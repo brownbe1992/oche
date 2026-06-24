@@ -197,6 +197,26 @@
   }
   @media (prefers-reduced-motion:reduce){*{animation:none!important}}
   .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+  button.rp-main{background:none;border:none;text-align:left;cursor:pointer;padding:0;font:inherit;color:inherit;margin-right:auto;flex:1;min-width:0}
+  button.rp-main:hover .rp-name{color:var(--gold)}
+
+  /* ---- player profile page ---- */
+  .pp-back{background:none;border:none;color:var(--muted);font:inherit;font-size:13px;cursor:pointer;padding:0;margin-bottom:16px}
+  .pp-back:hover{color:var(--ink)}
+  .pp-header{margin-bottom:20px}
+  .pp-name{font-size:22px;font-weight:700;margin-bottom:2px}
+  .pp-meta{font-size:12px;color:var(--muted)}
+  .stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
+  .stat-block{background:var(--surface-2);border:1px solid var(--wire);border-radius:11px;padding:12px 14px;text-align:center}
+  .stat-block .stat-val{font-family:'Bebas Neue';font-size:28px;color:var(--cream);line-height:1}
+  .stat-block .stat-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:4px}
+  .pp-section{margin-bottom:18px}
+  .pp-section-title{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;margin-bottom:8px}
+  .pp-cat-lines{font-size:13px;color:var(--muted);line-height:1.8}
+  .pp-cat-lines b{color:var(--ink)}
+  .btn.danger{color:var(--bust);border-color:var(--wire)}
+  .btn.danger:hover{border-color:var(--bust)}
 </style>
 </head>
 <body>
@@ -301,6 +321,14 @@
     </div>
   </section>
 
+  <!-- ============ PLAYER PROFILE ============ -->
+  <section id="screen-player" class="screen">
+    <div class="card">
+      <button class="pp-back" onclick="show('players')">← Players</button>
+      <div id="player-page-body"></div>
+    </div>
+  </section>
+
   <!-- ============ STATS ============ -->
   <section id="screen-stats" class="screen">
     <div class="card">
@@ -318,8 +346,8 @@
         <b style="color:var(--ink)">3-dart average</b> — lifetime: all points scored ÷ all turns, across every leg, set and game. (During play, the scoreboard shows your <em>current leg</em> and <em>current game</em> averages instead.)<br>
         <b style="color:var(--ink)">100+ checkouts</b> — winning turns where you scored 100 or more on that final visit.<br>
         <b style="color:var(--ink)">Treble-less turns</b> — turns where none of the darts landed in a treble bed.<br>
-        <b style="color:var(--ink)">Games &amp; legs played</b> — counted per game type for everyone taking part; a game is the whole match, a leg is a single 501 (or chosen start).<br>
-        A bust turn still counts as a turn (it scores 0) and still counts its darts toward treble-less totals.
+        A bust turn still counts as a turn (it scores 0) and still counts its darts toward treble-less totals.<br>
+        Click a player's name on the Stats or Players page to see their full profile including games &amp; legs played and H2H wins.
       </div>
     </div>
   </section>
@@ -493,11 +521,12 @@ function show(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));
   document.getElementById('screen-'+name).classList.add('on');
   document.getElementById('nav-setup').setAttribute('aria-current', name==='setup');
-  document.getElementById('nav-players').setAttribute('aria-current', name==='players');
+  document.getElementById('nav-players').setAttribute('aria-current', name==='players'||name==='player');
   document.getElementById('nav-stats').setAttribute('aria-current', name==='stats');
   if(name==='setup'){ sanitizeSlots(); renderPlayers(); }
   if(name==='players') renderRoster();
   if(name==='stats'){ if(DB.mode==='api'){ DB.refreshStats().then(renderStats).catch(renderStats); } else renderStats(); }
+  if(name==='player'){ if(DB.mode==='api'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); } else renderPlayerPage(); }
 }
 function openScoreboard(){
   if(DB.mode==='api'){
@@ -670,10 +699,10 @@ function renderRoster(){
     const out = playerOut(name);
     const j = escapeJs(name);
     return `<div class="roster-row">
-      <div class="rp-main">
+      <button class="rp-main" onclick="showPlayer('${j}')">
         <div class="rp-name">${escapeHtml(name)}</div>
         <div class="rp-stat">avg ${avg} · ${s.turns||0} turns</div>
-      </div>
+      </button>
       <div class="seg out-seg" role="group" aria-label="Finish rule for ${escapeHtml(name)}">
         <button aria-pressed="${out==='double'}" onclick="setPlayerOut('${j}','double'); renderRoster();">Double out</button>
         <button aria-pressed="${out==='single'}" onclick="setPlayerOut('${j}','single'); renderRoster();">Single out</button>
@@ -691,6 +720,64 @@ function askRename(name){
 }
 function askDelete(name){
   uiConfirm(`Delete "${name}" and all of their stats? This can't be undone.`, ()=>{ deletePlayer(name); renderRoster(); });
+}
+
+/* ---------- player profile page ---------- */
+let currentPlayer = null;
+function showPlayer(name){ currentPlayer = name; show('player'); }
+function renderPlayerPage(){
+  const body = document.getElementById('player-page-body');
+  if(!currentPlayer || !body) return;
+  const name = currentPlayer;
+  const s = stats[name] || {};
+  const avg = s.turns ? (s.totalPoints/s.turns).toFixed(1) : '0.0';
+  const out = playerOut(name);
+  const j = escapeJs(name);
+  const cats = Object.keys({...(s.legsByCat||{}), ...(s.gamesByCat||{})});
+  const catHtml = cats.length
+    ? cats.map(c=>`${c}: <b>${(s.gamesByCat||{})[c]||0}</b> games · <b>${(s.legsByCat||{})[c]||0}</b> legs`).join('<br>')
+    : '<span style="color:var(--muted)">none yet</span>';
+  const h2hCats = Object.keys({...(s.h2hGamesWonByCat||{}), ...(s.h2hSetsWonByCat||{}), ...(s.h2hLegsWonByCat||{})});
+  const h2hHtml = h2hCats.length
+    ? h2hCats.map(c=>`${c}: <b>${(s.h2hGamesWonByCat||{})[c]||0}</b> games · <b>${(s.h2hSetsWonByCat||{})[c]||0}</b> sets · <b>${(s.h2hLegsWonByCat||{})[c]||0}</b> legs`).join('<br>')
+    : '<span style="color:var(--muted)">none yet</span>';
+  body.innerHTML = `
+    <div class="pp-header">
+      <div class="pp-name">${escapeHtml(name)}</div>
+      <div class="pp-meta">${s.turns||0} turns thrown</div>
+    </div>
+    <div class="stat-grid">
+      <div class="stat-block"><div class="stat-val">${avg}</div><div class="stat-label">3-dart avg</div></div>
+      <div class="stat-block"><div class="stat-val">${s.checkouts100||0}</div><div class="stat-label">100+ CO</div></div>
+      <div class="stat-block"><div class="stat-val">${s.trebleLess||0}</div><div class="stat-label">Treble-less Visits</div></div>
+    </div>
+    <div class="pp-section">
+      <div class="pp-section-title">Out mode</div>
+      <div class="seg out-seg" role="group">
+        <button aria-pressed="${out==='double'}" onclick="setPlayerOut('${j}','double'); renderPlayerPage();">Double out</button>
+        <button aria-pressed="${out==='single'}" onclick="setPlayerOut('${j}','single'); renderPlayerPage();">Single out</button>
+      </div>
+    </div>
+    <div class="pp-section">
+      <div class="pp-section-title">Games &amp; legs played</div>
+      <div class="pp-cat-lines">${catHtml}</div>
+    </div>
+    <div class="pp-section">
+      <div class="pp-section-title">H2H Wins</div>
+      <div class="pp-cat-lines">${h2hHtml}</div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="askRenameFromProfile('${j}')">Rename</button>
+      <button class="btn btn-ghost danger" onclick="askDeleteFromProfile('${j}')">Delete</button>
+    </div>`;
+}
+function askRenameFromProfile(name){
+  uiPrompt('Rename player', name, newName=>{
+    if(renamePlayer(name, newName)){ currentPlayer = newName; renderPlayerPage(); }
+  });
+}
+function askDeleteFromProfile(name){
+  uiConfirm(`Delete "${name}" and all of their stats? This can't be undone.`, ()=>{ deletePlayer(name); currentPlayer=null; show('players'); });
 }
 
 /* ---------- game render ---------- */
@@ -1065,33 +1152,23 @@ function renderStats(){
   const body=document.getElementById('stats-body');
   const names=Object.keys(stats);
   if(names.length===0){
-    body.innerHTML=`<div class="empty">No stats yet.<br>Play a game and your <b>3-dart average</b>, <b>100+ checkouts</b>, <b>treble-less turns</b> and <b>games &amp; legs played</b> will build up here.</div>`;
+    body.innerHTML=`<div class="empty">No stats yet.<br>Play a game and your <b>3-dart average</b>, <b>100+ checkouts</b>, and <b>treble-less visits</b> will build up here.</div>`;
     return;
   }
   let rows = names.map(n=>{
     const s=stats[n];
     const avg=s.turns?(s.totalPoints/s.turns).toFixed(1):'0.0';
-    const cats=Object.keys({...s.legsByCat, ...s.gamesByCat});
-    const catLines = cats.length
-      ? cats.map(c=>`${c}: <b style="color:var(--ink)">${s.gamesByCat[c]||0}</b> games · <b style="color:var(--ink)">${s.legsByCat[c]||0}</b> legs`).join('<br>')
-      : '<span style="color:var(--muted)">none yet</span>';
-    const h2hCats=Object.keys({...s.h2hGamesByCat||{}, ...s.h2hSetsWonByCat||{}, ...s.h2hLegsWonByCat||{}});
-    const h2hLines = h2hCats.length
-      ? h2hCats.map(c=>`${c}: <b style="color:var(--ink)">${(s.h2hGamesByCat||{})[c]||0}</b> games · <b style="color:var(--ink)">${(s.h2hSetsWonByCat||{})[c]||0}</b> sets · <b style="color:var(--ink)">${(s.h2hLegsWonByCat||{})[c]||0}</b> legs`).join('<br>')
-      : '<span style="color:var(--muted)">none yet</span>';
     return `<tr>
-      <td><div style="font-weight:600">${escapeHtml(n)}</div><div class="cat-line">${s.turns} turns thrown</div></td>
+      <td><button class="rp-main" style="margin:0" onclick="showPlayer('${escapeJs(n)}')">${escapeHtml(n)}</button></td>
       <td class="num"><span class="big">${avg}</span></td>
       <td class="num">${s.checkouts100}</td>
       <td class="num">${s.trebleLess}</td>
-      <td class="cat-line">${catLines}</td>
-      <td class="cat-line">${h2hLines}</td>
     </tr>`;
   }).join('');
   body.innerHTML=`<table>
     <thead><tr>
       <th>Player</th><th class="num">3-dart avg</th><th class="num">100+&nbsp;CO</th>
-      <th class="num">Treble-less</th><th>Games &amp; legs played</th><th>H2H Wins</th>
+      <th class="num">Treble-less Visits</th>
     </tr></thead><tbody>${rows}</tbody></table>`;
 }
 function resetStats(){
