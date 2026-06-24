@@ -120,7 +120,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/stats/big-fish'&& m === 'GET') return send(res, 200, db.getBigFishStats());
     if (p === '/api/stats' && m === 'GET')  return send(res, 200, db.computeStats());
     if (p === '/api/players/top-finishes' && m === 'GET') {
-      return send(res, 200, db.getTopFinishes(url.searchParams.get('name')));
+      const mode = url.searchParams.get('mode');
+      return send(res, 200, db.getTopFinishes(url.searchParams.get('name'), mode));
     }
     if (p === '/api/players/avg-history' && m === 'GET') {
       const name = url.searchParams.get('name');
@@ -138,6 +139,8 @@ const server = http.createServer(async (req, res) => {
       }
       const weight = url.searchParams.get('weight');
       if (weight && /^\d+$/.test(weight)) opts.dartWeight = Number(weight);
+      const mode = url.searchParams.get('mode');
+      if (mode === 'h2h' || mode === 'practice') opts.mode = mode;
       return send(res, 200, db.getAvgHistory(name, period, opts));
     }
     if (p === '/api/reset' && m === 'POST') return send(res, 200, db.resetStats());

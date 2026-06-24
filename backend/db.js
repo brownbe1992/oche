@@ -299,16 +299,48 @@ function computeStats() {
     'SELECT player_id, COUNT(*) AS n FROM turns WHERE checkout = 1 AND checkout_points = 170 GROUP BY player_id'
   ).all();
 
+  const h2hAgg = db.prepare(`
+    SELECT t.player_id,
+      COUNT(*) AS turns,
+      COALESCE(SUM(t.scored), 0) AS total,
+      COALESCE(SUM(t.treble_less), 0) AS trebleLess,
+      COALESCE(SUM(CASE WHEN t.checkout=1 AND t.checkout_points>=100 THEN 1 ELSE 0 END),0) AS co100,
+      COALESCE(SUM(CASE WHEN t.scored=180 THEN 1 ELSE 0 END),0) AS oneEighties,
+      COALESCE(SUM(CASE WHEN t.checkout=1 AND t.checkout_points=170 THEN 1 ELSE 0 END),0) AS bigFish
+    FROM turns t JOIN games g ON g.id = t.game_id
+    WHERE g.practice = 0
+      AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+    GROUP BY t.player_id
+  `).all();
+
+  const pracAgg = db.prepare(`
+    SELECT t.player_id,
+      COUNT(*) AS turns,
+      COALESCE(SUM(t.scored), 0) AS total,
+      COALESCE(SUM(t.treble_less), 0) AS trebleLess,
+      COALESCE(SUM(CASE WHEN t.checkout=1 AND t.checkout_points>=100 THEN 1 ELSE 0 END),0) AS co100,
+      COALESCE(SUM(CASE WHEN t.scored=180 THEN 1 ELSE 0 END),0) AS oneEighties,
+      COALESCE(SUM(CASE WHEN t.checkout=1 AND t.checkout_points=170 THEN 1 ELSE 0 END),0) AS bigFish
+    FROM turns t JOIN games g ON g.id = t.game_id
+    WHERE g.practice = 1
+      OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1
+    GROUP BY t.player_id
+  `).all();
+
   const aggById = {}; agg.forEach(r => aggById[r.player_id] = r);
   const agg180ById    = {}; agg180.forEach(r => agg180ById[r.player_id] = r.n);
   const aggBFById     = {}; aggBF.forEach(r  => aggBFById[r.player_id]  = r.n);
   const h2hDartsById  = {}; h2hAvgDarts.forEach(r     => h2hDartsById[r.pid]  = r.avg_darts);
   const pracDartsById = {}; practiceAvgDarts.forEach(r => pracDartsById[r.pid] = r.avg_darts);
+  const h2hAggById    = {}; h2hAgg.forEach(r  => h2hAggById[r.player_id]  = r);
+  const pracAggById   = {}; pracAgg.forEach(r  => pracAggById[r.player_id] = r);
   const nameById = {};
   const out = {};
   players.forEach(p => {
     nameById[p.id] = p.name;
     const a = aggById[p.id] || { turns: 0, total: 0, trebleLess: 0, co100: 0 };
+    const ha = h2hAggById[p.id]  || { turns:0, total:0, trebleLess:0, co100:0, oneEighties:0, bigFish:0 };
+    const pa = pracAggById[p.id] || { turns:0, total:0, trebleLess:0, co100:0, oneEighties:0, bigFish:0 };
     out[p.name] = {
       out: p.out_mode,
       dartWeight: p.dart_weight ?? null,
@@ -320,6 +352,10 @@ function computeStats() {
       bigFish: aggBFById[p.id] ?? 0,
       h2hAvgDartsPerLeg: h2hDartsById[p.id] != null ? +h2hDartsById[p.id].toFixed(1) : null,
       practiceAvgDartsPerLeg: pracDartsById[p.id] != null ? +pracDartsById[p.id].toFixed(1) : null,
+      h2hStats: { turns:ha.turns, totalPoints:ha.total, trebleLess:ha.trebleLess,
+                  checkouts100:ha.co100, oneEighties:ha.oneEighties, bigFish:ha.bigFish },
+      practiceStats: { turns:pa.turns, totalPoints:pa.total, trebleLess:pa.trebleLess,
+                       checkouts100:pa.co100, oneEighties:pa.oneEighties, bigFish:pa.bigFish },
       legsByCat: {},
       gamesByCat: {},
       practiceLegs: {},
@@ -403,9 +439,14 @@ function recordEvent(gameId, eventType, setNo, legNo) {
   return { ok: true };
 }
 
-function getTopFinishes(playerName) {
+function getTopFinishes(playerName, mode) {
   const p = getPlayer(playerName);
   if (!p) return [];
+  const modeWhere = mode === 'h2h'
+    ? ` AND EXISTS (SELECT 1 FROM games g WHERE g.id = t.game_id AND g.practice = 0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1)`
+    : mode === 'practice'
+    ? ` AND (EXISTS (SELECT 1 FROM games g WHERE g.id = t.game_id AND g.practice = 1) OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = t.game_id) = 1)`
+    : '';
   return db.prepare(`
     SELECT t.checkout_points AS score,
            COUNT(*)          AS times,
@@ -415,6 +456,7 @@ function getTopFinishes(playerName) {
     WHERE t.player_id = ?
       AND t.checkout = 1
       AND t.checkout_points > 0
+      ${modeWhere}
     GROUP BY t.checkout_points
     ORDER BY t.checkout_points DESC
     LIMIT 10
@@ -467,6 +509,12 @@ function getAvgHistory(playerName, period, opts = {}) {
     params.push(p.id, Number(opts.dartWeight));
   }
 
+  const modeWhere = opts.mode === 'h2h'
+    ? ` AND EXISTS (SELECT 1 FROM games g WHERE g.id = t.game_id AND g.practice = 0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1)`
+    : opts.mode === 'practice'
+    ? ` AND (EXISTS (SELECT 1 FROM games g WHERE g.id = t.game_id AND g.practice = 1) OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = t.game_id) = 1)`
+    : '';
+
   return db.prepare(`
     SELECT ${fmt} AS bucket,
            CAST(SUM(t.scored) AS REAL) / COUNT(*) AS avg,
@@ -474,6 +522,7 @@ function getAvgHistory(playerName, period, opts = {}) {
     FROM turns t
     ${where}
     ${weightWhere}
+    ${modeWhere}
     GROUP BY bucket
     ORDER BY bucket
   `).all(...params);

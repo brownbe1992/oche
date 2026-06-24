@@ -218,6 +218,13 @@
   .btn.danger{color:var(--bust);border-color:var(--wire)}
   .btn.danger:hover{border-color:var(--bust)}
 
+  /* ---- player page tabs ---- */
+  .player-tabs{display:flex;gap:0;border-bottom:2px solid var(--wire);margin:0 0 20px}
+  .tab-btn{background:none;border:none;border-bottom:3px solid transparent;margin-bottom:-2px;
+    padding:10px 20px;font:inherit;font-size:14px;font-weight:600;cursor:pointer;color:var(--muted)}
+  .tab-btn.active{color:var(--ink);border-bottom-color:var(--gold)}
+  .tab-btn:hover:not(.active){color:var(--ink)}
+
   /* ---- avg chart ---- */
   .chart-periods{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
   .chart-period-btn{background:var(--board);border:1px solid var(--wire);color:var(--muted);border-radius:8px;
@@ -891,6 +898,8 @@ function ensurePlayerStats(name){
   if(s.bigFish == null) s.bigFish = 0;
   if(s.h2hAvgDartsPerLeg === undefined) s.h2hAvgDartsPerLeg = null;
   if(s.practiceAvgDartsPerLeg === undefined) s.practiceAvgDartsPerLeg = null;
+  if(!s.h2hStats) s.h2hStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0 };
+  if(!s.practiceStats) s.practiceStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0 };
   if(!s.legsByCat) s.legsByCat = s.games || {};   // migrate old `games` field (was per-leg counts)
   if(!s.gamesByCat) s.gamesByCat = {};
   if(!s.practiceLegs) s.practiceLegs = {};
@@ -940,6 +949,7 @@ function askDelete(name){
 
 /* ---------- player profile page ---------- */
 let currentPlayer = null;
+let playerPageTab = 'h2h';
 function localDateStr(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function setPlayerDartWeight(name, value){
   const weight = value ? Number(value) : null;
@@ -947,8 +957,12 @@ function setPlayerDartWeight(name, value){
   DB.setDartWeight(name, weight);
   persist();
 }
+function switchPlayerTab(tab){
+  playerPageTab = tab;
+  renderPlayerPage();
+}
 function showPlayer(name){
-  if(currentPlayer !== name){ avgChartWeight = null; cachedDartWeights = []; }
+  if(currentPlayer !== name){ avgChartWeight = null; cachedDartWeights = []; playerPageTab = 'h2h'; }
   currentPlayer = name;
   if(!customRangeEnd){
     const now=new Date();
@@ -963,37 +977,14 @@ function renderPlayerPage(){
   if(!currentPlayer || !body) return;
   const name = currentPlayer;
   const s = stats[name] || {};
-  const avg = s.turns ? (s.totalPoints/s.turns).toFixed(1) : '0.0';
   const out = playerOut(name);
   const dartWeight = s.dartWeight || null;
   const j = escapeJs(name);
-  const cats = Object.keys({...(s.legsByCat||{}), ...(s.gamesByCat||{})});
-  const catHtml = cats.length
-    ? cats.map(c=>`${c}: <b>${(s.gamesByCat||{})[c]||0}</b> games · <b>${(s.legsByCat||{})[c]||0}</b> legs`).join('<br>')
-    : '<span style="color:var(--muted)">none yet</span>';
-  const pracCats = Object.keys(s.practiceLegs||{});
-  const pracHtml = pracCats.length
-    ? pracCats.map(c=>`${c}: <b>${(s.practiceLegs||{})[c]||0}</b> legs`).join('<br>')
-    : '<span style="color:var(--muted)">none yet</span>';
-  const h2hDarts = s.h2hAvgDartsPerLeg != null ? s.h2hAvgDartsPerLeg : '—';
-  const pracDarts = s.practiceAvgDartsPerLeg != null ? s.practiceAvgDartsPerLeg : '—';
-  const h2hCats = Object.keys({...(s.h2hGamesWonByCat||{}), ...(s.h2hSetsWonByCat||{}), ...(s.h2hLegsWonByCat||{})});
-  const h2hHtml = h2hCats.length
-    ? h2hCats.map(c=>`${c}: <b>${(s.h2hGamesWonByCat||{})[c]||0}</b> games · <b>${(s.h2hSetsWonByCat||{})[c]||0}</b> sets · <b>${(s.h2hLegsWonByCat||{})[c]||0}</b> legs`).join('<br>')
-    : '<span style="color:var(--muted)">none yet</span>';
-  const cp=avgChartPeriod;
-  body.innerHTML = `
-    <div class="pp-header">
-      <div class="pp-name">${escapeHtml(name)}</div>
-      <div class="pp-meta">${s.turns||0} turns thrown</div>
-    </div>
-    <div class="stat-grid">
-      <div class="stat-block"><div class="stat-val">${avg}</div><div class="stat-label">3-dart avg</div></div>
-      <div class="stat-block"><div class="stat-val">${s.checkouts100||0}</div><div class="stat-label">100+ CO</div></div>
-      <div class="stat-block"><div class="stat-val">${s.trebleLess||0}</div><div class="stat-label">Treble-less</div></div>
-      <div class="stat-block"><div class="stat-val">${s.oneEighties||0}</div><div class="stat-label">180s</div></div>
-      <div class="stat-block"><div class="stat-val">${s.bigFish||0}</div><div class="stat-label">Big Fish</div></div>
-    </div>
+  const tab = playerPageTab;
+  const cp = avgChartPeriod;
+
+  // shared chart + top-finishes HTML (same structure for both tabs)
+  const chartSection = `
     <div class="pp-section">
       <div class="pp-section-title">3-dart average over time</div>
       <div class="chart-periods">
@@ -1016,7 +1007,70 @@ function renderPlayerPage(){
     <div class="pp-section">
       <div class="pp-section-title">Top 10 finishes</div>
       <div id="player-top-finishes"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </div>`;
+
+  function statGrid(ts){
+    const avg = ts.turns ? (ts.totalPoints/ts.turns).toFixed(1) : '0.0';
+    return `<div class="stat-grid">
+      <div class="stat-block"><div class="stat-val">${avg}</div><div class="stat-label">3-dart avg</div></div>
+      <div class="stat-block"><div class="stat-val">${ts.checkouts100||0}</div><div class="stat-label">100+ CO</div></div>
+      <div class="stat-block"><div class="stat-val">${ts.trebleLess||0}</div><div class="stat-label">Treble-less</div></div>
+      <div class="stat-block"><div class="stat-val">${ts.oneEighties||0}</div><div class="stat-label">180s</div></div>
+      <div class="stat-block"><div class="stat-val">${ts.bigFish||0}</div><div class="stat-label">Big Fish</div></div>
+    </div>`;
+  }
+
+  let tabContent;
+  if(tab === 'h2h'){
+    const ts = s.h2hStats || {};
+    const cats = Object.keys({...(s.legsByCat||{}), ...(s.gamesByCat||{})});
+    const catHtml = cats.length
+      ? cats.map(c=>`${c}: <b>${(s.gamesByCat||{})[c]||0}</b> games · <b>${(s.legsByCat||{})[c]||0}</b> legs`).join('<br>')
+      : '<span style="color:var(--muted)">none yet</span>';
+    const h2hDarts = s.h2hAvgDartsPerLeg != null ? s.h2hAvgDartsPerLeg : '—';
+    const h2hCats = Object.keys({...(s.h2hGamesWonByCat||{}), ...(s.h2hSetsWonByCat||{}), ...(s.h2hLegsWonByCat||{})});
+    const h2hHtml = h2hCats.length
+      ? h2hCats.map(c=>`${c}: <b>${(s.h2hGamesWonByCat||{})[c]||0}</b> games · <b>${(s.h2hSetsWonByCat||{})[c]||0}</b> sets · <b>${(s.h2hLegsWonByCat||{})[c]||0}</b> legs`).join('<br>')
+      : '<span style="color:var(--muted)">none yet</span>';
+    tabContent = `
+      ${statGrid(ts)}
+      ${chartSection}
+      <div class="pp-section">
+        <div class="pp-section-title">Games &amp; legs played</div>
+        <div class="pp-cat-lines">${catHtml}</div>
+        <div class="pp-cat-lines" style="margin-top:5px;font-size:12px;color:var(--muted)">Avg darts/leg: <b style="color:var(--ink)">${h2hDarts}</b></div>
+      </div>
+      <div class="pp-section">
+        <div class="pp-section-title">H2H Wins</div>
+        <div class="pp-cat-lines">${h2hHtml}</div>
+      </div>`;
+  } else {
+    const ts = s.practiceStats || {};
+    const pracCats = Object.keys(s.practiceLegs||{});
+    const pracHtml = pracCats.length
+      ? pracCats.map(c=>`${c}: <b>${(s.practiceLegs||{})[c]||0}</b> legs`).join('<br>')
+      : '<span style="color:var(--muted)">none yet</span>';
+    const pracDarts = s.practiceAvgDartsPerLeg != null ? s.practiceAvgDartsPerLeg : '—';
+    tabContent = `
+      ${statGrid(ts)}
+      ${chartSection}
+      <div class="pp-section">
+        <div class="pp-section-title">Legs thrown</div>
+        <div class="pp-cat-lines">${pracHtml}</div>
+        <div class="pp-cat-lines" style="margin-top:5px;font-size:12px;color:var(--muted)">Avg darts/leg: <b style="color:var(--ink)">${pracDarts}</b></div>
+      </div>`;
+  }
+
+  body.innerHTML = `
+    <div class="pp-header">
+      <div class="pp-name">${escapeHtml(name)}</div>
+      <div class="pp-meta">${s.turns||0} turns thrown (all-time)</div>
     </div>
+    <div class="player-tabs">
+      <button class="tab-btn${tab==='h2h'?' active':''}" data-tab="h2h" onclick="switchPlayerTab('h2h')">H2H</button>
+      <button class="tab-btn${tab==='practice'?' active':''}" data-tab="practice" onclick="switchPlayerTab('practice')">Practice</button>
+    </div>
+    ${tabContent}
     <div class="pp-section">
       <div class="pp-section-title">Out mode</div>
       <div class="seg out-seg" role="group">
@@ -1030,20 +1084,6 @@ function renderPlayerPage(){
         <option value="">Not set</option>
         ${Array.from({length:16},(_,i)=>15+i).map(g=>`<option value="${g}"${dartWeight===g?' selected':''}>${g}g</option>`).join('')}
       </select>
-    </div>
-    <div class="pp-section">
-      <div class="pp-section-title">H2H — Games &amp; legs played</div>
-      <div class="pp-cat-lines">${catHtml}</div>
-      <div class="pp-cat-lines" style="margin-top:5px;font-size:12px;color:var(--muted)">Avg darts/leg: <b style="color:var(--ink)">${h2hDarts}</b></div>
-    </div>
-    <div class="pp-section">
-      <div class="pp-section-title">Practice — Legs thrown</div>
-      <div class="pp-cat-lines">${pracHtml}</div>
-      <div class="pp-cat-lines" style="margin-top:5px;font-size:12px;color:var(--muted)">Avg darts/leg: <b style="color:var(--ink)">${pracDarts}</b></div>
-    </div>
-    <div class="pp-section">
-      <div class="pp-section-title">H2H Wins</div>
-      <div class="pp-cat-lines">${h2hHtml}</div>
     </div>
     <div class="btn-row">
       <button class="btn btn-ghost" onclick="askRenameFromProfile('${j}')">Rename</button>
@@ -1241,6 +1281,14 @@ function enterTurn(){
     if(ev.win && ev.pointsThisVisit >= 100) s.checkouts100 += 1;
     if(ev.scored === 180) s.oneEighties += 1;
     if(ev.win && ev.pointsThisVisit === 170) s.bigFish += 1;
+    // per-mode breakdown
+    const _mk = (!game.practice && game.players.length > 1) ? 'h2hStats' : 'practiceStats';
+    const _ms = s[_mk];
+    _ms.turns += 1; _ms.totalPoints += ev.scored;
+    if(ev.trebleLess) _ms.trebleLess += 1;
+    if(ev.win && ev.pointsThisVisit >= 100) _ms.checkouts100 += 1;
+    if(ev.scored === 180) _ms.oneEighties += 1;
+    if(ev.win && ev.pointsThisVisit === 170) _ms.bigFish += 1;
   }
 
   if(ev.win){
@@ -1562,7 +1610,7 @@ function loadAvgChart(period){
     return;
   }
   container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Loading…</p>`;
-  let url=`/api/players/avg-history?name=${encodeURIComponent(currentPlayer)}&period=${period}`;
+  let url=`/api/players/avg-history?name=${encodeURIComponent(currentPlayer)}&period=${period}&mode=${playerPageTab}`;
   if(period==='custom') url+=`&start=${customRangeStart}&end=${customRangeEnd}`;
   if(avgChartWeight) url+=`&weight=${avgChartWeight}`;
   Backend.get(url)
@@ -1593,7 +1641,7 @@ function loadTopFinishes(){
     container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Top finishes are saved when connected to the server backend.</p>`;
     return;
   }
-  Backend.get(`/api/players/top-finishes?name=${encodeURIComponent(currentPlayer)}`)
+  Backend.get(`/api/players/top-finishes?name=${encodeURIComponent(currentPlayer)}&mode=${playerPageTab}`)
     .then(rows=>{
       if(!rows||rows.length===0){
         container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No checkouts recorded yet.</p>`;
