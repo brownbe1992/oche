@@ -108,10 +108,14 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/players' && m === 'GET')  return send(res, 200, db.listPlayers());
     if (p === '/api/players' && m === 'POST') { const b = await readJson(req); return send(res, 200, db.addPlayer(b.name, b.out)); }
-    if (p === '/api/players/rename' && m === 'PUT') { const b = await readJson(req); return send(res, 200, db.renamePlayer(b.from, b.to)); }
-    if (p === '/api/players/out' && m === 'PUT')    { const b = await readJson(req); return send(res, 200, db.setOut(b.name, b.out)); }
+    if (p === '/api/players/rename' && m === 'PUT')      { const b = await readJson(req); return send(res, 200, db.renamePlayer(b.from, b.to)); }
+    if (p === '/api/players/out' && m === 'PUT')         { const b = await readJson(req); return send(res, 200, db.setOut(b.name, b.out)); }
+    if (p === '/api/players/dart-weight' && m === 'PUT') { const b = await readJson(req); return send(res, 200, db.setDartWeight(b.name, b.weight)); }
+    if (p === '/api/players/dart-weights' && m === 'GET') return send(res, 200, db.getDartWeights(url.searchParams.get('name')));
     if (p === '/api/players' && m === 'DELETE') return send(res, 200, db.deletePlayer(url.searchParams.get('name')));
 
+    if (p === '/api/summary'      && m === 'GET') return send(res, 200, db.getSummary());
+    if (p === '/api/top-finishes' && m === 'GET') return send(res, 200, db.getTopFinishesAll());
     if (p === '/api/stats' && m === 'GET')  return send(res, 200, db.computeStats());
     if (p === '/api/players/top-finishes' && m === 'GET') {
       return send(res, 200, db.getTopFinishes(url.searchParams.get('name')));
@@ -130,6 +134,8 @@ const server = http.createServer(async (req, res) => {
         opts.start = start;
         opts.end   = end;
       }
+      const weight = url.searchParams.get('weight');
+      if (weight && /^\d+$/.test(weight)) opts.dartWeight = Number(weight);
       return send(res, 200, db.getAvgHistory(name, period, opts));
     }
     if (p === '/api/reset' && m === 'POST') return send(res, 200, db.resetStats());

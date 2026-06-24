@@ -75,17 +75,22 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_timeline_game ON timeline_events(game_id);
 `);
 
+// Column migrations — safe to re-run; ALTER TABLE throws if column exists, which we catch.
+try { db.exec('ALTER TABLE players    ADD COLUMN dart_weight INTEGER'); } catch(e) {}
+try { db.exec('ALTER TABLE game_players ADD COLUMN dart_weight INTEGER'); } catch(e) {}
+
 /* ---------- prepared statements ---------- */
 const q = {
-  playerByName : db.prepare('SELECT id, name, out_mode FROM players WHERE name = ? COLLATE NOCASE'),
+  playerByName : db.prepare('SELECT id, name, out_mode, dart_weight FROM players WHERE name = ? COLLATE NOCASE'),
   insertPlayer : db.prepare("INSERT INTO players (name, out_mode) VALUES (?, ?)"),
-  listPlayers  : db.prepare('SELECT id, name, out_mode FROM players ORDER BY name COLLATE NOCASE'),
+  listPlayers  : db.prepare('SELECT id, name, out_mode, dart_weight FROM players ORDER BY name COLLATE NOCASE'),
   renamePlayer : db.prepare('UPDATE players SET name = ? WHERE id = ?'),
   setOut       : db.prepare('UPDATE players SET out_mode = ? WHERE id = ?'),
+  setDartWeight: db.prepare('UPDATE players SET dart_weight = ? WHERE id = ?'),
   deletePlayer : db.prepare('DELETE FROM players WHERE id = ?'),
 
   insertGame   : db.prepare('INSERT INTO games (category, legs_per_set, sets_per_game) VALUES (?, ?, ?)'),
-  addParticipant: db.prepare('INSERT OR IGNORE INTO game_players (game_id, player_id) VALUES (?, ?)'),
+  addParticipant: db.prepare('INSERT OR IGNORE INTO game_players (game_id, player_id, dart_weight) VALUES (?, ?, ?)'),
   completeGame : db.prepare("UPDATE games SET completed_at = datetime('now'), winner_id = ? WHERE id = ?"),
 
   insertTurn   : db.prepare(`INSERT INTO turns
@@ -104,7 +109,7 @@ function ensurePlayer(name, out = 'double') {
 }
 
 function listPlayers() {
-  return q.listPlayers.all().map(p => ({ name: p.name, out: p.out_mode }));
+  return q.listPlayers.all().map(p => ({ name: p.name, out: p.out_mode, dartWeight: p.dart_weight ?? null }));
 }
 
 function addPlayer(name, out = 'double') {
@@ -133,6 +138,25 @@ function setOut(name, out) {
   return { name: p.name, out: out === 'single' ? 'single' : 'double' };
 }
 
+function setDartWeight(name, weight) {
+  const p = getPlayer(name);
+  if (!p) throw httpError(404, 'Player not found');
+  const w = (weight !== null && weight !== undefined && weight !== '') ? Number(weight) : null;
+  q.setDartWeight.run(w, p.id);
+  return { name: p.name, dartWeight: w };
+}
+
+function getDartWeights(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return [];
+  return db.prepare(`
+    SELECT DISTINCT gp.dart_weight AS weight
+    FROM game_players gp
+    WHERE gp.player_id = ? AND gp.dart_weight IS NOT NULL
+    ORDER BY gp.dart_weight
+  `).all(p.id).map(r => r.weight);
+}
+
 function deletePlayer(name) {
   const p = getPlayer(name);
   if (p) q.deletePlayer.run(p.id);     // cascades to turns + game_players
@@ -145,7 +169,7 @@ function createGame({ category, legsPerSet, setsPerGame, players }) {
   const gameId = Number(info.lastInsertRowid);
   (players || []).forEach(nm => {
     const p = ensurePlayer(nm);
-    q.addParticipant.run(gameId, p.id);
+    q.addParticipant.run(gameId, p.id, p.dart_weight ?? null);
   });
   return { gameId };
 }
@@ -237,6 +261,7 @@ function computeStats() {
     const a = aggById[p.id] || { turns: 0, total: 0, trebleLess: 0, co100: 0 };
     out[p.name] = {
       out: p.out_mode,
+      dartWeight: p.dart_weight ?? null,
       turns: a.turns,
       totalPoints: a.total,
       trebleLess: a.trebleLess,
@@ -254,6 +279,31 @@ function computeStats() {
   h2hSets.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].h2hSetsWonByCat[r.cat] = r.sets; });
   h2hGames.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].h2hGamesWonByCat[r.cat] = r.games; });
   return out;
+}
+
+function getSummary() {
+  const players = db.prepare('SELECT COUNT(*) AS n FROM players').get().n;
+  const games   = db.prepare('SELECT COUNT(*) AS n FROM games WHERE completed_at IS NOT NULL').get().n;
+  const sets    = db.prepare("SELECT COUNT(DISTINCT game_id || '-' || set_no) AS n FROM turns").get().n;
+  const legs    = db.prepare("SELECT COUNT(DISTINCT game_id || '-' || set_no || '-' || leg_no) AS n FROM turns").get().n;
+  const darts   = db.prepare('SELECT COUNT(*) AS n FROM turns').get().n * 3;
+  return { players, games, sets, legs, darts };
+}
+
+function getTopFinishesAll(limit = 10) {
+  return db.prepare(`
+    SELECT p.name,
+           t.checkout_points AS score,
+           COUNT(*)          AS times,
+           MIN(t.created_at) AS first_date,
+           MAX(t.created_at) AS last_date
+    FROM turns t
+    JOIN players p ON p.id = t.player_id
+    WHERE t.checkout = 1 AND t.checkout_points > 0
+    GROUP BY t.player_id, t.checkout_points
+    ORDER BY t.checkout_points DESC, first_date ASC
+    LIMIT ?
+  `).all(limit);
 }
 
 function recordEvent(gameId, eventType, setNo, legNo) {
@@ -317,15 +367,26 @@ function getAvgHistory(playerName, period, opts = {}) {
     where = `WHERE t.player_id = ?`;
   }
 
+  const params = [p.id];
+  let weightWhere = '';
+  if (opts.dartWeight) {
+    weightWhere = ` AND EXISTS (
+      SELECT 1 FROM game_players gp
+      WHERE gp.game_id = t.game_id AND gp.player_id = ? AND gp.dart_weight = ?
+    )`;
+    params.push(p.id, Number(opts.dartWeight));
+  }
+
   return db.prepare(`
     SELECT ${fmt} AS bucket,
            CAST(SUM(t.scored) AS REAL) / COUNT(*) AS avg,
            COUNT(*) AS turns
     FROM turns t
     ${where}
+    ${weightWhere}
     GROUP BY bucket
     ORDER BY bucket
-  `).all(p.id);
+  `).all(...params);
 }
 
 function resetStats() {
@@ -339,8 +400,8 @@ function httpError(status, message) {
 }
 
 module.exports = {
-  listPlayers, addPlayer, renamePlayer, setOut, deletePlayer,
+  listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer,
   createGame, addTurn, completeGame, recordEvent,
-  computeStats, getTopFinishes, getAvgHistory, resetStats,
+  computeStats, getSummary, getTopFinishes, getTopFinishesAll, getAvgHistory, getDartWeights, resetStats,
   _db: db,
 };

@@ -229,6 +229,17 @@
     padding:5px 10px;font:inherit;font-size:12px;cursor:pointer;color-scheme:dark}
   .date-input:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
 
+  /* ---- home screen ---- */
+  .summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:10px;margin-bottom:20px}
+  .hof-list{display:flex;flex-direction:column}
+  .hof-row{display:flex;align-items:baseline;gap:10px;padding:7px 0;border-bottom:1px solid var(--wire)}
+  .hof-row:last-child{border-bottom:none}
+  .hof-rank{font-size:11px;color:var(--muted);min-width:16px;text-align:right;flex:none}
+  .hof-score{font-family:'Bebas Neue';font-size:22px;color:var(--cream);min-width:38px;flex:none}
+  .hof-times{font-size:11px;font-weight:700;color:var(--gold);min-width:22px;flex:none}
+  .hof-player{font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hof-dates{font-size:11px;color:var(--muted);flex:none;text-align:right}
+
   /* ---- top finishes ---- */
   .finish-list{display:flex;flex-direction:column;gap:5px}
   .finish-row{display:flex;align-items:baseline;gap:10px}
@@ -240,18 +251,27 @@
 <body>
 <div class="wrap">
   <header class="masthead">
-    <div class="mark">OCHE</div>
+    <button class="mark" onclick="show('home')" style="background:none;border:none;cursor:pointer;padding:0;font:inherit;color:inherit">OCHE</button>
     <div class="sub">Per-Dart Scoring &amp; Lifetime Stats</div>
     <nav class="nav">
-      <button class="navbtn" id="nav-setup" aria-current="true" onclick="show('setup')">New game</button>
+      <button class="navbtn" id="nav-home" aria-current="true" onclick="show('home')">Home</button>
+      <button class="navbtn" id="nav-setup" aria-current="false" onclick="show('setup')">New game</button>
       <button class="navbtn" id="nav-players" aria-current="false" onclick="show('players')">Players</button>
       <button class="navbtn" id="nav-stats" aria-current="false" onclick="show('stats')">Stats</button>
       <button class="navbtn" id="nav-scoreboard" onclick="openScoreboard()" title="Open the read-only scoreboard for a second screen">Scoreboard ↗</button>
     </nav>
   </header>
 
+  <!-- ============ HOME ============ -->
+  <section id="screen-home" class="screen on">
+    <div class="card">
+      <h2 style="font-size:18px;margin-bottom:16px">Overview</h2>
+      <div id="home-body"><p class="pp-meta">Loading…</p></div>
+    </div>
+  </section>
+
   <!-- ============ SETUP ============ -->
-  <section id="screen-setup" class="screen on">
+  <section id="screen-setup" class="screen">
     <div class="card">
       <h2 style="font-size:18px;margin-bottom:4px">Set up the game</h2>
       <p style="color:var(--muted);font-size:13px;margin:0 0 18px">Add the players, choose the game, and set the match length.</p>
@@ -458,6 +478,7 @@ const DB = {
   addPlayer(name, out){ if(this.mode==='api') Backend.send('POST','/api/players',{name, out:out||'double'}).catch(logErr); },
   rename(from, to){ if(this.mode==='api') Backend.send('PUT','/api/players/rename',{from, to}).catch(logErr); },
   setOut(name, out){ if(this.mode==='api') Backend.send('PUT','/api/players/out',{name, out}).catch(logErr); },
+  setDartWeight(name, weight){ if(this.mode==='api') Backend.send('PUT','/api/players/dart-weight',{name, weight}).catch(logErr); },
   delete(name){ if(this.mode==='api') Backend.send('DELETE','/api/players?name='+encodeURIComponent(name)).catch(logErr); },
 
   // game + turn writes
@@ -539,14 +560,69 @@ function setPlayerOut(name, mode){ const out = mode==='single'?'single':'double'
 function show(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));
   document.getElementById('screen-'+name).classList.add('on');
+  document.getElementById('nav-home').setAttribute('aria-current', name==='home');
   document.getElementById('nav-setup').setAttribute('aria-current', name==='setup');
   document.getElementById('nav-players').setAttribute('aria-current', name==='players'||name==='player');
   document.getElementById('nav-stats').setAttribute('aria-current', name==='stats');
+  if(name==='home') renderHome();
   if(name==='setup'){ sanitizeSlots(); renderPlayers(); }
   if(name==='players') renderRoster();
   if(name==='stats'){ if(DB.mode==='api'){ DB.refreshStats().then(renderStats).catch(renderStats); } else renderStats(); }
   if(name==='player'){ if(DB.mode==='api'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); } else renderPlayerPage(); }
 }
+/* ---------- home screen ---------- */
+function renderHome(){
+  const body=document.getElementById('home-body');
+  if(!body) return;
+  if(DB.mode==='api'){
+    body.innerHTML=`<p class="pp-meta">Loading…</p>`;
+    Promise.all([Backend.get('/api/summary'), Backend.get('/api/top-finishes')])
+      .then(([s,f])=>renderHomeContent(s,f))
+      .catch(()=>renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts:null},[]));
+  } else {
+    const darts=Object.values(stats).reduce((a,p)=>a+(p.turns||0),0)*3;
+    renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts},  []);
+  }
+}
+function renderHomeContent(s,finishes){
+  const body=document.getElementById('home-body');
+  if(!body) return;
+  const fmt=n=>n==null?'—':Number(n).toLocaleString();
+  const cards=[
+    {val:fmt(s.players), label:'Players'},
+    {val:fmt(s.games),   label:'Games'},
+    {val:fmt(s.sets),    label:'Sets'},
+    {val:fmt(s.legs),    label:'Legs'},
+    {val:fmt(s.darts),   label:'Darts thrown'},
+  ];
+  const hofRows=finishes.length
+    ? finishes.map((f,i)=>{
+        const first=fmtDate(f.first_date);
+        const last=fmtDate(f.last_date);
+        const dates=f.times===1?first:`${first} → ${last}`;
+        const times=f.times===1?'×1':`×${f.times}`;
+        return `<div class="hof-row">
+          <span class="hof-rank">${i+1}</span>
+          <span class="hof-score">${f.score}</span>
+          <span class="hof-times">${times}</span>
+          <span class="hof-player">${escapeHtml(f.name)}</span>
+          <span class="hof-dates">${dates}</span>
+        </div>`;
+      }).join('')
+    : `<p class="pp-meta" style="padding:8px 0">No checkouts recorded yet.</p>`;
+  const localNote=DB.mode!=='api'?`<p class="pp-meta" style="margin:0 0 16px">Games, legs, and top finishes require the server backend.</p>`:'';
+  body.innerHTML=`
+    <div class="summary-grid">${cards.map(c=>`<div class="stat-block"><div class="stat-val">${c.val}</div><div class="stat-label">${c.label}</div></div>`).join('')}</div>
+    ${localNote}
+    <div class="pp-section">
+      <div class="pp-section-title">All-time top finishes</div>
+      <div class="hof-list">${hofRows}</div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="show('setup')">Start new game →</button>
+    </div>`;
+}
+
 function openScoreboard(){
   if(DB.mode==='api'){
     window.open('display','_blank');
@@ -698,6 +774,7 @@ function ensurePlayerStats(name){
   if(s.turns==null)       s.turns=0;
   if(s.trebleLess==null)  s.trebleLess=0;
   if(s.checkouts100==null)s.checkouts100=0;
+  if(s.dartWeight === undefined) s.dartWeight = null;
   if(!s.legsByCat) s.legsByCat = s.games || {};   // migrate old `games` field (was per-leg counts)
   if(!s.gamesByCat) s.gamesByCat = {};
   if(!s.h2hLegsWonByCat) s.h2hLegsWonByCat = {};
@@ -747,7 +824,14 @@ function askDelete(name){
 /* ---------- player profile page ---------- */
 let currentPlayer = null;
 function localDateStr(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function setPlayerDartWeight(name, value){
+  const weight = value ? Number(value) : null;
+  if(stats[name]) stats[name].dartWeight = weight;
+  DB.setDartWeight(name, weight);
+  persist();
+}
 function showPlayer(name){
+  if(currentPlayer !== name){ avgChartWeight = null; cachedDartWeights = []; }
   currentPlayer = name;
   if(!customRangeEnd){
     const now=new Date();
@@ -764,6 +848,7 @@ function renderPlayerPage(){
   const s = stats[name] || {};
   const avg = s.turns ? (s.totalPoints/s.turns).toFixed(1) : '0.0';
   const out = playerOut(name);
+  const dartWeight = s.dartWeight || null;
   const j = escapeJs(name);
   const cats = Object.keys({...(s.legsByCat||{}), ...(s.gamesByCat||{})});
   const catHtml = cats.length
@@ -800,6 +885,7 @@ function renderPlayerPage(){
         <input type="date" id="chart-date-to" class="date-input" value="${customRangeEnd}">
         <button class="chart-period-btn active" onclick="applyCustomRange()">Apply</button>
       </div>
+      <div id="avg-weight-filters" class="chart-periods" hidden></div>
       <div id="avg-chart-body"></div>
     </div>
     <div class="pp-section">
@@ -814,6 +900,13 @@ function renderPlayerPage(){
       </div>
     </div>
     <div class="pp-section">
+      <div class="pp-section-title">Dart weight</div>
+      <select class="date-input" style="width:auto" onchange="setPlayerDartWeight('${j}', this.value)">
+        <option value="">Not set</option>
+        ${Array.from({length:16},(_,i)=>15+i).map(g=>`<option value="${g}"${dartWeight===g?' selected':''}>${g}g</option>`).join('')}
+      </select>
+    </div>
+    <div class="pp-section">
       <div class="pp-section-title">Games &amp; legs played</div>
       <div class="pp-cat-lines">${catHtml}</div>
     </div>
@@ -826,6 +919,7 @@ function renderPlayerPage(){
       <button class="btn btn-ghost danger" onclick="askDeleteFromProfile('${j}')">Delete</button>
     </div>`;
   loadAvgChart(avgChartPeriod);
+  loadDartWeights();
   loadTopFinishes();
 }
 function askRenameFromProfile(name){
@@ -1211,6 +1305,8 @@ function checkoutHint(rem, doubleOut, maxDarts){
 /* ---------- avg-over-time chart ---------- */
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 let avgChartPeriod = 'month';
+let avgChartWeight = null;      // null = all weights; number = grams filter
+let cachedDartWeights = [];
 let customRangeStart = '';
 let customRangeEnd = '';
 
@@ -1289,6 +1385,31 @@ function drawAvgChart(data){
   </svg>`;
 }
 
+function loadDartWeights(){
+  const container=document.getElementById('avg-weight-filters');
+  if(!container) return;
+  if(DB.mode!=='api'){ container.hidden=true; return; }
+  Backend.get(`/api/players/dart-weights?name=${encodeURIComponent(currentPlayer)}`)
+    .then(weights=>{ cachedDartWeights=weights; renderWeightFilters(); })
+    .catch(()=>{ container.hidden=true; });
+}
+function renderWeightFilters(){
+  const container=document.getElementById('avg-weight-filters');
+  if(!container) return;
+  if(!cachedDartWeights.length){ container.hidden=true; return; }
+  container.hidden=false;
+  container.innerHTML=[null,...cachedDartWeights].map(val=>{
+    const label=val===null?'All':val+'g';
+    const active=avgChartWeight===val;
+    return `<button class="chart-period-btn${active?' active':''}" onclick="setWeightFilter(${val})">${label}</button>`;
+  }).join('');
+}
+function setWeightFilter(weight){
+  avgChartWeight=weight;
+  renderWeightFilters();
+  loadAvgChart(avgChartPeriod);
+}
+
 function loadAvgChart(period){
   avgChartPeriod=period;
   document.querySelectorAll('.chart-period-btn').forEach(b=>b.classList.toggle('active',b.dataset.period===period));
@@ -1306,6 +1427,7 @@ function loadAvgChart(period){
   container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Loading…</p>`;
   let url=`/api/players/avg-history?name=${encodeURIComponent(currentPlayer)}&period=${period}`;
   if(period==='custom') url+=`&start=${customRangeStart}&end=${customRangeEnd}`;
+  if(avgChartWeight) url+=`&weight=${avgChartWeight}`;
   Backend.get(url)
     .then(data=>drawAvgChart(data))
     .catch(()=>{ const c=document.getElementById('avg-chart-body'); if(c) c.innerHTML=`<p class="pp-meta" style="padding:10px 0">Could not load chart data.</p>`; });
@@ -1441,6 +1563,7 @@ function uiPrompt(msg, initial, onSubmit){
   updateFormatLine();
   const tag=document.getElementById('persist-tag'); // reflect mode on the stats page
   if(tag) tag.dataset.mode = DB.mode;
+  renderHome();             // populate the landing page with summary data
   pushLive();   // tell any scoreboard screens we're ready (idle until a game starts)
 })();
 </script>
