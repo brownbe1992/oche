@@ -4,7 +4,7 @@ This project is completely vibe-coded using Claude Opus 4.8. I am not a software
 
 ---
 
-# Darts Scorer
+# Oche
 
 A per-dart darts scoring app with saved player profiles and lifetime statistics,
 stored in a real database (SQLite) on your own server.
