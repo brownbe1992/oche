@@ -188,6 +188,37 @@ function computeStats() {
     GROUP BY gp.player_id, g.category
   `).all();
 
+  // H2H = games with 2+ players. Track wins only (not participation).
+  const h2hLegs = db.prepare(`
+    SELECT t.player_id AS pid, g.category AS cat, COUNT(*) AS legs
+    FROM turns t JOIN games g ON g.id = t.game_id
+    WHERE t.checkout = 1
+      AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+    GROUP BY t.player_id, g.category
+  `).all();
+
+  const h2hSets = db.prepare(`
+    SELECT player_id AS pid, category AS cat, COUNT(*) AS sets
+    FROM (
+      SELECT t.player_id, g.category
+      FROM turns t JOIN games g ON g.id = t.game_id
+      WHERE t.checkout = 1
+        AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+      GROUP BY t.game_id, t.player_id, g.category, t.set_no
+      HAVING COUNT(*) >= g.legs_per_set
+    )
+    GROUP BY player_id, category
+  `).all();
+
+  const h2hGames = db.prepare(`
+    SELECT g.winner_id AS pid, g.category AS cat, COUNT(*) AS games
+    FROM games g
+    WHERE g.completed_at IS NOT NULL
+      AND g.winner_id IS NOT NULL
+      AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+    GROUP BY g.winner_id, g.category
+  `).all();
+
   const aggById = {}; agg.forEach(r => aggById[r.player_id] = r);
   const nameById = {};
   const out = {};
@@ -202,10 +233,16 @@ function computeStats() {
       checkouts100: a.co100,
       legsByCat: {},
       gamesByCat: {},
+      h2hLegsWonByCat: {},
+      h2hSetsWonByCat: {},
+      h2hGamesWonByCat: {},
     };
   });
   legs.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].legsByCat[r.cat] = r.legs; });
   gms.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].gamesByCat[r.cat] = r.games; });
+  h2hLegs.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].h2hLegsWonByCat[r.cat] = r.legs; });
+  h2hSets.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].h2hSetsWonByCat[r.cat] = r.sets; });
+  h2hGames.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].h2hGamesWonByCat[r.cat] = r.games; });
   return out;
 }
 

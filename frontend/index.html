@@ -649,6 +649,9 @@ function ensurePlayerStats(name){
   if(s.checkouts100==null)s.checkouts100=0;
   if(!s.legsByCat) s.legsByCat = s.games || {};   // migrate old `games` field (was per-leg counts)
   if(!s.gamesByCat) s.gamesByCat = {};
+  if(!s.h2hLegsWonByCat) s.h2hLegsWonByCat = {};
+  if(!s.h2hSetsWonByCat) s.h2hSetsWonByCat = {};
+  if(!s.h2hGamesWonByCat) s.h2hGamesWonByCat = {};
   delete s.games;
   stats[name]=s;
 }
@@ -893,16 +896,31 @@ function enterTurn(){
 function onLegWon(wi){
   const w = game.players[wi];
   w.legsWon += 1;
+  const isH2H = game.players.length > 1;
+
+  if(DB.mode==='local' && isH2H){
+    const cat = game.category;
+    stats[w.name].h2hLegsWonByCat[cat] = (stats[w.name].h2hLegsWonByCat[cat]||0) + 1;
+  }
 
   if(w.legsWon >= game.legsPerSet){      // set won
     w.setsWon += 1;
     game.players.forEach(p=>p.legsWon=0);  // reset legs for the next set
 
+    if(DB.mode==='local' && isH2H){
+      const cat = game.category;
+      stats[w.name].h2hSetsWonByCat[cat] = (stats[w.name].h2hSetsWonByCat[cat]||0) + 1;
+    }
+
     if(w.setsWon >= game.setsPerGame){   // game (match) won
       if(DB.mode==='local'){
+        const cat = game.category;
         game.players.forEach(pl=>{
-          stats[pl.name].gamesByCat[game.category] = (stats[pl.name].gamesByCat[game.category]||0) + 1;
+          stats[pl.name].gamesByCat[cat] = (stats[pl.name].gamesByCat[cat]||0) + 1;
         });
+        if(isH2H){
+          stats[w.name].h2hGamesWonByCat[cat] = (stats[w.name].h2hGamesWonByCat[cat]||0) + 1;
+        }
       }
       DB.completeGame(w.name);   // api marks the game complete in the database
       persist();
@@ -1057,18 +1075,23 @@ function renderStats(){
     const catLines = cats.length
       ? cats.map(c=>`${c}: <b style="color:var(--ink)">${s.gamesByCat[c]||0}</b> games · <b style="color:var(--ink)">${s.legsByCat[c]||0}</b> legs`).join('<br>')
       : '<span style="color:var(--muted)">none yet</span>';
+    const h2hCats=Object.keys({...s.h2hGamesByCat||{}, ...s.h2hSetsWonByCat||{}, ...s.h2hLegsWonByCat||{}});
+    const h2hLines = h2hCats.length
+      ? h2hCats.map(c=>`${c}: <b style="color:var(--ink)">${(s.h2hGamesByCat||{})[c]||0}</b> games · <b style="color:var(--ink)">${(s.h2hSetsWonByCat||{})[c]||0}</b> sets · <b style="color:var(--ink)">${(s.h2hLegsWonByCat||{})[c]||0}</b> legs`).join('<br>')
+      : '<span style="color:var(--muted)">none yet</span>';
     return `<tr>
       <td><div style="font-weight:600">${escapeHtml(n)}</div><div class="cat-line">${s.turns} turns thrown</div></td>
       <td class="num"><span class="big">${avg}</span></td>
       <td class="num">${s.checkouts100}</td>
       <td class="num">${s.trebleLess}</td>
       <td class="cat-line">${catLines}</td>
+      <td class="cat-line">${h2hLines}</td>
     </tr>`;
   }).join('');
   body.innerHTML=`<table>
     <thead><tr>
       <th>Player</th><th class="num">3-dart avg</th><th class="num">100+&nbsp;CO</th>
-      <th class="num">Treble-less</th><th>Games &amp; legs played</th>
+      <th class="num">Treble-less</th><th>Games &amp; legs played</th><th>H2H Wins</th>
     </tr></thead><tbody>${rows}</tbody></table>`;
 }
 function resetStats(){
