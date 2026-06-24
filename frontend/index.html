@@ -239,6 +239,11 @@
   .hof-times{font-size:11px;font-weight:700;color:var(--gold);min-width:22px;flex:none}
   .hof-player{font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .hof-dates{font-size:11px;color:var(--muted);flex:none;text-align:right}
+  .hero-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+  .hero-block{background:var(--surface-2);border:1px solid var(--wire);border-radius:11px;padding:18px 14px;text-align:center}
+  .hero-val{font-family:'Bebas Neue';font-size:46px;color:var(--cream);line-height:1}
+  .hero-label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:6px}
+  @media(max-width:400px){.hero-val{font-size:32px}}
   .achievement-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
   @media(max-width:500px){.achievement-pair{grid-template-columns:1fr}}
   .achievement-col-title{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;margin-bottom:6px}
@@ -598,22 +603,36 @@ function renderHomeContent(s,finishes,eighties,bigFishData){
   const body=document.getElementById('home-body');
   if(!body) return;
   const fmt=n=>n==null?'—':Number(n).toLocaleString();
-  const cards=[
-    {val:fmt(s.players),     label:'Players'},
-    {val:fmt(s.games),       label:'Games'},
-    {val:fmt(s.sets),        label:'Sets'},
-    {val:fmt(s.legs),        label:'Legs'},
-    {val:fmt(s.darts),       label:'Darts thrown'},
+
+  // Hero cards — prominent at the top
+  const heroCards=[
+    {val:fmt(s.darts),       label:'Darts Thrown'},
     {val:fmt(s.oneEighties), label:'180s'},
     {val:fmt(s.bigFish),     label:'Big Fish'},
   ];
 
-  function hofSection(finishes){
-    if(!finishes||!finishes.length) return `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
-    return `<div class="hof-list">${finishes.map((f,i)=>{
+  // Secondary stats
+  const secCards=[
+    {val:fmt(s.players), label:'Players'},
+    {val:fmt(s.games),   label:'Games Played'},
+    {val:fmt(s.sets),    label:'Sets'},
+    {val:fmt(s.legs),    label:'Legs'},
+  ];
+
+  // 3-dart average leaderboard computed from in-memory stats
+  const avgBoard=Object.entries(stats)
+    .filter(([,p])=>p.turns>0)
+    .map(([name,p])=>({name, avg:p.totalPoints/p.turns, turns:p.turns}))
+    .sort((a,b)=>b.avg-a.avg);
+
+  function hofSection(rows){
+    if(!rows||!rows.length) return `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
+    return `<div class="hof-list">${rows.map((f,i)=>{
       const first=fmtDate(f.first_date);
       const last=fmtDate(f.last_date);
-      const dates=f.times===1?first:`${first} → ${last}`;
+      const dates=f.times===1
+        ? `First: ${first}`
+        : `First: ${first} · Most Recent: ${last}`;
       return `<div class="hof-row">
         <span class="hof-rank">${i+1}</span>
         <span class="hof-score">${f.score}</span>
@@ -624,7 +643,7 @@ function renderHomeContent(s,finishes,eighties,bigFishData){
     }).join('')}</div>`;
   }
 
-  function achievementSection(title, data){
+  function achievementSection(title,data){
     if(!data||(!data.leaderboard.length&&!data.recent.length))
       return `<div class="pp-section"><div class="pp-section-title">${title}</div><p class="pp-meta" style="padding:4px 0">None recorded yet.</p></div>`;
     const lbRows=data.leaderboard.map((r,i)=>`<div class="hof-row">
@@ -648,10 +667,24 @@ function renderHomeContent(s,finishes,eighties,bigFishData){
     </div>`;
   }
 
+  const avgLeaderboard=avgBoard.length
+    ? `<div class="hof-list">${avgBoard.map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-score" style="font-size:18px;min-width:52px">${r.avg.toFixed(1)}</span>
+        <span class="hof-dates">${r.turns.toLocaleString()} visits</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">No games played yet.</p>`;
+
   const localNote=DB.mode!=='api'?`<p class="pp-meta" style="margin:0 0 16px">Full stats require the server backend.</p>`:'';
   body.innerHTML=`
-    <div class="summary-grid">${cards.map(c=>`<div class="stat-block"><div class="stat-val">${c.val}</div><div class="stat-label">${c.label}</div></div>`).join('')}</div>
+    <div class="hero-grid">${heroCards.map(c=>`<div class="hero-block"><div class="hero-val">${c.val}</div><div class="hero-label">${c.label}</div></div>`).join('')}</div>
+    <div class="summary-grid">${secCards.map(c=>`<div class="stat-block"><div class="stat-val">${c.val}</div><div class="stat-label">${c.label}</div></div>`).join('')}</div>
     ${localNote}
+    <div class="pp-section">
+      <div class="pp-section-title">All-time 3-dart average</div>
+      ${avgLeaderboard}
+    </div>
     <div class="pp-section">
       <div class="pp-section-title">All-time top finishes</div>
       ${hofSection(finishes)}
