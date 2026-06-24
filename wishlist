@@ -1,0 +1,14 @@
+Player pages:
+- Calculate averate leg/set/game length
+    - set/game length dependent on # of legs
+- Game win %
+- Set win %
+- Leg win %
+- Win/loss record against each player
+- Environmental data (temp, humidity)
+- Game log
+
+
+New Game
+- Add additional games (Cricket)
+

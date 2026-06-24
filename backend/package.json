@@ -1,6 +1,6 @@
 {
-  "name": "darts-scorer",
-  "version": "1.0.0",
+  "name": "Oche",
+  "version": "0.2.2",
   "private": true,
   "description": "Per-dart darts scorer with player profiles and lifetime stats, backed by SQLite. No external dependencies.",
   "main": "server.js",

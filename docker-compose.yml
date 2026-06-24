@@ -1,7 +1,7 @@
 services:
   darts:
     build: .
-    container_name: darts-scorer
+    container_name: oche
     ports:
       - "8046:8046"          # open http://<your-server>:8046 in a browser
     volumes:

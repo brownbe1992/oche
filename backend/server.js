@@ -1,6 +1,6 @@
 'use strict';
 /* =============================================================================
-   Darts scorer server.
+   Oche server.
 
    Dependency-free: uses only Node's built-in `http` module and the database
    layer in db.js (which uses Node's built-in SQLite). Serves the single-page
@@ -113,6 +113,25 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/players' && m === 'DELETE') return send(res, 200, db.deletePlayer(url.searchParams.get('name')));
 
     if (p === '/api/stats' && m === 'GET')  return send(res, 200, db.computeStats());
+    if (p === '/api/players/top-finishes' && m === 'GET') {
+      return send(res, 200, db.getTopFinishes(url.searchParams.get('name')));
+    }
+    if (p === '/api/players/avg-history' && m === 'GET') {
+      const name = url.searchParams.get('name');
+      const period = url.searchParams.get('period') || 'month';
+      const validPeriods = ['today', 'week', 'month', 'year', 'all', 'custom'];
+      if (!validPeriods.includes(period)) return send(res, 400, { error: 'Invalid period' });
+      const opts = {};
+      if (period === 'custom') {
+        const start = url.searchParams.get('start') || '';
+        const end   = url.searchParams.get('end')   || '';
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end))
+          return send(res, 400, { error: 'start and end must be YYYY-MM-DD' });
+        opts.start = start;
+        opts.end   = end;
+      }
+      return send(res, 200, db.getAvgHistory(name, period, opts));
+    }
     if (p === '/api/reset' && m === 'POST') return send(res, 200, db.resetStats());
 
     if (p === '/api/games' && m === 'POST') { const b = await readJson(req); return send(res, 200, db.createGame(b)); }
@@ -123,6 +142,10 @@ const server = http.createServer(async (req, res) => {
     }
     if ((mt = p.match(/^\/api\/games\/(\d+)\/complete$/)) && m === 'POST') {
       const b = await readJson(req); return send(res, 200, db.completeGame(Number(mt[1]), b.winner));
+    }
+    if ((mt = p.match(/^\/api\/games\/(\d+)\/events$/)) && m === 'POST') {
+      const b = await readJson(req);
+      return send(res, 200, db.recordEvent(Number(mt[1]), b.type, b.setNo ?? null, b.legNo ?? null));
     }
 
     return send(res, 404, { error: 'Unknown endpoint' });

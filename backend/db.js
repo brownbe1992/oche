@@ -63,6 +63,16 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_turns_player ON turns(player_id);
   CREATE INDEX IF NOT EXISTS idx_turns_game   ON turns(game_id);
+
+  CREATE TABLE IF NOT EXISTS timeline_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id     INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    set_no      INTEGER,
+    leg_no      INTEGER,
+    event_type  TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_timeline_game ON timeline_events(game_id);
 `);
 
 /* ---------- prepared statements ---------- */
@@ -188,6 +198,37 @@ function computeStats() {
     GROUP BY gp.player_id, g.category
   `).all();
 
+  // H2H = games with 2+ players. Track wins only (not participation).
+  const h2hLegs = db.prepare(`
+    SELECT t.player_id AS pid, g.category AS cat, COUNT(*) AS legs
+    FROM turns t JOIN games g ON g.id = t.game_id
+    WHERE t.checkout = 1
+      AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+    GROUP BY t.player_id, g.category
+  `).all();
+
+  const h2hSets = db.prepare(`
+    SELECT player_id AS pid, category AS cat, COUNT(*) AS sets
+    FROM (
+      SELECT t.player_id, g.category
+      FROM turns t JOIN games g ON g.id = t.game_id
+      WHERE t.checkout = 1
+        AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+      GROUP BY t.game_id, t.player_id, g.category, t.set_no
+      HAVING COUNT(*) >= g.legs_per_set
+    )
+    GROUP BY player_id, category
+  `).all();
+
+  const h2hGames = db.prepare(`
+    SELECT g.winner_id AS pid, g.category AS cat, COUNT(*) AS games
+    FROM games g
+    WHERE g.completed_at IS NOT NULL
+      AND g.winner_id IS NOT NULL
+      AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+    GROUP BY g.winner_id, g.category
+  `).all();
+
   const aggById = {}; agg.forEach(r => aggById[r.player_id] = r);
   const nameById = {};
   const out = {};
@@ -202,11 +243,89 @@ function computeStats() {
       checkouts100: a.co100,
       legsByCat: {},
       gamesByCat: {},
+      h2hLegsWonByCat: {},
+      h2hSetsWonByCat: {},
+      h2hGamesWonByCat: {},
     };
   });
   legs.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].legsByCat[r.cat] = r.legs; });
   gms.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].gamesByCat[r.cat] = r.games; });
+  h2hLegs.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].h2hLegsWonByCat[r.cat] = r.legs; });
+  h2hSets.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].h2hSetsWonByCat[r.cat] = r.sets; });
+  h2hGames.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].h2hGamesWonByCat[r.cat] = r.games; });
   return out;
+}
+
+function recordEvent(gameId, eventType, setNo, legNo) {
+  db.prepare(
+    'INSERT INTO timeline_events (game_id, event_type, set_no, leg_no) VALUES (?, ?, ?, ?)'
+  ).run(Number(gameId), String(eventType), setNo ?? null, legNo ?? null);
+  return { ok: true };
+}
+
+function getTopFinishes(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return [];
+  return db.prepare(`
+    SELECT t.checkout_points AS score,
+           COUNT(*)          AS times,
+           MIN(t.created_at) AS first_date,
+           MAX(t.created_at) AS last_date
+    FROM turns t
+    WHERE t.player_id = ?
+      AND t.checkout = 1
+      AND t.checkout_points > 0
+    GROUP BY t.checkout_points
+    ORDER BY t.checkout_points DESC
+    LIMIT 10
+  `).all(p.id);
+}
+
+function getAvgHistory(playerName, period, opts = {}) {
+  const p = getPlayer(playerName);
+  if (!p) return [];
+
+  let fmt, where;
+  if (period === 'today') {
+    fmt = "strftime('%H', t.created_at)";
+    where = `WHERE t.player_id = ? AND date(t.created_at) = date('now')`;
+  } else if (period === 'week') {
+    fmt = "strftime('%Y-%m-%d', t.created_at)";
+    where = `WHERE t.player_id = ? AND t.created_at >= datetime('now', '-7 days')`;
+  } else if (period === 'month') {
+    fmt = "strftime('%Y-%m-%d', t.created_at)";
+    where = `WHERE t.player_id = ? AND t.created_at >= datetime('now', '-30 days')`;
+  } else if (period === 'year') {
+    // 'w' prefix distinguishes week buckets from YYYY-MM month buckets
+    fmt = "'w' || strftime('%Y-%W', t.created_at)";
+    where = `WHERE t.player_id = ? AND t.created_at >= datetime('now', '-365 days')`;
+  } else if (period === 'custom') {
+    const { start, end } = opts;
+    const days = Math.round((new Date(end) - new Date(start)) / 86400000);
+    if (days <= 31) {
+      fmt = "strftime('%Y-%m-%d', t.created_at)";
+    } else if (days <= 365) {
+      fmt = "'w' || strftime('%Y-%W', t.created_at)";
+    } else {
+      fmt = "strftime('%Y-%m', t.created_at)";
+    }
+    // dates already validated as YYYY-MM-DD by the server
+    where = `WHERE t.player_id = ? AND date(t.created_at) >= '${start}' AND date(t.created_at) <= '${end}'`;
+  } else {
+    // all time
+    fmt = "strftime('%Y-%m', t.created_at)";
+    where = `WHERE t.player_id = ?`;
+  }
+
+  return db.prepare(`
+    SELECT ${fmt} AS bucket,
+           CAST(SUM(t.scored) AS REAL) / COUNT(*) AS avg,
+           COUNT(*) AS turns
+    FROM turns t
+    ${where}
+    GROUP BY bucket
+    ORDER BY bucket
+  `).all(p.id);
 }
 
 function resetStats() {
@@ -221,7 +340,7 @@ function httpError(status, message) {
 
 module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, deletePlayer,
-  createGame, addTurn, completeGame,
-  computeStats, resetStats,
+  createGame, addTurn, completeGame, recordEvent,
+  computeStats, getTopFinishes, getAvgHistory, resetStats,
   _db: db,
 };

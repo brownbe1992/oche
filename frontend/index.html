@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Oche — per-dart scorer & stats</title>
+<title>Oche — Per-Dart Scorer & Stats</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -197,13 +197,51 @@
   }
   @media (prefers-reduced-motion:reduce){*{animation:none!important}}
   .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+  button.rp-main{background:none;border:none;text-align:left;cursor:pointer;padding:0;font:inherit;color:inherit;margin-right:auto;flex:1;min-width:0}
+  button.rp-main:hover .rp-name{color:var(--gold)}
+
+  /* ---- player profile page ---- */
+  .pp-back{background:none;border:none;color:var(--muted);font:inherit;font-size:13px;cursor:pointer;padding:0;margin-bottom:16px}
+  .pp-back:hover{color:var(--ink)}
+  .pp-header{margin-bottom:20px}
+  .pp-name{font-size:22px;font-weight:700;margin-bottom:2px}
+  .pp-meta{font-size:12px;color:var(--muted)}
+  .stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
+  .stat-block{background:var(--surface-2);border:1px solid var(--wire);border-radius:11px;padding:12px 14px;text-align:center}
+  .stat-block .stat-val{font-family:'Bebas Neue';font-size:28px;color:var(--cream);line-height:1}
+  .stat-block .stat-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:4px}
+  .pp-section{margin-bottom:18px}
+  .pp-section-title{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;margin-bottom:8px}
+  .pp-cat-lines{font-size:13px;color:var(--muted);line-height:1.8}
+  .pp-cat-lines b{color:var(--ink)}
+  .btn.danger{color:var(--bust);border-color:var(--wire)}
+  .btn.danger:hover{border-color:var(--bust)}
+
+  /* ---- avg chart ---- */
+  .chart-periods{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+  .chart-period-btn{background:var(--board);border:1px solid var(--wire);color:var(--muted);border-radius:8px;
+    padding:6px 13px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+  .chart-period-btn.active{background:var(--surface-2);color:var(--ink);border-color:var(--muted)}
+  .chart-period-btn:hover:not(.active){color:var(--ink)}
+  .chart-custom-range{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  .date-input{background:var(--board);border:1px solid var(--wire);color:var(--ink);border-radius:8px;
+    padding:5px 10px;font:inherit;font-size:12px;cursor:pointer;color-scheme:dark}
+  .date-input:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
+
+  /* ---- top finishes ---- */
+  .finish-list{display:flex;flex-direction:column;gap:5px}
+  .finish-row{display:flex;align-items:baseline;gap:10px}
+  .finish-score{font-family:'Bebas Neue';font-size:22px;color:var(--cream);min-width:38px}
+  .finish-count{font-size:11px;font-weight:700;color:var(--gold);min-width:20px}
+  .finish-dates{font-size:11.5px;color:var(--muted)}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header class="masthead">
     <div class="mark">OCHE</div>
-    <div class="sub">per-dart scoring &amp; lifetime stats</div>
+    <div class="sub">Per-Dart Scoring &amp; Lifetime Stats</div>
     <nav class="nav">
       <button class="navbtn" id="nav-setup" aria-current="true" onclick="show('setup')">New game</button>
       <button class="navbtn" id="nav-players" aria-current="false" onclick="show('players')">Players</button>
@@ -301,6 +339,14 @@
     </div>
   </section>
 
+  <!-- ============ PLAYER PROFILE ============ -->
+  <section id="screen-player" class="screen">
+    <div class="card">
+      <button class="pp-back" onclick="show('players')">← Players</button>
+      <div id="player-page-body"></div>
+    </div>
+  </section>
+
   <!-- ============ STATS ============ -->
   <section id="screen-stats" class="screen">
     <div class="card">
@@ -318,8 +364,8 @@
         <b style="color:var(--ink)">3-dart average</b> — lifetime: all points scored ÷ all turns, across every leg, set and game. (During play, the scoreboard shows your <em>current leg</em> and <em>current game</em> averages instead.)<br>
         <b style="color:var(--ink)">100+ checkouts</b> — winning turns where you scored 100 or more on that final visit.<br>
         <b style="color:var(--ink)">Treble-less turns</b> — turns where none of the darts landed in a treble bed.<br>
-        <b style="color:var(--ink)">Games &amp; legs played</b> — counted per game type for everyone taking part; a game is the whole match, a leg is a single 501 (or chosen start).<br>
-        A bust turn still counts as a turn (it scores 0) and still counts its darts toward treble-less totals.
+        A bust turn still counts as a turn (it scores 0) and still counts its darts toward treble-less totals.<br>
+        Click a player's name on the Stats or Players page to see their full profile including games &amp; legs played and H2H wins.
       </div>
     </div>
   </section>
@@ -422,6 +468,7 @@ const DB = {
     } else this.gameId=null;
   },
   recordTurn(t){ if(this.mode==='api' && this.gameId!=null) Backend.send('POST',`/api/games/${this.gameId}/turns`, t).catch(logErr); },
+  recordEvent(type, setNo, legNo){ if(this.mode==='api' && this.gameId!=null) Backend.send('POST',`/api/games/${this.gameId}/events`, {type, setNo:setNo??null, legNo:legNo??null}).catch(logErr); },
   completeGame(winner){ if(this.mode==='api' && this.gameId!=null) Backend.send('POST',`/api/games/${this.gameId}/complete`, {winner}).catch(logErr); },
 
   async reset(){ if(this.mode==='api'){ await Backend.send('POST','/api/reset').catch(logErr); await this.refreshStats(); } },
@@ -493,11 +540,12 @@ function show(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));
   document.getElementById('screen-'+name).classList.add('on');
   document.getElementById('nav-setup').setAttribute('aria-current', name==='setup');
-  document.getElementById('nav-players').setAttribute('aria-current', name==='players');
+  document.getElementById('nav-players').setAttribute('aria-current', name==='players'||name==='player');
   document.getElementById('nav-stats').setAttribute('aria-current', name==='stats');
   if(name==='setup'){ sanitizeSlots(); renderPlayers(); }
   if(name==='players') renderRoster();
   if(name==='stats'){ if(DB.mode==='api'){ DB.refreshStats().then(renderStats).catch(renderStats); } else renderStats(); }
+  if(name==='player'){ if(DB.mode==='api'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); } else renderPlayerPage(); }
 }
 function openScoreboard(){
   if(DB.mode==='api'){
@@ -625,6 +673,9 @@ async function startGame(){
   };
   names.forEach(ensurePlayerStats);
   await DB.beginGame(game, names);   // registers the game; gets a gameId in api mode
+  DB.recordEvent('game_start', null, null);
+  DB.recordEvent('set_start', 1, null);
+  DB.recordEvent('leg_start', 1, 1);
   mult = 1;
   renderGameShell();        // ensure the throwing controls exist (e.g. after a finished game)
   updateMultUI();
@@ -649,6 +700,9 @@ function ensurePlayerStats(name){
   if(s.checkouts100==null)s.checkouts100=0;
   if(!s.legsByCat) s.legsByCat = s.games || {};   // migrate old `games` field (was per-leg counts)
   if(!s.gamesByCat) s.gamesByCat = {};
+  if(!s.h2hLegsWonByCat) s.h2hLegsWonByCat = {};
+  if(!s.h2hSetsWonByCat) s.h2hSetsWonByCat = {};
+  if(!s.h2hGamesWonByCat) s.h2hGamesWonByCat = {};
   delete s.games;
   stats[name]=s;
 }
@@ -667,10 +721,10 @@ function renderRoster(){
     const out = playerOut(name);
     const j = escapeJs(name);
     return `<div class="roster-row">
-      <div class="rp-main">
+      <button class="rp-main" onclick="showPlayer('${j}')">
         <div class="rp-name">${escapeHtml(name)}</div>
         <div class="rp-stat">avg ${avg} · ${s.turns||0} turns</div>
-      </div>
+      </button>
       <div class="seg out-seg" role="group" aria-label="Finish rule for ${escapeHtml(name)}">
         <button aria-pressed="${out==='double'}" onclick="setPlayerOut('${j}','double'); renderRoster();">Double out</button>
         <button aria-pressed="${out==='single'}" onclick="setPlayerOut('${j}','single'); renderRoster();">Single out</button>
@@ -688,6 +742,99 @@ function askRename(name){
 }
 function askDelete(name){
   uiConfirm(`Delete "${name}" and all of their stats? This can't be undone.`, ()=>{ deletePlayer(name); renderRoster(); });
+}
+
+/* ---------- player profile page ---------- */
+let currentPlayer = null;
+function localDateStr(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function showPlayer(name){
+  currentPlayer = name;
+  if(!customRangeEnd){
+    const now=new Date();
+    customRangeEnd=localDateStr(now);
+    const past=new Date(now); past.setMonth(past.getMonth()-1);
+    customRangeStart=localDateStr(past);
+  }
+  show('player');
+}
+function renderPlayerPage(){
+  const body = document.getElementById('player-page-body');
+  if(!currentPlayer || !body) return;
+  const name = currentPlayer;
+  const s = stats[name] || {};
+  const avg = s.turns ? (s.totalPoints/s.turns).toFixed(1) : '0.0';
+  const out = playerOut(name);
+  const j = escapeJs(name);
+  const cats = Object.keys({...(s.legsByCat||{}), ...(s.gamesByCat||{})});
+  const catHtml = cats.length
+    ? cats.map(c=>`${c}: <b>${(s.gamesByCat||{})[c]||0}</b> games · <b>${(s.legsByCat||{})[c]||0}</b> legs`).join('<br>')
+    : '<span style="color:var(--muted)">none yet</span>';
+  const h2hCats = Object.keys({...(s.h2hGamesWonByCat||{}), ...(s.h2hSetsWonByCat||{}), ...(s.h2hLegsWonByCat||{})});
+  const h2hHtml = h2hCats.length
+    ? h2hCats.map(c=>`${c}: <b>${(s.h2hGamesWonByCat||{})[c]||0}</b> games · <b>${(s.h2hSetsWonByCat||{})[c]||0}</b> sets · <b>${(s.h2hLegsWonByCat||{})[c]||0}</b> legs`).join('<br>')
+    : '<span style="color:var(--muted)">none yet</span>';
+  const cp=avgChartPeriod;
+  body.innerHTML = `
+    <div class="pp-header">
+      <div class="pp-name">${escapeHtml(name)}</div>
+      <div class="pp-meta">${s.turns||0} turns thrown</div>
+    </div>
+    <div class="stat-grid">
+      <div class="stat-block"><div class="stat-val">${avg}</div><div class="stat-label">3-dart avg</div></div>
+      <div class="stat-block"><div class="stat-val">${s.checkouts100||0}</div><div class="stat-label">100+ CO</div></div>
+      <div class="stat-block"><div class="stat-val">${s.trebleLess||0}</div><div class="stat-label">Treble-less Visits</div></div>
+    </div>
+    <div class="pp-section">
+      <div class="pp-section-title">3-dart average over time</div>
+      <div class="chart-periods">
+        <button class="chart-period-btn${cp==='today'?' active':''}" data-period="today" onclick="loadAvgChart('today')">Today</button>
+        <button class="chart-period-btn${cp==='week'?' active':''}" data-period="week" onclick="loadAvgChart('week')">Week</button>
+        <button class="chart-period-btn${cp==='month'?' active':''}" data-period="month" onclick="loadAvgChart('month')">Month</button>
+        <button class="chart-period-btn${cp==='year'?' active':''}" data-period="year" onclick="loadAvgChart('year')">Year</button>
+        <button class="chart-period-btn${cp==='all'?' active':''}" data-period="all" onclick="loadAvgChart('all')">All time</button>
+        <button class="chart-period-btn${cp==='custom'?' active':''}" data-period="custom" onclick="loadAvgChart('custom')">Custom</button>
+      </div>
+      <div class="chart-custom-range" id="chart-custom-range"${cp!=='custom'?' hidden':''}>
+        <input type="date" id="chart-date-from" class="date-input" value="${customRangeStart}">
+        <span class="pp-meta">to</span>
+        <input type="date" id="chart-date-to" class="date-input" value="${customRangeEnd}">
+        <button class="chart-period-btn active" onclick="applyCustomRange()">Apply</button>
+      </div>
+      <div id="avg-chart-body"></div>
+    </div>
+    <div class="pp-section">
+      <div class="pp-section-title">Top 10 finishes</div>
+      <div id="player-top-finishes"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </div>
+    <div class="pp-section">
+      <div class="pp-section-title">Out mode</div>
+      <div class="seg out-seg" role="group">
+        <button aria-pressed="${out==='double'}" onclick="setPlayerOut('${j}','double'); renderPlayerPage();">Double out</button>
+        <button aria-pressed="${out==='single'}" onclick="setPlayerOut('${j}','single'); renderPlayerPage();">Single out</button>
+      </div>
+    </div>
+    <div class="pp-section">
+      <div class="pp-section-title">Games &amp; legs played</div>
+      <div class="pp-cat-lines">${catHtml}</div>
+    </div>
+    <div class="pp-section">
+      <div class="pp-section-title">H2H Wins</div>
+      <div class="pp-cat-lines">${h2hHtml}</div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="askRenameFromProfile('${j}')">Rename</button>
+      <button class="btn btn-ghost danger" onclick="askDeleteFromProfile('${j}')">Delete</button>
+    </div>`;
+  loadAvgChart(avgChartPeriod);
+  loadTopFinishes();
+}
+function askRenameFromProfile(name){
+  uiPrompt('Rename player', name, newName=>{
+    if(renamePlayer(name, newName)){ currentPlayer = newName; renderPlayerPage(); }
+  });
+}
+function askDeleteFromProfile(name){
+  uiConfirm(`Delete "${name}" and all of their stats? This can't be undone.`, ()=>{ deletePlayer(name); currentPlayer=null; show('players'); });
 }
 
 /* ---------- game render ---------- */
@@ -893,26 +1040,47 @@ function enterTurn(){
 function onLegWon(wi){
   const w = game.players[wi];
   w.legsWon += 1;
+  const isH2H = game.players.length > 1;
+
+  if(DB.mode==='local' && isH2H){
+    const cat = game.category;
+    stats[w.name].h2hLegsWonByCat[cat] = (stats[w.name].h2hLegsWonByCat[cat]||0) + 1;
+  }
 
   if(w.legsWon >= game.legsPerSet){      // set won
     w.setsWon += 1;
     game.players.forEach(p=>p.legsWon=0);  // reset legs for the next set
 
+    if(DB.mode==='local' && isH2H){
+      const cat = game.category;
+      stats[w.name].h2hSetsWonByCat[cat] = (stats[w.name].h2hSetsWonByCat[cat]||0) + 1;
+    }
+
     if(w.setsWon >= game.setsPerGame){   // game (match) won
       if(DB.mode==='local'){
+        const cat = game.category;
         game.players.forEach(pl=>{
-          stats[pl.name].gamesByCat[game.category] = (stats[pl.name].gamesByCat[game.category]||0) + 1;
+          stats[pl.name].gamesByCat[cat] = (stats[pl.name].gamesByCat[cat]||0) + 1;
         });
+        if(isH2H){
+          stats[w.name].h2hGamesWonByCat[cat] = (stats[w.name].h2hGamesWonByCat[cat]||0) + 1;
+        }
       }
+      DB.recordEvent('leg_end', game.setNo, game.legNo);
+      DB.recordEvent('set_end', game.setNo, null);
+      DB.recordEvent('game_end', null, null);
       DB.completeGame(w.name);   // api marks the game complete in the database
       persist();
       finishUnit('game', w.name);
       return;
     }
+    DB.recordEvent('leg_end', game.setNo, game.legNo);
+    DB.recordEvent('set_end', game.setNo, null);
     persist();
     finishUnit('set', w.name);
     return;
   }
+  DB.recordEvent('leg_end', game.setNo, game.legNo);
   persist();
   finishUnit('leg', w.name);
 }
@@ -920,6 +1088,8 @@ function onLegWon(wi){
 // rotate who throws first, reset scores; keep game-scope totals, reset leg-scope
 function startNextLeg(newSet){
   if(newSet){ game.setNo += 1; game.legNo = 1; } else { game.legNo += 1; }
+  if(newSet) DB.recordEvent('set_start', game.setNo, null);
+  DB.recordEvent('leg_start', game.setNo, game.legNo);
   game.starter = (game.starter + 1) % game.players.length;
   game.current = game.starter;
   game.players.forEach(p=>{ p.score = game.start; p.legPoints=0; p.legVisits=0; });
@@ -1038,6 +1208,153 @@ function checkoutHint(rem, doubleOut, maxDarts){
   return '';
 }
 
+/* ---------- avg-over-time chart ---------- */
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+let avgChartPeriod = 'month';
+let customRangeStart = '';
+let customRangeEnd = '';
+
+// Bucket format is self-describing: HH (today), YYYY-MM-DD (day), wYYYY-WW (week), YYYY-MM (month)
+function formatBucket(bucket){
+  if(/^\d{2}$/.test(bucket)){
+    // hour: '14' → 2pm
+    const h=+bucket;
+    return `${h===0?12:h>12?h-12:h}${h>=12?'pm':'am'}`;
+  }
+  if(/^\d{4}-\d{2}-\d{2}$/.test(bucket)){
+    // YYYY-MM-DD
+    const [,mo,dy]=bucket.split('-');
+    return `${MONTHS[+mo-1]} ${+dy}`;
+  }
+  if(bucket.startsWith('w')){
+    // wYYYY-WW — approximate week start date
+    const [yr,wk]=bucket.slice(1).split('-');
+    const d=new Date(+yr,0,1+(+wk)*7);
+    return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+  }
+  // YYYY-MM
+  const [yr,mo]=bucket.split('-');
+  return `${MONTHS[+mo-1]} '${yr.slice(2)}`;
+}
+
+function drawAvgChart(data){
+  const container=document.getElementById('avg-chart-body');
+  if(!container) return;
+  if(!data||data.length===0){
+    container.innerHTML=`<p class="pp-meta" style="padding:10px 0">No turns recorded in this period.</p>`;
+    return;
+  }
+  if(data.length===1){
+    container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Only one session in this period — <b style="color:var(--ink)">${data[0].avg.toFixed(1)}</b> avg.</p>`;
+    return;
+  }
+  const W=560,H=180,ml=46,mr=12,mt=14,mb=30;
+  const cw=W-ml-mr, ch=H-mt-mb;
+  const avgs=data.map(d=>d.avg);
+  const rawMin=Math.min(...avgs), rawMax=Math.max(...avgs);
+  const spread=rawMax-rawMin;
+  const pad=Math.max(spread*0.2,2);
+  const yMin=Math.max(0,rawMin-pad), yMax=rawMax+pad, yRange=yMax-yMin||1;
+  const n=data.length;
+  const pts=data.map((d,i)=>({
+    x:ml+(n===1?cw/2:(i/(n-1))*cw),
+    y:mt+ch-((d.avg-yMin)/yRange)*ch
+  }));
+  const linePts=pts.map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const areaPts=`${pts[0].x.toFixed(1)},${mt+ch} ${linePts} ${pts[n-1].x.toFixed(1)},${mt+ch}`;
+  const yTicks=[yMin,(yMin+yMax)/2,yMax].map(v=>({
+    y:(mt+ch-((v-yMin)/yRange)*ch).toFixed(1),
+    label:v.toFixed(1)
+  }));
+  const labelCount=Math.min(n,5);
+  const xLabels=Array.from({length:labelCount},(_,i)=>{
+    const idx=labelCount===1?0:Math.round(i*(n-1)/(labelCount-1));
+    return {x:pts[idx].x.toFixed(1), label:formatBucket(data[idx].bucket)};
+  });
+  const showDots=n<=31;
+  const gId='ag'+Math.random().toString(36).slice(2,7);
+  container.innerHTML=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;display:block;overflow:visible">
+    <defs>
+      <linearGradient id="${gId}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#d9b46a" stop-opacity=".28"/>
+        <stop offset="100%" stop-color="#d9b46a" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    ${yTicks.map(t=>`<line x1="${ml}" y1="${t.y}" x2="${W-mr}" y2="${t.y}" stroke="#2e3129" stroke-width="1"/>`).join('')}
+    ${yTicks.map(t=>`<text x="${ml-6}" y="${t.y}" text-anchor="end" dominant-baseline="middle" font-size="10" fill="#7a8070">${t.label}</text>`).join('')}
+    <polygon points="${areaPts}" fill="url(#${gId})"/>
+    <polyline points="${linePts}" fill="none" stroke="#d9b46a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${showDots?pts.map(p=>`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="#d9b46a"/>`).join(''):''}
+    ${xLabels.map(l=>`<text x="${l.x}" y="${mt+ch+18}" text-anchor="middle" font-size="10" fill="#7a8070">${l.label}</text>`).join('')}
+  </svg>`;
+}
+
+function loadAvgChart(period){
+  avgChartPeriod=period;
+  document.querySelectorAll('.chart-period-btn').forEach(b=>b.classList.toggle('active',b.dataset.period===period));
+  const customEl=document.getElementById('chart-custom-range');
+  if(customEl) customEl.hidden=period!=='custom';
+  const container=document.getElementById('avg-chart-body');
+  if(!container) return;
+  if(period==='custom'&&(!customRangeStart||!customRangeEnd)){
+    container.innerHTML=''; return;
+  }
+  if(DB.mode!=='api'){
+    container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Average history requires the server backend.</p>`;
+    return;
+  }
+  container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Loading…</p>`;
+  let url=`/api/players/avg-history?name=${encodeURIComponent(currentPlayer)}&period=${period}`;
+  if(period==='custom') url+=`&start=${customRangeStart}&end=${customRangeEnd}`;
+  Backend.get(url)
+    .then(data=>drawAvgChart(data))
+    .catch(()=>{ const c=document.getElementById('avg-chart-body'); if(c) c.innerHTML=`<p class="pp-meta" style="padding:10px 0">Could not load chart data.</p>`; });
+}
+
+function applyCustomRange(){
+  const from=document.getElementById('chart-date-from');
+  const to=document.getElementById('chart-date-to');
+  if(!from||!to||!from.value||!to.value) return;
+  customRangeStart=from.value<=to.value?from.value:to.value;
+  customRangeEnd=from.value<=to.value?to.value:from.value;
+  loadAvgChart('custom');
+}
+
+/* ---------- top finishes ---------- */
+function fmtDate(dt){
+  if(!dt) return '';
+  const [yr,mo,dy]=dt.slice(0,10).split('-');
+  return `${MONTHS[+mo-1]} ${+dy}, ${yr}`;
+}
+
+function loadTopFinishes(){
+  const container=document.getElementById('player-top-finishes');
+  if(!container) return;
+  if(DB.mode!=='api'){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Top finishes are saved when connected to the server backend.</p>`;
+    return;
+  }
+  Backend.get(`/api/players/top-finishes?name=${encodeURIComponent(currentPlayer)}`)
+    .then(rows=>{
+      if(!rows||rows.length===0){
+        container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No checkouts recorded yet.</p>`;
+        return;
+      }
+      container.innerHTML=`<div class="finish-list">${rows.map(r=>{
+        const times=r.times===1?'×1':`×${r.times}`;
+        const first=fmtDate(r.first_date);
+        const last=fmtDate(r.last_date);
+        const dates=r.times===1?first:`First: ${first} · Last: ${last}`;
+        return `<div class="finish-row">
+          <span class="finish-score">${r.score}</span>
+          <span class="finish-count">${times}</span>
+          <span class="finish-dates">${dates}</span>
+        </div>`;
+      }).join('')}</div>`;
+    })
+    .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load finishes.</p>`; });
+}
+
 /* ---------- stats render ---------- */
 function renderStats(){
   document.getElementById('persist-tag').textContent =
@@ -1047,28 +1364,23 @@ function renderStats(){
   const body=document.getElementById('stats-body');
   const names=Object.keys(stats);
   if(names.length===0){
-    body.innerHTML=`<div class="empty">No stats yet.<br>Play a game and your <b>3-dart average</b>, <b>100+ checkouts</b>, <b>treble-less turns</b> and <b>games &amp; legs played</b> will build up here.</div>`;
+    body.innerHTML=`<div class="empty">No stats yet.<br>Play a game and your <b>3-dart average</b>, <b>100+ checkouts</b>, and <b>treble-less visits</b> will build up here.</div>`;
     return;
   }
   let rows = names.map(n=>{
     const s=stats[n];
     const avg=s.turns?(s.totalPoints/s.turns).toFixed(1):'0.0';
-    const cats=Object.keys({...s.legsByCat, ...s.gamesByCat});
-    const catLines = cats.length
-      ? cats.map(c=>`${c}: <b style="color:var(--ink)">${s.gamesByCat[c]||0}</b> games · <b style="color:var(--ink)">${s.legsByCat[c]||0}</b> legs`).join('<br>')
-      : '<span style="color:var(--muted)">none yet</span>';
     return `<tr>
-      <td><div style="font-weight:600">${escapeHtml(n)}</div><div class="cat-line">${s.turns} turns thrown</div></td>
+      <td><button class="rp-main" style="margin:0" onclick="showPlayer('${escapeJs(n)}')">${escapeHtml(n)}</button></td>
       <td class="num"><span class="big">${avg}</span></td>
       <td class="num">${s.checkouts100}</td>
       <td class="num">${s.trebleLess}</td>
-      <td class="cat-line">${catLines}</td>
     </tr>`;
   }).join('');
   body.innerHTML=`<table>
     <thead><tr>
       <th>Player</th><th class="num">3-dart avg</th><th class="num">100+&nbsp;CO</th>
-      <th class="num">Treble-less</th><th>Games &amp; legs played</th>
+      <th class="num">Treble-less Visits</th>
     </tr></thead><tbody>${rows}</tbody></table>`;
 }
 function resetStats(){

@@ -10,7 +10,7 @@
 services:
   darts:
     image: node:22-alpine
-    container_name: darts-scorer
+    container_name: oche
     working_dir: /app
     command: node backend/server.js
     ports:
