@@ -142,7 +142,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/reset' && m === 'POST') return send(res, 200, db.resetStats());
 
-    if (p === '/api/games' && m === 'POST') { const b = await readJson(req); return send(res, 200, db.createGame(b)); }
+    if (p === '/api/games' && m === 'POST') { const b = await readJson(req); return send(res, 200, db.createGame({ ...b, practice: b.practice ? 1 : 0 })); }
 
     let mt;
     if ((mt = p.match(/^\/api\/games\/(\d+)\/turns$/)) && m === 'POST') {

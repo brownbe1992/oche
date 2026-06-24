@@ -314,6 +314,14 @@
       </div>
       <p style="color:var(--muted);font-size:12px;margin:10px 2px 0" id="format-line"></p>
 
+      <div class="opts" style="margin-top:12px">
+        <div class="seg" role="group" aria-label="Game mode">
+          <span class="lbl">Mode</span>
+          <button id="mode-h2h" aria-pressed="true" onclick="setPractice(false)">H2H</button>
+          <button id="mode-practice" aria-pressed="false" onclick="setPractice(true)">Practice</button>
+        </div>
+      </div>
+
       <div class="btn-row">
         <button class="btn btn-primary" id="start-btn" onclick="startGame()">Start game</button>
       </div>
@@ -493,7 +501,7 @@ const DB = {
   // game + turn writes
   async beginGame(meta, names){
     if(this.mode==='api'){
-      try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame, players:names}); this.gameId=r.gameId; }
+      try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame, players:names, practice:meta.practice?1:0}); this.gameId=r.gameId; }
       catch(e){ logErr(e); this.gameId=null; }
     } else this.gameId=null;
   },
@@ -554,7 +562,7 @@ function evaluateVisit(startScore, darts, doubleOut){
 /* =========================================================================
    APP STATE
    ========================================================================= */
-let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1 };
+let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false };
 let game = null;
 let roster = [];     // saved player names (profiles that own stats)
 let stats = {};
@@ -625,6 +633,16 @@ function renderHomeContent(s,finishes,eighties,bigFishData){
     .map(([name,p])=>({name, avg:p.totalPoints/p.turns, turns:p.turns}))
     .sort((a,b)=>b.avg-a.avg);
 
+  // Practice legs leaderboard
+  const practiceBoard=Object.entries(stats)
+    .map(([name,p])=>{
+      const total=Object.values(p.practiceLegs||{}).reduce((a,n)=>a+n,0);
+      const byCat=Object.entries(p.practiceLegs||{}).map(([c,n])=>`${c}: ${n}`).join(' · ');
+      return {name, total, byCat};
+    })
+    .filter(r=>r.total>0)
+    .sort((a,b)=>b.total-a.total);
+
   function hofSection(rows){
     if(!rows||!rows.length) return `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
     return `<div class="hof-list">${rows.map((f,i)=>{
@@ -632,7 +650,7 @@ function renderHomeContent(s,finishes,eighties,bigFishData){
       const last=fmtDate(f.last_date);
       const dates=f.times===1
         ? `First: ${first}`
-        : `First: ${first} · Most Recent: ${last}`;
+        : `First: ${first} · Last: ${last}`;
       return `<div class="hof-row">
         <span class="hof-rank">${i+1}</span>
         <span class="hof-score">${f.score}</span>
@@ -691,9 +709,26 @@ function renderHomeContent(s,finishes,eighties,bigFishData){
     </div>
     ${achievementSection('180s', eighties)}
     ${achievementSection('Big Fish (170 checkouts)', bigFishData)}
+    <div class="pp-section">
+      <div class="pp-section-title">Practice legs thrown</div>
+      ${practiceBoard.length
+        ? `<div class="hof-list">${practiceBoard.map((r,i)=>`<div class="hof-row">
+            <span class="hof-rank">${i+1}</span>
+            <span class="hof-player">${escapeHtml(r.name)}</span>
+            <span class="hof-times">×${r.total}</span>
+            <span class="hof-dates">${r.byCat}</span>
+          </div>`).join('')}</div>`
+        : `<p class="pp-meta" style="padding:4px 0">No practice legs recorded yet.</p>`}
+    </div>
     <div class="btn-row">
       <button class="btn btn-primary" onclick="show('setup')">Start new game →</button>
     </div>`;
+}
+
+function setPractice(on){
+  setup.practice=on;
+  document.getElementById('mode-h2h').setAttribute('aria-pressed', !on);
+  document.getElementById('mode-practice').setAttribute('aria-pressed', on);
 }
 
 function openScoreboard(){
@@ -813,6 +848,7 @@ async function startGame(){
     category: String(setup.start),
     legsPerSet: setup.legsPerSet,
     setsPerGame: setup.setsPerGame,
+    practice: setup.practice,
     players: names.map(n=>newMatchPlayer(n, setup.start)),
     starter: 0,        // who throws first in the current leg
     current: 0,
@@ -850,8 +886,11 @@ function ensurePlayerStats(name){
   if(s.dartWeight === undefined) s.dartWeight = null;
   if(s.oneEighties == null) s.oneEighties = 0;
   if(s.bigFish == null) s.bigFish = 0;
+  if(s.h2hAvgDartsPerLeg === undefined) s.h2hAvgDartsPerLeg = null;
+  if(s.practiceAvgDartsPerLeg === undefined) s.practiceAvgDartsPerLeg = null;
   if(!s.legsByCat) s.legsByCat = s.games || {};   // migrate old `games` field (was per-leg counts)
   if(!s.gamesByCat) s.gamesByCat = {};
+  if(!s.practiceLegs) s.practiceLegs = {};
   if(!s.h2hLegsWonByCat) s.h2hLegsWonByCat = {};
   if(!s.h2hSetsWonByCat) s.h2hSetsWonByCat = {};
   if(!s.h2hGamesWonByCat) s.h2hGamesWonByCat = {};
@@ -929,6 +968,12 @@ function renderPlayerPage(){
   const catHtml = cats.length
     ? cats.map(c=>`${c}: <b>${(s.gamesByCat||{})[c]||0}</b> games · <b>${(s.legsByCat||{})[c]||0}</b> legs`).join('<br>')
     : '<span style="color:var(--muted)">none yet</span>';
+  const pracCats = Object.keys(s.practiceLegs||{});
+  const pracHtml = pracCats.length
+    ? pracCats.map(c=>`${c}: <b>${(s.practiceLegs||{})[c]||0}</b> legs`).join('<br>')
+    : '<span style="color:var(--muted)">none yet</span>';
+  const h2hDarts = s.h2hAvgDartsPerLeg != null ? s.h2hAvgDartsPerLeg : '—';
+  const pracDarts = s.practiceAvgDartsPerLeg != null ? s.practiceAvgDartsPerLeg : '—';
   const h2hCats = Object.keys({...(s.h2hGamesWonByCat||{}), ...(s.h2hSetsWonByCat||{}), ...(s.h2hLegsWonByCat||{})});
   const h2hHtml = h2hCats.length
     ? h2hCats.map(c=>`${c}: <b>${(s.h2hGamesWonByCat||{})[c]||0}</b> games · <b>${(s.h2hSetsWonByCat||{})[c]||0}</b> sets · <b>${(s.h2hLegsWonByCat||{})[c]||0}</b> legs`).join('<br>')
@@ -984,8 +1029,14 @@ function renderPlayerPage(){
       </select>
     </div>
     <div class="pp-section">
-      <div class="pp-section-title">Games &amp; legs played</div>
+      <div class="pp-section-title">H2H — Games &amp; legs played</div>
       <div class="pp-cat-lines">${catHtml}</div>
+      <div class="pp-cat-lines" style="margin-top:5px;font-size:12px;color:var(--muted)">Avg darts/leg: <b style="color:var(--ink)">${h2hDarts}</b></div>
+    </div>
+    <div class="pp-section">
+      <div class="pp-section-title">Practice — Legs thrown</div>
+      <div class="pp-cat-lines">${pracHtml}</div>
+      <div class="pp-cat-lines" style="margin-top:5px;font-size:12px;color:var(--muted)">Avg darts/leg: <b style="color:var(--ink)">${pracDarts}</b></div>
     </div>
     <div class="pp-section">
       <div class="pp-section-title">H2H Wins</div>
@@ -1190,10 +1241,14 @@ function enterTurn(){
   }
 
   if(ev.win){
-    if(DB.mode==='local'){   // legs played, per category, for everyone (api derives this server-side)
+    if(DB.mode==='local'){
+      const _isH2H = !game.practice && game.players.length > 1;
       game.players.forEach(pl=>{
         ensurePlayerStats(pl.name);
-        stats[pl.name].legsByCat[game.category] = (stats[pl.name].legsByCat[game.category]||0) + 1;
+        if(_isH2H)
+          stats[pl.name].legsByCat[game.category] = (stats[pl.name].legsByCat[game.category]||0) + 1;
+        else
+          stats[pl.name].practiceLegs[game.category] = (stats[pl.name].practiceLegs[game.category]||0) + 1;
       });
     }
     onLegWon(game.current);   // handles set/game progression
@@ -1213,7 +1268,7 @@ function enterTurn(){
 function onLegWon(wi){
   const w = game.players[wi];
   w.legsWon += 1;
-  const isH2H = game.players.length > 1;
+  const isH2H = game.players.length > 1 && !game.practice;
 
   if(DB.mode==='local' && isH2H){
     const cat = game.category;
@@ -1232,10 +1287,10 @@ function onLegWon(wi){
     if(w.setsWon >= game.setsPerGame){   // game (match) won
       if(DB.mode==='local'){
         const cat = game.category;
-        game.players.forEach(pl=>{
-          stats[pl.name].gamesByCat[cat] = (stats[pl.name].gamesByCat[cat]||0) + 1;
-        });
         if(isH2H){
+          game.players.forEach(pl=>{
+            stats[pl.name].gamesByCat[cat] = (stats[pl.name].gamesByCat[cat]||0) + 1;
+          });
           stats[w.name].h2hGamesWonByCat[cat] = (stats[w.name].h2hGamesWonByCat[cat]||0) + 1;
         }
       }

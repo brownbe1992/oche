@@ -76,8 +76,9 @@ db.exec(`
 `);
 
 // Column migrations — safe to re-run; ALTER TABLE throws if column exists, which we catch.
-try { db.exec('ALTER TABLE players    ADD COLUMN dart_weight INTEGER'); } catch(e) {}
+try { db.exec('ALTER TABLE players      ADD COLUMN dart_weight INTEGER'); } catch(e) {}
 try { db.exec('ALTER TABLE game_players ADD COLUMN dart_weight INTEGER'); } catch(e) {}
+try { db.exec('ALTER TABLE games        ADD COLUMN practice    INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
 
 /* ---------- prepared statements ---------- */
 const q = {
@@ -89,7 +90,7 @@ const q = {
   setDartWeight: db.prepare('UPDATE players SET dart_weight = ? WHERE id = ?'),
   deletePlayer : db.prepare('DELETE FROM players WHERE id = ?'),
 
-  insertGame   : db.prepare('INSERT INTO games (category, legs_per_set, sets_per_game) VALUES (?, ?, ?)'),
+  insertGame   : db.prepare('INSERT INTO games (category, legs_per_set, sets_per_game, practice) VALUES (?, ?, ?, ?)'),
   addParticipant: db.prepare('INSERT OR IGNORE INTO game_players (game_id, player_id, dart_weight) VALUES (?, ?, ?)'),
   completeGame : db.prepare("UPDATE games SET completed_at = datetime('now'), winner_id = ? WHERE id = ?"),
 
@@ -164,8 +165,8 @@ function deletePlayer(name) {
 }
 
 /* ---------- game + turn operations ---------- */
-function createGame({ category, legsPerSet, setsPerGame, players }) {
-  const info = q.insertGame.run(String(category), Number(legsPerSet) || 1, Number(setsPerGame) || 1);
+function createGame({ category, legsPerSet, setsPerGame, players, practice }) {
+  const info = q.insertGame.run(String(category), Number(legsPerSet) || 1, Number(setsPerGame) || 1, practice ? 1 : 0);
   const gameId = Number(info.lastInsertRowid);
   (players || []).forEach(nm => {
     const p = ensurePlayer(nm);
@@ -208,25 +209,28 @@ function computeStats() {
     FROM turns GROUP BY player_id
   `).all();
 
+  // H2H = non-practice games with 2+ players
   const legs = db.prepare(`
     SELECT t.player_id AS pid, g.category AS cat,
            COUNT(DISTINCT t.game_id || '-' || t.set_no || '-' || t.leg_no) AS legs
     FROM turns t JOIN games g ON g.id = t.game_id
+    WHERE g.practice = 0
+      AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
     GROUP BY t.player_id, g.category
   `).all();
 
   const gms = db.prepare(`
     SELECT gp.player_id AS pid, g.category AS cat, COUNT(*) AS games
     FROM game_players gp JOIN games g ON g.id = gp.game_id
-    WHERE g.completed_at IS NOT NULL
+    WHERE g.completed_at IS NOT NULL AND g.practice = 0
+      AND (SELECT COUNT(*) FROM game_players gp2 WHERE gp2.game_id = g.id) > 1
     GROUP BY gp.player_id, g.category
   `).all();
 
-  // H2H = games with 2+ players. Track wins only (not participation).
   const h2hLegs = db.prepare(`
     SELECT t.player_id AS pid, g.category AS cat, COUNT(*) AS legs
     FROM turns t JOIN games g ON g.id = t.game_id
-    WHERE t.checkout = 1
+    WHERE t.checkout = 1 AND g.practice = 0
       AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
     GROUP BY t.player_id, g.category
   `).all();
@@ -236,7 +240,7 @@ function computeStats() {
     FROM (
       SELECT t.player_id, g.category
       FROM turns t JOIN games g ON g.id = t.game_id
-      WHERE t.checkout = 1
+      WHERE t.checkout = 1 AND g.practice = 0
         AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
       GROUP BY t.game_id, t.player_id, g.category, t.set_no
       HAVING COUNT(*) >= g.legs_per_set
@@ -247,10 +251,44 @@ function computeStats() {
   const h2hGames = db.prepare(`
     SELECT g.winner_id AS pid, g.category AS cat, COUNT(*) AS games
     FROM games g
-    WHERE g.completed_at IS NOT NULL
-      AND g.winner_id IS NOT NULL
+    WHERE g.completed_at IS NOT NULL AND g.winner_id IS NOT NULL AND g.practice = 0
       AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
     GROUP BY g.winner_id, g.category
+  `).all();
+
+  // Practice = explicit practice flag OR solo (1-player) games
+  const practiceLegs = db.prepare(`
+    SELECT t.player_id AS pid, g.category AS cat,
+           COUNT(DISTINCT t.game_id || '-' || t.set_no || '-' || t.leg_no) AS legs
+    FROM turns t JOIN games g ON g.id = t.game_id
+    WHERE g.practice = 1
+      OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1
+    GROUP BY t.player_id, g.category
+  `).all();
+
+  // Average darts per leg (visits × 3) for won legs only
+  const h2hAvgDarts = db.prepare(`
+    SELECT pid, AVG(leg_visits) * 3 AS avg_darts
+    FROM (
+      SELECT t.player_id AS pid, COUNT(*) AS leg_visits
+      FROM turns t JOIN games g ON g.id = t.game_id
+      WHERE g.practice = 0
+        AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+      GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
+      HAVING SUM(CASE WHEN t.checkout = 1 THEN 1 ELSE 0 END) > 0
+    ) GROUP BY pid
+  `).all();
+
+  const practiceAvgDarts = db.prepare(`
+    SELECT pid, AVG(leg_visits) * 3 AS avg_darts
+    FROM (
+      SELECT t.player_id AS pid, COUNT(*) AS leg_visits
+      FROM turns t JOIN games g ON g.id = t.game_id
+      WHERE g.practice = 1
+        OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1
+      GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
+      HAVING SUM(CASE WHEN t.checkout = 1 THEN 1 ELSE 0 END) > 0
+    ) GROUP BY pid
   `).all();
 
   const agg180 = db.prepare(
@@ -262,8 +300,10 @@ function computeStats() {
   ).all();
 
   const aggById = {}; agg.forEach(r => aggById[r.player_id] = r);
-  const agg180ById = {}; agg180.forEach(r => agg180ById[r.player_id] = r.n);
-  const aggBFById  = {}; aggBF.forEach(r => aggBFById[r.player_id]  = r.n);
+  const agg180ById    = {}; agg180.forEach(r => agg180ById[r.player_id] = r.n);
+  const aggBFById     = {}; aggBF.forEach(r  => aggBFById[r.player_id]  = r.n);
+  const h2hDartsById  = {}; h2hAvgDarts.forEach(r     => h2hDartsById[r.pid]  = r.avg_darts);
+  const pracDartsById = {}; practiceAvgDarts.forEach(r => pracDartsById[r.pid] = r.avg_darts);
   const nameById = {};
   const out = {};
   players.forEach(p => {
@@ -278,8 +318,11 @@ function computeStats() {
       checkouts100: a.co100,
       oneEighties: agg180ById[p.id] ?? 0,
       bigFish: aggBFById[p.id] ?? 0,
+      h2hAvgDartsPerLeg: h2hDartsById[p.id] != null ? +h2hDartsById[p.id].toFixed(1) : null,
+      practiceAvgDartsPerLeg: pracDartsById[p.id] != null ? +pracDartsById[p.id].toFixed(1) : null,
       legsByCat: {},
       gamesByCat: {},
+      practiceLegs: {},
       h2hLegsWonByCat: {},
       h2hSetsWonByCat: {},
       h2hGamesWonByCat: {},
@@ -287,6 +330,7 @@ function computeStats() {
   });
   legs.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].legsByCat[r.cat] = r.legs; });
   gms.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].gamesByCat[r.cat] = r.games; });
+  practiceLegs.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].practiceLegs[r.cat] = r.legs; });
   h2hLegs.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].h2hLegsWonByCat[r.cat] = r.legs; });
   h2hSets.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].h2hSetsWonByCat[r.cat] = r.sets; });
   h2hGames.forEach(r => { const nm = nameById[r.pid]; if (nm) out[nm].h2hGamesWonByCat[r.cat] = r.games; });
