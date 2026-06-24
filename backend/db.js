@@ -63,6 +63,16 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_turns_player ON turns(player_id);
   CREATE INDEX IF NOT EXISTS idx_turns_game   ON turns(game_id);
+
+  CREATE TABLE IF NOT EXISTS timeline_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id     INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    set_no      INTEGER,
+    leg_no      INTEGER,
+    event_type  TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_timeline_game ON timeline_events(game_id);
 `);
 
 /* ---------- prepared statements ---------- */
@@ -246,6 +256,31 @@ function computeStats() {
   return out;
 }
 
+function recordEvent(gameId, eventType, setNo, legNo) {
+  db.prepare(
+    'INSERT INTO timeline_events (game_id, event_type, set_no, leg_no) VALUES (?, ?, ?, ?)'
+  ).run(Number(gameId), String(eventType), setNo ?? null, legNo ?? null);
+  return { ok: true };
+}
+
+function getTopFinishes(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return [];
+  return db.prepare(`
+    SELECT t.checkout_points AS score,
+           COUNT(*)          AS times,
+           MIN(t.created_at) AS first_date,
+           MAX(t.created_at) AS last_date
+    FROM turns t
+    WHERE t.player_id = ?
+      AND t.checkout = 1
+      AND t.checkout_points > 0
+    GROUP BY t.checkout_points
+    ORDER BY t.checkout_points DESC
+    LIMIT 10
+  `).all(p.id);
+}
+
 function getAvgHistory(playerName, period, opts = {}) {
   const p = getPlayer(playerName);
   if (!p) return [];
@@ -305,7 +340,7 @@ function httpError(status, message) {
 
 module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, deletePlayer,
-  createGame, addTurn, completeGame,
-  computeStats, getAvgHistory, resetStats,
+  createGame, addTurn, completeGame, recordEvent,
+  computeStats, getTopFinishes, getAvgHistory, resetStats,
   _db: db,
 };

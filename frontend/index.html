@@ -228,6 +228,13 @@
   .date-input{background:var(--board);border:1px solid var(--wire);color:var(--ink);border-radius:8px;
     padding:5px 10px;font:inherit;font-size:12px;cursor:pointer;color-scheme:dark}
   .date-input:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
+
+  /* ---- top finishes ---- */
+  .finish-list{display:flex;flex-direction:column;gap:5px}
+  .finish-row{display:flex;align-items:baseline;gap:10px}
+  .finish-score{font-family:'Bebas Neue';font-size:22px;color:var(--cream);min-width:38px}
+  .finish-count{font-size:11px;font-weight:700;color:var(--gold);min-width:20px}
+  .finish-dates{font-size:11.5px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -461,6 +468,7 @@ const DB = {
     } else this.gameId=null;
   },
   recordTurn(t){ if(this.mode==='api' && this.gameId!=null) Backend.send('POST',`/api/games/${this.gameId}/turns`, t).catch(logErr); },
+  recordEvent(type, setNo, legNo){ if(this.mode==='api' && this.gameId!=null) Backend.send('POST',`/api/games/${this.gameId}/events`, {type, setNo:setNo??null, legNo:legNo??null}).catch(logErr); },
   completeGame(winner){ if(this.mode==='api' && this.gameId!=null) Backend.send('POST',`/api/games/${this.gameId}/complete`, {winner}).catch(logErr); },
 
   async reset(){ if(this.mode==='api'){ await Backend.send('POST','/api/reset').catch(logErr); await this.refreshStats(); } },
@@ -665,6 +673,9 @@ async function startGame(){
   };
   names.forEach(ensurePlayerStats);
   await DB.beginGame(game, names);   // registers the game; gets a gameId in api mode
+  DB.recordEvent('game_start', null, null);
+  DB.recordEvent('set_start', 1, null);
+  DB.recordEvent('leg_start', 1, 1);
   mult = 1;
   renderGameShell();        // ensure the throwing controls exist (e.g. after a finished game)
   updateMultUI();
@@ -792,6 +803,10 @@ function renderPlayerPage(){
       <div id="avg-chart-body"></div>
     </div>
     <div class="pp-section">
+      <div class="pp-section-title">Top 10 finishes</div>
+      <div id="player-top-finishes"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </div>
+    <div class="pp-section">
       <div class="pp-section-title">Out mode</div>
       <div class="seg out-seg" role="group">
         <button aria-pressed="${out==='double'}" onclick="setPlayerOut('${j}','double'); renderPlayerPage();">Double out</button>
@@ -811,6 +826,7 @@ function renderPlayerPage(){
       <button class="btn btn-ghost danger" onclick="askDeleteFromProfile('${j}')">Delete</button>
     </div>`;
   loadAvgChart(avgChartPeriod);
+  loadTopFinishes();
 }
 function askRenameFromProfile(name){
   uiPrompt('Rename player', name, newName=>{
@@ -1050,15 +1066,21 @@ function onLegWon(wi){
           stats[w.name].h2hGamesWonByCat[cat] = (stats[w.name].h2hGamesWonByCat[cat]||0) + 1;
         }
       }
+      DB.recordEvent('leg_end', game.setNo, game.legNo);
+      DB.recordEvent('set_end', game.setNo, null);
+      DB.recordEvent('game_end', null, null);
       DB.completeGame(w.name);   // api marks the game complete in the database
       persist();
       finishUnit('game', w.name);
       return;
     }
+    DB.recordEvent('leg_end', game.setNo, game.legNo);
+    DB.recordEvent('set_end', game.setNo, null);
     persist();
     finishUnit('set', w.name);
     return;
   }
+  DB.recordEvent('leg_end', game.setNo, game.legNo);
   persist();
   finishUnit('leg', w.name);
 }
@@ -1066,6 +1088,8 @@ function onLegWon(wi){
 // rotate who throws first, reset scores; keep game-scope totals, reset leg-scope
 function startNextLeg(newSet){
   if(newSet){ game.setNo += 1; game.legNo = 1; } else { game.legNo += 1; }
+  if(newSet) DB.recordEvent('set_start', game.setNo, null);
+  DB.recordEvent('leg_start', game.setNo, game.legNo);
   game.starter = (game.starter + 1) % game.players.length;
   game.current = game.starter;
   game.players.forEach(p=>{ p.score = game.start; p.legPoints=0; p.legVisits=0; });
@@ -1294,6 +1318,41 @@ function applyCustomRange(){
   customRangeStart=from.value<=to.value?from.value:to.value;
   customRangeEnd=from.value<=to.value?to.value:from.value;
   loadAvgChart('custom');
+}
+
+/* ---------- top finishes ---------- */
+function fmtDate(dt){
+  if(!dt) return '';
+  const [yr,mo,dy]=dt.slice(0,10).split('-');
+  return `${MONTHS[+mo-1]} ${+dy}, ${yr}`;
+}
+
+function loadTopFinishes(){
+  const container=document.getElementById('player-top-finishes');
+  if(!container) return;
+  if(DB.mode!=='api'){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Top finishes are saved when connected to the server backend.</p>`;
+    return;
+  }
+  Backend.get(`/api/players/top-finishes?name=${encodeURIComponent(currentPlayer)}`)
+    .then(rows=>{
+      if(!rows||rows.length===0){
+        container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No checkouts recorded yet.</p>`;
+        return;
+      }
+      container.innerHTML=`<div class="finish-list">${rows.map(r=>{
+        const times=r.times===1?'×1':`×${r.times}`;
+        const first=fmtDate(r.first_date);
+        const last=fmtDate(r.last_date);
+        const dates=r.times===1?first:`First: ${first} · Last: ${last}`;
+        return `<div class="finish-row">
+          <span class="finish-score">${r.score}</span>
+          <span class="finish-count">${times}</span>
+          <span class="finish-dates">${dates}</span>
+        </div>`;
+      }).join('')}</div>`;
+    })
+    .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load finishes.</p>`; });
 }
 
 /* ---------- stats render ---------- */

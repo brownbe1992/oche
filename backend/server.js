@@ -113,6 +113,9 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/players' && m === 'DELETE') return send(res, 200, db.deletePlayer(url.searchParams.get('name')));
 
     if (p === '/api/stats' && m === 'GET')  return send(res, 200, db.computeStats());
+    if (p === '/api/players/top-finishes' && m === 'GET') {
+      return send(res, 200, db.getTopFinishes(url.searchParams.get('name')));
+    }
     if (p === '/api/players/avg-history' && m === 'GET') {
       const name = url.searchParams.get('name');
       const period = url.searchParams.get('period') || 'month';
@@ -139,6 +142,10 @@ const server = http.createServer(async (req, res) => {
     }
     if ((mt = p.match(/^\/api\/games\/(\d+)\/complete$/)) && m === 'POST') {
       const b = await readJson(req); return send(res, 200, db.completeGame(Number(mt[1]), b.winner));
+    }
+    if ((mt = p.match(/^\/api\/games\/(\d+)\/events$/)) && m === 'POST') {
+      const b = await readJson(req);
+      return send(res, 200, db.recordEvent(Number(mt[1]), b.type, b.setNo ?? null, b.legNo ?? null));
     }
 
     return send(res, 404, { error: 'Unknown endpoint' });
