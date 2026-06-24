@@ -253,7 +253,17 @@ function computeStats() {
     GROUP BY g.winner_id, g.category
   `).all();
 
+  const agg180 = db.prepare(
+    'SELECT player_id, COUNT(*) AS n FROM turns WHERE scored = 180 GROUP BY player_id'
+  ).all();
+
+  const aggBF = db.prepare(
+    'SELECT player_id, COUNT(*) AS n FROM turns WHERE checkout = 1 AND checkout_points = 170 GROUP BY player_id'
+  ).all();
+
   const aggById = {}; agg.forEach(r => aggById[r.player_id] = r);
+  const agg180ById = {}; agg180.forEach(r => agg180ById[r.player_id] = r.n);
+  const aggBFById  = {}; aggBF.forEach(r => aggBFById[r.player_id]  = r.n);
   const nameById = {};
   const out = {};
   players.forEach(p => {
@@ -266,6 +276,8 @@ function computeStats() {
       totalPoints: a.total,
       trebleLess: a.trebleLess,
       checkouts100: a.co100,
+      oneEighties: agg180ById[p.id] ?? 0,
+      bigFish: aggBFById[p.id] ?? 0,
       legsByCat: {},
       gamesByCat: {},
       h2hLegsWonByCat: {},
@@ -282,12 +294,46 @@ function computeStats() {
 }
 
 function getSummary() {
-  const players = db.prepare('SELECT COUNT(*) AS n FROM players').get().n;
-  const games   = db.prepare('SELECT COUNT(*) AS n FROM games WHERE completed_at IS NOT NULL').get().n;
-  const sets    = db.prepare("SELECT COUNT(DISTINCT game_id || '-' || set_no) AS n FROM turns").get().n;
-  const legs    = db.prepare("SELECT COUNT(DISTINCT game_id || '-' || set_no || '-' || leg_no) AS n FROM turns").get().n;
-  const darts   = db.prepare('SELECT COUNT(*) AS n FROM turns').get().n * 3;
-  return { players, games, sets, legs, darts };
+  const players    = db.prepare('SELECT COUNT(*) AS n FROM players').get().n;
+  const games      = db.prepare('SELECT COUNT(*) AS n FROM games WHERE completed_at IS NOT NULL').get().n;
+  const sets       = db.prepare("SELECT COUNT(DISTINCT game_id || '-' || set_no) AS n FROM turns").get().n;
+  const legs       = db.prepare("SELECT COUNT(DISTINCT game_id || '-' || set_no || '-' || leg_no) AS n FROM turns").get().n;
+  const darts      = db.prepare('SELECT COUNT(*) AS n FROM turns').get().n * 3;
+  const oneEighties = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE scored = 180').get().n;
+  const bigFish    = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout = 1 AND checkout_points = 170').get().n;
+  return { players, games, sets, legs, darts, oneEighties, bigFish };
+}
+
+function getOneEightyStats() {
+  const leaderboard = db.prepare(`
+    SELECT p.name, COUNT(*) AS count
+    FROM turns t JOIN players p ON p.id = t.player_id
+    WHERE t.scored = 180
+    GROUP BY t.player_id ORDER BY count DESC
+  `).all();
+  const recent = db.prepare(`
+    SELECT p.name, t.created_at
+    FROM turns t JOIN players p ON p.id = t.player_id
+    WHERE t.scored = 180
+    ORDER BY t.created_at DESC LIMIT 10
+  `).all();
+  return { leaderboard, recent };
+}
+
+function getBigFishStats() {
+  const leaderboard = db.prepare(`
+    SELECT p.name, COUNT(*) AS count
+    FROM turns t JOIN players p ON p.id = t.player_id
+    WHERE t.checkout = 1 AND t.checkout_points = 170
+    GROUP BY t.player_id ORDER BY count DESC
+  `).all();
+  const recent = db.prepare(`
+    SELECT p.name, t.created_at
+    FROM turns t JOIN players p ON p.id = t.player_id
+    WHERE t.checkout = 1 AND t.checkout_points = 170
+    ORDER BY t.created_at DESC LIMIT 10
+  `).all();
+  return { leaderboard, recent };
 }
 
 function getTopFinishesAll(limit = 10) {
@@ -402,6 +448,7 @@ function httpError(status, message) {
 module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer,
   createGame, addTurn, completeGame, recordEvent,
-  computeStats, getSummary, getTopFinishes, getTopFinishesAll, getAvgHistory, getDartWeights, resetStats,
+  computeStats, getSummary, getOneEightyStats, getBigFishStats,
+  getTopFinishes, getTopFinishesAll, getAvgHistory, getDartWeights, resetStats,
   _db: db,
 };

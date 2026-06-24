@@ -207,7 +207,7 @@
   .pp-header{margin-bottom:20px}
   .pp-name{font-size:22px;font-weight:700;margin-bottom:2px}
   .pp-meta{font-size:12px;color:var(--muted)}
-  .stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
+  .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:10px;margin-bottom:20px}
   .stat-block{background:var(--surface-2);border:1px solid var(--wire);border-radius:11px;padding:12px 14px;text-align:center}
   .stat-block .stat-val{font-family:'Bebas Neue';font-size:28px;color:var(--cream);line-height:1}
   .stat-block .stat-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:4px}
@@ -239,6 +239,10 @@
   .hof-times{font-size:11px;font-weight:700;color:var(--gold);min-width:22px;flex:none}
   .hof-player{font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .hof-dates{font-size:11px;color:var(--muted);flex:none;text-align:right}
+  .achievement-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
+  @media(max-width:500px){.achievement-pair{grid-template-columns:1fr}}
+  .achievement-col-title{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;margin-bottom:6px}
+  .recent-list{font-size:12px;color:var(--muted);line-height:1.9}
 
   /* ---- top finishes ---- */
   .finish-list{display:flex;flex-direction:column;gap:5px}
@@ -576,48 +580,84 @@ function renderHome(){
   if(!body) return;
   if(DB.mode==='api'){
     body.innerHTML=`<p class="pp-meta">Loading…</p>`;
-    Promise.all([Backend.get('/api/summary'), Backend.get('/api/top-finishes')])
-      .then(([s,f])=>renderHomeContent(s,f))
-      .catch(()=>renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts:null},[]));
+    Promise.all([
+      Backend.get('/api/summary'),
+      Backend.get('/api/top-finishes'),
+      Backend.get('/api/stats/180s'),
+      Backend.get('/api/stats/big-fish'),
+    ]).then(([s,f,e,b])=>renderHomeContent(s,f,e,b))
+      .catch(()=>renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts:null,oneEighties:null,bigFish:null},[],{leaderboard:[],recent:[]},{leaderboard:[],recent:[]}));
   } else {
     const darts=Object.values(stats).reduce((a,p)=>a+(p.turns||0),0)*3;
-    renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts},  []);
+    const oneEighties=Object.values(stats).reduce((a,p)=>a+(p.oneEighties||0),0);
+    const bigFish=Object.values(stats).reduce((a,p)=>a+(p.bigFish||0),0);
+    renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts,oneEighties,bigFish},[],{leaderboard:[],recent:[]},{leaderboard:[],recent:[]});
   }
 }
-function renderHomeContent(s,finishes){
+function renderHomeContent(s,finishes,eighties,bigFishData){
   const body=document.getElementById('home-body');
   if(!body) return;
   const fmt=n=>n==null?'—':Number(n).toLocaleString();
   const cards=[
-    {val:fmt(s.players), label:'Players'},
-    {val:fmt(s.games),   label:'Games'},
-    {val:fmt(s.sets),    label:'Sets'},
-    {val:fmt(s.legs),    label:'Legs'},
-    {val:fmt(s.darts),   label:'Darts thrown'},
+    {val:fmt(s.players),     label:'Players'},
+    {val:fmt(s.games),       label:'Games'},
+    {val:fmt(s.sets),        label:'Sets'},
+    {val:fmt(s.legs),        label:'Legs'},
+    {val:fmt(s.darts),       label:'Darts thrown'},
+    {val:fmt(s.oneEighties), label:'180s'},
+    {val:fmt(s.bigFish),     label:'Big Fish'},
   ];
-  const hofRows=finishes.length
-    ? finishes.map((f,i)=>{
-        const first=fmtDate(f.first_date);
-        const last=fmtDate(f.last_date);
-        const dates=f.times===1?first:`${first} → ${last}`;
-        const times=f.times===1?'×1':`×${f.times}`;
-        return `<div class="hof-row">
-          <span class="hof-rank">${i+1}</span>
-          <span class="hof-score">${f.score}</span>
-          <span class="hof-times">${times}</span>
-          <span class="hof-player">${escapeHtml(f.name)}</span>
-          <span class="hof-dates">${dates}</span>
-        </div>`;
-      }).join('')
-    : `<p class="pp-meta" style="padding:8px 0">No checkouts recorded yet.</p>`;
-  const localNote=DB.mode!=='api'?`<p class="pp-meta" style="margin:0 0 16px">Games, legs, and top finishes require the server backend.</p>`:'';
+
+  function hofSection(finishes){
+    if(!finishes||!finishes.length) return `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
+    return `<div class="hof-list">${finishes.map((f,i)=>{
+      const first=fmtDate(f.first_date);
+      const last=fmtDate(f.last_date);
+      const dates=f.times===1?first:`${first} → ${last}`;
+      return `<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${f.score}</span>
+        <span class="hof-times">${f.times===1?'×1':'×'+f.times}</span>
+        <span class="hof-player">${escapeHtml(f.name)}</span>
+        <span class="hof-dates">${dates}</span>
+      </div>`;
+    }).join('')}</div>`;
+  }
+
+  function achievementSection(title, data){
+    if(!data||(!data.leaderboard.length&&!data.recent.length))
+      return `<div class="pp-section"><div class="pp-section-title">${title}</div><p class="pp-meta" style="padding:4px 0">None recorded yet.</p></div>`;
+    const lbRows=data.leaderboard.map((r,i)=>`<div class="hof-row">
+      <span class="hof-rank">${i+1}</span>
+      <span class="hof-player">${escapeHtml(r.name)}</span>
+      <span class="hof-times">×${r.count}</span>
+    </div>`).join('');
+    const recentLines=data.recent.map(r=>`<b style="color:var(--ink)">${escapeHtml(r.name)}</b> — ${fmtDate(r.created_at)}`).join('<br>');
+    return `<div class="pp-section">
+      <div class="pp-section-title">${title}</div>
+      <div class="achievement-pair">
+        <div>
+          <div class="achievement-col-title">Leaderboard</div>
+          <div class="hof-list">${lbRows||'<p class="pp-meta">None yet.</p>'}</div>
+        </div>
+        <div>
+          <div class="achievement-col-title">Most recent</div>
+          <div class="recent-list">${recentLines||'<span class="pp-meta">None yet.</span>'}</div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  const localNote=DB.mode!=='api'?`<p class="pp-meta" style="margin:0 0 16px">Full stats require the server backend.</p>`:'';
   body.innerHTML=`
     <div class="summary-grid">${cards.map(c=>`<div class="stat-block"><div class="stat-val">${c.val}</div><div class="stat-label">${c.label}</div></div>`).join('')}</div>
     ${localNote}
     <div class="pp-section">
       <div class="pp-section-title">All-time top finishes</div>
-      <div class="hof-list">${hofRows}</div>
+      ${hofSection(finishes)}
     </div>
+    ${achievementSection('180s', eighties)}
+    ${achievementSection('Big Fish (170 checkouts)', bigFishData)}
     <div class="btn-row">
       <button class="btn btn-primary" onclick="show('setup')">Start new game →</button>
     </div>`;
@@ -775,6 +815,8 @@ function ensurePlayerStats(name){
   if(s.trebleLess==null)  s.trebleLess=0;
   if(s.checkouts100==null)s.checkouts100=0;
   if(s.dartWeight === undefined) s.dartWeight = null;
+  if(s.oneEighties == null) s.oneEighties = 0;
+  if(s.bigFish == null) s.bigFish = 0;
   if(!s.legsByCat) s.legsByCat = s.games || {};   // migrate old `games` field (was per-leg counts)
   if(!s.gamesByCat) s.gamesByCat = {};
   if(!s.h2hLegsWonByCat) s.h2hLegsWonByCat = {};
@@ -867,7 +909,9 @@ function renderPlayerPage(){
     <div class="stat-grid">
       <div class="stat-block"><div class="stat-val">${avg}</div><div class="stat-label">3-dart avg</div></div>
       <div class="stat-block"><div class="stat-val">${s.checkouts100||0}</div><div class="stat-label">100+ CO</div></div>
-      <div class="stat-block"><div class="stat-val">${s.trebleLess||0}</div><div class="stat-label">Treble-less Visits</div></div>
+      <div class="stat-block"><div class="stat-val">${s.trebleLess||0}</div><div class="stat-label">Treble-less</div></div>
+      <div class="stat-block"><div class="stat-val">${s.oneEighties||0}</div><div class="stat-label">180s</div></div>
+      <div class="stat-block"><div class="stat-val">${s.bigFish||0}</div><div class="stat-label">Big Fish</div></div>
     </div>
     <div class="pp-section">
       <div class="pp-section-title">3-dart average over time</div>
@@ -1108,6 +1152,8 @@ function enterTurn(){
     s.turns += 1; s.totalPoints += ev.scored;
     if(ev.trebleLess) s.trebleLess += 1;
     if(ev.win && ev.pointsThisVisit >= 100) s.checkouts100 += 1;
+    if(ev.scored === 180) s.oneEighties += 1;
+    if(ev.win && ev.pointsThisVisit === 170) s.bigFish += 1;
   }
 
   if(ev.win){
