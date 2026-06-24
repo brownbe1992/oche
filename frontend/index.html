@@ -299,27 +299,29 @@
       </div>
 
       <div class="opts">
-        <div class="stepper">
-          <span class="lbl">Legs per set</span>
-          <button aria-label="Fewer legs" onclick="bump('legsPerSet',-1)">−</button>
-          <span class="val" id="legs-val">3</span>
-          <button aria-label="More legs" onclick="bump('legsPerSet',1)">+</button>
-        </div>
-        <div class="stepper">
-          <span class="lbl">Sets per game</span>
-          <button aria-label="Fewer sets" onclick="bump('setsPerGame',-1)">−</button>
-          <span class="val" id="sets-val">1</span>
-          <button aria-label="More sets" onclick="bump('setsPerGame',1)">+</button>
-        </div>
-      </div>
-      <p style="color:var(--muted);font-size:12px;margin:10px 2px 0" id="format-line"></p>
-
-      <div class="opts" style="margin-top:12px">
         <div class="seg" role="group" aria-label="Game mode">
           <span class="lbl">Mode</span>
           <button id="mode-h2h" aria-pressed="true" onclick="setPractice(false)">H2H</button>
           <button id="mode-practice" aria-pressed="false" onclick="setPractice(true)">Practice</button>
         </div>
+      </div>
+
+      <div id="h2h-options">
+        <div class="opts">
+          <div class="stepper">
+            <span class="lbl">Legs per set</span>
+            <button aria-label="Fewer legs" onclick="bump('legsPerSet',-1)">−</button>
+            <span class="val" id="legs-val">3</span>
+            <button aria-label="More legs" onclick="bump('legsPerSet',1)">+</button>
+          </div>
+          <div class="stepper">
+            <span class="lbl">Sets per game</span>
+            <button aria-label="Fewer sets" onclick="bump('setsPerGame',-1)">−</button>
+            <span class="val" id="sets-val">1</span>
+            <button aria-label="More sets" onclick="bump('setsPerGame',1)">+</button>
+          </div>
+        </div>
+        <p style="color:var(--muted);font-size:12px;margin:10px 2px 0" id="format-line"></p>
       </div>
 
       <div class="btn-row">
@@ -729,6 +731,7 @@ function setPractice(on){
   setup.practice=on;
   document.getElementById('mode-h2h').setAttribute('aria-pressed', !on);
   document.getElementById('mode-practice').setAttribute('aria-pressed', on);
+  document.getElementById('h2h-options').hidden=on;
 }
 
 function openScoreboard(){
