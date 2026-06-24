@@ -217,6 +217,13 @@
   .pp-cat-lines b{color:var(--ink)}
   .btn.danger{color:var(--bust);border-color:var(--wire)}
   .btn.danger:hover{border-color:var(--bust)}
+
+  /* ---- avg chart ---- */
+  .chart-periods{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+  .chart-period-btn{background:var(--board);border:1px solid var(--wire);color:var(--muted);border-radius:8px;
+    padding:6px 13px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+  .chart-period-btn.active{background:var(--surface-2);color:var(--ink);border-color:var(--muted)}
+  .chart-period-btn:hover:not(.active){color:var(--ink)}
 </style>
 </head>
 <body>
@@ -741,6 +748,7 @@ function renderPlayerPage(){
   const h2hHtml = h2hCats.length
     ? h2hCats.map(c=>`${c}: <b>${(s.h2hGamesWonByCat||{})[c]||0}</b> games · <b>${(s.h2hSetsWonByCat||{})[c]||0}</b> sets · <b>${(s.h2hLegsWonByCat||{})[c]||0}</b> legs`).join('<br>')
     : '<span style="color:var(--muted)">none yet</span>';
+  const cp=avgChartPeriod;
   body.innerHTML = `
     <div class="pp-header">
       <div class="pp-name">${escapeHtml(name)}</div>
@@ -750,6 +758,16 @@ function renderPlayerPage(){
       <div class="stat-block"><div class="stat-val">${avg}</div><div class="stat-label">3-dart avg</div></div>
       <div class="stat-block"><div class="stat-val">${s.checkouts100||0}</div><div class="stat-label">100+ CO</div></div>
       <div class="stat-block"><div class="stat-val">${s.trebleLess||0}</div><div class="stat-label">Treble-less Visits</div></div>
+    </div>
+    <div class="pp-section">
+      <div class="pp-section-title">3-dart average over time</div>
+      <div class="chart-periods">
+        <button class="chart-period-btn${cp==='week'?' active':''}" data-period="week" onclick="loadAvgChart('week')">Week</button>
+        <button class="chart-period-btn${cp==='month'?' active':''}" data-period="month" onclick="loadAvgChart('month')">Month</button>
+        <button class="chart-period-btn${cp==='year'?' active':''}" data-period="year" onclick="loadAvgChart('year')">Year</button>
+        <button class="chart-period-btn${cp==='all'?' active':''}" data-period="all" onclick="loadAvgChart('all')">All time</button>
+      </div>
+      <div id="avg-chart-body"></div>
     </div>
     <div class="pp-section">
       <div class="pp-section-title">Out mode</div>
@@ -770,6 +788,7 @@ function renderPlayerPage(){
       <button class="btn btn-ghost" onclick="askRenameFromProfile('${j}')">Rename</button>
       <button class="btn btn-ghost danger" onclick="askDeleteFromProfile('${j}')">Delete</button>
     </div>`;
+  loadAvgChart(avgChartPeriod);
 }
 function askRenameFromProfile(name){
   uiPrompt('Rename player', name, newName=>{
@@ -1141,6 +1160,94 @@ function checkoutHint(rem, doubleOut, maxDarts){
       const s=coSingle(need)||CO_DOUBLES[need]||coTreble(need);
       if(need>0 && s) return f.label+' '+g.label+' '+s; } }
   return '';
+}
+
+/* ---------- avg-over-time chart ---------- */
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+let avgChartPeriod = 'month';
+
+function formatBucket(bucket, period){
+  if(period==='week'||period==='month'){
+    // YYYY-MM-DD
+    const [,mo,dy]=bucket.split('-');
+    return `${MONTHS[+mo-1]} ${+dy}`;
+  }
+  if(period==='year'){
+    // YYYY-WW — approximate to a date for display
+    const [yr,wk]=bucket.split('-');
+    const d=new Date(+yr,0,1+(+wk)*7);
+    return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+  }
+  // all: YYYY-MM
+  const [yr,mo]=bucket.split('-');
+  return `${MONTHS[+mo-1]} '${yr.slice(2)}`;
+}
+
+function drawAvgChart(data,period){
+  const container=document.getElementById('avg-chart-body');
+  if(!container) return;
+  if(!data||data.length===0){
+    container.innerHTML=`<p class="pp-meta" style="padding:10px 0">No turns recorded in this period.</p>`;
+    return;
+  }
+  if(data.length===1){
+    container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Only one session in this period — <b style="color:var(--ink)">${data[0].avg.toFixed(1)}</b> avg.</p>`;
+    return;
+  }
+  const W=560,H=180,ml=46,mr=12,mt=14,mb=30;
+  const cw=W-ml-mr, ch=H-mt-mb;
+  const avgs=data.map(d=>d.avg);
+  const rawMin=Math.min(...avgs), rawMax=Math.max(...avgs);
+  const spread=rawMax-rawMin;
+  const pad=Math.max(spread*0.2,2);
+  const yMin=Math.max(0,rawMin-pad), yMax=rawMax+pad, yRange=yMax-yMin||1;
+  const n=data.length;
+  const pts=data.map((d,i)=>({
+    x:ml+(n===1?cw/2:(i/(n-1))*cw),
+    y:mt+ch-((d.avg-yMin)/yRange)*ch
+  }));
+  const linePts=pts.map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const areaPts=`${pts[0].x.toFixed(1)},${mt+ch} ${linePts} ${pts[n-1].x.toFixed(1)},${mt+ch}`;
+  const yTicks=[yMin,(yMin+yMax)/2,yMax].map(v=>({
+    y:(mt+ch-((v-yMin)/yRange)*ch).toFixed(1),
+    label:v.toFixed(1)
+  }));
+  const labelCount=Math.min(n,5);
+  const xLabels=Array.from({length:labelCount},(_,i)=>{
+    const idx=labelCount===1?0:Math.round(i*(n-1)/(labelCount-1));
+    return {x:pts[idx].x.toFixed(1), label:formatBucket(data[idx].bucket,period)};
+  });
+  const showDots=n<=31;
+  const gId='ag'+Math.random().toString(36).slice(2,7);
+  container.innerHTML=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;display:block;overflow:visible">
+    <defs>
+      <linearGradient id="${gId}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#d9b46a" stop-opacity=".28"/>
+        <stop offset="100%" stop-color="#d9b46a" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    ${yTicks.map(t=>`<line x1="${ml}" y1="${t.y}" x2="${W-mr}" y2="${t.y}" stroke="#2e3129" stroke-width="1"/>`).join('')}
+    ${yTicks.map(t=>`<text x="${ml-6}" y="${t.y}" text-anchor="end" dominant-baseline="middle" font-size="10" fill="#7a8070">${t.label}</text>`).join('')}
+    <polygon points="${areaPts}" fill="url(#${gId})"/>
+    <polyline points="${linePts}" fill="none" stroke="#d9b46a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${showDots?pts.map(p=>`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="#d9b46a"/>`).join(''):''}
+    ${xLabels.map(l=>`<text x="${l.x}" y="${mt+ch+18}" text-anchor="middle" font-size="10" fill="#7a8070">${l.label}</text>`).join('')}
+  </svg>`;
+}
+
+function loadAvgChart(period){
+  avgChartPeriod=period;
+  document.querySelectorAll('.chart-period-btn').forEach(b=>b.classList.toggle('active',b.dataset.period===period));
+  const container=document.getElementById('avg-chart-body');
+  if(!container) return;
+  if(DB.mode!=='api'){
+    container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Average history requires the server backend.</p>`;
+    return;
+  }
+  container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Loading…</p>`;
+  Backend.get(`/api/players/avg-history?name=${encodeURIComponent(currentPlayer)}&period=${period}`)
+    .then(data=>drawAvgChart(data,period))
+    .catch(()=>{ const c=document.getElementById('avg-chart-body'); if(c) c.innerHTML=`<p class="pp-meta" style="padding:10px 0">Could not load chart data.</p>`; });
 }
 
 /* ---------- stats render ---------- */

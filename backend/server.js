@@ -113,6 +113,11 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/players' && m === 'DELETE') return send(res, 200, db.deletePlayer(url.searchParams.get('name')));
 
     if (p === '/api/stats' && m === 'GET')  return send(res, 200, db.computeStats());
+    if (p === '/api/players/avg-history' && m === 'GET') {
+      const name = url.searchParams.get('name');
+      const period = url.searchParams.get('period') || 'month';
+      return send(res, 200, db.getAvgHistory(name, period));
+    }
     if (p === '/api/reset' && m === 'POST') return send(res, 200, db.resetStats());
 
     if (p === '/api/games' && m === 'POST') { const b = await readJson(req); return send(res, 200, db.createGame(b)); }

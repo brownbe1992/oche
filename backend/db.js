@@ -246,6 +246,40 @@ function computeStats() {
   return out;
 }
 
+function getAvgHistory(playerName, period) {
+  const p = getPlayer(playerName);
+  if (!p) return [];
+
+  let fmt, cutoff;
+  if (period === 'week') {
+    fmt = "strftime('%Y-%m-%d', t.created_at)";
+    cutoff = "datetime('now', '-7 days')";
+  } else if (period === 'month') {
+    fmt = "strftime('%Y-%m-%d', t.created_at)";
+    cutoff = "datetime('now', '-30 days')";
+  } else if (period === 'year') {
+    fmt = "strftime('%Y-%W', t.created_at)";
+    cutoff = "datetime('now', '-365 days')";
+  } else {
+    fmt = "strftime('%Y-%m', t.created_at)";
+    cutoff = null;
+  }
+
+  const where = cutoff
+    ? `WHERE t.player_id = ? AND t.created_at >= ${cutoff}`
+    : `WHERE t.player_id = ?`;
+
+  return db.prepare(`
+    SELECT ${fmt} AS bucket,
+           CAST(SUM(t.scored) AS REAL) / COUNT(*) AS avg,
+           COUNT(*) AS turns
+    FROM turns t
+    ${where}
+    GROUP BY bucket
+    ORDER BY bucket
+  `).all(p.id);
+}
+
 function resetStats() {
   db.exec('DELETE FROM turns; DELETE FROM game_players; DELETE FROM games;');
   return { ok: true };
@@ -259,6 +293,6 @@ function httpError(status, message) {
 module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, deletePlayer,
   createGame, addTurn, completeGame,
-  computeStats, resetStats,
+  computeStats, getAvgHistory, resetStats,
   _db: db,
 };

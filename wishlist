@@ -1,0 +1,16 @@
+Player pages:
+- Track time started, time completed for games/legs/sets
+- Calculate averate leg/set/game length
+    - set/game length dependent on # of legs
+- Game win %
+- Set win %
+- Leg win %
+- Win/loss record against each player
+- Environmental data (temp, humidity)
+- Game log
+- Top 10 finishes (number, date)
+
+
+New Game
+- Add additional games (Cricket)
+
