@@ -1,6 +1,6 @@
 'use strict';
 /* =============================================================================
-   Darts scorer server.
+   Oche server.
 
    Dependency-free: uses only Node's built-in `http` module and the database
    layer in db.js (which uses Node's built-in SQLite). Serves the single-page
