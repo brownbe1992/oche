@@ -224,6 +224,10 @@
     padding:6px 13px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
   .chart-period-btn.active{background:var(--surface-2);color:var(--ink);border-color:var(--muted)}
   .chart-period-btn:hover:not(.active){color:var(--ink)}
+  .chart-custom-range{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  .date-input{background:var(--board);border:1px solid var(--wire);color:var(--ink);border-radius:8px;
+    padding:5px 10px;font:inherit;font-size:12px;cursor:pointer;color-scheme:dark}
+  .date-input:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
 </style>
 </head>
 <body>
@@ -731,7 +735,17 @@ function askDelete(name){
 
 /* ---------- player profile page ---------- */
 let currentPlayer = null;
-function showPlayer(name){ currentPlayer = name; show('player'); }
+function localDateStr(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function showPlayer(name){
+  currentPlayer = name;
+  if(!customRangeEnd){
+    const now=new Date();
+    customRangeEnd=localDateStr(now);
+    const past=new Date(now); past.setMonth(past.getMonth()-1);
+    customRangeStart=localDateStr(past);
+  }
+  show('player');
+}
 function renderPlayerPage(){
   const body = document.getElementById('player-page-body');
   if(!currentPlayer || !body) return;
@@ -762,10 +776,18 @@ function renderPlayerPage(){
     <div class="pp-section">
       <div class="pp-section-title">3-dart average over time</div>
       <div class="chart-periods">
+        <button class="chart-period-btn${cp==='today'?' active':''}" data-period="today" onclick="loadAvgChart('today')">Today</button>
         <button class="chart-period-btn${cp==='week'?' active':''}" data-period="week" onclick="loadAvgChart('week')">Week</button>
         <button class="chart-period-btn${cp==='month'?' active':''}" data-period="month" onclick="loadAvgChart('month')">Month</button>
         <button class="chart-period-btn${cp==='year'?' active':''}" data-period="year" onclick="loadAvgChart('year')">Year</button>
         <button class="chart-period-btn${cp==='all'?' active':''}" data-period="all" onclick="loadAvgChart('all')">All time</button>
+        <button class="chart-period-btn${cp==='custom'?' active':''}" data-period="custom" onclick="loadAvgChart('custom')">Custom</button>
+      </div>
+      <div class="chart-custom-range" id="chart-custom-range"${cp!=='custom'?' hidden':''}>
+        <input type="date" id="chart-date-from" class="date-input" value="${customRangeStart}">
+        <span class="pp-meta">to</span>
+        <input type="date" id="chart-date-to" class="date-input" value="${customRangeEnd}">
+        <button class="chart-period-btn active" onclick="applyCustomRange()">Apply</button>
       </div>
       <div id="avg-chart-body"></div>
     </div>
@@ -1165,25 +1187,33 @@ function checkoutHint(rem, doubleOut, maxDarts){
 /* ---------- avg-over-time chart ---------- */
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 let avgChartPeriod = 'month';
+let customRangeStart = '';
+let customRangeEnd = '';
 
-function formatBucket(bucket, period){
-  if(period==='week'||period==='month'){
+// Bucket format is self-describing: HH (today), YYYY-MM-DD (day), wYYYY-WW (week), YYYY-MM (month)
+function formatBucket(bucket){
+  if(/^\d{2}$/.test(bucket)){
+    // hour: '14' → 2pm
+    const h=+bucket;
+    return `${h===0?12:h>12?h-12:h}${h>=12?'pm':'am'}`;
+  }
+  if(/^\d{4}-\d{2}-\d{2}$/.test(bucket)){
     // YYYY-MM-DD
     const [,mo,dy]=bucket.split('-');
     return `${MONTHS[+mo-1]} ${+dy}`;
   }
-  if(period==='year'){
-    // YYYY-WW — approximate to a date for display
-    const [yr,wk]=bucket.split('-');
+  if(bucket.startsWith('w')){
+    // wYYYY-WW — approximate week start date
+    const [yr,wk]=bucket.slice(1).split('-');
     const d=new Date(+yr,0,1+(+wk)*7);
     return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
   }
-  // all: YYYY-MM
+  // YYYY-MM
   const [yr,mo]=bucket.split('-');
   return `${MONTHS[+mo-1]} '${yr.slice(2)}`;
 }
 
-function drawAvgChart(data,period){
+function drawAvgChart(data){
   const container=document.getElementById('avg-chart-body');
   if(!container) return;
   if(!data||data.length===0){
@@ -1215,7 +1245,7 @@ function drawAvgChart(data,period){
   const labelCount=Math.min(n,5);
   const xLabels=Array.from({length:labelCount},(_,i)=>{
     const idx=labelCount===1?0:Math.round(i*(n-1)/(labelCount-1));
-    return {x:pts[idx].x.toFixed(1), label:formatBucket(data[idx].bucket,period)};
+    return {x:pts[idx].x.toFixed(1), label:formatBucket(data[idx].bucket)};
   });
   const showDots=n<=31;
   const gId='ag'+Math.random().toString(36).slice(2,7);
@@ -1238,16 +1268,32 @@ function drawAvgChart(data,period){
 function loadAvgChart(period){
   avgChartPeriod=period;
   document.querySelectorAll('.chart-period-btn').forEach(b=>b.classList.toggle('active',b.dataset.period===period));
+  const customEl=document.getElementById('chart-custom-range');
+  if(customEl) customEl.hidden=period!=='custom';
   const container=document.getElementById('avg-chart-body');
   if(!container) return;
+  if(period==='custom'&&(!customRangeStart||!customRangeEnd)){
+    container.innerHTML=''; return;
+  }
   if(DB.mode!=='api'){
     container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Average history requires the server backend.</p>`;
     return;
   }
   container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Loading…</p>`;
-  Backend.get(`/api/players/avg-history?name=${encodeURIComponent(currentPlayer)}&period=${period}`)
-    .then(data=>drawAvgChart(data,period))
+  let url=`/api/players/avg-history?name=${encodeURIComponent(currentPlayer)}&period=${period}`;
+  if(period==='custom') url+=`&start=${customRangeStart}&end=${customRangeEnd}`;
+  Backend.get(url)
+    .then(data=>drawAvgChart(data))
     .catch(()=>{ const c=document.getElementById('avg-chart-body'); if(c) c.innerHTML=`<p class="pp-meta" style="padding:10px 0">Could not load chart data.</p>`; });
+}
+
+function applyCustomRange(){
+  const from=document.getElementById('chart-date-from');
+  const to=document.getElementById('chart-date-to');
+  if(!from||!to||!from.value||!to.value) return;
+  customRangeStart=from.value<=to.value?from.value:to.value;
+  customRangeEnd=from.value<=to.value?to.value:from.value;
+  loadAvgChart('custom');
 }
 
 /* ---------- stats render ---------- */

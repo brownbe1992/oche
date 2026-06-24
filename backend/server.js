@@ -116,7 +116,18 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/players/avg-history' && m === 'GET') {
       const name = url.searchParams.get('name');
       const period = url.searchParams.get('period') || 'month';
-      return send(res, 200, db.getAvgHistory(name, period));
+      const validPeriods = ['today', 'week', 'month', 'year', 'all', 'custom'];
+      if (!validPeriods.includes(period)) return send(res, 400, { error: 'Invalid period' });
+      const opts = {};
+      if (period === 'custom') {
+        const start = url.searchParams.get('start') || '';
+        const end   = url.searchParams.get('end')   || '';
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end))
+          return send(res, 400, { error: 'start and end must be YYYY-MM-DD' });
+        opts.start = start;
+        opts.end   = end;
+      }
+      return send(res, 200, db.getAvgHistory(name, period, opts));
     }
     if (p === '/api/reset' && m === 'POST') return send(res, 200, db.resetStats());
 

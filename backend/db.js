@@ -246,28 +246,41 @@ function computeStats() {
   return out;
 }
 
-function getAvgHistory(playerName, period) {
+function getAvgHistory(playerName, period, opts = {}) {
   const p = getPlayer(playerName);
   if (!p) return [];
 
-  let fmt, cutoff;
-  if (period === 'week') {
+  let fmt, where;
+  if (period === 'today') {
+    fmt = "strftime('%H', t.created_at)";
+    where = `WHERE t.player_id = ? AND date(t.created_at) = date('now')`;
+  } else if (period === 'week') {
     fmt = "strftime('%Y-%m-%d', t.created_at)";
-    cutoff = "datetime('now', '-7 days')";
+    where = `WHERE t.player_id = ? AND t.created_at >= datetime('now', '-7 days')`;
   } else if (period === 'month') {
     fmt = "strftime('%Y-%m-%d', t.created_at)";
-    cutoff = "datetime('now', '-30 days')";
+    where = `WHERE t.player_id = ? AND t.created_at >= datetime('now', '-30 days')`;
   } else if (period === 'year') {
-    fmt = "strftime('%Y-%W', t.created_at)";
-    cutoff = "datetime('now', '-365 days')";
+    // 'w' prefix distinguishes week buckets from YYYY-MM month buckets
+    fmt = "'w' || strftime('%Y-%W', t.created_at)";
+    where = `WHERE t.player_id = ? AND t.created_at >= datetime('now', '-365 days')`;
+  } else if (period === 'custom') {
+    const { start, end } = opts;
+    const days = Math.round((new Date(end) - new Date(start)) / 86400000);
+    if (days <= 31) {
+      fmt = "strftime('%Y-%m-%d', t.created_at)";
+    } else if (days <= 365) {
+      fmt = "'w' || strftime('%Y-%W', t.created_at)";
+    } else {
+      fmt = "strftime('%Y-%m', t.created_at)";
+    }
+    // dates already validated as YYYY-MM-DD by the server
+    where = `WHERE t.player_id = ? AND date(t.created_at) >= '${start}' AND date(t.created_at) <= '${end}'`;
   } else {
+    // all time
     fmt = "strftime('%Y-%m', t.created_at)";
-    cutoff = null;
+    where = `WHERE t.player_id = ?`;
   }
-
-  const where = cutoff
-    ? `WHERE t.player_id = ? AND t.created_at >= ${cutoff}`
-    : `WHERE t.player_id = ?`;
 
   return db.prepare(`
     SELECT ${fmt} AS bucket,
