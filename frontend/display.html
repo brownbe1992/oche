@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Oche — scoreboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --board:#0e0f0d; --surface:#1a1c18; --surface-2:#212420; --wire:#3a3d38;
+    --cream:#efe7d2; --ink:#f3efe4; --muted:#9a9387;
+    --red:#c8102e; --green:#1b8a3a; --gold:#d9b46a; --bust:#e2473d;
+  }
+  *{box-sizing:border-box;margin:0}
+  html,body{height:100%}
+  body{
+    background:radial-gradient(120% 90% at 50% -10%, #1b1d19 0%, var(--board) 60%);
+    color:var(--ink); font-family:'Inter',system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; height:100vh; overflow:hidden;
+    display:flex; flex-direction:column; padding:2.2vmin 2.6vmin;
+    font-feature-settings:"tnum" 1;
+  }
+  /* ---- top bar ---- */
+  .top{display:flex;align-items:center;gap:2vmin;padding-bottom:1.6vmin;border-bottom:1px solid var(--wire);flex:none}
+  .brand{font-family:'Bebas Neue';font-size:4.4vmin;line-height:.8;letter-spacing:.06em;color:var(--cream)}
+  .fmt{color:var(--muted);font-size:2.1vmin;letter-spacing:.02em}
+  .fmt b{color:var(--ink);font-weight:600}
+  .live{margin-left:auto;display:flex;align-items:center;gap:1vmin;color:var(--muted);font-size:1.7vmin;text-transform:uppercase;letter-spacing:.12em}
+  .dot{width:1.3vmin;height:1.3vmin;border-radius:50%;background:var(--green);box-shadow:0 0 1.4vmin var(--green)}
+  .dot.off{background:var(--bust);box-shadow:none;animation:none}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .dot{animation:pulse 2s ease-in-out infinite}
+
+  /* ---- player grid ---- */
+  .grid{flex:1;display:grid;gap:2vmin;padding:2vmin 0;min-height:0}
+  .pcard{position:relative;background:var(--surface);border:1px solid var(--wire);border-radius:2vmin;
+    padding:2.4vmin 2.8vmin;display:flex;flex-direction:column;justify-content:space-between;min-height:0;overflow:hidden}
+  .pcard.active{border-color:var(--gold);box-shadow:inset 0 0 0 .35vmin var(--gold), 0 0 6vmin rgba(217,180,106,.12)}
+  .prow1{display:flex;align-items:baseline;gap:1.4vmin}
+  .pname{font-weight:600;font-size:3.6vmin;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ptag{font-size:1.5vmin;font-weight:700;letter-spacing:.08em;color:var(--gold);border:1px solid var(--wire);border-radius:.8vmin;padding:.5vmin .9vmin;flex:none}
+  .throwflag{margin-left:auto;font-size:1.7vmin;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);flex:none}
+  .score{font-family:'Bebas Neue';font-size:clamp(56px, 17vmin, 280px);line-height:.78;color:var(--cream);letter-spacing:.01em;margin:.4vmin 0}
+  .pcard.active .score{color:#fff}
+  .meta{display:flex;gap:2.4vmin;align-items:center;color:var(--muted);font-size:2vmin;flex-wrap:wrap}
+  .meta b{color:var(--ink);font-weight:600}
+  .standing{margin-left:auto;color:var(--gold);font-weight:700;letter-spacing:.04em;font-size:2vmin}
+
+  /* darts in hand + checkout for the thrower */
+  .throwbox{margin-top:1.6vmin;border-top:1px dashed var(--wire);padding-top:1.6vmin;display:flex;flex-direction:column;gap:1.2vmin}
+  .darts{display:flex;gap:1.2vmin}
+  .dart{flex:1;background:var(--surface-2);border:1px solid var(--wire);border-radius:1.2vmin;height:6.5vmin;
+    display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue';font-size:3.4vmin;letter-spacing:.03em}
+  .dart.empty{color:#4d514a;font-family:'Inter';font-size:1.7vmin}
+  .dart.t{border-color:var(--green);color:#7fe0a0}
+  .dart.d{border-color:var(--red);color:#ff8a93}
+  .checkout{display:flex;align-items:center;gap:1.6vmin;background:linear-gradient(180deg,rgba(217,180,106,.16),rgba(217,180,106,.05));
+    border:1px solid var(--gold);border-radius:1.2vmin;padding:1.2vmin 1.8vmin}
+  .checkout .lab{font-size:1.6vmin;text-transform:uppercase;letter-spacing:.14em;color:var(--gold);font-weight:700;flex:none}
+  .checkout .route{font-family:'Bebas Neue';font-size:4.2vmin;line-height:.85;color:var(--cream);letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* status flash on a card (bust / game shot) */
+  .flash{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-family:'Bebas Neue';font-size:8vmin;letter-spacing:.06em;backdrop-filter:blur(2px)}
+  .flash.bust{background:rgba(226,71,61,.22);color:#ffb4ad}
+  .flash.shot{background:rgba(27,138,58,.22);color:#9bf0ba}
+
+  /* full-screen banner for leg/set/game results */
+  .banner{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:1vmin;
+    background:rgba(8,9,7,.86);z-index:20;text-align:center;padding:6vmin}
+  .banner.show{display:flex;animation:fade .3s ease both}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  .banner .big{font-family:'Bebas Neue';font-size:11vmin;line-height:.85;color:var(--gold);letter-spacing:.03em}
+  .banner .sub{font-size:3vmin;color:var(--muted)}
+
+  /* idle */
+  .idle{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1.6vmin;text-align:center}
+  .idle .mk{font-family:'Bebas Neue';font-size:9vmin;color:var(--cream);letter-spacing:.05em}
+  .idle .ln{color:var(--muted);font-size:2.6vmin}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="brand">OCHE</div>
+    <div class="fmt" id="fmt"></div>
+    <div class="live"><span class="dot" id="dot"></span><span id="livetext">live</span></div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <div class="idle" id="idle">
+    <div class="mk">SCOREBOARD READY</div>
+    <div class="ln">Waiting for a game to start on the controller…</div>
+  </div>
+
+  <div class="banner" id="banner">
+    <div class="big" id="banner-big"></div>
+    <div class="sub" id="banner-sub"></div>
+  </div>
+
+<script>
+const grid   = document.getElementById('grid');
+const idle   = document.getElementById('idle');
+const fmtEl  = document.getElementById('fmt');
+const dot    = document.getElementById('dot');
+const liveTx = document.getElementById('livetext');
+const banner = document.getElementById('banner');
+
+let bannerKey = '';   // so a result banner shows once, not on every heartbeat
+
+function fmtText(s){
+  const cat = s.category != null ? `${s.category}` : '';
+  const legs = s.legsPerSet>1 ? `first to ${s.legsPerSet} legs` : '1 leg';
+  const sets = s.setsPerGame>1 ? `first to ${s.setsPerGame} sets · ` : '';
+  const where = s.setsPerGame>1 ? `Set ${s.setNo} · Leg ${s.legNo}` : `Leg ${s.legNo}`;
+  return `<b>${cat}</b> &nbsp; ${sets}${legs} &nbsp;·&nbsp; ${where}`;
+}
+
+function dartClass(label){
+  if(!label) return 'empty';
+  if(label[0]==='T') return 't';
+  if(label[0]==='D' || label==='Bull') return 'd';
+  return '';
+}
+
+function render(s){
+  if(!s || !s.active){
+    grid.classList.add('hidden'); idle.classList.remove('hidden');
+    fmtEl.innerHTML=''; banner.classList.remove('show'); bannerKey='';
+    return;
+  }
+  idle.classList.add('hidden'); grid.classList.remove('hidden');
+  fmtEl.innerHTML = fmtText(s);
+
+  const n = s.players.length;
+  const cols = n<=1 ? 1 : n<=4 ? 2 : 3;
+  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+  grid.innerHTML = s.players.map((p,i)=>{
+    const active = i===s.currentIndex;
+    const standing = s.setsPerGame>1
+      ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
+      : `Legs ${p.legsWon}/${s.legsPerSet}`;
+    let throwbox = '';
+    if(active){
+      const slots = [0,1,2].map(k=>{
+        const lab = s.darts[k];
+        return `<div class="dart ${dartClass(lab)}">${lab || 'dart '+(k+1)}</div>`;
+      }).join('');
+      const checkout = s.checkout
+        ? `<div class="checkout"><span class="lab">Checkout</span><span class="route">${s.checkout.replace(/ /g,'  →  ')}</span></div>`
+        : '';
+      throwbox = `<div class="throwbox"><div class="darts">${slots}</div>${checkout}</div>`;
+    }
+    let flash = '';
+    if(active && s.status==='bust') flash = `<div class="flash bust">BUST</div>`;
+    if(active && s.status==='won')  flash = `<div class="flash shot">GAME SHOT</div>`;
+    return `<div class="pcard ${active?'active':''}">
+      ${flash}
+      <div>
+        <div class="prow1">
+          <span class="pname">${escapeHtml(p.name)}</span>
+          <span class="ptag">${p.out==='double'?'DOUBLE OUT':'SINGLE OUT'}</span>
+          ${active?'<span class="throwflag">▸ throwing</span>':''}
+        </div>
+        <div class="score">${p.score}</div>
+      </div>
+      <div class="meta">
+        <span>leg <b>${p.legAvg ?? '—'}</b></span>
+        <span>game <b>${p.gameAvg ?? '—'}</b></span>
+        <span class="standing">${standing}</span>
+      </div>
+      ${throwbox}
+    </div>`;
+  }).join('');
+
+  // result banners (leg / set / game) — show once per message
+  if(s.message && s.message !== bannerKey){
+    bannerKey = s.message;
+    document.getElementById('banner-big').textContent = s.done ? 'GAME OVER' : s.message;
+    document.getElementById('banner-sub').textContent = s.done ? s.message : 'next leg coming up';
+    banner.classList.add('show');
+    if(!s.done) setTimeout(()=>banner.classList.remove('show'), 3500);
+  } else if(!s.message){
+    bannerKey=''; banner.classList.remove('show');
+  }
+}
+
+function setLive(on){
+  dot.classList.toggle('off', !on);
+  liveTx.textContent = on ? 'live' : 'reconnecting…';
+}
+
+/* ---- connect to the live stream (with polling fallback) ---- */
+let usePoll = false, pollTimer = null;
+function startPolling(){
+  if(usePoll) return; usePoll = true; setLive(false);
+  const tick = async () => {
+    try { const r = await fetch('/api/live', {cache:'no-store'}); if(r.ok){ setLive(true); render(await r.json()); } else setLive(false); }
+    catch(e){ setLive(false); }
+  };
+  tick(); pollTimer = setInterval(tick, 1500);
+}
+function connect(){
+  if(typeof EventSource === 'undefined') return startPolling();
+  let es;
+  try { es = new EventSource('/api/live/stream'); }
+  catch(e){ return startPolling(); }
+  es.onopen = () => setLive(true);
+  es.onmessage = (ev) => { setLive(true); try { render(JSON.parse(ev.data)); } catch(e){} };
+  es.onerror = () => { setLive(false); /* EventSource auto-retries; keep it */ };
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// fetch current state immediately, then open the stream
+fetch('/api/live', {cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{ if(s) render(s); }).catch(()=>{});
+connect();
+</script>
+</body>
+</html>

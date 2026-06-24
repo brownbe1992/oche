@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Oche — per-dart scorer & stats</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --board:#0e0f0d;        /* dartboard black bed */
+    --panel:#16181500;      /* unused */
+    --surface:#1a1c18;      /* lifted card */
+    --surface-2:#212420;
+    --wire:#3a3d38;         /* spider-wire hairline */
+    --cream:#efe7d2;        /* wedge cream */
+    --ink:#f3efe4;          /* primary text */
+    --muted:#9a9387;        /* secondary text */
+    --red:#c8102e;          /* doubles/treble red */
+    --green:#1b8a3a;        /* board green */
+    --gold:#d9b46a;         /* brass oche */
+    --bust:#e2473d;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:
+      radial-gradient(120% 80% at 50% -10%, #1b1d19 0%, var(--board) 60%) fixed;
+    color:var(--ink);
+    font-family:'Inter',system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+    padding:18px;
+    font-feature-settings:"tnum" 1;
+  }
+  .wrap{max-width:760px;margin:0 auto}
+  h1,h2,h3{margin:0;font-weight:600;letter-spacing:.01em}
+  .masthead{display:flex;align-items:baseline;gap:14px;padding:6px 2px 18px;border-bottom:1px solid var(--wire);margin-bottom:22px;flex-wrap:wrap}
+  .masthead .mark{font-family:'Bebas Neue',sans-serif;font-size:38px;line-height:.8;color:var(--cream);letter-spacing:.04em}
+  .masthead .sub{color:var(--muted);font-size:13px}
+  .masthead .nav{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+  .navbtn{background:none;border:1px solid var(--wire);color:var(--muted);padding:7px 12px;border-radius:999px;font-size:12.5px;font-weight:600;cursor:pointer;letter-spacing:.02em}
+  .navbtn:hover{color:var(--ink);border-color:var(--muted)}
+  .navbtn[aria-current="true"]{color:var(--board);background:var(--gold);border-color:var(--gold)}
+
+  .card{background:var(--surface);border:1px solid var(--wire);border-radius:14px;padding:20px}
+  .screen{display:none}
+  .screen.on{display:block;animation:fade .25s ease both}
+  @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+  label.field{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 7px}
+  input[type=text]{width:100%;background:var(--board);border:1px solid var(--wire);color:var(--ink);
+    border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit}
+  input[type=text]:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
+
+  .players-list{display:flex;flex-direction:column;gap:8px;margin:4px 0 16px}
+  .player-row{display:flex;gap:8px;align-items:center}
+  .player-row .ix{font-family:'Bebas Neue';font-size:20px;color:var(--gold);width:22px;text-align:center}
+  .iconbtn{background:none;border:1px solid var(--wire);color:var(--muted);border-radius:9px;
+    width:42px;height:44px;font-size:18px;cursor:pointer;flex:none}
+  .iconbtn:hover{color:var(--bust);border-color:var(--bust)}
+  .iconbtn.danger:hover{color:var(--bust);border-color:var(--bust)}
+
+  .pselect{flex:1;background:var(--board);border:1px solid var(--wire);color:var(--ink);
+    border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit;cursor:pointer}
+  .pselect:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
+  .out-tag{flex:none;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--gold);
+    border:1px solid var(--wire);border-radius:8px;padding:7px 9px;min-width:38px;text-align:center}
+
+  .roster-list{display:flex;flex-direction:column;gap:8px;margin:0 0 16px}
+  .roster-row{display:flex;align-items:center;gap:10px;background:var(--surface-2);border:1px solid var(--wire);
+    border-radius:11px;padding:10px 12px;flex-wrap:wrap}
+  .roster-row .rp-main{margin-right:auto}
+  .roster-row .rp-name{font-weight:600;font-size:15px}
+  .roster-row .rp-stat{font-size:12px;color:var(--muted)}
+  .out-seg button{padding:8px 11px;font-size:12.5px}
+  .out-seg button[aria-pressed="true"]{background:var(--surface-2);color:var(--ink)}
+  .roster-row .iconbtn{width:40px;height:40px;font-size:15px}
+  .roster-row .iconbtn:hover{color:var(--gold);border-color:var(--muted)}
+  .roster-row .iconbtn.danger:hover{color:var(--bust);border-color:var(--bust)}
+
+  .modal-overlay{position:fixed;inset:0;background:rgba(8,9,7,.72);display:flex;align-items:center;
+    justify-content:center;padding:24px;z-index:50}
+  .modal-overlay[hidden]{display:none}
+  .modal-card{background:var(--surface);border:1px solid var(--gold);border-radius:14px;padding:22px;
+    width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .modal-msg{margin:0 0 16px;font-size:15px;line-height:1.5}
+  .modal-card input[type=text]{width:100%;background:var(--board);border:1px solid var(--wire);color:var(--ink);
+    border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit;margin-bottom:16px}
+  .modal-card input[type=text]:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
+  .modal-actions{display:flex;gap:10px;justify-content:flex-end}
+
+  .opts{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 6px}
+  .seg{display:inline-flex;border:1px solid var(--wire);border-radius:10px;overflow:hidden}
+  .seg button{background:var(--board);border:none;color:var(--muted);padding:10px 15px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
+  .seg button[aria-pressed="true"]{background:var(--surface-2);color:var(--ink)}
+  .seg .lbl{align-self:center;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;padding:0 10px 0 2px}
+  .stepper{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--wire);border-radius:10px;background:var(--board);padding:2px}
+  .stepper .lbl{align-self:center;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;padding:0 6px 0 10px}
+  .stepper button{background:var(--surface-2);border:none;color:var(--ink);width:34px;height:36px;border-radius:8px;font-size:18px;font-weight:700;cursor:pointer;line-height:1}
+  .stepper button:hover{color:var(--gold)}
+  .stepper .val{min-width:30px;text-align:center;font-family:'Bebas Neue';font-size:24px;color:var(--cream)}
+
+  .btn{display:inline-block;border:none;border-radius:11px;padding:14px 20px;font:inherit;font-weight:700;
+    font-size:15px;cursor:pointer;letter-spacing:.02em}
+  .btn-primary{background:var(--gold);color:#1a160c}
+  .btn-primary:hover{filter:brightness(1.06)}
+  .btn-primary:disabled{opacity:.4;cursor:not-allowed}
+  .btn-ghost{background:none;border:1px solid var(--wire);color:var(--ink)}
+  .btn-ghost:hover{border-color:var(--muted)}
+  .btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+
+  /* ---- game screen ---- */
+  .scoreboard{display:grid;gap:10px;margin-bottom:18px}
+  .pscore{display:flex;align-items:center;gap:14px;background:var(--surface-2);border:1px solid var(--wire);
+    border-radius:12px;padding:12px 16px}
+  .pscore.active{border-color:var(--gold);box-shadow:inset 0 0 0 1px var(--gold)}
+  .pscore .nm{font-weight:600;font-size:15px}
+  .pscore .nm-out{font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-left:6px}
+  .pscore .turnflag{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--gold);font-weight:700}
+  .pscore .rem{margin-left:16px;font-family:'Bebas Neue';font-size:46px;line-height:.8;color:var(--cream);letter-spacing:.02em;min-width:64px;text-align:right}
+  .pscore .meta{margin-left:auto;text-align:right;display:flex;flex-direction:column;gap:2px;min-width:120px}
+  .pscore .meta .avgs{font-size:12px;color:var(--muted)}
+  .pscore .meta .avgs b{color:var(--ink);font-weight:600}
+  .pscore .meta .standing{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--gold)}
+
+  .oche{background:var(--board);border:1px solid var(--wire);border-radius:14px;padding:18px}
+  .turnhead{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+  .turnhead .who{font-size:14px;color:var(--muted)}
+  .turnhead .who b{color:var(--ink)}
+  .checkout{margin-left:auto;font-size:12.5px;color:var(--gold);font-weight:600}
+
+  .checkout-bar{display:flex;align-items:center;gap:14px;margin:0 0 16px;padding:13px 18px;
+    border:1px solid var(--gold);border-radius:12px;
+    background:linear-gradient(180deg, rgba(217,180,106,.14), rgba(217,180,106,.05))}
+  .checkout-bar[hidden]{display:none}
+  .checkout-bar .co-label{font-size:11px;text-transform:uppercase;letter-spacing:.13em;color:var(--gold);font-weight:700;flex:none}
+  .checkout-bar .co-route{font-family:'Bebas Neue',sans-serif;font-size:34px;line-height:.85;
+    letter-spacing:.04em;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  @keyframes copulse{0%{box-shadow:0 0 0 0 rgba(217,180,106,.45)}100%{box-shadow:0 0 0 10px rgba(217,180,106,0)}}
+  .checkout-bar.flash{animation:copulse .6s ease-out}
+  @media (max-width:560px){ .checkout-bar .co-route{font-size:27px} }
+
+  .slots{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
+  .slot{position:relative;background:var(--surface);border:1px dashed var(--wire);border-radius:11px;
+    height:64px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+  .slot.filled{border-style:solid}
+  .slot.t{border-color:var(--green)}
+  .slot.d{border-color:var(--red)}
+  .slot .lab{font-family:'Bebas Neue';font-size:26px;line-height:.9;letter-spacing:.03em}
+  .slot .pts{font-size:11px;color:var(--muted)}
+  .slot .ph{color:#4d514a;font-size:12px}
+
+  .status{min-height:22px;text-align:center;font-size:13px;margin-bottom:12px;color:var(--muted)}
+  .status.bust{color:var(--bust);font-weight:700;letter-spacing:.04em}
+  .status.win{color:var(--green);font-weight:700;letter-spacing:.04em}
+
+  .multi{display:flex;gap:8px;justify-content:center;margin-bottom:12px}
+  .multi button{flex:1;max-width:130px;background:var(--surface);border:1px solid var(--wire);color:var(--muted);
+    padding:11px;border-radius:10px;font:inherit;font-weight:700;font-size:14px;cursor:pointer;letter-spacing:.03em}
+  .multi button[aria-pressed="true"]{color:var(--ink)}
+  .multi button.m-d[aria-pressed="true"]{background:rgba(200,16,46,.16);border-color:var(--red);color:#ff8a93}
+  .multi button.m-t[aria-pressed="true"]{background:rgba(27,138,58,.16);border-color:var(--green);color:#7fe0a0}
+  .multi button.m-s[aria-pressed="true"]{background:var(--surface-2);border-color:var(--muted)}
+
+  .pad{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}
+  .pad button{background:var(--surface);border:1px solid var(--wire);color:var(--ink);border-radius:9px;
+    padding:14px 0;font:inherit;font-size:15px;font-weight:600;cursor:pointer}
+  .pad button:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
+  .pad button:disabled{opacity:.3;cursor:not-allowed}
+  .pad button.wide{grid-column:span 2}
+  .pad button.bull{color:var(--red)}
+  .pad button.miss{color:var(--muted)}
+
+  .turn-actions{display:flex;gap:10px;margin-top:14px}
+  .turn-actions .btn{flex:1}
+
+  /* ---- stats screen ---- */
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{text-align:left;padding:11px 10px;border-bottom:1px solid var(--wire)}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  td .big{font-family:'Bebas Neue';font-size:22px;color:var(--cream)}
+  .cat-line{font-size:12px;color:var(--muted)}
+  .empty{color:var(--muted);text-align:center;padding:38px 10px;line-height:1.6}
+  .empty b{color:var(--ink)}
+
+  .note{font-size:12px;color:var(--muted);line-height:1.6;margin-top:16px;padding-top:14px;border-top:1px solid var(--wire)}
+  .badge{display:inline-block;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--gold);
+    border:1px solid var(--wire);border-radius:999px;padding:3px 9px;margin-bottom:4px}
+  .persist-tag{font-size:11px;color:var(--muted);margin-left:8px}
+  @media (max-width:560px){
+    .pad button{padding:13px 0;font-size:14px}
+    .pscore .rem{font-size:38px}
+    .masthead .mark{font-size:30px}
+  }
+  @media (prefers-reduced-motion:reduce){*{animation:none!important}}
+  .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="mark">OCHE</div>
+    <div class="sub">per-dart scoring &amp; lifetime stats</div>
+    <nav class="nav">
+      <button class="navbtn" id="nav-setup" aria-current="true" onclick="show('setup')">New game</button>
+      <button class="navbtn" id="nav-players" aria-current="false" onclick="show('players')">Players</button>
+      <button class="navbtn" id="nav-stats" aria-current="false" onclick="show('stats')">Stats</button>
+      <button class="navbtn" id="nav-scoreboard" onclick="openScoreboard()" title="Open the read-only scoreboard for a second screen">Scoreboard ↗</button>
+    </nav>
+  </header>
+
+  <!-- ============ SETUP ============ -->
+  <section id="screen-setup" class="screen on">
+    <div class="card">
+      <h2 style="font-size:18px;margin-bottom:4px">Set up the game</h2>
+      <p style="color:var(--muted);font-size:13px;margin:0 0 18px">Add the players, choose the game, and set the match length.</p>
+
+      <label class="field">Players</label>
+      <div class="players-list" id="players-list"></div>
+      <button class="btn btn-ghost" onclick="addPlayer()">+ Add player</button>
+
+      <div class="opts">
+        <div class="seg" role="group" aria-label="Starting score">
+          <span class="lbl">Start</span>
+          <button data-start="501" aria-pressed="true" onclick="pickStart(this,501)">501</button>
+          <button data-start="301" aria-pressed="false" onclick="pickStart(this,301)">301</button>
+          <button data-start="170" aria-pressed="false" onclick="pickStart(this,170)">170</button>
+        </div>
+      </div>
+
+      <div class="opts">
+        <div class="stepper">
+          <span class="lbl">Legs per set</span>
+          <button aria-label="Fewer legs" onclick="bump('legsPerSet',-1)">−</button>
+          <span class="val" id="legs-val">3</span>
+          <button aria-label="More legs" onclick="bump('legsPerSet',1)">+</button>
+        </div>
+        <div class="stepper">
+          <span class="lbl">Sets per game</span>
+          <button aria-label="Fewer sets" onclick="bump('setsPerGame',-1)">−</button>
+          <span class="val" id="sets-val">1</span>
+          <button aria-label="More sets" onclick="bump('setsPerGame',1)">+</button>
+        </div>
+      </div>
+      <p style="color:var(--muted);font-size:12px;margin:10px 2px 0" id="format-line"></p>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" id="start-btn" onclick="startGame()">Start game</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GAME ============ -->
+  <section id="screen-game" class="screen">
+    <div class="scoreboard" id="scoreboard"></div>
+
+    <div class="oche">
+      <div class="turnhead">
+        <div class="who">Throwing: <b id="active-name">—</b></div>
+      </div>
+
+      <div class="checkout-bar" id="checkout-bar" hidden>
+        <span class="co-label">Checkout</span>
+        <span class="co-route" id="checkout-route"></span>
+      </div>
+
+      <div class="slots" id="slots"></div>
+      <div class="status" id="status">Tap a multiplier, then a number — one dart at a time.</div>
+
+      <div class="multi" role="group" aria-label="Dart multiplier">
+        <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
+        <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
+        <button class="m-t" id="m-t" aria-pressed="false" onclick="setMult(3)">Treble</button>
+      </div>
+
+      <div class="pad" id="pad"></div>
+
+      <div class="turn-actions">
+        <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo dart</button>
+        <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="uiConfirm('Abandon this game? Recorded stats are kept.', ()=>show('setup'))">End game</button>
+    </div>
+  </section>
+
+  <!-- ============ PLAYERS ============ -->
+  <section id="screen-players" class="screen">
+    <div class="card">
+      <h2 style="font-size:18px;margin-bottom:4px">Players</h2>
+      <p style="color:var(--muted);font-size:13px;margin:0 0 16px">Create the people who throw. Each one keeps their own lifetime stats.</p>
+      <div id="roster-list" class="roster-list"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="askAddPlayer()">+ Add player</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STATS ============ -->
+  <section id="screen-stats" class="screen">
+    <div class="card">
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px">
+        <h2 style="font-size:18px">Lifetime stats</h2>
+        <span class="persist-tag" id="persist-tag"></span>
+      </div>
+      <p style="color:var(--muted);font-size:13px;margin:0 0 16px">Lifetime totals across every leg, set and game you've played on this device.</p>
+      <div id="stats-body"></div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" onclick="resetStats()">Reset all stats</button>
+      </div>
+      <div class="note">
+        <span class="badge">how each stat is counted</span><br>
+        <b style="color:var(--ink)">3-dart average</b> — lifetime: all points scored ÷ all turns, across every leg, set and game. (During play, the scoreboard shows your <em>current leg</em> and <em>current game</em> averages instead.)<br>
+        <b style="color:var(--ink)">100+ checkouts</b> — winning turns where you scored 100 or more on that final visit.<br>
+        <b style="color:var(--ink)">Treble-less turns</b> — turns where none of the darts landed in a treble bed.<br>
+        <b style="color:var(--ink)">Games &amp; legs played</b> — counted per game type for everyone taking part; a game is the whole match, a leg is a single 501 (or chosen start).<br>
+        A bust turn still counts as a turn (it scores 0) and still counts its darts toward treble-less totals.
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="modal-overlay" id="modal" hidden>
+  <div class="modal-card" id="modal-body"></div>
+</div>
+
+<script>
+/* =========================================================================
+   STORAGE  — uses the artifact storage API when present, otherwise keeps
+   data in memory for the session. Same shape your backend would persist
+   to its data folder.
+   ========================================================================= */
+const Store = (() => {
+  const KEY = 'oche_db_v2';        // { players:[names], stats:{name:stat} }
+  const OLD = 'oche_stats_v1';     // legacy: just the stats map
+  const hasWS = typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function';
+  let mem = null;
+  async function load(){
+    if(hasWS){
+      try{ const r = await window.storage.get(KEY); if(r) return JSON.parse(r.value); }catch(e){}
+      try{ const o = await window.storage.get(OLD); if(o){ const st=JSON.parse(o.value); return {players:Object.keys(st), stats:st}; } }catch(e){}
+      return {players:[], stats:{}};
+    }
+    return mem || {players:[], stats:{}};
+  }
+  async function save(db){
+    mem = db;
+    if(hasWS){ try{ await window.storage.set(KEY, JSON.stringify(db)); }catch(e){} }
+  }
+  return { load, save, hasWS };
+})();
+
+/* =========================================================================
+   BACKEND ADAPTER
+   The app talks to a database backend when one is reachable (served from the
+   same origin), and silently falls back to local browser storage if not — so
+   this same file works both as a standalone demo and as the real, server-backed
+   app. Gameplay code calls DB.* and doesn't care which mode is active.
+   ========================================================================= */
+const Backend = {
+  async get(p){ const r = await fetch(p, {cache:'no-store'}); if(!r.ok) throw new Error('GET '+p); return r.json(); },
+  async send(method, p, body){
+    const r = await fetch(p, { method, headers:{'Content-Type':'application/json'}, body: body?JSON.stringify(body):undefined });
+    if(!r.ok){ let msg=''; try{ msg=(await r.json()).error; }catch(e){} throw new Error(msg || ('HTTP '+r.status)); }
+    return r.json();
+  }
+};
+
+const DB = {
+  mode: 'local',      // 'api' once a backend answers
+  gameId: null,
+
+  async detect(){
+    try{ const r = await fetch('/api/health', {cache:'no-store'}); if(r.ok){ this.mode='api'; return; } }catch(e){}
+    this.mode = 'local';
+  },
+
+  // load roster + prefs + stats into the in-memory caches the UI renders from
+  async loadAll(){
+    if(this.mode==='api'){
+      let players = await Backend.get('/api/players');
+      if(players.length===0){ await Backend.send('POST','/api/players',{name:'Player 1',out:'double'}); players = await Backend.get('/api/players'); }
+      roster = players.map(p=>p.name);
+      prefs = {}; players.forEach(p=>{ prefs[p.name]={out:p.out}; ensurePlayerStats(p.name); });
+      await this.refreshStats();
+    } else {
+      const blob = await Store.load();
+      stats = (blob && blob.stats) || {};
+      roster = (blob && blob.players) || [];
+      prefs = (blob && blob.prefs) || {};
+      Object.keys(stats).forEach(ensurePlayerStats);
+      roster.forEach(ensurePlayerStats);
+      roster.forEach(n=>{ if(!prefs[n]) prefs[n]={out:'double'}; });
+      if(roster.length===0){ roster=['Player 1']; ensurePlayerStats('Player 1'); prefs['Player 1']={out:'double'}; persist(); }
+    }
+  },
+
+  async refreshStats(){
+    if(this.mode!=='api') return;
+    const s = await Backend.get('/api/stats');     // already in the shape the UI uses
+    stats = s;
+    roster = Object.keys(s);
+    prefs = {}; roster.forEach(n=>{ prefs[n]={out:s[n].out||'double'}; ensurePlayerStats(n); });
+  },
+
+  // player profile writes (api hits the server; local handled by persist())
+  addPlayer(name, out){ if(this.mode==='api') Backend.send('POST','/api/players',{name, out:out||'double'}).catch(logErr); },
+  rename(from, to){ if(this.mode==='api') Backend.send('PUT','/api/players/rename',{from, to}).catch(logErr); },
+  setOut(name, out){ if(this.mode==='api') Backend.send('PUT','/api/players/out',{name, out}).catch(logErr); },
+  delete(name){ if(this.mode==='api') Backend.send('DELETE','/api/players?name='+encodeURIComponent(name)).catch(logErr); },
+
+  // game + turn writes
+  async beginGame(meta, names){
+    if(this.mode==='api'){
+      try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame, players:names}); this.gameId=r.gameId; }
+      catch(e){ logErr(e); this.gameId=null; }
+    } else this.gameId=null;
+  },
+  recordTurn(t){ if(this.mode==='api' && this.gameId!=null) Backend.send('POST',`/api/games/${this.gameId}/turns`, t).catch(logErr); },
+  completeGame(winner){ if(this.mode==='api' && this.gameId!=null) Backend.send('POST',`/api/games/${this.gameId}/complete`, {winner}).catch(logErr); },
+
+  async reset(){ if(this.mode==='api'){ await Backend.send('POST','/api/reset').catch(logErr); await this.refreshStats(); } },
+
+  // push the current game snapshot to any scoreboard screens (api mode only)
+  pushLive(snapshot){ if(this.mode==='api') Backend.send('POST','/api/live', snapshot).catch(()=>{}); }
+};
+function logErr(e){ console.warn('darts backend:', e && e.message ? e.message : e); }
+
+/* =========================================================================
+   PURE SCORING LOGIC  (identical to the unit-tested version)
+   ========================================================================= */
+function dartValue(sector, mult){
+  if(sector === 0) return 0;
+  if(sector === 25) return mult === 2 ? 50 : 25;   // bull: 25 or double-bull 50, no treble
+  return sector * mult;
+}
+function makeDart(sector, mult){
+  const m = (sector === 25 && mult === 3) ? 1 : mult;  // guard: no treble bull
+  return {
+    sector, mult:m,
+    value: dartValue(sector, m),
+    isTreble: m === 3 && sector !== 25 && sector !== 0,
+    isDouble: (m === 2 && sector !== 0),
+    label: dartLabel(sector, m)
+  };
+}
+function dartLabel(sector, mult){
+  if(sector === 0) return 'Miss';
+  if(sector === 25) return mult === 2 ? 'Bull' : '25';
+  return (mult === 3 ? 'T' : mult === 2 ? 'D' : '') + sector;
+}
+function evaluateVisit(startScore, darts, doubleOut){
+  const points = darts.reduce((s,d)=>s+d.value,0);
+  const remaining = startScore - points;
+  const last = darts[darts.length-1];
+  let bust=false, win=false;
+  if(remaining < 0) bust=true;
+  else if(doubleOut && remaining === 1) bust=true;
+  else if(remaining === 0){
+    if(doubleOut && !(last && last.isDouble)) bust=true;
+    else win=true;
+  }
+  return {
+    pointsThisVisit: points,
+    scored: bust ? 0 : points,
+    newScore: bust ? startScore : remaining,
+    bust, win,
+    trebleLess: darts.length>0 && darts.every(d=>!d.isTreble)
+  };
+}
+
+/* =========================================================================
+   APP STATE
+   ========================================================================= */
+let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1 };
+let game = null;
+let roster = [];     // saved player names (profiles that own stats)
+let stats = {};
+let prefs = {};      // name -> { out:'double'|'single' }  (per-player finish rule)
+let mult = 1;
+
+/* ---------- per-player finish rule ---------- */
+function playerOut(name){ return (prefs[name] && prefs[name].out==='single') ? 'single' : 'double'; }
+function setPlayerOut(name, mode){ const out = mode==='single'?'single':'double'; prefs[name]={ out }; DB.setOut(name, out); persist(); }
+
+/* ---------- navigation ---------- */
+function show(name){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));
+  document.getElementById('screen-'+name).classList.add('on');
+  document.getElementById('nav-setup').setAttribute('aria-current', name==='setup');
+  document.getElementById('nav-players').setAttribute('aria-current', name==='players');
+  document.getElementById('nav-stats').setAttribute('aria-current', name==='stats');
+  if(name==='setup'){ sanitizeSlots(); renderPlayers(); }
+  if(name==='players') renderRoster();
+  if(name==='stats'){ if(DB.mode==='api'){ DB.refreshStats().then(renderStats).catch(renderStats); } else renderStats(); }
+}
+function openScoreboard(){
+  if(DB.mode==='api'){
+    window.open('display','_blank');
+  } else {
+    uiAlert('The scoreboard runs on the server. Start the app with Docker, then open  http://<your-server>:8046/display  on your second screen. (This standalone preview has no server, so the live scoreboard isn\u2019t available here.)');
+  }
+}
+
+/* ---------- player roster (saved profiles) ---------- */
+function findPlayer(name){ const k=name.trim().toLowerCase(); return roster.find(p=>p.toLowerCase()===k) || null; }
+function addToRoster(name){
+  name=(name||'').trim();
+  if(!name) return null;
+  const existing=findPlayer(name);
+  if(existing) return existing;          // already there — reuse
+  roster.push(name); ensurePlayerStats(name);
+  if(!prefs[name]) prefs[name]={ out:'double' };   // default to double out
+  DB.addPlayer(name, prefs[name].out);
+  persist();
+  return name;
+}
+function renamePlayer(oldName, newName){
+  newName=(newName||'').trim();
+  if(!newName) return false;
+  const clash=findPlayer(newName);
+  if(clash && clash!==oldName){ uiAlert(`"${newName}" already exists.`); return false; }
+  const i=roster.indexOf(oldName); if(i<0) return false;
+  DB.rename(oldName, newName);
+  roster[i]=newName;
+  if(stats[oldName]){ stats[newName]=stats[oldName]; delete stats[oldName]; }
+  if(prefs[oldName]){ prefs[newName]=prefs[oldName]; delete prefs[oldName]; }
+  setup.slots=setup.slots.map(s=>s===oldName?newName:s);
+  persist(); return true;
+}
+function deletePlayer(name){
+  DB.delete(name);
+  roster=roster.filter(p=>p!==name);
+  delete stats[name]; delete prefs[name];
+  setup.slots=setup.slots.filter(s=>s!==name);
+  persist();
+}
+
+/* ---------- setup screen (choose players from roster) ---------- */
+function sanitizeSlots(){
+  setup.slots = setup.slots.filter(s=>roster.includes(s));
+  if(setup.slots.length===0 && roster.length) setup.slots=[roster[0]];
+}
+function renderPlayers(){
+  const box = document.getElementById('players-list');
+  box.innerHTML='';
+  if(roster.length===0){
+    box.innerHTML=`<p style="color:var(--muted);font-size:13px;margin:0">No players yet. Use “+ Add player” to create one.</p>`;
+    return;
+  }
+  setup.slots.forEach((sel,i)=>{
+    const taken = setup.slots.filter((_,j)=>j!==i);
+    const opts = roster.map(p=>`<option value="${escapeHtml(p)}" ${p===sel?'selected':''} ${taken.includes(p)?'disabled':''}>${escapeHtml(p)}</option>`).join('');
+    const tag = sel ? `<span class="out-tag" title="${playerOut(sel)==='double'?'Doubles out':'Singles out'}">${playerOut(sel)==='double'?'DO':'SO'}</span>` : '';
+    const row=document.createElement('div'); row.className='player-row';
+    row.innerHTML=`<span class="ix">${i+1}</span>
+      <select class="pselect" aria-label="Player ${i+1}" onchange="onSlotChange(${i}, this.value)">
+        ${opts}
+        <option disabled>──────────</option>
+        <option value="__add__">+ Add new player…</option>
+      </select>
+      ${tag}
+      ${setup.slots.length>1?`<button class="iconbtn" title="Remove from game" onclick="removePlayer(${i})">✕</button>`:''}`;
+    box.appendChild(row);
+  });
+}
+function onSlotChange(i, value){
+  if(value==='__add__'){
+    renderPlayers(); // reset the dropdown back to its current value
+    uiPrompt('Add a new player', '', name=>{
+      const added=addToRoster(name);
+      if(added){ setup.slots[i]=added; renderPlayers(); }
+    });
+    return;
+  }
+  setup.slots[i]=value;
+  renderPlayers();
+}
+function addPlayer(){
+  if(setup.slots.length>=6) return;
+  if(roster.length===0){
+    uiPrompt('Add a new player', '', name=>{ const a=addToRoster(name); if(a){ setup.slots.push(a); renderPlayers(); } });
+    return;
+  }
+  const next = roster.find(p=>!setup.slots.includes(p)) || roster[0];
+  setup.slots.push(next); renderPlayers();
+}
+function removePlayer(i){ setup.slots.splice(i,1); renderPlayers(); }
+function pickStart(btn,v){ setup.start=v; document.querySelectorAll('[data-start]').forEach(b=>b.setAttribute('aria-pressed', b===btn)); }
+function bump(key, delta){
+  setup[key] = Math.max(1, Math.min(9, setup[key] + delta));
+  document.getElementById('legs-val').textContent = setup.legsPerSet;
+  document.getElementById('sets-val').textContent = setup.setsPerGame;
+  updateFormatLine();
+}
+function updateFormatLine(){
+  const el=document.getElementById('format-line'); if(!el) return;
+  const L=setup.legsPerSet, S=setup.setsPerGame;
+  const legTxt = L===1 ? '1 leg' : ('first to '+L+' legs');
+  el.textContent = S===1
+    ? `One set — ${legTxt} wins the game.`
+    : `First to ${S} sets wins the game; each set is ${legTxt}.`;
+}
+
+async function startGame(){
+  const names = [];
+  setup.slots.forEach(n=>{ if(n && roster.includes(n) && !names.includes(n)) names.push(n); });
+  if(names.length===0){ uiAlert('Choose at least one player.'); return; }
+  game = {
+    start: setup.start,
+    category: String(setup.start),
+    legsPerSet: setup.legsPerSet,
+    setsPerGame: setup.setsPerGame,
+    players: names.map(n=>newMatchPlayer(n, setup.start)),
+    starter: 0,        // who throws first in the current leg
+    current: 0,
+    setNo: 1, legNo: 1,
+    darts: [],
+    done: false
+  };
+  names.forEach(ensurePlayerStats);
+  await DB.beginGame(game, names);   // registers the game; gets a gameId in api mode
+  mult = 1;
+  renderGameShell();        // ensure the throwing controls exist (e.g. after a finished game)
+  updateMultUI();
+  show('game'); renderGame();
+}
+
+// a player's per-match runtime record (separate from lifetime stats)
+function newMatchPlayer(name, start){
+  return { name, score:start,
+    doubleOut: playerOut(name)==='double', // this player's own finish rule
+    legPoints:0,  legVisits:0,    // resets every leg  -> per-leg average
+    gamePoints:0, gameVisits:0,   // resets every game -> per-game average
+    legsWon:0,    setsWon:0 };    // legsWon = legs in the current set
+}
+
+/* ---------- stats helpers ---------- */
+function ensurePlayerStats(name){
+  const s = stats[name] || {};
+  if(s.totalPoints==null) s.totalPoints=0;
+  if(s.turns==null)       s.turns=0;
+  if(s.trebleLess==null)  s.trebleLess=0;
+  if(s.checkouts100==null)s.checkouts100=0;
+  if(!s.legsByCat) s.legsByCat = s.games || {};   // migrate old `games` field (was per-leg counts)
+  if(!s.gamesByCat) s.gamesByCat = {};
+  delete s.games;
+  stats[name]=s;
+}
+function persist(){ if(DB.mode==='local') Store.save({ players:roster, stats, prefs }); }
+
+/* ---------- players management screen ---------- */
+function renderRoster(){
+  const box=document.getElementById('roster-list');
+  if(roster.length===0){
+    box.innerHTML=`<div class="empty">No players yet.<br>Add your first player below.</div>`;
+    return;
+  }
+  box.innerHTML = roster.map(name=>{
+    const s=stats[name]||{};
+    const avg = s.turns ? (s.totalPoints/s.turns).toFixed(1) : '—';
+    const out = playerOut(name);
+    const j = escapeJs(name);
+    return `<div class="roster-row">
+      <div class="rp-main">
+        <div class="rp-name">${escapeHtml(name)}</div>
+        <div class="rp-stat">avg ${avg} · ${s.turns||0} turns</div>
+      </div>
+      <div class="seg out-seg" role="group" aria-label="Finish rule for ${escapeHtml(name)}">
+        <button aria-pressed="${out==='double'}" onclick="setPlayerOut('${j}','double'); renderRoster();">Double out</button>
+        <button aria-pressed="${out==='single'}" onclick="setPlayerOut('${j}','single'); renderRoster();">Single out</button>
+      </div>
+      <button class="iconbtn" title="Rename" onclick="askRename('${j}')">✎</button>
+      <button class="iconbtn danger" title="Delete" onclick="askDelete('${j}')">🗑</button>
+    </div>`;
+  }).join('');
+}
+function askAddPlayer(){
+  uiPrompt('Add a new player', '', name=>{ if(addToRoster(name)) renderRoster(); });
+}
+function askRename(name){
+  uiPrompt('Rename player', name, newName=>{ if(renamePlayer(name,newName)) renderRoster(); });
+}
+function askDelete(name){
+  uiConfirm(`Delete "${name}" and all of their stats? This can't be undone.`, ()=>{ deletePlayer(name); renderRoster(); });
+}
+
+/* ---------- game render ---------- */
+function avgStr(points, visits){ return visits ? (points/visits).toFixed(1) : '—'; }
+function renderGame(){
+  const sb = document.getElementById('scoreboard'); sb.innerHTML='';
+  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
+  game.players.forEach((p,i)=>{
+    const row=document.createElement('div');
+    row.className='pscore'+(i===game.current?' active':'');
+    const standing = game.setsPerGame>1
+      ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
+      : `Legs ${p.legsWon}/${game.legsPerSet}`;
+    row.innerHTML=`
+      <div>
+        <div class="nm">${escapeHtml(p.name)} <span class="nm-out">${p.doubleOut?'double out':'single out'}</span></div>
+        ${i===game.current?'<div class="turnflag">at the oche</div>':''}
+      </div>
+      <div class="meta">
+        <div class="avgs">leg <b>${avgStr(p.legPoints,p.legVisits)}</b> &nbsp;·&nbsp; game <b>${avgStr(p.gamePoints,p.gameVisits)}</b></div>
+        ${showStanding?`<div class="standing">${standing}</div>`:''}
+      </div>
+      <div class="rem">${p.score}</div>`;
+    sb.appendChild(row);
+  });
+  document.getElementById('active-name').textContent = game.players[game.current].name;
+  renderSlots();
+  renderPad();
+  updateCheckout(false);
+  pushLive();
+}
+
+function renderSlots(){
+  const wrap=document.getElementById('slots'); wrap.innerHTML='';
+  for(let i=0;i<3;i++){
+    const d = game.darts[i];
+    const div=document.createElement('div');
+    div.className='slot'+(d?' filled':'')+(d&&d.isTreble?' t':'')+(d&&d.isDouble?' d':'');
+    div.innerHTML = d
+      ? `<span class="lab">${d.label}</span><span class="pts">${d.value} pts</span>`
+      : `<span class="ph">dart ${i+1}</span>`;
+    wrap.appendChild(div);
+  }
+}
+
+function liveRemaining(){
+  const pts = game.darts.reduce((s,d)=>s+d.value,0);
+  return game.players[game.current].score - pts;
+}
+function updateCheckout(flash){
+  const bar = document.getElementById('checkout-bar');
+  const route = document.getElementById('checkout-route');
+  if(!bar || !route) return;
+  const cp = game.players[game.current];
+  const dbl = cp.doubleOut;
+  // Was the player on a finish at the START of this visit (3 darts in hand)?
+  // If not, never suggest a checkout mid-visit — even if a dart happens to leave
+  // a finishable number. Only update the suggestion when the visit began on one.
+  const startedOnCheckout = checkoutHint(cp.score, dbl, 3) !== '';
+  const dartsLeft = 3 - game.darts.length;
+  const rem = (game.busted || game.won) ? -1 : liveRemaining();
+  const hint = (startedOnCheckout && rem > 0 && dartsLeft > 0)
+    ? checkoutHint(rem, dbl, dartsLeft)   // route for what's left, within the darts remaining
+    : '';
+  if(hint){
+    route.textContent = hint.replace(/ /g,'  →  ');
+    bar.hidden = false;
+    if(flash){ bar.classList.remove('flash'); void bar.offsetWidth; bar.classList.add('flash'); }
+  } else {
+    bar.hidden = true;
+  }
+}
+
+/* ---------- live scoreboard feed ---------- */
+function liveSnapshot(message){
+  if(!game) return { active:false, ts:Date.now() };
+  const cur = game.players[game.current];
+  const dbl = cur.doubleOut;
+  const startedOn = checkoutHint(cur.score, dbl, 3) !== '';
+  const dartsLeft = 3 - game.darts.length;
+  const rem = (game.busted || game.won) ? -1 : liveRemaining();
+  const checkout = (startedOn && rem>0 && dartsLeft>0) ? checkoutHint(rem, dbl, dartsLeft) : '';
+  return {
+    active:true,
+    category:game.category, legsPerSet:game.legsPerSet, setsPerGame:game.setsPerGame,
+    setNo:game.setNo, legNo:game.legNo, currentIndex:game.current,
+    players: game.players.map(p=>({
+      name:p.name, score:p.score, out:p.doubleOut?'double':'single',
+      legAvg:  p.legVisits  ? (p.legPoints/p.legVisits).toFixed(1)   : null,
+      gameAvg: p.gameVisits ? (p.gamePoints/p.gameVisits).toFixed(1) : null,
+      legsWon:p.legsWon, setsWon:p.setsWon
+    })),
+    darts: game.darts.map(d=>d.label),
+    checkout,
+    status: game.won ? 'won' : (game.busted ? 'bust' : 'live'),
+    message: message || '',
+    done: !!game.done,
+    ts: Date.now()
+  };
+}
+function pushLive(message){ DB.pushLive(liveSnapshot(message)); }
+
+function renderPad(){
+  const pad=document.getElementById('pad'); pad.innerHTML='';
+  const full = game.darts.length>=3 || game.busted || game.won;
+  for(let n=1;n<=20;n++){
+    const b=document.createElement('button');
+    b.textContent=n; b.disabled=full;
+    b.onclick=()=>throwDart(n);
+    pad.appendChild(b);
+  }
+  const bull=document.createElement('button');
+  bull.className='bull'; bull.textContent='Bull'; bull.disabled=full;
+  bull.onclick=()=>throwDart(25); pad.appendChild(bull);
+
+  const miss=document.createElement('button');
+  miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
+  miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+}
+
+/* ---------- throwing ---------- */
+function setMult(m){ mult=m; updateMultUI(); }
+function updateMultUI(){
+  const s=document.getElementById('m-s'), d=document.getElementById('m-d'), t=document.getElementById('m-t');
+  if(!s||!d||!t) return;   // controls not on screen yet — nothing to update
+  s.setAttribute('aria-pressed', mult===1);
+  d.setAttribute('aria-pressed', mult===2);
+  t.setAttribute('aria-pressed', mult===3);
+}
+function throwDart(sector){
+  if(game.darts.length>=3 || game.busted || game.won) return;
+  const dart = makeDart(sector, mult);
+  game.darts.push(dart);
+  mult=1; updateMultUI();
+
+  // live bust/win feedback before committing
+  const ev = evaluateVisit(game.players[game.current].score, game.darts, game.players[game.current].doubleOut);
+  const status=document.getElementById('status');
+  if(ev.bust){
+    game.busted=true;
+    status.className='status bust'; status.textContent='BUST — turn scores nothing. Press Enter turn.';
+  } else if(ev.win){
+    game.won=true;
+    status.className='status win'; status.textContent='GAME SHOT! Press Enter turn to record it.';
+  } else if(game.darts.length>=3){
+    status.className='status'; status.textContent='Three darts thrown — press Enter turn.';
+  } else {
+    status.className='status'; status.textContent='Leaves '+ev.newScore+'.';
+  }
+  renderSlots(); renderPad(); updateCheckout(true); pushLive();
+}
+function undoDart(){
+  if(game.darts.length===0) return;
+  game.darts.pop();
+  game.busted=false; game.won=false;
+  const status=document.getElementById('status');
+  status.className='status'; status.textContent='Dart removed.';
+  renderSlots(); renderPad(); updateCheckout(false); pushLive();
+}
+
+function enterTurn(){
+  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  const p = game.players[game.current];
+  const ev = evaluateVisit(p.score, game.darts, p.doubleOut);
+
+  // per-leg and per-game scope (shown live on the scoreboard — both modes)
+  p.legPoints  += ev.scored; p.legVisits  += 1;
+  p.gamePoints += ev.scored; p.gameVisits += 1;
+  if(!ev.bust) p.score = ev.newScore;
+
+  // persist the turn: api mode posts it to the database; local mode updates counters
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:ev.scored, trebleLess:ev.trebleLess, bust:ev.bust,
+    checkout:ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null });
+  if(DB.mode==='local'){
+    const s = stats[p.name];
+    s.turns += 1; s.totalPoints += ev.scored;
+    if(ev.trebleLess) s.trebleLess += 1;
+    if(ev.win && ev.pointsThisVisit >= 100) s.checkouts100 += 1;
+  }
+
+  if(ev.win){
+    if(DB.mode==='local'){   // legs played, per category, for everyone (api derives this server-side)
+      game.players.forEach(pl=>{
+        ensurePlayerStats(pl.name);
+        stats[pl.name].legsByCat[game.category] = (stats[pl.name].legsByCat[game.category]||0) + 1;
+      });
+    }
+    onLegWon(game.current);   // handles set/game progression
+    return;
+  }
+  persist();
+
+  // next player
+  game.darts=[]; game.busted=false; game.won=false;
+  game.current = (game.current+1) % game.players.length;
+  document.getElementById('status').className='status';
+  document.getElementById('status').textContent='Tap a multiplier, then a number.';
+  renderGame();
+}
+
+/* ----- leg / set / game progression ----- */
+function onLegWon(wi){
+  const w = game.players[wi];
+  w.legsWon += 1;
+
+  if(w.legsWon >= game.legsPerSet){      // set won
+    w.setsWon += 1;
+    game.players.forEach(p=>p.legsWon=0);  // reset legs for the next set
+
+    if(w.setsWon >= game.setsPerGame){   // game (match) won
+      if(DB.mode==='local'){
+        game.players.forEach(pl=>{
+          stats[pl.name].gamesByCat[game.category] = (stats[pl.name].gamesByCat[game.category]||0) + 1;
+        });
+      }
+      DB.completeGame(w.name);   // api marks the game complete in the database
+      persist();
+      finishUnit('game', w.name);
+      return;
+    }
+    persist();
+    finishUnit('set', w.name);
+    return;
+  }
+  persist();
+  finishUnit('leg', w.name);
+}
+
+// rotate who throws first, reset scores; keep game-scope totals, reset leg-scope
+function startNextLeg(newSet){
+  if(newSet){ game.setNo += 1; game.legNo = 1; } else { game.legNo += 1; }
+  game.starter = (game.starter + 1) % game.players.length;
+  game.current = game.starter;
+  game.players.forEach(p=>{ p.score = game.start; p.legPoints=0; p.legVisits=0; });
+  game.darts=[]; game.busted=false; game.won=false;
+  mult=1;
+  renderGameShell(); updateMultUI(); renderGame();
+}
+// new set: also clear game-scope averages? No — a "game" = the whole match, so
+// game-scope totals carry across sets. Only leg-scope resets (handled above).
+function startNextSet(){ startNextLeg(true); }
+
+function finishUnit(kind, winner){
+  game.done = (kind==='game');
+  renderGame();
+  const sb=document.getElementById('scoreboard');
+  const labels = { leg:'wins the leg', set:'wins the set', game:'wins the game' };
+  const banner=document.createElement('div');
+  banner.className='pscore'; banner.style.borderColor='var(--gold)';
+  banner.innerHTML=`<div class="nm" style="color:var(--gold)">🎯 ${escapeHtml(winner)} ${labels[kind]}</div>`;
+  sb.prepend(banner);
+
+  const oche=document.querySelector('.oche');
+  if(kind==='game'){
+    oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
+      <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">GAME OVER</div>
+      <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${escapeHtml(winner)} takes the match. Stats saved.</p>
+      <div class="btn-row" style="justify-content:center">
+        <button class="btn btn-primary" onclick="show('setup')">New game</button>
+        <button class="btn btn-ghost" onclick="show('stats')">View stats</button>
+      </div></div>`;
+  } else {
+    const next = kind==='set' ? 'Next set' : 'Next leg';
+    const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
+    oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
+      <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">${kind==='set'?'SET COMPLETE':'LEG COMPLETE'}</div>
+      <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">Stats saved.</p>
+      <div class="btn-row" style="justify-content:center">
+        <button class="btn btn-primary" onclick="${fn}">${next}</button>
+        <button class="btn btn-ghost" onclick="show('stats')">View stats</button>
+        <button class="btn btn-ghost" onclick="uiConfirm('End the match early? Recorded stats are kept.', ()=>show('setup'))">End game</button>
+      </div></div>`;
+  }
+  pushLive(`${winner} ${labels[kind]}`);
+}
+
+/* rebuild the oche inner markup (used after a leg replaced it) */
+function renderGameShell(){
+  document.querySelector('.oche').innerHTML=`
+      <div class="turnhead">
+        <div class="who">Throwing: <b id="active-name">—</b></div>
+      </div>
+      <div class="checkout-bar" id="checkout-bar" hidden>
+        <span class="co-label">Checkout</span>
+        <span class="co-route" id="checkout-route"></span>
+      </div>
+      <div class="slots" id="slots"></div>
+      <div class="status" id="status">Tap a multiplier, then a number — one dart at a time.</div>
+      <div class="multi" role="group" aria-label="Dart multiplier">
+        <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
+        <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
+        <button class="m-t" id="m-t" aria-pressed="false" onclick="setMult(3)">Treble</button>
+      </div>
+      <div class="pad" id="pad"></div>
+      <div class="turn-actions">
+        <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo dart</button>
+        <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
+      </div>`;
+}
+
+/* ---------- checkout calculator ----------
+   Computes a real, valid finishing route for ANY reachable score, instead of
+   relying on a hardcoded list. Exhaustively verified for every finishable
+   score 2..170. Returns '' when the score can't be finished (e.g. bogey
+   numbers like 169, or anything that would leave 1 on a double-out). */
+const CO_DOUBLES = {};                       // value -> finishing-dart label
+for(let _n=1;_n<=20;_n++) CO_DOUBLES[2*_n]='D'+_n;
+CO_DOUBLES[50]='Bull';
+const CO_FAV_D = [40,32,16,24,8,20,12,4,36,28,50,2,38,34,30,26,22,18,14,10,6];
+const CO_FIRSTS = (()=>{ const a=[]; for(let n=20;n>=1;n--) a.push({v:3*n,label:'T'+n});
+  a.push({v:50,label:'Bull'}); a.push({v:25,label:'25'});
+  for(let n=20;n>=1;n--) a.push({v:n,label:''+n}); return a; })();
+
+function coTreble(v){ if(v%3===0){const n=v/3; if(n>=1&&n<=20) return 'T'+n;} return null; }
+function coSingle(v){ if(v>=1&&v<=20) return ''+v; if(v===25) return '25'; return null; }
+function coSetup(need){ if(need<=0) return null; return coTreble(need)||coSingle(need)||(CO_DOUBLES[need]||null); }
+function coFinish2(R){
+  for(const d of CO_FAV_D){ const need=R-d; if(need<=0) continue;
+    const f=coSetup(need); if(f) return [f, CO_DOUBLES[d]]; }
+  return null;
+}
+function coFinish3(R){
+  for(const f of CO_FIRSTS){ const rest=R-f.v; if(rest<2) continue;
+    const two=coFinish2(rest); if(two) return [f.label, ...two]; }
+  return null;
+}
+function checkoutHint(rem, doubleOut, maxDarts){
+  if(maxDarts == null) maxDarts = 3;
+  if(rem<1 || rem>170 || maxDarts<1) return '';
+  if(doubleOut){
+    if(rem<2) return '';
+    let r = CO_DOUBLES[rem] ? [CO_DOUBLES[rem]] : null;           // 1 dart
+    if(!r && maxDarts>=2) r = coFinish2(rem);                     // 2 darts
+    if(!r && maxDarts>=3) r = coFinish3(rem);                     // 3 darts
+    return r ? r.join(' ') : '';
+  }
+  // straight out: last dart can be anything
+  const one = coSingle(rem) || CO_DOUBLES[rem] || coTreble(rem);
+  if(one) return one;                                            // 1 dart
+  if(maxDarts>=2) for(const f of CO_FIRSTS){ const need=rem-f.v;
+    const s=coSingle(need)||CO_DOUBLES[need]||coTreble(need);
+    if(need>0 && s) return f.label+' '+s; }
+  if(maxDarts>=3) for(const f of CO_FIRSTS){ const rest=rem-f.v; if(rest<1) continue;
+    for(const g of CO_FIRSTS){ const need=rest-g.v;
+      const s=coSingle(need)||CO_DOUBLES[need]||coTreble(need);
+      if(need>0 && s) return f.label+' '+g.label+' '+s; } }
+  return '';
+}
+
+/* ---------- stats render ---------- */
+function renderStats(){
+  document.getElementById('persist-tag').textContent =
+    DB.mode==='api' ? 'saved in the database'
+    : Store.hasWS ? 'saved on this device'
+    : 'this session only (no backend, no local storage)';
+  const body=document.getElementById('stats-body');
+  const names=Object.keys(stats);
+  if(names.length===0){
+    body.innerHTML=`<div class="empty">No stats yet.<br>Play a game and your <b>3-dart average</b>, <b>100+ checkouts</b>, <b>treble-less turns</b> and <b>games &amp; legs played</b> will build up here.</div>`;
+    return;
+  }
+  let rows = names.map(n=>{
+    const s=stats[n];
+    const avg=s.turns?(s.totalPoints/s.turns).toFixed(1):'0.0';
+    const cats=Object.keys({...s.legsByCat, ...s.gamesByCat});
+    const catLines = cats.length
+      ? cats.map(c=>`${c}: <b style="color:var(--ink)">${s.gamesByCat[c]||0}</b> games · <b style="color:var(--ink)">${s.legsByCat[c]||0}</b> legs`).join('<br>')
+      : '<span style="color:var(--muted)">none yet</span>';
+    return `<tr>
+      <td><div style="font-weight:600">${escapeHtml(n)}</div><div class="cat-line">${s.turns} turns thrown</div></td>
+      <td class="num"><span class="big">${avg}</span></td>
+      <td class="num">${s.checkouts100}</td>
+      <td class="num">${s.trebleLess}</td>
+      <td class="cat-line">${catLines}</td>
+    </tr>`;
+  }).join('');
+  body.innerHTML=`<table>
+    <thead><tr>
+      <th>Player</th><th class="num">3-dart avg</th><th class="num">100+&nbsp;CO</th>
+      <th class="num">Treble-less</th><th>Games &amp; legs played</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+}
+function resetStats(){
+  uiConfirm('Erase all saved stats for every player? Players are kept; their numbers go back to zero.', ()=>{
+    if(DB.mode==='api'){
+      DB.reset().then(renderStats).catch(logErr);
+    } else {
+      stats={}; roster.forEach(ensurePlayerStats); persist(); renderStats();
+    }
+  });
+}
+
+/* ---------- util ---------- */
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function escapeJs(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+
+/* ---------- in-app dialogs (native confirm/prompt are blocked in the sandbox) ---------- */
+function closeModal(){ const o=document.getElementById('modal'); if(o) o.hidden=true; document.getElementById('modal-body').innerHTML=''; }
+function uiAlert(msg){
+  document.getElementById('modal-body').innerHTML=
+    `<p class="modal-msg">${escapeHtml(msg)}</p>
+     <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">OK</button></div>`;
+  document.getElementById('modal').hidden=false;
+}
+function uiConfirm(msg, onYes){
+  window.__modalYes = onYes;
+  document.getElementById('modal-body').innerHTML=
+    `<p class="modal-msg">${escapeHtml(msg)}</p>
+     <div class="modal-actions">
+       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+       <button class="btn btn-primary" onclick="(function(){var f=window.__modalYes;closeModal();if(f)f();})()">Yes</button>
+     </div>`;
+  document.getElementById('modal').hidden=false;
+}
+function uiPrompt(msg, initial, onSubmit){
+  window.__modalSubmit = onSubmit;
+  document.getElementById('modal-body').innerHTML=
+    `<p class="modal-msg">${escapeHtml(msg)}</p>
+     <input type="text" id="modal-input" value="${escapeHtml(initial||'')}" maxlength="24"
+            onkeydown="if(event.key==='Enter')document.getElementById('modal-ok').click()">
+     <div class="modal-actions">
+       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+       <button class="btn btn-primary" id="modal-ok"
+         onclick="(function(){var v=document.getElementById('modal-input').value;var f=window.__modalSubmit;closeModal();if(f)f(v);})()">Save</button>
+     </div>`;
+  document.getElementById('modal').hidden=false;
+  setTimeout(()=>{ const el=document.getElementById('modal-input'); if(el){ el.focus(); el.select(); } },0);
+}
+
+/* ---------- boot ---------- */
+(async function init(){
+  await DB.detect();        // is a database backend reachable?
+  await DB.loadAll();       // populate roster / prefs / stats from backend or local storage
+  sanitizeSlots();
+  renderPlayers();
+  document.getElementById('legs-val').textContent = setup.legsPerSet;
+  document.getElementById('sets-val').textContent = setup.setsPerGame;
+  updateFormatLine();
+  const tag=document.getElementById('persist-tag'); // reflect mode on the stats page
+  if(tag) tag.dataset.mode = DB.mode;
+  pushLive();   // tell any scoreboard screens we're ready (idle until a game starts)
+})();
+</script>
+</body>
+</html>

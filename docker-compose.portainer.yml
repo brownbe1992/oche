@@ -1,0 +1,23 @@
+# ── Portainer (no-build) version ──────────────────────────────────────────
+# Use this if you'd rather NOT build an image. It runs the app straight from
+# the project files using the official Node image, so you can paste it into
+# Portainer's Stacks → Web editor and just deploy.
+#
+# BEFORE DEPLOYING: copy the unzipped "darts-app" folder onto your Docker host,
+# then set the path below (left side of the volume line) to wherever you put it.
+# On Unraid this is typically something like /mnt/user/appdata/darts-app.
+
+services:
+  darts:
+    image: node:22-alpine
+    container_name: darts-scorer
+    working_dir: /app
+    command: node backend/server.js
+    ports:
+      - "8046:8046"            # open http://<your-server>:8046
+    environment:
+      - PORT=8046
+      - DARTS_DB=/app/data/darts.db   # database is saved in the data/ folder of the project
+    volumes:
+      - /mnt/user/appdata/darts-app:/app   # <-- CHANGE the left side to your folder path
+    restart: unless-stopped
