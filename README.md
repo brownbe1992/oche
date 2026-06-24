@@ -1,3 +1,9 @@
+## NOTICE
+
+This project is completely vibe-coded using Claude Opus 4.8. I am not a software developer.
+
+---
+
 # Darts Scorer
 
 A per-dart darts scoring app with saved player profiles and lifetime statistics,
