@@ -95,7 +95,7 @@
   .seg{display:inline-flex;border:1px solid var(--wire);border-radius:10px;overflow:hidden}
   .seg button{background:var(--board);border:none;color:var(--muted);padding:10px 15px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
   .seg button[aria-pressed="true"]{background:var(--surface-2);color:var(--ink)}
-  .seg .lbl{align-self:center;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;padding:0 10px 0 2px}
+  .seg .lbl{align-self:center;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;padding:0 10px}
   .stepper{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--wire);border-radius:10px;background:var(--board);padding:2px}
   .stepper .lbl{align-self:center;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;padding:0 6px 0 10px}
   .stepper button{background:var(--surface-2);border:none;color:var(--ink);width:34px;height:36px;border-radius:8px;font-size:18px;font-weight:700;cursor:pointer;line-height:1}
@@ -321,7 +321,7 @@
     <div class="card" style="margin-top:14px">
       <div class="note" style="margin-top:0;padding-top:0;border-top:none">
         <span class="badge">how each stat is counted</span><br>
-        <b style="color:var(--ink)">180</b> — a visit where all three darts land in the treble-20 bed, scoring the maximum 180 points.<br>
+        <b style="color:var(--ink)">180 🎯</b> — a visit where all three darts land in the treble-20 bed, scoring the maximum 180 points.<br>
         <b style="color:var(--ink)">Big Fish 🐟</b> — a checkout of exactly 170 (T20, T20, Bull), the highest possible finish in darts.<br>
         <b style="color:var(--ink)">Nine-dart finish</b> — a perfect leg of 501, finished in exactly nine darts (three visits of three darts each).
       </div>
@@ -775,7 +775,7 @@ function renderHomeContent(s,h2h,practice){
         ${hofSection(finishes)}
       </div>
     </div>
-    ${achievementSection('180s', eighties)}
+    ${achievementSection('180s 🎯', eighties)}
     ${achievementSection('Big Fish 🐟', bigFishData)}
     ${achievementSection('Nine-dart finish', nineDarterData||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
     `;
@@ -805,7 +805,7 @@ function renderHomeContent(s,h2h,practice){
         ${hofSection(practice.finishes)}
       </div>
     </div>
-    ${achievementSection('180s', practice.eighties)}
+    ${achievementSection('180s 🎯', practice.eighties)}
     ${achievementSection('Big Fish 🐟', practice.bigFish)}
     ${achievementSection('Nine-dart finish', practice.nineDarters||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
     `;
