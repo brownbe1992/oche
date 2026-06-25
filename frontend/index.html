@@ -1350,13 +1350,17 @@ function liveSnapshot(message){
     checkout,
     status: game.won ? 'won' : (game.busted ? 'bust' : 'live'),
     message: message || '',
-    achievement: pendingAchievement,
+    achievement: pendingAchievement || null,
     gameOneEighties: game.gameOneEighties || 0,
     gameBigFish: game.gameBigFish || 0,
     done: !!game.done,
     ts: Date.now()
   };
+}
+function pushLive(message){
+  const snap = liveSnapshot(message);
   pendingAchievement = null;
+  DB.pushLive(snap);
 }
 function pushLive(message){ DB.pushLive(liveSnapshot(message)); }
 
@@ -1476,6 +1480,7 @@ function enterTurn(){
   document.getElementById('status').className='status';
   document.getElementById('status').textContent='Tap a multiplier, then a number.';
   renderGame();
+  pushLive();
 }
 
 /* ----- leg / set / game progression ----- */
