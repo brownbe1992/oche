@@ -400,6 +400,7 @@ function getSummary() {
   const sets       = db.prepare("SELECT COUNT(DISTINCT game_id || '-' || set_no) AS n FROM turns").get().n;
   const legs       = db.prepare("SELECT COUNT(DISTINCT game_id || '-' || set_no || '-' || leg_no) AS n FROM turns").get().n;
   const darts      = db.prepare('SELECT COUNT(*) AS n FROM turns').get().n * 3;
+  const tonPlus      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout = 1 AND checkout_points >= 100').get().n;
   const oneEighties  = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE scored = 180').get().n;
   const bigFish      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout = 1 AND checkout_points = 170').get().n;
   const nineDarters  = db.prepare(`
@@ -416,7 +417,7 @@ function getSummary() {
     WHERE g.practice = 1
       OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1
   `).get().n;
-  return { players, games, sets, legs, darts, oneEighties, bigFish, nineDarters, practiceLegs };
+  return { players, games, sets, legs, darts, tonPlus, oneEighties, bigFish, nineDarters, practiceLegs };
 }
 
 function getPlayerStatBubbles(playerName, mode) {

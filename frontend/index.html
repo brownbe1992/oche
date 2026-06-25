@@ -663,11 +663,12 @@ function renderHome(){
         {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty}));
   } else {
     const darts=Object.values(stats).reduce((a,p)=>a+(p.turns||0),0)*3;
+    const tonPlus=Object.values(stats).reduce((a,p)=>a+(p.checkouts100||0),0);
     const oneEighties=Object.values(stats).reduce((a,p)=>a+(p.oneEighties||0),0);
     const bigFish=Object.values(stats).reduce((a,p)=>a+(p.bigFish||0),0);
     const nineDarters=Object.values(stats).reduce((a,p)=>a+(p.nineDarters||0),0);
     const practiceLegs=Object.values(stats).reduce((a,p)=>a+Object.values(p.practiceLegs||{}).reduce((s,n)=>s+n,0),0);
-    renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts,oneEighties,bigFish,nineDarters,practiceLegs},
+    renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts,tonPlus,oneEighties,bigFish,nineDarters,practiceLegs},
       {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
       {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty});
   }
@@ -692,6 +693,7 @@ function renderHomeContent(s,h2h,practice){
     {val:fmt(s.sets),         label:'Sets Played'},
     {val:fmt(s.legs),         label:'H2H Legs Thrown'},
     {val:fmt(s.practiceLegs), label:'Practice Legs Thrown'},
+    {val:fmt(s.tonPlus),      label:'Ton+ Finishes'},
     {val:fmt(s.nineDarters),  label:'9-Darters'},
   ];
 
