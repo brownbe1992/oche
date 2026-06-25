@@ -120,10 +120,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/summary'       && m === 'GET') return send(res, 200, db.getSummary());
-    if (p === '/api/top-finishes'  && m === 'GET') return send(res, 200, db.getTopFinishesAll());
-    if (p === '/api/stats/180s'         && m === 'GET') return send(res, 200, db.getOneEightyStats());
-    if (p === '/api/stats/big-fish'     && m === 'GET') return send(res, 200, db.getBigFishStats());
-    if (p === '/api/stats/nine-darters' && m === 'GET') return send(res, 200, db.getNineDarterStats());
+    if (p === '/api/top-finishes'  && m === 'GET') return send(res, 200, db.getTopFinishesAll(10, url.searchParams.get('mode')));
+    if (p === '/api/stats/180s'         && m === 'GET') return send(res, 200, db.getOneEightyStats(url.searchParams.get('mode')));
+    if (p === '/api/stats/big-fish'     && m === 'GET') return send(res, 200, db.getBigFishStats(url.searchParams.get('mode')));
+    if (p === '/api/stats/nine-darters' && m === 'GET') return send(res, 200, db.getNineDarterStats(url.searchParams.get('mode')));
     if (p === '/api/stats' && m === 'GET')  return send(res, 200, db.computeStats());
     if (p === '/api/players/top-finishes' && m === 'GET') {
       const mode = url.searchParams.get('mode');

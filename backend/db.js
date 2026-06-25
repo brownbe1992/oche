@@ -561,41 +561,43 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
   }
 }
 
-function getOneEightyStats() {
-  const leaderboard = db.prepare(`
-    SELECT p.name, COUNT(*) AS count
-    FROM turns t JOIN players p ON p.id = t.player_id
-    WHERE t.scored = 180
-    GROUP BY t.player_id ORDER BY count DESC
-  `).all();
-  const recent = db.prepare(`
-    SELECT p.name, t.created_at
-    FROM turns t JOIN players p ON p.id = t.player_id
-    WHERE t.scored = 180
-    ORDER BY t.created_at DESC LIMIT 10
-  `).all();
+function _mf(mode) {
+  if (mode === 'h2h')      return `AND g.practice = 0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1`;
+  if (mode === 'practice') return `AND (g.practice = 1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1)`;
+  return '';
+}
+
+function getOneEightyStats(mode) {
+  const mf = _mf(mode);
+  const J = `FROM turns t JOIN games g ON g.id = t.game_id JOIN players p ON p.id = t.player_id`;
+  const leaderboard = db.prepare(`SELECT p.name, COUNT(*) AS count ${J} WHERE t.scored = 180 ${mf} GROUP BY t.player_id ORDER BY count DESC`).all();
+  const recent      = db.prepare(`SELECT p.name, t.created_at ${J} WHERE t.scored = 180 ${mf} ORDER BY t.created_at DESC LIMIT 10`).all();
   return { leaderboard, recent };
 }
 
-function getNineDarterStats() {
+function getBigFishStats(mode) {
+  const mf = _mf(mode);
+  const J = `FROM turns t JOIN games g ON g.id = t.game_id JOIN players p ON p.id = t.player_id`;
+  const leaderboard = db.prepare(`SELECT p.name, COUNT(*) AS count ${J} WHERE t.checkout = 1 AND t.checkout_points = 170 ${mf} GROUP BY t.player_id ORDER BY count DESC`).all();
+  const recent      = db.prepare(`SELECT p.name, t.created_at ${J} WHERE t.checkout = 1 AND t.checkout_points = 170 ${mf} ORDER BY t.created_at DESC LIMIT 10`).all();
+  return { leaderboard, recent };
+}
+
+function getNineDarterStats(mode) {
+  const mf = _mf(mode);
   const leaderboard = db.prepare(`
-    SELECT p.name, COUNT(*) AS count
-    FROM (
-      SELECT t.player_id
-      FROM turns t JOIN games g ON g.id = t.game_id
-      WHERE g.category = '501'
+    SELECT p.name, COUNT(*) AS count FROM (
+      SELECT t.player_id FROM turns t JOIN games g ON g.id = t.game_id
+      WHERE g.category = '501' ${mf}
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
       HAVING COUNT(*) = 3 AND SUM(t.checkout) = 1
-    ) x
-    JOIN players p ON p.id = x.player_id
+    ) x JOIN players p ON p.id = x.player_id
     GROUP BY x.player_id ORDER BY count DESC
   `).all();
   const recent = db.prepare(`
     SELECT p.name, MAX(t.created_at) AS created_at
-    FROM turns t
-    JOIN games g ON g.id = t.game_id
-    JOIN players p ON p.id = t.player_id
-    WHERE g.category = '501'
+    FROM turns t JOIN games g ON g.id = t.game_id JOIN players p ON p.id = t.player_id
+    WHERE g.category = '501' ${mf}
     GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
     HAVING COUNT(*) = 3 AND SUM(t.checkout) = 1
     ORDER BY created_at DESC LIMIT 10
@@ -603,32 +605,15 @@ function getNineDarterStats() {
   return { leaderboard, recent };
 }
 
-function getBigFishStats() {
-  const leaderboard = db.prepare(`
-    SELECT p.name, COUNT(*) AS count
-    FROM turns t JOIN players p ON p.id = t.player_id
-    WHERE t.checkout = 1 AND t.checkout_points = 170
-    GROUP BY t.player_id ORDER BY count DESC
-  `).all();
-  const recent = db.prepare(`
-    SELECT p.name, t.created_at
-    FROM turns t JOIN players p ON p.id = t.player_id
-    WHERE t.checkout = 1 AND t.checkout_points = 170
-    ORDER BY t.created_at DESC LIMIT 10
-  `).all();
-  return { leaderboard, recent };
-}
-
-function getTopFinishesAll(limit = 10) {
+function getTopFinishesAll(limit = 10, mode) {
+  const mf = _mf(mode);
   return db.prepare(`
-    SELECT p.name,
-           t.checkout_points AS score,
-           COUNT(*)          AS times,
-           MIN(t.created_at) AS first_date,
-           MAX(t.created_at) AS last_date
+    SELECT p.name, t.checkout_points AS score, COUNT(*) AS times,
+           MIN(t.created_at) AS first_date, MAX(t.created_at) AS last_date
     FROM turns t
+    JOIN games g ON g.id = t.game_id
     JOIN players p ON p.id = t.player_id
-    WHERE t.checkout = 1 AND t.checkout_points > 0
+    WHERE t.checkout = 1 AND t.checkout_points > 0 ${mf}
     GROUP BY t.player_id, t.checkout_points
     ORDER BY t.checkout_points DESC, first_date ASC
     LIMIT ?

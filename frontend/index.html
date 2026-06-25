@@ -313,7 +313,13 @@
     <div class="card" style="margin-top:14px">
       <h2 style="font-size:24px;margin-bottom:16px">H2H Leaderboard</h2>
       <div id="leaderboard-body"><p class="pp-meta">Loading…</p></div>
-      <div class="note">
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2 style="font-size:24px;margin-bottom:16px">Practice Leaderboard</h2>
+      <div id="practice-leaderboard-body"><p class="pp-meta">Loading…</p></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="note" style="margin-top:0;padding-top:0;border-top:none">
         <span class="badge">how each stat is counted</span><br>
         <b style="color:var(--ink)">180</b> — a visit where all three darts land in the treble-20 bed, scoring the maximum 180 points.<br>
         <b style="color:var(--ink)">Big Fish</b> — a checkout of exactly 170 (T20, T20, Bull), the highest possible finish in darts.<br>
@@ -636,6 +642,7 @@ function show(name){
 function renderHome(){
   const body=document.getElementById('home-body');
   if(!body) return;
+  const empty={leaderboard:[],recent:[]};
   if(DB.mode==='api'){
     body.innerHTML=`<p class="pp-meta">Loading…</p>`;
     Promise.all([
@@ -644,18 +651,29 @@ function renderHome(){
       Backend.get('/api/stats/180s'),
       Backend.get('/api/stats/big-fish'),
       Backend.get('/api/stats/nine-darters'),
-    ]).then(([s,f,e,b,n])=>renderHomeContent(s,f,e,b,n))
-      .catch(()=>renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts:null,oneEighties:null,bigFish:null,nineDarters:null},[],{leaderboard:[],recent:[]},{leaderboard:[],recent:[]},{leaderboard:[],recent:[]}));
+      Backend.get('/api/top-finishes?mode=practice'),
+      Backend.get('/api/stats/180s?mode=practice'),
+      Backend.get('/api/stats/big-fish?mode=practice'),
+      Backend.get('/api/stats/nine-darters?mode=practice'),
+    ]).then(([s,f,e,b,n,pf,pe,pb,pn])=>renderHomeContent(s,
+      {finishes:f,eighties:e,bigFish:b,nineDarters:n},
+      {finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn}))
+      .catch(()=>renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts:null,oneEighties:null,bigFish:null,nineDarters:null},
+        {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
+        {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty}));
   } else {
     const darts=Object.values(stats).reduce((a,p)=>a+(p.turns||0),0)*3;
     const oneEighties=Object.values(stats).reduce((a,p)=>a+(p.oneEighties||0),0);
     const bigFish=Object.values(stats).reduce((a,p)=>a+(p.bigFish||0),0);
     const nineDarters=Object.values(stats).reduce((a,p)=>a+(p.nineDarters||0),0);
     const practiceLegs=Object.values(stats).reduce((a,p)=>a+Object.values(p.practiceLegs||{}).reduce((s,n)=>s+n,0),0);
-    renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts,oneEighties,bigFish,nineDarters,practiceLegs},[],{leaderboard:[],recent:[]},{leaderboard:[],recent:[]},{leaderboard:[],recent:[]});
+    renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts,oneEighties,bigFish,nineDarters,practiceLegs},
+      {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
+      {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty});
   }
 }
-function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
+function renderHomeContent(s,h2h,practice){
+  const finishes=h2h.finishes, eighties=h2h.eighties, bigFishData=h2h.bigFish, nineDarterData=h2h.nineDarters;
   const body=document.getElementById('home-body');
   if(!body) return;
   const fmt=n=>n==null?'—':Number(n).toLocaleString();
@@ -759,7 +777,37 @@ function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
     </div>
     ${achievementSection('180s', eighties)}
     ${achievementSection('Big Fish', bigFishData)}
-    ${achievementSection('Nine-dart finish', nineDarterData||{leaderboard:[],recent:[]},'None recorded yet... you will never get this!')}
+    ${achievementSection('Nine-dart finish', nineDarterData||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
+    `;
+
+  // Practice leaderboard
+  const practiceAvgBoard=Object.entries(stats)
+    .filter(([,p])=>p.practiceStats&&p.practiceStats.turns>0)
+    .map(([name,p])=>({name,avg:p.practiceStats.totalPoints/p.practiceStats.turns,turns:p.practiceStats.turns}))
+    .sort((a,b)=>b.avg-a.avg);
+  const practiceAvgLeaderboard=practiceAvgBoard.length
+    ? `<div class="hof-list">${practiceAvgBoard.map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.avg.toFixed(1)}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${r.turns.toLocaleString()} visits</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">No games played yet.</p>`;
+  const plb=document.getElementById('practice-leaderboard-body');
+  if(plb) plb.innerHTML=`
+    <div class="home-pair">
+      <div class="pp-section">
+        <div class="pp-section-title">Three-Dart Average</div>
+        ${practiceAvgLeaderboard}
+      </div>
+      <div class="pp-section">
+        <div class="pp-section-title">Top Finishes</div>
+        ${hofSection(practice.finishes)}
+      </div>
+    </div>
+    ${achievementSection('180s', practice.eighties)}
+    ${achievementSection('Big Fish', practice.bigFish)}
+    ${achievementSection('Nine-dart finish', practice.nineDarters||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
     `;
 }
 
