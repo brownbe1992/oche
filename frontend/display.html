@@ -80,6 +80,14 @@
   .idle .mk{font-family:'Bebas Neue';font-size:9vmin;color:var(--cream);letter-spacing:.05em}
   .idle .ln{color:var(--muted);font-size:2.6vmin}
   .hidden{display:none!important}
+
+  /* achievement flash overlay */
+  .ach-overlay{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;
+    gap:1.8vmin;background:rgba(8,9,7,.82);z-index:30;text-align:center;pointer-events:none}
+  .ach-overlay.show{display:flex;animation:achpop .35s ease both}
+  @keyframes achpop{from{opacity:0;transform:scale(.88)}to{opacity:1;transform:scale(1)}}
+  .ach-text{font-family:'Bebas Neue';font-size:16vmin;line-height:.85;color:var(--cream);letter-spacing:.04em}
+  .ach-name{font-size:3.5vmin;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
 </style>
 </head>
 <body>
@@ -101,15 +109,24 @@
     <div class="sub" id="banner-sub"></div>
   </div>
 
-<script>
-const grid   = document.getElementById('grid');
-const idle   = document.getElementById('idle');
-const fmtEl  = document.getElementById('fmt');
-const dot    = document.getElementById('dot');
-const liveTx = document.getElementById('livetext');
-const banner = document.getElementById('banner');
+  <div class="ach-overlay" id="ach-overlay">
+    <div class="ach-text" id="ach-text"></div>
+    <div class="ach-name" id="ach-name"></div>
+  </div>
 
-let bannerKey = '';   // so a result banner shows once, not on every heartbeat
+<script>
+const grid      = document.getElementById('grid');
+const idle      = document.getElementById('idle');
+const fmtEl     = document.getElementById('fmt');
+const dot       = document.getElementById('dot');
+const liveTx    = document.getElementById('livetext');
+const banner    = document.getElementById('banner');
+const achOverlay= document.getElementById('ach-overlay');
+const achText   = document.getElementById('ach-text');
+const achName   = document.getElementById('ach-name');
+
+let bannerKey = '';        // so a result banner shows once, not on every heartbeat
+let lastAchTs = 0;         // prevent re-firing achievement on heartbeats
 
 function fmtText(s){
   const cat = s.category != null ? `${s.category}` : '';
@@ -176,6 +193,16 @@ function render(s){
       ${throwbox}
     </div>`;
   }).join('');
+
+  // achievement flashes (180, Big Fish)
+  if(s.achievement && s.achievement.ts && s.achievement.ts !== lastAchTs){
+    lastAchTs = s.achievement.ts;
+    const labels = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟' };
+    achText.textContent = labels[s.achievement.type] || '';
+    achName.textContent = s.achievement.player || '';
+    achOverlay.classList.add('show');
+    setTimeout(()=>achOverlay.classList.remove('show'), 2500);
+  }
 
   // result banners (leg / set / game) — show once per message
   if(s.message && s.message !== bannerKey){

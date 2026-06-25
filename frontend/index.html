@@ -1324,6 +1324,8 @@ function updateCheckout(flash){
 }
 
 /* ---------- live scoreboard feed ---------- */
+let pendingAchievement = null;
+
 function liveSnapshot(message){
   if(!game) return { active:false, ts:Date.now() };
   const cur = game.players[game.current];
@@ -1346,9 +1348,11 @@ function liveSnapshot(message){
     checkout,
     status: game.won ? 'won' : (game.busted ? 'bust' : 'live'),
     message: message || '',
+    achievement: pendingAchievement,
     done: !!game.done,
     ts: Date.now()
   };
+  pendingAchievement = null;
 }
 function pushLive(message){ DB.pushLive(liveSnapshot(message)); }
 
@@ -1442,6 +1446,9 @@ function enterTurn(){
     if(ev.win && ev.pointsThisVisit === 170) _ms.bigFish += 1;
     if(ev.win && game.category==='501' && p.legVisits===3) _ms.nineDarters += 1;
   }
+  // achievement flashes for the live scoreboard (both modes — no-op in local since pushLive is guarded)
+  if(ev.scored === 180) pendingAchievement = { type:'180', player:p.name, ts:Date.now() };
+  if(ev.win && ev.pointsThisVisit === 170) pendingAchievement = { type:'bigfish', player:p.name, ts:Date.now() };
 
   if(ev.win){
     if(DB.mode==='local'){
