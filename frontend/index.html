@@ -265,6 +265,9 @@
   @media(max-width:400px){.hero-val{font-size:38px}}
   #home-body .pp-section-title{font-size:16px;color:var(--ink);text-transform:none;letter-spacing:.01em;
     font-weight:700;border-bottom:1.5px solid var(--wire);padding-bottom:10px;margin-bottom:14px}
+  #leaderboard-body .pp-section-title{display:inline-block;background:var(--surface-2);border:1px solid var(--wire);
+    border-radius:8px;padding:6px 18px;font-size:16px;font-weight:700;color:var(--ink);
+    letter-spacing:.01em;text-transform:none;margin-bottom:14px}
   .home-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   @media(max-width:560px){.home-pair{grid-template-columns:1fr}}
   .achievement-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
@@ -707,7 +710,6 @@ function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
       <div class="pp-section-title">${title}</div>
       <div class="achievement-pair">
         <div>
-          <div class="achievement-col-title">Leaderboard</div>
           <div class="hof-list">${lbRows||'<p class="pp-meta">None yet.</p>'}</div>
         </div>
         <div>
