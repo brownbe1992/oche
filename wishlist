@@ -1,31 +1,11 @@
 Home page:
-- Wins leaderboard
+- Wins leaderboard - on its own leaderboard page
 - Move start new game button to the top
 
 Player pages:
 - https://dartslytics.com/players/luke-littler
-    - Average
-        - 3-Darts Average
-    - 100+ AVG
-        - % Of Matches with 100+ Avg
-    - 90- AVG
-        - % of Matches with 90- (or less) Avg
-    - 1st 9 AVG
-        - Average of 1st nine darts in a leg
-    - 180s Per Leg
-    - 1st 3 AVG
-        - Average of 1st three darts in a leg
-    - 140 Per Leg
-        - % of 140+ scores in the 1st three darts of a leg
-    - Trebleless %
-        - % of legs without hitting a treble
-    - 180s
-    - Big Fish
-    - 9 Darters
     - Checkout %
-- Click each to see graph over time
-    - One graph at bottom, clicking each stat displays the data
-    - 3 dart average last week is default
+- 3 dart average last week is default graph view
 - Calculate average leg/set/game length by time
     - set/game length dependent on # of legs
 - Game/Set/Leg Win%

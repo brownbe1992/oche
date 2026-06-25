@@ -218,6 +218,17 @@
   .btn.danger{color:var(--bust);border-color:var(--wire)}
   .btn.danger:hover{border-color:var(--bust)}
 
+  /* ---- stat bubbles ---- */
+  .stat-bubbles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px}
+  @media(max-width:560px){.stat-bubbles{grid-template-columns:repeat(3,1fr)}}
+  .stat-bubble{background:var(--surface-2);border:1px solid var(--wire);border-radius:11px;
+    padding:11px 6px 10px;text-align:center;cursor:pointer;font:inherit;transition:border-color .12s}
+  .stat-bubble:hover{border-color:var(--muted)}
+  .stat-bubble.active{border-color:var(--gold);box-shadow:inset 0 0 0 1px var(--gold)}
+  .bubble-val{font-family:'Bebas Neue';font-size:22px;color:var(--cream);line-height:1}
+  .bubble-label{font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:3px;line-height:1.2}
+  .stat-bubble.active .bubble-label{color:var(--gold)}
+
   /* ---- player page tabs ---- */
   .player-tabs{display:flex;gap:0;border-bottom:2px solid var(--wire);margin:0 0 20px}
   .tab-btn{background:none;border:none;border-bottom:3px solid transparent;margin-bottom:-2px;
@@ -991,10 +1002,13 @@ function renderPlayerPage(){
   const tab = playerPageTab;
   const cp = avgChartPeriod;
 
+  // stat bubbles (shared, loaded async)
+  const bubblesHtml = `<div class="stat-bubbles" id="player-stat-bubbles">${STAT_DEFS.map(d=>`<button class="stat-bubble${selectedStat===d.key?' active':''}" data-stat="${d.key}" onclick="selectStat('${d.key}')" title="${d.desc}"><div class="bubble-val" id="bv-${d.key}">—</div><div class="bubble-label">${d.label}</div></button>`).join('')}</div>`;
+
   // shared chart + top-finishes HTML (same structure for both tabs)
   const chartSection = `
     <div class="pp-section">
-      <div class="pp-section-title">3-dart average over time</div>
+      <div class="pp-section-title" id="chart-metric-title">${(STAT_DEFS.find(d=>d.key===selectedStat)||STAT_DEFS[0]).label} over time</div>
       <div class="chart-periods">
         <button class="chart-period-btn${cp==='today'?' active':''}" data-period="today" onclick="loadAvgChart('today')">Today</button>
         <button class="chart-period-btn${cp==='week'?' active':''}" data-period="week" onclick="loadAvgChart('week')">Week</button>
@@ -1017,17 +1031,7 @@ function renderPlayerPage(){
       <div id="player-top-finishes"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </div>`;
 
-  function statGrid(ts){
-    const avg = ts.turns ? (ts.totalPoints/ts.turns).toFixed(1) : '0.0';
-    return `<div class="stat-grid">
-      <div class="stat-block"><div class="stat-val">${avg}</div><div class="stat-label">3-dart avg</div></div>
-      <div class="stat-block"><div class="stat-val">${ts.checkouts100||0}</div><div class="stat-label">Ton+ Finishes</div></div>
-      <div class="stat-block"><div class="stat-val">${ts.trebleLess||0}</div><div class="stat-label">Treble-less</div></div>
-      <div class="stat-block"><div class="stat-val">${ts.oneEighties||0}</div><div class="stat-label">180s</div></div>
-      <div class="stat-block"><div class="stat-val">${ts.bigFish||0}</div><div class="stat-label">Big Fish</div></div>
-      <div class="stat-block"><div class="stat-val">${ts.nineDarters||0}</div><div class="stat-label">9-Darters</div></div>
-    </div>`;
-  }
+  // statGrid replaced by stat bubbles above
 
   // H2H sections (reused by both 'h2h' and 'overall' tabs)
   const cats = Object.keys({...(s.legsByCat||{}), ...(s.gamesByCat||{})});
@@ -1066,13 +1070,11 @@ function renderPlayerPage(){
   let tabContent;
   if(tab === 'overall'){
     tabContent = `
-      ${statGrid(s)}
       ${chartSection}
       ${h2hSection}
       ${practiceSection}`;
   } else if(tab === 'h2h'){
     tabContent = `
-      ${statGrid(s.h2hStats||{})}
       ${chartSection}
       <div class="pp-section">
         <div class="pp-section-title">Games &amp; legs played</div>
@@ -1085,7 +1087,6 @@ function renderPlayerPage(){
       </div>`;
   } else {
     tabContent = `
-      ${statGrid(s.practiceStats||{})}
       ${chartSection}
       <div class="pp-section">
         <div class="pp-section-title">Legs thrown</div>
@@ -1104,6 +1105,7 @@ function renderPlayerPage(){
       <button class="tab-btn${tab==='h2h'?' active':''}" data-tab="h2h" onclick="switchPlayerTab('h2h')">H2H</button>
       <button class="tab-btn${tab==='practice'?' active':''}" data-tab="practice" onclick="switchPlayerTab('practice')">Practice</button>
     </div>
+    ${bubblesHtml}
     ${tabContent}
     <div class="pp-section">
       <div class="pp-section-title">Out mode</div>
@@ -1121,22 +1123,35 @@ function renderPlayerPage(){
     </div>
     <div class="btn-row">
       <button class="btn btn-ghost" onclick="askRenameFromProfile('${j}')">Rename</button>
-      <button class="btn btn-ghost danger" onclick="askClearPlayerStats('${j}','${tab}')">Clear ${tab==='h2h'?'H2H':'Practice'} stats</button>
+      <button class="btn btn-ghost danger" onclick="askClearPlayerStats('${j}','${tab==='overall'?'all':tab}')">Reset ${tab==='overall'?'all':tab==='h2h'?'H2H':'Practice'} stats</button>
       <button class="btn btn-ghost danger" onclick="askDeleteFromProfile('${j}')">Delete player</button>
     </div>`;
+  loadStatBubbles();
   loadAvgChart(avgChartPeriod);
   loadDartWeights();
   loadTopFinishes();
 }
 function clearLocalPlayerStats(name, mode){
   const s = stats[name]; if(!s) return;
+  const zeroStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0, nineDarters:0 };
+  if(mode === 'all'){
+    s.h2hStats = {...zeroStats};
+    s.practiceStats = {...zeroStats};
+    s.legsByCat = {}; s.gamesByCat = {};
+    s.h2hLegsWonByCat = {}; s.h2hSetsWonByCat = {}; s.h2hGamesWonByCat = {};
+    s.h2hAvgDartsPerLeg = null;
+    s.practiceLegs = {}; s.practiceAvgDartsPerLeg = null;
+    s.turns = 0; s.totalPoints = 0; s.trebleLess = 0;
+    s.checkouts100 = 0; s.oneEighties = 0; s.bigFish = 0; s.nineDarters = 0;
+    persist(); return;
+  }
   if(mode === 'h2h'){
-    s.h2hStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0 };
+    s.h2hStats = {...zeroStats};
     s.legsByCat = {}; s.gamesByCat = {};
     s.h2hLegsWonByCat = {}; s.h2hSetsWonByCat = {}; s.h2hGamesWonByCat = {};
     s.h2hAvgDartsPerLeg = null;
   } else {
-    s.practiceStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0 };
+    s.practiceStats = {...zeroStats};
     s.practiceLegs = {};
     s.practiceAvgDartsPerLeg = null;
   }
@@ -1148,11 +1163,12 @@ function clearLocalPlayerStats(name, mode){
   s.checkouts100 = (h.checkouts100||0) + (pr.checkouts100||0);
   s.oneEighties  = (h.oneEighties||0)  + (pr.oneEighties||0);
   s.bigFish      = (h.bigFish||0)      + (pr.bigFish||0);
+  s.nineDarters  = (h.nineDarters||0)  + (pr.nineDarters||0);
   persist();
 }
 function askClearPlayerStats(name, mode){
-  const label = mode === 'h2h' ? 'H2H' : 'Practice';
-  uiConfirm(`Clear all ${label} stats for "${name}"? Turn data is permanently deleted and cannot be undone.`, ()=>{
+  const label = mode === 'all' ? 'all' : mode === 'h2h' ? 'H2H' : 'Practice';
+  uiConfirm(`Reset ${label} stats for "${name}"? Turn data is permanently deleted and cannot be undone.`, ()=>{
     if(DB.mode==='api'){
       Backend.send('DELETE', `/api/players/stats?name=${encodeURIComponent(name)}&mode=${mode}`)
         .then(()=>{ if(DB.mode==='api') DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); })
@@ -1560,6 +1576,21 @@ function checkoutHint(rem, doubleOut, maxDarts){
 }
 
 /* ---------- avg-over-time chart ---------- */
+const STAT_DEFS = [
+  { key:'avg',           label:'Average',     desc:'3-dart average',                            fmt:v=>v!=null?v.toFixed(1):'—' },
+  { key:'180s',          label:'180s',         desc:'Count of 180s thrown',                    fmt:v=>v!=null?String(Math.round(v)):'—' },
+  { key:'bigfish',       label:'Big Fish',    desc:'170 checkouts',                            fmt:v=>v!=null?String(Math.round(v)):'—' },
+  { key:'ninedarters',   label:'9 Darters',   desc:'501 legs finished in 9 darts',            fmt:v=>v!=null?String(Math.round(v)):'—' },
+  { key:'treblelesspct', label:'Trebleless %',desc:'% of legs without hitting a treble',      fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'first3avg',     label:'1st 3 AVG',   desc:'Average of 1st 3 darts in a leg',         fmt:v=>v!=null?v.toFixed(1):'—' },
+  { key:'first9avg',     label:'1st 9 AVG',   desc:'Average of 1st 9 darts in a leg',         fmt:v=>v!=null?v.toFixed(1):'—' },
+  { key:'avg100plus',    label:'100+ AVG',    desc:'% of legs with a 100+ average',           fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'avg90minus',    label:'90- AVG',     desc:'% of legs with a 90 or lower average',    fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'score140pct',   label:'140/Leg',     desc:'% of opening visits scoring 140 or more', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'180sperleg',    label:'180s/Leg',    desc:'Ratio of 180s to total legs',             fmt:v=>v!=null?v.toFixed(3):'—' },
+];
+let selectedStat = 'avg';
+
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 let avgChartPeriod = 'month';
 let avgChartWeight = null;      // null = all weights; number = grams filter
@@ -1598,26 +1629,27 @@ function drawAvgChart(data){
     return;
   }
   if(data.length===1){
-    container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Only one session in this period — <b style="color:var(--ink)">${data[0].avg.toFixed(1)}</b> avg.</p>`;
+    container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Only one session in this period — <b style="color:var(--ink)">${(STAT_DEFS.find(d=>d.key===selectedStat)||STAT_DEFS[0]).fmt(data[0].value??data[0].avg)}</b>.</p>`;
     return;
   }
   const W=560,H=180,ml=46,mr=12,mt=14,mb=30;
   const cw=W-ml-mr, ch=H-mt-mb;
-  const avgs=data.map(d=>d.avg);
+  const avgs=data.map(d=>d.value??d.avg);
   const rawMin=Math.min(...avgs), rawMax=Math.max(...avgs);
   const spread=rawMax-rawMin;
   const pad=Math.max(spread*0.2,2);
   const yMin=Math.max(0,rawMin-pad), yMax=rawMax+pad, yRange=yMax-yMin||1;
   const n=data.length;
+  const statFmt=(STAT_DEFS.find(d=>d.key===selectedStat)||STAT_DEFS[0]).fmt;
   const pts=data.map((d,i)=>({
     x:ml+(n===1?cw/2:(i/(n-1))*cw),
-    y:mt+ch-((d.avg-yMin)/yRange)*ch
+    y:mt+ch-(((d.value??d.avg)-yMin)/yRange)*ch
   }));
   const linePts=pts.map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
   const areaPts=`${pts[0].x.toFixed(1)},${mt+ch} ${linePts} ${pts[n-1].x.toFixed(1)},${mt+ch}`;
   const yTicks=[yMin,(yMin+yMax)/2,yMax].map(v=>({
     y:(mt+ch-((v-yMin)/yRange)*ch).toFixed(1),
-    label:v.toFixed(1)
+    label:statFmt(v)
   }));
   const labelCount=Math.min(n,5);
   const xLabels=Array.from({length:labelCount},(_,i)=>{
@@ -1640,6 +1672,39 @@ function drawAvgChart(data){
     ${showDots?pts.map(p=>`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="#d9b46a"/>`).join(''):''}
     ${xLabels.map(l=>`<text x="${l.x}" y="${mt+ch+18}" text-anchor="middle" font-size="10" fill="#7a8070">${l.label}</text>`).join('')}
   </svg>`;
+}
+
+/* ---------- stat bubbles ---------- */
+const BUBBLE_KEY_MAP = { '180s':'one80s', bigfish:'bigFish', ninedarters:'nineDarters', treblelesspct:'treblelessPct', '180sperleg':'one80sPerLeg' };
+function selectStat(key){
+  selectedStat = key;
+  document.querySelectorAll('.stat-bubble').forEach(b=>b.classList.toggle('active',b.dataset.stat===key));
+  const el=document.getElementById('chart-metric-title');
+  const def=STAT_DEFS.find(d=>d.key===key);
+  if(el&&def) el.textContent=def.label+' over time';
+  loadAvgChart(avgChartPeriod);
+}
+function loadStatBubbles(){
+  const container=document.getElementById('player-stat-bubbles');
+  if(!container) return;
+  if(DB.mode!=='api'){
+    const s=stats[currentPlayer]||{};
+    const ts=playerPageTab==='h2h'?(s.h2hStats||{}):playerPageTab==='practice'?(s.practiceStats||{}):s;
+    renderStatBubbles({ avg:ts.turns?(ts.totalPoints/ts.turns):null, one80s:ts.oneEighties||0, bigFish:ts.bigFish||0, nineDarters:ts.nineDarters||0 });
+    return;
+  }
+  const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
+  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
+    .then(data=>renderStatBubbles(data)).catch(()=>{});
+}
+function renderStatBubbles(data){
+  if(!data) return;
+  STAT_DEFS.forEach(d=>{
+    const el=document.getElementById('bv-'+d.key);
+    if(!el) return;
+    const mk=BUBBLE_KEY_MAP[d.key]||d.key;
+    el.textContent=d.fmt(data[mk]!=null?data[mk]:data[d.key]);
+  });
 }
 
 function loadDartWeights(){
@@ -1682,7 +1747,7 @@ function loadAvgChart(period){
     return;
   }
   container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Loading…</p>`;
-  let url=`/api/players/avg-history?name=${encodeURIComponent(currentPlayer)}&period=${period}`;
+  let url=`/api/players/avg-history?name=${encodeURIComponent(currentPlayer)}&period=${period}&metric=${selectedStat}`;
   if(playerPageTab==='h2h'||playerPageTab==='practice') url+=`&mode=${playerPageTab}`;
   if(period==='custom') url+=`&start=${customRangeStart}&end=${customRangeEnd}`;
   if(avgChartWeight) url+=`&weight=${avgChartWeight}`;

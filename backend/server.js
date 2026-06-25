@@ -115,7 +115,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/players' && m === 'DELETE') return send(res, 200, db.deletePlayer(url.searchParams.get('name')));
     if (p === '/api/players/stats' && m === 'DELETE') {
       const mode = url.searchParams.get('mode');
-      if (mode !== 'h2h' && mode !== 'practice') return send(res, 400, { error: 'mode must be h2h or practice' });
+      if (!['h2h','practice','all'].includes(mode)) return send(res, 400, { error: 'mode must be h2h, practice, or all' });
       return send(res, 200, db.clearPlayerStats(url.searchParams.get('name'), mode));
     }
 
@@ -129,9 +129,14 @@ const server = http.createServer(async (req, res) => {
       const mode = url.searchParams.get('mode');
       return send(res, 200, db.getTopFinishes(url.searchParams.get('name'), mode));
     }
+    if (p === '/api/players/stat-bubbles' && m === 'GET') {
+      const mode = url.searchParams.get('mode');
+      return send(res, 200, db.getPlayerStatBubbles(url.searchParams.get('name'), mode));
+    }
     if (p === '/api/players/avg-history' && m === 'GET') {
       const name = url.searchParams.get('name');
       const period = url.searchParams.get('period') || 'month';
+      const metric = url.searchParams.get('metric') || 'avg';
       const validPeriods = ['today', 'week', 'month', 'year', 'all', 'custom'];
       if (!validPeriods.includes(period)) return send(res, 400, { error: 'Invalid period' });
       const opts = {};
@@ -147,7 +152,7 @@ const server = http.createServer(async (req, res) => {
       if (weight && /^\d+$/.test(weight)) opts.dartWeight = Number(weight);
       const mode = url.searchParams.get('mode');
       if (mode === 'h2h' || mode === 'practice') opts.mode = mode;
-      return send(res, 200, db.getAvgHistory(name, period, opts));
+      return send(res, 200, db.getMetricHistory(name, metric, period, opts));
     }
     if (p === '/api/reset' && m === 'POST') return send(res, 200, db.resetStats());
 

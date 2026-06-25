@@ -413,6 +413,148 @@ function getSummary() {
   return { players, games, sets, legs, darts, oneEighties, bigFish, nineDarters };
 }
 
+function getPlayerStatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const mf = mode === 'h2h'
+    ? `AND g.practice = 0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1`
+    : mode === 'practice'
+    ? `AND (g.practice = 1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1)`
+    : '';
+  const q = (sql) => { const r = db.prepare(sql).get(p.id); return r ? r.v : null; };
+  const J = `FROM turns t JOIN games g ON g.id = t.game_id WHERE t.player_id = ?`;
+
+  const avg        = q(`SELECT CAST(SUM(t.scored) AS REAL)/NULLIF(COUNT(*),0) AS v ${J} ${mf}`);
+  const one80s     = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.scored=180`) ?? 0;
+  const bigFish    = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.checkout=1 AND t.checkout_points=170`) ?? 0;
+  const nineDarters= q(`SELECT COUNT(*) AS v FROM (SELECT 1 ${J} ${mf} AND g.category='501' GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(*)=3 AND SUM(t.checkout)=1)`) ?? 0;
+  const totalLegs  = q(`SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS v ${J} ${mf}`) ?? 0;
+  const tlLegs     = q(`SELECT COUNT(*) AS v FROM (SELECT 1 ${J} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(1-t.treble_less)=0)`) ?? 0;
+
+  const first3avg = q(`SELECT AVG(scored) AS v FROM (
+    SELECT t.scored, ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
+    ${J} ${mf}
+  ) WHERE rn=1`);
+
+  const first9avg = q(`SELECT AVG(first3)/3.0 AS v FROM (
+    SELECT SUM(CASE WHEN rn<=3 THEN scored ELSE 0 END) AS first3,
+           SUM(CASE WHEN rn<=3 THEN 1 ELSE 0 END) AS c3
+    FROM (SELECT t.game_id,t.set_no,t.leg_no,t.scored,
+                 ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
+          ${J} ${mf}) t
+    GROUP BY game_id,set_no,leg_no HAVING c3=3
+  )`);
+
+  const avg100plus = q(`SELECT CAST(SUM(CASE WHEN la>=100 THEN 1 ELSE 0 END) AS REAL)*100/NULLIF(COUNT(*),0) AS v FROM (
+    SELECT CAST(SUM(t.scored) AS REAL)/COUNT(*) AS la ${J} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no
+  )`);
+  const avg90minus = q(`SELECT CAST(SUM(CASE WHEN la<=90 THEN 1 ELSE 0 END) AS REAL)*100/NULLIF(COUNT(*),0) AS v FROM (
+    SELECT CAST(SUM(t.scored) AS REAL)/COUNT(*) AS la ${J} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no
+  )`);
+  const score140pct = q(`SELECT CAST(SUM(CASE WHEN scored>=140 THEN 1 ELSE 0 END) AS REAL)*100/NULLIF(COUNT(*),0) AS v FROM (
+    SELECT t.scored, ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
+    ${J} ${mf}
+  ) WHERE rn=1`);
+
+  return {
+    avg, one80s, bigFish, nineDarters,
+    treblelessPct: totalLegs > 0 ? (tlLegs / totalLegs * 100) : null,
+    first3avg, first9avg, avg100plus, avg90minus, score140pct,
+    one80sPerLeg: totalLegs > 0 ? (one80s / totalLegs) : null,
+  };
+}
+
+function getMetricHistory(playerName, metric, period, opts = {}) {
+  const p = getPlayer(playerName);
+  if (!p) return [];
+  const modeWhere = opts.mode === 'h2h'
+    ? `AND g.practice = 0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1`
+    : opts.mode === 'practice'
+    ? `AND (g.practice = 1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1)`
+    : '';
+  const params = [p.id];
+  let weightWhere = '';
+  if (opts.dartWeight) {
+    weightWhere = ` AND EXISTS (SELECT 1 FROM game_players gp WHERE gp.game_id = t.game_id AND gp.player_id = ? AND gp.dart_weight = ?)`;
+    params.push(p.id, Number(opts.dartWeight));
+  }
+
+  const bld = (tsCol) => {
+    let fmt, flt;
+    if      (period==='today')  { fmt=`strftime('%H',${tsCol})`;          flt=`date(${tsCol})=date('now')`; }
+    else if (period==='week')   { fmt=`strftime('%Y-%m-%d',${tsCol})`;    flt=`${tsCol}>=datetime('now','-7 days')`; }
+    else if (period==='month')  { fmt=`strftime('%Y-%m-%d',${tsCol})`;    flt=`${tsCol}>=datetime('now','-30 days')`; }
+    else if (period==='year')   { fmt=`'w'||strftime('%Y-%W',${tsCol})`;  flt=`${tsCol}>=datetime('now','-365 days')`; }
+    else if (period==='custom') { fmt=`strftime('%Y-%m-%d',${tsCol})`;    flt=`date(${tsCol})>='${opts.start}' AND date(${tsCol})<='${opts.end}'`; }
+    else                        { fmt=`strftime('%Y-%m',${tsCol})`;       flt=null; }
+    return { fmt, and: flt ? `AND ${flt}` : '', where: flt ? `WHERE ${flt}` : '' };
+  };
+
+  const T = bld('t.created_at');
+  const L = bld('leg_ts');
+  const F = bld('created_at');  // after window func unwrapping, no t. prefix
+
+  const TBASE = `FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere}`;
+
+  switch (metric) {
+    case 'avg':
+      return db.prepare(`SELECT ${T.fmt} AS bucket, CAST(SUM(t.scored) AS REAL)/COUNT(*) AS value, COUNT(*) AS count ${TBASE} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case '180s':
+      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(*) AS value ${TBASE} AND t.scored=180 GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'bigfish':
+      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(*) AS value ${TBASE} AND t.checkout=1 AND t.checkout_points=170 GROUP BY bucket ORDER BY bucket`).all(...params);
+    case '180sperleg':
+      return db.prepare(`SELECT ${T.fmt} AS bucket, CAST(SUM(CASE WHEN t.scored=180 THEN 1 ELSE 0 END) AS REAL)/NULLIF(COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no),0) AS value ${TBASE} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'ninedarters':
+      return db.prepare(`SELECT ${L.fmt} AS bucket, COUNT(*) AS value FROM (
+        SELECT MAX(t.created_at) AS leg_ts
+        FROM turns t JOIN games g ON g.id=t.game_id
+        WHERE t.player_id=? AND g.category='501' ${modeWhere} ${weightWhere}
+        GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(*)=3 AND SUM(t.checkout)=1
+      ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'treblelesspct':
+      return db.prepare(`SELECT ${L.fmt} AS bucket, CAST(SUM(is_tl) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
+        SELECT MAX(t.created_at) AS leg_ts, CASE WHEN SUM(1-t.treble_less)=0 THEN 1 ELSE 0 END AS is_tl
+        FROM turns t JOIN games g ON g.id=t.game_id
+        WHERE t.player_id=? ${modeWhere} ${weightWhere}
+        GROUP BY t.game_id,t.set_no,t.leg_no
+      ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'first3avg':
+      return db.prepare(`SELECT ${F.fmt} AS bucket, AVG(scored) AS value FROM (
+        SELECT t.scored, t.created_at, ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
+        FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere}
+      ) WHERE rn=1 ${F.and} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'first9avg':
+      return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(first3)/3.0 AS value FROM (
+        SELECT MAX(t.created_at) AS leg_ts, SUM(CASE WHEN rn<=3 THEN t.scored ELSE 0 END) AS first3,
+               SUM(CASE WHEN rn<=3 THEN 1 ELSE 0 END) AS c3
+        FROM (SELECT t.game_id,t.set_no,t.leg_no,t.scored,t.created_at,
+                     ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
+              FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere}) t
+        GROUP BY t.game_id,t.set_no,t.leg_no HAVING c3=3
+      ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'avg100plus':
+      return db.prepare(`SELECT ${L.fmt} AS bucket, CAST(SUM(CASE WHEN la>=100 THEN 1 ELSE 0 END) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
+        SELECT MAX(t.created_at) AS leg_ts, CAST(SUM(t.scored) AS REAL)/COUNT(*) AS la
+        FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere}
+        GROUP BY t.game_id,t.set_no,t.leg_no
+      ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'avg90minus':
+      return db.prepare(`SELECT ${L.fmt} AS bucket, CAST(SUM(CASE WHEN la<=90 THEN 1 ELSE 0 END) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
+        SELECT MAX(t.created_at) AS leg_ts, CAST(SUM(t.scored) AS REAL)/COUNT(*) AS la
+        FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere}
+        GROUP BY t.game_id,t.set_no,t.leg_no
+      ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'score140pct':
+      return db.prepare(`SELECT ${F.fmt} AS bucket, CAST(SUM(CASE WHEN scored>=140 THEN 1 ELSE 0 END) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
+        SELECT t.scored, t.created_at, ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
+        FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere}
+      ) WHERE rn=1 ${F.and} GROUP BY bucket ORDER BY bucket`).all(...params);
+    default:
+      return [];
+  }
+}
+
 function getOneEightyStats() {
   const leaderboard = db.prepare(`
     SELECT p.name, COUNT(*) AS count
@@ -587,6 +729,12 @@ function clearPlayerStats(playerName, mode) {
   const p = getPlayer(playerName);
   if (!p) throw httpError(404, 'Player not found');
 
+  if (mode === 'all') {
+    db.prepare('DELETE FROM turns        WHERE player_id = ?').run(p.id);
+    db.prepare('DELETE FROM game_players WHERE player_id = ?').run(p.id);
+    return { ok: true };
+  }
+
   const gameIdQuery = mode === 'h2h'
     ? `SELECT g.id FROM games g
        WHERE g.practice = 0
@@ -619,6 +767,7 @@ module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer,
   createGame, addTurn, completeGame, recordEvent,
   computeStats, getSummary, getOneEightyStats, getBigFishStats, getNineDarterStats,
+  getPlayerStatBubbles, getMetricHistory,
   getTopFinishes, getTopFinishesAll, getAvgHistory, getDartWeights, clearPlayerStats, resetStats,
   _db: db,
 };
