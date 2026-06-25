@@ -148,7 +148,7 @@
   .slot.filled{border-style:solid}
   .slot.t{border-color:var(--green)}
   .slot.d{border-color:var(--red)}
-  .slot .lab{font-family:'Bebas Neue';font-size:26px;line-height:.9;letter-spacing:.03em}
+  .slot .lab{font-family:'Bebas Neue';font-size:30px;line-height:.9;letter-spacing:.03em}
   .slot .pts{font-size:11px;color:var(--muted)}
   .slot .ph{color:#4d514a;font-size:12px}
 
@@ -157,24 +157,27 @@
   .status.win{color:var(--green);font-weight:700;letter-spacing:.04em}
 
   .multi{display:flex;gap:8px;justify-content:center;margin-bottom:12px}
-  .multi button{flex:1;max-width:130px;background:var(--surface);border:1px solid var(--wire);color:var(--muted);
-    padding:11px;border-radius:10px;font:inherit;font-weight:700;font-size:14px;cursor:pointer;letter-spacing:.03em}
+  .multi button{flex:1;max-width:160px;background:var(--surface);border:1px solid var(--wire);color:var(--muted);
+    padding:14px;border-radius:10px;font:inherit;font-weight:700;font-size:16px;cursor:pointer;letter-spacing:.03em}
   .multi button[aria-pressed="true"]{color:var(--ink)}
   .multi button.m-d[aria-pressed="true"]{background:rgba(200,16,46,.16);border-color:var(--red);color:#ff8a93}
   .multi button.m-t[aria-pressed="true"]{background:rgba(27,138,58,.16);border-color:var(--green);color:#7fe0a0}
   .multi button.m-s[aria-pressed="true"]{background:var(--surface-2);border-color:var(--muted)}
 
-  .pad{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}
-  .pad button{background:var(--surface);border:1px solid var(--wire);color:var(--ink);border-radius:9px;
-    padding:14px 0;font:inherit;font-size:15px;font-weight:600;cursor:pointer}
+  .pad{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+  .pad button{background:var(--surface);border:1px solid var(--wire);color:var(--ink);border-radius:10px;
+    padding:16px 0;font:inherit;font-size:20px;font-weight:600;cursor:pointer}
   .pad button:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
   .pad button:disabled{opacity:.3;cursor:not-allowed}
   .pad button.wide{grid-column:span 2}
   .pad button.bull{color:var(--red)}
   .pad button.miss{color:var(--muted)}
 
-  .turn-actions{display:flex;gap:10px;margin-top:14px}
+  .turn-actions{display:flex;gap:10px;margin-top:12px;
+    position:sticky;bottom:10px;z-index:5;
+    background:linear-gradient(to top,var(--board) 85%,transparent);padding:14px 0 2px}
   .turn-actions .btn{flex:1}
+  .turn-actions .btn-primary{font-size:17px;padding:16px 20px}
 
   /* ---- stats screen ---- */
   table{width:100%;border-collapse:collapse;font-size:13.5px}
@@ -191,10 +194,29 @@
     border:1px solid var(--wire);border-radius:999px;padding:3px 9px;margin-bottom:4px}
   .persist-tag{font-size:11px;color:var(--muted);margin-left:8px}
   @media (max-width:560px){
-    .pad button{padding:13px 0;font-size:14px}
+    .pad button{padding:14px 0;font-size:17px}
     .pscore .rem{font-size:38px}
     .masthead .mark{font-size:30px}
   }
+
+  /* ---- game screen: compact layout for touchscreen scoring ---- */
+  body.game-active{padding:8px 12px}
+  body.game-active .masthead{padding:3px 2px 8px;margin-bottom:10px}
+  body.game-active .masthead .mark{font-size:26px}
+  body.game-active .masthead .nav{display:none}
+  body.game-active .scoreboard{gap:6px;margin-bottom:8px}
+  body.game-active .pscore{padding:8px 12px}
+  body.game-active .pscore .rem{font-size:44px;min-width:58px}
+  body.game-active .pscore .nm{font-size:16px}
+  body.game-active .pscore .meta{min-width:100px}
+  body.game-active .oche{padding:12px 14px}
+  body.game-active .turnhead{margin-bottom:6px}
+  body.game-active .slot{height:60px}
+  body.game-active .slots{margin-bottom:10px}
+  body.game-active .status{margin-bottom:8px;font-size:12px;min-height:18px}
+  body.game-active .multi{margin-bottom:10px}
+  body.game-active .checkout-bar{margin:0 0 10px;padding:10px 14px}
+
   @media (prefers-reduced-motion:reduce){*{animation:none!important}}
   .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 
@@ -628,6 +650,7 @@ function setPlayerOut(name, mode){ const out = mode==='single'?'single':'double'
 function show(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));
   document.getElementById('screen-'+name).classList.add('on');
+  document.body.classList.toggle('game-active', name==='game');
   document.getElementById('nav-home').setAttribute('aria-current', name==='home');
   document.getElementById('nav-setup').setAttribute('aria-current', name==='setup');
   document.getElementById('nav-players').setAttribute('aria-current', name==='players'||name==='player');
@@ -964,6 +987,7 @@ function newMatchPlayer(name, start){
   return { name, score:start,
     doubleOut: playerOut(name)==='double', // this player's own finish rule
     legPoints:0,  legVisits:0,    // resets every leg  -> per-leg average
+    legDarts:0,   legBusts:0,     // darts thrown + busts this leg
     gamePoints:0, gameVisits:0,   // resets every game -> per-game average
     legsWon:0,    setsWon:0 };    // legsWon = legs in the current set
 }
@@ -1353,6 +1377,7 @@ function liveSnapshot(message){
     achievement: pendingAchievement || null,
     gameOneEighties: game.gameOneEighties || 0,
     gameBigFish: game.gameBigFish || 0,
+    legSummary: game.legSummary || null,
     done: !!game.done,
     ts: Date.now()
   };
@@ -1362,7 +1387,6 @@ function pushLive(message){
   pendingAchievement = null;
   DB.pushLive(snap);
 }
-function pushLive(message){ DB.pushLive(liveSnapshot(message)); }
 
 function renderPad(){
   const pad=document.getElementById('pad'); pad.innerHTML='';
@@ -1429,6 +1453,8 @@ function enterTurn(){
 
   // per-leg and per-game scope (shown live on the scoreboard — both modes)
   p.legPoints  += ev.scored; p.legVisits  += 1;
+  p.legDarts   += game.darts.length;
+  if(ev.bust) p.legBusts += 1;
   p.gamePoints += ev.scored; p.gameVisits += 1;
   if(!ev.bust) p.score = ev.newScore;
 
@@ -1539,7 +1565,8 @@ function startNextLeg(newSet){
   DB.recordEvent('leg_start', game.setNo, game.legNo);
   game.starter = (game.starter + 1) % game.players.length;
   game.current = game.starter;
-  game.players.forEach(p=>{ p.score = game.start; p.legPoints=0; p.legVisits=0; });
+  game.players.forEach(p=>{ p.score = game.start; p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legBusts=0; });
+  game.legSummary = null;
   game.darts=[]; game.busted=false; game.won=false;
   mult=1;
   renderGameShell(); updateMultUI(); renderGame();
@@ -1579,6 +1606,13 @@ function finishUnit(kind, winner){
         <button class="btn btn-ghost" onclick="uiConfirm('End the match early? Recorded stats are kept.', ()=>show('setup'))">End game</button>
       </div></div>`;
   }
+  game.legSummary = game.players.map(p=>({
+    name: p.name,
+    avg:   p.legVisits ? (p.legPoints / p.legVisits).toFixed(1) : null,
+    darts: p.legDarts  || 0,
+    busts: p.legBusts  || 0,
+    won:   p.name === winner
+  }));
   pushLive(`${winner} ${labels[kind]}`);
 }
 

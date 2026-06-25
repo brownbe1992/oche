@@ -94,6 +94,18 @@
   .corner-row .cv{font-family:'Bebas Neue';font-size:3.2vmin;color:var(--cream);letter-spacing:.03em;flex:none}
   .corner-br .corner-row{flex-direction:row-reverse}
 
+  /* leg summary cards (shown between legs) */
+  .sum-card{position:relative;background:var(--surface);border:1px solid var(--wire);border-radius:2vmin;
+    padding:3vmin 3.2vmin;display:flex;flex-direction:column;gap:2.4vmin;justify-content:center;overflow:hidden}
+  .sum-card.winner{border-color:var(--gold);box-shadow:inset 0 0 0 .35vmin var(--gold),0 0 6vmin rgba(217,180,106,.12)}
+  .sum-name{font-weight:600;font-size:3.6vmin;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sum-crown{font-size:3.2vmin;margin-left:.8vmin}
+  .sum-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1.6vmin 2vmin}
+  .sum-stat{display:flex;flex-direction:column;gap:.4vmin}
+  .sum-stat .sv{font-family:'Bebas Neue';font-size:6.5vmin;line-height:.85;color:var(--cream);letter-spacing:.02em}
+  .sum-stat .sl{font-size:1.7vmin;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:600}
+  .sum-card.winner .sum-stat .sv{color:#fff}
+
   /* achievement flash overlay */
   .ach-overlay{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;
     gap:1.8vmin;background:rgba(8,9,7,.82);z-index:30;text-align:center;pointer-events:none}
@@ -198,43 +210,64 @@ function render(s){
   const cols = n<=1 ? 1 : n<=4 ? 2 : 3;
   grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
 
-  grid.innerHTML = s.players.map((p,i)=>{
-    const active = i===s.currentIndex;
-    const standing = s.setsPerGame>1
-      ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
-      : `Legs ${p.legsWon}/${s.legsPerSet}`;
-    let throwbox = '';
-    if(active){
-      const slots = [0,1,2].map(k=>{
-        const lab = s.darts[k];
-        return `<div class="dart ${dartClass(lab)}">${lab || 'dart '+(k+1)}</div>`;
-      }).join('');
-      const checkout = s.checkout
-        ? `<div class="checkout"><span class="lab">Checkout</span><span class="route">${s.checkout.replace(/ /g,'  →  ')}</span></div>`
-        : '';
-      throwbox = `<div class="throwbox"><div class="darts">${slots}</div>${checkout}</div>`;
-    }
-    let flash = '';
-    if(active && s.status==='bust') flash = `<div class="flash bust">BUST</div>`;
-    if(active && s.status==='won')  flash = `<div class="flash shot">GAME SHOT</div>`;
-    return `<div class="pcard ${active?'active':''}">
-      ${flash}
-      <div>
-        <div class="prow1">
-          <span class="pname">${escapeHtml(p.name)}</span>
-          <span class="ptag">${p.out==='double'?'DOUBLE OUT':'SINGLE OUT'}</span>
-          ${active?'<span class="throwflag">▸ throwing</span>':''}
+  if(s.legSummary){
+    grid.innerHTML = s.legSummary.map(p=>`
+      <div class="sum-card ${p.won?'winner':''}">
+        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}</div>
+        <div class="sum-stats">
+          <div class="sum-stat">
+            <div class="sv">${p.avg ?? '—'}</div>
+            <div class="sl">Average</div>
+          </div>
+          <div class="sum-stat">
+            <div class="sv">${p.darts}</div>
+            <div class="sl">Darts</div>
+          </div>
+          <div class="sum-stat">
+            <div class="sv">${p.busts}</div>
+            <div class="sl">Busts</div>
+          </div>
         </div>
-        <div class="score">${p.score}</div>
-      </div>
-      <div class="meta">
-        <span>leg <b>${p.legAvg ?? '—'}</b></span>
-        <span>game <b>${p.gameAvg ?? '—'}</b></span>
-        <span class="standing">${standing}</span>
-      </div>
-      ${throwbox}
-    </div>`;
-  }).join('');
+      </div>`).join('');
+  } else {
+    grid.innerHTML = s.players.map((p,i)=>{
+      const active = i===s.currentIndex;
+      const standing = s.setsPerGame>1
+        ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
+        : `Legs ${p.legsWon}/${s.legsPerSet}`;
+      let throwbox = '';
+      if(active){
+        const slots = [0,1,2].map(k=>{
+          const lab = s.darts[k];
+          return `<div class="dart ${dartClass(lab)}">${lab || 'dart '+(k+1)}</div>`;
+        }).join('');
+        const checkout = s.checkout
+          ? `<div class="checkout"><span class="lab">Checkout</span><span class="route">${s.checkout.replace(/ /g,'  →  ')}</span></div>`
+          : '';
+        throwbox = `<div class="throwbox"><div class="darts">${slots}</div>${checkout}</div>`;
+      }
+      let flash = '';
+      if(active && s.status==='bust') flash = `<div class="flash bust">BUST</div>`;
+      if(active && s.status==='won')  flash = `<div class="flash shot">GAME SHOT</div>`;
+      return `<div class="pcard ${active?'active':''}">
+        ${flash}
+        <div>
+          <div class="prow1">
+            <span class="pname">${escapeHtml(p.name)}</span>
+            <span class="ptag">${p.out==='double'?'DOUBLE OUT':'SINGLE OUT'}</span>
+            ${active?'<span class="throwflag">▸ throwing</span>':''}
+          </div>
+          <div class="score">${p.score}</div>
+        </div>
+        <div class="meta">
+          <span>leg <b>${p.legAvg ?? '—'}</b></span>
+          <span>game <b>${p.gameAvg ?? '—'}</b></span>
+          <span class="standing">${standing}</span>
+        </div>
+        ${throwbox}
+      </div>`;
+    }).join('');
+  }
 
   // achievement flashes (180, Big Fish)
   if(s.achievement && s.achievement.ts && s.achievement.ts !== lastAchTs){
