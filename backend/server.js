@@ -113,11 +113,17 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/players/dart-weight' && m === 'PUT') { const b = await readJson(req); return send(res, 200, db.setDartWeight(b.name, b.weight)); }
     if (p === '/api/players/dart-weights' && m === 'GET') return send(res, 200, db.getDartWeights(url.searchParams.get('name')));
     if (p === '/api/players' && m === 'DELETE') return send(res, 200, db.deletePlayer(url.searchParams.get('name')));
+    if (p === '/api/players/stats' && m === 'DELETE') {
+      const mode = url.searchParams.get('mode');
+      if (mode !== 'h2h' && mode !== 'practice') return send(res, 400, { error: 'mode must be h2h or practice' });
+      return send(res, 200, db.clearPlayerStats(url.searchParams.get('name'), mode));
+    }
 
     if (p === '/api/summary'       && m === 'GET') return send(res, 200, db.getSummary());
     if (p === '/api/top-finishes'  && m === 'GET') return send(res, 200, db.getTopFinishesAll());
-    if (p === '/api/stats/180s'    && m === 'GET') return send(res, 200, db.getOneEightyStats());
-    if (p === '/api/stats/big-fish'&& m === 'GET') return send(res, 200, db.getBigFishStats());
+    if (p === '/api/stats/180s'         && m === 'GET') return send(res, 200, db.getOneEightyStats());
+    if (p === '/api/stats/big-fish'     && m === 'GET') return send(res, 200, db.getBigFishStats());
+    if (p === '/api/stats/nine-darters' && m === 'GET') return send(res, 200, db.getNineDarterStats());
     if (p === '/api/stats' && m === 'GET')  return send(res, 200, db.computeStats());
     if (p === '/api/players/top-finishes' && m === 'GET') {
       const mode = url.searchParams.get('mode');

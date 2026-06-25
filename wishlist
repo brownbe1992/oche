@@ -1,17 +1,61 @@
+Home page:
+- Wins leaderboard
+- Move start new game button to the top
+
 Player pages:
-- Calculate averate leg/set/game length
+- https://dartslytics.com/players/luke-littler
+    - Average
+        - 3-Darts Average
+    - 100+ AVG
+        - % Of Matches with 100+ Avg
+    - 90- AVG
+        - % of Matches with 90- (or less) Avg
+    - 1st 9 AVG
+        - Average of 1st nine darts in a leg
+    - 180s Per Leg
+    - 1st 3 AVG
+        - Average of 1st three darts in a leg
+    - 140 Per Leg
+        - % of 140+ scores in the 1st three darts of a leg
+    - Trebleless %
+        - % of legs without hitting a treble
+    - 180s
+    - Big Fish
+    - 9 Darters
+    - Checkout %
+- Click each to see graph over time
+    - One graph at bottom, clicking each stat displays the data
+    - 3 dart average last week is default
+- Calculate average leg/set/game length by time
     - set/game length dependent on # of legs
-- Game win %
-- Set win %
-- Leg win %
+- Game/Set/Leg Win%
 - Win/loss record against each player
-- Environmental data (temp, humidity)
 - Game log
+    - Last 5/10
+    - Three dart average
+    - Ton+ finishes
+    - Trebleless %
+    - Checkout %
+
+- Dropdown to choose game mode to view stats for
+- Environmental data (temp/humidity)
 
 
-New Game
+Stats page:
+- 180s
+- Big Fish (with fish icon)
+- Nine darters
+- Tabs for Overall, H2H, Practice
+    - Default to Overall
+- Reset all stats button should have a confirmation
+
+Scoreboard
+- Show a fish when checking out big fish
+- Flash "180!" on a 180
+- 9 darter celebration of some kind
+
+Others
 - Add additional games (Cricket)
-
-Overall
--Homepage - clicking Oche brings you there
+- Integrate with Homeassistant
+- Automated scoring with cameras and machine learning
 

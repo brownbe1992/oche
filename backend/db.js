@@ -291,6 +291,21 @@ function computeStats() {
     ) GROUP BY pid
   `).all();
 
+  // Nine-darters: 501 legs won in exactly 3 visits
+  const nineDarterBase = (extraWhere) => db.prepare(`
+    SELECT pid, COUNT(*) AS n FROM (
+      SELECT t.player_id AS pid
+      FROM turns t JOIN games g ON g.id = t.game_id
+      WHERE g.category = '501' ${extraWhere}
+      GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
+      HAVING COUNT(*) = 3 AND SUM(t.checkout) = 1
+    ) GROUP BY pid
+  `).all();
+
+  const nd9All  = nineDarterBase('');
+  const nd9H2H  = nineDarterBase("AND g.practice = 0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1");
+  const nd9Prac = nineDarterBase("AND (g.practice = 1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1)");
+
   const agg180 = db.prepare(
     'SELECT player_id, COUNT(*) AS n FROM turns WHERE scored = 180 GROUP BY player_id'
   ).all();
@@ -328,6 +343,9 @@ function computeStats() {
   `).all();
 
   const aggById = {}; agg.forEach(r => aggById[r.player_id] = r);
+  const nd9AllById  = {}; nd9All.forEach(r  => nd9AllById[r.pid]  = r.n);
+  const nd9H2HById  = {}; nd9H2H.forEach(r  => nd9H2HById[r.pid]  = r.n);
+  const nd9PracById = {}; nd9Prac.forEach(r => nd9PracById[r.pid] = r.n);
   const agg180ById    = {}; agg180.forEach(r => agg180ById[r.player_id] = r.n);
   const aggBFById     = {}; aggBF.forEach(r  => aggBFById[r.player_id]  = r.n);
   const h2hDartsById  = {}; h2hAvgDarts.forEach(r     => h2hDartsById[r.pid]  = r.avg_darts);
@@ -350,12 +368,15 @@ function computeStats() {
       checkouts100: a.co100,
       oneEighties: agg180ById[p.id] ?? 0,
       bigFish: aggBFById[p.id] ?? 0,
+      nineDarters: nd9AllById[p.id] ?? 0,
       h2hAvgDartsPerLeg: h2hDartsById[p.id] != null ? +h2hDartsById[p.id].toFixed(1) : null,
       practiceAvgDartsPerLeg: pracDartsById[p.id] != null ? +pracDartsById[p.id].toFixed(1) : null,
       h2hStats: { turns:ha.turns, totalPoints:ha.total, trebleLess:ha.trebleLess,
-                  checkouts100:ha.co100, oneEighties:ha.oneEighties, bigFish:ha.bigFish },
+                  checkouts100:ha.co100, oneEighties:ha.oneEighties, bigFish:ha.bigFish,
+                  nineDarters: nd9H2HById[p.id] ?? 0 },
       practiceStats: { turns:pa.turns, totalPoints:pa.total, trebleLess:pa.trebleLess,
-                       checkouts100:pa.co100, oneEighties:pa.oneEighties, bigFish:pa.bigFish },
+                       checkouts100:pa.co100, oneEighties:pa.oneEighties, bigFish:pa.bigFish,
+                       nineDarters: nd9PracById[p.id] ?? 0 },
       legsByCat: {},
       gamesByCat: {},
       practiceLegs: {},
@@ -379,9 +400,17 @@ function getSummary() {
   const sets       = db.prepare("SELECT COUNT(DISTINCT game_id || '-' || set_no) AS n FROM turns").get().n;
   const legs       = db.prepare("SELECT COUNT(DISTINCT game_id || '-' || set_no || '-' || leg_no) AS n FROM turns").get().n;
   const darts      = db.prepare('SELECT COUNT(*) AS n FROM turns').get().n * 3;
-  const oneEighties = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE scored = 180').get().n;
-  const bigFish    = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout = 1 AND checkout_points = 170').get().n;
-  return { players, games, sets, legs, darts, oneEighties, bigFish };
+  const oneEighties  = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE scored = 180').get().n;
+  const bigFish      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout = 1 AND checkout_points = 170').get().n;
+  const nineDarters  = db.prepare(`
+    SELECT COUNT(*) AS n FROM (
+      SELECT t.player_id FROM turns t JOIN games g ON g.id = t.game_id
+      WHERE g.category = '501'
+      GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
+      HAVING COUNT(*) = 3 AND SUM(t.checkout) = 1
+    )
+  `).get().n;
+  return { players, games, sets, legs, darts, oneEighties, bigFish, nineDarters };
 }
 
 function getOneEightyStats() {
@@ -396,6 +425,32 @@ function getOneEightyStats() {
     FROM turns t JOIN players p ON p.id = t.player_id
     WHERE t.scored = 180
     ORDER BY t.created_at DESC LIMIT 10
+  `).all();
+  return { leaderboard, recent };
+}
+
+function getNineDarterStats() {
+  const leaderboard = db.prepare(`
+    SELECT p.name, COUNT(*) AS count
+    FROM (
+      SELECT t.player_id
+      FROM turns t JOIN games g ON g.id = t.game_id
+      WHERE g.category = '501'
+      GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
+      HAVING COUNT(*) = 3 AND SUM(t.checkout) = 1
+    ) x
+    JOIN players p ON p.id = x.player_id
+    GROUP BY x.player_id ORDER BY count DESC
+  `).all();
+  const recent = db.prepare(`
+    SELECT p.name, MAX(t.created_at) AS created_at
+    FROM turns t
+    JOIN games g ON g.id = t.game_id
+    JOIN players p ON p.id = t.player_id
+    WHERE g.category = '501'
+    GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
+    HAVING COUNT(*) = 3 AND SUM(t.checkout) = 1
+    ORDER BY created_at DESC LIMIT 10
   `).all();
   return { leaderboard, recent };
 }
@@ -528,6 +583,28 @@ function getAvgHistory(playerName, period, opts = {}) {
   `).all(...params);
 }
 
+function clearPlayerStats(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) throw httpError(404, 'Player not found');
+
+  const gameIdQuery = mode === 'h2h'
+    ? `SELECT g.id FROM games g
+       WHERE g.practice = 0
+         AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+         AND EXISTS (SELECT 1 FROM game_players gp2 WHERE gp2.game_id = g.id AND gp2.player_id = ?)`
+    : `SELECT g.id FROM games g
+       WHERE (g.practice = 1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1)
+         AND EXISTS (SELECT 1 FROM game_players gp2 WHERE gp2.game_id = g.id AND gp2.player_id = ?)`;
+
+  const gameIds = db.prepare(gameIdQuery).all(p.id).map(r => r.id);
+  if (!gameIds.length) return { ok: true };
+
+  const ph = gameIds.map(() => '?').join(',');
+  db.prepare(`DELETE FROM turns        WHERE player_id = ? AND game_id IN (${ph})`).run(p.id, ...gameIds);
+  db.prepare(`DELETE FROM game_players WHERE player_id = ? AND game_id IN (${ph})`).run(p.id, ...gameIds);
+  return { ok: true };
+}
+
 function resetStats() {
   db.exec('DELETE FROM turns; DELETE FROM game_players; DELETE FROM games;');
   return { ok: true };
@@ -541,7 +618,7 @@ function httpError(status, message) {
 module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer,
   createGame, addTurn, completeGame, recordEvent,
-  computeStats, getSummary, getOneEightyStats, getBigFishStats,
-  getTopFinishes, getTopFinishesAll, getAvgHistory, getDartWeights, resetStats,
+  computeStats, getSummary, getOneEightyStats, getBigFishStats, getNineDarterStats,
+  getTopFinishes, getTopFinishesAll, getAvgHistory, getDartWeights, clearPlayerStats, resetStats,
   _db: db,
 };
