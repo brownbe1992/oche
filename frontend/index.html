@@ -299,9 +299,13 @@
     <div class="card" style="text-align:center">
       <button class="btn btn-primary" onclick="show('setup')">Start new game →</button>
     </div>
-    <div class="card">
-      <h2 style="font-size:22px;margin-bottom:16px">Overview</h2>
+    <div class="card" style="margin-top:14px">
+      <h2 style="font-size:24px;margin-bottom:16px">Overview</h2>
       <div id="home-body"><p class="pp-meta">Loading…</p></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2 style="font-size:24px;margin-bottom:16px">H2H Leaderboard</h2>
+      <div id="leaderboard-body"><p class="pp-meta">Loading…</p></div>
     </div>
   </section>
 
@@ -727,15 +731,17 @@ function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
   body.innerHTML=`
     <div class="hero-grid">${heroCards.map(c=>`<div class="hero-block"><div class="hero-val">${c.val}</div><div class="hero-label">${c.label}</div></div>`).join('')}</div>
     <div class="summary-grid">${secCards.map(c=>`<div class="stat-block"><div class="stat-val">${c.val}</div><div class="stat-label">${c.label}</div></div>`).join('')}</div>
-    ${localNote}
-    <h2 style="font-size:22px;margin:24px 0 16px">Leaderboard</h2>
+    ${localNote}`;
+
+  const lb=document.getElementById('leaderboard-body');
+  if(lb) lb.innerHTML=`
     <div class="home-pair">
       <div class="pp-section">
-        <div class="pp-section-title">All-time 3-dart average</div>
+        <div class="pp-section-title">Three-Dart Average</div>
         ${avgLeaderboard}
       </div>
       <div class="pp-section">
-        <div class="pp-section-title">All-time top finishes</div>
+        <div class="pp-section-title">Top Finishes</div>
         ${hofSection(finishes)}
       </div>
     </div>
