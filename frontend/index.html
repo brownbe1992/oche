@@ -166,17 +166,16 @@
 
   .pad{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
   .pad button{background:var(--surface);border:1px solid var(--wire);color:var(--ink);border-radius:10px;
-    padding:16px 0;font:inherit;font-size:20px;font-weight:600;cursor:pointer}
+    padding:12px 0;font:inherit;font-size:24px;font-weight:600;cursor:pointer}
   .pad button:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
   .pad button:disabled{opacity:.3;cursor:not-allowed}
-  .pad button.wide{grid-column:span 2}
-  .pad button.bull{color:var(--red)}
-  .pad button.miss{color:var(--muted)}
+  .pad button.bull{grid-column:1 / -1;color:var(--red)}
 
-  .turn-actions{display:flex;gap:10px;margin-top:12px;
+  .turn-actions{display:flex;flex-direction:column;gap:8px;margin-top:12px;
     position:sticky;bottom:10px;z-index:5;
     background:linear-gradient(to top,var(--board) 85%,transparent);padding:14px 0 2px}
-  .turn-actions .btn{flex:1}
+  .turn-actions .miss-row,.turn-actions .enter-row{display:flex;gap:8px}
+  .turn-actions .miss-row .btn,.turn-actions .enter-row .btn{flex:1}
   .turn-actions .btn-primary{font-size:17px;padding:16px 20px}
 
   /* ---- stats screen ---- */
@@ -194,7 +193,7 @@
     border:1px solid var(--wire);border-radius:999px;padding:3px 9px;margin-bottom:4px}
   .persist-tag{font-size:11px;color:var(--muted);margin-left:8px}
   @media (max-width:560px){
-    .pad button{padding:14px 0;font-size:17px}
+    .pad button{padding:10px 0;font-size:20px}
     .pscore .rem{font-size:38px}
     .masthead .mark{font-size:30px}
   }
@@ -215,7 +214,9 @@
   body.game-active .slots{margin-bottom:10px}
   body.game-active .status{margin-bottom:8px;font-size:12px;min-height:18px}
   body.game-active .multi{margin-bottom:10px}
-  body.game-active .checkout-bar{margin:0 0 10px;padding:10px 14px}
+  body.game-active .multi button{padding:10px}
+  body.game-active .checkout-bar{margin:0 0 8px;padding:8px 12px}
+  body.game-active .checkout-bar .co-route{font-size:28px}
 
   @media (prefers-reduced-motion:reduce){*{animation:none!important}}
   .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
@@ -1399,11 +1400,12 @@ function renderPad(){
   }
   const bull=document.createElement('button');
   bull.className='bull'; bull.textContent='Bull'; bull.disabled=full;
+  bull.style.gridColumn='1 / -1';
   bull.onclick=()=>throwDart(25); pad.appendChild(bull);
 
-  const miss=document.createElement('button');
-  miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
-  miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+  // Miss lives in the sticky action bar — keep its state in sync
+  const missBtn = document.getElementById('miss-btn');
+  if(missBtn) missBtn.disabled = full;
 }
 
 /* ---------- throwing ---------- */
@@ -1417,8 +1419,13 @@ function updateMultUI(){
 }
 function throwDart(sector){
   if(game.darts.length>=3 || game.busted || game.won) return;
-  const dart = makeDart(sector, mult);
-  game.darts.push(dart);
+  if(sector === 0 && mult > 1){
+    // Double/Treble Miss fills that many slots at once
+    const count = Math.min(mult, 3 - game.darts.length);
+    for(let i = 0; i < count; i++) game.darts.push(makeDart(0, 1));
+  } else {
+    game.darts.push(makeDart(sector, mult));
+  }
   mult=1; updateMultUI();
 
   // live bust/win feedback before committing
@@ -1445,7 +1452,6 @@ function undoDart(){
   status.className='status'; status.textContent='Dart removed.';
   renderSlots(); renderPad(); updateCheckout(false); pushLive();
 }
-
 function enterTurn(){
   if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
   const p = game.players[game.current];
@@ -1635,8 +1641,13 @@ function renderGameShell(){
       </div>
       <div class="pad" id="pad"></div>
       <div class="turn-actions">
-        <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo dart</button>
-        <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
+        <div class="miss-row">
+          <button class="btn btn-ghost" id="miss-btn" onclick="throwDart(0)">Miss</button>
+        </div>
+        <div class="enter-row">
+          <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo dart</button>
+          <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
+        </div>
       </div>`;
 }
 
