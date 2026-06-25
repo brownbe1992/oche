@@ -171,9 +171,7 @@
   .pad button:disabled{opacity:.3;cursor:not-allowed}
   .pad button.bull{grid-column:1 / -1;color:var(--red)}
 
-  .turn-actions{display:flex;flex-direction:column;gap:8px;margin-top:12px;
-    position:sticky;bottom:10px;z-index:5;
-    background:linear-gradient(to top,var(--board) 85%,transparent);padding:14px 0 2px}
+  .turn-actions{display:flex;flex-direction:column;gap:8px;margin-top:12px}
   .turn-actions .miss-row,.turn-actions .enter-row{display:flex;gap:8px}
   .turn-actions .miss-row .btn,.turn-actions .enter-row .btn{flex:1}
   .turn-actions .btn-primary{font-size:17px;padding:16px 20px}
@@ -198,25 +196,95 @@
     .masthead .mark{font-size:30px}
   }
 
-  /* ---- game screen: compact layout for touchscreen scoring ---- */
-  body.game-active{padding:8px 12px}
-  body.game-active .masthead{padding:3px 2px 8px;margin-bottom:10px}
-  body.game-active .masthead .mark{font-size:26px}
+  /* ---- game screen: full-height dynamic layout — no scrolling, sizes adapt to device ---- */
+  body.game-active{
+    padding:0; height:100dvh; overflow:hidden;
+    display:flex; flex-direction:column;
+  }
+  body.game-active .wrap{
+    flex:1; display:flex; flex-direction:column; min-height:0;
+    width:100%; max-width:760px; margin:0 auto; padding:0 10px;
+  }
+  body.game-active .masthead{
+    flex:none;
+    padding:clamp(4px,1dvh,10px) 0;
+    margin-bottom:clamp(4px,1dvh,10px);
+  }
+  body.game-active .masthead .mark{font-size:clamp(18px,3.5dvh,30px)}
+  body.game-active .masthead .sub{display:none}
   body.game-active .masthead .nav{display:none}
-  body.game-active .scoreboard{gap:6px;margin-bottom:8px}
-  body.game-active .pscore{padding:8px 12px}
-  body.game-active .pscore .rem{font-size:44px;min-width:58px}
-  body.game-active .pscore .nm{font-size:16px}
-  body.game-active .pscore .meta{min-width:100px}
-  body.game-active .oche{padding:12px 14px}
-  body.game-active .turnhead{margin-bottom:6px}
-  body.game-active .slot{height:60px}
-  body.game-active .slots{margin-bottom:10px}
-  body.game-active .status{margin-bottom:8px;font-size:12px;min-height:18px}
-  body.game-active .multi{margin-bottom:10px}
-  body.game-active .multi button{padding:10px}
-  body.game-active .checkout-bar{margin:0 0 8px;padding:8px 12px}
-  body.game-active .checkout-bar .co-route{font-size:28px}
+  body.game-active #screen-game{
+    flex:1; display:flex; flex-direction:column; min-height:0;
+  }
+  body.game-active .scoreboard{
+    flex:none;
+    gap:clamp(3px,.7dvh,8px);
+    margin-bottom:clamp(4px,.8dvh,10px);
+  }
+  body.game-active .pscore{
+    padding:clamp(4px,.8dvh,10px) clamp(8px,1.5vw,14px);
+  }
+  body.game-active .pscore .nm{font-size:clamp(12px,1.9dvh,17px)}
+  body.game-active .pscore .nm-out{font-size:clamp(8px,1.2dvh,11px)}
+  body.game-active .pscore .rem{font-size:clamp(26px,4.8dvh,52px);min-width:auto}
+  body.game-active .pscore .meta{min-width:70px}
+  body.game-active .pscore .meta .avgs{font-size:clamp(9px,1.4dvh,13px)}
+  body.game-active .oche{
+    flex:1; display:flex; flex-direction:column; min-height:0; overflow:hidden;
+    padding:clamp(6px,1dvh,14px) clamp(8px,1.5vw,14px);
+  }
+  body.game-active .turnhead{
+    flex:none; margin-bottom:clamp(3px,.5dvh,8px);
+    font-size:clamp(11px,1.6dvh,14px);
+  }
+  body.game-active .checkout-bar{
+    flex:none;
+    margin:0 0 clamp(3px,.6dvh,8px);
+    padding:clamp(5px,.8dvh,10px) clamp(8px,1.5vw,14px);
+  }
+  body.game-active .checkout-bar .co-route{font-size:clamp(16px,2.8dvh,32px)}
+  body.game-active .slots{
+    flex:none;
+    gap:clamp(4px,.8vw,10px);
+    margin-bottom:clamp(3px,.6dvh,10px);
+  }
+  body.game-active .slot{height:clamp(38px,5.5dvh,68px)}
+  body.game-active .slot .lab{font-size:clamp(15px,2.8dvh,32px)}
+  body.game-active .slot .pts{font-size:clamp(8px,1.2dvh,12px)}
+  body.game-active .status{
+    flex:none; min-height:auto;
+    font-size:clamp(10px,1.4dvh,13px);
+    margin-bottom:clamp(3px,.5dvh,8px);
+  }
+  body.game-active .multi{
+    flex:none; gap:clamp(4px,.8vw,8px);
+    margin-bottom:clamp(4px,.7dvh,10px);
+  }
+  body.game-active .multi button{
+    font-size:clamp(11px,1.8dvh,16px);
+    padding:clamp(6px,1dvh,14px);
+    max-width:none;
+  }
+  body.game-active .pad{
+    flex:1; min-height:0;
+    gap:clamp(3px,.6vmin,8px);
+    grid-auto-rows:1fr;
+  }
+  body.game-active .pad button{padding:0;font-size:clamp(13px,2.4dvh,26px)}
+  body.game-active .turn-actions{
+    flex:none; position:static;
+    padding:clamp(4px,.7dvh,10px) 0 0;
+    margin-top:0; background:none;
+  }
+  body.game-active .turn-actions .miss-row .btn,
+  body.game-active .turn-actions .enter-row .btn{
+    font-size:clamp(11px,1.7dvh,16px);
+    padding:clamp(7px,1.2dvh,15px) 8px;
+  }
+  body.game-active .turn-actions .btn-primary{
+    font-size:clamp(12px,1.9dvh,17px);
+    padding:clamp(9px,1.5dvh,17px) 8px;
+  }
 
   @media (prefers-reduced-motion:reduce){*{animation:none!important}}
   .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
