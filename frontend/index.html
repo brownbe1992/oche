@@ -317,7 +317,7 @@
         <span class="badge">how each stat is counted</span><br>
         <b style="color:var(--ink)">180</b> — a visit where all three darts land in the treble-20 bed, scoring the maximum 180 points.<br>
         <b style="color:var(--ink)">Big Fish</b> — a checkout of exactly 170 (T20, T20, Bull), the highest possible finish in darts.<br>
-        <b style="color:var(--ink)">9-Darters</b> — a perfect leg of 501, finished in exactly nine darts (three visits of three darts each).
+        <b style="color:var(--ink)">Nine-dart finish</b> — a perfect leg of 501, finished in exactly nine darts (three visits of three darts each).
       </div>
     </div>
   </section>
@@ -707,9 +707,9 @@ function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
     }).join('')}</div>`;
   }
 
-  function achievementSection(title,data){
+  function achievementSection(title,data,emptyMsg='None recorded yet — will you be the first?'){
     if(!data||(!data.leaderboard.length&&!data.recent.length))
-      return `<div class="pp-section"><div class="pp-section-title">${title}</div><p class="pp-meta" style="padding:4px 0">None recorded yet.</p></div>`;
+      return `<div class="pp-section"><div class="pp-section-title">${title}</div><p class="pp-meta" style="padding:4px 0">${emptyMsg}</p></div>`;
     const lbRows=data.leaderboard.map((r,i)=>`<div class="hof-row">
       <span class="hof-rank">${i+1}</span>
       <span class="hof-player">${escapeHtml(r.name)}</span>
@@ -759,7 +759,7 @@ function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
     </div>
     ${achievementSection('180s', eighties)}
     ${achievementSection('Big Fish', bigFishData)}
-    ${achievementSection('9-Darters', nineDarterData||{leaderboard:[],recent:[]})}
+    ${achievementSection('Nine-dart finish', nineDarterData||{leaderboard:[],recent:[]},'None recorded yet... you will never get this!')}
     `;
 }
 
