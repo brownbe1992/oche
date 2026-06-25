@@ -296,6 +296,9 @@
 
   <!-- ============ HOME ============ -->
   <section id="screen-home" class="screen on">
+    <div class="card" style="text-align:center">
+      <button class="btn btn-primary" onclick="show('setup')">Start new game →</button>
+    </div>
     <div class="card">
       <h2 style="font-size:22px;margin-bottom:16px">Overview</h2>
       <div id="home-body"><p class="pp-meta">Loading…</p></div>
@@ -738,20 +741,7 @@ function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
     ${achievementSection('180s', eighties)}
     ${achievementSection('Big Fish (170 checkouts)', bigFishData)}
     ${achievementSection('9-Darters (501 in 9 darts)', nineDarterData||{leaderboard:[],recent:[]})}
-    <div class="pp-section">
-      <div class="pp-section-title">Practice legs thrown</div>
-      ${practiceBoard.length
-        ? `<div class="hof-list">${practiceBoard.map((r,i)=>`<div class="hof-row">
-            <span class="hof-rank">${i+1}</span>
-            <span class="hof-player">${escapeHtml(r.name)}</span>
-            <span class="hof-times">×${r.total}</span>
-            <span class="hof-dates">${r.byCat}</span>
-          </div>`).join('')}</div>`
-        : `<p class="pp-meta" style="padding:4px 0">No practice legs recorded yet.</p>`}
-    </div>
-    <div class="btn-row">
-      <button class="btn btn-primary" onclick="show('setup')">Start new game →</button>
-    </div>`;
+    `;
 }
 
 function setPractice(on){
