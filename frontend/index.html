@@ -271,7 +271,7 @@
   #leaderboard-body .pp-section-title{font-size:16px;font-weight:700;color:var(--ink);
     text-transform:none;letter-spacing:.01em;margin-bottom:12px;
     border-bottom:1px solid var(--wire);padding-bottom:8px}
-  .home-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:stretch}
+  .home-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:stretch;margin-bottom:14px}
   .home-pair>.pp-section{margin-bottom:0;height:100%;box-sizing:border-box}
   @media(max-width:560px){.home-pair{grid-template-columns:1fr}}
   .achievement-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
@@ -313,6 +313,12 @@
     <div class="card" style="margin-top:14px">
       <h2 style="font-size:24px;margin-bottom:16px">H2H Leaderboard</h2>
       <div id="leaderboard-body"><p class="pp-meta">Loading…</p></div>
+      <div class="note">
+        <span class="badge">how each stat is counted</span><br>
+        <b style="color:var(--ink)">180</b> — a visit where all three darts land in the treble-20 bed, scoring the maximum 180 points.<br>
+        <b style="color:var(--ink)">Big Fish</b> — a checkout of exactly 170 (T20, T20, Bull), the highest possible finish in darts.<br>
+        <b style="color:var(--ink)">9-Darters</b> — a perfect leg of 501, finished in exactly nine darts (three visits of three darts each).
+      </div>
     </div>
   </section>
 
@@ -752,8 +758,8 @@ function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
       </div>
     </div>
     ${achievementSection('180s', eighties)}
-    ${achievementSection('Big Fish (170 checkouts)', bigFishData)}
-    ${achievementSection('9-Darters (501 in 9 darts)', nineDarterData||{leaderboard:[],recent:[]})}
+    ${achievementSection('Big Fish', bigFishData)}
+    ${achievementSection('9-Darters', nineDarterData||{leaderboard:[],recent:[]})}
     `;
 }
 
