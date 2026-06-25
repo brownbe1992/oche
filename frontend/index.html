@@ -263,7 +263,7 @@
   .hero-val{font-family:'Bebas Neue';font-size:52px;color:var(--cream);line-height:1}
   .hero-label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:7px}
   @media(max-width:400px){.hero-val{font-size:38px}}
-  #home-body .pp-section-title{font-size:14px;color:var(--ink);text-transform:none;letter-spacing:.01em;
+  #home-body .pp-section-title{font-size:16px;color:var(--ink);text-transform:none;letter-spacing:.01em;
     font-weight:700;border-bottom:1.5px solid var(--wire);padding-bottom:10px;margin-bottom:14px}
   .home-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   @media(max-width:560px){.home-pair{grid-template-columns:1fr}}
@@ -297,7 +297,7 @@
   <!-- ============ HOME ============ -->
   <section id="screen-home" class="screen on">
     <div class="card">
-      <h2 style="font-size:18px;margin-bottom:16px">Overview</h2>
+      <h2 style="font-size:22px;margin-bottom:16px">Overview</h2>
       <div id="home-body"><p class="pp-meta">Loading…</p></div>
     </div>
   </section>
@@ -651,8 +651,8 @@ function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
     {val:fmt(s.players),      label:'Players'},
     {val:fmt(s.games),        label:'Games Played'},
     {val:fmt(s.sets),         label:'Sets Played'},
-    {val:fmt(s.legs),         label:'Legs Thrown'},
-    {val:fmt(s.practiceLegs), label:'Practice Legs'},
+    {val:fmt(s.legs),         label:'H2H Legs Thrown'},
+    {val:fmt(s.practiceLegs), label:'Practice Legs Thrown'},
     {val:fmt(s.bigFish),      label:'Big Fish'},
     {val:fmt(s.nineDarters),  label:'9-Darters'},
   ];
@@ -676,11 +676,7 @@ function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
   function hofSection(rows){
     if(!rows||!rows.length) return `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
     return `<div class="hof-list">${rows.map((f,i)=>{
-      const first=fmtDate(f.first_date);
-      const last=fmtDate(f.last_date);
-      const dates=f.times===1
-        ? `First: ${first}`
-        : `First: ${first} · Last: ${last}`;
+      const dates=fmtDate(f.last_date);
       return `<div class="hof-row">
         <span class="hof-rank">${i+1}</span>
         <span class="hof-score">${f.score}</span>
@@ -718,8 +714,8 @@ function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
   const avgLeaderboard=avgBoard.length
     ? `<div class="hof-list">${avgBoard.map((r,i)=>`<div class="hof-row">
         <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.avg.toFixed(1)}</span>
         <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-score" style="font-size:18px;min-width:52px">${r.avg.toFixed(1)}</span>
         <span class="hof-dates">${r.turns.toLocaleString()} visits</span>
       </div>`).join('')}</div>`
     : `<p class="pp-meta" style="padding:8px 0">No games played yet.</p>`;
