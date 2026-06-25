@@ -410,7 +410,13 @@ function getSummary() {
       HAVING COUNT(*) = 3 AND SUM(t.checkout) = 1
     )
   `).get().n;
-  return { players, games, sets, legs, darts, oneEighties, bigFish, nineDarters };
+  const practiceLegs = db.prepare(`
+    SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
+    FROM turns t JOIN games g ON g.id = t.game_id
+    WHERE g.practice = 1
+      OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1
+  `).get().n;
+  return { players, games, sets, legs, darts, oneEighties, bigFish, nineDarters, practiceLegs };
 }
 
 function getPlayerStatBubbles(playerName, mode) {

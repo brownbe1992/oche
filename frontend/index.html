@@ -265,6 +265,8 @@
   @media(max-width:400px){.hero-val{font-size:38px}}
   #home-body .pp-section-title{font-size:14px;color:var(--ink);text-transform:none;letter-spacing:.01em;
     font-weight:700;border-bottom:1.5px solid var(--wire);padding-bottom:10px;margin-bottom:14px}
+  .home-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:560px){.home-pair{grid-template-columns:1fr}}
   .achievement-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
   @media(max-width:500px){.achievement-pair{grid-template-columns:1fr}}
   .achievement-col-title{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;margin-bottom:6px}
@@ -629,7 +631,8 @@ function renderHome(){
     const oneEighties=Object.values(stats).reduce((a,p)=>a+(p.oneEighties||0),0);
     const bigFish=Object.values(stats).reduce((a,p)=>a+(p.bigFish||0),0);
     const nineDarters=Object.values(stats).reduce((a,p)=>a+(p.nineDarters||0),0);
-    renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts,oneEighties,bigFish,nineDarters},[],{leaderboard:[],recent:[]},{leaderboard:[],recent:[]},{leaderboard:[],recent:[]});
+    const practiceLegs=Object.values(stats).reduce((a,p)=>a+Object.values(p.practiceLegs||{}).reduce((s,n)=>s+n,0),0);
+    renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts,oneEighties,bigFish,nineDarters,practiceLegs},[],{leaderboard:[],recent:[]},{leaderboard:[],recent:[]},{leaderboard:[],recent:[]});
   }
 }
 function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
@@ -645,12 +648,13 @@ function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
 
   // Secondary stats (smaller cards)
   const secCards=[
-    {val:fmt(s.players),    label:'Players'},
-    {val:fmt(s.games),      label:'Games Played'},
-    {val:fmt(s.sets),       label:'Sets'},
-    {val:fmt(s.legs),       label:'Legs'},
-    {val:fmt(s.bigFish),    label:'Big Fish'},
-    {val:fmt(s.nineDarters),label:'9-Darters'},
+    {val:fmt(s.players),      label:'Players'},
+    {val:fmt(s.games),        label:'Games Played'},
+    {val:fmt(s.sets),         label:'Sets Played'},
+    {val:fmt(s.legs),         label:'Legs Thrown'},
+    {val:fmt(s.practiceLegs), label:'Practice Legs'},
+    {val:fmt(s.bigFish),      label:'Big Fish'},
+    {val:fmt(s.nineDarters),  label:'9-Darters'},
   ];
 
   // 3-dart average leaderboard computed from in-memory stats
@@ -725,13 +729,15 @@ function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
     <div class="hero-grid">${heroCards.map(c=>`<div class="hero-block"><div class="hero-val">${c.val}</div><div class="hero-label">${c.label}</div></div>`).join('')}</div>
     <div class="summary-grid">${secCards.map(c=>`<div class="stat-block"><div class="stat-val">${c.val}</div><div class="stat-label">${c.label}</div></div>`).join('')}</div>
     ${localNote}
-    <div class="pp-section">
-      <div class="pp-section-title">All-time 3-dart average</div>
-      ${avgLeaderboard}
-    </div>
-    <div class="pp-section">
-      <div class="pp-section-title">All-time top finishes</div>
-      ${hofSection(finishes)}
+    <div class="home-pair">
+      <div class="pp-section">
+        <div class="pp-section-title">All-time 3-dart average</div>
+        ${avgLeaderboard}
+      </div>
+      <div class="pp-section">
+        <div class="pp-section-title">All-time top finishes</div>
+        ${hofSection(finishes)}
+      </div>
     </div>
     ${achievementSection('180s', eighties)}
     ${achievementSection('Big Fish (170 checkouts)', bigFishData)}
