@@ -863,6 +863,7 @@ async function startGame(){
   const names = [];
   setup.slots.forEach(n=>{ if(n && roster.includes(n) && !names.includes(n)) names.push(n); });
   if(names.length===0){ uiAlert('Choose at least one player.'); return; }
+  if(!setup.practice && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   game = {
     start: setup.start,
     category: String(setup.start),
