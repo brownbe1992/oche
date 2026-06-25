@@ -119,28 +119,17 @@
   .pscore .nm{font-weight:600;font-size:15px}
   .pscore .nm-out{font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-left:6px}
   .pscore .turnflag{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--gold);font-weight:700}
-  .pscore .rem{margin-left:16px;font-family:'Bebas Neue';font-size:46px;line-height:.8;color:var(--cream);letter-spacing:.02em;min-width:64px;text-align:right}
+  .pscore .rem-wrap{margin-left:16px;display:flex;flex-direction:column;align-items:flex-end;gap:1px}
+  .pscore .rem{font-family:'Bebas Neue';font-size:46px;line-height:.8;color:var(--cream);letter-spacing:.02em;min-width:64px;text-align:right}
+  .pscore .co-inline{font-family:'Bebas Neue';font-size:15px;color:var(--gold);letter-spacing:.06em;white-space:nowrap;text-align:right;line-height:1}
   .pscore .meta{margin-left:auto;text-align:right;display:flex;flex-direction:column;gap:2px;min-width:120px}
   .pscore .meta .avgs{font-size:12px;color:var(--muted)}
   .pscore .meta .avgs b{color:var(--ink);font-weight:600}
   .pscore .meta .standing{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--gold)}
+  @keyframes coflash{0%{color:#fff}100%{color:var(--gold)}}
+  .pscore .co-inline.flash{animation:coflash .5s ease-out}
 
   .oche{background:var(--board);border:1px solid var(--wire);border-radius:14px;padding:18px}
-  .turnhead{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
-  .turnhead .who{font-size:14px;color:var(--muted)}
-  .turnhead .who b{color:var(--ink)}
-  .checkout{margin-left:auto;font-size:12.5px;color:var(--gold);font-weight:600}
-
-  .checkout-bar{display:flex;align-items:center;gap:14px;margin:0 0 16px;padding:13px 18px;
-    border:1px solid var(--gold);border-radius:12px;
-    background:linear-gradient(180deg, rgba(217,180,106,.14), rgba(217,180,106,.05))}
-  .checkout-bar[hidden]{display:none}
-  .checkout-bar .co-label{font-size:11px;text-transform:uppercase;letter-spacing:.13em;color:var(--gold);font-weight:700;flex:none}
-  .checkout-bar .co-route{font-family:'Bebas Neue',sans-serif;font-size:34px;line-height:.85;
-    letter-spacing:.04em;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  @keyframes copulse{0%{box-shadow:0 0 0 0 rgba(217,180,106,.45)}100%{box-shadow:0 0 0 10px rgba(217,180,106,0)}}
-  .checkout-bar.flash{animation:copulse .6s ease-out}
-  @media (max-width:560px){ .checkout-bar .co-route{font-size:27px} }
 
   .slots{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
   .slot{position:relative;background:var(--surface);border:1px dashed var(--wire);border-radius:11px;
@@ -164,16 +153,16 @@
   .multi button.m-t[aria-pressed="true"]{background:rgba(27,138,58,.16);border-color:var(--green);color:#7fe0a0}
   .multi button.m-s[aria-pressed="true"]{background:var(--surface-2);border-color:var(--muted)}
 
-  .pad{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+  .pad{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
   .pad button{background:var(--surface);border:1px solid var(--wire);color:var(--ink);border-radius:10px;
     padding:12px 0;font:inherit;font-size:24px;font-weight:600;cursor:pointer}
   .pad button:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
   .pad button:disabled{opacity:.3;cursor:not-allowed}
-  .pad button.bull{grid-column:1 / -1;color:var(--red)}
+  .pad button.bull{grid-column:span 2;color:var(--red)}
+  .pad button.miss{grid-column:span 2;color:var(--muted)}
 
-  .turn-actions{display:flex;flex-direction:column;gap:8px;margin-top:12px}
-  .turn-actions .miss-row,.turn-actions .enter-row{display:flex;gap:8px}
-  .turn-actions .miss-row .btn,.turn-actions .enter-row .btn{flex:1}
+  .turn-actions{display:flex;gap:10px;margin-top:12px}
+  .turn-actions .btn{flex:1}
   .turn-actions .btn-primary{font-size:17px;padding:16px 20px}
 
   /* ---- stats screen ---- */
@@ -226,23 +215,15 @@
   }
   body.game-active .pscore .nm{font-size:clamp(12px,1.9dvh,17px)}
   body.game-active .pscore .nm-out{font-size:clamp(8px,1.2dvh,11px)}
+  body.game-active .pscore .rem-wrap{margin-left:8px}
   body.game-active .pscore .rem{font-size:clamp(26px,4.8dvh,52px);min-width:auto}
+  body.game-active .pscore .co-inline{font-size:clamp(10px,1.8dvh,16px)}
   body.game-active .pscore .meta{min-width:70px}
   body.game-active .pscore .meta .avgs{font-size:clamp(9px,1.4dvh,13px)}
   body.game-active .oche{
     flex:1; display:flex; flex-direction:column; min-height:0; overflow:hidden;
     padding:clamp(6px,1dvh,14px) clamp(8px,1.5vw,14px);
   }
-  body.game-active .turnhead{
-    flex:none; margin-bottom:clamp(3px,.5dvh,8px);
-    font-size:clamp(11px,1.6dvh,14px);
-  }
-  body.game-active .checkout-bar{
-    flex:none;
-    margin:0 0 clamp(3px,.6dvh,8px);
-    padding:clamp(5px,.8dvh,10px) clamp(8px,1.5vw,14px);
-  }
-  body.game-active .checkout-bar .co-route{font-size:clamp(16px,2.8dvh,32px)}
   body.game-active .slots{
     flex:none;
     gap:clamp(4px,.8vw,10px);
@@ -276,8 +257,7 @@
     padding:clamp(4px,.7dvh,10px) 0 0;
     margin-top:0; background:none;
   }
-  body.game-active .turn-actions .miss-row .btn,
-  body.game-active .turn-actions .enter-row .btn{
+  body.game-active .turn-actions .btn{
     font-size:clamp(11px,1.7dvh,16px);
     padding:clamp(7px,1.2dvh,15px) 8px;
   }
@@ -475,26 +455,14 @@
     <div class="scoreboard" id="scoreboard"></div>
 
     <div class="oche">
-      <div class="turnhead">
-        <div class="who">Throwing: <b id="active-name">—</b></div>
-      </div>
-
-      <div class="checkout-bar" id="checkout-bar" hidden>
-        <span class="co-label">Checkout</span>
-        <span class="co-route" id="checkout-route"></span>
-      </div>
-
       <div class="slots" id="slots"></div>
-      <div class="status" id="status">Tap a multiplier, then a number — one dart at a time.</div>
-
+      <div class="status" id="status">Select a multiplier, then tap a number.</div>
       <div class="multi" role="group" aria-label="Dart multiplier">
         <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
         <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
         <button class="m-t" id="m-t" aria-pressed="false" onclick="setMult(3)">Treble</button>
       </div>
-
       <div class="pad" id="pad"></div>
-
       <div class="turn-actions">
         <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo dart</button>
         <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
@@ -1361,16 +1329,18 @@ function renderGame(){
     row.innerHTML=`
       <div>
         <div class="nm">${escapeHtml(p.name)} <span class="nm-out">${p.doubleOut?'double out':'single out'}</span></div>
-        ${i===game.current?'<div class="turnflag">at the oche</div>':''}
+        ${i===game.current?'<div class="turnflag">▸ throwing</div>':''}
       </div>
       <div class="meta">
         <div class="avgs">leg <b>${avgStr(p.legPoints,p.legVisits)}</b> &nbsp;·&nbsp; game <b>${avgStr(p.gamePoints,p.gameVisits)}</b></div>
         ${showStanding?`<div class="standing">${standing}</div>`:''}
       </div>
-      <div class="rem">${p.score}</div>`;
+      <div class="rem-wrap">
+        <div class="rem">${p.score}</div>
+        ${i===game.current?'<div class="co-inline" id="checkout-inline"></div>':''}
+      </div>`;
     sb.appendChild(row);
   });
-  document.getElementById('active-name').textContent = game.players[game.current].name;
   renderSlots();
   renderPad();
   updateCheckout(false);
@@ -1395,27 +1365,19 @@ function liveRemaining(){
   return game.players[game.current].score - pts;
 }
 function updateCheckout(flash){
-  const bar = document.getElementById('checkout-bar');
-  const route = document.getElementById('checkout-route');
-  if(!bar || !route) return;
+  const el = document.getElementById('checkout-inline');
+  if(!el) return;
   const cp = game.players[game.current];
   const dbl = cp.doubleOut;
-  // Was the player on a finish at the START of this visit (3 darts in hand)?
-  // If not, never suggest a checkout mid-visit — even if a dart happens to leave
-  // a finishable number. Only update the suggestion when the visit began on one.
+  // Only suggest a checkout if the player started this visit already on a finishing number.
   const startedOnCheckout = checkoutHint(cp.score, dbl, 3) !== '';
   const dartsLeft = 3 - game.darts.length;
   const rem = (game.busted || game.won) ? -1 : liveRemaining();
   const hint = (startedOnCheckout && rem > 0 && dartsLeft > 0)
-    ? checkoutHint(rem, dbl, dartsLeft)   // route for what's left, within the darts remaining
+    ? checkoutHint(rem, dbl, dartsLeft)
     : '';
-  if(hint){
-    route.textContent = hint.replace(/ /g,'  →  ');
-    bar.hidden = false;
-    if(flash){ bar.classList.remove('flash'); void bar.offsetWidth; bar.classList.add('flash'); }
-  } else {
-    bar.hidden = true;
-  }
+  el.textContent = hint ? hint.replace(/ /g,' → ') : '';
+  if(hint && flash){ el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
 }
 
 /* ---------- live scoreboard feed ---------- */
@@ -1466,14 +1428,14 @@ function renderPad(){
     b.onclick=()=>throwDart(n);
     pad.appendChild(b);
   }
+  // Bull + Miss share the last row (4-col grid, each spans 2)
   const bull=document.createElement('button');
   bull.className='bull'; bull.textContent='Bull'; bull.disabled=full;
-  bull.style.gridColumn='1 / -1';
   bull.onclick=()=>throwDart(25); pad.appendChild(bull);
 
-  // Miss lives in the sticky action bar — keep its state in sync
-  const missBtn = document.getElementById('miss-btn');
-  if(missBtn) missBtn.disabled = full;
+  const miss=document.createElement('button');
+  miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
+  miss.onclick=()=>throwDart(0); pad.appendChild(miss);
 }
 
 /* ---------- throwing ---------- */
@@ -1693,15 +1655,8 @@ function finishUnit(kind, winner){
 /* rebuild the oche inner markup (used after a leg replaced it) */
 function renderGameShell(){
   document.querySelector('.oche').innerHTML=`
-      <div class="turnhead">
-        <div class="who">Throwing: <b id="active-name">—</b></div>
-      </div>
-      <div class="checkout-bar" id="checkout-bar" hidden>
-        <span class="co-label">Checkout</span>
-        <span class="co-route" id="checkout-route"></span>
-      </div>
       <div class="slots" id="slots"></div>
-      <div class="status" id="status">Tap a multiplier, then a number — one dart at a time.</div>
+      <div class="status" id="status">Select a multiplier, then tap a number.</div>
       <div class="multi" role="group" aria-label="Dart multiplier">
         <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
         <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
@@ -1709,13 +1664,8 @@ function renderGameShell(){
       </div>
       <div class="pad" id="pad"></div>
       <div class="turn-actions">
-        <div class="miss-row">
-          <button class="btn btn-ghost" id="miss-btn" onclick="throwDart(0)">Miss</button>
-        </div>
-        <div class="enter-row">
-          <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo dart</button>
-          <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
-        </div>
+        <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo dart</button>
+        <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
       </div>`;
 }
 
