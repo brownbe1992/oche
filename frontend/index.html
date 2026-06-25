@@ -258,11 +258,13 @@
   .hof-times{font-size:11px;font-weight:700;color:var(--gold);min-width:22px;flex:none}
   .hof-player{font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .hof-dates{font-size:11px;color:var(--muted);flex:none;text-align:right}
-  .hero-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
-  .hero-block{background:var(--surface-2);border:1px solid var(--wire);border-radius:11px;padding:18px 14px;text-align:center}
-  .hero-val{font-family:'Bebas Neue';font-size:46px;color:var(--cream);line-height:1}
-  .hero-label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:6px}
-  @media(max-width:400px){.hero-val{font-size:32px}}
+  .hero-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:12px}
+  .hero-block{background:var(--surface-2);border:1px solid var(--wire);border-radius:11px;padding:22px 14px;text-align:center}
+  .hero-val{font-family:'Bebas Neue';font-size:52px;color:var(--cream);line-height:1}
+  .hero-label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:7px}
+  @media(max-width:400px){.hero-val{font-size:38px}}
+  #home-body .pp-section-title{font-size:14px;color:var(--ink);text-transform:none;letter-spacing:.01em;
+    font-weight:700;border-bottom:1.5px solid var(--wire);padding-bottom:10px;margin-bottom:14px}
   .achievement-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
   @media(max-width:500px){.achievement-pair{grid-template-columns:1fr}}
   .achievement-col-title{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;margin-bottom:6px}
@@ -637,18 +639,18 @@ function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
 
   // Hero cards — prominent at the top
   const heroCards=[
-    {val:fmt(s.darts),        label:'Darts Thrown'},
-    {val:fmt(s.oneEighties),  label:'180s'},
-    {val:fmt(s.bigFish),      label:'Big Fish'},
-    {val:fmt(s.nineDarters),  label:'9-Darters'},
+    {val:fmt(s.darts),       label:'Total Darts Thrown'},
+    {val:fmt(s.oneEighties), label:'180s'},
   ];
 
-  // Secondary stats
+  // Secondary stats (smaller cards)
   const secCards=[
-    {val:fmt(s.players), label:'Players'},
-    {val:fmt(s.games),   label:'Games Played'},
-    {val:fmt(s.sets),    label:'Sets'},
-    {val:fmt(s.legs),    label:'Legs'},
+    {val:fmt(s.players),    label:'Players'},
+    {val:fmt(s.games),      label:'Games Played'},
+    {val:fmt(s.sets),       label:'Sets'},
+    {val:fmt(s.legs),       label:'Legs'},
+    {val:fmt(s.bigFish),    label:'Big Fish'},
+    {val:fmt(s.nineDarters),label:'9-Darters'},
   ];
 
   // 3-dart average leaderboard computed from in-memory stats
