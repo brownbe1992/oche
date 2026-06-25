@@ -258,7 +258,7 @@
   .hof-times{font-size:11px;font-weight:700;color:var(--gold);min-width:22px;flex:none}
   .hof-player{font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .hof-dates{font-size:11px;color:var(--muted);flex:none;text-align:right}
-  .hero-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:12px}
+  .hero-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
   .hero-block{background:var(--surface-2);border:1px solid var(--wire);border-radius:11px;padding:22px 14px;text-align:center}
   .hero-val{font-family:'Bebas Neue';font-size:52px;color:var(--cream);line-height:1}
   .hero-label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:7px}
@@ -647,6 +647,7 @@ function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
   const heroCards=[
     {val:fmt(s.darts),       label:'Total Darts Thrown'},
     {val:fmt(s.oneEighties), label:'180s'},
+    {val:fmt(s.bigFish),     label:'Big Fish'},
   ];
 
   // Secondary stats (smaller cards)
@@ -656,7 +657,6 @@ function renderHomeContent(s,finishes,eighties,bigFishData,nineDarterData){
     {val:fmt(s.sets),         label:'Sets Played'},
     {val:fmt(s.legs),         label:'H2H Legs Thrown'},
     {val:fmt(s.practiceLegs), label:'Practice Legs Thrown'},
-    {val:fmt(s.bigFish),      label:'Big Fish'},
     {val:fmt(s.nineDarters),  label:'9-Darters'},
   ];
 
