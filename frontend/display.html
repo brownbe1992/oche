@@ -81,6 +81,19 @@
   .idle .ln{color:var(--muted);font-size:2.6vmin}
   .hidden{display:none!important}
 
+  /* corner panels */
+  .corner{position:fixed;bottom:2.2vmin;display:flex;flex-direction:column;gap:.7vmin;
+    background:rgba(20,22,18,.88);border:1px solid var(--wire);border-radius:1.4vmin;
+    padding:1.4vmin 2vmin;backdrop-filter:blur(4px);min-width:16vmin}
+  .corner.hidden{display:none}
+  .corner-bl{left:2.6vmin}
+  .corner-br{right:2.6vmin;text-align:right}
+  .corner-title{font-size:1.4vmin;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:600;margin-bottom:.3vmin}
+  .corner-row{display:flex;align-items:baseline;justify-content:space-between;gap:2vmin;font-size:2.1vmin}
+  .corner-row .cn{color:var(--muted);font-size:1.8vmin;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:14vmin}
+  .corner-row .cv{font-family:'Bebas Neue';font-size:3.2vmin;color:var(--cream);letter-spacing:.03em;flex:none}
+  .corner-br .corner-row{flex-direction:row-reverse}
+
   /* achievement flash overlay */
   .ach-overlay{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;
     gap:1.8vmin;background:rgba(8,9,7,.82);z-index:30;text-align:center;pointer-events:none}
@@ -114,6 +127,17 @@
     <div class="ach-name" id="ach-name"></div>
   </div>
 
+  <div class="corner corner-bl hidden" id="corner-bl">
+    <div class="corner-title">This game</div>
+    <div class="corner-row"><span class="cn">🎯 180s</span><span class="cv" id="stat-180s">0</span></div>
+    <div class="corner-row"><span class="cn">🐟 Big Fish</span><span class="cv" id="stat-bf">0</span></div>
+  </div>
+
+  <div class="corner corner-br hidden" id="corner-br">
+    <div class="corner-title">Score</div>
+    <div id="corner-score"></div>
+  </div>
+
 <script>
 const grid      = document.getElementById('grid');
 const idle      = document.getElementById('idle');
@@ -124,6 +148,12 @@ const banner    = document.getElementById('banner');
 const achOverlay= document.getElementById('ach-overlay');
 const achText   = document.getElementById('ach-text');
 const achName   = document.getElementById('ach-name');
+
+const cornerBL   = document.getElementById('corner-bl');
+const cornerBR   = document.getElementById('corner-br');
+const stat180s   = document.getElementById('stat-180s');
+const statBF     = document.getElementById('stat-bf');
+const cornerScore= document.getElementById('corner-score');
 
 let bannerKey = '';        // so a result banner shows once, not on every heartbeat
 let lastAchTs = 0;         // prevent re-firing achievement on heartbeats
@@ -147,8 +177,20 @@ function render(s){
   if(!s || !s.active){
     grid.classList.add('hidden'); idle.classList.remove('hidden');
     fmtEl.innerHTML=''; banner.classList.remove('show'); bannerKey='';
+    cornerBL.classList.add('hidden'); cornerBR.classList.add('hidden');
     return;
   }
+  // corner panels
+  cornerBL.classList.remove('hidden');
+  stat180s.textContent = s.gameOneEighties ?? 0;
+  statBF.textContent   = s.gameBigFish     ?? 0;
+  cornerBR.classList.remove('hidden');
+  cornerScore.innerHTML = s.players.map(p=>{
+    const score = s.setsPerGame > 1
+      ? `${p.setsWon}<span style="font-size:1.6vmin;color:var(--muted)"> sets</span>`
+      : `${p.legsWon}<span style="font-size:1.6vmin;color:var(--muted)">/${s.legsPerSet}</span>`;
+    return `<div class="corner-row"><span class="cn">${escapeHtml(p.name)}</span><span class="cv">${score}</span></div>`;
+  }).join('');
   idle.classList.add('hidden'); grid.classList.remove('hidden');
   fmtEl.innerHTML = fmtText(s);
 

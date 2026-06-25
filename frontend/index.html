@@ -944,7 +944,9 @@ async function startGame(){
     current: 0,
     setNo: 1, legNo: 1,
     darts: [],
-    done: false
+    done: false,
+    gameOneEighties: 0,
+    gameBigFish: 0
   };
   names.forEach(ensurePlayerStats);
   await DB.beginGame(game, names);   // registers the game; gets a gameId in api mode
@@ -1349,6 +1351,8 @@ function liveSnapshot(message){
     status: game.won ? 'won' : (game.busted ? 'bust' : 'live'),
     message: message || '',
     achievement: pendingAchievement,
+    gameOneEighties: game.gameOneEighties || 0,
+    gameBigFish: game.gameBigFish || 0,
     done: !!game.done,
     ts: Date.now()
   };
@@ -1446,9 +1450,9 @@ function enterTurn(){
     if(ev.win && ev.pointsThisVisit === 170) _ms.bigFish += 1;
     if(ev.win && game.category==='501' && p.legVisits===3) _ms.nineDarters += 1;
   }
-  // achievement flashes for the live scoreboard (both modes — no-op in local since pushLive is guarded)
-  if(ev.scored === 180) pendingAchievement = { type:'180', player:p.name, ts:Date.now() };
-  if(ev.win && ev.pointsThisVisit === 170) pendingAchievement = { type:'bigfish', player:p.name, ts:Date.now() };
+  // achievement flashes + in-game counters for the live scoreboard
+  if(ev.scored === 180){ game.gameOneEighties += 1; pendingAchievement = { type:'180', player:p.name, ts:Date.now() }; }
+  if(ev.win && ev.pointsThisVisit === 170){ game.gameBigFish += 1; pendingAchievement = { type:'bigfish', player:p.name, ts:Date.now() }; }
 
   if(ev.win){
     if(DB.mode==='local'){
