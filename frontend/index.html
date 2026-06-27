@@ -704,7 +704,7 @@ function throwDartBoard(sector, m){ mult = m; throwDart(sector); }
 
 function buildDartboard(disabled){
   const CX=250, CY=250;
-  const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248 };
+  const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, bg:248 };
   const DEG = 360/20;
   function xy(r, deg){ const a=(deg-90)*Math.PI/180; return [CX+r*Math.cos(a), CY+r*Math.sin(a)]; }
   function f(v){ return v.toFixed(2); }
@@ -734,10 +734,6 @@ function buildDartboard(disabled){
     s += `<path class="dz" d="${annulus(R.trebleIn,R.trebleOut,s0,e0)}" fill="${rc}" ${sw} ${oc(num,3)}/>`;
     s += `<path class="dz" d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${sc}" ${sw} ${oc(num,1)}/>`;
     s += `<path class="dz" d="${annulus(R.doubleIn,R.doubleOut,s0,e0)}" fill="${rc}" ${sw} ${oc(num,2)}/>`;
-    const [nx,ny]=xy(R.numAt,s0+DEG/2);
-    s += `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central"
-      font-family="Bebas Neue,sans-serif" font-size="17" fill="#efe7d2"
-      style="pointer-events:none;user-select:none">${num}</text>`;
   });
   s += `<circle class="dz" cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="#1b8a3a" stroke="#151613" stroke-width="0.5" ${oc(25,1)}/>`;
   s += `<circle class="dz" cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="#c8102e" stroke="#151613" stroke-width="0.5" ${oc(25,2)}/>`;
