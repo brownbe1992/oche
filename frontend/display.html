@@ -67,9 +67,13 @@
   .meta b{color:var(--ink);font-weight:600}
   .standing{margin-left:auto;color:var(--gold);font-weight:700;letter-spacing:.04em;font-size:2vmin}
 
-  /* darts in hand (no checkout here — shown in the strip above) */
-  .throwbox{margin-top:1.6vmin;border-top:1px dashed var(--wire);padding-top:1.6vmin}
+  /* darts in hand + checkout */
+  .throwbox{margin-top:1.6vmin;border-top:1px dashed var(--wire);padding-top:1.6vmin;display:flex;flex-direction:column;gap:1.2vmin}
   .darts{display:flex;gap:1.2vmin}
+  .checkout{display:flex;align-items:center;gap:1.6vmin;background:linear-gradient(180deg,rgba(217,180,106,.16),rgba(217,180,106,.05));
+    border:1px solid var(--gold);border-radius:1.2vmin;padding:1.2vmin 1.8vmin}
+  .checkout .lab{font-size:1.6vmin;text-transform:uppercase;letter-spacing:.14em;color:var(--gold);font-weight:700;flex:none}
+  .checkout .route{font-family:'Bebas Neue';font-size:4.2vmin;line-height:.85;color:var(--cream);letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dart{flex:1;background:var(--surface-2);border:1px solid var(--wire);border-radius:1.2vmin;height:6.5vmin;
     display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue';font-size:3.4vmin;letter-spacing:.03em}
   .dart.empty{color:#4d514a;font-family:'Inter';font-size:1.7vmin}
@@ -197,6 +201,9 @@ let lastCoKey = '';   // track checkout route to flash only on change
 
 function fmtText(s){
   const cat = s.category != null ? `${s.category}` : '';
+  if(s.practice){
+    return `<b>${cat}</b> &nbsp; Practice &nbsp;·&nbsp; Leg ${s.legNo}`;
+  }
   const legs = s.legsPerSet>1 ? `first to ${s.legsPerSet} legs` : '1 leg';
   const sets = s.setsPerGame>1 ? `first to ${s.setsPerGame} sets · ` : '';
   const where = s.setsPerGame>1 ? `Set ${s.setNo} · Leg ${s.legNo}` : `Leg ${s.legNo}`;
@@ -229,26 +236,26 @@ function render(s){
   statBF.textContent    = s.gameBigFish     ?? 0;
   statBusts.textContent = s.gameBusts       ?? 0;
 
-  // checkout strip — show prominently when player is on a finish
+  // checkout strip — show when player is on a finish
+  // s.checkout is already '' when bust/won/no-finish, so no status check needed
   const thrower = s.players[s.currentIndex];
-  const hasCheckout = s.checkout && s.status === 'live' && !s.legSummary;
+  const hasCheckout = !!s.checkout && !s.legSummary;
   if(hasCheckout){
     const route = s.checkout.replace(/ /g, '  →  ');
-    coRoute.textContent = route;
-    coWho.textContent   = thrower ? thrower.name + ' at the oche' : '';
-    coStrip.classList.remove('hidden');
-    // flash strip when the route changes (new dart landed)
     if(route !== lastCoKey){
       lastCoKey = route;
-      coStrip.classList.remove('flash'); void coStrip.offsetWidth; coStrip.classList.add('flash');
+      coRoute.textContent = route;
+      coWho.textContent   = thrower ? thrower.name + ' at the oche' : '';
     }
+    coStrip.classList.remove('hidden');
   } else {
     coStrip.classList.add('hidden');
     lastCoKey = '';
   }
 
-  // H2H score panel — hidden in practice/solo mode
-  if(!s.practice){
+  // H2H score panel — hidden in practice mode or solo play
+  const showScorePanel = !s.practice && s.players && s.players.length > 1;
+  if(showScorePanel){
     cornerBR.classList.remove('hidden');
     cornerScore.innerHTML = s.players.map(p=>{
       const score = s.setsPerGame > 1
@@ -286,17 +293,22 @@ function render(s){
   } else {
     grid.innerHTML = s.players.map((p,i)=>{
       const active = i===s.currentIndex;
-      const standing = s.setsPerGame>1
-        ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
-        : `Legs ${p.legsWon}/${s.legsPerSet}`;
-      const throwbox = active
-        ? `<div class="throwbox"><div class="darts">${
-            [0,1,2].map(k=>{
-              const lab = s.darts[k];
-              return `<div class="dart ${dartClass(lab)}">${lab || 'dart '+(k+1)}</div>`;
-            }).join('')
-          }</div></div>`
-        : '';
+      const standing = s.practice
+        ? `Leg ${s.legNo}`
+        : s.setsPerGame>1
+          ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
+          : `Legs ${p.legsWon}/${s.legsPerSet}`;
+      let throwbox = '';
+      if(active){
+        const slots = [0,1,2].map(k=>{
+          const lab = s.darts[k];
+          return `<div class="dart ${dartClass(lab)}">${lab || 'dart '+(k+1)}</div>`;
+        }).join('');
+        const co = s.checkout
+          ? `<div class="checkout"><span class="lab">Checkout</span><span class="route">${s.checkout.replace(/ /g,'  →  ')}</span></div>`
+          : '';
+        throwbox = `<div class="throwbox"><div class="darts">${slots}</div>${co}</div>`;
+      }
       let flash = '';
       if(active && s.status==='bust') flash = `<div class="flash bust">BUST</div>`;
       if(active && s.status==='won')  flash = `<div class="flash shot">GAME SHOT</div>`;

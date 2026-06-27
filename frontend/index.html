@@ -165,6 +165,15 @@
   .turn-actions .btn{flex:1}
   .turn-actions .btn-primary{font-size:17px;padding:16px 20px}
 
+  /* ---- dartboard input mode ---- */
+  .imt-row{display:flex;gap:5px;justify-content:flex-end;margin-bottom:6px;flex:none}
+  .imt-btn{background:var(--surface);border:1px solid var(--wire);color:var(--muted);
+    border-radius:8px;padding:5px 14px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.03em}
+  .imt-btn[aria-pressed="true"]{background:var(--surface-2);color:var(--ink);border-color:var(--muted)}
+  .dart-board-wrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .dart-board-wrap.hidden,.board-miss.hidden{display:none!important}
+  .board-miss{flex:none;margin-top:8px}
+
   /* ---- stats screen ---- */
   table{width:100%;border-collapse:collapse;font-size:13.5px}
   th,td{text-align:left;padding:11px 10px;border-bottom:1px solid var(--wire)}
@@ -264,6 +273,14 @@
   body.game-active .turn-actions .btn-primary{
     font-size:clamp(12px,1.9dvh,17px);
     padding:clamp(9px,1.5dvh,17px) 8px;
+  }
+  body.game-active .imt-row{margin-bottom:clamp(3px,.5dvh,6px)}
+  body.game-active .imt-btn{font-size:clamp(10px,1.5dvh,13px);padding:clamp(4px,.7dvh,6px) clamp(8px,1.5vw,14px)}
+  body.game-active .dart-board-wrap{flex:1;min-height:0}
+  body.game-active .board-miss{
+    margin-top:clamp(4px,.7dvh,8px);
+    font-size:clamp(11px,1.7dvh,16px);
+    padding:clamp(7px,1.2dvh,15px) 8px;
   }
 
   @media (prefers-reduced-motion:reduce){*{animation:none!important}}
@@ -678,6 +695,81 @@ let roster = [];     // saved player names (profiles that own stats)
 let stats = {};
 let prefs = {};      // name -> { out:'double'|'single' }  (per-player finish rule)
 let mult = 1;
+let dartboardMode = false;
+
+/* ---------- dartboard input mode ---------- */
+const DB_SECTORS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
+
+function throwDartBoard(sector, m){ mult = m; throwDart(sector); }
+
+function buildDartboard(disabled){
+  const CX=250, CY=250;
+  const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248 };
+  const DEG = 360/20;
+  function xy(r, deg){ const a=(deg-90)*Math.PI/180; return [CX+r*Math.cos(a), CY+r*Math.sin(a)]; }
+  function f(v){ return v.toFixed(2); }
+  function annulus(r1, r2, s, e){
+    const [x1,y1]=xy(r1,s),[x2,y2]=xy(r1,e),[x3,y3]=xy(r2,e),[x4,y4]=xy(r2,s);
+    const lg=e-s>180?1:0;
+    return `M${f(x1)},${f(y1)} A${r1},${r1} 0 ${lg},1 ${f(x2)},${f(y2)} L${f(x3)},${f(y3)} A${r2},${r2} 0 ${lg},0 ${f(x4)},${f(y4)} Z`;
+  }
+  const dis = disabled;
+  const oc = (sec, m) => dis ? '' : `onclick="throwDartBoard(${sec},${m})"`;
+  let s = `<svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg"
+    style="width:100%;height:100%;touch-action:manipulation;-webkit-tap-highlight-color:transparent"
+    preserveAspectRatio="xMidYMid meet">
+    <style>
+      .dz{${dis?'opacity:.4;cursor:not-allowed':'cursor:pointer;transition:filter .07s'}}
+      ${dis?'':'.dz:hover{filter:brightness(1.4)}.dz:active{filter:brightness(1.9)}'}
+    </style>
+    <circle cx="${CX}" cy="${CY}" r="${R.bg}" fill="#0d0e0b"/>
+    <circle cx="${CX}" cy="${CY}" r="${R.doubleOut+1}" fill="#111210"/>
+    <circle cx="${CX}" cy="${CY}" r="${R.doubleOut}" fill="#0d0e0b"/>`;
+  DB_SECTORS.forEach((num,i)=>{
+    const s0=i*DEG-DEG/2, e0=s0+DEG;
+    const sc = i%2===0 ? '#cbbf96' : '#1c1e1a';  // light/dark singles
+    const rc = i%2===0 ? '#c8102e' : '#1b8a3a';  // red/green rings
+    const sw = 'stroke="#151613" stroke-width="0.5"';
+    s += `<path class="dz" d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${sc}" ${sw} ${oc(num,1)}/>`;
+    s += `<path class="dz" d="${annulus(R.trebleIn,R.trebleOut,s0,e0)}" fill="${rc}" ${sw} ${oc(num,3)}/>`;
+    s += `<path class="dz" d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${sc}" ${sw} ${oc(num,1)}/>`;
+    s += `<path class="dz" d="${annulus(R.doubleIn,R.doubleOut,s0,e0)}" fill="${rc}" ${sw} ${oc(num,2)}/>`;
+    const [nx,ny]=xy(R.numAt,s0+DEG/2);
+    s += `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central"
+      font-family="Bebas Neue,sans-serif" font-size="17" fill="#efe7d2"
+      style="pointer-events:none;user-select:none">${num}</text>`;
+  });
+  s += `<circle class="dz" cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="#1b8a3a" stroke="#151613" stroke-width="0.5" ${oc(25,1)}/>`;
+  s += `<circle class="dz" cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="#c8102e" stroke="#151613" stroke-width="0.5" ${oc(25,2)}/>`;
+  s += `<text x="${CX}" y="${CY}" text-anchor="middle" dominant-baseline="central"
+    font-family="Bebas Neue,sans-serif" font-size="12" fill="#efe7d2" style="pointer-events:none;user-select:none">Bull</text>`;
+  s += `</svg>`;
+  return s;
+}
+
+function applyDartMode(){
+  const pad   = document.getElementById('pad');
+  const multi = document.getElementById('multi-row');
+  const board = document.getElementById('dart-board-wrap');
+  const missB = document.getElementById('board-miss-btn');
+  const tab1  = document.getElementById('imt-pad');
+  const tab2  = document.getElementById('imt-board');
+  if(!pad || !board) return;
+  const full  = game && (game.darts.length>=3 || game.busted || game.won);
+  if(dartboardMode){
+    pad.classList.add('hidden'); if(multi) multi.classList.add('hidden');
+    board.classList.remove('hidden'); board.innerHTML = buildDartboard(full);
+    if(missB){ missB.classList.remove('hidden'); missB.disabled = full; }
+    if(tab1) tab1.setAttribute('aria-pressed','false');
+    if(tab2) tab2.setAttribute('aria-pressed','true');
+  } else {
+    pad.classList.remove('hidden'); if(multi) multi.classList.remove('hidden');
+    board.classList.add('hidden'); if(missB) missB.classList.add('hidden');
+    if(tab1) tab1.setAttribute('aria-pressed','true');
+    if(tab2) tab2.setAttribute('aria-pressed','false');
+  }
+}
+function setDartMode(mode){ dartboardMode=(mode==='board'); applyDartMode(); }
 
 /* ---------- per-player finish rule ---------- */
 function playerOut(name){ return (prefs[name] && prefs[name].out==='single') ? 'single' : 'double'; }
@@ -1440,6 +1532,14 @@ function renderPad(){
   const miss=document.createElement('button');
   miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
   miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+
+  // in board mode, rebuild the dartboard to reflect the new disabled state
+  if(dartboardMode){
+    const board = document.getElementById('dart-board-wrap');
+    if(board) board.innerHTML = buildDartboard(full);
+    const missB = document.getElementById('board-miss-btn');
+    if(missB) missB.disabled = full;
+  }
 }
 
 /* ---------- throwing ---------- */
@@ -1660,18 +1760,25 @@ function finishUnit(kind, winner){
 /* rebuild the oche inner markup (used after a leg replaced it) */
 function renderGameShell(){
   document.querySelector('.oche').innerHTML=`
+      <div class="imt-row">
+        <button class="imt-btn" id="imt-pad"   onclick="setDartMode('pad')"   aria-pressed="${!dartboardMode}">Pad</button>
+        <button class="imt-btn" id="imt-board" onclick="setDartMode('board')" aria-pressed="${dartboardMode}">🎯</button>
+      </div>
       <div class="slots" id="slots"></div>
       <div class="status" id="status">Select a multiplier, then tap a number.</div>
-      <div class="multi" role="group" aria-label="Dart multiplier">
+      <div class="multi" id="multi-row" role="group" aria-label="Dart multiplier">
         <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
         <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
         <button class="m-t" id="m-t" aria-pressed="false" onclick="setMult(3)">Treble</button>
       </div>
       <div class="pad" id="pad"></div>
+      <div class="dart-board-wrap hidden" id="dart-board-wrap"></div>
+      <button class="btn btn-ghost board-miss hidden" id="board-miss-btn" onclick="throwDartBoard(0,1)">Miss</button>
       <div class="turn-actions">
         <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo dart</button>
         <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
       </div>`;
+  applyDartMode();
 }
 
 /* ---------- checkout calculator ----------

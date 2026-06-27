@@ -397,8 +397,18 @@ function computeStats() {
 function getSummary() {
   const players    = db.prepare('SELECT COUNT(*) AS n FROM players').get().n;
   const games      = db.prepare('SELECT COUNT(*) AS n FROM games WHERE completed_at IS NOT NULL').get().n;
-  const sets       = db.prepare("SELECT COUNT(DISTINCT game_id || '-' || set_no) AS n FROM turns").get().n;
-  const legs       = db.prepare("SELECT COUNT(DISTINCT game_id || '-' || set_no || '-' || leg_no) AS n FROM turns").get().n;
+  const sets = db.prepare(`
+    SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no) AS n
+    FROM turns t JOIN games g ON g.id = t.game_id
+    WHERE g.practice = 0
+      AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+  `).get().n;
+  const legs = db.prepare(`
+    SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
+    FROM turns t JOIN games g ON g.id = t.game_id
+    WHERE g.practice = 0
+      AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+  `).get().n;
   const darts      = db.prepare('SELECT COUNT(*) AS n FROM turns').get().n * 3;
   const tonPlus      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout = 1 AND checkout_points >= 100').get().n;
   const oneEighties  = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE scored = 180').get().n;
