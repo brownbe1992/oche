@@ -22,16 +22,34 @@
     display:flex; flex-direction:column; padding:2.2vmin 2.6vmin;
     font-feature-settings:"tnum" 1;
   }
+
   /* ---- top bar ---- */
   .top{display:flex;align-items:center;gap:2vmin;padding-bottom:1.6vmin;border-bottom:1px solid var(--wire);flex:none}
   .brand{font-family:'Bebas Neue';font-size:4.4vmin;line-height:.8;letter-spacing:.06em;color:var(--cream)}
   .fmt{color:var(--muted);font-size:2.1vmin;letter-spacing:.02em}
   .fmt b{color:var(--ink);font-weight:600}
-  .live{margin-left:auto;display:flex;align-items:center;gap:1vmin;color:var(--muted);font-size:1.7vmin;text-transform:uppercase;letter-spacing:.12em}
+  /* game stats (180s + BF) — right side of top bar */
+  .game-stats{display:flex;gap:2.4vmin;align-items:center;margin-left:auto}
+  .game-stats.hidden{display:none!important}
+  .gs-item{display:flex;align-items:center;gap:.5vmin;color:var(--muted);font-size:2vmin}
+  .gs-val{font-family:'Bebas Neue';font-size:3.2vmin;color:var(--cream);letter-spacing:.03em}
+  .live{margin-left:2vmin;display:flex;align-items:center;gap:1vmin;color:var(--muted);font-size:1.7vmin;text-transform:uppercase;letter-spacing:.12em}
   .dot{width:1.3vmin;height:1.3vmin;border-radius:50%;background:var(--green);box-shadow:0 0 1.4vmin var(--green)}
   .dot.off{background:var(--bust);box-shadow:none;animation:none}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
   .dot{animation:pulse 2s ease-in-out infinite}
+
+  /* ---- checkout strip ---- */
+  .co-strip{flex:none;display:flex;align-items:center;gap:2.4vmin;
+    padding:1vmin 2.6vmin;
+    background:linear-gradient(90deg,rgba(217,180,106,.15) 0%,rgba(217,180,106,.04) 100%);
+    border-bottom:1px solid rgba(217,180,106,.3)}
+  .co-strip.hidden{display:none!important}
+  .co-strip-label{font-size:1.5vmin;text-transform:uppercase;letter-spacing:.16em;color:var(--gold);font-weight:700;flex:none}
+  .co-strip-route{font-family:'Bebas Neue';font-size:5.5vmin;line-height:.85;color:var(--cream);letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+  .co-strip-who{font-size:1.8vmin;color:var(--muted);flex:none;white-space:nowrap}
+  @keyframes costrip-flash{0%{background:rgba(217,180,106,.35)}100%{background:rgba(217,180,106,.15)}}
+  .co-strip.flash{animation:costrip-flash .6s ease-out}
 
   /* ---- player grid ---- */
   .grid{flex:1;display:grid;gap:2vmin;padding:2vmin 0;min-height:0}
@@ -42,24 +60,21 @@
   .pname{font-weight:600;font-size:3.6vmin;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ptag{font-size:1.5vmin;font-weight:700;letter-spacing:.08em;color:var(--gold);border:1px solid var(--wire);border-radius:.8vmin;padding:.5vmin .9vmin;flex:none}
   .throwflag{margin-left:auto;font-size:1.7vmin;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);flex:none}
-  .score{font-family:'Bebas Neue';font-size:clamp(56px, 17vmin, 280px);line-height:.78;color:var(--cream);letter-spacing:.01em;margin:.4vmin 0}
+  .score{font-family:'Bebas Neue';font-size:clamp(56px, 17vmin, 280px);line-height:.78;color:var(--cream);letter-spacing:.01em;margin:.4vmin 0 .2vmin}
   .pcard.active .score{color:#fff}
+  .leg-darts{font-size:2vmin;color:var(--muted);letter-spacing:.08em;margin-bottom:.6vmin}
   .meta{display:flex;gap:2.4vmin;align-items:center;color:var(--muted);font-size:2vmin;flex-wrap:wrap}
   .meta b{color:var(--ink);font-weight:600}
   .standing{margin-left:auto;color:var(--gold);font-weight:700;letter-spacing:.04em;font-size:2vmin}
 
-  /* darts in hand + checkout for the thrower */
-  .throwbox{margin-top:1.6vmin;border-top:1px dashed var(--wire);padding-top:1.6vmin;display:flex;flex-direction:column;gap:1.2vmin}
+  /* darts in hand (no checkout here — shown in the strip above) */
+  .throwbox{margin-top:1.6vmin;border-top:1px dashed var(--wire);padding-top:1.6vmin}
   .darts{display:flex;gap:1.2vmin}
   .dart{flex:1;background:var(--surface-2);border:1px solid var(--wire);border-radius:1.2vmin;height:6.5vmin;
     display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue';font-size:3.4vmin;letter-spacing:.03em}
   .dart.empty{color:#4d514a;font-family:'Inter';font-size:1.7vmin}
   .dart.t{border-color:var(--green);color:#7fe0a0}
   .dart.d{border-color:var(--red);color:#ff8a93}
-  .checkout{display:flex;align-items:center;gap:1.6vmin;background:linear-gradient(180deg,rgba(217,180,106,.16),rgba(217,180,106,.05));
-    border:1px solid var(--gold);border-radius:1.2vmin;padding:1.2vmin 1.8vmin}
-  .checkout .lab{font-size:1.6vmin;text-transform:uppercase;letter-spacing:.14em;color:var(--gold);font-weight:700;flex:none}
-  .checkout .route{font-family:'Bebas Neue';font-size:4.2vmin;line-height:.85;color:var(--cream);letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
   /* status flash on a card (bust / game shot) */
   .flash{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
@@ -81,18 +96,15 @@
   .idle .ln{color:var(--muted);font-size:2.6vmin}
   .hidden{display:none!important}
 
-  /* corner panels */
-  .corner{position:fixed;bottom:2.2vmin;display:flex;flex-direction:column;gap:.7vmin;
+  /* score panel (bottom-right, H2H only) */
+  .corner{position:fixed;bottom:2.2vmin;right:2.6vmin;display:flex;flex-direction:column;gap:.7vmin;
     background:rgba(20,22,18,.88);border:1px solid var(--wire);border-radius:1.4vmin;
-    padding:1.4vmin 2vmin;backdrop-filter:blur(4px);min-width:16vmin}
+    padding:1.4vmin 2vmin;backdrop-filter:blur(4px);min-width:16vmin;text-align:right}
   .corner.hidden{display:none}
-  .corner-bl{left:2.6vmin}
-  .corner-br{right:2.6vmin;text-align:right}
   .corner-title{font-size:1.4vmin;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:600;margin-bottom:.3vmin}
-  .corner-row{display:flex;align-items:baseline;justify-content:space-between;gap:2vmin;font-size:2.1vmin}
+  .corner-row{display:flex;flex-direction:row-reverse;align-items:baseline;justify-content:space-between;gap:2vmin;font-size:2.1vmin}
   .corner-row .cn{color:var(--muted);font-size:1.8vmin;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:14vmin}
   .corner-row .cv{font-family:'Bebas Neue';font-size:3.2vmin;color:var(--cream);letter-spacing:.03em;flex:none}
-  .corner-br .corner-row{flex-direction:row-reverse}
 
   /* leg summary cards (shown between legs) */
   .sum-card{position:relative;background:var(--surface);border:1px solid var(--wire);border-radius:2vmin;
@@ -119,7 +131,17 @@
   <div class="top">
     <div class="brand">OCHE</div>
     <div class="fmt" id="fmt"></div>
+    <div class="game-stats hidden" id="game-stats">
+      <span class="gs-item">🎯 <span class="gs-val" id="stat-180s">0</span></span>
+      <span class="gs-item">🐟 <span class="gs-val" id="stat-bf">0</span></span>
+    </div>
     <div class="live"><span class="dot" id="dot"></span><span id="livetext">live</span></div>
+  </div>
+
+  <div class="co-strip hidden" id="co-strip">
+    <span class="co-strip-label">Checkout</span>
+    <span class="co-strip-route" id="co-strip-route"></span>
+    <span class="co-strip-who" id="co-strip-who"></span>
   </div>
 
   <div class="grid" id="grid"></div>
@@ -139,36 +161,37 @@
     <div class="ach-name" id="ach-name"></div>
   </div>
 
-  <div class="corner corner-bl hidden" id="corner-bl">
-    <div class="corner-title">This game</div>
-    <div class="corner-row"><span class="cn">🎯 180s</span><span class="cv" id="stat-180s">0</span></div>
-    <div class="corner-row"><span class="cn">🐟 Big Fish</span><span class="cv" id="stat-bf">0</span></div>
-  </div>
-
-  <div class="corner corner-br hidden" id="corner-br">
+  <!-- H2H score panel (bottom-right, hidden in practice mode) -->
+  <div class="corner hidden" id="corner-br">
     <div class="corner-title">Score</div>
     <div id="corner-score"></div>
   </div>
 
 <script>
-const grid      = document.getElementById('grid');
-const idle      = document.getElementById('idle');
-const fmtEl     = document.getElementById('fmt');
-const dot       = document.getElementById('dot');
-const liveTx    = document.getElementById('livetext');
-const banner    = document.getElementById('banner');
-const achOverlay= document.getElementById('ach-overlay');
-const achText   = document.getElementById('ach-text');
-const achName   = document.getElementById('ach-name');
+const grid       = document.getElementById('grid');
+const idle       = document.getElementById('idle');
+const fmtEl      = document.getElementById('fmt');
+const dot        = document.getElementById('dot');
+const liveTx     = document.getElementById('livetext');
+const banner     = document.getElementById('banner');
+const achOverlay = document.getElementById('ach-overlay');
+const achText    = document.getElementById('ach-text');
+const achName    = document.getElementById('ach-name');
 
-const cornerBL   = document.getElementById('corner-bl');
-const cornerBR   = document.getElementById('corner-br');
+const gameStats  = document.getElementById('game-stats');
 const stat180s   = document.getElementById('stat-180s');
 const statBF     = document.getElementById('stat-bf');
+
+const coStrip    = document.getElementById('co-strip');
+const coRoute    = document.getElementById('co-strip-route');
+const coWho      = document.getElementById('co-strip-who');
+
+const cornerBR   = document.getElementById('corner-br');
 const cornerScore= document.getElementById('corner-score');
 
-let bannerKey = '';        // so a result banner shows once, not on every heartbeat
-let lastAchTs = 0;         // prevent re-firing achievement on heartbeats
+let bannerKey = '';
+let lastAchTs = 0;
+let lastCoKey = '';   // track checkout route to flash only on change
 
 function fmtText(s){
   const cat = s.category != null ? `${s.category}` : '';
@@ -189,22 +212,50 @@ function render(s){
   if(!s || !s.active){
     grid.classList.add('hidden'); idle.classList.remove('hidden');
     fmtEl.innerHTML=''; banner.classList.remove('show'); bannerKey='';
-    cornerBL.classList.add('hidden'); cornerBR.classList.add('hidden');
+    gameStats.classList.add('hidden');
+    coStrip.classList.add('hidden'); lastCoKey='';
+    cornerBR.classList.add('hidden');
     return;
   }
-  // corner panels
-  cornerBL.classList.remove('hidden');
-  stat180s.textContent = s.gameOneEighties ?? 0;
-  statBF.textContent   = s.gameBigFish     ?? 0;
-  cornerBR.classList.remove('hidden');
-  cornerScore.innerHTML = s.players.map(p=>{
-    const score = s.setsPerGame > 1
-      ? `${p.setsWon}<span style="font-size:1.6vmin;color:var(--muted)"> sets</span>`
-      : `${p.legsWon}<span style="font-size:1.6vmin;color:var(--muted)">/${s.legsPerSet}</span>`;
-    return `<div class="corner-row"><span class="cn">${escapeHtml(p.name)}</span><span class="cv">${score}</span></div>`;
-  }).join('');
+
   idle.classList.add('hidden'); grid.classList.remove('hidden');
   fmtEl.innerHTML = fmtText(s);
+
+  // 180s + Big Fish in top bar
+  gameStats.classList.remove('hidden');
+  stat180s.textContent = s.gameOneEighties ?? 0;
+  statBF.textContent   = s.gameBigFish     ?? 0;
+
+  // checkout strip — show prominently when player is on a finish
+  const thrower = s.players[s.currentIndex];
+  const hasCheckout = s.checkout && s.status === 'live' && !s.legSummary;
+  if(hasCheckout){
+    const route = s.checkout.replace(/ /g, '  →  ');
+    coRoute.textContent = route;
+    coWho.textContent   = thrower ? thrower.name + ' at the oche' : '';
+    coStrip.classList.remove('hidden');
+    // flash strip when the route changes (new dart landed)
+    if(route !== lastCoKey){
+      lastCoKey = route;
+      coStrip.classList.remove('flash'); void coStrip.offsetWidth; coStrip.classList.add('flash');
+    }
+  } else {
+    coStrip.classList.add('hidden');
+    lastCoKey = '';
+  }
+
+  // H2H score panel — hidden in practice/solo mode
+  if(!s.practice){
+    cornerBR.classList.remove('hidden');
+    cornerScore.innerHTML = s.players.map(p=>{
+      const score = s.setsPerGame > 1
+        ? `${p.setsWon}<span style="font-size:1.6vmin;color:var(--muted)"> sets</span>`
+        : `${p.legsWon}<span style="font-size:1.6vmin;color:var(--muted)">/${s.legsPerSet}</span>`;
+      return `<div class="corner-row"><span class="cn">${escapeHtml(p.name)}</span><span class="cv">${score}</span></div>`;
+    }).join('');
+  } else {
+    cornerBR.classList.add('hidden');
+  }
 
   const n = s.players.length;
   const cols = n<=1 ? 1 : n<=4 ? 2 : 3;
@@ -235,17 +286,14 @@ function render(s){
       const standing = s.setsPerGame>1
         ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
         : `Legs ${p.legsWon}/${s.legsPerSet}`;
-      let throwbox = '';
-      if(active){
-        const slots = [0,1,2].map(k=>{
-          const lab = s.darts[k];
-          return `<div class="dart ${dartClass(lab)}">${lab || 'dart '+(k+1)}</div>`;
-        }).join('');
-        const checkout = s.checkout
-          ? `<div class="checkout"><span class="lab">Checkout</span><span class="route">${s.checkout.replace(/ /g,'  →  ')}</span></div>`
-          : '';
-        throwbox = `<div class="throwbox"><div class="darts">${slots}</div>${checkout}</div>`;
-      }
+      const throwbox = active
+        ? `<div class="throwbox"><div class="darts">${
+            [0,1,2].map(k=>{
+              const lab = s.darts[k];
+              return `<div class="dart ${dartClass(lab)}">${lab || 'dart '+(k+1)}</div>`;
+            }).join('')
+          }</div></div>`
+        : '';
       let flash = '';
       if(active && s.status==='bust') flash = `<div class="flash bust">BUST</div>`;
       if(active && s.status==='won')  flash = `<div class="flash shot">GAME SHOT</div>`;
@@ -258,6 +306,7 @@ function render(s){
             ${active?'<span class="throwflag">▸ throwing</span>':''}
           </div>
           <div class="score">${p.score}</div>
+          <div class="leg-darts">${p.legDarts ?? 0} darts</div>
         </div>
         <div class="meta">
           <span>leg <b>${p.legAvg ?? '—'}</b></span>
@@ -313,12 +362,11 @@ function connect(){
   catch(e){ return startPolling(); }
   es.onopen = () => setLive(true);
   es.onmessage = (ev) => { setLive(true); try { render(JSON.parse(ev.data)); } catch(e){} };
-  es.onerror = () => { setLive(false); /* EventSource auto-retries; keep it */ };
+  es.onerror = () => { setLive(false); };
 }
 
 function escapeHtml(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
-// fetch current state immediately, then open the stream
 fetch('/api/live', {cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{ if(s) render(s); }).catch(()=>{});
 connect();
 </script>

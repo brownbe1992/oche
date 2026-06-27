@@ -1399,7 +1399,8 @@ function liveSnapshot(message){
       name:p.name, score:p.score, out:p.doubleOut?'double':'single',
       legAvg:  p.legVisits  ? (p.legPoints/p.legVisits).toFixed(1)   : null,
       gameAvg: p.gameVisits ? (p.gamePoints/p.gameVisits).toFixed(1) : null,
-      legsWon:p.legsWon, setsWon:p.setsWon
+      legsWon:p.legsWon, setsWon:p.setsWon,
+      legDarts: p.legDarts || 0
     })),
     darts: game.darts.map(d=>d.label),
     checkout,
@@ -1409,6 +1410,7 @@ function liveSnapshot(message){
     gameOneEighties: game.gameOneEighties || 0,
     gameBigFish: game.gameBigFish || 0,
     legSummary: game.legSummary || null,
+    practice: !!game.practice,
     done: !!game.done,
     ts: Date.now()
   };
