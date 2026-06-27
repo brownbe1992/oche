@@ -134,6 +134,7 @@
     <div class="game-stats hidden" id="game-stats">
       <span class="gs-item">🎯 <span class="gs-val" id="stat-180s">0</span></span>
       <span class="gs-item">🐟 <span class="gs-val" id="stat-bf">0</span></span>
+      <span class="gs-item">💥 <span class="gs-val" id="stat-busts">0</span></span>
     </div>
     <div class="live"><span class="dot" id="dot"></span><span id="livetext">live</span></div>
   </div>
@@ -181,6 +182,7 @@ const achName    = document.getElementById('ach-name');
 const gameStats  = document.getElementById('game-stats');
 const stat180s   = document.getElementById('stat-180s');
 const statBF     = document.getElementById('stat-bf');
+const statBusts  = document.getElementById('stat-busts');
 
 const coStrip    = document.getElementById('co-strip');
 const coRoute    = document.getElementById('co-strip-route');
@@ -223,8 +225,9 @@ function render(s){
 
   // 180s + Big Fish in top bar
   gameStats.classList.remove('hidden');
-  stat180s.textContent = s.gameOneEighties ?? 0;
-  statBF.textContent   = s.gameBigFish     ?? 0;
+  stat180s.textContent  = s.gameOneEighties ?? 0;
+  statBF.textContent    = s.gameBigFish     ?? 0;
+  statBusts.textContent = s.gameBusts       ?? 0;
 
   // checkout strip — show prominently when player is on a finish
   const thrower = s.players[s.currentIndex];
