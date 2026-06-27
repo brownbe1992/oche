@@ -95,7 +95,7 @@
   .seg{display:inline-flex;border:1px solid var(--wire);border-radius:10px;overflow:hidden}
   .seg button{background:var(--board);border:none;color:var(--muted);padding:10px 15px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
   .seg button[aria-pressed="true"]{background:var(--surface-2);color:var(--ink)}
-  .seg .lbl{align-self:center;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;padding:0 10px 0 2px}
+  .seg .lbl{align-self:center;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;padding:0 10px}
   .stepper{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--wire);border-radius:10px;background:var(--board);padding:2px}
   .stepper .lbl{align-self:center;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;padding:0 6px 0 10px}
   .stepper button{background:var(--surface-2);border:none;color:var(--ink);width:34px;height:36px;border-radius:8px;font-size:18px;font-weight:700;cursor:pointer;line-height:1}
@@ -119,28 +119,17 @@
   .pscore .nm{font-weight:600;font-size:15px}
   .pscore .nm-out{font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-left:6px}
   .pscore .turnflag{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--gold);font-weight:700}
-  .pscore .rem{margin-left:16px;font-family:'Bebas Neue';font-size:46px;line-height:.8;color:var(--cream);letter-spacing:.02em;min-width:64px;text-align:right}
+  .pscore .rem-wrap{margin-left:16px;display:flex;flex-direction:column;align-items:flex-end;gap:1px}
+  .pscore .rem{font-family:'Bebas Neue';font-size:46px;line-height:.8;color:var(--cream);letter-spacing:.02em;min-width:64px;text-align:right}
+  .pscore .co-inline{font-family:'Bebas Neue';font-size:15px;color:var(--gold);letter-spacing:.06em;white-space:nowrap;text-align:right;line-height:1}
   .pscore .meta{margin-left:auto;text-align:right;display:flex;flex-direction:column;gap:2px;min-width:120px}
   .pscore .meta .avgs{font-size:12px;color:var(--muted)}
   .pscore .meta .avgs b{color:var(--ink);font-weight:600}
   .pscore .meta .standing{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--gold)}
+  @keyframes coflash{0%{color:#fff}100%{color:var(--gold)}}
+  .pscore .co-inline.flash{animation:coflash .5s ease-out}
 
   .oche{background:var(--board);border:1px solid var(--wire);border-radius:14px;padding:18px}
-  .turnhead{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
-  .turnhead .who{font-size:14px;color:var(--muted)}
-  .turnhead .who b{color:var(--ink)}
-  .checkout{margin-left:auto;font-size:12.5px;color:var(--gold);font-weight:600}
-
-  .checkout-bar{display:flex;align-items:center;gap:14px;margin:0 0 16px;padding:13px 18px;
-    border:1px solid var(--gold);border-radius:12px;
-    background:linear-gradient(180deg, rgba(217,180,106,.14), rgba(217,180,106,.05))}
-  .checkout-bar[hidden]{display:none}
-  .checkout-bar .co-label{font-size:11px;text-transform:uppercase;letter-spacing:.13em;color:var(--gold);font-weight:700;flex:none}
-  .checkout-bar .co-route{font-family:'Bebas Neue',sans-serif;font-size:34px;line-height:.85;
-    letter-spacing:.04em;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  @keyframes copulse{0%{box-shadow:0 0 0 0 rgba(217,180,106,.45)}100%{box-shadow:0 0 0 10px rgba(217,180,106,0)}}
-  .checkout-bar.flash{animation:copulse .6s ease-out}
-  @media (max-width:560px){ .checkout-bar .co-route{font-size:27px} }
 
   .slots{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
   .slot{position:relative;background:var(--surface);border:1px dashed var(--wire);border-radius:11px;
@@ -148,7 +137,7 @@
   .slot.filled{border-style:solid}
   .slot.t{border-color:var(--green)}
   .slot.d{border-color:var(--red)}
-  .slot .lab{font-family:'Bebas Neue';font-size:26px;line-height:.9;letter-spacing:.03em}
+  .slot .lab{font-family:'Bebas Neue';font-size:30px;line-height:.9;letter-spacing:.03em}
   .slot .pts{font-size:11px;color:var(--muted)}
   .slot .ph{color:#4d514a;font-size:12px}
 
@@ -157,24 +146,24 @@
   .status.win{color:var(--green);font-weight:700;letter-spacing:.04em}
 
   .multi{display:flex;gap:8px;justify-content:center;margin-bottom:12px}
-  .multi button{flex:1;max-width:130px;background:var(--surface);border:1px solid var(--wire);color:var(--muted);
-    padding:11px;border-radius:10px;font:inherit;font-weight:700;font-size:14px;cursor:pointer;letter-spacing:.03em}
+  .multi button{flex:1;max-width:160px;background:var(--surface);border:1px solid var(--wire);color:var(--muted);
+    padding:14px;border-radius:10px;font:inherit;font-weight:700;font-size:16px;cursor:pointer;letter-spacing:.03em}
   .multi button[aria-pressed="true"]{color:var(--ink)}
   .multi button.m-d[aria-pressed="true"]{background:rgba(200,16,46,.16);border-color:var(--red);color:#ff8a93}
   .multi button.m-t[aria-pressed="true"]{background:rgba(27,138,58,.16);border-color:var(--green);color:#7fe0a0}
   .multi button.m-s[aria-pressed="true"]{background:var(--surface-2);border-color:var(--muted)}
 
-  .pad{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}
-  .pad button{background:var(--surface);border:1px solid var(--wire);color:var(--ink);border-radius:9px;
-    padding:14px 0;font:inherit;font-size:15px;font-weight:600;cursor:pointer}
+  .pad{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .pad button{background:var(--surface);border:1px solid var(--wire);color:var(--ink);border-radius:10px;
+    padding:12px 0;font:inherit;font-size:24px;font-weight:600;cursor:pointer}
   .pad button:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
   .pad button:disabled{opacity:.3;cursor:not-allowed}
-  .pad button.wide{grid-column:span 2}
-  .pad button.bull{color:var(--red)}
-  .pad button.miss{color:var(--muted)}
+  .pad button.bull{grid-column:span 2;color:var(--red)}
+  .pad button.miss{grid-column:span 2;color:var(--muted)}
 
-  .turn-actions{display:flex;gap:10px;margin-top:14px}
+  .turn-actions{display:flex;gap:10px;margin-top:12px}
   .turn-actions .btn{flex:1}
+  .turn-actions .btn-primary{font-size:17px;padding:16px 20px}
 
   /* ---- stats screen ---- */
   table{width:100%;border-collapse:collapse;font-size:13.5px}
@@ -191,10 +180,92 @@
     border:1px solid var(--wire);border-radius:999px;padding:3px 9px;margin-bottom:4px}
   .persist-tag{font-size:11px;color:var(--muted);margin-left:8px}
   @media (max-width:560px){
-    .pad button{padding:13px 0;font-size:14px}
+    .pad button{padding:10px 0;font-size:20px}
     .pscore .rem{font-size:38px}
     .masthead .mark{font-size:30px}
   }
+
+  /* ---- game screen: full-height dynamic layout — no scrolling, sizes adapt to device ---- */
+  body.game-active{
+    padding:0; height:100dvh; overflow:hidden;
+    display:flex; flex-direction:column;
+  }
+  body.game-active .wrap{
+    flex:1; display:flex; flex-direction:column; min-height:0;
+    width:100%; max-width:760px; margin:0 auto; padding:0 10px;
+  }
+  body.game-active .masthead{
+    flex:none;
+    padding:clamp(4px,1dvh,10px) 0;
+    margin-bottom:clamp(4px,1dvh,10px);
+  }
+  body.game-active .masthead .mark{font-size:clamp(18px,3.5dvh,30px)}
+  body.game-active .masthead .sub{display:none}
+  body.game-active .masthead .nav{display:none}
+  body.game-active #screen-game{
+    flex:1; display:flex; flex-direction:column; min-height:0;
+  }
+  body.game-active .scoreboard{
+    flex:none;
+    gap:clamp(3px,.7dvh,8px);
+    margin-bottom:clamp(4px,.8dvh,10px);
+  }
+  body.game-active .pscore{
+    padding:clamp(4px,.8dvh,10px) clamp(8px,1.5vw,14px);
+  }
+  body.game-active .pscore .nm{font-size:clamp(12px,1.9dvh,17px)}
+  body.game-active .pscore .nm-out{font-size:clamp(8px,1.2dvh,11px)}
+  body.game-active .pscore .rem-wrap{margin-left:8px}
+  body.game-active .pscore .rem{font-size:clamp(26px,4.8dvh,52px);min-width:auto}
+  body.game-active .pscore .co-inline{font-size:clamp(10px,1.8dvh,16px)}
+  body.game-active .pscore .meta{min-width:70px}
+  body.game-active .pscore .meta .avgs{font-size:clamp(9px,1.4dvh,13px)}
+  body.game-active .oche{
+    flex:1; display:flex; flex-direction:column; min-height:0; overflow:hidden;
+    padding:clamp(6px,1dvh,14px) clamp(8px,1.5vw,14px);
+  }
+  body.game-active .slots{
+    flex:none;
+    gap:clamp(4px,.8vw,10px);
+    margin-bottom:clamp(3px,.6dvh,10px);
+  }
+  body.game-active .slot{height:clamp(38px,5.5dvh,68px)}
+  body.game-active .slot .lab{font-size:clamp(15px,2.8dvh,32px)}
+  body.game-active .slot .pts{font-size:clamp(8px,1.2dvh,12px)}
+  body.game-active .status{
+    flex:none; min-height:auto;
+    font-size:clamp(10px,1.4dvh,13px);
+    margin-bottom:clamp(3px,.5dvh,8px);
+  }
+  body.game-active .multi{
+    flex:none; gap:clamp(4px,.8vw,8px);
+    margin-bottom:clamp(4px,.7dvh,10px);
+  }
+  body.game-active .multi button{
+    font-size:clamp(11px,1.8dvh,16px);
+    padding:clamp(6px,1dvh,14px);
+    max-width:none;
+  }
+  body.game-active .pad{
+    flex:1; min-height:0;
+    gap:clamp(3px,.6vmin,8px);
+    grid-auto-rows:1fr;
+  }
+  body.game-active .pad button{padding:0;font-size:clamp(13px,2.4dvh,26px)}
+  body.game-active .turn-actions{
+    flex:none; position:static;
+    padding:clamp(4px,.7dvh,10px) 0 0;
+    margin-top:0; background:none;
+  }
+  body.game-active .turn-actions .btn{
+    font-size:clamp(11px,1.7dvh,16px);
+    padding:clamp(7px,1.2dvh,15px) 8px;
+  }
+  body.game-active .turn-actions .btn-primary{
+    font-size:clamp(12px,1.9dvh,17px);
+    padding:clamp(9px,1.5dvh,17px) 8px;
+  }
+
   @media (prefers-reduced-motion:reduce){*{animation:none!important}}
   .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 
@@ -207,7 +278,7 @@
   .pp-header{margin-bottom:20px}
   .pp-name{font-size:22px;font-weight:700;margin-bottom:2px}
   .pp-meta{font-size:12px;color:var(--muted)}
-  .stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
+  .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:10px;margin-bottom:20px}
   .stat-block{background:var(--surface-2);border:1px solid var(--wire);border-radius:11px;padding:12px 14px;text-align:center}
   .stat-block .stat-val{font-family:'Bebas Neue';font-size:28px;color:var(--cream);line-height:1}
   .stat-block .stat-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:4px}
@@ -218,6 +289,24 @@
   .btn.danger{color:var(--bust);border-color:var(--wire)}
   .btn.danger:hover{border-color:var(--bust)}
 
+  /* ---- stat bubbles ---- */
+  .stat-bubbles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px}
+  @media(max-width:560px){.stat-bubbles{grid-template-columns:repeat(3,1fr)}}
+  .stat-bubble{background:var(--surface-2);border:1px solid var(--wire);border-radius:11px;
+    padding:11px 6px 10px;text-align:center;cursor:pointer;font:inherit;transition:border-color .12s}
+  .stat-bubble:hover{border-color:var(--muted)}
+  .stat-bubble.active{border-color:var(--gold);box-shadow:inset 0 0 0 1px var(--gold)}
+  .bubble-val{font-family:'Bebas Neue';font-size:22px;color:var(--cream);line-height:1}
+  .bubble-label{font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:3px;line-height:1.2}
+  .stat-bubble.active .bubble-label{color:var(--gold)}
+
+  /* ---- player page tabs ---- */
+  .player-tabs{display:flex;gap:0;border-bottom:2px solid var(--wire);margin:0 0 20px}
+  .tab-btn{background:none;border:none;border-bottom:3px solid transparent;margin-bottom:-2px;
+    padding:10px 20px;font:inherit;font-size:14px;font-weight:600;cursor:pointer;color:var(--muted)}
+  .tab-btn.active{color:var(--ink);border-bottom-color:var(--gold)}
+  .tab-btn:hover:not(.active){color:var(--ink)}
+
   /* ---- avg chart ---- */
   .chart-periods{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
   .chart-period-btn{background:var(--board);border:1px solid var(--wire);color:var(--muted);border-radius:8px;
@@ -225,9 +314,41 @@
   .chart-period-btn.active{background:var(--surface-2);color:var(--ink);border-color:var(--muted)}
   .chart-period-btn:hover:not(.active){color:var(--ink)}
   .chart-custom-range{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  .chart-custom-range[hidden]{display:none}
   .date-input{background:var(--board);border:1px solid var(--wire);color:var(--ink);border-radius:8px;
     padding:5px 10px;font:inherit;font-size:12px;cursor:pointer;color-scheme:dark}
   .date-input:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
+
+  /* ---- home screen ---- */
+  .summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:10px;margin-bottom:20px}
+  .hof-list{display:flex;flex-direction:column}
+  .hof-row{display:flex;align-items:baseline;gap:10px;padding:7px 0;border-bottom:1px solid var(--wire)}
+  .hof-row:last-child{border-bottom:none}
+  .hof-rank{font-size:11px;color:var(--muted);min-width:16px;text-align:right;flex:none}
+  .hof-score{font-family:'Bebas Neue';font-size:22px;color:var(--cream);min-width:38px;flex:none}
+  .hof-times{font-size:11px;font-weight:700;color:var(--gold);min-width:22px;flex:none}
+  .hof-player{font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hof-dates{font-size:11px;color:var(--muted);flex:none;text-align:right}
+  .hero-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
+  .hero-block{background:var(--surface-2);border:1px solid var(--wire);border-radius:11px;padding:22px 14px;text-align:center}
+  .hero-val{font-family:'Bebas Neue';font-size:52px;color:var(--cream);line-height:1}
+  .hero-label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:7px}
+  @media(max-width:400px){.hero-val{font-size:38px}}
+  #home-body .pp-section-title{font-size:16px;color:var(--ink);text-transform:none;letter-spacing:.01em;
+    font-weight:700;border-bottom:1.5px solid var(--wire);padding-bottom:10px;margin-bottom:14px}
+  #leaderboard-body .pp-section, #practice-leaderboard-body .pp-section{background:var(--surface-2);border:1px solid var(--wire);
+    border-radius:12px;padding:16px 18px;margin-bottom:14px}
+  #leaderboard-body .pp-section:last-child, #practice-leaderboard-body .pp-section:last-child{margin-bottom:0}
+  #leaderboard-body .pp-section-title, #practice-leaderboard-body .pp-section-title{font-size:16px;font-weight:700;color:var(--ink);
+    text-transform:none;letter-spacing:.01em;margin-bottom:12px;
+    border-bottom:1px solid var(--wire);padding-bottom:8px}
+  .home-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:stretch;margin-bottom:14px}
+  .home-pair>.pp-section{margin-bottom:0;height:100%;box-sizing:border-box}
+  @media(max-width:560px){.home-pair{grid-template-columns:1fr}}
+  .achievement-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
+  @media(max-width:500px){.achievement-pair{grid-template-columns:1fr}}
+  .achievement-col-title{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;margin-bottom:6px}
+  .recent-list{font-size:12px;color:var(--muted);line-height:1.9}
 
   /* ---- top finishes ---- */
   .finish-list{display:flex;flex-direction:column;gap:5px}
@@ -240,18 +361,46 @@
 <body>
 <div class="wrap">
   <header class="masthead">
-    <div class="mark">OCHE</div>
+    <button class="mark" onclick="show('home')" style="background:none;border:none;cursor:pointer;padding:0;font:inherit;color:inherit">OCHE</button>
     <div class="sub">Per-Dart Scoring &amp; Lifetime Stats</div>
     <nav class="nav">
-      <button class="navbtn" id="nav-setup" aria-current="true" onclick="show('setup')">New game</button>
+      <button class="navbtn" id="nav-home" aria-current="true" onclick="show('home')">Home</button>
+      <button class="navbtn" id="nav-setup" aria-current="false" onclick="show('setup')">New game</button>
       <button class="navbtn" id="nav-players" aria-current="false" onclick="show('players')">Players</button>
       <button class="navbtn" id="nav-stats" aria-current="false" onclick="show('stats')">Stats</button>
       <button class="navbtn" id="nav-scoreboard" onclick="openScoreboard()" title="Open the read-only scoreboard for a second screen">Scoreboard ↗</button>
     </nav>
   </header>
 
+  <!-- ============ HOME ============ -->
+  <section id="screen-home" class="screen on">
+    <div class="card" style="text-align:center">
+      <button class="btn btn-primary" onclick="show('setup')">Start new game →</button>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2 style="font-size:24px;margin-bottom:16px">Overview</h2>
+      <div id="home-body"><p class="pp-meta">Loading…</p></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2 style="font-size:20px;margin-bottom:16px">H2H Leaderboard</h2>
+      <div id="leaderboard-body"><p class="pp-meta">Loading…</p></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2 style="font-size:20px;margin-bottom:16px">Practice Mode Leaderboard</h2>
+      <div id="practice-leaderboard-body"><p class="pp-meta">Loading…</p></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="note" style="margin-top:0;padding-top:0;border-top:none">
+        <span class="badge">how each stat is counted</span><br>
+        <b style="color:var(--ink)">180 🎯</b> — a visit where all three darts land in the treble-20 bed, scoring the maximum 180 points.<br>
+        <b style="color:var(--ink)">Big Fish 🐟</b> — a checkout of exactly 170 (T20, T20, Bull), the highest possible finish in darts.<br>
+        <b style="color:var(--ink)">Nine-dart finish</b> — a perfect leg of 501, finished in exactly nine darts (three visits of three darts each).
+      </div>
+    </div>
+  </section>
+
   <!-- ============ SETUP ============ -->
-  <section id="screen-setup" class="screen on">
+  <section id="screen-setup" class="screen">
     <div class="card">
       <h2 style="font-size:18px;margin-bottom:4px">Set up the game</h2>
       <p style="color:var(--muted);font-size:13px;margin:0 0 18px">Add the players, choose the game, and set the match length.</p>
@@ -270,20 +419,30 @@
       </div>
 
       <div class="opts">
-        <div class="stepper">
-          <span class="lbl">Legs per set</span>
-          <button aria-label="Fewer legs" onclick="bump('legsPerSet',-1)">−</button>
-          <span class="val" id="legs-val">3</span>
-          <button aria-label="More legs" onclick="bump('legsPerSet',1)">+</button>
-        </div>
-        <div class="stepper">
-          <span class="lbl">Sets per game</span>
-          <button aria-label="Fewer sets" onclick="bump('setsPerGame',-1)">−</button>
-          <span class="val" id="sets-val">1</span>
-          <button aria-label="More sets" onclick="bump('setsPerGame',1)">+</button>
+        <div class="seg" role="group" aria-label="Game mode">
+          <span class="lbl">Mode</span>
+          <button id="mode-h2h" aria-pressed="true" onclick="setPractice(false)">H2H</button>
+          <button id="mode-practice" aria-pressed="false" onclick="setPractice(true)">Practice</button>
         </div>
       </div>
-      <p style="color:var(--muted);font-size:12px;margin:10px 2px 0" id="format-line"></p>
+
+      <div id="h2h-options">
+        <div class="opts">
+          <div class="stepper">
+            <span class="lbl">Legs per set</span>
+            <button aria-label="Fewer legs" onclick="bump('legsPerSet',-1)">−</button>
+            <span class="val" id="legs-val">3</span>
+            <button aria-label="More legs" onclick="bump('legsPerSet',1)">+</button>
+          </div>
+          <div class="stepper">
+            <span class="lbl">Sets per game</span>
+            <button aria-label="Fewer sets" onclick="bump('setsPerGame',-1)">−</button>
+            <span class="val" id="sets-val">1</span>
+            <button aria-label="More sets" onclick="bump('setsPerGame',1)">+</button>
+          </div>
+        </div>
+        <p style="color:var(--muted);font-size:12px;margin:10px 2px 0" id="format-line"></p>
+      </div>
 
       <div class="btn-row">
         <button class="btn btn-primary" id="start-btn" onclick="startGame()">Start game</button>
@@ -296,26 +455,14 @@
     <div class="scoreboard" id="scoreboard"></div>
 
     <div class="oche">
-      <div class="turnhead">
-        <div class="who">Throwing: <b id="active-name">—</b></div>
-      </div>
-
-      <div class="checkout-bar" id="checkout-bar" hidden>
-        <span class="co-label">Checkout</span>
-        <span class="co-route" id="checkout-route"></span>
-      </div>
-
       <div class="slots" id="slots"></div>
-      <div class="status" id="status">Tap a multiplier, then a number — one dart at a time.</div>
-
+      <div class="status" id="status">Select a multiplier, then tap a number.</div>
       <div class="multi" role="group" aria-label="Dart multiplier">
         <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
         <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
         <button class="m-t" id="m-t" aria-pressed="false" onclick="setMult(3)">Treble</button>
       </div>
-
       <div class="pad" id="pad"></div>
-
       <div class="turn-actions">
         <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo dart</button>
         <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
@@ -362,7 +509,7 @@
       <div class="note">
         <span class="badge">how each stat is counted</span><br>
         <b style="color:var(--ink)">3-dart average</b> — lifetime: all points scored ÷ all turns, across every leg, set and game. (During play, the scoreboard shows your <em>current leg</em> and <em>current game</em> averages instead.)<br>
-        <b style="color:var(--ink)">100+ checkouts</b> — winning turns where you scored 100 or more on that final visit.<br>
+        <b style="color:var(--ink)">Ton+ finishes</b> — winning turns where you scored 100 or more on that final visit.<br>
         <b style="color:var(--ink)">Treble-less turns</b> — turns where none of the darts landed in a treble bed.<br>
         A bust turn still counts as a turn (it scores 0) and still counts its darts toward treble-less totals.<br>
         Click a player's name on the Stats or Players page to see their full profile including games &amp; legs played and H2H wins.
@@ -458,12 +605,13 @@ const DB = {
   addPlayer(name, out){ if(this.mode==='api') Backend.send('POST','/api/players',{name, out:out||'double'}).catch(logErr); },
   rename(from, to){ if(this.mode==='api') Backend.send('PUT','/api/players/rename',{from, to}).catch(logErr); },
   setOut(name, out){ if(this.mode==='api') Backend.send('PUT','/api/players/out',{name, out}).catch(logErr); },
+  setDartWeight(name, weight){ if(this.mode==='api') Backend.send('PUT','/api/players/dart-weight',{name, weight}).catch(logErr); },
   delete(name){ if(this.mode==='api') Backend.send('DELETE','/api/players?name='+encodeURIComponent(name)).catch(logErr); },
 
   // game + turn writes
   async beginGame(meta, names){
     if(this.mode==='api'){
-      try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame, players:names}); this.gameId=r.gameId; }
+      try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame, players:names, practice:meta.practice?1:0}); this.gameId=r.gameId; }
       catch(e){ logErr(e); this.gameId=null; }
     } else this.gameId=null;
   },
@@ -524,7 +672,7 @@ function evaluateVisit(startScore, darts, doubleOut){
 /* =========================================================================
    APP STATE
    ========================================================================= */
-let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1 };
+let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false };
 let game = null;
 let roster = [];     // saved player names (profiles that own stats)
 let stats = {};
@@ -539,14 +687,199 @@ function setPlayerOut(name, mode){ const out = mode==='single'?'single':'double'
 function show(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));
   document.getElementById('screen-'+name).classList.add('on');
+  document.body.classList.toggle('game-active', name==='game');
+  document.getElementById('nav-home').setAttribute('aria-current', name==='home');
   document.getElementById('nav-setup').setAttribute('aria-current', name==='setup');
   document.getElementById('nav-players').setAttribute('aria-current', name==='players'||name==='player');
   document.getElementById('nav-stats').setAttribute('aria-current', name==='stats');
+  if(name==='home') renderHome();
   if(name==='setup'){ sanitizeSlots(); renderPlayers(); }
   if(name==='players') renderRoster();
   if(name==='stats'){ if(DB.mode==='api'){ DB.refreshStats().then(renderStats).catch(renderStats); } else renderStats(); }
   if(name==='player'){ if(DB.mode==='api'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); } else renderPlayerPage(); }
 }
+/* ---------- home screen ---------- */
+function renderHome(){
+  const body=document.getElementById('home-body');
+  if(!body) return;
+  const empty={leaderboard:[],recent:[]};
+  if(DB.mode==='api'){
+    body.innerHTML=`<p class="pp-meta">Loading…</p>`;
+    Promise.all([
+      Backend.get('/api/summary'),
+      Backend.get('/api/top-finishes'),
+      Backend.get('/api/stats/180s'),
+      Backend.get('/api/stats/big-fish'),
+      Backend.get('/api/stats/nine-darters'),
+      Backend.get('/api/top-finishes?mode=practice'),
+      Backend.get('/api/stats/180s?mode=practice'),
+      Backend.get('/api/stats/big-fish?mode=practice'),
+      Backend.get('/api/stats/nine-darters?mode=practice'),
+    ]).then(([s,f,e,b,n,pf,pe,pb,pn])=>renderHomeContent(s,
+      {finishes:f,eighties:e,bigFish:b,nineDarters:n},
+      {finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn}))
+      .catch(()=>renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts:null,oneEighties:null,bigFish:null,nineDarters:null},
+        {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
+        {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty}));
+  } else {
+    const darts=Object.values(stats).reduce((a,p)=>a+(p.turns||0),0)*3;
+    const tonPlus=Object.values(stats).reduce((a,p)=>a+(p.checkouts100||0),0);
+    const oneEighties=Object.values(stats).reduce((a,p)=>a+(p.oneEighties||0),0);
+    const bigFish=Object.values(stats).reduce((a,p)=>a+(p.bigFish||0),0);
+    const nineDarters=Object.values(stats).reduce((a,p)=>a+(p.nineDarters||0),0);
+    const practiceLegs=Object.values(stats).reduce((a,p)=>a+Object.values(p.practiceLegs||{}).reduce((s,n)=>s+n,0),0);
+    renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts,tonPlus,oneEighties,bigFish,nineDarters,practiceLegs},
+      {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
+      {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty});
+  }
+}
+function renderHomeContent(s,h2h,practice){
+  const finishes=h2h.finishes, eighties=h2h.eighties, bigFishData=h2h.bigFish, nineDarterData=h2h.nineDarters;
+  const body=document.getElementById('home-body');
+  if(!body) return;
+  const fmt=n=>n==null?'—':Number(n).toLocaleString();
+
+  // Hero cards — prominent at the top
+  const heroCards=[
+    {val:fmt(s.darts),       label:'Total Darts Thrown'},
+    {val:fmt(s.oneEighties), label:'180s'},
+    {val:fmt(s.bigFish),     label:'Big Fish'},
+  ];
+
+  // Secondary stats (smaller cards)
+  const secCards=[
+    {val:fmt(s.players),      label:'Players'},
+    {val:fmt(s.games),        label:'Games Played'},
+    {val:fmt(s.sets),         label:'Sets Played'},
+    {val:fmt(s.legs),         label:'H2H Legs Thrown'},
+    {val:fmt(s.practiceLegs), label:'Practice Legs Thrown'},
+    {val:fmt(s.tonPlus),      label:'Ton+ Finishes'},
+    {val:fmt(s.nineDarters),  label:'9-Darters'},
+  ];
+
+  // 3-dart average leaderboard computed from in-memory stats
+  const avgBoard=Object.entries(stats)
+    .filter(([,p])=>p.turns>0)
+    .map(([name,p])=>({name, avg:p.totalPoints/p.turns, turns:p.turns}))
+    .sort((a,b)=>b.avg-a.avg);
+
+  // Practice legs leaderboard
+  const practiceBoard=Object.entries(stats)
+    .map(([name,p])=>{
+      const total=Object.values(p.practiceLegs||{}).reduce((a,n)=>a+n,0);
+      const byCat=Object.entries(p.practiceLegs||{}).map(([c,n])=>`${c}: ${n}`).join(' · ');
+      return {name, total, byCat};
+    })
+    .filter(r=>r.total>0)
+    .sort((a,b)=>b.total-a.total);
+
+  function hofSection(rows){
+    if(!rows||!rows.length) return `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
+    return `<div class="hof-list">${rows.map((f,i)=>{
+      const dates=fmtDate(f.last_date);
+      return `<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${f.score}</span>
+        <span class="hof-times">${f.times===1?'×1':'×'+f.times}</span>
+        <span class="hof-player">${escapeHtml(f.name)}</span>
+        <span class="hof-dates">${dates}</span>
+      </div>`;
+    }).join('')}</div>`;
+  }
+
+  function achievementSection(title,data,emptyMsg='None recorded yet — will you be the first?'){
+    if(!data||(!data.leaderboard.length&&!data.recent.length))
+      return `<div class="pp-section"><div class="pp-section-title">${title}</div><p class="pp-meta" style="padding:4px 0">${emptyMsg}</p></div>`;
+    const lbRows=data.leaderboard.map((r,i)=>`<div class="hof-row">
+      <span class="hof-rank">${i+1}</span>
+      <span class="hof-player">${escapeHtml(r.name)}</span>
+      <span class="hof-times">×${r.count}</span>
+    </div>`).join('');
+    const recentLines=data.recent.map(r=>`<b style="color:var(--ink)">${escapeHtml(r.name)}</b> — ${fmtDate(r.created_at)}`).join('<br>');
+    return `<div class="pp-section">
+      <div class="pp-section-title">${title}</div>
+      <div class="achievement-pair">
+        <div>
+          <div class="hof-list">${lbRows||'<p class="pp-meta">None yet.</p>'}</div>
+        </div>
+        <div>
+          <div class="achievement-col-title">Most recent</div>
+          <div class="recent-list">${recentLines||'<span class="pp-meta">None yet.</span>'}</div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  const avgLeaderboard=avgBoard.length
+    ? `<div class="hof-list">${avgBoard.map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.avg.toFixed(1)}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${r.turns.toLocaleString()} visits</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">No games played yet.</p>`;
+
+  const localNote=DB.mode!=='api'?`<p class="pp-meta" style="margin:0 0 16px">Full stats require the server backend.</p>`:'';
+  body.innerHTML=`
+    <div class="hero-grid">${heroCards.map(c=>`<div class="hero-block"><div class="hero-val">${c.val}</div><div class="hero-label">${c.label}</div></div>`).join('')}</div>
+    <div class="summary-grid">${secCards.map(c=>`<div class="stat-block"><div class="stat-val">${c.val}</div><div class="stat-label">${c.label}</div></div>`).join('')}</div>
+    ${localNote}`;
+
+  const lb=document.getElementById('leaderboard-body');
+  if(lb) lb.innerHTML=`
+    <div class="home-pair">
+      <div class="pp-section">
+        <div class="pp-section-title">Three-Dart Average</div>
+        ${avgLeaderboard}
+      </div>
+      <div class="pp-section">
+        <div class="pp-section-title">Top Finishes</div>
+        ${hofSection(finishes)}
+      </div>
+    </div>
+    ${achievementSection('180s 🎯', eighties)}
+    ${achievementSection('Big Fish 🐟', bigFishData)}
+    ${achievementSection('Nine-dart finish', nineDarterData||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
+    `;
+
+  // Practice leaderboard
+  const practiceAvgBoard=Object.entries(stats)
+    .filter(([,p])=>p.practiceStats&&p.practiceStats.turns>0)
+    .map(([name,p])=>({name,avg:p.practiceStats.totalPoints/p.practiceStats.turns,turns:p.practiceStats.turns}))
+    .sort((a,b)=>b.avg-a.avg);
+  const practiceAvgLeaderboard=practiceAvgBoard.length
+    ? `<div class="hof-list">${practiceAvgBoard.map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.avg.toFixed(1)}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${r.turns.toLocaleString()} visits</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">No games played yet.</p>`;
+  const plb=document.getElementById('practice-leaderboard-body');
+  if(plb) plb.innerHTML=`
+    <div class="home-pair">
+      <div class="pp-section">
+        <div class="pp-section-title">Three-Dart Average</div>
+        ${practiceAvgLeaderboard}
+      </div>
+      <div class="pp-section">
+        <div class="pp-section-title">Top Finishes</div>
+        ${hofSection(practice.finishes)}
+      </div>
+    </div>
+    ${achievementSection('180s 🎯', practice.eighties)}
+    ${achievementSection('Big Fish 🐟', practice.bigFish)}
+    ${achievementSection('Nine-dart finish', practice.nineDarters||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
+    `;
+}
+
+function setPractice(on){
+  setup.practice=on;
+  document.getElementById('mode-h2h').setAttribute('aria-pressed', !on);
+  document.getElementById('mode-practice').setAttribute('aria-pressed', on);
+  document.getElementById('h2h-options').hidden=on;
+}
+
 function openScoreboard(){
   if(DB.mode==='api'){
     window.open('display','_blank');
@@ -659,17 +992,22 @@ async function startGame(){
   const names = [];
   setup.slots.forEach(n=>{ if(n && roster.includes(n) && !names.includes(n)) names.push(n); });
   if(names.length===0){ uiAlert('Choose at least one player.'); return; }
+  if(!setup.practice && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   game = {
     start: setup.start,
     category: String(setup.start),
     legsPerSet: setup.legsPerSet,
     setsPerGame: setup.setsPerGame,
+    practice: setup.practice,
     players: names.map(n=>newMatchPlayer(n, setup.start)),
     starter: 0,        // who throws first in the current leg
     current: 0,
     setNo: 1, legNo: 1,
     darts: [],
-    done: false
+    done: false,
+    gameOneEighties: 0,
+    gameBigFish: 0,
+    gameBusts: 0
   };
   names.forEach(ensurePlayerStats);
   await DB.beginGame(game, names);   // registers the game; gets a gameId in api mode
@@ -687,6 +1025,7 @@ function newMatchPlayer(name, start){
   return { name, score:start,
     doubleOut: playerOut(name)==='double', // this player's own finish rule
     legPoints:0,  legVisits:0,    // resets every leg  -> per-leg average
+    legDarts:0,   legBusts:0,     // darts thrown + busts this leg
     gamePoints:0, gameVisits:0,   // resets every game -> per-game average
     legsWon:0,    setsWon:0 };    // legsWon = legs in the current set
 }
@@ -698,8 +1037,19 @@ function ensurePlayerStats(name){
   if(s.turns==null)       s.turns=0;
   if(s.trebleLess==null)  s.trebleLess=0;
   if(s.checkouts100==null)s.checkouts100=0;
+  if(s.dartWeight === undefined) s.dartWeight = null;
+  if(s.oneEighties == null) s.oneEighties = 0;
+  if(s.bigFish == null) s.bigFish = 0;
+  if(s.nineDarters == null) s.nineDarters = 0;
+  if(s.h2hAvgDartsPerLeg === undefined) s.h2hAvgDartsPerLeg = null;
+  if(s.practiceAvgDartsPerLeg === undefined) s.practiceAvgDartsPerLeg = null;
+  if(!s.h2hStats) s.h2hStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0, nineDarters:0 };
+  else if(s.h2hStats.nineDarters == null) s.h2hStats.nineDarters = 0;
+  if(!s.practiceStats) s.practiceStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0, nineDarters:0 };
+  else if(s.practiceStats.nineDarters == null) s.practiceStats.nineDarters = 0;
   if(!s.legsByCat) s.legsByCat = s.games || {};   // migrate old `games` field (was per-leg counts)
   if(!s.gamesByCat) s.gamesByCat = {};
+  if(!s.practiceLegs) s.practiceLegs = {};
   if(!s.h2hLegsWonByCat) s.h2hLegsWonByCat = {};
   if(!s.h2hSetsWonByCat) s.h2hSetsWonByCat = {};
   if(!s.h2hGamesWonByCat) s.h2hGamesWonByCat = {};
@@ -746,8 +1096,20 @@ function askDelete(name){
 
 /* ---------- player profile page ---------- */
 let currentPlayer = null;
+let playerPageTab = 'overall';
 function localDateStr(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function setPlayerDartWeight(name, value){
+  const weight = value ? Number(value) : null;
+  if(stats[name]) stats[name].dartWeight = weight;
+  DB.setDartWeight(name, weight);
+  persist();
+}
+function switchPlayerTab(tab){
+  playerPageTab = tab;
+  renderPlayerPage();
+}
 function showPlayer(name){
+  if(currentPlayer !== name){ avgChartWeight = null; cachedDartWeights = []; playerPageTab = 'overall'; }
   currentPlayer = name;
   if(!customRangeEnd){
     const now=new Date();
@@ -762,30 +1124,19 @@ function renderPlayerPage(){
   if(!currentPlayer || !body) return;
   const name = currentPlayer;
   const s = stats[name] || {};
-  const avg = s.turns ? (s.totalPoints/s.turns).toFixed(1) : '0.0';
   const out = playerOut(name);
+  const dartWeight = s.dartWeight || null;
   const j = escapeJs(name);
-  const cats = Object.keys({...(s.legsByCat||{}), ...(s.gamesByCat||{})});
-  const catHtml = cats.length
-    ? cats.map(c=>`${c}: <b>${(s.gamesByCat||{})[c]||0}</b> games · <b>${(s.legsByCat||{})[c]||0}</b> legs`).join('<br>')
-    : '<span style="color:var(--muted)">none yet</span>';
-  const h2hCats = Object.keys({...(s.h2hGamesWonByCat||{}), ...(s.h2hSetsWonByCat||{}), ...(s.h2hLegsWonByCat||{})});
-  const h2hHtml = h2hCats.length
-    ? h2hCats.map(c=>`${c}: <b>${(s.h2hGamesWonByCat||{})[c]||0}</b> games · <b>${(s.h2hSetsWonByCat||{})[c]||0}</b> sets · <b>${(s.h2hLegsWonByCat||{})[c]||0}</b> legs`).join('<br>')
-    : '<span style="color:var(--muted)">none yet</span>';
-  const cp=avgChartPeriod;
-  body.innerHTML = `
-    <div class="pp-header">
-      <div class="pp-name">${escapeHtml(name)}</div>
-      <div class="pp-meta">${s.turns||0} turns thrown</div>
-    </div>
-    <div class="stat-grid">
-      <div class="stat-block"><div class="stat-val">${avg}</div><div class="stat-label">3-dart avg</div></div>
-      <div class="stat-block"><div class="stat-val">${s.checkouts100||0}</div><div class="stat-label">100+ CO</div></div>
-      <div class="stat-block"><div class="stat-val">${s.trebleLess||0}</div><div class="stat-label">Treble-less Visits</div></div>
-    </div>
+  const tab = playerPageTab;
+  const cp = avgChartPeriod;
+
+  // stat bubbles (shared, loaded async)
+  const bubblesHtml = `<div class="stat-bubbles" id="player-stat-bubbles">${STAT_DEFS.map(d=>`<button class="stat-bubble${selectedStat===d.key?' active':''}" data-stat="${d.key}" onclick="selectStat('${d.key}')" title="${d.desc}"><div class="bubble-val" id="bv-${d.key}">—</div><div class="bubble-label">${d.label}</div></button>`).join('')}</div>`;
+
+  // shared chart + top-finishes HTML (same structure for both tabs)
+  const chartSection = `
     <div class="pp-section">
-      <div class="pp-section-title">3-dart average over time</div>
+      <div class="pp-section-title" id="chart-metric-title">${(STAT_DEFS.find(d=>d.key===selectedStat)||STAT_DEFS[0]).label} over time</div>
       <div class="chart-periods">
         <button class="chart-period-btn${cp==='today'?' active':''}" data-period="today" onclick="loadAvgChart('today')">Today</button>
         <button class="chart-period-btn${cp==='week'?' active':''}" data-period="week" onclick="loadAvgChart('week')">Week</button>
@@ -800,12 +1151,90 @@ function renderPlayerPage(){
         <input type="date" id="chart-date-to" class="date-input" value="${customRangeEnd}">
         <button class="chart-period-btn active" onclick="applyCustomRange()">Apply</button>
       </div>
+      <div id="avg-weight-filters" class="chart-periods" hidden></div>
       <div id="avg-chart-body"></div>
     </div>
     <div class="pp-section">
       <div class="pp-section-title">Top 10 finishes</div>
       <div id="player-top-finishes"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </div>`;
+
+  // statGrid replaced by stat bubbles above
+
+  // H2H sections (reused by both 'h2h' and 'overall' tabs)
+  const cats = Object.keys({...(s.legsByCat||{}), ...(s.gamesByCat||{})});
+  const catHtml = cats.length
+    ? cats.map(c=>`${c}: <b>${(s.gamesByCat||{})[c]||0}</b> games · <b>${(s.legsByCat||{})[c]||0}</b> legs`).join('<br>')
+    : '<span style="color:var(--muted)">none yet</span>';
+  const h2hDarts = s.h2hAvgDartsPerLeg != null ? s.h2hAvgDartsPerLeg : '—';
+  const h2hCats = Object.keys({...(s.h2hGamesWonByCat||{}), ...(s.h2hSetsWonByCat||{}), ...(s.h2hLegsWonByCat||{})});
+  const h2hHtml = h2hCats.length
+    ? h2hCats.map(c=>`${c}: <b>${(s.h2hGamesWonByCat||{})[c]||0}</b> games · <b>${(s.h2hSetsWonByCat||{})[c]||0}</b> sets · <b>${(s.h2hLegsWonByCat||{})[c]||0}</b> legs`).join('<br>')
+    : '<span style="color:var(--muted)">none yet</span>';
+  const h2hSection = `
+    <div class="pp-section">
+      <div class="pp-section-title">H2H — Games &amp; legs played</div>
+      <div class="pp-cat-lines">${catHtml}</div>
+      <div class="pp-cat-lines" style="margin-top:5px;font-size:12px;color:var(--muted)">Avg darts/leg: <b style="color:var(--ink)">${h2hDarts}</b></div>
     </div>
+    <div class="pp-section">
+      <div class="pp-section-title">H2H Wins</div>
+      <div class="pp-cat-lines">${h2hHtml}</div>
+    </div>`;
+
+  // Practice sections (reused by both 'practice' and 'overall' tabs)
+  const pracCats = Object.keys(s.practiceLegs||{});
+  const pracHtml = pracCats.length
+    ? pracCats.map(c=>`${c}: <b>${(s.practiceLegs||{})[c]||0}</b> legs`).join('<br>')
+    : '<span style="color:var(--muted)">none yet</span>';
+  const pracDarts = s.practiceAvgDartsPerLeg != null ? s.practiceAvgDartsPerLeg : '—';
+  const practiceSection = `
+    <div class="pp-section">
+      <div class="pp-section-title">Practice — Legs thrown</div>
+      <div class="pp-cat-lines">${pracHtml}</div>
+      <div class="pp-cat-lines" style="margin-top:5px;font-size:12px;color:var(--muted)">Avg darts/leg: <b style="color:var(--ink)">${pracDarts}</b></div>
+    </div>`;
+
+  let tabContent;
+  if(tab === 'overall'){
+    tabContent = `
+      ${chartSection}
+      ${h2hSection}
+      ${practiceSection}`;
+  } else if(tab === 'h2h'){
+    tabContent = `
+      ${chartSection}
+      <div class="pp-section">
+        <div class="pp-section-title">Games &amp; legs played</div>
+        <div class="pp-cat-lines">${catHtml}</div>
+        <div class="pp-cat-lines" style="margin-top:5px;font-size:12px;color:var(--muted)">Avg darts/leg: <b style="color:var(--ink)">${h2hDarts}</b></div>
+      </div>
+      <div class="pp-section">
+        <div class="pp-section-title">H2H Wins</div>
+        <div class="pp-cat-lines">${h2hHtml}</div>
+      </div>`;
+  } else {
+    tabContent = `
+      ${chartSection}
+      <div class="pp-section">
+        <div class="pp-section-title">Legs thrown</div>
+        <div class="pp-cat-lines">${pracHtml}</div>
+        <div class="pp-cat-lines" style="margin-top:5px;font-size:12px;color:var(--muted)">Avg darts/leg: <b style="color:var(--ink)">${pracDarts}</b></div>
+      </div>`;
+  }
+
+  body.innerHTML = `
+    <div class="pp-header">
+      <div class="pp-name">${escapeHtml(name)}</div>
+      <div class="pp-meta">${s.turns||0} turns thrown (all-time)</div>
+    </div>
+    <div class="player-tabs">
+      <button class="tab-btn${tab==='overall'?' active':''}" data-tab="overall" onclick="switchPlayerTab('overall')">Overall</button>
+      <button class="tab-btn${tab==='h2h'?' active':''}" data-tab="h2h" onclick="switchPlayerTab('h2h')">H2H</button>
+      <button class="tab-btn${tab==='practice'?' active':''}" data-tab="practice" onclick="switchPlayerTab('practice')">Practice</button>
+    </div>
+    ${bubblesHtml}
+    ${tabContent}
     <div class="pp-section">
       <div class="pp-section-title">Out mode</div>
       <div class="seg out-seg" role="group">
@@ -814,19 +1243,69 @@ function renderPlayerPage(){
       </div>
     </div>
     <div class="pp-section">
-      <div class="pp-section-title">Games &amp; legs played</div>
-      <div class="pp-cat-lines">${catHtml}</div>
-    </div>
-    <div class="pp-section">
-      <div class="pp-section-title">H2H Wins</div>
-      <div class="pp-cat-lines">${h2hHtml}</div>
+      <div class="pp-section-title">Dart weight</div>
+      <select class="date-input" style="width:auto" onchange="setPlayerDartWeight('${j}', this.value)">
+        <option value="">Not set</option>
+        ${Array.from({length:16},(_,i)=>15+i).map(g=>`<option value="${g}"${dartWeight===g?' selected':''}>${g}g</option>`).join('')}
+      </select>
     </div>
     <div class="btn-row">
       <button class="btn btn-ghost" onclick="askRenameFromProfile('${j}')">Rename</button>
-      <button class="btn btn-ghost danger" onclick="askDeleteFromProfile('${j}')">Delete</button>
+      <button class="btn btn-ghost danger" onclick="askClearPlayerStats('${j}','${tab==='overall'?'all':tab}')">Reset ${tab==='overall'?'all':tab==='h2h'?'H2H':'Practice'} stats</button>
+      <button class="btn btn-ghost danger" onclick="askDeleteFromProfile('${j}')">Delete player</button>
     </div>`;
+  loadStatBubbles();
   loadAvgChart(avgChartPeriod);
+  loadDartWeights();
   loadTopFinishes();
+}
+function clearLocalPlayerStats(name, mode){
+  const s = stats[name]; if(!s) return;
+  const zeroStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0, nineDarters:0 };
+  if(mode === 'all'){
+    s.h2hStats = {...zeroStats};
+    s.practiceStats = {...zeroStats};
+    s.legsByCat = {}; s.gamesByCat = {};
+    s.h2hLegsWonByCat = {}; s.h2hSetsWonByCat = {}; s.h2hGamesWonByCat = {};
+    s.h2hAvgDartsPerLeg = null;
+    s.practiceLegs = {}; s.practiceAvgDartsPerLeg = null;
+    s.turns = 0; s.totalPoints = 0; s.trebleLess = 0;
+    s.checkouts100 = 0; s.oneEighties = 0; s.bigFish = 0; s.nineDarters = 0;
+    persist(); return;
+  }
+  if(mode === 'h2h'){
+    s.h2hStats = {...zeroStats};
+    s.legsByCat = {}; s.gamesByCat = {};
+    s.h2hLegsWonByCat = {}; s.h2hSetsWonByCat = {}; s.h2hGamesWonByCat = {};
+    s.h2hAvgDartsPerLeg = null;
+  } else {
+    s.practiceStats = {...zeroStats};
+    s.practiceLegs = {};
+    s.practiceAvgDartsPerLeg = null;
+  }
+  // recalculate global totals from the two mode sub-objects
+  const h = s.h2hStats||{}, pr = s.practiceStats||{};
+  s.turns        = (h.turns||0)        + (pr.turns||0);
+  s.totalPoints  = (h.totalPoints||0)  + (pr.totalPoints||0);
+  s.trebleLess   = (h.trebleLess||0)   + (pr.trebleLess||0);
+  s.checkouts100 = (h.checkouts100||0) + (pr.checkouts100||0);
+  s.oneEighties  = (h.oneEighties||0)  + (pr.oneEighties||0);
+  s.bigFish      = (h.bigFish||0)      + (pr.bigFish||0);
+  s.nineDarters  = (h.nineDarters||0)  + (pr.nineDarters||0);
+  persist();
+}
+function askClearPlayerStats(name, mode){
+  const label = mode === 'all' ? 'all' : mode === 'h2h' ? 'H2H' : 'Practice';
+  uiConfirm(`Reset ${label} stats for "${name}"? Turn data is permanently deleted and cannot be undone.`, ()=>{
+    if(DB.mode==='api'){
+      Backend.send('DELETE', `/api/players/stats?name=${encodeURIComponent(name)}&mode=${mode}`)
+        .then(()=>{ if(DB.mode==='api') DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); })
+        .catch(logErr);
+    } else {
+      clearLocalPlayerStats(name, mode);
+      renderPlayerPage();
+    }
+  });
 }
 function askRenameFromProfile(name){
   uiPrompt('Rename player', name, newName=>{
@@ -851,16 +1330,18 @@ function renderGame(){
     row.innerHTML=`
       <div>
         <div class="nm">${escapeHtml(p.name)} <span class="nm-out">${p.doubleOut?'double out':'single out'}</span></div>
-        ${i===game.current?'<div class="turnflag">at the oche</div>':''}
+        ${i===game.current?'<div class="turnflag">▸ throwing</div>':''}
       </div>
       <div class="meta">
         <div class="avgs">leg <b>${avgStr(p.legPoints,p.legVisits)}</b> &nbsp;·&nbsp; game <b>${avgStr(p.gamePoints,p.gameVisits)}</b></div>
         ${showStanding?`<div class="standing">${standing}</div>`:''}
       </div>
-      <div class="rem">${p.score}</div>`;
+      <div class="rem-wrap">
+        <div class="rem">${p.score}</div>
+        ${i===game.current?'<div class="co-inline" id="checkout-inline"></div>':''}
+      </div>`;
     sb.appendChild(row);
   });
-  document.getElementById('active-name').textContent = game.players[game.current].name;
   renderSlots();
   renderPad();
   updateCheckout(false);
@@ -885,30 +1366,24 @@ function liveRemaining(){
   return game.players[game.current].score - pts;
 }
 function updateCheckout(flash){
-  const bar = document.getElementById('checkout-bar');
-  const route = document.getElementById('checkout-route');
-  if(!bar || !route) return;
+  const el = document.getElementById('checkout-inline');
+  if(!el) return;
   const cp = game.players[game.current];
   const dbl = cp.doubleOut;
-  // Was the player on a finish at the START of this visit (3 darts in hand)?
-  // If not, never suggest a checkout mid-visit — even if a dart happens to leave
-  // a finishable number. Only update the suggestion when the visit began on one.
+  // Only suggest a checkout if the player started this visit already on a finishing number.
   const startedOnCheckout = checkoutHint(cp.score, dbl, 3) !== '';
   const dartsLeft = 3 - game.darts.length;
   const rem = (game.busted || game.won) ? -1 : liveRemaining();
   const hint = (startedOnCheckout && rem > 0 && dartsLeft > 0)
-    ? checkoutHint(rem, dbl, dartsLeft)   // route for what's left, within the darts remaining
+    ? checkoutHint(rem, dbl, dartsLeft)
     : '';
-  if(hint){
-    route.textContent = hint.replace(/ /g,'  →  ');
-    bar.hidden = false;
-    if(flash){ bar.classList.remove('flash'); void bar.offsetWidth; bar.classList.add('flash'); }
-  } else {
-    bar.hidden = true;
-  }
+  el.textContent = hint ? hint.replace(/ /g,' → ') : '';
+  if(hint && flash){ el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
 }
 
 /* ---------- live scoreboard feed ---------- */
+let pendingAchievement = null;
+
 function liveSnapshot(message){
   if(!game) return { active:false, ts:Date.now() };
   const cur = game.players[game.current];
@@ -925,17 +1400,28 @@ function liveSnapshot(message){
       name:p.name, score:p.score, out:p.doubleOut?'double':'single',
       legAvg:  p.legVisits  ? (p.legPoints/p.legVisits).toFixed(1)   : null,
       gameAvg: p.gameVisits ? (p.gamePoints/p.gameVisits).toFixed(1) : null,
-      legsWon:p.legsWon, setsWon:p.setsWon
+      legsWon:p.legsWon, setsWon:p.setsWon,
+      legDarts: p.legDarts || 0
     })),
     darts: game.darts.map(d=>d.label),
     checkout,
     status: game.won ? 'won' : (game.busted ? 'bust' : 'live'),
     message: message || '',
+    achievement: pendingAchievement || null,
+    gameOneEighties: game.gameOneEighties || 0,
+    gameBigFish: game.gameBigFish || 0,
+    gameBusts: game.gameBusts || 0,
+    legSummary: game.legSummary || null,
+    practice: !!game.practice,
     done: !!game.done,
     ts: Date.now()
   };
 }
-function pushLive(message){ DB.pushLive(liveSnapshot(message)); }
+function pushLive(message){
+  const snap = liveSnapshot(message);
+  pendingAchievement = null;
+  DB.pushLive(snap);
+}
 
 function renderPad(){
   const pad=document.getElementById('pad'); pad.innerHTML='';
@@ -946,6 +1432,7 @@ function renderPad(){
     b.onclick=()=>throwDart(n);
     pad.appendChild(b);
   }
+  // Bull + Miss share the last row (4-col grid, each spans 2)
   const bull=document.createElement('button');
   bull.className='bull'; bull.textContent='Bull'; bull.disabled=full;
   bull.onclick=()=>throwDart(25); pad.appendChild(bull);
@@ -966,8 +1453,13 @@ function updateMultUI(){
 }
 function throwDart(sector){
   if(game.darts.length>=3 || game.busted || game.won) return;
-  const dart = makeDart(sector, mult);
-  game.darts.push(dart);
+  if(sector === 0 && mult > 1){
+    // Double/Treble Miss fills that many slots at once
+    const count = Math.min(mult, 3 - game.darts.length);
+    for(let i = 0; i < count; i++) game.darts.push(makeDart(0, 1));
+  } else {
+    game.darts.push(makeDart(sector, mult));
+  }
   mult=1; updateMultUI();
 
   // live bust/win feedback before committing
@@ -994,7 +1486,6 @@ function undoDart(){
   status.className='status'; status.textContent='Dart removed.';
   renderSlots(); renderPad(); updateCheckout(false); pushLive();
 }
-
 function enterTurn(){
   if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
   const p = game.players[game.current];
@@ -1002,6 +1493,8 @@ function enterTurn(){
 
   // per-leg and per-game scope (shown live on the scoreboard — both modes)
   p.legPoints  += ev.scored; p.legVisits  += 1;
+  p.legDarts   += game.darts.length;
+  if(ev.bust) p.legBusts += 1;
   p.gamePoints += ev.scored; p.gameVisits += 1;
   if(!ev.bust) p.score = ev.newScore;
 
@@ -1014,13 +1507,33 @@ function enterTurn(){
     s.turns += 1; s.totalPoints += ev.scored;
     if(ev.trebleLess) s.trebleLess += 1;
     if(ev.win && ev.pointsThisVisit >= 100) s.checkouts100 += 1;
+    if(ev.scored === 180) s.oneEighties += 1;
+    if(ev.win && ev.pointsThisVisit === 170) s.bigFish += 1;
+    if(ev.win && game.category==='501' && p.legVisits===3){ s.nineDarters += 1; }
+    // per-mode breakdown
+    const _mk = (!game.practice && game.players.length > 1) ? 'h2hStats' : 'practiceStats';
+    const _ms = s[_mk];
+    _ms.turns += 1; _ms.totalPoints += ev.scored;
+    if(ev.trebleLess) _ms.trebleLess += 1;
+    if(ev.win && ev.pointsThisVisit >= 100) _ms.checkouts100 += 1;
+    if(ev.scored === 180) _ms.oneEighties += 1;
+    if(ev.win && ev.pointsThisVisit === 170) _ms.bigFish += 1;
+    if(ev.win && game.category==='501' && p.legVisits===3) _ms.nineDarters += 1;
   }
+  // achievement flashes + in-game counters for the live scoreboard
+  if(ev.bust) game.gameBusts += 1;
+  if(ev.scored === 180){ game.gameOneEighties += 1; pendingAchievement = { type:'180', player:p.name, ts:Date.now() }; }
+  if(ev.win && ev.pointsThisVisit === 170){ game.gameBigFish += 1; pendingAchievement = { type:'bigfish', player:p.name, ts:Date.now() }; }
 
   if(ev.win){
-    if(DB.mode==='local'){   // legs played, per category, for everyone (api derives this server-side)
+    if(DB.mode==='local'){
+      const _isH2H = !game.practice && game.players.length > 1;
       game.players.forEach(pl=>{
         ensurePlayerStats(pl.name);
-        stats[pl.name].legsByCat[game.category] = (stats[pl.name].legsByCat[game.category]||0) + 1;
+        if(_isH2H)
+          stats[pl.name].legsByCat[game.category] = (stats[pl.name].legsByCat[game.category]||0) + 1;
+        else
+          stats[pl.name].practiceLegs[game.category] = (stats[pl.name].practiceLegs[game.category]||0) + 1;
       });
     }
     onLegWon(game.current);   // handles set/game progression
@@ -1034,13 +1547,14 @@ function enterTurn(){
   document.getElementById('status').className='status';
   document.getElementById('status').textContent='Tap a multiplier, then a number.';
   renderGame();
+  pushLive();
 }
 
 /* ----- leg / set / game progression ----- */
 function onLegWon(wi){
   const w = game.players[wi];
   w.legsWon += 1;
-  const isH2H = game.players.length > 1;
+  const isH2H = game.players.length > 1 && !game.practice;
 
   if(DB.mode==='local' && isH2H){
     const cat = game.category;
@@ -1059,10 +1573,10 @@ function onLegWon(wi){
     if(w.setsWon >= game.setsPerGame){   // game (match) won
       if(DB.mode==='local'){
         const cat = game.category;
-        game.players.forEach(pl=>{
-          stats[pl.name].gamesByCat[cat] = (stats[pl.name].gamesByCat[cat]||0) + 1;
-        });
         if(isH2H){
+          game.players.forEach(pl=>{
+            stats[pl.name].gamesByCat[cat] = (stats[pl.name].gamesByCat[cat]||0) + 1;
+          });
           stats[w.name].h2hGamesWonByCat[cat] = (stats[w.name].h2hGamesWonByCat[cat]||0) + 1;
         }
       }
@@ -1092,7 +1606,8 @@ function startNextLeg(newSet){
   DB.recordEvent('leg_start', game.setNo, game.legNo);
   game.starter = (game.starter + 1) % game.players.length;
   game.current = game.starter;
-  game.players.forEach(p=>{ p.score = game.start; p.legPoints=0; p.legVisits=0; });
+  game.players.forEach(p=>{ p.score = game.start; p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legBusts=0; });
+  game.legSummary = null;
   game.darts=[]; game.busted=false; game.won=false;
   mult=1;
   renderGameShell(); updateMultUI(); renderGame();
@@ -1132,21 +1647,21 @@ function finishUnit(kind, winner){
         <button class="btn btn-ghost" onclick="uiConfirm('End the match early? Recorded stats are kept.', ()=>show('setup'))">End game</button>
       </div></div>`;
   }
+  game.legSummary = game.players.map(p=>({
+    name: p.name,
+    avg:   p.legVisits ? (p.legPoints / p.legVisits).toFixed(1) : null,
+    darts: p.legDarts  || 0,
+    busts: p.legBusts  || 0,
+    won:   p.name === winner
+  }));
   pushLive(`${winner} ${labels[kind]}`);
 }
 
 /* rebuild the oche inner markup (used after a leg replaced it) */
 function renderGameShell(){
   document.querySelector('.oche').innerHTML=`
-      <div class="turnhead">
-        <div class="who">Throwing: <b id="active-name">—</b></div>
-      </div>
-      <div class="checkout-bar" id="checkout-bar" hidden>
-        <span class="co-label">Checkout</span>
-        <span class="co-route" id="checkout-route"></span>
-      </div>
       <div class="slots" id="slots"></div>
-      <div class="status" id="status">Tap a multiplier, then a number — one dart at a time.</div>
+      <div class="status" id="status">Select a multiplier, then tap a number.</div>
       <div class="multi" role="group" aria-label="Dart multiplier">
         <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
         <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
@@ -1209,8 +1724,25 @@ function checkoutHint(rem, doubleOut, maxDarts){
 }
 
 /* ---------- avg-over-time chart ---------- */
+const STAT_DEFS = [
+  { key:'avg',           label:'Average',     desc:'3-dart average',                            fmt:v=>v!=null?v.toFixed(1):'—' },
+  { key:'180s',          label:'180s',         desc:'Count of 180s thrown',                    fmt:v=>v!=null?String(Math.round(v)):'—' },
+  { key:'bigfish',       label:'Big Fish',    desc:'170 checkouts',                            fmt:v=>v!=null?String(Math.round(v)):'—' },
+  { key:'ninedarters',   label:'9 Darters',   desc:'501 legs finished in 9 darts',            fmt:v=>v!=null?String(Math.round(v)):'—' },
+  { key:'treblelesspct', label:'Trebleless %',desc:'% of legs without hitting a treble',      fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'first3avg',     label:'1st 3 AVG',   desc:'Average of 1st 3 darts in a leg',         fmt:v=>v!=null?v.toFixed(1):'—' },
+  { key:'first9avg',     label:'1st 9 AVG',   desc:'Average of 1st 9 darts in a leg',         fmt:v=>v!=null?v.toFixed(1):'—' },
+  { key:'avg100plus',    label:'100+ AVG',    desc:'% of legs with a 100+ average',           fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'avg90minus',    label:'90- AVG',     desc:'% of legs with a 90 or lower average',    fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'score140pct',   label:'140/Leg',     desc:'% of opening visits scoring 140 or more', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'180sperleg',    label:'180s/Leg',    desc:'Ratio of 180s to total legs',             fmt:v=>v!=null?v.toFixed(3):'—' },
+];
+let selectedStat = 'avg';
+
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 let avgChartPeriod = 'month';
+let avgChartWeight = null;      // null = all weights; number = grams filter
+let cachedDartWeights = [];
 let customRangeStart = '';
 let customRangeEnd = '';
 
@@ -1245,26 +1777,27 @@ function drawAvgChart(data){
     return;
   }
   if(data.length===1){
-    container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Only one session in this period — <b style="color:var(--ink)">${data[0].avg.toFixed(1)}</b> avg.</p>`;
+    container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Only one session in this period — <b style="color:var(--ink)">${(STAT_DEFS.find(d=>d.key===selectedStat)||STAT_DEFS[0]).fmt(data[0].value??data[0].avg)}</b>.</p>`;
     return;
   }
   const W=560,H=180,ml=46,mr=12,mt=14,mb=30;
   const cw=W-ml-mr, ch=H-mt-mb;
-  const avgs=data.map(d=>d.avg);
+  const avgs=data.map(d=>d.value??d.avg);
   const rawMin=Math.min(...avgs), rawMax=Math.max(...avgs);
   const spread=rawMax-rawMin;
   const pad=Math.max(spread*0.2,2);
   const yMin=Math.max(0,rawMin-pad), yMax=rawMax+pad, yRange=yMax-yMin||1;
   const n=data.length;
+  const statFmt=(STAT_DEFS.find(d=>d.key===selectedStat)||STAT_DEFS[0]).fmt;
   const pts=data.map((d,i)=>({
     x:ml+(n===1?cw/2:(i/(n-1))*cw),
-    y:mt+ch-((d.avg-yMin)/yRange)*ch
+    y:mt+ch-(((d.value??d.avg)-yMin)/yRange)*ch
   }));
   const linePts=pts.map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
   const areaPts=`${pts[0].x.toFixed(1)},${mt+ch} ${linePts} ${pts[n-1].x.toFixed(1)},${mt+ch}`;
   const yTicks=[yMin,(yMin+yMax)/2,yMax].map(v=>({
     y:(mt+ch-((v-yMin)/yRange)*ch).toFixed(1),
-    label:v.toFixed(1)
+    label:statFmt(v)
   }));
   const labelCount=Math.min(n,5);
   const xLabels=Array.from({length:labelCount},(_,i)=>{
@@ -1289,6 +1822,64 @@ function drawAvgChart(data){
   </svg>`;
 }
 
+/* ---------- stat bubbles ---------- */
+const BUBBLE_KEY_MAP = { '180s':'one80s', bigfish:'bigFish', ninedarters:'nineDarters', treblelesspct:'treblelessPct', '180sperleg':'one80sPerLeg' };
+function selectStat(key){
+  selectedStat = key;
+  document.querySelectorAll('.stat-bubble').forEach(b=>b.classList.toggle('active',b.dataset.stat===key));
+  const el=document.getElementById('chart-metric-title');
+  const def=STAT_DEFS.find(d=>d.key===key);
+  if(el&&def) el.textContent=def.label+' over time';
+  loadAvgChart(avgChartPeriod);
+}
+function loadStatBubbles(){
+  const container=document.getElementById('player-stat-bubbles');
+  if(!container) return;
+  if(DB.mode!=='api'){
+    const s=stats[currentPlayer]||{};
+    const ts=playerPageTab==='h2h'?(s.h2hStats||{}):playerPageTab==='practice'?(s.practiceStats||{}):s;
+    renderStatBubbles({ avg:ts.turns?(ts.totalPoints/ts.turns):null, one80s:ts.oneEighties||0, bigFish:ts.bigFish||0, nineDarters:ts.nineDarters||0 });
+    return;
+  }
+  const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
+  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
+    .then(data=>renderStatBubbles(data)).catch(()=>{});
+}
+function renderStatBubbles(data){
+  if(!data) return;
+  STAT_DEFS.forEach(d=>{
+    const el=document.getElementById('bv-'+d.key);
+    if(!el) return;
+    const mk=BUBBLE_KEY_MAP[d.key]||d.key;
+    el.textContent=d.fmt(data[mk]!=null?data[mk]:data[d.key]);
+  });
+}
+
+function loadDartWeights(){
+  const container=document.getElementById('avg-weight-filters');
+  if(!container) return;
+  if(DB.mode!=='api'){ container.hidden=true; return; }
+  Backend.get(`/api/players/dart-weights?name=${encodeURIComponent(currentPlayer)}`)
+    .then(weights=>{ cachedDartWeights=weights; renderWeightFilters(); })
+    .catch(()=>{ container.hidden=true; });
+}
+function renderWeightFilters(){
+  const container=document.getElementById('avg-weight-filters');
+  if(!container) return;
+  if(!cachedDartWeights.length){ container.hidden=true; return; }
+  container.hidden=false;
+  container.innerHTML=[null,...cachedDartWeights].map(val=>{
+    const label=val===null?'All':val+'g';
+    const active=avgChartWeight===val;
+    return `<button class="chart-period-btn${active?' active':''}" onclick="setWeightFilter(${val})">${label}</button>`;
+  }).join('');
+}
+function setWeightFilter(weight){
+  avgChartWeight=weight;
+  renderWeightFilters();
+  loadAvgChart(avgChartPeriod);
+}
+
 function loadAvgChart(period){
   avgChartPeriod=period;
   document.querySelectorAll('.chart-period-btn').forEach(b=>b.classList.toggle('active',b.dataset.period===period));
@@ -1304,8 +1895,10 @@ function loadAvgChart(period){
     return;
   }
   container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Loading…</p>`;
-  let url=`/api/players/avg-history?name=${encodeURIComponent(currentPlayer)}&period=${period}`;
+  let url=`/api/players/avg-history?name=${encodeURIComponent(currentPlayer)}&period=${period}&metric=${selectedStat}`;
+  if(playerPageTab==='h2h'||playerPageTab==='practice') url+=`&mode=${playerPageTab}`;
   if(period==='custom') url+=`&start=${customRangeStart}&end=${customRangeEnd}`;
+  if(avgChartWeight) url+=`&weight=${avgChartWeight}`;
   Backend.get(url)
     .then(data=>drawAvgChart(data))
     .catch(()=>{ const c=document.getElementById('avg-chart-body'); if(c) c.innerHTML=`<p class="pp-meta" style="padding:10px 0">Could not load chart data.</p>`; });
@@ -1334,7 +1927,8 @@ function loadTopFinishes(){
     container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Top finishes are saved when connected to the server backend.</p>`;
     return;
   }
-  Backend.get(`/api/players/top-finishes?name=${encodeURIComponent(currentPlayer)}`)
+  const _tfMode = (playerPageTab==='h2h'||playerPageTab==='practice') ? `&mode=${playerPageTab}` : '';
+  Backend.get(`/api/players/top-finishes?name=${encodeURIComponent(currentPlayer)}${_tfMode}`)
     .then(rows=>{
       if(!rows||rows.length===0){
         container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No checkouts recorded yet.</p>`;
@@ -1364,7 +1958,7 @@ function renderStats(){
   const body=document.getElementById('stats-body');
   const names=Object.keys(stats);
   if(names.length===0){
-    body.innerHTML=`<div class="empty">No stats yet.<br>Play a game and your <b>3-dart average</b>, <b>100+ checkouts</b>, and <b>treble-less visits</b> will build up here.</div>`;
+    body.innerHTML=`<div class="empty">No stats yet.<br>Play a game and your <b>3-dart average</b>, <b>ton+ finishes</b>, and <b>treble-less visits</b> will build up here.</div>`;
     return;
   }
   let rows = names.map(n=>{
@@ -1379,7 +1973,7 @@ function renderStats(){
   }).join('');
   body.innerHTML=`<table>
     <thead><tr>
-      <th>Player</th><th class="num">3-dart avg</th><th class="num">100+&nbsp;CO</th>
+      <th>Player</th><th class="num">3-dart avg</th><th class="num">Ton+&nbsp;Finishes</th>
       <th class="num">Treble-less Visits</th>
     </tr></thead><tbody>${rows}</tbody></table>`;
 }
@@ -1441,6 +2035,7 @@ function uiPrompt(msg, initial, onSubmit){
   updateFormatLine();
   const tag=document.getElementById('persist-tag'); // reflect mode on the stats page
   if(tag) tag.dataset.mode = DB.mode;
+  renderHome();             // populate the landing page with summary data
   pushLive();   // tell any scoreboard screens we're ready (idle until a game starts)
 })();
 </script>

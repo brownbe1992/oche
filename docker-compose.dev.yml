@@ -1,0 +1,12 @@
+services:
+  darts-dev:
+    build: .
+    container_name: oche-dev
+    ports:
+      - "8056:8056"          # dev branch — http://<your-server>:8056
+    volumes:
+      - ./darts_data_dev:/data
+    environment:
+      - PORT=8056
+      - DARTS_DB=/data/darts.db
+    restart: unless-stopped

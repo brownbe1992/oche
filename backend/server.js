@@ -108,17 +108,35 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/players' && m === 'GET')  return send(res, 200, db.listPlayers());
     if (p === '/api/players' && m === 'POST') { const b = await readJson(req); return send(res, 200, db.addPlayer(b.name, b.out)); }
-    if (p === '/api/players/rename' && m === 'PUT') { const b = await readJson(req); return send(res, 200, db.renamePlayer(b.from, b.to)); }
-    if (p === '/api/players/out' && m === 'PUT')    { const b = await readJson(req); return send(res, 200, db.setOut(b.name, b.out)); }
+    if (p === '/api/players/rename' && m === 'PUT')      { const b = await readJson(req); return send(res, 200, db.renamePlayer(b.from, b.to)); }
+    if (p === '/api/players/out' && m === 'PUT')         { const b = await readJson(req); return send(res, 200, db.setOut(b.name, b.out)); }
+    if (p === '/api/players/dart-weight' && m === 'PUT') { const b = await readJson(req); return send(res, 200, db.setDartWeight(b.name, b.weight)); }
+    if (p === '/api/players/dart-weights' && m === 'GET') return send(res, 200, db.getDartWeights(url.searchParams.get('name')));
     if (p === '/api/players' && m === 'DELETE') return send(res, 200, db.deletePlayer(url.searchParams.get('name')));
+    if (p === '/api/players/stats' && m === 'DELETE') {
+      const mode = url.searchParams.get('mode');
+      if (!['h2h','practice','all'].includes(mode)) return send(res, 400, { error: 'mode must be h2h, practice, or all' });
+      return send(res, 200, db.clearPlayerStats(url.searchParams.get('name'), mode));
+    }
 
+    if (p === '/api/summary'       && m === 'GET') return send(res, 200, db.getSummary());
+    if (p === '/api/top-finishes'  && m === 'GET') return send(res, 200, db.getTopFinishesAll(10, url.searchParams.get('mode')));
+    if (p === '/api/stats/180s'         && m === 'GET') return send(res, 200, db.getOneEightyStats(url.searchParams.get('mode')));
+    if (p === '/api/stats/big-fish'     && m === 'GET') return send(res, 200, db.getBigFishStats(url.searchParams.get('mode')));
+    if (p === '/api/stats/nine-darters' && m === 'GET') return send(res, 200, db.getNineDarterStats(url.searchParams.get('mode')));
     if (p === '/api/stats' && m === 'GET')  return send(res, 200, db.computeStats());
     if (p === '/api/players/top-finishes' && m === 'GET') {
-      return send(res, 200, db.getTopFinishes(url.searchParams.get('name')));
+      const mode = url.searchParams.get('mode');
+      return send(res, 200, db.getTopFinishes(url.searchParams.get('name'), mode));
+    }
+    if (p === '/api/players/stat-bubbles' && m === 'GET') {
+      const mode = url.searchParams.get('mode');
+      return send(res, 200, db.getPlayerStatBubbles(url.searchParams.get('name'), mode));
     }
     if (p === '/api/players/avg-history' && m === 'GET') {
       const name = url.searchParams.get('name');
       const period = url.searchParams.get('period') || 'month';
+      const metric = url.searchParams.get('metric') || 'avg';
       const validPeriods = ['today', 'week', 'month', 'year', 'all', 'custom'];
       if (!validPeriods.includes(period)) return send(res, 400, { error: 'Invalid period' });
       const opts = {};
@@ -130,11 +148,15 @@ const server = http.createServer(async (req, res) => {
         opts.start = start;
         opts.end   = end;
       }
-      return send(res, 200, db.getAvgHistory(name, period, opts));
+      const weight = url.searchParams.get('weight');
+      if (weight && /^\d+$/.test(weight)) opts.dartWeight = Number(weight);
+      const mode = url.searchParams.get('mode');
+      if (mode === 'h2h' || mode === 'practice') opts.mode = mode;
+      return send(res, 200, db.getMetricHistory(name, metric, period, opts));
     }
     if (p === '/api/reset' && m === 'POST') return send(res, 200, db.resetStats());
 
-    if (p === '/api/games' && m === 'POST') { const b = await readJson(req); return send(res, 200, db.createGame(b)); }
+    if (p === '/api/games' && m === 'POST') { const b = await readJson(req); return send(res, 200, db.createGame({ ...b, practice: b.practice ? 1 : 0 })); }
 
     let mt;
     if ((mt = p.match(/^\/api\/games\/(\d+)\/turns$/)) && m === 'POST') {
