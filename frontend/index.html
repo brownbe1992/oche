@@ -472,8 +472,18 @@
     <div class="scoreboard" id="scoreboard"></div>
 
     <div class="oche">
+      <div class="imt-row">
+        <button class="imt-btn" id="imt-pad"   onclick="setDartMode('pad')"   aria-pressed="false">Pad</button>
+        <button class="imt-btn" id="imt-board" onclick="setDartMode('board')" aria-pressed="true">🎯</button>
+      </div>
       <div class="slots" id="slots"></div>
       <div class="status" id="status">Tap the board to score.</div>
+      <div class="multi" id="multi-row" role="group" aria-label="Dart multiplier">
+        <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
+        <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
+        <button class="m-t" id="m-t" aria-pressed="false" onclick="setMult(3)">Treble</button>
+      </div>
+      <div class="pad" id="pad"></div>
       <div class="dart-board-wrap" id="dart-board-wrap"></div>
       <button class="btn btn-ghost board-miss" id="board-miss-btn" onclick="throwDartBoard(0,1)">Miss</button>
       <div class="turn-actions">
@@ -691,7 +701,7 @@ let roster = [];     // saved player names (profiles that own stats)
 let stats = {};
 let prefs = {};      // name -> { out:'double'|'single' }  (per-player finish rule)
 let mult = 1;
-let dartboardMode = false;
+let dartboardMode = true;
 
 /* ---------- dartboard input mode ---------- */
 const DB_SECTORS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
@@ -1513,10 +1523,28 @@ function pushLive(message){
 
 function renderPad(){
   const full = game.darts.length>=3 || game.busted || game.won;
-  const board = document.getElementById('dart-board-wrap');
-  if(board) board.innerHTML = buildDartboard(full);
-  const missB = document.getElementById('board-miss-btn');
-  if(missB) missB.disabled = full;
+  if(dartboardMode){
+    const board = document.getElementById('dart-board-wrap');
+    if(board) board.innerHTML = buildDartboard(full);
+    const missB = document.getElementById('board-miss-btn');
+    if(missB) missB.disabled = full;
+  } else {
+    const pad = document.getElementById('pad');
+    if(!pad) return;
+    pad.innerHTML = '';
+    for(let n=1;n<=20;n++){
+      const b=document.createElement('button');
+      b.textContent=n; b.disabled=full;
+      b.onclick=()=>throwDart(n);
+      pad.appendChild(b);
+    }
+    const bull=document.createElement('button');
+    bull.className='bull'; bull.textContent='Bull'; bull.disabled=full;
+    bull.onclick=()=>throwDart(25); pad.appendChild(bull);
+    const miss=document.createElement('button');
+    miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
+    miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+  }
 }
 
 /* ---------- throwing ---------- */
@@ -1737,14 +1765,25 @@ function finishUnit(kind, winner){
 /* rebuild the oche inner markup (used after a leg replaced it) */
 function renderGameShell(){
   document.querySelector('.oche').innerHTML=`
+      <div class="imt-row">
+        <button class="imt-btn" id="imt-pad"   onclick="setDartMode('pad')"   aria-pressed="${!dartboardMode}">Pad</button>
+        <button class="imt-btn" id="imt-board" onclick="setDartMode('board')" aria-pressed="${dartboardMode}">🎯</button>
+      </div>
       <div class="slots" id="slots"></div>
-      <div class="status" id="status">Tap the board to score.</div>
+      <div class="status" id="status">${dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
+      <div class="multi" id="multi-row" role="group" aria-label="Dart multiplier">
+        <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
+        <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
+        <button class="m-t" id="m-t" aria-pressed="false" onclick="setMult(3)">Treble</button>
+      </div>
+      <div class="pad" id="pad"></div>
       <div class="dart-board-wrap" id="dart-board-wrap"></div>
       <button class="btn btn-ghost board-miss" id="board-miss-btn" onclick="throwDartBoard(0,1)">Miss</button>
       <div class="turn-actions">
         <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo dart</button>
         <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
       </div>`;
+  applyDartMode();
 }
 
 /* ---------- checkout calculator ----------
