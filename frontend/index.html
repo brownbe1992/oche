@@ -834,7 +834,7 @@ function renderHome(){
         {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
         {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty}));
   } else {
-    const darts=Object.values(stats).reduce((a,p)=>a+(p.turns||0),0)*3;
+    const darts=Object.values(stats).reduce((a,p)=>a+(p.dartsThrown||0),0);
     const tonPlus=Object.values(stats).reduce((a,p)=>a+(p.checkouts100||0),0);
     const oneEighties=Object.values(stats).reduce((a,p)=>a+(p.oneEighties||0),0);
     const bigFish=Object.values(stats).reduce((a,p)=>a+(p.bigFish||0),0);
@@ -1165,8 +1165,9 @@ function newMatchPlayer(name, start){
 /* ---------- stats helpers ---------- */
 function ensurePlayerStats(name){
   const s = stats[name] || {};
-  if(s.totalPoints==null) s.totalPoints=0;
-  if(s.turns==null)       s.turns=0;
+  if(s.totalPoints==null)  s.totalPoints=0;
+  if(s.turns==null)        s.turns=0;
+  if(s.dartsThrown==null)  s.dartsThrown=0;
   if(s.trebleLess==null)  s.trebleLess=0;
   if(s.checkouts100==null)s.checkouts100=0;
   if(s.dartWeight === undefined) s.dartWeight = null;
@@ -1403,7 +1404,7 @@ function clearLocalPlayerStats(name, mode){
     s.h2hLegsWonByCat = {}; s.h2hSetsWonByCat = {}; s.h2hGamesWonByCat = {};
     s.h2hAvgDartsPerLeg = null;
     s.practiceLegs = {}; s.practiceAvgDartsPerLeg = null;
-    s.turns = 0; s.totalPoints = 0; s.trebleLess = 0;
+    s.turns = 0; s.totalPoints = 0; s.trebleLess = 0; s.dartsThrown = 0;
     s.checkouts100 = 0; s.oneEighties = 0; s.bigFish = 0; s.nineDarters = 0;
     persist(); return;
   }
@@ -1426,6 +1427,8 @@ function clearLocalPlayerStats(name, mode){
   s.oneEighties  = (h.oneEighties||0)  + (pr.oneEighties||0);
   s.bigFish      = (h.bigFish||0)      + (pr.bigFish||0);
   s.nineDarters  = (h.nineDarters||0)  + (pr.nineDarters||0);
+  // dartsThrown is not split by mode — approximate from remaining turns
+  s.dartsThrown  = s.turns * 3;
   persist();
 }
 function askClearPlayerStats(name, mode){
@@ -1642,10 +1645,11 @@ function enterTurn(){
   // persist the turn: api mode posts it to the database; local mode updates counters
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.scored, trebleLess:ev.trebleLess, bust:ev.bust,
-    checkout:ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null });
+    checkout:ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null,
+    dartsThrown: game.darts.length });
   if(DB.mode==='local'){
     const s = stats[p.name];
-    s.turns += 1; s.totalPoints += ev.scored;
+    s.turns += 1; s.totalPoints += ev.scored; s.dartsThrown += game.darts.length;
     if(ev.trebleLess) s.trebleLess += 1;
     if(ev.win && ev.pointsThisVisit >= 100) s.checkouts100 += 1;
     if(ev.scored === 180) s.oneEighties += 1;
@@ -1884,7 +1888,7 @@ const STAT_DEFS = [
   { key:'avg100plus',    label:'100+ AVG',    desc:'% of legs with a 100+ average',           fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
   { key:'avg90minus',    label:'90- AVG',     desc:'% of legs with a 90 or lower average',    fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
   { key:'score140pct',   label:'140/Leg',     desc:'% of opening visits scoring 140 or more', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
-  { key:'180sperleg',    label:'180s/Leg',    desc:'% of legs containing a 180',              fmt:v=>v!=null?(v*100).toFixed(1)+'%':'—' },
+  { key:'180sperleg',    label:'180s/Leg',    desc:'% of legs that contained a 180',           fmt:v=>v!=null?(v*100).toFixed(1)+'%':'—' },
 ];
 let selectedStat = 'avg';
 
@@ -1987,7 +1991,11 @@ function loadStatBubbles(){
   if(DB.mode!=='api'){
     const s=stats[currentPlayer]||{};
     const ts=playerPageTab==='h2h'?(s.h2hStats||{}):playerPageTab==='practice'?(s.practiceStats||{}):s;
-    renderStatBubbles({ avg:ts.turns?(ts.totalPoints/ts.turns):null, one80s:ts.oneEighties||0, bigFish:ts.bigFish||0, nineDarters:ts.nineDarters||0 });
+    renderStatBubbles({
+      dartsThrown: playerPageTab==='overall' ? (s.dartsThrown||0) : null,
+      avg: ts.turns?(ts.totalPoints/ts.turns):null,
+      one80s: ts.oneEighties||0, bigFish: ts.bigFish||0, nineDarters: ts.nineDarters||0
+    });
     return;
   }
   const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;

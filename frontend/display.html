@@ -198,6 +198,8 @@ const cornerScore= document.getElementById('corner-score');
 let bannerKey = '';
 let lastAchTs = 0;
 let lastCoKey = '';   // track checkout route to flash only on change
+let bannerTimer = null;
+let achTimer = null;
 
 function fmtText(s){
   const cat = s.category != null ? `${s.category}` : '';
@@ -340,16 +342,19 @@ function render(s){
     achText.textContent = labels[s.achievement.type] || '';
     achName.textContent = s.achievement.player || '';
     achOverlay.classList.add('show');
-    setTimeout(()=>achOverlay.classList.remove('show'), 2500);
+    clearTimeout(achTimer);
+    achTimer = setTimeout(()=>achOverlay.classList.remove('show'), 2500);
   }
 
   // result banners (leg / set / game) — show once per message
   if(s.message && s.message !== bannerKey){
     bannerKey = s.message;
     document.getElementById('banner-big').textContent = s.done ? 'GAME OVER' : s.message;
-    document.getElementById('banner-sub').textContent = s.done ? s.message : 'next leg coming up';
+    document.getElementById('banner-sub').textContent = s.done ? s.message
+      : s.message.includes(' the set') ? 'next set coming up'
+      : 'next leg coming up';
     banner.classList.add('show');
-    if(!s.done) setTimeout(()=>banner.classList.remove('show'), 3500);
+    if(!s.done){ clearTimeout(bannerTimer); bannerTimer = setTimeout(()=>banner.classList.remove('show'), 3500); }
   } else if(!s.message){
     bannerKey=''; banner.classList.remove('show');
   }

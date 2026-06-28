@@ -58,6 +58,7 @@ db.exec(`
     bust            INTEGER NOT NULL DEFAULT 0,
     checkout        INTEGER NOT NULL DEFAULT 0,
     checkout_points INTEGER,
+    darts_thrown    INTEGER NOT NULL DEFAULT 3,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -79,6 +80,7 @@ db.exec(`
 try { db.exec('ALTER TABLE players      ADD COLUMN dart_weight INTEGER'); } catch(e) {}
 try { db.exec('ALTER TABLE game_players ADD COLUMN dart_weight INTEGER'); } catch(e) {}
 try { db.exec('ALTER TABLE games        ADD COLUMN practice    INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
+try { db.exec('ALTER TABLE turns        ADD COLUMN darts_thrown INTEGER NOT NULL DEFAULT 3'); } catch(e) {}
 
 /* ---------- prepared statements ---------- */
 const q = {
@@ -95,8 +97,8 @@ const q = {
   completeGame : db.prepare("UPDATE games SET completed_at = datetime('now'), winner_id = ? WHERE id = ?"),
 
   insertTurn   : db.prepare(`INSERT INTO turns
-                   (game_id, player_id, set_no, leg_no, scored, treble_less, bust, checkout, checkout_points)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+                   (game_id, player_id, set_no, leg_no, scored, treble_less, bust, checkout, checkout_points, darts_thrown)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 };
 
 /* ---------- player operations ---------- */
@@ -184,7 +186,8 @@ function addTurn(gameId, t) {
     t.trebleLess ? 1 : 0,
     t.bust ? 1 : 0,
     t.checkout ? 1 : 0,
-    t.checkout ? (Number(t.checkoutPoints) || 0) : null
+    t.checkout ? (Number(t.checkoutPoints) || 0) : null,
+    Number(t.dartsThrown) || 3
   );
   return { ok: true };
 }
@@ -266,11 +269,11 @@ function computeStats() {
     GROUP BY t.player_id, g.category
   `).all();
 
-  // Average darts per leg (visits × 3) for won legs only
+  // Average actual darts per leg for won legs only
   const h2hAvgDarts = db.prepare(`
-    SELECT pid, AVG(leg_visits) * 3 AS avg_darts
+    SELECT pid, AVG(leg_darts) AS avg_darts
     FROM (
-      SELECT t.player_id AS pid, COUNT(*) AS leg_visits
+      SELECT t.player_id AS pid, SUM(t.darts_thrown) AS leg_darts
       FROM turns t JOIN games g ON g.id = t.game_id
       WHERE g.practice = 0
         AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
@@ -280,9 +283,9 @@ function computeStats() {
   `).all();
 
   const practiceAvgDarts = db.prepare(`
-    SELECT pid, AVG(leg_visits) * 3 AS avg_darts
+    SELECT pid, AVG(leg_darts) AS avg_darts
     FROM (
-      SELECT t.player_id AS pid, COUNT(*) AS leg_visits
+      SELECT t.player_id AS pid, SUM(t.darts_thrown) AS leg_darts
       FROM turns t JOIN games g ON g.id = t.game_id
       WHERE g.practice = 1
         OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1
@@ -409,7 +412,7 @@ function getSummary() {
     WHERE g.practice = 0
       AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
   `).get().n;
-  const darts      = db.prepare('SELECT COUNT(*) AS n FROM turns').get().n * 3;
+  const darts      = db.prepare('SELECT SUM(darts_thrown) AS n FROM turns').get().n ?? 0;
   const tonPlus      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout = 1 AND checkout_points >= 100').get().n;
   const oneEighties  = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE scored = 180').get().n;
   const bigFish      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout = 1 AND checkout_points = 170').get().n;
@@ -441,7 +444,8 @@ function getPlayerStatBubbles(playerName, mode) {
   const q = (sql) => { const r = db.prepare(sql).get(p.id); return r ? r.v : null; };
   const J = `FROM turns t JOIN games g ON g.id = t.game_id WHERE t.player_id = ?`;
 
-  const dartsThrown = (q(`SELECT COUNT(*) AS v ${J} ${mf}`) ?? 0) * 3;
+  const dartsThrown = q(`SELECT SUM(t.darts_thrown) AS v ${J} ${mf}`) ?? 0;
+  const legsWithOneEighty = q(`SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS v ${J} ${mf} AND t.scored=180`) ?? 0;
   const avg        = q(`SELECT CAST(SUM(t.scored) AS REAL)/NULLIF(COUNT(*),0) AS v ${J} ${mf}`);
   const one80s     = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.scored=180`) ?? 0;
   const bigFish    = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.checkout=1 AND t.checkout_points=170`) ?? 0;
@@ -478,7 +482,7 @@ function getPlayerStatBubbles(playerName, mode) {
     dartsThrown, avg, one80s, bigFish, nineDarters,
     treblelessPct: totalLegs > 0 ? (tlLegs / totalLegs * 100) : null,
     first3avg, first9avg, avg100plus, avg90minus, score140pct,
-    one80sPerLeg: totalLegs > 0 ? (one80s / totalLegs) : null,
+    one80sPerLeg: totalLegs > 0 ? (legsWithOneEighty / totalLegs) : null,
   };
 }
 
@@ -503,7 +507,10 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
     else if (period==='week')   { fmt=`strftime('%Y-%m-%d',${tsCol})`;    flt=`${tsCol}>=datetime('now','-7 days')`; }
     else if (period==='month')  { fmt=`strftime('%Y-%m-%d',${tsCol})`;    flt=`${tsCol}>=datetime('now','-30 days')`; }
     else if (period==='year')   { fmt=`'w'||strftime('%Y-%W',${tsCol})`;  flt=`${tsCol}>=datetime('now','-365 days')`; }
-    else if (period==='custom') { fmt=`strftime('%Y-%m-%d',${tsCol})`;    flt=`date(${tsCol})>='${opts.start}' AND date(${tsCol})<='${opts.end}'`; }
+    else if (period==='custom') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(opts.start) || !/^\d{4}-\d{2}-\d{2}$/.test(opts.end)) throw new Error('Invalid date range');
+      fmt=`strftime('%Y-%m-%d',${tsCol})`; flt=`date(${tsCol})>='${opts.start}' AND date(${tsCol})<='${opts.end}'`;
+    }
     else                        { fmt=`strftime('%Y-%m',${tsCol})`;       flt=null; }
     return { fmt, and: flt ? `AND ${flt}` : '', where: flt ? `WHERE ${flt}` : '' };
   };
@@ -516,7 +523,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
 
   switch (metric) {
     case 'dartsthrown':
-      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(*)*3 AS value ${TBASE} GROUP BY bucket ORDER BY bucket`).all(...params);
+      return db.prepare(`SELECT ${T.fmt} AS bucket, SUM(t.darts_thrown) AS value ${TBASE} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'avg':
       return db.prepare(`SELECT ${T.fmt} AS bucket, CAST(SUM(t.scored) AS REAL)/COUNT(*) AS value, COUNT(*) AS count ${TBASE} GROUP BY bucket ORDER BY bucket`).all(...params);
     case '180s':
@@ -524,7 +531,12 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
     case 'bigfish':
       return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(*) AS value ${TBASE} AND t.checkout=1 AND t.checkout_points=170 GROUP BY bucket ORDER BY bucket`).all(...params);
     case '180sperleg':
-      return db.prepare(`SELECT ${T.fmt} AS bucket, CAST(SUM(CASE WHEN t.scored=180 THEN 1 ELSE 0 END) AS REAL)/NULLIF(COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no),0) AS value ${TBASE} GROUP BY bucket ORDER BY bucket`).all(...params);
+      return db.prepare(`SELECT ${L.fmt} AS bucket, CAST(SUM(has_180) AS REAL)/NULLIF(COUNT(*),0) AS value FROM (
+        SELECT MAX(t.created_at) AS leg_ts, MAX(CASE WHEN t.scored=180 THEN 1 ELSE 0 END) AS has_180
+        FROM turns t JOIN games g ON g.id=t.game_id
+        WHERE t.player_id=? ${modeWhere} ${weightWhere}
+        GROUP BY t.game_id,t.set_no,t.leg_no
+      ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'ninedarters':
       return db.prepare(`SELECT ${L.fmt} AS bucket, COUNT(*) AS value FROM (
         SELECT MAX(t.created_at) AS leg_ts
@@ -685,6 +697,7 @@ function getAvgHistory(playerName, period, opts = {}) {
     where = `WHERE t.player_id = ? AND t.created_at >= datetime('now', '-365 days')`;
   } else if (period === 'custom') {
     const { start, end } = opts;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return [];
     const days = Math.round((new Date(end) - new Date(start)) / 86400000);
     if (days <= 31) {
       fmt = "strftime('%Y-%m-%d', t.created_at)";
@@ -693,7 +706,6 @@ function getAvgHistory(playerName, period, opts = {}) {
     } else {
       fmt = "strftime('%Y-%m', t.created_at)";
     }
-    // dates already validated as YYYY-MM-DD by the server
     where = `WHERE t.player_id = ? AND date(t.created_at) >= '${start}' AND date(t.created_at) <= '${end}'`;
   } else {
     // all time
