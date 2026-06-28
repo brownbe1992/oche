@@ -714,8 +714,7 @@ function getSettings() {
 }
 function updateSettings(obj) {
   const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
-  const tx = db.transaction((entries) => { for (const [k, v] of entries) upsert.run(String(k), String(v ?? '')); });
-  tx(Object.entries(obj));
+  for (const [k, v] of Object.entries(obj)) upsert.run(String(k), String(v ?? ''));
   return { ok: true };
 }
 
