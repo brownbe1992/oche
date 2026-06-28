@@ -248,6 +248,7 @@ function render(s){
       lastCoKey = route;
       coRoute.textContent = route;
       coWho.textContent   = thrower ? thrower.name + ' at the oche' : '';
+      coStrip.classList.remove('flash'); void coStrip.offsetWidth; coStrip.classList.add('flash');
     }
     coStrip.classList.remove('hidden');
   } else {
@@ -380,9 +381,15 @@ function connect(){
   let es;
   try { es = new EventSource('/api/live/stream'); }
   catch(e){ return startPolling(); }
-  es.onopen = () => setLive(true);
-  es.onmessage = (ev) => { setLive(true); try { render(JSON.parse(ev.data)); } catch(e){} };
-  es.onerror = () => { setLive(false); };
+  let errCount = 0;
+  es.onopen = () => { setLive(true); errCount = 0; };
+  es.onmessage = (ev) => { setLive(true); errCount = 0; try { render(JSON.parse(ev.data)); } catch(e){} };
+  es.onerror = () => {
+    setLive(false);
+    errCount++;
+    // After 3 consecutive errors the stream is unlikely to self-recover; fall back to polling
+    if(errCount >= 3){ es.close(); startPolling(); }
+  };
 }
 
 function escapeHtml(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }

@@ -10,7 +10,6 @@
 <style>
   :root{
     --board:#0e0f0d;        /* dartboard black bed */
-    --panel:#16181500;      /* unused */
     --surface:#1a1c18;      /* lifted card */
     --surface-2:#212420;
     --wire:#3a3d38;         /* spider-wire hairline */
@@ -547,7 +546,7 @@
         <b style="color:var(--ink)">3-dart average</b> — lifetime: all points scored ÷ all turns, across every leg, set and game. (During play, the scoreboard shows your <em>current leg</em> and <em>current game</em> averages instead.)<br>
         <b style="color:var(--ink)">Ton+ finishes</b> — winning turns where you scored 100 or more on that final visit.<br>
         <b style="color:var(--ink)">Treble-less turns</b> — turns where none of the darts landed in a treble bed.<br>
-        A bust turn still counts as a turn (it scores 0) and still counts its darts toward treble-less totals.<br>
+        A bust turn still counts as a turn (it scores 0) and is recorded as treble-less if no treble was hit during that visit.<br>
         Click a player's name on the Stats or Players page to see their full profile including games &amp; legs played and H2H wins.
       </div>
     </div>
@@ -924,17 +923,20 @@ function renderHomeContent(s,h2h,practice){
     </div>`;
   }
 
-  const avgLeaderboard=avgBoard.length
-    ? `<div class="hof-list">${avgBoard.map((r,i)=>{
-        const ob=r.out?`<span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;align-self:center">${r.out==='double'?'DO':'SO'}</span>`:'';
-        return `<div class="hof-row">
+  function renderAvgLeaderboard(rows){
+    if(!rows.length) return `<p class="pp-meta" style="padding:8px 0">No games played yet.</p>`;
+    return `<div class="hof-list">${rows.map((r,i)=>{
+      const ob=r.out?`<span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;align-self:center">${r.out==='double'?'DO':'SO'}</span>`:'';
+      return `<div class="hof-row">
         <span class="hof-rank">${i+1}</span>
         <span class="hof-score">${r.avg.toFixed(1)}</span>
         ${ob}
         <span class="hof-player">${escapeHtml(r.name)}</span>
         <span class="hof-dates">${r.turns.toLocaleString()} visits</span>
-      </div>`;}).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">No games played yet.</p>`;
+      </div>`;}).join('')}</div>`;
+  }
+
+  const avgLeaderboard=renderAvgLeaderboard(avgBoard);
 
   const localNote=DB.mode!=='api'?`<p class="pp-meta" style="margin:0 0 16px">Full stats require the server backend.</p>`:'';
   body.innerHTML=`
@@ -964,17 +966,7 @@ function renderHomeContent(s,h2h,practice){
     .filter(([,p])=>p.practiceStats&&p.practiceStats.turns>0)
     .map(([name,p])=>({name,avg:p.practiceStats.totalPoints/p.practiceStats.turns,turns:p.practiceStats.turns,out:p.out}))
     .sort((a,b)=>b.avg-a.avg);
-  const practiceAvgLeaderboard=practiceAvgBoard.length
-    ? `<div class="hof-list">${practiceAvgBoard.map((r,i)=>{
-        const ob=r.out?`<span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;align-self:center">${r.out==='double'?'DO':'SO'}</span>`:'';
-        return `<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.avg.toFixed(1)}</span>
-        ${ob}
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-dates">${r.turns.toLocaleString()} visits</span>
-      </div>`;}).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">No games played yet.</p>`;
+  const practiceAvgLeaderboard=renderAvgLeaderboard(practiceAvgBoard);
   const plb=document.getElementById('practice-leaderboard-body');
   if(plb) plb.innerHTML=`
     <div class="home-pair">
@@ -1455,6 +1447,18 @@ function askDeleteFromProfile(name){
 
 /* ---------- game render ---------- */
 function avgStr(points, visits){ return visits ? (points/visits).toFixed(1) : '—'; }
+
+// Accumulate one turn's stats into a target object (global or per-mode sub-object).
+// Adding a new per-turn stat means editing this one function instead of two.
+function accumTurnStats(target, ev, category, legDarts){
+  target.turns       += 1;
+  target.totalPoints += ev.scored;
+  if(ev.trebleLess)                              target.trebleLess  += 1;
+  if(ev.win && ev.pointsThisVisit >= 100)        target.checkouts100+= 1;
+  if(ev.scored === 180)                          target.oneEighties += 1;
+  if(ev.win && ev.pointsThisVisit === 170)       target.bigFish     += 1;
+  if(ev.win && category === '501' && legDarts===9) target.nineDarters+= 1;
+}
 function renderGame(){
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
@@ -1649,21 +1653,10 @@ function enterTurn(){
     dartsThrown: game.darts.length });
   if(DB.mode==='local'){
     const s = stats[p.name];
-    s.turns += 1; s.totalPoints += ev.scored; s.dartsThrown += game.darts.length;
-    if(ev.trebleLess) s.trebleLess += 1;
-    if(ev.win && ev.pointsThisVisit >= 100) s.checkouts100 += 1;
-    if(ev.scored === 180) s.oneEighties += 1;
-    if(ev.win && ev.pointsThisVisit === 170) s.bigFish += 1;
-    if(ev.win && game.category==='501' && p.legVisits===3){ s.nineDarters += 1; }
-    // per-mode breakdown
+    s.dartsThrown += game.darts.length;
+    accumTurnStats(s, ev, game.category, p.legDarts);
     const _mk = (!game.practice && game.players.length > 1) ? 'h2hStats' : 'practiceStats';
-    const _ms = s[_mk];
-    _ms.turns += 1; _ms.totalPoints += ev.scored;
-    if(ev.trebleLess) _ms.trebleLess += 1;
-    if(ev.win && ev.pointsThisVisit >= 100) _ms.checkouts100 += 1;
-    if(ev.scored === 180) _ms.oneEighties += 1;
-    if(ev.win && ev.pointsThisVisit === 170) _ms.bigFish += 1;
-    if(ev.win && game.category==='501' && p.legVisits===3) _ms.nineDarters += 1;
+    accumTurnStats(s[_mk], ev, game.category, p.legDarts);
   }
   // achievement flashes + in-game counters for the live scoreboard
   if(ev.bust) game.gameBusts += 1;
