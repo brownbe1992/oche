@@ -750,8 +750,9 @@ function clearPlayerStats(playerName, mode) {
   if (!gameIds.length) return { ok: true };
 
   const ph = gameIds.map(() => '?').join(',');
-  db.prepare(`DELETE FROM turns        WHERE player_id = ? AND game_id IN (${ph})`).run(p.id, ...gameIds);
-  db.prepare(`DELETE FROM game_players WHERE player_id = ? AND game_id IN (${ph})`).run(p.id, ...gameIds);
+  db.prepare(`DELETE FROM turns WHERE player_id = ? AND game_id IN (${ph})`).run(p.id, ...gameIds);
+  // game_players rows are intentionally kept: removing them would change the apparent player
+  // count for shared games, silently reclassifying opponents' H2H turns as practice.
   return { ok: true };
 }
 

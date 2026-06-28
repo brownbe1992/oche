@@ -806,10 +806,10 @@ function renderHome(){
     body.innerHTML=`<p class="pp-meta">Loading…</p>`;
     Promise.all([
       Backend.get('/api/summary'),
-      Backend.get('/api/top-finishes'),
-      Backend.get('/api/stats/180s'),
-      Backend.get('/api/stats/big-fish'),
-      Backend.get('/api/stats/nine-darters'),
+      Backend.get('/api/top-finishes?mode=h2h'),
+      Backend.get('/api/stats/180s?mode=h2h'),
+      Backend.get('/api/stats/big-fish?mode=h2h'),
+      Backend.get('/api/stats/nine-darters?mode=h2h'),
       Backend.get('/api/top-finishes?mode=practice'),
       Backend.get('/api/stats/180s?mode=practice'),
       Backend.get('/api/stats/big-fish?mode=practice'),
@@ -856,10 +856,10 @@ function renderHomeContent(s,h2h,practice){
     {val:fmt(s.nineDarters),  label:'9-Darters'},
   ];
 
-  // 3-dart average leaderboard computed from in-memory stats
+  // 3-dart average leaderboard — H2H only
   const avgBoard=Object.entries(stats)
-    .filter(([,p])=>p.turns>0)
-    .map(([name,p])=>({name, avg:p.totalPoints/p.turns, turns:p.turns}))
+    .filter(([,p])=>p.h2hStats&&p.h2hStats.turns>0)
+    .map(([name,p])=>({name, avg:p.h2hStats.totalPoints/p.h2hStats.turns, turns:p.h2hStats.turns}))
     .sort((a,b)=>b.avg-a.avg);
 
   // Practice legs leaderboard
@@ -1667,7 +1667,7 @@ function onLegWon(wi){
     stats[w.name].h2hLegsWonByCat[cat] = (stats[w.name].h2hLegsWonByCat[cat]||0) + 1;
   }
 
-  if(w.legsWon >= game.legsPerSet){      // set won
+  if(!game.practice && w.legsWon >= game.legsPerSet){      // set won (H2H only)
     w.setsWon += 1;
     game.players.forEach(p=>p.legsWon=0);  // reset legs for the next set
 
