@@ -180,10 +180,11 @@
   .prac-row-val{font-family:'Bebas Neue';font-size:20px;color:var(--cream);letter-spacing:.02em;text-align:right;max-width:55%}
   .prac-row-val.sm{font-family:'Inter';font-size:12px;color:var(--ink);font-weight:600}
   /* ---- dartboard input mode ---- */
-  .imt-row{display:flex;gap:5px;justify-content:flex-end;margin-bottom:6px;flex:none}
+  .imt-row{display:flex;gap:5px;flex:none}
   .imt-btn{background:var(--surface);border:1px solid var(--wire);color:var(--muted);
     border-radius:8px;padding:5px 14px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.03em}
   .imt-btn[aria-pressed="true"]{background:var(--surface-2);color:var(--ink);border-color:var(--muted)}
+  .turn-actions .mode-end-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
   .dart-board-wrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
   .board-miss{flex:none;margin-top:8px}
   .hidden{display:none!important}
@@ -288,8 +289,9 @@
     font-size:clamp(12px,1.9dvh,17px);
     padding:clamp(9px,1.5dvh,17px) 8px;
   }
-  body.game-active .imt-row{margin-bottom:clamp(3px,.5dvh,6px)}
+  body.game-active #screen-game > .btn-row{display:none}
   body.game-active .imt-btn{font-size:clamp(10px,1.5dvh,13px);padding:clamp(4px,.7dvh,6px) clamp(8px,1.5vw,14px)}
+  body.game-active .turn-actions .mode-end-row .btn-ghost{font-size:clamp(10px,1.5dvh,13px);padding:clamp(4px,.7dvh,6px) clamp(8px,1.5vw,14px)}
   body.game-active .dart-board-wrap{flex:1;min-height:0}
   body.game-active .board-miss{
     margin-top:clamp(4px,.7dvh,8px);
@@ -495,10 +497,6 @@
     <div class="scoreboard" id="scoreboard"></div>
 
     <div class="oche">
-      <div class="imt-row">
-        <button class="imt-btn" id="imt-pad"   onclick="setDartMode('pad')"   aria-pressed="false">Pad</button>
-        <button class="imt-btn" id="imt-board" onclick="setDartMode('board')" aria-pressed="true">🎯</button>
-      </div>
       <div class="slots" id="slots"></div>
       <div class="status" id="status">Tap the board to score.</div>
       <div class="multi" id="multi-row" role="group" aria-label="Dart multiplier">
@@ -515,6 +513,13 @@
           <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo Dart</button>
         </div>
         <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
+        <div class="mode-end-row">
+          <button class="btn btn-ghost" onclick="askEndGame()">End game</button>
+          <div class="imt-row">
+            <button class="imt-btn" id="imt-pad"   onclick="setDartMode('pad')"   aria-pressed="false">Pad</button>
+            <button class="imt-btn" id="imt-board" onclick="setDartMode('board')" aria-pressed="true">🎯</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -2119,10 +2124,6 @@ function finishUnit(kind, winner){
 /* rebuild the oche inner markup (used after a leg replaced it) */
 function renderGameShell(){
   document.querySelector('.oche').innerHTML=`
-      <div class="imt-row">
-        <button class="imt-btn" id="imt-pad"   onclick="setDartMode('pad')"   aria-pressed="${!dartboardMode}">Pad</button>
-        <button class="imt-btn" id="imt-board" onclick="setDartMode('board')" aria-pressed="${dartboardMode}">🎯</button>
-      </div>
       <div class="slots" id="slots"></div>
       <div class="status" id="status">${dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
       <div class="multi" id="multi-row" role="group" aria-label="Dart multiplier">
@@ -2139,6 +2140,13 @@ function renderGameShell(){
           <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo Dart</button>
         </div>
         <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
+        <div class="mode-end-row">
+          <button class="btn btn-ghost" onclick="askEndGame()">End game</button>
+          <div class="imt-row">
+            <button class="imt-btn" id="imt-pad"   onclick="setDartMode('pad')"   aria-pressed="${!dartboardMode}">Pad</button>
+            <button class="imt-btn" id="imt-board" onclick="setDartMode('board')" aria-pressed="${dartboardMode}">🎯</button>
+          </div>
+        </div>
       </div>`;
   applyDartMode();
 }
