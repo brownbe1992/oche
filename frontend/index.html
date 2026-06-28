@@ -171,8 +171,8 @@
     border-radius:8px;padding:5px 14px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.03em}
   .imt-btn[aria-pressed="true"]{background:var(--surface-2);color:var(--ink);border-color:var(--muted)}
   .dart-board-wrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
-  .dart-board-wrap.hidden,.board-miss.hidden{display:none!important}
   .board-miss{flex:none;margin-top:8px}
+  .hidden{display:none!important}
 
   /* ---- stats screen ---- */
   table{width:100%;border-collapse:collapse;font-size:13.5px}
@@ -773,6 +773,7 @@ function applyDartMode(){
     board.classList.add('hidden'); if(missB) missB.classList.add('hidden');
     if(tab1) tab1.setAttribute('aria-pressed','true');
     if(tab2) tab2.setAttribute('aria-pressed','false');
+    if(game) renderPad();   // populate buttons immediately when switching to pad mode
   }
 }
 function setDartMode(mode){ dartboardMode=(mode==='board'); applyDartMode(); }
