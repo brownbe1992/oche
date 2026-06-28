@@ -647,7 +647,7 @@ const DB = {
   // game + turn writes
   async beginGame(meta, names){
     if(this.mode==='api'){
-      try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame, players:names, practice:meta.practice?1:0}); this.gameId=r.gameId; }
+      try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame, players:names.map(n=>({name:n,out:playerOut(n)})), practice:meta.practice?1:0}); this.gameId=r.gameId; }
       catch(e){ logErr(e); this.gameId=null; }
     } else this.gameId=null;
   },

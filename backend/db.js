@@ -44,6 +44,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS game_players (
     game_id   INTEGER NOT NULL REFERENCES games(id)   ON DELETE CASCADE,
     player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    out_mode  TEXT NOT NULL DEFAULT 'double',
     PRIMARY KEY (game_id, player_id)
   );
 
@@ -79,6 +80,7 @@ db.exec(`
 // Column migrations — safe to re-run; ALTER TABLE throws if column exists, which we catch.
 try { db.exec('ALTER TABLE players      ADD COLUMN dart_weight INTEGER'); } catch(e) {}
 try { db.exec('ALTER TABLE game_players ADD COLUMN dart_weight INTEGER'); } catch(e) {}
+try { db.exec("ALTER TABLE game_players ADD COLUMN out_mode TEXT NOT NULL DEFAULT 'double'"); } catch(e) {}
 try { db.exec('ALTER TABLE games        ADD COLUMN practice    INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
 try { db.exec('ALTER TABLE turns        ADD COLUMN darts_thrown INTEGER NOT NULL DEFAULT 3'); } catch(e) {}
 
@@ -93,7 +95,7 @@ const q = {
   deletePlayer : db.prepare('DELETE FROM players WHERE id = ?'),
 
   insertGame   : db.prepare('INSERT INTO games (category, legs_per_set, sets_per_game, practice) VALUES (?, ?, ?, ?)'),
-  addParticipant: db.prepare('INSERT OR IGNORE INTO game_players (game_id, player_id, dart_weight) VALUES (?, ?, ?)'),
+  addParticipant: db.prepare('INSERT OR IGNORE INTO game_players (game_id, player_id, dart_weight, out_mode) VALUES (?, ?, ?, ?)'),
   completeGame : db.prepare("UPDATE games SET completed_at = datetime('now'), winner_id = ? WHERE id = ?"),
 
   insertTurn   : db.prepare(`INSERT INTO turns
@@ -170,9 +172,12 @@ function deletePlayer(name) {
 function createGame({ category, legsPerSet, setsPerGame, players, practice }) {
   const info = q.insertGame.run(String(category), Number(legsPerSet) || 1, Number(setsPerGame) || 1, practice ? 1 : 0);
   const gameId = Number(info.lastInsertRowid);
-  (players || []).forEach(nm => {
-    const p = ensurePlayer(nm);
-    q.addParticipant.run(gameId, p.id, p.dart_weight ?? null);
+  (players || []).forEach(entry => {
+    // entry can be a plain name string (legacy) or { name, out } object
+    const nm  = typeof entry === 'string' ? entry : entry.name;
+    const out = typeof entry === 'string' ? 'double' : (entry.out === 'single' ? 'single' : 'double');
+    const p   = ensurePlayer(nm);
+    q.addParticipant.run(gameId, p.id, p.dart_weight ?? null, out);
   });
   return { gameId };
 }
@@ -634,13 +639,14 @@ function getNineDarterStats(mode) {
 function getTopFinishesAll(limit = 10, mode) {
   const mf = _mf(mode);
   return db.prepare(`
-    SELECT p.name, p.out_mode AS out, t.checkout_points AS score, COUNT(*) AS times,
+    SELECT p.name, gp.out_mode AS out, t.checkout_points AS score, COUNT(*) AS times,
            MIN(t.created_at) AS first_date, MAX(t.created_at) AS last_date
     FROM turns t
     JOIN games g ON g.id = t.game_id
     JOIN players p ON p.id = t.player_id
+    JOIN game_players gp ON gp.game_id = t.game_id AND gp.player_id = t.player_id
     WHERE t.checkout = 1 AND t.checkout_points > 0 ${mf}
-    GROUP BY t.player_id, t.checkout_points
+    GROUP BY t.player_id, t.checkout_points, gp.out_mode
     ORDER BY t.checkout_points DESC, first_date ASC
     LIMIT ?
   `).all(limit);
@@ -665,16 +671,18 @@ function getTopFinishes(playerName, mode) {
     SELECT t.checkout_points AS score,
            COUNT(*)          AS times,
            MIN(t.created_at) AS first_date,
-           MAX(t.created_at) AS last_date
+           MAX(t.created_at) AS last_date,
+           gp.out_mode       AS out_mode
     FROM turns t
+    JOIN game_players gp ON gp.game_id = t.game_id AND gp.player_id = t.player_id
     WHERE t.player_id = ?
       AND t.checkout = 1
       AND t.checkout_points > 0
       ${modeWhere}
-    GROUP BY t.checkout_points
+    GROUP BY t.checkout_points, gp.out_mode
     ORDER BY t.checkout_points DESC
     LIMIT 10
-  `).all(p.id).map(r => ({ ...r, out: p.out_mode }));
+  `).all(p.id).map(r => ({ ...r, out: r.out_mode }));
 }
 
 function getAvgHistory(playerName, period, opts = {}) {
