@@ -36,13 +36,11 @@ Others
 - Add additional games (Cricket)
 - Integrate with Homeassistant
 - Automated scoring with cameras and machine learning
+- Settings page - set default player
 
 
 Fixes:
--  Optimize scoring page for iPad
-    - Should optimize for full screen on tiny devices
-- End of practice game should say how many darts were thrown
-    - Same for H2H games, per player
+- End of H2H leg stats for each player
+    - Should flash on the scoreboard as well
 - Add total busts to homepage, track busts per game mode on player pages
-- Bust graphic on scoreboard
 - Hover/tap on top finishes to see what the finish was

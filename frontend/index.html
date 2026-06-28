@@ -165,7 +165,10 @@
   .pad button.bull{grid-column:span 2;color:var(--red)}
   .pad button.miss{grid-column:span 2;color:var(--muted)}
 
-  .turn-actions{display:flex;gap:10px;margin-top:12px}
+  .turn-actions{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+  .turn-actions .undo-row{display:flex;gap:8px}
+  .turn-actions .undo-row .btn{flex:1;font-size:13px}
+  .turn-actions .btn-primary{font-size:17px;padding:16px 20px}
 
   /* ---- practice leg stats panel ---- */
   .prac-stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px;text-align:left}
@@ -176,9 +179,6 @@
   .prac-row-label{font-size:12px;color:var(--muted)}
   .prac-row-val{font-family:'Bebas Neue';font-size:20px;color:var(--cream);letter-spacing:.02em;text-align:right;max-width:55%}
   .prac-row-val.sm{font-family:'Inter';font-size:12px;color:var(--ink);font-weight:600}
-  .turn-actions .btn{flex:1}
-  .turn-actions .btn-primary{font-size:17px;padding:16px 20px}
-
   /* ---- dartboard input mode ---- */
   .imt-row{display:flex;gap:5px;justify-content:flex-end;margin-bottom:6px;flex:none}
   .imt-btn{background:var(--surface);border:1px solid var(--wire);color:var(--muted);
@@ -280,9 +280,9 @@
     padding:clamp(4px,.7dvh,10px) 0 0;
     margin-top:0; background:none;
   }
-  body.game-active .turn-actions .btn{
-    font-size:clamp(11px,1.7dvh,16px);
-    padding:clamp(7px,1.2dvh,15px) 8px;
+  body.game-active .turn-actions .undo-row .btn{
+    font-size:clamp(10px,1.5dvh,13px);
+    padding:clamp(6px,1dvh,12px) 6px;
   }
   body.game-active .turn-actions .btn-primary{
     font-size:clamp(12px,1.9dvh,17px);
@@ -510,13 +510,16 @@
       <div class="dart-board-wrap" id="dart-board-wrap"></div>
       <button class="btn btn-ghost board-miss" id="board-miss-btn" onclick="throwDartBoard(0,1)">Miss</button>
       <div class="turn-actions">
-        <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo dart</button>
+        <div class="undo-row">
+          <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled>Undo Last Turn</button>
+          <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo Dart</button>
+        </div>
         <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
       </div>
     </div>
 
     <div class="btn-row">
-      <button class="btn btn-ghost" onclick="uiConfirm('Abandon this game? Recorded stats are kept.', ()=>show('setup'))">End game</button>
+      <button class="btn btn-ghost" onclick="askEndGame()">End game</button>
     </div>
   </section>
 
@@ -1308,7 +1311,8 @@ async function startGame(){
     gameBigFish: 0,
     gameBusts: 0,
     currentLegTurns: [],   // turns in the current leg (reset per leg)
-    sessionTurns: []       // turns in the entire session (grows across legs)
+    sessionTurns: [],      // turns in the entire session (grows across legs)
+    lastTurnSnapshot: null // state before last committed turn (for undo)
   };
   names.forEach(ensurePlayerStats);
   await DB.beginGame(game, names);   // registers the game; gets a gameId in api mode
@@ -1331,6 +1335,8 @@ function newMatchPlayer(name, start){
     doubleOut: playerOut(name)==='double', // this player's own finish rule
     legPoints:0,  legVisits:0,    // resets every leg  -> per-leg average
     legDarts:0,   legBusts:0,     // darts thrown + busts this leg
+    setDarts:0,                   // darts thrown in the current set (resets per set)
+    gameDarts:0,                  // darts thrown in the entire game / session
     gamePoints:0, gameVisits:0,   // resets every game -> per-game average
     legsWon:0,    setsWon:0 };    // legsWon = legs in the current set
 }
@@ -1723,7 +1729,9 @@ function liveSnapshot(message){
       legAvg:  p.legVisits  ? (p.legPoints/p.legVisits).toFixed(1)   : null,
       gameAvg: p.gameVisits ? (p.gamePoints/p.gameVisits).toFixed(1) : null,
       legsWon:p.legsWon, setsWon:p.setsWon,
-      legDarts: p.legDarts || 0
+      legDarts: p.legDarts  || 0,
+      setDarts: p.setDarts  || 0,
+      gameDarts:p.gameDarts || 0
     })),
     darts: game.darts.map(d=>d.label),
     checkout,
@@ -1769,6 +1777,9 @@ function renderPad(){
     miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
     miss.onclick=()=>throwDart(0); pad.appendChild(miss);
   }
+  // keep Undo Last Turn in sync — enabled only when a snapshot exists
+  const utb = document.getElementById('undo-turn-btn');
+  if(utb) utb.disabled = !game.lastTurnSnapshot;
 }
 
 /* ---------- throwing ---------- */
@@ -1807,6 +1818,53 @@ function throwDart(sector){
   }
   renderSlots(); renderPad(); updateCheckout(true); pushLive();
 }
+function askEndGame(){
+  const msg = (game && game.practice)
+    ? 'Are you sure you want to end this practice session? Your stats have been saved.'
+    : 'Abandon this match early? Recorded stats are kept.';
+  uiConfirm(msg, ()=>show('setup'));
+}
+
+function undoLastTurn(){
+  if(!game || !game.lastTurnSnapshot) return;
+  const snap = game.lastTurnSnapshot;
+  const p = game.players[snap.pi];
+
+  // Restore the player's state to before the turn was committed
+  p.score     = snap.score;
+  p.legPoints = snap.legPoints; p.legVisits = snap.legVisits;
+  p.legDarts  = snap.legDarts;  p.legBusts  = snap.legBusts;
+
+  // Restore game-level achievement counters
+  game.gameOneEighties = snap.oe;
+  game.gameBigFish     = snap.bf;
+  game.gameBusts       = snap.bu;
+
+  // Truncate per-leg and session turn arrays back to pre-turn length
+  game.currentLegTurns.length = snap.ltLen;
+  game.sessionTurns.length    = snap.stLen;
+
+  // Restore local-mode lifetime stats if we captured them
+  if(snap.ls && stats[snap.ls.name]){
+    Object.assign(stats[snap.ls.name], snap.ls.g);
+    Object.assign(stats[snap.ls.name][snap.ls.mk], snap.ls.m);
+    persist();
+  }
+
+  // Move back to the player who threw
+  game.current = snap.pi;
+  game.darts = []; game.busted = false; game.won = false;
+  game.lastTurnSnapshot = null;  // one level of undo only
+
+  // Remove the last turn record from the database
+  if(DB.mode==='api' && DB.gameId!=null)
+    Backend.send('DELETE', `/api/games/${DB.gameId}/turns/last`).catch(()=>{});
+
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
+  renderSlots(); renderPad(); updateCheckout(false); pushLive();
+}
+
 function undoDart(){
   if(game.darts.length===0) return;
   game.darts.pop();
@@ -1820,9 +1878,28 @@ function enterTurn(){
   const p = game.players[game.current];
   const ev = evaluateVisit(p.score, game.darts, p.doubleOut);
 
+  // snapshot state before mutations so undoLastTurn() can restore it
+  const _snap = { pi:game.current, score:p.score,
+    legPoints:p.legPoints, legVisits:p.legVisits, legDarts:p.legDarts, legBusts:p.legBusts,
+    oe:game.gameOneEighties, bf:game.gameBigFish, bu:game.gameBusts,
+    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length };
+  if(DB.mode==='local' && stats[p.name]){
+    const _s=stats[p.name], _mk=(!game.practice&&game.players.length>1)?'h2hStats':'practiceStats';
+    _snap.ls={ name:p.name, mk:_mk,
+      g:{ turns:_s.turns, totalPoints:_s.totalPoints, dartsThrown:_s.dartsThrown,
+          trebleLess:_s.trebleLess, checkouts100:_s.checkouts100,
+          oneEighties:_s.oneEighties, bigFish:_s.bigFish, nineDarters:_s.nineDarters },
+      m:{ turns:_s[_mk].turns, totalPoints:_s[_mk].totalPoints, trebleLess:_s[_mk].trebleLess,
+          checkouts100:_s[_mk].checkouts100, oneEighties:_s[_mk].oneEighties,
+          bigFish:_s[_mk].bigFish, nineDarters:_s[_mk].nineDarters } };
+  }
+  game.lastTurnSnapshot = _snap;
+
   // per-leg and per-game scope (shown live on the scoreboard — both modes)
   p.legPoints  += ev.scored; p.legVisits  += 1;
   p.legDarts   += game.darts.length;
+  p.setDarts   += game.darts.length;
+  p.gameDarts  += game.darts.length;
   if(ev.bust) p.legBusts += 1;
   p.gamePoints += ev.scored; p.gameVisits += 1;
   if(!ev.bust) p.score = ev.newScore;
@@ -1957,9 +2034,10 @@ function startNextLeg(newSet){
   sendHaWebhook('legstart', '', game.category, { setNo: game.setNo, legNo: game.legNo });
   game.starter = (game.starter + 1) % game.players.length;
   game.current = game.starter;
-  game.players.forEach(p=>{ p.score = game.start; p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legBusts=0; });
+  game.players.forEach(p=>{ p.score = game.start; p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legBusts=0; if(newSet) p.setDarts=0; });
   game.legSummary = null;
   game.currentLegTurns = [];
+  game.lastTurnSnapshot = null;
   game.darts=[]; game.busted=false; game.won=false;
   mult=1;
   renderGameShell(); updateMultUI(); renderGame();
@@ -2025,7 +2103,7 @@ function finishUnit(kind, winner){
       <div class="btn-row" style="justify-content:center">
         <button class="btn btn-primary" onclick="${fn}">${next}</button>
         <button class="btn btn-ghost" onclick="show('stats')">View stats</button>
-        <button class="btn btn-ghost" onclick="uiConfirm('End the match early? Recorded stats are kept.', ()=>show('setup'))">End game</button>
+        <button class="btn btn-ghost" onclick="askEndGame()">End game</button>
       </div>${legPanel}</div>`;
   }
   game.legSummary = game.players.map(p=>({
@@ -2056,7 +2134,10 @@ function renderGameShell(){
       <div class="dart-board-wrap" id="dart-board-wrap"></div>
       <button class="btn btn-ghost board-miss" id="board-miss-btn" onclick="throwDartBoard(0,1)">Miss</button>
       <div class="turn-actions">
-        <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo dart</button>
+        <div class="undo-row">
+          <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled>Undo Last Turn</button>
+          <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo Dart</button>
+        </div>
         <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
       </div>`;
   applyDartMode();

@@ -703,6 +703,11 @@ function clearPlayerStats(playerName, mode) {
   return { ok: true };
 }
 
+function deleteLastTurn(gameId) {
+  db.prepare('DELETE FROM turns WHERE id = (SELECT MAX(id) FROM turns WHERE game_id = ?)').run(Number(gameId));
+  return { ok: true };
+}
+
 function resetStats() {
   db.exec('DELETE FROM turns; DELETE FROM game_players; DELETE FROM games;');
   return { ok: true };
@@ -755,7 +760,7 @@ module.exports = {
   createGame, addTurn, completeGame, recordEvent,
   computeStats, getSummary, getOneEightyStats, getBigFishStats, getNineDarterStats,
   getPlayerStatBubbles, getMetricHistory,
-  getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats,
+  getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, deleteLastTurn,
   getSettings, updateSettings, fireHaWebhook,
   _db: db,
 };

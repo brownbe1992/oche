@@ -62,7 +62,10 @@
   .throwflag{margin-left:auto;font-size:1.7vmin;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);flex:none}
   .score{font-family:'Bebas Neue';font-size:clamp(56px, 17vmin, 280px);line-height:.78;color:var(--cream);letter-spacing:.01em;margin:.4vmin 0 .2vmin}
   .pcard.active .score{color:#fff}
-  .leg-darts{font-size:2vmin;color:var(--muted);letter-spacing:.08em;margin-bottom:.6vmin}
+  .dart-counts{display:flex;flex-direction:column;gap:.2vmin;margin-bottom:.6vmin}
+  .dart-count-row{display:flex;align-items:baseline;gap:.8vmin;font-size:1.9vmin}
+  .dart-count-val{font-family:'Bebas Neue';font-size:2.6vmin;color:var(--cream);letter-spacing:.02em;line-height:1}
+  .dart-count-lbl{color:var(--muted);font-size:1.6vmin;text-transform:uppercase;letter-spacing:.07em}
   .meta{display:flex;gap:2.4vmin;align-items:center;color:var(--muted);font-size:2vmin;flex-wrap:wrap}
   .meta b{color:var(--ink);font-weight:600}
   .standing{margin-left:auto;color:var(--gold);font-weight:700;letter-spacing:.04em;font-size:2vmin}
@@ -324,7 +327,14 @@ function render(s){
             ${active?'<span class="throwflag">▸ throwing</span>':''}
           </div>
           <div class="score">${p.score}</div>
-          <div class="leg-darts">${p.legDarts ?? 0} darts</div>
+          <div class="dart-counts">
+            <div class="dart-count-row"><span class="dart-count-val">${p.legDarts ?? 0}</span><span class="dart-count-lbl">Leg</span></div>
+            ${s.practice
+              ? `<div class="dart-count-row"><span class="dart-count-val">${p.gameDarts ?? 0}</span><span class="dart-count-lbl">Session</span></div>`
+              : `<div class="dart-count-row"><span class="dart-count-val">${p.setDarts ?? 0}</span><span class="dart-count-lbl">Set</span></div>
+                 <div class="dart-count-row"><span class="dart-count-val">${p.gameDarts ?? 0}</span><span class="dart-count-lbl">Game</span></div>`
+            }
+          </div>
         </div>
         <div class="meta">
           <span>leg <b>${p.legAvg ?? '—'}</b></span>

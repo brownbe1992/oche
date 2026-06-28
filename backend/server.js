@@ -202,6 +202,9 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/games' && m === 'POST') { const b = await readJson(req); return send(res, 200, db.createGame({ ...b, practice: b.practice ? 1 : 0 })); }
 
     let mt;
+    if ((mt = p.match(/^\/api\/games\/(\d+)\/turns\/last$/)) && m === 'DELETE') {
+      return send(res, 200, db.deleteLastTurn(Number(mt[1])));
+    }
     if ((mt = p.match(/^\/api\/games\/(\d+)\/turns$/)) && m === 'POST') {
       const b = await readJson(req); return send(res, 200, db.addTurn(Number(mt[1]), b));
     }
