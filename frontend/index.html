@@ -870,7 +870,7 @@ function renderHomeContent(s,h2h,practice){
   // 3-dart average leaderboard — H2H only
   const avgBoard=Object.entries(stats)
     .filter(([,p])=>p.h2hStats&&p.h2hStats.turns>0)
-    .map(([name,p])=>({name, avg:p.h2hStats.totalPoints/p.h2hStats.turns, turns:p.h2hStats.turns}))
+    .map(([name,p])=>({name, avg:p.h2hStats.totalPoints/p.h2hStats.turns, turns:p.h2hStats.turns, out:p.out}))
     .sort((a,b)=>b.avg-a.avg);
 
   // Practice legs leaderboard
@@ -923,12 +923,15 @@ function renderHomeContent(s,h2h,practice){
   }
 
   const avgLeaderboard=avgBoard.length
-    ? `<div class="hof-list">${avgBoard.map((r,i)=>`<div class="hof-row">
+    ? `<div class="hof-list">${avgBoard.map((r,i)=>{
+        const ob=r.out?`<span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;align-self:center">${r.out==='double'?'DO':'SO'}</span>`:'';
+        return `<div class="hof-row">
         <span class="hof-rank">${i+1}</span>
         <span class="hof-score">${r.avg.toFixed(1)}</span>
+        ${ob}
         <span class="hof-player">${escapeHtml(r.name)}</span>
         <span class="hof-dates">${r.turns.toLocaleString()} visits</span>
-      </div>`).join('')}</div>`
+      </div>`;}).join('')}</div>`
     : `<p class="pp-meta" style="padding:8px 0">No games played yet.</p>`;
 
   const localNote=DB.mode!=='api'?`<p class="pp-meta" style="margin:0 0 16px">Full stats require the server backend.</p>`:'';
@@ -957,15 +960,18 @@ function renderHomeContent(s,h2h,practice){
   // Practice leaderboard
   const practiceAvgBoard=Object.entries(stats)
     .filter(([,p])=>p.practiceStats&&p.practiceStats.turns>0)
-    .map(([name,p])=>({name,avg:p.practiceStats.totalPoints/p.practiceStats.turns,turns:p.practiceStats.turns}))
+    .map(([name,p])=>({name,avg:p.practiceStats.totalPoints/p.practiceStats.turns,turns:p.practiceStats.turns,out:p.out}))
     .sort((a,b)=>b.avg-a.avg);
   const practiceAvgLeaderboard=practiceAvgBoard.length
-    ? `<div class="hof-list">${practiceAvgBoard.map((r,i)=>`<div class="hof-row">
+    ? `<div class="hof-list">${practiceAvgBoard.map((r,i)=>{
+        const ob=r.out?`<span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;align-self:center">${r.out==='double'?'DO':'SO'}</span>`:'';
+        return `<div class="hof-row">
         <span class="hof-rank">${i+1}</span>
         <span class="hof-score">${r.avg.toFixed(1)}</span>
+        ${ob}
         <span class="hof-player">${escapeHtml(r.name)}</span>
         <span class="hof-dates">${r.turns.toLocaleString()} visits</span>
-      </div>`).join('')}</div>`
+      </div>`;}).join('')}</div>`
     : `<p class="pp-meta" style="padding:8px 0">No games played yet.</p>`;
   const plb=document.getElementById('practice-leaderboard-body');
   if(plb) plb.innerHTML=`
