@@ -160,7 +160,10 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/settings' && m === 'PUT') {
       const b = await readJson(req);
       // Only allow known setting keys through
-      const allowed = ['ha_url','ha_webhook_oneeighty','ha_webhook_bigfish','ha_webhook_bust','ha_webhook_ninedarter'];
+      const allowed = ['ha_url',
+        'ha_webhook_oneeighty','ha_webhook_bigfish','ha_webhook_bust','ha_webhook_ninedarter','ha_webhook_tonplus',
+        'ha_webhook_gamestart','ha_webhook_gameend','ha_webhook_setstart','ha_webhook_setend',
+        'ha_webhook_legstart','ha_webhook_legend'];
       const safe = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
       return send(res, 200, db.updateSettings(safe));
     }
@@ -188,9 +191,11 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/ha-webhook' && m === 'POST') {
       const b = await readJson(req);
-      const allowed = ['oneeighty','bigfish','bust','ninedarter'];
+      const allowed = ['oneeighty','bigfish','bust','ninedarter','tonplus',
+                       'gamestart','gameend','setstart','setend','legstart','legend'];
       if (!allowed.includes(b.event)) return send(res, 400, { error: 'Unknown event type' });
-      const result = await db.fireHaWebhook(b.event, { player: b.player || '', category: b.category || '' });
+      const { event, ...payload } = b;
+      const result = await db.fireHaWebhook(event, payload);
       return send(res, 200, result);
     }
 

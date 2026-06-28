@@ -579,22 +579,59 @@
           <button class="btn btn-ghost" id="ha-test-btn" onclick="testHaConnection()" style="flex:none;white-space:nowrap">Test connection</button>
         </div>
 
-        <div style="display:grid;gap:12px">
+        <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0 0 10px">Throw events — H2H &amp; Practice</p>
+        <div style="display:grid;gap:12px;margin-bottom:20px">
           <div>
-            <label class="field">180 Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— fires when a maximum 180 is thrown</span></label>
+            <label class="field">180 Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— maximum 180 scored</span></label>
             <input type="text" id="ha-wh-oneeighty" placeholder="e.g. oche_180_thrown">
           </div>
           <div>
-            <label class="field">Big Fish Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— fires on a 170 checkout</span></label>
+            <label class="field">Big Fish Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— 170 checkout</span></label>
             <input type="text" id="ha-wh-bigfish" placeholder="e.g. oche_big_fish">
           </div>
           <div>
-            <label class="field">Bust Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— fires on every bust turn</span></label>
+            <label class="field">Ton+ Finish Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— any checkout of 100 or more</span></label>
+            <input type="text" id="ha-wh-tonplus" placeholder="e.g. oche_ton_plus">
+          </div>
+          <div>
+            <label class="field">Bust Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— bust turn</span></label>
             <input type="text" id="ha-wh-bust" placeholder="e.g. oche_bust">
           </div>
           <div>
-            <label class="field">Nine-Darter Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— fires on a perfect 501 in 9 darts</span></label>
+            <label class="field">Nine-Darter Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— perfect 501 in 9 darts</span></label>
             <input type="text" id="ha-wh-ninedarter" placeholder="e.g. oche_nine_darter">
+          </div>
+        </div>
+
+        <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0 0 10px">Leg events — H2H &amp; Practice</p>
+        <div style="display:grid;gap:12px;margin-bottom:20px">
+          <div>
+            <label class="field">Leg Start Webhook ID</label>
+            <input type="text" id="ha-wh-legstart" placeholder="e.g. oche_leg_start">
+          </div>
+          <div>
+            <label class="field">Leg End Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— includes winner name</span></label>
+            <input type="text" id="ha-wh-legend" placeholder="e.g. oche_leg_end">
+          </div>
+        </div>
+
+        <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0 0 10px">Game &amp; Set events — H2H only</p>
+        <div style="display:grid;gap:12px">
+          <div>
+            <label class="field">Game Start Webhook ID</label>
+            <input type="text" id="ha-wh-gamestart" placeholder="e.g. oche_game_start">
+          </div>
+          <div>
+            <label class="field">Game End Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— includes winner name</span></label>
+            <input type="text" id="ha-wh-gameend" placeholder="e.g. oche_game_end">
+          </div>
+          <div>
+            <label class="field">Set Start Webhook ID</label>
+            <input type="text" id="ha-wh-setstart" placeholder="e.g. oche_set_start">
+          </div>
+          <div>
+            <label class="field">Set End Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— includes winner name</span></label>
+            <input type="text" id="ha-wh-setend" placeholder="e.g. oche_set_end">
           </div>
         </div>
 
@@ -1066,12 +1103,19 @@ function renderSettings(){
     return;
   }
   Backend.get('/api/settings').then(cfg=>{
-    const el = id => document.getElementById(id);
-    if(el('ha-url'))          el('ha-url').value           = cfg.ha_url               || '';
-    if(el('ha-wh-oneeighty')) el('ha-wh-oneeighty').value  = cfg.ha_webhook_oneeighty  || '';
-    if(el('ha-wh-bigfish'))   el('ha-wh-bigfish').value    = cfg.ha_webhook_bigfish    || '';
-    if(el('ha-wh-bust'))      el('ha-wh-bust').value       = cfg.ha_webhook_bust       || '';
-    if(el('ha-wh-ninedarter'))el('ha-wh-ninedarter').value = cfg.ha_webhook_ninedarter || '';
+    const set = (id, key) => { const el=document.getElementById(id); if(el) el.value = cfg[key] || ''; };
+    set('ha-url',           'ha_url');
+    set('ha-wh-oneeighty',  'ha_webhook_oneeighty');
+    set('ha-wh-bigfish',    'ha_webhook_bigfish');
+    set('ha-wh-tonplus',    'ha_webhook_tonplus');
+    set('ha-wh-bust',       'ha_webhook_bust');
+    set('ha-wh-ninedarter', 'ha_webhook_ninedarter');
+    set('ha-wh-legstart',   'ha_webhook_legstart');
+    set('ha-wh-legend',     'ha_webhook_legend');
+    set('ha-wh-gamestart',  'ha_webhook_gamestart');
+    set('ha-wh-gameend',    'ha_webhook_gameend');
+    set('ha-wh-setstart',   'ha_webhook_setstart');
+    set('ha-wh-setend',     'ha_webhook_setend');
   }).catch(err=>{ const s=document.getElementById('settings-error'); if(s){ s.textContent='Could not load settings: '+err.message; s.hidden=false; } });
 }
 function saveSettings(){
@@ -1080,11 +1124,18 @@ function saveSettings(){
   const btn = document.getElementById('settings-save-btn');
   if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
   Backend.send('PUT','/api/settings',{
-    ha_url:                 v('ha-url').replace(/\/+$/,''),
-    ha_webhook_oneeighty:   v('ha-wh-oneeighty'),
-    ha_webhook_bigfish:     v('ha-wh-bigfish'),
-    ha_webhook_bust:        v('ha-wh-bust'),
-    ha_webhook_ninedarter:  v('ha-wh-ninedarter'),
+    ha_url:                  v('ha-url').replace(/\/+$/,''),
+    ha_webhook_oneeighty:    v('ha-wh-oneeighty'),
+    ha_webhook_bigfish:      v('ha-wh-bigfish'),
+    ha_webhook_tonplus:      v('ha-wh-tonplus'),
+    ha_webhook_bust:         v('ha-wh-bust'),
+    ha_webhook_ninedarter:   v('ha-wh-ninedarter'),
+    ha_webhook_legstart:     v('ha-wh-legstart'),
+    ha_webhook_legend:       v('ha-wh-legend'),
+    ha_webhook_gamestart:    v('ha-wh-gamestart'),
+    ha_webhook_gameend:      v('ha-wh-gameend'),
+    ha_webhook_setstart:     v('ha-wh-setstart'),
+    ha_webhook_setend:       v('ha-wh-setend'),
   }).then(()=>{
     if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
     uiAlert('Settings saved.');
@@ -1109,9 +1160,9 @@ function testHaConnection(){
       uiAlert('Connection failed: ' + (err.message || 'Could not reach the server'));
     });
 }
-function sendHaWebhook(event, player, category){
+function sendHaWebhook(event, player, category, extra){
   if(DB.mode!=='api') return;
-  Backend.send('POST','/api/ha-webhook',{ event, player, category }).catch(()=>{});
+  Backend.send('POST','/api/ha-webhook',{ event, player, category, ...(extra||{}) }).catch(()=>{});
 }
 
 /* ---------- player roster (saved profiles) ---------- */
@@ -1252,6 +1303,10 @@ async function startGame(){
   DB.recordEvent('game_start', null, null);
   DB.recordEvent('set_start', 1, null);
   DB.recordEvent('leg_start', 1, 1);
+  const _isH2H = !game.practice && game.players.length > 1;
+  if(_isH2H) sendHaWebhook('gamestart', '', game.category, { players: game.players.map(p=>p.name) });
+  if(_isH2H) sendHaWebhook('setstart',  '', game.category, { setNo: 1 });
+  sendHaWebhook('legstart', '', game.category, { setNo: 1, legNo: 1 });
   mult = 1;
   renderGameShell();        // ensure the throwing controls exist (e.g. after a finished game)
   updateMultUI();
@@ -1790,11 +1845,15 @@ function enterTurn(){
   if(ev.win && game.category==='501' && p.legDarts===9){
     sendHaWebhook('ninedarter', p.name, game.category);
   }
+  if(ev.win && ev.pointsThisVisit >= 100){
+    sendHaWebhook('tonplus', p.name, game.category, { score: ev.pointsThisVisit });
+  }
 
   if(ev.win){
     if(DB.mode==='local'){
       const _isH2H = !game.practice && game.players.length > 1;
       game.players.forEach(pl=>{
+        if(pl.legDarts === 0) return;   // player didn't throw in this leg — matches API behaviour
         ensurePlayerStats(pl.name);
         if(_isH2H)
           stats[pl.name].legsByCat[game.category] = (stats[pl.name].legsByCat[game.category]||0) + 1;
@@ -1846,6 +1905,9 @@ function onLegWon(wi){
           stats[w.name].h2hGamesWonByCat[cat] = (stats[w.name].h2hGamesWonByCat[cat]||0) + 1;
         }
       }
+      sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+      sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
+      sendHaWebhook('gameend', w.name, game.category);
       DB.recordEvent('leg_end', game.setNo, game.legNo);
       DB.recordEvent('set_end', game.setNo, null);
       DB.recordEvent('game_end', null, null);
@@ -1854,12 +1916,15 @@ function onLegWon(wi){
       finishUnit('game', w.name);
       return;
     }
+    sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+    sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
     DB.recordEvent('leg_end', game.setNo, game.legNo);
     DB.recordEvent('set_end', game.setNo, null);
     persist();
     finishUnit('set', w.name);
     return;
   }
+  sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
   DB.recordEvent('leg_end', game.setNo, game.legNo);
   persist();
   finishUnit('leg', w.name);
@@ -1870,6 +1935,9 @@ function startNextLeg(newSet){
   if(newSet){ game.setNo += 1; game.legNo = 1; } else { game.legNo += 1; }
   if(newSet) DB.recordEvent('set_start', game.setNo, null);
   DB.recordEvent('leg_start', game.setNo, game.legNo);
+  const _h2h = !game.practice && game.players.length > 1;
+  if(newSet && _h2h) sendHaWebhook('setstart', '', game.category, { setNo: game.setNo });
+  sendHaWebhook('legstart', '', game.category, { setNo: game.setNo, legNo: game.legNo });
   game.starter = (game.starter + 1) % game.players.length;
   game.current = game.starter;
   game.players.forEach(p=>{ p.score = game.start; p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legBusts=0; });
