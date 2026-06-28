@@ -391,6 +391,7 @@
       <button class="navbtn" id="nav-players" aria-current="false" onclick="show('players')">Players</button>
       <button class="navbtn" id="nav-stats" aria-current="false" onclick="show('stats')">Stats</button>
       <button class="navbtn" id="nav-scoreboard" onclick="openScoreboard()" title="Open the read-only scoreboard for a second screen">Scoreboard ↗</button>
+      <button class="navbtn" id="nav-settings" aria-current="false" onclick="show('settings')">Settings</button>
     </nav>
   </header>
 
@@ -548,6 +549,53 @@
         <b style="color:var(--ink)">Treble-less turns</b> — turns where none of the darts landed in a treble bed.<br>
         A bust turn still counts as a turn (it scores 0) and is recorded as treble-less if no treble was hit during that visit.<br>
         Click a player's name on the Stats or Players page to see their full profile including games &amp; legs played and H2H wins.
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section id="screen-settings" class="screen">
+    <div class="card">
+      <h2 style="font-size:18px;margin-bottom:4px">Settings</h2>
+      <p style="color:var(--muted);font-size:13px;margin:0 0 20px">App configuration and integrations.</p>
+
+      <div class="pp-section">
+        <div class="pp-section-title" style="display:flex;align-items:center;gap:8px">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--gold)"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          Home Assistant
+        </div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          Send webhooks to Home Assistant when game events occur. In HA, create an automation with a <b style="color:var(--ink)">Webhook</b> trigger and paste the webhook ID below. Leave a field blank to skip that event.
+        </p>
+
+        <label class="field">Home Assistant URL</label>
+        <input type="url" id="ha-url" placeholder="http://homeassistant.local:8123" style="margin-bottom:16px">
+
+        <div style="display:grid;gap:12px">
+          <div>
+            <label class="field">180 Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— fires when a maximum 180 is thrown</span></label>
+            <input type="text" id="ha-wh-oneeighty" placeholder="e.g. oche_180_thrown">
+          </div>
+          <div>
+            <label class="field">Big Fish Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— fires on a 170 checkout</span></label>
+            <input type="text" id="ha-wh-bigfish" placeholder="e.g. oche_big_fish">
+          </div>
+          <div>
+            <label class="field">Bust Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— fires on every bust turn</span></label>
+            <input type="text" id="ha-wh-bust" placeholder="e.g. oche_bust">
+          </div>
+          <div>
+            <label class="field">Nine-Darter Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— fires on a perfect 501 in 9 darts</span></label>
+            <input type="text" id="ha-wh-ninedarter" placeholder="e.g. oche_nine_darter">
+          </div>
+        </div>
+
+        <div class="btn-row" style="margin-top:18px">
+          <button class="btn btn-primary" onclick="saveSettings()">Save settings</button>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin:10px 0 0;line-height:1.6">
+          Webhook payload: <code style="background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:11px">{ "player": "Name", "event": "oneeighty", "category": "501", "timestamp": 1234567890 }</code>
+        </p>
       </div>
     </div>
   </section>
@@ -803,6 +851,8 @@ function show(name){
   document.getElementById('nav-setup').setAttribute('aria-current', name==='setup');
   document.getElementById('nav-players').setAttribute('aria-current', name==='players'||name==='player');
   document.getElementById('nav-stats').setAttribute('aria-current', name==='stats');
+  document.getElementById('nav-settings').setAttribute('aria-current', name==='settings');
+  if(name==='settings') renderSettings();
   if(name==='home') renderHome();
   if(name==='setup'){ sanitizeSlots(); renderPlayers(); }
   if(name==='players') renderRoster();
@@ -998,6 +1048,34 @@ function openScoreboard(){
   } else {
     uiAlert('The scoreboard runs on the server. Start the app with Docker, then open  http://<your-server>:8046/display  on your second screen. (This standalone preview has no server, so the live scoreboard isn\u2019t available here.)');
   }
+}
+
+/* ---------- settings ---------- */
+function renderSettings(){
+  if(DB.mode!=='api') return;
+  Backend.get('/api/settings').then(cfg=>{
+    const el = id => document.getElementById(id);
+    if(el('ha-url'))          el('ha-url').value           = cfg.ha_url                    || '';
+    if(el('ha-wh-oneeighty')) el('ha-wh-oneeighty').value  = cfg.ha_webhook_oneeighty       || '';
+    if(el('ha-wh-bigfish'))   el('ha-wh-bigfish').value    = cfg.ha_webhook_bigfish         || '';
+    if(el('ha-wh-bust'))      el('ha-wh-bust').value       = cfg.ha_webhook_bust            || '';
+    if(el('ha-wh-ninedarter'))el('ha-wh-ninedarter').value = cfg.ha_webhook_ninedarter      || '';
+  }).catch(()=>{});
+}
+function saveSettings(){
+  if(DB.mode!=='api'){ uiAlert('Settings require the server backend.'); return; }
+  const v = id => (document.getElementById(id)||{}).value || '';
+  Backend.send('PUT','/api/settings',{
+    ha_url:                 v('ha-url').replace(/\/+$/,''),
+    ha_webhook_oneeighty:   v('ha-wh-oneeighty'),
+    ha_webhook_bigfish:     v('ha-wh-bigfish'),
+    ha_webhook_bust:        v('ha-wh-bust'),
+    ha_webhook_ninedarter:  v('ha-wh-ninedarter'),
+  }).then(()=>uiAlert('Settings saved.')).catch(()=>uiAlert('Failed to save settings.'));
+}
+function sendHaWebhook(event, player, category){
+  if(DB.mode!=='api') return;
+  Backend.send('POST','/api/ha-webhook',{ event, player, category }).catch(()=>{});
 }
 
 /* ---------- player roster (saved profiles) ---------- */
@@ -1658,10 +1736,24 @@ function enterTurn(){
     const _mk = (!game.practice && game.players.length > 1) ? 'h2hStats' : 'practiceStats';
     accumTurnStats(s[_mk], ev, game.category, p.legDarts);
   }
-  // achievement flashes + in-game counters for the live scoreboard
-  if(ev.bust) game.gameBusts += 1;
-  if(ev.scored === 180){ game.gameOneEighties += 1; pendingAchievement = { type:'180', player:p.name, ts:Date.now() }; }
-  if(ev.win && ev.pointsThisVisit === 170){ game.gameBigFish += 1; pendingAchievement = { type:'bigfish', player:p.name, ts:Date.now() }; }
+  // achievement flashes + in-game counters + Home Assistant webhooks
+  if(ev.bust){
+    game.gameBusts += 1;
+    sendHaWebhook('bust', p.name, game.category);
+  }
+  if(ev.scored === 180){
+    game.gameOneEighties += 1;
+    pendingAchievement = { type:'180', player:p.name, ts:Date.now() };
+    sendHaWebhook('oneeighty', p.name, game.category);
+  }
+  if(ev.win && ev.pointsThisVisit === 170){
+    game.gameBigFish += 1;
+    pendingAchievement = { type:'bigfish', player:p.name, ts:Date.now() };
+    sendHaWebhook('bigfish', p.name, game.category);
+  }
+  if(ev.win && game.category==='501' && p.legDarts===9){
+    sendHaWebhook('ninedarter', p.name, game.category);
+  }
 
   if(ev.win){
     if(DB.mode==='local'){

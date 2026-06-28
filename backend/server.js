@@ -156,6 +156,22 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/reset' && m === 'POST') return send(res, 200, db.resetStats());
 
+    if (p === '/api/settings' && m === 'GET')  return send(res, 200, db.getSettings());
+    if (p === '/api/settings' && m === 'PUT') {
+      const b = await readJson(req);
+      // Only allow known setting keys through
+      const allowed = ['ha_url','ha_webhook_oneeighty','ha_webhook_bigfish','ha_webhook_bust','ha_webhook_ninedarter'];
+      const safe = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
+      return send(res, 200, db.updateSettings(safe));
+    }
+    if (p === '/api/ha-webhook' && m === 'POST') {
+      const b = await readJson(req);
+      const allowed = ['oneeighty','bigfish','bust','ninedarter'];
+      if (!allowed.includes(b.event)) return send(res, 400, { error: 'Unknown event type' });
+      const result = await db.fireHaWebhook(b.event, { player: b.player || '', category: b.category || '' });
+      return send(res, 200, result);
+    }
+
     if (p === '/api/games' && m === 'POST') { const b = await readJson(req); return send(res, 200, db.createGame({ ...b, practice: b.practice ? 1 : 0 })); }
 
     let mt;

@@ -75,6 +75,11 @@ db.exec(`
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_timeline_game ON timeline_events(game_id);
+
+  CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+  );
 `);
 
 // Column migrations — safe to re-run; ALTER TABLE throws if column exists, which we catch.
@@ -703,6 +708,44 @@ function resetStats() {
   return { ok: true };
 }
 
+/* ---------- settings ---------- */
+function getSettings() {
+  return Object.fromEntries(db.prepare('SELECT key, value FROM settings').all().map(r => [r.key, r.value]));
+}
+function updateSettings(obj) {
+  const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+  const tx = db.transaction((entries) => { for (const [k, v] of entries) upsert.run(String(k), String(v ?? '')); });
+  tx(Object.entries(obj));
+  return { ok: true };
+}
+
+/* ---------- Home Assistant webhook proxy ---------- */
+function fireHaWebhook(event, payload) {
+  const cfg = getSettings();
+  const haUrl    = cfg.ha_url    || '';
+  const whId     = cfg[`ha_webhook_${event}`] || '';
+  if (!haUrl || !whId) return Promise.resolve({ skipped: true });
+
+  return new Promise((resolve) => {
+    const body = JSON.stringify({ ...payload, event, timestamp: Date.now() });
+    let url;
+    try { url = new URL(`/api/webhook/${encodeURIComponent(whId)}`, haUrl); }
+    catch(e) { return resolve({ ok: false, error: 'Invalid HA URL' }); }
+
+    const mod = url.protocol === 'https:' ? require('https') : require('http');
+    const req = mod.request({
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    }, res => { res.resume(); resolve({ ok: true, status: res.statusCode }); });
+    req.on('error', err => resolve({ ok: false, error: err.message }));
+    req.setTimeout(5000, () => { req.destroy(); resolve({ ok: false, error: 'timeout' }); });
+    req.end(body);
+  });
+}
+
 /* ---------- helpers ---------- */
 function httpError(status, message) {
   const e = new Error(message); e.status = status; return e;
@@ -714,5 +757,6 @@ module.exports = {
   computeStats, getSummary, getOneEightyStats, getBigFishStats, getNineDarterStats,
   getPlayerStatBubbles, getMetricHistory,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats,
+  getSettings, updateSettings, fireHaWebhook,
   _db: db,
 };
