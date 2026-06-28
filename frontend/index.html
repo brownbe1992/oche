@@ -1873,7 +1873,7 @@ const STAT_DEFS = [
   { key:'avg100plus',    label:'100+ AVG',    desc:'% of legs with a 100+ average',           fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
   { key:'avg90minus',    label:'90- AVG',     desc:'% of legs with a 90 or lower average',    fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
   { key:'score140pct',   label:'140/Leg',     desc:'% of opening visits scoring 140 or more', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
-  { key:'180sperleg',    label:'180s/Leg',    desc:'Ratio of 180s to total legs',             fmt:v=>v!=null?v.toFixed(3):'—' },
+  { key:'180sperleg',    label:'180s/Leg',    desc:'% of legs containing a 180',              fmt:v=>v!=null?(v*100).toFixed(1)+'%':'—' },
 ];
 let selectedStat = 'avg';
 
