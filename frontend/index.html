@@ -559,6 +559,11 @@
       <h2 style="font-size:18px;margin-bottom:4px">Settings</h2>
       <p style="color:var(--muted);font-size:13px;margin:0 0 20px">App configuration and integrations.</p>
 
+      <p id="settings-api-note" hidden style="color:var(--muted);font-size:13px;background:var(--surface-2);border:1px solid var(--wire);border-radius:10px;padding:12px 14px">
+        Settings require the server backend. Open the app via Docker at <code>http://&lt;your-server&gt;:8046</code>.
+      </p>
+      <p id="settings-error" hidden style="color:var(--bust);font-size:13px;background:rgba(226,71,61,.1);border:1px solid var(--bust);border-radius:10px;padding:12px 14px;margin-bottom:16px"></p>
+
       <div class="pp-section">
         <div class="pp-section-title" style="display:flex;align-items:center;gap:8px">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--gold)"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
@@ -569,7 +574,10 @@
         </p>
 
         <label class="field">Home Assistant URL</label>
-        <input type="url" id="ha-url" placeholder="http://homeassistant.local:8123" style="margin-bottom:16px">
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          <input type="url" id="ha-url" placeholder="http://homeassistant.local:8123" style="flex:1;margin-bottom:0">
+          <button class="btn btn-ghost" id="ha-test-btn" onclick="testHaConnection()" style="flex:none;white-space:nowrap">Test connection</button>
+        </div>
 
         <div style="display:grid;gap:12px">
           <div>
@@ -591,7 +599,7 @@
         </div>
 
         <div class="btn-row" style="margin-top:18px">
-          <button class="btn btn-primary" onclick="saveSettings()">Save settings</button>
+          <button class="btn btn-primary" id="settings-save-btn" onclick="saveSettings()">Save settings</button>
         </div>
         <p style="font-size:11px;color:var(--muted);margin:10px 0 0;line-height:1.6">
           Webhook payload: <code style="background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:11px">{ "player": "Name", "event": "oneeighty", "category": "501", "timestamp": 1234567890 }</code>
@@ -1052,26 +1060,54 @@ function openScoreboard(){
 
 /* ---------- settings ---------- */
 function renderSettings(){
-  if(DB.mode!=='api') return;
+  if(DB.mode!=='api'){
+    const note=document.getElementById('settings-api-note');
+    if(note) note.hidden=false;
+    return;
+  }
   Backend.get('/api/settings').then(cfg=>{
     const el = id => document.getElementById(id);
-    if(el('ha-url'))          el('ha-url').value           = cfg.ha_url                    || '';
-    if(el('ha-wh-oneeighty')) el('ha-wh-oneeighty').value  = cfg.ha_webhook_oneeighty       || '';
-    if(el('ha-wh-bigfish'))   el('ha-wh-bigfish').value    = cfg.ha_webhook_bigfish         || '';
-    if(el('ha-wh-bust'))      el('ha-wh-bust').value       = cfg.ha_webhook_bust            || '';
-    if(el('ha-wh-ninedarter'))el('ha-wh-ninedarter').value = cfg.ha_webhook_ninedarter      || '';
-  }).catch(()=>{});
+    if(el('ha-url'))          el('ha-url').value           = cfg.ha_url               || '';
+    if(el('ha-wh-oneeighty')) el('ha-wh-oneeighty').value  = cfg.ha_webhook_oneeighty  || '';
+    if(el('ha-wh-bigfish'))   el('ha-wh-bigfish').value    = cfg.ha_webhook_bigfish    || '';
+    if(el('ha-wh-bust'))      el('ha-wh-bust').value       = cfg.ha_webhook_bust       || '';
+    if(el('ha-wh-ninedarter'))el('ha-wh-ninedarter').value = cfg.ha_webhook_ninedarter || '';
+  }).catch(err=>{ const s=document.getElementById('settings-error'); if(s){ s.textContent='Could not load settings: '+err.message; s.hidden=false; } });
 }
 function saveSettings(){
   if(DB.mode!=='api'){ uiAlert('Settings require the server backend.'); return; }
   const v = id => (document.getElementById(id)||{}).value || '';
+  const btn = document.getElementById('settings-save-btn');
+  if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
   Backend.send('PUT','/api/settings',{
     ha_url:                 v('ha-url').replace(/\/+$/,''),
     ha_webhook_oneeighty:   v('ha-wh-oneeighty'),
     ha_webhook_bigfish:     v('ha-wh-bigfish'),
     ha_webhook_bust:        v('ha-wh-bust'),
     ha_webhook_ninedarter:  v('ha-wh-ninedarter'),
-  }).then(()=>uiAlert('Settings saved.')).catch(()=>uiAlert('Failed to save settings.'));
+  }).then(()=>{
+    if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
+    uiAlert('Settings saved.');
+  }).catch(err=>{
+    if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
+    uiAlert('Failed to save settings: ' + (err.message || 'Unknown error'));
+  });
+}
+function testHaConnection(){
+  const url = (document.getElementById('ha-url')||{}).value || '';
+  if(!url){ uiAlert('Enter the Home Assistant URL first.'); return; }
+  const btn = document.getElementById('ha-test-btn');
+  if(btn){ btn.disabled=true; btn.textContent='Testing…'; }
+  Backend.send('POST','/api/ha-test',{ url })
+    .then(r=>{
+      if(btn){ btn.disabled=false; btn.textContent='Test connection'; }
+      if(r.ok) uiAlert('✓ Reached Home Assistant (HTTP ' + r.status + '). Connection is working.');
+      else      uiAlert('Connected but got an unexpected response (HTTP ' + r.status + '). Check the URL is correct.');
+    })
+    .catch(err=>{
+      if(btn){ btn.disabled=false; btn.textContent='Test connection'; }
+      uiAlert('Connection failed: ' + (err.message || 'Could not reach the server'));
+    });
 }
 function sendHaWebhook(event, player, category){
   if(DB.mode!=='api') return;

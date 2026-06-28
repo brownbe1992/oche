@@ -164,6 +164,28 @@ const server = http.createServer(async (req, res) => {
       const safe = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
       return send(res, 200, db.updateSettings(safe));
     }
+    if (p === '/api/ha-test' && m === 'POST') {
+      const b = await readJson(req);
+      const haUrl = String(b.url || '').trim().replace(/\/+$/, '');
+      if (!haUrl) return send(res, 400, { error: 'No URL provided' });
+      let parsedUrl;
+      try { parsedUrl = new URL('/', haUrl); }
+      catch(e) { return send(res, 400, { error: 'Invalid URL: ' + e.message }); }
+      const mod = parsedUrl.protocol === 'https:' ? require('https') : require('http');
+      const result = await new Promise((resolve) => {
+        const r2 = mod.request({
+          hostname: parsedUrl.hostname,
+          port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+          path: '/',
+          method: 'HEAD',
+        }, res2 => { res2.resume(); resolve({ ok: true, status: res2.statusCode }); });
+        r2.on('error', err => resolve({ ok: false, error: err.message }));
+        r2.setTimeout(5000, () => { r2.destroy(); resolve({ ok: false, error: 'Connection timed out after 5 seconds' }); });
+        r2.end();
+      });
+      return send(res, 200, result);
+    }
+
     if (p === '/api/ha-webhook' && m === 'POST') {
       const b = await readJson(req);
       const allowed = ['oneeighty','bigfish','bust','ninedarter'];
