@@ -55,6 +55,11 @@
   input[type=text]:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
 
   .players-list{display:flex;flex-direction:column;gap:8px;margin:4px 0 16px}
+  .add-player-wrap{display:flex;align-items:center;gap:8px;overflow:hidden}
+  .add-player-menu{display:flex;gap:6px;max-width:0;opacity:0;overflow:hidden;
+    transition:max-width .22s ease,opacity .22s ease}
+  .add-player-menu.open{max-width:360px;opacity:1}
+  .add-player-menu .btn{white-space:nowrap;padding:11px 14px;font-size:13.5px}
   .player-row{display:flex;gap:8px;align-items:center}
   .player-row .ix{font-family:'Bebas Neue';font-size:20px;color:var(--gold);width:22px;text-align:center}
   .iconbtn{background:none;border:1px solid var(--wire);color:var(--muted);border-radius:9px;
@@ -424,7 +429,13 @@
 
       <label class="field">Players</label>
       <div class="players-list" id="players-list"></div>
-      <button class="btn btn-ghost" onclick="addPlayer()">+ Add player</button>
+      <div class="add-player-wrap">
+        <button class="btn btn-ghost" id="add-player-btn" onclick="toggleAddPlayerMenu()">+ Add player</button>
+        <div class="add-player-menu" id="add-player-menu">
+          <button class="btn btn-ghost" onclick="addExistingPlayer()">Choose existing</button>
+          <button class="btn btn-ghost" onclick="addNewPlayer()">Enter new</button>
+        </div>
+      </div>
 
       <div class="opts">
         <div class="seg" role="group" aria-label="Starting score">
@@ -876,9 +887,11 @@ function renderHomeContent(s,h2h,practice){
     if(!rows||!rows.length) return `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
     return `<div class="hof-list">${rows.map((f,i)=>{
       const dates=fmtDate(f.last_date);
+      const outBadge=f.out?`<span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;align-self:center">${f.out==='double'?'DO':'SO'}</span>`:'';
       return `<div class="hof-row">
         <span class="hof-rank">${i+1}</span>
         <span class="hof-score">${f.score}</span>
+        ${outBadge}
         <span class="hof-times">${f.times===1?'×1':'×'+f.times}</span>
         <span class="hof-player">${escapeHtml(f.name)}</span>
         <span class="hof-dates">${dates}</span>
@@ -1027,6 +1040,7 @@ function sanitizeSlots(){
   if(setup.slots.length===0 && roster.length) setup.slots=[roster[0]];
 }
 function renderPlayers(){
+  closeAddPlayerMenu();
   const box = document.getElementById('players-list');
   box.innerHTML='';
   if(roster.length===0){
@@ -1061,14 +1075,25 @@ function onSlotChange(i, value){
   setup.slots[i]=value;
   renderPlayers();
 }
-function addPlayer(){
+function toggleAddPlayerMenu(){
   if(setup.slots.length>=6) return;
-  if(roster.length===0){
-    uiPrompt('Add a new player', '', name=>{ const a=addToRoster(name); if(a){ setup.slots.push(a); renderPlayers(); } });
-    return;
-  }
-  const next = roster.find(p=>!setup.slots.includes(p)) || roster[0];
+  if(roster.length===0){ addNewPlayer(); return; }
+  document.getElementById('add-player-menu').classList.toggle('open');
+}
+function closeAddPlayerMenu(){
+  const m=document.getElementById('add-player-menu');
+  if(m) m.classList.remove('open');
+}
+function addExistingPlayer(){
+  closeAddPlayerMenu();
+  if(setup.slots.length>=6) return;
+  const next=roster.find(p=>!setup.slots.includes(p))||roster[0];
   setup.slots.push(next); renderPlayers();
+}
+function addNewPlayer(){
+  closeAddPlayerMenu();
+  if(setup.slots.length>=6) return;
+  uiPrompt('Enter player name','',name=>{ const a=addToRoster(name); if(a){ setup.slots.push(a); renderPlayers(); } });
 }
 function removePlayer(i){ setup.slots.splice(i,1); renderPlayers(); }
 function pickStart(btn,v){ setup.start=v; document.querySelectorAll('[data-start]').forEach(b=>b.setAttribute('aria-pressed', b===btn)); }
