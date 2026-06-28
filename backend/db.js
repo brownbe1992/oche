@@ -441,6 +441,7 @@ function getPlayerStatBubbles(playerName, mode) {
   const q = (sql) => { const r = db.prepare(sql).get(p.id); return r ? r.v : null; };
   const J = `FROM turns t JOIN games g ON g.id = t.game_id WHERE t.player_id = ?`;
 
+  const dartsThrown = (q(`SELECT COUNT(*) AS v ${J} ${mf}`) ?? 0) * 3;
   const avg        = q(`SELECT CAST(SUM(t.scored) AS REAL)/NULLIF(COUNT(*),0) AS v ${J} ${mf}`);
   const one80s     = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.scored=180`) ?? 0;
   const bigFish    = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.checkout=1 AND t.checkout_points=170`) ?? 0;
@@ -474,7 +475,7 @@ function getPlayerStatBubbles(playerName, mode) {
   ) WHERE rn=1`);
 
   return {
-    avg, one80s, bigFish, nineDarters,
+    dartsThrown, avg, one80s, bigFish, nineDarters,
     treblelessPct: totalLegs > 0 ? (tlLegs / totalLegs * 100) : null,
     first3avg, first9avg, avg100plus, avg90minus, score140pct,
     one80sPerLeg: totalLegs > 0 ? (one80s / totalLegs) : null,
@@ -514,6 +515,8 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
   const TBASE = `FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere}`;
 
   switch (metric) {
+    case 'dartsthrown':
+      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(*)*3 AS value ${TBASE} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'avg':
       return db.prepare(`SELECT ${T.fmt} AS bucket, CAST(SUM(t.scored) AS REAL)/COUNT(*) AS value, COUNT(*) AS count ${TBASE} GROUP BY bucket ORDER BY bucket`).all(...params);
     case '180s':
