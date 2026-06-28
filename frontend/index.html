@@ -166,6 +166,16 @@
   .pad button.miss{grid-column:span 2;color:var(--muted)}
 
   .turn-actions{display:flex;gap:10px;margin-top:12px}
+
+  /* ---- practice leg stats panel ---- */
+  .prac-stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px;text-align:left}
+  .prac-col{background:var(--surface);border:1px solid var(--wire);border-radius:12px;padding:14px 16px}
+  .prac-col-title{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:700;margin-bottom:10px}
+  .prac-row{display:flex;justify-content:space-between;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--wire)}
+  .prac-row:last-child{border-bottom:none}
+  .prac-row-label{font-size:12px;color:var(--muted)}
+  .prac-row-val{font-family:'Bebas Neue';font-size:20px;color:var(--cream);letter-spacing:.02em;text-align:right;max-width:55%}
+  .prac-row-val.sm{font-family:'Inter';font-size:12px;color:var(--ink);font-weight:600}
   .turn-actions .btn{flex:1}
   .turn-actions .btn-primary{font-size:17px;padding:16px 20px}
 
@@ -1296,7 +1306,9 @@ async function startGame(){
     done: false,
     gameOneEighties: 0,
     gameBigFish: 0,
-    gameBusts: 0
+    gameBusts: 0,
+    currentLegTurns: [],   // turns in the current leg (reset per leg)
+    sessionTurns: []       // turns in the entire session (grows across legs)
   };
   names.forEach(ensurePlayerStats);
   await DB.beginGame(game, names);   // registers the game; gets a gameId in api mode
@@ -1849,6 +1861,11 @@ function enterTurn(){
     sendHaWebhook('tonplus', p.name, game.category, { score: ev.pointsThisVisit });
   }
 
+  // record turn for practice session stats display
+  { const _t = { scored:ev.scored, trebleLess:!!ev.trebleLess, bust:!!ev.bust,
+      checkout:!!ev.win, checkoutPoints:ev.win?ev.pointsThisVisit:null, darts:game.darts.length };
+    game.currentLegTurns.push(_t); game.sessionTurns.push(_t); }
+
   if(ev.win){
     if(DB.mode==='local'){
       const _isH2H = !game.practice && game.players.length > 1;
@@ -1942,6 +1959,7 @@ function startNextLeg(newSet){
   game.current = game.starter;
   game.players.forEach(p=>{ p.score = game.start; p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legBusts=0; });
   game.legSummary = null;
+  game.currentLegTurns = [];
   game.darts=[]; game.busted=false; game.won=false;
   mult=1;
   renderGameShell(); updateMultUI(); renderGame();
@@ -1949,6 +1967,24 @@ function startNextLeg(newSet){
 // new set: also clear game-scope averages? No — a "game" = the whole match, so
 // game-scope totals carry across sets. Only leg-scope resets (handled above).
 function startNextSet(){ startNextLeg(true); }
+
+function pracStatsHtml(turns){
+  if(!turns.length) return '';
+  const darts       = turns.reduce((s,t)=>s+t.darts,0);
+  const busts       = turns.filter(t=>t.bust).length;
+  const tlCount     = turns.filter(t=>t.trebleLess).length;
+  const tlPct       = turns.length ? Math.round(tlCount/turns.length*100)+'%' : '—';
+  const checkouts   = turns.filter(t=>t.checkout&&t.checkoutPoints).map(t=>t.checkoutPoints);
+  const topVisits   = turns.filter(t=>!t.bust).map(t=>t.scored).sort((a,b)=>b-a).slice(0,5);
+  const row=(label,val,sm)=>`<div class="prac-row"><span class="prac-row-label">${label}</span><span class="prac-row-val${sm?' sm':''}">${val}</span></div>`;
+  return [
+    row('Darts Thrown', darts),
+    row('Checkout'+(checkouts.length!==1?'s':''), checkouts.length ? checkouts.join(', ') : '—', checkouts.length>1),
+    row('Best Visits', topVisits.length ? topVisits.join(', ') : '—', topVisits.length>2),
+    row('Busts', busts),
+    row('Trebleless %', tlPct),
+  ].join('');
+}
 
 function finishUnit(kind, winner){
   game.done = (kind==='game');
@@ -1972,6 +2008,17 @@ function finishUnit(kind, winner){
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
+    const legPanel = (game.practice && kind==='leg') ? `
+      <div class="prac-stats">
+        <div class="prac-col">
+          <div class="prac-col-title">This Leg</div>
+          ${pracStatsHtml(game.currentLegTurns||[])}
+        </div>
+        <div class="prac-col">
+          <div class="prac-col-title">This Session</div>
+          ${pracStatsHtml(game.sessionTurns||[])}
+        </div>
+      </div>` : '';
     oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
       <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">${kind==='set'?'SET COMPLETE':'LEG COMPLETE'}</div>
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">Stats saved.</p>
@@ -1979,7 +2026,7 @@ function finishUnit(kind, winner){
         <button class="btn btn-primary" onclick="${fn}">${next}</button>
         <button class="btn btn-ghost" onclick="show('stats')">View stats</button>
         <button class="btn btn-ghost" onclick="uiConfirm('End the match early? Recorded stats are kept.', ()=>show('setup'))">End game</button>
-      </div></div>`;
+      </div>${legPanel}</div>`;
   }
   game.legSummary = game.players.map(p=>({
     name: p.name,
