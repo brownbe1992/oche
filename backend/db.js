@@ -619,7 +619,7 @@ function getNineDarterStats(mode) {
 function getTopFinishesAll(limit = 10, mode) {
   const mf = _mf(mode);
   return db.prepare(`
-    SELECT p.name, p.out, t.checkout_points AS score, COUNT(*) AS times,
+    SELECT p.name, p.out_mode AS out, t.checkout_points AS score, COUNT(*) AS times,
            MIN(t.created_at) AS first_date, MAX(t.created_at) AS last_date
     FROM turns t
     JOIN games g ON g.id = t.game_id
@@ -659,7 +659,7 @@ function getTopFinishes(playerName, mode) {
     GROUP BY t.checkout_points
     ORDER BY t.checkout_points DESC
     LIMIT 10
-  `).all(p.id).map(r => ({ ...r, out: p.out }));
+  `).all(p.id).map(r => ({ ...r, out: p.out_mode }));
 }
 
 function getAvgHistory(playerName, period, opts = {}) {
