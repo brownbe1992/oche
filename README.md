@@ -22,6 +22,7 @@ You enter every dart individually — multiplier first, then the number — and 
   - [Players](#players)
   - [Player Profile](#player-profile)
   - [Stats](#stats)
+  - [Settings](#settings)
 - [API Reference](#api-reference)
 - [Architecture](#architecture)
 - [Data Storage](#data-storage)
@@ -93,7 +94,7 @@ The landing page shows a live snapshot of all-time activity:
 **Practice Mode Leaderboard** — same stats for solo/practice sessions.
 
 **Hall of Fame sections:**
-- 🎯 **180s** — every player who has thrown a maximum, with count
+- 🎯 **180s** — every player who has thrown a maximum, with count and most recent date
 - 🐟 **Big Fish** — every 170 checkout recorded
 - **Nine-Dart Finishes** — 501 completed in exactly 9 darts *("None recorded yet — you will never get this!")*
 
@@ -128,15 +129,19 @@ The scoring screen is optimised for touchscreen entry on a tablet. Everything fi
 - Active player is highlighted in gold with a "▸ throwing" tag
 - Checkout route appears inline below the score when the player is on a finishing number
 
-**Dart entry:**
+**Input modes** — toggle between two ways to enter darts:
+- **Pad** — a grid of numbers (1–20), Bull, and Miss, with Single / Double / Treble multiplier buttons
+- **🎯 Dartboard** — an interactive SVG dartboard; tap directly on the sector you hit. The multiplier ring is determined by where you tap (singles bed, doubles ring, treble ring, bull).
+
+**Dart entry (Pad mode):**
 1. Tap **Single**, **Double**, or **Treble** to set the multiplier
 2. Tap a number (1–20), **Bull**, or **Miss**
    - *Double Miss* fills two dart slots; *Treble Miss* fills all three
 3. After three darts (or a bust or checkout), tap **Enter turn**
 
 **Controls:**
-- **Undo dart** — remove the last dart entered
-- **Miss** — register a missed dart (respects the current multiplier as a repeat count)
+- **Undo dart** — remove the last dart entered in the current visit
+- **Undo Last Turn** — revert the most recently committed turn and restore all dart counts and averages to their previous state
 - **Enter turn** — commit the visit and advance to the next player
 
 **Feedback:**
@@ -161,9 +166,9 @@ Open **`http://<your-server>:8046/display`** on a TV or second monitor. It updat
 
 **Player cards** (one per player):
 - Remaining score
-- Darts thrown this leg
+- Dart counts — **Leg / Set / Game** for H2H; **Leg / Session** for Practice
 - Leg average · game average · leg/set standing
-- Active player's card shows each dart thrown in the current visit
+- Active player's card shows each dart thrown in the current visit, plus the checkout route inline
 - Bust overlay (red) and Game Shot overlay (green) flash on the active card
 
 **Between legs:** score cards are replaced with a leg summary — average, darts thrown, and busts per player — until the next leg starts.
@@ -202,7 +207,7 @@ Each player has a dedicated profile page with full career statistics, accessible
 
 #### Stat Bubbles
 
-Eleven stat bubbles across the top of the profile. Click any bubble to display that metric in the chart below.
+Fourteen stat bubbles across the top of the profile. Click any bubble to display that metric in the chart below.
 
 | Bubble | Description |
 |---|---|
@@ -217,6 +222,9 @@ Eleven stat bubbles across the top of the profile. Click any bubble to display t
 | **90- AVG** | Percentage of legs with a 90 or lower average |
 | **140/Leg** | Percentage of opening visits scoring 140 or more |
 | **180s/Leg** | Ratio of 180s to total legs played |
+| **Darts Thrown** | Total individual darts thrown |
+| **Darts / Day** | Average darts thrown per day played |
+| **Darts / Leg** | Average darts thrown per won leg |
 
 #### Chart
 
@@ -227,7 +235,15 @@ A line chart showing the selected metric over time. Filters:
 
 #### Top 10 Finishes
 
-The player's ten highest checkouts — score, last date achieved.
+The player's ten highest checkouts — score, how many times achieved, and dates. Click any finish score to expand the most-used checkout routes for that score (e.g. the three darts you most often hit to land that 121).
+
+#### Dart Analytics
+
+A breakdown of how this player actually throws:
+
+- **Most-hit sectors** — top dart landing spots ranked by frequency, with sector and multiplier
+- **Treble hit rate** — for each number 1–20, how often the treble bed is hit vs. any throw at that sector
+- **Checkout routes** — the most common dart sequences used on winning turns
 
 #### Settings
 
@@ -245,9 +261,50 @@ A summary table of all players showing:
 - Ton+ finishes (100+ checkouts)
 - 180s
 - Big Fish
+- Darts thrown
 - H2H wins by format
 
 Plus global leaderboards for 180s, Big Fish, and nine-dart finishes, each filterable by mode.
+
+---
+
+### Settings
+
+The Settings page (accessible from the top navigation) holds app-wide configuration.
+
+#### Home Assistant Integration
+
+Oche can fire webhooks to a Home Assistant instance whenever key game events occur. Set this up in HA by creating an automation with a **Webhook** trigger, then paste the webhook ID into the corresponding field in Oche.
+
+**Configuration:**
+
+| Field | Description |
+|---|---|
+| **Home Assistant URL** | Base URL of your HA instance, e.g. `http://homeassistant.local:8123` |
+| **Test connection** | Sends a HEAD request to verify Oche can reach HA |
+
+**Supported events** — configure a webhook ID for any or all of these (leave blank to skip):
+
+| Event | Triggered when |
+|---|---|
+| **180** | A player scores a maximum 180 |
+| **Big Fish** | A player checks out 170 |
+| **Ton+ Finish** | Any checkout of 100 or more |
+| **Bust** | A turn ends in a bust |
+| **Nine-Darter** | A 501 leg is finished in exactly 9 darts |
+| **Leg Start** | A new leg begins |
+| **Leg End** | A leg is won (includes winner name) |
+| **Set Start** | A new set begins |
+| **Set End** | A set is won (includes winner name) |
+| **Game Start** | A new game begins |
+| **Game End** | A game is won (includes winner name) |
+
+**Webhook payload** (POST to `http://<ha-url>/api/webhook/<webhook-id>`):
+```json
+{ "player": "Name", "event": "oneeighty", "category": "501", "timestamp": 1234567890 }
+```
+
+Settings are persisted in the database and survive container restarts.
 
 ---
 
@@ -292,12 +349,17 @@ All leaderboard endpoints accept `?mode=h2h|practice` to filter by game mode. Om
 ### Per-Player Stats
 
 ```
-GET  /api/players/stat-bubbles?name=&mode=  All 11 stat bubble values for a player
+GET  /api/players/stat-bubbles?name=&mode=  All 14 stat bubble values for a player
 GET  /api/players/top-finishes?name=&mode=  Top 10 checkouts for a player
+GET  /api/players/checkout-route            Most-used routes for a specific checkout score
+     ?name=&score=&mode=
+GET  /api/players/dart-analytics?name=&mode= Per-dart hit frequency, treble rates,
+                                             and checkout route breakdown
 GET  /api/players/avg-history               Metric history for the chart
      ?name=
      &metric=avg|180s|bigfish|ninedarters|treblelesspct|
-              first3avg|first9avg|avg100plus|avg90minus|score140pct|180sperleg
+              first3avg|first9avg|avg100plus|avg90minus|score140pct|180sperleg|
+              dartsthrown|avgdartsperday|avgdartsperleg
      &period=today|week|month|year|all|custom
      &start=YYYY-MM-DD   (required when period=custom)
      &end=YYYY-MM-DD     (required when period=custom)
@@ -315,8 +377,11 @@ POST /api/games                             Start a game
 
 POST /api/games/:id/turns                   Record a visit
                                              { player, set, leg, scored,
-                                               trebleLess, bust, checkout,
-                                               checkoutPoints }
+                                               bust, checkout, checkoutPoints,
+                                               darts: [{sector, multiplier}] }
+
+DELETE /api/games/:id/turns/last            Delete the most recently recorded turn
+                                             (used by Undo Last Turn)
 
 POST /api/games/:id/complete                Mark a game finished    { winner }
 
@@ -336,6 +401,15 @@ GET  /api/live/stream                       SSE stream — scoreboard subscribes
 ```
 
 The live state is held in memory only — it is never written to the database. On reconnect the scoreboard receives the latest snapshot immediately.
+
+### Settings
+
+```
+GET  /api/settings                          Retrieve all settings (key/value pairs)
+PUT  /api/settings                          Update settings       { ha_url, ha_webhook_*, … }
+POST /api/ha-test                           Test HA connectivity  { url }
+POST /api/ha-webhook                        Fire an HA webhook    { event, player, category, … }
+```
 
 ### Admin
 
@@ -360,7 +434,7 @@ oche/
 └── Dockerfile
 ```
 
-**Backend** — a single `http.createServer` with no npm dependencies. Uses `node:sqlite` (built into Node 22.5+) in WAL mode with foreign keys enabled. All statistics are computed from raw turn data at query time — nothing is pre-aggregated, so stats are always consistent and new metrics can be added without migrations.
+**Backend** — a single `http.createServer` with no npm dependencies. Uses `node:sqlite` (built into Node 22.5+) in WAL mode with foreign keys enabled. All statistics are computed from raw turn and dart data at query time — nothing is pre-aggregated, so stats are always consistent and new metrics can be added without migrations.
 
 **Frontend** — a single HTML file with vanilla JavaScript and no build step. In API mode it talks to the backend; if opened directly as a file with no server it falls back to in-memory + localStorage so it still works as a demo.
 
@@ -370,13 +444,15 @@ oche/
 
 | Table | Purpose |
 |---|---|
-| `players` | Name and double/single-out preference |
+| `players` | Name, double/single-out preference, and dart weight |
 | `games` | One row per match; includes format, category, practice flag, winner |
-| `game_players` | Who played in each game; stores dart weight used |
-| `turns` | Every visit: score, bust flag, treble-less flag, checkout flag |
+| `game_players` | Who played in each game; stores dart weight and out mode used |
+| `turns` | Every visit: scored points, bust flag, checkout flag |
+| `darts` | Every individual dart: sector, multiplier, dart number within the visit. `scored`, `is_treble`, and `is_double` are computed columns derived from sector and multiplier. |
 | `timeline_events` | Leg/set/game start and end timestamps |
+| `settings` | Key/value store for app settings (e.g. Home Assistant config) |
 
-Schema changes are applied with `ALTER TABLE ... ADD COLUMN` wrapped in try/catch — idempotent, so the database auto-migrates on startup without wiping data.
+The `darts` table records every physical dart thrown and is the source of truth for treble rates, per-dart analytics, and checkout route history. Schema changes are applied automatically on startup using `ALTER TABLE … ADD COLUMN` or by dropping and recreating tables when the schema changes structurally — player profiles and settings are always preserved.
 
 ---
 
@@ -386,4 +462,4 @@ All data is in a single SQLite file. With Docker it lands at `./darts_data/darts
 
 - **Backup:** copy the `darts_data` folder
 - **Migrate to a new server:** copy the folder across and start the container
-- **Nothing leaves your network** — no cloud sync, no telemetry, no accounts
+- **Nothing leaves your network** — no cloud sync, no telemetry, no accounts (Home Assistant webhooks are outbound-only and only fire if you configure them)
