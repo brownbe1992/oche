@@ -170,6 +170,16 @@
   .turn-actions .undo-row .btn{flex:1;font-size:13px}
   .turn-actions .btn-primary{font-size:17px;padding:16px 20px}
 
+  /* ---- dart analytics ---- */
+  .da-list{display:flex;flex-direction:column;gap:5px}
+  .da-row{display:flex;align-items:center;gap:8px;font-size:12px}
+  .da-rank{font-size:11px;color:var(--muted);min-width:18px;text-align:right;flex:none}
+  .da-label{font-family:'Bebas Neue';font-size:16px;color:var(--cream);letter-spacing:.03em;flex:none;min-width:38px}
+  .da-bar-wrap{flex:1;height:8px;background:var(--wire);border-radius:4px;overflow:hidden;min-width:40px}
+  .da-bar{height:100%;border-radius:4px;transition:width .3s ease}
+  .da-count{font-family:'Bebas Neue';font-size:15px;color:var(--cream);flex:none;min-width:38px;text-align:right}
+  .da-sub{font-size:10px;color:var(--muted);flex:none}
+
   /* ---- practice leg stats panel ---- */
   .prac-stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px;text-align:left}
   .prac-col{background:var(--surface);border:1px solid var(--wire);border-radius:12px;padding:14px 16px}
@@ -1523,6 +1533,10 @@ function renderPlayerPage(){
     <div class="pp-section">
       <div class="pp-section-title">Top 10 finishes</div>
       <div id="player-top-finishes"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </div>
+    <div class="pp-section" id="dart-analytics-section">
+      <div class="pp-section-title">Dart Analytics</div>
+      <div id="dart-analytics-body"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </div>`;
 
   // statGrid replaced by stat bubbles above
@@ -1623,6 +1637,7 @@ function renderPlayerPage(){
   loadAvgChart(avgChartPeriod);
   loadDartWeights();
   loadTopFinishes();
+  loadDartAnalytics();
 }
 function clearLocalPlayerStats(name, mode){
   const s = stats[name]; if(!s) return;
@@ -1967,7 +1982,15 @@ function enterTurn(){
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.scored, trebleLess:ev.trebleLess, bust:ev.bust,
     checkout:ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null,
-    dartsThrown: game.darts.length });
+    dartsThrown: game.darts.length,
+    darts: game.darts.map((d,i) => ({
+      dartNo:     i + 1,
+      sector:     d.sector,
+      multiplier: d.mult,
+      scored:     d.value,  // face value regardless of bust
+      isTreble:   d.isTreble ? 1 : 0,
+      isDouble:   d.isDouble ? 1 : 0
+    })) });
   if(DB.mode==='local'){
     const s = stats[p.name];
     const _vd = game.darts.length;
@@ -2484,6 +2507,91 @@ function loadTopFinishes(){
       }).join('')}</div>`;
     })
     .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load finishes.</p>`; });
+}
+
+/* ---------- dart analytics ---------- */
+function loadDartAnalytics(){
+  const body = document.getElementById('dart-analytics-body');
+  const section = document.getElementById('dart-analytics-section');
+  if(!body) return;
+  if(DB.mode!=='api'){
+    body.innerHTML=`<p class="pp-meta" style="padding:4px 0">Dart analytics require the server backend.</p>`;
+    return;
+  }
+  const modeParam = (playerPageTab==='h2h'||playerPageTab==='practice') ? `&mode=${playerPageTab}` : '';
+  Backend.get(`/api/players/dart-analytics?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
+    .then(data => renderDartAnalytics(data, body))
+    .catch(()=>{ body.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load dart analytics.</p>`; });
+}
+
+function dartLabelFromParts(sector, mult){
+  if(sector == null) return null;
+  if(sector === 0) return 'Miss';
+  if(sector === 25) return mult === 2 ? 'Bull' : '25';
+  return (mult === 3 ? 'T' : mult === 2 ? 'D' : '') + sector;
+}
+
+function renderDartAnalytics(data, container){
+  if(!data){ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No dart data yet — available after games played with this version.</p>`; return; }
+  const { topSectors, trebleRates, checkoutRoutes } = data;
+  const noData = !topSectors.length && !trebleRates.length && !checkoutRoutes.length;
+  if(noData){ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No dart data yet — available after games played with this version.</p>`; return; }
+
+  // ── Most hit sectors ──────────────────────────────────────────────
+  const maxHits = topSectors[0]?.hits || 1;
+  const sectorRows = topSectors.map((r,i)=>{
+    const lbl = dartLabelFromParts(r.sector, r.multiplier);
+    const bar = Math.round(r.hits / maxHits * 100);
+    const color = r.multiplier === 3 ? 'var(--green)' : r.multiplier === 2 ? 'var(--red)' : 'var(--surface-2)';
+    return `<div class="da-row">
+      <span class="da-rank">${i+1}</span>
+      <span class="da-label">${lbl}</span>
+      <div class="da-bar-wrap"><div class="da-bar" style="width:${bar}%;background:${color}"></div></div>
+      <span class="da-count">${r.hits.toLocaleString()}</span>
+    </div>`;
+  }).join('');
+
+  // ── Treble rates ──────────────────────────────────────────────────
+  const trebleRows = trebleRates.map(r=>{
+    const pct = r.treble_pct ?? 0;
+    const bar = Math.round(pct);
+    return `<div class="da-row">
+      <span class="da-rank" style="min-width:28px">${r.sector}</span>
+      <div class="da-bar-wrap"><div class="da-bar" style="width:${bar}%;background:var(--green)"></div></div>
+      <span class="da-count">${pct.toFixed(1)}%</span>
+      <span class="da-sub">${r.trebles}/${r.total}</span>
+    </div>`;
+  }).join('');
+
+  // ── Checkout routes ───────────────────────────────────────────────
+  const routeRows = checkoutRoutes.map((r,i)=>{
+    const parts = [
+      dartLabelFromParts(r.s1, r.m1),
+      dartLabelFromParts(r.s2, r.m2),
+      dartLabelFromParts(r.s3, r.m3),
+    ].filter(Boolean);
+    return `<div class="da-row">
+      <span class="da-rank">${i+1}</span>
+      <span class="da-label" style="flex:1">${parts.join(' → ')}</span>
+      <span class="da-count">×${r.times}</span>
+    </div>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div>
+        <div class="pp-section-title" style="margin-bottom:8px">Most Hit Sectors</div>
+        <div class="da-list">${sectorRows || '<p class="pp-meta">No data yet.</p>'}</div>
+      </div>
+      <div>
+        <div class="pp-section-title" style="margin-bottom:8px">Treble Rate by Number</div>
+        <div class="da-list">${trebleRows || '<p class="pp-meta">No data yet.</p>'}</div>
+      </div>
+    </div>
+    <div>
+      <div class="pp-section-title" style="margin-bottom:8px">Top Checkout Routes</div>
+      <div class="da-list">${routeRows || '<p class="pp-meta">No checkouts recorded yet.</p>'}</div>
+    </div>`;
 }
 
 /* ---------- stats render ---------- */

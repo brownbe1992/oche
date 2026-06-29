@@ -66,6 +66,19 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_turns_player ON turns(player_id);
   CREATE INDEX IF NOT EXISTS idx_turns_game   ON turns(game_id);
 
+  CREATE TABLE IF NOT EXISTS darts (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    turn_id    INTEGER NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+    dart_no    INTEGER NOT NULL,    -- 1, 2, or 3 (position in the visit)
+    sector     INTEGER NOT NULL,    -- 0=miss  1-20=number  25=bull area
+    multiplier INTEGER NOT NULL,    -- 1=single  2=double  3=treble
+    scored     INTEGER NOT NULL,    -- face value regardless of bust
+    is_treble  INTEGER NOT NULL DEFAULT 0,
+    is_double  INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_darts_turn   ON darts(turn_id);
+  CREATE INDEX IF NOT EXISTS idx_darts_sector ON darts(sector, multiplier);
+
   CREATE TABLE IF NOT EXISTS timeline_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     game_id     INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
@@ -106,6 +119,10 @@ const q = {
   insertTurn   : db.prepare(`INSERT INTO turns
                    (game_id, player_id, set_no, leg_no, scored, treble_less, bust, checkout, checkout_points, darts_thrown)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+
+  insertDart   : db.prepare(`INSERT INTO darts
+                   (turn_id, dart_no, sector, multiplier, scored, is_treble, is_double)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)`),
 };
 
 /* ---------- player operations ---------- */
@@ -189,7 +206,7 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice }) {
 
 function addTurn(gameId, t) {
   const p = ensurePlayer(t.player);
-  q.insertTurn.run(
+  const info = q.insertTurn.run(
     Number(gameId), p.id,
     Number(t.set || 1), Number(t.leg || 1),
     Number(t.scored) || 0,
@@ -199,6 +216,21 @@ function addTurn(gameId, t) {
     t.checkout ? (Number(t.checkoutPoints) || 0) : null,
     Number(t.dartsThrown) || 3
   );
+  // Insert individual dart rows — one row per dart in the visit
+  if (Array.isArray(t.darts) && t.darts.length) {
+    const turnId = Number(info.lastInsertRowid);
+    for (const d of t.darts) {
+      q.insertDart.run(
+        turnId,
+        Number(d.dartNo),
+        Number(d.sector),
+        Number(d.multiplier),
+        Number(d.scored),
+        d.isTreble ? 1 : 0,
+        d.isDouble ? 1 : 0
+      );
+    }
+  }
   return { ok: true };
 }
 
@@ -709,6 +741,53 @@ function deleteLastTurn(gameId) {
   return { ok: true };
 }
 
+function getDartAnalytics(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const mf = _mf(mode);
+
+  // Base FROM for dart-level queries (darts → turns → games)
+  const BASE = `FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id WHERE t.player_id = ?`;
+
+  // 1 — Most hit sector/multiplier combinations
+  const topSectors = db.prepare(`
+    SELECT d.sector, d.multiplier, COUNT(*) AS hits
+    ${BASE} ${mf}
+    GROUP BY d.sector, d.multiplier
+    ORDER BY hits DESC
+    LIMIT 15
+  `).all(p.id);
+
+  // 2 — Treble hit rate per number (sectors 1-20 only)
+  const trebleRates = db.prepare(`
+    SELECT d.sector, COUNT(*) AS total,
+           SUM(d.is_treble) AS trebles,
+           ROUND(100.0 * SUM(d.is_treble) / COUNT(*), 1) AS treble_pct
+    ${BASE} ${mf} AND d.sector BETWEEN 1 AND 20
+    GROUP BY d.sector
+    ORDER BY treble_pct DESC
+  `).all(p.id);
+
+  // 3 — Most common checkout routes (up to 3 darts; d2/d3 are NULL for shorter finishes)
+  const checkoutRoutes = db.prepare(`
+    SELECT d1.sector AS s1, d1.multiplier AS m1,
+           d2.sector AS s2, d2.multiplier AS m2,
+           d3.sector AS s3, d3.multiplier AS m3,
+           COUNT(*) AS times
+    FROM turns t
+    JOIN games g ON g.id = t.game_id
+    JOIN  darts d1 ON d1.turn_id = t.id AND d1.dart_no = 1
+    LEFT JOIN darts d2 ON d2.turn_id = t.id AND d2.dart_no = 2
+    LEFT JOIN darts d3 ON d3.turn_id = t.id AND d3.dart_no = 3
+    WHERE t.player_id = ? AND t.checkout = 1 ${mf}
+    GROUP BY s1, m1, s2, m2, s3, m3
+    ORDER BY times DESC
+    LIMIT 10
+  `).all(p.id);
+
+  return { topSectors, trebleRates, checkoutRoutes };
+}
+
 function resetStats() {
   db.exec('DELETE FROM turns; DELETE FROM game_players; DELETE FROM games;');
   return { ok: true };
@@ -762,6 +841,7 @@ module.exports = {
   computeStats, getSummary, getOneEightyStats, getBigFishStats, getNineDarterStats,
   getPlayerStatBubbles, getMetricHistory,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, deleteLastTurn,
+  getDartAnalytics,
   getSettings, updateSettings, fireHaWebhook,
   _db: db,
 };

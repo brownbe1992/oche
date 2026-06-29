@@ -133,6 +133,11 @@ const server = http.createServer(async (req, res) => {
       const mode = url.searchParams.get('mode');
       return send(res, 200, db.getPlayerStatBubbles(url.searchParams.get('name'), mode));
     }
+    if (p === '/api/players/dart-analytics' && m === 'GET') {
+      const mode = url.searchParams.get('mode');
+      return send(res, 200, db.getDartAnalytics(url.searchParams.get('name'), mode));
+    }
+
     if (p === '/api/players/avg-history' && m === 'GET') {
       const name = url.searchParams.get('name');
       const period = url.searchParams.get('period') || 'month';
