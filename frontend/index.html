@@ -1048,7 +1048,7 @@ function renderHomeContent(s,h2h,practice){
     return `<div class="hof-list">${rows.map((f,i)=>{
       const dates=fmtDate(f.last_date);
       const outBadge=f.out?`<span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;align-self:center">${f.out==='double'?'DO':'SO'}</span>`:'';
-      const jName=escapeJs(f.name);
+      const jName=escapeHtml(escapeJs(f.name));
       return `<div class="hof-row expandable" role="button" aria-expanded="false"
         onclick="toggleFinishRoute(this,'${jName}',${f.score},'${mode}')">
         <span class="hof-rank">${i+1}</span>
@@ -1457,7 +1457,7 @@ function renderRoster(){
     const s=stats[name]||{};
     const avg = s.turns ? (s.totalPoints/s.turns).toFixed(1) : '—';
     const out = playerOut(name);
-    const j = escapeJs(name);
+    const j = escapeHtml(escapeJs(name));
     return `<div class="roster-row">
       <button class="rp-main" onclick="showPlayer('${j}')">
         <div class="rp-name">${escapeHtml(name)}</div>
@@ -1514,7 +1514,7 @@ function renderPlayerPage(){
   const s = stats[name] || {};
   const out = playerOut(name);
   const dartWeight = s.dartWeight || null;
-  const j = escapeJs(name);
+  const j = escapeHtml(escapeJs(name));
   const tab = playerPageTab;
   const cp = avgChartPeriod;
 
@@ -2561,7 +2561,7 @@ function loadTopFinishes(){
         const first=fmtDate(r.first_date);
         const last=fmtDate(r.last_date);
         const dates=r.times===1?first:`First: ${first} · Last: ${last}`;
-        const jPlayer=escapeJs(currentPlayer);
+        const jPlayer=escapeHtml(escapeJs(currentPlayer));
         return `<div class="finish-row" role="button" aria-expanded="false"
           onclick="toggleFinishRoute(this,'${jPlayer}',${r.score},'${_mode}')">
           <span class="finish-score">${r.score}</span>
@@ -2675,7 +2675,7 @@ function renderStats(){
     const s=stats[n];
     const avg=s.turns?(s.totalPoints/s.turns).toFixed(1):'0.0';
     return `<tr>
-      <td><button class="rp-main" style="margin:0" onclick="showPlayer('${escapeJs(n)}')">${escapeHtml(n)}</button></td>
+      <td><button class="rp-main" style="margin:0" onclick="showPlayer('${escapeHtml(escapeJs(n))}')">${escapeHtml(n)}</button></td>
       <td class="num"><span class="big">${avg}</span></td>
       <td class="num">${s.checkouts100}</td>
       <td class="num">${s.trebleLess}</td>

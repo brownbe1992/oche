@@ -342,7 +342,7 @@ function computeStats() {
       FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
       WHERE g.category='501' ${extraWhere}
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
-      HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)=1 AND COUNT(d.id)=9
+      HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9
     ) GROUP BY pid
   `).all();
 
@@ -450,7 +450,7 @@ function getSummary() {
       SELECT t.player_id FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
       WHERE g.category='501'
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
-      HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)=1 AND COUNT(d.id)=9
+      HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9
     )
   `).get().n;
   const practiceLegs = db.prepare(`
@@ -473,12 +473,12 @@ function getPlayerStatBubbles(playerName, mode) {
   const qd = (sql) => { const r = db.prepare(sql).get(p.id); return r ? r.v : null; };
   const dartsThrown    = qd(`SELECT COUNT(*) AS v ${JD} ${mf}`) ?? 0;
   const avgDartsPerDay = qd(`SELECT CAST(COUNT(*) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS v ${JD} ${mf}`);
-  const avgDartsPerLeg = qd(`SELECT AVG(leg_darts) AS v FROM (SELECT COUNT(d.id) AS leg_darts ${JD} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)=1)`);
+  const avgDartsPerLeg = qd(`SELECT AVG(leg_darts) AS v FROM (SELECT COUNT(d.id) AS leg_darts ${JD} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)>0)`);
   const legsWithOneEighty = q(`SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS v ${J} ${mf} AND t.scored=180`) ?? 0;
   const avg        = q(`SELECT CAST(SUM(t.scored) AS REAL)/NULLIF(COUNT(*),0) AS v ${J} ${mf}`);
   const one80s     = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.scored=180`) ?? 0;
   const bigFish    = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.checkout=1 AND t.checkout_points=170`) ?? 0;
-  const nineDarters= qd(`SELECT COUNT(*) AS v FROM (SELECT 1 ${JD} ${mf} AND g.category='501' GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)=1 AND COUNT(d.id)=9)`) ?? 0;
+  const nineDarters= qd(`SELECT COUNT(*) AS v FROM (SELECT 1 ${JD} ${mf} AND g.category='501' GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9)`) ?? 0;
   const totalLegs  = q(`SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS v ${J} ${mf}`) ?? 0;
   // tlLegs: legs where no dart was a treble
   const tlLegs     = qd(`SELECT COUNT(*) AS v FROM (SELECT t.game_id,t.set_no,t.leg_no ${JD} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(d.is_treble)=0)`) ?? 0;
@@ -583,7 +583,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         SELECT MAX(t.created_at) AS leg_ts
         FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
         WHERE t.player_id=? AND g.category='501' ${modeWhere} ${weightWhere}
-        GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)=1 AND COUNT(d.id)=9
+        GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'treblelesspct':
       return db.prepare(`SELECT ${L.fmt} AS bucket, CAST(SUM(is_tl) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
@@ -633,10 +633,10 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
       ) WHERE rn=1 ${F.and} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'avgdartsperleg':
       return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(leg_darts) AS value FROM (
-        SELECT MAX(t.created_at) AS leg_ts, SUM(t.darts_thrown) AS leg_darts
-        FROM turns t JOIN games g ON g.id=t.game_id
+        SELECT MAX(t.created_at) AS leg_ts, COUNT(d.id) AS leg_darts
+        FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
         WHERE t.player_id=? ${modeWhere} ${weightWhere}
-        GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)=1
+        GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)>0
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     default:
       return [];
@@ -672,7 +672,7 @@ function getNineDarterStats(mode) {
       SELECT t.player_id FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
       WHERE g.category = '501' ${mf}
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
-      HAVING COUNT(DISTINCT t.id) = 3 AND SUM(t.checkout) = 1 AND COUNT(d.id) = 9
+      HAVING COUNT(DISTINCT t.id) = 3 AND SUM(t.checkout) > 0 AND COUNT(d.id) = 9
     ) x JOIN players p ON p.id = x.player_id
     GROUP BY x.player_id ORDER BY count DESC
   `).all();
@@ -682,7 +682,7 @@ function getNineDarterStats(mode) {
     JOIN darts d ON d.turn_id=t.id
     WHERE g.category = '501' ${mf}
     GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
-    HAVING COUNT(DISTINCT t.id) = 3 AND SUM(t.checkout) = 1 AND COUNT(d.id) = 9
+    HAVING COUNT(DISTINCT t.id) = 3 AND SUM(t.checkout) > 0 AND COUNT(d.id) = 9
     ORDER BY created_at DESC LIMIT 10
   `).all();
   return { leaderboard, recent };
