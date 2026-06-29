@@ -397,10 +397,22 @@
 
   /* ---- top finishes ---- */
   .finish-list{display:flex;flex-direction:column;gap:5px}
-  .finish-row{display:flex;align-items:baseline;gap:10px}
+  .finish-row{display:flex;align-items:baseline;gap:10px;cursor:pointer;border-radius:8px;padding:3px 6px;margin:0 -6px;transition:background .15s}
+  .finish-row:hover{background:var(--surface-2)}
   .finish-score{font-family:'Bebas Neue';font-size:22px;color:var(--cream);min-width:38px}
   .finish-count{font-size:11px;font-weight:700;color:var(--gold);min-width:20px}
   .finish-dates{font-size:11.5px;color:var(--muted)}
+  .finish-row .expand-hint{font-size:10px;color:var(--muted);margin-left:auto;flex:none;transition:transform .2s}
+  .finish-row[aria-expanded="true"] .expand-hint{transform:rotate(180deg)}
+  .finish-route-detail{padding:4px 6px 8px 44px;display:flex;flex-direction:column;gap:4px}
+  .finish-route-detail.hidden{display:none}
+  .fr-row{display:flex;align-items:center;gap:8px;font-size:12px}
+  .fr-arrow{color:var(--muted);flex:none}
+  .fr-darts{font-family:'Bebas Neue';font-size:16px;color:var(--cream);letter-spacing:.03em;flex:1}
+  .fr-times{font-size:11px;color:var(--gold);font-weight:700;flex:none}
+  /* hof-row hover for homepage finishes */
+  .hof-row.expandable{cursor:pointer;border-radius:8px;padding:7px 6px;margin:0 -6px;transition:background .15s}
+  .hof-row.expandable:hover{background:var(--surface-2)}
 </style>
 </head>
 <body>
@@ -1030,12 +1042,14 @@ function renderHomeContent(s,h2h,practice){
     .filter(r=>r.total>0)
     .sort((a,b)=>b.total-a.total);
 
-  function hofSection(rows){
+  function hofSection(rows, mode=''){
     if(!rows||!rows.length) return `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
     return `<div class="hof-list">${rows.map((f,i)=>{
       const dates=fmtDate(f.last_date);
       const outBadge=f.out?`<span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;align-self:center">${f.out==='double'?'DO':'SO'}</span>`:'';
-      return `<div class="hof-row">
+      const jName=escapeJs(f.name);
+      return `<div class="hof-row expandable" role="button" aria-expanded="false"
+        onclick="toggleFinishRoute(this,'${jName}',${f.score},'${mode}')">
         <span class="hof-rank">${i+1}</span>
         <span class="hof-score">${f.score}</span>
         ${outBadge}
@@ -1099,7 +1113,7 @@ function renderHomeContent(s,h2h,practice){
       </div>
       <div class="pp-section">
         <div class="pp-section-title">Top Finishes</div>
-        ${hofSection(finishes)}
+        ${hofSection(finishes,'h2h')}
       </div>
     </div>
     ${achievementSection('180s 🎯', eighties)}
@@ -1122,7 +1136,7 @@ function renderHomeContent(s,h2h,practice){
       </div>
       <div class="pp-section">
         <div class="pp-section-title">Top Finishes</div>
-        ${hofSection(practice.finishes)}
+        ${hofSection(practice.finishes,'practice')}
       </div>
     </div>
     ${achievementSection('180s 🎯', practice.eighties)}
@@ -2473,6 +2487,51 @@ function applyCustomRange(){
   loadAvgChart('custom');
 }
 
+/* ---------- checkout route expansion ---------- */
+function toggleFinishRoute(row, player, score, mode){
+  // Toggle an existing detail panel
+  let detail = row.nextElementSibling;
+  if(detail && detail.classList.contains('finish-route-detail')){
+    const hidden = detail.classList.toggle('hidden');
+    row.setAttribute('aria-expanded', String(!hidden));
+    return;
+  }
+  // First open: create the panel and fetch routes
+  row.setAttribute('aria-expanded', 'true');
+  detail = document.createElement('div');
+  detail.className = 'finish-route-detail';
+  detail.innerHTML = `<span class="pp-meta" style="font-size:11px">Loading…</span>`;
+  row.after(detail);
+
+  if(DB.mode!=='api'){
+    detail.innerHTML = `<span class="pp-meta" style="font-size:11px">Route data requires the server backend.</span>`;
+    return;
+  }
+  const modeParam = mode ? `&mode=${encodeURIComponent(mode)}` : '';
+  Backend.get(`/api/players/checkout-route?name=${encodeURIComponent(player)}&score=${score}${modeParam}`)
+    .then(routes => {
+      if(!routes || !routes.length){
+        detail.innerHTML = `<span class="pp-meta" style="font-size:11px">No dart-level data for this finish — play more games to build history.</span>`;
+        return;
+      }
+      detail.innerHTML = routes.map(r => {
+        const parts = [
+          dartLabelFromParts(r.s1, r.m1),
+          dartLabelFromParts(r.s2, r.m2),
+          dartLabelFromParts(r.s3, r.m3),
+        ].filter(Boolean);
+        return `<div class="fr-row">
+          <span class="fr-arrow">↳</span>
+          <span class="fr-darts">${parts.join(' → ')}</span>
+          <span class="fr-times">×${r.times}</span>
+        </div>`;
+      }).join('');
+    })
+    .catch(() => {
+      detail.innerHTML = `<span class="pp-meta" style="font-size:11px">Could not load route data.</span>`;
+    });
+}
+
 /* ---------- top finishes ---------- */
 function fmtDate(dt){
   if(!dt) return '';
@@ -2494,15 +2553,19 @@ function loadTopFinishes(){
         container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No checkouts recorded yet.</p>`;
         return;
       }
+      const _mode = playerPageTab==='h2h'||playerPageTab==='practice' ? playerPageTab : '';
       container.innerHTML=`<div class="finish-list">${rows.map(r=>{
         const times=r.times===1?'×1':`×${r.times}`;
         const first=fmtDate(r.first_date);
         const last=fmtDate(r.last_date);
         const dates=r.times===1?first:`First: ${first} · Last: ${last}`;
-        return `<div class="finish-row">
+        const jPlayer=escapeJs(currentPlayer);
+        return `<div class="finish-row" role="button" aria-expanded="false"
+          onclick="toggleFinishRoute(this,'${jPlayer}',${r.score},'${_mode}')">
           <span class="finish-score">${r.score}</span>
           <span class="finish-count">${times}</span>
           <span class="finish-dates">${dates}</span>
+          <span class="expand-hint">▾</span>
         </div>`;
       }).join('')}</div>`;
     })

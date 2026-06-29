@@ -741,6 +741,27 @@ function deleteLastTurn(gameId) {
   return { ok: true };
 }
 
+function getCheckoutRoutes(playerName, score, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return [];
+  const mf = _mf(mode);
+  return db.prepare(`
+    SELECT d1.sector AS s1, d1.multiplier AS m1,
+           d2.sector AS s2, d2.multiplier AS m2,
+           d3.sector AS s3, d3.multiplier AS m3,
+           COUNT(*) AS times
+    FROM turns t
+    JOIN games g ON g.id = t.game_id
+    JOIN  darts d1 ON d1.turn_id = t.id AND d1.dart_no = 1
+    LEFT JOIN darts d2 ON d2.turn_id = t.id AND d2.dart_no = 2
+    LEFT JOIN darts d3 ON d3.turn_id = t.id AND d3.dart_no = 3
+    WHERE t.player_id = ? AND t.checkout = 1 AND t.checkout_points = ? ${mf}
+    GROUP BY s1, m1, s2, m2, s3, m3
+    ORDER BY times DESC
+    LIMIT 5
+  `).all(p.id, Number(score));
+}
+
 function getDartAnalytics(playerName, mode) {
   const p = getPlayer(playerName);
   if (!p) return null;
@@ -841,7 +862,7 @@ module.exports = {
   computeStats, getSummary, getOneEightyStats, getBigFishStats, getNineDarterStats,
   getPlayerStatBubbles, getMetricHistory,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, deleteLastTurn,
-  getDartAnalytics,
+  getCheckoutRoutes, getDartAnalytics,
   getSettings, updateSettings, fireHaWebhook,
   _db: db,
 };

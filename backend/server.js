@@ -133,6 +133,12 @@ const server = http.createServer(async (req, res) => {
       const mode = url.searchParams.get('mode');
       return send(res, 200, db.getPlayerStatBubbles(url.searchParams.get('name'), mode));
     }
+    if (p === '/api/players/checkout-route' && m === 'GET') {
+      const score = url.searchParams.get('score');
+      if (!score) return send(res, 400, { error: 'score required' });
+      return send(res, 200, db.getCheckoutRoutes(url.searchParams.get('name'), score, url.searchParams.get('mode')));
+    }
+
     if (p === '/api/players/dart-analytics' && m === 'GET') {
       const mode = url.searchParams.get('mode');
       return send(res, 200, db.getDartAnalytics(url.searchParams.get('name'), mode));
