@@ -351,13 +351,6 @@ function computeStats() {
   const nd9Prac = nineDarterBase("AND (g.practice=1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id=g.id)=1)");
 
   // Aggregate stats per mode — trebleLess and dartsThrown now come from the darts JOIN.
-  // Pre-aggregate darts per turn to avoid correlated subqueries in the outer GROUP BY.
-  const dartAgg = db.prepare(`
-    SELECT turn_id, COUNT(*) AS cnt, SUM(is_treble) AS trebles FROM darts GROUP BY turn_id
-  `).all();
-  const dartAggById = {};
-  dartAgg.forEach(r => { dartAggById[r.turn_id] = r; });
-
   const _agg = (modeWhere) => db.prepare(`
     SELECT t.player_id,
       COUNT(*) AS turns,
@@ -565,6 +558,8 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
   switch (metric) {
     case 'dartsthrown':
       return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(d.id) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'avgdartsperday':
+      return db.prepare(`SELECT ${T.fmt} AS bucket, CAST(COUNT(d.id) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'avg':
       return db.prepare(`SELECT ${T.fmt} AS bucket, CAST(SUM(t.scored) AS REAL)/COUNT(*) AS value, COUNT(*) AS count ${TBASE} GROUP BY bucket ORDER BY bucket`).all(...params);
     case '180s':

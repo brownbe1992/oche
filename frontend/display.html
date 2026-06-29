@@ -205,13 +205,14 @@ let bannerTimer = null;
 let achTimer = null;
 
 function fmtText(s){
-  const cat = s.category != null ? `${s.category}` : '';
+  const cat = s.category != null ? esc(s.category) : '';
+  const legNo = num(s.legNo), setNo = num(s.setNo), lps = num(s.legsPerSet), spg = num(s.setsPerGame);
   if(s.practice){
-    return `<b>${cat}</b> &nbsp; Practice &nbsp;·&nbsp; Leg ${s.legNo}`;
+    return `<b>${cat}</b> &nbsp; Practice &nbsp;·&nbsp; Leg ${legNo}`;
   }
-  const legs = s.legsPerSet>1 ? `first to ${s.legsPerSet} legs` : '1 leg';
-  const sets = s.setsPerGame>1 ? `first to ${s.setsPerGame} sets · ` : '';
-  const where = s.setsPerGame>1 ? `Set ${s.setNo} · Leg ${s.legNo}` : `Leg ${s.legNo}`;
+  const legs = lps>1 ? `first to ${lps} legs` : '1 leg';
+  const sets = spg>1 ? `first to ${spg} sets · ` : '';
+  const where = spg>1 ? `Set ${setNo} · Leg ${legNo}` : `Leg ${legNo}`;
   return `<b>${cat}</b> &nbsp; ${sets}${legs} &nbsp;·&nbsp; ${where}`;
 }
 
@@ -233,6 +234,7 @@ function render(s){
   }
 
   idle.classList.add('hidden'); grid.classList.remove('hidden');
+  if(!Array.isArray(s.players)) s.players = [];   // tolerate malformed snapshots
   fmtEl.innerHTML = fmtText(s);
 
   // 180s + Big Fish in top bar
@@ -264,9 +266,9 @@ function render(s){
   if(showScorePanel){
     cornerBR.classList.remove('hidden');
     cornerScore.innerHTML = s.players.map(p=>{
-      const score = s.setsPerGame > 1
-        ? `${p.setsWon}<span style="font-size:1.6vmin;color:var(--muted)"> sets</span>`
-        : `${p.legsWon}<span style="font-size:1.6vmin;color:var(--muted)">/${s.legsPerSet}</span>`;
+      const score = num(s.setsPerGame) > 1
+        ? `${num(p.setsWon)}<span style="font-size:1.6vmin;color:var(--muted)"> sets</span>`
+        : `${num(p.legsWon)}<span style="font-size:1.6vmin;color:var(--muted)">/${num(s.legsPerSet)}</span>`;
       return `<div class="corner-row"><span class="cn">${escapeHtml(p.name)}</span><span class="cv">${score}</span></div>`;
     }).join('');
   } else {
@@ -283,15 +285,15 @@ function render(s){
         <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}</div>
         <div class="sum-stats">
           <div class="sum-stat">
-            <div class="sv">${p.avg ?? '—'}</div>
+            <div class="sv">${p.avg!=null?esc(p.avg):'—'}</div>
             <div class="sl">Average</div>
           </div>
           <div class="sum-stat">
-            <div class="sv">${p.darts}</div>
+            <div class="sv">${num(p.darts)}</div>
             <div class="sl">Darts</div>
           </div>
           <div class="sum-stat">
-            <div class="sv">${p.busts}</div>
+            <div class="sv">${num(p.busts)}</div>
             <div class="sl">Busts</div>
           </div>
         </div>
@@ -300,18 +302,19 @@ function render(s){
     grid.innerHTML = s.players.map((p,i)=>{
       const active = i===s.currentIndex;
       const standing = s.practice
-        ? `Leg ${s.legNo}`
-        : s.setsPerGame>1
-          ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
-          : `Legs ${p.legsWon}/${s.legsPerSet}`;
+        ? `Leg ${num(s.legNo)}`
+        : num(s.setsPerGame)>1
+          ? `Sets ${num(p.setsWon)} · Legs ${num(p.legsWon)}`
+          : `Legs ${num(p.legsWon)}/${num(s.legsPerSet)}`;
       let throwbox = '';
       if(active){
+        const darts = Array.isArray(s.darts) ? s.darts : [];
         const slots = [0,1,2].map(k=>{
-          const lab = s.darts[k];
-          return `<div class="dart ${dartClass(lab)}">${lab || 'dart '+(k+1)}</div>`;
+          const lab = darts[k];
+          return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
         }).join('');
         const co = s.checkout
-          ? `<div class="checkout"><span class="lab">Checkout</span><span class="route">${s.checkout.replace(/ /g,'  →  ')}</span></div>`
+          ? `<div class="checkout"><span class="lab">Checkout</span><span class="route">${esc(s.checkout).replace(/ /g,'  →  ')}</span></div>`
           : '';
         throwbox = `<div class="throwbox"><div class="darts">${slots}</div>${co}</div>`;
       }
@@ -326,19 +329,19 @@ function render(s){
             <span class="ptag">${p.out==='double'?'DOUBLE OUT':'SINGLE OUT'}</span>
             ${active?'<span class="throwflag">▸ throwing</span>':''}
           </div>
-          <div class="score">${p.score}</div>
+          <div class="score">${num(p.score)}</div>
           <div class="dart-counts">
-            <div class="dart-count-row"><span class="dart-count-val">${p.legDarts ?? 0}</span><span class="dart-count-lbl">Leg</span></div>
+            <div class="dart-count-row"><span class="dart-count-val">${num(p.legDarts)}</span><span class="dart-count-lbl">Leg</span></div>
             ${s.practice
-              ? `<div class="dart-count-row"><span class="dart-count-val">${p.gameDarts ?? 0}</span><span class="dart-count-lbl">Session</span></div>`
-              : `<div class="dart-count-row"><span class="dart-count-val">${p.setDarts ?? 0}</span><span class="dart-count-lbl">Set</span></div>
-                 <div class="dart-count-row"><span class="dart-count-val">${p.gameDarts ?? 0}</span><span class="dart-count-lbl">Game</span></div>`
+              ? `<div class="dart-count-row"><span class="dart-count-val">${num(p.gameDarts)}</span><span class="dart-count-lbl">Session</span></div>`
+              : `<div class="dart-count-row"><span class="dart-count-val">${num(p.setDarts)}</span><span class="dart-count-lbl">Set</span></div>
+                 <div class="dart-count-row"><span class="dart-count-val">${num(p.gameDarts)}</span><span class="dart-count-lbl">Game</span></div>`
             }
           </div>
         </div>
         <div class="meta">
-          <span>leg <b>${p.legAvg ?? '—'}</b></span>
-          <span>game <b>${p.gameAvg ?? '—'}</b></span>
+          <span>leg <b>${p.legAvg!=null?esc(p.legAvg):'—'}</b></span>
+          <span>game <b>${p.gameAvg!=null?esc(p.gameAvg):'—'}</b></span>
           <span class="standing">${standing}</span>
         </div>
         ${throwbox}
@@ -403,6 +406,10 @@ function connect(){
 }
 
 function escapeHtml(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+// The live snapshot arrives from an unauthenticated POST /api/live, so every field
+// is treated as untrusted: strings are HTML-escaped, numeric fields are coerced.
+function esc(v){ return escapeHtml(v == null ? '' : String(v)); }
+function num(v){ return Number(v) || 0; }
 
 fetch('/api/live', {cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{ if(s) render(s); }).catch(()=>{});
 connect();
