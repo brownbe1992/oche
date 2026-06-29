@@ -936,7 +936,7 @@ function applyDartMode(){
   const tab1  = document.getElementById('imt-pad');
   const tab2  = document.getElementById('imt-board');
   if(!pad || !board) return;
-  const full  = game && (game.darts.length>=3 || game.busted || game.won);
+  const full  = !!(game && (game.darts.length>=3 || game.busted || game.won));
   if(dartboardMode){
     pad.classList.add('hidden'); if(multi) multi.classList.add('hidden');
     board.classList.remove('hidden');
@@ -1390,6 +1390,7 @@ async function startGame(){
     current: 0,
     setNo: 1, legNo: 1,
     darts: [],
+    busted: false, won: false,
     done: false,
     gameOneEighties: 0,
     gameBigFish: 0,
@@ -1845,7 +1846,7 @@ function pushLive(message){
 }
 
 function renderPad(){
-  const full = game.darts.length>=3 || game.busted || game.won;
+  const full = !!(game.darts.length>=3 || game.busted || game.won);
   if(dartboardMode){
     const board = document.getElementById('dart-board-wrap');
     if(board){
