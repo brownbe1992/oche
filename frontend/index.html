@@ -757,6 +757,13 @@ const DB = {
   mode: 'local',      // 'api' once a backend answers
   gameId: null,
 
+  // Serialize game writes so they reach the server in submission order. Without this,
+  // a quick "undo" could fire its DELETE before the turn's POST landed (or two writes
+  // could race), corrupting the recorded game. Each write waits for the previous one;
+  // a failure is logged but doesn't stall the queue.
+  _chain: Promise.resolve(),
+  _queue(fn){ this._chain = this._chain.then(fn).catch(logErr); return this._chain; },
+
   async detect(){
     try{ const r = await fetch('/api/health', {cache:'no-store'}); if(r.ok){ this.mode='api'; return; } }catch(e){}
     this.mode = 'local';
@@ -804,9 +811,10 @@ const DB = {
       catch(e){ logErr(e); this.gameId=null; }
     } else this.gameId=null;
   },
-  recordTurn(t){ if(this.mode==='api' && this.gameId!=null) Backend.send('POST',`/api/games/${this.gameId}/turns`, t).catch(logErr); },
-  recordEvent(type, setNo, legNo){ if(this.mode==='api' && this.gameId!=null) Backend.send('POST',`/api/games/${this.gameId}/events`, {type, setNo:setNo??null, legNo:legNo??null}).catch(logErr); },
-  completeGame(winner){ if(this.mode==='api' && this.gameId!=null) Backend.send('POST',`/api/games/${this.gameId}/complete`, {winner}).catch(logErr); },
+  recordTurn(t){ if(this.mode==='api' && this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/turns`, t)); } },
+  recordEvent(type, setNo, legNo){ if(this.mode==='api' && this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/events`, {type, setNo:setNo??null, legNo:legNo??null})); } },
+  completeGame(winner){ if(this.mode==='api' && this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/complete`, {winner})); } },
+  deleteLastTurn(){ if(this.mode==='api' && this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('DELETE',`/api/games/${id}/turns/last`)); } },
 
   async reset(){ if(this.mode==='api'){ await Backend.send('POST','/api/reset').catch(logErr); await this.refreshStats(); } },
 
@@ -1029,8 +1037,8 @@ function renderHomeContent(s,h2h,practice){
 
   // 3-dart average leaderboard — H2H only
   const avgBoard=Object.entries(stats)
-    .filter(([,p])=>p.h2hStats&&p.h2hStats.dartsThrown>0)
-    .map(([name,p])=>({name, avg:p.h2hStats.totalPoints/p.h2hStats.dartsThrown*3, turns:p.h2hStats.turns, out:p.out}))
+    .filter(([,p])=>p.h2hStats&&p.h2hStats.avgDarts>0)
+    .map(([name,p])=>({name, avg:p.h2hStats.totalPoints/p.h2hStats.avgDarts*3, turns:p.h2hStats.turns, out:p.out}))
     .sort((a,b)=>b.avg-a.avg);
 
   // Practice legs leaderboard
@@ -1124,8 +1132,8 @@ function renderHomeContent(s,h2h,practice){
 
   // Practice leaderboard
   const practiceAvgBoard=Object.entries(stats)
-    .filter(([,p])=>p.practiceStats&&p.practiceStats.dartsThrown>0)
-    .map(([name,p])=>({name,avg:p.practiceStats.totalPoints/p.practiceStats.dartsThrown*3,turns:p.practiceStats.turns,out:p.out}))
+    .filter(([,p])=>p.practiceStats&&p.practiceStats.avgDarts>0)
+    .map(([name,p])=>({name,avg:p.practiceStats.totalPoints/p.practiceStats.avgDarts*3,turns:p.practiceStats.turns,out:p.out}))
     .sort((a,b)=>b.avg-a.avg);
   const practiceAvgLeaderboard=renderAvgLeaderboard(practiceAvgBoard);
   const plb=document.getElementById('practice-leaderboard-body');
@@ -1411,8 +1419,10 @@ function newMatchPlayer(name, start){
     doubleOut: playerOut(name)==='double', // this player's own finish rule
     legPoints:0,  legVisits:0,    // resets every leg  -> per-leg average
     legDarts:0,   legBusts:0,     // darts thrown + busts this leg
+    legAvgDarts:0,                // darts counted for the leg 3-dart average (bust=3, win=actual)
     setDarts:0,                   // darts thrown in the current set (resets per set)
     gameDarts:0,                  // darts thrown in the entire game / session
+    gameAvgDarts:0,               // darts counted for the game 3-dart average (bust=3, win=actual)
     gamePoints:0, gameVisits:0,   // resets every game -> per-game average
     legsWon:0,    setsWon:0 };    // legsWon = legs in the current set
 }
@@ -1423,6 +1433,7 @@ function ensurePlayerStats(name){
   if(s.totalPoints==null)  s.totalPoints=0;
   if(s.turns==null)        s.turns=0;
   if(s.dartsThrown==null)  s.dartsThrown=0;
+  if(s.avgDarts==null)     s.avgDarts = s.dartsThrown || 0;  // 3-dart-avg denominator; backfill legacy data
   if(s.trebleLess==null)  s.trebleLess=0;
   if(s.checkouts100==null)s.checkouts100=0;
   if(s.dartWeight === undefined) s.dartWeight = null;
@@ -1431,10 +1442,10 @@ function ensurePlayerStats(name){
   if(s.nineDarters == null) s.nineDarters = 0;
   if(s.h2hAvgDartsPerLeg === undefined) s.h2hAvgDartsPerLeg = null;
   if(s.practiceAvgDartsPerLeg === undefined) s.practiceAvgDartsPerLeg = null;
-  if(!s.h2hStats) s.h2hStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0, nineDarters:0, dartsThrown:0 };
-  else { if(s.h2hStats.nineDarters==null) s.h2hStats.nineDarters=0; if(s.h2hStats.dartsThrown==null) s.h2hStats.dartsThrown=0; }
-  if(!s.practiceStats) s.practiceStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0, nineDarters:0, dartsThrown:0 };
-  else { if(s.practiceStats.nineDarters==null) s.practiceStats.nineDarters=0; if(s.practiceStats.dartsThrown==null) s.practiceStats.dartsThrown=0; }
+  if(!s.h2hStats) s.h2hStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0, nineDarters:0, dartsThrown:0, avgDarts:0 };
+  else { if(s.h2hStats.nineDarters==null) s.h2hStats.nineDarters=0; if(s.h2hStats.dartsThrown==null) s.h2hStats.dartsThrown=0; if(s.h2hStats.avgDarts==null) s.h2hStats.avgDarts=s.h2hStats.dartsThrown||0; }
+  if(!s.practiceStats) s.practiceStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0, nineDarters:0, dartsThrown:0, avgDarts:0 };
+  else { if(s.practiceStats.nineDarters==null) s.practiceStats.nineDarters=0; if(s.practiceStats.dartsThrown==null) s.practiceStats.dartsThrown=0; if(s.practiceStats.avgDarts==null) s.practiceStats.avgDarts=s.practiceStats.dartsThrown||0; }
   if(!s.legsByCat) s.legsByCat = s.games || {};   // migrate old `games` field (was per-leg counts)
   if(!s.gamesByCat) s.gamesByCat = {};
   if(!s.practiceLegs) s.practiceLegs = {};
@@ -1455,7 +1466,7 @@ function renderRoster(){
   }
   box.innerHTML = roster.map(name=>{
     const s=stats[name]||{};
-    const avg = s.dartsThrown ? (s.totalPoints/s.dartsThrown*3).toFixed(1) : '—';
+    const avg = s.avgDarts ? (s.totalPoints/s.avgDarts*3).toFixed(1) : '—';
     const out = playerOut(name);
     const j = escapeHtml(escapeJs(name));
     return `<div class="roster-row">
@@ -1650,7 +1661,7 @@ function renderPlayerPage(){
 }
 function clearLocalPlayerStats(name, mode){
   const s = stats[name]; if(!s) return;
-  const zeroStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0, nineDarters:0 };
+  const zeroStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0, nineDarters:0, dartsThrown:0, avgDarts:0 };
   if(mode === 'all'){
     s.h2hStats = {...zeroStats};
     s.practiceStats = {...zeroStats};
@@ -1658,7 +1669,7 @@ function clearLocalPlayerStats(name, mode){
     s.h2hLegsWonByCat = {}; s.h2hSetsWonByCat = {}; s.h2hGamesWonByCat = {};
     s.h2hAvgDartsPerLeg = null;
     s.practiceLegs = {}; s.practiceAvgDartsPerLeg = null;
-    s.turns = 0; s.totalPoints = 0; s.trebleLess = 0; s.dartsThrown = 0;
+    s.turns = 0; s.totalPoints = 0; s.trebleLess = 0; s.dartsThrown = 0; s.avgDarts = 0;
     s.checkouts100 = 0; s.oneEighties = 0; s.bigFish = 0; s.nineDarters = 0;
     persist(); return;
   }
@@ -1682,6 +1693,7 @@ function clearLocalPlayerStats(name, mode){
   s.bigFish      = (h.bigFish||0)      + (pr.bigFish||0);
   s.nineDarters  = (h.nineDarters||0)  + (pr.nineDarters||0);
   s.dartsThrown  = (h.dartsThrown||0)  + (pr.dartsThrown||0);
+  s.avgDarts     = (h.avgDarts||0)     + (pr.avgDarts||0);
   persist();
 }
 function askClearPlayerStats(name, mode){
@@ -1715,7 +1727,10 @@ function avgStr(points, darts){ return darts ? (points/darts*3).toFixed(1) : '�
 function accumTurnStats(target, ev, category, legDarts, visitDarts){
   target.turns       += 1;
   target.totalPoints += ev.scored;
-  if(visitDarts != null) target.dartsThrown = (target.dartsThrown||0) + visitDarts;
+  if(visitDarts != null){
+    target.dartsThrown = (target.dartsThrown||0) + visitDarts;        // physical darts thrown
+    target.avgDarts    = (target.avgDarts||0) + (ev.bust ? 3 : visitDarts); // darts counted for 3-dart avg
+  }
   if(ev.trebleLess)                              target.trebleLess  += 1;
   if(ev.win && ev.pointsThisVisit >= 100)        target.checkouts100+= 1;
   if(ev.scored === 180)                          target.oneEighties += 1;
@@ -1737,7 +1752,7 @@ function renderGame(){
         ${i===game.current?'<div class="turnflag">▸ throwing</div>':''}
       </div>
       <div class="meta">
-        <div class="avgs">leg <b>${avgStr(p.legPoints,p.legDarts)}</b> &nbsp;·&nbsp; game <b>${avgStr(p.gamePoints,p.gameDarts)}</b></div>
+        <div class="avgs">leg <b>${avgStr(p.legPoints,p.legAvgDarts)}</b> &nbsp;·&nbsp; game <b>${avgStr(p.gamePoints,p.gameAvgDarts)}</b></div>
         ${showStanding?`<div class="standing">${standing}</div>`:''}
       </div>
       <div class="rem-wrap">
@@ -1802,8 +1817,8 @@ function liveSnapshot(message){
     setNo:game.setNo, legNo:game.legNo, currentIndex:game.current,
     players: game.players.map(p=>({
       name:p.name, score:p.score, out:p.doubleOut?'double':'single',
-      legAvg:  p.legDarts  ? (p.legPoints/p.legDarts*3).toFixed(1)   : null,
-      gameAvg: p.gameDarts ? (p.gamePoints/p.gameDarts*3).toFixed(1) : null,
+      legAvg:  p.legAvgDarts  ? (p.legPoints/p.legAvgDarts*3).toFixed(1)   : null,
+      gameAvg: p.gameAvgDarts ? (p.gamePoints/p.gameAvgDarts*3).toFixed(1) : null,
       legsWon:p.legsWon, setsWon:p.setsWon,
       legDarts: p.legDarts  || 0,
       setDarts: p.setDarts  || 0,
@@ -1913,6 +1928,7 @@ function undoLastTurn(){
   p.score      = snap.score;
   p.legPoints  = snap.legPoints;  p.legVisits  = snap.legVisits;
   p.legDarts   = snap.legDarts;   p.legBusts   = snap.legBusts;
+  p.legAvgDarts = snap.legAvgDarts; p.gameAvgDarts = snap.gameAvgDarts;
   p.setDarts   = snap.setDarts;   p.gameDarts  = snap.gameDarts;
   p.gamePoints = snap.gamePoints; p.gameVisits = snap.gameVisits;
 
@@ -1937,9 +1953,9 @@ function undoLastTurn(){
   game.darts = []; game.busted = false; game.won = false;
   game.lastTurnSnapshot = null;  // one level of undo only
 
-  // Remove the last turn record from the database
-  if(DB.mode==='api' && DB.gameId!=null)
-    Backend.send('DELETE', `/api/games/${DB.gameId}/turns/last`).catch(()=>{});
+  // Remove the last turn record from the database (queued after the turn's POST so
+  // it can never overtake it)
+  DB.deleteLastTurn();
 
   const status=document.getElementById('status');
   if(status){ status.className='status'; status.textContent='Last turn undone.'; }
@@ -1962,6 +1978,7 @@ function enterTurn(){
   // snapshot state before mutations so undoLastTurn() can restore it
   const _snap = { pi:game.current, score:p.score,
     legPoints:p.legPoints, legVisits:p.legVisits, legDarts:p.legDarts, legBusts:p.legBusts,
+    legAvgDarts:p.legAvgDarts, gameAvgDarts:p.gameAvgDarts,
     setDarts:p.setDarts, gameDarts:p.gameDarts,
     gamePoints:p.gamePoints, gameVisits:p.gameVisits,
     oe:game.gameOneEighties, bf:game.gameBigFish, bu:game.gameBusts,
@@ -1969,21 +1986,24 @@ function enterTurn(){
   if(DB.mode==='local' && stats[p.name]){
     const _s=stats[p.name], _mk=(!game.practice&&game.players.length>1)?'h2hStats':'practiceStats';
     _snap.ls={ name:p.name, mk:_mk,
-      g:{ turns:_s.turns, totalPoints:_s.totalPoints, dartsThrown:_s.dartsThrown,
+      g:{ turns:_s.turns, totalPoints:_s.totalPoints, dartsThrown:_s.dartsThrown, avgDarts:_s.avgDarts,
           trebleLess:_s.trebleLess, checkouts100:_s.checkouts100,
           oneEighties:_s.oneEighties, bigFish:_s.bigFish, nineDarters:_s.nineDarters },
       m:{ turns:_s[_mk].turns, totalPoints:_s[_mk].totalPoints, trebleLess:_s[_mk].trebleLess,
           checkouts100:_s[_mk].checkouts100, oneEighties:_s[_mk].oneEighties,
           bigFish:_s[_mk].bigFish, nineDarters:_s[_mk].nineDarters,
-          dartsThrown:_s[_mk].dartsThrown||0 } };
+          dartsThrown:_s[_mk].dartsThrown||0, avgDarts:_s[_mk].avgDarts||0 } };
   }
   game.lastTurnSnapshot = _snap;
 
   // per-leg and per-game scope (shown live on the scoreboard — both modes)
+  const _adj = ev.bust ? 3 : game.darts.length;  // darts counted for the 3-dart average
   p.legPoints  += ev.scored; p.legVisits  += 1;
   p.legDarts   += game.darts.length;
+  p.legAvgDarts  += _adj;
   p.setDarts   += game.darts.length;
   p.gameDarts  += game.darts.length;
+  p.gameAvgDarts += _adj;
   if(ev.bust) p.legBusts += 1;
   p.gamePoints += ev.scored; p.gameVisits += 1;
   if(!ev.bust) p.score = ev.newScore;
@@ -1996,8 +2016,7 @@ function enterTurn(){
   if(DB.mode==='local'){
     const s = stats[p.name];
     const _vd = game.darts.length;
-    s.dartsThrown += _vd;
-    accumTurnStats(s, ev, game.category, p.legDarts, _vd);
+    accumTurnStats(s, ev, game.category, p.legDarts, _vd);   // updates dartsThrown + avgDarts
     const _mk = (!game.practice && game.players.length > 1) ? 'h2hStats' : 'practiceStats';
     accumTurnStats(s[_mk], ev, game.category, p.legDarts, _vd);
   }
@@ -2119,7 +2138,7 @@ function startNextLeg(newSet){
   sendHaWebhook('legstart', '', game.category, { setNo: game.setNo, legNo: game.legNo });
   game.starter = (game.starter + 1) % game.players.length;
   game.current = game.starter;
-  game.players.forEach(p=>{ p.score = game.start; p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legBusts=0; if(newSet) p.setDarts=0; });
+  game.players.forEach(p=>{ p.score = game.start; p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legAvgDarts=0; p.legBusts=0; if(newSet) p.setDarts=0; });
   game.legSummary = null;
   game.currentLegTurns = [];
   game.lastTurnSnapshot = null;
@@ -2193,7 +2212,7 @@ function finishUnit(kind, winner){
   }
   game.legSummary = game.players.map(p=>({
     name: p.name,
-    avg:   p.legDarts ? (p.legPoints / p.legDarts * 3).toFixed(1) : null,
+    avg:   p.legAvgDarts ? (p.legPoints / p.legAvgDarts * 3).toFixed(1) : null,
     darts: p.legDarts  || 0,
     busts: p.legBusts  || 0,
     won:   p.name === winner
@@ -2413,7 +2432,7 @@ function loadStatBubbles(){
     const ts=playerPageTab==='h2h'?(s.h2hStats||{}):playerPageTab==='practice'?(s.practiceStats||{}):s;
     renderStatBubbles({
       dartsThrown: playerPageTab==='overall' ? (s.dartsThrown||0) : (ts.dartsThrown||0),
-      avg: ts.dartsThrown?(ts.totalPoints/ts.dartsThrown*3):null,
+      avg: ts.avgDarts?(ts.totalPoints/ts.avgDarts*3):null,
       one80s: ts.oneEighties||0, bigFish: ts.bigFish||0, nineDarters: ts.nineDarters||0
     });
     return;
@@ -2679,7 +2698,7 @@ function renderStats(){
   }
   let rows = names.map(n=>{
     const s=stats[n];
-    const avg=s.dartsThrown?(s.totalPoints/s.dartsThrown*3).toFixed(1):'0.0';
+    const avg=s.avgDarts?(s.totalPoints/s.avgDarts*3).toFixed(1):'0.0';
     return `<tr>
       <td><button class="rp-main" style="margin:0" onclick="showPlayer('${escapeHtml(escapeJs(n))}')">${escapeHtml(n)}</button></td>
       <td class="num"><span class="big">${avg}</span></td>

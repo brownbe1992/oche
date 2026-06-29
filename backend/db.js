@@ -359,7 +359,10 @@ function computeStats() {
       COALESCE(SUM(CASE WHEN t.checkout=1 AND t.checkout_points>=100 THEN 1 ELSE 0 END),0) AS co100,
       COALESCE(SUM(CASE WHEN t.scored=180 THEN 1 ELSE 0 END),0) AS oneEighties,
       COALESCE(SUM(CASE WHEN t.checkout=1 AND t.checkout_points=170 THEN 1 ELSE 0 END),0) AS bigFish,
-      COALESCE(SUM(dt.cnt), 0) AS dartsThrown
+      COALESCE(SUM(dt.cnt), 0) AS dartsThrown,
+      -- darts counted toward the 3-dart average: a bust counts as a full 3-dart visit,
+      -- a winning visit counts only the darts actually thrown (dt.cnt)
+      COALESCE(SUM(CASE WHEN t.bust=1 THEN 3 ELSE dt.cnt END), 0) AS avgDarts
     FROM turns t JOIN games g ON g.id=t.game_id
     LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt, SUM(is_treble) AS trebles FROM darts GROUP BY turn_id) dt
       ON dt.turn_id=t.id
@@ -381,8 +384,8 @@ function computeStats() {
   const out = {};
   players.forEach(p => {
     nameById[p.id] = p.name;
-    const ha = h2hAggById[p.id]  || { turns:0, total:0, trebleLess:0, co100:0, oneEighties:0, bigFish:0, dartsThrown:0 };
-    const pa = pracAggById[p.id] || { turns:0, total:0, trebleLess:0, co100:0, oneEighties:0, bigFish:0, dartsThrown:0 };
+    const ha = h2hAggById[p.id]  || { turns:0, total:0, trebleLess:0, co100:0, oneEighties:0, bigFish:0, dartsThrown:0, avgDarts:0 };
+    const pa = pracAggById[p.id] || { turns:0, total:0, trebleLess:0, co100:0, oneEighties:0, bigFish:0, dartsThrown:0, avgDarts:0 };
     out[p.name] = {
       out: p.out_mode,
       dartWeight: p.dart_weight ?? null,
@@ -391,6 +394,7 @@ function computeStats() {
       trebleLess:  (ha.trebleLess||0)  + (pa.trebleLess||0),
       checkouts100:(ha.co100||0)       + (pa.co100||0),
       dartsThrown: (ha.dartsThrown||0) + (pa.dartsThrown||0),
+      avgDarts:    (ha.avgDarts||0)    + (pa.avgDarts||0),
       oneEighties: (ha.oneEighties ?? 0) + (pa.oneEighties ?? 0),
       bigFish:     (ha.bigFish     ?? 0) + (pa.bigFish     ?? 0),
       nineDarters: nd9AllById[p.id] ?? 0,
@@ -398,10 +402,10 @@ function computeStats() {
       practiceAvgDartsPerLeg: pracDartsById[p.id] != null ? +pracDartsById[p.id].toFixed(1) : null,
       h2hStats: { turns:ha.turns, totalPoints:ha.total, trebleLess:ha.trebleLess,
                   checkouts100:ha.co100, oneEighties:ha.oneEighties, bigFish:ha.bigFish,
-                  nineDarters: nd9H2HById[p.id] ?? 0, dartsThrown: ha.dartsThrown ?? 0 },
+                  nineDarters: nd9H2HById[p.id] ?? 0, dartsThrown: ha.dartsThrown ?? 0, avgDarts: ha.avgDarts ?? 0 },
       practiceStats: { turns:pa.turns, totalPoints:pa.total, trebleLess:pa.trebleLess,
                        checkouts100:pa.co100, oneEighties:pa.oneEighties, bigFish:pa.bigFish,
-                       nineDarters: nd9PracById[p.id] ?? 0, dartsThrown: pa.dartsThrown ?? 0 },
+                       nineDarters: nd9PracById[p.id] ?? 0, dartsThrown: pa.dartsThrown ?? 0, avgDarts: pa.avgDarts ?? 0 },
       legsByCat: {},
       gamesByCat: {},
       practiceLegs: {},
@@ -468,9 +472,11 @@ function getPlayerStatBubbles(playerName, mode) {
   const avgDartsPerDay = qd(`SELECT CAST(COUNT(*) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS v ${JD} ${mf}`);
   const avgDartsPerLeg = qd(`SELECT AVG(leg_darts) AS v FROM (SELECT COUNT(d.id) AS leg_darts ${JD} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)>0)`);
   const legsWithOneEighty = q(`SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS v ${J} ${mf} AND t.scored=180`) ?? 0;
-  // Standard 3-dart average: total points / total darts * 3
+  // Standard 3-dart average: total points / counted darts * 3, where a bust counts
+  // as a full 3-dart visit and a winning visit counts only the darts actually thrown.
+  const avgDarts   = qd(`SELECT SUM(adj) AS v FROM (SELECT CASE WHEN t.bust=1 THEN 3 ELSE COUNT(d.id) END AS adj ${JD} ${mf} GROUP BY t.id)`) ?? 0;
   const totalPts   = q(`SELECT SUM(t.scored) AS v ${J} ${mf}`) ?? 0;
-  const avg        = dartsThrown > 0 ? (totalPts / dartsThrown * 3) : null;
+  const avg        = avgDarts > 0 ? (totalPts / avgDarts * 3) : null;
   const one80s     = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.scored=180`) ?? 0;
   const bigFish    = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.checkout=1 AND t.checkout_points=170`) ?? 0;
   const nineDarters= qd(`SELECT COUNT(*) AS v FROM (SELECT 1 ${JD} ${mf} AND g.category='501' GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9)`) ?? 0;
@@ -570,10 +576,11 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
     case 'avgdartsperday':
       return db.prepare(`SELECT ${T.fmt} AS bucket, CAST(COUNT(d.id) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'avg':
-      // Standard 3-dart average: total points / total darts * 3 (per-turn darts
-      // pre-aggregated so the darts JOIN doesn't inflate SUM(scored)).
+      // Standard 3-dart average: total points / counted darts * 3 (per-turn darts
+      // pre-aggregated so the darts JOIN doesn't inflate SUM(scored)). A bust counts
+      // as a full 3-dart visit; a winning visit counts only the darts actually thrown.
       return db.prepare(`SELECT bucket, CAST(SUM(scored) AS REAL)/NULLIF(SUM(dcount),0)*3 AS value, COUNT(*) AS count FROM (
-        SELECT ${T.fmt} AS bucket, t.scored AS scored, COUNT(d.id) AS dcount
+        SELECT ${T.fmt} AS bucket, t.scored AS scored, CASE WHEN t.bust=1 THEN 3 ELSE COUNT(d.id) END AS dcount
         FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
         WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere}
         GROUP BY t.id
