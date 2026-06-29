@@ -2476,6 +2476,7 @@ function loadAvgChart(period){
   if(playerPageTab==='h2h'||playerPageTab==='practice') url+=`&mode=${playerPageTab}`;
   if(period==='custom') url+=`&start=${customRangeStart}&end=${customRangeEnd}`;
   if(avgChartWeight) url+=`&weight=${avgChartWeight}`;
+  url+=`&tz=${-new Date().getTimezoneOffset()}`;   // UTC stored, charts bucketed in local time
   Backend.get(url)
     .then(data=>drawAvgChart(data))
     .catch(()=>{ const c=document.getElementById('avg-chart-body'); if(c) c.innerHTML=`<p class="pp-meta" style="padding:10px 0">Could not load chart data.</p>`; });
@@ -2538,7 +2539,11 @@ function toggleFinishRoute(row, player, score, mode){
 /* ---------- top finishes ---------- */
 function fmtDate(dt){
   if(!dt) return '';
-  const [yr,mo,dy]=dt.slice(0,10).split('-');
+  // Stored timestamps are UTC ("YYYY-MM-DD HH:MM:SS"); display the local calendar date.
+  const hasTz = /[zZ]|[+-]\d\d:?\d\d$/.test(dt);
+  const d = new Date(dt.replace(' ','T') + (hasTz ? '' : 'Z'));
+  if(!isNaN(d)) return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+  const [yr,mo,dy]=dt.slice(0,10).split('-');   // fallback: show the raw date
   return `${MONTHS[+mo-1]} ${+dy}, ${yr}`;
 }
 

@@ -537,17 +537,24 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
     params.push(p.id, Number(opts.dartWeight));
   }
 
+  // Timestamps are stored in UTC; bucket labels and day/hour boundaries are shifted
+  // to the client's local time using the validated tz offset (minutes east of UTC).
+  const tz = Number.isInteger(opts.tz) ? opts.tz : 0;
+  const tzMod = tz ? `, '${tz>=0?'+':''}${tz} minutes'` : '';
+  const L_ = (col) => `${col}${tzMod}`;   // local-shifted column expression
+
   const bld = (tsCol) => {
+    const c = L_(tsCol);   // local-time expression for bucket labels & local-date boundaries
     let fmt, flt;
-    if      (period==='today')  { fmt=`strftime('%H',${tsCol})`;          flt=`date(${tsCol})=date('now')`; }
-    else if (period==='week')   { fmt=`strftime('%Y-%m-%d',${tsCol})`;    flt=`${tsCol}>=datetime('now','-7 days')`; }
-    else if (period==='month')  { fmt=`strftime('%Y-%m-%d',${tsCol})`;    flt=`${tsCol}>=datetime('now','-30 days')`; }
-    else if (period==='year')   { fmt=`'w'||strftime('%Y-%W',${tsCol})`;  flt=`${tsCol}>=datetime('now','-365 days')`; }
+    if      (period==='today')  { fmt=`strftime('%H',${c})`;          flt=`date(${c})=date('now'${tzMod})`; }
+    else if (period==='week')   { fmt=`strftime('%Y-%m-%d',${c})`;    flt=`${tsCol}>=datetime('now','-7 days')`; }
+    else if (period==='month')  { fmt=`strftime('%Y-%m-%d',${c})`;    flt=`${tsCol}>=datetime('now','-30 days')`; }
+    else if (period==='year')   { fmt=`'w'||strftime('%Y-%W',${c})`;  flt=`${tsCol}>=datetime('now','-365 days')`; }
     else if (period==='custom') {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(opts.start) || !/^\d{4}-\d{2}-\d{2}$/.test(opts.end)) throw new Error('Invalid date range');
-      fmt=`strftime('%Y-%m-%d',${tsCol})`; flt=`date(${tsCol})>='${opts.start}' AND date(${tsCol})<='${opts.end}'`;
+      fmt=`strftime('%Y-%m-%d',${c})`; flt=`date(${c})>='${opts.start}' AND date(${c})<='${opts.end}'`;
     }
-    else                        { fmt=`strftime('%Y-%m',${tsCol})`;       flt=null; }
+    else                        { fmt=`strftime('%Y-%m',${c})`;       flt=null; }
     return { fmt, and: flt ? `AND ${flt}` : '', where: flt ? `WHERE ${flt}` : '' };
   };
 

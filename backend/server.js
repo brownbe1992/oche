@@ -163,6 +163,8 @@ const server = http.createServer(async (req, res) => {
       if (weight && /^\d+$/.test(weight)) opts.dartWeight = Number(weight);
       const mode = url.searchParams.get('mode');
       if (mode === 'h2h' || mode === 'practice') opts.mode = mode;
+      const tz = url.searchParams.get('tz');   // client UTC offset in minutes, for local-time bucketing
+      if (tz && /^-?\d{1,4}$/.test(tz)) { const n = Number(tz); if (n >= -840 && n <= 840) opts.tz = n; }
       return send(res, 200, db.getMetricHistory(name, metric, period, opts));
     }
     if (p === '/api/reset' && m === 'POST') return send(res, 200, db.resetStats());
