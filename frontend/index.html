@@ -1973,7 +1973,7 @@ function undoLastTurn(){
 
   const status=document.getElementById('status');
   if(status){ status.className='status'; status.textContent='Last turn undone.'; }
-  renderSlots(); renderPad(); updateCheckout(false); pushLive();
+  renderGame(); renderSlots(); renderPad(); updateCheckout(false); pushLive();
 }
 
 function undoDart(){
