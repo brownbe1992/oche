@@ -1560,7 +1560,6 @@ function renderPlayerPage(){
   const catHtml = cats.length
     ? cats.map(c=>`${c}: <b>${(s.gamesByCat||{})[c]||0}</b> games · <b>${(s.legsByCat||{})[c]||0}</b> legs`).join('<br>')
     : '<span style="color:var(--muted)">none yet</span>';
-  const h2hDarts = s.h2hAvgDartsPerLeg != null ? s.h2hAvgDartsPerLeg : '—';
   const h2hCats = Object.keys({...(s.h2hGamesWonByCat||{}), ...(s.h2hSetsWonByCat||{}), ...(s.h2hLegsWonByCat||{})});
   const h2hHtml = h2hCats.length
     ? h2hCats.map(c=>`${c}: <b>${(s.h2hGamesWonByCat||{})[c]||0}</b> games · <b>${(s.h2hSetsWonByCat||{})[c]||0}</b> sets · <b>${(s.h2hLegsWonByCat||{})[c]||0}</b> legs`).join('<br>')
@@ -1569,7 +1568,6 @@ function renderPlayerPage(){
     <div class="pp-section">
       <div class="pp-section-title">H2H — Games &amp; legs played</div>
       <div class="pp-cat-lines">${catHtml}</div>
-      <div class="pp-cat-lines" style="margin-top:5px;font-size:12px;color:var(--muted)">Avg darts/leg: <b style="color:var(--ink)">${h2hDarts}</b></div>
     </div>
     <div class="pp-section">
       <div class="pp-section-title">H2H Wins</div>
@@ -1581,12 +1579,10 @@ function renderPlayerPage(){
   const pracHtml = pracCats.length
     ? pracCats.map(c=>`${c}: <b>${(s.practiceLegs||{})[c]||0}</b> legs`).join('<br>')
     : '<span style="color:var(--muted)">none yet</span>';
-  const pracDarts = s.practiceAvgDartsPerLeg != null ? s.practiceAvgDartsPerLeg : '—';
   const practiceSection = `
     <div class="pp-section">
       <div class="pp-section-title">Practice — Legs thrown</div>
       <div class="pp-cat-lines">${pracHtml}</div>
-      <div class="pp-cat-lines" style="margin-top:5px;font-size:12px;color:var(--muted)">Avg darts/leg: <b style="color:var(--ink)">${pracDarts}</b></div>
     </div>`;
 
   let tabContent;
@@ -1601,8 +1597,7 @@ function renderPlayerPage(){
       <div class="pp-section">
         <div class="pp-section-title">Games &amp; legs played</div>
         <div class="pp-cat-lines">${catHtml}</div>
-        <div class="pp-cat-lines" style="margin-top:5px;font-size:12px;color:var(--muted)">Avg darts/leg: <b style="color:var(--ink)">${h2hDarts}</b></div>
-      </div>
+        </div>
       <div class="pp-section">
         <div class="pp-section-title">H2H Wins</div>
         <div class="pp-cat-lines">${h2hHtml}</div>
@@ -1613,8 +1608,7 @@ function renderPlayerPage(){
       <div class="pp-section">
         <div class="pp-section-title">Legs thrown</div>
         <div class="pp-cat-lines">${pracHtml}</div>
-        <div class="pp-cat-lines" style="margin-top:5px;font-size:12px;color:var(--muted)">Avg darts/leg: <b style="color:var(--ink)">${pracDarts}</b></div>
-      </div>`;
+        </div>`;
   }
 
   body.innerHTML = `
@@ -1994,17 +1988,9 @@ function enterTurn(){
 
   // persist the turn: api mode posts it to the database; local mode updates counters
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
-    scored:ev.scored, trebleLess:ev.trebleLess, bust:ev.bust,
+    scored:ev.scored, bust:ev.bust,
     checkout:ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null,
-    dartsThrown: game.darts.length,
-    darts: game.darts.map((d,i) => ({
-      dartNo:     i + 1,
-      sector:     d.sector,
-      multiplier: d.mult,
-      scored:     d.value,  // face value regardless of bust
-      isTreble:   d.isTreble ? 1 : 0,
-      isDouble:   d.isDouble ? 1 : 0
-    })) });
+    darts: game.darts.map((d,i) => ({ dartNo: i+1, sector: d.sector, multiplier: d.mult })) });
   if(DB.mode==='local'){
     const s = stats[p.name];
     const _vd = game.darts.length;
@@ -2296,6 +2282,7 @@ function checkoutHint(rem, doubleOut, maxDarts){
 const STAT_DEFS = [
   { key:'dartsthrown',    label:'Darts Thrown',   desc:'Total darts thrown',                        fmt:v=>v!=null?Number(v).toLocaleString():'—' },
   { key:'avgdartsperday', label:'Darts / Day',    desc:'Average darts thrown per day played',        fmt:v=>v!=null?Number(v).toFixed(1):'—' },
+  { key:'avgdartsperleg', label:'Darts / Leg',    desc:'Average darts thrown per won leg',           fmt:v=>v!=null?Number(v).toFixed(1):'—' },
   { key:'avg',           label:'Average',     desc:'3-dart average',                            fmt:v=>v!=null?v.toFixed(1):'—' },
   { key:'180s',          label:'180s',         desc:'Count of 180s thrown',                    fmt:v=>v!=null?String(Math.round(v)):'—' },
   { key:'bigfish',       label:'Big Fish',    desc:'170 checkouts',                            fmt:v=>v!=null?String(Math.round(v)):'—' },
@@ -2360,6 +2347,9 @@ function drawAvgChart(data){
   const yMin=Math.max(0,rawMin-pad), yMax=rawMax+pad, yRange=yMax-yMin||1;
   const n=data.length;
   const statFmt=(STAT_DEFS.find(d=>d.key===selectedStat)||STAT_DEFS[0]).fmt;
+  // Y-axis uses whole numbers; detect suffix from the stat formatter
+  const _sample=statFmt(50); const _hasPct=_sample.includes('%');
+  const yAxisFmt=v=>_hasPct?Math.round(v)+'%':Math.round(v).toLocaleString();
   const pts=data.map((d,i)=>({
     x:ml+(n===1?cw/2:(i/(n-1))*cw),
     y:mt+ch-(((d.value??d.avg)-yMin)/yRange)*ch
@@ -2368,7 +2358,7 @@ function drawAvgChart(data){
   const areaPts=`${pts[0].x.toFixed(1)},${mt+ch} ${linePts} ${pts[n-1].x.toFixed(1)},${mt+ch}`;
   const yTicks=[yMin,(yMin+yMax)/2,yMax].map(v=>({
     y:(mt+ch-((v-yMin)/yRange)*ch).toFixed(1),
-    label:statFmt(v)
+    label:yAxisFmt(v)
   }));
   const labelCount=Math.min(n,5);
   const xLabels=Array.from({length:labelCount},(_,i)=>{
@@ -2404,7 +2394,7 @@ function drawAvgChart(data){
 }
 
 /* ---------- stat bubbles ---------- */
-const BUBBLE_KEY_MAP = { dartsthrown:'dartsThrown', avgdartsperday:'avgDartsPerDay', '180s':'one80s', bigfish:'bigFish', ninedarters:'nineDarters', treblelesspct:'treblelessPct', '180sperleg':'one80sPerLeg' };
+const BUBBLE_KEY_MAP = { dartsthrown:'dartsThrown', avgdartsperday:'avgDartsPerDay', avgdartsperleg:'avgDartsPerLeg', '180s':'one80s', bigfish:'bigFish', ninedarters:'nineDarters', treblelesspct:'treblelessPct', '180sperleg':'one80sPerLeg' };
 function selectStat(key){
   selectedStat = key;
   document.querySelectorAll('.stat-bubble').forEach(b=>b.classList.toggle('active',b.dataset.stat===key));

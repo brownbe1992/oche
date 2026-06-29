@@ -23,6 +23,20 @@ const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA foreign_keys = ON;');
 
+// Schema migration: if old turns table still has treble_less, clear game history and
+// recreate turns + darts with the normalised schema (player profiles/settings preserved).
+try {
+  db.exec("SELECT treble_less FROM turns LIMIT 0");
+  // Old schema detected — remove game-history tables so new CREATE TABLE below takes effect
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec(`DROP TABLE IF EXISTS darts;
+           DROP TABLE IF EXISTS turns;
+           DELETE FROM game_players;
+           DELETE FROM games;
+           DELETE FROM timeline_events;`);
+  db.exec("PRAGMA foreign_keys = ON");
+} catch(e) { /* Already on current schema */ }
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS players (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,33 +62,44 @@ db.exec(`
     PRIMARY KEY (game_id, player_id)
   );
 
+  -- turns stores visit-level outcomes that require game-state knowledge to compute.
+  -- treble_less and darts_thrown are gone — both are now derived from the darts table.
   CREATE TABLE IF NOT EXISTS turns (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     game_id         INTEGER NOT NULL REFERENCES games(id)   ON DELETE CASCADE,
     player_id       INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
     set_no          INTEGER NOT NULL,
     leg_no          INTEGER NOT NULL,
-    scored          INTEGER NOT NULL,
-    treble_less     INTEGER NOT NULL DEFAULT 0,
+    scored          INTEGER NOT NULL,    -- effective score; 0 for busts (game-state knowledge)
     bust            INTEGER NOT NULL DEFAULT 0,
     checkout        INTEGER NOT NULL DEFAULT 0,
-    checkout_points INTEGER,
-    darts_thrown    INTEGER NOT NULL DEFAULT 3,
+    checkout_points INTEGER,             -- kept as performance cache for ton+/Big Fish queries
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
   CREATE INDEX IF NOT EXISTS idx_turns_player ON turns(player_id);
   CREATE INDEX IF NOT EXISTS idx_turns_game   ON turns(game_id);
 
+  -- darts stores one row per physical dart. scored/is_treble/is_double are generated
+  -- from sector+multiplier — no app code writes them; SQLite computes and stores them.
   CREATE TABLE IF NOT EXISTS darts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     turn_id    INTEGER NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
-    dart_no    INTEGER NOT NULL,    -- 1, 2, or 3 (position in the visit)
+    dart_no    INTEGER NOT NULL,
     sector     INTEGER NOT NULL,    -- 0=miss  1-20=number  25=bull area
     multiplier INTEGER NOT NULL,    -- 1=single  2=double  3=treble
-    scored     INTEGER NOT NULL,    -- face value regardless of bust
-    is_treble  INTEGER NOT NULL DEFAULT 0,
-    is_double  INTEGER NOT NULL DEFAULT 0
+    scored     INTEGER NOT NULL GENERATED ALWAYS AS (
+      CASE WHEN sector=0 THEN 0
+           WHEN sector=25 AND multiplier=2 THEN 50
+           WHEN sector=25 THEN 25
+           ELSE sector*multiplier END
+    ) STORED,
+    is_treble  INTEGER NOT NULL GENERATED ALWAYS AS (
+      CASE WHEN multiplier=3 AND sector>=1 AND sector<=20 THEN 1 ELSE 0 END
+    ) STORED,
+    is_double  INTEGER NOT NULL GENERATED ALWAYS AS (
+      CASE WHEN multiplier=2 AND sector!=0 THEN 1 ELSE 0 END
+    ) STORED
   );
   CREATE INDEX IF NOT EXISTS idx_darts_turn   ON darts(turn_id);
   CREATE INDEX IF NOT EXISTS idx_darts_sector ON darts(sector, multiplier);
@@ -95,12 +120,11 @@ db.exec(`
   );
 `);
 
-// Column migrations — safe to re-run; ALTER TABLE throws if column exists, which we catch.
+// Column migrations for tables not recreated above — safe to re-run.
 try { db.exec('ALTER TABLE players      ADD COLUMN dart_weight INTEGER'); } catch(e) {}
 try { db.exec('ALTER TABLE game_players ADD COLUMN dart_weight INTEGER'); } catch(e) {}
 try { db.exec("ALTER TABLE game_players ADD COLUMN out_mode TEXT NOT NULL DEFAULT 'double'"); } catch(e) {}
 try { db.exec('ALTER TABLE games        ADD COLUMN practice    INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
-try { db.exec('ALTER TABLE turns        ADD COLUMN darts_thrown INTEGER NOT NULL DEFAULT 3'); } catch(e) {}
 
 /* ---------- prepared statements ---------- */
 const q = {
@@ -117,12 +141,11 @@ const q = {
   completeGame : db.prepare("UPDATE games SET completed_at = datetime('now'), winner_id = ? WHERE id = ?"),
 
   insertTurn   : db.prepare(`INSERT INTO turns
-                   (game_id, player_id, set_no, leg_no, scored, treble_less, bust, checkout, checkout_points, darts_thrown)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+                   (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
 
-  insertDart   : db.prepare(`INSERT INTO darts
-                   (turn_id, dart_no, sector, multiplier, scored, is_treble, is_double)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)`),
+  insertDart   : db.prepare(`INSERT INTO darts (turn_id, dart_no, sector, multiplier)
+                   VALUES (?, ?, ?, ?)`),
 };
 
 /* ---------- player operations ---------- */
@@ -210,25 +233,15 @@ function addTurn(gameId, t) {
     Number(gameId), p.id,
     Number(t.set || 1), Number(t.leg || 1),
     Number(t.scored) || 0,
-    t.trebleLess ? 1 : 0,
     t.bust ? 1 : 0,
     t.checkout ? 1 : 0,
-    t.checkout ? (Number(t.checkoutPoints) || 0) : null,
-    Number(t.dartsThrown) || 3
+    t.checkout ? (Number(t.checkoutPoints) || 0) : null
   );
-  // Insert individual dart rows — one row per dart in the visit
+  // Insert individual dart rows — scored/is_treble/is_double are generated columns
   if (Array.isArray(t.darts) && t.darts.length) {
     const turnId = Number(info.lastInsertRowid);
     for (const d of t.darts) {
-      q.insertDart.run(
-        turnId,
-        Number(d.dartNo),
-        Number(d.sector),
-        Number(d.multiplier),
-        Number(d.scored),
-        d.isTreble ? 1 : 0,
-        d.isDouble ? 1 : 0
-      );
+      q.insertDart.run(turnId, Number(d.dartNo), Number(d.sector), Number(d.multiplier));
     }
   }
   return { ok: true };
@@ -303,75 +316,66 @@ function computeStats() {
     GROUP BY t.player_id, g.category
   `).all();
 
-  // Average actual darts per leg for won legs only
+  // Average actual darts per won leg — COUNT(darts) replaces the removed darts_thrown column
   const h2hAvgDarts = db.prepare(`
-    SELECT pid, AVG(leg_darts) AS avg_darts
-    FROM (
-      SELECT t.player_id AS pid, SUM(t.darts_thrown) AS leg_darts
-      FROM turns t JOIN games g ON g.id = t.game_id
-      WHERE g.practice = 0
-        AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
-      GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
-      HAVING SUM(CASE WHEN t.checkout = 1 THEN 1 ELSE 0 END) > 0
+    SELECT pid, AVG(leg_darts) AS avg_darts FROM (
+      SELECT t.player_id AS pid, COUNT(d.id) AS leg_darts
+      FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+      WHERE g.practice=0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id=g.id)>1
+      GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout)>0
     ) GROUP BY pid
   `).all();
 
   const practiceAvgDarts = db.prepare(`
-    SELECT pid, AVG(leg_darts) AS avg_darts
-    FROM (
-      SELECT t.player_id AS pid, SUM(t.darts_thrown) AS leg_darts
-      FROM turns t JOIN games g ON g.id = t.game_id
-      WHERE g.practice = 1
-        OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1
-      GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
-      HAVING SUM(CASE WHEN t.checkout = 1 THEN 1 ELSE 0 END) > 0
+    SELECT pid, AVG(leg_darts) AS avg_darts FROM (
+      SELECT t.player_id AS pid, COUNT(d.id) AS leg_darts
+      FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+      WHERE g.practice=1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id=g.id)=1
+      GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout)>0
     ) GROUP BY pid
   `).all();
 
-  // Nine-darters: 501 legs won in exactly 3 visits
+  // Nine-darters: 501 legs won in exactly 9 darts across 3 visits
   const nineDarterBase = (extraWhere) => db.prepare(`
     SELECT pid, COUNT(*) AS n FROM (
       SELECT t.player_id AS pid
-      FROM turns t JOIN games g ON g.id = t.game_id
-      WHERE g.category = '501' ${extraWhere}
+      FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+      WHERE g.category='501' ${extraWhere}
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
-      HAVING COUNT(*) = 3 AND SUM(t.checkout) = 1 AND SUM(t.darts_thrown) = 9
+      HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)=1 AND COUNT(d.id)=9
     ) GROUP BY pid
   `).all();
 
   const nd9All  = nineDarterBase('');
-  const nd9H2H  = nineDarterBase("AND g.practice = 0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1");
-  const nd9Prac = nineDarterBase("AND (g.practice = 1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1)");
+  const nd9H2H  = nineDarterBase("AND g.practice=0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id=g.id)>1");
+  const nd9Prac = nineDarterBase("AND (g.practice=1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id=g.id)=1)");
 
-  const h2hAgg = db.prepare(`
+  // Aggregate stats per mode — trebleLess and dartsThrown now come from the darts JOIN.
+  // Pre-aggregate darts per turn to avoid correlated subqueries in the outer GROUP BY.
+  const dartAgg = db.prepare(`
+    SELECT turn_id, COUNT(*) AS cnt, SUM(is_treble) AS trebles FROM darts GROUP BY turn_id
+  `).all();
+  const dartAggById = {};
+  dartAgg.forEach(r => { dartAggById[r.turn_id] = r; });
+
+  const _agg = (modeWhere) => db.prepare(`
     SELECT t.player_id,
       COUNT(*) AS turns,
       COALESCE(SUM(t.scored), 0) AS total,
-      COALESCE(SUM(t.treble_less), 0) AS trebleLess,
+      COALESCE(SUM(CASE WHEN dt.trebles=0 THEN 1 ELSE 0 END), 0) AS trebleLess,
       COALESCE(SUM(CASE WHEN t.checkout=1 AND t.checkout_points>=100 THEN 1 ELSE 0 END),0) AS co100,
       COALESCE(SUM(CASE WHEN t.scored=180 THEN 1 ELSE 0 END),0) AS oneEighties,
       COALESCE(SUM(CASE WHEN t.checkout=1 AND t.checkout_points=170 THEN 1 ELSE 0 END),0) AS bigFish,
-      COALESCE(SUM(t.darts_thrown),0) AS dartsThrown
-    FROM turns t JOIN games g ON g.id = t.game_id
-    WHERE g.practice = 0
-      AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+      COALESCE(SUM(dt.cnt), 0) AS dartsThrown
+    FROM turns t JOIN games g ON g.id=t.game_id
+    LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt, SUM(is_treble) AS trebles FROM darts GROUP BY turn_id) dt
+      ON dt.turn_id=t.id
+    WHERE ${modeWhere}
     GROUP BY t.player_id
   `).all();
 
-  const pracAgg = db.prepare(`
-    SELECT t.player_id,
-      COUNT(*) AS turns,
-      COALESCE(SUM(t.scored), 0) AS total,
-      COALESCE(SUM(t.treble_less), 0) AS trebleLess,
-      COALESCE(SUM(CASE WHEN t.checkout=1 AND t.checkout_points>=100 THEN 1 ELSE 0 END),0) AS co100,
-      COALESCE(SUM(CASE WHEN t.scored=180 THEN 1 ELSE 0 END),0) AS oneEighties,
-      COALESCE(SUM(CASE WHEN t.checkout=1 AND t.checkout_points=170 THEN 1 ELSE 0 END),0) AS bigFish,
-      COALESCE(SUM(t.darts_thrown),0) AS dartsThrown
-    FROM turns t JOIN games g ON g.id = t.game_id
-    WHERE g.practice = 1
-      OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1
-    GROUP BY t.player_id
-  `).all();
+  const h2hAgg  = _agg(`g.practice=0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id=g.id)>1`);
+  const pracAgg = _agg(`g.practice=1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id=g.id)=1`);
 
   const nd9AllById  = {}; nd9All.forEach(r  => nd9AllById[r.pid]  = r.n);
   const nd9H2HById  = {}; nd9H2H.forEach(r  => nd9H2HById[r.pid]  = r.n);
@@ -437,16 +441,16 @@ function getSummary() {
     WHERE g.practice = 0
       AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
   `).get().n;
-  const darts      = db.prepare('SELECT SUM(darts_thrown) AS n FROM turns').get().n ?? 0;
-  const tonPlus      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout = 1 AND checkout_points >= 100').get().n;
-  const oneEighties  = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE scored = 180').get().n;
-  const bigFish      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout = 1 AND checkout_points = 170').get().n;
+  const darts        = db.prepare('SELECT COUNT(*) AS n FROM darts').get().n ?? 0;
+  const tonPlus      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout=1 AND checkout_points>=100').get().n;
+  const oneEighties  = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE scored=180').get().n;
+  const bigFish      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout=1 AND checkout_points=170').get().n;
   const nineDarters  = db.prepare(`
     SELECT COUNT(*) AS n FROM (
-      SELECT t.player_id FROM turns t JOIN games g ON g.id = t.game_id
-      WHERE g.category = '501'
+      SELECT t.player_id FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+      WHERE g.category='501'
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
-      HAVING COUNT(*) = 3 AND SUM(t.checkout) = 1 AND SUM(t.darts_thrown) = 9
+      HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)=1 AND COUNT(d.id)=9
     )
   `).get().n;
   const practiceLegs = db.prepare(`
@@ -465,29 +469,45 @@ function getPlayerStatBubbles(playerName, mode) {
   const q = (sql) => { const r = db.prepare(sql).get(p.id); return r ? r.v : null; };
   const J = `FROM turns t JOIN games g ON g.id = t.game_id WHERE t.player_id = ?`;
 
-  const dartsThrown    = q(`SELECT SUM(t.darts_thrown) AS v ${J} ${mf}`) ?? 0;
-  const avgDartsPerDay = q(`SELECT CAST(SUM(t.darts_thrown) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS v ${J} ${mf}`);
+  const JD = `FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id = ?`;
+  const qd = (sql) => { const r = db.prepare(sql).get(p.id); return r ? r.v : null; };
+  const dartsThrown    = qd(`SELECT COUNT(*) AS v ${JD} ${mf}`) ?? 0;
+  const avgDartsPerDay = qd(`SELECT CAST(COUNT(*) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS v ${JD} ${mf}`);
+  const avgDartsPerLeg = qd(`SELECT AVG(leg_darts) AS v FROM (SELECT COUNT(d.id) AS leg_darts ${JD} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)=1)`);
   const legsWithOneEighty = q(`SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS v ${J} ${mf} AND t.scored=180`) ?? 0;
   const avg        = q(`SELECT CAST(SUM(t.scored) AS REAL)/NULLIF(COUNT(*),0) AS v ${J} ${mf}`);
   const one80s     = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.scored=180`) ?? 0;
   const bigFish    = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.checkout=1 AND t.checkout_points=170`) ?? 0;
-  const nineDarters= q(`SELECT COUNT(*) AS v FROM (SELECT 1 ${J} ${mf} AND g.category='501' GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(*)=3 AND SUM(t.checkout)=1 AND SUM(t.darts_thrown)=9)`) ?? 0;
+  const nineDarters= qd(`SELECT COUNT(*) AS v FROM (SELECT 1 ${JD} ${mf} AND g.category='501' GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)=1 AND COUNT(d.id)=9)`) ?? 0;
   const totalLegs  = q(`SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS v ${J} ${mf}`) ?? 0;
-  const tlLegs     = q(`SELECT COUNT(*) AS v FROM (SELECT 1 ${J} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(1-t.treble_less)=0)`) ?? 0;
+  // tlLegs: legs where no dart was a treble
+  const tlLegs     = qd(`SELECT COUNT(*) AS v FROM (SELECT t.game_id,t.set_no,t.leg_no ${JD} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(d.is_treble)=0)`) ?? 0;
 
-  const first3avg = q(`SELECT AVG(scored) AS v FROM (
-    SELECT t.scored, ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
-    ${J} ${mf}
-  ) WHERE rn=1`);
+  // first3avg: actual score of first 3 darts (visit 1) per leg, using darts table
+  const first3avg = db.prepare(`
+    SELECT AVG(CAST(visit_scored AS REAL)) AS v FROM (
+      SELECT SUM(d.scored) AS visit_scored
+      FROM (SELECT t.id, t.game_id, t.set_no, t.leg_no,
+                   ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
+            ${J} ${mf}) t
+      JOIN darts d ON d.turn_id = t.id
+      WHERE t.rn = 1
+      GROUP BY t.game_id, t.set_no, t.leg_no
+    )
+  `).get(p.id)?.v ?? null;
 
-  const first9avg = q(`SELECT AVG(first3)/3.0 AS v FROM (
-    SELECT SUM(CASE WHEN rn<=3 THEN scored ELSE 0 END) AS first3,
-           SUM(CASE WHEN rn<=3 THEN 1 ELSE 0 END) AS c3
-    FROM (SELECT t.game_id,t.set_no,t.leg_no,t.scored,
-                 ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
-          ${J} ${mf}) t
-    GROUP BY game_id,set_no,leg_no HAVING c3=3
-  )`);
+  // first9avg: actual score of first 9 darts (visits 1-3) per leg, all legs included (no selection bias)
+  const first9avg = db.prepare(`
+    SELECT AVG(CAST(total_scored AS REAL) / NULLIF(dart_count,0) * 3) AS v FROM (
+      SELECT SUM(d.scored) AS total_scored, COUNT(d.id) AS dart_count
+      FROM (SELECT t.id, t.game_id, t.set_no, t.leg_no,
+                   ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
+            ${J} ${mf}) t
+      JOIN darts d ON d.turn_id = t.id
+      WHERE t.rn <= 3
+      GROUP BY t.game_id, t.set_no, t.leg_no
+    )
+  `).get(p.id)?.v ?? null;
 
   // avg100plus and avg90minus share the same subquery — compute in one pass
   const _legAvgs = db.prepare(`SELECT CAST(SUM(t.scored) AS REAL)/COUNT(*) AS la ${J} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no`).all(p.id);
@@ -500,7 +520,7 @@ function getPlayerStatBubbles(playerName, mode) {
   ) WHERE rn=1`);
 
   return {
-    dartsThrown, avgDartsPerDay, avg, one80s, bigFish, nineDarters,
+    dartsThrown, avgDartsPerDay, avgDartsPerLeg, avg, one80s, bigFish, nineDarters,
     treblelessPct: totalLegs > 0 ? (tlLegs / totalLegs * 100) : null,
     first3avg, first9avg, avg100plus, avg90minus, score140pct,
     one80sPerLeg: totalLegs > 0 ? (legsWithOneEighty / totalLegs) : null,
@@ -544,7 +564,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
 
   switch (metric) {
     case 'dartsthrown':
-      return db.prepare(`SELECT ${T.fmt} AS bucket, SUM(t.darts_thrown) AS value ${TBASE} GROUP BY bucket ORDER BY bucket`).all(...params);
+      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(d.id) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'avg':
       return db.prepare(`SELECT ${T.fmt} AS bucket, CAST(SUM(t.scored) AS REAL)/COUNT(*) AS value, COUNT(*) AS count ${TBASE} GROUP BY bucket ORDER BY bucket`).all(...params);
     case '180s':
@@ -561,30 +581,38 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
     case 'ninedarters':
       return db.prepare(`SELECT ${L.fmt} AS bucket, COUNT(*) AS value FROM (
         SELECT MAX(t.created_at) AS leg_ts
-        FROM turns t JOIN games g ON g.id=t.game_id
+        FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
         WHERE t.player_id=? AND g.category='501' ${modeWhere} ${weightWhere}
-        GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(*)=3 AND SUM(t.checkout)=1 AND SUM(t.darts_thrown)=9
+        GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)=1 AND COUNT(d.id)=9
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'treblelesspct':
       return db.prepare(`SELECT ${L.fmt} AS bucket, CAST(SUM(is_tl) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
-        SELECT MAX(t.created_at) AS leg_ts, CASE WHEN SUM(1-t.treble_less)=0 THEN 1 ELSE 0 END AS is_tl
-        FROM turns t JOIN games g ON g.id=t.game_id
+        SELECT MAX(t.created_at) AS leg_ts, CASE WHEN SUM(d.is_treble)=0 THEN 1 ELSE 0 END AS is_tl
+        FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
         WHERE t.player_id=? ${modeWhere} ${weightWhere}
         GROUP BY t.game_id,t.set_no,t.leg_no
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'first3avg':
-      return db.prepare(`SELECT ${F.fmt} AS bucket, AVG(scored) AS value FROM (
-        SELECT t.scored, t.created_at, ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
-        FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere}
-      ) WHERE rn=1 ${F.and} GROUP BY bucket ORDER BY bucket`).all(...params);
-    case 'first9avg':
-      return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(first3)/3.0 AS value FROM (
-        SELECT MAX(t.created_at) AS leg_ts, SUM(CASE WHEN rn<=3 THEN t.scored ELSE 0 END) AS first3,
-               SUM(CASE WHEN rn<=3 THEN 1 ELSE 0 END) AS c3
-        FROM (SELECT t.game_id,t.set_no,t.leg_no,t.scored,t.created_at,
+      // Score of first 3 actual darts (visit 1) per leg, using darts table for accuracy
+      return db.prepare(`SELECT ${F.fmt} AS bucket, AVG(CAST(visit_scored AS REAL)) AS value FROM (
+        SELECT t.created_at, SUM(d.scored) AS visit_scored
+        FROM (SELECT t.id, t.game_id, t.set_no, t.leg_no, t.created_at,
                      ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
               FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere}) t
-        GROUP BY t.game_id,t.set_no,t.leg_no HAVING c3=3
+        JOIN darts d ON d.turn_id = t.id
+        WHERE t.rn = 1 ${F.and}
+        GROUP BY t.game_id, t.set_no, t.leg_no
+      ) GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'first9avg':
+      // Score of first 9 actual darts (visits 1-3), all legs included — no HAVING bias
+      return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(CAST(total_scored AS REAL)/NULLIF(dart_count,0)*3) AS value FROM (
+        SELECT MAX(t.created_at) AS leg_ts, SUM(d.scored) AS total_scored, COUNT(d.id) AS dart_count
+        FROM (SELECT t.id, t.game_id, t.set_no, t.leg_no, t.created_at,
+                     ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
+              FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere}) t
+        JOIN darts d ON d.turn_id = t.id
+        WHERE t.rn <= 3
+        GROUP BY t.game_id, t.set_no, t.leg_no
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'avg100plus':
       return db.prepare(`SELECT ${L.fmt} AS bucket, CAST(SUM(CASE WHEN la>=100 THEN 1 ELSE 0 END) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
@@ -603,6 +631,13 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         SELECT t.scored, t.created_at, ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
         FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere}
       ) WHERE rn=1 ${F.and} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'avgdartsperleg':
+      return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(leg_darts) AS value FROM (
+        SELECT MAX(t.created_at) AS leg_ts, SUM(t.darts_thrown) AS leg_darts
+        FROM turns t JOIN games g ON g.id=t.game_id
+        WHERE t.player_id=? ${modeWhere} ${weightWhere}
+        GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)=1
+      ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     default:
       return [];
   }
@@ -634,19 +669,20 @@ function getNineDarterStats(mode) {
   const mf = _mf(mode);
   const leaderboard = db.prepare(`
     SELECT p.name, COUNT(*) AS count FROM (
-      SELECT t.player_id FROM turns t JOIN games g ON g.id = t.game_id
+      SELECT t.player_id FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
       WHERE g.category = '501' ${mf}
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
-      HAVING COUNT(*) = 3 AND SUM(t.checkout) = 1 AND SUM(t.darts_thrown) = 9
+      HAVING COUNT(DISTINCT t.id) = 3 AND SUM(t.checkout) = 1 AND COUNT(d.id) = 9
     ) x JOIN players p ON p.id = x.player_id
     GROUP BY x.player_id ORDER BY count DESC
   `).all();
   const recent = db.prepare(`
     SELECT p.name, MAX(t.created_at) AS created_at
-    FROM turns t JOIN games g ON g.id = t.game_id JOIN players p ON p.id = t.player_id
+    FROM turns t JOIN games g ON g.id=t.game_id JOIN players p ON p.id=t.player_id
+    JOIN darts d ON d.turn_id=t.id
     WHERE g.category = '501' ${mf}
     GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
-    HAVING COUNT(*) = 3 AND SUM(t.checkout) = 1 AND SUM(t.darts_thrown) = 9
+    HAVING COUNT(DISTINCT t.id) = 3 AND SUM(t.checkout) = 1 AND COUNT(d.id) = 9
     ORDER BY created_at DESC LIMIT 10
   `).all();
   return { leaderboard, recent };
