@@ -465,7 +465,8 @@ function getPlayerStatBubbles(playerName, mode) {
   const q = (sql) => { const r = db.prepare(sql).get(p.id); return r ? r.v : null; };
   const J = `FROM turns t JOIN games g ON g.id = t.game_id WHERE t.player_id = ?`;
 
-  const dartsThrown = q(`SELECT SUM(t.darts_thrown) AS v ${J} ${mf}`) ?? 0;
+  const dartsThrown    = q(`SELECT SUM(t.darts_thrown) AS v ${J} ${mf}`) ?? 0;
+  const avgDartsPerDay = q(`SELECT CAST(SUM(t.darts_thrown) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS v ${J} ${mf}`);
   const legsWithOneEighty = q(`SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS v ${J} ${mf} AND t.scored=180`) ?? 0;
   const avg        = q(`SELECT CAST(SUM(t.scored) AS REAL)/NULLIF(COUNT(*),0) AS v ${J} ${mf}`);
   const one80s     = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.scored=180`) ?? 0;
@@ -499,7 +500,7 @@ function getPlayerStatBubbles(playerName, mode) {
   ) WHERE rn=1`);
 
   return {
-    dartsThrown, avg, one80s, bigFish, nineDarters,
+    dartsThrown, avgDartsPerDay, avg, one80s, bigFish, nineDarters,
     treblelessPct: totalLegs > 0 ? (tlLegs / totalLegs * 100) : null,
     first3avg, first9avg, avg100plus, avg90minus, score140pct,
     one80sPerLeg: totalLegs > 0 ? (legsWithOneEighty / totalLegs) : null,

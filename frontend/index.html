@@ -2294,7 +2294,8 @@ function checkoutHint(rem, doubleOut, maxDarts){
 
 /* ---------- avg-over-time chart ---------- */
 const STAT_DEFS = [
-  { key:'dartsthrown',   label:'Darts Thrown',desc:'Total darts thrown',                        fmt:v=>v!=null?Number(v).toLocaleString():'—' },
+  { key:'dartsthrown',    label:'Darts Thrown',   desc:'Total darts thrown',                        fmt:v=>v!=null?Number(v).toLocaleString():'—' },
+  { key:'avgdartsperday', label:'Darts / Day',    desc:'Average darts thrown per day played',        fmt:v=>v!=null?Number(v).toFixed(1):'—' },
   { key:'avg',           label:'Average',     desc:'3-dart average',                            fmt:v=>v!=null?v.toFixed(1):'—' },
   { key:'180s',          label:'180s',         desc:'Count of 180s thrown',                    fmt:v=>v!=null?String(Math.round(v)):'—' },
   { key:'bigfish',       label:'Big Fish',    desc:'170 checkouts',                            fmt:v=>v!=null?String(Math.round(v)):'—' },
@@ -2375,7 +2376,16 @@ function drawAvgChart(data){
     return {x:pts[idx].x.toFixed(1), label:formatBucket(data[idx].bucket)};
   });
   const showDots=n<=31;
+  const showLabels=n<=20;  // data labels only when points aren't too crowded
   const gId='ag'+Math.random().toString(36).slice(2,7);
+  // Position each label above or below the dot to avoid clipping at the top edge
+  const dataLabels=showLabels?pts.map((p,i)=>{
+    const val=statFmt(avgs[i]);
+    const above=p.y>mt+14;
+    const ly=(above?p.y-8:p.y+13).toFixed(1);
+    const lx=Math.max(ml+2,Math.min(W-mr-2,p.x)).toFixed(1);
+    return `<text x="${lx}" y="${ly}" text-anchor="middle" font-size="9.5" fill="#d9b46a" font-weight="600">${val}</text>`;
+  }).join(''):'';
   container.innerHTML=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;display:block;overflow:visible">
     <defs>
       <linearGradient id="${gId}" x1="0" y1="0" x2="0" y2="1">
@@ -2388,12 +2398,13 @@ function drawAvgChart(data){
     <polygon points="${areaPts}" fill="url(#${gId})"/>
     <polyline points="${linePts}" fill="none" stroke="#d9b46a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
     ${showDots?pts.map(p=>`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="#d9b46a"/>`).join(''):''}
+    ${dataLabels}
     ${xLabels.map(l=>`<text x="${l.x}" y="${mt+ch+18}" text-anchor="middle" font-size="10" fill="#7a8070">${l.label}</text>`).join('')}
   </svg>`;
 }
 
 /* ---------- stat bubbles ---------- */
-const BUBBLE_KEY_MAP = { dartsthrown:'dartsThrown', '180s':'one80s', bigfish:'bigFish', ninedarters:'nineDarters', treblelesspct:'treblelessPct', '180sperleg':'one80sPerLeg' };
+const BUBBLE_KEY_MAP = { dartsthrown:'dartsThrown', avgdartsperday:'avgDartsPerDay', '180s':'one80s', bigfish:'bigFish', ninedarters:'nineDarters', treblelesspct:'treblelessPct', '180sperleg':'one80sPerLeg' };
 function selectStat(key){
   selectedStat = key;
   document.querySelectorAll('.stat-bubble').forEach(b=>b.classList.toggle('active',b.dataset.stat===key));
