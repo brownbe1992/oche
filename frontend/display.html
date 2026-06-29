@@ -18,7 +18,7 @@
   body{
     background:radial-gradient(120% 90% at 50% -10%, #1b1d19 0%, var(--board) 60%);
     color:var(--ink); font-family:'Inter',system-ui,sans-serif;
-    -webkit-font-smoothing:antialiased; height:100vh; overflow:hidden;
+    -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; height:100vh; overflow:hidden;
     display:flex; flex-direction:column; padding:2.2vmin 2.6vmin;
     font-feature-settings:"tnum" 1;
   }
@@ -84,13 +84,13 @@
   .dart.d{border-color:var(--red);color:#ff8a93}
 
   /* status flash on a card (bust / game shot) */
-  .flash{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-    font-family:'Bebas Neue';font-size:8vmin;letter-spacing:.06em;backdrop-filter:blur(2px)}
+  .flash{position:absolute;top:0;right:0;bottom:0;left:0;display:flex;align-items:center;justify-content:center;
+    font-family:'Bebas Neue';font-size:8vmin;letter-spacing:.06em;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
   .flash.bust{background:rgba(226,71,61,.22);color:#ffb4ad}
   .flash.shot{background:rgba(27,138,58,.22);color:#9bf0ba}
 
   /* full-screen banner for leg/set/game results */
-  .banner{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:1vmin;
+  .banner{position:fixed;top:0;right:0;bottom:0;left:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:1vmin;
     background:rgba(8,9,7,.86);z-index:20;text-align:center;padding:6vmin}
   .banner.show{display:flex;animation:fade .3s ease both}
   @keyframes fade{from{opacity:0}to{opacity:1}}
@@ -106,7 +106,7 @@
   /* score panel (bottom-right, H2H only) */
   .corner{position:fixed;bottom:2.2vmin;right:2.6vmin;display:flex;flex-direction:column;gap:.7vmin;
     background:rgba(20,22,18,.88);border:1px solid var(--wire);border-radius:1.4vmin;
-    padding:1.4vmin 2vmin;backdrop-filter:blur(4px);min-width:16vmin;text-align:right}
+    padding:1.4vmin 2vmin;-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);min-width:16vmin;text-align:right}
   .corner.hidden{display:none}
   .corner-title{font-size:1.4vmin;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:600;margin-bottom:.3vmin}
   .corner-row{display:flex;flex-direction:row-reverse;align-items:baseline;justify-content:space-between;gap:2vmin;font-size:2.1vmin}
@@ -126,7 +126,7 @@
   .sum-card.winner .sum-stat .sv{color:#fff}
 
   /* achievement flash overlay */
-  .ach-overlay{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;
+  .ach-overlay{position:fixed;top:0;right:0;bottom:0;left:0;display:none;flex-direction:column;align-items:center;justify-content:center;
     gap:1.8vmin;background:rgba(8,9,7,.82);z-index:30;text-align:center;pointer-events:none}
   .ach-overlay.show{display:flex;animation:achpop .35s ease both}
   @keyframes achpop{from{opacity:0;transform:scale(.88)}to{opacity:1;transform:scale(1)}}
