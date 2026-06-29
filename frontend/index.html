@@ -186,6 +186,7 @@
   .imt-btn[aria-pressed="true"]{background:var(--surface-2);color:var(--ink);border-color:var(--muted)}
   .turn-actions .mode-end-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
   .dart-board-wrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .dart-board-wrap.board-disabled{pointer-events:none;opacity:.4}
   .board-miss{flex:none;margin-top:8px}
   .hidden{display:none!important}
 
@@ -577,14 +578,31 @@
       <h2 style="font-size:18px;margin-bottom:4px">Settings</h2>
       <p style="color:var(--muted);font-size:13px;margin:0 0 20px">App configuration and integrations.</p>
 
-      <p id="settings-api-note" hidden style="color:var(--muted);font-size:13px;background:var(--surface-2);border:1px solid var(--wire);border-radius:10px;padding:12px 14px">
-        Settings require the server backend. Open the app via Docker at <code>http://&lt;your-server&gt;:8046</code>.
-      </p>
       <p id="settings-error" hidden style="color:var(--bust);font-size:13px;background:rgba(226,71,61,.1);border:1px solid var(--bust);border-radius:10px;padding:12px 14px;margin-bottom:16px"></p>
 
-      <div class="pp-section">
-        <div class="pp-section-title" style="display:flex;align-items:center;gap:8px">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--gold)"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <!-- Preferences -->
+      <div class="pp-section" style="margin-bottom:24px">
+        <div class="pp-section-title">Preferences</div>
+        <div>
+          <label class="field">Default Player</label>
+          <select class="pselect" id="pref-default-player" style="width:auto;min-width:200px">
+            <option value="">No default</option>
+          </select>
+          <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.5">This player is always pre-selected on the New Game page.</p>
+        </div>
+      </div>
+
+      <p id="settings-api-note" hidden style="color:var(--muted);font-size:13px;background:var(--surface-2);border:1px solid var(--wire);border-radius:10px;padding:12px 14px;margin-bottom:16px">
+        Smart Home Integration requires the server backend. Open the app via Docker at <code>http://&lt;your-server&gt;:8046</code>.
+      </p>
+
+      <!-- Smart Home Integration -->
+      <div class="pp-section" id="smart-home-section">
+        <div class="pp-section-title">Smart Home Integration</div>
+
+        <div style="margin-bottom:20px">
+        <div class="pp-section-title" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink);text-transform:none;letter-spacing:0;margin-bottom:8px">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--gold)"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
           Home Assistant
         </div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
@@ -653,12 +671,14 @@
           </div>
         </div>
 
-        <div class="btn-row" style="margin-top:18px">
-          <button class="btn btn-primary" id="settings-save-btn" onclick="saveSettings()">Save settings</button>
-        </div>
-        <p style="font-size:11px;color:var(--muted);margin:10px 0 0;line-height:1.6">
-          Webhook payload: <code style="background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:11px">{ "player": "Name", "event": "oneeighty", "category": "501", "timestamp": 1234567890 }</code>
-        </p>
+          <p style="font-size:11px;color:var(--muted);margin:14px 0 0;line-height:1.6">
+            Webhook payload: <code style="background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:11px">{ "player": "Name", "event": "oneeighty", "category": "501", "timestamp": 1234567890 }</code>
+          </p>
+        </div><!-- end HA subsection -->
+      </div><!-- end Smart Home section -->
+
+      <div class="btn-row" style="margin-top:20px">
+        <button class="btn btn-primary" id="settings-save-btn" onclick="saveSettings()">Save settings</button>
       </div>
     </div>
   </section>
@@ -735,7 +755,7 @@ const DB = {
       Object.keys(stats).forEach(ensurePlayerStats);
       roster.forEach(ensurePlayerStats);
       roster.forEach(n=>{ if(!prefs[n]) prefs[n]={out:'double'}; });
-      if(roster.length===0){ roster=['Player 1']; ensurePlayerStats('Player 1'); prefs['Player 1']={out:'double'}; persist(); }
+      // No auto-creation — show empty Players page so the user adds their own players
     }
   },
 
@@ -825,13 +845,15 @@ let stats = {};
 let prefs = {};      // name -> { out:'double'|'single' }  (per-player finish rule)
 let mult = 1;
 let dartboardMode = true;
+let defaultPlayer = localStorage.getItem('oche_default_player') || '';
 
 /* ---------- dartboard input mode ---------- */
 const DB_SECTORS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
 
 function throwDartBoard(sector, m){ mult = m; throwDart(sector); }
 
-function buildDartboard(disabled){
+function buildDartboard(){
+  // Built once — disabled state is toggled via .board-disabled on the wrapper
   const CX=250, CY=250;
   const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248 };
   const DEG = 360/20;
@@ -842,14 +864,13 @@ function buildDartboard(disabled){
     const lg=e-s>180?1:0;
     return `M${f(x1)},${f(y1)} A${r1},${r1} 0 ${lg},1 ${f(x2)},${f(y2)} L${f(x3)},${f(y3)} A${r2},${r2} 0 ${lg},0 ${f(x4)},${f(y4)} Z`;
   }
-  const dis = disabled;
-  const oc = (sec, m) => dis ? '' : `onclick="throwDartBoard(${sec},${m})"`;
+  const oc = (sec, m) => `onclick="throwDartBoard(${sec},${m})"`;
   let s = `<svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg"
     style="width:100%;height:100%;touch-action:manipulation;-webkit-tap-highlight-color:transparent"
     preserveAspectRatio="xMidYMid meet">
     <style>
-      .dz{${dis?'opacity:.4;cursor:not-allowed':'cursor:pointer;transition:filter .07s'}}
-      ${dis?'':'.dz:hover{filter:brightness(1.4)}.dz:active{filter:brightness(1.9)}'}
+      .dz{cursor:pointer;transition:filter .07s}
+      .dz:hover{filter:brightness(1.4)}.dz:active{filter:brightness(1.9)}
     </style>
     <circle cx="${CX}" cy="${CY}" r="${R.bg}" fill="#0d0e0b"/>
     <circle cx="${CX}" cy="${CY}" r="${R.doubleOut+1}" fill="#111210"/>
@@ -887,7 +908,9 @@ function applyDartMode(){
   const full  = game && (game.darts.length>=3 || game.busted || game.won);
   if(dartboardMode){
     pad.classList.add('hidden'); if(multi) multi.classList.add('hidden');
-    board.classList.remove('hidden'); board.innerHTML = buildDartboard(full);
+    board.classList.remove('hidden');
+    if(!board.querySelector('svg')) board.innerHTML = buildDartboard(); // build once
+    board.classList.toggle('board-disabled', full);
     if(missB){ missB.classList.remove('hidden'); missB.disabled = full; }
     if(tab1) tab1.setAttribute('aria-pressed','false');
     if(tab2) tab2.setAttribute('aria-pressed','true');
@@ -1115,9 +1138,19 @@ function openScoreboard(){
 
 /* ---------- settings ---------- */
 function renderSettings(){
+  // Preferences — always available (stored in localStorage)
+  const sel = document.getElementById('pref-default-player');
+  if(sel){
+    sel.innerHTML = '<option value="">No default</option>' +
+      roster.map(n=>`<option value="${escapeHtml(n)}"${n===defaultPlayer?' selected':''}>${escapeHtml(n)}</option>`).join('');
+  }
+
+  // Smart Home Integration — requires API backend
   if(DB.mode!=='api'){
     const note=document.getElementById('settings-api-note');
     if(note) note.hidden=false;
+    const sh=document.getElementById('smart-home-section');
+    if(sh) sh.style.opacity='0.4';
     return;
   }
   Backend.get('/api/settings').then(cfg=>{
@@ -1137,10 +1170,20 @@ function renderSettings(){
   }).catch(err=>{ const s=document.getElementById('settings-error'); if(s){ s.textContent='Could not load settings: '+err.message; s.hidden=false; } });
 }
 function saveSettings(){
-  if(DB.mode!=='api'){ uiAlert('Settings require the server backend.'); return; }
   const v = id => (document.getElementById(id)||{}).value || '';
   const btn = document.getElementById('settings-save-btn');
   if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
+
+  // Save default player preference to localStorage (works in all modes)
+  defaultPlayer = v('pref-default-player');
+  localStorage.setItem('oche_default_player', defaultPlayer);
+
+  if(DB.mode!=='api'){
+    if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
+    uiAlert('Preferences saved.');
+    return;
+  }
+
   Backend.send('PUT','/api/settings',{
     ha_url:                  v('ha-url').replace(/\/+$/,''),
     ha_webhook_oneeighty:    v('ha-wh-oneeighty'),
@@ -1220,7 +1263,10 @@ function deletePlayer(name){
 /* ---------- setup screen (choose players from roster) ---------- */
 function sanitizeSlots(){
   setup.slots = setup.slots.filter(s=>roster.includes(s));
-  if(setup.slots.length===0 && roster.length) setup.slots=[roster[0]];
+  if(setup.slots.length===0 && roster.length){
+    const def = roster.includes(defaultPlayer) ? defaultPlayer : roster[0];
+    setup.slots = [def];
+  }
 }
 function renderPlayers(){
   closeAddPlayerMenu();
@@ -1360,10 +1406,10 @@ function ensurePlayerStats(name){
   if(s.nineDarters == null) s.nineDarters = 0;
   if(s.h2hAvgDartsPerLeg === undefined) s.h2hAvgDartsPerLeg = null;
   if(s.practiceAvgDartsPerLeg === undefined) s.practiceAvgDartsPerLeg = null;
-  if(!s.h2hStats) s.h2hStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0, nineDarters:0 };
-  else if(s.h2hStats.nineDarters == null) s.h2hStats.nineDarters = 0;
-  if(!s.practiceStats) s.practiceStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0, nineDarters:0 };
-  else if(s.practiceStats.nineDarters == null) s.practiceStats.nineDarters = 0;
+  if(!s.h2hStats) s.h2hStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0, nineDarters:0, dartsThrown:0 };
+  else { if(s.h2hStats.nineDarters==null) s.h2hStats.nineDarters=0; if(s.h2hStats.dartsThrown==null) s.h2hStats.dartsThrown=0; }
+  if(!s.practiceStats) s.practiceStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0, nineDarters:0, dartsThrown:0 };
+  else { if(s.practiceStats.nineDarters==null) s.practiceStats.nineDarters=0; if(s.practiceStats.dartsThrown==null) s.practiceStats.dartsThrown=0; }
   if(!s.legsByCat) s.legsByCat = s.games || {};   // migrate old `games` field (was per-leg counts)
   if(!s.gamesByCat) s.gamesByCat = {};
   if(!s.practiceLegs) s.practiceLegs = {};
@@ -1602,7 +1648,7 @@ function clearLocalPlayerStats(name, mode){
     s.practiceLegs = {};
     s.practiceAvgDartsPerLeg = null;
   }
-  // recalculate global totals from the two mode sub-objects
+  // recalculate global totals exactly from the two mode sub-objects
   const h = s.h2hStats||{}, pr = s.practiceStats||{};
   s.turns        = (h.turns||0)        + (pr.turns||0);
   s.totalPoints  = (h.totalPoints||0)  + (pr.totalPoints||0);
@@ -1611,8 +1657,7 @@ function clearLocalPlayerStats(name, mode){
   s.oneEighties  = (h.oneEighties||0)  + (pr.oneEighties||0);
   s.bigFish      = (h.bigFish||0)      + (pr.bigFish||0);
   s.nineDarters  = (h.nineDarters||0)  + (pr.nineDarters||0);
-  // dartsThrown is not split by mode — approximate from remaining turns
-  s.dartsThrown  = s.turns * 3;
+  s.dartsThrown  = (h.dartsThrown||0)  + (pr.dartsThrown||0);
   persist();
 }
 function askClearPlayerStats(name, mode){
@@ -1642,9 +1687,10 @@ function avgStr(points, visits){ return visits ? (points/visits).toFixed(1) : '�
 
 // Accumulate one turn's stats into a target object (global or per-mode sub-object).
 // Adding a new per-turn stat means editing this one function instead of two.
-function accumTurnStats(target, ev, category, legDarts){
+function accumTurnStats(target, ev, category, legDarts, visitDarts){
   target.turns       += 1;
   target.totalPoints += ev.scored;
+  if(visitDarts != null) target.dartsThrown = (target.dartsThrown||0) + visitDarts;
   if(ev.trebleLess)                              target.trebleLess  += 1;
   if(ev.win && ev.pointsThisVisit >= 100)        target.checkouts100+= 1;
   if(ev.scored === 180)                          target.oneEighties += 1;
@@ -1762,7 +1808,10 @@ function renderPad(){
   const full = game.darts.length>=3 || game.busted || game.won;
   if(dartboardMode){
     const board = document.getElementById('dart-board-wrap');
-    if(board) board.innerHTML = buildDartboard(full);
+    if(board){
+      if(!board.querySelector('svg')) board.innerHTML = buildDartboard(); // build SVG once
+      board.classList.toggle('board-disabled', full);
+    }
     const missB = document.getElementById('board-miss-btn');
     if(missB) missB.disabled = full;
   } else {
@@ -1836,9 +1885,11 @@ function undoLastTurn(){
   const p = game.players[snap.pi];
 
   // Restore the player's state to before the turn was committed
-  p.score     = snap.score;
-  p.legPoints = snap.legPoints; p.legVisits = snap.legVisits;
-  p.legDarts  = snap.legDarts;  p.legBusts  = snap.legBusts;
+  p.score      = snap.score;
+  p.legPoints  = snap.legPoints;  p.legVisits  = snap.legVisits;
+  p.legDarts   = snap.legDarts;   p.legBusts   = snap.legBusts;
+  p.setDarts   = snap.setDarts;   p.gameDarts  = snap.gameDarts;
+  p.gamePoints = snap.gamePoints; p.gameVisits = snap.gameVisits;
 
   // Restore game-level achievement counters
   game.gameOneEighties = snap.oe;
@@ -1886,6 +1937,8 @@ function enterTurn(){
   // snapshot state before mutations so undoLastTurn() can restore it
   const _snap = { pi:game.current, score:p.score,
     legPoints:p.legPoints, legVisits:p.legVisits, legDarts:p.legDarts, legBusts:p.legBusts,
+    setDarts:p.setDarts, gameDarts:p.gameDarts,
+    gamePoints:p.gamePoints, gameVisits:p.gameVisits,
     oe:game.gameOneEighties, bf:game.gameBigFish, bu:game.gameBusts,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length };
   if(DB.mode==='local' && stats[p.name]){
@@ -1896,7 +1949,8 @@ function enterTurn(){
           oneEighties:_s.oneEighties, bigFish:_s.bigFish, nineDarters:_s.nineDarters },
       m:{ turns:_s[_mk].turns, totalPoints:_s[_mk].totalPoints, trebleLess:_s[_mk].trebleLess,
           checkouts100:_s[_mk].checkouts100, oneEighties:_s[_mk].oneEighties,
-          bigFish:_s[_mk].bigFish, nineDarters:_s[_mk].nineDarters } };
+          bigFish:_s[_mk].bigFish, nineDarters:_s[_mk].nineDarters,
+          dartsThrown:_s[_mk].dartsThrown||0 } };
   }
   game.lastTurnSnapshot = _snap;
 
@@ -1916,10 +1970,11 @@ function enterTurn(){
     dartsThrown: game.darts.length });
   if(DB.mode==='local'){
     const s = stats[p.name];
-    s.dartsThrown += game.darts.length;
-    accumTurnStats(s, ev, game.category, p.legDarts);
+    const _vd = game.darts.length;
+    s.dartsThrown += _vd;
+    accumTurnStats(s, ev, game.category, p.legDarts, _vd);
     const _mk = (!game.practice && game.players.length > 1) ? 'h2hStats' : 'practiceStats';
-    accumTurnStats(s[_mk], ev, game.category, p.legDarts);
+    accumTurnStats(s[_mk], ev, game.category, p.legDarts, _vd);
   }
   // achievement flashes + in-game counters + Home Assistant webhooks
   if(ev.bust){

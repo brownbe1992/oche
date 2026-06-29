@@ -679,6 +679,15 @@ function clearPlayerStats(playerName, mode) {
   if (!p) throw httpError(404, 'Player not found');
 
   if (mode === 'all') {
+    // Delete solo games (where this player was the sole participant) — cascades to their turns and game_players
+    db.prepare(`
+      DELETE FROM games WHERE id IN (
+        SELECT g.id FROM games g
+        WHERE (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1
+          AND EXISTS (SELECT 1 FROM game_players gp2 WHERE gp2.game_id = g.id AND gp2.player_id = ?)
+      )
+    `).run(p.id);
+    // Delete this player's turns and participation in any remaining multi-player games
     db.prepare('DELETE FROM turns        WHERE player_id = ?').run(p.id);
     db.prepare('DELETE FROM game_players WHERE player_id = ?').run(p.id);
     return { ok: true };
