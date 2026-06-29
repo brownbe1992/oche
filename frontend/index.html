@@ -586,7 +586,7 @@
       </div>
       <div class="note">
         <span class="badge">how each stat is counted</span><br>
-        <b style="color:var(--ink)">3-dart average</b> — lifetime: all points scored ÷ all turns, across every leg, set and game. (During play, the scoreboard shows your <em>current leg</em> and <em>current game</em> averages instead.)<br>
+        <b style="color:var(--ink)">3-dart average</b> — lifetime: all points scored ÷ all darts thrown × 3, across every leg, set and game. (During play, the scoreboard shows your <em>current leg</em> and <em>current game</em> averages instead.)<br>
         <b style="color:var(--ink)">Ton+ finishes</b> — winning turns where you scored 100 or more on that final visit.<br>
         <b style="color:var(--ink)">Treble-less turns</b> — turns where none of the darts landed in a treble bed.<br>
         A bust turn still counts as a turn (it scores 0) and is recorded as treble-less if no treble was hit during that visit.<br>
@@ -1029,8 +1029,8 @@ function renderHomeContent(s,h2h,practice){
 
   // 3-dart average leaderboard — H2H only
   const avgBoard=Object.entries(stats)
-    .filter(([,p])=>p.h2hStats&&p.h2hStats.turns>0)
-    .map(([name,p])=>({name, avg:p.h2hStats.totalPoints/p.h2hStats.turns, turns:p.h2hStats.turns, out:p.out}))
+    .filter(([,p])=>p.h2hStats&&p.h2hStats.dartsThrown>0)
+    .map(([name,p])=>({name, avg:p.h2hStats.totalPoints/p.h2hStats.dartsThrown*3, turns:p.h2hStats.turns, out:p.out}))
     .sort((a,b)=>b.avg-a.avg);
 
   // Practice legs leaderboard
@@ -1124,8 +1124,8 @@ function renderHomeContent(s,h2h,practice){
 
   // Practice leaderboard
   const practiceAvgBoard=Object.entries(stats)
-    .filter(([,p])=>p.practiceStats&&p.practiceStats.turns>0)
-    .map(([name,p])=>({name,avg:p.practiceStats.totalPoints/p.practiceStats.turns,turns:p.practiceStats.turns,out:p.out}))
+    .filter(([,p])=>p.practiceStats&&p.practiceStats.dartsThrown>0)
+    .map(([name,p])=>({name,avg:p.practiceStats.totalPoints/p.practiceStats.dartsThrown*3,turns:p.practiceStats.turns,out:p.out}))
     .sort((a,b)=>b.avg-a.avg);
   const practiceAvgLeaderboard=renderAvgLeaderboard(practiceAvgBoard);
   const plb=document.getElementById('practice-leaderboard-body');
@@ -1455,7 +1455,7 @@ function renderRoster(){
   }
   box.innerHTML = roster.map(name=>{
     const s=stats[name]||{};
-    const avg = s.turns ? (s.totalPoints/s.turns).toFixed(1) : '—';
+    const avg = s.dartsThrown ? (s.totalPoints/s.dartsThrown*3).toFixed(1) : '—';
     const out = playerOut(name);
     const j = escapeHtml(escapeJs(name));
     return `<div class="roster-row">
@@ -1707,7 +1707,8 @@ function askDeleteFromProfile(name){
 }
 
 /* ---------- game render ---------- */
-function avgStr(points, visits){ return visits ? (points/visits).toFixed(1) : '—'; }
+// Standard 3-dart average: total points / total darts * 3
+function avgStr(points, darts){ return darts ? (points/darts*3).toFixed(1) : '—'; }
 
 // Accumulate one turn's stats into a target object (global or per-mode sub-object).
 // Adding a new per-turn stat means editing this one function instead of two.
@@ -1736,7 +1737,7 @@ function renderGame(){
         ${i===game.current?'<div class="turnflag">▸ throwing</div>':''}
       </div>
       <div class="meta">
-        <div class="avgs">leg <b>${avgStr(p.legPoints,p.legVisits)}</b> &nbsp;·&nbsp; game <b>${avgStr(p.gamePoints,p.gameVisits)}</b></div>
+        <div class="avgs">leg <b>${avgStr(p.legPoints,p.legDarts)}</b> &nbsp;·&nbsp; game <b>${avgStr(p.gamePoints,p.gameDarts)}</b></div>
         ${showStanding?`<div class="standing">${standing}</div>`:''}
       </div>
       <div class="rem-wrap">
@@ -1801,8 +1802,8 @@ function liveSnapshot(message){
     setNo:game.setNo, legNo:game.legNo, currentIndex:game.current,
     players: game.players.map(p=>({
       name:p.name, score:p.score, out:p.doubleOut?'double':'single',
-      legAvg:  p.legVisits  ? (p.legPoints/p.legVisits).toFixed(1)   : null,
-      gameAvg: p.gameVisits ? (p.gamePoints/p.gameVisits).toFixed(1) : null,
+      legAvg:  p.legDarts  ? (p.legPoints/p.legDarts*3).toFixed(1)   : null,
+      gameAvg: p.gameDarts ? (p.gamePoints/p.gameDarts*3).toFixed(1) : null,
       legsWon:p.legsWon, setsWon:p.setsWon,
       legDarts: p.legDarts  || 0,
       setDarts: p.setDarts  || 0,
@@ -2192,7 +2193,7 @@ function finishUnit(kind, winner){
   }
   game.legSummary = game.players.map(p=>({
     name: p.name,
-    avg:   p.legVisits ? (p.legPoints / p.legVisits).toFixed(1) : null,
+    avg:   p.legDarts ? (p.legPoints / p.legDarts * 3).toFixed(1) : null,
     darts: p.legDarts  || 0,
     busts: p.legBusts  || 0,
     won:   p.name === winner
@@ -2412,7 +2413,7 @@ function loadStatBubbles(){
     const ts=playerPageTab==='h2h'?(s.h2hStats||{}):playerPageTab==='practice'?(s.practiceStats||{}):s;
     renderStatBubbles({
       dartsThrown: playerPageTab==='overall' ? (s.dartsThrown||0) : (ts.dartsThrown||0),
-      avg: ts.turns?(ts.totalPoints/ts.turns):null,
+      avg: ts.dartsThrown?(ts.totalPoints/ts.dartsThrown*3):null,
       one80s: ts.oneEighties||0, bigFish: ts.bigFish||0, nineDarters: ts.nineDarters||0
     });
     return;
@@ -2673,7 +2674,7 @@ function renderStats(){
   }
   let rows = names.map(n=>{
     const s=stats[n];
-    const avg=s.turns?(s.totalPoints/s.turns).toFixed(1):'0.0';
+    const avg=s.dartsThrown?(s.totalPoints/s.dartsThrown*3).toFixed(1):'0.0';
     return `<tr>
       <td><button class="rp-main" style="margin:0" onclick="showPlayer('${escapeHtml(escapeJs(n))}')">${escapeHtml(n)}</button></td>
       <td class="num"><span class="big">${avg}</span></td>
