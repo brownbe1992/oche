@@ -212,15 +212,7 @@ function completeGame(gameId, winnerName) {
 function computeStats() {
   const players = q.listPlayers.all();
 
-  const agg = db.prepare(`
-    SELECT player_id,
-           COUNT(*)                                                            AS turns,
-           COALESCE(SUM(scored), 0)                                            AS total,
-           COALESCE(SUM(treble_less), 0)                                       AS trebleLess,
-           COALESCE(SUM(CASE WHEN checkout = 1 AND checkout_points >= 100
-                             THEN 1 ELSE 0 END), 0)                            AS co100
-    FROM turns GROUP BY player_id
-  `).all();
+  // Global totals are derived from h2hAgg + pracAgg (those two cover all turns exactly)
 
   // H2H = non-practice games with 2+ players
   const legs = db.prepare(`
@@ -326,7 +318,8 @@ function computeStats() {
       COALESCE(SUM(t.treble_less), 0) AS trebleLess,
       COALESCE(SUM(CASE WHEN t.checkout=1 AND t.checkout_points>=100 THEN 1 ELSE 0 END),0) AS co100,
       COALESCE(SUM(CASE WHEN t.scored=180 THEN 1 ELSE 0 END),0) AS oneEighties,
-      COALESCE(SUM(CASE WHEN t.checkout=1 AND t.checkout_points=170 THEN 1 ELSE 0 END),0) AS bigFish
+      COALESCE(SUM(CASE WHEN t.checkout=1 AND t.checkout_points=170 THEN 1 ELSE 0 END),0) AS bigFish,
+      COALESCE(SUM(t.darts_thrown),0) AS dartsThrown
     FROM turns t JOIN games g ON g.id = t.game_id
     WHERE g.practice = 0
       AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
@@ -340,14 +333,14 @@ function computeStats() {
       COALESCE(SUM(t.treble_less), 0) AS trebleLess,
       COALESCE(SUM(CASE WHEN t.checkout=1 AND t.checkout_points>=100 THEN 1 ELSE 0 END),0) AS co100,
       COALESCE(SUM(CASE WHEN t.scored=180 THEN 1 ELSE 0 END),0) AS oneEighties,
-      COALESCE(SUM(CASE WHEN t.checkout=1 AND t.checkout_points=170 THEN 1 ELSE 0 END),0) AS bigFish
+      COALESCE(SUM(CASE WHEN t.checkout=1 AND t.checkout_points=170 THEN 1 ELSE 0 END),0) AS bigFish,
+      COALESCE(SUM(t.darts_thrown),0) AS dartsThrown
     FROM turns t JOIN games g ON g.id = t.game_id
     WHERE g.practice = 1
       OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1
     GROUP BY t.player_id
   `).all();
 
-  const aggById = {}; agg.forEach(r => aggById[r.player_id] = r);
   const nd9AllById  = {}; nd9All.forEach(r  => nd9AllById[r.pid]  = r.n);
   const nd9H2HById  = {}; nd9H2H.forEach(r  => nd9H2HById[r.pid]  = r.n);
   const nd9PracById = {}; nd9Prac.forEach(r => nd9PracById[r.pid] = r.n);
@@ -359,16 +352,16 @@ function computeStats() {
   const out = {};
   players.forEach(p => {
     nameById[p.id] = p.name;
-    const a = aggById[p.id] || { turns: 0, total: 0, trebleLess: 0, co100: 0 };
-    const ha = h2hAggById[p.id]  || { turns:0, total:0, trebleLess:0, co100:0, oneEighties:0, bigFish:0 };
-    const pa = pracAggById[p.id] || { turns:0, total:0, trebleLess:0, co100:0, oneEighties:0, bigFish:0 };
+    const ha = h2hAggById[p.id]  || { turns:0, total:0, trebleLess:0, co100:0, oneEighties:0, bigFish:0, dartsThrown:0 };
+    const pa = pracAggById[p.id] || { turns:0, total:0, trebleLess:0, co100:0, oneEighties:0, bigFish:0, dartsThrown:0 };
     out[p.name] = {
       out: p.out_mode,
       dartWeight: p.dart_weight ?? null,
-      turns: a.turns,
-      totalPoints: a.total,
-      trebleLess: a.trebleLess,
-      checkouts100: a.co100,
+      turns:       (ha.turns||0)       + (pa.turns||0),
+      totalPoints: (ha.total||0)       + (pa.total||0),
+      trebleLess:  (ha.trebleLess||0)  + (pa.trebleLess||0),
+      checkouts100:(ha.co100||0)       + (pa.co100||0),
+      dartsThrown: (ha.dartsThrown||0) + (pa.dartsThrown||0),
       oneEighties: (ha.oneEighties ?? 0) + (pa.oneEighties ?? 0),
       bigFish:     (ha.bigFish     ?? 0) + (pa.bigFish     ?? 0),
       nineDarters: nd9AllById[p.id] ?? 0,
@@ -376,10 +369,10 @@ function computeStats() {
       practiceAvgDartsPerLeg: pracDartsById[p.id] != null ? +pracDartsById[p.id].toFixed(1) : null,
       h2hStats: { turns:ha.turns, totalPoints:ha.total, trebleLess:ha.trebleLess,
                   checkouts100:ha.co100, oneEighties:ha.oneEighties, bigFish:ha.bigFish,
-                  nineDarters: nd9H2HById[p.id] ?? 0 },
+                  nineDarters: nd9H2HById[p.id] ?? 0, dartsThrown: ha.dartsThrown ?? 0 },
       practiceStats: { turns:pa.turns, totalPoints:pa.total, trebleLess:pa.trebleLess,
                        checkouts100:pa.co100, oneEighties:pa.oneEighties, bigFish:pa.bigFish,
-                       nineDarters: nd9PracById[p.id] ?? 0 },
+                       nineDarters: nd9PracById[p.id] ?? 0, dartsThrown: pa.dartsThrown ?? 0 },
       legsByCat: {},
       gamesByCat: {},
       practiceLegs: {},
@@ -463,12 +456,11 @@ function getPlayerStatBubbles(playerName, mode) {
     GROUP BY game_id,set_no,leg_no HAVING c3=3
   )`);
 
-  const avg100plus = q(`SELECT CAST(SUM(CASE WHEN la>=100 THEN 1 ELSE 0 END) AS REAL)*100/NULLIF(COUNT(*),0) AS v FROM (
-    SELECT CAST(SUM(t.scored) AS REAL)/COUNT(*) AS la ${J} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no
-  )`);
-  const avg90minus = q(`SELECT CAST(SUM(CASE WHEN la<=90 THEN 1 ELSE 0 END) AS REAL)*100/NULLIF(COUNT(*),0) AS v FROM (
-    SELECT CAST(SUM(t.scored) AS REAL)/COUNT(*) AS la ${J} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no
-  )`);
+  // avg100plus and avg90minus share the same subquery — compute in one pass
+  const _legAvgs = db.prepare(`SELECT CAST(SUM(t.scored) AS REAL)/COUNT(*) AS la ${J} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no`).all(p.id);
+  const _legAvgCount = _legAvgs.length || 0;
+  const avg100plus = _legAvgCount ? _legAvgs.filter(r=>r.la>=100).length * 100 / _legAvgCount : null;
+  const avg90minus = _legAvgCount ? _legAvgs.filter(r=>r.la<=90).length  * 100 / _legAvgCount : null;
   const score140pct = q(`SELECT CAST(SUM(CASE WHEN scored>=140 THEN 1 ELSE 0 END) AS REAL)*100/NULLIF(COUNT(*),0) AS v FROM (
     SELECT t.scored, ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
     ${J} ${mf}

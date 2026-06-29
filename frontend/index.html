@@ -742,8 +742,8 @@ const DB = {
   // load roster + prefs + stats into the in-memory caches the UI renders from
   async loadAll(){
     if(this.mode==='api'){
-      let players = await Backend.get('/api/players');
-      if(players.length===0){ await Backend.send('POST','/api/players',{name:'Player 1',out:'double'}); players = await Backend.get('/api/players'); }
+      const players = await Backend.get('/api/players');
+      // No auto-creation — empty roster shows the Players page prompting the user to add their own name
       roster = players.map(p=>p.name);
       prefs = {}; players.forEach(p=>{ prefs[p.name]={out:p.out}; ensurePlayerStats(p.name); });
       await this.refreshStats();
@@ -2372,7 +2372,7 @@ function loadStatBubbles(){
     const s=stats[currentPlayer]||{};
     const ts=playerPageTab==='h2h'?(s.h2hStats||{}):playerPageTab==='practice'?(s.practiceStats||{}):s;
     renderStatBubbles({
-      dartsThrown: playerPageTab==='overall' ? (s.dartsThrown||0) : null,
+      dartsThrown: playerPageTab==='overall' ? (s.dartsThrown||0) : (ts.dartsThrown||0),
       avg: ts.turns?(ts.totalPoints/ts.turns):null,
       one80s: ts.oneEighties||0, bigFish: ts.bigFish||0, nineDarters: ts.nineDarters||0
     });
