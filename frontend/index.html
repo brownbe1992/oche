@@ -382,17 +382,19 @@
   .hof-times{font-size:11px;font-weight:700;color:var(--gold);min-width:22px;flex:none}
   .hof-player{font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .hof-dates{font-size:11px;color:var(--muted);flex:none;text-align:right}
-  .hero-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
+  .hero-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:12px}
   .hero-block{background:var(--surface-2);border:1px solid var(--wire);border-radius:11px;padding:22px 14px;text-align:center}
+  .hero-block-empty{border-style:dashed;opacity:.75}
+  .hero-block-empty .hero-label{font-size:10px;line-height:1.4}
   .hero-val{font-family:'Bebas Neue';font-size:52px;color:var(--cream);line-height:1}
   .hero-label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:7px}
   @media(max-width:400px){.hero-val{font-size:38px}}
   #home-body .pp-section-title{font-size:16px;color:var(--ink);text-transform:none;letter-spacing:.01em;
     font-weight:700;border-bottom:1.5px solid var(--wire);padding-bottom:10px;margin-bottom:14px}
-  #leaderboard-body .pp-section, #practice-leaderboard-body .pp-section{background:var(--surface-2);border:1px solid var(--wire);
+  #home-tab-body .pp-section, #home-pulse-body .pp-section{background:var(--surface-2);border:1px solid var(--wire);
     border-radius:12px;padding:16px 18px;margin-bottom:14px}
-  #leaderboard-body .pp-section:last-child, #practice-leaderboard-body .pp-section:last-child{margin-bottom:0}
-  #leaderboard-body .pp-section-title, #practice-leaderboard-body .pp-section-title{font-size:16px;font-weight:700;color:var(--ink);
+  #home-tab-body .pp-section:last-child, #home-pulse-body .pp-section:last-child{margin-bottom:0}
+  #home-tab-body .pp-section-title, #home-pulse-body .pp-section-title{font-size:16px;font-weight:700;color:var(--ink);
     text-transform:none;letter-spacing:.01em;margin-bottom:12px;
     border-bottom:1px solid var(--wire);padding-bottom:8px}
   .home-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:stretch;margin-bottom:14px}
@@ -456,12 +458,14 @@
       <div id="home-body"><p class="pp-meta">Loading…</p></div>
     </div>
     <div class="card" style="margin-top:14px">
-      <h2 style="font-size:20px;margin-bottom:16px">H2H Leaderboard</h2>
-      <div id="leaderboard-body"><p class="pp-meta">Loading…</p></div>
+      <div id="home-pulse-body"><p class="pp-meta">Loading…</p></div>
     </div>
     <div class="card" style="margin-top:14px">
-      <h2 style="font-size:20px;margin-bottom:16px">Practice Mode Leaderboard</h2>
-      <div id="practice-leaderboard-body"><p class="pp-meta">Loading…</p></div>
+      <div class="player-tabs">
+        <button class="tab-btn active" data-tab="h2h" onclick="switchHomeTab('h2h')">H2H</button>
+        <button class="tab-btn" data-tab="practice" onclick="switchHomeTab('practice')">Practice</button>
+      </div>
+      <div id="home-tab-body"><p class="pp-meta">Loading…</p></div>
     </div>
     <div class="card" style="margin-top:14px">
       <div class="note" style="margin-top:0;padding-top:0;border-top:none">
@@ -1076,6 +1080,9 @@ function show(name){
   if(name==='player'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); }
 }
 /* ---------- home screen ---------- */
+let homeTab='h2h';
+let homeData=null;
+
 function renderHome(){
   const body=document.getElementById('home-body');
   if(!body) return;
@@ -1083,6 +1090,7 @@ function renderHome(){
   body.innerHTML=`<p class="pp-meta">Loading…</p>`;
   Promise.all([
     Backend.get('/api/summary'),
+    Backend.get('/api/home-extra'),
     Backend.get('/api/top-finishes?mode=h2h'),
     Backend.get('/api/stats/180s?mode=h2h'),
     Backend.get('/api/stats/big-fish?mode=h2h'),
@@ -1091,54 +1099,194 @@ function renderHome(){
     Backend.get('/api/stats/180s?mode=practice'),
     Backend.get('/api/stats/big-fish?mode=practice'),
     Backend.get('/api/stats/nine-darters?mode=practice'),
-  ]).then(([s,f,e,b,n,pf,pe,pb,pn])=>renderHomeContent(s,
-    {finishes:f,eighties:e,bigFish:b,nineDarters:n},
-    {finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn}))
-    .catch(()=>renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts:null,oneEighties:null,bigFish:null,nineDarters:null},
-      {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
-      {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty}));
+  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn])=>{
+    homeData={s, extra,
+      h2h:{finishes:f,eighties:e,bigFish:b,nineDarters:n},
+      practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn}};
+    renderHomeContent();
+  }).catch(()=>{
+    homeData={s:{players:roster.length,games:null,sets:null,legs:null,darts:null,oneEighties:null,bigFish:null,nineDarters:null,practiceLegs:null},
+      extra:null,
+      h2h:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
+      practice:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty}};
+    renderHomeContent();
+  });
 }
-function renderHomeContent(s,h2h,practice){
-  const finishes=h2h.finishes, eighties=h2h.eighties, bigFishData=h2h.bigFish, nineDarterData=h2h.nineDarters;
+
+function switchHomeTab(tab){
+  homeTab=tab;
+  document.querySelectorAll('#screen-home .tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  renderHomeTabBody();
+}
+
+function renderHomeContent(){
+  if(!homeData) return;
+  const {s, extra}=homeData;
   const body=document.getElementById('home-body');
   if(!body) return;
   const fmt=n=>n==null?'—':Number(n).toLocaleString();
 
-  // Hero cards — prominent at the top
+  // Hero cards — prominent at the top. Nine-darters gets its own permanent slot
+  // because of its rarity: shown even at zero, so the empty state itself signals
+  // "this is the stat that matters most" rather than being buried in a leaderboard.
+  const nineDarterHero = (s.nineDarters>0)
+    ? {val:fmt(s.nineDarters), label:'9-Darters 🏆'}
+    : {val:'—', label:'9-Darters — never happened. Will it be you?', empty:true};
   const heroCards=[
     {val:fmt(s.darts),       label:'Total Darts Thrown'},
     {val:fmt(s.oneEighties), label:'180s'},
     {val:fmt(s.bigFish),     label:'Big Fish'},
+    nineDarterHero,
   ];
 
-  // Secondary stats (smaller cards)
-  const secCards=[
+  // Secondary stats split into Activity (volume) vs Achievements (rare feats)
+  const activityCards=[
     {val:fmt(s.players),      label:'Players'},
     {val:fmt(s.games),        label:'Games Played'},
     {val:fmt(s.sets),         label:'Sets Played'},
     {val:fmt(s.legs),         label:'H2H Legs Thrown'},
     {val:fmt(s.practiceLegs), label:'Practice Legs Thrown'},
-    {val:fmt(s.tonPlus),      label:'Ton+ Finishes'},
-    {val:fmt(s.nineDarters),  label:'9-Darters'},
+  ];
+  const achievementCards=[
+    {val:fmt(s.tonPlus),     label:'Ton+ Finishes'},
+    {val:fmt(s.oneEighties), label:'180s'},
+    {val:fmt(s.bigFish),     label:'Big Fish'},
+    {val: extra && extra.highestCheckout ? extra.highestCheckout.points : '—', label:'Highest Checkout'},
   ];
 
-  // 3-dart average leaderboard — H2H only
+  body.innerHTML=`
+    <div class="hero-grid">${heroCards.map(c=>`<div class="hero-block${c.empty?' hero-block-empty':''}"><div class="hero-val">${c.val}</div><div class="hero-label">${c.label}</div></div>`).join('')}</div>
+    <div class="pp-section-title" style="margin-top:18px">Activity</div>
+    <div class="summary-grid">${activityCards.map(c=>`<div class="stat-block"><div class="stat-val">${c.val}</div><div class="stat-label">${c.label}</div></div>`).join('')}</div>
+    <div class="pp-section-title" style="margin-top:18px">Achievements</div>
+    <div class="summary-grid">${achievementCards.map(c=>`<div class="stat-block"><div class="stat-val">${c.val}</div><div class="stat-label">${c.label}</div></div>`).join('')}</div>`;
+
+  renderHomePulse();
+  renderHomeTabBody();
+}
+
+function renderHomePulse(){
+  const el=document.getElementById('home-pulse-body');
+  if(!el) return;
+  const extra=homeData && homeData.extra;
+  if(!extra){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
+  const lg=extra.lastGame;
+  const lastGameHtml = lg
+    ? `<b style="color:var(--ink)">${escapeHtml(lg.players||'')}</b> · ${escapeHtml(lg.category)} · won by <b style="color:var(--ink)">${escapeHtml(lg.winnerName||'—')}</b><br><span class="pp-meta">${fmtDate(lg.completedAt)}</span>`
+    : `<span class="pp-meta">No completed games yet.</span>`;
+  el.innerHTML=`
+    <div class="home-pair">
+      <div class="pp-section">
+        <div class="pp-section-title">This week</div>
+        <div class="summary-grid" style="margin-top:8px">
+          <div class="stat-block"><div class="stat-val">${extra.today.legs}</div><div class="stat-label">Legs Today</div></div>
+          <div class="stat-block"><div class="stat-val">${extra.week.legs}</div><div class="stat-label">Legs This Week</div></div>
+          <div class="stat-block"><div class="stat-val">${extra.week.darts}</div><div class="stat-label">Darts This Week</div></div>
+        </div>
+      </div>
+      <div class="pp-section">
+        <div class="pp-section-title">Last game played</div>
+        <p style="margin:4px 0 0;line-height:1.6">${lastGameHtml}</p>
+      </div>
+    </div>`;
+}
+
+function renderHomeTabBody(){
+  const el=document.getElementById('home-tab-body');
+  if(!el || !homeData) return;
+  const mode=homeTab;
+  const data=homeData[mode];
+  const extra=homeData.extra;
+  const finishes=data.finishes, eighties=data.eighties, bigFishData=data.bigFish, nineDarterData=data.nineDarters;
+
+  // 3-dart average leaderboard
+  const statsKey = mode==='h2h' ? 'h2hStats' : 'practiceStats';
   const avgBoard=Object.entries(stats)
-    .filter(([,p])=>p.h2hStats&&p.h2hStats.avgDarts>0)
-    .map(([name,p])=>({name, avg:p.h2hStats.totalPoints/p.h2hStats.avgDarts*3, turns:p.h2hStats.turns, out:p.out}))
+    .filter(([,p])=>p[statsKey]&&p[statsKey].avgDarts>0)
+    .map(([name,p])=>({name, avg:p[statsKey].totalPoints/p[statsKey].avgDarts*3, turns:p[statsKey].turns, out:p.out}))
     .sort((a,b)=>b.avg-a.avg);
+  const avgLeaderboard=renderAvgLeaderboard(avgBoard);
 
-  // Practice legs leaderboard
-  const practiceBoard=Object.entries(stats)
-    .map(([name,p])=>{
-      const total=Object.values(p.practiceLegs||{}).reduce((a,n)=>a+n,0);
-      const byCat=Object.entries(p.practiceLegs||{}).map(([c,n])=>`${c}: ${n}`).join(' · ');
-      return {name, total, byCat};
-    })
-    .filter(r=>r.total>0)
-    .sort((a,b)=>b.total-a.total);
+  // Win-rate leaderboard (H2H only — practice has no winner concept)
+  const winSection = (mode==='h2h' && extra && extra.winLeaderboard && extra.winLeaderboard.length)
+    ? `<div class="pp-section">
+        <div class="pp-section-title">Most Wins</div>
+        <div class="hof-list">${extra.winLeaderboard.slice(0,10).map((r,i)=>`<div class="hof-row">
+          <span class="hof-rank">${i+1}</span>
+          <span class="hof-score">${r.won}</span>
+          <span class="hof-player">${escapeHtml(r.name)}</span>
+          <span class="hof-dates">${r.rate}% of ${r.played}</span>
+        </div>`).join('')}</div>
+      </div>`
+    : '';
 
-  function hofSection(rows, mode=''){
+  const trebleLessSection = (extra && extra.trebleLessRows && extra.trebleLessRows.length)
+    ? `<div class="pp-section">
+        <div class="pp-section-title">Most Trebleless Visits</div>
+        <div class="hof-list">${extra.trebleLessRows.slice(0,10).map((r,i)=>`<div class="hof-row">
+          <span class="hof-rank">${i+1}</span>
+          <span class="hof-score">${r.rate}%</span>
+          <span class="hof-player">${escapeHtml(r.name)}</span>
+          <span class="hof-dates">${r.trebleLess}/${r.turns} visits</span>
+        </div>`).join('')}</div>
+      </div>`
+    : '';
+
+  const tonPlusSection = (extra && extra.tonPlusRows && extra.tonPlusRows.length)
+    ? `<div class="pp-section">
+        <div class="pp-section-title">Ton+ Finish Rate</div>
+        <div class="hof-list">${extra.tonPlusRows.slice(0,10).map((r,i)=>`<div class="hof-row">
+          <span class="hof-rank">${i+1}</span>
+          <span class="hof-score">${r.rate}%</span>
+          <span class="hof-player">${escapeHtml(r.name)}</span>
+          <span class="hof-dates">${r.tonPlus}/${r.checkouts} checkouts</span>
+        </div>`).join('')}</div>
+      </div>`
+    : '';
+
+  const paceVal = extra && extra.pace && extra.pace[mode];
+  const paceSection = `<div class="pp-section">
+      <div class="pp-section-title">Average Pace</div>
+      ${paceVal ? `<div class="hero-block" style="margin-top:6px"><div class="hero-val">${paceVal}</div><div class="hero-label">Darts / Minute</div></div>`
+                : `<p class="pp-meta" style="padding:4px 0">No timing data yet — enable "Collect per-dart timing" in Settings to start tracking pace.</p>`}
+    </div>`;
+
+  const highestCo = extra && extra.highestCheckout;
+  const highestCoSection = `<div class="pp-section">
+      <div class="pp-section-title">Highest Checkout Ever</div>
+      ${highestCo ? `<div class="hero-block" style="margin-top:6px"><div class="hero-val">${highestCo.points}</div><div class="hero-label">${escapeHtml(highestCo.name)} · ${fmtDate(highestCo.createdAt)}</div></div>`
+                  : `<p class="pp-meta" style="padding:4px 0">None recorded yet.</p>`}
+    </div>`;
+
+  el.innerHTML=`
+    <div class="home-pair">
+      <div class="pp-section">
+        <div class="pp-section-title">Three-Dart Average</div>
+        ${avgLeaderboard}
+      </div>
+      <div class="pp-section">
+        <div class="pp-section-title">Top Finishes</div>
+        ${hofSection(finishes,mode)}
+      </div>
+    </div>
+    <div class="home-pair">
+      ${winSection}
+      ${trebleLessSection}
+    </div>
+    <div class="home-pair">
+      ${tonPlusSection}
+      ${highestCoSection}
+    </div>
+    <div class="home-pair">
+      ${paceSection}
+    </div>
+    ${achievementSection('180s 🎯', eighties)}
+    ${achievementSection('Big Fish 🐟', bigFishData)}
+    ${achievementSection('Nine-dart finish', nineDarterData||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
+  `;
+}
+
+function hofSection(rows, mode=''){
     if(!rows||!rows.length) return `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
     return `<div class="hof-list">${rows.map((f,i)=>{
       const dates=fmtDate(f.last_date);
@@ -1192,52 +1340,6 @@ function renderHomeContent(s,h2h,practice){
       </div>`;}).join('')}</div>`;
   }
 
-  const avgLeaderboard=renderAvgLeaderboard(avgBoard);
-
-  body.innerHTML=`
-    <div class="hero-grid">${heroCards.map(c=>`<div class="hero-block"><div class="hero-val">${c.val}</div><div class="hero-label">${c.label}</div></div>`).join('')}</div>
-    <div class="summary-grid">${secCards.map(c=>`<div class="stat-block"><div class="stat-val">${c.val}</div><div class="stat-label">${c.label}</div></div>`).join('')}</div>`;
-
-  const lb=document.getElementById('leaderboard-body');
-  if(lb) lb.innerHTML=`
-    <div class="home-pair">
-      <div class="pp-section">
-        <div class="pp-section-title">Three-Dart Average</div>
-        ${avgLeaderboard}
-      </div>
-      <div class="pp-section">
-        <div class="pp-section-title">Top Finishes</div>
-        ${hofSection(finishes,'h2h')}
-      </div>
-    </div>
-    ${achievementSection('180s 🎯', eighties)}
-    ${achievementSection('Big Fish 🐟', bigFishData)}
-    ${achievementSection('Nine-dart finish', nineDarterData||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
-    `;
-
-  // Practice leaderboard
-  const practiceAvgBoard=Object.entries(stats)
-    .filter(([,p])=>p.practiceStats&&p.practiceStats.avgDarts>0)
-    .map(([name,p])=>({name,avg:p.practiceStats.totalPoints/p.practiceStats.avgDarts*3,turns:p.practiceStats.turns,out:p.out}))
-    .sort((a,b)=>b.avg-a.avg);
-  const practiceAvgLeaderboard=renderAvgLeaderboard(practiceAvgBoard);
-  const plb=document.getElementById('practice-leaderboard-body');
-  if(plb) plb.innerHTML=`
-    <div class="home-pair">
-      <div class="pp-section">
-        <div class="pp-section-title">Three-Dart Average</div>
-        ${practiceAvgLeaderboard}
-      </div>
-      <div class="pp-section">
-        <div class="pp-section-title">Top Finishes</div>
-        ${hofSection(practice.finishes,'practice')}
-      </div>
-    </div>
-    ${achievementSection('180s 🎯', practice.eighties)}
-    ${achievementSection('Big Fish 🐟', practice.bigFish)}
-    ${achievementSection('Nine-dart finish', practice.nineDarters||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
-    `;
-}
 
 function setPractice(on){
   setup.practice=on;

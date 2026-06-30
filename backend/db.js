@@ -497,6 +497,104 @@ function getSummary() {
   return { players, games, sets, legs, darts, tonPlus, oneEighties, bigFish, nineDarters, practiceLegs };
 }
 
+// Additional homepage stats: win rates, trebleless %, ton+ rate, highest checkout,
+// last game played, today/this-week activity, and dart-pace (when timing data exists).
+function getHomeExtra() {
+  const winRows = db.prepare(`
+    SELECT p.id, p.name,
+      COUNT(*) AS played,
+      SUM(CASE WHEN g.winner_id = p.id THEN 1 ELSE 0 END) AS won
+    FROM game_players gp
+    JOIN players p ON p.id = gp.player_id
+    JOIN games g ON g.id = gp.game_id
+    WHERE g.completed_at IS NOT NULL AND g.practice = 0
+      AND (SELECT COUNT(*) FROM game_players gp2 WHERE gp2.game_id = g.id) > 1
+    GROUP BY p.id
+    HAVING played >= 1
+    ORDER BY won DESC, played ASC
+  `).all();
+  const winLeaderboard = winRows.map(r => ({
+    name: r.name, played: r.played, won: r.won,
+    rate: r.played ? +((r.won / r.played) * 100).toFixed(1) : 0
+  }));
+
+  const trebleLessRows = db.prepare(`
+    SELECT p.name AS name, COUNT(*) AS turns,
+      SUM(CASE WHEN dt.trebles = 0 THEN 1 ELSE 0 END) AS trebleLess
+    FROM turns t
+    JOIN players p ON p.id = t.player_id
+    LEFT JOIN (SELECT turn_id, SUM(is_treble) AS trebles FROM darts GROUP BY turn_id) dt ON dt.turn_id = t.id
+    GROUP BY p.id
+    HAVING turns >= 10
+    ORDER BY (CAST(trebleLess AS REAL) / turns) ASC
+  `).all().map(r => ({ name: r.name, turns: r.turns, trebleLess: r.trebleLess,
+    rate: r.turns ? +((r.trebleLess / r.turns) * 100).toFixed(1) : 0 }));
+
+  const tonPlusRows = db.prepare(`
+    SELECT p.name AS name,
+      COUNT(*) AS checkouts,
+      SUM(CASE WHEN t.checkout_points >= 100 THEN 1 ELSE 0 END) AS tonPlus
+    FROM turns t
+    JOIN players p ON p.id = t.player_id
+    WHERE t.checkout = 1
+    GROUP BY p.id
+    HAVING checkouts >= 3
+    ORDER BY (CAST(tonPlus AS REAL) / checkouts) DESC
+  `).all().map(r => ({ name: r.name, checkouts: r.checkouts, tonPlus: r.tonPlus,
+    rate: r.checkouts ? +((r.tonPlus / r.checkouts) * 100).toFixed(1) : 0 }));
+
+  const highestCheckout = db.prepare(`
+    SELECT p.name AS name, t.checkout_points AS points, t.created_at AS createdAt
+    FROM turns t JOIN players p ON p.id = t.player_id
+    WHERE t.checkout = 1 AND t.checkout_points IS NOT NULL
+    ORDER BY t.checkout_points DESC, t.created_at ASC
+    LIMIT 1
+  `).get() || null;
+
+  const lastGame = db.prepare(`
+    SELECT g.id, g.category, g.completed_at AS completedAt, w.name AS winnerName,
+      (SELECT GROUP_CONCAT(p2.name, ', ') FROM game_players gp2 JOIN players p2 ON p2.id = gp2.player_id WHERE gp2.game_id = g.id) AS players
+    FROM games g LEFT JOIN players w ON w.id = g.winner_id
+    WHERE g.completed_at IS NOT NULL
+    ORDER BY g.completed_at DESC
+    LIMIT 1
+  `).get() || null;
+
+  const todayLegs = db.prepare(`
+    SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
+    FROM turns t WHERE date(t.created_at) = date('now')
+  `).get().n;
+  const todayDarts = db.prepare(`SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id WHERE date(t.created_at) = date('now')`).get().n;
+  const weekLegs = db.prepare(`
+    SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
+    FROM turns t WHERE date(t.created_at) >= date('now', '-6 days')
+  `).get().n;
+  const weekDarts = db.prepare(`SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id WHERE date(t.created_at) >= date('now', '-6 days')`).get().n;
+
+  // Pace: avg ms between consecutive thrown_at timestamps within the same turn -> darts/min.
+  const _pace = (modeWhere) => {
+    const row = db.prepare(`
+      SELECT AVG(gap_ms) AS avgMs FROM (
+        SELECT (julianday(d.thrown_at) - julianday(prev.thrown_at)) * 86400000 AS gap_ms
+        FROM darts d
+        JOIN darts prev ON prev.turn_id = d.turn_id AND prev.dart_no = d.dart_no - 1
+        JOIN turns t ON t.id = d.turn_id
+        JOIN games g ON g.id = t.game_id
+        WHERE d.thrown_at IS NOT NULL AND prev.thrown_at IS NOT NULL AND ${modeWhere}
+      ) WHERE gap_ms > 0 AND gap_ms < 60000
+    `).get();
+    if (!row || !row.avgMs) return null;
+    return +(60000 / row.avgMs).toFixed(2);
+  };
+  const pace = {
+    h2h: _pace(`g.practice = 0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1`),
+    practice: _pace(`g.practice = 1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1`)
+  };
+
+  return { winLeaderboard, trebleLessRows, tonPlusRows, highestCheckout, lastGame,
+    today: { legs: todayLegs, darts: todayDarts }, week: { legs: weekLegs, darts: weekDarts }, pace };
+}
+
 function getPlayerStatBubbles(playerName, mode) {
   const p = getPlayer(playerName);
   if (!p) return null;
@@ -1116,7 +1214,7 @@ function httpError(status, message) {
 module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer,
   createGame, addTurn, completeGame, recordEvent,
-  computeStats, getSummary, getOneEightyStats, getBigFishStats, getNineDarterStats,
+  computeStats, getSummary, getHomeExtra, getOneEightyStats, getBigFishStats, getNineDarterStats,
   getPlayerStatBubbles, getMetricHistory,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, deleteLastTurn,
   getCheckoutRoutes, getDartAnalytics,
