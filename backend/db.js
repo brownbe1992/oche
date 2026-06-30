@@ -871,7 +871,8 @@ function getDartAnalytics(playerName, mode) {
   const mf = _mf(mode);
 
   // Base FROM for dart-level queries (darts → turns → games)
-  const BASE = `FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id WHERE t.player_id = ?`;
+  // Excludes darts thrown on busted turns — they shouldn't count toward sector/treble analytics
+  const BASE = `FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id WHERE t.player_id = ? AND t.bust = 0`;
 
   // 1 — Most hit sector/multiplier combinations
   const topSectors = db.prepare(`
