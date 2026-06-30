@@ -65,7 +65,8 @@
   .add-player-menu.open{max-width:360px;opacity:1}
   .add-player-menu .btn{white-space:nowrap;padding:11px 14px;font-size:13.5px}
   .player-row{display:flex;gap:8px;align-items:center}
-  .player-row .ix{font-family:'Bebas Neue';font-size:20px;color:var(--gold);width:22px;text-align:center}
+  .player-row .ix{font-family:'Bebas Neue';font-size:20px;color:var(--gold);width:22px;text-align:center;flex-shrink:0}
+  .slot-stat-line{font-size:11px;color:var(--muted);margin-top:2px;padding-left:2px}
   .iconbtn{background:none;border:1px solid var(--wire);color:var(--muted);border-radius:9px;
     width:42px;height:44px;font-size:18px;cursor:pointer;flex:none}
   .iconbtn:hover{color:var(--bust);border-color:var(--bust)}
@@ -511,13 +512,15 @@
 
       <label class="field">Players</label>
       <div class="players-list" id="players-list"></div>
-      <div class="add-player-wrap">
+      <div class="add-player-wrap" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn btn-ghost" id="add-player-btn" onclick="toggleAddPlayerMenu()">+ Add player</button>
         <div class="add-player-menu" id="add-player-menu">
           <button class="btn btn-ghost" onclick="addExistingPlayer()">Choose existing</button>
           <button class="btn btn-ghost" onclick="addNewPlayer()">Enter new</button>
         </div>
+        <button class="btn btn-ghost" id="shuffle-btn" onclick="shufflePlayers()" style="display:none" title="Randomise throw order">🔀 Shuffle</button>
       </div>
+      <div id="h2h-preview" style="display:none;margin:10px 2px 0;font-size:12px;color:var(--muted)"></div>
 
       <div class="opts">
         <div class="seg" role="group" aria-label="Starting score">
@@ -537,6 +540,14 @@
       </div>
 
       <div id="h2h-options">
+        <div class="opts" style="margin-bottom:4px">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span class="lbl" style="flex-shrink:0">Quick</span>
+            <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="applyPreset(2,1)">Bo3</button>
+            <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="applyPreset(3,1)">Bo5</button>
+            <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="applyPreset(4,1)">Bo7</button>
+          </div>
+        </div>
         <div class="opts">
           <div class="stepper">
             <span class="lbl">Legs per set</span>
@@ -1626,28 +1637,92 @@ function renderPlayers(){
   const box = document.getElementById('players-list');
   box.innerHTML='';
   if(roster.length===0){
-    box.innerHTML=`<p style="color:var(--muted);font-size:13px;margin:0">No players yet. Use “+ Add player” to create one.</p>`;
+    box.innerHTML=`<p style=”color:var(--muted);font-size:13px;margin:0”>No players yet. Use “+ Add player” to create one.</p>`;
+    updateH2HPreview();
     return;
   }
   setup.slots.forEach((sel,i)=>{
     const taken = setup.slots.filter((_,j)=>j!==i);
     const opts = roster.map(p=>{
       const lockTag = (prefs[p] && prefs[p].hasPin) ? ' 🔒' : '';
-      return `<option value="${escapeHtml(p)}" ${p===sel?'selected':''} ${taken.includes(p)?'disabled':''}>${escapeHtml(p)}${lockTag}</option>`;
+      return `<option value=”${escapeHtml(p)}” ${p===sel?'selected':''} ${taken.includes(p)?'disabled':''}>${escapeHtml(p)}${lockTag}</option>`;
     }).join('');
-    const tag = sel ? `<span class="out-tag" title="${playerOut(sel)==='double'?'Doubles out':'Singles out'}">${playerOut(sel)==='double'?'DO':'SO'}</span>` : '';
+    const tag = sel ? `<span class=”out-tag” title=”${playerOut(sel)==='double'?'Doubles out':'Singles out'}”>${playerOut(sel)==='double'?'DO':'SO'}</span>` : '';
+    // stat line for selected player
+    let statLine = '';
+    if(sel && stats[sel]){
+      const s = stats[sel];
+      const avg = s.avgDarts ? (s.totalPoints/s.avgDarts*3) : null;
+      const avgStr = avg != null ? avg.toFixed(1) : '—';
+      let formStr = '';
+      if(avg != null && s.recentAvg != null){
+        const delta = s.recentAvg - avg;
+        const arrow = delta >= 0.5 ? '▲' : delta <= -0.5 ? '▼' : '~';
+        const col = delta >= 0.5 ? 'var(--gold)' : delta <= -0.5 ? 'var(--danger,#e5484d)' : 'var(--muted)';
+        formStr = ` <span style=”color:${col}”>${arrow} ${Math.abs(delta).toFixed(1)}</span>`;
+      }
+      statLine = `<div class=”slot-stat-line”>avg ${avgStr}${formStr}</div>`;
+    }
     const row=document.createElement('div'); row.className='player-row';
-    row.innerHTML=`<span class="ix">${i+1}</span>
-      <select class="pselect" aria-label="Player ${i+1}" onchange="onSlotChange(${i}, this.value)">
-        <option value="" ${sel?'':'selected'} disabled>Choose player</option>
-        ${opts}
-        <option disabled>──────────</option>
-        <option value="__add__">+ Add new player…</option>
-      </select>
+    row.innerHTML=`<span class=”ix”>${i+1}</span>
+      <div style=”flex:1;min-width:0”>
+        <select class=”pselect” style=”width:100%” aria-label=”Player ${i+1}” onchange=”onSlotChange(${i}, this.value)”>
+          <option value=”” ${sel?'':'selected'} disabled>Choose player</option>
+          ${opts}
+          <option disabled>──────────</option>
+          <option value=”__add__”>+ Add new player…</option>
+        </select>
+        ${statLine}
+      </div>
       ${tag}
-      ${setup.slots.length>1?`<button class="iconbtn" title="Remove from game" onclick="removePlayer(${i})">✕</button>`:''}`;
+      ${setup.slots.length>1?`<button class=”iconbtn” title=”Remove from game” onclick=”removePlayer(${i})”>✕</button>`:''}`;
     box.appendChild(row);
   });
+  // Show shuffle button when 2+ named players selected
+  const named = setup.slots.filter(s=>s);
+  const shuffleBtn = document.getElementById('shuffle-btn');
+  if(shuffleBtn) shuffleBtn.style.display = named.length >= 2 ? '' : 'none';
+  updateH2HPreview();
+}
+
+let _h2hPreviewAbort = null;
+function updateH2HPreview(){
+  const el = document.getElementById('h2h-preview');
+  if(!el) return;
+  const named = setup.slots.filter(s=>s);
+  if(named.length !== 2){ el.style.display='none'; el.textContent=''; return; }
+  const [p1, p2] = named;
+  el.style.display='';
+  el.textContent = 'Loading H2H record…';
+  if(_h2hPreviewAbort) _h2hPreviewAbort.aborted = true;
+  const tok = { aborted: false }; _h2hPreviewAbort = tok;
+  fetch(`/api/players/h2h?p1=${encodeURIComponent(p1)}&p2=${encodeURIComponent(p2)}`)
+    .then(r=>r.json()).then(d=>{
+      if(tok.aborted || !d) return;
+      if(d.total === 0){ el.textContent = `No H2H games yet between ${p1} and ${p2}.`; return; }
+      let leader;
+      if(d.p1Wins > d.p2Wins) leader = `${p1} leads ${d.p1Wins}–${d.p2Wins}`;
+      else if(d.p2Wins > d.p1Wins) leader = `${p2} leads ${d.p2Wins}–${d.p1Wins}`;
+      else leader = `Tied ${d.p1Wins}–${d.p2Wins}`;
+      el.textContent = `H2H: ${leader} (${d.total} game${d.total!==1?'s':''})`;
+    }).catch(()=>{ if(!tok.aborted) el.textContent=''; });
+}
+
+function shufflePlayers(){
+  const named = setup.slots.filter(s=>s);
+  // Fisher-Yates on the named subset, keep blank slots at end
+  for(let i=named.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [named[i],named[j]]=[named[j],named[i]]; }
+  const blanks = setup.slots.filter(s=>!s);
+  setup.slots = [...named, ...blanks];
+  renderPlayers();
+}
+
+function applyPreset(legsToWin, setsPerGame){
+  setup.legsPerSet = legsToWin;
+  setup.setsPerGame = setsPerGame;
+  const lv = document.getElementById('legs-val'); if(lv) lv.textContent = legsToWin;
+  const sv = document.getElementById('sets-val'); if(sv) sv.textContent = setsPerGame;
+  updateFormatLine();
 }
 function onSlotChange(i, value){
   if(value==='__add__'){
@@ -1704,6 +1779,8 @@ async function startGame(){
   setup.slots.forEach(n=>{ if(n && roster.includes(n) && !names.includes(n)) names.push(n); });
   if(names.length===0){ uiAlert('Choose at least one player.'); return; }
   if(!setup.practice && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
+  // Persist setup for next session
+  try{ localStorage.setItem('oche_last_setup', JSON.stringify({ start:setup.start, legsPerSet:setup.legsPerSet, setsPerGame:setup.setsPerGame, practice:setup.practice })); }catch(e){}
   game = {
     start: setup.start,
     category: String(setup.start),
@@ -3190,6 +3267,24 @@ function showBackendErrorScreen(){
   }
   await DB.loadAll();       // populate roster / prefs / stats from the backend
   try{ const dt = await Backend.get('/api/settings/dart-timing'); dartTimingEnabled = !!dt.enabled; }catch(e){}
+  // Restore last setup from localStorage
+  try{
+    const saved = JSON.parse(localStorage.getItem('oche_last_setup')||'null');
+    if(saved){
+      if(saved.start) setup.start = saved.start;
+      if(saved.legsPerSet) setup.legsPerSet = saved.legsPerSet;
+      if(saved.setsPerGame) setup.setsPerGame = saved.setsPerGame;
+      if(typeof saved.practice === 'boolean') setup.practice = saved.practice;
+      // Sync start button UI
+      document.querySelectorAll('[data-start]').forEach(b=>b.setAttribute('aria-pressed', String(Number(b.dataset.start)===setup.start)));
+      // Sync mode UI
+      const mh=document.getElementById('mode-h2h'), mp=document.getElementById('mode-practice');
+      if(mh) mh.setAttribute('aria-pressed', String(!setup.practice));
+      if(mp) mp.setAttribute('aria-pressed', String(setup.practice));
+      const ho=document.getElementById('h2h-options');
+      if(ho) ho.style.display = setup.practice ? 'none' : '';
+    }
+  }catch(e){}
   sanitizeSlots();
   renderPlayers();
   document.getElementById('legs-val').textContent = setup.legsPerSet;

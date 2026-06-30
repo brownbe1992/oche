@@ -1285,6 +1285,24 @@ function fireHaWebhook(event, payload) {
   });
 }
 
+function getH2HRecord(name1, name2) {
+  if (!name1 || !name2) return null;
+  const p1 = db.prepare(`SELECT id FROM players WHERE name=?`).get(name1);
+  const p2 = db.prepare(`SELECT id FROM players WHERE name=?`).get(name2);
+  if (!p1 || !p2) return null;
+  // Games where both players participated and a winner was recorded
+  const rows = db.prepare(`
+    SELECT g.winner_id
+    FROM games g
+    JOIN game_players gp1 ON gp1.game_id = g.id AND gp1.player_id = ?
+    JOIN game_players gp2 ON gp2.game_id = g.id AND gp2.player_id = ?
+    WHERE g.practice = 0 AND g.winner_id IS NOT NULL
+  `).all(p1.id, p2.id);
+  const p1Wins = rows.filter(r => r.winner_id === p1.id).length;
+  const p2Wins = rows.filter(r => r.winner_id === p2.id).length;
+  return { p1: name1, p2: name2, p1Wins, p2Wins, total: rows.length };
+}
+
 /* ---------- helpers ---------- */
 function httpError(status, message) {
   const e = new Error(message); e.status = status; return e;
@@ -1294,7 +1312,7 @@ module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer,
   createGame, addTurn, completeGame, recordEvent,
   computeStats, getSummary, getHomeExtra, getOneEightyStats, getBigFishStats, getNineDarterStats,
-  getPlayerStatBubbles, getMetricHistory, getPersonalBests,
+  getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, deleteLastTurn,
   getCheckoutRoutes, getDartAnalytics,
   getSettings, updateSettings, getDartTimingEnabled, fireHaWebhook,
