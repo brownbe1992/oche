@@ -261,6 +261,9 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/reset' && m === 'POST') { if (!requireAdmin(req, res)) return; return send(res, 200, db.resetStats()); }
 
     if (p === '/api/settings' && m === 'GET')  { if (!requireAdmin(req, res)) return; return send(res, 200, db.getSettings()); }
+    // Public (no-auth) read of just the dart-timing flag — every device running the
+    // scorer needs this during gameplay, not just an admin's browser.
+    if (p === '/api/settings/dart-timing' && m === 'GET') { return send(res, 200, db.getDartTimingEnabled()); }
     if (p === '/api/settings' && m === 'PUT') {
       if (!requireAdmin(req, res)) return;
       const b = await readJson(req);
@@ -268,12 +271,13 @@ const server = http.createServer(async (req, res) => {
       const allowed = ['ha_url',
         'ha_webhook_oneeighty','ha_webhook_bigfish','ha_webhook_bust','ha_webhook_ninedarter','ha_webhook_tonplus',
         'ha_webhook_gamestart','ha_webhook_gameend','ha_webhook_setstart','ha_webhook_setend',
-        'ha_webhook_legstart','ha_webhook_legend','pin_lockout_threshold'];
+        'ha_webhook_legstart','ha_webhook_legend','pin_lockout_threshold','collect_dart_timing'];
       const safe = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
       if ('pin_lockout_threshold' in safe) {
         const n = Number(safe.pin_lockout_threshold);
         if (!Number.isInteger(n) || n < 1 || n > 1000) return send(res, 400, { error: 'pin_lockout_threshold must be an integer between 1 and 1000' });
       }
+      if ('collect_dart_timing' in safe) safe.collect_dart_timing = (safe.collect_dart_timing === '1' || safe.collect_dart_timing === true) ? '1' : '0';
       return send(res, 200, db.updateSettings(safe));
     }
     if (p === '/api/ha-test' && m === 'POST') {

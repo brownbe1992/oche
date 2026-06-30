@@ -69,6 +69,8 @@ db.exec(`
 
   -- darts stores one row per physical dart. scored/is_treble/is_double are generated
   -- from sector+multiplier — no app code writes them; SQLite computes and stores them.
+  -- thrown_at (added via ALTER TABLE below) is the client-captured tap timestamp, only
+  -- populated when the "collect_dart_timing" setting is on; null otherwise.
   CREATE TABLE IF NOT EXISTS darts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     turn_id    INTEGER NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
@@ -132,6 +134,7 @@ try { db.exec('ALTER TABLE players ADD COLUMN pin_hash TEXT'); } catch(e) {}
 try { db.exec('ALTER TABLE players ADD COLUMN pin_salt TEXT'); } catch(e) {}
 try { db.exec('ALTER TABLE players ADD COLUMN pin_fail_count INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
 try { db.exec('ALTER TABLE players ADD COLUMN pin_locked_until INTEGER'); } catch(e) {}
+try { db.exec('ALTER TABLE darts ADD COLUMN thrown_at TEXT'); } catch(e) {}
 
 const DEFAULT_PIN_LOCKOUT_THRESHOLD = 10;
 
@@ -172,8 +175,8 @@ const q = {
                    (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
 
-  insertDart   : db.prepare(`INSERT INTO darts (turn_id, dart_no, sector, multiplier)
-                   VALUES (?, ?, ?, ?)`),
+  insertDart   : db.prepare(`INSERT INTO darts (turn_id, dart_no, sector, multiplier, thrown_at)
+                   VALUES (?, ?, ?, ?, ?)`),
 };
 
 /* ---------- player operations ---------- */
@@ -272,7 +275,10 @@ function addTurn(gameId, t) {
   if (Array.isArray(t.darts) && t.darts.length) {
     const turnId = Number(info.lastInsertRowid);
     for (const d of t.darts) {
-      q.insertDart.run(turnId, Number(d.dartNo), Number(d.sector), Number(d.multiplier));
+      // thrownAt is an ISO timestamp captured client-side at tap time; only sent when
+      // the admin has enabled the "collect_dart_timing" setting.
+      const thrownAt = d.thrownAt ? String(d.thrownAt) : null;
+      q.insertDart.run(turnId, Number(d.dartNo), Number(d.sector), Number(d.multiplier), thrownAt);
     }
   }
   return { ok: true };
@@ -911,6 +917,12 @@ function updateSettings(obj) {
   for (const [k, v] of Object.entries(obj)) upsert.run(String(k), String(v ?? ''));
   return { ok: true };
 }
+// Public (no-auth) read of just the dart-timing flag — gameplay needs this on every
+// device, including ones that never log in as admin.
+function getDartTimingEnabled() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'collect_dart_timing'").get();
+  return { enabled: row ? row.value === '1' : false };
+}
 
 /* ---------- admin accounts + sessions ---------- */
 function isSetupRequired() {
@@ -1108,7 +1120,7 @@ module.exports = {
   getPlayerStatBubbles, getMetricHistory,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, deleteLastTurn,
   getCheckoutRoutes, getDartAnalytics,
-  getSettings, updateSettings, fireHaWebhook,
+  getSettings, updateSettings, getDartTimingEnabled, fireHaWebhook,
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword,
   login, logout, getSessionAdmin,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,

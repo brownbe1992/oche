@@ -651,6 +651,23 @@
         Smart Home Integration requires the server backend. Open the app via Docker at <code>http://&lt;your-server&gt;:8046</code>.
       </p>
 
+      <!-- Data Collection -->
+      <div class="pp-section" style="margin-bottom:24px">
+        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('data-collection-body',this)">
+          Data Collection
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="data-collection-body" hidden>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+            Records the exact moment each dart is tapped, in addition to existing per-visit data — useful for analyzing throwing pace, e.g. correlating with scoring or dart weight. Off by default since most setups won't need it.
+          </p>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="collect-dart-timing" style="width:16px;height:16px;margin:0">
+            Collect per-dart timing
+          </label>
+        </div>
+      </div>
+
       <!-- Smart Home Integration -->
       <div class="pp-section" id="smart-home-section">
         <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('smart-home-body',this)">
@@ -918,7 +935,8 @@ function makeDart(sector, mult){
     value: dartValue(sector, m),
     isTreble: m === 3 && sector !== 25 && sector !== 0,
     isDouble: (m === 2 && sector !== 0),
-    label: dartLabel(sector, m)
+    label: dartLabel(sector, m),
+    thrownAt: dartTimingEnabled ? new Date().toISOString() : null   // tap-time stamp, only when enabled
   };
 }
 function dartLabel(sector, mult){
@@ -951,6 +969,7 @@ function evaluateVisit(startScore, darts, doubleOut){
    ========================================================================= */
 let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false };
 let game = null;
+let dartTimingEnabled = false;   // admin-toggled; refreshed at boot from /api/settings/dart-timing
 let roster = [];     // saved player names (profiles that own stats)
 let stats = {};
 let prefs = {};      // name -> { out:'double'|'single' }  (per-player finish rule)
@@ -1287,6 +1306,8 @@ async function renderSettings(){
     set('ha-wh-setend',     'ha_webhook_setend');
     const lockoutEl = document.getElementById('pin-lockout-threshold');
     if(lockoutEl) lockoutEl.value = cfg.pin_lockout_threshold || 10;
+    const dtEl = document.getElementById('collect-dart-timing');
+    if(dtEl) dtEl.checked = cfg.collect_dart_timing === '1';
   }).catch(err=>{ const s=document.getElementById('settings-error'); if(s){ s.textContent='Could not load settings: '+err.message; s.hidden=false; } });
 }
 
@@ -1402,8 +1423,10 @@ function saveSettings(){
     ha_webhook_setstart:     v('ha-wh-setstart'),
     ha_webhook_setend:       v('ha-wh-setend'),
     pin_lockout_threshold:   Number(v('pin-lockout-threshold')) || 10,
+    collect_dart_timing:     (document.getElementById('collect-dart-timing')||{}).checked ? '1' : '0',
   }).then(()=>{
     if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
+    dartTimingEnabled = (document.getElementById('collect-dart-timing')||{}).checked || false;
     uiAlert('Settings saved.');
   }).catch(err=>{
     if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
@@ -2121,7 +2144,7 @@ function enterTurn(){
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.scored, bust:ev.bust,
     checkout:ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null,
-    darts: game.darts.map((d,i) => ({ dartNo: i+1, sector: d.sector, multiplier: d.mult })) });
+    darts: game.darts.map((d,i) => ({ dartNo: i+1, sector: d.sector, multiplier: d.mult, thrownAt: d.thrownAt })) });
   // achievement flashes + in-game counters + Home Assistant webhooks
   if(ev.bust){
     game.gameBusts += 1;
@@ -2887,6 +2910,7 @@ function showBackendErrorScreen(){
     return;
   }
   await DB.loadAll();       // populate roster / prefs / stats from the backend
+  try{ const dt = await Backend.get('/api/settings/dart-timing'); dartTimingEnabled = !!dt.enabled; }catch(e){}
   sanitizeSlots();
   renderPlayers();
   document.getElementById('legs-val').textContent = setup.legsPerSet;
