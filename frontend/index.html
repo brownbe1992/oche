@@ -491,7 +491,8 @@
         <b style="color:var(--ink)">180 🎯</b> — a visit where all three darts land in the treble-20 bed, scoring the maximum 180 points.<br>
         <b style="color:var(--ink)">Big Fish 🐟</b> — a checkout of exactly 170 (T20, T20, Bull), the highest possible finish in darts.<br>
         <b style="color:var(--ink)">Nine-dart finish</b> — a perfect leg of 501, finished in exactly nine darts (three visits of three darts each).<br>
-        <span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;vertical-align:middle">DO</span> Double out &nbsp;·&nbsp; <span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;vertical-align:middle">SO</span> Single out — the player's default finish rule.
+        <span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;vertical-align:middle">DO</span> Double out &nbsp;·&nbsp; <span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;vertical-align:middle">SO</span> Single out — the player's default finish rule.<br>
+        <button class="btn btn-ghost" style="margin-top:8px" onclick="showLegend('home')">View full stats glossary →</button>
       </div>
     </div>
   </section>
@@ -619,6 +620,16 @@
         A bust turn still counts as a turn (it scores 0) and is recorded as treble-less if no treble was hit during that visit.<br>
         Click a player's name on the Stats or Players page to see their full profile including games &amp; legs played and H2H wins.
       </div>
+    </div>
+  </section>
+
+  <!-- ============ STATS LEGEND ============ -->
+  <section id="screen-legend" class="screen">
+    <div class="card">
+      <button class="pp-back" onclick="show(legendBackTo)">← Back</button>
+      <h2 style="font-size:18px;margin-bottom:4px">Stats Glossary</h2>
+      <p style="color:var(--muted);font-size:13px;margin:0 0 16px">What every stat on the homepage and player pages means and how it's counted.</p>
+      <div id="legend-body"></div>
     </div>
   </section>
 
@@ -1096,6 +1107,12 @@ function show(name){
   if(name==='players') renderRoster();
   if(name==='stats'){ DB.refreshStats().then(renderStats).catch(renderStats); }
   if(name==='player'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); }
+  if(name==='legend') renderLegend();
+}
+let legendBackTo='home';
+function showLegend(backTo){
+  legendBackTo = backTo || 'home';
+  show('legend');
 }
 /* ---------- home screen ---------- */
 let homeTab='h2h';
@@ -1821,6 +1838,7 @@ function askDelete(name){
 /* ---------- player profile page ---------- */
 let currentPlayer = null;
 let playerPageTab = 'overall';
+let showMoreStats = false;
 function localDateStr(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function setPlayerDartWeight(name, value){
   const weight = value ? Number(value) : null;
@@ -1833,7 +1851,7 @@ function switchPlayerTab(tab){
   renderPlayerPage();
 }
 function showPlayer(name){
-  if(currentPlayer !== name){ avgChartWeight = null; cachedDartWeights = []; playerPageTab = 'overall'; }
+  if(currentPlayer !== name){ avgChartWeight = null; cachedDartWeights = []; playerPageTab = 'overall'; showMoreStats = false; }
   currentPlayer = name;
   if(!customRangeEnd){
     const now=new Date();
@@ -1854,11 +1872,18 @@ function renderPlayerPage(){
   const tab = playerPageTab;
   const cp = avgChartPeriod;
 
-  // stat bubbles (shared, loaded async)
-  const bubblesHtml = `<div class="stat-bubbles" id="player-stat-bubbles">${STAT_DEFS.map(d=>{
+  // stat bubbles (shared, loaded async) — primary set always visible, the rest behind a toggle
+  // so the page isn't a wall of stats by default.
+  const bubble = d => {
     const bl = d.key==='dartsthrown' ? (tab==='overall'?'Total Darts Thrown':'Darts Thrown') : d.label;
     return `<button class="stat-bubble${selectedStat===d.key?' active':''}" data-stat="${d.key}" onclick="selectStat('${d.key}')" title="${d.desc}"><div class="bubble-val" id="bv-${d.key}">—</div><div class="bubble-label">${bl}</div></button>`;
-  }).join('')}</div>`;
+  };
+  const primaryDefs = STAT_DEFS.filter(d=>d.primary);
+  const secondaryDefs = STAT_DEFS.filter(d=>!d.primary);
+  const bubblesHtml = `
+    <div class="stat-bubbles" id="player-stat-bubbles">${primaryDefs.map(bubble).join('')}</div>
+    <button class="btn btn-ghost" style="margin:6px 0" onclick="toggleMoreStats()">${showMoreStats?'Fewer stats ▴':'More stats ▾'}</button>
+    <div class="stat-bubbles" id="player-stat-bubbles-more"${showMoreStats?'':' hidden'}>${secondaryDefs.map(bubble).join('')}</div>`;
 
   // shared chart + top-finishes HTML (same structure for both tabs)
   const chartSection = `
@@ -1882,13 +1907,17 @@ function renderPlayerPage(){
       <div id="avg-chart-body"></div>
     </div>
     <div class="pp-section">
-      <div class="pp-section-title">Top Checkouts</div>
-      <div id="player-top-finishes"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+      <div class="pp-section-title">Personal Bests</div>
+      <div id="player-personal-bests"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </div>
-    <div class="pp-section" id="dart-analytics-section">
-      <div class="pp-section-title">Dart Analytics</div>
+    <details class="pp-section">
+      <summary class="pp-section-title">Top Checkouts</summary>
+      <div id="player-top-finishes"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </details>
+    <details class="pp-section" id="dart-analytics-section">
+      <summary class="pp-section-title">Dart Analytics</summary>
       <div id="dart-analytics-body"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
-    </div>`;
+    </details>`;
 
   // statGrid replaced by stat bubbles above
 
@@ -1951,7 +1980,7 @@ function renderPlayerPage(){
   body.innerHTML = `
     <div class="pp-header">
       <div class="pp-name">${escapeHtml(name)}</div>
-      <div class="pp-meta">${s.turns||0} turns thrown (all-time)</div>
+      <div class="pp-meta">${s.turns||0} turns thrown (all-time) · <a href="javascript:void(0)" onclick="showLegend('player')">what do these stats mean?</a></div>
     </div>
     <div class="player-controls">
       <div class="seg out-seg" role="group" aria-label="Finish rule">
@@ -1983,6 +2012,33 @@ function renderPlayerPage(){
   loadDartWeights();
   loadTopFinishes();
   loadDartAnalytics();
+  loadPersonalBests();
+}
+function loadPersonalBests(){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
+  Backend.get(`/api/players/personal-bests?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
+    .then(data=>renderPersonalBests(data))
+    .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load personal bests.</p>`; });
+}
+function renderPersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || (data.bestLegAvg==null && data.fewestDartsCheckout==null)){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough legs recorded yet.</p>`;
+    return;
+  }
+  const formDelta = (data.recentFormAvg!=null && data.lifetimeAvg!=null) ? (data.recentFormAvg - data.lifetimeAvg) : null;
+  const formHtml = formDelta!=null
+    ? `<div class="stat-block"><div class="stat-val">${data.recentFormAvg.toFixed(1)}</div><div class="stat-label">Recent Form (last 10 legs) ${formDelta>=0?'▲':'▼'} ${Math.abs(formDelta).toFixed(1)}</div></div>`
+    : '';
+  container.innerHTML=`<div class="summary-grid">
+    ${data.bestLegAvg!=null?`<div class="stat-block"><div class="stat-val">${data.bestLegAvg.toFixed(1)}</div><div class="stat-label">Best Leg Average</div></div>`:''}
+    ${data.fewestDartsCheckout!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsCheckout}</div><div class="stat-label">Fewest Darts to Finish</div></div>`:''}
+    ${data.winStreak?`<div class="stat-block"><div class="stat-val">${data.winStreak}</div><div class="stat-label">Current Win Streak</div></div>`:''}
+    ${formHtml}
+  </div>`;
 }
 function askClearPlayerStats(name, mode){
   const label = mode === 'all' ? 'all' : mode === 'h2h' ? 'H2H' : 'Practice';
@@ -2551,13 +2607,15 @@ function checkoutHint(rem, doubleOut, maxDarts){
 
 /* ---------- avg-over-time chart ---------- */
 const STAT_DEFS = [
-  { key:'dartsthrown',    label:'Darts Thrown',   desc:'Total darts thrown',                        fmt:v=>v!=null?Number(v).toLocaleString():'—' },
+  // primary:true bubbles are shown by default; the rest live behind the "More stats" toggle.
+  { key:'dartsthrown',    label:'Darts Thrown',   desc:'Total darts thrown',                        fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
+  { key:'avg',           label:'Three-Dart Average', desc:'3-dart average',                      fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
+  { key:'180s',          label:'180s',         desc:'Count of 180s thrown',                    fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'bigfish',       label:'Big Fish',    desc:'170 checkouts',                            fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'ninedarters',   label:'9-Darters',   desc:'501 legs finished in 9 darts',            fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
   { key:'avgdartsperday', label:'Darts / Day',    desc:'Average darts thrown per day played',        fmt:v=>v!=null?Number(v).toFixed(1):'—' },
   { key:'avgdartsperleg', label:'Darts / Leg',    desc:'Average darts thrown per won leg',           fmt:v=>v!=null?Number(v).toFixed(1):'—' },
-  { key:'avg',           label:'Three-Dart Average', desc:'3-dart average',                      fmt:v=>v!=null?v.toFixed(1):'—' },
-  { key:'180s',          label:'180s',         desc:'Count of 180s thrown',                    fmt:v=>v!=null?String(Math.round(v)):'—' },
-  { key:'bigfish',       label:'Big Fish',    desc:'170 checkouts',                            fmt:v=>v!=null?String(Math.round(v)):'—' },
-  { key:'ninedarters',   label:'9-Darters',   desc:'501 legs finished in 9 darts',            fmt:v=>v!=null?String(Math.round(v)):'—' },
+  { key:'pace',           label:'Average Pace', desc:'Darts thrown per minute',                  fmt:v=>v!=null?Number(v).toFixed(1):'—' },
   { key:'treblelesspct', label:'Trebleless %',desc:'% of legs without hitting a treble',      fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
   { key:'first3avg',     label:'1st 3 AVG',   desc:'Average of 1st 3 darts in a leg',         fmt:v=>v!=null?v.toFixed(1):'—' },
   { key:'first9avg',     label:'1st 9 AVG',   desc:'Average of 1st 9 darts in a leg',         fmt:v=>v!=null?v.toFixed(1):'—' },
@@ -2567,6 +2625,55 @@ const STAT_DEFS = [
   { key:'180sperleg',    label:'180s/Leg',    desc:'% of legs that contained a 180',           fmt:v=>v!=null?(v*100).toFixed(1)+'%':'—' },
 ];
 let selectedStat = 'avg';
+
+// Centralized stats glossary — shared source of truth for the homepage and player-page
+// "What do these stats mean?" links, so descriptions never drift out of sync.
+const STATS_LEGEND = [
+  { group:'Scoring', items:[
+    { name:'Three-Dart Average', desc:'All points scored ÷ all darts thrown × 3, across every leg, set and game. A bust still counts as a full 3-dart visit.' },
+    { name:'180s', desc:'Count of maximum 180 scores (three treble 20s in one visit).' },
+    { name:'1st 3 AVG / 1st 9 AVG', desc:'Average score of just the opening 3 (or 9) darts of a leg — measures how strong your starts are.' },
+    { name:'100+ AVG / 90- AVG', desc:'% of legs where your leg average was 100 or higher / 90 or lower.' },
+    { name:'140/Leg', desc:'% of opening visits in a leg that scored 140 or more.' },
+    { name:'Most Trebleless Visits', desc:'Visits where none of the three darts landed in a treble bed. A bust still counts as a turn and is trebleless if no treble was hit.' },
+  ]},
+  { group:'Checkouts', items:[
+    { name:'Big Fish', desc:'A checkout of exactly 170 (T20, T20, Bull) — the highest possible finish in darts.' },
+    { name:'9-Darters', desc:'A 501 leg finished in the minimum possible 9 darts.' },
+    { name:'Ton+ Finishes', desc:'Winning turns where you scored 100 or more on the final, checkout visit.' },
+    { name:'Ton+ Finish Rate', desc:'% of all checkouts that were Ton+ finishes (100 or more).' },
+    { name:'Highest Checkout / Highest Checkout Ever', desc:'The single largest checkout score recorded.' },
+    { name:'Top Checkouts', desc:"A player's highest scoring checkouts, with how many times each was hit and when." },
+    { name:'Best Leg Average', desc:'The highest 3-dart average achieved in any single completed leg.' },
+    { name:'Fewest Darts to Finish', desc:'The fewest darts ever used to win a leg (9 is the theoretical minimum in 501).' },
+  ]},
+  { group:'Volume & Pace', items:[
+    { name:'Total Darts Thrown', desc:'Lifetime count of every dart thrown.' },
+    { name:'Darts / Day', desc:'Average darts thrown per day you played.' },
+    { name:'Darts / Leg', desc:'Average darts used to win a leg.' },
+    { name:'Average Pace', desc:'Darts thrown per minute, based on per-dart timing (only tracked when "Collect per-dart timing" is enabled in Settings).' },
+    { name:'Games Played / Sets Played', desc:'Total games and sets you have taken part in.' },
+    { name:'H2H Legs Thrown / Practice Legs Thrown', desc:'Legs thrown in head-to-head games vs solo practice sessions.' },
+  ]},
+  { group:'Form & Results', items:[
+    { name:'Recent Form', desc:"Your 3-dart average over your last 10 completed legs, compared against your lifetime average, to show whether you're trending up or down." },
+    { name:'Current Win Streak', desc:'Consecutive head-to-head games won, most recent first.' },
+    { name:'Most Wins', desc:'Players ranked by head-to-head games won (minimum games played applies).' },
+    { name:'Players', desc:'Everyone who has thrown at least one dart on this scorer.' },
+  ]},
+];
+
+function renderLegend(){
+  const el = document.getElementById('legend-body');
+  if(!el) return;
+  el.innerHTML = STATS_LEGEND.map(g=>`
+    <div class="pp-section">
+      <div class="pp-section-title">${escapeHtml(g.group)}</div>
+      <div class="note" style="margin-top:8px">
+        ${g.items.map(it=>`<b style="color:var(--ink)">${escapeHtml(it.name)}</b> — ${escapeHtml(it.desc)}<br>`).join('')}
+      </div>
+    </div>`).join('');
+}
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 let avgChartPeriod = 'month';
@@ -2666,6 +2773,10 @@ function drawAvgChart(data){
 
 /* ---------- stat bubbles ---------- */
 const BUBBLE_KEY_MAP = { dartsthrown:'dartsThrown', avgdartsperday:'avgDartsPerDay', avgdartsperleg:'avgDartsPerLeg', '180s':'one80s', bigfish:'bigFish', ninedarters:'nineDarters', treblelesspct:'treblelessPct', '180sperleg':'one80sPerLeg' };
+function toggleMoreStats(){
+  showMoreStats = !showMoreStats;
+  renderPlayerPage();
+}
 function selectStat(key){
   selectedStat = key;
   document.querySelectorAll('.stat-bubble').forEach(b=>b.classList.toggle('active',b.dataset.stat===key));

@@ -221,6 +221,10 @@ const server = http.createServer(async (req, res) => {
       const mode = url.searchParams.get('mode');
       return send(res, 200, db.getTopFinishes(url.searchParams.get('name'), mode));
     }
+    if (p === '/api/players/personal-bests' && m === 'GET') {
+      const mode = url.searchParams.get('mode');
+      return send(res, 200, db.getPersonalBests(url.searchParams.get('name'), mode));
+    }
     if (p === '/api/players/stat-bubbles' && m === 'GET') {
       const mode = url.searchParams.get('mode');
       return send(res, 200, db.getPlayerStatBubbles(url.searchParams.get('name'), mode));

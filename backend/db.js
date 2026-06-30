@@ -664,6 +664,57 @@ function getPlayerStatBubbles(playerName, mode) {
   };
 }
 
+// Personal-best / "tracking improvement" markers for the player page: best single-leg
+// average, fewest darts to finish a leg, current H2H win streak, and recent-form (last
+// 10 completed legs) average vs lifetime average.
+function getPersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const mf = _mf(mode);
+
+  const legAvgSql = `
+    SELECT t.game_id, t.set_no, t.leg_no, MAX(t.id) AS lastTurnId,
+      CAST(SUM(t.scored) AS REAL)/NULLIF(SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END),0)*3 AS la
+    FROM turns t JOIN games g ON g.id=t.game_id
+    JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id=t.id
+    WHERE t.player_id=? ${mf}
+    GROUP BY t.game_id,t.set_no,t.leg_no
+    HAVING SUM(t.checkout)>0
+  `;
+  const legs = db.prepare(legAvgSql).all(p.id);
+  const bestLegAvg = legs.length ? Math.max(...legs.map(r=>r.la)) : null;
+
+  const fewestDartsCheckout = db.prepare(`
+    SELECT MIN(leg_darts) AS v FROM (
+      SELECT COUNT(d.id) AS leg_darts
+      FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+      WHERE t.player_id=? ${mf}
+      GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)>0
+    )
+  `).get(p.id)?.v ?? null;
+
+  const recentLegs = legs.slice().sort((a,b)=>b.lastTurnId-a.lastTurnId).slice(0,10);
+  const recentFormAvg = recentLegs.length ? recentLegs.reduce((s,r)=>s+r.la,0)/recentLegs.length : null;
+  const lifetimeAvg = legs.length ? legs.reduce((s,r)=>s+r.la,0)/legs.length : null;
+
+  let winStreak = 0;
+  if (mode !== 'practice') {
+    const recentGames = db.prepare(`
+      SELECT g.winner_id AS winnerId
+      FROM games g JOIN game_players gp ON gp.game_id=g.id
+      WHERE gp.player_id=? AND g.completed_at IS NOT NULL AND g.practice=0
+        AND (SELECT COUNT(*) FROM game_players gp2 WHERE gp2.game_id=g.id) > 1
+      ORDER BY g.completed_at DESC
+      LIMIT 50
+    `).all(p.id);
+    for (const r of recentGames) {
+      if (r.winnerId === p.id) winStreak++; else break;
+    }
+  }
+
+  return { bestLegAvg, fewestDartsCheckout, winStreak, recentFormAvg, lifetimeAvg };
+}
+
 function getMetricHistory(playerName, metric, period, opts = {}) {
   const p = getPlayer(playerName);
   if (!p) return [];
@@ -785,6 +836,16 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         SELECT t.scored, t.created_at, ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
         FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere}
       ) WHERE rn=1 ${F.and} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'pace':
+      // Darts/minute, derived from the gap between consecutive thrown_at timestamps
+      // within the same turn — only populated when "collect per-dart timing" is on.
+      return db.prepare(`SELECT bucket, 60000.0/AVG(gap_ms) AS value FROM (
+        SELECT ${T.fmt} AS bucket, (julianday(d.thrown_at) - julianday(prev.thrown_at)) * 86400000 AS gap_ms
+        FROM darts d
+        JOIN darts prev ON prev.turn_id = d.turn_id AND prev.dart_no = d.dart_no - 1
+        JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id
+        WHERE t.player_id=? AND d.thrown_at IS NOT NULL AND prev.thrown_at IS NOT NULL ${T.and} ${modeWhere} ${weightWhere}
+      ) WHERE gap_ms > 0 AND gap_ms < 60000 GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'avgdartsperleg':
       return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(leg_darts) AS value FROM (
         SELECT MAX(t.created_at) AS leg_ts, COUNT(d.id) AS leg_darts
@@ -1215,7 +1276,7 @@ module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer,
   createGame, addTurn, completeGame, recordEvent,
   computeStats, getSummary, getHomeExtra, getOneEightyStats, getBigFishStats, getNineDarterStats,
-  getPlayerStatBubbles, getMetricHistory,
+  getPlayerStatBubbles, getMetricHistory, getPersonalBests,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, deleteLastTurn,
   getCheckoutRoutes, getDartAnalytics,
   getSettings, updateSettings, getDartTimingEnabled, fireHaWebhook,
