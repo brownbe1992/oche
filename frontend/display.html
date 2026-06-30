@@ -127,11 +127,17 @@
 
   /* achievement flash overlay */
   .ach-overlay{position:fixed;top:0;right:0;bottom:0;left:0;display:none;flex-direction:column;align-items:center;justify-content:center;
-    gap:1.8vmin;background:rgba(8,9,7,.82);z-index:30;text-align:center;pointer-events:none}
+    gap:1.8vmin;background:rgba(8,9,7,.82);z-index:30;text-align:center;pointer-events:none;overflow:hidden}
   .ach-overlay.show{display:flex;animation:achpop .35s ease both}
+  .ach-overlay.mega{background:rgba(8,9,7,.92)}
   @keyframes achpop{from{opacity:0;transform:scale(.88)}to{opacity:1;transform:scale(1)}}
   .ach-text{font-family:'Bebas Neue';font-size:16vmin;line-height:.85;color:var(--cream);letter-spacing:.04em}
+  .ach-overlay.mega .ach-text{font-size:21vmin;color:var(--gold);text-shadow:0 0 6vmin rgba(217,180,106,.5);animation:achmegapulse 1.1s ease-in-out infinite}
+  @keyframes achmegapulse{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
   .ach-name{font-size:3.5vmin;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+  .ach-overlay.mega .ach-name{font-size:4.4vmin;color:var(--cream)}
+  .confetti{position:absolute;top:-10vh;width:1.1vmin;height:2.4vmin;opacity:.95;border-radius:1px;animation:confetti-fall linear forwards;pointer-events:none}
+  @keyframes confetti-fall{0%{transform:translateY(0) rotate(0deg);opacity:1}100%{transform:translateY(120vh) rotate(560deg);opacity:.85}}
 </style>
 </head>
 <body>
@@ -203,6 +209,34 @@ let lastAchTs = 0;
 let lastCoKey = '';   // track checkout route to flash only on change
 let bannerTimer = null;
 let achTimer = null;
+
+const ACH_LABELS  = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter':'🏆 NINE-DARTER! 🏆' };
+const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000 };
+
+function spawnConfetti(root, count){
+  const colors=['#d9b46a','#efe7d2','#f4e3b2','#caa94e'];
+  for(let i=0;i<count;i++){
+    const c=document.createElement('div');
+    c.className='confetti';
+    c.style.left=(Math.random()*100)+'%';
+    c.style.background=colors[Math.floor(Math.random()*colors.length)];
+    c.style.animationDuration=(1.8+Math.random()*1.6)+'s';
+    c.style.animationDelay=(Math.random()*0.6)+'s';
+    root.appendChild(c);
+    setTimeout(()=>c.remove(), 4500);
+  }
+}
+
+function showAchievement(type, player){
+  achText.textContent = ACH_LABELS[type] || '';
+  achName.textContent = player || '';
+  const mega = type === 'ninedarter';
+  achOverlay.classList.toggle('mega', mega);
+  achOverlay.classList.add('show');
+  if(mega) spawnConfetti(achOverlay, 90);
+  clearTimeout(achTimer);
+  achTimer = setTimeout(()=>{ achOverlay.classList.remove('show'); achOverlay.querySelectorAll('.confetti').forEach(c=>c.remove()); }, ACH_DURATION[type] || 2500);
+}
 
 function fmtText(s){
   const cat = s.category != null ? esc(s.category) : '';
@@ -349,15 +383,10 @@ function render(s){
     }).join('');
   }
 
-  // achievement flashes (180, Big Fish)
+  // achievement flashes (180, Big Fish, nine-darter)
   if(s.achievement && s.achievement.ts && s.achievement.ts !== lastAchTs){
     lastAchTs = s.achievement.ts;
-    const labels = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟' };
-    achText.textContent = labels[s.achievement.type] || '';
-    achName.textContent = s.achievement.player || '';
-    achOverlay.classList.add('show');
-    clearTimeout(achTimer);
-    achTimer = setTimeout(()=>achOverlay.classList.remove('show'), 2500);
+    showAchievement(s.achievement.type, s.achievement.player);
   }
 
   // result banners (leg / set / game) — show once per message
