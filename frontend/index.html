@@ -73,6 +73,7 @@
   .iconbtn.danger:hover{color:var(--bust);border-color:var(--bust)}
 
   .pselect{flex:1;background:var(--board);border:1px solid var(--wire);color:var(--ink);
+    -webkit-appearance:none;appearance:none;
     border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit;cursor:pointer}
   .pselect:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
   .out-tag{flex:none;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--gold);
@@ -1726,15 +1727,23 @@ function applyPreset(legsToWin, setsPerGame){
 }
 function onSlotChange(i, value){
   if(value==='__add__'){
-    renderPlayers(); // reset the dropdown back to its current value
+    // Reset just this select without re-rendering the whole list
+    const selects = document.querySelectorAll('.pselect');
+    if(selects[i]) selects[i].value = setup.slots[i] || '';
     uiAddPlayer((name, opts)=>{
       const added=addToRoster(name, opts);
       if(added){ setup.slots[i]=added; renderPlayers(); }
     });
     return;
   }
-  renderPlayers(); // reset dropdown to current value until the PIN check (if any) resolves
-  withPinCheck(value, ()=>{ setup.slots[i]=value; renderPlayers(); });
+  const prev = setup.slots[i];
+  withPinCheck(value,
+    ()=>{ setup.slots[i]=value; renderPlayers(); },
+    ()=>{ // PIN cancelled/failed — snap just this select back without full re-render
+      const selects = document.querySelectorAll('.pselect');
+      if(selects[i]) selects[i].value = prev || '';
+    }
+  );
 }
 function toggleAddPlayerMenu(){
   if(setup.slots.length>=6) return;
@@ -3162,8 +3171,9 @@ function uiPrompt(msg, initial, onSubmit, extraAttrs){
   setTimeout(()=>{ const el=document.getElementById('modal-input'); if(el){ el.focus(); el.select(); } },0);
 }
 
-function uiVerifyPin(name, onOk){
+function uiVerifyPin(name, onOk, onFail){
   window.__modalPinOk = onOk;
+  window.__modalPinFail = onFail || null;
   window.__modalPinName = name;
   document.getElementById('modal-body').innerHTML=
     `<p class="modal-msg">Enter PIN for "${escapeHtml(name)}"</p>
@@ -3173,7 +3183,7 @@ function uiVerifyPin(name, onOk){
             onkeydown="if(event.key==='Enter')submitVerifyPin()">
      <div id="pin-error" style="color:var(--danger,#e5484d);font-size:12px;margin-top:8px" hidden></div>
      <div class="modal-actions">
-       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+       <button class="btn btn-ghost" onclick="closeModal();if(window.__modalPinFail)window.__modalPinFail()">Cancel</button>
        <button class="btn btn-primary" id="pin-ok" onclick="submitVerifyPin()">Confirm</button>
      </div>`;
   document.getElementById('modal').hidden=false;
@@ -3190,8 +3200,8 @@ function submitVerifyPin(){
     .catch(err=>{ if(btn) btn.disabled=false; errEl.textContent = err.message || 'Incorrect PIN'; errEl.hidden=false; });
 }
 // runs `onOk` immediately if the player has no PIN, otherwise prompts for one first
-function withPinCheck(name, onOk){
-  if(prefs[name] && prefs[name].hasPin){ uiVerifyPin(name, onOk); }
+function withPinCheck(name, onOk, onFail){
+  if(prefs[name] && prefs[name].hasPin){ uiVerifyPin(name, onOk, onFail); }
   else onOk();
 }
 function dartWeightOptions(selected){
