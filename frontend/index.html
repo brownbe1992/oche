@@ -72,10 +72,23 @@
   .iconbtn:hover{color:var(--bust);border-color:var(--bust)}
   .iconbtn.danger:hover{color:var(--bust);border-color:var(--bust)}
 
-  .pselect{flex:1;background:var(--board);border:1px solid var(--wire);color:var(--ink);
-    -webkit-appearance:none;appearance:none;
-    border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit;cursor:pointer}
-  .pselect:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
+  .pselect-btn{width:100%;background:var(--board);border:1px solid var(--wire);color:var(--ink);
+    border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit;cursor:pointer;
+    display:flex;justify-content:space-between;align-items:center;text-align:left;gap:8px}
+  .pselect-btn:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
+  .pselect-placeholder{color:var(--muted)}
+  /* Player picker bottom sheet */
+  #player-picker-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;display:flex;align-items:flex-end}
+  #player-picker-sheet{background:var(--surface);border-radius:18px 18px 0 0;width:100%;
+    max-height:72vh;display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom,0px)}
+  .picker-header{display:flex;justify-content:space-between;align-items:center;
+    padding:16px 16px 12px;border-bottom:1px solid var(--wire);font-weight:600;font-size:16px;flex-shrink:0}
+  #player-picker-list{overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .picker-opt{padding:15px 18px;border-bottom:1px solid var(--wire);cursor:pointer;font-size:15px;
+    display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .picker-opt:active{background:var(--surface-2)}
+  .picker-opt.taken{color:var(--muted);cursor:default}
+  .picker-opt.add-new{color:var(--gold)}
   .out-tag{flex:none;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--gold);
     border:1px solid var(--wire);border-radius:8px;padding:7px 9px;min-width:38px;text-align:center}
 
@@ -621,6 +634,17 @@
     </div>
   </section>
 
+
+  <!-- ============ PLAYER PICKER SHEET ============ -->
+  <div id="player-picker-overlay" hidden onclick="if(event.target===this)closePlayerPicker()">
+    <div id="player-picker-sheet">
+      <div class="picker-header">
+        <span>Choose player</span>
+        <button class="btn btn-ghost" style="padding:4px 10px" onclick="closePlayerPicker()">✕</button>
+      </div>
+      <div id="player-picker-list"></div>
+    </div>
+  </div>
 
   <!-- ============ STATS LEGEND ============ -->
   <section id="screen-legend" class="screen">
@@ -1633,6 +1657,35 @@ function sanitizeSlots(){
     setup.slots = [''];   // force an explicit choice — never auto-select a player
   }
 }
+let _pickerSlot = null;
+function openPlayerPicker(i){
+  _pickerSlot = i;
+  const taken = setup.slots.filter((_,j)=>j!==i);
+  const list = document.getElementById('player-picker-list');
+  list.innerHTML = roster.map(p=>{
+    const isTaken = taken.includes(p);
+    const lock = (prefs[p] && prefs[p].hasPin) ? ' 🔒' : '';
+    return `<div class=”picker-opt${isTaken?' taken':''}” ${isTaken?'':'onclick=”pickSlotPlayer(\''+escapeJs(p)+'\')”'}>
+      <span>${escapeHtml(p)}${lock}</span>
+      ${isTaken?'<span style=”font-size:11px”>in game</span>':''}
+    </div>`;
+  }).join('')+
+  `<div class=”picker-opt add-new” onclick=”closePlayerPicker();setTimeout(()=>{ uiAddPlayer((name,opts)=>{ const a=addToRoster(name,opts); if(a){ setup.slots[_pickerSlot||0]=a; renderPlayers(); } }); },50)”>+ Add new player…</div>`;
+  document.getElementById('player-picker-overlay').hidden=false;
+}
+function closePlayerPicker(){
+  document.getElementById('player-picker-overlay').hidden=true;
+  _pickerSlot=null;
+}
+function pickSlotPlayer(value){
+  const i = _pickerSlot;
+  closePlayerPicker();
+  withPinCheck(value,
+    ()=>{ setup.slots[i]=value; renderPlayers(); },
+    ()=>{}
+  );
+}
+
 function renderPlayers(){
   closeAddPlayerMenu();
   const box = document.getElementById('players-list');
@@ -1643,36 +1696,33 @@ function renderPlayers(){
     return;
   }
   setup.slots.forEach((sel,i)=>{
-    const taken = setup.slots.filter((_,j)=>j!==i);
-    const opts = roster.map(p=>{
-      const lockTag = (prefs[p] && prefs[p].hasPin) ? ' 🔒' : '';
-      return `<option value=”${escapeHtml(p)}” ${p===sel?'selected':''} ${taken.includes(p)?'disabled':''}>${escapeHtml(p)}${lockTag}</option>`;
-    }).join('');
     const tag = sel ? `<span class=”out-tag” title=”${playerOut(sel)==='double'?'Doubles out':'Singles out'}”>${playerOut(sel)==='double'?'DO':'SO'}</span>` : '';
     // stat line for selected player
     let statLine = '';
     if(sel && stats[sel]){
       const s = stats[sel];
       const avg = s.avgDarts ? (s.totalPoints/s.avgDarts*3) : null;
-      const avgStr = avg != null ? avg.toFixed(1) : '—';
-      let formStr = '';
-      if(avg != null && s.recentAvg != null){
-        const delta = s.recentAvg - avg;
-        const arrow = delta >= 0.5 ? '▲' : delta <= -0.5 ? '▼' : '~';
-        const col = delta >= 0.5 ? 'var(--gold)' : delta <= -0.5 ? 'var(--danger,#e5484d)' : 'var(--muted)';
-        formStr = ` <span style=”color:${col}”>${arrow} ${Math.abs(delta).toFixed(1)}</span>`;
+      if(avg != null){
+        const avgStr = avg.toFixed(1);
+        let formStr = '';
+        if(s.recentAvg != null){
+          const delta = s.recentAvg - avg;
+          const arrow = delta >= 0.5 ? '▲' : delta <= -0.5 ? '▼' : '~';
+          const col = delta >= 0.5 ? 'var(--gold)' : delta <= -0.5 ? 'var(--danger,#e5484d)' : 'var(--muted)';
+          formStr = ` <span style=”color:${col}”>${arrow} ${Math.abs(delta).toFixed(1)}</span>`;
+        }
+        statLine = `<div class=”slot-stat-line”>avg ${avgStr}${formStr}</div>`;
       }
-      statLine = `<div class=”slot-stat-line”>avg ${avgStr}${formStr}</div>`;
     }
+    const lock = sel && prefs[sel] && prefs[sel].hasPin ? ' 🔒' : '';
+    const label = sel ? escapeHtml(sel)+lock : '';
     const row=document.createElement('div'); row.className='player-row';
     row.innerHTML=`<span class=”ix”>${i+1}</span>
       <div style=”flex:1;min-width:0”>
-        <select class=”pselect” style=”width:100%” aria-label=”Player ${i+1}” onchange=”onSlotChange(${i}, this.value)”>
-          <option value=”” ${sel?'':'selected'} disabled>Choose player</option>
-          ${opts}
-          <option disabled>──────────</option>
-          <option value=”__add__”>+ Add new player…</option>
-        </select>
+        <button class=”pselect-btn” onclick=”openPlayerPicker(${i})”>
+          ${label ? `<span>${label}</span>` : `<span class=”pselect-placeholder”>Choose player</span>`}
+          <span style=”color:var(--muted);font-size:13px;flex-shrink:0”>▾</span>
+        </button>
         ${statLine}
       </div>
       ${tag}
@@ -1724,26 +1774,6 @@ function applyPreset(legsToWin, setsPerGame){
   const lv = document.getElementById('legs-val'); if(lv) lv.textContent = legsToWin;
   const sv = document.getElementById('sets-val'); if(sv) sv.textContent = setsPerGame;
   updateFormatLine();
-}
-function onSlotChange(i, value){
-  if(value==='__add__'){
-    // Reset just this select without re-rendering the whole list
-    const selects = document.querySelectorAll('.pselect');
-    if(selects[i]) selects[i].value = setup.slots[i] || '';
-    uiAddPlayer((name, opts)=>{
-      const added=addToRoster(name, opts);
-      if(added){ setup.slots[i]=added; renderPlayers(); }
-    });
-    return;
-  }
-  const prev = setup.slots[i];
-  withPinCheck(value,
-    ()=>{ setup.slots[i]=value; renderPlayers(); },
-    ()=>{ // PIN cancelled/failed — snap just this select back without full re-render
-      const selects = document.querySelectorAll('.pselect');
-      if(selects[i]) selects[i].value = prev || '';
-    }
-  );
 }
 function toggleAddPlayerMenu(){
   if(setup.slots.length>=6) return;
