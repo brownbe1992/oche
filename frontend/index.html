@@ -1664,7 +1664,7 @@ function renderPlayers(){
   setup.slots.forEach((sel, i)=>{
     const taken = setup.slots.filter((_,j)=>j!==i);
     const opts = roster.map(p=>{
-      const lock = (prefs[p] && prefs[p].hasPin) ? ' 🔒' : '';
+      const lock = '';
       return `<option value=”${escapeHtml(p)}” ${p===sel?'selected':''} ${taken.includes(p)?'disabled':''}>${escapeHtml(p)}${lock}</option>`;
     }).join('');
     // stat line
