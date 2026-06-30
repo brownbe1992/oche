@@ -81,8 +81,12 @@
   .roster-row{display:flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--wire);
     border-radius:11px;padding:10px 12px}
   .roster-row .rp-main{flex:1;min-width:0}
-  .roster-row .rp-name{font-weight:600;font-size:15px}
-  .roster-row .rp-stat{font-size:12px;color:var(--muted)}
+  .roster-row .rp-name-row{display:flex;align-items:center;gap:6px;font-weight:600;font-size:15px;flex-wrap:wrap}
+  .roster-row .rp-stat{font-size:12px;color:var(--muted);margin-top:2px}
+  .rp-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+  .rp-chip{font-size:11px;color:var(--muted);background:var(--surface);border:1px solid var(--wire);border-radius:999px;padding:2px 8px}
+  .rp-badges{display:flex;gap:3px;align-items:center}
+  .rp-badge{font-size:11px;background:var(--surface);border:1px solid var(--wire);border-radius:6px;padding:1px 5px}
   .out-seg button{padding:8px 11px;font-size:12.5px}
   .out-seg button[aria-pressed="true"]{background:var(--surface-2);color:var(--ink)}
   .roster-row .iconbtn{width:40px;height:40px;font-size:15px;flex-shrink:0}
@@ -1789,13 +1793,52 @@ function renderRoster(){
   }
   box.innerHTML = roster.map(name=>{
     const s=stats[name]||{};
-    const avg = s.avgDarts ? (s.totalPoints/s.avgDarts*3).toFixed(1) : '—';
     const out = playerOut(name);
     const j = escapeHtml(escapeJs(name));
+
+    // Lifetime avg
+    const avg = s.avgDarts ? (s.totalPoints/s.avgDarts*3) : null;
+    const avgStr = avg != null ? avg.toFixed(1) : '—';
+
+    // Recent form arrow vs lifetime avg
+    let formHtml = '';
+    if(avg != null && s.recentAvg != null){
+      const delta = s.recentAvg - avg;
+      const arrow = delta >= 0.5 ? '▲' : delta <= -0.5 ? '▼' : '~';
+      const col   = delta >= 0.5 ? 'var(--gold)' : delta <= -0.5 ? 'var(--danger,#e5484d)' : 'var(--muted)';
+      formHtml = ` <span style="color:${col};font-size:11px">${arrow} ${Math.abs(delta).toFixed(1)}</span>`;
+    }
+
+    // H2H win rate
+    const gamesPlayed = Object.values(s.gamesByCat||{}).reduce((a,b)=>a+b,0);
+    const gamesWon    = Object.values(s.h2hGamesWonByCat||{}).reduce((a,b)=>a+b,0);
+    const winRateHtml = gamesPlayed >= 3
+      ? `<span class="rp-chip">${Math.round(gamesWon/gamesPlayed*100)}% wins · ${gamesPlayed}g</span>`
+      : '';
+
+    // Last played
+    const lastHtml = s.lastPlayed
+      ? `<span class="rp-chip">${fmtDate(s.lastPlayed)}</span>`
+      : '';
+
+    // Achievement badges (only show achievements the player has actually hit)
+    const badges = [
+      s.oneEighties  ? '180' : '',
+      s.bigFish      ? '🐟' : '',
+      s.nineDarters  ? '🏆' : '',
+    ].filter(Boolean);
+    const badgesHtml = badges.length
+      ? `<div class="rp-badges">${badges.map(b=>`<span class="rp-badge">${b}</span>`).join('')}</div>`
+      : '';
+
+    // DO / SO tag
+    const outTag = `<span class="out-tag" style="font-size:10px;padding:3px 7px;min-width:auto">${out==='double'?'DO':'SO'}</span>`;
+
     return `<div class="roster-row">
       <button class="rp-main" onclick="showPlayer('${j}')">
-        <div class="rp-name">${escapeHtml(name)}</div>
-        <div class="rp-stat">avg ${avg} · ${s.turns||0} turns</div>
+        <div class="rp-name-row">${escapeHtml(name)} ${outTag} ${badgesHtml}</div>
+        <div class="rp-stat">avg ${avgStr}${formHtml} · ${s.turns||0} turns</div>
+        <div class="rp-chips">${winRateHtml}${lastHtml}</div>
       </button>
       <button class="iconbtn" title="Rename" onclick="askRename('${j}')">✎</button>
       ${canManagePlayers()?`<button class="iconbtn danger" title="Delete" onclick="askDelete('${j}')">🗑</button>`:''}

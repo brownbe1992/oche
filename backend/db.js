@@ -410,6 +410,22 @@ function computeStats() {
   const h2hAgg  = _agg(`g.practice=0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id=g.id)>1`);
   const pracAgg = _agg(`g.practice=1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id=g.id)=1`);
 
+  // Last played date and recent-form average (last 30 turns) per player — used on the roster page.
+  const lastPlayedRows = db.prepare(`
+    SELECT player_id AS pid, MAX(created_at) AS ts FROM turns GROUP BY player_id
+  `).all();
+  const recentAvgRows = db.prepare(`
+    SELECT pid, CAST(SUM(scored) AS REAL)/NULLIF(SUM(dcount),0)*3 AS recentAvg FROM (
+      SELECT t.player_id AS pid, t.scored,
+             CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END AS dcount,
+             ROW_NUMBER() OVER (PARTITION BY t.player_id ORDER BY t.id DESC) AS rn
+      FROM turns t
+      LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id=t.id
+    ) WHERE rn <= 30 GROUP BY pid
+  `).all();
+
+  const lastPlayedById = {}; lastPlayedRows.forEach(r => lastPlayedById[r.pid] = r.ts);
+  const recentAvgById  = {}; recentAvgRows.forEach(r  => recentAvgById[r.pid]  = r.recentAvg);
   const nd9AllById  = {}; nd9All.forEach(r  => nd9AllById[r.pid]  = r.n);
   const nd9H2HById  = {}; nd9H2H.forEach(r  => nd9H2HById[r.pid]  = r.n);
   const nd9PracById = {}; nd9Prac.forEach(r => nd9PracById[r.pid] = r.n);
@@ -436,6 +452,8 @@ function computeStats() {
       oneEighties: (ha.oneEighties ?? 0) + (pa.oneEighties ?? 0),
       bigFish:     (ha.bigFish     ?? 0) + (pa.bigFish     ?? 0),
       nineDarters: nd9AllById[p.id] ?? 0,
+      lastPlayed:  lastPlayedById[p.id] ?? null,
+      recentAvg:   recentAvgById[p.id]  ?? null,
       h2hAvgDartsPerLeg: h2hDartsById[p.id] != null ? +h2hDartsById[p.id].toFixed(1) : null,
       practiceAvgDartsPerLeg: pracDartsById[p.id] != null ? +pracDartsById[p.id].toFixed(1) : null,
       h2hStats: { turns:ha.turns, totalPoints:ha.total, trebleLess:ha.trebleLess,
