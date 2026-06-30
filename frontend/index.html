@@ -63,19 +63,17 @@
   .setup-label{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px}
   /* player slots */
   .players-list{display:flex;flex-direction:column;gap:10px;margin-bottom:10px}
-  .player-row{display:flex;gap:8px;align-items:flex-start}
-  .player-row .ix{font-family:'Bebas Neue';font-size:22px;color:var(--gold);width:22px;text-align:center;padding-top:10px;flex-shrink:0}
-  .player-slot{flex:1;min-width:0}
+  .player-row{display:flex;gap:8px;align-items:center}
+  .player-row .ix{font-family:'Bebas Neue';font-size:22px;color:var(--gold);width:22px;text-align:center;flex-shrink:0}
   .pselect{width:100%;background:var(--board);border:1px solid var(--wire);color:var(--ink);
     border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit;cursor:pointer;display:block}
   .pselect:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
   .slot-meta{display:flex;align-items:center;gap:8px;margin-top:5px;min-height:18px}
   .slot-stat{font-size:12px;color:var(--muted)}
   /* add player row */
-  .add-player-wrap{display:flex;align-items:center;gap:8px;overflow:hidden;margin-bottom:4px}
-  .add-player-menu{display:flex;gap:6px;max-width:0;opacity:0;overflow:hidden;
-    transition:max-width .22s ease,opacity .22s ease}
-  .add-player-menu.open{max-width:360px;opacity:1}
+  .add-player-wrap{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+  .add-player-menu{display:none;gap:6px;flex-wrap:wrap}
+  .add-player-menu.open{display:flex}
   .add-player-menu .btn{white-space:nowrap;padding:11px 14px;font-size:13.5px}
   /* h2h banner */
   .h2h-banner{font-size:12px;color:var(--muted);background:var(--surface-2);border:1px solid var(--wire);
@@ -1688,19 +1686,15 @@ function renderPlayers(){
     const outTag = sel ? `<span class=”out-tag”>${playerOut(sel)==='double'?'DO':'SO'}</span>` : '';
     const row = document.createElement('div'); row.className = 'player-row';
     row.innerHTML = `<span class=”ix”>${i+1}</span>
-      <div class=”player-slot”>
+      <div style=”flex:1;min-width:0”>
         <select class=”pselect” aria-label=”Player ${i+1}” onchange=”onSlotChange(${i}, this.value)”>
           <option value=”” ${sel?'':'selected'} disabled>Choose player…</option>
           ${opts}
-          <option disabled>──────────</option>
-          <option value=”__add__”>+ Add new player…</option>
         </select>
-        <div class=”slot-meta”>
-          ${outTag}
-          ${statHtml}
-        </div>
+        <div class=”slot-meta”>${statHtml}</div>
       </div>
-      ${setup.slots.length>1?`<button class=”iconbtn” style=”margin-top:2px” title=”Remove” onclick=”removePlayer(${i})”>✕</button>`:''}`;
+      ${outTag}
+      ${setup.slots.length>1?`<button class=”iconbtn” title=”Remove” onclick=”removePlayer(${i})”>✕</button>`:''}`;
     box.appendChild(row);
   });
   updateSetupChrome();
@@ -1739,13 +1733,15 @@ function updateH2HBanner(named){
 }
 
 function onSlotChange(i, value){
-  if(value==='__add__'){
-    renderPlayers();
-    uiAddPlayer((name, opts)=>{ const a=addToRoster(name,opts); if(a){ setup.slots[i]=a; renderPlayers(); } });
-    return;
-  }
-  renderPlayers();
-  withPinCheck(value, ()=>{ setup.slots[i]=value; renderPlayers(); });
+  const prev = setup.slots[i];
+  withPinCheck(value,
+    ()=>{ setup.slots[i]=value; renderPlayers(); },
+    ()=>{
+      // reset the select back to previous value without re-rendering everything
+      const sel = document.querySelector(`#players-list .player-row:nth-child(${i+1}) .pselect`);
+      if(sel) sel.value = prev || '';
+    }
+  );
 }
 
 function toggleAddPlayerMenu(){
@@ -3200,8 +3196,9 @@ function uiPrompt(msg, initial, onSubmit, extraAttrs){
   setTimeout(()=>{ const el=document.getElementById('modal-input'); if(el){ el.focus(); el.select(); } },0);
 }
 
-function uiVerifyPin(name, onOk){
+function uiVerifyPin(name, onOk, onFail){
   window.__modalPinOk = onOk;
+  window.__modalPinFail = onFail;
   window.__modalPinName = name;
   document.getElementById('modal-body').innerHTML=
     `<p class="modal-msg">Enter PIN for "${escapeHtml(name)}"</p>
@@ -3211,7 +3208,7 @@ function uiVerifyPin(name, onOk){
             onkeydown="if(event.key==='Enter')submitVerifyPin()">
      <div id="pin-error" style="color:var(--danger,#e5484d);font-size:12px;margin-top:8px" hidden></div>
      <div class="modal-actions">
-       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+       <button class="btn btn-ghost" onclick="const f=window.__modalPinFail;closeModal();if(f)f();">Cancel</button>
        <button class="btn btn-primary" id="pin-ok" onclick="submitVerifyPin()">Confirm</button>
      </div>`;
   document.getElementById('modal').hidden=false;
@@ -3228,8 +3225,8 @@ function submitVerifyPin(){
     .catch(err=>{ if(btn) btn.disabled=false; errEl.textContent = err.message || 'Incorrect PIN'; errEl.hidden=false; });
 }
 // runs `onOk` immediately if the player has no PIN, otherwise prompts for one first
-function withPinCheck(name, onOk){
-  if(prefs[name] && prefs[name].hasPin){ uiVerifyPin(name, onOk); }
+function withPinCheck(name, onOk, onFail){
+  if(prefs[name] && prefs[name].hasPin){ uiVerifyPin(name, onOk, onFail); }
   else onOk();
 }
 function dartWeightOptions(selected){
