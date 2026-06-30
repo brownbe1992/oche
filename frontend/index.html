@@ -65,32 +65,15 @@
   .add-player-menu.open{max-width:360px;opacity:1}
   .add-player-menu .btn{white-space:nowrap;padding:11px 14px;font-size:13.5px}
   .player-row{display:flex;gap:8px;align-items:center}
-  .player-row .ix{font-family:'Bebas Neue';font-size:20px;color:var(--gold);width:22px;text-align:center;flex-shrink:0}
-  .slot-stat-line{font-size:11px;color:var(--muted);margin-top:2px;padding-left:2px}
+  .player-row .ix{font-family:'Bebas Neue';font-size:20px;color:var(--gold);width:22px;text-align:center}
   .iconbtn{background:none;border:1px solid var(--wire);color:var(--muted);border-radius:9px;
     width:42px;height:44px;font-size:18px;cursor:pointer;flex:none}
   .iconbtn:hover{color:var(--bust);border-color:var(--bust)}
   .iconbtn.danger:hover{color:var(--bust);border-color:var(--bust)}
 
-  .pselect-btn{width:100%;background:var(--board);border:1px solid var(--wire);color:var(--ink);
-    border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit;cursor:pointer;
-    display:flex;justify-content:space-between;align-items:center;text-align:left;gap:8px}
-  .pselect-btn:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
-  .pselect-placeholder{color:var(--muted)}
-  /* Player picker bottom sheet */
-  #player-picker-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;display:none;align-items:flex-end}
-  #player-picker-overlay.open{display:flex}
-  #player-picker-sheet{background:var(--surface);border-radius:18px 18px 0 0;width:100%;
-    max-height:72vh;display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom,0px)}
-  .picker-header{display:flex;justify-content:space-between;align-items:center;
-    padding:16px 16px 12px;border-bottom:1px solid var(--wire);font-weight:600;font-size:16px;flex-shrink:0}
-  #player-picker-list{overflow-y:auto;-webkit-overflow-scrolling:touch}
-  .picker-opt{width:100%;padding:15px 18px;border:none;border-bottom:1px solid var(--wire);
-    background:none;color:var(--ink);cursor:pointer;font-size:15px;font-family:inherit;text-align:left;
-    display:flex;justify-content:space-between;align-items:center;gap:8px}
-  .picker-opt:active{background:var(--surface-2)}
-  .picker-opt:disabled,.picker-opt.taken{color:var(--muted);cursor:default}
-  .picker-opt.add-new{color:var(--gold)}
+  .pselect{flex:1;background:var(--board);border:1px solid var(--wire);color:var(--ink);
+    border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit;cursor:pointer}
+  .pselect:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
   .out-tag{flex:none;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--gold);
     border:1px solid var(--wire);border-radius:8px;padding:7px 9px;min-width:38px;text-align:center}
 
@@ -528,15 +511,13 @@
 
       <label class="field">Players</label>
       <div class="players-list" id="players-list"></div>
-      <div class="add-player-wrap" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <div class="add-player-wrap">
         <button class="btn btn-ghost" id="add-player-btn" onclick="toggleAddPlayerMenu()">+ Add player</button>
         <div class="add-player-menu" id="add-player-menu">
           <button class="btn btn-ghost" onclick="addExistingPlayer()">Choose existing</button>
           <button class="btn btn-ghost" onclick="addNewPlayer()">Enter new</button>
         </div>
-        <button class="btn btn-ghost" id="shuffle-btn" onclick="shufflePlayers()" style="display:none" title="Randomise throw order">🔀 Shuffle</button>
       </div>
-      <div id="h2h-preview" style="display:none;margin:10px 2px 0;font-size:12px;color:var(--muted)"></div>
 
       <div class="opts">
         <div class="seg" role="group" aria-label="Starting score">
@@ -556,14 +537,6 @@
       </div>
 
       <div id="h2h-options">
-        <div class="opts" style="margin-bottom:4px">
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-            <span class="lbl" style="flex-shrink:0">Quick</span>
-            <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="applyPreset(2,1)">Bo3</button>
-            <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="applyPreset(3,1)">Bo5</button>
-            <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="applyPreset(4,1)">Bo7</button>
-          </div>
-        </div>
         <div class="opts">
           <div class="stepper">
             <span class="lbl">Legs per set</span>
@@ -636,17 +609,6 @@
     </div>
   </section>
 
-
-  <!-- ============ PLAYER PICKER SHEET ============ -->
-  <div id="player-picker-overlay" onclick="if(event.target===this)closePlayerPicker()">
-    <div id="player-picker-sheet">
-      <div class="picker-header">
-        <span>Choose player</span>
-        <button class="btn btn-ghost" style="padding:4px 10px" onclick="closePlayerPicker()">✕</button>
-      </div>
-      <div id="player-picker-list"></div>
-    </div>
-  </div>
 
   <!-- ============ STATS LEGEND ============ -->
   <section id="screen-legend" class="screen">
@@ -1659,139 +1621,45 @@ function sanitizeSlots(){
     setup.slots = [''];   // force an explicit choice — never auto-select a player
   }
 }
-let _pickerSlot = null;
-function openPlayerPicker(i){
-  _pickerSlot = i;
-  const taken = setup.slots.filter((_,j)=>j!==i);
-  const list = document.getElementById('player-picker-list');
-  list.innerHTML = '';
-  // Use buttons (not divs) so iOS fires click events reliably
-  roster.forEach(p=>{
-    const isTaken = taken.includes(p);
-    const lock = (prefs[p] && prefs[p].hasPin) ? ' 🔒' : '';
-    const btn = document.createElement('button');
-    btn.className = 'picker-opt' + (isTaken ? ' taken' : '');
-    btn.disabled = isTaken;
-    btn.innerHTML = `<span>${escapeHtml(p)}${lock}</span>${isTaken?'<span style=”font-size:11px”>in game</span>':''}`;
-    if(!isTaken) btn.addEventListener('click', ()=>pickSlotPlayer(p));
-    list.appendChild(btn);
-  });
-  // “Add new player…” button — capture slot index now, before closePlayerPicker nulls it
-  const addBtn = document.createElement('button');
-  addBtn.className = 'picker-opt add-new';
-  addBtn.textContent = '+ Add new player…';
-  addBtn.addEventListener('click', ()=>{
-    const slot = _pickerSlot; // capture before close
-    closePlayerPicker();
-    setTimeout(()=>{ uiAddPlayer((name,opts)=>{ const a=addToRoster(name,opts); if(a){ setup.slots[slot]=a; renderPlayers(); } }); }, 50);
-  });
-  list.appendChild(addBtn);
-  document.getElementById('player-picker-overlay').classList.add('open');
-}
-function closePlayerPicker(){
-  document.getElementById('player-picker-overlay').classList.remove('open');
-  _pickerSlot=null;
-}
-function pickSlotPlayer(value){
-  const i = _pickerSlot; // captured before close
-  closePlayerPicker();
-  withPinCheck(value,
-    ()=>{ setup.slots[i]=value; renderPlayers(); },
-    ()=>{}
-  );
-}
-
 function renderPlayers(){
   closeAddPlayerMenu();
   const box = document.getElementById('players-list');
   box.innerHTML='';
   if(roster.length===0){
-    box.innerHTML=`<p style=”color:var(--muted);font-size:13px;margin:0”>No players yet. Use “+ Add player” to create one.</p>`;
-    updateH2HPreview();
+    box.innerHTML=`<p style="color:var(--muted);font-size:13px;margin:0">No players yet. Use “+ Add player” to create one.</p>`;
     return;
   }
   setup.slots.forEach((sel,i)=>{
-    const tag = sel ? `<span class=”out-tag” title=”${playerOut(sel)==='double'?'Doubles out':'Singles out'}”>${playerOut(sel)==='double'?'DO':'SO'}</span>` : '';
-    // stat line for selected player
-    let statLine = '';
-    if(sel && stats[sel]){
-      const s = stats[sel];
-      const avg = s.avgDarts ? (s.totalPoints/s.avgDarts*3) : null;
-      if(avg != null){
-        const avgStr = avg.toFixed(1);
-        let formStr = '';
-        if(s.recentAvg != null){
-          const delta = s.recentAvg - avg;
-          const arrow = delta >= 0.5 ? '▲' : delta <= -0.5 ? '▼' : '~';
-          const col = delta >= 0.5 ? 'var(--gold)' : delta <= -0.5 ? 'var(--danger,#e5484d)' : 'var(--muted)';
-          formStr = ` <span style=”color:${col}”>${arrow} ${Math.abs(delta).toFixed(1)}</span>`;
-        }
-        statLine = `<div class=”slot-stat-line”>avg ${avgStr}${formStr}</div>`;
-      }
-    }
-    const lock = sel && prefs[sel] && prefs[sel].hasPin ? ' 🔒' : '';
-    const label = sel ? escapeHtml(sel)+lock : '';
+    const taken = setup.slots.filter((_,j)=>j!==i);
+    const opts = roster.map(p=>{
+      const lockTag = (prefs[p] && prefs[p].hasPin) ? ' 🔒' : '';
+      return `<option value="${escapeHtml(p)}" ${p===sel?'selected':''} ${taken.includes(p)?'disabled':''}>${escapeHtml(p)}${lockTag}</option>`;
+    }).join('');
+    const tag = sel ? `<span class="out-tag" title="${playerOut(sel)==='double'?'Doubles out':'Singles out'}">${playerOut(sel)==='double'?'DO':'SO'}</span>` : '';
     const row=document.createElement('div'); row.className='player-row';
-    row.innerHTML=`<span class=”ix”>${i+1}</span>
-      <div style=”flex:1;min-width:0”>
-        <button class=”pselect-btn” onclick=”openPlayerPicker(${i})”>
-          ${label ? `<span>${label}</span>` : `<span class=”pselect-placeholder”>Choose player</span>`}
-          <span style=”color:var(--muted);font-size:13px;flex-shrink:0”>▾</span>
-        </button>
-        ${statLine}
-      </div>
+    row.innerHTML=`<span class="ix">${i+1}</span>
+      <select class="pselect" aria-label="Player ${i+1}" onchange="onSlotChange(${i}, this.value)">
+        <option value="" ${sel?'':'selected'} disabled>Choose player</option>
+        ${opts}
+        <option disabled>──────────</option>
+        <option value="__add__">+ Add new player…</option>
+      </select>
       ${tag}
-      ${setup.slots.length>1?`<button class=”iconbtn” title=”Remove from game” onclick=”removePlayer(${i})”>✕</button>`:''}`;
+      ${setup.slots.length>1?`<button class="iconbtn" title="Remove from game" onclick="removePlayer(${i})">✕</button>`:''}`;
     box.appendChild(row);
   });
-  // Show shuffle button when 2+ named players selected
-  const named = setup.slots.filter(s=>s);
-  const shuffleBtn = document.getElementById('shuffle-btn');
-  if(shuffleBtn) shuffleBtn.style.display = named.length >= 2 ? '' : 'none';
-  updateH2HPreview();
 }
-
-let _h2hPreviewAbort = null;
-function updateH2HPreview(){
-  const el = document.getElementById('h2h-preview');
-  if(!el) return;
-  // Only fetch when the setup screen is actually visible
-  const setupScreen = document.getElementById('screen-setup');
-  if(!setupScreen || !setupScreen.classList.contains('on')) { el.style.display='none'; return; }
-  const named = setup.slots.filter(s=>s);
-  if(named.length !== 2){ el.style.display='none'; el.textContent=''; return; }
-  const [p1, p2] = named;
-  el.style.display='';
-  el.textContent = 'Loading H2H record…';
-  if(_h2hPreviewAbort) _h2hPreviewAbort.aborted = true;
-  const tok = { aborted: false }; _h2hPreviewAbort = tok;
-  fetch(`/api/players/h2h?p1=${encodeURIComponent(p1)}&p2=${encodeURIComponent(p2)}`)
-    .then(r=>r.json()).then(d=>{
-      if(tok.aborted || !d) return;
-      if(d.total === 0){ el.textContent = `No H2H games yet between ${p1} and ${p2}.`; return; }
-      let leader;
-      if(d.p1Wins > d.p2Wins) leader = `${p1} leads ${d.p1Wins}–${d.p2Wins}`;
-      else if(d.p2Wins > d.p1Wins) leader = `${p2} leads ${d.p2Wins}–${d.p1Wins}`;
-      else leader = `Tied ${d.p1Wins}–${d.p2Wins}`;
-      el.textContent = `H2H: ${leader} (${d.total} game${d.total!==1?'s':''})`;
-    }).catch(()=>{ if(!tok.aborted) el.textContent=''; });
-}
-
-function shufflePlayers(){
-  const named = setup.slots.filter(s=>s);
-  // Fisher-Yates on the named subset, keep blank slots at end
-  for(let i=named.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [named[i],named[j]]=[named[j],named[i]]; }
-  const blanks = setup.slots.filter(s=>!s);
-  setup.slots = [...named, ...blanks];
-  renderPlayers();
-}
-
-function applyPreset(legsToWin, setsPerGame){
-  setup.legsPerSet = legsToWin;
-  setup.setsPerGame = setsPerGame;
-  const lv = document.getElementById('legs-val'); if(lv) lv.textContent = legsToWin;
-  const sv = document.getElementById('sets-val'); if(sv) sv.textContent = setsPerGame;
-  updateFormatLine();
+function onSlotChange(i, value){
+  if(value==='__add__'){
+    renderPlayers(); // reset the dropdown back to its current value
+    uiAddPlayer((name, opts)=>{
+      const added=addToRoster(name, opts);
+      if(added){ setup.slots[i]=added; renderPlayers(); }
+    });
+    return;
+  }
+  renderPlayers(); // reset dropdown to current value until the PIN check (if any) resolves
+  withPinCheck(value, ()=>{ setup.slots[i]=value; renderPlayers(); });
 }
 function toggleAddPlayerMenu(){
   if(setup.slots.length>=6) return;
@@ -1836,8 +1704,6 @@ async function startGame(){
   setup.slots.forEach(n=>{ if(n && roster.includes(n) && !names.includes(n)) names.push(n); });
   if(names.length===0){ uiAlert('Choose at least one player.'); return; }
   if(!setup.practice && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
-  // Persist setup for next session
-  try{ localStorage.setItem('oche_last_setup', JSON.stringify({ start:setup.start, legsPerSet:setup.legsPerSet, setsPerGame:setup.setsPerGame, practice:setup.practice })); }catch(e){}
   game = {
     start: setup.start,
     category: String(setup.start),
@@ -3219,9 +3085,8 @@ function uiPrompt(msg, initial, onSubmit, extraAttrs){
   setTimeout(()=>{ const el=document.getElementById('modal-input'); if(el){ el.focus(); el.select(); } },0);
 }
 
-function uiVerifyPin(name, onOk, onFail){
+function uiVerifyPin(name, onOk){
   window.__modalPinOk = onOk;
-  window.__modalPinFail = onFail || null;
   window.__modalPinName = name;
   document.getElementById('modal-body').innerHTML=
     `<p class="modal-msg">Enter PIN for "${escapeHtml(name)}"</p>
@@ -3231,7 +3096,7 @@ function uiVerifyPin(name, onOk, onFail){
             onkeydown="if(event.key==='Enter')submitVerifyPin()">
      <div id="pin-error" style="color:var(--danger,#e5484d);font-size:12px;margin-top:8px" hidden></div>
      <div class="modal-actions">
-       <button class="btn btn-ghost" onclick="closeModal();if(window.__modalPinFail)window.__modalPinFail()">Cancel</button>
+       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
        <button class="btn btn-primary" id="pin-ok" onclick="submitVerifyPin()">Confirm</button>
      </div>`;
   document.getElementById('modal').hidden=false;
@@ -3248,8 +3113,8 @@ function submitVerifyPin(){
     .catch(err=>{ if(btn) btn.disabled=false; errEl.textContent = err.message || 'Incorrect PIN'; errEl.hidden=false; });
 }
 // runs `onOk` immediately if the player has no PIN, otherwise prompts for one first
-function withPinCheck(name, onOk, onFail){
-  if(prefs[name] && prefs[name].hasPin){ uiVerifyPin(name, onOk, onFail); }
+function withPinCheck(name, onOk){
+  if(prefs[name] && prefs[name].hasPin){ uiVerifyPin(name, onOk); }
   else onOk();
 }
 function dartWeightOptions(selected){
@@ -3325,24 +3190,6 @@ function showBackendErrorScreen(){
   }
   await DB.loadAll();       // populate roster / prefs / stats from the backend
   try{ const dt = await Backend.get('/api/settings/dart-timing'); dartTimingEnabled = !!dt.enabled; }catch(e){}
-  // Restore last setup from localStorage
-  try{
-    const saved = JSON.parse(localStorage.getItem('oche_last_setup')||'null');
-    if(saved){
-      if(saved.start) setup.start = saved.start;
-      if(saved.legsPerSet) setup.legsPerSet = saved.legsPerSet;
-      if(saved.setsPerGame) setup.setsPerGame = saved.setsPerGame;
-      if(typeof saved.practice === 'boolean') setup.practice = saved.practice;
-      // Sync start button UI
-      document.querySelectorAll('[data-start]').forEach(b=>b.setAttribute('aria-pressed', String(Number(b.dataset.start)===setup.start)));
-      // Sync mode UI
-      const mh=document.getElementById('mode-h2h'), mp=document.getElementById('mode-practice');
-      if(mh) mh.setAttribute('aria-pressed', String(!setup.practice));
-      if(mp) mp.setAttribute('aria-pressed', String(setup.practice));
-      const ho=document.getElementById('h2h-options');
-      if(ho) ho.style.display = setup.practice ? 'none' : '';
-    }
-  }catch(e){}
   sanitizeSlots();
   renderPlayers();
   document.getElementById('legs-val').textContent = setup.legsPerSet;
