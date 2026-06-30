@@ -592,9 +592,6 @@
       </div>
       <p style="color:var(--muted);font-size:13px;margin:0 0 16px">Lifetime totals across every leg, set and game you've played on this device.</p>
       <div id="stats-body"></div>
-      <div class="btn-row">
-        <button class="btn btn-ghost" onclick="resetStats()">Reset all stats</button>
-      </div>
       <div class="note">
         <span class="badge">how each stat is counted</span><br>
         <b style="color:var(--ink)">3-dart average</b> — lifetime: all points scored ÷ all darts thrown × 3, across every leg, set and game. (During play, the scoreboard shows your <em>current leg</em> and <em>current game</em> averages instead.)<br>
@@ -620,18 +617,6 @@
       <div class="pp-section" style="margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;gap:12px">
         <span style="font-size:13px;color:var(--muted)">Logged in as <b style="color:var(--ink)" id="settings-admin-username"></b></span>
         <button class="btn btn-ghost" onclick="adminLogout()">Log out</button>
-      </div>
-
-      <!-- Preferences -->
-      <div class="pp-section" style="margin-bottom:24px">
-        <div class="pp-section-title">Preferences</div>
-        <div>
-          <label class="field">Default Player</label>
-          <select class="pselect" id="pref-default-player" style="width:auto;min-width:200px">
-            <option value="">No default</option>
-          </select>
-          <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.5">This player is always pre-selected on the New Game page.</p>
-        </div>
       </div>
 
       <p id="settings-api-note" hidden style="color:var(--muted);font-size:13px;background:var(--surface-2);border:1px solid var(--wire);border-radius:10px;padding:12px 14px;margin-bottom:16px">
@@ -900,6 +885,7 @@ const Auth = {
   }
 };
 
+function canManagePlayers(){ return DB.mode!=='api' || Auth.loggedIn; }
 function closeWizard(){ const o=document.getElementById('wizard'); if(o) o.hidden=true; }
 function showWizard(){
   renderWizardBody();
@@ -999,7 +985,6 @@ let stats = {};
 let prefs = {};      // name -> { out:'double'|'single' }  (per-player finish rule)
 let mult = 1;
 let dartboardMode = true;
-let defaultPlayer = localStorage.getItem('oche_default_player') || '';
 
 /* ---------- dartboard input mode ---------- */
 const DB_SECTORS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
@@ -1295,13 +1280,6 @@ function openScoreboard(){
 
 /* ---------- settings ---------- */
 async function renderSettings(){
-  // Preferences — always available (stored in localStorage)
-  const sel = document.getElementById('pref-default-player');
-  if(sel){
-    sel.innerHTML = '<option value="">No default</option>' +
-      roster.map(n=>`<option value="${escapeHtml(n)}"${n===defaultPlayer?' selected':''}>${escapeHtml(n)}</option>`).join('');
-  }
-
   const gate = document.getElementById('settings-gate');
   const content = document.getElementById('settings-content');
 
@@ -1461,13 +1439,9 @@ function saveSettings(){
   const btn = document.getElementById('settings-save-btn');
   if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
 
-  // Save default player preference to localStorage (works in all modes)
-  defaultPlayer = v('pref-default-player');
-  localStorage.setItem('oche_default_player', defaultPlayer);
-
   if(DB.mode!=='api'){
     if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
-    uiAlert('Preferences saved.');
+    uiAlert('Smart Home Integration settings require the server backend.');
     return;
   }
 
@@ -1553,10 +1527,9 @@ function deletePlayer(name){
 
 /* ---------- setup screen (choose players from roster) ---------- */
 function sanitizeSlots(){
-  setup.slots = setup.slots.filter(s=>roster.includes(s));
+  setup.slots = setup.slots.filter(s=>!s || roster.includes(s));
   if(setup.slots.length===0 && roster.length){
-    const def = roster.includes(defaultPlayer) ? defaultPlayer : roster[0];
-    setup.slots = [def];
+    setup.slots = [''];   // force an explicit choice — never auto-select a player
   }
 }
 function renderPlayers(){
@@ -1574,6 +1547,7 @@ function renderPlayers(){
     const row=document.createElement('div'); row.className='player-row';
     row.innerHTML=`<span class="ix">${i+1}</span>
       <select class="pselect" aria-label="Player ${i+1}" onchange="onSlotChange(${i}, this.value)">
+        <option value="" ${sel?'':'selected'} disabled>Choose player</option>
         ${opts}
         <option disabled>──────────</option>
         <option value="__add__">+ Add new player…</option>
@@ -1607,8 +1581,8 @@ function closeAddPlayerMenu(){
 function addExistingPlayer(){
   closeAddPlayerMenu();
   if(setup.slots.length>=6) return;
-  const next=roster.find(p=>!setup.slots.includes(p))||roster[0];
-  withPinCheck(next, ()=>{ setup.slots.push(next); renderPlayers(); });
+  setup.slots.push('');   // force an explicit choice — never auto-select a player
+  renderPlayers();
 }
 function addNewPlayer(){
   closeAddPlayerMenu();
@@ -1633,6 +1607,7 @@ function updateFormatLine(){
 }
 
 async function startGame(){
+  if(setup.slots.some(n=>!n)){ uiAlert('Choose a player for each slot before starting.'); return; }
   const names = [];
   setup.slots.forEach(n=>{ if(n && roster.includes(n) && !names.includes(n)) names.push(n); });
   if(names.length===0){ uiAlert('Choose at least one player.'); return; }
@@ -1738,7 +1713,7 @@ function renderRoster(){
         <button aria-pressed="${out==='single'}" onclick="setPlayerOut('${j}','single'); renderRoster();">Single out</button>
       </div>
       <button class="iconbtn" title="Rename" onclick="askRename('${j}')">✎</button>
-      <button class="iconbtn danger" title="Delete" onclick="askDelete('${j}')">🗑</button>
+      ${canManagePlayers()?`<button class="iconbtn danger" title="Delete" onclick="askDelete('${j}')">🗑</button>`:''}
     </div>`;
   }).join('');
 }
@@ -1896,7 +1871,7 @@ function renderPlayerPage(){
         <label class="field" style="margin-bottom:5px">Dart weight</label>
         <select class="date-input" style="width:auto" onchange="setPlayerDartWeight('${j}', this.value)">
           <option value="">Not set</option>
-          ${Array.from({length:16},(_,i)=>15+i).map(g=>`<option value="${g}"${dartWeight===g?' selected':''}>${g}g</option>`).join('')}
+          ${dartWeightOptions(dartWeight)}
         </select>
       </div>
     </div>
@@ -1909,8 +1884,8 @@ function renderPlayerPage(){
     ${tabContent}
     <div class="btn-row">
       <button class="btn btn-ghost" onclick="askRenameFromProfile('${j}')">Rename</button>
-      <button class="btn btn-ghost danger" onclick="askClearPlayerStats('${j}','${tab==='overall'?'all':tab}')">Reset ${tab==='overall'?'all':tab==='h2h'?'H2H':'Practice'} stats</button>
-      <button class="btn btn-ghost danger" onclick="askDeleteFromProfile('${j}')">Delete player</button>
+      ${canManagePlayers()?`<button class="btn btn-ghost danger" onclick="askClearPlayerStats('${j}','${tab==='overall'?'all':tab}')">Reset ${tab==='overall'?'all':tab==='h2h'?'H2H':'Practice'} stats</button>`:''}
+      ${canManagePlayers()?`<button class="btn btn-ghost danger" onclick="askDeleteFromProfile('${j}')">Delete player</button>`:''}
     </div>`;
   loadStatBubbles();
   loadAvgChart(avgChartPeriod);
@@ -2964,16 +2939,6 @@ function renderStats(){
       <th class="num">Treble-less Visits</th>
     </tr></thead><tbody>${rows}</tbody></table>`;
 }
-function resetStats(){
-  uiConfirm('Erase all saved stats for every player? Players are kept; their numbers go back to zero.', ()=>{
-    if(DB.mode==='api'){
-      DB.reset().then(renderStats).catch(logErr);
-    } else {
-      stats={}; roster.forEach(ensurePlayerStats); persist(); renderStats();
-    }
-  });
-}
-
 /* ---------- util ---------- */
 function escapeHtml(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function escapeJs(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
@@ -3041,6 +3006,10 @@ function withPinCheck(name, onOk){
   if(DB.mode==='api' && prefs[name] && prefs[name].hasPin){ uiVerifyPin(name, onOk); }
   else onOk();
 }
+function dartWeightOptions(selected){
+  return Array.from({length:31},(_,i)=>10+i)
+    .map(g=>`<option value="${g}"${Number(selected)===g?' selected':''}>${g}g</option>`).join('');
+}
 function uiAddPlayer(onSubmit){
   window.__modalAddPlayer = onSubmit;
   document.getElementById('modal-body').innerHTML=
@@ -3060,8 +3029,14 @@ function uiAddPlayer(onSubmit){
      <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
        Set a 4–8 digit PIN to stop other people from playing as this player — it will be asked for each time this player is added to a game. Leave it blank if anyone should be able to pick this player.
      </p>
-     <label class="field">Standard dart weight, grams (optional)</label>
-     <input type="number" id="ap-weight" min="1" max="60" step="0.1" placeholder="e.g. 22" style="margin-bottom:14px">
+     <label class="field">Dart Weight (optional)</label>
+     <select class="date-input" id="ap-weight" style="width:auto;margin-bottom:6px">
+       <option value="">Not set</option>
+       ${dartWeightOptions(null)}
+     </select>
+     <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+       Optionally choose your preferred dart weight. This can be changed later from your player page.
+     </p>
      <div id="ap-error" style="color:var(--danger,#e5484d);font-size:12px;margin-bottom:8px" hidden></div>
      <div class="modal-actions">
        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
@@ -3077,7 +3052,7 @@ function submitAddPlayer(){
   const out = document.getElementById('ap-out-single').getAttribute('aria-pressed')==='true' ? 'single' : 'double';
   const pin = document.getElementById('ap-pin').value.trim();
   if(pin && !/^\d{4,8}$/.test(pin)){ errEl.textContent='PIN must be 4–8 digits.'; errEl.hidden=false; return; }
-  const weightRaw = document.getElementById('ap-weight').value.trim();
+  const weightRaw = document.getElementById('ap-weight').value;
   const dartWeight = weightRaw ? Number(weightRaw) : null;
   const f = window.__modalAddPlayer;
   closeModal();

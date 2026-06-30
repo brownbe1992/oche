@@ -199,7 +199,10 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/players/out' && m === 'PUT')         { const b = await readJson(req); return send(res, 200, db.setOut(b.name, b.out)); }
     if (p === '/api/players/dart-weight' && m === 'PUT') { const b = await readJson(req); return send(res, 200, db.setDartWeight(b.name, b.weight)); }
     if (p === '/api/players/dart-weights' && m === 'GET') return send(res, 200, db.getDartWeights(url.searchParams.get('name')));
-    if (p === '/api/players' && m === 'DELETE') return send(res, 200, db.deletePlayer(url.searchParams.get('name')));
+    if (p === '/api/players' && m === 'DELETE') {
+      if (!requireAdmin(req, res)) return;
+      return send(res, 200, db.deletePlayer(url.searchParams.get('name')));
+    }
     if (p === '/api/players/stats' && m === 'DELETE') {
       if (!requireAdmin(req, res)) return;
       const mode = url.searchParams.get('mode');
