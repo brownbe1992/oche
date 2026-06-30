@@ -1980,7 +1980,8 @@ function renderPlayerPage(){
   body.innerHTML = `
     <div class="pp-header">
       <div class="pp-name">${escapeHtml(name)}</div>
-      <div class="pp-meta">${s.turns||0} turns thrown (all-time) · <a href="javascript:void(0)" onclick="showLegend('player')">what do these stats mean?</a></div>
+      <div class="pp-meta">${s.turns||0} turns thrown (all-time)</div>
+      <button class="btn btn-ghost" style="margin-top:6px" onclick="showLegend('player')">View stats glossary →</button>
     </div>
     <div class="player-controls">
       <div class="seg out-seg" role="group" aria-label="Finish rule">
