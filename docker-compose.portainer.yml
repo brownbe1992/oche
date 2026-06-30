@@ -18,6 +18,7 @@ services:
     environment:
       - PORT=8046
       - DARTS_DB=/app/data/darts.db   # database is saved in the data/ folder of the project
+      - COOKIE_SECURE=false   # set true if served over HTTPS (e.g. reverse proxy)
     volumes:
       - /mnt/user/appdata/darts-app:/app   # <-- CHANGE the left side to your folder path
     restart: unless-stopped

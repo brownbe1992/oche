@@ -9,4 +9,8 @@ services:
     environment:
       - PORT=8046
       - DARTS_DB=/data/darts.db
+      # Set to "true" if this app is served over HTTPS (e.g. behind a reverse proxy),
+      # so the admin session cookie gets the Secure flag. Leave unset/false for plain
+      # HTTP / LAN-only deployments.
+      - COOKIE_SECURE=false
     restart: unless-stopped

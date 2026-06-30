@@ -610,9 +610,17 @@
   <section id="screen-settings" class="screen">
     <div class="card">
       <h2 style="font-size:18px;margin-bottom:4px">Settings</h2>
-      <p style="color:var(--muted);font-size:13px;margin:0 0 20px">App configuration and integrations.</p>
+      <p style="color:var(--muted);font-size:13px;margin:0 0 20px">App configuration and integrations. Admin login required.</p>
 
+      <div id="settings-gate"></div>
+
+    <div class="card" id="settings-content" hidden style="padding:0;border:0;background:none">
       <p id="settings-error" hidden style="color:var(--bust);font-size:13px;background:rgba(226,71,61,.1);border:1px solid var(--bust);border-radius:10px;padding:12px 14px;margin-bottom:16px"></p>
+
+      <div class="pp-section" style="margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+        <span style="font-size:13px;color:var(--muted)">Logged in as <b style="color:var(--ink)" id="settings-admin-username"></b></span>
+        <button class="btn btn-ghost" onclick="adminLogout()">Log out</button>
+      </div>
 
       <!-- Preferences -->
       <div class="pp-section" style="margin-bottom:24px">
@@ -714,12 +722,38 @@
       <div class="btn-row" style="margin-top:20px">
         <button class="btn btn-primary" id="settings-save-btn" onclick="saveSettings()">Save settings</button>
       </div>
+
+      <!-- Manage admins -->
+      <div class="pp-section" style="margin-top:24px">
+        <div class="pp-section-title">Admin accounts</div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          Admin accounts can access this Settings page and manage player PINs. There must always be at least one.
+        </p>
+        <div id="admins-list" style="display:grid;gap:8px;margin-bottom:14px"></div>
+        <button class="btn btn-ghost" onclick="askAddAdmin()">+ Add admin</button>
+      </div>
+
+      <!-- Player PINs -->
+      <div class="pp-section" style="margin-top:24px">
+        <div class="pp-section-title">Player PINs</div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          A PIN-protected player must have their PIN entered before they can be added to a game — useful for stopping others from playing as you. Players without a PIN can be picked by anyone.
+        </p>
+        <label class="field">Lock out after this many wrong PIN attempts</label>
+        <input type="number" id="pin-lockout-threshold" min="1" max="1000" style="width:120px;margin-bottom:14px">
+        <div id="pin-players-list" style="display:grid;gap:8px"></div>
+      </div>
+    </div>
     </div>
   </section>
 </div>
 
 <div class="modal-overlay" id="modal" hidden>
   <div class="modal-card" id="modal-body"></div>
+</div>
+
+<div class="modal-overlay" id="wizard" hidden>
+  <div class="modal-card" id="wizard-body" style="max-width:420px"></div>
 </div>
 
 <script>
@@ -786,7 +820,7 @@ const DB = {
       const players = await Backend.get('/api/players');
       // No auto-creation — empty roster shows the Players page prompting the user to add their own name
       roster = players.map(p=>p.name);
-      prefs = {}; players.forEach(p=>{ prefs[p.name]={out:p.out}; ensurePlayerStats(p.name); });
+      prefs = {}; players.forEach(p=>{ prefs[p.name]={out:p.out, hasPin:!!p.hasPin}; ensurePlayerStats(p.name); });
       await this.refreshStats();
     } else {
       const blob = await Store.load();
@@ -805,11 +839,11 @@ const DB = {
     const s = await Backend.get('/api/stats');     // already in the shape the UI uses
     stats = s;
     roster = Object.keys(s);
-    prefs = {}; roster.forEach(n=>{ prefs[n]={out:s[n].out||'double'}; ensurePlayerStats(n); });
+    prefs = {}; roster.forEach(n=>{ prefs[n]={out:s[n].out||'double', hasPin:!!s[n].hasPin}; ensurePlayerStats(n); });
   },
 
   // player profile writes (api hits the server; local handled by persist())
-  addPlayer(name, out){ if(this.mode==='api') Backend.send('POST','/api/players',{name, out:out||'double'}).catch(logErr); },
+  addPlayer(name, out, opts){ if(this.mode==='api') Backend.send('POST','/api/players',{name, out:out||'double', pin:(opts&&opts.pin)||undefined, dartWeight:(opts&&opts.dartWeight)||undefined}).catch(logErr); },
   rename(from, to){ if(this.mode==='api') Backend.send('PUT','/api/players/rename',{from, to}).catch(logErr); },
   setOut(name, out){ if(this.mode==='api') Backend.send('PUT','/api/players/out',{name, out}).catch(logErr); },
   setDartWeight(name, weight){ if(this.mode==='api') Backend.send('PUT','/api/players/dart-weight',{name, weight}).catch(logErr); },
@@ -833,6 +867,84 @@ const DB = {
   pushLive(snapshot){ if(this.mode==='api') Backend.send('POST','/api/live', snapshot).catch(()=>{}); }
 };
 function logErr(e){ console.warn('darts backend:', e && e.message ? e.message : e); }
+
+/* =========================================================================
+   ADMIN AUTH  — login-gated Settings page, first-run wizard, player PINs.
+   Only meaningful when DB.mode==='api' (there's no server in local mode).
+   ========================================================================= */
+const Auth = {
+  loggedIn: false,
+  username: null,
+  setupRequired: false,
+
+  async refresh(){
+    if(DB.mode!=='api'){ this.loggedIn=false; this.username=null; this.setupRequired=false; return; }
+    try{
+      const [me, setup] = await Promise.all([Backend.get('/api/me'), Backend.get('/api/setup-required')]);
+      this.loggedIn = !!me.loggedIn;
+      this.username = me.username || null;
+      this.setupRequired = !!setup.required;
+    }catch(e){ logErr(e); }
+  },
+  async login(username, password){
+    await Backend.send('POST','/api/login',{username,password});
+    await this.refresh();
+  },
+  async logout(){
+    await Backend.send('POST','/api/logout').catch(()=>{});
+    await this.refresh();
+  },
+  async createAdmin(username, password){
+    await Backend.send('POST','/api/setup',{username,password});
+    await this.login(username, password);
+  }
+};
+
+function closeWizard(){ const o=document.getElementById('wizard'); if(o) o.hidden=true; }
+function showWizard(){
+  renderWizardBody();
+  document.getElementById('wizard').hidden=false;
+}
+function renderWizardBody(){
+  document.getElementById('wizard-body').innerHTML = `
+    <p class="modal-msg" style="font-weight:700;font-size:16px;margin-bottom:4px">Welcome to Oche</p>
+    <p style="font-size:13px;color:var(--muted);line-height:1.6;margin:0 0 16px">
+      Create an admin account to lock down the Settings page and manage player PINs (so others can't open Settings,
+      reset stats, or play games under your name without permission). The rest of the app — playing games, viewing
+      stats, the live scoreboard — works for everyone either way.
+    </p>
+    <p id="wizard-error" hidden style="color:var(--bust);font-size:13px;margin:0 0 10px"></p>
+    <label class="field">Username</label>
+    <input type="text" id="wizard-username" autocomplete="username" style="margin-bottom:10px">
+    <label class="field">Password <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— at least 8 characters</span></label>
+    <input type="password" id="wizard-password" autocomplete="new-password" style="margin-bottom:16px">
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="confirmSkipWizard()">Skip for now</button>
+      <button class="btn btn-primary" onclick="submitWizard()">Create admin account</button>
+    </div>`;
+}
+function confirmSkipWizard(){
+  uiConfirm('Skip creating an admin account? You can create one later from Settings, but until then Settings (and player PIN management) will be open to anyone using the app.', ()=>{
+    localStorage.setItem('oche_wizard_dismissed','1');
+    closeWizard();
+  });
+}
+async function submitWizard(){
+  const username = document.getElementById('wizard-username').value;
+  const password = document.getElementById('wizard-password').value;
+  const err = document.getElementById('wizard-error');
+  try{
+    await Auth.createAdmin(username, password);
+    localStorage.setItem('oche_wizard_dismissed','1');
+    closeWizard();
+    uiAlert('Admin account created and you are now logged in. You can manage it any time from Settings.');
+  }catch(e){
+    if(err){ err.textContent = e.message || 'Could not create admin account'; err.hidden=false; }
+  }
+}
+function adminLogout(){
+  Auth.logout().then(renderSettings);
+}
 
 /* =========================================================================
    PURE SCORING LOGIC  (identical to the unit-tested version)
@@ -1182,7 +1294,7 @@ function openScoreboard(){
 }
 
 /* ---------- settings ---------- */
-function renderSettings(){
+async function renderSettings(){
   // Preferences — always available (stored in localStorage)
   const sel = document.getElementById('pref-default-player');
   if(sel){
@@ -1190,14 +1302,55 @@ function renderSettings(){
       roster.map(n=>`<option value="${escapeHtml(n)}"${n===defaultPlayer?' selected':''}>${escapeHtml(n)}</option>`).join('');
   }
 
+  const gate = document.getElementById('settings-gate');
+  const content = document.getElementById('settings-content');
+
   // Smart Home Integration — requires API backend
   if(DB.mode!=='api'){
+    if(gate) gate.innerHTML='';
+    if(content) content.hidden=false;
     const note=document.getElementById('settings-api-note');
     if(note) note.hidden=false;
     const sh=document.getElementById('smart-home-section');
     if(sh) sh.style.opacity='0.4';
     return;
   }
+
+  await Auth.refresh();
+
+  if(Auth.setupRequired){
+    content.hidden=true;
+    gate.innerHTML = `
+      <p style="font-size:13px;color:var(--muted);line-height:1.6;margin:0 0 16px">
+        No admin account exists yet. Create one to access Settings and manage player PINs.
+      </p>
+      <p id="settings-gate-error" hidden style="color:var(--bust);font-size:13px;margin:0 0 10px"></p>
+      <label class="field">Username</label>
+      <input type="text" id="gate-username" autocomplete="username" style="margin-bottom:10px">
+      <label class="field">Password <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— at least 8 characters</span></label>
+      <input type="password" id="gate-password" autocomplete="new-password" style="margin-bottom:16px">
+      <button class="btn btn-primary" onclick="submitGateCreateAdmin()">Create admin account</button>`;
+    return;
+  }
+
+  if(!Auth.loggedIn){
+    content.hidden=true;
+    gate.innerHTML = `
+      <p id="settings-gate-error" hidden style="color:var(--bust);font-size:13px;margin:0 0 10px"></p>
+      <label class="field">Username</label>
+      <input type="text" id="gate-username" autocomplete="username" onkeydown="if(event.key==='Enter')submitGateLogin()" style="margin-bottom:10px">
+      <label class="field">Password</label>
+      <input type="password" id="gate-password" autocomplete="current-password" onkeydown="if(event.key==='Enter')submitGateLogin()" style="margin-bottom:16px">
+      <button class="btn btn-primary" onclick="submitGateLogin()">Log in</button>`;
+    return;
+  }
+
+  gate.innerHTML='';
+  content.hidden=false;
+  const un=document.getElementById('settings-admin-username'); if(un) un.textContent=Auth.username||'';
+  renderAdminsList();
+  renderPinPlayersList();
+
   Backend.get('/api/settings').then(cfg=>{
     const set = (id, key) => { const el=document.getElementById(id); if(el) el.value = cfg[key] || ''; };
     set('ha-url',           'ha_url');
@@ -1212,7 +1365,96 @@ function renderSettings(){
     set('ha-wh-gameend',    'ha_webhook_gameend');
     set('ha-wh-setstart',   'ha_webhook_setstart');
     set('ha-wh-setend',     'ha_webhook_setend');
+    const lockoutEl = document.getElementById('pin-lockout-threshold');
+    if(lockoutEl) lockoutEl.value = cfg.pin_lockout_threshold || 10;
   }).catch(err=>{ const s=document.getElementById('settings-error'); if(s){ s.textContent='Could not load settings: '+err.message; s.hidden=false; } });
+}
+
+async function submitGateLogin(){
+  const username = document.getElementById('gate-username').value;
+  const password = document.getElementById('gate-password').value;
+  const err = document.getElementById('settings-gate-error');
+  try{ await Auth.login(username, password); renderSettings(); }
+  catch(e){ if(err){ err.textContent = e.message || 'Login failed'; err.hidden=false; } }
+}
+async function submitGateCreateAdmin(){
+  const username = document.getElementById('gate-username').value;
+  const password = document.getElementById('gate-password').value;
+  const err = document.getElementById('settings-gate-error');
+  try{ await Auth.createAdmin(username, password); renderSettings(); }
+  catch(e){ if(err){ err.textContent = e.message || 'Could not create admin account'; err.hidden=false; } }
+}
+
+function renderAdminsList(){
+  const box = document.getElementById('admins-list');
+  if(!box) return;
+  box.innerHTML='<p style="font-size:12px;color:var(--muted)">Loading…</p>';
+  Backend.get('/api/admins').then(admins=>{
+    box.innerHTML = admins.map(a=>`
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:var(--surface-2);border-radius:8px">
+        <span style="font-size:13px">${escapeHtml(a.username)}</span>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="askChangeAdminPassword(${a.id},'${escapeJs(a.username)}')">Change password</button>
+          <button class="btn btn-ghost danger" style="padding:4px 10px;font-size:12px" onclick="askDeleteAdmin(${a.id},'${escapeJs(a.username)}')">Remove</button>
+        </div>
+      </div>`).join('') || '<p style="font-size:12px;color:var(--muted)">No admins.</p>';
+  }).catch(logErr);
+}
+function askAddAdmin(){
+  uiPrompt('New admin username','',username=>{
+    if(!username) return;
+    uiPrompt('Password for "'+username+'" (min 8 characters)','',password=>{
+      Backend.send('POST','/api/admins',{username,password})
+        .then(renderAdminsList)
+        .catch(e=>uiAlert('Could not create admin: '+(e.message||'Unknown error')));
+    });
+  });
+}
+function askChangeAdminPassword(id, username){
+  uiPrompt('New password for "'+username+'" (min 8 characters)','',password=>{
+    if(!password) return;
+    Backend.send('PUT','/api/admins/password',{id,password})
+      .then(()=>uiAlert('Password changed.'))
+      .catch(e=>uiAlert('Could not change password: '+(e.message||'Unknown error')));
+  });
+}
+function askDeleteAdmin(id, username){
+  uiConfirm('Remove admin account "'+username+'"?', ()=>{
+    Backend.send('DELETE','/api/admins?id='+id)
+      .then(renderAdminsList)
+      .catch(e=>uiAlert('Could not remove admin: '+(e.message||'Unknown error')));
+  });
+}
+
+function renderPinPlayersList(){
+  const box = document.getElementById('pin-players-list');
+  if(!box) return;
+  box.innerHTML = roster.map(n=>{
+    const has = !!(prefs[n] && prefs[n].hasPin);
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:var(--surface-2);border-radius:8px">
+        <span style="font-size:13px">${escapeHtml(n)} ${has?'<span style="color:var(--muted);font-size:11px">— PIN set</span>':''}</span>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="askSetPlayerPin('${escapeJs(n)}')">${has?'Reset PIN':'Set PIN'}</button>
+          ${has?`<button class="btn btn-ghost danger" style="padding:4px 10px;font-size:12px" onclick="askRemovePlayerPin('${escapeJs(n)}')">Remove PIN</button>`:''}
+        </div>
+      </div>`;
+  }).join('') || '<p style="font-size:12px;color:var(--muted)">No players yet.</p>';
+}
+function askSetPlayerPin(name){
+  uiPrompt('New PIN for "'+name+'" (4-8 digits)','',pin=>{
+    if(!pin) return;
+    Backend.send('PUT','/api/players/pin',{name,pin})
+      .then(()=>{ if(prefs[name]) prefs[name].hasPin=true; renderPinPlayersList(); })
+      .catch(e=>uiAlert('Could not set PIN: '+(e.message||'Unknown error')));
+  });
+}
+function askRemovePlayerPin(name){
+  uiConfirm('Remove PIN for "'+name+'"? Anyone will be able to play as this player.', ()=>{
+    Backend.send('DELETE','/api/players/pin?name='+encodeURIComponent(name))
+      .then(()=>{ if(prefs[name]) prefs[name].hasPin=false; renderPinPlayersList(); })
+      .catch(e=>uiAlert('Could not remove PIN: '+(e.message||'Unknown error')));
+  });
 }
 function saveSettings(){
   const v = id => (document.getElementById(id)||{}).value || '';
@@ -1242,6 +1484,7 @@ function saveSettings(){
     ha_webhook_gameend:      v('ha-wh-gameend'),
     ha_webhook_setstart:     v('ha-wh-setstart'),
     ha_webhook_setend:       v('ha-wh-setend'),
+    pin_lockout_threshold:   Number(v('pin-lockout-threshold')) || 10,
   }).then(()=>{
     if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
     uiAlert('Settings saved.');
@@ -1273,14 +1516,17 @@ function sendHaWebhook(event, player, category, extra){
 
 /* ---------- player roster (saved profiles) ---------- */
 function findPlayer(name){ const k=name.trim().toLowerCase(); return roster.find(p=>p.toLowerCase()===k) || null; }
-function addToRoster(name){
+function addToRoster(name, opts){
   name=(name||'').trim();
   if(!name) return null;
   const existing=findPlayer(name);
   if(existing) return existing;          // already there — reuse
+  opts = opts || {};
   roster.push(name); ensurePlayerStats(name);
-  if(!prefs[name]) prefs[name]={ out:'double' };   // default to double out
-  DB.addPlayer(name, prefs[name].out);
+  const out = opts.out==='single' ? 'single' : 'double';
+  prefs[name]={ out, hasPin: !!opts.pin };
+  if(opts.dartWeight) stats[name].dartWeight = Number(opts.dartWeight);
+  DB.addPlayer(name, out, { pin: opts.pin, dartWeight: opts.dartWeight });
   persist();
   return name;
 }
@@ -1340,14 +1586,14 @@ function renderPlayers(){
 function onSlotChange(i, value){
   if(value==='__add__'){
     renderPlayers(); // reset the dropdown back to its current value
-    uiPrompt('Add a new player', '', name=>{
-      const added=addToRoster(name);
+    uiAddPlayer((name, opts)=>{
+      const added=addToRoster(name, opts);
       if(added){ setup.slots[i]=added; renderPlayers(); }
     });
     return;
   }
-  setup.slots[i]=value;
-  renderPlayers();
+  renderPlayers(); // reset dropdown to current value until the PIN check (if any) resolves
+  withPinCheck(value, ()=>{ setup.slots[i]=value; renderPlayers(); });
 }
 function toggleAddPlayerMenu(){
   if(setup.slots.length>=6) return;
@@ -1362,12 +1608,12 @@ function addExistingPlayer(){
   closeAddPlayerMenu();
   if(setup.slots.length>=6) return;
   const next=roster.find(p=>!setup.slots.includes(p))||roster[0];
-  setup.slots.push(next); renderPlayers();
+  withPinCheck(next, ()=>{ setup.slots.push(next); renderPlayers(); });
 }
 function addNewPlayer(){
   closeAddPlayerMenu();
   if(setup.slots.length>=6) return;
-  uiPrompt('Enter player name','',name=>{ const a=addToRoster(name); if(a){ setup.slots.push(a); renderPlayers(); } });
+  uiAddPlayer((name, opts)=>{ const a=addToRoster(name, opts); if(a){ setup.slots.push(a); renderPlayers(); } });
 }
 function removePlayer(i){ setup.slots.splice(i,1); renderPlayers(); }
 function pickStart(btn,v){ setup.start=v; document.querySelectorAll('[data-start]').forEach(b=>b.setAttribute('aria-pressed', b===btn)); }
@@ -1497,7 +1743,7 @@ function renderRoster(){
   }).join('');
 }
 function askAddPlayer(){
-  uiPrompt('Add a new player', '', name=>{ if(addToRoster(name)) renderRoster(); });
+  uiAddPlayer((name, opts)=>{ if(addToRoster(name, opts)) renderRoster(); });
 }
 function askRename(name){
   uiPrompt('Rename player', name, newName=>{ if(renamePlayer(name,newName)) renderRoster(); });
@@ -2765,6 +3011,79 @@ function uiPrompt(msg, initial, onSubmit){
   setTimeout(()=>{ const el=document.getElementById('modal-input'); if(el){ el.focus(); el.select(); } },0);
 }
 
+function uiVerifyPin(name, onOk){
+  window.__modalPinOk = onOk;
+  window.__modalPinName = name;
+  document.getElementById('modal-body').innerHTML=
+    `<p class="modal-msg">Enter PIN for "${escapeHtml(name)}"</p>
+     <input type="password" inputmode="numeric" id="pin-input" maxlength="8"
+            onkeydown="if(event.key==='Enter')submitVerifyPin()">
+     <div id="pin-error" style="color:var(--danger,#e5484d);font-size:12px;margin-top:8px" hidden></div>
+     <div class="modal-actions">
+       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+       <button class="btn btn-primary" id="pin-ok" onclick="submitVerifyPin()">Confirm</button>
+     </div>`;
+  document.getElementById('modal').hidden=false;
+  setTimeout(()=>{ const el=document.getElementById('pin-input'); if(el) el.focus(); },0);
+}
+function submitVerifyPin(){
+  const pin = document.getElementById('pin-input').value.trim();
+  const name = window.__modalPinName;
+  const errEl = document.getElementById('pin-error');
+  const btn = document.getElementById('pin-ok');
+  if(btn) btn.disabled = true;
+  Backend.send('POST','/api/players/verify-pin',{ name, pin })
+    .then(()=>{ const f=window.__modalPinOk; closeModal(); if(f) f(); })
+    .catch(err=>{ if(btn) btn.disabled=false; errEl.textContent = err.message || 'Incorrect PIN'; errEl.hidden=false; });
+}
+// runs `onOk` immediately if the player has no PIN, otherwise prompts for one first
+function withPinCheck(name, onOk){
+  if(DB.mode==='api' && prefs[name] && prefs[name].hasPin){ uiVerifyPin(name, onOk); }
+  else onOk();
+}
+function uiAddPlayer(onSubmit){
+  window.__modalAddPlayer = onSubmit;
+  document.getElementById('modal-body').innerHTML=
+    `<p class="modal-msg">Add a new player</p>
+     <label class="field">Name</label>
+     <input type="text" id="ap-name" maxlength="24" style="margin-bottom:14px">
+     <label class="field">Finish rule</label>
+     <div class="seg out-seg" role="group" aria-label="Finish rule" style="margin-bottom:6px">
+       <button type="button" aria-pressed="true" id="ap-out-double" onclick="document.getElementById('ap-out-double').setAttribute('aria-pressed','true');document.getElementById('ap-out-single').setAttribute('aria-pressed','false')">Double out</button>
+       <button type="button" aria-pressed="false" id="ap-out-single" onclick="document.getElementById('ap-out-single').setAttribute('aria-pressed','true');document.getElementById('ap-out-double').setAttribute('aria-pressed','false')">Single out</button>
+     </div>
+     <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+       Double out means the final dart of a leg must land on a double (or the bullseye) to win — the standard tournament rule. Single out means any score that brings the player to exactly zero wins, no double required — easier for beginners.
+     </p>
+     <label class="field">PIN (optional)</label>
+     <input type="text" inputmode="numeric" id="ap-pin" maxlength="8" placeholder="Leave blank to allow anyone" style="margin-bottom:6px">
+     <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+       Set a 4–8 digit PIN to stop other people from playing as this player — it will be asked for each time this player is added to a game. Leave it blank if anyone should be able to pick this player.
+     </p>
+     <label class="field">Standard dart weight, grams (optional)</label>
+     <input type="number" id="ap-weight" min="1" max="60" step="0.1" placeholder="e.g. 22" style="margin-bottom:14px">
+     <div id="ap-error" style="color:var(--danger,#e5484d);font-size:12px;margin-bottom:8px" hidden></div>
+     <div class="modal-actions">
+       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+       <button class="btn btn-primary" id="ap-ok" onclick="submitAddPlayer()">Add</button>
+     </div>`;
+  document.getElementById('modal').hidden=false;
+  setTimeout(()=>{ const el=document.getElementById('ap-name'); if(el) el.focus(); },0);
+}
+function submitAddPlayer(){
+  const name = document.getElementById('ap-name').value.trim();
+  const errEl = document.getElementById('ap-error');
+  if(!name){ errEl.textContent='Name is required.'; errEl.hidden=false; return; }
+  const out = document.getElementById('ap-out-single').getAttribute('aria-pressed')==='true' ? 'single' : 'double';
+  const pin = document.getElementById('ap-pin').value.trim();
+  if(pin && !/^\d{4,8}$/.test(pin)){ errEl.textContent='PIN must be 4–8 digits.'; errEl.hidden=false; return; }
+  const weightRaw = document.getElementById('ap-weight').value.trim();
+  const dartWeight = weightRaw ? Number(weightRaw) : null;
+  const f = window.__modalAddPlayer;
+  closeModal();
+  if(f) f(name, { out, pin: pin||undefined, dartWeight: dartWeight||undefined });
+}
+
 /* ---------- boot ---------- */
 (async function init(){
   await DB.detect();        // is a database backend reachable?
@@ -2778,6 +3097,10 @@ function uiPrompt(msg, initial, onSubmit){
   if(tag) tag.dataset.mode = DB.mode;
   renderHome();             // populate the landing page with summary data
   pushLive();   // tell any scoreboard screens we're ready (idle until a game starts)
+  if(DB.mode==='api'){
+    await Auth.refresh();
+    if(Auth.setupRequired && !localStorage.getItem('oche_wizard_dismissed')) showWizard();
+  }
 })();
 </script>
 </body>

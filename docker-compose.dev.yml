@@ -9,4 +9,5 @@ services:
     environment:
       - PORT=8056
       - DARTS_DB=/data/darts.db
+      - COOKIE_SECURE=false   # set true if served over HTTPS (e.g. reverse proxy)
     restart: unless-stopped

@@ -15,6 +15,7 @@
 const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
+const auth = require('./auth.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -118,6 +119,22 @@ db.exec(`
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
   );
+
+  CREATE TABLE IF NOT EXISTS admins (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    password_salt TEXT NOT NULL,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    admin_id   INTEGER NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 `);
 
 // Column migrations for tables not recreated above — safe to re-run.
@@ -125,16 +142,41 @@ try { db.exec('ALTER TABLE players      ADD COLUMN dart_weight INTEGER'); } catc
 try { db.exec('ALTER TABLE game_players ADD COLUMN dart_weight INTEGER'); } catch(e) {}
 try { db.exec("ALTER TABLE game_players ADD COLUMN out_mode TEXT NOT NULL DEFAULT 'double'"); } catch(e) {}
 try { db.exec('ALTER TABLE games        ADD COLUMN practice    INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
+try { db.exec('ALTER TABLE players ADD COLUMN pin_hash TEXT'); } catch(e) {}
+try { db.exec('ALTER TABLE players ADD COLUMN pin_salt TEXT'); } catch(e) {}
+try { db.exec('ALTER TABLE players ADD COLUMN pin_fail_count INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
+try { db.exec('ALTER TABLE players ADD COLUMN pin_locked_until INTEGER'); } catch(e) {}
+
+const DEFAULT_PIN_LOCKOUT_THRESHOLD = 10;
 
 /* ---------- prepared statements ---------- */
 const q = {
-  playerByName : db.prepare('SELECT id, name, out_mode, dart_weight FROM players WHERE name = ? COLLATE NOCASE'),
+  playerByName : db.prepare('SELECT id, name, out_mode, dart_weight, pin_hash, pin_salt, pin_fail_count, pin_locked_until FROM players WHERE name = ? COLLATE NOCASE'),
   insertPlayer : db.prepare("INSERT INTO players (name, out_mode) VALUES (?, ?)"),
-  listPlayers  : db.prepare('SELECT id, name, out_mode, dart_weight FROM players ORDER BY name COLLATE NOCASE'),
+  listPlayers  : db.prepare('SELECT id, name, out_mode, dart_weight, pin_hash FROM players ORDER BY name COLLATE NOCASE'),
   renamePlayer : db.prepare('UPDATE players SET name = ? WHERE id = ?'),
   setOut       : db.prepare('UPDATE players SET out_mode = ? WHERE id = ?'),
   setDartWeight: db.prepare('UPDATE players SET dart_weight = ? WHERE id = ?'),
   deletePlayer : db.prepare('DELETE FROM players WHERE id = ?'),
+  setPin       : db.prepare('UPDATE players SET pin_hash = ?, pin_salt = ?, pin_fail_count = 0, pin_locked_until = NULL WHERE id = ?'),
+  clearPin     : db.prepare('UPDATE players SET pin_hash = NULL, pin_salt = NULL, pin_fail_count = 0, pin_locked_until = NULL WHERE id = ?'),
+  bumpPinFail  : db.prepare('UPDATE players SET pin_fail_count = pin_fail_count + 1 WHERE id = ?'),
+  lockPin      : db.prepare('UPDATE players SET pin_locked_until = ? WHERE id = ?'),
+  resetPinFail : db.prepare('UPDATE players SET pin_fail_count = 0, pin_locked_until = NULL WHERE id = ?'),
+
+  insertAdmin    : db.prepare('INSERT INTO admins (username, password_hash, password_salt) VALUES (?, ?, ?)'),
+  adminByUsername: db.prepare('SELECT id, username, password_hash, password_salt FROM admins WHERE username = ? COLLATE NOCASE'),
+  adminById      : db.prepare('SELECT id, username FROM admins WHERE id = ?'),
+  listAdmins     : db.prepare('SELECT id, username, created_at FROM admins ORDER BY username COLLATE NOCASE'),
+  countAdmins    : db.prepare('SELECT COUNT(*) AS n FROM admins'),
+  deleteAdmin    : db.prepare('DELETE FROM admins WHERE id = ?'),
+  updateAdminPw  : db.prepare('UPDATE admins SET password_hash = ?, password_salt = ? WHERE id = ?'),
+
+  insertSession  : db.prepare('INSERT INTO sessions (token_hash, admin_id, created_at, expires_at) VALUES (?, ?, ?, ?)'),
+  sessionByHash  : db.prepare('SELECT token_hash, admin_id, expires_at FROM sessions WHERE token_hash = ?'),
+  deleteSession  : db.prepare('DELETE FROM sessions WHERE token_hash = ?'),
+  deleteExpiredSessions: db.prepare('DELETE FROM sessions WHERE expires_at < ?'),
+  deleteSessionsForAdmin: db.prepare('DELETE FROM sessions WHERE admin_id = ?'),
 
   insertGame   : db.prepare('INSERT INTO games (category, legs_per_set, sets_per_game, practice) VALUES (?, ?, ?, ?)'),
   addParticipant: db.prepare('INSERT OR IGNORE INTO game_players (game_id, player_id, dart_weight, out_mode) VALUES (?, ?, ?, ?)'),
@@ -159,16 +201,21 @@ function ensurePlayer(name, out = 'double') {
 }
 
 function listPlayers() {
-  return q.listPlayers.all().map(p => ({ name: p.name, out: p.out_mode, dartWeight: p.dart_weight ?? null }));
+  return q.listPlayers.all().map(p => ({ name: p.name, out: p.out_mode, dartWeight: p.dart_weight ?? null, hasPin: !!p.pin_hash }));
 }
 
-function addPlayer(name, out = 'double') {
+function addPlayer(name, out = 'double', opts = {}) {
   name = String(name || '').trim();
   if (!name) throw httpError(400, 'Name is required');
   const existing = getPlayer(name);
-  if (existing) return { name: existing.name, out: existing.out_mode };
+  if (existing) return { name: existing.name, out: existing.out_mode, hasPin: !!existing.pin_hash, dartWeight: existing.dart_weight ?? null };
   q.insertPlayer.run(name, out === 'single' ? 'single' : 'double');
-  return { name, out: out === 'single' ? 'single' : 'double' };
+  if (opts.pin) setPlayerPin(name, opts.pin);
+  if (opts.dartWeight !== undefined && opts.dartWeight !== null && opts.dartWeight !== '') {
+    setDartWeight(name, opts.dartWeight);
+  }
+  const p = getPlayer(name);
+  return { name, out: out === 'single' ? 'single' : 'double', hasPin: !!p.pin_hash, dartWeight: p.dart_weight ?? null };
 }
 
 function renamePlayer(from, to) {
@@ -389,6 +436,7 @@ function computeStats() {
     out[p.name] = {
       out: p.out_mode,
       dartWeight: p.dart_weight ?? null,
+      hasPin: !!p.pin_hash,
       turns:       (ha.turns||0)       + (pa.turns||0),
       totalPoints: (ha.total||0)       + (pa.total||0),
       trebleLess:  (ha.trebleLess||0)  + (pa.trebleLess||0),
@@ -879,6 +927,163 @@ function updateSettings(obj) {
   return { ok: true };
 }
 
+/* ---------- admin accounts + sessions ---------- */
+function isSetupRequired() {
+  return q.countAdmins.get().n === 0;
+}
+
+const USERNAME_RE = /^[A-Za-z0-9_.-]{3,32}$/;
+
+function validateCredentials(username, password) {
+  username = String(username || '').trim();
+  if (!USERNAME_RE.test(username)) throw httpError(400, 'Username must be 3-32 characters: letters, numbers, _ . -');
+  if (typeof password !== 'string' || password.length < 8 || password.length > 256) {
+    throw httpError(400, 'Password must be at least 8 characters');
+  }
+  return username;
+}
+
+function createFirstAdmin(username, password) {
+  if (!isSetupRequired()) throw httpError(403, 'Setup already completed');
+  username = validateCredentials(username, password);
+  const { hash, salt } = auth.hashSecret(password);
+  try {
+    q.insertAdmin.run(username, hash, salt);
+  } catch (e) {
+    throw httpError(409, 'Username already exists');
+  }
+  return { ok: true };
+}
+
+function createAdmin(username, password) {
+  username = validateCredentials(username, password);
+  const { hash, salt } = auth.hashSecret(password);
+  try {
+    q.insertAdmin.run(username, hash, salt);
+  } catch (e) {
+    throw httpError(409, 'Username already exists');
+  }
+  return { ok: true };
+}
+
+function listAdmins() {
+  return q.listAdmins.all().map(a => ({ id: a.id, username: a.username, createdAt: a.created_at }));
+}
+
+function deleteAdmin(id) {
+  id = Number(id);
+  if (q.countAdmins.get().n <= 1) throw httpError(400, 'Cannot delete the last remaining admin account');
+  q.deleteAdmin.run(id);
+  q.deleteSessionsForAdmin.run(id);
+  return { ok: true };
+}
+
+function changeAdminPassword(id, password) {
+  id = Number(id);
+  const admin = q.adminById.get(id);
+  if (!admin) throw httpError(404, 'Admin not found');
+  if (typeof password !== 'string' || password.length < 8 || password.length > 256) {
+    throw httpError(400, 'Password must be at least 8 characters');
+  }
+  const { hash, salt } = auth.hashSecret(password);
+  q.updateAdminPw.run(hash, salt, id);
+  q.deleteSessionsForAdmin.run(id); // force re-login on this and any other device after a password change
+  return { ok: true };
+}
+
+// Generic failure message for both "unknown username" and "wrong password" — avoids
+// leaking which usernames exist (user enumeration).
+const INVALID_LOGIN = 'Invalid username or password';
+
+// Fixed dummy hash/salt used to verify against on unknown usernames, so login() always
+// performs one scrypt computation regardless of whether the username exists — this keeps
+// response timing from leaking which usernames are registered.
+const DUMMY_PW_HASH = auth.hashSecret('dummy-password-for-constant-time-login');
+
+function login(username, password) {
+  username = String(username || '').trim();
+  password = String(password || '');
+  const admin = q.adminByUsername.get(username);
+  const ok = admin
+    ? auth.verifySecret(password, admin.password_hash, admin.password_salt)
+    : (auth.verifySecret(password, DUMMY_PW_HASH.hash, DUMMY_PW_HASH.salt), false);
+  if (!admin || !ok) throw httpError(401, INVALID_LOGIN);
+
+  const token = auth.newSessionToken();
+  const tokenHash = auth.hashToken(token);
+  const now = Date.now();
+  q.insertSession.run(tokenHash, admin.id, now, now + auth.SESSION_TTL_MS);
+  q.deleteExpiredSessions.run(now);
+  return { token, username: admin.username };
+}
+
+function logout(token) {
+  if (!token) return { ok: true };
+  q.deleteSession.run(auth.hashToken(token));
+  return { ok: true };
+}
+
+function getSessionAdmin(token) {
+  if (!token) return null;
+  const row = q.sessionByHash.get(auth.hashToken(token));
+  if (!row) return null;
+  if (row.expires_at < Date.now()) { q.deleteSession.run(row.token_hash); return null; }
+  const admin = q.adminById.get(row.admin_id);
+  return admin ? { id: admin.id, username: admin.username } : null;
+}
+
+/* ---------- player PIN management ---------- */
+const PIN_RE = /^\d{4,8}$/;
+
+function pinLockoutThreshold() {
+  const v = Number(getSettings().pin_lockout_threshold);
+  return Number.isInteger(v) && v > 0 ? v : DEFAULT_PIN_LOCKOUT_THRESHOLD;
+}
+
+function setPlayerPin(name, pin) {
+  const p = getPlayer(name);
+  if (!p) throw httpError(404, 'Player not found');
+  if (!PIN_RE.test(String(pin))) throw httpError(400, 'PIN must be 4-8 digits');
+  const { hash, salt } = auth.hashSecret(String(pin));
+  q.setPin.run(hash, salt, p.id);
+  return { name: p.name, hasPin: true };
+}
+
+function removePlayerPin(name) {
+  const p = getPlayer(name);
+  if (!p) throw httpError(404, 'Player not found');
+  q.clearPin.run(p.id);
+  return { name: p.name, hasPin: false };
+}
+
+// Generic failure message — doesn't distinguish "no pin set", "wrong pin", or "locked",
+// to avoid leaking player PIN state to a guesser.
+const INVALID_PIN = 'Incorrect PIN';
+
+function verifyPlayerPin(name, pin) {
+  const p = getPlayer(name);
+  if (!p) throw httpError(404, 'Player not found');
+  if (!p.pin_hash) return { ok: true }; // no PIN set — anyone may play as this player
+
+  const now = Date.now();
+  if (p.pin_locked_until && p.pin_locked_until > now) {
+    throw httpError(423, 'Too many incorrect attempts. Try again later.');
+  }
+
+  const ok = auth.verifySecret(String(pin || ''), p.pin_hash, p.pin_salt);
+  if (!ok) {
+    q.bumpPinFail.run(p.id);
+    const fails = (p.pin_fail_count || 0) + 1;
+    const threshold = pinLockoutThreshold();
+    if (fails >= threshold) {
+      q.lockPin.run(now + 5 * 60 * 1000, p.id); // 5 minute lockout
+    }
+    throw httpError(401, INVALID_PIN);
+  }
+  q.resetPinFail.run(p.id);
+  return { ok: true };
+}
+
 /* ---------- Home Assistant webhook proxy ---------- */
 function fireHaWebhook(event, payload) {
   const cfg = getSettings();
@@ -919,5 +1124,8 @@ module.exports = {
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, deleteLastTurn,
   getCheckoutRoutes, getDartAnalytics,
   getSettings, updateSettings, fireHaWebhook,
+  isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword,
+  login, logout, getSessionAdmin,
+  setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,
   _db: db,
 };

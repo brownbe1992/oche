@@ -18,12 +18,28 @@
        POST /api/games             -> start a game           { category, legsPerSet, setsPerGame, players:[names] } -> { gameId }
        POST /api/games/:id/turns   -> record one turn        { player, set, leg, scored, trebleLess, bust, checkout, checkoutPoints }
        POST /api/games/:id/complete-> finish a game          { winner }
-       POST /api/reset             -> wipe all games/turns (players kept)
+       POST /api/reset             -> wipe all games/turns (players kept)        [admin]
+
+       GET  /api/setup-required    -> { required } - true until the first admin exists
+       POST /api/setup             -> create the first admin  { username, password } (only while setup-required)
+       POST /api/login             -> { username, password } -> sets session cookie
+       POST /api/logout            -> clears session cookie
+       GET  /api/me                -> { loggedIn, username? }
+       GET/POST/DELETE /api/admins -> manage admin accounts                      [admin]
+       PUT  /api/admins/password   -> change an admin's password                 [admin]
+       POST /api/players/verify-pin-> { name, pin } -> verify a player's PIN (public)
+       PUT  /api/players/pin       -> set/reset a player's PIN  { name, pin }    [admin]
+       DEL  /api/players/pin       -> remove a player's PIN (?name=...)         [admin]
+
+   Routes marked [admin] require a logged-in admin session (cookie set by /api/login).
+   Set COOKIE_SECURE=true when serving over HTTPS (e.g. behind a reverse proxy) so the
+   session cookie gets the Secure flag; leave unset for plain-HTTP LAN deployments.
    ============================================================================= */
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const db = require('./db.js');
+const auth = require('./auth.js');
 
 const PORT = process.env.PORT || 8046;
 const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
@@ -33,6 +49,21 @@ function send(res, status, data, headers = {}) {
   const body = typeof data === 'string' || Buffer.isBuffer(data) ? data : JSON.stringify(data);
   res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
   res.end(body);
+}
+
+// Returns the logged-in admin ({id, username}) for this request, or null.
+function currentAdmin(req) {
+  const cookies = auth.parseCookies(req);
+  const token = cookies[auth.SESSION_COOKIE];
+  if (!token) return null;
+  return db.getSessionAdmin(token);
+}
+
+// Call at the top of any admin-only route. Sends 401 and returns null if not authenticated.
+function requireAdmin(req, res) {
+  const admin = currentAdmin(req);
+  if (!admin) { send(res, 401, { error: 'Admin login required' }); return null; }
+  return admin;
 }
 
 function readJson(req) {
@@ -85,6 +116,59 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/health' && m === 'GET') return send(res, 200, { ok: true });
 
+    // ----- auth -----
+    if (p === '/api/setup-required' && m === 'GET') return send(res, 200, { required: db.isSetupRequired() });
+    if (p === '/api/setup' && m === 'POST') {
+      const b = await readJson(req);
+      const result = db.createFirstAdmin(b.username, b.password);
+      return send(res, 200, result);
+    }
+    if (p === '/api/login' && m === 'POST') {
+      const b = await readJson(req);
+      const { token, username } = db.login(b.username, b.password);
+      return send(res, 200, { ok: true, username }, { 'Set-Cookie': auth.sessionCookieHeader(token, auth.SESSION_TTL_MS / 1000) });
+    }
+    if (p === '/api/logout' && m === 'POST') {
+      const cookies = auth.parseCookies(req);
+      db.logout(cookies[auth.SESSION_COOKIE]);
+      return send(res, 200, { ok: true }, { 'Set-Cookie': auth.clearSessionCookieHeader() });
+    }
+    if (p === '/api/me' && m === 'GET') {
+      const admin = currentAdmin(req);
+      return send(res, 200, admin ? { loggedIn: true, username: admin.username } : { loggedIn: false });
+    }
+
+    if (p === '/api/admins' && m === 'GET')  { if (!requireAdmin(req, res)) return; return send(res, 200, db.listAdmins()); }
+    if (p === '/api/admins' && m === 'POST') {
+      if (!requireAdmin(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.createAdmin(b.username, b.password));
+    }
+    if (p === '/api/admins' && m === 'DELETE') {
+      if (!requireAdmin(req, res)) return;
+      return send(res, 200, db.deleteAdmin(url.searchParams.get('id')));
+    }
+    if (p === '/api/admins/password' && m === 'PUT') {
+      if (!requireAdmin(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.changeAdminPassword(b.id, b.password));
+    }
+
+    // ----- player PINs -----
+    if (p === '/api/players/verify-pin' && m === 'POST') {
+      const b = await readJson(req);
+      return send(res, 200, db.verifyPlayerPin(b.name, b.pin));
+    }
+    if (p === '/api/players/pin' && m === 'PUT') {
+      if (!requireAdmin(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.setPlayerPin(b.name, b.pin));
+    }
+    if (p === '/api/players/pin' && m === 'DELETE') {
+      if (!requireAdmin(req, res)) return;
+      return send(res, 200, db.removePlayerPin(url.searchParams.get('name')));
+    }
+
     // ----- live scoreboard channel -----
     if (p === '/api/live' && m === 'GET') return send(res, 200, liveState);
     if (p === '/api/live' && m === 'POST') {
@@ -107,13 +191,17 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/players' && m === 'GET')  return send(res, 200, db.listPlayers());
-    if (p === '/api/players' && m === 'POST') { const b = await readJson(req); return send(res, 200, db.addPlayer(b.name, b.out)); }
+    if (p === '/api/players' && m === 'POST') {
+      const b = await readJson(req);
+      return send(res, 200, db.addPlayer(b.name, b.out, { pin: b.pin, dartWeight: b.dartWeight }));
+    }
     if (p === '/api/players/rename' && m === 'PUT')      { const b = await readJson(req); return send(res, 200, db.renamePlayer(b.from, b.to)); }
     if (p === '/api/players/out' && m === 'PUT')         { const b = await readJson(req); return send(res, 200, db.setOut(b.name, b.out)); }
     if (p === '/api/players/dart-weight' && m === 'PUT') { const b = await readJson(req); return send(res, 200, db.setDartWeight(b.name, b.weight)); }
     if (p === '/api/players/dart-weights' && m === 'GET') return send(res, 200, db.getDartWeights(url.searchParams.get('name')));
     if (p === '/api/players' && m === 'DELETE') return send(res, 200, db.deletePlayer(url.searchParams.get('name')));
     if (p === '/api/players/stats' && m === 'DELETE') {
+      if (!requireAdmin(req, res)) return;
       const mode = url.searchParams.get('mode');
       if (!['h2h','practice','all'].includes(mode)) return send(res, 400, { error: 'mode must be h2h, practice, or all' });
       return send(res, 200, db.clearPlayerStats(url.searchParams.get('name'), mode));
@@ -167,20 +255,26 @@ const server = http.createServer(async (req, res) => {
       if (tz && /^-?\d{1,4}$/.test(tz)) { const n = Number(tz); if (n >= -840 && n <= 840) opts.tz = n; }
       return send(res, 200, db.getMetricHistory(name, metric, period, opts));
     }
-    if (p === '/api/reset' && m === 'POST') return send(res, 200, db.resetStats());
+    if (p === '/api/reset' && m === 'POST') { if (!requireAdmin(req, res)) return; return send(res, 200, db.resetStats()); }
 
-    if (p === '/api/settings' && m === 'GET')  return send(res, 200, db.getSettings());
+    if (p === '/api/settings' && m === 'GET')  { if (!requireAdmin(req, res)) return; return send(res, 200, db.getSettings()); }
     if (p === '/api/settings' && m === 'PUT') {
+      if (!requireAdmin(req, res)) return;
       const b = await readJson(req);
       // Only allow known setting keys through
       const allowed = ['ha_url',
         'ha_webhook_oneeighty','ha_webhook_bigfish','ha_webhook_bust','ha_webhook_ninedarter','ha_webhook_tonplus',
         'ha_webhook_gamestart','ha_webhook_gameend','ha_webhook_setstart','ha_webhook_setend',
-        'ha_webhook_legstart','ha_webhook_legend'];
+        'ha_webhook_legstart','ha_webhook_legend','pin_lockout_threshold'];
       const safe = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
+      if ('pin_lockout_threshold' in safe) {
+        const n = Number(safe.pin_lockout_threshold);
+        if (!Number.isInteger(n) || n < 1 || n > 1000) return send(res, 400, { error: 'pin_lockout_threshold must be an integer between 1 and 1000' });
+      }
       return send(res, 200, db.updateSettings(safe));
     }
     if (p === '/api/ha-test' && m === 'POST') {
+      if (!requireAdmin(req, res)) return;
       const b = await readJson(req);
       const haUrl = String(b.url || '').trim().replace(/\/+$/, '');
       if (!haUrl) return send(res, 400, { error: 'No URL provided' });
