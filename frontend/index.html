@@ -78,7 +78,8 @@
   .pselect-btn:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
   .pselect-placeholder{color:var(--muted)}
   /* Player picker bottom sheet */
-  #player-picker-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;display:flex;align-items:flex-end}
+  #player-picker-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;display:none;align-items:flex-end}
+  #player-picker-overlay.open{display:flex}
   #player-picker-sheet{background:var(--surface);border-radius:18px 18px 0 0;width:100%;
     max-height:72vh;display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom,0px)}
   .picker-header{display:flex;justify-content:space-between;align-items:center;
@@ -636,7 +637,7 @@
 
 
   <!-- ============ PLAYER PICKER SHEET ============ -->
-  <div id="player-picker-overlay" hidden onclick="if(event.target===this)closePlayerPicker()">
+  <div id="player-picker-overlay" onclick="if(event.target===this)closePlayerPicker()">
     <div id="player-picker-sheet">
       <div class="picker-header">
         <span>Choose player</span>
@@ -1671,10 +1672,10 @@ function openPlayerPicker(i){
     </div>`;
   }).join('')+
   `<div class=”picker-opt add-new” onclick=”closePlayerPicker();setTimeout(()=>{ uiAddPlayer((name,opts)=>{ const a=addToRoster(name,opts); if(a){ setup.slots[_pickerSlot||0]=a; renderPlayers(); } }); },50)”>+ Add new player…</div>`;
-  document.getElementById('player-picker-overlay').hidden=false;
+  document.getElementById('player-picker-overlay').classList.add('open');
 }
 function closePlayerPicker(){
-  document.getElementById('player-picker-overlay').hidden=true;
+  document.getElementById('player-picker-overlay').classList.remove('open');
   _pickerSlot=null;
 }
 function pickSlotPlayer(value){
