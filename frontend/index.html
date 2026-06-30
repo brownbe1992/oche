@@ -58,24 +58,40 @@
     border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit}
   input[type=text]:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
 
-  .players-list{display:flex;flex-direction:column;gap:8px;margin:4px 0 16px}
-  .add-player-wrap{display:flex;align-items:center;gap:8px;overflow:hidden}
+  /* ---- New Game page ---- */
+  .setup-section{margin-bottom:20px}
+  .setup-label{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px}
+  /* player slots */
+  .players-list{display:flex;flex-direction:column;gap:10px;margin-bottom:10px}
+  .player-row{display:flex;gap:8px;align-items:flex-start}
+  .player-row .ix{font-family:'Bebas Neue';font-size:22px;color:var(--gold);width:22px;text-align:center;padding-top:10px;flex-shrink:0}
+  .player-slot{flex:1;min-width:0}
+  .pselect{width:100%;background:var(--board);border:1px solid var(--wire);color:var(--ink);
+    border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit;cursor:pointer;display:block}
+  .pselect:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
+  .slot-meta{display:flex;align-items:center;gap:8px;margin-top:5px;min-height:18px}
+  .slot-stat{font-size:12px;color:var(--muted)}
+  /* add player row */
+  .add-player-wrap{display:flex;align-items:center;gap:8px;overflow:hidden;margin-bottom:4px}
   .add-player-menu{display:flex;gap:6px;max-width:0;opacity:0;overflow:hidden;
     transition:max-width .22s ease,opacity .22s ease}
   .add-player-menu.open{max-width:360px;opacity:1}
   .add-player-menu .btn{white-space:nowrap;padding:11px 14px;font-size:13.5px}
-  .player-row{display:flex;gap:8px;align-items:center}
-  .player-row .ix{font-family:'Bebas Neue';font-size:20px;color:var(--gold);width:22px;text-align:center}
+  /* h2h banner */
+  .h2h-banner{font-size:12px;color:var(--muted);background:var(--surface-2);border:1px solid var(--wire);
+    border-radius:8px;padding:7px 11px;margin-top:8px;display:none}
+  /* format presets */
+  .preset-row{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+  .preset-btn{background:var(--surface-2);border:1px solid var(--wire);color:var(--ink);
+    border-radius:8px;padding:7px 14px;font-size:13px;font-family:inherit;cursor:pointer}
+  .preset-btn:hover{border-color:var(--gold);color:var(--gold)}
+  /* shared */
   .iconbtn{background:none;border:1px solid var(--wire);color:var(--muted);border-radius:9px;
     width:42px;height:44px;font-size:18px;cursor:pointer;flex:none}
   .iconbtn:hover{color:var(--bust);border-color:var(--bust)}
   .iconbtn.danger:hover{color:var(--bust);border-color:var(--bust)}
-
-  .pselect{flex:1;background:var(--board);border:1px solid var(--wire);color:var(--ink);
-    border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit;cursor:pointer}
-  .pselect:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
   .out-tag{flex:none;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--gold);
-    border:1px solid var(--wire);border-radius:8px;padding:7px 9px;min-width:38px;text-align:center}
+    border:1px solid var(--wire);border-radius:8px;padding:3px 7px;text-align:center}
 
   .roster-list{display:flex;flex-direction:column;gap:8px;margin:0 0 16px}
   .roster-row{display:flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--wire);
@@ -506,38 +522,56 @@
   <!-- ============ SETUP ============ -->
   <section id="screen-setup" class="screen">
     <div class="card">
-      <h2 style="font-size:18px;margin-bottom:4px">Set up the game</h2>
-      <p style="color:var(--muted);font-size:13px;margin:0 0 18px">Add the players, choose the game, and set the match length.</p>
+      <h2 style="font-size:18px;margin-bottom:4px">New game</h2>
 
-      <label class="field">Players</label>
-      <div class="players-list" id="players-list"></div>
-      <div class="add-player-wrap">
-        <button class="btn btn-ghost" id="add-player-btn" onclick="toggleAddPlayerMenu()">+ Add player</button>
-        <div class="add-player-menu" id="add-player-menu">
-          <button class="btn btn-ghost" onclick="addExistingPlayer()">Choose existing</button>
-          <button class="btn btn-ghost" onclick="addNewPlayer()">Enter new</button>
+      <!-- Players -->
+      <div class="setup-section">
+        <div class="setup-label">Players</div>
+        <div class="players-list" id="players-list"></div>
+        <div class="add-player-wrap">
+          <button class="btn btn-ghost" id="add-player-btn" onclick="toggleAddPlayerMenu()">+ Add player</button>
+          <div class="add-player-menu" id="add-player-menu">
+            <button class="btn btn-ghost" onclick="addExistingPlayer()">Choose existing</button>
+            <button class="btn btn-ghost" onclick="addNewPlayer()">Enter new</button>
+          </div>
+          <button class="btn btn-ghost" id="shuffle-btn" style="display:none" onclick="shufflePlayers()" title="Randomise throw order">🔀 Shuffle</button>
+        </div>
+        <div class="h2h-banner" id="h2h-banner"></div>
+      </div>
+
+      <!-- Starting score -->
+      <div class="setup-section">
+        <div class="setup-label">Starting score</div>
+        <div class="opts" style="margin:0">
+          <div class="seg" role="group" aria-label="Starting score">
+            <button data-start="501" aria-pressed="true" onclick="pickStart(this,501)">501</button>
+            <button data-start="301" aria-pressed="false" onclick="pickStart(this,301)">301</button>
+            <button data-start="170" aria-pressed="false" onclick="pickStart(this,170)">170</button>
+          </div>
         </div>
       </div>
 
-      <div class="opts">
-        <div class="seg" role="group" aria-label="Starting score">
-          <span class="lbl">Start</span>
-          <button data-start="501" aria-pressed="true" onclick="pickStart(this,501)">501</button>
-          <button data-start="301" aria-pressed="false" onclick="pickStart(this,301)">301</button>
-          <button data-start="170" aria-pressed="false" onclick="pickStart(this,170)">170</button>
+      <!-- Mode -->
+      <div class="setup-section">
+        <div class="setup-label">Mode</div>
+        <div class="opts" style="margin:0">
+          <div class="seg" role="group" aria-label="Game mode">
+            <button id="mode-h2h" aria-pressed="true" onclick="setPractice(false)">H2H</button>
+            <button id="mode-practice" aria-pressed="false" onclick="setPractice(true)">Practice</button>
+          </div>
         </div>
       </div>
 
-      <div class="opts">
-        <div class="seg" role="group" aria-label="Game mode">
-          <span class="lbl">Mode</span>
-          <button id="mode-h2h" aria-pressed="true" onclick="setPractice(false)">H2H</button>
-          <button id="mode-practice" aria-pressed="false" onclick="setPractice(true)">Practice</button>
+      <!-- Format (H2H only) -->
+      <div id="h2h-options" class="setup-section">
+        <div class="setup-label">Format</div>
+        <div class="preset-row">
+          <span style="font-size:12px;color:var(--muted);margin-right:2px">Quick:</span>
+          <button class="preset-btn" onclick="applyPreset(2,1)">Bo3</button>
+          <button class="preset-btn" onclick="applyPreset(3,1)">Bo5</button>
+          <button class="preset-btn" onclick="applyPreset(4,1)">Bo7</button>
         </div>
-      </div>
-
-      <div id="h2h-options">
-        <div class="opts">
+        <div class="opts" style="margin:0">
           <div class="stepper">
             <span class="lbl">Legs per set</span>
             <button aria-label="Fewer legs" onclick="bump('legsPerSet',-1)">−</button>
@@ -1089,7 +1123,7 @@ function show(name){
   document.getElementById('nav-settings').setAttribute('aria-current', name==='settings');
   if(name==='settings') renderSettings();
   if(name==='home') renderHome();
-  if(name==='setup'){ setup.slots=[]; sanitizeSlots(); renderPlayers(); }
+  if(name==='setup'){ setup.slots=[]; sanitizeSlots(); renderPlayers(); updateFormatLine(); }
   if(name==='players') renderRoster();
   if(name==='player'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); }
   if(name==='legend') renderLegend();
@@ -1614,77 +1648,145 @@ function deletePlayer(name){
   persist();
 }
 
-/* ---------- setup screen (choose players from roster) ---------- */
+/* ---------- setup screen ---------- */
 function sanitizeSlots(){
   setup.slots = setup.slots.filter(s=>!s || roster.includes(s));
-  if(setup.slots.length===0 && roster.length){
-    setup.slots = [''];   // force an explicit choice — never auto-select a player
-  }
+  if(setup.slots.length===0 && roster.length) setup.slots = [''];
 }
+
 function renderPlayers(){
   closeAddPlayerMenu();
   const box = document.getElementById('players-list');
-  box.innerHTML='';
+  box.innerHTML = '';
   if(roster.length===0){
-    box.innerHTML=`<p style="color:var(--muted);font-size:13px;margin:0">No players yet. Use “+ Add player” to create one.</p>`;
+    box.innerHTML = `<p style=”color:var(--muted);font-size:13px;margin:0”>No players yet. Use “+ Add player” to create one.</p>`;
+    updateSetupChrome();
     return;
   }
-  setup.slots.forEach((sel,i)=>{
+  setup.slots.forEach((sel, i)=>{
     const taken = setup.slots.filter((_,j)=>j!==i);
     const opts = roster.map(p=>{
-      const lockTag = (prefs[p] && prefs[p].hasPin) ? ' 🔒' : '';
-      return `<option value="${escapeHtml(p)}" ${p===sel?'selected':''} ${taken.includes(p)?'disabled':''}>${escapeHtml(p)}${lockTag}</option>`;
+      const lock = (prefs[p] && prefs[p].hasPin) ? ' 🔒' : '';
+      return `<option value=”${escapeHtml(p)}” ${p===sel?'selected':''} ${taken.includes(p)?'disabled':''}>${escapeHtml(p)}${lock}</option>`;
     }).join('');
-    const tag = sel ? `<span class="out-tag" title="${playerOut(sel)==='double'?'Doubles out':'Singles out'}">${playerOut(sel)==='double'?'DO':'SO'}</span>` : '';
-    const row=document.createElement('div'); row.className='player-row';
-    row.innerHTML=`<span class="ix">${i+1}</span>
-      <select class="pselect" aria-label="Player ${i+1}" onchange="onSlotChange(${i}, this.value)">
-        <option value="" ${sel?'':'selected'} disabled>Choose player</option>
-        ${opts}
-        <option disabled>──────────</option>
-        <option value="__add__">+ Add new player…</option>
-      </select>
-      ${tag}
-      ${setup.slots.length>1?`<button class="iconbtn" title="Remove from game" onclick="removePlayer(${i})">✕</button>`:''}`;
+    // stat line
+    let statHtml = '';
+    if(sel && stats[sel]){
+      const s = stats[sel];
+      const avg = s.avgDarts ? (s.totalPoints / s.avgDarts * 3) : null;
+      if(avg != null){
+        let form = '';
+        if(s.recentAvg != null){
+          const d = s.recentAvg - avg;
+          const arrow = d >= 0.5 ? '▲' : d <= -0.5 ? '▼' : '~';
+          const col = d >= 0.5 ? 'var(--gold)' : d <= -0.5 ? 'var(--danger,#e5484d)' : 'var(--muted)';
+          form = `<span style=”color:${col};margin-left:4px”>${arrow} ${Math.abs(d).toFixed(1)}</span>`;
+        }
+        statHtml = `<span class=”slot-stat”>avg ${avg.toFixed(1)}${form}</span>`;
+      }
+    }
+    const outTag = sel ? `<span class=”out-tag”>${playerOut(sel)==='double'?'DO':'SO'}</span>` : '';
+    const row = document.createElement('div'); row.className = 'player-row';
+    row.innerHTML = `<span class=”ix”>${i+1}</span>
+      <div class=”player-slot”>
+        <select class=”pselect” aria-label=”Player ${i+1}” onchange=”onSlotChange(${i}, this.value)”>
+          <option value=”” ${sel?'':'selected'} disabled>Choose player…</option>
+          ${opts}
+          <option disabled>──────────</option>
+          <option value=”__add__”>+ Add new player…</option>
+        </select>
+        <div class=”slot-meta”>
+          ${outTag}
+          ${statHtml}
+        </div>
+      </div>
+      ${setup.slots.length>1?`<button class=”iconbtn” style=”margin-top:2px” title=”Remove” onclick=”removePlayer(${i})”>✕</button>`:''}`;
     box.appendChild(row);
   });
+  updateSetupChrome();
 }
+
+function updateSetupChrome(){
+  // Shuffle button
+  const named = setup.slots.filter(s=>s);
+  const sb = document.getElementById('shuffle-btn');
+  if(sb) sb.style.display = named.length >= 2 ? '' : 'none';
+  // H2H banner
+  updateH2HBanner(named);
+}
+
+let _h2hAbort = null;
+function updateH2HBanner(named){
+  const el = document.getElementById('h2h-banner');
+  if(!el) return;
+  // Only fetch when the setup screen is active
+  const screen = document.getElementById('screen-setup');
+  if(!screen || !screen.classList.contains('on')){ el.style.display='none'; return; }
+  if(named.length !== 2){ el.style.display='none'; return; }
+  const [p1, p2] = named;
+  el.style.display = '';
+  el.textContent = 'Loading H2H record…';
+  if(_h2hAbort) _h2hAbort.aborted = true;
+  const tok = { aborted:false }; _h2hAbort = tok;
+  fetch(`/api/players/h2h?p1=${encodeURIComponent(p1)}&p2=${encodeURIComponent(p2)}`)
+    .then(r=>r.json()).then(d=>{
+      if(tok.aborted || !d || d.total===0){ el.style.display='none'; return; }
+      const leader = d.p1Wins>d.p2Wins ? `${p1} leads ${d.p1Wins}–${d.p2Wins}`
+                   : d.p2Wins>d.p1Wins ? `${p2} leads ${d.p2Wins}–${d.p1Wins}`
+                   : `Tied ${d.p1Wins}–${d.p2Wins}`;
+      el.textContent = `H2H: ${leader} (${d.total} game${d.total!==1?'s':''})`;
+    }).catch(()=>{ if(!tok.aborted) el.style.display='none'; });
+}
+
 function onSlotChange(i, value){
   if(value==='__add__'){
-    renderPlayers(); // reset the dropdown back to its current value
-    uiAddPlayer((name, opts)=>{
-      const added=addToRoster(name, opts);
-      if(added){ setup.slots[i]=added; renderPlayers(); }
-    });
+    renderPlayers();
+    uiAddPlayer((name, opts)=>{ const a=addToRoster(name,opts); if(a){ setup.slots[i]=a; renderPlayers(); } });
     return;
   }
-  renderPlayers(); // reset dropdown to current value until the PIN check (if any) resolves
+  renderPlayers();
   withPinCheck(value, ()=>{ setup.slots[i]=value; renderPlayers(); });
 }
+
 function toggleAddPlayerMenu(){
   if(setup.slots.length>=6) return;
   if(roster.length===0){ addNewPlayer(); return; }
   document.getElementById('add-player-menu').classList.toggle('open');
 }
 function closeAddPlayerMenu(){
-  const m=document.getElementById('add-player-menu');
+  const m = document.getElementById('add-player-menu');
   if(m) m.classList.remove('open');
 }
 function addExistingPlayer(){
   closeAddPlayerMenu();
   if(setup.slots.length>=6) return;
-  setup.slots.push('');   // force an explicit choice — never auto-select a player
+  setup.slots.push('');
   renderPlayers();
 }
 function addNewPlayer(){
   closeAddPlayerMenu();
   if(setup.slots.length>=6) return;
-  uiAddPlayer((name, opts)=>{ const a=addToRoster(name, opts); if(a){ setup.slots.push(a); renderPlayers(); } });
+  uiAddPlayer((name,opts)=>{ const a=addToRoster(name,opts); if(a){ setup.slots.push(a); renderPlayers(); } });
 }
-function removePlayer(i){ setup.slots.splice(i,1); renderPlayers(); }
-function pickStart(btn,v){ setup.start=v; document.querySelectorAll('[data-start]').forEach(b=>b.setAttribute('aria-pressed', b===btn)); }
+function removePlayer(i){ setup.slots.splice(i,1); if(!setup.slots.length) setup.slots=[''] ; renderPlayers(); }
+function shufflePlayers(){
+  const named = setup.slots.filter(s=>s);
+  for(let i=named.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [named[i],named[j]]=[named[j],named[i]]; }
+  setup.slots = [...named, ...setup.slots.filter(s=>!s)];
+  renderPlayers();
+}
+function applyPreset(legsToWin, sets){
+  setup.legsPerSet=legsToWin; setup.setsPerGame=sets;
+  const lv=document.getElementById('legs-val'); if(lv) lv.textContent=legsToWin;
+  const sv=document.getElementById('sets-val'); if(sv) sv.textContent=sets;
+  updateFormatLine();
+}
+function pickStart(btn,v){
+  setup.start=v;
+  document.querySelectorAll('[data-start]').forEach(b=>b.setAttribute('aria-pressed', b===btn));
+}
 function bump(key, delta){
-  setup[key] = Math.max(1, Math.min(9, setup[key] + delta));
+  setup[key] = Math.max(1, Math.min(9, setup[key]+delta));
   document.getElementById('legs-val').textContent = setup.legsPerSet;
   document.getElementById('sets-val').textContent = setup.setsPerGame;
   updateFormatLine();
@@ -1692,10 +1794,22 @@ function bump(key, delta){
 function updateFormatLine(){
   const el=document.getElementById('format-line'); if(!el) return;
   const L=setup.legsPerSet, S=setup.setsPerGame;
-  const legTxt = L===1 ? '1 leg' : ('first to '+L+' legs');
-  el.textContent = S===1
-    ? `One set — ${legTxt} wins the game.`
-    : `First to ${S} sets wins the game; each set is ${legTxt}.`;
+  const legTxt = L===1 ? '1 leg' : `first to ${L} legs`;
+  el.textContent = S===1 ? `One set — ${legTxt} wins the game.`
+                         : `First to ${S} sets wins the game; each set is ${legTxt}.`;
+}
+function saveSetup(){
+  try{ localStorage.setItem('oche_last_setup', JSON.stringify({start:setup.start,legsPerSet:setup.legsPerSet,setsPerGame:setup.setsPerGame,practice:setup.practice})); }catch(e){}
+}
+function restoreSetup(){
+  try{
+    const s = JSON.parse(localStorage.getItem('oche_last_setup')||'null');
+    if(!s) return;
+    if(s.start)       { setup.start=s.start; document.querySelectorAll('[data-start]').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.start)===s.start))); }
+    if(s.legsPerSet)  { setup.legsPerSet=s.legsPerSet; }
+    if(s.setsPerGame) { setup.setsPerGame=s.setsPerGame; }
+    if(typeof s.practice==='boolean') setPractice(s.practice);
+  }catch(e){}
 }
 
 async function startGame(){
@@ -1704,6 +1818,7 @@ async function startGame(){
   setup.slots.forEach(n=>{ if(n && roster.includes(n) && !names.includes(n)) names.push(n); });
   if(names.length===0){ uiAlert('Choose at least one player.'); return; }
   if(!setup.practice && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
+  saveSetup();
   game = {
     start: setup.start,
     category: String(setup.start),
@@ -3190,6 +3305,7 @@ function showBackendErrorScreen(){
   }
   await DB.loadAll();       // populate roster / prefs / stats from the backend
   try{ const dt = await Backend.get('/api/settings/dart-timing'); dartTimingEnabled = !!dt.enabled; }catch(e){}
+  restoreSetup();
   sanitizeSlots();
   renderPlayers();
   document.getElementById('legs-val').textContent = setup.legsPerSet;
