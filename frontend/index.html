@@ -1882,7 +1882,7 @@ function renderPlayerPage(){
       <div id="avg-chart-body"></div>
     </div>
     <div class="pp-section">
-      <div class="pp-section-title">Top 10 finishes</div>
+      <div class="pp-section-title">Top Checkouts</div>
       <div id="player-top-finishes"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </div>
     <div class="pp-section" id="dart-analytics-section">
@@ -1903,7 +1903,7 @@ function renderPlayerPage(){
     : '<span style="color:var(--muted)">none yet</span>';
   const h2hSection = `
     <div class="pp-section">
-      <div class="pp-section-title">H2H — Games &amp; legs played</div>
+      <div class="pp-section-title">H2H — Games &amp; Legs Played</div>
       <div class="pp-cat-lines">${catHtml}</div>
     </div>
     <div class="pp-section">
@@ -1918,7 +1918,7 @@ function renderPlayerPage(){
     : '<span style="color:var(--muted)">none yet</span>';
   const practiceSection = `
     <div class="pp-section">
-      <div class="pp-section-title">Practice — Legs thrown</div>
+      <div class="pp-section-title">Practice — Legs Thrown</div>
       <div class="pp-cat-lines">${pracHtml}</div>
     </div>`;
 
@@ -1932,7 +1932,7 @@ function renderPlayerPage(){
     tabContent = `
       ${chartSection}
       <div class="pp-section">
-        <div class="pp-section-title">Games &amp; legs played</div>
+        <div class="pp-section-title">Games &amp; Legs Played</div>
         <div class="pp-cat-lines">${catHtml}</div>
         </div>
       <div class="pp-section">
@@ -1943,7 +1943,7 @@ function renderPlayerPage(){
     tabContent = `
       ${chartSection}
       <div class="pp-section">
-        <div class="pp-section-title">Legs thrown</div>
+        <div class="pp-section-title">Legs Thrown</div>
         <div class="pp-cat-lines">${pracHtml}</div>
         </div>`;
   }
@@ -2554,10 +2554,10 @@ const STAT_DEFS = [
   { key:'dartsthrown',    label:'Darts Thrown',   desc:'Total darts thrown',                        fmt:v=>v!=null?Number(v).toLocaleString():'—' },
   { key:'avgdartsperday', label:'Darts / Day',    desc:'Average darts thrown per day played',        fmt:v=>v!=null?Number(v).toFixed(1):'—' },
   { key:'avgdartsperleg', label:'Darts / Leg',    desc:'Average darts thrown per won leg',           fmt:v=>v!=null?Number(v).toFixed(1):'—' },
-  { key:'avg',           label:'Average',     desc:'3-dart average',                            fmt:v=>v!=null?v.toFixed(1):'—' },
+  { key:'avg',           label:'Three-Dart Average', desc:'3-dart average',                      fmt:v=>v!=null?v.toFixed(1):'—' },
   { key:'180s',          label:'180s',         desc:'Count of 180s thrown',                    fmt:v=>v!=null?String(Math.round(v)):'—' },
   { key:'bigfish',       label:'Big Fish',    desc:'170 checkouts',                            fmt:v=>v!=null?String(Math.round(v)):'—' },
-  { key:'ninedarters',   label:'9 Darters',   desc:'501 legs finished in 9 darts',            fmt:v=>v!=null?String(Math.round(v)):'—' },
+  { key:'ninedarters',   label:'9-Darters',   desc:'501 legs finished in 9 darts',            fmt:v=>v!=null?String(Math.round(v)):'—' },
   { key:'treblelesspct', label:'Trebleless %',desc:'% of legs without hitting a treble',      fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
   { key:'first3avg',     label:'1st 3 AVG',   desc:'Average of 1st 3 darts in a leg',         fmt:v=>v!=null?v.toFixed(1):'—' },
   { key:'first9avg',     label:'1st 9 AVG',   desc:'Average of 1st 9 darts in a leg',         fmt:v=>v!=null?v.toFixed(1):'—' },
