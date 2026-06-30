@@ -224,7 +224,8 @@
 
   /* ---- game screen: full-height dynamic layout — no scrolling, sizes adapt to device ---- */
   body.game-active{
-    padding:0; height:100vh; height:100dvh; overflow:hidden;
+    padding:env(safe-area-inset-top,0px) 0 0; box-sizing:border-box;
+    height:100vh; height:100svh; overflow:hidden;
     display:flex; flex-direction:column;
   }
   body.game-active .wrap{
@@ -975,10 +976,10 @@ function setPlayerOut(name, mode){ const out = mode==='single'?'single':'double'
 
 /* ---------- navigation ---------- */
 function show(name){
+  window.scrollTo(0, 0);
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));
   document.getElementById('screen-'+name).classList.add('on');
   document.body.classList.toggle('game-active', name==='game');
-  window.scrollTo(0, 0);
   document.getElementById('nav-home').setAttribute('aria-current', name==='home');
   document.getElementById('nav-setup').setAttribute('aria-current', name==='setup');
   document.getElementById('nav-players').setAttribute('aria-current', name==='players'||name==='player');
