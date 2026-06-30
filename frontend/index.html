@@ -758,36 +758,12 @@
 
 <script>
 /* =========================================================================
-   STORAGE  — uses the artifact storage API when present, otherwise keeps
-   data in memory for the session. Same shape your backend would persist
-   to its data folder.
-   ========================================================================= */
-const Store = (() => {
-  const KEY = 'oche_db_v2';        // { players:[names], stats:{name:stat} }
-  const OLD = 'oche_stats_v1';     // legacy: just the stats map
-  const hasWS = typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function';
-  let mem = null;
-  async function load(){
-    if(hasWS){
-      try{ const r = await window.storage.get(KEY); if(r) return JSON.parse(r.value); }catch(e){}
-      try{ const o = await window.storage.get(OLD); if(o){ const st=JSON.parse(o.value); return {players:Object.keys(st), stats:st}; } }catch(e){}
-      return {players:[], stats:{}};
-    }
-    return mem || {players:[], stats:{}};
-  }
-  async function save(db){
-    mem = db;
-    if(hasWS){ try{ await window.storage.set(KEY, JSON.stringify(db)); }catch(e){} }
-  }
-  return { load, save, hasWS };
-})();
-
-/* =========================================================================
    BACKEND ADAPTER
-   The app talks to a database backend when one is reachable (served from the
-   same origin), and silently falls back to local browser storage if not — so
-   this same file works both as a standalone demo and as the real, server-backed
-   app. Gameplay code calls DB.* and doesn't care which mode is active.
+   The app requires a reachable database backend at the same origin — there is
+   no offline/local fallback. If the backend can't be reached, the app shows
+   a connection-error screen instead of silently scoring into the browser
+   (which would split stats across two unsynced stores). Gameplay code calls
+   DB.* without needing to think about connectivity.
    ========================================================================= */
 const Backend = {
   async get(p){ const r = await fetch(p, {cache:'no-store'}); if(!r.ok) throw new Error('GET '+p); return r.json(); },
@@ -799,7 +775,6 @@ const Backend = {
 };
 
 const DB = {
-  mode: 'local',      // 'api' once a backend answers
   gameId: null,
 
   // Serialize game writes so they reach the server in submission order. Without this,
@@ -810,67 +785,52 @@ const DB = {
   _queue(fn){ this._chain = this._chain.then(fn).catch(logErr); return this._chain; },
 
   async detect(){
-    try{ const r = await fetch('/api/health', {cache:'no-store'}); if(r.ok){ this.mode='api'; return; } }catch(e){}
-    this.mode = 'local';
+    const r = await fetch('/api/health', {cache:'no-store'});
+    if(!r.ok) throw new Error('backend health check failed: HTTP '+r.status);
   },
 
   // load roster + prefs + stats into the in-memory caches the UI renders from
   async loadAll(){
-    if(this.mode==='api'){
-      const players = await Backend.get('/api/players');
-      // No auto-creation — empty roster shows the Players page prompting the user to add their own name
-      roster = players.map(p=>p.name);
-      prefs = {}; players.forEach(p=>{ prefs[p.name]={out:p.out, hasPin:!!p.hasPin}; ensurePlayerStats(p.name); });
-      await this.refreshStats();
-    } else {
-      const blob = await Store.load();
-      stats = (blob && blob.stats) || {};
-      roster = (blob && blob.players) || [];
-      prefs = (blob && blob.prefs) || {};
-      Object.keys(stats).forEach(ensurePlayerStats);
-      roster.forEach(ensurePlayerStats);
-      roster.forEach(n=>{ if(!prefs[n]) prefs[n]={out:'double'}; });
-      // No auto-creation — show empty Players page so the user adds their own players
-    }
+    const players = await Backend.get('/api/players');
+    // No auto-creation — empty roster shows the Players page prompting the user to add their own name
+    roster = players.map(p=>p.name);
+    prefs = {}; players.forEach(p=>{ prefs[p.name]={out:p.out, hasPin:!!p.hasPin}; ensurePlayerStats(p.name); });
+    await this.refreshStats();
   },
 
   async refreshStats(){
-    if(this.mode!=='api') return;
     const s = await Backend.get('/api/stats');     // already in the shape the UI uses
     stats = s;
     roster = Object.keys(s);
     prefs = {}; roster.forEach(n=>{ prefs[n]={out:s[n].out||'double', hasPin:!!s[n].hasPin}; ensurePlayerStats(n); });
   },
 
-  // player profile writes (api hits the server; local handled by persist())
-  addPlayer(name, out, opts){ if(this.mode==='api') Backend.send('POST','/api/players',{name, out:out||'double', pin:(opts&&opts.pin)||undefined, dartWeight:(opts&&opts.dartWeight)||undefined}).catch(logErr); },
-  rename(from, to){ if(this.mode==='api') Backend.send('PUT','/api/players/rename',{from, to}).catch(logErr); },
-  setOut(name, out){ if(this.mode==='api') Backend.send('PUT','/api/players/out',{name, out}).catch(logErr); },
-  setDartWeight(name, weight){ if(this.mode==='api') Backend.send('PUT','/api/players/dart-weight',{name, weight}).catch(logErr); },
-  delete(name){ if(this.mode==='api') Backend.send('DELETE','/api/players?name='+encodeURIComponent(name)).catch(logErr); },
+  // player profile writes
+  addPlayer(name, out, opts){ Backend.send('POST','/api/players',{name, out:out||'double', pin:(opts&&opts.pin)||undefined, dartWeight:(opts&&opts.dartWeight)||undefined}).catch(logErr); },
+  rename(from, to){ Backend.send('PUT','/api/players/rename',{from, to}).catch(logErr); },
+  setOut(name, out){ Backend.send('PUT','/api/players/out',{name, out}).catch(logErr); },
+  setDartWeight(name, weight){ Backend.send('PUT','/api/players/dart-weight',{name, weight}).catch(logErr); },
+  delete(name){ Backend.send('DELETE','/api/players?name='+encodeURIComponent(name)).catch(logErr); },
 
   // game + turn writes
   async beginGame(meta, names){
-    if(this.mode==='api'){
-      try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame, players:names.map(n=>({name:n,out:playerOut(n)})), practice:meta.practice?1:0}); this.gameId=r.gameId; }
-      catch(e){ logErr(e); this.gameId=null; }
-    } else this.gameId=null;
+    try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame, players:names.map(n=>({name:n,out:playerOut(n)})), practice:meta.practice?1:0}); this.gameId=r.gameId; }
+    catch(e){ logErr(e); this.gameId=null; }
   },
-  recordTurn(t){ if(this.mode==='api' && this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/turns`, t)); } },
-  recordEvent(type, setNo, legNo){ if(this.mode==='api' && this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/events`, {type, setNo:setNo??null, legNo:legNo??null})); } },
-  completeGame(winner){ if(this.mode==='api' && this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/complete`, {winner})); } },
-  deleteLastTurn(){ if(this.mode==='api' && this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('DELETE',`/api/games/${id}/turns/last`)); } },
+  recordTurn(t){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/turns`, t)); } },
+  recordEvent(type, setNo, legNo){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/events`, {type, setNo:setNo??null, legNo:legNo??null})); } },
+  completeGame(winner){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/complete`, {winner})); } },
+  deleteLastTurn(){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('DELETE',`/api/games/${id}/turns/last`)); } },
 
-  async reset(){ if(this.mode==='api'){ await Backend.send('POST','/api/reset').catch(logErr); await this.refreshStats(); } },
+  async reset(){ await Backend.send('POST','/api/reset').catch(logErr); await this.refreshStats(); },
 
-  // push the current game snapshot to any scoreboard screens (api mode only)
-  pushLive(snapshot){ if(this.mode==='api') Backend.send('POST','/api/live', snapshot).catch(()=>{}); }
+  // push the current game snapshot to any scoreboard screens
+  pushLive(snapshot){ Backend.send('POST','/api/live', snapshot).catch(()=>{}); }
 };
 function logErr(e){ console.warn('darts backend:', e && e.message ? e.message : e); }
 
 /* =========================================================================
    ADMIN AUTH  — login-gated Settings page, first-run wizard, player PINs.
-   Only meaningful when DB.mode==='api' (there's no server in local mode).
    ========================================================================= */
 const Auth = {
   loggedIn: false,
@@ -878,7 +838,6 @@ const Auth = {
   setupRequired: false,
 
   async refresh(){
-    if(DB.mode!=='api'){ this.loggedIn=false; this.username=null; this.setupRequired=false; return; }
     try{
       const [me, setup] = await Promise.all([Backend.get('/api/me'), Backend.get('/api/setup-required')]);
       this.loggedIn = !!me.loggedIn;
@@ -900,7 +859,7 @@ const Auth = {
   }
 };
 
-function canManagePlayers(){ return DB.mode!=='api' || Auth.loggedIn; }
+function canManagePlayers(){ return Auth.loggedIn; }
 function closeWizard(){ const o=document.getElementById('wizard'); if(o) o.hidden=true; }
 function showWizard(){
   renderWizardBody();
@@ -1097,43 +1056,31 @@ function show(name){
   if(name==='home') renderHome();
   if(name==='setup'){ setup.slots=[]; sanitizeSlots(); renderPlayers(); }
   if(name==='players') renderRoster();
-  if(name==='stats'){ if(DB.mode==='api'){ DB.refreshStats().then(renderStats).catch(renderStats); } else renderStats(); }
-  if(name==='player'){ if(DB.mode==='api'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); } else renderPlayerPage(); }
+  if(name==='stats'){ DB.refreshStats().then(renderStats).catch(renderStats); }
+  if(name==='player'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); }
 }
 /* ---------- home screen ---------- */
 function renderHome(){
   const body=document.getElementById('home-body');
   if(!body) return;
   const empty={leaderboard:[],recent:[]};
-  if(DB.mode==='api'){
-    body.innerHTML=`<p class="pp-meta">Loading…</p>`;
-    Promise.all([
-      Backend.get('/api/summary'),
-      Backend.get('/api/top-finishes?mode=h2h'),
-      Backend.get('/api/stats/180s?mode=h2h'),
-      Backend.get('/api/stats/big-fish?mode=h2h'),
-      Backend.get('/api/stats/nine-darters?mode=h2h'),
-      Backend.get('/api/top-finishes?mode=practice'),
-      Backend.get('/api/stats/180s?mode=practice'),
-      Backend.get('/api/stats/big-fish?mode=practice'),
-      Backend.get('/api/stats/nine-darters?mode=practice'),
-    ]).then(([s,f,e,b,n,pf,pe,pb,pn])=>renderHomeContent(s,
-      {finishes:f,eighties:e,bigFish:b,nineDarters:n},
-      {finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn}))
-      .catch(()=>renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts:null,oneEighties:null,bigFish:null,nineDarters:null},
-        {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
-        {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty}));
-  } else {
-    const darts=Object.values(stats).reduce((a,p)=>a+(p.dartsThrown||0),0);
-    const tonPlus=Object.values(stats).reduce((a,p)=>a+(p.checkouts100||0),0);
-    const oneEighties=Object.values(stats).reduce((a,p)=>a+(p.oneEighties||0),0);
-    const bigFish=Object.values(stats).reduce((a,p)=>a+(p.bigFish||0),0);
-    const nineDarters=Object.values(stats).reduce((a,p)=>a+(p.nineDarters||0),0);
-    const practiceLegs=Object.values(stats).reduce((a,p)=>a+Object.values(p.practiceLegs||{}).reduce((s,n)=>s+n,0),0);
-    renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts,tonPlus,oneEighties,bigFish,nineDarters,practiceLegs},
+  body.innerHTML=`<p class="pp-meta">Loading…</p>`;
+  Promise.all([
+    Backend.get('/api/summary'),
+    Backend.get('/api/top-finishes?mode=h2h'),
+    Backend.get('/api/stats/180s?mode=h2h'),
+    Backend.get('/api/stats/big-fish?mode=h2h'),
+    Backend.get('/api/stats/nine-darters?mode=h2h'),
+    Backend.get('/api/top-finishes?mode=practice'),
+    Backend.get('/api/stats/180s?mode=practice'),
+    Backend.get('/api/stats/big-fish?mode=practice'),
+    Backend.get('/api/stats/nine-darters?mode=practice'),
+  ]).then(([s,f,e,b,n,pf,pe,pb,pn])=>renderHomeContent(s,
+    {finishes:f,eighties:e,bigFish:b,nineDarters:n},
+    {finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn}))
+    .catch(()=>renderHomeContent({players:roster.length,games:null,sets:null,legs:null,darts:null,oneEighties:null,bigFish:null,nineDarters:null},
       {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
-      {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty});
-  }
+      {finishes:[],eighties:empty,bigFish:empty,nineDarters:empty}));
 }
 function renderHomeContent(s,h2h,practice){
   const finishes=h2h.finishes, eighties=h2h.eighties, bigFishData=h2h.bigFish, nineDarterData=h2h.nineDarters;
@@ -1231,11 +1178,9 @@ function renderHomeContent(s,h2h,practice){
 
   const avgLeaderboard=renderAvgLeaderboard(avgBoard);
 
-  const localNote=DB.mode!=='api'?`<p class="pp-meta" style="margin:0 0 16px">Full stats require the server backend.</p>`:'';
   body.innerHTML=`
     <div class="hero-grid">${heroCards.map(c=>`<div class="hero-block"><div class="hero-val">${c.val}</div><div class="hero-label">${c.label}</div></div>`).join('')}</div>
-    <div class="summary-grid">${secCards.map(c=>`<div class="stat-block"><div class="stat-val">${c.val}</div><div class="stat-label">${c.label}</div></div>`).join('')}</div>
-    ${localNote}`;
+    <div class="summary-grid">${secCards.map(c=>`<div class="stat-block"><div class="stat-val">${c.val}</div><div class="stat-label">${c.label}</div></div>`).join('')}</div>`;
 
   const lb=document.getElementById('leaderboard-body');
   if(lb) lb.innerHTML=`
@@ -1286,28 +1231,13 @@ function setPractice(on){
 }
 
 function openScoreboard(){
-  if(DB.mode==='api'){
-    window.open('display','_blank');
-  } else {
-    uiAlert('The scoreboard runs on the server. Start the app with Docker, then open  http://<your-server>:8046/display  on your second screen. (This standalone preview has no server, so the live scoreboard isn\u2019t available here.)');
-  }
+  window.open('display','_blank');
 }
 
 /* ---------- settings ---------- */
 async function renderSettings(){
   const gate = document.getElementById('settings-gate');
   const content = document.getElementById('settings-content');
-
-  // Smart Home Integration — requires API backend
-  if(DB.mode!=='api'){
-    if(gate) gate.innerHTML='';
-    if(content) content.hidden=false;
-    const note=document.getElementById('settings-api-note');
-    if(note) note.hidden=false;
-    const sh=document.getElementById('smart-home-section');
-    if(sh) sh.style.opacity='0.4';
-    return;
-  }
 
   await Auth.refresh();
 
@@ -1461,12 +1391,6 @@ function saveSettings(){
   const btn = document.getElementById('settings-save-btn');
   if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
 
-  if(DB.mode!=='api'){
-    if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
-    uiAlert('Smart Home Integration settings require the server backend.');
-    return;
-  }
-
   Backend.send('PUT','/api/settings',{
     ha_url:                  v('ha-url').replace(/\/+$/,''),
     ha_webhook_oneeighty:    v('ha-wh-oneeighty'),
@@ -1506,7 +1430,6 @@ function testHaConnection(){
     });
 }
 function sendHaWebhook(event, player, category, extra){
-  if(DB.mode!=='api') return;
   Backend.send('POST','/api/ha-webhook',{ event, player, category, ...(extra||{}) }).catch(()=>{});
 }
 
@@ -1711,7 +1634,8 @@ function ensurePlayerStats(name){
   delete s.games;
   stats[name]=s;
 }
-function persist(){ if(DB.mode==='local') Store.save({ players:roster, stats, prefs }); }
+// no-op: all writes go straight to the backend (DB.*) — nothing to persist locally
+function persist(){}
 
 /* ---------- players management screen ---------- */
 function renderRoster(){
@@ -1915,54 +1839,12 @@ function renderPlayerPage(){
   loadTopFinishes();
   loadDartAnalytics();
 }
-function clearLocalPlayerStats(name, mode){
-  const s = stats[name]; if(!s) return;
-  const zeroStats = { turns:0, totalPoints:0, trebleLess:0, checkouts100:0, oneEighties:0, bigFish:0, nineDarters:0, dartsThrown:0, avgDarts:0 };
-  if(mode === 'all'){
-    s.h2hStats = {...zeroStats};
-    s.practiceStats = {...zeroStats};
-    s.legsByCat = {}; s.gamesByCat = {};
-    s.h2hLegsWonByCat = {}; s.h2hSetsWonByCat = {}; s.h2hGamesWonByCat = {};
-    s.h2hAvgDartsPerLeg = null;
-    s.practiceLegs = {}; s.practiceAvgDartsPerLeg = null;
-    s.turns = 0; s.totalPoints = 0; s.trebleLess = 0; s.dartsThrown = 0; s.avgDarts = 0;
-    s.checkouts100 = 0; s.oneEighties = 0; s.bigFish = 0; s.nineDarters = 0;
-    persist(); return;
-  }
-  if(mode === 'h2h'){
-    s.h2hStats = {...zeroStats};
-    s.legsByCat = {}; s.gamesByCat = {};
-    s.h2hLegsWonByCat = {}; s.h2hSetsWonByCat = {}; s.h2hGamesWonByCat = {};
-    s.h2hAvgDartsPerLeg = null;
-  } else {
-    s.practiceStats = {...zeroStats};
-    s.practiceLegs = {};
-    s.practiceAvgDartsPerLeg = null;
-  }
-  // recalculate global totals exactly from the two mode sub-objects
-  const h = s.h2hStats||{}, pr = s.practiceStats||{};
-  s.turns        = (h.turns||0)        + (pr.turns||0);
-  s.totalPoints  = (h.totalPoints||0)  + (pr.totalPoints||0);
-  s.trebleLess   = (h.trebleLess||0)   + (pr.trebleLess||0);
-  s.checkouts100 = (h.checkouts100||0) + (pr.checkouts100||0);
-  s.oneEighties  = (h.oneEighties||0)  + (pr.oneEighties||0);
-  s.bigFish      = (h.bigFish||0)      + (pr.bigFish||0);
-  s.nineDarters  = (h.nineDarters||0)  + (pr.nineDarters||0);
-  s.dartsThrown  = (h.dartsThrown||0)  + (pr.dartsThrown||0);
-  s.avgDarts     = (h.avgDarts||0)     + (pr.avgDarts||0);
-  persist();
-}
 function askClearPlayerStats(name, mode){
   const label = mode === 'all' ? 'all' : mode === 'h2h' ? 'H2H' : 'Practice';
   uiConfirm(`Reset ${label} stats for "${name}"? Turn data is permanently deleted and cannot be undone.`, ()=>{
-    if(DB.mode==='api'){
-      Backend.send('DELETE', `/api/players/stats?name=${encodeURIComponent(name)}&mode=${mode}`)
-        .then(()=>{ if(DB.mode==='api') DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); })
-        .catch(logErr);
-    } else {
-      clearLocalPlayerStats(name, mode);
-      renderPlayerPage();
-    }
+    Backend.send('DELETE', `/api/players/stats?name=${encodeURIComponent(name)}&mode=${mode}`)
+      .then(()=>DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage))
+      .catch(logErr);
   });
 }
 function askRenameFromProfile(name){
@@ -1978,21 +1860,6 @@ function askDeleteFromProfile(name){
 // Standard 3-dart average: total points / total darts * 3
 function avgStr(points, darts){ return darts ? (points/darts*3).toFixed(1) : '—'; }
 
-// Accumulate one turn's stats into a target object (global or per-mode sub-object).
-// Adding a new per-turn stat means editing this one function instead of two.
-function accumTurnStats(target, ev, category, legDarts, visitDarts){
-  target.turns       += 1;
-  target.totalPoints += ev.scored;
-  if(visitDarts != null){
-    target.dartsThrown = (target.dartsThrown||0) + visitDarts;        // physical darts thrown
-    target.avgDarts    = (target.avgDarts||0) + (ev.bust ? 3 : visitDarts); // darts counted for 3-dart avg
-  }
-  if(ev.trebleLess)                              target.trebleLess  += 1;
-  if(ev.win && ev.pointsThisVisit >= 100)        target.checkouts100+= 1;
-  if(ev.scored === 180)                          target.oneEighties += 1;
-  if(ev.win && ev.pointsThisVisit === 170)       target.bigFish     += 1;
-  if(ev.win && category === '501' && legDarts===9) target.nineDarters+= 1;
-}
 function renderGame(){
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
@@ -2239,17 +2106,6 @@ function enterTurn(){
     gamePoints:p.gamePoints, gameVisits:p.gameVisits,
     oe:game.gameOneEighties, bf:game.gameBigFish, bu:game.gameBusts,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length };
-  if(DB.mode==='local' && stats[p.name]){
-    const _s=stats[p.name], _mk=(!game.practice&&game.players.length>1)?'h2hStats':'practiceStats';
-    _snap.ls={ name:p.name, mk:_mk,
-      g:{ turns:_s.turns, totalPoints:_s.totalPoints, dartsThrown:_s.dartsThrown, avgDarts:_s.avgDarts,
-          trebleLess:_s.trebleLess, checkouts100:_s.checkouts100,
-          oneEighties:_s.oneEighties, bigFish:_s.bigFish, nineDarters:_s.nineDarters },
-      m:{ turns:_s[_mk].turns, totalPoints:_s[_mk].totalPoints, trebleLess:_s[_mk].trebleLess,
-          checkouts100:_s[_mk].checkouts100, oneEighties:_s[_mk].oneEighties,
-          bigFish:_s[_mk].bigFish, nineDarters:_s[_mk].nineDarters,
-          dartsThrown:_s[_mk].dartsThrown||0, avgDarts:_s[_mk].avgDarts||0 } };
-  }
   game.lastTurnSnapshot = _snap;
 
   // per-leg and per-game scope (shown live on the scoreboard — both modes)
@@ -2264,18 +2120,11 @@ function enterTurn(){
   p.gamePoints += ev.scored; p.gameVisits += 1;
   if(!ev.bust) p.score = ev.newScore;
 
-  // persist the turn: api mode posts it to the database; local mode updates counters
+  // persist the turn to the database
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.scored, bust:ev.bust,
     checkout:ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null,
     darts: game.darts.map((d,i) => ({ dartNo: i+1, sector: d.sector, multiplier: d.mult })) });
-  if(DB.mode==='local'){
-    const s = stats[p.name];
-    const _vd = game.darts.length;
-    accumTurnStats(s, ev, game.category, p.legDarts, _vd);   // updates dartsThrown + avgDarts
-    const _mk = (!game.practice && game.players.length > 1) ? 'h2hStats' : 'practiceStats';
-    accumTurnStats(s[_mk], ev, game.category, p.legDarts, _vd);
-  }
   // achievement flashes + in-game counters + Home Assistant webhooks
   if(ev.bust){
     game.gameBusts += 1;
@@ -2291,7 +2140,7 @@ function enterTurn(){
     pendingAchievement = { type:'bigfish', player:p.name, ts:Date.now() };
     sendHaWebhook('bigfish', p.name, game.category);
   }
-  if(ev.win && game.category==='501' && p.legDarts===9){
+  if(ev.win && game.category==='501' && p.legDarts===9 && p.legVisits===3){
     sendHaWebhook('ninedarter', p.name, game.category);
   }
   if(ev.win && ev.pointsThisVisit >= 100){
@@ -2304,17 +2153,6 @@ function enterTurn(){
     game.currentLegTurns.push(_t); game.sessionTurns.push(_t); }
 
   if(ev.win){
-    if(DB.mode==='local'){
-      const _isH2H = !game.practice && game.players.length > 1;
-      game.players.forEach(pl=>{
-        if(pl.legDarts === 0) return;   // player didn't throw in this leg — matches API behaviour
-        ensurePlayerStats(pl.name);
-        if(_isH2H)
-          stats[pl.name].legsByCat[game.category] = (stats[pl.name].legsByCat[game.category]||0) + 1;
-        else
-          stats[pl.name].practiceLegs[game.category] = (stats[pl.name].practiceLegs[game.category]||0) + 1;
-      });
-    }
     onLegWon(game.current);   // handles set/game progression
     return;
   }
@@ -2333,32 +2171,12 @@ function enterTurn(){
 function onLegWon(wi){
   const w = game.players[wi];
   w.legsWon += 1;
-  const isH2H = game.players.length > 1 && !game.practice;
-
-  if(DB.mode==='local' && isH2H){
-    const cat = game.category;
-    stats[w.name].h2hLegsWonByCat[cat] = (stats[w.name].h2hLegsWonByCat[cat]||0) + 1;
-  }
 
   if(!game.practice && w.legsWon >= game.legsPerSet){      // set won (H2H only)
     w.setsWon += 1;
     game.players.forEach(p=>p.legsWon=0);  // reset legs for the next set
 
-    if(DB.mode==='local' && isH2H){
-      const cat = game.category;
-      stats[w.name].h2hSetsWonByCat[cat] = (stats[w.name].h2hSetsWonByCat[cat]||0) + 1;
-    }
-
     if(w.setsWon >= game.setsPerGame){   // game (match) won
-      if(DB.mode==='local'){
-        const cat = game.category;
-        if(isH2H){
-          game.players.forEach(pl=>{
-            stats[pl.name].gamesByCat[cat] = (stats[pl.name].gamesByCat[cat]||0) + 1;
-          });
-          stats[w.name].h2hGamesWonByCat[cat] = (stats[w.name].h2hGamesWonByCat[cat]||0) + 1;
-        }
-      }
       sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
       sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
       sendHaWebhook('gameend', w.name, game.category);
@@ -2676,16 +2494,6 @@ function selectStat(key){
 function loadStatBubbles(){
   const container=document.getElementById('player-stat-bubbles');
   if(!container) return;
-  if(DB.mode!=='api'){
-    const s=stats[currentPlayer]||{};
-    const ts=playerPageTab==='h2h'?(s.h2hStats||{}):playerPageTab==='practice'?(s.practiceStats||{}):s;
-    renderStatBubbles({
-      dartsThrown: playerPageTab==='overall' ? (s.dartsThrown||0) : (ts.dartsThrown||0),
-      avg: ts.avgDarts?(ts.totalPoints/ts.avgDarts*3):null,
-      one80s: ts.oneEighties||0, bigFish: ts.bigFish||0, nineDarters: ts.nineDarters||0
-    });
-    return;
-  }
   const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
   Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
     .then(data=>renderStatBubbles(data)).catch(()=>{});
@@ -2703,7 +2511,6 @@ function renderStatBubbles(data){
 function loadDartWeights(){
   const container=document.getElementById('avg-weight-filters');
   if(!container) return;
-  if(DB.mode!=='api'){ container.hidden=true; return; }
   Backend.get(`/api/players/dart-weights?name=${encodeURIComponent(currentPlayer)}`)
     .then(weights=>{ cachedDartWeights=weights; renderWeightFilters(); })
     .catch(()=>{ container.hidden=true; });
@@ -2734,10 +2541,6 @@ function loadAvgChart(period){
   if(!container) return;
   if(period==='custom'&&(!customRangeStart||!customRangeEnd)){
     container.innerHTML=''; return;
-  }
-  if(DB.mode!=='api'){
-    container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Average history requires the server backend.</p>`;
-    return;
   }
   container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Loading…</p>`;
   let url=`/api/players/avg-history?name=${encodeURIComponent(currentPlayer)}&period=${period}&metric=${selectedStat}`;
@@ -2775,10 +2578,6 @@ function toggleFinishRoute(row, player, score, mode){
   detail.innerHTML = `<span class="pp-meta" style="font-size:11px">Loading…</span>`;
   row.after(detail);
 
-  if(DB.mode!=='api'){
-    detail.innerHTML = `<span class="pp-meta" style="font-size:11px">Route data requires the server backend.</span>`;
-    return;
-  }
   const modeParam = mode ? `&mode=${encodeURIComponent(mode)}` : '';
   Backend.get(`/api/players/checkout-route?name=${encodeURIComponent(player)}&score=${score}${modeParam}`)
     .then(routes => {
@@ -2818,10 +2617,6 @@ function fmtDate(dt){
 function loadTopFinishes(){
   const container=document.getElementById('player-top-finishes');
   if(!container) return;
-  if(DB.mode!=='api'){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Top finishes are saved when connected to the server backend.</p>`;
-    return;
-  }
   const _tfMode = (playerPageTab==='h2h'||playerPageTab==='practice') ? `&mode=${playerPageTab}` : '';
   Backend.get(`/api/players/top-finishes?name=${encodeURIComponent(currentPlayer)}${_tfMode}`)
     .then(rows=>{
@@ -2853,10 +2648,6 @@ function loadDartAnalytics(){
   const body = document.getElementById('dart-analytics-body');
   const section = document.getElementById('dart-analytics-section');
   if(!body) return;
-  if(DB.mode!=='api'){
-    body.innerHTML=`<p class="pp-meta" style="padding:4px 0">Dart analytics require the server backend.</p>`;
-    return;
-  }
   const modeParam = (playerPageTab==='h2h'||playerPageTab==='practice') ? `&mode=${playerPageTab}` : '';
   Backend.get(`/api/players/dart-analytics?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
     .then(data => renderDartAnalytics(data, body))
@@ -2935,10 +2726,7 @@ function renderDartAnalytics(data, container){
 
 /* ---------- stats render ---------- */
 function renderStats(){
-  document.getElementById('persist-tag').textContent =
-    DB.mode==='api' ? 'saved in the database'
-    : Store.hasWS ? 'saved on this device'
-    : 'this session only (no backend, no local storage)';
+  document.getElementById('persist-tag').textContent = 'saved in the database';
   const body=document.getElementById('stats-body');
   const names=Object.keys(stats);
   if(names.length===0){
@@ -3027,7 +2815,7 @@ function submitVerifyPin(){
 }
 // runs `onOk` immediately if the player has no PIN, otherwise prompts for one first
 function withPinCheck(name, onOk){
-  if(DB.mode==='api' && prefs[name] && prefs[name].hasPin){ uiVerifyPin(name, onOk); }
+  if(prefs[name] && prefs[name].hasPin){ uiVerifyPin(name, onOk); }
   else onOk();
 }
 function dartWeightOptions(selected){
@@ -3086,22 +2874,31 @@ function submitAddPlayer(){
 }
 
 /* ---------- boot ---------- */
+function showBackendErrorScreen(){
+  document.body.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:24px;text-align:center;gap:16px">
+    <div style="font-size:48px">⚠️</div>
+    <h1 style="margin:0;font-size:20px">Can't reach the database</h1>
+    <p style="margin:0;max-width:380px;color:#7a8070">Oche needs its server backend to load or save anything. Make sure the server is running, then retry.</p>
+    <button onclick="location.reload()" style="padding:10px 24px;border-radius:8px;border:none;background:#2f6f3e;color:#fff;font-size:15px;cursor:pointer">Retry</button>
+  </div>`;
+}
 (async function init(){
-  await DB.detect();        // is a database backend reachable?
-  await DB.loadAll();       // populate roster / prefs / stats from backend or local storage
+  try{
+    await DB.detect();      // throws if the database backend isn't reachable
+  }catch(e){
+    showBackendErrorScreen();
+    return;
+  }
+  await DB.loadAll();       // populate roster / prefs / stats from the backend
   sanitizeSlots();
   renderPlayers();
   document.getElementById('legs-val').textContent = setup.legsPerSet;
   document.getElementById('sets-val').textContent = setup.setsPerGame;
   updateFormatLine();
-  const tag=document.getElementById('persist-tag'); // reflect mode on the stats page
-  if(tag) tag.dataset.mode = DB.mode;
   renderHome();             // populate the landing page with summary data
   pushLive();   // tell any scoreboard screens we're ready (idle until a game starts)
-  if(DB.mode==='api'){
-    await Auth.refresh();
-    if(Auth.setupRequired && !localStorage.getItem('oche_wizard_dismissed')) showWizard();
-  }
+  await Auth.refresh();
+  if(Auth.setupRequired && !localStorage.getItem('oche_wizard_dismissed')) showWizard();
 })();
 </script>
 </body>
