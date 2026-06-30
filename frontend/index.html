@@ -619,13 +619,34 @@
         <button class="btn btn-ghost" onclick="adminLogout()">Log out</button>
       </div>
 
+      <!-- Manage admins -->
+      <div class="pp-section" style="margin-bottom:24px">
+        <div class="pp-section-title" style="font-size:16px">Admin accounts</div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          Admin accounts can access this Settings page and manage player PINs. There must always be at least one.
+        </p>
+        <div id="admins-list" style="display:grid;gap:8px;margin-bottom:14px"></div>
+        <button class="btn btn-ghost" onclick="askAddAdmin()">+ Add admin</button>
+      </div>
+
+      <!-- Player PINs -->
+      <div class="pp-section" style="margin-bottom:24px">
+        <div class="pp-section-title" style="font-size:16px">Player PINs</div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          A PIN-protected player must have their PIN entered before they can be added to a game — useful for stopping others from playing as you. Players without a PIN can be picked by anyone.
+        </p>
+        <label class="field">Lock out after this many wrong PIN attempts</label>
+        <input type="number" id="pin-lockout-threshold" min="1" max="1000" style="width:120px;margin-bottom:14px">
+        <div id="pin-players-list" style="display:grid;gap:8px"></div>
+      </div>
+
       <p id="settings-api-note" hidden style="color:var(--muted);font-size:13px;background:var(--surface-2);border:1px solid var(--wire);border-radius:10px;padding:12px 14px;margin-bottom:16px">
         Smart Home Integration requires the server backend. Open the app via Docker at <code>http://&lt;your-server&gt;:8046</code>.
       </p>
 
       <!-- Smart Home Integration -->
       <div class="pp-section" id="smart-home-section">
-        <div class="pp-section-title">Smart Home Integration</div>
+        <div class="pp-section-title" style="font-size:16px">Smart Home Integration</div>
 
         <div style="margin-bottom:20px">
         <div class="pp-section-title" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink);text-transform:none;letter-spacing:0;margin-bottom:8px">
@@ -706,27 +727,6 @@
 
       <div class="btn-row" style="margin-top:20px">
         <button class="btn btn-primary" id="settings-save-btn" onclick="saveSettings()">Save settings</button>
-      </div>
-
-      <!-- Manage admins -->
-      <div class="pp-section" style="margin-top:24px">
-        <div class="pp-section-title">Admin accounts</div>
-        <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
-          Admin accounts can access this Settings page and manage player PINs. There must always be at least one.
-        </p>
-        <div id="admins-list" style="display:grid;gap:8px;margin-bottom:14px"></div>
-        <button class="btn btn-ghost" onclick="askAddAdmin()">+ Add admin</button>
-      </div>
-
-      <!-- Player PINs -->
-      <div class="pp-section" style="margin-top:24px">
-        <div class="pp-section-title">Player PINs</div>
-        <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
-          A PIN-protected player must have their PIN entered before they can be added to a game — useful for stopping others from playing as you. Players without a PIN can be picked by anyone.
-        </p>
-        <label class="field">Lock out after this many wrong PIN attempts</label>
-        <input type="number" id="pin-lockout-threshold" min="1" max="1000" style="width:120px;margin-bottom:14px">
-        <div id="pin-players-list" style="display:grid;gap:8px"></div>
       </div>
     </div>
     </div>
@@ -1080,7 +1080,7 @@ function show(name){
   document.getElementById('nav-settings').setAttribute('aria-current', name==='settings');
   if(name==='settings') renderSettings();
   if(name==='home') renderHome();
-  if(name==='setup'){ sanitizeSlots(); renderPlayers(); }
+  if(name==='setup'){ setup.slots=[]; sanitizeSlots(); renderPlayers(); }
   if(name==='players') renderRoster();
   if(name==='stats'){ if(DB.mode==='api'){ DB.refreshStats().then(renderStats).catch(renderStats); } else renderStats(); }
   if(name==='player'){ if(DB.mode==='api'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); } else renderPlayerPage(); }
