@@ -78,14 +78,11 @@
     border:1px solid var(--wire);border-radius:8px;padding:7px 9px;min-width:38px;text-align:center}
 
   .roster-list{display:flex;flex-direction:column;gap:8px;margin:0 0 16px}
-  .roster-row{display:flex;flex-direction:column;gap:8px;background:var(--surface-2);border:1px solid var(--wire);
+  .roster-row{display:flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--wire);
     border-radius:11px;padding:10px 12px}
-  .roster-row-top{display:flex;align-items:center;gap:8px}
   .roster-row .rp-main{flex:1;min-width:0}
   .roster-row .rp-name{font-weight:600;font-size:15px}
   .roster-row .rp-stat{font-size:12px;color:var(--muted)}
-  .roster-row-bottom{display:flex;align-items:center;gap:8px}
-  .roster-row .out-seg{flex:1}
   .out-seg button{padding:8px 11px;font-size:12.5px}
   .out-seg button[aria-pressed="true"]{background:var(--surface-2);color:var(--ink)}
   .roster-row .iconbtn{width:40px;height:40px;font-size:15px;flex-shrink:0}
@@ -1796,20 +1793,12 @@ function renderRoster(){
     const out = playerOut(name);
     const j = escapeHtml(escapeJs(name));
     return `<div class="roster-row">
-      <div class="roster-row-top">
-        <button class="rp-main" onclick="showPlayer('${j}')">
-          <div class="rp-name">${escapeHtml(name)}</div>
-          <div class="rp-stat">avg ${avg} · ${s.turns||0} turns</div>
-        </button>
-        <button class="iconbtn" title="Rename" onclick="askRename('${j}')">✎</button>
-        ${canManagePlayers()?`<button class="iconbtn danger" title="Delete" onclick="askDelete('${j}')">🗑</button>`:''}
-      </div>
-      <div class="roster-row-bottom">
-        <div class="seg out-seg" role="group" aria-label="Finish rule for ${escapeHtml(name)}">
-          <button aria-pressed="${out==='double'}" onclick="setPlayerOut('${j}','double'); renderRoster();">Double out</button>
-          <button aria-pressed="${out==='single'}" onclick="setPlayerOut('${j}','single'); renderRoster();">Single out</button>
-        </div>
-      </div>
+      <button class="rp-main" onclick="showPlayer('${j}')">
+        <div class="rp-name">${escapeHtml(name)}</div>
+        <div class="rp-stat">avg ${avg} · ${s.turns||0} turns</div>
+      </button>
+      <button class="iconbtn" title="Rename" onclick="askRename('${j}')">✎</button>
+      ${canManagePlayers()?`<button class="iconbtn danger" title="Delete" onclick="askDelete('${j}')">🗑</button>`:''}
     </div>`;
   }).join('');
 }
@@ -1827,6 +1816,7 @@ function askDelete(name){
 let currentPlayer = null;
 let playerPageTab = 'overall';
 let showMoreStats = false;
+let playerSettingsUnlocked = false;
 function localDateStr(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function setPlayerDartWeight(name, value){
   const weight = value ? Number(value) : null;
@@ -1839,7 +1829,7 @@ function switchPlayerTab(tab){
   renderPlayerPage();
 }
 function showPlayer(name){
-  if(currentPlayer !== name){ avgChartWeight = null; cachedDartWeights = []; playerPageTab = 'overall'; showMoreStats = false; }
+  if(currentPlayer !== name){ avgChartWeight = null; cachedDartWeights = []; playerPageTab = 'overall'; showMoreStats = false; playerSettingsUnlocked = false; }
   currentPlayer = name;
   if(!customRangeEnd){
     const now=new Date();
@@ -1972,6 +1962,9 @@ function renderPlayerPage(){
       <button class="btn btn-ghost" style="margin-top:6px" onclick="showLegend('player')">View stats glossary →</button>
     </div>
     <div class="player-controls">
+      ${((prefs[name] && prefs[name].hasPin) && !playerSettingsUnlocked) ? `
+      <button class="btn btn-ghost" onclick="unlockPlayerSettings('${j}')">🔒 Enter PIN to change player settings</button>
+      ` : `
       <div class="seg out-seg" role="group" aria-label="Finish rule">
         <button aria-pressed="${out==='double'}" onclick="setPlayerOut('${j}','double'); renderPlayerPage();">Double out</button>
         <button aria-pressed="${out==='single'}" onclick="setPlayerOut('${j}','single'); renderPlayerPage();">Single out</button>
@@ -1983,6 +1976,7 @@ function renderPlayerPage(){
           ${dartWeightOptions(dartWeight)}
         </select>
       </div>
+      `}
     </div>
     <div class="player-tabs">
       <button class="tab-btn${tab==='overall'?' active':''}" data-tab="overall" onclick="switchPlayerTab('overall')">Overall</button>
@@ -2765,6 +2759,9 @@ const BUBBLE_KEY_MAP = { dartsthrown:'dartsThrown', avgdartsperday:'avgDartsPerD
 function toggleMoreStats(){
   showMoreStats = !showMoreStats;
   renderPlayerPage();
+}
+function unlockPlayerSettings(name){
+  uiVerifyPin(name, ()=>{ playerSettingsUnlocked = true; renderPlayerPage(); });
 }
 function selectStat(key){
   selectedStat = key;
