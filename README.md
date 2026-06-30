@@ -374,7 +374,7 @@ POST   /api/logout                          Clear the session cookie
 GET    /api/me                              { loggedIn, username? }
 GET    /api/admins                          List admin accounts                      [admin]
 POST   /api/admins                          Add an admin             { username, password } [admin]
-DELETE /api/admins?username=                Remove an admin                          [admin]
+DELETE /api/admins?id=                      Remove an admin                          [admin]
 PUT    /api/admins/password                 Change an admin's password { username, password } [admin]
 ```
 

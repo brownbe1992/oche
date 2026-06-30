@@ -24,20 +24,6 @@ const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA foreign_keys = ON;');
 
-// Schema migration: if old turns table still has treble_less, clear game history and
-// recreate turns + darts with the normalised schema (player profiles/settings preserved).
-try {
-  db.exec("SELECT treble_less FROM turns LIMIT 0");
-  // Old schema detected — remove game-history tables so new CREATE TABLE below takes effect
-  db.exec("PRAGMA foreign_keys = OFF");
-  db.exec(`DROP TABLE IF EXISTS darts;
-           DROP TABLE IF EXISTS turns;
-           DELETE FROM game_players;
-           DELETE FROM games;
-           DELETE FROM timeline_events;`);
-  db.exec("PRAGMA foreign_keys = ON");
-} catch(e) { /* Already on current schema */ }
-
 db.exec(`
   CREATE TABLE IF NOT EXISTS players (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -265,10 +251,8 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice }) {
   const info = q.insertGame.run(String(category), Number(legsPerSet) || 1, Number(setsPerGame) || 1, practice ? 1 : 0);
   const gameId = Number(info.lastInsertRowid);
   (players || []).forEach(entry => {
-    // entry can be a plain name string (legacy) or { name, out } object
-    const nm  = typeof entry === 'string' ? entry : entry.name;
-    const out = typeof entry === 'string' ? 'double' : (entry.out === 'single' ? 'single' : 'double');
-    const p   = ensurePlayer(nm);
+    const out = entry.out === 'single' ? 'single' : 'double';
+    const p   = ensurePlayer(entry.name);
     q.addParticipant.run(gameId, p.id, p.dart_weight ?? null, out);
   });
   return { gameId };
