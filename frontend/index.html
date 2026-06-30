@@ -1272,7 +1272,9 @@ function renderHomeTabBody(){
   const highestCo = extra && extra.highestCheckout;
   const highestCoSection = `<div class="pp-section">
       <div class="pp-section-title">Highest Checkout Ever</div>
-      ${highestCo ? `<div class="hero-block" style="margin-top:6px"><div class="hero-val">${highestCo.points}</div><div class="hero-label">${escapeHtml(highestCo.name)} · ${fmtDate(highestCo.createdAt)}</div></div>`
+      ${highestCo ? `<div class="hero-block expandable" role="button" aria-expanded="false" style="margin-top:6px;cursor:pointer"
+          onclick="toggleFinishRoute(this,'${escapeHtml(escapeJs(highestCo.name))}',${highestCo.points},'${mode}')">
+          <div class="hero-val">${highestCo.points}</div><div class="hero-label">${escapeHtml(highestCo.name)} · ${fmtDate(highestCo.createdAt)}</div></div>`
                   : `<p class="pp-meta" style="padding:4px 0">None recorded yet.</p>`}
     </div>`;
 
@@ -1283,7 +1285,7 @@ function renderHomeTabBody(){
         ${avgLeaderboard}
       </div>
       <div class="pp-section">
-        <div class="pp-section-title">Top Finishes</div>
+        <div class="pp-section-title">Top Checkouts</div>
         ${hofSection(finishes,mode)}
       </div>
     </div>
@@ -1300,7 +1302,7 @@ function renderHomeTabBody(){
     </div>
     ${achievementSection('180s 🎯', eighties)}
     ${achievementSection('Big Fish 🐟', bigFishData)}
-    ${achievementSection('Nine-dart finish', nineDarterData||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
+    ${achievementSection('9-Darters', nineDarterData||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
   `;
 }
 
