@@ -6,6 +6,8 @@
 
 A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player statistics, and no external dependencies.
 
+**v0.6.0**
+
 You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, hall-of-fame moments, and years' worth of per-player history. All data lives in a SQLite database on your own server.
 
 ---
@@ -23,6 +25,7 @@ You enter every dart individually — multiplier first, then the number — and 
   - [Player Profile](#player-profile)
   - [Stats](#stats)
   - [Settings](#settings)
+- [Admin Accounts & Player PINs](#admin-accounts--player-pins)
 - [API Reference](#api-reference)
 - [Architecture](#architecture)
 - [Data Storage](#data-storage)
@@ -189,11 +192,13 @@ The Players screen shows all registered players with their current finish rule (
 
 Actions per player:
 - **Rename** — changes the name everywhere, including all historical records
-- **Delete** — permanently removes the player and all their data
+- **Delete** — permanently removes the player and all their data *(admin login required)*
 - **Set finish rule** — double out or single out
 - **View profile** — opens the full player profile page
 
-Add new players from this screen.
+Add new players from this screen. New players can optionally be given a **PIN** and a **dart weight** at creation time — see [Admin Accounts & Player PINs](#admin-accounts--player-pins).
+
+Once any admin account exists, destructive actions (deleting a player, resetting stats) are hidden from the UI until you log in as an admin.
 
 ---
 
@@ -247,7 +252,7 @@ A breakdown of how this player actually throws:
 
 #### Settings
 
-- **Dart weight** — 15g through 30g; stored per-game for chart filtering
+- **Dart weight** — 10g through 40g; stored per-game for chart filtering
 - **Clear stats** — reset H2H stats, Practice stats, or all stats (with confirmation)
 
 ---
@@ -270,7 +275,9 @@ Plus global leaderboards for 180s, Big Fish, and nine-dart finishes, each filter
 
 ### Settings
 
-The Settings page (accessible from the top navigation) holds app-wide configuration.
+The Settings page (accessible from the top navigation) holds app-wide configuration. Each section — **Admin accounts**, **Player PINs**, and **Smart Home Integration** — is collapsed to just its header by default; click a header to expand it.
+
+Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accounts--player-pins)) — until an admin account exists, the page offers to create the first one.
 
 #### Home Assistant Integration
 
@@ -308,6 +315,42 @@ Settings are persisted in the database and survive container restarts.
 
 ---
 
+## Admin Accounts & Player PINs
+
+Oche supports an optional but recommended authentication layer so a shared tablet or TV can't be used to delete players, wipe stats, or play under someone else's name.
+
+### First-run setup
+
+The first time Settings is opened with no admin account on the server, a setup wizard prompts for a username and password to create the first admin. From then on, Settings requires logging in as an admin.
+
+### Admin accounts
+
+- Any number of admin accounts can exist; there must always be at least one
+- Admins can access Settings, manage other admin accounts, set/reset player PINs, and perform destructive player actions (delete player, reset stats)
+- Sessions are stored server-side and tracked via a cookie — logging out clears the session
+
+### Player PINs
+
+- Any player can optionally be given a 4–8 digit PIN, either at creation or later from **Settings → Player PINs**
+- A PIN-protected player must have their PIN entered before they can be added to a New Game slot — this stops other people from playing as you
+- Players without a PIN can be picked by anyone
+- Repeated wrong PIN attempts lock the player out temporarily; the lockout threshold (default: configurable 1–1000 attempts) is set in **Settings → Player PINs**
+- PIN entry fields are marked to opt out of browser/extension password-manager save prompts (e.g. 1Password), since a PIN isn't a password
+
+### What's gated behind admin login
+
+| Action | Requires admin |
+|---|---|
+| Delete a player | Yes |
+| Reset a player's stats | Yes |
+| Set or remove a player's PIN | Yes |
+| Add/remove admin accounts | Yes |
+| Change Home Assistant / webhook settings | Yes |
+| Verify a player's PIN to add them to a game | No — public, but rate-limited by the lockout threshold |
+| View stats, play games, use the scoreboard | No |
+
+---
+
 ## API Reference
 
 All responses are JSON. The server runs on one port and serves both the frontend and the API.
@@ -319,18 +362,39 @@ GET  /api/health
 ```
 Returns `{ ok: true }`.
 
+### Auth & Admin Accounts
+
+```
+GET    /api/setup-required                  { required } — true until the first admin exists
+POST   /api/setup                           Create the first admin   { username, password }
+                                             (only while setup-required)
+POST   /api/login                           Log in                   { username, password }
+                                             → sets session cookie
+POST   /api/logout                          Clear the session cookie
+GET    /api/me                              { loggedIn, username? }
+GET    /api/admins                          List admin accounts                      [admin]
+POST   /api/admins                          Add an admin             { username, password } [admin]
+DELETE /api/admins?username=                Remove an admin                          [admin]
+PUT    /api/admins/password                 Change an admin's password { username, password } [admin]
+```
+
+Routes marked `[admin]` require a logged-in admin session (cookie set by `/api/login`).
+
 ### Players
 
 ```
 GET    /api/players                         List all players
-POST   /api/players                         Add a player          { name, out }
+POST   /api/players                         Add a player          { name, out, pin?, dartWeight? }
 PUT    /api/players/rename                  Rename a player       { from, to }
 PUT    /api/players/out                     Set finish rule       { name, out: "double"|"single" }
 PUT    /api/players/dart-weight             Set dart weight       { name, weight }
 GET    /api/players/dart-weights?name=      Dart weight history for a player
-DELETE /api/players?name=                   Delete a player and all their data
-DELETE /api/players/stats?name=&mode=       Clear stats for a player
+DELETE /api/players?name=                   Delete a player and all their data        [admin]
+DELETE /api/players/stats?name=&mode=       Clear stats for a player                  [admin]
                                              mode: "h2h" | "practice" | "all"
+POST   /api/players/verify-pin              Verify a player's PIN  { name, pin } (public, rate-limited)
+PUT    /api/players/pin                     Set/reset a player's PIN { name, pin }    [admin]
+DELETE /api/players/pin?name=               Remove a player's PIN                     [admin]
 ```
 
 ### Stats & Leaderboards
@@ -406,15 +470,16 @@ The live state is held in memory only — it is never written to the database. O
 
 ```
 GET  /api/settings                          Retrieve all settings (key/value pairs)
-PUT  /api/settings                          Update settings       { ha_url, ha_webhook_*, … }
-POST /api/ha-test                           Test HA connectivity  { url }
+PUT  /api/settings                          Update settings       { ha_url, ha_webhook_*,         [admin]
+                                               pin_lockout_threshold, … }
+POST /api/ha-test                           Test HA connectivity  { url }                        [admin]
 POST /api/ha-webhook                        Fire an HA webhook    { event, player, category, … }
 ```
 
 ### Admin
 
 ```
-POST /api/reset                             Wipe all games and turns (players kept)
+POST /api/reset                             Wipe all games and turns (players kept)               [admin]
 ```
 
 ---
@@ -450,7 +515,9 @@ oche/
 | `turns` | Every visit: scored points, bust flag, checkout flag |
 | `darts` | Every individual dart: sector, multiplier, dart number within the visit. `scored`, `is_treble`, and `is_double` are computed columns derived from sector and multiplier. |
 | `timeline_events` | Leg/set/game start and end timestamps |
-| `settings` | Key/value store for app settings (e.g. Home Assistant config) |
+| `settings` | Key/value store for app settings (e.g. Home Assistant config, PIN lockout threshold) |
+| `admins` | Admin usernames and hashed passwords |
+| `sessions` | Server-side admin login sessions, keyed by cookie token |
 
 The `darts` table records every physical dart thrown and is the source of truth for treble rates, per-dart analytics, and checkout route history. Schema changes are applied automatically on startup using `ALTER TABLE … ADD COLUMN` or by dropping and recreating tables when the schema changes structurally — player profiles and settings are always preserved.
 
