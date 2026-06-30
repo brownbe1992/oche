@@ -62,18 +62,18 @@
   .setup-section{margin-bottom:20px}
   .setup-label{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px}
   /* player slots */
-  .players-list{display:flex;flex-direction:column;gap:10px;margin-bottom:10px}
+  .players-list{display:flex;flex-direction:column;gap:8px;margin:4px 0 16px}
   .player-row{display:flex;gap:8px;align-items:center}
-  .player-row .ix{font-family:'Bebas Neue';font-size:22px;color:var(--gold);width:22px;text-align:center;flex-shrink:0}
-  .pselect{width:100%;background:var(--board);border:1px solid var(--wire);color:var(--ink);
-    border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit;cursor:pointer;display:block}
+  .player-row .ix{font-family:'Bebas Neue';font-size:20px;color:var(--gold);width:22px;text-align:center}
+  .pselect{flex:1;background:var(--board);border:1px solid var(--wire);color:var(--ink);
+    border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit;cursor:pointer}
   .pselect:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
-  .slot-meta{display:flex;align-items:center;gap:8px;margin-top:5px;min-height:18px}
-  .slot-stat{font-size:12px;color:var(--muted)}
+  .slot-stat{font-size:11px;color:var(--muted)}
   /* add player row */
-  .add-player-wrap{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
-  .add-player-menu{display:none;gap:6px;flex-wrap:wrap}
-  .add-player-menu.open{display:flex}
+  .add-player-wrap{display:flex;align-items:center;gap:8px;overflow:hidden;margin-bottom:4px}
+  .add-player-menu{display:flex;gap:6px;max-width:0;opacity:0;overflow:hidden;
+    transition:max-width .22s ease,opacity .22s ease}
+  .add-player-menu.open{max-width:360px;opacity:1}
   .add-player-menu .btn{white-space:nowrap;padding:11px 14px;font-size:13.5px}
   /* h2h banner */
   .h2h-banner{font-size:12px;color:var(--muted);background:var(--surface-2);border:1px solid var(--wire);
@@ -89,7 +89,7 @@
   .iconbtn:hover{color:var(--bust);border-color:var(--bust)}
   .iconbtn.danger:hover{color:var(--bust);border-color:var(--bust)}
   .out-tag{flex:none;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--gold);
-    border:1px solid var(--wire);border-radius:8px;padding:3px 7px;text-align:center}
+    border:1px solid var(--wire);border-radius:8px;padding:7px 9px;min-width:38px;text-align:center}
 
   .roster-list{display:flex;flex-direction:column;gap:8px;margin:0 0 16px}
   .roster-row{display:flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--wire);
@@ -1683,18 +1683,21 @@ function renderPlayers(){
         statHtml = `<span class=”slot-stat”>avg ${avg.toFixed(1)}${form}</span>`;
       }
     }
-    const outTag = sel ? `<span class=”out-tag”>${playerOut(sel)==='double'?'DO':'SO'}</span>` : '';
-    const row = document.createElement('div'); row.className = 'player-row';
-    row.innerHTML = `<span class=”ix”>${i+1}</span>
-      <div style=”flex:1;min-width:0”>
-        <select class=”pselect” aria-label=”Player ${i+1}” onchange=”onSlotChange(${i}, this.value)”>
-          <option value=”” ${sel?'':'selected'} disabled>Choose player…</option>
-          ${opts}
-        </select>
-        <div class=”slot-meta”>${statHtml}</div>
-      </div>
+    const outTag = sel ? `<span class=”out-tag” title=”${playerOut(sel)==='double'?'Doubles out':'Singles out'}”>${playerOut(sel)==='double'?'DO':'SO'}</span>` : '';
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:contents';
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;flex-direction:column;gap:0';
+    const innerRow = document.createElement('div'); innerRow.className = 'player-row';
+    innerRow.innerHTML = `<span class=”ix”>${i+1}</span>
+      <select class=”pselect” aria-label=”Player ${i+1}” onchange=”onSlotChange(${i}, this.value)”>
+        <option value=”” ${sel?'':'selected'} disabled>Choose player</option>
+        ${opts}
+      </select>
       ${outTag}
-      ${setup.slots.length>1?`<button class=”iconbtn” title=”Remove” onclick=”removePlayer(${i})”>✕</button>`:''}`;
+      ${setup.slots.length>1?`<button class=”iconbtn” title=”Remove from game” onclick=”removePlayer(${i})”>✕</button>`:''}`;
+    row.appendChild(innerRow);
+    if(statHtml) row.insertAdjacentHTML('beforeend', `<div style=”padding-left:30px;margin-top:3px”>${statHtml}</div>`);
     box.appendChild(row);
   });
   updateSetupChrome();
@@ -1738,7 +1741,7 @@ function onSlotChange(i, value){
     ()=>{ setup.slots[i]=value; renderPlayers(); },
     ()=>{
       // reset the select back to previous value without re-rendering everything
-      const sel = document.querySelector(`#players-list .player-row:nth-child(${i+1}) .pselect`);
+      const sel = document.querySelectorAll(`#players-list .pselect`)[i];
       if(sel) sel.value = prev || '';
     }
   );
