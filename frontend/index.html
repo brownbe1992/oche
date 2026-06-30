@@ -1769,7 +1769,11 @@ function addExistingPlayer(){
 function addNewPlayer(){
   closeAddPlayerMenu();
   if(setup.slots.length>=6) return;
-  uiAddPlayer((name,opts)=>{ const a=addToRoster(name,opts); if(a){ setup.slots.push(a); renderPlayers(); } });
+  uiAddPlayer((name,opts)=>{
+    const a=addToRoster(name,opts);
+    if(!a) return;
+    withPinCheck(a, ()=>{ setup.slots.push(a); renderPlayers(); });
+  });
 }
 function removePlayer(i){ setup.slots.splice(i,1); if(!setup.slots.length) setup.slots=[''] ; renderPlayers(); }
 function shufflePlayers(){
