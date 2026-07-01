@@ -512,7 +512,7 @@
   <section id="screen-home" class="screen on">
     <div class="card">
       <h2 style="font-size:20px;margin-bottom:12px">🎯 Today's Challenge</h2>
-      <div id="challenge-card-body"><p class="pp-meta">Loading…</p></div>
+      <div id="home-challenge-body"><p class="pp-meta">Loading…</p></div>
     </div>
     <div class="card" style="text-align:center;margin-top:14px">
       <button class="btn btn-primary" onclick="show('setup')">Start new game →</button>
@@ -547,6 +547,12 @@
   <section id="screen-setup" class="screen">
     <div class="card">
       <h2 style="font-size:18px;margin-bottom:4px">New game</h2>
+
+      <!-- Today's Challenge -->
+      <div class="setup-section" style="border:1px solid var(--gold);border-radius:10px;padding:12px;margin-bottom:18px">
+        <div class="setup-label" style="color:var(--gold)">🎯 Today's Challenge</div>
+        <div id="challenge-card-body"><p class="pp-meta">Loading…</p></div>
+      </div>
 
       <!-- Players -->
       <div class="setup-section">
@@ -1287,9 +1293,10 @@ function show(name){
   document.getElementById('nav-players').setAttribute('aria-current', name==='players'||name==='player');
   document.getElementById('nav-settings').setAttribute('aria-current', name==='settings');
   if(name==='settings') renderSettings();
-  if(name==='home'){ renderHome(); renderChallengeCard(); }
+  if(name==='home'){ renderHome(); renderHomeChallengeTeaser(); }
   if(name==='setup'){
     setup.slots=[]; sanitizeSlots(); renderPlayers(); updateFormatLine();
+    renderChallengeCard();
     // stats are cached client-side and only refetched on demand — without this, averages
     // shown here can be stale after playing a game earlier in the same session.
     DB.refreshStats().then(()=>{ sanitizeSlots(); renderPlayers(); }).catch(()=>{});
@@ -1356,6 +1363,22 @@ let lastLegWasChallenge = false; // set true right when a challenge attempt's ca
 let sessionBadgesShown = { nightOwl:false, earlyBird:false }; // novelty badges that should fire at most once per session
 let earnedBadgeCache = {}; // playerName -> Set(badgeId), warms per game so Around the World's query can be skipped once earned
 
+// Home page: a read-only teaser (today's challenge shape only, no player tied to
+// it) — the interactive picker lives on the New Game screen instead, where picking
+// a PIN-protected player is already gated by withPinCheck(). Purely derived from
+// todaysChallenge(), so no backend round-trip and nothing to get stuck loading.
+function renderHomeChallengeTeaser(){
+  const el = document.getElementById('home-challenge-body');
+  if(!el) return;
+  const challenge = todaysChallenge();
+  el.innerHTML = `
+    <p style="margin:0;color:var(--ink);font-size:14px">${escapeHtml(challenge.label)}</p>
+    <p class="pp-meta" style="margin-top:8px">Start it from <b>New Game</b>.</p>`;
+}
+
+// New Game screen: the interactive card — player picker, streak, history, Start
+// Challenge button. Selecting a PIN-protected player here goes through the same
+// withPinCheck() gate as picking a player for a regular H2H/practice slot.
 function renderChallengeCard(){
   const el = document.getElementById('challenge-card-body');
   if(!el) return;
@@ -1385,7 +1408,7 @@ function renderChallengeCard(){
     }</div>` : '';
     el.innerHTML = `
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-        <select id="challenge-player-select" class="date-input" style="width:auto" onchange="challengePlayer=this.value;renderChallengeCard()">${playerOpts}</select>
+        <select id="challenge-player-select" class="date-input" style="width:auto" onchange="setChallengePlayer(this.value)">${playerOpts}</select>
         ${streakHtml}
       </div>
       <p style="margin:0;color:var(--ink);font-size:14px">${escapeHtml(challenge.label)}</p>
@@ -1394,22 +1417,37 @@ function renderChallengeCard(){
   }).catch(()=>{ el.innerHTML = `<p class="pp-meta">Could not load today's challenge.</p>`; });
 }
 
+// Changing who's attempting the challenge is exactly like filling an H2H/practice
+// slot with a different player — a PIN-protected player needs their PIN entered.
+function setChallengePlayer(name){
+  const prev = challengePlayer;
+  withPinCheck(name,
+    ()=>{ challengePlayer = name; renderChallengeCard(); },
+    ()=>{ const sel = document.getElementById('challenge-player-select'); if(sel) sel.value = prev || ''; }
+  );
+}
+
 function startChallengeGame(){
-  const challenge = todaysChallenge();
   if(!challengePlayer || !roster.includes(challengePlayer)) return;
-  setup.slots = [challengePlayer];
-  // Bullseye Gauntlet / Steady Hand / Treble Run don't play to zero at all — the
-  // success metric is dart-count-based, not score-based — so they get a filler
-  // start score comfortably above any realistic 9-dart total (max 9x60=540) purely
-  // so the underlying X01 engine never spuriously "busts" or "wins" mid-challenge.
-  setup.start = challenge.format==='checkout_sprint' ? challenge.target
-    : (challenge.format==='bullseye_gauntlet' || challenge.format==='steady_hand' || challenge.format==='treble_run') ? 1000
-    : 501; // speed_to_zero, long_game
-  setup.legsPerSet = 1;
-  setup.setsPerGame = 1;
-  setup.practice = true;
-  activeChallenge = { date:challenge.date, format:challenge.format, target:challenge.target, player:challengePlayer };
-  startGame();
+  // Guards the case where challengePlayer is still just the default (roster[0]),
+  // never run through setChallengePlayer()'s PIN check because the dropdown was
+  // never touched — Start Challenge must still gate on it here.
+  withPinCheck(challengePlayer, ()=>{
+    const challenge = todaysChallenge();
+    setup.slots = [challengePlayer];
+    // Bullseye Gauntlet / Steady Hand / Treble Run don't play to zero at all — the
+    // success metric is dart-count-based, not score-based — so they get a filler
+    // start score comfortably above any realistic 9-dart total (max 9x60=540) purely
+    // so the underlying X01 engine never spuriously "busts" or "wins" mid-challenge.
+    setup.start = challenge.format==='checkout_sprint' ? challenge.target
+      : (challenge.format==='bullseye_gauntlet' || challenge.format==='steady_hand' || challenge.format==='treble_run') ? 1000
+      : 501; // speed_to_zero, long_game
+    setup.legsPerSet = 1;
+    setup.setsPerGame = 1;
+    setup.practice = true;
+    activeChallenge = { date:challenge.date, format:challenge.format, target:challenge.target, player:challengePlayer };
+    startGame();
+  });
 }
 
 /* ---------- home screen ---------- */
@@ -4202,7 +4240,7 @@ function showBackendErrorScreen(){
   document.getElementById('sets-val').textContent = setup.setsPerGame;
   updateFormatLine();
   renderHome();             // populate the landing page with summary data
-  renderChallengeCard();    // populate Today's Challenge (show('home') isn't called on first load)
+  renderHomeChallengeTeaser(); // populate Today's Challenge teaser (show('home') isn't called on first load)
   pushLive();   // tell any scoreboard screens we're ready (idle until a game starts)
   await Auth.refresh();
   if(Auth.setupRequired && !localStorage.getItem('oche_wizard_dismissed')) showWizard();

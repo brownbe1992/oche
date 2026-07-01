@@ -4,7 +4,13 @@
 > end-to-end, covering every suggested-build-order step:
 > 1. Deterministic date-seeded generation (`todaysChallenge()` in `frontend/index.html`)
 >    across all six formats.
-> 2. The Home page "Today's Challenge" entry point and constrained Practice-mode launch.
+> 2. A "Today's Challenge" entry point and constrained Practice-mode launch. The
+>    interactive picker (player select, streak, history, Start Challenge) lives on
+>    the New Game screen, not the Home page — picking a PIN-protected player here
+>    goes through the same `withPinCheck()` gate as filling a normal game slot, which
+>    a Home-page picker couldn't do without duplicating that logic. The Home page
+>    keeps a read-only teaser (today's challenge shape only, no player attached, no
+>    backend call) linking to New Game.
 > 3. Result tracking + the four formats beyond the original two: Bullseye Gauntlet
 >    (most bulls in 3 visits), Steady Hand (closest to 20 per visit without going
 >    over), Treble Run (most distinct trebles in 3 visits), and The Long Game (fewest
