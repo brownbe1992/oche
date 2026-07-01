@@ -2646,7 +2646,6 @@ function finishUnit(kind, winner){
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${escapeHtml(winner)} takes the match. Stats saved.</p>
       <div class="btn-row" style="justify-content:center">
         <button class="btn btn-primary" onclick="show('setup')">New game</button>
-        <button class="btn btn-ghost" onclick="show('stats')">View stats</button>
       </div></div>`;
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
@@ -2667,7 +2666,6 @@ function finishUnit(kind, winner){
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">Stats saved.</p>
       <div class="btn-row" style="justify-content:center">
         <button class="btn btn-primary" onclick="${fn}">${next}</button>
-        <button class="btn btn-ghost" onclick="show('stats')">View stats</button>
         <button class="btn btn-ghost" onclick="askEndGame()">End game</button>
       </div>${legPanel}</div>`;
   }
