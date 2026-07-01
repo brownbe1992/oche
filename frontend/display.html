@@ -66,6 +66,7 @@
   body.layout-compact .score{font-size:clamp(64px, 20vmin, 320px)}
   body.layout-minimal .score{font-size:clamp(72px, 24vmin, 360px)}
   .dart-counts{display:flex;flex-direction:column;gap:.2vmin;margin-bottom:.6vmin}
+  .dart-counts-title{color:var(--muted);font-size:1.4vmin;text-transform:uppercase;letter-spacing:.12em;font-weight:600;margin-bottom:.3vmin}
   .dart-count-row{display:flex;align-items:baseline;gap:.8vmin;font-size:1.9vmin}
   .dart-count-val{font-family:'Bebas Neue';font-size:2.6vmin;color:var(--cream);letter-spacing:.02em;line-height:1}
   .dart-count-lbl{color:var(--muted);font-size:1.6vmin;text-transform:uppercase;letter-spacing:.07em}
@@ -318,6 +319,7 @@ const renderers = {
 
       const dartCounts = !L.showDartCounts ? '' : `
           <div class="dart-counts">
+            <div class="dart-counts-title">Darts Thrown</div>
             <div class="dart-count-row"><span class="dart-count-val">${num(p.legDarts)}</span><span class="dart-count-lbl">Leg</span></div>
             ${s.practice
               ? `<div class="dart-count-row"><span class="dart-count-val">${num(p.gameDarts)}</span><span class="dart-count-lbl">Session</span></div>`
