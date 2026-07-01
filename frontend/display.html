@@ -107,15 +107,23 @@
   .idle .ln{color:var(--muted);font-size:2.6vmin}
   .hidden{display:none!important}
 
-  /* score panel (bottom-right, H2H only) */
-  .corner{position:fixed;bottom:2.2vmin;right:2.6vmin;display:flex;flex-direction:column;gap:.7vmin;
-    background:rgba(20,22,18,.88);border:1px solid var(--wire);border-radius:1.4vmin;
-    padding:1.4vmin 2vmin;-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);min-width:16vmin;text-align:right}
-  .corner.hidden{display:none}
-  .corner-title{font-size:1.4vmin;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:600;margin-bottom:.3vmin}
-  .corner-row{display:flex;flex-direction:row-reverse;align-items:baseline;justify-content:space-between;gap:2vmin;font-size:2.1vmin}
-  .corner-row .cn{color:var(--muted);font-size:1.8vmin;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:14vmin}
-  .corner-row .cv{font-family:'Bebas Neue';font-size:3.2vmin;color:var(--cream);letter-spacing:.03em;flex:none}
+  /* match bar (sets/legs standings, H2H only) — in-flow, below the top bar, so it
+     never overlaps a player's card the way the old fixed-position corner panel did.
+     Boxed stat chips are borrowed from broadcast dart scoreboards. */
+  .matchbar{flex:none;display:flex;flex-direction:column;gap:.8vmin;
+    padding:1.2vmin 2.6vmin;background:var(--surface);border-bottom:1px solid var(--wire)}
+  .matchbar.hidden{display:none!important}
+  .mb-row{display:flex;align-items:center;gap:1.6vmin;padding-left:1vmin;border-left:.4vmin solid transparent}
+  .mb-row.active{border-left-color:var(--gold)}
+  .mb-name{font-weight:600;font-size:2.3vmin;color:var(--ink);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mb-row.active .mb-name{color:#fff}
+  .mb-turn{color:var(--gold);font-size:1.7vmin;flex:none;width:1.6vmin}
+  .mb-stats{display:flex;gap:1vmin;flex:none}
+  .mb-stat{display:flex;flex-direction:column;align-items:center;justify-content:center;
+    min-width:6.5vmin;padding:.4vmin .8vmin;border-radius:.8vmin;background:var(--surface-2);border:1px solid var(--wire)}
+  .mb-row.active .mb-stat{border-color:var(--gold)}
+  .mb-stat .v{font-family:'Bebas Neue';font-size:2.8vmin;color:var(--cream);letter-spacing:.02em;line-height:1}
+  .mb-stat .l{font-size:1.15vmin;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:600;margin-top:.2vmin}
 
   /* leg summary cards (shown between legs) */
   .sum-card{position:relative;background:var(--surface);border:1px solid var(--wire);border-radius:2vmin;
@@ -156,6 +164,8 @@
     <div class="live"><span class="dot" id="dot"></span><span id="livetext">live</span></div>
   </div>
 
+  <div class="matchbar hidden" id="matchbar"></div>
+
   <div class="co-strip hidden" id="co-strip">
     <span class="co-strip-label">Checkout</span>
     <span class="co-strip-route" id="co-strip-route"></span>
@@ -179,12 +189,6 @@
     <div class="ach-name" id="ach-name"></div>
   </div>
 
-  <!-- H2H score panel (bottom-right, hidden in practice mode) -->
-  <div class="corner hidden" id="corner-br">
-    <div class="corner-title">Score</div>
-    <div id="corner-score"></div>
-  </div>
-
 <script>
 const grid       = document.getElementById('grid');
 const idle       = document.getElementById('idle');
@@ -205,8 +209,7 @@ const coStrip    = document.getElementById('co-strip');
 const coRoute    = document.getElementById('co-strip-route');
 const coWho      = document.getElementById('co-strip-who');
 
-const cornerBR   = document.getElementById('corner-br');
-const cornerScore= document.getElementById('corner-score');
+const matchbar   = document.getElementById('matchbar');
 
 let bannerKey = '';
 let lastAchTs = 0;
@@ -220,9 +223,9 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000 };
 /* ---- layout presets ----
    Chosen by the admin in Settings (or overridden per-screen with ?layout=...
    in the URL, e.g. for a small screen that wants Compact regardless of the
-   site-wide default). Checkout suggestions, achievement flashes, and the H2H
-   corner score panel always show — they're small and are the whole point of
-   a "resource for checkouts" screen — only the denser stat rows are gated. */
+   site-wide default). Checkout suggestions, achievement flashes, and the
+   match bar always show — they're small and are the whole point of a
+   "resource for checkouts" screen — only the denser stat rows are gated. */
 const LAYOUTS = {
   full:    { showTag:true,  showDartCounts:true,  showMeta:true, showAverages:true,  showGameStats:true  },
   compact: { showTag:false, showDartCounts:false, showMeta:true, showAverages:false, showGameStats:false },
@@ -286,7 +289,7 @@ function dartClass(label){
 }
 
 /* ---- per-game-type renderers ----
-   The shell above (top bar, checkout strip, corner panel, banners, achievement
+   The shell above (top bar, match bar, checkout strip, banners, achievement
    overlays, idle state, connection handling) is game-agnostic. Only the player
    cards and the between-leg summary cards differ by game type, so each game
    type gets its own small renderer here, looked up by s.gameType. X01 is the
@@ -296,11 +299,9 @@ const renderers = {
   x01: {
     card(p, i, s, L){
       const active = i===s.currentIndex;
-      const standing = s.practice
-        ? `Leg ${num(s.legNo)}`
-        : num(s.setsPerGame)>1
-          ? `Sets ${num(p.setsWon)} · Legs ${num(p.legsWon)}`
-          : `Legs ${num(p.legsWon)}/${num(s.legsPerSet)}`;
+      // H2H standing (sets/legs) now lives in the match bar above the grid, not here —
+      // showing it twice was redundant, and the match bar's boxed chips are more legible.
+      const standing = s.practice ? `Leg ${num(s.legNo)}` : '';
       let throwbox = '';
       if(active){
         const darts = Array.isArray(s.darts) ? s.darts : [];
@@ -327,11 +328,10 @@ const renderers = {
                  <div class="dart-count-row"><span class="dart-count-val">${num(p.gameDarts)}</span><span class="dart-count-lbl">Game</span></div>`
             }
           </div>`;
-      const meta = !L.showMeta ? '' : `
-        <div class="meta">
-          ${L.showAverages ? `<span>leg <b>${p.legAvg!=null?esc(p.legAvg):'—'}</b></span><span>game <b>${p.gameAvg!=null?esc(p.gameAvg):'—'}</b></span>` : ''}
-          <span class="standing">${standing}</span>
-        </div>`;
+      const metaParts = [];
+      if(L.showAverages) metaParts.push(`<span>leg <b>${p.legAvg!=null?esc(p.legAvg):'—'}</b></span><span>game <b>${p.gameAvg!=null?esc(p.gameAvg):'—'}</b></span>`);
+      if(standing) metaParts.push(`<span class="standing">${standing}</span>`);
+      const meta = (!L.showMeta || !metaParts.length) ? '' : `<div class="meta">${metaParts.join('')}</div>`;
 
       return `<div class="pcard ${active?'active':''}">
         ${flash}
@@ -377,7 +377,7 @@ function render(s){
     fmtEl.innerHTML=''; banner.classList.remove('show'); bannerKey='';
     gameStats.classList.add('hidden');
     coStrip.classList.add('hidden'); lastCoKey='';
-    cornerBR.classList.add('hidden');
+    matchbar.classList.add('hidden');
     return;
   }
 
@@ -416,18 +416,26 @@ function render(s){
     lastCoKey = '';
   }
 
-  // H2H score panel — hidden in practice mode or solo play
-  const showScorePanel = !s.practice && s.players && s.players.length > 1;
-  if(showScorePanel){
-    cornerBR.classList.remove('hidden');
-    cornerScore.innerHTML = s.players.map(p=>{
-      const score = num(s.setsPerGame) > 1
-        ? `${num(p.setsWon)}<span style="font-size:1.6vmin;color:var(--muted)"> sets</span>`
-        : `${num(p.legsWon)}<span style="font-size:1.6vmin;color:var(--muted)">/${num(s.legsPerSet)}</span>`;
-      return `<div class="corner-row"><span class="cn">${escapeHtml(p.name)}</span><span class="cv">${score}</span></div>`;
+  // match bar — sets/legs standings, hidden in practice mode or solo play
+  const showMatchbar = !s.practice && s.players && s.players.length > 1;
+  if(showMatchbar){
+    matchbar.classList.remove('hidden');
+    const showSets = num(s.setsPerGame) > 1;
+    const showLegs = showSets || num(s.legsPerSet) > 1;
+    matchbar.innerHTML = s.players.map((p,i)=>{
+      const active = i===s.currentIndex;
+      const chips = [
+        showSets ? `<div class="mb-stat"><span class="v">${num(p.setsWon)}</span><span class="l">Sets</span></div>` : '',
+        showLegs ? `<div class="mb-stat"><span class="v">${num(p.legsWon)}${showSets?'':'/'+num(s.legsPerSet)}</span><span class="l">Legs</span></div>` : '',
+      ].join('');
+      return `<div class="mb-row ${active?'active':''}">
+        <span class="mb-turn">${active?'▸':''}</span>
+        <span class="mb-name">${escapeHtml(p.name)}</span>
+        <div class="mb-stats">${chips}</div>
+      </div>`;
     }).join('');
   } else {
-    cornerBR.classList.add('hidden');
+    matchbar.classList.add('hidden');
   }
 
   const n = s.players.length;
