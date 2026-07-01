@@ -135,6 +135,11 @@ try { db.exec('ALTER TABLE players ADD COLUMN pin_salt TEXT'); } catch(e) {}
 try { db.exec('ALTER TABLE players ADD COLUMN pin_fail_count INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
 try { db.exec('ALTER TABLE players ADD COLUMN pin_locked_until INTEGER'); } catch(e) {}
 try { db.exec('ALTER TABLE darts ADD COLUMN thrown_at TEXT'); } catch(e) {}
+// game_type/config lay the groundwork for future non-X01 game types (see
+// docs/game-modes-roadmap.md) without changing any current behavior — every game
+// created today is still 'x01', config just carries its starting score.
+try { db.exec("ALTER TABLE games ADD COLUMN game_type TEXT NOT NULL DEFAULT 'x01'"); } catch(e) {}
+try { db.exec('ALTER TABLE games ADD COLUMN config TEXT'); } catch(e) {}
 
 const DEFAULT_PIN_LOCKOUT_THRESHOLD = 10;
 
@@ -167,7 +172,7 @@ const q = {
   deleteExpiredSessions: db.prepare('DELETE FROM sessions WHERE expires_at < ?'),
   deleteSessionsForAdmin: db.prepare('DELETE FROM sessions WHERE admin_id = ?'),
 
-  insertGame   : db.prepare('INSERT INTO games (category, legs_per_set, sets_per_game, practice) VALUES (?, ?, ?, ?)'),
+  insertGame   : db.prepare('INSERT INTO games (category, legs_per_set, sets_per_game, practice, game_type, config) VALUES (?, ?, ?, ?, ?, ?)'),
   addParticipant: db.prepare('INSERT OR IGNORE INTO game_players (game_id, player_id, dart_weight, out_mode) VALUES (?, ?, ?, ?)'),
   completeGame : db.prepare("UPDATE games SET completed_at = datetime('now'), winner_id = ? WHERE id = ?"),
 
@@ -262,7 +267,11 @@ function deletePlayer(name) {
 
 /* ---------- game + turn operations ---------- */
 function createGame({ category, legsPerSet, setsPerGame, players, practice }) {
-  const info = q.insertGame.run(String(category), Number(legsPerSet) || 1, Number(setsPerGame) || 1, practice ? 1 : 0);
+  // game_type is hardcoded to 'x01' here — every game created today is X01. This
+  // just gives future game types (see docs/game-modes-roadmap.md) a column to
+  // populate instead of needing a migration bundled into that work.
+  const config = JSON.stringify({ startingScore: Number(category) || null });
+  const info = q.insertGame.run(String(category), Number(legsPerSet) || 1, Number(setsPerGame) || 1, practice ? 1 : 0, 'x01', config);
   const gameId = Number(info.lastInsertRowid);
   (players || []).forEach(entry => {
     const out = entry.out === 'single' ? 'single' : 'double';
