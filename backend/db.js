@@ -123,6 +123,35 @@ db.exec(`
     expires_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+
+  -- One-time milestone badges (docs/achievements-badges-roadmap.md). Recurring
+  -- badges (Hat Trick, So Close..., etc.) need no persistence — they just fire the
+  -- achievement overlay each time, the same way 180/Big Fish already do. This table
+  -- exists only for badges that should be awarded once and remembered.
+  CREATE TABLE IF NOT EXISTS player_badges (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    badge_id  TEXT NOT NULL,
+    earned_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(player_id, badge_id)
+  );
+
+  -- Daily Challenge attempts (docs/daily-challenge-roadmap.md). Per the games-context
+  -- convention in CLAUDE.md, a challenge attempt links into games via its own table
+  -- with a game_id FK rather than a new boolean column on games itself.
+  CREATE TABLE IF NOT EXISTS daily_challenge_attempts (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id        INTEGER NOT NULL REFERENCES games(id)   ON DELETE CASCADE,
+    player_id      INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    challenge_date TEXT NOT NULL,   -- YYYY-MM-DD, local to whoever attempted it
+    format         TEXT NOT NULL,   -- 'checkout_sprint' | 'speed_to_zero'
+    target         INTEGER,         -- checkout target for checkout_sprint; null for speed_to_zero
+    result_darts   INTEGER,         -- darts taken to complete; null if not completed
+    completed      INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(player_id, challenge_date)
+  );
+  CREATE INDEX IF NOT EXISTS idx_challenge_player_date ON daily_challenge_attempts(player_id, challenge_date);
 `);
 
 // Column migrations for tables not recreated above — safe to re-run.
@@ -160,6 +189,9 @@ const q = {
   bumpPinFail  : db.prepare('UPDATE players SET pin_fail_count = pin_fail_count + 1 WHERE id = ?'),
   lockPin      : db.prepare('UPDATE players SET pin_locked_until = ? WHERE id = ?'),
   resetPinFail : db.prepare('UPDATE players SET pin_fail_count = 0, pin_locked_until = NULL WHERE id = ?'),
+
+  awardBadge   : db.prepare('INSERT OR IGNORE INTO player_badges (player_id, badge_id) VALUES (?, ?)'),
+  playerBadges : db.prepare('SELECT badge_id, earned_at FROM player_badges WHERE player_id = ? ORDER BY earned_at DESC'),
 
   insertAdmin    : db.prepare('INSERT INTO admins (username, password_hash, password_salt) VALUES (?, ?, ?)'),
   adminByUsername: db.prepare('SELECT id, username, password_hash, password_salt, login_fail_count, login_locked_until FROM admins WHERE username = ? COLLATE NOCASE'),
@@ -314,6 +346,78 @@ function completeGame(gameId, winnerName) {
   const w = winnerName ? getPlayer(winnerName) : null;
   q.completeGame.run(w ? w.id : null, Number(gameId));
   return { ok: true };
+}
+
+/* ---------- daily challenge (docs/daily-challenge-roadmap.md) ---------- */
+// Links a just-started practice game to today's challenge attempt. One attempt per
+// player per calendar date (UNIQUE(player_id, challenge_date)) — a second attempt on
+// the same date fails quietly rather than overwriting the first, since "today's"
+// challenge is meant to be a single daily shot, not retriable.
+function startChallengeAttempt(playerName, gameId, challengeDate, format, target) {
+  const p = getPlayer(playerName);
+  if (!p) throw httpError(404, 'Player not found');
+  try {
+    db.prepare(`
+      INSERT INTO daily_challenge_attempts (game_id, player_id, challenge_date, format, target)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(Number(gameId), p.id, String(challengeDate), String(format), target != null ? Number(target) : null);
+    return { ok: true };
+  } catch (e) {
+    throw httpError(409, 'Already attempted today\'s challenge');
+  }
+}
+
+function completeChallengeAttempt(playerName, challengeDate, resultDarts) {
+  const p = getPlayer(playerName);
+  if (!p) throw httpError(404, 'Player not found');
+  db.prepare(`
+    UPDATE daily_challenge_attempts SET completed = 1, result_darts = ?
+    WHERE player_id = ? AND challenge_date = ?
+  `).run(resultDarts != null ? Number(resultDarts) : null, p.id, String(challengeDate));
+  return { ok: true };
+}
+
+// Today's attempt (if any) plus the current streak (consecutive calendar dates,
+// counting back from today, with a completed attempt — a missed or DNF day breaks it).
+function getChallengeStatus(playerName, todayDate) {
+  const p = getPlayer(playerName);
+  if (!p) return { today: null, streak: 0, history: [] };
+  const today = db.prepare(`
+    SELECT format, target, completed, result_darts FROM daily_challenge_attempts
+    WHERE player_id = ? AND challenge_date = ?
+  `).get(p.id, todayDate) || null;
+
+  const history = db.prepare(`
+    SELECT challenge_date, format, target, completed, result_darts
+    FROM daily_challenge_attempts
+    WHERE player_id = ? AND challenge_date <= ?
+    ORDER BY challenge_date DESC LIMIT 7
+  `).all(p.id, todayDate);
+
+  // Streak needs its own (much longer) lookback — the 7-row `history` above is only
+  // for the display strip and would silently cap a real streak at 7 if reused here.
+  const streakRows = db.prepare(`
+    SELECT challenge_date, completed FROM daily_challenge_attempts
+    WHERE player_id = ? AND challenge_date <= ?
+    ORDER BY challenge_date DESC LIMIT 400
+  `).all(p.id, todayDate);
+
+  // Streak: walk back day by day, stopping at the first gap or DNF. Today not
+  // having been attempted yet doesn't break a real streak on its own — the day
+  // isn't over yet — so counting starts from yesterday in that case instead.
+  const byDate = new Map(streakRows.map(h => [h.challenge_date, h]));
+  const cursor = new Date(todayDate + 'T00:00:00Z');
+  if (!today || !today.completed) cursor.setUTCDate(cursor.getUTCDate() - 1);
+  let streak = 0;
+  for (;;) {
+    const key = cursor.toISOString().slice(0, 10);
+    const row = byDate.get(key);
+    if (!row || !row.completed) break;
+    streak += 1;
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  }
+
+  return { today, streak, history };
 }
 
 /* ---------- statistics (computed with SQL) ---------- */
@@ -947,6 +1051,24 @@ function getNineDarterStats(mode) {
   return { leaderboard, recent };
 }
 
+/* ---------- badges (docs/achievements-badges-roadmap.md) ---------- */
+// Awards a one-time milestone badge. Idempotent (INSERT OR IGNORE on a unique
+// player+badge pair) — safe to call every time the underlying condition holds;
+// the return value tells the caller whether this was the first time (so the
+// achievement overlay only fires once, not on every subsequent occurrence).
+function awardBadge(playerName, badgeId) {
+  const p = getPlayer(playerName);
+  if (!p) throw httpError(404, 'Player not found');
+  const info = q.awardBadge.run(p.id, String(badgeId));
+  return { newlyEarned: info.changes > 0 };
+}
+
+function getPlayerBadges(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return [];
+  return q.playerBadges.all(p.id);
+}
+
 function getTopFinishesAll(limit = 10, mode) {
   const mf = _mf(mode);
   return db.prepare(`
@@ -1421,5 +1543,7 @@ module.exports = {
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword,
   login, logout, getSessionAdmin, adminLockoutThreshold,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,
+  awardBadge, getPlayerBadges,
+  startChallengeAttempt, completeChallengeAttempt, getChallengeStatus,
   _db: db,
 };

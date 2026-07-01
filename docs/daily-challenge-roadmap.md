@@ -1,7 +1,14 @@
 # Daily/Weekly Challenge — Design Roadmap
 
-> Status: **not started**. This is a design doc for a future release, captured so the
-> thinking isn't lost. Nothing described here exists in the app yet.
+> Status: **v1 shipped**. Built and tested end-to-end per suggested-build-order steps
+> 1, 2, 4, and 5: deterministic date-seeded generation (`todaysChallenge()` in
+> `frontend/index.html`) proven with the two simplest formats (Checkout Sprint, Speed
+> to Zero); the Home page "Today's Challenge" entry point and constrained
+> Practice-mode launch; streak tracking and the 7-day history strip
+> (`getChallengeStatus()` in `backend/db.js`); and the shareable results card
+> (`dailychallenge` moment-card type). **Not yet built** (step 3): the remaining four
+> challenge formats (Bullseye Gauntlet, Steady Hand, Treble Run, The Long Game), each
+> needing a new success-metric computation — open for a follow-on pass.
 
 ## Goal
 

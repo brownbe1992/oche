@@ -1,7 +1,15 @@
 # Expanded Achievements & Badges — Design Roadmap
 
-> Status: **not started**. This is a design doc for a future release, captured so the
-> thinking isn't lost. Nothing described here exists in the app yet.
+> Status: **v1 shipped**. Built and tested end-to-end (`frontend/index.html`'s
+> `enterTurn()`, `showAchievement()`/`ACH_LABELS` in both `index.html` and
+> `display.html`, the `player_badges` table in `backend/db.js`, and a Badge Case
+> section on the Player Profile page). Live per suggested-build-order steps 1-2: the
+> milestone mechanism (first 100+ checkout) plus all the recurring badges that need no
+> new query complexity (Hat Trick, Bullseye Gauntlet, Where'd It Go?, Ton-titled to
+> Nothing, So Close..., Night Owl/Early Bird). **Not yet built** (steps 3-6): Around the
+> Clock/Around the World, Consistency (Metronome, Cruise Control), Social/H2H (Giant
+> Slayer, Grudge Match, The Rematch), and Mental Game/Clutch (Ice in the Veins, Nerves
+> of Steel, Comeback Kid) — all still open for a follow-on pass.
 
 ## Goal
 

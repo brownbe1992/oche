@@ -510,7 +510,11 @@
 
   <!-- ============ HOME ============ -->
   <section id="screen-home" class="screen on">
-    <div class="card" style="text-align:center">
+    <div class="card">
+      <h2 style="font-size:20px;margin-bottom:12px">🎯 Today's Challenge</h2>
+      <div id="challenge-card-body"><p class="pp-meta">Loading…</p></div>
+    </div>
+    <div class="card" style="text-align:center;margin-top:14px">
       <button class="btn btn-primary" onclick="show('setup')">Start new game →</button>
     </div>
     <div class="card" style="margin-top:14px">
@@ -1283,7 +1287,7 @@ function show(name){
   document.getElementById('nav-players').setAttribute('aria-current', name==='players'||name==='player');
   document.getElementById('nav-settings').setAttribute('aria-current', name==='settings');
   if(name==='settings') renderSettings();
-  if(name==='home') renderHome();
+  if(name==='home'){ renderHome(); renderChallengeCard(); }
   if(name==='setup'){
     setup.slots=[]; sanitizeSlots(); renderPlayers(); updateFormatLine();
     // stats are cached client-side and only refetched on demand — without this, averages
@@ -1299,6 +1303,87 @@ function showLegend(backTo){
   legendBackTo = backTo || 'home';
   show('legend');
 }
+/* =========================================================================
+   DAILY CHALLENGE  (docs/daily-challenge-roadmap.md)
+   A pool of genuinely different challenge shapes, picked deterministically by
+   date (pure function, no server-side randomness) so the format itself varies
+   day to day, not just a number inside the same task shape every time.
+   ========================================================================= */
+const CHALLENGE_CHECKOUTS = [121, 96, 100, 141, 170, 40, 32, 50, 60, 80, 110, 130];
+const CHALLENGE_FORMATS = ['checkout_sprint','speed_to_zero'];
+const CHALLENGE_LABELS = {
+  checkout_sprint: (t)=>`Checkout Sprint — finish ${t} in the fewest darts`,
+  speed_to_zero:   ()=>`Speed to Zero — full 501 leg, fewest total darts`,
+};
+// Deterministic hash of a string -> a small non-negative int, used to pick an index
+// into a pool. Same date always produces the same pick — no stored state needed.
+function _seededIndex(s, mod){
+  let h = 0;
+  for(let i=0;i<s.length;i++){ h = (h*31 + s.charCodeAt(i)) | 0; }
+  return Math.abs(h) % mod;
+}
+function todaysChallenge(dateStr){
+  dateStr = dateStr || localDateStr();
+  const format = CHALLENGE_FORMATS[_seededIndex(dateStr+'|format', CHALLENGE_FORMATS.length)];
+  const target = format==='checkout_sprint' ? CHALLENGE_CHECKOUTS[_seededIndex(dateStr+'|target', CHALLENGE_CHECKOUTS.length)] : null;
+  return { date:dateStr, format, target, label: CHALLENGE_LABELS[format](target) };
+}
+
+let activeChallenge = null;   // { date, format, target, player } while a challenge attempt is in progress
+let challengePlayer = null;   // last-selected player for the challenge card
+let lastLegWasChallenge = false; // set true right when a challenge attempt's card fires, so finishUnit() knows to show its Share button
+let sessionBadgesShown = { nightOwl:false, earlyBird:false }; // novelty badges that should fire at most once per session
+
+function renderChallengeCard(){
+  const el = document.getElementById('challenge-card-body');
+  if(!el) return;
+  if(!roster.length){ el.innerHTML = `<p class="pp-meta">Add a player to try today's challenge.</p>`; return; }
+  if(!challengePlayer || !roster.includes(challengePlayer)) challengePlayer = roster[0];
+  const challenge = todaysChallenge();
+  const playerOpts = roster.map(n=>`<option value="${escapeHtml(n)}" ${n===challengePlayer?'selected':''}>${escapeHtml(n)}</option>`).join('');
+
+  el.innerHTML = `<p class="pp-meta" style="margin:0 0 10px">Loading…</p>`;
+  Backend.get(`/api/challenges/status?player=${encodeURIComponent(challengePlayer)}&date=${challenge.date}`).then(status=>{
+    const streakHtml = status.streak > 0 ? `<span style="color:var(--gold);font-weight:600">🔥 ${status.streak} day streak</span>` : '';
+    let resultHtml;
+    if(status.today && status.today.completed){
+      resultHtml = `<div style="margin-top:10px;color:var(--ink)">✅ Done — ${status.today.result_darts} darts. Nice work.</div>`;
+    } else if(status.today){
+      resultHtml = `<div style="margin-top:10px;color:var(--muted)">Attempted today, not finished.</div>`;
+    } else {
+      resultHtml = `<button class="btn btn-primary" style="margin-top:10px" onclick="startChallengeGame()">Start Challenge</button>`;
+    }
+    // Last 7 days strip — gives the streak somewhere visible to live, not just a number
+    const historyHtml = status.history.length ? `<div style="display:flex;gap:6px;margin-top:12px">${
+      status.history.slice().reverse().map(h=>{
+        const day = new Date(h.challenge_date+'T00:00:00Z').toLocaleDateString(undefined,{weekday:'short'})[0];
+        const cls = h.completed ? 'background:var(--gold);color:var(--board)' : 'background:var(--surface-2);color:var(--muted)';
+        return `<div title="${h.challenge_date}${h.completed?' — '+h.result_darts+' darts':' — not finished'}" style="width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;${cls}">${day}</div>`;
+      }).join('')
+    }</div>` : '';
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+        <select id="challenge-player-select" class="date-input" style="width:auto" onchange="challengePlayer=this.value;renderChallengeCard()">${playerOpts}</select>
+        ${streakHtml}
+      </div>
+      <p style="margin:0;color:var(--ink);font-size:14px">${escapeHtml(challenge.label)}</p>
+      ${resultHtml}
+      ${historyHtml}`;
+  }).catch(()=>{ el.innerHTML = `<p class="pp-meta">Could not load today's challenge.</p>`; });
+}
+
+function startChallengeGame(){
+  const challenge = todaysChallenge();
+  if(!challengePlayer || !roster.includes(challengePlayer)) return;
+  setup.slots = [challengePlayer];
+  setup.start = challenge.format==='checkout_sprint' ? challenge.target : 501;
+  setup.legsPerSet = 1;
+  setup.setsPerGame = 1;
+  setup.practice = true;
+  activeChallenge = { date:challenge.date, format:challenge.format, target:challenge.target, player:challengePlayer };
+  startGame();
+}
+
 /* ---------- home screen ---------- */
 let homeTab='h2h';
 let homeData=null;
@@ -2064,7 +2149,13 @@ async function startGame(){
     legStart: null         // one-shot: a new leg just began, who's throwing first (voice announcements)
   };
   names.forEach(ensurePlayerStats);
+  sessionBadgesShown = { nightOwl:false, earlyBird:false };
   await DB.beginGame(game, names);   // registers the game; gets a gameId in api mode
+  if(activeChallenge && DB.gameId != null){
+    Backend.send('POST','/api/challenges/start', { player:activeChallenge.player, gameId:DB.gameId,
+      challengeDate:activeChallenge.date, format:activeChallenge.format, target:activeChallenge.target })
+      .catch(()=>{ activeChallenge = null; }); // couldn't register (e.g. already attempted today) — don't treat this game as a challenge
+  }
   DB.recordEvent('game_start', null, null);
   DB.recordEvent('set_start', 1, null);
   DB.recordEvent('leg_start', 1, 1);
@@ -2200,7 +2291,7 @@ let currentPlayer = null;
 let playerPageTab = 'overall';
 let showMoreStats = false;
 let playerSettingsUnlocked = false;
-function localDateStr(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function localDateStr(d){ d = d || new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function setPlayerDartWeight(name, value){
   const weight = value ? Number(value) : null;
   if(stats[name]) stats[name].dartWeight = weight;
@@ -2270,6 +2361,10 @@ function renderPlayerPage(){
     <div class="pp-section">
       <div class="pp-section-title">Personal Bests</div>
       <div id="player-personal-bests"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </div>
+    <div class="pp-section">
+      <div class="pp-section-title">Badge Case</div>
+      <div id="player-badges"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </div>
     <details class="pp-section">
       <summary class="pp-section-title">Top Checkouts</summary>
@@ -2379,6 +2474,40 @@ function renderPlayerPage(){
   loadTopFinishes();
   loadDartAnalytics();
   loadPersonalBests();
+  loadPlayerBadges();
+}
+// Milestone badges only — recurring celebrations (Hat Trick, Night Owl, etc.) fire live
+// during play but aren't persisted, so they don't appear in the Badge Case.
+const BADGE_INFO = {
+  first_100_checkout: { icon:'🥇', label:'First 100+ Checkout', achType:'first100checkout' },
+};
+function loadPlayerBadges(){
+  const container=document.getElementById('player-badges');
+  if(!container) return;
+  Backend.get(`/api/players/badges?name=${encodeURIComponent(currentPlayer)}`)
+    .then(data=>renderPlayerBadges(data))
+    .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load badges.</p>`; });
+}
+function renderPlayerBadges(data){
+  const container=document.getElementById('player-badges');
+  if(!container) return;
+  const earned = new Map((data||[]).map(b=>[b.badge_id, b.earned_at]));
+  container.innerHTML = `<div class="summary-grid">${Object.keys(BADGE_INFO).map(id=>{
+    const info = BADGE_INFO[id];
+    const earnedAt = earned.get(id);
+    if(earnedAt){
+      const date = new Date(earnedAt.replace(' ','T')+'Z').toLocaleDateString();
+      return `<div class="stat-block"><div class="stat-val">${info.icon}</div><div class="stat-label">${info.label}<br>Earned ${date}</div>
+        <button class="iconbtn" title="Share" style="margin-top:4px" onclick="shareEarnedBadge('${id}')">📤</button></div>`;
+    }
+    return `<div class="stat-block" style="opacity:.4"><div class="stat-val">${info.icon}</div><div class="stat-label">${info.label}<br>Not yet earned</div></div>`;
+  }).join('')}</div>`;
+}
+async function shareEarnedBadge(badgeId){
+  const info = BADGE_INFO[badgeId];
+  if(!info) return;
+  const canvas = await buildMomentCard({ icon:info.icon, headline:info.label.toUpperCase(), player:currentPlayer });
+  shareOrSaveCanvas(canvas, `oche-${badgeId}-${Date.now()}.${MOMENT_CARD_EXT}`, `${currentPlayer} — ${info.label}`, 'Shared from Oche');
 }
 function loadPersonalBests(){
   const container=document.getElementById('player-personal-bests');
@@ -2509,8 +2638,13 @@ function updateCheckout(flash){
 const achOverlayEl = document.getElementById('ach-overlay');
 const achTextEl    = document.getElementById('ach-text');
 const achNameEl    = document.getElementById('ach-name');
-const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter':'🏆 NINE-DARTER! 🏆' };
-const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000 };
+const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter':'🏆 NINE-DARTER! 🏆',
+  hattrick:'Hat Trick! 🎩', bullseyegauntlet:'Bullseye Gauntlet! 🔴', wherediditgo:"Where'd It Go? 💨",
+  socloseshot:'So Close... 😩', tontitled:'Ton-titled to Nothing 😅', nightowl:'Night Owl 🦉',
+  earlybird:'Early Bird 🐦', first100checkout:'First 100+ Checkout! 🥇' };
+const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
+  hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
+  tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000 };
 let achTimer = null;
 
 function spawnConfetti(root, count){
@@ -2808,7 +2942,7 @@ function askEndGame(){
   const msg = (game && game.practice)
     ? 'Are you sure you want to end this practice session? Your stats have been saved.'
     : 'Abandon this match early? Recorded stats are kept.';
-  uiConfirm(msg, ()=>show('setup'));
+  uiConfirm(msg, ()=>{ activeChallenge = null; show('setup'); });
 }
 
 function undoLastTurn(){
@@ -2927,6 +3061,50 @@ function enterTurn(){
     sendHaWebhook('tonplus', p.name, game.category, { score: ev.pointsThisVisit });
   }
 
+  // Expanded achievements/badges (docs/achievements-badges-roadmap.md) — recurring,
+  // no persistence needed, same pattern as 180/Big Fish/nine-darter above. Each
+  // condition is written to be mutually exclusive with 180 (so a genuine 180 never
+  // also fires Hat Trick or So Close...).
+  const _d = game.darts;
+  if(_d.length===3 && _d.every(d=>d.isTreble) && ev.scored !== 180){
+    showAchievement('hattrick', p.name);
+    fireMomentCard('hattrick', { icon:'🎩', headline:'HAT TRICK!', player:p.name, statLine:'Three trebles, one visit' });
+  } else if(_d.filter(d=>d.sector===25 && d.mult===2).length >= 2){
+    showAchievement('bullseyegauntlet', p.name);
+    fireMomentCard('bullseyegauntlet', { icon:'🔴', headline:'BULLSEYE GAUNTLET!', player:p.name, statLine:'Double bull, twice in one visit' });
+  } else if(_d.length===3 && _d.every(d=>d.sector===0)){
+    showAchievement('wherediditgo', p.name);
+    fireMomentCard('wherediditgo', { icon:'💨', headline:"WHERE'D IT GO?", player:p.name, statLine:'Three misses' });
+  } else if(_d.length===3 && _d[0].sector===20 && _d[0].mult===3 && _d[1].sector===20 && _d[1].mult===3 && _d[2].sector===20 && _d[2].mult===1){
+    showAchievement('socloseshot', p.name);
+    fireMomentCard('socloseshot', { icon:'😩', headline:'SO CLOSE...', player:p.name, statLine:'140 — one dart from 180' });
+  } else if(ev.bust && _d.reduce((s,d)=>s+d.value,0) >= 100){
+    showAchievement('tontitled', p.name);
+    fireMomentCard('tontitled', { icon:'😅', headline:'TON-TITLED TO NOTHING', player:p.name, statLine:'100+ attempted, still busted' });
+  }
+  // Novelty time-of-day badges — once per session (not once per turn, which would
+  // spam the same celebration all night), reset when a new game starts.
+  const _hour = new Date().getHours();
+  if(!sessionBadgesShown.nightOwl && _hour < 5){
+    sessionBadgesShown.nightOwl = true;
+    showAchievement('nightowl', p.name);
+    fireMomentCard('nightowl', { icon:'🦉', headline:'NIGHT OWL', player:p.name, statLine:'Darts after midnight' });
+  } else if(!sessionBadgesShown.earlyBird && _hour >= 5 && _hour < 7){
+    sessionBadgesShown.earlyBird = true;
+    showAchievement('earlybird', p.name);
+    fireMomentCard('earlybird', { icon:'🐦', headline:'EARLY BIRD', player:p.name, statLine:'Darts before 7am' });
+  }
+  // First 100+ checkout — a one-time milestone (persisted server-side so the
+  // celebration fires exactly once, ever, not every time it happens again).
+  if(ev.win && ev.pointsThisVisit >= 100){
+    Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'first_100_checkout' }).then(r=>{
+      if(r && r.newlyEarned){
+        showAchievement('first100checkout', p.name);
+        fireMomentCard('first100checkout', { icon:'🥇', headline:'FIRST 100+ CHECKOUT', player:p.name, statLine:`${ev.pointsThisVisit} checkout` });
+      }
+    }).catch(()=>{});
+  }
+
   // record turn for practice session stats display
   { const _t = { scored:ev.scored, trebleLess:!!ev.trebleLess, bust:!!ev.bust,
       checkout:!!ev.win, checkoutPoints:ev.win?ev.pointsThisVisit:null, darts:game.darts.length };
@@ -2991,6 +3169,15 @@ function onLegWon(wi){
   sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
   DB.recordEvent('leg_end', game.setNo, game.legNo);
   persist();
+  lastLegWasChallenge = false;
+  if(activeChallenge && activeChallenge.player === w.name){
+    Backend.send('POST','/api/challenges/complete',
+      { player:activeChallenge.player, challengeDate:activeChallenge.date, resultDarts:w.legDarts }).catch(()=>{});
+    fireMomentCard('dailychallenge', { icon:'📅', headline:'CHALLENGE COMPLETE!', player:w.name,
+      statLine: `${activeChallenge.format==='checkout_sprint' ? 'Checkout '+activeChallenge.target : 'Speed to Zero'} — ${w.legDarts} darts` });
+    lastLegWasChallenge = true;
+    activeChallenge = null;
+  }
   game.matchResult = { ts: Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:_bigFish };
   finishUnit('leg', w.name);
 }
@@ -3093,12 +3280,15 @@ function finishUnit(kind, winner){
           ${pracStatsHtml(game.sessionTurns||[])}
         </div>
       </div>` : h2hStatsHtml(winner);
+    const challengeShareBtn = lastLegWasChallenge
+      ? `<button class="btn btn-ghost" onclick="shareMomentCard('dailychallenge')">📤 Share</button>` : '';
     oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
       <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">${kind==='set'?'SET COMPLETE':'LEG COMPLETE'}</div>
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">Stats saved.</p>
       <div class="btn-row" style="justify-content:center">
         <button class="btn btn-primary" onclick="${fn}">${next}</button>
         <button class="btn btn-ghost" onclick="askEndGame()">End game</button>
+        ${challengeShareBtn}
       </div>${legPanel}</div>`;
   }
   game.legSummary = game.players.map(p=>({

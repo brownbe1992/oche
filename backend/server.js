@@ -37,6 +37,12 @@
        GET  /api/settings/voice-announcements -> { enabled, turnScore, noScore, checkoutReq, oneEighty, bigFish, matchProgress } (public)
        GET  /api/settings/card-tagline      -> { tagline } (public)
 
+       POST /api/badges/award      -> { player, badgeId } -> { newlyEarned } (public)
+       GET  /api/players/badges    -> (?name=...) -> [ { badgeId, earnedAt } ] (public)
+       POST /api/challenges/start  -> { player, gameId, challengeDate, format, target } (public)
+       POST /api/challenges/complete -> { player, challengeDate, resultDarts } (public)
+       GET  /api/challenges/status -> (?player=...&date=YYYY-MM-DD) -> { today, streak, history } (public)
+
    Routes marked [admin] require a logged-in admin session (cookie set by /api/login).
    Set COOKIE_SECURE=true when serving over HTTPS (e.g. behind a reverse proxy) so the
    session cookie gets the Secure flag; leave unset for plain-HTTP LAN deployments.
@@ -386,6 +392,28 @@ const server = http.createServer(async (req, res) => {
     if ((mt = p.match(/^\/api\/games\/(\d+)\/events$/)) && m === 'POST') {
       const b = await readJson(req);
       return send(res, 200, db.recordEvent(Number(mt[1]), b.type, b.setNo ?? null, b.legNo ?? null));
+    }
+
+    // ----- badges (docs/achievements-badges-roadmap.md) -----
+    if (p === '/api/badges/award' && m === 'POST') {
+      const b = await readJson(req);
+      return send(res, 200, db.awardBadge(b.player, b.badgeId));
+    }
+    if (p === '/api/players/badges' && m === 'GET') {
+      return send(res, 200, db.getPlayerBadges(url.searchParams.get('name')));
+    }
+
+    // ----- daily challenge (docs/daily-challenge-roadmap.md) -----
+    if (p === '/api/challenges/start' && m === 'POST') {
+      const b = await readJson(req);
+      return send(res, 200, db.startChallengeAttempt(b.player, b.gameId, b.challengeDate, b.format, b.target));
+    }
+    if (p === '/api/challenges/complete' && m === 'POST') {
+      const b = await readJson(req);
+      return send(res, 200, db.completeChallengeAttempt(b.player, b.challengeDate, b.resultDarts));
+    }
+    if (p === '/api/challenges/status' && m === 'GET') {
+      return send(res, 200, db.getChallengeStatus(url.searchParams.get('player'), url.searchParams.get('date')));
     }
 
     return send(res, 404, { error: 'Unknown endpoint' });
