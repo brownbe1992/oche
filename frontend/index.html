@@ -722,6 +722,28 @@
         </div>
       </div>
 
+      <!-- Live Scoreboard -->
+      <div class="pp-section" style="margin-bottom:24px">
+        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('scoreboard-body',this)">
+          Live Scoreboard
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="scoreboard-body" hidden>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+            Controls what the read-only scoreboard (the "Scoreboard ↗" link, meant for a second screen or TV by the board) shows. Pick the density that fits the screen it'll run on — each layout still scales to fill the screen.
+          </p>
+          <label class="field">Layout</label>
+          <select class="date-input" id="scoreboard-layout" style="width:auto;margin-bottom:6px">
+            <option value="full">Full — everything: dart counts, leg/game averages, 180s/Big Fish/busts</option>
+            <option value="compact">Compact — score, checkout, and standing only</option>
+            <option value="minimal">Minimal — just the score and whose turn it is</option>
+          </select>
+          <p style="font-size:12px;color:var(--muted);margin:6px 0 0;line-height:1.6">
+            Checkout suggestions, achievement flashes, and the H2H score panel always show, regardless of layout.
+          </p>
+        </div>
+      </div>
+
       <!-- Smart Home Integration -->
       <div class="pp-section" id="smart-home-section">
         <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('smart-home-body',this)">
@@ -1484,6 +1506,8 @@ async function renderSettings(){
     if(lockoutEl) lockoutEl.value = cfg.pin_lockout_threshold || 10;
     const dtEl = document.getElementById('collect-dart-timing');
     if(dtEl) dtEl.checked = cfg.collect_dart_timing === '1';
+    const sbEl = document.getElementById('scoreboard-layout');
+    if(sbEl) sbEl.value = ['full','compact','minimal'].includes(cfg.scoreboard_layout) ? cfg.scoreboard_layout : 'full';
   }).catch(err=>{ const s=document.getElementById('settings-error'); if(s){ s.textContent='Could not load settings: '+err.message; s.hidden=false; } });
 }
 
@@ -1600,6 +1624,7 @@ function saveSettings(){
     ha_webhook_setend:       v('ha-wh-setend'),
     pin_lockout_threshold:   Number(v('pin-lockout-threshold')) || 10,
     collect_dart_timing:     (document.getElementById('collect-dart-timing')||{}).checked ? '1' : '0',
+    scoreboard_layout:       v('scoreboard-layout') || 'full',
   }).then(()=>{
     if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
     dartTimingEnabled = (document.getElementById('collect-dart-timing')||{}).checked || false;
@@ -2341,6 +2366,7 @@ function liveSnapshot(message){
   const checkout = (startedOn && rem>0 && dartsLeft>0) ? checkoutHint(rem, dbl, dartsLeft) : '';
   return {
     active:true,
+    gameType:'x01',
     category:game.category, legsPerSet:game.legsPerSet, setsPerGame:game.setsPerGame,
     setNo:game.setNo, legNo:game.legNo, currentIndex:game.current,
     players: game.players.map(p=>({

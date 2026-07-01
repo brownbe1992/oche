@@ -1119,6 +1119,13 @@ function getDartTimingEnabled() {
   const row = db.prepare("SELECT value FROM settings WHERE key = 'collect_dart_timing'").get();
   return { enabled: row ? row.value === '1' : false };
 }
+// Public (no-auth) read of the scoreboard layout preset — the /display screen
+// isn't logged in as admin, it just needs to know which layout to render.
+function getScoreboardLayout() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'scoreboard_layout'").get();
+  const layout = row ? row.value : 'full';
+  return { layout: ['full','compact','minimal'].includes(layout) ? layout : 'full' };
+}
 
 /* ---------- admin accounts + sessions ---------- */
 function isSetupRequired() {
@@ -1337,7 +1344,7 @@ module.exports = {
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn,
   getCheckoutRoutes, getDartAnalytics,
-  getSettings, updateSettings, getDartTimingEnabled, fireHaWebhook,
+  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, fireHaWebhook,
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword,
   login, logout, getSessionAdmin,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,

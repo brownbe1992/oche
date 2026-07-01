@@ -49,7 +49,7 @@
   .co-strip-route{font-family:'Bebas Neue';font-size:5.5vmin;line-height:.85;color:var(--cream);letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
   .co-strip-who{font-size:1.8vmin;color:var(--muted);flex:none;white-space:nowrap}
   @keyframes costrip-flash{0%{background:rgba(217,180,106,.35)}100%{background:rgba(217,180,106,.15)}}
-  .co-strip.flash{animation:costrip-flash .6s ease-out}
+  .co-strip.flashpulse{animation:costrip-flash .6s ease-out}
 
   /* ---- player grid ---- */
   .grid{flex:1;display:grid;gap:2vmin;padding:2vmin 0;min-height:0}
@@ -62,6 +62,9 @@
   .throwflag{margin-left:auto;font-size:1.7vmin;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);flex:none}
   .score{font-family:'Bebas Neue';font-size:clamp(56px, 17vmin, 280px);line-height:.78;color:var(--cream);letter-spacing:.01em;margin:.4vmin 0 .2vmin}
   .pcard.active .score{color:#fff}
+  /* Compact/Minimal free up card space by dropping rows below — let the score grow into it */
+  body.layout-compact .score{font-size:clamp(64px, 20vmin, 320px)}
+  body.layout-minimal .score{font-size:clamp(72px, 24vmin, 360px)}
   .dart-counts{display:flex;flex-direction:column;gap:.2vmin;margin-bottom:.6vmin}
   .dart-count-row{display:flex;align-items:baseline;gap:.8vmin;font-size:1.9vmin}
   .dart-count-val{font-family:'Bebas Neue';font-size:2.6vmin;color:var(--cream);letter-spacing:.02em;line-height:1}
@@ -213,6 +216,30 @@ let achTimer = null;
 const ACH_LABELS  = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter':'🏆 NINE-DARTER! 🏆' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000 };
 
+/* ---- layout presets ----
+   Chosen by the admin in Settings (or overridden per-screen with ?layout=...
+   in the URL, e.g. for a small screen that wants Compact regardless of the
+   site-wide default). Checkout suggestions, achievement flashes, and the H2H
+   corner score panel always show — they're small and are the whole point of
+   a "resource for checkouts" screen — only the denser stat rows are gated. */
+const LAYOUTS = {
+  full:    { showTag:true,  showDartCounts:true,  showMeta:true, showAverages:true,  showGameStats:true  },
+  compact: { showTag:false, showDartCounts:false, showMeta:true, showAverages:false, showGameStats:false },
+  minimal: { showTag:false, showDartCounts:false, showMeta:false,showAverages:false, showGameStats:false },
+};
+const layoutParam = new URLSearchParams(location.search).get('layout');
+let layout = LAYOUTS[layoutParam] ? layoutParam : 'full';
+document.body.classList.add('layout-'+layout);
+if(!LAYOUTS[layoutParam]){
+  fetch('/api/settings/scoreboard-layout', {cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{
+    if(s && LAYOUTS[s.layout] && s.layout !== layout){
+      document.body.classList.remove('layout-'+layout);
+      layout = s.layout;
+      document.body.classList.add('layout-'+layout);
+    }
+  }).catch(()=>{});
+}
+
 function spawnConfetti(root, count){
   const colors=['#d9b46a','#efe7d2','#f4e3b2','#caa94e'];
   for(let i=0;i<count;i++){
@@ -257,6 +284,91 @@ function dartClass(label){
   return '';
 }
 
+/* ---- per-game-type renderers ----
+   The shell above (top bar, checkout strip, corner panel, banners, achievement
+   overlays, idle state, connection handling) is game-agnostic. Only the player
+   cards and the between-leg summary cards differ by game type, so each game
+   type gets its own small renderer here, looked up by s.gameType. X01 is the
+   only one today; a future Cricket renderer (marks/closed numbers instead of
+   score/checkout) plugs in the same way without touching this one. */
+const renderers = {
+  x01: {
+    card(p, i, s, L){
+      const active = i===s.currentIndex;
+      const standing = s.practice
+        ? `Leg ${num(s.legNo)}`
+        : num(s.setsPerGame)>1
+          ? `Sets ${num(p.setsWon)} · Legs ${num(p.legsWon)}`
+          : `Legs ${num(p.legsWon)}/${num(s.legsPerSet)}`;
+      let throwbox = '';
+      if(active){
+        const darts = Array.isArray(s.darts) ? s.darts : [];
+        const slots = [0,1,2].map(k=>{
+          const lab = darts[k];
+          return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
+        }).join('');
+        const co = s.checkout
+          ? `<div class="checkout"><span class="lab">Checkout</span><span class="route">${esc(s.checkout).replace(/ /g,'  →  ')}</span></div>`
+          : '';
+        throwbox = `<div class="throwbox"><div class="darts">${slots}</div>${co}</div>`;
+      }
+      let flash = '';
+      if(active && s.status==='bust') flash = `<div class="flash bust">BUST</div>`;
+      if(active && s.status==='won')  flash = `<div class="flash shot">GAME SHOT</div>`;
+
+      const dartCounts = !L.showDartCounts ? '' : `
+          <div class="dart-counts">
+            <div class="dart-count-row"><span class="dart-count-val">${num(p.legDarts)}</span><span class="dart-count-lbl">Leg</span></div>
+            ${s.practice
+              ? `<div class="dart-count-row"><span class="dart-count-val">${num(p.gameDarts)}</span><span class="dart-count-lbl">Session</span></div>`
+              : `<div class="dart-count-row"><span class="dart-count-val">${num(p.setDarts)}</span><span class="dart-count-lbl">Set</span></div>
+                 <div class="dart-count-row"><span class="dart-count-val">${num(p.gameDarts)}</span><span class="dart-count-lbl">Game</span></div>`
+            }
+          </div>`;
+      const meta = !L.showMeta ? '' : `
+        <div class="meta">
+          ${L.showAverages ? `<span>leg <b>${p.legAvg!=null?esc(p.legAvg):'—'}</b></span><span>game <b>${p.gameAvg!=null?esc(p.gameAvg):'—'}</b></span>` : ''}
+          <span class="standing">${standing}</span>
+        </div>`;
+
+      return `<div class="pcard ${active?'active':''}">
+        ${flash}
+        <div>
+          <div class="prow1">
+            <span class="pname">${escapeHtml(p.name)}</span>
+            ${L.showTag ? `<span class="ptag">${p.out==='double'?'DOUBLE OUT':'SINGLE OUT'}</span>` : ''}
+            ${active?'<span class="throwflag">▸ throwing</span>':''}
+          </div>
+          <div class="score">${num(p.score)}</div>
+          ${dartCounts}
+        </div>
+        ${meta}
+        ${throwbox}
+      </div>`;
+    },
+    summary(p){
+      return `
+      <div class="sum-card ${p.won?'winner':''}">
+        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}</div>
+        <div class="sum-stats">
+          <div class="sum-stat">
+            <div class="sv">${p.avg!=null?esc(p.avg):'—'}</div>
+            <div class="sl">Average</div>
+          </div>
+          <div class="sum-stat">
+            <div class="sv">${num(p.darts)}</div>
+            <div class="sl">Darts</div>
+          </div>
+          <div class="sum-stat">
+            <div class="sv">${num(p.busts)}</div>
+            <div class="sl">Busts</div>
+          </div>
+        </div>
+      </div>`;
+    }
+  }
+};
+
 function render(s){
   if(!s || !s.active){
     grid.classList.add('hidden'); idle.classList.remove('hidden');
@@ -271,11 +383,18 @@ function render(s){
   if(!Array.isArray(s.players)) s.players = [];   // tolerate malformed snapshots
   fmtEl.innerHTML = fmtText(s);
 
-  // 180s + Big Fish in top bar
-  gameStats.classList.remove('hidden');
-  stat180s.textContent  = s.gameOneEighties ?? 0;
-  statBF.textContent    = s.gameBigFish     ?? 0;
-  statBusts.textContent = s.gameBusts       ?? 0;
+  const renderer = renderers[s.gameType] || renderers.x01;
+  const L = LAYOUTS[layout] || LAYOUTS.full;
+
+  // 180s + Big Fish in top bar (Full layout only — secondary info on Compact/Minimal)
+  if(L.showGameStats){
+    gameStats.classList.remove('hidden');
+    stat180s.textContent  = s.gameOneEighties ?? 0;
+    statBF.textContent    = s.gameBigFish     ?? 0;
+    statBusts.textContent = s.gameBusts       ?? 0;
+  } else {
+    gameStats.classList.add('hidden');
+  }
 
   // checkout strip — show when player is on a finish
   // s.checkout is already '' when bust/won/no-finish, so no status check needed
@@ -287,7 +406,7 @@ function render(s){
       lastCoKey = route;
       coRoute.textContent = route;
       coWho.textContent   = thrower ? thrower.name + ' at the oche' : '';
-      coStrip.classList.remove('flash'); void coStrip.offsetWidth; coStrip.classList.add('flash');
+      coStrip.classList.remove('flashpulse'); void coStrip.offsetWidth; coStrip.classList.add('flashpulse');
     }
     coStrip.classList.remove('hidden');
   } else {
@@ -314,73 +433,9 @@ function render(s){
   grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
 
   if(s.legSummary){
-    grid.innerHTML = s.legSummary.map(p=>`
-      <div class="sum-card ${p.won?'winner':''}">
-        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}</div>
-        <div class="sum-stats">
-          <div class="sum-stat">
-            <div class="sv">${p.avg!=null?esc(p.avg):'—'}</div>
-            <div class="sl">Average</div>
-          </div>
-          <div class="sum-stat">
-            <div class="sv">${num(p.darts)}</div>
-            <div class="sl">Darts</div>
-          </div>
-          <div class="sum-stat">
-            <div class="sv">${num(p.busts)}</div>
-            <div class="sl">Busts</div>
-          </div>
-        </div>
-      </div>`).join('');
+    grid.innerHTML = s.legSummary.map(p=>renderer.summary(p, L)).join('');
   } else {
-    grid.innerHTML = s.players.map((p,i)=>{
-      const active = i===s.currentIndex;
-      const standing = s.practice
-        ? `Leg ${num(s.legNo)}`
-        : num(s.setsPerGame)>1
-          ? `Sets ${num(p.setsWon)} · Legs ${num(p.legsWon)}`
-          : `Legs ${num(p.legsWon)}/${num(s.legsPerSet)}`;
-      let throwbox = '';
-      if(active){
-        const darts = Array.isArray(s.darts) ? s.darts : [];
-        const slots = [0,1,2].map(k=>{
-          const lab = darts[k];
-          return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
-        }).join('');
-        const co = s.checkout
-          ? `<div class="checkout"><span class="lab">Checkout</span><span class="route">${esc(s.checkout).replace(/ /g,'  →  ')}</span></div>`
-          : '';
-        throwbox = `<div class="throwbox"><div class="darts">${slots}</div>${co}</div>`;
-      }
-      let flash = '';
-      if(active && s.status==='bust') flash = `<div class="flash bust">BUST</div>`;
-      if(active && s.status==='won')  flash = `<div class="flash shot">GAME SHOT</div>`;
-      return `<div class="pcard ${active?'active':''}">
-        ${flash}
-        <div>
-          <div class="prow1">
-            <span class="pname">${escapeHtml(p.name)}</span>
-            <span class="ptag">${p.out==='double'?'DOUBLE OUT':'SINGLE OUT'}</span>
-            ${active?'<span class="throwflag">▸ throwing</span>':''}
-          </div>
-          <div class="score">${num(p.score)}</div>
-          <div class="dart-counts">
-            <div class="dart-count-row"><span class="dart-count-val">${num(p.legDarts)}</span><span class="dart-count-lbl">Leg</span></div>
-            ${s.practice
-              ? `<div class="dart-count-row"><span class="dart-count-val">${num(p.gameDarts)}</span><span class="dart-count-lbl">Session</span></div>`
-              : `<div class="dart-count-row"><span class="dart-count-val">${num(p.setDarts)}</span><span class="dart-count-lbl">Set</span></div>
-                 <div class="dart-count-row"><span class="dart-count-val">${num(p.gameDarts)}</span><span class="dart-count-lbl">Game</span></div>`
-            }
-          </div>
-        </div>
-        <div class="meta">
-          <span>leg <b>${p.legAvg!=null?esc(p.legAvg):'—'}</b></span>
-          <span>game <b>${p.gameAvg!=null?esc(p.gameAvg):'—'}</b></span>
-          <span class="standing">${standing}</span>
-        </div>
-        ${throwbox}
-      </div>`;
-    }).join('');
+    grid.innerHTML = s.players.map((p,i)=>renderer.card(p, i, s, L)).join('');
   }
 
   // achievement flashes (180, Big Fish, nine-darter)

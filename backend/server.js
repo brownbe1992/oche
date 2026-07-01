@@ -31,6 +31,7 @@
        POST /api/players/verify-pin-> { name, pin } -> verify a player's PIN (public)
        PUT  /api/players/pin       -> set/reset a player's PIN  { name, pin }    [admin]
        DEL  /api/players/pin       -> remove a player's PIN (?name=...)         [admin]
+       GET  /api/settings/scoreboard-layout -> { layout: 'full'|'compact'|'minimal' } (public)
 
    Routes marked [admin] require a logged-in admin session (cookie set by /api/login).
    Set COOKIE_SECURE=true when serving over HTTPS (e.g. behind a reverse proxy) so the
@@ -274,6 +275,9 @@ const server = http.createServer(async (req, res) => {
     // Public (no-auth) read of just the dart-timing flag — every device running the
     // scorer needs this during gameplay, not just an admin's browser.
     if (p === '/api/settings/dart-timing' && m === 'GET') { return send(res, 200, db.getDartTimingEnabled()); }
+    // Public (no-auth) read of the scoreboard layout — the /display screen isn't
+    // logged in as admin, it just needs to know which preset to render.
+    if (p === '/api/settings/scoreboard-layout' && m === 'GET') { return send(res, 200, db.getScoreboardLayout()); }
     if (p === '/api/settings' && m === 'PUT') {
       if (!requireAdmin(req, res)) return;
       const b = await readJson(req);
@@ -281,13 +285,16 @@ const server = http.createServer(async (req, res) => {
       const allowed = ['ha_url',
         'ha_webhook_oneeighty','ha_webhook_bigfish','ha_webhook_bust','ha_webhook_ninedarter','ha_webhook_tonplus',
         'ha_webhook_gamestart','ha_webhook_gameend','ha_webhook_setstart','ha_webhook_setend',
-        'ha_webhook_legstart','ha_webhook_legend','pin_lockout_threshold','collect_dart_timing'];
+        'ha_webhook_legstart','ha_webhook_legend','pin_lockout_threshold','collect_dart_timing','scoreboard_layout'];
       const safe = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
       if ('pin_lockout_threshold' in safe) {
         const n = Number(safe.pin_lockout_threshold);
         if (!Number.isInteger(n) || n < 1 || n > 1000) return send(res, 400, { error: 'pin_lockout_threshold must be an integer between 1 and 1000' });
       }
       if ('collect_dart_timing' in safe) safe.collect_dart_timing = (safe.collect_dart_timing === '1' || safe.collect_dart_timing === true) ? '1' : '0';
+      if ('scoreboard_layout' in safe && !['full','compact','minimal'].includes(safe.scoreboard_layout)) {
+        return send(res, 400, { error: 'scoreboard_layout must be one of: full, compact, minimal' });
+      }
       return send(res, 200, db.updateSettings(safe));
     }
     if (p === '/api/ha-test' && m === 'POST') {
