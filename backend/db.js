@@ -1157,6 +1157,14 @@ function getVoiceAnnouncementSettings() {
     matchProgress: on('voice_match_progress'),
   };
 }
+const DEFAULT_CARD_TAGLINE = 'Darts tracked via Oche — track your darts games today!';
+// Public (no-auth) read of the shareable-card tagline — any device generating a card
+// (not just the admin's browser) needs this, and it's meant to be edited later once
+// there's a real website/handle to point at.
+function getCardTagline() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'card_tagline'").get();
+  return { tagline: row && row.value ? row.value : DEFAULT_CARD_TAGLINE };
+}
 // Public (no-auth) read of the scoreboard layout preset — the /display screen
 // isn't logged in as admin, it just needs to know which layout to render.
 function getScoreboardLayout() {
@@ -1409,7 +1417,7 @@ module.exports = {
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn,
   getCheckoutRoutes, getDartAnalytics,
-  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, fireHaWebhook,
+  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, fireHaWebhook,
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword,
   login, logout, getSessionAdmin, adminLockoutThreshold,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,

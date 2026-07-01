@@ -805,6 +805,21 @@
         </div>
       </div>
 
+      <!-- Shareable Moments -->
+      <div class="pp-section" style="margin-bottom:24px">
+        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('sharecard-body',this)">
+          Shareable Moments
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="sharecard-body" hidden>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+            A short line printed on every shareable card (180s, Big Fish, nine-darters, match wins, personal bests). Update this once you have a website or social handle to point people at.
+          </p>
+          <label class="field">Card tagline</label>
+          <input type="text" id="card-tagline" maxlength="140" placeholder="Darts tracked via Oche — track your darts games today!">
+        </div>
+      </div>
+
       <!-- Data Collection -->
       <div class="pp-section" style="margin-bottom:24px">
         <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('data-collection-body',this)">
@@ -1171,6 +1186,8 @@ let prefs = {};      // name -> { out:'double'|'single' }  (per-player finish ru
 let mult = 1;
 let dartboardMode = true;   // admin-configurable default; refreshed at boot from /api/settings/default-input
 let colorblindMode = false; // admin-toggled; refreshed at boot from /api/settings/colorblind-mode
+const DEFAULT_CARD_TAGLINE = 'Darts tracked via Oche — track your darts games today!';
+let cardTagline = DEFAULT_CARD_TAGLINE; // admin-editable; refreshed at boot from /api/settings/card-tagline
 
 /* ---------- dartboard input mode ---------- */
 const DB_SECTORS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
@@ -1638,6 +1655,8 @@ async function renderSettings(){
       el.checked = id==='voice-enabled' ? cfg[key]==='1' : cfg[key]!=='0';
     });
     toggleVoiceSubOptions();
+    const ctEl = document.getElementById('card-tagline');
+    if(ctEl) ctEl.value = cfg.card_tagline || DEFAULT_CARD_TAGLINE;
   }).catch(err=>{ const s=document.getElementById('settings-error'); if(s){ s.textContent='Could not load settings: '+err.message; s.hidden=false; } });
 }
 
@@ -1773,8 +1792,10 @@ function saveSettings(){
     voice_180:               (document.getElementById('voice-180')||{}).checked ? '1' : '0',
     voice_bigfish:           (document.getElementById('voice-bigfish')||{}).checked ? '1' : '0',
     voice_match_progress:    (document.getElementById('voice-match-progress')||{}).checked ? '1' : '0',
+    card_tagline:            v('card-tagline'),
   }).then(()=>{
     if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
+    cardTagline = (document.getElementById('card-tagline')||{}).value || DEFAULT_CARD_TAGLINE;
     dartTimingEnabled = (document.getElementById('collect-dart-timing')||{}).checked || false;
     colorblindMode = (document.getElementById('colorblind-mode')||{}).checked || false;
     document.body.classList.toggle('colorblind', colorblindMode);
@@ -2588,10 +2609,18 @@ async function buildMomentCard({ icon, headline, player, statLine, footer }){
     ctx.fillText(statLine, cx, y + 115);
   }
 
+  // Tagline (Settings -> Shareable Moments -> Card tagline) — a short promotional
+  // line, editable so it can point at a real website/handle once one exists.
+  ctx.strokeStyle = 'rgba(217,180,106,.25)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(cx-140, 668); ctx.lineTo(cx+140, 668); ctx.stroke();
+  ctx.fillStyle = '#d9b46a';
+  ctx.font = '600 20px Inter, sans-serif';
+  wrapCanvasText(ctx, cardTagline || DEFAULT_CARD_TAGLINE, cx, 706, MOMENT_CARD_W-140, 26);
+
   ctx.fillStyle = '#655f54';
   ctx.font = '400 18px Inter, sans-serif';
   const dateStr = new Date().toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' });
-  ctx.fillText(footer || dateStr, cx, MOMENT_CARD_H-45);
+  ctx.fillText(footer || dateStr, cx, MOMENT_CARD_H-30);
 
   return canvas;
 }
@@ -3717,6 +3746,7 @@ function showBackendErrorScreen(){
   try{ const di = await Backend.get('/api/settings/default-input'); dartboardMode = di.input !== 'pad'; }catch(e){}
   try{ const cb = await Backend.get('/api/settings/colorblind-mode'); colorblindMode = !!cb.enabled; }catch(e){}
   document.body.classList.toggle('colorblind', colorblindMode);
+  try{ const ct = await Backend.get('/api/settings/card-tagline'); cardTagline = ct.tagline || DEFAULT_CARD_TAGLINE; }catch(e){}
   restoreSetup();
   sanitizeSlots();
   renderPlayers();

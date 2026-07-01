@@ -35,6 +35,7 @@
        GET  /api/settings/default-input     -> { input: 'pad'|'board' } (public)
        GET  /api/settings/colorblind-mode   -> { enabled } (public)
        GET  /api/settings/voice-announcements -> { enabled, turnScore, noScore, checkoutReq, oneEighty, bigFish, matchProgress } (public)
+       GET  /api/settings/card-tagline      -> { tagline } (public)
 
    Routes marked [admin] require a logged-in admin session (cookie set by /api/login).
    Set COOKIE_SECURE=true when serving over HTTPS (e.g. behind a reverse proxy) so the
@@ -299,6 +300,9 @@ const server = http.createServer(async (req, res) => {
     // Public (no-auth) read of voice-announcement settings — the /display screen
     // (where announcements are spoken) isn't logged in as admin.
     if (p === '/api/settings/voice-announcements' && m === 'GET') { return send(res, 200, db.getVoiceAnnouncementSettings()); }
+    // Public (no-auth) read of the shareable-card tagline — any device generating a
+    // card needs this, not just the admin's browser.
+    if (p === '/api/settings/card-tagline' && m === 'GET') { return send(res, 200, db.getCardTagline()); }
     if (p === '/api/settings' && m === 'PUT') {
       if (!requireAdmin(req, res)) return;
       const b = await readJson(req);
@@ -310,7 +314,7 @@ const server = http.createServer(async (req, res) => {
         'ha_webhook_momentcard',
         'ha_webhook_gamestart','ha_webhook_gameend','ha_webhook_setstart','ha_webhook_setend',
         'ha_webhook_legstart','ha_webhook_legend','pin_lockout_threshold','admin_lockout_threshold','scoreboard_layout',
-        'default_scoring_input', ...boolKeys];
+        'default_scoring_input','card_tagline', ...boolKeys];
       const safe = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
       if ('pin_lockout_threshold' in safe) {
         const n = Number(safe.pin_lockout_threshold);
@@ -319,6 +323,9 @@ const server = http.createServer(async (req, res) => {
       if ('admin_lockout_threshold' in safe) {
         const n = Number(safe.admin_lockout_threshold);
         if (!Number.isInteger(n) || n < 1 || n > 1000) return send(res, 400, { error: 'admin_lockout_threshold must be an integer between 1 and 1000' });
+      }
+      if ('card_tagline' in safe && safe.card_tagline.length > 140) {
+        return send(res, 400, { error: 'card_tagline must be 140 characters or fewer' });
       }
       for (const k of boolKeys) {
         if (k in safe) safe[k] = (safe[k] === '1' || safe[k] === true) ? '1' : '0';
