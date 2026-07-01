@@ -47,6 +47,9 @@ Others
 - Home Assistant automation recipe book (lights/sounds/notifications) — full design in docs/ha-recipes-roadmap.md
 - Colorblind-friendly dartboard palette — full design in docs/colorblind-mode-roadmap.md
 - Accessibility roadmap & standing checklist (aria-live, contrast audit, and more) — full design in docs/accessibility-roadmap.md
+- Backups & disaster recovery for the SQLite database — full design in docs/backups-roadmap.md
+- Security hardening (admin login rate limiting + standing checklist) — full design in docs/security-hardening-roadmap.md
+- Testing & observability (test coverage + server-side error logging) — full design in docs/testing-and-observability-roadmap.md
 - League/season mode (standings across casual matches over time) — full design in docs/league-mode-roadmap.md
 - Daily/weekly solo challenge — full design in docs/daily-challenge-roadmap.md
 - Ghost opponent (practice against a replay of your own past leg) — full design in docs/ghost-opponent-roadmap.md

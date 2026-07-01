@@ -300,19 +300,26 @@ un-learn later:**
 
 A separate pass across all 16 feature roadmap docs (not this consolidation doc
 itself), ranking each on build complexity and real usefulness, and calling out
-build-order dependencies between them.
+build-order dependencies between them. Also now includes the cross-cutting
+engineering-health items identified in the accessibility/backups/security/testing
+audits below, since in practice they compete for the same "what do we build next"
+attention as the feature roadmaps.
 
 | Roadmap | Complexity | Usefulness | Why |
 |---|---|---|---|
+| Server-side error logging | Trivial (one line) | High | Zero design, closes a real "no one would know" gap — see `docs/testing-and-observability-roadmap.md` |
 | HA recipes | Trivial (docs only) | Medium | Zero code, unlocks power that already shipped |
+| Admin login rate limiting | Very low | High | Mirrors the already-proven PIN lockout pattern almost line-for-line — see `docs/security-hardening-roadmap.md` |
 | Colorblind mode | Very low | Medium (narrow, real) | CSS-only, genuine accessibility fix; first item under `docs/accessibility-roadmap.md` |
 | Data export | Very low | Medium | Reformats existing queries; reinforces the self-hosted trust story |
 | Voice announcements | Very low | Medium-High | Browser API only, zero infra, extends the celebration culture already core to the app |
+| Backups / disaster recovery | Low | Very high | Self-contained script + docs, no schema/API changes; protects irreplaceable personal data — see `docs/backups-roadmap.md` |
 | Shareable moments | Low | Medium | Client-side only; fun/virality, not core utility |
 | Achievements/badges | Low | Medium | Mostly content on top of infra that already works |
 | Daily challenge | Low | Medium | Built entirely on the existing Practice engine |
 | Ghost opponent | Low-Medium | Medium | Needs a "scripted input source" concept — see dependency note below |
 | Coaching insights | Low-Medium | High | No new data collection; genuinely differentiating vs. competitors |
+| Testing strategy (initial slice) | Medium | High | Real cost is a refactor-for-testability step, not the tests themselves; protects every future roadmap item — see `docs/testing-and-observability-roadmap.md` |
 | League mode | Medium | Medium-High | New tables, no new infra; complements tournament mode |
 | Mobile app | Medium | High | Real packaging/TLS work, but zero new backend infra, and its one prerequisite (responsive CSS) is already done |
 | Tournament mode | Medium-High | High | Bracket generation (especially double-elim) is genuinely fiddly, but fully self-contained — reuses the scoring engine unchanged |
@@ -338,6 +345,15 @@ build-order dependencies between them.
 4. **The ten smaller roadmaps are entirely order-independent** and can be
    interleaved anywhere, including between or ahead of the bigger lifts — good for
    sustaining momentum, and essentially zero risk of creating rework later.
+5. **Server-side error logging, admin login rate limiting, and backups should be
+   done sooner rather than later**, alongside colorblind mode — all four are the
+   cheapest items in the whole table (Trivial-to-Low complexity) and three of them
+   (logging, login lockout, backups) close real operational/security gaps rather than
+   adding new user-facing capability. None has any dependency on anything else in this
+   table. The testing-strategy slice is a size step up (Medium) but is worth doing
+   before or alongside item 10 (the X01-to-plugin refactor), since that refactor is
+   the highest-value place to prove the new abstraction behaves identically to today's
+   code via an actual test rather than manual spot-checking.
 5. **Achievements/badges and coaching insights are X01-only today.** If either is
    built before Cricket exists (likely, given Cricket's complexity), keep the
    stat/achievement definitions abstracted per game type from day one — cheap to do

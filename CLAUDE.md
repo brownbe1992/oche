@@ -31,6 +31,25 @@ but it isn't the whole of it.
 
 Full checklist, current gaps, and priority order: `docs/accessibility-roadmap.md`.
 
+### Every new feature considers its security surface, not just its own function
+
+Any feature that adds a new credential, token, or secret (an API key, a webhook
+token, TURN credentials, anything similar) should ask up front whether it needs
+write-only handling (never returned to the client) and whether whatever verifies it
+needs brute-force protection — the same standard already applied to admin logins and
+player PINs.
+
+Full checklist and current gaps: `docs/security-hardening-roadmap.md`.
+
+### New features get test coverage for their core logic, not just manual verification
+
+Once a real test runner exists (see `docs/testing-and-observability-roadmap.md`), new
+features touching scoring/stats logic should add tests for that logic as part of
+building it — not defer it, and not rely solely on manual/Playwright verification the
+way this project has so far.
+
+Full plan and current status: `docs/testing-and-observability-roadmap.md`.
+
 ## Roadmap docs
 
 `docs/*.md` holds design roadmaps for features that are planned but not yet built —
