@@ -49,6 +49,7 @@ Others
 - League/season mode (standings across casual matches over time) — full design in docs/league-mode-roadmap.md
 - Daily/weekly solo challenge — full design in docs/daily-challenge-roadmap.md
 - Ghost opponent (practice against a replay of your own past leg) — full design in docs/ghost-opponent-roadmap.md
+- Prep work to reduce future rework across all roadmap items — see docs/existing-app-prep-roadmap.md
 
 
 Fixes:
