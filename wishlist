@@ -34,7 +34,7 @@ Scoreboard
 Others
 - Add additional games (Cricket, Baseball, etc.) — full design in docs/game-modes-roadmap.md
 - Integrate with Homeassistant
-- Automated scoring with cameras and machine learning
+- Automated scoring with cameras and machine learning — full design in docs/camera-scoring-roadmap.md
 - Settings page - set default player
 - Tournament mode (bracket play, up to 128 players, single/double elim) — full design in docs/tournament-mode-roadmap.md
 
