@@ -758,6 +758,49 @@
         </div>
       </div>
 
+      <!-- Voice Announcements -->
+      <div class="pp-section" style="margin-bottom:24px">
+        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('voice-body',this)">
+          Voice Announcements
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="voice-body" hidden>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+            Spoken call-outs on the live scoreboard (`/display`) using the browser's built-in speech synthesis — no server involvement, no external service. Off by default. Each call-out can be turned on or off individually once voice is enabled.
+          </p>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;font-weight:600;margin-bottom:10px">
+            <input type="checkbox" id="voice-enabled" style="width:16px;height:16px;margin:0" onchange="toggleVoiceSubOptions()">
+            Enable voice announcements
+          </label>
+          <div id="voice-sub-options" style="display:grid;gap:8px;padding-left:24px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="voice-turn-score" style="width:16px;height:16px;margin:0">
+              Turn score (e.g. "One-forty")
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="voice-no-score" style="width:16px;height:16px;margin:0">
+              "No Score" (bust or three misses)
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="voice-checkout-req" style="width:16px;height:16px;margin:0">
+              Checkout requirement (e.g. "Alice, you require forty")
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="voice-180" style="width:16px;height:16px;margin:0">
+              180s
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="voice-bigfish" style="width:16px;height:16px;margin:0">
+              Big Fish sound (170 checkout)
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="voice-match-progress" style="width:16px;height:16px;margin:0">
+              Leg / Set / Game results (e.g. "Game shot and the leg, Alice!")
+            </label>
+          </div>
+        </div>
+      </div>
+
       <!-- Data Collection -->
       <div class="pp-section" style="margin-bottom:24px">
         <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('data-collection-body',this)">
@@ -1575,6 +1618,17 @@ async function renderSettings(){
     if(diEl) diEl.value = cfg.default_scoring_input === 'pad' ? 'pad' : 'board';
     const cbEl = document.getElementById('colorblind-mode');
     if(cbEl) cbEl.checked = cfg.colorblind_mode === '1';
+    // Voice: master off by default; sub-toggles on by default once master is enabled
+    // (opt-out, not opt-in) — each is only ever explicitly '0' if a user turned it off.
+    const voiceMap = { 'voice-enabled':'voice_enabled', 'voice-turn-score':'voice_turn_score',
+      'voice-no-score':'voice_no_score', 'voice-checkout-req':'voice_checkout_req',
+      'voice-180':'voice_180', 'voice-bigfish':'voice_bigfish', 'voice-match-progress':'voice_match_progress' };
+    Object.entries(voiceMap).forEach(([id,key])=>{
+      const el = document.getElementById(id);
+      if(!el) return;
+      el.checked = id==='voice-enabled' ? cfg[key]==='1' : cfg[key]!=='0';
+    });
+    toggleVoiceSubOptions();
   }).catch(err=>{ const s=document.getElementById('settings-error'); if(s){ s.textContent='Could not load settings: '+err.message; s.hidden=false; } });
 }
 
@@ -1656,6 +1710,13 @@ function toggleSettingsSection(bodyId, titleEl){
   const chevron = titleEl && titleEl.querySelector('.settings-chevron');
   if(chevron) chevron.style.transform = body.hidden ? '' : 'rotate(180deg)';
 }
+function toggleVoiceSubOptions(){
+  const on = (document.getElementById('voice-enabled')||{}).checked;
+  const sub = document.getElementById('voice-sub-options');
+  if(!sub) return;
+  sub.style.opacity = on ? '1' : '.4';
+  sub.querySelectorAll('input[type=checkbox]').forEach(el=>el.disabled = !on);
+}
 function askSetPlayerPin(name){
   uiPrompt('New PIN for "'+name+'" (4-8 digits)','',pin=>{
     if(!pin) return;
@@ -1695,6 +1756,13 @@ function saveSettings(){
     scoreboard_layout:       v('scoreboard-layout') || 'full',
     default_scoring_input:   v('default-scoring-input') || 'board',
     colorblind_mode:         (document.getElementById('colorblind-mode')||{}).checked ? '1' : '0',
+    voice_enabled:           (document.getElementById('voice-enabled')||{}).checked ? '1' : '0',
+    voice_turn_score:        (document.getElementById('voice-turn-score')||{}).checked ? '1' : '0',
+    voice_no_score:          (document.getElementById('voice-no-score')||{}).checked ? '1' : '0',
+    voice_checkout_req:      (document.getElementById('voice-checkout-req')||{}).checked ? '1' : '0',
+    voice_180:               (document.getElementById('voice-180')||{}).checked ? '1' : '0',
+    voice_bigfish:           (document.getElementById('voice-bigfish')||{}).checked ? '1' : '0',
+    voice_match_progress:    (document.getElementById('voice-match-progress')||{}).checked ? '1' : '0',
   }).then(()=>{
     if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
     dartTimingEnabled = (document.getElementById('collect-dart-timing')||{}).checked || false;
@@ -1958,7 +2026,11 @@ async function startGame(){
     gameBusts: 0,
     currentLegTurns: [],   // turns in the current leg (reset per leg)
     sessionTurns: [],      // turns in the entire session (grows across legs)
-    lastTurnSnapshot: null // state before last committed turn (for undo)
+    lastTurnSnapshot: null,// state before last committed turn (for undo)
+    turnSeq: 0,            // monotonic counter, bumped each time a new turn begins (voice announcements dedup on this)
+    lastTurnEvent: null,   // one-shot: outcome of the turn just entered (voice announcements)
+    matchResult: null,     // one-shot: leg/set/game just won (voice announcements)
+    legStart: null         // one-shot: a new leg just began, who's throwing first (voice announcements)
   };
   names.forEach(ensurePlayerStats);
   await DB.beginGame(game, names);   // registers the game; gets a gameId in api mode
@@ -1970,6 +2042,7 @@ async function startGame(){
   if(_isH2H) sendHaWebhook('setstart',  '', game.category, { setNo: 1 });
   sendHaWebhook('legstart', '', game.category, { setNo: 1, legNo: 1 });
   mult = 1;
+  game.legStart = { ts: Date.now(), starter: game.players[game.starter].name };
   renderGameShell();        // ensure the throwing controls exist (e.g. after a finished game)
   updateMultUI();
   show('game'); renderGame();
@@ -2463,12 +2536,23 @@ function liveSnapshot(message){
     legSummary: game.legSummary || null,
     practice: !!game.practice,
     done: !!game.done,
+    // one-shot fields for the live scoreboard's voice announcements — cleared right
+    // after being sent (see pushLive()), same pattern as `achievement` above.
+    lastTurnEvent: game.lastTurnEvent || null,
+    matchResult: game.matchResult || null,
+    legStart: game.legStart || null,
+    // non-transient: which player is now up and, if they're on a valid finish before
+    // throwing this visit, what they require — turnSeq lets the scoreboard tell "still
+    // the same pending turn" apart from "a fresh turn just began" without re-announcing.
+    checkoutTarget: (game.darts.length===0 && startedOn) ? { player: cur.name, score: cur.score } : null,
+    turnSeq: game.turnSeq || 0,
     ts: Date.now()
   };
 }
 function pushLive(message){
   const snap = liveSnapshot(message);
   pendingAchievement = null;
+  if(game){ game.lastTurnEvent = null; game.matchResult = null; game.legStart = null; }
   DB.pushLive(snap);
 }
 
@@ -2630,6 +2714,9 @@ function enterTurn(){
     scored:ev.scored, bust:ev.bust,
     checkout:ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null,
     darts: game.darts.map((d,i) => ({ dartNo: i+1, sector: d.sector, multiplier: d.mult, thrownAt: d.thrownAt })) });
+  // one-shot record of this turn's outcome, for voice announcements on the scoreboard
+  game.lastTurnEvent = { ts: Date.now(), player: p.name, scored: ev.scored, bust: !!ev.bust,
+    win: !!ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null };
   // achievement flashes + in-game counters + Home Assistant webhooks
   if(ev.bust){
     game.gameBusts += 1;
@@ -2670,6 +2757,7 @@ function enterTurn(){
   // next player
   game.darts=[]; game.busted=false; game.won=false;
   game.current = (game.current+1) % game.players.length;
+  game.turnSeq += 1;
   document.getElementById('status').className='status';
   document.getElementById('status').textContent='Tap a multiplier, then a number.';
   renderGame();
@@ -2680,6 +2768,9 @@ function enterTurn(){
 function onLegWon(wi){
   const w = game.players[wi];
   w.legsWon += 1;
+  // Big Fish (170 checkout) always finishes a leg, so this is the reliable way to know
+  // whether the winning dart of this leg/set/game was specifically a 170 checkout.
+  const _bigFish = !!(game.lastTurnEvent && game.lastTurnEvent.checkoutPoints === 170);
 
   if(!game.practice && w.legsWon >= game.legsPerSet){      // set won (H2H only)
     w.setsWon += 1;
@@ -2694,6 +2785,7 @@ function onLegWon(wi){
       DB.recordEvent('game_end', null, null);
       DB.completeGame(w.name);   // api marks the game complete in the database
       persist();
+      game.matchResult = { ts: Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:_bigFish };
       finishUnit('game', w.name);
       return;
     }
@@ -2702,12 +2794,14 @@ function onLegWon(wi){
     DB.recordEvent('leg_end', game.setNo, game.legNo);
     DB.recordEvent('set_end', game.setNo, null);
     persist();
+    game.matchResult = { ts: Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:_bigFish };
     finishUnit('set', w.name);
     return;
   }
   sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
   DB.recordEvent('leg_end', game.setNo, game.legNo);
   persist();
+  game.matchResult = { ts: Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:_bigFish };
   finishUnit('leg', w.name);
 }
 
@@ -2726,6 +2820,8 @@ function startNextLeg(newSet){
   game.currentLegTurns = [];
   game.lastTurnSnapshot = null;
   game.darts=[]; game.busted=false; game.won=false;
+  game.turnSeq += 1;
+  game.legStart = { ts: Date.now(), starter: game.players[game.starter].name };
   mult=1;
   renderGameShell(); updateMultUI(); renderGame();
 }

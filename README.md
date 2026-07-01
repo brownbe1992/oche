@@ -287,7 +287,7 @@ Plus global leaderboards for 180s, Big Fish, and nine-dart finishes, each filter
 
 ### Settings
 
-The Settings page (accessible from the top navigation) holds app-wide configuration. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
+The Settings page (accessible from the top navigation) holds app-wide configuration. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
 
 Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accounts--player-pins)) — until an admin account exists, the page offers to create the first one.
 
@@ -298,6 +298,19 @@ Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accou
 #### Accessibility
 
 - **Colorblind-friendly palette** — swaps the app's red/green double and treble colors (dartboard rings, Pad mode's Double/Treble buttons, win/bust status text, and the live scoreboard's checkout flashes and dart-class colors) for a blue/orange palette. Applies to this device and the `/display` scoreboard.
+
+#### Voice Announcements
+
+Spoken call-outs on the live scoreboard (`/display`) using the browser's built-in speech synthesis — no server involvement, no external service. Off by default via a master switch; each call-out below is independently toggleable once enabled:
+
+- **Turn score** — after any ordinary turn, speaks just the score (no player name), e.g. "sixty".
+- **"No Score"** — a bust or three misses, spoken at a deliberately low, disappointed tone.
+- **Checkout requirement** — each time it becomes a player's turn while they're on a valid finish, "{name}, you require {score}".
+- **180s** — "One! Hundred! and! Eighty!!", spoken as an escalating, drawn-out call.
+- **Big Fish sound** — a short splash effect (not speech) when a leg/set/game is won on a 170 checkout.
+- **Leg / Set / Game results** — PDC-style phrasing, e.g. "Game shot! And the 3rd leg, Alice!", followed by "Alice to throw first, Game On!" for the next leg.
+
+Multi-language support is left to whatever voice/locale the browser already provides — see `docs/voice-announcements-i18n-roadmap.md` for the full i18n plan. Most browsers block audio until a user gesture, so `/display` shows a one-tap "🔊 Tap to enable voice announcements" button the first time voice is enabled.
 
 #### Data Collection
 
@@ -520,6 +533,8 @@ GET  /api/settings/dart-timing              { enabled } — public, read by ever
 GET  /api/settings/scoreboard-layout        { layout } — public, read by the /display screen
 GET  /api/settings/default-input            { input: 'pad'|'board' } — public, read at app boot
 GET  /api/settings/colorblind-mode          { enabled } — public, read at app boot by both the controller and /display
+GET  /api/settings/voice-announcements      { enabled, turnScore, noScore, checkoutReq, oneEighty,
+                                               bigFish, matchProgress } — public, read at boot by /display
 POST /api/ha-test                           Test HA connectivity  { url }                        [admin]
 POST /api/ha-webhook                        Fire an HA webhook    { event, player, category, … }
 ```

@@ -315,7 +315,7 @@ attention as the feature roadmaps.
 | ~~Admin login rate limiting~~ ✅ Done (v0.6.2) | Very low | High | Mirrors the already-proven PIN lockout pattern almost line-for-line — see `docs/security-hardening-roadmap.md` |
 | ~~Colorblind mode~~ ✅ Done | Very low | Medium (narrow, real) | CSS-only, genuine accessibility fix; first item under `docs/accessibility-roadmap.md` |
 | Data export | Very low | Medium | Reformats existing queries; reinforces the self-hosted trust story |
-| Voice announcements | Very low | Medium-High | Browser API only, zero infra, extends the celebration culture already core to the app |
+| ~~Voice announcements~~ ✅ Done | Very low | Medium-High | Browser API only, zero infra, extends the celebration culture already core to the app; full i18n left as its own follow-on, see `docs/voice-announcements-i18n-roadmap.md` |
 | ~~Backups / disaster recovery~~ ✅ Done (v0.6.2) | Low | Very high | Self-contained script + docs, no schema/API changes; protects irreplaceable personal data — see `docs/backups-roadmap.md` |
 | Shareable moments | Low | Medium | Client-side only; fun/virality, not core utility |
 | Achievements/badges | Low | Medium | Mostly content on top of infra that already works |

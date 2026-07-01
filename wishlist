@@ -33,7 +33,7 @@ Stats page:
 
 Scoreboard
 - 9 darter celebration of some kind
-- Voice announcements (180, game shot, running score) — full design in docs/voice-announcements-roadmap.md
+- Voice announcements (180, game shot, running score) — done, see docs/voice-announcements-roadmap.md; full i18n follow-on in docs/voice-announcements-i18n-roadmap.md
 
 Others
 - Add additional games (Cricket, Baseball, etc.) — full design in docs/game-modes-roadmap.md

@@ -1140,6 +1140,23 @@ function getColorblindMode() {
   const row = db.prepare("SELECT value FROM settings WHERE key = 'colorblind_mode'").get();
   return { enabled: row ? row.value === '1' : false };
 }
+// Public (no-auth) read of voice-announcement settings — the /display screen (where
+// announcements are spoken) isn't logged in as admin. Sub-toggles default to true
+// (opt-out, not opt-in) once the master switch is on — only 'voice_enabled' itself
+// defaults to off.
+function getVoiceAnnouncementSettings() {
+  const s = getSettings();
+  const on = (key) => s[key] !== '0'; // absent/anything but '0' -> enabled
+  return {
+    enabled:       s.voice_enabled === '1',
+    turnScore:     on('voice_turn_score'),
+    noScore:       on('voice_no_score'),
+    checkoutReq:   on('voice_checkout_req'),
+    oneEighty:     on('voice_180'),
+    bigFish:       on('voice_bigfish'),
+    matchProgress: on('voice_match_progress'),
+  };
+}
 // Public (no-auth) read of the scoreboard layout preset — the /display screen
 // isn't logged in as admin, it just needs to know which layout to render.
 function getScoreboardLayout() {
@@ -1392,7 +1409,7 @@ module.exports = {
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn,
   getCheckoutRoutes, getDartAnalytics,
-  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, fireHaWebhook,
+  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, fireHaWebhook,
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword,
   login, logout, getSessionAdmin, adminLockoutThreshold,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,

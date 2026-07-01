@@ -386,6 +386,161 @@ const renderers = {
   }
 };
 
+/* ---- voice announcements ----
+   Spoken call-outs using the browser's built-in speechSynthesis (SpeechSynthesisUtterance)
+   plus a procedurally-synthesized splash effect (Web Audio API) for Big Fish — zero
+   server involvement, zero external services, zero new dependencies, matching
+   docs/voice-announcements-roadmap.md. Multi-language support is left entirely to
+   whatever voice/locale the browser already provides (see
+   docs/voice-announcements-i18n-roadmap.md for what a real i18n implementation would
+   need beyond that). Off by default; each call-out type is independently toggleable
+   from Settings -> Voice Announcements. */
+let VOICE = { enabled:false, turnScore:true, noScore:true, checkoutReq:true, oneEighty:true, bigFish:true, matchProgress:true };
+function voiceOn(key){ return !!(VOICE.enabled && VOICE[key]); }
+
+// Sequential queue so overlapping events (e.g. a Big Fish that also wins the leg)
+// speak/play one at a time instead of talking over each other.
+const _announceQueue = [];
+let _announcing = false;
+function queueSpeech(chunks){ _announceQueue.push({ type:'speech', chunks }); _processQueue(); }
+function queueSound(playFn){ _announceQueue.push({ type:'sound', play:playFn }); _processQueue(); }
+function _processQueue(){
+  if(_announcing || !_announceQueue.length) return;
+  _announcing = true;
+  const item = _announceQueue.shift();
+  if(item.type === 'sound'){
+    Promise.resolve().then(item.play).catch(()=>{}).then(()=>{ _announcing=false; _processQueue(); });
+    return;
+  }
+  const chunks = item.chunks.slice();
+  const speakNext = () => {
+    if(!chunks.length){ _announcing=false; _processQueue(); return; }
+    const c = chunks.shift();
+    const u = new SpeechSynthesisUtterance(c.text);
+    u.pitch = c.pitch; u.rate = c.rate; u.volume = c.volume;
+    u.onend = speakNext; u.onerror = speakNext;
+    speechSynthesis.speak(u);
+  };
+  speakNext();
+}
+
+function ordinal(n){
+  n = Number(n) || 0;
+  const v = n % 100;
+  const suf = (v >= 11 && v <= 13) ? 'th' : ({1:'st',2:'nd',3:'rd'}[n % 10] || 'th');
+  return n + suf;
+}
+
+// "One! Hundred! and! Eighty!!" — escalating pitch and slowing rate word-by-word.
+// The Web Speech API can't bend pitch mid-utterance or reliably stretch a vowel
+// ("eighhhhty"), so this simulates the drawn-out hype-announcer effect by queuing
+// each word as its own utterance with a rising pitch and slower rate.
+function announce180(){
+  queueSpeech([
+    { text:'One',     pitch:0.95, rate:0.85, volume:1.0 },
+    { text:'Hundred', pitch:1.1,  rate:0.85, volume:1.0 },
+    { text:'and',     pitch:1.25, rate:0.8,  volume:1.0 },
+    { text:'Eighty!', pitch:1.5,  rate:0.65, volume:1.0 },
+  ]);
+}
+
+// Procedurally-synthesized splash/flop effect (filtered decaying noise bursts) rather
+// than a recorded audio file — keeps this dependency-free and licensing-free. Swap in
+// a real sound file later by replacing this function's body if you'd rather.
+let _actx = null;
+function playBigFishSplash(){
+  return new Promise(resolve=>{
+    try{
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if(!Ctx) return resolve();
+      const ctx = _actx || (_actx = new Ctx());
+      const now = ctx.currentTime;
+      const flop = (start, len, vol) => {
+        const n = Math.max(1, Math.floor(ctx.sampleRate * len));
+        const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for(let i=0;i<n;i++) data[i] = (Math.random()*2-1) * (1 - i/n);
+        const src = ctx.createBufferSource(); src.buffer = buf;
+        const filter = ctx.createBiquadFilter(); filter.type='bandpass'; filter.frequency.value=900; filter.Q.value=0.6;
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(vol, now+start);
+        gain.gain.exponentialRampToValueAtTime(0.001, now+start+len);
+        src.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+        src.start(now+start);
+      };
+      flop(0, 0.28, 0.5); flop(0.32, 0.22, 0.35); flop(0.58, 0.18, 0.25);
+      setTimeout(resolve, 900);
+    }catch(e){ resolve(); }
+  });
+}
+
+let _lastTurnEventTs = 0, _lastCheckoutTurnSeq = -1, _lastMatchResultTs = 0, _lastLegStartTs = 0;
+function handleVoiceEvents(s){
+  if(!VOICE.enabled) return;
+
+  if(s.lastTurnEvent && s.lastTurnEvent.ts !== _lastTurnEventTs){
+    _lastTurnEventTs = s.lastTurnEvent.ts;
+    const ev = s.lastTurnEvent;
+    if(!ev.win){   // a winning turn is narrated by matchResult below instead
+      if(ev.bust || ev.scored === 0){
+        if(voiceOn('noScore')) queueSpeech([{ text:'No Score', pitch:0.65, rate:0.85, volume:0.9 }]);
+      } else if(ev.scored === 180){
+        if(voiceOn('oneEighty')) announce180();
+      } else if(voiceOn('turnScore')){
+        queueSpeech([{ text:String(ev.scored), pitch:1.0, rate:1.0, volume:1.0 }]);
+      }
+    }
+  }
+
+  if(s.checkoutTarget && s.turnSeq !== _lastCheckoutTurnSeq){
+    _lastCheckoutTurnSeq = s.turnSeq;
+    if(voiceOn('checkoutReq')){
+      const ct = s.checkoutTarget;
+      queueSpeech([{ text:`${ct.player}, you require ${ct.score}`, pitch:1.0, rate:0.95, volume:1.0 }]);
+    }
+  }
+
+  if(s.matchResult && s.matchResult.ts !== _lastMatchResultTs){
+    _lastMatchResultTs = s.matchResult.ts;
+    const mr = s.matchResult;
+    if(voiceOn('matchProgress')){
+      const phrase = mr.kind === 'leg' ? `Game shot! And the ${ordinal(mr.legNo)} leg, ${mr.winner}!`
+        : mr.kind === 'set' ? `Game shot! And the ${ordinal(mr.setNo)} set, ${mr.winner}!`
+        : `Game shot! And the match, ${mr.winner}!`;
+      queueSpeech([{ text:phrase, pitch:1.1, rate:1.0, volume:1.0 }]);
+    }
+    if(mr.bigFish && voiceOn('bigFish')) queueSound(playBigFishSplash);
+  }
+
+  if(s.legStart && s.legStart.ts !== _lastLegStartTs){
+    _lastLegStartTs = s.legStart.ts;
+    if(voiceOn('matchProgress')){
+      queueSpeech([{ text:`${s.legStart.starter} to throw first, Game On!`, pitch:1.1, rate:1.05, volume:1.0 }]);
+    }
+  }
+}
+
+// Most browsers block audio (speech synthesis and Web Audio alike) until the page
+// has had a user gesture. /display is typically left open on a TV with nobody
+// touching it, so surface a one-tap prompt to unlock audio rather than silently
+// having the first few announcements never be heard.
+const voiceUnlock = document.createElement('button');
+voiceUnlock.textContent = '🔊 Tap to enable voice announcements';
+voiceUnlock.style.cssText = 'position:fixed;bottom:2vmin;right:2vmin;z-index:40;padding:1.2vmin 2vmin;'+
+  'border-radius:1vmin;border:1px solid var(--gold);background:var(--surface-2);color:var(--gold);'+
+  'font:inherit;font-size:1.6vmin;cursor:pointer';
+voiceUnlock.hidden = true;
+document.body.appendChild(voiceUnlock);
+voiceUnlock.addEventListener('click', ()=>{
+  try{ const Ctx = window.AudioContext || window.webkitAudioContext; if(Ctx) (_actx || (_actx = new Ctx())).resume(); }catch(e){}
+  try{ speechSynthesis.speak(new SpeechSynthesisUtterance('')); }catch(e){}
+  voiceUnlock.hidden = true;
+});
+fetch('/api/settings/voice-announcements', {cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{
+  if(s) VOICE = s;
+  if(VOICE.enabled) voiceUnlock.hidden = false;
+}).catch(()=>{});
+
 function render(s){
   if(!s || !s.active){
     grid.classList.add('hidden'); idle.classList.remove('hidden');
@@ -468,6 +623,8 @@ function render(s){
     lastAchTs = s.achievement.ts;
     showAchievement(s.achievement.type, s.achievement.player);
   }
+
+  handleVoiceEvents(s);
 
   // result banners (leg / set / game) — show once per message
   if(s.message && s.message !== bannerKey){
