@@ -243,9 +243,20 @@ function getDartWeights(playerName) {
   `).all(p.id).map(r => r.weight);
 }
 
+// Games with no remaining participants (every player who played in them has
+// since been deleted) are dead weight: no stats point at them, but they still
+// count toward "games played" and can still surface as "last game played"
+// with a blank player list. Drop them.
+function pruneOrphanedGames() {
+  db.prepare('DELETE FROM games WHERE id NOT IN (SELECT DISTINCT game_id FROM game_players)').run();
+}
+
 function deletePlayer(name) {
   const p = getPlayer(name);
-  if (p) q.deletePlayer.run(p.id);     // cascades to turns + game_players
+  if (p) {
+    q.deletePlayer.run(p.id);     // cascades to turns + game_players
+    pruneOrphanedGames();
+  }
   return { ok: true };
 }
 
@@ -1085,6 +1096,14 @@ function resetStats() {
   return { ok: true };
 }
 
+// Wipes every player, game, and stat — admin accounts and app settings survive.
+// Deleting all players cascades to game_players/turns/darts; deleting the
+// (now-empty) games cascades their timeline_events too.
+function wipeAllData() {
+  db.exec('DELETE FROM players; DELETE FROM games;');
+  return { ok: true };
+}
+
 /* ---------- settings ---------- */
 function getSettings() {
   return Object.fromEntries(db.prepare('SELECT key, value FROM settings').all().map(r => [r.key, r.value]));
@@ -1306,12 +1325,17 @@ function httpError(status, message) {
   const e = new Error(message); e.status = status; return e;
 }
 
+// Self-heal on boot: older versions of deletePlayer() left a `games` row
+// behind once every one of its participants had been deleted. Clean up any
+// that are already sitting in the database.
+pruneOrphanedGames();
+
 module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer,
   createGame, addTurn, completeGame, recordEvent,
   computeStats, getSummary, getHomeExtra, getOneEightyStats, getBigFishStats, getNineDarterStats,
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
-  getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, deleteLastTurn,
+  getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn,
   getCheckoutRoutes, getDartAnalytics,
   getSettings, updateSettings, getDartTimingEnabled, fireHaWebhook,
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword,

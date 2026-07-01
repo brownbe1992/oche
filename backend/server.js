@@ -19,6 +19,7 @@
        POST /api/games/:id/turns   -> record one turn        { player, set, leg, scored, trebleLess, bust, checkout, checkoutPoints }
        POST /api/games/:id/complete-> finish a game          { winner }
        POST /api/reset             -> wipe all games/turns (players kept)        [admin]
+       POST /api/wipe-all          -> wipe all players/games/stats (admins kept) [admin]
 
        GET  /api/setup-required    -> { required } - true until the first admin exists
        POST /api/setup             -> create the first admin  { username, password } (only while setup-required)
@@ -267,6 +268,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, db.getMetricHistory(name, metric, period, opts));
     }
     if (p === '/api/reset' && m === 'POST') { if (!requireAdmin(req, res)) return; return send(res, 200, db.resetStats()); }
+    if (p === '/api/wipe-all' && m === 'POST') { if (!requireAdmin(req, res)) return; return send(res, 200, db.wipeAllData()); }
 
     if (p === '/api/settings' && m === 'GET')  { if (!requireAdmin(req, res)) return; return send(res, 200, db.getSettings()); }
     // Public (no-auth) read of just the dart-timing flag — every device running the

@@ -808,6 +808,20 @@
         </div><!-- end smart-home-body -->
       </div><!-- end Smart Home section -->
 
+      <!-- Danger Zone -->
+      <div class="pp-section" style="margin-top:24px">
+        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('danger-zone-body',this)">
+          Danger Zone
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="danger-zone-body" hidden>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+            Permanently deletes every player, game, and stat in the database. Admin accounts and these settings are kept. Meant for clearing out test/dev data, not everyday use.
+          </p>
+          <button class="btn btn-ghost danger" onclick="askWipeAllData()">Wipe all player &amp; game data</button>
+        </div>
+      </div>
+
       <div class="btn-row" style="margin-top:20px">
         <button class="btn btn-primary" id="settings-save-btn" onclick="saveSettings()">Save settings</button>
       </div>
@@ -891,6 +905,7 @@ const DB = {
   deleteLastTurn(){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('DELETE',`/api/games/${id}/turns/last`)); } },
 
   async reset(){ await Backend.send('POST','/api/reset').catch(logErr); await this.refreshStats(); },
+  async wipeAll(){ await Backend.send('POST','/api/wipe-all'); await this.refreshStats(); },
 
   // push the current game snapshot to any scoreboard screens
   pushLive(snapshot){ Backend.send('POST','/api/live', snapshot).catch(()=>{}); }
@@ -2187,6 +2202,13 @@ function renderPersonalBests(data){
     ${data.winStreak?`<div class="stat-block"><div class="stat-val">${data.winStreak}</div><div class="stat-label">Current Win Streak</div></div>`:''}
     ${formHtml}
   </div>`;
+}
+function askWipeAllData(){
+  uiConfirm('Wipe every player, game, and stat? This deletes the entire database (admin accounts and these settings are kept) and cannot be undone. Intended for clearing out test/dev data.', ()=>{
+    DB.wipeAll()
+      .then(()=>{ uiAlert('All player and game data has been wiped.'); show('home'); })
+      .catch(err=>uiAlert('Could not wipe data: '+err.message));
+  });
 }
 function askClearPlayerStats(name, mode){
   const label = mode === 'all' ? 'all' : mode === 'h2h' ? 'H2H' : 'Practice';
