@@ -405,8 +405,8 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, db.getPlayerBadges(url.searchParams.get('name')));
     }
     if (p === '/api/players/h2h-summary' && m === 'GET') {
-      const exGid = url.searchParams.get('excludeGameId');
-      return send(res, 200, db.getH2HSummary(url.searchParams.get('player'), url.searchParams.get('opponent'), exGid != null ? Number(exGid) : null));
+      const exGid = Number(url.searchParams.get('excludeGameId'));
+      return send(res, 200, db.getH2HSummary(url.searchParams.get('player'), url.searchParams.get('opponent'), Number.isFinite(exGid) ? exGid : null));
     }
     if (p === '/api/players/around-the-world' && m === 'GET') {
       return send(res, 200, db.getAroundTheWorldProgress(url.searchParams.get('name')));

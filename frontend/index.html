@@ -3040,6 +3040,16 @@ function undoLastTurn(){
   p.setDarts   = snap.setDarts;   p.gameDarts  = snap.gameDarts;
   p.gamePoints = snap.gamePoints; p.gameVisits = snap.gameVisits;
 
+  // Restore achievement/challenge tracking state — otherwise an undone (mis-entered)
+  // turn can leave a stale Metronome streak, Comeback Kid deficit, Around the Clock
+  // progress, or a premature Daily Challenge completion in place.
+  p.legVisitScores = snap.legVisitScores;
+  p.metronomeFired = snap.metronomeFired;
+  p.pendingIceInTheVeins = snap.pendingIceInTheVeins;
+  p.legWorstDeficit = snap.legWorstDeficit;
+  p.singlesHit = snap.singlesHit;
+  game.legVisitLogs.length = snap.legVisitLogsLen;
+
   // Restore game-level achievement counters
   game.gameOneEighties = snap.oe;
   game.gameBigFish     = snap.bf;
@@ -3090,7 +3100,12 @@ function enterTurn(){
     setDarts:p.setDarts, gameDarts:p.gameDarts,
     gamePoints:p.gamePoints, gameVisits:p.gameVisits,
     oe:game.gameOneEighties, bf:game.gameBigFish, bu:game.gameBusts,
-    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length };
+    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
+    // achievement/challenge tracking state — restored on undo so a mis-entered dart
+    // that's undone can't leave a stale badge/streak trace behind
+    legVisitScores:p.legVisitScores.slice(), metronomeFired:p.metronomeFired,
+    pendingIceInTheVeins:p.pendingIceInTheVeins, legWorstDeficit:p.legWorstDeficit,
+    singlesHit:new Set(p.singlesHit), legVisitLogsLen:game.legVisitLogs.length };
   game.lastTurnSnapshot = _snap;
 
   // per-leg and per-game scope (shown live on the scoreboard — both modes)
@@ -3155,7 +3170,7 @@ function enterTurn(){
   // condition is written to be mutually exclusive with 180 (so a genuine 180 never
   // also fires Hat Trick or So Close...).
   const _d = game.darts;
-  if(_d.length===3 && _d.every(d=>d.isTreble) && ev.scored !== 180){
+  if(_d.length===3 && _d.every(d=>d.isTreble) && ev.scored !== 180 && !ev.bust){
     showAchievement('hattrick', p.name);
     fireMomentCard('hattrick', { icon:'🎩', headline:'HAT TRICK!', player:p.name, statLine:'Three trebles, one visit' });
   } else if(_d.filter(d=>d.sector===25 && d.mult===2).length >= 2){
@@ -3164,7 +3179,7 @@ function enterTurn(){
   } else if(_d.length===3 && _d.every(d=>d.sector===0)){
     showAchievement('wherediditgo', p.name);
     fireMomentCard('wherediditgo', { icon:'💨', headline:"WHERE'D IT GO?", player:p.name, statLine:'Three misses' });
-  } else if(_d.length===3 && _d[0].sector===20 && _d[0].mult===3 && _d[1].sector===20 && _d[1].mult===3 && _d[2].sector===20 && _d[2].mult===1){
+  } else if(_d.length===3 && !ev.bust && _d[0].sector===20 && _d[0].mult===3 && _d[1].sector===20 && _d[1].mult===3 && _d[2].sector===20 && _d[2].mult===1){
     showAchievement('socloseshot', p.name);
     fireMomentCard('socloseshot', { icon:'😩', headline:'SO CLOSE...', player:p.name, statLine:'140 — one dart from 180' });
   } else if(ev.bust && _d.reduce((s,d)=>s+d.value,0) >= 100){
@@ -3283,6 +3298,14 @@ function enterTurn(){
       onLegWon(game.current);
       return;
     }
+  }
+  // The Long Game's metric is always "how many visits it took," even on the rare
+  // case where the player's final visit both drops under 40 *and* happens to be a
+  // legitimate double-out checkout to exactly 0 (a real ev.win) — without this, that
+  // one path would fall through to onLegWon()'s generic fallback (dart count) instead,
+  // making the same challenge format store two different kinds of number.
+  if(ev.win && activeChallenge && activeChallenge.player === p.name && activeChallenge.format==='long_game'){
+    activeChallenge.overrideMetric = p.legVisits;
   }
 
   if(ev.win){

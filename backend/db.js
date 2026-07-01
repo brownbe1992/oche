@@ -356,6 +356,7 @@ function completeGame(gameId, winnerName) {
 function startChallengeAttempt(playerName, gameId, challengeDate, format, target) {
   const p = getPlayer(playerName);
   if (!p) throw httpError(404, 'Player not found');
+  if (!Number.isFinite(Number(gameId))) throw httpError(400, 'gameId must be a number');
   try {
     db.prepare(`
       INSERT INTO daily_challenge_attempts (game_id, player_id, challenge_date, format, target)
@@ -370,16 +371,18 @@ function startChallengeAttempt(playerName, gameId, challengeDate, format, target
 function completeChallengeAttempt(playerName, challengeDate, resultDarts) {
   const p = getPlayer(playerName);
   if (!p) throw httpError(404, 'Player not found');
-  db.prepare(`
+  const info = db.prepare(`
     UPDATE daily_challenge_attempts SET completed = 1, result_darts = ?
     WHERE player_id = ? AND challenge_date = ?
   `).run(resultDarts != null ? Number(resultDarts) : null, p.id, String(challengeDate));
+  if (info.changes === 0) throw httpError(404, 'No matching challenge attempt for that date');
   return { ok: true };
 }
 
 // Today's attempt (if any) plus the current streak (consecutive calendar dates,
 // counting back from today, with a completed attempt — a missed or DNF day breaks it).
 function getChallengeStatus(playerName, todayDate) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(todayDate))) throw httpError(400, 'date must be YYYY-MM-DD');
   const p = getPlayer(playerName);
   if (!p) return { today: null, streak: 0, history: [] };
   const today = db.prepare(`
@@ -1537,7 +1540,7 @@ function getH2HSummary(name1, name2, excludeGameId) {
     ORDER BY g.completed_at DESC, g.id DESC
   `).all(p1.id, p2.id);
   const totalGames = rows.length;
-  const priorRows = excludeGameId != null ? rows.filter(r=>r.id !== Number(excludeGameId)) : rows;
+  const priorRows = Number.isFinite(excludeGameId) ? rows.filter(r=>r.id !== excludeGameId) : rows;
   const previousWinner = priorRows.length ? (priorRows[0].winner_id === p1.id ? name1 : name2) : null;
   return { totalGames, previousWinner };
 }
