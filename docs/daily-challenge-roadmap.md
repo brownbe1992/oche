@@ -5,37 +5,100 @@
 
 ## Goal
 
-A recurring, Wordle-style solo challenge — e.g. "finish 121 in the fewest darts
-possible today" — that gives a player a reason to open the app and throw a few darts
-even when nobody else is around to play H2H with. Purely local, no infrastructure,
-built entirely on the existing Practice-mode engine.
+A recurring, Wordle-style solo challenge that gives a player a reason to open the app
+and throw a few darts even when nobody else is around to play H2H with. Purely local,
+no infrastructure, built entirely on the existing Practice-mode engine.
+
+## The key design problem: staleness
+
+A single challenge *format* — even with the target number changing daily — gets old
+fast. "Finish 121 in the fewest darts" today, "finish 96 in the fewest darts"
+tomorrow, forever, is the same task with a different number bolted on. The fix is a
+**pool of genuinely different challenge shapes**, picked deterministically by date
+alongside the target itself, so consecutive days actually feel different rather than
+just numerically different.
 
 ## Design
 
-- **Challenge definition**: a specific starting score/checkout target, generated on a
-  schedule (daily is the more Wordle-like cadence; weekly is a gentler commitment —
-  worth deciding based on how often the target audience actually plays). Could be as
-  simple as a deterministic pick from a curated list of interesting checkouts (121,
-  170, etc.) seeded by the date, so everyone attempting "today's challenge" on the
-  same day gets the same target — no server-side randomness or state needed, just a
-  pure function of the date.
-- **Attempt flow**: a "Today's Challenge" entry point on the Home page, launching a
-  constrained Practice-mode session (starting score fixed to the challenge target,
-  single leg) using the existing scoring engine unmodified.
-- **Result tracking**: darts-to-finish (or "did not finish" if busted out / gave up)
-  recorded against the challenge date, similar in shape to how Personal Bests already
-  tracks "fewest darts to finish" — could reuse that computation, scoped to the
-  challenge's specific target score rather than any finish.
-- **Streak tracking**: consecutive days/weeks attempted, mirroring the "win streak"
-  concept from the achievements-badges roadmap — these two features share a lot of
-  underlying mechanics (attempt logging, streak computation) and could reasonably be
-  built by the same effort.
+### Challenge type pool
+
+All of these reuse the existing scoring engine unmodified — a challenge is just a
+constrained Practice-mode session with a specific starting condition and success
+metric:
+
+1. **Checkout Sprint** — finish a specific score (121, 170, 96, ...) in the fewest
+   darts. The original idea; still the most classic/recognizable format.
+2. **Speed to Zero** — a full 501 leg, fewest total darts, no fixed checkout target —
+   tests the whole leg, not just the finish.
+3. **Bullseye Gauntlet** — most bulls (single or double) hit in 9 darts.
+4. **Steady Hand** — score as close to exactly 20 as possible each visit *without*
+   going over — an inverted skill test: precision at a *low* target instead of
+   maximizing, genuinely different muscle than every other format here.
+5. **Treble Run** — most different treble numbers hit in 9 darts — rewards spread/
+   variety, not raw score.
+6. **The Long Game** — fewest visits to get from 501 down to under 40 remaining
+   without busting — an endurance/discipline format, distinct from the speed-focused
+   ones above.
+
+- **Deterministic generation**: both the format *and* the specific target/number for
+  a given day are picked by a pure function of the date (e.g. a seeded pick from the
+  pool + a curated list of interesting checkout targets for format 1) — no
+  server-side randomness or stored state needed. Everyone attempting "today's
+  challenge" on the same calendar day gets the identical challenge, the same way
+  Wordle works.
+- **Curated, not purely algorithmic, target selection** (for formats that need a
+  target number, like Checkout Sprint) — a hand-picked list of interesting,
+  achievable-but-non-trivial checkouts (121, 170, 96, 100, 141...) cycled
+  deterministically, rather than generating arbitrary numbers that might land on a
+  "bogey" score (like 169) that isn't checkoutable at all, or a trivially easy one
+  (like 40) that doesn't feel like a real challenge.
+- **Attempt flow**: a "Today's Challenge" entry point on the Home page, launching the
+  constrained Practice-mode session using the existing scoring engine unmodified —
+  no new scoring logic, just a pre-set starting condition and a success metric
+  computed from the resulting turns the same way Personal Bests already computes
+  "fewest darts to finish."
+- **Result tracking**: outcome (darts taken, bulls hit, trebles hit, etc. — whichever
+  metric that day's format uses) recorded against the challenge date. "Did not
+  finish" (busted out or gave up) is a valid, trackable outcome too, not just success/
+  failure — matches how a real Wordle "X/6" can also be a loss.
+- **Streak tracking**: consecutive days/weeks attempted. This shares real underlying
+  mechanics with the win-streak concept in `docs/achievements-badges-roadmap.md` —
+  attempt logging and streak computation are the same problem for both features and
+  are worth building once, shared between them.
+- **Results history strip** on the Home page — last 7 days' attempts (hit/miss/metric
+  value per day), not just today's challenge in isolation, so a streak actually has
+  somewhere visible to live rather than only existing as a number.
+- **Shareable results card** — this is essentially free now that the card-generation
+  engine exists (`docs/shareable-moments-roadmap.md`): "Today's Challenge: 121 in 4
+  darts 🎯" with a **Share** button, Wordle-style. Genuine virality potential (people
+  already share Wordle results unprompted) with zero new infrastructure — the card
+  engine, the Share button, and the Home Assistant webhook delivery path all already
+  exist and just need a new card type plugged in.
+
+## Suggested build order
+
+1. Challenge-type pool + deterministic date-seeded generation (format + target),
+   proven with just the two simplest formats (Checkout Sprint, Speed to Zero) before
+   building out the rest.
+2. "Today's Challenge" Home page entry point + constrained Practice-mode launch.
+3. Result tracking + the remaining challenge formats (Bullseye Gauntlet, Steady Hand,
+   Treble Run, The Long Game) — each is a new success-metric computation over the
+   same underlying turn/dart data, not new scoring logic.
+4. Streak tracking + the Home page results history strip.
+5. Shareable results card, reusing the existing card-generation engine.
 
 ## Open questions for whoever picks this up
 
-- Should the challenge target be a fixed curated list cycling deterministically, or
-  algorithmically generated (e.g. always a checkout that's achievable but non-trivial
-  — no free 2s or 4s, no impossible-in-3-darts scores)?
-- Does this need to work for Cricket/Baseball once those exist (per the game-modes
-  roadmap), or is it X01-specific by nature given "fewest darts to finish a score" is
-  an X01 concept that doesn't map cleanly onto marks-based or innings-based games?
+- Exact curated target list for Checkout Sprint days, and the full rotation/weighting
+  across the challenge-type pool (equal rotation, or weighted toward the more
+  approachable formats with occasional harder ones?) — a content decision best made
+  by actually playing each format a few times, not guessed up front.
+- Does this need to work for Cricket/Baseball once those exist (per
+  `docs/game-modes-roadmap.md`), or is it inherently X01-specific by nature — several
+  of the formats above (Checkout Sprint, Speed to Zero, The Long Game) are X01
+  concepts that don't map cleanly onto marks-based or innings-based games, while
+  others (Bullseye Gauntlet, Treble Run, Steady Hand) are really just "N darts,
+  optimize for X" and could plausibly generalize. Worth revisiting once a second game
+  type actually exists rather than speculating now.
+- Whether a missed/failed day should break a streak immediately or have some grace
+  (e.g. Duolingo-style streak freezes) — a product decision, not a technical one.

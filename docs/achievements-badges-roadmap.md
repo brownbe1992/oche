@@ -6,51 +6,166 @@
 ## Goal
 
 Extend the existing 180/Big Fish/nine-darter achievement-overlay pattern
-(`display.html`'s `ACH_LABELS`/`showAchievement()`) to a broader set of milestones —
-mostly content work on top of infrastructure that's already built, not a new system.
+(`frontend/index.html`'s `showAchievement()`, `display.html`'s `ACH_LABELS`) to a much
+broader, more varied set of badges — mostly content work on top of infrastructure
+that's already built, not a new system. The explicit design goal is **variety of
+shape, not just variety of name**: a badge list that's just "hit N of stat X" at
+increasing thresholds (10 180s, 50 180s, 100 180s...) turns into one long grind
+wearing different hats. Every badge below is picked to test a genuinely different
+thing — precision, nerve, consistency, history, or just a good story — so a player's
+badge case feels like a varied collection, not a leaderboard in disguise.
 
 ## Why this is cheap
 
 The hard part — a full-screen celebration overlay with confetti, achievement-specific
 styling, and live-scoreboard integration — already exists and already works for three
 achievement types. Adding more is primarily a matter of defining new trigger
-conditions and labels, not new plumbing.
+conditions and labels, not new plumbing. Every badge below is checked against data
+`backend/db.js` already stores (`turns`, `darts`, `game_players.dart_weight`,
+`created_at` timestamps) — none require new data collection, only new queries or
+in-session logic.
 
-## Candidate badges (beyond the existing three)
+## Two firing behaviors, not one
 
-- **Win streaks** — 5/10/20 consecutive wins, using data already available via the
-  existing win-rate leaderboard queries in `getHomeExtra`.
-- **First 100+ checkout**, **first 50+ average leg**, **century club** (lifetime
-  100+ checkouts reaching a round number) — milestone badges rather than per-game
-  achievements, shown once on first occurrence rather than every recurrence.
-- **Perfect leg variants beyond the nine-darter** — e.g. an 11-dart or 12-dart 501 leg
-  as a "notable" tier below the full nine-darter celebration, using a smaller/lighter
-  overlay treatment so the nine-darter still feels uniquely special (avoid diluting
-  the app's biggest existing celebration by treating everything the same way).
-- **Cricket/Baseball-specific badges** (once those game modes exist per the
-  game-modes roadmap) — e.g. Cricket's "9 marks in one visit" as that mode's 180
-  equivalent, keeping the badge system extensible per game type from the start rather
-  than hardcoded to X01 achievements.
+- **Recurring celebrations** — fun every time they happen (like 180/Big Fish today).
+  Fires the achievement overlay live, during play, no persistence needed beyond what
+  already exists.
+- **One-time milestones** — earned once, then live permanently in a "badge case."
+  These need a small `player_badges` table (`player_id, badge_id, earned_at`) so
+  "already earned" is a cheap lookup rather than re-deriving from a potentially
+  expensive live query every time, and so the celebration doesn't re-fire every time
+  the underlying condition remains true (e.g. lifetime 180 count staying above a
+  threshold forever after the first time it's crossed).
+
+Each badge below is tagged **[recurring]** or **[milestone]**.
+
+## Candidate badges
+
+### Precision & Skill
+*Uses `getDartAnalytics`'s sector/treble data, or straightforward new queries over
+`darts`/`turns` — no new data collection.*
+
+- **Hat Trick** *(recurring)* — three trebles in one visit, any numbers. Distinct from
+  180 specifically (three T20s) — this rewards treble *consistency* on any numbers,
+  not just luck landing on the biggest one.
+- **Bullseye Gauntlet** *(recurring)* — double bull (50) twice in one visit.
+- **Around the Clock** *(milestone)* — every number 1–20 hit as a single at least once
+  within a single session. A completionist checklist, not a skill ceiling.
+- **Around the World** *(milestone, the big one)* — hit *every* dart outcome at least
+  once, lifetime: all 20 numbers × single/double/treble (60 combinations), plus outer
+  bull (25) and inner/double bull (50), plus a miss — **63 distinct outcomes total**.
+  This is a genuine long-term collection goal, not a single-session task, and is
+  worth a dedicated progress view rather than a simple earned/not-earned flag — see
+  Design below.
+
+### Mental Game & Clutch
+*Needs reconstructing running score/context from `turns` within a leg — real but
+moderate query work, not trivial. Worth prototyping the exact thresholds against real
+play data rather than guessing.*
+
+- **Ice in the Veins** *(recurring)* — a 50+ checkout on the very next visit after a
+  bust earlier in the same leg.
+- **Nerves of Steel** *(recurring)* — win the deciding leg of a set, or the deciding
+  set of a match (the final leg of a Bo5/Bo7 specifically, not just any win).
+- **Comeback Kid** *(recurring)* — win a leg after trailing by 100+ points at the
+  midpoint of the leg.
+
+### Consistency
+*A genuinely different skill than "biggest single score" — rewards steady play, which
+nothing else in the badge list currently celebrates.*
+
+- **Metronome** *(recurring)* — five consecutive visits all within 15 points of each
+  other.
+- **Cruise Control** *(recurring)* — an entire leg with no visit scoring below 40.
+
+### Social / H2H
+*Uses `getH2HRecord` plus a lifetime-average comparison — both already computable
+from existing stats.*
+
+- **Giant Slayer** *(recurring)* — beat an opponent whose lifetime average is 15+
+  points higher than yours.
+- **Grudge Match** *(milestone)* — face the same opponent 10+ times. A history
+  milestone, not a skill badge — recognizes a real rivalry.
+- **The Rematch** *(recurring)* — beat someone who beat you the last time you played
+  them.
+
+### Novelty & Humor
+*Deliberately light and self-deprecating — these are the ones that make a badge case
+fun to show off rather than just another leaderboard. Every darts player recognizes
+these moments immediately.*
+
+- **Where'd It Go?** *(recurring)* — three misses in one visit. Pairs naturally with
+  the "No Score" voice callout already shipped (`docs/voice-announcements-roadmap.md`).
+- **Ton-titled to Nothing** *(recurring)* — score 100+ in a visit that still ends in a
+  bust.
+- **So Close...** *(recurring)* — open a leg with two treble 20s, then land a single
+  20 on the third dart (140 instead of the 180 that was right there). An extremely
+  specific, extremely relatable choke moment — exactly the kind of "good story" badge
+  this list is trying to have more of.
+- **Night Owl** / **Early Bird** *(recurring)* — a leg played after midnight / before
+  7am, using the `created_at` timestamps already stored on every turn.
+
+### Milestones (round numbers, first occurrences)
+*(milestone)* — first 100+ checkout, first sub-10-dart leg, and lifetime round-number
+totals (50th 180, 100th Big Fish, etc.). The most "traditional" badge shape in this
+list, deliberately kept to a small share of the total roster rather than the whole
+system, per the design goal above.
 
 ## Design
 
-- A **badges/milestones section** on the Player Profile, alongside Personal Bests —
-  a simple earned/not-yet-earned grid, similar in spirit to achievement systems in
-  most games, but modest in scope (no points/leveling system needed, just recognition).
-- Milestone badges (first-occurrence-only) need a way to check "has this player
-  already earned this" without re-triggering the celebration every time the
-  underlying stat condition remains true — likely a small `player_badges` table
-  (`player_id, badge_id, earned_at`) rather than deriving "already earned" from a
-  potentially expensive live query every time.
-- Tiered severity in the overlay treatment (routine vs. rare vs. legendary) should be
-  deliberate, not just "give everything confetti" — the nine-darter's dedicated mega
-  celebration exists precisely because it's the rarest thing in the game; new badges
-  shouldn't crowd that out.
+- **A "Badge Case" section on the Player Profile**, alongside Personal Bests — an
+  earned/not-yet-earned grid. Modest in scope: recognition, not points or leveling.
+  Every earned badge gets a **Share** button for free, since the card-generation
+  engine from `docs/shareable-moments-roadmap.md` already exists and already builds
+  arbitrary icon/headline/player/stat-line cards.
+- **Around the World gets its own progress view**, not just a grid cell — e.g. "47/63
+  outcomes hit," ideally visualized as a dartboard-shaped heatmap (reusing
+  `buildDartboard()`'s existing geometry from `frontend/index.html`) showing which of
+  the 63 outcomes are still missing. The completion query itself is just `SELECT
+  DISTINCT sector, multiplier FROM darts WHERE ...player...` — no new schema, matching
+  the app's "nothing pre-aggregated" philosophy — but the *progress UI* is genuinely
+  more work than any other badge here, so it should be scoped and estimated
+  separately from the rest of the list rather than assumed to be "just another badge."
+- **Tiered severity in the overlay treatment is deliberate.** The nine-darter's
+  dedicated mega-celebration (confetti, full-screen, extended duration) exists
+  precisely because it's the rarest thing in the game. New badges — even fun ones
+  like Hat Trick or So Close — get a lighter, smaller treatment so the app's biggest
+  moment doesn't get crowded out by treating everything the same way.
+- **Extensibility per game type from day one.** Once Cricket/Baseball exist (per
+  `docs/game-modes-roadmap.md`), they need their own badge vocabulary (e.g. Cricket's
+  "9 marks in one visit" as that mode's 180-equivalent) rather than every badge being
+  implicitly X01-only. The `player_badges` table's `badge_id` should be a free-form
+  string key from day one (not an enum tied to X01 concepts) so this doesn't require
+  a schema change later.
+
+## Suggested build order
+
+1. `player_badges` table + the small number of milestone badges that are cheap wins
+   (first 100+ checkout, first sub-10-dart leg, round-number lifetime totals) —
+   proves the earned/not-earned mechanism before anything fancier.
+2. The straightforward recurring badges that need no new query complexity (Hat
+   Trick, Bullseye Gauntlet, Where'd It Go?, Ton-titled to Nothing, So Close..., Night
+   Owl/Early Bird) — all detectable from a single turn's dart rows, the same way 180
+   detection already works in `enterTurn()`.
+3. Consistency badges (Metronome, Cruise Control) — need a leg's full visit sequence,
+   still no cross-leg/cross-game complexity.
+4. Social/H2H badges (Giant Slayer, Grudge Match, The Rematch) — need the existing
+   `getH2HRecord` plus a lifetime-average lookup.
+5. Mental Game/Clutch badges (Ice in the Veins, Nerves of Steel, Comeback Kid) — need
+   real prototyping against actual play data to pick sensible thresholds (is "trailing
+   by 100 at the midpoint" the right bar? needs testing, not guessing).
+6. Around the Clock, then Around the World — the two completionist badges, with
+   Around the World's dartboard-heatmap progress view as its own scoped sub-project
+   given the extra UI work involved.
 
 ## Open questions for whoever picks this up
 
-- Should badges be purely cosmetic/celebratory, or eventually tie into other roadmap
-  items (e.g. seeding advantage in tournament mode, shareable-moment card triggers)?
-- Full badge list and exact thresholds are a content decision better made once the
-  Cricket/Baseball roadmap's own achievements are defined, so the whole system is
-  designed for multiple game types from day one rather than retrofitted.
+- Exact thresholds for the Mental Game/Clutch category (how big a deficit counts as
+  a "comeback"?) should be validated against real play data, not fixed arbitrarily in
+  this doc.
+- Should badges eventually tie into other roadmap items (tournament seeding,
+  achievement-triggered voice announcements) or stay purely cosmetic/celebratory —
+  purely cosmetic is the simpler, safer v1 scope.
+- Whether Around the World's progress view is worth building before or after the
+  rest of the badge list, given it's meaningfully more UI work than everything else
+  combined.
