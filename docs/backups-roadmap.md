@@ -1,10 +1,11 @@
 # Backups & Disaster Recovery — Design Roadmap
 
-> Status: **✅ Done** (v0.6.2). `backend/backup.js` implements exactly the design
+> Status: **v1 ✅ Done** (v0.6.2). `backend/backup.js` implements exactly the design
 > below — verified end-to-end against a real seeded database: backup written,
 > restored from the `.db` file alone (no `-wal`/`-shm` needed), retention pruning
 > tested. README's "Backups" section documents the cron schedule and restore steps.
-> The Compose-profile sidecar remains an unbuilt stretch goal.
+> The Compose-profile sidecar remains an unbuilt stretch goal. **v2 (managing backups
+> from Settings — download/retention/restore/upload) is designed below, not started.**
 >
 > **Size: Low complexity.** A self-contained script plus documentation — no schema or
 > API changes to the running app, no new dependencies. **Usefulness: very high** — this
@@ -72,10 +73,91 @@ never been verified to actually work.
 3. README section: how to schedule via host cron, plus the tested restore procedure.
 4. **(Stretch)** an opt-in Compose profile for admins who'd rather not touch host cron.
 
-## Open questions for whoever picks this up
+## Open questions for whoever picks this up (v1)
 
 - Default retention window (7 daily backups? 30?) — cheap to make configurable rather
   than guessing once.
 - Whether backups should be encrypted at rest — likely out of scope for v1 given the
   threat model of a home-LAN, self-hosted deployment, but worth a conscious decision
   rather than a silent omission.
+
+---
+
+## v2: Managing backups from Settings (not started)
+
+> **Size: Medium overall.** Download and retention management are Low/Low-Medium —
+> straightforward admin-gated routes on top of what already exists. Restore and
+> upload-to-restore are Medium/Medium-High — not because the code is exotic, but
+> because they're two genuinely new problem areas for this codebase (swapping out a
+> live, open database file; accepting an uploaded file at all). **Usefulness: high**
+> for anyone who'd rather manage this from the app than SSH into the server — inspired
+> by the equivalent feature in Dispatcharr, which the project owner already relies on
+> and finds convenient.
+
+### Goal
+
+Let an admin download existing backups, manage retention, restore from a backup
+already on the server, and upload/restore from an older backup file — all from
+**Settings → Backups** — instead of needing shell access to the host.
+
+### Design, piece by piece
+
+**Download a backup** — list `darts_data/backups/` (name, size, timestamp) and stream
+a chosen file back over an admin-gated route, the same `requireAdmin` pattern already
+used everywhere else in `server.js`. No new problems to solve here.
+
+**Manage retention** — today `BACKUP_RETENTION_DAYS` is an env var read only by the
+standalone `backend/backup.js` script. For this to be manageable from Settings, it
+needs to move into the `settings` table (same pattern as `pin_lockout_threshold` /
+`admin_lockout_threshold`) so the UI and the cron-invoked script agree on one value,
+plus a way to delete an individual backup on demand.
+
+**Restore from an existing backup — the piece that actually needs careful design.**
+The server holds the live `.db` file open in a running Node process (`db.js`'s module-
+level `DatabaseSync`). Overwriting that file path on disk does **not** affect an
+already-open file handle — on Linux, the running process keeps reading/writing the
+*old* inode until it reopens the file. So "restore" can't be "copy the backup over
+`darts.db`, done" — it has to:
+1. Stage the chosen backup as the new `darts.db` (with any stale `-wal`/`-shm` files
+   cleared, same gotcha as the backup side).
+2. Force the app to actually reopen the file — either by exiting the process and
+   relying on `restart: unless-stopped` in `docker-compose.yml` to relaunch it clean,
+   or with a clear "restart now" instruction if an automatic self-restart feels too
+   risky to trigger from inside a request handler.
+3. Treat this as at least as destructive as the existing "Wipe all player & game data"
+   flow (`askWipeAllData()` in `frontend/index.html`) — it's a full, irreversible
+   replacement of the live database — and give it comparable confirmation weight, or
+   stronger (see Open questions).
+
+**Upload an old backup to restore from** — adds a capability the app has never needed
+before: an actual file upload. Every existing endpoint goes through `readJson()`,
+which buffers the whole body in memory and caps it at 1MB (see
+`docs/testing-and-observability-roadmap.md`'s Part A) — real backup files will exceed
+that as data grows over years, so this needs its own streaming-to-disk upload path,
+not a reuse of `readJson()`. It also must **validate the uploaded file is actually a
+legitimate SQLite database** (check the file header magic bytes, then open it
+read-only and run `PRAGMA integrity_check`) before ever treating it as a restore
+candidate — accepting an unvalidated file and pointing the app at it is a real risk,
+not just a nicety, since the next step is replacing the live database with it.
+
+### Suggested build order
+
+1. Move `BACKUP_RETENTION_DAYS` into the `settings` table; add list/download/delete
+   routes.
+2. Settings UI: a "Backups" section listing existing snapshots with download/delete,
+   plus the retention control.
+3. Restore-from-existing-backup, including the stage-then-restart sequencing above,
+   with confirmation UX at least as strong as the wipe-all-data flow.
+4. Upload-to-restore: streaming upload endpoint + SQLite file validation, then reuses
+   the same restore/restart flow from step 3.
+
+### Open questions for whoever picks this up (v2)
+
+- Should restoring require re-entering the admin password (not just an already-active
+  session), given it's a stronger, less-reversible action than anything else currently
+  gated behind a simple confirm dialog?
+- Should the app attempt an automatic self-restart after staging a restore (cleaner
+  UX, but code triggering its own process exit mid-request is worth being deliberate
+  about), or always hand the admin an explicit "restart the container now" instruction?
+- Whether upload size needs an explicit cap distinct from the 1MB JSON-body limit, and
+  what a sane one is given realistic multi-year database sizes.
