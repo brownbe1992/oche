@@ -1,7 +1,9 @@
 # Additional Game Modes — Design Roadmap
 
-> Status: **not started**. This is a design doc for a future release, captured so the
-> thinking isn't lost. Nothing described here exists in the app yet.
+> Status: **not started** (Cricket/Baseball themselves). One piece of schema
+> groundwork — `games.game_type`/`games.config` — is done; see the Data model
+> section below. This is otherwise a design doc for a future release, captured so
+> the thinking isn't lost.
 
 ## Goal
 
@@ -71,6 +73,13 @@ changing X01 behavior at all* — proving the abstraction is sound before Cricke
 depends on it.
 
 ## Data model
+
+> **Status: ✅ Schema groundwork done** (see `docs/existing-app-prep-roadmap.md`
+> item 2, implemented in `backend/db.js` on `dev`). `games.game_type` and
+> `games.config` both exist now, populated as `'x01'` / `{startingScore: ...}` for
+> every game — hardcoded, since no Cricket/Baseball engine or New Game UI exists
+> yet. The rest of this section (Cricket actually using `config`, the nine-darter
+> query fix, etc.) is still not started.
 
 - `games.game_type` (new column: `'x01' | 'cricket' | 'baseball' | ...`)
 - `games.category` stays as the human-readable label (X01: "501" as today; Cricket:

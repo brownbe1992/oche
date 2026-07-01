@@ -1,6 +1,6 @@
 # Preparing the Existing App for Future Roadmaps
 
-> Status: **in progress** (1 of 9 items done — see item 8). This doc reviews all 16
+> Status: **in progress** (2 of 9 items done — see items 2 and 8). This doc reviews all 16
 > other roadmap docs in `docs/` and recommends changes to the *existing* codebase now,
 > specifically to reduce rework later. It intentionally does not recommend building
 > any future feature early — only making the current code more hospitable to features
@@ -50,6 +50,13 @@ means the *next* dimension to land only touches the helper, not 20 call sites.
 ---
 
 ## 2. Add `games.game_type` and `games.config` now (cheap, additive, zero behavior change)
+
+> **Status: ✅ Done** (see `backend/db.js` on `dev`). Added via the same additive
+> `ALTER TABLE` pattern as `practice`. `createGame()` now writes `game_type='x01'`
+> and `config='{"startingScore": ...}'` for every game — hardcoded, since no
+> game-mode selection exists yet. Verified fresh installs and existing databases
+> both migrate cleanly, and that every existing stats/summary endpoint is
+> byte-for-byte unchanged.
 
 **The evidence**: `game-modes-roadmap.md`'s entire schema design depends on this
 split existing. `games.practice` itself was added exactly this way — an additive
@@ -219,8 +226,8 @@ Worth naming explicitly, since not everything needs a change:
 
 **Worth doing soon, independent of any specific roadmap landing:**
 1. ~~Phone-responsive CSS pass (item 8).~~ ✅ Done.
-2. Add `games.game_type`/`games.config` columns, defaulted to today's behavior
-   (item 2).
+2. ~~Add `games.game_type`/`games.config` columns, defaulted to today's behavior
+   (item 2).~~ ✅ Done.
 
 **Worth adopting as a stated convention now, cheap to write down, expensive to
 un-learn later:**
