@@ -1,6 +1,6 @@
 # Preparing the Existing App for Future Roadmaps
 
-> Status: **in progress** (2 of 9 items done — see items 2 and 8). This doc reviews all 16
+> Status: **in progress** (3 of 9 items done/adopted — see items 2, 3, and 8). This doc reviews all 16
 > other roadmap docs in `docs/` and recommends changes to the *existing* codebase now,
 > specifically to reduce rework later. It intentionally does not recommend building
 > any future feature early — only making the current code more hospitable to features
@@ -73,6 +73,12 @@ already exists, instead of bundling a migration into that same refactor.
 ---
 
 ## 3. Convention: link new game *contexts* into `games`, don't add a new boolean per feature
+
+> **Status: ✅ Adopted** as a binding project convention in `CLAUDE.md`, so it
+> persists across sessions rather than depending on this doc being re-read. No code
+> change was needed — the next feature that needs a new context (online
+> multiplayer, or anything not yet designed) just follows this pattern from the
+> start.
 
 **The evidence**: `tournament-mode-roadmap.md` already does this correctly —
 `tournament_matches.game_id` points at a normal `games` row, rather than adding an
@@ -231,7 +237,8 @@ Worth naming explicitly, since not everything needs a change:
 
 **Worth adopting as a stated convention now, cheap to write down, expensive to
 un-learn later:**
-3. Context tables link into `games` via FK, never a new boolean on `games` (item 3).
+3. ~~Context tables link into `games` via FK, never a new boolean on `games`
+   (item 3).~~ ✅ Adopted — see `CLAUDE.md`.
 4. Docker Compose profiles for future optional services (item 9).
 
 **Worth doing when the first feature that needs it actually starts:**
