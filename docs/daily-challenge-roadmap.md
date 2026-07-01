@@ -1,14 +1,22 @@
 # Daily/Weekly Challenge — Design Roadmap
 
-> Status: **v1 shipped**. Built and tested end-to-end per suggested-build-order steps
-> 1, 2, 4, and 5: deterministic date-seeded generation (`todaysChallenge()` in
-> `frontend/index.html`) proven with the two simplest formats (Checkout Sprint, Speed
-> to Zero); the Home page "Today's Challenge" entry point and constrained
-> Practice-mode launch; streak tracking and the 7-day history strip
-> (`getChallengeStatus()` in `backend/db.js`); and the shareable results card
-> (`dailychallenge` moment-card type). **Not yet built** (step 3): the remaining four
-> challenge formats (Bullseye Gauntlet, Steady Hand, Treble Run, The Long Game), each
-> needing a new success-metric computation — open for a follow-on pass.
+> Status: **fully shipped**. All six challenge-type-pool formats are built and tested
+> end-to-end, covering every suggested-build-order step:
+> 1. Deterministic date-seeded generation (`todaysChallenge()` in `frontend/index.html`)
+>    across all six formats.
+> 2. The Home page "Today's Challenge" entry point and constrained Practice-mode launch.
+> 3. Result tracking + the four formats beyond the original two: Bullseye Gauntlet
+>    (most bulls in 3 visits), Steady Hand (closest to 20 per visit without going
+>    over), Treble Run (most distinct trebles in 3 visits), and The Long Game (fewest
+>    visits from 501 to under 40, no busts). These three dart-count-based formats and
+>    Long Game don't play out a normal X01 win — `enterTurn()` detects each format's
+>    completion condition directly (3 visits logged, or remaining drops under 40) and
+>    ends the round early by invoking the same `onLegWon()` completion path the
+>    original two formats use, rather than duplicating it.
+> 4. Streak tracking + the Home page 7-day history strip, with per-format metric
+>    labels (bulls/trebles/points/visits/darts) instead of a hardcoded "darts" unit.
+> 5. Shareable results card (`dailychallenge` moment-card type), format-aware for all
+>    six challenge types.
 
 ## Goal
 

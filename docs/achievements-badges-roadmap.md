@@ -1,15 +1,26 @@
 # Expanded Achievements & Badges — Design Roadmap
 
-> Status: **v1 shipped**. Built and tested end-to-end (`frontend/index.html`'s
-> `enterTurn()`, `showAchievement()`/`ACH_LABELS` in both `index.html` and
-> `display.html`, the `player_badges` table in `backend/db.js`, and a Badge Case
-> section on the Player Profile page). Live per suggested-build-order steps 1-2: the
-> milestone mechanism (first 100+ checkout) plus all the recurring badges that need no
-> new query complexity (Hat Trick, Bullseye Gauntlet, Where'd It Go?, Ton-titled to
-> Nothing, So Close..., Night Owl/Early Bird). **Not yet built** (steps 3-6): Around the
-> Clock/Around the World, Consistency (Metronome, Cruise Control), Social/H2H (Giant
-> Slayer, Grudge Match, The Rematch), and Mental Game/Clutch (Ice in the Veins, Nerves
-> of Steel, Comeback Kid) — all still open for a follow-on pass.
+> Status: **fully shipped**. Every badge in the candidate list is built and tested
+> end-to-end (`frontend/index.html`'s `enterTurn()`/`onLegWon()`, `showAchievement()`/
+> `ACH_LABELS` in both `index.html` and `display.html`, the `player_badges` table in
+> `backend/db.js`, a Badge Case section on the Player Profile page, and an Around the
+> World progress grid). All six suggested-build-order steps are live:
+> 1. Milestones: first 100+ checkout, Grudge Match, Around the Clock, Around the World.
+> 2. Simple recurring: Hat Trick, Bullseye Gauntlet, Where'd It Go?, Ton-titled to
+>    Nothing, So Close..., Night Owl/Early Bird.
+> 3. Consistency: Metronome, Cruise Control.
+> 4. Social/H2H: Giant Slayer, Grudge Match, The Rematch (`getH2HSummary()` in
+>    `backend/db.js`, comparing lifetime averages already cached client-side).
+> 5. Mental Game/Clutch: Ice in the Veins, Nerves of Steel, Comeback Kid — with two
+>    deliberate simplifications instead of guessing exact thresholds: Comeback Kid
+>    fires on "trailing by 100+ at any point in the leg" rather than strictly at the
+>    literal midpoint, and Nerves of Steel's "decider" check is legs/sets tied one
+>    short of the winning threshold entering the leg/set.
+> 6. Completionist: Around the Clock (per-session, per-player) and Around the World
+>    (lifetime, `getAroundTheWorldProgress()`'s `SELECT DISTINCT sector, multiplier`
+>    query) — the progress view is a compact hit/miss grid rather than a full
+>    dartboard-shaped heatmap, a deliberate scope simplification from the "ideally"
+>    phrasing in the Design section below.
 
 ## Goal
 

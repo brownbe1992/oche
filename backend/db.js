@@ -1522,6 +1522,40 @@ function getH2HRecord(name1, name2) {
   return { p1:name1, p2:name2, p1Wins, p2Wins, total:rows.length };
 }
 
+// Used by the Grudge Match / Rematch badges (docs/achievements-badges-roadmap.md).
+// excludeGameId lets the caller ask "who won the last time before this one" right
+// after the current match has just been recorded.
+function getH2HSummary(name1, name2, excludeGameId) {
+  if(!name1 || !name2) return null;
+  const p1 = getPlayer(name1), p2 = getPlayer(name2);
+  if(!p1 || !p2) return null;
+  const rows = db.prepare(`
+    SELECT g.id, g.winner_id FROM games g
+    JOIN game_players gp1 ON gp1.game_id=g.id AND gp1.player_id=?
+    JOIN game_players gp2 ON gp2.game_id=g.id AND gp2.player_id=?
+    WHERE g.practice=0 AND g.winner_id IS NOT NULL
+    ORDER BY g.completed_at DESC, g.id DESC
+  `).all(p1.id, p2.id);
+  const totalGames = rows.length;
+  const priorRows = excludeGameId != null ? rows.filter(r=>r.id !== Number(excludeGameId)) : rows;
+  const previousWinner = priorRows.length ? (priorRows[0].winner_id === p1.id ? name1 : name2) : null;
+  return { totalGames, previousWinner };
+}
+
+// Around the World progress (docs/achievements-badges-roadmap.md): 63 distinct dart
+// outcomes total — 20 numbers x single/double/treble (60), outer bull, double bull,
+// and a miss. No new schema; just a DISTINCT scan over darts already stored.
+function getAroundTheWorldProgress(playerName) {
+  const p = getPlayer(playerName);
+  if(!p) return { hit:[], count:0, total:63 };
+  const rows = db.prepare(`
+    SELECT DISTINCT d.sector AS sector, d.multiplier AS mult
+    FROM darts d JOIN turns t ON t.id = d.turn_id
+    WHERE t.player_id = ?
+  `).all(p.id);
+  return { hit: rows, count: rows.length, total: 63 };
+}
+
 /* ---------- helpers ---------- */
 function httpError(status, message) {
   const e = new Error(message); e.status = status; return e;
@@ -1543,7 +1577,7 @@ module.exports = {
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword,
   login, logout, getSessionAdmin, adminLockoutThreshold,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,
-  awardBadge, getPlayerBadges,
+  awardBadge, getPlayerBadges, getH2HSummary, getAroundTheWorldProgress,
   startChallengeAttempt, completeChallengeAttempt, getChallengeStatus,
   _db: db,
 };

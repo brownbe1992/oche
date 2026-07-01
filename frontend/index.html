@@ -1310,11 +1310,32 @@ function showLegend(backTo){
    day to day, not just a number inside the same task shape every time.
    ========================================================================= */
 const CHALLENGE_CHECKOUTS = [121, 96, 100, 141, 170, 40, 32, 50, 60, 80, 110, 130];
-const CHALLENGE_FORMATS = ['checkout_sprint','speed_to_zero'];
+const CHALLENGE_FORMATS = ['checkout_sprint','speed_to_zero','bullseye_gauntlet','steady_hand','treble_run','long_game'];
 const CHALLENGE_LABELS = {
-  checkout_sprint: (t)=>`Checkout Sprint — finish ${t} in the fewest darts`,
-  speed_to_zero:   ()=>`Speed to Zero — full 501 leg, fewest total darts`,
+  checkout_sprint:   (t)=>`Checkout Sprint — finish ${t} in the fewest darts`,
+  speed_to_zero:     ()=>`Speed to Zero — full 501 leg, fewest total darts`,
+  bullseye_gauntlet: ()=>`Bullseye Gauntlet — most bulls hit in 3 visits (9 darts)`,
+  steady_hand:       ()=>`Steady Hand — score as close to 20 as possible each visit, without going over`,
+  treble_run:        ()=>`Treble Run — most different trebles hit in 3 visits (9 darts)`,
+  long_game:         ()=>`The Long Game — fewest visits from 501 to under 40, no busts`,
 };
+// Short form for moment cards / stat lines, where the full label above is too long.
+const CHALLENGE_SHORT_LABELS = {
+  checkout_sprint:   (t)=>`Checkout ${t}`,
+  speed_to_zero:     ()=>`Speed to Zero`,
+  bullseye_gauntlet: ()=>`Bullseye Gauntlet`,
+  steady_hand:       ()=>`Steady Hand`,
+  treble_run:        ()=>`Treble Run`,
+  long_game:         ()=>`The Long Game`,
+};
+function challengeShortLabel(format, target){ return (CHALLENGE_SHORT_LABELS[format] || CHALLENGE_SHORT_LABELS.speed_to_zero)(target); }
+function challengeMetricLabel(format, value){
+  if(format==='bullseye_gauntlet') return `${value} bull${value===1?'':'s'}`;
+  if(format==='treble_run')        return `${value} treble${value===1?'':'s'}`;
+  if(format==='steady_hand')       return `${value} pts`;
+  if(format==='long_game')         return `${value} visit${value===1?'':'s'}`;
+  return `${value} darts`;
+}
 // Deterministic hash of a string -> a small non-negative int, used to pick an index
 // into a pool. Same date always produces the same pick — no stored state needed.
 function _seededIndex(s, mod){
@@ -1333,6 +1354,7 @@ let activeChallenge = null;   // { date, format, target, player } while a challe
 let challengePlayer = null;   // last-selected player for the challenge card
 let lastLegWasChallenge = false; // set true right when a challenge attempt's card fires, so finishUnit() knows to show its Share button
 let sessionBadgesShown = { nightOwl:false, earlyBird:false }; // novelty badges that should fire at most once per session
+let earnedBadgeCache = {}; // playerName -> Set(badgeId), warms per game so Around the World's query can be skipped once earned
 
 function renderChallengeCard(){
   const el = document.getElementById('challenge-card-body');
@@ -1347,7 +1369,7 @@ function renderChallengeCard(){
     const streakHtml = status.streak > 0 ? `<span style="color:var(--gold);font-weight:600">🔥 ${status.streak} day streak</span>` : '';
     let resultHtml;
     if(status.today && status.today.completed){
-      resultHtml = `<div style="margin-top:10px;color:var(--ink)">✅ Done — ${status.today.result_darts} darts. Nice work.</div>`;
+      resultHtml = `<div style="margin-top:10px;color:var(--ink)">✅ Done — ${challengeMetricLabel(status.today.format, status.today.result_darts)}. Nice work.</div>`;
     } else if(status.today){
       resultHtml = `<div style="margin-top:10px;color:var(--muted)">Attempted today, not finished.</div>`;
     } else {
@@ -1358,7 +1380,7 @@ function renderChallengeCard(){
       status.history.slice().reverse().map(h=>{
         const day = new Date(h.challenge_date+'T00:00:00Z').toLocaleDateString(undefined,{weekday:'short'})[0];
         const cls = h.completed ? 'background:var(--gold);color:var(--board)' : 'background:var(--surface-2);color:var(--muted)';
-        return `<div title="${h.challenge_date}${h.completed?' — '+h.result_darts+' darts':' — not finished'}" style="width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;${cls}">${day}</div>`;
+        return `<div title="${h.challenge_date}${h.completed?' — '+challengeMetricLabel(h.format, h.result_darts):' — not finished'}" style="width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;${cls}">${day}</div>`;
       }).join('')
     }</div>` : '';
     el.innerHTML = `
@@ -1376,7 +1398,13 @@ function startChallengeGame(){
   const challenge = todaysChallenge();
   if(!challengePlayer || !roster.includes(challengePlayer)) return;
   setup.slots = [challengePlayer];
-  setup.start = challenge.format==='checkout_sprint' ? challenge.target : 501;
+  // Bullseye Gauntlet / Steady Hand / Treble Run don't play to zero at all — the
+  // success metric is dart-count-based, not score-based — so they get a filler
+  // start score comfortably above any realistic 9-dart total (max 9x60=540) purely
+  // so the underlying X01 engine never spuriously "busts" or "wins" mid-challenge.
+  setup.start = challenge.format==='checkout_sprint' ? challenge.target
+    : (challenge.format==='bullseye_gauntlet' || challenge.format==='steady_hand' || challenge.format==='treble_run') ? 1000
+    : 501; // speed_to_zero, long_game
   setup.legsPerSet = 1;
   setup.setsPerGame = 1;
   setup.practice = true;
@@ -2141,6 +2169,7 @@ async function startGame(){
     gameBigFish: 0,
     gameBusts: 0,
     currentLegTurns: [],   // turns in the current leg (reset per leg)
+    legVisitLogs: [],      // raw dart arrays per visit this leg (reset per leg; Daily Challenge dart-count formats)
     sessionTurns: [],      // turns in the entire session (grows across legs)
     lastTurnSnapshot: null,// state before last committed turn (for undo)
     turnSeq: 0,            // monotonic counter, bumped each time a new turn begins (voice announcements dedup on this)
@@ -2150,6 +2179,12 @@ async function startGame(){
   };
   names.forEach(ensurePlayerStats);
   sessionBadgesShown = { nightOwl:false, earlyBird:false };
+  earnedBadgeCache = {};
+  names.forEach(n=>{
+    Backend.get(`/api/players/badges?name=${encodeURIComponent(n)}`)
+      .then(list=>{ earnedBadgeCache[n] = new Set((list||[]).map(b=>b.badge_id)); })
+      .catch(()=>{ earnedBadgeCache[n] = new Set(); });
+  });
   await DB.beginGame(game, names);   // registers the game; gets a gameId in api mode
   if(activeChallenge && DB.gameId != null){
     Backend.send('POST','/api/challenges/start', { player:activeChallenge.player, gameId:DB.gameId,
@@ -2181,7 +2216,12 @@ function newMatchPlayer(name, start){
     gameDarts:0,                  // darts thrown in the entire game / session
     gameAvgDarts:0,               // darts counted for the game 3-dart average (bust=3, win=actual)
     gamePoints:0, gameVisits:0,   // resets every game -> per-game average
-    legsWon:0,    setsWon:0 };    // legsWon = legs in the current set
+    legsWon:0,    setsWon:0,      // legsWon = legs in the current set
+    legVisitScores:[],           // running list of this leg's visit totals (Metronome/Cruise Control)
+    metronomeFired:false,        // Metronome fires once per leg, not once per qualifying turn
+    pendingIceInTheVeins:false,  // true right after a bust, cleared after the player's next visit
+    legWorstDeficit:0,           // largest (opponent remaining - my remaining) seen this leg (Comeback Kid)
+    singlesHit: new Set() };     // distinct 1-20 singles hit this session (Around the Clock)
 }
 
 /* ---------- stats helpers ---------- */
@@ -2367,6 +2407,10 @@ function renderPlayerPage(){
       <div id="player-badges"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </div>
     <details class="pp-section">
+      <summary class="pp-section-title">Around the World Progress</summary>
+      <div id="player-atw-progress"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </details>
+    <details class="pp-section">
       <summary class="pp-section-title">Top Checkouts</summary>
       <div id="player-top-finishes"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>
@@ -2475,11 +2519,15 @@ function renderPlayerPage(){
   loadDartAnalytics();
   loadPersonalBests();
   loadPlayerBadges();
+  loadAroundTheWorldProgress();
 }
 // Milestone badges only — recurring celebrations (Hat Trick, Night Owl, etc.) fire live
 // during play but aren't persisted, so they don't appear in the Badge Case.
 const BADGE_INFO = {
   first_100_checkout: { icon:'🥇', label:'First 100+ Checkout', achType:'first100checkout' },
+  grudge_match:       { icon:'⚔️', label:'Grudge Match', achType:'grudgematch' },
+  around_the_clock:   { icon:'🕐', label:'Around the Clock', achType:'aroundtheclock' },
+  around_the_world:   { icon:'🌍', label:'Around the World', achType:'aroundtheworld' },
 };
 function loadPlayerBadges(){
   const container=document.getElementById('player-badges');
@@ -2502,6 +2550,33 @@ function renderPlayerBadges(data){
     }
     return `<div class="stat-block" style="opacity:.4"><div class="stat-val">${info.icon}</div><div class="stat-label">${info.label}<br>Not yet earned</div></div>`;
   }).join('')}</div>`;
+}
+// Around the World progress (docs/achievements-badges-roadmap.md): a compact grid
+// rather than a full dartboard-shaped heatmap — the doc explicitly calls the ideal
+// dartboard visualization a separately-scoped sub-project; this is the simpler v1.
+function loadAroundTheWorldProgress(){
+  const container=document.getElementById('player-atw-progress');
+  if(!container) return;
+  Backend.get(`/api/players/around-the-world?name=${encodeURIComponent(currentPlayer)}`)
+    .then(data=>renderAroundTheWorldProgress(data))
+    .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load progress.</p>`; });
+}
+function renderAroundTheWorldProgress(data){
+  const container=document.getElementById('player-atw-progress');
+  if(!container) return;
+  const hitSet = new Set((data && data.hit || []).map(h=>`${h.sector}:${h.mult}`));
+  const cell = (label, sector, mult) => {
+    const hit = hitSet.has(`${sector}:${mult}`);
+    return `<div title="${label}" style="width:34px;height:34px;border-radius:.6vmin;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;
+      background:${hit?'var(--gold)':'var(--surface-2)'};color:${hit?'var(--board)':'var(--muted)'}">${label}</div>`;
+  };
+  const numberCells = Array.from({length:20},(_,i)=>i+1).map(n=>
+    `<div style="display:flex;gap:3px">${cell('S'+n,n,1)}${cell('D'+n,n,2)}${cell('T'+n,n,3)}</div>`
+  ).join('');
+  const specialCells = `<div style="display:flex;gap:3px">${cell('25',25,1)}${cell('Bull',25,2)}${cell('Miss',0,1)}</div>`;
+  container.innerHTML = `
+    <p class="pp-meta" style="margin:0 0 10px">${(data && data.count) || 0} / ${(data && data.total) || 63} outcomes hit</p>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">${numberCells}${specialCells}</div>`;
 }
 async function shareEarnedBadge(badgeId){
   const info = BADGE_INFO[badgeId];
@@ -2641,10 +2716,17 @@ const achNameEl    = document.getElementById('ach-name');
 const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter':'🏆 NINE-DARTER! 🏆',
   hattrick:'Hat Trick! 🎩', bullseyegauntlet:'Bullseye Gauntlet! 🔴', wherediditgo:"Where'd It Go? 💨",
   socloseshot:'So Close... 😩', tontitled:'Ton-titled to Nothing 😅', nightowl:'Night Owl 🦉',
-  earlybird:'Early Bird 🐦', first100checkout:'First 100+ Checkout! 🥇' };
+  earlybird:'Early Bird 🐦', first100checkout:'First 100+ Checkout! 🥇',
+  metronome:'Metronome! 🎯', cruisecontrol:'Cruise Control 🚗', iceintheveins:'Ice in the Veins ❄️',
+  nervesofsteel:'Nerves of Steel 🧊', comebackkid:'Comeback Kid 🔥', giantslayer:'Giant Slayer 🗡️',
+  grudgematch:'Grudge Match ⚔️', therematch:'The Rematch 🔁', aroundtheclock:'Around the Clock 🕐',
+  aroundtheworld:'Around the World! 🌍' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
-  tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000 };
+  tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
+  metronome:2500, cruisecontrol:2500, iceintheveins:2500, nervesofsteel:3000,
+  comebackkid:3000, giantslayer:2500, grudgematch:3000, therematch:2500,
+  aroundtheclock:3500, aroundtheworld:5000 };
 let achTimer = null;
 
 function spawnConfetti(root, count){
@@ -3023,6 +3105,13 @@ function enterTurn(){
   p.gamePoints += ev.scored; p.gameVisits += 1;
   if(!ev.bust) p.score = ev.newScore;
 
+  // Comeback Kid tracking: the worst remaining-score deficit seen this leg, needs
+  // an opponent to trail behind (H2H, or a 2-player practice match).
+  if(game.players.length===2){
+    const _opp = game.players.find(x=>x!==p);
+    if(_opp) p.legWorstDeficit = Math.max(p.legWorstDeficit, p.score - _opp.score);
+  }
+
   // persist the turn to the database
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.scored, bust:ev.bust,
@@ -3082,6 +3171,66 @@ function enterTurn(){
     showAchievement('tontitled', p.name);
     fireMomentCard('tontitled', { icon:'😅', headline:'TON-TITLED TO NOTHING', player:p.name, statLine:'100+ attempted, still busted' });
   }
+
+  // Consistency badges — Metronome (5 consecutive visits within 15 points of each
+  // other) and Cruise Control (no visit below 40, the whole leg). Uses the raw
+  // attempted visit total so a bust still counts toward "how hard were they hitting,"
+  // not just the zeroed-out scored value.
+  p.legVisitScores.push(ev.pointsThisVisit);
+  if(!p.metronomeFired && p.legVisitScores.length>=5){
+    const _last5 = p.legVisitScores.slice(-5);
+    if(Math.max(..._last5) - Math.min(..._last5) <= 15){
+      p.metronomeFired = true;
+      showAchievement('metronome', p.name);
+      fireMomentCard('metronome', { icon:'🎯', headline:'METRONOME', player:p.name, statLine:'5 visits within 15 points of each other' });
+    }
+  }
+  if(ev.win && p.legVisitScores.every(v=>v>=40)){
+    showAchievement('cruisecontrol', p.name);
+    fireMomentCard('cruisecontrol', { icon:'🚗', headline:'CRUISE CONTROL', player:p.name, statLine:'No visit below 40, the whole leg' });
+  }
+
+  // Ice in the Veins: a 50+ checkout on the very next visit after this player's own
+  // bust earlier in the leg (cleared either way after this visit — a hit or a miss
+  // both consume the "next visit" window).
+  const _iceEligible = p.pendingIceInTheVeins;
+  p.pendingIceInTheVeins = !!ev.bust;
+  if(ev.win && _iceEligible && ev.pointsThisVisit >= 50){
+    showAchievement('iceintheveins', p.name);
+    fireMomentCard('iceintheveins', { icon:'❄️', headline:'ICE IN THE VEINS', player:p.name, statLine:`${ev.pointsThisVisit} checkout right after a bust` });
+  }
+
+  // Around the Clock (milestone): every 1-20 single hit within one session.
+  // Tracked per-player so it's meaningful in H2H too (each player's own singles).
+  _d.forEach(d=>{ if(d.sector>=1 && d.sector<=20 && d.mult===1) p.singlesHit.add(d.sector); });
+  if(p.singlesHit.size >= 20){
+    Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'around_the_clock' }).then(r=>{
+      if(r && r.newlyEarned){
+        showAchievement('aroundtheclock', p.name);
+        fireMomentCard('aroundtheclock', { icon:'🕐', headline:'AROUND THE CLOCK', player:p.name, statLine:'Every number, 1 to 20, singled out' });
+      }
+    }).catch(()=>{});
+  }
+  // Around the World (milestone): all 63 lifetime dart outcomes. Skips the (mildly
+  // expensive) progress query once this player's cached badge list already has it.
+  // Queued behind DB.recordTurn() above (both go through the same DB._queue chain)
+  // so the progress query only runs once this visit's darts are actually persisted —
+  // querying immediately would race the still-pending recordTurn write.
+  if(!(earnedBadgeCache[p.name] && earnedBadgeCache[p.name].has('around_the_world'))){
+    DB._queue(()=>Backend.get(`/api/players/around-the-world?name=${encodeURIComponent(p.name)}`).then(prog=>{
+      if(prog && prog.count >= prog.total){
+        Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'around_the_world' }).then(r=>{
+          if(!earnedBadgeCache[p.name]) earnedBadgeCache[p.name] = new Set();
+          earnedBadgeCache[p.name].add('around_the_world');
+          if(r && r.newlyEarned){
+            showAchievement('aroundtheworld', p.name);
+            fireMomentCard('aroundtheworld', { icon:'🌍', headline:'AROUND THE WORLD', player:p.name, statLine:'Every dart outcome, lifetime' });
+          }
+        }).catch(()=>{});
+      }
+    }).catch(()=>{}));
+  }
+
   // Novelty time-of-day badges — once per session (not once per turn, which would
   // spam the same celebration all night), reset when a new game starts.
   const _hour = new Date().getHours();
@@ -3110,6 +3259,32 @@ function enterTurn(){
       checkout:!!ev.win, checkoutPoints:ev.win?ev.pointsThisVisit:null, darts:game.darts.length };
     game.currentLegTurns.push(_t); game.sessionTurns.push(_t); }
 
+  // Daily Challenge formats that complete on a dart-count/threshold basis rather
+  // than a normal X01 win (Bullseye Gauntlet, Treble Run, Steady Hand: 3 visits;
+  // The Long Game: remaining drops under 40, no busts allowed) end the round right
+  // here, reusing onLegWon()'s existing challenge-completion + finishUnit machinery
+  // instead of duplicating it. Skipped entirely once a normal win already happened.
+  if(activeChallenge && activeChallenge.player === p.name && !ev.win){
+    game.legVisitLogs.push(game.darts.slice());
+    const _fmt = activeChallenge.format;
+    let _done = false, _metric = null;
+    if((_fmt==='bullseye_gauntlet' || _fmt==='treble_run' || _fmt==='steady_hand') && game.legVisitLogs.length >= 3){
+      _done = true;
+      const _all = game.legVisitLogs.flat();
+      if(_fmt==='bullseye_gauntlet') _metric = _all.filter(d=>d.sector===25).length;
+      else if(_fmt==='treble_run')   _metric = new Set(_all.filter(d=>d.isTreble).map(d=>d.sector)).size;
+      else _metric = game.legVisitLogs.reduce((s,visit)=>{ const t=visit.reduce((x,d)=>x+d.value,0); return s + (t<=20 ? t : 0); }, 0);
+    } else if(_fmt==='long_game'){
+      if(ev.bust){ activeChallenge = null; }              // busted before reaching target — DNF, stop tracking
+      else if(p.score < 40){ _done = true; _metric = p.legVisits; }
+    }
+    if(_done){
+      activeChallenge.overrideMetric = _metric;
+      onLegWon(game.current);
+      return;
+    }
+  }
+
   if(ev.win){
     onLegWon(game.current);   // handles set/game progression
     return;
@@ -3129,7 +3304,25 @@ function enterTurn(){
 /* ----- leg / set / game progression ----- */
 function onLegWon(wi){
   const w = game.players[wi];
+  const opp = game.players.length===2 ? game.players.find(p=>p!==w) : null;
+  // Snapshots taken before any of this leg's win bookkeeping mutates legsWon/setsWon —
+  // "was this a decider" only makes sense measured against the state entering the leg.
+  const legsWonBefore = new Map(game.players.map(p => [p, p.legsWon]));
+  const setsWonBefore = new Map(game.players.map(p => [p, p.setsWon]));
   w.legsWon += 1;
+
+  // Comeback Kid (recurring): won this leg after trailing by 100+ remaining-points
+  // at some point during it. Needs an opponent to trail behind (H2H, or a 2-player
+  // practice match).
+  if(opp && w.legWorstDeficit >= 100){
+    showAchievement('comebackkid', w.name);
+    fireMomentCard('comebackkid', { icon:'🔥', headline:'COMEBACK KID', player:w.name, statLine:'Trailed by 100+, won anyway' });
+  }
+  // Nerves of Steel (recurring): a genuine decider — both players tied one leg (or
+  // one set) short of winning, entering this leg/set.
+  const _setDecider = !game.practice && opp && game.legsPerSet > 1
+    && legsWonBefore.get(w) === game.legsPerSet - 1 && legsWonBefore.get(opp) === game.legsPerSet - 1;
+
   // Big Fish (170 checkout) always finishes a leg, so this is the reliable way to know
   // whether the winning dart of this leg/set/game was specifically a 170 checkout.
   const _bigFish = !!(game.lastTurnEvent && game.lastTurnEvent.checkoutPoints === 170);
@@ -3143,6 +3336,9 @@ function onLegWon(wi){
     w.setsWon += 1;
     game.players.forEach(p=>p.legsWon=0);  // reset legs for the next set
 
+    const _matchDecider = opp && game.setsPerGame > 1
+      && setsWonBefore.get(w) === game.setsPerGame - 1 && setsWonBefore.get(opp) === game.setsPerGame - 1;
+
     if(w.setsWon >= game.setsPerGame){   // game (match) won
       sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
       sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
@@ -3152,6 +3348,38 @@ function onLegWon(wi){
       DB.recordEvent('game_end', null, null);
       DB.completeGame(w.name);   // api marks the game complete in the database
       persist();
+      if(_setDecider || _matchDecider){
+        showAchievement('nervesofsteel', w.name);
+        fireMomentCard('nervesofsteel', { icon:'🧊', headline:'NERVES OF STEEL', player:w.name, statLine: _matchDecider ? 'Won the deciding set' : 'Won the deciding leg' });
+      }
+      // Social/H2H badges — 2-player matches only.
+      if(opp){
+        const winnerAvg = (stats[w.name] && stats[w.name].avgDarts) ? stats[w.name].totalPoints/stats[w.name].avgDarts*3 : null;
+        const loserAvg  = (stats[opp.name] && stats[opp.name].avgDarts) ? stats[opp.name].totalPoints/stats[opp.name].avgDarts*3 : null;
+        if(winnerAvg!=null && loserAvg!=null && loserAvg - winnerAvg >= 15){
+          showAchievement('giantslayer', w.name);
+          fireMomentCard('giantslayer', { icon:'🗡️', headline:'GIANT SLAYER', player:w.name, statLine:`Beat a ${loserAvg.toFixed(1)} average` });
+        }
+        const gid = DB.gameId;
+        // Queued behind DB.completeGame() above so totalGames reflects this match
+        // once it's actually persisted, not a race against the still-pending write.
+        DB._queue(()=>Backend.get(`/api/players/h2h-summary?player=${encodeURIComponent(w.name)}&opponent=${encodeURIComponent(opp.name)}${gid!=null?'&excludeGameId='+gid:''}`)).then(sum=>{
+          if(!sum) return;
+          if(sum.previousWinner === opp.name){
+            showAchievement('therematch', w.name);
+            fireMomentCard('therematch', { icon:'🔁', headline:'THE REMATCH', player:w.name, statLine:`Revenge over ${opp.name}` });
+          }
+          if(sum.totalGames >= 10){
+            Backend.send('POST','/api/badges/award', { player:w.name, badgeId:'grudge_match' }).then(r=>{
+              if(r && r.newlyEarned){
+                showAchievement('grudgematch', w.name);
+                fireMomentCard('grudgematch', { icon:'⚔️', headline:'GRUDGE MATCH', player:w.name, statLine:`${sum.totalGames} games vs ${opp.name}` });
+              }
+            }).catch(()=>{});
+            Backend.send('POST','/api/badges/award', { player:opp.name, badgeId:'grudge_match' }).catch(()=>{});
+          }
+        }).catch(()=>{});
+      }
       game.matchResult = { ts: Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:_bigFish };
       fireMomentCard('matchwin', { icon:'🏅', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) });
       finishUnit('game', w.name);
@@ -3162,6 +3390,10 @@ function onLegWon(wi){
     DB.recordEvent('leg_end', game.setNo, game.legNo);
     DB.recordEvent('set_end', game.setNo, null);
     persist();
+    if(_setDecider){
+      showAchievement('nervesofsteel', w.name);
+      fireMomentCard('nervesofsteel', { icon:'🧊', headline:'NERVES OF STEEL', player:w.name, statLine:'Won the deciding leg' });
+    }
     game.matchResult = { ts: Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:_bigFish };
     finishUnit('set', w.name);
     return;
@@ -3171,10 +3403,11 @@ function onLegWon(wi){
   persist();
   lastLegWasChallenge = false;
   if(activeChallenge && activeChallenge.player === w.name){
+    const _metric = activeChallenge.overrideMetric != null ? activeChallenge.overrideMetric : w.legDarts;
     Backend.send('POST','/api/challenges/complete',
-      { player:activeChallenge.player, challengeDate:activeChallenge.date, resultDarts:w.legDarts }).catch(()=>{});
+      { player:activeChallenge.player, challengeDate:activeChallenge.date, resultDarts:_metric }).catch(()=>{});
     fireMomentCard('dailychallenge', { icon:'📅', headline:'CHALLENGE COMPLETE!', player:w.name,
-      statLine: `${activeChallenge.format==='checkout_sprint' ? 'Checkout '+activeChallenge.target : 'Speed to Zero'} — ${w.legDarts} darts` });
+      statLine: `${challengeShortLabel(activeChallenge.format, activeChallenge.target)} — ${challengeMetricLabel(activeChallenge.format, _metric)}` });
     lastLegWasChallenge = true;
     activeChallenge = null;
   }
@@ -3192,9 +3425,11 @@ function startNextLeg(newSet){
   sendHaWebhook('legstart', '', game.category, { setNo: game.setNo, legNo: game.legNo });
   game.starter = (game.starter + 1) % game.players.length;
   game.current = game.starter;
-  game.players.forEach(p=>{ p.score = game.start; p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legAvgDarts=0; p.legBusts=0; if(newSet) p.setDarts=0; });
+  game.players.forEach(p=>{ p.score = game.start; p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legAvgDarts=0; p.legBusts=0; if(newSet) p.setDarts=0;
+    p.legVisitScores=[]; p.metronomeFired=false; p.pendingIceInTheVeins=false; p.legWorstDeficit=0; });
   game.legSummary = null;
   game.currentLegTurns = [];
+  game.legVisitLogs = [];
   game.lastTurnSnapshot = null;
   game.darts=[]; game.busted=false; game.won=false;
   game.turnSeq += 1;

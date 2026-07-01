@@ -39,6 +39,8 @@
 
        POST /api/badges/award      -> { player, badgeId } -> { newlyEarned } (public)
        GET  /api/players/badges    -> (?name=...) -> [ { badgeId, earnedAt } ] (public)
+       GET  /api/players/h2h-summary -> (?player=...&opponent=...&excludeGameId=) -> { totalGames, previousWinner } (public)
+       GET  /api/players/around-the-world -> (?name=...) -> { hit, count, total } (public)
        POST /api/challenges/start  -> { player, gameId, challengeDate, format, target } (public)
        POST /api/challenges/complete -> { player, challengeDate, resultDarts } (public)
        GET  /api/challenges/status -> (?player=...&date=YYYY-MM-DD) -> { today, streak, history } (public)
@@ -401,6 +403,13 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/players/badges' && m === 'GET') {
       return send(res, 200, db.getPlayerBadges(url.searchParams.get('name')));
+    }
+    if (p === '/api/players/h2h-summary' && m === 'GET') {
+      const exGid = url.searchParams.get('excludeGameId');
+      return send(res, 200, db.getH2HSummary(url.searchParams.get('player'), url.searchParams.get('opponent'), exGid != null ? Number(exGid) : null));
+    }
+    if (p === '/api/players/around-the-world' && m === 'GET') {
+      return send(res, 200, db.getAroundTheWorldProgress(url.searchParams.get('name')));
     }
 
     // ----- daily challenge (docs/daily-challenge-roadmap.md) -----
