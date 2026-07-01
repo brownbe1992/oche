@@ -2,6 +2,9 @@
 
 > Status: **not started**. This is a design doc for a future release, captured so the
 > thinking isn't lost. Nothing described here exists in the app yet.
+>
+> This is the first concrete item under the broader `docs/accessibility-roadmap.md`
+> checklist — see that doc for other accessibility gaps identified alongside this one.
 
 ## Goal
 
@@ -15,13 +18,16 @@ to visually distinguish treble from double rings on the interactive board.
 ## Design
 
 - **A Settings toggle** ("Accessibility" section, or folded into an existing
-  visually-adjacent section) switching the dartboard's ring colors to a
-  colorblind-safe palette — blue/orange is the standard accessible substitute for
-  red/green, and should extend consistently to every place the app currently uses
-  red/green semantically: the interactive dartboard SVG, the live scoreboard's
-  bust/win flash overlays (`.flash.bust`/`.flash.shot` in `display.html`), and the
-  dart-class styling on the live scoreboard's thrown-dart display (`.dart.t`/`.dart.d`
-  in `display.html`).
+  visually-adjacent section) switching the ring/multiplier colors to a colorblind-safe
+  palette — blue/orange is the standard accessible substitute for red/green, and
+  should extend consistently to every place the app currently uses red/green
+  semantically: the interactive dartboard SVG, the **Pad-mode Double/Treble buttons**
+  (`.multi button.m-d`/`.multi button.m-t` in `frontend/index.html` — identified during
+  the accessibility audit as in-scope too, not just the SVG board), the live
+  scoreboard's bust/win flash overlays (`.flash.bust`/`.flash.shot` in `display.html`),
+  and the dart-class styling on the live scoreboard's thrown-dart display
+  (`.dart.t`/`.dart.d` in `display.html`). One consistent palette swap across all of
+  these, not a fix scoped to the SVG board alone.
 - Since the multiplier is also conveyed via other means already (single/double/treble
   buttons, the "T"/"D" prefix on dart labels), color isn't the *only* signal today —
   but it's the primary one on the interactive dartboard specifically, where sector

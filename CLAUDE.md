@@ -22,6 +22,15 @@ accumulate `is_online`, `is_tournament`, etc. one feature at a time.
 
 Full rationale: `docs/existing-app-prep-roadmap.md`, item 3.
 
+### Accessibility is a standing design concern, not a one-off pass
+
+Every new feature (in this codebase or any `docs/*.md` roadmap) should consider
+keyboard/focus order, color-only signals, and screen-reader announcements as part of
+its own design — not bolted on afterward. Colorblind mode is the first concrete fix,
+but it isn't the whole of it.
+
+Full checklist, current gaps, and priority order: `docs/accessibility-roadmap.md`.
+
 ## Roadmap docs
 
 `docs/*.md` holds design roadmaps for features that are planned but not yet built —

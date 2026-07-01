@@ -305,7 +305,7 @@ build-order dependencies between them.
 | Roadmap | Complexity | Usefulness | Why |
 |---|---|---|---|
 | HA recipes | Trivial (docs only) | Medium | Zero code, unlocks power that already shipped |
-| Colorblind mode | Very low | Medium (narrow, real) | CSS-only, genuine accessibility fix |
+| Colorblind mode | Very low | Medium (narrow, real) | CSS-only, genuine accessibility fix; first item under `docs/accessibility-roadmap.md` |
 | Data export | Very low | Medium | Reformats existing queries; reinforces the self-hosted trust story |
 | Voice announcements | Very low | Medium-High | Browser API only, zero infra, extends the celebration culture already core to the app |
 | Shareable moments | Low | Medium | Client-side only; fun/virality, not core utility |
