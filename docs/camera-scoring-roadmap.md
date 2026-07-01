@@ -53,6 +53,12 @@ rather than quietly introducing a second language and a dependency tree. The
 alternative — reimplementing computer-vision primitives from scratch in a language
 with far weaker support for it — isn't a realistic option for this scope.
 
+**Deployment**: package the vision service behind a Docker Compose profile (or a
+separate compose file, matching the existing `docker-compose.dev.yml` convention)
+rather than always-on in the default `docker-compose.yml` — see
+`docs/existing-app-prep-roadmap.md` item 9. Anyone who doesn't want camera scoring
+should never have this service running just because they installed Oche.
+
 **Open question**: where does the vision service run relative to the Oche backend
 (same device/LAN), and does the new detection endpoint need its own auth/trust story,
 or is it acceptable to trust it the same way the unauthenticated live-scoreboard

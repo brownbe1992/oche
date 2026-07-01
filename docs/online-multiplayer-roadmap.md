@@ -56,6 +56,11 @@ while any install can point at a self-hosted copy instead — the same "sensible
 default, fully swappable" pattern the Home Assistant integration already uses, just
 applied to a piece of infrastructure the project itself provides a default for.
 
+For anyone self-hosting the signaling relay locally rather than using the project
+default, it should be an opt-in Docker Compose profile (or separate compose file),
+not always-on in the default `docker-compose.yml` — same convention as the camera
+scoring vision service, see `docs/existing-app-prep-roadmap.md` item 9.
+
 **TURN** (bring-your-own only) — the piece that costs real, ongoing bandwidth. When
 direct P2P fails (a meaningful fraction of real-world peer pairs, due to symmetric NAT
 or restrictive firewalls — and video makes this worse, since it needs sustained
