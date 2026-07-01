@@ -33,6 +33,7 @@
        DEL  /api/players/pin       -> remove a player's PIN (?name=...)         [admin]
        GET  /api/settings/scoreboard-layout -> { layout: 'full'|'compact'|'minimal' } (public)
        GET  /api/settings/default-input     -> { input: 'pad'|'board' } (public)
+       GET  /api/settings/colorblind-mode   -> { enabled } (public)
 
    Routes marked [admin] require a logged-in admin session (cookie set by /api/login).
    Set COOKIE_SECURE=true when serving over HTTPS (e.g. behind a reverse proxy) so the
@@ -291,6 +292,9 @@ const server = http.createServer(async (req, res) => {
     // Public (no-auth) read of the default scoring input — every device scoring a
     // game needs this, not just an admin's browser.
     if (p === '/api/settings/default-input' && m === 'GET') { return send(res, 200, db.getDefaultScoringInput()); }
+    // Public (no-auth) read of the colorblind-mode flag — both the controller and the
+    // /display screen need this, and neither is necessarily logged in as admin.
+    if (p === '/api/settings/colorblind-mode' && m === 'GET') { return send(res, 200, db.getColorblindMode()); }
     if (p === '/api/settings' && m === 'PUT') {
       if (!requireAdmin(req, res)) return;
       const b = await readJson(req);
@@ -299,7 +303,7 @@ const server = http.createServer(async (req, res) => {
         'ha_webhook_oneeighty','ha_webhook_bigfish','ha_webhook_bust','ha_webhook_ninedarter','ha_webhook_tonplus',
         'ha_webhook_gamestart','ha_webhook_gameend','ha_webhook_setstart','ha_webhook_setend',
         'ha_webhook_legstart','ha_webhook_legend','pin_lockout_threshold','admin_lockout_threshold','collect_dart_timing','scoreboard_layout',
-        'default_scoring_input'];
+        'default_scoring_input','colorblind_mode'];
       const safe = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
       if ('pin_lockout_threshold' in safe) {
         const n = Number(safe.pin_lockout_threshold);
@@ -310,6 +314,7 @@ const server = http.createServer(async (req, res) => {
         if (!Number.isInteger(n) || n < 1 || n > 1000) return send(res, 400, { error: 'admin_lockout_threshold must be an integer between 1 and 1000' });
       }
       if ('collect_dart_timing' in safe) safe.collect_dart_timing = (safe.collect_dart_timing === '1' || safe.collect_dart_timing === true) ? '1' : '0';
+      if ('colorblind_mode' in safe) safe.colorblind_mode = (safe.colorblind_mode === '1' || safe.colorblind_mode === true) ? '1' : '0';
       if ('scoreboard_layout' in safe && !['full','compact','minimal'].includes(safe.scoreboard_layout)) {
         return send(res, 400, { error: 'scoreboard_layout must be one of: full, compact, minimal' });
       }

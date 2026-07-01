@@ -13,6 +13,14 @@
     --cream:#efe7d2; --ink:#f3efe4; --muted:#9a9387;
     --red:#c8102e; --green:#1b8a3a; --gold:#d9b46a; --bust:#e2473d;
   }
+  /* Colorblind-friendly palette, set from Settings -> Accessibility (see index.html
+     for the full rationale). Covers the dart border-colors below via the variables;
+     the bust/win flash overlay and dart text colors are hardcoded tints, not
+     variable-based, so they're overridden explicitly further down. */
+  body.colorblind{
+    --red:#e2711d;    /* orange, replaces double/treble red */
+    --green:#2f8fd9;  /* blue, replaces treble/board green */
+  }
   *{box-sizing:border-box;margin:0}
   html,body{height:100%}
   body{
@@ -86,12 +94,16 @@
   .dart.empty{color:#4d514a;font-family:'Inter';font-size:1.7vmin}
   .dart.t{border-color:var(--green);color:#7fe0a0}
   .dart.d{border-color:var(--red);color:#ff8a93}
+  body.colorblind .dart.t{color:#9cd2ff}
+  body.colorblind .dart.d{color:#ffb570}
 
   /* status flash on a card (bust / game shot) */
   .flash{position:absolute;top:0;right:0;bottom:0;left:0;display:flex;align-items:center;justify-content:center;
     font-family:'Bebas Neue';font-size:8vmin;letter-spacing:.06em;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
   .flash.bust{background:rgba(226,71,61,.22);color:#ffb4ad}
   .flash.shot{background:rgba(27,138,58,.22);color:#9bf0ba}
+  body.colorblind .flash.bust{background:rgba(226,113,29,.22);color:#ffb570}
+  body.colorblind .flash.shot{background:rgba(47,143,217,.22);color:#9cd2ff}
 
   /* full-screen banner for leg/set/game results */
   .banner{position:fixed;top:0;right:0;bottom:0;left:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:1vmin;
@@ -243,6 +255,9 @@ if(!LAYOUTS[layoutParam]){
     }
   }).catch(()=>{});
 }
+fetch('/api/settings/colorblind-mode', {cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{
+  document.body.classList.toggle('colorblind', !!(s && s.enabled));
+}).catch(()=>{});
 
 function spawnConfetti(root, count){
   const colors=['#d9b46a','#efe7d2','#f4e3b2','#caa94e'];

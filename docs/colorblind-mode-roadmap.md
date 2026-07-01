@@ -1,9 +1,16 @@
 # Colorblind-Friendly Mode — Design Roadmap
 
-> Status: **not started**. This is a design doc for a future release, captured so the
-> thinking isn't lost. Nothing described here exists in the app yet.
+> Status: **✅ Done**. A single admin-toggled setting
+> (`colorblind_mode`, Settings → Accessibility) switches the app to a blue/orange
+> palette — verified across every spot identified below: the dartboard SVG rings and
+> bull, the Pad-mode Double/Treble buttons, entered-dart slot borders, win/bust status
+> text, the dart-analytics chart, and the live scoreboard's checkout flash overlays
+> and dart-class colors. Confirmed end-to-end with a real running server and browser
+> screenshots. Most elements were covered by overriding the shared `--red`/`--green`
+> (and `--bust`) CSS variables in one place; a handful of hardcoded rgba/hex tints
+> (not variable-based) needed individual overrides, called out inline in the code.
 >
-> This is the first concrete item under the broader `docs/accessibility-roadmap.md`
+> This was the first concrete item under the broader `docs/accessibility-roadmap.md`
 > checklist — see that doc for other accessibility gaps identified alongside this one.
 
 ## Goal

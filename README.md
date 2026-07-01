@@ -287,13 +287,17 @@ Plus global leaderboards for 180s, Big Fish, and nine-dart finishes, each filter
 
 ### Settings
 
-The Settings page (accessible from the top navigation) holds app-wide configuration. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
+The Settings page (accessible from the top navigation) holds app-wide configuration. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
 
 Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accounts--player-pins)) — until an admin account exists, the page offers to create the first one.
 
 #### Scoring
 
 - **Default input** — which dart entry method a new game opens with: **Dartboard** (tap the sector you hit) or **Pad** (number grid with a multiplier selector). Either can still be switched per-session from the scoring screen itself.
+
+#### Accessibility
+
+- **Colorblind-friendly palette** — swaps the app's red/green double and treble colors (dartboard rings, Pad mode's Double/Treble buttons, win/bust status text, and the live scoreboard's checkout flashes and dart-class colors) for a blue/orange palette. Applies to this device and the `/display` scoreboard.
 
 #### Data Collection
 
@@ -515,6 +519,7 @@ PUT  /api/settings                          Update settings       { ha_url, ha_w
 GET  /api/settings/dart-timing              { enabled } — public, read by every device during play
 GET  /api/settings/scoreboard-layout        { layout } — public, read by the /display screen
 GET  /api/settings/default-input            { input: 'pad'|'board' } — public, read at app boot
+GET  /api/settings/colorblind-mode          { enabled } — public, read at app boot by both the controller and /display
 POST /api/ha-test                           Test HA connectivity  { url }                        [admin]
 POST /api/ha-webhook                        Fire an HA webhook    { event, player, category, … }
 ```

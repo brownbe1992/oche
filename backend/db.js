@@ -1134,6 +1134,12 @@ function getDartTimingEnabled() {
   const row = db.prepare("SELECT value FROM settings WHERE key = 'collect_dart_timing'").get();
   return { enabled: row ? row.value === '1' : false };
 }
+// Public (no-auth) read of the colorblind-mode flag — both the controller and the
+// /display screen need this, and neither is necessarily logged in as admin.
+function getColorblindMode() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'colorblind_mode'").get();
+  return { enabled: row ? row.value === '1' : false };
+}
 // Public (no-auth) read of the scoreboard layout preset — the /display screen
 // isn't logged in as admin, it just needs to know which layout to render.
 function getScoreboardLayout() {
@@ -1386,7 +1392,7 @@ module.exports = {
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn,
   getCheckoutRoutes, getDartAnalytics,
-  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, fireHaWebhook,
+  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, fireHaWebhook,
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword,
   login, logout, getSessionAdmin, adminLockoutThreshold,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,

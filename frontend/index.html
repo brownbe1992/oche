@@ -21,6 +21,18 @@
     --gold:#d9b46a;         /* brass oche */
     --bust:#e2473d;
   }
+  /* Colorblind-friendly palette (Settings -> Accessibility): red-green color vision
+     deficiency is the most common form of colorblindness, and red/green is exactly
+     the pairing this app uses to distinguish doubles from trebles everywhere — the
+     dartboard rings, the pad's Double/Treble buttons, entered-dart slots, win/bust
+     status text, and the dart-analytics chart. Overriding the variables here covers
+     most of it in one place; a few hardcoded rgba/hex tints (not variable-based)
+     are overridden individually further down. */
+  body.colorblind{
+    --red:#e2711d;    /* orange, replaces double/treble red */
+    --green:#2f8fd9;  /* blue, replaces treble/board green */
+    --bust:#e2711d;   /* bust status pairs against win-green in the same status line */
+  }
   *{box-sizing:border-box}
   html,body{margin:0}
   body{
@@ -183,6 +195,8 @@
   .multi button.m-d[aria-pressed="true"]{background:rgba(200,16,46,.16);border-color:var(--red);color:#ff8a93}
   .multi button.m-t[aria-pressed="true"]{background:rgba(27,138,58,.16);border-color:var(--green);color:#7fe0a0}
   .multi button.m-s[aria-pressed="true"]{background:var(--surface-2);border-color:var(--muted)}
+  body.colorblind .multi button.m-d[aria-pressed="true"]{background:rgba(226,113,29,.16);color:#ffb570}
+  body.colorblind .multi button.m-t[aria-pressed="true"]{background:rgba(47,143,217,.16);color:#9cd2ff}
 
   .pad{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
   .pad button{background:var(--surface);border:1px solid var(--wire);color:var(--ink);border-radius:10px;
@@ -727,6 +741,23 @@
         </div>
       </div>
 
+      <!-- Accessibility -->
+      <div class="pp-section" style="margin-bottom:24px">
+        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('accessibility-body',this)">
+          Accessibility
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="accessibility-body" hidden>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+            Switches the app's red/green double and treble colors (dartboard rings, pad buttons, win/bust status, live scoreboard) to a colorblind-friendly blue/orange palette. Applies to this device and the live scoreboard.
+          </p>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="colorblind-mode" style="width:16px;height:16px;margin:0">
+            Colorblind-friendly palette
+          </label>
+        </div>
+      </div>
+
       <!-- Data Collection -->
       <div class="pp-section" style="margin-bottom:24px">
         <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('data-collection-body',this)">
@@ -1088,6 +1119,7 @@ let stats = {};
 let prefs = {};      // name -> { out:'double'|'single' }  (per-player finish rule)
 let mult = 1;
 let dartboardMode = true;   // admin-configurable default; refreshed at boot from /api/settings/default-input
+let colorblindMode = false; // admin-toggled; refreshed at boot from /api/settings/colorblind-mode
 
 /* ---------- dartboard input mode ---------- */
 const DB_SECTORS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
@@ -1117,10 +1149,12 @@ function buildDartboard(){
     <circle cx="${CX}" cy="${CY}" r="${R.bg}" fill="#0d0e0b"/>
     <circle cx="${CX}" cy="${CY}" r="${R.doubleOut+1}" fill="#111210"/>
     <circle cx="${CX}" cy="${CY}" r="${R.doubleOut}" fill="#0d0e0b"/>`;
+  const ringA = colorblindMode ? '#e2711d' : '#c8102e';  // orange substitute for red
+  const ringB = colorblindMode ? '#2f8fd9' : '#1b8a3a';  // blue substitute for green
   DB_SECTORS.forEach((num,i)=>{
     const s0=i*DEG-DEG/2, e0=s0+DEG;
     const sc = i%2===0 ? '#cbbf96' : '#1c1e1a';  // light/dark singles
-    const rc = i%2===0 ? '#c8102e' : '#1b8a3a';  // red/green rings
+    const rc = i%2===0 ? ringA : ringB;  // alternating ring color per sector
     const sw = 'stroke="#151613" stroke-width="0.5"';
     s += `<path class="dz" d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${sc}" ${sw} ${oc(num,1)}/>`;
     s += `<path class="dz" d="${annulus(R.trebleIn,R.trebleOut,s0,e0)}" fill="${rc}" ${sw} ${oc(num,3)}/>`;
@@ -1131,8 +1165,8 @@ function buildDartboard(){
       font-family="Bebas Neue,sans-serif" font-size="17" fill="#efe7d2"
       style="pointer-events:none;user-select:none">${num}</text>`;
   });
-  s += `<circle class="dz" cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="#1b8a3a" stroke="#151613" stroke-width="0.5" ${oc(25,1)}/>`;
-  s += `<circle class="dz" cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="#c8102e" stroke="#151613" stroke-width="0.5" ${oc(25,2)}/>`;
+  s += `<circle class="dz" cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="${ringB}" stroke="#151613" stroke-width="0.5" ${oc(25,1)}/>`;
+  s += `<circle class="dz" cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="${ringA}" stroke="#151613" stroke-width="0.5" ${oc(25,2)}/>`;
   s += `<text x="${CX}" y="${CY}" text-anchor="middle" dominant-baseline="central"
     font-family="Bebas Neue,sans-serif" font-size="12" fill="#efe7d2" style="pointer-events:none;user-select:none">Bull</text>`;
   s += `</svg>`;
@@ -1539,6 +1573,8 @@ async function renderSettings(){
     if(sbEl) sbEl.value = ['full','compact','minimal'].includes(cfg.scoreboard_layout) ? cfg.scoreboard_layout : 'full';
     const diEl = document.getElementById('default-scoring-input');
     if(diEl) diEl.value = cfg.default_scoring_input === 'pad' ? 'pad' : 'board';
+    const cbEl = document.getElementById('colorblind-mode');
+    if(cbEl) cbEl.checked = cfg.colorblind_mode === '1';
   }).catch(err=>{ const s=document.getElementById('settings-error'); if(s){ s.textContent='Could not load settings: '+err.message; s.hidden=false; } });
 }
 
@@ -1658,9 +1694,12 @@ function saveSettings(){
     collect_dart_timing:     (document.getElementById('collect-dart-timing')||{}).checked ? '1' : '0',
     scoreboard_layout:       v('scoreboard-layout') || 'full',
     default_scoring_input:   v('default-scoring-input') || 'board',
+    colorblind_mode:         (document.getElementById('colorblind-mode')||{}).checked ? '1' : '0',
   }).then(()=>{
     if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
     dartTimingEnabled = (document.getElementById('collect-dart-timing')||{}).checked || false;
+    colorblindMode = (document.getElementById('colorblind-mode')||{}).checked || false;
+    document.body.classList.toggle('colorblind', colorblindMode);
     uiAlert('Settings saved.');
   }).catch(err=>{
     if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
@@ -3418,6 +3457,8 @@ function showBackendErrorScreen(){
   await DB.loadAll();       // populate roster / prefs / stats from the backend
   try{ const dt = await Backend.get('/api/settings/dart-timing'); dartTimingEnabled = !!dt.enabled; }catch(e){}
   try{ const di = await Backend.get('/api/settings/default-input'); dartboardMode = di.input !== 'pad'; }catch(e){}
+  try{ const cb = await Backend.get('/api/settings/colorblind-mode'); colorblindMode = !!cb.enabled; }catch(e){}
+  document.body.classList.toggle('colorblind', colorblindMode);
   restoreSetup();
   sanitizeSlots();
   renderPlayers();

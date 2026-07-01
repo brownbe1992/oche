@@ -1,9 +1,9 @@
 # Accessibility — Roadmap & Standing Checklist
 
-> Status: **in progress planning**. Unlike the other docs in this folder, this isn't a
-> single future feature — it's a cross-cutting standard the app should hold itself to
-> as new features (including everything else in `docs/*.md`) get built. See
-> `CLAUDE.md` for the binding convention that points here.
+> Status: **in progress** (item 1 of 5 done — colorblind-friendly palette). Unlike the
+> other docs in this folder, this isn't a single future feature — it's a cross-cutting
+> standard the app should hold itself to as new features (including everything else in
+> `docs/*.md`) get built. See `CLAUDE.md` for the binding convention that points here.
 
 ## Goal
 
@@ -39,13 +39,11 @@ in isolation.
    issue, though more work to do well (need to decide *what* gets announced without
    being overwhelming — e.g. announce the result of `enterTurn()` and achievement
    flashes, not every intermediate dart tap).
-2. **Color-only signals extend beyond the dartboard.** `docs/colorblind-mode-roadmap.md`
-   scopes its fix to the interactive dartboard SVG and the live scoreboard's bust/win
-   flashes and dart-class styling. The same red/green pairing also drives the
-   **Pad-mode Double/Treble buttons** (`.multi button.m-d` / `.multi button.m-t` in
-   `frontend/index.html`), which isn't in that doc's stated scope today. When
-   colorblind mode is implemented, its palette swap should cover the Pad buttons too,
-   not just the SVG board and scoreboard — one consistent palette, not two fixes.
+2. ~~**Color-only signals extend beyond the dartboard.**~~ ✅ **Done** — the shipped
+   colorblind-mode palette (see `docs/colorblind-mode-roadmap.md`) covers the
+   Pad-mode Double/Treble buttons, entered-dart slot borders, win/bust status text,
+   and the dart-analytics chart alongside the dartboard SVG and live scoreboard, not
+   just the SVG board in isolation.
 3. **No contrast audit has been performed.** The palette (`--muted`, `--gold`,
    `--danger`, etc. against `--board`/`--surface`/`--surface-2`) hasn't been checked
    against WCAG AA contrast ratios (4.5:1 normal text, 3:1 large text/UI components).
@@ -64,9 +62,9 @@ in isolation.
 
 ## Suggested priority order
 
-1. **Colorblind-friendly palette** (`docs/colorblind-mode-roadmap.md`) — very low
-   complexity, CSS-only, already scoped (with the Pad-button expansion from gap 2
-   above folded in). Good first item.
+1. ~~**Colorblind-friendly palette**~~ ✅ **Done** (`docs/colorblind-mode-roadmap.md`) —
+   very low complexity, CSS-only, shipped with the Pad-button expansion from gap 2
+   above folded in.
 2. **Contrast audit** — no code risk, just measurement; produces a concrete punch
    list if anything fails.
 3. **`aria-live` announcements** for turn results, bust/win, and achievement flashes —
