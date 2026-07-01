@@ -1,9 +1,10 @@
 # Preparing the Existing App for Future Roadmaps
 
-> Status: **not started**. This doc reviews all 16 other roadmap docs in `docs/` and
-> recommends changes to the *existing* codebase now, specifically to reduce rework
-> later. It intentionally does not recommend building any future feature early — only
-> making the current code more hospitable to features that are still just plans.
+> Status: **in progress** (1 of 9 items done — see item 8). This doc reviews all 16
+> other roadmap docs in `docs/` and recommends changes to the *existing* codebase now,
+> specifically to reduce rework later. It intentionally does not recommend building
+> any future feature early — only making the current code more hospitable to features
+> that are still just plans.
 
 ## How to read this
 
@@ -159,6 +160,19 @@ restructure now with 7 sections than later with 12.
 
 ## 8. Phone-responsive CSS pass (already flagged in the mobile roadmap, worth elevating)
 
+> **Status: ✅ Done** (see `frontend/index.html` on `dev`). Testing at 320-390px
+> viewports found and fixed three real overflow bugs: the achievement overlay
+> (180/Big Fish/nine-darter celebrations) used fixed 64px/88px fonts with no padding,
+> overflowing off-screen on phones — now uses `clamp()`, unchanged at desktop width.
+> The Scoreboard Layout and Default Scoring Input `<select>` elements sized
+> themselves to their widest `<option>` text, forcing the whole Settings page wider
+> than the viewport — fixed with `max-width:100%` on `.date-input`. The Home
+> Assistant URL input + Test Connection button didn't wrap, clipping the button
+> off-screen — now wraps. Also added a scroll-fade affordance to the nav bar, which
+> already scrolled horizontally on narrow screens but gave no visual hint of it. New
+> Game, both scoring input modes (Pad and Dartboard), Players, and Add Player were
+> already responsive and needed no changes.
+
 **The evidence**: `mobile-app-roadmap.md` already calls this out as "independently
 valuable and shippable even before any native wrapper exists," since the current UI
 is tablet-first (per the README's own description of the Scoring screen). It's worth
@@ -204,7 +218,7 @@ Worth naming explicitly, since not everything needs a change:
 ## Priority summary
 
 **Worth doing soon, independent of any specific roadmap landing:**
-1. Phone-responsive CSS pass (item 8).
+1. ~~Phone-responsive CSS pass (item 8).~~ ✅ Done.
 2. Add `games.game_type`/`games.config` columns, defaulted to today's behavior
    (item 2).
 

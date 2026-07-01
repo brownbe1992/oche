@@ -1,7 +1,8 @@
 # iOS/Android App — Design Roadmap
 
-> Status: **not started**. This is a design doc for a future release, captured so the
-> thinking isn't lost. Nothing described here exists in the app yet.
+> Status: **not started** (the native app itself). One prerequisite from the build
+> order below — the phone-responsive CSS pass — is done; see item 1. This is
+> otherwise a design doc for a future release, captured so the thinking isn't lost.
 
 ## Goal
 
@@ -109,10 +110,9 @@ the work is native packaging, responsive CSS, and the TLS/trust handling above.
 
 ## Suggested build order
 
-1. **Phone-optimized responsive CSS** on the existing web app (New Game, Scoring,
-   Player Profile, Settings) — independently valuable and shippable even before any
-   native wrapper exists, since the current UI is tablet-first (per the README's
-   Scoring section: "optimised for touchscreen entry on a tablet").
+1. ~~**Phone-optimized responsive CSS** on the existing web app (New Game, Scoring,
+   Player Profile, Settings)~~ ✅ **Done**, ahead of the native wrapper as planned —
+   see `docs/existing-app-prep-roadmap.md` item 8 for what was found and fixed.
 2. **Capacitor scaffold** (iOS + Android) with the native Server Setup screen +
    remote-URL WebView.
 3. **ATS/cleartext config + self-signed cert trust-prompt** (the flexible-TLS work
