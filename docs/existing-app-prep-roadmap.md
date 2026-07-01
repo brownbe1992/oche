@@ -317,7 +317,7 @@ attention as the feature roadmaps.
 | Data export | Very low | Medium | Reformats existing queries; reinforces the self-hosted trust story |
 | ~~Voice announcements~~ ✅ Done | Very low | Medium-High | Browser API only, zero infra, extends the celebration culture already core to the app; full i18n left as its own follow-on, see `docs/voice-announcements-i18n-roadmap.md` |
 | ~~Backups / disaster recovery~~ ✅ Done (v0.6.2) | Low | Very high | Self-contained script + docs, no schema/API changes; protects irreplaceable personal data — see `docs/backups-roadmap.md` |
-| Shareable moments | Low | Medium | Client-side only; fun/virality, not core utility |
+| ~~Shareable moments~~ ✅ Done | Low | Medium | Client-side only; fun/virality, not core utility |
 | Achievements/badges | Low | Medium | Mostly content on top of infra that already works |
 | Daily challenge | Low | Medium | Built entirely on the existing Practice engine |
 | Ghost opponent | Low-Medium | Medium | Needs a "scripted input source" concept — see dependency note below |

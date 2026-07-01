@@ -1,13 +1,42 @@
 # Shareable Moments — Design Roadmap
 
-> Status: **not started**. This is a design doc for a future release, captured so the
-> thinking isn't lost. Nothing described here exists in the app yet.
->
-> Includes a researched design for social media integration (Home Assistant webhook
-> + direct-to-platform sharing for X/Twitter, Instagram, and Facebook) — see
-> "Social media integration" below. The platform-specific constraints there are real,
-> current API policy, not engineering guesses (Instagram and Facebook in particular
-> have hard platform restrictions, not just friction).
+> Status: **✅ Core feature done.** Canvas-generated cards, Web Share/save-image, and
+> the automatic Home Assistant webhook all shipped — verified end-to-end with a real
+> running server and browser automation (card generation, both achievement and
+> match-win trigger points, Personal Bests sharing, the HA webhook payload actually
+> fitting under the app's request-size cap, and a genuine race-condition bug between
+> overlapping cards found and fixed during testing). **Direct-to-platform X/Instagram/
+> Facebook API posting was explicitly descoped** — manual sharing via the native share
+> sheet (which already reaches X/Instagram/Facebook) is the accepted answer; see
+> "Social media integration" below for why automated posting isn't realistic for a
+> personal account on any of those three platforms today. The optional BYO-credentials
+> X auto-post tier and the Player Profile "Moments" gallery remain unbuilt.
+
+## What shipped
+
+- **Card generation**: an 800×800 canvas card (dark/gold themed, matching the app's
+  existing palette) built entirely client-side in `frontend/index.html`
+  (`buildMomentCard()`), exported as JPEG (chosen over PNG specifically because the
+  gradient background compresses far better as JPEG — an early PNG version produced
+  ~795KB images that overflowed the HA webhook request's 1MB body cap).
+- **Trigger points**: the achievement overlay (180/Big Fish/nine-darter, each with its
+  own **📤 Share** button visible while the flash is showing), the Game Over screen
+  (match win, with a stat line showing the final score for 2-player H2H matches), and
+  Personal Bests on the Player Profile (Best Leg Average, Fewest Darts to Finish —
+  generated on demand when tapped, not auto-detected live during play).
+- **Sharing mechanism**: `navigator.share()` with files where supported, falling back
+  to a plain download link; cancelling the native share sheet does nothing further
+  (no forced download) rather than surprising the player.
+- **Home Assistant webhook**: a new `momentcard` event (`ha_webhook_momentcard`
+  setting, same public pattern as every other HA webhook) fires automatically
+  whenever a card is generated, independent of whether the player taps Share, with
+  the image embedded as base64 in the payload.
+- **A real bug found and fixed during testing**: cards are now stored keyed by moment
+  type (`momentCards = { '180': ..., bigfish: ..., matchwin: ... }`) rather than a
+  single "last generated" pointer — a Big Fish checkout that also wins the match
+  fires two card-generation calls on the same turn, and since both are async, the one
+  that happened to resolve second was silently overwriting the other, leaving the
+  wrong image behind whichever Share button was tapped.
 
 ## Goal
 

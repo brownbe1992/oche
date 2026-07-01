@@ -20,6 +20,7 @@ You enter every dart individually — multiplier first, then the number — and 
   - [Home](#home)
   - [New Game](#new-game)
   - [Scoring](#scoring)
+  - [Shareable Moments](#shareable-moments)
   - [Live Scoreboard](#live-scoreboard)
   - [Players](#players)
   - [Player Profile](#player-profile)
@@ -158,6 +159,16 @@ The scoring screen is optimised for touchscreen entry on a tablet. Everything fi
 
 ---
 
+### Shareable Moments
+
+Big moments — a 180, a Big Fish, a nine-darter, or a match win — get a **📤 Share** button that generates a shareable card image entirely on-device (canvas, styled to match the app), then either opens your phone's native share sheet (to Messages, X, Instagram, Facebook, or anything else it offers) or falls back to a plain image download on browsers without share-sheet support. Nothing is ever uploaded anywhere by this button — it's the same image whether you share it or save it.
+
+- **Where it shows up:** the achievement overlay (180/Big Fish/nine-darter) while it's flashing, the Game Over screen after a match win, and next to Best Leg Average / Fewest Darts to Finish on a **Player Profile**'s Personal Bests.
+- **Automatic Home Assistant delivery:** independent of the Share button, if a **Moment Card Webhook ID** is configured (**Settings → Smart Home Integration**), the same card is sent to your HA instance automatically as a base64-encoded image the moment it happens — useful for routing it into Discord, Telegram, or anywhere else your own HA automations already reach. Personal-best cards are share-button-only (no automatic HA delivery), since there's no live "new personal best" detection during play yet.
+- Not affiliated with or posting directly to X/Instagram/Facebook's own APIs — see `docs/shareable-moments-roadmap.md` for why direct API posting isn't realistic for a personal account on any of those three platforms today.
+
+---
+
 ### Live Scoreboard
 
 Open **`http://<your-server>:8046/display`** on a TV or second monitor. It updates in real time via Server-Sent Events (SSE) — no refreshing needed.
@@ -184,7 +195,7 @@ Open **`http://<your-server>:8046/display`** on a TV or second monitor. It updat
 
 **Leg/Set/Game banners:** full-screen result announced when a unit ends.
 
-**Achievement overlays:** full-screen flash for 180s (🎯), Big Fish (🐟), and nine-darters (🏆, with confetti) the moment they're scored.
+**Achievement overlays:** full-screen flash for 180s (🎯), Big Fish (🐟), and nine-darters (🏆, with confetti) the moment they're scored — each with a **📤 Share** button (see [Shareable Moments](#shareable-moments) below).
 
 The scoreboard is read-only and can be open on any number of screens simultaneously.
 
@@ -340,6 +351,7 @@ Oche can fire webhooks to a Home Assistant instance whenever key game events occ
 | **Ton+ Finish** | Any checkout of 100 or more |
 | **Bust** | A turn ends in a bust |
 | **Nine-Darter** | A 501 leg is finished in exactly 9 darts |
+| **Moment Card** | A shareable card image (180/Big Fish/Nine-Darter/match win) is generated — payload includes the image as base64 |
 | **Leg Start** | A new leg begins |
 | **Leg End** | A leg is won (includes winner name) |
 | **Set Start** | A new set begins |

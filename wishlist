@@ -19,7 +19,7 @@ Player pages:
 - Dropdown to choose game mode to view stats for
 - Environmental data (temp/humidity) — full design in docs/environmental-logging-roadmap.md
 - Coaching insights from existing dart analytics — full design in docs/coaching-insights-roadmap.md
-- Shareable moment/stat cards — full design in docs/shareable-moments-roadmap.md
+- Shareable moment/stat cards — done, see docs/shareable-moments-roadmap.md (direct social API posting descoped in favor of manual share)
 - Data export (CSV/JSON) — full design in docs/data-export-roadmap.md
 
 

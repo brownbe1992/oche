@@ -432,6 +432,9 @@
   @keyframes achmegapulse{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
   .ach-name{font-size:18px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
   .ach-overlay.mega .ach-name{font-size:22px;color:var(--cream)}
+  .ach-share-btn{pointer-events:auto;margin-top:4px;padding:9px 18px;border-radius:999px;border:1px solid var(--gold);
+    background:rgba(217,180,106,.12);color:var(--gold);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+  .ach-share-btn[hidden]{display:none}
   .confetti{position:absolute;top:-10vh;width:9px;height:18px;opacity:.95;border-radius:1px;animation:confetti-fall linear forwards;pointer-events:none}
   @keyframes confetti-fall{0%{transform:translateY(0) rotate(0deg);opacity:1}100%{transform:translateY(120vh) rotate(560deg);opacity:.85}}
 
@@ -482,6 +485,7 @@
 <div class="ach-overlay" id="ach-overlay">
   <div class="ach-text" id="ach-text"></div>
   <div class="ach-name" id="ach-name"></div>
+  <button class="ach-share-btn" id="ach-share-btn" hidden onclick="shareMomentCard(currentAchType)">📤 Share</button>
 </div>
 <div class="wrap">
   <header class="masthead">
@@ -884,6 +888,10 @@
           <div>
             <label class="field">Nine-Darter Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— perfect 501 in 9 darts</span></label>
             <input type="text" id="ha-wh-ninedarter" placeholder="e.g. oche_nine_darter">
+          </div>
+          <div>
+            <label class="field">Moment Card Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— sends the shareable card image (180/Big Fish/Nine-Darter/match win) as base64 PNG</span></label>
+            <input type="text" id="ha-wh-momentcard" placeholder="e.g. oche_moment_card">
           </div>
         </div>
 
@@ -1600,6 +1608,7 @@ async function renderSettings(){
     set('ha-wh-tonplus',    'ha_webhook_tonplus');
     set('ha-wh-bust',       'ha_webhook_bust');
     set('ha-wh-ninedarter', 'ha_webhook_ninedarter');
+    set('ha-wh-momentcard', 'ha_webhook_momentcard');
     set('ha-wh-legstart',   'ha_webhook_legstart');
     set('ha-wh-legend',     'ha_webhook_legend');
     set('ha-wh-gamestart',  'ha_webhook_gamestart');
@@ -1744,6 +1753,7 @@ function saveSettings(){
     ha_webhook_tonplus:      v('ha-wh-tonplus'),
     ha_webhook_bust:         v('ha-wh-bust'),
     ha_webhook_ninedarter:   v('ha-wh-ninedarter'),
+    ha_webhook_momentcard:   v('ha-wh-momentcard'),
     ha_webhook_legstart:     v('ha-wh-legstart'),
     ha_webhook_legend:       v('ha-wh-legend'),
     ha_webhook_gamestart:    v('ha-wh-gamestart'),
@@ -2368,12 +2378,20 @@ function renderPersonalBests(data){
   const formHtml = formDelta!=null
     ? `<div class="stat-block"><div class="stat-val">${data.recentFormAvg.toFixed(1)}</div><div class="stat-label">Recent Form (last 10 legs) ${formDelta>=0?'▲':'▼'} ${Math.abs(formDelta).toFixed(1)}</div></div>`
     : '';
+  const shareBtn = (onclick) => `<button class="iconbtn" title="Share" style="margin-top:4px" onclick="${onclick}">📤</button>`;
   container.innerHTML=`<div class="summary-grid">
-    ${data.bestLegAvg!=null?`<div class="stat-block"><div class="stat-val">${data.bestLegAvg.toFixed(1)}</div><div class="stat-label">Best Leg Average</div></div>`:''}
-    ${data.fewestDartsCheckout!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsCheckout}</div><div class="stat-label">Fewest Darts to Finish</div></div>`:''}
+    ${data.bestLegAvg!=null?`<div class="stat-block"><div class="stat-val">${data.bestLegAvg.toFixed(1)}</div><div class="stat-label">Best Leg Average</div>${shareBtn(`sharePersonalBest('legavg', ${data.bestLegAvg})`)}</div>`:''}
+    ${data.fewestDartsCheckout!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsCheckout}</div><div class="stat-label">Fewest Darts to Finish</div>${shareBtn(`sharePersonalBest('fewestdarts', ${data.fewestDartsCheckout})`)}</div>`:''}
     ${data.winStreak?`<div class="stat-block"><div class="stat-val">${data.winStreak}</div><div class="stat-label">Current Win Streak</div></div>`:''}
     ${formHtml}
   </div>`;
+}
+async function sharePersonalBest(kind, value){
+  const cfg = { legavg: { icon:'📊', headline:'BEST LEG AVERAGE', statLine: value.toFixed(1) },
+    fewestdarts: { icon:'🎯', headline:'FEWEST DARTS TO FINISH', statLine: `${value} darts` } }[kind];
+  if(!cfg) return;
+  const canvas = await buildMomentCard({ icon:cfg.icon, headline:cfg.headline, player:currentPlayer, statLine:cfg.statLine });
+  shareOrSaveCanvas(canvas, `oche-${kind}-${Date.now()}.${MOMENT_CARD_EXT}`, `${currentPlayer} — ${cfg.headline}`, 'Shared from Oche');
 }
 function askWipeAllData(){
   uiConfirm('Wipe every player, game, and stat? This deletes the entire database (admin accounts and these settings are kept) and cannot be undone. Intended for clearing out test/dev data.', ()=>{
@@ -2488,16 +2506,149 @@ function spawnConfetti(root, count){
   }
 }
 
+let currentAchType = null;
 function showAchievement(type, player){
   if(!achOverlayEl) return;
+  currentAchType = type;
   achTextEl.textContent = ACH_LABELS[type] || '';
   achNameEl.textContent = player || '';
   const mega = type === 'ninedarter';
   achOverlayEl.classList.toggle('mega', mega);
   achOverlayEl.classList.add('show');
+  const shareBtn = document.getElementById('ach-share-btn');
+  if(shareBtn) shareBtn.hidden = false;
   if(mega) spawnConfetti(achOverlayEl, 90);
   clearTimeout(achTimer);
-  achTimer = setTimeout(()=>{ achOverlayEl.classList.remove('show'); achOverlayEl.querySelectorAll('.confetti').forEach(c=>c.remove()); }, ACH_DURATION[type] || 2500);
+  achTimer = setTimeout(()=>{ achOverlayEl.classList.remove('show'); achOverlayEl.querySelectorAll('.confetti').forEach(c=>c.remove()); if(shareBtn) shareBtn.hidden = true; }, ACH_DURATION[type] || 2500);
+}
+
+/* =========================================================================
+   SHAREABLE MOMENTS  (docs/shareable-moments-roadmap.md)
+   Client-side canvas card generation + Web Share/save-image + an automatic
+   Home Assistant webhook carrying the same image as base64 — no server
+   round-trip, no image hosting, no new dependency.
+   ========================================================================= */
+// 800x800 is still crisp for social sharing; JPEG (not PNG) keeps the file small
+// enough to fit in the same request-body cap as everything else the app POSTs
+// (readJson()'s 1MB limit in server.js) once base64-encoded for the HA webhook —
+// the gradient background compresses far better as JPEG than as lossless PNG.
+const MOMENT_CARD_W = 800, MOMENT_CARD_H = 800;
+const MOMENT_CARD_MIME = 'image/jpeg', MOMENT_CARD_QUALITY = 0.88, MOMENT_CARD_EXT = 'jpg';
+
+function wrapCanvasText(ctx, text, cx, y, maxWidth, lineHeight){
+  const words = String(text).split(' ');
+  let line = '', lines = [];
+  for(const w of words){
+    const test = line ? line+' '+w : w;
+    if(ctx.measureText(test).width > maxWidth && line){ lines.push(line); line = w; }
+    else line = test;
+  }
+  if(line) lines.push(line);
+  const startY = y - (lines.length-1)*lineHeight/2;
+  lines.forEach((l,i)=>ctx.fillText(l, cx, startY + i*lineHeight));
+  return startY + (lines.length-1)*lineHeight; // y of the last line, for laying out what follows
+}
+
+// Builds the card as an off-screen canvas — never appended to the DOM. Waits for
+// the app's own web fonts (already requested via <link> in <head>) to finish
+// loading so canvas text doesn't silently fall back to a system font on the very
+// first card generated in a session.
+async function buildMomentCard({ icon, headline, player, statLine, footer }){
+  await document.fonts.ready;
+  const canvas = document.createElement('canvas');
+  canvas.width = MOMENT_CARD_W; canvas.height = MOMENT_CARD_H;
+  const ctx = canvas.getContext('2d');
+  const cx = MOMENT_CARD_W/2;
+
+  const bg = ctx.createRadialGradient(cx, 165, 60, cx, MOMENT_CARD_H/2, 580);
+  bg.addColorStop(0, '#1b1d19'); bg.addColorStop(1, '#0d0e0b');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, MOMENT_CARD_W, MOMENT_CARD_H);
+  ctx.strokeStyle = '#d9b46a'; ctx.lineWidth = 4;
+  ctx.strokeRect(20, 20, MOMENT_CARD_W-40, MOMENT_CARD_H-40);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#9a9387';
+  ctx.font = '700 22px Inter, sans-serif';
+  ctx.fillText('OCHE', cx, 82);
+
+  ctx.font = '110px sans-serif';
+  ctx.fillText(icon || '🎯', cx, 250);
+
+  ctx.fillStyle = '#efe7d2';
+  ctx.font = '60px "Bebas Neue", sans-serif';
+  let y = wrapCanvasText(ctx, headline, cx, 350, MOMENT_CARD_W-120, 65);
+
+  ctx.fillStyle = '#d9b46a';
+  ctx.font = '600 34px Inter, sans-serif';
+  ctx.fillText(player, cx, y + 66);
+
+  if(statLine){
+    ctx.fillStyle = '#f3efe4';
+    ctx.font = '400 26px Inter, sans-serif';
+    ctx.fillText(statLine, cx, y + 115);
+  }
+
+  ctx.fillStyle = '#655f54';
+  ctx.font = '400 18px Inter, sans-serif';
+  const dateStr = new Date().toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' });
+  ctx.fillText(footer || dateStr, cx, MOMENT_CARD_H-45);
+
+  return canvas;
+}
+
+// Native share sheet (X/Instagram/Facebook/Messages/anything the OS offers) where
+// supported, falling back to a plain image download everywhere else. If the user
+// backs out of the native share sheet (AbortError), do nothing rather than forcing
+// a download they didn't ask for.
+async function shareOrSaveCanvas(canvas, filename, shareTitle, shareText){
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, MOMENT_CARD_MIME, MOMENT_CARD_QUALITY));
+  if(!blob) return;
+  const file = new File([blob], filename, { type:MOMENT_CARD_MIME });
+  if(navigator.canShare && navigator.canShare({ files:[file] })){
+    try{ await navigator.share({ files:[file], title:shareTitle, text:shareText }); return; }
+    catch(e){ if(e && e.name === 'AbortError') return; /* else fall through to save */ }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+
+// Generates the card once, stashes it keyed by moment type (a Big Fish that also
+// wins the match fires two cards on the very same turn — keying by type instead of
+// a single "last" pointer avoids one overwriting the other whenever their async
+// generation happens to resolve out of order), and — since this is the one path
+// that fires regardless of whether the player ever taps Share — automatically
+// posts it to Home Assistant if a moment-card webhook ID is configured (same
+// fire-and-forget pattern as every other HA event webhook).
+const momentCards = {};
+async function fireMomentCard(momentType, opts){
+  try{
+    const canvas = await buildMomentCard(opts);
+    momentCards[momentType] = { canvas, ...opts };
+    const image = canvas.toDataURL(MOMENT_CARD_MIME, MOMENT_CARD_QUALITY);
+    sendHaWebhook('momentcard', opts.player, (game && game.category) || '', {
+      momentType, headline: opts.headline, statLine: opts.statLine || '', image });
+  }catch(e){ console.warn('moment card generation failed:', e); }
+}
+// Keeps the match-win card's stat line simple: an exact score for the common
+// 2-player case, a plain "match complete" for 3+ players rather than trying to
+// lay out every player's standing on a fixed-size card.
+function matchWinStatLine(winner, legsAtWin){
+  const useSets = game.setsPerGame > 1;
+  if(game.players.length === 2){
+    const opp = game.players.find(p=>p!==winner);
+    const w = useSets ? winner.setsWon : legsAtWin.get(winner);
+    const l = useSets ? opp.setsWon    : legsAtWin.get(opp);
+    return `${game.category} · Won ${w}-${l} ${useSets?'in sets':'in legs'}`;
+  }
+  return `${game.category} · Match complete`;
+}
+function shareMomentCard(momentType){
+  const card = momentCards[momentType];
+  if(!card) return;
+  shareOrSaveCanvas(card.canvas, `oche-${momentType}-${Date.now()}.${MOMENT_CARD_EXT}`, `${card.player} — ${card.headline}`, 'Shared from Oche');
 }
 
 /* ---------- live scoreboard feed ---------- */
@@ -2727,17 +2878,21 @@ function enterTurn(){
     pendingAchievement = { type:'180', player:p.name, ts:Date.now() };
     showAchievement('180', p.name);
     sendHaWebhook('oneeighty', p.name, game.category);
+    fireMomentCard('180', { icon:'🎯', headline:'ONE-EIGHTY!', player:p.name,
+      statLine: `${game.category} · ${game.practice?'Practice':'H2H'}` });
   }
   if(ev.win && ev.pointsThisVisit === 170){
     game.gameBigFish += 1;
     pendingAchievement = { type:'bigfish', player:p.name, ts:Date.now() };
     showAchievement('bigfish', p.name);
     sendHaWebhook('bigfish', p.name, game.category);
+    fireMomentCard('bigfish', { icon:'🐟', headline:'BIG FISH!', player:p.name, statLine:'170 checkout' });
   }
   if(ev.win && game.category==='501' && p.legDarts===9 && p.legVisits===3){
     pendingAchievement = { type:'ninedarter', player:p.name, ts:Date.now() };
     showAchievement('ninedarter', p.name);
     sendHaWebhook('ninedarter', p.name, game.category);
+    fireMomentCard('ninedarter', { icon:'🏆', headline:'NINE-DARTER!', player:p.name, statLine:'501 · 9 darts' });
   }
   if(ev.win && ev.pointsThisVisit >= 100){
     sendHaWebhook('tonplus', p.name, game.category, { score: ev.pointsThisVisit });
@@ -2771,6 +2926,11 @@ function onLegWon(wi){
   // Big Fish (170 checkout) always finishes a leg, so this is the reliable way to know
   // whether the winning dart of this leg/set/game was specifically a 170 checkout.
   const _bigFish = !!(game.lastTurnEvent && game.lastTurnEvent.checkoutPoints === 170);
+  // Captured before the legs-reset below zeroes everyone out — a single-set match
+  // (setsPerGame===1) is decided purely by legs, so the match-win card's stat line
+  // needs the leg count as it stood at the moment of winning, not after "reset for
+  // the next set" bookkeeping that will never actually have a next set to run.
+  const legsAtWin = new Map(game.players.map(p => [p, p.legsWon]));
 
   if(!game.practice && w.legsWon >= game.legsPerSet){      // set won (H2H only)
     w.setsWon += 1;
@@ -2786,6 +2946,7 @@ function onLegWon(wi){
       DB.completeGame(w.name);   // api marks the game complete in the database
       persist();
       game.matchResult = { ts: Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:_bigFish };
+      fireMomentCard('matchwin', { icon:'🏅', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) });
       finishUnit('game', w.name);
       return;
     }
@@ -2887,6 +3048,7 @@ function finishUnit(kind, winner){
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${escapeHtml(winner)} takes the match. Stats saved.</p>
       <div class="btn-row" style="justify-content:center">
         <button class="btn btn-primary" onclick="show('setup')">New game</button>
+        <button class="btn btn-ghost" id="matchwin-share-btn" onclick="shareMomentCard('matchwin')">📤 Share</button>
       </div>${h2hStatsHtml(winner,'game')}</div>`;
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
