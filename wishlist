@@ -36,6 +36,7 @@ Others
 - Integrate with Homeassistant
 - Automated scoring with cameras and machine learning
 - Settings page - set default player
+- Tournament mode (bracket play, up to 128 players, single/double elim) — full design in docs/tournament-mode-roadmap.md
 
 
 Fixes:
