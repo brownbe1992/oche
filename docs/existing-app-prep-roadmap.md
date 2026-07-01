@@ -1,6 +1,6 @@
 # Preparing the Existing App for Future Roadmaps
 
-> Status: **in progress** (3 of 9 items done/adopted — see items 2, 3, and 8). This doc reviews all 16
+> Status: **in progress** (4 of 9 items done/adopted — see items 2, 3, 8, and 9). This doc reviews all 16
 > other roadmap docs in `docs/` and recommends changes to the *existing* codebase now,
 > specifically to reduce rework later. It intentionally does not recommend building
 > any future feature early — only making the current code more hospitable to features
@@ -201,6 +201,15 @@ on the mobile-app project specifically to justify.
 
 ## 9. Deployment structure for optional future services
 
+> **Status: ✅ Adopted.** Cross-referenced directly in `camera-scoring-roadmap.md`
+> and `online-multiplayer-roadmap.md` (the two docs that will actually need it),
+> rather than in `CLAUDE.md` — lower near-term violation risk than item 3 since it
+> only applies once one of those two specific, clearly-flagged projects actually
+> starts, so it doesn't need every-session visibility. Also verified
+> `docker-compose.yml` has no pinned old `version:` field, so it's already
+> compatible with the Compose `profiles:` key whenever a service needs one — no
+> blocker waiting to be discovered later.
+
 **The evidence**: `camera-scoring-roadmap.md` (a Python vision service) and
 `online-multiplayer-roadmap.md` (a signaling relay) both introduce a second process
 alongside the existing single Node container — a real departure from today's
@@ -239,7 +248,7 @@ Worth naming explicitly, since not everything needs a change:
 un-learn later:**
 3. ~~Context tables link into `games` via FK, never a new boolean on `games`
    (item 3).~~ ✅ Adopted — see `CLAUDE.md`.
-4. Docker Compose profiles for future optional services (item 9).
+4. ~~Docker Compose profiles for future optional services (item 9).~~ ✅ Adopted.
 
 **Worth doing when the first feature that needs it actually starts:**
 5. Stats query scope helper (item 1) — needed the moment game-modes, online
