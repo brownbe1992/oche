@@ -1662,14 +1662,14 @@ function renderPlayers(){
   const box = document.getElementById('players-list');
   box.innerHTML = '';
   if(roster.length===0){
-    box.innerHTML = `<p style=”color:var(--muted);font-size:13px;margin:0”>No players yet. Use “+ Add player” to create one.</p>`;
+    box.innerHTML = `<p style="color:var(--muted);font-size:13px;margin:0">No players yet. Use "+ Add player" to create one.</p>`;
     updateSetupChrome();
     return;
   }
   setup.slots.forEach((sel, i)=>{
     const taken = setup.slots.filter((_,j)=>j!==i);
     const opts = roster.map(p=>{
-      return `<option value=”${escapeHtml(p)}” ${p===sel?'selected':''} ${taken.includes(p)?'disabled':''}>${escapeHtml(p)}</option>`;
+      return `<option value="${escapeHtml(p)}" ${p===sel?'selected':''} ${taken.includes(p)?'disabled':''}>${escapeHtml(p)}</option>`;
     }).join('');
     // stat line — prefer H2H stats so practice sessions don't skew the number
     let statHtml = '';
@@ -1683,25 +1683,25 @@ function renderPlayers(){
           const d = s.recentAvg - avg;
           const arrow = d >= 0.5 ? '▲' : d <= -0.5 ? '▼' : '~';
           const col = d >= 0.5 ? 'var(--gold)' : d <= -0.5 ? 'var(--danger,#e5484d)' : 'var(--muted)';
-          form = `<span style=”color:${col};margin-left:4px”>${arrow} ${Math.abs(d).toFixed(1)}</span>`;
+          form = `<span style="color:${col};margin-left:4px">${arrow} ${Math.abs(d).toFixed(1)}</span>`;
         }
         const label = src === s.h2hStats ? 'h2h' : 'avg';
-        statHtml = `<span class=”slot-stat”>${label} ${avg.toFixed(1)}${form}</span>`;
+        statHtml = `<span class="slot-stat">${label} ${avg.toFixed(1)}${form}</span>`;
       }
     }
-    const outTag = sel ? `<span class=”out-tag” title=”${playerOut(sel)==='double'?'Doubles out':'Singles out'}”>${playerOut(sel)==='double'?'DO':'SO'}</span>` : '';
+    const outTag = sel ? `<span class="out-tag" title="${playerOut(sel)==='double'?'Doubles out':'Singles out'}">${playerOut(sel)==='double'?'DO':'SO'}</span>` : '';
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;flex-direction:column;gap:0';
     const innerRow = document.createElement('div'); innerRow.className = 'player-row';
-    innerRow.innerHTML = `<span class=”ix”>${i+1}</span>
-      <select class=”pselect” aria-label=”Player ${i+1}” onchange=”onSlotChange(${i}, this.value)”>
-        <option value=”” ${sel?'':'selected'} disabled>Choose player</option>
+    innerRow.innerHTML = `<span class="ix">${i+1}</span>
+      <select class="pselect" aria-label="Player ${i+1}" onchange="onSlotChange(${i}, this.value)">
+        <option value="" ${sel?'':'selected'} disabled>Choose player</option>
         ${opts}
       </select>
       ${outTag}
-      ${setup.slots.length>1?`<button class=”iconbtn” title=”Remove from game” onclick=”removePlayer(${i})”>✕</button>`:''}`;
+      ${setup.slots.length>1?`<button class="iconbtn" title="Remove from game" onclick="removePlayer(${i})">✕</button>`:''}`;
     row.appendChild(innerRow);
-    if(statHtml) row.insertAdjacentHTML('beforeend', `<div style=”padding-left:30px;margin-top:3px”>${statHtml}</div>`);
+    if(statHtml) row.insertAdjacentHTML('beforeend', `<div style="padding-left:30px;margin-top:3px">${statHtml}</div>`);
     box.appendChild(row);
   });
   updateSetupChrome();
