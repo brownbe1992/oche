@@ -207,7 +207,7 @@
   .da-sub{font-size:10px;color:var(--muted);flex:none}
 
   /* ---- practice leg stats panel ---- */
-  .prac-stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px;text-align:left}
+  .prac-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:20px;text-align:left}
   .prac-col{background:var(--surface);border:1px solid var(--wire);border-radius:12px;padding:14px 16px}
   .prac-col-title{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:700;margin-bottom:10px}
   .prac-row{display:flex;justify-content:space-between;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--wire)}
@@ -2611,6 +2611,8 @@ function startNextLeg(newSet){
 // game-scope totals carry across sets. Only leg-scope resets (handled above).
 function startNextSet(){ startNextLeg(true); }
 
+function statRow(label,val,sm){ return `<div class="prac-row"><span class="prac-row-label">${label}</span><span class="prac-row-val${sm?' sm':''}">${val}</span></div>`; }
+
 function pracStatsHtml(turns){
   if(!turns.length) return '';
   const darts       = turns.reduce((s,t)=>s+t.darts,0);
@@ -2619,14 +2621,32 @@ function pracStatsHtml(turns){
   const tlPct       = turns.length ? Math.round(tlCount/turns.length*100)+'%' : '—';
   const checkouts   = turns.filter(t=>t.checkout&&t.checkoutPoints).map(t=>t.checkoutPoints);
   const topVisits   = turns.filter(t=>!t.bust).map(t=>t.scored).sort((a,b)=>b-a).slice(0,5);
-  const row=(label,val,sm)=>`<div class="prac-row"><span class="prac-row-label">${label}</span><span class="prac-row-val${sm?' sm':''}">${val}</span></div>`;
   return [
-    row('Darts Thrown', darts),
-    row('Checkout'+(checkouts.length!==1?'s':''), checkouts.length ? checkouts.join(', ') : '—', checkouts.length>1),
-    row('Best Visits', topVisits.length ? topVisits.join(', ') : '—', topVisits.length>2),
-    row('Busts', busts),
-    row('Trebleless %', tlPct),
+    statRow('Darts Thrown', darts),
+    statRow('Checkout'+(checkouts.length!==1?'s':''), checkouts.length ? checkouts.join(', ') : '—', checkouts.length>1),
+    statRow('Best Visits', topVisits.length ? topVisits.join(', ') : '—', topVisits.length>2),
+    statRow('Busts', busts),
+    statRow('Trebleless %', tlPct),
   ].join('');
+}
+
+// per-player leg/game stats shown on the H2H leg-complete screen
+function h2hStatsHtml(winner){
+  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
+  const cols = game.players.map(p=>{
+    const rows = [
+      statRow('Leg Avg', avgStr(p.legPoints, p.legAvgDarts)),
+      statRow('Game Avg', avgStr(p.gamePoints, p.gameAvgDarts)),
+      statRow('Darts (leg)', p.legDarts||0),
+    ];
+    if(showStanding){
+      const standing = game.setsPerGame>1 ? `Sets ${p.setsWon} · Legs ${p.legsWon}` : `Legs ${p.legsWon}/${game.legsPerSet}`;
+      rows.push(statRow('Standing', standing, true));
+    }
+    const title = p.name===winner ? `${escapeHtml(p.name)} 🎯` : escapeHtml(p.name);
+    return `<div class="prac-col"><div class="prac-col-title">${title}</div>${rows.join('')}</div>`;
+  }).join('');
+  return `<div class="prac-stats">${cols}</div>`;
 }
 
 function finishUnit(kind, winner){
@@ -2650,7 +2670,7 @@ function finishUnit(kind, winner){
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
-    const legPanel = (game.practice && kind==='leg') ? `
+    const legPanel = kind!=='leg' ? '' : game.practice ? `
       <div class="prac-stats">
         <div class="prac-col">
           <div class="prac-col-title">This Leg</div>
@@ -2660,7 +2680,7 @@ function finishUnit(kind, winner){
           <div class="prac-col-title">This Session</div>
           ${pracStatsHtml(game.sessionTurns||[])}
         </div>
-      </div>` : '';
+      </div>` : h2hStatsHtml(winner);
     oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
       <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">${kind==='set'?'SET COMPLETE':'LEG COMPLETE'}</div>
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">Stats saved.</p>
