@@ -18,6 +18,9 @@ Player pages:
 
 - Dropdown to choose game mode to view stats for
 - Environmental data (temp/humidity) — full design in docs/environmental-logging-roadmap.md
+- Coaching insights from existing dart analytics — full design in docs/coaching-insights-roadmap.md
+- Shareable moment/stat cards — full design in docs/shareable-moments-roadmap.md
+- Data export (CSV/JSON) — full design in docs/data-export-roadmap.md
 
 
 Stats page:
@@ -30,6 +33,7 @@ Stats page:
 
 Scoreboard
 - 9 darter celebration of some kind
+- Voice announcements (180, game shot, running score) — full design in docs/voice-announcements-roadmap.md
 
 Others
 - Add additional games (Cricket, Baseball, etc.) — full design in docs/game-modes-roadmap.md
@@ -39,6 +43,12 @@ Others
 - Tournament mode (bracket play, up to 128 players, single/double elim) — full design in docs/tournament-mode-roadmap.md
 - iOS/Android app (hybrid webview client) — full design in docs/mobile-app-roadmap.md
 - Online multiplayer (P2P scoring + live video verification) — full design in docs/online-multiplayer-roadmap.md
+- Expanded achievements/badges beyond 180s/Big Fish/9-darters — full design in docs/achievements-badges-roadmap.md
+- Home Assistant automation recipe book (lights/sounds/notifications) — full design in docs/ha-recipes-roadmap.md
+- Colorblind-friendly dartboard palette — full design in docs/colorblind-mode-roadmap.md
+- League/season mode (standings across casual matches over time) — full design in docs/league-mode-roadmap.md
+- Daily/weekly solo challenge — full design in docs/daily-challenge-roadmap.md
+- Ghost opponent (practice against a replay of your own past leg) — full design in docs/ghost-opponent-roadmap.md
 
 
 Fixes:
