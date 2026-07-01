@@ -1160,7 +1160,12 @@ function show(name){
   document.getElementById('nav-settings').setAttribute('aria-current', name==='settings');
   if(name==='settings') renderSettings();
   if(name==='home') renderHome();
-  if(name==='setup'){ setup.slots=[]; sanitizeSlots(); renderPlayers(); updateFormatLine(); }
+  if(name==='setup'){
+    setup.slots=[]; sanitizeSlots(); renderPlayers(); updateFormatLine();
+    // stats are cached client-side and only refetched on demand — without this, averages
+    // shown here can be stale after playing a game earlier in the same session.
+    DB.refreshStats().then(()=>{ sanitizeSlots(); renderPlayers(); }).catch(()=>{});
+  }
   if(name==='players') renderRoster();
   if(name==='player'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); }
   if(name==='legend') renderLegend();
@@ -1709,7 +1714,8 @@ function renderPlayers(){
   setup.slots.forEach((sel, i)=>{
     const taken = setup.slots.filter((_,j)=>j!==i);
     const opts = roster.map(p=>{
-      return `<option value="${escapeHtml(p)}" ${p===sel?'selected':''} ${taken.includes(p)?'disabled':''}>${escapeHtml(p)}</option>`;
+      const lock = (prefs[p] && prefs[p].hasPin) ? ' 🔒' : '';
+      return `<option value="${escapeHtml(p)}" ${p===sel?'selected':''} ${taken.includes(p)?'disabled':''}>${escapeHtml(p)}${lock}</option>`;
     }).join('');
     // stat line — prefer H2H stats so practice sessions don't skew the number
     let statHtml = '';
@@ -1765,13 +1771,14 @@ function updateH2HBanner(named){
   if(!screen || !screen.classList.contains('on')){ el.style.display='none'; return; }
   if(named.length !== 2 || setup.practice){ el.style.display='none'; return; }
   const [p1, p2] = named;
-  el.style.display = '';
+  el.style.display = 'block';
   el.textContent = 'Loading H2H record…';
   if(_h2hAbort) _h2hAbort.aborted = true;
   const tok = { aborted:false }; _h2hAbort = tok;
   fetch(`/api/players/h2h?p1=${encodeURIComponent(p1)}&p2=${encodeURIComponent(p2)}`)
     .then(r=>r.json()).then(d=>{
-      if(tok.aborted || !d || d.total===0){ el.style.display='none'; return; }
+      if(tok.aborted) return;   // a newer selection already took over — don't clobber its result
+      if(!d || d.total===0){ el.style.display='none'; return; }
       const leader = d.p1Wins>d.p2Wins ? `${p1} leads ${d.p1Wins}–${d.p2Wins}`
                    : d.p2Wins>d.p1Wins ? `${p2} leads ${d.p2Wins}–${d.p1Wins}`
                    : `Tied ${d.p1Wins}–${d.p2Wins}`;
