@@ -1157,7 +1157,7 @@ function getVoiceAnnouncementSettings() {
     matchProgress: on('voice_match_progress'),
   };
 }
-const DEFAULT_CARD_TAGLINE = 'Darts tracked via Oche — track your darts games today!';
+const DEFAULT_CARD_TAGLINE = 'Darts tracked via Oche — track your darts thrown today!';
 // Public (no-auth) read of the shareable-card tagline — any device generating a card
 // (not just the admin's browser) needs this, and it's meant to be edited later once
 // there's a real website/handle to point at.
