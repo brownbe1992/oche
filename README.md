@@ -287,9 +287,13 @@ Plus global leaderboards for 180s, Big Fish, and nine-dart finishes, each filter
 
 ### Settings
 
-The Settings page (accessible from the top navigation) holds app-wide configuration. Each section — **Admin accounts**, **Player PINs**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
+The Settings page (accessible from the top navigation) holds app-wide configuration. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
 
 Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accounts--player-pins)) — until an admin account exists, the page offers to create the first one.
+
+#### Scoring
+
+- **Default input** — which dart entry method a new game opens with: **Dartboard** (tap the sector you hit) or **Pad** (number grid with a multiplier selector). Either can still be switched per-session from the scoring screen itself.
 
 #### Data Collection
 
@@ -370,7 +374,7 @@ The first time Settings is opened with no admin account on the server, a setup w
 | Wipe all player/game/stat data | Yes |
 | Set or remove a player's PIN | Yes |
 | Add/remove admin accounts | Yes |
-| Change Home Assistant / webhook / scoreboard-layout settings | Yes |
+| Change Home Assistant / webhook / scoreboard-layout / default-input settings | Yes |
 | Verify a player's PIN to add them to a game | No — public, but rate-limited by the lockout threshold |
 | View stats, play games, use the scoreboard | No |
 
@@ -504,9 +508,10 @@ The live state is held in memory only — it is never written to the database. O
 GET  /api/settings                          Retrieve all settings (key/value pairs)                [admin]
 PUT  /api/settings                          Update settings       { ha_url, ha_webhook_*,          [admin]
                                                pin_lockout_threshold, collect_dart_timing,
-                                               scoreboard_layout, … }
+                                               scoreboard_layout, default_scoring_input, … }
 GET  /api/settings/dart-timing              { enabled } — public, read by every device during play
 GET  /api/settings/scoreboard-layout        { layout } — public, read by the /display screen
+GET  /api/settings/default-input            { input: 'pad'|'board' } — public, read at app boot
 POST /api/ha-test                           Test HA connectivity  { url }                        [admin]
 POST /api/ha-webhook                        Fire an HA webhook    { event, player, category, … }
 ```

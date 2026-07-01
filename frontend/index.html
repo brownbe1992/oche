@@ -705,6 +705,24 @@
         Smart Home Integration requires the server backend. Open the app via Docker at <code>http://&lt;your-server&gt;:8046</code>.
       </p>
 
+      <!-- Scoring -->
+      <div class="pp-section" style="margin-bottom:24px">
+        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('scoring-input-body',this)">
+          Scoring
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="scoring-input-body" hidden>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+            Which dart entry method a new game opens with. Either can still be switched per-session from the scoring screen itself.
+          </p>
+          <label class="field">Default input</label>
+          <select class="date-input" id="default-scoring-input" style="width:auto;margin-bottom:6px">
+            <option value="board">Dartboard — tap the sector you hit</option>
+            <option value="pad">Pad — number grid with a multiplier selector</option>
+          </select>
+        </div>
+      </div>
+
       <!-- Data Collection -->
       <div class="pp-section" style="margin-bottom:24px">
         <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('data-collection-body',this)">
@@ -1065,7 +1083,7 @@ let roster = [];     // saved player names (profiles that own stats)
 let stats = {};
 let prefs = {};      // name -> { out:'double'|'single' }  (per-player finish rule)
 let mult = 1;
-let dartboardMode = true;
+let dartboardMode = true;   // admin-configurable default; refreshed at boot from /api/settings/default-input
 
 /* ---------- dartboard input mode ---------- */
 const DB_SECTORS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
@@ -1513,6 +1531,8 @@ async function renderSettings(){
     if(dtEl) dtEl.checked = cfg.collect_dart_timing === '1';
     const sbEl = document.getElementById('scoreboard-layout');
     if(sbEl) sbEl.value = ['full','compact','minimal'].includes(cfg.scoreboard_layout) ? cfg.scoreboard_layout : 'full';
+    const diEl = document.getElementById('default-scoring-input');
+    if(diEl) diEl.value = cfg.default_scoring_input === 'pad' ? 'pad' : 'board';
   }).catch(err=>{ const s=document.getElementById('settings-error'); if(s){ s.textContent='Could not load settings: '+err.message; s.hidden=false; } });
 }
 
@@ -1630,6 +1650,7 @@ function saveSettings(){
     pin_lockout_threshold:   Number(v('pin-lockout-threshold')) || 10,
     collect_dart_timing:     (document.getElementById('collect-dart-timing')||{}).checked ? '1' : '0',
     scoreboard_layout:       v('scoreboard-layout') || 'full',
+    default_scoring_input:   v('default-scoring-input') || 'board',
   }).then(()=>{
     if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
     dartTimingEnabled = (document.getElementById('collect-dart-timing')||{}).checked || false;
@@ -3389,6 +3410,7 @@ function showBackendErrorScreen(){
   }
   await DB.loadAll();       // populate roster / prefs / stats from the backend
   try{ const dt = await Backend.get('/api/settings/dart-timing'); dartTimingEnabled = !!dt.enabled; }catch(e){}
+  try{ const di = await Backend.get('/api/settings/default-input'); dartboardMode = di.input !== 'pad'; }catch(e){}
   restoreSetup();
   sanitizeSlots();
   renderPlayers();

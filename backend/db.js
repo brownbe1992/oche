@@ -1126,6 +1126,13 @@ function getScoreboardLayout() {
   const layout = row ? row.value : 'full';
   return { layout: ['full','compact','minimal'].includes(layout) ? layout : 'full' };
 }
+// Public (no-auth) read of the default scoring input (dartboard vs number pad) —
+// every device scoring a game needs this, not just an admin's browser.
+function getDefaultScoringInput() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'default_scoring_input'").get();
+  const input = row ? row.value : 'board';
+  return { input: ['pad','board'].includes(input) ? input : 'board' };
+}
 
 /* ---------- admin accounts + sessions ---------- */
 function isSetupRequired() {
@@ -1344,7 +1351,7 @@ module.exports = {
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn,
   getCheckoutRoutes, getDartAnalytics,
-  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, fireHaWebhook,
+  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, fireHaWebhook,
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword,
   login, logout, getSessionAdmin,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,
