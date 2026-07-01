@@ -4202,6 +4202,7 @@ function showBackendErrorScreen(){
   document.getElementById('sets-val').textContent = setup.setsPerGame;
   updateFormatLine();
   renderHome();             // populate the landing page with summary data
+  renderChallengeCard();    // populate Today's Challenge (show('home') isn't called on first load)
   pushLive();   // tell any scoreboard screens we're ready (idle until a game starts)
   await Auth.refresh();
   if(Auth.setupRequired && !localStorage.getItem('oche_wizard_dismissed')) showWizard();
