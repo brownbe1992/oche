@@ -37,6 +37,7 @@ Others
 - Automated scoring with cameras and machine learning — full design in docs/camera-scoring-roadmap.md
 - Settings page - set default player
 - Tournament mode (bracket play, up to 128 players, single/double elim) — full design in docs/tournament-mode-roadmap.md
+- iOS/Android app (hybrid webview client) — full design in docs/mobile-app-roadmap.md
 
 
 Fixes:
