@@ -1,10 +1,11 @@
 # Preparing the Existing App for Future Roadmaps
 
-> Status: **in progress** (4 of 9 items done/adopted — see items 2, 3, 8, and 9). This doc reviews all 16
+> Status: **in progress** (4 of 10 items done/adopted — see items 2, 3, 8, and 9). This doc reviews all 16
 > other roadmap docs in `docs/` and recommends changes to the *existing* codebase now,
 > specifically to reduce rework later. It intentionally does not recommend building
 > any future feature early — only making the current code more hospitable to features
-> that are still just plans.
+> that are still just plans. It also now includes a cross-roadmap sequencing analysis
+> (complexity vs. usefulness, and build-order dependencies) at the end.
 
 ## How to read this
 
@@ -224,6 +225,31 @@ service."
 
 ---
 
+## 10. Pull the X01-to-plugin refactor forward, decoupled from shipping Cricket
+
+**The evidence**: `game-modes-roadmap.md`'s own build order lists "extract the
+existing X01 logic behind the plugin interface, no behavior change" as its Phase 1,
+treating it as step one of *shipping Cricket*. But looking across the full roadmap
+set, that same refactor is also exactly what `ghost-opponent-roadmap.md` and
+`camera-scoring-roadmap.md` need — both are, at their core, "a dart event from a
+non-tap source" (a scripted historical replay; a vision service), which is precisely
+the "where did this dart event come from" vs. "what does this game type do with it"
+separation item 5 above already flags as worth protecting.
+
+If ghost-opponent or camera-scoring get built before this refactor happens, each will
+invent its own version of "inject a dart from somewhere other than a tap," and the
+later game-modes refactor then has to reconcile two ad-hoc solutions instead of
+establishing one clean one from the start.
+
+**Recommendation**: treat the X01-to-plugin extraction as its own near-term prep
+project — the same way `games.game_type`/`config` (item 2) was pulled forward — 
+*without* committing to build Cricket's rules, UI, or stats parity yet. This is a
+real, non-trivial chunk of work (unlike items 2/8/9, which were cheap), so it
+shouldn't be understated, but doing it once, early, de-risks three separate future
+features (Cricket, ghost-opponent, camera-scoring) instead of just one.
+
+---
+
 ## What's already well-positioned (no prep needed)
 
 Worth naming explicitly, since not everything needs a change:
@@ -250,14 +276,69 @@ un-learn later:**
    (item 3).~~ ✅ Adopted — see `CLAUDE.md`.
 4. ~~Docker Compose profiles for future optional services (item 9).~~ ✅ Adopted.
 
+**Worth pulling forward as its own project, ahead of committing to ship Cricket:**
+5. The X01-to-plugin refactor (item 10) — real work, but de-risks Cricket,
+   ghost-opponent, and camera-scoring at once rather than one at a time. See the
+   Roadmap Sequencing section below for why this should happen before either of the
+   other two.
+
 **Worth doing when the first feature that needs it actually starts:**
-5. Stats query scope helper (item 1) — needed the moment game-modes, online
+6. Stats query scope helper (item 1) — needed the moment game-modes, online
    multiplayer, or league mode starts real implementation, but not before.
-6. Game-lifecycle hook point (item 4) — same timing.
-7. Player-deletion-guard extensibility (item 6) — same timing.
+7. Game-lifecycle hook point (item 4) — same timing.
+8. Player-deletion-guard extensibility (item 6) — same timing.
 
 **Worth keeping in mind, no action item today:**
-8. Protecting the `throwDart` input-source separation during the eventual game-modes
-   refactor (item 5).
-9. Settings page regrouping (item 7) — not urgent at 7 sections, worth revisiting
-   before the next 2-3 land.
+9. Protecting the `throwDart` input-source separation during the eventual game-modes
+   refactor (item 5) — largely superseded by item 10 above once that's done.
+10. Settings page regrouping (item 7) — not urgent at 7 sections, worth revisiting
+    before the next 2-3 land.
+
+---
+
+## Roadmap sequencing: complexity vs. usefulness
+
+A separate pass across all 16 feature roadmap docs (not this consolidation doc
+itself), ranking each on build complexity and real usefulness, and calling out
+build-order dependencies between them.
+
+| Roadmap | Complexity | Usefulness | Why |
+|---|---|---|---|
+| HA recipes | Trivial (docs only) | Medium | Zero code, unlocks power that already shipped |
+| Colorblind mode | Very low | Medium (narrow, real) | CSS-only, genuine accessibility fix |
+| Data export | Very low | Medium | Reformats existing queries; reinforces the self-hosted trust story |
+| Voice announcements | Very low | Medium-High | Browser API only, zero infra, extends the celebration culture already core to the app |
+| Shareable moments | Low | Medium | Client-side only; fun/virality, not core utility |
+| Achievements/badges | Low | Medium | Mostly content on top of infra that already works |
+| Daily challenge | Low | Medium | Built entirely on the existing Practice engine |
+| Ghost opponent | Low-Medium | Medium | Needs a "scripted input source" concept — see dependency note below |
+| Coaching insights | Low-Medium | High | No new data collection; genuinely differentiating vs. competitors |
+| League mode | Medium | Medium-High | New tables, no new infra; complements tournament mode |
+| Mobile app | Medium | High | Real packaging/TLS work, but zero new backend infra, and its one prerequisite (responsive CSS) is already done |
+| Tournament mode | Medium-High | High | Bracket generation (especially double-elim) is genuinely fiddly, but fully self-contained — reuses the scoring engine unchanged |
+| Environmental logging | Medium | Low (self-admittedly niche) | New inbound HA auth model, but explicitly scoped as a niche, manually-enabled feature |
+| Game modes (Cricket/Baseball) | Very high | Very high | Full scoring-engine + stats-pipeline generalization, not just "add Cricket" |
+| Online multiplayer | Very high | High *but conditional* | Needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem that caps near-term value regardless of build quality |
+| Camera/ML scoring | Extremely high | High *but narrow* | Genuinely novel CV engineering; only useful to whoever actually mounts the hardware |
+
+### Build-order dependencies worth acting on
+
+1. **Game-modes' Phase 1 (the X01→plugin refactor) should happen before
+   ghost-opponent and camera-scoring** — see item 10 above. This is the single most
+   important sequencing call in the whole set: all three features are variations of
+   "a dart event from a non-tap source," and solving it once, early, avoids two
+   ad-hoc solutions that later need reconciling.
+2. **Tournament mode before league mode.** Not a hard dependency, but tournament
+   mode is the more specifically-requested one, and building it first gives league
+   mode's "games link into a context table" pattern (item 3) a real precedent to
+   follow.
+3. **Mobile app has no blockers at all**, and its only prerequisite (item 8) already
+   shipped — it's the only big item genuinely ready to start today with nothing else
+   required first.
+4. **The ten smaller roadmaps are entirely order-independent** and can be
+   interleaved anywhere, including between or ahead of the bigger lifts — good for
+   sustaining momentum, and essentially zero risk of creating rework later.
+5. **Achievements/badges and coaching insights are X01-only today.** If either is
+   built before Cricket exists (likely, given Cricket's complexity), keep the
+   stat/achievement definitions abstracted per game type from day one — cheap to do
+   now, expensive to retrofit once real achievement data exists for X01 only.
