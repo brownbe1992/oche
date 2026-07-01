@@ -17,7 +17,7 @@ Player pages:
     - Checkout %
 
 - Dropdown to choose game mode to view stats for
-- Environmental data (temp/humidity)
+- Environmental data (temp/humidity) — full design in docs/environmental-logging-roadmap.md
 
 
 Stats page:
