@@ -298,12 +298,16 @@ const server = http.createServer(async (req, res) => {
       const allowed = ['ha_url',
         'ha_webhook_oneeighty','ha_webhook_bigfish','ha_webhook_bust','ha_webhook_ninedarter','ha_webhook_tonplus',
         'ha_webhook_gamestart','ha_webhook_gameend','ha_webhook_setstart','ha_webhook_setend',
-        'ha_webhook_legstart','ha_webhook_legend','pin_lockout_threshold','collect_dart_timing','scoreboard_layout',
+        'ha_webhook_legstart','ha_webhook_legend','pin_lockout_threshold','admin_lockout_threshold','collect_dart_timing','scoreboard_layout',
         'default_scoring_input'];
       const safe = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
       if ('pin_lockout_threshold' in safe) {
         const n = Number(safe.pin_lockout_threshold);
         if (!Number.isInteger(n) || n < 1 || n > 1000) return send(res, 400, { error: 'pin_lockout_threshold must be an integer between 1 and 1000' });
+      }
+      if ('admin_lockout_threshold' in safe) {
+        const n = Number(safe.admin_lockout_threshold);
+        if (!Number.isInteger(n) || n < 1 || n > 1000) return send(res, 400, { error: 'admin_lockout_threshold must be an integer between 1 and 1000' });
       }
       if ('collect_dart_timing' in safe) safe.collect_dart_timing = (safe.collect_dart_timing === '1' || safe.collect_dart_timing === true) ? '1' : '0';
       if ('scoreboard_layout' in safe && !['full','compact','minimal'].includes(safe.scoreboard_layout)) {
@@ -366,6 +370,11 @@ const server = http.createServer(async (req, res) => {
 
     return send(res, 404, { error: 'Unknown endpoint' });
   } catch (err) {
+    // Log server-side so a self-hoster can see failures in `docker logs` — previously
+    // errors were only ever reported back to the client, with no server-side record.
+    if (!err.status || err.status >= 500) {
+      console.error(`[${new Date().toISOString()}] ${req.method} ${req.url} ->`, err);
+    }
     send(res, err.status || 500, { error: err.message || 'Server error' });
   }
 });

@@ -140,8 +140,11 @@ try { db.exec('ALTER TABLE darts ADD COLUMN thrown_at TEXT'); } catch(e) {}
 // created today is still 'x01', config just carries its starting score.
 try { db.exec("ALTER TABLE games ADD COLUMN game_type TEXT NOT NULL DEFAULT 'x01'"); } catch(e) {}
 try { db.exec('ALTER TABLE games ADD COLUMN config TEXT'); } catch(e) {}
+try { db.exec('ALTER TABLE admins ADD COLUMN login_fail_count INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
+try { db.exec('ALTER TABLE admins ADD COLUMN login_locked_until INTEGER'); } catch(e) {}
 
 const DEFAULT_PIN_LOCKOUT_THRESHOLD = 10;
+const DEFAULT_ADMIN_LOCKOUT_THRESHOLD = 5; // stricter than PIN lockout — compromising the admin account is more consequential
 
 /* ---------- prepared statements ---------- */
 const q = {
@@ -159,11 +162,14 @@ const q = {
   resetPinFail : db.prepare('UPDATE players SET pin_fail_count = 0, pin_locked_until = NULL WHERE id = ?'),
 
   insertAdmin    : db.prepare('INSERT INTO admins (username, password_hash, password_salt) VALUES (?, ?, ?)'),
-  adminByUsername: db.prepare('SELECT id, username, password_hash, password_salt FROM admins WHERE username = ? COLLATE NOCASE'),
+  adminByUsername: db.prepare('SELECT id, username, password_hash, password_salt, login_fail_count, login_locked_until FROM admins WHERE username = ? COLLATE NOCASE'),
   adminById      : db.prepare('SELECT id, username FROM admins WHERE id = ?'),
   listAdmins     : db.prepare('SELECT id, username, created_at FROM admins ORDER BY username COLLATE NOCASE'),
   countAdmins    : db.prepare('SELECT COUNT(*) AS n FROM admins'),
   deleteAdmin    : db.prepare('DELETE FROM admins WHERE id = ?'),
+  bumpLoginFail  : db.prepare('UPDATE admins SET login_fail_count = login_fail_count + 1 WHERE id = ?'),
+  lockLogin      : db.prepare('UPDATE admins SET login_locked_until = ? WHERE id = ?'),
+  resetLoginFail : db.prepare('UPDATE admins SET login_fail_count = 0, login_locked_until = NULL WHERE id = ?'),
   updateAdminPw  : db.prepare('UPDATE admins SET password_hash = ?, password_salt = ? WHERE id = ?'),
 
   insertSession  : db.prepare('INSERT INTO sessions (token_hash, admin_id, created_at, expires_at) VALUES (?, ?, ?, ?)'),
@@ -1216,18 +1222,38 @@ const INVALID_LOGIN = 'Invalid username or password';
 // response timing from leaking which usernames are registered.
 const DUMMY_PW_HASH = auth.hashSecret('dummy-password-for-constant-time-login');
 
+function adminLockoutThreshold() {
+  const v = Number(getSettings().admin_lockout_threshold);
+  return Number.isInteger(v) && v > 0 ? v : DEFAULT_ADMIN_LOCKOUT_THRESHOLD;
+}
+
 function login(username, password) {
   username = String(username || '').trim();
   password = String(password || '');
   const admin = q.adminByUsername.get(username);
+  const now = Date.now();
+  if (admin && admin.login_locked_until && admin.login_locked_until > now) {
+    throw httpError(423, 'Too many failed login attempts. Try again in a few minutes.');
+  }
+
   const ok = admin
     ? auth.verifySecret(password, admin.password_hash, admin.password_salt)
     : (auth.verifySecret(password, DUMMY_PW_HASH.hash, DUMMY_PW_HASH.salt), false);
-  if (!admin || !ok) throw httpError(401, INVALID_LOGIN);
+
+  if (!admin || !ok) {
+    if (admin) {
+      q.bumpLoginFail.run(admin.id);
+      const fails = (admin.login_fail_count || 0) + 1;
+      if (fails >= adminLockoutThreshold()) {
+        q.lockLogin.run(now + 5 * 60 * 1000, admin.id); // 5 minute lockout, same as PIN lockout
+      }
+    }
+    throw httpError(401, INVALID_LOGIN);
+  }
+  q.resetLoginFail.run(admin.id);
 
   const token = auth.newSessionToken();
   const tokenHash = auth.hashToken(token);
-  const now = Date.now();
   q.insertSession.run(tokenHash, admin.id, now, now + auth.SESSION_TTL_MS);
   q.deleteExpiredSessions.run(now);
   return { token, username: admin.username };
@@ -1362,7 +1388,7 @@ module.exports = {
   getCheckoutRoutes, getDartAnalytics,
   getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, fireHaWebhook,
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword,
-  login, logout, getSessionAdmin,
+  login, logout, getSessionAdmin, adminLockoutThreshold,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,
   _db: db,
 };

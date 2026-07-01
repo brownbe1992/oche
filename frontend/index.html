@@ -684,6 +684,8 @@
           </p>
           <div id="admins-list" style="display:grid;gap:8px;margin-bottom:14px"></div>
           <button class="btn btn-ghost" onclick="askAddAdmin()">+ Add admin</button>
+          <label class="field" style="margin-top:14px">Lock out logins after this many wrong passwords</label>
+          <input type="number" id="admin-lockout-threshold" min="1" max="1000" style="width:120px">
         </div>
       </div>
 
@@ -1529,6 +1531,8 @@ async function renderSettings(){
     set('ha-wh-setend',     'ha_webhook_setend');
     const lockoutEl = document.getElementById('pin-lockout-threshold');
     if(lockoutEl) lockoutEl.value = cfg.pin_lockout_threshold || 10;
+    const adminLockoutEl = document.getElementById('admin-lockout-threshold');
+    if(adminLockoutEl) adminLockoutEl.value = cfg.admin_lockout_threshold || 5;
     const dtEl = document.getElementById('collect-dart-timing');
     if(dtEl) dtEl.checked = cfg.collect_dart_timing === '1';
     const sbEl = document.getElementById('scoreboard-layout');
@@ -1650,6 +1654,7 @@ function saveSettings(){
     ha_webhook_setstart:     v('ha-wh-setstart'),
     ha_webhook_setend:       v('ha-wh-setend'),
     pin_lockout_threshold:   Number(v('pin-lockout-threshold')) || 10,
+    admin_lockout_threshold: Number(v('admin-lockout-threshold')) || 5,
     collect_dart_timing:     (document.getElementById('collect-dart-timing')||{}).checked ? '1' : '0',
     scoreboard_layout:       v('scoreboard-layout') || 'full',
     default_scoring_input:   v('default-scoring-input') || 'board',

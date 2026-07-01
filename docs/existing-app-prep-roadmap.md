@@ -5,7 +5,10 @@
 > specifically to reduce rework later. It intentionally does not recommend building
 > any future feature early — only making the current code more hospitable to features
 > that are still just plans. It also now includes a cross-roadmap sequencing analysis
-> (complexity vs. usefulness, and build-order dependencies) at the end.
+> (complexity vs. usefulness, and build-order dependencies) at the end — three of the
+> cross-cutting engineering-health items added there (server-side error logging,
+> admin login rate limiting, backups) are now done as of v0.6.2; see the sequencing
+> table below.
 
 ## How to read this
 
@@ -307,13 +310,13 @@ attention as the feature roadmaps.
 
 | Roadmap | Complexity | Usefulness | Why |
 |---|---|---|---|
-| Server-side error logging | Trivial (one line) | High | Zero design, closes a real "no one would know" gap — see `docs/testing-and-observability-roadmap.md` |
+| ~~Server-side error logging~~ ✅ Done (v0.6.2) | Trivial (one line) | High | Zero design, closes a real "no one would know" gap — see `docs/testing-and-observability-roadmap.md` |
 | HA recipes | Trivial (docs only) | Medium | Zero code, unlocks power that already shipped |
-| Admin login rate limiting | Very low | High | Mirrors the already-proven PIN lockout pattern almost line-for-line — see `docs/security-hardening-roadmap.md` |
+| ~~Admin login rate limiting~~ ✅ Done (v0.6.2) | Very low | High | Mirrors the already-proven PIN lockout pattern almost line-for-line — see `docs/security-hardening-roadmap.md` |
 | Colorblind mode | Very low | Medium (narrow, real) | CSS-only, genuine accessibility fix; first item under `docs/accessibility-roadmap.md` |
 | Data export | Very low | Medium | Reformats existing queries; reinforces the self-hosted trust story |
 | Voice announcements | Very low | Medium-High | Browser API only, zero infra, extends the celebration culture already core to the app |
-| Backups / disaster recovery | Low | Very high | Self-contained script + docs, no schema/API changes; protects irreplaceable personal data — see `docs/backups-roadmap.md` |
+| ~~Backups / disaster recovery~~ ✅ Done (v0.6.2) | Low | Very high | Self-contained script + docs, no schema/API changes; protects irreplaceable personal data — see `docs/backups-roadmap.md` |
 | Shareable moments | Low | Medium | Client-side only; fun/virality, not core utility |
 | Achievements/badges | Low | Medium | Mostly content on top of infra that already works |
 | Daily challenge | Low | Medium | Built entirely on the existing Practice engine |
@@ -345,15 +348,15 @@ attention as the feature roadmaps.
 4. **The ten smaller roadmaps are entirely order-independent** and can be
    interleaved anywhere, including between or ahead of the bigger lifts — good for
    sustaining momentum, and essentially zero risk of creating rework later.
-5. **Server-side error logging, admin login rate limiting, and backups should be
-   done sooner rather than later**, alongside colorblind mode — all four are the
-   cheapest items in the whole table (Trivial-to-Low complexity) and three of them
-   (logging, login lockout, backups) close real operational/security gaps rather than
-   adding new user-facing capability. None has any dependency on anything else in this
-   table. The testing-strategy slice is a size step up (Medium) but is worth doing
-   before or alongside item 10 (the X01-to-plugin refactor), since that refactor is
-   the highest-value place to prove the new abstraction behaves identically to today's
-   code via an actual test rather than manual spot-checking.
+5. ~~Server-side error logging, admin login rate limiting, and backups should be
+   done sooner rather than later, alongside colorblind mode~~ ✅ **Done (v0.6.2)** —
+   all three closed real operational/security gaps rather than adding new
+   user-facing capability, with no dependency on anything else in this table.
+   Colorblind mode (also Very low complexity, no dependency on these three) remains
+   the next item queued. The testing-strategy slice is a size step up (Medium) but is
+   worth doing before or alongside item 10 (the X01-to-plugin refactor), since that
+   refactor is the highest-value place to prove the new abstraction behaves
+   identically to today's code via an actual test rather than manual spot-checking.
 5. **Achievements/badges and coaching insights are X01-only today.** If either is
    built before Cricket exists (likely, given Cricket's complexity), keep the
    stat/achievement definitions abstracted per game type from day one — cheap to do

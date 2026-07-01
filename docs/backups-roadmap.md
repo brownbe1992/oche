@@ -1,7 +1,10 @@
 # Backups & Disaster Recovery — Design Roadmap
 
-> Status: **not started**. This is a design doc for a future release, captured so the
-> thinking isn't lost. Nothing described here exists in the app yet.
+> Status: **✅ Done** (v0.6.2). `backend/backup.js` implements exactly the design
+> below — verified end-to-end against a real seeded database: backup written,
+> restored from the `.db` file alone (no `-wal`/`-shm` needed), retention pruning
+> tested. README's "Backups" section documents the cron schedule and restore steps.
+> The Compose-profile sidecar remains an unbuilt stretch goal.
 >
 > **Size: Low complexity.** A self-contained script plus documentation — no schema or
 > API changes to the running app, no new dependencies. **Usefulness: very high** — this

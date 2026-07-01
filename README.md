@@ -6,7 +6,7 @@
 
 A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player statistics, and no external dependencies.
 
-**v0.6.1**
+**v0.6.2**
 
 You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, hall-of-fame moments, and years' worth of per-player history. All data lives in a SQLite database on your own server.
 
@@ -356,6 +356,7 @@ The first time Settings is opened with no admin account on the server, a setup w
 - Any number of admin accounts can exist; there must always be at least one
 - Admins can access Settings, manage other admin accounts, set/reset player PINs, and perform destructive player actions (delete player, reset stats)
 - Sessions are stored server-side and tracked via a cookie — logging out clears the session
+- Repeated wrong login attempts lock the account out temporarily (default: 5 attempts, configurable 1–1000 in **Settings → Admin accounts**), mirroring the same protection player PINs already have
 
 ### Player PINs
 
@@ -376,6 +377,7 @@ The first time Settings is opened with no admin account on the server, a setup w
 | Add/remove admin accounts | Yes |
 | Change Home Assistant / webhook / scoreboard-layout / default-input settings | Yes |
 | Verify a player's PIN to add them to a game | No — public, but rate-limited by the lockout threshold |
+| Log in as an admin | No — public, but rate-limited by its own lockout threshold |
 | View stats, play games, use the scoreboard | No |
 
 ---
@@ -507,8 +509,9 @@ The live state is held in memory only — it is never written to the database. O
 ```
 GET  /api/settings                          Retrieve all settings (key/value pairs)                [admin]
 PUT  /api/settings                          Update settings       { ha_url, ha_webhook_*,          [admin]
-                                               pin_lockout_threshold, collect_dart_timing,
-                                               scoreboard_layout, default_scoring_input, … }
+                                               pin_lockout_threshold, admin_lockout_threshold,
+                                               collect_dart_timing, scoreboard_layout,
+                                               default_scoring_input, … }
 GET  /api/settings/dart-timing              { enabled } — public, read by every device during play
 GET  /api/settings/scoreboard-layout        { layout } — public, read by the /display screen
 GET  /api/settings/default-input            { input: 'pad'|'board' } — public, read at app boot
@@ -556,7 +559,7 @@ oche/
 | `turns` | Every visit: scored points, bust flag, checkout flag |
 | `darts` | Every individual dart: sector, multiplier, dart number within the visit. `scored`, `is_treble`, and `is_double` are computed columns derived from sector and multiplier. |
 | `timeline_events` | Leg/set/game start and end timestamps |
-| `settings` | Key/value store for app settings (e.g. Home Assistant config, PIN lockout threshold) |
+| `settings` | Key/value store for app settings (e.g. Home Assistant config, PIN/admin-login lockout thresholds) |
 | `admins` | Admin usernames and hashed passwords |
 | `sessions` | Server-side admin login sessions, keyed by cookie token |
 
@@ -568,6 +571,29 @@ The `darts` table records every physical dart thrown and is the source of truth 
 
 All data is in a single SQLite file. With Docker it lands at `./darts_data/darts.db` on the host.
 
-- **Backup:** copy the `darts_data` folder
-- **Migrate to a new server:** copy the folder across and start the container
+- **Migrate to a new server:** copy the `darts_data` folder across and start the container
 - **Nothing leaves your network** — no cloud sync, no telemetry, no accounts (Home Assistant webhooks are outbound-only and only fire if you configure them)
+
+### Backups
+
+The database runs in SQLite's WAL mode, so a plain `cp` of `darts.db` while the app is
+running can grab an inconsistent snapshot (recent writes can still be sitting in a
+separate `-wal` file). Use the included backup script instead — it takes a real,
+consistent point-in-time snapshot regardless of WAL state, using Node's built-in
+`node:sqlite` backup API (no extra dependencies):
+
+```
+node backend/backup.js
+```
+
+This writes a timestamped snapshot to `darts_data/backups/` and prunes anything older
+than 7 days (override with `BACKUP_RETENTION_DAYS`). Schedule it with host cron, e.g.
+for a nightly backup at 3am:
+
+```
+0 3 * * * cd /path/to/oche && DARTS_DB=/path/to/darts_data/darts.db node backend/backup.js >> /var/log/oche-backup.log 2>&1
+```
+
+**To restore:** stop the container, replace `darts_data/darts.db` with the chosen
+backup file (and remove any stale `darts.db-wal`/`darts.db-shm` files sitting next to
+it), then restart the container.

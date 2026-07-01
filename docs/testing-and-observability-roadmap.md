@@ -1,9 +1,12 @@
 # Testing & Observability — Design Roadmap & Standing Checklist
 
-> Status: **not started**. Like `docs/accessibility-roadmap.md`, this is partly a
-> concrete near-term fix (server-side error logging) and partly a standing practice
-> for every future feature (test coverage for core logic) — see `CLAUDE.md` for the
-> binding cross-reference.
+> Status: **Part A (observability) ✅ Done** (v0.6.2) — the top-level `catch` in
+> `backend/server.js` now logs 5xx/unstatused errors server-side with a timestamp,
+> verified against a real malformed request. **Part B (automated testing) not
+> started.** Like `docs/accessibility-roadmap.md`, this is partly a concrete
+> near-term fix (done) and partly a standing practice for every future feature (test
+> coverage for core logic, still to start) — see `CLAUDE.md` for the binding
+> cross-reference.
 >
 > **Size**: the observability fix is **trivial** (minutes, one line). Testing is
 > **Medium** — the real cost is a small refactor-for-testability step, not the tests
@@ -69,8 +72,8 @@ identity.
 
 ## Suggested build order
 
-1. **(Trivial)** Add server-side error logging to the top-level `catch` in
-   `server.js` — a few minutes, no design needed.
+1. ~~**(Trivial)** Add server-side error logging to the top-level `catch` in
+   `server.js`.~~ ✅ **Done** (v0.6.2).
 2. Introduce `node:test` as the runner; extract `evaluateVisit()`/checkout math into
    a testable form and write the first suite against it.
 3. Add a `db.js` integration-test suite using scratch databases.
