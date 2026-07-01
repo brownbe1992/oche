@@ -72,7 +72,16 @@ function requireAdmin(req, res) {
 function readJson(req) {
   return new Promise((resolve, reject) => {
     let raw = '';
-    req.on('data', c => { raw += c; if (raw.length > 1e6) req.destroy(); });
+    req.on('data', c => {
+      raw += c;
+      if (raw.length > 1e6) {
+        // destroy() with an error emits 'error' below, so the promise settles instead
+        // of hanging forever (destroy() with no argument emits neither 'end' nor 'error').
+        const err = new Error('Request body too large');
+        err.status = 413;
+        req.destroy(err);
+      }
+    });
     req.on('end', () => { try { resolve(raw ? JSON.parse(raw) : {}); } catch (e) { reject(e); } });
     req.on('error', reject);
   });
