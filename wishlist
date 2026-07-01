@@ -32,7 +32,7 @@ Scoreboard
 - 9 darter celebration of some kind
 
 Others
-- Add additional games (Cricket)
+- Add additional games (Cricket, Baseball, etc.) — full design in docs/game-modes-roadmap.md
 - Integrate with Homeassistant
 - Automated scoring with cameras and machine learning
 - Settings page - set default player
