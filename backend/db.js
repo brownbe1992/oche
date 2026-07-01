@@ -1388,13 +1388,18 @@ function login(username, password) {
   password = String(password || '');
   const admin = q.adminByUsername.get(username);
   const now = Date.now();
-  if (admin && admin.login_locked_until && admin.login_locked_until > now) {
-    throw httpError(423, 'Too many failed login attempts. Try again in a few minutes.');
-  }
+  const locked = !!(admin && admin.login_locked_until && admin.login_locked_until > now);
 
+  // Always pay the same scrypt cost — regardless of whether the username exists or
+  // is currently locked out — before any branching, so response timing can't be used
+  // to probe either signal (matches the existing DUMMY_PW_HASH rationale below).
   const ok = admin
     ? auth.verifySecret(password, admin.password_hash, admin.password_salt)
     : (auth.verifySecret(password, DUMMY_PW_HASH.hash, DUMMY_PW_HASH.salt), false);
+
+  if (locked) {
+    throw httpError(423, 'Too many failed login attempts. Try again in a few minutes.');
+  }
 
   if (!admin || !ok) {
     if (admin) {
