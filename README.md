@@ -6,7 +6,7 @@
 
 A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player statistics, and no external dependencies.
 
-**v0.6.0**
+**v0.6.1**
 
 You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, hall-of-fame moments, and years' worth of per-player history. All data lives in a SQLite database on your own server.
 
@@ -76,30 +76,27 @@ Open `http://localhost:8046`. The database is created at the path in the `DARTS_
 
 The landing page shows a live snapshot of all-time activity:
 
-**Overview bubbles**
-- Total darts thrown
-- 180s thrown
-- Big Fish (170 checkouts)
-- Nine-dart finishes
-- Ton+ finishes (100+ checkouts)
-- Sets played
-- Legs played
-- Practice legs thrown
+**Hero stats:** Total darts thrown · 180s · Big Fish · 9-Darters *(shown even at zero, with an empty-state prompt, since it's the rarest feat in the game)*
 
-**H2H Leaderboard** — ranked stats across all head-to-head games:
-- 3-dart average
-- Top finish
-- 180s
-- Big Fish
-- Treble-less visit percentage
-- Wins (legs, sets, games by format)
+**Activity:** Players · Games played · Sets played · H2H legs thrown · Practice legs thrown
 
-**Practice Mode Leaderboard** — same stats for solo/practice sessions.
+**Achievements:** Ton+ finishes (100+ checkouts) · 180s · Big Fish · Highest checkout ever recorded
+
+**This week / Last game played** — legs thrown today and this week, darts thrown this week, and a summary of the most recently completed game (players, category, winner, and when).
+
+**H2H / Practice toggle** — switches the leaderboards below between head-to-head and solo/practice stats:
+- 3-dart average leaderboard
+- Most Wins (win rate) — H2H only
+- Most Trebleless Visits
+- Ton+ Finish Rate
+- Average Pace (darts/minute) — appears once dart-timing data exists, see [Settings](#settings)
 
 **Hall of Fame sections:**
 - 🎯 **180s** — every player who has thrown a maximum, with count and most recent date
 - 🐟 **Big Fish** — every 170 checkout recorded
 - **Nine-Dart Finishes** — 501 completed in exactly 9 darts *("None recorded yet — you will never get this!")*
+
+A **"View full stats glossary"** link opens a shared reference explaining every stat term used across the app.
 
 ---
 
@@ -117,6 +114,8 @@ Configure a game before starting:
 | **Finish rule** | Double out · Single out (set per player) |
 
 H2H mode requires at least two players selected. Practice mode can be played solo or with others and is tracked separately from H2H statistics.
+
+Players with a PIN set show a 🔒 next to their name in the dropdown. When exactly two players are selected in H2H mode, a banner shows their all-time head-to-head record (e.g. *"H2H: Alice leads 3–0 (3 games)"*).
 
 ---
 
@@ -152,7 +151,10 @@ The scoring screen is optimised for touchscreen entry on a tablet. Everything fi
 - Checkout turns show "GAME SHOT!" in green
 - The checkout suggestion updates dart-by-dart as you enter the visit
 
-**Between legs/sets/games:** a summary card shows each player's leg average, darts thrown, and busts before the next leg begins.
+**Between legs/sets/games:** a summary panel appears before the next unit begins —
+- **Practice:** *This Leg* and *This Session* columns showing darts thrown, checkouts, best visits, busts, and treble-less %
+- **H2H (leg complete):** each player's leg average, game average, darts thrown this leg, and legs/sets standing
+- **H2H (game over):** each player's game average, total darts thrown, and final sets/legs standing
 
 ---
 
@@ -160,17 +162,21 @@ The scoring screen is optimised for touchscreen entry on a tablet. Everything fi
 
 Open **`http://<your-server>:8046/display`** on a TV or second monitor. It updates in real time via Server-Sent Events (SSE) — no refreshing needed.
 
+**Layout presets** — pick **Full**, **Compact**, or **Minimal** from **Settings → Live Scoreboard**, or override per-screen with `?layout=compact` in the URL (handy when different screens in the same room want different densities). Checkout suggestions, achievement flashes, and the match bar always show regardless of layout — only the denser rows (dart counts, leg/game averages, and the 180/Big Fish/Bust counters) are hidden on Compact and Minimal, so a smaller screen isn't stuck showing TV-sized clutter.
+
 **Top bar:**
 - Game format and current leg/set
-- 🎯 180s · 🐟 Big Fish · 💥 Busts for the current game (updates live)
+- 🎯 180s · 🐟 Big Fish · 💥 Busts for the current game (Full layout only)
 - Live connection indicator
 
-**Checkout strip** — appears prominently below the top bar whenever the active player is on a finishing number, showing the full route in large text (e.g. `T20 → T19 → D12`). Flashes when updated after each dart.
+**Match bar** (H2H only, 2+ players) — an in-flow strip below the top bar with one row per player, showing Sets and/or Legs as bold boxed numbers (styled after broadcast dart scoreboards). The throwing player's row and stat boxes are gold-outlined.
+
+**Checkout strip** — appears prominently below the match bar whenever the active player is on a finishing number, showing the full route in large text (e.g. `T20 → T19 → D12`). Flashes when updated after each dart.
 
 **Player cards** (one per player):
 - Remaining score
-- Dart counts — **Leg / Set / Game** for H2H; **Leg / Session** for Practice
-- Leg average · game average · leg/set standing
+- "Darts Thrown" — **Leg / Set / Game** for H2H; **Leg / Session** for Practice (Full layout only)
+- Leg average · game average (Full layout only)
 - Active player's card shows each dart thrown in the current visit, plus the checkout route inline
 - Bust overlay (red) and Game Shot overlay (green) flash on the active card
 
@@ -178,9 +184,7 @@ Open **`http://<your-server>:8046/display`** on a TV or second monitor. It updat
 
 **Leg/Set/Game banners:** full-screen result announced when a unit ends.
 
-**Achievement overlays:** full-screen flash for 180s (🎯) and Big Fish (🐟) the moment they're scored.
-
-**Score panel** (bottom-right): legs or sets won per player — hidden in practice mode.
+**Achievement overlays:** full-screen flash for 180s (🎯), Big Fish (🐟), and nine-darters (🏆, with confetti) the moment they're scored.
 
 The scoreboard is read-only and can be open on any number of screens simultaneously.
 
@@ -212,14 +216,18 @@ Each player has a dedicated profile page with full career statistics, accessible
 
 #### Stat Bubbles
 
-Fourteen stat bubbles across the top of the profile. Click any bubble to display that metric in the chart below.
+Fifteen stat bubbles are available; five (Darts Thrown, Average, 180s, Big Fish, 9 Darters) show by default and the rest live behind a "More stats" toggle. Click any bubble to display that metric in the chart below.
 
 | Bubble | Description |
 |---|---|
+| **Darts Thrown** | Total individual darts thrown |
 | **Average** | 3-dart average across all visits |
 | **180s** | Total 180s thrown |
 | **Big Fish** | Total 170 checkouts |
 | **9 Darters** | 501 legs finished in exactly 9 darts |
+| **Darts / Day** | Average darts thrown per day played |
+| **Darts / Leg** | Average darts thrown per won leg |
+| **Average Pace** | Darts thrown per minute — requires "Collect per-dart timing" in Settings |
 | **Trebleless %** | Percentage of visits without hitting a treble |
 | **1st 3 AVG** | Average of the first visit of each leg |
 | **1st 9 AVG** | Average of the first three visits of each leg |
@@ -227,9 +235,6 @@ Fourteen stat bubbles across the top of the profile. Click any bubble to display
 | **90- AVG** | Percentage of legs with a 90 or lower average |
 | **140/Leg** | Percentage of opening visits scoring 140 or more |
 | **180s/Leg** | Ratio of 180s to total legs played |
-| **Darts Thrown** | Total individual darts thrown |
-| **Darts / Day** | Average darts thrown per day played |
-| **Darts / Leg** | Average darts thrown per won leg |
 
 #### Chart
 
@@ -237,6 +242,13 @@ A line chart showing the selected metric over time. Filters:
 
 - **Period:** Today · Week · Month · Year · All time · Custom date range
 - **Dart weight:** filter to games thrown with a specific dart weight (if recorded)
+
+#### Personal Bests
+
+- **Best Leg Average**
+- **Fewest Darts to Finish**
+- **Current Win Streak**
+- **Recent Form** — average of the last 10 legs, with an arrow showing the delta vs. lifetime average
 
 #### Top 10 Finishes
 
@@ -275,9 +287,17 @@ Plus global leaderboards for 180s, Big Fish, and nine-dart finishes, each filter
 
 ### Settings
 
-The Settings page (accessible from the top navigation) holds app-wide configuration. Each section — **Admin accounts**, **Player PINs**, and **Smart Home Integration** — is collapsed to just its header by default; click a header to expand it.
+The Settings page (accessible from the top navigation) holds app-wide configuration. Each section — **Admin accounts**, **Player PINs**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
 
 Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accounts--player-pins)) — until an admin account exists, the page offers to create the first one.
+
+#### Data Collection
+
+- **Collect per-dart timing** — records the exact moment each dart is tapped, in addition to existing per-visit data. Enables the Average Pace (darts/minute) stat on the Home page and player profiles. Off by default since most setups won't need it.
+
+#### Live Scoreboard
+
+- **Layout** — the preset the `/display` screen uses: **Full**, **Compact**, or **Minimal** (see [Live Scoreboard](#live-scoreboard)). Can be overridden per-screen with `?layout=` in the URL.
 
 #### Home Assistant Integration
 
@@ -311,6 +331,10 @@ Oche can fire webhooks to a Home Assistant instance whenever key game events occ
 { "player": "Name", "event": "oneeighty", "category": "501", "timestamp": 1234567890 }
 ```
 
+#### Danger Zone
+
+- **Wipe all player & game data** — permanently deletes every player, game, and stat. Admin accounts and settings are kept. Meant for clearing out test/dev data, not everyday use.
+
 Settings are persisted in the database and survive container restarts.
 
 ---
@@ -343,9 +367,10 @@ The first time Settings is opened with no admin account on the server, a setup w
 |---|---|
 | Delete a player | Yes |
 | Reset a player's stats | Yes |
+| Wipe all player/game/stat data | Yes |
 | Set or remove a player's PIN | Yes |
 | Add/remove admin accounts | Yes |
-| Change Home Assistant / webhook settings | Yes |
+| Change Home Assistant / webhook / scoreboard-layout settings | Yes |
 | Verify a player's PIN to add them to a game | No — public, but rate-limited by the lockout threshold |
 | View stats, play games, use the scoreboard | No |
 
@@ -402,6 +427,9 @@ DELETE /api/players/pin?name=               Remove a player's PIN               
 ```
 GET  /api/stats                             All player stats (full computed object)
 GET  /api/summary                           Site-wide totals (darts, legs, 180s, etc.)
+GET  /api/home-extra                        Home page extras: win/trebleless/ton+ leaderboards,
+                                             highest checkout, last game played, today/week
+                                             activity, and dart pace
 GET  /api/top-finishes?mode=                Top 10 checkouts across all players
 GET  /api/stats/180s?mode=                  180 leaderboard
 GET  /api/stats/big-fish?mode=              Big Fish (170 checkout) leaderboard
@@ -413,17 +441,21 @@ All leaderboard endpoints accept `?mode=h2h|practice` to filter by game mode. Om
 ### Per-Player Stats
 
 ```
-GET  /api/players/stat-bubbles?name=&mode=  All 14 stat bubble values for a player
+GET  /api/players/stat-bubbles?name=&mode=  All 15 stat bubble values for a player
+GET  /api/players/personal-bests?name=&mode= Best leg average, fewest darts to finish,
+                                             current win streak, and recent form
 GET  /api/players/top-finishes?name=&mode=  Top 10 checkouts for a player
 GET  /api/players/checkout-route            Most-used routes for a specific checkout score
      ?name=&score=&mode=
 GET  /api/players/dart-analytics?name=&mode= Per-dart hit frequency, treble rates,
                                              and checkout route breakdown
+GET  /api/players/h2h?p1=&p2=               Head-to-head record between two players
+                                             (used by the New Game H2H banner)
 GET  /api/players/avg-history               Metric history for the chart
      ?name=
      &metric=avg|180s|bigfish|ninedarters|treblelesspct|
               first3avg|first9avg|avg100plus|avg90minus|score140pct|180sperleg|
-              dartsthrown|avgdartsperday|avgdartsperleg
+              dartsthrown|avgdartsperday|avgdartsperleg|pace
      &period=today|week|month|year|all|custom
      &start=YYYY-MM-DD   (required when period=custom)
      &end=YYYY-MM-DD     (required when period=custom)
@@ -469,9 +501,12 @@ The live state is held in memory only — it is never written to the database. O
 ### Settings
 
 ```
-GET  /api/settings                          Retrieve all settings (key/value pairs)
-PUT  /api/settings                          Update settings       { ha_url, ha_webhook_*,         [admin]
-                                               pin_lockout_threshold, … }
+GET  /api/settings                          Retrieve all settings (key/value pairs)                [admin]
+PUT  /api/settings                          Update settings       { ha_url, ha_webhook_*,          [admin]
+                                               pin_lockout_threshold, collect_dart_timing,
+                                               scoreboard_layout, … }
+GET  /api/settings/dart-timing              { enabled } — public, read by every device during play
+GET  /api/settings/scoreboard-layout        { layout } — public, read by the /display screen
 POST /api/ha-test                           Test HA connectivity  { url }                        [admin]
 POST /api/ha-webhook                        Fire an HA webhook    { event, player, category, … }
 ```
@@ -480,6 +515,7 @@ POST /api/ha-webhook                        Fire an HA webhook    { event, playe
 
 ```
 POST /api/reset                             Wipe all games and turns (players kept)               [admin]
+POST /api/wipe-all                          Wipe all players, games, and stats (admins kept)      [admin]
 ```
 
 ---
@@ -501,7 +537,7 @@ oche/
 
 **Backend** — a single `http.createServer` with no npm dependencies. Uses `node:sqlite` (built into Node 22.5+) in WAL mode with foreign keys enabled. All statistics are computed from raw turn and dart data at query time — nothing is pre-aggregated, so stats are always consistent and new metrics can be added without migrations.
 
-**Frontend** — a single HTML file with vanilla JavaScript and no build step. In API mode it talks to the backend; if opened directly as a file with no server it falls back to in-memory + localStorage so it still works as a demo.
+**Frontend** — a single HTML file with vanilla JavaScript and no build step. It requires a reachable backend at the same origin — there is no offline/local-storage fallback — so stats never split across two unsynced stores. If the backend can't be reached, the app shows a connection-error screen instead of scoring silently into the browser.
 
 **Live scoreboard** — the controller (`index.html`) POSTs the full game state to `/api/live` after every dart and every turn. The scoreboard (`display.html`) subscribes to `/api/live/stream` (Server-Sent Events) and re-renders on every push. A 25-second heartbeat keeps the connection alive through proxies.
 
