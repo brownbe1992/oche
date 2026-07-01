@@ -2630,18 +2630,21 @@ function pracStatsHtml(turns){
   ].join('');
 }
 
-// per-player leg/game stats shown on the H2H leg-complete screen
-function h2hStatsHtml(winner){
+// per-player leg/game stats shown on the H2H leg-complete and game-over screens
+function h2hStatsHtml(winner, scope){
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
   const cols = game.players.map(p=>{
-    const rows = [
+    const rows = scope==='game' ? [
+      statRow('Game Avg', avgStr(p.gamePoints, p.gameAvgDarts)),
+      statRow('Darts (match)', p.gameDarts||0),
+    ] : [
       statRow('Leg Avg', avgStr(p.legPoints, p.legAvgDarts)),
       statRow('Game Avg', avgStr(p.gamePoints, p.gameAvgDarts)),
       statRow('Darts (leg)', p.legDarts||0),
     ];
     if(showStanding){
       const standing = game.setsPerGame>1 ? `Sets ${p.setsWon} · Legs ${p.legsWon}` : `Legs ${p.legsWon}/${game.legsPerSet}`;
-      rows.push(statRow('Standing', standing, true));
+      rows.push(statRow(scope==='game' ? 'Final Standing' : 'Standing', standing, true));
     }
     const title = p.name===winner ? `${escapeHtml(p.name)} 🎯` : escapeHtml(p.name);
     return `<div class="prac-col"><div class="prac-col-title">${title}</div>${rows.join('')}</div>`;
@@ -2666,7 +2669,7 @@ function finishUnit(kind, winner){
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${escapeHtml(winner)} takes the match. Stats saved.</p>
       <div class="btn-row" style="justify-content:center">
         <button class="btn btn-primary" onclick="show('setup')">New game</button>
-      </div></div>`;
+      </div>${h2hStatsHtml(winner,'game')}</div>`;
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
