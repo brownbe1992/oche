@@ -25,13 +25,15 @@ shareable cards should explain the badge and show the count."
 
 Full design: `docs/achievements-badges-roadmap.md` → Precision & Skill.
 
-Check out on a visit where every dart thrown was a double (any numbers, not
-necessarily matching each other or the finishing double) — e.g. a 2-dart D5/D12
-finish or a 3-dart D16/D9/D10 finish. Same shape as Hat Trick (N-of-a-kind dart type
-on the closing visit) applied to doubles instead of trebles.
+Check out on a visit where the **last two darts thrown were both doubles** (any
+numbers, not necessarily matching each other) — e.g. a 2-dart D5/D12 finish or a
+3-dart miss/D9/D10 finish. Dart 1 of a 3-dart visit is irrelevant and doesn't need to
+be a double — a total miss, a single, or a treble on dart 1 all still qualify as long
+as darts 2 and 3 are both doubles; only the last two darts are checked. A single-dart
+double-out checkout does **not** qualify — "consecutive" requires at least two.
 
-- Detection: `_d.every(d=>d.isDouble)` on the winning visit, alongside the existing
-  Hat Trick check in `enterTurn()`.
+- Detection: `_d.length>=2 && _d[_d.length-2].isDouble && _d[_d.length-1].isDouble` on
+  the winning visit, alongside the existing Hat Trick check in `enterTurn()`.
 - Needs an icon/label/description added to `ACH_LABELS` (both `index.html` and
   `display.html`) and `BADGE_INFO` (Badge Case), plus an `awardRecurringBadge()` call
   — follow the exact same pattern as Hat Trick end to end.
