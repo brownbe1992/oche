@@ -51,6 +51,7 @@ Others
 - Accessibility roadmap & standing checklist (aria-live, contrast audit, and more) — full design in docs/accessibility-roadmap.md
 - Backups & disaster recovery for the SQLite database — full design in docs/backups-roadmap.md
 - Security hardening (admin login rate limiting + standing checklist) — full design in docs/security-hardening-roadmap.md
+- Security audit findings (adversarial whole-codebase review: DoS, SSRF/egress, container hardening) — step-by-step fixes in docs/security-audit-roadmap.md
 - Testing & observability (test coverage + server-side error logging) — full design in docs/testing-and-observability-roadmap.md
 - League/season mode (standings across casual matches over time) — full design in docs/league-mode-roadmap.md
 - Daily/weekly solo challenge — full design in docs/daily-challenge-roadmap.md
