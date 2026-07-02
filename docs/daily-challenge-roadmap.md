@@ -1,7 +1,9 @@
 # Daily/Weekly Challenge — Design Roadmap
 
-> Status: **fully shipped**. All six challenge-type-pool formats are built and tested
-> end-to-end, covering every suggested-build-order step:
+> Status: **core feature fully shipped**; a **Player Profile history view is planned
+> but not yet built** (see "Player Profile: Daily Challenge history" below). All six
+> challenge-type-pool formats are built and tested end-to-end, covering every
+> suggested-build-order step:
 > 1. Deterministic date-seeded generation (`todaysChallenge()` in `frontend/index.html`)
 >    across all six formats.
 > 2. A "Today's Challenge" entry point, treated as a third game mode on the New Game
@@ -98,6 +100,35 @@ metric:
   engine, the Share button, and the Home Assistant webhook delivery path all already
   exist and just need a new card type plugged in.
 
+### Player Profile: Daily Challenge history *(planned, not yet built)*
+
+The New Game panel only ever shows the current streak and the last 7 days — there's
+nowhere on a player's own profile to see the bigger picture. Requested addition: a
+**Daily Challenge** section on the [Player Profile](../README.md#player-profile) page,
+alongside the existing Badge Case, Personal Bests, and Top 10 Finishes, showing:
+
+- **Lifetime completion record** — total attempts vs. total completions (the "X/6"
+  Wordle-style stat), plus current streak and longest-ever streak.
+- **Best result per format** — the six challenge types each have their own success
+  metric (fewest darts, most bulls, most trebles, etc. — see `challengeMetricLabel()`
+  in `frontend/index.html`), so this is six separate personal-best lines, not one
+  combined number. Mirrors how Personal Bests already separates Best Leg Average from
+  Fewest Darts to Finish rather than conflating unrelated metrics.
+- **Full attempt history** — every calendar date this player has attempted the
+  challenge, with the format played, the result (or "not finished"), so a player can
+  scroll back through their run the way a Wordle stats screen does, not just the
+  rolling 7-day window on New Game.
+
+No new schema needed — `daily_challenge_attempts` already stores exactly this
+(`challenge_date, format, target, completed, result_darts` per player), matching the
+app's "nothing pre-aggregated" philosophy: this is new read-only queries and a new UI
+section, not new data collection. The streak-computation logic in
+`getChallengeStatus()` (`backend/db.js`) already does the hard part (walking
+consecutive dates, handling an unplayed "today" without breaking a real streak) and
+should be reused/extended rather than re-derived — a "longest-ever streak" is the same
+walk without stopping at the first gap, and per-format bests are a `GROUP BY format`
+over the same table.
+
 ## Suggested build order
 
 1. Challenge-type pool + deterministic date-seeded generation (format + target),
@@ -109,6 +140,8 @@ metric:
    same underlying turn/dart data, not new scoring logic.
 4. Streak tracking + the Home page results history strip.
 5. Shareable results card, reusing the existing card-generation engine.
+6. Player Profile: Daily Challenge history — lifetime completion record, best result
+   per format, and full attempt history, per the section above.
 
 ## Open questions for whoever picks this up
 
