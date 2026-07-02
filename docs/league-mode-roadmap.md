@@ -43,6 +43,22 @@ unify them into one system.
   ends, and a "past seasons" archive lets you look back at who won a given month
   without needing to keep manually filtering by date range.
 
+## Accessibility, security, and testing considerations
+
+Not yet addressed anywhere in this doc, per `CLAUDE.md`'s standing conventions:
+
+- **Testing**: standings computation (points, tiebreakers, the season-freeze
+  snapshot) is pure stats logic over existing tables — exactly what
+  `docs/testing-and-observability-roadmap.md` says new scoring/stats logic should
+  get real test coverage for as it's built, not just eyeballed against a manual
+  spreadsheet.
+- **Accessibility**: the standings table and any "past seasons" archive view need
+  the same keyboard/focus-order and color-only-signal review (e.g. don't rely on
+  color alone to show who's promoted/relegated, if that's ever added) as every other
+  new surface, per `docs/accessibility-roadmap.md`.
+- **Security**: no new credential/token surface — reuses the existing `games.league_id`
+  FK and admin-auth model, so nothing new to harden here.
+
 ## Open questions for whoever picks this up
 
 - Points system: straightforward win=1/loss=0, or something with more texture (bonus

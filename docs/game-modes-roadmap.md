@@ -170,6 +170,21 @@ Legs/sets/best-of stays universal across types — that concept isn't X01-specif
 5. **Baseball** (or another variant) as the second proof that the plugin shape
    generalizes, not just fits Cricket specifically.
 
+## Accessibility, security, and testing considerations
+
+- **Accessibility**: Cricket's scoring screen (marks/closed display) is a new UI
+  surface — it should extend the app's existing `aria-pressed`/`role="group"`
+  control conventions rather than introducing a one-off pattern, and the
+  closed-numbers display needs a non-color-only signal (per
+  `docs/accessibility-roadmap.md`) for which numbers are closed vs. still open.
+- **Testing**: the Cricket win-condition edge case flagged above (closed-but-behind-
+  on-points) is exactly the kind of easy-to-get-wrong, pure win-condition logic
+  `docs/testing-and-observability-roadmap.md` says new scoring logic should get real
+  test coverage for — a good candidate to write the test for *before* the
+  implementation, given the doc already knows the edge case is tricky.
+- **Security**: no new credential/token surface from the plugin refactor or Cricket
+  itself — reuses the existing game/turn recording and admin-auth model.
+
 ## Open questions for whoever picks this up
 
 - Exact Cricket win-condition edge case (closed-but-behind-on-points) — see above.

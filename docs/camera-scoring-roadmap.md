@@ -190,6 +190,30 @@ Given the scale, this needs more phases than any other roadmap item:
 8. **(Stretch)** evaluate whether a narrow trained model improves tip localization in
    heavy-occlusion cases beyond classical CV's ceiling.
 
+## Accessibility, security, and testing considerations
+
+- **Accessibility — this is a genuine accessibility win worth designing for
+  explicitly, not just a scoring convenience.** Automatic dart detection removes the
+  need to physically operate the tap-to-score UI at all, which is a real path to
+  playing for anyone who has difficulty with the touchscreen/pad input specifically
+  — the same "which input path is actually the accessible one" question
+  `docs/accessibility-roadmap.md` already raises about Pad vs. dartboard input
+  applies here even more directly. Worth stating as an explicit goal of this
+  feature, not an incidental side effect, since it should shape priorities (e.g.
+  reliable confirm/correction UX matters more than shaving latency).
+- **Security**: the detection endpoint's auth/trust story is already flagged as an
+  open question below — resolve it the same way the rest of the security audit did
+  for other new surfaces (`docs/security-hardening-roadmap.md`'s standing
+  checklist): does this endpoint accept write-capable input that needs the same
+  gating as a manual `throwDart()` call, and if the vision service runs as a
+  separate process/container, does it need its own credential rather than trusting
+  network position alone?
+- **Testing**: the homography computation and sector/ring classification are pure
+  geometry math with known-correct answers (a calibration point should map to a
+  specific sector) — exactly the kind of core logic worth real test coverage per
+  `docs/testing-and-observability-roadmap.md`, verified against fixed calibration
+  fixtures rather than only against a live camera during development.
+
 ## Open questions for whoever picks this up
 
 - Where does the vision service run relative to the Oche backend, and does the new

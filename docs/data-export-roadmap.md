@@ -32,6 +32,26 @@ worth calling out explicitly rather than treating this as a minor utility featur
   endpoints that reformat existing query results as a downloadable file
   (`Content-Disposition: attachment`) rather than JSON returned to the page.
 
+## Accessibility, security, and testing considerations
+
+- **Security — this needs real access-control design, not just "no new computation
+  needed."** As drafted above, per-player export is reachable from anyone browsing
+  to that player's Profile page, with no gating mentioned — but this app already
+  gates other player-specific actions (recording a turn as that player, in
+  PIN-protected setups) behind that player's own PIN specifically because it's a
+  shared household device where anyone can be looking at anyone's profile. A full
+  turn-by-turn/dart-by-dart history export is a meaningfully bigger exposure than
+  viewing already-aggregated stats on screen — it should require the requesting
+  player's own PIN (when one is set) the same way other write/reveal actions do,
+  not just be reachable because the profile page happens to be open. The
+  full-database admin export is already correctly scoped (admin-only, Danger Zone).
+- **Testing**: the export formatting itself is low-risk reformatting, but the
+  access-control check above is exactly the kind of security-relevant logic worth a
+  test once it exists, per `docs/testing-and-observability-roadmap.md`.
+- **Accessibility**: the export action itself is a simple button/download — no
+  special concern beyond the standing keyboard/focus-order checklist in
+  `docs/accessibility-roadmap.md`.
+
 ## Open questions for whoever picks this up
 
 - Should CSV export happen per-turn (maximum fidelity, larger files) or per-game

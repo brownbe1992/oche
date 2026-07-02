@@ -48,6 +48,22 @@ next to "here are your numbers." Could also surface a single top insight as a
 homepage callout for the currently-viewed player, but the profile page is the more
 natural home given it's where the underlying analytics already live.
 
+## Accessibility, security, and testing considerations
+
+Not yet addressed anywhere in this doc, per `CLAUDE.md`'s standing conventions:
+
+- **Testing**: insight computation (weak-number detection, bust-pattern analysis,
+  whatever the final candidate list settles on) is pure, deterministic logic over
+  existing tables — a natural fit for real test coverage per
+  `docs/testing-and-observability-roadmap.md`, and arguably more important here than
+  most features, since a wrong "coaching" insight actively misleads a player about
+  their own game rather than just displaying a wrong number.
+- **Accessibility**: the new Coaching section needs the same review as any other
+  profile-page addition — don't rely on color alone to distinguish a "strength" vs.
+  "weakness" callout, per `docs/accessibility-roadmap.md`'s standing checklist.
+- **Security**: no new credential/token surface — reads existing turn/dart data
+  already scoped to the profile the viewer is already allowed to see.
+
 ## Open questions for whoever picks this up
 
 - How many turns/legs of data should be required before an insight is considered

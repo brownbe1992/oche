@@ -43,6 +43,20 @@ approximation of one.
   (no `game_players` row for a non-existent player, or a special sentinel that's
   excluded from stats entirely).
 
+## Accessibility, security, and testing considerations
+
+- **Accessibility**: if the live scoreboard gains turn-by-turn `aria-live`
+  announcements (the standing gap `docs/accessibility-roadmap.md` calls the single
+  biggest one), the ghost's turns should get the same announcement treatment as a
+  real opponent's — a screen-reader user racing a ghost needs to hear its throws
+  too, not just the live player's.
+- **Testing**: replaying a stored leg's dart sequence is pure, deterministic logic
+  (same input darts in, same simulated outcome out every time) — a natural
+  candidate for real test coverage per `docs/testing-and-observability-roadmap.md`,
+  rather than only verifying it by eye against one recorded playback.
+- **Security**: no new credential/token surface — reuses existing turn/leg data
+  already recorded for the human player whose leg is being replayed.
+
 ## Open questions for whoever picks this up
 
 - Should the ghost play at exactly the historical pace (real time between throws,

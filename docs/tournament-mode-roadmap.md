@@ -148,6 +148,26 @@ Given the scope, sequence this rather than build it all at once:
 4. Per-round format setup UI polish, seeding UI polish, tournament stats on player
    profiles (stretch — e.g. tournament wins / best finish on the player profile page).
 
+## Accessibility, security, and testing considerations
+
+Per `CLAUDE.md`'s standing conventions, these need designing in alongside the
+feature, not bolted on after:
+
+- **Accessibility**: the bracket tree is a highly visual, spatial UI (up to ~19
+  rounds for 128 players) with no non-visual equivalent designed here yet — a
+  screen-reader user needs some linearized "who plays whom next, and what's the
+  current state of my side of the bracket" view, not just the tree. The multi-select
+  seeding UI also needs keyboard/focus-order treatment per
+  `docs/accessibility-roadmap.md`'s standing checklist.
+- **Testing**: the double-elimination bracket generator is the piece this doc itself
+  calls out as "genuinely fiddly" and the highest-risk part of the whole feature —
+  it's also pure, deterministic logic (seed list in, bracket structure out), exactly
+  the kind of core logic `docs/testing-and-observability-roadmap.md` says new
+  features should get real test coverage for as it's built, not verify by hand.
+- **Security**: no new credential/token surface, so no write-only-handling or
+  brute-force question here — tournament data reuses the existing `games`/admin-auth
+  model unchanged.
+
 ## Open questions for whoever picks this up
 
 - Seeding method: random draw (matches the app's existing "Shuffle" feature) vs. admin

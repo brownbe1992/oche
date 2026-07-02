@@ -122,16 +122,27 @@ hang — when they don't.
   everything expensive or trust-sensitive is opt-in and externalized to whoever wants
   it.
 
-## Data model: online matches as their own category
+## Data model: online matches get their own table, not a `games` column
 
 Per the stats-trust decision, online matches don't merge into the trusted local H2H
 stats pool. Each side of a match independently records its own copy of the game
 (players, turns, darts) to its own local database — both instances process the same
 live stream of dart events off the shared DataChannel in real time, so absent active
 tampering they naturally converge on the same recorded result without needing a
-shared authoritative database. Matches are tagged as a distinct "Online" category,
-kept separate from regular H2H stats, since there's no cross-instance verification
-backing the result the way a normal locally-witnessed H2H game has.
+shared authoritative database.
+
+Per the binding convention in `CLAUDE.md` (already applied to tournament mode's
+`tournament_matches.game_id` and league mode's `games.league_id`), this is a new
+**`online_matches`** table with a `game_id` FK back into `games` — *not* a value
+stuffed into `games.category` (which already means the X01 starting score, e.g.
+`'501'`/`'301'`/`'170'` — every existing category-scoped stat query, including
+`getPlayerStatBubbles()`'s `first3avg`/`first9avg`/`score140pct`, filters on that
+column expecting exactly those values, so overloading it with `'Online'` would
+silently break them) and *not* a new `is_online` boolean bolted onto `games` either.
+A minimal shape: `online_matches(game_id INTEGER PRIMARY KEY REFERENCES games(id),
+match_code TEXT, peer_verified INTEGER)` — stats/leaderboard queries that need to
+exclude online matches join against (or anti-join) this table, exactly like league
+mode's queries already key off `games.league_id IS NULL`/`IS NOT NULL`.
 
 ## UX: connecting two remote instances
 
@@ -156,14 +167,14 @@ carrying the score DataChannel, not a separate recording pipeline.
    game logic yet — prove two independent Oche instances can find and negotiate a
    connection.
 2. **DataChannel score sync** — dart-by-dart events flowing P2P, each side recording
-   its own "Online" category game locally.
+   its own game locally with an `online_matches` row (see Data model above).
 3. **STUN-only P2P connectivity**, with clear failure messaging when a direct
    connection isn't possible (no TURN yet).
 4. **BYO TURN configuration** in Settings, with ephemeral credential issuance.
 5. **Video track for live verification** — the highest-bandwidth, most TURN-dependent
    piece, deliberately built last once the lower-bandwidth path is solid.
-6. **Online-category stats/leaderboards**, kept visibly distinct from local H2H
-   throughout the UI.
+6. **Online-match stats/leaderboards** (queried via the `online_matches` join, not a
+   `games.category` value), kept visibly distinct from local H2H throughout the UI.
 
 ## Open questions for whoever picks this up
 
