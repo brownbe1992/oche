@@ -36,6 +36,8 @@ Scoreboard
 - Voice announcements (180, game shot, running score) — done, see docs/voice-announcements-roadmap.md; full i18n follow-on in docs/voice-announcements-i18n-roadmap.md
 
 Others
+- Schedule for the next session (Double Trouble badge, Busted Maximum badge,
+  explanatory + count-aware achievement notifications) — see docs/next-session-plan.md
 - Add additional games (Cricket, Baseball, etc.) — full design in docs/game-modes-roadmap.md
 - Integrate with Homeassistant
 - Automated scoring with cameras and machine learning — full design in docs/camera-scoring-roadmap.md

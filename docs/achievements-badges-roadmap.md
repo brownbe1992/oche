@@ -151,6 +151,13 @@ these moments immediately.*
   the "No Score" voice callout already shipped (`docs/voice-announcements-roadmap.md`).
 - **Ton-titled to Nothing** *(recurring)* — score 100+ in a visit that still ends in a
   bust.
+- **Busted Maximum** *(recurring, not yet built)* — throw three treble 20s (a genuine
+  180) but the visit still busts. Ton-titled to Nothing already catches any 100+ bust
+  generically, but a busted maximum is its own specific, extra-painful story worth
+  celebrating on its own — a real 180 still happened, it just didn't count for
+  scoring. Detection: `_d.length===3 && _d.every(d=>d.sector===20 && d.mult===3) &&
+  ev.bust` — checked *before* the generic Ton-titled to Nothing condition so this
+  more specific case wins.
 - **So Close...** *(recurring)* — open a leg with two treble 20s, then land a single
   20 on the third dart (140 instead of the 180 that was right there). An extremely
   specific, extremely relatable choke moment — exactly the kind of "good story" badge
@@ -190,6 +197,51 @@ system, per the design goal above.
   implicitly X01-only. The `player_badges` table's `badge_id` should be a free-form
   string key from day one (not an enum tied to X01 concepts) so this doesn't require
   a schema change later.
+
+## Planned: notifications and shareable cards should explain the badge and show the count
+
+*(planned, not yet built)* Today `showAchievement()` only shows an icon and the
+badge's name (e.g. "Hat Trick! 🎩") — a player who doesn't already know what each
+badge means gets no explanation, live or on the shared image, and neither surface
+shows how many times they've earned it. Two things to add, to both the live overlay
+and the shareable moment card:
+
+1. **What you did** — a plain-language explanation of the trigger condition.
+   `BADGE_INFO[type].desc` (added for the Badge Case's hover/tap tooltips) already
+   has exactly this text ("Three trebles (any numbers) in one visit, without
+   busting.", etc.) — reuse it as-is rather than maintaining a second copy. This is
+   *in addition to* the existing per-instance `statLine` some badges already pass to
+   `fireMomentCard()` (e.g. Giant Slayer's "Beat a 87.4 average"), not a replacement
+   for it — the generic description explains the badge, the stat line captures what
+   was special about *this* instance.
+2. **How many times** — the award response already returns `{ newlyEarned, count }`
+   (`POST /api/badges/award`) and is simply discarded today. Thread it through to
+   both surfaces: "5th Hat Trick" on the overlay, and either a text line or a small
+   corner counter on the card (visually consistent with the Badge Case's gold
+   counter circle). One-time milestones (Around the Clock/World, Grudge Match) always
+   show `count === 1` — "First time!" reads better there than a numeric count.
+
+**The plumbing problem to solve**: the live overlay currently fires *before* the
+award network round-trip resolves (so the celebration isn't delayed by a network
+call), via `showAchievement(type, player)` — a 2-argument function with no way to
+carry a count that doesn't exist yet. `awardRecurringBadge()` is fire-and-forget for
+the same reason. Fixing this without reintroducing a delay means:
+
+- Show the overlay/card immediately with the description (always known synchronously
+  — no network dependency), then patch the count in a moment later once the award
+  response lands (typically near-instant on a LAN) — an in-place DOM text update, not
+  a re-render.
+- `awardRecurringBadge()` needs to return its promise (or accept a callback) so
+  call sites that want the resolved count can react to it, while revocation-tracking
+  and other current callers that don't care keep working unchanged.
+- The once-badges (Around the Clock/World, Grudge Match, First 100+ Checkout) already
+  have the award response in scope at the point they call `showAchievement()` inside
+  their `.then()` — trivial to pass `count` through immediately for these, no
+  patch-in-place needed.
+
+No new backend work required — `count` is already in the API response, this is
+entirely frontend plumbing (`showAchievement()`'s signature, the overlay's DOM in
+both `index.html` and `display.html`, and `buildMomentCard()`'s layout).
 
 ## Suggested build order
 
