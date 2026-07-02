@@ -2482,6 +2482,10 @@ function renderPlayerPage(){
       <div id="player-on-this-day"></div>
     </div>
     <details class="pp-section">
+      <summary class="pp-section-title">Daily Challenge History</summary>
+      <div id="player-challenge-history"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </details>
+    <details class="pp-section">
       <summary class="pp-section-title">Around the World Progress</summary>
       <div id="player-atw-progress"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>
@@ -2596,6 +2600,7 @@ function renderPlayerPage(){
   loadPlayerBadges();
   loadAroundTheWorldProgress();
   loadOnThisDay();
+  loadChallengeHistory();
 }
 // The full achievement roster (docs/achievements-badges-roadmap.md) — every badge
 // in the game, not just milestones. Recurring badges (Hat Trick, Night Owl, etc.)
@@ -2715,6 +2720,55 @@ function loadOnThisDay(){
       if(btn) btn.onclick = () => shareMomentCard('flashback');
     })
     .catch(()=>{ section.hidden = true; });
+}
+// Daily Challenge history (docs/daily-challenge-roadmap.md "Player Profile: Daily
+// Challenge history"): lifetime completion record, best result per format (reusing
+// challengeMetricLabel()/challengeShortLabel() — no new copy to write), and the
+// full attempt-by-attempt log.
+function loadChallengeHistory(){
+  const container = document.getElementById('player-challenge-history');
+  if(!container) return;
+  const today = localDateStr(new Date());
+  Backend.get(`/api/challenges/history?player=${encodeURIComponent(currentPlayer)}&date=${today}`)
+    .then(data=>renderChallengeHistory(data))
+    .catch(()=>{ container.innerHTML = `<p class="pp-meta" style="padding:4px 0">Could not load Daily Challenge history.</p>`; });
+}
+function renderChallengeHistory(data){
+  const container = document.getElementById('player-challenge-history');
+  if(!container) return;
+  if(!data || !data.played){
+    container.innerHTML = `<p class="pp-meta" style="padding:4px 0">No Daily Challenge attempts yet.</p>`;
+    return;
+  }
+  const rate = data.played ? Math.round((data.completed / data.played) * 100) : 0;
+  const summaryHtml = `<div class="summary-grid" style="margin-bottom:14px">
+    ${[['Played',data.played],['Completed',`${data.completed} (${rate}%)`],
+       ['Current Streak',data.currentStreak],['Longest Streak',data.longestStreak]]
+      .map(([label,val])=>`<div class="stat-block"><div class="stat-val">${val}</div><div class="stat-label">${label}</div></div>`).join('')}</div>`;
+
+  // checkout_sprint's short label takes a per-day target ("Checkout 40"); this is a
+  // cross-day aggregate, so it needs its own target-independent name instead.
+  const FORMAT_NAME = { checkout_sprint:'Checkout Sprint', speed_to_zero:'Speed to Zero',
+    bullseye_gauntlet:'Bullseye Gauntlet', steady_hand:'Steady Hand', treble_run:'Treble Run', long_game:'The Long Game' };
+  const bestHtml = CHALLENGE_FORMATS.map(fmt=>{
+    const best = data.bestByFormat[fmt];
+    return `<div class="stat-block"><div class="stat-val">${best!=null ? challengeMetricLabel(fmt, best) : '—'}</div>
+      <div class="stat-label">${FORMAT_NAME[fmt]}</div></div>`;
+  }).join('');
+
+  const rows = (data.attempts||[]).map(a=>{
+    const label = challengeShortLabel(a.format, a.target);
+    const result = a.completed ? challengeMetricLabel(a.format, a.result_darts) : 'Not finished';
+    return `<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--wire);font-size:12.5px">
+      <span class="pp-meta">${a.challenge_date}</span><span>${escapeHtml(label)}</span>
+      <span style="color:${a.completed?'var(--gold)':'var(--muted)'};font-weight:${a.completed?'700':'400'}">${escapeHtml(result)}</span></div>`;
+  }).join('');
+
+  container.innerHTML = `${summaryHtml}
+    <div class="pp-section-title" style="font-size:13px;margin-bottom:8px">Best result per format</div>
+    <div class="summary-grid" style="margin-bottom:14px">${bestHtml}</div>
+    <div class="pp-section-title" style="font-size:13px;margin-bottom:4px">Full history</div>
+    <div>${rows || '<p class="pp-meta" style="padding:4px 0">No attempts recorded yet.</p>'}</div>`;
 }
 async function shareEarnedBadge(badgeId){
   const info = BADGE_INFO[badgeId];

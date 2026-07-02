@@ -46,6 +46,7 @@
        POST /api/challenges/start  -> { player, gameId, challengeDate, format, target } (public)
        POST /api/challenges/complete -> { player, challengeDate, resultDarts } -> { ok, isPersonalBest } (public)
        GET  /api/challenges/status -> (?player=...&date=YYYY-MM-DD) -> { today, streak, history } (public)
+       GET  /api/challenges/history -> (?player=...&date=YYYY-MM-DD) -> { played, completed, currentStreak, longestStreak, bestByFormat, attempts } (public)
 
    Routes marked [admin] require a logged-in admin session (cookie set by /api/login).
    Set COOKIE_SECURE=true when serving over HTTPS (e.g. behind a reverse proxy) so the
@@ -614,6 +615,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/challenges/status' && m === 'GET') {
       return send(res, 200, db.getChallengeStatus(url.searchParams.get('player'), url.searchParams.get('date')));
+    }
+    if (p === '/api/challenges/history' && m === 'GET') {
+      return send(res, 200, db.getChallengeHistory(url.searchParams.get('player'), url.searchParams.get('date')));
     }
 
     return send(res, 404, { error: 'Unknown endpoint' });

@@ -1,16 +1,21 @@
 # Daily/Weekly Challenge — Design Roadmap
 
-> Status: **core feature fully shipped**, including the "beat your best" live
-> callout — `completeChallengeAttempt()` (`backend/db.js`) now returns
-> `isPersonalBest` (comparing against every other completed attempt of the same
-> format, per-format direction: fewest darts/visits for Checkout Sprint/Speed to
-> Zero/The Long Game, most bulls/trebles/points for Bullseye Gauntlet/Treble
+> Status: **fully shipped**, including the "beat your best" live callout and the
+> Player Profile history view. `completeChallengeAttempt()` (`backend/db.js`) now
+> returns `isPersonalBest` (comparing against every other completed attempt of the
+> same format, per-format direction: fewest darts/visits for Checkout Sprint/Speed
+> to Zero/The Long Game, most bulls/trebles/points for Bullseye Gauntlet/Treble
 > Run/Steady Hand), patched into a `#challenge-pb-banner` placeholder on the results
 > screen once the round-trip resolves — same "celebrate immediately, patch in the
-> extra detail a moment later" pattern used for achievement counts. A **Player
-> Profile history view is planned but not yet built** (see "Player Profile: Daily
-> Challenge history" below — its "Best result per format" section can now reuse this
-> same per-format-direction comparison once built). All six
+> extra detail a moment later" pattern used for achievement counts. **Player Profile:
+> Daily Challenge history** (see below) is now built too — a new `getChallengeHistory()`
+> backs a collapsible section on the Player Profile page showing the lifetime
+> completion record (played/completed/current streak/longest-ever streak), a
+> per-format personal-best line reusing the exact same direction table as the
+> "beat your best" check, and the full attempt-by-attempt log. Current streak is
+> delegated to `getChallengeStatus()` rather than re-derived, exactly as the
+> original design called for; longest-ever streak is the same day-by-day walk
+> without stopping at the first gap. All six
 > challenge-type-pool formats are built and tested end-to-end, covering every
 > suggested-build-order step:
 > 1. Deterministic date-seeded generation (`todaysChallenge()` in `frontend/index.html`)
@@ -109,7 +114,7 @@ metric:
   engine, the Share button, and the Home Assistant webhook delivery path all already
   exist and just need a new card type plugged in.
 
-### Player Profile: Daily Challenge history *(planned, not yet built)*
+### Player Profile: Daily Challenge history
 
 The New Game panel only ever shows the current streak and the last 7 days — there's
 nowhere on a player's own profile to see the bigger picture. Requested addition: a

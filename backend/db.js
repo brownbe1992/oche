@@ -488,6 +488,65 @@ function getChallengeStatus(playerName, todayDate) {
   return { today, streak, history };
 }
 
+// Full lifetime Daily Challenge history for a player's profile
+// (docs/daily-challenge-roadmap.md "Player Profile: Daily Challenge history"):
+// completion record (Wordle-stats-style: played, completed, current streak,
+// longest-ever streak), best result per format (six separate personal-best lines,
+// not one combined number — mirrors how Personal Bests already separates unrelated
+// metrics like Best Leg Average from Fewest Darts to Finish), and the full
+// attempt-by-attempt log. Current streak is delegated to getChallengeStatus() (not
+// re-derived) per the roadmap doc's explicit instruction; longest-ever streak is
+// the same day-by-day walk without stopping at the first gap.
+function getChallengeHistory(playerName, todayDate) {
+  const p = getPlayer(playerName);
+  if (!p) return { played: 0, completed: 0, currentStreak: 0, longestStreak: 0, bestByFormat: {}, attempts: [] };
+
+  const totals = db.prepare(`
+    SELECT COUNT(*) AS played, SUM(completed) AS completedCount
+    FROM daily_challenge_attempts WHERE player_id = ?
+  `).get(p.id);
+
+  const allDates = db.prepare(`
+    SELECT challenge_date, completed FROM daily_challenge_attempts
+    WHERE player_id = ? ORDER BY challenge_date ASC
+  `).all(p.id);
+  let longestStreak = 0, run = 0, prevDate = null;
+  for (const row of allDates) {
+    if (!row.completed) { run = 0; prevDate = null; continue; }
+    if (prevDate) {
+      const dayGap = Math.round((new Date(row.challenge_date + 'T00:00:00Z') - new Date(prevDate + 'T00:00:00Z')) / 86400000);
+      run = dayGap === 1 ? run + 1 : 1;
+    } else {
+      run = 1;
+    }
+    longestStreak = Math.max(longestStreak, run);
+    prevDate = row.challenge_date;
+  }
+
+  const currentStreak = /^\d{4}-\d{2}-\d{2}$/.test(String(todayDate)) ? getChallengeStatus(playerName, todayDate).streak : 0;
+
+  const bestByFormat = {};
+  for (const row of db.prepare(`
+    SELECT format, result_darts FROM daily_challenge_attempts
+    WHERE player_id = ? AND completed = 1 AND result_darts IS NOT NULL
+  `).all(p.id)) {
+    const dir = CHALLENGE_BETTER_DIRECTION[row.format];
+    if (!dir) continue;
+    const cur = bestByFormat[row.format];
+    if (cur == null || (dir === 'asc' ? row.result_darts < cur : row.result_darts > cur)) {
+      bestByFormat[row.format] = row.result_darts;
+    }
+  }
+
+  const attempts = db.prepare(`
+    SELECT challenge_date, format, target, completed, result_darts
+    FROM daily_challenge_attempts WHERE player_id = ?
+    ORDER BY challenge_date DESC LIMIT 400
+  `).all(p.id);
+
+  return { played: totals.played || 0, completed: totals.completedCount || 0, currentStreak, longestStreak, bestByFormat, attempts };
+}
+
 /* ---------- statistics (computed with SQL) ---------- */
 function computeStats() {
   const players = q.listPlayers.all();
@@ -1787,6 +1846,6 @@ module.exports = {
   login, logout, getSessionAdmin, adminLockoutThreshold,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,
   awardBadge, revokeBadge, getPlayerBadges, getH2HSummary, getAroundTheWorldProgress,
-  startChallengeAttempt, completeChallengeAttempt, getChallengeStatus,
+  startChallengeAttempt, completeChallengeAttempt, getChallengeStatus, getChallengeHistory,
   _db: db,
 };

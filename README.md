@@ -216,7 +216,9 @@ A recurring, Wordle-style solo challenge — the same challenge for everyone on 
 
 **Streaks & history:** the New Game panel shows the current player's streak (consecutive days with a completed attempt) and the last 7 days as a row of colored dots (gold = completed, grey = missed or unfinished). A missed or unfinished day breaks the streak.
 
-**Sharing:** completing a challenge offers the same **📤 Share** card as any other big moment (see [Shareable Moments](#shareable-moments)), captioned with the format and result (e.g. "Checkout Sprint — 170 in 3 darts").
+**Sharing:** completing a challenge offers the same **📤 Share** card as any other big moment (see [Shareable Moments](#shareable-moments)), captioned with the format and result (e.g. "Checkout Sprint — 170 in 3 darts"). Beating your own best-ever result for that format also patches a gold "New personal best!" banner onto the results screen.
+
+**Player Profile history:** a collapsible **Daily Challenge History** section on every [Player Profile](#player-profile) shows the lifetime completion record (played, completed, current streak, longest-ever streak), a best-result line for each of the six formats, and the full attempt-by-attempt log.
 
 ---
 
