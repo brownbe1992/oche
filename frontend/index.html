@@ -548,17 +548,11 @@
     <div class="card">
       <h2 style="font-size:18px;margin-bottom:4px">New game</h2>
 
-      <!-- Today's Challenge -->
-      <div class="setup-section" style="border:1px solid var(--gold);border-radius:10px;padding:12px;margin-bottom:18px">
-        <div class="setup-label" style="color:var(--gold)">🎯 Today's Challenge</div>
-        <div id="challenge-card-body"><p class="pp-meta">Loading…</p></div>
-      </div>
-
       <!-- Players -->
       <div class="setup-section">
         <div class="setup-label">Players</div>
         <div class="players-list" id="players-list"></div>
-        <div class="add-player-wrap">
+        <div class="add-player-wrap" id="add-player-wrap">
           <button class="btn btn-ghost" id="add-player-btn" onclick="toggleAddPlayerMenu()">+ Add player</button>
           <div class="add-player-menu" id="add-player-menu">
             <button class="btn btn-ghost" onclick="addExistingPlayer()">Add existing</button>
@@ -570,7 +564,7 @@
       </div>
 
       <!-- Starting score -->
-      <div class="setup-section">
+      <div class="setup-section" id="start-score-section">
         <div class="setup-label">Starting score</div>
         <div class="opts" style="margin:0">
           <div class="seg" role="group" aria-label="Starting score">
@@ -586,10 +580,17 @@
         <div class="setup-label">Mode</div>
         <div class="opts" style="margin:0">
           <div class="seg" role="group" aria-label="Game mode">
-            <button id="mode-h2h" aria-pressed="true" onclick="setPractice(false)">H2H</button>
-            <button id="mode-practice" aria-pressed="false" onclick="setPractice(true)">Practice</button>
+            <button id="mode-h2h" aria-pressed="true" onclick="setMode('h2h')">H2H</button>
+            <button id="mode-practice" aria-pressed="false" onclick="setMode('practice')">Practice</button>
+            <button id="mode-challenge" aria-pressed="false" onclick="setMode('challenge')">🎯 Daily Challenge</button>
           </div>
         </div>
+      </div>
+
+      <!-- Today's Challenge (Daily Challenge mode only) -->
+      <div class="setup-section" id="challenge-info-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
+        <div class="setup-label" style="color:var(--gold)">🎯 Today's Challenge</div>
+        <div id="challenge-card-body"><p class="pp-meta">Loading…</p></div>
       </div>
 
       <!-- Format (H2H only) -->
@@ -1187,7 +1188,7 @@ function evaluateVisit(startScore, darts, doubleOut){
 /* =========================================================================
    APP STATE
    ========================================================================= */
-let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false };
+let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, mode:'h2h' }; // mode: 'h2h' | 'practice' | 'challenge'
 let game = null;
 let dartTimingEnabled = false;   // admin-toggled; refreshed at boot from /api/settings/dart-timing
 let roster = [];     // saved player names (profiles that own stats)
@@ -1358,7 +1359,6 @@ function todaysChallenge(dateStr){
 }
 
 let activeChallenge = null;   // { date, format, target, player } while a challenge attempt is in progress
-let challengePlayer = null;   // last-selected player for the challenge card
 let lastLegWasChallenge = false; // set true right when a challenge attempt's card fires, so finishUnit() knows to show its Share button
 let sessionBadgesShown = { nightOwl:false, earlyBird:false }; // novelty badges that should fire at most once per session
 let earnedBadgeCache = {}; // playerName -> Set(badgeId), warms per game so Around the World's query can be skipped once earned
@@ -1376,19 +1376,24 @@ function renderHomeChallengeTeaser(){
     <p class="pp-meta" style="margin-top:8px">Start it from <b>New Game</b>.</p>`;
 }
 
-// New Game screen: the interactive card — player picker, streak, history, Start
-// Challenge button. Selecting a PIN-protected player here goes through the same
-// withPinCheck() gate as picking a player for a regular H2H/practice slot.
+// New Game screen, Daily Challenge mode: a read-only status panel (streak, history,
+// today's result) for whichever player is currently in slot 0. No player picker or
+// Start button of its own — that's the same "Choose player" slot and "Start game"
+// button the other two modes use, so a PIN-protected player is gated exactly the
+// same way as filling a regular H2H/practice slot (see onSlotChange/withPinCheck).
 function renderChallengeCard(){
   const el = document.getElementById('challenge-card-body');
   if(!el) return;
-  if(!roster.length){ el.innerHTML = `<p class="pp-meta">Add a player to try today's challenge.</p>`; return; }
-  if(!challengePlayer || !roster.includes(challengePlayer)) challengePlayer = roster[0];
   const challenge = todaysChallenge();
-  const playerOpts = roster.map(n=>`<option value="${escapeHtml(n)}" ${n===challengePlayer?'selected':''}>${escapeHtml(n)}</option>`).join('');
-
+  const player = setup.slots[0];
+  if(!player || !roster.includes(player)){
+    el.innerHTML = `
+      <p style="margin:0;color:var(--ink);font-size:14px">${escapeHtml(challenge.label)}</p>
+      <p class="pp-meta" style="margin-top:8px">Choose a player above to see your streak.</p>`;
+    return;
+  }
   el.innerHTML = `<p class="pp-meta" style="margin:0 0 10px">Loading…</p>`;
-  Backend.get(`/api/challenges/status?player=${encodeURIComponent(challengePlayer)}&date=${challenge.date}`).then(status=>{
+  Backend.get(`/api/challenges/status?player=${encodeURIComponent(player)}&date=${challenge.date}`).then(status=>{
     const streakHtml = status.streak > 0 ? `<span style="color:var(--gold);font-weight:600">🔥 ${status.streak} day streak</span>` : '';
     let resultHtml;
     if(status.today && status.today.completed){
@@ -1396,7 +1401,7 @@ function renderChallengeCard(){
     } else if(status.today){
       resultHtml = `<div style="margin-top:10px;color:var(--muted)">Attempted today, not finished.</div>`;
     } else {
-      resultHtml = `<button class="btn btn-primary" style="margin-top:10px" onclick="startChallengeGame()">Start Challenge</button>`;
+      resultHtml = `<p class="pp-meta" style="margin-top:8px">Press "Start Challenge" below to play.</p>`;
     }
     // Last 7 days strip — gives the streak somewhere visible to live, not just a number
     const historyHtml = status.history.length ? `<div style="display:flex;gap:6px;margin-top:12px">${
@@ -1407,47 +1412,11 @@ function renderChallengeCard(){
       }).join('')
     }</div>` : '';
     el.innerHTML = `
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-        <select id="challenge-player-select" class="date-input" style="width:auto" onchange="setChallengePlayer(this.value)">${playerOpts}</select>
-        ${streakHtml}
-      </div>
+      <div style="margin-bottom:8px">${streakHtml}</div>
       <p style="margin:0;color:var(--ink);font-size:14px">${escapeHtml(challenge.label)}</p>
       ${resultHtml}
       ${historyHtml}`;
   }).catch(()=>{ el.innerHTML = `<p class="pp-meta">Could not load today's challenge.</p>`; });
-}
-
-// Changing who's attempting the challenge is exactly like filling an H2H/practice
-// slot with a different player — a PIN-protected player needs their PIN entered.
-function setChallengePlayer(name){
-  const prev = challengePlayer;
-  withPinCheck(name,
-    ()=>{ challengePlayer = name; renderChallengeCard(); },
-    ()=>{ const sel = document.getElementById('challenge-player-select'); if(sel) sel.value = prev || ''; }
-  );
-}
-
-function startChallengeGame(){
-  if(!challengePlayer || !roster.includes(challengePlayer)) return;
-  // Guards the case where challengePlayer is still just the default (roster[0]),
-  // never run through setChallengePlayer()'s PIN check because the dropdown was
-  // never touched — Start Challenge must still gate on it here.
-  withPinCheck(challengePlayer, ()=>{
-    const challenge = todaysChallenge();
-    setup.slots = [challengePlayer];
-    // Bullseye Gauntlet / Steady Hand / Treble Run don't play to zero at all — the
-    // success metric is dart-count-based, not score-based — so they get a filler
-    // start score comfortably above any realistic 9-dart total (max 9x60=540) purely
-    // so the underlying X01 engine never spuriously "busts" or "wins" mid-challenge.
-    setup.start = challenge.format==='checkout_sprint' ? challenge.target
-      : (challenge.format==='bullseye_gauntlet' || challenge.format==='steady_hand' || challenge.format==='treble_run') ? 1000
-      : 501; // speed_to_zero, long_game
-    setup.legsPerSet = 1;
-    setup.setsPerGame = 1;
-    setup.practice = true;
-    activeChallenge = { date:challenge.date, format:challenge.format, target:challenge.target, player:challengePlayer };
-    startGame();
-  });
 }
 
 /* ---------- home screen ---------- */
@@ -1714,14 +1683,34 @@ function hofSection(rows, mode=''){
   }
 
 
-function setPractice(on){
-  setup.practice=on;
-  document.getElementById('mode-h2h').setAttribute('aria-pressed', !on);
-  document.getElementById('mode-practice').setAttribute('aria-pressed', on);
-  document.getElementById('h2h-options').hidden=on;
-  // hide H2H banner immediately when switching to practice
-  if(on){ const b=document.getElementById('h2h-banner'); if(b) b.style.display='none'; }
-  else updateSetupChrome();
+// Daily Challenge is treated as its own game mode (not a special flow with its own
+// player picker) — selecting it reuses the same PIN-gated "Choose player" slot the
+// other two modes already use, just capped to a single slot since a challenge is
+// inherently solo.
+function setMode(mode){
+  setup.mode = mode;
+  setup.practice = (mode !== 'h2h');
+  document.getElementById('mode-h2h').setAttribute('aria-pressed', mode==='h2h');
+  document.getElementById('mode-practice').setAttribute('aria-pressed', mode==='practice');
+  document.getElementById('mode-challenge').setAttribute('aria-pressed', mode==='challenge');
+  document.getElementById('h2h-options').hidden = (mode !== 'h2h');
+  document.getElementById('start-score-section').hidden = (mode === 'challenge');
+  document.getElementById('challenge-info-section').hidden = (mode !== 'challenge');
+  document.getElementById('add-player-wrap').style.display = (mode === 'challenge') ? 'none' : '';
+  const startBtn = document.getElementById('start-btn');
+  if(startBtn) startBtn.textContent = (mode === 'challenge') ? 'Start Challenge' : 'Start game';
+  if(mode === 'challenge'){
+    // a challenge is always exactly one player
+    setup.slots = setup.slots.slice(0,1);
+    if(!setup.slots.length) setup.slots = [''];
+    renderPlayers();
+    const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
+    renderChallengeCard();
+  } else if(mode === 'practice'){
+    const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
+  } else {
+    updateSetupChrome();
+  }
 }
 
 function openScoreboard(){
@@ -2106,7 +2095,7 @@ function updateH2HBanner(named){
 function onSlotChange(i, value){
   const prev = setup.slots[i];
   withPinCheck(value,
-    ()=>{ setup.slots[i]=value; renderPlayers(); },
+    ()=>{ setup.slots[i]=value; renderPlayers(); if(setup.mode==='challenge' && i===0) renderChallengeCard(); },
     ()=>{
       // reset the select back to previous value without re-rendering everything
       const sel = document.querySelectorAll(`#players-list .pselect`)[i];
@@ -2179,24 +2168,46 @@ function restoreSetup(){
     if(s.start)       { setup.start=s.start; document.querySelectorAll('[data-start]').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.start)===s.start))); }
     if(s.legsPerSet)  { setup.legsPerSet=s.legsPerSet; const el=document.getElementById('legs-val'); if(el) el.textContent=s.legsPerSet; }
     if(s.setsPerGame) { setup.setsPerGame=s.setsPerGame; const el=document.getElementById('sets-val'); if(el) el.textContent=s.setsPerGame; }
-    if(typeof s.practice==='boolean') setPractice(s.practice);
+    if(typeof s.practice==='boolean') setMode(s.practice ? 'practice' : 'h2h'); // never restores into 'challenge' — that's a fresh choice each visit
   }catch(e){}
 }
 
 async function startGame(){
+  // Daily Challenge mode determines its own starting score/legs/sets from today's
+  // challenge shape — computed into locals rather than written into setup.start/
+  // legsPerSet/setsPerGame, since those persist across sessions (saveSetup() below)
+  // and shouldn't get clobbered by whatever the challenge happened to need today.
+  let challengeStart = null;
+  if(setup.mode === 'challenge'){
+    const player = setup.slots[0];
+    if(!player || !roster.includes(player)){ uiAlert('Choose a player for the challenge.'); return; }
+    const challenge = todaysChallenge();
+    // Bullseye Gauntlet / Steady Hand / Treble Run don't play to zero at all — the
+    // success metric is dart-count-based, not score-based — so they get a filler
+    // start score comfortably above any realistic 9-dart total (max 9x60=540) purely
+    // so the underlying X01 engine never spuriously "busts" or "wins" mid-challenge.
+    challengeStart = challenge.format==='checkout_sprint' ? challenge.target
+      : (challenge.format==='bullseye_gauntlet' || challenge.format==='steady_hand' || challenge.format==='treble_run') ? 1000
+      : 501; // speed_to_zero, long_game
+    activeChallenge = { date:challenge.date, format:challenge.format, target:challenge.target, player };
+  } else {
+    activeChallenge = null; // guard against a stale challenge from an earlier abandoned attempt
+  }
   if(setup.slots.some(n=>!n)){ uiAlert('Choose a player for each slot before starting.'); return; }
   const names = [];
   setup.slots.forEach(n=>{ if(n && roster.includes(n) && !names.includes(n)) names.push(n); });
   if(names.length===0){ uiAlert('Choose at least one player.'); return; }
-  if(!setup.practice && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
+  if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   saveSetup();
+  const startScore = challengeStart != null ? challengeStart : setup.start;
+  const legsPerSet = setup.mode==='challenge' ? 1 : setup.legsPerSet;
+  const setsPerGame = setup.mode==='challenge' ? 1 : setup.setsPerGame;
   game = {
-    start: setup.start,
-    category: String(setup.start),
-    legsPerSet: setup.legsPerSet,
-    setsPerGame: setup.setsPerGame,
+    start: startScore,
+    category: String(startScore),
+    legsPerSet, setsPerGame,
     practice: setup.practice,
-    players: names.map(n=>newMatchPlayer(n, setup.start)),
+    players: names.map(n=>newMatchPlayer(n, startScore)),
     starter: 0,        // who throws first in the current leg
     current: 0,
     setNo: 1, legNo: 1,

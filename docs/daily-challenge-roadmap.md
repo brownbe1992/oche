@@ -4,13 +4,15 @@
 > end-to-end, covering every suggested-build-order step:
 > 1. Deterministic date-seeded generation (`todaysChallenge()` in `frontend/index.html`)
 >    across all six formats.
-> 2. A "Today's Challenge" entry point and constrained Practice-mode launch. The
->    interactive picker (player select, streak, history, Start Challenge) lives on
->    the New Game screen, not the Home page — picking a PIN-protected player here
->    goes through the same `withPinCheck()` gate as filling a normal game slot, which
->    a Home-page picker couldn't do without duplicating that logic. The Home page
->    keeps a read-only teaser (today's challenge shape only, no player attached, no
->    backend call) linking to New Game.
+> 2. A "Today's Challenge" entry point, treated as a third game mode on the New Game
+>    screen (`setup.mode`: `'h2h' | 'practice' | 'challenge'`) alongside H2H and
+>    Practice, not a separate special flow with its own picker. Selecting Daily
+>    Challenge mode reuses the same single "Choose player" slot and PIN gate
+>    (`onSlotChange()` → `withPinCheck()`) that Practice mode already uses, and the
+>    same "Start game" button (relabeled "Start Challenge"), rather than a standalone
+>    dropdown + button that had no PIN check of its own. The Home page keeps a
+>    read-only teaser (today's challenge shape only, no player attached, no backend
+>    call) linking to New Game.
 > 3. Result tracking + the four formats beyond the original two: Bullseye Gauntlet
 >    (most bulls in 3 visits), Steady Hand (closest to 20 per visit without going
 >    over), Treble Run (most distinct trebles in 3 visits), and The Long Game (fewest
