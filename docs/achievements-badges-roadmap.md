@@ -48,6 +48,12 @@
 > immediate revoke instead of registering into a revert list nobody will read
 > again, regardless of which one — the undo click or the award confirmation —
 > happens first.
+>
+> **Known gap:** a single turn that earns more than one badge at once only shows
+> and broadcasts the last one — `showAchievement()`/`pendingAchievement` are
+> single-slot, so simultaneous badges clobber each other on screen even though
+> they all still persist correctly. Full design for the fix (a display queue, not
+> a persistence change): `docs/simultaneous-achievements-roadmap.md`.
 
 ## Goal
 
