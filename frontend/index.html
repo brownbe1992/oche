@@ -2575,24 +2575,24 @@ function renderPlayerPage(){
 // are now persisted too (see awardRecurringBadge()) specifically so the Badge Case
 // can show a real count, not just earned/not-earned.
 const BADGE_INFO = {
-  hattrick:           { icon:'🎩', label:'Hat Trick' },
-  bullseyegauntlet:   { icon:'🔴', label:'Bullseye Gauntlet' },
-  wherediditgo:       { icon:'💨', label:"Where'd It Go?" },
-  socloseshot:        { icon:'😩', label:'So Close...' },
-  tontitled:          { icon:'😅', label:'Ton-titled to Nothing' },
-  nightowl:           { icon:'🦉', label:'Night Owl' },
-  earlybird:          { icon:'🐦', label:'Early Bird' },
-  metronome:          { icon:'🎯', label:'Metronome' },
-  cruisecontrol:      { icon:'🚗', label:'Cruise Control' },
-  iceintheveins:      { icon:'❄️', label:'Ice in the Veins' },
-  nervesofsteel:      { icon:'🧊', label:'Nerves of Steel' },
-  comebackkid:        { icon:'🔥', label:'Comeback Kid' },
-  giantslayer:        { icon:'🗡️', label:'Giant Slayer' },
-  therematch:         { icon:'🔁', label:'The Rematch' },
-  first_100_checkout: { icon:'🥇', label:'First 100+ Checkout' },
-  grudge_match:       { icon:'⚔️', label:'Grudge Match' },
-  around_the_clock:   { icon:'🕐', label:'Around the Clock' },
-  around_the_world:   { icon:'🌍', label:'Around the World' },
+  hattrick:           { icon:'🎩', label:'Hat Trick', desc:'Three trebles (any numbers) in one visit, without busting.' },
+  bullseyegauntlet:   { icon:'🔴', label:'Bullseye Gauntlet', desc:'Hit the double bull twice in one visit.' },
+  wherediditgo:       { icon:'💨', label:"Where'd It Go?", desc:'Three misses in one visit.' },
+  socloseshot:        { icon:'😩', label:'So Close...', desc:'Throw two treble 20s, then a single 20, in one visit.' },
+  tontitled:          { icon:'😅', label:'Ton-titled to Nothing', desc:'Score 100 or more in a visit that still busts.' },
+  nightowl:           { icon:'🦉', label:'Night Owl', desc:'Throw a dart between midnight and 5am.' },
+  earlybird:          { icon:'🐦', label:'Early Bird', desc:'Throw a dart between 5am and 7am.' },
+  metronome:          { icon:'🎯', label:'Metronome', desc:'Score within 15 points of each other across 5 consecutive visits.' },
+  cruisecontrol:      { icon:'🚗', label:'Cruise Control', desc:'Win a leg where no visit scored below 40.' },
+  iceintheveins:      { icon:'❄️', label:'Ice in the Veins', desc:'Check out for 50 or more on the visit right after a bust.' },
+  nervesofsteel:      { icon:'🧊', label:'Nerves of Steel', desc:'Win a leg or set that was a decider — tied one leg/set short of winning it.' },
+  comebackkid:        { icon:'🔥', label:'Comeback Kid', desc:"Win a leg after trailing your opponent's remaining score by 100+ at some point." },
+  giantslayer:        { icon:'🗡️', label:'Giant Slayer', desc:'Beat an opponent whose average is 15+ points higher than yours.' },
+  therematch:         { icon:'🔁', label:'The Rematch', desc:'Beat someone who beat you the last time you played them.' },
+  first_100_checkout: { icon:'🥇', label:'First 100+ Checkout', desc:'Check out for 100 or more points.' },
+  grudge_match:       { icon:'⚔️', label:'Grudge Match', desc:'Play 10 or more H2H games against the same opponent.' },
+  around_the_clock:   { icon:'🕐', label:'Around the Clock', desc:'Hit every number 1-20 as a single within one session.' },
+  around_the_world:   { icon:'🌍', label:'Around the World', desc:'Hit every dart outcome at least once, over your lifetime (63 total: singles/doubles/trebles 1-20, outer bull, double bull, and a miss).' },
 };
 function loadPlayerBadges(){
   const container=document.getElementById('player-badges');
@@ -2600,6 +2600,13 @@ function loadPlayerBadges(){
   Backend.get(`/api/players/badges?name=${encodeURIComponent(currentPlayer)}`)
     .then(data=>renderPlayerBadges(data))
     .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load badges.</p>`; });
+}
+// Hovering a badge shows its "how to earn it" description via the native title
+// tooltip; tapping it (no hover on touchscreens) shows the same text in a modal.
+function showBadgeInfo(id){
+  const info = BADGE_INFO[id];
+  if(!info) return;
+  uiAlert(`${info.label} — ${info.desc}`);
 }
 function renderPlayerBadges(data){
   const container=document.getElementById('player-badges');
@@ -2609,15 +2616,16 @@ function renderPlayerBadges(data){
     const info = BADGE_INFO[id];
     const row = earned.get(id);
     const count = row ? row.count : 0;
+    const titleAttr = `title="${escapeHtml(info.desc)}"`;
     const countBadge = count > 1 ? `<span style="position:absolute;top:2px;right:2px;background:var(--gold);color:var(--board);
       border-radius:50%;min-width:18px;height:18px;padding:0 4px;font-size:10px;font-weight:700;
       display:flex;align-items:center;justify-content:center;line-height:1">${count}</span>` : '';
     if(row){
       const date = new Date(row.earned_at.replace(' ','T')+'Z').toLocaleDateString();
-      return `<div class="stat-block" style="position:relative">${countBadge}<div class="stat-val">${info.icon}</div><div class="stat-label">${info.label}<br>Earned ${date}</div>
-        <button class="iconbtn" title="Share" style="margin-top:4px" onclick="shareEarnedBadge('${id}')">📤</button></div>`;
+      return `<div class="stat-block" style="position:relative;cursor:pointer" ${titleAttr} onclick="showBadgeInfo('${id}')">${countBadge}<div class="stat-val">${info.icon}</div><div class="stat-label">${info.label}<br>Earned ${date}</div>
+        <button class="iconbtn" title="Share" style="margin-top:4px" onclick="event.stopPropagation();shareEarnedBadge('${id}')">📤</button></div>`;
     }
-    return `<div class="stat-block" style="opacity:.5"><div class="stat-val" style="filter:grayscale(1)">${info.icon}</div><div class="stat-label">${info.label}<br>Not yet earned</div></div>`;
+    return `<div class="stat-block" style="opacity:.5;cursor:pointer" ${titleAttr} onclick="showBadgeInfo('${id}')"><div class="stat-val" style="filter:grayscale(1)">${info.icon}</div><div class="stat-label">${info.label}<br>Not yet earned</div></div>`;
   }).join('')}</div>`;
 }
 // Around the World progress (docs/achievements-badges-roadmap.md): a compact grid
