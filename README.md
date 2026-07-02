@@ -6,7 +6,7 @@
 
 A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player statistics, and no external dependencies.
 
-**v0.7.0**
+**v0.7.1**
 
 You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, an [18-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. All data lives in a SQLite database on your own server.
 
@@ -473,8 +473,8 @@ The first time Settings is opened with no admin account on the server, a setup w
 | Set or remove a player's PIN | Yes |
 | Add/remove admin accounts | Yes |
 | Change Home Assistant / webhook / scoreboard-layout / default-input settings | Yes |
-| Verify a player's PIN to add them to a game | No — public, but rate-limited by the lockout threshold |
-| Log in as an admin | No — public, but rate-limited by its own lockout threshold |
+| Verify a player's PIN to add them to a game | No — public, but rate-limited by both the lockout threshold and a per-IP request budget |
+| Log in as an admin | No — public, but rate-limited by both its own lockout threshold and a per-IP request budget |
 | View stats, play games, use the scoreboard | No *(unless `OCHE_REQUIRE_AUTH` is set — see below)* |
 
 ### Locking down writes for internet-exposed deployments
@@ -701,17 +701,22 @@ POST /api/wipe-all                          Wipe all players, games, and stats (
 ```
 oche/
 ├── backend/
-│   ├── server.js      Dependency-free HTTP server (Node built-ins only)
-│   └── db.js          SQLite schema, migrations, and all stat queries
+│   ├── server.js    Dependency-free HTTP server (Node built-ins only)
+│   ├── db.js        SQLite schema, migrations, and all stat queries
+│   ├── auth.js      Password/PIN hashing, session tokens, cookie helpers
+│   ├── netguard.js  Outbound-request egress guard (blocks loopback/link-local)
+│   └── backup.js    Stand-alone WAL-safe backup script (see Backups)
 ├── frontend/
-│   ├── index.html     The entire app — one self-contained HTML file
-│   └── display.html   Read-only live scoreboard for a second screen
+│   ├── index.html    The entire app — one self-contained HTML file
+│   └── display.html  Read-only live scoreboard for a second screen
 ├── docker-compose.yml
-├── docker-compose.dev.yml   Dev instance on port 8056
+├── docker-compose.dev.yml        Dev instance on port 8056
+├── docker-compose.portainer.yml  No-build variant for Portainer/Unraid
+├── docker-entrypoint.sh          Fixes /data ownership, then drops to non-root
 └── Dockerfile
 ```
 
-**Backend** — a single `http.createServer` with no npm dependencies. Uses `node:sqlite` (built into Node 22.5+) in WAL mode with foreign keys enabled. All statistics are computed from raw turn and dart data at query time — nothing is pre-aggregated, so stats are always consistent and new metrics can be added without migrations.
+**Backend** — a single `http.createServer` with no npm dependencies. Uses `node:sqlite` (built into Node 22.5+) in WAL mode with foreign keys enabled. All statistics are computed from raw turn and dart data at query time — nothing is pre-aggregated, so stats are always consistent and new metrics can be added without migrations. Every write endpoint is rate-limited per IP, and outbound requests (Home Assistant) are checked against `netguard.js` before connecting — see [Admin Accounts & Player PINs](#admin-accounts--player-pins) for the full security posture.
 
 **Frontend** — a single HTML file with vanilla JavaScript and no build step. It requires a reachable backend at the same origin — there is no offline/local-storage fallback — so stats never split across two unsynced stores. If the backend can't be reached, the app shows a connection-error screen instead of scoring silently into the browser.
 
