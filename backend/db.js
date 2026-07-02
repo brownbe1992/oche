@@ -198,7 +198,12 @@ const q = {
   deletePlayer : db.prepare('DELETE FROM players WHERE id = ?'),
   setPin       : db.prepare('UPDATE players SET pin_hash = ?, pin_salt = ?, pin_fail_count = 0, pin_locked_until = NULL WHERE id = ?'),
   clearPin     : db.prepare('UPDATE players SET pin_hash = NULL, pin_salt = NULL, pin_fail_count = 0, pin_locked_until = NULL WHERE id = ?'),
-  bumpPinFail  : db.prepare('UPDATE players SET pin_fail_count = pin_fail_count + 1 WHERE id = ?'),
+  // RETURNING the post-increment count so callers compare the actual persisted value
+  // against the lockout threshold, instead of computing (staleCount + 1) from a row
+  // read before the `await auth.verifySecret(...)` yield — two concurrent failed
+  // attempts racing across that yield would otherwise both compute the same stale
+  // fails count and could let one extra guess past the threshold.
+  bumpPinFail  : db.prepare('UPDATE players SET pin_fail_count = pin_fail_count + 1 WHERE id = ? RETURNING pin_fail_count'),
   lockPin      : db.prepare('UPDATE players SET pin_locked_until = ? WHERE id = ?'),
   resetPinFail : db.prepare('UPDATE players SET pin_fail_count = 0, pin_locked_until = NULL WHERE id = ?'),
 
@@ -218,7 +223,8 @@ const q = {
   listAdmins     : db.prepare('SELECT id, username, created_at FROM admins ORDER BY username COLLATE NOCASE'),
   countAdmins    : db.prepare('SELECT COUNT(*) AS n FROM admins'),
   deleteAdmin    : db.prepare('DELETE FROM admins WHERE id = ?'),
-  bumpLoginFail  : db.prepare('UPDATE admins SET login_fail_count = login_fail_count + 1 WHERE id = ?'),
+  // RETURNING the post-increment count — see bumpPinFail's comment above for why.
+  bumpLoginFail  : db.prepare('UPDATE admins SET login_fail_count = login_fail_count + 1 WHERE id = ? RETURNING login_fail_count'),
   lockLogin      : db.prepare('UPDATE admins SET login_locked_until = ? WHERE id = ?'),
   resetLoginFail : db.prepare('UPDATE admins SET login_fail_count = 0, login_locked_until = NULL WHERE id = ?'),
   updateAdminPw  : db.prepare('UPDATE admins SET password_hash = ?, password_salt = ? WHERE id = ?'),
@@ -865,9 +871,12 @@ function getPlayerStatBubbles(playerName, mode) {
   const _legAvgCount = _legAvgs.length || 0;
   const avg100plus = _legAvgCount ? _legAvgs.filter(r=>r.la>=100).length * 100 / _legAvgCount : null;
   const avg90minus = _legAvgCount ? _legAvgs.filter(r=>r.la<=90).length  * 100 / _legAvgCount : null;
+  // Same "opening visit" shape as first3avg above, so it needs the same OPENING_CATS
+  // scoping — a Daily Challenge filler-category leg (or a 170 leg) isn't a real X01
+  // opening exchange and shouldn't count toward this stat.
   const score140pct = q(`SELECT CAST(SUM(CASE WHEN scored>=140 THEN 1 ELSE 0 END) AS REAL)*100/NULLIF(COUNT(*),0) AS v FROM (
     SELECT t.scored, ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
-    ${J} ${mf}
+    ${J} ${mf} ${OPENING_CATS}
   ) WHERE rn=1`);
 
   return {
@@ -1052,9 +1061,11 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         GROUP BY t.game_id,t.set_no,t.leg_no
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'score140pct':
+      // Same "opening visit" shape as first3avg above — needs the same 501/301
+      // scoping, see the OPENING_CATS comment in getPlayerStatBubbles.
       return db.prepare(`SELECT ${F.fmt} AS bucket, CAST(SUM(CASE WHEN scored>=140 THEN 1 ELSE 0 END) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
         SELECT t.scored, t.created_at, ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
-        FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere}
+        FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere} AND g.category IN ('501','301')
       ) WHERE rn=1 ${F.and} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'pace':
       // Darts/minute, derived from the gap between consecutive thrown_at timestamps
@@ -1517,8 +1528,7 @@ async function login(username, password) {
 
   if (!admin || !ok) {
     if (admin) {
-      q.bumpLoginFail.run(admin.id);
-      const fails = (admin.login_fail_count || 0) + 1;
+      const fails = q.bumpLoginFail.get(admin.id).login_fail_count;
       if (fails >= adminLockoutThreshold()) {
         q.lockLogin.run(now + 5 * 60 * 1000, admin.id); // 5 minute lockout, same as PIN lockout
       }
@@ -1589,8 +1599,7 @@ async function verifyPlayerPin(name, pin) {
 
   const ok = await auth.verifySecret(String(pin || ''), p.pin_hash, p.pin_salt);
   if (!ok) {
-    q.bumpPinFail.run(p.id);
-    const fails = (p.pin_fail_count || 0) + 1;
+    const fails = q.bumpPinFail.get(p.id).pin_fail_count;
     const threshold = pinLockoutThreshold();
     if (fails >= threshold) {
       q.lockPin.run(now + 5 * 60 * 1000, p.id); // 5 minute lockout

@@ -340,15 +340,24 @@ const server = http.createServer(async (req, res) => {
       if (liveClients.size >= MAX_SSE_TOTAL) return send(res, 503, { error: 'Too many live connections' });
       const ipSseCount = sseByIp.get(ip) || 0;
       if (ipSseCount >= MAX_SSE_PER_IP) return send(res, 503, { error: 'Too many live connections from this address' });
+      // Only count the slot (and register the cleanup listener) once the handshake has
+      // actually succeeded — counting it first and registering cleanup after meant a
+      // synchronous throw from writeHead/write (a socket that died mid-handshake) would
+      // leak one of this IP's MAX_SSE_PER_IP slots permanently, since nothing would ever
+      // decrement it.
+      try {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache, no-transform',
+          'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',   // disable proxy buffering so events arrive immediately
+          ...SECURITY_HEADERS,
+        });
+        res.write(`data: ${JSON.stringify(liveState)}\n\n`);   // current state right away
+      } catch (e) {
+        return; // socket already dead — nothing was counted, nothing to clean up
+      }
       sseByIp.set(ip, ipSseCount + 1);
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache, no-transform',
-        'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no',   // disable proxy buffering so events arrive immediately
-        ...SECURITY_HEADERS,
-      });
-      res.write(`data: ${JSON.stringify(liveState)}\n\n`);   // current state right away
       liveClients.add(res);
       req.on('close', () => {
         liveClients.delete(res);
