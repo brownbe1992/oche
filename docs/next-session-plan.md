@@ -5,7 +5,7 @@ directly without re-deriving context. Full design detail for each item lives in 
 roadmap doc it's linked from — this file is just the punch list and the order to
 work through it in.
 
-## 1. Achievement notifications + shareable cards: explain what happened, show the count
+## 1. Achievement notifications + shareable cards: explain what happened, show the count — done
 
 Full design: `docs/achievements-badges-roadmap.md` → "Planned: notifications and
 shareable cards should explain the badge and show the count."

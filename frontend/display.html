@@ -160,6 +160,8 @@
   @keyframes achmegapulse{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
   .ach-name{font-size:3.5vmin;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
   .ach-overlay.mega .ach-name{font-size:4.4vmin;color:var(--cream)}
+  .ach-desc{font-size:2.2vmin;color:var(--muted);max-width:70vmin;line-height:1.4;margin-top:.5vmin}
+  .ach-desc:empty{display:none}
   .confetti{position:absolute;top:-10vh;width:1.1vmin;height:2.4vmin;opacity:.95;border-radius:1px;animation:confetti-fall linear forwards;pointer-events:none}
   @keyframes confetti-fall{0%{transform:translateY(0) rotate(0deg);opacity:1}100%{transform:translateY(120vh) rotate(560deg);opacity:.85}}
 </style>
@@ -199,6 +201,7 @@
   <div class="ach-overlay" id="ach-overlay">
     <div class="ach-text" id="ach-text"></div>
     <div class="ach-name" id="ach-name"></div>
+    <div class="ach-desc" id="ach-desc"></div>
   </div>
 
 <script>
@@ -211,6 +214,7 @@ const banner     = document.getElementById('banner');
 const achOverlay = document.getElementById('ach-overlay');
 const achText    = document.getElementById('ach-text');
 const achName    = document.getElementById('ach-name');
+const achDesc    = document.getElementById('ach-desc');
 
 const gameStats  = document.getElementById('game-stats');
 const stat180s   = document.getElementById('stat-180s');
@@ -243,6 +247,34 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   metronome:2500, cruisecontrol:2500, iceintheveins:2500, nervesofsteel:3000,
   comebackkid:3000, giantslayer:2500, grudgematch:3000, therematch:2500,
   aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500 };
+// Mirror-copied from frontend/index.html's BADGE_INFO[...].desc / ACH_DESC_FALLBACK —
+// this file has no Badge Case UI to source the text from directly, so it's kept as
+// its own flat map (docs/next-session-plan.md item 1).
+const ACH_DESC = {
+  '180': 'Three darts, sixty each — the biggest score possible in one visit.',
+  bigfish: 'A 170 checkout — the highest finish possible in a leg.',
+  ninedarter: 'A perfect leg: 501 down to zero in exactly nine darts.',
+  hattrick: 'Three trebles (any numbers) in one visit, without busting.',
+  bullseyegauntlet: 'Hit the double bull twice in one visit.',
+  doubletrouble: 'Check out with the last two darts of the visit both landing on doubles.',
+  wherediditgo: 'Three misses in one visit.',
+  socloseshot: 'Throw two treble 20s, then a single 20, in one visit.',
+  bustedmaximum: 'Throw three treble 20s (a genuine 180) on a visit that still busts.',
+  tontitled: 'Score 100 or more in a visit that still busts.',
+  nightowl: 'Throw a dart between midnight and 5am.',
+  earlybird: 'Throw a dart between 5am and 7am.',
+  metronome: 'Score within 15 points of each other across 5 consecutive visits.',
+  cruisecontrol: 'Win a leg where no visit scored below 40.',
+  iceintheveins: 'Check out for 50 or more on the visit right after a bust.',
+  nervesofsteel: 'Win a leg or set that was a decider — tied one leg/set short of winning it.',
+  comebackkid: "Win a leg after trailing your opponent's remaining score by 100+ at some point.",
+  giantslayer: 'Beat an opponent whose average is 15+ points higher than yours.',
+  therematch: 'Beat someone who beat you the last time you played them.',
+  first100checkout: 'Check out for 100 or more points.',
+  grudgematch: 'Play 10 or more H2H games against the same opponent.',
+  aroundtheclock: 'Hit every number 1-20 as a single within one session.',
+  aroundtheworld: 'Hit every dart outcome at least once, over your lifetime (63 total: singles/doubles/trebles 1-20, outer bull, double bull, and a miss).',
+};
 
 /* ---- layout presets ----
    Chosen by the admin in Settings (or overridden per-screen with ?layout=...
@@ -288,6 +320,7 @@ function spawnConfetti(root, count){
 function showAchievement(type, player){
   achText.textContent = ACH_LABELS[type] || '';
   achName.textContent = player || '';
+  if(achDesc) achDesc.textContent = ACH_DESC[type] || '';
   const mega = type === 'ninedarter';
   achOverlay.classList.toggle('mega', mega);
   achOverlay.classList.add('show');

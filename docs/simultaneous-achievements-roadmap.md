@@ -1,7 +1,24 @@
 # Simultaneous Achievements — Design Roadmap
 
-> Status: **not started**. This is a design doc for a future release, captured so the
-> thinking isn't lost. Nothing described here exists in the app yet.
+> Status: **shipped**, per the design below. `enterTurn()`'s expanded-achievements
+> chain is now a `CHAIN_CHECKS` list collected and filtered by the suppression-pairs
+> table (Busted Maximum still suppresses Ton-titled to Nothing, Bullseye Gauntlet
+> still suppresses Double Trouble) rather than an `if/else if` chain. Every
+> `showAchievement()` call site — the expanded chain, Metronome, Cruise Control, Ice
+> in the Veins, Night Owl/Early Bird, `onLegWon()`'s Comeback Kid/Nerves of
+> Steel/Giant Slayer, The Rematch/Grudge Match, the async milestones, and
+> 180/Big Fish/Nine-Darter — now goes through `queueBadge()`/`pumpAchievementQueue()`
+> instead. `pendingAchievement` is now set generically for every queued item as it's
+> shown (previously only 180/Big Fish/Nine-Darter ever reached `display.html` at
+> all — that broadcast-coverage gap is fixed as part of the same change, not just the
+> ordering). Verified end-to-end: a real `onLegWon()` triple collision (Comeback
+> Kid + Nerves of Steel + Giant Slayer, all genuinely true on the same
+> match-deciding leg) shows and broadcasts all three in sequence; a same-visit Big
+> Fish + Nine-Darter collision shows both; both suppression pairs still hold.
+>
+> Built alongside `docs/next-session-plan.md` item 1 (explanatory text + count on
+> the overlay/moment card), since both touch the same `showAchievement()`/
+> `awardRecurringBadge()` code — see that doc for what shipped there.
 
 ## Goal
 

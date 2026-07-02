@@ -357,7 +357,7 @@ attention as the feature roadmaps.
    (the X01-to-plugin refactor), since that
    refactor is the highest-value place to prove the new abstraction behaves
    identically to today's code via an actual test rather than manual spot-checking.
-5. **Achievements/badges and coaching insights are X01-only today.** If either is
+6. **Achievements/badges and coaching insights are X01-only today.** If either is
    built before Cricket exists (likely, given Cricket's complexity), keep the
    stat/achievement definitions abstracted per game type from day one — cheap to do
    now, expensive to retrofit once real achievement data exists for X01 only.

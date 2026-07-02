@@ -433,6 +433,8 @@
   @keyframes achmegapulse{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
   .ach-name{font-size:18px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
   .ach-overlay.mega .ach-name{font-size:22px;color:var(--cream)}
+  .ach-desc{font-size:13px;color:var(--muted);max-width:420px;line-height:1.4}
+  .ach-desc:empty{display:none}
   .ach-share-btn{pointer-events:auto;margin-top:4px;padding:9px 18px;border-radius:999px;border:1px solid var(--gold);
     background:rgba(217,180,106,.12);color:var(--gold);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
   .ach-share-btn[hidden]{display:none}
@@ -486,6 +488,7 @@
 <div class="ach-overlay" id="ach-overlay">
   <div class="ach-text" id="ach-text"></div>
   <div class="ach-name" id="ach-name"></div>
+  <div class="ach-desc" id="ach-desc"></div>
   <button class="ach-share-btn" id="ach-share-btn" hidden onclick="shareMomentCard(currentAchType)">📤 Share</button>
 </div>
 <div class="wrap">
@@ -2811,6 +2814,7 @@ function updateCheckout(flash){
 const achOverlayEl = document.getElementById('ach-overlay');
 const achTextEl    = document.getElementById('ach-text');
 const achNameEl    = document.getElementById('ach-name');
+const achDescEl    = document.getElementById('ach-desc');
 const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter':'🏆 NINE-DARTER! 🏆',
   hattrick:'Hat Trick! 🎩', bullseyegauntlet:'Bullseye Gauntlet! 🔴', wherediditgo:"Where'd It Go? 💨",
   socloseshot:'So Close... 😩', tontitled:'Ton-titled to Nothing 😅', nightowl:'Night Owl 🦉',
@@ -2825,7 +2829,24 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   metronome:2500, cruisecontrol:2500, iceintheveins:2500, nervesofsteel:3000,
   comebackkid:3000, giantslayer:2500, grudgematch:3000, therematch:2500,
   aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500 };
-let achTimer = null;
+// The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
+// four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
+// instead of duplicating copy (docs/next-session-plan.md item 1).
+const ACH_TYPE_TO_BADGE_ID = {
+  first100checkout: 'first_100_checkout', grudgematch: 'grudge_match',
+  aroundtheclock: 'around_the_clock', aroundtheworld: 'around_the_world',
+};
+// 180/Big Fish/Nine-darter aren't in BADGE_INFO (they're older top-level stats, not
+// player_badges rows), so they get their own short explanation lines here.
+const ACH_DESC_FALLBACK = {
+  '180': 'Three darts, sixty each — the biggest score possible in one visit.',
+  bigfish: 'A 170 checkout — the highest finish possible in a leg.',
+  ninedarter: 'A perfect leg: 501 down to zero in exactly nine darts.',
+};
+function achDescFor(type){
+  const badgeId = ACH_TYPE_TO_BADGE_ID[type] || type;
+  return (BADGE_INFO[badgeId] && BADGE_INFO[badgeId].desc) || ACH_DESC_FALLBACK[type] || '';
+}
 
 function spawnConfetti(root, count){
   const colors=['#d9b46a','#efe7d2','#f4e3b2','#caa94e'];
@@ -2841,20 +2862,50 @@ function spawnConfetti(root, count){
   }
 }
 
+// A single turn (or leg win, or an async milestone confirmation) can genuinely earn
+// more than one badge at once, but the overlay can only show one at a time — so
+// every celebration goes through queueBadge() instead of calling showAchievement()
+// directly, and they're played back one at a time instead of the second silently
+// clobbering the first. See docs/simultaneous-achievements-roadmap.md.
+let achTimer = null;
 let currentAchType = null;
+let achievementQueue = [];
+let achievementQueueRunning = false;
+function queueBadge(type, player){
+  achievementQueue.push({ type, player, ts: Date.now() });
+  if(!achievementQueueRunning) pumpAchievementQueue();
+}
+function pumpAchievementQueue(){
+  if(achievementQueue.length===0){ achievementQueueRunning = false; return; }
+  achievementQueueRunning = true;
+  const next = achievementQueue.shift();
+  // Every queued badge gets its own live-scoreboard broadcast as it's shown — not
+  // just whatever pushLive() call happened to already be at the end of enterTurn()/
+  // onLegWon(), since that only covers the first item drained from the queue.
+  pendingAchievement = { type: next.type, player: next.player, ts: next.ts };
+  if(game) pushLive();
+  showAchievement(next.type, next.player);
+  clearTimeout(achTimer);
+  achTimer = setTimeout(()=>{
+    achOverlayEl.classList.remove('show');
+    achOverlayEl.querySelectorAll('.confetti').forEach(c=>c.remove());
+    const shareBtn = document.getElementById('ach-share-btn');
+    if(shareBtn) shareBtn.hidden = true;
+    pumpAchievementQueue();   // advance to the next queued badge, if any
+  }, ACH_DURATION[next.type] || 2500);
+}
 function showAchievement(type, player){
   if(!achOverlayEl) return;
   currentAchType = type;
   achTextEl.textContent = ACH_LABELS[type] || '';
   achNameEl.textContent = player || '';
+  if(achDescEl) achDescEl.textContent = achDescFor(type);
   const mega = type === 'ninedarter';
   achOverlayEl.classList.toggle('mega', mega);
   achOverlayEl.classList.add('show');
   const shareBtn = document.getElementById('ach-share-btn');
   if(shareBtn) shareBtn.hidden = false;
   if(mega) spawnConfetti(achOverlayEl, 90);
-  clearTimeout(achTimer);
-  achTimer = setTimeout(()=>{ achOverlayEl.classList.remove('show'); achOverlayEl.querySelectorAll('.confetti').forEach(c=>c.remove()); if(shareBtn) shareBtn.hidden = true; }, ACH_DURATION[type] || 2500);
 }
 
 /* =========================================================================
@@ -2982,11 +3033,24 @@ function trackBadgeForUndo(snap, playerName, badgeId){
 }
 // Persists a recurring badge occurrence (count-mode: increments every call, since
 // these all fire on a per-visit/per-leg/per-match event that won't spuriously
-// re-trigger). Fire-and-forget — the celebration itself already happened via
-// showAchievement()/fireMomentCard(), this just feeds the Badge Case's counter.
-function awardRecurringBadge(playerName, badgeId){
-  Backend.send('POST','/api/badges/award', { player:playerName, badgeId, once:false }).catch(()=>{});
-  trackBadgeForUndo(game && game.lastTurnSnapshot, playerName, badgeId);
+// re-trigger). The overlay celebration itself already happened via queueBadge()
+// synchronously, before this network round-trip even starts — deliberately not
+// blocked on it (docs/next-session-plan.md item 1). Once the award API's
+// { newlyEarned, count } response comes back, the shareable moment card (if a
+// momentType/momentOpts pair was given) fires with the real count folded into its
+// statLine — firing the card here instead of at the call site is what lets it show
+// an accurate "Earned N× total" without delaying the celebration that already ran.
+function awardRecurringBadge(playerName, badgeId, momentType, momentOpts){
+  const snap = game && game.lastTurnSnapshot;
+  Backend.send('POST','/api/badges/award', { player:playerName, badgeId, once:false })
+    .then(r=>{
+      if(!momentType) return;
+      const count = r && r.count;
+      const statLine = (count>1 && momentOpts.statLine) ? `${momentOpts.statLine} · Earned ${count}× total` : momentOpts.statLine;
+      fireMomentCard(momentType, { ...momentOpts, statLine });
+    })
+    .catch(()=>{ if(momentType) fireMomentCard(momentType, momentOpts); });
+  trackBadgeForUndo(snap, playerName, badgeId);
 }
 
 const momentCards = {};
@@ -3279,22 +3343,19 @@ function enterTurn(){
   }
   if(ev.scored === 180){
     game.gameOneEighties += 1;
-    pendingAchievement = { type:'180', player:p.name, ts:Date.now() };
-    showAchievement('180', p.name);
+    queueBadge('180', p.name);
     sendHaWebhook('oneeighty', p.name, game.category);
     fireMomentCard('180', { icon:'🎯', headline:'ONE-EIGHTY!', player:p.name,
       statLine: `${game.category} · ${game.practice?'Practice':'H2H'}` });
   }
   if(ev.win && ev.pointsThisVisit === 170){
     game.gameBigFish += 1;
-    pendingAchievement = { type:'bigfish', player:p.name, ts:Date.now() };
-    showAchievement('bigfish', p.name);
+    queueBadge('bigfish', p.name);
     sendHaWebhook('bigfish', p.name, game.category);
     fireMomentCard('bigfish', { icon:'🐟', headline:'BIG FISH!', player:p.name, statLine:'170 checkout' });
   }
   if(ev.win && game.category==='501' && p.legDarts===9 && p.legVisits===3){
-    pendingAchievement = { type:'ninedarter', player:p.name, ts:Date.now() };
-    showAchievement('ninedarter', p.name);
+    queueBadge('ninedarter', p.name);
     sendHaWebhook('ninedarter', p.name, game.category);
     fireMomentCard('ninedarter', { icon:'🏆', headline:'NINE-DARTER!', player:p.name, statLine:'501 · 9 darts' });
   }
@@ -3302,46 +3363,46 @@ function enterTurn(){
     sendHaWebhook('tonplus', p.name, game.category, { score: ev.pointsThisVisit });
   }
 
-  // Expanded achievements/badges (docs/achievements-badges-roadmap.md) — recurring,
-  // no persistence needed, same pattern as 180/Big Fish/nine-darter above. Each
-  // condition is written to be mutually exclusive with 180 (so a genuine 180 never
-  // also fires Hat Trick or So Close...).
+  // Expanded achievements/badges (docs/achievements-badges-roadmap.md) — recurring.
+  // Collected as a list rather than an if/else-if chain so a turn that genuinely
+  // satisfies more than one condition queues all of them instead of only the first
+  // match winning — but two deliberate suppression pairs stay exclusive (they're
+  // the same underlying event wearing two labels, not two distinct achievements):
+  // Busted Maximum suppresses Ton-titled to Nothing (a busted 3xT20 is a 100+ bust
+  // by definition, but the specific story wins), and Bullseye Gauntlet suppresses
+  // Double Trouble (double-bull-twice is technically "last two darts both doubles"
+  // too). See docs/simultaneous-achievements-roadmap.md.
   const _d = game.darts;
-  if(_d.length===3 && _d.every(d=>d.isTreble) && ev.scored !== 180 && !ev.bust){
-    showAchievement('hattrick', p.name);
-    fireMomentCard('hattrick', { icon:'🎩', headline:'HAT TRICK!', player:p.name, statLine:'Three trebles, one visit' });
-    awardRecurringBadge(p.name, 'hattrick');
-  } else if(_d.filter(d=>d.sector===25 && d.mult===2).length >= 2){
-    showAchievement('bullseyegauntlet', p.name);
-    fireMomentCard('bullseyegauntlet', { icon:'🔴', headline:'BULLSEYE GAUNTLET!', player:p.name, statLine:'Double bull, twice in one visit' });
-    awardRecurringBadge(p.name, 'bullseyegauntlet');
-  } else if(ev.win && _d.length>=2 && _d[_d.length-2].isDouble && _d[_d.length-1].isDouble){
+  const CHAIN_CHECKS = [
+    { id:'hattrick', icon:'🎩', headline:'HAT TRICK!', statLine:'Three trebles, one visit',
+      test: () => _d.length===3 && _d.every(d=>d.isTreble) && ev.scored !== 180 && !ev.bust },
+    { id:'bullseyegauntlet', icon:'🔴', headline:'BULLSEYE GAUNTLET!', statLine:'Double bull, twice in one visit',
+      test: () => _d.filter(d=>d.sector===25 && d.mult===2).length >= 2, suppresses:['doubletrouble'] },
     // Double Trouble: the last two darts of the checkout visit both landed on
     // doubles — dart 1 of a 3-dart visit (miss/single/treble) doesn't matter, only
     // the trailing pair does. A single-dart double-out checkout doesn't qualify
     // ("consecutive" needs at least two) — see docs/achievements-badges-roadmap.md.
-    showAchievement('doubletrouble', p.name);
-    fireMomentCard('doubletrouble', { icon:'👯', headline:'DOUBLE TROUBLE!', player:p.name, statLine:'Checked out on consecutive doubles' });
-    awardRecurringBadge(p.name, 'doubletrouble');
-  } else if(_d.length===3 && _d.every(d=>d.sector===0)){
-    showAchievement('wherediditgo', p.name);
-    fireMomentCard('wherediditgo', { icon:'💨', headline:"WHERE'D IT GO?", player:p.name, statLine:'Three misses' });
-    awardRecurringBadge(p.name, 'wherediditgo');
-  } else if(_d.length===3 && !ev.bust && _d[0].sector===20 && _d[0].mult===3 && _d[1].sector===20 && _d[1].mult===3 && _d[2].sector===20 && _d[2].mult===1){
-    showAchievement('socloseshot', p.name);
-    fireMomentCard('socloseshot', { icon:'😩', headline:'SO CLOSE...', player:p.name, statLine:'140 — one dart from 180' });
-    awardRecurringBadge(p.name, 'socloseshot');
-  } else if(ev.bust && _d.length===3 && _d.every(d=>d.sector===20 && d.mult===3)){
+    { id:'doubletrouble', icon:'👯', headline:'DOUBLE TROUBLE!', statLine:'Checked out on consecutive doubles',
+      test: () => ev.win && _d.length>=2 && _d[_d.length-2].isDouble && _d[_d.length-1].isDouble },
+    { id:'wherediditgo', icon:'💨', headline:"WHERE'D IT GO?", statLine:'Three misses',
+      test: () => _d.length===3 && _d.every(d=>d.sector===0) },
+    { id:'socloseshot', icon:'😩', headline:'SO CLOSE...', statLine:'140 — one dart from 180',
+      test: () => _d.length===3 && !ev.bust && _d[0].sector===20 && _d[0].mult===3 && _d[1].sector===20 && _d[1].mult===3 && _d[2].sector===20 && _d[2].mult===1 },
     // Busted Maximum: a genuine 180 (three treble 20s) that still busts — more
-    // specific than Ton-titled to Nothing below, so it must be checked first.
-    showAchievement('bustedmaximum', p.name);
-    fireMomentCard('bustedmaximum', { icon:'💥', headline:'BUSTED MAXIMUM', player:p.name, statLine:'A genuine 180 that still busted' });
-    awardRecurringBadge(p.name, 'bustedmaximum');
-  } else if(ev.bust && _d.reduce((s,d)=>s+d.value,0) >= 100){
-    showAchievement('tontitled', p.name);
-    fireMomentCard('tontitled', { icon:'😅', headline:'TON-TITLED TO NOTHING', player:p.name, statLine:'100+ attempted, still busted' });
-    awardRecurringBadge(p.name, 'tontitled');
-  }
+    // specific than Ton-titled to Nothing below, so it suppresses it rather than
+    // both firing for the same visit.
+    { id:'bustedmaximum', icon:'💥', headline:'BUSTED MAXIMUM', statLine:'A genuine 180 that still busted',
+      test: () => ev.bust && _d.length===3 && _d.every(d=>d.sector===20 && d.mult===3), suppresses:['tontitled'] },
+    { id:'tontitled', icon:'😅', headline:'TON-TITLED TO NOTHING', statLine:'100+ attempted, still busted',
+      test: () => ev.bust && _d.reduce((s,d)=>s+d.value,0) >= 100 },
+  ];
+  let _chainMatched = CHAIN_CHECKS.filter(c => c.test());
+  const _chainSuppressed = new Set(_chainMatched.flatMap(c => c.suppresses || []));
+  _chainMatched = _chainMatched.filter(c => !_chainSuppressed.has(c.id));
+  _chainMatched.forEach(c => {
+    queueBadge(c.id, p.name);
+    awardRecurringBadge(p.name, c.id, c.id, { icon:c.icon, headline:c.headline, player:p.name, statLine:c.statLine });
+  });
 
   // Consistency badges — Metronome (5 consecutive visits within 15 points of each
   // other) and Cruise Control (no visit below 40, the whole leg). Uses the raw
@@ -3352,15 +3413,13 @@ function enterTurn(){
     const _last5 = p.legVisitScores.slice(-5);
     if(Math.max(..._last5) - Math.min(..._last5) <= 15){
       p.metronomeFired = true;
-      showAchievement('metronome', p.name);
-      fireMomentCard('metronome', { icon:'🎯', headline:'METRONOME', player:p.name, statLine:'5 visits within 15 points of each other' });
-      awardRecurringBadge(p.name, 'metronome');
+      queueBadge('metronome', p.name);
+      awardRecurringBadge(p.name, 'metronome', 'metronome', { icon:'🎯', headline:'METRONOME', player:p.name, statLine:'5 visits within 15 points of each other' });
     }
   }
   if(ev.win && p.legVisitScores.every(v=>v>=40)){
-    showAchievement('cruisecontrol', p.name);
-    fireMomentCard('cruisecontrol', { icon:'🚗', headline:'CRUISE CONTROL', player:p.name, statLine:'No visit below 40, the whole leg' });
-    awardRecurringBadge(p.name, 'cruisecontrol');
+    queueBadge('cruisecontrol', p.name);
+    awardRecurringBadge(p.name, 'cruisecontrol', 'cruisecontrol', { icon:'🚗', headline:'CRUISE CONTROL', player:p.name, statLine:'No visit below 40, the whole leg' });
   }
 
   // Ice in the Veins: a 50+ checkout on the very next visit after this player's own
@@ -3369,9 +3428,8 @@ function enterTurn(){
   const _iceEligible = p.pendingIceInTheVeins;
   p.pendingIceInTheVeins = !!ev.bust;
   if(ev.win && _iceEligible && ev.pointsThisVisit >= 50){
-    showAchievement('iceintheveins', p.name);
-    fireMomentCard('iceintheveins', { icon:'❄️', headline:'ICE IN THE VEINS', player:p.name, statLine:`${ev.pointsThisVisit} checkout right after a bust` });
-    awardRecurringBadge(p.name, 'iceintheveins');
+    queueBadge('iceintheveins', p.name);
+    awardRecurringBadge(p.name, 'iceintheveins', 'iceintheveins', { icon:'❄️', headline:'ICE IN THE VEINS', player:p.name, statLine:`${ev.pointsThisVisit} checkout right after a bust` });
   }
 
   // Around the Clock (state-based milestone): every 1-20 single hit within one
@@ -3384,7 +3442,7 @@ function enterTurn(){
     Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'around_the_clock', once:true }).then(r=>{
       if(r && r.newlyEarned){
         trackBadgeForUndo(_snapAtc, p.name, 'around_the_clock');
-        showAchievement('aroundtheclock', p.name);
+        queueBadge('aroundtheclock', p.name);
         fireMomentCard('aroundtheclock', { icon:'🕐', headline:'AROUND THE CLOCK', player:p.name, statLine:'Every number, 1 to 20, singled out' });
       }
     }).catch(()=>{});
@@ -3403,7 +3461,7 @@ function enterTurn(){
           earnedBadgeCache[p.name].add('around_the_world');
           if(r && r.newlyEarned){
             trackBadgeForUndo(_snapAtw, p.name, 'around_the_world');
-            showAchievement('aroundtheworld', p.name);
+            queueBadge('aroundtheworld', p.name);
             fireMomentCard('aroundtheworld', { icon:'🌍', headline:'AROUND THE WORLD', player:p.name, statLine:'Every dart outcome, lifetime' });
           }
         }).catch(()=>{});
@@ -3413,18 +3471,21 @@ function enterTurn(){
 
   // Novelty time-of-day badges — the overlay only fires once per session (not once
   // per turn, which would spam the same celebration all night), but every actual
-  // occurrence still counts toward the Badge Case total.
+  // occurrence still counts toward the Badge Case total. The per-turn persistence
+  // call below deliberately omits the momentType/momentOpts args (no momentType ==
+  // no card fired) — only the session-gated celebration below fires a card, or every
+  // turn thrown after midnight would spam an HA webhook.
   const _hour = new Date().getHours();
   if(_hour < 5 || (_hour >= 5 && _hour < 7)){
     awardRecurringBadge(p.name, _hour < 5 ? 'nightowl' : 'earlybird');
   }
   if(!sessionBadgesShown.nightOwl && _hour < 5){
     sessionBadgesShown.nightOwl = true;
-    showAchievement('nightowl', p.name);
+    queueBadge('nightowl', p.name);
     fireMomentCard('nightowl', { icon:'🦉', headline:'NIGHT OWL', player:p.name, statLine:'Darts after midnight' });
   } else if(!sessionBadgesShown.earlyBird && _hour >= 5 && _hour < 7){
     sessionBadgesShown.earlyBird = true;
-    showAchievement('earlybird', p.name);
+    queueBadge('earlybird', p.name);
     fireMomentCard('earlybird', { icon:'🐦', headline:'EARLY BIRD', player:p.name, statLine:'Darts before 7am' });
   }
   // First 100+ checkout — a one-time milestone (persisted server-side so the
@@ -3434,7 +3495,7 @@ function enterTurn(){
     Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'first_100_checkout', once:true }).then(r=>{
       if(r && r.newlyEarned){
         trackBadgeForUndo(_snap100, p.name, 'first_100_checkout');
-        showAchievement('first100checkout', p.name);
+        queueBadge('first100checkout', p.name);
         fireMomentCard('first100checkout', { icon:'🥇', headline:'FIRST 100+ CHECKOUT', player:p.name, statLine:`${ev.pointsThisVisit} checkout` });
       }
     }).catch(()=>{});
@@ -3509,9 +3570,8 @@ function onLegWon(wi){
   // at some point during it. Needs an opponent to trail behind (H2H, or a 2-player
   // practice match).
   if(opp && w.legWorstDeficit >= 100){
-    showAchievement('comebackkid', w.name);
-    fireMomentCard('comebackkid', { icon:'🔥', headline:'COMEBACK KID', player:w.name, statLine:'Trailed by 100+, won anyway' });
-    awardRecurringBadge(w.name, 'comebackkid');
+    queueBadge('comebackkid', w.name);
+    awardRecurringBadge(w.name, 'comebackkid', 'comebackkid', { icon:'🔥', headline:'COMEBACK KID', player:w.name, statLine:'Trailed by 100+, won anyway' });
   }
   // Nerves of Steel (recurring): a genuine decider — both players tied one leg (or
   // one set) short of winning, entering this leg/set.
@@ -3544,18 +3604,16 @@ function onLegWon(wi){
       DB.completeGame(w.name);   // api marks the game complete in the database
       persist();
       if(_setDecider || _matchDecider){
-        showAchievement('nervesofsteel', w.name);
-        fireMomentCard('nervesofsteel', { icon:'🧊', headline:'NERVES OF STEEL', player:w.name, statLine: _matchDecider ? 'Won the deciding set' : 'Won the deciding leg' });
-        awardRecurringBadge(w.name, 'nervesofsteel');
+        queueBadge('nervesofsteel', w.name);
+        awardRecurringBadge(w.name, 'nervesofsteel', 'nervesofsteel', { icon:'🧊', headline:'NERVES OF STEEL', player:w.name, statLine: _matchDecider ? 'Won the deciding set' : 'Won the deciding leg' });
       }
       // Social/H2H badges — 2-player matches only.
       if(opp){
         const winnerAvg = (stats[w.name] && stats[w.name].avgDarts) ? stats[w.name].totalPoints/stats[w.name].avgDarts*3 : null;
         const loserAvg  = (stats[opp.name] && stats[opp.name].avgDarts) ? stats[opp.name].totalPoints/stats[opp.name].avgDarts*3 : null;
         if(winnerAvg!=null && loserAvg!=null && loserAvg - winnerAvg >= 15){
-          showAchievement('giantslayer', w.name);
-          fireMomentCard('giantslayer', { icon:'🗡️', headline:'GIANT SLAYER', player:w.name, statLine:`Beat a ${loserAvg.toFixed(1)} average` });
-          awardRecurringBadge(w.name, 'giantslayer');
+          queueBadge('giantslayer', w.name);
+          awardRecurringBadge(w.name, 'giantslayer', 'giantslayer', { icon:'🗡️', headline:'GIANT SLAYER', player:w.name, statLine:`Beat a ${loserAvg.toFixed(1)} average` });
         }
         const gid = DB.gameId;
         const _snapGm = game.lastTurnSnapshot;
@@ -3564,9 +3622,8 @@ function onLegWon(wi){
         DB._queue(()=>Backend.get(`/api/players/h2h-summary?player=${encodeURIComponent(w.name)}&opponent=${encodeURIComponent(opp.name)}${gid!=null?'&excludeGameId='+gid:''}`)).then(sum=>{
           if(!sum) return;
           if(sum.previousWinner === opp.name){
-            showAchievement('therematch', w.name);
-            fireMomentCard('therematch', { icon:'🔁', headline:'THE REMATCH', player:w.name, statLine:`Revenge over ${opp.name}` });
-            awardRecurringBadge(w.name, 'therematch');
+            queueBadge('therematch', w.name);
+            awardRecurringBadge(w.name, 'therematch', 'therematch', { icon:'🔁', headline:'THE REMATCH', player:w.name, statLine:`Revenge over ${opp.name}` });
           }
           if(sum.totalGames >= 10){
             // Grudge Match: a genuine milestone (has this rivalry crossed 10 games
@@ -3575,7 +3632,7 @@ function onLegWon(wi){
             Backend.send('POST','/api/badges/award', { player:w.name, badgeId:'grudge_match', once:true }).then(r=>{
               if(r && r.newlyEarned){
                 trackBadgeForUndo(_snapGm, w.name, 'grudge_match');
-                showAchievement('grudgematch', w.name);
+                queueBadge('grudgematch', w.name);
                 fireMomentCard('grudgematch', { icon:'⚔️', headline:'GRUDGE MATCH', player:w.name, statLine:`${sum.totalGames} games vs ${opp.name}` });
               }
             }).catch(()=>{});
@@ -3596,9 +3653,8 @@ function onLegWon(wi){
     DB.recordEvent('set_end', game.setNo, null);
     persist();
     if(_setDecider){
-      showAchievement('nervesofsteel', w.name);
-      fireMomentCard('nervesofsteel', { icon:'🧊', headline:'NERVES OF STEEL', player:w.name, statLine:'Won the deciding leg' });
-      awardRecurringBadge(w.name, 'nervesofsteel');
+      queueBadge('nervesofsteel', w.name);
+      awardRecurringBadge(w.name, 'nervesofsteel', 'nervesofsteel', { icon:'🧊', headline:'NERVES OF STEEL', player:w.name, statLine:'Won the deciding leg' });
     }
     game.matchResult = { ts: Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:_bigFish };
     finishUnit('set', w.name);

@@ -49,11 +49,13 @@
 > again, regardless of which one — the undo click or the award confirmation —
 > happens first.
 >
-> **Known gap:** a single turn that earns more than one badge at once only shows
-> and broadcasts the last one — `showAchievement()`/`pendingAchievement` are
-> single-slot, so simultaneous badges clobber each other on screen even though
-> they all still persist correctly. Full design for the fix (a display queue, not
-> a persistence change): `docs/simultaneous-achievements-roadmap.md`.
+> **Fixed:** a single turn earning more than one badge now shows and broadcasts
+> every one of them in sequence via a display queue, instead of the last one
+> clobbering the rest — see `docs/simultaneous-achievements-roadmap.md` for the
+> design and what shipped. The live overlay also now shows a plain-language
+> explanation (`BADGE_INFO[...].desc`) and the shareable moment card folds in the
+> real occurrence count once the award API confirms it — `docs/next-session-plan.md`
+> item 1.
 
 ## Goal
 
