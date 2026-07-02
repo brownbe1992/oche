@@ -3666,8 +3666,21 @@ function onLegWon(wi){
   lastLegWasChallenge = false;
   if(activeChallenge && activeChallenge.player === w.name){
     const _metric = activeChallenge.overrideMetric != null ? activeChallenge.overrideMetric : w.legDarts;
+    // Captured before activeChallenge is nulled out below — the response this feeds
+    // arrives after that happens, so the callback can't read activeChallenge itself.
+    const _challengeFormat = activeChallenge.format, _challengeTarget = activeChallenge.target;
+    // The results screen (finishUnit(), below) renders immediately — not blocked on
+    // this round-trip, same "celebrate now, patch in extra detail once confirmed"
+    // pattern as the achievement queue's count patching. The #challenge-pb-banner
+    // placeholder only exists on the just-rendered results screen, so this patch is
+    // a no-op if the player has already navigated away by the time it resolves.
     Backend.send('POST','/api/challenges/complete',
-      { player:activeChallenge.player, challengeDate:activeChallenge.date, resultDarts:_metric }).catch(()=>{});
+      { player:activeChallenge.player, challengeDate:activeChallenge.date, resultDarts:_metric }).then(r=>{
+        if(r && r.isPersonalBest){
+          const el = document.getElementById('challenge-pb-banner');
+          if(el) el.innerHTML = `<p style="color:var(--gold);font-weight:700;font-size:13px;margin:0 0 14px">🏆 New personal best for ${challengeShortLabel(_challengeFormat, _challengeTarget)}!</p>`;
+        }
+      }).catch(()=>{});
     fireMomentCard('dailychallenge', { icon:'📅', headline:'CHALLENGE COMPLETE!', player:w.name,
       statLine: `${challengeShortLabel(activeChallenge.format, activeChallenge.target)} — ${challengeMetricLabel(activeChallenge.format, _metric)}` });
     lastLegWasChallenge = true;
@@ -3792,6 +3805,7 @@ function finishUnit(kind, winner){
     oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
       <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">${heading}</div>
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${subtext}</p>
+      ${lastLegWasChallenge ? '<div id="challenge-pb-banner"></div>' : ''}
       <div class="btn-row" style="justify-content:center">
         ${actionButtons}
         ${challengeShareBtn}

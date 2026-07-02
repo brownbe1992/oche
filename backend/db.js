@@ -149,7 +149,8 @@ db.exec(`
     game_id        INTEGER NOT NULL REFERENCES games(id)   ON DELETE CASCADE,
     player_id      INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
     challenge_date TEXT NOT NULL,   -- YYYY-MM-DD, local to whoever attempted it
-    format         TEXT NOT NULL,   -- 'checkout_sprint' | 'speed_to_zero'
+    format         TEXT NOT NULL,   -- 'checkout_sprint' | 'speed_to_zero' | 'bullseye_gauntlet'
+                                     -- | 'steady_hand' | 'treble_run' | 'long_game'
     target         INTEGER,         -- checkout target for checkout_sprint; null for speed_to_zero
     result_darts   INTEGER,         -- darts taken to complete; null if not completed
     completed      INTEGER NOT NULL DEFAULT 0,
@@ -408,6 +409,14 @@ function startChallengeAttempt(playerName, gameId, challengeDate, format, target
   }
 }
 
+// Each challenge format's success metric points a different direction (see
+// challengeMetricLabel() in frontend/index.html) — 'asc' means lower is better
+// (fewest darts/visits), 'desc' means higher is better (most bulls/trebles/points).
+const CHALLENGE_BETTER_DIRECTION = {
+  checkout_sprint: 'asc', speed_to_zero: 'asc', long_game: 'asc',
+  bullseye_gauntlet: 'desc', treble_run: 'desc', steady_hand: 'desc',
+};
+
 function completeChallengeAttempt(playerName, challengeDate, resultDarts) {
   const p = getPlayer(playerName);
   if (!p) throw httpError(404, 'Player not found');
@@ -416,7 +425,23 @@ function completeChallengeAttempt(playerName, challengeDate, resultDarts) {
     WHERE player_id = ? AND challenge_date = ?
   `).run(resultDarts != null ? Number(resultDarts) : null, p.id, String(challengeDate));
   if (info.changes === 0) throw httpError(404, 'No matching challenge attempt for that date');
-  return { ok: true };
+
+  // "Beat your best" callout: compare this result against every other completed
+  // attempt of the same format (excluding today, since UNIQUE(player_id,
+  // challenge_date) means today's row is already the one we just wrote above).
+  const row = db.prepare(`SELECT format, result_darts FROM daily_challenge_attempts WHERE player_id = ? AND challenge_date = ?`).get(p.id, String(challengeDate));
+  let isPersonalBest = false;
+  const dir = row && CHALLENGE_BETTER_DIRECTION[row.format];
+  if (dir && row.result_darts != null) {
+    const agg = dir === 'asc' ? 'MIN' : 'MAX';
+    const prior = db.prepare(`
+      SELECT ${agg}(result_darts) AS v FROM daily_challenge_attempts
+      WHERE player_id = ? AND format = ? AND completed = 1 AND challenge_date != ?
+    `).get(p.id, row.format, String(challengeDate));
+    const priorBest = prior ? prior.v : null;
+    isPersonalBest = priorBest == null || (dir === 'asc' ? row.result_darts < priorBest : row.result_darts > priorBest);
+  }
+  return { ok: true, isPersonalBest };
 }
 
 // Today's attempt (if any) plus the current streak (consecutive calendar dates,

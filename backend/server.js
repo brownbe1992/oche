@@ -43,7 +43,7 @@
        GET  /api/players/h2h-summary -> (?player=...&opponent=...&excludeGameId=) -> { totalGames, previousWinner } (public)
        GET  /api/players/around-the-world -> (?name=...) -> { hit, count, total } (public)
        POST /api/challenges/start  -> { player, gameId, challengeDate, format, target } (public)
-       POST /api/challenges/complete -> { player, challengeDate, resultDarts } (public)
+       POST /api/challenges/complete -> { player, challengeDate, resultDarts } -> { ok, isPersonalBest } (public)
        GET  /api/challenges/status -> (?player=...&date=YYYY-MM-DD) -> { today, streak, history } (public)
 
    Routes marked [admin] require a logged-in admin session (cookie set by /api/login).

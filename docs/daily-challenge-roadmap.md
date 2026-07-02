@@ -1,7 +1,16 @@
 # Daily/Weekly Challenge — Design Roadmap
 
-> Status: **core feature fully shipped**; a **Player Profile history view is planned
-> but not yet built** (see "Player Profile: Daily Challenge history" below). All six
+> Status: **core feature fully shipped**, including the "beat your best" live
+> callout — `completeChallengeAttempt()` (`backend/db.js`) now returns
+> `isPersonalBest` (comparing against every other completed attempt of the same
+> format, per-format direction: fewest darts/visits for Checkout Sprint/Speed to
+> Zero/The Long Game, most bulls/trebles/points for Bullseye Gauntlet/Treble
+> Run/Steady Hand), patched into a `#challenge-pb-banner` placeholder on the results
+> screen once the round-trip resolves — same "celebrate immediately, patch in the
+> extra detail a moment later" pattern used for achievement counts. A **Player
+> Profile history view is planned but not yet built** (see "Player Profile: Daily
+> Challenge history" below — its "Best result per format" section can now reuse this
+> same per-format-direction comparison once built). All six
 > challenge-type-pool formats are built and tested end-to-end, covering every
 > suggested-build-order step:
 > 1. Deterministic date-seeded generation (`todaysChallenge()` in `frontend/index.html`)
