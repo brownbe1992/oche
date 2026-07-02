@@ -37,8 +37,8 @@
        GET  /api/settings/voice-announcements -> { enabled, turnScore, noScore, checkoutReq, oneEighty, bigFish, matchProgress } (public)
        GET  /api/settings/card-tagline      -> { tagline } (public)
 
-       POST /api/badges/award      -> { player, badgeId } -> { newlyEarned } (public)
-       GET  /api/players/badges    -> (?name=...) -> [ { badgeId, earnedAt } ] (public)
+       POST /api/badges/award      -> { player, badgeId, once } -> { newlyEarned, count } (public)
+       GET  /api/players/badges    -> (?name=...) -> [ { badge_id, count, earned_at } ] (public)
        GET  /api/players/h2h-summary -> (?player=...&opponent=...&excludeGameId=) -> { totalGames, previousWinner } (public)
        GET  /api/players/around-the-world -> (?name=...) -> { hit, count, total } (public)
        POST /api/challenges/start  -> { player, gameId, challengeDate, format, target } (public)
@@ -399,7 +399,7 @@ const server = http.createServer(async (req, res) => {
     // ----- badges (docs/achievements-badges-roadmap.md) -----
     if (p === '/api/badges/award' && m === 'POST') {
       const b = await readJson(req);
-      return send(res, 200, db.awardBadge(b.player, b.badgeId));
+      return send(res, 200, db.awardBadge(b.player, b.badgeId, !!b.once));
     }
     if (p === '/api/players/badges' && m === 'GET') {
       return send(res, 200, db.getPlayerBadges(url.searchParams.get('name')));

@@ -124,14 +124,18 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
-  -- One-time milestone badges (docs/achievements-badges-roadmap.md). Recurring
-  -- badges (Hat Trick, So Close..., etc.) need no persistence — they just fire the
-  -- achievement overlay each time, the same way 180/Big Fish already do. This table
-  -- exists only for badges that should be awarded once and remembered.
+  -- Every badge a player has earned (docs/achievements-badges-roadmap.md), one row
+  -- per player+badge with a running count. Two award modes, chosen by the caller:
+  --  - counted (most badges): count increments every time the badge's trigger
+  --    condition fires (a visit, a leg, a match) — the Badge Case shows this count.
+  --  - once (state-based badges whose condition stays true forever once crossed,
+  --    e.g. Around the Clock/World, Grudge Match): INSERT OR IGNORE only, so
+  --    re-checking the same still-true condition doesn't inflate the count.
   CREATE TABLE IF NOT EXISTS player_badges (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
     badge_id  TEXT NOT NULL,
+    count     INTEGER NOT NULL DEFAULT 1,
     earned_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(player_id, badge_id)
   );
@@ -171,6 +175,7 @@ try { db.exec("ALTER TABLE games ADD COLUMN game_type TEXT NOT NULL DEFAULT 'x01
 try { db.exec('ALTER TABLE games ADD COLUMN config TEXT'); } catch(e) {}
 try { db.exec('ALTER TABLE admins ADD COLUMN login_fail_count INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
 try { db.exec('ALTER TABLE admins ADD COLUMN login_locked_until INTEGER'); } catch(e) {}
+try { db.exec('ALTER TABLE player_badges ADD COLUMN count INTEGER NOT NULL DEFAULT 1'); } catch(e) {}
 
 const DEFAULT_PIN_LOCKOUT_THRESHOLD = 10;
 const DEFAULT_ADMIN_LOCKOUT_THRESHOLD = 5; // stricter than PIN lockout — compromising the admin account is more consequential
@@ -190,8 +195,13 @@ const q = {
   lockPin      : db.prepare('UPDATE players SET pin_locked_until = ? WHERE id = ?'),
   resetPinFail : db.prepare('UPDATE players SET pin_fail_count = 0, pin_locked_until = NULL WHERE id = ?'),
 
-  awardBadge   : db.prepare('INSERT OR IGNORE INTO player_badges (player_id, badge_id) VALUES (?, ?)'),
-  playerBadges : db.prepare('SELECT badge_id, earned_at FROM player_badges WHERE player_id = ? ORDER BY earned_at DESC'),
+  awardBadgeOnce      : db.prepare('INSERT OR IGNORE INTO player_badges (player_id, badge_id, count) VALUES (?, ?, 1)'),
+  awardBadgeIncrement : db.prepare(`
+    INSERT INTO player_badges (player_id, badge_id, count) VALUES (?, ?, 1)
+    ON CONFLICT(player_id, badge_id) DO UPDATE SET count = count + 1
+  `),
+  badgeCount   : db.prepare('SELECT count FROM player_badges WHERE player_id = ? AND badge_id = ?'),
+  playerBadges : db.prepare('SELECT badge_id, count, earned_at FROM player_badges WHERE player_id = ? ORDER BY earned_at DESC'),
 
   insertAdmin    : db.prepare('INSERT INTO admins (username, password_hash, password_salt) VALUES (?, ?, ?)'),
   adminByUsername: db.prepare('SELECT id, username, password_hash, password_salt, login_fail_count, login_locked_until FROM admins WHERE username = ? COLLATE NOCASE'),
@@ -1055,15 +1065,21 @@ function getNineDarterStats(mode) {
 }
 
 /* ---------- badges (docs/achievements-badges-roadmap.md) ---------- */
-// Awards a one-time milestone badge. Idempotent (INSERT OR IGNORE on a unique
-// player+badge pair) — safe to call every time the underlying condition holds;
-// the return value tells the caller whether this was the first time (so the
-// achievement overlay only fires once, not on every subsequent occurrence).
-function awardBadge(playerName, badgeId) {
+// Awards a badge. Two modes, chosen by the caller (see the player_badges table
+// comment): `once` is idempotent (INSERT OR IGNORE) for state-based badges whose
+// trigger condition stays true forever once crossed, so re-checking it doesn't
+// inflate the count. Otherwise the count increments every call, for badges whose
+// trigger condition fires once per relevant event (a visit, a leg, a match).
+function awardBadge(playerName, badgeId, once) {
   const p = getPlayer(playerName);
   if (!p) throw httpError(404, 'Player not found');
-  const info = q.awardBadge.run(p.id, String(badgeId));
-  return { newlyEarned: info.changes > 0 };
+  if (once) {
+    const info = q.awardBadgeOnce.run(p.id, String(badgeId));
+    return { newlyEarned: info.changes > 0, count: 1 };
+  }
+  q.awardBadgeIncrement.run(p.id, String(badgeId));
+  const row = q.badgeCount.get(p.id, String(badgeId));
+  return { newlyEarned: row.count === 1, count: row.count };
 }
 
 function getPlayerBadges(playerName) {

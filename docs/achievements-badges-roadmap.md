@@ -21,6 +21,17 @@
 >    query) — the progress view is a compact hit/miss grid rather than a full
 >    dartboard-shaped heatmap, a deliberate scope simplification from the "ideally"
 >    phrasing in the Design section below.
+>
+> The Badge Case now shows the full 18-badge roster (not just milestones) with a
+> count per badge — `player_badges` grew a `count` column, and every recurring
+> badge (previously celebrated live but never persisted) now also gets a
+> fire-and-forget `awardRecurringBadge()` call so its occurrences are counted.
+> State-based badges whose trigger condition stays true forever once crossed
+> (Around the Clock, Around the World, Grudge Match) still use `once:true`
+> (INSERT OR IGNORE) so re-checking an already-true condition doesn't inflate
+> their count — everything else increments on every genuine occurrence. Unearned
+> badges render greyscale/dimmed; earned ones show a gold counter circle when
+> count > 1.
 
 ## Goal
 

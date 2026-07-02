@@ -2570,13 +2570,29 @@ function renderPlayerPage(){
   loadPlayerBadges();
   loadAroundTheWorldProgress();
 }
-// Milestone badges only — recurring celebrations (Hat Trick, Night Owl, etc.) fire live
-// during play but aren't persisted, so they don't appear in the Badge Case.
+// The full achievement roster (docs/achievements-badges-roadmap.md) — every badge
+// in the game, not just milestones. Recurring badges (Hat Trick, Night Owl, etc.)
+// are now persisted too (see awardRecurringBadge()) specifically so the Badge Case
+// can show a real count, not just earned/not-earned.
 const BADGE_INFO = {
-  first_100_checkout: { icon:'🥇', label:'First 100+ Checkout', achType:'first100checkout' },
-  grudge_match:       { icon:'⚔️', label:'Grudge Match', achType:'grudgematch' },
-  around_the_clock:   { icon:'🕐', label:'Around the Clock', achType:'aroundtheclock' },
-  around_the_world:   { icon:'🌍', label:'Around the World', achType:'aroundtheworld' },
+  hattrick:           { icon:'🎩', label:'Hat Trick' },
+  bullseyegauntlet:   { icon:'🔴', label:'Bullseye Gauntlet' },
+  wherediditgo:       { icon:'💨', label:"Where'd It Go?" },
+  socloseshot:        { icon:'😩', label:'So Close...' },
+  tontitled:          { icon:'😅', label:'Ton-titled to Nothing' },
+  nightowl:           { icon:'🦉', label:'Night Owl' },
+  earlybird:          { icon:'🐦', label:'Early Bird' },
+  metronome:          { icon:'🎯', label:'Metronome' },
+  cruisecontrol:      { icon:'🚗', label:'Cruise Control' },
+  iceintheveins:      { icon:'❄️', label:'Ice in the Veins' },
+  nervesofsteel:      { icon:'🧊', label:'Nerves of Steel' },
+  comebackkid:        { icon:'🔥', label:'Comeback Kid' },
+  giantslayer:        { icon:'🗡️', label:'Giant Slayer' },
+  therematch:         { icon:'🔁', label:'The Rematch' },
+  first_100_checkout: { icon:'🥇', label:'First 100+ Checkout' },
+  grudge_match:       { icon:'⚔️', label:'Grudge Match' },
+  around_the_clock:   { icon:'🕐', label:'Around the Clock' },
+  around_the_world:   { icon:'🌍', label:'Around the World' },
 };
 function loadPlayerBadges(){
   const container=document.getElementById('player-badges');
@@ -2588,16 +2604,20 @@ function loadPlayerBadges(){
 function renderPlayerBadges(data){
   const container=document.getElementById('player-badges');
   if(!container) return;
-  const earned = new Map((data||[]).map(b=>[b.badge_id, b.earned_at]));
+  const earned = new Map((data||[]).map(b=>[b.badge_id, b]));
   container.innerHTML = `<div class="summary-grid">${Object.keys(BADGE_INFO).map(id=>{
     const info = BADGE_INFO[id];
-    const earnedAt = earned.get(id);
-    if(earnedAt){
-      const date = new Date(earnedAt.replace(' ','T')+'Z').toLocaleDateString();
-      return `<div class="stat-block"><div class="stat-val">${info.icon}</div><div class="stat-label">${info.label}<br>Earned ${date}</div>
+    const row = earned.get(id);
+    const count = row ? row.count : 0;
+    const countBadge = count > 1 ? `<span style="position:absolute;top:2px;right:2px;background:var(--gold);color:var(--board);
+      border-radius:50%;min-width:18px;height:18px;padding:0 4px;font-size:10px;font-weight:700;
+      display:flex;align-items:center;justify-content:center;line-height:1">${count}</span>` : '';
+    if(row){
+      const date = new Date(row.earned_at.replace(' ','T')+'Z').toLocaleDateString();
+      return `<div class="stat-block" style="position:relative">${countBadge}<div class="stat-val">${info.icon}</div><div class="stat-label">${info.label}<br>Earned ${date}</div>
         <button class="iconbtn" title="Share" style="margin-top:4px" onclick="shareEarnedBadge('${id}')">📤</button></div>`;
     }
-    return `<div class="stat-block" style="opacity:.4"><div class="stat-val">${info.icon}</div><div class="stat-label">${info.label}<br>Not yet earned</div></div>`;
+    return `<div class="stat-block" style="opacity:.5"><div class="stat-val" style="filter:grayscale(1)">${info.icon}</div><div class="stat-label">${info.label}<br>Not yet earned</div></div>`;
   }).join('')}</div>`;
 }
 // Around the World progress (docs/achievements-badges-roadmap.md): a compact grid
@@ -2916,6 +2936,14 @@ async function shareOrSaveCanvas(canvas, filename, shareTitle, shareText){
 // that fires regardless of whether the player ever taps Share — automatically
 // posts it to Home Assistant if a moment-card webhook ID is configured (same
 // fire-and-forget pattern as every other HA event webhook).
+// Persists a recurring badge occurrence (count-mode: increments every call, since
+// these all fire on a per-visit/per-leg/per-match event that won't spuriously
+// re-trigger). Fire-and-forget — the celebration itself already happened via
+// showAchievement()/fireMomentCard(), this just feeds the Badge Case's counter.
+function awardRecurringBadge(playerName, badgeId){
+  Backend.send('POST','/api/badges/award', { player:playerName, badgeId, once:false }).catch(()=>{});
+}
+
 const momentCards = {};
 async function fireMomentCard(momentType, opts){
   try{
@@ -3222,18 +3250,23 @@ function enterTurn(){
   if(_d.length===3 && _d.every(d=>d.isTreble) && ev.scored !== 180 && !ev.bust){
     showAchievement('hattrick', p.name);
     fireMomentCard('hattrick', { icon:'🎩', headline:'HAT TRICK!', player:p.name, statLine:'Three trebles, one visit' });
+    awardRecurringBadge(p.name, 'hattrick');
   } else if(_d.filter(d=>d.sector===25 && d.mult===2).length >= 2){
     showAchievement('bullseyegauntlet', p.name);
     fireMomentCard('bullseyegauntlet', { icon:'🔴', headline:'BULLSEYE GAUNTLET!', player:p.name, statLine:'Double bull, twice in one visit' });
+    awardRecurringBadge(p.name, 'bullseyegauntlet');
   } else if(_d.length===3 && _d.every(d=>d.sector===0)){
     showAchievement('wherediditgo', p.name);
     fireMomentCard('wherediditgo', { icon:'💨', headline:"WHERE'D IT GO?", player:p.name, statLine:'Three misses' });
+    awardRecurringBadge(p.name, 'wherediditgo');
   } else if(_d.length===3 && !ev.bust && _d[0].sector===20 && _d[0].mult===3 && _d[1].sector===20 && _d[1].mult===3 && _d[2].sector===20 && _d[2].mult===1){
     showAchievement('socloseshot', p.name);
     fireMomentCard('socloseshot', { icon:'😩', headline:'SO CLOSE...', player:p.name, statLine:'140 — one dart from 180' });
+    awardRecurringBadge(p.name, 'socloseshot');
   } else if(ev.bust && _d.reduce((s,d)=>s+d.value,0) >= 100){
     showAchievement('tontitled', p.name);
     fireMomentCard('tontitled', { icon:'😅', headline:'TON-TITLED TO NOTHING', player:p.name, statLine:'100+ attempted, still busted' });
+    awardRecurringBadge(p.name, 'tontitled');
   }
 
   // Consistency badges — Metronome (5 consecutive visits within 15 points of each
@@ -3247,11 +3280,13 @@ function enterTurn(){
       p.metronomeFired = true;
       showAchievement('metronome', p.name);
       fireMomentCard('metronome', { icon:'🎯', headline:'METRONOME', player:p.name, statLine:'5 visits within 15 points of each other' });
+      awardRecurringBadge(p.name, 'metronome');
     }
   }
   if(ev.win && p.legVisitScores.every(v=>v>=40)){
     showAchievement('cruisecontrol', p.name);
     fireMomentCard('cruisecontrol', { icon:'🚗', headline:'CRUISE CONTROL', player:p.name, statLine:'No visit below 40, the whole leg' });
+    awardRecurringBadge(p.name, 'cruisecontrol');
   }
 
   // Ice in the Veins: a 50+ checkout on the very next visit after this player's own
@@ -3262,28 +3297,31 @@ function enterTurn(){
   if(ev.win && _iceEligible && ev.pointsThisVisit >= 50){
     showAchievement('iceintheveins', p.name);
     fireMomentCard('iceintheveins', { icon:'❄️', headline:'ICE IN THE VEINS', player:p.name, statLine:`${ev.pointsThisVisit} checkout right after a bust` });
+    awardRecurringBadge(p.name, 'iceintheveins');
   }
 
-  // Around the Clock (milestone): every 1-20 single hit within one session.
-  // Tracked per-player so it's meaningful in H2H too (each player's own singles).
+  // Around the Clock (state-based milestone): every 1-20 single hit within one
+  // session. Tracked per-player so it's meaningful in H2H too. once:true — the
+  // condition stays true for the rest of the session, so re-checking it shouldn't
+  // inflate the count.
   _d.forEach(d=>{ if(d.sector>=1 && d.sector<=20 && d.mult===1) p.singlesHit.add(d.sector); });
   if(p.singlesHit.size >= 20){
-    Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'around_the_clock' }).then(r=>{
+    Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'around_the_clock', once:true }).then(r=>{
       if(r && r.newlyEarned){
         showAchievement('aroundtheclock', p.name);
         fireMomentCard('aroundtheclock', { icon:'🕐', headline:'AROUND THE CLOCK', player:p.name, statLine:'Every number, 1 to 20, singled out' });
       }
     }).catch(()=>{});
   }
-  // Around the World (milestone): all 63 lifetime dart outcomes. Skips the (mildly
-  // expensive) progress query once this player's cached badge list already has it.
-  // Queued behind DB.recordTurn() above (both go through the same DB._queue chain)
-  // so the progress query only runs once this visit's darts are actually persisted —
-  // querying immediately would race the still-pending recordTurn write.
+  // Around the World (state-based milestone): all 63 lifetime dart outcomes. Skips
+  // the (mildly expensive) progress query once this player's cached badge list
+  // already has it. Queued behind DB.recordTurn() above (both go through the same
+  // DB._queue chain) so the progress query only runs once this visit's darts are
+  // actually persisted — querying immediately would race the still-pending write.
   if(!(earnedBadgeCache[p.name] && earnedBadgeCache[p.name].has('around_the_world'))){
     DB._queue(()=>Backend.get(`/api/players/around-the-world?name=${encodeURIComponent(p.name)}`).then(prog=>{
       if(prog && prog.count >= prog.total){
-        Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'around_the_world' }).then(r=>{
+        Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'around_the_world', once:true }).then(r=>{
           if(!earnedBadgeCache[p.name]) earnedBadgeCache[p.name] = new Set();
           earnedBadgeCache[p.name].add('around_the_world');
           if(r && r.newlyEarned){
@@ -3295,9 +3333,13 @@ function enterTurn(){
     }).catch(()=>{}));
   }
 
-  // Novelty time-of-day badges — once per session (not once per turn, which would
-  // spam the same celebration all night), reset when a new game starts.
+  // Novelty time-of-day badges — the overlay only fires once per session (not once
+  // per turn, which would spam the same celebration all night), but every actual
+  // occurrence still counts toward the Badge Case total.
   const _hour = new Date().getHours();
+  if(_hour < 5 || (_hour >= 5 && _hour < 7)){
+    awardRecurringBadge(p.name, _hour < 5 ? 'nightowl' : 'earlybird');
+  }
   if(!sessionBadgesShown.nightOwl && _hour < 5){
     sessionBadgesShown.nightOwl = true;
     showAchievement('nightowl', p.name);
@@ -3310,7 +3352,7 @@ function enterTurn(){
   // First 100+ checkout — a one-time milestone (persisted server-side so the
   // celebration fires exactly once, ever, not every time it happens again).
   if(ev.win && ev.pointsThisVisit >= 100){
-    Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'first_100_checkout' }).then(r=>{
+    Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'first_100_checkout', once:true }).then(r=>{
       if(r && r.newlyEarned){
         showAchievement('first100checkout', p.name);
         fireMomentCard('first100checkout', { icon:'🥇', headline:'FIRST 100+ CHECKOUT', player:p.name, statLine:`${ev.pointsThisVisit} checkout` });
@@ -3389,6 +3431,7 @@ function onLegWon(wi){
   if(opp && w.legWorstDeficit >= 100){
     showAchievement('comebackkid', w.name);
     fireMomentCard('comebackkid', { icon:'🔥', headline:'COMEBACK KID', player:w.name, statLine:'Trailed by 100+, won anyway' });
+    awardRecurringBadge(w.name, 'comebackkid');
   }
   // Nerves of Steel (recurring): a genuine decider — both players tied one leg (or
   // one set) short of winning, entering this leg/set.
@@ -3423,6 +3466,7 @@ function onLegWon(wi){
       if(_setDecider || _matchDecider){
         showAchievement('nervesofsteel', w.name);
         fireMomentCard('nervesofsteel', { icon:'🧊', headline:'NERVES OF STEEL', player:w.name, statLine: _matchDecider ? 'Won the deciding set' : 'Won the deciding leg' });
+        awardRecurringBadge(w.name, 'nervesofsteel');
       }
       // Social/H2H badges — 2-player matches only.
       if(opp){
@@ -3431,6 +3475,7 @@ function onLegWon(wi){
         if(winnerAvg!=null && loserAvg!=null && loserAvg - winnerAvg >= 15){
           showAchievement('giantslayer', w.name);
           fireMomentCard('giantslayer', { icon:'🗡️', headline:'GIANT SLAYER', player:w.name, statLine:`Beat a ${loserAvg.toFixed(1)} average` });
+          awardRecurringBadge(w.name, 'giantslayer');
         }
         const gid = DB.gameId;
         // Queued behind DB.completeGame() above so totalGames reflects this match
@@ -3440,15 +3485,19 @@ function onLegWon(wi){
           if(sum.previousWinner === opp.name){
             showAchievement('therematch', w.name);
             fireMomentCard('therematch', { icon:'🔁', headline:'THE REMATCH', player:w.name, statLine:`Revenge over ${opp.name}` });
+            awardRecurringBadge(w.name, 'therematch');
           }
           if(sum.totalGames >= 10){
-            Backend.send('POST','/api/badges/award', { player:w.name, badgeId:'grudge_match' }).then(r=>{
+            // Grudge Match: a genuine milestone (has this rivalry crossed 10 games
+            // yet), not a per-game event — once:true so re-crossing the threshold
+            // on later games between the same two doesn't inflate the count.
+            Backend.send('POST','/api/badges/award', { player:w.name, badgeId:'grudge_match', once:true }).then(r=>{
               if(r && r.newlyEarned){
                 showAchievement('grudgematch', w.name);
                 fireMomentCard('grudgematch', { icon:'⚔️', headline:'GRUDGE MATCH', player:w.name, statLine:`${sum.totalGames} games vs ${opp.name}` });
               }
             }).catch(()=>{});
-            Backend.send('POST','/api/badges/award', { player:opp.name, badgeId:'grudge_match' }).catch(()=>{});
+            Backend.send('POST','/api/badges/award', { player:opp.name, badgeId:'grudge_match', once:true }).catch(()=>{});
           }
         }).catch(()=>{});
       }
@@ -3465,6 +3514,7 @@ function onLegWon(wi){
     if(_setDecider){
       showAchievement('nervesofsteel', w.name);
       fireMomentCard('nervesofsteel', { icon:'🧊', headline:'NERVES OF STEEL', player:w.name, statLine:'Won the deciding leg' });
+      awardRecurringBadge(w.name, 'nervesofsteel');
     }
     game.matchResult = { ts: Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:_bigFish };
     finishUnit('set', w.name);
