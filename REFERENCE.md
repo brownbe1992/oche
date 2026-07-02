@@ -1,17 +1,22 @@
 # Oche — Reference Manual
 
-This is the internal reference for how Oche actually works: every stat's exact
-formula, every achievement's exact trigger condition, the full database schema,
-the full API surface, and the mechanics behind every feature. `README.md` is the
-user-facing "what it does and how to run it" doc; this is the "how it works
-internally, and how to debug it when it's wrong" doc.
+This is the **specification** for how Oche is supposed to work: every stat's
+exact formula, every achievement's exact trigger condition, the full database
+schema, the full API surface, and the mechanics behind every feature.
+`README.md` is the user-facing "what it does and how to run it" doc; this is the
+"what it's supposed to do, and how to debug it when it doesn't" doc.
 
-**This file must be kept up to date.** Whenever a change touches a stat formula,
-an achievement condition, the database schema, an API endpoint, or how a feature
-mechanically works, update the relevant section here in the same change — not as
-a followup. See the "Reference manual" convention in `CLAUDE.md`. If you're
-fixing a bug because this document and the code disagree, the code is correct and
-this document is stale — fix both.
+**This document is the statement of intended behavior — use it to find bugs.**
+When auditing or bug-hunting, cross-reference the code against this document: a
+mismatch between the two is a bug signal, and the presumption is that this
+document describes the intent. If the code deviates from what's written here,
+the code has a bug — fix the code. (This is exactly how the Average Pace bubble
+bug was found: the spec said the bubble shows darts/minute; the code could never
+display it.) Only when the deviation turns out to be a deliberate, intended
+change is this document the thing to update — and in that case it must be
+updated in the same change that altered the behavior, not as a followup. Either
+way, the two must never be left disagreeing. See the "Reference manual"
+convention in `CLAUDE.md`.
 
 ---
 
@@ -961,6 +966,14 @@ already-shipped limitations, not just unbuilt future features:
 ---
 
 ## 16. Troubleshooting
+
+The general method, before the specific symptoms below: **this document is the
+spec.** Find the section describing what the misbehaving feature is supposed to
+do, then diff the actual code against it. If the code doesn't match the
+documented behavior, you've found the bug — fix the code. If the code matches
+the spec but the behavior still seems wrong, the spec itself may encode a bad
+decision — that's a design discussion, not a silent code change; whatever the
+outcome, update this document in the same change.
 
 **"This stat looks wrong."** First check §3's denominator-conventions table —
 identify which family the stat should be in, then check whether the actual SQL

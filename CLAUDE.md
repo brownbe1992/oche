@@ -61,23 +61,31 @@ than leaving it silently out of date.
 
 ## Reference manual — `REFERENCE.md` must be kept current
 
-`REFERENCE.md` (repo root) is the single source of truth for exactly how the app
-works: every stat's precise formula, every achievement's exact trigger condition,
-the full database schema, the full API surface, and the internal mechanics behind
-every feature (the achievement queue, Daily Challenge streak logic, security model,
-and so on). It exists so a question like "how is this stat calculated" or "why did
-this badge fire" or "how do I fix this" always has one authoritative place to look,
-instead of needing to re-derive the answer from the code every time.
+`REFERENCE.md` (repo root) is the **specification** — the single authoritative
+statement of what the app is *supposed* to do: every stat's precise formula, every
+achievement's exact trigger condition, the full database schema, the full API
+surface, and the internal mechanics behind every feature (the achievement queue,
+Daily Challenge streak logic, security model, and so on). It exists so a question
+like "how is this stat calculated" or "why did this badge fire" or "how do I fix
+this" always has one authoritative place to look, instead of needing to re-derive
+the answer from the code every time.
+
+**Use it to find bugs: when auditing or debugging, cross-reference the code
+against `REFERENCE.md` — a mismatch is a bug signal, and the presumption is that
+the document describes the intent.** If the code deviates from the documented
+behavior, the code has a bug — fix the code, not the doc. (The Average Pace
+bubble bug was found exactly this way: the spec said the bubble shows
+darts/minute; the code could never display it.) Only update `REFERENCE.md` when
+the deviation is a deliberate, intended behavior change — and then it must be
+updated **in the same change** that altered the behavior, not as a followup.
 
 **Any change that touches a stat formula, an achievement/badge condition, the
 database schema, an API endpoint's request/response shape, or how a feature
 mechanically works must update the relevant section of `REFERENCE.md` in the same
 change** — not as a followup, not left for later. This is the same standing
 discipline as the roadmap-docs convention above, applied to "how the shipped app
-actually works" instead of "what's planned." If `REFERENCE.md` and the code ever
-disagree, treat that as a bug in `REFERENCE.md` and fix it immediately, the same as
-any other bug — don't leave the two sources of truth out of sync for a future
-session to reconcile.
+is supposed to work" instead of "what's planned." The spec and the code must never
+be left disagreeing for a future session to reconcile.
 
 `README.md` stays the user-facing "what it does and how to run it" doc; `REFERENCE.md`
 is the "how it works internally, and how to debug it" doc. Both need updating when a
