@@ -58,3 +58,28 @@ multiplayer, and others (see `wishlist` at the repo root for the full index). Wh
 implementing something described in one of these docs, update that doc's status
 inline (and any other doc referencing the same work) to reflect what's done, rather
 than leaving it silently out of date.
+
+## Reference manual — `REFERENCE.md` must be kept current
+
+`REFERENCE.md` (repo root) is the single source of truth for exactly how the app
+works: every stat's precise formula, every achievement's exact trigger condition,
+the full database schema, the full API surface, and the internal mechanics behind
+every feature (the achievement queue, Daily Challenge streak logic, security model,
+and so on). It exists so a question like "how is this stat calculated" or "why did
+this badge fire" or "how do I fix this" always has one authoritative place to look,
+instead of needing to re-derive the answer from the code every time.
+
+**Any change that touches a stat formula, an achievement/badge condition, the
+database schema, an API endpoint's request/response shape, or how a feature
+mechanically works must update the relevant section of `REFERENCE.md` in the same
+change** — not as a followup, not left for later. This is the same standing
+discipline as the roadmap-docs convention above, applied to "how the shipped app
+actually works" instead of "what's planned." If `REFERENCE.md` and the code ever
+disagree, treat that as a bug in `REFERENCE.md` and fix it immediately, the same as
+any other bug — don't leave the two sources of truth out of sync for a future
+session to reconcile.
+
+`README.md` stays the user-facing "what it does and how to run it" doc; `REFERENCE.md`
+is the "how it works internally, and how to debug it" doc. Both need updating when a
+user-visible feature changes; only `REFERENCE.md` needs updating for internal-only
+changes (e.g. a formula fix that doesn't change what the stat is called or how it's used).

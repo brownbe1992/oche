@@ -8,7 +8,9 @@ A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player 
 
 **v0.7.1**
 
-You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, an [20-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. All data lives in a SQLite database on your own server.
+You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [20-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. All data lives in a SQLite database on your own server.
+
+> Looking for exact stat formulas, achievement trigger conditions, the full database schema, or how a feature works internally (e.g. to debug it)? See **[REFERENCE.md](REFERENCE.md)** — the technical reference manual, kept up to date alongside this README.
 
 ---
 
@@ -32,6 +34,7 @@ You enter every dart individually — multiplier first, then the number — and 
 - [API Reference](#api-reference)
 - [Architecture](#architecture)
 - [Data Storage](#data-storage)
+- [Reference Manual](REFERENCE.md) — exact stat formulas, achievement trigger conditions, full DB schema, and internals
 
 ---
 
@@ -195,6 +198,10 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 20 achievement badges cover
 
 **Around the World Progress** — a dedicated grid on the Player Profile showing exactly which of the 63 lifetime dart outcomes are still missing, alongside the Badge Case.
 
+**Every badge a turn earns actually shows.** A single leg-winning visit can genuinely earn more than one badge at once — a decider leg won after a big comeback against a stronger opponent, for example, is Comeback Kid *and* Nerves of Steel *and* Giant Slayer all at once. Each one flashes in turn, back to back, with its own overlay and its own moment card, instead of only the last one clobbering the rest. Two pairs are deliberately treated as the same story wearing two labels rather than double-firing: a busted three-treble-20 shows **Busted Maximum**, not also the more generic Ton-titled to Nothing; hitting the double bull twice shows **Bullseye Gauntlet**, not also Double Trouble.
+
+**What the overlay tells you** — every flash names the badge, who earned it, and a plain-language line explaining how (the same text as the Badge Case tooltip above). Recurring badges' shareable moment card also folds in the running count once it's confirmed ("Earned 5× total"), without delaying the flash itself waiting on that confirmation.
+
 ---
 
 ### Daily Challenge
@@ -224,7 +231,7 @@ A recurring, Wordle-style solo challenge — the same challenge for everyone on 
 
 ### Shareable Moments
 
-Big moments — a 180, a Big Fish, a nine-darter, a match win, any of the 18 [achievement badges](#achievements--badges), or a completed [Daily Challenge](#daily-challenge) — get a **📤 Share** button that generates a shareable card image entirely on-device (canvas, styled to match the app), then either opens your phone's native share sheet (to Messages, X, Instagram, Facebook, or anything else it offers) or falls back to a plain image download on browsers without share-sheet support. Nothing is ever uploaded anywhere by this button — it's the same image whether you share it or save it.
+Big moments — a 180, a Big Fish, a nine-darter, a match win, any of the 20 [achievement badges](#achievements--badges), an [On This Day](#player-profile) flashback, or a completed [Daily Challenge](#daily-challenge) — get a **📤 Share** button that generates a shareable card image entirely on-device (canvas, styled to match the app), then either opens your phone's native share sheet (to Messages, X, Instagram, Facebook, or anything else it offers) or falls back to a plain image download on browsers without share-sheet support. Nothing is ever uploaded anywhere by this button — it's the same image whether you share it or save it.
 
 - **Where it shows up:** the achievement overlay (180/Big Fish/nine-darter/any badge) while it's flashing, the Game Over screen after a match win, the Daily Challenge result panel, a badge's entry in the **Badge Case**, and next to Best Leg Average / Fewest Darts to Finish on a **Player Profile**'s Personal Bests.
 - **Card tagline** (**Settings → Shareable Moments**) — a short editable line printed on every card, defaulting to "Darts tracked via Oche — track your darts today!". Update it once you have a real website or social handle to point at.
@@ -259,7 +266,7 @@ Open **`http://<your-server>:8046/display`** on a TV or second monitor. It updat
 
 **Leg/Set/Game banners:** full-screen result announced when a unit ends.
 
-**Achievement overlays:** full-screen flash for 180s (🎯), Big Fish (🐟), and nine-darters (🏆, with confetti) the moment they're scored, plus any of the 18 [achievement badges](#achievements--badges) (Hat Trick, Nerves of Steel, Around the World, and so on) — each with a **📤 Share** button (see [Shareable Moments](#shareable-moments) below).
+**Achievement overlays:** full-screen flash for 180s (🎯), Big Fish (🐟), and nine-darters (🏆, with confetti) the moment they're scored, plus any of the 20 [achievement badges](#achievements--badges) (Hat Trick, Nerves of Steel, Around the World, and so on) — each with a **📤 Share** button (see [Shareable Moments](#shareable-moments) below). If a single turn or leg genuinely earns more than one badge at once, every one of them shows and shares in sequence instead of only the last one — see [Achievements & Badges](#achievements--badges) below.
 
 The scoreboard is read-only and can be open on any number of screens simultaneously.
 
@@ -329,6 +336,14 @@ A line chart showing the selected metric over time. Filters:
 
 The full 20-badge [achievement](#achievements--badges) roster for this player — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
 
+#### On This Day
+
+When this player did something notable — a 180, a 170 checkout, or any 100+ checkout — on today's exact calendar date in a past year, a flashback card shows it ("3 years ago today — a 180, 501") with its own **📤 Share** button. Only appears when there's something to show.
+
+#### Daily Challenge History
+
+Collapsible section covering this player's lifetime [Daily Challenge](#daily-challenge) record: total attempts vs. completions, current streak, longest-ever streak, a best-result line for each of the six formats, and the full attempt-by-attempt log (date, format, result or "Not finished").
+
 #### Around the World Progress
 
 A grid showing exactly which of the 63 lifetime dart outcomes (every number 1–20 × single/double/treble, outer bull, double bull, and a miss) this player has and hasn't hit yet — the completion criterion for the Around the World badge.
@@ -336,10 +351,6 @@ A grid showing exactly which of the 63 lifetime dart outcomes (every number 1–
 #### Top 10 Finishes
 
 The player's ten highest checkouts — score, how many times achieved, and dates. Click any finish score to expand the most-used checkout routes for that score (e.g. the three darts you most often hit to land that 121).
-
-#### On This Day
-
-When this player did something notable — a 180, a 170 checkout, or any 100+ checkout — on today's exact calendar date in a past year, a flashback card shows it ("3 years ago today — a 180, 501") with its own **📤 Share** button. Only appears when there's something to show.
 
 #### Dart Analytics
 
@@ -385,6 +396,7 @@ Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accou
 #### Accessibility
 
 - **Colorblind-friendly palette** — swaps the app's red/green double and treble colors (dartboard rings, Pad mode's Double/Treble buttons, win/bust status text, and the live scoreboard's checkout flashes and dart-class colors) for a blue/orange palette. Applies to this device and the `/display` scoreboard.
+- **Screen-reader announcements** — always on, no setting needed. A visually-hidden live region announces the result of every committed turn ("Alice scores 60, 201 remaining." / "Alice busts, stays on 140." / "Alice checks out with 40. Leg won.") and every achievement badge as it flashes, using the same explanation text as the Badge Case tooltip. Deliberately limited to committed turn results and achievements, not every intermediate dart tap, so it doesn't talk over itself.
 
 #### Voice Announcements
 
@@ -627,6 +639,10 @@ GET  /api/players/h2h-summary               Games played and previous-match winn
      ?player=&opponent=&excludeGameId=       players (used by the Grudge Match/Rematch badges)
 GET  /api/players/around-the-world?name=    Around the World progress
                                              → { hit: [{sector, mult}], count, total: 63 }
+GET  /api/players/on-this-day               Most notable thing this player did on today's exact
+     ?name=&tz=                             calendar date in a past year (180 > 170 checkout >
+                                             100+ checkout, in that priority order)
+                                             → { type, year, yearsAgo, statLine } | null
 ```
 
 ### Daily Challenge
@@ -636,9 +652,13 @@ POST /api/challenges/start                  Register today's attempt
                                              { player, gameId, challengeDate, format, target }
                                              → 409 if already attempted this date
 POST /api/challenges/complete               Record a result { player, challengeDate, resultDarts }
-                                             → 404 if no matching attempt exists
+                                             → { ok, isPersonalBest } — 404 if no matching attempt
 GET  /api/challenges/status                 Today's attempt, current streak, and 7-day history
      ?player=&date=YYYY-MM-DD               → { today, streak, history }
+GET  /api/challenges/history                Lifetime completion record, best result per format,
+     ?player=&date=YYYY-MM-DD               and the full attempt-by-attempt log
+                                             → { played, completed, currentStreak, longestStreak,
+                                                  bestByFormat, attempts }
 ```
 
 ### Games
