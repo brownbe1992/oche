@@ -300,8 +300,8 @@ Fifteen stat bubbles are available; five (Darts Thrown, Average, 180s, Big Fish,
 | **Darts / Leg** | Average darts thrown per won leg |
 | **Average Pace** | Darts thrown per minute — requires "Collect per-dart timing" in Settings |
 | **Trebleless %** | Percentage of visits without hitting a treble |
-| **1st 3 AVG** | Average of the first visit of each leg |
-| **1st 9 AVG** | Average of the first three visits of each leg |
+| **1st 3 AVG** | Average of the first visit of each leg (501/301 only) |
+| **1st 9 AVG** | Average of the first three visits of each leg (501/301 only) |
 | **100+ AVG** | Percentage of legs with a 100+ average |
 | **90- AVG** | Percentage of legs with a 90 or lower average |
 | **140/Leg** | Percentage of opening visits scoring 140 or more |

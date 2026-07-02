@@ -825,27 +825,36 @@ function getPlayerStatBubbles(playerName, mode) {
   // tlLegs: legs where no dart was a treble
   const tlLegs     = qd(`SELECT COUNT(*) AS v FROM (SELECT t.game_id,t.set_no,t.leg_no ${JD} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(d.is_treble)=0)`) ?? 0;
 
-  // first3avg: actual score of first 3 darts (visit 1) per leg, using darts table
+  // first3avg / first9avg ("opening exchanges" stats) are scoped to 501/301 only — a
+  // 170 leg is short enough that "first visit" / "first 9 darts" isn't a meaningful
+  // opening-strength window (a 170 leg routinely finishes in a single visit, and can
+  // bust on that very first visit, which 501/301 never can), and Daily Challenge's
+  // non-scoring formats (Bullseye Gauntlet, Steady Hand, Treble Run) use a filler
+  // 1000 starting score that isn't a real X01 leg at all.
+  const OPENING_CATS = `AND g.category IN ('501','301')`;
+
+  // first3avg: turn-level score of the leg's first visit. t.scored is already 0 for
+  // a busted visit — the previous version summed raw per-dart points instead, which
+  // wrongly counted a busted opening visit's attempted score as if it had counted.
   const first3avg = db.prepare(`
-    SELECT AVG(CAST(visit_scored AS REAL)) AS v FROM (
-      SELECT SUM(d.scored) AS visit_scored
-      FROM (SELECT t.id, t.game_id, t.set_no, t.leg_no,
-                   ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
-            ${J} ${mf}) t
-      JOIN darts d ON d.turn_id = t.id
-      WHERE t.rn = 1
-      GROUP BY t.game_id, t.set_no, t.leg_no
-    )
+    SELECT AVG(CAST(scored AS REAL)) AS v FROM (
+      SELECT t.scored, ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
+      ${J} ${mf} ${OPENING_CATS}
+    ) WHERE rn = 1
   `).get(p.id)?.v ?? null;
 
-  // first9avg: actual score of first 9 darts (visits 1-3) per leg, all legs included (no selection bias)
+  // first9avg: 3-dart-average-equivalent over the leg's first up-to-3 visits. Uses
+  // t.scored (bust-zeroed) for points and the same "bust counts as 3 darts"
+  // convention used everywhere else (avgDarts, etc.) for the denominator — a bust
+  // ends the visit early (fewer darts recorded), but still uses up a full visit.
   const first9avg = db.prepare(`
     SELECT AVG(CAST(total_scored AS REAL) / NULLIF(dart_count,0) * 3) AS v FROM (
-      SELECT SUM(d.scored) AS total_scored, COUNT(d.id) AS dart_count
-      FROM (SELECT t.id, t.game_id, t.set_no, t.leg_no,
+      SELECT SUM(t.scored) AS total_scored,
+             SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END) AS dart_count
+      FROM (SELECT t.id, t.game_id, t.set_no, t.leg_no, t.scored, t.bust,
                    ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
-            ${J} ${mf}) t
-      JOIN darts d ON d.turn_id = t.id
+            ${J} ${mf} ${OPENING_CATS}) t
+      LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
       WHERE t.rn <= 3
       GROUP BY t.game_id, t.set_no, t.leg_no
     )
@@ -1003,24 +1012,30 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         GROUP BY t.game_id,t.set_no,t.leg_no
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'first3avg':
-      // Score of first 3 actual darts (visit 1) per leg, using darts table for accuracy
-      return db.prepare(`SELECT ${F.fmt} AS bucket, AVG(CAST(visit_scored AS REAL)) AS value FROM (
-        SELECT t.created_at, SUM(d.scored) AS visit_scored
-        FROM (SELECT t.id, t.game_id, t.set_no, t.leg_no, t.created_at,
-                     ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
-              FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere}) t
-        JOIN darts d ON d.turn_id = t.id
-        WHERE t.rn = 1 ${F.and}
-        GROUP BY t.game_id, t.set_no, t.leg_no
-      ) GROUP BY bucket ORDER BY bucket`).all(...params);
+      // Turn-level score of the leg's first visit — t.scored is already 0 for a
+      // busted visit (the previous version summed raw per-dart points instead,
+      // wrongly counting a busted opening visit's attempted score). Scoped to
+      // 501/301: see the OPENING_CATS comment in getPlayerStatBubbles for why.
+      return db.prepare(`SELECT ${F.fmt} AS bucket, AVG(CAST(scored AS REAL)) AS value FROM (
+        SELECT t.created_at, t.scored,
+               ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
+        FROM turns t JOIN games g ON g.id=t.game_id
+        WHERE t.player_id=? ${modeWhere} ${weightWhere} AND g.category IN ('501','301')
+      ) WHERE rn = 1 ${F.and} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'first9avg':
-      // Score of first 9 actual darts (visits 1-3), all legs included — no HAVING bias
+      // 3-dart-average-equivalent over the leg's first up-to-3 visits — uses
+      // t.scored (bust-zeroed) for points and the same "bust counts as 3 darts"
+      // convention used everywhere else for the denominator, instead of raw
+      // per-dart sums that previously counted a busted visit's attempted points as
+      // if they'd scored. Scoped to 501/301 — see getPlayerStatBubbles.
       return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(CAST(total_scored AS REAL)/NULLIF(dart_count,0)*3) AS value FROM (
-        SELECT MAX(t.created_at) AS leg_ts, SUM(d.scored) AS total_scored, COUNT(d.id) AS dart_count
-        FROM (SELECT t.id, t.game_id, t.set_no, t.leg_no, t.created_at,
+        SELECT MAX(t.created_at) AS leg_ts, SUM(t.scored) AS total_scored,
+               SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END) AS dart_count
+        FROM (SELECT t.id, t.game_id, t.set_no, t.leg_no, t.created_at, t.scored, t.bust,
                      ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
-              FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere}) t
-        JOIN darts d ON d.turn_id = t.id
+              FROM turns t JOIN games g ON g.id=t.game_id
+              WHERE t.player_id=? ${modeWhere} ${weightWhere} AND g.category IN ('501','301')) t
+        LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
         WHERE t.rn <= 3
         GROUP BY t.game_id, t.set_no, t.leg_no
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
