@@ -1248,6 +1248,48 @@ function getTopFinishes(playerName, mode) {
 }
 
 
+// "On This Day": the most notable thing this player did on this exact calendar
+// month/day in a past year — a 180, a 170 checkout, or any 100+ checkout, in that
+// priority order, picking the single most recent qualifying date if more than one
+// year has one. Deliberately just one clear story rather than an exhaustive list —
+// this feeds a homepage-style flashback callback, not a stats report. Feeds into
+// the existing buildMomentCard()/share/HA-webhook pipeline client-side as a new
+// 'flashback' moment type, reusing that machinery rather than building a new one.
+function getOnThisDay(playerName, tz) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const tzOff = Number.isInteger(tz) ? tz : 0;
+  const tzMod = tzOff ? `, '${tzOff >= 0 ? '+' : ''}${tzOff} minutes'` : '';
+  const row = db.prepare(`
+    SELECT t.scored, t.checkout, t.checkout_points, g.category,
+           strftime('%Y', t.created_at${tzMod}) AS yr
+    FROM turns t JOIN games g ON g.id = t.game_id
+    WHERE t.player_id = ?
+      AND strftime('%m-%d', t.created_at${tzMod}) = strftime('%m-%d', 'now'${tzMod})
+      AND strftime('%Y',    t.created_at${tzMod}) != strftime('%Y', 'now'${tzMod})
+    ORDER BY
+      (CASE WHEN t.scored = 180 THEN 3
+            WHEN t.checkout = 1 AND t.checkout_points = 170 THEN 2
+            WHEN t.checkout = 1 AND t.checkout_points >= 100 THEN 1
+            ELSE 0 END) DESC,
+      yr DESC
+    LIMIT 1
+  `).get(p.id);
+  if (!row) return null;
+  const nowYear = new Date().getFullYear();
+  const yearsAgo = nowYear - Number(row.yr);
+  if (row.scored === 180) {
+    return { type: '180', year: Number(row.yr), yearsAgo, statLine: `A 180, ${row.category}` };
+  }
+  if (row.checkout && row.checkout_points === 170) {
+    return { type: 'bigfish', year: Number(row.yr), yearsAgo, statLine: `A 170 checkout, ${row.category}` };
+  }
+  if (row.checkout && row.checkout_points >= 100) {
+    return { type: 'checkout100', year: Number(row.yr), yearsAgo, statLine: `A ${row.checkout_points} checkout, ${row.category}` };
+  }
+  return null;
+}
+
 function clearPlayerStats(playerName, mode) {
   const p = getPlayer(playerName);
   if (!p) throw httpError(404, 'Player not found');
@@ -1738,6 +1780,7 @@ module.exports = {
   computeStats, getSummary, getHomeExtra, getOneEightyStats, getBigFishStats, getNineDarterStats,
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn,
+  getOnThisDay,
   getCheckoutRoutes, getDartAnalytics,
   getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, fireHaWebhook,
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword,

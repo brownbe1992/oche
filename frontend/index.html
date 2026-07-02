@@ -2477,6 +2477,10 @@ function renderPlayerPage(){
       <div class="pp-section-title">Badge Case</div>
       <div id="player-badges"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </div>
+    <div class="pp-section" id="on-this-day-section" hidden>
+      <div class="pp-section-title">On This Day</div>
+      <div id="player-on-this-day"></div>
+    </div>
     <details class="pp-section">
       <summary class="pp-section-title">Around the World Progress</summary>
       <div id="player-atw-progress"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
@@ -2591,6 +2595,7 @@ function renderPlayerPage(){
   loadPersonalBests();
   loadPlayerBadges();
   loadAroundTheWorldProgress();
+  loadOnThisDay();
 }
 // The full achievement roster (docs/achievements-badges-roadmap.md) — every badge
 // in the game, not just milestones. Recurring badges (Hat Trick, Night Owl, etc.)
@@ -2678,6 +2683,38 @@ function renderAroundTheWorldProgress(data){
   container.innerHTML = `
     <p class="pp-meta" style="margin:0 0 10px">${(data && data.count) || 0} / ${(data && data.total) || 63} outcomes hit</p>
     <div style="display:flex;flex-wrap:wrap;gap:6px">${numberCells}${specialCells}</div>`;
+}
+// "On This Day": a flashback callback to something notable this player did on
+// today's exact calendar date in a past year (backend/db.js's getOnThisDay()).
+// Unlike achievement badges, this fires on every profile page load, not on a real
+// occurrence — so it deliberately does NOT go through fireMomentCard() (which
+// always sends an HA webhook; that's right for a turn-triggered achievement, wrong
+// for "someone opened a profile page"). It builds the shareable card directly and
+// only wires up the Share button, matching the same card-generation pipeline
+// without the automatic webhook side effect.
+const ON_THIS_DAY_ICON  = { '180':'🎯', bigfish:'🐟', checkout100:'🥇' };
+const ON_THIS_DAY_LABEL = { '180':'A 180!', bigfish:'Big Fish!', checkout100:'Big Checkout!' };
+function loadOnThisDay(){
+  const section = document.getElementById('on-this-day-section');
+  const container = document.getElementById('player-on-this-day');
+  if(!section || !container) return;
+  section.hidden = true;
+  const tz = -new Date().getTimezoneOffset();
+  Backend.get(`/api/players/on-this-day?name=${encodeURIComponent(currentPlayer)}&tz=${tz}`)
+    .then(async data=>{
+      if(!data) return;
+      section.hidden = false;
+      const yearsLabel = data.yearsAgo===1 ? '1 year ago today' : `${data.yearsAgo} years ago today`;
+      container.innerHTML = `<p class="pp-meta" style="margin:0 0 10px">${yearsLabel} (${data.year}) — ${escapeHtml(data.statLine)}</p>
+        <button class="btn btn-ghost" id="otd-share-btn">📤 Share</button>`;
+      const canvas = await buildMomentCard({ icon: ON_THIS_DAY_ICON[data.type] || '📅',
+        headline: ON_THIS_DAY_LABEL[data.type] || 'FLASHBACK', player: currentPlayer,
+        statLine: `${data.statLine} — ${yearsLabel}` });
+      momentCards['flashback'] = { canvas, player: currentPlayer, headline: ON_THIS_DAY_LABEL[data.type] || 'FLASHBACK' };
+      const btn = document.getElementById('otd-share-btn');
+      if(btn) btn.onclick = () => shareMomentCard('flashback');
+    })
+    .catch(()=>{ section.hidden = true; });
 }
 async function shareEarnedBadge(badgeId){
   const info = BADGE_INFO[badgeId];

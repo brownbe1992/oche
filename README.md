@@ -335,6 +335,10 @@ A grid showing exactly which of the 63 lifetime dart outcomes (every number 1–
 
 The player's ten highest checkouts — score, how many times achieved, and dates. Click any finish score to expand the most-used checkout routes for that score (e.g. the three darts you most often hit to land that 121).
 
+#### On This Day
+
+When this player did something notable — a 180, a 170 checkout, or any 100+ checkout — on today's exact calendar date in a past year, a flashback card shows it ("3 years ago today — a 180, 501") with its own **📤 Share** button. Only appears when there's something to show.
+
 #### Dart Analytics
 
 A breakdown of how this player actually throws:
