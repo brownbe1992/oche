@@ -1,6 +1,7 @@
 # Accessibility — Roadmap & Standing Checklist
 
-> Status: **in progress** (item 1 of 5 done — colorblind-friendly palette). Unlike the
+> Status: **in progress** (items 1 and 3 of 5 done — colorblind-friendly palette, and
+> `aria-live` announcements for turn results + achievement flashes). Unlike the
 > other docs in this folder, this isn't a single future feature — it's a cross-cutting
 > standard the app should hold itself to as new features (including everything else in
 > `docs/*.md`) get built. See `CLAUDE.md` for the binding convention that points here.
@@ -30,15 +31,19 @@ in isolation.
 
 ## Identified gaps (this session's audit)
 
-1. **No `aria-live` regions anywhere in the app.** Oche is fundamentally a
-   live-updating scoring interface — the status line, current score, bust/win state,
-   and achievement flashes (`showAchievement()`) all update via JS with nothing
-   announced to a screen reader. A screen-reader user gets no non-visual signal that a
-   turn was entered, a leg was busted, or a checkout was hit. This is likely the
-   single biggest gap in the app today — bigger in impact than the dartboard color
-   issue, though more work to do well (need to decide *what* gets announced without
-   being overwhelming — e.g. announce the result of `enterTurn()` and achievement
-   flashes, not every intermediate dart tap).
+1. ~~**No `aria-live` regions anywhere in the app.**~~ ✅ **Done, for `frontend/index.html`.**
+   A visually-hidden `#sr-announcer` (`aria-live="polite"`, `aria-atomic="true"`) now
+   announces exactly what this gap called for and nothing more: the committed result
+   of `enterTurn()` ("Alice scores 60, 201 remaining." / "Alice busts, stays on
+   140." / "Alice checks out with 40. Leg won.") and every achievement flash as it's
+   shown (`pumpAchievementQueue()`, reusing `ACH_LABELS`/`achDescFor()` — no new
+   copy). Deliberately *not* wired into `throwDart()`'s per-dart live preview, per
+   this gap's own scoping note. `announce()` clears the region before setting new
+   text so two identical announcements in a row (e.g. "Bust" twice) both actually
+   get spoken, since most screen readers don't re-announce unchanged live-region
+   content. **`display.html` was deliberately left out of this pass** — see the open
+   question below about whether the shared/ambient scoreboard display warrants the
+   same investment as the primary controller.
 2. ~~**Color-only signals extend beyond the dartboard.**~~ ✅ **Done** — the shipped
    colorblind-mode palette (see `docs/colorblind-mode-roadmap.md`) covers the
    Pad-mode Double/Treble buttons, entered-dart slot borders, win/bust status text,
@@ -67,8 +72,8 @@ in isolation.
    above folded in.
 2. **Contrast audit** — no code risk, just measurement; produces a concrete punch
    list if anything fails.
-3. **`aria-live` announcements** for turn results, bust/win, and achievement flashes —
-   real but contained JS work, no data model changes.
+3. ~~**`aria-live` announcements**~~ ✅ **Done** for `frontend/index.html` — see gap 1
+   above. `display.html` intentionally not yet covered.
 4. **Accessible-input-path framing for `default_scoring_input`** — likely just a
    documentation/UI-copy change once decided, no new mechanism needed.
 5. **Type-size pass** — lowest priority; revisit after the above, since none of the

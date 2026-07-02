@@ -485,6 +485,11 @@
 </style>
 </head>
 <body>
+<!-- Screen-reader-only live region (docs/accessibility-roadmap.md gap 1): announces
+     turn results and achievement flashes, not every intermediate dart tap — see
+     announce() below. aria-live="polite" so it queues behind whatever the screen
+     reader is already saying rather than interrupting. -->
+<div id="sr-announcer" class="vh" aria-live="polite" aria-atomic="true"></div>
 <div class="ach-overlay" id="ach-overlay">
   <div class="ach-text" id="ach-text"></div>
   <div class="ach-name" id="ach-name"></div>
@@ -2901,6 +2906,21 @@ function updateCheckout(flash){
   if(hint && flash){ el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
 }
 
+/* ---------- screen-reader announcements (docs/accessibility-roadmap.md) ---------- */
+// Announces to the #sr-announcer live region — turn results (enterTurn()) and
+// achievement flashes (pumpAchievementQueue()) only, deliberately not every
+// intermediate dart tap (throwDart()'s live bust/win preview), per the roadmap
+// doc's explicit scoping. Clearing first, then setting on the next frame, is
+// necessary for two consecutive identical announcements (e.g. "Bust" twice in a
+// row) to both actually be spoken — most screen readers don't re-announce a live
+// region whose text didn't change.
+function announce(text){
+  const el = document.getElementById('sr-announcer');
+  if(!el || !text) return;
+  el.textContent = '';
+  requestAnimationFrame(()=>{ el.textContent = text; });
+}
+
 /* ---------- achievement full-screen takeover ---------- */
 const achOverlayEl = document.getElementById('ach-overlay');
 const achTextEl    = document.getElementById('ach-text');
@@ -2976,6 +2996,7 @@ function pumpAchievementQueue(){
   pendingAchievement = { type: next.type, player: next.player, ts: next.ts };
   if(game) pushLive();
   showAchievement(next.type, next.player);
+  announce(`${next.player}: ${ACH_LABELS[next.type] || 'Achievement'}. ${achDescFor(next.type)}`);
   clearTimeout(achTimer);
   achTimer = setTimeout(()=>{
     achOverlayEl.classList.remove('show');
@@ -3380,6 +3401,14 @@ function enterTurn(){
   if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
   const p = game.players[game.current];
   const ev = evaluateVisit(p.score, game.darts, p.doubleOut);
+
+  // Screen-reader announcement of the committed turn result (docs/accessibility-roadmap.md
+  // gap 1) — deliberately just the turn outcome, not per-dart. Leg/set/game-win detail
+  // is handled separately by the achievement queue and onLegWon()'s own UI, which
+  // isn't duplicated here to avoid two announcements for the same winning visit.
+  if(ev.bust) announce(`${p.name} busts, stays on ${p.score}.`);
+  else if(ev.win) announce(`${p.name} checks out with ${ev.pointsThisVisit}. Leg won.`);
+  else announce(`${p.name} scores ${ev.scored}, ${ev.newScore} remaining.`);
 
   // snapshot state before mutations so undoLastTurn() can restore it
   const _snap = { pi:game.current, score:p.score,
