@@ -6,9 +6,9 @@
 
 A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player statistics, and no external dependencies.
 
-**v0.6.2**
+**v0.7.0**
 
-You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, hall-of-fame moments, and years' worth of per-player history. All data lives in a SQLite database on your own server.
+You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, an [18-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. All data lives in a SQLite database on your own server.
 
 ---
 
@@ -20,6 +20,8 @@ You enter every dart individually — multiplier first, then the number — and 
   - [Home](#home)
   - [New Game](#new-game)
   - [Scoring](#scoring)
+  - [Achievements & Badges](#achievements--badges)
+  - [Daily Challenge](#daily-challenge)
   - [Shareable Moments](#shareable-moments)
   - [Live Scoreboard](#live-scoreboard)
   - [Players](#players)
@@ -107,7 +109,7 @@ Configure a game before starting:
 
 | Setting | Options |
 |---|---|
-| **Mode** | H2H (head-to-head) · Practice (solo) |
+| **Mode** | H2H (head-to-head) · Practice (solo) · 🎯 Daily Challenge |
 | **Format** | 501 · 301 · 170 |
 | **Legs per set** | 1 – 9 |
 | **Sets per game** | 1 – 9 |
@@ -117,6 +119,8 @@ Configure a game before starting:
 H2H mode requires at least two players selected. Practice mode can be played solo or with others and is tracked separately from H2H statistics.
 
 Players with a PIN set show a 🔒 next to their name in the dropdown. When exactly two players are selected in H2H mode, a banner shows their all-time head-to-head record (e.g. *"H2H: Alice leads 3–0 (3 games)"*).
+
+**Daily Challenge mode** turns New Game into today's [Daily Challenge](#daily-challenge) launcher instead of a regular match: Starting Score and Format hide (the challenge decides them), and a gold **Today's Challenge** panel shows the challenge description plus whoever is currently in the player slot's streak and results history. Selecting who's attempting it uses the exact same single "Choose player" slot as Practice mode — a PIN-protected player still needs their PIN entered, since it's the identical gate every other slot uses, not a separate picker of its own. The **Start game** button relabels to **Start Challenge** while this mode is active.
 
 ---
 
@@ -159,11 +163,65 @@ The scoring screen is optimised for touchscreen entry on a tablet. Everything fi
 
 ---
 
+### Achievements & Badges
+
+Beyond 180s, Big Fish, and nine-darters, Oche tracks 18 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes. Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
+
+| Badge | How to earn it |
+|---|---|
+| 🎩 **Hat Trick** | Three trebles (any numbers) in one visit, without busting |
+| 🔴 **Bullseye Gauntlet** | Hit the double bull twice in one visit |
+| 💨 **Where'd It Go?** | Three misses in one visit |
+| 😩 **So Close...** | Throw two treble 20s, then a single 20, in one visit |
+| 😅 **Ton-titled to Nothing** | Score 100+ in a visit that still busts |
+| 🦉 **Night Owl** | Throw a dart between midnight and 5am |
+| 🐦 **Early Bird** | Throw a dart between 5am and 7am |
+| 🎯 **Metronome** | Score within 15 points of each other across 5 consecutive visits |
+| 🚗 **Cruise Control** | Win a leg where no visit scored below 40 |
+| ❄️ **Ice in the Veins** | Check out for 50+ on the visit right after a bust |
+| 🧊 **Nerves of Steel** | Win a leg or set that was a decider — tied one leg/set short of winning it |
+| 🔥 **Comeback Kid** | Win a leg after trailing your opponent's remaining score by 100+ at some point |
+| 🗡️ **Giant Slayer** | Beat an opponent whose average is 15+ points higher than yours |
+| 🔁 **The Rematch** | Beat someone who beat you the last time you played them |
+| 🥇 **First 100+ Checkout** | Check out for 100 or more points |
+| ⚔️ **Grudge Match** | Play 10+ H2H games against the same opponent |
+| 🕐 **Around the Clock** | Hit every number 1–20 as a single within one session |
+| 🌍 **Around the World** | Hit every dart outcome at least once, over your lifetime — 63 total: singles/doubles/trebles 1–20, outer bull, double bull, and a miss |
+
+**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 18-badge roster: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5) — three badges (Around the Clock, Around the World, Grudge Match) are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
+
+**Around the World Progress** — a dedicated grid on the Player Profile showing exactly which of the 63 lifetime dart outcomes are still missing, alongside the Badge Case.
+
+---
+
+### Daily Challenge
+
+A recurring, Wordle-style solo challenge — the same challenge for everyone on a given calendar day, picked deterministically from the date so there's no server-side randomness and nothing to configure. A new format is picked each day from a pool of six, so it isn't the same task with a different number every time:
+
+| Format | Goal |
+|---|---|
+| **Checkout Sprint** | Finish a specific score (121, 170, 96, ...) in the fewest darts |
+| **Speed to Zero** | A full 501 leg, fewest total darts |
+| **Bullseye Gauntlet** | Most bulls (single or double) hit across 3 visits (9 darts) |
+| **Steady Hand** | Score as close to 20 as possible each visit, without going over |
+| **Treble Run** | Most different treble numbers hit across 3 visits (9 darts) |
+| **The Long Game** | Fewest visits to get from 501 down to under 40 remaining, without busting |
+
+**Playing it:** switch to **🎯 Daily Challenge** mode on the [New Game](#new-game) screen — see that section for how player selection and PIN protection work in this mode. Only one attempt is allowed per player per calendar day; a second attempt the same day is rejected rather than overwriting the first, matching how a real Wordle guess works.
+
+**Home page teaser:** the Home screen always shows a **🎯 Today's Challenge** card describing today's format, with a link to New Game — it's read-only (no player picker, no Start button) and shows the same information regardless of who's using the shared screen.
+
+**Streaks & history:** the New Game panel shows the current player's streak (consecutive days with a completed attempt) and the last 7 days as a row of colored dots (gold = completed, grey = missed or unfinished). A missed or unfinished day breaks the streak.
+
+**Sharing:** completing a challenge offers the same **📤 Share** card as any other big moment (see [Shareable Moments](#shareable-moments)), captioned with the format and result (e.g. "Checkout Sprint — 170 in 3 darts").
+
+---
+
 ### Shareable Moments
 
-Big moments — a 180, a Big Fish, a nine-darter, or a match win — get a **📤 Share** button that generates a shareable card image entirely on-device (canvas, styled to match the app), then either opens your phone's native share sheet (to Messages, X, Instagram, Facebook, or anything else it offers) or falls back to a plain image download on browsers without share-sheet support. Nothing is ever uploaded anywhere by this button — it's the same image whether you share it or save it.
+Big moments — a 180, a Big Fish, a nine-darter, a match win, any of the 18 [achievement badges](#achievements--badges), or a completed [Daily Challenge](#daily-challenge) — get a **📤 Share** button that generates a shareable card image entirely on-device (canvas, styled to match the app), then either opens your phone's native share sheet (to Messages, X, Instagram, Facebook, or anything else it offers) or falls back to a plain image download on browsers without share-sheet support. Nothing is ever uploaded anywhere by this button — it's the same image whether you share it or save it.
 
-- **Where it shows up:** the achievement overlay (180/Big Fish/nine-darter) while it's flashing, the Game Over screen after a match win, and next to Best Leg Average / Fewest Darts to Finish on a **Player Profile**'s Personal Bests.
+- **Where it shows up:** the achievement overlay (180/Big Fish/nine-darter/any badge) while it's flashing, the Game Over screen after a match win, the Daily Challenge result panel, a badge's entry in the **Badge Case**, and next to Best Leg Average / Fewest Darts to Finish on a **Player Profile**'s Personal Bests.
 - **Card tagline** (**Settings → Shareable Moments**) — a short editable line printed on every card, defaulting to "Darts tracked via Oche — track your darts today!". Update it once you have a real website or social handle to point at.
 - **Automatic Home Assistant delivery:** independent of the Share button, if a **Moment Card Webhook ID** is configured (**Settings → Smart Home Integration**), the same card is sent to your HA instance automatically as a base64-encoded image the moment it happens — useful for routing it into Discord, Telegram, or anywhere else your own HA automations already reach. Personal-best cards are share-button-only (no automatic HA delivery), since there's no live "new personal best" detection during play yet.
 - Not affiliated with or posting directly to X/Instagram/Facebook's own APIs — see `docs/shareable-moments-roadmap.md` for why direct API posting isn't realistic for a personal account on any of those three platforms today.
@@ -196,7 +254,7 @@ Open **`http://<your-server>:8046/display`** on a TV or second monitor. It updat
 
 **Leg/Set/Game banners:** full-screen result announced when a unit ends.
 
-**Achievement overlays:** full-screen flash for 180s (🎯), Big Fish (🐟), and nine-darters (🏆, with confetti) the moment they're scored — each with a **📤 Share** button (see [Shareable Moments](#shareable-moments) below).
+**Achievement overlays:** full-screen flash for 180s (🎯), Big Fish (🐟), and nine-darters (🏆, with confetti) the moment they're scored, plus any of the 18 [achievement badges](#achievements--badges) (Hat Trick, Nerves of Steel, Around the World, and so on) — each with a **📤 Share** button (see [Shareable Moments](#shareable-moments) below).
 
 The scoreboard is read-only and can be open on any number of screens simultaneously.
 
@@ -261,6 +319,14 @@ A line chart showing the selected metric over time. Filters:
 - **Fewest Darts to Finish**
 - **Current Win Streak**
 - **Recent Form** — average of the last 10 legs, with an arrow showing the delta vs. lifetime average
+
+#### Badge Case
+
+The full 18-badge [achievement](#achievements--badges) roster for this player — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
+
+#### Around the World Progress
+
+A grid showing exactly which of the 63 lifetime dart outcomes (every number 1–20 × single/double/treble, outer bull, double bull, and a miss) this player has and hasn't hit yet — the completion criterion for the Around the World badge.
 
 #### Top 10 Finishes
 
@@ -499,6 +565,34 @@ GET  /api/players/avg-history               Metric history for the chart
      &mode=h2h|practice  (optional)
 ```
 
+### Achievements & Badges
+
+```
+POST /api/badges/award                      Award/increment a badge { player, badgeId, once }
+                                             → { newlyEarned, count }
+                                             once:true is idempotent (state-based badges like
+                                             Around the Clock/World, Grudge Match); otherwise
+                                             count increments on every call
+GET  /api/players/badges?name=              This player's earned badges
+                                             → [ { badge_id, count, earned_at } ]
+GET  /api/players/h2h-summary               Games played and previous-match winner between two
+     ?player=&opponent=&excludeGameId=       players (used by the Grudge Match/Rematch badges)
+GET  /api/players/around-the-world?name=    Around the World progress
+                                             → { hit: [{sector, mult}], count, total: 63 }
+```
+
+### Daily Challenge
+
+```
+POST /api/challenges/start                  Register today's attempt
+                                             { player, gameId, challengeDate, format, target }
+                                             → 409 if already attempted this date
+POST /api/challenges/complete               Record a result { player, challengeDate, resultDarts }
+                                             → 404 if no matching attempt exists
+GET  /api/challenges/status                 Today's attempt, current streak, and 7-day history
+     ?player=&date=YYYY-MM-DD               → { today, streak, history }
+```
+
 ### Games
 
 ```
@@ -593,6 +687,8 @@ oche/
 | `turns` | Every visit: scored points, bust flag, checkout flag |
 | `darts` | Every individual dart: sector, multiplier, dart number within the visit. `scored`, `is_treble`, and `is_double` are computed columns derived from sector and multiplier. |
 | `timeline_events` | Leg/set/game start and end timestamps |
+| `player_badges` | One row per player+badge earned, with a running count (see [Achievements & Badges](#achievements--badges)) |
+| `daily_challenge_attempts` | One row per player per calendar date attempted; links to `games` via `game_id` |
 | `settings` | Key/value store for app settings (e.g. Home Assistant config, PIN/admin-login lockout thresholds) |
 | `admins` | Admin usernames and hashed passwords |
 | `sessions` | Server-side admin login sessions, keyed by cookie token |
