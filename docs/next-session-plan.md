@@ -21,7 +21,7 @@ shareable cards should explain the badge and show the count."
   before the network round-trip resolves today, on purpose (no delay) — the count
   needs to patch in a moment later, not block the initial celebration.
 
-## 2. Double Trouble badge
+## 2. Double Trouble badge — done
 
 Full design: `docs/achievements-badges-roadmap.md` → Precision & Skill.
 
@@ -38,7 +38,7 @@ double-out checkout does **not** qualify — "consecutive" requires at least two
   `display.html`) and `BADGE_INFO` (Badge Case), plus an `awardRecurringBadge()` call
   — follow the exact same pattern as Hat Trick end to end.
 
-## 3. Busted Maximum badge
+## 3. Busted Maximum badge — done
 
 Full design: `docs/achievements-badges-roadmap.md` → Novelty & Humor.
 

@@ -2612,6 +2612,8 @@ const BADGE_INFO = {
   grudge_match:       { icon:'⚔️', label:'Grudge Match', desc:'Play 10 or more H2H games against the same opponent.' },
   around_the_clock:   { icon:'🕐', label:'Around the Clock', desc:'Hit every number 1-20 as a single within one session.' },
   around_the_world:   { icon:'🌍', label:'Around the World', desc:'Hit every dart outcome at least once, over your lifetime (63 total: singles/doubles/trebles 1-20, outer bull, double bull, and a miss).' },
+  doubletrouble:      { icon:'👯', label:'Double Trouble', desc:'Check out with the last two darts of the visit both landing on doubles.' },
+  bustedmaximum:      { icon:'💥', label:'Busted Maximum', desc:'Throw three treble 20s (a genuine 180) on a visit that still busts.' },
 };
 function loadPlayerBadges(){
   const container=document.getElementById('player-badges');
@@ -2816,13 +2818,13 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   metronome:'Metronome! 🎯', cruisecontrol:'Cruise Control 🚗', iceintheveins:'Ice in the Veins ❄️',
   nervesofsteel:'Nerves of Steel 🧊', comebackkid:'Comeback Kid 🔥', giantslayer:'Giant Slayer 🗡️',
   grudgematch:'Grudge Match ⚔️', therematch:'The Rematch 🔁', aroundtheclock:'Around the Clock 🕐',
-  aroundtheworld:'Around the World! 🌍' };
+  aroundtheworld:'Around the World! 🌍', doubletrouble:'Double Trouble! 👯', bustedmaximum:'Busted Maximum 💥' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
   metronome:2500, cruisecontrol:2500, iceintheveins:2500, nervesofsteel:3000,
   comebackkid:3000, giantslayer:2500, grudgematch:3000, therematch:2500,
-  aroundtheclock:3500, aroundtheworld:5000 };
+  aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500 };
 let achTimer = null;
 
 function spawnConfetti(root, count){
@@ -3313,6 +3315,14 @@ function enterTurn(){
     showAchievement('bullseyegauntlet', p.name);
     fireMomentCard('bullseyegauntlet', { icon:'🔴', headline:'BULLSEYE GAUNTLET!', player:p.name, statLine:'Double bull, twice in one visit' });
     awardRecurringBadge(p.name, 'bullseyegauntlet');
+  } else if(ev.win && _d.length>=2 && _d[_d.length-2].isDouble && _d[_d.length-1].isDouble){
+    // Double Trouble: the last two darts of the checkout visit both landed on
+    // doubles — dart 1 of a 3-dart visit (miss/single/treble) doesn't matter, only
+    // the trailing pair does. A single-dart double-out checkout doesn't qualify
+    // ("consecutive" needs at least two) — see docs/achievements-badges-roadmap.md.
+    showAchievement('doubletrouble', p.name);
+    fireMomentCard('doubletrouble', { icon:'👯', headline:'DOUBLE TROUBLE!', player:p.name, statLine:'Checked out on consecutive doubles' });
+    awardRecurringBadge(p.name, 'doubletrouble');
   } else if(_d.length===3 && _d.every(d=>d.sector===0)){
     showAchievement('wherediditgo', p.name);
     fireMomentCard('wherediditgo', { icon:'💨', headline:"WHERE'D IT GO?", player:p.name, statLine:'Three misses' });
@@ -3321,6 +3331,12 @@ function enterTurn(){
     showAchievement('socloseshot', p.name);
     fireMomentCard('socloseshot', { icon:'😩', headline:'SO CLOSE...', player:p.name, statLine:'140 — one dart from 180' });
     awardRecurringBadge(p.name, 'socloseshot');
+  } else if(ev.bust && _d.length===3 && _d.every(d=>d.sector===20 && d.mult===3)){
+    // Busted Maximum: a genuine 180 (three treble 20s) that still busts — more
+    // specific than Ton-titled to Nothing below, so it must be checked first.
+    showAchievement('bustedmaximum', p.name);
+    fireMomentCard('bustedmaximum', { icon:'💥', headline:'BUSTED MAXIMUM', player:p.name, statLine:'A genuine 180 that still busted' });
+    awardRecurringBadge(p.name, 'bustedmaximum');
   } else if(ev.bust && _d.reduce((s,d)=>s+d.value,0) >= 100){
     showAchievement('tontitled', p.name);
     fireMomentCard('tontitled', { icon:'😅', headline:'TON-TITLED TO NOTHING', player:p.name, statLine:'100+ attempted, still busted' });

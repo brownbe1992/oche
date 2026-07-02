@@ -4,10 +4,11 @@
 > end-to-end (`frontend/index.html`'s `enterTurn()`/`onLegWon()`, `showAchievement()`/
 > `ACH_LABELS` in both `index.html` and `display.html`, the `player_badges` table in
 > `backend/db.js`, a Badge Case section on the Player Profile page, and an Around the
-> World progress grid). All six suggested-build-order steps are live:
+> World progress grid). All six suggested-build-order steps are live, including the
+> two late additions Double Trouble and Busted Maximum:
 > 1. Milestones: first 100+ checkout, Grudge Match, Around the Clock, Around the World.
-> 2. Simple recurring: Hat Trick, Bullseye Gauntlet, Where'd It Go?, Ton-titled to
->    Nothing, So Close..., Night Owl/Early Bird.
+> 2. Simple recurring: Hat Trick, Bullseye Gauntlet, Double Trouble, Where'd It Go?,
+>    Ton-titled to Nothing, Busted Maximum, So Close..., Night Owl/Early Bird.
 > 3. Consistency: Metronome, Cruise Control.
 > 4. Social/H2H: Giant Slayer, Grudge Match, The Rematch (`getH2HSummary()` in
 >    `backend/db.js`, comparing lifetime averages already cached client-side).
@@ -22,7 +23,7 @@
 >    dartboard-shaped heatmap, a deliberate scope simplification from the "ideally"
 >    phrasing in the Design section below.
 >
-> The Badge Case now shows the full 18-badge roster (not just milestones) with a
+> The Badge Case now shows the full 20-badge roster (not just milestones) with a
 > count per badge — `player_badges` grew a `count` column, and every recurring
 > badge (previously celebrated live but never persisted) now also gets a
 > fire-and-forget `awardRecurringBadge()` call so its occurrences are counted.
@@ -94,7 +95,7 @@ Each badge below is tagged **[recurring]** or **[milestone]**.
   180 specifically (three T20s) — this rewards treble *consistency* on any numbers,
   not just luck landing on the biggest one.
 - **Bullseye Gauntlet** *(recurring)* — double bull (50) twice in one visit.
-- **Double Trouble** *(recurring, not yet built)* — check out on a visit where the
+- **Double Trouble** *(recurring)* — check out on a visit where the
   **last two darts thrown were both doubles**, any numbers (they don't have to match
   each other or each be the finishing double specifically) — e.g. a 2-dart finish of
   D5, D12, or a 3-dart D16, D9, D10. Dart 1 of a 3-dart visit is irrelevant and doesn't
@@ -153,7 +154,7 @@ these moments immediately.*
   the "No Score" voice callout already shipped (`docs/voice-announcements-roadmap.md`).
 - **Ton-titled to Nothing** *(recurring)* — score 100+ in a visit that still ends in a
   bust.
-- **Busted Maximum** *(recurring, not yet built)* — throw three treble 20s (a genuine
+- **Busted Maximum** *(recurring)* — throw three treble 20s (a genuine
   180) but the visit still busts. Ton-titled to Nothing already catches any 100+ bust
   generically, but a busted maximum is its own specific, extra-painful story worth
   celebrating on its own — a real 180 still happened, it just didn't count for
