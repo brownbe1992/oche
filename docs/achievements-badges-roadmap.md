@@ -32,6 +32,21 @@
 > their count — everything else increments on every genuine occurrence. Unearned
 > badges render greyscale/dimmed; earned ones show a gold counter circle when
 > count > 1.
+>
+> **Undo Last Turn now revokes any badge that turn awarded**, not just the
+> client-side tracking state fixed earlier. A new `revokeBadge()`/`POST
+> /api/badges/revoke` (`backend/db.js`, `backend/server.js`) decrements a badge's
+> count by one (deleting the row at 0) — symmetric to `awardBadge()`. Each turn's
+> undo snapshot carries a `badgeReverts` list, populated by a new
+> `trackBadgeForUndo(snap, player, badgeId)` helper called wherever a badge is
+> actually awarded; `undoLastTurn()` fires a revoke for everything in that list.
+> The tricky part was the once-badges' async award confirmations (Around the
+> Clock/World, Grudge Match, First 100+ Checkout) racing against undo — they
+> capture the snapshot reference *before* the await, and a `snap.voided` flag
+> (set the moment undo runs) makes a late-arriving award self-correct with an
+> immediate revoke instead of registering into a revert list nobody will read
+> again, regardless of which one — the undo click or the award confirmation —
+> happens first.
 
 ## Goal
 
@@ -79,6 +94,14 @@ Each badge below is tagged **[recurring]** or **[milestone]**.
   180 specifically (three T20s) — this rewards treble *consistency* on any numbers,
   not just luck landing on the biggest one.
 - **Bullseye Gauntlet** *(recurring)* — double bull (50) twice in one visit.
+- **Double Trouble** *(recurring, not yet built)* — check out on a visit where every
+  dart thrown was a double, any numbers (they don't have to match each other or the
+  finishing double itself) — e.g. a 2-dart finish of D5, D12, or a 3-dart D16, D9, D10.
+  Rewards a genuinely "clean" finish on the outer ring, distinct from Hat Trick's
+  treble-only focus — same shape (N-of-a-kind dart type in the closing visit), applied
+  to the checkout dart instead of an arbitrary visit. Detectable the same way Hat
+  Trick already is (`_d.every(d=>d.isDouble)` on the winning visit) — no new data
+  needed.
 - **Around the Clock** *(milestone)* — every number 1–20 hit as a single at least once
   within a single session. A completionist checklist, not a skill ceiling.
 - **Around the World** *(milestone, the big one)* — hit *every* dart outcome at least

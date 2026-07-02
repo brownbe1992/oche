@@ -38,6 +38,7 @@
        GET  /api/settings/card-tagline      -> { tagline } (public)
 
        POST /api/badges/award      -> { player, badgeId, once } -> { newlyEarned, count } (public)
+       POST /api/badges/revoke     -> { player, badgeId } -> { count } (public, used by Undo Last Turn)
        GET  /api/players/badges    -> (?name=...) -> [ { badge_id, count, earned_at } ] (public)
        GET  /api/players/h2h-summary -> (?player=...&opponent=...&excludeGameId=) -> { totalGames, previousWinner } (public)
        GET  /api/players/around-the-world -> (?name=...) -> { hit, count, total } (public)
@@ -400,6 +401,10 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/badges/award' && m === 'POST') {
       const b = await readJson(req);
       return send(res, 200, db.awardBadge(b.player, b.badgeId, !!b.once));
+    }
+    if (p === '/api/badges/revoke' && m === 'POST') {
+      const b = await readJson(req);
+      return send(res, 200, db.revokeBadge(b.player, b.badgeId));
     }
     if (p === '/api/players/badges' && m === 'GET') {
       return send(res, 200, db.getPlayerBadges(url.searchParams.get('name')));

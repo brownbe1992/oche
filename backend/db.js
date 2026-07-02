@@ -201,6 +201,8 @@ const q = {
     ON CONFLICT(player_id, badge_id) DO UPDATE SET count = count + 1
   `),
   badgeCount   : db.prepare('SELECT count FROM player_badges WHERE player_id = ? AND badge_id = ?'),
+  decrementBadge : db.prepare('UPDATE player_badges SET count = count - 1 WHERE player_id = ? AND badge_id = ?'),
+  deleteBadge    : db.prepare('DELETE FROM player_badges WHERE player_id = ? AND badge_id = ?'),
   playerBadges : db.prepare('SELECT badge_id, count, earned_at FROM player_badges WHERE player_id = ? ORDER BY earned_at DESC'),
 
   insertAdmin    : db.prepare('INSERT INTO admins (username, password_hash, password_salt) VALUES (?, ?, ?)'),
@@ -1082,6 +1084,24 @@ function awardBadge(playerName, badgeId, once) {
   return { newlyEarned: row.count === 1, count: row.count };
 }
 
+// Reverses one occurrence of a badge (Undo Last Turn). Symmetric to awardBadge():
+// decrements count by 1, deleting the row once it reaches 0. Works the same way
+// for both award modes — a `once` badge only ever has count 1, so revoking it
+// always deletes the row, exactly undoing the single INSERT OR IGNORE that
+// created it.
+function revokeBadge(playerName, badgeId) {
+  const p = getPlayer(playerName);
+  if (!p) throw httpError(404, 'Player not found');
+  const row = q.badgeCount.get(p.id, String(badgeId));
+  if (!row) return { count: 0 };
+  if (row.count <= 1) {
+    q.deleteBadge.run(p.id, String(badgeId));
+    return { count: 0 };
+  }
+  q.decrementBadge.run(p.id, String(badgeId));
+  return { count: row.count - 1 };
+}
+
 function getPlayerBadges(playerName) {
   const p = getPlayer(playerName);
   if (!p) return [];
@@ -1601,7 +1621,7 @@ module.exports = {
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword,
   login, logout, getSessionAdmin, adminLockoutThreshold,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,
-  awardBadge, getPlayerBadges, getH2HSummary, getAroundTheWorldProgress,
+  awardBadge, revokeBadge, getPlayerBadges, getH2HSummary, getAroundTheWorldProgress,
   startChallengeAttempt, completeChallengeAttempt, getChallengeStatus,
   _db: db,
 };

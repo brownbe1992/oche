@@ -2945,12 +2945,28 @@ async function shareOrSaveCanvas(canvas, filename, shareTitle, shareText){
 // that fires regardless of whether the player ever taps Share — automatically
 // posts it to Home Assistant if a moment-card webhook ID is configured (same
 // fire-and-forget pattern as every other HA event webhook).
+// Registers a just-awarded badge against a specific turn's undo snapshot, so
+// undoLastTurn() can revoke it later. `snap` must be captured by the caller at
+// the moment the award call was made (not re-read from game.lastTurnSnapshot
+// inside an async callback) — by the time an award's response comes back, the
+// player may already be several turns further on, and game.lastTurnSnapshot
+// would point at the wrong (later) turn's snapshot.
+//
+// If undo already ran for that turn before this award's response arrived (snap
+// is marked .voided), the badge never gets a chance to sit in the revert list —
+// so it's revoked immediately instead, closing the race the other direction.
+function trackBadgeForUndo(snap, playerName, badgeId){
+  if(!snap) return;
+  if(snap.voided){ Backend.send('POST','/api/badges/revoke', { player:playerName, badgeId }).catch(()=>{}); return; }
+  snap.badgeReverts.push({ player:playerName, badgeId });
+}
 // Persists a recurring badge occurrence (count-mode: increments every call, since
 // these all fire on a per-visit/per-leg/per-match event that won't spuriously
 // re-trigger). Fire-and-forget — the celebration itself already happened via
 // showAchievement()/fireMomentCard(), this just feeds the Badge Case's counter.
 function awardRecurringBadge(playerName, badgeId){
   Backend.send('POST','/api/badges/award', { player:playerName, badgeId, once:false }).catch(()=>{});
+  trackBadgeForUndo(game && game.lastTurnSnapshot, playerName, badgeId);
 }
 
 const momentCards = {};
@@ -3154,6 +3170,15 @@ function undoLastTurn(){
     persist();
   }
 
+  // Revoke any badges this turn awarded/incremented — otherwise a badge earned by
+  // a turn that's since been undone stays sitting in the Badge Case regardless.
+  // voided=true first, so any award call still in flight when this runs revokes
+  // itself on arrival instead of registering into a revert list nobody reads again.
+  snap.voided = true;
+  snap.badgeReverts.forEach(({player, badgeId})=>{
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+  });
+
   // Move back to the player who threw
   game.current = snap.pi;
   game.darts = []; game.busted = false; game.won = false;
@@ -3193,7 +3218,11 @@ function enterTurn(){
     // that's undone can't leave a stale badge/streak trace behind
     legVisitScores:p.legVisitScores.slice(), metronomeFired:p.metronomeFired,
     pendingIceInTheVeins:p.pendingIceInTheVeins, legWorstDeficit:p.legWorstDeficit,
-    singlesHit:new Set(p.singlesHit), legVisitLogsLen:game.legVisitLogs.length };
+    singlesHit:new Set(p.singlesHit), legVisitLogsLen:game.legVisitLogs.length,
+    // badges awarded/incremented while processing this turn — revoked on undo.
+    // voided flips true once undo actually runs, so an award response that's
+    // still in flight at that point revokes itself instead of registering here.
+    badgeReverts:[], voided:false };
   game.lastTurnSnapshot = _snap;
 
   // per-leg and per-game scope (shown live on the scoreboard — both modes)
@@ -3317,8 +3346,10 @@ function enterTurn(){
   // inflate the count.
   _d.forEach(d=>{ if(d.sector>=1 && d.sector<=20 && d.mult===1) p.singlesHit.add(d.sector); });
   if(p.singlesHit.size >= 20){
+    const _snapAtc = game.lastTurnSnapshot;
     Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'around_the_clock', once:true }).then(r=>{
       if(r && r.newlyEarned){
+        trackBadgeForUndo(_snapAtc, p.name, 'around_the_clock');
         showAchievement('aroundtheclock', p.name);
         fireMomentCard('aroundtheclock', { icon:'🕐', headline:'AROUND THE CLOCK', player:p.name, statLine:'Every number, 1 to 20, singled out' });
       }
@@ -3330,12 +3361,14 @@ function enterTurn(){
   // DB._queue chain) so the progress query only runs once this visit's darts are
   // actually persisted — querying immediately would race the still-pending write.
   if(!(earnedBadgeCache[p.name] && earnedBadgeCache[p.name].has('around_the_world'))){
+    const _snapAtw = game.lastTurnSnapshot;
     DB._queue(()=>Backend.get(`/api/players/around-the-world?name=${encodeURIComponent(p.name)}`).then(prog=>{
       if(prog && prog.count >= prog.total){
         Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'around_the_world', once:true }).then(r=>{
           if(!earnedBadgeCache[p.name]) earnedBadgeCache[p.name] = new Set();
           earnedBadgeCache[p.name].add('around_the_world');
           if(r && r.newlyEarned){
+            trackBadgeForUndo(_snapAtw, p.name, 'around_the_world');
             showAchievement('aroundtheworld', p.name);
             fireMomentCard('aroundtheworld', { icon:'🌍', headline:'AROUND THE WORLD', player:p.name, statLine:'Every dart outcome, lifetime' });
           }
@@ -3363,8 +3396,10 @@ function enterTurn(){
   // First 100+ checkout — a one-time milestone (persisted server-side so the
   // celebration fires exactly once, ever, not every time it happens again).
   if(ev.win && ev.pointsThisVisit >= 100){
+    const _snap100 = game.lastTurnSnapshot;
     Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'first_100_checkout', once:true }).then(r=>{
       if(r && r.newlyEarned){
+        trackBadgeForUndo(_snap100, p.name, 'first_100_checkout');
         showAchievement('first100checkout', p.name);
         fireMomentCard('first100checkout', { icon:'🥇', headline:'FIRST 100+ CHECKOUT', player:p.name, statLine:`${ev.pointsThisVisit} checkout` });
       }
@@ -3489,6 +3524,7 @@ function onLegWon(wi){
           awardRecurringBadge(w.name, 'giantslayer');
         }
         const gid = DB.gameId;
+        const _snapGm = game.lastTurnSnapshot;
         // Queued behind DB.completeGame() above so totalGames reflects this match
         // once it's actually persisted, not a race against the still-pending write.
         DB._queue(()=>Backend.get(`/api/players/h2h-summary?player=${encodeURIComponent(w.name)}&opponent=${encodeURIComponent(opp.name)}${gid!=null?'&excludeGameId='+gid:''}`)).then(sum=>{
@@ -3504,11 +3540,14 @@ function onLegWon(wi){
             // on later games between the same two doesn't inflate the count.
             Backend.send('POST','/api/badges/award', { player:w.name, badgeId:'grudge_match', once:true }).then(r=>{
               if(r && r.newlyEarned){
+                trackBadgeForUndo(_snapGm, w.name, 'grudge_match');
                 showAchievement('grudgematch', w.name);
                 fireMomentCard('grudgematch', { icon:'⚔️', headline:'GRUDGE MATCH', player:w.name, statLine:`${sum.totalGames} games vs ${opp.name}` });
               }
             }).catch(()=>{});
-            Backend.send('POST','/api/badges/award', { player:opp.name, badgeId:'grudge_match', once:true }).catch(()=>{});
+            Backend.send('POST','/api/badges/award', { player:opp.name, badgeId:'grudge_match', once:true }).then(r=>{
+              if(r && r.newlyEarned) trackBadgeForUndo(_snapGm, opp.name, 'grudge_match');
+            }).catch(()=>{});
           }
         }).catch(()=>{});
       }
