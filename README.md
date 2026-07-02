@@ -553,6 +553,8 @@ Returns `{ ok: true }`.
 
 ```
 GET    /api/setup-required                  { required } — true until the first admin exists
+GET    /api/auth-config                     { requireAuth } — whether OCHE_REQUIRE_AUTH is set
+                                             (read at app boot to know if writes need a login)
 POST   /api/setup                           Create the first admin   { username, password }
                                              (only while setup-required)
 POST   /api/login                           Log in                   { username, password }
@@ -562,7 +564,7 @@ GET    /api/me                              { loggedIn, username? }
 GET    /api/admins                          List admin accounts                      [admin]
 POST   /api/admins                          Add an admin             { username, password } [admin]
 DELETE /api/admins?id=                      Remove an admin                          [admin]
-PUT    /api/admins/password                 Change an admin's password { username, password } [admin]
+PUT    /api/admins/password                 Change an admin's password { id, password } [admin]
 ```
 
 Routes marked `[admin]` require a logged-in admin session (cookie set by `/api/login`).
@@ -633,6 +635,9 @@ POST /api/badges/award                      Award/increment a badge { player, ba
                                              once:true is idempotent (state-based badges like
                                              Around the Clock/World, Grudge Match); otherwise
                                              count increments on every call
+POST /api/badges/revoke                     Reverse one occurrence of a badge { player, badgeId }
+                                             → { count } — decrements the count, deleting the
+                                             row at 0 (used by Undo Last Turn)
 GET  /api/players/badges?name=              This player's earned badges
                                              → [ { badge_id, count, earned_at } ]
 GET  /api/players/h2h-summary               Games played and previous-match winner between two
@@ -666,7 +671,7 @@ GET  /api/challenges/history                Lifetime completion record, best res
 ```
 POST /api/games                             Start a game
                                              { category, legsPerSet, setsPerGame,
-                                               players: [names], practice: bool }
+                                               players: [{ name, out }], practice: 0|1 }
                                              → { gameId }
 
 POST /api/games/:id/turns                   Record a visit

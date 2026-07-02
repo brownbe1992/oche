@@ -963,10 +963,24 @@ function getPlayerStatBubbles(playerName, mode) {
     ${J} ${mf} ${OPENING_CATS}
   ) WHERE rn=1`);
 
+  // Average Pace (darts/minute) — same formula as getHomeExtra()'s pace and
+  // getMetricHistory()'s 'pace' case: gaps between consecutive thrown_at timestamps
+  // within a turn, clamped to plausible human timing. Null (bubble shows "—") until
+  // "collect per-dart timing" has captured data. The pace STAT_DEF bubble on the
+  // Player Profile reads this key — it was missing from this return object for a
+  // while, leaving that bubble permanently blank even with timing data recorded.
+  const pace = q(`SELECT 60000.0/AVG(gap_ms) AS v FROM (
+    SELECT (julianday(d.thrown_at) - julianday(prev.thrown_at)) * 86400000 AS gap_ms
+    FROM darts d
+    JOIN darts prev ON prev.turn_id = d.turn_id AND prev.dart_no = d.dart_no - 1
+    JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id
+    WHERE t.player_id = ? AND d.thrown_at IS NOT NULL AND prev.thrown_at IS NOT NULL ${mf}
+  ) WHERE gap_ms > 0 AND gap_ms < 60000`);
+
   return {
     dartsThrown, avgDartsPerDay, avgDartsPerLeg, avg, one80s, bigFish, nineDarters,
     treblelessPct: totalLegs > 0 ? (tlLegs / totalLegs * 100) : null,
-    first3avg, first9avg, avg100plus, avg90minus, score140pct,
+    first3avg, first9avg, avg100plus, avg90minus, score140pct, pace,
     one80sPerLeg: totalLegs > 0 ? (legsWithOneEighty / totalLegs) : null,
   };
 }

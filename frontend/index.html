@@ -2294,7 +2294,7 @@ function newMatchPlayer(name, start){
     legVisitScores:[],           // running list of this leg's visit totals (Metronome/Cruise Control)
     metronomeFired:false,        // Metronome fires once per leg, not once per qualifying turn
     pendingIceInTheVeins:false,  // true right after a bust, cleared after the player's next visit
-    legWorstDeficit:0,           // largest (opponent remaining - my remaining) seen this leg (Comeback Kid)
+    legWorstDeficit:0,           // largest (my remaining - opponent remaining) seen this leg (Comeback Kid)
     singlesHit: new Set() };     // distinct 1-20 singles hit this session (Around the Clock)
 }
 

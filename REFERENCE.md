@@ -214,7 +214,7 @@ checkout, and exactly 9 total darts were thrown across those 3 turns. Locked to
 | **90- AVG** | per-visit-avg | same shape, `<= 90` |
 | **140/Leg** | first-visit-only | `% of opening visits scoring >=140`. **Scoped to 501/301 only.** |
 | **180s/Leg** | fraction | `legs containing ≥1 180 / total legs` |
-| **Average Pace** | — | darts/minute, same formula as the Home page version |
+| **Average Pace** | — | darts/minute, returned as the `pace` key — same formula as the Home page/chart versions (consecutive `thrown_at` gaps within a turn, clamped to `0 < gap < 60000ms`); `null` (bubble shows "—") until per-dart timing data exists. *Note: this key was missing from `getPlayerStatBubbles()`'s return object until the audit that produced this manual caught it — the bubble was permanently blank before that.* |
 
 **Why 1st 3 AVG / 1st 9 AVG / 140/Leg are scoped to 501/301 only**: a 170 leg is
 short enough that "first visit" isn't a meaningful opening-strength window (it
@@ -367,8 +367,8 @@ co-fire with a chain badge or with each other in the same turn/leg:
 
 | Badge | Exact condition |
 |---|---|
-| 🦉 **Night Owl** | Local hour `< 5` when a dart is thrown. Celebration overlay fires once per session (`sessionBadgesShown.nightOwl`); the persistence call fires every qualifying turn regardless. |
-| 🐦 **Early Bird** | Local hour `>= 5 && < 7`. Same once-per-session overlay gating as Night Owl. |
+| 🦉 **Night Owl** | Local hour `< 5` at the moment the turn is **committed** (`enterTurn()` — checked per turn, not per individual dart tap). Celebration overlay fires once per session (`sessionBadgesShown.nightOwl`); the persistence call fires every qualifying turn regardless. |
+| 🐦 **Early Bird** | Local hour `>= 5 && < 7`, same per-turn check and once-per-session overlay gating as Night Owl. |
 | 🎯 **Metronome** | 5 consecutive visits (raw attempted points, including busts) within 15 of each other: `max(last5) - min(last5) <= 15`. Fires at most once per leg (`p.metronomeFired`). |
 | 🚗 **Cruise Control** | `win && every visit this leg scored >= 40` (raw attempted points). |
 | ❄️ **Ice in the Veins** | `win && pendingIceInTheVeins && pointsThisVisit >= 50` — a 50+ checkout on the visit *immediately following* this player's own bust earlier in the leg. The eligibility flag is cleared after every visit (hit or miss both consume the window) so it only ever covers the very next visit. |
@@ -378,7 +378,7 @@ co-fire with a chain badge or with each other in the same turn/leg:
 | 🔁 **The Rematch** | On a match win, an async `h2h-summary` lookup finds `previousWinner === opponent` — i.e. beat someone who beat you last time you two played. |
 | 🥇 **First 100+ Checkout** | `win && pointsThisVisit >= 100`, **once-badge** — celebrates only the very first time it ever happens for that player. |
 | ⚔️ **Grudge Match** | On a match win, the same `h2h-summary` lookup shows `totalGames >= 10` against this opponent. **Once-badge** per player — awarded to both the winner and the loser once the threshold is first crossed. |
-| 🕐 **Around the Clock** | `singlesHit.size >= 20` — every number 1–20 hit as a single at least once **within the current session** (tracked in-memory per player, resets on page reload). **Once-badge.** |
+| 🕐 **Around the Clock** | `singlesHit.size >= 20` — every number 1–20 hit as a single at least once **within the current game** (`singlesHit` is created fresh in `newMatchPlayer()` at every `startGame()`, persists across legs/sets within that game, and resets when a new game starts — not just on page reload). **Once-badge.** |
 | 🌍 **Around the World** | Lifetime: all 63 dart outcomes hit at least once (20 numbers × single/double/treble = 60, plus outer bull, double bull, and a miss). Checked via an async progress query (`/api/players/around-the-world`), skipped once the client-side `earnedBadgeCache` already has it. **Once-badge.** |
 
 ### Description text
