@@ -16,6 +16,7 @@ const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
 const auth = require('./auth.js');
+const netguard = require('./netguard.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -1401,10 +1402,10 @@ function validateCredentials(username, password) {
   return username;
 }
 
-function createFirstAdmin(username, password) {
+async function createFirstAdmin(username, password) {
   if (!isSetupRequired()) throw httpError(403, 'Setup already completed');
   username = validateCredentials(username, password);
-  const { hash, salt } = auth.hashSecret(password);
+  const { hash, salt } = await auth.hashSecret(password);
   try {
     q.insertAdmin.run(username, hash, salt);
   } catch (e) {
@@ -1413,9 +1414,9 @@ function createFirstAdmin(username, password) {
   return { ok: true };
 }
 
-function createAdmin(username, password) {
+async function createAdmin(username, password) {
   username = validateCredentials(username, password);
-  const { hash, salt } = auth.hashSecret(password);
+  const { hash, salt } = await auth.hashSecret(password);
   try {
     q.insertAdmin.run(username, hash, salt);
   } catch (e) {
@@ -1436,14 +1437,14 @@ function deleteAdmin(id) {
   return { ok: true };
 }
 
-function changeAdminPassword(id, password) {
+async function changeAdminPassword(id, password) {
   id = Number(id);
   const admin = q.adminById.get(id);
   if (!admin) throw httpError(404, 'Admin not found');
   if (typeof password !== 'string' || password.length < 8 || password.length > 256) {
     throw httpError(400, 'Password must be at least 8 characters');
   }
-  const { hash, salt } = auth.hashSecret(password);
+  const { hash, salt } = await auth.hashSecret(password);
   q.updateAdminPw.run(hash, salt, id);
   q.deleteSessionsForAdmin.run(id); // force re-login on this and any other device after a password change
   return { ok: true };
@@ -1455,15 +1456,28 @@ const INVALID_LOGIN = 'Invalid username or password';
 
 // Fixed dummy hash/salt used to verify against on unknown usernames, so login() always
 // performs one scrypt computation regardless of whether the username exists — this keeps
-// response timing from leaking which usernames are registered.
-const DUMMY_PW_HASH = auth.hashSecret('dummy-password-for-constant-time-login');
+// response timing from leaking which usernames are registered. hashSecret() is now
+// async (SEC-1), so this is computed once lazily and cached as a promise rather than
+// at module load (top-level await isn't available in CommonJS).
+let _dummyPwHashPromise = null;
+function getDummyPwHash() {
+  if (!_dummyPwHashPromise) _dummyPwHashPromise = auth.hashSecret('dummy-password-for-constant-time-login');
+  return _dummyPwHashPromise;
+}
 
 function adminLockoutThreshold() {
   const v = Number(getSettings().admin_lockout_threshold);
   return Number.isInteger(v) && v > 0 ? v : DEFAULT_ADMIN_LOCKOUT_THRESHOLD;
 }
 
-function login(username, password) {
+// SEC-3/SEC-8 note: per-account lockout (below) is deliberately left as-is — an
+// attacker who knows a username can still grief that one account into lockout. The
+// server-side rate limiter (server.js, rateLimit()) applied to this endpoint bounds
+// how fast any single IP can throw failed attempts at it, which is the primary
+// defense; account lockout on top of that remains for the case where different IPs
+// are used. Documented as an accepted tradeoff rather than "fixed" — a lockout system
+// with no failure limit at all would be worse.
+async function login(username, password) {
   username = String(username || '').trim();
   password = String(password || '');
   const admin = q.adminByUsername.get(username);
@@ -1472,10 +1486,15 @@ function login(username, password) {
 
   // Always pay the same scrypt cost — regardless of whether the username exists or
   // is currently locked out — before any branching, so response timing can't be used
-  // to probe either signal (matches the existing DUMMY_PW_HASH rationale below).
-  const ok = admin
-    ? auth.verifySecret(password, admin.password_hash, admin.password_salt)
-    : (auth.verifySecret(password, DUMMY_PW_HASH.hash, DUMMY_PW_HASH.salt), false);
+  // to probe either signal (matches the existing dummy-hash rationale below).
+  let ok;
+  if (admin) {
+    ok = await auth.verifySecret(password, admin.password_hash, admin.password_salt);
+  } else {
+    const dummy = await getDummyPwHash();
+    await auth.verifySecret(password, dummy.hash, dummy.salt);
+    ok = false;
+  }
 
   if (locked) {
     throw httpError(423, 'Too many failed login attempts. Try again in a few minutes.');
@@ -1523,11 +1542,11 @@ function pinLockoutThreshold() {
   return Number.isInteger(v) && v > 0 ? v : DEFAULT_PIN_LOCKOUT_THRESHOLD;
 }
 
-function setPlayerPin(name, pin) {
+async function setPlayerPin(name, pin) {
   const p = getPlayer(name);
   if (!p) throw httpError(404, 'Player not found');
   if (!PIN_RE.test(String(pin))) throw httpError(400, 'PIN must be 4-8 digits');
-  const { hash, salt } = auth.hashSecret(String(pin));
+  const { hash, salt } = await auth.hashSecret(String(pin));
   q.setPin.run(hash, salt, p.id);
   return { name: p.name, hasPin: true };
 }
@@ -1543,7 +1562,7 @@ function removePlayerPin(name) {
 // to avoid leaking player PIN state to a guesser.
 const INVALID_PIN = 'Incorrect PIN';
 
-function verifyPlayerPin(name, pin) {
+async function verifyPlayerPin(name, pin) {
   const p = getPlayer(name);
   if (!p) throw httpError(404, 'Player not found');
   if (!p.pin_hash) return { ok: true }; // no PIN set — anyone may play as this player
@@ -1553,7 +1572,7 @@ function verifyPlayerPin(name, pin) {
     throw httpError(423, 'Too many incorrect attempts. Try again later.');
   }
 
-  const ok = auth.verifySecret(String(pin || ''), p.pin_hash, p.pin_salt);
+  const ok = await auth.verifySecret(String(pin || ''), p.pin_hash, p.pin_salt);
   if (!ok) {
     q.bumpPinFail.run(p.id);
     const fails = (p.pin_fail_count || 0) + 1;
@@ -1568,26 +1587,36 @@ function verifyPlayerPin(name, pin) {
 }
 
 /* ---------- Home Assistant webhook proxy ---------- */
-function fireHaWebhook(event, payload) {
+async function fireHaWebhook(event, payload) {
   const cfg = getSettings();
   const haUrl    = cfg.ha_url    || '';
   const whId     = cfg[`ha_webhook_${event}`] || '';
-  if (!haUrl || !whId) return Promise.resolve({ skipped: true });
+  if (!haUrl || !whId) return { skipped: true };
+
+  const body = JSON.stringify({ ...payload, event, timestamp: Date.now() });
+  let url;
+  try { url = new URL(`/api/webhook/${encodeURIComponent(whId)}`, haUrl); }
+  catch(e) { return { ok: false, error: 'Invalid HA URL' }; }
+
+  // Egress guard (docs/security-audit-roadmap.md, SEC-4): resolve the hostname once
+  // and connect to THAT resolved IP (with the original hostname sent as the Host
+  // header / TLS SNI), so a DNS answer that changes between "checked" and "connected"
+  // (rebinding) can't slip a blocked destination through.
+  let resolvedIp;
+  try { resolvedIp = await netguard.resolveAllowedHost(url.hostname); }
+  catch (e) { return { ok: false, error: e.message }; }
 
   return new Promise((resolve) => {
-    const body = JSON.stringify({ ...payload, event, timestamp: Date.now() });
-    let url;
-    try { url = new URL(`/api/webhook/${encodeURIComponent(whId)}`, haUrl); }
-    catch(e) { return resolve({ ok: false, error: 'Invalid HA URL' }); }
-
     const mod = url.protocol === 'https:' ? require('https') : require('http');
-    const req = mod.request({
-      hostname: url.hostname,
+    const opts = {
+      hostname: resolvedIp,
       port: url.port || (url.protocol === 'https:' ? 443 : 80),
       path: url.pathname,
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-    }, res => { res.resume(); resolve({ ok: true, status: res.statusCode }); });
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), Host: url.host },
+    };
+    if (url.protocol === 'https:') opts.servername = url.hostname; // keep SNI/cert checks on the real hostname
+    const req = mod.request(opts, res => { res.resume(); resolve({ ok: true, status: res.statusCode }); });
     req.on('error', err => resolve({ ok: false, error: err.message }));
     req.setTimeout(5000, () => { req.destroy(); resolve({ ok: false, error: 'timeout' }); });
     req.end(body);

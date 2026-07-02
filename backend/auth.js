@@ -10,15 +10,29 @@ const SESSION_TOKEN_BYTES = 32;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const SESSION_COOKIE = 'oche_session';
 
-function hashSecret(secret) {
+// Promise wrapper around the async crypto.scrypt — used everywhere instead of
+// scryptSync (docs/security-audit-roadmap.md, SEC-1). scryptSync blocks Node's single
+// event loop for ~50-100ms per call; since login() must pay this cost on every
+// attempt (including a dummy hash for unknown usernames, to avoid leaking which
+// usernames exist via timing), a synchronous version let an unauthenticated flood of
+// login attempts stall the entire server, including the live scoreboard. The async
+// form still costs the same CPU time per call, but no longer blocks other requests
+// while it runs.
+function scryptAsync(secret, salt, keylen) {
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(secret, salt, keylen, (err, derivedKey) => err ? reject(err) : resolve(derivedKey));
+  });
+}
+
+async function hashSecret(secret) {
   const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(String(secret), salt, SCRYPT_KEYLEN).toString('hex');
+  const hash = (await scryptAsync(String(secret), salt, SCRYPT_KEYLEN)).toString('hex');
   return { hash, salt };
 }
 
-function verifySecret(secret, hash, salt) {
+async function verifySecret(secret, hash, salt) {
   if (!hash || !salt) return false;
-  const candidate = crypto.scryptSync(String(secret), salt, SCRYPT_KEYLEN);
+  const candidate = await scryptAsync(String(secret), salt, SCRYPT_KEYLEN);
   const stored = Buffer.from(hash, 'hex');
   if (candidate.length !== stored.length) return false;
   return crypto.timingSafeEqual(candidate, stored);

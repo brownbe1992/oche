@@ -54,12 +54,20 @@
    (creating players/games, recording turns, badges, challenges, the live feed) — reads
    stay public. Default off (open LAN behavior). GET /api/auth-config reports this flag
    so the frontend can gate gameplay behind login when it's on.
+
+   Set TRUST_PROXY=true only when this server sits behind a reverse proxy you control,
+   so the per-IP rate limiter uses X-Forwarded-For instead of the raw socket address —
+   otherwise a client could spoof that header to evade or frame another IP.
+   Set HA_BLOCK_PRIVATE=true to additionally block outbound Home Assistant requests to
+   private/LAN address ranges (loopback and link-local/metadata addresses are always
+   blocked regardless — see backend/netguard.js).
    ============================================================================= */
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const db = require('./db.js');
 const auth = require('./auth.js');
+const netguard = require('./netguard.js');
 
 const PORT = process.env.PORT || 8046;
 // When OCHE_REQUIRE_AUTH=true, every state-changing (write) API endpoint requires a
@@ -70,11 +78,63 @@ const REQUIRE_AUTH = String(process.env.OCHE_REQUIRE_AUTH || '').toLowerCase() =
 const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
 const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript', '.css':'text/css', '.svg':'image/svg+xml', '.ico':'image/x-icon' };
 
+// docs/security-audit-roadmap.md SEC-10: applied to every response (API and static).
+// Both frontend HTML files use inline <script> and inline onclick handlers, and load
+// Google Fonts cross-origin, so a strict nonce-based CSP would require a larger
+// refactor (tracked separately) — 'unsafe-inline' still blocks an injected
+// <script src="https://evil.example/x.js"> from a different origin, which is the
+// realistic risk for a single-file app with no user-supplied HTML rendering.
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
+  'X-Frame-Options': 'DENY',
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; " +
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+    "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; " +
+    "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+};
+
 function send(res, status, data, headers = {}) {
   const body = typeof data === 'string' || Buffer.isBuffer(data) ? data : JSON.stringify(data);
-  res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
+  res.writeHead(status, { 'Content-Type': 'application/json', ...SECURITY_HEADERS, ...headers });
   res.end(body);
 }
+
+// docs/security-audit-roadmap.md SEC-3: derive the client IP for rate limiting.
+// X-Forwarded-For is only honored when TRUST_PROXY=true (i.e. a trusted reverse proxy
+// sets it) — otherwise any client could put an arbitrary value in that header to
+// evade the limiter or frame another IP.
+const TRUST_PROXY = String(process.env.TRUST_PROXY || '').toLowerCase() === 'true';
+function clientIp(req) {
+  if (TRUST_PROXY) {
+    const xff = req.headers['x-forwarded-for'];
+    if (xff) return String(xff).split(',')[0].trim();
+  }
+  return (req.socket && req.socket.remoteAddress) || 'unknown';
+}
+
+// Reusable in-memory per-IP, per-bucket fixed-window rate limiter. Buckets are named
+// so different endpoint classes (e.g. a strict "auth" budget vs. a loose "global"
+// budget) don't share or interfere with each other. Resets on process restart and
+// isn't shared across replicas — acceptable for this single-process, self-hosted app.
+const rlBuckets = new Map(); // `${bucket}:${ip}` -> { count, resetAt }
+function rateLimit(bucket, ip, max, windowMs) {
+  const key = `${bucket}:${ip}`;
+  const now = Date.now();
+  let e = rlBuckets.get(key);
+  if (!e || e.resetAt <= now) { e = { count: 0, resetAt: now + windowMs }; rlBuckets.set(key, e); }
+  e.count++;
+  return e.count <= max;
+}
+function tooManyRequests(res, retryAfterSec) {
+  send(res, 429, { error: 'Too many requests' }, { 'Retry-After': String(retryAfterSec) });
+}
+// Periodic prune so rlBuckets doesn't grow unbounded from one-off IPs.
+const rlPrune = setInterval(() => {
+  const now = Date.now();
+  for (const [key, e] of rlBuckets) if (e.resetAt <= now) rlBuckets.delete(key);
+}, 60000);
+if (rlPrune.unref) rlPrune.unref();
 
 // Returns the logged-in admin ({id, username}) for this request, or null.
 function currentAdmin(req) {
@@ -156,11 +216,46 @@ const heartbeat = setInterval(() => {
 }, 25000);
 if (heartbeat.unref) heartbeat.unref();
 
+// docs/security-audit-roadmap.md SEC-2: /api/live/stream is a public, unauthenticated
+// GET (the display screen isn't logged in), so it isn't gated by requireWrite/
+// requireAdmin — cap it directly instead, both in total and per source IP, so an
+// unauthenticated client can't exhaust file descriptors/memory by opening unlimited
+// SSE connections.
+const MAX_SSE_TOTAL = 50;
+const MAX_SSE_PER_IP = 5;
+const sseByIp = new Map(); // ip -> open connection count
+
+// SEC-2: POST /api/live accepts an arbitrary object today, bounded only by
+// readJson()'s 1MB request-body cap, and re-broadcasts it verbatim to every
+// connected screen. Restrict it to the fields liveSnapshot() in frontend/index.html
+// actually produces (and display.html reads) and cap its serialized size, so a
+// malformed/oversized payload can't bloat every broadcast.
+const ALLOWED_LIVE_KEYS = new Set([
+  'active', 'gameType', 'category', 'legsPerSet', 'setsPerGame', 'setNo', 'legNo',
+  'currentIndex', 'players', 'darts', 'checkout', 'status', 'message', 'achievement',
+  'gameOneEighties', 'gameBigFish', 'gameBusts', 'legSummary', 'practice', 'done',
+  'lastTurnEvent', 'matchResult', 'legStart', 'checkoutTarget', 'turnSeq', 'ts',
+]);
+const MAX_LIVE_BYTES = 65536;
+// Returns the sanitized state, or null if it's over the size cap (caller sends 413).
+function sanitizeLiveState(b) {
+  if (!b || typeof b !== 'object' || Array.isArray(b)) return { active: false, ts: Date.now() };
+  const out = {};
+  for (const k of Object.keys(b)) if (ALLOWED_LIVE_KEYS.has(k)) out[k] = b[k];
+  if (out.ts == null) out.ts = Date.now();
+  if (Buffer.byteLength(JSON.stringify(out)) > MAX_LIVE_BYTES) return null;
+  return out;
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const p = url.pathname;
     const m = req.method;
+    const ip = clientIp(req);
+
+    // SEC-3: loose global budget on every request, ahead of any routing/work.
+    if (!rateLimit('global', ip, 300, 60000)) return tooManyRequests(res, 60);
 
     if (!p.startsWith('/api/')) return serveStatic(req, res);
 
@@ -172,13 +267,20 @@ const server = http.createServer(async (req, res) => {
     // ----- auth -----
     if (p === '/api/setup-required' && m === 'GET') return send(res, 200, { required: db.isSetupRequired() });
     if (p === '/api/setup' && m === 'POST') {
+      // SEC-1: strict budget ahead of the scrypt hash this performs, so flooding
+      // this endpoint can't pin the event loop. Own bucket (not shared with login/
+      // verify-pin) — those are separate concerns with very different normal-use
+      // request rates (verify-pin in particular fires every time a PIN player is
+      // picked during ordinary gameplay) and shouldn't throttle each other.
+      if (!rateLimit('setup', ip, 10, 60000)) return tooManyRequests(res, 60);
       const b = await readJson(req);
-      const result = db.createFirstAdmin(b.username, b.password);
+      const result = await db.createFirstAdmin(b.username, b.password);
       return send(res, 200, result);
     }
     if (p === '/api/login' && m === 'POST') {
+      if (!rateLimit('login', ip, 10, 60000)) return tooManyRequests(res, 60);
       const b = await readJson(req);
-      const { token, username } = db.login(b.username, b.password);
+      const { token, username } = await db.login(b.username, b.password);
       return send(res, 200, { ok: true, username }, { 'Set-Cookie': auth.sessionCookieHeader(token, auth.SESSION_TTL_MS / 1000) });
     }
     if (p === '/api/logout' && m === 'POST') {
@@ -195,7 +297,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/admins' && m === 'POST') {
       if (!requireAdmin(req, res)) return;
       const b = await readJson(req);
-      return send(res, 200, db.createAdmin(b.username, b.password));
+      return send(res, 200, await db.createAdmin(b.username, b.password));
     }
     if (p === '/api/admins' && m === 'DELETE') {
       if (!requireAdmin(req, res)) return;
@@ -204,18 +306,19 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/admins/password' && m === 'PUT') {
       if (!requireAdmin(req, res)) return;
       const b = await readJson(req);
-      return send(res, 200, db.changeAdminPassword(b.id, b.password));
+      return send(res, 200, await db.changeAdminPassword(b.id, b.password));
     }
 
     // ----- player PINs -----
     if (p === '/api/players/verify-pin' && m === 'POST') {
+      if (!rateLimit('pin', ip, 10, 60000)) return tooManyRequests(res, 60);
       const b = await readJson(req);
-      return send(res, 200, db.verifyPlayerPin(b.name, b.pin));
+      return send(res, 200, await db.verifyPlayerPin(b.name, b.pin));
     }
     if (p === '/api/players/pin' && m === 'PUT') {
       if (!requireAdmin(req, res)) return;
       const b = await readJson(req);
-      return send(res, 200, db.setPlayerPin(b.name, b.pin));
+      return send(res, 200, await db.setPlayerPin(b.name, b.pin));
     }
     if (p === '/api/players/pin' && m === 'DELETE') {
       if (!requireAdmin(req, res)) return;
@@ -227,20 +330,31 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/live' && m === 'POST') {
       if (!requireWrite(req, res)) return;
       const b = await readJson(req);
-      liveState = b && typeof b === 'object' ? b : { active: false, ts: Date.now() };
+      const sanitized = sanitizeLiveState(b);
+      if (sanitized === null) return send(res, 413, { error: 'Live payload too large' });
+      liveState = sanitized;
       liveBroadcast();
       return send(res, 200, { ok: true });
     }
     if (p === '/api/live/stream' && m === 'GET') {
+      if (liveClients.size >= MAX_SSE_TOTAL) return send(res, 503, { error: 'Too many live connections' });
+      const ipSseCount = sseByIp.get(ip) || 0;
+      if (ipSseCount >= MAX_SSE_PER_IP) return send(res, 503, { error: 'Too many live connections from this address' });
+      sseByIp.set(ip, ipSseCount + 1);
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache, no-transform',
         'Connection': 'keep-alive',
         'X-Accel-Buffering': 'no',   // disable proxy buffering so events arrive immediately
+        ...SECURITY_HEADERS,
       });
       res.write(`data: ${JSON.stringify(liveState)}\n\n`);   // current state right away
       liveClients.add(res);
-      req.on('close', () => liveClients.delete(res));
+      req.on('close', () => {
+        liveClients.delete(res);
+        const remaining = (sseByIp.get(ip) || 1) - 1;
+        if (remaining <= 0) sseByIp.delete(ip); else sseByIp.set(ip, remaining);
+      });
       return; // keep the connection open
     }
 
@@ -367,6 +481,15 @@ const server = http.createServer(async (req, res) => {
       if ('card_tagline' in safe && safe.card_tagline.length > 140) {
         return send(res, 400, { error: 'card_tagline must be 140 characters or fewer' });
       }
+      // SEC-9: ha_url and the webhook-ID fields were previously stored unbounded.
+      if ('ha_url' in safe && String(safe.ha_url).length > 2048) {
+        return send(res, 400, { error: 'ha_url must be 2048 characters or fewer' });
+      }
+      for (const k of allowed) {
+        if (k.startsWith('ha_webhook_') && k in safe && String(safe[k]).length > 128) {
+          return send(res, 400, { error: `${k} must be 128 characters or fewer` });
+        }
+      }
       for (const k of boolKeys) {
         if (k in safe) safe[k] = (safe[k] === '1' || safe[k] === true) ? '1' : '0';
       }
@@ -386,14 +509,23 @@ const server = http.createServer(async (req, res) => {
       let parsedUrl;
       try { parsedUrl = new URL('/', haUrl); }
       catch(e) { return send(res, 400, { error: 'Invalid URL: ' + e.message }); }
+      // SEC-4 egress guard: resolve once and connect to that resolved IP (with the
+      // original hostname as Host/SNI), closing the DNS-rebinding window between
+      // "checked" and "connected" — see backend/netguard.js.
+      let resolvedIp;
+      try { resolvedIp = await netguard.resolveAllowedHost(parsedUrl.hostname); }
+      catch (e) { return send(res, 400, { error: e.message }); }
       const mod = parsedUrl.protocol === 'https:' ? require('https') : require('http');
       const result = await new Promise((resolve) => {
-        const r2 = mod.request({
-          hostname: parsedUrl.hostname,
+        const reqOpts = {
+          hostname: resolvedIp,
           port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
           path: '/',
           method: 'HEAD',
-        }, res2 => { res2.resume(); resolve({ ok: true, status: res2.statusCode }); });
+          headers: { Host: parsedUrl.host },
+        };
+        if (parsedUrl.protocol === 'https:') reqOpts.servername = parsedUrl.hostname;
+        const r2 = mod.request(reqOpts, res2 => { res2.resume(); resolve({ ok: true, status: res2.statusCode }); });
         r2.on('error', err => resolve({ ok: false, error: err.message }));
         r2.setTimeout(5000, () => { r2.destroy(); resolve({ ok: false, error: 'Connection timed out after 5 seconds' }); });
         r2.end();
@@ -471,12 +603,14 @@ const server = http.createServer(async (req, res) => {
 
     return send(res, 404, { error: 'Unknown endpoint' });
   } catch (err) {
+    const status = err.status || 500;
     // Log server-side so a self-hoster can see failures in `docker logs` — previously
     // errors were only ever reported back to the client, with no server-side record.
-    if (!err.status || err.status >= 500) {
-      console.error(`[${new Date().toISOString()}] ${req.method} ${req.url} ->`, err);
-    }
-    send(res, err.status || 500, { error: err.message || 'Server error' });
+    if (status >= 500) console.error(`[${new Date().toISOString()}] ${req.method} ${req.url} ->`, err);
+    // SEC-11: 4xx messages are app-authored (httpError() call sites) and safe to
+    // return as-is; a 5xx means something unexpected threw, so return a generic
+    // message rather than echoing err.message — the detail is already logged above.
+    send(res, status, { error: status >= 500 ? 'Server error' : (err.message || 'Server error') });
   }
 });
 

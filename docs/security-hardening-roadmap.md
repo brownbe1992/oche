@@ -13,6 +13,12 @@
 > **Size: Very low complexity** for the concrete fix below — it mirrors an
 > already-proven pattern in this exact codebase almost line-for-line, not new design.
 > **Usefulness: high** — closes a real, currently-unprotected brute-force path.
+>
+> **Follow-up:** a second, broader adversarial audit (`docs/security-audit-roadmap.md`)
+> found and fixed rate limiting, async password hashing, SSE/live-payload bounds, an
+> outbound-request egress guard, a non-root container, and several smaller hardening
+> items — all done except the webhook-auth decision below (SEC-7 in that doc), which is
+> the same open item as the "TODO" section immediately following this one.
 
 ## Goal
 

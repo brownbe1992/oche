@@ -6,6 +6,14 @@
 # BEFORE DEPLOYING: copy the unzipped "darts-app" folder onto your Docker host,
 # then set the path below (left side of the volume line) to wherever you put it.
 # On Unraid this is typically something like /mnt/user/appdata/darts-app.
+#
+# Security note: unlike docker-compose.yml (which builds the project's own Dockerfile
+# and runs as a non-root user — see docs/security-audit-roadmap.md SEC-5), this
+# variant runs the stock node:22-alpine image directly with the whole project folder
+# bind-mounted as /app, so it runs as root (matching that image's own default) with no
+# way to safely chown an arbitrary host folder without a build step. If you can build
+# an image on your Docker host, prefer docker-compose.yml instead; use this one only
+# when you specifically need the no-build/paste-into-Portainer workflow.
 
 services:
   darts:
@@ -19,6 +27,9 @@ services:
       - PORT=8046
       - DARTS_DB=/app/data/darts.db   # database is saved in the data/ folder of the project
       - COOKIE_SECURE=false   # set true if served over HTTPS (e.g. reverse proxy)
+      - OCHE_REQUIRE_AUTH=false   # set true for any internet-exposed deployment — see README.md
+      # - TRUST_PROXY=true       # only if behind a reverse proxy YOU control
+      # - HA_BLOCK_PRIVATE=true  # only to also block outbound HA requests to private/LAN IPs
     volumes:
       - /mnt/user/appdata/darts-app:/app   # <-- CHANGE the left side to your folder path
     restart: unless-stopped

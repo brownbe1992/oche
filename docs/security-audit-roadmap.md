@@ -1,5 +1,13 @@
 # Security Audit Roadmap (adversarial whole-codebase review)
 
+> **Status: SEC-1 through SEC-6 and SEC-8 through SEC-11 are ✅ fixed** (see the
+> "Status" line under each finding below for what actually shipped, which in a couple
+> of places is a more robust implementation than the original suggested fix — e.g.
+> SEC-5 uses a root-briefly/chown/drop-to-non-root entrypoint rather than a bare `USER
+> node`, so existing bind-mounted data directories keep working). **SEC-7 is the only
+> item still open**, per explicit instruction — it needs a design decision (see its
+> section) before any code changes.
+>
 > Produced by a full, character-by-character read of the codebase with a
 > pretend-malicious mindset ("how do I break in and pivot into the rest of the
 > network?"). Scope: `backend/server.js`, `backend/db.js`, `backend/auth.js`,
@@ -54,6 +62,19 @@ model doesn't re-report them. See `docs/security-hardening-roadmap.md` for detai
 
 ### SEC-1 — Blocking `scryptSync` on every login attempt → CPU-exhaustion DoS  **(MED, unauthenticated)**
 
+**Status: ✅ Fixed.** `auth.js` now wraps `crypto.scrypt` in a promise
+(`hashSecret`/`verifySecret` are async); `login()`, `verifyPlayerPin()`,
+`createFirstAdmin()`, `createAdmin()`, `changeAdminPassword()`, `setPlayerPin()` all
+`await` it, and every caller in `server.js` awaits those. The dummy-hash constant-time
+behavior on unknown usernames is preserved (computed lazily once, cached as a
+promise, since a synchronous module-load-time call isn't possible for an async
+function). `/api/login`, `/api/setup`, and `/api/players/verify-pin` each get their
+**own** rate-limit bucket (`'login'`, `'setup'`, `'pin'` — not a single shared bucket
+as the fix sketch below implies) at 10/60s/IP, so heavy legitimate PIN-verify traffic
+during normal gameplay setup can't burn down the login budget. Verified: 200
+concurrent bogus logins kept `GET /api/health` responding in ~10-20ms throughout, and
+the 11th login attempt from one IP within a window correctly got 429.
+
 **Where:** `backend/auth.js` `verifySecret()`/`hashSecret()` use `crypto.scryptSync`
 (synchronous). `backend/db.js` `login()` runs it on **every** attempt, including a
 dummy hash for unknown usernames (the anti-enumeration measure). `verifyPlayerPin()`
@@ -86,6 +107,19 @@ throughout, and (b) the attacker starts receiving 429 after the budget.
 
 ### SEC-2 — Unbounded SSE connections + unbounded live-state payload → resource-exhaustion DoS  **(MED)**
 
+**Status: ✅ Fixed.** `MAX_SSE_TOTAL=50` and `MAX_SSE_PER_IP=5` in `server.js`; the
+`/api/live/stream` handler returns 503 past either cap, and the per-IP count is
+decremented on `req.on('close', ...)`. Went with "leave the stream public but cap it"
+(option 3's simpler branch) rather than gating it behind `OCHE_REQUIRE_AUTH`, since the
+display screen genuinely isn't logged in. `POST /api/live` now runs through
+`sanitizeLiveState()`: only the top-level keys `liveSnapshot()` in `frontend/index.html`
+actually produces are kept (everything else silently dropped), and the sanitized
+result is rejected with 413 if it serializes past 64KB. Verified: a payload with a
+2000-entry players array + a 5KB junk field → 413; a normal payload with one unknown
+top-level key → 200 with that key stripped from the stored/broadcast state; opening 7
+connections from one IP → first 5 accepted (200), next 2 rejected (503); closing
+connections frees up the per-IP slot for a new one.
+
 **Where:** `backend/server.js` — `liveClients` is a `Set` with no cap; `GET
 /api/live/stream` adds a client per connection and is a **read**, so it is *not* gated
 even when `OCHE_REQUIRE_AUTH` is on. `POST /api/live` stores whatever object is sent
@@ -114,6 +148,14 @@ existing clients keep receiving updates.
 ---
 
 ### SEC-3 — No HTTP rate limiting anywhere  **(MED, unauthenticated)**
+
+**Status: ✅ Fixed.** `server.js` has a reusable `rateLimit(bucket, ip, max, windowMs)`
+(bucketed, not a single global map keyed by IP alone — see SEC-1's note on why login/
+setup/pin got separate buckets), `clientIp()` honoring `X-Forwarded-For` only when
+`TRUST_PROXY=true`, a `tooManyRequests()` helper that sets `Retry-After`, and a loose
+global budget (300/60s/IP) applied to every request before routing. Buckets are
+pruned on a 60s unref'd interval. Verified with the SEC-1 tests above plus a direct
+check that the `Retry-After` header is present and correct on a 429.
 
 **Where:** `backend/server.js` — there is no per-IP throttling on any route. Only
 per-account lockouts exist (admin login, player PIN).
@@ -149,6 +191,23 @@ unaffected.
 
 ### SEC-4 — No egress restriction on the Home Assistant URL → SSRF / network pivot  **(MED→HIGH if internet-exposed)**
 
+**Status: ✅ Fixed**, with the policy resolved as literally "always block
+loopback/link-local, allow private by default" (the fix sketch below hedges between
+two phrasings of an opt-out flag — resolved in favor of the "Recommended default"
+paragraph): new `backend/netguard.js` exports `resolveAllowedHost(hostname)`, which
+resolves once, rejects loopback/link-local (incl. `169.254.169.254`) unconditionally,
+optionally also rejects private ranges when `HA_BLOCK_PRIVATE=true` (renamed from the
+fix sketch's `HA_ALLOW_PRIVATE` — block-flag, not an allow-flag, since allow is the
+default), and returns the single resolved IP for the caller to connect to (closing the
+DNS-rebinding window). Both `fireHaWebhook()` (`db.js`) and `/api/ha-test`
+(`server.js`) use it and connect to the resolved IP with the original hostname sent as
+the `Host` header (and `servername` for TLS SNI on https). Verified against a real
+running server: `http://169.254.169.254/`, `http://127.0.0.1:<port>/`, and
+`http://localhost:<port>/` (resolves to loopback) were all rejected with a 400 and a
+clear message; a private-LAN-shaped address (`192.168.1.250`) was allowed through to
+attempt the connection (and correctly timed out, since nothing was listening there —
+proving it wasn't blocked by policy).
+
 **Where:** `backend/db.js` `fireHaWebhook()` and `backend/server.js` `/api/ha-test` —
 both make outbound HTTP requests to the admin-configured `ha_url` with no restriction
 on the destination host.
@@ -183,6 +242,33 @@ with a clear error; confirm a normal LAN HA URL still works.
 
 ### SEC-5 — Container runs as root  **(MED, defense-in-depth)**
 
+**Status: ✅ Fixed, with a more robust approach than the fix sketch below.** A bare
+`USER node` (as suggested) would break every *existing* deployment on upgrade: Docker
+bind mounts (`./darts_data:/data`, what `docker-compose.yml` actually uses) don't
+inherit the image's ownership the way named/anonymous volumes do, so a freshly-created
+or previously-root-owned host directory would leave the non-root process unable to
+open its database at all. Instead: new `docker-entrypoint.sh` runs as root just long
+enough to `chown` the (`DARTS_DB`-derived) data directory, then execs the real command
+via `su-exec node` (a small static binary from Alpine's own package repo — not an
+npm/JS dependency, doesn't affect the app's zero-dependency nature). `Dockerfile` adds
+`apk add su-exec`, copies the entrypoint, and sets `ENTRYPOINT
+["docker-entrypoint.sh"]`. **Verified against a real Docker daemon** (this sandbox
+doesn't have network access to pull `node:22-alpine` from Docker Hub — a policy-level
+403, not a config issue — so a literal `docker build` couldn't be completed here; the
+entrypoint's actual mechanism was instead validated directly with the real `chown` +
+`su-exec`-equivalent privilege-drop sequence against a real root-owned directory and
+the real Node app: confirmed the app fails to even start as non-root against a
+pre-existing root-owned dir without the chown step, and starts and writes its SQLite
+DB correctly with it). `docker-compose.yml`/`docker-compose.dev.yml` add
+`security_opt: [no-new-privileges:true]` (safe unconditionally); `read_only: true` /
+`cap_drop: [ALL]` were deliberately **not** added — the entrypoint's `chown` step needs
+`CAP_CHOWN`, and getting the exact minimal capability set right isn't something to
+guess at without being able to test a real container build in this environment; a
+wrong guess here would mean the container fails to start at all, which is worse than
+not adding the extra hardening. `docker-compose.portainer.yml` (the no-build, bind-the-
+whole-project-folder variant) is documented as staying root, since it has no build
+step to run a chown/entrypoint against — see the comment added to that file.
+
 **Where:** `Dockerfile` — no `USER` directive, so the process runs as root inside the
 container. Any RCE (now or from a future dependency) would start as root.
 
@@ -205,6 +291,19 @@ container. Any RCE (now or from a future dependency) would start as root.
 ---
 
 ### SEC-6 — Secure defaults not surfaced for public deployment  **(LOW→MED)**
+
+**Status: ✅ Fixed.** `docker-compose.yml`, `docker-compose.dev.yml`, and
+`docker-compose.portainer.yml` all now document (commented, default-off/unset)
+`OCHE_REQUIRE_AUTH`, `TRUST_PROXY`, and `HA_BLOCK_PRIVATE` with explanations of when to
+set each. `README.md` has a new "Exposing this to the internet — checklist" section
+covering all of the above plus the reverse-proxy/`COOKIE_SECURE` guidance, the
+non-root container, and the security response headers (all on by default, nothing to
+configure). Step 3 (log a warning when `COOKIE_SECURE` is false but the request looks
+like HTTPS via `X-Forwarded-Proto`) was **not** implemented — it's speculative
+(marked "Optional" in the fix sketch) and would require deciding whether to trust
+`X-Forwarded-Proto` by default, which has the same spoofing consideration as
+`X-Forwarded-For`/`TRUST_PROXY`; left as a possible future addition rather than guessed
+at here.
 
 **Where:** `docker-compose.yml` sets `COOKIE_SECURE=false` and does not mention
 `OCHE_REQUIRE_AUTH` at all; there is no TLS in-app (relies on a reverse proxy).
@@ -241,6 +340,15 @@ token. Recommendation: option 1 now, option 2 later. **Agree the approach before
 
 ### SEC-8 — Lockout enables griefing  **(LOW, accepted tradeoff — document)**
 
+**Status: ✅ Documented (no functional change needed — this finding's own fix section
+says "document the behavior either way").** SEC-3 now exists, so the per-IP `login`
+bucket bounds how fast one attacker IP can throw failed attempts at any one account. A
+code comment above `login()` in `db.js` records the tradeoff explicitly: per-account
+lockout is left as-is (an attacker who knows a username can still grief that one
+account via a slow-and-steady or multi-IP attempt sequence); a scheme that only locks
+an account after ITS OWN IP has separately been throttled would be a real behavior
+change with its own subtlety, out of scope for this pass.
+
 **Where:** `db.js` `login()` and `verifyPlayerPin()` lock an account for 5 min after N
 failures.
 
@@ -256,6 +364,10 @@ Document the behavior either way.
 
 ### SEC-9 — Settings values not length-bounded  **(LOW)**
 
+**Status: ✅ Fixed.** `PUT /api/settings` in `server.js` now rejects `ha_url` over 2048
+characters and any `ha_webhook_*` field over 128 characters with a 400, before calling
+`updateSettings`. Verified directly against a running server.
+
 **Where:** `server.js` `PUT /api/settings` caps `card_tagline` (≤140) and the two
 lockout thresholds, but `ha_url` and the webhook-ID fields are stored unbounded (admin
 only).
@@ -268,6 +380,20 @@ allow-list validation before `updateSettings`. Reject over-length with 400.
 ---
 
 ### SEC-10 — No security response headers  **(LOW, hardening)**
+
+**Status: ✅ Fixed**, using approach (a) from the fix sketch. `server.js` defines
+`SECURITY_HEADERS` (`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+`X-Frame-Options: DENY`, and a CSP: `default-src 'self'; script-src 'self'
+'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self';
+frame-ancestors 'none'; base-uri 'self'; form-action 'self'`) and applies it in `send()`
+(covering every API response and, since `serveStatic()` also calls `send()`, every
+static file too) and explicitly on the `/api/live/stream` SSE response. Verified with a
+real Playwright run of a full game (start → throw darts → 180 → enter turn) plus the
+`/display` scoreboard page: zero CSP violations logged by the browser, confirming the
+inline `<script>`/`onclick` handlers and Google Fonts loading are unaffected. Approach
+(b) — removing inline JS/handlers entirely for a strict nonce-based CSP — remains a
+separate, larger follow-up, not attempted here.
 
 **Where:** `server.js` `send()`/`serveStatic()` set only `Content-Type`.
 
@@ -287,6 +413,15 @@ allow-list validation before `updateSettings`. Reject over-length with 400.
 ---
 
 ### SEC-11 — Error responses echo `err.message` to the client  **(LOW)**
+
+**Status: ✅ Fixed.** The top-level catch in `server.js` now returns `{ error: 'Server
+error' }` for any response with `status >= 500`, while still returning the specific
+`err.message` for 4xx (the existing app-authored `httpError()` messages, which are
+meant to be shown to the user). The detailed error is still logged server-side via
+`console.error` exactly as before. Verified: a malformed-JSON request body (a real
+unhandled `JSON.parse` throw, not an `httpError`) now returns `{"error":"Server
+error"}` instead of the raw parse-error message; a normal 404 ("Player not found")
+still returns its specific message.
 
 **Where:** `server.js` top-level catch returns `err.message` for any error.
 
@@ -318,7 +453,8 @@ already there). Continue returning specific messages for 4xx.
 - **Auth primitives:** scrypt + random salt, `timingSafeEqual`, session tokens random
   and SHA-256-hashed at rest, `HttpOnly`+`SameSite=Strict` cookies (CSRF-safe for the
   state-changing verbs, which are all POST/PUT/DELETE), sessions invalidated on password
-  change. Sound. (The only issue is the *blocking* nature of scrypt — SEC-1.)
+  change. Sound. (The blocking nature of scrypt was the one real issue here — SEC-1,
+  now fixed.)
 - **Path traversal:** fixed (`path.relative`), re-verified with `curl --path-as-is`.
 - **Daily-challenge seed:** `Math.abs()` returns a positive double even for INT32_MIN;
   no negative-modulo crash.
@@ -327,14 +463,14 @@ already there). Continue returning specific messages for 4xx.
 
 ## Suggested implementation order
 
-1. **SEC-3** (build the reusable per-IP rate limiter) — unblocks SEC-1 and SEC-2.
-2. **SEC-1** (async scrypt + rate-limit auth) — highest unauthenticated-DoS payoff.
-3. **SEC-2** (SSE caps + bounded live payload).
-4. **SEC-4** (HA egress guard) — the network-pivot risk the deployment cares most about.
-5. **SEC-5** (non-root container) + **SEC-6** (secure-default docs/compose).
-6. **SEC-7** (decide + implement webhook auth — agree first).
-7. **SEC-9, SEC-10, SEC-11** (bounded settings, headers, generic 5xx) — quick hardening.
-8. **SEC-8** (revisit lockout vs. IP throttling once SEC-3 lands).
+1. ~~**SEC-3** (build the reusable per-IP rate limiter) — unblocks SEC-1 and SEC-2.~~ ✅
+2. ~~**SEC-1** (async scrypt + rate-limit auth) — highest unauthenticated-DoS payoff.~~ ✅
+3. ~~**SEC-2** (SSE caps + bounded live payload).~~ ✅
+4. ~~**SEC-4** (HA egress guard) — the network-pivot risk the deployment cares most about.~~ ✅
+5. ~~**SEC-5** (non-root container) + **SEC-6** (secure-default docs/compose).~~ ✅
+6. **SEC-7** (decide + implement webhook auth — agree first). **← the only remaining item**
+7. ~~**SEC-9, SEC-10, SEC-11** (bounded settings, headers, generic 5xx) — quick hardening.~~ ✅
+8. ~~**SEC-8** (revisit lockout vs. IP throttling once SEC-3 lands).~~ ✅ (documented)
 
 ## Standing practice
 

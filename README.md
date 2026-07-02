@@ -488,9 +488,33 @@ Set the environment variable **`OCHE_REQUIRE_AUTH=true`** to require a logged-in
 session for **every write** (creating players/games, recording turns, badges, challenges,
 and the live-scoreboard feed). Reads stay public, so the read-only scoreboard and stats
 pages still work for everyone. When enabled, the app prompts for an admin login before
-starting a game or changing the roster. **Turn this on for any deployment reachable from
-the open internet**; also set `COOKIE_SECURE=true` when serving over HTTPS so the session
-cookie gets the `Secure` flag.
+starting a game or changing the roster.
+
+### Exposing this to the internet — checklist
+
+If you're putting this somewhere reachable from the open internet (not just your LAN),
+work through this list. It's also tracked in `docs/security-audit-roadmap.md`.
+
+- **Put it behind a TLS-terminating reverse proxy.** The app itself only speaks plain HTTP.
+- **Set `COOKIE_SECURE=true`** once it's served over HTTPS, so the admin session cookie
+  gets the `Secure` flag.
+- **Set `OCHE_REQUIRE_AUTH=true`** (see above) so every write requires a logged-in admin.
+- **Set `TRUST_PROXY=true`** *only* if the reverse proxy in front of it is one you control
+  and it sets `X-Forwarded-For`. This makes the built-in per-IP rate limiting (login,
+  first-run setup, PIN verification, and a general per-IP request budget) use the real
+  client IP instead of the proxy's. Leave it unset otherwise — trusting that header from
+  an untrusted source would let a client spoof its way around the rate limiter.
+- **Leave `HA_BLOCK_PRIVATE` unset** for a normal LAN-hosted Home Assistant instance (the
+  default already blocks the app from being pointed at loopback or link-local/cloud-metadata
+  addresses regardless). Only set it to `true` if you specifically want outbound Home
+  Assistant requests restricted to non-private-network hosts too.
+- **The container already runs as a non-root user** (see `Dockerfile` /
+  `docker-entrypoint.sh`) and sends standard security response headers (CSP,
+  `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`) — nothing to configure
+  for these, just worth knowing they're on by default.
+- `POST /api/ha-webhook` (the inbound trigger used to fire an already-configured Home
+  Assistant webhook) is intentionally **not yet covered** by `OCHE_REQUIRE_AUTH` — see the
+  open item in `docs/security-hardening-roadmap.md` before relying on it being gated.
 
 ---
 

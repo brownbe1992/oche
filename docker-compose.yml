@@ -1,3 +1,5 @@
+# See "Exposing this to the internet" in README.md before putting this behind
+# anything other than a trusted LAN.
 services:
   darts:
     build: .
@@ -13,4 +15,27 @@ services:
       # so the admin session cookie gets the Secure flag. Leave unset/false for plain
       # HTTP / LAN-only deployments.
       - COOKIE_SECURE=false
+      # Set to "true" to require an admin login for every write (players, games,
+      # turns, badges, live feed) — reads stay public. Default off for a smooth
+      # upgrade on existing LAN installs; turn this ON for any deployment reachable
+      # from the open internet. See README.md "Exposing this to the internet".
+      - OCHE_REQUIRE_AUTH=false
+      # Only set to "true" if this container sits behind a reverse proxy YOU control
+      # that sets X-Forwarded-For — otherwise leave unset, since honoring that header
+      # from an untrusted source would let a client spoof its way around per-IP rate
+      # limiting.
+      # - TRUST_PROXY=true
+      # Only set to "true" to additionally block outbound Home Assistant requests to
+      # private/LAN address ranges (loopback and link-local/metadata addresses are
+      # always blocked regardless). Leave unset for a normal LAN-hosted HA instance.
+      # - HA_BLOCK_PRIVATE=true
+    # The container runs as a non-root user (see Dockerfile / docker-entrypoint.sh).
+    # no-new-privileges is safe to add unconditionally; a full read-only root
+    # filesystem / cap_drop:[ALL] were deliberately NOT added here — the entrypoint
+    # needs to run as root briefly to chown a freshly bind-mounted ./darts_data on
+    # first run (see docker-entrypoint.sh), which needs CAP_CHOWN, and getting the
+    # exact minimal capability set right isn't something to guess at without testing
+    # against a real deployment.
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
