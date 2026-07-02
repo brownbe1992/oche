@@ -1072,14 +1072,25 @@ const Auth = {
   loggedIn: false,
   username: null,
   setupRequired: false,
+  requireAuth: false,   // server-side OCHE_REQUIRE_AUTH — when true, writes need an admin login
 
   async refresh(){
     try{
-      const [me, setup] = await Promise.all([Backend.get('/api/me'), Backend.get('/api/setup-required')]);
+      const [me, setup, cfg] = await Promise.all([Backend.get('/api/me'), Backend.get('/api/setup-required'), Backend.get('/api/auth-config')]);
       this.loggedIn = !!me.loggedIn;
       this.username = me.username || null;
       this.setupRequired = !!setup.required;
+      this.requireAuth = !!(cfg && cfg.requireAuth);
     }catch(e){ logErr(e); }
+  },
+
+  // Gate for state-changing actions. When the server requires auth and nobody is
+  // logged in, prompt for admin login and run `onOk` only after a successful login;
+  // otherwise run `onOk` immediately. Keeps gameplay/roster writes from silently
+  // failing (401) under OCHE_REQUIRE_AUTH.
+  ensureCanWrite(onOk){
+    if(!this.requireAuth || this.loggedIn){ onOk(); return; }
+    uiLogin(()=>{ onOk(); });
   },
   async login(username, password){
     await Backend.send('POST','/api/login',{username,password});
@@ -1282,7 +1293,7 @@ function setDartMode(mode){ dartboardMode=(mode==='board'); applyDartMode(); }
 
 /* ---------- per-player finish rule ---------- */
 function playerOut(name){ return (prefs[name] && prefs[name].out==='single') ? 'single' : 'double'; }
-function setPlayerOut(name, mode){ const out = mode==='single'?'single':'double'; prefs[name]={ ...(prefs[name]||{}), out }; DB.setOut(name, out); persist(); }
+function setPlayerOut(name, mode){ Auth.ensureCanWrite(()=>{ const out = mode==='single'?'single':'double'; prefs[name]={ ...(prefs[name]||{}), out }; DB.setOut(name, out); persist(); renderPlayerPage(); }); }
 
 /* ---------- navigation ---------- */
 function show(name){
@@ -2125,11 +2136,11 @@ function addExistingPlayer(){
 function addNewPlayer(){
   closeAddPlayerMenu();
   if(setup.slots.length>=6) return;
-  uiAddPlayer((name,opts)=>{
+  Auth.ensureCanWrite(()=>uiAddPlayer((name,opts)=>{
     const a=addToRoster(name,opts);
     if(!a) return;
     withPinCheck(a, ()=>{ setup.slots.push(a); renderPlayers(); });
-  });
+  }));
 }
 function removePlayer(i){ setup.slots.splice(i,1); if(!setup.slots.length) setup.slots=[''] ; renderPlayers(); }
 function shufflePlayers(){
@@ -2176,6 +2187,9 @@ function restoreSetup(){
 }
 
 async function startGame(){
+  // When the server requires auth for writes, make sure we're logged in before
+  // starting — otherwise every turn POST would 401 and the game wouldn't record.
+  if(Auth.requireAuth && !Auth.loggedIn){ Auth.ensureCanWrite(()=>startGame()); return; }
   // Daily Challenge mode determines its own starting score/legs/sets from today's
   // challenge shape — computed into locals rather than written into setup.start/
   // legsPerSet/setsPerGame, since those persist across sessions (saveSetup() below)
@@ -2369,10 +2383,10 @@ function renderRoster(){
   }).join('');
 }
 function askAddPlayer(){
-  uiAddPlayer((name, opts)=>{ if(addToRoster(name, opts)) renderRoster(); });
+  Auth.ensureCanWrite(()=>uiAddPlayer((name, opts)=>{ if(addToRoster(name, opts)) renderRoster(); }));
 }
 function askRename(name){
-  uiPrompt('Rename player', name, newName=>{ if(renamePlayer(name,newName)) renderRoster(); });
+  Auth.ensureCanWrite(()=>uiPrompt('Rename player', name, newName=>{ if(renamePlayer(name,newName)) renderRoster(); }));
 }
 function askDelete(name){
   uiConfirm(`Delete "${name}" and all of their stats? This can't be undone.`, ()=>{ deletePlayer(name); renderRoster(); });
@@ -2385,10 +2399,12 @@ let showMoreStats = false;
 let playerSettingsUnlocked = false;
 function localDateStr(d){ d = d || new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function setPlayerDartWeight(name, value){
-  const weight = value ? Number(value) : null;
-  if(stats[name]) stats[name].dartWeight = weight;
-  DB.setDartWeight(name, weight);
-  persist();
+  Auth.ensureCanWrite(()=>{
+    const weight = value ? Number(value) : null;
+    if(stats[name]) stats[name].dartWeight = weight;
+    DB.setDartWeight(name, weight);
+    persist();
+  });
 }
 function switchPlayerTab(tab){
   playerPageTab = tab;
@@ -2714,9 +2730,9 @@ function askClearPlayerStats(name, mode){
   });
 }
 function askRenameFromProfile(name){
-  uiPrompt('Rename player', name, newName=>{
+  Auth.ensureCanWrite(()=>uiPrompt('Rename player', name, newName=>{
     if(renamePlayer(name, newName)){ currentPlayer = newName; renderPlayerPage(); }
-  });
+  }));
 }
 function askDeleteFromProfile(name){
   uiConfirm(`Delete "${name}" and all of their stats? This can't be undone.`, ()=>{ deletePlayer(name); currentPlayer=null; show('players'); });
@@ -4272,6 +4288,36 @@ function submitVerifyPin(){
   Backend.send('POST','/api/players/verify-pin',{ name, pin })
     .then(()=>{ const f=window.__modalPinOk; closeModal(); if(f) f(); })
     .catch(err=>{ if(btn) btn.disabled=false; errEl.textContent = err.message || 'Incorrect PIN'; errEl.hidden=false; });
+}
+// Admin-login modal, shown when a write is attempted on a server that has
+// OCHE_REQUIRE_AUTH enabled and nobody is logged in. Reuses Auth.login (same
+// endpoint/session as the Settings gate); on success runs onOk.
+function uiLogin(onOk){
+  window.__modalLoginOk = onOk;
+  document.getElementById('modal-body').innerHTML=
+    `<p class="modal-msg">This server requires an admin login to make changes.</p>
+     <label class="field">Username</label>
+     <input type="text" id="login-username" autocomplete="username" style="margin-bottom:10px">
+     <label class="field">Password</label>
+     <input type="password" id="login-password" autocomplete="current-password" style="margin-bottom:6px"
+            onkeydown="if(event.key==='Enter')submitUiLogin()">
+     <div id="login-error" style="color:var(--danger,#e5484d);font-size:12px;margin:6px 0 0" hidden></div>
+     <div class="modal-actions" style="margin-top:16px">
+       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+       <button class="btn btn-primary" id="login-ok" onclick="submitUiLogin()">Log in</button>
+     </div>`;
+  document.getElementById('modal').hidden=false;
+  setTimeout(()=>{ const el=document.getElementById('login-username'); if(el) el.focus(); },0);
+}
+function submitUiLogin(){
+  const username=document.getElementById('login-username').value;
+  const password=document.getElementById('login-password').value;
+  const err=document.getElementById('login-error');
+  const btn=document.getElementById('login-ok');
+  if(btn) btn.disabled=true;
+  Auth.login(username,password)
+    .then(()=>{ const f=window.__modalLoginOk; closeModal(); if(f) f(); })
+    .catch(e=>{ if(btn) btn.disabled=false; if(err){ err.textContent=e.message||'Login failed'; err.hidden=false; } });
 }
 // runs `onOk` immediately if the player has no PIN, otherwise prompts for one first
 function withPinCheck(name, onOk, onFail){

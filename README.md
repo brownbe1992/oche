@@ -475,7 +475,22 @@ The first time Settings is opened with no admin account on the server, a setup w
 | Change Home Assistant / webhook / scoreboard-layout / default-input settings | Yes |
 | Verify a player's PIN to add them to a game | No — public, but rate-limited by the lockout threshold |
 | Log in as an admin | No — public, but rate-limited by its own lockout threshold |
-| View stats, play games, use the scoreboard | No |
+| View stats, play games, use the scoreboard | No *(unless `OCHE_REQUIRE_AUTH` is set — see below)* |
+
+### Locking down writes for internet-exposed deployments
+
+By default the app follows a LAN trust model: **reads and gameplay writes are open**, and
+only the admin/destructive actions above require login. Player PINs are a UI convenience —
+they gate the player picker, **not** the underlying API — so on an untrusted network anyone
+who can reach the server could record games or edit players directly.
+
+Set the environment variable **`OCHE_REQUIRE_AUTH=true`** to require a logged-in admin
+session for **every write** (creating players/games, recording turns, badges, challenges,
+and the live-scoreboard feed). Reads stay public, so the read-only scoreboard and stats
+pages still work for everyone. When enabled, the app prompts for an admin login before
+starting a game or changing the roster. **Turn this on for any deployment reachable from
+the open internet**; also set `COOKIE_SECURE=true` when serving over HTTPS so the session
+cookie gets the `Secure` flag.
 
 ---
 

@@ -176,6 +176,12 @@ try { db.exec('ALTER TABLE games ADD COLUMN config TEXT'); } catch(e) {}
 try { db.exec('ALTER TABLE admins ADD COLUMN login_fail_count INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
 try { db.exec('ALTER TABLE admins ADD COLUMN login_locked_until INTEGER'); } catch(e) {}
 try { db.exec('ALTER TABLE player_badges ADD COLUMN count INTEGER NOT NULL DEFAULT 1'); } catch(e) {}
+// player_count is the participant count captured once at game creation. H2H-vs-practice
+// classification reads THIS instead of a live COUNT(game_players) subquery, so deleting
+// or resetting a player can never retroactively reclassify a game (a 2-player H2H game
+// stays H2H even after one participant is removed). Backfilled for existing rows below.
+try { db.exec('ALTER TABLE games ADD COLUMN player_count INTEGER'); } catch(e) {}
+db.exec(`UPDATE games SET player_count = (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = games.id) WHERE player_count IS NULL`);
 
 const DEFAULT_PIN_LOCKOUT_THRESHOLD = 10;
 const DEFAULT_ADMIN_LOCKOUT_THRESHOLD = 5; // stricter than PIN lockout — compromising the admin account is more consequential
@@ -328,11 +334,31 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice }) {
     const p   = ensurePlayer(entry.name);
     q.addParticipant.run(gameId, p.id, p.dart_weight ?? null, out);
   });
+  // Freeze the participant count now (deduped, since addParticipant is INSERT OR IGNORE)
+  // so H2H/practice classification survives later player deletion — see the migration note.
+  const pc = db.prepare('SELECT COUNT(*) AS n FROM game_players WHERE game_id = ?').get(gameId).n;
+  db.prepare('UPDATE games SET player_count = ? WHERE id = ?').run(pc, gameId);
   return { gameId };
 }
 
 function addTurn(gameId, t) {
   const p = ensurePlayer(t.player);
+  // Every real visit is 1-3 physical darts. Enforce that here so a malformed/hostile
+  // request can't record a "scored" turn with no dart rows — which would count toward
+  // total points but not the darts denominator, silently inflating the 3-dart average.
+  if (!Array.isArray(t.darts) || t.darts.length < 1 || t.darts.length > 3) {
+    throw httpError(400, 'A turn must contain 1 to 3 darts');
+  }
+  // Validate each dart before writing: sector 0 (miss), 1-20, or 25 (bull); multiplier
+  // 1-3. Rejecting garbage here keeps sector/treble/checkout analytics trustworthy.
+  const darts = t.darts.map((d, i) => {
+    const sector = Number(d.sector), multiplier = Number(d.multiplier);
+    const validSector = Number.isInteger(sector) && (sector === 0 || sector === 25 || (sector >= 1 && sector <= 20));
+    const validMult   = Number.isInteger(multiplier) && multiplier >= 1 && multiplier <= 3;
+    if (!validSector || !validMult) throw httpError(400, 'Invalid dart sector or multiplier');
+    return { dartNo: Number.isInteger(Number(d.dartNo)) ? Number(d.dartNo) : i + 1, sector, multiplier,
+             thrownAt: d.thrownAt ? String(d.thrownAt) : null };
+  });
   const info = q.insertTurn.run(
     Number(gameId), p.id,
     Number(t.set || 1), Number(t.leg || 1),
@@ -341,16 +367,11 @@ function addTurn(gameId, t) {
     t.checkout ? 1 : 0,
     t.checkout ? (Number(t.checkoutPoints) || 0) : null
   );
-  // Insert individual dart rows — scored/is_treble/is_double are generated columns
-  if (Array.isArray(t.darts) && t.darts.length) {
-    const turnId = Number(info.lastInsertRowid);
-    for (const d of t.darts) {
-      // thrownAt is an ISO timestamp captured client-side at tap time; only sent when
-      // the admin has enabled the "collect_dart_timing" setting.
-      const thrownAt = d.thrownAt ? String(d.thrownAt) : null;
-      q.insertDart.run(turnId, Number(d.dartNo), Number(d.sector), Number(d.multiplier), thrownAt);
-    }
-  }
+  // Insert individual dart rows — scored/is_treble/is_double are generated columns.
+  // thrownAt is an ISO timestamp captured client-side at tap time; only sent when
+  // the admin has enabled the "collect_dart_timing" setting.
+  const turnId = Number(info.lastInsertRowid);
+  for (const d of darts) q.insertDart.run(turnId, d.dartNo, d.sector, d.multiplier, d.thrownAt);
   return { ok: true };
 }
 
@@ -447,7 +468,7 @@ function computeStats() {
            COUNT(DISTINCT t.game_id || '-' || t.set_no || '-' || t.leg_no) AS legs
     FROM turns t JOIN games g ON g.id = t.game_id
     WHERE g.practice = 0
-      AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+      AND g.player_count > 1
     GROUP BY t.player_id, g.category
   `).all();
 
@@ -455,7 +476,7 @@ function computeStats() {
     SELECT gp.player_id AS pid, g.category AS cat, COUNT(*) AS games
     FROM game_players gp JOIN games g ON g.id = gp.game_id
     WHERE g.completed_at IS NOT NULL AND g.practice = 0
-      AND (SELECT COUNT(*) FROM game_players gp2 WHERE gp2.game_id = g.id) > 1
+      AND g.player_count > 1
     GROUP BY gp.player_id, g.category
   `).all();
 
@@ -463,7 +484,7 @@ function computeStats() {
     SELECT t.player_id AS pid, g.category AS cat, COUNT(*) AS legs
     FROM turns t JOIN games g ON g.id = t.game_id
     WHERE t.checkout = 1 AND g.practice = 0
-      AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+      AND g.player_count > 1
     GROUP BY t.player_id, g.category
   `).all();
 
@@ -473,7 +494,7 @@ function computeStats() {
       SELECT t.player_id, g.category
       FROM turns t JOIN games g ON g.id = t.game_id
       WHERE t.checkout = 1 AND g.practice = 0
-        AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+        AND g.player_count > 1
       GROUP BY t.game_id, t.player_id, g.category, t.set_no
       HAVING COUNT(*) >= g.legs_per_set
     )
@@ -484,7 +505,7 @@ function computeStats() {
     SELECT g.winner_id AS pid, g.category AS cat, COUNT(*) AS games
     FROM games g
     WHERE g.completed_at IS NOT NULL AND g.winner_id IS NOT NULL AND g.practice = 0
-      AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+      AND g.player_count > 1
     GROUP BY g.winner_id, g.category
   `).all();
 
@@ -494,7 +515,7 @@ function computeStats() {
            COUNT(DISTINCT t.game_id || '-' || t.set_no || '-' || t.leg_no) AS legs
     FROM turns t JOIN games g ON g.id = t.game_id
     WHERE g.practice = 1
-      OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1
+      OR g.player_count = 1
     GROUP BY t.player_id, g.category
   `).all();
 
@@ -503,7 +524,7 @@ function computeStats() {
     SELECT pid, AVG(leg_darts) AS avg_darts FROM (
       SELECT t.player_id AS pid, COUNT(d.id) AS leg_darts
       FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-      WHERE g.practice=0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id=g.id)>1
+      WHERE g.practice=0 AND g.player_count>1
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout)>0
     ) GROUP BY pid
   `).all();
@@ -512,7 +533,7 @@ function computeStats() {
     SELECT pid, AVG(leg_darts) AS avg_darts FROM (
       SELECT t.player_id AS pid, COUNT(d.id) AS leg_darts
       FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-      WHERE g.practice=1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id=g.id)=1
+      WHERE g.practice=1 OR g.player_count=1
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout)>0
     ) GROUP BY pid
   `).all();
@@ -529,8 +550,8 @@ function computeStats() {
   `).all();
 
   const nd9All  = nineDarterBase('');
-  const nd9H2H  = nineDarterBase("AND g.practice=0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id=g.id)>1");
-  const nd9Prac = nineDarterBase("AND (g.practice=1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id=g.id)=1)");
+  const nd9H2H  = nineDarterBase("AND g.practice=0 AND g.player_count>1");
+  const nd9Prac = nineDarterBase("AND (g.practice=1 OR g.player_count=1)");
 
   // Aggregate stats per mode — trebleLess and dartsThrown now come from the darts JOIN.
   const _agg = (modeWhere) => db.prepare(`
@@ -552,8 +573,8 @@ function computeStats() {
     GROUP BY t.player_id
   `).all();
 
-  const h2hAgg  = _agg(`g.practice=0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id=g.id)>1`);
-  const pracAgg = _agg(`g.practice=1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id=g.id)=1`);
+  const h2hAgg  = _agg(`g.practice=0 AND g.player_count>1`);
+  const pracAgg = _agg(`g.practice=1 OR g.player_count=1`);
 
   // Last played date and recent-form average (last 30 turns) per player — used on the roster page.
   const lastPlayedRows = db.prepare(`
@@ -631,13 +652,13 @@ function getSummary() {
     SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no) AS n
     FROM turns t JOIN games g ON g.id = t.game_id
     WHERE g.practice = 0
-      AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+      AND g.player_count > 1
   `).get().n;
   const legs = db.prepare(`
     SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
     FROM turns t JOIN games g ON g.id = t.game_id
     WHERE g.practice = 0
-      AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+      AND g.player_count > 1
   `).get().n;
   const darts        = db.prepare('SELECT COUNT(*) AS n FROM darts').get().n ?? 0;
   const tonPlus      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout=1 AND checkout_points>=100').get().n;
@@ -655,7 +676,7 @@ function getSummary() {
     SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
     FROM turns t JOIN games g ON g.id = t.game_id
     WHERE g.practice = 1
-      OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1
+      OR g.player_count = 1
   `).get().n;
   return { players, games, sets, legs, darts, tonPlus, oneEighties, bigFish, nineDarters, practiceLegs };
 }
@@ -671,7 +692,7 @@ function getHomeExtra() {
     JOIN players p ON p.id = gp.player_id
     JOIN games g ON g.id = gp.game_id
     WHERE g.completed_at IS NOT NULL AND g.practice = 0
-      AND (SELECT COUNT(*) FROM game_players gp2 WHERE gp2.game_id = g.id) > 1
+      AND g.player_count > 1
     GROUP BY p.id
     HAVING played >= 1
     ORDER BY won DESC, played ASC
@@ -681,8 +702,8 @@ function getHomeExtra() {
     rate: r.played ? +((r.won / r.played) * 100).toFixed(1) : 0
   }));
 
-  const H2H_WHERE = `(g.practice = 0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1)`;
-  const PRACTICE_WHERE = `(g.practice = 1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1)`;
+  const H2H_WHERE = `(g.practice = 0 AND g.player_count > 1)`;
+  const PRACTICE_WHERE = `(g.practice = 1 OR g.player_count = 1)`;
 
   const _trebleLess = (modeWhere) => db.prepare(`
     SELECT p.name AS name, COUNT(*) AS turns,
@@ -886,7 +907,7 @@ function getPersonalBests(playerName, mode) {
       SELECT g.winner_id AS winnerId
       FROM games g JOIN game_players gp ON gp.game_id=g.id
       WHERE gp.player_id=? AND g.completed_at IS NOT NULL AND g.practice=0
-        AND (SELECT COUNT(*) FROM game_players gp2 WHERE gp2.game_id=g.id) > 1
+        AND g.player_count > 1
       ORDER BY g.completed_at DESC
       LIMIT 50
     `).all(p.id);
@@ -902,9 +923,9 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
   const p = getPlayer(playerName);
   if (!p) return [];
   const modeWhere = opts.mode === 'h2h'
-    ? `AND g.practice = 0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1`
+    ? `AND g.practice = 0 AND g.player_count > 1`
     : opts.mode === 'practice'
-    ? `AND (g.practice = 1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1)`
+    ? `AND (g.practice = 1 OR g.player_count = 1)`
     : '';
   const params = [p.id];
   let weightWhere = '';
@@ -1042,8 +1063,8 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
 }
 
 function _mf(mode) {
-  if (mode === 'h2h')      return `AND g.practice = 0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1`;
-  if (mode === 'practice') return `AND (g.practice = 1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1)`;
+  if (mode === 'h2h')      return `AND g.practice = 0 AND g.player_count > 1`;
+  if (mode === 'practice') return `AND (g.practice = 1 OR g.player_count = 1)`;
   return '';
 }
 
@@ -1184,23 +1205,26 @@ function clearPlayerStats(playerName, mode) {
     db.prepare(`
       DELETE FROM games WHERE id IN (
         SELECT g.id FROM games g
-        WHERE (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1
+        WHERE g.player_count = 1
           AND EXISTS (SELECT 1 FROM game_players gp2 WHERE gp2.game_id = g.id AND gp2.player_id = ?)
       )
     `).run(p.id);
-    // Delete this player's turns and participation in any remaining multi-player games
-    db.prepare('DELETE FROM turns        WHERE player_id = ?').run(p.id);
-    db.prepare('DELETE FROM game_players WHERE player_id = ?').run(p.id);
+    // Delete this player's turns from any remaining multi-player games. game_players
+    // rows are intentionally KEPT (same as the h2h/practice branches below) — and now
+    // that classification reads the frozen games.player_count, keeping vs. removing them
+    // no longer affects an opponent's H2H/practice split either way; keeping them just
+    // preserves the honest record that this player took part in those games.
+    db.prepare('DELETE FROM turns WHERE player_id = ?').run(p.id);
     return { ok: true };
   }
 
   const gameIdQuery = mode === 'h2h'
     ? `SELECT g.id FROM games g
        WHERE g.practice = 0
-         AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1
+         AND g.player_count > 1
          AND EXISTS (SELECT 1 FROM game_players gp2 WHERE gp2.game_id = g.id AND gp2.player_id = ?)`
     : `SELECT g.id FROM games g
-       WHERE (g.practice = 1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1)
+       WHERE (g.practice = 1 OR g.player_count = 1)
          AND EXISTS (SELECT 1 FROM game_players gp2 WHERE gp2.game_id = g.id AND gp2.player_id = ?)`;
 
   const gameIds = db.prepare(gameIdQuery).all(p.id).map(r => r.id);

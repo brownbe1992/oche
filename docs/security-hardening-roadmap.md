@@ -60,6 +60,70 @@ solved once, just not applied to the account that matters most.
   `pin_lockout_threshold`-style settings pattern (either share that setting or add a
   distinct `admin_lockout_threshold` — see Open questions).
 
+## Follow-up done (v0.7.x): auth-required-for-writes, and two stat-integrity fixes
+
+A second audit (pretend-malicious, whole-codebase) found that while admin/settings
+routes were gated, **every gameplay/stat write endpoint was unauthenticated**, and that
+**player PINs were only enforced in the UI** — a direct `POST /api/games/:id/turns`
+recorded turns as a PIN-protected player with no PIN. Addressed:
+
+- **`OCHE_REQUIRE_AUTH` (env, default off).** When on, every write endpoint
+  (`POST /api/players`, `PUT /api/players/rename|out|dart-weight`, `POST /api/games`,
+  `/api/games/:id/turns|complete|events`, `DELETE .../turns/last`, `POST /api/live`,
+  `/api/badges/award|revoke`, `/api/challenges/start|complete`) requires a logged-in
+  admin session via a shared `requireWrite()` gate. Reads stay public so the scoreboard
+  and stats still work for everyone. `GET /api/auth-config` exposes the flag; the
+  frontend uses it to prompt for login before gameplay/roster writes. Default off so
+  existing LAN installs are unchanged on upgrade; **turn it on for any internet-exposed
+  deployment.** This is the chosen mitigation for the client-only-PIN gap — PINs stay a
+  UI convenience; the auth gate is the real lock.
+- **Stat reclassification fixed.** H2H-vs-practice classification now reads a frozen
+  `games.player_count` (captured at creation, backfilled) instead of a live
+  `COUNT(game_players)` subquery, so deleting or resetting a player can no longer flip
+  an opponent's completed H2H games into "practice."
+- **Hardening:** `addTurn` now rejects turns with no darts / out-of-range
+  sector/multiplier (was a silent 3-dart-average inflation + stat-poisoning vector);
+  the static-file traversal guard uses `path.relative` instead of a bare
+  `startsWith(FRONTEND_DIR)` (which would also accept a sibling `frontend-*` dir).
+
+## TODO — brainstorm & agree: authenticate webhook payloads (Home Assistant)
+
+**Status: needs a design decision before implementing — do not just pick one.**
+
+`POST /api/ha-webhook` is still unauthenticated (deliberately left out of the
+auth-for-writes pass above, pending this discussion). Today it only ever fires to the
+*already-admin-configured* HA URL, so it's not arbitrary SSRF — but an anonymous
+request can still (a) trigger the homeowner's HA automations at will and (b) inject
+arbitrary JSON fields into the outbound payload. The goal: **every webhook payload the
+app emits should be attributable to an authenticated session of some kind**, so a
+random internet client can't drive someone's smart home through this app.
+
+Candidate approaches to weigh (pick together, don't assume):
+
+1. **Fold it into `requireWrite`** — simplest: `/api/ha-webhook` requires an admin
+   session like every other write when `OCHE_REQUIRE_AUTH` is on. Downside: the webhook
+   is fired from gameplay code (`sendHaWebhook`) that today runs for any player at the
+   oche, not just an admin — so this only works cleanly if gameplay already requires
+   auth (which, with the flag on, it does). Likely the right default. Open question:
+   what should happen when the flag is *off* — stay open (LAN trust) or always require
+   admin for this specific endpoint regardless of the flag?
+2. **Server-side firing only.** Stop exposing an HTTP trigger at all: move all webhook
+   emission fully server-side, fired as a side effect of already-authenticated write
+   endpoints (turn recorded → server decides whether it's a 180/Big Fish/etc. and fires
+   the webhook itself). Removes the public trigger entirely and also removes the
+   client's ability to forge payload fields. Bigger refactor (server must re-derive the
+   achievement conditions the client currently computes), but the most robust.
+3. **Signed/capability token.** Mint a short-lived HMAC token (derived from a server
+   secret) when a game starts under an authenticated session, and require it on
+   `/api/ha-webhook`. Flexible but adds token-lifecycle complexity for little gain over
+   option 1 in a single-server LAN app.
+
+Recommendation to open the discussion: **option 1 for now** (least churn, closes the
+anonymous-trigger hole the moment `OCHE_REQUIRE_AUTH` is on), with **option 2 as the
+eventual target** once we're comfortable moving achievement detection server-side —
+which would also make the moment-card image payload (currently client-generated base64)
+the last remaining client-trusted webhook input to reconsider. Decide before coding.
+
 ## Standing checklist for future features (not urgent, just tracked)
 
 Several roadmap docs already thought carefully about secrets on their own:

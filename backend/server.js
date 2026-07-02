@@ -49,6 +49,11 @@
    Routes marked [admin] require a logged-in admin session (cookie set by /api/login).
    Set COOKIE_SECURE=true when serving over HTTPS (e.g. behind a reverse proxy) so the
    session cookie gets the Secure flag; leave unset for plain-HTTP LAN deployments.
+
+   Set OCHE_REQUIRE_AUTH=true to require an admin session for ALL write endpoints
+   (creating players/games, recording turns, badges, challenges, the live feed) — reads
+   stay public. Default off (open LAN behavior). GET /api/auth-config reports this flag
+   so the frontend can gate gameplay behind login when it's on.
    ============================================================================= */
 const http = require('http');
 const fs = require('fs');
@@ -57,6 +62,11 @@ const db = require('./db.js');
 const auth = require('./auth.js');
 
 const PORT = process.env.PORT || 8046;
+// When OCHE_REQUIRE_AUTH=true, every state-changing (write) API endpoint requires a
+// logged-in admin session. Reads (stats, scoreboard, settings-for-display) stay public
+// so viewing and the live scoreboard still work for everyone. Default OFF so existing
+// LAN deployments are unaffected on upgrade; turn ON for any internet-exposed install.
+const REQUIRE_AUTH = String(process.env.OCHE_REQUIRE_AUTH || '').toLowerCase() === 'true';
 const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
 const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript', '.css':'text/css', '.svg':'image/svg+xml', '.ico':'image/x-icon' };
 
@@ -79,6 +89,15 @@ function requireAdmin(req, res) {
   const admin = currentAdmin(req);
   if (!admin) { send(res, 401, { error: 'Admin login required' }); return null; }
   return admin;
+}
+
+// Call at the top of any state-changing (write) route. When OCHE_REQUIRE_AUTH is off
+// this is a no-op (returns true, preserving open LAN behavior). When on, it requires a
+// logged-in admin, sending 401 and returning false if absent. Returns true when the
+// request may proceed.
+function requireWrite(req, res) {
+  if (!REQUIRE_AUTH) return true;
+  return !!requireAdmin(req, res);
 }
 
 function readJson(req) {
@@ -104,7 +123,14 @@ function serveStatic(req, res) {
   if (rel === '/' || rel === '') rel = '/index.html';
   if (rel === '/display') rel = '/display.html';     // friendly URL for the scoreboard
   const filePath = path.normalize(path.join(FRONTEND_DIR, rel));
-  if (!filePath.startsWith(FRONTEND_DIR)) return send(res, 403, { error: 'Forbidden' }); // path traversal guard
+  // Path-traversal guard via path.relative: a plain string startsWith(FRONTEND_DIR)
+  // check would also accept a sibling dir whose name merely starts with "frontend"
+  // (e.g. frontend-backup). relative() is "" for the dir itself and starts with ".."
+  // only when the resolved path escapes it — the robust form.
+  const relToRoot = path.relative(FRONTEND_DIR, filePath);
+  if (relToRoot !== '' && (relToRoot.startsWith('..') || path.isAbsolute(relToRoot))) {
+    return send(res, 403, { error: 'Forbidden' });
+  }
   fs.readFile(filePath, (err, buf) => {
     if (err) {
       // single-page app: fall back to index.html for unknown non-API paths
@@ -139,6 +165,9 @@ const server = http.createServer(async (req, res) => {
     if (!p.startsWith('/api/')) return serveStatic(req, res);
 
     if (p === '/api/health' && m === 'GET') return send(res, 200, { ok: true });
+    // Public: lets the frontend know whether writes require an admin login, so it can
+    // gate gameplay/roster changes behind login when OCHE_REQUIRE_AUTH is enabled.
+    if (p === '/api/auth-config' && m === 'GET') return send(res, 200, { requireAuth: REQUIRE_AUTH });
 
     // ----- auth -----
     if (p === '/api/setup-required' && m === 'GET') return send(res, 200, { required: db.isSetupRequired() });
@@ -196,6 +225,7 @@ const server = http.createServer(async (req, res) => {
     // ----- live scoreboard channel -----
     if (p === '/api/live' && m === 'GET') return send(res, 200, liveState);
     if (p === '/api/live' && m === 'POST') {
+      if (!requireWrite(req, res)) return;
       const b = await readJson(req);
       liveState = b && typeof b === 'object' ? b : { active: false, ts: Date.now() };
       liveBroadcast();
@@ -216,12 +246,13 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/players' && m === 'GET')  return send(res, 200, db.listPlayers());
     if (p === '/api/players' && m === 'POST') {
+      if (!requireWrite(req, res)) return;
       const b = await readJson(req);
       return send(res, 200, db.addPlayer(b.name, b.out, { pin: b.pin, dartWeight: b.dartWeight }));
     }
-    if (p === '/api/players/rename' && m === 'PUT')      { const b = await readJson(req); return send(res, 200, db.renamePlayer(b.from, b.to)); }
-    if (p === '/api/players/out' && m === 'PUT')         { const b = await readJson(req); return send(res, 200, db.setOut(b.name, b.out)); }
-    if (p === '/api/players/dart-weight' && m === 'PUT') { const b = await readJson(req); return send(res, 200, db.setDartWeight(b.name, b.weight)); }
+    if (p === '/api/players/rename' && m === 'PUT')      { if (!requireWrite(req, res)) return; const b = await readJson(req); return send(res, 200, db.renamePlayer(b.from, b.to)); }
+    if (p === '/api/players/out' && m === 'PUT')         { if (!requireWrite(req, res)) return; const b = await readJson(req); return send(res, 200, db.setOut(b.name, b.out)); }
+    if (p === '/api/players/dart-weight' && m === 'PUT') { if (!requireWrite(req, res)) return; const b = await readJson(req); return send(res, 200, db.setDartWeight(b.name, b.weight)); }
     if (p === '/api/players/dart-weights' && m === 'GET') return send(res, 200, db.getDartWeights(url.searchParams.get('name')));
     if (p === '/api/players' && m === 'DELETE') {
       if (!requireAdmin(req, res)) return;
@@ -380,29 +411,35 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, result);
     }
 
-    if (p === '/api/games' && m === 'POST') { const b = await readJson(req); return send(res, 200, db.createGame({ ...b, practice: b.practice ? 1 : 0 })); }
+    if (p === '/api/games' && m === 'POST') { if (!requireWrite(req, res)) return; const b = await readJson(req); return send(res, 200, db.createGame({ ...b, practice: b.practice ? 1 : 0 })); }
 
     let mt;
     if ((mt = p.match(/^\/api\/games\/(\d+)\/turns\/last$/)) && m === 'DELETE') {
+      if (!requireWrite(req, res)) return;
       return send(res, 200, db.deleteLastTurn(Number(mt[1])));
     }
     if ((mt = p.match(/^\/api\/games\/(\d+)\/turns$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
       const b = await readJson(req); return send(res, 200, db.addTurn(Number(mt[1]), b));
     }
     if ((mt = p.match(/^\/api\/games\/(\d+)\/complete$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
       const b = await readJson(req); return send(res, 200, db.completeGame(Number(mt[1]), b.winner));
     }
     if ((mt = p.match(/^\/api\/games\/(\d+)\/events$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
       const b = await readJson(req);
       return send(res, 200, db.recordEvent(Number(mt[1]), b.type, b.setNo ?? null, b.legNo ?? null));
     }
 
     // ----- badges (docs/achievements-badges-roadmap.md) -----
     if (p === '/api/badges/award' && m === 'POST') {
+      if (!requireWrite(req, res)) return;
       const b = await readJson(req);
       return send(res, 200, db.awardBadge(b.player, b.badgeId, !!b.once));
     }
     if (p === '/api/badges/revoke' && m === 'POST') {
+      if (!requireWrite(req, res)) return;
       const b = await readJson(req);
       return send(res, 200, db.revokeBadge(b.player, b.badgeId));
     }
@@ -419,10 +456,12 @@ const server = http.createServer(async (req, res) => {
 
     // ----- daily challenge (docs/daily-challenge-roadmap.md) -----
     if (p === '/api/challenges/start' && m === 'POST') {
+      if (!requireWrite(req, res)) return;
       const b = await readJson(req);
       return send(res, 200, db.startChallengeAttempt(b.player, b.gameId, b.challengeDate, b.format, b.target));
     }
     if (p === '/api/challenges/complete' && m === 'POST') {
+      if (!requireWrite(req, res)) return;
       const b = await readJson(req);
       return send(res, 200, db.completeChallengeAttempt(b.player, b.challengeDate, b.resultDarts));
     }
