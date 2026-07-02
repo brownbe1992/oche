@@ -681,38 +681,58 @@ function getHomeExtra() {
     rate: r.played ? +((r.won / r.played) * 100).toFixed(1) : 0
   }));
 
-  const trebleLessRows = db.prepare(`
+  const H2H_WHERE = `(g.practice = 0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1)`;
+  const PRACTICE_WHERE = `(g.practice = 1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1)`;
+
+  const _trebleLess = (modeWhere) => db.prepare(`
     SELECT p.name AS name, COUNT(*) AS turns,
       SUM(CASE WHEN dt.trebles = 0 THEN 1 ELSE 0 END) AS trebleLess
     FROM turns t
     JOIN players p ON p.id = t.player_id
+    JOIN games g ON g.id = t.game_id
     LEFT JOIN (SELECT turn_id, SUM(is_treble) AS trebles FROM darts GROUP BY turn_id) dt ON dt.turn_id = t.id
+    WHERE ${modeWhere}
     GROUP BY p.id
     HAVING turns >= 10
     ORDER BY (CAST(trebleLess AS REAL) / turns) ASC
   `).all().map(r => ({ name: r.name, turns: r.turns, trebleLess: r.trebleLess,
     rate: r.turns ? +((r.trebleLess / r.turns) * 100).toFixed(1) : 0 }));
+  const trebleLessRows = { h2h: _trebleLess(H2H_WHERE), practice: _trebleLess(PRACTICE_WHERE) };
 
-  const tonPlusRows = db.prepare(`
+  const _tonPlus = (modeWhere) => db.prepare(`
     SELECT p.name AS name,
       COUNT(*) AS checkouts,
       SUM(CASE WHEN t.checkout_points >= 100 THEN 1 ELSE 0 END) AS tonPlus
     FROM turns t
     JOIN players p ON p.id = t.player_id
-    WHERE t.checkout = 1
+    JOIN games g ON g.id = t.game_id
+    WHERE t.checkout = 1 AND ${modeWhere}
     GROUP BY p.id
     HAVING checkouts >= 3
     ORDER BY (CAST(tonPlus AS REAL) / checkouts) DESC
   `).all().map(r => ({ name: r.name, checkouts: r.checkouts, tonPlus: r.tonPlus,
     rate: r.checkouts ? +((r.tonPlus / r.checkouts) * 100).toFixed(1) : 0 }));
+  const tonPlusRows = { h2h: _tonPlus(H2H_WHERE), practice: _tonPlus(PRACTICE_WHERE) };
 
-  const highestCheckout = db.prepare(`
+  const _highestCheckout = (modeWhere) => db.prepare(`
     SELECT p.name AS name, t.checkout_points AS points, t.created_at AS createdAt
     FROM turns t JOIN players p ON p.id = t.player_id
-    WHERE t.checkout = 1 AND t.checkout_points IS NOT NULL
+    JOIN games g ON g.id = t.game_id
+    WHERE t.checkout = 1 AND t.checkout_points IS NOT NULL AND ${modeWhere}
     ORDER BY t.checkout_points DESC, t.created_at ASC
     LIMIT 1
   `).get() || null;
+  const highestCheckout = {
+    overall: db.prepare(`
+      SELECT p.name AS name, t.checkout_points AS points, t.created_at AS createdAt
+      FROM turns t JOIN players p ON p.id = t.player_id
+      WHERE t.checkout = 1 AND t.checkout_points IS NOT NULL
+      ORDER BY t.checkout_points DESC, t.created_at ASC
+      LIMIT 1
+    `).get() || null,
+    h2h: _highestCheckout(H2H_WHERE),
+    practice: _highestCheckout(PRACTICE_WHERE)
+  };
 
   const lastGame = db.prepare(`
     SELECT g.id, g.category, g.completed_at AS completedAt, w.name AS winnerName,
@@ -750,8 +770,8 @@ function getHomeExtra() {
     return +(60000 / row.avgMs).toFixed(2);
   };
   const pace = {
-    h2h: _pace(`g.practice = 0 AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1`),
-    practice: _pace(`g.practice = 1 OR (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) = 1`)
+    h2h: _pace(H2H_WHERE),
+    practice: _pace(PRACTICE_WHERE)
   };
 
   return { winLeaderboard, trebleLessRows, tonPlusRows, highestCheckout, lastGame,

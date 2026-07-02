@@ -92,6 +92,7 @@ The landing page shows a live snapshot of all-time activity:
 - Most Wins (win rate) — H2H only
 - Most Trebleless Visits
 - Ton+ Finish Rate
+- Highest Checkout Ever (within that mode — the "Highest checkout ever recorded" figure in Achievements above is separate and always all-time)
 - Average Pace (darts/minute) — appears once dart-timing data exists, see [Settings](#settings)
 
 **Hall of Fame sections:**

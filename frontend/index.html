@@ -1492,7 +1492,7 @@ function renderHomeContent(){
     {val:fmt(s.tonPlus),     label:'Ton+ Finishes'},
     {val:fmt(s.oneEighties), label:'180s'},
     {val:fmt(s.bigFish),     label:'Big Fish'},
-    {val: extra && extra.highestCheckout ? extra.highestCheckout.points : '—', label:'Highest Checkout'},
+    {val: extra && extra.highestCheckout && extra.highestCheckout.overall ? extra.highestCheckout.overall.points : '—', label:'Highest Checkout'},
   ];
 
   body.innerHTML=`
@@ -1561,10 +1561,11 @@ function renderHomeTabBody(){
       </div>`
     : '';
 
-  const trebleLessSection = (extra && extra.trebleLessRows && extra.trebleLessRows.length)
+  const trebleLessRowsForMode = extra && extra.trebleLessRows && extra.trebleLessRows[mode];
+  const trebleLessSection = (trebleLessRowsForMode && trebleLessRowsForMode.length)
     ? `<div class="pp-section">
         <div class="pp-section-title">Most Trebleless Visits</div>
-        <div class="hof-list">${extra.trebleLessRows.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <div class="hof-list">${trebleLessRowsForMode.slice(0,10).map((r,i)=>`<div class="hof-row">
           <span class="hof-rank">${i+1}</span>
           <span class="hof-score">${r.rate}%</span>
           <span class="hof-player">${escapeHtml(r.name)}</span>
@@ -1573,10 +1574,11 @@ function renderHomeTabBody(){
       </div>`
     : '';
 
-  const tonPlusSection = (extra && extra.tonPlusRows && extra.tonPlusRows.length)
+  const tonPlusRowsForMode = extra && extra.tonPlusRows && extra.tonPlusRows[mode];
+  const tonPlusSection = (tonPlusRowsForMode && tonPlusRowsForMode.length)
     ? `<div class="pp-section">
         <div class="pp-section-title">Ton+ Finish Rate</div>
-        <div class="hof-list">${extra.tonPlusRows.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <div class="hof-list">${tonPlusRowsForMode.slice(0,10).map((r,i)=>`<div class="hof-row">
           <span class="hof-rank">${i+1}</span>
           <span class="hof-score">${r.rate}%</span>
           <span class="hof-player">${escapeHtml(r.name)}</span>
@@ -1592,7 +1594,7 @@ function renderHomeTabBody(){
                 : `<p class="pp-meta" style="padding:4px 0">No timing data yet — enable "Collect per-dart timing" in Settings to start tracking pace.</p>`}
     </div>`;
 
-  const highestCo = extra && extra.highestCheckout;
+  const highestCo = extra && extra.highestCheckout && extra.highestCheckout[mode];
   const highestCoSection = `<div class="pp-section">
       <div class="pp-section-title">Highest Checkout Ever</div>
       ${highestCo ? `<div class="hero-block expandable" role="button" aria-expanded="false" style="margin-top:6px;cursor:pointer"
