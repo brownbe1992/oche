@@ -1,6 +1,9 @@
 # Preparing the Existing App for Future Roadmaps
 
-> Status: **in progress** (5 of 10 items done/adopted — see items 2, 3, 8, 9, and 10). This doc reviews all 16
+> Status: **in progress** (5 of 10 items done/adopted, 1 more confirmed-and-closed —
+> see items 2, 3, 8, 9, 10 (done/adopted) and item 5 (confirmed protected through
+> item 10's refactor)). Item 7 (Settings regrouping) is now the most overdue
+> remaining item — see its section below. This doc reviews all 16
 > other roadmap docs in `docs/` and recommends changes to the *existing* codebase now,
 > specifically to reduce rework later. It intentionally does not recommend building
 > any future feature early — only making the current code more hospitable to features
@@ -72,7 +75,8 @@ line 132) — so there's already a proven, safe pattern for this in the codebase
 write `game_type='x01'` and leaving `config` null or populated with
 `{startingScore: ...}`. This is a no-op for current behavior, but means the
 game-modes roadmap's Phase 1 (the X01-to-plugin refactor) starts from a schema that
-already exists, instead of bundling a migration into that same refactor.
+already exists, instead of bundling a migration into that same refactor. (That Phase
+1 refactor is itself done now too — see item 10.)
 
 ---
 
@@ -127,6 +131,14 @@ register their own reaction without repeatedly modifying the same core functions
 
 ## 5. Protect the `throwDart(sector, multiplier)` input primitive
 
+> **Status: ✅ Confirmed protected.** Now that item 10's refactor has actually
+> happened, this held: `throwDart(sector)` (`frontend/index.html`) is untouched by
+> it — still just pushes a dart into `game.darts`, with zero awareness of
+> `game.gameType`. Only `enterTurn()`'s call into
+> `GAME_TYPES[game.gameType].evaluateVisit(...)` decides what a game type does with
+> that dart. So "where did this dart event come from" and "what does this game type
+> do with it" stayed cleanly separate through the refactor, as this item asked.
+
 **The evidence**: this is the thing already working correctly across the roadmaps,
 worth calling out so it's *protected* rather than accidentally broken during other
 refactors. `camera-scoring-roadmap.md` and `ghost-opponent-roadmap.md` both depend on
@@ -160,6 +172,16 @@ directly into the function and then bolting league logic on top of that later.
 ---
 
 ## 7. Settings page is approaching flat-list overload
+
+> **Update**: the prediction below already came true faster than expected — Settings
+> has grown from 7 to **11** flat collapsible sections since this doc was written
+> (Admin Accounts, Player PINs, Scoring Input, Accessibility, Voice, Sharecard, Data
+> Collection, Scoreboard, Smart Home Integration, Daily Challenge, Danger Zone), none
+> of it from the three roadmap features named below — all from shipped work this
+> doc didn't anticipate (accessibility, voice announcements, shareable moments, Daily
+> Challenge admin reset). The grouping recommendation itself is still **not done**.
+> With environmental-logging, camera-scoring, and online-multiplayer's sections still
+> to come on top of 11, this is now the most overdue item in this doc.
 
 **The evidence**: Settings currently has 7 collapsible sections (Admin Accounts,
 Player PINs, Scoring, Data Collection, Live Scoreboard, Smart Home Integration,
@@ -276,7 +298,8 @@ Worth naming explicitly, since not everything needs a change:
   already is.
 - The live snapshot already carries a `gameType` field and `display.html` already has
   a `renderers` dispatch table keyed by it, built during the recent scoreboard
-  redesign specifically so this wouldn't need revisiting later.
+  redesign specifically so this wouldn't need revisiting later — confirmed during
+  item 10's refactor, which needed zero changes to `display.html` as a result.
 - The `practice` boolean's additive-migration history is itself the proof that
   schema changes like `game_type`/`config` (item 2) are low-risk in this codebase.
 
@@ -305,11 +328,14 @@ un-learn later:**
 7. Game-lifecycle hook point (item 4) — same timing.
 8. Player-deletion-guard extensibility (item 6) — same timing.
 
-**Worth keeping in mind, no action item today:**
-9. Protecting the `throwDart` input-source separation during the eventual game-modes
-   refactor (item 5) — largely superseded by item 10 above once that's done.
-10. Settings page regrouping (item 7) — not urgent at 7 sections, worth revisiting
-    before the next 2-3 land.
+**Already confirmed, no action needed:**
+9. ~~Protecting the `throwDart` input-source separation during the eventual
+   game-modes refactor (item 5)~~ ✅ Confirmed — item 10's refactor landed and the
+   separation held.
+
+**Worth doing now — this one is overdue, not just "worth keeping in mind":**
+10. Settings page regrouping (item 7) — no longer "not urgent at 7 sections"; it's at
+    **11** sections today with three more roadmap features still to add their own.
 
 ---
 
@@ -368,11 +394,16 @@ attention as the feature roadmaps.
    mode should be done sooner rather than later~~ ✅ **All four done** (error
    logging/login lockout/backups in v0.6.2; colorblind mode shortly after) — all
    closed real gaps or shipped low-risk accessibility wins rather than needing new
-   infra, with no dependency on anything else in this table. The testing-strategy
-   slice is a size step up (Medium) but is worth doing before or alongside item 10
-   (the X01-to-plugin refactor), since that
-   refactor is the highest-value place to prove the new abstraction behaves
-   identically to today's code via an actual test rather than manual spot-checking.
+   infra, with no dependency on anything else in this table. Item 10 (the
+   X01-to-plugin refactor) has since shipped, and was in fact proven
+   behavior-identical via real tests — Playwright end-to-end coverage plus db.js
+   unit tests against scratch SQLite databases — rather than manual spot-checking.
+   That said, the testing-strategy slice itself (a first real, committed-to-the-repo
+   test runner, per `docs/testing-and-observability-roadmap.md`) is still **not
+   done** — those verification scripts were one-off scratchpad scripts, not
+   permanent test infrastructure the next contributor can just re-run. The
+   recommendation to build that slice stands on its own merits now, not tied to
+   item 10 specifically.
 6. **Achievements/badges and coaching insights are X01-only today.** If either is
    built before Cricket exists (likely, given Cricket's complexity), keep the
    stat/achievement definitions abstracted per game type from day one — cheap to do
