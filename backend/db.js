@@ -467,6 +467,30 @@ function completeChallengeAttempt(playerName, challengeDate, resultDarts) {
   return { ok: true, isPersonalBest };
 }
 
+// Admin reset (Settings → Daily Challenge): removes a player's attempt for a given
+// date AND every stat recorded during it, so the player can retake that day's
+// challenge with a clean slate. Deleting the linked games row does all the work —
+// ON DELETE CASCADE removes the game's turns (and their darts), game_players,
+// timeline_events, and the daily_challenge_attempts row itself (its game_id FK also
+// cascades). Badges earned during the wiped attempt are intentionally NOT revoked —
+// a badge celebrates something that physically happened at the board.
+function resetChallengeAttempt(playerName, challengeDate) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(challengeDate))) throw httpError(400, 'date must be YYYY-MM-DD');
+  const p = getPlayer(playerName);
+  if (!p) throw httpError(404, 'Player not found');
+  const attempt = db.prepare(`
+    SELECT id, game_id FROM daily_challenge_attempts
+    WHERE player_id = ? AND challenge_date = ?
+  `).get(p.id, String(challengeDate));
+  if (!attempt) throw httpError(404, 'No challenge attempt found for that player and date');
+  db.prepare('DELETE FROM games WHERE id = ?').run(attempt.game_id);
+  // Belt and braces: if the games row was somehow already gone (it shouldn't be —
+  // each attempt owns exactly one game), remove the attempt row directly so the
+  // reset still unlocks a retake.
+  db.prepare('DELETE FROM daily_challenge_attempts WHERE id = ?').run(attempt.id);
+  return { ok: true };
+}
+
 // Today's attempt (if any) plus the current streak (consecutive calendar dates,
 // counting back from today, with a completed attempt — a missed or DNF day breaks it).
 function getChallengeStatus(playerName, todayDate) {
@@ -761,7 +785,13 @@ function computeStats() {
 
 function getSummary() {
   const players    = db.prepare('SELECT COUNT(*) AS n FROM players').get().n;
-  const games      = db.prepare('SELECT COUNT(*) AS n FROM games WHERE completed_at IS NOT NULL').get().n;
+  // "Games Played" is deliberately H2H matches only — practice, solo, and Daily
+  // Challenge sessions do NOT count (product decision, see REFERENCE.md §3). The
+  // explicit practice/player_count filter makes that intentional rather than an
+  // accident of practice games never receiving completed_at: even if a future change
+  // starts completing practice games (e.g. for "last game played"), this count stays
+  // H2H-only.
+  const games      = db.prepare('SELECT COUNT(*) AS n FROM games WHERE completed_at IS NOT NULL AND practice = 0 AND player_count > 1').get().n;
   const sets = db.prepare(`
     SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no) AS n
     FROM turns t JOIN games g ON g.id = t.game_id
@@ -1887,6 +1917,6 @@ module.exports = {
   login, logout, getSessionAdmin, adminLockoutThreshold,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,
   awardBadge, revokeBadge, getPlayerBadges, getH2HSummary, getAroundTheWorldProgress,
-  startChallengeAttempt, completeChallengeAttempt, getChallengeStatus, getChallengeHistory,
+  startChallengeAttempt, completeChallengeAttempt, getChallengeStatus, getChallengeHistory, resetChallengeAttempt,
   _db: db,
 };

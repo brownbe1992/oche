@@ -969,6 +969,26 @@
         </div><!-- end smart-home-body -->
       </div><!-- end Smart Home section -->
 
+      <!-- Daily Challenge -->
+      <div class="pp-section" style="margin-top:24px">
+        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('challenge-admin-body',this)">
+          Daily Challenge
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="challenge-admin-body" hidden>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+            Each player gets one Daily Challenge attempt per calendar day. Resetting an attempt deletes it <b>and every stat recorded during it</b> (the game, turns, and darts), so the player can retake that day's challenge with a clean slate. Badges earned during the attempt are kept.
+          </p>
+          <label class="field">Player</label>
+          <select class="date-input" id="challenge-reset-player" style="width:auto;margin-bottom:10px"></select>
+          <label class="field">Challenge date</label>
+          <input type="date" class="date-input" id="challenge-reset-date" style="width:auto;margin-bottom:14px">
+          <div>
+            <button class="btn btn-ghost danger" onclick="askResetChallengeAttempt()">Reset attempt &amp; wipe its stats</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Danger Zone -->
       <div class="pp-section" style="margin-top:24px">
         <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('danger-zone-body',this)">
@@ -1778,6 +1798,7 @@ async function renderSettings(){
   const un=document.getElementById('settings-admin-username'); if(un) un.textContent=Auth.username||'';
   renderAdminsList();
   renderPinPlayersList();
+  renderChallengeResetControls();
 
   Backend.get('/api/settings').then(cfg=>{
     const set = (id, key) => { const el=document.getElementById(id); if(el) el.value = cfg[key] || ''; };
@@ -1899,6 +1920,28 @@ function toggleSettingsSection(bodyId, titleEl){
   body.hidden = !body.hidden;
   const chevron = titleEl && titleEl.querySelector('.settings-chevron');
   if(chevron) chevron.style.transform = body.hidden ? '' : 'rotate(180deg)';
+}
+// Settings -> Daily Challenge: admin reset of a player's attempt for a given date.
+// Deletes the attempt AND the game/turns/darts recorded during it (server-side
+// cascade), unlocking a clean retake of that day's challenge.
+function renderChallengeResetControls(){
+  const sel = document.getElementById('challenge-reset-player');
+  const dateEl = document.getElementById('challenge-reset-date');
+  if(!sel || !dateEl) return;
+  sel.innerHTML = roster.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('')
+    || '<option value="">No players yet</option>';
+  if(!dateEl.value) dateEl.value = localDateStr(new Date());
+}
+function askResetChallengeAttempt(){
+  const player = (document.getElementById('challenge-reset-player')||{}).value;
+  const date   = (document.getElementById('challenge-reset-date')||{}).value;
+  if(!player){ uiAlert('Choose a player.'); return; }
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date||'')){ uiAlert('Choose a challenge date.'); return; }
+  uiConfirm(`Reset ${player}'s Daily Challenge attempt for ${date}? This deletes the attempt AND every stat recorded during it (the game, turns, and darts). ${player} will be able to retake that day's challenge. This can't be undone.`, ()=>{
+    Backend.send('DELETE', `/api/challenges/attempt?player=${encodeURIComponent(player)}&date=${encodeURIComponent(date)}`)
+      .then(()=>uiAlert(`Reset complete — ${player} can retake the ${date} challenge.`))
+      .catch(e=>uiAlert('Could not reset: '+(e.message||'Unknown error')));
+  });
 }
 function toggleVoiceSubOptions(){
   const on = (document.getElementById('voice-enabled')||{}).checked;
@@ -2207,6 +2250,18 @@ async function startGame(){
     const player = setup.slots[0];
     if(!player || !roster.includes(player)){ uiAlert('Choose a player for the challenge.'); return; }
     const challenge = todaysChallenge();
+    // One attempt per calendar day, enforced BEFORE the game is created. Without this
+    // gate, a second Start Challenge tap created a real (filler-category) game whose
+    // 409 from /api/challenges/start was silently swallowed — the player played what
+    // they believed was the challenge, nothing was tracked, and junk turns landed in
+    // the stats tables. The server-side 409 remains as the race backstop.
+    try{
+      const status = await Backend.get(`/api/challenges/status?player=${encodeURIComponent(player)}&date=${challenge.date}`);
+      if(status && status.today){
+        uiAlert(`${player} has already attempted today's challenge — one attempt per calendar day. See you tomorrow!`);
+        return;
+      }
+    }catch(e){ /* status unreachable — fall through, the server-side 409 backstop below still applies */ }
     // Bullseye Gauntlet / Steady Hand / Treble Run don't play to zero at all — the
     // success metric is dart-count-based, not score-based — so they get a filler
     // start score comfortably above any realistic 9-dart total (max 9x60=540) purely
@@ -2267,7 +2322,13 @@ async function startGame(){
   if(activeChallenge && DB.gameId != null){
     Backend.send('POST','/api/challenges/start', { player:activeChallenge.player, gameId:DB.gameId,
       challengeDate:activeChallenge.date, format:activeChallenge.format, target:activeChallenge.target })
-      .catch(()=>{ activeChallenge = null; }); // couldn't register (e.g. already attempted today) — don't treat this game as a challenge
+      .catch(()=>{
+        // Couldn't register (already attempted today — a race past the pre-check
+        // above — or a network failure). Don't treat this game as a challenge, and
+        // say so instead of letting the player believe the attempt counts.
+        activeChallenge = null;
+        uiAlert("Couldn't register this as today's Daily Challenge attempt (it may already have been attempted). This game will play as regular practice and won't count as the challenge.");
+      });
   }
   DB.recordEvent('game_start', null, null);
   DB.recordEvent('set_start', 1, null);

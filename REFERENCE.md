@@ -174,7 +174,7 @@ them:
 | Stat | Scope | Formula |
 |---|---|---|
 | `players` | unscoped | `COUNT(*) FROM players` |
-| `games` | all modes | `COUNT(*) FROM games WHERE completed_at IS NOT NULL`. The query itself is mode-agnostic (it does not filter on `practice`), **but** `completed_at` is only ever set by `POST /api/games/:id/complete`, which the frontend calls **only when an H2H match is won** — practice, solo, and Daily Challenge games are never marked complete (End Game just navigates away without completing). So in current behavior this count is effectively "H2H matches won to completion." Whether practice sessions *should* count toward Games Played is an open product decision, not just a doc detail — see §15. |
+| `games` | **H2H only — by design** | `COUNT(*) FROM games WHERE completed_at IS NOT NULL AND practice = 0 AND player_count > 1`. Practice, solo, and Daily Challenge sessions deliberately do **not** count as "Games Played" (product decision, 2026-07). The explicit filter makes that intentional; independently, `completed_at` is also only ever set on an H2H match win (`POST /api/games/:id/complete` is only called from `onLegWon()`'s match-win branch — End Game navigates away without completing), so the filter is belt-and-braces rather than load-bearing today. |
 | `sets` / `legs` | **H2H only** | Distinct `(game,set)` / `(game,set,leg)` combos with ≥1 turn recorded — **no completion requirement**, an in-progress leg still counts |
 | `darts` | fully global | `COUNT(*) FROM darts` |
 | `tonPlus` | fully global | `COUNT(*) FROM turns WHERE checkout=1 AND checkout_points>=100` |
@@ -511,9 +511,33 @@ distinction server-side, for personal-best comparison:
 
 ### One attempt per player per calendar day
 
-`daily_challenge_attempts` has `UNIQUE(player_id, challenge_date)`. A second
-`startChallengeAttempt` call on an already-attempted date throws `409`, exactly
-like a real Wordle guess — no overwrite, no retry.
+`daily_challenge_attempts` has `UNIQUE(player_id, challenge_date)`. Enforced at
+three layers:
+1. **Frontend gate**: `startGame()` in challenge mode checks
+   `/api/challenges/status` *before* creating a game — if today's attempt exists,
+   it alerts and refuses to start (previously a second tap created a real
+   filler-category game that silently wasn't tracked as a challenge).
+2. **Server 409**: a second `startChallengeAttempt` INSERT for the same date hits
+   the UNIQUE constraint and throws `409` — the race backstop for the gate. The
+   frontend surfaces this (the game degrades to plain practice with an explicit
+   alert, no longer silently).
+3. **Locked completion**: `completeChallengeAttempt` only updates rows with
+   `completed = 0`, so a repeat completion can never overwrite a locked-in result.
+
+### Admin reset (Settings → Daily Challenge)
+
+`DELETE /api/challenges/attempt?player=&date=` (**admin-only**) →
+`resetChallengeAttempt()`: deletes the attempt's linked `games` row, which cascades
+away the game's turns, darts, `game_players`, `timeline_events`, **and the
+`daily_challenge_attempts` row itself** (its `game_id` FK also cascades) — wiping
+every stat recorded during the attempt and unlocking a clean retake of that day's
+challenge. Badges earned during the wiped attempt are deliberately **not** revoked
+(a badge celebrates something that physically happened at the board). Resetting an
+attempt that is *currently being played* deletes the live game's row out from under
+it — subsequent turn writes for that game fail server-side (FK) and are dropped by
+the client's fire-and-forget queue; an admin should do resets between sessions, not
+mid-throw. Surfaced in Settings → Daily Challenge: player picker + date (defaults
+to today) + a confirm dialog spelling out what gets deleted.
 
 ### Streaks — two independently-implemented walks
 
@@ -959,13 +983,11 @@ already-shipped limitations, not just unbuilt future features:
 - **Online multiplayer's data model isn't fully specified** — needs its own
   `online_matches` table with a `game_id` FK (per the binding convention below),
   not a value stuffed into `games.category` — `docs/online-multiplayer-roadmap.md`.
-- **Practice / solo / Daily Challenge games are never marked `completed_at`** — the
-  frontend only calls `completeGame` on an H2H match win, so these never count toward
-  the home "Games Played" total or appear in "Last game played," even when ended
-  deliberately via End Game (whose copy says stats were saved — which is true, turns
-  are persisted per-visit; only the game-completion marker is absent). Whether they
-  *should* count is an open product decision, not settled here (see the §3 `games`
-  row).
+- **Practice / solo / Daily Challenge games intentionally don't count as "Games
+  Played"** (decided 2026-07; the §3 `games` row now filters them explicitly). They
+  also never receive `completed_at` (only an H2H match win calls `completeGame`), so
+  they don't appear in "Last game played" either — turns are still persisted
+  per-visit, so all throwing stats are unaffected.
 - **Navigating away mid-game (tapping the "OCHE" logo) exits the scoring screen with
   no confirmation and no resume path** — the in-progress game becomes unreachable
   (though its turns are already persisted per-visit). Renaming a player mid-game also

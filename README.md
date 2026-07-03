@@ -84,7 +84,7 @@ The landing page shows a live snapshot of all-time activity:
 
 **Hero stats:** Total darts thrown · 180s · Big Fish · 9-Darters *(shown even at zero, with an empty-state prompt, since it's the rarest feat in the game)*
 
-**Activity:** Players · Games played · Sets played · H2H legs thrown · Practice legs thrown
+**Activity:** Players · Games played *(completed H2H matches — practice, solo, and Daily Challenge sessions don't count as games)* · Sets played · H2H legs thrown · Practice legs thrown
 
 **Achievements:** Ton+ finishes (100+ checkouts) · 180s · Big Fish · Highest checkout ever recorded
 
@@ -217,7 +217,7 @@ A recurring, Wordle-style solo challenge — the same challenge for everyone on 
 | **Treble Run** | Most different treble numbers hit across 3 visits (9 darts) |
 | **The Long Game** | Fewest visits to get from 501 down to under 40 remaining, without busting |
 
-**Playing it:** switch to **🎯 Daily Challenge** mode on the [New Game](#new-game) screen — see that section for how player selection and PIN protection work in this mode. Only one attempt is allowed per player per calendar day; a second attempt the same day is rejected rather than overwriting the first, matching how a real Wordle guess works.
+**Playing it:** switch to **🎯 Daily Challenge** mode on the [New Game](#new-game) screen — see that section for how player selection and PIN protection work in this mode. Only one attempt is allowed per player per calendar day — the app checks before starting and refuses a second attempt outright (and the server independently rejects duplicates), matching how a real Wordle guess works. An admin can reset a player's attempt from **Settings → Daily Challenge**, which deletes the attempt *and every stat recorded during it* so the player can retake that day's challenge cleanly.
 
 **Home page teaser:** the Home screen always shows a **🎯 Today's Challenge** card describing today's format, with a link to New Game — it's read-only (no player picker, no Start button) and shows the same information regardless of who's using the shared screen.
 
@@ -385,7 +385,7 @@ Plus global leaderboards for 180s, Big Fish, and nine-dart finishes, each filter
 
 ### Settings
 
-The Settings page (accessible from the top navigation) holds app-wide configuration. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
+The Settings page (accessible from the top navigation) holds app-wide configuration. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, **Daily Challenge**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
 
 Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accounts--player-pins)) — until an admin account exists, the page offers to create the first one.
 
@@ -452,6 +452,10 @@ Oche can fire webhooks to a Home Assistant instance whenever key game events occ
 { "player": "Name", "event": "oneeighty", "category": "501", "timestamp": 1234567890 }
 ```
 
+#### Daily Challenge
+
+- **Reset a player's attempt** — pick a player and a challenge date (defaults to today) and reset that attempt: the attempt record **and every stat recorded during it** (the game, turns, and darts) are deleted, so the player can retake that day's challenge with a clean slate. Badges earned during the wiped attempt are kept. Admin-only, with a confirmation dialog spelling out exactly what gets deleted.
+
 #### Danger Zone
 
 - **Wipe all player & game data** — permanently deletes every player, game, and stat. Admin accounts and settings are kept. Meant for clearing out test/dev data, not everyday use.
@@ -489,6 +493,7 @@ The first time Settings is opened with no admin account on the server, a setup w
 |---|---|
 | Delete a player | Yes |
 | Reset a player's stats | Yes |
+| Reset a player's Daily Challenge attempt (and wipe its recorded stats) | Yes |
 | Wipe all player/game/stat data | Yes |
 | Set or remove a player's PIN | Yes |
 | Add/remove admin accounts | Yes |
@@ -664,6 +669,9 @@ GET  /api/challenges/history                Lifetime completion record, best res
      ?player=&date=YYYY-MM-DD               and the full attempt-by-attempt log
                                              → { played, completed, currentStreak, longestStreak,
                                                   bestByFormat, attempts }
+DELETE /api/challenges/attempt              Reset a player's attempt for a date — deletes the    [admin]
+     ?player=&date=YYYY-MM-DD               attempt AND the game/turns/darts recorded during it,
+                                             unlocking a retake of that day's challenge
 ```
 
 ### Games
