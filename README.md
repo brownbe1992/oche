@@ -6,9 +6,9 @@
 
 A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player statistics, and no external dependencies.
 
-**v0.7.1**
+**v0.8.0**
 
-You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [20-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. All data lives in a SQLite database on your own server.
+You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [20-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 — its own dedicated scoring screen and live scoreboard, though stats/achievements parity for it is still on the roadmap. All data lives in a SQLite database on your own server.
 
 > Looking for exact stat formulas, achievement trigger conditions, the full database schema, or how a feature works internally (e.g. to debug it)? See **[REFERENCE.md](REFERENCE.md)** — the technical reference manual, kept up to date alongside this README.
 
@@ -113,18 +113,22 @@ Configure a game before starting:
 
 | Setting | Options |
 |---|---|
+| **Game** | X01 · Cricket |
 | **Mode** | H2H (head-to-head) · Practice (solo) · 🎯 Daily Challenge |
-| **Format** | 501 · 301 · 170 |
+| **Format (X01)** | 501 · 301 · 170 |
+| **Targets (Cricket)** | Classic (15–20, Bull) · Custom (any 7 numbers) |
 | **Legs per set** | 1 – 9 |
 | **Sets per game** | 1 – 9 |
 | **Players** | Select from the roster (up to 6); H2H requires 2+ |
-| **Finish rule** | Double out · Single out (set per player) |
+| **Finish rule (X01)** | Double out · Single out (set per player) |
 
 H2H mode requires at least two players selected. Practice mode can be played solo or with others and is tracked separately from H2H statistics.
 
 Players with a PIN set show a 🔒 next to their name in the dropdown. When exactly two players are selected in H2H mode, a banner shows their all-time head-to-head record (e.g. *"H2H: Alice leads 3–0 (3 games)"*).
 
-**Daily Challenge mode** turns New Game into today's [Daily Challenge](#daily-challenge) launcher instead of a regular match: Starting Score and Format hide (the challenge decides them), and a gold **Today's Challenge** panel shows the challenge description plus whoever is currently in the player slot's streak and results history. Selecting who's attempting it uses the exact same single "Choose player" slot as Practice mode — a PIN-protected player still needs their PIN entered, since it's the identical gate every other slot uses, not a separate picker of its own. The **Start game** button relabels to **Start Challenge** while this mode is active.
+**Cricket** is a second game type alongside X01. Choosing **Classic** locks the targets to the standard 15, 16, 17, 18, 19, 20, and Bull. Choosing **Custom** reveals a 1–20-plus-Bull picker — pick any numbers you like, but always exactly 7 (the same count as classic); Start is blocked until exactly 7 are checked, with a running "N of 7 selected" count and a one-tap "Start from classic" fill-in. Once a Cricket game begins, the scoring screen and live scoreboard both switch to Cricket's own marks/closed/points display — the X01 Pad and Dartboard input screens are never shown during a Cricket game, and there's no per-game choice between them the way there is for X01. See [Scoring](#scoring) below and `REFERENCE.md` for the exact marks/points rules. Cricket stats/leaderboards/achievements aren't built yet — a Cricket game only tracks marks, points, and the match result today.
+
+**Daily Challenge mode** turns New Game into today's [Daily Challenge](#daily-challenge) launcher instead of a regular match: Starting Score and Format hide (the challenge decides them), and a gold **Today's Challenge** panel shows the challenge description plus whoever is currently in the player slot's streak and results history. Selecting who's attempting it uses the exact same single "Choose player" slot as Practice mode — a PIN-protected player still needs their PIN entered, since it's the identical gate every other slot uses, not a separate picker of its own. The **Start game** button relabels to **Start Challenge** while this mode is active. Daily Challenge is X01-only — the Game-type choice is hidden and forced back to X01 whenever this mode is selected.
 
 ---
 
@@ -164,6 +168,27 @@ The scoring screen is optimised for touchscreen entry on a tablet. Everything fi
 - **Practice:** *This Leg* and *This Session* columns showing darts thrown, checkouts, best visits, busts, and treble-less %
 - **H2H (leg complete):** each player's leg average, game average, darts thrown this leg, and legs/sets standing
 - **H2H (game over):** each player's game average, total darts thrown, and final sets/legs standing
+
+**Cricket's scoring screen is entirely different** — there's no Pad/Dartboard
+choice, no checkout hints, and no bust concept:
+- **Player cards** show a grid of this match's 7 target numbers per player, each
+  marked with how many marks it has (0–3 dots, or a checkmark once closed —
+  closed status is always shown with a checkmark and label, never color alone)
+  and a running points total.
+- **Dart entry** — the same Single/Double/Treble multiplier selector as X01, then
+  tap directly on one of the 7 in-play target buttons (or **Miss**). A closed
+  number stays tappable — real cricket still lets you score on a number you've
+  closed as long as an opponent hasn't closed it too, so it's never disabled for
+  that reason, only once all 3 darts of the visit are thrown.
+- **Scoring**: hitting a number you haven't closed just builds toward closing it
+  (3 marks — single=1, double=2, treble=3); the closing marks themselves are
+  worth 0 points. Any marks beyond what was needed to close, in the same visit
+  or a later one, score points (the number's value × marks) *if at least one
+  opponent hasn't closed that number yet*.
+- **Winning**: first to close all 7 numbers while strictly ahead on points wins
+  the leg. Closing everything without the lead doesn't end the leg — you keep
+  throwing (and can still score against anyone still open on a number you've
+  closed) until you take the lead or an opponent closes out ahead of you.
 
 ---
 
@@ -246,6 +271,8 @@ Open **`http://<your-server>:8046/display`** on a TV or second monitor. It updat
 
 **Layout presets** — pick **Full**, **Compact**, or **Minimal** from **Settings → Live Scoreboard**, or override per-screen with `?layout=compact` in the URL (handy when different screens in the same room want different densities). Checkout suggestions, achievement flashes, and the match bar always show regardless of layout — only the denser rows (dart counts, leg/game averages, and the 180/Big Fish/Bust counters) are hidden on Compact and Minimal, so a smaller screen isn't stuck showing TV-sized clutter.
 
+**Portrait and landscape** — the scoreboard automatically detects which orientation the screen is in and reshapes itself: landscape keeps the usual side-by-side player cards, while portrait (e.g. a tablet or spare phone mounted upright) stacks every player's card in a single full-width column instead of squeezing them into narrow side-by-side cells. Rotating the device mid-match updates the layout immediately, without waiting for the next dart or turn.
+
 **Top bar:**
 - Game format and current leg/set
 - 🎯 180s · 🐟 Big Fish · 💥 Busts for the current game (Full layout only)
@@ -262,7 +289,12 @@ Open **`http://<your-server>:8046/display`** on a TV or second monitor. It updat
 - Active player's card shows each dart thrown in the current visit, plus the checkout route inline
 - Bust overlay (red) and Game Shot overlay (green) flash on the active card
 
-**Between legs:** score cards are replaced with a leg summary — average, darts thrown, and busts per player — until the next leg starts.
+**Cricket games** show a different card entirely: each player's grid of this
+match's 7 targets with marks/closed status (a checkmark, not just a color, so
+it's never color-only) and a running points total, instead of a countdown
+score, checkout route, or bust/shot overlay.
+
+**Between legs:** score cards are replaced with a leg summary — average, darts thrown, and busts per player (points and numbers closed, for Cricket) — until the next leg starts.
 
 **Leg/Set/Game banners:** full-screen result announced when a unit ends.
 
@@ -679,7 +711,10 @@ DELETE /api/challenges/attempt              Reset a player's attempt for a date 
 ```
 POST /api/games                             Start a game
                                              { category, legsPerSet, setsPerGame,
-                                               players: [{ name, out }], practice: 0|1 }
+                                               players: [{ name, out }], practice: 0|1,
+                                               gameType: "x01"|"cricket" (default "x01"),
+                                               config: { startingScore } for x01,
+                                                       { numbers: [7 sectors] } for cricket }
                                              → { gameId }
 
 POST /api/games/:id/turns                   Record a visit

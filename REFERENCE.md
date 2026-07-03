@@ -75,24 +75,32 @@ oche/
   after every dart and every turn; `/display` subscribes to `/api/live/stream`
   (SSE) and re-renders on every push. Live state lives in memory only on the
   server — it is never written to the database. See [§7](#7-live-scoreboard--real-time-sync).
-- **Game-type plugin seam**: `frontend/index.html` has a `GAME_TYPES` registry
-  (currently just `x01`) with `newMatchPlayer`, `evaluateVisit`, `resetForNextLeg`,
-  `playerSnapshot`, and `statDefs`. `game.gameType` is stamped once in `startGame()`;
-  every downstream caller (`enterTurn`, `startNextLeg`, `liveSnapshot`) dispatches
-  through `GAME_TYPES[game.gameType]` instead of calling those functions directly, and
-  `display.html`'s `renderers[s.gameType]` table reads the same field. This is prep
-  for Cricket/Baseball (`docs/game-modes-roadmap.md`) — adding a second game type is a
-  new registry entry, not a rewrite of these call sites. Achievements and the scoring
-  screen's countdown UI are still X01-specific; only the engine/state layer is
-  pluggable so far.
+- **Game-type plugin seam**: `frontend/index.html` has a `GAME_TYPES` registry with
+  `newMatchPlayer`, `evaluateVisit`, `resetForNextLeg`, `playerSnapshot`, and
+  `statDefs` per type — `x01` and, as of the Cricket build, `cricket`.
+  `game.gameType` is stamped once in `startGame()`; every downstream caller
+  (`enterTurn`, `startNextLeg`, `liveSnapshot`) dispatches through
+  `GAME_TYPES[game.gameType]` instead of calling those functions directly, and
+  `display.html`'s `renderers[s.gameType]` table reads the same field. Cricket's turn
+  commit/leg-progression/scoring-screen rendering (`enterTurnCricket`,
+  `onLegWonCricket`, `renderGameCricket`, `renderPadCricket`) are separate sibling
+  functions dispatched from the shared `enterTurn`/`onLegWon`/`renderGame`/`renderPad`
+  entry points, rather than branches inside the X01-heavy originals — Cricket has no
+  achievements, bust concept, or checkout hints, so forcing it through the same code
+  would mean a lot of irrelevant branching. See §2 for Cricket's scoring rules.
 
 ---
 
 ## 2. Core Scoring Engine
 
-### Bust/win rules — `evaluateVisit(startScore, darts, doubleOut)` (`frontend/index.html`)
+### X01 bust/win rules — `GAME_TYPES.x01.evaluateVisit(player, darts, game)` (`frontend/index.html`)
+
+The signature is `(player, darts, game)` for every game type (X01 only reads
+`player.score`/`player.doubleOut`; Cricket also reads `game.players` to check
+opponents' closed-number status — see below).
 
 ```js
+const startScore = player.score, doubleOut = player.doubleOut;
 const points = darts.reduce((s,d)=>s+d.value,0);
 const remaining = startScore - points;
 const last = darts[darts.length-1];
@@ -149,14 +157,69 @@ and revokes any badge that turn awarded (`snap.badgeReverts`, populated by
 `trackBadgeForUndo()` every time `awardRecurringBadge()`/an async milestone
 award runs — see §4/§5 for the undo-vs-async-award race handling). Only one
 level of undo exists — `game.lastTurnSnapshot` is set to `null` immediately
-after an undo, so undo cannot be chained.
+after an undo, so undo cannot be chained. Cricket has its own, much smaller
+undo (`undoLastTurnCricket()`, dispatched from `undoLastTurn()`) — no
+achievements/challenge state to restore, just `marks`/`points`/dart counts.
+
+### Cricket rules — `GAME_TYPES.cricket.evaluateVisit(player, darts, game)` (`frontend/index.html`)
+
+Standard cricket only (v1 scope decision — cut-throat deferred). A match's
+in-play numbers are locked to exactly 7, chosen at New Game time: classic
+(15, 16, 17, 18, 19, 20, Bull) or a custom 7-of-21 selection, stored as
+`game.config.numbers`. Per-player state is `{marks: {sector: count, ...},
+points}` — no `score` field, no bust concept.
+
+**Marks accumulate dart-by-dart within a visit**, not per-visit-total — a
+number can go from open to closed mid-visit, with the remaining darts in that
+same visit scoring points on it:
+
+```js
+darts.forEach(d => {
+  if (!numbers.includes(d.sector)) return;        // miss or out-of-play: no-op
+  const before = marks[d.sector] || 0;
+  const after = before + d.mult;                  // single=1, double=2, treble=3
+  marks[d.sector] = after;
+  const newBeyond = Math.max(0, after - 3) - Math.max(0, before - 3);
+  if (newBeyond > 0) {
+    const opponentOpen = opponents.some(o => (o.marks[d.sector] || 0) < 3);
+    if (opponentOpen) pointsThisVisit += newBeyond * d.sector;   // Bull's "sector" is 25
+  }
+});
+```
+
+A mark only scores points once the shooter has closed that number (3+ marks —
+the closing marks themselves are worth 0) **and** at least one opponent hasn't
+closed it yet. Opponents' closed status is read as of the start of the visit
+(only the shooter's own marks change during their own turn, so no separate
+snapshot is needed). Real-darts bull scoring is inherited for free from the
+existing `makeDart()` guard — single bull is 1 mark, double bull is 2, and a
+"treble bull" tap is silently downgraded to a single (no triple bull exists).
+
+**Win condition**: this player has closed all 7 numbers **and** has strictly
+more points than every opponent. If they've closed everything but don't lead,
+the leg just continues — real cricket lets them keep throwing/blocking
+normally, and the per-dart rule above already lets them score against any
+opponent still open on a number they've closed, with no extra logic needed.
+
+**Known open edge case, not silently resolved**: an exact points *tie* at the
+moment the last number closes is not a win by this rule — the leg continues
+with no tie-break implemented. Verified behavior (not a bug): two players
+tied 0-0 when the second one closes their last number keep playing.
+
+Leg/set/game progression (`onLegWonCricket`) mirrors X01's `onLegWon`
+structurally (legs/sets advance the same way, same `DB.completeGame`/HA
+webhook calls) but has no achievement, Daily Challenge, or per-leg-stats-panel
+integration — those are `docs/game-modes-roadmap.md` build-order step 3, not
+yet built.
 
 ---
 
 ## 3. Statistics — Every Formula
 
-All formulas below are in `backend/db.js`. Two facts drive almost every one of
-them:
+All formulas below are X01-only — Cricket's `statDefs` is deliberately empty
+(`GAME_TYPES.cricket.statDefs: []`); stats/leaderboard/profile-chart parity is
+`docs/game-modes-roadmap.md` build-order step 3, not yet built. All formulas
+below are in `backend/db.js`. Two facts drive almost every one of them:
 
 - **`turns.scored` is already `0` for a busted visit** — the bust-zeroing
   happens app-side before the turn is even persisted. No stat formula needs to
@@ -602,13 +665,18 @@ dies mid-handshake can't leak a permanently-stuck slot.
 ### Payload shape (`liveSnapshot()`, `frontend/index.html`)
 
 Built fresh on every `pushLive()` call from the current `game` object: active
-flag, category/legs/sets/current-player-index, per-player score/averages/darts
-breakdowns, current visit's darts, checkout hint, status, `pendingAchievement`
-(§5), one-shot fields (`lastTurnEvent`, `matchResult`, `legStart` — cleared
-immediately after each push, so they only ever announce once), and a
-`checkoutTarget` for voice announcements. `ALLOWED_LIVE_KEYS` on the server
-allow-lists exactly these fields — anything else in a `POST /api/live` body is
-silently dropped (413 if the sanitized payload still exceeds 64KB).
+flag, category/legs/sets/current-player-index, per-player data (shape depends
+on `gameType` — X01: score/averages/darts breakdowns via `playerSnapshotX01`;
+Cricket: `marks`/`points`/darts breakdowns via `playerSnapshotCricket`),
+current visit's darts, checkout hint (X01 only — always empty for Cricket),
+status, `pendingAchievement` (§5), one-shot fields (`lastTurnEvent`,
+`matchResult`, `legStart` — cleared immediately after each push, so they only
+ever announce once), and a `checkoutTarget` for voice announcements.
+`ALLOWED_LIVE_KEYS` on the server allow-lists exactly these top-level fields
+(not the per-player shape inside `players`, which is how Cricket's differently-
+shaped player objects pass through unchanged) — anything else in a
+`POST /api/live` body is silently dropped (413 if the sanitized payload still
+exceeds 64KB).
 
 ### Layout presets
 

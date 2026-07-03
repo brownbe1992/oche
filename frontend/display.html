@@ -87,6 +87,22 @@
   .meta b{color:var(--ink);font-weight:600}
   .standing{margin-left:auto;color:var(--gold);font-weight:700;letter-spacing:.04em;font-size:2vmin}
 
+  /* Cricket scoreboard — non-color-only closed signal (checkmark + text, not just
+     a color change), per docs/accessibility-roadmap.md. */
+  .cr-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1vmin;margin:.6vmin 0}
+  .cr-cell{display:flex;flex-direction:column;align-items:center;gap:.3vmin;background:var(--surface-2);
+    border:1px solid var(--wire);border-radius:1vmin;padding:.8vmin .4vmin}
+  .cr-cell.closed{border-color:var(--green);background:rgba(27,138,58,.12)}
+  body.colorblind .cr-cell.closed{border-color:var(--green);background:rgba(47,143,217,.12)}
+  .cr-num{font-family:'Bebas Neue';font-size:2.4vmin;line-height:1;color:var(--cream)}
+  .cr-marks{font-size:1.5vmin;color:var(--muted)}
+  .cr-cell.closed .cr-marks{color:var(--green)}
+  body.colorblind .cr-cell.closed .cr-marks{color:#9cd2ff}
+  .cr-points{display:flex;align-items:baseline;gap:.6vmin;margin:.2vmin 0}
+  .cr-points-val{font-family:'Bebas Neue';font-size:clamp(40px,10vmin,160px);line-height:.85;color:var(--cream)}
+  .pcard.active .cr-points-val{color:#fff}
+  .cr-points-lbl{font-size:1.6vmin;letter-spacing:.1em;color:var(--muted)}
+
   /* darts in hand + checkout */
   .throwbox{margin-top:1.6vmin;border-top:1px dashed var(--wire);padding-top:1.6vmin;display:flex;flex-direction:column;gap:1.2vmin}
   .darts{display:flex;gap:1.2vmin}
@@ -452,8 +468,78 @@ const renderers = {
         </div>
       </div>`;
     }
+  },
+  cricket: {
+    card(p, i, s, L){
+      const active = i===s.currentIndex;
+      const standing = s.practice ? `Leg ${num(s.legNo)}` : '';
+      let throwbox = '';
+      if(active){
+        const darts = Array.isArray(s.darts) ? s.darts : [];
+        const slots = [0,1,2].map(k=>{
+          const lab = darts[k];
+          return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
+        }).join('');
+        throwbox = `<div class="throwbox"><div class="darts">${slots}</div></div>`;
+      }
+      const marks = p.marks || {};
+      const cells = Object.keys(marks).map(Number).map(n=>{
+        const m = marks[n] || 0;
+        const closed = m >= 3;
+        const lbl = n===25 ? 'Bull' : String(n);
+        return `<div class="cr-cell${closed?' closed':''}">
+          <div class="cr-num">${lbl}</div>
+          <div class="cr-marks">${cricketMarksGlyph(m)}</div>
+        </div>`;
+      }).join('');
+      const dartCounts = !L.showDartCounts ? '' : `
+          <div class="dart-counts">
+            <div class="dart-counts-title">Darts Thrown</div>
+            <div class="dart-count-row"><span class="dart-count-val">${num(p.legDarts)}</span><span class="dart-count-lbl">Leg</span></div>
+            ${s.practice
+              ? `<div class="dart-count-row"><span class="dart-count-val">${num(p.gameDarts)}</span><span class="dart-count-lbl">Session</span></div>`
+              : `<div class="dart-count-row"><span class="dart-count-val">${num(p.setDarts)}</span><span class="dart-count-lbl">Set</span></div>
+                 <div class="dart-count-row"><span class="dart-count-val">${num(p.gameDarts)}</span><span class="dart-count-lbl">Game</span></div>`
+            }
+          </div>`;
+      const meta = (!L.showMeta || !standing) ? '' : `<div class="meta"><span class="standing">${standing}</span></div>`;
+
+      return `<div class="pcard ${active?'active':''}">
+        <div>
+          <div class="prow1">
+            <span class="pname">${escapeHtml(p.name)}</span>
+            ${active?'<span class="throwflag">▸ throwing</span>':''}
+          </div>
+          <div class="cr-grid">${cells}</div>
+          <div class="cr-points"><span class="cr-points-val">${num(p.points)}</span><span class="cr-points-lbl">PTS</span></div>
+          ${dartCounts}
+        </div>
+        ${meta}
+        ${throwbox}
+      </div>`;
+    },
+    summary(p){
+      return `
+      <div class="sum-card ${p.won?'winner':''}">
+        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}</div>
+        <div class="sum-stats">
+          <div class="sum-stat">
+            <div class="sv">${num(p.points)}</div>
+            <div class="sl">Points</div>
+          </div>
+          <div class="sum-stat">
+            <div class="sv">${num(p.closed)}</div>
+            <div class="sl">Closed</div>
+          </div>
+        </div>
+      </div>`;
+    }
   }
 };
+function cricketMarksGlyph(n){
+  const clamped = Math.min(3, n);
+  return clamped>=3 ? '✓' : '●'.repeat(clamped) + '○'.repeat(3-clamped);
+}
 
 /* ---- voice announcements ----
    Spoken call-outs using the browser's built-in speechSynthesis (SpeechSynthesisUtterance)

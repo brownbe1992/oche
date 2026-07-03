@@ -1,28 +1,31 @@
 # Additional Game Modes — Design Roadmap
 
-> Status: **not started** (Cricket/Baseball themselves). Build-order step 1, the
-> plugin refactor, is done: `frontend/index.html` now has a `GAME_TYPES` registry
-> (`newMatchPlayer`, `evaluateVisit`, `resetForNextLeg`, `playerSnapshot`,
-> `statDefs`), currently holding only `x01`, and every call site that used to call
-> those functions directly now dispatches through `GAME_TYPES[game.gameType]` —
-> proven behavior-identical to the pre-refactor code via Playwright (bust, double-out
-> win, undo, 180 achievement, live scoreboard) and db.js unit tests. Backend
-> `createGame()` now accepts optional `gameType`/`config` params (still defaulting to
-> `'x01'`/derived-from-category for every caller today), and the nine-darter queries
-> that hardcoded `category='501'` now read `game_type`/`config` instead (with a
-> one-time backfill for historical rows, since `config` itself was never backfilled
-> when the column was added). See the Data model section below for details. Cricket's
-> own engine, config UI, scoring screen, and stats (build-order steps 2-4) are still
-> not started. The spec for step 2 is now more fully fleshed out based on explicit
-> feature requests: Cricket needs its own dedicated scoring screen (Pad/Dartboard are
-> never used during a Cricket game, and the Cricket screen is the automatic default),
-> a classic-vs-custom New Game prompt where custom mode locks the target count to
-> exactly 7 (never more, never fewer), and an orientation-aware (portrait/landscape,
-> auto-detected) live scoreboard. That last prerequisite is now done —
-> `docs/existing-app-prep-roadmap.md` item 11 retrofitted `frontend/display.html`
-> with `matchMedia`-based orientation detection and a single-column portrait grid,
-> so a future `renderers.cricket` entry inherits orientation support directly
-> instead of needing its own retrofit.
+> Status: **Cricket is playable (build-order steps 1-2 done); steps 3-5 not
+> started.** `frontend/index.html` has a `GAME_TYPES` registry with `x01` and
+> `cricket` entries (`newMatchPlayer`, `evaluateVisit`, `resetForNextLeg`,
+> `playerSnapshot`, `statDefs`); every call site dispatches through
+> `GAME_TYPES[game.gameType]`. Backend `createGame()` accepts `gameType`/`config`;
+> the nine-darter queries read `game_type`/`config` instead of a hardcoded
+> `category='501'`.
+>
+> **Cricket (step 2) is fully playable end-to-end**: a classic-vs-custom New Game
+> prompt (custom locked to exactly 7 targets, validated before Start), a dedicated
+> Cricket scoring screen (`renderGameCricket`/`renderPadCricket` — Pad/Dartboard are
+> never shown during a Cricket game), the marks/points/win-condition turn engine
+> (`GAME_TYPES.cricket.evaluateVisit`, dispatched via `enterTurnCricket`/
+> `onLegWonCricket`/`undoLastTurnCricket`), and an orientation-aware
+> `renderers.cricket` live-scoreboard card (inherits portrait/landscape support
+> from item 11 for free). Verified: 12 hand-checked scoring-engine scenarios (mark
+> accumulation within a visit, opponent-closed gating, multi-opponent win checks),
+> Playwright end-to-end (New Game validation, scoring screen, live board in both
+> orientations, undo, full game completion), and a full X01 regression pass
+> confirming zero cross-contamination between the two renderers.
+>
+> **Not yet built** (steps 3-5, unchanged from the original plan): Cricket stats
+> parity (MPR, leaderboards, profile charts — `GAME_TYPES.cricket.statDefs` is
+> deliberately `[]`), Cricket achievements, Home/Player Profile game-type
+> navigation, and Baseball. See "Suggested build order" below for the unchanged
+> plan for those.
 
 ## Goal
 
@@ -38,9 +41,9 @@ added later without starting from scratch each time.
 | Architecture approach | Proper generalization now — refactor X01 into "the first plugin" in a real game-type framework, rather than bolting Cricket on separately |
 | Cricket stats depth | Full parity with X01 — a dedicated Cricket stat (Marks Per Round), leaderboards, and profile charts, not just win/loss |
 | Cricket variant scope for v1 | Standard cricket only (highest score wins). Cut-throat (points scored against opponents) deferred to later |
-| Custom cricket target count | Fixed at 7 targets — the same count as classic cricket (15, 16, 17, 18, 19, 20, Bull) — freely chosen from 1-20 + Bull, but never more or fewer than 7 |
-| Scoring screen during Cricket | A dedicated Cricket scoring screen (marks/closed grid), not the X01 Pad or Dartboard screens — it's the automatic default the instant a Cricket game is active, with no player choice to fall back to Pad/Dartboard |
-| Live scoreboard orientation | Cricket's `display.html` renderer must detect and support both portrait and landscape. ✅ The prerequisite prep project (retrofitting the *existing* X01 renderer with the same orientation-awareness) is done — see `docs/existing-app-prep-roadmap.md` item 11 |
+| Custom cricket target count | ✅ Built. Fixed at 7 targets — the same count as classic cricket (15, 16, 17, 18, 19, 20, Bull) — freely chosen from 1-20 + Bull, but never more or fewer than 7. Enforced at Start (`startGame()` blocks with an alert if the count is wrong) |
+| Scoring screen during Cricket | ✅ Built. A dedicated Cricket scoring screen (marks/closed grid), not the X01 Pad or Dartboard screens — it's the automatic default the instant a Cricket game is active, with no player choice to fall back to Pad/Dartboard |
+| Live scoreboard orientation | ✅ Built. Cricket's `renderers.cricket` inherits portrait/landscape detection from the shared shell — see `docs/existing-app-prep-roadmap.md` item 11 |
 
 ## Why this is bigger than "add cricket"
 
@@ -261,12 +264,13 @@ X01-only, see its status note above).
 1. **✅ Done — Refactor, no new behavior** — extracted the existing X01 logic behind
    the plugin interface; verified X01 plays identically (Playwright + db.js unit
    tests) before anything else depends on the abstraction.
-2. **Cricket engine + customizable numbers** — turn engine, win condition, New Game
-   classic/custom config UI (exact-7-target validation), a dedicated Cricket scoring
-   screen (marks/closed display, replacing Pad/Dartboard entirely for Cricket
-   games), and a `renderers.cricket` live-scoreboard card (orientation-awareness
-   already provided by the shared shell — see `docs/existing-app-prep-roadmap.md`
-   item 11, done).
+2. **✅ Done — Cricket engine + customizable numbers** — turn engine, win condition,
+   New Game classic/custom config UI (exact-7-target validation), a dedicated
+   Cricket scoring screen (marks/closed display, replacing Pad/Dartboard entirely
+   for Cricket games), and a `renderers.cricket` live-scoreboard card
+   (orientation-awareness inherited from the shared shell — item 11, done).
+   Verified with 12 hand-checked scoring-engine scenarios, Playwright end-to-end,
+   and a full X01 regression pass.
 3. **Cricket stats parity** — MPR, leaderboards, profile charts, achievements.
 4. **Home/Stats page game-type navigation** — the cross-cutting UI work to surface
    Cricket stats alongside X01's.
@@ -275,33 +279,42 @@ X01-only, see its status note above).
 
 ## Accessibility, security, and testing considerations
 
-- **Accessibility**: Cricket's scoring screen (marks/closed display) is a new UI
-  surface — it should extend the app's existing `aria-pressed`/`role="group"`
-  control conventions rather than introducing a one-off pattern, and the
-  closed-numbers display needs a non-color-only signal (per
-  `docs/accessibility-roadmap.md`) for which numbers are closed vs. still open. The
-  new portrait and landscape live-scoreboard layouts (both X01's retrofit and
-  Cricket's new one) need to reach parity with each other too — orientation should
-  never become "the one where the announcements/contrast work and the other one
-  where they don't."
-- **Testing**: the Cricket win-condition edge case flagged above (closed-but-behind-
-  on-points) is exactly the kind of easy-to-get-wrong, pure win-condition logic
-  `docs/testing-and-observability-roadmap.md` says new scoring logic should get real
-  test coverage for — a good candidate to write the test for *before* the
-  implementation, given the doc already knows the edge case is tricky. The exact-7
-  target-count validation (New Game custom mode) is simple but worth a real test too,
-  since it's a hard product rule ("never more, never fewer") rather than a soft
-  suggestion.
+- **Accessibility**: ✅ Done. Cricket's scoring screen extends the app's existing
+  `aria-pressed`/`role="group"` conventions (each target button carries an
+  `aria-label` stating its exact mark count or closed status), and closed numbers
+  are signaled with a checkmark + text label, never color alone. The live
+  scoreboard's marks grid follows the same rule. Portrait/landscape parity between
+  X01 and Cricket's cards is verified — both flow through the same `#grid` and
+  orientation logic (item 11), so there's no separate code path to drift out of
+  sync.
+- **Testing**: ✅ Done, though as ad hoc scratch scripts rather than the formal test
+  runner `docs/testing-and-observability-roadmap.md` still calls for (that slice is
+  a separate, not-yet-built prerequisite — see that doc). The scoring engine
+  (`evaluateVisitCricket`) was validated standalone against 12 hand-checked
+  scenarios before being wired in: mark accumulation within a single visit
+  (including a number closing mid-visit with the remaining darts scoring),
+  opponent-closed gating, out-of-play-sector no-ops, and the win condition
+  (including the closed-but-behind case, the exact-tie case, and a 3-player
+  multi-opponent check). The exact-7 target-count validation and a full
+  New-Game-to-game-completion flow were verified end-to-end with Playwright,
+  alongside a full X01 regression pass confirming no cross-contamination between
+  the two renderers.
 - **Security**: no new credential/token surface from the plugin refactor or Cricket
   itself — reuses the existing game/turn recording and admin-auth model.
 
 ## Open questions for whoever picks this up
 
-- Exact Cricket win-condition edge case (closed-but-behind-on-points) — see above.
+- **Resolved during implementation**: Bull is *not* mandatory in custom cricket —
+  it's just one of the 21 selectable targets (1-20 + Bull), so a player can build a
+  custom set of 7 purely numeric targets with no Bull at all if they choose to. Not
+  a deliberate design statement that this is definitely correct — just the simplest
+  choice consistent with "any 7 of 21," flagged here in case it's revisited.
+- **Still open**: the exact win-condition tie edge case (an exact points tie at the
+  moment the last number closes doesn't end the leg — verified behavior, not a bug,
+  see REFERENCE.md §2) has no tie-break implemented. Whoever wants one needs to
+  decide what it should be.
 - Should legs/sets apply to Cricket the same way as X01, or does a Cricket "match"
-  more naturally mean a fixed number of games rather than legs-within-a-set?
-- Priority after Cricket: Baseball, or one of the other named variants?
-- Is Bull mandatory as one of custom cricket's 7 targets, or can a player build a
-  custom set of 7 purely numeric targets (1-20) with no Bull at all? Real cricket
-  always plays Bull; this doc doesn't decide whether the app should enforce that or
-  leave it as a free choice within the 7.
+  more naturally mean a fixed number of games rather than legs-within-a-set? (Built
+  the same way as X01 for now — no decision was forced either way.)
+- Priority after Cricket stats parity (build-order step 3): Baseball, or one of the
+  other named variants?

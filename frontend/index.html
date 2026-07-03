@@ -207,6 +207,44 @@
   .pad button.bull{grid-column:span 2;color:var(--red)}
   .pad button.miss{grid-column:span 2;color:var(--muted)}
 
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+    clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+  /* Cricket's dedicated scoring screen (never Pad/Dartboard) — see
+     docs/game-modes-roadmap.md. Closed status is signaled by a checkmark + text,
+     not color alone (docs/accessibility-roadmap.md). */
+  .pad.cricket-pad{grid-template-columns:repeat(4,1fr)}
+  .cricket-target{background:var(--surface);border:1px solid var(--wire);color:var(--ink);border-radius:10px;
+    padding:10px 4px;font:inherit;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px}
+  .cricket-target:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
+  .cricket-target:disabled{opacity:.3;cursor:not-allowed}
+  .cricket-target.closed{border-color:var(--green);background:rgba(27,138,58,.12)}
+  body.colorblind .cricket-target.closed{border-color:var(--green);background:rgba(47,143,217,.12)}
+  .ct-num{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:.02em}
+  .ct-marks{font-size:13px;letter-spacing:.1em;color:var(--muted)}
+  .cricket-target.closed .ct-marks{color:var(--green)}
+  body.colorblind .cricket-target.closed .ct-marks{color:#9cd2ff}
+
+  .cricket-pscore{align-items:stretch}
+  .cricket-pscore .cr-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-left:auto;max-width:280px}
+  .cr-cell{display:flex;flex-direction:column;align-items:center;gap:2px;background:var(--surface);
+    border:1px solid var(--wire);border-radius:8px;padding:4px 2px;min-width:0}
+  .cr-cell.closed{border-color:var(--green);background:rgba(27,138,58,.1)}
+  body.colorblind .cr-cell.closed{border-color:var(--green);background:rgba(47,143,217,.1)}
+  .cr-num{font-family:'Bebas Neue',sans-serif;font-size:15px;line-height:1}
+  .cr-marks{font-size:10px;color:var(--muted)}
+  .cr-cell.closed .cr-marks{color:var(--green)}
+  body.colorblind .cr-cell.closed .cr-marks{color:#9cd2ff}
+  .cricket-pscore .cr-points{margin-left:14px;display:flex;flex-direction:column;align-items:flex-end;gap:0}
+  .cr-points-val{font-family:'Bebas Neue',sans-serif;font-size:34px;line-height:.85;color:var(--cream)}
+  .cr-points-lbl{font-size:10px;letter-spacing:.1em;color:var(--muted)}
+
+  /* Custom cricket target multi-select (New Game) */
+  .cricket-number-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+  .cricket-number-toggle{background:var(--surface);border:1px solid var(--wire);color:var(--ink);
+    border-radius:8px;padding:8px 0;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+  .cricket-number-toggle[aria-pressed="true"]{border-color:var(--gold);background:rgba(217,180,106,.14);color:var(--gold)}
+
   .turn-actions{display:flex;flex-direction:column;gap:8px;margin-top:12px}
   .turn-actions .undo-row{display:flex;gap:8px}
   .turn-actions .undo-row .btn{flex:1;font-size:13px}
@@ -286,6 +324,8 @@
   }
   body.game-active #game-header-controls .imt-row{justify-self:center}
   body.game-active #game-header-controls .end-game-btn{justify-self:end}
+  /* Cricket has no Pad/Dartboard choice — its scoring screen replaces both. */
+  body.cricket-active #game-header-controls .imt-row{display:none}
   body.game-active .imt-btn{font-size:12px;padding:5px 13px}
   body.game-active #game-header-controls .end-game-btn{font-size:12px;padding:5px 12px}
   /* screen container */
@@ -572,7 +612,18 @@
         <div class="h2h-banner" id="h2h-banner"></div>
       </div>
 
-      <!-- Starting score -->
+      <!-- Game type (X01 / Cricket) -->
+      <div class="setup-section" id="game-type-section">
+        <div class="setup-label">Game</div>
+        <div class="opts" style="margin:0">
+          <div class="seg" role="group" aria-label="Game type">
+            <button id="gt-x01" aria-pressed="true" onclick="setGameType('x01')">X01</button>
+            <button id="gt-cricket" aria-pressed="false" onclick="setGameType('cricket')">Cricket</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Starting score (X01 only) -->
       <div class="setup-section" id="start-score-section">
         <div class="setup-label">Starting score</div>
         <div class="opts" style="margin:0">
@@ -581,6 +632,22 @@
             <button data-start="301" aria-pressed="false" onclick="pickStart(this,301)">301</button>
             <button data-start="170" aria-pressed="false" onclick="pickStart(this,170)">170</button>
           </div>
+        </div>
+      </div>
+
+      <!-- Cricket target numbers (Cricket only) -->
+      <div class="setup-section" id="cricket-options-section" hidden>
+        <div class="setup-label">Cricket targets</div>
+        <div class="opts" style="margin:0">
+          <div class="seg" role="group" aria-label="Cricket target set">
+            <button id="cricket-preset-classic" aria-pressed="true" onclick="setCricketPreset('classic')">Classic (15-20, Bull)</button>
+            <button id="cricket-preset-custom" aria-pressed="false" onclick="setCricketPreset('custom')">Custom</button>
+          </div>
+        </div>
+        <div id="cricket-custom-body" hidden style="margin-top:10px">
+          <p class="pp-meta" style="margin:0 0 8px">Choose exactly 7 targets — <span id="cricket-custom-count">0 of 7</span> selected.</p>
+          <div class="cricket-number-grid" id="cricket-number-grid" role="group" aria-label="Custom cricket targets"></div>
+          <button class="btn btn-ghost" style="margin-top:8px" onclick="fillCricketClassicIntoCustom()">Start from classic</button>
         </div>
       </div>
 
@@ -1077,7 +1144,7 @@ const DB = {
 
   // game + turn writes
   async beginGame(meta, names){
-    try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame, players:names.map(n=>({name:n,out:playerOut(n)})), practice:meta.practice?1:0}); this.gameId=r.gameId; }
+    try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame, players:names.map(n=>({name:n,out:playerOut(n)})), practice:meta.practice?1:0, gameType:meta.gameType, config:meta.config}); this.gameId=r.gameId; }
     catch(e){ logErr(e); this.gameId=null; }
   },
   recordTurn(t){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/turns`, t)); } },
@@ -1205,7 +1272,12 @@ function dartLabel(sector, mult){
   if(sector === 25) return mult === 2 ? 'Bull' : '25';
   return (mult === 3 ? 'T' : mult === 2 ? 'D' : '') + sector;
 }
-function evaluateVisit(startScore, darts, doubleOut){
+// Signature is (player, darts, game) for every game type — X01 only needs
+// player.score/player.doubleOut, but the shared shape lets Cricket's evaluateVisit
+// see the rest of game.players (to check opponents' closed-number status) without
+// a different call convention per type. See GAME_TYPES below.
+function evaluateVisit(player, darts, game){
+  const startScore = player.score, doubleOut = player.doubleOut;
   const points = darts.reduce((s,d)=>s+d.value,0);
   const remaining = startScore - points;
   const last = darts[darts.length-1];
@@ -1228,7 +1300,8 @@ function evaluateVisit(startScore, darts, doubleOut){
 /* =========================================================================
    APP STATE
    ========================================================================= */
-let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, mode:'h2h' }; // mode: 'h2h' | 'practice' | 'challenge'
+let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, mode:'h2h',
+  gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[] }; // mode: 'h2h' | 'practice' | 'challenge'; gameType: 'x01' | 'cricket'
 let game = null;
 let dartTimingEnabled = false;   // admin-toggled; refreshed at boot from /api/settings/dart-timing
 let roster = [];     // saved player names (profiles that own stats)
@@ -1329,6 +1402,9 @@ function show(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));
   document.getElementById('screen-'+name).classList.add('on');
   document.body.classList.toggle('game-active', name==='game');
+  // Cricket never offers a Pad/Dartboard choice (its own dedicated scoring screen
+  // replaces both) — hide the toggle rather than leave it visibly do-nothing.
+  document.body.classList.toggle('cricket-active', name==='game' && !!game && game.gameType==='cricket');
   document.getElementById('nav-home').setAttribute('aria-current', name==='home');
   document.getElementById('nav-setup').setAttribute('aria-current', name==='setup');
   document.getElementById('nav-players').setAttribute('aria-current', name==='players'||name==='player');
@@ -1736,7 +1812,12 @@ function setMode(mode){
   document.getElementById('mode-practice').setAttribute('aria-pressed', mode==='practice');
   document.getElementById('mode-challenge').setAttribute('aria-pressed', mode==='challenge');
   document.getElementById('h2h-options').hidden = (mode !== 'h2h');
-  document.getElementById('start-score-section').hidden = (mode === 'challenge');
+  // Daily Challenge is X01-only — force the game-type choice back and hide it
+  // entirely rather than offering a combination that was never designed.
+  document.getElementById('game-type-section').hidden = (mode === 'challenge');
+  if(mode === 'challenge' && setup.gameType !== 'x01') setGameType('x01');
+  document.getElementById('start-score-section').hidden = (mode === 'challenge' || setup.gameType === 'cricket');
+  document.getElementById('cricket-options-section').hidden = (mode === 'challenge' || setup.gameType !== 'cricket');
   document.getElementById('challenge-info-section').hidden = (mode !== 'challenge');
   document.getElementById('add-player-wrap').style.display = (mode === 'challenge') ? 'none' : '';
   const startBtn = document.getElementById('start-btn');
@@ -2210,6 +2291,58 @@ function pickStart(btn,v){
   setup.start=v;
   document.querySelectorAll('[data-start]').forEach(b=>b.setAttribute('aria-pressed', b===btn));
 }
+/* ---------- Cricket New Game config (game-modes-roadmap.md) ---------- */
+function setGameType(type){
+  setup.gameType = type;
+  document.getElementById('gt-x01').setAttribute('aria-pressed', type==='x01');
+  document.getElementById('gt-cricket').setAttribute('aria-pressed', type==='cricket');
+  document.getElementById('start-score-section').hidden = (type === 'cricket' || setup.mode === 'challenge');
+  document.getElementById('cricket-options-section').hidden = (type !== 'cricket' || setup.mode === 'challenge');
+  if(type === 'cricket') renderCricketNumberGrid();
+}
+function setCricketPreset(preset){
+  setup.cricketPreset = preset;
+  document.getElementById('cricket-preset-classic').setAttribute('aria-pressed', preset==='classic');
+  document.getElementById('cricket-preset-custom').setAttribute('aria-pressed', preset==='custom');
+  document.getElementById('cricket-custom-body').hidden = (preset !== 'custom');
+  if(preset === 'custom' && setup.cricketCustomNumbers.length===0) fillCricketClassicIntoCustom();
+}
+function fillCricketClassicIntoCustom(){
+  setup.cricketCustomNumbers = CRICKET_STANDARD_NUMBERS.slice();
+  renderCricketNumberGrid();
+}
+function renderCricketNumberGrid(){
+  const grid = document.getElementById('cricket-number-grid');
+  if(!grid) return;
+  grid.innerHTML = '';
+  for(let n=1;n<=20;n++) grid.appendChild(cricketNumberToggleBtn(n));
+  grid.appendChild(cricketNumberToggleBtn(25));
+  updateCricketCustomCount();
+}
+function cricketNumberToggleBtn(n){
+  const b=document.createElement('button');
+  b.type='button';
+  b.className='cricket-number-toggle';
+  b.setAttribute('aria-pressed', String(setup.cricketCustomNumbers.includes(n)));
+  b.textContent = cricketNumberLabel(n);
+  b.onclick = ()=>toggleCricketNumber(n);
+  return b;
+}
+function toggleCricketNumber(n){
+  const i = setup.cricketCustomNumbers.indexOf(n);
+  if(i>=0) setup.cricketCustomNumbers.splice(i,1);
+  else setup.cricketCustomNumbers.push(n);
+  renderCricketNumberGrid();
+}
+function updateCricketCustomCount(){
+  const el = document.getElementById('cricket-custom-count');
+  if(el) el.textContent = `${setup.cricketCustomNumbers.length} of 7`;
+}
+// The definitive set of numbers this match will use, after the classic/custom
+// choice — used both for New Game validation and to build game.config.numbers.
+function resolveCricketNumbers(){
+  return setup.cricketPreset === 'custom' ? setup.cricketCustomNumbers.slice() : CRICKET_STANDARD_NUMBERS.slice();
+}
 function bump(key, delta){
   setup[key] = Math.max(1, Math.min(9, setup[key]+delta));
   document.getElementById('legs-val').textContent = setup.legsPerSet;
@@ -2278,18 +2411,33 @@ async function startGame(){
   setup.slots.forEach(n=>{ if(n && roster.includes(n) && !names.includes(n)) names.push(n); });
   if(names.length===0){ uiAlert('Choose at least one player.'); return; }
   if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
+  // Custom cricket is locked to exactly 7 targets (same count as classic) — never
+  // more, never fewer (docs/game-modes-roadmap.md "Decisions made").
+  const gameType = setup.gameType === 'cricket' ? 'cricket' : 'x01'; // Daily Challenge always forces x01 via setMode()
+  let cricketNumbers = null;
+  if(gameType === 'cricket'){
+    cricketNumbers = resolveCricketNumbers();
+    if(cricketNumbers.length !== 7){
+      uiAlert(`Choose exactly 7 cricket targets — currently ${cricketNumbers.length} of 7 selected.`);
+      return;
+    }
+  }
   saveSetup();
   const startScore = challengeStart != null ? challengeStart : setup.start;
   const legsPerSet = setup.mode==='challenge' ? 1 : setup.legsPerSet;
   const setsPerGame = setup.mode==='challenge' ? 1 : setup.setsPerGame;
-  const gameType = 'x01'; // the only game type today; see GAME_TYPES for the plugin seam
+  const config = gameType === 'cricket' ? { numbers: cricketNumbers } : { startingScore: startScore };
+  const category = gameType === 'cricket'
+    ? (setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
+    : String(startScore);
   game = {
     gameType,
+    config,
     start: startScore,
-    category: String(startScore),
+    category,
     legsPerSet, setsPerGame,
     practice: setup.practice,
-    players: names.map(n=>GAME_TYPES[gameType].newMatchPlayer(n, startScore)),
+    players: names.map(n=>GAME_TYPES[gameType].newMatchPlayer(n, gameType==='cricket' ? config : startScore)),
     starter: 0,        // who throws first in the current leg
     current: 0,
     setNo: 1, legNo: 1,
@@ -2911,6 +3059,7 @@ function askDeleteFromProfile(name){
 function avgStr(points, darts){ return darts ? (points/darts*3).toFixed(1) : '—'; }
 
 function renderGame(){
+  if(game.gameType === 'cricket') return renderGameCricket();
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
   game.players.forEach((p,i)=>{
@@ -2942,6 +3091,45 @@ function renderGame(){
   renderSlots();
   renderPad();
   updateCheckout(false);
+  pushLive();
+}
+
+/* Cricket scoreboard: one row per player, a marks/closed cell per in-play number
+   (non-color-only "closed" signal per docs/accessibility-roadmap.md — a checkmark
+   and text label, not just a color change), and a running points total. */
+function renderGameCricket(){
+  const sb = document.getElementById('scoreboard'); sb.innerHTML='';
+  const numbers = game.config.numbers || CRICKET_STANDARD_NUMBERS;
+  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
+  game.players.forEach((p,i)=>{
+    const standing = game.setsPerGame>1
+      ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
+      : game.practice
+      ? `Legs ${p.legsWon}`
+      : `Legs ${p.legsWon}/${game.legsPerSet}`;
+    const cells = numbers.map(n=>{
+      const m = p.marks[n] || 0;
+      const closed = m >= 3;
+      return `<div class="cr-cell${closed?' closed':''}">
+        <div class="cr-num">${cricketNumberLabel(n)}</div>
+        <div class="cr-marks" aria-hidden="true">${marksGlyph(m)}</div>
+        <div class="sr-only">${closed ? cricketNumberLabel(n)+' closed' : cricketNumberLabel(n)+': '+Math.min(3,m)+' of 3 marks'}</div>
+      </div>`;
+    }).join('');
+    const row=document.createElement('div');
+    row.className='pscore cricket-pscore'+(i===game.current?' active':'');
+    row.innerHTML=`
+      <div>
+        <div class="nm">${escapeHtml(p.name)}</div>
+        ${i===game.current?'<div class="turnflag">▸ throwing</div>':''}
+        ${showStanding?`<div class="standing">${standing}</div>`:''}
+      </div>
+      <div class="cr-grid" role="group" aria-label="${escapeHtml(p.name)}'s marks">${cells}</div>
+      <div class="cr-points"><span class="cr-points-val">${p.points||0}</span><span class="cr-points-lbl">PTS</span></div>`;
+    sb.appendChild(row);
+  });
+  renderSlots();
+  renderPad();
   pushLive();
 }
 
@@ -3276,10 +3464,13 @@ let pendingAchievement = null;
 function liveSnapshot(message){
   if(!game) return { active:false, ts:Date.now() };
   const cur = game.players[game.current];
-  const dbl = cur.doubleOut;
-  const startedOn = checkoutHint(cur.score, dbl, 3) !== '';
+  // Checkout-route hints are an X01 concept (a countdown finishing route) — Cricket
+  // has no equivalent, so it just never has a pending checkout suggestion.
+  const isX01 = game.gameType === 'x01';
+  const dbl = isX01 ? cur.doubleOut : false;
+  const startedOn = isX01 && checkoutHint(cur.score, dbl, 3) !== '';
   const dartsLeft = 3 - game.darts.length;
-  const rem = (game.busted || game.won) ? -1 : liveRemaining();
+  const rem = (game.busted || game.won) ? -1 : (isX01 ? liveRemaining() : -1);
   const checkout = (startedOn && rem>0 && dartsLeft>0) ? checkoutHint(rem, dbl, dartsLeft) : '';
   return {
     active:true,
@@ -3320,6 +3511,12 @@ function pushLive(message){
 
 function renderPad(){
   const full = !!(game.darts.length>=3 || game.busted || game.won);
+  if(game.gameType === 'cricket'){
+    renderPadCricket(full);
+    const utb0 = document.getElementById('undo-turn-btn');
+    if(utb0) utb0.disabled = !game.lastTurnSnapshot;
+    return;
+  }
   if(dartboardMode){
     const board = document.getElementById('dart-board-wrap');
     if(board){
@@ -3350,6 +3547,41 @@ function renderPad(){
   if(utb) utb.disabled = !game.lastTurnSnapshot;
 }
 
+/* Cricket's dedicated scoring screen — never the Pad or Dartboard (Decisions made
+   table, game-modes-roadmap.md). Only the 7 in-play numbers are tappable, each
+   showing the throwing player's own marks-so-far as a convenience; a closed number
+   stays tappable (real cricket: still scores if an opponent has it open) so it's
+   never disabled for that reason — only a full 3-dart visit disables the pad. */
+function renderPadCricket(full){
+  const board = document.getElementById('dart-board-wrap');
+  if(board) board.classList.add('hidden');
+  const missB = document.getElementById('board-miss-btn');
+  if(missB) missB.classList.add('hidden');
+  const multi = document.getElementById('multi-row');
+  if(multi) multi.classList.remove('hidden');
+  const pad = document.getElementById('pad');
+  if(!pad) return;
+  pad.classList.remove('hidden');
+  pad.classList.add('cricket-pad');
+  pad.innerHTML = '';
+  const p = game.players[game.current];
+  const numbers = game.config.numbers || CRICKET_STANDARD_NUMBERS;
+  numbers.forEach(n=>{
+    const m = p.marks[n] || 0;
+    const closed = m >= 3;
+    const b = document.createElement('button');
+    b.className = 'cricket-target' + (closed ? ' closed' : '');
+    b.disabled = full;
+    b.innerHTML = `<span class="ct-num">${cricketNumberLabel(n)}</span><span class="ct-marks" aria-hidden="true">${marksGlyph(m)}</span>`;
+    b.setAttribute('aria-label', `${cricketNumberLabel(n)}${closed ? ' — closed' : ` — ${Math.min(3,m)} of 3 marks`}`);
+    b.onclick = () => throwDart(n);
+    pad.appendChild(b);
+  });
+  const miss=document.createElement('button');
+  miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
+  miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+}
+
 /* ---------- throwing ---------- */
 function setMult(m){ mult=m; updateMultUI(); }
 function updateMultUI(){
@@ -3370,8 +3602,15 @@ function throwDart(sector){
   }
   mult=1; updateMultUI();
 
+  if(game.gameType === 'cricket'){
+    // No bust/checkout concept — the cricket pad re-renders the dart slots and its
+    // own live marks/points display; committed state only changes on Enter Turn.
+    renderSlots(); renderPad(); pushLive();
+    return;
+  }
+
   // live bust/win feedback before committing
-  const ev = GAME_TYPES[game.gameType].evaluateVisit(game.players[game.current].score, game.darts, game.players[game.current].doubleOut);
+  const ev = GAME_TYPES[game.gameType].evaluateVisit(game.players[game.current], game.darts, game);
   const status=document.getElementById('status');
   if(ev.bust){
     game.busted=true;
@@ -3405,6 +3644,7 @@ function askEndGame(){
 }
 
 function undoLastTurn(){
+  if(game && game.gameType === 'cricket') return undoLastTurnCricket();
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
   const p = game.players[snap.pi];
@@ -3475,9 +3715,10 @@ function undoDart(){
   renderSlots(); renderPad(); updateCheckout(false); pushLive();
 }
 function enterTurn(){
+  if(game.gameType === 'cricket') return enterTurnCricket();
   if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
   const p = game.players[game.current];
-  const ev = GAME_TYPES[game.gameType].evaluateVisit(p.score, game.darts, p.doubleOut);
+  const ev = GAME_TYPES[game.gameType].evaluateVisit(p, game.darts, game);
 
   // Screen-reader announcement of the committed turn result (docs/accessibility-roadmap.md
   // gap 1) — deliberately just the turn outcome, not per-dart. Leg/set/game-win detail
@@ -3763,6 +4004,102 @@ function enterTurn(){
   pushLive();
 }
 
+/* ----- Cricket turn commit (dispatched from enterTurn()) ----- */
+function enterTurnCricket(){
+  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  const p = game.players[game.current];
+  const ev = GAME_TYPES.cricket.evaluateVisit(p, game.darts, game);
+
+  announce(`${p.name} scores ${ev.pointsThisVisit} point${ev.pointsThisVisit===1?'':'s'} this visit.`);
+
+  // snapshot state before mutations so undoLastTurn() can restore it
+  const _snap = { pi:game.current, marks:Object.assign({}, p.marks), points:p.points,
+    legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
+    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length };
+  game.lastTurnSnapshot = _snap;
+
+  p.marks = ev.marks;
+  p.points = ev.points;
+  const dartsThrown = game.darts.length;
+  p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
+
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:ev.scored, bust:false, checkout:false, checkoutPoints:null,
+    darts: game.darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt })) });
+
+  const turnRecord = { player:p.name, scored:ev.scored, darts:game.darts.slice() };
+  game.currentLegTurns.push(turnRecord);
+  game.sessionTurns.push(turnRecord);
+
+  if(ev.win){
+    onLegWonCricket(game.current);
+    return;
+  }
+
+  game.darts=[]; game.busted=false; game.won=false;
+  game.current = (game.current+1) % game.players.length;
+  game.turnSeq += 1;
+  document.getElementById('status').className='status';
+  document.getElementById('status').textContent='Tap a number to score.';
+  renderGameCricket();
+  pushLive();
+}
+function undoLastTurnCricket(){
+  if(!game || !game.lastTurnSnapshot) return;
+  const snap = game.lastTurnSnapshot;
+  const p = game.players[snap.pi];
+  p.marks = snap.marks;
+  p.points = snap.points;
+  p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
+  game.currentLegTurns.length = snap.ltLen;
+  game.sessionTurns.length = snap.stLen;
+  game.current = snap.pi;
+  game.darts = []; game.busted=false; game.won=false;
+  game.lastTurnSnapshot = null;
+  DB.deleteLastTurn();
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
+  renderGameCricket();
+  pushLive();
+}
+/* ----- Cricket leg / set / game progression (dispatched from onLegWon path) -----
+   No achievements, no Daily Challenge integration, no per-leg stat panel — those are
+   build-order step 3, not this pass. Set/leg advancement and the completeGame/HA
+   webhook calls are the same generic hooks the X01 path uses. */
+function onLegWonCricket(wi){
+  const w = game.players[wi];
+  w.legsWon += 1;
+
+  if(!game.practice && w.legsWon >= game.legsPerSet){      // set won (H2H only)
+    w.setsWon += 1;
+    game.players.forEach(p=>p.legsWon=0);
+
+    if(w.setsWon >= game.setsPerGame){   // game (match) won
+      sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+      sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
+      sendHaWebhook('gameend', w.name, game.category);
+      DB.recordEvent('leg_end', game.setNo, game.legNo);
+      DB.recordEvent('set_end', game.setNo, null);
+      DB.recordEvent('game_end', null, null);
+      DB.completeGame(w.name);
+      game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+      finishUnit('game', w.name);
+      return;
+    }
+    sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+    sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
+    DB.recordEvent('leg_end', game.setNo, game.legNo);
+    DB.recordEvent('set_end', game.setNo, null);
+    game.matchResult = { ts:Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+    finishUnit('set', w.name);
+    return;
+  }
+  sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+  DB.recordEvent('leg_end', game.setNo, game.legNo);
+  game.matchResult = { ts:Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+  finishUnit('leg', w.name);
+}
+
 /* ----- leg / set / game progression ----- */
 function onLegWon(wi){
   const w = game.players[wi];
@@ -3975,18 +4312,26 @@ function finishUnit(kind, winner){
   sb.prepend(banner);
 
   const oche=document.querySelector('.oche');
+  const isCricket = game.gameType === 'cricket';
+  // No matchwin moment card is built for Cricket this pass (stats/social parity is
+  // build-order step 3, not this one) — suppress the Share button rather than wire
+  // it to a card that doesn't exist.
+  const matchShareBtn = isCricket ? '' : `<button class="btn btn-ghost" id="matchwin-share-btn" onclick="shareMomentCard('matchwin')">📤 Share</button>`;
   if(kind==='game'){
     oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
       <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">GAME OVER</div>
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${escapeHtml(winner)} takes the match. Stats saved.</p>
       <div class="btn-row" style="justify-content:center">
         <button class="btn btn-primary" onclick="show('setup')">New game</button>
-        <button class="btn btn-ghost" id="matchwin-share-btn" onclick="shareMomentCard('matchwin')">📤 Share</button>
-      </div>${h2hStatsHtml(winner,'game')}</div>`;
+        ${matchShareBtn}
+      </div>${isCricket ? '' : h2hStatsHtml(winner,'game')}</div>`;
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
-    const legPanel = kind!=='leg' ? '' : game.practice ? `
+    // Cricket has no per-leg stat panel yet (X01-only fields; stats parity is
+    // build-order step 3) — skip straight to '' rather than reading fields that
+    // don't exist on a cricket player.
+    const legPanel = isCricket || kind!=='leg' ? '' : game.practice ? `
       <div class="prac-stats">
         <div class="prac-col">
           <div class="prac-col-title">This Leg</div>
@@ -4018,7 +4363,12 @@ function finishUnit(kind, winner){
         ${challengeShareBtn}
       </div>${legPanel}</div>`;
   }
-  game.legSummary = game.players.map(p=>({
+  game.legSummary = isCricket ? game.players.map(p=>({
+    name: p.name,
+    points: p.points || 0,
+    closed: Object.keys(p.marks||{}).filter(n=>(p.marks[n]||0)>=3).length,
+    won: p.name === winner
+  })) : game.players.map(p=>({
     name: p.name,
     avg:   p.legAvgDarts ? (p.legPoints / p.legAvgDarts * 3).toFixed(1) : null,
     darts: p.legDarts  || 0,
@@ -4151,8 +4501,83 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegX01,
     playerSnapshot: playerSnapshotX01,
     statDefs: STAT_DEFS
+  },
+  cricket: {
+    id: 'cricket',
+    newMatchPlayer: newMatchPlayerCricket,
+    evaluateVisit: evaluateVisitCricket,
+    resetForNextLeg: resetPlayerForNextLegCricket,
+    playerSnapshot: playerSnapshotCricket,
+    statDefs: [] // Cricket stats parity is game-modes-roadmap.md build-order step 3, not this pass
   }
 };
+
+/* ---------- Cricket (game-modes-roadmap.md build-order step 2) ----------
+   Standard cricket only (v1 scope decision) — highest score wins, cut-throat
+   deferred. A match's in-play numbers are locked to exactly 7 (classic:
+   15,16,17,18,19,20,Bull, or a custom 7-of-21 selection made at New Game time),
+   stored as game.config.numbers. */
+const CRICKET_STANDARD_NUMBERS = [15,16,17,18,19,20,25];
+function cricketNumberLabel(n){ return n===25 ? 'Bull' : String(n); }
+function newMatchPlayerCricket(name, config){
+  const marks = {};
+  (config && config.numbers || CRICKET_STANDARD_NUMBERS).forEach(n=>{ marks[n]=0; });
+  return { name, marks, points:0, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 };
+}
+function resetPlayerForNextLegCricket(p, game, newSet){
+  const marks = {};
+  (game.config.numbers || CRICKET_STANDARD_NUMBERS).forEach(n=>{ marks[n]=0; });
+  p.marks = marks; p.points = 0; p.legDarts = 0;
+  if(newSet) p.setDarts = 0;
+}
+function playerSnapshotCricket(p){
+  return {
+    name:p.name, marks:Object.assign({}, p.marks), points:p.points||0,
+    legsWon:p.legsWon, setsWon:p.setsWon,
+    legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0
+  };
+}
+// Pure per-dart scoring function, validated standalone against 12 hand-checked
+// scenarios (mark accumulation within a visit, closing-vs-scoring marks, opponent-
+// closed gating, multi-opponent win checks) before being wired in here.
+//
+// Marks accumulate dart-by-dart *within* a visit — a number can go from open to
+// closed mid-visit, with the remaining darts in that same visit scoring points.
+// A mark counts toward points only once the shooter has closed the number (3+
+// marks, counting the closing marks themselves as 0 points) AND at least one
+// opponent hasn't closed it yet (checked against opponents' state as of the start
+// of this visit — only the shooter's own marks change during their own visit).
+//
+// Known open edge case (matches the roadmap doc's own framing, not silently
+// resolved): an exact points TIE at the moment the last number closes is not a
+// win by this rule — the leg just continues with no tie-break implemented.
+function evaluateVisitCricket(player, darts, game){
+  const numbers = game.config.numbers || CRICKET_STANDARD_NUMBERS;
+  const opponents = game.players.filter(pl=>pl!==player);
+  const marks = Object.assign({}, player.marks);
+  let pointsThisVisit = 0;
+  darts.forEach(d=>{
+    if(!numbers.includes(d.sector)) return; // miss or out-of-play number: no-op
+    const before = marks[d.sector] || 0;
+    const after = before + d.mult;
+    marks[d.sector] = after;
+    const beyondBefore = Math.max(0, before - 3);
+    const beyondAfter = Math.max(0, after - 3);
+    const newBeyond = beyondAfter - beyondBefore;
+    if(newBeyond > 0){
+      const opponentOpen = opponents.some(o=>(o.marks[d.sector]||0) < 3);
+      if(opponentOpen) pointsThisVisit += newBeyond * d.sector;
+    }
+  });
+  const points = player.points + pointsThisVisit;
+  const allClosed = numbers.every(n=>(marks[n]||0) >= 3);
+  const win = allClosed && opponents.every(o=>points > (o.points||0));
+  return { marks, points, pointsThisVisit, scored:pointsThisVisit, win };
+}
+function marksGlyph(n){
+  const clamped = Math.min(3, n);
+  return clamped>=3 ? '✓' : '●'.repeat(clamped) + '○'.repeat(3-clamped);
+}
 
 // Centralized stats glossary — shared source of truth for the homepage and player-page
 // "What do these stats mean?" links, so descriptions never drift out of sync.
