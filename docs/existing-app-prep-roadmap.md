@@ -1,6 +1,6 @@
 # Preparing the Existing App for Future Roadmaps
 
-> Status: **in progress** (4 of 10 items done/adopted — see items 2, 3, 8, and 9). This doc reviews all 16
+> Status: **in progress** (5 of 10 items done/adopted — see items 2, 3, 8, 9, and 10). This doc reviews all 16
 > other roadmap docs in `docs/` and recommends changes to the *existing* codebase now,
 > specifically to reduce rework later. It intentionally does not recommend building
 > any future feature early — only making the current code more hospitable to features
@@ -230,6 +230,20 @@ service."
 
 ## 10. Pull the X01-to-plugin refactor forward, decoupled from shipping Cricket
 
+> **Status: ✅ Done** (see `frontend/index.html`/`backend/db.js` on
+> `claude/dev-branch-commits-bvcxjj`; also recorded in `game-modes-roadmap.md`'s
+> build-order step 1). A `GAME_TYPES` registry now holds X01's `newMatchPlayer`,
+> `evaluateVisit`, `resetForNextLeg`, `playerSnapshot`, and `statDefs`; every call
+> site dispatches through `GAME_TYPES[game.gameType]` instead of calling those
+> functions directly, and `createGame()` accepts optional `gameType`/`config`
+> instead of hardcoding them. Verified behavior-identical to pre-refactor X01 via
+> Playwright and db.js unit tests. This was done as its own project, *before*
+> ghost-opponent or camera-scoring exist, per the recommendation below — so both of
+> those can build their "scripted/simulated dart source" on the same seam instead of
+> each inventing its own. Achievements and the scoring-screen UI were deliberately
+> left X01-specific (see item 5's note on that separation) since there's still no
+> second game type to abstract them against yet.
+
 **The evidence**: `game-modes-roadmap.md`'s own build order lists "extract the
 existing X01 logic behind the plugin interface, no behavior change" as its Phase 1,
 treating it as step one of *shipping Cricket*. But looking across the full roadmap
@@ -280,10 +294,10 @@ un-learn later:**
 4. ~~Docker Compose profiles for future optional services (item 9).~~ ✅ Adopted.
 
 **Worth pulling forward as its own project, ahead of committing to ship Cricket:**
-5. The X01-to-plugin refactor (item 10) — real work, but de-risks Cricket,
-   ghost-opponent, and camera-scoring at once rather than one at a time. See the
-   Roadmap Sequencing section below for why this should happen before either of the
-   other two.
+5. ~~The X01-to-plugin refactor (item 10)~~ ✅ Done — de-risks Cricket,
+   ghost-opponent, and camera-scoring at once rather than one at a time, and now
+   sits in place *before* either of the other two starts. See the Roadmap
+   Sequencing section below.
 
 **Worth doing when the first feature that needs it actually starts:**
 6. Stats query scope helper (item 1) — needed the moment game-modes, online
@@ -333,11 +347,13 @@ attention as the feature roadmaps.
 
 ### Build-order dependencies worth acting on
 
-1. **Game-modes' Phase 1 (the X01→plugin refactor) should happen before
-   ghost-opponent and camera-scoring** — see item 10 above. This is the single most
-   important sequencing call in the whole set: all three features are variations of
-   "a dart event from a non-tap source," and solving it once, early, avoids two
-   ad-hoc solutions that later need reconciling.
+1. ~~**Game-modes' Phase 1 (the X01→plugin refactor) should happen before
+   ghost-opponent and camera-scoring**~~ ✅ **Done** — see item 10 above. This was the
+   single most important sequencing call in the whole set: all three features are
+   variations of "a dart event from a non-tap source," and it's now solved once,
+   ahead of any of the three being built, instead of needing two ad-hoc solutions
+   reconciled later. Ghost-opponent and camera-scoring can now build on
+   `GAME_TYPES`/`game.gameType` directly rather than each inventing their own hook.
 2. **Tournament mode before league mode.** Not a hard dependency, but tournament
    mode is the more specifically-requested one, and building it first gives league
    mode's "games link into a context table" pattern (item 3) a real precedent to
