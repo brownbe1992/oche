@@ -713,7 +713,7 @@ function computeStats() {
     FROM turns t JOIN games g ON g.id=t.game_id
     LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt, SUM(is_treble) AS trebles FROM darts GROUP BY turn_id) dt
       ON dt.turn_id=t.id
-    WHERE ${modeWhere}
+    WHERE (${modeWhere}) ${X01_ONLY}
     GROUP BY t.player_id
   `).all();
 
@@ -729,8 +729,9 @@ function computeStats() {
       SELECT t.player_id AS pid, t.scored,
              CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END AS dcount,
              ROW_NUMBER() OVER (PARTITION BY t.player_id ORDER BY t.id DESC) AS rn
-      FROM turns t
+      FROM turns t JOIN games g ON g.id=t.game_id
       LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id=t.id
+      WHERE 1=1 ${X01_ONLY}
     ) WHERE rn <= 30 GROUP BY pid
   `).all();
 
@@ -812,7 +813,7 @@ function getSummary() {
   `).get().n;
   const darts        = db.prepare('SELECT COUNT(*) AS n FROM darts').get().n ?? 0;
   const tonPlus      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout=1 AND checkout_points>=100').get().n;
-  const oneEighties  = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE scored=180').get().n;
+  const oneEighties  = db.prepare(`SELECT COUNT(*) AS n FROM turns t JOIN games g ON g.id=t.game_id WHERE t.scored=180 ${X01_ONLY}`).get().n;
   const bigFish      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout=1 AND checkout_points=170').get().n;
   const nineDarters  = db.prepare(`
     SELECT COUNT(*) AS n FROM (
@@ -862,7 +863,7 @@ function getHomeExtra() {
     JOIN players p ON p.id = t.player_id
     JOIN games g ON g.id = t.game_id
     LEFT JOIN (SELECT turn_id, SUM(is_treble) AS trebles FROM darts GROUP BY turn_id) dt ON dt.turn_id = t.id
-    WHERE ${modeWhere}
+    WHERE ${modeWhere} ${X01_ONLY}
     GROUP BY p.id
     HAVING turns >= 10
     ORDER BY (CAST(trebleLess AS REAL) / turns) ASC
@@ -961,18 +962,20 @@ function getPlayerStatBubbles(playerName, mode) {
   const dartsThrown    = qd(`SELECT COUNT(*) AS v ${JD} ${mf}`) ?? 0;
   const avgDartsPerDay = qd(`SELECT CAST(COUNT(*) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS v ${JD} ${mf}`);
   const avgDartsPerLeg = qd(`SELECT AVG(leg_darts) AS v FROM (SELECT COUNT(d.id) AS leg_darts ${JD} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)>0)`);
-  const legsWithOneEighty = q(`SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS v ${J} ${mf} AND t.scored=180`) ?? 0;
+  const legsWithOneEighty = q(`SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS v ${J} ${mf} ${X01_ONLY} AND t.scored=180`) ?? 0;
   // Standard 3-dart average: total points / counted darts * 3, where a bust counts
   // as a full 3-dart visit and a winning visit counts only the darts actually thrown.
-  const avgDarts   = qd(`SELECT SUM(adj) AS v FROM (SELECT CASE WHEN t.bust=1 THEN 3 ELSE COUNT(d.id) END AS adj ${JD} ${mf} GROUP BY t.id)`) ?? 0;
-  const totalPts   = q(`SELECT SUM(t.scored) AS v ${J} ${mf}`) ?? 0;
+  const avgDarts   = qd(`SELECT SUM(adj) AS v FROM (SELECT CASE WHEN t.bust=1 THEN 3 ELSE COUNT(d.id) END AS adj ${JD} ${mf} ${X01_ONLY} GROUP BY t.id)`) ?? 0;
+  const totalPts   = q(`SELECT SUM(t.scored) AS v ${J} ${mf} ${X01_ONLY}`) ?? 0;
   const avg        = avgDarts > 0 ? (totalPts / avgDarts * 3) : null;
-  const one80s     = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.scored=180`) ?? 0;
+  const one80s     = q(`SELECT COUNT(*) AS v ${J} ${mf} ${X01_ONLY} AND t.scored=180`) ?? 0;
   const bigFish    = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.checkout=1 AND t.checkout_points=170`) ?? 0;
   const nineDarters= qd(`SELECT COUNT(*) AS v FROM (SELECT 1 ${JD} ${mf} AND g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501 GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9)`) ?? 0;
-  const totalLegs  = q(`SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS v ${J} ${mf}`) ?? 0;
+  // totalLegs is only ever a denominator for the X01 leg stats below (trebleless %,
+  // 180s/leg) — X01-scoped so a cricket leg can't dilute either.
+  const totalLegs  = q(`SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS v ${J} ${mf} ${X01_ONLY}`) ?? 0;
   // tlLegs: legs where no dart was a treble
-  const tlLegs     = qd(`SELECT COUNT(*) AS v FROM (SELECT t.game_id,t.set_no,t.leg_no ${JD} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(d.is_treble)=0)`) ?? 0;
+  const tlLegs     = qd(`SELECT COUNT(*) AS v FROM (SELECT t.game_id,t.set_no,t.leg_no ${JD} ${mf} ${X01_ONLY} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(d.is_treble)=0)`) ?? 0;
 
   // first3avg / first9avg ("opening exchanges" stats) are scoped to 501/301 only — a
   // 170 leg is short enough that "first visit" / "first 9 darts" isn't a meaningful
@@ -1010,7 +1013,7 @@ function getPlayerStatBubbles(playerName, mode) {
   `).get(p.id)?.v ?? null;
 
   // avg100plus and avg90minus share the same subquery — compute in one pass
-  const _legAvgs = db.prepare(`SELECT CAST(SUM(t.scored) AS REAL)/COUNT(*) AS la ${J} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no`).all(p.id);
+  const _legAvgs = db.prepare(`SELECT CAST(SUM(t.scored) AS REAL)/COUNT(*) AS la ${J} ${mf} ${X01_ONLY} GROUP BY t.game_id,t.set_no,t.leg_no`).all(p.id);
   const _legAvgCount = _legAvgs.length || 0;
   const avg100plus = _legAvgCount ? _legAvgs.filter(r=>r.la>=100).length * 100 / _legAvgCount : null;
   const avg90minus = _legAvgCount ? _legAvgs.filter(r=>r.la<=90).length  * 100 / _legAvgCount : null;
@@ -1149,18 +1152,18 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
       return db.prepare(`SELECT bucket, CAST(SUM(scored) AS REAL)/NULLIF(SUM(dcount),0)*3 AS value, COUNT(*) AS count FROM (
         SELECT ${T.fmt} AS bucket, t.scored AS scored, CASE WHEN t.bust=1 THEN 3 ELSE COUNT(d.id) END AS dcount
         FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-        WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere}
+        WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere} ${X01_ONLY}
         GROUP BY t.id
       ) GROUP BY bucket ORDER BY bucket`).all(...params);
     case '180s':
-      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(*) AS value ${TBASE} AND t.scored=180 GROUP BY bucket ORDER BY bucket`).all(...params);
+      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(*) AS value ${TBASE} ${X01_ONLY} AND t.scored=180 GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'bigfish':
       return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(*) AS value ${TBASE} AND t.checkout=1 AND t.checkout_points=170 GROUP BY bucket ORDER BY bucket`).all(...params);
     case '180sperleg':
       return db.prepare(`SELECT ${L.fmt} AS bucket, CAST(SUM(has_180) AS REAL)/NULLIF(COUNT(*),0) AS value FROM (
         SELECT MAX(t.created_at) AS leg_ts, MAX(CASE WHEN t.scored=180 THEN 1 ELSE 0 END) AS has_180
         FROM turns t JOIN games g ON g.id=t.game_id
-        WHERE t.player_id=? ${modeWhere} ${weightWhere}
+        WHERE t.player_id=? ${modeWhere} ${weightWhere} ${X01_ONLY}
         GROUP BY t.game_id,t.set_no,t.leg_no
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'ninedarters':
@@ -1174,7 +1177,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
       return db.prepare(`SELECT ${L.fmt} AS bucket, CAST(SUM(is_tl) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
         SELECT MAX(t.created_at) AS leg_ts, CASE WHEN SUM(d.is_treble)=0 THEN 1 ELSE 0 END AS is_tl
         FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-        WHERE t.player_id=? ${modeWhere} ${weightWhere}
+        WHERE t.player_id=? ${modeWhere} ${weightWhere} ${X01_ONLY}
         GROUP BY t.game_id,t.set_no,t.leg_no
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'first3avg':
@@ -1208,13 +1211,13 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
     case 'avg100plus':
       return db.prepare(`SELECT ${L.fmt} AS bucket, CAST(SUM(CASE WHEN la>=100 THEN 1 ELSE 0 END) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
         SELECT MAX(t.created_at) AS leg_ts, CAST(SUM(t.scored) AS REAL)/COUNT(*) AS la
-        FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere}
+        FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere} ${X01_ONLY}
         GROUP BY t.game_id,t.set_no,t.leg_no
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'avg90minus':
       return db.prepare(`SELECT ${L.fmt} AS bucket, CAST(SUM(CASE WHEN la<=90 THEN 1 ELSE 0 END) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
         SELECT MAX(t.created_at) AS leg_ts, CAST(SUM(t.scored) AS REAL)/COUNT(*) AS la
-        FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere}
+        FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere} ${X01_ONLY}
         GROUP BY t.game_id,t.set_no,t.leg_no
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'score140pct':
@@ -1246,6 +1249,16 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
   }
 }
 
+// X01-only scope for stats derived from turns.scored / leg averages / trebleless
+// legs. turns.scored means "X01 points toward the countdown" in an X01 game but
+// "cricket points earned" in a cricket game — same column, different quantity — so
+// any formula built on it must exclude non-X01 games or a 9-mark cricket visit on
+// 20s (180 cricket points) counts as a "180" and cricket points corrupt every
+// average. Physical-dart stats (darts thrown, pace, sector analytics, Around the
+// World), games/wins/H2H records, and checkout-based stats (cricket never writes
+// checkout=1) deliberately do NOT use this — see REFERENCE.md §3.
+const X01_ONLY = `AND g.game_type='x01'`;
+
 function _mf(mode) {
   if (mode === 'h2h')      return `AND g.practice = 0 AND g.player_count > 1`;
   if (mode === 'practice') return `AND (g.practice = 1 OR g.player_count = 1)`;
@@ -1255,8 +1268,8 @@ function _mf(mode) {
 function getOneEightyStats(mode) {
   const mf = _mf(mode);
   const J = `FROM turns t JOIN games g ON g.id = t.game_id JOIN players p ON p.id = t.player_id`;
-  const leaderboard = db.prepare(`SELECT p.name, COUNT(*) AS count ${J} WHERE t.scored = 180 ${mf} GROUP BY t.player_id ORDER BY count DESC`).all();
-  const recent      = db.prepare(`SELECT p.name, t.created_at ${J} WHERE t.scored = 180 ${mf} ORDER BY t.created_at DESC LIMIT 10`).all();
+  const leaderboard = db.prepare(`SELECT p.name, COUNT(*) AS count ${J} WHERE t.scored = 180 ${mf} ${X01_ONLY} GROUP BY t.player_id ORDER BY count DESC`).all();
+  const recent      = db.prepare(`SELECT p.name, t.created_at ${J} WHERE t.scored = 180 ${mf} ${X01_ONLY} ORDER BY t.created_at DESC LIMIT 10`).all();
   return { leaderboard, recent };
 }
 
@@ -1392,15 +1405,18 @@ function getOnThisDay(playerName, tz) {
   if (!p) return null;
   const tzOff = Number.isInteger(tz) ? tz : 0;
   const tzMod = tzOff ? `, '${tzOff >= 0 ? '+' : ''}${tzOff} minutes'` : '';
+  // scored=180 only means "a 180" in an X01 game — a 9-mark cricket visit on 20s
+  // records 180 cricket points and must not surface as a 180 flashback. Cricket
+  // turns stay eligible for the generic "you played on this day" fallback (ELSE 0).
   const row = db.prepare(`
-    SELECT t.scored, t.checkout, t.checkout_points, g.category,
+    SELECT t.scored, t.checkout, t.checkout_points, g.category, g.game_type,
            strftime('%Y', t.created_at${tzMod}) AS yr
     FROM turns t JOIN games g ON g.id = t.game_id
     WHERE t.player_id = ?
       AND strftime('%m-%d', t.created_at${tzMod}) = strftime('%m-%d', 'now'${tzMod})
       AND strftime('%Y',    t.created_at${tzMod}) != strftime('%Y', 'now'${tzMod})
     ORDER BY
-      (CASE WHEN t.scored = 180 THEN 3
+      (CASE WHEN t.scored = 180 AND g.game_type = 'x01' THEN 3
             WHEN t.checkout = 1 AND t.checkout_points = 170 THEN 2
             WHEN t.checkout = 1 AND t.checkout_points >= 100 THEN 1
             ELSE 0 END) DESC,
@@ -1410,7 +1426,7 @@ function getOnThisDay(playerName, tz) {
   if (!row) return null;
   const nowYear = new Date().getFullYear();
   const yearsAgo = nowYear - Number(row.yr);
-  if (row.scored === 180) {
+  if (row.scored === 180 && row.game_type === 'x01') {
     return { type: '180', year: Number(row.yr), yearsAgo, statLine: `A 180, ${row.category}` };
   }
   if (row.checkout && row.checkout_points === 170) {

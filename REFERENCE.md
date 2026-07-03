@@ -218,8 +218,27 @@ yet built.
 
 All formulas below are X01-only — Cricket's `statDefs` is deliberately empty
 (`GAME_TYPES.cricket.statDefs: []`); stats/leaderboard/profile-chart parity is
-`docs/game-modes-roadmap.md` build-order step 3, not yet built. All formulas
-below are in `backend/db.js`. Two facts drive almost every one of them:
+`docs/game-modes-roadmap.md` build-order step 3, not yet built.
+
+**How cricket games interact with these stats** (`X01_ONLY` constant in
+`backend/db.js`): cricket turns live in the same `turns` table, but
+`turns.scored` means *cricket points earned* there, not X01 countdown points —
+so every formula derived from `scored` (or from leg averages / trebleless legs /
+180 detection) carries an explicit `g.game_type='x01'` filter. Without it, a
+9-mark cricket visit on 20s (180 cricket points) counts as a "180" and cricket
+points corrupt every average — this was found and fixed in the post-Cricket
+audit. The exact split:
+
+| Category | Cricket games… | Why |
+|---|---|---|
+| `scored`-derived (3-dart avg, 180s, 180s/leg, 100+/90− leg averages, trebleless %, recent-form avg, On This Day's 180 detection, metric-history equivalents) | **Excluded** (`X01_ONLY`) | `scored` means a different quantity in cricket |
+| Opening-window stats (1st 3/1st 9 avg, 140/leg) | Excluded already | `OPENING_CATS` restricts to category `'501'`/`'301'` |
+| Checkout-based (Big Fish, ton+ finishes, highest checkout, checkout routes, fewest darts to finish, darts/leg, best leg avg) | Naturally excluded | cricket never writes `checkout=1`, and these are all scoped to won legs / checkout rows |
+| Physical-dart stats (Darts Thrown, Darts/Day, Average Pace, dart analytics sector/treble maps, Around the World progress) | **Included** | a dart thrown in cricket is a real dart; these count physical throws, not X01 arithmetic |
+| Games / wins / win rate / win streak / H2H records / activity counters (legs, sets, darts, today/this-week) | **Included** | a completed cricket H2H match is a real match; "Games Played" counts completed H2H matches of any game type |
+
+All formulas below are in `backend/db.js`. Two facts drive almost every one of
+them:
 
 - **`turns.scored` is already `0` for a busted visit** — the bust-zeroing
   happens app-side before the turn is even persisted. No stat formula needs to
@@ -247,7 +266,7 @@ below are in `backend/db.js`. Two facts drive almost every one of them:
 | Stat | Scope | Formula |
 |---|---|---|
 | `players` | unscoped | `COUNT(*) FROM players` |
-| `games` | **H2H only — by design** | `COUNT(*) FROM games WHERE completed_at IS NOT NULL AND practice = 0 AND player_count > 1`. Practice, solo, and Daily Challenge sessions deliberately do **not** count as "Games Played" (product decision, 2026-07). The explicit filter makes that intentional; independently, `completed_at` is also only ever set on an H2H match win (`POST /api/games/:id/complete` is only called from `onLegWon()`'s match-win branch — End Game navigates away without completing), so the filter is belt-and-braces rather than load-bearing today. |
+| `games` | **H2H only — by design** | `COUNT(*) FROM games WHERE completed_at IS NOT NULL AND practice = 0 AND player_count > 1`. Practice, solo, and Daily Challenge sessions deliberately do **not** count as "Games Played" (product decision, 2026-07); completed cricket H2H matches **do** count (they're real matches — see the cricket-interaction table above). The explicit filter makes the practice exclusion intentional; independently, `completed_at` is only ever set on an H2H match win (`POST /api/games/:id/complete` is called from `onLegWon()`'s and `onLegWonCricket()`'s match-win branches — End Game navigates away without completing), so the filter is belt-and-braces rather than load-bearing today. |
 | `sets` / `legs` | **H2H only** | Distinct `(game,set)` / `(game,set,leg)` combos with ≥1 turn recorded — **no completion requirement**, an in-progress leg still counts |
 | `darts` | fully global | `COUNT(*) FROM darts` |
 | `tonPlus` | fully global | `COUNT(*) FROM turns WHERE checkout=1 AND checkout_points>=100` |

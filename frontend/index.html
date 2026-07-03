@@ -3135,12 +3135,22 @@ function renderGameCricket(){
 
 function renderSlots(){
   const wrap=document.getElementById('slots'); wrap.innerHTML='';
+  const isCricket = game.gameType === 'cricket';
+  const cricketNumbers = isCricket ? (game.config.numbers || CRICKET_STANDARD_NUMBERS) : null;
   for(let i=0;i<3;i++){
     const d = game.darts[i];
+    // The X01 "N pts" subtitle is meaningless in cricket (a T18's 54 X01 points may be
+    // 3 marks, or nothing at all if 18 isn't in play) — show marks instead.
+    let sub = '';
+    if(d){
+      if(!isCricket) sub = `${d.value} pts`;
+      else if(cricketNumbers.includes(d.sector)) sub = `${d.mult} mark${d.mult===1?'':'s'}`;
+      else sub = 'no mark';
+    }
     const div=document.createElement('div');
     div.className='slot'+(d?' filled':'')+(d&&d.isTreble?' t':'')+(d&&d.isDouble?' d':'');
     div.innerHTML = d
-      ? `<span class="lab">${d.label}</span><span class="pts">${d.value} pts</span>`
+      ? `<span class="lab">${d.label}</span><span class="pts">${sub}</span>`
       : `<span class="ph">dart ${i+1}</span>`;
     wrap.appendChild(div);
   }
@@ -4010,7 +4020,10 @@ function enterTurnCricket(){
   const p = game.players[game.current];
   const ev = GAME_TYPES.cricket.evaluateVisit(p, game.darts, game);
 
-  announce(`${p.name} scores ${ev.pointsThisVisit} point${ev.pointsThisVisit===1?'':'s'} this visit.`);
+  // Same screen-reader convention as X01's enterTurn(): announce the committed
+  // outcome, with a distinct phrasing for the leg-winning visit.
+  if(ev.win) announce(`${p.name} closes out and wins the leg with ${ev.points} points.`);
+  else announce(`${p.name} scores ${ev.pointsThisVisit} point${ev.pointsThisVisit===1?'':'s'} this visit.`);
 
   // snapshot state before mutations so undoLastTurn() can restore it
   const _snap = { pi:game.current, marks:Object.assign({}, p.marks), points:p.points,
@@ -4380,9 +4393,10 @@ function finishUnit(kind, winner){
 
 /* rebuild the oche inner markup (used after a leg replaced it) */
 function renderGameShell(){
+  const isCricketGame = !!(game && game.gameType === 'cricket');
   document.querySelector('.oche').innerHTML=`
       <div class="slots" id="slots"></div>
-      <div class="status" id="status">${dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
+      <div class="status" id="status">${isCricketGame ? 'Select a multiplier, then tap a target number.' : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
       <div class="multi" id="multi-row" role="group" aria-label="Dart multiplier">
         <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
         <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
