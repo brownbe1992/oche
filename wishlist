@@ -33,11 +33,11 @@ Stats page:
 
 Scoreboard
 - 9 darter celebration of some kind
-- Voice announcements (180, game shot, running score) — done, see docs/voice-announcements-roadmap.md; full i18n follow-on in docs/voice-announcements-i18n-roadmap.md
+- Voice announcements (180, game shot, running score) — done, see docs/archive/voice-announcements-roadmap.md; full i18n follow-on in docs/voice-announcements-i18n-roadmap.md
 
 Others
 - Schedule for the next session (Double Trouble badge, Busted Maximum badge,
-  explanatory + count-aware achievement notifications) — done, see docs/next-session-plan.md
+  explanatory + count-aware achievement notifications) — done, see docs/archive/next-session-plan.md
 - Add additional games (Cricket, Baseball, etc.) — full design in docs/game-modes-roadmap.md
 - Integrate with Homeassistant
 - Automated scoring with cameras and machine learning — full design in docs/camera-scoring-roadmap.md
@@ -45,23 +45,25 @@ Others
 - Tournament mode (bracket play, up to 128 players, single/double elim) — full design in docs/tournament-mode-roadmap.md
 - iOS/Android app (hybrid webview client) — full design in docs/mobile-app-roadmap.md
 - Online multiplayer (P2P scoring + live video verification) — full design in docs/online-multiplayer-roadmap.md
-- Expanded achievements/badges beyond 180s/Big Fish/9-darters — done, see docs/achievements-badges-roadmap.md
-- Simultaneous achievements (show/persist every badge a turn earns, not just the last one) — done, see docs/simultaneous-achievements-roadmap.md
+- Expanded achievements/badges beyond 180s/Big Fish/9-darters — done, see docs/archive/achievements-badges-roadmap.md
+- Simultaneous achievements (show/persist every badge a turn earns, not just the last one) — done, see docs/archive/simultaneous-achievements-roadmap.md
 - Home Assistant automation recipe book (lights/sounds/notifications) — full design in docs/ha-recipes-roadmap.md
-- Colorblind-friendly dartboard palette — done, see docs/colorblind-mode-roadmap.md
+- Colorblind-friendly dartboard palette — done, see docs/archive/colorblind-mode-roadmap.md
 - Accessibility roadmap & standing checklist (aria-live, contrast audit, and more) — full design in docs/accessibility-roadmap.md
 - Backups & disaster recovery for the SQLite database — done (v1), see docs/backups-roadmap.md
 - Security hardening (admin login rate limiting + standing checklist) — done, see docs/security-hardening-roadmap.md
 - Security audit findings (adversarial whole-codebase review: DoS, SSRF/egress, container hardening) — step-by-step fixes in docs/security-audit-roadmap.md
 - Testing & observability (test coverage + server-side error logging) — done (Part A), see docs/testing-and-observability-roadmap.md
 - League/season mode (standings across casual matches over time) — full design in docs/league-mode-roadmap.md
-- Daily/weekly solo challenge — done (core), see docs/daily-challenge-roadmap.md
+- Daily/weekly solo challenge — done (core), see docs/archive/daily-challenge-roadmap.md
 - Ghost opponent (practice against a replay of your own past leg) — full design in docs/ghost-opponent-roadmap.md
 - Prep work to reduce future rework across all roadmap items — see docs/existing-app-prep-roadmap.md
 
 
 Fixes:
-- End of H2H leg stats for each player
-    - Should flash on the scoreboard as well
+- End of H2H leg stats for each player — done (per-leg summary cards on the live
+  scoreboard, `game.legSummary` in frontend/index.html)
+    - Should flash on the scoreboard as well — done, same feature
 - Add total busts to homepage, track busts per game mode on player pages
-- Hover/tap on top finishes to see what the finish was
+- Hover/tap on top finishes to see what the finish was — done (`toggleFinishRoute()`
+  in frontend/index.html expands each finish row into its checkout route)

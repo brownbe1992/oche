@@ -1,5 +1,12 @@
 # Schedule: Next Session
 
+> **Archived** — all 3 items below are done (each already marked "— done" in its own
+> heading). This was a session punch list, not a design roadmap; its content is fully
+> covered by `docs/archive/achievements-badges-roadmap.md` and
+> `docs/archive/simultaneous-achievements-roadmap.md`. Kept here only for the
+> historical to-do framing. See `docs/existing-app-prep-roadmap.md`'s Roadmap
+> sequencing table for the live completion tracker across all roadmaps.
+
 A short to-do list of what to tackle next, written up so a session can pick these up
 directly without re-deriving context. Full design detail for each item lives in the
 roadmap doc it's linked from — this file is just the punch list and the order to
@@ -7,7 +14,7 @@ work through it in.
 
 ## 1. Achievement notifications + shareable cards: explain what happened, show the count — done
 
-Full design: `docs/achievements-badges-roadmap.md` → "Planned: notifications and
+Full design: `docs/archive/achievements-badges-roadmap.md` → "Planned: notifications and
 shareable cards should explain the badge and show the count."
 
 - Add a plain-language explanation line to the live achievement overlay (both
@@ -23,7 +30,7 @@ shareable cards should explain the badge and show the count."
 
 ## 2. Double Trouble badge — done
 
-Full design: `docs/achievements-badges-roadmap.md` → Precision & Skill.
+Full design: `docs/archive/achievements-badges-roadmap.md` → Precision & Skill.
 
 Check out on a visit where the **last two darts thrown were both doubles** (any
 numbers, not necessarily matching each other) — e.g. a 2-dart D5/D12 finish or a
@@ -40,7 +47,7 @@ double-out checkout does **not** qualify — "consecutive" requires at least two
 
 ## 3. Busted Maximum badge — done
 
-Full design: `docs/achievements-badges-roadmap.md` → Novelty & Humor.
+Full design: `docs/archive/achievements-badges-roadmap.md` → Novelty & Humor.
 
 Throw three treble 20s (a genuine 180) but the visit still busts — a real maximum
 that didn't count. More specific than the existing Ton-titled to Nothing (which

@@ -1,5 +1,12 @@
 # Expanded Achievements & Badges — Design Roadmap
 
+> **Archived** — fully shipped, kept here for design-rationale history. See
+> `docs/existing-app-prep-roadmap.md`'s Roadmap sequencing table for the live
+> completion tracker across all roadmaps. Related archived docs:
+> `docs/archive/simultaneous-achievements-roadmap.md` (the multi-badge queue fix)
+> and `docs/archive/next-session-plan.md` (the punch list this and that doc grew
+> out of).
+
 > Status: **fully shipped**. Every badge in the candidate list is built and tested
 > end-to-end (`frontend/index.html`'s `enterTurn()`/`onLegWon()`, `showAchievement()`/
 > `ACH_LABELS` in both `index.html` and `display.html`, the `player_badges` table in
@@ -51,10 +58,10 @@
 >
 > **Fixed:** a single turn earning more than one badge now shows and broadcasts
 > every one of them in sequence via a display queue, instead of the last one
-> clobbering the rest — see `docs/simultaneous-achievements-roadmap.md` for the
+> clobbering the rest — see `docs/archive/simultaneous-achievements-roadmap.md` for the
 > design and what shipped. The live overlay also now shows a plain-language
 > explanation (`BADGE_INFO[...].desc`) and the shareable moment card folds in the
-> real occurrence count once the award API confirms it — `docs/next-session-plan.md`
+> real occurrence count once the award API confirms it — `docs/archive/next-session-plan.md`
 > item 1.
 
 ## Goal
@@ -159,7 +166,8 @@ fun to show off rather than just another leaderboard. Every darts player recogni
 these moments immediately.*
 
 - **Where'd It Go?** *(recurring)* — three misses in one visit. Pairs naturally with
-  the "No Score" voice callout already shipped (`docs/voice-announcements-roadmap.md`).
+  the "No Score" voice callout already shipped
+  (`docs/archive/voice-announcements-roadmap.md`).
 - **Ton-titled to Nothing** *(recurring)* — score 100+ in a visit that still ends in a
   bust.
 - **Busted Maximum** *(recurring)* — throw three treble 20s (a genuine

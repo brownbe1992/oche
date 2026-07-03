@@ -1,7 +1,8 @@
 # Voice Announcements — Full i18n / Multi-Language Roadmap
 
 > Status: **not started**. Voice announcements themselves shipped with multi-language
-> support deliberately left to the browser (see `docs/voice-announcements-roadmap.md`)
+> support deliberately left to the browser (see
+> `docs/archive/voice-announcements-roadmap.md`)
 > — whatever `speechSynthesis` voice/locale the device already has installed is what
 > speaks, and all phrase text is hardcoded English. This doc designs what a *real*
 > i18n implementation would need on top of that, for whoever picks it up later.

@@ -1,5 +1,9 @@
 # Colorblind-Friendly Mode — Design Roadmap
 
+> **Archived** — fully shipped, kept here for design-rationale history. See
+> `docs/existing-app-prep-roadmap.md`'s Roadmap sequencing table for the live
+> completion tracker across all roadmaps.
+
 > Status: **✅ Done**. A single admin-toggled setting
 > (`colorblind_mode`, Settings → Accessibility) switches the app to a blue/orange
 > palette — verified across every spot identified below: the dartboard SVG rings and

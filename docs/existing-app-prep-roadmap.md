@@ -1,17 +1,20 @@
 # Preparing the Existing App for Future Roadmaps
 
-> Status: **in progress** (5 of 10 items done/adopted, 1 more confirmed-and-closed —
-> see items 2, 3, 8, 9, 10 (done/adopted) and item 5 (confirmed protected through
-> item 10's refactor)). Item 7 (Settings regrouping) is now the most overdue
-> remaining item — see its section below. This doc reviews all 16
-> other roadmap docs in `docs/` and recommends changes to the *existing* codebase now,
-> specifically to reduce rework later. It intentionally does not recommend building
-> any future feature early — only making the current code more hospitable to features
-> that are still just plans. It also now includes a cross-roadmap sequencing analysis
-> (complexity vs. usefulness, and build-order dependencies) at the end — three of the
-> cross-cutting engineering-health items added there (server-side error logging,
-> admin login rate limiting, backups) are now done as of v0.6.2; see the sequencing
-> table below.
+> Status: **in progress** (5 of 10 of this doc's own items done/adopted, 1 more
+> confirmed-and-closed — see items 2, 3, 8, 9, 10 (done/adopted) and item 5
+> (confirmed protected through item 10's refactor)). Item 7 (Settings regrouping) is
+> now the most overdue remaining item — see its section below.
+>
+> This doc reviews the other roadmap docs in `docs/` and recommends changes to the
+> *existing* codebase now, specifically to reduce rework later. It intentionally does
+> not recommend building any future feature early — only making the current code more
+> hospitable to features that are still just plans.
+>
+> Its "Roadmap sequencing" table further down is also the **central completion
+> tracker for every roadmap doc in the project** — every doc's done/partial/
+> not-started status lives there, and fully-finished docs are archived to
+> `docs/archive/` once every item in them is done. See `CLAUDE.md`'s "Roadmap docs"
+> section for the standing convention that keeps this current.
 
 ## How to read this
 
@@ -112,8 +115,12 @@ completed" beyond what happens today:
 - `environmental-logging-roadmap.md` starts/stops HA polling on game start/end.
 - `tournament-mode-roadmap.md` propagates the winner into the next bracket match on
   game completion.
-- `achievements-badges-roadmap.md`'s milestone badges need to check conditions after
-  a game completes.
+- `achievements-badges-roadmap.md` (now shipped and archived at
+  `docs/archive/achievements-badges-roadmap.md`) needed milestone badges to check
+  conditions after a game completes — this item's recommendation (a generic hook
+  mechanism) still wasn't built; achievement checks are inline in `enterTurn()`/
+  `onLegWon()` instead, so this need is still real for the *next* feature that wants
+  a post-completion hook.
 
 Today, `createGame`/`completeGame` in `db.js` are plain functions called directly
 from `server.js` — reasonable for one thing happening on completion (marking a
@@ -341,35 +348,50 @@ un-learn later:**
 
 ## Roadmap sequencing: complexity vs. usefulness
 
-A separate pass across all 16 feature roadmap docs (not this consolidation doc
-itself), ranking each on build complexity and real usefulness, and calling out
-build-order dependencies between them. Also now includes the cross-cutting
-engineering-health items identified in the accessibility/backups/security/testing
-audits below, since in practice they compete for the same "what do we build next"
-attention as the feature roadmaps.
+**This table is the central completion tracker for every roadmap doc in `docs/`** —
+the single place to check what's done and what's outstanding across the whole
+project, so no individual doc's header has to be hunted down and re-read to answer
+that question. It's kept current in the same change that finishes or advances any
+roadmap (per the standing convention below), not as a periodic audit. Fully-finished
+docs are moved to `docs/archive/` (see each row's path) but stay listed here so the
+ledger itself never loses history.
 
-| Roadmap | Complexity | Usefulness | Why |
-|---|---|---|---|
-| ~~Server-side error logging~~ ✅ Done (v0.6.2) | Trivial (one line) | High | Zero design, closes a real "no one would know" gap — see `docs/testing-and-observability-roadmap.md` |
-| HA recipes | Trivial (docs only) | Medium | Zero code, unlocks power that already shipped |
-| ~~Admin login rate limiting~~ ✅ Done (v0.6.2) | Very low | High | Mirrors the already-proven PIN lockout pattern almost line-for-line — see `docs/security-hardening-roadmap.md` |
-| ~~Colorblind mode~~ ✅ Done | Very low | Medium (narrow, real) | CSS-only, genuine accessibility fix; first item under `docs/accessibility-roadmap.md` |
-| Data export | Very low | Medium | Reformats existing queries; reinforces the self-hosted trust story |
-| ~~Voice announcements~~ ✅ Done | Very low | Medium-High | Browser API only, zero infra, extends the celebration culture already core to the app; full i18n left as its own follow-on, see `docs/voice-announcements-i18n-roadmap.md` |
-| ~~Backups / disaster recovery~~ ✅ Done (v0.6.2) | Low | Very high | Self-contained script + docs, no schema/API changes; protects irreplaceable personal data — see `docs/backups-roadmap.md` |
-| ~~Shareable moments~~ ✅ Done | Low | Medium | Client-side only; fun/virality, not core utility |
-| Achievements/badges | Low | Medium | Mostly content on top of infra that already works |
-| Daily challenge | Low | Medium | Built entirely on the existing Practice engine |
-| Ghost opponent | Low-Medium | Medium | Needs a "scripted input source" concept — see dependency note below |
-| Coaching insights | Low-Medium | High | No new data collection; genuinely differentiating vs. competitors |
-| Testing strategy (initial slice) | Medium | High | Real cost is a refactor-for-testability step, not the tests themselves; protects every future roadmap item — see `docs/testing-and-observability-roadmap.md` |
-| League mode | Medium | Medium-High | New tables, no new infra; complements tournament mode |
-| Mobile app | Medium | High | Real packaging/TLS work, but zero new backend infra, and its one prerequisite (responsive CSS) is already done |
-| Tournament mode | Medium-High | High | Bracket generation (especially double-elim) is genuinely fiddly, but fully self-contained — reuses the scoring engine unchanged |
-| Environmental logging | Medium | Low (self-admittedly niche) | New inbound HA auth model, but explicitly scoped as a niche, manually-enabled feature |
-| Game modes (Cricket/Baseball) | Very high | Very high | Full scoring-engine + stats-pipeline generalization, not just "add Cricket" |
-| Online multiplayer | Very high | High *but conditional* | Needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem that caps near-term value regardless of build quality |
-| Camera/ML scoring | Extremely high | High *but narrow* | Genuinely novel CV engineering; only useful to whoever actually mounts the hardware |
+Ranks each doc on build complexity and real usefulness, and calls out build-order
+dependencies between them, in one pass across every roadmap doc in `docs/` —
+including the cross-cutting engineering-health docs (accessibility, backups,
+security, testing) alongside the feature roadmaps, since in practice they compete
+for the same "what do we build next" attention.
+
+| Roadmap doc | Status | Complexity | Usefulness | Notes |
+|---|---|---|---|---|
+| `docs/archive/colorblind-mode-roadmap.md` | ✅ Done | Very low | Medium (narrow, real) | CSS-only, genuine accessibility fix |
+| `docs/ha-recipes-roadmap.md` | Not started | Trivial (docs only) | Medium | Zero code, unlocks power that already shipped — the promised recipe content was never written |
+| `docs/security-hardening-roadmap.md` | Partial | Very low | High | Admin login rate limiting done (v0.6.2), mirroring the proven PIN lockout pattern; SEC-7 (webhook auth) is the one item still open |
+| `docs/data-export-roadmap.md` | Not started | Very low | Medium | Reformats existing queries; reinforces the self-hosted trust story |
+| `docs/archive/voice-announcements-roadmap.md` | ✅ Done | Very low | Medium-High | Browser API only, zero infra; i18n left to its own follow-on doc (next row) |
+| `docs/voice-announcements-i18n-roadmap.md` | Not started | Low-Medium | Low-Medium | Follow-on to the shipped feature; every phrase is still hardcoded English |
+| `docs/backups-roadmap.md` | Partial | Low | Very high | v1 (script + retention + restore docs) done (v0.6.2); v2 (compose sidecar, restore UI/endpoint) not started |
+| `docs/shareable-moments-roadmap.md` | Partial | Low | Medium | Card generation, every trigger point, and the HA webhook are done; Profile "Moments" gallery and BYO-credentials X auto-post are not |
+| `docs/archive/achievements-badges-roadmap.md` | ✅ Done | Low | Medium | Mostly content on top of infra that already worked |
+| `docs/archive/simultaneous-achievements-roadmap.md` | ✅ Done | Low | Medium | Fixed the single-slot achievement-overlay bug; built alongside achievements/badges |
+| `docs/archive/daily-challenge-roadmap.md` | ✅ Done | Low | Medium | Built entirely on the existing Practice engine |
+| `docs/ghost-opponent-roadmap.md` | Not started | Low-Medium | Medium | Needs a "scripted input source" concept — its prerequisite (the `GAME_TYPES` seam, see game-modes row below) now exists; see dependency note below |
+| `docs/coaching-insights-roadmap.md` | Not started | Low-Medium | High | No new data collection; genuinely differentiating vs. competitors |
+| `docs/testing-and-observability-roadmap.md` | Partial | Medium | High | Part A (server-side error logging) done (v0.6.2); Part B (a real, committed test runner) still not started — real cost is a refactor-for-testability step, not the tests themselves |
+| `docs/accessibility-roadmap.md` | Partial | Low-Medium | High | 2 of 5 items done (colorblind mode, `aria-live` announcements on the controller); contrast audit, accessible-input framing, and a type-size pass are outstanding — standing checklist per CLAUDE.md, not a one-off |
+| `docs/league-mode-roadmap.md` | Not started | Medium | Medium-High | New tables, no new infra; complements tournament mode |
+| `docs/mobile-app-roadmap.md` | Partial | Medium | High | Its one prerequisite (responsive CSS pass) is done; the native app itself (Capacitor scaffold, packaging, distribution) is not started |
+| `docs/tournament-mode-roadmap.md` | Not started | Medium-High | High | Bracket generation (especially double-elim) is genuinely fiddly, but fully self-contained — reuses the scoring engine unchanged |
+| `docs/security-audit-roadmap.md` | Partial | Low (fixes were) | High | SEC-1 through SEC-6 and SEC-8 through SEC-11 fixed; SEC-7 (webhook auth) is the only item still open, same gap `security-hardening-roadmap.md` flags |
+| `docs/environmental-logging-roadmap.md` | Not started | Medium | Low (self-admittedly niche) | New inbound HA auth model, but explicitly scoped as a niche, manually-enabled feature |
+| `docs/game-modes-roadmap.md` | Partial | Very high | Very high | Phase 1 (the X01-to-plugin refactor + schema groundwork) done; Cricket/Baseball engine, stats parity, and Home/Profile nav (steps 2-5) not started — full scoring-engine + stats-pipeline generalization, not just "add Cricket" |
+| `docs/online-multiplayer-roadmap.md` | Not started | Very high | High *but conditional* | Needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem that caps near-term value regardless of build quality |
+| `docs/camera-scoring-roadmap.md` | Not started | Extremely high | High *but narrow* | Genuinely novel CV engineering; only useful to whoever actually mounts the hardware |
+
+Also archived, not part of the complexity/usefulness ranking since it's a session
+punch-list rather than a design doc: `docs/archive/next-session-plan.md` — ✅ Done,
+all 3 items shipped, fully superseded by the achievements-badges and
+simultaneous-achievements rows above.
 
 ### Build-order dependencies worth acting on
 

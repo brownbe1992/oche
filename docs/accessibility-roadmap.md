@@ -45,7 +45,7 @@ in isolation.
    question below about whether the shared/ambient scoreboard display warrants the
    same investment as the primary controller.
 2. ~~**Color-only signals extend beyond the dartboard.**~~ ✅ **Done** — the shipped
-   colorblind-mode palette (see `docs/colorblind-mode-roadmap.md`) covers the
+   colorblind-mode palette (see `docs/archive/colorblind-mode-roadmap.md`) covers the
    Pad-mode Double/Treble buttons, entered-dart slot borders, win/bust status text,
    and the dart-analytics chart alongside the dartboard SVG and live scoreboard, not
    just the SVG board in isolation.
@@ -67,7 +67,7 @@ in isolation.
 
 ## Suggested priority order
 
-1. ~~**Colorblind-friendly palette**~~ ✅ **Done** (`docs/colorblind-mode-roadmap.md`) —
+1. ~~**Colorblind-friendly palette**~~ ✅ **Done** (`docs/archive/colorblind-mode-roadmap.md`) —
    very low complexity, CSS-only, shipped with the Pad-button expansion from gap 2
    above folded in.
 2. **Contrast audit** — no code risk, just measurement; produces a concrete punch

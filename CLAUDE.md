@@ -59,6 +59,21 @@ implementing something described in one of these docs, update that doc's status
 inline (and any other doc referencing the same work) to reflect what's done, rather
 than leaving it silently out of date.
 
+`docs/existing-app-prep-roadmap.md`'s "Roadmap sequencing" table is the **central
+completion tracker** across every doc in `docs/` — the one place to check what's
+done and what's outstanding without opening each doc individually. Update its row for
+a doc in the same change that finishes or advances that doc's work, the same
+discipline as keeping the doc's own status header current.
+
+When every item in a roadmap doc is genuinely done, move it to `docs/archive/`
+(`git mv`, preserving history) and fix every cross-reference to its old path in the
+same change (other roadmap docs, `README.md`, `REFERENCE.md`, `wishlist`) — don't
+leave a doc sitting in `docs/` claiming "done" indefinitely, and don't leave dangling
+`docs/whatever.md` references pointing at a path that no longer exists. Archived docs
+stay linkable and keep their design rationale; they just stop competing with the
+still-open roadmaps for attention. Partially-done docs stay in `docs/` — only archive
+a doc once nothing in it is still outstanding.
+
 ## Reference manual — `REFERENCE.md` must be kept current
 
 `REFERENCE.md` (repo root) is the **specification** — the single authoritative

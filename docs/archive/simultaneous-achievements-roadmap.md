@@ -1,5 +1,9 @@
 # Simultaneous Achievements — Design Roadmap
 
+> **Archived** — fully shipped, kept here for design-rationale history. See
+> `docs/existing-app-prep-roadmap.md`'s Roadmap sequencing table for the live
+> completion tracker across all roadmaps.
+
 > Status: **shipped**, per the design below. `enterTurn()`'s expanded-achievements
 > chain is now a `CHAIN_CHECKS` list collected and filtered by the suppression-pairs
 > table (Busted Maximum still suppresses Ton-titled to Nothing, Bullseye Gauntlet
@@ -16,7 +20,7 @@
 > match-deciding leg) shows and broadcasts all three in sequence; a same-visit Big
 > Fish + Nine-Darter collision shows both; both suppression pairs still hold.
 >
-> Built alongside `docs/next-session-plan.md` item 1 (explanatory text + count on
+> Built alongside `docs/archive/next-session-plan.md` item 1 (explanatory text + count on
 > the overlay/moment card), since both touch the same `showAchievement()`/
 > `awardRecurringBadge()` code — see that doc for what shipped there.
 

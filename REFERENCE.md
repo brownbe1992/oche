@@ -469,7 +469,7 @@ Fish/Nine-Darter (which is all it originally supported, before the queue
 rework also fixed this coverage gap as a side effect of centralizing the
 broadcast point).
 
-Full design rationale: `docs/simultaneous-achievements-roadmap.md`.
+Full design rationale: `docs/archive/simultaneous-achievements-roadmap.md`.
 
 ---
 

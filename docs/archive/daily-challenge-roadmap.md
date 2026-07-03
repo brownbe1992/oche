@@ -1,5 +1,9 @@
 # Daily/Weekly Challenge — Design Roadmap
 
+> **Archived** — fully shipped, kept here for design-rationale history. See
+> `docs/existing-app-prep-roadmap.md`'s Roadmap sequencing table for the live
+> completion tracker across all roadmaps.
+
 > Status: **fully shipped**, including the "beat your best" live callout and the
 > Player Profile history view. `completeChallengeAttempt()` (`backend/db.js`) now
 > returns `isPersonalBest` (comparing against every other completed attempt of the
@@ -101,7 +105,7 @@ metric:
   finish" (busted out or gave up) is a valid, trackable outcome too, not just success/
   failure — matches how a real Wordle "X/6" can also be a loss.
 - **Streak tracking**: consecutive days/weeks attempted. This shares real underlying
-  mechanics with the win-streak concept in `docs/achievements-badges-roadmap.md` —
+  mechanics with the win-streak concept in `docs/archive/achievements-badges-roadmap.md` —
   attempt logging and streak computation are the same problem for both features and
   are worth building once, shared between them.
 - **Results history strip** on the Home page — last 7 days' attempts (hit/miss/metric
