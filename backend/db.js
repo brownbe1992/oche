@@ -184,6 +184,10 @@ try { db.exec('ALTER TABLE player_badges ADD COLUMN count INTEGER NOT NULL DEFAU
 // stays H2H even after one participant is removed). Backfilled for existing rows below.
 try { db.exec('ALTER TABLE games ADD COLUMN player_count INTEGER'); } catch(e) {}
 db.exec(`UPDATE games SET player_count = (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = games.id) WHERE player_count IS NULL`);
+// config wasn't backfilled when the column was added (unlike player_count above) —
+// every pre-existing row is X01 (game_type defaults to 'x01') with category as its
+// stringified starting score, so this mirrors createGame()'s own derivation exactly.
+db.exec(`UPDATE games SET config = json_object('startingScore', CAST(category AS INTEGER)) WHERE config IS NULL AND game_type = 'x01'`);
 
 const DEFAULT_PIN_LOCKOUT_THRESHOLD = 10;
 const DEFAULT_ADMIN_LOCKOUT_THRESHOLD = 5; // stricter than PIN lockout — compromising the admin account is more consequential
@@ -330,12 +334,14 @@ function deletePlayer(name) {
 }
 
 /* ---------- game + turn operations ---------- */
-function createGame({ category, legsPerSet, setsPerGame, players, practice }) {
-  // game_type is hardcoded to 'x01' here — every game created today is X01. This
-  // just gives future game types (see docs/game-modes-roadmap.md) a column to
-  // populate instead of needing a migration bundled into that work.
-  const config = JSON.stringify({ startingScore: Number(category) || null });
-  const info = q.insertGame.run(String(category), Number(legsPerSet) || 1, Number(setsPerGame) || 1, practice ? 1 : 0, 'x01', config);
+function createGame({ category, legsPerSet, setsPerGame, players, practice, gameType, config }) {
+  // gameType/config default to X01 for every caller today (no New Game UI sends
+  // anything else yet) — see docs/game-modes-roadmap.md. Accepting them as params
+  // means a future Cricket/Baseball New Game flow can pass its own without another
+  // signature change here.
+  const resolvedGameType = gameType || 'x01';
+  const resolvedConfig = config ? JSON.stringify(config) : JSON.stringify({ startingScore: Number(category) || null });
+  const info = q.insertGame.run(String(category), Number(legsPerSet) || 1, Number(setsPerGame) || 1, practice ? 1 : 0, resolvedGameType, resolvedConfig);
   const gameId = Number(info.lastInsertRowid);
   (players || []).forEach(entry => {
     const out = entry.out === 'single' ? 'single' : 'double';
@@ -681,7 +687,7 @@ function computeStats() {
     SELECT pid, COUNT(*) AS n FROM (
       SELECT t.player_id AS pid
       FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-      WHERE g.category='501' ${extraWhere}
+      WHERE g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501 ${extraWhere}
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
       HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9
     ) GROUP BY pid
@@ -811,7 +817,7 @@ function getSummary() {
   const nineDarters  = db.prepare(`
     SELECT COUNT(*) AS n FROM (
       SELECT t.player_id FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-      WHERE g.category='501'
+      WHERE g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
       HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9
     )
@@ -963,7 +969,7 @@ function getPlayerStatBubbles(playerName, mode) {
   const avg        = avgDarts > 0 ? (totalPts / avgDarts * 3) : null;
   const one80s     = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.scored=180`) ?? 0;
   const bigFish    = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.checkout=1 AND t.checkout_points=170`) ?? 0;
-  const nineDarters= qd(`SELECT COUNT(*) AS v FROM (SELECT 1 ${JD} ${mf} AND g.category='501' GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9)`) ?? 0;
+  const nineDarters= qd(`SELECT COUNT(*) AS v FROM (SELECT 1 ${JD} ${mf} AND g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501 GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9)`) ?? 0;
   const totalLegs  = q(`SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS v ${J} ${mf}`) ?? 0;
   // tlLegs: legs where no dart was a treble
   const tlLegs     = qd(`SELECT COUNT(*) AS v FROM (SELECT t.game_id,t.set_no,t.leg_no ${JD} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(d.is_treble)=0)`) ?? 0;
@@ -1161,7 +1167,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
       return db.prepare(`SELECT ${L.fmt} AS bucket, COUNT(*) AS value FROM (
         SELECT MAX(t.created_at) AS leg_ts
         FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-        WHERE t.player_id=? AND g.category='501' ${modeWhere} ${weightWhere}
+        WHERE t.player_id=? AND g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501 ${modeWhere} ${weightWhere}
         GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'treblelesspct':
@@ -1267,7 +1273,7 @@ function getNineDarterStats(mode) {
   const leaderboard = db.prepare(`
     SELECT p.name, COUNT(*) AS count FROM (
       SELECT t.player_id FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-      WHERE g.category = '501' ${mf}
+      WHERE g.game_type = 'x01' AND json_extract(g.config,'$.startingScore') = 501 ${mf}
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
       HAVING COUNT(DISTINCT t.id) = 3 AND SUM(t.checkout) > 0 AND COUNT(d.id) = 9
     ) x JOIN players p ON p.id = x.player_id
@@ -1277,7 +1283,7 @@ function getNineDarterStats(mode) {
     SELECT p.name, MAX(t.created_at) AS created_at
     FROM turns t JOIN games g ON g.id=t.game_id JOIN players p ON p.id=t.player_id
     JOIN darts d ON d.turn_id=t.id
-    WHERE g.category = '501' ${mf}
+    WHERE g.game_type = 'x01' AND json_extract(g.config,'$.startingScore') = 501 ${mf}
     GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
     HAVING COUNT(DISTINCT t.id) = 3 AND SUM(t.checkout) > 0 AND COUNT(d.id) = 9
     ORDER BY created_at DESC LIMIT 10

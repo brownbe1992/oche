@@ -1,9 +1,19 @@
 # Additional Game Modes — Design Roadmap
 
-> Status: **not started** (Cricket/Baseball themselves). One piece of schema
-> groundwork — `games.game_type`/`games.config` — is done; see the Data model
-> section below. This is otherwise a design doc for a future release, captured so
-> the thinking isn't lost.
+> Status: **not started** (Cricket/Baseball themselves). Build-order step 1, the
+> plugin refactor, is done: `frontend/index.html` now has a `GAME_TYPES` registry
+> (`newMatchPlayer`, `evaluateVisit`, `resetForNextLeg`, `playerSnapshot`,
+> `statDefs`), currently holding only `x01`, and every call site that used to call
+> those functions directly now dispatches through `GAME_TYPES[game.gameType]` —
+> proven behavior-identical to the pre-refactor code via Playwright (bust, double-out
+> win, undo, 180 achievement, live scoreboard) and db.js unit tests. Backend
+> `createGame()` now accepts optional `gameType`/`config` params (still defaulting to
+> `'x01'`/derived-from-category for every caller today), and the nine-darter queries
+> that hardcoded `category='501'` now read `game_type`/`config` instead (with a
+> one-time backfill for historical rows, since `config` itself was never backfilled
+> when the column was added). See the Data model section below for details. Cricket's
+> own engine, config UI, scoring screen, and stats (build-order steps 2-4) are still
+> not started.
 
 ## Goal
 
@@ -72,14 +82,27 @@ active plugin. This refactor is Phase 1 of the build order below, done *without
 changing X01 behavior at all* — proving the abstraction is sound before Cricket
 depends on it.
 
+> **Status: ✅ Phase 1 done.** `GAME_TYPES.x01` in `frontend/index.html` holds
+> `newMatchPlayer`, `evaluateVisit`, `resetForNextLeg`, `playerSnapshot`, and
+> `statDefs` (a pointer to `STAT_DEFS`); `game.gameType` is stamped once at
+> `startGame()` and every downstream call site (`enterTurn`, `startNextLeg`,
+> `liveSnapshot`) dispatches through `GAME_TYPES[game.gameType]` instead of calling
+> the old functions by name. `display.html`'s `renderers` table already read
+> `s.gameType` from the live snapshot, so it needed no change. Achievements
+> (`CHAIN_CHECKS`, Metronome, etc.), `renderGame()`'s countdown scoring screen, and
+> the New Game starting-score UI are deliberately **not** abstracted yet — Cricket
+> gets its own scoring screen and achievement set (steps 2-3 below), there's nothing
+> generic to extract from those until a second game type actually exists.
+
 ## Data model
 
-> **Status: ✅ Schema groundwork done** (see `docs/existing-app-prep-roadmap.md`
-> item 2, implemented in `backend/db.js` on `dev`). `games.game_type` and
-> `games.config` both exist now, populated as `'x01'` / `{startingScore: ...}` for
-> every game — hardcoded, since no Cricket/Baseball engine or New Game UI exists
-> yet. The rest of this section (Cricket actually using `config`, the nine-darter
-> query fix, etc.) is still not started.
+> **Status: ✅ Schema groundwork done, and now actually used.** `games.game_type` and
+> `games.config` exist and are populated as `'x01'` / `{startingScore: ...}` for every
+> game today. `createGame()` (`backend/db.js`) now accepts optional `gameType`/
+> `config` params instead of hardcoding them, so a future Cricket New Game flow can
+> pass its own without another signature change. The nine-darter query fix mentioned
+> below is done — see the note under "Known coupling" further down. Cricket actually
+> using non-x01 `config` shapes is still not started.
 
 - `games.game_type` (new column: `'x01' | 'cricket' | 'baseball' | ...`)
 - `games.category` stays as the human-readable label (X01: "501" as today; Cricket:
@@ -91,9 +114,13 @@ depends on it.
 - No changes to `turns`/`darts` — Cricket's marks/closed state and points are computed
   from existing `darts` rows at query time, matching the existing "nothing is
   pre-aggregated" philosophy already documented in the README's Architecture section.
-- **Known coupling to fix during the refactor**: the nine-darter detection query
-  hardcodes `g.category='501'` (`db.js`, `computeStats`/`getSummary` area) — this
-  becomes `g.game_type='x01' AND json_extract(config,'$.startingScore')=501`.
+- **✅ Fixed**: the nine-darter detection query no longer hardcodes `g.category='501'`
+  — all 6 occurrences (`nineDarterBase`, `getSummary`, `getPlayerStatBubbles`,
+  `getMetricHistory`, and both `getNineDarterStats` queries) now read
+  `g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501`. This required
+  a one-time backfill (`db.js`, alongside the existing `player_count` backfill) since
+  `config` itself was added without backfilling pre-existing rows — without it, every
+  nine-darter thrown before that migration would have silently stopped counting.
 
 ## Cricket rules (standard, v1 scope)
 
@@ -159,9 +186,9 @@ Legs/sets/best-of stays universal across types — that concept isn't X01-specif
 
 ## Suggested build order
 
-1. **Refactor, no new behavior** — extract the existing X01 logic behind the plugin
-   interface; prove X01 plays identically before anything else depends on the
-   abstraction.
+1. **✅ Done — Refactor, no new behavior** — extracted the existing X01 logic behind
+   the plugin interface; verified X01 plays identically (Playwright + db.js unit
+   tests) before anything else depends on the abstraction.
 2. **Cricket engine + customizable numbers** — turn engine, win condition, New Game
    config UI, scoring-screen card (marks/closed display instead of a countdown).
 3. **Cricket stats parity** — MPR, leaderboards, profile charts, achievements.

@@ -75,6 +75,16 @@ oche/
   after every dart and every turn; `/display` subscribes to `/api/live/stream`
   (SSE) and re-renders on every push. Live state lives in memory only on the
   server — it is never written to the database. See [§7](#7-live-scoreboard--real-time-sync).
+- **Game-type plugin seam**: `frontend/index.html` has a `GAME_TYPES` registry
+  (currently just `x01`) with `newMatchPlayer`, `evaluateVisit`, `resetForNextLeg`,
+  `playerSnapshot`, and `statDefs`. `game.gameType` is stamped once in `startGame()`;
+  every downstream caller (`enterTurn`, `startNextLeg`, `liveSnapshot`) dispatches
+  through `GAME_TYPES[game.gameType]` instead of calling those functions directly, and
+  `display.html`'s `renderers[s.gameType]` table reads the same field. This is prep
+  for Cricket/Baseball (`docs/game-modes-roadmap.md`) — adding a second game type is a
+  new registry entry, not a rewrite of these call sites. Achievements and the scoring
+  screen's countdown UI are still X01-specific; only the engine/state layer is
+  pluggable so far.
 
 ---
 
@@ -838,8 +848,8 @@ already-migrated database is a safe no-op).
 | `created_at` / `completed_at` | `TEXT` | `completed_at` is `NULL` for in-progress/abandoned games |
 | `winner_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | |
 | `practice` | `INTEGER NOT NULL DEFAULT 0` | Explicit practice flag, set at creation |
-| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | Forward-looking column for future non-X01 modes; every game today is `'x01'` |
-| `config` | `TEXT` | JSON, currently just `{startingScore}` |
+| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | Forward-looking column for future non-X01 modes; every game today is `'x01'`. `createGame()` accepts it as an optional param (still defaults to `'x01'`) so a future Cricket New Game flow can pass its own. Nine-darter detection queries filter on this + `config` instead of `category='501'`. |
+| `config` | `TEXT` | JSON, currently just `{startingScore}` for every row (backfilled for rows created before this column existed) |
 | `player_count` | `INTEGER` | **Frozen** participant count at creation (not a live subquery) — see §3's mode-scoping note |
 
 ### `game_players` (composite `PRIMARY KEY (game_id, player_id)`)

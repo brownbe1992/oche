@@ -2282,12 +2282,14 @@ async function startGame(){
   const startScore = challengeStart != null ? challengeStart : setup.start;
   const legsPerSet = setup.mode==='challenge' ? 1 : setup.legsPerSet;
   const setsPerGame = setup.mode==='challenge' ? 1 : setup.setsPerGame;
+  const gameType = 'x01'; // the only game type today; see GAME_TYPES for the plugin seam
   game = {
+    gameType,
     start: startScore,
     category: String(startScore),
     legsPerSet, setsPerGame,
     practice: setup.practice,
-    players: names.map(n=>newMatchPlayer(n, startScore)),
+    players: names.map(n=>GAME_TYPES[gameType].newMatchPlayer(n, startScore)),
     starter: 0,        // who throws first in the current leg
     current: 0,
     setNo: 1, legNo: 1,
@@ -3281,18 +3283,10 @@ function liveSnapshot(message){
   const checkout = (startedOn && rem>0 && dartsLeft>0) ? checkoutHint(rem, dbl, dartsLeft) : '';
   return {
     active:true,
-    gameType:'x01',
+    gameType:game.gameType,
     category:game.category, legsPerSet:game.legsPerSet, setsPerGame:game.setsPerGame,
     setNo:game.setNo, legNo:game.legNo, currentIndex:game.current,
-    players: game.players.map(p=>({
-      name:p.name, score:p.score, out:p.doubleOut?'double':'single',
-      legAvg:  p.legAvgDarts  ? (p.legPoints/p.legAvgDarts*3).toFixed(1)   : null,
-      gameAvg: p.gameAvgDarts ? (p.gamePoints/p.gameAvgDarts*3).toFixed(1) : null,
-      legsWon:p.legsWon, setsWon:p.setsWon,
-      legDarts: p.legDarts  || 0,
-      setDarts: p.setDarts  || 0,
-      gameDarts:p.gameDarts || 0
-    })),
+    players: game.players.map(p=>GAME_TYPES[game.gameType].playerSnapshot(p)),
     darts: game.darts.map(d=>d.label),
     checkout,
     status: game.won ? 'won' : (game.busted ? 'bust' : 'live'),
@@ -3377,7 +3371,7 @@ function throwDart(sector){
   mult=1; updateMultUI();
 
   // live bust/win feedback before committing
-  const ev = evaluateVisit(game.players[game.current].score, game.darts, game.players[game.current].doubleOut);
+  const ev = GAME_TYPES[game.gameType].evaluateVisit(game.players[game.current].score, game.darts, game.players[game.current].doubleOut);
   const status=document.getElementById('status');
   if(ev.bust){
     game.busted=true;
@@ -3483,7 +3477,7 @@ function undoDart(){
 function enterTurn(){
   if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
   const p = game.players[game.current];
-  const ev = evaluateVisit(p.score, game.darts, p.doubleOut);
+  const ev = GAME_TYPES[game.gameType].evaluateVisit(p.score, game.darts, p.doubleOut);
 
   // Screen-reader announcement of the committed turn result (docs/accessibility-roadmap.md
   // gap 1) — deliberately just the turn outcome, not per-dart. Leg/set/game-win detail
@@ -3914,8 +3908,7 @@ function startNextLeg(newSet){
   sendHaWebhook('legstart', '', game.category, { setNo: game.setNo, legNo: game.legNo });
   game.starter = (game.starter + 1) % game.players.length;
   game.current = game.starter;
-  game.players.forEach(p=>{ p.score = game.start; p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legAvgDarts=0; p.legBusts=0; if(newSet) p.setDarts=0;
-    p.legVisitScores=[]; p.metronomeFired=false; p.pendingIceInTheVeins=false; p.legWorstDeficit=0; });
+  game.players.forEach(p=>GAME_TYPES[game.gameType].resetForNextLeg(p, game, newSet));
   game.legSummary = null;
   game.currentLegTurns = [];
   game.legVisitLogs = [];
@@ -4127,6 +4120,39 @@ const STAT_DEFS = [
   { key:'180sperleg',    label:'180s/Leg',    desc:'% of legs that contained a 180',           fmt:v=>v!=null?(v*100).toFixed(1)+'%':'—' },
 ];
 let selectedStat = 'avg';
+
+// ---------- game-type plugin registry ----------
+// The seam future game types (Cricket, Ghost Opponent's replay engine) plug into.
+// X01 is the only entry today; everything above/below that drives an active `game`
+// dispatches through GAME_TYPES[game.gameType] instead of calling these directly,
+// so a second entry is a pure addition, not a rewrite of call sites.
+function resetPlayerForNextLegX01(p, game, newSet){
+  p.score = game.start;
+  p.legPoints = 0; p.legVisits = 0; p.legDarts = 0; p.legAvgDarts = 0; p.legBusts = 0;
+  if(newSet) p.setDarts = 0;
+  p.legVisitScores = []; p.metronomeFired = false; p.pendingIceInTheVeins = false; p.legWorstDeficit = 0;
+}
+function playerSnapshotX01(p){
+  return {
+    name:p.name, score:p.score, out:p.doubleOut?'double':'single',
+    legAvg:  p.legAvgDarts  ? (p.legPoints/p.legAvgDarts*3).toFixed(1)   : null,
+    gameAvg: p.gameAvgDarts ? (p.gamePoints/p.gameAvgDarts*3).toFixed(1) : null,
+    legsWon:p.legsWon, setsWon:p.setsWon,
+    legDarts: p.legDarts  || 0,
+    setDarts: p.setDarts  || 0,
+    gameDarts:p.gameDarts || 0
+  };
+}
+const GAME_TYPES = {
+  x01: {
+    id: 'x01',
+    newMatchPlayer,
+    evaluateVisit,
+    resetForNextLeg: resetPlayerForNextLegX01,
+    playerSnapshot: playerSnapshotX01,
+    statDefs: STAT_DEFS
+  }
+};
 
 // Centralized stats glossary — shared source of truth for the homepage and player-page
 // "What do these stats mean?" links, so descriptions never drift out of sync.
