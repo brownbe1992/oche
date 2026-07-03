@@ -599,7 +599,11 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/players/on-this-day' && m === 'GET') {
       const tzRaw = url.searchParams.get('tz');
       const tz = tzRaw !== null ? Number(tzRaw) : 0;
-      return send(res, 200, db.getOnThisDay(url.searchParams.get('name'), Number.isFinite(tz) ? tz : 0));
+      // Clamp to the same +/-840-minute range as /api/players/avg-history — a valid
+      // UTC offset never exceeds 14h, and an absurd value would shift the %m-%d match
+      // to the wrong day.
+      const tzSafe = (Number.isFinite(tz) && tz >= -840 && tz <= 840) ? tz : 0;
+      return send(res, 200, db.getOnThisDay(url.searchParams.get('name'), tzSafe));
     }
 
     // ----- daily challenge (docs/daily-challenge-roadmap.md) -----

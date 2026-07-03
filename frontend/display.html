@@ -680,7 +680,11 @@ function render(s){
       : 'next leg coming up';
     banner.classList.add('show');
     if(!s.done){ clearTimeout(bannerTimer); bannerTimer = setTimeout(()=>banner.classList.remove('show'), 3500); }
-  } else if(!s.message){
+  } else if(!s.message && !s.done){
+    // A message-less snapshot clears the banner (e.g. play resuming next leg). Guard on
+    // !s.done so the persistent GAME OVER banner isn't dismissed by a trailing
+    // achievement broadcast (which carries message:'' but keeps done:true) — it stays
+    // up until a new game actually starts (done:false).
     bannerKey=''; banner.classList.remove('show');
   }
 }
@@ -711,8 +715,12 @@ function connect(){
   es.onerror = () => {
     setLive(false);
     errCount++;
-    // After 3 consecutive errors the stream is unlikely to self-recover; fall back to polling
-    if(errCount >= 3){ es.close(); startPolling(); }
+    // A fatal close (readyState CLOSED) means the browser won't auto-retry — this is
+    // what happens when the server rejects the stream with a non-2xx (e.g. the 503
+    // connection-cap response). Fall back to polling immediately rather than waiting
+    // for 3 retries that will never come. Transient drops keep readyState CONNECTING,
+    // so those still get the auto-reconnect + 3-strikes behaviour.
+    if(errCount >= 3 || es.readyState === EventSource.CLOSED){ es.close(); startPolling(); }
   };
 }
 

@@ -174,7 +174,7 @@ them:
 | Stat | Scope | Formula |
 |---|---|---|
 | `players` | unscoped | `COUNT(*) FROM players` |
-| `games` | all modes | `COUNT(*) FROM games WHERE completed_at IS NOT NULL` (practice included) |
+| `games` | all modes | `COUNT(*) FROM games WHERE completed_at IS NOT NULL`. The query itself is mode-agnostic (it does not filter on `practice`), **but** `completed_at` is only ever set by `POST /api/games/:id/complete`, which the frontend calls **only when an H2H match is won** — practice, solo, and Daily Challenge games are never marked complete (End Game just navigates away without completing). So in current behavior this count is effectively "H2H matches won to completion." Whether practice sessions *should* count toward Games Played is an open product decision, not just a doc detail — see §15. |
 | `sets` / `legs` | **H2H only** | Distinct `(game,set)` / `(game,set,leg)` combos with ≥1 turn recorded — **no completion requirement**, an in-progress leg still counts |
 | `darts` | fully global | `COUNT(*) FROM darts` |
 | `tonPlus` | fully global | `COUNT(*) FROM turns WHERE checkout=1 AND checkout_points>=100` |
@@ -959,6 +959,24 @@ already-shipped limitations, not just unbuilt future features:
 - **Online multiplayer's data model isn't fully specified** — needs its own
   `online_matches` table with a `game_id` FK (per the binding convention below),
   not a value stuffed into `games.category` — `docs/online-multiplayer-roadmap.md`.
+- **Practice / solo / Daily Challenge games are never marked `completed_at`** — the
+  frontend only calls `completeGame` on an H2H match win, so these never count toward
+  the home "Games Played" total or appear in "Last game played," even when ended
+  deliberately via End Game (whose copy says stats were saved — which is true, turns
+  are persisted per-visit; only the game-completion marker is absent). Whether they
+  *should* count is an open product decision, not settled here (see the §3 `games`
+  row).
+- **Navigating away mid-game (tapping the "OCHE" logo) exits the scoring screen with
+  no confirmation and no resume path** — the in-progress game becomes unreachable
+  (though its turns are already persisted per-visit). Renaming a player mid-game also
+  doesn't update `game.players[].name`, so a resume path, if added, would need to
+  reconcile that. Unspecified state-machine behavior, not a data-loss bug.
+- **`getH2HSummary().previousWinner` can mislabel in a 3+-player free-for-all** — the
+  double `game_players` join counts any game where both named players took part (not
+  exactly-two-player games, per §3's note), so if a *third* player won the most-recent
+  such game, `previousWinner` still reports one of the two named players. Only reaches
+  the Rematch/Grudge badges, which the controller evaluates for 2-player matches only,
+  so it's latent in practice.
 - See the individual `docs/*.md` files for full design detail on every
   not-yet-built feature (tournament mode, league mode, Cricket/game modes,
   camera scoring, mobile app, ghost opponent, coaching insights, and more).

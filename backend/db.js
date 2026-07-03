@@ -367,13 +367,24 @@ function addTurn(gameId, t) {
     return { dartNo: Number.isInteger(Number(d.dartNo)) ? Number(d.dartNo) : i + 1, sector, multiplier,
              thrownAt: d.thrownAt ? String(d.thrownAt) : null };
   });
+  // Validate the visit-level numbers too, not just the darts. turns.scored feeds every
+  // points/average stat, so a negative or absurd value would silently corrupt them; a
+  // negative set/leg number is meaningless. Max single-visit score is 180 (3xT20) and
+  // max checkout is 170, so anything beyond those is garbage from a malformed/hostile
+  // client (this is a requireWrite route, public by default on a LAN).
+  const scored = Number(t.scored) || 0;
+  if (!Number.isFinite(scored) || scored < 0 || scored > 180) throw httpError(400, 'scored must be between 0 and 180');
+  const setNo = Number(t.set || 1), legNo = Number(t.leg || 1);
+  if (!Number.isInteger(setNo) || setNo < 1 || !Number.isInteger(legNo) || legNo < 1) throw httpError(400, 'set and leg must be positive integers');
+  const checkoutPoints = t.checkout ? (Number(t.checkoutPoints) || 0) : null;
+  if (checkoutPoints != null && (!Number.isFinite(checkoutPoints) || checkoutPoints < 0 || checkoutPoints > 170)) throw httpError(400, 'checkoutPoints must be between 0 and 170');
   const info = q.insertTurn.run(
     Number(gameId), p.id,
-    Number(t.set || 1), Number(t.leg || 1),
-    Number(t.scored) || 0,
+    setNo, legNo,
+    scored,
     t.bust ? 1 : 0,
     t.checkout ? 1 : 0,
-    t.checkout ? (Number(t.checkoutPoints) || 0) : null
+    checkoutPoints
   );
   // Insert individual dart rows — scored/is_treble/is_double are generated columns.
   // thrownAt is an ISO timestamp captured client-side at tap time; only sent when
@@ -420,11 +431,23 @@ const CHALLENGE_BETTER_DIRECTION = {
 function completeChallengeAttempt(playerName, challengeDate, resultDarts) {
   const p = getPlayer(playerName);
   if (!p) throw httpError(404, 'Player not found');
+  // A day's result is locked in like a Wordle guess — once completed it must not be
+  // overwritten. The `AND completed = 0` guard makes a repeat/retried/replayed
+  // completion a no-op instead of letting a second (e.g. better) resultDarts replace
+  // the locked one and fabricate a personal best / streak. /api/challenges/complete is
+  // a requireWrite route, public by default, so a plain double-submit could trigger it.
   const info = db.prepare(`
     UPDATE daily_challenge_attempts SET completed = 1, result_darts = ?
-    WHERE player_id = ? AND challenge_date = ?
+    WHERE player_id = ? AND challenge_date = ? AND completed = 0
   `).run(resultDarts != null ? Number(resultDarts) : null, p.id, String(challengeDate));
-  if (info.changes === 0) throw httpError(404, 'No matching challenge attempt for that date');
+  if (info.changes === 0) {
+    // Distinguish "no attempt started for that date" (a genuine 404) from "already
+    // completed" (locked in — return the no-op result rather than erroring, so a
+    // network retry of a legit completion doesn't surface as a user-visible failure).
+    const existing = db.prepare(`SELECT completed FROM daily_challenge_attempts WHERE player_id = ? AND challenge_date = ?`).get(p.id, String(challengeDate));
+    if (!existing) throw httpError(404, 'No matching challenge attempt for that date');
+    return { ok: true, isPersonalBest: false, alreadyCompleted: true };
+  }
 
   // "Beat your best" callout: compare this result against every other completed
   // attempt of the same format (excluding today, since UNIQUE(player_id,
@@ -1789,8 +1812,12 @@ async function fireHaWebhook(event, payload) {
 
 function getH2HRecord(name1, name2) {
   if(!name1 || !name2) return null;
-  const p1 = db.prepare(`SELECT id FROM players WHERE name=?`).get(name1);
-  const p2 = db.prepare(`SELECT id FROM players WHERE name=?`).get(name2);
+  // COLLATE NOCASE to match players.name's case-insensitive uniqueness and every
+  // other lookup in this file (getPlayer, getH2HSummary) — without it a
+  // differently-cased name would return an empty record here but a correct one
+  // everywhere else.
+  const p1 = db.prepare(`SELECT id FROM players WHERE name=? COLLATE NOCASE`).get(name1);
+  const p2 = db.prepare(`SELECT id FROM players WHERE name=? COLLATE NOCASE`).get(name2);
   if(!p1 || !p2) return null;
   const rows = db.prepare(`
     SELECT g.winner_id FROM games g

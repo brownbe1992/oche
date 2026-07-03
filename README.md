@@ -72,7 +72,7 @@ Requires **Node.js 22.5 or newer** (uses the built-in `node:sqlite` module).
 node backend/server.js
 ```
 
-Open `http://localhost:8046`. The database is created at the path in the `DARTS_DB` environment variable (defaults to `/data/darts.db`).
+Open `http://localhost:8046`. The database is created at the path in the `DARTS_DB` environment variable. Without Docker and with `DARTS_DB` unset it defaults to `data/darts.db` next to the repo (`backend/../data/darts.db`); the Docker image sets `DARTS_DB=/data/darts.db` instead.
 
 ---
 

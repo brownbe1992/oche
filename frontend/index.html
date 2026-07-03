@@ -925,7 +925,7 @@
             <input type="text" id="ha-wh-ninedarter" placeholder="e.g. oche_nine_darter">
           </div>
           <div>
-            <label class="field">Moment Card Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— sends the shareable card image (180/Big Fish/Nine-Darter/match win) as base64 PNG</span></label>
+            <label class="field">Moment Card Webhook ID <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— sends the shareable card image (180/Big Fish/Nine-Darter/match win) as a base64 JPEG</span></label>
             <input type="text" id="ha-wh-momentcard" placeholder="e.g. oche_moment_card">
           </div>
         </div>
@@ -2252,7 +2252,11 @@ async function startGame(){
     legStart: null         // one-shot: a new leg just began, who's throwing first (voice announcements)
   };
   names.forEach(ensurePlayerStats);
-  sessionBadgesShown = { nightOwl:false, earlyBird:false };
+  // sessionBadgesShown is deliberately NOT reset here — Night Owl / Early Bird fire
+  // at most once per *browser session* (per the spec and the variable's own comment),
+  // not once per game. Resetting it per startGame() meant three games after midnight
+  // gave three Night Owl overlays. (The persisted per-occurrence count is unaffected;
+  // that still increments every qualifying turn via awardRecurringBadge.)
   earnedBadgeCache = {};
   names.forEach(n=>{
     Backend.get(`/api/players/badges?name=${encodeURIComponent(n)}`)
@@ -2849,8 +2853,13 @@ function renderGame(){
   game.players.forEach((p,i)=>{
     const row=document.createElement('div');
     row.className='pscore'+(i===game.current?' active':'');
+    // Practice mode has no set structure, so legsWon just counts total legs played
+    // and grows unbounded (it never resets, since practice never reaches the set-won
+    // branch) — showing "Legs 4/3" is nonsense there, so drop the target denominator.
     const standing = game.setsPerGame>1
       ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
+      : game.practice
+      ? `Legs ${p.legsWon}`
       : `Legs ${p.legsWon}/${game.legsPerSet}`;
     row.innerHTML=`
       <div>
@@ -2993,7 +3002,11 @@ function pumpAchievementQueue(){
   // Every queued badge gets its own live-scoreboard broadcast as it's shown — not
   // just whatever pushLive() call happened to already be at the end of enterTurn()/
   // onLegWon(), since that only covers the first item drained from the queue.
-  pendingAchievement = { type: next.type, player: next.player, ts: next.ts };
+  // Stamp a FRESH ts at broadcast time (not the queue-time next.ts): two badges
+  // queued in the same synchronous tick share a Date.now() millisecond, and
+  // /display dedups on `s.achievement.ts`, so reusing next.ts would make it drop the
+  // second badge. Broadcasts drain >=ACH_DURATION apart, so fresh stamps are distinct.
+  pendingAchievement = { type: next.type, player: next.player, ts: Date.now() };
   if(game) pushLive();
   showAchievement(next.type, next.player);
   announce(`${next.player}: ${ACH_LABELS[next.type] || 'Achievement'}. ${achDescFor(next.type)}`);
@@ -3324,7 +3337,16 @@ function askEndGame(){
     : (game && game.practice)
     ? 'Are you sure you want to end this practice session? Your stats have been saved.'
     : 'Abandon this match early? Recorded stats are kept.';
-  uiConfirm(msg, ()=>{ activeChallenge = null; show('setup'); });
+  uiConfirm(msg, ()=>{
+    activeChallenge = null;
+    // Clear the game and push an inactive snapshot so any /display scoreboard stops
+    // showing the abandoned match as "live" — otherwise liveSnapshot() keeps
+    // reporting active:true (game is still set) and the TV freezes on the ended game
+    // until a new one starts.
+    game = null;
+    pushLive();
+    show('setup');
+  });
 }
 
 function undoLastTurn(){
@@ -3439,14 +3461,18 @@ function enterTurn(){
   p.gameAvgDarts += _adj;
   if(ev.bust) p.legBusts += 1;
   p.gamePoints += ev.scored; p.gameVisits += 1;
-  if(!ev.bust) p.score = ev.newScore;
 
-  // Comeback Kid tracking: the worst remaining-score deficit seen this leg, needs
-  // an opponent to trail behind (H2H, or a 2-player practice match).
+  // Comeback Kid tracking: the worst remaining-score deficit seen at any point this
+  // leg (needs an opponent to trail behind — H2H or a 2-player practice match).
+  // Sampled BEFORE this visit reduces p.score, because the deepest a player is behind
+  // is as they step up to throw (right after the opponent's last visit) — sampling
+  // after their own visit would understate the true peak by up to this visit's score
+  // and miss real >=100 comebacks (deficits in [100, 100+visitScore)).
   if(game.players.length===2){
     const _opp = game.players.find(x=>x!==p);
     if(_opp) p.legWorstDeficit = Math.max(p.legWorstDeficit, p.score - _opp.score);
   }
+  if(!ev.bust) p.score = ev.newScore;
 
   // persist the turn to the database
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
@@ -3456,6 +3482,12 @@ function enterTurn(){
   // one-shot record of this turn's outcome, for voice announcements on the scoreboard
   game.lastTurnEvent = { ts: Date.now(), player: p.name, scored: ev.scored, bust: !!ev.bust,
     win: !!ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null };
+  // Stable copy of the winning-visit checkout points for onLegWon()'s Big Fish (170)
+  // check: onLegWon reads this instead of game.lastTurnEvent.checkoutPoints, because
+  // the badge queue below calls pushLive() synchronously (when the queue is idle),
+  // which nulls lastTurnEvent before onLegWon runs — so the /display Big Fish splash
+  // would otherwise never fire on a 170 finish.
+  game.lastWinCheckoutPoints = ev.win ? ev.pointsThisVisit : null;
   // achievement flashes + in-game counters + Home Assistant webhooks
   if(ev.bust){
     game.gameBusts += 1;
@@ -3698,9 +3730,10 @@ function onLegWon(wi){
   const _setDecider = !game.practice && opp && game.legsPerSet > 1
     && legsWonBefore.get(w) === game.legsPerSet - 1 && legsWonBefore.get(opp) === game.legsPerSet - 1;
 
-  // Big Fish (170 checkout) always finishes a leg, so this is the reliable way to know
-  // whether the winning dart of this leg/set/game was specifically a 170 checkout.
-  const _bigFish = !!(game.lastTurnEvent && game.lastTurnEvent.checkoutPoints === 170);
+  // Big Fish (170 checkout) always finishes a leg. Read the stable copy captured in
+  // enterTurn() rather than game.lastTurnEvent, which the badge queue's synchronous
+  // pushLive() may have already nulled by the time we get here.
+  const _bigFish = game.lastWinCheckoutPoints === 170;
   // Captured before the legs-reset below zeroes everyone out — a single-set match
   // (setsPerGame===1) is decided purely by legs, so the match-win card's stat line
   // needs the leg count as it stood at the moment of winning, not after "reset for
