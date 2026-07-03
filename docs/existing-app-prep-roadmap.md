@@ -1,10 +1,9 @@
 # Preparing the Existing App for Future Roadmaps
 
-> Status: **in progress** (5 of 11 of this doc's own items done/adopted, 1 more
-> confirmed-and-closed — see items 2, 3, 8, 9, 10 (done/adopted) and item 5
+> Status: **in progress** (6 of 11 of this doc's own items done/adopted, 1 more
+> confirmed-and-closed — see items 2, 3, 8, 9, 10, 11 (done/adopted) and item 5
 > (confirmed protected through item 10's refactor)). Item 7 (Settings regrouping) is
-> the most overdue remaining item; item 11 (orientation-aware live scoreboard) is a
-> new prerequisite for Cricket's own scoreboard — see their sections below.
+> now the only remaining item without a concrete plan in motion.
 >
 > This doc reviews the other roadmap docs in `docs/` and recommends changes to the
 > *existing* codebase now, specifically to reduce rework later. It intentionally does
@@ -299,6 +298,23 @@ features (Cricket, ghost-opponent, camera-scoring) instead of just one.
 
 ## 11. Orientation-aware live scoreboard (portrait vs. landscape) — needed before Cricket's dedicated scoreboard
 
+> **Status: ✅ Done** (see `frontend/display.html` on `claude/dev-branch-commits-bvcxjj`).
+> `window.matchMedia('(orientation: portrait)')` drives an `orientation-portrait`
+> body class, with the live snapshot cached (`lastSnapshot`) so a rotation
+> re-renders immediately from the matchMedia `change` listener alone — no separate
+> `resize`/`orientationchange` handler needed, and no wait for the next server push.
+> The player-card grid forces a single column in portrait (was previously always
+> 1/2/3 columns by player count regardless of orientation); the top bar wraps
+> instead of overflowing. Applies to both the live grid and the between-leg summary
+> cards, since both render through the same `#grid` container. Verified with
+> Playwright: resizing an already-open `/display` tab from 1280×800 to 800×1280
+> (simulating a live rotation, no new server push) correctly collapsed a 2-player
+> grid from 2 columns to 1, repopulated with the same live data, and reverted
+> cleanly back to 2 columns on rotating back — for both the live per-player grid
+> and a between-leg summary-card screenshot. `docs/game-modes-roadmap.md`'s Cricket
+> scoreboard step (build-order step 2) can now build `renderers.cricket` on top of
+> this instead of needing its own separate retrofit.
+
 **The evidence**: `frontend/display.html` has zero orientation-handling today — no
 `orientation` media query, no `matchMedia`, no `resize`/`orientationchange` listener
 anywhere in the file (confirmed: no matches). Its only concept of "adapt to the
@@ -371,10 +387,10 @@ un-learn later:**
    ghost-opponent, and camera-scoring at once rather than one at a time, and now
    sits in place *before* either of the other two starts. See the Roadmap
    Sequencing section below.
-6. **Orientation-aware live scoreboard (item 11)** — not started. The same
-   pull-it-forward treatment as item 10: retrofit the existing X01 scoreboard with
-   portrait/landscape detection *before* Cricket's own scoreboard is built, so
-   Cricket gets orientation support from day one instead of a second retrofit.
+6. ~~Orientation-aware live scoreboard (item 11)~~ ✅ Done — retrofit the existing
+   X01 scoreboard with portrait/landscape detection *before* Cricket's own
+   scoreboard is built, so Cricket gets orientation support from day one instead
+   of a second retrofit.
 
 **Worth doing when the first feature that needs it actually starts:**
 7. Stats query scope helper (item 1) — needed the moment game-modes, online
@@ -431,7 +447,7 @@ for the same "what do we build next" attention.
 | `docs/tournament-mode-roadmap.md` | Not started | Medium-High | High | Bracket generation (especially double-elim) is genuinely fiddly, but fully self-contained — reuses the scoring engine unchanged |
 | `docs/security-audit-roadmap.md` | Partial | Low (fixes were) | High | SEC-1 through SEC-6 and SEC-8 through SEC-11 fixed; SEC-7 (webhook auth) is the only item still open, same gap `security-hardening-roadmap.md` flags |
 | `docs/environmental-logging-roadmap.md` | Not started | Medium | Low (self-admittedly niche) | New inbound HA auth model, but explicitly scoped as a niche, manually-enabled feature |
-| `docs/game-modes-roadmap.md` | Partial | Very high | Very high | Phase 1 (the X01-to-plugin refactor + schema groundwork) done; Cricket/Baseball engine, stats parity, and Home/Profile nav (steps 2-5) not started — full scoring-engine + stats-pipeline generalization, not just "add Cricket." Cricket's scoreboard step also depends on item 11 (orientation-aware live scoreboard) landing first |
+| `docs/game-modes-roadmap.md` | Partial | Very high | Very high | Phase 1 (the X01-to-plugin refactor + schema groundwork) done; Cricket/Baseball engine, stats parity, and Home/Profile nav (steps 2-5) not started — full scoring-engine + stats-pipeline generalization, not just "add Cricket." Item 11 (orientation-aware live scoreboard), its scoreboard-step prerequisite, is now done too |
 | `docs/online-multiplayer-roadmap.md` | Not started | Very high | High *but conditional* | Needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem that caps near-term value regardless of build quality |
 | `docs/camera-scoring-roadmap.md` | Not started | Extremely high | High *but narrow* | Genuinely novel CV engineering; only useful to whoever actually mounts the hardware |
 
@@ -477,9 +493,9 @@ simultaneous-achievements rows above.
    built before Cricket exists (likely, given Cricket's complexity), keep the
    stat/achievement definitions abstracted per game type from day one — cheap to do
    now, expensive to retrofit once real achievement data exists for X01 only.
-7. **Item 11 (orientation-aware live scoreboard) should happen before Cricket's
-   scoreboard step**, the same build-order treatment item 10 got for the turn engine.
-   `game-modes-roadmap.md` build-order step 2 explicitly calls this out as a
-   dependency for its `renderers.cricket` sub-item — the engine/config/scoring-screen
-   parts of step 2 aren't blocked by item 11, only the live-scoreboard-renderer part
-   is.
+7. ~~**Item 11 (orientation-aware live scoreboard) should happen before Cricket's
+   scoreboard step**~~ ✅ **Done** — the same build-order treatment item 10 got for
+   the turn engine. `game-modes-roadmap.md` build-order step 2's `renderers.cricket`
+   sub-item can now build on the existing `matchMedia`/`orientation-portrait`
+   seam directly instead of needing its own retrofit; the engine/config/
+   scoring-screen parts of step 2 were never blocked by this either way.

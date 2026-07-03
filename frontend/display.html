@@ -33,6 +33,11 @@
 
   /* ---- top bar ---- */
   .top{display:flex;align-items:center;gap:2vmin;padding-bottom:1.6vmin;border-bottom:1px solid var(--wire);flex:none}
+  /* Portrait: a narrow viewport crowds brand+format+stats+live onto one line —
+     wrap instead of letting them get clipped or overlap. */
+  body.orientation-portrait .top{flex-wrap:wrap;row-gap:1vmin}
+  body.orientation-portrait .game-stats{margin-left:0}
+  body.orientation-portrait .live{margin-left:auto}
   .brand{font-family:'Bebas Neue';font-size:4.4vmin;line-height:.8;letter-spacing:.06em;color:var(--cream)}
   .fmt{color:var(--muted);font-size:2.1vmin;letter-spacing:.02em}
   .fmt b{color:var(--ink);font-weight:600}
@@ -302,6 +307,25 @@ if(!LAYOUTS[layoutParam]){
 fetch('/api/settings/colorblind-mode', {cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{
   document.body.classList.toggle('colorblind', !!(s && s.enabled));
 }).catch(()=>{});
+
+/* ---- orientation detection ----
+   A mounted tablet or spare phone can be portrait or landscape, and can be rotated
+   mid-match — this isn't a one-time check at load. matchMedia's own change event
+   fires for both an actual device rotation and a plain browser-window resize that
+   crosses the portrait/landscape boundary, so it's the one listener needed (no
+   separate orientationchange/resize handler required). The grid's column count
+   (see render()) reads `isPortrait` directly; re-rendering the last snapshot on
+   change means a rotation reshapes the board immediately, not on the next server
+   push. See docs/existing-app-prep-roadmap.md item 11. */
+let lastSnapshot = null;
+const portraitQuery = window.matchMedia('(orientation: portrait)');
+let isPortrait = portraitQuery.matches;
+document.body.classList.toggle('orientation-portrait', isPortrait);
+portraitQuery.addEventListener('change', (e)=>{
+  isPortrait = e.matches;
+  document.body.classList.toggle('orientation-portrait', isPortrait);
+  if(lastSnapshot) render(lastSnapshot);
+});
 
 function spawnConfetti(root, count){
   const colors=['#d9b46a','#efe7d2','#f4e3b2','#caa94e'];
@@ -587,6 +611,7 @@ fetch('/api/settings/voice-announcements', {cache:'no-store'}).then(r=>r.ok?r.js
 }).catch(()=>{});
 
 function render(s){
+  lastSnapshot = s;
   if(!s || !s.active){
     grid.classList.add('hidden'); idle.classList.remove('hidden');
     fmtEl.innerHTML=''; banner.classList.remove('show'); bannerKey='';
@@ -654,7 +679,10 @@ function render(s){
   }
 
   const n = s.players.length;
-  const cols = n<=1 ? 1 : n<=4 ? 2 : 3;
+  // Portrait is narrow and tall — stacking cards single-column gives each one full
+  // width (readable at a glance) instead of the side-by-side columns that make sense
+  // in landscape's wide-and-short shape but cram score text into narrow cells here.
+  const cols = isPortrait ? 1 : (n<=1 ? 1 : n<=4 ? 2 : 3);
   grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
 
   if(s.legSummary){

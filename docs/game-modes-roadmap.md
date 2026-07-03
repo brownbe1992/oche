@@ -18,9 +18,11 @@
 > never used during a Cricket game, and the Cricket screen is the automatic default),
 > a classic-vs-custom New Game prompt where custom mode locks the target count to
 > exactly 7 (never more, never fewer), and an orientation-aware (portrait/landscape,
-> auto-detected) live scoreboard — the last of which depends on a new prerequisite
-> prep project, `docs/existing-app-prep-roadmap.md` item 11, retrofitting the
-> *existing* X01 scoreboard with the same orientation-awareness first.
+> auto-detected) live scoreboard. That last prerequisite is now done —
+> `docs/existing-app-prep-roadmap.md` item 11 retrofitted `frontend/display.html`
+> with `matchMedia`-based orientation detection and a single-column portrait grid,
+> so a future `renderers.cricket` entry inherits orientation support directly
+> instead of needing its own retrofit.
 
 ## Goal
 
@@ -38,7 +40,7 @@ added later without starting from scratch each time.
 | Cricket variant scope for v1 | Standard cricket only (highest score wins). Cut-throat (points scored against opponents) deferred to later |
 | Custom cricket target count | Fixed at 7 targets — the same count as classic cricket (15, 16, 17, 18, 19, 20, Bull) — freely chosen from 1-20 + Bull, but never more or fewer than 7 |
 | Scoring screen during Cricket | A dedicated Cricket scoring screen (marks/closed grid), not the X01 Pad or Dartboard screens — it's the automatic default the instant a Cricket game is active, with no player choice to fall back to Pad/Dartboard |
-| Live scoreboard orientation | Cricket's `display.html` renderer must detect and support both portrait and landscape. Retrofitting the *existing* X01 renderer with the same orientation-awareness is a prerequisite prep project — see `docs/existing-app-prep-roadmap.md` item 11 |
+| Live scoreboard orientation | Cricket's `display.html` renderer must detect and support both portrait and landscape. ✅ The prerequisite prep project (retrofitting the *existing* X01 renderer with the same orientation-awareness) is done — see `docs/existing-app-prep-roadmap.md` item 11 |
 
 ## Why this is bigger than "add cricket"
 
@@ -77,10 +79,11 @@ scoring engine and stats pipeline, not an additive feature.
   `gameType` value from a hardcoded literal to a real field and needed zero changes to
   `display.html` as a result. That groundwork already means a Cricket game
   automatically gets its own scoreboard the instant `s.gameType==='cricket'` — no new
-  dispatch mechanism needed, just a `renderers.cricket` entry. What it does **not**
-  yet cover is orientation: neither `renderers.x01` today nor a future
-  `renderers.cricket` has any portrait/landscape awareness — see
-  `docs/existing-app-prep-roadmap.md` item 11.
+  dispatch mechanism needed, just a `renderers.cricket` entry. Orientation is also
+  now covered: `renderers.x01` is portrait/landscape-aware (`docs/existing-app-prep-
+  roadmap.md` item 11 — `matchMedia`-based detection, single-column portrait grid),
+  and a future `renderers.cricket` entry renders through the same `#grid` container
+  and column-count logic, so it inherits that awareness without its own retrofit.
 
 ## The architecture: a game-type plugin interface
 
@@ -106,8 +109,9 @@ Each game type implements the same shape:
   below) — this is a per-game-type UI choice, not just a per-game-type turn engine.
 - **Live scoreboard card renderer** — slots into `display.html`'s existing `renderers`
   table, and must support both portrait and landscape with automatic orientation
-  detection (see `docs/existing-app-prep-roadmap.md` item 11 for the X01 retrofit
-  that needs to land first).
+  detection — ✅ already true of the shared shell (`docs/existing-app-prep-roadmap.md`
+  item 11), so a `renderers.cricket` entry only needs to design its card content for
+  a narrow single-column cell, not build orientation detection itself.
 - **Stats definitions** — each plugin defines its own stat vocabulary (see Cricket
   stats below), not just reusing X01's.
 
@@ -260,8 +264,9 @@ X01-only, see its status note above).
 2. **Cricket engine + customizable numbers** — turn engine, win condition, New Game
    classic/custom config UI (exact-7-target validation), a dedicated Cricket scoring
    screen (marks/closed display, replacing Pad/Dartboard entirely for Cricket
-   games), and an orientation-aware `renderers.cricket` live-scoreboard card — the
-   last one depends on `docs/existing-app-prep-roadmap.md` item 11 landing first.
+   games), and a `renderers.cricket` live-scoreboard card (orientation-awareness
+   already provided by the shared shell — see `docs/existing-app-prep-roadmap.md`
+   item 11, done).
 3. **Cricket stats parity** — MPR, leaderboards, profile charts, achievements.
 4. **Home/Stats page game-type navigation** — the cross-cutting UI work to surface
    Cricket stats alongside X01's.

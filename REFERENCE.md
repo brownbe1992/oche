@@ -617,6 +617,22 @@ silently dropped (413 if the sanitized payload still exceeds 64KB).
 bar always show in every layout; `compact`/`minimal` hide the denser rows (dart
 counts, leg/game averages, per-game 180/Big Fish/Bust counters).
 
+### Orientation (portrait vs. landscape)
+
+`display.html` detects orientation via `window.matchMedia('(orientation:
+portrait)')`, toggling an `orientation-portrait` body class and re-rendering the
+last-received snapshot immediately on change — a mounted tablet or phone can be
+rotated mid-match, so this isn't a one-time check at load. In portrait, the
+player-card grid always uses a single column (`grid-template-columns` computed
+in `render()`) regardless of player count, since portrait's narrow width would
+otherwise cram score text into side-by-side cells sized for landscape's
+wide-and-short shape; landscape keeps its existing player-count-based column
+logic (1/2/3 columns). The top bar also gets `flex-wrap` in portrait so
+brand/format/game-stats/live-indicator wrap onto a second line instead of
+overflowing a narrow viewport. This applies uniformly to both the live
+per-player grid and the between-leg/game summary cards, since both render
+through the same `#grid` container and column-count logic.
+
 ### Voice announcements (`/display` only)
 
 Uses the browser's built-in `SpeechSynthesis` API — no server involvement, no
