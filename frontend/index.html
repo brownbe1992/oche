@@ -214,6 +214,7 @@
      docs/game-modes-roadmap.md. Closed status is signaled by a checkmark + text,
      not color alone (docs/accessibility-roadmap.md). */
   .pad.cricket-pad{grid-template-columns:repeat(4,1fr)}
+  .pad.cricket-pad button.miss{grid-column:1/-1}
   .cricket-target{background:var(--surface);border:1px solid var(--wire);color:var(--ink);border-radius:10px;
     padding:10px 4px;font:inherit;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px}
   .cricket-target:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
@@ -356,6 +357,22 @@
   body.game-active .pscore .meta{min-width:70px}
   body.game-active .pscore .meta .avgs{font-size:clamp(9px,1.3dvh,12px)}
   body.game-active .pscore .turnflag{font-size:clamp(8px,1.1dvh,11px)}
+  /* Cricket's chalkboard scorecard replaces .pscore — same "shrink to fit any
+     screen" treatment, since .scoreboard is flex:none (sized to its own content,
+     not stretched or clipped) and a fixed-size table here would eat into the
+     rest of the screen's available height on shorter phones. */
+  body.game-active .cs-table{margin-bottom:0}
+  body.game-active .cs-label,
+  body.game-active .cs-cell,
+  body.game-active .cs-col-head{padding:clamp(2px,.6dvh,8px) 4px}
+  body.game-active .cs-label{font-size:clamp(10px,1.6dvh,15px)}
+  body.game-active .cs-head .cs-col-head{font-size:clamp(9px,1.3dvh,13px)}
+  body.game-active .cs-throw-chip{font-size:clamp(7px,1dvh,9px)}
+  body.game-active .cs-mark{font-size:clamp(12px,2dvh,20px)}
+  body.game-active .cs-mark-3{
+    width:clamp(15px,2.6dvh,26px); height:clamp(15px,2.6dvh,26px); font-size:clamp(9px,1.4dvh,14px);
+  }
+  body.game-active .cs-points{font-size:clamp(12px,2dvh,20px)}
   /* scoring box — fills all remaining space */
   body.game-active .oche{
     flex:1; display:flex; flex-direction:column; min-height:0; overflow:hidden;
@@ -391,6 +408,20 @@
     padding:0; font-size:clamp(14px,2.2dvh,24px);
     display:flex; align-items:center; justify-content:center;
   }
+  /* Cricket's pad has a fixed 7-target+Miss shape (always 8 items in a 4-col
+     grid = 3 rows), not X01's ~22-button shape — the row count above is
+     hardcoded for X01 and doesn't fit Cricket. grid-auto-rows:1fr (rather than
+     a fixed row count) still fills all available height, evenly, whatever the
+     actual row count turns out to be — and its content shrinks via the clamp()s
+     below instead of overflowing past the pad's box into .turn-actions below. */
+  body.game-active .pad.cricket-pad{
+    grid-template-rows:none; grid-auto-rows:1fr;
+  }
+  body.game-active .cricket-target{
+    padding:clamp(2px,.6dvh,10px) 4px; gap:clamp(1px,.3dvh,4px); min-height:0;
+  }
+  body.game-active .ct-num{font-size:clamp(13px,2.2dvh,22px)}
+  body.game-active .ct-marks{font-size:clamp(8px,1.3dvh,13px)}
   /* dartboard — grows to fill all available height */
   body.game-active .dart-board-wrap{flex:1;min-height:0}
   body.game-active .board-miss{
