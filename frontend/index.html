@@ -2976,8 +2976,8 @@ const BADGE_INFO = {
   around_the_world:   { icon:'🌍', label:'Around the World', desc:'Hit every dart outcome at least once, over your lifetime (63 total: singles/doubles/trebles 1-20, outer bull, double bull, and a miss).' },
   doubletrouble:      { icon:'👯', label:'Double Trouble', desc:'Check out with the last two darts of the visit both landing on doubles.' },
   bustedmaximum:      { icon:'💥', label:'Busted Maximum', desc:'Throw three treble 20s (a genuine 180) on a visit that still busts.' },
-  cricket9marks:       { icon:'🎯', label:'9 Marks', desc:'Score 9 marks in one Cricket visit — three trebles, the maximum possible.' },
-  cricketperfectclose: { icon:'🏆', label:'Perfect Leg', desc:'Close every Cricket number using the fewest darts physically possible for that match.' },
+  cricket9marks:       { icon:'🎯', label:'9 Marks', desc:'Score 9 marks in one Cricket visit — three trebles, the maximum possible.', cricket:true },
+  cricketperfectclose: { icon:'🏆', label:'Perfect Leg', desc:'Close every Cricket number using the fewest darts physically possible for that match.', cricket:true },
 };
 function loadPlayerBadges(){
   const container=document.getElementById('player-badges');
@@ -2997,7 +2997,7 @@ function renderPlayerBadges(data){
   const container=document.getElementById('player-badges');
   if(!container) return;
   const earned = new Map((data||[]).map(b=>[b.badge_id, b]));
-  container.innerHTML = `<div class="summary-grid">${Object.keys(BADGE_INFO).map(id=>{
+  const badgeBlock = id => {
     const info = BADGE_INFO[id];
     const row = earned.get(id);
     const count = row ? row.count : 0;
@@ -3011,7 +3011,16 @@ function renderPlayerBadges(data){
         <button class="iconbtn" title="Share" style="margin-top:4px" onclick="event.stopPropagation();shareEarnedBadge('${id}')">📤</button></div>`;
     }
     return `<div class="stat-block" style="opacity:.5;cursor:pointer" ${titleAttr} onclick="showBadgeInfo('${id}')"><div class="stat-val" style="filter:grayscale(1)">${info.icon}</div><div class="stat-label">${info.label}<br>Not yet earned</div></div>`;
-  }).join('')}</div>`;
+  };
+  // Grouped by game type — X01's 20 badges and Cricket's 2 stay visually
+  // distinct sub-sections rather than one mixed flat grid.
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket);
+  const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
+  container.innerHTML = `
+    <div class="pp-section-title" style="margin-bottom:6px">X01</div>
+    <div class="summary-grid">${x01Ids.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">Cricket</div>
+    <div class="summary-grid">${cricketIds.map(badgeBlock).join('')}</div>`;
 }
 // Around the World progress (docs/achievements-badges-roadmap.md): a compact grid
 // rather than a full dartboard-shaped heatmap — the doc explicitly calls the ideal

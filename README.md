@@ -8,7 +8,7 @@ A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player 
 
 **v0.9.0**
 
-You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [22-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 — its own dedicated scoring screen, live scoreboard, and stat bubbles/Personal Bests/achievements (Home page leaderboards are still X01-only). All data lives in a SQLite database on your own server.
+You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [22-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. All data lives in a SQLite database on your own server.
 
 > Looking for exact stat formulas, achievement trigger conditions, the full database schema, or how a feature works internally (e.g. to debug it)? See **[REFERENCE.md](REFERENCE.md)** — the technical reference manual, kept up to date alongside this README.
 
@@ -400,7 +400,7 @@ On the Cricket toggle, this section shows **Best Leg MPR**, **Fewest Darts to Cl
 
 #### Badge Case
 
-The full 22-badge [achievement](#achievements--badges) roster for this player — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
+The full 22-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (20 badges) and a **Cricket** section (2 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
 
 #### On This Day
 

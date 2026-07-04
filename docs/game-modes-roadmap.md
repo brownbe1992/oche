@@ -244,9 +244,12 @@ depends on it.
   (`getCricketMprLeaderboard()`), Most Cricket Wins (`getCricketWinLeaderboard()`,
   H2H only), and 9 Marks/Perfect Leg achievement sections
   (`getCricketNineMarksStats()`/`getCricketPerfectLegStats()`) — rather than a
-  reskin of X01's average/180s-shaped cards. `player_badges`' Badge Case still
-  stays one flat grid (X01 and Cricket badges mixed together) — acceptable for
-  v1, no grouping UI built.
+  reskin of X01's average/180s-shaped cards. `player_badges`' Badge Case is now
+  grouped into an "X01" sub-section (20 badges) and a "Cricket" sub-section
+  (2 badges) — a `cricket:true` flag on `BADGE_INFO`'s 2 Cricket entries splits
+  `renderPlayerBadges()`'s single flat grid into the two, no schema or backend
+  change needed (the grouping is purely a client-side rendering split, since
+  `player_badges` itself only ever needed a free-form `badge_id` string).
 
 ## Baseball (rules primer — for whoever builds this next)
 
