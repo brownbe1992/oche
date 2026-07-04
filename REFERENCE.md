@@ -216,11 +216,13 @@ yet built.
 
 ## 3. Statistics — Every Formula
 
-All formulas below are X01-only — Cricket's `statDefs` is deliberately empty
-(`GAME_TYPES.cricket.statDefs: []`); stats/leaderboard/profile-chart parity is
-`docs/game-modes-roadmap.md` build-order step 3, not yet built.
+Sections 3.1-3.N below are X01-only, read via `GAME_TYPES.x01.statDefs`
+(`STAT_DEFS`). Cricket has its own separate stat vocabulary
+(`GAME_TYPES.cricket.statDefs` / `CRICKET_STAT_DEFS`) — see "Cricket stats" at
+the end of this section for its formulas (game-modes-roadmap.md build-order
+step 3).
 
-**How cricket games interact with these stats** (`X01_ONLY` constant in
+**How cricket games interact with these X01 stats** (`X01_ONLY` constant in
 `backend/db.js`): cricket turns live in the same `turns` table, but
 `turns.scored` means *cricket points earned* there, not X01 countdown points —
 so every formula derived from `scored` (or from leg averages / trebleless legs /
@@ -415,13 +417,55 @@ historical bugs here came from a metric accidentally using the wrong family, or
 two sibling functions (bubbles vs. history) drifting onto different families
 for the same named metric.
 
+### Cricket stats (`GAME_TYPES.cricket.statDefs` / `CRICKET_STAT_DEFS`)
+
+A separate, smaller stat vocabulary from X01's — Cricket's `turns.scored` means
+"cricket points earned," not countdown points, so none of these reuse the X01
+formulas above; every query here is scoped by `g.game_type='cricket'` instead
+of `X01_ONLY`. Marks are always derived at query time from `darts.sector`/
+`multiplier` matched against that game's `config.numbers` (`CRICKET_MARK_CASE`
+in `backend/db.js` — a dart's marks are its multiplier if the sector is one of
+the match's in-play numbers, else 0), not from any persisted mark/closed state.
+
+**Stat bubbles** (`getCricketStatBubbles(name, mode)`):
+
+| Key | Label | Formula |
+|---|---|---|
+| `cricketmpr` | MPR | `SUM(marks) / COUNT(rounds)` — a miss-only turn still counts as a round |
+| `cricket9marks` | 9 Marks | Count of visits where exactly 3 darts were thrown and `SUM(marks)=9` (the maximum possible — 3 trebles on in-play numbers) |
+| `cricketwinpct` | Win Rate | `won / played * 100` over completed Cricket games this player took part in |
+| `cricketgames` | Games Played | Count of completed Cricket games this player took part in |
+| `cricketdartsthrown` | Darts Thrown | Count of darts thrown in Cricket games (a cricket-scoped breakdown — the global "Darts Thrown" bubble already includes these darts too) |
+| `cricketavgdartsperleg` | Darts / Won Leg | `AVG(darts thrown)` across legs where this player has a `leg_won=1` turn |
+
+**Personal Bests** (`getCricketPersonalBests(name, mode)`, same 5-field shape as
+X01's `getPersonalBests()` but keyed on `leg_won=1` instead of `checkout=1`):
+`bestLegMpr` (max marks/rounds across won legs), `fewestDartsToClose` (min total
+darts across won legs), `winStreak` (current consecutive-win streak, Cricket
+games only), `recentFormMpr` (avg MPR over the last 10 won legs),
+`lifetimeMpr` (avg MPR over every won leg).
+
+**Metric history** (`getMetricHistory()`, same 6 keys as the stat bubbles above,
+bucketed the same way as X01's metrics via `bld()`) — `cricketwinpct`/
+`cricketgames` bucket by the game's completion date (a new per-game bucket
+granularity `getMetricHistory` didn't previously need); the other 4 bucket
+per-turn or per-leg like their X01 counterparts.
+
+**Player Profile UI**: a small X01/Cricket toggle (`playerGameType`, mirroring
+the existing `.player-tabs` pattern) next to the Overall/H2H/Practice tabs
+switches which `statDefs` array/personal-bests shape/chart metric feeds the
+bubbles, chart, and Personal Bests section. The Home page's leaderboards remain
+X01-only for now — making Home game-type-aware is the remaining, larger slice
+of build-order step 4 (`docs/game-modes-roadmap.md`).
+
 ---
 
 ## 4. Achievements & Badges
 
-20 badges, tracked in the `player_badges` table (one row per player+badge, with
-a running `count`). All detection logic lives in `frontend/index.html`'s
-`enterTurn()` and `onLegWon()`.
+22 badges (20 X01 + 2 Cricket), tracked in the `player_badges` table (one row
+per player+badge, with a running `count`). X01 detection logic lives in
+`frontend/index.html`'s `enterTurn()`/`onLegWon()`; Cricket's 2 badges live in
+`enterTurnCricket()`/`onLegWonCricket()`.
 
 ### Award modes
 
@@ -477,6 +521,15 @@ co-fire with a chain badge or with each other in the same turn/leg:
 | ⚔️ **Grudge Match** | On a match win, the same `h2h-summary` lookup shows `totalGames >= 10` against this opponent. **Once-badge** per player — awarded to both the winner and the loser once the threshold is first crossed. |
 | 🕐 **Around the Clock** | `singlesHit.size >= 20` — every number 1–20 hit as a single at least once **within the current game** (`singlesHit` is created fresh in `newMatchPlayer()` at every `startGame()`, persists across legs/sets within that game, and resets when a new game starts — not just on page reload). **Once-badge.** |
 | 🌍 **Around the World** | Lifetime: all 63 dart outcomes hit at least once (20 numbers × single/double/treble = 60, plus outer bull, double bull, and a miss). Checked via an async progress query (`/api/players/around-the-world`), skipped once the client-side `earnedBadgeCache` already has it. **Once-badge.** |
+
+**Cricket badges** (checked in `enterTurnCricket()`/`onLegWonCricket()`,
+`frontend/index.html` — game-modes-roadmap.md build-order step 3, the direct
+analogs of 180 and the nine-darter):
+
+| Badge | Exact condition |
+|---|---|
+| 🎯 **9 Marks** | `darts.length===3 && marksThisVisit===9` — 3 darts, each a treble on an in-play number, the maximum possible marks in one visit (same framing as 180 being the max possible X01 visit score). **Recurring.** |
+| 🏆 **Perfect Leg** | `win && legDarts === theoreticalMinimum`, where the minimum is computed per match from `game.config.numbers`: each non-Bull number can close in a single treble (3 marks); Bull can't be trebled (`makeDart()` already downgrades a "treble bull" tap to a single), so it needs a minimum of 2 darts. A win at exactly this minimum already implies enough bonus marks were scored to strictly lead (the win condition in §2 guarantees that), so no separate points check is needed. **Recurring**, mega-tier overlay (confetti) like Nine-Darter. |
 
 ### Description text
 
@@ -981,9 +1034,10 @@ already-migrated database is a safe no-op).
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
 | `game_id` / `player_id` | `INTEGER NOT NULL, FK, ON DELETE CASCADE` | |
 | `set_no` / `leg_no` | `INTEGER NOT NULL` | |
-| `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum) |
-| `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans |
-| `checkout_points` | `INTEGER` | Only set when `checkout=1` |
+| `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3) |
+| `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans. Cricket turns always write `bust=0, checkout=0` — cricket has neither concept |
+| `checkout_points` | `INTEGER` | Only set when `checkout=1` (X01 only) |
+| `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set only by Cricket's write path (`enterTurnCricket()`) — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 
 ### `darts` (one row per physical dart, indexed on `turn_id` and `(sector,multiplier)`)

@@ -281,13 +281,15 @@ const ACH_LABELS  = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter
   metronome:'Metronome! 🎯', cruisecontrol:'Cruise Control 🚗', iceintheveins:'Ice in the Veins ❄️',
   nervesofsteel:'Nerves of Steel 🧊', comebackkid:'Comeback Kid 🔥', giantslayer:'Giant Slayer 🗡️',
   grudgematch:'Grudge Match ⚔️', therematch:'The Rematch 🔁', aroundtheclock:'Around the Clock 🕐',
-  aroundtheworld:'Around the World! 🌍', doubletrouble:'Double Trouble! 👯', bustedmaximum:'Busted Maximum 💥' };
+  aroundtheworld:'Around the World! 🌍', doubletrouble:'Double Trouble! 👯', bustedmaximum:'Busted Maximum 💥',
+  cricket9marks:'9 Marks! 🎯', cricketperfectclose:'🏆 PERFECT LEG! 🏆' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
   metronome:2500, cruisecontrol:2500, iceintheveins:2500, nervesofsteel:3000,
   comebackkid:3000, giantslayer:2500, grudgematch:3000, therematch:2500,
-  aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500 };
+  aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500,
+  cricket9marks:2500, cricketperfectclose:6000 };
 // Mirror-copied from frontend/index.html's BADGE_INFO[...].desc / ACH_DESC_FALLBACK —
 // this file has no Badge Case UI to source the text from directly, so it's kept as
 // its own flat map (docs/next-session-plan.md item 1).
@@ -315,6 +317,8 @@ const ACH_DESC = {
   grudgematch: 'Play 10 or more H2H games against the same opponent.',
   aroundtheclock: 'Hit every number 1-20 as a single within one session.',
   aroundtheworld: 'Hit every dart outcome at least once, over your lifetime (63 total: singles/doubles/trebles 1-20, outer bull, double bull, and a miss).',
+  cricket9marks: 'Score 9 marks in one Cricket visit — three trebles, the maximum possible.',
+  cricketperfectclose: 'Close every Cricket number using the fewest darts physically possible for that match.',
 };
 
 /* ---- layout presets ----
@@ -381,7 +385,7 @@ function showAchievement(type, player){
   achText.textContent = ACH_LABELS[type] || '';
   achName.textContent = player || '';
   if(achDesc) achDesc.textContent = ACH_DESC[type] || '';
-  const mega = type === 'ninedarter';
+  const mega = type === 'ninedarter' || type === 'cricketperfectclose';
   achOverlay.classList.toggle('mega', mega);
   achOverlay.classList.add('show');
   if(mega) spawnConfetti(achOverlay, 90);

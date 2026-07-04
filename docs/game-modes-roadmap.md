@@ -1,12 +1,13 @@
 # Additional Game Modes — Design Roadmap
 
-> Status: **Cricket is playable (build-order steps 1-2 done); steps 3-5 not
-> started.** `frontend/index.html` has a `GAME_TYPES` registry with `x01` and
-> `cricket` entries (`newMatchPlayer`, `evaluateVisit`, `resetForNextLeg`,
-> `playerSnapshot`, `statDefs`); every call site dispatches through
-> `GAME_TYPES[game.gameType]`. Backend `createGame()` accepts `gameType`/`config`;
-> the nine-darter queries read `game_type`/`config` instead of a hardcoded
-> `category='501'`.
+> Status: **Cricket is playable with stats parity (build-order steps 1-3 done);
+> step 4 partially done (Player Profile only, Home page still open); step 5
+> (Baseball) not started.** `frontend/index.html` has a `GAME_TYPES` registry
+> with `x01` and `cricket` entries (`newMatchPlayer`, `evaluateVisit`,
+> `resetForNextLeg`, `playerSnapshot`, `statDefs`); every call site dispatches
+> through `GAME_TYPES[game.gameType]`. Backend `createGame()` accepts
+> `gameType`/`config`; the nine-darter queries read `game_type`/`config` instead
+> of a hardcoded `category='501'`.
 >
 > **Cricket (step 2) is fully playable end-to-end**: a classic-vs-custom New Game
 > prompt (custom locked to exactly 7 targets, validated before Start), a dedicated
@@ -23,11 +24,34 @@
 > game completion), and a full X01 regression pass confirming zero
 > cross-contamination between the two renderers.
 >
-> **Not yet built** (steps 3-5, unchanged from the original plan): Cricket stats
-> parity (MPR, leaderboards, profile charts — `GAME_TYPES.cricket.statDefs` is
-> deliberately `[]`), Cricket achievements, Home/Player Profile game-type
-> navigation, and Baseball. See "Suggested build order" below for the unchanged
-> plan for those.
+> **Cricket stats parity (step 3) is done**: `GAME_TYPES.cricket.statDefs` is
+> now `CRICKET_STAT_DEFS` (6 stats: MPR, 9 Marks, Win Rate, Games Played, Darts
+> Thrown, Darts/Won Leg), backed by new `backend/db.js` functions
+> (`getCricketStatBubbles`, `getCricketNineMarksStats`,
+> `getCricketPersonalBests`, plus 6 new `getMetricHistory()` cases) scoped by
+> `g.game_type='cricket'` and deriving marks at query time from
+> `darts.sector`/`multiplier` matched against `games.config.numbers`. A new
+> `turns.leg_won` column (game-type-agnostic "this turn won the leg" signal, set
+> only by Cricket's write path) backs Cricket's Personal Bests, since Cricket
+> has no `checkout` mechanism to key off like X01 does. 2 new Cricket
+> achievements shipped alongside: **9 Marks** (3 darts, all trebles, summing to
+> the maximum 9 — Cricket's 180 analog) and **Perfect Leg** (won the leg using
+> the fewest darts physically possible for that match's target set — Cricket's
+> nine-darter analog, mega-tier overlay). Verified: an 18-assertion scratch-DB
+> unit suite for the new backend functions plus an X01 regression guard,
+> Playwright end-to-end for both achievements firing correctly (and not
+> firing prematurely).
+>
+> **Step 4 (Home/Player Profile game-type navigation) is partially done**: the
+> Player Profile has a small X01/Cricket toggle (`playerGameType`) next to its
+> existing Overall/H2H/Practice tabs, switching the stat bubbles, chart, and
+> Personal Bests section between the two game types. **The Home page's
+> leaderboards remain X01-only** — `renderHome()`'s `Promise.all` of ~8 endpoints
+> and `renderHomeTabBody()` were deliberately left untouched this pass; making
+> Home Cricket-aware is a separately-scoped, larger UI lift (a new leaderboard
+> layout, not just a toggle) and is the remaining step-4 work.
+>
+> **Not yet built**: Baseball (step 5). See "Suggested build order" below.
 
 ## Goal
 
@@ -41,7 +65,7 @@ added later without starting from scratch each time.
 | Decision | Choice |
 |---|---|
 | Architecture approach | Proper generalization now — refactor X01 into "the first plugin" in a real game-type framework, rather than bolting Cricket on separately |
-| Cricket stats depth | Full parity with X01 — a dedicated Cricket stat (Marks Per Round), leaderboards, and profile charts, not just win/loss |
+| Cricket stats depth | ✅ Built. A dedicated Cricket stat (Marks Per Round) plus 5 more stat bubbles, a 9-Marks leaderboard, Personal Bests, and profile charts — Player Profile only; Home page leaderboards still X01-only (see step 4) |
 | Cricket variant scope for v1 | Standard cricket only (highest score wins). Cut-throat (points scored against opponents) deferred to later |
 | Custom cricket target count | ✅ Built. Fixed at 7 targets — the same count as classic cricket (15, 16, 17, 18, 19, 20, Bull) — freely chosen from 1-20 + Bull, but never more or fewer than 7. Enforced at Start (`startGame()` blocks with an alert if the count is wrong) |
 | Scoring screen during Cricket | ✅ Built. A dedicated Cricket scoring screen (traditional chalkboard scorecard — slash/X/circled-X marks), not the X01 Pad or Dartboard screens — it's the automatic default the instant a Cricket game is active, with no player choice to fall back to Pad/Dartboard |
@@ -188,20 +212,30 @@ depends on it.
 
 ## Cricket stats (full parity with X01)
 
-- **Marks Per Round (MPR)** — Cricket's direct equivalent of 3-dart average: total
-  marks scored ÷ rounds played. Becomes Cricket's primary leaderboard/chart metric,
-  computed from `darts` the same way 3-dart average is today.
-- **Cricket-specific achievements** — e.g. "9 marks in one visit" (three darts, each a
-  treble on a different open number) as Cricket's analog to a 180; fastest close
-  (fewest darts to close all numbers) as an analog to a nine-darter.
-- **Home page and Player Profile become game-type-aware** — today Home has one
-  H2H/Practice toggle feeding X01-shaped leaderboards; the profile's Stat Bubbles are
-  a fixed X01 list (`STAT_DEFS` in `frontend/index.html`). Full parity means these
-  need a game-type dimension too (e.g. a game-type selector alongside the existing
-  H2H/Practice tabs, each type showing its own bubble set and chart). This is real
-  UI/navigation expansion, not just new SQL — flagging it clearly since "full parity"
-  implies touching Home, Player Profile, and achievements/Hall-of-Fame sections, not
-  just adding a Cricket scoring engine.
+- **Marks Per Round (MPR)** ✅ Built. Cricket's direct equivalent of 3-dart
+  average: total marks scored ÷ rounds played, computed from `darts` matched
+  against `games.config.numbers` the same way 3-dart average is derived from
+  `turns.scored` — no persisted mark/closed state needed. `getCricketStatBubbles()`,
+  `getCricketPersonalBests()`, and 6 new `getMetricHistory()` cases in
+  `backend/db.js`; `CRICKET_STAT_DEFS` in `frontend/index.html`.
+- **Cricket-specific achievements** ✅ Built, exactly as scoped here: **9 Marks**
+  (three darts, each a treble on an in-play number, summing to the maximum
+  9 marks — not required to be different numbers, matching 180's "the max
+  possible visit" framing rather than a stricter "3 different numbers" rule)
+  as Cricket's analog to a 180; **Perfect Leg** (won the leg using the fewest
+  darts physically possible for that match's target set, computed dynamically
+  from `config.numbers` since Bull can't be trebled and needs a 2-dart minimum)
+  as the analog to a nine-darter.
+- **Home page and Player Profile become game-type-aware** — **Player Profile
+  done** (a small X01/Cricket toggle next to the existing Overall/H2H/Practice
+  tabs switches the stat bubbles, chart, and Personal Bests section between
+  the two game types' own vocabularies). **Home page still X01-only** — its
+  leaderboards (`renderHome()`'s `Promise.all`, `renderHomeTabBody()`) need a
+  new Cricket-shaped leaderboard layout (MPR/9-Marks leaderboards, not
+  average/180s ones), which is a separately-scoped, larger UI lift than the
+  Profile's toggle — left for a future pass rather than silently bundled in
+  here. `player_badges`' Badge Case also stays one flat grid (X01 and Cricket
+  badges mixed together) — acceptable for v1, no grouping UI built.
 
 ## Baseball (rules primer — for whoever builds this next)
 
@@ -274,9 +308,16 @@ X01-only, see its status note above).
    (orientation-awareness inherited from the shared shell — item 11, done).
    Verified with 12 hand-checked scoring-engine scenarios, Playwright end-to-end,
    and a full X01 regression pass.
-3. **Cricket stats parity** — MPR, leaderboards, profile charts, achievements.
-4. **Home/Stats page game-type navigation** — the cross-cutting UI work to surface
-   Cricket stats alongside X01's.
+3. **✅ Done — Cricket stats parity** — MPR, 9-Marks leaderboard, Personal Bests
+   (via the new `turns.leg_won` column), metric-history charts, and 2 new
+   achievements (9 Marks, Perfect Leg). 18-assertion scratch-DB unit suite
+   (backend functions + X01 regression guard) plus Playwright end-to-end for
+   both achievements.
+4. **Partially done — Home/Stats page game-type navigation** — Player Profile's
+   slice done (X01/Cricket toggle switching bubbles/chart/Personal Bests).
+   **Still open**: Home page's leaderboards becoming Cricket-aware — needs a
+   new leaderboard layout (MPR/9-Marks, not average/180s), a separately-scoped
+   UI lift from the Profile's toggle.
 5. **Baseball** (or another variant) as the second proof that the plugin shape
    generalizes, not just fits Cricket specifically.
 

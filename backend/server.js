@@ -16,7 +16,7 @@
        DEL  /api/players           -> delete (?name=...)
        GET  /api/stats             -> computed stats per player
        POST /api/games             -> start a game           { category, legsPerSet, setsPerGame, players:[names] } -> { gameId }
-       POST /api/games/:id/turns   -> record one turn        { player, set, leg, scored, trebleLess, bust, checkout, checkoutPoints }
+       POST /api/games/:id/turns   -> record one turn        { player, set, leg, scored, trebleLess, bust, checkout, checkoutPoints, legWon }
        POST /api/games/:id/complete-> finish a game          { winner }
        POST /api/reset             -> wipe all games/turns (players kept)        [admin]
        POST /api/wipe-all          -> wipe all players/games/stats (admins kept) [admin]
@@ -395,6 +395,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/home-extra'    && m === 'GET') return send(res, 200, db.getHomeExtra());
     if (p === '/api/top-finishes'  && m === 'GET') return send(res, 200, db.getTopFinishesAll(10, url.searchParams.get('mode')));
     if (p === '/api/stats/180s'         && m === 'GET') return send(res, 200, db.getOneEightyStats(url.searchParams.get('mode')));
+    if (p === '/api/stats/cricket-9marks' && m === 'GET') return send(res, 200, db.getCricketNineMarksStats(url.searchParams.get('mode')));
     if (p === '/api/stats/big-fish'     && m === 'GET') return send(res, 200, db.getBigFishStats(url.searchParams.get('mode')));
     if (p === '/api/stats/nine-darters' && m === 'GET') return send(res, 200, db.getNineDarterStats(url.searchParams.get('mode')));
     if (p === '/api/stats' && m === 'GET')  return send(res, 200, db.computeStats());
@@ -407,11 +408,15 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/players/personal-bests' && m === 'GET') {
       const mode = url.searchParams.get('mode');
-      return send(res, 200, db.getPersonalBests(url.searchParams.get('name'), mode));
+      const name = url.searchParams.get('name');
+      return send(res, 200, url.searchParams.get('gameType') === 'cricket'
+        ? db.getCricketPersonalBests(name, mode) : db.getPersonalBests(name, mode));
     }
     if (p === '/api/players/stat-bubbles' && m === 'GET') {
       const mode = url.searchParams.get('mode');
-      return send(res, 200, db.getPlayerStatBubbles(url.searchParams.get('name'), mode));
+      const name = url.searchParams.get('name');
+      return send(res, 200, url.searchParams.get('gameType') === 'cricket'
+        ? db.getCricketStatBubbles(name, mode) : db.getPlayerStatBubbles(name, mode));
     }
     if (p === '/api/players/checkout-route' && m === 'GET') {
       const score = url.searchParams.get('score');

@@ -6,9 +6,9 @@
 
 A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player statistics, and no external dependencies.
 
-**v0.8.0**
+**v0.9.0**
 
-You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [20-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 — its own dedicated scoring screen and live scoreboard, though stats/achievements parity for it is still on the roadmap. All data lives in a SQLite database on your own server.
+You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [22-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 — its own dedicated scoring screen, live scoreboard, and stat bubbles/Personal Bests/achievements (Home page leaderboards are still X01-only). All data lives in a SQLite database on your own server.
 
 > Looking for exact stat formulas, achievement trigger conditions, the full database schema, or how a feature works internally (e.g. to debug it)? See **[REFERENCE.md](REFERENCE.md)** — the technical reference manual, kept up to date alongside this README.
 
@@ -126,7 +126,7 @@ H2H mode requires at least two players selected. Practice mode can be played sol
 
 Players with a PIN set show a 🔒 next to their name in the dropdown. When exactly two players are selected in H2H mode, a banner shows their all-time head-to-head record (e.g. *"H2H: Alice leads 3–0 (3 games)"*).
 
-**Cricket** is a second game type alongside X01. Choosing **Classic** locks the targets to the standard 15, 16, 17, 18, 19, 20, and Bull. Choosing **Custom** reveals a 1–20-plus-Bull picker — pick any numbers you like, but always exactly 7 (the same count as classic); Start is blocked until exactly 7 are checked, with a running "N of 7 selected" count and a one-tap "Start from classic" fill-in. Once a Cricket game begins, the scoring screen and live scoreboard both switch to Cricket's own marks/closed/points display — the X01 Pad and Dartboard input screens are never shown during a Cricket game, and there's no per-game choice between them the way there is for X01. See [Scoring](#scoring) below and `REFERENCE.md` for the exact marks/points rules. Cricket stats/leaderboards/achievements aren't built yet — a Cricket game only tracks marks, points, and the match result today.
+**Cricket** is a second game type alongside X01. Choosing **Classic** locks the targets to the standard 15, 16, 17, 18, 19, 20, and Bull. Choosing **Custom** reveals a 1–20-plus-Bull picker — pick any numbers you like, but always exactly 7 (the same count as classic); Start is blocked until exactly 7 are checked, with a running "N of 7 selected" count and a one-tap "Start from classic" fill-in. Once a Cricket game begins, the scoring screen and live scoreboard both switch to Cricket's own marks/closed/points display — the X01 Pad and Dartboard input screens are never shown during a Cricket game, and there's no per-game choice between them the way there is for X01. See [Scoring](#scoring) below and `REFERENCE.md` for the exact marks/points rules. Cricket has its own stat bubbles (MPR, 9 Marks, Win Rate, Games Played, Darts Thrown, Darts/Won Leg), Personal Bests, and 2 achievements (9 Marks and Perfect Leg) — a small X01/Cricket toggle on the Player Profile switches between the two. The Home page's leaderboards remain X01-only for now.
 
 **Daily Challenge mode** turns New Game into today's [Daily Challenge](#daily-challenge) launcher instead of a regular match: Starting Score and Format hide (the challenge decides them), and a gold **Today's Challenge** panel shows the challenge description plus whoever is currently in the player slot's streak and results history. Selecting who's attempting it uses the exact same single "Choose player" slot as Practice mode — a PIN-protected player still needs their PIN entered, since it's the identical gate every other slot uses, not a separate picker of its own. The **Start game** button relabels to **Start Challenge** while this mode is active. Daily Challenge is X01-only — the Game-type choice is hidden and forced back to X01 whenever this mode is selected.
 
@@ -195,7 +195,7 @@ choice, no checkout hints, and no bust concept:
 
 ### Achievements & Badges
 
-Beyond 180s, Big Fish, and nine-darters, Oche tracks 20 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes. Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
+Beyond 180s, Big Fish, and nine-darters, Oche tracks 20 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 2 Cricket-specific badges. Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
 
 | Badge | How to earn it |
 |---|---|
@@ -220,7 +220,14 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 20 achievement badges cover
 | 🕐 **Around the Clock** | Hit every number 1–20 as a single within one session |
 | 🌍 **Around the World** | Hit every dart outcome at least once, over your lifetime — 63 total: singles/doubles/trebles 1–20, outer bull, double bull, and a miss |
 
-**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 20-badge roster: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5) — three badges (Around the Clock, Around the World, Grudge Match) are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
+**Cricket's 2 badges** (its own analogs of 180 and the nine-darter):
+
+| Badge | How to earn it |
+|---|---|
+| 🎯 **9 Marks** | Score 9 marks in one Cricket visit — three trebles, the maximum possible |
+| 🏆 **Perfect Leg** | Close every Cricket number using the fewest darts physically possible for that match |
+
+**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 22-badge roster: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5) — three badges (Around the Clock, Around the World, Grudge Match) are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
 
 **Around the World Progress** — a dedicated grid on the Player Profile showing exactly which of the 63 lifetime dart outcomes are still missing, alongside the Badge Case.
 
@@ -330,11 +337,11 @@ Each player has a dedicated profile page with full career statistics, accessible
 
 #### Tabs
 
-**Overall** · **H2H** · **Practice** — all stats and charts filter to the selected mode.
+**Overall** · **H2H** · **Practice** — all stats and charts filter to the selected mode. A second **X01 / Cricket** toggle sits just above the stat bubbles — switches the bubbles, chart, and Personal Bests section between the two game types' own stat vocabularies (X01's 15 stats, or Cricket's 6 — see below). The Home page's leaderboards are still X01-only.
 
 #### Stat Bubbles
 
-Fifteen stat bubbles are available; five (Darts Thrown, Average, 180s, Big Fish, 9 Darters) show by default and the rest live behind a "More stats" toggle. Click any bubble to display that metric in the chart below.
+Fifteen X01 stat bubbles are available; five (Darts Thrown, Average, 180s, Big Fish, 9 Darters) show by default and the rest live behind a "More stats" toggle. Click any bubble to display that metric in the chart below.
 
 | Bubble | Description |
 |---|---|
@@ -354,6 +361,17 @@ Fifteen stat bubbles are available; five (Darts Thrown, Average, 180s, Big Fish,
 | **140/Leg** | Percentage of opening visits scoring 140 or more |
 | **180s/Leg** | Ratio of 180s to total legs played |
 
+Switching the toggle above to **Cricket** shows Cricket's own 6 stat bubbles instead:
+
+| Bubble | Description |
+|---|---|
+| **MPR** | Marks Per Round — total marks scored ÷ rounds played, Cricket's direct analog of 3-dart average |
+| **9 Marks** | Visits where all 3 darts scored the maximum 9 marks (three trebles) |
+| **Win Rate** | Percentage of H2H Cricket games won |
+| **Games Played** | Cricket games played |
+| **Darts Thrown** | Darts thrown in Cricket games specifically |
+| **Darts / Won Leg** | Average darts thrown per won Cricket leg |
+
 #### Chart
 
 A line chart showing the selected metric over time. Filters:
@@ -368,9 +386,11 @@ A line chart showing the selected metric over time. Filters:
 - **Current Win Streak**
 - **Recent Form** — average of the last 10 legs, with an arrow showing the delta vs. lifetime average
 
+On the Cricket toggle, this section shows **Best Leg MPR**, **Fewest Darts to Close**, **Current Win Streak**, and **Recent Form** (MPR-based) instead — the same shape, keyed off the turn that won each Cricket leg rather than an X01 checkout.
+
 #### Badge Case
 
-The full 20-badge [achievement](#achievements--badges) roster for this player — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
+The full 22-badge [achievement](#achievements--badges) roster for this player — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
 
 #### On This Day
 
@@ -639,6 +659,7 @@ GET  /api/top-finishes?mode=                Top 10 checkouts across all players
 GET  /api/stats/180s?mode=                  180 leaderboard
 GET  /api/stats/big-fish?mode=              Big Fish (170 checkout) leaderboard
 GET  /api/stats/nine-darters?mode=          Nine-dart finish leaderboard
+GET  /api/stats/cricket-9marks?mode=        Cricket 9-marks-in-one-visit leaderboard
 ```
 
 All leaderboard endpoints accept `?mode=h2h|practice` to filter by game mode. Omit for overall.
@@ -646,9 +667,15 @@ All leaderboard endpoints accept `?mode=h2h|practice` to filter by game mode. Om
 ### Per-Player Stats
 
 ```
-GET  /api/players/stat-bubbles?name=&mode=  All 15 stat bubble values for a player
+GET  /api/players/stat-bubbles?name=&mode=  All 15 stat bubble values for a player.
+     &gameType=cricket                      Pass gameType=cricket for Cricket's 6 stat bubbles
+                                             (MPR, 9 Marks, Win Rate, Games Played, Darts
+                                             Thrown, Darts/Won Leg) instead of X01's 15.
 GET  /api/players/personal-bests?name=&mode= Best leg average, fewest darts to finish,
-                                             current win streak, and recent form
+                                             current win streak, and recent form.
+     &gameType=cricket                      Pass gameType=cricket for Cricket's Personal Bests
+                                             (best leg MPR, fewest darts to close, win streak,
+                                             recent/lifetime MPR) instead.
 GET  /api/players/top-finishes?name=&mode=  Top 10 checkouts for a player
 GET  /api/players/checkout-route            Most-used routes for a specific checkout score
      ?name=&score=&mode=
@@ -660,7 +687,9 @@ GET  /api/players/avg-history               Metric history for the chart
      ?name=
      &metric=avg|180s|bigfish|ninedarters|treblelesspct|
               first3avg|first9avg|avg100plus|avg90minus|score140pct|180sperleg|
-              dartsthrown|avgdartsperday|avgdartsperleg|pace
+              dartsthrown|avgdartsperday|avgdartsperleg|pace|
+              cricketmpr|cricket9marks|cricketwinpct|cricketgames|
+              cricketdartsthrown|cricketavgdartsperleg
      &period=today|week|month|year|all|custom
      &start=YYYY-MM-DD   (required when period=custom)
      &end=YYYY-MM-DD     (required when period=custom)
@@ -723,8 +752,12 @@ POST /api/games                             Start a game
 
 POST /api/games/:id/turns                   Record a visit
                                              { player, set, leg, scored,
-                                               bust, checkout, checkoutPoints,
+                                               bust, checkout, checkoutPoints, legWon,
                                                darts: [{sector, multiplier}] }
+                                             legWon marks the turn that won the leg —
+                                             set by Cricket (which has no checkout
+                                             mechanism); X01 omits it and keeps using
+                                             checkout for its own Personal Bests.
 
 DELETE /api/games/:id/turns/last            Delete the most recently recorded turn
                                              (used by Undo Last Turn)

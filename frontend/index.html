@@ -2630,6 +2630,7 @@ function askDelete(name){
 /* ---------- player profile page ---------- */
 let currentPlayer = null;
 let playerPageTab = 'overall';
+let playerGameType = 'x01';
 let showMoreStats = false;
 let playerSettingsUnlocked = false;
 function localDateStr(d){ d = d || new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
@@ -2645,8 +2646,14 @@ function switchPlayerTab(tab){
   playerPageTab = tab;
   renderPlayerPage();
 }
+function switchPlayerGameType(type){
+  if(playerGameType === type) return;
+  playerGameType = type;
+  selectedStat = activeStatDefs()[0].key;
+  renderPlayerPage();
+}
 function showPlayer(name){
-  if(currentPlayer !== name){ avgChartWeight = null; cachedDartWeights = []; playerPageTab = 'overall'; showMoreStats = false; playerSettingsUnlocked = false; }
+  if(currentPlayer !== name){ avgChartWeight = null; cachedDartWeights = []; playerPageTab = 'overall'; playerGameType = 'x01'; showMoreStats = false; playerSettingsUnlocked = false; }
   currentPlayer = name;
   if(!customRangeEnd){
     const now=new Date();
@@ -2668,22 +2675,32 @@ function renderPlayerPage(){
   const cp = avgChartPeriod;
 
   // stat bubbles (shared, loaded async) — primary set always visible, the rest behind a toggle
-  // so the page isn't a wall of stats by default.
+  // so the page isn't a wall of stats by default. Which def array feeds these
+  // depends on the profile's own game-type toggle (playerGameType), not any
+  // in-progress game — X01 and Cricket each have their own stat vocabulary.
+  const gt = playerGameType;
+  const defs = activeStatDefs();
   const bubble = d => {
     const bl = d.key==='dartsthrown' ? (tab==='overall'?'Total Darts Thrown':'Darts Thrown') : d.label;
     return `<button class="stat-bubble${selectedStat===d.key?' active':''}" data-stat="${d.key}" onclick="selectStat('${d.key}')" title="${d.desc}"><div class="bubble-val" id="bv-${d.key}">—</div><div class="bubble-label">${bl}</div></button>`;
   };
-  const primaryDefs = STAT_DEFS.filter(d=>d.primary);
-  const secondaryDefs = STAT_DEFS.filter(d=>!d.primary);
+  const primaryDefs = defs.filter(d=>d.primary);
+  const secondaryDefs = defs.filter(d=>!d.primary);
+  const gameTypeTabsHtml = `
+    <div class="player-tabs" style="margin-bottom:8px">
+      <button class="tab-btn${gt==='x01'?' active':''}" onclick="switchPlayerGameType('x01')">X01</button>
+      <button class="tab-btn${gt==='cricket'?' active':''}" onclick="switchPlayerGameType('cricket')">Cricket</button>
+    </div>`;
   const bubblesHtml = `
+    ${gameTypeTabsHtml}
     <div class="stat-bubbles" id="player-stat-bubbles">${primaryDefs.map(bubble).join('')}</div>
-    <button class="btn btn-ghost" style="margin:6px 0" onclick="toggleMoreStats()">${showMoreStats?'Fewer stats ▴':'More stats ▾'}</button>
-    <div class="stat-bubbles" id="player-stat-bubbles-more"${showMoreStats?'':' hidden'}>${secondaryDefs.map(bubble).join('')}</div>`;
+    ${secondaryDefs.length ? `<button class="btn btn-ghost" style="margin:6px 0" onclick="toggleMoreStats()">${showMoreStats?'Fewer stats ▴':'More stats ▾'}</button>
+    <div class="stat-bubbles" id="player-stat-bubbles-more"${showMoreStats?'':' hidden'}>${secondaryDefs.map(bubble).join('')}</div>` : ''}`;
 
   // shared chart + top-finishes HTML (same structure for both tabs)
   const chartSection = `
     <div class="pp-section">
-      <div class="pp-section-title" id="chart-metric-title">${(STAT_DEFS.find(d=>d.key===selectedStat)||STAT_DEFS[0]).label} over time</div>
+      <div class="pp-section-title" id="chart-metric-title">${(defs.find(d=>d.key===selectedStat)||defs[0]).label} over time</div>
       <div class="chart-periods">
         <button class="chart-period-btn${cp==='today'?' active':''}" data-period="today" onclick="loadAvgChart('today')">Today</button>
         <button class="chart-period-btn${cp==='week'?' active':''}" data-period="week" onclick="loadAvgChart('week')">Week</button>
@@ -2859,6 +2876,8 @@ const BADGE_INFO = {
   around_the_world:   { icon:'🌍', label:'Around the World', desc:'Hit every dart outcome at least once, over your lifetime (63 total: singles/doubles/trebles 1-20, outer bull, double bull, and a miss).' },
   doubletrouble:      { icon:'👯', label:'Double Trouble', desc:'Check out with the last two darts of the visit both landing on doubles.' },
   bustedmaximum:      { icon:'💥', label:'Busted Maximum', desc:'Throw three treble 20s (a genuine 180) on a visit that still busts.' },
+  cricket9marks:       { icon:'🎯', label:'9 Marks', desc:'Score 9 marks in one Cricket visit — three trebles, the maximum possible.' },
+  cricketperfectclose: { icon:'🏆', label:'Perfect Leg', desc:'Close every Cricket number using the fewest darts physically possible for that match.' },
 };
 function loadPlayerBadges(){
   const container=document.getElementById('player-badges');
@@ -3012,13 +3031,15 @@ function loadPersonalBests(){
   const container=document.getElementById('player-personal-bests');
   if(!container) return;
   const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
-  Backend.get(`/api/players/personal-bests?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
+  const gtParam=playerGameType==='cricket'?'&gameType=cricket':'';
+  Backend.get(`/api/players/personal-bests?name=${encodeURIComponent(currentPlayer)}${modeParam}${gtParam}`)
     .then(data=>renderPersonalBests(data))
     .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load personal bests.</p>`; });
 }
 function renderPersonalBests(data){
   const container=document.getElementById('player-personal-bests');
   if(!container) return;
+  if(playerGameType==='cricket') return renderCricketPersonalBests(data);
   if(!data || (data.bestLegAvg==null && data.fewestDartsCheckout==null)){
     container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough legs recorded yet.</p>`;
     return;
@@ -3031,6 +3052,26 @@ function renderPersonalBests(data){
   container.innerHTML=`<div class="summary-grid">
     ${data.bestLegAvg!=null?`<div class="stat-block"><div class="stat-val">${data.bestLegAvg.toFixed(1)}</div><div class="stat-label">Best Leg Average</div>${shareBtn(`sharePersonalBest('legavg', ${data.bestLegAvg})`)}</div>`:''}
     ${data.fewestDartsCheckout!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsCheckout}</div><div class="stat-label">Fewest Darts to Finish</div>${shareBtn(`sharePersonalBest('fewestdarts', ${data.fewestDartsCheckout})`)}</div>`:''}
+    ${data.winStreak?`<div class="stat-block"><div class="stat-val">${data.winStreak}</div><div class="stat-label">Current Win Streak</div></div>`:''}
+    ${formHtml}
+  </div>`;
+}
+// Cricket's Personal Bests — same 5-field shape mirrored from getCricketPersonalBests(),
+// mpr formatted to 1 decimal in place of X01's avg.
+function renderCricketPersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || (data.bestLegMpr==null && data.fewestDartsToClose==null)){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough legs recorded yet.</p>`;
+    return;
+  }
+  const formDelta = (data.recentFormMpr!=null && data.lifetimeMpr!=null) ? (data.recentFormMpr - data.lifetimeMpr) : null;
+  const formHtml = formDelta!=null
+    ? `<div class="stat-block"><div class="stat-val">${data.recentFormMpr.toFixed(1)}</div><div class="stat-label">Recent Form (last 10 legs) ${formDelta>=0?'▲':'▼'} ${Math.abs(formDelta).toFixed(1)}</div></div>`
+    : '';
+  container.innerHTML=`<div class="summary-grid">
+    ${data.bestLegMpr!=null?`<div class="stat-block"><div class="stat-val">${data.bestLegMpr.toFixed(1)}</div><div class="stat-label">Best Leg MPR</div></div>`:''}
+    ${data.fewestDartsToClose!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsToClose}</div><div class="stat-label">Fewest Darts to Close</div></div>`:''}
     ${data.winStreak?`<div class="stat-block"><div class="stat-val">${data.winStreak}</div><div class="stat-label">Current Win Streak</div></div>`:''}
     ${formHtml}
   </div>`;
@@ -3239,13 +3280,15 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   metronome:'Metronome! 🎯', cruisecontrol:'Cruise Control 🚗', iceintheveins:'Ice in the Veins ❄️',
   nervesofsteel:'Nerves of Steel 🧊', comebackkid:'Comeback Kid 🔥', giantslayer:'Giant Slayer 🗡️',
   grudgematch:'Grudge Match ⚔️', therematch:'The Rematch 🔁', aroundtheclock:'Around the Clock 🕐',
-  aroundtheworld:'Around the World! 🌍', doubletrouble:'Double Trouble! 👯', bustedmaximum:'Busted Maximum 💥' };
+  aroundtheworld:'Around the World! 🌍', doubletrouble:'Double Trouble! 👯', bustedmaximum:'Busted Maximum 💥',
+  cricket9marks:'9 Marks! 🎯', cricketperfectclose:'🏆 PERFECT LEG! 🏆' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
   metronome:2500, cruisecontrol:2500, iceintheveins:2500, nervesofsteel:3000,
   comebackkid:3000, giantslayer:2500, grudgematch:3000, therematch:2500,
-  aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500 };
+  aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500,
+  cricket9marks:2500, cricketperfectclose:6000 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
@@ -3322,7 +3365,7 @@ function showAchievement(type, player){
   achTextEl.textContent = ACH_LABELS[type] || '';
   achNameEl.textContent = player || '';
   if(achDescEl) achDescEl.textContent = achDescFor(type);
-  const mega = type === 'ninedarter';
+  const mega = type === 'ninedarter' || type === 'cricketperfectclose';
   achOverlayEl.classList.toggle('mega', mega);
   achOverlayEl.classList.add('show');
   const shareBtn = document.getElementById('ach-share-btn');
@@ -4061,10 +4104,13 @@ function enterTurnCricket(){
   if(ev.win) announce(`${p.name} closes out and wins the leg with ${ev.points} points.`);
   else announce(`${p.name} scores ${ev.pointsThisVisit} point${ev.pointsThisVisit===1?'':'s'} this visit.`);
 
-  // snapshot state before mutations so undoLastTurn() can restore it
+  // snapshot state before mutations so undoLastTurn() can restore it. badgeReverts/
+  // voided mirror X01's enterTurn() snapshot (see its comment) — needed now that
+  // Cricket has its own achievements to revoke on undo.
   const _snap = { pi:game.current, marks:Object.assign({}, p.marks), points:p.points,
     legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
-    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length };
+    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
+    badgeReverts:[], voided:false };
   game.lastTurnSnapshot = _snap;
 
   p.marks = ev.marks;
@@ -4073,14 +4119,40 @@ function enterTurnCricket(){
   p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
 
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
-    scored:ev.scored, bust:false, checkout:false, checkoutPoints:null,
+    scored:ev.scored, bust:false, checkout:false, checkoutPoints:null, legWon:ev.win,
     darts: game.darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt })) });
 
   const turnRecord = { player:p.name, scored:ev.scored, darts:game.darts.slice() };
   game.currentLegTurns.push(turnRecord);
   game.sessionTurns.push(turnRecord);
 
+  // Cricket achievements (game-modes-roadmap.md build-order step 3) — the direct
+  // analogs of X01's 180/nine-darter, detected the same way (inspect this visit's
+  // raw darts / legDarts right after they're committed above).
+  const _inPlayNumbers = game.config.numbers || CRICKET_STANDARD_NUMBERS;
+  // 9 Marks: 3 darts, each a treble on an in-play number — the maximum possible
+  // marks in one visit, same framing as 180 being the max possible X01 visit score.
+  const marksThisVisit = game.darts.reduce((s,d)=> s + (_inPlayNumbers.includes(d.sector) ? d.mult : 0), 0);
+  if(game.darts.length===3 && marksThisVisit===9){
+    queueBadge('cricket9marks', p.name);
+    awardRecurringBadge(p.name, 'cricket9marks', 'cricket9marks',
+      { icon:'🎯', headline:'9 MARKS!', player:p.name, statLine:'Three trebles, one visit' });
+  }
   if(ev.win){
+    // Perfect Leg: closed every in-play number using the fewest darts physically
+    // possible for this match's target set (each non-Bull number closes in a
+    // single treble; Bull can't be trebled — makeDart() already downgrades a
+    // "treble bull" tap to a single — so it needs a minimum of 2 darts). A win at
+    // exactly this minimum already implies enough bonus marks were scored to
+    // strictly lead (evaluateVisitCricket()'s win condition guarantees that), so
+    // no separate points check is needed. Cricket's analog of a nine-darter.
+    const _nonBullCount = _inPlayNumbers.filter(n=>n!==25).length;
+    const _minDarts = _nonBullCount + (_inPlayNumbers.includes(25) ? 2 : 0);
+    if(p.legDarts === _minDarts){
+      queueBadge('cricketperfectclose', p.name);
+      awardRecurringBadge(p.name, 'cricketperfectclose', 'cricketperfectclose',
+        { icon:'🏆', headline:'PERFECT LEG!', player:p.name, statLine:`Closed every number in ${_minDarts} darts` });
+    }
     onLegWonCricket(game.current);
     return;
   }
@@ -4102,6 +4174,13 @@ function undoLastTurnCricket(){
   p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
+
+  // Revoke any badges this turn awarded — same convention as X01's undoLastTurn().
+  snap.voided = true;
+  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+  });
+
   game.current = snap.pi;
   game.darts = []; game.busted=false; game.won=false;
   game.lastTurnSnapshot = null;
@@ -4521,6 +4600,24 @@ const STAT_DEFS = [
 ];
 let selectedStat = 'avg';
 
+// Cricket's own stat-bubble vocabulary (game-modes-roadmap.md build-order step 3)
+// — same {key,label,desc,fmt,primary} shape as STAT_DEFS. Keys match
+// getMetricHistory()'s cricket metric case names 1:1, so the chart endpoint needs
+// no separate key-translation map the way the stat-bubbles endpoint does (see
+// CRICKET_BUBBLE_KEY_MAP below).
+const CRICKET_STAT_DEFS = [
+  { key:'cricketmpr',           label:'MPR',            desc:'Marks Per Round — total marks scored / rounds played', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
+  { key:'cricket9marks',        label:'9 Marks',        desc:'Visits where all 3 darts scored the maximum 9 marks', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'cricketwinpct',        label:'Win Rate',       desc:'% of H2H Cricket games won',              fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'cricketgames',         label:'Games Played',   desc:'Cricket games played',                    fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'cricketdartsthrown',   label:'Darts Thrown',   desc:'Total darts thrown in Cricket games',     fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
+  { key:'cricketavgdartsperleg', label:'Darts / Won Leg', desc:'Average darts thrown per won Cricket leg', fmt:v=>v!=null?Number(v).toFixed(1):'—' },
+];
+// Translates a CRICKET_STAT_DEFS key to getCricketStatBubbles()'s JSON field name
+// (mirrors BUBBLE_KEY_MAP's role for STAT_DEFS/getPlayerStatBubbles()).
+const CRICKET_BUBBLE_KEY_MAP = { cricketmpr:'mpr', cricket9marks:'nineMarks', cricketwinpct:'winPct',
+  cricketgames:'gamesPlayed', cricketdartsthrown:'dartsThrown', cricketavgdartsperleg:'avgDartsPerLeg' };
+
 // ---------- game-type plugin registry ----------
 // The seam future game types (Cricket, Ghost Opponent's replay engine) plug into.
 // X01 is the only entry today; everything above/below that drives an active `game`
@@ -4558,9 +4655,14 @@ const GAME_TYPES = {
     evaluateVisit: evaluateVisitCricket,
     resetForNextLeg: resetPlayerForNextLegCricket,
     playerSnapshot: playerSnapshotCricket,
-    statDefs: [] // Cricket stats parity is game-modes-roadmap.md build-order step 3, not this pass
+    statDefs: CRICKET_STAT_DEFS
   }
 };
+// Which def array / bubble-key-map the Player Profile's stat bubbles, chart, and
+// personal bests should read from — driven by the profile's own game-type toggle
+// (playerGameType), independent of any in-progress game.gameType.
+function activeStatDefs(){ return GAME_TYPES[playerGameType].statDefs; }
+function activeBubbleKeyMap(){ return playerGameType==='cricket' ? CRICKET_BUBBLE_KEY_MAP : BUBBLE_KEY_MAP; }
 
 /* ---------- Cricket (game-modes-roadmap.md build-order step 2) ----------
    Standard cricket only (v1 scope decision) — highest score wins, cut-throat
@@ -4716,7 +4818,7 @@ function drawAvgChart(data){
     return;
   }
   if(data.length===1){
-    container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Only one session in this period — <b style="color:var(--ink)">${(STAT_DEFS.find(d=>d.key===selectedStat)||STAT_DEFS[0]).fmt(data[0].value??data[0].avg)}</b>.</p>`;
+    container.innerHTML=`<p class="pp-meta" style="padding:10px 0">Only one session in this period — <b style="color:var(--ink)">${(activeStatDefs().find(d=>d.key===selectedStat)||activeStatDefs()[0]).fmt(data[0].value??data[0].avg)}</b>.</p>`;
     return;
   }
   const W=560,H=180,ml=46,mr=12,mt=14,mb=30;
@@ -4727,7 +4829,7 @@ function drawAvgChart(data){
   const pad=Math.max(spread*0.2,2);
   const yMin=Math.max(0,rawMin-pad), yMax=rawMax+pad, yRange=yMax-yMin||1;
   const n=data.length;
-  const statFmt=(STAT_DEFS.find(d=>d.key===selectedStat)||STAT_DEFS[0]).fmt;
+  const statFmt=(activeStatDefs().find(d=>d.key===selectedStat)||activeStatDefs()[0]).fmt;
   // Y-axis uses whole numbers; detect suffix from the stat formatter
   const _sample=statFmt(50); const _hasPct=_sample.includes('%');
   const yAxisFmt=v=>_hasPct?Math.round(v)+'%':Math.round(v).toLocaleString();
@@ -4787,7 +4889,7 @@ function selectStat(key){
   selectedStat = key;
   document.querySelectorAll('.stat-bubble').forEach(b=>b.classList.toggle('active',b.dataset.stat===key));
   const el=document.getElementById('chart-metric-title');
-  const def=STAT_DEFS.find(d=>d.key===key);
+  const def=activeStatDefs().find(d=>d.key===key);
   if(el&&def) el.textContent=def.label+' over time';
   loadAvgChart(avgChartPeriod);
 }
@@ -4795,15 +4897,17 @@ function loadStatBubbles(){
   const container=document.getElementById('player-stat-bubbles');
   if(!container) return;
   const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
-  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
+  const gtParam=playerGameType==='cricket'?'&gameType=cricket':'';
+  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(currentPlayer)}${modeParam}${gtParam}`)
     .then(data=>renderStatBubbles(data)).catch(()=>{});
 }
 function renderStatBubbles(data){
   if(!data) return;
-  STAT_DEFS.forEach(d=>{
+  const keyMap = activeBubbleKeyMap();
+  activeStatDefs().forEach(d=>{
     const el=document.getElementById('bv-'+d.key);
     if(!el) return;
-    const mk=BUBBLE_KEY_MAP[d.key]||d.key;
+    const mk=keyMap[d.key]||d.key;
     el.textContent=d.fmt(data[mk]!=null?data[mk]:data[d.key]);
   });
 }

@@ -63,6 +63,10 @@ db.exec(`
     checkout        INTEGER NOT NULL DEFAULT 0,
     checkout_points INTEGER,             -- kept as performance cache for ton+/Big Fish queries
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    -- leg_won (added via ALTER TABLE below) is a game-type-agnostic "this turn won
+    -- the leg" signal, distinct from checkout (X01's own narrower double-out
+    -- concept) — Cricket has no checkout mechanism, so Personal Bests need their
+    -- own marker for finding winning legs.
   );
 
   CREATE INDEX IF NOT EXISTS idx_turns_player ON turns(player_id);
@@ -178,6 +182,12 @@ try { db.exec('ALTER TABLE games ADD COLUMN config TEXT'); } catch(e) {}
 try { db.exec('ALTER TABLE admins ADD COLUMN login_fail_count INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
 try { db.exec('ALTER TABLE admins ADD COLUMN login_locked_until INTEGER'); } catch(e) {}
 try { db.exec('ALTER TABLE player_badges ADD COLUMN count INTEGER NOT NULL DEFAULT 1'); } catch(e) {}
+// Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close
+// a leg, best MPR in a leg) need their own "this turn won the leg" signal instead
+// of reusing checkout (X01's narrower double-out concept). Defaults to 0 for every
+// existing/X01 row — X01's own Personal Bests queries keep using checkout=1
+// unchanged. Only Cricket's write path (enterTurnCricket()) sets it.
+try { db.exec('ALTER TABLE turns ADD COLUMN leg_won INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
 // player_count is the participant count captured once at game creation. H2H-vs-practice
 // classification reads THIS instead of a live COUNT(game_players) subquery, so deleting
 // or resetting a player can never retroactively reclassify a game (a 2-player H2H game
@@ -245,8 +255,8 @@ const q = {
   completeGame : db.prepare("UPDATE games SET completed_at = datetime('now'), winner_id = ? WHERE id = ?"),
 
   insertTurn   : db.prepare(`INSERT INTO turns
-                   (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+                   (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points, leg_won)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 
   insertDart   : db.prepare(`INSERT INTO darts (turn_id, dart_no, sector, multiplier, thrown_at)
                    VALUES (?, ?, ?, ?, ?)`),
@@ -390,7 +400,8 @@ function addTurn(gameId, t) {
     scored,
     t.bust ? 1 : 0,
     t.checkout ? 1 : 0,
-    checkoutPoints
+    checkoutPoints,
+    t.legWon ? 1 : 0
   );
   // Insert individual dart rows — scored/is_treble/is_double are generated columns.
   // thrownAt is an ISO timestamp captured client-side at tap time; only sent when
@@ -1047,6 +1058,79 @@ function getPlayerStatBubbles(playerName, mode) {
   };
 }
 
+// A dart's marks toward Cricket's in-play numbers — a mark is the dart's multiplier
+// (1/2/3) if its sector is one of this match's config.numbers, else 0. Used
+// everywhere a Cricket formula needs "marks scored," derived at query time from
+// darts+games.config rather than any persisted mark/closed state (matching the
+// engine's own "nothing pre-aggregated" design, docs/game-modes-roadmap.md).
+// Achieving SUM(...)=9 over exactly 3 darts (COUNT=3) necessarily means every dart
+// hit an in-play number as a treble (3 is the per-dart maximum), so the 9-marks
+// check below needs no separate "all in-play" condition.
+const CRICKET_MARK_CASE = (d) => `CASE WHEN EXISTS (SELECT 1 FROM json_each(g.config,'$.numbers') je WHERE je.value=${d}.sector) THEN ${d}.multiplier ELSE 0 END`;
+
+// Cricket's stat-bubble equivalents (game-modes-roadmap.md build-order step 3).
+// Marks Per Round (MPR) is Cricket's direct analog of X01's 3-dart average: total
+// marks scored / total rounds (turns) played — a miss-only turn still counts as a
+// round, matching real MPR's definition. Everything here is scoped by
+// g.game_type='cricket' instead of X01_ONLY, since turns.scored/marks mean
+// something different per game type (see X01_ONLY's comment below).
+function getCricketStatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const mf = _mf(mode);
+  const CRICKET = `AND g.game_type='cricket'`;
+
+  const rounds = db.prepare(`SELECT COUNT(*) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${CRICKET} ${mf}`).get(p.id)?.v ?? 0;
+  const marks  = db.prepare(`SELECT COALESCE(SUM(${CRICKET_MARK_CASE('d')}),0) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${CRICKET} ${mf}`).get(p.id)?.v ?? 0;
+  const mpr = rounds > 0 ? (marks / rounds) : null;
+
+  // 9 marks in one visit — 3 darts, each a treble on an in-play number, the
+  // maximum possible marks in a single visit (Cricket's 180 analog).
+  const nineMarks = db.prepare(`
+    SELECT COUNT(*) AS v FROM (
+      SELECT t.id FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+      WHERE t.player_id=? ${CRICKET} ${mf}
+      GROUP BY t.id HAVING COUNT(d.id)=3 AND SUM(${CRICKET_MARK_CASE('d')})=9
+    )
+  `).get(p.id)?.v ?? 0;
+
+  const gamesRow = db.prepare(`
+    SELECT COUNT(*) AS played, SUM(CASE WHEN g.winner_id=? THEN 1 ELSE 0 END) AS won
+    FROM game_players gp JOIN games g ON g.id=gp.game_id
+    WHERE gp.player_id=? ${CRICKET} AND g.completed_at IS NOT NULL ${mf}
+  `).get(p.id, p.id);
+  const gamesPlayed = gamesRow?.played ?? 0;
+  const winPct = gamesPlayed > 0 ? (gamesRow.won / gamesPlayed * 100) : null;
+
+  const dartsThrown = db.prepare(`SELECT COUNT(*) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${CRICKET} ${mf}`).get(p.id)?.v ?? 0;
+
+  const avgDartsPerLeg = db.prepare(`
+    SELECT AVG(leg_darts) AS v FROM (
+      SELECT COUNT(d.id) AS leg_darts
+      FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+      WHERE t.player_id=? ${CRICKET} ${mf}
+      GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.leg_won)>0
+    )
+  `).get(p.id)?.v ?? null;
+
+  return { mpr, nineMarks, winPct, gamesPlayed, dartsThrown, avgDartsPerLeg };
+}
+
+// Cricket leaderboard for the 9-marks achievement (see getCricketStatBubbles'
+// nineMarks formula above) — same leaderboard+recent shape as getOneEightyStats.
+function getCricketNineMarksStats(mode) {
+  const mf = _mf(mode);
+  const base = `
+    SELECT t.id, t.player_id, t.created_at
+    FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+    WHERE g.game_type='cricket' ${mf}
+    GROUP BY t.id HAVING COUNT(d.id)=3 AND SUM(${CRICKET_MARK_CASE('d')})=9
+  `;
+  const leaderboard = db.prepare(`SELECT p.name, COUNT(*) AS count FROM (${base}) x JOIN players p ON p.id=x.player_id GROUP BY x.player_id ORDER BY count DESC`).all();
+  const recent      = db.prepare(`SELECT p.name, x.created_at FROM (${base}) x JOIN players p ON p.id=x.player_id ORDER BY x.created_at DESC LIMIT 10`).all();
+  return { leaderboard, recent };
+}
+
 // Personal-best / "tracking improvement" markers for the player page: best single-leg
 // average, fewest darts to finish a leg, current H2H win streak, and recent-form (last
 // 10 completed legs) average vs lifetime average.
@@ -1096,6 +1180,52 @@ function getPersonalBests(playerName, mode) {
   }
 
   return { bestLegAvg, fewestDartsCheckout, winStreak, recentFormAvg, lifetimeAvg };
+}
+
+// Cricket's Personal Bests — same 5-field shape as getPersonalBests() above, but
+// keyed on turns.leg_won instead of turns.checkout (Cricket has no checkout
+// mechanism, so it needs its own "this turn won the leg" signal — see the
+// turns.leg_won column comment in the schema).
+function getCricketPersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const mf = _mf(mode);
+
+  const legRowsSql = `
+    SELECT t.game_id, t.set_no, t.leg_no, MAX(t.id) AS lastTurnId,
+      SUM(${CRICKET_MARK_CASE('d')}) AS marks, COUNT(DISTINCT t.id) AS rounds, COUNT(d.id) AS darts
+    FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+    WHERE t.player_id=? AND g.game_type='cricket' ${mf}
+    GROUP BY t.game_id, t.set_no, t.leg_no
+    HAVING SUM(t.leg_won) > 0
+  `;
+  // mpr uses the same marks/rounds formula as getCricketStatBubbles' lifetime MPR,
+  // just scoped to a single leg — keeps "MPR" meaning one consistent thing
+  // everywhere it appears rather than two different scales.
+  const legs = db.prepare(legRowsSql).all(p.id).map(r => ({ ...r, mpr: r.rounds > 0 ? r.marks / r.rounds : 0 }));
+  const bestLegMpr = legs.length ? Math.max(...legs.map(r => r.mpr)) : null;
+  const fewestDartsToClose = legs.length ? Math.min(...legs.map(r => r.darts)) : null;
+
+  const recentLegs = legs.slice().sort((a, b) => b.lastTurnId - a.lastTurnId).slice(0, 10);
+  const recentFormMpr = recentLegs.length ? recentLegs.reduce((s, r) => s + r.mpr, 0) / recentLegs.length : null;
+  const lifetimeMpr = legs.length ? legs.reduce((s, r) => s + r.mpr, 0) / legs.length : null;
+
+  let winStreak = 0;
+  if (mode !== 'practice') {
+    const recentGames = db.prepare(`
+      SELECT g.winner_id AS winnerId
+      FROM games g JOIN game_players gp ON gp.game_id=g.id
+      WHERE gp.player_id=? AND g.game_type='cricket' AND g.completed_at IS NOT NULL
+        AND g.practice=0 AND g.player_count > 1
+      ORDER BY g.completed_at DESC
+      LIMIT 50
+    `).all(p.id);
+    for (const r of recentGames) {
+      if (r.winnerId === p.id) winStreak++; else break;
+    }
+  }
+
+  return { bestLegMpr, fewestDartsToClose, winStreak, recentFormMpr, lifetimeMpr };
 }
 
 function getMetricHistory(playerName, metric, period, opts = {}) {
@@ -1244,6 +1374,52 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         WHERE t.player_id=? ${modeWhere} ${weightWhere}
         GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)>0
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
+
+    // ---- Cricket metrics (game-modes-roadmap.md build-order step 3) ----
+    case 'cricketmpr':
+      // Marks Per Round: SUM(marks)/COUNT(rounds), pre-aggregated per turn (like
+      // 'avg' above) so the darts JOIN doesn't inflate the marks sum.
+      return db.prepare(`SELECT bucket, CAST(SUM(marks) AS REAL)/NULLIF(COUNT(*),0) AS value FROM (
+        SELECT ${T.fmt} AS bucket, SUM(${CRICKET_MARK_CASE('d')}) AS marks
+        FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+        WHERE t.player_id=? AND g.game_type='cricket' ${T.and} ${modeWhere} ${weightWhere}
+        GROUP BY t.id
+      ) GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'cricket9marks':
+      return db.prepare(`SELECT bucket, COUNT(*) AS value FROM (
+        SELECT ${T.fmt} AS bucket
+        FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+        WHERE t.player_id=? AND g.game_type='cricket' ${T.and} ${modeWhere} ${weightWhere}
+        GROUP BY t.id HAVING COUNT(d.id)=3 AND SUM(${CRICKET_MARK_CASE('d')})=9
+      ) GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'cricketwinpct': {
+      // Game-level bucketing (by completion date), not turn/leg-level — a new
+      // bucket granularity for getMetricHistory, but bld() is generic over any
+      // timestamp column. Dart-weight filtering doesn't apply at this granularity.
+      const G = bld('g.completed_at');
+      return db.prepare(`SELECT bucket, CAST(SUM(won) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
+        SELECT ${G.fmt} AS bucket, CASE WHEN g.winner_id=? THEN 1 ELSE 0 END AS won
+        FROM game_players gp JOIN games g ON g.id=gp.game_id
+        WHERE gp.player_id=? AND g.game_type='cricket' AND g.completed_at IS NOT NULL ${modeWhere} ${G.and}
+      ) GROUP BY bucket ORDER BY bucket`).all(p.id, p.id);
+    }
+    case 'cricketgames': {
+      const G = bld('g.completed_at');
+      return db.prepare(`SELECT ${G.fmt} AS bucket, COUNT(*) AS value
+        FROM game_players gp JOIN games g ON g.id=gp.game_id
+        WHERE gp.player_id=? AND g.game_type='cricket' AND g.completed_at IS NOT NULL ${modeWhere} ${G.and}
+        GROUP BY bucket ORDER BY bucket`).all(p.id);
+    }
+    case 'cricketdartsthrown':
+      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(d.id) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? AND g.game_type='cricket' ${T.and} ${modeWhere} ${weightWhere} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'cricketavgdartsperleg':
+      return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(leg_darts) AS value FROM (
+        SELECT MAX(t.created_at) AS leg_ts, COUNT(d.id) AS leg_darts
+        FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+        WHERE t.player_id=? AND g.game_type='cricket' ${modeWhere} ${weightWhere}
+        GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.leg_won)>0
+      ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
+
     default:
       return [];
   }
@@ -1931,6 +2107,7 @@ module.exports = {
   createGame, addTurn, completeGame, recordEvent,
   computeStats, getSummary, getHomeExtra, getOneEightyStats, getBigFishStats, getNineDarterStats,
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
+  getCricketStatBubbles, getCricketNineMarksStats, getCricketPersonalBests,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics,
