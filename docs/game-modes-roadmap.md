@@ -13,13 +13,15 @@
 > Cricket scoring screen (`renderGameCricket`/`renderPadCricket` — Pad/Dartboard are
 > never shown during a Cricket game), the marks/points/win-condition turn engine
 > (`GAME_TYPES.cricket.evaluateVisit`, dispatched via `enterTurnCricket`/
-> `onLegWonCricket`/`undoLastTurnCricket`), and an orientation-aware
-> `renderers.cricket` live-scoreboard card (inherits portrait/landscape support
-> from item 11 for free). Verified: 12 hand-checked scoring-engine scenarios (mark
-> accumulation within a visit, opponent-closed gating, multi-opponent win checks),
-> Playwright end-to-end (New Game validation, scoring screen, live board in both
-> orientations, undo, full game completion), and a full X01 regression pass
-> confirming zero cross-contamination between the two renderers.
+> `onLegWonCricket`/`undoLastTurnCricket`), and a traditional chalkboard-style
+> scorecard (rows=numbers, columns=players, slash/X/circled-X marks) shared by
+> `renderGameCricket()` (controller) and `renderers.cricket.scorecard()`
+> (`display.html` live scoreboard, orientation-aware per item 11). Verified: 12
+> hand-checked scoring-engine scenarios (mark accumulation within a visit,
+> opponent-closed gating, multi-opponent win checks), Playwright end-to-end (New
+> Game validation, scoring screen, live board in both orientations, undo, full
+> game completion), and a full X01 regression pass confirming zero
+> cross-contamination between the two renderers.
 >
 > **Not yet built** (steps 3-5, unchanged from the original plan): Cricket stats
 > parity (MPR, leaderboards, profile charts — `GAME_TYPES.cricket.statDefs` is
@@ -42,8 +44,9 @@ added later without starting from scratch each time.
 | Cricket stats depth | Full parity with X01 — a dedicated Cricket stat (Marks Per Round), leaderboards, and profile charts, not just win/loss |
 | Cricket variant scope for v1 | Standard cricket only (highest score wins). Cut-throat (points scored against opponents) deferred to later |
 | Custom cricket target count | ✅ Built. Fixed at 7 targets — the same count as classic cricket (15, 16, 17, 18, 19, 20, Bull) — freely chosen from 1-20 + Bull, but never more or fewer than 7. Enforced at Start (`startGame()` blocks with an alert if the count is wrong) |
-| Scoring screen during Cricket | ✅ Built. A dedicated Cricket scoring screen (marks/closed grid), not the X01 Pad or Dartboard screens — it's the automatic default the instant a Cricket game is active, with no player choice to fall back to Pad/Dartboard |
+| Scoring screen during Cricket | ✅ Built. A dedicated Cricket scoring screen (traditional chalkboard scorecard — slash/X/circled-X marks), not the X01 Pad or Dartboard screens — it's the automatic default the instant a Cricket game is active, with no player choice to fall back to Pad/Dartboard |
 | Live scoreboard orientation | ✅ Built. Cricket's `renderers.cricket` inherits portrait/landscape detection from the shared shell — see `docs/existing-app-prep-roadmap.md` item 11 |
+| Cricket scorecard style | ✅ Built. A single shared chalkboard-style table (rows=numbers, columns=players) rather than per-player cards — matches how cricket is scored on a real board. Marks: slash (1), X (2), circled X (3+/closed) |
 
 ## Why this is bigger than "add cricket"
 
@@ -282,11 +285,12 @@ X01-only, see its status note above).
 - **Accessibility**: ✅ Done. Cricket's scoring screen extends the app's existing
   `aria-pressed`/`role="group"` conventions (each target button carries an
   `aria-label` stating its exact mark count or closed status), and closed numbers
-  are signaled with a checkmark + text label, never color alone. The live
-  scoreboard's marks grid follows the same rule. Portrait/landscape parity between
-  X01 and Cricket's cards is verified — both flow through the same `#grid` and
-  orientation logic (item 11), so there's no separate code path to drift out of
-  sync.
+  are signaled with a circled X + `sr-only` text label, never color alone. The
+  chalkboard scorecard (both the controller's `renderGameCricket()` and the live
+  scoreboard's `renderers.cricket.scorecard()`) follows the same rule. Portrait/
+  landscape parity is verified — Cricket's scorecard always forces a single
+  column spanning the whole `#grid` regardless of orientation, so there's no
+  separate code path to drift out of sync.
 - **Testing**: ✅ Done, though as ad hoc scratch scripts rather than the formal test
   runner `docs/testing-and-observability-roadmap.md` still calls for (that slice is
   a separate, not-yet-built prerequisite — see that doc). The scoring engine

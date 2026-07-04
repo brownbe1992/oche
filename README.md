@@ -171,10 +171,11 @@ The scoring screen is optimised for touchscreen entry on a tablet. Everything fi
 
 **Cricket's scoring screen is entirely different** — there's no Pad/Dartboard
 choice, no checkout hints, and no bust concept:
-- **Player cards** show a grid of this match's 7 target numbers per player, each
-  marked with how many marks it has (0–3 dots, or a checkmark once closed —
-  closed status is always shown with a checkmark and label, never color alone)
-  and a running points total.
+- **Scorecard** is a traditional chalkboard-style table, not per-player cards —
+  one row per target number (highest to lowest, Bull last) and one column per
+  player. Each cell shows a slash (1 mark), an X (2 marks), or a circled X (3+
+  marks/closed — the circle is the non-color-only closed signal, never color
+  alone), plus a running points total in a footer row.
 - **Dart entry** — the same Single/Double/Treble multiplier selector as X01, then
   tap directly on one of the 7 in-play target buttons (or **Miss**). A closed
   number stays tappable — real cricket still lets you score on a number you've
@@ -289,10 +290,13 @@ Open **`http://<your-server>:8046/display`** on a TV or second monitor. It updat
 - Active player's card shows each dart thrown in the current visit, plus the checkout route inline
 - Bust overlay (red) and Game Shot overlay (green) flash on the active card
 
-**Cricket games** show a different card entirely: each player's grid of this
-match's 7 targets with marks/closed status (a checkmark, not just a color, so
-it's never color-only) and a running points total, instead of a countdown
-score, checkout route, or bust/shot overlay.
+**Cricket games** replace the per-player cards with a single traditional
+chalkboard-style scorecard table spanning the whole screen — one row per
+target number (highest to lowest, Bull last), one column per player, marks
+shown as a slash (1), an X (2), or a circled X (3+/closed — never color alone),
+plus a points footer row. The currently-throwing player's column is
+highlighted, and the grid always shows this table in a single column
+regardless of player count or screen orientation.
 
 **Between legs:** score cards are replaced with a leg summary — average, darts thrown, and busts per player (points and numbers closed, for Cricket) — until the next leg starts.
 

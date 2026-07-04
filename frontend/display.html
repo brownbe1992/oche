@@ -87,21 +87,41 @@
   .meta b{color:var(--ink);font-weight:600}
   .standing{margin-left:auto;color:var(--gold);font-weight:700;letter-spacing:.04em;font-size:2vmin}
 
-  /* Cricket scoreboard — non-color-only closed signal (checkmark + text, not just
-     a color change), per docs/accessibility-roadmap.md. */
-  .cr-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1vmin;margin:.6vmin 0}
-  .cr-cell{display:flex;flex-direction:column;align-items:center;gap:.3vmin;background:var(--surface-2);
-    border:1px solid var(--wire);border-radius:1vmin;padding:.8vmin .4vmin}
-  .cr-cell.closed{border-color:var(--green);background:rgba(27,138,58,.12)}
-  body.colorblind .cr-cell.closed{border-color:var(--green);background:rgba(47,143,217,.12)}
-  .cr-num{font-family:'Bebas Neue';font-size:2.4vmin;line-height:1;color:var(--cream)}
-  .cr-marks{font-size:1.5vmin;color:var(--muted)}
-  .cr-cell.closed .cr-marks{color:var(--green)}
-  body.colorblind .cr-cell.closed .cr-marks{color:#9cd2ff}
-  .cr-points{display:flex;align-items:baseline;gap:.6vmin;margin:.2vmin 0}
-  .cr-points-val{font-family:'Bebas Neue';font-size:clamp(40px,10vmin,160px);line-height:.85;color:var(--cream)}
-  .pcard.active .cr-points-val{color:#fff}
-  .cr-points-lbl{font-size:1.6vmin;letter-spacing:.1em;color:var(--muted)}
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+    clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+  /* Traditional chalkboard cricket scorecard — one shared table (rows=numbers,
+     columns=players), not per-player cards. Marks render as a slash (1), an X (2),
+     and a circled X (3/closed) — the circle is the non-color-only "closed" signal
+     required by docs/accessibility-roadmap.md, not color alone. */
+  .cs-wrap{flex:1;display:flex;flex-direction:column;min-height:0;padding:1vmin 0;gap:1.6vmin}
+  .cs-table{display:flex;flex-direction:column;border:1px solid var(--wire);border-radius:1.4vmin;overflow:hidden;background:var(--surface)}
+  .cs-row{display:grid;grid-template-columns:minmax(9vmin,14vmin) repeat(var(--cs-cols,2),1fr);
+    border-bottom:1px solid var(--wire)}
+  .cs-row:last-child{border-bottom:none}
+  .cs-label,.cs-cell,.cs-col-head{display:flex;align-items:center;justify-content:center;
+    padding:1.2vmin .6vmin;min-width:0}
+  .cs-label{font-family:'Bebas Neue';font-size:2.6vmin;color:var(--muted);justify-content:flex-start;padding-left:1.6vmin}
+  .cs-head .cs-col-head{font-weight:600;font-size:2.2vmin;color:var(--cream);gap:.6vmin;flex-direction:column;line-height:1.15}
+  .cs-head{background:var(--surface-2)}
+  .cs-col-head.active{color:var(--gold)}
+  .cs-throw-chip{font-size:1.5vmin;letter-spacing:.1em;color:var(--gold);text-transform:uppercase}
+  .cs-cell{border-left:1px solid var(--wire)}
+  .cs-col-head{border-left:1px solid var(--wire)}
+  .cs-cell.active,.cs-col-head.active{background:rgba(217,180,106,.08)}
+  .cs-mark{font-family:'Bebas Neue';font-size:3.4vmin;line-height:1;color:var(--muted)}
+  .cs-mark-2{color:var(--cream)}
+  .cs-mark-3{display:flex;align-items:center;justify-content:center;width:5vmin;height:5vmin;
+    border:.3vmin solid var(--green);border-radius:50%;color:var(--green);font-size:2.6vmin}
+  body.colorblind .cs-mark-3{border-color:#9cd2ff;color:#9cd2ff}
+  .cs-foot{background:var(--surface-2)}
+  .cs-foot .cs-label{color:var(--gold)}
+  .cs-points{font-family:'Bebas Neue';font-size:3.4vmin;color:var(--cream)}
+  .cs-points.active{color:#fff}
+  .cs-throw-row{flex:none;display:flex;align-items:center;gap:2vmin}
+  .cs-throw-lbl{font-size:2vmin;color:var(--muted);flex:none}
+  .cs-throw-lbl b{color:var(--gold)}
+  .cs-throw-row .darts{flex:1}
 
   /* darts in hand + checkout */
   .throwbox{margin-top:1.6vmin;border-top:1px dashed var(--wire);padding-top:1.6vmin;display:flex;flex-direction:column;gap:1.2vmin}
@@ -470,52 +490,57 @@ const renderers = {
     }
   },
   cricket: {
-    card(p, i, s, L){
-      const active = i===s.currentIndex;
-      const standing = s.practice ? `Leg ${num(s.legNo)}` : '';
-      let throwbox = '';
-      if(active){
-        const darts = Array.isArray(s.darts) ? s.darts : [];
-        const slots = [0,1,2].map(k=>{
-          const lab = darts[k];
-          return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
-        }).join('');
-        throwbox = `<div class="throwbox"><div class="darts">${slots}</div></div>`;
-      }
-      const marks = p.marks || {};
-      const cells = Object.keys(marks).map(Number).map(n=>{
-        const m = marks[n] || 0;
-        const closed = m >= 3;
-        const lbl = n===25 ? 'Bull' : String(n);
-        return `<div class="cr-cell${closed?' closed':''}">
-          <div class="cr-num">${lbl}</div>
-          <div class="cr-marks">${cricketMarksGlyph(m)}</div>
+    // A single shared chalkboard-style table (rows=numbers, columns=players)
+    // rather than per-player cards — matches how cricket is scored on a real
+    // board. Replaces the per-player marks-grid design used before.
+    scorecard(s, L){
+      const players = s.players;
+      const active = s.currentIndex;
+      const numberSet = new Set();
+      players.forEach(p=>Object.keys(p.marks||{}).forEach(n=>numberSet.add(Number(n))));
+      const nums = Array.from(numberSet).filter(n=>n!==25).sort((a,b)=>b-a);
+      if(numberSet.has(25)) nums.push(25);
+
+      const headCells = players.map((p,i)=>{
+        const isActive = i===active;
+        return `<div class="cs-col-head${isActive?' active':''}">
+          <span>${escapeHtml(p.name)}</span>
+          ${isActive?'<span class="cs-throw-chip">▸ throwing</span>':''}
         </div>`;
       }).join('');
-      const dartCounts = !L.showDartCounts ? '' : `
-          <div class="dart-counts">
-            <div class="dart-counts-title">Darts Thrown</div>
-            <div class="dart-count-row"><span class="dart-count-val">${num(p.legDarts)}</span><span class="dart-count-lbl">Leg</span></div>
-            ${s.practice
-              ? `<div class="dart-count-row"><span class="dart-count-val">${num(p.gameDarts)}</span><span class="dart-count-lbl">Session</span></div>`
-              : `<div class="dart-count-row"><span class="dart-count-val">${num(p.setDarts)}</span><span class="dart-count-lbl">Set</span></div>
-                 <div class="dart-count-row"><span class="dart-count-val">${num(p.gameDarts)}</span><span class="dart-count-lbl">Game</span></div>`
-            }
-          </div>`;
-      const meta = (!L.showMeta || !standing) ? '' : `<div class="meta"><span class="standing">${standing}</span></div>`;
 
-      return `<div class="pcard ${active?'active':''}">
-        <div>
-          <div class="prow1">
-            <span class="pname">${escapeHtml(p.name)}</span>
-            ${active?'<span class="throwflag">▸ throwing</span>':''}
-          </div>
-          <div class="cr-grid">${cells}</div>
-          <div class="cr-points"><span class="cr-points-val">${num(p.points)}</span><span class="cr-points-lbl">PTS</span></div>
-          ${dartCounts}
+      const bodyRows = nums.map(n=>{
+        const lbl = n===25 ? 'Bull' : String(n);
+        const cells = players.map((p,i)=>{
+          const m = (p.marks && p.marks[n]) || 0;
+          const isActive = i===active;
+          return `<div class="cs-cell${isActive?' active':''}">${cricketMarkGlyph(m, lbl)}</div>`;
+        }).join('');
+        return `<div class="cs-row"><div class="cs-label">${lbl}</div>${cells}</div>`;
+      }).join('');
+
+      const pointCells = players.map((p,i)=>{
+        const isActive = i===active;
+        return `<div class="cs-cell${isActive?' active':''}"><span class="cs-points${isActive?' active':''}">${num(p.points)}</span></div>`;
+      }).join('');
+
+      const thrower = players[active];
+      const darts = Array.isArray(s.darts) ? s.darts : [];
+      const slots = [0,1,2].map(k=>{
+        const lab = darts[k];
+        return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
+      }).join('');
+
+      return `<div class="cs-wrap" style="--cs-cols:${players.length}">
+        <div class="cs-table">
+          <div class="cs-row cs-head"><div class="cs-label"></div>${headCells}</div>
+          ${bodyRows}
+          <div class="cs-row cs-foot"><div class="cs-label">Pts</div>${pointCells}</div>
         </div>
-        ${meta}
-        ${throwbox}
+        <div class="cs-throw-row">
+          <span class="cs-throw-lbl">${thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche`:''}</span>
+          <div class="darts">${slots}</div>
+        </div>
       </div>`;
     },
     summary(p){
@@ -536,9 +561,15 @@ const renderers = {
     }
   }
 };
-function cricketMarksGlyph(n){
-  const clamped = Math.min(3, n);
-  return clamped>=3 ? '✓' : '●'.repeat(clamped) + '○'.repeat(3-clamped);
+// Traditional chalkboard marks: blank (0), / (1), X (2), circled X (3+/closed).
+// The circle is the accessibility signal (docs/accessibility-roadmap.md) — closed
+// status never relies on color alone.
+function cricketMarkGlyph(n, numberLabel){
+  const sr = n>=3 ? `<span class="sr-only">${numberLabel} closed</span>` : (n>0 ? `<span class="sr-only">${numberLabel}: ${n} of 3 marks</span>` : '');
+  if(n<=0) return sr;
+  if(n===1) return `<span class="cs-mark cs-mark-1" aria-hidden="true">/</span>${sr}`;
+  if(n===2) return `<span class="cs-mark cs-mark-2" aria-hidden="true">✕</span>${sr}`;
+  return `<span class="cs-mark cs-mark-3" aria-hidden="true">✕</span>${sr}`;
 }
 
 /* ---- voice announcements ----
@@ -768,11 +799,16 @@ function render(s){
   // Portrait is narrow and tall — stacking cards single-column gives each one full
   // width (readable at a glance) instead of the side-by-side columns that make sense
   // in landscape's wide-and-short shape but cram score text into narrow cells here.
-  const cols = isPortrait ? 1 : (n<=1 ? 1 : n<=4 ? 2 : 3);
+  // The cricket scorecard is always a single table spanning the whole grid, not
+  // per-player columns, regardless of orientation.
+  const isCricketScorecard = s.gameType === 'cricket' && !s.legSummary;
+  const cols = isCricketScorecard ? 1 : (isPortrait ? 1 : (n<=1 ? 1 : n<=4 ? 2 : 3));
   grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
 
   if(s.legSummary){
     grid.innerHTML = s.legSummary.map(p=>renderer.summary(p, L)).join('');
+  } else if(isCricketScorecard){
+    grid.innerHTML = renderer.scorecard(s, L);
   } else {
     grid.innerHTML = s.players.map((p,i)=>renderer.card(p, i, s, L)).join('');
   }

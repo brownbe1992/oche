@@ -697,6 +697,18 @@ shaped player objects pass through unchanged) — anything else in a
 `POST /api/live` body is silently dropped (413 if the sanitized payload still
 exceeds 64KB).
 
+Cricket's live scoreboard (`renderers.cricket.scorecard()` in `display.html`,
+mirrored by `renderGameCricket()` on the controller in `frontend/index.html`)
+is a single traditional chalkboard-style table — not per-player cards like X01.
+Rows are the match's in-play numbers (highest to lowest, Bull last); columns
+are players. Each cell renders the mark count as a slash (1 mark), an X (2
+marks), or a circled X (3+ marks/closed) — the circle is the non-color-only
+"closed" signal (`docs/accessibility-roadmap.md`), not a color change alone. A
+`Pts` footer row shows each player's running total, and the currently-throwing
+player's column is highlighted. Because this is one shared table rather than
+one card per player, `render()` forces the live-scoreboard grid to a single
+column for Cricket regardless of player count or orientation.
+
 ### Layout presets
 
 `full` / `compact` / `minimal`, chosen in Settings or overridden per-screen via
