@@ -1131,6 +1131,66 @@ function getCricketNineMarksStats(mode) {
   return { leaderboard, recent };
 }
 
+// Home page's Cricket leaderboards (game-modes-roadmap.md build-order step 4).
+// Marks Per Round across every player, mirroring getCricketStatBubbles()'s mpr
+// formula but grouped across all players at once instead of one name. A
+// minimum-rounds floor (matching _trebleLess()'s HAVING turns>=10 convention)
+// keeps a single lucky visit from topping the board.
+function getCricketMprLeaderboard(mode) {
+  const mf = _mf(mode);
+  const rows = db.prepare(`
+    SELECT p.name AS name, COUNT(DISTINCT t.id) AS rounds, SUM(${CRICKET_MARK_CASE('d')}) AS marks
+    FROM turns t JOIN games g ON g.id=t.game_id JOIN players p ON p.id=t.player_id JOIN darts d ON d.turn_id=t.id
+    WHERE g.game_type='cricket' ${mf}
+    GROUP BY t.player_id
+    HAVING rounds >= 5
+  `).all();
+  return rows
+    .map(r => ({ name: r.name, mpr: +(r.marks / r.rounds).toFixed(2), rounds: r.rounds }))
+    .sort((a, b) => b.mpr - a.mpr);
+}
+
+// Cricket win leaderboard — same shape as getHomeExtra()'s winLeaderboard, just
+// scoped to game_type='cricket'. H2H-only by nature (practice has no opponent
+// to win against), so no mode param.
+function getCricketWinLeaderboard() {
+  const winRows = db.prepare(`
+    SELECT p.name AS name, COUNT(*) AS played, SUM(CASE WHEN g.winner_id = p.id THEN 1 ELSE 0 END) AS won
+    FROM game_players gp
+    JOIN players p ON p.id = gp.player_id
+    JOIN games g ON g.id = gp.game_id
+    WHERE g.completed_at IS NOT NULL AND g.practice = 0 AND g.player_count > 1 AND g.game_type='cricket'
+    GROUP BY p.id
+    HAVING played >= 1
+    ORDER BY won DESC, played ASC
+  `).all();
+  return winRows.map(r => ({ name: r.name, played: r.played, won: r.won,
+    rate: r.played ? +((r.won / r.played) * 100).toFixed(1) : 0 }));
+}
+
+// Cricket's nine-darter analog leaderboard — a won leg (turns.leg_won=1) whose
+// total darts equal that match's theoretical minimum (each non-Bull number
+// closes in a single treble; Bull can't be trebled, so it needs a 2-dart
+// minimum — same logic as the Perfect Leg achievement in frontend/index.html's
+// enterTurnCricket(), computed here in SQL instead of read from client state).
+function getCricketPerfectLegStats(mode) {
+  const mf = _mf(mode);
+  const base = `
+    SELECT t.player_id, MAX(t.created_at) AS created_at
+    FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+    WHERE g.game_type='cricket' ${mf}
+    GROUP BY t.game_id, t.set_no, t.leg_no, t.player_id
+    HAVING SUM(t.leg_won) > 0
+      AND COUNT(d.id) = (
+        (SELECT COUNT(*) FROM json_each(g.config,'$.numbers') je WHERE je.value != 25)
+        + (CASE WHEN EXISTS (SELECT 1 FROM json_each(g.config,'$.numbers') je2 WHERE je2.value = 25) THEN 2 ELSE 0 END)
+      )
+  `;
+  const leaderboard = db.prepare(`SELECT p.name, COUNT(*) AS count FROM (${base}) x JOIN players p ON p.id=x.player_id GROUP BY x.player_id ORDER BY count DESC`).all();
+  const recent      = db.prepare(`SELECT p.name, x.created_at FROM (${base}) x JOIN players p ON p.id=x.player_id ORDER BY x.created_at DESC LIMIT 10`).all();
+  return { leaderboard, recent };
+}
+
 // Personal-best / "tracking improvement" markers for the player page: best single-leg
 // average, fewest darts to finish a leg, current H2H win streak, and recent-form (last
 // 10 completed legs) average vs lifetime average.
@@ -2108,6 +2168,7 @@ module.exports = {
   computeStats, getSummary, getHomeExtra, getOneEightyStats, getBigFishStats, getNineDarterStats,
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
   getCricketStatBubbles, getCricketNineMarksStats, getCricketPersonalBests,
+  getCricketMprLeaderboard, getCricketWinLeaderboard, getCricketPerfectLegStats,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics,

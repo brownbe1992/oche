@@ -454,9 +454,24 @@ per-turn or per-leg like their X01 counterparts.
 **Player Profile UI**: a small X01/Cricket toggle (`playerGameType`, mirroring
 the existing `.player-tabs` pattern) next to the Overall/H2H/Practice tabs
 switches which `statDefs` array/personal-bests shape/chart metric feeds the
-bubbles, chart, and Personal Bests section. The Home page's leaderboards remain
-X01-only for now — making Home game-type-aware is the remaining, larger slice
-of build-order step 4 (`docs/game-modes-roadmap.md`).
+bubbles, chart, and Personal Bests section.
+
+**Home page leaderboards** (`renderHomeTabBodyCricket()`, a separate rendering
+path from `renderHomeTabBody()` rather than shoehorned branches, since
+Cricket's stat shapes don't map onto X01's): a second `homeGameType` toggle
+(same `.player-tabs` pattern) below the existing H2H/Practice tabs switches
+between X01's leaderboard set and Cricket's own:
+
+| Leaderboard | Backend function | Notes |
+|---|---|---|
+| Marks Per Round | `getCricketMprLeaderboard(mode)` | All players ranked by MPR; `HAVING rounds >= 5` floor so one lucky visit can't top the board (mirrors `_trebleLess()`'s `turns >= 10` convention) |
+| Most Cricket Wins | `getCricketWinLeaderboard()` | Same shape as `getHomeExtra()`'s `winLeaderboard`, scoped to `game_type='cricket'`; H2H only (no `mode` param — practice has no opponent to win against) |
+| 9 Marks | `getCricketNineMarksStats(mode)` | Reused as-is from the achievements leaderboard already built for step 3 |
+| Perfect Leg | `getCricketPerfectLegStats(mode)` | A won leg (`leg_won=1`) whose total darts equal that match's config-derived theoretical minimum — the same logic as the Perfect Leg achievement trigger in `enterTurnCricket()`, computed here in SQL via `json_each(g.config,'$.numbers')` instead of read from client state |
+
+All four are fetched in the same upfront `Promise.all` `renderHome()` already
+uses for X01 (`homeData.cricket.h2h`/`.practice`/`.wins`) — no separate loading
+state or lazy-fetch-on-toggle.
 
 ---
 

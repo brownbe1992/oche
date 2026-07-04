@@ -90,7 +90,9 @@ The landing page shows a live snapshot of all-time activity:
 
 **This week / Last game played** — legs thrown today and this week, darts thrown this week, and a summary of the most recently completed game (players, category, winner, and when).
 
-**H2H / Practice toggle** — switches the leaderboards below between head-to-head and solo/practice stats:
+**H2H / Practice toggle** — switches the leaderboards below between head-to-head and solo/practice stats. A second **X01 / Cricket** toggle switches the leaderboards between the two game types' own stat vocabularies.
+
+**X01 leaderboards:**
 - 3-dart average leaderboard
 - Most Wins (win rate) — H2H only
 - Most Trebleless Visits
@@ -98,10 +100,18 @@ The landing page shows a live snapshot of all-time activity:
 - Highest Checkout Ever (within that mode — the "Highest checkout ever recorded" figure in Achievements above is separate and always all-time)
 - Average Pace (darts/minute) — appears once dart-timing data exists, see [Settings](#settings)
 
-**Hall of Fame sections:**
+**X01 Hall of Fame sections:**
 - 🎯 **180s** — every player who has thrown a maximum, with count and most recent date
 - 🐟 **Big Fish** — every 170 checkout recorded
 - **Nine-Dart Finishes** — 501 completed in exactly 9 darts *("None recorded yet — you will never get this!")*
+
+**Cricket leaderboards** (switching the toggle to Cricket):
+- Marks Per Round (MPR) leaderboard — minimum 5 rounds played, so one lucky visit can't top the board
+- Most Cricket Wins (win rate) — H2H only
+
+**Cricket Hall of Fame sections:**
+- 🎯 **9 Marks** — every player who's scored the maximum 9 marks in one visit, with count and most recent date
+- 🏆 **Perfect Leg** — every leg closed in the fewest darts physically possible for that match's target set *("None recorded yet — you will never get this!")*
 
 A **"View full stats glossary"** link opens a shared reference explaining every stat term used across the app.
 
@@ -126,7 +136,7 @@ H2H mode requires at least two players selected. Practice mode can be played sol
 
 Players with a PIN set show a 🔒 next to their name in the dropdown. When exactly two players are selected in H2H mode, a banner shows their all-time head-to-head record (e.g. *"H2H: Alice leads 3–0 (3 games)"*).
 
-**Cricket** is a second game type alongside X01. Choosing **Classic** locks the targets to the standard 15, 16, 17, 18, 19, 20, and Bull. Choosing **Custom** reveals a 1–20-plus-Bull picker — pick any numbers you like, but always exactly 7 (the same count as classic); Start is blocked until exactly 7 are checked, with a running "N of 7 selected" count and a one-tap "Start from classic" fill-in. Once a Cricket game begins, the scoring screen and live scoreboard both switch to Cricket's own marks/closed/points display — the X01 Pad and Dartboard input screens are never shown during a Cricket game, and there's no per-game choice between them the way there is for X01. See [Scoring](#scoring) below and `REFERENCE.md` for the exact marks/points rules. Cricket has its own stat bubbles (MPR, 9 Marks, Win Rate, Games Played, Darts Thrown, Darts/Won Leg), Personal Bests, and 2 achievements (9 Marks and Perfect Leg) — a small X01/Cricket toggle on the Player Profile switches between the two. The Home page's leaderboards remain X01-only for now.
+**Cricket** is a second game type alongside X01. Choosing **Classic** locks the targets to the standard 15, 16, 17, 18, 19, 20, and Bull. Choosing **Custom** reveals a 1–20-plus-Bull picker — pick any numbers you like, but always exactly 7 (the same count as classic); Start is blocked until exactly 7 are checked, with a running "N of 7 selected" count and a one-tap "Start from classic" fill-in. Once a Cricket game begins, the scoring screen and live scoreboard both switch to Cricket's own marks/closed/points display — the X01 Pad and Dartboard input screens are never shown during a Cricket game, and there's no per-game choice between them the way there is for X01. See [Scoring](#scoring) below and `REFERENCE.md` for the exact marks/points rules. Cricket has its own stat bubbles (MPR, 9 Marks, Win Rate, Games Played, Darts Thrown, Darts/Won Leg), Personal Bests, 2 achievements (9 Marks and Perfect Leg), and its own Home page leaderboard set (Marks Per Round, Most Cricket Wins, 9 Marks, Perfect Leg) — a small X01/Cricket toggle on both the Home page and the Player Profile switches between the two.
 
 **Daily Challenge mode** turns New Game into today's [Daily Challenge](#daily-challenge) launcher instead of a regular match: Starting Score and Format hide (the challenge decides them), and a gold **Today's Challenge** panel shows the challenge description plus whoever is currently in the player slot's streak and results history. Selecting who's attempting it uses the exact same single "Choose player" slot as Practice mode — a PIN-protected player still needs their PIN entered, since it's the identical gate every other slot uses, not a separate picker of its own. The **Start game** button relabels to **Start Challenge** while this mode is active. Daily Challenge is X01-only — the Game-type choice is hidden and forced back to X01 whenever this mode is selected.
 
@@ -660,6 +670,9 @@ GET  /api/stats/180s?mode=                  180 leaderboard
 GET  /api/stats/big-fish?mode=              Big Fish (170 checkout) leaderboard
 GET  /api/stats/nine-darters?mode=          Nine-dart finish leaderboard
 GET  /api/stats/cricket-9marks?mode=        Cricket 9-marks-in-one-visit leaderboard
+GET  /api/stats/cricket-mpr?mode=           Cricket Marks Per Round leaderboard (min. 5 rounds)
+GET  /api/stats/cricket-wins                Cricket win-rate leaderboard (H2H only, no mode param)
+GET  /api/stats/cricket-perfect-leg?mode=   Cricket "closed in the fewest possible darts" leaderboard
 ```
 
 All leaderboard endpoints accept `?mode=h2h|practice` to filter by game mode. Omit for overall.

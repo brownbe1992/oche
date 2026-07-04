@@ -621,6 +621,10 @@
         <button class="tab-btn active" data-tab="h2h" onclick="switchHomeTab('h2h')">H2H</button>
         <button class="tab-btn" data-tab="practice" onclick="switchHomeTab('practice')">Practice</button>
       </div>
+      <div class="player-tabs" style="margin-bottom:16px">
+        <button class="tab-btn active" data-gtype="x01" onclick="switchHomeGameType('x01')">X01</button>
+        <button class="tab-btn" data-gtype="cricket" onclick="switchHomeGameType('cricket')">Cricket</button>
+      </div>
       <div id="home-tab-body"><p class="pp-meta">Loading…</p></div>
     </div>
     <div class="card" style="margin-top:14px">
@@ -1580,6 +1584,7 @@ function renderChallengeCard(){
 
 /* ---------- home screen ---------- */
 let homeTab='h2h';
+let homeGameType='x01';
 let homeData=null;
 
 function renderHome(){
@@ -1598,23 +1603,41 @@ function renderHome(){
     Backend.get('/api/stats/180s?mode=practice'),
     Backend.get('/api/stats/big-fish?mode=practice'),
     Backend.get('/api/stats/nine-darters?mode=practice'),
-  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn])=>{
+    Backend.get('/api/stats/cricket-mpr?mode=h2h'),
+    Backend.get('/api/stats/cricket-9marks?mode=h2h'),
+    Backend.get('/api/stats/cricket-perfect-leg?mode=h2h'),
+    Backend.get('/api/stats/cricket-mpr?mode=practice'),
+    Backend.get('/api/stats/cricket-9marks?mode=practice'),
+    Backend.get('/api/stats/cricket-perfect-leg?mode=practice'),
+    Backend.get('/api/stats/cricket-wins'),
+  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw])=>{
     homeData={s, extra,
       h2h:{finishes:f,eighties:e,bigFish:b,nineDarters:n},
-      practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn}};
+      practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn},
+      cricket:{
+        h2h:{mpr:cm,nineMarks:c9,perfectLeg:cp},
+        practice:{mpr:pcm,nineMarks:pc9,perfectLeg:pcp},
+        wins:cw,
+      }};
     renderHomeContent();
   }).catch(()=>{
     homeData={s:{players:roster.length,games:null,sets:null,legs:null,darts:null,oneEighties:null,bigFish:null,nineDarters:null,practiceLegs:null},
       extra:null,
       h2h:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
-      practice:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty}};
+      practice:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
+      cricket:{h2h:{mpr:[],nineMarks:empty,perfectLeg:empty}, practice:{mpr:[],nineMarks:empty,perfectLeg:empty}, wins:[]}};
     renderHomeContent();
   });
 }
 
 function switchHomeTab(tab){
   homeTab=tab;
-  document.querySelectorAll('#screen-home .tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  document.querySelectorAll('#screen-home .tab-btn[data-tab]').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  renderHomeTabBody();
+}
+function switchHomeGameType(type){
+  homeGameType=type;
+  document.querySelectorAll('#screen-home .tab-btn[data-gtype]').forEach(b=>b.classList.toggle('active', b.dataset.gtype===type));
   renderHomeTabBody();
 }
 
@@ -1693,6 +1716,7 @@ function renderHomePulse(){
 function renderHomeTabBody(){
   const el=document.getElementById('home-tab-body');
   if(!el || !homeData) return;
+  if(homeGameType==='cricket') return renderHomeTabBodyCricket();
   const mode=homeTab;
   const data=homeData[mode];
   const extra=homeData.extra;
@@ -1786,6 +1810,51 @@ function renderHomeTabBody(){
     ${achievementSection('180s 🎯', eighties)}
     ${achievementSection('Big Fish 🐟', bigFishData)}
     ${achievementSection('9-Darters', nineDarterData||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
+  `;
+}
+
+// Cricket's Home leaderboards (game-modes-roadmap.md build-order step 4) — a
+// separate rendering path from renderHomeTabBody() above rather than shoehorned
+// branches, since Cricket's stat shapes (MPR, marks) don't map onto X01's
+// (average, checkouts).
+function renderHomeTabBodyCricket(){
+  const el=document.getElementById('home-tab-body');
+  const mode=homeTab;
+  const data=homeData.cricket && homeData.cricket[mode];
+  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
+
+  const mprBoard=data.mpr||[];
+  const mprLeaderboard=mprBoard.length
+    ? `<div class="hof-list">${mprBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.mpr.toFixed(1)}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${r.rounds} rounds</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet (needs at least 5 rounds played).</p>`;
+
+  const winSection=(mode==='h2h' && homeData.cricket.wins && homeData.cricket.wins.length)
+    ? `<div class="pp-section">
+        <div class="pp-section-title">Most Cricket Wins</div>
+        <div class="hof-list">${homeData.cricket.wins.slice(0,10).map((r,i)=>`<div class="hof-row">
+          <span class="hof-rank">${i+1}</span>
+          <span class="hof-score">${r.won}</span>
+          <span class="hof-player">${escapeHtml(r.name)}</span>
+          <span class="hof-dates">${r.rate}% of ${r.played}</span>
+        </div>`).join('')}</div>
+      </div>`
+    : '';
+
+  el.innerHTML=`
+    <div class="home-pair">
+      <div class="pp-section">
+        <div class="pp-section-title">Marks Per Round (MPR)</div>
+        ${mprLeaderboard}
+      </div>
+      ${winSection}
+    </div>
+    ${achievementSection('9 Marks 🎯', data.nineMarks||{leaderboard:[],recent:[]})}
+    ${achievementSection('Perfect Leg 🏆', data.perfectLeg||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
   `;
 }
 
