@@ -247,3 +247,45 @@ describe('checkoutHint (checkout route calculator, REFERENCE.md §2)', () => {
     }
   });
 });
+
+// Ghost Opponent (docs/ghost-opponent-roadmap.md): "replaying a stored leg's dart
+// sequence is pure, deterministic logic" per the roadmap doc's own testing note.
+// index.html's playGhostTurn() is exactly this: it takes a getGhostLegScript()-shaped
+// turn (raw {sector,multiplier} darts), converts each via makeDartCore(), and
+// re-evaluates it through this same evaluateVisit() against a running score — so
+// the replay's correctness reduces entirely to "does replaying known dart sequences
+// through evaluateVisit reproduce the recorded bust/win outcome," which this suite
+// already establishes above. This test exercises that exact sequence end to end
+// (a small multi-turn leg script), rather than one visit in isolation.
+describe('Ghost Opponent replay (docs/ghost-opponent-roadmap.md)', () => {
+  test('replaying a recorded leg\'s turn-by-turn script through evaluateVisit reproduces the same outcome at each step', () => {
+    // Mirrors the shape backend/db.js's getGhostLegScript() returns: darts as
+    // plain {sector, multiplier} pairs, one entry per turn, in playback order.
+    const script = [
+      { darts: [{ sector: 20, multiplier: 3 }, { sector: 20, multiplier: 3 }, { sector: 20, multiplier: 3 }] }, // 180, remaining 321
+      { darts: [{ sector: 20, multiplier: 3 }, { sector: 20, multiplier: 3 }, { sector: 20, multiplier: 3 }] }, // 180, remaining 141
+      { darts: [{ sector: 20, multiplier: 3 }, { sector: 19, multiplier: 3 }, { sector: 12, multiplier: 2 }] }, // 141 checkout, remaining 0 (the classic 9-dart finish)
+    ];
+    const ghost = { score: 501, doubleOut: true };
+    const results = script.map(turn => {
+      const madeDarts = turn.darts.map(d => makeDartCore(d.sector, d.multiplier));
+      const ev = evaluateVisit(ghost, madeDarts, {});
+      if (!ev.bust) ghost.score = ev.newScore;
+      return ev;
+    });
+    assert.deepEqual(results.map(r => r.scored), [180, 180, 141]);
+    assert.deepEqual(results.map(r => r.newScore), [321, 141, 0]);
+    assert.equal(results[2].win, true, 'the final scripted visit reproduces the recorded checkout');
+    assert.equal(ghost.score, 0);
+  });
+
+  test('a recorded leg re-evaluated against the wrong out mode reproduces a different outcome — why the replay must reuse the leg\'s own out_mode', () => {
+    // T20 + T13 + single-2 = 101, finishing on a single (not a double).
+    const darts = [makeDartCore(20, 3), makeDartCore(13, 3), makeDartCore(2, 1)];
+    const singleOut = evaluateVisit({ score: 101, doubleOut: false }, darts, {});
+    assert.equal(singleOut.win, true, 'legal finish under the leg\'s actual (single-out) rule');
+    const doubleOut = evaluateVisit({ score: 101, doubleOut: true }, darts, {});
+    assert.equal(doubleOut.win, false);
+    assert.equal(doubleOut.bust, true, 'the identical darts bust under double-out — getGhostLegScript()\'s outMode field exists exactly to prevent this mismatch');
+  });
+});

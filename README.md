@@ -124,7 +124,7 @@ Configure a game before starting:
 | Setting | Options |
 |---|---|
 | **Game** | X01 · Cricket |
-| **Mode** | H2H (head-to-head) · Practice (solo) · 🎯 Daily Challenge |
+| **Mode** | H2H (head-to-head) · Practice (solo) · 🎯 Daily Challenge · 👻 Ghost |
 | **Format (X01)** | 501 · 301 · 170 |
 | **Targets (Cricket)** | Classic (15–20, Bull) · Custom (any 7 numbers) |
 | **Legs per set** | 1 – 9 |
@@ -139,6 +139,8 @@ Players with a PIN set show a 🔒 next to their name in the dropdown. When exac
 **Cricket** is a second game type alongside X01. Choosing **Classic** locks the targets to the standard 15, 16, 17, 18, 19, 20, and Bull. Choosing **Custom** reveals a 1–20-plus-Bull picker — pick any numbers you like, but always exactly 7 (the same count as classic); Start is blocked until exactly 7 are checked, with a running "N of 7 selected" count and a one-tap "Start from classic" fill-in. Once a Cricket game begins, the scoring screen and live scoreboard both switch to Cricket's own marks/closed/points display — the X01 Pad and Dartboard input screens are never shown during a Cricket game, and there's no per-game choice between them the way there is for X01. See [Scoring](#scoring) below and `REFERENCE.md` for the exact marks/points rules. Cricket has its own stat bubbles (MPR, 9 Marks, Win Rate, Games Played, Darts Thrown, Darts/Won Leg), Personal Bests, 2 achievements (9 Marks and Perfect Leg), and its own Home page leaderboard set (Marks Per Round, Most Cricket Wins, 9 Marks, Perfect Leg) — a small X01/Cricket toggle on both the Home page and the Player Profile switches between the two.
 
 **Daily Challenge mode** turns New Game into today's [Daily Challenge](#daily-challenge) launcher instead of a regular match: Starting Score and Format hide (the challenge decides them), and a gold **Today's Challenge** panel shows the challenge description plus whoever is currently in the player slot's streak and results history. Selecting who's attempting it uses the exact same single "Choose player" slot as Practice mode — a PIN-protected player still needs their PIN entered, since it's the identical gate every other slot uses, not a separate picker of its own. The **Start game** button relabels to **Start Challenge** while this mode is active. Daily Challenge is X01-only — the Game-type choice is hidden and forced back to X01 whenever this mode is selected.
+
+**👻 Ghost mode** races a replay of one of your own past legs — literally your prior self, thrown dart-by-dart from a leg you actually won, not a simulated opponent. Choosing it shows a gold **Race a past leg** panel listing that player's past won legs (date, category, average, darts used) once a player is picked — the same single-player slot as Practice mode. You can also jump straight into this from a **👻** button next to **Best Leg Average** on a [Player Profile](#player-profile)'s Personal Bests, which preselects that specific leg. The ghost throws back automatically right after each of your own turns (not at the leg's real historical pace) — its card on the scoring screen and Live Scoreboard is labeled **"👻 Ghost (date)"**. Ghost mode is X01-only, always exactly one leg, and always tracked as practice: your own darts record normally, but nothing is recorded for the ghost, and it can never trigger a head-to-head badge like Comeback Kid or Giant Slayer.
 
 ---
 
@@ -701,6 +703,10 @@ GET  /api/players/dart-analytics?name=&mode= Per-dart hit frequency, treble rate
                                              and checkout route breakdown
 GET  /api/players/h2h?p1=&p2=               Head-to-head record between two players
                                              (used by the New Game H2H banner)
+GET  /api/players/ghost-legs?name=&limit=   X01 legs this player has won, most recent
+                                             first (Ghost Opponent's leg picker)
+GET  /api/players/ghost-script              A specific past leg's dart-by-dart replay
+     ?gameId=&setNo=&legNo=&name=           script — 404 if that player didn't win it
 GET  /api/players/avg-history               Metric history for the chart
      ?name=
      &metric=avg|180s|bigfish|ninedarters|treblelesspct|

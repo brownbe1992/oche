@@ -706,6 +706,7 @@
             <button id="mode-h2h" aria-pressed="true" onclick="setMode('h2h')">H2H</button>
             <button id="mode-practice" aria-pressed="false" onclick="setMode('practice')">Practice</button>
             <button id="mode-challenge" aria-pressed="false" onclick="setMode('challenge')">🎯 Daily Challenge</button>
+            <button id="mode-ghost" aria-pressed="false" onclick="setMode('ghost')">👻 Ghost</button>
           </div>
         </div>
       </div>
@@ -714,6 +715,12 @@
       <div class="setup-section" id="challenge-info-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
         <div class="setup-label" style="color:var(--gold)">🎯 Today's Challenge</div>
         <div id="challenge-card-body"><p class="pp-meta">Loading…</p></div>
+      </div>
+
+      <!-- Ghost leg picker (Ghost Opponent mode only) -->
+      <div class="setup-section" id="ghost-options-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
+        <div class="setup-label" style="color:var(--gold)">👻 Race a past leg</div>
+        <div id="ghost-leg-picker-body"><p class="pp-meta">Choose a player above to see their past won legs.</p></div>
       </div>
 
       <!-- Format (H2H only) -->
@@ -1355,7 +1362,7 @@ function makeDart(sector, mult){
    APP STATE
    ========================================================================= */
 let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, mode:'h2h',
-  gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[] }; // mode: 'h2h' | 'practice' | 'challenge'; gameType: 'x01' | 'cricket'
+  gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[], ghostLeg:null }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost'; gameType: 'x01' | 'cricket'
 let game = null;
 let dartTimingEnabled = false;   // admin-toggled; refreshed at boot from /api/settings/dart-timing
 let roster = [];     // saved player names (profiles that own stats)
@@ -1937,17 +1944,20 @@ function setMode(mode){
   document.getElementById('mode-h2h').setAttribute('aria-pressed', mode==='h2h');
   document.getElementById('mode-practice').setAttribute('aria-pressed', mode==='practice');
   document.getElementById('mode-challenge').setAttribute('aria-pressed', mode==='challenge');
+  document.getElementById('mode-ghost').setAttribute('aria-pressed', mode==='ghost');
   document.getElementById('h2h-options').hidden = (mode !== 'h2h');
-  // Daily Challenge is X01-only — force the game-type choice back and hide it
-  // entirely rather than offering a combination that was never designed.
-  document.getElementById('game-type-section').hidden = (mode === 'challenge');
-  if(mode === 'challenge' && setup.gameType !== 'x01') setGameType('x01');
-  document.getElementById('start-score-section').hidden = (mode === 'challenge' || setup.gameType === 'cricket');
-  document.getElementById('cricket-options-section').hidden = (mode === 'challenge' || setup.gameType !== 'cricket');
+  // Daily Challenge and Ghost Opponent are both X01-only — force the game-type
+  // choice back and hide it entirely rather than offering a combination that was
+  // never designed (docs/ghost-opponent-roadmap.md is explicitly X01-only for v1).
+  document.getElementById('game-type-section').hidden = (mode === 'challenge' || mode === 'ghost');
+  if((mode === 'challenge' || mode === 'ghost') && setup.gameType !== 'x01') setGameType('x01');
+  document.getElementById('start-score-section').hidden = (mode === 'challenge' || mode === 'ghost' || setup.gameType === 'cricket');
+  document.getElementById('cricket-options-section').hidden = (mode === 'challenge' || mode === 'ghost' || setup.gameType !== 'cricket');
   document.getElementById('challenge-info-section').hidden = (mode !== 'challenge');
-  document.getElementById('add-player-wrap').style.display = (mode === 'challenge') ? 'none' : '';
+  document.getElementById('ghost-options-section').hidden = (mode !== 'ghost');
+  document.getElementById('add-player-wrap').style.display = (mode === 'challenge' || mode === 'ghost') ? 'none' : '';
   const startBtn = document.getElementById('start-btn');
-  if(startBtn) startBtn.textContent = (mode === 'challenge') ? 'Start Challenge' : 'Start game';
+  if(startBtn) startBtn.textContent = (mode === 'challenge') ? 'Start Challenge' : (mode === 'ghost') ? 'Start race' : 'Start game';
   if(mode === 'challenge'){
     // a challenge is always exactly one player
     setup.slots = setup.slots.slice(0,1);
@@ -1955,11 +1965,75 @@ function setMode(mode){
     renderPlayers();
     const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
     renderChallengeCard();
+  } else if(mode === 'ghost'){
+    // racing a ghost is always exactly one live player, one leg
+    setup.slots = setup.slots.slice(0,1);
+    if(!setup.slots.length) setup.slots = [''];
+    setup.legsPerSet = 1; setup.setsPerGame = 1;
+    setup.ghostLeg = null;
+    renderPlayers();
+    const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
+    renderGhostLegPicker();
   } else if(mode === 'practice'){
     const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
   } else {
     updateSetupChrome();
   }
+}
+
+/* ---------- Ghost Opponent (docs/ghost-opponent-roadmap.md) ---------- */
+// Set by raceLeg() (Player Profile's "Race this leg" entry point) right before
+// switching into Ghost mode — consumed once, by the next renderGhostLegPicker()
+// fetch, to preselect that specific leg instead of the default (most recent).
+let _ghostLegTarget = null;
+function raceLeg(playerName, gameId, setNo, legNo){
+  if(!roster.includes(playerName)) return;
+  setup.slots = [playerName];
+  _ghostLegTarget = { gameId, setNo, legNo };
+  setMode('ghost');
+  show('setup');
+}
+function renderGhostLegPicker(){
+  const box = document.getElementById('ghost-leg-picker-body');
+  if(!box) return;
+  const name = setup.slots[0];
+  setup.ghostLeg = null;
+  if(!name){ box.innerHTML = `<p class="pp-meta">Choose a player above to see their past won legs.</p>`; return; }
+  box.innerHTML = `<p class="pp-meta">Loading…</p>`;
+  fetch(`/api/players/ghost-legs?name=${encodeURIComponent(name)}&limit=20`).then(r=>r.json()).then(legs=>{
+    if(setup.mode !== 'ghost' || setup.slots[0] !== name) return; // a newer selection took over
+    box._legs = legs;
+    if(!legs || !legs.length){
+      box.innerHTML = `<p class="pp-meta">No won legs yet — win a leg in H2H or Practice mode first, then come back to race it.</p>`;
+      return;
+    }
+    let idx = 0;
+    if(_ghostLegTarget){
+      const m = legs.findIndex(l=>l.gameId===_ghostLegTarget.gameId && l.setNo===_ghostLegTarget.setNo && l.legNo===_ghostLegTarget.legNo);
+      if(m>=0) idx = m;
+      _ghostLegTarget = null;
+    }
+    setup.ghostLeg = legs[idx];
+    renderGhostLegList(legs);
+  }).catch(()=>{ box.innerHTML = `<p class="pp-meta">Couldn't load past legs.</p>`; });
+}
+function renderGhostLegList(legs){
+  const box = document.getElementById('ghost-leg-picker-body');
+  box.innerHTML = legs.map((l,i)=>{
+    const date = new Date(l.date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+    const sel = setup.ghostLeg && setup.ghostLeg.gameId===l.gameId && setup.ghostLeg.setNo===l.setNo && setup.ghostLeg.legNo===l.legNo;
+    return `<button class="btn ${sel?'btn-primary':'btn-ghost'}" style="display:flex;justify-content:space-between;width:100%;margin-bottom:6px;text-align:left" onclick="selectGhostLeg(${i})">
+      <span>${escapeHtml(date)} · ${escapeHtml(l.category)}${l.practice?'':' (H2H)'}</span>
+      <span>${l.avg.toFixed(1)} avg · ${l.darts} darts</span>
+    </button>`;
+  }).join('');
+}
+function selectGhostLeg(i){
+  const box = document.getElementById('ghost-leg-picker-body');
+  const legs = box && box._legs;
+  if(!legs || !legs[i]) return;
+  setup.ghostLeg = legs[i];
+  renderGhostLegList(legs);
 }
 
 function openScoreboard(){
@@ -2392,7 +2466,7 @@ function updateH2HBanner(named){
 function onSlotChange(i, value){
   const prev = setup.slots[i];
   withPinCheck(value,
-    ()=>{ setup.slots[i]=value; renderPlayers(); if(setup.mode==='challenge' && i===0) renderChallengeCard(); },
+    ()=>{ setup.slots[i]=value; renderPlayers(); if(setup.mode==='challenge' && i===0) renderChallengeCard(); if(setup.mode==='ghost' && i===0) renderGhostLegPicker(); },
     ()=>{
       // reset the select back to previous value without re-rendering everything
       const sel = document.querySelectorAll(`#players-list .pselect`)[i];
@@ -2447,8 +2521,8 @@ function setGameType(type){
   setup.gameType = type;
   document.getElementById('gt-x01').setAttribute('aria-pressed', type==='x01');
   document.getElementById('gt-cricket').setAttribute('aria-pressed', type==='cricket');
-  document.getElementById('start-score-section').hidden = (type === 'cricket' || setup.mode === 'challenge');
-  document.getElementById('cricket-options-section').hidden = (type !== 'cricket' || setup.mode === 'challenge');
+  document.getElementById('start-score-section').hidden = (type === 'cricket' || setup.mode === 'challenge' || setup.mode === 'ghost');
+  document.getElementById('cricket-options-section').hidden = (type !== 'cricket' || setup.mode === 'challenge' || setup.mode === 'ghost');
   if(type === 'cricket') renderCricketNumberGrid();
 }
 function setCricketPreset(preset){
@@ -2557,6 +2631,22 @@ async function startGame(){
   } else {
     activeChallenge = null; // guard against a stale challenge from an earlier abandoned attempt
   }
+  // Ghost Opponent (docs/ghost-opponent-roadmap.md): fetch the chosen past leg's
+  // full dart-by-dart script before building the game — the ghost's fixed replay.
+  let ghostScript = null;
+  if(setup.mode === 'ghost'){
+    const player = setup.slots[0];
+    if(!player || !roster.includes(player)){ uiAlert('Choose a player to race.'); return; }
+    if(!setup.ghostLeg){ uiAlert('Choose a leg to race against.'); return; }
+    const leg = setup.ghostLeg;
+    try{
+      ghostScript = await Backend.get(`/api/players/ghost-script?gameId=${leg.gameId}&setNo=${leg.setNo}&legNo=${leg.legNo}&name=${encodeURIComponent(player)}`);
+    }catch(e){ ghostScript = null; }
+    if(!ghostScript || !ghostScript.turns || !ghostScript.turns.length){
+      uiAlert("Couldn't load that leg's replay data. Choose a different leg.");
+      return;
+    }
+  }
   if(setup.slots.some(n=>!n)){ uiAlert('Choose a player for each slot before starting.'); return; }
   const names = [];
   setup.slots.forEach(n=>{ if(n && roster.includes(n) && !names.includes(n)) names.push(n); });
@@ -2574,9 +2664,12 @@ async function startGame(){
     }
   }
   saveSetup();
-  const startScore = challengeStart != null ? challengeStart : setup.start;
-  const legsPerSet = setup.mode==='challenge' ? 1 : setup.legsPerSet;
-  const setsPerGame = setup.mode==='challenge' ? 1 : setup.setsPerGame;
+  // A ghost race always starts from the historical leg's own starting score
+  // (whatever "Starting score" happened to be hidden at, per setMode('ghost')) —
+  // otherwise the two "players" wouldn't actually be racing the same leg.
+  const startScore = challengeStart != null ? challengeStart : ghostScript ? Number(ghostScript.category) : setup.start;
+  const legsPerSet = (setup.mode==='challenge' || setup.mode==='ghost') ? 1 : setup.legsPerSet;
+  const setsPerGame = (setup.mode==='challenge' || setup.mode==='ghost') ? 1 : setup.setsPerGame;
   const config = gameType === 'cricket' ? { numbers: cricketNumbers } : { startingScore: startScore };
   const category = gameType === 'cricket'
     ? (setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
@@ -2605,8 +2698,14 @@ async function startGame(){
     turnSeq: 0,            // monotonic counter, bumped each time a new turn begins (voice announcements dedup on this)
     lastTurnEvent: null,   // one-shot: outcome of the turn just entered (voice announcements)
     matchResult: null,     // one-shot: leg/set/game just won (voice announcements)
-    legStart: null         // one-shot: a new leg just began, who's throwing first (voice announcements)
+    legStart: null,        // one-shot: a new leg just began, who's throwing first (voice announcements)
+    hasGhost: false        // true for a Ghost Opponent race (docs/ghost-opponent-roadmap.md)
   };
+  if(setup.mode === 'ghost'){
+    game.hasGhost = true;
+    const ghostLabel = `👻 Ghost (${new Date(setup.ghostLeg.date).toLocaleDateString(undefined,{month:'short',day:'numeric'})})`;
+    game.players.push(newGhostPlayer(ghostLabel, startScore, ghostScript));
+  }
   names.forEach(ensurePlayerStats);
   // sessionBadgesShown is deliberately NOT reset here — Night Owl / Early Bird fire
   // at most once per *browser session* (per the spec and the variable's own comment),
@@ -2662,6 +2761,21 @@ function newMatchPlayer(name, start){
     pendingIceInTheVeins:false,  // true right after a bust, cleared after the player's next visit
     legWorstDeficit:0,           // largest (my remaining - opponent remaining) seen this leg (Comeback Kid)
     singlesHit: new Set() };     // distinct 1-20 singles hit this session (Around the Clock)
+}
+
+// Ghost Opponent (docs/ghost-opponent-roadmap.md): a virtual second "player" whose
+// throws are read from a past leg's recorded script instead of tapped in — same
+// runtime shape as newMatchPlayer() (every render path reads plain player fields,
+// game-type-agnostic), plus isGhost/ghostScript/ghostTurnIndex to drive playGhostTurn().
+// doubleOut is overridden to the *historical* leg's own out_mode — not this player's
+// current pref — so replaying it re-evaluates against the same rule it was set under.
+function newGhostPlayer(label, start, script){
+  const p = newMatchPlayer(label, start);
+  p.isGhost = true;
+  p.doubleOut = script.outMode === 'double';
+  p.ghostScript = script.turns;
+  p.ghostTurnIndex = 0;
+  return p;
 }
 
 /* ---------- stats helpers ---------- */
@@ -3197,8 +3311,13 @@ function renderPersonalBests(data){
     ? `<div class="stat-block"><div class="stat-val">${data.recentFormAvg.toFixed(1)}</div><div class="stat-label">Recent Form (last 10 legs) ${formDelta>=0?'▲':'▼'} ${Math.abs(formDelta).toFixed(1)}</div></div>`
     : '';
   const shareBtn = (onclick) => `<button class="iconbtn" title="Share" style="margin-top:4px" onclick="${onclick}">📤</button>`;
+  // Ghost Opponent entry point (docs/ghost-opponent-roadmap.md): race the exact leg
+  // that produced this player's best leg average, right from the stat that names it.
+  const raceBtn = data.bestLeg
+    ? `<button class="iconbtn" title="Race this leg" style="margin-top:4px" onclick="raceLeg('${escapeHtml(currentPlayer)}', ${data.bestLeg.gameId}, ${data.bestLeg.setNo}, ${data.bestLeg.legNo})">👻</button>`
+    : '';
   container.innerHTML=`<div class="summary-grid">
-    ${data.bestLegAvg!=null?`<div class="stat-block"><div class="stat-val">${data.bestLegAvg.toFixed(1)}</div><div class="stat-label">Best Leg Average</div>${shareBtn(`sharePersonalBest('legavg', ${data.bestLegAvg})`)}</div>`:''}
+    ${data.bestLegAvg!=null?`<div class="stat-block"><div class="stat-val">${data.bestLegAvg.toFixed(1)}</div><div class="stat-label">Best Leg Average</div>${shareBtn(`sharePersonalBest('legavg', ${data.bestLegAvg})`)}${raceBtn}</div>`:''}
     ${data.fewestDartsCheckout!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsCheckout}</div><div class="stat-label">Fewest Darts to Finish</div>${shareBtn(`sharePersonalBest('fewestdarts', ${data.fewestDartsCheckout})`)}</div>`:''}
     ${data.winStreak?`<div class="stat-block"><div class="stat-val">${data.winStreak}</div><div class="stat-label">Current Win Streak</div></div>`:''}
     ${formHtml}
@@ -3913,6 +4032,10 @@ function undoLastTurn(){
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length    = snap.stLen;
 
+  // Ghost Opponent: roll the ghost back to its state entering this round too,
+  // since playGhostTurn() auto-played a reply after this human turn was committed.
+  if(snap.ghost) Object.assign(game.players[1], snap.ghost);
+
   // Restore local-mode lifetime stats if we captured them
   if(snap.ls && stats[snap.ls.name]){
     Object.assign(stats[snap.ls.name], snap.ls.g);
@@ -3981,7 +4104,15 @@ function enterTurn(){
     // badges awarded/incremented while processing this turn — revoked on undo.
     // voided flips true once undo actually runs, so an award response that's
     // still in flight at that point revokes itself instead of registering here.
-    badgeReverts:[], voided:false };
+    badgeReverts:[], voided:false,
+    // Ghost Opponent: captured BEFORE this round's auto-played ghost reply below,
+    // so undo rolls the ghost back to its state entering this round too — otherwise
+    // undoing a human turn would leave the ghost one scripted visit further ahead.
+    ghost: game.hasGhost ? { score:game.players[1].score, legPoints:game.players[1].legPoints,
+      legVisits:game.players[1].legVisits, legDarts:game.players[1].legDarts, legBusts:game.players[1].legBusts,
+      legAvgDarts:game.players[1].legAvgDarts, gameDarts:game.players[1].gameDarts, gameAvgDarts:game.players[1].gameAvgDarts,
+      gamePoints:game.players[1].gamePoints, gameVisits:game.players[1].gameVisits,
+      ghostTurnIndex:game.players[1].ghostTurnIndex } : null };
   game.lastTurnSnapshot = _snap;
 
   // per-leg and per-game scope (shown live on the scoreboard — both modes)
@@ -4001,7 +4132,10 @@ function enterTurn(){
   // is as they step up to throw (right after the opponent's last visit) — sampling
   // after their own visit would understate the true peak by up to this visit's score
   // and miss real >=100 comebacks (deficits in [100, 100+visitScore)).
-  if(game.players.length===2){
+  // A ghost isn't a real opponent for Comeback Kid purposes (see onLegWon()'s
+  // matching guard) — racing your own past leg shouldn't earn a badge framed
+  // around beating another player.
+  if(game.players.length===2 && !game.hasGhost){
     const _opp = game.players.find(x=>x!==p);
     if(_opp) p.legWorstDeficit = Math.max(p.legWorstDeficit, p.score - _opp.score);
   }
@@ -4239,6 +4373,58 @@ function enterTurn(){
   document.getElementById('status').textContent='Tap a multiplier, then a number.';
   renderGame();
   pushLive();
+  // Ghost Opponent: the ghost has no input of its own — it auto-advances through
+  // its scripted leg right after the human's turn rather than waiting on the
+  // original historical pace (docs/ghost-opponent-roadmap.md's open question,
+  // resolved as "advance as fast as the live player throws" for v1 — simpler, no
+  // awkward waiting period). A short fixed delay (not a real wait) lets the human
+  // see their own result and the "▸ throwing" flag on the ghost's card first, and
+  // keeps its screen-reader announcement from clobbering the human's own — both
+  // otherwise land in the same animation frame on announce()'s shared region.
+  if(game.hasGhost && game.players[game.current] && game.players[game.current].isGhost) setTimeout(playGhostTurn, 450);
+}
+
+// Ghost Opponent: plays the ghost's next pre-recorded visit automatically. Reuses
+// the real evaluateVisit() so the replay is re-evaluated fresh against this race's
+// state (not just replayed as literal old outcomes) — see newGhostPlayer()'s
+// doubleOut comment for why that stays faithful to the original leg.
+function playGhostTurn(){
+  const ghost = game.players[game.current];
+  if(!ghost || !ghost.isGhost) return;
+  if(ghost.ghostTurnIndex >= ghost.ghostScript.length){
+    // The recorded leg's script ran out without recreating its own checkout
+    // (shouldn't normally happen — a candidate leg's script always ends in a
+    // win). Hand back to the human rather than looping or throwing.
+    game.current = 0;
+    renderGame(); pushLive();
+    return;
+  }
+  const scriptTurn = ghost.ghostScript[ghost.ghostTurnIndex++];
+  const madeDarts = scriptTurn.darts.map(d=>makeDartCore(d.sector, d.multiplier));
+  const ev = GAME_TYPES.x01.evaluateVisit(ghost, madeDarts, game);
+
+  announce(ev.bust ? `${ghost.name} busts, stays on ${ghost.score}.`
+    : ev.win ? `${ghost.name} checks out with ${ev.pointsThisVisit}. Leg won.`
+    : `${ghost.name} scores ${ev.scored}, ${ev.newScore} remaining.`);
+
+  const _adj = ev.bust ? 3 : madeDarts.length;
+  ghost.legPoints += ev.scored; ghost.legVisits += 1;
+  ghost.legDarts  += madeDarts.length; ghost.legAvgDarts += _adj;
+  ghost.gameDarts += madeDarts.length; ghost.gameAvgDarts += _adj;
+  ghost.gamePoints += ev.scored; ghost.gameVisits += 1;
+  if(ev.bust) ghost.legBusts += 1;
+  if(!ev.bust) ghost.score = ev.newScore;
+
+  if(ev.win){
+    onLegWon(game.current);   // ghost.isGhost lets onLegWon()/finishUnit() skip the parts that assume a real, DB-tracked winner
+    return;
+  }
+  game.current = 0;   // back to the human
+  game.turnSeq += 1;
+  document.getElementById('status').className='status';
+  document.getElementById('status').textContent='Tap a multiplier, then a number.';
+  renderGame();
+  pushLive();
 }
 
 /* ----- Cricket turn commit (dispatched from enterTurn()) ----- */
@@ -4381,7 +4567,11 @@ function onLegWonCricket(wi){
 /* ----- leg / set / game progression ----- */
 function onLegWon(wi){
   const w = game.players[wi];
-  const opp = game.players.length===2 ? game.players.find(p=>p!==w) : null;
+  // A ghost is never treated as a real H2H opponent — no Comeback Kid, Giant
+  // Slayer, Rematch, Grudge Match, or Nerves of Steel for racing your own past
+  // leg (those are all gated on `opp` below). The set/match-win tree below this
+  // is separately gated on `!game.practice`, always true for a ghost race anyway.
+  const opp = game.players.length===2 && !game.hasGhost ? game.players.find(p=>p!==w) : null;
   // Snapshots taken before any of this leg's win bookkeeping mutates legsWon/setsWon —
   // "was this a decider" only makes sense measured against the state entering the leg.
   const legsWonBefore = new Map(game.players.map(p => [p, p.legsWon]));

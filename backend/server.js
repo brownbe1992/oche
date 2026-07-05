@@ -431,6 +431,17 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, url.searchParams.get('gameType') === 'cricket'
         ? db.getCricketStatBubbles(name, mode) : db.getPlayerStatBubbles(name, mode));
     }
+    if (p === '/api/players/ghost-legs' && m === 'GET') {
+      const limit = url.searchParams.get('limit');
+      return send(res, 200, db.getGhostCandidateLegs(url.searchParams.get('name'), limit));
+    }
+    if (p === '/api/players/ghost-script' && m === 'GET') {
+      const script = db.getGhostLegScript(
+        url.searchParams.get('gameId'), url.searchParams.get('setNo'),
+        url.searchParams.get('legNo'), url.searchParams.get('name'));
+      if (!script) return send(res, 404, { error: 'Leg not found' });
+      return send(res, 200, script);
+    }
     if (p === '/api/players/checkout-route' && m === 'GET') {
       const score = url.searchParams.get('score');
       if (!score) return send(res, 400, { error: 'score required' });

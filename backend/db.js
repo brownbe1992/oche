@@ -1305,7 +1305,9 @@ function getPersonalBests(playerName, mode) {
     HAVING SUM(t.checkout)>0
   `;
   const legs = db.prepare(legAvgSql).all(p.id);
-  const bestLegAvg = legs.length ? Math.max(...legs.map(r=>r.la)) : null;
+  const bestLegRow = legs.length ? legs.reduce((best, r) => r.la > best.la ? r : best) : null;
+  const bestLegAvg = bestLegRow ? bestLegRow.la : null;
+  const bestLeg = bestLegRow ? { gameId: bestLegRow.game_id, setNo: bestLegRow.set_no, legNo: bestLegRow.leg_no } : null;
 
   const fewestDartsCheckout = db.prepare(`
     SELECT MIN(leg_darts) AS v FROM (
@@ -1335,7 +1337,68 @@ function getPersonalBests(playerName, mode) {
     }
   }
 
-  return { bestLegAvg, fewestDartsCheckout, winStreak, recentFormAvg, lifetimeAvg };
+  return { bestLegAvg, bestLeg, fewestDartsCheckout, winStreak, recentFormAvg, lifetimeAvg };
+}
+
+// Ghost Opponent (docs/ghost-opponent-roadmap.md): pick one of your own past won
+// X01 legs to replay dart-by-dart as a virtual second player. Deliberately X01-only
+// for v1 — Cricket's leg_won signal would need its own MPR-based candidate/script
+// queries, deferred until Cricket ghost support is actually requested.
+//
+// Browsable list of past legs this player won, most recent first — the "browsable
+// list" alternative to picking straight from Personal Bests' best-leg-average entry.
+function getGhostCandidateLegs(playerName, limit) {
+  const p = getPlayer(playerName);
+  if (!p) return [];
+  const lim = Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 20;
+  // Ties on `date` (created_at only has second-level resolution — plausible within
+  // one fast-inserted test or a quick real session) break on MAX(t.id) DESC, the
+  // same "force a deterministic newest-first order" fix winStreak's own tie case
+  // already needed (db.x01-stats.test.js).
+  return db.prepare(`
+    SELECT t.game_id AS gameId, t.set_no AS setNo, t.leg_no AS legNo,
+           MAX(t.created_at) AS date, MAX(t.id) AS lastTurnId, g.category AS category, g.practice AS practice,
+           CAST(SUM(t.scored) AS REAL)/NULLIF(SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END),0)*3 AS avg,
+           SUM(dc.cnt) AS darts
+    FROM turns t
+    JOIN games g ON g.id = t.game_id
+    JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
+    WHERE t.player_id = ? AND g.game_type = 'x01'
+    GROUP BY t.game_id, t.set_no, t.leg_no
+    HAVING SUM(t.checkout) > 0
+    ORDER BY date DESC, lastTurnId DESC
+    LIMIT ?
+  `).all(p.id, lim).map(({ lastTurnId, ...r }) => r);
+}
+
+// The ordered turn-by-turn, dart-by-dart script for one specific past leg — the
+// ghost's fixed replay. Scoped to playerName + a "this player actually won this
+// leg" check so a ghost can only ever be built from a leg the requester genuinely
+// played and won themselves ("one of your own past legs", per the roadmap doc).
+function getGhostLegScript(gameId, setNo, legNo, playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const game = db.prepare('SELECT id, category, game_type, config FROM games WHERE id = ?').get(Number(gameId));
+  if (!game || game.game_type !== 'x01') return null;
+  // out_mode is that historical leg's actual double/single-out rule — the replay
+  // must reuse it (not whatever the new race happens to be configured with),
+  // otherwise re-evaluating the ghost's scripted darts against the wrong rule
+  // could turn a historical win into a bust (or vice versa).
+  const outMode = db.prepare('SELECT out_mode AS outMode FROM game_players WHERE game_id = ? AND player_id = ?')
+    .get(Number(gameId), p.id)?.outMode || 'double';
+  const turns = db.prepare(`
+    SELECT id, scored, bust, checkout, checkout_points AS checkoutPoints
+    FROM turns
+    WHERE game_id = ? AND set_no = ? AND leg_no = ? AND player_id = ?
+    ORDER BY id
+  `).all(Number(gameId), Number(setNo), Number(legNo), p.id);
+  if (!turns.length || !turns.some(t => t.checkout)) return null;
+  const dartStmt = db.prepare('SELECT sector, multiplier FROM darts WHERE turn_id = ? ORDER BY dart_no');
+  const scriptTurns = turns.map(t => ({
+    scored: t.scored, bust: !!t.bust, checkout: !!t.checkout, checkoutPoints: t.checkoutPoints,
+    darts: dartStmt.all(t.id).map(d => ({ sector: d.sector, multiplier: d.multiplier })),
+  }));
+  return { category: game.category, config: JSON.parse(game.config), outMode, turns: scriptTurns };
 }
 
 // Cricket's Personal Bests — same 5-field shape as getPersonalBests() above, but
@@ -2299,6 +2362,7 @@ module.exports = {
   logServerError, getServerErrors,
   computeStats, getSummary, getHomeExtra, getOneEightyStats, getBigFishStats, getNineDarterStats,
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
+  getGhostCandidateLegs, getGhostLegScript,
   getCricketStatBubbles, getCricketNineMarksStats, getCricketPersonalBests,
   getCricketMprLeaderboard, getCricketWinLeaderboard, getCricketPerfectLegStats,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn,

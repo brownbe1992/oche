@@ -168,6 +168,7 @@ describe('getPersonalBests', () => {
 
     const pb = db.getPersonalBests(name, 'practice');
     assert.equal(pb.bestLegAvg, 170, 'leg 1\'s single 3-dart 170 visit is the best leg average');
+    assert.deepEqual(pb.bestLeg, { gameId: g.gameId, setNo: 1, legNo: 1 }, 'bestLeg identifies which leg produced bestLegAvg (Ghost Opponent\'s "Race this leg" entry point)');
     assert.equal(pb.fewestDartsCheckout, 2, 'leg 3 finished in the fewest total darts (2)');
     const legAvgs = [170, (60 + 141) / 6 * 3, 100 / 2 * 3];
     const expectedLifetime = legAvgs.reduce((s, v) => s + v, 0) / legAvgs.length;

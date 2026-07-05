@@ -429,6 +429,42 @@ numerically agree on the same leg; this is a known, deliberate inconsistency
 between two different formula families in the codebase, not a bug — but it's
 the first thing to check if someone asks "why doesn't X match Y."
 
+`getPersonalBests()` also returns **`bestLeg`**: `{gameId, setNo, legNo}` identifying
+which specific leg produced `bestLegAvg` (`null` if no won legs exist yet) — feeds
+the Player Profile's "👻" Race-this-leg button (§ Ghost Opponent, below).
+
+### Ghost Opponent (`docs/ghost-opponent-roadmap.md`) — race a replay of your own past leg
+
+X01-only. Two backend functions in `backend/db.js`, both scoped so a script/leg list
+can only ever be built from legs the requesting player genuinely won themselves:
+
+- **`getGhostCandidateLegs(playerName, limit=20)`**: every X01 leg this player has
+  won (`turns.checkout=1`), most recent first, each row giving `{gameId, setNo,
+  legNo, date, category, practice, avg, darts}` — the browsable "past legs" list.
+  `GET /api/players/ghost-legs?name=&limit=`.
+- **`getGhostLegScript(gameId, setNo, legNo, playerName)`**: that leg's turns in
+  playback order, each with its raw `{sector, multiplier}` darts, plus `category`,
+  `config`, and the leg's actual recorded `outMode` (double/single-out) — returns
+  `null` if the game doesn't exist, isn't X01, or this player didn't actually win
+  that leg. `GET /api/players/ghost-script?gameId=&setNo=&legNo=&name=`.
+
+Frontend (`frontend/index.html`): a "👻 Ghost" New Game mode fetches the script,
+starts a practice game with **only the human** as a real DB participant (the ghost's
+name is never sent to `createGame()`/`addTurn()` — it exists purely client-side as a
+second `game.players[]` entry, `newGhostPlayer()`, tagged `isGhost:true`), starting
+at the historical leg's own starting score and `doubleOut` (not whatever the New
+Game screen happens to be set to — replaying the same darts under a different
+out-mode could turn a historical win into a bust). After every human turn,
+`playGhostTurn()` re-evaluates the ghost's next scripted visit through the same
+`evaluateVisit()` the human uses (not a canned replay of the old outcome), then
+hands control back — advances immediately (a short ~450ms fixed UX pause), not at
+the leg's real historical pace. `onLegWon()`/`enterTurn()`'s `opp` computation is
+guarded with `!game.hasGhost`, so Comeback Kid/Giant Slayer/The Rematch/Grudge
+Match/Nerves of Steel (all opponent-based) can never fire against a ghost; badges
+based on the human's own performance (Big Fish, Cruise Control, etc.) are unaffected.
+The ghost's turns are never persisted — no `game_players` row, no stats, no
+leaderboard/badge eligibility.
+
 ### Top Finishes / Checkout Routes
 
 - **`getTopFinishesAll()`** (global leaderboard): one row per `(player, checkout
