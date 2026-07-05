@@ -221,9 +221,11 @@ tied 0-0 when the second one closes their last number keep playing.
 
 Leg/set/game progression (`onLegWonCricket`) mirrors X01's `onLegWon`
 structurally (legs/sets advance the same way, same `DB.completeGame`/HA
-webhook calls) but has no achievement, Daily Challenge, or per-leg-stats-panel
-integration — those are `docs/game-modes-roadmap.md` build-order step 3, not
-yet built.
+webhook calls). Cricket's two achievements (9 Marks, Perfect Leg — §4) are
+detected in `enterTurnCricket()` before it runs; `onLegWonCricket` itself
+carries no achievement or Daily Challenge integration, since X01's
+clutch/social badges and the Daily Challenge formats don't apply to Cricket.
+Cricket's stat vocabulary is documented in §3 ("Cricket stats").
 
 ---
 
@@ -251,7 +253,7 @@ audit. The exact split:
 | Opening-window stats (1st 3/1st 9 avg, 140/leg) | Excluded already | `OPENING_CATS` restricts to category `'501'`/`'301'` |
 | Checkout-based (Big Fish, ton+ finishes, highest checkout, checkout routes, fewest darts to finish, darts/leg, best leg avg) | Naturally excluded | cricket never writes `checkout=1`, and these are all scoped to won legs / checkout rows |
 | Physical-dart stats (Darts Thrown, Darts/Day, Average Pace, dart analytics sector/treble maps, Around the World progress) | **Included** | a dart thrown in cricket is a real dart; these count physical throws, not X01 arithmetic |
-| Games / wins / win rate / win streak / H2H records / activity counters (legs, sets, darts, today/this-week) | **Included** | a completed cricket H2H match is a real match; "Games Played" counts completed H2H matches of any game type |
+| Games / wins / win rate / win streak / H2H records / activity counters (legs, sets, darts, turns, today/this-week) | **Included** | a completed cricket H2H match is a real match; "Games Played" counts completed H2H matches of any game type. Per-category legs/sets **won** (`computeStats()`'s `h2hLegsWonByCat`/`h2hSetsWonByCat`) count a won leg via `(checkout=1 OR leg_won=1)` — X01 signals a won leg with `checkout`, Cricket with `leg_won`. The roster/profile "turns"/"darts thrown" totals are likewise unscoped (a cricket visit is a real visit); only the X01-scoped copies inside `h2hStats`/`practiceStats` feed the averages |
 
 All formulas below are in `backend/db.js`. Two facts drive almost every one of
 them:
@@ -293,8 +295,12 @@ them:
 
 **Home page leaderboards** (`getHomeExtra()`):
 - **Win leaderboard**: `won/played*100`, H2H-only, completed games only, `HAVING played >= 1`.
-- **Trebleless leaderboard**: `SUM(no-treble turns)/turns*100` — **per-turn** (not
-  per-leg — see the Player Profile's `treblelessPct`, which is per-leg), `HAVING turns >= 10`.
+- **Fewest Trebleless Visits leaderboard**: `SUM(no-treble turns)/turns*100` —
+  **per-turn** (not per-leg — see the Player Profile's `treblelessPct`, which is
+  per-leg), `HAVING turns >= 10`. Ranked **ascending** deliberately: a trebleless
+  visit is a visit that failed to find a treble, so fewer is better and rank #1 is
+  the lowest rate (the leaderboard was titled "Most Trebleless Visits" until the
+  2026-07 audit; the ordering was always ascending — the title was what changed).
 - **Ton+ leaderboard**: `SUM(checkouts >=100)/checkouts*100` — rate among a
   player's own *finishing* visits, `HAVING checkouts >= 3`.
 - **Highest checkout**: `MAX(checkout_points)`, ties broken by earliest date; `overall`/`h2h`/`practice` variants.
@@ -737,7 +743,11 @@ to today) + a confirm dialog spelling out what gets deleted.
 - **Current streak** (`getChallengeStatus()`): walks backward day-by-day from
   today (or from yesterday, if today hasn't been attempted yet — an unplayed
   "today" doesn't break a real streak on its own), stopping at the first
-  missing date or DNF. Capped by a 400-day lookback.
+  missing date or DNF. An *attempted*-but-uncompleted today gets no yesterday
+  grace — the walk starts at today, hits the incomplete row, and reports 0.
+  Since `completed=0` also describes an attempt still in progress, the streak
+  reads 0 mid-attempt until the completion lands (the day's single attempt is
+  spent either way). Capped by a 400-day lookback.
 - **Longest-ever streak** (`getChallengeHistory()`): walks the *entire* history
   forward chronologically, resetting the running count to 0 on any DNF, and to
   1 (not carrying over) whenever there's a >1-day gap between completed
@@ -1059,13 +1069,13 @@ already-migrated database is a safe no-op).
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
-| `category` | `TEXT NOT NULL` | The X01 starting score as a string (`'501'`/`'301'`/`'170'`) — **not** a free-form tag; every category-scoped stat filter depends on this meaning exactly the starting score |
+| `category` | `TEXT NOT NULL` | For X01 games: the starting score as a string (`'501'`/`'301'`/`'170'`, or a filler `'1000'` for Daily Challenge's non-scoring formats). Cricket games write a display label instead (`'Cricket (15-20, Bull)'` or `'Custom Cricket'`). Category-scoped stat filters (`OPENING_CATS`'s `IN ('501','301')`, nine-darter detection) either match X01 values explicitly or filter on `game_type`+`config`, so the cricket labels never collide with them |
 | `legs_per_set` / `sets_per_game` | `INTEGER NOT NULL` | |
 | `created_at` / `completed_at` | `TEXT` | `completed_at` is `NULL` for in-progress/abandoned games |
 | `winner_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | |
 | `practice` | `INTEGER NOT NULL DEFAULT 0` | Explicit practice flag, set at creation |
-| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | Forward-looking column for future non-X01 modes; every game today is `'x01'`. `createGame()` accepts it as an optional param (still defaults to `'x01'`) so a future Cricket New Game flow can pass its own. Nine-darter detection queries filter on this + `config` instead of `category='501'`. |
-| `config` | `TEXT` | JSON, currently just `{startingScore}` for every row (backfilled for rows created before this column existed) |
+| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'` or `'cricket'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; the Cricket New Game flow passes `'cricket'`. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
+| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3) |
 | `player_count` | `INTEGER` | **Frozen** participant count at creation (not a live subquery) — see §3's mode-scoping note |
 
 ### `game_players` (composite `PRIMARY KEY (game_id, player_id)`)
@@ -1095,7 +1105,7 @@ already-migrated database is a safe no-op).
 | `turn_id` | `INTEGER NOT NULL REFERENCES turns(id) ON DELETE CASCADE` | |
 | `dart_no` | `INTEGER NOT NULL` | 1/2/3, position within the visit |
 | `sector` | `INTEGER NOT NULL` | `0`=miss, `1`–`20`=numbered wedge, `25`=bull area |
-| `multiplier` | `INTEGER NOT NULL` | `1`=single, `2`=double, `3`=treble |
+| `multiplier` | `INTEGER NOT NULL` | `1`=single, `2`=double, `3`=treble. `addTurn()` rejects the physically impossible combinations `(25,3)` (no treble bull exists) and `(0,2)`/`(0,3)` (a miss is always stored as multiplier 1) — the client never produces them, and left unchecked they'd count as phantom distinct outcomes against Around the World's 63-outcome total |
 | `scored` | `INTEGER GENERATED ALWAYS AS (...)  STORED` | Miss=0, inner bull=50, outer bull=25, else `sector*multiplier` |
 | `is_treble` | `INTEGER GENERATED ALWAYS AS (...) STORED` | 1 iff `multiplier=3` on a numbered sector (1-20) |
 | `is_double` | `INTEGER GENERATED ALWAYS AS (...) STORED` | 1 iff `multiplier=2` and not a miss (includes double bull) |

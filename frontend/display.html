@@ -416,9 +416,9 @@ function dartClass(label){
    The shell above (top bar, match bar, checkout strip, banners, achievement
    overlays, idle state, connection handling) is game-agnostic. Only the player
    cards and the between-leg summary cards differ by game type, so each game
-   type gets its own small renderer here, looked up by s.gameType. X01 is the
-   only one today; a future Cricket renderer (marks/closed numbers instead of
-   score/checkout) plugs in the same way without touching this one. */
+   type gets its own small renderer here, looked up by s.gameType — X01's
+   per-player cards and Cricket's shared chalkboard scorecard. A future game
+   type (Baseball, etc.) plugs in the same way without touching either. */
 const renderers = {
   x01: {
     card(p, i, s, L){

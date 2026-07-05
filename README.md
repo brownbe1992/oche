@@ -95,7 +95,7 @@ The landing page shows a live snapshot of all-time activity:
 **X01 leaderboards:**
 - 3-dart average leaderboard
 - Most Wins (win rate) — H2H only
-- Most Trebleless Visits
+- Fewest Trebleless Visits (lowest trebleless rate first — fewer is better)
 - Ton+ Finish Rate
 - Highest Checkout Ever (within that mode — the "Highest checkout ever recorded" figure in Achievements above is separate and always all-time)
 - Average Pace (darts/minute) — appears once dart-timing data exists, see [Settings](#settings)

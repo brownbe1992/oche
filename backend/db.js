@@ -403,6 +403,14 @@ function addTurn(gameId, t) {
     const validSector = Number.isInteger(sector) && (sector === 0 || sector === 25 || (sector >= 1 && sector <= 20));
     const validMult   = Number.isInteger(multiplier) && multiplier >= 1 && multiplier <= 3;
     if (!validSector || !validMult) throw httpError(400, 'Invalid dart sector or multiplier');
+    // Reject physically impossible combinations the client can never produce: no
+    // treble bull exists (makeDart() downgrades that tap to a single), and a miss is
+    // always stored as multiplier 1 (a "double/treble miss" tap expands to N single
+    // misses client-side). Left unchecked, a hostile/buggy client could store these
+    // as phantom distinct (sector, multiplier) outcomes and corrupt the Around the
+    // World progress count, whose 63-outcome total assumes only real combos exist.
+    if (sector === 25 && multiplier === 3) throw httpError(400, 'No treble bull exists');
+    if (sector === 0 && multiplier !== 1) throw httpError(400, 'A miss must have multiplier 1');
     return { dartNo: Number.isInteger(Number(d.dartNo)) ? Number(d.dartNo) : i + 1, sector, multiplier,
              thrownAt: d.thrownAt ? String(d.thrownAt) : null };
   });
@@ -457,7 +465,13 @@ function startChallengeAttempt(playerName, gameId, challengeDate, format, target
     `).run(Number(gameId), p.id, String(challengeDate), String(format), target != null ? Number(target) : null);
     return { ok: true };
   } catch (e) {
-    throw httpError(409, 'Already attempted today\'s challenge');
+    // Only the UNIQUE(player_id, challenge_date) violation means "already attempted";
+    // a foreign-key failure means the gameId doesn't exist (a distinct client error),
+    // and anything else is a genuine server fault — don't disguise either as a 409.
+    const msg = String(e && e.message || '');
+    if (/UNIQUE constraint failed/i.test(msg)) throw httpError(409, 'Already attempted today\'s challenge');
+    if (/FOREIGN KEY constraint failed/i.test(msg)) throw httpError(400, 'gameId does not reference an existing game');
+    throw e;
   }
 }
 
@@ -561,9 +575,14 @@ function getChallengeStatus(playerName, todayDate) {
   // Streak: walk back day by day, stopping at the first gap or DNF. Today not
   // having been attempted yet doesn't break a real streak on its own — the day
   // isn't over yet — so counting starts from yesterday in that case instead.
+  // An ATTEMPTED-but-uncompleted today gets no such grace (REFERENCE.md §6: the
+  // walk "stops at the first missing date or DNF") — the walk starts at today,
+  // hits the incomplete row, and reports 0. Note completed=0 also describes an
+  // attempt still in progress, so the streak reads 0 mid-attempt until the
+  // completion lands — the day's attempt is spent either way.
   const byDate = new Map(streakRows.map(h => [h.challenge_date, h]));
   const cursor = new Date(todayDate + 'T00:00:00Z');
-  if (!today || !today.completed) cursor.setUTCDate(cursor.getUTCDate() - 1);
+  if (!today) cursor.setUTCDate(cursor.getUTCDate() - 1);
   let streak = 0;
   for (;;) {
     const key = cursor.toISOString().slice(0, 10);
@@ -659,10 +678,13 @@ function computeStats() {
     GROUP BY gp.player_id, g.category
   `).all();
 
+  // A won leg is signaled by checkout=1 in X01 but leg_won=1 in Cricket (which has
+  // no checkout concept) — count both, or a profile's per-category H2H record shows
+  // cricket wins as "N games · 0 sets · 0 legs".
   const h2hLegs = db.prepare(`
     SELECT t.player_id AS pid, g.category AS cat, COUNT(*) AS legs
     FROM turns t JOIN games g ON g.id = t.game_id
-    WHERE t.checkout = 1 AND g.practice = 0
+    WHERE (t.checkout = 1 OR t.leg_won = 1) AND g.practice = 0
       AND g.player_count > 1
     GROUP BY t.player_id, g.category
   `).all();
@@ -672,7 +694,7 @@ function computeStats() {
     FROM (
       SELECT t.player_id, g.category
       FROM turns t JOIN games g ON g.id = t.game_id
-      WHERE t.checkout = 1 AND g.practice = 0
+      WHERE (t.checkout = 1 OR t.leg_won = 1) AND g.practice = 0
         AND g.player_count > 1
       GROUP BY t.game_id, t.player_id, g.category, t.set_no
       HAVING COUNT(*) >= g.legs_per_set
@@ -755,6 +777,18 @@ function computeStats() {
   const h2hAgg  = _agg(`g.practice=0 AND g.player_count>1`);
   const pracAgg = _agg(`g.practice=1 OR g.player_count=1`);
 
+  // Unscoped (all-game-type) turn/dart counts for display sites labeled "all-time"
+  // (roster "N turns", profile "N turns thrown"). _agg above is X01_ONLY because it
+  // feeds scored-derived math (averages, trebleless), but a cricket visit is a real
+  // visit and a cricket dart a real dart — physical-throw counters include them
+  // (REFERENCE.md §3's cricket-interaction table).
+  const allCounts = db.prepare(`
+    SELECT t.player_id AS pid, COUNT(*) AS turns, COALESCE(SUM(dt.cnt), 0) AS dartsThrown
+    FROM turns t
+    LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dt ON dt.turn_id = t.id
+    GROUP BY t.player_id
+  `).all();
+
   // Last played date and recent-form average (last 30 turns) per player — used on the roster page.
   const lastPlayedRows = db.prepare(`
     SELECT player_id AS pid, MAX(created_at) AS ts FROM turns GROUP BY player_id
@@ -775,6 +809,7 @@ function computeStats() {
   const nd9AllById  = {}; nd9All.forEach(r  => nd9AllById[r.pid]  = r.n);
   const nd9H2HById  = {}; nd9H2H.forEach(r  => nd9H2HById[r.pid]  = r.n);
   const nd9PracById = {}; nd9Prac.forEach(r => nd9PracById[r.pid] = r.n);
+  const allCountsById = {}; allCounts.forEach(r => allCountsById[r.pid] = r);
   const h2hDartsById  = {}; h2hAvgDarts.forEach(r     => h2hDartsById[r.pid]  = r.avg_darts);
   const pracDartsById = {}; practiceAvgDarts.forEach(r => pracDartsById[r.pid] = r.avg_darts);
   const h2hAggById    = {}; h2hAgg.forEach(r  => h2hAggById[r.player_id]  = r);
@@ -789,11 +824,14 @@ function computeStats() {
       out: p.out_mode,
       dartWeight: p.dart_weight ?? null,
       hasPin: !!p.pin_hash,
-      turns:       (ha.turns||0)       + (pa.turns||0),
+      // turns/dartsThrown are the unscoped "all-time" physical counts (cricket visits
+      // and darts included); the X01-scoped equivalents that back the averages live
+      // in h2hStats/practiceStats below.
+      turns:       (allCountsById[p.id] && allCountsById[p.id].turns) || 0,
       totalPoints: (ha.total||0)       + (pa.total||0),
       trebleLess:  (ha.trebleLess||0)  + (pa.trebleLess||0),
       checkouts100:(ha.co100||0)       + (pa.co100||0),
-      dartsThrown: (ha.dartsThrown||0) + (pa.dartsThrown||0),
+      dartsThrown: (allCountsById[p.id] && allCountsById[p.id].dartsThrown) || 0,
       avgDarts:    (ha.avgDarts||0)    + (pa.avgDarts||0),
       oneEighties: (ha.oneEighties ?? 0) + (pa.oneEighties ?? 0),
       bigFish:     (ha.bigFish     ?? 0) + (pa.bigFish     ?? 0),
@@ -891,6 +929,9 @@ function getHomeExtra() {
   const H2H_WHERE = `(g.practice = 0 AND g.player_count > 1)`;
   const PRACTICE_WHERE = `(g.practice = 1 OR g.player_count = 1)`;
 
+  // "Fewest Trebleless Visits" leaderboard — ranked ascending on purpose: a
+  // trebleless visit is a visit that failed to find a treble, so FEWER is better
+  // and rank #1 goes to the player with the lowest trebleless rate.
   const _trebleLess = (modeWhere) => db.prepare(`
     SELECT p.name AS name, COUNT(*) AS turns,
       SUM(CASE WHEN dt.trebles = 0 THEN 1 ELSE 0 END) AS trebleLess

@@ -1768,7 +1768,7 @@ function renderHomeTabBody(){
   const trebleLessRowsForMode = extra && extra.trebleLessRows && extra.trebleLessRows[mode];
   const trebleLessSection = (trebleLessRowsForMode && trebleLessRowsForMode.length)
     ? `<div class="pp-section">
-        <div class="pp-section-title">Most Trebleless Visits</div>
+        <div class="pp-section-title">Fewest Trebleless Visits</div>
         <div class="hof-list">${trebleLessRowsForMode.slice(0,10).map((r,i)=>`<div class="hof-row">
           <span class="hof-rank">${i+1}</span>
           <span class="hof-score">${r.rate}%</span>
@@ -4322,9 +4322,11 @@ function undoLastTurnCricket(){
   pushLive();
 }
 /* ----- Cricket leg / set / game progression (dispatched from onLegWon path) -----
-   No achievements, no Daily Challenge integration, no per-leg stat panel — those are
-   build-order step 3, not this pass. Set/leg advancement and the completeGame/HA
-   webhook calls are the same generic hooks the X01 path uses. */
+   Cricket's own achievements (9 Marks, Perfect Leg) are detected in enterTurnCricket()
+   before this runs; this function itself carries no achievement or Daily Challenge
+   integration (X01's clutch/social badges and challenges don't apply to Cricket).
+   Set/leg advancement and the completeGame/HA webhook calls are the same generic
+   hooks the X01 path uses. */
 function onLegWonCricket(wi){
   const w = game.players[wi];
   w.legsWon += 1;
@@ -4871,7 +4873,7 @@ const STATS_LEGEND = [
     { name:'1st 3 AVG / 1st 9 AVG', desc:'Average score of just the opening 3 (or 9) darts of a leg — measures how strong your starts are. 501/301 legs only: a 170 leg is too short for "opening darts" to mean anything, and Daily Challenge formats that aren’t normal X01 legs are excluded entirely.' },
     { name:'100+ AVG / 90- AVG', desc:'% of legs where your leg average was 100 or higher / 90 or lower.' },
     { name:'140/Leg', desc:'% of opening visits in a leg that scored 140 or more.' },
-    { name:'Most Trebleless Visits', desc:'Visits where none of the three darts landed in a treble bed. A bust still counts as a turn and is trebleless if no treble was hit.' },
+    { name:'Fewest Trebleless Visits', desc:'Visits where none of the three darts landed in a treble bed — fewer is better, so the leaderboard ranks the lowest rate first. A bust still counts as a turn and is trebleless if no treble was hit.' },
   ]},
   { group:'Checkouts', items:[
     { name:'Big Fish', desc:'A checkout of exactly 170 (T20, T20, Bull) — the highest possible finish in darts.' },
