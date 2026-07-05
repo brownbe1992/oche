@@ -28,6 +28,7 @@
        GET  /api/me                -> { loggedIn, username? }
        GET/POST/DELETE /api/admins -> manage admin accounts                      [admin]
        PUT  /api/admins/password   -> change an admin's password                 [admin]
+       GET  /api/errors            -> (?limit=) recent server-side 5xx failures  [admin]
        POST /api/players/verify-pin-> { name, pin } -> verify a player's PIN (public)
        PUT  /api/players/pin       -> set/reset a player's PIN  { name, pin }    [admin]
        DEL  /api/players/pin       -> remove a player's PIN (?name=...)         [admin]
@@ -310,6 +311,15 @@ const server = http.createServer(async (req, res) => {
       if (!requireAdmin(req, res)) return;
       const b = await readJson(req);
       return send(res, 200, await db.changeAdminPassword(b.id, b.password));
+    }
+
+    // Recent server-side 5xx failures (docs/testing-and-observability-roadmap.md Part A) —
+    // admin-only, surfaced in Settings so a self-hoster doesn't need shell/docker access
+    // to see what's been going wrong.
+    if (p === '/api/errors' && m === 'GET') {
+      if (!requireAdmin(req, res)) return;
+      const limit = Number(url.searchParams.get('limit'));
+      return send(res, 200, db.getServerErrors(Number.isInteger(limit) && limit > 0 ? limit : 100));
     }
 
     // ----- player PINs -----
@@ -644,7 +654,13 @@ const server = http.createServer(async (req, res) => {
     const status = err.status || 500;
     // Log server-side so a self-hoster can see failures in `docker logs` — previously
     // errors were only ever reported back to the client, with no server-side record.
-    if (status >= 500) console.error(`[${new Date().toISOString()}] ${req.method} ${req.url} ->`, err);
+    // Also persisted to the server_errors table (docs/testing-and-observability-roadmap.md
+    // Part A) so the same failures survive a container restart / log-rotation and are
+    // visible from Settings without shell/docker access.
+    if (status >= 500) {
+      console.error(`[${new Date().toISOString()}] ${req.method} ${req.url} ->`, err);
+      try { db.logServerError({ method: req.method, path: req.url, status, message: err.message }); } catch (e) {}
+    }
     // SEC-11: 4xx messages are app-authored (httpError() call sites) and safe to
     // return as-is; a 5xx means something unexpected threw, so return a generic
     // message rather than echoing err.message — the detail is already logged above.

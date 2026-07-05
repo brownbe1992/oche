@@ -108,6 +108,21 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_timeline_game ON timeline_events(game_id);
 
+  -- Persistent record of server-side 5xx failures (docs/testing-and-observability-roadmap.md
+  -- Part A) — console.error alone only survives as long as the container's stdout log
+  -- retention does, and requires shell/docker access to read. Storing the same events here
+  -- gives a self-hoster a "recent errors" view in Settings without either of those. Kept
+  -- small on purpose (see logServerError()'s prune-to-500 behavior below) — this is a
+  -- diagnostic tail, not a full audit log.
+  CREATE TABLE IF NOT EXISTS server_errors (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    method     TEXT,
+    path       TEXT,
+    status     INTEGER,
+    message    TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
@@ -243,6 +258,10 @@ const q = {
   lockLogin      : db.prepare('UPDATE admins SET login_locked_until = ? WHERE id = ?'),
   resetLoginFail : db.prepare('UPDATE admins SET login_fail_count = 0, login_locked_until = NULL WHERE id = ?'),
   updateAdminPw  : db.prepare('UPDATE admins SET password_hash = ?, password_salt = ? WHERE id = ?'),
+
+  insertServerError : db.prepare('INSERT INTO server_errors (method, path, status, message) VALUES (?, ?, ?, ?)'),
+  pruneServerErrors : db.prepare('DELETE FROM server_errors WHERE id NOT IN (SELECT id FROM server_errors ORDER BY id DESC LIMIT 500)'),
+  recentServerErrors: db.prepare('SELECT id, created_at, method, path, status, message FROM server_errors ORDER BY id DESC LIMIT ?'),
 
   insertSession  : db.prepare('INSERT INTO sessions (token_hash, admin_id, created_at, expires_at) VALUES (?, ?, ?, ?)'),
   sessionByHash  : db.prepare('SELECT token_hash, admin_id, expires_at FROM sessions WHERE token_hash = ?'),
@@ -1688,6 +1707,22 @@ function recordEvent(gameId, eventType, setNo, legNo) {
   return { ok: true };
 }
 
+/* ---------- server error log (docs/testing-and-observability-roadmap.md Part A) ----------
+   Called from server.js's top-level catch alongside the existing console.error, for
+   5xx responses only (a 4xx is an expected client mistake, not a server fault worth
+   a diagnostic entry). Pruned to the most recent 500 rows on every insert — a
+   deliberately small rolling window, not a full audit log, so a crash-loop can't
+   grow this table unbounded between restarts. */
+function logServerError({ method, path, status, message }) {
+  q.insertServerError.run(method ? String(method) : null, path ? String(path) : null,
+    Number.isInteger(status) ? status : null, message ? String(message).slice(0, 2000) : null);
+  q.pruneServerErrors.run();
+}
+function getServerErrors(limit = 100) {
+  const n = Number.isInteger(Number(limit)) && limit > 0 ? Math.min(Number(limit), 500) : 100;
+  return q.recentServerErrors.all(n);
+}
+
 function getTopFinishes(playerName, mode) {
   const p = getPlayer(playerName);
   if (!p) return [];
@@ -2249,6 +2284,7 @@ module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer,
   createGame, addTurn, completeGame, recordEvent,
   onGameCreated, onGameCompleted,
+  logServerError, getServerErrors,
   computeStats, getSummary, getHomeExtra, getOneEightyStats, getBigFishStats, getNineDarterStats,
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
   getCricketStatBubbles, getCricketNineMarksStats, getCricketPersonalBests,

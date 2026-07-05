@@ -1,20 +1,31 @@
 # Testing & Observability — Design Roadmap & Standing Checklist
 
-> Status: **Part A (observability) ✅ Done** (v0.6.2) — the top-level `catch` in
-> `backend/server.js` now logs 5xx/unstatused errors server-side with a timestamp,
-> verified against a real malformed request. **Part B (automated testing) not
-> started.** Like `docs/accessibility-roadmap.md`, this is partly a concrete
-> near-term fix (done) and partly a standing practice for every future feature (test
-> coverage for core logic, still to start) — see `CLAUDE.md` for the binding
-> cross-reference.
+> Status: **Part A (observability) ✅ Done**, including the "longer-term, not urgent"
+> items — the top-level `catch` in `backend/server.js` logs 5xx errors both to
+> `console.error` (v0.6.2) and, as of 2026-07, to a persistent `server_errors` table
+> (`backend/db.js`) via `db.logServerError()`, pruned to the most recent 500 rows on
+> every insert (the "rotating log" — persists across container restarts, unlike
+> stdout). An admin-only `GET /api/errors` feeds a **Server Errors** section in
+> Settings → Admin & Danger Zone. Verified against a real malformed request end to
+> end (server → table → API → UI), plus a committed `node:test` suite. **Part B
+> (automated testing) started, not complete**: `backend/package.json` now has a
+> working `npm test` (Node's built-in `node:test`, zero new dependency), seeded with
+> one suite (`backend/test/db.server-errors.test.js`) covering the observability
+> feature above — the two originally-planned first targets (extracting
+> `evaluateVisit()`/checkout math out of the frontend's inline `<script>` for
+> testability, and a broader `db.js` suite covering `computeStats`/`getSummary`/etc.)
+> are still outstanding. Like `docs/accessibility-roadmap.md`, this is partly a
+> concrete near-term fix (Part A, done) and partly a standing practice for every
+> future feature (test coverage for core logic, ongoing) — see `CLAUDE.md` for the
+> binding cross-reference.
 >
-> **Size**: the observability fix is **trivial** (minutes, one line). Testing is
+> **Size**: the observability fix was **trivial** (now fully done). Testing is
 > **Medium** — the real cost is a small refactor-for-testability step, not the tests
 > themselves; a useful initial slice is a session or two of work, full coverage is an
 > ongoing practice rather than a single project. **Usefulness**: high for both —
-> observability is a trivial fix for real value, and testing protects every future
+> observability was a trivial fix for real value, and testing protects every future
 > roadmap item, especially the higher-risk refactors already planned (item 10, the
-> X01-to-plugin refactor).
+> X01-to-plugin refactor, itself already shipped and worth retroactive coverage).
 
 ## Goal
 
@@ -62,23 +73,34 @@ identity.
 
 ## B. Observability
 
-- **Trivial, immediate fix**: add `console.error` (with a timestamp) to the top-level
-  `catch` block in `server.js` so a self-hoster can see something in `docker logs`
-  when a request fails — currently there's nothing to see at all.
-- **Longer-term, not urgent**: a rotating log file or a "recent errors" view in
-  Settings. Likely overkill for a personal/small-household deployment where `docker
-  logs` is already sufficient once the fix above exists — kept as a "keep in mind"
-  item rather than a committed build step.
+- ~~**Trivial, immediate fix**: add `console.error` (with a timestamp) to the
+  top-level `catch` block in `server.js`~~ ✅ **Done** (v0.6.2).
+- ~~**Longer-term, not urgent**: a rotating log file or a "recent errors" view in
+  Settings~~ ✅ **Done** (2026-07) — turned out cheap enough to just build rather than
+  leave as a "keep in mind" item. `backend/db.js`'s `server_errors` table (pruned to
+  the most recent 500 rows on every insert — the rotation) plus a **Server Errors**
+  section in Settings → Admin & Danger Zone, fed by an admin-only `GET /api/errors`.
+  See §1 of `REFERENCE.md` for the exact mechanism.
 
 ## Suggested build order
 
 1. ~~**(Trivial)** Add server-side error logging to the top-level `catch` in
-   `server.js`.~~ ✅ **Done** (v0.6.2).
+   `server.js`.~~ ✅ **Done** (v0.6.2). ~~Persist it (a rotating log file) and add a
+   "recent errors" view in Settings~~ ✅ **Done** (2026-07) — see §B above.
 2. Introduce `node:test` as the runner; extract `evaluateVisit()`/checkout math into
-   a testable form and write the first suite against it.
-3. Add a `db.js` integration-test suite using scratch databases.
-4. Add `npm test` to `backend/package.json`, and revisit coverage each time a major
-   roadmap item lands, starting with item 10 (the X01 plugin refactor).
+   a testable form and write the first suite against it. **Runner done** (2026-07,
+   `npm test` in `backend/package.json`); the `evaluateVisit()`/checkout-math
+   extraction itself is **still not done** — the first suite committed
+   (`backend/test/db.server-errors.test.js`) covers the server-error log, not the
+   frontend scoring logic this item was originally about.
+3. Add a `db.js` integration-test suite using scratch databases. **Started, not
+   complete** — `db.server-errors.test.js` covers `logServerError`/`getServerErrors`
+   only; `computeStats`/`getSummary`/`getPersonalBests`/etc. still have no committed
+   suite, only this session's one-off scratchpad verification scripts.
+4. ~~Add `npm test` to `backend/package.json`~~ ✅ **Done** (2026-07, `node --test`,
+   zero new dependency) — and revisit coverage each time a major roadmap item lands,
+   starting with item 10 (the X01 plugin refactor, already shipped and still owed
+   retroactive test coverage).
 
 ## Standing practice going forward
 

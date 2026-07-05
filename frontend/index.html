@@ -1117,6 +1117,26 @@
         </div>
       </div>
 
+      <!-- Server Errors -->
+      <div class="pp-section" style="margin-top:24px">
+        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('server-errors-body',this);loadServerErrors()">
+          Server Errors
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="server-errors-body" hidden>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+            The most recent server-side failures (up to 500), newest first — the same
+            record kept for a self-hosted setup without shell/<code>docker logs</code> access.
+            Ordinary player mistakes (a bad login, an invalid PIN) don't appear here; only
+            genuine server errors do.
+          </p>
+          <div style="margin-bottom:10px">
+            <button class="btn btn-ghost" onclick="loadServerErrors()">Refresh</button>
+          </div>
+          <div id="server-errors-list"><p class="pp-meta">Loading…</p></div>
+        </div>
+      </div>
+
       <!-- Danger Zone -->
       <div class="pp-section" style="margin-top:24px">
         <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('danger-zone-body',this)">
@@ -2157,6 +2177,31 @@ function askResetChallengeAttempt(){
       .then(()=>uiAlert(`Reset complete — ${player} can retake the ${date} challenge.`))
       .catch(e=>uiAlert('Could not reset: '+(e.message||'Unknown error')));
   });
+}
+// Server Errors settings section (docs/testing-and-observability-roadmap.md Part A) —
+// fetched only when the section is actually expanded (toggleSettingsSection() runs
+// first in the shared onclick, so body.hidden already reflects the new state here),
+// not preloaded with the rest of Settings, since it's an occasional diagnostic check.
+function loadServerErrors(){
+  const body = document.getElementById('server-errors-body');
+  if(!body || body.hidden) return;
+  const list = document.getElementById('server-errors-list');
+  if(!list) return;
+  list.innerHTML = '<p class="pp-meta">Loading…</p>';
+  Backend.get('/api/errors?limit=100').then(renderServerErrors)
+    .catch(()=>{ list.innerHTML = '<p class="pp-meta">Could not load errors.</p>'; });
+}
+function renderServerErrors(rows){
+  const list = document.getElementById('server-errors-list');
+  if(!list) return;
+  if(!rows || !rows.length){ list.innerHTML = '<p class="pp-meta">No server errors recorded.</p>'; return; }
+  list.innerHTML = rows.map(r=>{
+    const date = new Date(String(r.created_at).replace(' ','T')+'Z').toLocaleString();
+    return `<div style="padding:8px 0;border-bottom:1px solid var(--wire);font-size:12px">
+      <div style="color:var(--muted)">${date} &nbsp;·&nbsp; <b style="color:var(--ink)">${r.status||'—'}</b> &nbsp;·&nbsp; ${escapeHtml(r.method||'')} ${escapeHtml(r.path||'')}</div>
+      <div style="color:var(--ink);margin-top:2px">${escapeHtml(r.message||'(no message)')}</div>
+    </div>`;
+  }).join('');
 }
 function toggleVoiceSubOptions(){
   const on = (document.getElementById('voice-enabled')||{}).checked;

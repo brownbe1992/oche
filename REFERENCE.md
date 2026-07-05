@@ -101,6 +101,19 @@ oche/
   these two core functions again. Does not touch the existing client-side
   achievement checks (`frontend/index.html`'s `enterTurn()`/`onLegWon()`), a
   different layer entirely.
+- **Server error log** (`backend/db.js`'s `server_errors` table,
+  `docs/testing-and-observability-roadmap.md` Part A): `server.js`'s top-level
+  `catch` calls `db.logServerError({method, path, status, message})` alongside
+  its existing `console.error`, for `status >= 500` responses only — a 4xx is an
+  expected client mistake (bad login, invalid PIN), not a server fault worth a
+  diagnostic entry. `logServerError()` prunes to the most recent 500 rows on
+  every insert (a rolling diagnostic tail, not a full audit log), so a
+  crash-loop can't grow the table unbounded. `GET /api/errors` (admin-only,
+  `?limit=`, capped at 500) feeds Settings → Admin & Danger Zone → **Server
+  Errors**, so a self-hoster can see recent failures without shell/`docker
+  logs` access. The DB write is itself wrapped in a `try/catch` in `server.js`
+  so a failure to log (e.g. the very error being logged was a DB fault) can't
+  throw a second, unhandled exception from inside the error handler.
 
 ---
 
@@ -1167,6 +1180,13 @@ already-migrated database is a safe no-op).
 | `token_hash` | `TEXT PRIMARY KEY` | SHA-256 of the raw token — raw token never stored |
 | `admin_id` | `INTEGER NOT NULL REFERENCES admins(id) ON DELETE CASCADE` | |
 | `created_at` / `expires_at` | `INTEGER NOT NULL` | Epoch ms, indexed on `expires_at` |
+
+### `server_errors`
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
+| `method` / `path` / `status` / `message` | nullable | One row per server-side 5xx response (§1's "Server error log"); pruned to the most recent 500 rows on every insert |
 
 ### Cascade summary
 

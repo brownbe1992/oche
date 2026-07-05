@@ -5,7 +5,8 @@
   "description": "Per-dart darts scorer with player profiles and lifetime stats, backed by SQLite. No external dependencies.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=22.5.0"

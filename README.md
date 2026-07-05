@@ -451,7 +451,7 @@ Plus global leaderboards for 180s, Big Fish, and nine-dart finishes, each filter
 
 ### Settings
 
-The Settings page (accessible from the top navigation) holds app-wide configuration. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, **Daily Challenge**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
+The Settings page (accessible from the top navigation) holds app-wide configuration, grouped into four tabs: **Account & Access**, **Gameplay & Display**, **Integrations**, and **Admin & Danger Zone**. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, **Daily Challenge**, **Server Errors**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
 
 Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accounts--player-pins)) — until an admin account exists, the page offers to create the first one.
 
@@ -521,6 +521,10 @@ Oche can fire webhooks to a Home Assistant instance whenever key game events occ
 #### Daily Challenge
 
 - **Reset a player's attempt** — pick a player and a challenge date (defaults to today) and reset that attempt: the attempt record **and every stat recorded during it** (the game, turns, and darts) are deleted, so the player can retake that day's challenge with a clean slate. Badges earned during the wiped attempt are kept. Admin-only, with a confirmation dialog spelling out exactly what gets deleted.
+
+#### Server Errors
+
+Shows the most recent server-side failures (up to 500, newest first) — the same record kept for a self-hosted setup that doesn't have shell/`docker logs` access. Only genuine server errors (5xx) appear here; ordinary mistakes like a bad login or an invalid PIN don't. Click **Refresh** to pull the latest.
 
 #### Danger Zone
 
@@ -636,6 +640,7 @@ GET    /api/admins                          List admin accounts                 
 POST   /api/admins                          Add an admin             { username, password } [admin]
 DELETE /api/admins?id=                      Remove an admin                          [admin]
 PUT    /api/admins/password                 Change an admin's password { id, password } [admin]
+GET    /api/errors?limit=                   Recent server-side 5xx failures (default 100, max 500) [admin]
 ```
 
 Routes marked `[admin]` require a logged-in admin session (cookie set by `/api/login`).
