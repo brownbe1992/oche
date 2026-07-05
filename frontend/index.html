@@ -824,6 +824,14 @@
         <button class="btn btn-ghost" onclick="adminLogout()">Log out</button>
       </div>
 
+      <div class="player-tabs" style="flex-wrap:wrap">
+        <button class="tab-btn active" data-stab="account" onclick="switchSettingsTab('account')">Account &amp; Access</button>
+        <button class="tab-btn" data-stab="gameplay" onclick="switchSettingsTab('gameplay')">Gameplay &amp; Display</button>
+        <button class="tab-btn" data-stab="integrations" onclick="switchSettingsTab('integrations')">Integrations</button>
+        <button class="tab-btn" data-stab="admin-danger" onclick="switchSettingsTab('admin-danger')">Admin &amp; Danger Zone</button>
+      </div>
+
+      <div class="settings-group" data-group="account">
       <!-- Manage admins -->
       <div class="pp-section" style="margin-bottom:24px">
         <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('admin-accounts-body',this)">
@@ -856,11 +864,9 @@
           <div id="pin-players-list" style="display:grid;gap:8px"></div>
         </div>
       </div>
+      </div><!-- end settings-group: account -->
 
-      <p id="settings-api-note" hidden style="color:var(--muted);font-size:13px;background:var(--surface-2);border:1px solid var(--wire);border-radius:10px;padding:12px 14px;margin-bottom:16px">
-        Smart Home Integration requires the server backend. Open the app via Docker at <code>http://&lt;your-server&gt;:8046</code>.
-      </p>
-
+      <div class="settings-group" data-group="gameplay" hidden>
       <!-- Scoring -->
       <div class="pp-section" style="margin-bottom:24px">
         <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('scoring-input-body',this)">
@@ -992,6 +998,12 @@
           </p>
         </div>
       </div>
+      </div><!-- end settings-group: gameplay -->
+
+      <div class="settings-group" data-group="integrations" hidden>
+      <p id="settings-api-note" hidden style="color:var(--muted);font-size:13px;background:var(--surface-2);border:1px solid var(--wire);border-radius:10px;padding:12px 14px;margin-bottom:16px">
+        Smart Home Integration requires the server backend. Open the app via Docker at <code>http://&lt;your-server&gt;:8046</code>.
+      </p>
 
       <!-- Smart Home Integration -->
       <div class="pp-section" id="smart-home-section">
@@ -1082,7 +1094,9 @@
         </div><!-- end HA subsection -->
         </div><!-- end smart-home-body -->
       </div><!-- end Smart Home section -->
+      </div><!-- end settings-group: integrations -->
 
+      <div class="settings-group" data-group="admin-danger" hidden>
       <!-- Daily Challenge -->
       <div class="pp-section" style="margin-top:24px">
         <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('challenge-admin-body',this)">
@@ -1116,6 +1130,7 @@
           <button class="btn btn-ghost danger" onclick="askWipeAllData()">Wipe all player &amp; game data</button>
         </div>
       </div>
+      </div><!-- end settings-group: admin-danger -->
 
       <div class="btn-row" style="margin-top:20px">
         <button class="btn btn-primary" id="settings-save-btn" onclick="saveSettings()">Save settings</button>
@@ -1585,6 +1600,7 @@ function renderChallengeCard(){
 /* ---------- home screen ---------- */
 let homeTab='h2h';
 let homeGameType='x01';
+let settingsTab='account';
 let homeData=null;
 
 function renderHome(){
@@ -1639,6 +1655,12 @@ function switchHomeGameType(type){
   homeGameType=type;
   document.querySelectorAll('#screen-home .tab-btn[data-gtype]').forEach(b=>b.classList.toggle('active', b.dataset.gtype===type));
   renderHomeTabBody();
+}
+
+function switchSettingsTab(tab){
+  settingsTab=tab;
+  document.querySelectorAll('#screen-settings .tab-btn[data-stab]').forEach(b=>b.classList.toggle('active', b.dataset.stab===tab));
+  document.querySelectorAll('#screen-settings .settings-group').forEach(g=>{ g.hidden = (g.dataset.group!==tab); });
 }
 
 function renderHomeContent(){

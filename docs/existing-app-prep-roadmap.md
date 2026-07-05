@@ -1,12 +1,11 @@
 # Preparing the Existing App for Future Roadmaps
 
-> Status: **in progress** (7 of 11 of this doc's own items done/adopted, 1 more
-> confirmed-and-closed — see items 2, 3, 4, 8, 9, 10, 11 (done/adopted) and item 5
+> Status: **in progress** (8 of 11 of this doc's own items done/adopted, 1 more
+> confirmed-and-closed — see items 2, 3, 4, 7, 8, 9, 10, 11 (done/adopted) and item 5
 > (confirmed protected through item 10's refactor)). Item 1 (the shared game-scope
 > helper) is now partially done — see its own status note. Item 6
 > (player-deletion-guard extensibility) remains deliberately not started — no
-> feature needing it has landed yet. Item 7 (Settings regrouping) is the only
-> remaining item without a concrete plan in motion.
+> feature needing it has landed yet.
 >
 > This doc reviews the other roadmap docs in `docs/` and recommends changes to the
 > *existing* codebase now, specifically to reduce rework later. It intentionally does
@@ -226,15 +225,34 @@ directly into the function and then bolting league logic on top of that later.
 
 ## 7. Settings page is approaching flat-list overload
 
-> **Update**: the prediction below already came true faster than expected — Settings
-> has grown from 7 to **11** flat collapsible sections since this doc was written
-> (Admin Accounts, Player PINs, Scoring Input, Accessibility, Voice, Sharecard, Data
-> Collection, Scoreboard, Smart Home Integration, Daily Challenge, Danger Zone), none
-> of it from the three roadmap features named below — all from shipped work this
-> doc didn't anticipate (accessibility, voice announcements, shareable moments, Daily
-> Challenge admin reset). The grouping recommendation itself is still **not done**.
-> With environmental-logging, camera-scoring, and online-multiplayer's sections still
-> to come on top of 11, this is now the most overdue item in this doc.
+> **Status: ✅ Done.** Settings now has a `.player-tabs` row (reusing the same tab
+> pattern already used 4 other places in this app — Home's H2H/Practice and
+> X01/Cricket toggles, Player Profile's Overall/H2H/Practice and X01/Cricket
+> toggles) with 4 groups, and every one of the 11 existing sections was placed into
+> exactly one group with zero content changes: **Account & Access** (Admin
+> Accounts, Player PINs), **Gameplay & Display** (Scoring, Accessibility, Voice
+> Announcements, Shareable Moments, Data Collection, Live Scoreboard),
+> **Integrations** (Smart Home Integration — sized to house
+> `environmental-logging-roadmap.md`, `camera-scoring-roadmap.md`, and
+> `online-multiplayer-roadmap.md`'s future sections), **Admin & Danger Zone**
+> (Daily Challenge, Danger Zone). Implementation: a `settingsTab` state var + a
+> `switchSettingsTab(tab)` function (mirrors `switchHomeGameType`) toggles the
+> `hidden` attribute on 4 new `.settings-group` wrapper `<div>`s in
+> `frontend/index.html`; each individual section's own markup, id, and
+> independent `toggleSettingsSection` collapse/expand behavior is completely
+> unchanged. Verified end-to-end with Playwright: every tab shows exactly its own
+> group, every existing control (checkboxes, selects, buttons, webhook inputs,
+> PIN/admin management, Daily Challenge reset, Danger Zone wipe) still works, and
+> a section's own collapse toggle still works from within its group.
+>
+> Superseded history (kept for context): the prediction below already came true
+> faster than expected — Settings grew from 7 to 11 flat collapsible sections
+> before this grouping landed (Admin Accounts, Player PINs, Scoring Input,
+> Accessibility, Voice, Sharecard, Data Collection, Scoreboard, Smart Home
+> Integration, Daily Challenge, Danger Zone), none of it from the three roadmap
+> features named below — all from shipped work this doc didn't anticipate
+> (accessibility, voice announcements, shareable moments, Daily Challenge admin
+> reset).
 
 **The evidence**: Settings currently has 7 collapsible sections (Admin Accounts,
 Player PINs, Scoring, Data Collection, Live Scoreboard, Smart Home Integration,
@@ -449,9 +467,9 @@ un-learn later:**
     game-modes refactor (item 5)~~ ✅ Confirmed — item 10's refactor landed and the
     separation held.
 
-**Worth doing now — this one is overdue, not just "worth keeping in mind":**
-11. Settings page regrouping (item 7) — no longer "not urgent at 7 sections"; it's at
-    **11** sections today with three more roadmap features still to add their own.
+**Done:**
+11. ~~Settings page regrouping (item 7)~~ ✅ Done — 4-group `.player-tabs` navigation
+    over the same 11 sections, see item 7's own status note.
 
 ---
 
