@@ -295,13 +295,17 @@ function listPlayers() {
   return q.listPlayers.all().map(p => ({ name: p.name, out: p.out_mode, dartWeight: p.dart_weight ?? null, hasPin: !!p.pin_hash }));
 }
 
-function addPlayer(name, out = 'double', opts = {}) {
+// async: setPlayerPin() awaits scrypt hashing internally, and this function's own
+// return value reads pin_hash back from the DB — without awaiting it here, the
+// hasPin field below could report false for a player created with a PIN, since
+// the hash write wouldn't have landed yet when getPlayer() re-reads the row.
+async function addPlayer(name, out = 'double', opts = {}) {
   name = String(name || '').trim();
   if (!name) throw httpError(400, 'Name is required');
   const existing = getPlayer(name);
   if (existing) return { name: existing.name, out: existing.out_mode, hasPin: !!existing.pin_hash, dartWeight: existing.dart_weight ?? null };
   q.insertPlayer.run(name, out === 'single' ? 'single' : 'double');
-  if (opts.pin) setPlayerPin(name, opts.pin);
+  if (opts.pin) await setPlayerPin(name, opts.pin);
   if (opts.dartWeight !== undefined && opts.dartWeight !== null && opts.dartWeight !== '') {
     setDartWeight(name, opts.dartWeight);
   }
@@ -438,9 +442,17 @@ function addTurn(gameId, t) {
   // negative set/leg number is meaningless. Max single-visit score is 180 (3xT20) and
   // max checkout is 170, so anything beyond those is garbage from a malformed/hostile
   // client (this is a requireWrite route, public by default on a LAN).
-  const scored = Number(t.scored) || 0;
+  // t.scored != null ? ... : 0, not `Number(t.scored) || 0` — the latter would
+  // silently turn a non-numeric garbage value into a "valid" 0 (Number(garbage) is
+  // NaN, and NaN || 0 is 0), defeating the Number.isFinite check on the next line
+  // for exactly the malformed input it exists to catch.
+  const scored = t.scored != null ? Number(t.scored) : 0;
   if (!Number.isFinite(scored) || scored < 0 || scored > 180) throw httpError(400, 'scored must be between 0 and 180');
-  const setNo = Number(t.set || 1), legNo = Number(t.leg || 1);
+  // t.set/t.leg default to 1 only when actually omitted (null/undefined) — a plain
+  // `t.set || 1` would also silently coerce an explicit 0 to 1 (0 is falsy), which
+  // would defeat the "positive integer" check on the very next line for exactly the
+  // value it exists to catch.
+  const setNo = Number(t.set != null ? t.set : 1), legNo = Number(t.leg != null ? t.leg : 1);
   if (!Number.isInteger(setNo) || setNo < 1 || !Number.isInteger(legNo) || legNo < 1) throw httpError(400, 'set and leg must be positive integers');
   const checkoutPoints = t.checkout ? (Number(t.checkoutPoints) || 0) : null;
   if (checkoutPoints != null && (!Number.isFinite(checkoutPoints) || checkoutPoints < 0 || checkoutPoints > 170)) throw httpError(400, 'checkoutPoints must be between 0 and 170');

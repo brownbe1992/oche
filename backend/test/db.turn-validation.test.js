@@ -1,0 +1,144 @@
+'use strict';
+// Committed tests for backend/db.js's addTurn() input validation — ported from a
+// throwaway scratch script used during this session's audit (which added the
+// treble-bull/multiplied-miss rejection) so this validation has a permanent
+// regression test per CLAUDE.md's testing convention, instead of only ever
+// having been checked once by hand.
+const { test, describe, after } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oche-test-'));
+const scratchDb = path.join(scratchDir, 'test.db');
+process.env.DARTS_DB = scratchDb;
+
+const db = require('../db.js');
+
+after(() => {
+  for (const f of [scratchDb, scratchDb + '-wal', scratchDb + '-shm']) {
+    try { fs.unlinkSync(f); } catch (e) {}
+  }
+  try { fs.rmdirSync(scratchDir); } catch (e) {}
+});
+
+function expect400(fn) {
+  assert.throws(fn, (err) => err.status === 400);
+}
+
+describe('addTurn — darts array shape', () => {
+  test('accepts 1, 2, or 3 darts', () => {
+    const name = 'Turns_DartCount';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 1, darts: [{ sector: 1, multiplier: 1 }] }));
+    assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 2, darts: [{ sector: 1, multiplier: 1 }, { sector: 1, multiplier: 1 }] }));
+    assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 3, darts: [{ sector: 1, multiplier: 1 }, { sector: 1, multiplier: 1 }, { sector: 1, multiplier: 1 }] }));
+  });
+
+  test('rejects 0 or more than 3 darts', () => {
+    const name = 'Turns_DartCountBad';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [] }));
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 1, multiplier: 1 }, { sector: 1, multiplier: 1 }, { sector: 1, multiplier: 1 }, { sector: 1, multiplier: 1 }] }));
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: 'not-an-array' }));
+  });
+});
+
+describe('addTurn — sector/multiplier validity', () => {
+  test('valid sectors: 0 (miss), 1-20 (numbers), 25 (bull)', () => {
+    const name = 'Turns_ValidSectors';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    for (const sector of [0, 1, 20, 25]) {
+      assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 1, darts: [{ sector, multiplier: 1 }] }));
+    }
+  });
+
+  test('rejects out-of-range or non-integer sectors', () => {
+    const name = 'Turns_BadSectors';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    for (const sector of [-1, 21, 24, 26, 1.5, 'x']) {
+      expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector, multiplier: 1 }] }));
+    }
+  });
+
+  test('rejects out-of-range or non-integer multipliers', () => {
+    const name = 'Turns_BadMultipliers';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    for (const multiplier of [0, 4, -1, 1.5]) {
+      expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 20, multiplier }] }));
+    }
+  });
+
+  test('rejects a treble bull (25,3) — no treble bull exists on a real board', () => {
+    const name = 'Turns_TrebleBull';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 25, multiplier: 3 }] }));
+  });
+
+  test('rejects a multiplied miss (0,2) or (0,3) — a miss is always multiplier 1', () => {
+    const name = 'Turns_MultipliedMiss';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 0, multiplier: 2 }] }));
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 0, multiplier: 3 }] }));
+    assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 0, multiplier: 1 }] }));
+  });
+
+  test('accepts a double bull (25,2) — the one real bull multiplier besides single', () => {
+    const name = 'Turns_DoubleBull';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 50, darts: [{ sector: 25, multiplier: 2 }] }));
+  });
+});
+
+describe('addTurn — scored/set/leg/checkoutPoints ranges', () => {
+  test('scored must be between 0 and 180', () => {
+    const name = 'Turns_ScoredRange';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: -1, darts: [{ sector: 1, multiplier: 1 }] }));
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 181, darts: [{ sector: 1, multiplier: 1 }] }));
+    assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 180, darts: [{ sector: 20, multiplier: 3 }] }));
+  });
+
+  test('a non-numeric scored value is rejected, not silently coerced to 0 (Number(garbage)||0 quirk)', () => {
+    const name = 'Turns_ScoredGarbage';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 'garbage', darts: [{ sector: 1, multiplier: 1 }] }));
+    assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 0, multiplier: 1 }] }), 'an explicit 0 (a real bust) is still valid');
+  });
+
+  test('set and leg must be positive integers — explicit 0 is rejected, not silently defaulted to 1', () => {
+    const name = 'Turns_SetLeg';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 0, leg: 1, scored: 0, darts: [{ sector: 1, multiplier: 1 }] }));
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 0, scored: 0, darts: [{ sector: 1, multiplier: 1 }] }));
+    expect400(() => db.addTurn(g.gameId, { player: name, set: -1, leg: 1, scored: 0, darts: [{ sector: 1, multiplier: 1 }] }));
+  });
+
+  test('omitted set/leg default to 1', () => {
+    const name = 'Turns_SetLegDefault';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, scored: 0, darts: [{ sector: 1, multiplier: 1 }] }));
+  });
+
+  test('checkoutPoints must be between 0 and 170 when checkout is true', () => {
+    const name = 'Turns_CheckoutPoints';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 171, checkout: true, checkoutPoints: 171, darts: [{ sector: 20, multiplier: 3 }] }));
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 171, checkout: true, checkoutPoints: -1, darts: [{ sector: 20, multiplier: 3 }] }));
+    assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 170, checkout: true, checkoutPoints: 170, darts: [{ sector: 20, multiplier: 3 }] }));
+  });
+});

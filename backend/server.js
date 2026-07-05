@@ -384,7 +384,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/players' && m === 'POST') {
       if (!requireWrite(req, res)) return;
       const b = await readJson(req);
-      return send(res, 200, db.addPlayer(b.name, b.out, { pin: b.pin, dartWeight: b.dartWeight }));
+      return send(res, 200, await db.addPlayer(b.name, b.out, { pin: b.pin, dartWeight: b.dartWeight }));
     }
     if (p === '/api/players/rename' && m === 'PUT')      { if (!requireWrite(req, res)) return; const b = await readJson(req); return send(res, 200, db.renamePlayer(b.from, b.to)); }
     if (p === '/api/players/out' && m === 'PUT')         { if (!requireWrite(req, res)) return; const b = await readJson(req); return send(res, 200, db.setOut(b.name, b.out)); }

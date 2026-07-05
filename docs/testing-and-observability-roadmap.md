@@ -13,10 +13,19 @@
 > the browser, `require()`-able from a test, zero behavior change — verified via a
 > full Playwright regression of real gameplay after the extraction), and
 > `backend/db.js`'s core stat formulas, Cricket stats, Daily Challenge streak/
-> personal-best logic, and badge semantics all have committed `node:test` suites
-> (`backend/test/*.test.js`, 76 assertions total). `npm test` runs the whole suite
-> (zero new dependency), and `.github/workflows/test.yml` runs it on every push/PR,
-> closing this doc's own open CI question. Like `docs/accessibility-roadmap.md`,
+> personal-best logic, badge semantics, checkout-history/dart-analytics functions,
+> `getOnThisDay`'s priority ordering, H2H record/summary, the game-lifecycle
+> hooks, `addTurn()`'s input validation, the auth model, and player CRUD/cascade
+> + the settings store all have committed `node:test` suites
+> (`backend/test/*.test.js`, 11 files, 161 assertions total — every formula named
+> in an earlier draft of this doc's "not yet tested" list is now covered).
+> `npm test` runs the whole suite (zero new dependency), and
+> `.github/workflows/test.yml` runs it on every push/PR, closing this doc's own
+> open CI question. Writing this suite found and fixed 3 small, real bugs
+> (`addTurn()` silently coercing an explicit `0`/garbage input to a valid default
+> instead of rejecting it; `addPlayer()` missing an `await` on its PIN-hash write)
+> — exactly the kind of regression this suite exists to catch going forward.
+> Like `docs/accessibility-roadmap.md`,
 > this was partly a concrete near-term project (now done) and partly a standing
 > practice for every future feature (test coverage for core logic, ongoing per
 > CLAUDE.md) — the "not aiming for exhaustive coverage" framing below still holds:
@@ -66,21 +75,40 @@ identity.
   assertions: every `evaluateVisit` bust/win branch, Cricket mark accumulation/
   opponent-gating/win-condition edge cases, and checkout-route correctness
   including known routes, bogey numbers, and `maxDarts` limiting).
-- ~~**Second target**: `backend/db.js`'s query functions~~ ✅ Done —
+- ~~**Second target**: `backend/db.js`'s query functions~~ ✅ Done, and then some —
   `db.x01-stats.test.js` (computeStats/getSummary/getHomeExtra/
   getPlayerStatBubbles/getPersonalBests/getMetricHistory parity),
   `db.cricket-stats.test.js` (Cricket's stat bubbles/personal bests/leaderboards,
-  plus the X01/Cricket isolation regression), `db.challenges.test.js` (Daily
-  Challenge streak/personal-best/reset-cascade semantics), and `db.badges.test.js`
-  (award/revoke count semantics) — each against its own scratch SQLite database,
-  hand-verified expected values, same technique used manually throughout this
-  project's sessions, now permanent.
+  plus the X01/Cricket isolation regression), `db.leaderboards.test.js` (the X01
+  180s/Big Fish/nine-darter global leaderboards, Around the World progress),
+  `db.finishes.test.js` (getTopFinishes/getTopFinishesAll/getCheckoutRoutes/
+  getDartAnalytics — busted-turns-excluded rule included), `db.on-this-day.test.js`
+  (the full priority-ordering/tiebreak/date-matching logic), `db.h2h.test.js`
+  (getH2HRecord/getH2HSummary), `db.challenges.test.js` (Daily Challenge streak/
+  personal-best/reset-cascade semantics), `db.badges.test.js` (award/revoke count
+  semantics), `db.lifecycle-hooks.test.js` (the game-lifecycle hooks, item 4),
+  `db.turn-validation.test.js` (addTurn()'s full input validation), `db.auth.test.js`
+  (login/PIN lockout thresholds, session lifecycle, admin CRUD), and
+  `db.players-and-settings.test.js` (player CRUD/cascade, the settings store) —
+  each against its own scratch SQLite database, hand-verified expected values,
+  same technique used manually throughout this project's sessions, now permanent.
+  Writing these surfaced 3 small real bugs, fixed in the same pass: `addTurn()`'s
+  `set`/`leg`/`scored` fields used a bare `x || default` fallback that silently
+  coerced an explicit `0` or non-numeric garbage into a valid default instead of
+  rejecting it (now `x != null ? x : default`, so the existing range checks
+  actually see the bad value); and `addPlayer()` created a player with a PIN
+  without `await`-ing the PIN-hash write, so its own `hasPin` field (and
+  `POST /api/players`'s HTTP response) could report `false` for a player that was,
+  in fact, just given one.
 - **Still not aiming for exhaustive coverage.** The goal remains a safety net
-  around the highest-risk shared logic, not 100% of every formula in REFERENCE.md
-  §3 — e.g. `getDartAnalytics`, `getTopFinishes`/`getCheckoutRoutes`, and
-  `getOnThisDay`'s exact priority-ordering have no dedicated test yet. Per
-  CLAUDE.md's standing convention, any new calculation (and any of these, if
-  touched again) gets a test added to the relevant file at that point.
+  around the highest-risk shared logic, not literally every line in `db.js` —
+  e.g. `getSettings`/`updateSettings`'s full validation surface (mirrored in
+  `server.js`'s route-level checks) and the exact concurrent-request race the
+  `RETURNING`-based lockout-counter fix closes (REFERENCE.md §9) aren't
+  exercised here; node:test's sequential execution can't meaningfully reproduce
+  genuine concurrency. Per CLAUDE.md's standing convention, any new calculation
+  (or any deeper edge case in the above, if touched again) gets a test added to
+  the relevant file at that point.
 
 ## B. Observability
 
@@ -102,10 +130,12 @@ identity.
    into a testable form and write the first suite against it.~~ ✅ **Done**
    (2026-07) — `frontend/scoring.js` + `backend/test/scoring.test.js`.
 3. ~~Add a `db.js` integration-test suite using scratch databases.~~ ✅ **Done**
-   (2026-07) — `db.x01-stats.test.js`, `db.cricket-stats.test.js`,
-   `db.challenges.test.js`, `db.badges.test.js` (plus `db.server-errors.test.js`
-   from Part A). Retroactive coverage for item 10 (the X01-to-plugin refactor) is
-   satisfied by `scoring.test.js` testing `GAME_TYPES.x01.evaluateVisit` itself.
+   (2026-07) — 10 `db.*.test.js` files covering stat formulas (X01 and Cricket),
+   leaderboards, checkout/dart-analytics, On This Day, H2H, Daily Challenge,
+   badges, the game-lifecycle hooks, `addTurn()` validation, auth, and player/
+   settings CRUD (plus `db.server-errors.test.js` from Part A). Retroactive
+   coverage for item 10 (the X01-to-plugin refactor) is satisfied by
+   `scoring.test.js` testing `GAME_TYPES.x01.evaluateVisit` itself.
 4. ~~Add `npm test` to `backend/package.json`~~ ✅ **Done** (2026-07, `node --test`,
    zero new dependency). ~~Whether CI is worth adding~~ ✅ **Done** —
    `.github/workflows/test.yml` runs `npm test` on every push/PR. Revisit coverage
@@ -136,7 +166,10 @@ properly" session. See `CLAUDE.md` for the binding version of this statement.
 
 ## Remaining open questions
 
-- Whether to extend coverage to the not-yet-tested `db.js` formulas noted in §A
-  (`getDartAnalytics`, `getTopFinishes`/`getCheckoutRoutes`, `getOnThisDay`'s
-  priority ordering) proactively, or only when one of them is next touched (per
-  the standing practice below, which is the minimum bar, not a ceiling).
+- The formulas named in an earlier draft of this section (`getDartAnalytics`,
+  `getTopFinishes`/`getCheckoutRoutes`, `getOnThisDay`'s priority ordering) are
+  now covered (2026-07) — see §A. Whether to proactively chase the smaller
+  remaining gaps noted there (`getSettings`/`updateSettings` validation, genuine
+  concurrent-request lockout races) or only add coverage when one of them is
+  next touched is still open; the standing practice below is the minimum bar,
+  not a ceiling.

@@ -127,14 +127,27 @@ oche/
 - **Automated test suite** (`backend/test/`, `docs/testing-and-observability-roadmap.md`
   Part B): Node's built-in `node:test` + `node:assert` (zero new dependency), run
   via `npm test` in `backend/` (also wired into `.github/workflows/test.yml` on
-  every push/PR). `scoring.test.js` covers the extracted pure scoring logic above;
-  `db.*.test.js` files cover `backend/db.js`'s stat formulas, Cricket stats, Daily
-  Challenge streak/personal-best logic, and badge award/revoke semantics, each
-  against its own scratch SQLite database (a temp file, never `data/darts.db`).
-  Per CLAUDE.md's testing convention, any new stat formula, achievement condition,
-  or other calculation gets a test added to one of these files (or a new one) in
-  the same change that adds it — this is a safety net around the highest-risk
-  shared logic, deliberately not aiming for 100% coverage.
+  every push/PR), 161 assertions across 11 files. `scoring.test.js` covers the
+  extracted pure scoring logic above; `db.*.test.js` files cover `backend/db.js`'s
+  X01/Cricket stat formulas and leaderboards, checkout-route/dart-analytics
+  functions, `getOnThisDay`'s priority ordering, H2H record/summary lookups, Daily
+  Challenge streak/personal-best/reset-cascade logic, badge award/revoke
+  semantics, the game-lifecycle hooks, `addTurn()`'s input validation, the auth
+  model (login/PIN lockout thresholds, session lifecycle, admin CRUD), and player
+  CRUD/cascade + the settings store — each against its own scratch SQLite
+  database (a temp file, never `data/darts.db`). Per CLAUDE.md's testing
+  convention, any new stat formula, achievement condition, or other calculation
+  gets a test added to one of these files (or a new one) in the same change that
+  adds it — this is a safety net around the highest-risk shared logic,
+  deliberately not aiming for 100% coverage. Writing this suite surfaced and
+  fixed three small, low-severity bugs found nowhere else: `addTurn()`'s
+  `set`/`leg` and `scored` fields used a bare `x || default` fallback that
+  silently coerced an explicit `0`/non-numeric garbage into a "valid" default
+  instead of the rejection the validation's own stated intent calls for (now
+  `x != null ? x : default`); and `addPlayer()` created a player with a PIN
+  without `await`-ing the PIN hash write, so its own `hasPin` return value (and
+  therefore `POST /api/players`'s HTTP response) could report `false` for a
+  player that was, in fact, just given a PIN.
 
 ---
 
@@ -1125,8 +1138,8 @@ already-migrated database is a safe no-op).
 |---|---|---|
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
 | `game_id` / `player_id` | `INTEGER NOT NULL, FK, ON DELETE CASCADE` | |
-| `set_no` / `leg_no` | `INTEGER NOT NULL` | |
-| `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3) |
+| `set_no` / `leg_no` | `INTEGER NOT NULL` | Must be a positive integer (`addTurn()` rejects `0` or negative explicitly — an explicit `0` is validation-rejected, not silently treated as the "omitted" default of `1`) |
+| `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3). `addTurn()` rejects a non-numeric value outright rather than silently coercing it to `0` |
 | `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans. Cricket turns always write `bust=0, checkout=0` — cricket has neither concept |
 | `checkout_points` | `INTEGER` | Only set when `checkout=1` (X01 only) |
 | `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set only by Cricket's write path (`enterTurnCricket()`) — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged |
