@@ -343,6 +343,27 @@ function deletePlayer(name) {
   return { ok: true };
 }
 
+/* ---------- game-lifecycle hooks (docs/existing-app-prep-roadmap.md item 4) ----------
+   A minimal internal hook mechanism around createGame()/completeGame() so a future
+   feature (HA polling on game start/end, tournament bracket advancement on
+   completion, league standings updates, etc.) registers its own reaction here
+   instead of editing these two core functions directly every time they need a
+   new consequence stacked on. Fired synchronously, in registration order, right
+   after the core DB write — a listener that throws is caught and logged, not
+   rethrown, so one broken future feature can't take down game creation/completion
+   itself. No listeners are registered today; this is pure infrastructure ahead of
+   the next feature that needs one — it doesn't retrofit the existing client-side
+   achievement checks (those stay inline in frontend/index.html's enterTurn()/
+   onLegWon(), a different layer entirely). */
+const gameLifecycleHooks = { created: [], completed: [] };
+function onGameCreated(fn) { gameLifecycleHooks.created.push(fn); }
+function onGameCompleted(fn) { gameLifecycleHooks.completed.push(fn); }
+function _fireGameLifecycleHooks(event, payload) {
+  for (const fn of gameLifecycleHooks[event]) {
+    try { fn(payload); } catch (e) { console.error(`game-lifecycle "${event}" hook failed:`, e); }
+  }
+}
+
 /* ---------- game + turn operations ---------- */
 function createGame({ category, legsPerSet, setsPerGame, players, practice, gameType, config }) {
   // gameType/config default to X01 for every caller today (no New Game UI sends
@@ -362,6 +383,8 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   // so H2H/practice classification survives later player deletion — see the migration note.
   const pc = db.prepare('SELECT COUNT(*) AS n FROM game_players WHERE game_id = ?').get(gameId).n;
   db.prepare('UPDATE games SET player_count = ? WHERE id = ?').run(pc, gameId);
+  _fireGameLifecycleHooks('created', { gameId, gameType: resolvedGameType, practice: !!practice,
+    category: String(category), playerCount: pc });
   return { gameId };
 }
 
@@ -414,6 +437,7 @@ function addTurn(gameId, t) {
 function completeGame(gameId, winnerName) {
   const w = winnerName ? getPlayer(winnerName) : null;
   q.completeGame.run(w ? w.id : null, Number(gameId));
+  _fireGameLifecycleHooks('completed', { gameId: Number(gameId), winnerName: w ? w.name : null });
   return { ok: true };
 }
 
@@ -2183,6 +2207,7 @@ pruneOrphanedGames();
 module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer,
   createGame, addTurn, completeGame, recordEvent,
+  onGameCreated, onGameCompleted,
   computeStats, getSummary, getHomeExtra, getOneEightyStats, getBigFishStats, getNineDarterStats,
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
   getCricketStatBubbles, getCricketNineMarksStats, getCricketPersonalBests,

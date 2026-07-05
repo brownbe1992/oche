@@ -88,6 +88,19 @@ oche/
   entry points, rather than branches inside the X01-heavy originals — Cricket has no
   achievements, bust concept, or checkout hints, so forcing it through the same code
   would mean a lot of irrelevant branching. See §2 for Cricket's scoring rules.
+- **Game-lifecycle hooks** (`backend/db.js`, `docs/existing-app-prep-roadmap.md`
+  item 4): `onGameCreated(fn)`/`onGameCompleted(fn)` register listener callbacks;
+  `createGame()`/`completeGame()` fire theirs synchronously, in registration
+  order, right after their core DB write (`created` payload:
+  `{gameId, gameType, practice, category, playerCount}`; `completed` payload:
+  `{gameId, winnerName}`). A throwing listener is caught and logged, not
+  rethrown, so a broken future feature can't take down game creation/completion
+  itself. Pure infrastructure today — no listeners are registered — meant for
+  the next feature that needs to react to a game starting/finishing (HA
+  polling, tournament bracket advancement, league standings) without editing
+  these two core functions again. Does not touch the existing client-side
+  achievement checks (`frontend/index.html`'s `enterTurn()`/`onLegWon()`), a
+  different layer entirely.
 
 ---
 

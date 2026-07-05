@@ -1,13 +1,12 @@
 # Preparing the Existing App for Future Roadmaps
 
-> Status: **in progress** (6 of 11 of this doc's own items done/adopted, 1 more
-> confirmed-and-closed — see items 2, 3, 8, 9, 10, 11 (done/adopted) and item 5
+> Status: **in progress** (7 of 11 of this doc's own items done/adopted, 1 more
+> confirmed-and-closed — see items 2, 3, 4, 8, 9, 10, 11 (done/adopted) and item 5
 > (confirmed protected through item 10's refactor)). Item 1 (the shared game-scope
-> helper) is now partially done — see its own status note. Items 4 and 6 (game-
-> lifecycle hook point, player-deletion-guard extensibility) remain genuinely
-> not started — item 6 deliberately so (no feature needing it has landed yet).
-> Item 7 (Settings regrouping) is the only remaining item without a concrete plan
-> in motion.
+> helper) is now partially done — see its own status note. Item 6
+> (player-deletion-guard extensibility) remains deliberately not started — no
+> feature needing it has landed yet. Item 7 (Settings regrouping) is the only
+> remaining item without a concrete plan in motion.
 >
 > This doc reviews the other roadmap docs in `docs/` and recommends changes to the
 > *existing* codebase now, specifically to reduce rework later. It intentionally does
@@ -136,6 +135,26 @@ other way around.
 ---
 
 ## 4. A lightweight game-lifecycle hook point
+
+> **Status: ✅ Done** (see `backend/db.js`). `onGameCreated(fn)`/`onGameCompleted(fn)`
+> register listener callbacks against two small internal arrays; `createGame()`/
+> `completeGame()` each fire theirs (`_fireGameLifecycleHooks(event, payload)`)
+> synchronously, in registration order, right after their core DB write. A listener
+> that throws is caught and logged (`console.error`), not rethrown — one broken
+> future feature can't take down game creation/completion itself, and later
+> listeners still run. Payloads: `created` gets `{gameId, gameType, practice,
+> category, playerCount}`; `completed` gets `{gameId, winnerName}` (`null` for an
+> unfinished/no-winner game). No listeners are registered yet — this is pure
+> infrastructure ahead of the next feature that needs one (environmental logging,
+> tournament bracket advancement, etc.), exactly as recommended below. Verified
+> with a scratch-DB test: payload shape for both X01 and Cricket games, a
+> deliberately-throwing listener not breaking `createGame()`'s return value or
+> blocking a second listener registered after it, and a live-server smoke test
+> confirming zero behavior change with no listeners registered (the common case
+> today). This does **not** retrofit the existing client-side achievement checks
+> (`frontend/index.html`'s `enterTurn()`/`onLegWon()`) — those are a different
+> layer (client-side turn commit, not backend game create/complete) and were
+> intentionally left alone.
 
 **The evidence**: multiple roadmaps need to react to "a game started" or "a game
 completed" beyond what happens today:
