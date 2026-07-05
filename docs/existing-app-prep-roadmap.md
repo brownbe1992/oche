@@ -504,7 +504,7 @@ for the same "what do we build next" attention.
 | `docs/archive/daily-challenge-roadmap.md` | ✅ Done | Low | Medium | Built entirely on the existing Practice engine |
 | `docs/ghost-opponent-roadmap.md` | Not started | Low-Medium | Medium | Needs a "scripted input source" concept — its prerequisite (the `GAME_TYPES` seam, see game-modes row below) now exists; see dependency note below |
 | `docs/coaching-insights-roadmap.md` | Not started | Low-Medium | High | No new data collection; genuinely differentiating vs. competitors |
-| `docs/testing-and-observability-roadmap.md` | Partial | Medium | High | Part A (server-side error logging, now including a persistent rotating log + a Settings "Server Errors" view) fully done; Part B (a real, committed test runner) started — `npm test` (`node:test`) now wired up with one committed suite covering the server-error log — but the two originally-planned first targets (extracting the frontend's scoring logic for testability, a broader `db.js` stat-function suite) remain outstanding |
+| `docs/testing-and-observability-roadmap.md` | ✅ Done (v1 scope) | Medium | High | Part A (server-side error logging, a persistent rotating log, a Settings "Server Errors" view) and Part B (a real, committed `node:test` suite — `frontend/scoring.js`'s extracted scoring logic, plus `backend/db.js`'s core/Cricket/challenge/badge stat suites, 76 assertions total, run via `npm test` and CI on every push) are both done for their stated v1 scope. Not exhaustive — a few `db.js` formulas (`getDartAnalytics`, `getOnThisDay`, etc.) still have no dedicated test, extended per CLAUDE.md's standing convention whenever next touched |
 | `docs/accessibility-roadmap.md` | Partial | Low-Medium | High | 2 of 5 items done (colorblind mode, `aria-live` announcements on the controller); contrast audit, accessible-input framing, and a type-size pass are outstanding — standing checklist per CLAUDE.md, not a one-off |
 | `docs/league-mode-roadmap.md` | Not started | Medium | Medium-High | New tables, no new infra; complements tournament mode |
 | `docs/mobile-app-roadmap.md` | Partial | Medium | High | Its one prerequisite (responsive CSS pass) is done; the native app itself (Capacitor scaffold, packaging, distribution) is not started |
@@ -550,10 +550,13 @@ simultaneous-achievements rows above.
    That said, the testing-strategy slice itself (a first real, committed-to-the-repo
    test runner, per `docs/testing-and-observability-roadmap.md`) was, until 2026-07,
    still not done — those verification scripts were one-off scratchpad scripts, not
-   permanent test infrastructure the next contributor could just re-run. A minimal
-   runner (`npm test` via `node:test`) now exists, seeded by the server-error-log
-   feature's own test — but it doesn't yet cover item 10's refactor retroactively, or
-   `db.js`'s broader stat functions. That extension still stands on its own merits.
+   permanent test infrastructure the next contributor could just re-run. A real
+   suite (`npm test` via `node:test`, plus CI) now exists and **does** cover item
+   10's refactor retroactively — `backend/test/scoring.test.js` tests
+   `GAME_TYPES.x01.evaluateVisit` (extracted to `frontend/scoring.js`) directly —
+   and `db.js`'s core/Cricket/challenge/badge stat functions across several
+   `backend/test/db.*.test.js` files. See
+   `docs/testing-and-observability-roadmap.md` for the full breakdown.
 6. **Achievements/badges and coaching insights are X01-only today.** If either is
    built before Cricket exists (likely, given Cricket's complexity), keep the
    stat/achievement definitions abstracted per game type from day one — cheap to do

@@ -1168,6 +1168,12 @@
   <div class="modal-card" id="wizard-body" style="max-width:420px"></div>
 </div>
 
+<!-- Pure scoring logic (evaluateVisit/evaluateVisitCricket/checkout math), extracted
+     into its own file so it's reachable from an automated test — see scoring.js's own
+     header comment and docs/testing-and-observability-roadmap.md Part B. Must load
+     before the main script below: every name it defines becomes a plain global that
+     the code below still uses exactly as before the extraction. -->
+<script src="scoring.js"></script>
 <script>
 /* =========================================================================
    BACKEND ADAPTER
@@ -1331,52 +1337,18 @@ function adminLogout(){
 }
 
 /* =========================================================================
-   PURE SCORING LOGIC  (identical to the unit-tested version)
+   PURE SCORING LOGIC — extracted to scoring.js (docs/testing-and-observability-
+   roadmap.md Part B), loaded via <script src> above this block. dartValue,
+   dartLabel, evaluateVisit, evaluateVisitCricket, and the checkout calculator
+   are all plain globals from that file now — nothing here redeclares them.
+   makeDart() stays here since it reads dartTimingEnabled (outer app state,
+   deliberately not part of the pure module) — it's a thin wrapper around
+   scoring.js's pure makeDartCore().
    ========================================================================= */
-function dartValue(sector, mult){
-  if(sector === 0) return 0;
-  if(sector === 25) return mult === 2 ? 50 : 25;   // bull: 25 or double-bull 50, no treble
-  return sector * mult;
-}
 function makeDart(sector, mult){
-  const m = (sector === 25 && mult === 3) ? 1 : mult;  // guard: no treble bull
-  return {
-    sector, mult:m,
-    value: dartValue(sector, m),
-    isTreble: m === 3 && sector !== 25 && sector !== 0,
-    isDouble: (m === 2 && sector !== 0),
-    label: dartLabel(sector, m),
-    thrownAt: dartTimingEnabled ? new Date().toISOString() : null   // tap-time stamp, only when enabled
-  };
-}
-function dartLabel(sector, mult){
-  if(sector === 0) return 'Miss';
-  if(sector === 25) return mult === 2 ? 'Bull' : '25';
-  return (mult === 3 ? 'T' : mult === 2 ? 'D' : '') + sector;
-}
-// Signature is (player, darts, game) for every game type — X01 only needs
-// player.score/player.doubleOut, but the shared shape lets Cricket's evaluateVisit
-// see the rest of game.players (to check opponents' closed-number status) without
-// a different call convention per type. See GAME_TYPES below.
-function evaluateVisit(player, darts, game){
-  const startScore = player.score, doubleOut = player.doubleOut;
-  const points = darts.reduce((s,d)=>s+d.value,0);
-  const remaining = startScore - points;
-  const last = darts[darts.length-1];
-  let bust=false, win=false;
-  if(remaining < 0) bust=true;
-  else if(doubleOut && remaining === 1) bust=true;
-  else if(remaining === 0){
-    if(doubleOut && !(last && last.isDouble)) bust=true;
-    else win=true;
-  }
-  return {
-    pointsThisVisit: points,
-    scored: bust ? 0 : points,
-    newScore: bust ? startScore : remaining,
-    bust, win,
-    trebleLess: darts.length>0 && darts.every(d=>!d.isTreble)
-  };
+  const d = makeDartCore(sector, mult);
+  d.thrownAt = dartTimingEnabled ? new Date().toISOString() : null;   // tap-time stamp, only when enabled
+  return d;
 }
 
 /* =========================================================================
@@ -4709,53 +4681,10 @@ function renderGameShell(){
 }
 
 /* ---------- checkout calculator ----------
-   Computes a real, valid finishing route for ANY reachable score, instead of
-   relying on a hardcoded list. Exhaustively verified for every finishable
-   score 2..170. Returns '' when the score can't be finished (e.g. bogey
-   numbers like 169, or anything that would leave 1 on a double-out). */
-const CO_DOUBLES = {};                       // value -> finishing-dart label
-for(let _n=1;_n<=20;_n++) CO_DOUBLES[2*_n]='D'+_n;
-CO_DOUBLES[50]='Bull';
-const CO_FAV_D = [40,32,16,24,8,20,12,4,36,28,50,2,38,34,30,26,22,18,14,10,6];
-const CO_FIRSTS = (()=>{ const a=[]; for(let n=20;n>=1;n--) a.push({v:3*n,label:'T'+n});
-  a.push({v:50,label:'Bull'}); a.push({v:25,label:'25'});
-  for(let n=20;n>=1;n--) a.push({v:n,label:''+n}); return a; })();
-
-function coTreble(v){ if(v%3===0){const n=v/3; if(n>=1&&n<=20) return 'T'+n;} return null; }
-function coSingle(v){ if(v>=1&&v<=20) return ''+v; if(v===25) return '25'; return null; }
-function coSetup(need){ if(need<=0) return null; return coTreble(need)||coSingle(need)||(CO_DOUBLES[need]||null); }
-function coFinish2(R){
-  for(const d of CO_FAV_D){ const need=R-d; if(need<=0) continue;
-    const f=coSetup(need); if(f) return [f, CO_DOUBLES[d]]; }
-  return null;
-}
-function coFinish3(R){
-  for(const f of CO_FIRSTS){ const rest=R-f.v; if(rest<2) continue;
-    const two=coFinish2(rest); if(two) return [f.label, ...two]; }
-  return null;
-}
-function checkoutHint(rem, doubleOut, maxDarts){
-  if(maxDarts == null) maxDarts = 3;
-  if(rem<1 || rem>170 || maxDarts<1) return '';
-  if(doubleOut){
-    if(rem<2) return '';
-    let r = CO_DOUBLES[rem] ? [CO_DOUBLES[rem]] : null;           // 1 dart
-    if(!r && maxDarts>=2) r = coFinish2(rem);                     // 2 darts
-    if(!r && maxDarts>=3) r = coFinish3(rem);                     // 3 darts
-    return r ? r.join(' ') : '';
-  }
-  // straight out: last dart can be anything
-  const one = coSingle(rem) || CO_DOUBLES[rem] || coTreble(rem);
-  if(one) return one;                                            // 1 dart
-  if(maxDarts>=2) for(const f of CO_FIRSTS){ const need=rem-f.v;
-    const s=coSingle(need)||CO_DOUBLES[need]||coTreble(need);
-    if(need>0 && s) return f.label+' '+s; }
-  if(maxDarts>=3) for(const f of CO_FIRSTS){ const rest=rem-f.v; if(rest<1) continue;
-    for(const g of CO_FIRSTS){ const need=rest-g.v;
-      const s=coSingle(need)||CO_DOUBLES[need]||coTreble(need);
-      if(need>0 && s) return f.label+' '+g.label+' '+s; } }
-  return '';
-}
+   Moved to scoring.js (docs/testing-and-observability-roadmap.md Part B) —
+   CO_DOUBLES/CO_FAV_D/CO_FIRSTS/coTreble/coSingle/coSetup/coFinish2/coFinish3/
+   checkoutHint are all plain globals from that file now, loaded before this
+   script via <script src>. See scoring.js's own header comment. */
 
 /* ---------- avg-over-time chart ---------- */
 const STAT_DEFS = [
@@ -4846,8 +4775,9 @@ function activeBubbleKeyMap(){ return playerGameType==='cricket' ? CRICKET_BUBBL
    Standard cricket only (v1 scope decision) — highest score wins, cut-throat
    deferred. A match's in-play numbers are locked to exactly 7 (classic:
    15,16,17,18,19,20,Bull, or a custom 7-of-21 selection made at New Game time),
-   stored as game.config.numbers. */
-const CRICKET_STANDARD_NUMBERS = [15,16,17,18,19,20,25];
+   stored as game.config.numbers. CRICKET_STANDARD_NUMBERS and evaluateVisitCricket
+   itself now live in scoring.js (see the PURE SCORING LOGIC block above) — only
+   the stateful player-record helpers stay here. */
 function cricketNumberLabel(n){ return n===25 ? 'Bull' : String(n); }
 function newMatchPlayerCricket(name, config){
   const marks = {};
@@ -4866,43 +4796,6 @@ function playerSnapshotCricket(p){
     legsWon:p.legsWon, setsWon:p.setsWon,
     legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0
   };
-}
-// Pure per-dart scoring function, validated standalone against 12 hand-checked
-// scenarios (mark accumulation within a visit, closing-vs-scoring marks, opponent-
-// closed gating, multi-opponent win checks) before being wired in here.
-//
-// Marks accumulate dart-by-dart *within* a visit — a number can go from open to
-// closed mid-visit, with the remaining darts in that same visit scoring points.
-// A mark counts toward points only once the shooter has closed the number (3+
-// marks, counting the closing marks themselves as 0 points) AND at least one
-// opponent hasn't closed it yet (checked against opponents' state as of the start
-// of this visit — only the shooter's own marks change during their own visit).
-//
-// Known open edge case (matches the roadmap doc's own framing, not silently
-// resolved): an exact points TIE at the moment the last number closes is not a
-// win by this rule — the leg just continues with no tie-break implemented.
-function evaluateVisitCricket(player, darts, game){
-  const numbers = game.config.numbers || CRICKET_STANDARD_NUMBERS;
-  const opponents = game.players.filter(pl=>pl!==player);
-  const marks = Object.assign({}, player.marks);
-  let pointsThisVisit = 0;
-  darts.forEach(d=>{
-    if(!numbers.includes(d.sector)) return; // miss or out-of-play number: no-op
-    const before = marks[d.sector] || 0;
-    const after = before + d.mult;
-    marks[d.sector] = after;
-    const beyondBefore = Math.max(0, before - 3);
-    const beyondAfter = Math.max(0, after - 3);
-    const newBeyond = beyondAfter - beyondBefore;
-    if(newBeyond > 0){
-      const opponentOpen = opponents.some(o=>(o.marks[d.sector]||0) < 3);
-      if(opponentOpen) pointsThisVisit += newBeyond * d.sector;
-    }
-  });
-  const points = player.points + pointsThisVisit;
-  const allClosed = numbers.every(n=>(marks[n]||0) >= 3);
-  const win = allClosed && opponents.every(o=>points > (o.points||0));
-  return { marks, points, pointsThisVisit, scored:pointsThisVisit, win };
 }
 function marksGlyph(n){
   const clamped = Math.min(3, n);

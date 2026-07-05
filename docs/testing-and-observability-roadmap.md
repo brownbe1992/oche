@@ -6,26 +6,30 @@
 > (`backend/db.js`) via `db.logServerError()`, pruned to the most recent 500 rows on
 > every insert (the "rotating log" — persists across container restarts, unlike
 > stdout). An admin-only `GET /api/errors` feeds a **Server Errors** section in
-> Settings → Admin & Danger Zone. Verified against a real malformed request end to
-> end (server → table → API → UI), plus a committed `node:test` suite. **Part B
-> (automated testing) started, not complete**: `backend/package.json` now has a
-> working `npm test` (Node's built-in `node:test`, zero new dependency), seeded with
-> one suite (`backend/test/db.server-errors.test.js`) covering the observability
-> feature above — the two originally-planned first targets (extracting
-> `evaluateVisit()`/checkout math out of the frontend's inline `<script>` for
-> testability, and a broader `db.js` suite covering `computeStats`/`getSummary`/etc.)
-> are still outstanding. Like `docs/accessibility-roadmap.md`, this is partly a
-> concrete near-term fix (Part A, done) and partly a standing practice for every
-> future feature (test coverage for core logic, ongoing) — see `CLAUDE.md` for the
-> binding cross-reference.
+> Settings → Admin & Danger Zone. **Part B (automated testing) ✅ Done for its
+> stated v1 scope** (2026-07) — both originally-planned first targets are complete:
+> `evaluateVisit()`/`evaluateVisitCricket()`/the checkout route calculator are
+> extracted to `frontend/scoring.js` (a dual-mode file: a plain `<script src>` in
+> the browser, `require()`-able from a test, zero behavior change — verified via a
+> full Playwright regression of real gameplay after the extraction), and
+> `backend/db.js`'s core stat formulas, Cricket stats, Daily Challenge streak/
+> personal-best logic, and badge semantics all have committed `node:test` suites
+> (`backend/test/*.test.js`, 76 assertions total). `npm test` runs the whole suite
+> (zero new dependency), and `.github/workflows/test.yml` runs it on every push/PR,
+> closing this doc's own open CI question. Like `docs/accessibility-roadmap.md`,
+> this was partly a concrete near-term project (now done) and partly a standing
+> practice for every future feature (test coverage for core logic, ongoing per
+> CLAUDE.md) — the "not aiming for exhaustive coverage" framing below still holds:
+> this is a safety net around the highest-risk shared logic, not 100% coverage, and
+> new calculations keep extending the same suite going forward.
 >
-> **Size**: the observability fix was **trivial** (now fully done). Testing is
-> **Medium** — the real cost is a small refactor-for-testability step, not the tests
-> themselves; a useful initial slice is a session or two of work, full coverage is an
-> ongoing practice rather than a single project. **Usefulness**: high for both —
-> observability was a trivial fix for real value, and testing protects every future
-> roadmap item, especially the higher-risk refactors already planned (item 10, the
-> X01-to-plugin refactor, itself already shipped and worth retroactive coverage).
+> **Size**: both parts are now done — observability was trivial, testing's v1 slice
+> was the "session or two of work" this doc estimated. **Usefulness**: high for
+> both — observability gives real self-hosted visibility, and the test suite now
+> actively protects the highest-risk shared logic (bust/win rules, Cricket's mark
+> accumulation, checkout routes, the core stat formulas) against regressions —
+> including retroactive coverage for item 10 (the X01-to-plugin refactor), whose
+> `GAME_TYPES.x01.evaluateVisit` is the exact function `scoring.test.js` now covers.
 
 ## Goal
 
@@ -49,27 +53,34 @@ identity.
 
 ## A. Automated testing
 
-- **Use Node's built-in `node:test` + `node:assert`** — no new dependency, already
-  available given `engines: { node: ">=22.5.0" }`. Keeps the project's stated
-  "dependency-free" identity intact rather than introducing Jest/Mocha/etc.
-- **Highest-value, lowest-effort first target**: the pure scoring logic in
-  `frontend/index.html` — `evaluateVisit()` (bust/checkout rules) and the checkout
-  route calculator (`coFinish2`/`coFinish3`/`checkoutHint()`). Zero DOM dependency,
-  and the highest-stakes code in the app for correctness. The real cost here isn't
-  writing the tests — it's that these functions live inside one giant inline
-  `<script>` today with nothing exported, so step one is making them reachable from a
-  test file (e.g. a small extracted module the page also loads via `<script src>`).
-  That's a refactor-for-testability step, not new behavior.
-- **Second target**: `backend/db.js`'s query functions (`computeStats`, `getSummary`,
-  etc.), using the same technique already used manually throughout this project's
-  sessions — point `DARTS_DB` at a scratch file, seed known games/turns/darts, assert
-  the computed stats match hand-calculated expected values.
-- **Not aiming for exhaustive coverage in v1.** The goal is a safety net around the
-  highest-risk shared logic (scoring rules, checkout math, core stat queries) — not
-  100% coverage. `docs/existing-app-prep-roadmap.md` item 10 (the X01-to-plugin
-  refactor) is the ideal moment to extend this further: that refactor needs to prove
-  the new plugin abstraction behaves identically to today's inline X01 logic, and a
-  test suite is exactly how you'd prove that rather than eyeballing it.
+> **Status: ✅ Done for v1 scope** (2026-07). Both targets below are complete.
+
+- ~~**Use Node's built-in `node:test` + `node:assert`**~~ ✅ Done — no new
+  dependency; `backend/package.json`'s `"test": "node --test"` script runs every
+  `backend/test/*.test.js` file.
+- ~~**Highest-value, lowest-effort first target**: the pure scoring logic in
+  `frontend/index.html`~~ ✅ Done — `evaluateVisit()`, `evaluateVisitCricket()`, and
+  the checkout route calculator (`coFinish2`/`coFinish3`/`checkoutHint()`) are
+  extracted to `frontend/scoring.js` (see REFERENCE.md §1 for the exact
+  dual-mode-loading mechanism) and covered by `backend/test/scoring.test.js` (28
+  assertions: every `evaluateVisit` bust/win branch, Cricket mark accumulation/
+  opponent-gating/win-condition edge cases, and checkout-route correctness
+  including known routes, bogey numbers, and `maxDarts` limiting).
+- ~~**Second target**: `backend/db.js`'s query functions~~ ✅ Done —
+  `db.x01-stats.test.js` (computeStats/getSummary/getHomeExtra/
+  getPlayerStatBubbles/getPersonalBests/getMetricHistory parity),
+  `db.cricket-stats.test.js` (Cricket's stat bubbles/personal bests/leaderboards,
+  plus the X01/Cricket isolation regression), `db.challenges.test.js` (Daily
+  Challenge streak/personal-best/reset-cascade semantics), and `db.badges.test.js`
+  (award/revoke count semantics) — each against its own scratch SQLite database,
+  hand-verified expected values, same technique used manually throughout this
+  project's sessions, now permanent.
+- **Still not aiming for exhaustive coverage.** The goal remains a safety net
+  around the highest-risk shared logic, not 100% of every formula in REFERENCE.md
+  §3 — e.g. `getDartAnalytics`, `getTopFinishes`/`getCheckoutRoutes`, and
+  `getOnThisDay`'s exact priority-ordering have no dedicated test yet. Per
+  CLAUDE.md's standing convention, any new calculation (and any of these, if
+  touched again) gets a test added to the relevant file at that point.
 
 ## B. Observability
 
@@ -87,20 +98,18 @@ identity.
 1. ~~**(Trivial)** Add server-side error logging to the top-level `catch` in
    `server.js`.~~ ✅ **Done** (v0.6.2). ~~Persist it (a rotating log file) and add a
    "recent errors" view in Settings~~ ✅ **Done** (2026-07) — see §B above.
-2. Introduce `node:test` as the runner; extract `evaluateVisit()`/checkout math into
-   a testable form and write the first suite against it. **Runner done** (2026-07,
-   `npm test` in `backend/package.json`); the `evaluateVisit()`/checkout-math
-   extraction itself is **still not done** — the first suite committed
-   (`backend/test/db.server-errors.test.js`) covers the server-error log, not the
-   frontend scoring logic this item was originally about.
-3. Add a `db.js` integration-test suite using scratch databases. **Started, not
-   complete** — `db.server-errors.test.js` covers `logServerError`/`getServerErrors`
-   only; `computeStats`/`getSummary`/`getPersonalBests`/etc. still have no committed
-   suite, only this session's one-off scratchpad verification scripts.
+2. ~~Introduce `node:test` as the runner; extract `evaluateVisit()`/checkout math
+   into a testable form and write the first suite against it.~~ ✅ **Done**
+   (2026-07) — `frontend/scoring.js` + `backend/test/scoring.test.js`.
+3. ~~Add a `db.js` integration-test suite using scratch databases.~~ ✅ **Done**
+   (2026-07) — `db.x01-stats.test.js`, `db.cricket-stats.test.js`,
+   `db.challenges.test.js`, `db.badges.test.js` (plus `db.server-errors.test.js`
+   from Part A). Retroactive coverage for item 10 (the X01-to-plugin refactor) is
+   satisfied by `scoring.test.js` testing `GAME_TYPES.x01.evaluateVisit` itself.
 4. ~~Add `npm test` to `backend/package.json`~~ ✅ **Done** (2026-07, `node --test`,
-   zero new dependency) — and revisit coverage each time a major roadmap item lands,
-   starting with item 10 (the X01 plugin refactor, already shipped and still owed
-   retroactive test coverage).
+   zero new dependency). ~~Whether CI is worth adding~~ ✅ **Done** —
+   `.github/workflows/test.yml` runs `npm test` on every push/PR. Revisit coverage
+   each time a major roadmap item lands, per the standing practice below.
 
 ## Standing practice going forward
 
@@ -111,12 +120,23 @@ alone. If no runner exists yet at the point this comes up, build the minimal ver
 needed to hold that one test rather than deferring it to a separate "do testing
 properly" session. See `CLAUDE.md` for the binding version of this statement.
 
-## Open questions for whoever picks this up
+## Decisions made (2026-07, resolved rather than left open)
 
-- Whether to extract the frontend's pure logic into real ES modules now (bigger,
-  cleaner change) vs. a minimal shim just for testability (smaller, uglier) — the
-  item 10 refactor is a natural moment to decide this properly rather than
-  pre-empting it here.
-- Whether CI (even something as simple as a GitHub Actions workflow running `npm
-  test` on push) is worth adding once a real test suite exists — no code prerequisite,
-  just needs a suite worth running first.
+- **Minimal shim, not real ES modules.** `frontend/scoring.js` is a dual-mode file:
+  every function/const is a plain top-level declaration (a browser-loaded global
+  via `<script src>`, unchanged from how it worked inline), with a CommonJS
+  `module.exports` block at the bottom that only activates under Node (guarded by
+  `typeof module !== 'undefined'`). Chosen over real ES modules because the app's
+  explicit "no build step, no framework" identity (REFERENCE.md §1) would be
+  compromised by introducing `import`/`export` + a bundler; the shim adds zero new
+  tooling and is a straight cut-and-paste move of existing code, not a rewrite.
+- **CI added.** `.github/workflows/test.yml` runs `npm test` on every push and PR —
+  no code prerequisite was blocking this once the suite existed, so it was built
+  in the same pass rather than left for a future session.
+
+## Remaining open questions
+
+- Whether to extend coverage to the not-yet-tested `db.js` formulas noted in §A
+  (`getDartAnalytics`, `getTopFinishes`/`getCheckoutRoutes`, `getOnThisDay`'s
+  priority ordering) proactively, or only when one of them is next touched (per
+  the standing practice below, which is the minimum bar, not a ceiling).

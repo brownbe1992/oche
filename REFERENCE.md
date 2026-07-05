@@ -53,6 +53,8 @@ oche/
 │   └── backup.js       Stand-alone WAL-safe backup script
 ├── frontend/
 │   ├── index.html    The entire app — one self-contained HTML file (the controller)
+│   ├── scoring.js    Pure scoring logic (evaluateVisit/evaluateVisitCricket/checkout
+│   │                 math), extracted from index.html so it's unit-testable
 │   └── display.html  Read-only live scoreboard for a second screen
 ```
 
@@ -66,6 +68,14 @@ oche/
   reachable backend at the same origin; there is no offline/local-storage
   fallback, so stats never split across two unsynced stores. `frontend/display.html`
   is a much smaller read-only client, driven entirely by Server-Sent Events.
+  `frontend/scoring.js` is the one exception to "everything lives in the inline
+  `<script>`" — `evaluateVisit()`, `evaluateVisitCricket()`, and the checkout
+  route calculator were extracted there (docs/testing-and-observability-roadmap.md
+  Part B) so they're reachable from a `node:test` file. It's still loaded the same
+  no-build-step way, via a plain `<script src="scoring.js">` before the main
+  script, and every name it defines is still a plain global exactly as before the
+  extraction — a dual-mode CommonJS export block at the bottom only activates
+  under Node (`typeof module !== 'undefined'`), so nothing changes in the browser.
 - **Client-server sync**: the controller's `Backend` object wraps `fetch()` calls
   to the API; `DB` (in `index.html`) wraps the specific game/turn/badge/challenge
   endpoints and owns a small internal promise queue (`DB._queue`) so that
@@ -114,6 +124,17 @@ oche/
   logs` access. The DB write is itself wrapped in a `try/catch` in `server.js`
   so a failure to log (e.g. the very error being logged was a DB fault) can't
   throw a second, unhandled exception from inside the error handler.
+- **Automated test suite** (`backend/test/`, `docs/testing-and-observability-roadmap.md`
+  Part B): Node's built-in `node:test` + `node:assert` (zero new dependency), run
+  via `npm test` in `backend/` (also wired into `.github/workflows/test.yml` on
+  every push/PR). `scoring.test.js` covers the extracted pure scoring logic above;
+  `db.*.test.js` files cover `backend/db.js`'s stat formulas, Cricket stats, Daily
+  Challenge streak/personal-best logic, and badge award/revoke semantics, each
+  against its own scratch SQLite database (a temp file, never `data/darts.db`).
+  Per CLAUDE.md's testing convention, any new stat formula, achievement condition,
+  or other calculation gets a test added to one of these files (or a new one) in
+  the same change that adds it — this is a safety net around the highest-risk
+  shared logic, deliberately not aiming for 100% coverage.
 
 ---
 

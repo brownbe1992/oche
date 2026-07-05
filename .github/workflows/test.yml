@@ -1,0 +1,23 @@
+name: Backend tests
+
+# docs/testing-and-observability-roadmap.md's open "is CI worth adding" question,
+# closed now that a real committed suite exists (backend/test/, node:test). Runs
+# the same `npm test` a contributor runs locally — no separate CI-only config.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.5'
+      # No install step: the project is intentionally dependency-free (no
+      # package-lock.json, no node_modules) — nothing to install.
+      - name: Run tests
+        run: npm test
+        working-directory: backend
