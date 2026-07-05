@@ -575,6 +575,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/ha-webhook' && m === 'POST') {
+      // SEC-7 (docs/security-audit-roadmap.md): folded into the same requireWrite
+      // gate as every other state-changing endpoint — a no-op (stays open, LAN
+      // trust) when OCHE_REQUIRE_AUTH is off, admin-session-required when it's on.
+      // Gameplay already requires login before this can fire in that mode (see
+      // Auth.ensureCanWrite() gating startGame()), so this closes the anonymous-
+      // trigger hole without any new frontend prompt.
+      if (!requireWrite(req, res)) return;
       const b = await readJson(req);
       const allowed = ['oneeighty','bigfish','bust','ninedarter','tonplus','momentcard',
                        'gamestart','gameend','setstart','setend','legstart','legend'];

@@ -17,8 +17,11 @@
 > **Follow-up:** a second, broader adversarial audit (`docs/security-audit-roadmap.md`)
 > found and fixed rate limiting, async password hashing, SSE/live-payload bounds, an
 > outbound-request egress guard, a non-root container, and several smaller hardening
-> items — all done except the webhook-auth decision below (SEC-7 in that doc), which is
-> the same open item as the "TODO" section immediately following this one.
+> items. **The webhook-auth decision below (SEC-7 in that doc) is also now done**
+> (2026-07) — resolved as option 1: `POST /api/ha-webhook` now goes through the same
+> `requireWrite` gate every other write endpoint uses. Every item in both security
+> docs is closed; the standing checklist below remains ongoing practice, not a task
+> to complete.
 
 ## Goal
 
@@ -92,17 +95,21 @@ recorded turns as a PIN-protected player with no PIN. Addressed:
   the static-file traversal guard uses `path.relative` instead of a bare
   `startsWith(FRONTEND_DIR)` (which would also accept a sibling `frontend-*` dir).
 
-## TODO — brainstorm & agree: authenticate webhook payloads (Home Assistant)
+## Webhook payload authentication (Home Assistant) — ✅ Resolved (2026-07)
 
-**Status: needs a design decision before implementing — do not just pick one.**
+`POST /api/ha-webhook` is no longer unauthenticated. It now calls the same
+`requireWrite(req, res)` guard as every other state-changing route
+(`backend/server.js`): a no-op (stays open, LAN trust — unchanged) when
+`OCHE_REQUIRE_AUTH` is off, requires a logged-in admin session when it's on.
+Gameplay already requires login before this can fire in that mode
+(`Auth.ensureCanWrite()` gates `startGame()` on the frontend), so this closes the
+anonymous-trigger hole with zero new frontend prompt. Verified against a live
+scratch server in all three states: off → 200 anonymously; on, no session → 401
+(matching every other write route); on, logged in → 200.
 
-`POST /api/ha-webhook` is still unauthenticated (deliberately left out of the
-auth-for-writes pass above, pending this discussion). Today it only ever fires to the
-*already-admin-configured* HA URL, so it's not arbitrary SSRF — but an anonymous
-request can still (a) trigger the homeowner's HA automations at will and (b) inject
-arbitrary JSON fields into the outbound payload. The goal: **every webhook payload the
-app emits should be attributable to an authenticated session of some kind**, so a
-random internet client can't drive someone's smart home through this app.
+The goal this section originally set — **every webhook payload the app emits should
+be attributable to an authenticated session of some kind** — is met by option 1
+below. Kept for reference: the full option comparison that led to this decision.
 
 Candidate approaches to weigh (pick together, don't assume):
 
@@ -110,9 +117,11 @@ Candidate approaches to weigh (pick together, don't assume):
    session like every other write when `OCHE_REQUIRE_AUTH` is on. Downside: the webhook
    is fired from gameplay code (`sendHaWebhook`) that today runs for any player at the
    oche, not just an admin — so this only works cleanly if gameplay already requires
-   auth (which, with the flag on, it does). Likely the right default. Open question:
-   what should happen when the flag is *off* — stay open (LAN trust) or always require
-   admin for this specific endpoint regardless of the flag?
+   auth (which, with the flag on, it does). Likely the right default. **Chosen** —
+   its open question ("what happens when the flag is off?") resolved as: behave
+   exactly like every other write route (stay open, LAN trust), rather than a
+   special always-on gate for this one endpoint — keeps behavior uniform instead of
+   inventing a second auth rule to remember.
 2. **Server-side firing only.** Stop exposing an HTTP trigger at all: move all webhook
    emission fully server-side, fired as a side effect of already-authenticated write
    endpoints (turn recorded → server decides whether it's a 180/Big Fish/etc. and fires

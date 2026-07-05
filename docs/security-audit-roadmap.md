@@ -1,12 +1,16 @@
 # Security Audit Roadmap (adversarial whole-codebase review)
 
-> **Status: SEC-1 through SEC-6 and SEC-8 through SEC-11 are ✅ fixed** (see the
-> "Status" line under each finding below for what actually shipped, which in a couple
-> of places is a more robust implementation than the original suggested fix — e.g.
-> SEC-5 uses a root-briefly/chown/drop-to-non-root entrypoint rather than a bare `USER
-> node`, so existing bind-mounted data directories keep working). **SEC-7 is the only
-> item still open**, per explicit instruction — it needs a design decision (see its
-> section) before any code changes.
+> **Status: ✅ All findings fixed (SEC-1 through SEC-11).** See the "Status" line
+> under each finding below for what actually shipped, which in a couple of places is
+> a more robust implementation than the original suggested fix — e.g. SEC-5 uses a
+> root-briefly/chown/drop-to-non-root entrypoint rather than a bare `USER node`, so
+> existing bind-mounted data directories keep working. **SEC-7 (2026-07)**: option 1
+> from the brainstorm — folded `POST /api/ha-webhook` into the same `requireWrite`
+> gate every other write endpoint already uses (`backend/server.js`) — a no-op (LAN
+> trust, unchanged) when `OCHE_REQUIRE_AUTH` is off, admin-session-required when it's
+> on, verified all three cases (off/anonymous, on/no-session→401, on/logged-in→200)
+> against a live scratch server. Option 2 (moving webhook firing fully server-side)
+> remains a possible future refinement, not required to close this finding.
 >
 > Produced by a full, character-by-character read of the codebase with a
 > pretend-malicious mindset ("how do I break in and pivot into the rest of the
@@ -322,19 +326,29 @@ at here.
 
 ---
 
-### SEC-7 — `POST /api/ha-webhook` is unauthenticated  **(MED — decision pending, do not just pick one)**
+### SEC-7 — `POST /api/ha-webhook` is unauthenticated  **(MED)**
 
-**Where:** `backend/server.js` `/api/ha-webhook` (deliberately left out of the
-auth-for-writes pass, pending a design decision).
+**Status: ✅ Fixed (2026-07).** Folded into the same `requireWrite` gate every other
+write endpoint already uses — a plain `if (!requireWrite(req, res)) return;` at the
+top of the route (`backend/server.js`). Behaves identically to every other write:
+a no-op (stays open, LAN trust) when `OCHE_REQUIRE_AUTH` is off, requires a
+logged-in admin session when it's on. Gameplay already requires login before this
+can fire in that mode (`Auth.ensureCanWrite()` gates `startGame()` on the frontend),
+so this closes the anonymous-trigger hole with zero new frontend prompt or UX
+change. Verified against a live scratch server: off → 200 anonymously (unchanged);
+on, no session → 401 (matches `POST /api/games`'s existing 401 in the same state);
+on, logged in → 200. Option 2 (move webhook firing fully server-side, removing the
+public trigger and the client's ability to forge payload fields) and option 3
+(a signed capability token) remain possible future refinements — not needed to
+close this finding, which only asked for "every payload attributable to an
+authenticated session," and option 1 already delivers that.
 
-**Attack:** an anonymous request can trigger the homeowner's HA automations at will and
-inject arbitrary JSON fields into the outbound payload (destination is still the
-admin-configured URL, so not arbitrary SSRF — that's SEC-4).
+**Where:** `backend/server.js` `/api/ha-webhook`.
 
-**Fix:** see the full options and recommendation already written up under "TODO —
-brainstorm & agree" in `docs/security-hardening-roadmap.md`. Summary: (1) fold into
-`requireWrite`, (2) move webhook firing fully server-side, or (3) signed capability
-token. Recommendation: option 1 now, option 2 later. **Agree the approach before coding.**
+**Attack (now closed):** an anonymous request could trigger the homeowner's HA
+automations at will and inject arbitrary JSON fields into the outbound payload
+(destination was still the admin-configured URL, so never arbitrary SSRF — that's
+SEC-4).
 
 ---
 
@@ -468,9 +482,11 @@ already there). Continue returning specific messages for 4xx.
 3. ~~**SEC-2** (SSE caps + bounded live payload).~~ ✅
 4. ~~**SEC-4** (HA egress guard) — the network-pivot risk the deployment cares most about.~~ ✅
 5. ~~**SEC-5** (non-root container) + **SEC-6** (secure-default docs/compose).~~ ✅
-6. **SEC-7** (decide + implement webhook auth — agree first). **← the only remaining item**
+6. ~~**SEC-7** (decide + implement webhook auth — agree first).~~ ✅
 7. ~~**SEC-9, SEC-10, SEC-11** (bounded settings, headers, generic 5xx) — quick hardening.~~ ✅
 8. ~~**SEC-8** (revisit lockout vs. IP throttling once SEC-3 lands).~~ ✅ (documented)
+
+**Every finding in this audit is now closed.**
 
 ## Standing practice
 

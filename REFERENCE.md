@@ -1047,10 +1047,11 @@ lazily deleted on lookup and swept on every successful login.
 
 ### Known, accepted gaps
 
-`POST /api/ha-webhook` (the inbound trigger that fires an already-configured HA
-webhook) is **fully public — not gated by `OCHE_REQUIRE_AUTH` at all**. This is
-a known, open item — see `docs/security-hardening-roadmap.md`. Don't rely on it
-being access-controlled if exposed to the internet.
+None currently open. `POST /api/ha-webhook` (the inbound trigger that fires an
+already-configured HA webhook) is gated by `requireWrite` like every other
+state-changing endpoint (SEC-7, `docs/security-audit-roadmap.md`) — public by
+default (LAN trust) unless `OCHE_REQUIRE_AUTH=true`, in which case it requires a
+logged-in admin session the same as `POST /api/games` or any other write.
 
 ---
 
@@ -1292,8 +1293,6 @@ hard connection caps, not a `rateLimit()` bucket.
 Cross-referenced from the `docs/*.md` roadmap docs — these are real,
 already-shipped limitations, not just unbuilt future features:
 
-- **`POST /api/ha-webhook` is fully unauthenticated**, not covered by
-  `OCHE_REQUIRE_AUTH` — `docs/security-hardening-roadmap.md`.
 - **Account-lockout griefing is an accepted tradeoff**, not fixed — an attacker
   who knows a username/player can deliberately lock that one account —
   `docs/security-audit-roadmap.md` SEC-8.

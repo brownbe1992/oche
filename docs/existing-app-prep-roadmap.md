@@ -493,7 +493,7 @@ for the same "what do we build next" attention.
 |---|---|---|---|---|
 | `docs/archive/colorblind-mode-roadmap.md` | ✅ Done | Very low | Medium (narrow, real) | CSS-only, genuine accessibility fix |
 | `docs/ha-recipes-roadmap.md` | Not started | Trivial (docs only) | Medium | Zero code, unlocks power that already shipped — the promised recipe content was never written |
-| `docs/security-hardening-roadmap.md` | Partial | Very low | High | Admin login rate limiting done (v0.6.2), mirroring the proven PIN lockout pattern; SEC-7 (webhook auth) is the one item still open |
+| `docs/security-hardening-roadmap.md` | ✅ Done | Very low | High | Admin login rate limiting (v0.6.2) + `OCHE_REQUIRE_AUTH` for all gameplay/roster writes. SEC-7 (webhook auth, 2026-07) closed the last open item — `POST /api/ha-webhook` now uses the same `requireWrite` gate as every other write endpoint. The standing checklist for future credentials/secrets remains ongoing practice, per CLAUDE.md |
 | `docs/data-export-roadmap.md` | Not started | Very low | Medium | Reformats existing queries; reinforces the self-hosted trust story |
 | `docs/archive/voice-announcements-roadmap.md` | ✅ Done | Very low | Medium-High | Browser API only, zero infra; i18n left to its own follow-on doc (next row) |
 | `docs/voice-announcements-i18n-roadmap.md` | Not started | Low-Medium | Low-Medium | Follow-on to the shipped feature; every phrase is still hardcoded English |
@@ -509,7 +509,7 @@ for the same "what do we build next" attention.
 | `docs/league-mode-roadmap.md` | Not started | Medium | Medium-High | New tables, no new infra; complements tournament mode |
 | `docs/mobile-app-roadmap.md` | Partial | Medium | High | Its one prerequisite (responsive CSS pass) is done; the native app itself (Capacitor scaffold, packaging, distribution) is not started |
 | `docs/tournament-mode-roadmap.md` | Not started | Medium-High | High | Bracket generation (especially double-elim) is genuinely fiddly, but fully self-contained — reuses the scoring engine unchanged |
-| `docs/security-audit-roadmap.md` | Partial | Low (fixes were) | High | SEC-1 through SEC-6 and SEC-8 through SEC-11 fixed; SEC-7 (webhook auth) is the only item still open, same gap `security-hardening-roadmap.md` flags |
+| `docs/security-audit-roadmap.md` | ✅ Done | Low (fixes were) | High | All 11 findings (SEC-1 through SEC-11) fixed; SEC-7 (webhook auth, 2026-07) was the last one — same fix as `security-hardening-roadmap.md`'s row. The standing practice section at the bottom remains ongoing, per CLAUDE.md |
 | `docs/environmental-logging-roadmap.md` | Not started | Medium | Low (self-admittedly niche) | New inbound HA auth model, but explicitly scoped as a niche, manually-enabled feature |
 | `docs/game-modes-roadmap.md` | Partial | Very high | Very high | Steps 1-4 done: X01-to-plugin refactor, Cricket fully playable (turn engine, New Game classic/custom config, dedicated scoring screen, chalkboard scorecard live scoreboard), Cricket stats parity (MPR + 5 more stat bubbles, Personal Bests via new `turns.leg_won` column, 2 achievements), and Home/Player Profile game-type navigation (X01/Cricket toggles on both, Home's own MPR/Most-Wins/9-Marks/Perfect-Leg leaderboard set). Step 5 (Baseball) not started |
 | `docs/online-multiplayer-roadmap.md` | Not started | Very high | High *but conditional* | Needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem that caps near-term value regardless of build quality |
