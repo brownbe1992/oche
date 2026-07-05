@@ -45,7 +45,7 @@ Others
 - Tournament mode (bracket play, up to 128 players, single/double elim) — full design in docs/tournament-mode-roadmap.md
 - iOS/Android app (hybrid webview client) — full design in docs/mobile-app-roadmap.md
 - Online multiplayer (P2P scoring + live video verification) — full design in docs/online-multiplayer-roadmap.md
-- Expanded achievements/badges beyond 180s/Big Fish/9-darters — done, see docs/archive/achievements-badges-roadmap.md
+- Expanded achievements/badges beyond 180s/Big Fish/9-darters — done, see docs/achievements-badges-roadmap.md
 - Simultaneous achievements (show/persist every badge a turn earns, not just the last one) — done, see docs/archive/simultaneous-achievements-roadmap.md
 - Home Assistant automation recipe book (lights/sounds/notifications) — full design in docs/ha-recipes-roadmap.md
 - Colorblind-friendly dartboard palette — done, see docs/archive/colorblind-mode-roadmap.md

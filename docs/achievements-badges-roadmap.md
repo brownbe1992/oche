@@ -1,13 +1,17 @@
 # Expanded Achievements & Badges — Design Roadmap
 
-> **Archived** — fully shipped, kept here for design-rationale history. See
-> `docs/existing-app-prep-roadmap.md`'s Roadmap sequencing table for the live
-> completion tracker across all roadmaps. Related archived docs:
-> `docs/archive/simultaneous-achievements-roadmap.md` (the multi-badge queue fix)
-> and `docs/archive/next-session-plan.md` (the punch list this and that doc grew
-> out of).
+> **Un-archived (2026-07)** — a new candidate badge, **No Cigar** (see Novelty &
+> Humor below), was added and isn't built yet, so this doc moved back out of
+> `docs/archive/` per CLAUDE.md's "partially-done docs stay in `docs/`" convention.
+> Everything else here already shipped. See `docs/existing-app-prep-roadmap.md`'s
+> Roadmap sequencing table for the live completion tracker across all roadmaps.
+> Related archived docs stay archived — `docs/archive/simultaneous-achievements-
+> roadmap.md` (the multi-badge queue fix) and `docs/archive/next-session-plan.md`
+> (the punch list this and that doc grew out of) — neither needs the new badge
+> folded in.
 
-> Status: **fully shipped**. Every badge in the candidate list is built and tested
+> Status: **20 of 21 candidate badges shipped; No Cigar is planned, not yet built.**
+> Every other badge in the candidate list is built and tested
 > end-to-end (`frontend/index.html`'s `enterTurn()`/`onLegWon()`, `showAchievement()`/
 > `ACH_LABELS` in both `index.html` and `display.html`, the `player_badges` table in
 > `backend/db.js`, a Badge Case section on the Player Profile page, and an Around the
@@ -183,6 +187,27 @@ these moments immediately.*
   this list is trying to have more of.
 - **Night Owl** / **Early Bird** *(recurring)* — a leg played after midnight / before
   7am, using the `created_at` timestamps already stored on every turn.
+- **No Cigar** *(recurring, planned — not yet built, 2026-07)* — bust a visit whose
+  darts sum to **exactly** the score that was needed, just not on a double. This is
+  double-out's single most deflating moment: the player did the arithmetic
+  perfectly and hit the right total, but the rules still call it a bust because
+  the last dart wasn't a double — e.g. standing on 32 and throwing single-16,
+  single-16 (32 exactly, but neither dart a double). `evaluateVisit()`
+  (`frontend/scoring.js`) already computes this exact case internally — its bust
+  branch fires when `remaining === 0 && doubleOut && !last.isDouble` — but the
+  caller only ever sees the final `{bust, win, ...}` result, not which of the
+  three bust sub-cases (overshoot, left-on-1, or this one) actually happened.
+  Detection needs no new state: `ev.bust && p.doubleOut && ev.pointsThisVisit ===
+  p.score` (checked at the same point in `enterTurn()`'s `CHAIN_CHECKS` as the
+  other novelty badges, after the score-unless-bust assignment — `p.score` at
+  that point is still the *pre-visit* remaining, since a bust never applies
+  `ev.newScore`) — this condition can only be true for the exact-zero-not-a-
+  double bust case, since overshoot busts always score *more* than `p.score` and
+  a left-on-1 bust always scores exactly one less. Never fires in single-out
+  mode, since hitting the exact remaining there is always a win, never a bust —
+  no extra guard needed beyond the `p.doubleOut` check already in the condition.
+  Icon/name are a starting proposal (icon 🤦 fits the existing self-deprecating
+  tone alongside 😅/😩), not locked.
 
 ### Milestones (round numbers, first occurrences)
 *(milestone)* — first 100+ checkout, first sub-10-dart leg, and lifetime round-number
@@ -269,7 +294,8 @@ both `index.html` and `display.html`, and `buildMomentCard()`'s layout).
    proves the earned/not-earned mechanism before anything fancier.
 2. The straightforward recurring badges that need no new query complexity (Hat
    Trick, Bullseye Gauntlet, Where'd It Go?, Ton-titled to Nothing, So Close..., Night
-   Owl/Early Bird) — all detectable from a single turn's dart rows, the same way 180
+   Owl/Early Bird, **No Cigar**) — all detectable from a single turn's dart rows
+   (or, for No Cigar, that turn's `ev`/`p.score` already in scope), the same way 180
    detection already works in `enterTurn()`.
 3. Consistency badges (Metronome, Cruise Control) — need a leg's full visit sequence,
    still no cross-leg/cross-game complexity.

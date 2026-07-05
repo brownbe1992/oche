@@ -160,8 +160,8 @@ completed" beyond what happens today:
 - `environmental-logging-roadmap.md` starts/stops HA polling on game start/end.
 - `tournament-mode-roadmap.md` propagates the winner into the next bracket match on
   game completion.
-- `achievements-badges-roadmap.md` (now shipped and archived at
-  `docs/archive/achievements-badges-roadmap.md`) needed milestone badges to check
+- `achievements-badges-roadmap.md` (20 of 21 candidate badges shipped; see its own
+  status for the one still-planned addition) needed milestone badges to check
   conditions after a game completes — this item's recommendation (a generic hook
   mechanism) still wasn't built; achievement checks are inline in `enterTurn()`/
   `onLegWon()` instead, so this need is still real for the *next* feature that wants
@@ -499,7 +499,7 @@ for the same "what do we build next" attention.
 | `docs/voice-announcements-i18n-roadmap.md` | Not started | Low-Medium | Low-Medium | Follow-on to the shipped feature; every phrase is still hardcoded English |
 | `docs/backups-roadmap.md` | Partial | Low | Very high | v1 (script + retention + restore docs) done (v0.6.2); v2 (compose sidecar, restore UI/endpoint) not started |
 | `docs/shareable-moments-roadmap.md` | Partial | Low | Medium | Card generation, every trigger point, and the HA webhook are done; Profile "Moments" gallery and BYO-credentials X auto-post are not |
-| `docs/archive/achievements-badges-roadmap.md` | ✅ Done | Low | Medium | Mostly content on top of infra that already worked |
+| `docs/achievements-badges-roadmap.md` | Partial | Low | Medium | 20 of 21 candidate badges shipped; **No Cigar** (2026-07, bust a visit that hit the exact score needed but not on a double) is planned, not yet built — un-archived from `docs/archive/` back to `docs/` per CLAUDE.md's convention |
 | `docs/archive/simultaneous-achievements-roadmap.md` | ✅ Done | Low | Medium | Fixed the single-slot achievement-overlay bug; built alongside achievements/badges |
 | `docs/archive/daily-challenge-roadmap.md` | ✅ Done | Low | Medium | Built entirely on the existing Practice engine |
 | `docs/ghost-opponent-roadmap.md` | ✅ Done (X01 only) | Low-Medium | Medium | A "👻 Ghost" New Game mode races a replay of one of your own past won X01 legs — backend leg-script/candidate-leg queries, a New Game leg picker, a Player Profile "Race this leg" entry point, opponent-badge suppression (Comeback Kid etc. can't fire against a ghost), and full Playwright verification (both a ghost-wins and a human-wins race). Cricket ghost support explicitly deferred |
@@ -511,7 +511,7 @@ for the same "what do we build next" attention.
 | `docs/tournament-mode-roadmap.md` | Not started | Medium-High | High | Bracket generation (especially double-elim) is genuinely fiddly, but fully self-contained — reuses the scoring engine unchanged |
 | `docs/security-audit-roadmap.md` | ✅ Done | Low (fixes were) | High | All 11 findings (SEC-1 through SEC-11) fixed; SEC-7 (webhook auth, 2026-07) was the last one — same fix as `security-hardening-roadmap.md`'s row. The standing practice section at the bottom remains ongoing, per CLAUDE.md |
 | `docs/environmental-logging-roadmap.md` | Not started | Medium | Low (self-admittedly niche) | New inbound HA auth model, but explicitly scoped as a niche, manually-enabled feature |
-| `docs/game-modes-roadmap.md` | Partial | Very high | Very high | Steps 1-4 done: X01-to-plugin refactor, Cricket fully playable (turn engine, New Game classic/custom config, dedicated scoring screen, chalkboard scorecard live scoreboard), Cricket stats parity (MPR + 5 more stat bubbles, Personal Bests via new `turns.leg_won` column, 2 achievements), and Home/Player Profile game-type navigation (X01/Cricket toggles on both, Home's own MPR/Most-Wins/9-Marks/Perfect-Leg leaderboard set). Step 5 (Baseball) not started |
+| `docs/game-modes-roadmap.md` | Partial | Very high | Very high | Steps 1-4 done: X01-to-plugin refactor, Cricket fully playable (turn engine, New Game classic/custom config, dedicated scoring screen, chalkboard scorecard live scoreboard), Cricket stats parity (MPR + 5 more stat bubbles, Personal Bests via new `turns.leg_won` column, 2 achievements), and Home/Player Profile game-type navigation (X01/Cricket toggles on both, Home's own MPR/Most-Wins/9-Marks/Perfect-Leg leaderboard set). Step 5 (Baseball) not started. **New backlog logged (2026-07, not designed/built)**: a 101 X01 starting score, two new practice drill modes (Just Chuckin' It — freeform unscored, must NOT count toward any other stats; Doubles Practice — aim at chosen double(s), per-dart not per-visit evaluation), and generalizing the X01/Cricket toggle to N game types |
 | `docs/online-multiplayer-roadmap.md` | Not started | Very high | High *but conditional* | Needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem that caps near-term value regardless of build quality |
 | `docs/camera-scoring-roadmap.md` | Not started | Extremely high | High *but narrow* | Genuinely novel CV engineering; only useful to whoever actually mounts the hardware |
 
