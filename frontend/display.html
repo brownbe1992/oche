@@ -11,7 +11,11 @@
   :root{
     --board:#0e0f0d; --surface:#1a1c18; --surface-2:#212420; --wire:#3a3d38;
     --cream:#efe7d2; --ink:#f3efe4; --muted:#9a9387;
-    --red:#c8102e; --green:#1b8a3a; --gold:#d9b46a; --bust:#e2473d;
+    /* --green/--bust brightened from #1b8a3a/#e2473d so they pass 4.5:1 as text on
+       --board/--surface (docs/accessibility-roadmap.md contrast audit) — matches
+       index.html's :root, kept in sync. --red stays border/background-only here
+       (no text usage in this file), so it's unchanged. */
+    --red:#c8102e; --green:#2fa050; --gold:#d9b46a; --bust:#ea6058;
   }
   /* Colorblind-friendly palette, set from Settings -> Accessibility (see index.html
      for the full rationale). Covers the dart border-colors below via the variables;
@@ -141,8 +145,8 @@
   /* status flash on a card (bust / game shot) */
   .flash{position:absolute;top:0;right:0;bottom:0;left:0;display:flex;align-items:center;justify-content:center;
     font-family:'Bebas Neue';font-size:8vmin;letter-spacing:.06em;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
-  .flash.bust{background:rgba(226,71,61,.22);color:#ffb4ad}
-  .flash.shot{background:rgba(27,138,58,.22);color:#9bf0ba}
+  .flash.bust{background:rgba(234,96,88,.22);color:#ffb4ad}
+  .flash.shot{background:rgba(47,160,80,.22);color:#9bf0ba}
   body.colorblind .flash.bust{background:rgba(226,113,29,.22);color:#ffb570}
   body.colorblind .flash.shot{background:rgba(47,143,217,.22);color:#9cd2ff}
 

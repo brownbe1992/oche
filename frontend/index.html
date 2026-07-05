@@ -16,10 +16,11 @@
     --cream:#efe7d2;        /* wedge cream */
     --ink:#f3efe4;          /* primary text */
     --muted:#9a9387;        /* secondary text */
-    --red:#c8102e;          /* doubles/treble red */
-    --green:#1b8a3a;        /* board green */
+    --red:#c8102e;          /* doubles/treble red — border/background use only, never text (fails WCAG AA as text; see --red-text) */
+    --green:#2fa050;        /* win status / cricket "closed" text — brightened from the dartboard SVG's own #1b8a3a (hardcoded there, unaffected) so it passes 4.5:1 as text on --board/--surface (docs/accessibility-roadmap.md contrast audit) */
     --gold:#d9b46a;         /* brass oche */
-    --bust:#e2473d;
+    --bust:#ea6058;         /* was #e2473d — brightened so bust-status/error text passes 4.5:1 as text on --surface too, not just --board (docs/accessibility-roadmap.md contrast audit) */
+    --red-text:#ff8a93;     /* readable red for text (e.g. the Pad's "Bull" label) — --red itself fails WCAG AA as text */
   }
   /* Colorblind-friendly palette (Settings -> Accessibility): red-green color vision
      deficiency is the most common form of colorblindness, and red/green is exactly
@@ -194,7 +195,7 @@
     padding:14px;border-radius:10px;font:inherit;font-weight:700;font-size:16px;cursor:pointer;letter-spacing:.03em}
   .multi button[aria-pressed="true"]{color:var(--ink)}
   .multi button.m-d[aria-pressed="true"]{background:rgba(200,16,46,.16);border-color:var(--red);color:#ff8a93}
-  .multi button.m-t[aria-pressed="true"]{background:rgba(27,138,58,.16);border-color:var(--green);color:#7fe0a0}
+  .multi button.m-t[aria-pressed="true"]{background:rgba(47,160,80,.16);border-color:var(--green);color:#7fe0a0}
   .multi button.m-s[aria-pressed="true"]{background:var(--surface-2);border-color:var(--muted)}
   body.colorblind .multi button.m-d[aria-pressed="true"]{background:rgba(226,113,29,.16);color:#ffb570}
   body.colorblind .multi button.m-t[aria-pressed="true"]{background:rgba(47,143,217,.16);color:#9cd2ff}
@@ -204,7 +205,7 @@
     padding:12px 0;font:inherit;font-size:24px;font-weight:600;cursor:pointer}
   .pad button:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
   .pad button:disabled{opacity:.3;cursor:not-allowed}
-  .pad button.bull{grid-column:span 2;color:var(--red)}
+  .pad button.bull{grid-column:span 2;color:var(--red-text)}
   .pad button.miss{grid-column:span 2;color:var(--muted)}
 
   .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
@@ -219,7 +220,7 @@
     padding:10px 4px;font:inherit;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px}
   .cricket-target:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
   .cricket-target:disabled{opacity:.3;cursor:not-allowed}
-  .cricket-target.closed{border-color:var(--green);background:rgba(27,138,58,.12)}
+  .cricket-target.closed{border-color:var(--green);background:rgba(47,160,80,.12)}
   body.colorblind .cricket-target.closed{border-color:var(--green);background:rgba(47,143,217,.12)}
   .ct-num{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:.02em}
   .ct-marks{font-size:13px;letter-spacing:.1em;color:var(--muted)}
@@ -824,7 +825,7 @@
       <div id="settings-gate"></div>
 
     <div class="card" id="settings-content" hidden style="padding:0;border:0;background:none">
-      <p id="settings-error" hidden style="color:var(--bust);font-size:13px;background:rgba(226,71,61,.1);border:1px solid var(--bust);border-radius:10px;padding:12px 14px;margin-bottom:16px"></p>
+      <p id="settings-error" hidden style="color:var(--bust);font-size:13px;background:rgba(234,96,88,.1);border:1px solid var(--bust);border-radius:10px;padding:12px 14px;margin-bottom:16px"></p>
 
       <div class="pp-section" style="margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;gap:12px">
         <span style="font-size:13px;color:var(--muted)">Logged in as <b style="color:var(--ink)" id="settings-admin-username"></b></span>
@@ -1420,8 +1421,14 @@ function buildDartboard(){
   });
   s += `<circle class="dz" cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="${ringB}" stroke="#151613" stroke-width="0.5" ${oc(25,1)}/>`;
   s += `<circle class="dz" cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="${ringA}" stroke="#151613" stroke-width="0.5" ${oc(25,2)}/>`;
+  // "Bull" text sits on the inner bull circle (ringA) — cream passes 4.5:1 against the
+  // default red (#c8102e) but fails badly (2.58:1) against colorblind mode's lighter
+  // orange substitute (#e2711d), a contrast regression that colorblind mode itself
+  // introduced. Dark text instead, only in that mode, passes 6.1:1 there while cream
+  // stays correct for everyone else (docs/accessibility-roadmap.md contrast audit).
+  const bullTextFill = colorblindMode ? '#151613' : '#efe7d2';
   s += `<text x="${CX}" y="${CY}" text-anchor="middle" dominant-baseline="central"
-    font-family="Bebas Neue,sans-serif" font-size="12" fill="#efe7d2" style="pointer-events:none;user-select:none">Bull</text>`;
+    font-family="Bebas Neue,sans-serif" font-size="12" fill="${bullTextFill}" style="pointer-events:none;user-select:none">Bull</text>`;
   s += `</svg>`;
   return s;
 }

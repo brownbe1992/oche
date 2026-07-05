@@ -1106,12 +1106,27 @@ Pad mode (number grid + Single/Double/Treble buttons, ordinary focusable
 just an alternate UI skin. `default_scoring_input` in Settings picks which mode
 a new game opens with.
 
+### Contrast (WCAG AA)
+
+Audited 2026-07 (relative-luminance contrast ratios computed against every
+text-color/background pairing, not assumed). `--green` (`#2fa050`, was
+`#1b8a3a`) and `--bust` (`#ea6058`, was `#e2473d`) were both brightened —
+their previous values fell short of 4.5:1 as text against `--surface` and/or
+`--board` (the "leg won" status line, Cricket's closed-number marks, bust
+status, and settings/wizard error banners). `--red` (`#c8102e`) stays
+unchanged — it's only ever used as a border/background color (passes the
+lower 3:1 UI-component bar) except the Pad's "Bull" label, which now uses a
+dedicated `--red-text` (`#ff8a93`) instead. The dartboard SVG's own "Bull"
+center-circle label (a hardcoded hex, not a CSS variable) is dark text in
+colorblind mode and cream otherwise — the orange colorblind-mode substitute for
+red made that label unreadable at the default cream, a genuine regression the
+audit caught. Full punch list: `docs/accessibility-roadmap.md`.
+
 ### Known open gaps
 
-No WCAG contrast audit has been performed against the rendered palette; small
-(11-12px) secondary text sizes haven't been checked against a minimum-readable
-guideline. See `docs/accessibility-roadmap.md` for the full standing checklist
-and priority order.
+Small (11-12px) secondary text sizes haven't been checked against a
+minimum-readable guideline. See `docs/accessibility-roadmap.md` for the full
+standing checklist and priority order.
 
 ---
 
