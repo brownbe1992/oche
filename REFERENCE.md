@@ -297,7 +297,7 @@ audit. The exact split:
 | Category | Cricket games… | Why |
 |---|---|---|
 | `scored`-derived (3-dart avg, 180s, 180s/leg, 100+/90− leg averages, trebleless %, recent-form avg, On This Day's 180 detection, metric-history equivalents) | **Excluded** (`X01_ONLY`) | `scored` means a different quantity in cricket |
-| Opening-window stats (1st 3/1st 9 avg, 140/leg) | Excluded already | `OPENING_CATS` restricts to category `'501'`/`'301'` |
+| Opening-window stats (1st 3/1st 9 avg, 140/leg) | Excluded already | `OPENING_CATS` requires `game_type='x01'` plus `config.startingScore` in `(501,301,170,101)` |
 | Checkout-based (Big Fish, ton+ finishes, highest checkout, checkout routes, fewest darts to finish, darts/leg, best leg avg) | Naturally excluded | cricket never writes `checkout=1`, and these are all scoped to won legs / checkout rows |
 | Physical-dart stats (Darts Thrown, Darts/Day, Average Pace, dart analytics sector/treble maps, Around the World progress) | **Included** | a dart thrown in cricket is a real dart; these count physical throws, not X01 arithmetic |
 | Games / wins / win rate / win streak / H2H records / activity counters (legs, sets, darts, turns, today/this-week) | **Included** | a completed cricket H2H match is a real match; "Games Played" counts completed H2H matches of any game type. Per-category legs/sets **won** (`computeStats()`'s `h2hLegsWonByCat`/`h2hSetsWonByCat`) count a won leg via `(checkout=1 OR leg_won=1)` — X01 signals a won leg with `checkout`, Cricket with `leg_won`. The roster/profile "turns"/"darts thrown" totals are likewise unscoped (a cricket visit is a real visit); only the X01-scoped copies inside `h2hStats`/`practiceStats` feed the averages |
@@ -374,22 +374,34 @@ checkout, and exactly 9 total darts were thrown across those 3 turns. Locked to
 | **Darts / Day** | raw | `dartsThrown / COUNT(DISTINCT date(created_at))` |
 | **Darts / Leg** | raw | `AVG(darts in leg)`, **won legs only** (`HAVING SUM(checkout)>0`) |
 | **Trebleless %** | per-leg | `% of legs where SUM(is_treble)=0 across every dart in the leg` |
-| **1st 3 AVG** | first-visit-only | `AVG(scored)` of each leg's first visit (`ROW_NUMBER()...rn=1`). **Scoped to 501/301 only** — see below. |
-| **1st 9 AVG** | 3-dart-avg | Sum of the first ≤3 visits' `scored`, over the bust-as-3 dart denominator, ×3, averaged across legs. **Scoped to 501/301 only.** |
+| **1st 3 AVG** | first-visit-only | `AVG(scored)` of each leg's first visit (`ROW_NUMBER()...rn=1`). **Scoped to exactly 501/301/170/101** — see below. |
+| **1st 9 AVG** | 3-dart-avg | Sum of the first ≤3 visits' `scored`, over the bust-as-3 dart denominator, ×3, averaged across legs. **Scoped to exactly 501/301/170/101.** |
 | **100+ AVG** | per-visit-avg | `% of legs where SUM(scored)/COUNT(turns) >= 100` — **note this denominator is turns, not darts** (see conventions table) |
 | **90- AVG** | per-visit-avg | same shape, `<= 90` |
-| **140/Leg** | first-visit-only | `% of opening visits scoring >=140`. **Scoped to 501/301 only.** |
+| **140/Leg** | first-visit-only | `% of opening visits scoring >=140`. **Scoped to exactly 501/301/170/101.** |
 | **180s/Leg** | fraction | `legs containing ≥1 180 / total legs` |
 | **Average Pace** | — | darts/minute, returned as the `pace` key — same formula as the Home page/chart versions (consecutive `thrown_at` gaps within a turn, clamped to `0 < gap < 60000ms`); `null` (bubble shows "—") until per-dart timing data exists. *Note: this key was missing from `getPlayerStatBubbles()`'s return object until the audit that produced this manual caught it — the bubble was permanently blank before that.* |
 
-**Why 1st 3 AVG / 1st 9 AVG / 140/Leg are scoped to 501/301 only**: a 170 leg is
-short enough that "first visit" isn't a meaningful opening-strength window (it
-routinely finishes in one visit, and can bust on that very first visit — which
-501/301 legs can't structurally do at that low a remaining score); Daily
-Challenge's non-scoring formats (Bullseye Gauntlet, Steady Hand, Treble Run) use
-a filler `1000` starting category that isn't a real X01 leg at all. This
-restriction is applied via a literal `AND g.category IN ('501','301')` clause,
-referred to in the code as `OPENING_CATS`.
+**Why 1st 3 AVG / 1st 9 AVG / 140/Leg are scoped to exactly 501, 301, 170, and 101
+— never any other X01 starting score, and never any other game type — ever,
+unless a future change explicitly says otherwise (2026-07 product decision)**:
+these three "opening exchange" stats only mean something for the app's standard
+X01 formats. A 170 leg was previously excluded on the theory that it's too short
+for "opening darts" to be meaningful (it can finish, or bust, on the very first
+visit) — that reasoning is superseded by the explicit decision to include it, so
+it no longer applies. What's still excluded: any custom/non-standard X01 starting
+score (e.g. a 701 leg) and Daily Challenge's non-scoring formats (Bullseye
+Gauntlet, Steady Hand, Treble Run), which use a filler `1000` starting category
+that isn't a real X01 leg at all — and, as always, every non-X01 game type
+(Cricket, and whatever comes after it). This restriction is applied via
+`AND g.game_type='x01' AND json_extract(g.config,'$.startingScore') IN
+(501,301,170,101)`, referred to in the code as `OPENING_CATS` — checking
+`game_type` explicitly (not just matching on `category`, a human-readable label)
+means a future game type's category string can never accidentally collide with
+these four values the way a bare string match could. If a future starting score
+is added to X01 (per `docs/game-modes-roadmap.md`), it does **not** automatically
+join this scope — it must be added to this exact `IN (...)` list explicitly, the
+same deliberate step that added 170 and 101 here.
 
 **Historical bug, fixed**: `1st 3 AVG`/`1st 9 AVG` originally summed raw
 per-dart values instead of using the bust-zeroed `turns.scored` column, so a

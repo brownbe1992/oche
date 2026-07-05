@@ -77,18 +77,38 @@ describe('getPlayerStatBubbles — trebleless % (per-leg, REFERENCE.md denominat
   });
 });
 
-describe('getPlayerStatBubbles — OPENING_CATS scoping (501/301 only)', () => {
-  test('first3avg/score140pct ignore a leg played in a non-501/301 category', () => {
+describe('getPlayerStatBubbles — OPENING_CATS scoping (exactly 501/301/170/101, 2026-07 decision)', () => {
+  test('first3avg/score140pct count 501, 170, and 101 opening visits alike', () => {
     const name = 'X01_OpeningCats';
     db.addPlayer(name);
     const g501 = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
     turn(g501.gameId, name, 1, 1, { scored: 140, darts: 3 }); // a real 501 opening visit, scores 140
     const g170 = db.createGame({ category: '170', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
-    turn(g170.gameId, name, 1, 1, { scored: 170, darts: 3, checkout: true, checkoutPoints: 170 }); // a 170 leg's opening (only) visit
+    turn(g170.gameId, name, 1, 1, { scored: 170, darts: 3, checkout: true, checkoutPoints: 170 }); // 170's opening (only) visit — now counts, was previously excluded
+    const g101 = db.createGame({ category: '101', legsPerSet: 1, setsPerGame: 1, practice: 1, config: { startingScore: 101 }, players: [{ name }] });
+    turn(g101.gameId, name, 1, 1, { scored: 101, darts: 3, checkout: true, checkoutPoints: 101 }); // 101's opening (only) visit — new starting score, also counts
     const bubbles = db.getPlayerStatBubbles(name, 'practice');
-    assert.equal(bubbles.first3avg, 140, 'only the 501 leg\'s opening visit counts, not the 170 leg\'s');
-    assert.equal(bubbles.score140pct, 100, '1 of 1 eligible (501/301) opening visits scored >=140');
+    assert.equal(bubbles.first3avg, (140 + 170 + 101) / 3, 'all 3 opening visits (501/170/101) count');
+    assert.ok(Math.abs(bubbles.score140pct - (2 / 3) * 100) < 1e-9, '2 of 3 (140 and 170) scored >=140, 101 did not');
     assert.equal(bubbles.bigFish, 1, 'the 170 checkout still counts toward Big Fish (not opening-scoped)');
+  });
+
+  test('first3avg/score140pct ignore a non-standard X01 starting score and any non-X01 game type', () => {
+    const name = 'X01_OpeningCats_Excluded';
+    db.addPlayer(name);
+    const g501 = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    turn(g501.gameId, name, 1, 1, { scored: 140, darts: 3 });
+    // A custom/non-standard X01 starting score (e.g. 701) is not one of the 4
+    // decided values — excluded even though game_type='x01'.
+    const g701 = db.createGame({ category: '701', legsPerSet: 1, setsPerGame: 1, practice: 1, config: { startingScore: 701 }, players: [{ name }] });
+    turn(g701.gameId, name, 1, 1, { scored: 180, darts: 3 });
+    // A Cricket opening "visit" must never count either, even though nothing about
+    // its category string would collide with '501'/'301'/'170'/'101'.
+    const gCricket = db.createGame({ category: 'Cricket (15-20, Bull)', legsPerSet: 1, setsPerGame: 1, practice: 1, gameType: 'cricket', config: { numbers: [20, 19, 18, 17, 16, 15, 25] }, players: [{ name }] });
+    db.addTurn(gCricket.gameId, { player: name, set: 1, leg: 1, scored: 0, legWon: true, darts: [{ sector: 20, multiplier: 3 }] });
+    const bubbles = db.getPlayerStatBubbles(name, 'practice');
+    assert.equal(bubbles.first3avg, 140, 'only the 501 opening visit counts — not 701 (non-standard) or Cricket');
+    assert.equal(bubbles.score140pct, 100, 'the 701 leg\'s 180 opening visit is excluded from this stat entirely');
   });
 });
 
@@ -233,5 +253,21 @@ describe('getMetricHistory matches getPlayerStatBubbles for the same metric (doc
     const history = db.getMetricHistory(name, 'avg', 'all', { mode: 'practice' });
     const historyTotal = history.reduce((s, r) => s + r.value * r.count, 0) / history.reduce((s, r) => s + r.count, 0);
     assert.equal(historyTotal, bubble, 'aggregating every history bucket reproduces the single bubble value');
+  });
+
+  test('"first3avg" applies the same 501/301/170/101 scoping as getPlayerStatBubbles', () => {
+    const name = 'X01_History_OpeningCats';
+    db.addPlayer(name);
+    const g501 = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    turn(g501.gameId, name, 1, 1, { scored: 140, darts: 3 });
+    const g170 = db.createGame({ category: '170', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    turn(g170.gameId, name, 1, 1, { scored: 170, darts: 3, checkout: true, checkoutPoints: 170 });
+    const g701 = db.createGame({ category: '701', legsPerSet: 1, setsPerGame: 1, practice: 1, config: { startingScore: 701 }, players: [{ name }] });
+    turn(g701.gameId, name, 1, 1, { scored: 100, darts: 3 }); // non-standard starting score — excluded from both
+    const bubble = db.getPlayerStatBubbles(name, 'practice').first3avg;
+    const history = db.getMetricHistory(name, 'first3avg', 'all', { mode: 'practice' });
+    assert.equal(history.length, 1, 'both eligible legs land in the same (current) month bucket');
+    assert.equal(history[0].value, bubble, 'getMetricHistory reproduces the exact same scoped average as the bubble');
+    assert.equal(bubble, (140 + 170) / 2, '701 (non-standard) is excluded from both');
   });
 });

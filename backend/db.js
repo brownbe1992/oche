@@ -1084,13 +1084,19 @@ function getPlayerStatBubbles(playerName, mode) {
   // tlLegs: legs where no dart was a treble
   const tlLegs     = qd(`SELECT COUNT(*) AS v FROM (SELECT t.game_id,t.set_no,t.leg_no ${JD} ${mf} ${X01_ONLY} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(d.is_treble)=0)`) ?? 0;
 
-  // first3avg / first9avg ("opening exchanges" stats) are scoped to 501/301 only — a
-  // 170 leg is short enough that "first visit" / "first 9 darts" isn't a meaningful
-  // opening-strength window (a 170 leg routinely finishes in a single visit, and can
-  // bust on that very first visit, which 501/301 never can), and Daily Challenge's
-  // non-scoring formats (Bullseye Gauntlet, Steady Hand, Treble Run) use a filler
-  // 1000 starting score that isn't a real X01 leg at all.
-  const OPENING_CATS = `AND g.category IN ('501','301')`;
+  // first3avg / first9avg / score140pct ("opening exchanges" stats) are scoped to
+  // exactly the 4 standard X01 starting scores (501/301/170/101) — never any other
+  // game type, and never a non-standard/custom X01 starting score — per an explicit
+  // product decision (2026-07): these three-and-nine-dart-average stats count for
+  // 501/301/170/101 only, ever, unless a future change explicitly says otherwise.
+  // Checks game_type (not just category, which is only a human-readable label) plus
+  // the actual numeric startingScore from config, matching the same robust pattern
+  // getNineDarterStats()/getSummary() already use for their own 501-only scoping —
+  // stronger than a bare category-string match, which a future game type could
+  // coincidentally collide with. Daily Challenge's non-scoring formats (Bullseye
+  // Gauntlet, Steady Hand, Treble Run) use a filler 1000 starting score, already
+  // excluded by this same numeric check.
+  const OPENING_CATS = `AND g.game_type='x01' AND json_extract(g.config,'$.startingScore') IN (501,301,170,101)`;
 
   // first3avg: turn-level score of the leg's first visit. t.scored is already 0 for
   // a busted visit — the previous version summed raw per-dart points instead, which
@@ -1532,26 +1538,28 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
       // Turn-level score of the leg's first visit — t.scored is already 0 for a
       // busted visit (the previous version summed raw per-dart points instead,
       // wrongly counting a busted opening visit's attempted score). Scoped to
-      // 501/301: see the OPENING_CATS comment in getPlayerStatBubbles for why.
+      // exactly 501/301/170/101 — see the OPENING_CATS comment in
+      // getPlayerStatBubbles for why (2026-07 product decision: these three-and-
+      // nine-dart-average stats count for these 4 starting scores only, ever).
       return db.prepare(`SELECT ${F.fmt} AS bucket, AVG(CAST(scored AS REAL)) AS value FROM (
         SELECT t.created_at, t.scored,
                ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
         FROM turns t JOIN games g ON g.id=t.game_id
-        WHERE t.player_id=? ${modeWhere} ${weightWhere} AND g.category IN ('501','301')
+        WHERE t.player_id=? ${modeWhere} ${weightWhere} AND g.game_type='x01' AND json_extract(g.config,'$.startingScore') IN (501,301,170,101)
       ) WHERE rn = 1 ${F.and} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'first9avg':
       // 3-dart-average-equivalent over the leg's first up-to-3 visits — uses
       // t.scored (bust-zeroed) for points and the same "bust counts as 3 darts"
       // convention used everywhere else for the denominator, instead of raw
       // per-dart sums that previously counted a busted visit's attempted points as
-      // if they'd scored. Scoped to 501/301 — see getPlayerStatBubbles.
+      // if they'd scored. Scoped to 501/301/170/101 — see getPlayerStatBubbles.
       return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(CAST(total_scored AS REAL)/NULLIF(dart_count,0)*3) AS value FROM (
         SELECT MAX(t.created_at) AS leg_ts, SUM(t.scored) AS total_scored,
                SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END) AS dart_count
         FROM (SELECT t.id, t.game_id, t.set_no, t.leg_no, t.created_at, t.scored, t.bust,
                      ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
               FROM turns t JOIN games g ON g.id=t.game_id
-              WHERE t.player_id=? ${modeWhere} ${weightWhere} AND g.category IN ('501','301')) t
+              WHERE t.player_id=? ${modeWhere} ${weightWhere} AND g.game_type='x01' AND json_extract(g.config,'$.startingScore') IN (501,301,170,101)) t
         LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
         WHERE t.rn <= 3
         GROUP BY t.game_id, t.set_no, t.leg_no
@@ -1569,11 +1577,11 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         GROUP BY t.game_id,t.set_no,t.leg_no
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'score140pct':
-      // Same "opening visit" shape as first3avg above — needs the same 501/301
-      // scoping, see the OPENING_CATS comment in getPlayerStatBubbles.
+      // Same "opening visit" shape as first3avg above — needs the same
+      // 501/301/170/101 scoping, see the OPENING_CATS comment in getPlayerStatBubbles.
       return db.prepare(`SELECT ${F.fmt} AS bucket, CAST(SUM(CASE WHEN scored>=140 THEN 1 ELSE 0 END) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
         SELECT t.scored, t.created_at, ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
-        FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere} AND g.category IN ('501','301')
+        FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere} AND g.game_type='x01' AND json_extract(g.config,'$.startingScore') IN (501,301,170,101)
       ) WHERE rn=1 ${F.and} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'pace':
       // Darts/minute, derived from the gap between consecutive thrown_at timestamps

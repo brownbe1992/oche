@@ -330,9 +330,17 @@ calling this trivial: the nine-darter detection queries are hardcoded to
 `startingScore=501` specifically (`game-modes-roadmap.md`'s own "Data model" section
 above, "Known coupling") — that's deliberate (a nine-darter is a 501-specific concept,
 the minimum dart count to check out from 501), not a bug, and 101 doesn't need or want
-its own "nine-darter" analog. No other X01 stat currently assumes a specific starting
-score, so this really is just a UI addition plus (if wanted later) a 101-specific
-Personal Best framing — out of scope for the "add the button" version of this task.
+its own "nine-darter" analog. One X01 stat group *does* enumerate specific starting
+scores explicitly — the "opening exchange" stats (1st 3 AVG, 1st 9 AVG, 140/Leg),
+scoped via `OPENING_CATS` in `backend/db.js` to exactly `501/301/170/101` per an
+explicit 2026-07 product decision (see `REFERENCE.md` §3) — and 101 has already been
+added to that list as part of this same decision, so no follow-up is needed for 101
+specifically. But this means the "just add a button" framing doesn't generalize: any
+*future* X01 starting score added after 101 would need a deliberate decision (and an
+explicit edit to `OPENING_CATS`'s `IN (...)` list) about whether it also joins the
+opening-exchange scope — it does not happen automatically. So this really is just a
+UI addition for 101 itself, plus (if wanted later) a 101-specific Personal Best
+framing — out of scope for the "add the button" version of this task.
 
 ## Practice Drill Modes (new candidates, 2026-07 — design not started)
 
