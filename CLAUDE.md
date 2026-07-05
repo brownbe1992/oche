@@ -41,12 +41,22 @@ player PINs.
 
 Full checklist and current gaps: `docs/security-hardening-roadmap.md`.
 
-### New features get test coverage for their core logic, not just manual verification
+### Every new calculation gets a permanent, committed test in the same change
 
-Once a real test runner exists (see `docs/testing-and-observability-roadmap.md`), new
-features touching scoring/stats logic should add tests for that logic as part of
-building it — not defer it, and not rely solely on manual/Playwright verification the
-way this project has so far.
+Any time a new stat formula, achievement/badge trigger condition, or other
+calculation is added or changed (X01, Cricket, or any future game type), it needs a
+committed, re-runnable automated test proving the math — not a one-off manual or
+Playwright check that gets thrown away once the session ends. This is what closes
+the exact gap that let bugs like the backwards trebleless leaderboard or the
+missing `OPENING_CATS` filter sit undetected for a while: the only verification
+was a person eyeballing numbers once, with nothing left behind to catch the same
+mistake creeping back in later.
+
+If `docs/testing-and-observability-roadmap.md`'s Part B (a real `node:test` runner)
+doesn't exist yet when this comes up, build the minimal version needed to hold this
+one test rather than skipping it — don't wait for a separate, dedicated session to
+"do testing properly" first. Every new calculation extends the same suite from then
+on, so it only ever grows.
 
 Full plan and current status: `docs/testing-and-observability-roadmap.md`.
 

@@ -82,9 +82,12 @@ identity.
 
 ## Standing practice going forward
 
-New features should get test coverage for their core logic as they're built — not
-retrofitted later, and not replaced by manual verification alone once a real test
-runner exists. See `CLAUDE.md` for the binding version of this statement.
+Every new calculation (a stat formula, an achievement/badge trigger condition, any
+other game-logic math) gets a committed, re-runnable test in the same change that
+adds it — not retrofitted later, and not replaced by manual/Playwright verification
+alone. If no runner exists yet at the point this comes up, build the minimal version
+needed to hold that one test rather than deferring it to a separate "do testing
+properly" session. See `CLAUDE.md` for the binding version of this statement.
 
 ## Open questions for whoever picks this up
 
