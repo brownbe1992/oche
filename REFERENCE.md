@@ -223,7 +223,8 @@ the end of this section for its formulas (game-modes-roadmap.md build-order
 step 3).
 
 **How cricket games interact with these X01 stats** (`X01_ONLY` constant in
-`backend/db.js`): cricket turns live in the same `turns` table, but
+`backend/db.js`, now defined as `_scope({gameType:'x01'})` — see "Game scope
+filter helper" below): cricket turns live in the same `turns` table, but
 `turns.scored` means *cricket points earned* there, not X01 countdown points —
 so every formula derived from `scored` (or from leg averages / trebleless legs /
 180 detection) carries an explicit `g.game_type='x01'` filter. Without it, a
@@ -417,12 +418,31 @@ historical bugs here came from a metric accidentally using the wrong family, or
 two sibling functions (bubbles vs. history) drifting onto different families
 for the same named metric.
 
+### Game scope filter helper (`_scope({mode, gameType})`, `backend/db.js`)
+
+Every stats query needs to scope by mode (h2h/practice, via the existing
+`_mf(mode)`) and, since Cricket landed, by game type too. `_scope()` composes
+both into one SQL fragment instead of each query hand-rolling its own
+`AND g.game_type='...'` alongside its mode filter
+(`docs/existing-app-prep-roadmap.md` item 1) — `gameType` is whitelisted
+against `KNOWN_GAME_TYPES` (`['x01','cricket']`) as defense-in-depth, though
+it's always an internally-controlled literal, never raw request input.
+`X01_ONLY` is now `_scope({gameType:'x01'})` (byte-identical string, so its
+existing call sites needed no changes), and every Cricket query function below
+routes through `_scope({mode, gameType:'cricket'})`. A future scoping
+dimension (online matches, league membership) only needs to extend `_scope`'s
+destructured params — Cricket's own dimension is now fully centralized this
+way; the ~15-20 pre-existing mode-only query sites (`computeStats`,
+`getSummary`, `getHomeExtra`, `getPersonalBests`, pace, etc.) still call
+`_mf(mode)` directly and weren't migrated in this pass (out of scope, higher
+regression risk on mature code, no current feature needs it yet).
+
 ### Cricket stats (`GAME_TYPES.cricket.statDefs` / `CRICKET_STAT_DEFS`)
 
 A separate, smaller stat vocabulary from X01's — Cricket's `turns.scored` means
 "cricket points earned," not countdown points, so none of these reuse the X01
-formulas above; every query here is scoped by `g.game_type='cricket'` instead
-of `X01_ONLY`. Marks are always derived at query time from `darts.sector`/
+formulas above; every query here is scoped via `_scope({mode, gameType:'cricket'})`
+instead of `X01_ONLY`. Marks are always derived at query time from `darts.sector`/
 `multiplier` matched against that game's `config.numbers` (`CRICKET_MARK_CASE`
 in `backend/db.js` — a dart's marks are its multiplier if the sector is one of
 the match's in-play numbers, else 0), not from any persisted mark/closed state.

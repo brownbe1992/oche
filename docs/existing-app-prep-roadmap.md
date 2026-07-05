@@ -2,8 +2,12 @@
 
 > Status: **in progress** (6 of 11 of this doc's own items done/adopted, 1 more
 > confirmed-and-closed — see items 2, 3, 8, 9, 10, 11 (done/adopted) and item 5
-> (confirmed protected through item 10's refactor)). Item 7 (Settings regrouping) is
-> now the only remaining item without a concrete plan in motion.
+> (confirmed protected through item 10's refactor)). Item 1 (the shared game-scope
+> helper) is now partially done — see its own status note. Items 4 and 6 (game-
+> lifecycle hook point, player-deletion-guard extensibility) remain genuinely
+> not started — item 6 deliberately so (no feature needing it has landed yet).
+> Item 7 (Settings regrouping) is the only remaining item without a concrete plan
+> in motion.
 >
 > This doc reviews the other roadmap docs in `docs/` and recommends changes to the
 > *existing* codebase now, specifically to reduce rework later. It intentionally does
@@ -26,6 +30,29 @@ they are. A prioritized "do now / keep in mind" summary is at the end.
 ---
 
 ## 1. Generalize the stats query layer beyond `practice`/H2H (highest leverage)
+
+> **Status: Partially done.** The recommended shared helper now exists —
+> `_scope({mode, gameType})` in `backend/db.js`, composing the existing `_mf(mode)`
+> h2h/practice fragment with a whitelisted `game_type` dimension
+> (`KNOWN_GAME_TYPES`). `X01_ONLY` is now `_scope({gameType:'x01'})` (byte-identical
+> output, so its ~15 existing call sites needed zero changes), and **every one of
+> Cricket's query functions** (`getCricketStatBubbles`, `getCricketNineMarksStats`,
+> `getCricketMprLeaderboard`, `getCricketWinLeaderboard`, `getCricketPerfectLegStats`,
+> `getCricketPersonalBests`, and 6 `getMetricHistory()` cases) routes through it
+> instead of hand-rolling its own `AND g.game_type='cricket'` — this closes the gap
+> Cricket's own build concretely re-created (it had temporarily reintroduced ~24
+> ad-hoc inline `game_type='...'` literals before this retrofit). Verified
+> byte-identical output via the existing scratch-DB regression suite (Cricket stats
+> + X01 personal-bests/stat-bubbles unchanged).
+>
+> **Still open**: the ~15-20 pre-existing mode-only query sites (`computeStats`,
+> `getSummary`, `getHomeExtra`, `getPersonalBests`, pace, etc.) still call `_mf(mode)`
+> directly rather than `_scope({mode})` — they were left untouched as out of scope
+> for this pass (higher regression risk on mature, already-shipped code, and no
+> current feature needs it). A genuinely new *universal* dimension (e.g. excluding
+> online matches from every stat, not just Cricket's) would still need to touch
+> those sites individually to route them onto `_scope()` first. Cricket's own
+> dimension is fully centralized; the older mode-only dimension is not yet.
 
 **The evidence**: `backend/db.js` currently hardcodes the pattern
 `g.practice = 0/1` (almost always paired with a `game_players` count check to

@@ -1077,11 +1077,10 @@ const CRICKET_MARK_CASE = (d) => `CASE WHEN EXISTS (SELECT 1 FROM json_each(g.co
 function getCricketStatBubbles(playerName, mode) {
   const p = getPlayer(playerName);
   if (!p) return null;
-  const mf = _mf(mode);
-  const CRICKET = `AND g.game_type='cricket'`;
+  const scope = _scope({ mode, gameType: 'cricket' });
 
-  const rounds = db.prepare(`SELECT COUNT(*) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${CRICKET} ${mf}`).get(p.id)?.v ?? 0;
-  const marks  = db.prepare(`SELECT COALESCE(SUM(${CRICKET_MARK_CASE('d')}),0) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${CRICKET} ${mf}`).get(p.id)?.v ?? 0;
+  const rounds = db.prepare(`SELECT COUNT(*) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+  const marks  = db.prepare(`SELECT COALESCE(SUM(${CRICKET_MARK_CASE('d')}),0) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
   const mpr = rounds > 0 ? (marks / rounds) : null;
 
   // 9 marks in one visit — 3 darts, each a treble on an in-play number, the
@@ -1089,7 +1088,7 @@ function getCricketStatBubbles(playerName, mode) {
   const nineMarks = db.prepare(`
     SELECT COUNT(*) AS v FROM (
       SELECT t.id FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-      WHERE t.player_id=? ${CRICKET} ${mf}
+      WHERE t.player_id=? ${scope}
       GROUP BY t.id HAVING COUNT(d.id)=3 AND SUM(${CRICKET_MARK_CASE('d')})=9
     )
   `).get(p.id)?.v ?? 0;
@@ -1097,18 +1096,18 @@ function getCricketStatBubbles(playerName, mode) {
   const gamesRow = db.prepare(`
     SELECT COUNT(*) AS played, SUM(CASE WHEN g.winner_id=? THEN 1 ELSE 0 END) AS won
     FROM game_players gp JOIN games g ON g.id=gp.game_id
-    WHERE gp.player_id=? ${CRICKET} AND g.completed_at IS NOT NULL ${mf}
+    WHERE gp.player_id=? ${scope} AND g.completed_at IS NOT NULL
   `).get(p.id, p.id);
   const gamesPlayed = gamesRow?.played ?? 0;
   const winPct = gamesPlayed > 0 ? (gamesRow.won / gamesPlayed * 100) : null;
 
-  const dartsThrown = db.prepare(`SELECT COUNT(*) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${CRICKET} ${mf}`).get(p.id)?.v ?? 0;
+  const dartsThrown = db.prepare(`SELECT COUNT(*) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
 
   const avgDartsPerLeg = db.prepare(`
     SELECT AVG(leg_darts) AS v FROM (
       SELECT COUNT(d.id) AS leg_darts
       FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-      WHERE t.player_id=? ${CRICKET} ${mf}
+      WHERE t.player_id=? ${scope}
       GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.leg_won)>0
     )
   `).get(p.id)?.v ?? null;
@@ -1119,11 +1118,11 @@ function getCricketStatBubbles(playerName, mode) {
 // Cricket leaderboard for the 9-marks achievement (see getCricketStatBubbles'
 // nineMarks formula above) — same leaderboard+recent shape as getOneEightyStats.
 function getCricketNineMarksStats(mode) {
-  const mf = _mf(mode);
+  const scope = _scope({ mode, gameType: 'cricket' });
   const base = `
     SELECT t.id, t.player_id, t.created_at
     FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-    WHERE g.game_type='cricket' ${mf}
+    WHERE 1=1 ${scope}
     GROUP BY t.id HAVING COUNT(d.id)=3 AND SUM(${CRICKET_MARK_CASE('d')})=9
   `;
   const leaderboard = db.prepare(`SELECT p.name, COUNT(*) AS count FROM (${base}) x JOIN players p ON p.id=x.player_id GROUP BY x.player_id ORDER BY count DESC`).all();
@@ -1137,11 +1136,11 @@ function getCricketNineMarksStats(mode) {
 // minimum-rounds floor (matching _trebleLess()'s HAVING turns>=10 convention)
 // keeps a single lucky visit from topping the board.
 function getCricketMprLeaderboard(mode) {
-  const mf = _mf(mode);
+  const scope = _scope({ mode, gameType: 'cricket' });
   const rows = db.prepare(`
     SELECT p.name AS name, COUNT(DISTINCT t.id) AS rounds, SUM(${CRICKET_MARK_CASE('d')}) AS marks
     FROM turns t JOIN games g ON g.id=t.game_id JOIN players p ON p.id=t.player_id JOIN darts d ON d.turn_id=t.id
-    WHERE g.game_type='cricket' ${mf}
+    WHERE 1=1 ${scope}
     GROUP BY t.player_id
     HAVING rounds >= 5
   `).all();
@@ -1154,12 +1153,13 @@ function getCricketMprLeaderboard(mode) {
 // scoped to game_type='cricket'. H2H-only by nature (practice has no opponent
 // to win against), so no mode param.
 function getCricketWinLeaderboard() {
+  const scope = _scope({ mode: 'h2h', gameType: 'cricket' });
   const winRows = db.prepare(`
     SELECT p.name AS name, COUNT(*) AS played, SUM(CASE WHEN g.winner_id = p.id THEN 1 ELSE 0 END) AS won
     FROM game_players gp
     JOIN players p ON p.id = gp.player_id
     JOIN games g ON g.id = gp.game_id
-    WHERE g.completed_at IS NOT NULL AND g.practice = 0 AND g.player_count > 1 AND g.game_type='cricket'
+    WHERE g.completed_at IS NOT NULL ${scope}
     GROUP BY p.id
     HAVING played >= 1
     ORDER BY won DESC, played ASC
@@ -1174,11 +1174,11 @@ function getCricketWinLeaderboard() {
 // minimum — same logic as the Perfect Leg achievement in frontend/index.html's
 // enterTurnCricket(), computed here in SQL instead of read from client state).
 function getCricketPerfectLegStats(mode) {
-  const mf = _mf(mode);
+  const scope = _scope({ mode, gameType: 'cricket' });
   const base = `
     SELECT t.player_id, MAX(t.created_at) AS created_at
     FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-    WHERE g.game_type='cricket' ${mf}
+    WHERE 1=1 ${scope}
     GROUP BY t.game_id, t.set_no, t.leg_no, t.player_id
     HAVING SUM(t.leg_won) > 0
       AND COUNT(d.id) = (
@@ -1249,13 +1249,13 @@ function getPersonalBests(playerName, mode) {
 function getCricketPersonalBests(playerName, mode) {
   const p = getPlayer(playerName);
   if (!p) return null;
-  const mf = _mf(mode);
+  const scope = _scope({ mode, gameType: 'cricket' });
 
   const legRowsSql = `
     SELECT t.game_id, t.set_no, t.leg_no, MAX(t.id) AS lastTurnId,
       SUM(${CRICKET_MARK_CASE('d')}) AS marks, COUNT(DISTINCT t.id) AS rounds, COUNT(d.id) AS darts
     FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-    WHERE t.player_id=? AND g.game_type='cricket' ${mf}
+    WHERE t.player_id=? ${scope}
     GROUP BY t.game_id, t.set_no, t.leg_no
     HAVING SUM(t.leg_won) > 0
   `;
@@ -1272,11 +1272,11 @@ function getCricketPersonalBests(playerName, mode) {
 
   let winStreak = 0;
   if (mode !== 'practice') {
+    const h2hScope = _scope({ mode: 'h2h', gameType: 'cricket' });
     const recentGames = db.prepare(`
       SELECT g.winner_id AS winnerId
       FROM games g JOIN game_players gp ON gp.game_id=g.id
-      WHERE gp.player_id=? AND g.game_type='cricket' AND g.completed_at IS NOT NULL
-        AND g.practice=0 AND g.player_count > 1
+      WHERE gp.player_id=? AND g.completed_at IS NOT NULL ${h2hScope}
       ORDER BY g.completed_at DESC
       LIMIT 50
     `).all(p.id);
@@ -1291,11 +1291,10 @@ function getCricketPersonalBests(playerName, mode) {
 function getMetricHistory(playerName, metric, period, opts = {}) {
   const p = getPlayer(playerName);
   if (!p) return [];
-  const modeWhere = opts.mode === 'h2h'
-    ? `AND g.practice = 0 AND g.player_count > 1`
-    : opts.mode === 'practice'
-    ? `AND (g.practice = 1 OR g.player_count = 1)`
-    : '';
+  const modeWhere = _mf(opts.mode);
+  // Cricket's metric cases below scope through _scope() (docs/existing-app-prep-roadmap.md
+  // item 1) instead of hand-rolling their own "AND g.game_type='cricket'" alongside modeWhere.
+  const cricketScope = _scope({ mode: opts.mode, gameType: 'cricket' });
   const params = [p.id];
   let weightWhere = '';
   if (opts.dartWeight) {
@@ -1442,14 +1441,14 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
       return db.prepare(`SELECT bucket, CAST(SUM(marks) AS REAL)/NULLIF(COUNT(*),0) AS value FROM (
         SELECT ${T.fmt} AS bucket, SUM(${CRICKET_MARK_CASE('d')}) AS marks
         FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-        WHERE t.player_id=? AND g.game_type='cricket' ${T.and} ${modeWhere} ${weightWhere}
+        WHERE t.player_id=? ${cricketScope} ${T.and} ${weightWhere}
         GROUP BY t.id
       ) GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'cricket9marks':
       return db.prepare(`SELECT bucket, COUNT(*) AS value FROM (
         SELECT ${T.fmt} AS bucket
         FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-        WHERE t.player_id=? AND g.game_type='cricket' ${T.and} ${modeWhere} ${weightWhere}
+        WHERE t.player_id=? ${cricketScope} ${T.and} ${weightWhere}
         GROUP BY t.id HAVING COUNT(d.id)=3 AND SUM(${CRICKET_MARK_CASE('d')})=9
       ) GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'cricketwinpct': {
@@ -1460,29 +1459,54 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
       return db.prepare(`SELECT bucket, CAST(SUM(won) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
         SELECT ${G.fmt} AS bucket, CASE WHEN g.winner_id=? THEN 1 ELSE 0 END AS won
         FROM game_players gp JOIN games g ON g.id=gp.game_id
-        WHERE gp.player_id=? AND g.game_type='cricket' AND g.completed_at IS NOT NULL ${modeWhere} ${G.and}
+        WHERE gp.player_id=? AND g.completed_at IS NOT NULL ${cricketScope} ${G.and}
       ) GROUP BY bucket ORDER BY bucket`).all(p.id, p.id);
     }
     case 'cricketgames': {
       const G = bld('g.completed_at');
       return db.prepare(`SELECT ${G.fmt} AS bucket, COUNT(*) AS value
         FROM game_players gp JOIN games g ON g.id=gp.game_id
-        WHERE gp.player_id=? AND g.game_type='cricket' AND g.completed_at IS NOT NULL ${modeWhere} ${G.and}
+        WHERE gp.player_id=? AND g.completed_at IS NOT NULL ${cricketScope} ${G.and}
         GROUP BY bucket ORDER BY bucket`).all(p.id);
     }
     case 'cricketdartsthrown':
-      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(d.id) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? AND g.game_type='cricket' ${T.and} ${modeWhere} ${weightWhere} GROUP BY bucket ORDER BY bucket`).all(...params);
+      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(d.id) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${cricketScope} ${T.and} ${weightWhere} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'cricketavgdartsperleg':
       return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(leg_darts) AS value FROM (
         SELECT MAX(t.created_at) AS leg_ts, COUNT(d.id) AS leg_darts
         FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-        WHERE t.player_id=? AND g.game_type='cricket' ${modeWhere} ${weightWhere}
+        WHERE t.player_id=? ${cricketScope} ${weightWhere}
         GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.leg_won)>0
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
 
     default:
       return [];
   }
+}
+
+function _mf(mode) {
+  if (mode === 'h2h')      return `AND g.practice = 0 AND g.player_count > 1`;
+  if (mode === 'practice') return `AND (g.practice = 1 OR g.player_count = 1)`;
+  return '';
+}
+
+// Central "game scope" filter builder (docs/existing-app-prep-roadmap.md item 1)
+// — composes the mode dimension (h2h/practice, via _mf) with the game-type
+// dimension, so a future scoping dimension (online, league, tournament) only
+// needs to touch this one function instead of being hand-rolled at 20+ query
+// sites the way `practice` originally was. gameType is always an internally-
+// controlled enum value (never raw request input — callers pass a literal
+// 'x01'/'cricket', server.js only uses a query param to pick which function to
+// call), and is whitelisted here regardless as a defense-in-depth measure
+// against string interpolation.
+const KNOWN_GAME_TYPES = ['x01', 'cricket'];
+function _scope({ mode, gameType } = {}) {
+  let sql = _mf(mode);
+  if (gameType) {
+    if (!KNOWN_GAME_TYPES.includes(gameType)) throw new Error(`_scope: unknown gameType "${gameType}"`);
+    sql += ` AND g.game_type='${gameType}'`;
+  }
+  return sql;
 }
 
 // X01-only scope for stats derived from turns.scored / leg averages / trebleless
@@ -1493,13 +1517,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
 // average. Physical-dart stats (darts thrown, pace, sector analytics, Around the
 // World), games/wins/H2H records, and checkout-based stats (cricket never writes
 // checkout=1) deliberately do NOT use this — see REFERENCE.md §3.
-const X01_ONLY = `AND g.game_type='x01'`;
-
-function _mf(mode) {
-  if (mode === 'h2h')      return `AND g.practice = 0 AND g.player_count > 1`;
-  if (mode === 'practice') return `AND (g.practice = 1 OR g.player_count = 1)`;
-  return '';
-}
+const X01_ONLY = _scope({ gameType: 'x01' });
 
 function getOneEightyStats(mode) {
   const mf = _mf(mode);
