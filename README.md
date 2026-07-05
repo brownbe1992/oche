@@ -157,7 +157,7 @@ The scoring screen is optimised for touchscreen entry on a tablet. Everything fi
 - Checkout route appears inline below the score when the player is on a finishing number
 
 **Input modes** — toggle between two ways to enter darts:
-- **Pad** — a grid of numbers (1–20), Bull, and Miss, with Single / Double / Treble multiplier buttons
+- **Pad** — a grid of numbers (1–20), Bull, and Miss, with Single / Double / Treble multiplier buttons. This is the app's **accessible input path**: ordinary focusable buttons that work the same for keyboard, switch, and screen-reader users, with no visual dartboard shape or precise tap-target aiming required.
 - **🎯 Dartboard** — an interactive SVG dartboard; tap directly on the sector you hit. The multiplier ring is determined by where you tap (singles bed, doubles ring, treble ring, bull).
 
 **Dart entry (Pad mode):**
@@ -459,7 +459,7 @@ Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accou
 
 #### Scoring
 
-- **Default input** — which dart entry method a new game opens with: **Dartboard** (tap the sector you hit) or **Pad** (number grid with a multiplier selector). Either can still be switched per-session from the scoring screen itself.
+- **Default input** — which dart entry method a new game opens with: **Dartboard** (tap the sector you hit) or **Pad** (number grid with a multiplier selector). Either can still be switched per-session from the scoring screen itself. **Pad is the app's accessible input path** — plain focusable buttons, no dartboard shape or precise tapping required — worth setting as the default for a low-vision or motor-impaired player.
 
 #### Accessibility
 

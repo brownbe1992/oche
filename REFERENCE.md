@@ -1101,10 +1101,15 @@ both the controller and `/display`.
 
 ### Input paths
 
-Pad mode (number grid + Single/Double/Treble buttons, ordinary focusable
-`<button>` elements) is a fully non-visual-board-dependent way to score — not
-just an alternate UI skin. `default_scoring_input` in Settings picks which mode
-a new game opens with.
+**Pad mode is the app's decided accessible input path** (docs/accessibility-roadmap.md,
+2026-07) — not just an alternate UI skin. Number grid + Single/Double/Treble
+buttons, ordinary focusable `<button>` elements: no dartboard shape to
+perceive and no precise tap-target aiming required, unlike the SVG Dartboard's
+sector/ring hit-testing. `default_scoring_input` in Settings picks which mode a
+new game opens with; the Settings copy (both the Scoring section that owns the
+setting and the Accessibility section, which cross-references it) says so
+directly, so an admin setting up the app for a low-vision or motor-impaired
+player knows which mode to pick.
 
 ### Contrast (WCAG AA)
 
@@ -1122,11 +1127,25 @@ colorblind mode and cream otherwise — the orange colorblind-mode substitute fo
 red made that label unreadable at the default cream, a genuine regression the
 audit caught. Full punch list: `docs/accessibility-roadmap.md`.
 
+### Type size
+
+Audited 2026-07: catalogued every sub-13px `font-size` in `frontend/index.html`.
+The compact 10-12px tier (field labels, chips, secondary metadata) is a
+deliberate, working design choice, kept as-is — zoom isn't disabled and none
+of it is essential/blocking content. Two 9px outliers that were actually
+primary (non-decorative) labels were bumped to the existing 10.5px tier:
+`.bubble-label` (names each stat bubble's number) and `.cs-throw-chip` (the
+Cricket scorecard's sole textual "whose turn" indicator). `display.html`'s
+`vmin`-based scale is a different concern (scales with the physical display),
+not covered by this pass.
+
 ### Known open gaps
 
-Small (11-12px) secondary text sizes haven't been checked against a
-minimum-readable guideline. See `docs/accessibility-roadmap.md` for the full
-standing checklist and priority order.
+None currently open — see `docs/accessibility-roadmap.md`'s own "Open
+questions" section for the two genuinely unresolved design questions (how much
+`aria-live="polite"` vs. `"assertive"` should vary by event type, and whether
+`display.html` warrants the same investment as the controller), which aren't
+gaps so much as open design calls for whoever picks them up next.
 
 ---
 

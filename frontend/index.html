@@ -242,7 +242,7 @@
   .cs-standing{font-size:10px;font-weight:400;color:var(--muted);letter-spacing:0}
   .cs-col-head,.cs-cell{border-left:1px solid var(--wire)}
   .cs-col-head.active{color:var(--gold)}
-  .cs-throw-chip{font-size:9px;letter-spacing:.08em;color:var(--gold);text-transform:uppercase}
+  .cs-throw-chip{font-size:10.5px;letter-spacing:.08em;color:var(--gold);text-transform:uppercase}
   .cs-cell.active,.cs-col-head.active{background:rgba(217,180,106,.08)}
   .cs-mark{font-family:'Bebas Neue',sans-serif;font-size:20px;line-height:1;color:var(--muted)}
   .cs-mark-2{color:var(--ink)}
@@ -473,7 +473,7 @@
   .stat-bubble:hover{border-color:var(--muted)}
   .stat-bubble.active{border-color:var(--gold);box-shadow:inset 0 0 0 1px var(--gold)}
   .bubble-val{font-family:'Bebas Neue';font-size:22px;color:var(--cream);line-height:1}
-  .bubble-label{font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:3px;line-height:1.2}
+  .bubble-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:3px;line-height:1.2}
   .stat-bubble.active .bubble-label{color:var(--gold)}
 
   /* ---- player page tabs ---- */
@@ -883,12 +883,12 @@
         </div>
         <div id="scoring-input-body" hidden>
           <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
-            Which dart entry method a new game opens with. Either can still be switched per-session from the scoring screen itself.
+            Which dart entry method a new game opens with. Either can still be switched per-session from the scoring screen itself. <strong style="color:var(--ink)">Pad is the app's accessible input path</strong> — ordinary focusable buttons, no dartboard shape or precise tap-target aiming required — worth setting as the default for a low-vision or motor-impaired player.
           </p>
           <label class="field">Default input</label>
           <select class="date-input" id="default-scoring-input" style="width:auto;margin-bottom:6px">
             <option value="board">Dartboard — tap the sector you hit</option>
-            <option value="pad">Pad — number grid with a multiplier selector</option>
+            <option value="pad">Pad — number grid with a multiplier selector (accessible input path)</option>
           </select>
         </div>
       </div>
@@ -907,6 +907,9 @@
             <input type="checkbox" id="colorblind-mode" style="width:16px;height:16px;margin:0">
             Colorblind-friendly palette
           </label>
+          <p style="font-size:12px;color:var(--muted);margin:14px 0 0;line-height:1.6">
+            For a low-vision or motor-impaired player, see <strong style="color:var(--ink)">Scoring → Default input</strong> above — Pad mode is the app's accessible input path (plain focusable buttons, no dartboard shape or precise tapping required).
+          </p>
         </div>
       </div>
 

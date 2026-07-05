@@ -1,11 +1,44 @@
 # Accessibility — Roadmap & Standing Checklist
 
-> Status: **in progress** (items 1, 2, and 3 of 5 done — colorblind-friendly palette,
-> the contrast audit, and `aria-live` announcements for turn results + achievement
-> flashes). Unlike the other docs in this folder, this isn't a single future feature —
-> it's a cross-cutting standard the app should hold itself to as new features
-> (including everything else in `docs/*.md`) get built. See `CLAUDE.md` for the
-> binding convention that points here.
+> Status: **✅ All 5 identified gaps done** (2026-07) — colorblind-friendly palette,
+> the contrast audit, `aria-live` announcements for turn results + achievement
+> flashes (controller only — see the open question about `display.html`), the
+> accessible-input-path framing for `default_scoring_input`, and the type-size pass.
+> Unlike the other docs in this folder, this isn't a single future feature that's now
+> "finished" — it's a cross-cutting standard the app should hold itself to as new
+> features (including everything else in `docs/*.md`) get built, so this doc stays in
+> `docs/` rather than moving to `docs/archive/` even with every identified gap
+> closed — see the "Standing practice going forward" section below and `CLAUDE.md`
+> for the binding convention that points here.
+>
+> **Accessible-input-path framing (2026-07)**: explicitly decided and documented (not
+> just left as an implicit baseline fact) that Pad mode is the app's accessible input
+> path — ordinary focusable buttons, no dartboard shape to perceive, no precise
+> tap-target aiming required, unlike the SVG Dartboard's sector/ring hit-testing.
+> Updated the Settings copy in both the Scoring section (which owns
+> `default_scoring_input`) and the Accessibility section (which now cross-references
+> it, so an admin looking there for accessibility guidance finds it too), the
+> dropdown's own "Pad" option label, README.md's Input modes and Default input
+> descriptions, and REFERENCE.md's Input paths section. Pure documentation/UI-copy —
+> no new mechanism, since Pad mode already existed and already worked this way.
+>
+> **Type-size pass (2026-07)**: catalogued every sub-13px `font-size` in
+> `frontend/index.html` (about a dozen distinct values from 9px to 12px, ~120 uses
+> total) rather than assuming the existing scale was fine. Verdict: the compact tier
+> (10-12px: field labels, chips, secondary metadata) is a deliberate, working design
+> choice — zoom isn't disabled (confirmed baseline), and none of it is essential
+> content that would block a task if briefly hard to read. Two genuine outliers at
+> 9px, both non-decorative primary labels rather than secondary chrome, were bumped
+> to the existing 10.5px tier already used elsewhere (`.out-tag`, `.pscore .nm-out`)
+> for consistency: `.bubble-label` (the sole visible label naming each Player Profile
+> stat bubble's number — without it the number is meaningless) and `.cs-throw-chip`
+> (the Cricket scorecard's sole textual "whose turn" indicator, previously redundant
+> with only a subtle background-tint highlight). Verified visually via Playwright
+> screenshots (Player Profile stat bubbles, the Cricket scorecard header) — no
+> overflow, clipping, or layout regression at either size. `display.html`'s type
+> scale (`vmin`-based, scaling with the physical display's size) is a fundamentally
+> different concern and was explicitly left out of this pass, matching how the
+> `aria-live` pass also scoped itself to the controller only.
 >
 > **Contrast audit (2026-07)**: computed real WCAG 2.1 contrast ratios (relative
 > luminance formula) for every text-color/background pairing in the palette, rather
@@ -87,16 +120,11 @@ in isolation.
    header above for the full punch list and fixes (`--green`/`--bust` brightened,
    a new `--red-text` for the one place `--red` was used as text, and a
    colorblind-mode-specific fix to the dartboard's own "Bull" label).
-4. **`default_scoring_input` is framed as an aesthetic choice today, not an
-   accessibility one.** Worth explicitly deciding that Pad mode *is* the app's
-   accessible input path (vs. the dartboard SVG), and considering whether the
-   Settings copy/documentation should say so directly, so an admin setting up the app
-   for a low-vision or motor-impaired player knows which mode to pick.
-5. **Small type sizes on secondary UI text** (11-12px field labels, chips, stat
-   captions throughout `index.html`) haven't been checked against a minimum
-   readable-size guideline. Likely acceptable since none of it is essential
-   content and zoom isn't disabled (see baseline above), but worth a deliberate
-   look rather than an assumption once the higher-priority items above are done.
+4. ~~**`default_scoring_input` is framed as an aesthetic choice today, not an
+   accessibility one.**~~ ✅ **Done** (2026-07) — see the status header above.
+5. ~~**Small type sizes on secondary UI text**~~ ✅ **Done** (2026-07) — see the status
+   header above for the catalog, the verdict (the compact tier stays, deliberately),
+   and the two genuine outliers that were bumped.
 
 ## Suggested priority order
 
@@ -107,10 +135,9 @@ in isolation.
    header for the punch list and fixes.
 3. ~~**`aria-live` announcements**~~ ✅ **Done** for `frontend/index.html` — see gap 1
    above. `display.html` intentionally not yet covered.
-4. **Accessible-input-path framing for `default_scoring_input`** — likely just a
-   documentation/UI-copy change once decided, no new mechanism needed.
-5. **Type-size pass** — lowest priority; revisit after the above, since none of the
-   small text is essential/blocking content today.
+4. ~~**Accessible-input-path framing for `default_scoring_input`**~~ ✅ **Done**
+   (2026-07) — see gap 4 above and the status header.
+5. ~~**Type-size pass**~~ ✅ **Done** (2026-07) — see gap 5 above and the status header.
 
 ## Standing practice going forward
 
