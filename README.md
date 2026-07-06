@@ -968,7 +968,8 @@ oche/
 │   ├── auth.js      Password/PIN hashing, session tokens, cookie helpers
 │   ├── netguard.js  Outbound-request egress guard (blocks loopback/link-local)
 │   ├── backup.js    Stand-alone WAL-safe backup script (see Backups)
-│   └── backup-lib.js  Shared backup/restore mechanics (used by backup.js and server.js)
+│   ├── backup-lib.js  Shared backup/restore mechanics (used by backup.js and server.js)
+│   └── admin-recovery.js  Stand-alone admin password reset / lockout-clear CLI
 ├── frontend/
 │   ├── index.html    The entire app — one self-contained HTML file
 │   └── display.html  Read-only live scoreboard for a second screen
@@ -1067,3 +1068,58 @@ export of every player, game, and stat in the database with one click — it's y
 and you can always take it with you. This is admin-only: there is no per-player export
 and no export entry point anywhere on a player's own page. The export never includes
 admin accounts, sessions, app settings, or any player's PIN.
+
+### Admin Account Recovery
+
+If you've forgotten the admin password — or an admin account is stuck in its login
+lockout — with no other admin able to log in to fix it, use `backend/admin-recovery.js`.
+It's a standalone script with direct filesystem/container access, the same trust
+boundary every other sensitive operation on a self-hosted install already assumes
+(editing `docker-compose.yml`, reading the raw `darts.db` file). It's safe to run
+while the container keeps serving normally — no need to stop it first.
+
+Via Docker (most self-hosters' primary path):
+
+```
+docker exec -it oche node backend/admin-recovery.js list
+```
+
+Or directly on the host, pointing `DARTS_DB` at the live database file:
+
+```
+DARTS_DB=/path/to/darts_data/darts.db node backend/admin-recovery.js list
+```
+
+**Subcommands:**
+
+```
+list                          Prints every admin's username, creation date, and
+                               current lockout status.
+reset-password <username>     Sets a new password AND clears any lockout — a
+                               locked-out admin can log in again immediately with
+                               the new password, not just once the lock naturally
+                               expires.
+clear-lockout <username>      Clears a stuck lockout without changing the
+                               password at all, for "I remember my password fine,
+                               I just got locked out."
+```
+
+**Entering the new password**: avoid passing it as a plain argument (it would leak
+into shell history and `ps` output) — pipe it in instead, the same way `htpasswd`/
+`openssl passwd -stdin` do:
+
+```
+echo -n 'newpassword' | docker exec -i oche node backend/admin-recovery.js reset-password alice
+```
+
+Piping still leaves the echoed value in your *own* shell's history unless you're
+careful (e.g. prefix the command with a space, if your shell is configured to skip
+history for space-prefixed commands). Running the command with no piped input at
+all drops into an interactive, masked prompt instead (asked twice, since a masked
+prompt gives no visual feedback to catch a typo) — useful when running it directly
+inside an interactive `docker exec -it` session.
+
+There's deliberately no way to create a brand-new admin from scratch with this
+script — that's what the first-run setup wizard (when zero admins exist) and
+Settings → Admin Accounts (once logged in) are for. This is recovery of an
+*existing* account only.

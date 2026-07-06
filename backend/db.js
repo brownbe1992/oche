@@ -258,7 +258,7 @@ const q = {
   // password (verifyAdminPassword, for the backup-restore re-auth gate) rather than
   // just confirming the id exists.
   adminByIdFull  : db.prepare('SELECT id, username, password_hash, password_salt, login_fail_count, login_locked_until FROM admins WHERE id = ?'),
-  listAdmins     : db.prepare('SELECT id, username, created_at FROM admins ORDER BY username COLLATE NOCASE'),
+  listAdmins     : db.prepare('SELECT id, username, created_at, login_fail_count, login_locked_until FROM admins ORDER BY username COLLATE NOCASE'),
   countAdmins    : db.prepare('SELECT COUNT(*) AS n FROM admins'),
   deleteAdmin    : db.prepare('DELETE FROM admins WHERE id = ?'),
   // RETURNING the post-increment count — see bumpPinFail's comment above for why.
@@ -2555,8 +2555,17 @@ async function createAdmin(username, password) {
   return { ok: true };
 }
 
+// loginLockedUntil/loginFailCount are included so admin-recovery.js's `list`
+// subcommand can show whether an account is currently locked (and for how
+// much longer) without a separate query — docs/archive/admin-account-recovery-roadmap.md's
+// own "resolved open question" that this makes `clear-lockout` an informed
+// action rather than a shot in the dark. Harmless to also return to the
+// Settings UI's admin list, which only ever reads `.id`/`.username` today.
 function listAdmins() {
-  return q.listAdmins.all().map(a => ({ id: a.id, username: a.username, createdAt: a.created_at }));
+  return q.listAdmins.all().map(a => ({
+    id: a.id, username: a.username, createdAt: a.created_at,
+    loginFailCount: a.login_fail_count, loginLockedUntil: a.login_locked_until,
+  }));
 }
 
 function deleteAdmin(id) {
@@ -2567,6 +2576,14 @@ function deleteAdmin(id) {
   return { ok: true };
 }
 
+// docs/archive/admin-account-recovery-roadmap.md's "design gap" section: login()'s
+// lockout check runs unconditionally before the password is even consulted, so
+// resetting a locked-out admin's password alone would NOT restore access until
+// the existing lock naturally expired. Clearing login_fail_count/
+// login_locked_until here closes that for both this normal in-app flow (an
+// admin who successfully changes their own password has no reason to still be
+// carrying a stale lockout) and the recovery CLI's `reset-password`, which gets
+// this behavior for free with no separate call.
 async function changeAdminPassword(id, password) {
   id = Number(id);
   const admin = q.adminById.get(id);
@@ -2576,7 +2593,19 @@ async function changeAdminPassword(id, password) {
   }
   const { hash, salt } = await auth.hashSecret(password);
   q.updateAdminPw.run(hash, salt, id);
+  q.resetLoginFail.run(id);
   q.deleteSessionsForAdmin.run(id); // force re-login on this and any other device after a password change
+  return { ok: true };
+}
+
+// Clears a stuck lockout without touching the password at all —
+// admin-recovery.js's `clear-lockout` subcommand, for the "I remember my
+// password fine, I just got locked out" case.
+function clearAdminLockout(id) {
+  id = Number(id);
+  const admin = q.adminById.get(id);
+  if (!admin) throw httpError(404, 'Admin not found');
+  q.resetLoginFail.run(id);
   return { ok: true };
 }
 
@@ -2866,7 +2895,7 @@ module.exports = {
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics,
   getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, fireHaWebhook,
-  isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword,
+  isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword, clearAdminLockout,
   login, logout, getSessionAdmin, adminLockoutThreshold, verifyAdminPassword, backupRetentionDays,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,
   awardBadge, revokeBadge, getPlayerBadges, getH2HSummary, getAroundTheWorldProgress,

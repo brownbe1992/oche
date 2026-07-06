@@ -1525,6 +1525,20 @@ enumerate valid usernames.
   complete one — an attacker who knows a username/player name can still grief
   that one account into lockout. The per-IP rate limiter (below) is the primary
   defense against a flood; lockout is the backstop for slow, distributed attempts.
+- **Recovery**: `backend/admin-recovery.js` (a standalone CLI, same precedent
+  as `backend/backup.js` — direct filesystem/container access, no HTTP
+  surface) provides `list`/`reset-password <username>`/`clear-lockout
+  <username>` for a forgotten admin password or a stuck lockout when no other
+  admin can log in to fix it. `changeAdminPassword()` clears
+  `login_fail_count`/`login_locked_until` as part of any password change,
+  closing a gap where resetting a locked-out admin's password alone would not
+  have restored access until the lock naturally expired — this applies to
+  both the normal in-app Settings flow and the recovery CLI's
+  `reset-password`. `clearAdminLockout()` clears the same two columns without
+  touching the password, for an admin who remembers their password fine but
+  is just locked out. `listAdmins()` additionally returns
+  `loginFailCount`/`loginLockedUntil` so the CLI's `list` subcommand can show
+  lockout status without a separate query.
 
 ### Rate limiting (`server.js`, `rateLimit(bucket, ip, max, windowMs)`)
 

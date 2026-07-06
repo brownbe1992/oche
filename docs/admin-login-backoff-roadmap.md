@@ -15,8 +15,8 @@
 > zero waiting by simply providing the correct password sooner (see "How this differs
 > from a hard lockout" below).
 >
-> **Companion doc**: `docs/admin-account-recovery-roadmap.md` (a CLI recovery script)
-> is a different angle on the same underlying worry — this doc makes lockout itself
+> **Companion doc**: `docs/archive/admin-account-recovery-roadmap.md` (a CLI recovery
+> script, now shipped) is a different angle on the same underlying worry — this doc makes lockout itself
 > less of a problem to begin with; that doc gives an operator a way out if it still
 > happens (or if the password is simply forgotten, which no lockout design fixes).
 > They're independent and either can be built without the other, but they pair well.

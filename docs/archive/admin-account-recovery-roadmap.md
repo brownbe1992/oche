@@ -1,6 +1,17 @@
 # Admin Account Recovery CLI — Design Roadmap
 
-> Status: **Not started.**
+> Status: **Done.** `backend/admin-recovery.js` ships `list`/`reset-password
+> <username>`/`clear-lockout <username>`, exactly as designed below.
+> `changeAdminPassword()` (option 2, the recommended fix) now always clears
+> `login_fail_count`/`login_locked_until`, and `listAdmins()` returns lockout
+> status so `list` shows it directly. Concurrent-write safety against a live
+> running server was verified, not just assumed. All three open questions are
+> resolved: the interactive TTY prompt asks for the new password twice (piped
+> stdin is trusted as a single read, matching `openssl passwd -stdin`); the
+> README documents `docker exec -it oche node backend/admin-recovery.js ...`
+> as the primary invocation path; `list` shows lockout status. Committed
+> coverage: `backend/test/admin-recovery.test.js`. See
+> `docs/open-roadmap-items.md` for the tracker entry.
 >
 > **Size: Low complexity** — a standalone script following the exact precedent
 > `backend/backup.js` already set (zero new dependencies, invoked via
