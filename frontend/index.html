@@ -622,11 +622,7 @@
         <button class="tab-btn active" data-tab="h2h" onclick="switchHomeTab('h2h')">H2H</button>
         <button class="tab-btn" data-tab="practice" onclick="switchHomeTab('practice')">Practice</button>
       </div>
-      <div class="player-tabs" style="margin-bottom:16px">
-        <button class="tab-btn active" data-gtype="x01" onclick="switchHomeGameType('x01')">X01</button>
-        <button class="tab-btn" data-gtype="cricket" onclick="switchHomeGameType('cricket')">Cricket</button>
-        <button class="tab-btn" data-gtype="doubles_practice" onclick="switchHomeGameType('doubles_practice')">Doubles Practice</button>
-      </div>
+      <div class="player-tabs" id="home-gtype-tabs" style="margin-bottom:16px"></div>
       <div id="home-tab-body"><p class="pp-meta">Loading…</p></div>
     </div>
     <div class="card" style="margin-top:14px">
@@ -1623,7 +1619,19 @@ let homeGameType='x01';
 let settingsTab='account';
 let homeData=null;
 
+// Populates the Home page's game-type toggle from every registered game type with
+// a stat vocabulary (same filter/iteration as the Player Profile's own toggle,
+// game-modes-roadmap.md "Generalizing per-game-type stats") — no data dependency,
+// so this renders immediately rather than waiting on renderHome()'s fetch.
+function renderHomeGameTypeTabs(){
+  const el=document.getElementById('home-gtype-tabs');
+  if(!el) return;
+  el.innerHTML = Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length).map(g=>
+    `<button class="tab-btn${homeGameType===g.id?' active':''}" data-gtype="${g.id}" onclick="switchHomeGameType('${g.id}')">${g.label}</button>`
+  ).join('');
+}
 function renderHome(){
+  renderHomeGameTypeTabs();
   const body=document.getElementById('home-body');
   if(!body) return;
   const empty={leaderboard:[],recent:[]};
@@ -1762,8 +1770,8 @@ function renderHomePulse(){
 function renderHomeTabBody(){
   const el=document.getElementById('home-tab-body');
   if(!el || !homeData) return;
-  if(homeGameType==='cricket') return renderHomeTabBodyCricket();
-  if(homeGameType==='doubles_practice') return renderHomeTabBodyDoublesPractice();
+  const custom = GAME_TYPES[homeGameType] && GAME_TYPES[homeGameType].homeTabRenderer;
+  if(custom) return custom();
   const mode=homeTab;
   const data=homeData[mode];
   const extra=homeData.extra;
@@ -3072,11 +3080,15 @@ function renderPlayerPage(){
   };
   const primaryDefs = defs.filter(d=>d.primary);
   const secondaryDefs = defs.filter(d=>!d.primary);
+  // Iterates every registered game type with a stat vocabulary (game-modes-roadmap.md
+  // "Generalizing per-game-type stats") rather than one hardcoded button per known
+  // type — a future type with no statDefs (e.g. a stats-less drill mode) is filtered
+  // out instead of rendering an empty tab.
   const gameTypeTabsHtml = `
     <div class="player-tabs" style="margin-bottom:8px">
-      <button class="tab-btn${gt==='x01'?' active':''}" onclick="switchPlayerGameType('x01')">X01</button>
-      <button class="tab-btn${gt==='cricket'?' active':''}" onclick="switchPlayerGameType('cricket')">Cricket</button>
-      <button class="tab-btn${gt==='doubles_practice'?' active':''}" onclick="switchPlayerGameType('doubles_practice')">Doubles Practice</button>
+      ${Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length).map(g=>
+        `<button class="tab-btn${gt===g.id?' active':''}" onclick="switchPlayerGameType('${g.id}')">${g.label}</button>`
+      ).join('')}
     </div>`;
   const bubblesHtml = `
     ${gameTypeTabsHtml}
@@ -3486,8 +3498,8 @@ function loadPersonalBests(){
 function renderPersonalBests(data){
   const container=document.getElementById('player-personal-bests');
   if(!container) return;
-  if(playerGameType==='cricket') return renderCricketPersonalBests(data);
-  if(playerGameType==='doubles_practice') return renderDoublesPracticePersonalBests(data);
+  const custom = GAME_TYPES[playerGameType].personalBestsRenderer;
+  if(custom) return custom(data);
   if(!data || (data.bestLegAvg==null && data.fewestDartsCheckout==null)){
     container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough legs recorded yet.</p>`;
     return;
@@ -5176,25 +5188,49 @@ function playerSnapshotX01(p){
     gameDarts:p.gameDarts || 0
   };
 }
+// `label`/`personalBestsRenderer`/`homeTabRenderer` (game-modes-roadmap.md
+// "Generalizing per-game-type stats beyond a two-way toggle") are what let the
+// Player Profile and Home page game-type toggles iterate Object.values(GAME_TYPES)
+// instead of one hardcoded button + ternary per type at every call site. A `null`
+// personalBestsRenderer/homeTabRenderer means "use the built-in X01-shaped
+// rendering" (renderPersonalBests()/renderHomeTabBody()'s own default body) rather
+// than a custom function — X01 is the original shape everything else is compared
+// against, not itself a special case requiring its own renderer. Adding a future
+// game type (Baseball, Just Chuckin' It) to these two toggles is then just adding
+// an entry here with its own bespoke stat-fetch/render functions plugged in, not
+// touching the toggle-rendering or dispatch code at either site. What's
+// deliberately NOT generalized here: the backend stat-fetch functions themselves
+// (getCricketStatBubbles(), getDoublesPracticeStatBubbles(), etc. stay bespoke
+// per type) and the Home page's upfront Promise.all fetch list — a single
+// parameterized query engine across X01 (leg/win-based), Cricket (marks-based),
+// and drill modes (no legs, no opponent) is a real, separate design problem the
+// roadmap doc leaves open, not something this pass forces an abstraction onto.
 const GAME_TYPES = {
   x01: {
     id: 'x01',
+    label: 'X01',
     newMatchPlayer,
     evaluateVisit,
     resetForNextLeg: resetPlayerForNextLegX01,
     playerSnapshot: playerSnapshotX01,
-    statDefs: STAT_DEFS
+    statDefs: STAT_DEFS,
+    personalBestsRenderer: null,
+    homeTabRenderer: null
   },
   cricket: {
     id: 'cricket',
+    label: 'Cricket',
     newMatchPlayer: newMatchPlayerCricket,
     evaluateVisit: evaluateVisitCricket,
     resetForNextLeg: resetPlayerForNextLegCricket,
     playerSnapshot: playerSnapshotCricket,
-    statDefs: CRICKET_STAT_DEFS
+    statDefs: CRICKET_STAT_DEFS,
+    personalBestsRenderer: renderCricketPersonalBests,
+    homeTabRenderer: renderHomeTabBodyCricket
   },
   doubles_practice: {
     id: 'doubles_practice',
+    label: 'Doubles Practice',
     newMatchPlayer: newMatchPlayerDoublesPractice,
     // Per-dart evaluation (throwDartDoublesPractice()), not a batched-visit
     // evaluateVisit — every existing call site for this game type is a dedicated
@@ -5205,15 +5241,21 @@ const GAME_TYPES = {
     evaluateVisit: () => { throw new Error('doubles_practice has no per-visit evaluateVisit — see throwDartDoublesPractice()'); },
     resetForNextLeg: resetPlayerForNextLegDoublesPractice,
     playerSnapshot: playerSnapshotDoublesPractice,
-    statDefs: DOUBLES_PRACTICE_STAT_DEFS
+    statDefs: DOUBLES_PRACTICE_STAT_DEFS,
+    personalBestsRenderer: renderDoublesPracticePersonalBests,
+    homeTabRenderer: renderHomeTabBodyDoublesPractice
   }
 };
+// bubbleKeyMap is patched on below, right after each map itself is defined —
+// BUBBLE_KEY_MAP in particular is declared later in the file (near
+// loadStatBubbles()), so referencing it inside the object literal above would hit
+// its temporal-dead-zone before that line runs.
 // Which def array / bubble-key-map the Player Profile's stat bubbles, chart, and
 // personal bests should read from — driven by the profile's own game-type toggle
 // (playerGameType), independent of any in-progress game.gameType.
 function activeStatDefs(){ return GAME_TYPES[playerGameType].statDefs; }
-function activeBubbleKeyMap(){ return playerGameType==='cricket' ? CRICKET_BUBBLE_KEY_MAP : playerGameType==='doubles_practice' ? DOUBLES_PRACTICE_BUBBLE_KEY_MAP : BUBBLE_KEY_MAP; }
-function activeGameTypeParam(){ return playerGameType==='cricket' ? '&gameType=cricket' : playerGameType==='doubles_practice' ? '&gameType=doubles_practice' : ''; }
+function activeBubbleKeyMap(){ return GAME_TYPES[playerGameType].bubbleKeyMap; }
+function activeGameTypeParam(){ return playerGameType==='x01' ? '' : '&gameType='+playerGameType; }
 
 /* ---------- Cricket (game-modes-roadmap.md build-order step 2) ----------
    Standard cricket only (v1 scope decision) — highest score wins, cut-throat
@@ -5525,6 +5567,11 @@ function drawAvgChart(data){
 
 /* ---------- stat bubbles ---------- */
 const BUBBLE_KEY_MAP = { dartsthrown:'dartsThrown', avgdartsperday:'avgDartsPerDay', avgdartsperleg:'avgDartsPerLeg', '180s':'one80s', bigfish:'bigFish', ninedarters:'nineDarters', treblelesspct:'treblelessPct', '180sperleg':'one80sPerLeg' };
+// Patched onto GAME_TYPES here (rather than inline in its own object literal
+// above) since BUBBLE_KEY_MAP itself isn't defined until this point in the file.
+GAME_TYPES.x01.bubbleKeyMap = BUBBLE_KEY_MAP;
+GAME_TYPES.cricket.bubbleKeyMap = CRICKET_BUBBLE_KEY_MAP;
+GAME_TYPES.doubles_practice.bubbleKeyMap = DOUBLES_PRACTICE_BUBBLE_KEY_MAP;
 function toggleMoreStats(){
   showMoreStats = !showMoreStats;
   renderPlayerPage();

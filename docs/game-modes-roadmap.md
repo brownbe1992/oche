@@ -75,12 +75,15 @@
 > toggle — see "Doubles Practice" below and REFERENCE.md §2/§3 for the full
 > design. Just Chuckin' It (freeform, unscored) remains not started.
 >
-> **New candidates logged (2026-07, not designed/built yet)**: **Just Chuckin' It** (freeform,
-> unscored practice — see "Practice Drill Modes" below); and a generalization of
-> the existing Player Profile X01/Cricket/Doubles-Practice toggle to work for an
-> arbitrary number of game types instead of three hardcoded ones — see
-> "Generalizing per-game-type stats" below, since every mode listed here needs
-> its own place to show its own stats.
+> **New candidates logged (2026-07, not designed/built yet)**: **Just Chuckin' It**
+> (freeform, unscored practice — see "Practice Drill Modes" below).
+>
+> **✅ Done (2026-07): the Player Profile/Home page game-type toggle is now N-way**,
+> not three hardcoded buttons — see "Toggle mechanism generalized" below. The
+> *backend* half of that same section (a bespoke SQL function set per game type,
+> and the Home page's upfront fetch list growing the same way) is still open and
+> deliberately not attempted — real design work for whoever builds Baseball or
+> Just Chuckin' It next, not resolved by the toggle-mechanism generalization.
 
 ## Goal
 
@@ -271,43 +274,67 @@ depends on it.
   change needed (the grouping is purely a client-side rendering split, since
   `player_badges` itself only ever needed a free-form `badge_id` string).
 
-## Generalizing per-game-type stats beyond a two-way toggle (new, 2026-07 — design not started)
+## ✅ Toggle mechanism generalized (2026-07); backend stat-fetch generalization still open
 
 Requested: every game mode's own stats (three-dart average, trebleless %, etc. or
 whatever that mode's equivalent is) should be viewable on the Player Profile, for
-*every* mode that exists — not just X01 and Cricket. Today this is genuinely
-hardcoded to exactly two: `playerGameType` (`frontend/index.html`) is a plain
-`'x01' | 'cricket'` string, and the Player Profile's game-type selector is two
-literal buttons (`switchPlayerGameType('x01')` / `switchPlayerGameType('cricket')`),
-not a loop over anything. The matching Home page toggle (`homeGameType`) is built
-the same hardcoded way. Every new mode this doc adds (Baseball, and now the two
-Practice Drill Modes above) needs a place to show its own stats, so this two-way
-toggle needs to become **N-way** before a third mode ships, not after:
+*every* mode that exists — not just X01 and Cricket. This had two genuinely
+separate parts, and only the first is built:
 
-- The toggle itself needs to iterate over the registered game types (`GAME_TYPES`
-  in `frontend/index.html`, or a filtered view of it — a drill mode with no
-  `statDefs` at all shouldn't render an empty tab) rather than two hardcoded
-  buttons, on both the Player Profile and the Home page.
-- **The backend scaling concern**: Cricket's stats needed a full parallel set of
-  functions (`getCricketStatBubbles`, `getCricketPersonalBests`,
-  `getCricketMprLeaderboard`, `getCricketWinLeaderboard`,
-  `getCricketPerfectLegStats`, 6 new `getMetricHistory()` cases) — a real, but
-  one-time, cost when going from 1 to 2 game types. Going from 2 to 4-5 (Baseball,
-  Just Chuckin' It, Doubles Practice) by hand-writing another fully parallel set of
-  functions *per type, forever* is a cost worth reconsidering before it compounds —
-  whether some of this can generalize (e.g. a single parameterized stat-bubble
-  query keyed by each type's own formula definitions, rather than a bespoke
-  SQL function per type) is an open design question for whoever tackles this,
-  not something this note resolves.
-- The **drill modes above don't fit the existing per-type stats shape at all** —
+**✅ Built: the toggle widgets and their dispatch are now N-way, not hardcoded
+per type.** `GAME_TYPES` (`frontend/index.html`) gained 3 UI-facing fields per
+entry — `label`, `personalBestsRenderer`, `homeTabRenderer` (a `null` renderer
+means "use the built-in X01-shaped default," not a special case) — alongside
+`statDefs`, which already existed. Both the Player Profile's and the Home page's
+game-type toggle now render via `Object.values(GAME_TYPES).filter(g=>g.statDefs
+&& g.statDefs.length).map(...)` instead of one hardcoded `<button>` per known
+type, and `renderPersonalBests()`/`renderHomeTabBody()` dispatch to a custom
+renderer via `GAME_TYPES[type].personalBestsRenderer`/`.homeTabRenderer` instead
+of an `if(type==='cricket') ... if(type==='doubles_practice') ...` chain. The
+Home page's toggle row was static HTML before this — it's now populated by a new
+`renderHomeGameTypeTabs()`, called from `renderHome()`. `activeBubbleKeyMap()`
+reads `GAME_TYPES[playerGameType].bubbleKeyMap` (patched onto each entry right
+after `BUBBLE_KEY_MAP`/`CRICKET_BUBBLE_KEY_MAP`/`DOUBLES_PRACTICE_BUBBLE_KEY_MAP`
+are each defined, since referencing a `const` before its own declaration line
+would hit its temporal-dead-zone); `activeGameTypeParam()` was already fully
+mechanical (`'&gameType='+type` for anything but `'x01'`) and needed no stored
+field at all. **Net effect**: adding Baseball or Just Chuckin' It to these two
+toggles going forward means adding one `GAME_TYPES` entry with its own bespoke
+stat-fetch/render functions plugged in — not touching the toggle-rendering or
+dispatch code at either site, which was the actual goal of "N-way before a third
+mode ships" (even though Doubles Practice, the third mode, had already shipped
+with one more hardcoded branch by the time this generalization pass landed —
+this retrofits that branch away, not just prevents a fourth one).
+
+**Still genuinely open — deliberately not attempted this pass**: the backend
+scaling concern. Cricket's stats needed a full parallel set of functions
+(`getCricketStatBubbles`, `getCricketPersonalBests`, `getCricketMprLeaderboard`,
+`getCricketWinLeaderboard`, `getCricketPerfectLegStats`, 6 `getMetricHistory()`
+cases); Doubles Practice needed its own smaller parallel set on top. Going from
+3 to 4-5 game types (Baseball, Just Chuckin' It) by hand-writing another fully
+parallel set of SQL functions *per type, forever* is a cost worth reconsidering
+before it compounds — whether some of this can generalize (e.g. a single
+parameterized stat-bubble query keyed by each type's own formula definitions,
+rather than a bespoke SQL function per type) is a real, separate design problem.
+Forcing an abstraction across X01 (leg/win-gated), Cricket (marks-based), and the
+drill modes (no legs, no opponent, no win concept at all) without a concrete
+second consumer to validate the shape against risks exactly the kind of
+premature generalization that's worse than the per-type duplication it would
+replace — left for whoever tackles Baseball or Just Chuckin' It next, informed
+by having a genuine fourth data point to design against. The Home page's upfront
+`Promise.all` fetch list (`renderHome()`) has the same "grows by N endpoints per
+type" shape and is left unresolved for the same reason.
+- The **drill modes don't fit the existing per-type stats shape at all** —
   `getPersonalBests()`-style "best leg / fewest darts / win streak" concepts assume
-  legs and opponents that Just Chuckin' It and Doubles Practice don't have. Their
-  stat vocabularies (see each mode's own section above) are different enough that
-  "just add a `statDefs` array like Cricket's" may not be the right fit without
-  some adaptation.
-- This is the natural next step after step 4 (already done for X01/Cricket) in the
-  build order below, and a prerequisite for showing *any* stats for whichever mode
-  ships next — Baseball or a Practice Drill Mode both need it.
+  legs and opponents that Just Chuckin' It doesn't have (Doubles Practice worked
+  around this with its own deliberately-smaller 2-field Personal Bests shape,
+  not a generalization of X01/Cricket's 5-field one). Whoever designs Just
+  Chuckin' It's stats will hit the same question.
+- **Still open, unrelated to the mechanism above**: whether the toggle should
+  show every registered game type unconditionally (today's behavior, unchanged
+  by this pass) or only the ones a given player has actually played, so a player
+  who's never touched Cricket doesn't see an all-empty Cricket tab. Genuinely
+  undecided, not resolved by this pass — see "Open questions" below.
 
 ## Baseball (rules primer — for whoever builds this next)
 
@@ -542,13 +569,11 @@ X01-only, see its status note above).
    regression to the existing X01 leaderboards.
 5. **Baseball** (or another variant) as the second proof that the plugin shape
    generalizes, not just fits Cricket specifically.
-6. **New, not designed yet**: generalize the Player Profile/Home page game-type
-   toggle beyond X01/Cricket/Doubles Practice (see "Generalizing per-game-type
-   stats" above) — this naturally comes before or alongside whichever of
-   Baseball/Just Chuckin' It ships next, since neither has anywhere
-   to show its stats without it. Doubles Practice's own toggle button was
-   added as a minimal 3rd-branch extension of the existing 2-way mechanism, not
-   this full generalization — that's still open.
+6. **✅ Done (2026-07): generalize the Player Profile/Home page game-type toggle**
+   beyond hardcoded per-type buttons — see "Toggle mechanism generalized" above.
+   The toggle mechanism itself is N-way now; the backend stat-fetch side of the
+   same concern (a bespoke SQL function set per type, forever) is explicitly
+   still open, left for whichever of Baseball/Just Chuckin' It builds next.
 7. **✅ Done — Doubles Practice** — the first Practice Drill Mode built. Per-dart
    evaluation (`evaluateDartDoublesPractice()`), "all simultaneously live"
    multi-double sessions, its own 3 stat bubbles + 2-field Personal Bests, New

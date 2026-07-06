@@ -89,7 +89,7 @@ oche/
   server — it is never written to the database. See [§7](#7-live-scoreboard--real-time-sync).
 - **Game-type plugin seam**: `frontend/index.html` has a `GAME_TYPES` registry with
   `newMatchPlayer`, `evaluateVisit`, `resetForNextLeg`, `playerSnapshot`, and
-  `statDefs` per type — `x01` and, as of the Cricket build, `cricket`.
+  `statDefs` per type — `x01`, `cricket`, and `doubles_practice`.
   `game.gameType` is stamped once in `startGame()`; every downstream caller
   (`enterTurn`, `startNextLeg`, `liveSnapshot`) dispatches through
   `GAME_TYPES[game.gameType]` instead of calling those functions directly, and
@@ -100,6 +100,20 @@ oche/
   entry points, rather than branches inside the X01-heavy originals — Cricket has no
   achievements, bust concept, or checkout hints, so forcing it through the same code
   would mean a lot of irrelevant branching. See §2 for Cricket's scoring rules.
+- **Player Profile/Home page game-type toggle**: each `GAME_TYPES` entry also
+  carries 3 UI-facing fields (game-modes-roadmap.md "Toggle mechanism
+  generalized") — `label` (button text), `bubbleKeyMap` (patched on right after
+  its own key-map `const` is defined, to dodge that const's temporal-dead-zone
+  inside the earlier `GAME_TYPES` object literal), and `personalBestsRenderer`/
+  `homeTabRenderer` (`null` means "use the built-in X01-shaped default" in
+  `renderPersonalBests()`/`renderHomeTabBody()`, not a special case). Both
+  toggles render via `Object.values(GAME_TYPES).filter(g=>g.statDefs &&
+  g.statDefs.length).map(...)` instead of one hardcoded button per type — the
+  Home page's toggle row, previously static HTML, is now populated by
+  `renderHomeGameTypeTabs()`. Only the toggle *mechanism* is generalized this
+  way — each type's own backend stat-fetch functions and stat shapes stay
+  bespoke; see game-modes-roadmap.md for why that part is deliberately left
+  unsolved.
 - **Game-lifecycle hooks** (`backend/db.js`, `docs/existing-app-prep-roadmap.md`
   item 4): `onGameCreated(fn)`/`onGameCompleted(fn)` register listener callbacks;
   `createGame()`/`completeGame()` fire theirs synchronously, in registration
