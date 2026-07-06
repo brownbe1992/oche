@@ -75,8 +75,7 @@
 > toggle — see "Doubles Practice" below and REFERENCE.md §2/§3 for the full
 > design. Just Chuckin' It (freeform, unscored) remains not started.
 >
-> **New candidates logged (2026-07, not designed/built yet)**: a 101 starting score
-> for X01 (trivial — see "Quick addition" below); **Just Chuckin' It** (freeform,
+> **New candidates logged (2026-07, not designed/built yet)**: **Just Chuckin' It** (freeform,
 > unscored practice — see "Practice Drill Modes" below); and a generalization of
 > the existing Player Profile X01/Cricket/Doubles-Practice toggle to work for an
 > arbitrary number of game types instead of three hardcoded ones — see
@@ -329,28 +328,27 @@ implementation (not just fitted to Cricket specifically).
 - **Killer** — elimination-style, players "kill" each other's assigned numbers.
 - **High-Low / Halve-It** — miss a target number and your score halves.
 
-## Quick addition: 101 as a fourth X01 starting score (2026-07, not built yet)
+## ✅ Built: 101 as a fourth X01 starting score (2026-07)
 
-X01's starting-score picker (`frontend/index.html`, the `pickStart(this, v)` segmented
-control, `data-start="501"/"301"/"170"`) needs a fourth button for **101** — the same
-mechanism, no new plumbing: `category` is already handled as a generic string/number
-everywhere in `backend/db.js` (X01_ONLY's `json_extract(g.config,'$.startingScore')`
-scoping doesn't hardcode which values are valid). The one thing to check before
-calling this trivial: the nine-darter detection queries are hardcoded to
-`startingScore=501` specifically (`game-modes-roadmap.md`'s own "Data model" section
-above, "Known coupling") — that's deliberate (a nine-darter is a 501-specific concept,
-the minimum dart count to check out from 501), not a bug, and 101 doesn't need or want
-its own "nine-darter" analog. One X01 stat group *does* enumerate specific starting
-scores explicitly — the "opening exchange" stats (1st 3 AVG, 1st 9 AVG, 140/Leg),
-scoped via `OPENING_CATS` in `backend/db.js` to exactly `501/301/170/101` per an
-explicit 2026-07 product decision (see `REFERENCE.md` §3) — and 101 has already been
-added to that list as part of this same decision, so no follow-up is needed for 101
-specifically. But this means the "just add a button" framing doesn't generalize: any
-*future* X01 starting score added after 101 would need a deliberate decision (and an
-explicit edit to `OPENING_CATS`'s `IN (...)` list) about whether it also joins the
-opening-exchange scope — it does not happen automatically. So this really is just a
-UI addition for 101 itself, plus (if wanted later) a 101-specific Personal Best
-framing — out of scope for the "add the button" version of this task.
+X01's starting-score picker (`frontend/index.html`) is now a `<select id="start-score-
+select">` with four options — **501/301/170/101** — rather than the old 3-button
+`.seg` control, since a dropdown reads tidier at 4 options and scales cleanly if a
+future value is ever added. `pickStart(btn,v)` was replaced by `pickStartSelect(sel)`
+(`setup.start = Number(sel.value)`); `restoreSetup()`'s "reselect the last-used
+starting score" logic now sets the `<select>`'s `.value` instead of toggling
+`aria-pressed` on a set of buttons. No new backend plumbing was needed: `category` was
+already handled as a generic string/number everywhere in `backend/db.js`, and
+`OPENING_CATS` (the "opening exchange" stats' scoping — 1st 3 AVG, 1st 9 AVG, 140/Leg)
+already included `501/301/170/101` from an earlier product decision (see `REFERENCE.md`
+§3), so no follow-up was needed for 101 specifically. The nine-darter detection queries
+stay hardcoded to `startingScore=501` — deliberate, not a gap, since a nine-darter is a
+501-specific concept (the minimum dart count to check out from 501) and 101 doesn't
+want its own analog. Verified end-to-end with Playwright: dropdown renders all 4
+options, selecting 101 sets `setup.start`, a full 101 leg plays and checks out
+correctly, and personal bests/stat bubbles report correct values scoped to 101. Any
+*future* X01 starting score added after 101 would still need a deliberate decision (and
+an explicit edit to `OPENING_CATS`'s `IN (...)` list) about whether it also joins the
+opening-exchange scope — that part still doesn't happen automatically.
 
 ## Practice Drill Modes (2026-07 — Doubles Practice built, Just Chuckin' It not started)
 
@@ -530,8 +528,8 @@ X01-only, see its status note above).
 6. **New, not designed yet**: generalize the Player Profile/Home page game-type
    toggle beyond X01/Cricket/Doubles Practice (see "Generalizing per-game-type
    stats" above) — this naturally comes before or alongside whichever of
-   Baseball/101/Just Chuckin' It ships next, since none of them have anywhere
-   to show their stats without it. Doubles Practice's own toggle button was
+   Baseball/Just Chuckin' It ships next, since neither has anywhere
+   to show its stats without it. Doubles Practice's own toggle button was
    added as a minimal 3rd-branch extension of the existing 2-way mechanism, not
    this full generalization — that's still open.
 7. **✅ Done — Doubles Practice** — the first Practice Drill Mode built. Per-dart
@@ -544,11 +542,11 @@ X01-only, see its status note above).
    regression check) and Playwright end-to-end (New Game setup, a full round
    ending each of the two ways, the Player Profile toggle, and the live
    scoreboard on both the controller and `/display`).
-8. **New, not designed yet**: 101 as a fourth X01 starting score (trivial, see
-   "Quick addition" above) and Just Chuckin' It — the latter needs its own
-   design pass first (the match-vs-drill architectural question raised in its
-   section is still open for it, even though Doubles Practice resolved it for
-   itself by just reusing `practice`/`game_type` as-is).
+8. **✅ Done — 101 as a fourth X01 starting score** (see "Quick addition" above).
+   **New, not designed yet**: Just Chuckin' It — needs its own design pass
+   first (the match-vs-drill architectural question raised in its section is
+   still open for it, even though Doubles Practice resolved it for itself by
+   just reusing `practice`/`game_type` as-is).
 
 ## Accessibility, security, and testing considerations
 

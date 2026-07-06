@@ -675,11 +675,12 @@
       <div class="setup-section" id="start-score-section">
         <div class="setup-label">Starting score</div>
         <div class="opts" style="margin:0">
-          <div class="seg" role="group" aria-label="Starting score">
-            <button data-start="501" aria-pressed="true" onclick="pickStart(this,501)">501</button>
-            <button data-start="301" aria-pressed="false" onclick="pickStart(this,301)">301</button>
-            <button data-start="170" aria-pressed="false" onclick="pickStart(this,170)">170</button>
-          </div>
+          <select class="date-input" id="start-score-select" aria-label="Starting score" onchange="pickStartSelect(this)">
+            <option value="501" selected>501</option>
+            <option value="301">301</option>
+            <option value="170">170</option>
+            <option value="101">101</option>
+          </select>
         </div>
       </div>
 
@@ -2545,9 +2546,8 @@ function applyPreset(legsToWin, sets){
   const sv=document.getElementById('sets-val'); if(sv) sv.textContent=sets;
   updateFormatLine();
 }
-function pickStart(btn,v){
-  setup.start=v;
-  document.querySelectorAll('[data-start]').forEach(b=>b.setAttribute('aria-pressed', b===btn));
+function pickStartSelect(sel){
+  setup.start = Number(sel.value);
 }
 /* ---------- Cricket New Game config (game-modes-roadmap.md) ---------- */
 function setGameType(type){
@@ -2654,7 +2654,7 @@ function restoreSetup(){
   try{
     const s = JSON.parse(localStorage.getItem('oche_last_setup')||'null');
     if(!s) return;
-    if(s.start)       { setup.start=s.start; document.querySelectorAll('[data-start]').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.start)===s.start))); }
+    if(s.start)       { setup.start=s.start; const sel=document.getElementById('start-score-select'); if(sel) sel.value=String(s.start); }
     if(s.legsPerSet)  { setup.legsPerSet=s.legsPerSet; const el=document.getElementById('legs-val'); if(el) el.textContent=s.legsPerSet; }
     if(s.setsPerGame) { setup.setsPerGame=s.setsPerGame; const el=document.getElementById('sets-val'); if(el) el.textContent=s.setsPerGame; }
     if(typeof s.practice==='boolean') setMode(s.practice ? 'practice' : 'h2h'); // never restores into 'challenge' — that's a fresh choice each visit

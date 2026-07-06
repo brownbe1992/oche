@@ -1338,7 +1338,7 @@ already-migrated database is a safe no-op).
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
-| `category` | `TEXT NOT NULL` | For X01 games: the starting score as a string (`'501'`/`'301'`/`'170'`, or a filler `'1000'` for Daily Challenge's non-scoring formats). Cricket games write a display label instead (`'Cricket (15-20, Bull)'` or `'Custom Cricket'`). Category-scoped stat filters (`OPENING_CATS`'s `IN ('501','301')`, nine-darter detection) either match X01 values explicitly or filter on `game_type`+`config`, so the cricket labels never collide with them |
+| `category` | `TEXT NOT NULL` | For X01 games: the starting score as a string (`'501'`/`'301'`/`'170'`/`'101'`, or a filler `'1000'` for Daily Challenge's non-scoring formats). Cricket games write a display label instead (`'Cricket (15-20, Bull)'` or `'Custom Cricket'`). Category-scoped stat filters (`OPENING_CATS`'s `IN (501,301,170,101)`, nine-darter detection) either match X01 values explicitly or filter on `game_type`+`config`, so the cricket labels never collide with them |
 | `legs_per_set` / `sets_per_game` | `INTEGER NOT NULL` | |
 | `created_at` / `completed_at` | `TEXT` | `completed_at` is `NULL` for in-progress/abandoned games |
 | `winner_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | |
