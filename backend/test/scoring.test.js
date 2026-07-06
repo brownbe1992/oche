@@ -11,7 +11,7 @@ const path = require('path');
 const scoring = require(path.join('..', '..', 'frontend', 'scoring.js'));
 const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET_STANDARD_NUMBERS,
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
-  evaluateDartDoublesPractice } = scoring;
+  evaluateDartDoublesPractice, chuckinTiersReached } = scoring;
 
 // Builds a real dart object the same way the app does (makeDart minus the
 // thrownAt timestamp), rather than hand-rolling a fake {value,isDouble,...} shape.
@@ -398,5 +398,36 @@ describe('challengeBadgeSignals (Daily Challenge badges: streak + format-complet
   test('missing/zero history is handled without throwing', () => {
     assert.deepEqual(challengeBadgeSignals({}, CHALLENGE_FORMATS), { week: false, month: false, allFormats: false });
     assert.deepEqual(challengeBadgeSignals(null, CHALLENGE_FORMATS), { week: false, month: false, allFormats: false });
+  });
+});
+
+describe('chuckinTiersReached (Just Chuckin\' It milestone ladders, game-modes-roadmap.md "Just Chuckin\' It")', () => {
+  // Mirrors index.html's CHUCKIN_MILESTONE_LADDERS trebles ladder thresholds
+  // exactly, so a regression here would also catch a real ladder-data typo.
+  const treblesTiers = [
+    { threshold: 10 }, { threshold: 50 }, { threshold: 100 }, { threshold: 500 }, { threshold: 1000 },
+  ];
+
+  test('a value below the lowest tier reaches nothing', () => {
+    assert.deepEqual(chuckinTiersReached(treblesTiers, 9), []);
+  });
+
+  test('a value is reached at exactly its threshold, not just above it', () => {
+    assert.deepEqual(chuckinTiersReached(treblesTiers, 10), [10]);
+    assert.deepEqual(chuckinTiersReached(treblesTiers, 11), [10]);
+  });
+
+  test('a value between two tiers reaches every tier at or below it, not just the nearest one', () => {
+    assert.deepEqual(chuckinTiersReached(treblesTiers, 75), [10, 50]);
+  });
+
+  test('a value at or above the top tier reaches every tier', () => {
+    assert.deepEqual(chuckinTiersReached(treblesTiers, 1000), [10, 50, 100, 500, 1000]);
+    assert.deepEqual(chuckinTiersReached(treblesTiers, 50000), [10, 50, 100, 500, 1000]);
+  });
+
+  test('an empty ladder reaches nothing, and a zero value reaches nothing', () => {
+    assert.deepEqual(chuckinTiersReached([], 100), []);
+    assert.deepEqual(chuckinTiersReached(treblesTiers, 0), []);
   });
 });

@@ -8,7 +8,7 @@ A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player 
 
 **v0.10.0**
 
-You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [26-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. All data lives in a SQLite database on your own server.
+You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [44-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. All data lives in a SQLite database on your own server.
 
 > Looking for exact stat formulas, achievement trigger conditions, the full database schema, or how a feature works internally (e.g. to debug it)? See **[REFERENCE.md](REFERENCE.md)** — the technical reference manual, kept up to date alongside this README.
 
@@ -90,7 +90,7 @@ The landing page shows a live snapshot of all-time activity:
 
 **This week / Last game played** — legs thrown today and this week, darts thrown this week, and a summary of the most recently completed game (players, category, winner, and when).
 
-**H2H / Practice toggle** — switches the leaderboards below between head-to-head and solo/practice stats. A second **X01 / Cricket** toggle switches the leaderboards between the two game types' own stat vocabularies.
+**H2H / Practice toggle** — switches the leaderboards below between head-to-head and solo/practice stats. A second game-type toggle — **X01 / Cricket / Doubles Practice** — switches the leaderboards between each game type's own stat vocabulary. (Just Chuckin' It isn't on this toggle — it has no win/opponent-based stats to rank on a leaderboard; its stats are Player Profile-only.)
 
 **X01 leaderboards:**
 - 3-dart average leaderboard
@@ -113,6 +113,10 @@ The landing page shows a live snapshot of all-time activity:
 - 🎯 **9 Marks** — every player who's scored the maximum 9 marks in one visit, with count and most recent date
 - 🏆 **Perfect Leg** — every leg closed in the fewest darts physically possible for that match's target set *("None recorded yet — you will never get this!")*
 
+**Doubles Practice leaderboards** (switching the toggle to Doubles Practice — no mode param, since this game type is always solo):
+- Doubles % leaderboard — minimum 5 rounds played, so one lucky round can't top the board
+- Best Round — each player's own best single round (most doubles hit; a tie is broken by fewest darts)
+
 A **"View full stats glossary"** link opens a shared reference explaining every stat term used across the app.
 
 ---
@@ -124,7 +128,7 @@ Configure a game before starting:
 | Setting | Options |
 |---|---|
 | **Game** | X01 · Cricket |
-| **Mode** | H2H (head-to-head) · Practice (solo) · 🎯 Daily Challenge · 👻 Ghost · Doubles Practice |
+| **Mode** | H2H (head-to-head) · Practice (solo) · 🎯 Daily Challenge · 👻 Ghost · Doubles Practice · Just Chuckin' It |
 | **Format (X01)** | 501 · 301 · 170 · 101 (dropdown) |
 | **Targets (Cricket)** | Classic (15–20, Bull) · Custom (any 7 numbers) |
 | **Legs per set** | 1 – 9 |
@@ -136,13 +140,15 @@ H2H mode requires at least two players selected. Practice mode can be played sol
 
 Players with a PIN set show a 🔒 next to their name in the dropdown. When exactly two players are selected in H2H mode, a banner shows their all-time head-to-head record (e.g. *"H2H: Alice leads 3–0 (3 games)"*).
 
-**Cricket** is a second game type alongside X01. Choosing **Classic** locks the targets to the standard 15, 16, 17, 18, 19, 20, and Bull. Choosing **Custom** reveals a 1–20-plus-Bull picker — pick any numbers you like, but always exactly 7 (the same count as classic); Start is blocked until exactly 7 are checked, with a running "N of 7 selected" count and a one-tap "Start from classic" fill-in. Once a Cricket game begins, the scoring screen and live scoreboard both switch to Cricket's own marks/closed/points display — the X01 Pad and Dartboard input screens are never shown during a Cricket game, and there's no per-game choice between them the way there is for X01. See [Scoring](#scoring) below and `REFERENCE.md` for the exact marks/points rules. Cricket has its own stat bubbles (MPR, 9 Marks, Win Rate, Games Played, Darts Thrown, Darts/Won Leg), Personal Bests, 2 achievements (9 Marks and Perfect Leg), and its own Home page leaderboard set (Marks Per Round, Most Cricket Wins, 9 Marks, Perfect Leg) — a small X01/Cricket toggle on both the Home page and the Player Profile switches between the two.
+**Cricket** is a second game type alongside X01. Choosing **Classic** locks the targets to the standard 15, 16, 17, 18, 19, 20, and Bull. Choosing **Custom** reveals a 1–20-plus-Bull picker — pick any numbers you like, but always exactly 7 (the same count as classic); Start is blocked until exactly 7 are checked, with a running "N of 7 selected" count and a one-tap "Start from classic" fill-in. Once a Cricket game begins, the scoring screen and live scoreboard both switch to Cricket's own marks/closed/points display — the X01 Pad and Dartboard input screens are never shown during a Cricket game, and there's no per-game choice between them the way there is for X01. See [Scoring](#scoring) below and `REFERENCE.md` for the exact marks/points rules. Cricket has its own stat bubbles (MPR, 9 Marks, Win Rate, Games Played, Darts Thrown, Darts/Won Leg), Personal Bests, 2 achievements (9 Marks and Perfect Leg), and its own Home page leaderboard set (Marks Per Round, Most Cricket Wins, 9 Marks, Perfect Leg) — a game-type toggle on both the Home page and the Player Profile switches between it and every other game type.
 
 **Daily Challenge mode** turns New Game into today's [Daily Challenge](#daily-challenge) launcher instead of a regular match: Starting Score and Format hide (the challenge decides them), and a gold **Today's Challenge** panel shows the challenge description plus whoever is currently in the player slot's streak and results history. Selecting who's attempting it uses the exact same single "Choose player" slot as Practice mode — a PIN-protected player still needs their PIN entered, since it's the identical gate every other slot uses, not a separate picker of its own. The **Start game** button relabels to **Start Challenge** while this mode is active. Daily Challenge is X01-only — the Game-type choice is hidden and forced back to X01 whenever this mode is selected.
 
 **👻 Ghost mode** races a replay of one of your own past legs — literally your prior self, thrown dart-by-dart from a leg you actually won, not a simulated opponent. Choosing it shows a gold **Race a past leg** panel listing that player's past won legs (date, category, average, darts used) once a player is picked — the same single-player slot as Practice mode. You can also jump straight into this from a **👻** button next to **Best Leg Average** on a [Player Profile](#player-profile)'s Personal Bests, which preselects that specific leg. The ghost throws back automatically right after each of your own turns (not at the leg's real historical pace) — its card on the scoring screen and Live Scoreboard is labeled **"👻 Ghost (date)"**. Ghost mode is X01-only, always exactly one leg, and always tracked as practice: your own darts record normally, but nothing is recorded for the ghost, and it can never trigger a head-to-head badge like Comeback Kid or Giant Slayer.
 
-**Doubles Practice mode** is a solo drill for practicing specific doubles — choose one or more from a 1–20-plus-Bull picker (any number, no fixed count), then throw. All selected doubles stay **live at once** — you choose which one to aim at each dart, not a forced rotation. A **round** keeps going, however many darts it takes, until one of two things happens: a single or treble lands on one of your target numbers ("so close" — right number, wrong ring), or a double lands on a number that isn't one of your targets ("wrong double"). A genuine miss elsewhere on the board doesn't end anything — just keep throwing. When a round ends, **Start next round** resets the tally and keeps the same targets. The scoring screen and Live Scoreboard show the live target set, this round's hit count and darts-thrown, and the running doubles percentage; there's no numeric score, no opponent, and no Enter-turn step — every dart commits the instant it's thrown. See [Player Profile](#player-profile) for its own stat bubbles (Doubles %, Darts/Round, Doubles Hit/Round) and Personal Bests (longest round, most doubles in a round), reachable via the same X01/Cricket toggle. No undo support yet — a misthrow just becomes part of the round.
+**Doubles Practice mode** is a solo drill for practicing specific doubles — choose one or more from a 1–20-plus-Bull picker (any number, no fixed count), then throw. All selected doubles stay **live at once** — you choose which one to aim at each dart, not a forced rotation. A **round** keeps going, however many darts it takes, until one of two things happens: a single or treble lands on one of your target numbers ("so close" — right number, wrong ring), or a double lands on a number that isn't one of your targets ("wrong double"). A genuine miss elsewhere on the board doesn't end anything — just keep throwing. When a round ends, **Start next round** resets the tally and keeps the same targets. The scoring screen and Live Scoreboard show the live target set, this round's hit count and darts-thrown, and the running doubles percentage; there's no numeric score, no opponent, and no Enter-turn step — every dart commits the instant it's thrown. See [Player Profile](#player-profile) for its own stat bubbles (Doubles %, Darts/Round, Doubles Hit/Round) and Personal Bests (longest round, most doubles in a round), reachable via the same game-type toggle. Undo Last Dart is supported, one dart deep.
+
+**Just Chuckin' It** is completely freeform, unscored practice — no starting score, no bust, no win, no opponent, just throwing dart after dart until you press **End game**. The point is pure warm-up/muscle-memory reps without any game pressure at all. Every dart commits instantly (no Enter-turn step, same as Doubles Practice), and there's undo support for the last dart. Its stats are heatmap-heavy on purpose: [Player Profile](#player-profile) gets a non-interactive dartboard heatmap shaded by how often you hit each region (with exact counts on hover), plus 6 stat bubbles (Darts Thrown, Treble/Bull/Double %, Sessions Played, Avg Darts/Session), a 2-field Personal Bests (longest session, most trebles in a session), and 18 laddered milestone achievements (see [Achievements & Badges](#achievements--badges)) so there's always another one within reach. Darts thrown in this mode count toward your lifetime/daily/weekly total darts thrown (the one deliberate exception) but never toward any X01/Cricket/Doubles Practice stat, average, or leaderboard.
 
 ---
 
@@ -209,7 +215,7 @@ choice, no checkout hints, and no bust concept:
 
 ### Achievements & Badges
 
-Beyond 180s, Big Fish, and nine-darters, Oche tracks 21 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 2 Cricket-specific badges and 3 Daily Challenge badges. Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
+Beyond 180s, Big Fish, and nine-darters, Oche tracks 21 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 2 Cricket-specific badges, 3 Daily Challenge badges, and 18 laddered Just Chuckin' It milestone badges. Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
 
 | Badge | How to earn it |
 |---|---|
@@ -250,7 +256,15 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 21 X01 achievement badges c
 | 🏆 **Challenge Streak: Month** | Complete the Daily Challenge 30 days in a row |
 | 🗓️ **Full Rotation** | Complete every Daily Challenge format at least once |
 
-**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 26-badge roster, grouped into X01/Cricket/Daily Challenge sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5) — four badges (Around the Clock, Around the World, Grudge Match, Full Rotation) are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
+**Just Chuckin' It's 18 badges** (3 laddered milestone tracks — a lot to earn, starting early and often, exactly as requested; see [Just Chuckin' It](#new-game)):
+
+| Ladder | Tiers (threshold — label) |
+|---|---|
+| Lifetime Darts Thrown | 100 Warming Up 🔥 · 500 In the Groove 🎯 · 1,000 Getting Serious 💪 · 2,500 Dedicated 📈 · 5,000 Grinder ⚙️ · 10,000 Iron Arm 🦾 · 25,000 Practice Makes Perfect 🏹 · 50,000 Machine 🤖 · 100,000 Legend of the Oche 👑 |
+| Darts in a Single Session | 100 Solid Session ⏱️ · 250 Marathon Session 🏃 · 500 Endurance Test 🧗 · 1,000 Iron Session 🔋 |
+| Lifetime Trebles Hit | 10 First Trebles 🎯 · 50 Treble Trouble 💥 · 100 Treble Century 💯 · 500 Treble Master 🌟 · 1,000 Treble Legend 🐐 |
+
+**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 44-badge roster, grouped into X01/Cricket/Daily Challenge/Just Chuckin' It sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5) — 4 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout), Full Rotation, and all 18 Just Chuckin' It milestones are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
 
 **Around the World Progress** — a dedicated grid on the Player Profile showing exactly which of the 63 lifetime dart outcomes are still missing, alongside the Badge Case.
 
@@ -362,7 +376,7 @@ Each player has a dedicated profile page with full career statistics, accessible
 
 #### Tabs
 
-**Overall** · **H2H** · **Practice** — all stats and charts filter to the selected mode. A second **X01 / Cricket** toggle sits just above the stat bubbles — switches the bubbles, chart, and Personal Bests section between the two game types' own stat vocabularies (X01's 15 stats, or Cricket's 6 — see below). The Home page's leaderboards are still X01-only.
+**Overall** · **H2H** · **Practice** — all stats and charts filter to the selected mode. A second game-type toggle sits just above the stat bubbles — **X01 / Cricket / Doubles Practice / Just Chuckin' It** — switches the bubbles, chart, and Personal Bests section between each game type's own stat vocabulary (X01's 15 stats, Cricket's 6, Doubles Practice's 3, or Chuckin's 6 — see below). The Home page's leaderboards cover X01, Cricket, and Doubles Practice — Just Chuckin' It doesn't have a competitive leaderboard shape to show there (no wins, no opponent), so it's Player Profile-only.
 
 #### Stat Bubbles
 
@@ -397,6 +411,25 @@ Switching the toggle above to **Cricket** shows Cricket's own 6 stat bubbles ins
 | **Darts Thrown** | Darts thrown in Cricket games specifically |
 | **Darts / Won Leg** | Average darts thrown per won Cricket leg |
 
+Switching to **Doubles Practice** shows its own 3 stat bubbles instead:
+
+| Bubble | Description |
+|---|---|
+| **Doubles %** | Doubles hit ÷ every dart ever thrown in this mode, lifetime |
+| **Darts / Round** | Average darts thrown per round |
+| **Doubles Hit / Round** | Average doubles hit per round |
+
+Switching to **Just Chuckin' It** shows its own 6 stat bubbles instead, plus a dartboard heatmap section below the chart:
+
+| Bubble | Description |
+|---|---|
+| **Darts Thrown** | Total individual darts thrown in this mode, lifetime |
+| **Treble %** | Percentage of darts that landed as a treble |
+| **Bull %** | Percentage of darts that landed on the bull (single or double) |
+| **Double %** | Percentage of darts that landed as a double |
+| **Sessions Played** | Number of Just Chuckin' It sessions played |
+| **Avg Darts / Session** | Average darts thrown per session |
+
 #### Chart
 
 A line chart showing the selected metric over time. Filters:
@@ -413,9 +446,11 @@ A line chart showing the selected metric over time. Filters:
 
 On the Cricket toggle, this section shows **Best Leg MPR**, **Fewest Darts to Close**, **Current Win Streak**, and **Recent Form** (MPR-based) instead — the same shape, keyed off the turn that won each Cricket leg rather than an X01 checkout.
 
+On the Doubles Practice toggle, this section shows just **Best Round (Darts)** and **Best Round (Doubles Hit)** — no win-streak/recent-form fields, since this mode has no win condition. On the Just Chuckin' It toggle, it shows **Best Session (Darts)** and **Best Session (Trebles)**, the same deliberately-smaller 2-field shape.
+
 #### Badge Case
 
-The full 26-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (21 badges), a **Cricket** section (2 badges), and a **Daily Challenge** section (3 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
+The full 44-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (21 badges), a **Cricket** section (2 badges), a **Daily Challenge** section (3 badges), and a **Just Chuckin' It** section (18 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
 
 #### On This Day
 
@@ -712,6 +747,9 @@ GET  /api/players/stat-bubbles?name=&mode=  All 15 stat bubble values for a play
      &gameType=doubles_practice             Pass gameType=doubles_practice for Doubles
                                              Practice's 3 stat bubbles (Doubles %, Darts/Round,
                                              Doubles Hit/Round) instead.
+     &gameType=chuckin                      Pass gameType=chuckin for Just Chuckin' It's 6
+                                             stat bubbles (Darts Thrown, Treble/Bull/Double %,
+                                             Sessions Played, Avg Darts/Session) instead.
 GET  /api/players/personal-bests?name=&mode= Best leg average, fewest darts to finish,
                                              current win streak, and recent form.
      &gameType=cricket                      Pass gameType=cricket for Cricket's Personal Bests
@@ -720,6 +758,12 @@ GET  /api/players/personal-bests?name=&mode= Best leg average, fewest darts to f
      &gameType=doubles_practice             Pass gameType=doubles_practice for Doubles
                                              Practice's Personal Bests (longest round by darts,
                                              most doubles hit in a round) instead.
+     &gameType=chuckin                      Pass gameType=chuckin for Just Chuckin' It's
+                                             Personal Bests (longest session by darts, most
+                                             trebles hit in a session) instead.
+GET  /api/players/chuckin-heatmap?name=&mode= Per-(sector,multiplier) hit counts for Just
+                                             Chuckin' It, feeding the Player Profile's dartboard
+                                             heatmap → [ { sector, multiplier, hits } ]
 GET  /api/players/top-finishes?name=&mode=  Top 10 checkouts for a player
 GET  /api/players/checkout-route            Most-used routes for a specific checkout score
      ?name=&score=&mode=
@@ -739,7 +783,9 @@ GET  /api/players/avg-history               Metric history for the chart
               cricketmpr|cricket9marks|cricketwinpct|cricketgames|
               cricketdartsthrown|cricketavgdartsperleg|
               doublespracticepct|doublespracticedartsperround|
-              doublespracticehitsperround
+              doublespracticehitsperround|
+              chuckindartsthrown|chuckintreblepct|chuckinbullpct|
+              chuckindoublepct|chuckinsessions|chuckinavgdartspersession
      &period=today|week|month|year|all|custom
      &start=YYYY-MM-DD   (required when period=custom)
      &end=YYYY-MM-DD     (required when period=custom)
@@ -795,9 +841,12 @@ DELETE /api/challenges/attempt              Reset a player's attempt for a date 
 POST /api/games                             Start a game
                                              { category, legsPerSet, setsPerGame,
                                                players: [{ name, out }], practice: 0|1,
-                                               gameType: "x01"|"cricket" (default "x01"),
+                                               gameType: "x01"|"cricket"|"doubles_practice"|
+                                                         "chuckin" (default "x01"),
                                                config: { startingScore } for x01,
-                                                       { numbers: [7 sectors] } for cricket }
+                                                       { numbers: [7 sectors] } for cricket,
+                                                       { doubles: [sectors] } for doubles_practice,
+                                                       {} for chuckin }
                                              → { gameId }
 
 POST /api/games/:id/turns                   Record a visit

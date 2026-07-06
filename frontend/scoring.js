@@ -219,6 +219,19 @@ function challengeBadgeSignals(history, formats){
   };
 }
 
+// Just Chuckin' It milestone-ladder trigger condition (game-modes-roadmap.md
+// "Just Chuckin' It", REFERENCE.md's Achievements section) — each of the 18
+// tiers across 3 metrics (lifetime darts, lifetime trebles, single-session
+// darts) is just a >= threshold check on a cumulative count, but per
+// challengeBadgeSignals()'s precedent above, the actual comparison lives here
+// (not reimplemented inline in index.html's checkChuckinMilestoneTier()) so
+// it's covered by a committed test rather than only a one-off manual check.
+// `tiers` is one ladder's `tiers` array (each `{threshold, ...}`); returns the
+// thresholds `value` has reached, in the same order they were given.
+function chuckinTiersReached(tiers, value){
+  return tiers.filter(t => value >= t.threshold).map(t => t.threshold);
+}
+
 // Only executes under Node (require()'d from a test file) — undefined in a
 // browser, so this is a no-op there and every name above stays a plain global.
 if (typeof module !== 'undefined' && module.exports) {
@@ -228,5 +241,6 @@ if (typeof module !== 'undefined' && module.exports) {
     evaluateDartDoublesPractice,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,
     CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH, challengeBadgeSignals,
+    chuckinTiersReached,
   };
 }

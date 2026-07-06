@@ -354,6 +354,75 @@ don't apply; a misthrow just becomes part of the round's own tally).
 
 Stat vocabulary is documented in §3 ("Doubles Practice stats").
 
+### Just Chuckin' It — `throwDartChuckin(sector)` (`frontend/index.html`)
+
+docs/game-modes-roadmap.md's "Just Chuckin' It" drill mode — freeform, entirely
+unscored practice. No starting score, no bust, no win, no opponent, and unlike
+Doubles Practice, **no round/leg concept at all**: a whole session is one
+continuous stream of darts from the first throw until "End game" is pressed,
+every dart its own 1-dart `turns` row sharing `set_no=1, leg_no=1` for the
+entire session (a "session" = one `games` row, grouped by `t.game_id` in every
+backend query — not `(game_id, set_no, leg_no)` the way every other game type
+groups).
+
+`throwDartChuckin()` is a dedicated `game.gameType==='chuckin'` branch (the same
+"hardcode a branch at every call site" precedent as Doubles Practice —
+`throwDart`, `renderGame`, `renderPad`, `undoLastTurn`, `liveSnapshot`,
+`renderGameShell` all branch on this game type):
+
+```js
+function throwDartChuckin(sector){
+  const dart = makeDart(sector, mult);
+  const p = game.players[0];
+  p.sessionDarts += 1;
+  if(dart.isTreble) p.sessionTrebles += 1;
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:0, bust:false, checkout:false, checkoutPoints:null, legWon:false,
+    darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt }] });
+  game.chuckinLastDart = { label:dart.label, isTreble:!!dart.isTreble };
+  checkChuckinMilestones(p);
+}
+```
+
+- Every dart is simply recorded — `scored`/`bust`/`checkout`/`legWon` are always
+  `0`/`false`, since this mode has no numeric score and never busts or wins.
+- **Undo is supported** (`undoLastTurnChuckin()`), one dart deep, restoring the
+  session counters from a snapshot taken before the mutation and deleting the
+  persisted turn — matching the one-level-deep undo convention used everywhere
+  else in the app.
+- After every dart, `checkChuckinMilestones(p)` checks the 3 milestone ladders
+  (§4 "The 18 Just Chuckin' It milestone badges") entirely from **local**
+  per-player state (`p.sessionDarts`/`p.sessionTrebles` plus a
+  `lifetimeDartsBase`/`lifetimeTreblesBase` fetched once at game start) — not a
+  network round-trip per dart. An earlier revision that re-queried the
+  stat-bubbles endpoint after every single dart was found, during Playwright
+  testing, to occasionally lose darts outright: at high enough throw rates it
+  tripped the server's per-IP rate limiter, and a 429 on the `recordTurn` write
+  itself is silently swallowed by `DB._queue`'s catch (see §9 "Rate limiting").
+  Since this mode's entire premise is rapid successive throws, doubling the
+  request rate per dart was a real risk, not a hypothetical one.
+
+**Stats-leak exclusion** — the opposite of how Cricket was added. Cricket's
+darts were deliberately folded INTO existing unscoped "all game types"
+aggregates; Just Chuckin' It needs the reverse. A `NOT_CHUCKIN` SQL constant
+(`` `AND g.game_type != 'chuckin'` ``, `backend/db.js`) excludes this game type
+from 5 previously-unscoped "physical dart stats" queries: `getDartAnalytics()`,
+`getAroundTheWorldProgress()`, `getHomeExtra()`'s `_pace()`/`todayLegs`/
+`weekLegs`, and the `practiceLegs` counts in `getSummary()`/`computeStats()`.
+Deliberately **not** folded into the central `_mf()`/`_scope()` helpers (§3
+"Game scope filter helper"), since Chuckin's own stat functions explicitly scope
+`gameType:'chuckin'` and would contradict a blanket exclusion placed there.
+
+**The one documented exception, per explicit design intent**: total darts
+thrown (lifetime, daily, and weekly) is NOT excluded — `getSummary().darts`,
+`computeStats()`'s `allCounts` aggregate, and `getHomeExtra()`'s
+`todayDarts`/`weekDarts` all remained fully unscoped with zero code changes,
+since "darts thrown" already meant every physical dart thrown, Chuckin included
+— the same design already documented for Cricket's darts (§3's denominator
+table), just re-confirmed rather than re-derived for a fourth game type.
+
+Stat vocabulary is documented in §3 ("Just Chuckin' It stats").
+
 ---
 
 ## 3. Statistics — Every Formula
@@ -768,16 +837,87 @@ mode (not "Undo Last Turn"), and the separate "Undo Dart" button (which
 un-stages an uncommitted dart from a batched 3-dart visit) is hidden
 entirely — Doubles Practice has no staged-visit concept to undo from.
 
+### Just Chuckin' It stats (`GAME_TYPES.chuckin.statDefs` / `CHUCKIN_STAT_DEFS`)
+
+Heatmap-first, as explicitly requested: "the stats/reporting should be very
+heatmap-heavy. We want to see patterns and trends over time, specifically
+improvements." No win condition, no legs/sets, no opponent — every query is
+scoped via `_scope({mode, gameType:'chuckin'})`.
+
+**Stat bubbles** (`getChuckinStatBubbles(name, mode)`):
+
+| Key | Label | Formula |
+|---|---|---|
+| `chuckindartsthrown` | Darts Thrown | `COUNT(*)` over every dart ever thrown in this mode, lifetime |
+| `chuckintreblepct` | Treble % | `trebles / dartsThrown * 100` |
+| `chuckinbullpct` | Bull % | `bulls / dartsThrown * 100` — a "bull" is any dart with `sector=25`, single or double |
+| `chuckindoublepct` | Double % | `doubles / dartsThrown * 100` |
+| `chuckinsessions` | Sessions Played | `COUNT(DISTINCT t.game_id)` |
+| `chuckinavgdartspersession` | Avg Darts / Session | `dartsThrown / sessionsPlayed` |
+
+All 6 return `null` (not `0`/`NaN`) when no darts have been thrown yet, matching
+every other stat bubble's "no data" convention.
+
+**Personal Bests** (`getChuckinPersonalBests(name, mode)`) — deliberately just 2
+fields, following Doubles Practice's precedent that a drill mode's Personal
+Bests don't need the 5-field X01/Cricket shape: `bestSessionDarts` (the longest
+session ever, by dart count) and `bestSessionTrebles` (the most trebles hit in
+a single session). No `winStreak`/`recentForm`/`lifetime` fields — this mode
+has no win condition to gate a streak on, and `chuckintreblepct`'s lifetime
+figure above already answers "how am I doing overall."
+
+**Heatmap** (`getChuckinHeatmap(name, mode)`) — the one genuinely new reporting
+shape this mode introduces: every `(sector, multiplier)` combination this
+player has ever hit in Chuckin, with its hit count, feeding a non-interactive
+dartboard visualization on the Player Profile (`buildChuckinHeatmap()`,
+`frontend/index.html`) shaded by relative hit frequency (a single-hue scale
+from dark to warm gold) with native `<title>` tooltips giving the exact count
+per region on hover. Deliberately a **separate function** from
+`buildDartboard()` (the interactive live-scoring board) rather than a reused/
+extended version of it — duplicating the small set of shared geometry helpers
+(`CX`/`CY`, ring radii, `xy()`, `annulus()`) locally was judged lower-risk than
+adding a non-interactive rendering mode to the heavily-used live scoring
+widget.
+
+**Metric history** (`getMetricHistory()`, all 6 keys above) —
+`chuckindartsthrown`/`chuckintreblepct`/`chuckinbullpct`/`chuckindoublepct`
+bucket per-dart like X01's `avg`; `chuckinsessions`/`chuckinavgdartspersession`
+bucket per-session (grouped by `t.game_id`, using the same `L` leg-bucketer
+Cricket/Doubles Practice use for their own per-round metrics — a "session" here
+plays the same structural role a "leg" does elsewhere).
+
+**Player Profile UI**: its own button on the same N-way `.player-tabs`
+game-type toggle (`playerGameType`) every other mode uses, switching to
+`CHUCKIN_STAT_DEFS`/this Personal Bests shape/these chart metrics — plus the
+dartboard heatmap section above (`#chuckin-heatmap-section`, hidden for every
+other game type).
+
+**Home page**: deliberately **not** on the Home page leaderboard toggle
+(`GAME_TYPES.chuckin.homeTabRenderer = false`) — none of this mode's stats map
+onto a competitive leaderboard shape (no wins, no opponent, nothing to rank
+head-to-head), so it's excluded from that specific toggle's `Object.values(...)
+.filter(g => g.statDefs && g.statDefs.length && g.homeTabRenderer !== false)`
+check while still appearing on the Player Profile's own toggle (whose filter
+doesn't check `homeTabRenderer` at all).
+
+**Undo support**: `throwDartChuckin()` snapshots session-counter state into
+`game.lastTurnSnapshot` before mutating (the same convention as every other
+per-dart-commit mode), and `undoLastTurnChuckin()` restores it and calls
+`DB.deleteLastTurn()`.
+
 ---
 
 ## 4. Achievements & Badges
 
-26 badges (21 X01 + 2 Cricket + 3 Daily Challenge), tracked in the
-`player_badges` table (one row per player+badge, with a running `count`). X01
-detection logic lives in `frontend/index.html`'s `enterTurn()`/`onLegWon()`;
-Cricket's 2 badges live in `enterTurnCricket()`/`onLegWonCricket()`; Daily
-Challenge's 3 badges are checked in `checkChallengeBadges()`, called right
-after every `/api/challenges/complete` response.
+44 badges (21 X01 + 2 Cricket + 3 Daily Challenge + 18 Just Chuckin' It),
+tracked in the `player_badges` table (one row per player+badge, with a running
+`count`). X01 detection logic lives in `frontend/index.html`'s
+`enterTurn()`/`onLegWon()`; Cricket's 2 badges live in
+`enterTurnCricket()`/`onLegWonCricket()`; Daily Challenge's 3 badges are
+checked in `checkChallengeBadges()`, called right after every
+`/api/challenges/complete` response; Just Chuckin' It's 18 badges are checked
+in `checkChuckinMilestones()`, called after every dart from
+`throwDartChuckin()`.
 
 ### Award modes
 
@@ -857,6 +997,42 @@ inline in `index.html`, so they're covered by a committed `node:test`:
 | 🔥 **Challenge Streak: Week** | `currentStreak === 7` exactly (an exact crossing check, not `>=`, so a long streak doesn't refire this every day). **Recurring** — a later streak that reaches 7 again after breaking can re-earn it. |
 | 🏆 **Challenge Streak: Month** | `currentStreak === 30` exactly, same exact-crossing reasoning as above. **Recurring**, mega-tier overlay (confetti) like Nine-Darter/Perfect Leg. |
 | 🗓️ **Full Rotation** | Every one of the 6 Daily Challenge formats (§6) has at least one *completed* attempt, ever (`bestByFormat` only ever contains completed attempts — see `getChallengeHistory()`'s own query — so this is already "at least once", not merely "attempted"). **Once-badge.** |
+
+**The 18 Just Chuckin' It milestone badges** (checked in
+`checkChuckinMilestones(playerName)`, `frontend/index.html` — called after
+every dart from `throwDartChuckin()`). Requested explicitly: "achievements
+specifically for this game mode, centered around major milestones... ladder
+the achievements so there are a lot to earn and that earning them starts early
+and often." All 18 tiers, across 3 ladders, are generated from a single
+`CHUCKIN_MILESTONE_LADDERS` data array (not 18 hand-written badge definitions)
+via a `.forEach()` that populates `BADGE_INFO`/`ACH_LABELS`/`ACH_DURATION` —
+each ladder is `{metric, idPrefix, statNoun, descFor(threshold), tiers:
+[{threshold, label, icon}, ...]}`. `badge_id` is always `idPrefix + threshold`
+(e.g. `chuckin_darts_100`); the last tier of each ladder gets a longer
+celebration duration (5000ms vs. the usual 3000ms), matching the "biggest
+completionist milestone gets a longer beat" convention Around the World already
+set.
+
+The trigger condition itself — "has this cumulative value reached this
+threshold" — is `chuckinTiersReached(tiers, value)` in `frontend/scoring.js`
+(unit-tested in `backend/test/scoring.test.js`, following
+`challengeBadgeSignals()`'s precedent of keeping the actual comparison out of
+`index.html` so it's covered by a committed test), not reimplemented inline.
+Every tier check is a plain `value >= threshold` (not an exact-crossing check
+like the Daily Challenge streak badges above — a milestone, once reached, stays
+reached), guarded by `earnedBadgeCache` so an already-earned tier is never
+re-POSTed. **All 18 are once-badges** (never re-fire once earned) and **none
+support undo-revocation** — a deliberate deviation from Around the Clock/
+World's precedent, since a low-stakes practice-mode milestone staying earned on
+an undone dart is a harmless edge case, not worth the added
+`badgeReverts`/`snap.voided` plumbing those modes need for genuine
+competitive-play corrections.
+
+| Ladder | Metric | Tiers (threshold → label) |
+|---|---|---|
+| Lifetime Darts | `lifetimeDartsBase + p.sessionDarts` (computed locally — see §2's Just Chuckin' It section for why this isn't a network fetch per dart) | 100 Warming Up 🔥 · 500 In the Groove 🎯 · 1,000 Getting Serious 💪 · 2,500 Dedicated 📈 · 5,000 Grinder ⚙️ · 10,000 Iron Arm 🦾 · 25,000 Practice Makes Perfect 🏹 · 50,000 Machine 🤖 · 100,000 Legend of the Oche 👑 |
+| Session Darts | `p.sessionDarts` (this session only, resets to 0 on a new game) | 100 Solid Session ⏱️ · 250 Marathon Session 🏃 · 500 Endurance Test 🧗 · 1,000 Iron Session 🔋 |
+| Lifetime Trebles | `lifetimeTreblesBase + p.sessionTrebles` | 10 First Trebles 🎯 · 50 Treble Trouble 💥 · 100 Treble Century 💯 · 500 Treble Master 🌟 · 1,000 Treble Legend 🐐 |
 
 ### Description text
 
@@ -1199,6 +1375,15 @@ by unrelated setup/login traffic (they were briefly merged into one shared
 interference — kept split ever since). `clientIp()` only trusts
 `X-Forwarded-For` when `TRUST_PROXY=true` is explicitly set.
 
+**Client-side interaction with the `global` bucket**: a request that gets a 429
+is not retried — `DB._queue`'s `.catch(logErr)` (`frontend/index.html`) logs it
+to the console and moves on, so a rejected `recordTurn()` write is silently lost
+from that point forward. In practice this is only reachable at throw rates far
+beyond human play, but it's the reason Just Chuckin' It's milestone-badge check
+(§2/§4) was rewritten to avoid a network round-trip on every single dart —
+found during testing, doubling the request rate per dart in that mode was
+enough to occasionally trip this exact path.
+
 ### `OCHE_REQUIRE_AUTH` — the write-gating switch
 
 Two auth gates exist: **`requireAdmin`** always requires a logged-in admin
@@ -1385,13 +1570,13 @@ already-migrated database is a safe no-op).
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
-| `category` | `TEXT NOT NULL` | For X01 games: the starting score as a string (`'501'`/`'301'`/`'170'`/`'101'`, or a filler `'1000'` for Daily Challenge's non-scoring formats). Cricket games write a display label instead (`'Cricket (15-20, Bull)'` or `'Custom Cricket'`). Category-scoped stat filters (`OPENING_CATS`'s `IN (501,301,170,101)`, nine-darter detection) either match X01 values explicitly or filter on `game_type`+`config`, so the cricket labels never collide with them |
+| `category` | `TEXT NOT NULL` | For X01 games: the starting score as a string (`'501'`/`'301'`/`'170'`/`'101'`, or a filler `'1000'` for Daily Challenge's non-scoring formats). Cricket games write a display label instead (`'Cricket (15-20, Bull)'` or `'Custom Cricket'`); Chuckin games write `"Just Chuckin' It"`. Category-scoped stat filters (`OPENING_CATS`'s `IN (501,301,170,101)`, nine-darter detection) either match X01 values explicitly or filter on `game_type`+`config`, so the non-X01 labels never collide with them |
 | `legs_per_set` / `sets_per_game` | `INTEGER NOT NULL` | |
 | `created_at` / `completed_at` | `TEXT` | `completed_at` is `NULL` for in-progress/abandoned games |
 | `winner_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | |
 | `practice` | `INTEGER NOT NULL DEFAULT 0` | Explicit practice flag, set at creation |
-| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, or `'doubles_practice'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; the Cricket/Doubles Practice New Game flows pass their own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
-| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3) |
+| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, `'doubles_practice'`, or `'chuckin'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; the Cricket/Doubles Practice/Chuckin New Game flows pass their own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
+| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows (no config needed — every number/multiplier is always "in play") |
 | `player_count` | `INTEGER` | **Frozen** participant count at creation (not a live subquery) — see §3's mode-scoping note |
 
 ### `game_players` (composite `PRIMARY KEY (game_id, player_id)`)

@@ -60,8 +60,7 @@
 > confirming the toggle switches cleanly in both H2H/Practice modes with zero
 > regression to the existing X01 leaderboards.
 >
-> **Not yet built**: Baseball (step 5), Just Chuckin' It. See "Suggested build
-> order" below.
+> **Not yet built**: Baseball (step 5). See "Suggested build order" below.
 >
 > **Doubles Practice is built (2026-07)** — the first of the two "Practice Drill
 > Modes" candidates below to ship. A genuinely different shape from every other
@@ -73,17 +72,25 @@
 > (Doubles %, Darts/Round, Doubles Hit/Round) and a 2-field Personal Bests
 > shape, reachable via a third button on the existing Player Profile X01/Cricket
 > toggle — see "Doubles Practice" below and REFERENCE.md §2/§3 for the full
-> design. Just Chuckin' It (freeform, unscored) remains not started.
+> design.
 >
-> **New candidates logged (2026-07, not designed/built yet)**: **Just Chuckin' It**
-> (freeform, unscored practice — see "Practice Drill Modes" below).
+> **Just Chuckin' It is built (2026-07)** — the second "Practice Drill Modes"
+> candidate, and the first game type with no round/leg concept at all (a whole
+> session is one continuous stream of 1-dart turns). Heatmap-first stats
+> (`getChuckinStatBubbles`/`getChuckinPersonalBests`/`getChuckinHeatmap`, 6
+> `getMetricHistory()` cases) with darts thrown as the one deliberate exception to
+> "no stats leak into any other game type's calculations," plus 18 laddered
+> milestone achievements generated from a single data-driven ladder array. See
+> "Just Chuckin' It" below and REFERENCE.md §2/§3/§6 for the full design.
 >
 > **✅ Done (2026-07): the Player Profile/Home page game-type toggle is now N-way**,
 > not three hardcoded buttons — see "Toggle mechanism generalized" below. The
 > *backend* half of that same section (a bespoke SQL function set per game type,
 > and the Home page's upfront fetch list growing the same way) is still open and
-> deliberately not attempted — real design work for whoever builds Baseball or
-> Just Chuckin' It next, not resolved by the toggle-mechanism generalization.
+> deliberately not attempted for Baseball — real design work for whoever builds it
+> next, not resolved by the toggle-mechanism generalization. (Just Chuckin' It's
+> own backend function set shipped as part of building it, following the same
+> "bespoke per game type" pattern this section anticipated.)
 
 ## Goal
 
@@ -298,38 +305,51 @@ after `BUBBLE_KEY_MAP`/`CRICKET_BUBBLE_KEY_MAP`/`DOUBLES_PRACTICE_BUBBLE_KEY_MAP
 are each defined, since referencing a `const` before its own declaration line
 would hit its temporal-dead-zone); `activeGameTypeParam()` was already fully
 mechanical (`'&gameType='+type` for anything but `'x01'`) and needed no stored
-field at all. **Net effect**: adding Baseball or Just Chuckin' It to these two
-toggles going forward means adding one `GAME_TYPES` entry with its own bespoke
-stat-fetch/render functions plugged in — not touching the toggle-rendering or
-dispatch code at either site, which was the actual goal of "N-way before a third
-mode ships" (even though Doubles Practice, the third mode, had already shipped
-with one more hardcoded branch by the time this generalization pass landed —
-this retrofits that branch away, not just prevents a fourth one).
+field at all. **Net effect**: adding Baseball (or, as it turned out, Just
+Chuckin' It) to these two toggles means adding one `GAME_TYPES` entry with its
+own bespoke stat-fetch/render functions plugged in — not touching the
+toggle-rendering or dispatch code at either site, which was the actual goal of
+"N-way before a third mode ships" (even though Doubles Practice, the third mode,
+had already shipped with one more hardcoded branch by the time this
+generalization pass landed — this retrofits that branch away, not just prevents
+a fourth one). Just Chuckin' It (built 2026-07) confirmed this net effect held
+exactly as predicted: it plugged into both toggles with zero changes to the
+toggle-rendering or dispatch code itself, needing only its own `GAME_TYPES`
+entry plus `homeTabRenderer:false` (opting out of the Home toggle specifically,
+since none of its stats map onto a leaderboard shape there).
 
-**Still genuinely open — deliberately not attempted this pass**: the backend
-scaling concern. Cricket's stats needed a full parallel set of functions
+**Still genuinely open for Baseball — Just Chuckin' It didn't resolve it
+generically, it just paid the same cost again**: the backend scaling concern.
+Cricket's stats needed a full parallel set of functions
 (`getCricketStatBubbles`, `getCricketPersonalBests`, `getCricketMprLeaderboard`,
 `getCricketWinLeaderboard`, `getCricketPerfectLegStats`, 6 `getMetricHistory()`
-cases); Doubles Practice needed its own smaller parallel set on top. Going from
-3 to 4-5 game types (Baseball, Just Chuckin' It) by hand-writing another fully
-parallel set of SQL functions *per type, forever* is a cost worth reconsidering
-before it compounds — whether some of this can generalize (e.g. a single
-parameterized stat-bubble query keyed by each type's own formula definitions,
-rather than a bespoke SQL function per type) is a real, separate design problem.
-Forcing an abstraction across X01 (leg/win-gated), Cricket (marks-based), and the
-drill modes (no legs, no opponent, no win concept at all) without a concrete
-second consumer to validate the shape against risks exactly the kind of
-premature generalization that's worse than the per-type duplication it would
-replace — left for whoever tackles Baseball or Just Chuckin' It next, informed
-by having a genuine fourth data point to design against. The Home page's upfront
-`Promise.all` fetch list (`renderHome()`) has the same "grows by N endpoints per
-type" shape and is left unresolved for the same reason.
+cases); Doubles Practice needed its own smaller parallel set on top; Just
+Chuckin' It added a third (`getChuckinStatBubbles`, `getChuckinPersonalBests`,
+`getChuckinHeatmap`, 6 more `getMetricHistory()` cases). Going from 4 to 5+ game
+types (Baseball) by hand-writing yet another fully parallel set of SQL functions
+*per type, forever* is a cost worth reconsidering before it compounds — whether
+some of this can generalize (e.g. a single parameterized stat-bubble query keyed
+by each type's own formula definitions, rather than a bespoke SQL function per
+type) is a real, separate design problem. Forcing an abstraction across X01
+(leg/win-gated), Cricket (marks-based), and the drill modes (no legs, no
+opponent, no win concept at all) without a concrete consumer to validate the
+shape against risked exactly the kind of premature generalization that's worse
+than the per-type duplication it would replace when this was first written —
+now with three drill-shaped and non-drill-shaped data points banked (Cricket,
+Doubles Practice, Just Chuckin' It), whoever tackles Baseball next has a much
+better-informed basis for deciding whether it's finally worth generalizing. The
+Home page's upfront `Promise.all` fetch list (`renderHome()`) has the same
+"grows by N endpoints per type" shape and is left unresolved for the same
+reason (Just Chuckin' It opted out of it entirely via `homeTabRenderer:false`,
+so it didn't add to this list at all).
 - The **drill modes don't fit the existing per-type stats shape at all** —
   `getPersonalBests()`-style "best leg / fewest darts / win streak" concepts assume
-  legs and opponents that Just Chuckin' It doesn't have (Doubles Practice worked
-  around this with its own deliberately-smaller 2-field Personal Bests shape,
-  not a generalization of X01/Cricket's 5-field one). Whoever designs Just
-  Chuckin' It's stats will hit the same question.
+  legs and opponents neither drill mode has (Doubles Practice worked around this
+  with its own deliberately-smaller 2-field Personal Bests shape, not a
+  generalization of X01/Cricket's 5-field one; Just Chuckin' It hit the exact
+  same question and landed on its own 2-field shape too — best session by darts,
+  best session by trebles — confirming this was a real, recurring shape, not a
+  one-off).
 - **Still open, unrelated to the mechanism above**: whether the toggle should
   show every registered game type unconditionally (today's behavior, unchanged
   by this pass) or only the ones a given player has actually played, so a player
@@ -377,7 +397,7 @@ correctly, and personal bests/stat bubbles report correct values scoped to 101. 
 an explicit edit to `OPENING_CATS`'s `IN (...)` list) about whether it also joins the
 opening-exchange scope — that part still doesn't happen automatically.
 
-## Practice Drill Modes (2026-07 — Doubles Practice built, Just Chuckin' It not started)
+## Practice Drill Modes (2026-07 — Doubles Practice and Just Chuckin' It both built)
 
 Two new modes requested that are a genuinely different *shape* from every game type
 above: no legs, no sets, no win condition, no opponent, ever. X01/Cricket/Baseball are
@@ -397,43 +417,72 @@ designed around "eventually someone wins," and Doubles Practice routes around th
 entirely via its own dedicated `throwDartDoublesPractice()`/`renderGameDoublesPractice()`
 functions rather than forcing the win-condition-shaped machinery to fit — the same
 "hardcode a `gameType` branch at each call site" precedent Cricket already
-established, not a registry redesign. **Still an open question for Just Chuckin'
-It** — it may or may not want the same treatment; not decided.
+established, not a registry redesign. **Just Chuckin' It (built 2026-07, see its
+own section below) took the identical treatment** — its own dedicated
+`throwDartChuckin()`/`renderGameChuckin()` functions, no round/leg concept
+whatsoever (unlike Doubles Practice's repurposed `legNo`-as-round-counter — a
+Chuckin session has no round boundary at all, just one continuous stream of darts
+per `games` row).
 
-### Just Chuckin' It
+### Just Chuckin' It — ✅ Built (2026-07)
 
 Freeform, completely unscored practice — no starting score, no countdown, no bust, no
 win, just recording dart after dart until the player stops. The point is pure
-warm-up/muscle-memory reps without any game pressure at all.
+warm-up/muscle-memory reps without any game pressure at all, with heatmap-heavy
+reporting to see accuracy patterns/trends over time.
 
-- **New `game_type` value** (e.g. `'chuckin'`), always solo, no H2H equivalent makes
-  sense for this mode (there's nothing to compare between two players — no score, no
-  winner). Whether `practice=1` even means anything meaningful here, or whether this
-  mode should always be excluded from the practice/H2H toggle entirely, is an open
-  question.
-- **Turn engine**: none, really — every dart is just recorded via the existing
-  `addTurn()`/`darts` write path with no bust/win evaluation at all. The 3-dart
-  "visit" grouping could still apply purely for input-UX consistency (reusing the
-  existing Pad/Dartboard widgets as-is), but nothing about a visit "matters" beyond
-  being recorded.
-- **Its own stat category, and — critically — darts thrown in this mode must NOT
-  count toward any other stat**, including the currently-unscoped "all game types"
-  aggregates. This is the *opposite* of how Cricket was added: Cricket's darts were
-  deliberately folded INTO existing unscoped totals (the "all-time turns/darts"
-  audit fix earlier this session added an `allCounts` aggregate specifically so
-  Cricket darts count toward the roster's all-time totals). Just Chuckin' It needs
-  the reverse — every currently-"unscoped" aggregate in `backend/db.js` needs an
-  explicit exclusion for this `game_type`, not just X01/Cricket-specific queries.
-  Easy to get backwards by copying the Cricket-inclusion precedent instead of
-  inverting it — flagging this explicitly so whoever builds it doesn't assume
-  "new game_type + existing scope helper" is automatically safe here the way it was
-  for Cricket.
-- **Stat ideas** (not decided): total darts thrown this session/lifetime, a
-  sector/multiplier hit-frequency breakdown and treble rate — this is exactly the
-  shape `getDartAnalytics()` already computes (per-sector hit counts, treble rate
-  per number), so this mode's stats may be mostly "point `getDartAnalytics()` at
-  `game_type='chuckin'`" rather than new query design, once the exclusion concern
-  above is handled.
+- **`game_type='chuckin'`**, always solo (single-slot New Game screen, `setMode('chuckin')`),
+  one continuous session per `games` row — the whole session shares `set_no=1,
+  leg_no=1` (no round/leg concept at all, unlike Doubles Practice's repurposed
+  `legNo`-as-round-counter). "A session" = `t.game_id` grouping throughout
+  `backend/db.js`, not `(game_id, set_no, leg_no)`.
+- **Turn engine**: every dart is its own 1-dart turn, committed immediately via a
+  dedicated `throwDartChuckin(sector)` (same "hardcode a `gameType` branch at every
+  shared call site" precedent as Doubles Practice — `throwDart`, `renderGame`,
+  `renderPad`, `undoLastTurn`, `liveSnapshot`, `renderGameShell`) — no bust/win
+  evaluation of any kind.
+- **The exclusion principle this section originally flagged turned out to be exactly
+  right**: a `NOT_CHUCKIN` SQL constant (`AND g.game_type != 'chuckin'`) excludes
+  Chuckin from 5 previously-unscoped "physical dart stats" queries
+  (`getDartAnalytics`, `getAroundTheWorldProgress`, `getHomeExtra`'s pace/today/week
+  legs, the practice-legs counts in `getSummary()`/`computeStats()`) — deliberately
+  *not* folded into the central `_mf()`/`_scope()` helpers, since Chuckin's own stat
+  functions explicitly scope `gameType:'chuckin'` and would contradict a blanket
+  exclusion placed there. **The one documented exception, per the user's explicit
+  request, is total darts thrown** (lifetime, daily, and weekly) — those three
+  aggregates were already fully unscoped with zero `game_type` filtering and needed
+  no code change at all, since "darts thrown" already meant literally every physical
+  dart, Chuckin included.
+- **Stats, heatmap-first as requested**: `getChuckinStatBubbles()` (darts thrown,
+  treble/bull/double counts+%, sessions played, avg darts/session),
+  `getChuckinPersonalBests()` (best session by darts and by trebles — no
+  win/streak-shaped fields, since a session never "wins"), and
+  `getChuckinHeatmap()` (per-`(sector,multiplier)` hit counts feeding a
+  non-interactive dartboard heatmap on the Player Profile, shaded by relative hit
+  frequency with hover tooltips for exact counts — a separate `buildChuckinHeatmap()`
+  duplicating (not reusing) the live scoring dartboard's geometry helpers, to avoid
+  any risk to the heavily-used interactive board). 6 matching `getMetricHistory()`
+  cases for trend charts. Reachable via its own button on the Player Profile's N-way
+  game-type toggle (`homeTabRenderer:false` opts it out of the *Home* page's
+  leaderboard toggle specifically, since none of its stats map onto a Home
+  leaderboard shape — deferred, not a gap).
+- **18 laddered milestone achievements**, exactly as requested ("ladder the
+  achievements so there are a lot to earn and that earning them starts early and
+  often"): 3 ladders — lifetime darts thrown (9 tiers: 100 → 100,000), trebles hit
+  in a single session (4 tiers: 100 → 1,000), and lifetime trebles hit (5 tiers: 10
+  → 1,000) — generated from a single `CHUCKIN_MILESTONE_LADDERS` data array (not 18
+  hand-written badge definitions) feeding `BADGE_INFO`/`ACH_LABELS`/`ACH_DURATION`.
+  Checked after every dart via `checkChuckinMilestones()`, computed **entirely from
+  local per-player state** (`p.sessionDarts`/`p.sessionTrebles` plus a
+  `lifetimeDartsBase`/`lifetimeTreblesBase` fetched once at game start) rather than
+  a network round-trip per dart — this mode is built around rapid successive
+  throws, and an earlier revision that re-queried the stats endpoint after every
+  single dart was found (during Playwright testing) to occasionally lose darts
+  outright: enough requests-per-second tripped the server's per-IP rate limiter,
+  and a 429 on the `recordTurn` write itself is silently swallowed by the client's
+  write queue. No undo-revocation (deliberate deviation from Around the
+  Clock/World's precedent — a low-stakes practice-mode milestone staying earned on
+  an undone dart is a harmless edge case, not worth the added plumbing).
 
 ### Doubles Practice — ✅ Built (2026-07)
 
@@ -573,7 +622,8 @@ X01-only, see its status note above).
    beyond hardcoded per-type buttons — see "Toggle mechanism generalized" above.
    The toggle mechanism itself is N-way now; the backend stat-fetch side of the
    same concern (a bespoke SQL function set per type, forever) is explicitly
-   still open, left for whichever of Baseball/Just Chuckin' It builds next.
+   still open for Baseball — Just Chuckin' It's own bespoke set shipped as part
+   of item 9 below.
 7. **✅ Done — Doubles Practice** — the first Practice Drill Mode built. Per-dart
    evaluation (`evaluateDartDoublesPractice()`), "all simultaneously live"
    multi-double sessions, its own 3 stat bubbles + 2-field Personal Bests, New
@@ -587,10 +637,20 @@ X01-only, see its status note above).
    scoreboard on both the controller and `/display`, undo of both a plain dart
    and a round-ending dart, and the Home page leaderboard toggle).
 8. **✅ Done — 101 as a fourth X01 starting score** (see "Quick addition" above).
-   **New, not designed yet**: Just Chuckin' It — needs its own design pass
-   first (the match-vs-drill architectural question raised in its section is
-   still open for it, even though Doubles Practice resolved it for itself by
-   just reusing `practice`/`game_type` as-is).
+9. **✅ Done — Just Chuckin' It** — the second Practice Drill Mode built, resolving
+   its own match-vs-drill question the same way Doubles Practice did (reusing
+   `practice`/`game_type` as-is, no round/leg concept whatsoever). Heatmap-first
+   Player Profile stats, a `NOT_CHUCKIN` exclusion audit across 5 previously-
+   unscoped queries (with total-darts-thrown as the one deliberate exception),
+   and 18 laddered milestone achievements generated from a single data-driven
+   ladder array. Verified with a committed scratch-DB unit suite (backend stat
+   functions + an X01/Cricket isolation regression check + the achievement
+   threshold comparison, `frontend/scoring.js`'s `chuckinTiersReached()`) and
+   Playwright end-to-end (New Game setup, per-dart scoring screen, undo, the
+   `/display` live scoreboard, the Player Profile tab with dartboard heatmap and
+   trend chart, and all 3 milestone ladders firing correctly in both
+   `index.html` and `display.html`, including a real per-dart rate-limit/data-
+   loss bug this testing caught and fixed).
 
 ## Accessibility, security, and testing considerations
 
@@ -639,8 +699,10 @@ X01-only, see its status note above).
   **Resolved for Doubles Practice** (built 2026-07): no new distinction needed —
   it reuses `practice`/`game_type` as-is, with `game.legNo` repurposed as a
   plain "round number" counter and `turns.bust` repurposed as "this dart ended
-  the round" (see REFERENCE.md §2/§13). Still open for Just Chuckin' It,
-  whichever mode is built next.
+  the round" (see REFERENCE.md §2/§13). **Resolved the same way for Just
+  Chuckin' It** (built 2026-07) — also just `practice`/`game_type` as-is, but
+  with no round concept repurposed at all: a whole session is one continuous
+  stream of 1-dart turns sharing `set_no=1, leg_no=1`.
 - **Resolved** (was: for Doubles Practice, how does a multi-double session pick
   which double is "live"): **all simultaneously live**, no rotation, no random
   pick — see the "Doubles Practice" section above.

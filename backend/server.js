@@ -242,6 +242,9 @@ const ALLOWED_LIVE_KEYS = new Set([
   // Doubles Practice only (docs/game-modes-roadmap.md) — read by display.html's
   // renderers.doubles_practice.card(), never by X01/Cricket.
   'doublesTargets', 'dpLastDart', 'roundOver', 'roundEndReason',
+  // Just Chuckin' It only (docs/game-modes-roadmap.md) — read by display.html's
+  // renderers.chuckin.card().
+  'chuckinLastDart',
 ]);
 const MAX_LIVE_BYTES = 65536;
 // Returns the sanitized state, or null if it's over the size cap (caller sends 413).
@@ -430,6 +433,7 @@ const server = http.createServer(async (req, res) => {
       const gameType = url.searchParams.get('gameType');
       return send(res, 200, gameType === 'cricket' ? db.getCricketPersonalBests(name, mode)
         : gameType === 'doubles_practice' ? db.getDoublesPracticePersonalBests(name, mode)
+        : gameType === 'chuckin' ? db.getChuckinPersonalBests(name, mode)
         : db.getPersonalBests(name, mode));
     }
     if (p === '/api/players/stat-bubbles' && m === 'GET') {
@@ -438,7 +442,11 @@ const server = http.createServer(async (req, res) => {
       const gameType = url.searchParams.get('gameType');
       return send(res, 200, gameType === 'cricket' ? db.getCricketStatBubbles(name, mode)
         : gameType === 'doubles_practice' ? db.getDoublesPracticeStatBubbles(name, mode)
+        : gameType === 'chuckin' ? db.getChuckinStatBubbles(name, mode)
         : db.getPlayerStatBubbles(name, mode));
+    }
+    if (p === '/api/players/chuckin-heatmap' && m === 'GET') {
+      return send(res, 200, db.getChuckinHeatmap(url.searchParams.get('name'), url.searchParams.get('mode')));
     }
     if (p === '/api/players/ghost-legs' && m === 'GET') {
       const limit = url.searchParams.get('limit');

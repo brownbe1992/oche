@@ -707,6 +707,7 @@
             <button id="mode-challenge" aria-pressed="false" onclick="setMode('challenge')">🎯 Daily Challenge</button>
             <button id="mode-ghost" aria-pressed="false" onclick="setMode('ghost')">👻 Ghost</button>
             <button id="mode-doubles" aria-pressed="false" onclick="setMode('doubles_practice')">Doubles Practice</button>
+            <button id="mode-chuckin" aria-pressed="false" onclick="setMode('chuckin')">Just Chuckin' It</button>
           </div>
         </div>
       </div>
@@ -1620,13 +1621,16 @@ let settingsTab='account';
 let homeData=null;
 
 // Populates the Home page's game-type toggle from every registered game type with
-// a stat vocabulary (same filter/iteration as the Player Profile's own toggle,
-// game-modes-roadmap.md "Generalizing per-game-type stats") — no data dependency,
+// a stat vocabulary AND a Home-page presence (same filter/iteration as the Player
+// Profile's own toggle, plus an extra `homeTabRenderer !== false` check — Just
+// Chuckin' It opts out of the Home page entirely via that explicit `false`, since
+// its stats don't map onto a leaderboard shape and none was requested; see
+// game-modes-roadmap.md "Generalizing per-game-type stats"). No data dependency,
 // so this renders immediately rather than waiting on renderHome()'s fetch.
 function renderHomeGameTypeTabs(){
   const el=document.getElementById('home-gtype-tabs');
   if(!el) return;
-  el.innerHTML = Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length).map(g=>
+  el.innerHTML = Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length && g.homeTabRenderer !== false).map(g=>
     `<button class="tab-btn${homeGameType===g.id?' active':''}" data-gtype="${g.id}" onclick="switchHomeGameType('${g.id}')">${g.label}</button>`
   ).join('');
 }
@@ -2025,16 +2029,20 @@ function setMode(mode){
   document.getElementById('mode-challenge').setAttribute('aria-pressed', mode==='challenge');
   document.getElementById('mode-ghost').setAttribute('aria-pressed', mode==='ghost');
   document.getElementById('mode-doubles').setAttribute('aria-pressed', mode==='doubles_practice');
+  document.getElementById('mode-chuckin').setAttribute('aria-pressed', mode==='chuckin');
   document.getElementById('h2h-options').hidden = (mode !== 'h2h');
   // Daily Challenge and Ghost Opponent are both X01-only — force the game-type
   // choice back and hide it entirely rather than offering a combination that was
   // never designed (docs/ghost-opponent-roadmap.md is explicitly X01-only for v1).
-  // Doubles Practice is its own game_type, not a choice between X01/Cricket, so it
-  // hides the same X01/Cricket-specific sections for the same reason.
-  const isSpecialMode = (mode === 'challenge' || mode === 'ghost' || mode === 'doubles_practice');
+  // Doubles Practice and Just Chuckin' It are each their own game_type, not a
+  // choice between X01/Cricket, so they hide the same X01/Cricket-specific
+  // sections for the same reason — Just Chuckin' It additionally has no config
+  // options at all (no starting score, no targets), unlike Doubles Practice.
+  const isSpecialMode = (mode === 'challenge' || mode === 'ghost' || mode === 'doubles_practice' || mode === 'chuckin');
   document.getElementById('game-type-section').hidden = isSpecialMode;
   if((mode === 'challenge' || mode === 'ghost') && setup.gameType !== 'x01') setGameType('x01');
   if(mode === 'doubles_practice') setup.gameType = 'doubles_practice';
+  if(mode === 'chuckin') setup.gameType = 'chuckin';
   document.getElementById('start-score-section').hidden = (isSpecialMode || setup.gameType === 'cricket');
   document.getElementById('cricket-options-section').hidden = (isSpecialMode || setup.gameType !== 'cricket');
   document.getElementById('challenge-info-section').hidden = (mode !== 'challenge');
@@ -2042,7 +2050,7 @@ function setMode(mode){
   document.getElementById('doubles-options-section').hidden = (mode !== 'doubles_practice');
   document.getElementById('add-player-wrap').style.display = isSpecialMode ? 'none' : '';
   const startBtn = document.getElementById('start-btn');
-  if(startBtn) startBtn.textContent = (mode === 'challenge') ? 'Start Challenge' : (mode === 'ghost') ? 'Start race' : (mode === 'doubles_practice') ? 'Start practice' : 'Start game';
+  if(startBtn) startBtn.textContent = (mode === 'challenge') ? 'Start Challenge' : (mode === 'ghost') ? 'Start race' : (mode === 'doubles_practice') ? 'Start practice' : (mode === 'chuckin') ? 'Start chuckin\'' : 'Start game';
   if(mode === 'challenge'){
     // a challenge is always exactly one player
     setup.slots = setup.slots.slice(0,1);
@@ -2058,6 +2066,13 @@ function setMode(mode){
     renderPlayers();
     const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
     renderDoublesTargetGrid();
+  } else if(mode === 'chuckin'){
+    // solo, freeform, no config — same single-slot treatment as Doubles Practice
+    setup.slots = setup.slots.slice(0,1);
+    if(!setup.slots.length) setup.slots = [''];
+    setup.legsPerSet = 1; setup.setsPerGame = 1;
+    renderPlayers();
+    const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
   } else if(mode === 'ghost'){
     // racing a ghost is always exactly one live player, one leg
     setup.slots = setup.slots.slice(0,1);
@@ -2787,7 +2802,7 @@ async function startGame(){
   if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   // Custom cricket is locked to exactly 7 targets (same count as classic) — never
   // more, never fewer (docs/game-modes-roadmap.md "Decisions made").
-  const gameType = setup.gameType === 'cricket' ? 'cricket' : setup.gameType === 'doubles_practice' ? 'doubles_practice' : 'x01'; // Daily Challenge always forces x01 via setMode()
+  const gameType = setup.gameType === 'cricket' ? 'cricket' : setup.gameType === 'doubles_practice' ? 'doubles_practice' : setup.gameType === 'chuckin' ? 'chuckin' : 'x01'; // Daily Challenge always forces x01 via setMode()
   let cricketNumbers = null;
   if(gameType === 'cricket'){
     cricketNumbers = resolveCricketNumbers();
@@ -2801,15 +2816,18 @@ async function startGame(){
   // (whatever "Starting score" happened to be hidden at, per setMode('ghost')) —
   // otherwise the two "players" wouldn't actually be racing the same leg.
   const startScore = challengeStart != null ? challengeStart : ghostScript ? Number(ghostScript.category) : setup.start;
-  const legsPerSet = (setup.mode==='challenge' || setup.mode==='ghost' || setup.mode==='doubles_practice') ? 1 : setup.legsPerSet;
-  const setsPerGame = (setup.mode==='challenge' || setup.mode==='ghost' || setup.mode==='doubles_practice') ? 1 : setup.setsPerGame;
+  const legsPerSet = (setup.mode==='challenge' || setup.mode==='ghost' || setup.mode==='doubles_practice' || setup.mode==='chuckin') ? 1 : setup.legsPerSet;
+  const setsPerGame = (setup.mode==='challenge' || setup.mode==='ghost' || setup.mode==='doubles_practice' || setup.mode==='chuckin') ? 1 : setup.setsPerGame;
   const config = gameType === 'cricket' ? { numbers: cricketNumbers }
     : gameType === 'doubles_practice' ? { doubles: setup.doublesTargets.slice() }
+    : gameType === 'chuckin' ? {}
     : { startingScore: startScore };
   const category = gameType === 'cricket'
     ? (setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
     : gameType === 'doubles_practice'
     ? `Doubles Practice (${config.doubles.map(doublesTargetLabel).join(', ')})`
+    : gameType === 'chuckin'
+    ? `Just Chuckin' It`
     : String(startScore);
   game = {
     gameType,
@@ -2840,7 +2858,10 @@ async function startGame(){
     // Doubles Practice (docs/game-modes-roadmap.md): per-dart evaluation, not
     // per-visit — a round runs until evaluateDartDoublesPractice() ends it
     // (so-close or wrong-double), never on a fixed dart count.
-    roundOver: false, roundEndReason: null, dpLastDart: null
+    roundOver: false, roundEndReason: null, dpLastDart: null,
+    // Just Chuckin' It (docs/game-modes-roadmap.md): no round-ending condition at
+    // all — the session just runs until "End game" is pressed.
+    chuckinLastDart: null
   };
   if(setup.mode === 'ghost'){
     game.hasGhost = true;
@@ -3098,6 +3119,11 @@ function renderPlayerPage(){
 
   // shared chart + top-finishes HTML (same structure for both tabs)
   const chartSection = `
+    <div class="pp-section" id="chuckin-heatmap-section" hidden>
+      <div class="pp-section-title">Dartboard Heatmap</div>
+      <p class="pp-meta" style="margin:0 0 8px">Where every Just Chuckin' It dart has landed — brighter means more hits.</p>
+      <div id="chuckin-heatmap-body"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </div>
     <div class="pp-section">
       <div class="pp-section-title" id="chart-metric-title">${(defs.find(d=>d.key===selectedStat)||defs[0]).label} over time</div>
       <div class="chart-periods">
@@ -3263,6 +3289,7 @@ function renderPlayerPage(){
   loadAroundTheWorldProgress();
   loadOnThisDay();
   loadChallengeHistory();
+  loadChuckinHeatmap();
 }
 // The full achievement roster (docs/achievements-badges-roadmap.md) — every badge
 // in the game, not just milestones. Recurring badges (Hat Trick, Night Owl, etc.)
@@ -3329,18 +3356,22 @@ function renderPlayerBadges(data){
     }
     return `<div class="stat-block" style="opacity:.5;cursor:pointer" ${titleAttr} onclick="showBadgeInfo('${id}')"><div class="stat-val" style="filter:grayscale(1)">${info.icon}</div><div class="stat-label">${info.label}<br>Not yet earned</div></div>`;
   };
-  // Grouped by game type — X01's badges, Cricket's 2, and Daily Challenge's 3 each
-  // stay visually distinct sub-sections rather than one mixed flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].challenge);
+  // Grouped by game type — X01's badges, Cricket's 2, Daily Challenge's 3, and
+  // Just Chuckin' It's 18 each stay visually distinct sub-sections rather than one
+  // mixed flat grid.
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
   const challengeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].challenge);
+  const chuckinIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].chuckin);
   container.innerHTML = `
     <div class="pp-section-title" style="margin-bottom:6px">X01</div>
     <div class="summary-grid">${x01Ids.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Cricket</div>
     <div class="summary-grid">${cricketIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Daily Challenge</div>
-    <div class="summary-grid">${challengeIds.map(badgeBlock).join('')}</div>`;
+    <div class="summary-grid">${challengeIds.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">Just Chuckin' It</div>
+    <div class="summary-grid">${chuckinIds.map(badgeBlock).join('')}</div>`;
 }
 // Around the World progress (docs/achievements-badges-roadmap.md): a compact grid
 // rather than a full dartboard-shaped heatmap — the doc explicitly calls the ideal
@@ -3555,6 +3586,20 @@ function renderDoublesPracticePersonalBests(data){
     ${data.bestRoundHits!=null?`<div class="stat-block"><div class="stat-val">${data.bestRoundHits}</div><div class="stat-label">Most Doubles in a Round</div></div>`:''}
   </div>`;
 }
+// No winStreak/recentForm/lifetime fields (see getChuckinPersonalBests()'s own
+// comment) — a session never "wins", so those X01/Cricket concepts don't map.
+function renderChuckinPersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || (data.bestSessionDarts==null && data.bestSessionTrebles==null)){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough sessions recorded yet.</p>`;
+    return;
+  }
+  container.innerHTML=`<div class="summary-grid">
+    ${data.bestSessionDarts!=null?`<div class="stat-block"><div class="stat-val">${data.bestSessionDarts}</div><div class="stat-label">Longest Session (darts)</div></div>`:''}
+    ${data.bestSessionTrebles!=null?`<div class="stat-block"><div class="stat-val">${data.bestSessionTrebles}</div><div class="stat-label">Most Trebles in a Session</div></div>`:''}
+  </div>`;
+}
 async function sharePersonalBest(kind, value){
   const cfg = { legavg: { icon:'📊', headline:'BEST LEG AVERAGE', statLine: value.toFixed(1) },
     fewestdarts: { icon:'🎯', headline:'FEWEST DARTS TO FINISH', statLine: `${value} darts` } }[kind];
@@ -3593,6 +3638,7 @@ function avgStr(points, darts){ return darts ? (points/darts*3).toFixed(1) : '�
 function renderGame(){
   if(game.gameType === 'cricket') return renderGameCricket();
   if(game.gameType === 'doubles_practice') return renderGameDoublesPractice();
+  if(game.gameType === 'chuckin') return renderGameChuckin();
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
   game.players.forEach((p,i)=>{
@@ -3789,6 +3835,111 @@ const ACH_DESC_FALLBACK = {
 function achDescFor(type){
   const badgeId = ACH_TYPE_TO_BADGE_ID[type] || type;
   return (BADGE_INFO[badgeId] && BADGE_INFO[badgeId].desc) || ACH_DESC_FALLBACK[type] || '';
+}
+
+// Just Chuckin' It's laddered milestone achievements (game-modes-roadmap.md "Just
+// Chuckin' It" achievements — requested explicitly laddered, so there's a lot to
+// earn and the first ones come early). 3 ladders, each a genuine permanent
+// once-earned milestone (same INSERT-OR-IGNORE once:true semantics as Around the
+// Clock/World/Grudge Match, not a recurring celebration): lifetime darts thrown,
+// darts in a single session, and lifetime trebles hit. Data-driven — a single
+// array + a population loop below generates all 18 BADGE_INFO/ACH_LABELS/
+// ACH_DURATION entries mechanically, since every tier of every ladder shares the
+// exact same shape (only id/threshold/label/icon differ) and hand-writing 18
+// near-identical object literals would be pure repetition. The overlay `type` and
+// the persisted `badgeId` are deliberately the same string for every tier (e.g.
+// `chuckin_darts_100`), so no ACH_TYPE_TO_BADGE_ID bridge entry is needed — same
+// precedent as cricket9marks/nocigar already use.
+const CHUCKIN_MILESTONE_LADDERS = [
+  { metric:'darts', idPrefix:'chuckin_darts_', statNoun:'lifetime darts',
+    descFor: t => `Throw ${t.toLocaleString()} lifetime darts in Just Chuckin' It.`,
+    tiers: [
+      { threshold:100,    label:'Warming Up',            icon:'🔥' },
+      { threshold:500,    label:'In the Groove',         icon:'🎯' },
+      { threshold:1000,   label:'Getting Serious',       icon:'💪' },
+      { threshold:2500,   label:'Dedicated',             icon:'📈' },
+      { threshold:5000,   label:'Grinder',               icon:'⚙️' },
+      { threshold:10000,  label:'Iron Arm',              icon:'🦾' },
+      { threshold:25000,  label:'Practice Makes Perfect', icon:'🏹' },
+      { threshold:50000,  label:'Machine',               icon:'🤖' },
+      { threshold:100000, label:'Legend of the Oche',    icon:'👑' },
+    ] },
+  { metric:'session', idPrefix:'chuckin_session_', statNoun:'darts this session',
+    descFor: t => `Throw ${t.toLocaleString()} darts in a single Just Chuckin' It session.`,
+    tiers: [
+      { threshold:100,  label:'Solid Session',    icon:'⏱️' },
+      { threshold:250,  label:'Marathon Session', icon:'🏃' },
+      { threshold:500,  label:'Endurance Test',   icon:'🧗' },
+      { threshold:1000, label:'Iron Session',     icon:'🔋' },
+    ] },
+  { metric:'trebles', idPrefix:'chuckin_trebles_', statNoun:'lifetime trebles',
+    descFor: t => `Hit ${t.toLocaleString()} lifetime trebles in Just Chuckin' It.`,
+    tiers: [
+      { threshold:10,   label:'First Trebles',  icon:'🎯' },
+      { threshold:50,   label:'Treble Trouble', icon:'💥' },
+      { threshold:100,  label:'Treble Century', icon:'💯' },
+      { threshold:500,  label:'Treble Master',  icon:'🌟' },
+      { threshold:1000, label:'Treble Legend',  icon:'🐐' },
+    ] },
+];
+CHUCKIN_MILESTONE_LADDERS.forEach(ladder=>{
+  ladder.tiers.forEach((tier, i)=>{
+    const id = ladder.idPrefix + tier.threshold;
+    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), chuckin:true };
+    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
+    // The top tier of each ladder gets a longer celebration, same convention as
+    // Around the World (the biggest completionist milestone) getting 5000 vs. the
+    // usual 2500-3000.
+    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
+  });
+});
+// Checks one ladder against a current value, awarding (once:true) any tier not
+// already cached as earned. Shared by the session ladder and the darts/trebles
+// (lifetime) ladders — see checkChuckinMilestones() below. The actual >=
+// threshold comparison is scoring.js's chuckinTiersReached() (loaded via
+// <script src="scoring.js">), not reimplemented here, so it's covered by a
+// committed test (backend/test/scoring.test.js) rather than only a Playwright check.
+function checkChuckinMilestoneTier(ladder, playerName, value){
+  const reached = chuckinTiersReached(ladder.tiers, value);
+  ladder.tiers.forEach(tier=>{
+    const id = ladder.idPrefix + tier.threshold;
+    if(!reached.includes(tier.threshold)) return;
+    if(earnedBadgeCache[playerName] && earnedBadgeCache[playerName].has(id)) return;
+    Backend.send('POST','/api/badges/award', { player:playerName, badgeId:id, once:true }).then(r=>{
+      if(!earnedBadgeCache[playerName]) earnedBadgeCache[playerName] = new Set();
+      earnedBadgeCache[playerName].add(id);
+      if(r && r.newlyEarned){
+        queueBadge(id, playerName);
+        fireMomentCard(id, { icon:tier.icon, headline:tier.label.toUpperCase(), player:playerName, statLine:`${value.toLocaleString()} ${ladder.statNoun}` });
+      }
+    }).catch(()=>{});
+  });
+}
+// Called after every dart from throwDartChuckin(). Every ladder is checked
+// entirely from local state — the session ladder from p.sessionDarts directly,
+// and the darts/trebles (lifetime) ladders from p.lifetimeDartsBase/
+// lifetimeTreblesBase (fetched once at game start by newMatchPlayerChuckin())
+// plus this session's running counters. This mode commits one turn per dart, so
+// a network round-trip on every single throw (as earlier revisions of this
+// function did, re-querying stat-bubbles per dart) could burn through the
+// server's per-IP rate limit during a long rapid-fire practice session — worse,
+// a 429 on the recordTurn write itself is swallowed silently by DB._queue's
+// catch, so needless extra traffic here was directly competing with the writes
+// that actually need to land. The only network calls left are the badge-award
+// POST itself, and only when a threshold is actually newly crossed. No undo
+// support: unlike X01/Cricket/Doubles Practice's badges, these are deliberately
+// never revoked if the dart that crossed a threshold is later undone — a
+// low-stakes practice mode milestone staying earned on an undone dart is a
+// harmless edge case, not worth the added badgeReverts/snap.voided plumbing
+// those other modes need for genuine competitive-play corrections.
+function checkChuckinMilestones(p){
+  const sessionLadder = CHUCKIN_MILESTONE_LADDERS.find(l=>l.metric==='session');
+  checkChuckinMilestoneTier(sessionLadder, p.name, p.sessionDarts);
+
+  const dartsLadder = CHUCKIN_MILESTONE_LADDERS.find(l=>l.metric==='darts');
+  const treblesLadder = CHUCKIN_MILESTONE_LADDERS.find(l=>l.metric==='trebles');
+  checkChuckinMilestoneTier(dartsLadder, p.name, (p.lifetimeDartsBase||0) + p.sessionDarts);
+  checkChuckinMilestoneTier(treblesLadder, p.name, (p.lifetimeTreblesBase||0) + p.sessionTrebles);
 }
 
 function spawnConfetti(root, count){
@@ -4061,6 +4212,9 @@ function liveSnapshot(message){
     dpLastDart: game.gameType === 'doubles_practice' ? (game.dpLastDart || null) : null,
     roundOver: game.gameType === 'doubles_practice' ? !!game.roundOver : null,
     roundEndReason: game.gameType === 'doubles_practice' ? (game.roundEndReason || null) : null,
+    // Just Chuckin' It only: the outcome of the most recent dart — the /display
+    // renderer reads this instead of the X01/Cricket/Doubles-Practice-shaped fields.
+    chuckinLastDart: game.gameType === 'chuckin' ? (game.chuckinLastDart || null) : null,
     achievement: pendingAchievement || null,
     gameOneEighties: game.gameOneEighties || 0,
     gameBigFish: game.gameBigFish || 0,
@@ -4174,6 +4328,7 @@ function updateMultUI(){
 }
 function throwDart(sector){
   if(game.gameType === 'doubles_practice') return throwDartDoublesPractice(sector);
+  if(game.gameType === 'chuckin') return throwDartChuckin(sector);
   if(game.darts.length>=3 || game.busted || game.won) return;
   if(sector === 0 && mult > 1){
     // Double/Treble Miss fills that many slots at once
@@ -4228,6 +4383,7 @@ function askEndGame(){
 function undoLastTurn(){
   if(game && game.gameType === 'cricket') return undoLastTurnCricket();
   if(game && game.gameType === 'doubles_practice') return undoLastTurnDoublesPractice();
+  if(game && game.gameType === 'chuckin') return undoLastTurnChuckin();
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
   const p = game.players[snap.pi];
@@ -5088,9 +5244,14 @@ function finishUnit(kind, winner){
 function renderGameShell(){
   const isCricketGame = !!(game && game.gameType === 'cricket');
   const isDoublesPractice = !!(game && game.gameType === 'doubles_practice');
+  const isChuckin = !!(game && game.gameType === 'chuckin');
+  // Doubles Practice and Just Chuckin' It are both per-dart-commit modes with no
+  // staged 3-dart visit — no "Enter turn" step, no slots row (no opponent/score to
+  // show), and no separate "Undo Dart" (there's no uncommitted dart to un-stage).
+  const isPerDartMode = isDoublesPractice || isChuckin;
   document.querySelector('.oche').innerHTML=`
-      <div class="slots" id="slots"${isDoublesPractice ? ' hidden' : ''}></div>
-      <div class="status" id="status">${isDoublesPractice ? 'Select a multiplier, then tap a number.' : isCricketGame ? 'Select a multiplier, then tap a target number.' : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
+      <div class="slots" id="slots"${isPerDartMode ? ' hidden' : ''}></div>
+      <div class="status" id="status">${isChuckin ? "Select a multiplier, then tap a number. No score, no pressure — just throw." : isDoublesPractice ? 'Select a multiplier, then tap a number.' : isCricketGame ? 'Select a multiplier, then tap a target number.' : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
       <div class="multi" id="multi-row" role="group" aria-label="Dart multiplier">
         <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
         <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
@@ -5101,10 +5262,10 @@ function renderGameShell(){
       <button class="btn btn-ghost board-miss" id="board-miss-btn" onclick="throwDartBoard(0,1)">Miss</button>
       <div class="turn-actions">
         <div class="undo-row">
-          <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled>${isDoublesPractice ? 'Undo Last Dart' : 'Undo Last Turn'}</button>
-          <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()"${isDoublesPractice ? ' hidden' : ''}>Undo Dart</button>
+          <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled>${isPerDartMode ? 'Undo Last Dart' : 'Undo Last Turn'}</button>
+          <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()"${isPerDartMode ? ' hidden' : ''}>Undo Dart</button>
         </div>
-        <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()"${isDoublesPractice ? ' hidden' : ''}>Enter turn</button>
+        <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()"${isPerDartMode ? ' hidden' : ''}>Enter turn</button>
         <button class="btn btn-primary" id="dp-next-round-btn" onclick="startNextRoundDoublesPractice()" hidden>Start next round</button>
       </div>`;
   applyDartMode();
@@ -5165,6 +5326,22 @@ const DOUBLES_PRACTICE_STAT_DEFS = [
 ];
 const DOUBLES_PRACTICE_BUBBLE_KEY_MAP = { doublespracticepct:'doublesPct',
   doublespracticedartsperround:'avgDartsPerRound', doublespracticehitsperround:'avgHitsPerRound' };
+
+// Just Chuckin' It's own stat vocabulary (game-modes-roadmap.md "Just Chuckin' It")
+// — deliberately heatmap/trend-heavy per the feature request (patterns and
+// improvement over time, not a score). Darts Thrown/Sessions Played/Darts per
+// Session/Treble % are primary; Double %/Bull % live behind "More stats".
+const CHUCKIN_STAT_DEFS = [
+  { key:'chuckindartsthrown', label:'Darts Thrown', desc:"Total darts thrown in Just Chuckin' It", fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
+  { key:'chuckinsessions', label:'Sessions Played', desc:"Number of Just Chuckin' It sessions", fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'chuckinavgdartspersession', label:'Darts / Session', desc:'Average darts thrown per session', fmt:v=>v!=null?Number(v).toFixed(1):'—', primary:true },
+  { key:'chuckintreblepct', label:'Treble %', desc:'% of darts landing in a treble bed', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'chuckindoublepct', label:'Double %', desc:'% of darts landing in a double bed (including double bull)', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'chuckinbullpct', label:'Bull %', desc:'% of darts landing on the bullseye (single or double)', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+];
+const CHUCKIN_BUBBLE_KEY_MAP = { chuckindartsthrown:'dartsThrown', chuckinsessions:'sessionsPlayed',
+  chuckinavgdartspersession:'avgDartsPerSession', chuckintreblepct:'treblePct',
+  chuckindoublepct:'doublePct', chuckinbullpct:'bullPct' };
 
 // ---------- game-type plugin registry ----------
 // The seam future game types (Cricket, Ghost Opponent's replay engine) plug into.
@@ -5244,6 +5421,24 @@ const GAME_TYPES = {
     statDefs: DOUBLES_PRACTICE_STAT_DEFS,
     personalBestsRenderer: renderDoublesPracticePersonalBests,
     homeTabRenderer: renderHomeTabBodyDoublesPractice
+  },
+  chuckin: {
+    id: 'chuckin',
+    label: "Just Chuckin' It",
+    newMatchPlayer: newMatchPlayerChuckin,
+    // Per-dart, no round/leg-ending condition at all (throwDartChuckin()) — every
+    // existing call site for this game type is a dedicated gameType==='chuckin'
+    // branch, the same precedent Cricket/Doubles Practice already established, so
+    // this is never actually invoked.
+    evaluateVisit: () => { throw new Error("chuckin has no per-visit evaluateVisit — see throwDartChuckin()"); },
+    resetForNextLeg: resetPlayerForNextLegChuckin,
+    playerSnapshot: playerSnapshotChuckin,
+    statDefs: CHUCKIN_STAT_DEFS,
+    personalBestsRenderer: renderChuckinPersonalBests,
+    // false (not null) deliberately opts this mode out of the Home page toggle
+    // entirely — unlike null ("use the built-in X01-shaped default"), this mode's
+    // stats don't map onto that shape and no Home leaderboard was requested for it.
+    homeTabRenderer: false
   }
 };
 // bubbleKeyMap is patched on below, right after each map itself is defined —
@@ -5415,6 +5610,110 @@ function renderGameDoublesPractice(){
   if(nextBtn) nextBtn.hidden = !game.roundOver;
   pushLive();
 }
+
+/* ---------- Just Chuckin' It (docs/game-modes-roadmap.md "Just Chuckin' It") ----------
+   Freeform, completely unscored practice: no starting score, no countdown, no
+   bust, no win — every dart just gets recorded until the player presses "End
+   game." No round-ending condition at all (unlike Doubles Practice), so every
+   dart commits immediately with nothing to evaluate — the simplest per-dart
+   write in the app. sessionDarts/sessionTrebles are tracked client-side purely
+   for the live scoreboard and the session-length milestone ladder (see
+   checkChuckinMilestones()); the lifetime figures backing the other two
+   milestone ladders come from the stat-bubbles endpoint instead. */
+function newMatchPlayerChuckin(name){
+  const p = { name, sessionDarts:0, sessionTrebles:0, lifetimeDartsBase:0, lifetimeTreblesBase:0 };
+  // Fetched once at game start (not re-queried per dart) so checkChuckinMilestones()
+  // can compute lifetime darts/trebles as base+session entirely from local state —
+  // this mode is built around rapid successive throws, and hitting the network on
+  // every single dart (this mode commits one turn per dart) would needlessly burn
+  // through the server's per-IP rate limit during a long practice session. If this
+  // hasn't resolved by the time a dart is thrown, the milestone check just uses 0 as
+  // the base and catches up once it lands — worst case a lifetime tier is checked a
+  // dart or two late, never a false positive.
+  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(name)}&gameType=chuckin`).then(stats=>{
+    if(!stats) return;
+    p.lifetimeDartsBase = (stats.dartsThrown || 0) - p.sessionDarts;
+    p.lifetimeTreblesBase = (stats.trebles || 0) - p.sessionTrebles;
+  }).catch(()=>{});
+  return p;
+}
+// Not called by startNextLeg() (this mode never advances a leg) — provided only
+// to satisfy the GAME_TYPES contract, matching Doubles Practice's own precedent.
+function resetPlayerForNextLegChuckin(p){
+  p.sessionDarts = 0; p.sessionTrebles = 0;
+}
+function playerSnapshotChuckin(p){
+  return { name:p.name, sessionDarts:p.sessionDarts||0, sessionTrebles:p.sessionTrebles||0 };
+}
+function throwDartChuckin(sector){
+  const dart = makeDart(sector, mult);
+  mult = 1; updateMultUI();
+  const p = game.players[0];
+
+  // snapshot state before mutation so undoLastTurnChuckin() can restore it
+  game.lastTurnSnapshot = { sessionDarts:p.sessionDarts, sessionTrebles:p.sessionTrebles, chuckinLastDart:game.chuckinLastDart };
+
+  p.sessionDarts += 1;
+  if(dart.isTreble) p.sessionTrebles += 1;
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:0, bust:false, checkout:false, checkoutPoints:null, legWon:false,
+    darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt }] });
+  game.chuckinLastDart = { label:dart.label, isTreble:!!dart.isTreble };
+  announce(`${dart.label}. ${p.sessionDarts} dart${p.sessionDarts===1?'':'s'} this session.`);
+  renderGameChuckin();
+  checkChuckinMilestones(p);
+}
+// Undoes the single most recently thrown dart — mirrors undoLastTurnDoublesPractice()'s
+// shape. No badge reverts needed here despite this mode having achievements: every
+// chuckin badge is a permanent once-earned milestone gated on a >= threshold, so an
+// undone dart that happened to cross one leaves the milestone earned (matches how
+// Around the Clock/World already behave — those aren't revoked on undo either).
+function undoLastTurnChuckin(){
+  if(!game || !game.lastTurnSnapshot) return;
+  const snap = game.lastTurnSnapshot;
+  const p = game.players[0];
+  p.sessionDarts = snap.sessionDarts;
+  p.sessionTrebles = snap.sessionTrebles;
+  game.chuckinLastDart = snap.chuckinLastDart;
+  game.lastTurnSnapshot = null;
+  DB.deleteLastTurn();
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent='Last dart undone.'; }
+  renderGameChuckin();
+}
+function renderGameChuckin(){
+  const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
+  const p = game.players[0];
+  const pct = p.sessionDarts ? Math.round(p.sessionTrebles/p.sessionDarts*100) : 0;
+  const row = document.createElement('div');
+  row.className = 'pscore active';
+  row.innerHTML = `
+    <div>
+      <div class="nm">${escapeHtml(p.name)} <span class="nm-out">just chuckin' it</span></div>
+      <div class="turnflag">▸ throwing</div>
+    </div>
+    <div class="meta">
+      <div class="avgs">this session <b>${pct}%</b> trebles &nbsp;·&nbsp; ${p.sessionTrebles} treble${p.sessionTrebles===1?'':'s'} / ${p.sessionDarts} dart${p.sessionDarts===1?'':'s'}</div>
+    </div>
+    <div class="rem-wrap">
+      <div class="rem">${p.sessionDarts}</div>
+    </div>`;
+  if(sb) sb.appendChild(row);
+
+  const status = document.getElementById('status');
+  if(status){
+    if(game.chuckinLastDart){
+      status.className = game.chuckinLastDart.isTreble ? 'status win' : 'status';
+      status.textContent = `${game.chuckinLastDart.label}${game.chuckinLastDart.isTreble ? ' — treble!' : ''} · ${p.sessionDarts} dart${p.sessionDarts===1?'':'s'} this session.`;
+    } else {
+      status.className = 'status';
+      status.textContent = 'Select a multiplier, then tap a number. No score, no pressure — just throw.';
+    }
+  }
+  renderPad();
+  pushLive();
+}
+
 function marksGlyph(n){
   const clamped = Math.min(3, n);
   return clamped>=3 ? '✓' : '●'.repeat(clamped) + '○'.repeat(3-clamped);
@@ -5572,6 +5871,7 @@ const BUBBLE_KEY_MAP = { dartsthrown:'dartsThrown', avgdartsperday:'avgDartsPerD
 GAME_TYPES.x01.bubbleKeyMap = BUBBLE_KEY_MAP;
 GAME_TYPES.cricket.bubbleKeyMap = CRICKET_BUBBLE_KEY_MAP;
 GAME_TYPES.doubles_practice.bubbleKeyMap = DOUBLES_PRACTICE_BUBBLE_KEY_MAP;
+GAME_TYPES.chuckin.bubbleKeyMap = CHUCKIN_BUBBLE_KEY_MAP;
 function toggleMoreStats(){
   showMoreStats = !showMoreStats;
   renderPlayerPage();
@@ -5739,6 +6039,71 @@ function loadTopFinishes(){
       }).join('')}</div>`;
     })
     .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load finishes.</p>`; });
+}
+
+/* ---------- Just Chuckin' It dartboard heatmap (game-modes-roadmap.md) ----------
+   Reuses buildDartboard()'s geometry (radii, sector math) but as a standalone,
+   non-interactive rendering — no onclick handlers, no hover states, shaded by hit
+   frequency instead of the static light/dark scoring pattern. Kept fully separate
+   from buildDartboard() itself (rather than adding a "heatmap mode" flag to it) so
+   the heavily-used live scoring board can't regress from a change made for this
+   one Player Profile visualization. */
+function loadChuckinHeatmap(){
+  const section = document.getElementById('chuckin-heatmap-section');
+  const body = document.getElementById('chuckin-heatmap-body');
+  if(!section || !body) return;
+  if(playerGameType !== 'chuckin'){ section.hidden = true; return; }
+  section.hidden = false;
+  const modeParam = (playerPageTab==='h2h'||playerPageTab==='practice') ? `&mode=${playerPageTab}` : '';
+  Backend.get(`/api/players/chuckin-heatmap?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
+    .then(cells => { body.innerHTML = buildChuckinHeatmap(cells||[]); })
+    .catch(()=>{ body.innerHTML = `<p class="pp-meta" style="padding:4px 0">Could not load the heatmap.</p>`; });
+}
+function buildChuckinHeatmap(cells){
+  const hitMap = {};
+  let maxHits = 0;
+  (cells||[]).forEach(c=>{ hitMap[c.sector+'_'+c.multiplier] = c.hits; if(c.hits>maxHits) maxHits = c.hits; });
+  const hits = (sector, m) => hitMap[sector+'_'+m] || 0;
+  const heat = (sector, m) => maxHits>0 ? hits(sector,m)/maxHits : 0;
+
+  const CX=250, CY=250;
+  const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248 };
+  const DEG = 360/20;
+  const xy = (r, deg) => { const a=(deg-90)*Math.PI/180; return [CX+r*Math.cos(a), CY+r*Math.sin(a)]; };
+  const f = v => v.toFixed(2);
+  const annulus = (r1, r2, s, e) => {
+    const [x1,y1]=xy(r1,s),[x2,y2]=xy(r1,e),[x3,y3]=xy(r2,e),[x4,y4]=xy(r2,s);
+    const lg=e-s>180?1:0;
+    return `M${f(x1)},${f(y1)} A${r1},${r1} 0 ${lg},1 ${f(x2)},${f(y2)} L${f(x3)},${f(y3)} A${r2},${r2} 0 ${lg},0 ${f(x4)},${f(y4)} Z`;
+  };
+  // Single-hue heat scale: dark background -> gold, by relative hit frequency
+  // (0 = never hit, 1 = the single most-hit region on the board).
+  const heatFill = t => {
+    if(t<=0) return '#1c1e1a';
+    const r = Math.round(28 + t*(217-28));
+    const g = Math.round(30 + t*(180-30));
+    const b = Math.round(26 + t*(106-26));
+    return `rgb(${r},${g},${b})`;
+  };
+  let s = `<svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:360px;height:auto;display:block;margin:0 auto" role="img" aria-label="Dartboard heatmap of every Just Chuckin' It dart thrown">
+    <circle cx="${CX}" cy="${CY}" r="${R.bg}" fill="#0d0e0b"/>
+    <circle cx="${CX}" cy="${CY}" r="${R.doubleOut+1}" fill="#111210"/>
+    <circle cx="${CX}" cy="${CY}" r="${R.doubleOut}" fill="#0d0e0b"/>`;
+  DB_SECTORS.forEach((num,i)=>{
+    const s0=i*DEG-DEG/2, e0=s0+DEG;
+    const sw = 'stroke="#151613" stroke-width="0.5"';
+    s += `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${heatFill(heat(num,1))}" ${sw}><title>${num}: ${hits(num,1)} single hit${hits(num,1)===1?'':'s'}</title></path>`;
+    s += `<path d="${annulus(R.trebleIn,R.trebleOut,s0,e0)}" fill="${heatFill(heat(num,3))}" ${sw}><title>T${num}: ${hits(num,3)} treble hit${hits(num,3)===1?'':'s'}</title></path>`;
+    s += `<path d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${heatFill(heat(num,1))}" ${sw}/>`;
+    s += `<path d="${annulus(R.doubleIn,R.doubleOut,s0,e0)}" fill="${heatFill(heat(num,2))}" ${sw}><title>D${num}: ${hits(num,2)} double hit${hits(num,2)===1?'':'s'}</title></path>`;
+    const [nx,ny]=xy(R.numAt,s0+DEG/2);
+    s += `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="17" fill="#efe7d2" style="pointer-events:none;user-select:none">${num}</text>`;
+  });
+  s += `<circle cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="${heatFill(heat(25,1))}" stroke="#151613" stroke-width="0.5"><title>Bull: ${hits(25,1)} hit${hits(25,1)===1?'':'s'}</title></circle>`;
+  s += `<circle cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="${heatFill(heat(25,2))}" stroke="#151613" stroke-width="0.5"><title>Double Bull: ${hits(25,2)} hit${hits(25,2)===1?'':'s'}</title></circle>`;
+  s += `<text x="${CX}" y="${CY}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="12" fill="#efe7d2" style="pointer-events:none;user-select:none">Bull</text>`;
+  s += `</svg>`;
+  return s;
 }
 
 /* ---------- dart analytics ---------- */

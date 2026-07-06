@@ -17,8 +17,13 @@
 > `getOnThisDay`'s priority ordering, H2H record/summary, the game-lifecycle
 > hooks, `addTurn()`'s input validation, the auth model, and player CRUD/cascade
 > + the settings store all have committed `node:test` suites
-> (`backend/test/*.test.js`, 11 files, 161 assertions total — every formula named
-> in an earlier draft of this doc's "not yet tested" list is now covered).
+> (`backend/test/*.test.js`, grown to 17 files/223 tests as of the Just Chuckin' It
+> pass — every formula named in an earlier draft of this doc's "not yet tested"
+> list is now covered, and every game type added since keeps extending the same
+> suite: Doubles Practice's `db.doubles-practice-stats.test.js`, Ghost mode's
+> `db.ghost.test.js`, and Just Chuckin' It's `db.chuckin-stats.test.js` plus
+> `scoring.test.js`'s `chuckinTiersReached()` coverage for the milestone-badge
+> trigger condition).
 > `npm test` runs the whole suite (zero new dependency), and
 > `.github/workflows/test.yml` runs it on every push/PR, closing this doc's own
 > open CI question. Writing this suite found and fixed 3 small, real bugs

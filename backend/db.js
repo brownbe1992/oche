@@ -744,13 +744,15 @@ function computeStats() {
     GROUP BY g.winner_id, g.category
   `).all();
 
-  // Practice = explicit practice flag OR solo (1-player) games
+  // Practice = explicit practice flag OR solo (1-player) games. Excludes Just
+  // Chuckin' It (NOT_CHUCKIN) — its darts count toward the global dartsThrown
+  // total below but not toward this per-category legs breakdown.
   const practiceLegs = db.prepare(`
     SELECT t.player_id AS pid, g.category AS cat,
            COUNT(DISTINCT t.game_id || '-' || t.set_no || '-' || t.leg_no) AS legs
     FROM turns t JOIN games g ON g.id = t.game_id
-    WHERE g.practice = 1
-      OR g.player_count = 1
+    WHERE (g.practice = 1
+      OR g.player_count = 1) ${NOT_CHUCKIN}
     GROUP BY t.player_id, g.category
   `).all();
 
@@ -933,8 +935,8 @@ function getSummary() {
   const practiceLegs = db.prepare(`
     SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
     FROM turns t JOIN games g ON g.id = t.game_id
-    WHERE g.practice = 1
-      OR g.player_count = 1
+    WHERE (g.practice = 1
+      OR g.player_count = 1) ${NOT_CHUCKIN}
   `).get().n;
   return { players, games, sets, legs, darts, tonPlus, oneEighties, bigFish, nineDarters, practiceLegs };
 }
@@ -1025,18 +1027,24 @@ function getHomeExtra() {
     LIMIT 1
   `).get() || null;
 
+  // legs/darts "activity" counts — legs excludes Just Chuckin' It (NOT_CHUCKIN,
+  // joins games for the first time here to apply it); darts stays fully unscoped
+  // since raw dart-throwing volume is the one thing chuckin should count toward.
   const todayLegs = db.prepare(`
     SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
-    FROM turns t WHERE date(t.created_at) = date('now')
+    FROM turns t JOIN games g ON g.id = t.game_id WHERE date(t.created_at) = date('now') ${NOT_CHUCKIN}
   `).get().n;
   const todayDarts = db.prepare(`SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id WHERE date(t.created_at) = date('now')`).get().n;
   const weekLegs = db.prepare(`
     SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
-    FROM turns t WHERE date(t.created_at) >= date('now', '-6 days')
+    FROM turns t JOIN games g ON g.id = t.game_id WHERE date(t.created_at) >= date('now', '-6 days') ${NOT_CHUCKIN}
   `).get().n;
   const weekDarts = db.prepare(`SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id WHERE date(t.created_at) >= date('now', '-6 days')`).get().n;
 
   // Pace: avg ms between consecutive thrown_at timestamps within the same turn -> darts/min.
+  // Excludes Just Chuckin' It (NOT_CHUCKIN) — its rapid-fire per-dart-only rhythm
+  // (no scoring pauses, no walking to collect between legs the way a real match
+  // has) would skew this as a measure of match-throwing pace.
   const _pace = (modeWhere) => {
     const row = db.prepare(`
       SELECT AVG(gap_ms) AS avgMs FROM (
@@ -1045,7 +1053,7 @@ function getHomeExtra() {
         JOIN darts prev ON prev.turn_id = d.turn_id AND prev.dart_no = d.dart_no - 1
         JOIN turns t ON t.id = d.turn_id
         JOIN games g ON g.id = t.game_id
-        WHERE d.thrown_at IS NOT NULL AND prev.thrown_at IS NOT NULL AND ${modeWhere}
+        WHERE d.thrown_at IS NOT NULL AND prev.thrown_at IS NOT NULL AND ${modeWhere} ${NOT_CHUCKIN}
       ) WHERE gap_ms > 0 AND gap_ms < 60000
     `).get();
     if (!row || !row.avgMs) return null;
@@ -1565,6 +1573,80 @@ function getDoublesPracticeBestRoundStats() {
     .map(r => ({ name: r.name, hits: r.hits, darts: r.darts, createdAt: r.created_at }));
 }
 
+/* ---------- Just Chuckin' It (game-modes-roadmap.md "Just Chuckin' It") ----------
+   Freeform, completely unscored practice: every dart is its own 1-dart turn
+   (mirrors Doubles Practice's per-dart-turn precedent — addTurn() already allows
+   1-3 darts per turn), with no bust/win/checkout concept at all (turns.bust/
+   checkout always 0/false, scored always 0 — none of them are repurposed the way
+   Doubles Practice repurposes bust, since this mode has no round-ending condition
+   to signal). A "session" is one games row; darts group into a single
+   set_no=1/leg_no=1 for the whole session, since there's no round/leg boundary to
+   increment at all (unlike Doubles Practice's per-round leg_no bump) — grouping by
+   t.game_id alone is equivalent and clearer intent-wise. Deliberately the INVERSE
+   of every other game-type addition: its darts must NOT count toward any existing
+   stat (see NOT_CHUCKIN above) — the one exception, the pure "total darts thrown"
+   counters, are already fully unscoped queries that need no change to include it. */
+
+function getChuckinStatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'chuckin' });
+
+  const dartsThrown = db.prepare(`SELECT COUNT(*) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+  const trebles = db.prepare(`SELECT COALESCE(SUM(d.is_treble),0) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+  const bulls = db.prepare(`SELECT COUNT(*) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? AND d.sector=25 ${scope}`).get(p.id)?.v ?? 0;
+  const doubles = db.prepare(`SELECT COALESCE(SUM(d.is_double),0) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+  const treblePct = dartsThrown > 0 ? (trebles / dartsThrown * 100) : null;
+  const bullPct = dartsThrown > 0 ? (bulls / dartsThrown * 100) : null;
+  const doublePct = dartsThrown > 0 ? (doubles / dartsThrown * 100) : null;
+
+  const sessionsPlayed = db.prepare(`SELECT COUNT(DISTINCT t.game_id) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+  const avgDartsPerSession = sessionsPlayed > 0 ? (dartsThrown / sessionsPlayed) : null;
+
+  return { dartsThrown, trebles, treblePct, bulls, bullPct, doubles, doublePct, sessionsPlayed, avgDartsPerSession };
+}
+
+// Personal Bests analog: "best session" records (mirrors Doubles Practice's
+// bestRoundDarts/bestRoundHits shape) — no winStreak/recentForm/lifetime fields,
+// since a chuckin session never "wins"; getChuckinStatBubbles()'s lifetime
+// treblePct already covers "how am I doing overall."
+function getChuckinPersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'chuckin' });
+
+  const sessions = db.prepare(`
+    SELECT COUNT(d.id) AS darts, COALESCE(SUM(d.is_treble),0) AS trebles
+    FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+    WHERE t.player_id=? ${scope}
+    GROUP BY t.game_id
+  `).all(p.id);
+
+  let bestSessionDarts = null, bestSessionTrebles = null;
+  for (const s of sessions) {
+    if (bestSessionDarts == null || s.darts > bestSessionDarts) bestSessionDarts = s.darts;
+    if (bestSessionTrebles == null || s.trebles > bestSessionTrebles) bestSessionTrebles = s.trebles;
+  }
+  return { bestSessionDarts, bestSessionTrebles };
+}
+
+// Per-sector/multiplier hit-count grid feeding the Player Profile's dartboard
+// heatmap — the "heatmap-heavy... patterns and trends" reporting this mode was
+// specifically requested to have. Same flat {sector,multiplier,hits} shape as
+// getDartAnalytics()'s topSectors, just chuckin-scoped and unfiltered by rank
+// (the frontend shades every dartboard region, not just the top 15).
+function getChuckinHeatmap(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return [];
+  const scope = _scope({ mode, gameType: 'chuckin' });
+  return db.prepare(`
+    SELECT d.sector AS sector, d.multiplier AS multiplier, COUNT(*) AS hits
+    FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id
+    WHERE t.player_id=? ${scope}
+    GROUP BY d.sector, d.multiplier
+  `).all(p.id);
+}
+
 function getMetricHistory(playerName, metric, period, opts = {}) {
   const p = getPlayer(playerName);
   if (!p) return [];
@@ -1573,6 +1655,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
   // item 1) instead of hand-rolling their own "AND g.game_type='cricket'" alongside modeWhere.
   const cricketScope = _scope({ mode: opts.mode, gameType: 'cricket' });
   const doublesPracticeScope = _scope({ mode: opts.mode, gameType: 'doubles_practice' });
+  const chuckinScope = _scope({ mode: opts.mode, gameType: 'chuckin' });
   const params = [p.id];
   let weightWhere = '';
   if (opts.dartWeight) {
@@ -1783,6 +1866,47 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         GROUP BY t.game_id,t.set_no,t.leg_no
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
 
+    // ---- Just Chuckin' It metrics (game-modes-roadmap.md "Just Chuckin' It") ----
+    // Per-dart bucketing (like Cricket's cricketdartsthrown/doublespracticepct) —
+    // there's no leg/round boundary in this mode to bucket by instead.
+    case 'chuckindartsthrown':
+      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(d.id) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${chuckinScope} ${T.and} ${weightWhere} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'chuckintreblepct':
+      return db.prepare(`SELECT bucket, CAST(SUM(is_treble) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
+        SELECT ${T.fmt} AS bucket, d.is_treble AS is_treble
+        FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+        WHERE t.player_id=? ${chuckinScope} ${T.and} ${weightWhere}
+      ) GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'chuckinbullpct':
+      return db.prepare(`SELECT bucket, CAST(SUM(is_bull) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
+        SELECT ${T.fmt} AS bucket, CASE WHEN d.sector=25 THEN 1 ELSE 0 END AS is_bull
+        FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+        WHERE t.player_id=? ${chuckinScope} ${T.and} ${weightWhere}
+      ) GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'chuckindoublepct':
+      return db.prepare(`SELECT bucket, CAST(SUM(is_double) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
+        SELECT ${T.fmt} AS bucket, d.is_double AS is_double
+        FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+        WHERE t.player_id=? ${chuckinScope} ${T.and} ${weightWhere}
+      ) GROUP BY bucket ORDER BY bucket`).all(...params);
+    // Session-shaped metrics bucket by each session's own timestamp (leg_ts, via
+    // the L bucketer already used for X01/Cricket/Doubles-Practice per-leg
+    // metrics) — a "session" here is one games row, matching getChuckinPersonalBests().
+    case 'chuckinsessions':
+      return db.prepare(`SELECT ${L.fmt} AS bucket, COUNT(*) AS value FROM (
+        SELECT MAX(t.created_at) AS leg_ts
+        FROM turns t JOIN games g ON g.id=t.game_id
+        WHERE t.player_id=? ${chuckinScope} ${weightWhere}
+        GROUP BY t.game_id
+      ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'chuckinavgdartspersession':
+      return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(session_darts) AS value FROM (
+        SELECT MAX(t.created_at) AS leg_ts, COUNT(d.id) AS session_darts
+        FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+        WHERE t.player_id=? ${chuckinScope} ${weightWhere}
+        GROUP BY t.game_id
+      ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
+
     default:
       return [];
   }
@@ -1803,7 +1927,7 @@ function _mf(mode) {
 // 'x01'/'cricket', server.js only uses a query param to pick which function to
 // call), and is whitelisted here regardless as a defense-in-depth measure
 // against string interpolation.
-const KNOWN_GAME_TYPES = ['x01', 'cricket', 'doubles_practice'];
+const KNOWN_GAME_TYPES = ['x01', 'cricket', 'doubles_practice', 'chuckin'];
 function _scope({ mode, gameType } = {}) {
   let sql = _mf(mode);
   if (gameType) {
@@ -1822,6 +1946,25 @@ function _scope({ mode, gameType } = {}) {
 // World), games/wins/H2H records, and checkout-based stats (cricket never writes
 // checkout=1) deliberately do NOT use this — see REFERENCE.md §3.
 const X01_ONLY = _scope({ gameType: 'x01' });
+
+// Just Chuckin' It (game-modes-roadmap.md) is the inverse of every other game-type
+// addition so far: Cricket/Doubles Practice darts were deliberately folded INTO the
+// "physical dart stats" aggregates above (dartsThrown, pace, sector analytics,
+// Around the World) since a cricket dart is still a real dart. Just Chuckin' It's
+// darts must NOT count toward any of those — the one deliberate exception (per an
+// explicit product decision) is the pure "total darts thrown" counters themselves
+// (computeStats()'s allCounts, getSummary()'s darts/todayDarts/weekDarts — all
+// already fully unscoped queries that need no change to keep including chuckin).
+// Every other "physical dart stats" query that isn't naturally gated by a column
+// chuckin never sets (checkout=1, game_type='x01') needs this exclusion added
+// explicitly — getDartAnalytics(), getAroundTheWorldProgress(), getHomeExtra()'s
+// _pace()/todayLegs/weekLegs, and the practiceLegs aggregates in getSummary()/
+// computeStats(). These are hand-rolled WHERE clauses that don't go through
+// _mf()/_scope() at all (unlike getChuckinStatBubbles() etc., which always pass an
+// explicit gameType:'chuckin' and would contradict a blanket exclusion baked into
+// _mf('practice') itself — that's why this is a separate constant applied at each
+// specific call site, not folded into the central mode-scoping helpers above).
+const NOT_CHUCKIN = `AND g.game_type != 'chuckin'`;
 
 function getOneEightyStats(mode) {
   const mf = _mf(mode);
@@ -2085,8 +2228,10 @@ function getDartAnalytics(playerName, mode) {
   const mf = _mf(mode);
 
   // Base FROM for dart-level queries (darts → turns → games)
-  // Excludes darts thrown on busted turns — they shouldn't count toward sector/treble analytics
-  const BASE = `FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id WHERE t.player_id = ? AND t.bust = 0`;
+  // Excludes darts thrown on busted turns — they shouldn't count toward sector/treble
+  // analytics — and Just Chuckin' It darts (NOT_CHUCKIN), which get their own
+  // dedicated heatmap/treble-rate stats instead of feeding this cross-game-type view.
+  const BASE = `FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id WHERE t.player_id = ? AND t.bust = 0 ${NOT_CHUCKIN}`;
 
   // 1 — Most hit sector/multiplier combinations
   const topSectors = db.prepare(`
@@ -2482,10 +2627,12 @@ function getH2HSummary(name1, name2, excludeGameId) {
 function getAroundTheWorldProgress(playerName) {
   const p = getPlayer(playerName);
   if(!p) return { hit:[], count:0, total:63 };
+  // Joins games to apply NOT_CHUCKIN — Just Chuckin' It hitting a never-before-hit
+  // outcome shouldn't silently complete this X01 achievement's progress.
   const rows = db.prepare(`
     SELECT DISTINCT d.sector AS sector, d.multiplier AS mult
-    FROM darts d JOIN turns t ON t.id = d.turn_id
-    WHERE t.player_id = ?
+    FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id
+    WHERE t.player_id = ? ${NOT_CHUCKIN}
   `).all(p.id);
   return { hit: rows, count: rows.length, total: 63 };
 }
@@ -2512,6 +2659,7 @@ module.exports = {
   getCricketMprLeaderboard, getCricketWinLeaderboard, getCricketPerfectLegStats,
   getDoublesPracticeStatBubbles, getDoublesPracticePersonalBests,
   getDoublesPracticeAccuracyLeaderboard, getDoublesPracticeBestRoundStats,
+  getChuckinStatBubbles, getChuckinPersonalBests, getChuckinHeatmap,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics,

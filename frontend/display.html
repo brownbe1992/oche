@@ -331,6 +331,51 @@ const ACH_DESC = {
   challengeallformats: 'Complete every Daily Challenge format at least once.',
   nocigar: 'Bust a double-out visit whose darts sum to exactly the score you needed — just not on a double.',
 };
+// Just Chuckin' It's 18 laddered milestone badges — mirror-copied from frontend/
+// index.html's CHUCKIN_MILESTONE_LADDERS (this file has no shared module with
+// index.html, so both copies must be kept in sync by hand, same convention as
+// every other badge above). Populates ACH_LABELS/ACH_DURATION/ACH_DESC the same
+// way index.html's forEach populates BADGE_INFO/ACH_LABELS/ACH_DURATION.
+const CHUCKIN_MILESTONE_LADDERS = [
+  { idPrefix:'chuckin_darts_',
+    descFor: t => `Throw ${t.toLocaleString()} lifetime darts in Just Chuckin' It.`,
+    tiers: [
+      { threshold:100,    label:'Warming Up',            icon:'🔥' },
+      { threshold:500,    label:'In the Groove',         icon:'🎯' },
+      { threshold:1000,   label:'Getting Serious',       icon:'💪' },
+      { threshold:2500,   label:'Dedicated',             icon:'📈' },
+      { threshold:5000,   label:'Grinder',               icon:'⚙️' },
+      { threshold:10000,  label:'Iron Arm',              icon:'🦾' },
+      { threshold:25000,  label:'Practice Makes Perfect', icon:'🏹' },
+      { threshold:50000,  label:'Machine',               icon:'🤖' },
+      { threshold:100000, label:'Legend of the Oche',    icon:'👑' },
+    ] },
+  { idPrefix:'chuckin_session_',
+    descFor: t => `Throw ${t.toLocaleString()} darts in a single Just Chuckin' It session.`,
+    tiers: [
+      { threshold:100,  label:'Solid Session',    icon:'⏱️' },
+      { threshold:250,  label:'Marathon Session', icon:'🏃' },
+      { threshold:500,  label:'Endurance Test',   icon:'🧗' },
+      { threshold:1000, label:'Iron Session',     icon:'🔋' },
+    ] },
+  { idPrefix:'chuckin_trebles_',
+    descFor: t => `Hit ${t.toLocaleString()} lifetime trebles in Just Chuckin' It.`,
+    tiers: [
+      { threshold:10,   label:'First Trebles',  icon:'🎯' },
+      { threshold:50,   label:'Treble Trouble', icon:'💥' },
+      { threshold:100,  label:'Treble Century', icon:'💯' },
+      { threshold:500,  label:'Treble Master',  icon:'🌟' },
+      { threshold:1000, label:'Treble Legend',  icon:'🐐' },
+    ] },
+];
+CHUCKIN_MILESTONE_LADDERS.forEach(ladder=>{
+  ladder.tiers.forEach((tier, i)=>{
+    const id = ladder.idPrefix + tier.threshold;
+    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
+    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
+    ACH_DESC[id] = ladder.descFor(tier.threshold);
+  });
+});
 
 /* ---- layout presets ----
    Chosen by the admin in Settings (or overridden per-screen with ?layout=...
@@ -607,6 +652,35 @@ const renderers = {
           </div>
         </div>
         <div class="meta"><span class="standing">Round ${num(s.legNo)}</span></div>
+        ${throwbox}
+      </div>`;
+    }
+  },
+  // Just Chuckin' It (docs/game-modes-roadmap.md): solo, freeform, no rounds/legs
+  // at all — always exactly one player/card, no legSummary, no scorecard, so this
+  // always goes through the generic s.players.map(renderer.card) path below.
+  chuckin: {
+    card(p, i, s, L){
+      const active = i===s.currentIndex;
+      const pct = p.sessionDarts ? Math.round(p.sessionTrebles/p.sessionDarts*100) : 0;
+      let throwbox = '';
+      if(active && s.chuckinLastDart){
+        const treble = s.chuckinLastDart.isTreble ? '<span class="flash win" style="position:static;display:inline-block;margin-left:8px">TREBLE</span>' : '';
+        throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(s.chuckinLastDart.label)}">${esc(s.chuckinLastDart.label)}</div></div>${treble}</div>`;
+      }
+      return `<div class="pcard ${active?'active':''}">
+        <div>
+          <div class="prow1">
+            <span class="pname">${escapeHtml(p.name)}</span>
+            ${active?'<span class="throwflag">▸ throwing</span>':''}
+          </div>
+          <div class="score">${num(p.sessionDarts)}</div>
+          <div class="dart-counts">
+            <div class="dart-counts-title">Just chuckin' it</div>
+            <div class="dart-count-row"><span class="dart-count-val">${pct}%</span><span class="dart-count-lbl">Trebles this session</span></div>
+            <div class="dart-count-row"><span class="dart-count-val">${num(p.sessionTrebles)}</span><span class="dart-count-lbl">Trebles</span></div>
+          </div>
+        </div>
         ${throwbox}
       </div>`;
     }
