@@ -706,8 +706,19 @@
             <button id="mode-practice" aria-pressed="false" onclick="setMode('practice')">Practice</button>
             <button id="mode-challenge" aria-pressed="false" onclick="setMode('challenge')">🎯 Daily Challenge</button>
             <button id="mode-ghost" aria-pressed="false" onclick="setMode('ghost')">👻 Ghost</button>
-            <button id="mode-doubles" aria-pressed="false" onclick="setMode('doubles_practice')">Doubles Practice</button>
-            <button id="mode-chuckin" aria-pressed="false" onclick="setMode('chuckin')">Just Chuckin' It</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Practice type (Practice family only — Doubles Practice and Just
+           Chuckin' It are sub-modes of Practice, not their own top-level mode) -->
+      <div class="setup-section" id="practice-type-section" hidden>
+        <div class="setup-label">Practice type</div>
+        <div class="opts" style="margin:0">
+          <div class="seg" role="group" aria-label="Practice type">
+            <button id="practice-type-normal" aria-pressed="true" onclick="setMode('practice')">Practice</button>
+            <button id="practice-type-doubles" aria-pressed="false" onclick="setMode('doubles_practice')">Doubles Practice</button>
+            <button id="practice-type-chuckin" aria-pressed="false" onclick="setMode('chuckin')">Just Chuckin' It</button>
           </div>
         </div>
       </div>
@@ -2024,12 +2035,18 @@ function hofSection(rows, mode=''){
 function setMode(mode){
   setup.mode = mode;
   setup.practice = (mode !== 'h2h');
+  // Doubles Practice and Just Chuckin' It are sub-modes of Practice, not their
+  // own top-level mode button — the "Practice" button stays pressed for all
+  // three, and a nested "Practice type" sub-toggle picks which one.
+  const practiceFamily = (mode === 'practice' || mode === 'doubles_practice' || mode === 'chuckin');
   document.getElementById('mode-h2h').setAttribute('aria-pressed', mode==='h2h');
-  document.getElementById('mode-practice').setAttribute('aria-pressed', mode==='practice');
+  document.getElementById('mode-practice').setAttribute('aria-pressed', practiceFamily);
   document.getElementById('mode-challenge').setAttribute('aria-pressed', mode==='challenge');
   document.getElementById('mode-ghost').setAttribute('aria-pressed', mode==='ghost');
-  document.getElementById('mode-doubles').setAttribute('aria-pressed', mode==='doubles_practice');
-  document.getElementById('mode-chuckin').setAttribute('aria-pressed', mode==='chuckin');
+  document.getElementById('practice-type-section').hidden = !practiceFamily;
+  document.getElementById('practice-type-normal').setAttribute('aria-pressed', mode==='practice');
+  document.getElementById('practice-type-doubles').setAttribute('aria-pressed', mode==='doubles_practice');
+  document.getElementById('practice-type-chuckin').setAttribute('aria-pressed', mode==='chuckin');
   document.getElementById('h2h-options').hidden = (mode !== 'h2h');
   // Daily Challenge and Ghost Opponent are both X01-only — force the game-type
   // choice back and hide it entirely rather than offering a combination that was

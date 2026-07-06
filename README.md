@@ -128,7 +128,8 @@ Configure a game before starting:
 | Setting | Options |
 |---|---|
 | **Game** | X01 · Cricket |
-| **Mode** | H2H (head-to-head) · Practice (solo) · 🎯 Daily Challenge · 👻 Ghost · Doubles Practice · Just Chuckin' It |
+| **Mode** | H2H (head-to-head) · Practice (solo) · 🎯 Daily Challenge · 👻 Ghost |
+| **Practice type** (Practice only) | Practice · Doubles Practice · Just Chuckin' It |
 | **Format (X01)** | 501 · 301 · 170 · 101 (dropdown) |
 | **Targets (Cricket)** | Classic (15–20, Bull) · Custom (any 7 numbers) |
 | **Legs per set** | 1 – 9 |
