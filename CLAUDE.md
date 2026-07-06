@@ -20,7 +20,8 @@ This is already the shape used by `docs/tournament-mode-roadmap.md`
 fifth boolean flag to `games` — `games` already has `practice`; it should not
 accumulate `is_online`, `is_tournament`, etc. one feature at a time.
 
-Full rationale: `docs/existing-app-prep-roadmap.md`, item 3.
+Full rationale: `docs/open-roadmap-items.md`'s completion ledger, "context tables link
+into `games` via FK" entry.
 
 ### Accessibility is a standing design concern, not a one-off pass
 
@@ -69,11 +70,19 @@ implementing something described in one of these docs, update that doc's status
 inline (and any other doc referencing the same work) to reflect what's done, rather
 than leaving it silently out of date.
 
-`docs/existing-app-prep-roadmap.md`'s "Roadmap sequencing" table is the **central
-completion tracker** across every doc in `docs/` — the one place to check what's
-done and what's outstanding without opening each doc individually. Update its row for
-a doc in the same change that finishes or advances that doc's work, the same
-discipline as keeping the doc's own status header current.
+`docs/open-roadmap-items.md` is the **central completion tracker** across every doc
+in `docs/` — the one place to check what's done and what's outstanding without
+opening each doc individually. Update it in the same change that finishes or
+advances any roadmap doc's work, the same discipline as keeping the doc's own status
+header current.
+
+**No item on that tracker is ever "Partially Completed."** If a roadmap doc ships
+part of its design and defers the rest (a "v1"/"v2" split, a numbered build-order
+step left undone, or any other genuinely separable piece of work), split it into
+separate, independently-tracked items on `docs/open-roadmap-items.md` instead —
+each one cleanly Done or Not started. This applies to the tracker's entries, not to
+a roadmap doc's own prose status header, which can still describe nuance in full
+sentences.
 
 When every item in a roadmap doc is genuinely done, move it to `docs/archive/`
 (`git mv`, preserving history) and fix every cross-reference to its old path in the
@@ -81,8 +90,9 @@ same change (other roadmap docs, `README.md`, `REFERENCE.md`, `wishlist`) — do
 leave a doc sitting in `docs/` claiming "done" indefinitely, and don't leave dangling
 `docs/whatever.md` references pointing at a path that no longer exists. Archived docs
 stay linkable and keep their design rationale; they just stop competing with the
-still-open roadmaps for attention. Partially-done docs stay in `docs/` — only archive
-a doc once nothing in it is still outstanding.
+still-open roadmaps for attention. A roadmap doc whose split-out items on
+`docs/open-roadmap-items.md` are a mix of Done and Not-started stays in `docs/` —
+only archive a doc once every item split out from it is Done.
 
 ## Version numbers require explicit confirmation before bumping
 

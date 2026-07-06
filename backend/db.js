@@ -383,7 +383,7 @@ function pruneOrphanedGames() {
   db.prepare('DELETE FROM games WHERE id NOT IN (SELECT DISTINCT game_id FROM game_players)').run();
 }
 
-/* ---------- player-deletion guard extensibility (docs/existing-app-prep-roadmap.md item 6) ----------
+/* ---------- player-deletion guard extensibility (docs/archive/existing-app-prep-roadmap.md item 6) ----------
    Mirrors the game-lifecycle hook pattern below: a small, growing list of "is this
    player referenced by an active thing" checks that deletePlayer() consults before
    deleting, rather than hardcoding tournament logic directly into deletePlayer() and
@@ -414,7 +414,7 @@ function deletePlayer(name) {
   return { ok: true };
 }
 
-/* ---------- game-lifecycle hooks (docs/existing-app-prep-roadmap.md item 4) ----------
+/* ---------- game-lifecycle hooks (docs/archive/existing-app-prep-roadmap.md item 4) ----------
    A minimal internal hook mechanism around createGame()/completeGame() so a future
    feature (HA polling on game start/end, tournament bracket advancement on
    completion, league standings updates, etc.) registers its own reaction here
@@ -1750,7 +1750,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
   const p = getPlayer(playerName);
   if (!p) return [];
   const modeWhere = _mf(opts.mode);
-  // Cricket's metric cases below scope through _scope() (docs/existing-app-prep-roadmap.md
+  // Cricket's metric cases below scope through _scope() (docs/archive/existing-app-prep-roadmap.md
   // item 1) instead of hand-rolling their own "AND g.game_type='cricket'" alongside modeWhere.
   const cricketScope = _scope({ mode: opts.mode, gameType: 'cricket' });
   const doublesPracticeScope = _scope({ mode: opts.mode, gameType: 'doubles_practice' });
@@ -2037,7 +2037,7 @@ function _mf(mode) {
   return '';
 }
 
-// Central "game scope" filter builder (docs/existing-app-prep-roadmap.md item 1)
+// Central "game scope" filter builder (docs/archive/existing-app-prep-roadmap.md item 1)
 // — composes the mode dimension (h2h/practice, via _mf) with the game-type
 // dimension, so a future scoping dimension (online, league, tournament) only
 // needs to touch this one function instead of being hand-rolled at 20+ query

@@ -1,8 +1,7 @@
 # Simultaneous Achievements — Design Roadmap
 
 > **Archived** — fully shipped, kept here for design-rationale history. See
-> `docs/existing-app-prep-roadmap.md`'s Roadmap sequencing table for the live
-> completion tracker across all roadmaps.
+> `docs/open-roadmap-items.md` for the live completion tracker across all roadmaps.
 
 > Status: **shipped**, per the design below. `enterTurn()`'s expanded-achievements
 > chain is now a `CHAIN_CHECKS` list collected and filtered by the suppression-pairs

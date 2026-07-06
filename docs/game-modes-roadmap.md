@@ -108,7 +108,7 @@ added later without starting from scratch each time.
 | Cricket variant scope for v1 | Standard cricket only (highest score wins). Cut-throat (points scored against opponents) deferred to later |
 | Custom cricket target count | ✅ Built. Fixed at 7 targets — the same count as classic cricket (15, 16, 17, 18, 19, 20, Bull) — freely chosen from 1-20 + Bull, but never more or fewer than 7. Enforced at Start (`startGame()` blocks with an alert if the count is wrong) |
 | Scoring screen during Cricket | ✅ Built. A dedicated Cricket scoring screen (traditional chalkboard scorecard — slash/X/circled-X marks), not the X01 Pad or Dartboard screens — it's the automatic default the instant a Cricket game is active, with no player choice to fall back to Pad/Dartboard |
-| Live scoreboard orientation | ✅ Built. Cricket's `renderers.cricket` inherits portrait/landscape detection from the shared shell — see `docs/existing-app-prep-roadmap.md` item 11 |
+| Live scoreboard orientation | ✅ Built. Cricket's `renderers.cricket` inherits portrait/landscape detection from the shared shell — see `docs/archive/existing-app-prep-roadmap.md` item 11 |
 | Cricket scorecard style | ✅ Built. A single shared chalkboard-style table (rows=numbers, columns=players) rather than per-player cards — matches how cricket is scored on a real board. Marks: slash (1), X (2), circled X (3+/closed) |
 
 ## Why this is bigger than "add cricket"
@@ -131,7 +131,7 @@ scoring engine and stats pipeline, not an additive feature.
 - **The underlying tap→dart primitive** (`throwDart(sector, mult)` capturing a
   "sector + multiplier" event into `game.darts`) has no concept of which game is
   being played, and stays shared by every game type — confirmed unchanged by the
-  Phase 1 refactor (see `docs/existing-app-prep-roadmap.md` item 5).
+  Phase 1 refactor (see `docs/archive/existing-app-prep-roadmap.md` item 5).
   **Correction from an earlier draft of this doc**: the *visible* scoring screen
   built on top of that primitive — the X01 number Pad and the interactive dartboard
   SVG — is **not** reused as-is for Cricket. Cricket needs its own dedicated scoring
@@ -178,7 +178,7 @@ Each game type implements the same shape:
   below) — this is a per-game-type UI choice, not just a per-game-type turn engine.
 - **Live scoreboard card renderer** — slots into `display.html`'s existing `renderers`
   table, and must support both portrait and landscape with automatic orientation
-  detection — ✅ already true of the shared shell (`docs/existing-app-prep-roadmap.md`
+  detection — ✅ already true of the shared shell (`docs/archive/existing-app-prep-roadmap.md`
   item 11), so a `renderers.cricket` entry only needs to design its card content for
   a narrow single-column cell, not build orientation detection itself.
 - **Stats definitions** — each plugin defines its own stat vocabulary (see Cricket

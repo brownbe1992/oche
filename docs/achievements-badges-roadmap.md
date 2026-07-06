@@ -8,8 +8,8 @@
 > now because the separate "Planned: notifications and shareable cards should
 > explain the badge and show the count" section below still has an open item
 > (live-overlay count display) — see that section's own status. See
-> `docs/existing-app-prep-roadmap.md`'s Roadmap sequencing table for the live
-> completion tracker across all roadmaps. Related archived docs stay archived
+> `docs/open-roadmap-items.md` for the live completion tracker across all
+> roadmaps. Related archived docs stay archived
 > — `docs/archive/simultaneous-achievements-roadmap.md` (the multi-badge queue
 > fix) and `docs/archive/next-session-plan.md` (the punch list this and that
 > doc grew out of) — neither needs the new badges folded in.

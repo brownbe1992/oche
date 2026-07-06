@@ -1,6 +1,6 @@
 'use strict';
 // Committed test for backend/db.js's game-lifecycle hook mechanism
-// (docs/existing-app-prep-roadmap.md item 4, REFERENCE.md §1 "Game-lifecycle
+// (docs/archive/existing-app-prep-roadmap.md item 4, REFERENCE.md §1 "Game-lifecycle
 // hooks") — ported from a scratch script used to verify it earlier this session,
 // which was never committed. Covers payload shapes, multi-listener registration
 // order, and the error-isolation guarantee (one broken listener can't block

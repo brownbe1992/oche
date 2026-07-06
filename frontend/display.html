@@ -427,7 +427,7 @@ fetch('/api/settings/colorblind-mode', {cache:'no-store'}).then(r=>r.ok?r.json()
    separate orientationchange/resize handler required). The grid's column count
    (see render()) reads `isPortrait` directly; re-rendering the last snapshot on
    change means a rotation reshapes the board immediately, not on the next server
-   push. See docs/existing-app-prep-roadmap.md item 11. */
+   push. See docs/archive/existing-app-prep-roadmap.md item 11. */
 let lastSnapshot = null;
 const portraitQuery = window.matchMedia('(orientation: portrait)');
 let isPortrait = portraitQuery.matches;

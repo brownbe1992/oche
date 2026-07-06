@@ -1,0 +1,99 @@
+# Open Roadmap Items — Central Tracker
+
+> This is the **single centralized place to track every roadmap request across the
+> project** — replacing `docs/archive/existing-app-prep-roadmap.md`'s old "Roadmap
+> sequencing" table, which is now frozen/historical. See `CLAUDE.md`'s "Roadmap
+> docs" section for the standing convention that keeps this file current.
+>
+> **No item on this tracker is ever "Partially Completed."** A roadmap doc that
+> ships part of its design and defers the rest gets split into separate,
+> independently-tracked items here — one line per shippable phase (a "v1"/"v2",
+> a numbered build-order step, or any other genuinely separable piece of work) —
+> each cleanly **Done** or **Not started**. When a roadmap doc's own status
+> header would otherwise say "Partial," that's the signal to split it here
+> instead of writing "Partial" as this tracker's status.
+>
+> A roadmap doc moves to `docs/archive/` only once **every** item split out from
+> it below is Done — matching the existing archiving convention. A doc can have
+> some items Done and others still open here without being archived; it archives
+> once nothing about it remains on the open list.
+
+---
+
+## Open items (not yet started, ordered by complexity — lowest first)
+
+| # | Item | Source doc | Complexity |
+|---|---|---|---|
+| 1 | Write the promised Home Assistant automation recipe content (zero code — the webhooks already work, the docs describing example automations were never written) | `docs/ha-recipes-roadmap.md` | Trivial (docs only) |
+| 2 | Thread the badge award count into the live achievement overlay itself (the shareable moment card already shows it) | `docs/achievements-badges-roadmap.md` | Very low |
+| 3 | Backups: opt-in Docker Compose-profile sidecar as an alternative to host cron (v1's own stretch goal) | `docs/backups-roadmap.md` | Very low |
+| 4 | Mobile: multiple saved server profiles (stretch goal, step 7) | `docs/mobile-app-roadmap.md` | Low |
+| 5 | Mobile: "Scoreboard Mode" toggle (step 5) | `docs/mobile-app-roadmap.md` | Low |
+| 6 | Shareable Moments: Player Profile "Moments" gallery | `docs/shareable-moments-roadmap.md` | Low |
+| 7 | Standalone `backend/admin-recovery.js` CLI for resetting a forgotten admin password or clearing a stuck lockout via direct filesystem/container access | `docs/admin-account-recovery-roadmap.md` | Low |
+| 8 | Shareable Moments: optional BYO-credentials X auto-post tier | `docs/shareable-moments-roadmap.md` | Low-Medium |
+| 9 | Mobile: native chrome — change-server access, haptics, biometric unlock (step 4) | `docs/mobile-app-roadmap.md` | Low-Medium |
+| 10 | Mobile: distribution decision — App Store/Play Store listing vs. simpler sideload distribution (step 6) | `docs/mobile-app-roadmap.md` | Low-Medium |
+| 11 | Localize voice announcements beyond hardcoded English phrases | `docs/voice-announcements-i18n-roadmap.md` | Low-Medium |
+| 12 | Coaching insights (no new data collection needed; genuinely differentiating vs. competitors) | `docs/coaching-insights-roadmap.md` | Low-Medium |
+| 13 | Progressive admin-login lockout delay (replaces the flat 5-minute lockout, doubles per consecutive failure, never fully blocks a correct password) | `docs/admin-login-backoff-roadmap.md` | Low-Medium |
+| 14 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
+| 15 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
+| 16 | League mode (new tables, no new infra; complements tournament mode) | `docs/league-mode-roadmap.md` | Medium |
+| 17 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
+| 18 | Tournament mode (bracket generation, especially double-elim, is genuinely fiddly but fully self-contained) | `docs/tournament-mode-roadmap.md` | Medium-High |
+| 19 | Game Modes: Baseball — the second proof that the plugin shape generalizes beyond Cricket (step 5) | `docs/game-modes-roadmap.md` | High |
+| 20 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
+| 21 | Camera/ML scoring (genuinely novel CV engineering; only useful to whoever mounts the hardware) | `docs/camera-scoring-roadmap.md` | Extremely high |
+| 22 | Companion website (persistent hosted infrastructure — accounts, matchmaking, a cloud database — the one item requiring the project to operate long-term infra, not just be self-hostable) | `docs/companion-website-roadmap.md` | Extremely high |
+
+### Build-order notes that still apply
+
+- **Tournament mode before league mode** — not a hard dependency, but tournament mode is the more specifically-requested one, and building it first gives league mode's "games link into a context table" pattern (see `CLAUDE.md`) a real precedent to follow.
+- **Mobile app's steps are sequential as listed** (2 → 3 → 4 → 5 → 6 → 7) per `docs/mobile-app-roadmap.md`'s own suggested build order; its one prerequisite (the responsive CSS pass) is already done.
+- **The small, order-independent items** (rows 1, 2, 3, 6, 7, 8, 11, 13, 17) can be interleaved anywhere, including ahead of the bigger lifts — good for sustaining momentum with essentially zero risk of creating rework later.
+
+---
+
+## Done (completion ledger — kept for history, not re-verified here)
+
+Every item below is fully shipped. This section exists so nothing's completion
+history is lost when a doc still has open items elsewhere on this tracker (and
+therefore hasn't been archived yet) — see each source doc for full detail.
+
+| Item | Source doc |
+|---|---|
+| Colorblind-friendly palette | `docs/archive/colorblind-mode-roadmap.md` |
+| Admin login rate limiting + `OCHE_REQUIRE_AUTH` zero-trust default; SEC-7 webhook auth | `docs/security-hardening-roadmap.md` |
+| Full-database admin JSON export (Settings → Data Export); per-player export deliberately descoped | `docs/data-export-roadmap.md` |
+| Voice announcements (browser speech synthesis call-outs) | `docs/archive/voice-announcements-roadmap.md` |
+| Backups v1: `backend/backup.js` script, retention pruning, documented restore procedure | `docs/backups-roadmap.md` |
+| Backups v2: Settings → Backups (download/retention/on-demand backup/restore-from-existing/upload-restore) | `docs/backups-roadmap.md` |
+| Shareable Moments: card generation, every trigger point (achievements, match win, Personal Bests), HA webhook | `docs/shareable-moments-roadmap.md` |
+| 22 of 22 achievement/badges shipped (21 original candidates + Staircase Finish) | `docs/achievements-badges-roadmap.md` |
+| Simultaneous-achievements overlay fix (multi-badge queue) | `docs/archive/simultaneous-achievements-roadmap.md` |
+| Daily/Weekly Challenge — all 6 formats, streak tracking, shareable card, Player Profile history tab, 3 challenge-specific badges | `docs/daily-challenge-roadmap.md` |
+| Ghost Opponent (X01 only) — leg-script replay, New Game leg picker, opponent-badge suppression | `docs/archive/ghost-opponent-roadmap.md` |
+| Server-side error logging + persistent rotating log + Settings "Server Errors" view (Part A); committed `node:test` suite + CI (Part B) | `docs/testing-and-observability-roadmap.md` |
+| Colorblind mode, WCAG contrast audit fixes, `aria-live` announcements, accessible-input-path framing, type-size pass (standing checklist, not archived — ongoing per CLAUDE.md) | `docs/accessibility-roadmap.md` |
+| Mobile: phone-responsive CSS pass (step 1) | `docs/mobile-app-roadmap.md` |
+| All 14 security-audit findings (SEC-1 through SEC-14) fixed | `docs/security-audit-roadmap.md` |
+| All 3 functional-defect findings (BUG-1 through BUG-3) fixed | `docs/bug-roadmap.md` |
+| Game Modes step 1: X01-to-plugin refactor, no behavior change | `docs/game-modes-roadmap.md` |
+| Game Modes step 2: Cricket engine + customizable numbers, dedicated scoring screen, live scoreboard | `docs/game-modes-roadmap.md` |
+| Game Modes step 3: Cricket stats parity (MPR, 9-Marks, Personal Bests, metric history, 2 achievements) | `docs/game-modes-roadmap.md` |
+| Game Modes step 4: Home/Player Profile game-type navigation (X01/Cricket toggles + Cricket leaderboard set) | `docs/game-modes-roadmap.md` |
+| Game Modes step 6: generalized N-way Player Profile/Home page game-type toggle mechanism | `docs/game-modes-roadmap.md` |
+| Game Modes step 7: Doubles Practice (per-dart evaluation, stats, Personal Bests, undo, Home leaderboard set) | `docs/game-modes-roadmap.md` |
+| Game Modes step 8: 101 as a fourth X01 starting score | `docs/game-modes-roadmap.md` |
+| Game Modes step 9: Just Chuckin' It (heatmap-first stats, 18 laddered milestone achievements) | `docs/game-modes-roadmap.md` |
+| Orientation-aware live scoreboard (portrait vs. landscape), built ahead of Cricket's scoreboard | `docs/archive/existing-app-prep-roadmap.md` item 11 |
+| Stats query scope helper (`_scope()` in `backend/db.js`), now used by every stat query in the file | `docs/archive/existing-app-prep-roadmap.md` item 1 |
+| Player-deletion-guard extensibility (`registerDeletePlayerGuard`) | `docs/archive/existing-app-prep-roadmap.md` item 6 |
+| Game-lifecycle hook mechanism (`onGameCreated`/`onGameCompleted`) | `docs/archive/existing-app-prep-roadmap.md` item 4 |
+| Settings page regrouping into 4 tabs (Account & Access, Gameplay & Display, Integrations, Admin & Danger Zone) | `docs/archive/existing-app-prep-roadmap.md` item 7 |
+| `games.game_type`/`games.config` columns | `docs/archive/existing-app-prep-roadmap.md` item 2 |
+| Context tables link into `games` via FK, never a new boolean on `games` (adopted convention) | `docs/archive/existing-app-prep-roadmap.md` item 3, see `CLAUDE.md` |
+| Docker Compose profiles for future optional services (adopted convention) | `docs/archive/existing-app-prep-roadmap.md` item 9 |
+| `throwDart(sector, multiplier)` input-source separation, confirmed protected through the plugin refactor | `docs/archive/existing-app-prep-roadmap.md` item 5 |
+| Preparing the Existing App for Future Roadmaps — all 11 of its own items | `docs/archive/existing-app-prep-roadmap.md` |

@@ -1,6 +1,6 @@
 'use strict';
 // Committed test for backend/db.js's player-deletion guard extensibility
-// (docs/existing-app-prep-roadmap.md item 6) — mirrors the game-lifecycle hook
+// (docs/archive/existing-app-prep-roadmap.md item 6) — mirrors the game-lifecycle hook
 // mechanism (item 4, covered by db.lifecycle-hooks.test.js): a small, growing
 // list of "is this player referenced by an active thing" checks that
 // deletePlayer() consults before deleting, rather than hardcoding a specific

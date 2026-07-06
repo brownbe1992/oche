@@ -1,8 +1,7 @@
 # Ghost Opponent — Design Roadmap
 
 > **Archived** — fully shipped, kept here for design-rationale history. See
-> `docs/existing-app-prep-roadmap.md`'s Roadmap sequencing table for the live
-> completion tracker across all roadmaps.
+> `docs/open-roadmap-items.md` for the live completion tracker across all roadmaps.
 
 > Status: **✅ Done** (2026-07). Every item below is built and verified: a New Game
 > "👻 Ghost" mode (X01-only for v1) lets a player pick one of their own past won X01

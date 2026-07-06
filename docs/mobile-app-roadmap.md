@@ -112,7 +112,7 @@ the work is native packaging, responsive CSS, and the TLS/trust handling above.
 
 1. ~~**Phone-optimized responsive CSS** on the existing web app (New Game, Scoring,
    Player Profile, Settings)~~ ✅ **Done**, ahead of the native wrapper as planned —
-   see `docs/existing-app-prep-roadmap.md` item 8 for what was found and fixed.
+   see `docs/archive/existing-app-prep-roadmap.md` item 8 for what was found and fixed.
 2. **Capacitor scaffold** (iOS + Android) with the native Server Setup screen +
    remote-URL WebView.
 3. **ATS/cleartext config + self-signed cert trust-prompt** (the flexible-TLS work

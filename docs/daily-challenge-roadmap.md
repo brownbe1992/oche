@@ -4,8 +4,8 @@
 > Player Profile tab were added (per an explicit user request for "stats,
 > reporting, badges, and achievements for daily challenges"), so this doc moved
 > back out of `docs/archive/` per CLAUDE.md's "partially-done docs stay in
-> `docs/`" convention. See `docs/existing-app-prep-roadmap.md`'s Roadmap
-> sequencing table for the live completion tracker across all roadmaps.
+> `docs/`" convention. See `docs/open-roadmap-items.md` for the live
+> completion tracker across all roadmaps.
 
 > Status: **fully shipped**, including the "beat your best" live callout, the
 > Player Profile history view (now its own tab, see below), and Daily-Challenge-

@@ -76,7 +76,7 @@ never been verified to actually work.
   approach (zero new containers, easiest to explain in the README). An automated
   in-container scheduler is a reasonable stretch goal, but should be an **opt-in
   Docker Compose profile** if built, matching the existing convention for optional
-  services (`docs/existing-app-prep-roadmap.md` item 9) rather than something that
+  services (`docs/archive/existing-app-prep-roadmap.md` item 9) rather than something that
   runs by default for everyone.
 - **Restore procedure must be written down and actually tested** — stop the container,
   replace `darts.db` (and remove any stale `-wal`/`-shm` files) with the backup,

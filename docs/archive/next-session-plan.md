@@ -4,8 +4,8 @@
 > heading). This was a session punch list, not a design roadmap; its content is fully
 > covered by `docs/achievements-badges-roadmap.md` and
 > `docs/archive/simultaneous-achievements-roadmap.md`. Kept here only for the
-> historical to-do framing. See `docs/existing-app-prep-roadmap.md`'s Roadmap
-> sequencing table for the live completion tracker across all roadmaps.
+> historical to-do framing. See `docs/open-roadmap-items.md` for the live
+> completion tracker across all roadmaps.
 
 A short to-do list of what to tackle next, written up so a session can pick these up
 directly without re-deriving context. Full design detail for each item lives in the

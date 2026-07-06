@@ -1,8 +1,7 @@
 # Voice Announcements — Design Roadmap
 
 > **Archived** — fully shipped, kept here for design-rationale history. See
-> `docs/existing-app-prep-roadmap.md`'s Roadmap sequencing table for the live
-> completion tracker across all roadmaps. (The i18n follow-on,
+> `docs/open-roadmap-items.md` for the live completion tracker across all roadmaps. (The i18n follow-on,
 > `docs/voice-announcements-i18n-roadmap.md`, is still active/not started.)
 
 > Status: **✅ Done**. Shipped on the live scoreboard (`frontend/display.html`) with

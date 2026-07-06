@@ -119,7 +119,7 @@ oche/
   and `switchHomeTab('h2h')` bounces `homeGameType` back to `'x01'` if a
   solo-only type was active, rather than leaving a hidden tab's solo data
   showing mislabeled as H2H content.
-- **Game-lifecycle hooks** (`backend/db.js`, `docs/existing-app-prep-roadmap.md`
+- **Game-lifecycle hooks** (`backend/db.js`, `docs/archive/existing-app-prep-roadmap.md`
   item 4): `onGameCreated(fn)`/`onGameCompleted(fn)` register listener callbacks;
   `createGame()`/`completeGame()` fire theirs synchronously, in registration
   order, right after their core DB write (`created` payload:
@@ -133,7 +133,7 @@ oche/
   achievement checks (`frontend/index.html`'s `enterTurn()`/`onLegWon()`), a
   different layer entirely.
 - **Player-deletion guard extensibility** (`backend/db.js`,
-  `docs/existing-app-prep-roadmap.md` item 6): mirrors the game-lifecycle hook
+  `docs/archive/existing-app-prep-roadmap.md` item 6): mirrors the game-lifecycle hook
   pattern above. `registerDeletePlayerGuard(fn)` registers a check function that
   receives the player row and returns either a non-empty string (the reason to
   block the delete) or a falsy value (no objection); `deletePlayer()` consults
@@ -703,7 +703,7 @@ Every stats query needs to scope by mode (h2h/practice, via the existing
 `_mf(mode)`) and, since Cricket landed, by game type too. `_scope()` composes
 both into one SQL fragment instead of each query hand-rolling its own
 `AND g.game_type='...'` alongside its mode filter
-(`docs/existing-app-prep-roadmap.md` item 1) — `gameType` is whitelisted
+(`docs/archive/existing-app-prep-roadmap.md` item 1) — `gameType` is whitelisted
 against `KNOWN_GAME_TYPES` (`['x01','cricket']`) as defense-in-depth, though
 it's always an internally-controlled literal, never raw request input.
 `X01_ONLY` is now `_scope({gameType:'x01'})` (byte-identical string, so its

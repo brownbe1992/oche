@@ -1,5 +1,12 @@
 # Preparing the Existing App for Future Roadmaps
 
+> **Archived (2026-07)** — all 11 of this doc's own recommendation items are
+> done/adopted/confirmed, kept here for design-rationale history. The
+> "Roadmap sequencing" table further down is **frozen as of archival** — it is
+> no longer updated. `docs/open-roadmap-items.md` is now the central completion
+> tracker for every roadmap doc in the project; see `CLAUDE.md`'s "Roadmap docs"
+> section for the standing convention that keeps it current.
+
 > Status: **✅ All 11 of this doc's own items done/adopted/confirmed** (2026-07) —
 > items 1, 2, 3, 4, 6, 7, 8, 9, 10, 11 done/adopted/built, item 5 confirmed
 > protected through item 10's refactor. Item 1 (the stats query scope helper) and
@@ -14,12 +21,6 @@
 > *existing* codebase now, specifically to reduce rework later. It intentionally does
 > not recommend building any future feature early — only making the current code more
 > hospitable to features that are still just plans.
->
-> Its "Roadmap sequencing" table further down is also the **central completion
-> tracker for every roadmap doc in the project** — every doc's done/partial/
-> not-started status lives there, and fully-finished docs are archived to
-> `docs/archive/` once every item in them is done. See `CLAUDE.md`'s "Roadmap docs"
-> section for the standing convention that keeps this current.
 
 ## How to read this
 
