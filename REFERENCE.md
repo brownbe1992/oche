@@ -725,7 +725,7 @@ left for whoever picks up a future pass if it turns out to be wanted.
 
 ## 4. Achievements & Badges
 
-25 badges (20 X01 + 2 Cricket + 3 Daily Challenge), tracked in the
+26 badges (21 X01 + 2 Cricket + 3 Daily Challenge), tracked in the
 `player_badges` table (one row per player+badge, with a running `count`). X01
 detection logic lives in `frontend/index.html`'s `enterTurn()`/`onLegWon()`;
 Cricket's 2 badges live in `enterTurnCricket()`/`onLegWonCricket()`; Daily
@@ -744,7 +744,7 @@ after every `/api/challenges/complete` response.
   the count past 1): **Around the Clock, Around the World, Grudge Match, First
   100+ Checkout, Full Rotation**.
 
-### The 20 badges, exact trigger conditions
+### The 21 badges, exact trigger conditions
 
 **Expanded-chain badges** (the `CHAIN_CHECKS` list in `enterTurn()` — collected
 as an array and filtered by suppression pairs, not an if/else-if chain, so a
@@ -758,6 +758,7 @@ turn matching more than one condition queues all of them):
 | 💨 **Where'd It Go?** | `darts.length===3 && every dart sector===0` (three misses) |
 | 😩 **So Close...** | `darts.length===3 && !bust && [T20,T20,S20]` in that exact order (140 — one dart short of 180) |
 | 💥 **Busted Maximum** | `bust && darts.length===3 && every dart is T20` — a genuine 180 attempt that still busts (see §2's bust rule #3: hit zero, but the last dart isn't a double). |
+| 🤦 **No Cigar** | `bust && doubleOut && pointsThisVisit === score` — the visit's attempted points land on exactly the score that was needed, but the last dart wasn't a double (§2's bust rule #3, restated: hitting the target number itself instead of finishing on it). Distinguishable from an overshoot bust (`pointsThisVisit > score`) and a left-on-1 bust (`pointsThisVisit === score - 1`) by this exact equality. Never fires in single-out mode, since hitting the exact remaining there is a win, not a bust. |
 | 😅 **Ton-titled to Nothing** | `bust && sum of attempted dart values >= 100` |
 
 **Suppression pairs**: two conditions above are deliberately treated as the same
@@ -1537,7 +1538,7 @@ Check §4's exact condition against the actual `enterTurn()`/`onLegWon()` code �
 conditions are precise (e.g. Double Trouble needs the *last two* darts to be
 doubles, not any two). Check the suppression-pairs table if two related badges
 seem to be competing. Check `evaluateVisit()`'s three bust rules (§2) if a
-scoring-adjacent badge (Busted Maximum, Ton-titled to Nothing) seems to be
+scoring-adjacent badge (Busted Maximum, No Cigar, Ton-titled to Nothing) seems to be
 firing on the wrong side of a bust/win boundary.
 
 **"Only one badge showed when a turn should have earned several."** Check that

@@ -8,7 +8,7 @@ A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player 
 
 **v0.10.0**
 
-You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [25-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. All data lives in a SQLite database on your own server.
+You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [26-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. All data lives in a SQLite database on your own server.
 
 > Looking for exact stat formulas, achievement trigger conditions, the full database schema, or how a feature works internally (e.g. to debug it)? See **[REFERENCE.md](REFERENCE.md)** — the technical reference manual, kept up to date alongside this README.
 
@@ -209,7 +209,7 @@ choice, no checkout hints, and no bust concept:
 
 ### Achievements & Badges
 
-Beyond 180s, Big Fish, and nine-darters, Oche tracks 20 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 2 Cricket-specific badges and 3 Daily Challenge badges. Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
+Beyond 180s, Big Fish, and nine-darters, Oche tracks 21 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 2 Cricket-specific badges and 3 Daily Challenge badges. Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
 
 | Badge | How to earn it |
 |---|---|
@@ -220,6 +220,7 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 20 X01 achievement badges c
 | 😩 **So Close...** | Throw two treble 20s, then a single 20, in one visit |
 | 😅 **Ton-titled to Nothing** | Score 100+ in a visit that still busts |
 | 💥 **Busted Maximum** | Throw three treble 20s (a genuine 180) on a visit that still busts |
+| 🤦 **No Cigar** | Bust a double-out visit whose darts sum to exactly the score you needed — just not on a double |
 | 🦉 **Night Owl** | Throw a dart between midnight and 5am |
 | 🐦 **Early Bird** | Throw a dart between 5am and 7am |
 | 🎯 **Metronome** | Score within 15 points of each other across 5 consecutive visits |
@@ -249,7 +250,7 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 20 X01 achievement badges c
 | 🏆 **Challenge Streak: Month** | Complete the Daily Challenge 30 days in a row |
 | 🗓️ **Full Rotation** | Complete every Daily Challenge format at least once |
 
-**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 25-badge roster, grouped into X01/Cricket/Daily Challenge sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5) — four badges (Around the Clock, Around the World, Grudge Match, Full Rotation) are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
+**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 26-badge roster, grouped into X01/Cricket/Daily Challenge sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5) — four badges (Around the Clock, Around the World, Grudge Match, Full Rotation) are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
 
 **Around the World Progress** — a dedicated grid on the Player Profile showing exactly which of the 63 lifetime dart outcomes are still missing, alongside the Badge Case.
 
@@ -414,7 +415,7 @@ On the Cricket toggle, this section shows **Best Leg MPR**, **Fewest Darts to Cl
 
 #### Badge Case
 
-The full 25-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (20 badges), a **Cricket** section (2 badges), and a **Daily Challenge** section (3 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
+The full 26-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (21 badges), a **Cricket** section (2 badges), and a **Daily Challenge** section (3 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
 
 #### On This Day
 

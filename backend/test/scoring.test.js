@@ -58,6 +58,25 @@ describe('evaluateVisit (X01 bust/win rules, REFERENCE.md §2)', () => {
     assert.equal(ev.newScore, 180);
   });
 
+  test('rule 3 restated as "No Cigar" (docs/achievements-badges-roadmap.md): busts hitting exactly the remaining score, just not on a double', () => {
+    const ev = evaluateVisit({ score: 32, doubleOut: true }, [d(16,1), d(16,1)], {});
+    assert.equal(ev.bust, true);
+    assert.equal(ev.pointsThisVisit, 32, 'attempted points equal the exact remaining score — the condition awardRecurringBadge checks (ev.pointsThisVisit === p.score) for the No Cigar badge');
+    assert.equal(ev.win, false);
+  });
+
+  test('the No Cigar bust sub-case is distinguishable from an overshoot bust and a left-on-1 bust by pointsThisVisit vs. the pre-visit score', () => {
+    const startScore = 40;
+    const overshoot = evaluateVisit({ score: startScore, doubleOut: true }, [d(20,3)], {});
+    const leftOn1 = evaluateVisit({ score: 41, doubleOut: true }, [d(20,1), d(20,1)], {});
+    const exactNotDouble = evaluateVisit({ score: startScore, doubleOut: true }, [d(20,1), d(20,1)], {});
+    assert.ok(overshoot.pointsThisVisit > startScore, 'overshoot always scores more than the pre-visit remaining');
+    assert.equal(leftOn1.pointsThisVisit, 40, 'left-on-1 scores exactly one less than the pre-visit remaining (41-1=40)');
+    assert.notEqual(leftOn1.pointsThisVisit, 41, 'left-on-1 never equals the pre-visit score itself');
+    assert.equal(exactNotDouble.pointsThisVisit, startScore, 'only this sub-case scores exactly the pre-visit remaining');
+    assert.equal(exactNotDouble.bust, true);
+  });
+
   test('hits exactly 0 on a double, double-out mode: wins', () => {
     const ev = evaluateVisit({ score: 40, doubleOut: true }, [d(20,2)], {});
     assert.equal(ev.win, true);
