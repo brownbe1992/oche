@@ -383,9 +383,31 @@ function pruneOrphanedGames() {
   db.prepare('DELETE FROM games WHERE id NOT IN (SELECT DISTINCT game_id FROM game_players)').run();
 }
 
+/* ---------- player-deletion guard extensibility (docs/existing-app-prep-roadmap.md item 6) ----------
+   Mirrors the game-lifecycle hook pattern below: a small, growing list of "is this
+   player referenced by an active thing" checks that deletePlayer() consults before
+   deleting, rather than hardcoding tournament logic directly into deletePlayer() and
+   bolting league logic on top of that later. A guard receives the player row
+   ({id, name, ...}) and returns either a non-empty string (the reason to block the
+   delete) or a falsy value (no objection) — the first blocking reason wins.
+   No guards are registered today; this is pure infrastructure ahead of the next
+   feature that needs one (tournament mode blocking deletion of an active
+   competitor, league mode blocking deletion of an active-season player). */
+const deletePlayerGuards = [];
+function registerDeletePlayerGuard(fn) { deletePlayerGuards.push(fn); }
+function _checkDeletePlayerGuards(player) {
+  for (const fn of deletePlayerGuards) {
+    const reason = fn(player);
+    if (reason) return reason;
+  }
+  return null;
+}
+
 function deletePlayer(name) {
   const p = getPlayer(name);
   if (p) {
+    const blockReason = _checkDeletePlayerGuards(p);
+    if (blockReason) throw httpError(409, blockReason);
     q.deletePlayer.run(p.id);     // cascades to turns + game_players
     pruneOrphanedGames();
   }
@@ -2805,7 +2827,7 @@ function httpError(status, message) {
 pruneOrphanedGames();
 
 module.exports = {
-  listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer,
+  listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer, registerDeletePlayerGuard,
   createGame, addTurn, completeGame, recordEvent,
   onGameCreated, onGameCompleted,
   logServerError, getServerErrors,

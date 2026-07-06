@@ -1,11 +1,14 @@
 # Preparing the Existing App for Future Roadmaps
 
-> Status: **in progress** (8 of 11 of this doc's own items done/adopted, 1 more
-> confirmed-and-closed — see items 2, 3, 4, 7, 8, 9, 10, 11 (done/adopted) and item 5
-> (confirmed protected through item 10's refactor)). Item 1 (the shared game-scope
-> helper) is now partially done — see its own status note. Item 6
-> (player-deletion-guard extensibility) remains deliberately not started — no
-> feature needing it has landed yet.
+> Status: **✅ All 11 of this doc's own items done/adopted/confirmed** (2026-07) —
+> items 1, 2, 3, 4, 6, 7, 8, 9, 10, 11 done/adopted/built, item 5 confirmed
+> protected through item 10's refactor. Item 1 (the stats query scope helper) and
+> item 6 (player-deletion-guard extensibility) were the last two to close: item 1
+> now routes every remaining stats query through `_scope()` (see its own status
+> note for the full list); item 6 built the guard-registration mechanism itself
+> as pure infrastructure — no tournament/league-specific guard function exists
+> yet, since no feature needs one, but the mechanism is ready for the first one
+> that does.
 >
 > This doc reviews the other roadmap docs in `docs/` and recommends changes to the
 > *existing* codebase now, specifically to reduce rework later. It intentionally does
@@ -29,41 +32,26 @@ they are. A prioritized "do now / keep in mind" summary is at the end.
 
 ## 1. Generalize the stats query layer beyond `practice`/H2H (highest leverage)
 
-> **Status: Partially done.** The recommended shared helper now exists —
-> `_scope({mode, gameType})` in `backend/db.js`, composing the existing `_mf(mode)`
-> h2h/practice fragment with a whitelisted `game_type` dimension
-> (`KNOWN_GAME_TYPES`). `X01_ONLY` is now `_scope({gameType:'x01'})` (byte-identical
-> output, so its ~15 existing call sites needed zero changes), and **every one of
-> Cricket's query functions** (`getCricketStatBubbles`, `getCricketNineMarksStats`,
-> `getCricketMprLeaderboard`, `getCricketWinLeaderboard`, `getCricketPerfectLegStats`,
-> `getCricketPersonalBests`, and 6 `getMetricHistory()` cases) routes through it
-> instead of hand-rolling its own `AND g.game_type='cricket'` — this closes the gap
-> Cricket's own build concretely re-created (it had temporarily reintroduced ~24
-> ad-hoc inline `game_type='...'` literals before this retrofit). Verified
-> byte-identical output via the existing scratch-DB regression suite (Cricket stats
-> + X01 personal-bests/stat-bubbles unchanged).
->
-> **Update (2026-07): adoption is now universal for every game type built since.**
-> Doubles Practice's and Just Chuckin' It's stat functions (`getDoublesPracticeStatBubbles`,
-> `getDoublesPracticePersonalBests`, `getDoublesPracticeAccuracyLeaderboard`,
-> `getDoublesPracticeBestRoundStats`, `getChuckinStatBubbles`, `getChuckinPersonalBests`,
-> `getChuckinHeatmap`, and `getMetricHistory()`'s cases for both) were built calling
-> `_scope({mode, gameType:...})` from day one — no retrofit needed, since the helper
-> already existed by the time those modes shipped. Every game type that has a
-> `gameType` dimension at all is now fully centralized.
->
-> **Still open**: two different pre-existing patterns predate `_scope()` entirely and
-> remain untouched: (a) `computeStats`, `getSummary`, and `getHomeExtra` hand-roll
-> their own raw `g.practice = 0/1` conditions directly, without even going through
-> `_mf(mode)`; (b) 9 other functions (`getPlayerStatBubbles`, `getPersonalBests`,
-> `getOneEightyStats`, `getBigFishStats`, `getNineDarterStats`, `getTopFinishesAll`,
-> `getTopFinishes`, `getCheckoutRoutes`, `getDartAnalytics`) call `_mf(mode)` directly
-> rather than `_scope({mode})`. Both were left untouched as out of scope for the
-> Cricket-driven retrofit pass (higher regression risk on mature, already-shipped
-> code, and no current feature needs a second dimension there). A genuinely new
-> *universal* dimension (e.g. excluding online matches from every stat, not just a
-> specific game type's) would still need to touch these sites individually to route
-> them onto `_scope()` first.
+> **Status: ✅ Done** (2026-07). The shared helper — `_scope({mode, gameType})` in
+> `backend/db.js` — was originally built for Cricket's retrofit (`X01_ONLY` became
+> `_scope({gameType:'x01'})`, byte-identical output), then adopted from day one by
+> every game type built since (Doubles Practice, Just Chuckin' It). The last
+> holdouts are now converted too: `computeStats`, `getSummary`, and `getHomeExtra`
+> route through local `_scope({mode:'h2h'})`/`_scope({mode:'practice'})` aliases
+> instead of hand-rolling `g.practice = 0/1`; the 9 functions that called
+> `_mf(mode)` directly now call `_scope({mode})` (byte-identical output, since
+> `_scope({mode})` with no `gameType` returns exactly `_mf(mode)`). Two more raw
+> sites turned up during the conversion that weren't in the original inventory —
+> `getPersonalBests()`'s win-streak query and `clearPlayerStats()`'s per-mode
+> game-id lookup — plus `getH2HRecord()`/`getH2HSummary()`'s own `g.practice=0`
+> literal, all converted the same way. The only `g.practice`/`g.player_count`
+> literals left anywhere in `db.js` are now inside `_mf()` itself — the single
+> source of truth every other query goes through. Verified byte-identical output
+> via the full existing test suite (295 tests, all passing, before and after) —
+> no new tests needed since every converted function already had committed
+> coverage asserting its exact output. A genuinely new *universal* dimension (e.g.
+> excluding online matches from every stat) now only needs to touch `_scope()`
+> itself — every query in the file routes through it.
 
 **The evidence**: `backend/db.js` currently hardcodes the pattern
 `g.practice = 0/1` (almost always paired with a `game_players` count check to
@@ -224,6 +212,23 @@ constraint to keep in mind when that refactor happens.
 ---
 
 ## 6. Extend the player-deletion-guard pattern
+
+> **Status: ✅ Done** (2026-07). `registerDeletePlayerGuard(fn)` (`backend/db.js`)
+> mirrors the game-lifecycle hook mechanism (item 4) exactly: a guard receives the
+> player row and returns either a non-empty string (the reason to block) or a
+> falsy value (no objection); `deletePlayer()` consults every registered guard and
+> throws a 409 with the first blocking reason it finds, before touching the
+> database. No guards are registered by any shipped feature yet — this is pure
+> infrastructure ahead of tournament mode / league mode actually landing, not a
+> feature built early, matching the "no change needed until one of those features
+> actually lands" framing in the recommendation below (the mechanism itself is
+> the cheap, safe part to build now; the tournament/league-specific guard
+> functions are still correctly deferred). Covered by a dedicated committed test
+> (`backend/test/db.delete-player-guard.test.js`): the no-guards-registered
+> baseline is unchanged, a blocking guard's exact reason surfaces as a 409, an
+> unrelated player still deletes normally, the first blocking guard short-circuits
+> any later ones, and guards are never consulted for an already-nonexistent
+> player. Documented in REFERENCE.md §1.
 
 **The evidence**: this session already added orphaned-game cleanup to
 `deletePlayer()` in `db.js`. Both `tournament-mode-roadmap.md` and, implicitly,
@@ -481,24 +486,26 @@ un-learn later:**
    scoreboard is built, so Cricket gets orientation support from day one instead
    of a second retrofit.
 
-**Partially done — the retrofit has landed for every feature built since it was
-introduced, but a core group of pre-existing X01-only functions is still
-untouched:**
-7. Stats query scope helper (item 1) — `_scope()` exists in `db.js`, and every stat
-   function for Cricket, Doubles Practice, and Just Chuckin' It already routes
-   through it (each built using the pattern from day one, needing no retrofit of
-   its own). What's still open: `computeStats`/`getSummary`/`getHomeExtra` hand-roll
-   raw `g.practice = 0/1` conditions directly (not even through `_mf(mode)`), and 9
-   other functions (`getPlayerStatBubbles`, `getPersonalBests`, `getOneEightyStats`,
-   `getBigFishStats`, `getNineDarterStats`, `getTopFinishesAll`, `getTopFinishes`,
-   `getCheckoutRoutes`, `getDartAnalytics`) call `_mf(mode)` directly instead of
-   `_scope({mode})` — deliberately left alone until a genuinely new cross-cutting
-   dimension (online matches, league scoping) actually needs to touch them.
+**Done (the retrofit now covers every stats query in `db.js`):**
+7. ~~Stats query scope helper (item 1)~~ ✅ Done — `_scope()` exists in `db.js`, and
+   every stat function in the file now routes through it. Cricket, Doubles
+   Practice, and Just Chuckin' It already did (built using the pattern from day
+   one); `computeStats`/`getSummary`/`getHomeExtra` and the 9 functions that
+   called `_mf(mode)` directly (`getPlayerStatBubbles`, `getPersonalBests`,
+   `getOneEightyStats`, `getBigFishStats`, `getNineDarterStats`,
+   `getTopFinishesAll`, `getTopFinishes`, `getCheckoutRoutes`,
+   `getDartAnalytics`), plus `clearPlayerStats`, `getH2HRecord`, and
+   `getH2HSummary`, were converted in the same pass. A genuinely new
+   cross-cutting dimension (online matches, league scoping) now only needs to
+   touch `_scope()` itself.
 
-**Worth doing when the first feature that needs it actually starts:**
-8. Player-deletion-guard extensibility (item 6) — still true: no feature that needs
-   to *block* deleting an actively-referenced player (tournament mode, league mode)
-   has landed yet.
+**Done (built as pure infrastructure, mirroring item 4's precedent — no
+tournament/league-specific guard exists yet, since no feature needs one):**
+8. ~~Player-deletion-guard extensibility (item 6)~~ ✅ Done —
+   `registerDeletePlayerGuard(fn)` in `db.js`; `deletePlayer()` consults every
+   registered guard and throws a 409 with the first blocking reason before
+   deleting. No guards are registered by any shipped feature — ready for
+   tournament mode / league mode whenever either lands.
 
 **Already confirmed, no action needed:**
 9. ~~Protecting the `throwDart` input-source separation during the eventual

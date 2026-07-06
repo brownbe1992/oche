@@ -132,6 +132,17 @@ oche/
   these two core functions again. Does not touch the existing client-side
   achievement checks (`frontend/index.html`'s `enterTurn()`/`onLegWon()`), a
   different layer entirely.
+- **Player-deletion guard extensibility** (`backend/db.js`,
+  `docs/existing-app-prep-roadmap.md` item 6): mirrors the game-lifecycle hook
+  pattern above. `registerDeletePlayerGuard(fn)` registers a check function that
+  receives the player row and returns either a non-empty string (the reason to
+  block the delete) or a falsy value (no objection); `deletePlayer()` consults
+  every registered guard before deleting and throws a 409 with the first
+  blocking reason it finds. No guards are registered today — pure infrastructure
+  ahead of the next feature that needs to *block* deletion of an actively-
+  referenced player (a mid-tournament competitor, a mid-season league player)
+  rather than just cleaning up after it, the way orphaned-game pruning already
+  does.
 - **Server error log** (`backend/db.js`'s `server_errors` table,
   `docs/testing-and-observability-roadmap.md` Part A): `server.js`'s top-level
   `catch` calls `db.logServerError({method, path, status, message})` alongside
