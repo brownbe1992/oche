@@ -511,7 +511,7 @@ Plus global leaderboards for 180s, Big Fish, and nine-dart finishes, each filter
 
 ### Settings
 
-The Settings page (accessible from the top navigation) holds app-wide configuration, grouped into four tabs: **Account & Access**, **Gameplay & Display**, **Integrations**, and **Admin & Danger Zone**. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, **Daily Challenge**, **Server Errors**, **Backups**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
+The Settings page (accessible from the top navigation) holds app-wide configuration, grouped into four tabs: **Account & Access**, **Gameplay & Display**, **Integrations**, and **Admin & Danger Zone**. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, **Daily Challenge**, **Server Errors**, **Backups**, **Data Export**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
 
 Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accounts--player-pins)) — until an admin account exists, the page offers to create the first one.
 
@@ -585,6 +585,10 @@ Oche can fire webhooks to a Home Assistant instance whenever key game events occ
 #### Server Errors
 
 Shows the most recent server-side failures (up to 500, newest first) — the same record kept for a self-hosted setup that doesn't have shell/`docker logs` access. Only genuine server errors (5xx) appear here; ordinary mistakes like a bad login or an invalid PIN don't. Click **Refresh** to pull the latest.
+
+#### Data Export
+
+- **Export all data** — downloads a complete JSON export of every player, game, and stat in the database. Admin-only; there's no per-player export and nothing export-related appears on a player's own page. Excludes admin accounts, sessions, app settings, and player PINs.
 
 #### Danger Zone
 
@@ -944,6 +948,14 @@ POST /api/backups/upload-restore            Raw .db file body, X-Admin-Password 
                                              same restore as above. Capped at 500MB.
 ```
 
+### Data Export
+
+```
+GET  /api/export-all                        Streams a full-database JSON export as a download            [admin]
+                                             (excludes admins/sessions/settings/server_errors and
+                                             all player PIN/credential columns)
+```
+
 ---
 
 ## Architecture
@@ -1032,3 +1044,11 @@ backup or an uploaded `.db` file — no shell access needed. An uploaded file is
 your admin password again, even though you're already logged in, since it replaces the
 entire database. Either restore path stages the file and then tells you to restart the
 container — it doesn't restart itself, so nothing takes effect until you do.
+
+### Data Export
+
+**Settings → Admin & Danger Zone → Data Export** lets an admin download a complete JSON
+export of every player, game, and stat in the database with one click — it's your data,
+and you can always take it with you. This is admin-only: there is no per-player export
+and no export entry point anywhere on a player's own page. The export never includes
+admin accounts, sessions, app settings, or any player's PIN.

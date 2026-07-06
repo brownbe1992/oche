@@ -2432,6 +2432,29 @@ function wipeAllData() {
   return { ok: true };
 }
 
+// Full-database export (docs/data-export-roadmap.md, admin-only, Settings ->
+// Admin & Danger Zone -> Data Export): a complete, human-readable JSON dump of
+// every player/game/stat table — "it's your data, and you can always take it
+// with you." Deliberately excludes admins/sessions/settings/server_errors
+// (internal/credential tables, not "your darts data"), and excludes players'
+// pin_hash/pin_salt/pin_fail_count/pin_locked_until columns even though the
+// players table itself is included — a password/PIN hash should never leave
+// the server, exported or not, the same write-only handling every other
+// credential in this app already gets.
+function getFullDatabaseExport() {
+  return {
+    exportedAt: new Date().toISOString(),
+    players: db.prepare('SELECT id, name, out_mode, created_at, dart_weight FROM players').all(),
+    games: db.prepare('SELECT * FROM games').all(),
+    gamePlayers: db.prepare('SELECT * FROM game_players').all(),
+    turns: db.prepare('SELECT * FROM turns').all(),
+    darts: db.prepare('SELECT * FROM darts').all(),
+    timelineEvents: db.prepare('SELECT * FROM timeline_events').all(),
+    playerBadges: db.prepare('SELECT * FROM player_badges').all(),
+    dailyChallengeAttempts: db.prepare('SELECT * FROM daily_challenge_attempts').all(),
+  };
+}
+
 /* ---------- settings ---------- */
 function getSettings() {
   return Object.fromEntries(db.prepare('SELECT key, value FROM settings').all().map(r => [r.key, r.value]));
@@ -2839,7 +2862,7 @@ module.exports = {
   getDoublesPracticeStatBubbles, getDoublesPracticePersonalBests,
   getDoublesPracticeAccuracyLeaderboard, getDoublesPracticeBestRoundStats,
   getChuckinStatBubbles, getChuckinPersonalBests, getChuckinHeatmap,
-  getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn,
+  getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics,
   getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, fireHaWebhook,

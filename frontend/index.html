@@ -1212,6 +1212,22 @@
         </div>
       </div>
 
+      <!-- Data Export -->
+      <div class="pp-section" style="margin-top:24px">
+        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('data-export-body',this)">
+          Data Export
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="data-export-body" hidden>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+            Download a complete JSON export of every player, game, and stat in the database —
+            it's your data, and you can always take it with you. Admin credentials and session
+            data are never included.
+          </p>
+          <button class="btn btn-ghost" onclick="window.location='/api/export-all'">Export all data</button>
+        </div>
+      </div>
+
       <!-- Danger Zone -->
       <div class="pp-section" style="margin-top:24px">
         <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('danger-zone-body',this)">

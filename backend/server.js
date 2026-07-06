@@ -64,6 +64,11 @@
                                        validates it's a genuine, non-corrupt SQLite file
                                        (header + PRAGMA integrity_check) before staging the
                                        same restore as above. Capped at 500MB. [admin]
+       GET  /api/export-all        -> streams a full-database JSON export (docs/
+                                       data-export-roadmap.md, admin-only, Settings ->
+                                       Admin & Danger Zone -> Data Export). Excludes
+                                       admins/sessions/settings/server_errors and strips
+                                       PIN-hash columns from players. [admin]
 
    Routes marked [admin] require a logged-in admin session (cookie set by /api/login).
    Set COOKIE_SECURE=true when serving over HTTPS (e.g. behind a reverse proxy) so the
@@ -843,6 +848,19 @@ const server = http.createServer(async (req, res) => {
       if (!admin) return;
       if (!rateLimit('backup-restore', ip, 10, 60000)) return tooManyRequests(res, 60);
       return await handleUploadRestore(req, res, admin);
+    }
+    if (p === '/api/export-all' && m === 'GET') {
+      if (!requireAdmin(req, res)) return;
+      const dump = db.getFullDatabaseExport();
+      const body = Buffer.from(JSON.stringify(dump, null, 2));
+      const filename = `oche-export-${new Date().toISOString().slice(0, 10)}.json`;
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': String(body.length),
+        ...SECURITY_HEADERS,
+      });
+      return res.end(body);
     }
 
     return send(res, 404, { error: 'Unknown endpoint' });

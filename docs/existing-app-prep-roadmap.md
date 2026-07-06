@@ -545,7 +545,7 @@ for the same "what do we build next" attention.
 | `docs/archive/colorblind-mode-roadmap.md` | ✅ Done | Very low | Medium (narrow, real) | CSS-only, genuine accessibility fix |
 | `docs/ha-recipes-roadmap.md` | Not started | Trivial (docs only) | Medium | Zero code, unlocks power that already shipped — the promised recipe content was never written |
 | `docs/security-hardening-roadmap.md` | ✅ Done | Very low | High | Admin login rate limiting (v0.6.2) + `OCHE_REQUIRE_AUTH` for all gameplay/roster writes. SEC-7 (webhook auth, 2026-07) closed the last open item — `POST /api/ha-webhook` now uses the same `requireWrite` gate as every other write endpoint. **`OCHE_REQUIRE_AUTH` itself flipped to a zero-trust default-on (2026-07)** — every write requires a logged-in admin out of the box; `OCHE_REQUIRE_AUTH=false` opts back into open-LAN behavior. The standing checklist for future credentials/secrets remains ongoing practice, per CLAUDE.md |
-| `docs/data-export-roadmap.md` | Not started | Very low | Medium | Reformats existing queries; reinforces the self-hosted trust story |
+| `docs/data-export-roadmap.md` | ✅ Done (2026-07) | Very low | Medium | Built narrower than originally drafted: full-database admin JSON export only (Settings → Admin & Danger Zone → Data Export). Per-player export was deliberately descoped, not built, per explicit product direction |
 | `docs/archive/voice-announcements-roadmap.md` | ✅ Done | Very low | Medium-High | Browser API only, zero infra; i18n left to its own follow-on doc (next row) |
 | `docs/voice-announcements-i18n-roadmap.md` | Not started | Low-Medium | Low-Medium | Follow-on to the shipped feature; every phrase is still hardcoded English |
 | `docs/backups-roadmap.md` | Partial | Low | Very high | v1 (script + retention + restore docs) done (v0.6.2); **v2 (Settings → Backups: download/retention/on-demand backup/restore-from-existing/upload-restore) done (2026-07)**. The only thing still unbuilt is v1's own stretch goal — an opt-in Compose-profile sidecar as an alternative to host cron |
@@ -592,11 +592,12 @@ simultaneous-achievements rows above.
    shipped — it's the only big item genuinely ready to start today with nothing else
    required first.
 4. **The remaining smaller, not-started roadmaps are entirely order-independent**
-   (`ha-recipes-roadmap.md`, `data-export-roadmap.md`,
-   `voice-announcements-i18n-roadmap.md`, `environmental-logging-roadmap.md`,
-   `admin-login-backoff-roadmap.md`, `admin-account-recovery-roadmap.md` — six as of
-   2026-07) and can be interleaved anywhere, including between or ahead of the
-   bigger lifts — good for sustaining momentum, and essentially zero risk of
+   (`ha-recipes-roadmap.md`, `voice-announcements-i18n-roadmap.md`,
+   `environmental-logging-roadmap.md`, `admin-login-backoff-roadmap.md`,
+   `admin-account-recovery-roadmap.md` — five as of 2026-07, now that
+   `data-export-roadmap.md` has shipped) and can be interleaved anywhere, including
+   between or ahead of the bigger lifts — good for sustaining momentum, and
+   essentially zero risk of
    creating rework later.
 5. ~~Server-side error logging, admin login rate limiting, backups, and colorblind
    mode should be done sooner rather than later~~ ✅ **All four done** (error

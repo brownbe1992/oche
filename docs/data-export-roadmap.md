@@ -1,7 +1,21 @@
 # Data Export — Design Roadmap
 
-> Status: **not started**. This is a design doc for a future release, captured so the
-> thinking isn't lost. Nothing described here exists in the app yet.
+> Status: **Done (2026-07), built to a deliberately narrower scope than originally
+> drafted below.** Per explicit product direction, the per-player/CSV/PIN-gated half
+> of this doc was **descoped, not built**: there is no per-player export anywhere,
+> and no export-related UI on any Player Profile page. What shipped is the
+> full-database admin export only — **Settings → Admin & Danger Zone → Data
+> Export**, a single "Export all data" button that downloads a complete JSON dump
+> via `GET /api/export-all` (`requireAdmin`). It excludes the `admins`, `sessions`,
+> `settings`, and `server_errors` tables entirely and strips every PIN/credential
+> column from the `players` rows it does include — see `REFERENCE.md`'s §12 "Settings
+> → Data Export" for the exact mechanics. Covered by committed tests
+> (`db.export.test.js`, `server.export.test.js`).
+>
+> The rest of this document (per-player CSV/JSON export, PIN-gating design) is kept
+> below for historical context only — it is not planned to be picked up as written;
+> any future revival of a per-player export would need fresh product direction, not
+> just implementation of the design below.
 
 ## Goal
 

@@ -1766,6 +1766,33 @@ file.
   sensitive as `/api/wipe-all` and `/api/admins`, which use the same
   unconditional gate regardless of `OCHE_REQUIRE_AUTH`.
 
+### Settings → Data Export (admin-only)
+
+`docs/data-export-roadmap.md`'s original design proposed a per-player,
+PIN-gated export in addition to an admin-only full-database export; the
+per-player half was deliberately descoped by explicit product direction — this
+app only ever exports the whole database, and only to a logged-in admin. There
+is no export entry point anywhere on a Player Profile page.
+
+- **`db.getFullDatabaseExport()`** returns `{ exportedAt, players, games,
+  gamePlayers, turns, darts, timelineEvents, playerBadges,
+  dailyChallengeAttempts }` — every player/game/stat table, reformatted as
+  plain JSON. It deliberately excludes the `admins`, `sessions`, `settings`,
+  and `server_errors` tables entirely (internal/credential tables, not "your
+  darts data"), and the `players` rows only select `id, name, out_mode,
+  created_at, dart_weight` — `pin_hash`/`pin_salt`/`pin_fail_count`/
+  `pin_locked_until` never leave the server, exported or not, the same
+  write-only handling every other credential in this app gets.
+- **`GET /api/export-all`** (`requireAdmin`, unconditional — same gate as the
+  Backups routes and `/api/wipe-all`) streams that object as a
+  `Content-Disposition: attachment` download named
+  `oche-export-<YYYY-MM-DD>.json`.
+- The Settings → Admin & Danger Zone → **Data Export** section is a single
+  button ("Export all data") that navigates to that URL, mirroring exactly how
+  the Backups section's own download links work — the browser's existing
+  admin session cookie authenticates the request, no separate credential in
+  the URL.
+
 ---
 
 ## 13. Database Schema
@@ -1942,9 +1969,6 @@ already-shipped limitations, not just unbuilt future features:
   `docs/accessibility-roadmap.md` about whether the shared/ambient display
   warrants the same investment as the controller.
 - **No WCAG contrast audit has been performed.**
-- **Data export has no per-player access-control story drafted** — flagged in
-  `docs/data-export-roadmap.md` as needing the same PIN-gating other
-  player-specific actions get, before it's built.
 - **Online multiplayer's data model isn't fully specified** — needs its own
   `online_matches` table with a `game_id` FK (per the binding convention below),
   not a value stuffed into `games.category` — `docs/online-multiplayer-roadmap.md`.
