@@ -3,6 +3,12 @@
 > Status: **not started**. This is a design doc for a future release, captured so the
 > thinking isn't lost. Nothing described here exists in the app yet.
 
+> **Related (2026-07)**: `docs/companion-website-roadmap.md` proposes a project-
+> operated site for cross-instance matchmaking — it's the discovery/lobby layer that
+> could hand a matched pair off to *this* doc's P2P design to actually play, rather
+> than reinventing a second live-transport mechanism. That doc doesn't change anything
+> here; it's upstream of it.
+
 ## Goal
 
 Peer-to-peer live scoring between two players on independent self-hosted Oche

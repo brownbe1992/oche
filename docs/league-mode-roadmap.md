@@ -3,6 +3,12 @@
 > Status: **not started**. This is a design doc for a future release, captured so the
 > thinking isn't lost. Nothing described here exists in the app yet.
 
+> **Related (2026-07)**: `docs/companion-website-roadmap.md` proposes cross-instance
+> leagues run through a project-operated site, reusing this doc's standings logic —
+> but everything below is scoped to one instance's own local `players` roster;
+> extending the participant model to include matched/remote players is that other
+> doc's job, not a change needed here yet.
+
 ## Goal
 
 A lighter-weight, complementary alternative to the tournament-mode roadmap: instead of

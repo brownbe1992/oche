@@ -3,6 +3,12 @@
 > Status: **not started**. This is a design doc for a future release, captured so the
 > thinking isn't lost. Nothing described here exists in the app yet.
 
+> **Related (2026-07)**: `docs/companion-website-roadmap.md` proposes cross-instance
+> tournaments run through a project-operated site. This doc's bracket-generation logic
+> is exactly what that would reuse — but everything below is scoped to one instance's
+> own local `players` roster; extending the participant model to include matched/
+> remote players is that other doc's job, not a change needed here yet.
+
 ## Goal
 
 Bracket-style tournament play — e.g. 8, 16, or up to 128 players — built on top of the
