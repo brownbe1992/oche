@@ -708,6 +708,7 @@
             <button id="mode-practice" aria-pressed="false" onclick="setMode('practice')">Practice</button>
             <button id="mode-challenge" aria-pressed="false" onclick="setMode('challenge')">🎯 Daily Challenge</button>
             <button id="mode-ghost" aria-pressed="false" onclick="setMode('ghost')">👻 Ghost</button>
+            <button id="mode-doubles" aria-pressed="false" onclick="setMode('doubles_practice')">Doubles Practice</button>
           </div>
         </div>
       </div>
@@ -722,6 +723,13 @@
       <div class="setup-section" id="ghost-options-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
         <div class="setup-label" style="color:var(--gold)">👻 Race a past leg</div>
         <div id="ghost-leg-picker-body"><p class="pp-meta">Choose a player above to see their past won legs.</p></div>
+      </div>
+
+      <!-- Doubles Practice target picker (Doubles Practice mode only) -->
+      <div class="setup-section" id="doubles-options-section" hidden>
+        <div class="setup-label">Doubles to practice</div>
+        <p class="pp-meta" style="margin:0 0 8px">Choose one or more doubles — <span id="doubles-target-count">0</span> selected. All selected doubles stay live at once; a single/treble on a target number, or hitting a different double, ends the round.</p>
+        <div class="cricket-number-grid" id="doubles-target-grid" role="group" aria-label="Doubles to practice"></div>
       </div>
 
       <!-- Format (H2H only) -->
@@ -1366,7 +1374,8 @@ function makeDart(sector, mult){
    APP STATE
    ========================================================================= */
 let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, mode:'h2h',
-  gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[], ghostLeg:null }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost'; gameType: 'x01' | 'cricket'
+  gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[], ghostLeg:null,
+  doublesTargets:[] }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice'; gameType: 'x01' | 'cricket' | 'doubles_practice'
 let game = null;
 let dartTimingEnabled = false;   // admin-toggled; refreshed at boot from /api/settings/dart-timing
 let roster = [];     // saved player names (profiles that own stats)
@@ -1955,19 +1964,25 @@ function setMode(mode){
   document.getElementById('mode-practice').setAttribute('aria-pressed', mode==='practice');
   document.getElementById('mode-challenge').setAttribute('aria-pressed', mode==='challenge');
   document.getElementById('mode-ghost').setAttribute('aria-pressed', mode==='ghost');
+  document.getElementById('mode-doubles').setAttribute('aria-pressed', mode==='doubles_practice');
   document.getElementById('h2h-options').hidden = (mode !== 'h2h');
   // Daily Challenge and Ghost Opponent are both X01-only — force the game-type
   // choice back and hide it entirely rather than offering a combination that was
   // never designed (docs/ghost-opponent-roadmap.md is explicitly X01-only for v1).
-  document.getElementById('game-type-section').hidden = (mode === 'challenge' || mode === 'ghost');
+  // Doubles Practice is its own game_type, not a choice between X01/Cricket, so it
+  // hides the same X01/Cricket-specific sections for the same reason.
+  const isSpecialMode = (mode === 'challenge' || mode === 'ghost' || mode === 'doubles_practice');
+  document.getElementById('game-type-section').hidden = isSpecialMode;
   if((mode === 'challenge' || mode === 'ghost') && setup.gameType !== 'x01') setGameType('x01');
-  document.getElementById('start-score-section').hidden = (mode === 'challenge' || mode === 'ghost' || setup.gameType === 'cricket');
-  document.getElementById('cricket-options-section').hidden = (mode === 'challenge' || mode === 'ghost' || setup.gameType !== 'cricket');
+  if(mode === 'doubles_practice') setup.gameType = 'doubles_practice';
+  document.getElementById('start-score-section').hidden = (isSpecialMode || setup.gameType === 'cricket');
+  document.getElementById('cricket-options-section').hidden = (isSpecialMode || setup.gameType !== 'cricket');
   document.getElementById('challenge-info-section').hidden = (mode !== 'challenge');
   document.getElementById('ghost-options-section').hidden = (mode !== 'ghost');
-  document.getElementById('add-player-wrap').style.display = (mode === 'challenge' || mode === 'ghost') ? 'none' : '';
+  document.getElementById('doubles-options-section').hidden = (mode !== 'doubles_practice');
+  document.getElementById('add-player-wrap').style.display = isSpecialMode ? 'none' : '';
   const startBtn = document.getElementById('start-btn');
-  if(startBtn) startBtn.textContent = (mode === 'challenge') ? 'Start Challenge' : (mode === 'ghost') ? 'Start race' : 'Start game';
+  if(startBtn) startBtn.textContent = (mode === 'challenge') ? 'Start Challenge' : (mode === 'ghost') ? 'Start race' : (mode === 'doubles_practice') ? 'Start practice' : 'Start game';
   if(mode === 'challenge'){
     // a challenge is always exactly one player
     setup.slots = setup.slots.slice(0,1);
@@ -1975,6 +1990,14 @@ function setMode(mode){
     renderPlayers();
     const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
     renderChallengeCard();
+  } else if(mode === 'doubles_practice'){
+    // solo drill, no opponent — same single-slot treatment as Challenge/Ghost
+    setup.slots = setup.slots.slice(0,1);
+    if(!setup.slots.length) setup.slots = [''];
+    setup.legsPerSet = 1; setup.setsPerGame = 1;
+    renderPlayers();
+    const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
+    renderDoublesTargetGrid();
   } else if(mode === 'ghost'){
     // racing a ghost is always exactly one live player, one leg
     setup.slots = setup.slots.slice(0,1);
@@ -2578,6 +2601,39 @@ function updateCricketCustomCount(){
 function resolveCricketNumbers(){
   return setup.cricketPreset === 'custom' ? setup.cricketCustomNumbers.slice() : CRICKET_STANDARD_NUMBERS.slice();
 }
+
+/* ---------- Doubles Practice target picker (docs/game-modes-roadmap.md) ----------
+   Same multi-select-grid mechanism as Cricket's custom targets, reused for a
+   different target set (doubles only) and no fixed count requirement — any
+   number of doubles from 1 upward, unlike Cricket's locked-to-7 rule. */
+function doublesTargetLabel(n){ return n===25 ? 'Bull' : 'D'+n; }
+function renderDoublesTargetGrid(){
+  const grid = document.getElementById('doubles-target-grid');
+  if(!grid) return;
+  grid.innerHTML = '';
+  for(let n=1;n<=20;n++) grid.appendChild(doublesTargetToggleBtn(n));
+  grid.appendChild(doublesTargetToggleBtn(25));
+  updateDoublesTargetCount();
+}
+function doublesTargetToggleBtn(n){
+  const b=document.createElement('button');
+  b.type='button';
+  b.className='cricket-number-toggle';
+  b.setAttribute('aria-pressed', String(setup.doublesTargets.includes(n)));
+  b.textContent = doublesTargetLabel(n);
+  b.onclick = ()=>toggleDoublesTarget(n);
+  return b;
+}
+function toggleDoublesTarget(n){
+  const i = setup.doublesTargets.indexOf(n);
+  if(i>=0) setup.doublesTargets.splice(i,1);
+  else setup.doublesTargets.push(n);
+  renderDoublesTargetGrid();
+}
+function updateDoublesTargetCount(){
+  const el = document.getElementById('doubles-target-count');
+  if(el) el.textContent = String(setup.doublesTargets.length);
+}
 function bump(key, delta){
   setup[key] = Math.max(1, Math.min(9, setup[key]+delta));
   document.getElementById('legs-val').textContent = setup.legsPerSet;
@@ -2657,6 +2713,14 @@ async function startGame(){
       return;
     }
   }
+  // Doubles Practice (docs/game-modes-roadmap.md "Doubles Practice"): needs at
+  // least one selected double target before it can start — otherwise every dart
+  // would be "off-target" by definition and the session could never register a hit.
+  if(setup.mode === 'doubles_practice'){
+    const player = setup.slots[0];
+    if(!player || !roster.includes(player)){ uiAlert('Choose a player to practice.'); return; }
+    if(!setup.doublesTargets.length){ uiAlert('Choose at least one double to practice.'); return; }
+  }
   if(setup.slots.some(n=>!n)){ uiAlert('Choose a player for each slot before starting.'); return; }
   const names = [];
   setup.slots.forEach(n=>{ if(n && roster.includes(n) && !names.includes(n)) names.push(n); });
@@ -2664,7 +2728,7 @@ async function startGame(){
   if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   // Custom cricket is locked to exactly 7 targets (same count as classic) — never
   // more, never fewer (docs/game-modes-roadmap.md "Decisions made").
-  const gameType = setup.gameType === 'cricket' ? 'cricket' : 'x01'; // Daily Challenge always forces x01 via setMode()
+  const gameType = setup.gameType === 'cricket' ? 'cricket' : setup.gameType === 'doubles_practice' ? 'doubles_practice' : 'x01'; // Daily Challenge always forces x01 via setMode()
   let cricketNumbers = null;
   if(gameType === 'cricket'){
     cricketNumbers = resolveCricketNumbers();
@@ -2678,11 +2742,15 @@ async function startGame(){
   // (whatever "Starting score" happened to be hidden at, per setMode('ghost')) —
   // otherwise the two "players" wouldn't actually be racing the same leg.
   const startScore = challengeStart != null ? challengeStart : ghostScript ? Number(ghostScript.category) : setup.start;
-  const legsPerSet = (setup.mode==='challenge' || setup.mode==='ghost') ? 1 : setup.legsPerSet;
-  const setsPerGame = (setup.mode==='challenge' || setup.mode==='ghost') ? 1 : setup.setsPerGame;
-  const config = gameType === 'cricket' ? { numbers: cricketNumbers } : { startingScore: startScore };
+  const legsPerSet = (setup.mode==='challenge' || setup.mode==='ghost' || setup.mode==='doubles_practice') ? 1 : setup.legsPerSet;
+  const setsPerGame = (setup.mode==='challenge' || setup.mode==='ghost' || setup.mode==='doubles_practice') ? 1 : setup.setsPerGame;
+  const config = gameType === 'cricket' ? { numbers: cricketNumbers }
+    : gameType === 'doubles_practice' ? { doubles: setup.doublesTargets.slice() }
+    : { startingScore: startScore };
   const category = gameType === 'cricket'
     ? (setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
+    : gameType === 'doubles_practice'
+    ? `Doubles Practice (${config.doubles.map(doublesTargetLabel).join(', ')})`
     : String(startScore);
   game = {
     gameType,
@@ -2691,7 +2759,7 @@ async function startGame(){
     category,
     legsPerSet, setsPerGame,
     practice: setup.practice,
-    players: names.map(n=>GAME_TYPES[gameType].newMatchPlayer(n, gameType==='cricket' ? config : startScore)),
+    players: names.map(n=>GAME_TYPES[gameType].newMatchPlayer(n, gameType==='cricket' || gameType==='doubles_practice' ? config : startScore)),
     starter: 0,        // who throws first in the current leg
     current: 0,
     setNo: 1, legNo: 1,
@@ -2709,7 +2777,11 @@ async function startGame(){
     lastTurnEvent: null,   // one-shot: outcome of the turn just entered (voice announcements)
     matchResult: null,     // one-shot: leg/set/game just won (voice announcements)
     legStart: null,        // one-shot: a new leg just began, who's throwing first (voice announcements)
-    hasGhost: false        // true for a Ghost Opponent race (docs/ghost-opponent-roadmap.md)
+    hasGhost: false,       // true for a Ghost Opponent race (docs/ghost-opponent-roadmap.md)
+    // Doubles Practice (docs/game-modes-roadmap.md): per-dart evaluation, not
+    // per-visit — a round runs until evaluateDartDoublesPractice() ends it
+    // (so-close or wrong-double), never on a fixed dart count.
+    roundOver: false, roundEndReason: null, dpLastDart: null
   };
   if(setup.mode === 'ghost'){
     game.hasGhost = true;
@@ -2953,6 +3025,7 @@ function renderPlayerPage(){
     <div class="player-tabs" style="margin-bottom:8px">
       <button class="tab-btn${gt==='x01'?' active':''}" onclick="switchPlayerGameType('x01')">X01</button>
       <button class="tab-btn${gt==='cricket'?' active':''}" onclick="switchPlayerGameType('cricket')">Cricket</button>
+      <button class="tab-btn${gt==='doubles_practice'?' active':''}" onclick="switchPlayerGameType('doubles_practice')">Doubles Practice</button>
     </div>`;
   const bubblesHtml = `
     ${gameTypeTabsHtml}
@@ -3353,7 +3426,7 @@ function loadPersonalBests(){
   const container=document.getElementById('player-personal-bests');
   if(!container) return;
   const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
-  const gtParam=playerGameType==='cricket'?'&gameType=cricket':'';
+  const gtParam=activeGameTypeParam();
   Backend.get(`/api/players/personal-bests?name=${encodeURIComponent(currentPlayer)}${modeParam}${gtParam}`)
     .then(data=>renderPersonalBests(data))
     .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load personal bests.</p>`; });
@@ -3362,6 +3435,7 @@ function renderPersonalBests(data){
   const container=document.getElementById('player-personal-bests');
   if(!container) return;
   if(playerGameType==='cricket') return renderCricketPersonalBests(data);
+  if(playerGameType==='doubles_practice') return renderDoublesPracticePersonalBests(data);
   if(!data || (data.bestLegAvg==null && data.fewestDartsCheckout==null)){
     container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough legs recorded yet.</p>`;
     return;
@@ -3403,6 +3477,20 @@ function renderCricketPersonalBests(data){
     ${formHtml}
   </div>`;
 }
+// No winStreak/recentForm/lifetime fields (see getDoublesPracticePersonalBests()'s
+// own comment) — a round never "wins", so those X01/Cricket concepts don't map.
+function renderDoublesPracticePersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || (data.bestRoundDarts==null && data.bestRoundHits==null)){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough rounds recorded yet.</p>`;
+    return;
+  }
+  container.innerHTML=`<div class="summary-grid">
+    ${data.bestRoundDarts!=null?`<div class="stat-block"><div class="stat-val">${data.bestRoundDarts}</div><div class="stat-label">Longest Round (darts)</div></div>`:''}
+    ${data.bestRoundHits!=null?`<div class="stat-block"><div class="stat-val">${data.bestRoundHits}</div><div class="stat-label">Most Doubles in a Round</div></div>`:''}
+  </div>`;
+}
 async function sharePersonalBest(kind, value){
   const cfg = { legavg: { icon:'📊', headline:'BEST LEG AVERAGE', statLine: value.toFixed(1) },
     fewestdarts: { icon:'🎯', headline:'FEWEST DARTS TO FINISH', statLine: `${value} darts` } }[kind];
@@ -3440,6 +3528,7 @@ function avgStr(points, darts){ return darts ? (points/darts*3).toFixed(1) : '�
 
 function renderGame(){
   if(game.gameType === 'cricket') return renderGameCricket();
+  if(game.gameType === 'doubles_practice') return renderGameDoublesPractice();
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
   game.players.forEach((p,i)=>{
@@ -3899,8 +3988,15 @@ function liveSnapshot(message){
     players: game.players.map(p=>GAME_TYPES[game.gameType].playerSnapshot(p)),
     darts: game.darts.map(d=>d.label),
     checkout,
-    status: game.won ? 'won' : (game.busted ? 'bust' : 'live'),
+    status: game.gameType === 'doubles_practice' ? (game.roundOver ? 'bust' : 'live') : game.won ? 'won' : (game.busted ? 'bust' : 'live'),
     message: message || '',
+    // Doubles Practice only (docs/game-modes-roadmap.md): the target set, the
+    // outcome of the most recent dart, and why the round ended (if it has) — the
+    // /display renderer reads these instead of the X01/Cricket-shaped fields above.
+    doublesTargets: game.gameType === 'doubles_practice' ? (game.config.doubles || []) : null,
+    dpLastDart: game.gameType === 'doubles_practice' ? (game.dpLastDart || null) : null,
+    roundOver: game.gameType === 'doubles_practice' ? !!game.roundOver : null,
+    roundEndReason: game.gameType === 'doubles_practice' ? (game.roundEndReason || null) : null,
     achievement: pendingAchievement || null,
     gameOneEighties: game.gameOneEighties || 0,
     gameBigFish: game.gameBigFish || 0,
@@ -3929,7 +4025,9 @@ function pushLive(message){
 }
 
 function renderPad(){
-  const full = !!(game.darts.length>=3 || game.busted || game.won);
+  // Doubles Practice never batches to 3 darts — a round runs until a so-close/
+  // wrong-double dart ends it, so the pad only disables once the round is over.
+  const full = game.gameType === 'doubles_practice' ? !!game.roundOver : !!(game.darts.length>=3 || game.busted || game.won);
   if(game.gameType === 'cricket'){
     renderPadCricket(full);
     const utb0 = document.getElementById('undo-turn-btn');
@@ -4011,6 +4109,7 @@ function updateMultUI(){
   t.setAttribute('aria-pressed', mult===3);
 }
 function throwDart(sector){
+  if(game.gameType === 'doubles_practice') return throwDartDoublesPractice(sector);
   if(game.darts.length>=3 || game.busted || game.won) return;
   if(sector === 0 && mult > 1){
     // Double/Treble Miss fills that many slots at once
@@ -4913,9 +5012,10 @@ function finishUnit(kind, winner){
 /* rebuild the oche inner markup (used after a leg replaced it) */
 function renderGameShell(){
   const isCricketGame = !!(game && game.gameType === 'cricket');
+  const isDoublesPractice = !!(game && game.gameType === 'doubles_practice');
   document.querySelector('.oche').innerHTML=`
-      <div class="slots" id="slots"></div>
-      <div class="status" id="status">${isCricketGame ? 'Select a multiplier, then tap a target number.' : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
+      <div class="slots" id="slots"${isDoublesPractice ? ' hidden' : ''}></div>
+      <div class="status" id="status">${isDoublesPractice ? 'Select a multiplier, then tap a number.' : isCricketGame ? 'Select a multiplier, then tap a target number.' : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
       <div class="multi" id="multi-row" role="group" aria-label="Dart multiplier">
         <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
         <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
@@ -4925,11 +5025,12 @@ function renderGameShell(){
       <div class="dart-board-wrap" id="dart-board-wrap"></div>
       <button class="btn btn-ghost board-miss" id="board-miss-btn" onclick="throwDartBoard(0,1)">Miss</button>
       <div class="turn-actions">
-        <div class="undo-row">
+        <div class="undo-row"${isDoublesPractice ? ' hidden' : ''}>
           <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled>Undo Last Turn</button>
           <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo Dart</button>
         </div>
-        <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
+        <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()"${isDoublesPractice ? ' hidden' : ''}>Enter turn</button>
+        <button class="btn btn-primary" id="dp-next-round-btn" onclick="startNextRoundDoublesPractice()" hidden>Start next round</button>
       </div>`;
   applyDartMode();
 }
@@ -4979,6 +5080,17 @@ const CRICKET_STAT_DEFS = [
 const CRICKET_BUBBLE_KEY_MAP = { cricketmpr:'mpr', cricket9marks:'nineMarks', cricketwinpct:'winPct',
   cricketgames:'gamesPlayed', cricketdartsthrown:'dartsThrown', cricketavgdartsperleg:'avgDartsPerLeg' };
 
+// Doubles Practice's own 3 stat bubbles (docs/game-modes-roadmap.md's requested
+// vocabulary: darts per round, doubles hit per round, doubles%) — every bubble
+// here has a matching getMetricHistory() case, same completeness as Cricket's set.
+const DOUBLES_PRACTICE_STAT_DEFS = [
+  { key:'doublespracticepct', label:'Doubles %', desc:'Doubles hit ÷ darts thrown, across every Doubles Practice round', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'doublespracticedartsperround', label:'Darts / Round', desc:'Average darts thrown per Doubles Practice round', fmt:v=>v!=null?Number(v).toFixed(1):'—', primary:true },
+  { key:'doublespracticehitsperround', label:'Doubles Hit / Round', desc:'Average doubles hit per Doubles Practice round', fmt:v=>v!=null?Number(v).toFixed(1):'—', primary:true },
+];
+const DOUBLES_PRACTICE_BUBBLE_KEY_MAP = { doublespracticepct:'doublesPct',
+  doublespracticedartsperround:'avgDartsPerRound', doublespracticehitsperround:'avgHitsPerRound' };
+
 // ---------- game-type plugin registry ----------
 // The seam future game types (Cricket, Ghost Opponent's replay engine) plug into.
 // X01 is the only entry today; everything above/below that drives an active `game`
@@ -5017,13 +5129,28 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegCricket,
     playerSnapshot: playerSnapshotCricket,
     statDefs: CRICKET_STAT_DEFS
+  },
+  doubles_practice: {
+    id: 'doubles_practice',
+    newMatchPlayer: newMatchPlayerDoublesPractice,
+    // Per-dart evaluation (throwDartDoublesPractice()), not a batched-visit
+    // evaluateVisit — every existing call site for this game type is a dedicated
+    // gameType==='doubles_practice' branch (throwDart, renderGame, renderPad),
+    // the same "hardcode a branch" precedent Cricket already established, so this
+    // is never actually invoked; it throws instead of silently doing the wrong
+    // thing if some future generic code path ever calls it by mistake.
+    evaluateVisit: () => { throw new Error('doubles_practice has no per-visit evaluateVisit — see throwDartDoublesPractice()'); },
+    resetForNextLeg: resetPlayerForNextLegDoublesPractice,
+    playerSnapshot: playerSnapshotDoublesPractice,
+    statDefs: DOUBLES_PRACTICE_STAT_DEFS
   }
 };
 // Which def array / bubble-key-map the Player Profile's stat bubbles, chart, and
 // personal bests should read from — driven by the profile's own game-type toggle
 // (playerGameType), independent of any in-progress game.gameType.
 function activeStatDefs(){ return GAME_TYPES[playerGameType].statDefs; }
-function activeBubbleKeyMap(){ return playerGameType==='cricket' ? CRICKET_BUBBLE_KEY_MAP : BUBBLE_KEY_MAP; }
+function activeBubbleKeyMap(){ return playerGameType==='cricket' ? CRICKET_BUBBLE_KEY_MAP : playerGameType==='doubles_practice' ? DOUBLES_PRACTICE_BUBBLE_KEY_MAP : BUBBLE_KEY_MAP; }
+function activeGameTypeParam(){ return playerGameType==='cricket' ? '&gameType=cricket' : playerGameType==='doubles_practice' ? '&gameType=doubles_practice' : ''; }
 
 /* ---------- Cricket (game-modes-roadmap.md build-order step 2) ----------
    Standard cricket only (v1 scope decision) — highest score wins, cut-throat
@@ -5050,6 +5177,107 @@ function playerSnapshotCricket(p){
     legsWon:p.legsWon, setsWon:p.setsWon,
     legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0
   };
+}
+
+/* ---------- Doubles Practice (docs/game-modes-roadmap.md) ----------
+   Solo drill mode: no opponent, no legs/sets in the usual sense — a "round" is
+   one continuous session from the first dart until evaluateDartDoublesPractice()
+   ends it, and game.legNo (reused as "round number") increments per round via
+   startNextRoundDoublesPractice(), not startNextLeg(). */
+function newMatchPlayerDoublesPractice(name){
+  return { name, roundDarts:0, roundHits:0, sessionRounds:[] };
+}
+// Not called by startNextLeg() (Doubles Practice never uses it — see
+// startNextRoundDoublesPractice() instead); provided only to satisfy the
+// GAME_TYPES contract in case a future generic caller expects every entry to
+// have one.
+function resetPlayerForNextLegDoublesPractice(p){
+  p.roundDarts = 0; p.roundHits = 0;
+}
+function playerSnapshotDoublesPractice(p){
+  return { name:p.name, roundDarts:p.roundDarts||0, roundHits:p.roundHits||0 };
+}
+// Per-dart evaluation (evaluateDartDoublesPractice(), frontend/scoring.js) — every
+// dart commits immediately as its own 1-dart turn (addTurn() already supports 1-3
+// darts per turn), unlike every other game type's batched-3-dart visit. No undo
+// support in this v1 (docs/game-modes-roadmap.md notes it as a known gap) — a
+// misthrow just becomes part of the round's own dart/hit tally.
+function throwDartDoublesPractice(sector){
+  if(game.roundOver) return;
+  const dart = makeDart(sector, mult);
+  mult = 1; updateMultUI();
+  const p = game.players[0];
+  const targets = game.config.doubles || [];
+  const ev = evaluateDartDoublesPractice(dart, targets);
+  p.roundDarts += 1;
+  if(ev.hit) p.roundHits += 1;
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:0, bust: !!ev.ended, checkout:false, checkoutPoints:null, legWon:false,
+    darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt }] });
+  game.dpLastDart = { label:dart.label, hit:ev.hit, ended:ev.ended, reason:ev.reason };
+  if(ev.ended){
+    game.roundOver = true;
+    game.roundEndReason = ev.reason;
+    p.sessionRounds.push({ darts:p.roundDarts, hits:p.roundHits, reason:ev.reason });
+    announce(`Round over. ${ev.reason==='so-close' ? 'So close — landed on the number, missed the double.' : "Wrong double — that number wasn't a target."} ${p.roundDarts} darts, ${p.roundHits} hit${p.roundHits===1?'':'s'} this round.`);
+  } else if(ev.hit){
+    announce(`Hit, ${dart.label}. ${p.roundHits} hit${p.roundHits===1?'':'s'} so far this round.`);
+  }
+  renderGameDoublesPractice();
+}
+function startNextRoundDoublesPractice(){
+  const p = game.players[0];
+  p.roundDarts = 0; p.roundHits = 0;
+  game.roundOver = false; game.roundEndReason = null; game.dpLastDart = null;
+  game.legNo += 1;   // each round is its own "leg" for turn grouping/personal bests
+  DB.recordEvent('leg_start', game.setNo, game.legNo);
+  renderGameDoublesPractice();
+}
+function renderGameDoublesPractice(){
+  const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
+  const p = game.players[0];
+  const targets = game.config.doubles || [];
+  const targetsLabel = targets.map(doublesTargetLabel).join(', ');
+  const pct = p.roundDarts ? Math.round(p.roundHits/p.roundDarts*100) : 0;
+  const row = document.createElement('div');
+  row.className = 'pscore active';
+  row.innerHTML = `
+    <div>
+      <div class="nm">${escapeHtml(p.name)} <span class="nm-out">practicing ${escapeHtml(targetsLabel)}</span></div>
+      <div class="turnflag">▸ throwing</div>
+    </div>
+    <div class="meta">
+      <div class="avgs">this round <b>${pct}%</b> doubles &nbsp;·&nbsp; ${p.roundHits} hit${p.roundHits===1?'':'s'} / ${p.roundDarts} dart${p.roundDarts===1?'':'s'}</div>
+      <div class="standing">Round ${game.legNo}</div>
+    </div>
+    <div class="rem-wrap">
+      <div class="rem">${p.roundHits}</div>
+    </div>`;
+  if(sb) sb.appendChild(row);
+
+  const status = document.getElementById('status');
+  if(status){
+    if(game.roundOver){
+      const reasonTxt = game.roundEndReason === 'so-close'
+        ? 'So close! Landed on the number, missed the double.'
+        : "Wrong double — that number wasn't a target.";
+      status.className = 'status bust';
+      status.textContent = `Round over — ${reasonTxt} ${p.roundDarts} dart${p.roundDarts===1?'':'s'}, ${p.roundHits} hit${p.roundHits===1?'':'s'} this round.`;
+    } else if(game.dpLastDart && game.dpLastDart.hit){
+      status.className = 'status win';
+      status.textContent = `Hit! ${game.dpLastDart.label}. Keep going.`;
+    } else if(game.dpLastDart){
+      status.className = 'status';
+      status.textContent = `${game.dpLastDart.label} — no effect, keep going.`;
+    } else {
+      status.className = 'status';
+      status.textContent = 'Select a multiplier, then tap a number.';
+    }
+  }
+  renderPad();
+  const nextBtn = document.getElementById('dp-next-round-btn');
+  if(nextBtn) nextBtn.hidden = !game.roundOver;
+  pushLive();
 }
 function marksGlyph(n){
   const clamped = Math.min(3, n);
@@ -5222,7 +5450,7 @@ function loadStatBubbles(){
   const container=document.getElementById('player-stat-bubbles');
   if(!container) return;
   const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
-  const gtParam=playerGameType==='cricket'?'&gameType=cricket':'';
+  const gtParam=activeGameTypeParam();
   Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(currentPlayer)}${modeParam}${gtParam}`)
     .then(data=>renderStatBubbles(data)).catch(()=>{});
 }

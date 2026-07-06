@@ -8,7 +8,7 @@ A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player 
 
 **v0.10.0**
 
-You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [25-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. All data lives in a SQLite database on your own server.
+You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [25-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. All data lives in a SQLite database on your own server.
 
 > Looking for exact stat formulas, achievement trigger conditions, the full database schema, or how a feature works internally (e.g. to debug it)? See **[REFERENCE.md](REFERENCE.md)** — the technical reference manual, kept up to date alongside this README.
 
@@ -124,7 +124,7 @@ Configure a game before starting:
 | Setting | Options |
 |---|---|
 | **Game** | X01 · Cricket |
-| **Mode** | H2H (head-to-head) · Practice (solo) · 🎯 Daily Challenge · 👻 Ghost |
+| **Mode** | H2H (head-to-head) · Practice (solo) · 🎯 Daily Challenge · 👻 Ghost · Doubles Practice |
 | **Format (X01)** | 501 · 301 · 170 |
 | **Targets (Cricket)** | Classic (15–20, Bull) · Custom (any 7 numbers) |
 | **Legs per set** | 1 – 9 |
@@ -141,6 +141,8 @@ Players with a PIN set show a 🔒 next to their name in the dropdown. When exac
 **Daily Challenge mode** turns New Game into today's [Daily Challenge](#daily-challenge) launcher instead of a regular match: Starting Score and Format hide (the challenge decides them), and a gold **Today's Challenge** panel shows the challenge description plus whoever is currently in the player slot's streak and results history. Selecting who's attempting it uses the exact same single "Choose player" slot as Practice mode — a PIN-protected player still needs their PIN entered, since it's the identical gate every other slot uses, not a separate picker of its own. The **Start game** button relabels to **Start Challenge** while this mode is active. Daily Challenge is X01-only — the Game-type choice is hidden and forced back to X01 whenever this mode is selected.
 
 **👻 Ghost mode** races a replay of one of your own past legs — literally your prior self, thrown dart-by-dart from a leg you actually won, not a simulated opponent. Choosing it shows a gold **Race a past leg** panel listing that player's past won legs (date, category, average, darts used) once a player is picked — the same single-player slot as Practice mode. You can also jump straight into this from a **👻** button next to **Best Leg Average** on a [Player Profile](#player-profile)'s Personal Bests, which preselects that specific leg. The ghost throws back automatically right after each of your own turns (not at the leg's real historical pace) — its card on the scoring screen and Live Scoreboard is labeled **"👻 Ghost (date)"**. Ghost mode is X01-only, always exactly one leg, and always tracked as practice: your own darts record normally, but nothing is recorded for the ghost, and it can never trigger a head-to-head badge like Comeback Kid or Giant Slayer.
+
+**Doubles Practice mode** is a solo drill for practicing specific doubles — choose one or more from a 1–20-plus-Bull picker (any number, no fixed count), then throw. All selected doubles stay **live at once** — you choose which one to aim at each dart, not a forced rotation. A **round** keeps going, however many darts it takes, until one of two things happens: a single or treble lands on one of your target numbers ("so close" — right number, wrong ring), or a double lands on a number that isn't one of your targets ("wrong double"). A genuine miss elsewhere on the board doesn't end anything — just keep throwing. When a round ends, **Start next round** resets the tally and keeps the same targets. The scoring screen and Live Scoreboard show the live target set, this round's hit count and darts-thrown, and the running doubles percentage; there's no numeric score, no opponent, and no Enter-turn step — every dart commits the instant it's thrown. See [Player Profile](#player-profile) for its own stat bubbles (Doubles %, Darts/Round, Doubles Hit/Round) and Personal Bests (longest round, most doubles in a round), reachable via the same X01/Cricket toggle. No undo support yet — a misthrow just becomes part of the round.
 
 ---
 
@@ -701,11 +703,17 @@ GET  /api/players/stat-bubbles?name=&mode=  All 15 stat bubble values for a play
      &gameType=cricket                      Pass gameType=cricket for Cricket's 6 stat bubbles
                                              (MPR, 9 Marks, Win Rate, Games Played, Darts
                                              Thrown, Darts/Won Leg) instead of X01's 15.
+     &gameType=doubles_practice             Pass gameType=doubles_practice for Doubles
+                                             Practice's 3 stat bubbles (Doubles %, Darts/Round,
+                                             Doubles Hit/Round) instead.
 GET  /api/players/personal-bests?name=&mode= Best leg average, fewest darts to finish,
                                              current win streak, and recent form.
      &gameType=cricket                      Pass gameType=cricket for Cricket's Personal Bests
                                              (best leg MPR, fewest darts to close, win streak,
                                              recent/lifetime MPR) instead.
+     &gameType=doubles_practice             Pass gameType=doubles_practice for Doubles
+                                             Practice's Personal Bests (longest round by darts,
+                                             most doubles hit in a round) instead.
 GET  /api/players/top-finishes?name=&mode=  Top 10 checkouts for a player
 GET  /api/players/checkout-route            Most-used routes for a specific checkout score
      ?name=&score=&mode=
@@ -723,7 +731,9 @@ GET  /api/players/avg-history               Metric history for the chart
               first3avg|first9avg|avg100plus|avg90minus|score140pct|180sperleg|
               dartsthrown|avgdartsperday|avgdartsperleg|pace|
               cricketmpr|cricket9marks|cricketwinpct|cricketgames|
-              cricketdartsthrown|cricketavgdartsperleg
+              cricketdartsthrown|cricketavgdartsperleg|
+              doublespracticepct|doublespracticedartsperround|
+              doublespracticehitsperround
      &period=today|week|month|year|all|custom
      &start=YYYY-MM-DD   (required when period=custom)
      &end=YYYY-MM-DD     (required when period=custom)

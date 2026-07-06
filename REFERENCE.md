@@ -274,6 +274,70 @@ carries no achievement or Daily Challenge integration, since X01's
 clutch/social badges and the Daily Challenge formats don't apply to Cricket.
 Cricket's stat vocabulary is documented in §3 ("Cricket stats").
 
+### Doubles Practice per-dart rules — `evaluateDartDoublesPractice(dart, targets)` (`frontend/scoring.js`)
+
+docs/game-modes-roadmap.md's "Doubles Practice" drill mode — genuinely
+different from every other game type: evaluated **per dart**, not per 3-dart
+visit. A session-ending event can fire on dart 1, 2, or 3 of what would
+otherwise be a visit, so `throwDart()` routes straight to
+`throwDartDoublesPractice()` (a dedicated `game.gameType==='doubles_practice'`
+branch, the same "hardcode a branch" precedent Cricket already established at
+every one of its own call sites) instead of batching into `game.darts` at all.
+Every dart commits immediately as its own 1-dart `turns` row (`addTurn()`
+already allows 1-3 darts per turn); there is no "Enter turn" step for this mode.
+
+Solo drill, no opponent, no legs/sets in the usual sense — a **round** is one
+continuous session from the first dart until it ends, tracked via
+`game.legNo` (reused as "round number," incremented by
+`startNextRoundDoublesPractice()` each time a round ends — a plain counter, not
+a real leg/set structure). `game.config.doubles` is the target set: an array of
+sectors, 1-20 plus 25 for double-bull, chosen at New Game time via the same
+multi-select-grid mechanism as Cricket's custom targets (no fixed count
+requirement, unlike Cricket's locked-to-7 rule).
+
+**"All simultaneously live"** (2026-07 decision) — every selected double is
+live at once; no rotation, no random pick. The player throws at whichever
+target they choose each dart:
+
+```js
+function evaluateDartDoublesPractice(dart, targets){
+  if(dart.isDouble){
+    if(targets.includes(dart.sector)) return { hit:true, ended:false, reason:null };
+    return { hit:false, ended:true, reason:'wrong-double' };
+  }
+  if(dart.sector !== 0 && targets.includes(dart.sector)){
+    return { hit:false, ended:true, reason:'so-close' };
+  }
+  return { hit:false, ended:false, reason:null };
+}
+```
+
+- A **double on a target number** is a hit — the round continues, and
+  `p.roundHits` increments.
+- A **double on a number NOT in the target set** is "wrong double" — ends the
+  round immediately.
+- A **single OR treble on a target number** is "so close" — landed on the
+  right number, just not through the double ring — and also ends the round.
+  The roadmap doc's own text only calls out "a single" explicitly, but a treble
+  on the target number is the identical miss (wrong ring, right number), so
+  it's treated the same way — a deliberate completeness decision, not a new
+  failure mode the roadmap didn't anticipate.
+- Anything else (a miss on an unrelated number, or a genuine total miss/sector
+  0) is a no-op: doesn't end the round, doesn't count as a hit. Real double-bull
+  scoring is inherited for free from `makeDartCore()`'s existing guard — an
+  attempted "treble bull" tap is silently downgraded to a single, scored as
+  "so close" if bull is a target, exactly like every other game type.
+
+**Persistence**: every dart is recorded via `DB.recordTurn()` with `scored:0`
+always (no numeric score concept in this mode), `bust: !!ev.ended` (repurposed
+as "this dart ended the round," the closest existing column to that meaning —
+`checkout`/`legWon` stay `false`/`0` always, since this mode has no win
+condition to signal). No undo support in this v1 (a known, documented gap —
+`game.darts` is never populated for this mode, so `undoDart()`/`undoLastTurn()`
+don't apply; a misthrow just becomes part of the round's own tally).
+
+Stat vocabulary is documented in §3 ("Doubles Practice stats").
+
 ---
 
 ## 3. Statistics — Every Formula
@@ -606,6 +670,54 @@ between X01's leaderboard set and Cricket's own:
 All four are fetched in the same upfront `Promise.all` `renderHome()` already
 uses for X01 (`homeData.cricket.h2h`/`.practice`/`.wins`) — no separate loading
 state or lazy-fetch-on-toggle.
+
+### Doubles Practice stats (`GAME_TYPES.doubles_practice.statDefs` / `DOUBLES_PRACTICE_STAT_DEFS`)
+
+A much smaller vocabulary than X01/Cricket's — no win condition, no legs/sets,
+so there's no "games played"/"win rate" concept here. A **hit** is a dart whose
+`multiplier=2` and whose `sector` is in that game's own `config.doubles` array
+— derived at query time via `DOUBLES_HIT_CASE` (`backend/db.js`), the same
+`json_each(g.config, '$.doubles')` join pattern `CRICKET_MARK_CASE` already
+uses against `config.numbers`, just with a simpler binary (0/1) result instead
+of a 1-3 mark value. Every query is scoped via
+`_scope({mode, gameType:'doubles_practice'})`.
+
+**Stat bubbles** (`getDoublesPracticeStatBubbles(name, mode)`):
+
+| Key | Label | Formula |
+|---|---|---|
+| `doublespracticepct` | Doubles % | `hits / dartsThrown * 100` — every dart ever thrown in this mode, lifetime |
+| `doublespracticedartsperround` | Darts / Round | `dartsThrown / roundsPlayed` — a round is one `(game_id, set_no, leg_no)` grouping |
+| `doublespracticehitsperround` | Doubles Hit / Round | `hits / roundsPlayed` |
+
+**Personal Bests** (`getDoublesPracticePersonalBests(name, mode)`) — deliberately
+just 2 fields, not the 5-field X01/Cricket shape: `bestRoundDarts` (the longest
+round ever, by dart count — "how long did the streak last") and
+`bestRoundHits` (the most doubles hit in a single round). No `winStreak`/
+`recentForm`/`lifetime` fields — those are all win- or leg-won-gated concepts
+(X01's `winStreak` needs H2H wins; Cricket's `recentFormMpr`/`lifetimeMpr` are
+gated on `leg_won=1`) that don't map onto a mode with no win condition at all —
+`doublespracticepct`'s lifetime figure above already answers "how am I doing
+overall" for this mode.
+
+**Metric history** (`getMetricHistory()`, all 3 keys above) — `doublespracticepct`
+buckets per-dart like X01's `avg`; `doublespracticedartsperround`/
+`doublespracticehitsperround` bucket per-round like Cricket's
+`cricketavgdartsperleg`, but with **no win-gating `HAVING` clause** — every
+round counts, however it ended, since a Doubles Practice round never "wins."
+
+**Player Profile UI**: a third button on the same X01/Cricket `.player-tabs`
+toggle (`playerGameType`) switches to this mode's `statDefs`/personal-bests
+shape/chart metrics, exactly the same mechanism Cricket's toggle already uses
+— no new toggle widget, no registry redesign. (This is the one
+`Doubles Practice`-specific slice of `docs/game-modes-roadmap.md`'s larger,
+still-open "generalizing per-game-type stats beyond a two-way toggle" backlog
+item — extending 3 existing `playerGameType==='cricket'` ternaries to a third
+branch, not the full N-game-type redesign that backlog item describes.)
+
+No Home page leaderboard set for this mode (unlike Cricket's 4) — solo drill,
+no H2H concept, so a global "leaderboard" doesn't obviously map onto it yet;
+left for whoever picks up a future pass if it turns out to be wanted.
 
 ---
 
@@ -1228,8 +1340,8 @@ already-migrated database is a safe no-op).
 | `created_at` / `completed_at` | `TEXT` | `completed_at` is `NULL` for in-progress/abandoned games |
 | `winner_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | |
 | `practice` | `INTEGER NOT NULL DEFAULT 0` | Explicit practice flag, set at creation |
-| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'` or `'cricket'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; the Cricket New Game flow passes `'cricket'`. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
-| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3) |
+| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, or `'doubles_practice'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; the Cricket/Doubles Practice New Game flows pass their own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
+| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3) |
 | `player_count` | `INTEGER` | **Frozen** participant count at creation (not a live subquery) — see §3's mode-scoping note |
 
 ### `game_players` (composite `PRIMARY KEY (game_id, player_id)`)
@@ -1247,7 +1359,7 @@ already-migrated database is a safe no-op).
 | `game_id` / `player_id` | `INTEGER NOT NULL, FK, ON DELETE CASCADE` | |
 | `set_no` / `leg_no` | `INTEGER NOT NULL` | Must be a positive integer (`addTurn()` rejects `0` or negative explicitly — an explicit `0` is validation-rejected, not silently treated as the "omitted" default of `1`) |
 | `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3). `addTurn()` rejects a non-numeric value outright rather than silently coercing it to `0` |
-| `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans. Cricket turns always write `bust=0, checkout=0` — cricket has neither concept |
+| `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans. Cricket turns always write `bust=0, checkout=0` — cricket has neither concept. Doubles Practice repurposes `bust` as "this dart ended the round" (so-close or wrong-double, §2) — the closest existing column to that meaning, since this mode has no bust/win concept of its own either; `checkout` stays `0` always |
 | `checkout_points` | `INTEGER` | Only set when `checkout=1` (X01 only) |
 | `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set only by Cricket's write path (`enterTurnCricket()`) — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |

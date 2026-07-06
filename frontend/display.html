@@ -573,6 +573,42 @@ const renderers = {
         </div>
       </div>`;
     }
+  },
+  // Doubles Practice (docs/game-modes-roadmap.md): solo drill, always exactly one
+  // player/card — no legSummary, no scorecard, so this always goes through the
+  // generic s.players.map(renderer.card) path below, same as X01.
+  doubles_practice: {
+    card(p, i, s, L){
+      const active = i===s.currentIndex;
+      const targets = Array.isArray(s.doublesTargets) ? s.doublesTargets : [];
+      const targetLabel = targets.map(n => n===25 ? 'Bull' : 'D'+n).join(', ');
+      const pct = p.roundDarts ? Math.round(p.roundHits/p.roundDarts*100) : 0;
+      let flash = '';
+      if(active && s.roundOver){
+        flash = `<div class="flash bust">${s.roundEndReason==='so-close' ? 'SO CLOSE' : 'WRONG DOUBLE'}</div>`;
+      }
+      let throwbox = '';
+      if(active && s.dpLastDart && !s.roundOver){
+        throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(s.dpLastDart.label)}">${esc(s.dpLastDart.label)}</div></div></div>`;
+      }
+      return `<div class="pcard ${active?'active':''}">
+        ${flash}
+        <div>
+          <div class="prow1">
+            <span class="pname">${escapeHtml(p.name)}</span>
+            ${active?'<span class="throwflag">▸ throwing</span>':''}
+          </div>
+          <div class="score">${num(p.roundHits)}</div>
+          <div class="dart-counts">
+            <div class="dart-counts-title">Practicing ${esc(targetLabel)}</div>
+            <div class="dart-count-row"><span class="dart-count-val">${pct}%</span><span class="dart-count-lbl">This round</span></div>
+            <div class="dart-count-row"><span class="dart-count-val">${num(p.roundDarts)}</span><span class="dart-count-lbl">Darts</span></div>
+          </div>
+        </div>
+        <div class="meta"><span class="standing">Round ${num(s.legNo)}</span></div>
+        ${throwbox}
+      </div>`;
+    }
   }
 };
 // Traditional chalkboard marks: blank (0), / (1), X (2), circled X (3+/closed).

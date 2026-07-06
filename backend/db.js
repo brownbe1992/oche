@@ -1453,6 +1453,65 @@ function getCricketPersonalBests(playerName, mode) {
   return { bestLegMpr, fewestDartsToClose, winStreak, recentFormMpr, lifetimeMpr };
 }
 
+/* ---------- Doubles Practice (docs/game-modes-roadmap.md) ----------
+   Solo drill mode: no opponent, no win/loss, no legs won — a "round" is one
+   turns.leg_no grouping (incremented client-side by startNextRoundDoublesPractice()
+   every time evaluateDartDoublesPractice() ends it), spanning as many single-dart
+   turns as were thrown before the ending dart. Every dart is its own turn
+   (addTurn() already allows 1-3 darts per turn); a "hit" is a double landed on one
+   of that game's own config.doubles targets — mirrors CRICKET_MARK_CASE's
+   json_each join against config, just against a different config key and with a
+   simpler 0/1 result (a mark can be worth up to 3; a "hit" is binary). */
+const DOUBLES_HIT_CASE = (d) => `CASE WHEN ${d}.multiplier=2 AND EXISTS (SELECT 1 FROM json_each(g.config,'$.doubles') je WHERE je.value=${d}.sector) THEN 1 ELSE 0 END`;
+
+function getDoublesPracticeStatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'doubles_practice' });
+
+  const dartsThrown = db.prepare(`SELECT COUNT(*) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+  const hits = db.prepare(`SELECT COALESCE(SUM(${DOUBLES_HIT_CASE('d')}),0) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+  const doublesPct = dartsThrown > 0 ? (hits / dartsThrown * 100) : null;
+
+  const roundsPlayed = db.prepare(`
+    SELECT COUNT(*) AS v FROM (
+      SELECT 1 FROM turns t JOIN games g ON g.id=t.game_id
+      WHERE t.player_id=? ${scope}
+      GROUP BY t.game_id, t.set_no, t.leg_no
+    )
+  `).get(p.id)?.v ?? 0;
+  const avgDartsPerRound = roundsPlayed > 0 ? (dartsThrown / roundsPlayed) : null;
+  const avgHitsPerRound = roundsPlayed > 0 ? (hits / roundsPlayed) : null;
+
+  return { doublesPct, avgDartsPerRound, avgHitsPerRound, roundsPlayed, dartsThrown };
+}
+
+// Personal Bests analog: "best round" records rather than X01/Cricket's win-
+// gated leg bests, since a Doubles Practice round never "wins" — every round
+// (however it ended) counts equally. No winStreak/recentForm/lifetime fields —
+// those are all win- or leg-gated concepts that don't map onto a mode with no
+// win condition; getDoublesPracticeStatBubbles()'s lifetime doublesPct already
+// covers the "how am I doing overall" question this mode has an equivalent for.
+function getDoublesPracticePersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'doubles_practice' });
+
+  const rounds = db.prepare(`
+    SELECT COUNT(d.id) AS darts, COALESCE(SUM(${DOUBLES_HIT_CASE('d')}),0) AS hits
+    FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+    WHERE t.player_id=? ${scope}
+    GROUP BY t.game_id, t.set_no, t.leg_no
+  `).all(p.id);
+
+  let bestRoundDarts = null, bestRoundHits = null;
+  for (const r of rounds) {
+    if (bestRoundDarts == null || r.darts > bestRoundDarts) bestRoundDarts = r.darts;
+    if (bestRoundHits == null || r.hits > bestRoundHits) bestRoundHits = r.hits;
+  }
+  return { bestRoundDarts, bestRoundHits };
+}
+
 function getMetricHistory(playerName, metric, period, opts = {}) {
   const p = getPlayer(playerName);
   if (!p) return [];
@@ -1460,6 +1519,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
   // Cricket's metric cases below scope through _scope() (docs/existing-app-prep-roadmap.md
   // item 1) instead of hand-rolling their own "AND g.game_type='cricket'" alongside modeWhere.
   const cricketScope = _scope({ mode: opts.mode, gameType: 'cricket' });
+  const doublesPracticeScope = _scope({ mode: opts.mode, gameType: 'doubles_practice' });
   const params = [p.id];
   let weightWhere = '';
   if (opts.dartWeight) {
@@ -1646,6 +1706,30 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.leg_won)>0
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
 
+    // ---- Doubles Practice metrics (docs/game-modes-roadmap.md) ----
+    case 'doublespracticepct':
+      return db.prepare(`SELECT bucket, CAST(SUM(hits) AS REAL)*100/NULLIF(SUM(dcount),0) AS value FROM (
+        SELECT ${T.fmt} AS bucket, ${DOUBLES_HIT_CASE('d')} AS hits, 1 AS dcount
+        FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+        WHERE t.player_id=? ${doublesPracticeScope} ${T.and} ${weightWhere}
+      ) GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'doublespracticedartsperround':
+      // No HAVING gate (unlike X01/Cricket's avgdartsperleg) — a Doubles Practice
+      // round never "wins", so every round, however it ended, counts equally.
+      return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(round_darts) AS value FROM (
+        SELECT MAX(t.created_at) AS leg_ts, COUNT(d.id) AS round_darts
+        FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+        WHERE t.player_id=? ${doublesPracticeScope} ${weightWhere}
+        GROUP BY t.game_id,t.set_no,t.leg_no
+      ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'doublespracticehitsperround':
+      return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(round_hits) AS value FROM (
+        SELECT MAX(t.created_at) AS leg_ts, SUM(${DOUBLES_HIT_CASE('d')}) AS round_hits
+        FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+        WHERE t.player_id=? ${doublesPracticeScope} ${weightWhere}
+        GROUP BY t.game_id,t.set_no,t.leg_no
+      ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
+
     default:
       return [];
   }
@@ -1666,7 +1750,7 @@ function _mf(mode) {
 // 'x01'/'cricket', server.js only uses a query param to pick which function to
 // call), and is whitelisted here regardless as a defense-in-depth measure
 // against string interpolation.
-const KNOWN_GAME_TYPES = ['x01', 'cricket'];
+const KNOWN_GAME_TYPES = ['x01', 'cricket', 'doubles_practice'];
 function _scope({ mode, gameType } = {}) {
   let sql = _mf(mode);
   if (gameType) {
@@ -2373,6 +2457,7 @@ module.exports = {
   getGhostCandidateLegs, getGhostLegScript,
   getCricketStatBubbles, getCricketNineMarksStats, getCricketPersonalBests,
   getCricketMprLeaderboard, getCricketWinLeaderboard, getCricketPerfectLegStats,
+  getDoublesPracticeStatBubbles, getDoublesPracticePersonalBests,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics,

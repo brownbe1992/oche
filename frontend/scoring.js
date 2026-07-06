@@ -68,6 +68,38 @@ function evaluateVisit(player, darts, game){
   };
 }
 
+/* ---------- Doubles Practice ----------
+   docs/game-modes-roadmap.md's "Doubles Practice" drill mode. Genuinely
+   different shape from every other game type: evaluated PER DART, not per
+   3-dart visit — a session-ending event can fire on dart 1, 2, or 3 of what
+   would otherwise be a visit, so this can't wait for a batched evaluateVisit()
+   call the way X01/Cricket do. game.config.doubles is the target set (an array
+   of sectors, 1-20 plus 25 for bull — a "double" of 25 means double-bull/50,
+   the same encoding makeDartCore() already uses).
+
+   "All simultaneously live" (2026-07 decision, docs/game-modes-roadmap.md):
+   every selected double is live at once — no rotation, no random pick. The
+   player throws at whichever target they choose each dart:
+   - a double on a target number is a hit (session continues)
+   - a double on a number NOT in the target set is "wrong double" (session ends)
+   - a single OR treble on a target number is "so close" — landed on the right
+     number, just not through the double ring (session ends). The roadmap doc's
+     own text only calls out "a single" explicitly, but a treble on the target
+     number is the identical miss (wrong ring, right number), so it's treated
+     the same way for a complete, unambiguous rule — not a new failure mode.
+   - anything else (a miss on an unrelated number, or a genuine total miss) is
+     a no-op: doesn't end the session, doesn't count as a hit. */
+function evaluateDartDoublesPractice(dart, targets){
+  if(dart.isDouble){
+    if(targets.includes(dart.sector)) return { hit:true, ended:false, reason:null };
+    return { hit:false, ended:true, reason:'wrong-double' };
+  }
+  if(dart.sector !== 0 && targets.includes(dart.sector)){
+    return { hit:false, ended:true, reason:'so-close' };
+  }
+  return { hit:false, ended:false, reason:null };
+}
+
 /* ---------- Cricket ----------
    Standard cricket only (v1 scope decision) — highest score wins, cut-throat
    deferred. A match's in-play numbers are locked to exactly 7 (classic:
@@ -193,6 +225,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     dartValue, dartLabel, makeDartCore,
     evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS,
+    evaluateDartDoublesPractice,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,
     CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH, challengeBadgeSignals,
   };

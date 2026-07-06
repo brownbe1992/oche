@@ -60,18 +60,28 @@
 > confirming the toggle switches cleanly in both H2H/Practice modes with zero
 > regression to the existing X01 leaderboards.
 >
-> **Not yet built**: Baseball (step 5). See "Suggested build order" below.
+> **Not yet built**: Baseball (step 5), Just Chuckin' It. See "Suggested build
+> order" below.
+>
+> **Doubles Practice is built (2026-07)** — the first of the two "Practice Drill
+> Modes" candidates below to ship. A genuinely different shape from every other
+> game type: no legs/sets/opponent/win-condition, and per-DART evaluation
+> instead of per-visit (`evaluateDartDoublesPractice()` in `frontend/scoring.js`,
+> a new `throwDartDoublesPractice()` bypassing the batched-3-dart pipeline
+> entirely). "All simultaneously live" was the resolved answer to this doc's own
+> open question about multi-double sessions. Ships with its own 3 stat bubbles
+> (Doubles %, Darts/Round, Doubles Hit/Round) and a 2-field Personal Bests
+> shape, reachable via a third button on the existing Player Profile X01/Cricket
+> toggle — see "Doubles Practice" below and REFERENCE.md §2/§3 for the full
+> design. Just Chuckin' It (freeform, unscored) remains not started.
 >
 > **New candidates logged (2026-07, not designed/built yet)**: a 101 starting score
-> for X01 (trivial — see "Quick addition" below); two new **practice drill modes**,
-> **Just Chuckin' It** (freeform, unscored) and **Doubles Practice** (aim at a
-> chosen double or doubles until a miss-the-double or wrong-double ends the
-> session) — see "Practice Drill Modes" below, a structurally different shape from
-> Cricket/Baseball since neither has a win condition, legs, or an opponent; and a
-> generalization of the existing Player Profile X01/Cricket toggle to work for an
-> arbitrary number of game types instead of two hardcoded ones — see "Generalizing
-> per-game-type stats" below, since every mode listed here needs its own place to
-> show its own stats.
+> for X01 (trivial — see "Quick addition" below); **Just Chuckin' It** (freeform,
+> unscored practice — see "Practice Drill Modes" below); and a generalization of
+> the existing Player Profile X01/Cricket/Doubles-Practice toggle to work for an
+> arbitrary number of game types instead of three hardcoded ones — see
+> "Generalizing per-game-type stats" below, since every mode listed here needs
+> its own place to show its own stats.
 
 ## Goal
 
@@ -342,20 +352,28 @@ opening-exchange scope — it does not happen automatically. So this really is j
 UI addition for 101 itself, plus (if wanted later) a 101-specific Personal Best
 framing — out of scope for the "add the button" version of this task.
 
-## Practice Drill Modes (new candidates, 2026-07 — design not started)
+## Practice Drill Modes (2026-07 — Doubles Practice built, Just Chuckin' It not started)
 
 Two new modes requested that are a genuinely different *shape* from every game type
 above: no legs, no sets, no win condition, no opponent, ever. X01/Cricket/Baseball are
 all **matches** — someone wins, someone (maybe) loses, `game.legsPerSet`/
 `setsPerGame`/`onLegWon()` all assume that shape exists. These two are **drills** —
 open-ended solo practice that ends when the player decides (or when a specific miss
-condition fires), with their own stat vocabulary, not a match outcome. Whether this
-needs its own top-level distinction (e.g. a `games.mode` value of `'match'` vs.
-`'drill'`, separate from `game_type`) or can be squeezed into the existing
-`practice`/`game_type` combination is the first open design question for whoever
-picks these up — the existing plugin interface (config schema, turn engine, win
-condition, scoring screen, stats) was designed around "eventually someone wins," and
-neither of these modes has that concept at all.
+condition fires), with their own stat vocabulary, not a match outcome.
+
+**Resolved for Doubles Practice** (built 2026-07, see its own section below): the
+`games.mode` `'match'`-vs-`'drill'` question this section originally raised turned
+out not to need a real answer — it shipped by reusing the existing `practice`/
+`game_type` combination as-is, repurposing `game.legNo` as a plain "round number"
+counter (incremented client-side, not a real leg/set structure) and `turns.bust` as
+"this dart ended the round" (the closest existing column to that meaning). The
+existing plugin interface (config schema, turn engine, scoring screen, stats) was
+designed around "eventually someone wins," and Doubles Practice routes around that
+entirely via its own dedicated `throwDartDoublesPractice()`/`renderGameDoublesPractice()`
+functions rather than forcing the win-condition-shaped machinery to fit — the same
+"hardcode a `gameType` branch at each call site" precedent Cricket already
+established, not a registry redesign. **Still an open question for Just Chuckin'
+It** — it may or may not want the same treatment; not decided.
 
 ### Just Chuckin' It
 
@@ -392,42 +410,56 @@ warm-up/muscle-memory reps without any game pressure at all.
   `game_type='chuckin'`" rather than new query design, once the exclusion concern
   above is handled.
 
-### Doubles Practice
+### Doubles Practice — ✅ Built (2026-07)
 
-Choose one specific double (or a set of doubles) to aim at; keep throwing until
-either the target double is hit (a success) or a genuine miss-condition ends the
-session. Misses (darts that land nowhere near — a total miss, the wire, an
-unrelated number) do **not** end anything — only two very specific outcomes do:
+Choose one or more doubles to aim at; keep throwing until a genuine
+miss-condition ends the round. Misses (darts that land nowhere near — a total
+miss, the wire, an unrelated number) do **not** end anything — only two very
+specific outcomes do:
 
-1. **Hitting a single on the target number** — landed on the right number, just not
-   through to the double ring. The "so close" failure mode.
+1. **Hitting a single (or treble) on a target number** — landed on the right
+   number, just not through to the double ring. The "so close" failure mode.
+   (The treble case wasn't explicitly called out when this doc was first
+   written — decided during implementation as the same miss, just a different
+   ring, not a new failure mode.)
 2. **Hitting a different double** — wildly off-target, a different kind of miss.
 
-Both are session-enders; a plain miss just means "try again." This is a real
-architectural wrinkle worth flagging: every other game type in this app evaluates
+Both are round-enders; a plain miss just means "keep throwing." This was a
+real architectural wrinkle — every other game type in this app evaluates
 **one full visit** (up to 3 darts) at a time via `evaluateVisit()`, then decides
 bust/win/continue. Doubles Practice's ending condition can fire on **any single
-dart**, including dart 1 or 2 of what would otherwise be a 3-dart visit — it needs
-per-dart evaluation, not per-visit, which none of the existing turn-engine plumbing
-does today.
+dart**, including dart 1 or 2 of what would otherwise be a 3-dart visit, so it
+needed genuine per-dart evaluation — a new `evaluateDartDoublesPractice(dart,
+targets)` in `frontend/scoring.js`, with `throwDart()` routing straight to a
+dedicated `throwDartDoublesPractice()` (the same "hardcode a `gameType`
+branch" precedent Cricket already established), bypassing the batched-3-dart
+pipeline entirely. Every dart commits immediately as its own 1-dart `turns`
+row — no "Enter turn" step for this mode. Full formula and schema details:
+REFERENCE.md §2 ("Doubles Practice per-dart rules") and §3 ("Doubles Practice
+stats").
 
-- **New `game_type` value** (e.g. `'doubles_practice'`). Config: which double(s) are
-  in play — a subset of D1–D20 plus double-bull (50), chosen at New Game setup, in
-  principle the same multi-select mechanism Cricket's custom-target picker already
-  built (`frontend/index.html`'s custom cricket number grid), reused for a different
-  target set (doubles only, not all 21 numbers).
-- **Open question**: if multiple doubles are selected, how does the session pick
-  which one is "live" at any moment — a fixed rotation (like Round the Clock: D1,
-  then D2, once D1 succeeds), a random pick each round, or does a wrong hit on *any*
-  selected double end the whole session regardless of which one was live? Not
-  specified — needs a decision before implementation.
-- **Stats requested**: **darts per round** (how many darts were thrown before the
-  session-ending miss/wrong-double, i.e. "how long did the streak last" — this
-  reads as a Personal-Best-shaped stat, the same "best/longest run" framing
-  `getPersonalBests()` already uses for `bestLegAvg`/`fewestDartsCheckout`), **doubles
-  hit per round** (successful hits within that same round), and **doubles %**
-  (doubles hit ÷ total darts thrown, the headline accuracy stat — this mode's
-  closest analog to 3-dart average, since there's no score to average).
+- **Resolved**: this is a new `game_type` value (`'doubles_practice'`).
+  `config: {doubles: [...]}` — a subset of D1–D20 plus double-bull (sector 25),
+  chosen at New Game setup via the same multi-select-grid mechanism as
+  Cricket's custom-target picker, with no fixed count requirement (unlike
+  Cricket's locked-to-7 rule).
+- **Resolved (was an open question)**: multi-double sessions use **"all
+  simultaneously live"** — every selected double stays live at once, no forced
+  rotation and no random pick. The player throws at whichever target they
+  choose each dart; a hit on any selected double counts, and the round only
+  ends on a so-close or wrong-double dart, regardless of which target that was.
+- **Built**: darts per round, doubles hit per round, and doubles % — all 3
+  shipped as `GAME_TYPES.doubles_practice.statDefs`/`DOUBLES_PRACTICE_STAT_DEFS`,
+  reachable via a third button on the existing Player Profile X01/Cricket
+  toggle. Personal Bests (`bestRoundDarts`, `bestRoundHits`) ship too, using a
+  deliberately smaller 2-field shape than X01/Cricket's 5 — this mode has no
+  win condition, so `winStreak`/`recentForm`/`lifetime` fields don't map onto it.
+- **Known gaps, deliberately deferred**: no undo support yet (every dart
+  commits immediately, so there's no staged "undo the last dart" state the way
+  X01/Cricket have) — a misthrow just becomes part of the round's own tally.
+  No Home page leaderboard set (Cricket has one; this mode doesn't yet — no
+  H2H concept to leaderboard against, left for a future pass if wanted). No
+  achievements/badges for this mode yet (none were requested for this pass).
 
 ## New Game / Scoring screen changes
 
@@ -496,15 +528,27 @@ X01-only, see its status note above).
 5. **Baseball** (or another variant) as the second proof that the plugin shape
    generalizes, not just fits Cricket specifically.
 6. **New, not designed yet**: generalize the Player Profile/Home page game-type
-   toggle beyond X01/Cricket (see "Generalizing per-game-type stats" above) — this
-   naturally comes before or alongside whichever of Baseball/101/the two Practice
-   Drill Modes ships next, since none of them have anywhere to show their stats
-   without it.
-7. **New, not designed yet**: 101 as a fourth X01 starting score (trivial, see
-   "Quick addition" above) and the two Practice Drill Modes (Just Chuckin' It,
-   Doubles Practice) — the drill modes need their own design pass first (the
-   match-vs-drill architectural question raised in their section), so treat these
-   as backlog alongside Baseball, not a drop-in next step.
+   toggle beyond X01/Cricket/Doubles Practice (see "Generalizing per-game-type
+   stats" above) — this naturally comes before or alongside whichever of
+   Baseball/101/Just Chuckin' It ships next, since none of them have anywhere
+   to show their stats without it. Doubles Practice's own toggle button was
+   added as a minimal 3rd-branch extension of the existing 2-way mechanism, not
+   this full generalization — that's still open.
+7. **✅ Done — Doubles Practice** — the first Practice Drill Mode built. Per-dart
+   evaluation (`evaluateDartDoublesPractice()`), "all simultaneously live"
+   multi-double sessions, its own 3 stat bubbles + 2-field Personal Bests, New
+   Game target picker, dedicated scoring screen and `display.html` renderer.
+   No undo support and no Home page leaderboard yet (deliberately deferred, see
+   its own section above). Verified with a committed scratch-DB unit suite
+   (pure evaluator + backend stat functions + an X01/Cricket isolation
+   regression check) and Playwright end-to-end (New Game setup, a full round
+   ending each of the two ways, the Player Profile toggle, and the live
+   scoreboard on both the controller and `/display`).
+8. **New, not designed yet**: 101 as a fourth X01 starting score (trivial, see
+   "Quick addition" above) and Just Chuckin' It — the latter needs its own
+   design pass first (the match-vs-drill architectural question raised in its
+   section is still open for it, even though Doubles Practice resolved it for
+   itself by just reusing `practice`/`game_type` as-is).
 
 ## Accessibility, security, and testing considerations
 
@@ -549,13 +593,15 @@ X01-only, see its status note above).
 - Priority after Cricket stats parity (build-order step 3): Baseball, or one of the
   other named variants?
 - **New**: do the Practice Drill Modes need their own `games.mode` distinction
-  (`'match'` vs. `'drill'`), or can they reuse `practice`/`game_type` as-is? See
-  "Practice Drill Modes" above — this needs deciding before either mode is built,
-  since it affects how much of the existing plugin interface (legs/sets/win
-  condition) they can skip vs. need to route around.
-- **New**: for Doubles Practice, how does a multi-double session pick which double
-  is "live" — fixed rotation, random, or does any wrong hit end the whole session
-  regardless of which target was live?
+  (`'match'` vs. `'drill'`), or can they reuse `practice`/`game_type` as-is?
+  **Resolved for Doubles Practice** (built 2026-07): no new distinction needed —
+  it reuses `practice`/`game_type` as-is, with `game.legNo` repurposed as a
+  plain "round number" counter and `turns.bust` repurposed as "this dart ended
+  the round" (see REFERENCE.md §2/§13). Still open for Just Chuckin' It,
+  whichever mode is built next.
+- **Resolved** (was: for Doubles Practice, how does a multi-double session pick
+  which double is "live"): **all simultaneously live**, no rotation, no random
+  pick — see the "Doubles Practice" section above.
 - **New**: does the per-game-type stats toggle (Player Profile/Home page)
   generalize by literally listing every `GAME_TYPES` entry, or only the ones a
   given player has actually played (so a player who's never touched Cricket

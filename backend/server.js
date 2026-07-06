@@ -239,6 +239,9 @@ const ALLOWED_LIVE_KEYS = new Set([
   'currentIndex', 'players', 'darts', 'checkout', 'status', 'message', 'achievement',
   'gameOneEighties', 'gameBigFish', 'gameBusts', 'legSummary', 'practice', 'done',
   'lastTurnEvent', 'matchResult', 'legStart', 'checkoutTarget', 'turnSeq', 'ts',
+  // Doubles Practice only (docs/game-modes-roadmap.md) — read by display.html's
+  // renderers.doubles_practice.card(), never by X01/Cricket.
+  'doublesTargets', 'dpLastDart', 'roundOver', 'roundEndReason',
 ]);
 const MAX_LIVE_BYTES = 65536;
 // Returns the sanitized state, or null if it's over the size cap (caller sends 413).
@@ -422,14 +425,18 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/players/personal-bests' && m === 'GET') {
       const mode = url.searchParams.get('mode');
       const name = url.searchParams.get('name');
-      return send(res, 200, url.searchParams.get('gameType') === 'cricket'
-        ? db.getCricketPersonalBests(name, mode) : db.getPersonalBests(name, mode));
+      const gameType = url.searchParams.get('gameType');
+      return send(res, 200, gameType === 'cricket' ? db.getCricketPersonalBests(name, mode)
+        : gameType === 'doubles_practice' ? db.getDoublesPracticePersonalBests(name, mode)
+        : db.getPersonalBests(name, mode));
     }
     if (p === '/api/players/stat-bubbles' && m === 'GET') {
       const mode = url.searchParams.get('mode');
       const name = url.searchParams.get('name');
-      return send(res, 200, url.searchParams.get('gameType') === 'cricket'
-        ? db.getCricketStatBubbles(name, mode) : db.getPlayerStatBubbles(name, mode));
+      const gameType = url.searchParams.get('gameType');
+      return send(res, 200, gameType === 'cricket' ? db.getCricketStatBubbles(name, mode)
+        : gameType === 'doubles_practice' ? db.getDoublesPracticeStatBubbles(name, mode)
+        : db.getPlayerStatBubbles(name, mode));
     }
     if (p === '/api/players/ghost-legs' && m === 'GET') {
       const limit = url.searchParams.get('limit');

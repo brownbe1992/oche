@@ -10,7 +10,8 @@ const path = require('path');
 
 const scoring = require(path.join('..', '..', 'frontend', 'scoring.js'));
 const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET_STANDARD_NUMBERS,
-  challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH } = scoring;
+  challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
+  evaluateDartDoublesPractice } = scoring;
 
 // Builds a real dart object the same way the app does (makeDart minus the
 // thrownAt timestamp), rather than hand-rolling a fake {value,isDouble,...} shape.
@@ -293,6 +294,57 @@ describe('Ghost Opponent replay (docs/ghost-opponent-roadmap.md)', () => {
 
 // Mirrors index.html's CHALLENGE_FORMATS constant (the 6 Daily Challenge formats).
 const CHALLENGE_FORMATS = ['checkout_sprint', 'speed_to_zero', 'bullseye_gauntlet', 'steady_hand', 'treble_run', 'long_game'];
+
+describe('evaluateDartDoublesPractice (per-dart drill mode, docs/game-modes-roadmap.md "Doubles Practice")', () => {
+  const targets = [16, 8, 4, 25]; // D16, D8, D4, double-bull
+
+  test('a double on a target number is a hit, session continues', () => {
+    assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(16, 2), targets), { hit: true, ended: false, reason: null });
+    assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(4, 2), targets), { hit: true, ended: false, reason: null });
+  });
+
+  test('double-bull (sector 25, mult 2) counts as a hit when bull is a target', () => {
+    assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(25, 2), targets), { hit: true, ended: false, reason: null });
+  });
+
+  test('a double on a number NOT in the target set is "wrong double" and ends the session', () => {
+    assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(20, 2), targets), { hit: false, ended: true, reason: 'wrong-double' });
+  });
+
+  test('a single on a target number is "so close" and ends the session', () => {
+    assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(16, 1), targets), { hit: false, ended: true, reason: 'so-close' });
+  });
+
+  test('a treble on a target number is also "so close" (right number, wrong ring) — not a separate failure mode', () => {
+    assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(8, 3), targets), { hit: false, ended: true, reason: 'so-close' });
+  });
+
+  test('single bull (sector 25, mult 1) on a target set including bull is "so close", not a hit', () => {
+    assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(25, 1), targets), { hit: false, ended: true, reason: 'so-close' });
+  });
+
+  test('a single/treble on an unrelated (non-target) number is a genuine miss: no hit, session does not end', () => {
+    assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(20, 1), targets), { hit: false, ended: false, reason: null });
+    assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(11, 3), targets), { hit: false, ended: false, reason: null });
+  });
+
+  test('a genuine total miss (sector 0) never ends the session or counts as a hit', () => {
+    assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(0, 1), targets), { hit: false, ended: false, reason: null });
+  });
+
+  test('an attempted treble-bull downgrades to a single bull (makeDartCore\'s existing guard) and is scored as "so close" when bull is targeted', () => {
+    const d = makeDartCore(25, 3);
+    assert.equal(d.mult, 1, 'treble bull is not a real outcome — makeDartCore downgrades it to a single');
+    assert.deepEqual(evaluateDartDoublesPractice(d, targets), { hit: false, ended: true, reason: 'so-close' });
+  });
+
+  test('a single target ([16]) still distinguishes hit vs so-close vs wrong-double correctly', () => {
+    const single = [16];
+    assert.equal(evaluateDartDoublesPractice(makeDartCore(16, 2), single).hit, true);
+    assert.equal(evaluateDartDoublesPractice(makeDartCore(16, 1), single).reason, 'so-close');
+    assert.equal(evaluateDartDoublesPractice(makeDartCore(8, 2), single).reason, 'wrong-double');
+  });
+});
 
 describe('challengeBadgeSignals (Daily Challenge badges: streak + format-completionist, docs/daily-challenge-roadmap.md)', () => {
   test('week badge fires only at exactly a 7-day streak, not before or after', () => {
