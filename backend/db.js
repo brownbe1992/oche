@@ -218,7 +218,15 @@ db.exec(`UPDATE games SET player_count = (SELECT COUNT(*) FROM game_players gp W
 db.exec(`UPDATE games SET config = json_object('startingScore', CAST(category AS INTEGER)) WHERE config IS NULL AND game_type = 'x01'`);
 
 const DEFAULT_PIN_LOCKOUT_THRESHOLD = 10;
-const DEFAULT_ADMIN_LOCKOUT_THRESHOLD = 5; // stricter than PIN lockout — compromising the admin account is more consequential
+// Admin login backoff (docs/archive/admin-login-backoff-roadmap.md) — replaces the old flat
+// admin_lockout_threshold+5-minute-lock scheme. The first few wrong passwords cost no
+// delay at all (real admins mistype); every failure past that grace window doubles the
+// wait, capped at the max, so a legitimate admin is never fully locked out — only ever
+// made to wait slightly longer before the next attempt — while brute-forcing the
+// password stays computationally infeasible after a dozen or so guesses.
+const DEFAULT_ADMIN_LOCKOUT_GRACE = 3;
+const DEFAULT_ADMIN_LOCKOUT_BASE_SECONDS = 2;
+const DEFAULT_ADMIN_LOCKOUT_MAX_SECONDS = 900; // 15 minutes
 const DEFAULT_BACKUP_RETENTION_DAYS = 7; // mirrors backup-lib.js's own fallback for when this setting is unset
 
 /* ---------- prepared statements ---------- */
@@ -2624,18 +2632,49 @@ function getDummyPwHash() {
   return _dummyPwHashPromise;
 }
 
-function adminLockoutThreshold() {
-  const v = Number(getSettings().admin_lockout_threshold);
-  return Number.isInteger(v) && v > 0 ? v : DEFAULT_ADMIN_LOCKOUT_THRESHOLD;
+function adminLockoutGraceAttempts() {
+  const v = Number(getSettings().admin_lockout_grace);
+  return Number.isInteger(v) && v >= 0 ? v : DEFAULT_ADMIN_LOCKOUT_GRACE;
+}
+function adminLockoutBaseSeconds() {
+  const v = Number(getSettings().admin_lockout_base_seconds);
+  return Number.isInteger(v) && v > 0 ? v : DEFAULT_ADMIN_LOCKOUT_BASE_SECONDS;
+}
+function adminLockoutMaxSeconds() {
+  const v = Number(getSettings().admin_lockout_max_seconds);
+  return Number.isInteger(v) && v > 0 ? v : DEFAULT_ADMIN_LOCKOUT_MAX_SECONDS;
+}
+
+// The core backoff formula (docs/archive/admin-login-backoff-roadmap.md): 0 (no lock at all)
+// while still inside the grace window, then doubling per consecutive failure past it,
+// capped at adminLockoutMaxSeconds(). `fails` is the post-increment consecutive-failure
+// count from q.bumpLoginFail. Worked example at the doc's own defaults (grace=3, base=2s):
+// fails 1-3 -> 0; 4 -> 2s; 5 -> 4s; 6 -> 8s; ... 13 -> capped at 900s.
+function adminLockoutDelayMs(fails) {
+  const grace = adminLockoutGraceAttempts();
+  if (fails <= grace) return 0;
+  const seconds = Math.min(adminLockoutMaxSeconds(), adminLockoutBaseSeconds() * Math.pow(2, fails - grace - 1));
+  return Math.round(seconds * 1000);
+}
+
+// Human-readable remaining-wait text for a 423 response body — mirrors the intent of
+// the rate-limiter's Retry-After header (SEC-3) without changing this endpoint's
+// existing plain-message error shape.
+function formatLockoutWait(ms) {
+  const totalSec = Math.max(1, Math.ceil(ms / 1000));
+  if (totalSec < 60) return `${totalSec} second${totalSec === 1 ? '' : 's'}`;
+  const min = Math.ceil(totalSec / 60);
+  return `about ${min} minute${min === 1 ? '' : 's'}`;
 }
 
 // SEC-3/SEC-8 note: per-account lockout (below) is deliberately left as-is — an
 // attacker who knows a username can still grief that one account into lockout. The
 // server-side rate limiter (server.js, rateLimit()) applied to this endpoint bounds
 // how fast any single IP can throw failed attempts at it, which is the primary
-// defense; account lockout on top of that remains for the case where different IPs
-// are used. Documented as an accepted tradeoff rather than "fixed" — a lockout system
-// with no failure limit at all would be worse.
+// defense. Unlike the old flat-lockout design, a real admin is never fully blocked —
+// see docs/archive/admin-login-backoff-roadmap.md: the account is only ever made to wait
+// slightly longer before its next attempt, never placed in a state where the correct
+// password stops working once the wait has elapsed.
 async function login(username, password) {
   username = String(username || '').trim();
   password = String(password || '');
@@ -2656,15 +2695,14 @@ async function login(username, password) {
   }
 
   if (locked) {
-    throw httpError(423, 'Too many failed login attempts. Try again in a few minutes.');
+    throw httpError(423, `Too many failed login attempts. Try again in ${formatLockoutWait(admin.login_locked_until - now)}.`);
   }
 
   if (!admin || !ok) {
     if (admin) {
       const fails = q.bumpLoginFail.get(admin.id).login_fail_count;
-      if (fails >= adminLockoutThreshold()) {
-        q.lockLogin.run(now + 5 * 60 * 1000, admin.id); // 5 minute lockout, same as PIN lockout
-      }
+      const delayMs = adminLockoutDelayMs(fails);
+      if (delayMs > 0) q.lockLogin.run(now + delayMs, admin.id);
     }
     throw httpError(401, INVALID_LOGIN);
   }
@@ -2687,23 +2725,22 @@ function logout(token) {
 // session) without creating a new session — used to gate restoring a database
 // backup (docs/backups-roadmap.md v2), which is at least as destructive as
 // "Wipe all data" and shouldn't rely on an active session alone. Reuses the same
-// login_fail_count/login_locked_until lockout columns and threshold as login()
-// itself, since this is a genuine additional password-guessing surface on the
-// same account, not a separate concern.
+// login_fail_count/login_locked_until lockout columns and progressive-backoff
+// formula as login() itself, since this is a genuine additional password-guessing
+// surface on the same account, not a separate concern.
 async function verifyAdminPassword(id, password) {
   const admin = q.adminByIdFull.get(Number(id));
   if (!admin) throw httpError(404, 'Admin not found');
   password = String(password || '');
   const now = Date.now();
   if (admin.login_locked_until && admin.login_locked_until > now) {
-    throw httpError(423, 'Too many failed login attempts. Try again in a few minutes.');
+    throw httpError(423, `Too many failed login attempts. Try again in ${formatLockoutWait(admin.login_locked_until - now)}.`);
   }
   const ok = await auth.verifySecret(password, admin.password_hash, admin.password_salt);
   if (!ok) {
     const fails = q.bumpLoginFail.get(admin.id).login_fail_count;
-    if (fails >= adminLockoutThreshold()) {
-      q.lockLogin.run(now + 5 * 60 * 1000, admin.id);
-    }
+    const delayMs = adminLockoutDelayMs(fails);
+    if (delayMs > 0) q.lockLogin.run(now + delayMs, admin.id);
     throw httpError(401, 'Incorrect password');
   }
   q.resetLoginFail.run(admin.id);
@@ -2896,7 +2933,7 @@ module.exports = {
   getCheckoutRoutes, getDartAnalytics,
   getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, fireHaWebhook,
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword, clearAdminLockout,
-  login, logout, getSessionAdmin, adminLockoutThreshold, verifyAdminPassword, backupRetentionDays,
+  login, logout, getSessionAdmin, adminLockoutDelayMs, verifyAdminPassword, backupRetentionDays,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,
   awardBadge, revokeBadge, getPlayerBadges, getH2HSummary, getAroundTheWorldProgress,
   startChallengeAttempt, completeChallengeAttempt, getChallengeStatus, getChallengeHistory, resetChallengeAttempt,

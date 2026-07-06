@@ -87,17 +87,62 @@ describe('login and lockout', () => {
     assert.equal(db.getSessionAdmin(token), null);
   });
 
-  test('adminLockoutThreshold defaults to 5', () => {
-    assert.equal(db.adminLockoutThreshold(), 5);
+  // docs/archive/admin-login-backoff-roadmap.md: adminLockoutDelayMs(fails) is the pure
+  // formula login()/verifyAdminPassword() both use — grace window costs no delay,
+  // then doubles per consecutive failure past it, capped at the configured max.
+  // Tested directly against the documented defaults (grace=3, base=2s, max=900s)
+  // and its own worked example (fails 1-3 -> 0; 4 -> 2s; 5 -> 4s; 6 -> 8s; 13 -> capped).
+  describe('adminLockoutDelayMs formula', () => {
+    test('the grace window (default 3) costs no delay at all', () => {
+      assert.equal(db.adminLockoutDelayMs(0), 0);
+      assert.equal(db.adminLockoutDelayMs(1), 0);
+      assert.equal(db.adminLockoutDelayMs(2), 0);
+      assert.equal(db.adminLockoutDelayMs(3), 0);
+    });
+
+    test('doubles per consecutive failure past the grace window', () => {
+      assert.equal(db.adminLockoutDelayMs(4), 2000);
+      assert.equal(db.adminLockoutDelayMs(5), 4000);
+      assert.equal(db.adminLockoutDelayMs(6), 8000);
+    });
+
+    test('is capped at the configured max (default 900s)', () => {
+      assert.equal(db.adminLockoutDelayMs(13), 900000); // 2*2^9=1024s, clamped to 900s
+      assert.equal(db.adminLockoutDelayMs(50), 900000);
+    });
+
+    test('respects overridden grace/base/max settings', () => {
+      db.updateSettings({ admin_lockout_grace: '0', admin_lockout_base_seconds: '1', admin_lockout_max_seconds: '5' });
+      assert.equal(db.adminLockoutDelayMs(1), 1000); // no grace at all now: 1st failure already delays
+      assert.equal(db.adminLockoutDelayMs(2), 2000);
+      assert.equal(db.adminLockoutDelayMs(10), 5000); // capped at the new 5s max
+      // Restore the defaults for every test after this one in the file.
+      db.updateSettings({ admin_lockout_grace: '3', admin_lockout_base_seconds: '2', admin_lockout_max_seconds: '900' });
+    });
   });
 
-  test('locks out after the default threshold of failed attempts, even with the right password', { timeout: 20000 }, async () => {
+  test('a real admin is never fully locked out: the grace window lets a few typos through with zero delay', async () => {
     await db.createAdmin('auth_lockout_user', 'therealpassword');
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 3; i++) {
       await expectStatus(db.login('auth_lockout_user', 'wrongpassword'), 401);
     }
-    // The 6th attempt is locked out (423) even with the CORRECT password now.
-    await expectStatus(db.login('auth_lockout_user', 'therealpassword'), 423);
+    // Still inside the grace window — the correct password works immediately, no wait.
+    const { username } = await db.login('auth_lockout_user', 'therealpassword');
+    assert.equal(username, 'auth_lockout_user');
+  });
+
+  test('a 4th consecutive failure schedules a real delay, and the correct password works again the instant it elapses', { timeout: 20000 }, async () => {
+    await db.createAdmin('auth_lockout_delay_user', 'therealpassword');
+    for (let i = 0; i < 4; i++) {
+      await expectStatus(db.login('auth_lockout_delay_user', 'wrongpassword'), 401);
+    }
+    // The 4th failure's 2s delay is active now — even the CORRECT password is rejected with 423.
+    await expectStatus(db.login('auth_lockout_delay_user', 'therealpassword'), 423);
+    await new Promise(r => setTimeout(r, 2100));
+    // Once the wait has elapsed, the correct password succeeds immediately — never
+    // permanently locked out, unlike the old flat-lockout design.
+    const { username } = await db.login('auth_lockout_delay_user', 'therealpassword');
+    assert.equal(username, 'auth_lockout_delay_user');
   });
 
   test('changing an admin\'s password revokes all of that admin\'s existing sessions', async () => {
@@ -133,16 +178,19 @@ describe('verifyAdminPassword (backup-restore re-auth)', () => {
     await expectStatus(db.verifyAdminPassword(999999, 'whatever'), 404);
   });
 
-  test('locks out after the default threshold of failed attempts, same as login()', { timeout: 20000 }, async () => {
+  test('shares the same progressive-backoff formula and columns as login()', { timeout: 20000 }, async () => {
     await db.createAdmin('auth_vap_lockout_user', 'therealpassword');
     const admin = db.listAdmins().find(a => a.username === 'auth_vap_lockout_user');
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 4; i++) {
       await expectStatus(db.verifyAdminPassword(admin.id, 'wrongpassword'), 401);
     }
-    // The 6th attempt is locked out (423) even with the CORRECT password now —
+    // The 4th failure's delay is active now (423) even with the CORRECT password —
     // and login() itself is locked out too, since they share the same columns.
     await expectStatus(db.verifyAdminPassword(admin.id, 'therealpassword'), 423);
     await expectStatus(db.login('auth_vap_lockout_user', 'therealpassword'), 423);
+    await new Promise(r => setTimeout(r, 2100));
+    const result = await db.verifyAdminPassword(admin.id, 'therealpassword');
+    assert.deepEqual(result, { ok: true });
   });
 });
 

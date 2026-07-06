@@ -623,16 +623,27 @@ const server = http.createServer(async (req, res) => {
         'ha_webhook_oneeighty','ha_webhook_bigfish','ha_webhook_bust','ha_webhook_ninedarter','ha_webhook_tonplus',
         'ha_webhook_momentcard',
         'ha_webhook_gamestart','ha_webhook_gameend','ha_webhook_setstart','ha_webhook_setend',
-        'ha_webhook_legstart','ha_webhook_legend','pin_lockout_threshold','admin_lockout_threshold','scoreboard_layout',
+        'ha_webhook_legstart','ha_webhook_legend','pin_lockout_threshold',
+        'admin_lockout_grace','admin_lockout_base_seconds','admin_lockout_max_seconds','scoreboard_layout',
         'default_scoring_input','card_tagline', ...boolKeys];
       const safe = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
       if ('pin_lockout_threshold' in safe) {
         const n = Number(safe.pin_lockout_threshold);
         if (!Number.isInteger(n) || n < 1 || n > 1000) return send(res, 400, { error: 'pin_lockout_threshold must be an integer between 1 and 1000' });
       }
-      if ('admin_lockout_threshold' in safe) {
-        const n = Number(safe.admin_lockout_threshold);
-        if (!Number.isInteger(n) || n < 1 || n > 1000) return send(res, 400, { error: 'admin_lockout_threshold must be an integer between 1 and 1000' });
+      // docs/archive/admin-login-backoff-roadmap.md: replaces the old flat admin_lockout_threshold
+      // with a doubling-delay formula's 3 tunables.
+      if ('admin_lockout_grace' in safe) {
+        const n = Number(safe.admin_lockout_grace);
+        if (!Number.isInteger(n) || n < 0 || n > 100) return send(res, 400, { error: 'admin_lockout_grace must be an integer between 0 and 100' });
+      }
+      if ('admin_lockout_base_seconds' in safe) {
+        const n = Number(safe.admin_lockout_base_seconds);
+        if (!Number.isInteger(n) || n < 1 || n > 3600) return send(res, 400, { error: 'admin_lockout_base_seconds must be an integer between 1 and 3600' });
+      }
+      if ('admin_lockout_max_seconds' in safe) {
+        const n = Number(safe.admin_lockout_max_seconds);
+        if (!Number.isInteger(n) || n < 1 || n > 86400) return send(res, 400, { error: 'admin_lockout_max_seconds must be an integer between 1 and 86400' });
       }
       if ('card_tagline' in safe && safe.card_tagline.length > 140) {
         return send(res, 400, { error: 'card_tagline must be 140 characters or fewer' });

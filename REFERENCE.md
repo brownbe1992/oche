@@ -1512,10 +1512,26 @@ enumerate valid usernames.
 
 ### Lockout mechanics
 
-- **Admin login**: default threshold 5 failed attempts (`DEFAULT_ADMIN_LOCKOUT_THRESHOLD`),
-  configurable 1–1000 in Settings. 5-minute lockout.
-- **Player PIN**: default threshold 10 (`DEFAULT_PIN_LOCKOUT_THRESHOLD`), same
-  configurable range, same 5-minute lockout.
+- **Admin login — progressive backoff** (`docs/archive/admin-login-backoff-roadmap.md`,
+  replaces the old flat threshold+5-minute-lock design): `login()`/
+  `verifyAdminPassword()` share one formula, `adminLockoutDelayMs(fails)`. The
+  first `admin_lockout_grace` consecutive failures (default 3) cost **no delay
+  at all** — real admins mistype passwords. Each failure past that grace window
+  doubles the wait — `base * 2^(fails - grace - 1)` seconds, `base` from
+  `admin_lockout_base_seconds` (default 2s) — capped at
+  `admin_lockout_max_seconds` (default 900s = 15 min). Worked example at the
+  defaults: fails 1-3 → no delay; 4 → 2s; 5 → 4s; 6 → 8s; ...13 → capped at
+  900s; every failure after that stays at the cap. **There is no point at which
+  a correct password stops working** — once `login_locked_until` has passed,
+  the very next attempt is evaluated normally; a correct password succeeds
+  immediately and resets the counter to zero. The 423 response includes the
+  computed remaining wait ("Try again in 4 seconds." / "...about 3 minutes.").
+  All three values are configurable in Settings → Admin accounts (grace 0–100,
+  base 1–3600s, max 1–86400s).
+- **Player PIN**: unchanged, a flat threshold (default 10,
+  `DEFAULT_PIN_LOCKOUT_THRESHOLD`), configurable 1–1000, 5-minute lockout —
+  deliberately out of scope for the admin-login backoff redesign above (see
+  that doc's own open questions).
 - Both counters use a `RETURNING`-based `UPDATE` (`bumpLoginFail`/`bumpPinFail`)
   so the lockout decision compares against the actual post-increment persisted
   count, not a value read before the async `verifySecret()` yield — this closes
@@ -1523,7 +1539,8 @@ enumerate valid usernames.
   and let an extra guess past the threshold.
 - Per-account lockout is a deliberate, accepted-tradeoff defense, not a
   complete one — an attacker who knows a username/player name can still grief
-  that one account into lockout. The per-IP rate limiter (below) is the primary
+  that one account into lockout (though now only into a growing wait, never a
+  full block — see above). The per-IP rate limiter (below) is the primary
   defense against a flood; lockout is the backstop for slow, distributed attempts.
 - **Recovery**: `backend/admin-recovery.js` (a standalone CLI, same precedent
   as `backend/backup.js` — direct filesystem/container access, no HTTP
@@ -1966,7 +1983,8 @@ already-migrated database is a safe no-op).
 `voice_enabled`, `voice_turn_score`, `voice_no_score`, `voice_checkout_req`,
 `voice_180`, `voice_bigfish`, `voice_match_progress`, `ha_url`,
 `ha_webhook_<event>` (×12, see §10), `pin_lockout_threshold`,
-`admin_lockout_threshold`, `scoreboard_layout`, `default_scoring_input`,
+`admin_lockout_grace`, `admin_lockout_base_seconds`, `admin_lockout_max_seconds`,
+`scoreboard_layout`, `default_scoring_input`,
 `card_tagline`.
 
 ### `admins`

@@ -30,8 +30,12 @@ function expectStatus(promise, status) {
   return assert.rejects(promise, (err) => err.status === status);
 }
 
+// docs/archive/admin-login-backoff-roadmap.md: the default grace window is 3 failures with
+// no delay at all; the 4th consecutive failure is the first one that actually
+// schedules a lock (a short one, but a real one) — so 4 wrong attempts is enough
+// to reach a locked-out state, not the old flat-lockout design's 5.
 async function lockOut(username, wrongPassword) {
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 4; i++) {
     await expectStatus(db.login(username, wrongPassword), 401);
   }
 }
@@ -102,7 +106,7 @@ describe('admin-recovery: listAdmins() lockout visibility', () => {
     await db.createAdmin('recovery_locked_user', 'correctpassword');
     await lockOut('recovery_locked_user', 'wrongpassword');
     const admin = db.listAdmins().find(a => a.username === 'recovery_locked_user');
-    assert.equal(admin.loginFailCount, 5);
+    assert.equal(admin.loginFailCount, 4);
     assert.ok(admin.loginLockedUntil > Date.now(), 'lockout should be in the future');
   });
 });

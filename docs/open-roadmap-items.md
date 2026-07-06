@@ -31,22 +31,21 @@
 | 5 | Mobile: distribution decision — App Store/Play Store listing vs. simpler sideload distribution (step 6) | `docs/mobile-app-roadmap.md` | Low-Medium |
 | 6 | Localize voice announcements beyond hardcoded English phrases | `docs/voice-announcements-i18n-roadmap.md` | Low-Medium |
 | 7 | Coaching insights (no new data collection needed; genuinely differentiating vs. competitors) | `docs/coaching-insights-roadmap.md` | Low-Medium |
-| 8 | Progressive admin-login lockout delay (replaces the flat 5-minute lockout, doubles per consecutive failure, never fully blocks a correct password) | `docs/admin-login-backoff-roadmap.md` | Low-Medium |
-| 9 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
-| 10 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
-| 11 | League mode (new tables, no new infra; complements tournament mode) | `docs/league-mode-roadmap.md` | Medium |
-| 12 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
-| 13 | Tournament mode (bracket generation, especially double-elim, is genuinely fiddly but fully self-contained) | `docs/tournament-mode-roadmap.md` | Medium-High |
-| 14 | Game Modes: Baseball — the second proof that the plugin shape generalizes beyond Cricket (step 5) | `docs/game-modes-roadmap.md` | High |
-| 15 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
-| 16 | Camera/ML scoring (genuinely novel CV engineering; only useful to whoever mounts the hardware) | `docs/camera-scoring-roadmap.md` | Extremely high |
-| 17 | Companion website (persistent hosted infrastructure — accounts, matchmaking, a cloud database — the one item requiring the project to operate long-term infra, not just be self-hostable) | `docs/companion-website-roadmap.md` | Extremely high |
+| 8 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
+| 9 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
+| 10 | League mode (new tables, no new infra; complements tournament mode) | `docs/league-mode-roadmap.md` | Medium |
+| 11 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
+| 12 | Tournament mode (bracket generation, especially double-elim, is genuinely fiddly but fully self-contained) | `docs/tournament-mode-roadmap.md` | Medium-High |
+| 13 | Game Modes: Baseball — the second proof that the plugin shape generalizes beyond Cricket (step 5) | `docs/game-modes-roadmap.md` | High |
+| 14 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
+| 15 | Camera/ML scoring (genuinely novel CV engineering; only useful to whoever mounts the hardware) | `docs/camera-scoring-roadmap.md` | Extremely high |
+| 16 | Companion website (persistent hosted infrastructure — accounts, matchmaking, a cloud database — the one item requiring the project to operate long-term infra, not just be self-hostable) | `docs/companion-website-roadmap.md` | Extremely high |
 
 ### Build-order notes that still apply
 
 - **Tournament mode before league mode** — not a hard dependency, but tournament mode is the more specifically-requested one, and building it first gives league mode's "games link into a context table" pattern (see `CLAUDE.md`) a real precedent to follow.
 - **Mobile app's steps are sequential as listed** (2 → 3 → 4 → 5 → 6 → 7) per `docs/mobile-app-roadmap.md`'s own suggested build order; its one prerequisite (the responsive CSS pass) is already done.
-- **The small, order-independent items** (rows 1, 6, 8, 12) can be interleaved anywhere, including ahead of the bigger lifts — good for sustaining momentum with essentially zero risk of creating rework later.
+- **The small, order-independent items** (rows 1, 6, 11) can be interleaved anywhere, including ahead of the bigger lifts — good for sustaining momentum with essentially zero risk of creating rework later.
 
 ---
 
@@ -62,6 +61,7 @@ therefore hasn't been archived yet) — see each source doc for full detail.
 | Admin login rate limiting + `OCHE_REQUIRE_AUTH` zero-trust default; SEC-7 webhook auth | `docs/security-hardening-roadmap.md` |
 | Full-database admin JSON export (Settings → Data Export); per-player export deliberately descoped | `docs/data-export-roadmap.md` |
 | Standalone `backend/admin-recovery.js` CLI (`list`/`reset-password`/`clear-lockout`) for a forgotten admin password or a stuck lockout via direct filesystem/container access; `changeAdminPassword()` now also clears lockout | `docs/archive/admin-account-recovery-roadmap.md` |
+| Progressive admin-login lockout delay — replaces the flat 5-minute lockout with a doubling-per-failure backoff past a grace window, never fully blocking a correct password | `docs/archive/admin-login-backoff-roadmap.md` |
 | Voice announcements (browser speech synthesis call-outs) | `docs/archive/voice-announcements-roadmap.md` |
 | Backups v1: `backend/backup.js` script, retention pruning, documented restore procedure | `docs/backups-roadmap.md` |
 | Backups v2: Settings → Backups (download/retention/on-demand backup/restore-from-existing/upload-restore) | `docs/backups-roadmap.md` |

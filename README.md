@@ -615,7 +615,7 @@ Settings itself has its own equivalent gate: opening it with no admin account ye
 - Any number of admin accounts can exist; there must always be at least one
 - Admins can access Settings, manage other admin accounts, set/reset player PINs, and perform destructive player actions (delete player, reset stats)
 - Sessions are stored server-side and tracked via a cookie — logging out clears the session
-- Repeated wrong login attempts lock the account out temporarily (default: 5 attempts, configurable 1–1000 in **Settings → Admin accounts**), mirroring the same protection player PINs already have
+- Repeated wrong login attempts trigger a progressive backoff, not a hard lockout: the first few (default 3, configurable) cost no delay at all, then each further consecutive failure doubles the wait (default base 2s, capped at 15 min) before the next attempt is allowed — a real admin is never permanently locked out, only ever made to wait a little longer, and the correct password always works the instant the wait has elapsed. Tune the grace/base/max values in **Settings → Admin accounts**
 
 ### Player PINs
 
@@ -639,7 +639,7 @@ Settings itself has its own equivalent gate: opening it with no admin account ye
 | Download/delete a backup, change retention, take an on-demand backup | Yes |
 | Restore the database from a backup | **Yes, plus your admin password again** — an active session alone isn't enough for this one |
 | Verify a player's PIN to add them to a game | No — public, but rate-limited by both the lockout threshold and a per-IP request budget |
-| Log in as an admin | No — public, but rate-limited by both its own lockout threshold and a per-IP request budget |
+| Log in as an admin | No — public, but rate-limited by both its own progressive backoff and a per-IP request budget |
 | View stats, watch the live scoreboard | No — always public, regardless of the setting below |
 | Add a player, start a game, record turns, everything else that writes | **Yes, by default** — see below |
 
@@ -912,7 +912,8 @@ The live state is held in memory only — it is never written to the database. O
 ```
 GET  /api/settings                          Retrieve all settings (key/value pairs)                [admin]
 PUT  /api/settings                          Update settings       { ha_url, ha_webhook_*,          [admin]
-                                               pin_lockout_threshold, admin_lockout_threshold,
+                                               pin_lockout_threshold, admin_lockout_grace,
+                                               admin_lockout_base_seconds, admin_lockout_max_seconds,
                                                collect_dart_timing, scoreboard_layout,
                                                default_scoring_input, … }
 GET  /api/settings/dart-timing              { enabled } — public, read by every device during play

@@ -879,8 +879,18 @@
           </p>
           <div id="admins-list" style="display:grid;gap:8px;margin-bottom:14px"></div>
           <button class="btn btn-ghost" onclick="askAddAdmin()">+ Add admin</button>
-          <label class="field" style="margin-top:14px">Lock out logins after this many wrong passwords</label>
-          <input type="number" id="admin-lockout-threshold" min="1" max="1000" style="width:120px">
+          <p style="font-size:12px;color:var(--muted);margin:14px 0 8px;line-height:1.6">
+            Admin login backoff: a wrong password never permanently locks this account out — each
+            consecutive failure past the grace attempts below schedules a longer wait (doubling
+            each time, up to the cap) before the next attempt is allowed. The correct password
+            always works immediately once that wait has passed.
+          </p>
+          <label class="field">Grace attempts (no delay at all)</label>
+          <input type="number" id="admin-lockout-grace" min="0" max="100" style="width:120px">
+          <label class="field" style="margin-top:14px">Base delay after grace, in seconds (doubles each failure)</label>
+          <input type="number" id="admin-lockout-base" min="1" max="3600" style="width:120px">
+          <label class="field" style="margin-top:14px">Maximum delay cap, in seconds</label>
+          <input type="number" id="admin-lockout-max" min="1" max="86400" style="width:120px">
         </div>
       </div>
 
@@ -2320,8 +2330,12 @@ async function renderSettings(){
     set('ha-wh-setend',     'ha_webhook_setend');
     const lockoutEl = document.getElementById('pin-lockout-threshold');
     if(lockoutEl) lockoutEl.value = cfg.pin_lockout_threshold || 10;
-    const adminLockoutEl = document.getElementById('admin-lockout-threshold');
-    if(adminLockoutEl) adminLockoutEl.value = cfg.admin_lockout_threshold || 5;
+    const adminLockoutGraceEl = document.getElementById('admin-lockout-grace');
+    if(adminLockoutGraceEl) adminLockoutGraceEl.value = cfg.admin_lockout_grace || 3; // '0' is a non-empty string, so this correctly keeps an explicit 0
+    const adminLockoutBaseEl = document.getElementById('admin-lockout-base');
+    if(adminLockoutBaseEl) adminLockoutBaseEl.value = cfg.admin_lockout_base_seconds || 2;
+    const adminLockoutMaxEl = document.getElementById('admin-lockout-max');
+    if(adminLockoutMaxEl) adminLockoutMaxEl.value = cfg.admin_lockout_max_seconds || 900;
     const dtEl = document.getElementById('collect-dart-timing');
     if(dtEl) dtEl.checked = cfg.collect_dart_timing === '1';
     const sbEl = document.getElementById('scoreboard-layout');
@@ -2624,8 +2638,12 @@ function saveSettings(){
     ha_webhook_gameend:      v('ha-wh-gameend'),
     ha_webhook_setstart:     v('ha-wh-setstart'),
     ha_webhook_setend:       v('ha-wh-setend'),
-    pin_lockout_threshold:   Number(v('pin-lockout-threshold')) || 10,
-    admin_lockout_threshold: Number(v('admin-lockout-threshold')) || 5,
+    pin_lockout_threshold:      Number(v('pin-lockout-threshold')) || 10,
+    // v('admin-lockout-grace') can legitimately be "0" (Number("0") is falsy), so this
+    // can't use the same `|| default` shorthand the other numeric fields above use.
+    admin_lockout_grace:        v('admin-lockout-grace') === '' ? 3 : Number(v('admin-lockout-grace')),
+    admin_lockout_base_seconds: Number(v('admin-lockout-base')) || 2,
+    admin_lockout_max_seconds:  Number(v('admin-lockout-max')) || 900,
     collect_dart_timing:     (document.getElementById('collect-dart-timing')||{}).checked ? '1' : '0',
     scoreboard_layout:       v('scoreboard-layout') || 'full',
     default_scoring_input:   v('default-scoring-input') || 'board',

@@ -20,7 +20,7 @@
 > one gap nothing else in this app currently covers: a forgotten admin password, with
 > no admin account able to log in to reset it and no email/SMS to fall back on.
 >
-> **Companion doc**: `docs/admin-login-backoff-roadmap.md` makes an admin *locked out
+> **Companion doc**: `docs/archive/admin-login-backoff-roadmap.md` makes an admin *locked out
 > by an attacker* less likely to matter (the real admin can always still get back in
 > given the correct password); this doc is the tool for the case that backoff design
 > can't fix at all — **the password itself is genuinely forgotten**, or every admin

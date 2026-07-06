@@ -376,13 +376,14 @@ account via a slow-and-steady or multi-IP attempt sequence); a scheme that only 
 an account after ITS OWN IP has separately been throttled would be a real behavior
 change with its own subtlety, out of scope for this pass.
 
-**Follow-up design work**: two companion roadmap docs pick up exactly this tradeoff
-and the "what if the real admin gets fully locked out" worry it implies —
-`docs/admin-login-backoff-roadmap.md` (replace the flat lockout with a progressive
-delay that never produces a hard, unconditional block; not started) and
-`docs/archive/admin-account-recovery-roadmap.md` (a CLI recovery script for the case
-a password is genuinely forgotten, which no lockout redesign fixes; now shipped).
-Either could be built without the other; see those docs for the full design.
+**Follow-up (now done):** two companion roadmap docs picked up exactly this
+tradeoff and the "what if the real admin gets fully locked out" worry it implies,
+both now shipped — `docs/archive/admin-login-backoff-roadmap.md` replaced the flat
+lockout with a progressive delay that doubles per consecutive failure past a
+grace window and never produces a hard, unconditional block (a correct password
+always works again once the wait elapses), and
+`docs/archive/admin-account-recovery-roadmap.md` added a CLI recovery script for
+the case a password is genuinely forgotten, which no lockout redesign fixes.
 
 **Where:** `db.js` `login()` and `verifyPlayerPin()` lock an account for 5 min after N
 failures.

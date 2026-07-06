@@ -2,13 +2,16 @@
 
 > Status: **✅ Concrete fix done** (v0.6.2). Admin login now has the same lockout
 > protection as player PINs — `login_fail_count`/`login_locked_until` columns on
-> `admins`, a configurable `admin_lockout_threshold` (default 5) in **Settings →
-> Admin accounts**, verified end-to-end (locks after the threshold, correct password
-> still rejected while locked, resets on success). The standing checklist for future
-> features (below) remains an ongoing practice, not a one-time task — like
-> `docs/accessibility-roadmap.md`, this is partly a bounded fix (now done) and partly
-> a standing practice for every future feature — see `CLAUDE.md` for the binding
-> cross-reference.
+> `admins`, a configurable lockout threshold in **Settings → Admin accounts**,
+> verified end-to-end (locks after the threshold, correct password still rejected
+> while locked, resets on success). **Superseded by `docs/archive/admin-login-backoff-roadmap.md`
+> (now done, 2026-07)**: the flat `admin_lockout_threshold` described below no longer
+> exists — the same two columns now back a progressive doubling-delay formula instead
+> of a hard lock, see that doc and `REFERENCE.md`'s lockout-mechanics section for the
+> current design. The standing checklist for future features (below) remains an
+> ongoing practice, not a one-time task — like `docs/accessibility-roadmap.md`, this
+> is partly a bounded fix (now done) and partly a standing practice for every future
+> feature — see `CLAUDE.md` for the binding cross-reference.
 >
 > **Size: Very low complexity** for the concrete fix below — it mirrors an
 > already-proven pattern in this exact codebase almost line-for-line, not new design.

@@ -1,6 +1,24 @@
 # Admin Login Backoff (Progressive Delay Instead of a Hard Lockout) — Design Roadmap
 
-> Status: **Not started.**
+> Status: **Done.** `login()`/`verifyAdminPassword()` now share one formula,
+> `adminLockoutDelayMs(fails)`: a configurable grace window (default 3
+> failures) costs no delay at all, then each further consecutive failure
+> doubles the wait (default base 2s), capped at a configurable max (default
+> 900s). `admin_lockout_threshold` is fully replaced (not kept alongside) by
+> three new settings — `admin_lockout_grace`, `admin_lockout_base_seconds`,
+> `admin_lockout_max_seconds` — configurable in **Settings → Admin accounts**,
+> validated the same bounded-integer way the old threshold was. The 423
+> response now states the actual remaining wait ("Try again in 4 seconds." /
+> "...about 3 minutes."). All three of this doc's own open questions are
+> resolved: a correct password during an active delay window still has to
+> wait it out (matches the anti-timing-oracle reasoning in "How this differs
+> from a hard lockout" below); the flat threshold is fully replaced, not kept
+> as a backstop; the three tunables are admin-configurable, following the
+> existing lockout-threshold precedent; `verifyPlayerPin()` is unchanged, out
+> of scope as this doc originally scoped. Committed coverage:
+> `backend/test/db.auth.test.js` (formula unit tests plus a real-time test
+> proving a correct password succeeds the instant the delay elapses) and
+> `backend/test/admin-recovery.test.js` (updated for the new backoff).
 >
 > **Size: Low-Medium complexity** — replaces one existing mechanism
 > (`login_locked_until` as a flat 5-minute lock after N failures) with a different
