@@ -149,6 +149,12 @@
 
   .btn{display:inline-block;border:none;border-radius:11px;padding:14px 20px;font:inherit;font-weight:700;
     font-size:15px;cursor:pointer;letter-spacing:.02em}
+  /* .btn's own display:inline-block is an author rule, so it beats the UA
+     stylesheet's [hidden]{display:none} at equal specificity regardless of
+     source order (author normal always wins over UA normal) — every .btn-classed
+     button that's conditionally given the hidden attribute (#enter-btn, #undo-btn,
+     #dp-next-round-btn) would otherwise stay visible no matter what. */
+  .btn[hidden]{display:none}
   .btn-primary{background:var(--gold);color:#1a160c}
   .btn-primary:hover{filter:brightness(1.06)}
   .btn-primary:disabled{opacity:.4;cursor:not-allowed}
