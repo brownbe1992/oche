@@ -1,11 +1,28 @@
 # Backups & Disaster Recovery — Design Roadmap
 
-> Status: **v1 ✅ Done** (v0.6.2). `backend/backup.js` implements exactly the design
-> below — verified end-to-end against a real seeded database: backup written,
-> restored from the `.db` file alone (no `-wal`/`-shm` needed), retention pruning
-> tested. README's "Backups" section documents the cron schedule and restore steps.
-> The Compose-profile sidecar remains an unbuilt stretch goal. **v2 (managing backups
-> from Settings — download/retention/restore/upload) is designed below, not started.**
+> Status: **v1 ✅ Done** (v0.6.2) and **v2 ✅ Done** (2026-07). `backend/backup.js`
+> implements exactly the v1 design below — verified end-to-end against a real seeded
+> database: backup written, restored from the `.db` file alone (no `-wal`/`-shm`
+> needed), retention pruning tested. README's "Backups" section documents the cron
+> schedule and restore steps. The Compose-profile sidecar remains an unbuilt stretch
+> goal.
+>
+> **v2 (managing backups from Settings)** shipped as designed: the shared
+> backup/restore mechanics moved into `backend/backup-lib.js` (used by both
+> `backup.js` and the new routes, so they can't drift apart); **Settings → Admin &
+> Danger Zone → Backups** lists/downloads/deletes backups, controls the retention
+> window (`settings.backup_retention_days`), and takes on-demand backups; restoring
+> — from an existing backup or an uploaded file — validates the file (header +
+> `PRAGMA integrity_check`) and re-verifies the admin's password independently of the
+> active session (`db.verifyAdminPassword`, reusing `login()`'s own lockout columns),
+> since it's at least as destructive as "Wipe all data." Every restore path stages the
+> file and returns an explicit "restart now" instruction rather than the server
+> restarting itself. Upload is a genuinely new streaming-to-disk endpoint (not
+> `readJson()`, which is capped at 1MB) with its own 500MB cap. Covered by 24 new
+> committed tests (`backup-lib.test.js`, `db.auth.test.js`'s
+> `verifyAdminPassword` block, `db.players-and-settings.test.js`'s
+> `backupRetentionDays` test, `server.backups.test.js`) and verified live via
+> Playwright for both restore paths.
 >
 > **Size: Low complexity.** A self-contained script plus documentation — no schema or
 > API changes to the running app, no new dependencies. **Usefulness: very high** — this
@@ -85,7 +102,7 @@ never been verified to actually work.
 
 ---
 
-## v2: Managing backups from Settings (not started)
+## v2: Managing backups from Settings (✅ Done, 2026-07)
 
 > **Size: Medium overall.** Download and retention management are Low/Low-Medium —
 > straightforward admin-gated routes on top of what already exists. Restore and
@@ -153,13 +170,15 @@ not just a nicety, since the next step is replacing the live database with it.
 4. Upload-to-restore: streaming upload endpoint + SQLite file validation, then reuses
    the same restore/restart flow from step 3.
 
-### Open questions for whoever picks this up (v2)
+### Open questions — resolved
 
-- Should restoring require re-entering the admin password (not just an already-active
-  session), given it's a stronger, less-reversible action than anything else currently
-  gated behind a simple confirm dialog?
-- Should the app attempt an automatic self-restart after staging a restore (cleaner
-  UX, but code triggering its own process exit mid-request is worth being deliberate
-  about), or always hand the admin an explicit "restart the container now" instruction?
-- Whether upload size needs an explicit cap distinct from the 1MB JSON-body limit, and
-  what a sane one is given realistic multi-year database sizes.
+- **Re-enter the admin password on restore?** Yes — `db.verifyAdminPassword(id,
+  password)` re-verifies it independently of the active session, reusing `login()`'s
+  own `login_fail_count`/`login_locked_until` lockout columns and threshold.
+- **Automatic self-restart, or a manual instruction?** Manual — every restore path
+  stages the file and returns `{ ok:true, message: 'Restore staged. Restart the
+  container/process now to apply it.' }` rather than the server exiting itself.
+- **Upload size cap?** 500MB — comfortably covers years of per-dart history for a
+  household while bounding worst-case disk use during a single upload. Enforced both
+  via an upfront `Content-Length` check (rejects an oversized declared upload before
+  reading any bytes) and a running byte count during the stream itself, as a backstop.

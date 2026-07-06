@@ -1172,6 +1172,46 @@
         </div>
       </div>
 
+      <!-- Backups -->
+      <div class="pp-section" style="margin-top:24px">
+        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('backups-body',this);loadBackups()">
+          Backups
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="backups-body" hidden>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+            A backup is a consistent, point-in-time snapshot of the whole database — every
+            player, game, and stat. Take one on demand below, or schedule <code>backend/backup.js</code>
+            via host cron (see README's "Backups" section). <b>Restoring replaces the entire live
+            database</b> and requires your admin password again, even though you're already logged
+            in — it stages the file and then asks you to restart the app; it doesn't restart itself.
+          </p>
+
+          <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+            <div>
+              <label class="field">Keep backups for (days)</label>
+              <input type="number" min="1" max="365" class="date-input" id="backup-retention-days" style="width:100px">
+            </div>
+            <button class="btn btn-ghost" onclick="saveBackupRetention()">Save</button>
+            <button class="btn btn-ghost" onclick="askBackupNow()" style="margin-left:auto">Back up now</button>
+          </div>
+
+          <div id="backups-list"><p class="pp-meta">Loading…</p></div>
+
+          <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--wire)">
+            <label class="field">Restore from an uploaded backup file</label>
+            <p style="font-size:12px;color:var(--muted);margin:4px 0 10px;line-height:1.6">
+              The file is checked (header + integrity check) before anything is replaced — an
+              unrelated or corrupt file is rejected with no changes made.
+            </p>
+            <input type="file" id="backup-upload-file" accept=".db">
+            <div style="margin-top:10px">
+              <button class="btn btn-ghost danger" onclick="askUploadRestore()">Upload &amp; restore</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Danger Zone -->
       <div class="pp-section" style="margin-top:24px">
         <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('danger-zone-body',this)">
@@ -2411,6 +2451,118 @@ function renderServerErrors(rows){
       <div style="color:var(--ink);margin-top:2px">${escapeHtml(r.message||'(no message)')}</div>
     </div>`;
   }).join('');
+}
+
+/* ---------- Settings -> Backups (docs/backups-roadmap.md v2) ---------- */
+function formatBytes(n){
+  if(n==null) return '—';
+  const units=['B','KB','MB','GB']; let v=Number(n), i=0;
+  while(v>=1024 && i<units.length-1){ v/=1024; i++; }
+  return (i===0?v:v.toFixed(1))+' '+units[i];
+}
+function loadBackups(){
+  const body = document.getElementById('backups-body');
+  if(!body || body.hidden) return;
+  const list = document.getElementById('backups-list');
+  if(!list) return;
+  list.innerHTML = '<p class="pp-meta">Loading…</p>';
+  Backend.get('/api/backups').then(r=>{
+    const input = document.getElementById('backup-retention-days');
+    if(input && document.activeElement !== input) input.value = r.retentionDays;
+    renderBackups(r.backups);
+  }).catch(()=>{ list.innerHTML = '<p class="pp-meta">Could not load backups.</p>'; });
+}
+function renderBackups(rows){
+  const list = document.getElementById('backups-list');
+  if(!list) return;
+  if(!rows || !rows.length){ list.innerHTML = '<p class="pp-meta">No backups yet — click "Back up now" to create one.</p>'; return; }
+  list.innerHTML = rows.map(r=>{
+    const date = new Date(r.mtime).toLocaleString();
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--wire);font-size:12px">
+      <div style="flex:1;min-width:0">
+        <div style="color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.name)}</div>
+        <div style="color:var(--muted)">${date} &nbsp;·&nbsp; ${formatBytes(r.size)}</div>
+      </div>
+      <button class="btn btn-ghost" style="padding:4px 10px" onclick="downloadBackup('${escapeJs(r.name)}')">Download</button>
+      <button class="btn btn-ghost" style="padding:4px 10px" onclick="askRestoreBackup('${escapeJs(r.name)}')">Restore</button>
+      <button class="btn btn-ghost danger" style="padding:4px 10px" onclick="askDeleteBackup('${escapeJs(r.name)}')">Delete</button>
+    </div>`;
+  }).join('');
+}
+function askBackupNow(){
+  Backend.send('POST','/api/backups')
+    .then(()=>loadBackups())
+    .catch(err=>uiAlert('Could not create backup: '+err.message));
+}
+function downloadBackup(name){
+  window.location = '/api/backups/download?name='+encodeURIComponent(name);
+}
+function askDeleteBackup(name){
+  uiConfirm(`Delete backup "${name}"? This can't be undone (the live database is unaffected either way).`, ()=>{
+    Backend.send('DELETE','/api/backups?name='+encodeURIComponent(name))
+      .then(()=>loadBackups())
+      .catch(err=>uiAlert('Could not delete backup: '+err.message));
+  });
+}
+function saveBackupRetention(){
+  const days = Number(document.getElementById('backup-retention-days').value);
+  if(!Number.isInteger(days) || days<1 || days>365){ uiAlert('Enter a whole number of days between 1 and 365.'); return; }
+  Backend.send('PUT','/api/backups/retention',{days})
+    .then(()=>loadBackups())
+    .catch(err=>uiAlert('Could not save retention: '+err.message));
+}
+
+// Restoring is at least as destructive as "Wipe all data" — it replaces the
+// entire live database — so it re-asks for the admin password even though the
+// browser already has an active session, rather than relying on the session
+// alone (docs/backups-roadmap.md v2's confirmed design decision).
+function uiPasswordConfirm(msg, onSubmit){
+  window.__modalPwSubmit = onSubmit;
+  document.getElementById('modal-body').innerHTML=
+    `<p class="modal-msg">${escapeHtml(msg)}</p>
+     <label class="field">Admin password</label>
+     <input type="password" id="modal-pw-input" autocomplete="current-password"
+            onkeydown="if(event.key==='Enter')document.getElementById('modal-pw-ok').click()">
+     <p id="modal-pw-error" hidden style="color:var(--bust);font-size:12px;margin-top:8px"></p>
+     <div class="modal-actions">
+       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+       <button class="btn btn-primary" id="modal-pw-ok"
+         onclick="(function(){var v=document.getElementById('modal-pw-input').value;var f=window.__modalPwSubmit;if(f)f(v);})()">Confirm</button>
+     </div>`;
+  document.getElementById('modal').hidden=false;
+  setTimeout(()=>{ const el=document.getElementById('modal-pw-input'); if(el) el.focus(); },0);
+}
+function modalPwError(msg){
+  const el = document.getElementById('modal-pw-error');
+  if(el){ el.textContent = msg; el.hidden = false; }
+}
+function askRestoreBackup(name){
+  uiPasswordConfirm(`Restore from "${name}"? This replaces every player, game, and stat in the live database with this backup's contents. You'll need to restart the app afterward for it to take effect.`, password=>{
+    Backend.send('POST','/api/backups/restore',{name,password})
+      .then(r=>{ closeModal(); uiAlert(r.message||'Restore staged.'); })
+      .catch(err=>modalPwError(err.message||'Could not restore'));
+  });
+}
+function askUploadRestore(){
+  const input = document.getElementById('backup-upload-file');
+  const file = input && input.files && input.files[0];
+  if(!file){ uiAlert('Choose a backup file first.'); return; }
+  uiPasswordConfirm(`Upload "${file.name}" and restore from it? This replaces every player, game, and stat in the live database. The file is validated before anything is replaced. You'll need to restart the app afterward for it to take effect.`, async password=>{
+    try{
+      const r = await fetch('/api/backups/upload-restore', {
+        method:'POST',
+        headers:{ 'X-Admin-Password': password },
+        body: file,
+      });
+      const j = await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(j.error || ('HTTP '+r.status));
+      closeModal();
+      input.value = '';
+      uiAlert(j.message || 'Restore staged.');
+    }catch(err){
+      modalPwError(err.message || 'Could not restore');
+    }
+  });
 }
 function toggleVoiceSubOptions(){
   const on = (document.getElementById('voice-enabled')||{}).checked;

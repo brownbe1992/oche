@@ -1486,6 +1486,7 @@ enumerate valid usernames.
 | `setup` | 10 / 60s per IP | `POST /api/setup` only |
 | `login` | 10 / 60s per IP | `POST /api/login` only |
 | `pin` | 10 / 60s per IP | `POST /api/players/verify-pin` only |
+| `backup-restore` | 10 / 60s per IP | `POST /api/backups/restore` and `POST /api/backups/upload-restore` only — both re-verify a password, the same password-guessing-surface reasoning as `login` |
 
 Each bucket is separate specifically so gameplay PIN checks never get throttled
 by unrelated setup/login traffic (they were briefly merged into one shared
@@ -1682,16 +1683,77 @@ gaps so much as open design calls for whoever picks them up next.
 
 ## 12. Backups
 
-`node backend/backup.js` — uses `node:sqlite`'s built-in `backup()` API (not a
-plain file copy), since the database runs in WAL mode and recent writes can
-still be sitting in a separate `-wal` file that a naive `cp` would miss.
-Writes a timestamped snapshot to `<data-dir>/backups/darts-<timestamp>.db`,
-then prunes anything older than `BACKUP_RETENTION_DAYS` (default 7). No new
-dependencies. Intended to be run via host cron (see README for the recommended
-crontab line).
+### The mechanics (`backend/backup-lib.js`)
 
-**To restore**: stop the app, replace `darts.db` with the chosen backup file,
-remove any stale `darts.db-wal`/`darts.db-shm` sitting next to it, restart.
+Shared by both call sites below — the exact same WAL-aware snapshot/restore
+code, so the cron script and the Settings UI never drift apart. Uses
+`node:sqlite`'s built-in `backup()` API (not a plain file copy), since the
+database runs in WAL mode and recent writes can still be sitting in a separate
+`-wal` file that a naive `cp` would miss. Writes a timestamped snapshot to
+`<data-dir>/backups/darts-<timestamp>.db`, then prunes anything older than the
+retention window (`settings.backup_retention_days`, default 7 — falls back to
+the `BACKUP_RETENTION_DAYS` env var, then the hardcoded default, if that
+setting has never been touched). No new dependencies.
+
+A restore candidate — whether an existing backup on disk or an uploaded file —
+is always validated before it's used: the 16-byte SQLite file-header magic
+string, then a real read-only open and `PRAGMA integrity_check`. `stageRestore()`
+clears any stale `-wal`/`-shm` files next to the live database and copies the
+validated file over it. **This does not make the already-running server pick it
+up** — on Linux, an open file handle keeps reading/writing the old inode until
+the process reopens the file — so every restore path ends with an explicit
+"restart the container/process now" instruction rather than the server
+restarting itself.
+
+### `node backend/backup.js` — the cron script
+
+Run manually or on a schedule via host cron (see README for the recommended
+crontab line). Writes one snapshot per run via the shared library above, then
+prunes. Env vars: `DARTS_DB` (same var the server uses), `BACKUP_DIR` (default:
+a `backups` folder next to the database), `BACKUP_RETENTION_DAYS` (default 7,
+overridden by the Settings UI's retention control once one is set).
+
+### Settings → Backups (admin-gated UI + API)
+
+Lets an admin manage backups from the app instead of needing shell access to
+the host — download existing backups, change the retention window, take an
+on-demand backup, and restore from either an existing backup or an uploaded
+file.
+
+- **List/download/delete** — `GET /api/backups` → `{ backups:[{name,size,mtime}],
+  retentionDays }`; `GET /api/backups/download?name=...` streams the file;
+  `DELETE /api/backups?name=...`. Every `name` is validated against the exact
+  filename pattern `createBackup()` produces before touching the filesystem, so
+  a crafted name can't traverse outside the backups directory.
+- **On-demand backup** — `POST /api/backups` takes a snapshot right now, so an
+  admin can generate (and then download) one without host cron already being
+  configured.
+- **Retention** — `PUT /api/backups/retention` `{ days }` (1-365) writes
+  `settings.backup_retention_days` and immediately re-prunes with the new value,
+  rather than waiting for the next cron run.
+- **Restore from an existing backup** — `POST /api/backups/restore`
+  `{ name, password }`. Restoring replaces the *entire* live database, so it's
+  treated as at least as destructive as "Wipe all data" (Settings → Danger
+  Zone): it re-verifies the admin's password via `db.verifyAdminPassword(id,
+  password)` even though the browser already has an active session, rather than
+  relying on the session alone. That function reuses `login()`'s exact
+  `login_fail_count`/`login_locked_until` lockout columns and threshold — a
+  genuine additional password-guessing surface on the same account, not a
+  separate concern.
+- **Restore from an uploaded file** — `POST /api/backups/upload-restore`. The
+  body is the raw `.db` file (not JSON), streamed straight to a temp file on
+  disk rather than buffered — every other write endpoint goes through
+  `readJson()`'s 1MB cap, which a real backup file will exceed as data grows
+  over years. Capped at 500MB (`Content-Length` is checked up front so an
+  oversized declared upload is rejected before any bytes are read; the actual
+  byte count is also checked mid-stream as a backstop). Since the body isn't
+  JSON, the admin's password travels in an `X-Admin-Password` request header
+  instead, verified *before* the upload starts streaming so a bad password
+  doesn't cost the bandwidth of a large rejected upload.
+- All of the above are gated by `requireAdmin` unconditionally (not
+  `requireWrite`) — managing or restoring the whole database is at least as
+  sensitive as `/api/wipe-all` and `/api/admins`, which use the same
+  unconditional gate regardless of `OCHE_REQUIRE_AUTH`.
 
 ---
 

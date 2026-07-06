@@ -110,6 +110,42 @@ describe('login and lockout', () => {
   });
 });
 
+// verifyAdminPassword (docs/backups-roadmap.md v2) re-verifies an already-known
+// admin's password without creating a session — gates restoring a database
+// backup, which is at least as destructive as "Wipe all data" and shouldn't rely
+// on an active session alone. It deliberately reuses login()'s exact
+// login_fail_count/login_locked_until columns and threshold, since this is a
+// genuine additional password-guessing surface on the same account.
+describe('verifyAdminPassword (backup-restore re-auth)', () => {
+  test('correct password succeeds without creating a session', async () => {
+    await db.createAdmin('auth_vap_user', 'therealpassword');
+    const admin = db.listAdmins().find(a => a.username === 'auth_vap_user');
+    const result = await db.verifyAdminPassword(admin.id, 'therealpassword');
+    assert.deepEqual(result, { ok: true });
+  });
+
+  test('wrong password is rejected with a generic message', async () => {
+    const admin = db.listAdmins().find(a => a.username === 'auth_vap_user');
+    await expectStatus(db.verifyAdminPassword(admin.id, 'wrongpassword'), 401);
+  });
+
+  test('an unknown admin id is rejected with 404', async () => {
+    await expectStatus(db.verifyAdminPassword(999999, 'whatever'), 404);
+  });
+
+  test('locks out after the default threshold of failed attempts, same as login()', { timeout: 20000 }, async () => {
+    await db.createAdmin('auth_vap_lockout_user', 'therealpassword');
+    const admin = db.listAdmins().find(a => a.username === 'auth_vap_lockout_user');
+    for (let i = 0; i < 5; i++) {
+      await expectStatus(db.verifyAdminPassword(admin.id, 'wrongpassword'), 401);
+    }
+    // The 6th attempt is locked out (423) even with the CORRECT password now —
+    // and login() itself is locked out too, since they share the same columns.
+    await expectStatus(db.verifyAdminPassword(admin.id, 'therealpassword'), 423);
+    await expectStatus(db.login('auth_vap_lockout_user', 'therealpassword'), 423);
+  });
+});
+
 describe('player PIN protection', () => {
   test('a player with no PIN set can be verified by anyone', async () => {
     db.addPlayer('auth_pin_nopin');

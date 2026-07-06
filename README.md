@@ -511,7 +511,7 @@ Plus global leaderboards for 180s, Big Fish, and nine-dart finishes, each filter
 
 ### Settings
 
-The Settings page (accessible from the top navigation) holds app-wide configuration, grouped into four tabs: **Account & Access**, **Gameplay & Display**, **Integrations**, and **Admin & Danger Zone**. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, **Daily Challenge**, **Server Errors**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
+The Settings page (accessible from the top navigation) holds app-wide configuration, grouped into four tabs: **Account & Access**, **Gameplay & Display**, **Integrations**, and **Admin & Danger Zone**. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, **Daily Challenge**, **Server Errors**, **Backups**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
 
 Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accounts--player-pins)) — until an admin account exists, the page offers to create the first one.
 
@@ -632,6 +632,8 @@ Settings itself has its own equivalent gate: opening it with no admin account ye
 | Set or remove a player's PIN | Yes |
 | Add/remove admin accounts | Yes |
 | Change Home Assistant / webhook / scoreboard-layout / default-input settings | Yes |
+| Download/delete a backup, change retention, take an on-demand backup | Yes |
+| Restore the database from a backup | **Yes, plus your admin password again** — an active session alone isn't enough for this one |
 | Verify a player's PIN to add them to a game | No — public, but rate-limited by both the lockout threshold and a per-IP request budget |
 | Log in as an admin | No — public, but rate-limited by both its own lockout threshold and a per-IP request budget |
 | View stats, watch the live scoreboard | No — always public, regardless of the setting below |
@@ -927,6 +929,21 @@ POST /api/reset                             Wipe all games and turns (players ke
 POST /api/wipe-all                          Wipe all players, games, and stats (admins kept)      [admin]
 ```
 
+### Backups
+
+```
+GET  /api/backups                           List backups + current retention -> {backups,retentionDays} [admin]
+POST /api/backups                           Take an on-demand backup now -> {ok,backup}                  [admin]
+PUT  /api/backups/retention                 {days} -> {ok,retentionDays,pruned}                          [admin]
+GET  /api/backups/download                  (?name=...) streams the backup file                          [admin]
+DEL  /api/backups                           (?name=...) delete one backup                                [admin]
+POST /api/backups/restore                   {name,password} restore from an existing backup;             [admin]
+                                             re-verifies the admin password independent of the session
+POST /api/backups/upload-restore            Raw .db file body, X-Admin-Password header; validates        [admin]
+                                             the file (header + integrity check) before staging it,
+                                             same restore as above. Capped at 500MB.
+```
+
 ---
 
 ## Architecture
@@ -938,7 +955,8 @@ oche/
 │   ├── db.js        SQLite schema, migrations, and all stat queries
 │   ├── auth.js      Password/PIN hashing, session tokens, cookie helpers
 │   ├── netguard.js  Outbound-request egress guard (blocks loopback/link-local)
-│   └── backup.js    Stand-alone WAL-safe backup script (see Backups)
+│   ├── backup.js    Stand-alone WAL-safe backup script (see Backups)
+│   └── backup-lib.js  Shared backup/restore mechanics (used by backup.js and server.js)
 ├── frontend/
 │   ├── index.html    The entire app — one self-contained HTML file
 │   └── display.html  Read-only live scoreboard for a second screen
@@ -1005,3 +1023,12 @@ for a nightly backup at 3am:
 **To restore:** stop the container, replace `darts_data/darts.db` with the chosen
 backup file (and remove any stale `darts.db-wal`/`darts.db-shm` files sitting next to
 it), then restart the container.
+
+**Or manage it all from the app:** **Settings → Admin & Danger Zone → Backups** lets
+you download existing backups, change the retention window, take an on-demand backup
+(useful if you haven't set up host cron yet), and restore from either an existing
+backup or an uploaded `.db` file — no shell access needed. An uploaded file is checked
+(header + integrity check) before anything is replaced, and restoring always asks for
+your admin password again, even though you're already logged in, since it replaces the
+entire database. Either restore path stages the file and then tells you to restart the
+container — it doesn't restart itself, so nothing takes effect until you do.

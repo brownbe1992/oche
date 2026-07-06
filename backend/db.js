@@ -219,6 +219,7 @@ db.exec(`UPDATE games SET config = json_object('startingScore', CAST(category AS
 
 const DEFAULT_PIN_LOCKOUT_THRESHOLD = 10;
 const DEFAULT_ADMIN_LOCKOUT_THRESHOLD = 5; // stricter than PIN lockout — compromising the admin account is more consequential
+const DEFAULT_BACKUP_RETENTION_DAYS = 7; // mirrors backup-lib.js's own fallback for when this setting is unset
 
 /* ---------- prepared statements ---------- */
 const q = {
@@ -253,6 +254,10 @@ const q = {
   insertAdmin    : db.prepare('INSERT INTO admins (username, password_hash, password_salt) VALUES (?, ?, ?)'),
   adminByUsername: db.prepare('SELECT id, username, password_hash, password_salt, login_fail_count, login_locked_until FROM admins WHERE username = ? COLLATE NOCASE'),
   adminById      : db.prepare('SELECT id, username FROM admins WHERE id = ?'),
+  // Wider shape than adminById — includes the fields needed to actually re-verify a
+  // password (verifyAdminPassword, for the backup-restore re-auth gate) rather than
+  // just confirming the id exists.
+  adminByIdFull  : db.prepare('SELECT id, username, password_hash, password_salt, login_fail_count, login_locked_until FROM admins WHERE id = ?'),
   listAdmins     : db.prepare('SELECT id, username, created_at FROM admins ORDER BY username COLLATE NOCASE'),
   countAdmins    : db.prepare('SELECT COUNT(*) AS n FROM admins'),
   deleteAdmin    : db.prepare('DELETE FROM admins WHERE id = ?'),
@@ -2604,6 +2609,38 @@ function logout(token) {
   return { ok: true };
 }
 
+// Re-verifies the password of an *already-known* admin (by id, from the current
+// session) without creating a new session — used to gate restoring a database
+// backup (docs/backups-roadmap.md v2), which is at least as destructive as
+// "Wipe all data" and shouldn't rely on an active session alone. Reuses the same
+// login_fail_count/login_locked_until lockout columns and threshold as login()
+// itself, since this is a genuine additional password-guessing surface on the
+// same account, not a separate concern.
+async function verifyAdminPassword(id, password) {
+  const admin = q.adminByIdFull.get(Number(id));
+  if (!admin) throw httpError(404, 'Admin not found');
+  password = String(password || '');
+  const now = Date.now();
+  if (admin.login_locked_until && admin.login_locked_until > now) {
+    throw httpError(423, 'Too many failed login attempts. Try again in a few minutes.');
+  }
+  const ok = await auth.verifySecret(password, admin.password_hash, admin.password_salt);
+  if (!ok) {
+    const fails = q.bumpLoginFail.get(admin.id).login_fail_count;
+    if (fails >= adminLockoutThreshold()) {
+      q.lockLogin.run(now + 5 * 60 * 1000, admin.id);
+    }
+    throw httpError(401, 'Incorrect password');
+  }
+  q.resetLoginFail.run(admin.id);
+  return { ok: true };
+}
+
+function backupRetentionDays() {
+  const v = Number(getSettings().backup_retention_days);
+  return Number.isInteger(v) && v > 0 ? v : DEFAULT_BACKUP_RETENTION_DAYS;
+}
+
 function getSessionAdmin(token) {
   if (!token) return null;
   const row = q.sessionByHash.get(auth.hashToken(token));
@@ -2785,7 +2822,7 @@ module.exports = {
   getCheckoutRoutes, getDartAnalytics,
   getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, fireHaWebhook,
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword,
-  login, logout, getSessionAdmin, adminLockoutThreshold,
+  login, logout, getSessionAdmin, adminLockoutThreshold, verifyAdminPassword, backupRetentionDays,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,
   awardBadge, revokeBadge, getPlayerBadges, getH2HSummary, getAroundTheWorldProgress,
   startChallengeAttempt, completeChallengeAttempt, getChallengeStatus, getChallengeHistory, resetChallengeAttempt,

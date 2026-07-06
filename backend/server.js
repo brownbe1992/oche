@@ -50,6 +50,21 @@
        GET  /api/challenges/history -> (?player=...&date=YYYY-MM-DD) -> { played, completed, currentStreak, longestStreak, bestByFormat, attempts } (public)
        DEL  /api/challenges/attempt -> (?player=...&date=YYYY-MM-DD) reset an attempt + wipe its recorded stats [admin]
 
+       GET  /api/backups           -> { backups:[{name,size,mtime}], retentionDays } [admin]
+       POST /api/backups           -> take an on-demand backup now -> { ok, backup } [admin]
+       PUT  /api/backups/retention -> { days } -> { ok, retentionDays, pruned } [admin]
+       GET  /api/backups/download  -> (?name=...) streams the backup file [admin]
+       DEL  /api/backups           -> (?name=...) delete one backup [admin]
+       POST /api/backups/restore   -> { name, password } restore from an existing backup;
+                                       re-verifies the admin's password (independent of the
+                                       active session) since this replaces the live database.
+                                       Stages the file and returns an explicit "restart now"
+                                       instruction — it does not restart the process itself. [admin]
+       POST /api/backups/upload-restore -> raw .db file body, X-Admin-Password header ->
+                                       validates it's a genuine, non-corrupt SQLite file
+                                       (header + PRAGMA integrity_check) before staging the
+                                       same restore as above. Capped at 500MB. [admin]
+
    Routes marked [admin] require a logged-in admin session (cookie set by /api/login).
    Set COOKIE_SECURE=true when serving over HTTPS (e.g. behind a reverse proxy) so the
    session cookie gets the Secure flag; leave unset for plain-HTTP LAN deployments.
@@ -75,6 +90,7 @@ const path = require('path');
 const db = require('./db.js');
 const auth = require('./auth.js');
 const netguard = require('./netguard.js');
+const backupLib = require('./backup-lib.js');
 
 const PORT = process.env.PORT || 8046;
 // Every state-changing (write) API endpoint requires a logged-in admin session by
@@ -235,6 +251,13 @@ const MAX_SSE_TOTAL = 50;
 const MAX_SSE_PER_IP = 5;
 const sseByIp = new Map(); // ip -> open connection count
 
+// docs/backups-roadmap.md v2: an uploaded backup file bypasses readJson()'s 1MB
+// cap entirely (streamed straight to disk, never buffered as one JSON string) —
+// this is its own, independent ceiling. 500MB comfortably covers years of
+// per-dart history for a household while still bounding worst-case disk use
+// during a single upload.
+const MAX_BACKUP_UPLOAD_BYTES = 500 * 1024 * 1024;
+
 // SEC-2: POST /api/live accepts an arbitrary object today, bounded only by
 // readJson()'s 1MB request-body cap, and re-broadcasts it verbatim to every
 // connected screen. Restrict it to the fields liveSnapshot() in frontend/index.html
@@ -261,6 +284,70 @@ function sanitizeLiveState(b) {
   if (out.ts == null) out.ts = Date.now();
   if (Buffer.byteLength(JSON.stringify(out)) > MAX_LIVE_BYTES) return null;
   return out;
+}
+
+// docs/backups-roadmap.md v2: streams an uploaded .db file straight to a temp
+// file on disk rather than buffering it as one string — every other endpoint
+// goes through readJson()'s 1MB cap, which a real backup file will exceed as
+// data grows over years, so this is its own path (manual 'data'/'end'/'error'
+// handling, matching readJson()'s own idiom above, just capped much higher and
+// writing to disk instead of concatenating a string). The admin's password is
+// carried in a request header (X-Admin-Password) since the body here is the raw
+// file, not JSON — verified before ever reading a byte of the upload so a bad
+// password doesn't cost the bandwidth of a large rejected upload.
+async function handleUploadRestore(req, res, admin) {
+  const contentLength = Number(req.headers['content-length']);
+  if (Number.isFinite(contentLength) && contentLength > MAX_BACKUP_UPLOAD_BYTES) {
+    // req and res share one socket — destroy()ing req here would tear down the
+    // socket before our response can be written, leaving the client with a raw
+    // connection-reset instead of this 413 body. Drain-and-discard instead so
+    // the client's write completes and it can actually read the response.
+    req.resume();
+    return send(res, 413, { error: `Upload too large (max ${MAX_BACKUP_UPLOAD_BYTES / (1024 * 1024)}MB)` });
+  }
+  try {
+    await db.verifyAdminPassword(admin.id, req.headers['x-admin-password']);
+  } catch (e) {
+    req.resume(); // same reasoning as above — let the client read the real error
+    return send(res, e.status || 401, { error: e.message });
+  }
+
+  fs.mkdirSync(backupLib.BACKUP_DIR, { recursive: true });
+  const tempPath = path.join(backupLib.BACKUP_DIR, `.upload-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
+  try {
+    await new Promise((resolve, reject) => {
+      const out = fs.createWriteStream(tempPath);
+      let bytesWritten = 0;
+      let settled = false;
+      const fail = (err) => { if (settled) return; settled = true; out.destroy(); reject(err); };
+      req.on('data', chunk => {
+        if (settled) return;
+        bytesWritten += chunk.length;
+        if (bytesWritten > MAX_BACKUP_UPLOAD_BYTES) {
+          req.destroy();
+          fail(Object.assign(new Error(`Upload too large (max ${MAX_BACKUP_UPLOAD_BYTES / (1024 * 1024)}MB)`), { status: 413 }));
+          return;
+        }
+        out.write(chunk);
+      });
+      req.on('end', () => { if (!settled) out.end(() => { settled = true; resolve(); }); });
+      req.on('error', fail);
+      out.on('error', fail);
+    });
+  } catch (e) {
+    try { fs.unlinkSync(tempPath); } catch (_) {}
+    return send(res, e.status || 400, { error: e.message });
+  }
+
+  try {
+    backupLib.validateSqliteFile(tempPath);
+  } catch (e) {
+    try { fs.unlinkSync(tempPath); } catch (_) {}
+    return send(res, 400, { error: e.message });
+  }
+  backupLib.stageRestore(tempPath);
+  try { fs.unlinkSync(tempPath); } catch (_) {}
+  return send(res, 200, { ok: true, message: 'Restore staged. Restart the container/process now to apply it.' });
 }
 
 const server = http.createServer(async (req, res) => {
@@ -688,6 +775,74 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/challenges/attempt' && m === 'DELETE') {
       if (!requireAdmin(req, res)) return;
       return send(res, 200, db.resetChallengeAttempt(url.searchParams.get('player'), url.searchParams.get('date')));
+    }
+
+    // ----- backups (docs/backups-roadmap.md v2) -----
+    // Every route here is unconditionally admin-gated (requireAdmin, not
+    // requireWrite) regardless of OCHE_REQUIRE_AUTH — managing or restoring the
+    // whole database is at least as sensitive as /api/wipe-all and /api/admins,
+    // which use the same unconditional gate.
+    if (p === '/api/backups' && m === 'GET') {
+      if (!requireAdmin(req, res)) return;
+      return send(res, 200, { backups: backupLib.listBackups(), retentionDays: db.backupRetentionDays() });
+    }
+    if (p === '/api/backups' && m === 'POST') {
+      // On-demand backup, so an admin can generate (and then download) a
+      // snapshot without host cron already being set up.
+      if (!requireAdmin(req, res)) return;
+      const result = await backupLib.createBackup();
+      const st = fs.statSync(result.path);
+      return send(res, 200, { ok: true, backup: { name: result.name, size: st.size, mtime: st.mtime.toISOString() } });
+    }
+    if (p === '/api/backups/retention' && m === 'PUT') {
+      if (!requireAdmin(req, res)) return;
+      const b = await readJson(req);
+      const days = Number(b.days);
+      if (!Number.isInteger(days) || days < 1 || days > 365) {
+        return send(res, 400, { error: 'days must be an integer between 1 and 365' });
+      }
+      db.updateSettings({ backup_retention_days: String(days) });
+      const { pruned } = backupLib.pruneOldBackups(days);
+      return send(res, 200, { ok: true, retentionDays: days, pruned });
+    }
+    if (p === '/api/backups/download' && m === 'GET') {
+      if (!requireAdmin(req, res)) return;
+      let filePath;
+      try { filePath = backupLib.backupPath(url.searchParams.get('name')); }
+      catch (e) { return send(res, 404, { error: e.message }); }
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${path.basename(filePath)}"`,
+        'Content-Length': String(fs.statSync(filePath).size),
+        ...SECURITY_HEADERS,
+      });
+      return fs.createReadStream(filePath).pipe(res);
+    }
+    if (p === '/api/backups' && m === 'DELETE') {
+      if (!requireAdmin(req, res)) return;
+      try { return send(res, 200, backupLib.deleteBackup(url.searchParams.get('name'))); }
+      catch (e) { return send(res, 404, { error: e.message }); }
+    }
+    if (p === '/api/backups/restore' && m === 'POST') {
+      const admin = requireAdmin(req, res);
+      if (!admin) return;
+      // Same budget as login/setup — this is a password-guessing surface too.
+      if (!rateLimit('backup-restore', ip, 10, 60000)) return tooManyRequests(res, 60);
+      const b = await readJson(req);
+      await db.verifyAdminPassword(admin.id, b.password);
+      let filePath;
+      try { filePath = backupLib.backupPath(b.name); }
+      catch (e) { return send(res, 404, { error: e.message }); }
+      try { backupLib.validateSqliteFile(filePath); }
+      catch (e) { return send(res, 400, { error: e.message }); }
+      backupLib.stageRestore(filePath);
+      return send(res, 200, { ok: true, message: 'Restore staged. Restart the container/process now to apply it.' });
+    }
+    if (p === '/api/backups/upload-restore' && m === 'POST') {
+      const admin = requireAdmin(req, res);
+      if (!admin) return;
+      if (!rateLimit('backup-restore', ip, 10, 60000)) return tooManyRequests(res, 60);
+      return await handleUploadRestore(req, res, admin);
     }
 
     return send(res, 404, { error: 'Unknown endpoint' });

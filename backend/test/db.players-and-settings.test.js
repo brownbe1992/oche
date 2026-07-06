@@ -218,6 +218,14 @@ describe('settings key/value store', () => {
     db.updateSettings({ scoreboard_layout: 'nonsense' });
     assert.equal(db.getScoreboardLayout().layout, 'full');
   });
+
+  test('backupRetentionDays defaults to 7, reflects updateSettings, and falls back on an invalid value', () => {
+    assert.equal(db.backupRetentionDays(), 7);
+    db.updateSettings({ backup_retention_days: '30' });
+    assert.equal(db.backupRetentionDays(), 30);
+    db.updateSettings({ backup_retention_days: 'nonsense' });
+    assert.equal(db.backupRetentionDays(), 7, 'falls back to the default rather than NaN/0');
+  });
 });
 
 // --- Destructive, whole-database tests: kept last in this file (see header comment) ---
