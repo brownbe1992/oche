@@ -216,7 +216,7 @@ function isStaircaseFinish(startScore, darts){
 }
 
 // Daily Challenge badge trigger thresholds (REFERENCE.md's Achievements section,
-// docs/achievements-badges-roadmap.md) — a day-count streak, not a visit/leg count,
+// docs/archive/achievements-badges-roadmap.md) — a day-count streak, not a visit/leg count,
 // so "recurring" here means "can fire again after a later streak reaches the same
 // exact length again", not "fires every day the streak stays >= threshold" (an
 // index.html caller checking currentStreak===7/===30, one-shot per crossing, is

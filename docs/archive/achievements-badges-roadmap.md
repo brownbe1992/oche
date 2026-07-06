@@ -1,18 +1,17 @@
 # Expanded Achievements & Badges — Design Roadmap
 
-> **Still partial (2026-07)** — **No Cigar** (see Novelty & Humor below) is now
-> built and tested, bringing the original candidate list to 21 of 21 shipped.
-> **Staircase Finish** shipped after that (2026-07, user-requested — not part
-> of the original candidate list below, an addition on top of it), bringing
-> the total X01 badge count to 22. This doc stays out of `docs/archive/` for
-> now because the separate "Planned: notifications and shareable cards should
-> explain the badge and show the count" section below still has an open item
-> (live-overlay count display) — see that section's own status. See
+> **Archived (2026-07)** — fully shipped, kept here for design-rationale
+> history. **No Cigar** (see Novelty & Humor below) brought the original
+> candidate list to 21 of 21 shipped; **Staircase Finish** shipped after that
+> (user-requested — not part of the original candidate list below, an addition
+> on top of it), bringing the total X01 badge count to 22. The doc's last open
+> item — threading the badge award count into the live overlay itself, not just
+> the shareable moment card — is now also done (see "Notifications and
+> shareable cards" below), so nothing about this doc remains outstanding. See
 > `docs/open-roadmap-items.md` for the live completion tracker across all
-> roadmaps. Related archived docs stay archived
-> — `docs/archive/simultaneous-achievements-roadmap.md` (the multi-badge queue
-> fix) and `docs/archive/next-session-plan.md` (the punch list this and that
-> doc grew out of) — neither needs the new badges folded in.
+> roadmaps. Related archived docs — `docs/archive/simultaneous-achievements-roadmap.md`
+> (the multi-badge queue fix) and `docs/archive/next-session-plan.md` (the punch
+> list this and that doc grew out of) — neither needed the new badges folded in.
 
 > Status: **21 of 21 original candidate badges shipped**, including **No Cigar**
 > (`enterTurn()`'s `CHAIN_CHECKS`, `frontend/scoring.js`'s `evaluateVisit()`
@@ -260,18 +259,27 @@ system, per the design goal above.
 
 ## Notifications and shareable cards explaining the badge and showing the count
 
-*(partially built)* Item 1 (below) is done: `showAchievement()`
-(`frontend/index.html`) now sets `achDescEl.textContent` from `achDescFor(type)`
-(backed by `BADGE_INFO[type].desc`) on every live overlay, matching
-`display.html`'s `ACH_DESC` map — no badge fires without its plain-language
-explanation anymore. Item 2 is only half done: `awardRecurringBadge()` already
-threads the award response's `count` into the shareable moment card's
-`statLine` ("Earned 5× total"), but the **live overlay itself still doesn't
-show a count** — `showAchievement()`'s signature has no count parameter, so
-"5th Hat Trick" as originally proposed for the overlay was never added. Left
-for whoever picks this doc up next; not required for No Cigar to ship, since
-No Cigar reuses the exact same (already-working) `BADGE_INFO`/description path
-as every other recurring badge.
+**✅ Done (2026-07).** Item 1: `showAchievement()` (`frontend/index.html`) sets
+`achDescEl.textContent` from `achDescFor(type)` (backed by `BADGE_INFO[type].desc`)
+on every live overlay, matching `display.html`'s `ACH_DESC` map — no badge fires
+without its plain-language explanation. Item 2 (the live-overlay count) is now
+also done: `showAchievement(type, player, countText)` and `queueBadge(type,
+player, snap, countText)` gained a `countText` parameter, and a new
+`patchAchievementCount(type, player, countText)` patches it into the DOM once
+`awardRecurringBadge()`'s award round-trip resolves — the overlay itself still
+fires synchronously via `queueBadge()`, unblocked by the network call, exactly as
+designed below. Recurring badges show "Earned N× total" once `count > 1` (silent
+on a badge's first-ever earn, matching the moment card's own convention);
+once-badges (Around the Clock/World, Grudge Match, First 100+ Checkout, Full
+Rotation, and every Just Chuckin' It milestone tier) pass `'First time!'`
+directly at their `queueBadge()` call site, since they already have the award
+response in scope inside their `.then()`. `display.html` mirrors the same
+patch-in-place behavior via a second `/api/live` push carrying the same
+achievement `ts` with an added `countText` — `lastAchCountText` tracks it
+separately from the `ts`-based dedup so the second push updates the DOM without
+restarting the reveal/confetti animation. A no-op (graceful, not a bug) if the
+achievement queue has already moved on to a different badge or player by the
+time the count resolves.
 
 1. **What you did** — a plain-language explanation of the trigger condition.
    `BADGE_INFO[type].desc` (added for the Badge Case's hover/tap tooltips) already
@@ -283,30 +291,22 @@ as every other recurring badge.
    was special about *this* instance.
 2. **How many times** — the award response already returns `{ newlyEarned, count }`
    (`POST /api/badges/award`). The shareable moment card's `statLine` already folds
-   this in ("Earned 5× total"). **Still open**: threading it into the live overlay
-   itself ("5th Hat Trick") the same way — `showAchievement()`/`pumpAchievementQueue()`
-   would need to patch the count into the DOM once the award round-trip resolves,
-   matching the pattern already described lower in this doc ("The plumbing problem to
-   solve"). One-time milestones (Around the Clock/World, Grudge Match) always show
-   `count === 1` — "First time!" reads better there than a numeric count.
+   this in ("Earned 5× total"), and the live overlay now shows the same "Earned N×
+   total" text via `patchAchievementCount()`. One-time milestones (Around the
+   Clock/World, Grudge Match, etc.) always show `'First time!'` rather than a
+   numeric count.
 
-**The plumbing problem to solve**: the live overlay currently fires *before* the
-award network round-trip resolves (so the celebration isn't delayed by a network
-call), via `showAchievement(type, player)` — a 2-argument function with no way to
-carry a count that doesn't exist yet. `awardRecurringBadge()` is fire-and-forget for
-the same reason. Fixing this without reintroducing a delay means:
-
-- Show the overlay/card immediately with the description (always known synchronously
-  — no network dependency), then patch the count in a moment later once the award
-  response lands (typically near-instant on a LAN) — an in-place DOM text update, not
-  a re-render.
-- `awardRecurringBadge()` needs to return its promise (or accept a callback) so
-  call sites that want the resolved count can react to it, while revocation-tracking
-  and other current callers that don't care keep working unchanged.
-- The once-badges (Around the Clock/World, Grudge Match, First 100+ Checkout) already
-  have the award response in scope at the point they call `showAchievement()` inside
-  their `.then()` — trivial to pass `count` through immediately for these, no
-  patch-in-place needed.
+**The plumbing problem, solved**: the live overlay fires *before* the award
+network round-trip resolves (so the celebration isn't delayed by a network call),
+via `queueBadge()`/`showAchievement()`. `awardRecurringBadge()` now returns its
+existing promise chain and, in its `.then()`, calls
+`patchAchievementCount(badgeId, playerName, countText)` — a targeted DOM patch
+(not a re-render), guarded by `currentAchType`/`currentAchPlayer` so it only
+applies if the queue hasn't already moved on. The once-badges (Around the
+Clock/World, Grudge Match, First 100+ Checkout, Full Rotation, Chuckin
+milestones) already have the award response in scope at the point they call
+`queueBadge()` inside their `.then()` — they pass `'First time!'` immediately,
+no patch-in-place needed.
 
 No new backend work required — `count` is already in the API response, this is
 entirely frontend plumbing (`showAchievement()`'s signature, the overlay's DOM in

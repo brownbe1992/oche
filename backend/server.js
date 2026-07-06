@@ -727,7 +727,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, db.recordEvent(Number(mt[1]), b.type, b.setNo ?? null, b.legNo ?? null));
     }
 
-    // ----- badges (docs/achievements-badges-roadmap.md) -----
+    // ----- badges (docs/archive/achievements-badges-roadmap.md) -----
     if (p === '/api/badges/award' && m === 'POST') {
       if (!requireWrite(req, res)) return;
       const b = await readJson(req);

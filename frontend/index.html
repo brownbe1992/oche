@@ -519,6 +519,8 @@
   .ach-overlay.mega .ach-name{font-size:22px;color:var(--cream)}
   .ach-desc{font-size:13px;color:var(--muted);max-width:420px;line-height:1.4}
   .ach-desc:empty{display:none}
+  .ach-count{font-size:12px;font-weight:700;color:var(--gold);letter-spacing:.04em;text-transform:uppercase}
+  .ach-count:empty{display:none}
   .ach-share-btn{pointer-events:auto;margin-top:4px;padding:9px 18px;border-radius:999px;border:1px solid var(--gold);
     background:rgba(217,180,106,.12);color:var(--gold);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
   .ach-share-btn[hidden]{display:none}
@@ -578,6 +580,7 @@
   <div class="ach-text" id="ach-text"></div>
   <div class="ach-name" id="ach-name"></div>
   <div class="ach-desc" id="ach-desc"></div>
+  <div class="ach-count" id="ach-count"></div>
   <button class="ach-share-btn" id="ach-share-btn" hidden onclick="shareMomentCard(currentAchType)">📤 Share</button>
 </div>
 <div class="wrap">
@@ -3514,7 +3517,7 @@ function renderPlayerPage(){
   loadChallengeHistory();
   loadChuckinHeatmap();
 }
-// The full achievement roster (docs/achievements-badges-roadmap.md) — every badge
+// The full achievement roster (docs/archive/achievements-badges-roadmap.md) — every badge
 // in the game, not just milestones. Recurring badges (Hat Trick, Night Owl, etc.)
 // are now persisted too (see awardRecurringBadge()) specifically so the Badge Case
 // can show a real count, not just earned/not-earned.
@@ -3598,7 +3601,7 @@ function renderPlayerBadges(data){
     <div class="pp-section-title" style="margin:16px 0 6px">Just Chuckin' It</div>
     <div class="summary-grid">${chuckinIds.map(badgeBlock).join('')}</div>`;
 }
-// Around the World progress (docs/achievements-badges-roadmap.md): a compact grid
+// Around the World progress (docs/archive/achievements-badges-roadmap.md): a compact grid
 // rather than a full dartboard-shaped heatmap — the doc explicitly calls the ideal
 // dartboard visualization a separately-scoped sub-project; this is the simpler v1.
 function loadAroundTheWorldProgress(){
@@ -3666,7 +3669,7 @@ function loadOnThisDay(){
 // already renders — fetched fresh right after a challenge attempt completes
 // rather than duplicating streak/format bookkeeping client-side. The pure
 // threshold checks themselves live in scoring.js's challengeBadgeSignals() so
-// they're covered by a committed node:test (docs/achievements-badges-roadmap.md).
+// they're covered by a committed node:test (docs/archive/achievements-badges-roadmap.md).
 function checkChallengeBadges(playerName){
   const today = localDateStr(new Date());
   Backend.get(`/api/challenges/history?player=${encodeURIComponent(playerName)}&date=${today}`).then(history=>{
@@ -3684,7 +3687,7 @@ function checkChallengeBadges(playerName){
       Backend.send('POST','/api/badges/award', { player:playerName, badgeId:'challengeallformats', once:true }).then(r=>{
         if(r && r.newlyEarned){
           trackBadgeForUndo(_snapAllFmt, playerName, 'challengeallformats');
-          queueBadge('challengeallformats', playerName, _snapAllFmt);
+          queueBadge('challengeallformats', playerName, _snapAllFmt, 'First time!');
           fireMomentCard('challengeallformats', { icon:'🗓️', headline:'FULL ROTATION', player:playerName, statLine:'Every Daily Challenge format completed' });
         }
       }).catch(()=>{});
@@ -4024,6 +4027,7 @@ const achOverlayEl = document.getElementById('ach-overlay');
 const achTextEl    = document.getElementById('ach-text');
 const achNameEl    = document.getElementById('ach-name');
 const achDescEl    = document.getElementById('ach-desc');
+const achCountEl   = document.getElementById('ach-count');
 const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter':'🏆 NINE-DARTER! 🏆',
   hattrick:'Hat Trick! 🎩', bullseyegauntlet:'Bullseye Gauntlet! 🔴', wherediditgo:"Where'd It Go? 💨",
   socloseshot:'So Close... 😩', tontitled:'Ton-titled to Nothing 😅', nightowl:'Night Owl 🦉',
@@ -4136,7 +4140,7 @@ function checkChuckinMilestoneTier(ladder, playerName, value){
       if(!earnedBadgeCache[playerName]) earnedBadgeCache[playerName] = new Set();
       earnedBadgeCache[playerName].add(id);
       if(r && r.newlyEarned){
-        queueBadge(id, playerName, null);
+        queueBadge(id, playerName, null, 'First time!');
         fireMomentCard(id, { icon:tier.icon, headline:tier.label.toUpperCase(), player:playerName, statLine:`${value.toLocaleString()} ${ladder.statNoun}` });
       }
     }).catch(()=>{});
@@ -4196,6 +4200,11 @@ let currentAchType = null;
 // for the turn just undone" and dismiss it immediately instead of letting it run
 // out its own timer for an event that no longer happened.
 let currentAchSnap = null;
+// The player name the currently-showing achievement belongs to — lets
+// patchAchievementCount() (docs/archive/achievements-badges-roadmap.md's live-overlay
+// count item) confirm it's patching the DOM for the achievement that's
+// genuinely still on screen, not one the queue has already moved past.
+let currentAchPlayer = null;
 let achievementQueue = [];
 let achievementQueueRunning = false;
 // snap defaults to the CURRENT turn's snapshot, correct for every synchronous
@@ -4205,16 +4214,21 @@ let achievementQueueRunning = false;
 // one they pass to trackBadgeForUndo() — and pass it here explicitly instead,
 // since game.lastTurnSnapshot may have moved on to a newer turn by the time the
 // response arrives.
-function queueBadge(type, player, snap){
+// countText (docs/archive/achievements-badges-roadmap.md's live-overlay count item):
+// an optional, already-formatted string ("First time!" for once-badges, or left
+// unset for recurring badges whose count isn't known yet at queue time — see
+// patchAchievementCount() below, which fills it in once the award API resolves).
+function queueBadge(type, player, snap, countText){
   const s = snap !== undefined ? snap : (game && game.lastTurnSnapshot);
-  achievementQueue.push({ type, player, ts: Date.now(), snap: s });
+  achievementQueue.push({ type, player, ts: Date.now(), snap: s, countText: countText || null });
   if(!achievementQueueRunning) pumpAchievementQueue();
 }
 function pumpAchievementQueue(){
-  if(achievementQueue.length===0){ achievementQueueRunning = false; currentAchType = null; currentAchSnap = null; return; }
+  if(achievementQueue.length===0){ achievementQueueRunning = false; currentAchType = null; currentAchPlayer = null; currentAchSnap = null; return; }
   achievementQueueRunning = true;
   const next = achievementQueue.shift();
   currentAchSnap = next.snap;
+  currentAchPlayer = next.player;
   // Every queued badge gets its own live-scoreboard broadcast as it's shown — not
   // just whatever pushLive() call happened to already be at the end of enterTurn()/
   // onLegWon(), since that only covers the first item drained from the queue.
@@ -4222,9 +4236,9 @@ function pumpAchievementQueue(){
   // queued in the same synchronous tick share a Date.now() millisecond, and
   // /display dedups on `s.achievement.ts`, so reusing next.ts would make it drop the
   // second badge. Broadcasts drain >=ACH_DURATION apart, so fresh stamps are distinct.
-  pendingAchievement = { type: next.type, player: next.player, ts: Date.now() };
+  pendingAchievement = { type: next.type, player: next.player, ts: Date.now(), countText: next.countText };
   if(game) pushLive();
-  showAchievement(next.type, next.player);
+  showAchievement(next.type, next.player, next.countText);
   announce(`${next.player}: ${ACH_LABELS[next.type] || 'Achievement'}. ${achDescFor(next.type)}`);
   clearTimeout(achTimer);
   achTimer = setTimeout(()=>{
@@ -4235,18 +4249,34 @@ function pumpAchievementQueue(){
     pumpAchievementQueue();   // advance to the next queued badge, if any
   }, ACH_DURATION[next.type] || 2500);
 }
-function showAchievement(type, player){
+function showAchievement(type, player, countText){
   if(!achOverlayEl) return;
   currentAchType = type;
   achTextEl.textContent = ACH_LABELS[type] || '';
   achNameEl.textContent = player || '';
   if(achDescEl) achDescEl.textContent = achDescFor(type);
+  if(achCountEl) achCountEl.textContent = countText || '';
   const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth';
   achOverlayEl.classList.toggle('mega', mega);
   achOverlayEl.classList.add('show');
   const shareBtn = document.getElementById('ach-share-btn');
   if(shareBtn) shareBtn.hidden = false;
   if(mega) spawnConfetti(achOverlayEl, 90);
+}
+// Patches the count into an achievement overlay that's still showing, once the
+// award API's { count } response resolves — the overlay fires synchronously via
+// queueBadge(), before that network round-trip even starts, so the celebration
+// is never delayed waiting for a count that doesn't exist yet. A no-op if the
+// queue has already moved on to a different achievement (or a different player's
+// instance of the same badge type) by the time this resolves — typically
+// near-instant on a LAN, but not guaranteed.
+function patchAchievementCount(type, player, countText){
+  if(currentAchType !== type || currentAchPlayer !== player) return;
+  if(achCountEl) achCountEl.textContent = countText || '';
+  if(pendingAchievement && pendingAchievement.type === type && pendingAchievement.player === player){
+    pendingAchievement = { ...pendingAchievement, countText: countText || null };
+    if(game) pushLive();
+  }
 }
 // Called by every undoLastTurn*() right after marking a snapshot voided — an
 // achievement queued (or, worse, already mid-celebration) for the turn just
@@ -4270,7 +4300,7 @@ function cancelQueuedAchievementsForSnapshot(snap){
     }
     const shareBtn = document.getElementById('ach-share-btn');
     if(shareBtn) shareBtn.hidden = true;
-    currentAchType = null; currentAchSnap = null;
+    currentAchType = null; currentAchPlayer = null; currentAchSnap = null;
     achievementQueueRunning = false;
     pumpAchievementQueue();
   }
@@ -4404,16 +4434,19 @@ function trackBadgeForUndo(snap, playerName, badgeId){
 // re-trigger). The overlay celebration itself already happened via queueBadge()
 // synchronously, before this network round-trip even starts — deliberately not
 // blocked on it (docs/next-session-plan.md item 1). Once the award API's
-// { newlyEarned, count } response comes back, the shareable moment card (if a
+// { newlyEarned, count } response comes back: the shareable moment card (if a
 // momentType/momentOpts pair was given) fires with the real count folded into its
-// statLine — firing the card here instead of at the call site is what lets it show
-// an accurate "Earned N× total" without delaying the celebration that already ran.
+// statLine, and the live overlay itself gets the same count patched in via
+// patchAchievementCount() (docs/archive/achievements-badges-roadmap.md's live-overlay
+// count item) — both deliberately only shown once count > 1, matching the
+// existing moment-card convention of staying silent on a badge's first-ever earn.
 function awardRecurringBadge(playerName, badgeId, momentType, momentOpts){
   const snap = game && game.lastTurnSnapshot;
   Backend.send('POST','/api/badges/award', { player:playerName, badgeId, once:false })
     .then(r=>{
-      if(!momentType) return;
       const count = r && r.count;
+      patchAchievementCount(badgeId, playerName, count>1 ? `Earned ${count}× total` : '');
+      if(!momentType) return;
       const statLine = (count>1 && momentOpts.statLine) ? `${momentOpts.statLine} · Earned ${count}× total` : momentOpts.statLine;
       fireMomentCard(momentType, { ...momentOpts, statLine });
     })
@@ -4835,7 +4868,7 @@ function enterTurn(){
     sendHaWebhook('tonplus', p.name, game.category, { score: ev.pointsThisVisit });
   }
 
-  // Expanded achievements/badges (docs/achievements-badges-roadmap.md) — recurring.
+  // Expanded achievements/badges (docs/archive/achievements-badges-roadmap.md) — recurring.
   // Collected as a list rather than an if/else-if chain so a turn that genuinely
   // satisfies more than one condition queues all of them instead of only the first
   // match winning — but two deliberate suppression pairs stay exclusive (they're
@@ -4853,7 +4886,7 @@ function enterTurn(){
     // Double Trouble: the last two darts of the checkout visit both landed on
     // doubles — dart 1 of a 3-dart visit (miss/single/treble) doesn't matter, only
     // the trailing pair does. A single-dart double-out checkout doesn't qualify
-    // ("consecutive" needs at least two) — see docs/achievements-badges-roadmap.md.
+    // ("consecutive" needs at least two) — see docs/archive/achievements-badges-roadmap.md.
     { id:'doubletrouble', icon:'👯', headline:'DOUBLE TROUBLE!', statLine:'Checked out on consecutive doubles',
       test: () => ev.win && _d.length>=2 && _d[_d.length-2].isDouble && _d[_d.length-1].isDouble },
     { id:'wherediditgo', icon:'💨', headline:"WHERE'D IT GO?", statLine:'Three misses',
@@ -4930,7 +4963,7 @@ function enterTurn(){
     Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'around_the_clock', once:true }).then(r=>{
       if(r && r.newlyEarned){
         trackBadgeForUndo(_snapAtc, p.name, 'around_the_clock');
-        queueBadge('aroundtheclock', p.name, _snapAtc);
+        queueBadge('aroundtheclock', p.name, _snapAtc, 'First time!');
         fireMomentCard('aroundtheclock', { icon:'🕐', headline:'AROUND THE CLOCK', player:p.name, statLine:'Every number, 1 to 20, singled out' });
       }
     }).catch(()=>{});
@@ -4949,7 +4982,7 @@ function enterTurn(){
           earnedBadgeCache[p.name].add('around_the_world');
           if(r && r.newlyEarned){
             trackBadgeForUndo(_snapAtw, p.name, 'around_the_world');
-            queueBadge('aroundtheworld', p.name, _snapAtw);
+            queueBadge('aroundtheworld', p.name, _snapAtw, 'First time!');
             fireMomentCard('aroundtheworld', { icon:'🌍', headline:'AROUND THE WORLD', player:p.name, statLine:'Every dart outcome, lifetime' });
           }
         }).catch(()=>{});
@@ -4983,7 +5016,7 @@ function enterTurn(){
     Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'first_100_checkout', once:true }).then(r=>{
       if(r && r.newlyEarned){
         trackBadgeForUndo(_snap100, p.name, 'first_100_checkout');
-        queueBadge('first100checkout', p.name, _snap100);
+        queueBadge('first100checkout', p.name, _snap100, 'First time!');
         fireMomentCard('first100checkout', { icon:'🥇', headline:'FIRST 100+ CHECKOUT', player:p.name, statLine:`${ev.pointsThisVisit} checkout` });
       }
     }).catch(()=>{});
@@ -5315,7 +5348,7 @@ function onLegWon(wi){
             Backend.send('POST','/api/badges/award', { player:w.name, badgeId:'grudge_match', once:true }).then(r=>{
               if(r && r.newlyEarned){
                 trackBadgeForUndo(_snapGm, w.name, 'grudge_match');
-                queueBadge('grudgematch', w.name, _snapGm);
+                queueBadge('grudgematch', w.name, _snapGm, 'First time!');
                 fireMomentCard('grudgematch', { icon:'⚔️', headline:'GRUDGE MATCH', player:w.name, statLine:`${sum.totalGames} games vs ${opp.name}` });
               }
             }).catch(()=>{});

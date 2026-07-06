@@ -1151,9 +1151,13 @@ Slayer simultaneously. The overlay can only show one thing at a time, so every
 celebration is queued and drained sequentially rather than the newest one
 silently clobbering whatever was already showing.
 
-**`queueBadge(type, player, snap)`** — pushes `{type, player, ts, snap}` onto
-`achievementQueue`; if nothing is currently draining, kicks off
-`pumpAchievementQueue()`. `snap` is the turn's `game.lastTurnSnapshot`
+**`queueBadge(type, player, snap, countText)`** — pushes
+`{type, player, ts, snap, countText}` onto `achievementQueue`; if nothing is
+currently draining, kicks off `pumpAchievementQueue()`. `countText` is an
+optional, already-formatted string shown on the overlay (`'First time!'` for
+once-badges, which pass it directly since they already have the award response
+in scope; omitted for recurring badges, whose count isn't known yet at queue
+time — see `patchAchievementCount()` below). `snap` is the turn's `game.lastTurnSnapshot`
 reference — it defaults to `game.lastTurnSnapshot` at call time (correct for
 the synchronous majority of call sites, called directly from `enterTurn()`/
 `onLegWonCricket()`/etc.), but the handful of call sites that queue a badge
@@ -1210,19 +1214,40 @@ achievement. In practice this only matters for the few seconds between a
 broadcast and an undo of that same turn, not the original bug (a stale
 achievement surfacing arbitrarily far in the future).
 
-**`showAchievement(type, player)`** — the pure "paint one badge" primitive:
-sets the overlay text/name/description, toggles the mega-celebration class for
-nine-darters (with confetti), shows the Share button. It never manages timing
-itself — that's entirely `pumpAchievementQueue()`'s job — and as of the queue
-rework it's *only* ever called from `pumpAchievementQueue()`, never directly.
+**`showAchievement(type, player, countText)`** — the pure "paint one badge"
+primitive: sets the overlay text/name/description/count, toggles the
+mega-celebration class for nine-darters (with confetti), shows the Share
+button. It never manages timing itself — that's entirely
+`pumpAchievementQueue()`'s job — and as of the queue rework it's *only* ever
+called from `pumpAchievementQueue()`, never directly.
 
-**Moment card + count**: `awardRecurringBadge(player, badgeId, momentType,
-momentOpts)` fires the overlay celebration synchronously (via `queueBadge`,
-before any network round-trip), but defers firing the shareable moment card
-until the `POST /api/badges/award` response confirms the real count — if
-`count > 1`, `" · Earned N× total"` is appended to the card's `statLine`. This
-is deliberate: the celebration is never delayed waiting on the network, but the
-card (which the player looks at a moment later, if at all) gets accurate data.
+**Moment card + live-overlay count**: `awardRecurringBadge(player, badgeId,
+momentType, momentOpts)` fires the overlay celebration synchronously (via
+`queueBadge`, before any network round-trip), but the real count is only known
+once the `POST /api/badges/award` response resolves — its `.then()` handles
+both places that show it: if `count > 1`, `" · Earned N× total"` is appended to
+the shareable moment card's `statLine`, and the exact same `"Earned N× total"`
+text is patched into the still-showing live overlay via
+`patchAchievementCount(badgeId, playerName, countText)`. This is deliberate:
+the celebration itself is never delayed waiting on the network, but both the
+overlay and the card (each looked at a moment later, if at all) end up with
+accurate data. `patchAchievementCount()` is guarded by `currentAchType`/
+`currentAchPlayer` — a no-op if the queue has already moved on to a different
+badge or a different player's instance of the same badge type by the time the
+response arrives (graceful, not a bug; typically near-instant on a LAN).
+Once-badges (`once:true` — Around the Clock/World, Grudge Match, First 100+
+Checkout, Full Rotation, every Just Chuckin' It milestone tier) skip this
+entirely: they already have the award response in scope at the point they call
+`queueBadge()` inside their own `.then()`, so they pass the literal string
+`'First time!'` immediately rather than a numeric count — showing `count === 1`
+as a number would read oddly for something that, by construction, can only ever
+happen once.
+
+`display.html` mirrors this via a second `/api/live` push carrying the same
+`achievement.ts` with `countText` now populated — its `ts`-based dedup would
+normally ignore a repeat push, so `lastAchCountText` tracks the count text
+separately and patches `#ach-count` in place (no re-render, no restarted
+confetti) whenever it changes while the overlay is still showing.
 
 **Suppression pairs are resolved before anything is queued** — see §4's
 `CHAIN_CHECKS` filtering, which runs once per turn before any `queueBadge()`

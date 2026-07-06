@@ -218,6 +218,8 @@
   .ach-overlay.mega .ach-name{font-size:4.4vmin;color:var(--cream)}
   .ach-desc{font-size:2.2vmin;color:var(--muted);max-width:70vmin;line-height:1.4;margin-top:.5vmin}
   .ach-desc:empty{display:none}
+  .ach-count{font-size:2vmin;font-weight:700;color:var(--gold);letter-spacing:.04em;text-transform:uppercase}
+  .ach-count:empty{display:none}
   .confetti{position:absolute;top:-10vh;width:1.1vmin;height:2.4vmin;opacity:.95;border-radius:1px;animation:confetti-fall linear forwards;pointer-events:none}
   @keyframes confetti-fall{0%{transform:translateY(0) rotate(0deg);opacity:1}100%{transform:translateY(120vh) rotate(560deg);opacity:.85}}
 </style>
@@ -258,6 +260,7 @@
     <div class="ach-text" id="ach-text"></div>
     <div class="ach-name" id="ach-name"></div>
     <div class="ach-desc" id="ach-desc"></div>
+    <div class="ach-count" id="ach-count"></div>
   </div>
 
 <script>
@@ -271,6 +274,7 @@ const achOverlay = document.getElementById('ach-overlay');
 const achText    = document.getElementById('ach-text');
 const achName    = document.getElementById('ach-name');
 const achDesc    = document.getElementById('ach-desc');
+const achCount   = document.getElementById('ach-count');
 
 const gameStats  = document.getElementById('game-stats');
 const stat180s   = document.getElementById('stat-180s');
@@ -285,6 +289,12 @@ const matchbar   = document.getElementById('matchbar');
 
 let bannerKey = '';
 let lastAchTs = 0;
+// docs/archive/achievements-badges-roadmap.md's live-overlay count item: the recurring-
+// badge count arrives in a second /api/live push with the SAME ts (the overlay
+// fired before the award round-trip resolved) — tracked separately from
+// lastAchTs so that second push can patch just the count text in place instead
+// of being ignored by the ts-dedup, or restarting the whole reveal animation.
+let lastAchCountText = '';
 let lastCoKey = '';   // track checkout route to flash only on change
 let bannerTimer = null;
 let achTimer = null;
@@ -452,10 +462,11 @@ function spawnConfetti(root, count){
   }
 }
 
-function showAchievement(type, player){
+function showAchievement(type, player, countText){
   achText.textContent = ACH_LABELS[type] || '';
   achName.textContent = player || '';
   if(achDesc) achDesc.textContent = ACH_DESC[type] || '';
+  if(achCount) achCount.textContent = countText || '';
   const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth';
   achOverlay.classList.toggle('mega', mega);
   achOverlay.classList.add('show');
@@ -1018,9 +1029,17 @@ function render(s){
   }
 
   // achievement flashes (180, Big Fish, nine-darter)
-  if(s.achievement && s.achievement.ts && s.achievement.ts !== lastAchTs){
-    lastAchTs = s.achievement.ts;
-    showAchievement(s.achievement.type, s.achievement.player);
+  if(s.achievement && s.achievement.ts){
+    if(s.achievement.ts !== lastAchTs){
+      lastAchTs = s.achievement.ts;
+      lastAchCountText = s.achievement.countText || '';
+      showAchievement(s.achievement.type, s.achievement.player, s.achievement.countText);
+    } else if((s.achievement.countText || '') !== lastAchCountText && achOverlay.classList.contains('show')){
+      // Same achievement, a later push once the award count resolved — patch
+      // the count in place rather than restarting the reveal/confetti.
+      lastAchCountText = s.achievement.countText || '';
+      if(achCount) achCount.textContent = lastAchCountText;
+    }
   }
 
   handleVoiceEvents(s);

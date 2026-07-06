@@ -147,7 +147,7 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
-  -- Every badge a player has earned (docs/achievements-badges-roadmap.md), one row
+  -- Every badge a player has earned (docs/archive/achievements-badges-roadmap.md), one row
   -- per player+badge with a running count. Two award modes, chosen by the caller:
   --  - counted (most badges): count increments every time the badge's trigger
   --    condition fires (a visit, a leg, a match) — the Badge Case shows this count.
@@ -2124,7 +2124,7 @@ function getNineDarterStats(mode) {
   return { leaderboard, recent };
 }
 
-/* ---------- badges (docs/achievements-badges-roadmap.md) ---------- */
+/* ---------- badges (docs/archive/achievements-badges-roadmap.md) ---------- */
 // Awards a badge. Two modes, chosen by the caller (see the player_badges table
 // comment): `once` is idempotent (INSERT OR IGNORE) for state-based badges whose
 // trigger condition stays true forever once crossed, so re-checking it doesn't
@@ -2803,7 +2803,7 @@ function getH2HRecord(name1, name2) {
   return { p1:name1, p2:name2, p1Wins, p2Wins, total:rows.length };
 }
 
-// Used by the Grudge Match / Rematch badges (docs/achievements-badges-roadmap.md).
+// Used by the Grudge Match / Rematch badges (docs/archive/achievements-badges-roadmap.md).
 // excludeGameId lets the caller ask "who won the last time before this one" right
 // after the current match has just been recorded.
 function getH2HSummary(name1, name2, excludeGameId) {
@@ -2823,7 +2823,7 @@ function getH2HSummary(name1, name2, excludeGameId) {
   return { totalGames, previousWinner };
 }
 
-// Around the World progress (docs/achievements-badges-roadmap.md): 63 distinct dart
+// Around the World progress (docs/archive/achievements-badges-roadmap.md): 63 distinct dart
 // outcomes total — 20 numbers x single/double/treble (60), outer bull, double bull,
 // and a miss. No new schema; just a DISTINCT scan over darts already stored.
 function getAroundTheWorldProgress(playerName) {

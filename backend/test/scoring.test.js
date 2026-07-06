@@ -58,7 +58,7 @@ describe('evaluateVisit (X01 bust/win rules, REFERENCE.md §2)', () => {
     assert.equal(ev.newScore, 180);
   });
 
-  test('rule 3 restated as "No Cigar" (docs/achievements-badges-roadmap.md): busts hitting exactly the remaining score, just not on a double', () => {
+  test('rule 3 restated as "No Cigar" (docs/archive/achievements-badges-roadmap.md): busts hitting exactly the remaining score, just not on a double', () => {
     const ev = evaluateVisit({ score: 32, doubleOut: true }, [d(16,1), d(16,1)], {});
     assert.equal(ev.bust, true);
     assert.equal(ev.pointsThisVisit, 32, 'attempted points equal the exact remaining score — the condition awardRecurringBadge checks (ev.pointsThisVisit === p.score) for the No Cigar badge');
