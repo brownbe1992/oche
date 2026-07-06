@@ -194,6 +194,27 @@ function checkoutHint(rem, doubleOut, maxDarts){
   return '';
 }
 
+// Staircase Finish (REFERENCE.md's Achievements section, docs/achievements-badges-
+// roadmap.md) — checked out a leg by aiming at a double, missing to the single,
+// and repeating that all the way down: single at half the visit's starting
+// remaining score, single at a quarter, double at an eighth. E.g. left on 32
+// (the double-out target is double 16): single 16 (16 left), single 8 (8 left),
+// double 4 (checkout) — or 40: single 20, single 10, double 5 — or 8: single 4,
+// single 2, double 1. Requires exactly 3 darts and an exact match on each dart's
+// sector/multiplier; startScore must be a multiple of 8 with startScore/2 a valid
+// single (<=20) and startScore/8 a valid dart number (>=1) — the only qualifying
+// starting scores are 8, 16, 24, 32, and 40.
+function isStaircaseFinish(startScore, darts){
+  if(!darts || darts.length !== 3) return false;
+  if(startScore % 8 !== 0) return false;
+  const n = startScore/2, half = startScore/4, quarter = startScore/8;
+  if(quarter < 1 || n > 20) return false;
+  const [d1, d2, d3] = darts;
+  return d1.sector===n && d1.mult===1 &&
+    d2.sector===half && d2.mult===1 &&
+    d3.sector===quarter && d3.mult===2;
+}
+
 // Daily Challenge badge trigger thresholds (REFERENCE.md's Achievements section,
 // docs/achievements-badges-roadmap.md) — a day-count streak, not a visit/leg count,
 // so "recurring" here means "can fire again after a later streak reaches the same
@@ -238,7 +259,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     dartValue, dartLabel, makeDartCore,
     evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS,
-    evaluateDartDoublesPractice,
+    evaluateDartDoublesPractice, isStaircaseFinish,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,
     CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH, challengeBadgeSignals,
     chuckinTiersReached,

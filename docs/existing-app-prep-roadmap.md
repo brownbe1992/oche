@@ -160,8 +160,9 @@ completed" beyond what happens today:
 - `environmental-logging-roadmap.md` starts/stops HA polling on game start/end.
 - `tournament-mode-roadmap.md` propagates the winner into the next bracket match on
   game completion.
-- `achievements-badges-roadmap.md` (21 of 21 candidate badges shipped; see its own
-  status for the one still-open notification-plumbing item) needed milestone badges to check
+- `achievements-badges-roadmap.md` (21 of 21 original candidate badges shipped,
+  plus a 22nd, Staircase Finish, added afterward; see its own status for the
+  one still-open notification-plumbing item) needed milestone badges to check
   conditions after a game completes — this item's recommendation (a generic hook
   mechanism) still wasn't built; achievement checks are inline in `enterTurn()`/
   `onLegWon()` instead, so this need is still real for the *next* feature that wants
@@ -500,7 +501,7 @@ for the same "what do we build next" attention.
 | `docs/voice-announcements-i18n-roadmap.md` | Not started | Low-Medium | Low-Medium | Follow-on to the shipped feature; every phrase is still hardcoded English |
 | `docs/backups-roadmap.md` | Partial | Low | Very high | v1 (script + retention + restore docs) done (v0.6.2); v2 (compose sidecar, restore UI/endpoint) not started |
 | `docs/shareable-moments-roadmap.md` | Partial | Low | Medium | Card generation, every trigger point, and the HA webhook are done; Profile "Moments" gallery and BYO-credentials X auto-post are not |
-| `docs/achievements-badges-roadmap.md` | Partial | Low | Low | **21 of 21 candidate badges shipped**, including **No Cigar** (2026-07, bust a visit that hit the exact score needed but not on a double); the doc stays out of `docs/archive/` because its own "notifications and shareable cards" section still has one open item — threading the award count into the live overlay itself (the shareable moment card already shows it) |
+| `docs/achievements-badges-roadmap.md` | Partial | Low | Low | **21 of 21 original candidate badges shipped**, including **No Cigar** (2026-07, bust a visit that hit the exact score needed but not on a double), plus a 22nd badge, **Staircase Finish** (2026-07, user-requested, added after the original candidate list — check out in exactly 3 darts by halving the target twice), shipped on top; the doc stays out of `docs/archive/` because its own "notifications and shareable cards" section still has one open item — threading the award count into the live overlay itself (the shareable moment card already shows it) |
 | `docs/archive/simultaneous-achievements-roadmap.md` | ✅ Done | Low | Medium | Fixed the single-slot achievement-overlay bug; built alongside achievements/badges |
 | `docs/daily-challenge-roadmap.md` | Partial | Low | Medium | Built entirely on the existing Practice engine. **Un-archived (2026-07)**: 3 new Daily-Challenge-specific badges (Challenge Streak: Week/Month, Full Rotation) and a dedicated Player Profile tab (promoted from a collapsible section duplicated inside every other tab) were added per an explicit "stats, reporting, badges, and achievements for daily challenges" request |
 | `docs/archive/ghost-opponent-roadmap.md` | ✅ Done (X01 only) | Low-Medium | Medium | A "👻 Ghost" New Game mode races a replay of one of your own past won X01 legs — backend leg-script/candidate-leg queries, a New Game leg picker, a Player Profile "Race this leg" entry point, opponent-badge suppression (Comeback Kid etc. can't fire against a ghost), and full Playwright verification (both a ghost-wins and a human-wins race). Cricket ghost support explicitly deferred. **Archived (2026-07)** — nothing outstanding |

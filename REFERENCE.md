@@ -964,7 +964,7 @@ revokes any `chuckin180` badge that dart awarded — see above.
 
 ## 4. Achievements & Badges
 
-45 badges (21 X01 + 2 Cricket + 3 Daily Challenge + 19 Just Chuckin' It),
+46 badges (22 X01 + 2 Cricket + 3 Daily Challenge + 19 Just Chuckin' It),
 tracked in the `player_badges` table (one row per player+badge, with a running
 `count`). X01 detection logic lives in `frontend/index.html`'s
 `enterTurn()`/`onLegWon()`; Cricket's 2 badges live in
@@ -987,7 +987,7 @@ same function (see §2/§3's own coverage of it).
   the count past 1): **Around the Clock, Around the World, Grudge Match, First
   100+ Checkout, Full Rotation**.
 
-### The 21 badges, exact trigger conditions
+### The 22 badges, exact trigger conditions
 
 **Expanded-chain badges** (the `CHAIN_CHECKS` list in `enterTurn()` — collected
 as an array and filtered by suppression pairs, not an if/else-if chain, so a
@@ -1003,6 +1003,7 @@ turn matching more than one condition queues all of them):
 | 💥 **Busted Maximum** | `bust && darts.length===3 && every dart is T20` — a genuine 180 attempt that still busts (see §2's bust rule #3: hit zero, but the last dart isn't a double). |
 | 🤦 **No Cigar** | `bust && doubleOut && pointsThisVisit === score` — the visit's attempted points land on exactly the score that was needed, but the last dart wasn't a double (§2's bust rule #3, restated: hitting the target number itself instead of finishing on it). Distinguishable from an overshoot bust (`pointsThisVisit > score`) and a left-on-1 bust (`pointsThisVisit === score - 1`) by this exact equality. Never fires in single-out mode, since hitting the exact remaining there is a win, not a bust. |
 | 😅 **Ton-titled to Nothing** | `bust && sum of attempted dart values >= 100` |
+| 🪜 **Staircase Finish** | `win && isStaircaseFinish(preVisitScore, darts)` (`frontend/scoring.js`, unit-tested in `backend/test/scoring.test.js`) — checked out in exactly 3 darts by aiming at a double, missing to the single, and repeating that all the way down: `darts === [single(N), single(N/2), double(N/4)]` where `N = preVisitScore/2`. Only qualifies when `preVisitScore` is a multiple of 8 with `N<=20` and `N/4>=1` — the 5 qualifying starting scores are 8, 16, 24, 32, and 40 (e.g. 32: single 16, single 8, double 4; 40: single 20, single 10, double 5; 8: single 4, single 2, double 1). `preVisitScore` is read from `_snap.score` (the turn's snapshot, captured before `p.score` is mutated), not `p.score` itself, since by the time `CHAIN_CHECKS` runs `p.score` already reflects the post-visit value. |
 
 **Suppression pairs**: two conditions above are deliberately treated as the same
 event wearing two labels, not two distinct achievements — the more specific one

@@ -1,20 +1,25 @@
 # Expanded Achievements & Badges — Design Roadmap
 
 > **Still partial (2026-07)** — **No Cigar** (see Novelty & Humor below) is now
-> built and tested, bringing the candidate list to 21 of 21 shipped. This doc
-> stays out of `docs/archive/` for now because the separate "Planned:
-> notifications and shareable cards should explain the badge and show the
-> count" section below still has an open item (live-overlay count display) —
-> see that section's own status. See `docs/existing-app-prep-roadmap.md`'s
-> Roadmap sequencing table for the live completion tracker across all roadmaps.
-> Related archived docs stay archived — `docs/archive/simultaneous-achievements-
-> roadmap.md` (the multi-badge queue fix) and `docs/archive/next-session-plan.md`
-> (the punch list this and that doc grew out of) — neither needs the new badge
-> folded in.
+> built and tested, bringing the original candidate list to 21 of 21 shipped.
+> **Staircase Finish** shipped after that (2026-07, user-requested — not part
+> of the original candidate list below, an addition on top of it), bringing
+> the total X01 badge count to 22. This doc stays out of `docs/archive/` for
+> now because the separate "Planned: notifications and shareable cards should
+> explain the badge and show the count" section below still has an open item
+> (live-overlay count display) — see that section's own status. See
+> `docs/existing-app-prep-roadmap.md`'s Roadmap sequencing table for the live
+> completion tracker across all roadmaps. Related archived docs stay archived
+> — `docs/archive/simultaneous-achievements-roadmap.md` (the multi-badge queue
+> fix) and `docs/archive/next-session-plan.md` (the punch list this and that
+> doc grew out of) — neither needs the new badges folded in.
 
-> Status: **21 of 21 candidate badges shipped**, including **No Cigar**
+> Status: **21 of 21 original candidate badges shipped**, including **No Cigar**
 > (`enterTurn()`'s `CHAIN_CHECKS`, `frontend/scoring.js`'s `evaluateVisit()`
-> bust-rule-3 case, tested in `backend/test/scoring.test.js`).
+> bust-rule-3 case, tested in `backend/test/scoring.test.js`), plus **Staircase
+> Finish** shipped afterward as a 22nd X01 badge, outside the original
+> candidate list (`isStaircaseFinish()`, also in `frontend/scoring.js`, same
+> test file).
 > Every other badge in the candidate list is built and tested
 > end-to-end (`frontend/index.html`'s `enterTurn()`/`onLegWon()`, `showAchievement()`/
 > `ACH_LABELS` in both `index.html` and `display.html`, the `player_badges` table in
@@ -205,6 +210,20 @@ these moments immediately.*
   in single-out mode. Icon 🤦, un-suppressed (co-fires freely with Busted
   Maximum/Ton-titled to Nothing on the rare visit that also matches one of
   those). Tested in `backend/test/scoring.test.js`.
+- **Staircase Finish** *(recurring — shipped, 2026-07, user-requested addition
+  beyond the original 21-badge candidate list below)* — check out in exactly
+  three darts by aiming at a double, missing to the single, and repeating that
+  all the way down: single at half the visit's starting remaining score,
+  single at a quarter, double at an eighth (e.g. left on 32: single 16, single
+  8, double 4; or 40: single 20, single 10, double 5; or 8: single 4, single 2,
+  double 1 — the user's own worked examples). Only 8, 16, 24, 32, and 40
+  qualify as starting scores (the halving chain needs `start/2<=20` and
+  `start/8>=1`). Detection: `enterTurn()`'s `CHAIN_CHECKS` entry calls
+  `isStaircaseFinish(preVisitScore, darts)` (`frontend/scoring.js`, tested in
+  `backend/test/scoring.test.js`) — `preVisitScore` is read from that turn's
+  snapshot (`_snap.score`), not `p.score`, since `p.score` is already mutated
+  to the post-visit value by the time `CHAIN_CHECKS` runs. Icon 🪜,
+  un-suppressed.
 
 ### Milestones (round numbers, first occurrences)
 *(milestone)* — first 100+ checkout, first sub-10-dart leg, and lifetime round-number

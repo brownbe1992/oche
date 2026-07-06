@@ -11,7 +11,7 @@ const path = require('path');
 const scoring = require(path.join('..', '..', 'frontend', 'scoring.js'));
 const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET_STANDARD_NUMBERS,
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
-  evaluateDartDoublesPractice, chuckinTiersReached } = scoring;
+  evaluateDartDoublesPractice, chuckinTiersReached, isStaircaseFinish } = scoring;
 
 // Builds a real dart object the same way the app does (makeDart minus the
 // thrownAt timestamp), rather than hand-rolling a fake {value,isDouble,...} shape.
@@ -429,5 +429,54 @@ describe('chuckinTiersReached (Just Chuckin\' It milestone ladders, game-modes-r
   test('an empty ladder reaches nothing, and a zero value reaches nothing', () => {
     assert.deepEqual(chuckinTiersReached([], 100), []);
     assert.deepEqual(chuckinTiersReached(treblesTiers, 0), []);
+  });
+});
+
+describe('isStaircaseFinish (Staircase Finish achievement, REFERENCE.md\'s Achievements section)', () => {
+  test('the user\'s own worked example: left on 32, single 16 / single 8 / double 4', () => {
+    assert.equal(isStaircaseFinish(32, [d(16,1), d(8,1), d(4,2)]), true);
+  });
+
+  test('left on 40, single 20 / single 10 / double 5', () => {
+    assert.equal(isStaircaseFinish(40, [d(20,1), d(10,1), d(5,2)]), true);
+  });
+
+  test('left on 8, single 4 / single 2 / double 1 — the smallest qualifying start', () => {
+    assert.equal(isStaircaseFinish(8, [d(4,1), d(2,1), d(1,2)]), true);
+  });
+
+  test('every qualifying starting score (8, 16, 24, 32, 40) matches its own halving triple', () => {
+    assert.equal(isStaircaseFinish(16, [d(8,1), d(4,1), d(2,2)]), true);
+    assert.equal(isStaircaseFinish(24, [d(12,1), d(6,1), d(3,2)]), true);
+  });
+
+  test('the classic double-out route (no misses to the single) does not qualify', () => {
+    // Same 32 left, finished the "normal" way — straight to double 16, one dart.
+    assert.equal(isStaircaseFinish(32, [d(16,2)]), false);
+  });
+
+  test('a starting score not a multiple of 8 never qualifies', () => {
+    assert.equal(isStaircaseFinish(30, [d(15,1), d(7,1), d(4,2)]), false);
+  });
+
+  test('a starting score above 40 fails because the first dart would exceed a single (max 20)', () => {
+    assert.equal(isStaircaseFinish(48, [d(24,1), d(12,1), d(6,2)]), false);
+  });
+
+  test('right shape but a wrong multiplier on any of the three darts fails', () => {
+    assert.equal(isStaircaseFinish(32, [d(16,2), d(8,1), d(4,2)]), false);  // first dart a double, not single
+    assert.equal(isStaircaseFinish(32, [d(16,1), d(8,2), d(4,2)]), false);  // second dart a double, not single
+    assert.equal(isStaircaseFinish(32, [d(16,1), d(8,1), d(4,1)]), false); // last dart a single, not double
+  });
+
+  test('right shape but a wrong sector on any dart fails', () => {
+    assert.equal(isStaircaseFinish(32, [d(15,1), d(8,1), d(4,2)]), false);
+    assert.equal(isStaircaseFinish(32, [d(16,1), d(9,1), d(4,2)]), false);
+    assert.equal(isStaircaseFinish(32, [d(16,1), d(8,1), d(5,2)]), false);
+  });
+
+  test('fewer or more than exactly 3 darts never qualifies', () => {
+    assert.equal(isStaircaseFinish(32, [d(16,1), d(8,1)]), false);
+    assert.equal(isStaircaseFinish(32, [d(16,1), d(8,1), d(4,2), d(1,1)]), false);
   });
 });

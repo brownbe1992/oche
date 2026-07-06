@@ -3347,6 +3347,7 @@ const BADGE_INFO = {
   doubletrouble:      { icon:'👯', label:'Double Trouble', desc:'Check out with the last two darts of the visit both landing on doubles.' },
   bustedmaximum:      { icon:'💥', label:'Busted Maximum', desc:'Throw three treble 20s (a genuine 180) on a visit that still busts.' },
   nocigar:            { icon:'🤦', label:'No Cigar', desc:'Bust a double-out visit whose darts sum to exactly the score you needed — just not on a double.' },
+  staircasefinish:    { icon:'🪜', label:'Staircase Finish', desc:'Check out in exactly three darts by halving the target twice: single, single, then double — e.g. 32 down to 16, down to 8, then double 4.' },
   cricket9marks:       { icon:'🎯', label:'9 Marks', desc:'Score 9 marks in one Cricket visit — three trebles, the maximum possible.', cricket:true },
   cricketperfectclose: { icon:'🏆', label:'Perfect Leg', desc:'Close every Cricket number using the fewest darts physically possible for that match.', cricket:true },
   challengeweek:       { icon:'🔥', label:'Challenge Streak: Week', desc:'Complete the Daily Challenge 7 days in a row.', challenge:true },
@@ -3840,7 +3841,8 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   aroundtheworld:'Around the World! 🌍', doubletrouble:'Double Trouble! 👯', bustedmaximum:'Busted Maximum 💥',
   cricket9marks:'9 Marks! 🎯', cricketperfectclose:'🏆 PERFECT LEG! 🏆',
   challengeweek:'Challenge Streak: Week! 🔥', challengemonth:'🏆 CHALLENGE STREAK: MONTH! 🏆',
-  challengeallformats:'Full Rotation! 🗓️', nocigar:'No Cigar 🤦', chuckin180:'180! 🎯' };
+  challengeallformats:'Full Rotation! 🗓️', nocigar:'No Cigar 🤦', chuckin180:'180! 🎯',
+  staircasefinish:'Staircase Finish! 🪜' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -3848,7 +3850,8 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   comebackkid:3000, giantslayer:2500, grudgematch:3000, therematch:2500,
   aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500,
   cricket9marks:2500, cricketperfectclose:6000,
-  challengeweek:3000, challengemonth:6000, challengeallformats:3500, nocigar:2500, chuckin180:2500 };
+  challengeweek:3000, challengemonth:6000, challengeallformats:3500, nocigar:2500, chuckin180:2500,
+  staircasefinish:3000 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
@@ -4681,6 +4684,12 @@ function enterTurn(){
     // hence the p.doubleOut guard.
     { id:'nocigar', icon:'🤦', headline:'NO CIGAR', statLine:'Hit the exact score needed — just not on a double',
       test: () => ev.bust && p.doubleOut && ev.pointsThisVisit === p.score },
+    // Staircase Finish: checked out by aiming at a double, missing to the single,
+    // and repeating that all the way down (single half, single quarter, double
+    // eighth) — see scoring.js's isStaircaseFinish() for the exact math. _snap.score
+    // is this visit's PRE-visit remaining (p.score is already mutated to 0 by now).
+    { id:'staircasefinish', icon:'🪜', headline:'STAIRCASE FINISH', statLine:'Missed the double, checked out anyway by halving all the way down',
+      test: () => ev.win && isStaircaseFinish(_snap.score, _d) },
   ];
   let _chainMatched = CHAIN_CHECKS.filter(c => c.test());
   const _chainSuppressed = new Set(_chainMatched.flatMap(c => c.suppresses || []));
