@@ -466,6 +466,31 @@ reporting to see accuracy patterns/trends over time.
   game-type toggle (`homeTabRenderer:false` opts it out of the *Home* page's
   leaderboard toggle specifically, since none of its stats map onto a Home
   leaderboard shape — deferred, not a gap).
+- **✅ Done (2026-07, follow-up pass): Three-Dart Average + 180s + the `chuckin180`
+  achievement + a live Scoreboard dartboard heatmap.** `getChuckinStatBubbles()`
+  gained `avg` (the standard 3-dart average, same formula as X01) and
+  `oneEighties` (a count derived by grouping darts into non-overlapping runs of
+  3, in throw order, never spanning two sessions — `CHUCKIN_GROUPS_OF_3`'s
+  `ROW_NUMBER() OVER (PARTITION BY t.game_id ORDER BY d.id)` window function),
+  plus matching `chuckinavg`/`chuckin180s` metric-history cases. A 19th badge,
+  **`chuckin180`** ("180! 🎯"), fires whenever a completed group of 3 sums to
+  exactly 180 — checked inline in `throwDartChuckin()` via the identical
+  grouping rule replayed client-side in a rolling `p.dartBuffer`. Unlike the 18
+  milestones (deliberately not undo-revocable), `chuckin180` **is** revoked on
+  undo — it's a moment-style badge like Hat Trick, not a slow-building
+  milestone, so the per-dart snapshot now carries `badgeReverts`/`voided` the
+  same way X01/Cricket/Doubles Practice's snapshots already do. The Live
+  Scoreboard (`renderers.chuckin.card()`, `display.html`) also gained a live,
+  **session-only** dartboard heatmap (a separate, gradually-filling-in dataset
+  from the Player Profile's lifetime one — `buildChuckinLiveHeatmap()`, a
+  mirror-copied port of the Player Profile's own SVG geometry, no shared module
+  between the two files) alongside the running darts-thrown counter and 3-dart
+  average, laid out side-by-side in landscape and stacked in portrait. No
+  `ALLOWED_LIVE_KEYS` change was needed — the new `heatmap`/`sessionAvg` fields
+  ride inside the already-unrestricted per-player `players[]` array.
+- **✅ Done (2026-07, same pass): a brief explanation on the New Game page** —
+  a `chuckin-info-section`, shown only when the Just Chuckin' It sub-mode is
+  selected, explaining the mode's purpose in plain language.
 - **18 laddered milestone achievements**, exactly as requested ("ladder the
   achievements so there are a lot to earn and that earning them starts early and
   often"): 3 ladders — lifetime darts thrown (9 tiers: 100 → 100,000), trebles hit
@@ -551,6 +576,21 @@ stats").
   h2h/practice split would always leave the h2h side empty.
 - **Still not built**: achievements/badges for this mode (none were requested
   for this pass).
+- **Fixed (2026-07, follow-up pass): the Doubles Practice Home page tab no
+  longer shows while H2H is selected.** Since this mode has no H2H equivalent
+  at all, its Home leaderboard tab only makes sense under Practice — a new
+  `soloOnly:true` flag on `GAME_TYPES.doubles_practice` hides it from
+  `renderHomeGameTypeTabs()` while the top-level H2H tab is active, and
+  `switchHomeTab('h2h')` bounces `homeGameType` back to `'x01'` if this type
+  was showing, rather than leaving its solo data visible mislabeled as H2H
+  content.
+- **Changed (2026-07, same pass): moved off the New Game page's top-level Mode
+  row.** Doubles Practice and Just Chuckin' It are both solo practice
+  variants, not their own mode alongside H2H/Practice/Daily Challenge/Ghost —
+  they now live behind a "Practice type" sub-toggle that only appears once
+  Practice is selected (the top-level Practice button stays pressed for all
+  three sub-modes). Purely a New Game UI reorganization — no change to
+  `setMode()`'s underlying state handling or any game logic.
 
 ## New Game / Scoring screen changes
 

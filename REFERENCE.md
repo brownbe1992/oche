@@ -113,7 +113,12 @@ oche/
   `renderHomeGameTypeTabs()`. Only the toggle *mechanism* is generalized this
   way — each type's own backend stat-fetch functions and stat shapes stay
   bespoke; see game-modes-roadmap.md for why that part is deliberately left
-  unsolved.
+  unsolved. A `soloOnly:true` flag (currently just `GAME_TYPES.doubles_practice`
+  — a game type with no H2H mode at all) additionally hides that type's Home
+  page tab while the H2H top-level tab is selected (`renderHomeGameTypeTabs()`),
+  and `switchHomeTab('h2h')` bounces `homeGameType` back to `'x01'` if a
+  solo-only type was active, rather than leaving a hidden tab's solo data
+  showing mislabeled as H2H content.
 - **Game-lifecycle hooks** (`backend/db.js`, `docs/existing-app-prep-roadmap.md`
   item 4): `onGameCreated(fn)`/`onGameCompleted(fn)` register listener callbacks;
   `createGame()`/`completeGame()` fire theirs synchronously, in registration
@@ -849,14 +854,40 @@ scoped via `_scope({mode, gameType:'chuckin'})`.
 | Key | Label | Formula |
 |---|---|---|
 | `chuckindartsthrown` | Darts Thrown | `COUNT(*)` over every dart ever thrown in this mode, lifetime |
+| `chuckinavg` | Three-Dart Average | `SUM(sector*multiplier) / dartsThrown * 3` — the standard darts average formula, identical to X01's, over every dart ever thrown (no grouping needed — see `oneEighties` below for the one metric that does need grouping) |
+| `chuckin180s` | 180s | Count of completed, in-order 3-dart groups summing to exactly 180 — see "180s and the `chuckin180` achievement" below |
 | `chuckintreblepct` | Treble % | `trebles / dartsThrown * 100` |
 | `chuckinbullpct` | Bull % | `bulls / dartsThrown * 100` — a "bull" is any dart with `sector=25`, single or double |
 | `chuckindoublepct` | Double % | `doubles / dartsThrown * 100` |
 | `chuckinsessions` | Sessions Played | `COUNT(DISTINCT t.game_id)` |
 | `chuckinavgdartspersession` | Avg Darts / Session | `dartsThrown / sessionsPlayed` |
 
-All 6 return `null` (not `0`/`NaN`) when no darts have been thrown yet, matching
-every other stat bubble's "no data" convention.
+All 8 return `null` (not `0`/`NaN`) when no darts have been thrown yet, matching
+every other stat bubble's "no data" convention. `chuckinavg`/`chuckin180s` are
+primary (shown by default); `chuckinavgdartspersession`/`chuckintreblepct`/
+`chuckindoublepct`/`chuckinbullpct` moved behind "More stats" to make room.
+
+**180s and the `chuckin180` achievement** — this mode otherwise has no turn/
+visit boundary at all, so "assuming 3 darts per turn" (an explicit design
+decision) means both the `oneEighties` stat and its achievement are computed
+by grouping darts into non-overlapping runs of exactly 3, in throw order,
+*never spanning two different sessions* (`CHUCKIN_GROUPS_OF_3`, `backend/db.js`
+— a `ROW_NUMBER() OVER (PARTITION BY t.game_id ORDER BY d.id)` window function,
+`(rn-1)/3` giving the group index). A completed group whose 3 dart values sum
+to exactly 180 (only physically possible as three treble 20s) counts. The
+client mirrors this exact grouping live: `throwDartChuckin()` pushes each dart's
+value onto `p.dartBuffer`, and once it reaches length 3, checks the sum and
+resets the buffer — a fresh buffer at the start of every session, so a
+trailing 1-2 darts left over at the end of one session never combines with the
+next session's first darts, matching the backend's per-`game_id` partitioning
+exactly. On a genuine 180, the client queues a **`chuckin180`** achievement
+(`BADGE_INFO`/`ACH_LABELS`/`ACH_DURATION` in both `index.html` and
+`display.html`) via `awardRecurringBadge()` — a moment-style badge like Hat
+Trick, not a slow-building milestone, so **unlike** the 18 laddered milestones
+above (deliberately not undo-revocable) it **is** revoked on undo: the
+per-dart snapshot in `throwDartChuckin()` now carries `badgeReverts`/`voided`
+fields (the same convention `trackBadgeForUndo()` already uses for X01/Cricket/
+Doubles Practice), and `undoLastTurnChuckin()` processes them.
 
 **Personal Bests** (`getChuckinPersonalBests(name, mode)`) — deliberately just 2
 fields, following Doubles Practice's precedent that a drill mode's Personal
@@ -879,12 +910,16 @@ extended version of it — duplicating the small set of shared geometry helpers
 adding a non-interactive rendering mode to the heavily-used live scoring
 widget.
 
-**Metric history** (`getMetricHistory()`, all 6 keys above) —
-`chuckindartsthrown`/`chuckintreblepct`/`chuckinbullpct`/`chuckindoublepct`
-bucket per-dart like X01's `avg`; `chuckinsessions`/`chuckinavgdartspersession`
-bucket per-session (grouped by `t.game_id`, using the same `L` leg-bucketer
-Cricket/Doubles Practice use for their own per-round metrics — a "session" here
-plays the same structural role a "leg" does elsewhere).
+**Metric history** (`getMetricHistory()`, all 8 keys above) —
+`chuckindartsthrown`/`chuckinavg`/`chuckintreblepct`/`chuckinbullpct`/
+`chuckindoublepct` bucket per-dart like X01's `avg`; `chuckinsessions`/
+`chuckinavgdartspersession` bucket per-session (grouped by `t.game_id`, using
+the same `L` leg-bucketer Cricket/Doubles Practice use for their own per-round
+metrics — a "session" here plays the same structural role a "leg" does
+elsewhere); `chuckin180s` buckets by the timestamp of each qualifying group's
+*last* dart (via `F`, the post-window-function bucketer X01's `first3avg`
+already established the precedent for — no `t.` table alias is in scope once
+the grouping subquery's own `created_at` column has been unwrapped).
 
 **Player Profile UI**: its own button on the same N-way `.player-tabs`
 game-type toggle (`playerGameType`) every other mode uses, switching to
@@ -900,24 +935,45 @@ head-to-head), so it's excluded from that specific toggle's `Object.values(...)
 check while still appearing on the Player Profile's own toggle (whose filter
 doesn't check `homeTabRenderer` at all).
 
-**Undo support**: `throwDartChuckin()` snapshots session-counter state into
-`game.lastTurnSnapshot` before mutating (the same convention as every other
-per-dart-commit mode), and `undoLastTurnChuckin()` restores it and calls
-`DB.deleteLastTurn()`.
+**Live Scoreboard**: `renderers.chuckin.card()` (`frontend/display.html`) shows
+a live, **session-only** dartboard heatmap alongside the darts-thrown counter
+and the running 3-dart average — a genuinely different dataset from the
+lifetime one the Player Profile fetches via `getChuckinHeatmap()`, gradually
+filling in as the session progresses rather than showing accumulated history.
+`throwDartChuckin()` tallies hits into `p.heatmap` (a `{sector_mult: count}`
+map) and `p.sessionScore` (feeding the average) on every dart;
+`playerSnapshotChuckin()` flattens `p.heatmap` into the same
+`{sector,multiplier,hits}` array shape `getChuckinHeatmap()` already returns,
+so `display.html`'s renderer (`buildChuckinLiveHeatmap()`, a mirror-copied port
+of `buildChuckinHeatmap()`'s SVG geometry — no shared module between the two
+files, per the established convention) can feed it straight in. No
+`ALLOWED_LIVE_KEYS` change was needed — both fields ride inside the per-player
+`players[]` array, whose nested shape isn't restricted by that allowlist (only
+top-level payload keys are). Side-by-side with the session stats in landscape,
+stacked in portrait (`.chuckin-layout`, reusing the same
+`body.orientation-portrait` class every other orientation-aware element in
+this file already toggles — item 11).
+
+**Undo support**: `throwDartChuckin()` snapshots session-counter, heatmap,
+score, and dart-buffer state into `game.lastTurnSnapshot` before mutating (the
+same convention as every other per-dart-commit mode), and
+`undoLastTurnChuckin()` restores it, calls `DB.deleteLastTurn()`, and (new)
+revokes any `chuckin180` badge that dart awarded — see above.
 
 ---
 
 ## 4. Achievements & Badges
 
-44 badges (21 X01 + 2 Cricket + 3 Daily Challenge + 18 Just Chuckin' It),
+45 badges (21 X01 + 2 Cricket + 3 Daily Challenge + 19 Just Chuckin' It),
 tracked in the `player_badges` table (one row per player+badge, with a running
 `count`). X01 detection logic lives in `frontend/index.html`'s
 `enterTurn()`/`onLegWon()`; Cricket's 2 badges live in
 `enterTurnCricket()`/`onLegWonCricket()`; Daily Challenge's 3 badges are
 checked in `checkChallengeBadges()`, called right after every
-`/api/challenges/complete` response; Just Chuckin' It's 18 badges are checked
-in `checkChuckinMilestones()`, called after every dart from
-`throwDartChuckin()`.
+`/api/challenges/complete` response; Just Chuckin' It's 18 laddered milestones
+are checked in `checkChuckinMilestones()`, called after every dart from
+`throwDartChuckin()` — its 19th badge, `chuckin180`, is checked inline in that
+same function (see §2/§3's own coverage of it).
 
 ### Award modes
 
@@ -1033,6 +1089,16 @@ competitive-play corrections.
 | Lifetime Darts | `lifetimeDartsBase + p.sessionDarts` (computed locally — see §2's Just Chuckin' It section for why this isn't a network fetch per dart) | 100 Warming Up 🔥 · 500 In the Groove 🎯 · 1,000 Getting Serious 💪 · 2,500 Dedicated 📈 · 5,000 Grinder ⚙️ · 10,000 Iron Arm 🦾 · 25,000 Practice Makes Perfect 🏹 · 50,000 Machine 🤖 · 100,000 Legend of the Oche 👑 |
 | Session Darts | `p.sessionDarts` (this session only, resets to 0 on a new game) | 100 Solid Session ⏱️ · 250 Marathon Session 🏃 · 500 Endurance Test 🧗 · 1,000 Iron Session 🔋 |
 | Lifetime Trebles | `lifetimeTreblesBase + p.sessionTrebles` | 10 First Trebles 🎯 · 50 Treble Trouble 💥 · 100 Treble Century 💯 · 500 Treble Master 🌟 · 1,000 Treble Legend 🐐 |
+
+**The 19th Just Chuckin' It badge, `chuckin180`** ("180! 🎯"), is a genuinely
+different shape from the 18 above — a moment-style badge (Chuckin's own analog
+of X01's own 180, since this mode has no `scored` field to detect it from) checked
+inline in `throwDartChuckin()` rather than in `checkChuckinMilestones()`.
+**Recurring** (fires every qualifying group of 3, not once-only) and **does
+support undo-revocation** — see §2/§3's coverage of `CHUCKIN_GROUPS_OF_3`/
+`p.dartBuffer` for the exact "assumes 3 darts per turn" grouping rule and why
+this one badge, unlike the 18 milestones, gets the full `badgeReverts`/
+`snap.voided` treatment.
 
 ### Description text
 
@@ -1254,16 +1320,18 @@ dies mid-handshake can't leak a permanently-stuck slot.
 Built fresh on every `pushLive()` call from the current `game` object: active
 flag, category/legs/sets/current-player-index, per-player data (shape depends
 on `gameType` — X01: score/averages/darts breakdowns via `playerSnapshotX01`;
-Cricket: `marks`/`points`/darts breakdowns via `playerSnapshotCricket`),
-current visit's darts, checkout hint (X01 only — always empty for Cricket),
-status, `pendingAchievement` (§5), one-shot fields (`lastTurnEvent`,
-`matchResult`, `legStart` — cleared immediately after each push, so they only
-ever announce once), and a `checkoutTarget` for voice announcements.
-`ALLOWED_LIVE_KEYS` on the server allow-lists exactly these top-level fields
-(not the per-player shape inside `players`, which is how Cricket's differently-
-shaped player objects pass through unchanged) — anything else in a
-`POST /api/live` body is silently dropped (413 if the sanitized payload still
-exceeds 64KB).
+Cricket: `marks`/`points`/darts breakdowns via `playerSnapshotCricket`; Chuckin:
+session darts/trebles plus a live `heatmap` array and `sessionAvg` via
+`playerSnapshotChuckin`, §3's "Live Scoreboard" coverage), current visit's
+darts, checkout hint (X01 only — always empty for Cricket), status,
+`pendingAchievement` (§5), one-shot fields (`lastTurnEvent`, `matchResult`,
+`legStart` — cleared immediately after each push, so they only ever announce
+once), and a `checkoutTarget` for voice announcements. `ALLOWED_LIVE_KEYS` on
+the server allow-lists exactly these top-level fields (not the per-player
+shape inside `players`, which is how Cricket's differently-shaped player
+objects — and Chuckin's `heatmap`/`sessionAvg` — pass through unchanged) —
+anything else in a `POST /api/live` body is silently dropped (413 if the
+sanitized payload still exceeds 64KB).
 
 Cricket's live scoreboard (`renderers.cricket.scorecard()` in `display.html`,
 mirrored by `renderGameCricket()` on the controller in `frontend/index.html`)

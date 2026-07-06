@@ -742,6 +742,12 @@
         <div class="cricket-number-grid" id="doubles-target-grid" role="group" aria-label="Doubles to practice"></div>
       </div>
 
+      <!-- Just Chuckin' It explanation (Just Chuckin' It mode only) -->
+      <div class="setup-section" id="chuckin-info-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
+        <div class="setup-label" style="color:var(--gold)">Just Chuckin' It</div>
+        <p class="pp-meta" style="margin:0">No score to chase, no leg to win — just throw for as long as you like. Every dart still counts toward your lifetime totals and heatmap, so it's a low-pressure way to warm up, find your rhythm, or chase down a milestone badge.</p>
+      </div>
+
       <!-- Format (H2H only) -->
       <div id="h2h-options" class="setup-section">
         <div class="setup-label">Format</div>
@@ -1641,7 +1647,8 @@ let homeData=null;
 function renderHomeGameTypeTabs(){
   const el=document.getElementById('home-gtype-tabs');
   if(!el) return;
-  el.innerHTML = Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length && g.homeTabRenderer !== false).map(g=>
+  el.innerHTML = Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length && g.homeTabRenderer !== false
+    && !(g.soloOnly && homeTab==='h2h')).map(g=>
     `<button class="tab-btn${homeGameType===g.id?' active':''}" data-gtype="${g.id}" onclick="switchHomeGameType('${g.id}')">${g.label}</button>`
   ).join('');
 }
@@ -1696,6 +1703,11 @@ function renderHome(){
 function switchHomeTab(tab){
   homeTab=tab;
   document.querySelectorAll('#screen-home .tab-btn[data-tab]').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  // A solo-only game type (Doubles Practice) has no H2H content — bounce back to
+  // X01 rather than leaving its tab selected-but-hidden showing solo data
+  // mislabeled as H2H.
+  if(tab==='h2h' && GAME_TYPES[homeGameType] && GAME_TYPES[homeGameType].soloOnly) homeGameType='x01';
+  renderHomeGameTypeTabs();
   renderHomeTabBody();
 }
 function switchHomeGameType(type){
@@ -2065,6 +2077,7 @@ function setMode(mode){
   document.getElementById('challenge-info-section').hidden = (mode !== 'challenge');
   document.getElementById('ghost-options-section').hidden = (mode !== 'ghost');
   document.getElementById('doubles-options-section').hidden = (mode !== 'doubles_practice');
+  document.getElementById('chuckin-info-section').hidden = (mode !== 'chuckin');
   document.getElementById('add-player-wrap').style.display = isSpecialMode ? 'none' : '';
   const startBtn = document.getElementById('start-btn');
   if(startBtn) startBtn.textContent = (mode === 'challenge') ? 'Start Challenge' : (mode === 'ghost') ? 'Start race' : (mode === 'doubles_practice') ? 'Start practice' : (mode === 'chuckin') ? 'Start chuckin\'' : 'Start game';
@@ -3339,6 +3352,7 @@ const BADGE_INFO = {
   challengeweek:       { icon:'🔥', label:'Challenge Streak: Week', desc:'Complete the Daily Challenge 7 days in a row.', challenge:true },
   challengemonth:      { icon:'🏆', label:'Challenge Streak: Month', desc:'Complete the Daily Challenge 30 days in a row.', challenge:true },
   challengeallformats: { icon:'🗓️', label:'Full Rotation', desc:'Complete every Daily Challenge format at least once.', challenge:true },
+  chuckin180: { icon:'🎯', label:'180!', desc:"Three darts, sixty each — treated as a turn, since Just Chuckin' It otherwise has no turn boundary at all.", chuckin:true },
 };
 function loadPlayerBadges(){
   const container=document.getElementById('player-badges');
@@ -3826,7 +3840,7 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   aroundtheworld:'Around the World! 🌍', doubletrouble:'Double Trouble! 👯', bustedmaximum:'Busted Maximum 💥',
   cricket9marks:'9 Marks! 🎯', cricketperfectclose:'🏆 PERFECT LEG! 🏆',
   challengeweek:'Challenge Streak: Week! 🔥', challengemonth:'🏆 CHALLENGE STREAK: MONTH! 🏆',
-  challengeallformats:'Full Rotation! 🗓️', nocigar:'No Cigar 🤦' };
+  challengeallformats:'Full Rotation! 🗓️', nocigar:'No Cigar 🤦', chuckin180:'180! 🎯' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -3834,7 +3848,7 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   comebackkid:3000, giantslayer:2500, grudgematch:3000, therematch:2500,
   aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500,
   cricket9marks:2500, cricketperfectclose:6000,
-  challengeweek:3000, challengemonth:6000, challengeallformats:3500, nocigar:2500 };
+  challengeweek:3000, challengemonth:6000, challengeallformats:3500, nocigar:2500, chuckin180:2500 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
@@ -5350,15 +5364,17 @@ const DOUBLES_PRACTICE_BUBBLE_KEY_MAP = { doublespracticepct:'doublesPct',
 // Session/Treble % are primary; Double %/Bull % live behind "More stats".
 const CHUCKIN_STAT_DEFS = [
   { key:'chuckindartsthrown', label:'Darts Thrown', desc:"Total darts thrown in Just Chuckin' It", fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
+  { key:'chuckinavg', label:'Three-Dart Average', desc:"Standard 3-dart average across every dart thrown in Just Chuckin' It — assumes 3 darts per turn, same formula as X01", fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
+  { key:'chuckin180s', label:'180s', desc:"Count of 180s thrown in Just Chuckin' It (3 consecutive darts, treated as a turn, all landing as treble 20)", fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
   { key:'chuckinsessions', label:'Sessions Played', desc:"Number of Just Chuckin' It sessions", fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
-  { key:'chuckinavgdartspersession', label:'Darts / Session', desc:'Average darts thrown per session', fmt:v=>v!=null?Number(v).toFixed(1):'—', primary:true },
-  { key:'chuckintreblepct', label:'Treble %', desc:'% of darts landing in a treble bed', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'chuckinavgdartspersession', label:'Darts / Session', desc:'Average darts thrown per session', fmt:v=>v!=null?Number(v).toFixed(1):'—' },
+  { key:'chuckintreblepct', label:'Treble %', desc:'% of darts landing in a treble bed', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
   { key:'chuckindoublepct', label:'Double %', desc:'% of darts landing in a double bed (including double bull)', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
   { key:'chuckinbullpct', label:'Bull %', desc:'% of darts landing on the bullseye (single or double)', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
 ];
 const CHUCKIN_BUBBLE_KEY_MAP = { chuckindartsthrown:'dartsThrown', chuckinsessions:'sessionsPlayed',
   chuckinavgdartspersession:'avgDartsPerSession', chuckintreblepct:'treblePct',
-  chuckindoublepct:'doublePct', chuckinbullpct:'bullPct' };
+  chuckindoublepct:'doublePct', chuckinbullpct:'bullPct', chuckinavg:'avg', chuckin180s:'oneEighties' };
 
 // ---------- game-type plugin registry ----------
 // The seam future game types (Cricket, Ghost Opponent's replay engine) plug into.
@@ -5437,7 +5453,12 @@ const GAME_TYPES = {
     playerSnapshot: playerSnapshotDoublesPractice,
     statDefs: DOUBLES_PRACTICE_STAT_DEFS,
     personalBestsRenderer: renderDoublesPracticePersonalBests,
-    homeTabRenderer: renderHomeTabBodyDoublesPractice
+    homeTabRenderer: renderHomeTabBodyDoublesPractice,
+    // Always solo — there's no opponent to play head-to-head against, so this
+    // game type's Home page tab only makes sense under Practice. renderHomeGameTypeTabs()
+    // hides it entirely while the H2H tab is selected, and switchHomeTab() bumps
+    // homeGameType back to x01 if the H2H tab is clicked while this one is active.
+    soloOnly: true
   },
   chuckin: {
     id: 'chuckin',
@@ -5638,7 +5659,14 @@ function renderGameDoublesPractice(){
    checkChuckinMilestones()); the lifetime figures backing the other two
    milestone ladders come from the stat-bubbles endpoint instead. */
 function newMatchPlayerChuckin(name){
-  const p = { name, sessionDarts:0, sessionTrebles:0, lifetimeDartsBase:0, lifetimeTreblesBase:0 };
+  const p = { name, sessionDarts:0, sessionTrebles:0, lifetimeDartsBase:0, lifetimeTreblesBase:0,
+    // sessionScore feeds the 3-dart average; heatmap is a live, session-only
+    // {sector_mult: hits} tally for the Live Scoreboard's dartboard (a separate,
+    // shorter-lived concept from the lifetime one Player Profile fetches via
+    // getChuckinHeatmap()); dartBuffer groups darts into non-overlapping runs of
+    // 3 (mirroring the backend's CHUCKIN_GROUPS_OF_3) purely to detect a 180 —
+    // see throwDartChuckin() below.
+    sessionScore:0, heatmap:{}, dartBuffer:[] };
   // Fetched once at game start (not re-queried per dart) so checkChuckinMilestones()
   // can compute lifetime darts/trebles as base+session entirely from local state —
   // this mode is built around rapid successive throws, and hitting the network on
@@ -5657,21 +5685,54 @@ function newMatchPlayerChuckin(name){
 // Not called by startNextLeg() (this mode never advances a leg) — provided only
 // to satisfy the GAME_TYPES contract, matching Doubles Practice's own precedent.
 function resetPlayerForNextLegChuckin(p){
-  p.sessionDarts = 0; p.sessionTrebles = 0;
+  p.sessionDarts = 0; p.sessionTrebles = 0; p.sessionScore = 0; p.heatmap = {}; p.dartBuffer = [];
 }
+// heatmap is sent as a flat {sector,multiplier,hits} array (same shape
+// getChuckinHeatmap() returns) so the Live Scoreboard can feed it straight into
+// the same buildChuckinHeatmap()-style renderer, just session-scoped instead of
+// lifetime-scoped. sessionAvg is the standard 3-dart average computed live
+// (see getChuckinStatBubbles()'s `avg` field for the backend/lifetime version
+// of the identical formula).
 function playerSnapshotChuckin(p){
-  return { name:p.name, sessionDarts:p.sessionDarts||0, sessionTrebles:p.sessionTrebles||0 };
+  const heatmap = Object.entries(p.heatmap||{}).map(([key,hits])=>{
+    const [sector,multiplier] = key.split('_').map(Number);
+    return { sector, multiplier, hits };
+  });
+  const sessionAvg = p.sessionDarts>0 ? (p.sessionScore/p.sessionDarts*3) : null;
+  return { name:p.name, sessionDarts:p.sessionDarts||0, sessionTrebles:p.sessionTrebles||0, heatmap, sessionAvg };
 }
 function throwDartChuckin(sector){
   const dart = makeDart(sector, mult);
   mult = 1; updateMultUI();
   const p = game.players[0];
 
-  // snapshot state before mutation so undoLastTurnChuckin() can restore it
-  game.lastTurnSnapshot = { sessionDarts:p.sessionDarts, sessionTrebles:p.sessionTrebles, chuckinLastDart:game.chuckinLastDart };
+  // snapshot state before mutation so undoLastTurnChuckin() can restore it.
+  // badgeReverts/voided follow the same convention as every other game type's
+  // snapshot (see trackBadgeForUndo()) — the chuckin180 achievement below is a
+  // moment-style badge like Hat Trick, not a slow-building milestone, so unlike
+  // the 18 laddered milestones (deliberately not undo-revocable, see
+  // checkChuckinMilestones()'s own comment) it DOES get revoked on undo.
+  game.lastTurnSnapshot = { sessionDarts:p.sessionDarts, sessionTrebles:p.sessionTrebles,
+    sessionScore:p.sessionScore, dartBuffer:p.dartBuffer.slice(), heatmap:{...p.heatmap},
+    chuckinLastDart:game.chuckinLastDart, badgeReverts:[], voided:false };
 
   p.sessionDarts += 1;
   if(dart.isTreble) p.sessionTrebles += 1;
+  p.sessionScore += dart.value;
+  const hKey = dart.sector+'_'+dart.mult;
+  p.heatmap[hKey] = (p.heatmap[hKey]||0) + 1;
+
+  // "Assuming three darts per turn" (explicitly requested): group darts into
+  // non-overlapping runs of 3, purely to detect a 180 — this mode otherwise has
+  // no turn/visit boundary at all. Mirrors the backend's CHUCKIN_GROUPS_OF_3
+  // exactly (both reset at a fresh session, so a group never spans two games).
+  p.dartBuffer.push(dart.value);
+  let got180 = false;
+  if(p.dartBuffer.length === 3){
+    got180 = (p.dartBuffer[0] + p.dartBuffer[1] + p.dartBuffer[2] === 180);
+    p.dartBuffer = [];
+  }
+
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:0, bust:false, checkout:false, checkoutPoints:null, legWon:false,
     darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt }] });
@@ -5679,19 +5740,32 @@ function throwDartChuckin(sector){
   announce(`${dart.label}. ${p.sessionDarts} dart${p.sessionDarts===1?'':'s'} this session.`);
   renderGameChuckin();
   checkChuckinMilestones(p);
+  if(got180){
+    queueBadge('chuckin180', p.name);
+    awardRecurringBadge(p.name, 'chuckin180', 'chuckin180', { icon:'🎯', headline:'180!', player:p.name, statLine:"Three darts, sixty each, in Just Chuckin' It" });
+  }
 }
 // Undoes the single most recently thrown dart — mirrors undoLastTurnDoublesPractice()'s
-// shape. No badge reverts needed here despite this mode having achievements: every
-// chuckin badge is a permanent once-earned milestone gated on a >= threshold, so an
-// undone dart that happened to cross one leaves the milestone earned (matches how
-// Around the Clock/World already behave — those aren't revoked on undo either).
+// shape, plus revoking any badge (chuckin180) this dart awarded, same convention
+// as X01/Cricket. The 18 laddered milestones stay permanently earned on undo —
+// see checkChuckinMilestones()'s own comment for why that's a deliberate,
+// separate decision from this one.
 function undoLastTurnChuckin(){
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
   const p = game.players[0];
   p.sessionDarts = snap.sessionDarts;
   p.sessionTrebles = snap.sessionTrebles;
+  p.sessionScore = snap.sessionScore;
+  p.dartBuffer = snap.dartBuffer;
+  p.heatmap = snap.heatmap;
   game.chuckinLastDart = snap.chuckinLastDart;
+
+  snap.voided = true;
+  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+  });
+
   game.lastTurnSnapshot = null;
   DB.deleteLastTurn();
   const status=document.getElementById('status');

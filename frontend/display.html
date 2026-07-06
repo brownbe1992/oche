@@ -127,6 +127,17 @@
   .cs-throw-lbl b{color:var(--gold)}
   .cs-throw-row .darts{flex:1}
 
+  /* Just Chuckin' It: dartboard heatmap alongside the session stats — side by
+     side in landscape (plenty of width, since this mode is always solo so the
+     card already spans the whole grid), stacked in portrait (same orientation-
+     awareness convention as the rest of this file, item 11). */
+  .chuckin-layout{display:flex;gap:2.8vmin;flex:1;min-height:0;align-items:center}
+  body.orientation-portrait .chuckin-layout{flex-direction:column;align-items:stretch}
+  .chuckin-stats{flex:1;display:flex;flex-direction:column;justify-content:center;min-width:0}
+  .chuckin-board{flex:none;width:40vmin;max-width:44%}
+  body.orientation-portrait .chuckin-board{width:100%;max-width:62vmin;margin:0 auto}
+  .chuckin-board svg{width:100%;height:auto;display:block}
+
   /* darts in hand + checkout */
   .throwbox{margin-top:1.6vmin;border-top:1px dashed var(--wire);padding-top:1.6vmin;display:flex;flex-direction:column;gap:1.2vmin}
   .darts{display:flex;gap:1.2vmin}
@@ -288,7 +299,7 @@ const ACH_LABELS  = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter
   aroundtheworld:'Around the World! 🌍', doubletrouble:'Double Trouble! 👯', bustedmaximum:'Busted Maximum 💥',
   cricket9marks:'9 Marks! 🎯', cricketperfectclose:'🏆 PERFECT LEG! 🏆',
   challengeweek:'Challenge Streak: Week! 🔥', challengemonth:'🏆 CHALLENGE STREAK: MONTH! 🏆',
-  challengeallformats:'Full Rotation! 🗓️', nocigar:'No Cigar 🤦' };
+  challengeallformats:'Full Rotation! 🗓️', nocigar:'No Cigar 🤦', chuckin180:'180! 🎯' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -296,7 +307,7 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   comebackkid:3000, giantslayer:2500, grudgematch:3000, therematch:2500,
   aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500,
   cricket9marks:2500, cricketperfectclose:6000,
-  challengeweek:3000, challengemonth:6000, challengeallformats:3500, nocigar:2500 };
+  challengeweek:3000, challengemonth:6000, challengeallformats:3500, nocigar:2500, chuckin180:2500 };
 // Mirror-copied from frontend/index.html's BADGE_INFO[...].desc / ACH_DESC_FALLBACK —
 // this file has no Badge Case UI to source the text from directly, so it's kept as
 // its own flat map (docs/next-session-plan.md item 1).
@@ -330,6 +341,7 @@ const ACH_DESC = {
   challengemonth: 'Complete the Daily Challenge 30 days in a row.',
   challengeallformats: 'Complete every Daily Challenge format at least once.',
   nocigar: 'Bust a double-out visit whose darts sum to exactly the score you needed — just not on a double.',
+  chuckin180: "Three darts, sixty each — treated as a turn, since Just Chuckin' It otherwise has no turn boundary at all.",
 };
 // Just Chuckin' It's 18 laddered milestone badges — mirror-copied from frontend/
 // index.html's CHUCKIN_MILESTONE_LADDERS (this file has no shared module with
@@ -466,6 +478,62 @@ function dartClass(label){
   if(label[0]==='T') return 't';
   if(label[0]==='D' || label==='Bull') return 'd';
   return '';
+}
+
+// Standard dartboard number ordering, clockwise from the top — mirror-copied
+// from frontend/index.html's DB_SECTORS (this file has no shared module with
+// index.html, per the established convention for every other duplicated map
+// above). Feeds buildChuckinLiveHeatmap() below.
+const DB_SECTORS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
+// Just Chuckin' It's live, session-only dartboard heatmap — mirror-copied from
+// frontend/index.html's buildChuckinHeatmap() (the Player Profile's lifetime
+// version), stripped of nothing structural: same geometry, same single-hue heat
+// scale, same hover tooltips. `cells` is index.html's playerSnapshotChuckin()'s
+// live {sector,multiplier,hits} array, gradually filling in as the session
+// progresses, not a fetched lifetime dataset.
+function buildChuckinLiveHeatmap(cells){
+  const hitMap = {};
+  let maxHits = 0;
+  (cells||[]).forEach(c=>{ hitMap[c.sector+'_'+c.multiplier] = c.hits; if(c.hits>maxHits) maxHits = c.hits; });
+  const hits = (sector, m) => hitMap[sector+'_'+m] || 0;
+  const heat = (sector, m) => maxHits>0 ? hits(sector,m)/maxHits : 0;
+
+  const CX=250, CY=250;
+  const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248 };
+  const DEG = 360/20;
+  const xy = (r, deg) => { const a=(deg-90)*Math.PI/180; return [CX+r*Math.cos(a), CY+r*Math.sin(a)]; };
+  const f = v => v.toFixed(2);
+  const annulus = (r1, r2, s, e) => {
+    const [x1,y1]=xy(r1,s),[x2,y2]=xy(r1,e),[x3,y3]=xy(r2,e),[x4,y4]=xy(r2,s);
+    const lg=e-s>180?1:0;
+    return `M${f(x1)},${f(y1)} A${r1},${r1} 0 ${lg},1 ${f(x2)},${f(y2)} L${f(x3)},${f(y3)} A${r2},${r2} 0 ${lg},0 ${f(x4)},${f(y4)} Z`;
+  };
+  const heatFill = t => {
+    if(t<=0) return '#1c1e1a';
+    const r = Math.round(28 + t*(217-28));
+    const g = Math.round(30 + t*(180-30));
+    const b = Math.round(26 + t*(106-26));
+    return `rgb(${r},${g},${b})`;
+  };
+  let s = `<svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Live dartboard heatmap of this Just Chuckin' It session">
+    <circle cx="${CX}" cy="${CY}" r="${R.bg}" fill="#0d0e0b"/>
+    <circle cx="${CX}" cy="${CY}" r="${R.doubleOut+1}" fill="#111210"/>
+    <circle cx="${CX}" cy="${CY}" r="${R.doubleOut}" fill="#0d0e0b"/>`;
+  DB_SECTORS.forEach((n,i)=>{
+    const s0=i*DEG-DEG/2, e0=s0+DEG;
+    const sw = 'stroke="#151613" stroke-width="0.5"';
+    s += `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${heatFill(heat(n,1))}" ${sw}><title>${n}: ${hits(n,1)} single hit${hits(n,1)===1?'':'s'}</title></path>`;
+    s += `<path d="${annulus(R.trebleIn,R.trebleOut,s0,e0)}" fill="${heatFill(heat(n,3))}" ${sw}><title>T${n}: ${hits(n,3)} treble hit${hits(n,3)===1?'':'s'}</title></path>`;
+    s += `<path d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${heatFill(heat(n,1))}" ${sw}/>`;
+    s += `<path d="${annulus(R.doubleIn,R.doubleOut,s0,e0)}" fill="${heatFill(heat(n,2))}" ${sw}><title>D${n}: ${hits(n,2)} double hit${hits(n,2)===1?'':'s'}</title></path>`;
+    const [nx,ny]=xy(R.numAt,s0+DEG/2);
+    s += `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="17" fill="#efe7d2" style="pointer-events:none;user-select:none">${n}</text>`;
+  });
+  s += `<circle cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="${heatFill(heat(25,1))}" stroke="#151613" stroke-width="0.5"><title>Bull: ${hits(25,1)} hit${hits(25,1)===1?'':'s'}</title></circle>`;
+  s += `<circle cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="${heatFill(heat(25,2))}" stroke="#151613" stroke-width="0.5"><title>Double Bull: ${hits(25,2)} hit${hits(25,2)===1?'':'s'}</title></circle>`;
+  s += `<text x="${CX}" y="${CY}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="12" fill="#efe7d2" style="pointer-events:none;user-select:none">Bull</text>`;
+  s += `</svg>`;
+  return s;
 }
 
 /* ---- per-game-type renderers ----
@@ -659,29 +727,37 @@ const renderers = {
   // Just Chuckin' It (docs/game-modes-roadmap.md): solo, freeform, no rounds/legs
   // at all — always exactly one player/card, no legSummary, no scorecard, so this
   // always goes through the generic s.players.map(renderer.card) path below.
+  // p.heatmap/p.sessionAvg come from index.html's playerSnapshotChuckin() — a
+  // live, session-only tally (gradually fills in as the session progresses),
+  // a separate concept from the lifetime heatmap the Player Profile fetches.
   chuckin: {
     card(p, i, s, L){
       const active = i===s.currentIndex;
       const pct = p.sessionDarts ? Math.round(p.sessionTrebles/p.sessionDarts*100) : 0;
+      const avgText = p.sessionAvg!=null ? p.sessionAvg.toFixed(1) : '—';
       let throwbox = '';
       if(active && s.chuckinLastDart){
         const treble = s.chuckinLastDart.isTreble ? '<span class="flash win" style="position:static;display:inline-block;margin-left:8px">TREBLE</span>' : '';
         throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(s.chuckinLastDart.label)}">${esc(s.chuckinLastDart.label)}</div></div>${treble}</div>`;
       }
       return `<div class="pcard ${active?'active':''}">
-        <div>
-          <div class="prow1">
-            <span class="pname">${escapeHtml(p.name)}</span>
-            ${active?'<span class="throwflag">▸ throwing</span>':''}
+        <div class="chuckin-layout">
+          <div class="chuckin-stats">
+            <div class="prow1">
+              <span class="pname">${escapeHtml(p.name)}</span>
+              ${active?'<span class="throwflag">▸ throwing</span>':''}
+            </div>
+            <div class="score">${num(p.sessionDarts)}</div>
+            <div class="dart-counts">
+              <div class="dart-counts-title">Just chuckin' it</div>
+              <div class="dart-count-row"><span class="dart-count-val">${avgText}</span><span class="dart-count-lbl">3-dart average</span></div>
+              <div class="dart-count-row"><span class="dart-count-val">${pct}%</span><span class="dart-count-lbl">Trebles this session</span></div>
+              <div class="dart-count-row"><span class="dart-count-val">${num(p.sessionTrebles)}</span><span class="dart-count-lbl">Trebles</span></div>
+            </div>
+            ${throwbox}
           </div>
-          <div class="score">${num(p.sessionDarts)}</div>
-          <div class="dart-counts">
-            <div class="dart-counts-title">Just chuckin' it</div>
-            <div class="dart-count-row"><span class="dart-count-val">${pct}%</span><span class="dart-count-lbl">Trebles this session</span></div>
-            <div class="dart-count-row"><span class="dart-count-val">${num(p.sessionTrebles)}</span><span class="dart-count-lbl">Trebles</span></div>
-          </div>
+          <div class="chuckin-board">${buildChuckinLiveHeatmap(p.heatmap||[])}</div>
         </div>
-        ${throwbox}
       </div>`;
     }
   }

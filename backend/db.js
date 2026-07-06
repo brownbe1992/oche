@@ -1587,6 +1587,22 @@ function getDoublesPracticeBestRoundStats() {
    stat (see NOT_CHUCKIN above) — the one exception, the pure "total darts thrown"
    counters, are already fully unscoped queries that need no change to include it. */
 
+// Groups a player's chuckin darts into non-overlapping runs of 3, in throw
+// order, *within each session* (a run never spans two different games) —
+// the "assuming three darts per turn" convention requested for tracking 180s
+// in a game type that otherwise has no turn/visit boundary at all. Shared by
+// the `oneEighties` stat bubble below and (mirrored client-side in
+// checkChuckinMilestones()'s sibling, throwDartChuckin()'s own rolling buffer)
+// the live chuckin180 achievement check.
+const CHUCKIN_GROUPS_OF_3 = (scope) => `
+  SELECT SUM(val) AS grp_score, COUNT(*) AS grp_count FROM (
+    SELECT d.sector * d.multiplier AS val, t.game_id AS game_id,
+           (ROW_NUMBER() OVER (PARTITION BY t.game_id ORDER BY d.id) - 1) / 3 AS grp
+    FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id
+    WHERE t.player_id=? ${scope}
+  ) GROUP BY game_id, grp
+`;
+
 function getChuckinStatBubbles(playerName, mode) {
   const p = getPlayer(playerName);
   if (!p) return null;
@@ -1603,7 +1619,18 @@ function getChuckinStatBubbles(playerName, mode) {
   const sessionsPlayed = db.prepare(`SELECT COUNT(DISTINCT t.game_id) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
   const avgDartsPerSession = sessionsPlayed > 0 ? (dartsThrown / sessionsPlayed) : null;
 
-  return { dartsThrown, trebles, treblePct, bulls, bullPct, doubles, doublePct, sessionsPlayed, avgDartsPerSession };
+  // Standard 3-dart average (matches X01's own formula exactly): total score
+  // across every dart thrown, scaled to a 3-dart-visit equivalent. Unlike
+  // oneEighties below, this doesn't need the 3-dart grouping at all — it's
+  // just points-per-dart * 3, so a trailing partial group still counts fully.
+  const totalScore = db.prepare(`SELECT COALESCE(SUM(d.sector * d.multiplier),0) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+  const avg = dartsThrown > 0 ? (totalScore / dartsThrown * 3) : null;
+
+  // 180s: every completed (exactly 3 darts) group above whose total is 180 —
+  // only physically possible as three treble 20s, same as X01's 180.
+  const oneEighties = db.prepare(`SELECT COUNT(*) AS v FROM (${CHUCKIN_GROUPS_OF_3(scope)} HAVING grp_count=3 AND grp_score=180)`).get(p.id)?.v ?? 0;
+
+  return { dartsThrown, trebles, treblePct, bulls, bullPct, doubles, doublePct, sessionsPlayed, avgDartsPerSession, avg, oneEighties };
 }
 
 // Personal Bests analog: "best session" records (mirrors Doubles Practice's
@@ -1906,6 +1933,26 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         WHERE t.player_id=? ${chuckinScope} ${weightWhere}
         GROUP BY t.game_id
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
+    // Standard 3-dart average, per-dart bucketed like X01's own 'avg' case —
+    // no 3-dart grouping needed, just points-per-dart * 3 (see getChuckinStatBubbles).
+    case 'chuckinavg':
+      return db.prepare(`SELECT bucket, CAST(SUM(val) AS REAL)*3/NULLIF(COUNT(*),0) AS value FROM (
+        SELECT ${T.fmt} AS bucket, d.sector*d.multiplier AS val
+        FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+        WHERE t.player_id=? ${chuckinScope} ${T.and} ${weightWhere}
+      ) GROUP BY bucket ORDER BY bucket`).all(...params);
+    // 180s: bucketed by the timestamp of each qualifying 3-dart group's last dart
+    // (via its turn's created_at) — see CHUCKIN_GROUPS_OF_3's own comment for why
+    // groups never span two sessions.
+    case 'chuckin180s':
+      return db.prepare(`SELECT ${F.fmt} AS bucket, COUNT(*) AS value FROM (
+        SELECT MAX(created_at) AS created_at, SUM(val) AS grp_score, COUNT(*) AS grp_count FROM (
+          SELECT d.sector*d.multiplier AS val, t.created_at AS created_at, t.game_id AS game_id,
+                 (ROW_NUMBER() OVER (PARTITION BY t.game_id ORDER BY d.id) - 1) / 3 AS grp
+          FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id
+          WHERE t.player_id=? ${chuckinScope} ${weightWhere}
+        ) GROUP BY game_id, grp
+      ) WHERE grp_count=3 AND grp_score=180 ${F.and} GROUP BY bucket ORDER BY bucket`).all(...params);
 
     default:
       return [];

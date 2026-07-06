@@ -89,6 +89,57 @@ describe('getChuckinStatBubbles', () => {
     assert.equal(bubbles.doublePct, null);
     assert.equal(bubbles.sessionsPlayed, 0);
     assert.equal(bubbles.avgDartsPerSession, null);
+    assert.equal(bubbles.avg, null);
+    assert.equal(bubbles.oneEighties, 0);
+  });
+
+  test('avg is the standard 3-dart average (total score / darts * 3), including a trailing partial group', () => {
+    const name = 'Chuckin_Avg';
+    db.addPlayer(name);
+    const g = chuckinGame(name);
+    chuckinDart(g.gameId, name, [20, 3]); // 60
+    chuckinDart(g.gameId, name, [20, 3]); // 60
+    chuckinDart(g.gameId, name, [20, 3]); // 60
+    chuckinDart(g.gameId, name, [5, 1]);  // 5 -- a trailing 4th dart, no full group of 3
+    chuckinDart(g.gameId, name, [5, 1]);  // 5
+
+    const bubbles = db.getChuckinStatBubbles(name, 'practice');
+    assert.equal(bubbles.avg, (60 * 3 + 5 + 5) / 5 * 3, 'total score / darts thrown * 3, same formula as X01');
+  });
+
+  test('oneEighties counts only complete, in-order 3-dart groups summing to exactly 180', () => {
+    const name = 'Chuckin_180';
+    db.addPlayer(name);
+    const g = chuckinGame(name);
+    chuckinDart(g.gameId, name, [20, 3]);
+    chuckinDart(g.gameId, name, [20, 3]);
+    chuckinDart(g.gameId, name, [20, 3]); // group 1: 180 -- counts
+    chuckinDart(g.gameId, name, [20, 3]);
+    chuckinDart(g.gameId, name, [20, 3]);
+    chuckinDart(g.gameId, name, [20, 1]); // group 2: 60+60+20=140 -- does not count
+    chuckinDart(g.gameId, name, [20, 3]);
+    chuckinDart(g.gameId, name, [20, 3]); // trailing partial group of 2 -- not evaluated yet
+
+    const bubbles = db.getChuckinStatBubbles(name, 'practice');
+    assert.equal(bubbles.oneEighties, 1);
+  });
+
+  test('a 180 group never spans two different sessions, even if darts land at the boundary', () => {
+    const name = 'Chuckin_180_SessionBoundary';
+    db.addPlayer(name);
+    const g1 = chuckinGame(name);
+    chuckinDart(g1.gameId, name, [20, 3]);
+    chuckinDart(g1.gameId, name, [20, 3]); // session 1 ends with a partial 2-dart group
+    const g2 = chuckinGame(name);
+    chuckinDart(g2.gameId, name, [20, 3]); // if this wrongly completed session 1's group, oneEighties would be 1
+
+    const bubbles = db.getChuckinStatBubbles(name, 'practice');
+    assert.equal(bubbles.oneEighties, 0, 'session 1 has only 2 darts, session 2 has only 1 -- no session has a complete 180');
+
+    chuckinDart(g2.gameId, name, [20, 3]);
+    chuckinDart(g2.gameId, name, [20, 3]); // completes session 2's own group of 3
+    const bubbles2 = db.getChuckinStatBubbles(name, 'practice');
+    assert.equal(bubbles2.oneEighties, 1, 'session 2 now has its own complete 180, entirely within itself');
   });
 });
 
@@ -194,6 +245,35 @@ describe('getMetricHistory matches getChuckinStatBubbles (docs/game-modes-roadma
     const totalSessions = sessionsHistory.reduce((s, row) => s + row.value, 0);
     assert.equal(totalSessions, bubbles.sessionsPlayed);
     assert.equal(avgHistory[0].value, bubbles.avgDartsPerSession);
+  });
+
+  test('"chuckinavg" over "all" time equals the stat-bubble 3-dart average', () => {
+    const name = 'Chuckin_Metric_Avg';
+    db.addPlayer(name);
+    const g = chuckinGame(name);
+    chuckinDart(g.gameId, name, [20, 3]);
+    chuckinDart(g.gameId, name, [5, 1]);
+
+    const bubbles = db.getChuckinStatBubbles(name, 'practice');
+    const history = db.getMetricHistory(name, 'chuckinavg', 'all', { mode: 'practice' });
+    assert.equal(history.length, 1);
+    assert.equal(history[0].value, bubbles.avg);
+  });
+
+  test('"chuckin180s" over "all" time sums to the stat-bubble oneEighties count', () => {
+    const name = 'Chuckin_Metric_180';
+    db.addPlayer(name);
+    const g = chuckinGame(name);
+    chuckinDart(g.gameId, name, [20, 3]);
+    chuckinDart(g.gameId, name, [20, 3]);
+    chuckinDart(g.gameId, name, [20, 3]); // a complete 180
+    chuckinDart(g.gameId, name, [5, 1]); // trailing, no full group
+
+    const bubbles = db.getChuckinStatBubbles(name, 'practice');
+    const history = db.getMetricHistory(name, 'chuckin180s', 'all', { mode: 'practice' });
+    const total = history.reduce((s, row) => s + row.value, 0);
+    assert.equal(total, bubbles.oneEighties);
+    assert.equal(total, 1);
   });
 });
 

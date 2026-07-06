@@ -8,7 +8,7 @@ A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player 
 
 **v0.10.0**
 
-You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [44-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. All data lives in a SQLite database on your own server.
+You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [45-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. All data lives in a SQLite database on your own server.
 
 > Looking for exact stat formulas, achievement trigger conditions, the full database schema, or how a feature works internally (e.g. to debug it)? See **[REFERENCE.md](REFERENCE.md)** — the technical reference manual, kept up to date alongside this README.
 
@@ -149,7 +149,9 @@ Players with a PIN set show a 🔒 next to their name in the dropdown. When exac
 
 **Doubles Practice mode** is a solo drill for practicing specific doubles — choose one or more from a 1–20-plus-Bull picker (any number, no fixed count), then throw. All selected doubles stay **live at once** — you choose which one to aim at each dart, not a forced rotation. A **round** keeps going, however many darts it takes, until one of two things happens: a single or treble lands on one of your target numbers ("so close" — right number, wrong ring), or a double lands on a number that isn't one of your targets ("wrong double"). A genuine miss elsewhere on the board doesn't end anything — just keep throwing. When a round ends, **Start next round** resets the tally and keeps the same targets. The scoring screen and Live Scoreboard show the live target set, this round's hit count and darts-thrown, and the running doubles percentage; there's no numeric score, no opponent, and no Enter-turn step — every dart commits the instant it's thrown. See [Player Profile](#player-profile) for its own stat bubbles (Doubles %, Darts/Round, Doubles Hit/Round) and Personal Bests (longest round, most doubles in a round), reachable via the same game-type toggle. Undo Last Dart is supported, one dart deep.
 
-**Just Chuckin' It** is completely freeform, unscored practice — no starting score, no bust, no win, no opponent, just throwing dart after dart until you press **End game**. The point is pure warm-up/muscle-memory reps without any game pressure at all. Every dart commits instantly (no Enter-turn step, same as Doubles Practice), and there's undo support for the last dart. Its stats are heatmap-heavy on purpose: [Player Profile](#player-profile) gets a non-interactive dartboard heatmap shaded by how often you hit each region (with exact counts on hover), plus 6 stat bubbles (Darts Thrown, Treble/Bull/Double %, Sessions Played, Avg Darts/Session), a 2-field Personal Bests (longest session, most trebles in a session), and 18 laddered milestone achievements (see [Achievements & Badges](#achievements--badges)) so there's always another one within reach. Darts thrown in this mode count toward your lifetime/daily/weekly total darts thrown (the one deliberate exception) but never toward any X01/Cricket/Doubles Practice stat, average, or leaderboard.
+**Just Chuckin' It** is completely freeform, unscored practice — no starting score, no bust, no win, no opponent, just throwing dart after dart until you press **End game**. Selecting it on the [New Game](#new-game) page shows a short explanation of what it's for. The point is pure warm-up/muscle-memory reps without any game pressure at all. Every dart commits instantly (no Enter-turn step, same as Doubles Practice), and there's undo support for the last dart. Its stats are heatmap-heavy on purpose: [Player Profile](#player-profile) gets a non-interactive dartboard heatmap shaded by how often you hit each region (with exact counts on hover), plus 8 stat bubbles (Darts Thrown, Three-Dart Average, 180s, Treble/Bull/Double %, Sessions Played, Avg Darts/Session), a 2-field Personal Bests (longest session, most trebles in a session), and 19 achievements (18 laddered milestones plus its own 180! — see [Achievements & Badges](#achievements--badges)) so there's always another one within reach. Darts thrown in this mode count toward your lifetime/daily/weekly total darts thrown (the one deliberate exception) but never toward any X01/Cricket/Doubles Practice stat, average, or leaderboard.
+
+The **Live Scoreboard** shows a live dartboard heatmap for this mode too, gradually filling in as the session progresses (a separate, shorter-lived dataset from the lifetime one on the Player Profile), alongside a running darts-thrown counter and three-dart average — side by side on a wide screen, stacked on a narrow one.
 
 ---
 
@@ -216,7 +218,7 @@ choice, no checkout hints, and no bust concept:
 
 ### Achievements & Badges
 
-Beyond 180s, Big Fish, and nine-darters, Oche tracks 21 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 2 Cricket-specific badges, 3 Daily Challenge badges, and 18 laddered Just Chuckin' It milestone badges. Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
+Beyond 180s, Big Fish, and nine-darters, Oche tracks 21 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 2 Cricket-specific badges, 3 Daily Challenge badges, and 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
 
 | Badge | How to earn it |
 |---|---|
@@ -257,7 +259,7 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 21 X01 achievement badges c
 | 🏆 **Challenge Streak: Month** | Complete the Daily Challenge 30 days in a row |
 | 🗓️ **Full Rotation** | Complete every Daily Challenge format at least once |
 
-**Just Chuckin' It's 18 badges** (3 laddered milestone tracks — a lot to earn, starting early and often, exactly as requested; see [Just Chuckin' It](#new-game)):
+**Just Chuckin' It's 19 badges** — 18 laddered milestones (3 tracks — a lot to earn, starting early and often, exactly as requested; see [Just Chuckin' It](#new-game)) plus its own **180!** badge:
 
 | Ladder | Tiers (threshold — label) |
 |---|---|
@@ -265,7 +267,11 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 21 X01 achievement badges c
 | Darts in a Single Session | 100 Solid Session ⏱️ · 250 Marathon Session 🏃 · 500 Endurance Test 🧗 · 1,000 Iron Session 🔋 |
 | Lifetime Trebles Hit | 10 First Trebles 🎯 · 50 Treble Trouble 💥 · 100 Treble Century 💯 · 500 Treble Master 🌟 · 1,000 Treble Legend 🐐 |
 
-**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 44-badge roster, grouped into X01/Cricket/Daily Challenge/Just Chuckin' It sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5) — 4 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout), Full Rotation, and all 18 Just Chuckin' It milestones are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
+| Badge | How to earn it |
+|---|---|
+| 🎯 **180!** | Three darts, sixty each — assuming 3 darts per turn (the same convention as the ladders above), since Just Chuckin' It otherwise has no turn boundary at all |
+
+**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 45-badge roster, grouped into X01/Cricket/Daily Challenge/Just Chuckin' It sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 4 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout), Full Rotation, and all 18 Just Chuckin' It milestones are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
 
 **Around the World Progress** — a dedicated grid on the Player Profile showing exactly which of the 63 lifetime dart outcomes are still missing, alongside the Badge Case.
 
@@ -420,11 +426,13 @@ Switching to **Doubles Practice** shows its own 3 stat bubbles instead:
 | **Darts / Round** | Average darts thrown per round |
 | **Doubles Hit / Round** | Average doubles hit per round |
 
-Switching to **Just Chuckin' It** shows its own 6 stat bubbles instead, plus a dartboard heatmap section below the chart:
+Switching to **Just Chuckin' It** shows its own 8 stat bubbles instead, plus a dartboard heatmap section below the chart:
 
 | Bubble | Description |
 |---|---|
 | **Darts Thrown** | Total individual darts thrown in this mode, lifetime |
+| **Three-Dart Average** | Standard 3-dart average across every dart thrown, lifetime — same formula as X01, assuming 3 darts per turn |
+| **180s** | Count of 180s thrown (3 consecutive darts, treated as a turn, all landing as treble 20) |
 | **Treble %** | Percentage of darts that landed as a treble |
 | **Bull %** | Percentage of darts that landed on the bull (single or double) |
 | **Double %** | Percentage of darts that landed as a double |
@@ -451,7 +459,7 @@ On the Doubles Practice toggle, this section shows just **Best Round (Darts)** a
 
 #### Badge Case
 
-The full 44-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (21 badges), a **Cricket** section (2 badges), a **Daily Challenge** section (3 badges), and a **Just Chuckin' It** section (18 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
+The full 45-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (21 badges), a **Cricket** section (2 badges), a **Daily Challenge** section (3 badges), and a **Just Chuckin' It** section (19 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
 
 #### On This Day
 
@@ -748,9 +756,10 @@ GET  /api/players/stat-bubbles?name=&mode=  All 15 stat bubble values for a play
      &gameType=doubles_practice             Pass gameType=doubles_practice for Doubles
                                              Practice's 3 stat bubbles (Doubles %, Darts/Round,
                                              Doubles Hit/Round) instead.
-     &gameType=chuckin                      Pass gameType=chuckin for Just Chuckin' It's 6
-                                             stat bubbles (Darts Thrown, Treble/Bull/Double %,
-                                             Sessions Played, Avg Darts/Session) instead.
+     &gameType=chuckin                      Pass gameType=chuckin for Just Chuckin' It's 8
+                                             stat bubbles (Darts Thrown, Three-Dart Average,
+                                             180s, Treble/Bull/Double %, Sessions Played,
+                                             Avg Darts/Session) instead.
 GET  /api/players/personal-bests?name=&mode= Best leg average, fewest darts to finish,
                                              current win streak, and recent form.
      &gameType=cricket                      Pass gameType=cricket for Cricket's Personal Bests
@@ -785,8 +794,9 @@ GET  /api/players/avg-history               Metric history for the chart
               cricketdartsthrown|cricketavgdartsperleg|
               doublespracticepct|doublespracticedartsperround|
               doublespracticehitsperround|
-              chuckindartsthrown|chuckintreblepct|chuckinbullpct|
-              chuckindoublepct|chuckinsessions|chuckinavgdartspersession
+              chuckindartsthrown|chuckinavg|chuckin180s|chuckintreblepct|
+              chuckinbullpct|chuckindoublepct|chuckinsessions|
+              chuckinavgdartspersession
      &period=today|week|month|year|all|custom
      &start=YYYY-MM-DD   (required when period=custom)
      &end=YYYY-MM-DD     (required when period=custom)
