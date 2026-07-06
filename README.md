@@ -8,7 +8,7 @@ A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player 
 
 **v0.10.0**
 
-You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [22-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. All data lives in a SQLite database on your own server.
+You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [25-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. All data lives in a SQLite database on your own server.
 
 > Looking for exact stat formulas, achievement trigger conditions, the full database schema, or how a feature works internally (e.g. to debug it)? See **[REFERENCE.md](REFERENCE.md)** — the technical reference manual, kept up to date alongside this README.
 
@@ -207,7 +207,7 @@ choice, no checkout hints, and no bust concept:
 
 ### Achievements & Badges
 
-Beyond 180s, Big Fish, and nine-darters, Oche tracks 20 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 2 Cricket-specific badges. Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
+Beyond 180s, Big Fish, and nine-darters, Oche tracks 20 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 2 Cricket-specific badges and 3 Daily Challenge badges. Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
 
 | Badge | How to earn it |
 |---|---|
@@ -239,7 +239,15 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 20 X01 achievement badges c
 | 🎯 **9 Marks** | Score 9 marks in one Cricket visit — three trebles, the maximum possible |
 | 🏆 **Perfect Leg** | Close every Cricket number using the fewest darts physically possible for that match |
 
-**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 22-badge roster: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5) — three badges (Around the Clock, Around the World, Grudge Match) are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
+**Daily Challenge's 3 badges** (see [Daily Challenge](#daily-challenge)):
+
+| Badge | How to earn it |
+|---|---|
+| 🔥 **Challenge Streak: Week** | Complete the Daily Challenge 7 days in a row |
+| 🏆 **Challenge Streak: Month** | Complete the Daily Challenge 30 days in a row |
+| 🗓️ **Full Rotation** | Complete every Daily Challenge format at least once |
+
+**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 25-badge roster, grouped into X01/Cricket/Daily Challenge sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5) — four badges (Around the Clock, Around the World, Grudge Match, Full Rotation) are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
 
 **Around the World Progress** — a dedicated grid on the Player Profile showing exactly which of the 63 lifetime dart outcomes are still missing, alongside the Badge Case.
 
@@ -270,7 +278,9 @@ A recurring, Wordle-style solo challenge — the same challenge for everyone on 
 
 **Sharing:** completing a challenge offers the same **📤 Share** card as any other big moment (see [Shareable Moments](#shareable-moments)), captioned with the format and result (e.g. "Checkout Sprint — 170 in 3 darts"). Beating your own best-ever result for that format also patches a gold "New personal best!" banner onto the results screen.
 
-**Player Profile history:** a collapsible **Daily Challenge History** section on every [Player Profile](#player-profile) shows the lifetime completion record (played, completed, current streak, longest-ever streak), a best-result line for each of the six formats, and the full attempt-by-attempt log.
+**Player Profile history:** every [Player Profile](#player-profile) has its own **Daily Challenge** tab (alongside Overall/H2H/Practice) showing the lifetime completion record (played, completed, current streak, longest-ever streak), a best-result line for each of the six formats, the full attempt-by-attempt log, and the Badge Case.
+
+**Badges:** completing challenges 7 and 30 days in a row earns **Challenge Streak: Week** and **Challenge Streak: Month**; completing all six formats at least once earns **Full Rotation** — see [Achievements & Badges](#achievements--badges).
 
 ---
 
@@ -402,15 +412,15 @@ On the Cricket toggle, this section shows **Best Leg MPR**, **Fewest Darts to Cl
 
 #### Badge Case
 
-The full 22-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (20 badges) and a **Cricket** section (2 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
+The full 25-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (20 badges), a **Cricket** section (2 badges), and a **Daily Challenge** section (3 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
 
 #### On This Day
 
 When this player did something notable — a 180, a 170 checkout, or any 100+ checkout — on today's exact calendar date in a past year, a flashback card shows it ("3 years ago today — a 180, 501") with its own **📤 Share** button. Only appears when there's something to show.
 
-#### Daily Challenge History
+#### Daily Challenge (tab)
 
-Collapsible section covering this player's lifetime [Daily Challenge](#daily-challenge) record: total attempts vs. completions, current streak, longest-ever streak, a best-result line for each of the six formats, and the full attempt-by-attempt log (date, format, result or "Not finished").
+Its own tab on the Player Profile (alongside Overall/H2H/Practice), covering this player's lifetime [Daily Challenge](#daily-challenge) record: total attempts vs. completions, current streak, longest-ever streak, a best-result line for each of the six formats, the full attempt-by-attempt log (date, format, result or "Not finished"), and the Badge Case.
 
 #### Around the World Progress
 

@@ -55,7 +55,7 @@ Others
 - Security audit findings (adversarial whole-codebase review: DoS, SSRF/egress, container hardening) — step-by-step fixes in docs/security-audit-roadmap.md
 - Testing & observability (test coverage + server-side error logging) — done (Part A), see docs/testing-and-observability-roadmap.md
 - League/season mode (standings across casual matches over time) — full design in docs/league-mode-roadmap.md
-- Daily/weekly solo challenge — done (core), see docs/archive/daily-challenge-roadmap.md
+- Daily/weekly solo challenge — done (core) plus badges/its own Profile tab, see docs/daily-challenge-roadmap.md
 - Ghost opponent (practice against a replay of your own past leg) — full design in docs/ghost-opponent-roadmap.md
 - Prep work to reduce future rework across all roadmap items — see docs/existing-app-prep-roadmap.md
 

@@ -2994,10 +2994,6 @@ function renderPlayerPage(){
       <div id="player-on-this-day"></div>
     </div>
     <details class="pp-section">
-      <summary class="pp-section-title">Daily Challenge History</summary>
-      <div id="player-challenge-history"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
-    </details>
-    <details class="pp-section">
       <summary class="pp-section-title">Around the World Progress</summary>
       <div id="player-atw-progress"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>
@@ -3042,6 +3038,21 @@ function renderPlayerPage(){
       <div class="pp-cat-lines">${pracHtml}</div>
     </div>`;
 
+  // Its own tab rather than a collapsible tucked inside Overall/H2H/Practice
+  // (which is what this used to be) — the history/streak view is X01/Cricket-
+  // agnostic, so it doesn't need the stat-bubbles/chart machinery those tabs use,
+  // just its own report plus the Badge Case (now grouped X01/Cricket/Daily
+  // Challenge, so the challenge-specific badges are visible from here too).
+  const challengeSection = `
+    <details class="pp-section" open>
+      <summary class="pp-section-title">Daily Challenge History</summary>
+      <div id="player-challenge-history"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </details>
+    <div class="pp-section">
+      <div class="pp-section-title">Badge Case</div>
+      <div id="player-badges"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </div>`;
+
   let tabContent;
   if(tab === 'overall'){
     tabContent = `
@@ -3059,6 +3070,8 @@ function renderPlayerPage(){
         <div class="pp-section-title">H2H Wins</div>
         <div class="pp-cat-lines">${h2hHtml}</div>
       </div>`;
+  } else if(tab === 'challenge'){
+    tabContent = challengeSection;
   } else {
     tabContent = `
       ${chartSection}
@@ -3095,12 +3108,13 @@ function renderPlayerPage(){
       <button class="tab-btn${tab==='overall'?' active':''}" data-tab="overall" onclick="switchPlayerTab('overall')">Overall</button>
       <button class="tab-btn${tab==='h2h'?' active':''}" data-tab="h2h" onclick="switchPlayerTab('h2h')">H2H</button>
       <button class="tab-btn${tab==='practice'?' active':''}" data-tab="practice" onclick="switchPlayerTab('practice')">Practice</button>
+      <button class="tab-btn${tab==='challenge'?' active':''}" data-tab="challenge" onclick="switchPlayerTab('challenge')">Daily Challenge</button>
     </div>
-    ${bubblesHtml}
+    ${tab==='challenge' ? '' : bubblesHtml}
     ${tabContent}
     <div class="btn-row">
       <button class="btn btn-ghost" onclick="askRenameFromProfile('${j}')">Rename</button>
-      ${canManagePlayers()?`<button class="btn btn-ghost danger" onclick="askClearPlayerStats('${j}','${tab==='overall'?'all':tab}')">Reset ${tab==='overall'?'all':tab==='h2h'?'H2H':'Practice'} stats</button>`:''}
+      ${(canManagePlayers() && tab!=='challenge')?`<button class="btn btn-ghost danger" onclick="askClearPlayerStats('${j}','${tab==='overall'?'all':tab}')">Reset ${tab==='overall'?'all':tab==='h2h'?'H2H':'Practice'} stats</button>`:''}
       ${canManagePlayers()?`<button class="btn btn-ghost danger" onclick="askDeleteFromProfile('${j}')">Delete player</button>`:''}
     </div>`;
   loadStatBubbles();
@@ -3141,6 +3155,9 @@ const BADGE_INFO = {
   bustedmaximum:      { icon:'💥', label:'Busted Maximum', desc:'Throw three treble 20s (a genuine 180) on a visit that still busts.' },
   cricket9marks:       { icon:'🎯', label:'9 Marks', desc:'Score 9 marks in one Cricket visit — three trebles, the maximum possible.', cricket:true },
   cricketperfectclose: { icon:'🏆', label:'Perfect Leg', desc:'Close every Cricket number using the fewest darts physically possible for that match.', cricket:true },
+  challengeweek:       { icon:'🔥', label:'Challenge Streak: Week', desc:'Complete the Daily Challenge 7 days in a row.', challenge:true },
+  challengemonth:      { icon:'🏆', label:'Challenge Streak: Month', desc:'Complete the Daily Challenge 30 days in a row.', challenge:true },
+  challengeallformats: { icon:'🗓️', label:'Full Rotation', desc:'Complete every Daily Challenge format at least once.', challenge:true },
 };
 function loadPlayerBadges(){
   const container=document.getElementById('player-badges');
@@ -3175,15 +3192,18 @@ function renderPlayerBadges(data){
     }
     return `<div class="stat-block" style="opacity:.5;cursor:pointer" ${titleAttr} onclick="showBadgeInfo('${id}')"><div class="stat-val" style="filter:grayscale(1)">${info.icon}</div><div class="stat-label">${info.label}<br>Not yet earned</div></div>`;
   };
-  // Grouped by game type — X01's 20 badges and Cricket's 2 stay visually
-  // distinct sub-sections rather than one mixed flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket);
+  // Grouped by game type — X01's badges, Cricket's 2, and Daily Challenge's 3 each
+  // stay visually distinct sub-sections rather than one mixed flat grid.
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].challenge);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
+  const challengeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].challenge);
   container.innerHTML = `
     <div class="pp-section-title" style="margin-bottom:6px">X01</div>
     <div class="summary-grid">${x01Ids.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Cricket</div>
-    <div class="summary-grid">${cricketIds.map(badgeBlock).join('')}</div>`;
+    <div class="summary-grid">${cricketIds.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">Daily Challenge</div>
+    <div class="summary-grid">${challengeIds.map(badgeBlock).join('')}</div>`;
 }
 // Around the World progress (docs/achievements-badges-roadmap.md): a compact grid
 // rather than a full dartboard-shaped heatmap — the doc explicitly calls the ideal
@@ -3248,6 +3268,36 @@ function loadOnThisDay(){
 // Challenge history"): lifetime completion record, best result per format (reusing
 // challengeMetricLabel()/challengeShortLabel() — no new copy to write), and the
 // full attempt-by-attempt log.
+// Daily Challenge badges (challengeweek/challengemonth/challengeallformats) are
+// detected from the same getChallengeHistory() shape the history view below
+// already renders — fetched fresh right after a challenge attempt completes
+// rather than duplicating streak/format bookkeeping client-side. The pure
+// threshold checks themselves live in scoring.js's challengeBadgeSignals() so
+// they're covered by a committed node:test (docs/achievements-badges-roadmap.md).
+function checkChallengeBadges(playerName){
+  const today = localDateStr(new Date());
+  Backend.get(`/api/challenges/history?player=${encodeURIComponent(playerName)}&date=${today}`).then(history=>{
+    const sig = challengeBadgeSignals(history, CHALLENGE_FORMATS);
+    if(sig.week){
+      queueBadge('challengeweek', playerName);
+      awardRecurringBadge(playerName, 'challengeweek', 'challengeweek', { icon:'🔥', headline:'CHALLENGE STREAK: WEEK', player:playerName, statLine:'7 days in a row' });
+    }
+    if(sig.month){
+      queueBadge('challengemonth', playerName);
+      awardRecurringBadge(playerName, 'challengemonth', 'challengemonth', { icon:'🏆', headline:'CHALLENGE STREAK: MONTH', player:playerName, statLine:'30 days in a row' });
+    }
+    if(sig.allFormats){
+      const _snapAllFmt = game && game.lastTurnSnapshot;
+      Backend.send('POST','/api/badges/award', { player:playerName, badgeId:'challengeallformats', once:true }).then(r=>{
+        if(r && r.newlyEarned){
+          trackBadgeForUndo(_snapAllFmt, playerName, 'challengeallformats');
+          queueBadge('challengeallformats', playerName);
+          fireMomentCard('challengeallformats', { icon:'🗓️', headline:'FULL ROTATION', player:playerName, statLine:'Every Daily Challenge format completed' });
+        }
+      }).catch(()=>{});
+    }
+  }).catch(()=>{});
+}
 function loadChallengeHistory(){
   const container = document.getElementById('player-challenge-history');
   if(!container) return;
@@ -3558,14 +3608,17 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   nervesofsteel:'Nerves of Steel 🧊', comebackkid:'Comeback Kid 🔥', giantslayer:'Giant Slayer 🗡️',
   grudgematch:'Grudge Match ⚔️', therematch:'The Rematch 🔁', aroundtheclock:'Around the Clock 🕐',
   aroundtheworld:'Around the World! 🌍', doubletrouble:'Double Trouble! 👯', bustedmaximum:'Busted Maximum 💥',
-  cricket9marks:'9 Marks! 🎯', cricketperfectclose:'🏆 PERFECT LEG! 🏆' };
+  cricket9marks:'9 Marks! 🎯', cricketperfectclose:'🏆 PERFECT LEG! 🏆',
+  challengeweek:'Challenge Streak: Week! 🔥', challengemonth:'🏆 CHALLENGE STREAK: MONTH! 🏆',
+  challengeallformats:'Full Rotation! 🗓️' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
   metronome:2500, cruisecontrol:2500, iceintheveins:2500, nervesofsteel:3000,
   comebackkid:3000, giantslayer:2500, grudgematch:3000, therematch:2500,
   aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500,
-  cricket9marks:2500, cricketperfectclose:6000 };
+  cricket9marks:2500, cricketperfectclose:6000,
+  challengeweek:3000, challengemonth:6000, challengeallformats:3500 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
@@ -3642,7 +3695,7 @@ function showAchievement(type, player){
   achTextEl.textContent = ACH_LABELS[type] || '';
   achNameEl.textContent = player || '';
   if(achDescEl) achDescEl.textContent = achDescFor(type);
-  const mega = type === 'ninedarter' || type === 'cricketperfectclose';
+  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth';
   achOverlayEl.classList.toggle('mega', mega);
   achOverlayEl.classList.add('show');
   const shareBtn = document.getElementById('ach-share-btn');
@@ -4703,6 +4756,7 @@ function onLegWon(wi){
           const el = document.getElementById('challenge-pb-banner');
           if(el) el.innerHTML = `<p style="color:var(--gold);font-weight:700;font-size:13px;margin:0 0 14px">🏆 New personal best for ${challengeShortLabel(_challengeFormat, _challengeTarget)}!</p>`;
         }
+        checkChallengeBadges(w.name);
       }).catch(()=>{});
     fireMomentCard('dailychallenge', { icon:'📅', headline:'CHALLENGE COMPLETE!', player:w.name,
       statLine: `${challengeShortLabel(activeChallenge.format, activeChallenge.target)} — ${challengeMetricLabel(activeChallenge.format, _metric)}` });

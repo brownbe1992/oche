@@ -9,7 +9,8 @@ const assert = require('node:assert/strict');
 const path = require('path');
 
 const scoring = require(path.join('..', '..', 'frontend', 'scoring.js'));
-const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET_STANDARD_NUMBERS } = scoring;
+const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET_STANDARD_NUMBERS,
+  challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH } = scoring;
 
 // Builds a real dart object the same way the app does (makeDart minus the
 // thrownAt timestamp), rather than hand-rolling a fake {value,isDouble,...} shape.
@@ -287,5 +288,44 @@ describe('Ghost Opponent replay (docs/ghost-opponent-roadmap.md)', () => {
     const doubleOut = evaluateVisit({ score: 101, doubleOut: true }, darts, {});
     assert.equal(doubleOut.win, false);
     assert.equal(doubleOut.bust, true, 'the identical darts bust under double-out — getGhostLegScript()\'s outMode field exists exactly to prevent this mismatch');
+  });
+});
+
+// Mirrors index.html's CHALLENGE_FORMATS constant (the 6 Daily Challenge formats).
+const CHALLENGE_FORMATS = ['checkout_sprint', 'speed_to_zero', 'bullseye_gauntlet', 'steady_hand', 'treble_run', 'long_game'];
+
+describe('challengeBadgeSignals (Daily Challenge badges: streak + format-completionist, docs/daily-challenge-roadmap.md)', () => {
+  test('week badge fires only at exactly a 7-day streak, not before or after', () => {
+    assert.equal(challengeBadgeSignals({ currentStreak: 6, bestByFormat: {} }, CHALLENGE_FORMATS).week, false);
+    assert.equal(challengeBadgeSignals({ currentStreak: CHALLENGE_STREAK_WEEK, bestByFormat: {} }, CHALLENGE_FORMATS).week, true);
+    assert.equal(challengeBadgeSignals({ currentStreak: 8, bestByFormat: {} }, CHALLENGE_FORMATS).week, false, 'an exact-crossing check, not >=, so a long streak does not refire this badge every day');
+  });
+
+  test('month badge fires only at exactly a 30-day streak, and is independent of the week badge', () => {
+    const at30 = challengeBadgeSignals({ currentStreak: CHALLENGE_STREAK_MONTH, bestByFormat: {} }, CHALLENGE_FORMATS);
+    assert.equal(at30.month, true);
+    assert.equal(at30.week, false, 'a 30-day streak does not also re-trigger the 7-day badge the same day');
+    assert.equal(challengeBadgeSignals({ currentStreak: 29, bestByFormat: {} }, CHALLENGE_FORMATS).month, false);
+    assert.equal(challengeBadgeSignals({ currentStreak: 31, bestByFormat: {} }, CHALLENGE_FORMATS).month, false);
+  });
+
+  test('allFormats fires only once every one of the 6 formats has a completed attempt', () => {
+    const fiveOfSix = { checkout_sprint: 12, speed_to_zero: 8, bullseye_gauntlet: 3, steady_hand: 20, treble_run: 5 };
+    assert.equal(challengeBadgeSignals({ currentStreak: 0, bestByFormat: fiveOfSix }, CHALLENGE_FORMATS).allFormats, false, 'missing long_game entirely');
+    const sixOfSix = { ...fiveOfSix, long_game: 40 };
+    assert.equal(challengeBadgeSignals({ currentStreak: 0, bestByFormat: sixOfSix }, CHALLENGE_FORMATS).allFormats, true);
+  });
+
+  test('a format present but never completed (getChallengeHistory only ever populates completed attempts) does not satisfy allFormats', () => {
+    // bestByFormat can never actually contain a null/undefined entry in practice
+    // (getChallengeHistory's query filters to completed=1), but this guards the
+    // pure function's own contract in case a caller passes an incomplete map.
+    const withGap = { checkout_sprint: 12, speed_to_zero: 8, bullseye_gauntlet: 3, steady_hand: 20, treble_run: 5, long_game: null };
+    assert.equal(challengeBadgeSignals({ currentStreak: 0, bestByFormat: withGap }, CHALLENGE_FORMATS).allFormats, false);
+  });
+
+  test('missing/zero history is handled without throwing', () => {
+    assert.deepEqual(challengeBadgeSignals({}, CHALLENGE_FORMATS), { week: false, month: false, allFormats: false });
+    assert.deepEqual(challengeBadgeSignals(null, CHALLENGE_FORMATS), { week: false, month: false, allFormats: false });
   });
 });

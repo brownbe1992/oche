@@ -611,10 +611,12 @@ state or lazy-fetch-on-toggle.
 
 ## 4. Achievements & Badges
 
-22 badges (20 X01 + 2 Cricket), tracked in the `player_badges` table (one row
-per player+badge, with a running `count`). X01 detection logic lives in
-`frontend/index.html`'s `enterTurn()`/`onLegWon()`; Cricket's 2 badges live in
-`enterTurnCricket()`/`onLegWonCricket()`.
+25 badges (20 X01 + 2 Cricket + 3 Daily Challenge), tracked in the
+`player_badges` table (one row per player+badge, with a running `count`). X01
+detection logic lives in `frontend/index.html`'s `enterTurn()`/`onLegWon()`;
+Cricket's 2 badges live in `enterTurnCricket()`/`onLegWonCricket()`; Daily
+Challenge's 3 badges are checked in `checkChallengeBadges()`, called right
+after every `/api/challenges/complete` response.
 
 ### Award modes
 
@@ -626,7 +628,7 @@ per player+badge, with a running `count`). X01 detection logic lives in
   state-based badges whose trigger condition stays true forever once crossed
   (`INSERT OR IGNORE`, so re-checking an already-true condition never inflates
   the count past 1): **Around the Clock, Around the World, Grudge Match, First
-  100+ Checkout**.
+  100+ Checkout, Full Rotation**.
 
 ### The 20 badges, exact trigger conditions
 
@@ -679,6 +681,20 @@ analogs of 180 and the nine-darter):
 |---|---|
 | 🎯 **9 Marks** | `darts.length===3 && marksThisVisit===9` — 3 darts, each a treble on an in-play number, the maximum possible marks in one visit (same framing as 180 being the max possible X01 visit score). **Recurring.** |
 | 🏆 **Perfect Leg** | `win && legDarts === theoreticalMinimum`, where the minimum is computed per match from `game.config.numbers`: each non-Bull number can close in a single treble (3 marks); Bull can't be trebled (`makeDart()` already downgrades a "treble bull" tap to a single), so it needs a minimum of 2 darts. A win at exactly this minimum already implies enough bonus marks were scored to strictly lead (the win condition in §2 guarantees that), so no separate points check is needed. **Recurring**, mega-tier overlay (confetti) like Nine-Darter. |
+
+**Daily Challenge badges** (checked in `checkChallengeBadges(playerName)`,
+`frontend/index.html` — called right after every `/api/challenges/complete`
+response resolves, using the same `{currentStreak, bestByFormat}` shape
+`getChallengeHistory()` already returns to the Player Profile's Daily Challenge
+tab, §6). The three pure trigger conditions live in `challengeBadgeSignals()`
+(`frontend/scoring.js`, unit-tested in `backend/test/scoring.test.js`), not
+inline in `index.html`, so they're covered by a committed `node:test`:
+
+| Badge | Exact condition |
+|---|---|
+| 🔥 **Challenge Streak: Week** | `currentStreak === 7` exactly (an exact crossing check, not `>=`, so a long streak doesn't refire this every day). **Recurring** — a later streak that reaches 7 again after breaking can re-earn it. |
+| 🏆 **Challenge Streak: Month** | `currentStreak === 30` exactly, same exact-crossing reasoning as above. **Recurring**, mega-tier overlay (confetti) like Nine-Darter/Perfect Leg. |
+| 🗓️ **Full Rotation** | Every one of the 6 Daily Challenge formats (§6) has at least one *completed* attempt, ever (`bestByFormat` only ever contains completed attempts — see `getChallengeHistory()`'s own query — so this is already "at least once", not merely "attempted"). **Once-badge.** |
 
 ### Description text
 
@@ -868,6 +884,14 @@ unblocked (same pattern as the achievement queue's count-patching).
 `longestStreak` (the independent walk above), `bestByFormat` (per-format best
 result using the same direction table), and `attempts` (full log, newest first,
 capped at 400 rows).
+
+Rendered in its own **Daily Challenge** tab on the Player Profile (`.player-tabs`,
+alongside Overall/H2H/Practice, `switchPlayerTab('challenge')`) — previously a
+collapsible section tucked inside every other tab, promoted to a dedicated tab
+so the streak/history report and the Badge Case (which now groups X01/Cricket/
+Daily Challenge badges separately) live together in one place. The tab
+intentionally omits the X01/Cricket stat-bubbles/chart machinery those other
+tabs use — the history view is game-type-agnostic and doesn't need it.
 
 ---
 

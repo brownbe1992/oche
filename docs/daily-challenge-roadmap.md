@@ -1,11 +1,15 @@
 # Daily/Weekly Challenge — Design Roadmap
 
-> **Archived** — fully shipped, kept here for design-rationale history. See
-> `docs/existing-app-prep-roadmap.md`'s Roadmap sequencing table for the live
-> completion tracker across all roadmaps.
+> **Un-archived (2026-07)** — three new Daily Challenge badges and a dedicated
+> Player Profile tab were added (per an explicit user request for "stats,
+> reporting, badges, and achievements for daily challenges"), so this doc moved
+> back out of `docs/archive/` per CLAUDE.md's "partially-done docs stay in
+> `docs/`" convention. See `docs/existing-app-prep-roadmap.md`'s Roadmap
+> sequencing table for the live completion tracker across all roadmaps.
 
-> Status: **fully shipped**, including the "beat your best" live callout and the
-> Player Profile history view. `completeChallengeAttempt()` (`backend/db.js`) now
+> Status: **fully shipped**, including the "beat your best" live callout, the
+> Player Profile history view (now its own tab, see below), and Daily-Challenge-
+> specific badges. `completeChallengeAttempt()` (`backend/db.js`) now
 > returns `isPersonalBest` (comparing against every other completed attempt of the
 > same format, per-format direction: fewest darts/visits for Checkout Sprint/Speed
 > to Zero/The Long Game, most bulls/trebles/points for Bullseye Gauntlet/Treble
@@ -13,10 +17,13 @@
 > screen once the round-trip resolves — same "celebrate immediately, patch in the
 > extra detail a moment later" pattern used for achievement counts. **Player Profile:
 > Daily Challenge history** (see below) is now built too — a new `getChallengeHistory()`
-> backs a collapsible section on the Player Profile page showing the lifetime
-> completion record (played/completed/current streak/longest-ever streak), a
-> per-format personal-best line reusing the exact same direction table as the
-> "beat your best" check, and the full attempt-by-attempt log. Current streak is
+> backs its own **Daily Challenge** tab on the Player Profile (promoted, 2026-07,
+> from a collapsible section that used to be duplicated inside every other tab)
+> showing the lifetime completion record (played/completed/current streak/longest-
+> ever streak), a per-format personal-best line reusing the exact same direction
+> table as the "beat your best" check, the full attempt-by-attempt log, and (new)
+> the Badge Case — now grouped X01/Cricket/Daily Challenge, so the three new
+> challenge badges below are visible from this tab too. Current streak is
 > delegated to `getChallengeStatus()` rather than re-derived, exactly as the
 > original design called for; longest-ever streak is the same day-by-day walk
 > without stopping at the first gap. All six
@@ -147,6 +154,37 @@ should be reused/extended rather than re-derived — a "longest-ever streak" is 
 walk without stopping at the first gap, and per-format bests are a `GROUP BY format`
 over the same table.
 
+### Daily Challenge badges + its own Player Profile tab (built 2026-07)
+
+Requested addition: "stats, reporting, badges, and achievements for daily
+challenges," with "a special daily challenge tab on player pages." Both halves
+now exist:
+
+- **Three new badges** (`BADGE_INFO` in `frontend/index.html`, detection in a
+  new `checkChallengeBadges(playerName)` called right after every
+  `/api/challenges/complete` response): 🔥 **Challenge Streak: Week**
+  (`currentStreak === 7` exactly — recurring, can re-earn after a later streak
+  reaches 7 again), 🏆 **Challenge Streak: Month** (`currentStreak === 30`
+  exactly — recurring, mega-tier confetti overlay like Nine-Darter/Perfect
+  Leg), and 🗓️ **Full Rotation** (every one of the 6 formats has at least one
+  completed attempt ever — once-badge). The exact-crossing check (`===`, not
+  `>=`) is deliberate: a `>=` check would refire the badge every single day of
+  a long streak, since `awardRecurringBadge()` has no memory of "already fired
+  today." The three pure trigger conditions live in `challengeBadgeSignals()`
+  (`frontend/scoring.js`), covered by a committed `node:test` in
+  `backend/test/scoring.test.js` per CLAUDE.md's testing convention, rather
+  than being inline, untestable `if` blocks the way most X01 badges are.
+- **Its own Player Profile tab** — the Daily Challenge history section used to
+  be a `<details>` collapsible duplicated inside every one of the Overall/H2H/
+  Practice tabs (the same content rendered three times over, once per tab).
+  It's now a fourth `.player-tabs` entry (`switchPlayerTab('challenge')`),
+  showing the history/streak report (unchanged) plus the Badge Case — which
+  now groups badges into X01/Cricket/Daily Challenge sub-sections instead of
+  one flat X01-vs-Cricket split, so the three new badges are visible from this
+  tab without a separate mini badge display. The tab deliberately omits the
+  X01/Cricket stat-bubbles/chart machinery the other three tabs use (game-
+  type-specific, not applicable here).
+
 ## Suggested build order
 
 1. Challenge-type pool + deterministic date-seeded generation (format + target),
@@ -160,6 +198,8 @@ over the same table.
 5. Shareable results card, reusing the existing card-generation engine.
 6. Player Profile: Daily Challenge history — lifetime completion record, best result
    per format, and full attempt history, per the section above.
+7. Daily Challenge badges (Challenge Streak: Week/Month, Full Rotation) + promoting
+   the history section into its own Player Profile tab, per the section above.
 
 ## Open questions for whoever picks this up
 

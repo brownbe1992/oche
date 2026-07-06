@@ -162,6 +162,31 @@ function checkoutHint(rem, doubleOut, maxDarts){
   return '';
 }
 
+// Daily Challenge badge trigger thresholds (REFERENCE.md's Achievements section,
+// docs/achievements-badges-roadmap.md) — a day-count streak, not a visit/leg count,
+// so "recurring" here means "can fire again after a later streak reaches the same
+// exact length again", not "fires every day the streak stays >= threshold" (an
+// index.html caller checking currentStreak===7/===30, one-shot per crossing, is
+// what keeps this from re-firing every single day of a long streak).
+const CHALLENGE_STREAK_WEEK = 7;
+const CHALLENGE_STREAK_MONTH = 30;
+// Pure trigger-condition check for the three Daily Challenge badges, given the
+// `{currentStreak, bestByFormat}` shape returned by backend/db.js's
+// getChallengeHistory() and the list of all challenge format keys (CHALLENGE_FORMATS
+// in index.html). `allFormats` is true once every format has at least one
+// *completed* attempt ever (bestByFormat only ever contains completed attempts —
+// see getChallengeHistory()'s own query — so this is already "at least once", not
+// merely "attempted").
+function challengeBadgeSignals(history, formats){
+  const bestByFormat = (history && history.bestByFormat) || {};
+  const currentStreak = (history && history.currentStreak) || 0;
+  return {
+    week: currentStreak === CHALLENGE_STREAK_WEEK,
+    month: currentStreak === CHALLENGE_STREAK_MONTH,
+    allFormats: formats.length > 0 && formats.every(f => bestByFormat[f] != null),
+  };
+}
+
 // Only executes under Node (require()'d from a test file) — undefined in a
 // browser, so this is a no-op there and every name above stays a plain global.
 if (typeof module !== 'undefined' && module.exports) {
@@ -169,5 +194,6 @@ if (typeof module !== 'undefined' && module.exports) {
     dartValue, dartLabel, makeDartCore,
     evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,
+    CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH, challengeBadgeSignals,
   };
 }
