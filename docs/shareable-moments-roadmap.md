@@ -9,8 +9,12 @@
 > Facebook API posting was explicitly descoped** — manual sharing via the native share
 > sheet (which already reaches X/Instagram/Facebook) is the accepted answer; see
 > "Social media integration" below for why automated posting isn't realistic for a
-> personal account on any of those three platforms today. The optional BYO-credentials
-> X auto-post tier and the Player Profile "Moments" gallery remain unbuilt.
+> personal account on any of those three platforms today. **The optional
+> BYO-credentials X auto-post tier was deliberately rejected (2026-07)** — not
+> going to be built; the Web Share API path already covers X (and is the only
+> realistic path onto Instagram/Facebook regardless), so it wasn't worth the
+> added credential-handling surface for a single platform. The Player Profile
+> "Moments" gallery remains unbuilt and still open.
 
 ## What shipped
 
@@ -139,16 +143,16 @@ Given that, the realistic, honest design is:
   only works from an actual installed native app, not a website. Worth revisiting
   once `docs/mobile-app-roadmap.md`'s native wrapper exists; not achievable from
   `frontend/index.html` as a plain web page.
-- **An optional, clearly opt-in "auto-post to X" tier** for admins who want it badly
-  enough to accept the cost: bring-your-own X developer app + OAuth credentials
-  (stored write-only, same standing convention as every other credential in
+- **An optional "auto-post to X" tier — rejected (2026-07), not being built.** The
+  design considered was: bring-your-own X developer app + OAuth credentials (stored
+  write-only, same standing convention as every other credential in
   `docs/security-hardening-roadmap.md`), a Settings toggle per moment type (mirroring
   the granular per-event-type toggle pattern already established for voice
-  announcements), and — deliberately — **prompt-before-posting as the default
-  behavior**, not silent auto-post. Firing an HA webhook to the admin's own private
-  automation is one thing; silently posting to a public platform on someone's behalf,
-  at a real per-post cost, is a different risk profile and should default to a
-  confirmation step even when the feature is enabled.
+  announcements), and prompt-before-posting as the default behavior rather than
+  silent auto-post. Decided against: the Web Share API path above already reaches X
+  from a personal account at zero cost and zero credential-handling surface, and it's
+  the only realistic path onto Instagram/Facebook regardless — a bespoke, paid,
+  credential-holding integration for X alone wasn't worth building on top of that.
 - **Instagram and Facebook get no bespoke API integration** — not because it's not
   worth building, but because there's no legitimate API to build it against for a
   personal account. Revisit only if Meta's policy changes, or if there's ever a
@@ -167,7 +171,3 @@ Given that, the realistic, honest design is:
   all of them with per-type toggles (personal bests, achievements, match completion),
   matching the granularity already established for voice announcements, but worth
   confirming against real usage rather than assuming.
-- Whether X's pay-per-use pricing ever becomes cheap enough, or a free tier
-  reappears, to reconsider making that integration more prominent — pricing policy is
-  entirely outside this project's control and worth rechecking before committing
-  real engineering time to it.
