@@ -2169,6 +2169,15 @@ function setMode(mode){
   // options at all (no starting score, no targets), unlike Doubles Practice.
   const isSpecialMode = (mode === 'challenge' || mode === 'ghost' || mode === 'doubles_practice' || mode === 'chuckin');
   document.getElementById('game-type-section').hidden = isSpecialMode;
+  // Leaving Doubles Practice/Chuckin for any other mode: setup.gameType was force-set
+  // below (bypassing setGameType(), which is the only place that also updates the
+  // X01/Cricket toggle buttons' own visual state) — so it must be reset back to a
+  // real game type here. Without this, the X01/Cricket toggle keeps showing whatever
+  // it visually showed before Doubles Practice/Chuckin was ever chosen, while
+  // setup.gameType silently stays 'doubles_practice'/'chuckin' underneath, and
+  // startGame() (which reads setup.gameType, not the button) builds that game type
+  // even though every visible control says otherwise.
+  if(mode !== 'doubles_practice' && mode !== 'chuckin' && (setup.gameType === 'doubles_practice' || setup.gameType === 'chuckin')) setGameType('x01');
   if((mode === 'challenge' || mode === 'ghost') && setup.gameType !== 'x01') setGameType('x01');
   if(mode === 'doubles_practice') setup.gameType = 'doubles_practice';
   if(mode === 'chuckin') setup.gameType = 'chuckin';
