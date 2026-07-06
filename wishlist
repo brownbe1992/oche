@@ -53,6 +53,8 @@ Others
 - Backups & disaster recovery for the SQLite database — done (v1), see docs/backups-roadmap.md
 - Security hardening (admin login rate limiting + standing checklist) — done, see docs/security-hardening-roadmap.md
 - Security audit findings (adversarial whole-codebase review: DoS, SSRF/egress, container hardening) — step-by-step fixes in docs/security-audit-roadmap.md
+- Admin login progressive backoff (replace the flat lockout so a real admin can never be fully locked out) — full design in docs/admin-login-backoff-roadmap.md
+- Admin account recovery CLI (reset a forgotten password / clear a stuck lockout without email) — full design in docs/admin-account-recovery-roadmap.md
 - Testing & observability (test coverage + server-side error logging) — done (Part A), see docs/testing-and-observability-roadmap.md
 - League/season mode (standings across casual matches over time) — full design in docs/league-mode-roadmap.md
 - Daily/weekly solo challenge — done (core) plus badges/its own Profile tab, see docs/daily-challenge-roadmap.md
