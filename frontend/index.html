@@ -1305,9 +1305,12 @@ const Auth = {
   // Gate for state-changing actions. When the server requires auth and nobody is
   // logged in, prompt for admin login and run `onOk` only after a successful login;
   // otherwise run `onOk` immediately. Keeps gameplay/roster writes from silently
-  // failing (401) under OCHE_REQUIRE_AUTH.
+  // failing (401) under OCHE_REQUIRE_AUTH. If no admin account exists yet
+  // (setupRequired), uiLogin() would be a dead end — there's nothing to log into —
+  // so route to the setup wizard instead, which can actually create one.
   ensureCanWrite(onOk){
     if(!this.requireAuth || this.loggedIn){ onOk(); return; }
+    if(this.setupRequired){ showWizard(onOk); return; }
     uiLogin(()=>{ onOk(); });
   },
   async login(username, password){
@@ -1326,17 +1329,33 @@ const Auth = {
 
 function canManagePlayers(){ return Auth.loggedIn; }
 function closeWizard(){ const o=document.getElementById('wizard'); if(o) o.hidden=true; }
-function showWizard(){
+// onOk (optional): when the wizard was opened because a gated write attempt hit
+// ensureCanWrite() and found no admin account to log into (uiLogin() would be a
+// dead end there), the original action resumes automatically once the account is
+// created. Omitted for the unconditional first-load popup, which just confirms
+// success generically instead.
+function showWizard(onOk){
+  window.__wizardOk = onOk || null;
   renderWizardBody();
   document.getElementById('wizard').hidden=false;
 }
 function renderWizardBody(){
+  // Copy differs by whether writes are actually gated (Auth.requireAuth) — under the
+  // zero-trust default, skipping account creation really does block every gameplay
+  // write, not just Settings, so the wording must say so rather than the older
+  // LAN-trust framing where skipping only left Settings/PINs open.
+  const intro = Auth.requireAuth
+    ? `Create an admin account to get started — every write (adding players, starting
+       games, recording turns) requires a logged-in admin by default. Viewing stats and
+       the live scoreboard never needs a login. Once created, this device stays logged
+       in for 30 days.`
+    : `Create an admin account to lock down the Settings page and manage player PINs (so others can't open Settings,
+       reset stats, or play games under your name without permission). The rest of the app — playing games, viewing
+       stats, the live scoreboard — works for everyone either way.`;
   document.getElementById('wizard-body').innerHTML = `
     <p class="modal-msg" style="font-weight:700;font-size:16px;margin-bottom:4px">Welcome to Oche</p>
     <p style="font-size:13px;color:var(--muted);line-height:1.6;margin:0 0 16px">
-      Create an admin account to lock down the Settings page and manage player PINs (so others can't open Settings,
-      reset stats, or play games under your name without permission). The rest of the app — playing games, viewing
-      stats, the live scoreboard — works for everyone either way.
+      ${intro}
     </p>
     <p id="wizard-error" hidden style="color:var(--bust);font-size:13px;margin:0 0 10px"></p>
     <label class="field">Username</label>
@@ -1349,8 +1368,12 @@ function renderWizardBody(){
     </div>`;
 }
 function confirmSkipWizard(){
-  uiConfirm('Skip creating an admin account? You can create one later from Settings, but until then Settings (and player PIN management) will be open to anyone using the app.', ()=>{
+  const msg = Auth.requireAuth
+    ? "Skip creating an admin account? You won't be able to add players, start games, or record turns until you create one — you'll see this prompt again the next time you try. Stats and the live scoreboard stay viewable either way."
+    : 'Skip creating an admin account? You can create one later from Settings, but until then Settings (and player PIN management) will be open to anyone using the app.';
+  uiConfirm(msg, ()=>{
     localStorage.setItem('oche_wizard_dismissed','1');
+    window.__wizardOk = null;   // skipping cancels whatever gated action opened this
     closeWizard();
   });
 }
@@ -1362,7 +1385,9 @@ async function submitWizard(){
     await Auth.createAdmin(username, password);
     localStorage.setItem('oche_wizard_dismissed','1');
     closeWizard();
-    uiAlert('Admin account created and you are now logged in. You can manage it any time from Settings.');
+    const onOk = window.__wizardOk; window.__wizardOk = null;
+    if(onOk) onOk();
+    else uiAlert('Admin account created and you are now logged in. You can manage it any time from Settings.');
   }catch(e){
     if(err){ err.textContent = e.message || 'Could not create admin account'; err.hidden=false; }
   }

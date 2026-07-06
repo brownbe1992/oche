@@ -596,11 +596,15 @@ Settings are persisted in the database and survive container restarts.
 
 ## Admin Accounts & Player PINs
 
-Oche supports an optional but recommended authentication layer so a shared tablet or TV can't be used to delete players, wipe stats, or play under someone else's name.
+Oche follows a zero-trust default: **every write requires a logged-in admin**, even on your own home LAN — not just the destructive/admin-only actions below.
 
 ### First-run setup
 
-The first time Settings is opened with no admin account on the server, a setup wizard prompts for a username and password to create the first admin. From then on, Settings requires logging in as an admin.
+The first time you open the app with no admin account yet, a welcome screen offers to create one. Because every write requires admin login by default, this isn't optional busywork — skipping it means no players can be added and no games can be started until an account exists (you'll see the same prompt again the next time you try). Viewing stats and the live scoreboard never require a login, with or without an admin account.
+
+Once created, that admin's session lasts 30 days per device/browser — a household typically only needs to log in once on whichever device actually runs the scoreboard, not on every device that views it.
+
+Settings itself has its own equivalent gate: opening it with no admin account yet asks you to create one there instead, if you didn't already from the welcome screen.
 
 ### Admin accounts
 
@@ -630,20 +634,23 @@ The first time Settings is opened with no admin account on the server, a setup w
 | Change Home Assistant / webhook / scoreboard-layout / default-input settings | Yes |
 | Verify a player's PIN to add them to a game | No — public, but rate-limited by both the lockout threshold and a per-IP request budget |
 | Log in as an admin | No — public, but rate-limited by both its own lockout threshold and a per-IP request budget |
-| View stats, play games, use the scoreboard | No *(unless `OCHE_REQUIRE_AUTH` is set — see below)* |
+| View stats, watch the live scoreboard | No — always public, regardless of the setting below |
+| Add a player, start a game, record turns, everything else that writes | **Yes, by default** — see below |
 
-### Locking down writes for internet-exposed deployments
+### Zero-trust by default: opting back into open-LAN behavior
 
-By default the app follows a LAN trust model: **reads and gameplay writes are open**, and
-only the admin/destructive actions above require login. Player PINs are a UI convenience —
-they gate the player picker, **not** the underlying API — so on an untrusted network anyone
-who can reach the server could record games or edit players directly.
+Every write (creating players/games, recording turns, badges, challenges, and the
+live-scoreboard feed) requires a logged-in admin session by default — even on a
+network you fully trust. Reads always stay public, so the read-only scoreboard and
+stats pages work for everyone with no login needed to just watch.
 
-Set the environment variable **`OCHE_REQUIRE_AUTH=true`** to require a logged-in admin
-session for **every write** (creating players/games, recording turns, badges, challenges,
-and the live-scoreboard feed). Reads stay public, so the read-only scoreboard and stats
-pages still work for everyone. When enabled, the app prompts for an admin login before
-starting a game or changing the roster.
+Set the environment variable **`OCHE_REQUIRE_AUTH=false`** to opt back into the old
+LAN-trust behavior instead: reads *and* gameplay writes both open, and only the
+admin/destructive actions in the table above still require login. Only do this on a
+network you fully trust (no untrusted devices, no internet exposure) — player PINs
+are a UI convenience, not real authentication. They gate the player picker, **not**
+the underlying API, so with `OCHE_REQUIRE_AUTH=false` anyone who can reach the server
+could record games or edit players directly.
 
 ### Exposing this to the internet — checklist
 
@@ -653,7 +660,8 @@ work through this list. It's also tracked in `docs/security-audit-roadmap.md`.
 - **Put it behind a TLS-terminating reverse proxy.** The app itself only speaks plain HTTP.
 - **Set `COOKIE_SECURE=true`** once it's served over HTTPS, so the admin session cookie
   gets the `Secure` flag.
-- **Set `OCHE_REQUIRE_AUTH=true`** (see above) so every write requires a logged-in admin.
+- **Leave `OCHE_REQUIRE_AUTH` at its default (`true`)** — every write already requires a
+  logged-in admin with no configuration needed.
 - **Set `TRUST_PROXY=true`** *only* if the reverse proxy in front of it is one you control
   and it sets `X-Forwarded-For`. This makes the built-in per-IP rate limiting (login,
   first-run setup, PIN verification, and a general per-IP request budget) use the real
@@ -668,8 +676,8 @@ work through this list. It's also tracked in `docs/security-audit-roadmap.md`.
   `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`) — nothing to configure
   for these, just worth knowing they're on by default.
 - `POST /api/ha-webhook` (the inbound trigger used to fire an already-configured Home
-  Assistant webhook) is intentionally **not yet covered** by `OCHE_REQUIRE_AUTH` — see the
-  open item in `docs/security-hardening-roadmap.md` before relying on it being gated.
+  Assistant webhook) uses the same admin-login gate as every other write endpoint above —
+  nothing extra to configure for it either.
 
 ---
 
@@ -688,8 +696,9 @@ Returns `{ ok: true }`.
 
 ```
 GET    /api/setup-required                  { required } — true until the first admin exists
-GET    /api/auth-config                     { requireAuth } — whether OCHE_REQUIRE_AUTH is set
-                                             (read at app boot to know if writes need a login)
+GET    /api/auth-config                     { requireAuth } — the effective OCHE_REQUIRE_AUTH
+                                             value (true by default; read at app boot to know
+                                             if writes need a login)
 POST   /api/setup                           Create the first admin   { username, password }
                                              (only while setup-required)
 POST   /api/login                           Log in                   { username, password }

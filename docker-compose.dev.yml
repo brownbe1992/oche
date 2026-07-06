@@ -10,7 +10,7 @@ services:
       - PORT=8056
       - DARTS_DB=/data/darts.db
       - COOKIE_SECURE=false   # set true if served over HTTPS (e.g. reverse proxy)
-      - OCHE_REQUIRE_AUTH=false   # set true for any internet-exposed deployment — see README.md
+      - OCHE_REQUIRE_AUTH=true   # zero-trust default; set false only for a fully-trusted LAN — see README.md
       # - TRUST_PROXY=true       # only if behind a reverse proxy YOU control
       # - HA_BLOCK_PRIVATE=true  # only to also block outbound HA requests to private/LAN IPs
     # See docker-compose.yml for why a full read-only/cap_drop:[ALL] setup isn't used here.

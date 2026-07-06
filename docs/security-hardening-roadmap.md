@@ -76,15 +76,18 @@ routes were gated, **every gameplay/stat write endpoint was unauthenticated**, a
 **player PINs were only enforced in the UI** — a direct `POST /api/games/:id/turns`
 recorded turns as a PIN-protected player with no PIN. Addressed:
 
-- **`OCHE_REQUIRE_AUTH` (env, default off).** When on, every write endpoint
+- **`OCHE_REQUIRE_AUTH` (env, zero-trust default: on).** Every write endpoint
   (`POST /api/players`, `PUT /api/players/rename|out|dart-weight`, `POST /api/games`,
   `/api/games/:id/turns|complete|events`, `DELETE .../turns/last`, `POST /api/live`,
   `/api/badges/award|revoke`, `/api/challenges/start|complete`) requires a logged-in
   admin session via a shared `requireWrite()` gate. Reads stay public so the scoreboard
   and stats still work for everyone. `GET /api/auth-config` exposes the flag; the
-  frontend uses it to prompt for login before gameplay/roster writes. Default off so
-  existing LAN installs are unchanged on upgrade; **turn it on for any internet-exposed
-  deployment.** This is the chosen mitigation for the client-only-PIN gap — PINs stay a
+  frontend uses it to prompt for login before gameplay/roster writes, routing to the
+  first-run setup wizard instead of a dead-end login prompt when no admin account
+  exists yet (`Auth.ensureCanWrite()`, `frontend/index.html`). **Set
+  `OCHE_REQUIRE_AUTH=false` to opt back into open-LAN behavior** for a fully-trusted
+  household network — unrecognized values fail closed (still required), not silently
+  disabled. This is the chosen mitigation for the client-only-PIN gap — PINs stay a
   UI convenience; the auth gate is the real lock.
 - **Stat reclassification fixed.** H2H-vs-practice classification now reads a frozen
   `games.player_count` (captured at creation, backfilled) instead of a live

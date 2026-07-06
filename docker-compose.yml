@@ -15,11 +15,12 @@ services:
       # so the admin session cookie gets the Secure flag. Leave unset/false for plain
       # HTTP / LAN-only deployments.
       - COOKIE_SECURE=false
-      # Set to "true" to require an admin login for every write (players, games,
-      # turns, badges, live feed) — reads stay public. Default off for a smooth
-      # upgrade on existing LAN installs; turn this ON for any deployment reachable
-      # from the open internet. See README.md "Exposing this to the internet".
-      - OCHE_REQUIRE_AUTH=false
+      # Requires an admin login for every write (players, games, turns, badges, live
+      # feed) — reads stay public. This is a zero-trust default: true even for a
+      # trusted-looking LAN device. Set to "false" only for a fully-trusted household
+      # network where you'd rather skip the one-time admin login per device. See
+      # README.md "Locking down writes" and "Exposing this to the internet".
+      - OCHE_REQUIRE_AUTH=true
       # Only set to "true" if this container sits behind a reverse proxy YOU control
       # that sets X-Forwarded-For — otherwise leave unset, since honoring that header
       # from an untrusted source would let a client spoof its way around per-IP rate

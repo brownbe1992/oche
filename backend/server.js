@@ -54,10 +54,13 @@
    Set COOKIE_SECURE=true when serving over HTTPS (e.g. behind a reverse proxy) so the
    session cookie gets the Secure flag; leave unset for plain-HTTP LAN deployments.
 
-   Set OCHE_REQUIRE_AUTH=true to require an admin session for ALL write endpoints
-   (creating players/games, recording turns, badges, challenges, the live feed) — reads
-   stay public. Default off (open LAN behavior). GET /api/auth-config reports this flag
-   so the frontend can gate gameplay behind login when it's on.
+   Every write endpoint (creating players/games, recording turns, badges, challenges,
+   the live feed) requires an admin session by default — reads stay public. This is a
+   zero-trust default: even a trusted-looking LAN device isn't assumed safe. Set
+   OCHE_REQUIRE_AUTH=false to opt back into the old LAN-trust behavior (writes open to
+   anyone who can reach the server) for a fully-trusted household network. GET
+   /api/auth-config reports the effective flag so the frontend can gate gameplay behind
+   login when it's on.
 
    Set TRUST_PROXY=true only when this server sits behind a reverse proxy you control,
    so the per-IP rate limiter uses X-Forwarded-For instead of the raw socket address —
@@ -74,11 +77,14 @@ const auth = require('./auth.js');
 const netguard = require('./netguard.js');
 
 const PORT = process.env.PORT || 8046;
-// When OCHE_REQUIRE_AUTH=true, every state-changing (write) API endpoint requires a
-// logged-in admin session. Reads (stats, scoreboard, settings-for-display) stay public
-// so viewing and the live scoreboard still work for everyone. Default OFF so existing
-// LAN deployments are unaffected on upgrade; turn ON for any internet-exposed install.
-const REQUIRE_AUTH = String(process.env.OCHE_REQUIRE_AUTH || '').toLowerCase() === 'true';
+// Every state-changing (write) API endpoint requires a logged-in admin session by
+// default. Reads (stats, scoreboard, settings-for-display) stay public so viewing and
+// the live scoreboard still work for everyone without logging in. Zero-trust default —
+// set OCHE_REQUIRE_AUTH=false (or "0") to opt back into open-LAN behavior for a
+// fully-trusted household network. Unrecognized values are treated as "required" (fail
+// closed), not silently disabled.
+const _requireAuthEnv = String(process.env.OCHE_REQUIRE_AUTH ?? '').toLowerCase();
+const REQUIRE_AUTH = !(_requireAuthEnv === 'false' || _requireAuthEnv === '0');
 const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
 const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript', '.css':'text/css', '.svg':'image/svg+xml', '.ico':'image/x-icon' };
 

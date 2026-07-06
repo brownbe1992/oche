@@ -1505,12 +1505,42 @@ enough to occasionally trip this exact path.
 ### `OCHE_REQUIRE_AUTH` — the write-gating switch
 
 Two auth gates exist: **`requireAdmin`** always requires a logged-in admin
-session; **`requireWrite`** is a no-op (public) unless `OCHE_REQUIRE_AUTH=true`,
-in which case it behaves exactly like `requireAdmin`. By default the app trusts
-its LAN — reads and gameplay writes (recording turns, starting games, awarding
-badges) are open, and only destructive/admin actions require login. Setting
-`OCHE_REQUIRE_AUTH=true` locks every write behind an admin session, for
-internet-exposed deployments.
+session; **`requireWrite`** behaves exactly like `requireAdmin` unless
+`OCHE_REQUIRE_AUTH` is explicitly set to `"false"` or `"0"` (case-insensitive),
+in which case it's a no-op (public). Zero-trust default: reads (stats,
+scoreboard, settings-for-display) always stay public, but every write
+(recording turns, starting games, awarding badges) requires a logged-in admin
+session even on a fully-trusted LAN — the app never assumes a device on the
+network is safe just because it's on the network. An unrecognized env value
+fails closed (still required), not silently disabled. Set
+`OCHE_REQUIRE_AUTH=false` to opt back into the pre-2026-07 open-LAN behavior
+(reads and gameplay writes both open, only destructive/admin actions require
+login) for a fully-trusted household network. See
+`docs/security-hardening-roadmap.md` for the design history of this default
+flip.
+
+### The setup wizard and `Auth.ensureCanWrite()` (`frontend/index.html`)
+
+`Auth.ensureCanWrite(onOk)` is the client-side gate every write action calls
+through (add/rename a player, start a game, etc.): if the server doesn't
+require auth or the client is already logged in, `onOk()` runs immediately.
+Otherwise it needs an existing admin account to log into — but if
+`Auth.setupRequired` is true (zero admins exist yet), there's nothing to log
+into, so it opens the **setup wizard** (`showWizard(onOk)`) instead of the
+login modal, which would otherwise be a dead end. `showWizard`/`submitWizard`
+thread `onOk` through via `window.__wizardOk`: on successful admin creation,
+the originally-attempted action resumes automatically (e.g. the "add player"
+prompt that triggered the gate appears right after); skipping the wizard
+clears `window.__wizardOk` and simply abandons that action, and the *same*
+prompt reappears the next time any write is attempted, since `setupRequired`
+hasn't changed. The wizard's own copy branches on `Auth.requireAuth`: under
+the zero-trust default, skipping means no games can be started at all (stats
+and the live scoreboard remain viewable); under `OCHE_REQUIRE_AUTH=false`,
+skipping only leaves Settings/PIN management open, exactly as before this
+default existed. The unconditional first-load popup (`showWizard()` with no
+argument, gated on `!localStorage.getItem('oche_wizard_dismissed')`) uses the
+same generic "created" confirmation it always has, since there's no pending
+action to resume in that path.
 
 ### Egress guard (`netguard.js`) — outbound-request SSRF/DNS-rebinding protection
 
@@ -1550,9 +1580,9 @@ lazily deleted on lookup and swept on every successful login.
 
 None currently open. `POST /api/ha-webhook` (the inbound trigger that fires an
 already-configured HA webhook) is gated by `requireWrite` like every other
-state-changing endpoint (SEC-7, `docs/security-audit-roadmap.md`) — public by
-default (LAN trust) unless `OCHE_REQUIRE_AUTH=true`, in which case it requires a
-logged-in admin session the same as `POST /api/games` or any other write.
+state-changing endpoint (SEC-7, `docs/security-audit-roadmap.md`) — requires a
+logged-in admin session by default, the same as `POST /api/games` or any other
+write, unless `OCHE_REQUIRE_AUTH=false` opts back into open-LAN behavior.
 
 ---
 
@@ -1812,10 +1842,11 @@ against the API. This document's job is the *why*/*exact internal logic*
 behind each one; cross-reference by endpoint name.
 
 **Two auth gates, not one**: `requireAdmin` always requires a logged-in admin
-session; `requireWrite` is a no-op unless `OCHE_REQUIRE_AUTH=true` (see §9).
-Routes documented as `[admin]` in the README use `requireAdmin`; everything
-else that mutates state uses `requireWrite` and is public by default on a
-normal LAN deployment.
+session; `requireWrite` behaves the same way by default and is only a no-op
+when `OCHE_REQUIRE_AUTH` is explicitly set to `"false"`/`"0"` (see §9). Routes
+documented as `[admin]` in the README use `requireAdmin`; everything else that
+mutates state uses `requireWrite`, which requires a logged-in admin by default
+even on a normal LAN deployment.
 
 **Rate-limit buckets**: see §9's table — `global` (300/60s, every request),
 `setup`/`login`/`pin` (10/60s each, their own endpoint only). SSE uses separate

