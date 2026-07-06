@@ -84,6 +84,15 @@ stay linkable and keep their design rationale; they just stop competing with the
 still-open roadmaps for attention. Partially-done docs stay in `docs/` — only archive
 a doc once nothing in it is still outstanding.
 
+## Version numbers require explicit confirmation before bumping
+
+`backend/package.json`'s `version` field (mirrored in `README.md`'s `**vX.Y.Z**`
+line) must never be bumped as a side effect of other work, and never proposed with
+an assumed next value — always ask the user which version to use and wait for
+their explicit confirmation before editing either file. This applies even when the
+user has already asked for "a version bump" in general terms; confirm the specific
+number, since the next logical version isn't always obvious from git history alone.
+
 ## Reference manual — `REFERENCE.md` must be kept current
 
 `REFERENCE.md` (repo root) is the **specification** — the single authoritative
