@@ -80,6 +80,47 @@ describe('revokeBadge (undo support)', () => {
   });
 });
 
+// docs/security-audit-roadmap.md SEC-14: badgeId previously accepted any string
+// with no bound (both awardBadge/revokeBadge are requireWrite routes, public by
+// default) — a made-up or oversized id could pollute the Badge Case. Every real
+// badge id is lowercase snake_case, so a shape bound (not a duplicated exact
+// enumeration — see the comment on validateBadgeId() in db.js) closes the gap.
+describe('validateBadgeId (SEC-14: badgeId shape bound)', () => {
+  test('rejects an empty badgeId', () => {
+    const name = 'Badge_EmptyId';
+    db.addPlayer(name);
+    assert.throws(() => db.awardBadge(name, '', false), (err) => err.status === 400);
+  });
+
+  test('rejects uppercase or non-alphanumeric characters', () => {
+    const name = 'Badge_BadShape';
+    db.addPlayer(name);
+    assert.throws(() => db.awardBadge(name, 'HatTrick', false), (err) => err.status === 400);
+    assert.throws(() => db.awardBadge(name, 'hat-trick', false), (err) => err.status === 400);
+    assert.throws(() => db.awardBadge(name, "hattrick'); DROP TABLE players;--", false), (err) => err.status === 400);
+  });
+
+  test('rejects an id over 64 characters', () => {
+    const name = 'Badge_TooLong';
+    db.addPlayer(name);
+    assert.throws(() => db.awardBadge(name, 'x'.repeat(65), false), (err) => err.status === 400);
+  });
+
+  test('accepts a real badge id at exactly 64 characters', () => {
+    const name = 'Badge_ExactLen';
+    db.addPlayer(name);
+    const id = 'chuckin_darts_' + '1'.repeat(50); // pads to exactly 64
+    assert.equal(id.length, 64);
+    assert.doesNotThrow(() => db.awardBadge(name, id, false));
+  });
+
+  test('revokeBadge applies the same bound', () => {
+    const name = 'Badge_RevokeBadShape';
+    db.addPlayer(name);
+    assert.throws(() => db.revokeBadge(name, 'Not Valid!'), (err) => err.status === 400);
+  });
+});
+
 describe('getPlayerBadges', () => {
   test('lists every distinct badge a player has earned, with its running count', () => {
     const name = 'Badge_List';

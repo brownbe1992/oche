@@ -27,7 +27,12 @@
 
 ## BUG-1 — Daily Challenge write path doesn't validate the date/format the read path requires  **(LOW, latent / data-integrity)**
 
-**Status: 🔴 OPEN.**
+**Status: ✅ Fixed.** `startChallengeAttempt()` now validates `challengeDate` against
+`^\d{4}-\d{2}-\d{2}$` and `format` against `CHALLENGE_BETTER_DIRECTION`'s known keys
+before writing (400 otherwise); `completeChallengeAttempt()` validates `challengeDate`
+the same way. Same fix as `security-audit-roadmap.md` **SEC-14**. Tested in
+`db.challenges.test.js` (malformed date on start/complete, unknown format on start,
+every one of the 6 known formats accepted).
 
 **Where:** `db.js` `startChallengeAttempt()` and `completeChallengeAttempt()` store
 `challenge_date` and `format` via bare `String(...)` with no validation. The *read* side
@@ -65,7 +70,16 @@ correctly.
 
 ## BUG-2 — `createGame` accepts an unknown `gameType`, which then silently skews cross-type stats  **(LOW, latent / data-integrity)**
 
-**Status: 🔴 OPEN.**
+**Status: ✅ Fixed.** `createGame()` now validates `gameType` (defaulted to `'x01'`
+first) against the existing `KNOWN_GAME_TYPES` whitelist, rejecting an unknown value
+with a 400 before any row is written — the same whitelist `_scope()` already enforced
+on the read side. `category` is also now capped at 64 characters and the serialized
+`config` at 4096 bytes (same change, since all three live at the same write
+boundary — see `security-audit-roadmap.md` **SEC-14**). No self-heal migration was
+needed since no pre-existing rows have an unknown `game_type` (confirmed: the
+shipped UI only ever sends one of the four known types). Tested in
+`db.turn-validation.test.js`; a live Playwright smoke test also confirmed ordinary
+X01/Cricket/Chuckin game creation is unaffected.
 
 **Where:** `db.js` `createGame()` sets `resolvedGameType = gameType || 'x01'` with **no**
 whitelist, even though `KNOWN_GAME_TYPES` (`['x01','cricket','doubles_practice','chuckin']`)
@@ -97,7 +111,13 @@ create normally and appear in both the unscoped and typed stats.
 
 ## BUG-3 — Admin-username `onclick` handlers rely on a validator elsewhere instead of escaping at the sink  **(LOW, code-hygiene / latent-regression)**
 
-**Status: 🔴 OPEN.** (Cross-ref: `security-audit-roadmap.md` **SEC-12**.)
+**Status: ✅ Fixed.** (Cross-ref: `security-audit-roadmap.md` **SEC-12**.) Both
+`askChangeAdminPassword(...)`/`askDeleteAdmin(...)` handlers in `renderAdminsList()`
+now wrap `a.username` as `escapeHtml(escapeJs(a.username))`, matching every other
+`onclick` site in the file. Purely defensive — usernames were never exploitable
+(regex-restricted), and this removes the "safe only because of a validator
+elsewhere" coupling. Verified: a grep for `escapeJs(` not preceded by `escapeHtml(`
+across `frontend/index.html` now returns zero matches.
 
 **Where:** `frontend/index.html` — the `askChangeAdminPassword(...)` / `askDeleteAdmin(...)`
 `onclick` handlers in `renderAdminsList()` interpolate `a.username` with **`escapeJs`

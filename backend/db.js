@@ -287,10 +287,30 @@ const q = {
 /* ---------- player operations ---------- */
 function getPlayer(name) { return q.playerByName.get(String(name)); }
 
+// docs/security-audit-roadmap.md SEC-13: player names previously had no server-side
+// length or shape bound (just String(name).trim()) — unbounded free-text from an
+// unauthenticated caller (POST /api/players is public by default), and the raw
+// material for SEC-12 (a stored-XSS sink that has since been fixed at the render
+// site, but an input bound is still the right defense-in-depth here). Charset stays
+// permissive (real names use emoji/apostrophes/etc.) — only a length cap and a
+// control-character reject, since control characters have no legitimate use in a
+// display name and the length cap keeps a single giant name from bloating every
+// view/canvas/live-payload broadcast that echoes it.
+const MAX_PLAYER_NAME_LEN = 64;
+const CONTROL_CHAR_RE = /[\x00-\x1f]/;
+function validatePlayerName(name) {
+  name = String(name || '').trim();
+  if (!name) throw httpError(400, 'Name is required');
+  if (name.length > MAX_PLAYER_NAME_LEN) throw httpError(400, `Name must be ${MAX_PLAYER_NAME_LEN} characters or fewer`);
+  if (CONTROL_CHAR_RE.test(name)) throw httpError(400, 'Name must not contain control characters');
+  return name;
+}
+
 function ensurePlayer(name, out = 'double') {
+  name = validatePlayerName(name);
   const existing = getPlayer(name);
   if (existing) return existing;
-  q.insertPlayer.run(String(name).trim(), out === 'single' ? 'single' : 'double');
+  q.insertPlayer.run(name, out === 'single' ? 'single' : 'double');
   return getPlayer(name);
 }
 
@@ -303,8 +323,7 @@ function listPlayers() {
 // hasPin field below could report false for a player created with a PIN, since
 // the hash write wouldn't have landed yet when getPlayer() re-reads the row.
 async function addPlayer(name, out = 'double', opts = {}) {
-  name = String(name || '').trim();
-  if (!name) throw httpError(400, 'Name is required');
+  name = validatePlayerName(name);
   const existing = getPlayer(name);
   if (existing) return { name: existing.name, out: existing.out_mode, hasPin: !!existing.pin_hash, dartWeight: existing.dart_weight ?? null };
   q.insertPlayer.run(name, out === 'single' ? 'single' : 'double');
@@ -317,8 +336,7 @@ async function addPlayer(name, out = 'double', opts = {}) {
 }
 
 function renamePlayer(from, to) {
-  to = String(to || '').trim();
-  if (!to) throw httpError(400, 'New name is required');
+  to = validatePlayerName(to);
   const p = getPlayer(from);
   if (!p) throw httpError(404, 'Player not found');
   const clash = getPlayer(to);
@@ -397,8 +415,20 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   // means a future Cricket/Baseball New Game flow can pass its own without another
   // signature change here.
   const resolvedGameType = gameType || 'x01';
+  // docs/security-audit-roadmap.md SEC-14 / docs/bug-roadmap.md BUG-2: an unknown
+  // gameType was previously accepted and stored as-is — it then counted toward every
+  // UNSCOPED aggregate (total darts thrown, games played) while being silently
+  // excluded from every TYPED stat query (X01_ONLY, _scope({gameType:...}), which
+  // already whitelists against this same KNOWN_GAME_TYPES list on the read side).
+  // Reject at the write boundary instead of letting a bad row drift the totals.
+  if (!KNOWN_GAME_TYPES.includes(resolvedGameType)) {
+    throw httpError(400, `Unknown gameType "${resolvedGameType}"`);
+  }
+  const categoryStr = String(category);
+  if (categoryStr.length > 64) throw httpError(400, 'category must be 64 characters or fewer');
   const resolvedConfig = config ? JSON.stringify(config) : JSON.stringify({ startingScore: Number(category) || null });
-  const info = q.insertGame.run(String(category), Number(legsPerSet) || 1, Number(setsPerGame) || 1, practice ? 1 : 0, resolvedGameType, resolvedConfig);
+  if (Buffer.byteLength(resolvedConfig) > 4096) throw httpError(400, 'config is too large');
+  const info = q.insertGame.run(categoryStr, Number(legsPerSet) || 1, Number(setsPerGame) || 1, practice ? 1 : 0, resolvedGameType, resolvedConfig);
   const gameId = Number(info.lastInsertRowid);
   (players || []).forEach(entry => {
     const out = entry.out === 'single' ? 'single' : 'double';
@@ -410,7 +440,7 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   const pc = db.prepare('SELECT COUNT(*) AS n FROM game_players WHERE game_id = ?').get(gameId).n;
   db.prepare('UPDATE games SET player_count = ? WHERE id = ?').run(pc, gameId);
   _fireGameLifecycleHooks('created', { gameId, gameType: resolvedGameType, practice: !!practice,
-    category: String(category), playerCount: pc });
+    category: categoryStr, playerCount: pc });
   return { gameId };
 }
 
@@ -492,6 +522,18 @@ function startChallengeAttempt(playerName, gameId, challengeDate, format, target
   const p = getPlayer(playerName);
   if (!p) throw httpError(404, 'Player not found');
   if (!Number.isFinite(Number(gameId))) throw httpError(400, 'gameId must be a number');
+  // docs/security-audit-roadmap.md SEC-14 / docs/bug-roadmap.md BUG-1: the write path
+  // previously stored challengeDate/format via bare String(...) with no validation,
+  // while every READ path (getChallengeStatus, resetChallengeAttempt) requires
+  // challengeDate to match this same regex and the streak walks assume it parses as
+  // a real calendar date — a malformed date written here would count toward
+  // getChallengeHistory()'s played/completed totals (which doesn't validate) but
+  // silently corrupt the streak walk (NaN day-gap resets a real run to 1). Reject
+  // both at the write boundary instead of writing an attempt no read path can find.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(challengeDate))) throw httpError(400, 'challengeDate must be YYYY-MM-DD');
+  if (!Object.prototype.hasOwnProperty.call(CHALLENGE_BETTER_DIRECTION, String(format))) {
+    throw httpError(400, `Unknown challenge format "${format}"`);
+  }
   try {
     db.prepare(`
       INSERT INTO daily_challenge_attempts (game_id, player_id, challenge_date, format, target)
@@ -520,6 +562,9 @@ const CHALLENGE_BETTER_DIRECTION = {
 function completeChallengeAttempt(playerName, challengeDate, resultDarts) {
   const p = getPlayer(playerName);
   if (!p) throw httpError(404, 'Player not found');
+  // See startChallengeAttempt()'s comment (SEC-14/BUG-1) — same read/write asymmetry,
+  // guarded the same way here.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(challengeDate))) throw httpError(400, 'challengeDate must be YYYY-MM-DD');
   // A day's result is locked in like a Wordle guess — once completed it must not be
   // overwritten. The `AND completed = 0` guard makes a repeat/retried/replayed
   // completion a no-op instead of letting a second (e.g. better) resultDarts replace
@@ -2058,15 +2103,36 @@ function getNineDarterStats(mode) {
 // trigger condition stays true forever once crossed, so re-checking it doesn't
 // inflate the count. Otherwise the count increments every call, for badges whose
 // trigger condition fires once per relevant event (a visit, a leg, a match).
+// docs/security-audit-roadmap.md SEC-14: badgeId previously accepted any string with
+// no bound — awardBadge()/revokeBadge() are both requireWrite routes, public by
+// default, so an unauthenticated caller could award/inflate an arbitrary badge_id
+// (real or made-up) on any player, polluting the Badge Case/leaderboards. There is
+// no single canonical badge-id registry shared between frontend and backend today
+// (badge ids live only in frontend/index.html's BADGE_INFO plus the dynamically-
+// generated Just Chuckin' It milestone-ladder ids, e.g. chuckin_darts_10) — building
+// a duplicate exact-enumeration here would be a second place to keep in sync every
+// time a badge is added, the exact "same meaning in two places" drift risk this
+// codebase avoids elsewhere. Every existing badge id (checked against BADGE_INFO's
+// keys, ACH_TYPE_TO_BADGE_ID's persisted values, and the ladder id prefixes) is
+// lowercase snake_case, so a shape bound closes the "unbounded free-form string"
+// gap without introducing that duplication.
+const BADGE_ID_RE = /^[a-z0-9_]{1,64}$/;
+function validateBadgeId(badgeId) {
+  const id = String(badgeId || '');
+  if (!BADGE_ID_RE.test(id)) throw httpError(400, 'badgeId must be lowercase letters, numbers, and underscores (max 64 characters)');
+  return id;
+}
+
 function awardBadge(playerName, badgeId, once) {
   const p = getPlayer(playerName);
   if (!p) throw httpError(404, 'Player not found');
+  badgeId = validateBadgeId(badgeId);
   if (once) {
-    const info = q.awardBadgeOnce.run(p.id, String(badgeId));
+    const info = q.awardBadgeOnce.run(p.id, badgeId);
     return { newlyEarned: info.changes > 0, count: 1 };
   }
-  q.awardBadgeIncrement.run(p.id, String(badgeId));
-  const row = q.badgeCount.get(p.id, String(badgeId));
+  q.awardBadgeIncrement.run(p.id, badgeId);
+  const row = q.badgeCount.get(p.id, badgeId);
   return { newlyEarned: row.count === 1, count: row.count };
 }
 
@@ -2078,13 +2144,14 @@ function awardBadge(playerName, badgeId, once) {
 function revokeBadge(playerName, badgeId) {
   const p = getPlayer(playerName);
   if (!p) throw httpError(404, 'Player not found');
-  const row = q.badgeCount.get(p.id, String(badgeId));
+  badgeId = validateBadgeId(badgeId);
+  const row = q.badgeCount.get(p.id, badgeId);
   if (!row) return { count: 0 };
   if (row.count <= 1) {
-    q.deleteBadge.run(p.id, String(badgeId));
+    q.deleteBadge.run(p.id, badgeId);
     return { count: 0 };
   }
-  q.decrementBadge.run(p.id, String(badgeId));
+  q.decrementBadge.run(p.id, badgeId);
   return { count: row.count - 1 };
 }
 
@@ -2110,7 +2177,13 @@ function getTopFinishesAll(limit = 10, mode) {
   `).all(limit);
 }
 
+// docs/security-audit-roadmap.md SEC-14: eventType previously accepted any string.
+// This is a requireWrite route, public by default, so an unauthenticated caller
+// could pollute a game's timeline with arbitrary event types. The 6 real event
+// types are exactly the ones frontend/index.html's DB.recordEvent() ever sends.
+const KNOWN_EVENT_TYPES = ['game_start', 'game_end', 'set_start', 'set_end', 'leg_start', 'leg_end'];
 function recordEvent(gameId, eventType, setNo, legNo) {
+  if (!KNOWN_EVENT_TYPES.includes(eventType)) throw httpError(400, `Unknown event type "${eventType}"`);
   db.prepare(
     'INSERT INTO timeline_events (game_id, event_type, set_no, leg_no) VALUES (?, ?, ?, ?)'
   ).run(Number(gameId), String(eventType), setNo ?? null, legNo ?? null);

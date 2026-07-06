@@ -71,6 +71,48 @@ describe('startChallengeAttempt / completeChallengeAttempt', () => {
   });
 });
 
+// docs/security-audit-roadmap.md SEC-14 / docs/bug-roadmap.md BUG-1: the write path
+// previously stored challengeDate/format via bare String(...) with no validation,
+// even though every READ path (getChallengeStatus, resetChallengeAttempt) requires
+// challengeDate to match ^\d{4}-\d{2}-\d{2}$ and the streak walks assume it parses
+// as a real calendar date — a malformed write would count toward
+// getChallengeHistory()'s totals but corrupt the streak walk silently.
+describe('startChallengeAttempt / completeChallengeAttempt — date/format validation', () => {
+  test('rejects a malformed challengeDate on start', () => {
+    const name = 'Challenge_BadDateStart';
+    db.addPlayer(name);
+    const g = practiceGame(name);
+    assert.throws(() => db.startChallengeAttempt(name, g.gameId, '2021-6-1', 'speed_to_zero', null), (err) => err.status === 400);
+    assert.throws(() => db.startChallengeAttempt(name, g.gameId, 'not-a-date', 'speed_to_zero', null), (err) => err.status === 400);
+  });
+
+  test('rejects an unknown format on start', () => {
+    const name = 'Challenge_BadFormat';
+    db.addPlayer(name);
+    const g = practiceGame(name);
+    assert.throws(() => db.startChallengeAttempt(name, g.gameId, '2021-06-01', 'made_up_format', null), (err) => err.status === 400);
+  });
+
+  test('accepts every known format', () => {
+    const formats = ['checkout_sprint', 'speed_to_zero', 'bullseye_gauntlet', 'steady_hand', 'treble_run', 'long_game'];
+    formats.forEach((format, i) => {
+      const name = 'Challenge_Format_' + i;
+      db.addPlayer(name);
+      const g = practiceGame(name);
+      const date = `2021-07-${String(i + 1).padStart(2, '0')}`;
+      assert.doesNotThrow(() => db.startChallengeAttempt(name, g.gameId, date, format, format === 'checkout_sprint' ? 40 : null));
+    });
+  });
+
+  test('rejects a malformed challengeDate on complete', () => {
+    const name = 'Challenge_BadDateComplete';
+    db.addPlayer(name);
+    const g = practiceGame(name);
+    db.startChallengeAttempt(name, g.gameId, '2021-06-02', 'speed_to_zero', null);
+    assert.throws(() => db.completeChallengeAttempt(name, '2021-6-2', 30), (err) => err.status === 400);
+  });
+});
+
 describe('personal best detection (CHALLENGE_BETTER_DIRECTION)', () => {
   test('speed_to_zero (fewer darts is better): first ever completion is trivially a PB, a worse one is not, a better one is', () => {
     const name = 'Challenge_PB_Asc';

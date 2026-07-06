@@ -2286,8 +2286,8 @@ function renderAdminsList(){
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:var(--surface-2);border-radius:8px">
         <span style="font-size:13px">${escapeHtml(a.username)}</span>
         <div style="display:flex;gap:6px">
-          <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="askChangeAdminPassword(${a.id},'${escapeJs(a.username)}')">Change password</button>
-          <button class="btn btn-ghost danger" style="padding:4px 10px;font-size:12px" onclick="askDeleteAdmin(${a.id},'${escapeJs(a.username)}')">Remove</button>
+          <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="askChangeAdminPassword(${a.id},'${escapeHtml(escapeJs(a.username))}')">Change password</button>
+          <button class="btn btn-ghost danger" style="padding:4px 10px;font-size:12px" onclick="askDeleteAdmin(${a.id},'${escapeHtml(escapeJs(a.username))}')">Remove</button>
         </div>
       </div>`).join('') || '<p style="font-size:12px;color:var(--muted)">No admins.</p>';
   }).catch(logErr);
@@ -2327,8 +2327,8 @@ function renderPinPlayersList(){
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:var(--surface-2);border-radius:8px">
         <span style="font-size:13px">${escapeHtml(n)} ${has?'<span style="color:var(--muted);font-size:11px">— PIN set</span>':''}</span>
         <div style="display:flex;gap:6px">
-          <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="askSetPlayerPin('${escapeJs(n)}')">${has?'Reset PIN':'Set PIN'}</button>
-          ${has?`<button class="btn btn-ghost danger" style="padding:4px 10px;font-size:12px" onclick="askRemovePlayerPin('${escapeJs(n)}')">Remove PIN</button>`:''}
+          <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="askSetPlayerPin('${escapeHtml(escapeJs(n))}')">${has?'Reset PIN':'Set PIN'}</button>
+          ${has?`<button class="btn btn-ghost danger" style="padding:4px 10px;font-size:12px" onclick="askRemovePlayerPin('${escapeHtml(escapeJs(n))}')">Remove PIN</button>`:''}
         </div>
       </div>`;
   }).join('') || '<p style="font-size:12px;color:var(--muted)">No players yet.</p>';

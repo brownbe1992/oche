@@ -1,9 +1,11 @@
 # Security Audit Roadmap (adversarial whole-codebase review)
 
-> **Status: SEC-1 through SEC-11 fixed. A second-pass audit (2026-07, after the
-> Cricket / Doubles Practice / Just Chuckin' It / Ghost-mode expansion) opened
-> three NEW findings — SEC-12 (stored XSS), SEC-13, SEC-14 — see "Part 4" below.
-> SEC-12 is OPEN and should be fixed first.** The original eleven are unchanged.
+> **Status: ✅ All findings fixed (SEC-1 through SEC-14).** A second-pass audit
+> (2026-07, after the Cricket / Doubles Practice / Just Chuckin' It / Ghost-mode
+> expansion) opened three new findings — SEC-12 (stored XSS), SEC-13 (player-name
+> bounds), SEC-14 (validate/bound write inputs) — see "Part 4" below for what
+> shipped for each, and `docs/bug-roadmap.md` for the functional-defect
+> counterparts (BUG-1/BUG-2/BUG-3) fixed in the same pass.
 >
 > See the "Status" line
 > under each finding below for what actually shipped, which in a couple of places is
@@ -514,7 +516,17 @@ Part 3). Three new findings:
 
 ### SEC-12 — Stored XSS via a player name in Settings → PIN management  **(MED, unauthenticated in the default config)**
 
-**Status: 🔴 OPEN.** Fix first.
+**Status: ✅ Fixed.** `renderPinPlayersList()`'s two handlers now wrap the player
+name as `escapeHtml(escapeJs(n))`, matching every other `onclick` site in the file.
+The two admin-username handlers (`askChangeAdminPassword`/`askDeleteAdmin`) got the
+same defense-in-depth wrap even though they were never exploitable (usernames are
+regex-restricted). Confirmed zero remaining bare `escapeJs(` call sites in the file
+(a grep for `escapeJs(` not preceded by `escapeHtml(` returns nothing). Verified
+live against a running server: created a player named
+`x"><img src=x onerror=window.__xss=true>`, opened Settings → PIN management,
+confirmed `window.__xss` stayed `false`, no dialog fired, and the name rendered as
+literal escaped text (`&quot;&gt;&lt;img...&gt;`) in both the `onclick` attribute
+and the visible label.
 
 **Where:** `frontend/index.html` `renderPinPlayersList()` (the two `onclick` handlers
 that call `askSetPlayerPin(...)` / `askRemovePlayerPin(...)`). They interpolate a player
@@ -571,7 +583,14 @@ management, confirm no alert fires and the name renders literally.
 
 ### SEC-13 — Player names have no server-side length or shape bound  **(LOW)**
 
-**Status: 🔴 OPEN.**
+**Status: ✅ Fixed.** New `validatePlayerName()` in `db.js` (used by `addPlayer()`,
+`ensurePlayer()` — so it also covers `setOut()`, `createGame()`'s player-adding loop,
+and `addTurn()`'s auto-create path — and `renamePlayer()`'s new name): rejects empty,
+over-64-character, or control-character-containing names with a 400. Charset stays
+permissive (apostrophes/emoji still allowed) per the fix sketch's own reasoning —
+tested explicitly (`db.players-and-settings.test.js`). No frontend `maxlength` was
+added (optional UX polish, not required to close the finding — the server-side bound
+is what matters for the threat model).
 
 **Where:** `db.js` `addPlayer()` / `renamePlayer()` / `ensurePlayer()` — a name is only
 `String(name).trim()` + non-empty. No max length, no charset policy.
@@ -596,7 +615,35 @@ free-text from an unauthenticated caller is exactly what the threat model wants 
 
 ### SEC-14 — Several write endpoints accept unbounded / unvalidated free-form fields  **(LOW, data-integrity + minor storage-DoS when auth is off)**
 
-**Status: 🔴 OPEN.**
+**Status: ✅ Fixed**, with one deliberate scope decision noted below. All four
+call sites now validate at the write boundary, each with a committed
+`node:test`:
+- `awardBadge()`/`revokeBadge()`: new `validateBadgeId()` rejects anything not
+  matching `^[a-z0-9_]{1,64}$`. This is a **shape bound, not an exact
+  enumeration** — there is no single canonical badge-id registry shared between
+  frontend and backend today (ids live only in `frontend/index.html`'s
+  `BADGE_INFO` plus the dynamically-generated Just Chuckin' It milestone-ladder
+  ids), and building a duplicate exact list here would be a second place to keep
+  in sync on every new badge — the exact "same meaning in two places" drift risk
+  this codebase avoids elsewhere. Every existing badge id was checked against
+  this shape and matches. Tested in `db.badges.test.js`.
+- `createGame()`: `gameType` is now checked against the existing
+  `KNOWN_GAME_TYPES` whitelist (400 on unknown), `category` capped at 64
+  characters, serialized `config` capped at 4096 bytes. Tested in
+  `db.turn-validation.test.js`.
+- `startChallengeAttempt()`/`completeChallengeAttempt()`: `challengeDate` now
+  validated against the same `^\d{4}-\d{2}-\d{2}$` regex the read side already
+  uses, `format` validated against `CHALLENGE_BETTER_DIRECTION`'s known keys.
+  This is the same fix as `docs/bug-roadmap.md` **BUG-1**. Tested in
+  `db.challenges.test.js`.
+- `recordEvent()`: `eventType` checked against a new `KNOWN_EVENT_TYPES` list
+  (the exact 6 types `frontend/index.html`'s `DB.recordEvent()` ever sends).
+  Tested in `db.turn-validation.test.js`.
+
+All 4 file locations return 400 for the bad-input cases the fix sketch below
+calls out, verified both by the committed tests and a live Playwright smoke
+test confirming ordinary X01/Cricket/Chuckin gameplay still creates and plays
+normally after the change.
 
 **Where / what:** all of these are parameterized (so **not** SQL injection) but accept
 values with no whitelist or bound, so in the default auth-off config an unauthenticated
@@ -655,7 +702,10 @@ auth-off default for an oversight.
 
 ## Suggested order for Part 4
 
-1. **SEC-12** (XSS) — real, cheap, do it first.
-2. **SEC-13** (name bounds) — cheap, and it shrinks SEC-12's raw material.
-3. **SEC-14** (validate write inputs) — mostly data-integrity; pairs with the bug-roadmap
-   items BUG-1/BUG-2 that share the same missing-validation root cause.
+1. ~~**SEC-12** (XSS) — real, cheap, do it first.~~ ✅
+2. ~~**SEC-13** (name bounds) — cheap, and it shrinks SEC-12's raw material.~~ ✅
+3. ~~**SEC-14** (validate write inputs) — mostly data-integrity; pairs with the bug-roadmap
+   items BUG-1/BUG-2 that share the same missing-validation root cause.~~ ✅
+
+**Every finding in Part 4 is now closed**, alongside `docs/bug-roadmap.md`'s
+BUG-1/BUG-2/BUG-3 (fixed in the same pass — see that doc).

@@ -142,3 +142,53 @@ describe('addTurn — scored/set/leg/checkoutPoints ranges', () => {
     assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 170, checkout: true, checkoutPoints: 170, darts: [{ sector: 20, multiplier: 3 }] }));
   });
 });
+
+// docs/security-audit-roadmap.md SEC-14 / docs/bug-roadmap.md BUG-2: createGame()
+// previously accepted any gameType string, an unbounded category, and an unbounded
+// config object — a bad gameType then counted toward every UNSCOPED aggregate while
+// being silently excluded from every TYPED stat query.
+describe('createGame — gameType/category/config validation', () => {
+  test('accepts every known gameType', () => {
+    for (const gameType of ['x01', 'cricket', 'doubles_practice', 'chuckin']) {
+      assert.doesNotThrow(() => db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, gameType, players: [] }));
+    }
+  });
+
+  test('defaults to x01 when gameType is omitted', () => {
+    assert.doesNotThrow(() => db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [] }));
+  });
+
+  test('rejects an unknown gameType', () => {
+    expect400(() => db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, gameType: 'evil', players: [] }));
+  });
+
+  test('rejects an oversized category', () => {
+    expect400(() => db.createGame({ category: 'x'.repeat(65), legsPerSet: 1, setsPerGame: 1, practice: 1, players: [] }));
+    assert.doesNotThrow(() => db.createGame({ category: 'x'.repeat(64), legsPerSet: 1, setsPerGame: 1, practice: 1, players: [] }));
+  });
+
+  test('rejects an oversized config object', () => {
+    expect400(() => db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, config: { junk: 'x'.repeat(5000) }, players: [] }));
+    assert.doesNotThrow(() => db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, config: { startingScore: 501 }, players: [] }));
+  });
+});
+
+// docs/security-audit-roadmap.md SEC-14: recordEvent() previously accepted any
+// eventType string.
+describe('recordEvent — eventType validation', () => {
+  test('accepts every known event type', () => {
+    const name = 'Events_KnownTypes';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    for (const eventType of ['game_start', 'game_end', 'set_start', 'set_end', 'leg_start', 'leg_end']) {
+      assert.doesNotThrow(() => db.recordEvent(g.gameId, eventType, 1, 1));
+    }
+  });
+
+  test('rejects an unknown event type', () => {
+    const name = 'Events_UnknownType';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    expect400(() => db.recordEvent(g.gameId, 'made_up_event', 1, 1));
+  });
+});

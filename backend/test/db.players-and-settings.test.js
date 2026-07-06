@@ -42,6 +42,37 @@ describe('addPlayer', () => {
   });
 });
 
+// docs/security-audit-roadmap.md SEC-13: player names previously had no server-side
+// length or shape bound (String(name).trim() only) — unbounded free-text from an
+// unauthenticated caller (POST /api/players is public by default), and the raw
+// material for SEC-12 (a stored-XSS sink at the render site, fixed separately).
+describe('validatePlayerName (SEC-13: length/control-character bound)', () => {
+  test('rejects a name over 64 characters', async () => {
+    await assert.rejects(() => db.addPlayer('x'.repeat(65)), (err) => err.status === 400);
+  });
+
+  test('accepts a name at exactly the 64-character limit', async () => {
+    const name = 'y'.repeat(64);
+    await assert.doesNotReject(() => db.addPlayer(name));
+    assert.ok(db.listPlayers().some(p => p.name === name));
+  });
+
+  test('rejects a name containing a control character', async () => {
+    await assert.rejects(() => db.addPlayer('Bad\x00Name'), (err) => err.status === 400);
+    await assert.rejects(() => db.addPlayer('Bad\nName'), (err) => err.status === 400);
+  });
+
+  test('still permits ordinary punctuation/emoji — the bound is length/control-chars, not charset', async () => {
+    await assert.doesNotReject(() => db.addPlayer("O'Brien 🎯"));
+    assert.ok(db.listPlayers().some(p => p.name === "O'Brien 🎯"));
+  });
+
+  test('renamePlayer applies the same bound to the new name', () => {
+    db.addPlayer('Players_RenameBoundFrom');
+    assert.throws(() => db.renamePlayer('Players_RenameBoundFrom', 'z'.repeat(65)), (err) => err.status === 400);
+  });
+});
+
 describe('renamePlayer', () => {
   test('renames successfully when the new name is free', () => {
     db.addPlayer('Players_RenameFrom');
