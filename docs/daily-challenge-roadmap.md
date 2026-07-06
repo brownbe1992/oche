@@ -119,7 +119,7 @@ metric:
   value per day), not just today's challenge in isolation, so a streak actually has
   somewhere visible to live rather than only existing as a number.
 - **Shareable results card** — this is essentially free now that the card-generation
-  engine exists (`docs/shareable-moments-roadmap.md`): "Today's Challenge: 121 in 4
+  engine exists (`docs/archive/shareable-moments-roadmap.md`): "Today's Challenge: 121 in 4
   darts 🎯" with a **Share** button, Wordle-style. Genuine virality potential (people
   already share Wordle results unprompted) with zero new infrastructure — the card
   engine, the Share button, and the Home Assistant webhook delivery path all already

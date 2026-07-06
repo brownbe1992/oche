@@ -235,7 +235,7 @@ system, per the design goal above.
 - **A "Badge Case" section on the Player Profile**, alongside Personal Bests — an
   earned/not-yet-earned grid. Modest in scope: recognition, not points or leveling.
   Every earned badge gets a **Share** button for free, since the card-generation
-  engine from `docs/shareable-moments-roadmap.md` already exists and already builds
+  engine from `docs/archive/shareable-moments-roadmap.md` already exists and already builds
   arbitrary icon/headline/player/stat-line cards.
 - **Around the World gets its own progress view**, not just a grid cell — e.g. "47/63
   outcomes hit," ideally visualized as a dartboard-shaped heatmap (reusing

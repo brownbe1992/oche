@@ -1,20 +1,28 @@
 # Shareable Moments — Design Roadmap
 
-> Status: **✅ Core feature done.** Canvas-generated cards, Web Share/save-image, and
-> the automatic Home Assistant webhook all shipped — verified end-to-end with a real
-> running server and browser automation (card generation, both achievement and
-> match-win trigger points, Personal Bests sharing, the HA webhook payload actually
-> fitting under the app's request-size cap, and a genuine race-condition bug between
-> overlapping cards found and fixed during testing). **Direct-to-platform X/Instagram/
-> Facebook API posting was explicitly descoped** — manual sharing via the native share
-> sheet (which already reaches X/Instagram/Facebook) is the accepted answer; see
-> "Social media integration" below for why automated posting isn't realistic for a
-> personal account on any of those three platforms today. **The optional
-> BYO-credentials X auto-post tier was deliberately rejected (2026-07)** — not
-> going to be built; the Web Share API path already covers X (and is the only
-> realistic path onto Instagram/Facebook regardless), so it wasn't worth the
-> added credential-handling surface for a single platform. The Player Profile
-> "Moments" gallery remains unbuilt and still open.
+> **Archived (2026-07)** — fully shipped, kept here for design-rationale history.
+> Canvas-generated cards, Web Share/save-image, and the automatic Home Assistant
+> webhook all shipped — verified end-to-end with a real running server and browser
+> automation (card generation, both achievement and match-win trigger points,
+> Personal Bests sharing, the HA webhook payload actually fitting under the app's
+> request-size cap, and a genuine race-condition bug between overlapping cards found
+> and fixed during testing). **Direct-to-platform X/Instagram/Facebook API posting
+> was explicitly descoped** — manual sharing via the native share sheet (which
+> already reaches X/Instagram/Facebook) is the accepted answer; see "Social media
+> integration" below for why automated posting isn't realistic for a personal
+> account on any of those three platforms today. **The optional BYO-credentials X
+> auto-post tier was deliberately rejected (2026-07)** — the Web Share API path
+> already covers X at zero cost and zero credential-handling surface. **The Player
+> Profile "Moments" gallery was already built** (found during a 2026-07 doc-accuracy
+> pass — this doc had gone stale claiming it unbuilt): every *earned* badge tile in
+> the existing Badge Case has a 📤 Share button (`shareEarnedBadge(badgeId)`,
+> `frontend/index.html`) that regenerates that badge's card on demand and shares/
+> downloads it — the Badge Case itself is the persistent "gallery," resolving this
+> doc's own open question (cache vs. regenerate) in favor of regenerating, with zero
+> new storage. See `REFERENCE.md` §8 for the exact mechanics. Verified live via
+> Playwright: awarding a badge via the API, loading that player's profile, confirming
+> exactly one Share button renders on the earned tile, and confirming
+> `shareEarnedBadge()` runs without error.
 
 ## What shipped
 
@@ -76,10 +84,11 @@ infrastructure since it never touches a server.
   post-game summary card (winner, score, top stat of the match) shown on the
   Game Over screen with a "Share" button, extending the stat panel already added
   there.
-- **Player Profile "Moments" section**: a lightweight gallery of a player's own
-  generated moments (or just the underlying events, regenerable on demand) — not a
-  hard requirement for v1, but a natural place for these to live persistently rather
-  than only appearing transiently on the achievement overlay.
+- **Player Profile "Moments" section — ✅ Built.** A lightweight gallery of a
+  player's own generated moments, regenerable on demand rather than stored: the
+  existing Badge Case doubles as this, with a Share button on every earned badge
+  tile (`shareEarnedBadge()`) so these live persistently on the profile rather than
+  only appearing transiently on the achievement overlay.
 
 ## Social media integration
 
@@ -159,11 +168,12 @@ Given that, the realistic, honest design is:
   real case for a Page-based "Darts Night" Facebook Page rather than personal
   profiles (a different, narrower use case than what's being asked for here).
 
-## Open questions for whoever picks this up
+## Open questions — resolved
 
-- Should generated cards be cached/stored anywhere (e.g. as a blob in the database)
-  or always regenerated on demand from existing stat data — storage adds complexity
-  and disk usage for something that's cheap to recompute.
+- **Should generated cards be cached/stored, or regenerated on demand? Resolved:
+  regenerate.** `shareEarnedBadge()` rebuilds a badge's card fresh every time from
+  `BADGE_INFO`/`player_badges` rather than storing any image — no new disk usage,
+  consistent with the app's standing "recompute at query time" philosophy.
 - Visual design of the card itself (what's the right amount of information vs. visual
   impact) probably needs a few real iterations against actual achievement data before
   it feels right — worth prototyping early rather than over-specifying in this doc.

@@ -316,7 +316,7 @@ Big moments — a 180, a Big Fish, a nine-darter, a match win, any of the 22 [ac
 - **Where it shows up:** the achievement overlay (180/Big Fish/nine-darter/any badge) while it's flashing, the Game Over screen after a match win, the Daily Challenge result panel, a badge's entry in the **Badge Case**, and next to Best Leg Average / Fewest Darts to Finish on a **Player Profile**'s Personal Bests.
 - **Card tagline** (**Settings → Shareable Moments**) — a short editable line printed on every card, defaulting to "Darts tracked via Oche — track your darts today!". Update it once you have a real website or social handle to point at.
 - **Automatic Home Assistant delivery:** independent of the Share button, if a **Moment Card Webhook ID** is configured (**Settings → Smart Home Integration**), the same card is sent to your HA instance automatically as a base64-encoded image the moment it happens — useful for routing it into Discord, Telegram, or anywhere else your own HA automations already reach. Personal-best cards are share-button-only (no automatic HA delivery), since there's no live "new personal best" detection during play yet.
-- Not affiliated with or posting directly to X/Instagram/Facebook's own APIs — see `docs/shareable-moments-roadmap.md` for why direct API posting isn't realistic for a personal account on any of those three platforms today.
+- Not affiliated with or posting directly to X/Instagram/Facebook's own APIs — see `docs/archive/shareable-moments-roadmap.md` for why direct API posting isn't realistic for a personal account on any of those three platforms today.
 
 ---
 

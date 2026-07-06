@@ -1485,6 +1485,18 @@ and skips the HA webhook, since it fires on *every* profile page view, not on a
 real occurrence — routing it through `fireMomentCard()` would spam an HA
 webhook every time someone opens a profile page.
 
+**Player Profile "Moments" gallery** (`docs/archive/shareable-moments-roadmap.md`):
+the Badge Case (§4) doubles as this — every *earned* badge tile gets a 📤 Share
+button (`shareEarnedBadge(badgeId)`) that regenerates that badge's card on
+demand (icon, label, current player) and shares/downloads it via the same
+`shareOrSaveCanvas()` path, independent of whether the achievement overlay is
+still showing or was ever tapped at the time. This is a genuine "moment from
+the past" replay, not a stored image — resolving the roadmap doc's own open
+question ("cache cards, or regenerate on demand?") in favor of regenerating,
+consistent with this app's standing "recompute at query time, store nothing
+pre-aggregated" philosophy. Not-yet-earned badges (dimmed/greyscale in the
+Badge Case) get no Share button, since there's nothing to regenerate.
+
 ---
 
 ## 9. Security Model
