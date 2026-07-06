@@ -452,12 +452,29 @@ stats").
   toggle. Personal Bests (`bestRoundDarts`, `bestRoundHits`) ship too, using a
   deliberately smaller 2-field shape than X01/Cricket's 5 — this mode has no
   win condition, so `winStreak`/`recentForm`/`lifetime` fields don't map onto it.
-- **Known gaps, deliberately deferred**: no undo support yet (every dart
-  commits immediately, so there's no staged "undo the last dart" state the way
-  X01/Cricket have) — a misthrow just becomes part of the round's own tally.
-  No Home page leaderboard set (Cricket has one; this mode doesn't yet — no
-  H2H concept to leaderboard against, left for a future pass if wanted). No
-  achievements/badges for this mode yet (none were requested for this pass).
+- **✅ Built (2026-07): undo support.** Every dart still commits immediately as
+  its own 1-dart turn, but `throwDartDoublesPractice()` now snapshots state into
+  `game.lastTurnSnapshot` first (the same convention X01/Cricket use), and a new
+  `undoLastTurnDoublesPractice()` restores it and calls `DB.deleteLastTurn()` —
+  "undo the last turn" and "undo the last dart" are the same action here. Undo
+  reaches back through a round-ending dart too, right up until "Start next
+  round" is pressed (which clears the snapshot, mirroring `startNextLeg()`'s own
+  "one level of undo only" rule). The scoring screen's button reads "Undo Last
+  Dart" for this mode; the separate "Undo Dart" button (for un-staging an
+  uncommitted dart mid-visit) is hidden — there's no staged-visit concept here
+  to undo from.
+- **✅ Built (2026-07): Home page leaderboard set.** A third
+  X01/Cricket/Doubles-Practice toggle button on the Home page, feeding 2
+  boards (not Cricket's 4, since this mode has no opponent to win against and
+  no achievements yet): a **Doubles %** leaderboard
+  (`getDoublesPracticeAccuracyLeaderboard()`, same 5-round floor as Cricket's
+  MPR board) and a **Best Round** leaderboard
+  (`getDoublesPracticeBestRoundStats()`, one row per player — their own best
+  single round by hits, ties broken by fewest darts). Neither takes a `mode`
+  param, since this game type is always `practice=1` by construction — an
+  h2h/practice split would always leave the h2h side empty.
+- **Still not built**: achievements/badges for this mode (none were requested
+  for this pass).
 
 ## New Game / Scoring screen changes
 
@@ -536,12 +553,14 @@ X01-only, see its status note above).
    evaluation (`evaluateDartDoublesPractice()`), "all simultaneously live"
    multi-double sessions, its own 3 stat bubbles + 2-field Personal Bests, New
    Game target picker, dedicated scoring screen and `display.html` renderer.
-   No undo support and no Home page leaderboard yet (deliberately deferred, see
-   its own section above). Verified with a committed scratch-DB unit suite
-   (pure evaluator + backend stat functions + an X01/Cricket isolation
-   regression check) and Playwright end-to-end (New Game setup, a full round
-   ending each of the two ways, the Player Profile toggle, and the live
-   scoreboard on both the controller and `/display`).
+   Undo support and a 2-board Home page leaderboard set shipped in a later pass
+   (see its own section above) — only "achievements/badges" remains
+   deliberately not built for this mode. Verified with a committed scratch-DB
+   unit suite (pure evaluator + backend stat functions + an X01/Cricket
+   isolation regression check) and Playwright end-to-end (New Game setup, a
+   full round ending each of the two ways, the Player Profile toggle, the live
+   scoreboard on both the controller and `/display`, undo of both a plain dart
+   and a round-ending dart, and the Home page leaderboard toggle).
 8. **✅ Done — 101 as a fourth X01 starting score** (see "Quick addition" above).
    **New, not designed yet**: Just Chuckin' It — needs its own design pass
    first (the match-vs-drill architectural question raised in its section is

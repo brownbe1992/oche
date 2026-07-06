@@ -412,6 +412,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/stats/cricket-mpr' && m === 'GET') return send(res, 200, db.getCricketMprLeaderboard(url.searchParams.get('mode')));
     if (p === '/api/stats/cricket-wins' && m === 'GET') return send(res, 200, db.getCricketWinLeaderboard());
     if (p === '/api/stats/cricket-perfect-leg' && m === 'GET') return send(res, 200, db.getCricketPerfectLegStats(url.searchParams.get('mode')));
+    if (p === '/api/stats/doubles-practice-accuracy' && m === 'GET') return send(res, 200, db.getDoublesPracticeAccuracyLeaderboard());
+    if (p === '/api/stats/doubles-practice-best-round' && m === 'GET') return send(res, 200, db.getDoublesPracticeBestRoundStats());
     if (p === '/api/stats/big-fish'     && m === 'GET') return send(res, 200, db.getBigFishStats(url.searchParams.get('mode')));
     if (p === '/api/stats/nine-darters' && m === 'GET') return send(res, 200, db.getNineDarterStats(url.searchParams.get('mode')));
     if (p === '/api/stats' && m === 'GET')  return send(res, 200, db.computeStats());

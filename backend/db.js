@@ -1515,6 +1515,56 @@ function getDoublesPracticePersonalBests(playerName, mode) {
   return { bestRoundDarts, bestRoundHits };
 }
 
+// Home page leaderboards for Doubles Practice (game-modes-roadmap.md, previously a
+// known gap — deliberately deferred when the mode first shipped). No mode param on
+// either function: this mode is always practice=1 (startGame() forces it via
+// setup.practice, set whenever setup.mode !== 'h2h'), so an h2h/practice split would
+// always leave the h2h side empty — same reasoning as getCricketWinLeaderboard()'s
+// "H2H only by nature, no mode param" precedent, just the opposite polarity.
+
+// Doubles % leaderboard across every player — direct structural analog of
+// getCricketMprLeaderboard() (same minimum-rounds floor to keep one lucky round
+// from topping the board), just ranking accuracy instead of a per-round average.
+function getDoublesPracticeAccuracyLeaderboard() {
+  const scope = _scope({ gameType: 'doubles_practice' });
+  const rows = db.prepare(`
+    SELECT p.name AS name, COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS rounds,
+           COUNT(d.id) AS darts, SUM(${DOUBLES_HIT_CASE('d')}) AS hits
+    FROM turns t JOIN games g ON g.id=t.game_id JOIN players p ON p.id=t.player_id JOIN darts d ON d.turn_id=t.id
+    WHERE 1=1 ${scope}
+    GROUP BY t.player_id
+    HAVING rounds >= 5
+  `).all();
+  return rows
+    .map(r => ({ name: r.name, pct: +(r.hits / r.darts * 100).toFixed(1), rounds: r.rounds }))
+    .sort((a, b) => b.pct - a.pct);
+}
+
+// Best-single-round leaderboard — one row per player, their own best round (most
+// hits; fewest darts breaks a tie), across every round they've ever played. Not a
+// "leaderboard"/"recent" achievement-count shape like Cricket's 9 Marks/Perfect Leg,
+// since a best round isn't a repeatable qualifying event — it's a record-book entry,
+// structurally closer to getPersonalBests() extended across players than to an
+// achievement tally.
+function getDoublesPracticeBestRoundStats() {
+  const scope = _scope({ gameType: 'doubles_practice' });
+  const rows = db.prepare(`
+    SELECT p.name AS name, COUNT(d.id) AS darts, SUM(${DOUBLES_HIT_CASE('d')}) AS hits,
+           MAX(t.created_at) AS created_at
+    FROM turns t JOIN games g ON g.id=t.game_id JOIN players p ON p.id=t.player_id JOIN darts d ON d.turn_id=t.id
+    WHERE 1=1 ${scope}
+    GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
+  `).all();
+  const best = new Map();
+  for (const r of rows) {
+    const cur = best.get(r.name);
+    if (!cur || r.hits > cur.hits || (r.hits === cur.hits && r.darts < cur.darts)) best.set(r.name, r);
+  }
+  return [...best.values()]
+    .sort((a, b) => b.hits - a.hits || a.darts - b.darts)
+    .map(r => ({ name: r.name, hits: r.hits, darts: r.darts, createdAt: r.created_at }));
+}
+
 function getMetricHistory(playerName, metric, period, opts = {}) {
   const p = getPlayer(playerName);
   if (!p) return [];
@@ -2461,6 +2511,7 @@ module.exports = {
   getCricketStatBubbles, getCricketNineMarksStats, getCricketPersonalBests,
   getCricketMprLeaderboard, getCricketWinLeaderboard, getCricketPerfectLegStats,
   getDoublesPracticeStatBubbles, getDoublesPracticePersonalBests,
+  getDoublesPracticeAccuracyLeaderboard, getDoublesPracticeBestRoundStats,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics,

@@ -693,9 +693,14 @@ GET  /api/stats/cricket-9marks?mode=        Cricket 9-marks-in-one-visit leaderb
 GET  /api/stats/cricket-mpr?mode=           Cricket Marks Per Round leaderboard (min. 5 rounds)
 GET  /api/stats/cricket-wins                Cricket win-rate leaderboard (H2H only, no mode param)
 GET  /api/stats/cricket-perfect-leg?mode=   Cricket "closed in the fewest possible darts" leaderboard
+GET  /api/stats/doubles-practice-accuracy   Doubles % leaderboard (no mode param — always practice)
+GET  /api/stats/doubles-practice-best-round Doubles Practice best-single-round leaderboard (no mode param)
 ```
 
-All leaderboard endpoints accept `?mode=h2h|practice` to filter by game mode. Omit for overall.
+All leaderboard endpoints accept `?mode=h2h|practice` to filter by game mode. Omit for overall. The
+two Doubles Practice endpoints above never take a `mode` param — the game type is always solo
+practice, so there's no H2H side to split against (same reasoning as `cricket-wins` above, just the
+opposite polarity).
 
 ### Per-Player Stats
 

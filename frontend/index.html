@@ -625,6 +625,7 @@
       <div class="player-tabs" style="margin-bottom:16px">
         <button class="tab-btn active" data-gtype="x01" onclick="switchHomeGameType('x01')">X01</button>
         <button class="tab-btn" data-gtype="cricket" onclick="switchHomeGameType('cricket')">Cricket</button>
+        <button class="tab-btn" data-gtype="doubles_practice" onclick="switchHomeGameType('doubles_practice')">Doubles Practice</button>
       </div>
       <div id="home-tab-body"><p class="pp-meta">Loading…</p></div>
     </div>
@@ -1645,7 +1646,9 @@ function renderHome(){
     Backend.get('/api/stats/cricket-9marks?mode=practice'),
     Backend.get('/api/stats/cricket-perfect-leg?mode=practice'),
     Backend.get('/api/stats/cricket-wins'),
-  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw])=>{
+    Backend.get('/api/stats/doubles-practice-accuracy'),
+    Backend.get('/api/stats/doubles-practice-best-round'),
+  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,dpa,dpb])=>{
     homeData={s, extra,
       h2h:{finishes:f,eighties:e,bigFish:b,nineDarters:n},
       practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn},
@@ -1653,14 +1656,16 @@ function renderHome(){
         h2h:{mpr:cm,nineMarks:c9,perfectLeg:cp},
         practice:{mpr:pcm,nineMarks:pc9,perfectLeg:pcp},
         wins:cw,
-      }};
+      },
+      doublesPractice:{ accuracy:dpa, bestRound:dpb }};
     renderHomeContent();
   }).catch(()=>{
     homeData={s:{players:roster.length,games:null,sets:null,legs:null,darts:null,oneEighties:null,bigFish:null,nineDarters:null,practiceLegs:null},
       extra:null,
       h2h:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
       practice:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
-      cricket:{h2h:{mpr:[],nineMarks:empty,perfectLeg:empty}, practice:{mpr:[],nineMarks:empty,perfectLeg:empty}, wins:[]}};
+      cricket:{h2h:{mpr:[],nineMarks:empty,perfectLeg:empty}, practice:{mpr:[],nineMarks:empty,perfectLeg:empty}, wins:[]},
+      doublesPractice:{ accuracy:[], bestRound:[] }};
     renderHomeContent();
   });
 }
@@ -1758,6 +1763,7 @@ function renderHomeTabBody(){
   const el=document.getElementById('home-tab-body');
   if(!el || !homeData) return;
   if(homeGameType==='cricket') return renderHomeTabBodyCricket();
+  if(homeGameType==='doubles_practice') return renderHomeTabBodyDoublesPractice();
   const mode=homeTab;
   const data=homeData[mode];
   const extra=homeData.extra;
@@ -1896,6 +1902,51 @@ function renderHomeTabBodyCricket(){
     </div>
     ${achievementSection('9 Marks 🎯', data.nineMarks||{leaderboard:[],recent:[]})}
     ${achievementSection('Perfect Leg 🏆', data.perfectLeg||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
+  `;
+}
+
+// Doubles Practice's Home page leaderboards (game-modes-roadmap.md, previously a
+// known gap). No H2H/Practice split — this mode is always solo practice, so
+// homeData.doublesPractice is a single flat dataset, not h2h/practice-keyed like
+// homeData.cricket is. Two boards, not Cricket's four: no win-rate leaderboard
+// (no opponent to win against) and no achievement-count sections (this mode has
+// no achievements yet, per its own "known gaps" note).
+function renderHomeTabBodyDoublesPractice(){
+  const el=document.getElementById('home-tab-body');
+  const data=homeData.doublesPractice;
+  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
+
+  const accBoard=data.accuracy||[];
+  const accLeaderboard=accBoard.length
+    ? `<div class="hof-list">${accBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.pct.toFixed(1)}%</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${r.rounds} rounds</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet (needs at least 5 rounds played).</p>`;
+
+  const bestBoard=data.bestRound||[];
+  const bestLeaderboard=bestBoard.length
+    ? `<div class="hof-list">${bestBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.hits}/${r.darts}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${fmtDate(r.createdAt)}</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
+
+  el.innerHTML=`
+    <div class="home-pair">
+      <div class="pp-section">
+        <div class="pp-section-title">Doubles %</div>
+        ${accLeaderboard}
+      </div>
+      <div class="pp-section">
+        <div class="pp-section-title">Best Round</div>
+        ${bestLeaderboard}
+      </div>
+    </div>
   `;
 }
 
@@ -4164,6 +4215,7 @@ function askEndGame(){
 
 function undoLastTurn(){
   if(game && game.gameType === 'cricket') return undoLastTurnCricket();
+  if(game && game.gameType === 'doubles_practice') return undoLastTurnDoublesPractice();
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
   const p = game.players[snap.pi];
@@ -5036,9 +5088,9 @@ function renderGameShell(){
       <div class="dart-board-wrap" id="dart-board-wrap"></div>
       <button class="btn btn-ghost board-miss" id="board-miss-btn" onclick="throwDartBoard(0,1)">Miss</button>
       <div class="turn-actions">
-        <div class="undo-row"${isDoublesPractice ? ' hidden' : ''}>
-          <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled>Undo Last Turn</button>
-          <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo Dart</button>
+        <div class="undo-row">
+          <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled>${isDoublesPractice ? 'Undo Last Dart' : 'Undo Last Turn'}</button>
+          <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()"${isDoublesPractice ? ' hidden' : ''}>Undo Dart</button>
         </div>
         <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()"${isDoublesPractice ? ' hidden' : ''}>Enter turn</button>
         <button class="btn btn-primary" id="dp-next-round-btn" onclick="startNextRoundDoublesPractice()" hidden>Start next round</button>
@@ -5210,9 +5262,11 @@ function playerSnapshotDoublesPractice(p){
 }
 // Per-dart evaluation (evaluateDartDoublesPractice(), frontend/scoring.js) — every
 // dart commits immediately as its own 1-dart turn (addTurn() already supports 1-3
-// darts per turn), unlike every other game type's batched-3-dart visit. No undo
-// support in this v1 (docs/game-modes-roadmap.md notes it as a known gap) — a
-// misthrow just becomes part of the round's own dart/hit tally.
+// darts per turn), unlike every other game type's batched-3-dart visit. Undo
+// support (docs/game-modes-roadmap.md, previously a known gap): since each dart is
+// its own committed turn, "undo the last turn" and "undo the last dart" are the
+// same action here — one snapshot per dart, same "one level of undo only"
+// convention as X01/Cricket's game.lastTurnSnapshot.
 function throwDartDoublesPractice(sector){
   if(game.roundOver) return;
   const dart = makeDart(sector, mult);
@@ -5220,6 +5274,12 @@ function throwDartDoublesPractice(sector){
   const p = game.players[0];
   const targets = game.config.doubles || [];
   const ev = evaluateDartDoublesPractice(dart, targets);
+
+  // snapshot state before mutation so undoLastTurnDoublesPractice() can restore it
+  game.lastTurnSnapshot = { roundDarts:p.roundDarts, roundHits:p.roundHits,
+    roundOver:game.roundOver, roundEndReason:game.roundEndReason,
+    dpLastDart:game.dpLastDart, sessionRoundsLen:p.sessionRounds.length };
+
   p.roundDarts += 1;
   if(ev.hit) p.roundHits += 1;
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
@@ -5236,11 +5296,34 @@ function throwDartDoublesPractice(sector){
   }
   renderGameDoublesPractice();
 }
+// Undoes the single most recently thrown dart (this mode's "turn" is always exactly
+// one dart) — mirrors undoLastTurn()/undoLastTurnCricket()'s snapshot-restore shape.
+// No badge reverts needed: Doubles Practice has no achievements (docs/game-modes-
+// roadmap.md, deliberately deferred). Only available until the next round starts
+// (startNextRoundDoublesPractice() clears the snapshot), same "one level of undo,
+// gone once you move on" rule X01/Cricket already follow.
+function undoLastTurnDoublesPractice(){
+  if(!game || !game.lastTurnSnapshot) return;
+  const snap = game.lastTurnSnapshot;
+  const p = game.players[0];
+  p.roundDarts = snap.roundDarts;
+  p.roundHits = snap.roundHits;
+  game.roundOver = snap.roundOver;
+  game.roundEndReason = snap.roundEndReason;
+  game.dpLastDart = snap.dpLastDart;
+  p.sessionRounds.length = snap.sessionRoundsLen;
+  game.lastTurnSnapshot = null;
+  DB.deleteLastTurn();
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent='Last dart undone.'; }
+  renderGameDoublesPractice();
+}
 function startNextRoundDoublesPractice(){
   const p = game.players[0];
   p.roundDarts = 0; p.roundHits = 0;
   game.roundOver = false; game.roundEndReason = null; game.dpLastDart = null;
   game.legNo += 1;   // each round is its own "leg" for turn grouping/personal bests
+  game.lastTurnSnapshot = null;  // undo only reaches back into the round just finished
   DB.recordEvent('leg_start', game.setNo, game.legNo);
   renderGameDoublesPractice();
 }

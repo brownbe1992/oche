@@ -717,9 +717,42 @@ still-open "generalizing per-game-type stats beyond a two-way toggle" backlog
 item — extending 3 existing `playerGameType==='cricket'` ternaries to a third
 branch, not the full N-game-type redesign that backlog item describes.)
 
-No Home page leaderboard set for this mode (unlike Cricket's 4) — solo drill,
-no H2H concept, so a global "leaderboard" doesn't obviously map onto it yet;
-left for whoever picks up a future pass if it turns out to be wanted.
+**Home page leaderboards** (`getDoublesPracticeAccuracyLeaderboard()`,
+`getDoublesPracticeBestRoundStats()`) — 2 boards, not Cricket's 4: no win-rate
+leaderboard (no opponent to win against) and no achievement-count sections
+(this mode has no achievements). Neither function takes a `mode` param —
+Doubles Practice games are always `practice=1` (`startGame()` forces it via
+`setup.practice`, set whenever `setup.mode !== 'h2h'`), so an h2h/practice
+split would always leave the h2h side empty, the same reasoning as
+`getCricketWinLeaderboard()`'s "H2H only by nature, no mode param" precedent,
+just the opposite polarity.
+
+- **Doubles % leaderboard** — direct structural analog of
+  `getCricketMprLeaderboard()`: `hits / dartsThrown * 100` across every
+  player, with the same minimum-5-rounds floor so one lucky round can't top
+  the board.
+- **Best Round leaderboard** — one row per player: their own best single
+  round ever (most hits; a tie is broken by fewest darts, so a shorter path
+  to the same hit count ranks higher). Not a "leaderboard"/"recent"
+  achievement-count shape like Cricket's 9 Marks/Perfect Leg — a best round
+  isn't a repeatable qualifying event, so this is structurally closer to
+  `getPersonalBests()` extended across every player than to an achievement
+  tally.
+
+**Undo support**: `throwDartDoublesPractice()` snapshots player/round state
+into `game.lastTurnSnapshot` before mutating (mirroring X01/Cricket's own
+`lastTurnSnapshot` convention), and `undoLastTurnDoublesPractice()` restores
+it and calls `DB.deleteLastTurn()` — "undo the last turn" and "undo the last
+dart" are the same action in this mode, since every dart is its own committed
+turn. No badge-revoke step is needed (this mode has no achievements).
+Available only until `startNextRoundDoublesPractice()` runs (which clears the
+snapshot, the same "one level of undo, gone once you move on" rule
+`startNextLeg()` already enforces for X01/Cricket) — so a round-ending dart
+can still be undone right up until "Start next round" is pressed. The
+Player Profile/scoring-screen button is labeled "Undo Last Dart" for this
+mode (not "Undo Last Turn"), and the separate "Undo Dart" button (which
+un-stages an uncommitted dart from a batched 3-dart visit) is hidden
+entirely — Doubles Practice has no staged-visit concept to undo from.
 
 ---
 
