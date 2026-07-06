@@ -1724,6 +1724,24 @@ prunes. Env vars: `DARTS_DB` (same var the server uses), `BACKUP_DIR` (default:
 a `backups` folder next to the database), `BACKUP_RETENTION_DAYS` (default 7,
 overridden by the Settings UI's retention control once one is set).
 
+### Opt-in Compose-profile sidecar (`docker-compose.yml`'s `backups` service)
+
+An alternative to host cron for anyone who'd rather not touch their server's
+crontab: a second service in `docker-compose.yml` gated behind
+`profiles: ["backups"]`, invisible to a plain `docker compose up` and started
+only via `docker compose --profile backups up -d`. It reuses the exact same
+image, entrypoint (ownership fix + drop to the non-root `node` user), and
+`./darts_data` volume as the main `darts` service — no separate image, no new
+dependency — with its `command` overridden to
+`sh -c "while true; do node backend/backup.js; sleep 86400; done"` instead of
+`node backend/server.js`. This runs one backup immediately on container start,
+then every 24h — a simple loop, not a wall-clock-pinned schedule (it won't
+necessarily land at exactly 3am the way the host-cron recipe does). Retention
+is resolved exactly the same way as every other call site (`resolveRetentionDays()`
+in `backup-lib.js`): the `settings.backup_retention_days` value if one has been
+set from Settings → Backups, else `BACKUP_RETENTION_DAYS`, else the 7-day
+default.
+
 ### Settings → Backups (admin-gated UI + API)
 
 Lets an admin manage backups from the app instead of needing shell access to

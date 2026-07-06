@@ -1045,6 +1045,21 @@ your admin password again, even though you're already logged in, since it replac
 entire database. Either restore path stages the file and then tells you to restart the
 container — it doesn't restart itself, so nothing takes effect until you do.
 
+**Or let a container do the scheduling for you, if you'd rather not touch host
+cron at all:** an opt-in `backups` service is already defined in
+`docker-compose.yml`, disabled by default. Enable it with:
+
+```
+docker compose --profile backups up -d
+```
+
+It reuses the same image and `./darts_data` volume as the main `darts` service —
+no separate setup — and runs `backend/backup.js` once immediately, then every 24h,
+using the same retention setting as everywhere else (Settings → Backups, or
+`BACKUP_RETENTION_DAYS`). This is a simple loop, not a wall-clock-pinned schedule
+(it won't land on exactly 3am the way the cron recipe above does) — use host cron
+instead if that precision matters to you.
+
 ### Data Export
 
 **Settings → Admin & Danger Zone → Data Export** lets an admin download a complete JSON

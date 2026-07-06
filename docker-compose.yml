@@ -40,3 +40,30 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
+
+  # Opt-in automated backups (docs/backups-roadmap.md's Compose-profile stretch
+  # goal) — an alternative to host cron for anyone who'd rather not touch their
+  # server's crontab. Off by default: `docker compose up` never starts this.
+  # Enable it with: docker compose --profile backups up -d
+  #
+  # Reuses the same image/entrypoint as the `darts` service above (no new
+  # dependencies) and the same ./darts_data volume, so it reads the live
+  # database and writes into darts_data/backups exactly like the standalone
+  # `node backend/backup.js` script does. Runs one backup immediately on
+  # startup, then every 24h — a simple loop, not a wall-clock-pinned schedule
+  # (e.g. "every day at exactly 3am"); use host cron instead if that precision
+  # matters to you. Retention is controlled the same way as everywhere else:
+  # Settings -> Backups, or the BACKUP_RETENTION_DAYS env var below.
+  backups:
+    build: .
+    container_name: oche-backups
+    profiles: ["backups"]
+    volumes:
+      - ./darts_data:/data
+    environment:
+      - DARTS_DB=/data/darts.db
+      # - BACKUP_RETENTION_DAYS=7   # overridden by Settings -> Backups once set there
+    command: ["sh", "-c", "while true; do node backend/backup.js; sleep 86400; done"]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped

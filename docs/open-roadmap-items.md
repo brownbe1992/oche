@@ -26,31 +26,30 @@
 |---|---|---|---|
 | 1 | Write the promised Home Assistant automation recipe content (zero code — the webhooks already work, the docs describing example automations were never written) | `docs/ha-recipes-roadmap.md` | Trivial (docs only) |
 | 2 | Thread the badge award count into the live achievement overlay itself (the shareable moment card already shows it) | `docs/achievements-badges-roadmap.md` | Very low |
-| 3 | Backups: opt-in Docker Compose-profile sidecar as an alternative to host cron (v1's own stretch goal) | `docs/backups-roadmap.md` | Very low |
-| 4 | Mobile: multiple saved server profiles (stretch goal, step 7) | `docs/mobile-app-roadmap.md` | Low |
-| 5 | Mobile: "Scoreboard Mode" toggle (step 5) | `docs/mobile-app-roadmap.md` | Low |
-| 6 | Shareable Moments: Player Profile "Moments" gallery | `docs/shareable-moments-roadmap.md` | Low |
-| 7 | Standalone `backend/admin-recovery.js` CLI for resetting a forgotten admin password or clearing a stuck lockout via direct filesystem/container access | `docs/admin-account-recovery-roadmap.md` | Low |
-| 8 | Mobile: native chrome — change-server access, haptics, biometric unlock (step 4) | `docs/mobile-app-roadmap.md` | Low-Medium |
-| 9 | Mobile: distribution decision — App Store/Play Store listing vs. simpler sideload distribution (step 6) | `docs/mobile-app-roadmap.md` | Low-Medium |
-| 10 | Localize voice announcements beyond hardcoded English phrases | `docs/voice-announcements-i18n-roadmap.md` | Low-Medium |
-| 11 | Coaching insights (no new data collection needed; genuinely differentiating vs. competitors) | `docs/coaching-insights-roadmap.md` | Low-Medium |
-| 12 | Progressive admin-login lockout delay (replaces the flat 5-minute lockout, doubles per consecutive failure, never fully blocks a correct password) | `docs/admin-login-backoff-roadmap.md` | Low-Medium |
-| 13 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
-| 14 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
-| 15 | League mode (new tables, no new infra; complements tournament mode) | `docs/league-mode-roadmap.md` | Medium |
-| 16 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
-| 17 | Tournament mode (bracket generation, especially double-elim, is genuinely fiddly but fully self-contained) | `docs/tournament-mode-roadmap.md` | Medium-High |
-| 18 | Game Modes: Baseball — the second proof that the plugin shape generalizes beyond Cricket (step 5) | `docs/game-modes-roadmap.md` | High |
-| 19 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
-| 20 | Camera/ML scoring (genuinely novel CV engineering; only useful to whoever mounts the hardware) | `docs/camera-scoring-roadmap.md` | Extremely high |
-| 21 | Companion website (persistent hosted infrastructure — accounts, matchmaking, a cloud database — the one item requiring the project to operate long-term infra, not just be self-hostable) | `docs/companion-website-roadmap.md` | Extremely high |
+| 3 | Mobile: multiple saved server profiles (stretch goal, step 7) | `docs/mobile-app-roadmap.md` | Low |
+| 4 | Mobile: "Scoreboard Mode" toggle (step 5) | `docs/mobile-app-roadmap.md` | Low |
+| 5 | Shareable Moments: Player Profile "Moments" gallery | `docs/shareable-moments-roadmap.md` | Low |
+| 6 | Standalone `backend/admin-recovery.js` CLI for resetting a forgotten admin password or clearing a stuck lockout via direct filesystem/container access | `docs/admin-account-recovery-roadmap.md` | Low |
+| 7 | Mobile: native chrome — change-server access, haptics, biometric unlock (step 4) | `docs/mobile-app-roadmap.md` | Low-Medium |
+| 8 | Mobile: distribution decision — App Store/Play Store listing vs. simpler sideload distribution (step 6) | `docs/mobile-app-roadmap.md` | Low-Medium |
+| 9 | Localize voice announcements beyond hardcoded English phrases | `docs/voice-announcements-i18n-roadmap.md` | Low-Medium |
+| 10 | Coaching insights (no new data collection needed; genuinely differentiating vs. competitors) | `docs/coaching-insights-roadmap.md` | Low-Medium |
+| 11 | Progressive admin-login lockout delay (replaces the flat 5-minute lockout, doubles per consecutive failure, never fully blocks a correct password) | `docs/admin-login-backoff-roadmap.md` | Low-Medium |
+| 12 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
+| 13 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
+| 14 | League mode (new tables, no new infra; complements tournament mode) | `docs/league-mode-roadmap.md` | Medium |
+| 15 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
+| 16 | Tournament mode (bracket generation, especially double-elim, is genuinely fiddly but fully self-contained) | `docs/tournament-mode-roadmap.md` | Medium-High |
+| 17 | Game Modes: Baseball — the second proof that the plugin shape generalizes beyond Cricket (step 5) | `docs/game-modes-roadmap.md` | High |
+| 18 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
+| 19 | Camera/ML scoring (genuinely novel CV engineering; only useful to whoever mounts the hardware) | `docs/camera-scoring-roadmap.md` | Extremely high |
+| 20 | Companion website (persistent hosted infrastructure — accounts, matchmaking, a cloud database — the one item requiring the project to operate long-term infra, not just be self-hostable) | `docs/companion-website-roadmap.md` | Extremely high |
 
 ### Build-order notes that still apply
 
 - **Tournament mode before league mode** — not a hard dependency, but tournament mode is the more specifically-requested one, and building it first gives league mode's "games link into a context table" pattern (see `CLAUDE.md`) a real precedent to follow.
 - **Mobile app's steps are sequential as listed** (2 → 3 → 4 → 5 → 6 → 7) per `docs/mobile-app-roadmap.md`'s own suggested build order; its one prerequisite (the responsive CSS pass) is already done.
-- **The small, order-independent items** (rows 1, 2, 3, 6, 7, 10, 12, 16) can be interleaved anywhere, including ahead of the bigger lifts — good for sustaining momentum with essentially zero risk of creating rework later.
+- **The small, order-independent items** (rows 1, 2, 5, 6, 9, 11, 15) can be interleaved anywhere, including ahead of the bigger lifts — good for sustaining momentum with essentially zero risk of creating rework later.
 
 ---
 
@@ -68,6 +67,7 @@ therefore hasn't been archived yet) — see each source doc for full detail.
 | Voice announcements (browser speech synthesis call-outs) | `docs/archive/voice-announcements-roadmap.md` |
 | Backups v1: `backend/backup.js` script, retention pruning, documented restore procedure | `docs/backups-roadmap.md` |
 | Backups v2: Settings → Backups (download/retention/on-demand backup/restore-from-existing/upload-restore) | `docs/backups-roadmap.md` |
+| Backups: opt-in Docker Compose-profile sidecar (`docker-compose.yml`'s `backups` service, `profiles: ["backups"]`) | `docs/backups-roadmap.md` |
 | Shareable Moments: card generation, every trigger point (achievements, match win, Personal Bests), HA webhook | `docs/shareable-moments-roadmap.md` |
 | 22 of 22 achievement/badges shipped (21 original candidates + Staircase Finish) | `docs/achievements-badges-roadmap.md` |
 | Simultaneous-achievements overlay fix (multi-badge queue) | `docs/archive/simultaneous-achievements-roadmap.md` |

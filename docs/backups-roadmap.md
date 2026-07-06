@@ -1,11 +1,17 @@
 # Backups & Disaster Recovery — Design Roadmap
 
-> Status: **v1 ✅ Done** (v0.6.2) and **v2 ✅ Done** (2026-07). `backend/backup.js`
-> implements exactly the v1 design below — verified end-to-end against a real seeded
-> database: backup written, restored from the `.db` file alone (no `-wal`/`-shm`
-> needed), retention pruning tested. README's "Backups" section documents the cron
-> schedule and restore steps. The Compose-profile sidecar remains an unbuilt stretch
-> goal.
+> Status: **v1 ✅ Done** (v0.6.2), **v2 ✅ Done** (2026-07), and **the Compose-profile
+> sidecar stretch goal ✅ Done** (2026-07). `backend/backup.js` implements exactly the
+> v1 design below — verified end-to-end against a real seeded database: backup
+> written, restored from the `.db` file alone (no `-wal`/`-shm` needed), retention
+> pruning tested. README's "Backups" section documents the cron schedule and restore
+> steps. The sidecar is a `backups` service in `docker-compose.yml` gated behind
+> `profiles: ["backups"]` (opt-in via `docker compose --profile backups up -d`,
+> invisible to `docker compose up` otherwise) — reuses the same image/entrypoint/
+> `./darts_data` volume as the main service, running `backend/backup.js` in a
+> `while true; do ...; sleep 86400; done` loop rather than a wall-clock-pinned cron
+> schedule, verified via `docker compose config` (with and without the profile) and
+> by running the exact underlying command against a seeded scratch database.
 >
 > **v2 (managing backups from Settings)** shipped as designed: the shared
 > backup/restore mechanics moved into `backend/backup-lib.js` (used by both
@@ -90,7 +96,9 @@ never been verified to actually work.
    timestamped snapshot.
 2. Retention/pruning logic (delete backups older than N days, configurable).
 3. README section: how to schedule via host cron, plus the tested restore procedure.
-4. **(Stretch)** an opt-in Compose profile for admins who'd rather not touch host cron.
+4. **(Stretch)** ✅ **Done (2026-07)** — an opt-in Compose profile for admins who'd
+   rather not touch host cron: `docker-compose.yml`'s `backups` service, gated
+   behind `profiles: ["backups"]`.
 
 ## Open questions for whoever picks this up (v1)
 
