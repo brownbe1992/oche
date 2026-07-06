@@ -56,7 +56,7 @@ Others
 - Testing & observability (test coverage + server-side error logging) — done (Part A), see docs/testing-and-observability-roadmap.md
 - League/season mode (standings across casual matches over time) — full design in docs/league-mode-roadmap.md
 - Daily/weekly solo challenge — done (core) plus badges/its own Profile tab, see docs/daily-challenge-roadmap.md
-- Ghost opponent (practice against a replay of your own past leg) — full design in docs/ghost-opponent-roadmap.md
+- Ghost opponent (practice against a replay of your own past leg) — done (X01 only), see docs/archive/ghost-opponent-roadmap.md
 - Companion website (cloud stat reporting, matchmaking, cross-instance tournaments/leagues, global leaderboards including Daily Challenge) — full design in docs/companion-website-roadmap.md
 - Prep work to reduce future rework across all roadmap items — see docs/existing-app-prep-roadmap.md
 

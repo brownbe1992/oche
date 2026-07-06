@@ -193,7 +193,8 @@ register their own reaction without repeatedly modifying the same core functions
 
 **The evidence**: this is the thing already working correctly across the roadmaps,
 worth calling out so it's *protected* rather than accidentally broken during other
-refactors. `camera-scoring-roadmap.md` and `ghost-opponent-roadmap.md` both depend on
+refactors. `camera-scoring-roadmap.md` and `archive/ghost-opponent-roadmap.md` (now
+shipped) both depend on
 being able to inject a `(sector, multiplier)` dart event from a non-tap source (a
 vision service; a scripted historical replay) into the exact same pipeline a manual
 tap uses today.
@@ -340,7 +341,7 @@ service."
 **The evidence**: `game-modes-roadmap.md`'s own build order lists "extract the
 existing X01 logic behind the plugin interface, no behavior change" as its Phase 1,
 treating it as step one of *shipping Cricket*. But looking across the full roadmap
-set, that same refactor is also exactly what `ghost-opponent-roadmap.md` and
+set, that same refactor is also exactly what `archive/ghost-opponent-roadmap.md` and
 `camera-scoring-roadmap.md` need — both are, at their core, "a dart event from a
 non-tap source" (a scripted historical replay; a vision service), which is precisely
 the "where did this dart event come from" vs. "what does this game type do with it"
@@ -502,7 +503,7 @@ for the same "what do we build next" attention.
 | `docs/achievements-badges-roadmap.md` | Partial | Low | Medium | 20 of 21 candidate badges shipped; **No Cigar** (2026-07, bust a visit that hit the exact score needed but not on a double) is planned, not yet built — un-archived from `docs/archive/` back to `docs/` per CLAUDE.md's convention |
 | `docs/archive/simultaneous-achievements-roadmap.md` | ✅ Done | Low | Medium | Fixed the single-slot achievement-overlay bug; built alongside achievements/badges |
 | `docs/daily-challenge-roadmap.md` | Partial | Low | Medium | Built entirely on the existing Practice engine. **Un-archived (2026-07)**: 3 new Daily-Challenge-specific badges (Challenge Streak: Week/Month, Full Rotation) and a dedicated Player Profile tab (promoted from a collapsible section duplicated inside every other tab) were added per an explicit "stats, reporting, badges, and achievements for daily challenges" request |
-| `docs/ghost-opponent-roadmap.md` | ✅ Done (X01 only) | Low-Medium | Medium | A "👻 Ghost" New Game mode races a replay of one of your own past won X01 legs — backend leg-script/candidate-leg queries, a New Game leg picker, a Player Profile "Race this leg" entry point, opponent-badge suppression (Comeback Kid etc. can't fire against a ghost), and full Playwright verification (both a ghost-wins and a human-wins race). Cricket ghost support explicitly deferred |
+| `docs/archive/ghost-opponent-roadmap.md` | ✅ Done (X01 only) | Low-Medium | Medium | A "👻 Ghost" New Game mode races a replay of one of your own past won X01 legs — backend leg-script/candidate-leg queries, a New Game leg picker, a Player Profile "Race this leg" entry point, opponent-badge suppression (Comeback Kid etc. can't fire against a ghost), and full Playwright verification (both a ghost-wins and a human-wins race). Cricket ghost support explicitly deferred. **Archived (2026-07)** — nothing outstanding |
 | `docs/coaching-insights-roadmap.md` | Not started | Low-Medium | High | No new data collection; genuinely differentiating vs. competitors |
 | `docs/testing-and-observability-roadmap.md` | ✅ Done (v1 scope) | Medium | High | Part A (server-side error logging, a persistent rotating log, a Settings "Server Errors" view) and Part B (a real, committed `node:test` suite — `frontend/scoring.js`'s extracted scoring logic, plus 10 `backend/db.js` suites covering X01/Cricket stats, leaderboards, checkout/dart-analytics, On This Day, H2H, Daily Challenge, badges, lifecycle hooks, `addTurn()` validation, auth, and player/settings CRUD — 161 assertions total, run via `npm test` and CI on every push) are both done for their stated scope. Writing the suite found and fixed 3 real bugs (`addTurn()` silently coercing invalid `0`/garbage input instead of rejecting it; `addPlayer()` missing an `await` on its PIN-hash write). Not exhaustive by design — e.g. genuine concurrent-request lockout races aren't exercised — extended per CLAUDE.md's standing convention whenever next touched |
 | `docs/accessibility-roadmap.md` | ✅ Done (all 5 identified gaps) | Low-Medium | High | Colorblind mode, the WCAG contrast audit (found/fixed 4 real AA failures — `--green`/`--bust` brightened, a new `--red-text` for the Pad's "Bull" label, a colorblind-mode fix to the dartboard's own "Bull" center label), `aria-live` announcements on the controller, accessible-input-path framing for `default_scoring_input` (Settings copy + README + REFERENCE.md), and a type-size pass (2 genuine 9px outliers bumped, the rest of the compact tier deliberately kept). Stays in `docs/` (not archived) — it's a standing cross-cutting checklist per CLAUDE.md, not a completable one-off; two open design questions (display.html's `aria-live` investment, `polite` vs `assertive` tuning) remain for whoever picks them up |

@@ -511,7 +511,7 @@ the first thing to check if someone asks "why doesn't X match Y."
 which specific leg produced `bestLegAvg` (`null` if no won legs exist yet) — feeds
 the Player Profile's "👻" Race-this-leg button (§ Ghost Opponent, below).
 
-### Ghost Opponent (`docs/ghost-opponent-roadmap.md`) — race a replay of your own past leg
+### Ghost Opponent (`docs/archive/ghost-opponent-roadmap.md`) — race a replay of your own past leg
 
 X01-only. Two backend functions in `backend/db.js`, both scoped so a script/leg list
 can only ever be built from legs the requesting player genuinely won themselves:
