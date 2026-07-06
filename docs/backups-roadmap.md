@@ -43,8 +43,10 @@ never been verified to actually work.
 ## Design
 
 - **Use `node:sqlite`'s built-in `backup()` function** — confirmed present in the Node
-  version this project already requires (`engines: >=22.5.0` in `backend/package.json`;
-  verified available in the installed `v22.22.2`). This is a real online-backup API
+  version this project already requires (`engines: >=22.13.0` in `backend/package.json`
+  — `node:sqlite` exists as of 22.5.0 but needs the `--experimental-sqlite` flag until
+  22.13.0, a CI bug found and fixed 2026-07; verified available in the installed
+  `v22.22.2`). This is a real online-backup API
   (mirrors SQLite's own backup mechanism) that produces a consistent snapshot
   regardless of WAL state, with **zero new dependencies** — keeping the project's
   "dependency-free" identity intact.

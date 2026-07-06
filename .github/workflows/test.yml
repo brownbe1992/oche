@@ -15,7 +15,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.5'
+          # NOT '22.5' — node:sqlite exists in 22.5.0 but only behind the
+          # --experimental-sqlite flag, which this project's test script
+          # doesn't pass. It isn't usable unflagged until 22.13.0, so pinning
+          # to 22.5 exactly makes every run fail with ERR_UNKNOWN_BUILTIN_MODULE
+          # (confirmed against real CI logs, 2026-07 — every run had been
+          # failing this way since the workflow was first added). Tracking the
+          # latest 22.x here instead of a fixed patch avoids re-hitting this
+          # same class of bug later.
+          node-version: '22'
       # No install step: the project is intentionally dependency-free (no
       # package-lock.json, no node_modules) — nothing to install.
       - name: Run tests

@@ -66,7 +66,7 @@ Change the port by editing `docker-compose.yml` — update both sides of `"8046:
 
 ## Running without Docker
 
-Requires **Node.js 22.5 or newer** (uses the built-in `node:sqlite` module).
+Requires **Node.js 22.13 or newer** (uses the built-in `node:sqlite` module — it exists as of 22.5.0, but stays behind an experimental flag this project doesn't pass until 22.13.0).
 
 ```bash
 node backend/server.js
@@ -873,7 +873,7 @@ oche/
 └── Dockerfile
 ```
 
-**Backend** — a single `http.createServer` with no npm dependencies. Uses `node:sqlite` (built into Node 22.5+) in WAL mode with foreign keys enabled. All statistics are computed from raw turn and dart data at query time — nothing is pre-aggregated, so stats are always consistent and new metrics can be added without migrations. Every write endpoint is rate-limited per IP, and outbound requests (Home Assistant) are checked against `netguard.js` before connecting — see [Admin Accounts & Player PINs](#admin-accounts--player-pins) for the full security posture.
+**Backend** — a single `http.createServer` with no npm dependencies. Uses `node:sqlite` (built into Node 22.13+) in WAL mode with foreign keys enabled. All statistics are computed from raw turn and dart data at query time — nothing is pre-aggregated, so stats are always consistent and new metrics can be added without migrations. Every write endpoint is rate-limited per IP, and outbound requests (Home Assistant) are checked against `netguard.js` before connecting — see [Admin Accounts & Player PINs](#admin-accounts--player-pins) for the full security posture.
 
 **Frontend** — a single HTML file with vanilla JavaScript and no build step. It requires a reachable backend at the same origin — there is no offline/local-storage fallback — so stats never split across two unsynced stores. If the backend can't be reached, the app shows a connection-error screen instead of scoring silently into the browser.
 

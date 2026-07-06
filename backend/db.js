@@ -2,9 +2,12 @@
 /* =============================================================================
    Database layer for the darts scorer.
 
-   Uses Node's built-in SQLite (node:sqlite, Node 22.5+), so there are NO
-   external dependencies to install or compile — important for running on
-   Unraid / Docker without native-module headaches.
+   Uses Node's built-in SQLite (node:sqlite, Node 22.13+ — it exists as of
+   22.5.0 but stays behind the --experimental-sqlite flag until 22.13.0, and
+   this project never passes that flag, so anything older throws
+   ERR_UNKNOWN_BUILTIN_MODULE), so there are NO external dependencies to
+   install or compile — important for running on Unraid / Docker without
+   native-module headaches.
 
    The schema is normalized and event-based: we store every TURN a player
    throws, plus the games they were part of, and compute all statistics with

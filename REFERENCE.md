@@ -59,7 +59,9 @@ oche/
 ```
 
 - **Backend**: a single `http.createServer` with zero npm dependencies. Uses
-  `node:sqlite` (`DatabaseSync`, built into Node 22.5+) in WAL mode with foreign
+  `node:sqlite` (`DatabaseSync`, built into Node 22.13+ — it exists as of
+  22.5.0 but stays behind the `--experimental-sqlite` flag, which this project
+  never passes, until 22.13.0) in WAL mode with foreign
   keys enabled. All statistics are computed from raw `turns`/`darts` data at
   query time — nothing is pre-aggregated, so a new metric never needs a
   migration or a backfill, and stats are always internally consistent.
