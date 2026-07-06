@@ -43,14 +43,27 @@ they are. A prioritized "do now / keep in mind" summary is at the end.
 > byte-identical output via the existing scratch-DB regression suite (Cricket stats
 > + X01 personal-bests/stat-bubbles unchanged).
 >
-> **Still open**: the ~15-20 pre-existing mode-only query sites (`computeStats`,
-> `getSummary`, `getHomeExtra`, `getPersonalBests`, pace, etc.) still call `_mf(mode)`
-> directly rather than `_scope({mode})` — they were left untouched as out of scope
-> for this pass (higher regression risk on mature, already-shipped code, and no
-> current feature needs it). A genuinely new *universal* dimension (e.g. excluding
-> online matches from every stat, not just Cricket's) would still need to touch
-> those sites individually to route them onto `_scope()` first. Cricket's own
-> dimension is fully centralized; the older mode-only dimension is not yet.
+> **Update (2026-07): adoption is now universal for every game type built since.**
+> Doubles Practice's and Just Chuckin' It's stat functions (`getDoublesPracticeStatBubbles`,
+> `getDoublesPracticePersonalBests`, `getDoublesPracticeAccuracyLeaderboard`,
+> `getDoublesPracticeBestRoundStats`, `getChuckinStatBubbles`, `getChuckinPersonalBests`,
+> `getChuckinHeatmap`, and `getMetricHistory()`'s cases for both) were built calling
+> `_scope({mode, gameType:...})` from day one — no retrofit needed, since the helper
+> already existed by the time those modes shipped. Every game type that has a
+> `gameType` dimension at all is now fully centralized.
+>
+> **Still open**: two different pre-existing patterns predate `_scope()` entirely and
+> remain untouched: (a) `computeStats`, `getSummary`, and `getHomeExtra` hand-roll
+> their own raw `g.practice = 0/1` conditions directly, without even going through
+> `_mf(mode)`; (b) 9 other functions (`getPlayerStatBubbles`, `getPersonalBests`,
+> `getOneEightyStats`, `getBigFishStats`, `getNineDarterStats`, `getTopFinishesAll`,
+> `getTopFinishes`, `getCheckoutRoutes`, `getDartAnalytics`) call `_mf(mode)` directly
+> rather than `_scope({mode})`. Both were left untouched as out of scope for the
+> Cricket-driven retrofit pass (higher regression risk on mature, already-shipped
+> code, and no current feature needs a second dimension there). A genuinely new
+> *universal* dimension (e.g. excluding online matches from every stat, not just a
+> specific game type's) would still need to touch these sites individually to route
+> them onto `_scope()` first.
 
 **The evidence**: `backend/db.js` currently hardcodes the pattern
 `g.practice = 0/1` (almost always paired with a `game_players` count check to
@@ -227,14 +240,14 @@ directly into the function and then bolting league logic on top of that later.
 
 ## 7. Settings page is approaching flat-list overload
 
-> **Status: ✅ Done.** Settings now has a `.player-tabs` row (reusing the same tab
+> **Status: ✅ Done.** Settings has a `.player-tabs` row (reusing the same tab
 > pattern already used 4 other places in this app — Home's H2H/Practice and
 > X01/Cricket toggles, Player Profile's Overall/H2H/Practice and X01/Cricket
-> toggles) with 4 groups, and every one of the 11 existing sections was placed into
-> exactly one group with zero content changes: **Account & Access** (Admin
-> Accounts, Player PINs), **Gameplay & Display** (Scoring, Accessibility, Voice
-> Announcements, Shareable Moments, Data Collection, Live Scoreboard),
-> **Integrations** (Smart Home Integration — sized to house
+> toggles) with 4 groups. At the time this shipped, every one of the (then) 11
+> existing sections was placed into exactly one group with zero content changes:
+> **Account & Access** (Admin Accounts, Player PINs), **Gameplay & Display**
+> (Scoring, Accessibility, Voice Announcements, Shareable Moments, Data Collection,
+> Live Scoreboard), **Integrations** (Smart Home Integration — sized to house
 > `environmental-logging-roadmap.md`, `camera-scoring-roadmap.md`, and
 > `online-multiplayer-roadmap.md`'s future sections), **Admin & Danger Zone**
 > (Daily Challenge, Danger Zone). Implementation: a `settingsTab` state var + a
@@ -246,6 +259,16 @@ directly into the function and then bolting league logic on top of that later.
 > group, every existing control (checkboxes, selects, buttons, webhook inputs,
 > PIN/admin management, Daily Challenge reset, Danger Zone wipe) still works, and
 > a section's own collapse toggle still works from within its group.
+>
+> **Update (2026-07): the grouping itself is holding up exactly as designed.** Two
+> more sections have landed since — **Server Errors** (Part A of
+> `docs/testing-and-observability-roadmap.md`) and **Backups**
+> (`docs/backups-roadmap.md` v2) — and both simply slotted into the existing
+> **Admin & Danger Zone** group (now: Daily Challenge, Server Errors, Backups,
+> Danger Zone) with no further navigation changes needed. Settings is at 13
+> sections across the same 4 groups today, exactly the scaling this item was meant
+> to buy — new sections keep landing inside an existing group instead of
+> re-triggering flat-list overload.
 >
 > Superseded history (kept for context): the prediction below already came true
 > faster than expected — Settings grew from 7 to 11 flat collapsible sections
@@ -458,20 +481,39 @@ un-learn later:**
    scoreboard is built, so Cricket gets orientation support from day one instead
    of a second retrofit.
 
+**Partially done — the retrofit has landed for every feature built since it was
+introduced, but a core group of pre-existing X01-only functions is still
+untouched:**
+7. Stats query scope helper (item 1) — `_scope()` exists in `db.js`, and every stat
+   function for Cricket, Doubles Practice, and Just Chuckin' It already routes
+   through it (each built using the pattern from day one, needing no retrofit of
+   its own). What's still open: `computeStats`/`getSummary`/`getHomeExtra` hand-roll
+   raw `g.practice = 0/1` conditions directly (not even through `_mf(mode)`), and 9
+   other functions (`getPlayerStatBubbles`, `getPersonalBests`, `getOneEightyStats`,
+   `getBigFishStats`, `getNineDarterStats`, `getTopFinishesAll`, `getTopFinishes`,
+   `getCheckoutRoutes`, `getDartAnalytics`) call `_mf(mode)` directly instead of
+   `_scope({mode})` — deliberately left alone until a genuinely new cross-cutting
+   dimension (online matches, league scoping) actually needs to touch them.
+
 **Worth doing when the first feature that needs it actually starts:**
-7. Stats query scope helper (item 1) — needed the moment game-modes, online
-   multiplayer, or league mode starts real implementation, but not before.
-8. Game-lifecycle hook point (item 4) — same timing.
-9. Player-deletion-guard extensibility (item 6) — same timing.
+8. Player-deletion-guard extensibility (item 6) — still true: no feature that needs
+   to *block* deleting an actively-referenced player (tournament mode, league mode)
+   has landed yet.
 
 **Already confirmed, no action needed:**
-10. ~~Protecting the `throwDart` input-source separation during the eventual
-    game-modes refactor (item 5)~~ ✅ Confirmed — item 10's refactor landed and the
-    separation held.
+9. ~~Protecting the `throwDart` input-source separation during the eventual
+   game-modes refactor (item 5)~~ ✅ Confirmed — item 10's refactor landed and the
+   separation held.
 
 **Done:**
-11. ~~Settings page regrouping (item 7)~~ ✅ Done — 4-group `.player-tabs` navigation
+10. ~~Settings page regrouping (item 7)~~ ✅ Done — 4-group `.player-tabs` navigation
     over the same 11 sections, see item 7's own status note.
+11. ~~Game-lifecycle hook point (item 4)~~ ✅ Done — `onGameCreated`/`onGameCompleted`
+    listener hooks exist in `db.js`, firing synchronously right after the core DB
+    write with a throwing listener caught rather than breaking game creation/
+    completion itself. No listeners are registered yet — pure infrastructure ahead
+    of the next feature that needs one, exactly as this item's own recommendation
+    intended.
 
 ---
 
@@ -542,9 +584,13 @@ simultaneous-achievements rows above.
 3. **Mobile app has no blockers at all**, and its only prerequisite (item 8) already
    shipped — it's the only big item genuinely ready to start today with nothing else
    required first.
-4. **The ten smaller roadmaps are entirely order-independent** and can be
-   interleaved anywhere, including between or ahead of the bigger lifts — good for
-   sustaining momentum, and essentially zero risk of creating rework later.
+4. **The remaining smaller, not-started roadmaps are entirely order-independent**
+   (`ha-recipes-roadmap.md`, `data-export-roadmap.md`,
+   `voice-announcements-i18n-roadmap.md`, `environmental-logging-roadmap.md`,
+   `admin-login-backoff-roadmap.md`, `admin-account-recovery-roadmap.md` — six as of
+   2026-07) and can be interleaved anywhere, including between or ahead of the
+   bigger lifts — good for sustaining momentum, and essentially zero risk of
+   creating rework later.
 5. ~~Server-side error logging, admin login rate limiting, backups, and colorblind
    mode should be done sooner rather than later~~ ✅ **All four done** (error
    logging/login lockout/backups in v0.6.2; colorblind mode shortly after) — all
@@ -563,10 +609,17 @@ simultaneous-achievements rows above.
    and `db.js`'s core/Cricket/challenge/badge stat functions across several
    `backend/test/db.*.test.js` files. See
    `docs/testing-and-observability-roadmap.md` for the full breakdown.
-6. **Achievements/badges and coaching insights are X01-only today.** If either is
-   built before Cricket exists (likely, given Cricket's complexity), keep the
-   stat/achievement definitions abstracted per game type from day one — cheap to do
-   now, expensive to retrofit once real achievement data exists for X01 only.
+6. ~~Achievements/badges and coaching insights are X01-only today.~~ **Achievements
+   resolved; coaching insights still applies.** Achievements/badges are no longer
+   X01-only — Cricket (9 Marks, Perfect Leg), Just Chuckin' It (18 laddered
+   milestone badges), and Daily Challenge (3 streak/rotation badges) each shipped
+   their own game-type-specific achievements without any plumbing rework, because
+   `awardBadge()`/`player_badges` were already generic (an opaque `badgeId` string
+   with zero game-type awareness) — only new client-side detection code was needed
+   per game type, exactly the outcome this recommendation was meant to produce.
+   **Coaching insights remains not started** — the same caution still applies
+   whenever it's built: keep its stat/insight definitions abstracted per game type
+   from day one.
 7. ~~**Item 11 (orientation-aware live scoreboard) should happen before Cricket's
    scoreboard step**~~ ✅ **Done** — the same build-order treatment item 10 got for
    the turn engine. `game-modes-roadmap.md` build-order step 2's `renderers.cricket`
