@@ -1124,6 +1124,10 @@ runs before an async `once`-badge's award response arrives, `snap.voided` is set
 on arrival (`POST /api/badges/revoke`) instead of registering into a revert list
 that will never be read again, regardless of which happens first.
 
+This only revokes the badge server-side (the Badge Case record). The
+client-side celebration itself is a separate concern, handled by
+`cancelQueuedAchievementsForSnapshot()` — see §5.
+
 ---
 
 ## 5. The Achievement Queue (Simultaneous Achievements)
@@ -1135,19 +1139,64 @@ Slayer simultaneously. The overlay can only show one thing at a time, so every
 celebration is queued and drained sequentially rather than the newest one
 silently clobbering whatever was already showing.
 
-**`queueBadge(type, player)`** — pushes `{type, player, ts}` onto
+**`queueBadge(type, player, snap)`** — pushes `{type, player, ts, snap}` onto
 `achievementQueue`; if nothing is currently draining, kicks off
-`pumpAchievementQueue()`.
+`pumpAchievementQueue()`. `snap` is the turn's `game.lastTurnSnapshot`
+reference — it defaults to `game.lastTurnSnapshot` at call time (correct for
+the synchronous majority of call sites, called directly from `enterTurn()`/
+`onLegWonCricket()`/etc.), but the handful of call sites that queue a badge
+from inside an async `.then()` (Around the Clock/World, First 100+ Checkout,
+Full Rotation, The Rematch, Grudge Match) pass their own already-captured
+snap variable explicitly instead, since `game.lastTurnSnapshot` may have moved
+on to a newer turn by the time the response arrives. Two call sites
+(`challengeweek`, `challengemonth`) pass `null` deliberately — Daily Challenge
+streak badges have no undo-tracking at all (a separate, pre-existing gap;
+see `trackBadgeForUndo()` below), so no real snap exists to tag them with.
 
-**`pumpAchievementQueue()`** — dequeues one item, sets `pendingAchievement`
-(the field broadcast to `/display` — see §7) to that item, calls `pushLive()`
-so this specific item gets its own broadcast (not just whatever `pushLive()`
-call happened to already be at the end of `enterTurn()`), calls
-`showAchievement()` to paint the overlay, calls `announce()` for the
-screen-reader region (§11), then sets a timer for `ACH_DURATION[type]` (2500ms
-default, up to 6000ms for a nine-darter) that hides the overlay and recurses
-into `pumpAchievementQueue()` again — draining the rest of the queue one item
-at a time, each getting its own full display duration.
+**`pumpAchievementQueue()`** — dequeues one item, stores its `snap` on
+`currentAchSnap` (so `cancelQueuedAchievementsForSnapshot()`, below, can
+recognize "the thing on screen right now belongs to the turn just undone"),
+sets `pendingAchievement` (the field broadcast to `/display` — see §7) to
+that item, calls `pushLive()` so this specific item gets its own broadcast
+(not just whatever `pushLive()` call happened to already be at the end of
+`enterTurn()`), calls `showAchievement()` to paint the overlay, calls
+`announce()` for the screen-reader region (§11), then sets a timer for
+`ACH_DURATION[type]` (2500ms default, up to 6000ms for a nine-darter) that
+hides the overlay and recurses into `pumpAchievementQueue()` again — draining
+the rest of the queue one item at a time, each getting its own full display
+duration.
+
+**`cancelQueuedAchievementsForSnapshot(snap)`** — called by every
+`undoLastTurn*()` right after marking that turn's snapshot `voided` and
+sending its `badgeReverts` to `POST /api/badges/revoke` (§4). Filters
+`achievementQueue` down to entries not tagged with `snap` (removing any
+not-yet-shown celebration earned by the turn just undone), and if the
+*currently showing* achievement is tagged with `snap`, dismisses it
+immediately (clears the timer, hides the overlay, removes confetti) and
+advances to the next real item instead of waiting out its full
+`ACH_DURATION`. This closes a real bug: `undoLastTurn()` always revoked the
+badge server-side, but before this existed, the *client-side celebration*
+for the undone turn had no way to know the turn it was queued for had been
+undone — it would sit in `achievementQueue` (sometimes for a long time, since
+the queue is otherwise strictly FIFO) and eventually surface during some
+later, unrelated turn, playing out its full animation over whatever was
+actually happening at that moment. Since the overlay is a full-screen
+takeover, this made an unrelated *later* bust look like the live scoreboard's
+bust flash "only shows for a split second" — the stale achievement was
+popping up and then timing out on top of it, not the bust flash itself
+misbehaving. Only entries tagged with the exact undone snapshot are touched;
+an achievement genuinely earned by a different turn (still queued behind it,
+or showing concurrently in front of it) is left alone.
+
+**Known limitation**: this only prevents a *not-yet-broadcast* queued
+achievement from surfacing later. `/display` runs its own independent
+overlay timer once an achievement has been broadcast via SSE (see §7) — if
+the undo happens after the broadcast already reached a connected `/display`
+device, that device's own in-flight countdown finishes on its own; there is
+no "cancel" message sent over SSE to retract an already-delivered
+achievement. In practice this only matters for the few seconds between a
+broadcast and an undo of that same turn, not the original bug (a stale
+achievement surfacing arbitrarily far in the future).
 
 **`showAchievement(type, player)`** — the pure "paint one badge" primitive:
 sets the overlay text/name/description, toggles the mega-celebration class for

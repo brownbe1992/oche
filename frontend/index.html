@@ -3478,11 +3478,11 @@ function checkChallengeBadges(playerName){
   Backend.get(`/api/challenges/history?player=${encodeURIComponent(playerName)}&date=${today}`).then(history=>{
     const sig = challengeBadgeSignals(history, CHALLENGE_FORMATS);
     if(sig.week){
-      queueBadge('challengeweek', playerName);
+      queueBadge('challengeweek', playerName, null);
       awardRecurringBadge(playerName, 'challengeweek', 'challengeweek', { icon:'🔥', headline:'CHALLENGE STREAK: WEEK', player:playerName, statLine:'7 days in a row' });
     }
     if(sig.month){
-      queueBadge('challengemonth', playerName);
+      queueBadge('challengemonth', playerName, null);
       awardRecurringBadge(playerName, 'challengemonth', 'challengemonth', { icon:'🏆', headline:'CHALLENGE STREAK: MONTH', player:playerName, statLine:'30 days in a row' });
     }
     if(sig.allFormats){
@@ -3490,7 +3490,7 @@ function checkChallengeBadges(playerName){
       Backend.send('POST','/api/badges/award', { player:playerName, badgeId:'challengeallformats', once:true }).then(r=>{
         if(r && r.newlyEarned){
           trackBadgeForUndo(_snapAllFmt, playerName, 'challengeallformats');
-          queueBadge('challengeallformats', playerName);
+          queueBadge('challengeallformats', playerName, _snapAllFmt);
           fireMomentCard('challengeallformats', { icon:'🗓️', headline:'FULL ROTATION', player:playerName, statLine:'Every Daily Challenge format completed' });
         }
       }).catch(()=>{});
@@ -3940,7 +3940,7 @@ function checkChuckinMilestoneTier(ladder, playerName, value){
       if(!earnedBadgeCache[playerName]) earnedBadgeCache[playerName] = new Set();
       earnedBadgeCache[playerName].add(id);
       if(r && r.newlyEarned){
-        queueBadge(id, playerName);
+        queueBadge(id, playerName, null);
         fireMomentCard(id, { icon:tier.icon, headline:tier.label.toUpperCase(), player:playerName, statLine:`${value.toLocaleString()} ${ladder.statNoun}` });
       }
     }).catch(()=>{});
@@ -3994,16 +3994,31 @@ function spawnConfetti(root, count){
 // clobbering the first. See docs/simultaneous-achievements-roadmap.md.
 let achTimer = null;
 let currentAchType = null;
+// Which turn's snapshot (game.lastTurnSnapshot at the moment it was queued) the
+// currently-showing achievement came from — lets cancelQueuedAchievementsForSnapshot()
+// (called by every undoLastTurn*()) recognize "the thing on screen right now is
+// for the turn just undone" and dismiss it immediately instead of letting it run
+// out its own timer for an event that no longer happened.
+let currentAchSnap = null;
 let achievementQueue = [];
 let achievementQueueRunning = false;
-function queueBadge(type, player){
-  achievementQueue.push({ type, player, ts: Date.now() });
+// snap defaults to the CURRENT turn's snapshot, correct for every synchronous
+// CHAIN_CHECKS-style call site (the vast majority). The handful of call sites that
+// queue a badge from inside an async .then() (Around the Clock/World, First 100+
+// Checkout, Full Rotation) already capture their own snap variable earlier — same
+// one they pass to trackBadgeForUndo() — and pass it here explicitly instead,
+// since game.lastTurnSnapshot may have moved on to a newer turn by the time the
+// response arrives.
+function queueBadge(type, player, snap){
+  const s = snap !== undefined ? snap : (game && game.lastTurnSnapshot);
+  achievementQueue.push({ type, player, ts: Date.now(), snap: s });
   if(!achievementQueueRunning) pumpAchievementQueue();
 }
 function pumpAchievementQueue(){
-  if(achievementQueue.length===0){ achievementQueueRunning = false; return; }
+  if(achievementQueue.length===0){ achievementQueueRunning = false; currentAchType = null; currentAchSnap = null; return; }
   achievementQueueRunning = true;
   const next = achievementQueue.shift();
+  currentAchSnap = next.snap;
   // Every queued badge gets its own live-scoreboard broadcast as it's shown — not
   // just whatever pushLive() call happened to already be at the end of enterTurn()/
   // onLegWon(), since that only covers the first item drained from the queue.
@@ -4036,6 +4051,33 @@ function showAchievement(type, player){
   const shareBtn = document.getElementById('ach-share-btn');
   if(shareBtn) shareBtn.hidden = false;
   if(mega) spawnConfetti(achOverlayEl, 90);
+}
+// Called by every undoLastTurn*() right after marking a snapshot voided — an
+// achievement queued (or, worse, already mid-celebration) for the turn just
+// undone would otherwise still play out later, popping up seemingly at random
+// and covering whatever's actually happening then (a real bug this was written
+// to fix: undoing a bust that had queued e.g. "Ton-titled to Nothing" left that
+// celebration sitting in the queue, so it would surface minutes later on top of
+// an unrelated, genuinely-current bust, making the live scoreboard's bust flash
+// look like it "only shows for a split second" when really an unrelated stale
+// achievement overlay was covering and then hiding it). Only cancels queued/
+// showing entries tagged with this exact snapshot — an achievement genuinely
+// earned by a different turn (still queued behind this one) is left alone.
+function cancelQueuedAchievementsForSnapshot(snap){
+  if(!snap) return;
+  achievementQueue = achievementQueue.filter(item => item.snap !== snap);
+  if(currentAchSnap === snap){
+    clearTimeout(achTimer);
+    if(achOverlayEl){
+      achOverlayEl.classList.remove('show');
+      achOverlayEl.querySelectorAll('.confetti').forEach(c=>c.remove());
+    }
+    const shareBtn = document.getElementById('ach-share-btn');
+    if(shareBtn) shareBtn.hidden = true;
+    currentAchType = null; currentAchSnap = null;
+    achievementQueueRunning = false;
+    pumpAchievementQueue();
+  }
 }
 
 /* =========================================================================
@@ -4465,6 +4507,7 @@ function undoLastTurn(){
   snap.badgeReverts.forEach(({player, badgeId})=>{
     Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
   });
+  cancelQueuedAchievementsForSnapshot(snap);
 
   // Move back to the player who threw
   game.current = snap.pi;
@@ -4685,7 +4728,7 @@ function enterTurn(){
     Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'around_the_clock', once:true }).then(r=>{
       if(r && r.newlyEarned){
         trackBadgeForUndo(_snapAtc, p.name, 'around_the_clock');
-        queueBadge('aroundtheclock', p.name);
+        queueBadge('aroundtheclock', p.name, _snapAtc);
         fireMomentCard('aroundtheclock', { icon:'🕐', headline:'AROUND THE CLOCK', player:p.name, statLine:'Every number, 1 to 20, singled out' });
       }
     }).catch(()=>{});
@@ -4704,7 +4747,7 @@ function enterTurn(){
           earnedBadgeCache[p.name].add('around_the_world');
           if(r && r.newlyEarned){
             trackBadgeForUndo(_snapAtw, p.name, 'around_the_world');
-            queueBadge('aroundtheworld', p.name);
+            queueBadge('aroundtheworld', p.name, _snapAtw);
             fireMomentCard('aroundtheworld', { icon:'🌍', headline:'AROUND THE WORLD', player:p.name, statLine:'Every dart outcome, lifetime' });
           }
         }).catch(()=>{});
@@ -4738,7 +4781,7 @@ function enterTurn(){
     Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'first_100_checkout', once:true }).then(r=>{
       if(r && r.newlyEarned){
         trackBadgeForUndo(_snap100, p.name, 'first_100_checkout');
-        queueBadge('first100checkout', p.name);
+        queueBadge('first100checkout', p.name, _snap100);
         fireMomentCard('first100checkout', { icon:'🥇', headline:'FIRST 100+ CHECKOUT', player:p.name, statLine:`${ev.pointsThisVisit} checkout` });
       }
     }).catch(()=>{});
@@ -4938,6 +4981,7 @@ function undoLastTurnCricket(){
   (snap.badgeReverts || []).forEach(({player, badgeId})=>{
     Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
   });
+  cancelQueuedAchievementsForSnapshot(snap);
 
   game.current = snap.pi;
   game.darts = []; game.busted=false; game.won=false;
@@ -5059,7 +5103,7 @@ function onLegWon(wi){
         DB._queue(()=>Backend.get(`/api/players/h2h-summary?player=${encodeURIComponent(w.name)}&opponent=${encodeURIComponent(opp.name)}${gid!=null?'&excludeGameId='+gid:''}`)).then(sum=>{
           if(!sum) return;
           if(sum.previousWinner === opp.name){
-            queueBadge('therematch', w.name);
+            queueBadge('therematch', w.name, _snapGm);
             awardRecurringBadge(w.name, 'therematch', 'therematch', { icon:'🔁', headline:'THE REMATCH', player:w.name, statLine:`Revenge over ${opp.name}` });
           }
           if(sum.totalGames >= 10){
@@ -5069,7 +5113,7 @@ function onLegWon(wi){
             Backend.send('POST','/api/badges/award', { player:w.name, badgeId:'grudge_match', once:true }).then(r=>{
               if(r && r.newlyEarned){
                 trackBadgeForUndo(_snapGm, w.name, 'grudge_match');
-                queueBadge('grudgematch', w.name);
+                queueBadge('grudgematch', w.name, _snapGm);
                 fireMomentCard('grudgematch', { icon:'⚔️', headline:'GRUDGE MATCH', player:w.name, statLine:`${sum.totalGames} games vs ${opp.name}` });
               }
             }).catch(()=>{});
@@ -5765,6 +5809,7 @@ function undoLastTurnChuckin(){
   (snap.badgeReverts || []).forEach(({player, badgeId})=>{
     Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
   });
+  cancelQueuedAchievementsForSnapshot(snap);
 
   game.lastTurnSnapshot = null;
   DB.deleteLastTurn();
