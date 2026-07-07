@@ -185,6 +185,14 @@ Loadouts"), styled as a CoD/Halo-style gunsmith screen:
   complete, unmodified set (e.g. a specific retail dart model) and just needs to type
   in its spec once rather than build it as three separate "add component" steps.
 
+**Player Profile integration**: the profile page's existing "Dart Weight" row is
+replaced by a **"Default Loadout"** selector — a dropdown of that player's saved
+loadouts, picking one flags it `is_default` (same flag the New Game screen's
+auto-selection reads). This is the only place `is_default` is set; the builder
+screen itself doesn't duplicate a "Set as default" control. A PIN-protected
+player's Default Loadout selector — and the Dart Builder screen generally — is
+gated behind that player's PIN (see "Security" below).
+
 **New Game integration**: a **"Change Loadout"** button next to each selected player
 slot on the New Game screen (alongside the existing finish-rule/PIN affordances for
 that player), opening a compact picker (same card style as the builder, but
@@ -233,9 +241,17 @@ Per `CLAUDE.md`'s standing conventions:
   have a text-equivalent summary (e.g. an `aria-live` region stating "Barrel: [name],
   Shaft: [name], Flight: [name], Tip: [texture] — total Xmm") so a screen-reader user
   gets the same "what am I building" feedback a sighted user gets visually.
-- **Security**: no new credential/token surface — components and loadouts are
-  player-owned catalog data behind the same PIN/player-auth model already protecting
-  other per-player data, nothing new to harden.
+- **Security**: no new credential/token surface, but a new PIN-gated action: for a
+  PIN-protected player, both **setting/changing their Default Loadout** (on the
+  Player Profile page) and **opening the Dart Builder screen to customize their
+  loadouts/components** (create, edit, or delete a component or loadout) require
+  that player's PIN — reusing the existing `withPinCheck()` mechanism already used
+  to gate PIN-protected players at New Game/tournament-match start (see
+  `REFERENCE.md`'s "PIN gate" note), not a new check mechanism. Players without a
+  PIN keep today's no-PIN-required behavior, same as every other PIN-gated action
+  in the app. Read-only viewing of a loadout's stats from elsewhere (e.g. a
+  loadout comparison view reached some other way) is not in scope for this gate —
+  only the two mutating entry points above are.
 - **Testing**: the loadout total-length derivation (sum of three component
   `length_mm` values) and the new stats-scoping predicate (which games count toward
   which loadout's filtered stats) both need committed, re-runnable `node:test`
