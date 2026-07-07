@@ -2557,9 +2557,9 @@ function renderBackups(rows){
         <div style="color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.name)}</div>
         <div style="color:var(--muted)">${date} &nbsp;·&nbsp; ${formatBytes(r.size)}</div>
       </div>
-      <button class="btn btn-ghost" style="padding:4px 10px" onclick="downloadBackup('${escapeJs(r.name)}')">Download</button>
-      <button class="btn btn-ghost" style="padding:4px 10px" onclick="askRestoreBackup('${escapeJs(r.name)}')">Restore</button>
-      <button class="btn btn-ghost danger" style="padding:4px 10px" onclick="askDeleteBackup('${escapeJs(r.name)}')">Delete</button>
+      <button class="btn btn-ghost" style="padding:4px 10px" onclick="downloadBackup('${escapeHtml(escapeJs(r.name))}')">Download</button>
+      <button class="btn btn-ghost" style="padding:4px 10px" onclick="askRestoreBackup('${escapeHtml(escapeJs(r.name))}')">Restore</button>
+      <button class="btn btn-ghost danger" style="padding:4px 10px" onclick="askDeleteBackup('${escapeHtml(escapeJs(r.name))}')">Delete</button>
     </div>`;
   }).join('');
 }
@@ -3487,7 +3487,7 @@ function renderTournamentDetail(t){
     <div class="da-row" style="align-items:center">
       <span class="da-label" style="flex:1;font-size:14px">${escapeHtml(m.label)}: ${escapeHtml(m.player1Name)} vs ${escapeHtml(m.player2Name)}${m.status==='in_progress'?' <span class="pp-meta">(in progress)</span>':''}</span>
       ${m.status==='ready' ? `<button class="btn btn-primary" style="margin-right:6px" onclick="beginTournamentMatch(${m.id})">Start</button>` : ''}
-      <button class="btn btn-ghost" onclick="askTournamentWalkover(${m.id}, '${escapeJs(m.player1Name)}', '${escapeJs(m.player2Name)}')">Walkover</button>
+      <button class="btn btn-ghost" onclick="askTournamentWalkover(${m.id}, '${escapeHtml(escapeJs(m.player1Name))}', '${escapeHtml(escapeJs(m.player2Name))}')">Walkover</button>
     </div>`).join('') : `<p class="pp-meta">Nothing ready to play right now.</p>`;
 
   const rounds = {};
@@ -3536,8 +3536,8 @@ function askTournamentWalkover(matchId, p1, p2){
     <p class="modal-msg">Record a walkover — who advances without playing?</p>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="submitTournamentWalkover(${matchId}, '${escapeJs(p1)}')">${escapeHtml(p1)}</button>
-      <button class="btn btn-primary" onclick="submitTournamentWalkover(${matchId}, '${escapeJs(p2)}')">${escapeHtml(p2)}</button>
+      <button class="btn btn-primary" onclick="submitTournamentWalkover(${matchId}, '${escapeHtml(escapeJs(p1))}')">${escapeHtml(p1)}</button>
+      <button class="btn btn-primary" onclick="submitTournamentWalkover(${matchId}, '${escapeHtml(escapeJs(p2))}')">${escapeHtml(p2)}</button>
     </div>`;
   document.getElementById('modal').hidden = false;
 }

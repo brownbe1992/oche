@@ -20,7 +20,9 @@
 > the `node:test` suite under `backend/test/` (all green as of this writing). This doc
 > tracks the correctness gaps that suite doesn't yet assert.
 >
-> **Open:** BUG-4 (MED), BUG-5 (LOW), BUG-6 (LOW), BUG-7 (MED). Fixed: BUG-1, BUG-2, BUG-3.
+> **All fixed.** BUG-1/BUG-2/BUG-3 (second pass); BUG-4/BUG-5/BUG-6/BUG-7 (fixed
+> 2026-07 alongside `security-audit-roadmap.md` SEC-15/SEC-16), each with a committed
+> regression test and the full backend suite green.
 
 ## Severity legend
 
@@ -145,7 +147,18 @@ defensive — no behavior change for valid usernames.
 
 ## BUG-4 — Tournament advancement (the `onGameCompleted` hook) doesn't validate the winner is a match participant, and can re-advance an already-decided match  **(MED, data-integrity)**
 
-**Status: ⛔ OPEN.** (Found in the 2026-07 third-pass audit; cross-ref
+**Status: ✅ Fixed (2026-07).** `_advanceTournamentMatch()` now early-returns if
+`match.winner_id != null` (no re-advancing a decided match) and if `winnerId` isn't
+one of the match's two players (no injecting a non-participant) — a silent skip, since
+the game itself still completes normally. Both generation-time bye advances still pass
+(the bye match has `winner_id` null and its winner is its one real player). Committed
+regression tests in `backend/test/tournament.test.js`: completing a tournament-linked
+game with a non-participant winner leaves the bracket unchanged (no champion set, then
+the legitimate winner still works); a second complete on an already-decided match with
+a different winner does not overwrite the recorded winner/champion. `REFERENCE.md` §15
+updated to note the guards. Full suite green.
+
+**Original finding:** (Found in the 2026-07 third-pass audit; cross-ref
 `security-audit-roadmap.md` Part 5.)
 
 **Where:** `backend/db.js` — `_advanceTournamentMatch(matchId, winnerId)` and the
@@ -236,7 +249,16 @@ still completes normally; `recordWalkover` behavior is unchanged.
 
 ## BUG-5 — `legsPerSet` / `setsPerGame` are not magnitude-bounded (and `createGame` doesn't require integers)  **(LOW, data-integrity / cosmetic)**
 
-**Status: ⛔ OPEN.** (Found in the 2026-07 third-pass audit.)
+**Status: ✅ Fixed (2026-07).** `createGame()` clamps both fields via a new
+`clampMatchFormat()` helper to a whole number in `[1, MAX_LEGS_OR_SETS=99]` (lenient —
+garbage floors to 1, matching the old `|| 1` style, just bounded and integer-floored).
+`createTournament()`'s per-round validation now rejects a non-integer or out-of-range
+(`> 99`) format with a 400 before the tournament is created. Committed tests: the
+`createGame` clamp (`db.turn-validation.test.js` — `1e9→99`, `2.9→2`, `0/-5→1`) and
+the tournament round rejection (`tournament.test.js` — `1e9` and `2.5` both 400, sane
+format still creates). Full suite green.
+
+**Original finding:** (Found in the 2026-07 third-pass audit.)
 
 **Where:** `backend/db.js` `createGame()` stores `Number(legsPerSet) || 1` /
 `Number(setsPerGame) || 1` with **no upper bound and no integer check** — a float like
@@ -275,7 +297,17 @@ returns 400; ordinary 1–5 leg/set games and tournaments still create normally.
 
 ## BUG-6 — The full-database JSON export silently omits the four tournament tables  **(LOW, data-completeness)**
 
-**Status: ⛔ OPEN.** (Found in the 2026-07 fourth-pass audit.)
+**Status: ✅ Fixed (2026-07).** `getFullDatabaseExport()` now includes `tournaments`,
+`tournamentPlayers`, `tournamentRounds`, and `tournamentMatches` (`SELECT *` — they
+carry no credential columns). A standing-rule comment next to the function records
+that any new user-data table must be added here and to `wipeAllData()`/`resetStats()`
+(BUG-7) in the same change. `REFERENCE.md`'s data-export section and `README.md`'s Data
+Export bullet updated to list the tournament tables. Committed test in
+`db.export.test.js`: the exported-keys assertion now includes the four tournament keys,
+and a new test confirms a run tournament (rows in all four tables) appears in the
+export. Full suite green.
+
+**Original finding:** (Found in the 2026-07 fourth-pass audit.)
 
 **Where:** `backend/db.js` `getFullDatabaseExport()` (the `GET /api/export-all` payload,
 Settings → Admin & Danger Zone → Data Export). It dumps `players`, `games`,
@@ -322,7 +354,15 @@ champion).
 
 ## BUG-7 — "Wipe all data" (and "Reset all stats") leave orphaned tournament rows behind  **(MED, data-integrity)**
 
-**Status: ⛔ OPEN.** (Found in the 2026-07 fourth-pass audit; cross-ref
+**Status: ✅ Fixed (2026-07).** `wipeAllData()` and `resetStats()` now both include
+`DELETE FROM tournaments;`, which cascades to `tournament_players`/`tournament_rounds`/
+`tournament_matches` — so a full wipe leaves no orphaned tournament shells, and a stat
+reset (which deletes every game the matches link to) clears the brackets rather than
+stranding them. Committed test in `tournament.test.js`: after `wipeAllData()`,
+`listTournaments()` is empty and all four tournament tables have zero rows. Full suite
+green.
+
+**Original finding:** (Found in the 2026-07 fourth-pass audit; cross-ref
 `security-audit-roadmap.md` Part 6.)
 
 **Where:** `backend/db.js` `wipeAllData()` (`DELETE FROM players; DELETE FROM games;`)

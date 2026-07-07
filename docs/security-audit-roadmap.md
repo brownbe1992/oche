@@ -1,6 +1,7 @@
 # Security Audit Roadmap (adversarial whole-codebase review)
 
-> **Status: SEC-1 through SEC-14 fixed; SEC-15 and SEC-16 OPEN.** A second-pass
+> **Status: SEC-1 through SEC-16 all fixed** (SEC-15 and SEC-16 fixed 2026-07 in the
+> same pass that shipped `docs/bug-roadmap.md` BUG-4 through BUG-7). A second-pass
 > audit (2026-07, after the Cricket / Doubles Practice / Just Chuckin' It /
 > Ghost-mode expansion) opened three findings — SEC-12 (stored XSS), SEC-13
 > (player-name bounds), SEC-14 (validate/bound write inputs), all now fixed — see
@@ -751,7 +752,22 @@ finding, plus its two functional-defect counterparts in `docs/bug-roadmap.md`
 
 ### SEC-15 — Stored XSS via a player name in the tournament bracket view  **(MED, unauthenticated in the default-off config)**
 
-**Status: ⛔ OPEN.** This is a re-introduction of the exact SEC-12 pattern in code
+**Status: ✅ Fixed (2026-07).** All three tournament sinks (`renderTournamentDetail()`'s
+Up Next Walkover button and `askTournamentWalkover()`'s two confirm-modal buttons) now
+wrap the player name as `escapeHtml(escapeJs(name))`, the file's established pattern.
+The three `renderBackups()` handlers (`downloadBackup`/`askRestoreBackup`/
+`askDeleteBackup`) got the same wrap as defense-in-depth (BUG-3 precedent), even
+though they were never exploitable (server-generated, regex-filtered filenames). The
+"zero bare `escapeJs`" invariant is re-established: a grep for `escapeJs(` not
+preceded by `escapeHtml(` across `frontend/index.html` now returns only the `escapeJs`
+function definition itself. Verified end-to-end against a live server with
+`OCHE_REQUIRE_AUTH=false`: created a player named
+`x"><img src=x onerror="window.__xss=1">`, added it to a tournament, opened the
+bracket detail and the Walkover confirm modal in a headless browser — `window.__xss`
+stayed `0`, no `onerror` image request fired, and the name rendered as literal escaped
+text in both the `onclick` attributes and the visible labels.
+
+**Original finding:** This is a re-introduction of the exact SEC-12 pattern in code
 written after SEC-12 was closed — the tournament UI, added in the single-elim
 feature, interpolates player names into **double-quoted** `onclick="..."` attributes
 using **`escapeJs(name)` only**, without the outer `escapeHtml` that SEC-12
@@ -879,7 +895,22 @@ exactly the "nothing slips through the cracks" class this pass was looking for.
 
 ### SEC-16 — SSRF egress guard doesn't block `0.0.0.0/8` or IPv6 `::`, re-opening the loopback pivot SEC-4 closed  **(MED)**
 
-**Status: ⛔ OPEN.**
+**Status: ✅ Fixed (2026-07).** `backend/netguard.js`'s `isLoopbackOrLinkLocal()` now
+blocks `0.0.0.0/8` (`o[0] === 0`), the IPv6 unspecified address `::` (in any spelling,
+via a new `isUnspecifiedIPv6()` all-zero-hextet check), and the limited broadcast
+`255.255.255.255`. IPv4-mapped IPv6 is now normalized to its embedded v4 via a shared
+`embeddedIPv4()` helper that handles **both** the dotted (`::ffff:127.0.0.1`) and hex
+(`::ffff:7f00:1`) spellings, and `isPrivateRange()` uses the same helper so the hex
+form can't bypass the private-range check either. New committed
+`backend/test/netguard.test.js` locks in the full blocked-range list (loopback,
+unspecified, link-local, broadcast, cloud metadata, IPv4-mapped both spellings) and
+confirms public/LAN addresses still pass; `resolveAllowedHost('0.0.0.0')` and
+`resolveAllowedHost('::')` now reject. Verified: the exact bypass IPs from the
+finding (`0.0.0.0`, `0.0.0.1`, `0.1.2.3`, `::`, `::0`, `0:0:0:0:0:0:0:0`,
+`255.255.255.255`, `::ffff:7f00:1`) are all blocked; `8.8.8.8`/`192.168.1.5`/
+`2606:4700:4700::1111` still allowed.
+
+**Original finding:**
 
 **Where:** `backend/netguard.js` `isLoopbackOrLinkLocal()`. The IPv4 branch blocks
 `127.0.0.0/8` (`o[0] === 127`) and `169.254.0.0/16`, but **not** `0.0.0.0/8`

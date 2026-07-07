@@ -507,6 +507,18 @@ function _fireGameLifecycleHooks(event, payload) {
 }
 
 /* ---------- game + turn operations ---------- */
+// docs/bug-roadmap.md BUG-5: legs-per-set / sets-per-game were stored as
+// `Number(x) || 1`, which accepts a float (2.5 -> "first to 2.5 legs") or an
+// absurd magnitude (1e9 -> an unwinnable match). Clamp to a whole number in a
+// sane range at the write boundary. Lenient like the old `|| 1` (garbage floors
+// to 1 rather than erroring) — the strict integer+range REJECT lives in
+// createTournament(), whose UI never produces a bad value in the first place.
+const MAX_LEGS_OR_SETS = 99;
+function clampMatchFormat(v) {
+  const n = Math.floor(Number(v));
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(MAX_LEGS_OR_SETS, n);
+}
 function createGame({ category, legsPerSet, setsPerGame, players, practice, gameType, config }) {
   // gameType/config default to X01 for every caller today (no New Game UI sends
   // anything else yet) — see docs/game-modes-roadmap.md. Accepting them as params
@@ -526,7 +538,7 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   if (categoryStr.length > 64) throw httpError(400, 'category must be 64 characters or fewer');
   const resolvedConfig = config ? JSON.stringify(config) : JSON.stringify({ startingScore: Number(category) || null });
   if (Buffer.byteLength(resolvedConfig) > 4096) throw httpError(400, 'config is too large');
-  const info = q.insertGame.run(categoryStr, Number(legsPerSet) || 1, Number(setsPerGame) || 1, practice ? 1 : 0, resolvedGameType, resolvedConfig);
+  const info = q.insertGame.run(categoryStr, clampMatchFormat(legsPerSet), clampMatchFormat(setsPerGame), practice ? 1 : 0, resolvedGameType, resolvedConfig);
   const gameId = Number(info.lastInsertRowid);
   (players || []).forEach(entry => {
     const out = entry.out === 'single' ? 'single' : 'double';
@@ -2632,15 +2644,23 @@ function getCoachingInsights(playerName, mode) {
 }
 
 function resetStats() {
-  db.exec('DELETE FROM turns; DELETE FROM game_players; DELETE FROM games;');
+  // docs/bug-roadmap.md BUG-7: this deletes every game, which is what tournament
+  // matches link to — so leaving the tournament rows behind would strand every
+  // bracket (game_id NULLed, in-progress matches silently reverting to "ready").
+  // A stat reset that guts all games should clear the tournaments too. DELETE FROM
+  // tournaments cascades to tournament_players/rounds/matches.
+  db.exec('DELETE FROM turns; DELETE FROM game_players; DELETE FROM games; DELETE FROM tournaments;');
   return { ok: true };
 }
 
 // Wipes every player, game, and stat — admin accounts and app settings survive.
 // Deleting all players cascades to game_players/turns/darts; deleting the
-// (now-empty) games cascades their timeline_events too.
+// (now-empty) games cascades their timeline_events too. docs/bug-roadmap.md BUG-7:
+// nothing references the tournaments PARENT row, so without an explicit delete the
+// tournament/round/match shells survived a total wipe and still showed (with blank
+// names) in the Tournaments list. DELETE FROM tournaments cascades all four tables.
 function wipeAllData() {
-  db.exec('DELETE FROM players; DELETE FROM games;');
+  db.exec('DELETE FROM players; DELETE FROM games; DELETE FROM tournaments;');
   return { ok: true };
 }
 
@@ -2664,6 +2684,15 @@ function getFullDatabaseExport() {
     timelineEvents: db.prepare('SELECT * FROM timeline_events').all(),
     playerBadges: db.prepare('SELECT * FROM player_badges').all(),
     dailyChallengeAttempts: db.prepare('SELECT * FROM daily_challenge_attempts').all(),
+    // docs/bug-roadmap.md BUG-6: the tournament tables are ordinary user data (no
+    // secrets), so they belong in "take your data with you" alongside games/stats —
+    // omitting them silently dropped all tournament history from the export.
+    // NOTE (standing rule): any NEW user-data table must be added HERE and to
+    // wipeAllData()/resetStats() (BUG-7) in the same change that creates it.
+    tournaments: db.prepare('SELECT * FROM tournaments').all(),
+    tournamentPlayers: db.prepare('SELECT * FROM tournament_players').all(),
+    tournamentRounds: db.prepare('SELECT * FROM tournament_rounds').all(),
+    tournamentMatches: db.prepare('SELECT * FROM tournament_matches').all(),
   };
 }
 
@@ -3152,6 +3181,18 @@ function _roundLabel(roundsFromFinal, roundNo) {
 function _advanceTournamentMatch(matchId, winnerId) {
   const match = db.prepare('SELECT * FROM tournament_matches WHERE id = ?').get(matchId);
   if (!match) return;
+  // docs/bug-roadmap.md BUG-4: two guards the walkover path already enforces but the
+  // game-completion hook path was missing. (a) Never re-advance a match that's already
+  // decided — a replayed/forged POST /api/games/:id/complete would otherwise overwrite
+  // a settled bracket (even a finished tournament's champion). (b) Never advance a
+  // winner who isn't one of this match's two players — a completion naming a
+  // non-participant would inject an outsider into the next round or as champion. Skip
+  // silently rather than throw: the game itself still completed and recorded stats
+  // normally; this completion just doesn't correspond to a valid bracket result.
+  // (Generation-time bye advances pass both guards: the bye match has winner_id null,
+  // and its winnerId is its one real player.)
+  if (match.winner_id != null) return;
+  if (winnerId !== match.player1_id && winnerId !== match.player2_id) return;
   const loserId = winnerId === match.player1_id ? match.player2_id : match.player1_id;
   db.prepare('UPDATE tournament_matches SET winner_id = ? WHERE id = ?').run(winnerId, matchId);
   const tournamentId = db.prepare('SELECT tournament_id FROM tournament_rounds WHERE id = ?').get(match.round_id).tournament_id;
@@ -3191,8 +3232,12 @@ function createTournament({ name, category, players, rounds }) {
   }
   const cleanRounds = rounds.map((r, i) => {
     const legsPerSet = Number(r.legsPerSet), setsPerGame = Number(r.setsPerGame);
-    if (!Number.isInteger(legsPerSet) || legsPerSet < 1 || !Number.isInteger(setsPerGame) || setsPerGame < 1) {
-      throw httpError(400, `Round ${i + 1}: legsPerSet/setsPerGame must be positive integers`);
+    // docs/bug-roadmap.md BUG-5: reject non-integer or out-of-range formats here (the
+    // setup UI never sends one), so a bogus round can't be persisted and then flow into
+    // createGame() when the match is started. Upper bound matches MAX_LEGS_OR_SETS.
+    if (!Number.isInteger(legsPerSet) || legsPerSet < 1 || legsPerSet > MAX_LEGS_OR_SETS ||
+        !Number.isInteger(setsPerGame) || setsPerGame < 1 || setsPerGame > MAX_LEGS_OR_SETS) {
+      throw httpError(400, `Round ${i + 1}: legsPerSet/setsPerGame must be integers between 1 and ${MAX_LEGS_OR_SETS}`);
     }
     return { legsPerSet, setsPerGame };
   });

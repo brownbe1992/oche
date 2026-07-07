@@ -640,7 +640,7 @@ Shows the most recent server-side failures (up to 500, newest first) — the sam
 
 #### Data Export
 
-- **Export all data** — downloads a complete JSON export of every player, game, and stat in the database. Admin-only; there's no per-player export and nothing export-related appears on a player's own page. Excludes admin accounts, sessions, app settings, and player PINs.
+- **Export all data** — downloads a complete JSON export of every player, game, stat, and tournament in the database. Admin-only; there's no per-player export and nothing export-related appears on a player's own page. Excludes admin accounts, sessions, app settings, and player PINs.
 
 #### Danger Zone
 

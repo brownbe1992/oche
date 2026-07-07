@@ -171,6 +171,18 @@ describe('createGame — gameType/category/config validation', () => {
     expect400(() => db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, config: { junk: 'x'.repeat(5000) }, players: [] }));
     assert.doesNotThrow(() => db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, config: { startingScore: 501 }, players: [] }));
   });
+
+  // docs/bug-roadmap.md BUG-5: legsPerSet/setsPerGame are clamped to a whole number
+  // in [1, 99] at the write boundary (lenient — garbage floors to 1, no 400).
+  test('clamps legsPerSet/setsPerGame to a whole number in [1, 99]', () => {
+    const read = (gid) => db._db.prepare('SELECT legs_per_set AS legs, sets_per_game AS sets FROM games WHERE id = ?').get(gid);
+    const huge = read(db.createGame({ category: '501', legsPerSet: 1e9, setsPerGame: 500, practice: 1, players: [] }).gameId);
+    assert.equal(huge.legs, 99); assert.equal(huge.sets, 99);
+    const frac = read(db.createGame({ category: '501', legsPerSet: 2.9, setsPerGame: 1, practice: 1, players: [] }).gameId);
+    assert.equal(frac.legs, 2, 'a float floors to a whole number');
+    const junk = read(db.createGame({ category: '501', legsPerSet: 0, setsPerGame: -5, practice: 1, players: [] }).gameId);
+    assert.equal(junk.legs, 1); assert.equal(junk.sets, 1);
+  });
 });
 
 // docs/security-audit-roadmap.md SEC-14: recordEvent() previously accepted any

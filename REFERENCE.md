@@ -1906,13 +1906,17 @@ is no export entry point anywhere on a Player Profile page.
 
 - **`db.getFullDatabaseExport()`** returns `{ exportedAt, players, games,
   gamePlayers, turns, darts, timelineEvents, playerBadges,
-  dailyChallengeAttempts }` — every player/game/stat table, reformatted as
-  plain JSON. It deliberately excludes the `admins`, `sessions`, `settings`,
-  and `server_errors` tables entirely (internal/credential tables, not "your
-  darts data"), and the `players` rows only select `id, name, out_mode,
-  created_at, dart_weight` — `pin_hash`/`pin_salt`/`pin_fail_count`/
-  `pin_locked_until` never leave the server, exported or not, the same
-  write-only handling every other credential in this app gets.
+  dailyChallengeAttempts, tournaments, tournamentPlayers, tournamentRounds,
+  tournamentMatches }` — every player/game/stat table (including the four
+  tournament tables, `docs/bug-roadmap.md` BUG-6), reformatted as plain JSON. It
+  deliberately excludes the `admins`, `sessions`, `settings`, and `server_errors`
+  tables entirely (internal/credential tables, not "your darts data"), and the
+  `players` rows only select `id, name, out_mode, created_at, dart_weight` —
+  `pin_hash`/`pin_salt`/`pin_fail_count`/`pin_locked_until` never leave the
+  server, exported or not, the same write-only handling every other credential in
+  this app gets. **Standing rule:** any new user-data table must be added to this
+  export (and to `wipeAllData()`/`resetStats()`, BUG-7) in the same change that
+  creates it.
 - **`GET /api/export-all`** (`requireAdmin`, unconditional — same gate as the
   Backups routes and `/api/wipe-all`) streams that object as a
   `Content-Disposition: attachment` download named
@@ -2219,6 +2223,14 @@ Given N players and `bracketSize` = the smallest power of two ≥ N:
    winner into `winner_next_match_id`'s slot or — if there is no next match
    (this was the final) — sets `tournaments.champion_id`/`runner_up_id`/
    `status='completed'`/`completed_at` and marks the winner `champion`.
+   `_advanceTournamentMatch()` **guards** before doing any of that
+   (`docs/bug-roadmap.md` BUG-4): it silently returns if the match already has a
+   `winner_id` (a replayed/forged completion can't overwrite a decided match) or
+   if `winnerId` isn't one of the match's two players (a completion naming a
+   non-participant can't inject an outsider into the bracket or as champion). The
+   walkover path enforces the same two invariants explicitly; generation-time bye
+   advances pass both (the bye match has a null `winner_id` and its winner is its
+   one real player).
 3. **Walkover** (`recordWalkover(matchId, winnerName)`): records a result
    without playing it out, calling the same `_advanceTournamentMatch()`
    propagation. Allowed any time `winner_id` is still `null` — **regardless of

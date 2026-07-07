@@ -237,3 +237,67 @@ describe('listTournaments', () => {
     assert.equal(row.champion_name, null);
   });
 });
+
+describe('BUG-4 — advancement guards (winner validation + already-decided)', () => {
+  test('completing a tournament-linked game with a NON-participant winner does not corrupt the bracket', () => {
+    const players = makePlayers(uniqueName('B4A_'), 2);
+    const [A, B] = players;
+    const outsider = uniqueName('B4A_OUT'); db.addPlayer(outsider);
+    const { tournamentId } = db.createTournament({ name: 'Bug4 Cup A', category: '501', players, rounds: roundsFor(2) });
+    const final = db.getTournament(tournamentId).matches[0];
+    const { gameId } = db.startTournamentMatch(final.id);
+    // Forge a completion naming a real player who isn't in this match.
+    db.completeGame(gameId, outsider);
+    const t = db.getTournament(tournamentId);
+    assert.equal(t.status, 'in_progress', 'tournament must not complete on a non-participant winner');
+    assert.equal(t.champion_name, null, 'no champion set');
+    assert.equal(t.matches[0].winnerName, null, 'match winner not recorded for an outsider');
+    // The legitimate result still works afterward.
+    db.completeGame(gameId, A);
+    const t2 = db.getTournament(tournamentId);
+    assert.equal(t2.status, 'completed');
+    assert.equal(t2.champion_name, A);
+  });
+
+  test('a second complete on an already-decided match cannot overwrite the recorded winner or champion', () => {
+    const players = makePlayers(uniqueName('B4B_'), 2);
+    const [A, B] = players;
+    const { tournamentId } = db.createTournament({ name: 'Bug4 Cup B', category: '501', players, rounds: roundsFor(2) });
+    const final = db.getTournament(tournamentId).matches[0];
+    const { gameId } = db.startTournamentMatch(final.id);
+    db.completeGame(gameId, A);
+    assert.equal(db.getTournament(tournamentId).champion_name, A);
+    // Replay the completion with the OTHER player — must be a no-op for the bracket.
+    db.completeGame(gameId, B);
+    const t = db.getTournament(tournamentId);
+    assert.equal(t.champion_name, A, 'champion is not overwritten by a replayed complete');
+    assert.equal(t.matches[0].winnerName, A);
+  });
+});
+
+describe('BUG-5 — round format bounds', () => {
+  test('createTournament rejects a round with an out-of-range or non-integer legs/sets', () => {
+    const players = makePlayers(uniqueName('B5_'), 2);
+    assert.throws(() => db.createTournament({ name: 'Bug5 Cup', category: '501', players, rounds: [{ legsPerSet: 1e9, setsPerGame: 1 }] }),
+      (e) => e.status === 400 && /between 1 and/i.test(e.message));
+    assert.throws(() => db.createTournament({ name: 'Bug5 Cup', category: '501', players, rounds: [{ legsPerSet: 2.5, setsPerGame: 1 }] }),
+      (e) => e.status === 400 && /between 1 and/i.test(e.message));
+    // A sane format still creates fine.
+    const ok = db.createTournament({ name: 'Bug5 OK', category: '501', players, rounds: [{ legsPerSet: 3, setsPerGame: 1 }] });
+    assert.ok(ok.tournamentId);
+  });
+});
+
+describe('BUG-7 — wipeAllData clears tournament tables', () => {
+  test('a full wipe leaves no orphaned tournament rows', () => {
+    const players = makePlayers(uniqueName('B7_'), 4);
+    db.createTournament({ name: 'Bug7 Cup', category: '501', players, rounds: roundsFor(4) });
+    assert.ok(db.listTournaments().length >= 1, 'tournament exists before wipe');
+    db.wipeAllData();
+    assert.equal(db.listTournaments().length, 0, 'no tournaments survive wipeAllData');
+    for (const tbl of ['tournaments', 'tournament_players', 'tournament_rounds', 'tournament_matches']) {
+      const n = db._db.prepare(`SELECT COUNT(*) AS n FROM ${tbl}`).get().n;
+      assert.equal(n, 0, `${tbl} must be empty after wipeAllData`);
+    }
+  });
+});

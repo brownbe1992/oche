@@ -36,6 +36,8 @@ describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
 
     assert.deepEqual(Object.keys(dump).sort(), [
       'dailyChallengeAttempts', 'darts', 'exportedAt', 'gamePlayers', 'games', 'players', 'playerBadges', 'timelineEvents', 'turns',
+      // docs/bug-roadmap.md BUG-6: tournament tables must be exported too
+      'tournaments', 'tournamentPlayers', 'tournamentRounds', 'tournamentMatches',
     ].sort());
 
     const alice = dump.players.find(p => p.name === 'export_alice');
@@ -45,6 +47,19 @@ describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
     assert.equal(dump.games.length, 1);
     assert.equal(dump.turns.length, 1);
     assert.equal(dump.darts.length, 3);
+  });
+
+  test('includes tournament data (BUG-6) — a run tournament appears in the export', () => {
+    db.addPlayer('export_t1'); db.addPlayer('export_t2');
+    db.createTournament({ name: 'Export Cup', category: '501', players: ['export_t1', 'export_t2'],
+      rounds: [{ legsPerSet: 3, setsPerGame: 1 }] });
+
+    const dump = db.getFullDatabaseExport();
+    const cup = dump.tournaments.find(t => t.name === 'Export Cup');
+    assert.ok(cup, 'tournament row is exported');
+    assert.equal(dump.tournamentPlayers.filter(tp => tp.tournament_id === cup.id).length, 2);
+    assert.equal(dump.tournamentRounds.filter(r => r.tournament_id === cup.id).length, 1);
+    assert.ok(dump.tournamentMatches.length >= 1, 'match rows exported');
   });
 
   test('never includes admin/session/settings/error tables or any PIN/credential column', async () => {
