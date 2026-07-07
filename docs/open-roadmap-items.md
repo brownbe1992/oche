@@ -33,26 +33,27 @@
 | 7 | Mobile: distribution decision — App Store/Play Store listing vs. simpler sideload distribution (step 6) | `docs/mobile-app-roadmap.md` | Low-Medium |
 | 8 | Localize voice announcements beyond hardcoded English phrases | `docs/voice-announcements-i18n-roadmap.md` | Low-Medium |
 | 9 | Dart Builder: loadout comparison view (side-by-side stats for two or more of a player's loadouts; explicitly a v1 stretch goal, not required) | `docs/dart-builder-roadmap.md` | Low-Medium |
-| 10 | Cricket: two new native badges — 🧹 Whitewash (won without the opponent closing a single number) and a Cricket-shaped Comeback Kid (points-based, not X01's remaining-score-based version) | `docs/game-modes-roadmap.md` | Low-Medium |
-| 11 | Tournament: two new badges — 🏆 Champion (win a bracket) and a seed-based Giant Slayer equivalent (beat a meaningfully higher seed) | `docs/tournament-mode-roadmap.md` | Low-Medium |
-| 12 | Tournament: stats on the Player Profile (wins, runner-up count, best finish reached) — the doc's own step 4 stretch goal, expanded into a full design | `docs/tournament-mode-roadmap.md` | Low-Medium |
-| 13 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
-| 14 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
-| 15 | League mode (new tables, no new infra; complements tournament mode) | `docs/league-mode-roadmap.md` | Medium |
-| 16 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
-| 17 | Guided Around the Clock / Around the World practice drill mode — turns the existing passive completion tracking into a fourth Practice Drill Mode with live progress feedback, reusing Around the World's existing heatmap/progress-view UI | `docs/game-modes-roadmap.md` | Medium |
-| 18 | Per-player data export (CSV + JSON, PIN-gated) — re-opened with fresh product direction after being explicitly descoped when the admin full-database export shipped; design was already fully written, just shelved | `docs/data-export-roadmap.md` | Medium |
-| 19 | Game Modes: Baseball — the second proof that the plugin shape generalizes beyond Cricket (step 5) | `docs/game-modes-roadmap.md` | High |
-| 20 | Tournament mode: double-elimination bracket support (losers bracket + grand final/reset logic, the genuinely fiddly combinatorial piece — single-elimination already shipped, see the Done ledger) | `docs/tournament-mode-roadmap.md` | High |
-| 21 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
-| 22 | Camera/ML scoring (genuinely novel CV engineering; only useful to whoever mounts the hardware) | `docs/camera-scoring-roadmap.md` | Extremely high |
-| 23 | Companion website (persistent hosted infrastructure — accounts, matchmaking, a cloud database — the one item requiring the project to operate long-term infra, not just be self-hostable) | `docs/companion-website-roadmap.md` | Extremely high |
+| 10 | Dartboard inner/outer single zone tracking — a nullable `darts.zone` column (`'inner'`\|`'outer'`\|`NULL`) populated only by Dartboard-tap-mode singles, so heatmaps (Just Chuckin' It's, and `topSectors`) can tell "hit above the treble" apart from "hit below the treble" instead of collapsing both into one bucket per number | `docs/dartboard-zone-tracking-roadmap.md` | Low-Medium |
+| 11 | Cricket: two new native badges — 🧹 Whitewash (won without the opponent closing a single number) and a Cricket-shaped Comeback Kid (points-based, not X01's remaining-score-based version) | `docs/game-modes-roadmap.md` | Low-Medium |
+| 12 | Tournament: two new badges — 🏆 Champion (win a bracket) and a seed-based Giant Slayer equivalent (beat a meaningfully higher seed) | `docs/tournament-mode-roadmap.md` | Low-Medium |
+| 13 | Tournament: stats on the Player Profile (wins, runner-up count, best finish reached) — the doc's own step 4 stretch goal, expanded into a full design | `docs/tournament-mode-roadmap.md` | Low-Medium |
+| 14 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
+| 15 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
+| 16 | League mode (new tables, no new infra; complements tournament mode) | `docs/league-mode-roadmap.md` | Medium |
+| 17 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
+| 18 | Guided Around the Clock / Around the World practice drill mode — turns the existing passive completion tracking into a fourth Practice Drill Mode with live progress feedback, reusing Around the World's existing heatmap/progress-view UI | `docs/game-modes-roadmap.md` | Medium |
+| 19 | Per-player data export (CSV + JSON, PIN-gated) — re-opened with fresh product direction after being explicitly descoped when the admin full-database export shipped; design was already fully written, just shelved | `docs/data-export-roadmap.md` | Medium |
+| 20 | Game Modes: Baseball — the second proof that the plugin shape generalizes beyond Cricket (step 5) | `docs/game-modes-roadmap.md` | High |
+| 21 | Tournament mode: double-elimination bracket support (losers bracket + grand final/reset logic, the genuinely fiddly combinatorial piece — single-elimination already shipped, see the Done ledger) | `docs/tournament-mode-roadmap.md` | High |
+| 22 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
+| 23 | Camera/ML scoring (genuinely novel CV engineering; only useful to whoever mounts the hardware) | `docs/camera-scoring-roadmap.md` | Extremely high |
+| 24 | Companion website (persistent hosted infrastructure — accounts, matchmaking, a cloud database — the one item requiring the project to operate long-term infra, not just be self-hostable) | `docs/companion-website-roadmap.md` | Extremely high |
 
 ### Build-order notes that still apply
 
 - **Tournament mode (single-elimination) is done** and its `tournament_matches.game_id` FK is the real, shipped precedent league mode's "games link into a context table" pattern (see `CLAUDE.md`) can now follow directly, rather than a hoped-for one.
 - **Mobile app's steps are sequential as listed** (step 2 → 3 → 4 → 5 → 6 → 7) per `docs/mobile-app-roadmap.md`'s own suggested build order; its one prerequisite (the responsive CSS pass) is already done.
-- **The small, order-independent items** (rows 3-5, 8, 10-12) can be interleaved anywhere, including ahead of the bigger lifts — good for sustaining momentum with essentially zero risk of creating rework later.
+- **The small, order-independent items** (rows 3-5, 8-13) can be interleaved anywhere, including ahead of the bigger lifts — good for sustaining momentum with essentially zero risk of creating rework later.
 
 ---
 

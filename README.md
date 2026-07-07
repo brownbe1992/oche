@@ -364,6 +364,16 @@ regardless of player count or screen orientation.
 
 The scoreboard is read-only and can be open on any number of screens simultaneously.
 
+**Emoji not rendering (Raspberry Pi / other minimal Linux kiosks)** — if 🎯🐟🏆 and other emoji show up as blank boxes or nothing at all in Chromium on a Raspberry Pi (or any minimal Linux install used as a kiosk), it's a **missing system font, not a browser bug**. Chromium and Google Chrome are both Blink-based and neither bundles a color emoji font on Linux — both defer entirely to the OS's font stack, so switching from Chromium to Chrome on the same install will not fix it. Install a color emoji font and rebuild the font cache:
+
+```bash
+sudo apt update
+sudo apt install fonts-noto-color-emoji
+fc-cache -f -v
+```
+
+Then fully restart Chromium (closing the kiosk process, not just reloading the page) — it caches its font list per-process, so a plain refresh sometimes isn't enough. This is most common on **Raspberry Pi OS Lite** and older (pre-Bookworm) Raspberry Pi OS images, which ship a much sparser default font set than the Desktop image. Run `fc-list | grep -i emoji` to check whether a color emoji font is already installed before troubleshooting further.
+
 ---
 
 ### Players

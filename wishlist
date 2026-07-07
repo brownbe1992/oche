@@ -71,3 +71,6 @@ Fixes:
 - Add total busts to homepage, track busts per game mode on player pages
 - Hover/tap on top finishes to see what the finish was — done (`toggleFinishRoute()`
   in frontend/index.html expands each finish row into its checkout route)
+- Dartboard heatmap: distinguish inner single (above the treble ring) from outer
+  single (below the treble ring) per number, instead of one merged "single"
+  bucket — full design in docs/dartboard-zone-tracking-roadmap.md
