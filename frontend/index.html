@@ -5205,6 +5205,33 @@ async function shareOrSaveCanvas(canvas, filename, shareTitle, shareText){
 // If undo already ran for that turn before this award's response arrived (snap
 // is marked .voided), the badge never gets a chance to sit in the revert list —
 // so it's revoked immediately instead, closing the race the other direction.
+// Novelty time-of-day badges — shared between X01's enterTurn() and Cricket's
+// enterTurnCricket() (docs/game-modes-roadmap.md "Cricket badge parity": this was
+// previously X01-only by accident of code structure, not a deliberate scoping
+// decision — a Cricket player who only ever plays at 4am could never earn either
+// badge). The overlay only fires once per session (not once per turn, which would
+// spam the same celebration all night), but every actual occurrence still counts
+// toward the Badge Case total. The per-turn persistence call below deliberately
+// omits the momentType/momentOpts args (no momentType == no card fired) — only the
+// session-gated celebration below fires a card, or every turn thrown after
+// midnight would spam an HA webhook. Relies on the caller having already set
+// game.lastTurnSnapshot (both enterTurn() and enterTurnCricket() do this before
+// any achievement checks), since awardRecurringBadge() reads it for undo tracking.
+function awardTimeOfDayBadges(p){
+  const _hour = new Date().getHours();
+  if(_hour < 5 || (_hour >= 5 && _hour < 7)){
+    awardRecurringBadge(p.name, _hour < 5 ? 'nightowl' : 'earlybird');
+  }
+  if(!sessionBadgesShown.nightOwl && _hour < 5){
+    sessionBadgesShown.nightOwl = true;
+    queueBadge('nightowl', p.name);
+    fireMomentCard('nightowl', { icon:'🦉', headline:'NIGHT OWL', player:p.name, statLine:'Darts after midnight' });
+  } else if(!sessionBadgesShown.earlyBird && _hour >= 5 && _hour < 7){
+    sessionBadgesShown.earlyBird = true;
+    queueBadge('earlybird', p.name);
+    fireMomentCard('earlybird', { icon:'🐦', headline:'EARLY BIRD', player:p.name, statLine:'Darts before 7am' });
+  }
+}
 function trackBadgeForUndo(snap, playerName, badgeId){
   if(!snap) return;
   if(snap.voided){ Backend.send('POST','/api/badges/revoke', { player:playerName, badgeId }).catch(()=>{}); return; }
@@ -5786,25 +5813,10 @@ function enterTurn(){
     }).catch(()=>{}));
   }
 
-  // Novelty time-of-day badges — the overlay only fires once per session (not once
-  // per turn, which would spam the same celebration all night), but every actual
-  // occurrence still counts toward the Badge Case total. The per-turn persistence
-  // call below deliberately omits the momentType/momentOpts args (no momentType ==
-  // no card fired) — only the session-gated celebration below fires a card, or every
-  // turn thrown after midnight would spam an HA webhook.
-  const _hour = new Date().getHours();
-  if(_hour < 5 || (_hour >= 5 && _hour < 7)){
-    awardRecurringBadge(p.name, _hour < 5 ? 'nightowl' : 'earlybird');
-  }
-  if(!sessionBadgesShown.nightOwl && _hour < 5){
-    sessionBadgesShown.nightOwl = true;
-    queueBadge('nightowl', p.name);
-    fireMomentCard('nightowl', { icon:'🦉', headline:'NIGHT OWL', player:p.name, statLine:'Darts after midnight' });
-  } else if(!sessionBadgesShown.earlyBird && _hour >= 5 && _hour < 7){
-    sessionBadgesShown.earlyBird = true;
-    queueBadge('earlybird', p.name);
-    fireMomentCard('earlybird', { icon:'🐦', headline:'EARLY BIRD', player:p.name, statLine:'Darts before 7am' });
-  }
+  // Novelty time-of-day badges (shared with Cricket's enterTurnCricket() via
+  // awardTimeOfDayBadges() below — "when you played" has nothing to do with
+  // which game type you were playing).
+  awardTimeOfDayBadges(p);
   // First 100+ checkout — a one-time milestone (persisted server-side so the
   // celebration fires exactly once, ever, not every time it happens again).
   if(ev.win && ev.pointsThisVisit >= 100){
@@ -5957,6 +5969,10 @@ function enterTurnCricket(){
   const turnRecord = { player:p.name, scored:ev.scored, darts:game.darts.slice() };
   game.currentLegTurns.push(turnRecord);
   game.sessionTurns.push(turnRecord);
+
+  // Novelty time-of-day badges — shared with X01's enterTurn(), see
+  // awardTimeOfDayBadges() (docs/game-modes-roadmap.md "Cricket badge parity").
+  awardTimeOfDayBadges(p);
 
   // Cricket achievements (game-modes-roadmap.md build-order step 3) — the direct
   // analogs of X01's 180/nine-darter, detected the same way (inspect this visit's

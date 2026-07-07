@@ -1014,10 +1014,15 @@ revokes any `chuckin180` badge that dart awarded — see above.
 
 ## 4. Achievements & Badges
 
-46 badges (22 X01 + 2 Cricket + 3 Daily Challenge + 19 Just Chuckin' It),
-tracked in the `player_badges` table (one row per player+badge, with a running
-`count`). X01 detection logic lives in `frontend/index.html`'s
-`enterTurn()`/`onLegWon()`; Cricket's 2 badges live in
+46 badges (22 X01 + 2 Cricket + 3 Daily Challenge + 19 Just Chuckin' It) — that
+split is by which table each is listed under below, not a strict statement of
+which game types can trigger it: Night Owl/Early Bird (listed under X01) are the
+one exception, checked from both `enterTurn()` and `enterTurnCricket()` via a
+shared `awardTimeOfDayBadges()` helper (2026-07 — previously Cricket-triggerable
+by neither, an accident of code structure rather than a deliberate scoping
+decision). Tracked in the `player_badges` table (one row per player+badge, with
+a running `count`). X01 detection logic lives in `frontend/index.html`'s
+`enterTurn()`/`onLegWon()`; Cricket's 2 own badges live in
 `enterTurnCricket()`/`onLegWonCricket()`; Daily Challenge's 3 badges are
 checked in `checkChallengeBadges()`, called right after every
 `/api/challenges/complete` response; Just Chuckin' It's 18 laddered milestones
@@ -1068,8 +1073,8 @@ co-fire with a chain badge or with each other in the same turn/leg:
 
 | Badge | Exact condition |
 |---|---|
-| 🦉 **Night Owl** | Local hour `< 5` at the moment the turn is **committed** (`enterTurn()` — checked per turn, not per individual dart tap). Celebration overlay fires once per session (`sessionBadgesShown.nightOwl`); the persistence call fires every qualifying turn regardless. |
-| 🐦 **Early Bird** | Local hour `>= 5 && < 7`, same per-turn check and once-per-session overlay gating as Night Owl. |
+| 🦉 **Night Owl** | Local hour `< 5` at the moment the turn is **committed** — shared `awardTimeOfDayBadges(p)` helper, called from both `enterTurn()` (X01) and `enterTurnCricket()` (checked per turn, not per individual dart tap; game-type-agnostic since 2026-07 — previously X01-only by accident of code structure, not a deliberate scoping decision). Celebration overlay fires once per session (`sessionBadgesShown.nightOwl`); the persistence call fires every qualifying turn regardless, in either game type. |
+| 🐦 **Early Bird** | Local hour `>= 5 && < 7`, same per-turn check and once-per-session overlay gating as Night Owl — same shared helper, same X01+Cricket coverage. |
 | 🎯 **Metronome** | 5 consecutive visits (raw attempted points, including busts) within 15 of each other: `max(last5) - min(last5) <= 15`. Fires at most once per leg (`p.metronomeFired`). |
 | 🚗 **Cruise Control** | `win && every visit this leg scored >= 40` (raw attempted points). |
 | ❄️ **Ice in the Veins** | `win && pendingIceInTheVeins && pointsThisVisit >= 50` — a 50+ checkout on the visit *immediately following* this player's own bust earlier in the leg. The eligibility flag is cleared after every visit (hit or miss both consume the window) so it only ever covers the very next visit. |

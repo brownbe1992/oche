@@ -92,11 +92,12 @@
 > own backend function set shipped as part of building it, following the same
 > "bespoke per game type" pattern this section anticipated.)
 >
-> **Three more items designed but not started (2026-07)**, each its own tracked
-> item on `docs/open-roadmap-items.md`: extending Night Owl/Early Bird to fire
-> from Cricket turns too (currently X01-only by accident of code structure, not
-> design — see "Cricket badge parity"), two new Cricket-native badges (Whitewash,
-> a Cricket-shaped Comeback Kid), and a Guided Around the Clock/World practice
+> **✅ Built (2026-07): Night Owl/Early Bird now fire from Cricket turns too**
+> (were X01-only by accident of code structure, not design — see "Cricket badge
+> parity"), via a shared `awardTimeOfDayBadges(p)` helper. **Two more items
+> designed but not started**, each its own tracked item on
+> `docs/open-roadmap-items.md`: two new Cricket-native badges (Whitewash, a
+> Cricket-shaped Comeback Kid), and a Guided Around the Clock/World practice
 > drill mode (a fourth Practice Drill Mode, turning the existing passive
 > completion tracking into something actively practicable with live progress
 > feedback).
@@ -743,25 +744,33 @@ X01-only, see its status note above).
    `index.html` and `display.html`, including a real per-dart rate-limit/data-
    loss bug this testing caught and fixed).
 
-## Cricket badge parity — two gaps (not yet built)
+## Cricket badge parity — one gap fixed, one still open
 
-Cricket ships with exactly 2 badges (9 Marks, Perfect Leg) against X01's 20 —
-thin, and part of that gap is an accidental side effect of code structure, not
-a deliberate scoping decision. Split into two separately-tracked items:
+Cricket shipped with exactly 2 badges (9 Marks, Perfect Leg) against X01's 20 —
+thin, and part of that gap was an accidental side effect of code structure, not
+a deliberate scoping decision.
 
-### 1. Night Owl / Early Bird are silently X01-only (a gap, arguably a bug)
+### 1. ✅ Built (2026-07): Night Owl / Early Bird are no longer X01-only
 
-Per `REFERENCE.md` §4, Night Owl/Early Bird are checked from `enterTurn()` —
-X01's own turn-commit function — not `enterTurnCricket()`. Neither badge's
-condition (`local hour < 5` / `>= 5 && < 7`) has anything to do with X01
-specifically; a Cricket player who only ever plays at 4am currently can never
-earn either badge, purely because the check lives in the wrong function, not
-because of a real design decision to exclude Cricket. Fix: call the same
-time-of-day check from `enterTurnCricket()` too (same `badgeId`s, so a
-player's count is shared across game types — these are about *when* you play,
-not *what* you play).
+Was: Night Owl/Early Bird were only checked from `enterTurn()` — X01's own
+turn-commit function — never `enterTurnCricket()`. Neither badge's condition
+(`local hour < 5` / `>= 5 && < 7`) has anything to do with X01 specifically; a
+Cricket player who only ever played at 4am could never earn either badge,
+purely because the check lived in the wrong function, not because of a real
+design decision to exclude Cricket.
 
-### 2. New Cricket-native badges (not X01 ports)
+Fixed by extracting the shared logic into `awardTimeOfDayBadges(p)`
+(`frontend/index.html`), called from both `enterTurn()` and
+`enterTurnCricket()` — same `badgeId`s, so a player's count is shared across
+game types (these are about *when* you play, not *what* you play). Undo works
+for free: `awardRecurringBadge()` reads `game.lastTurnSnapshot` generically
+(whichever the caller most recently set), so no Cricket-specific undo handling
+was needed. Verified end-to-end with Playwright against a live server: a
+Cricket turn committed at a monkey-patched `Date.prototype.getHours() = 3`
+fires `POST /api/badges/award {badgeId:'nightowl'}`, and an X01 turn at hour 6
+still fires `earlybird` unchanged (regression check).
+
+### 2. New Cricket-native badges (not X01 ports) — still open
 
 Rather than forcing X01 concepts (checkout-based Comeback Kid, average-based
 Giant Slayer) onto a game with no checkouts and a different averaging concept
