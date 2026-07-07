@@ -29,25 +29,26 @@
 | 3 | Mobile: native chrome — change-server access, haptics, biometric unlock (step 4) | `docs/mobile-app-roadmap.md` | Low-Medium |
 | 4 | Mobile: distribution decision — App Store/Play Store listing vs. simpler sideload distribution (step 6) | `docs/mobile-app-roadmap.md` | Low-Medium |
 | 5 | Localize voice announcements beyond hardcoded English phrases | `docs/voice-announcements-i18n-roadmap.md` | Low-Medium |
-| 6 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
-| 7 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
-| 8 | League mode (new tables, no new infra; complements tournament mode) | `docs/league-mode-roadmap.md` | Medium |
-| 9 | Dart Builder: visual icon/diagram per barrel shape, barrel grip, and flight shape option (the accessibility requirement the shipped v1 picker still owes — text-label dropdowns shipped instead, see the Done ledger) | `docs/dart-builder-roadmap.md` | Low |
-| 10 | Dart Builder: "quick-add full set" one-shot entry form (name + all component fields on one screen, for logging an off-the-shelf dart set in one save instead of three) | `docs/dart-builder-roadmap.md` | Low |
-| 11 | Dart Builder: optional photo upload per component (instead of a generic shape/grip icon) | `docs/dart-builder-roadmap.md` | Low |
-| 12 | Dart Builder: loadout comparison view (side-by-side stats for two or more of a player's loadouts; explicitly a v1 stretch goal, not required) | `docs/dart-builder-roadmap.md` | Low-Medium |
-| 13 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
-| 14 | Game Modes: Baseball — the second proof that the plugin shape generalizes beyond Cricket (step 5) | `docs/game-modes-roadmap.md` | High |
-| 15 | Tournament mode: double-elimination bracket support (losers bracket + grand final/reset logic, the genuinely fiddly combinatorial piece — single-elimination already shipped, see the Done ledger) | `docs/tournament-mode-roadmap.md` | High |
-| 16 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
-| 17 | Camera/ML scoring (genuinely novel CV engineering; only useful to whoever mounts the hardware) | `docs/camera-scoring-roadmap.md` | Extremely high |
-| 18 | Companion website (persistent hosted infrastructure — accounts, matchmaking, a cloud database — the one item requiring the project to operate long-term infra, not just be self-hostable) | `docs/companion-website-roadmap.md` | Extremely high |
+| 6 | Ghost Opponent: win/loss tracking (`ghost_races` table, `POST /api/ghost-races`, a "Ghost races: W–L" line on the Player Profile — full design written up, not yet built) | `docs/ghost-opponent-roadmap.md` | Low-Medium |
+| 7 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
+| 8 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
+| 9 | League mode (new tables, no new infra; complements tournament mode) | `docs/league-mode-roadmap.md` | Medium |
+| 10 | Dart Builder: visual icon/diagram per barrel shape, barrel grip, and flight shape option (the accessibility requirement the shipped v1 picker still owes — text-label dropdowns shipped instead, see the Done ledger) | `docs/dart-builder-roadmap.md` | Low |
+| 11 | Dart Builder: "quick-add full set" one-shot entry form (name + all component fields on one screen, for logging an off-the-shelf dart set in one save instead of three) | `docs/dart-builder-roadmap.md` | Low |
+| 12 | Dart Builder: optional photo upload per component (instead of a generic shape/grip icon) | `docs/dart-builder-roadmap.md` | Low |
+| 13 | Dart Builder: loadout comparison view (side-by-side stats for two or more of a player's loadouts; explicitly a v1 stretch goal, not required) | `docs/dart-builder-roadmap.md` | Low-Medium |
+| 14 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
+| 15 | Game Modes: Baseball — the second proof that the plugin shape generalizes beyond Cricket (step 5) | `docs/game-modes-roadmap.md` | High |
+| 16 | Tournament mode: double-elimination bracket support (losers bracket + grand final/reset logic, the genuinely fiddly combinatorial piece — single-elimination already shipped, see the Done ledger) | `docs/tournament-mode-roadmap.md` | High |
+| 17 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
+| 18 | Camera/ML scoring (genuinely novel CV engineering; only useful to whoever mounts the hardware) | `docs/camera-scoring-roadmap.md` | Extremely high |
+| 19 | Companion website (persistent hosted infrastructure — accounts, matchmaking, a cloud database — the one item requiring the project to operate long-term infra, not just be self-hostable) | `docs/companion-website-roadmap.md` | Extremely high |
 
 ### Build-order notes that still apply
 
 - **Tournament mode (single-elimination) is done** and its `tournament_matches.game_id` FK is the real, shipped precedent league mode's "games link into a context table" pattern (see `CLAUDE.md`) can now follow directly, rather than a hoped-for one.
 - **Mobile app's steps are sequential as listed** (step 2 → 3 → 4 → 5 → 6 → 7) per `docs/mobile-app-roadmap.md`'s own suggested build order; its one prerequisite (the responsive CSS pass) is already done.
-- **The small, order-independent items** (rows 5, 9-11) can be interleaved anywhere, including ahead of the bigger lifts — good for sustaining momentum with essentially zero risk of creating rework later.
+- **The small, order-independent items** (rows 5, 6, 10-12) can be interleaved anywhere, including ahead of the bigger lifts — good for sustaining momentum with essentially zero risk of creating rework later.
 
 ---
 
@@ -79,7 +80,7 @@ therefore hasn't been archived yet) — see each source doc for full detail.
 | Expanded Achievements & Badges — every item, now archived (all 22 badges + the notifications/count work above) | `docs/archive/achievements-badges-roadmap.md` |
 | Simultaneous-achievements overlay fix (multi-badge queue) | `docs/archive/simultaneous-achievements-roadmap.md` |
 | Daily/Weekly Challenge — all 6 formats, streak tracking, shareable card, Player Profile history tab, 3 challenge-specific badges | `docs/daily-challenge-roadmap.md` |
-| Ghost Opponent (X01 only) — leg-script replay, New Game leg picker, opponent-badge suppression | `docs/archive/ghost-opponent-roadmap.md` |
+| Ghost Opponent (X01 only) — leg-script replay, New Game leg picker, opponent-badge suppression (win/loss tracking is a separate, not-yet-built open item above) | `docs/ghost-opponent-roadmap.md` |
 | Server-side error logging + persistent rotating log + Settings "Server Errors" view (Part A); committed `node:test` suite + CI (Part B) | `docs/testing-and-observability-roadmap.md` |
 | Colorblind mode, WCAG contrast audit fixes, `aria-live` announcements, accessible-input-path framing, type-size pass (standing checklist, not archived — ongoing per CLAUDE.md) | `docs/accessibility-roadmap.md` |
 | Mobile: phone-responsive CSS pass (step 1) | `docs/mobile-app-roadmap.md` |
