@@ -1,9 +1,14 @@
 # Home Assistant "Recipe Book" — Documentation Roadmap
 
-> Status: **not started**. Unlike the other roadmap docs, this isn't a code project —
-> it's a documentation gap. Flagging it here so it doesn't get lost, and because it
-> came up directly while reviewing what would make the app feel special with close to
-> zero engineering effort.
+> **Archived** — fully shipped, kept here for design-rationale history. See
+> `docs/open-roadmap-items.md` for the live completion tracker across all roadmaps.
+
+> Status: **✅ Done**. The recipe content this doc called for now lives in
+> [`docs/home-assistant-recipes.md`](../home-assistant-recipes.md) — copy-pasteable
+> automations for flashing lights on a bust/180/checkout/nine-darter, spoken
+> call-outs, a "game night" lighting scene, phone push notifications, and posting
+> moment cards to Discord — linked from the README's Home Assistant Integration
+> section.
 
 ## Goal
 

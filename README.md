@@ -35,6 +35,7 @@ You enter every dart individually — multiplier first, then the number — and 
 - [Architecture](#architecture)
 - [Data Storage](#data-storage)
 - [Reference Manual](REFERENCE.md) — exact stat formulas, achievement trigger conditions, full DB schema, and internals
+- [Home Assistant Automation Recipes](docs/home-assistant-recipes.md) — copy-pasteable automations built on the webhooks below
 
 ---
 
@@ -577,6 +578,11 @@ Oche can fire webhooks to a Home Assistant instance whenever key game events occ
 ```json
 { "player": "Name", "event": "oneeighty", "category": "501", "timestamp": 1234567890 }
 ```
+
+See [`docs/home-assistant-recipes.md`](docs/home-assistant-recipes.md) for a set of
+ready-to-paste HA automations built on these webhooks — flashing lights on a bust/180/
+checkout, spoken call-outs, a "game night" lighting scene, phone push notifications,
+and posting moment cards to Discord.
 
 #### Daily Challenge
 

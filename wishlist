@@ -47,7 +47,7 @@ Others
 - Online multiplayer (P2P scoring + live video verification) — full design in docs/online-multiplayer-roadmap.md
 - Expanded achievements/badges beyond 180s/Big Fish/9-darters — done, see docs/achievements-badges-roadmap.md
 - Simultaneous achievements (show/persist every badge a turn earns, not just the last one) — done, see docs/archive/simultaneous-achievements-roadmap.md
-- Home Assistant automation recipe book (lights/sounds/notifications) — full design in docs/ha-recipes-roadmap.md
+- Home Assistant automation recipe book (lights/sounds/notifications) — done, see docs/home-assistant-recipes.md (design rationale archived at docs/archive/ha-recipes-roadmap.md)
 - Colorblind-friendly dartboard palette — done, see docs/archive/colorblind-mode-roadmap.md
 - Accessibility roadmap & standing checklist (aria-live, contrast audit, and more) — full design in docs/accessibility-roadmap.md
 - Backups & disaster recovery for the SQLite database — done (v1), see docs/backups-roadmap.md
