@@ -12,12 +12,15 @@
 > **Seeded by** the 2026-07 second-pass audit (the same read that produced
 > `security-audit-roadmap.md` Part 4); **extended** by the 2026-07 third-pass audit
 > (scoped to the single-elimination tournament feature — the same read that produced
-> `security-audit-roadmap.md` Part 5 / SEC-15), which added **BUG-4** and **BUG-5**
+> `security-audit-roadmap.md` Part 5 / SEC-15), which added **BUG-4** and **BUG-5**;
+> and again by the 2026-07 **fourth-pass audit** (a breadth-first re-read of the whole
+> codebase weighted evenly across every module — the same read that produced
+> `security-audit-roadmap.md` Part 6 / SEC-16), which added **BUG-6** and **BUG-7**
 > below. The stat/achievement *formulas* are not re-derived here — they're covered by
 > the `node:test` suite under `backend/test/` (all green as of this writing). This doc
 > tracks the correctness gaps that suite doesn't yet assert.
 >
-> **Open:** BUG-4 (MED), BUG-5 (LOW). Fixed: BUG-1, BUG-2, BUG-3.
+> **Open:** BUG-4 (MED), BUG-5 (LOW), BUG-6 (LOW), BUG-7 (MED). Fixed: BUG-1, BUG-2, BUG-3.
 
 ## Severity legend
 
@@ -267,6 +270,110 @@ never produce them, so this is latent.
 **Verify:** `createGame({ legsPerSet: 2.5, ... })` and `createGame({ legsPerSet: 1e9, ... })`
 each clamp/reject; `createTournament` with a round of `{ legsPerSet: 1e9, setsPerGame: 1 }`
 returns 400; ordinary 1–5 leg/set games and tournaments still create normally.
+
+---
+
+## BUG-6 — The full-database JSON export silently omits the four tournament tables  **(LOW, data-completeness)**
+
+**Status: ⛔ OPEN.** (Found in the 2026-07 fourth-pass audit.)
+
+**Where:** `backend/db.js` `getFullDatabaseExport()` (the `GET /api/export-all` payload,
+Settings → Admin & Danger Zone → Data Export). It dumps `players`, `games`,
+`game_players`, `turns`, `darts`, `timeline_events`, `player_badges`, and
+`daily_challenge_attempts` — but **not** `tournaments`, `tournament_players`,
+`tournament_rounds`, or `tournament_matches`, which were added by the tournament
+feature after the export was written.
+
+**Misbehavior:** the export is documented (in the function's own comment,
+`REFERENCE.md`, and `README.md`) as "a complete JSON export of every player, game, and
+stat" / "it's your data, and you can always take it with you." A user who exports
+their data believing it's complete gets a JSON file with **no record of any tournament
+they ran** — champions, brackets, seeds, per-round formats are all missing. Unlike the
+deliberate exclusions (`admins`/`sessions`/`settings`/`server_errors` and the players'
+`pin_*` columns, which are intentionally withheld as credential/internal data), the
+tournament tables contain ordinary user data and carry no secrets, so their omission is
+an oversight, not a policy choice. (No true data loss — the `.db` backup path still
+captures everything — but the JSON export's completeness contract is violated.) This is
+the exact "a new table wasn't wired into an existing whole-system operation" gap the
+fourth pass was hunting; it shares a root cause with **BUG-7** (bulk wipe) and the fix
+should be paired.
+
+**Fix (step by step):**
+1. In `getFullDatabaseExport()`, add the four tables:
+   `tournaments: db.prepare('SELECT * FROM tournaments').all()`, and likewise
+   `tournamentPlayers`, `tournamentRounds`, `tournamentMatches`. They hold no
+   credential columns, so `SELECT *` is fine (unlike `players`, which must keep
+   excluding `pin_*`).
+2. Update `REFERENCE.md`'s data-export section and `README.md`'s Data Export bullet to
+   list the tournament tables among what's exported.
+3. **Standing checklist item** (the real fix for the class): add a note next to
+   `getFullDatabaseExport()` and in `REFERENCE.md` that *any new user-data table must
+   be added here and to `wipeAllData()` (BUG-7) in the same change that creates it* —
+   the same discipline `CLAUDE.md` already applies to REFERENCE/roadmap updates. A
+   cheap guard: a `node:test` that reads `sqlite_master` for all non-internal tables
+   and asserts each appears in the export keys, so a future new table fails the test
+   until it's added.
+
+**Verify:** run a tournament to completion, hit `GET /api/export-all`, and confirm the
+JSON contains the tournament rows (tournament, players/seeds, rounds, matches with the
+champion).
+
+---
+
+## BUG-7 — "Wipe all data" (and "Reset all stats") leave orphaned tournament rows behind  **(MED, data-integrity)**
+
+**Status: ⛔ OPEN.** (Found in the 2026-07 fourth-pass audit; cross-ref
+`security-audit-roadmap.md` Part 6.)
+
+**Where:** `backend/db.js` `wipeAllData()` (`DELETE FROM players; DELETE FROM games;`)
+and, to a lesser degree, `resetStats()` (`DELETE FROM turns; DELETE FROM game_players;
+DELETE FROM games;`).
+
+**Misbehavior:** the four tournament tables reference `players`/`games` only via
+`ON DELETE CASCADE` (from `players` → `tournament_players`) and `ON DELETE SET NULL`
+(from `players`/`games` → `tournament_matches.player1_id`/`player2_id`/`winner_id`,
+`tournaments.champion_id`/`runner_up_id`, `tournament_matches.game_id`). Nothing
+references the **`tournaments` parent row**, so deleting all players and games leaves
+every `tournaments` / `tournament_rounds` / `tournament_matches` row intact —
+now pointing at nothing.
+
+- After **`wipeAllData()`** ("permanently deletes every player, game, and stat"), the
+  Tournaments list still shows every past tournament, now with blank player names, a
+  blank champion, and dead bracket cards. The operation's own contract ("Wipes every
+  player, game, and stat") is violated — the tournament shells survive a total wipe.
+- After **`resetStats()`** ("wipe all games/turns, players kept"), each tournament
+  match's `game_id` is NULLed, so a match that was `in_progress` silently reverts to
+  `ready` (or a completed match keeps its `winner_id` but loses its linked game),
+  leaving in-progress tournaments in an inconsistent half-state.
+
+Both are reachable only by an admin (the routes are `requireAdmin`), so this is a
+data-integrity/correctness defect, not a privilege issue — but it's *visible*
+incorrectness right after an operation whose entire purpose is to leave a clean slate,
+which is worse than a latent drift.
+
+**Fix (step by step):**
+1. In `wipeAllData()`, add `DELETE FROM tournaments;` — because `tournament_players`,
+   `tournament_rounds` (and transitively `tournament_matches`) all cascade from
+   `tournaments`, this one statement clears all four tables cleanly. Order doesn't
+   matter with the cascades, but doing it alongside the existing
+   `DELETE FROM players; DELETE FROM games;` is clearest.
+2. For `resetStats()`, decide the intended semantics and make it consistent: since it
+   deletes all games (which is what tournament matches link to), the least-surprising
+   behavior is to also `DELETE FROM tournaments;` there — a stat reset that guts every
+   game shouldn't leave dangling brackets. (If instead tournaments are meant to survive
+   a stat reset, that's a deliberate product call to document in `REFERENCE.md`; the
+   current behavior — silently NULLing `game_id` and reverting match state — is neither
+   choice made on purpose.)
+3. Add a committed `node:test`: create a tournament, run `wipeAllData()`, and assert
+   `SELECT COUNT(*)` on all four tournament tables is 0; a second test for the chosen
+   `resetStats()` semantics.
+4. Pair with **BUG-6** and add the standing "new user-data table must be wired into
+   both the export and the wipe" checklist note, so the next feature table doesn't
+   reopen this.
+
+**Verify:** create a tournament, run "Wipe all player & game data" from Settings,
+reload the Tournaments tab, and confirm it's empty (no orphaned shells); the four
+tournament tables are empty in the DB.
 
 ---
 

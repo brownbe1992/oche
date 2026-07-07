@@ -1,15 +1,17 @@
 # Security Audit Roadmap (adversarial whole-codebase review)
 
-> **Status: SEC-1 through SEC-14 fixed; SEC-15 OPEN (found 2026-07, third-pass
-> audit after the single-elimination tournament feature landed).** A second-pass
+> **Status: SEC-1 through SEC-14 fixed; SEC-15 and SEC-16 OPEN.** A second-pass
 > audit (2026-07, after the Cricket / Doubles Practice / Just Chuckin' It /
 > Ghost-mode expansion) opened three findings — SEC-12 (stored XSS), SEC-13
 > (player-name bounds), SEC-14 (validate/bound write inputs), all now fixed — see
 > "Part 4" below. A **third-pass audit** (2026-07, scoped to the newly-added
 > tournament mode plus a re-check of the SEC-12 "zero bare `escapeJs`" invariant)
-> opened **SEC-15** — see "Part 5" at the bottom. Functional-defect counterparts
-> live in `docs/bug-roadmap.md` (BUG-1/BUG-2/BUG-3 from the second pass; BUG-4/BUG-5
-> from the third).
+> opened **SEC-15** — see "Part 5". A **fourth-pass audit** (2026-07, a deliberate
+> breadth-first re-read of the *whole* codebase weighted evenly across every module
+> rather than the newest features — "make sure nothing slipped through the cracks")
+> opened **SEC-16** (SSRF egress-guard bypass) — see "Part 6" at the bottom.
+> Functional-defect counterparts live in `docs/bug-roadmap.md` (BUG-1/BUG-2/BUG-3
+> from the second pass; BUG-4/BUG-5 from the third; BUG-6/BUG-7 from the fourth).
 >
 > See the "Status" line
 > under each finding below for what actually shipped, which in a couple of places is
@@ -838,3 +840,101 @@ auditing the new endpoints doesn't mistake it for an oversight.
    third time.
 2. Then `docs/bug-roadmap.md` **BUG-4** (tournament advancement validation) and
    **BUG-5** (legs/sets bounds) — data-integrity hardening on the same feature.
+
+---
+
+## Part 6 — Fourth-pass audit (2026-07, whole-codebase breadth)
+
+A deliberate breadth-first re-read of the **entire** codebase, weighted evenly across
+every module rather than concentrated on the newest features — auth primitives,
+session/cookie handling, the SSRF egress guard, backup/restore, the CLI recovery
+script, every server route's gate and input validation, the stat/challenge/badge
+logic in `db.js`, the full-database export and the bulk-wipe operations, and the
+`display.html` untrusted-live-payload render path. Most surfaces re-confirmed safe and
+unchanged from earlier passes:
+
+- **auth.js** — 256-bit random session tokens, SHA-256 at rest, scrypt +
+  `timingSafeEqual` with a length guard, `HttpOnly`/`SameSite=Strict`/`Path=/` cookies
+  with a conditional `Secure`. `login()` pays a constant scrypt cost before any
+  lockout/existence branch (no timing oracle); `getSessionAdmin()` enforces expiry on
+  read. Sound.
+- **Session/admin management** — `deleteAdmin()` refuses to remove the last admin;
+  `changeAdminPassword()` invalidates all of that admin's sessions. Sound.
+- **backup-lib.js** — filenames validated against `BACKUP_NAME_RE` before any `fs`
+  call, magic-byte + `PRAGMA integrity_check` before staging a restore, WAL/SHM
+  cleanup. `download` sets `Content-Disposition` from a `path.basename` of an
+  already-validated name (no header injection). Sound.
+- **display.html** — every player name from the untrusted `/api/live` payload is
+  rendered through `escapeHtml`; the two `textContent` sinks are safe by construction.
+  No XSS via the live billboard.
+- **SQL** — re-confirmed parameterized throughout; `getMetricHistory`'s `metric` only
+  selects a `switch` branch (never interpolated), and its `tz`/`start`/`end`
+  interpolations are the already-validated integer/`YYYY-MM-DD` values (the
+  documented-safe items in Part 3).
+
+One new security finding (**SEC-16**), plus two functional-defect counterparts in
+`docs/bug-roadmap.md` (**BUG-6**, **BUG-7**) — all three are cross-cutting gaps where
+something added later wasn't wired into an existing whole-system mechanism, which is
+exactly the "nothing slips through the cracks" class this pass was looking for.
+
+### SEC-16 — SSRF egress guard doesn't block `0.0.0.0/8` or IPv6 `::`, re-opening the loopback pivot SEC-4 closed  **(MED)**
+
+**Status: ⛔ OPEN.**
+
+**Where:** `backend/netguard.js` `isLoopbackOrLinkLocal()`. The IPv4 branch blocks
+`127.0.0.0/8` (`o[0] === 127`) and `169.254.0.0/16`, but **not** `0.0.0.0/8`
+(`o[0] === 0`). The IPv6 branch blocks `::1` and `fe80::/10`, but **not** the
+unspecified address `::`. Verified empirically:
+
+```
+0.0.0.0            loopback/link-local-blocked: false
+0.0.0.1            loopback/link-local-blocked: false
+0.1.2.3            loopback/link-local-blocked: false
+::                 loopback/link-local-blocked: false
+255.255.255.255    loopback/link-local-blocked: false
+127.0.0.1 / ::1 / 169.254.169.254 / ::ffff:127.0.0.1 : correctly blocked
+```
+
+**Attack:** on Linux, connecting a client socket to `0.0.0.0` (or any `0.x.x.x`
+address in the `0.0.0.0/8` "this host on this network" block) reaches a service
+listening on the local host — the kernel treats `connect(0.0.0.0)` as loopback. IPv6
+`::` behaves the same way for a local IPv6 listener. So an admin-set (or, per SEC-4's
+threat model, a phished/coerced/settings-write-influenced) `ha_url` of
+`http://0.0.0.0:<port>/` or `http://[::]:<port>/` passes `resolveAllowedHost()` — the
+resolved address isn't in any blocked range — and `fireHaWebhook()` / `POST /api/ha-test`
+then connect straight to a loopback service. This is precisely the loopback probe SEC-4
+was written to prevent (`http://127.0.0.1:<port>` is blocked, but its `0.0.0.0`
+equivalent is not), so the SEC-4 defense is bypassable as written. `169.254.169.254`
+(cloud metadata) is still correctly blocked, so the highest-value metadata target is
+covered — this is the loopback/other-local-service angle of the same finding.
+
+**Fix (step by step):**
+1. In `isLoopbackOrLinkLocal()`'s IPv4 branch, add `if (o[0] === 0) return true;`
+   (blocks the whole `0.0.0.0/8` "this-network"/"this-host" range, of which `0.0.0.0`
+   itself is the reachable-as-loopback case).
+2. In the IPv6 branch, block the unspecified address: `if (norm === '::' || norm === '::0' || /^0*:0*:/.test(...)) return true;` — simplest is to normalize and check for the all-zeros address explicitly (and treat a `NaN` first-group from a leading `::` conservatively as blocked, since a leading-`::` form is either the unspecified address or an IPv4-mapped/compressed form that should be range-checked, not silently allowed).
+3. Defense-in-depth (same function, cheap): also block the IPv4 broadcast
+   `255.255.255.255` and the IPv4-mapped-IPv6 **hex** form of loopback
+   (`::ffff:7f00:1`), which the current dotted-quad-only regex
+   (`/^::ffff:(\d+\.\d+\.\d+\.\d+)$/`) doesn't catch — normalize IPv4-mapped addresses
+   to their embedded v4 before the range checks rather than relying on the dotted-quad
+   spelling.
+4. Add a committed `node:test` for `netguard.js` asserting `0.0.0.0`, `0.0.0.1`, `::`,
+   and `255.255.255.255` are all rejected by `resolveAllowedHost` (they resolve to
+   themselves as literals) and that legitimate LAN addresses (`192.168.x.x`) still pass
+   with `HA_BLOCK_PRIVATE` unset.
+
+**Verify:** set `ha_url` to `http://0.0.0.0:8046/` (the app's own port) and confirm
+`POST /api/ha-test` now refuses with the loopback/link-local error rather than
+connecting; confirm a normal LAN HA URL still works.
+
+## Suggested order for Part 6
+
+1. **SEC-16** (SSRF loopback bypass) — the one security finding; small, self-contained,
+   and it re-closes a defense (SEC-4) that's currently bypassable. Do it with the
+   `netguard.js` regression test so this range list has coverage going forward.
+2. Then `docs/bug-roadmap.md` **BUG-7** (bulk-wipe leaves orphaned tournament rows —
+   visible incorrectness after a destructive admin action) and **BUG-6** (JSON export
+   omits the tournament tables). Both are "new table not wired into an existing
+   whole-system operation" — worth fixing together and adding a standing checklist item
+   (see BUG-6's fix) so the next new table doesn't repeat it.
