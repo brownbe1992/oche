@@ -567,6 +567,10 @@ const server = http.createServer(async (req, res) => {
       const mode = url.searchParams.get('mode');
       return send(res, 200, db.getDartAnalytics(url.searchParams.get('name'), mode));
     }
+    if (p === '/api/players/coaching-insights' && m === 'GET') {
+      const mode = url.searchParams.get('mode');
+      return send(res, 200, db.getCoachingInsights(url.searchParams.get('name'), mode));
+    }
 
     if (p === '/api/players/avg-history' && m === 'GET') {
       const name = url.searchParams.get('name');

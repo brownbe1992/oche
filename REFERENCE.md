@@ -656,6 +656,45 @@ leaderboard/badge eligibility.
   checkout score, `LIMIT 5` — this is the "how do I usually hit this number"
   drill-down on the Top 10 Finishes list.
 
+### Coaching Insights (`getCoachingInsights(name, mode)`, `docs/archive/coaching-insights-roadmap.md`)
+
+X01 only (checkout-route and bust-parity insights are X01-specific concepts).
+`GET /api/players/coaching-insights?name=&mode=`. No new data collection — built
+entirely from `getDartAnalytics`, `getCheckoutRoutes`, and `getPersonalBests`. Every
+insight requires a large-enough sample to reflect a real pattern rather than noise
+("Strict" thresholds — the roadmap doc's own decision record); a wrong coaching
+insight actively misleads a player about their own game, a worse failure mode than a
+wrong descriptive stat. Returns an array of `{ type, tone, text }`, `tone` one of
+`'weakness'`/`'strength'` (rendered as an icon + text tag, never color alone — see
+§11 Accessibility):
+
+- **`weak_number`**: a number (1–20) whose treble rate sits **≥10 percentage points**
+  below the player's own overall treble rate (their own baseline, never a fixed
+  external benchmark), requiring **≥40 darts thrown at that number**. Up to 2
+  reported, worst first.
+- **`checkout_route`**: the player's most-used route for their single most-hit
+  checkout score (**≥10 uses** to qualify) takes more darts than
+  `checkoutHint()`'s (`frontend/scoring.js`) dart-count-optimal route for that same
+  score and the player's own out-mode.
+- **`bust_parity`**: double-out only (single-out has no such bias — any score
+  reaching exactly zero wins). Reconstructs the remaining score entering each turn
+  (starting score minus the running sum of this player's prior `scored` points in
+  that same leg, via a `SUM() OVER (PARTITION BY game_id,set_no,leg_no ORDER BY id
+  ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)` window — `turns` doesn't store
+  remaining directly), scoped to genuine X01 starting scores (501/301/170/101) and
+  the double-out `game_players.out_mode` used in that specific game. Turns where
+  that reconstructed remaining falls in `[2, 170]` are grouped by parity (odd/even);
+  each side needs **≥20 such attempts**. Flags whichever parity's bust rate is **≥15
+  percentage points** higher than the other's.
+- **`form_trend`**: plain-language wrapper around `getPersonalBests`'s existing
+  `recentFormAvg`/`lifetimeAvg` delta, shown only once the player has **≥20 lifetime
+  legs** (so the "last 10" window isn't simply most/all of their history) and the
+  delta is **≥5** in either direction.
+
+**Deferred to a future pass** (not built): a "Practice this" button pre-configuring a
+practice session targeting the flagged weakness — see the roadmap doc's decision
+record.
+
 ### Head-to-Head (`getH2HRecord()`, `getH2HSummary()`)
 
 `getH2HRecord(p1, p2)`: counts completed, non-practice games where both named

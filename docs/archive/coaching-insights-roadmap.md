@@ -1,7 +1,17 @@
 # Coaching Insights — Design Roadmap
 
-> Status: **not started**. This is a design doc for a future release, captured so the
-> thinking isn't lost. Nothing described here exists in the app yet.
+> **Archived** — fully shipped, kept here for design-rationale history. See
+> `docs/open-roadmap-items.md` for the live completion tracker across all roadmaps.
+
+> Status: **✅ Done**. All four candidate insights below are built:
+> `getCoachingInsights(name, mode)` in `backend/db.js`, `GET
+> /api/players/coaching-insights`, and a "Coaching Insights" section on the Player
+> Profile (X01 tab only) right after Personal Bests. Committed test coverage in
+> `backend/test/coaching-insights.test.js` (positive + below-threshold-negative case
+> per insight). Exact formulas/thresholds documented in `REFERENCE.md`'s "Coaching
+> Insights" subsection (§3). Both open questions below are resolved: **Strict**
+> sample thresholds (chosen over Moderate/Lenient), and the "Practice this" button
+> **deferred** — insights ship as plain descriptive text only in this pass.
 
 ## Goal
 
@@ -64,11 +74,13 @@ Not yet addressed anywhere in this doc, per `CLAUDE.md`'s standing conventions:
 - **Security**: no new credential/token surface — reads existing turn/dart data
   already scoped to the profile the viewer is already allowed to see.
 
-## Open questions for whoever picks this up
+## Open questions — resolved
 
-- How many turns/legs of data should be required before an insight is considered
-  statistically meaningful enough to show (avoiding a false "weakness" flagged from a
-  tiny sample)?
-- Should insights be purely descriptive text, or paired with a "Practice this" button
-  that pre-configures a Practice-mode session targeting the specific weakness (e.g.
-  starting score chosen to require the checkout route being practiced)?
+- **Sample-size threshold**: **Strict** was chosen over Moderate/Lenient — every
+  insight requires roughly double the initially-proposed "moderate" sample (40 darts
+  per number, 10 uses of a checkout score, 20 attempts per bust-parity side, 20
+  lifetime legs for form trend) before it's shown at all. See `REFERENCE.md` for the
+  exact numbers.
+- **"Practice this" button**: **deferred**, not built in this pass. Insights ship as
+  plain descriptive text only. A follow-up item could add a practice-session deep
+  link once the insight logic itself has been in real use for a while.

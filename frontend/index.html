@@ -281,6 +281,14 @@
   .da-count{font-family:'Bebas Neue';font-size:15px;color:var(--cream);flex:none;min-width:38px;text-align:right}
   .da-sub{font-size:10px;color:var(--muted);flex:none}
 
+  /* ---- coaching insights ---- */
+  /* Icon + text tag rather than a color-coded strip, so strength vs. focus-area
+     reads without relying on color alone (docs/accessibility-roadmap.md). */
+  .coaching-list{display:flex;flex-direction:column;gap:10px}
+  .coaching-row{display:flex;align-items:flex-start;gap:10px;font-size:12px;background:var(--surface-2);border-radius:8px;padding:8px 10px}
+  .coaching-tag{font-family:'Bebas Neue';font-size:11px;letter-spacing:.04em;text-transform:uppercase;flex:none;padding:2px 8px;border-radius:6px;background:var(--wire);color:var(--cream);white-space:nowrap}
+  .coaching-text{color:var(--cream);line-height:1.4}
+
   /* ---- practice leg stats panel ---- */
   .prac-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:20px;text-align:left}
   .prac-col{background:var(--surface);border:1px solid var(--wire);border-radius:12px;padding:14px 16px}
@@ -3406,6 +3414,10 @@ function renderPlayerPage(){
       <div class="pp-section-title">Personal Bests</div>
       <div id="player-personal-bests"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </div>
+    <div class="pp-section" id="coaching-section" hidden>
+      <div class="pp-section-title">Coaching Insights</div>
+      <div id="coaching-insights-body"></div>
+    </div>
     <div class="pp-section">
       <div class="pp-section-title">Badge Case</div>
       <div id="player-badges"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
@@ -3543,6 +3555,7 @@ function renderPlayerPage(){
   loadDartWeights();
   loadTopFinishes();
   loadDartAnalytics();
+  loadCoachingInsights();
   loadPersonalBests();
   loadPlayerBadges();
   loadAroundTheWorldProgress();
@@ -6589,6 +6602,31 @@ function renderDartAnalytics(data, container){
       <div class="pp-section-title" style="margin-bottom:8px">Top Checkout Routes</div>
       <div class="da-list">${routeRows || '<p class="pp-meta">No checkouts recorded yet.</p>'}</div>
     </div>`;
+}
+
+/* ---------- coaching insights (docs/coaching-insights-roadmap.md) ----------
+   X01 only for v1 — checkout-route/bust-parity insights are X01-specific
+   concepts, so the section stays hidden for every other game type. */
+function loadCoachingInsights(){
+  const section = document.getElementById('coaching-section');
+  const body = document.getElementById('coaching-insights-body');
+  if(!section || !body) return;
+  section.hidden = true;
+  if(playerGameType !== 'x01') return;
+  const modeParam = (playerPageTab==='h2h'||playerPageTab==='practice') ? `&mode=${playerPageTab}` : '';
+  Backend.get(`/api/players/coaching-insights?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
+    .then(insights => renderCoachingInsights(insights, section, body))
+    .catch(()=>{});
+}
+const COACHING_TAG = { weakness: '🔧 Focus area', strength: '✅ Good form' };
+function renderCoachingInsights(insights, section, body){
+  if(!Array.isArray(insights) || !insights.length){ section.hidden = true; return; }
+  section.hidden = false;
+  body.innerHTML = `<div class="coaching-list">${insights.map(i => `
+    <div class="coaching-row">
+      <span class="coaching-tag">${COACHING_TAG[i.tone] || i.tone}</span>
+      <span class="coaching-text">${escapeHtml(i.text)}</span>
+    </div>`).join('')}</div>`;
 }
 
 /* ---------- stats render ---------- */

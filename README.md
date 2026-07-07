@@ -487,6 +487,16 @@ A breakdown of how this player actually throws:
 - **Treble hit rate** — for each number 1–20, how often the treble bed is hit vs. any throw at that sector
 - **Checkout routes** — the most common dart sequences used on winning turns
 
+#### Coaching Insights
+
+X01 only. Plain-language practice guidance built entirely from the data above — no
+new tracking required. Each insight only appears once there's a large-enough sample
+to trust it: a weak number (treble rate well below your own overall rate), a
+checkout route that takes more darts than necessary for that score, a tendency to
+bust more often when left on an odd number vs. an even one (double-out only), or a
+notable recent-form swing vs. your lifetime average. See `REFERENCE.md` for the
+exact thresholds.
+
 #### Settings
 
 - **Dart weight** — 10g through 40g; stored per-game for chart filtering
@@ -801,6 +811,9 @@ GET  /api/players/checkout-route            Most-used routes for a specific chec
      ?name=&score=&mode=
 GET  /api/players/dart-analytics?name=&mode= Per-dart hit frequency, treble rates,
                                              and checkout route breakdown
+GET  /api/players/coaching-insights         X01-only plain-language practice guidance
+     ?name=&mode=                           (weak numbers, checkout-route inefficiency,
+                                             bust parity, form trend) — see REFERENCE.md
 GET  /api/players/h2h?p1=&p2=               Head-to-head record between two players
                                              (used by the New Game H2H banner)
 GET  /api/players/ghost-legs?name=&limit=   X01 legs this player has won, most recent
