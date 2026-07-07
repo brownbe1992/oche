@@ -181,6 +181,68 @@ db.exec(`
     UNIQUE(player_id, challenge_date)
   );
   CREATE INDEX IF NOT EXISTS idx_challenge_player_date ON daily_challenge_attempts(player_id, challenge_date);
+
+  -- Tournament mode (docs/tournament-mode-roadmap.md), single-elimination only —
+  -- built on top of the existing 1v1 scoring engine rather than a parallel system.
+  -- A tournament match IS a normal games row under the hood (tournament_matches.game_id),
+  -- so PINs, checkout hints, undo, live scoreboard, and all existing stats keep
+  -- working with zero changes to the scoring engine itself; this layer is purely
+  -- bracket orchestration on top. winner_next_match_id/slot and loser_next_match_id/
+  -- slot are the same pointer-pair design the roadmap doc uses to make single- and
+  -- double-elimination the same schema — a future double-elimination pass (tracked
+  -- separately, see docs/open-roadmap-items.md) can reuse this table set unchanged;
+  -- v1 only ever writes loser_next_match_id/slot as NULL.
+  CREATE TABLE IF NOT EXISTS tournaments (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL,
+    category      TEXT NOT NULL,   -- X01 starting score as a string: '501'|'301'|'170'|'101'
+    bracket_type  TEXT NOT NULL DEFAULT 'single_elim' CHECK (bracket_type IN ('single_elim','double_elim')),
+    player_count  INTEGER NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress','completed')),
+    champion_id   INTEGER REFERENCES players(id) ON DELETE SET NULL,
+    runner_up_id  INTEGER REFERENCES players(id) ON DELETE SET NULL,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at  TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS tournament_players (
+    tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+    player_id     INTEGER NOT NULL REFERENCES players(id)     ON DELETE CASCADE,
+    seed          INTEGER NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','eliminated','champion')),
+    PRIMARY KEY (tournament_id, player_id)
+  );
+
+  -- One row per round so each can carry its own format (e.g. Bo3 early rounds
+  -- stepping up to Bo5 in the final) — resolved and stored at bracket-creation
+  -- time, not looked up dynamically.
+  CREATE TABLE IF NOT EXISTS tournament_rounds (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+    bracket       TEXT NOT NULL DEFAULT 'winners' CHECK (bracket IN ('winners','losers','grand_final')),
+    round_no      INTEGER NOT NULL,
+    label         TEXT NOT NULL,   -- e.g. "Quarterfinal", "Final"
+    legs_per_set  INTEGER NOT NULL,
+    sets_per_game INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_tournament_rounds_tournament ON tournament_rounds(tournament_id);
+
+  CREATE TABLE IF NOT EXISTS tournament_matches (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    round_id             INTEGER NOT NULL REFERENCES tournament_rounds(id) ON DELETE CASCADE,
+    slot                 INTEGER NOT NULL,   -- 1-based position within the round
+    player1_id           INTEGER REFERENCES players(id) ON DELETE SET NULL,
+    player2_id           INTEGER REFERENCES players(id) ON DELETE SET NULL,
+    is_bye               INTEGER NOT NULL DEFAULT 0,
+    game_id              INTEGER REFERENCES games(id) ON DELETE SET NULL,
+    winner_id            INTEGER REFERENCES players(id) ON DELETE SET NULL,
+    winner_next_match_id INTEGER REFERENCES tournament_matches(id) ON DELETE SET NULL,
+    winner_next_slot     INTEGER,   -- 1 or 2 — which slot of winner_next_match_id the winner fills
+    loser_next_match_id  INTEGER REFERENCES tournament_matches(id) ON DELETE SET NULL,
+    loser_next_slot      INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_tournament_matches_round ON tournament_matches(round_id);
+  CREATE INDEX IF NOT EXISTS idx_tournament_matches_game  ON tournament_matches(game_id);
 `);
 
 // Column migrations for tables not recreated above — safe to re-run.
@@ -3047,6 +3109,274 @@ function getAroundTheWorldProgress(playerName) {
   return { hit: rows, count: rows.length, total: 63 };
 }
 
+/* ---------- tournament mode (docs/tournament-mode-roadmap.md, single-elim only) ----------
+   Seeding (random shuffle / manual reorder / by lifetime 3-dart average) all happens
+   client-side — `players` here is already the final seed order (index 0 = seed 1),
+   the same way createGame()'s `players` array order already determines throw order
+   with no server-side reordering. */
+const TOURNAMENT_X01_CATEGORIES = ['501', '301', '170', '101'];
+const TOURNAMENT_MAX_PLAYERS = 128;
+
+function _nextPowerOfTwo(n) { let p = 1; while (p < n) p *= 2; return p; }
+
+// Standard single-elimination bracket seeding order — recursively expands
+// [1,2] -> [1,4,2,3] -> [1,8,4,5,2,7,3,6] -> ..., pairing each existing seed s
+// against (size+1-s) at the next size up. Guarantees seed 1 and seed 2 can't meet
+// before the final, and (proven by induction on this construction) that byes —
+// which only ever occupy seed numbers > player count — never double up in a
+// single round-1 match as long as byes < bracketSize/2, which is always true
+// since bracketSize is the SMALLEST power of two >= player count.
+function _bracketSeedOrder(size) {
+  let order = [1, 2];
+  while (order.length < size) {
+    const s = order.length * 2;
+    const next = [];
+    for (const seed of order) { next.push(seed); next.push(s + 1 - seed); }
+    order = next;
+  }
+  return order;
+}
+
+function _roundLabel(roundsFromFinal, roundNo) {
+  if (roundsFromFinal === 0) return 'Final';
+  if (roundsFromFinal === 1) return 'Semifinal';
+  if (roundsFromFinal === 2) return 'Quarterfinal';
+  return `Round ${roundNo}`;
+}
+
+// Propagates a match's result: records the winner, marks the loser eliminated,
+// fills the winner into the next round's match/slot (or, if there is no next
+// match, completes the whole tournament). Called identically whether the result
+// came from a played game, an admin-recorded walkover, or a round-1 bye cascading
+// forward at generation time — advancement logic doesn't need to know which.
+function _advanceTournamentMatch(matchId, winnerId) {
+  const match = db.prepare('SELECT * FROM tournament_matches WHERE id = ?').get(matchId);
+  if (!match) return;
+  const loserId = winnerId === match.player1_id ? match.player2_id : match.player1_id;
+  db.prepare('UPDATE tournament_matches SET winner_id = ? WHERE id = ?').run(winnerId, matchId);
+  const tournamentId = db.prepare('SELECT tournament_id FROM tournament_rounds WHERE id = ?').get(match.round_id).tournament_id;
+  if (loserId != null) {
+    db.prepare(`UPDATE tournament_players SET status = 'eliminated' WHERE tournament_id = ? AND player_id = ?`)
+      .run(tournamentId, loserId);
+  }
+  if (match.winner_next_match_id) {
+    const col = match.winner_next_slot === 1 ? 'player1_id' : 'player2_id';
+    db.prepare(`UPDATE tournament_matches SET ${col} = ? WHERE id = ?`).run(winnerId, match.winner_next_match_id);
+  } else {
+    // No next match — this was the final. The whole tournament is decided.
+    db.prepare(`UPDATE tournaments SET status = 'completed', champion_id = ?, runner_up_id = ?, completed_at = datetime('now') WHERE id = ?`)
+      .run(winnerId, loserId, tournamentId);
+    db.prepare(`UPDATE tournament_players SET status = 'champion' WHERE tournament_id = ? AND player_id = ?`)
+      .run(tournamentId, winnerId);
+  }
+}
+
+// players: ordered array of names, index 0 = seed 1. rounds: [{legsPerSet,
+// setsPerGame}, ...], earliest round first — must have exactly as many entries
+// as the bracket has rounds (ceil(log2(next power of two >= player count))).
+function createTournament({ name, category, players, rounds }) {
+  name = String(name || '').trim();
+  if (!name) throw httpError(400, 'Tournament name is required');
+  if (name.length > 64) throw httpError(400, 'Tournament name must be 64 characters or fewer');
+  if (!TOURNAMENT_X01_CATEGORIES.includes(String(category))) throw httpError(400, 'category must be one of 501, 301, 170, or 101');
+  if (!Array.isArray(players) || players.length < 2) throw httpError(400, 'A tournament needs at least 2 players');
+  if (players.length > TOURNAMENT_MAX_PLAYERS) throw httpError(400, `A tournament supports at most ${TOURNAMENT_MAX_PLAYERS} players`);
+  const uniqueNames = new Set(players.map(n => String(n).trim().toLowerCase()));
+  if (uniqueNames.size !== players.length) throw httpError(400, 'Duplicate players are not allowed');
+
+  const bracketSize = _nextPowerOfTwo(players.length);
+  const roundCount = Math.log2(bracketSize);
+  if (!Array.isArray(rounds) || rounds.length !== roundCount) {
+    throw httpError(400, `rounds must have exactly ${roundCount} entries for ${players.length} players`);
+  }
+  const cleanRounds = rounds.map((r, i) => {
+    const legsPerSet = Number(r.legsPerSet), setsPerGame = Number(r.setsPerGame);
+    if (!Number.isInteger(legsPerSet) || legsPerSet < 1 || !Number.isInteger(setsPerGame) || setsPerGame < 1) {
+      throw httpError(400, `Round ${i + 1}: legsPerSet/setsPerGame must be positive integers`);
+    }
+    return { legsPerSet, setsPerGame };
+  });
+
+  const playerRows = players.map(n => ensurePlayer(n));
+
+  const tournamentId = Number(db.prepare(
+    'INSERT INTO tournaments (name, category, player_count) VALUES (?, ?, ?)'
+  ).run(name, String(category), playerRows.length).lastInsertRowid);
+
+  playerRows.forEach((p, i) => {
+    db.prepare('INSERT INTO tournament_players (tournament_id, player_id, seed) VALUES (?, ?, ?)')
+      .run(tournamentId, p.id, i + 1);
+  });
+
+  const roundIds = cleanRounds.map((r, i) => {
+    const roundNo = i + 1;
+    const label = _roundLabel(roundCount - roundNo, roundNo);
+    return Number(db.prepare(
+      'INSERT INTO tournament_rounds (tournament_id, round_no, label, legs_per_set, sets_per_game) VALUES (?, ?, ?, ?, ?)'
+    ).run(tournamentId, roundNo, label, r.legsPerSet, r.setsPerGame).lastInsertRowid);
+  });
+
+  // Build rounds LAST-to-FIRST so every match can point winner_next_match_id at
+  // an already-created row in the next round — the final's matches (no next
+  // match) are created first, round 1's matches (pointing at round 2) last.
+  const matchIdsByRound = new Array(roundCount);
+  for (let r = roundCount - 1; r >= 0; r--) {
+    const matchesInRound = bracketSize / Math.pow(2, r + 1);
+    const ids = [];
+    for (let slot = 0; slot < matchesInRound; slot++) {
+      let nextMatchId = null, nextSlot = null;
+      if (r < roundCount - 1) {
+        nextMatchId = matchIdsByRound[r + 1][Math.floor(slot / 2)];
+        nextSlot = (slot % 2) + 1;
+      }
+      const id = Number(db.prepare(
+        'INSERT INTO tournament_matches (round_id, slot, winner_next_match_id, winner_next_slot) VALUES (?, ?, ?, ?)'
+      ).run(roundIds[r], slot + 1, nextMatchId, nextSlot).lastInsertRowid);
+      ids.push(id);
+    }
+    matchIdsByRound[r] = ids;
+  }
+
+  // Fill round 1 from the seed order; a slot whose seed number exceeds the real
+  // player count has no player (a bye) — the other side auto-advances immediately.
+  const seedSlots = _bracketSeedOrder(bracketSize);
+  const seedToPlayerId = {};
+  playerRows.forEach((p, i) => { seedToPlayerId[i + 1] = p.id; });
+
+  const round1MatchIds = matchIdsByRound[0];
+  const byeAdvances = [];
+  for (let m = 0; m < round1MatchIds.length; m++) {
+    const playerA = seedToPlayerId[seedSlots[m * 2]] ?? null;
+    const playerB = seedToPlayerId[seedSlots[m * 2 + 1]] ?? null;
+    const isBye = (playerA == null) !== (playerB == null);
+    db.prepare('UPDATE tournament_matches SET player1_id = ?, player2_id = ?, is_bye = ? WHERE id = ?')
+      .run(playerA, playerB, isBye ? 1 : 0, round1MatchIds[m]);
+    if (isBye) byeAdvances.push([round1MatchIds[m], playerA ?? playerB]);
+  }
+  // Propagate byes after every round-1 row exists, so a round-2+ match fed by two
+  // separate round-1 byes ends up immediately "ready" (both real players known)
+  // without either bye needing to reference the other.
+  byeAdvances.forEach(([matchId, winnerId]) => _advanceTournamentMatch(matchId, winnerId));
+
+  return { tournamentId };
+}
+
+function listTournaments() {
+  return db.prepare(`
+    SELECT t.id, t.name, t.category, t.status, t.player_count, t.created_at, t.completed_at,
+           c.name AS champion_name
+    FROM tournaments t LEFT JOIN players c ON c.id = t.champion_id
+    ORDER BY t.created_at DESC
+  `).all();
+}
+
+function getTournament(id) {
+  const t = db.prepare(`
+    SELECT t.*, c.name AS champion_name, r.name AS runner_up_name
+    FROM tournaments t
+    LEFT JOIN players c ON c.id = t.champion_id
+    LEFT JOIN players r ON r.id = t.runner_up_id
+    WHERE t.id = ?
+  `).get(Number(id));
+  if (!t) return null;
+
+  const matches = db.prepare(`
+    SELECT m.id, m.round_id, m.slot, m.is_bye, m.game_id, m.winner_id,
+           m.winner_next_match_id, m.winner_next_slot,
+           r.round_no, r.label, r.legs_per_set AS legsPerSet, r.sets_per_game AS setsPerGame,
+           p1.name AS player1Name, p2.name AS player2Name, w.name AS winnerName
+    FROM tournament_matches m
+    JOIN tournament_rounds r ON r.id = m.round_id
+    LEFT JOIN players p1 ON p1.id = m.player1_id
+    LEFT JOIN players p2 ON p2.id = m.player2_id
+    LEFT JOIN players w  ON w.id  = m.winner_id
+    WHERE r.tournament_id = ?
+    ORDER BY r.round_no, m.slot
+  `).all(t.id).map(m => ({
+    ...m,
+    status: m.winner_id != null ? 'complete'
+      : (m.game_id != null ? 'in_progress'
+        : (m.player1Name != null && m.player2Name != null ? 'ready' : 'pending')),
+  }));
+
+  const players = db.prepare(`
+    SELECT tp.seed, tp.status, p.name
+    FROM tournament_players tp JOIN players p ON p.id = tp.player_id
+    WHERE tp.tournament_id = ? ORDER BY tp.seed
+  `).all(t.id);
+
+  return { ...t, matches, players };
+}
+
+// Starts the linked game for a "ready" match (both players known, not already
+// started or complete) — reuses createGame() exactly as a normal New Game H2H
+// match would, with the round's own configured category/legs/sets.
+function startTournamentMatch(matchId) {
+  const m = db.prepare(`
+    SELECT m.id, m.player1_id, m.player2_id, m.game_id, m.winner_id,
+           r.legs_per_set AS legsPerSet, r.sets_per_game AS setsPerGame, t.category
+    FROM tournament_matches m
+    JOIN tournament_rounds r ON r.id = m.round_id
+    JOIN tournaments t ON t.id = r.tournament_id
+    WHERE m.id = ?
+  `).get(Number(matchId));
+  if (!m) throw httpError(404, 'Match not found');
+  if (m.player1_id == null || m.player2_id == null) throw httpError(409, 'Match is not ready yet — both players are not yet known');
+  if (m.winner_id != null) throw httpError(409, 'Match is already complete');
+  if (m.game_id != null) throw httpError(409, 'This match already has a game in progress');
+  const p1 = db.prepare('SELECT name, out_mode FROM players WHERE id = ?').get(m.player1_id);
+  const p2 = db.prepare('SELECT name, out_mode FROM players WHERE id = ?').get(m.player2_id);
+  const { gameId } = createGame({
+    category: m.category, legsPerSet: m.legsPerSet, setsPerGame: m.setsPerGame, practice: 0,
+    players: [{ name: p1.name, out: p1.out_mode }, { name: p2.name, out: p2.out_mode }],
+  });
+  db.prepare('UPDATE tournament_matches SET game_id = ? WHERE id = ?').run(gameId, m.id);
+  return { gameId };
+}
+
+// Records a result without playing it out — covers both "this match was never
+// started" and "a game was started but abandoned mid-way" (the roadmap doc's
+// requirement that a tournament match can't just be left as a plain unfinished
+// game): allowed any time winner_id is still null, regardless of game_id.
+function recordWalkover(matchId, winnerName) {
+  const m = db.prepare('SELECT * FROM tournament_matches WHERE id = ?').get(Number(matchId));
+  if (!m) throw httpError(404, 'Match not found');
+  if (m.player1_id == null || m.player2_id == null) throw httpError(409, 'Match is not ready yet — both players are not yet known');
+  if (m.winner_id != null) throw httpError(409, 'Match is already complete');
+  const w = getPlayer(winnerName);
+  if (!w || (w.id !== m.player1_id && w.id !== m.player2_id)) throw httpError(400, "winner must be one of this match's two players");
+  _advanceTournamentMatch(m.id, w.id);
+  return { ok: true };
+}
+
+// Hook: when ANY game completes, check whether it's linked to a tournament match
+// and advance the bracket if so — this is the one piece of "tournament mode"
+// logic that lives outside this section, registered here rather than editing
+// completeGame() directly (docs/archive/existing-app-prep-roadmap.md item 4).
+onGameCompleted(({ gameId, winnerName }) => {
+  if (!winnerName) return;
+  const m = db.prepare('SELECT id FROM tournament_matches WHERE game_id = ?').get(gameId);
+  if (!m) return;
+  const w = getPlayer(winnerName);
+  if (!w) return;
+  _advanceTournamentMatch(m.id, w.id);
+});
+
+// Player-deletion guard (docs/archive/existing-app-prep-roadmap.md item 6): block
+// deleting a player who's still 'active' in an in-progress tournament — the
+// bracket depends on that player's future matches existing to advance correctly.
+// A player already eliminated, or a completed tournament, is safe to delete from
+// (loses only that historical name, same tradeoff already accepted elsewhere —
+// e.g. games.winner_id ON DELETE SET NULL).
+registerDeletePlayerGuard((player) => {
+  const row = db.prepare(`
+    SELECT t.name FROM tournament_players tp
+    JOIN tournaments t ON t.id = tp.tournament_id
+    WHERE tp.player_id = ? AND tp.status = 'active' AND t.status = 'in_progress'
+  `).get(player.id);
+  return row ? `${player.name} is still active in the in-progress tournament "${row.name}" — eliminate them or finish the tournament before deleting.` : null;
+});
+
 /* ---------- helpers ---------- */
 function httpError(status, message) {
   const e = new Error(message); e.status = status; return e;
@@ -3079,5 +3409,6 @@ module.exports = {
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,
   awardBadge, revokeBadge, getPlayerBadges, getH2HSummary, getAroundTheWorldProgress,
   startChallengeAttempt, completeChallengeAttempt, getChallengeStatus, getChallengeHistory, resetChallengeAttempt,
+  createTournament, listTournaments, getTournament, startTournamentMatch, recordWalkover,
   _db: db,
 };

@@ -28,6 +28,7 @@ You enter every dart individually — multiplier first, then the number — and 
   - [Live Scoreboard](#live-scoreboard)
   - [Players](#players)
   - [Player Profile](#player-profile)
+  - [Tournaments](#tournaments)
   - [Stats](#stats)
   - [Settings](#settings)
 - [Admin Accounts & Player PINs](#admin-accounts--player-pins)
@@ -504,6 +505,41 @@ exact thresholds.
 
 ---
 
+### Tournaments
+
+Single-elimination brackets, any X01 format (501/301/170/101) — built on top of the
+existing scoring engine, not a parallel one: a tournament match is a normal H2H game
+under the hood, so PINs, checkout hints, undo, the live scoreboard, and every stat
+keep working exactly as they do outside a tournament.
+
+**Creating a bracket** — from the **Tournaments** nav button: name it, pick an X01
+format, check off who's playing, choose a seeding method, then set the match format
+(legs/sets) for each round before generating:
+
+- **Random** — a shuffle of the selected players, same as the New Game screen's own 🔀 Shuffle.
+- **Manual order** — reorder the selected players yourself (▲/▼) before generating.
+- **By 3-dart average** — seeds by each player's existing lifetime average, best first; a player with no recorded legs yet is seeded last rather than treated as a last-place average.
+
+Any player count works — the bracket pads to the next power of two with byes,
+which auto-advance immediately (including cascading: a later round can already be
+fully set once two separate byes have resolved into it, with neither of those
+first-round "matches" ever actually played).
+
+**Playing it out** — the bracket screen has an **Up Next** list of every match
+that's ready to play, each with a **Start** button that drops straight into the
+normal scoring screen for those two players, and a **Walkover** button for
+recording a result without playing it out (also the recovery path if a match was
+started and abandoned via End Game — tournament matches can't just be left
+unfinished, since the bracket depends on a real result to advance). A visual
+bracket tree shows the whole tournament at a glance, with a linearized list view
+underneath it for anyone who'd rather read than scan the tree. The champion and
+runner-up are shown once the final resolves.
+
+**Double-elimination isn't built** — single-elimination only for now; see
+`REFERENCE.md` for the deferred design.
+
+---
+
 ### Stats
 
 A summary table of all players showing:
@@ -914,6 +950,40 @@ POST /api/games/:id/events                  Record a timeline event
                                                       "set_start"|"set_end"|
                                                       "game_start"|"game_end",
                                                setNo, legNo }
+```
+
+### Tournaments
+
+Single-elimination only (see [Tournaments](#tournaments) below and `REFERENCE.md` §15
+for double-elimination's deferred status). A tournament match is a normal H2H game
+under the hood — everything above (turns/complete/events) applies to it unchanged
+once started.
+
+```
+GET  /api/tournaments                       List tournaments (summary shape),
+                                             most recent first
+POST /api/tournaments                       Create a bracket
+                                             { name, category: "501"|"301"|"170"|"101",
+                                               players: [name, ...] (already seed-ordered,
+                                                 index 0 = seed 1 — seeding itself is a
+                                                 client-side concern, see REFERENCE.md §15),
+                                               rounds: [{ legsPerSet, setsPerGame }, ...]
+                                                 (one entry per round, earliest first) }
+                                             → { tournamentId }
+GET  /api/tournaments/:id                   Full bracket detail — tournament row,
+                                             every round/match (with resolved player
+                                             names and a derived status per match:
+                                             pending|ready|in_progress|complete), and
+                                             the seeded player list with each one's
+                                             active|eliminated|champion status
+POST /api/tournaments/matches/:id/start     Start a ready match's game (creates a
+                                             normal game via the round's own format)
+                                             → { gameId }
+POST /api/tournaments/matches/:id/walkover  Record a result without playing it out
+                                             { winner: name } — allowed any time the
+                                             match doesn't already have a winner,
+                                             including recovering an abandoned
+                                             mid-game match
 ```
 
 ### Live Scoreboard

@@ -1,7 +1,16 @@
 # Tournament Mode — Design Roadmap
 
-> Status: **not started**. This is a design doc for a future release, captured so the
-> thinking isn't lost. Nothing described here exists in the app yet.
+> Status (2026-07): **Single-elimination is fully built and playable end-to-end** —
+> schema (`tournaments`/`tournament_players`/`tournament_rounds`/`tournament_matches`),
+> bracket generation (arbitrary player counts, standard seeding placement, cascading
+> byes), match lifecycle (start/advance/walkover via the existing `onGameCompleted`
+> hook), a New Game-adjacent setup screen (name/category/player-select/seeding/
+> per-round format), a bracket-tree + "Up Next" view, live-scoreboard round labels, and
+> the player-deletion guard. **Double-elimination is explicitly deferred** — not
+> started, tracked as its own item on `docs/open-roadmap-items.md` — the schema's
+> `winner_next_*`/`loser_next_*` pointer-pair design (§1 below) already supports it
+> without a migration, so this doc stays open (not archived) until that item ships
+> too. Full mechanics writeup: `REFERENCE.md` §15.
 
 > **Related (2026-07)**: `docs/companion-website-roadmap.md` proposes cross-instance
 > tournaments run through a project-operated site. This doc's bracket-generation logic
@@ -24,9 +33,11 @@ for them:
 
 | Decision | Choice |
 |---|---|
-| Bracket format | Single-elimination **and** double-elimination |
-| Match format across rounds | Per-round configurable (e.g. Bo3 early rounds, Bo5/Bo7 later) |
-| Bracket visualization | Full visual bracket tree (not just a round-by-round list) |
+| Bracket format | ~~Single-elimination **and** double-elimination~~ **Revised (2026-07, explicit build decision): single-elimination only.** Double-elimination deferred to its own future item — see the status header above. |
+| Category scope | **Built.** Any X01 starting score (501/301/170/101) — the whole tournament uses one, chosen at setup. Not scoped to other game types (Cricket, etc.). |
+| Match format across rounds | **Built.** Per-round configurable (legs/sets per round), same as originally decided — the setup screen pre-fills Bo3 early rounds stepping to Bo5 in the final, editable per round before generating. |
+| Bracket visualization | **Built**, but simpler than "full visual bracket tree" implied — single-elimination's tree is one column per round (no winners/losers split to manage), not a procedurally-generated SVG. A linearized list view sits alongside it for accessibility. |
+| Seeding | **Built.** Three methods, all client-side: random shuffle, manual reorder, or by existing lifetime 3-dart average (best first, no-data-yet sorts last). See REFERENCE.md §15. |
 
 ## 1. Data model
 
@@ -34,7 +45,11 @@ New tables, additive to the existing schema — no changes needed to `games`,
 `game_players`, `turns`, or `darts`.
 
 **`tournaments`**
-`id, name, category, bracket_type ('single_elim'|'double_elim'), player_count, status ('seeding'|'in_progress'|'completed'), champion_id, runner_up_id, created_at, completed_at`
+`id, name, category, bracket_type ('single_elim'|'double_elim'), player_count, status ('in_progress'|'completed'), champion_id, runner_up_id, created_at, completed_at`
+
+(Built with just `'in_progress'`/`'completed'`, no separate `'seeding'` state —
+bracket generation is one synchronous call, `createTournament()`, so there's no
+partially-set-up tournament to represent a third status for.)
 
 **`tournament_players`**
 `tournament_id, player_id, seed, status ('active'|'eliminated'|'champion')`
@@ -46,7 +61,11 @@ Resolved at bracket-creation time and stored on the row — not looked up dynami
 so changing the default format logic later never requires a migration.
 
 **`tournament_matches`** — the core structure:
-`id, round_id, slot, player1_id, player2_id, is_bye, game_id, winner_id, winner_next_match_id, winner_next_slot, loser_next_match_id, loser_next_slot, status`
+`id, round_id, slot, player1_id, player2_id, is_bye, game_id, winner_id, winner_next_match_id, winner_next_slot, loser_next_match_id, loser_next_slot`
+
+(Built without a stored `status` column — `pending`/`ready`/`in_progress`/`complete`
+is derived at read time from the other columns instead, matching the rest of the
+schema's "nothing pre-aggregated" philosophy.)
 
 The `winner_next_*` / `loser_next_*` pointer pair is the key design choice: it makes
 single- and double-elimination *the same schema*. A single-elim match always has
@@ -55,6 +74,11 @@ double-elim points its loser into a losers-bracket match instead of null. No
 format-specific tables needed.
 
 ## 2. The hard part: double-elimination bracket generation
+
+**Not built — deferred, see the status header above.** Single-elimination's own
+generation (arbitrary player count, standard seeding placement, cascading byes) is
+built and tested; everything in this section is still exactly as originally scoped,
+unstarted, for whoever picks up double-elimination next.
 
 Flagging this clearly — it's the highest-risk piece of the whole feature.
 
@@ -83,6 +107,10 @@ well-understood.
 
 ## 3. Match lifecycle
 
+**Built, exactly as described below** (single-elim: step 4's "propagates the loser
+into `loser_next_match_id`/slot (double-elim)" branch doesn't exist yet — a loser is
+always just marked eliminated). See `REFERENCE.md` §15 for the exact function names.
+
 1. Tournament created → bracket generated → all `tournament_matches` rows exist
    upfront (most with `player1_id`/`player2_id` null until earlier matches resolve),
    with byes auto-resolved immediately (cascading where needed).
@@ -102,83 +130,100 @@ well-understood.
 **Abandoning a match mid-way** needs a firm rule since the bracket depends on a
 definite result: disallow a plain "End game" for tournament matches and require either
 finishing it or recording an explicit walkover/forfeit (admin picks a winner without
-playing it out).
+playing it out). **Built**: `askEndGame()` refuses the normal abandon flow for a
+tournament match and sends the admin back to the bracket instead; `recordWalkover()`
+is allowed regardless of whether the match's game was ever started, so it recovers an
+abandoned mid-game match too, not just a never-started one.
 
 ## 4. UI/UX
 
-**Setup screen** (new — doesn't fit the existing 2-player-centric New Game flow):
-tournament name, category, bracket type, player selection (needs a scalable
-multi-select for up to 128 — a searchable checklist with a running count, "select
-all," and manual seed reordering, not the current one-slot-at-a-time picker), then a
-per-round format table (pre-filled with sensible defaults — e.g. Bo3 early rounds
-stepping up to Bo5/Bo7 — that the admin can override per round) before generating the
-bracket.
+**Setup screen** — **built**, though simpler than "up to 128 players" implied: a
+checkbox list rather than a searchable virtualized picker (a household's player
+roster is realistically tens of names, not hundreds), the three seeding methods from
+the Decisions table above, and the per-round format table with editable legs/sets
+per round before generating.
 
-**Bracket view**: render it the same way the interactive dartboard already is —
-procedurally generated SVG/positioned-div layout from data (the codebase already has
-this pattern in `buildDartboard()`). Given the scale (winners + losers brackets, up to
-~19 rounds combined for 128 players), split it into two scrollable/zoomable panels —
-**Winners** and **Losers** as a tab switcher — rather than one enormous combined
-canvas, with the Grand Final shown as a connecting element between them. This mirrors
-how most bracket tools (Challonge, etc.) handle double-elim at scale.
+**Bracket view** — **built**, but as a plain flex column per round (`.tourney-bracket`
+in `frontend/index.html`) rather than a procedurally-generated SVG — single-
+elimination has no winners/losers split to render, so the "two scrollable panels
+with a tab switcher" design below is double-elimination-specific and still unbuilt.
 
-**"Up Next" list**: tapping a specific match node in a zoomed-out 128-player tree is a
-poor way to *start* a match. Add a simple list of just the matches currently ready to
-play, across both brackets, as the actual entry point for launching a game — the tree
-serves as the "view standings/progress" screen, not the primary interaction surface.
+**"Up Next" list** — **built**, exactly as described: the actual entry point for
+starting a match, listing every `ready` match (plus any `in_progress` one, for a
+Walkover-only recovery action) across the single bracket.
 
-**During/after a match**: unchanged scoring screen and live scoreboard. Add the round
-label (e.g. "Losers Round 3 · Match 2") to the live snapshot so `/display` can show
-tournament context in the top bar — small addition to the existing `gameType`-style
-snapshot fields (see `frontend/display.html`'s `renderers` dispatch table).
+**During/after a match** — **built**: the round label
+(`game.tournamentRoundLabel`, e.g. `"Final"`) feeds `liveSnapshot()` and is prefixed
+onto `/display`'s existing top-bar text by `fmtText()`. Simpler than the
+`"Losers Round 3 · Match 2"` example above since there's only one bracket to label.
 
 ## 5. Integration points (no changes needed)
+
+**Built exactly as scoped** — nothing in this section needed a single change to
+`games`/`turns`/`darts` or the scoring engine:
 
 - **Stats**: tournament matches record as normal H2H games (`practice=0`), so they
   automatically count toward existing averages, win rates, H2H records, etc.
 - **PINs, per-player finish rules, checkout hints, achievements**: all work unmodified
-  since it's the same `game` object under the hood.
-- **Player deletion mid-tournament**: needs a guard — block deleting a player who's
-  `active` in an in-progress tournament, similar in spirit to the orphaned-game
-  cleanup already built for regular player deletion (`db.js`'s `pruneOrphanedGames`).
+  since it's the same `game` object under the hood. (PINs needed one small addition
+  not originally anticipated here: `beginTournamentMatch()` re-applies the New Game
+  screen's own `withPinCheck()` gate, since a tournament match has no per-slot picker
+  of its own to have applied it already — see `REFERENCE.md` §15.)
+- **Player deletion mid-tournament**: **built** — a guard blocks deleting a player
+  who's `active` in an in-progress tournament, registered via the existing
+  `registerDeletePlayerGuard` extensibility point (`docs/archive/existing-app-prep-roadmap.md`
+  item 6) exactly as anticipated here.
 
 ## 6. Suggested build order
 
-Given the scope, sequence this rather than build it all at once:
-
-1. Schema + single-elimination generation/advancement + "Up Next" list UI (no tree
-   yet) — proves out the game-linking and advancement-propagation logic on the simpler
-   bracket shape.
-2. Losers bracket + grand final/reset logic layered on top of the same schema.
-3. Visual bracket tree rendering (winners/losers tabs).
-4. Per-round format setup UI polish, seeding UI polish, tournament stats on player
-   profiles (stretch — e.g. tournament wins / best finish on the player profile page).
+1. **✅ Done — Schema + single-elimination generation/advancement + "Up Next" list UI**
+   (no tree yet at this step) — proved out the game-linking and
+   advancement-propagation logic on the simpler bracket shape. Shipped with the
+   bracket tree too (simple enough for single-elim that it wasn't worth a separate
+   step) plus the full setup screen, walkover, and PIN gate — see the status header.
+2. **Not started** — Losers bracket + grand final/reset logic layered on top of the
+   same schema (double-elimination).
+3. **Not started** — Visual bracket tree rendering with winners/losers tabs
+   (double-elimination's version of the tree — single-elim's simpler tree is done).
+4. **Partially done** — Per-round format setup UI: done. Seeding UI: done (three
+   methods, see the Decisions table). Tournament stats on player profiles (stretch):
+   not built.
 
 ## Accessibility, security, and testing considerations
 
 Per `CLAUDE.md`'s standing conventions, these need designing in alongside the
 feature, not bolted on after:
 
-- **Accessibility**: the bracket tree is a highly visual, spatial UI (up to ~19
-  rounds for 128 players) with no non-visual equivalent designed here yet — a
-  screen-reader user needs some linearized "who plays whom next, and what's the
-  current state of my side of the bracket" view, not just the tree. The multi-select
-  seeding UI also needs keyboard/focus-order treatment per
-  `docs/accessibility-roadmap.md`'s standing checklist.
-- **Testing**: the double-elimination bracket generator is the piece this doc itself
-  calls out as "genuinely fiddly" and the highest-risk part of the whole feature —
-  it's also pure, deterministic logic (seed list in, bracket structure out), exactly
-  the kind of core logic `docs/testing-and-observability-roadmap.md` says new
-  features should get real test coverage for as it's built, not verify by hand.
+- **Accessibility**: **built** for single-elim's bracket tree — a linearized
+  "Full bracket (list view)" text list sits alongside the tree (a `<details>`
+  element, not hidden away), plus the "Up Next" list above both, so a screen-reader
+  user has two non-spatial ways to follow the tournament, not just the tree. Match
+  status is always icon + text (`TOURNEY_STATUS_ICON`/`TOURNEY_STATUS_LABEL`), never
+  color alone. **Still open**: double-elimination's much deeper tree (up to ~19
+  rounds combined for 128 players) will need this revisited at that scale — the
+  simple list-view approach may not stay ergonomic that large.
+- **Testing**: **built** for single-elimination — `backend/test/tournament.test.js`
+  covers bracket generation across several player counts (including the 5-player
+  bye-cascade case), a full simulated tournament to champion, walkover parity with a
+  played match, validation, and the player-deletion guard. The double-elimination
+  bracket generator remains the piece this doc itself calls out as "genuinely
+  fiddly" and the highest-risk part of the whole feature — still needs the same
+  level of test coverage once it's built.
 - **Security**: no new credential/token surface, so no write-only-handling or
   brute-force question here — tournament data reuses the existing `games`/admin-auth
   model unchanged.
 
-## Open questions for whoever picks this up
+## Open questions — resolved (single-elimination) / still open (double-elimination)
 
-- Seeding method: random draw (matches the app's existing "Shuffle" feature) vs. admin
-  manually orders seeds vs. standard tournament seeding math (1 vs N, 2 vs N-1, ...)?
-- Exact power-of-two requirement for double-elim (see §2) — acceptable, or is
-  arbitrary-count support with cascading byes worth the complexity?
-- Should tournament matches be tied to a specific dart board / device, or can any
-  device pick up the next "Up Next" match?
+- **Resolved**: seeding method — built all three (random shuffle, manual reorder, by
+  lifetime 3-dart average) rather than picking just one, since each is genuinely
+  useful for a different situation and none was clearly better on its own.
+- **Still open**: exact power-of-two requirement for double-elim (see §2) —
+  acceptable, or is arbitrary-count support with cascading byes worth the
+  complexity? Single-elimination's own bye-cascading (arbitrary counts, no
+  power-of-two requirement) is built and proven, so this is purely a
+  double-elimination-specific question now.
+- **Still open**: should tournament matches be tied to a specific dart board /
+  device, or can any device pick up the next "Up Next" match? Not addressed either
+  way in this pass — any device with the app open can start any ready match today,
+  which is the simpler default behavior, not a deliberate design statement.

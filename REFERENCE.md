@@ -36,8 +36,9 @@ convention in `CLAUDE.md`.
 - [12. Backups](#12-backups)
 - [13. Database Schema](#13-database-schema)
 - [14. API Reference](#14-api-reference)
-- [15. Known Limitations & Open Gaps](#15-known-limitations--open-gaps)
-- [16. Troubleshooting](#16-troubleshooting)
+- [15. Tournament Mode](#15-tournament-mode)
+- [16. Known Limitations & Open Gaps](#16-known-limitations--open-gaps)
+- [17. Troubleshooting](#17-troubleshooting)
 
 ---
 
@@ -126,23 +127,22 @@ oche/
   `{gameId, gameType, practice, category, playerCount}`; `completed` payload:
   `{gameId, winnerName}`). A throwing listener is caught and logged, not
   rethrown, so a broken future feature can't take down game creation/completion
-  itself. Pure infrastructure today — no listeners are registered — meant for
-  the next feature that needs to react to a game starting/finishing (HA
-  polling, tournament bracket advancement, league standings) without editing
-  these two core functions again. Does not touch the existing client-side
-  achievement checks (`frontend/index.html`'s `enterTurn()`/`onLegWon()`), a
-  different layer entirely.
+  itself. Does not touch the existing client-side achievement checks
+  (`frontend/index.html`'s `enterTurn()`/`onLegWon()`), a different layer
+  entirely. **First real consumer (2026-07): tournament mode** (§15) registers
+  an `onGameCompleted` listener that checks whether the finished game is linked
+  to a `tournament_matches` row and advances the bracket if so — exactly the
+  "tournament bracket advancement" use case this was built ahead of.
 - **Player-deletion guard extensibility** (`backend/db.js`,
   `docs/archive/existing-app-prep-roadmap.md` item 6): mirrors the game-lifecycle hook
   pattern above. `registerDeletePlayerGuard(fn)` registers a check function that
   receives the player row and returns either a non-empty string (the reason to
   block the delete) or a falsy value (no objection); `deletePlayer()` consults
   every registered guard before deleting and throws a 409 with the first
-  blocking reason it finds. No guards are registered today — pure infrastructure
-  ahead of the next feature that needs to *block* deletion of an actively-
-  referenced player (a mid-tournament competitor, a mid-season league player)
-  rather than just cleaning up after it, the way orphaned-game pruning already
-  does.
+  blocking reason it finds. **First real consumer (2026-07): tournament mode**
+  (§15) registers a guard blocking deletion of a player who's still `active` in
+  an in-progress tournament — exactly the "mid-tournament competitor" case this
+  was built ahead of.
 - **Server error log** (`backend/db.js`'s `server_errors` table,
   `docs/testing-and-observability-roadmap.md` Part A): `server.js`'s top-level
   `catch` calls `db.logServerError({method, path, status, message})` alongside
@@ -1451,12 +1451,17 @@ session darts/trebles plus a live `heatmap` array and `sessionAvg` via
 darts, checkout hint (X01 only — always empty for Cricket), status,
 `pendingAchievement` (§5), one-shot fields (`lastTurnEvent`, `matchResult`,
 `legStart` — cleared immediately after each push, so they only ever announce
-once), and a `checkoutTarget` for voice announcements. `ALLOWED_LIVE_KEYS` on
-the server allow-lists exactly these top-level fields (not the per-player
-shape inside `players`, which is how Cricket's differently-shaped player
-objects — and Chuckin's `heatmap`/`sessionAvg` — pass through unchanged) —
-anything else in a `POST /api/live` body is silently dropped (413 if the
-sanitized payload still exceeds 64KB).
+once), a `checkoutTarget` for voice announcements, and (tournament matches
+only, §15) `tournamentRoundLabel`. `ALLOWED_LIVE_KEYS` on the server
+allow-lists exactly these top-level fields (not the per-player shape inside
+`players`, which is how Cricket's differently-shaped player objects — and
+Chuckin's `heatmap`/`sessionAvg` — pass through unchanged) — anything else in
+a `POST /api/live` body is silently dropped (413 if the sanitized payload
+still exceeds 64KB). **Adding any new top-level `liveSnapshot()` field must add
+it to `ALLOWED_LIVE_KEYS` in the same change** — `tournamentRoundLabel` itself
+was initially missed here during development and silently dropped by the
+allow-list until caught in end-to-end testing, exactly the failure mode this
+note now exists to prevent happening again.
 
 Cricket's live scoreboard (`renderers.cricket.scorecard()` in `display.html`,
 mirrored by `renderGameCricket()` on the controller in `frontend/index.html`)
@@ -2016,6 +2021,56 @@ already-migrated database is a safe no-op).
 | `completed` | `INTEGER NOT NULL DEFAULT 0` | |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 
+### Tournament mode (`docs/tournament-mode-roadmap.md`, single-elimination only — see §15)
+
+**`tournaments`**
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `name` | `TEXT NOT NULL` | |
+| `category` | `TEXT NOT NULL` | X01 starting score as a string: `'501'`\|`'301'`\|`'170'`\|`'101'` — every match in the tournament uses this same format |
+| `bracket_type` | `TEXT NOT NULL DEFAULT 'single_elim' CHECK (IN ('single_elim','double_elim'))` | Always `'single_elim'` today — the column exists so a future double-elimination pass (tracked separately, not yet started) needs no migration |
+| `player_count` | `INTEGER NOT NULL` | Frozen at creation |
+| `status` | `TEXT NOT NULL DEFAULT 'in_progress' CHECK (IN ('in_progress','completed'))` | |
+| `champion_id` / `runner_up_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | Set together, atomically, the instant the final resolves |
+| `created_at` / `completed_at` | `TEXT` | |
+
+**`tournament_players`** (`PRIMARY KEY (tournament_id, player_id)`)
+| Column | Type | Notes |
+|---|---|---|
+| `tournament_id` | `INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE` | |
+| `player_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | |
+| `seed` | `INTEGER NOT NULL` | 1 = best seed; the order `players` was submitted in at creation (already seeded client-side — see §15) |
+| `status` | `TEXT NOT NULL DEFAULT 'active' CHECK (IN ('active','eliminated','champion'))` | Read by the player-deletion guard (§1, §15) |
+
+**`tournament_rounds`** — one row per round, so each carries its own format
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `tournament_id` | `INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE` | |
+| `bracket` | `TEXT NOT NULL DEFAULT 'winners' CHECK (IN ('winners','losers','grand_final'))` | Always `'winners'` today (no losers bracket in single-elim) |
+| `round_no` | `INTEGER NOT NULL` | 1-based, earliest round first |
+| `label` | `TEXT NOT NULL` | `"Quarterfinal"`/`"Semifinal"`/`"Final"`/`"Round N"` — computed once at creation, not looked up dynamically (see §15) |
+| `legs_per_set` / `sets_per_game` | `INTEGER NOT NULL` | This round's own match format |
+
+**`tournament_matches`** — the core bracket structure
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `round_id` | `INTEGER NOT NULL REFERENCES tournament_rounds(id) ON DELETE CASCADE` | |
+| `slot` | `INTEGER NOT NULL` | 1-based position within the round |
+| `player1_id` / `player2_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | `NULL` until known — either seeded directly (round 1) or filled by a prior match's winner propagating in |
+| `is_bye` | `INTEGER NOT NULL DEFAULT 0` | Round-1 only — set when the bracket size exceeds the real player count (see §15) |
+| `game_id` | `INTEGER REFERENCES games(id) ON DELETE SET NULL` | The normal `games` row this match's play created — `NULL` until started, stays `NULL` forever for a walkover |
+| `winner_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | Set once, never changed |
+| `winner_next_match_id` / `winner_next_slot` | `INTEGER` / `INTEGER (1 or 2)` | Where the winner advances to |
+| `loser_next_match_id` / `loser_next_slot` | `INTEGER` / `INTEGER` | Always `NULL` in v1 (single-elim has no losers bracket) — reserved for a future double-elimination pass, per the roadmap doc's original schema design |
+
+A match's **status** (`pending`/`ready`/`in_progress`/`complete`) is derived at read
+time by `getTournament()`, never stored: `winner_id` set → `complete`; else `game_id`
+set → `in_progress`; else both player slots filled → `ready`; else `pending`. Same
+"compute from raw data" philosophy as the rest of the schema (§1).
+
 ### `settings` (key/value)
 `key TEXT PRIMARY KEY`, `value TEXT NOT NULL DEFAULT ''` (booleans stored as
 `'1'`/`'0'`). Known keys: `collect_dart_timing`, `colorblind_mode`,
@@ -2053,9 +2108,17 @@ already-migrated database is a safe no-op).
 ### Cascade summary
 
 Deleting a `player` cascades: their `game_players` rows, `turns` (and
-transitively their `darts`), `player_badges`, and `daily_challenge_attempts`.
-`deletePlayer()` then prunes any `games` row left with zero remaining
-`game_players` (also run once at boot to self-heal older databases).
+transitively their `darts`), `player_badges`, `daily_challenge_attempts`, and
+`tournament_players`. `deletePlayer()` then prunes any `games` row left with
+zero remaining `game_players` (also run once at boot to self-heal older
+databases). Any `tournament_matches`/`tournaments` row referencing the deleted
+player (`player1_id`/`player2_id`/`winner_id`/`champion_id`/`runner_up_id`)
+sets that column to `NULL` rather than cascading — the bracket's shape and
+results stay intact, only the departed player's name is lost from it (the same
+tradeoff already accepted for `games.winner_id`). The player-deletion guard
+(§1, §15) blocks this entirely while the player is still `active` in an
+in-progress tournament, so this SET NULL path only ever fires for an already-
+eliminated player or a completed tournament.
 
 ---
 
@@ -2080,7 +2143,132 @@ hard connection caps, not a `rateLimit()` bucket.
 
 ---
 
-## 15. Known Limitations & Open Gaps
+## 15. Tournament Mode
+
+`docs/tournament-mode-roadmap.md`. Single-elimination only — double-elimination
+is explicitly deferred (tracked as its own Not-started item on
+`docs/open-roadmap-items.md`; the schema's `winner_next_*`/`loser_next_*`
+pointer-pair design already supports it without a migration, see §13). X01
+only — any of the four starting scores (501/301/170/101). Backend:
+`backend/db.js`'s tournament section. Frontend: `frontend/index.html`'s
+"TOURNAMENT MODE" block, reachable via the **Tournaments** nav button.
+
+### Design principle: a tournament match IS a normal game
+
+Starting a tournament match calls the exact same `createGame()` a regular New
+Game H2H match would (same `category`/`legsPerSet`/`setsPerGame`/`players`,
+`practice=0`), just with `tournament_matches.game_id` recording which match it
+belongs to. Every existing mechanism — PINs, per-player finish rules, checkout
+hints, undo, the live scoreboard, achievements, and every stat/leaderboard —
+works completely unmodified, because as far as any of those are concerned it's
+indistinguishable from any other H2H game.
+
+### Seeding (client-side, not a backend concern)
+
+`createTournament({name, category, players, rounds})`'s `players` array is
+**already in final seed order** (index 0 = seed 1) by the time it reaches the
+backend — exactly like `createGame()`'s own `players` array order has always
+determined throw order, with no server-side reordering. The New Game setup
+screen offers three seeding methods, all computed in `frontend/index.html`:
+
+- **Random** — a Fisher-Yates shuffle of the selected players (`shuffleTournamentSeed()`), the same algorithm the app's existing "🔀 Shuffle" New Game feature already uses.
+- **Manual order** — the admin reorders the selected list directly (▲/▼ per row, `moveTournamentSeed()`), starting from whatever order they were checked in.
+- **By 3-dart average** — `loadTournamentSeedByAverage()` fetches each selected player's existing lifetime average via the already-public `GET /api/players/personal-bests?name=` endpoint (no new backend surface needed) and sorts best-average-first; a player with no recorded legs yet (`lifetimeAvg == null`) sorts **last**, never treated as a misleadingly literal zero.
+
+### Bracket generation (`createTournament()`, `backend/db.js`)
+
+Given N players and `bracketSize` = the smallest power of two ≥ N:
+
+- **Standard tournament seeding placement** (`_bracketSeedOrder()`): recursively
+  expands `[1,2]` → `[1,4,2,3]` → `[1,8,4,5,2,7,3,6]` → ..., pairing each
+  existing seed `s` against `(size+1-s)` at the next size up. This guarantees
+  seed 1 and seed 2 can't meet before the final, and — proven by this
+  construction, not just asserted — that byes (seed numbers > N, which only
+  ever occupy round-1 slots) never double up in a single round-1 match, since
+  `bracketSize - N` (the bye count) is always `< bracketSize/2` by definition
+  of "smallest power of two ≥ N."
+- **Round rows are built final-first**: `tournament_rounds`/`tournament_matches`
+  for the LAST round are inserted before the first, so every earlier round's
+  matches can set `winner_next_match_id` pointing at an already-existing row in
+  the next round (rather than needing a second pass to backfill pointers).
+- **Byes auto-resolve immediately, cascading forward**: a round-1 match with
+  exactly one real player (`is_bye=1`) advances that player via the same
+  `_advanceTournamentMatch()` propagation function used for a real result — so
+  a round-2 match fed by **two separate** round-1 byes ends up immediately
+  `ready` (both real players known) without either underlying bye match ever
+  needing to be "played." This is the one genuinely subtle case in the whole
+  feature — covered explicitly in `backend/test/tournament.test.js`'s 5-player
+  case (byes cascading into an already-`ready` semifinal).
+- **Round labels** (`_roundLabel()`): computed once at creation from how many
+  rounds remain until the final — `0` → `"Final"`, `1` → `"Semifinal"`, `2` →
+  `"Quarterfinal"`, else `"Round N"` — and stored on `tournament_rounds.label`,
+  not recomputed on read.
+
+### Match lifecycle
+
+1. **`startTournamentMatch(matchId)`**: validates the match is `ready` (both
+   players known, no `winner_id`, no `game_id` yet already), then calls
+   `createGame()` with that round's own `legs_per_set`/`sets_per_game` and the
+   two players' own current out-mode preference, and stores the resulting
+   `game_id` back on the match row.
+2. **On completion**: an `onGameCompleted` hook (registered once at module
+   load — see §1's "Game-lifecycle hooks") checks whether the finished game's
+   id matches a `tournament_matches.game_id`; if so it calls
+   `_advanceTournamentMatch(matchId, winnerId)`, which records the winner,
+   marks the loser `eliminated` in `tournament_players`, and either fills the
+   winner into `winner_next_match_id`'s slot or — if there is no next match
+   (this was the final) — sets `tournaments.champion_id`/`runner_up_id`/
+   `status='completed'`/`completed_at` and marks the winner `champion`.
+3. **Walkover** (`recordWalkover(matchId, winnerName)`): records a result
+   without playing it out, calling the same `_advanceTournamentMatch()`
+   propagation. Allowed any time `winner_id` is still `null` — **regardless of
+   whether `game_id` is already set** — which is deliberately what covers the
+   roadmap doc's "a tournament match can't just be left as a plain unfinished
+   game" requirement: `askEndGame()` on the frontend refuses a plain abandon
+   for a tournament match (`game.tournamentMatchId` set) and sends the admin
+   back to the bracket to record a walkover instead, which then works whether
+   that match was never started or was started and abandoned mid-way.
+
+### Frontend integration points
+
+- **PIN gate**: the New Game screen's per-slot PIN check
+  (`withPinCheck()`) has no equivalent entry point for a tournament match,
+  since players are fixed by bracket position rather than picked into slots —
+  `beginTournamentMatch()` re-applies the same `withPinCheck()` gate for both
+  players before actually starting the match, so a PIN-protected player in a
+  tournament is exactly as protected as one in a regular New Game.
+- **Live scoreboard round label**: `game.tournamentRoundLabel` (set when the
+  match object is built) feeds `liveSnapshot()`'s `tournamentRoundLabel` field,
+  which `display.html`'s `fmtText()` prefixes onto the existing top-bar text
+  (`"Quarterfinal · 501 · first to 3 legs · Leg 1"`) — see §7's note on
+  `ALLOWED_LIVE_KEYS`, which this field must stay registered in.
+- **Post-game navigation**: `finishUnit('game', ...)`'s "GAME OVER" screen
+  shows a **"Back to bracket"** button instead of "New game" when
+  `game.tournamentMatchId` is set — the bracket has already advanced
+  server-side by the time this renders (the hook fired from the preceding
+  `DB.completeGame()`), so this is purely a navigation convenience.
+- **Accessibility**: the bracket tree (`renderTournamentDetail()`'s
+  `.tourney-bracket` columns) is a spatial/visual layout with a linearized
+  text-list equivalent right below it (a `<details>` "Full bracket (list
+  view)") plus the "Up Next" list above both — per
+  `docs/accessibility-roadmap.md`'s standing checklist that a spatial UI is
+  never the *only* way to follow along. Match status (`pending`/`ready`/
+  `in_progress`/`complete`) is always icon + text label together
+  (`TOURNEY_STATUS_ICON`/`TOURNEY_STATUS_LABEL`), never color alone.
+
+### Deliberately out of scope for this pass
+
+- **Double-elimination** — schema supports it (§13), generation/advancement
+  logic doesn't exist yet. Tracked separately on `docs/open-roadmap-items.md`.
+- **A "Practice this" style deep link or bracket-tree drag/zoom** — not
+  requested; the simple column layout was sufficient for single-elimination's
+  much shallower tree (no winners/losers split to manage).
+- **Tournament stats on the player profile** (tournament wins, best finish) —
+  the roadmap doc's own step 4 stretch goal, not built.
+
+---
+
+## 16. Known Limitations & Open Gaps
 
 Cross-referenced from the `docs/*.md` roadmap docs — these are real,
 already-shipped limitations, not just unbuilt future features:
@@ -2114,13 +2302,17 @@ already-shipped limitations, not just unbuilt future features:
   such game, `previousWinner` still reports one of the two named players. Only reaches
   the Rematch/Grudge badges, which the controller evaluates for 2-player matches only,
   so it's latent in practice.
-- See the individual `docs/*.md` files for full design detail on every
-  not-yet-built feature (tournament mode, league mode, Cricket/game modes,
-  camera scoring, mobile app, ghost opponent, coaching insights, and more).
+- **Double-elimination tournaments aren't built** — single-elimination only
+  (§15); the schema already supports double-elim without a migration, but the
+  generation/advancement logic doesn't exist yet. Tracked as its own item on
+  `docs/open-roadmap-items.md`.
+- See the individual `docs/*.md` files for full design detail on every other
+  not-yet-built feature (league mode, Baseball/other game-mode variants,
+  camera scoring, mobile app, online multiplayer, and more).
 
 ---
 
-## 16. Troubleshooting
+## 17. Troubleshooting
 
 The general method, before the specific symptoms below: **this document is the
 spec.** Find the section describing what the misbehaving feature is supposed to

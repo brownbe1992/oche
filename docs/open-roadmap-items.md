@@ -34,15 +34,15 @@
 | 8 | League mode (new tables, no new infra; complements tournament mode) | `docs/league-mode-roadmap.md` | Medium |
 | 9 | Dart Builder / loadout customization (component catalog, loadout builder screen, New Game "Change Loadout" picker, per-loadout stats scoping; supersedes the existing single-number `dart_weight` field) | `docs/dart-builder-roadmap.md` | Medium |
 | 10 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
-| 11 | Tournament mode (bracket generation, especially double-elim, is genuinely fiddly but fully self-contained) | `docs/tournament-mode-roadmap.md` | Medium-High |
-| 12 | Game Modes: Baseball — the second proof that the plugin shape generalizes beyond Cricket (step 5) | `docs/game-modes-roadmap.md` | High |
+| 11 | Game Modes: Baseball — the second proof that the plugin shape generalizes beyond Cricket (step 5) | `docs/game-modes-roadmap.md` | High |
+| 12 | Tournament mode: double-elimination bracket support (losers bracket + grand final/reset logic, the genuinely fiddly combinatorial piece — single-elimination already shipped, see the Done ledger) | `docs/tournament-mode-roadmap.md` | High |
 | 13 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
 | 14 | Camera/ML scoring (genuinely novel CV engineering; only useful to whoever mounts the hardware) | `docs/camera-scoring-roadmap.md` | Extremely high |
 | 15 | Companion website (persistent hosted infrastructure — accounts, matchmaking, a cloud database — the one item requiring the project to operate long-term infra, not just be self-hostable) | `docs/companion-website-roadmap.md` | Extremely high |
 
 ### Build-order notes that still apply
 
-- **Tournament mode before league mode** — not a hard dependency, but tournament mode is the more specifically-requested one, and building it first gives league mode's "games link into a context table" pattern (see `CLAUDE.md`) a real precedent to follow.
+- **Tournament mode (single-elimination) is done** and its `tournament_matches.game_id` FK is the real, shipped precedent league mode's "games link into a context table" pattern (see `CLAUDE.md`) can now follow directly, rather than a hoped-for one.
 - **Mobile app's steps are sequential as listed** (step 2 → 3 → 4 → 5 → 6 → 7) per `docs/mobile-app-roadmap.md`'s own suggested build order; its one prerequisite (the responsive CSS pass) is already done.
 - **The small, order-independent items** (rows 5, 9) can be interleaved anywhere, including ahead of the bigger lifts — good for sustaining momentum with essentially zero risk of creating rework later.
 
@@ -56,6 +56,7 @@ therefore hasn't been archived yet) — see each source doc for full detail.
 
 | Item | Source doc |
 |---|---|
+| Tournament mode: single-elimination (schema, bracket generation with cascading byes, match lifecycle/walkover, setup screen, bracket tree + Up Next view, live-scoreboard round label, player-deletion guard, committed tests) — double-elimination remains a separate open item above | `docs/tournament-mode-roadmap.md` |
 | Coaching Insights — weak-number, checkout-route, bust-parity, and form-trend insights (`getCoachingInsights`, Player Profile X01 tab, committed tests) | `docs/archive/coaching-insights-roadmap.md` |
 | Home Assistant automation recipe book (`docs/home-assistant-recipes.md`, linked from README) | `docs/archive/ha-recipes-roadmap.md` |
 | Colorblind-friendly palette | `docs/archive/colorblind-mode-roadmap.md` |

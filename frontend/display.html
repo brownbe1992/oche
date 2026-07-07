@@ -478,13 +478,17 @@ function showAchievement(type, player, countText){
 function fmtText(s){
   const cat = s.category != null ? esc(s.category) : '';
   const legNo = num(s.legNo), setNo = num(s.setNo), lps = num(s.legsPerSet), spg = num(s.setsPerGame);
+  // Tournament mode (docs/tournament-mode-roadmap.md): a small addition to the
+  // existing gameType-style snapshot fields — same shape as everything else
+  // fmtText already reads off `s`, no new rendering path needed.
+  const roundPrefix = s.tournamentRoundLabel ? `${esc(s.tournamentRoundLabel)} &nbsp;·&nbsp; ` : '';
   if(s.practice){
-    return `<b>${cat}</b> &nbsp; Practice &nbsp;·&nbsp; Leg ${legNo}`;
+    return `${roundPrefix}<b>${cat}</b> &nbsp; Practice &nbsp;·&nbsp; Leg ${legNo}`;
   }
   const legs = lps>1 ? `first to ${lps} legs` : '1 leg';
   const sets = spg>1 ? `first to ${spg} sets · ` : '';
   const where = spg>1 ? `Set ${setNo} · Leg ${legNo}` : `Leg ${legNo}`;
-  return `<b>${cat}</b> &nbsp; ${sets}${legs} &nbsp;·&nbsp; ${where}`;
+  return `${roundPrefix}<b>${cat}</b> &nbsp; ${sets}${legs} &nbsp;·&nbsp; ${where}`;
 }
 
 function dartClass(label){

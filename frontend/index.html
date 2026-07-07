@@ -281,6 +281,14 @@
   .da-count{font-family:'Bebas Neue';font-size:15px;color:var(--cream);flex:none;min-width:38px;text-align:right}
   .da-sub{font-size:10px;color:var(--muted);flex:none}
 
+  /* ---- tournament mode (docs/tournament-mode-roadmap.md) ---- */
+  .tourney-check-row{display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:13px;color:var(--cream)}
+  .tourney-bracket{display:flex;gap:16px;overflow-x:auto;padding-bottom:8px}
+  .tourney-round-col{display:flex;flex-direction:column;gap:10px;min-width:150px;flex:none}
+  .tourney-round-col .pp-section-title{margin-bottom:2px}
+  .tourney-match-card{background:var(--surface-2);border:1px solid var(--wire);border-radius:8px;
+    padding:8px 10px;font-size:13px;color:var(--cream);display:flex;flex-direction:column;gap:2px}
+
   /* ---- coaching insights ---- */
   /* Icon + text tag rather than a color-coded strip, so strength vs. focus-area
      reads without relying on color alone (docs/accessibility-roadmap.md). */
@@ -605,6 +613,7 @@
       <button class="navbtn" id="nav-home" aria-current="true" onclick="show('home')">Home</button>
       <button class="navbtn" id="nav-setup" aria-current="false" onclick="show('setup')">New game</button>
       <button class="navbtn" id="nav-players" aria-current="false" onclick="show('players')">Players</button>
+      <button class="navbtn" id="nav-tournament" aria-current="false" onclick="show('tournament')">Tournaments</button>
       <button class="navbtn" id="nav-scoreboard" onclick="openScoreboard()" title="Open the read-only scoreboard for a second screen">Scoreboard ↗</button>
       <button class="navbtn" id="nav-settings" aria-current="false" onclick="show('settings')">Settings</button>
     </nav>
@@ -846,6 +855,13 @@
     </div>
   </section>
 
+
+  <!-- ============ TOURNAMENTS ============ -->
+  <section id="screen-tournament" class="screen">
+    <div class="card">
+      <div id="tournament-body"></div>
+    </div>
+  </section>
 
   <!-- ============ STATS LEGEND ============ -->
   <section id="screen-legend" class="screen">
@@ -1612,6 +1628,7 @@ function show(name){
   document.getElementById('nav-home').setAttribute('aria-current', name==='home');
   document.getElementById('nav-setup').setAttribute('aria-current', name==='setup');
   document.getElementById('nav-players').setAttribute('aria-current', name==='players'||name==='player');
+  document.getElementById('nav-tournament').setAttribute('aria-current', name==='tournament');
   document.getElementById('nav-settings').setAttribute('aria-current', name==='settings');
   if(name==='settings') renderSettings();
   if(name==='home'){ renderHome(); renderHomeChallengeTeaser(); }
@@ -1624,6 +1641,7 @@ function show(name){
   }
   if(name==='players') renderRoster();
   if(name==='player'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); }
+  if(name==='tournament') renderTournamentScreen();
   if(name==='legend') renderLegend();
 }
 let legendBackTo='home';
@@ -3238,6 +3256,364 @@ function ensurePlayerStats(name){
 // no-op: all writes go straight to the backend (DB.*) — nothing to persist locally
 function persist(){}
 
+/* =========================================================================
+   TOURNAMENT MODE (docs/tournament-mode-roadmap.md) — single-elimination only.
+   A tournament match IS a normal X01 game under the hood (see beginTournamentMatch
+   below) — this section is purely the bracket setup/view/orchestration UI on top;
+   the actual scoring screen, live scoreboard, undo, achievements, etc. are all the
+   existing X01 machinery, unmodified.
+   ========================================================================= */
+let tournamentView = 'list';        // 'list' | 'setup' | 'detail'
+let currentTournamentId = null;
+let tournamentDetailCache = null;   // last-fetched detail for currentTournamentId
+let tournamentSetup = null;         // built fresh each time the setup view opens
+
+function renderTournamentScreen(){
+  if(tournamentView==='setup') return renderTournamentSetup();
+  if(tournamentView==='detail' && currentTournamentId!=null) return loadTournamentDetail();
+  return loadTournamentList();
+}
+
+function loadTournamentList(){
+  const body=document.getElementById('tournament-body');
+  body.innerHTML = `<p class="pp-meta" style="padding:4px 0">Loading…</p>`;
+  Backend.get('/api/tournaments').then(renderTournamentList)
+    .catch(()=>{ body.innerHTML = `<p class="pp-meta">Could not load tournaments.</p>`; });
+}
+function renderTournamentList(list){
+  const body=document.getElementById('tournament-body');
+  const rows = (list||[]).map(t=>{
+    const statusLabel = t.status==='completed' ? `🏆 ${escapeHtml(t.champion_name||'')}` : 'In progress';
+    return `<button class="rp-main" onclick="openTournament(${t.id})">
+      <div class="rp-name-row">${escapeHtml(t.name)}</div>
+      <div class="rp-stat">${escapeHtml(t.category)} · ${t.player_count} players · ${statusLabel}</div>
+    </button>`;
+  }).join('');
+  body.innerHTML = `
+    <h2 style="font-size:18px;margin-bottom:4px">Tournaments</h2>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px">Single-elimination brackets, any X01 format.</p>
+    <div class="roster-list">${rows || '<div class="empty">No tournaments yet.<br>Create your first one below.</div>'}</div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="openTournamentSetup()">+ New Tournament</button>
+    </div>`;
+}
+function openTournament(id){ currentTournamentId=id; tournamentView='detail'; renderTournamentScreen(); }
+function openTournamentSetup(){ tournamentSetup=null; tournamentView='setup'; renderTournamentScreen(); }
+
+/* ---------- setup ---------- */
+function tournamentNextPow2(n){ let p=1; while(p<n) p*=2; return p; }
+function tournamentRoundCount(n){ return Math.log2(tournamentNextPow2(Math.max(n,2))); }
+function tournamentRoundLabel(roundNo, roundCount){
+  const fromFinal = roundCount - roundNo;
+  if(fromFinal===0) return 'Final';
+  if(fromFinal===1) return 'Semifinal';
+  if(fromFinal===2) return 'Quarterfinal';
+  return `Round ${roundNo}`;
+}
+// Sensible default: best-of-3 legs every round, stepping up to best-of-5 in the
+// final — the admin can edit any of these before creating the bracket.
+function defaultTournamentRounds(n){
+  const count = tournamentRoundCount(n);
+  return Array.from({length:count}, (_,i)=>({ legsPerSet: i===count-1?5:3, setsPerGame:1 }));
+}
+
+function renderTournamentSetup(){
+  if(!tournamentSetup) tournamentSetup = { name:'', category:'501', selected:[], seedMethod:'random', rounds:[], avgByName:null };
+  const ts = tournamentSetup;
+  const n = ts.selected.length;
+  const canBuild = n >= 2;
+  if(canBuild && ts.rounds.length !== tournamentRoundCount(n)) ts.rounds = defaultTournamentRounds(n);
+
+  const checklist = roster.map(name=>{
+    const checked = ts.selected.includes(name);
+    const j = escapeHtml(escapeJs(name));
+    return `<label class="tourney-check-row">
+      <input type="checkbox" ${checked?'checked':''} onchange="toggleTournamentPlayer('${j}', this.checked)">
+      <span>${escapeHtml(name)}</span>
+    </label>`;
+  }).join('');
+
+  document.getElementById('tournament-body').innerHTML = `
+    <button class="pp-back" onclick="tournamentView='list'; renderTournamentScreen()">← Tournaments</button>
+    <h2 style="font-size:18px;margin:8px 0 4px">New Tournament</h2>
+    <label class="field">Tournament name</label>
+    <input type="text" id="tourney-name" maxlength="64" value="${escapeHtml(ts.name)}" oninput="tournamentSetup.name=this.value" style="margin-bottom:14px">
+    <label class="field">Format (X01)</label>
+    <select class="date-input" id="tourney-category" style="width:auto;margin-bottom:14px" onchange="tournamentSetup.category=this.value">
+      ${['501','301','170','101'].map(c=>`<option value="${c}"${ts.category===c?' selected':''}>${c}</option>`).join('')}
+    </select>
+    <label class="field">Players (${n} selected)</label>
+    <div class="roster-list" style="margin-bottom:14px">${checklist || '<div class="empty">No players yet — add some from the Players tab first.</div>'}</div>
+    ${canBuild ? `
+    <label class="field">Seeding</label>
+    <div class="seg out-seg" role="group" aria-label="Seeding method" style="margin-bottom:10px">
+      <button type="button" aria-pressed="${ts.seedMethod==='random'}" onclick="setTournamentSeedMethod('random')">Random</button>
+      <button type="button" aria-pressed="${ts.seedMethod==='manual'}" onclick="setTournamentSeedMethod('manual')">Manual order</button>
+      <button type="button" aria-pressed="${ts.seedMethod==='average'}" onclick="setTournamentSeedMethod('average')">By 3-dart average</button>
+    </div>
+    <div id="tourney-seed-preview">${renderTournamentSeedPreview()}</div>
+    <label class="field" style="margin-top:14px">Match format per round</label>
+    <div id="tourney-rounds-table">${renderTournamentRoundsTable()}</div>
+    ` : ''}
+    <div class="btn-row" style="margin-top:16px">
+      <button class="btn btn-primary" ${canBuild?'':'disabled'} onclick="submitTournamentSetup()">Create Tournament</button>
+    </div>`;
+}
+
+function toggleTournamentPlayer(name, checked){
+  const ts = tournamentSetup;
+  if(checked){ if(!ts.selected.includes(name)) ts.selected.push(name); }
+  else { ts.selected = ts.selected.filter(n=>n!==name); }
+  ts.avgByName = null;   // stale once the player set changes
+  renderTournamentSetup();
+}
+function setTournamentSeedMethod(method){
+  const ts = tournamentSetup;
+  ts.seedMethod = method;
+  if(method==='random') shuffleTournamentSeed();
+  else if(method==='average') loadTournamentSeedByAverage();
+  else renderTournamentSetup();   // manual: keep the current order, just show reorder controls
+}
+function shuffleTournamentSeed(){
+  const ts = tournamentSetup;
+  const arr = ts.selected.slice();
+  for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; }
+  ts.selected = arr;
+  ts.avgByName = null;
+  renderTournamentSetup();
+}
+// Seeds by each selected player's existing lifetime 3-dart average (reusing the
+// already-public personal-bests endpoint — no new backend surface needed), best
+// average first; a player with no recorded legs yet sorts last rather than being
+// treated as a (misleadingly literal) zero average.
+function loadTournamentSeedByAverage(){
+  const ts = tournamentSetup;
+  const names = ts.selected.slice();
+  Promise.all(names.map(nm => Backend.get(`/api/players/personal-bests?name=${encodeURIComponent(nm)}`).catch(()=>null)))
+    .then(results=>{
+      const withAvg = names.map((nm,i)=>({ name:nm, avg: results[i] && results[i].lifetimeAvg!=null ? results[i].lifetimeAvg : null }));
+      withAvg.sort((a,b)=>{
+        if(a.avg==null && b.avg==null) return 0;
+        if(a.avg==null) return 1;
+        if(b.avg==null) return -1;
+        return b.avg - a.avg;
+      });
+      ts.selected = withAvg.map(x=>x.name);
+      ts.avgByName = Object.fromEntries(withAvg.map(x=>[x.name, x.avg]));
+      renderTournamentSetup();
+    });
+}
+function renderTournamentSeedPreview(){
+  const ts = tournamentSetup;
+  const rows = ts.selected.map((name,i)=>{
+    const avg = ts.avgByName ? (ts.avgByName[name]!=null ? ` <span class="pp-meta">(${ts.avgByName[name].toFixed(1)} avg)</span>` : ` <span class="pp-meta">(no data yet)</span>`) : '';
+    const moveButtons = ts.seedMethod==='manual' ? `
+      <button class="iconbtn" title="Move up" ${i===0?'disabled':''} onclick="moveTournamentSeed(${i},-1)">▲</button>
+      <button class="iconbtn" title="Move down" ${i===ts.selected.length-1?'disabled':''} onclick="moveTournamentSeed(${i},1)">▼</button>` : '';
+    return `<div class="da-row"><span class="da-rank">${i+1}</span><span class="da-label" style="flex:1;font-size:14px">${escapeHtml(name)}${avg}</span>${moveButtons}</div>`;
+  }).join('');
+  return `<div class="da-list">${rows}</div>`;
+}
+function moveTournamentSeed(i, dir){
+  const ts = tournamentSetup;
+  const j = i + dir;
+  if(j<0 || j>=ts.selected.length) return;
+  [ts.selected[i], ts.selected[j]] = [ts.selected[j], ts.selected[i]];
+  renderTournamentSetup();
+}
+function renderTournamentRoundsTable(){
+  const ts = tournamentSetup;
+  const count = ts.rounds.length;
+  const rows = ts.rounds.map((r,i)=>{
+    const label = tournamentRoundLabel(i+1, count);
+    return `<div class="da-row">
+      <span class="da-label" style="flex:1;font-size:13px">${label}</span>
+      <label class="pp-meta" style="margin-right:4px">Legs</label>
+      <input type="number" min="1" max="15" value="${r.legsPerSet}" style="width:48px" onchange="setTournamentRoundField(${i},'legsPerSet',this.value)">
+      <label class="pp-meta" style="margin:0 4px">Sets</label>
+      <input type="number" min="1" max="15" value="${r.setsPerGame}" style="width:48px" onchange="setTournamentRoundField(${i},'setsPerGame',this.value)">
+    </div>`;
+  }).join('');
+  return `<div class="da-list">${rows}</div>`;
+}
+function setTournamentRoundField(i, field, value){
+  tournamentSetup.rounds[i][field] = Math.max(1, Math.round(Number(value)||1));
+}
+function submitTournamentSetup(){
+  const ts = tournamentSetup;
+  const name = (ts.name||'').trim();
+  if(!name){ uiAlert('Enter a tournament name.'); return; }
+  if(ts.selected.length < 2){ uiAlert('Select at least 2 players.'); return; }
+  Backend.send('POST', '/api/tournaments', { name, category: ts.category, players: ts.selected, rounds: ts.rounds })
+    .then(r=>{
+      tournamentSetup = null;
+      currentTournamentId = r.tournamentId;
+      tournamentView = 'detail';
+      renderTournamentScreen();
+    })
+    .catch(e=>{ uiAlert('Could not create tournament: ' + ((e && e.message) || 'unknown error')); });
+}
+
+/* ---------- detail / bracket / up next ---------- */
+const TOURNEY_STATUS_ICON  = { pending:'⏳', ready:'▶️', in_progress:'🎯', complete:'✅' };
+const TOURNEY_STATUS_LABEL = { pending:'Waiting', ready:'Ready', in_progress:'In progress', complete:'Complete' };
+
+function loadTournamentDetail(){
+  const body=document.getElementById('tournament-body');
+  body.innerHTML = `<p class="pp-meta" style="padding:4px 0">Loading…</p>`;
+  Backend.get(`/api/tournaments/${currentTournamentId}`)
+    .then(t=>{ tournamentDetailCache = t; renderTournamentDetail(t); })
+    .catch(()=>{ body.innerHTML = `<p class="pp-meta">Could not load tournament.</p>`; });
+}
+function tournamentMatchCardHtml(m){
+  const p1 = m.player1Name ? escapeHtml(m.player1Name) : 'TBD';
+  const p2 = m.player2Name ? escapeHtml(m.player2Name) : 'TBD';
+  const p1Style = m.winnerName && m.winnerName===m.player1Name ? 'font-weight:700' : '';
+  const p2Style = m.winnerName && m.winnerName===m.player2Name ? 'font-weight:700' : '';
+  return `<div class="tourney-match-card">
+    <div style="${p1Style}">${p1}</div>
+    <div style="${p2Style}">${p2}</div>
+    <div class="pp-meta" style="font-size:11px">${TOURNEY_STATUS_ICON[m.status]||''} ${TOURNEY_STATUS_LABEL[m.status]||m.status}</div>
+  </div>`;
+}
+function renderTournamentDetail(t){
+  const body=document.getElementById('tournament-body');
+  // "in_progress" matches (a game was started but never completed — e.g. End
+  // Game was used) get listed here too, Walkover-only, no Start button — that's
+  // the recovery path for an abandoned match (recordWalkover() on the backend
+  // allows overriding one exactly like this).
+  const actionableMatches = t.matches.filter(m=>m.status==='ready' || m.status==='in_progress');
+  const upNextHtml = actionableMatches.length ? actionableMatches.map(m=>`
+    <div class="da-row" style="align-items:center">
+      <span class="da-label" style="flex:1;font-size:14px">${escapeHtml(m.label)}: ${escapeHtml(m.player1Name)} vs ${escapeHtml(m.player2Name)}${m.status==='in_progress'?' <span class="pp-meta">(in progress)</span>':''}</span>
+      ${m.status==='ready' ? `<button class="btn btn-primary" style="margin-right:6px" onclick="beginTournamentMatch(${m.id})">Start</button>` : ''}
+      <button class="btn btn-ghost" onclick="askTournamentWalkover(${m.id}, '${escapeJs(m.player1Name)}', '${escapeJs(m.player2Name)}')">Walkover</button>
+    </div>`).join('') : `<p class="pp-meta">Nothing ready to play right now.</p>`;
+
+  const rounds = {};
+  t.matches.forEach(m=>{ (rounds[m.round_no] = rounds[m.round_no] || []).push(m); });
+  const roundNos = Object.keys(rounds).map(Number).sort((a,b)=>a-b);
+  const bracketHtml = `<div class="tourney-bracket">${roundNos.map(rn=>{
+    const ms = rounds[rn].slice().sort((a,b)=>a.slot-b.slot);
+    return `<div class="tourney-round-col">
+      <div class="pp-section-title">${escapeHtml(ms[0].label)}</div>
+      ${ms.map(tournamentMatchCardHtml).join('')}
+    </div>`;
+  }).join('')}</div>`;
+
+  // Linearized "who plays whom next" text list — the bracket tree above is a
+  // spatial/visual layout with no non-visual equivalent of its own, so this list
+  // (plus the Up Next list above it) is what a screen-reader user actually
+  // follows the tournament through, per docs/accessibility-roadmap.md's standing
+  // checklist on not relying on a spatial UI as the only way to understand state.
+  const linearHtml = `<details style="margin-top:12px"><summary class="pp-section-title">Full bracket (list view)</summary>
+    <div class="da-list">${roundNos.map(rn=>rounds[rn].slice().sort((a,b)=>a.slot-b.slot).map(m=>
+      `<div class="da-row"><span class="da-label" style="flex:1;font-size:13px">${escapeHtml(m.label)}: ${escapeHtml(m.player1Name||'TBD')} vs ${escapeHtml(m.player2Name||'TBD')}${m.winnerName?` — winner: ${escapeHtml(m.winnerName)}`:''}</span></div>`
+    ).join('')).join('')}</div>
+  </details>`;
+
+  const header = t.status==='completed'
+    ? `<p class="pp-meta">🏆 Champion: <b>${escapeHtml(t.champion_name)}</b> · Runner-up: ${escapeHtml(t.runner_up_name)}</p>`
+    : `<p class="pp-meta">In progress · ${t.player_count} players · ${escapeHtml(t.category)}</p>`;
+
+  body.innerHTML = `
+    <button class="pp-back" onclick="tournamentView='list'; renderTournamentScreen()">← Tournaments</button>
+    <h2 style="font-size:18px;margin:8px 0 4px">${escapeHtml(t.name)}</h2>
+    ${header}
+    <div class="pp-section">
+      <div class="pp-section-title">Up Next</div>
+      ${upNextHtml}
+    </div>
+    <div class="pp-section">
+      <div class="pp-section-title">Bracket</div>
+      ${bracketHtml}
+      ${linearHtml}
+    </div>`;
+}
+
+function askTournamentWalkover(matchId, p1, p2){
+  document.getElementById('modal-body').innerHTML = `
+    <p class="modal-msg">Record a walkover — who advances without playing?</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitTournamentWalkover(${matchId}, '${escapeJs(p1)}')">${escapeHtml(p1)}</button>
+      <button class="btn btn-primary" onclick="submitTournamentWalkover(${matchId}, '${escapeJs(p2)}')">${escapeHtml(p2)}</button>
+    </div>`;
+  document.getElementById('modal').hidden = false;
+}
+function submitTournamentWalkover(matchId, winner){
+  closeModal();
+  Backend.send('POST', `/api/tournaments/matches/${matchId}/walkover`, { winner })
+    .then(loadTournamentDetail)
+    .catch(e=>uiAlert('Could not record walkover: ' + ((e && e.message) || 'unknown error')));
+}
+
+// Starts a ready match's underlying game and drops straight into the existing X01
+// scoring screen — the game already exists server-side (created by the /start
+// call below), so DB.gameId is set directly rather than via DB.beginGame()'s own
+// POST /api/games (which would create a second, untracked game row).
+async function beginTournamentMatch(matchId){
+  if(Auth.requireAuth && !Auth.loggedIn){ Auth.ensureCanWrite(()=>beginTournamentMatch(matchId)); return; }
+  const t = tournamentDetailCache;
+  const match = t && t.matches.find(mm=>mm.id===matchId);
+  if(!match){ uiAlert('Match not found.'); return; }
+  // Same PIN gate the New Game slot picker already applies per-player — a
+  // tournament match skips that picker entirely (players are fixed by bracket
+  // position), so this is the one place left to actually enforce it.
+  withPinCheck(match.player1Name, ()=>{
+    withPinCheck(match.player2Name, ()=>_reallyBeginTournamentMatch(matchId), ()=>{});
+  }, ()=>{});
+}
+async function _reallyBeginTournamentMatch(matchId){
+  const t = tournamentDetailCache;
+  const match = t.matches.find(mm=>mm.id===matchId);
+  let result;
+  try{ result = await Backend.send('POST', `/api/tournaments/matches/${matchId}/start`); }
+  catch(e){ uiAlert('Could not start match: ' + ((e && e.message) || 'unknown error')); return; }
+  const startScore = Number(t.category);
+  const names = [match.player1Name, match.player2Name];
+  game = {
+    gameType:'x01',
+    config:{ startingScore: startScore },
+    start: startScore,
+    category: String(startScore),
+    legsPerSet: match.legsPerSet, setsPerGame: match.setsPerGame,
+    practice: 0,
+    players: names.map(nm=>GAME_TYPES.x01.newMatchPlayer(nm, startScore)),
+    starter: 0, current: 0, setNo: 1, legNo: 1,
+    darts: [], busted:false, won:false, done:false,
+    gameOneEighties:0, gameBigFish:0, gameBusts:0,
+    currentLegTurns:[], legVisitLogs:[], sessionTurns:[],
+    lastTurnSnapshot:null, turnSeq:0, lastTurnEvent:null, matchResult:null, legStart:null,
+    hasGhost:false, roundOver:false, roundEndReason:null, dpLastDart:null, chuckinLastDart:null,
+    // Tournament linkage — tournamentMatchId drives the "back to bracket" post-game
+    // button (finishUnit()) and the End-game guard (askEndGame()); tournamentRoundLabel
+    // feeds the live snapshot's tournamentRoundLabel field (liveSnapshot()) for /display.
+    tournamentMatchId: matchId,
+    tournamentId: currentTournamentId,
+    tournamentRoundLabel: match.label,
+  };
+  DB.gameId = result.gameId;
+  names.forEach(ensurePlayerStats);
+  earnedBadgeCache = {};
+  names.forEach(nm=>{
+    Backend.get(`/api/players/badges?name=${encodeURIComponent(nm)}`)
+      .then(list=>{ earnedBadgeCache[nm] = new Set((list||[]).map(b=>b.badge_id)); })
+      .catch(()=>{ earnedBadgeCache[nm] = new Set(); });
+  });
+  DB.recordEvent('game_start', null, null);
+  DB.recordEvent('set_start', 1, null);
+  DB.recordEvent('leg_start', 1, 1);
+  sendHaWebhook('gamestart', '', game.category, { players: names });
+  sendHaWebhook('setstart',  '', game.category, { setNo: 1 });
+  sendHaWebhook('legstart',  '', game.category, { setNo: 1, legNo: 1 });
+  mult = 1;
+  game.legStart = { ts: Date.now(), starter: game.players[game.starter].name };
+  renderGameShell();
+  updateMultUI();
+  show('game'); renderGame();
+}
+
 /* ---------- players management screen ---------- */
 function renderRoster(){
   const box=document.getElementById('roster-list');
@@ -4570,6 +4946,10 @@ function liveSnapshot(message){
     legSummary: game.legSummary || null,
     practice: !!game.practice,
     done: !!game.done,
+    // Tournament mode (docs/tournament-mode-roadmap.md): the round label ("Quarterfinal",
+    // "Final", ...) when this game is a tournament match, so /display can show tournament
+    // context in the top bar — null for every normal game, unchanged shape otherwise.
+    tournamentRoundLabel: game.tournamentRoundLabel || null,
     // one-shot fields for the live scoreboard's voice announcements — cleared right
     // after being sent (see pushLive()), same pattern as `achievement` above.
     lastTurnEvent: game.lastTurnEvent || null,
@@ -4711,6 +5091,17 @@ function throwDart(sector){
   renderSlots(); renderPad(); updateCheckout(true); pushLive();
 }
 function askEndGame(){
+  // Tournament mode (docs/tournament-mode-roadmap.md): a plain "abandon and forget"
+  // isn't allowed here — the bracket needs an actual result to advance. Send the
+  // admin back to the bracket to record a walkover instead (recordWalkover() on the
+  // backend allows overriding an abandoned mid-game match exactly like this one).
+  if(game && game.tournamentMatchId){
+    uiConfirm(
+      "This is a tournament match — leaving it unfinished would leave the bracket stuck. Go back to the bracket? You can record a walkover there for whichever player should advance.",
+      ()=>{ game = null; pushLive(); show('tournament'); }
+    );
+    return;
+  }
   const msg = activeChallenge
     ? "End today's Daily Challenge attempt now? You only get one attempt per calendar day, so this locks in as unfinished for today — there's no retrying until tomorrow."
     : (game && game.practice)
@@ -5536,11 +5927,17 @@ function finishUnit(kind, winner){
   // it to a card that doesn't exist.
   const matchShareBtn = isCricket ? '' : `<button class="btn btn-ghost" id="matchwin-share-btn" onclick="shareMomentCard('matchwin')">📤 Share</button>`;
   if(kind==='game'){
+    // Tournament mode: the bracket already advanced server-side (the onGameCompleted
+    // hook fired from DB.completeGame() above), so route back to the bracket instead
+    // of the normal New Game screen.
+    const nextBtn = game.tournamentMatchId
+      ? `<button class="btn btn-primary" onclick="show('tournament')">Back to bracket</button>`
+      : `<button class="btn btn-primary" onclick="show('setup')">New game</button>`;
     oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
       <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">GAME OVER</div>
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${escapeHtml(winner)} takes the match. Stats saved.</p>
       <div class="btn-row" style="justify-content:center">
-        <button class="btn btn-primary" onclick="show('setup')">New game</button>
+        ${nextBtn}
         ${matchShareBtn}
       </div>${isCricket ? '' : h2hStatsHtml(winner,'game')}</div>`;
   } else {

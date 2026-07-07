@@ -279,6 +279,9 @@ const ALLOWED_LIVE_KEYS = new Set([
   // Just Chuckin' It only (docs/game-modes-roadmap.md) — read by display.html's
   // renderers.chuckin.card().
   'chuckinLastDart',
+  // Tournament mode only (docs/tournament-mode-roadmap.md) — read by display.html's
+  // fmtText() for the top-bar round label ("Quarterfinal", "Final", ...).
+  'tournamentRoundLabel',
 ]);
 const MAX_LIVE_BYTES = 65536;
 // Returns the sanitized state, or null if it's over the size cap (caller sends 413).
@@ -740,6 +743,33 @@ const server = http.createServer(async (req, res) => {
       if (!requireWrite(req, res)) return;
       const b = await readJson(req);
       return send(res, 200, db.recordEvent(Number(mt[1]), b.type, b.setNo ?? null, b.legNo ?? null));
+    }
+
+    // ----- tournaments (docs/tournament-mode-roadmap.md, single-elimination only) -----
+    // Viewing a bracket is public, same as every other stats/scoreboard view; creating
+    // a tournament, starting a match, and recording a walkover are all state-changing
+    // writes and go through the same requireWrite gate as starting/completing a game.
+    if (p === '/api/tournaments' && m === 'GET') {
+      return send(res, 200, db.listTournaments());
+    }
+    if (p === '/api/tournaments' && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.createTournament(b));
+    }
+    if ((mt = p.match(/^\/api\/tournaments\/(\d+)$/)) && m === 'GET') {
+      const t = db.getTournament(Number(mt[1]));
+      if (!t) return send(res, 404, { error: 'Tournament not found' });
+      return send(res, 200, t);
+    }
+    if ((mt = p.match(/^\/api\/tournaments\/matches\/(\d+)\/start$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      return send(res, 200, db.startTournamentMatch(Number(mt[1])));
+    }
+    if ((mt = p.match(/^\/api\/tournaments\/matches\/(\d+)\/walkover$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.recordWalkover(Number(mt[1]), b.winner));
     }
 
     // ----- badges (docs/archive/achievements-badges-roadmap.md) -----
