@@ -269,7 +269,7 @@ describe('checkoutHint (checkout route calculator, REFERENCE.md §2)', () => {
   });
 });
 
-// Ghost Opponent (docs/ghost-opponent-roadmap.md): "replaying a stored leg's dart
+// Ghost Opponent (docs/archive/ghost-opponent-roadmap.md): "replaying a stored leg's dart
 // sequence is pure, deterministic logic" per the roadmap doc's own testing note.
 // index.html's playGhostTurn() is exactly this: it takes a getGhostLegScript()-shaped
 // turn (raw {sector,multiplier} darts), converts each via makeDartCore(), and
@@ -278,7 +278,7 @@ describe('checkoutHint (checkout route calculator, REFERENCE.md §2)', () => {
 // through evaluateVisit reproduce the recorded bust/win outcome," which this suite
 // already establishes above. This test exercises that exact sequence end to end
 // (a small multi-turn leg script), rather than one visit in isolation.
-describe('Ghost Opponent replay (docs/ghost-opponent-roadmap.md)', () => {
+describe('Ghost Opponent replay (docs/archive/ghost-opponent-roadmap.md)', () => {
   test('replaying a recorded leg\'s turn-by-turn script through evaluateVisit reproduces the same outcome at each step', () => {
     // Mirrors the shape backend/db.js's getGhostLegScript() returns: darts as
     // plain {sector, multiplier} pairs, one entry per turn, in playback order.

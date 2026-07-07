@@ -26,34 +26,33 @@
 |---|---|---|---|
 | 1 | Mobile: multiple saved server profiles (stretch goal, step 7) | `docs/mobile-app-roadmap.md` | Low |
 | 2 | Mobile: "Scoreboard Mode" toggle (step 5) | `docs/mobile-app-roadmap.md` | Low |
-| 3 | Ghost Opponent: "Ghost Slayer" first-win badge — unblocked (its dependency, ghost-race win/loss tracking, is now built, see the Done ledger) | `docs/ghost-opponent-roadmap.md` | Low |
-| 4 | Dart Builder: visual icon/diagram per barrel shape, barrel grip, and flight shape option (the accessibility requirement the shipped v1 picker still owes — text-label dropdowns shipped instead, see the Done ledger) | `docs/dart-builder-roadmap.md` | Low |
-| 5 | Dart Builder: "quick-add full set" one-shot entry form (name + all component fields on one screen, for logging an off-the-shelf dart set in one save instead of three) | `docs/dart-builder-roadmap.md` | Low |
-| 6 | Dart Builder: optional photo upload per component (instead of a generic shape/grip icon) | `docs/dart-builder-roadmap.md` | Low |
-| 7 | Mobile: native chrome — change-server access, haptics, biometric unlock (step 4) | `docs/mobile-app-roadmap.md` | Low-Medium |
-| 8 | Mobile: distribution decision — App Store/Play Store listing vs. simpler sideload distribution (step 6) | `docs/mobile-app-roadmap.md` | Low-Medium |
-| 9 | Localize voice announcements beyond hardcoded English phrases | `docs/voice-announcements-i18n-roadmap.md` | Low-Medium |
-| 10 | Dart Builder: loadout comparison view (side-by-side stats for two or more of a player's loadouts; explicitly a v1 stretch goal, not required) | `docs/dart-builder-roadmap.md` | Low-Medium |
-| 11 | Cricket: two new native badges — 🧹 Whitewash (won without the opponent closing a single number) and a Cricket-shaped Comeback Kid (points-based, not X01's remaining-score-based version) | `docs/game-modes-roadmap.md` | Low-Medium |
-| 12 | Tournament: two new badges — 🏆 Champion (win a bracket) and a seed-based Giant Slayer equivalent (beat a meaningfully higher seed) | `docs/tournament-mode-roadmap.md` | Low-Medium |
-| 13 | Tournament: stats on the Player Profile (wins, runner-up count, best finish reached) — the doc's own step 4 stretch goal, expanded into a full design | `docs/tournament-mode-roadmap.md` | Low-Medium |
-| 14 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
-| 15 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
-| 16 | League mode (new tables, no new infra; complements tournament mode) | `docs/league-mode-roadmap.md` | Medium |
-| 17 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
-| 18 | Guided Around the Clock / Around the World practice drill mode — turns the existing passive completion tracking into a fourth Practice Drill Mode with live progress feedback, reusing Around the World's existing heatmap/progress-view UI | `docs/game-modes-roadmap.md` | Medium |
-| 19 | Per-player data export (CSV + JSON, PIN-gated) — re-opened with fresh product direction after being explicitly descoped when the admin full-database export shipped; design was already fully written, just shelved | `docs/data-export-roadmap.md` | Medium |
-| 20 | Game Modes: Baseball — the second proof that the plugin shape generalizes beyond Cricket (step 5) | `docs/game-modes-roadmap.md` | High |
-| 21 | Tournament mode: double-elimination bracket support (losers bracket + grand final/reset logic, the genuinely fiddly combinatorial piece — single-elimination already shipped, see the Done ledger) | `docs/tournament-mode-roadmap.md` | High |
-| 22 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
-| 23 | Camera/ML scoring (genuinely novel CV engineering; only useful to whoever mounts the hardware) | `docs/camera-scoring-roadmap.md` | Extremely high |
-| 24 | Companion website (persistent hosted infrastructure — accounts, matchmaking, a cloud database — the one item requiring the project to operate long-term infra, not just be self-hostable) | `docs/companion-website-roadmap.md` | Extremely high |
+| 3 | Dart Builder: visual icon/diagram per barrel shape, barrel grip, and flight shape option (the accessibility requirement the shipped v1 picker still owes — text-label dropdowns shipped instead, see the Done ledger) | `docs/dart-builder-roadmap.md` | Low |
+| 4 | Dart Builder: "quick-add full set" one-shot entry form (name + all component fields on one screen, for logging an off-the-shelf dart set in one save instead of three) | `docs/dart-builder-roadmap.md` | Low |
+| 5 | Dart Builder: optional photo upload per component (instead of a generic shape/grip icon) | `docs/dart-builder-roadmap.md` | Low |
+| 6 | Mobile: native chrome — change-server access, haptics, biometric unlock (step 4) | `docs/mobile-app-roadmap.md` | Low-Medium |
+| 7 | Mobile: distribution decision — App Store/Play Store listing vs. simpler sideload distribution (step 6) | `docs/mobile-app-roadmap.md` | Low-Medium |
+| 8 | Localize voice announcements beyond hardcoded English phrases | `docs/voice-announcements-i18n-roadmap.md` | Low-Medium |
+| 9 | Dart Builder: loadout comparison view (side-by-side stats for two or more of a player's loadouts; explicitly a v1 stretch goal, not required) | `docs/dart-builder-roadmap.md` | Low-Medium |
+| 10 | Cricket: two new native badges — 🧹 Whitewash (won without the opponent closing a single number) and a Cricket-shaped Comeback Kid (points-based, not X01's remaining-score-based version) | `docs/game-modes-roadmap.md` | Low-Medium |
+| 11 | Tournament: two new badges — 🏆 Champion (win a bracket) and a seed-based Giant Slayer equivalent (beat a meaningfully higher seed) | `docs/tournament-mode-roadmap.md` | Low-Medium |
+| 12 | Tournament: stats on the Player Profile (wins, runner-up count, best finish reached) — the doc's own step 4 stretch goal, expanded into a full design | `docs/tournament-mode-roadmap.md` | Low-Medium |
+| 13 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
+| 14 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
+| 15 | League mode (new tables, no new infra; complements tournament mode) | `docs/league-mode-roadmap.md` | Medium |
+| 16 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
+| 17 | Guided Around the Clock / Around the World practice drill mode — turns the existing passive completion tracking into a fourth Practice Drill Mode with live progress feedback, reusing Around the World's existing heatmap/progress-view UI | `docs/game-modes-roadmap.md` | Medium |
+| 18 | Per-player data export (CSV + JSON, PIN-gated) — re-opened with fresh product direction after being explicitly descoped when the admin full-database export shipped; design was already fully written, just shelved | `docs/data-export-roadmap.md` | Medium |
+| 19 | Game Modes: Baseball — the second proof that the plugin shape generalizes beyond Cricket (step 5) | `docs/game-modes-roadmap.md` | High |
+| 20 | Tournament mode: double-elimination bracket support (losers bracket + grand final/reset logic, the genuinely fiddly combinatorial piece — single-elimination already shipped, see the Done ledger) | `docs/tournament-mode-roadmap.md` | High |
+| 21 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
+| 22 | Camera/ML scoring (genuinely novel CV engineering; only useful to whoever mounts the hardware) | `docs/camera-scoring-roadmap.md` | Extremely high |
+| 23 | Companion website (persistent hosted infrastructure — accounts, matchmaking, a cloud database — the one item requiring the project to operate long-term infra, not just be self-hostable) | `docs/companion-website-roadmap.md` | Extremely high |
 
 ### Build-order notes that still apply
 
 - **Tournament mode (single-elimination) is done** and its `tournament_matches.game_id` FK is the real, shipped precedent league mode's "games link into a context table" pattern (see `CLAUDE.md`) can now follow directly, rather than a hoped-for one.
 - **Mobile app's steps are sequential as listed** (step 2 → 3 → 4 → 5 → 6 → 7) per `docs/mobile-app-roadmap.md`'s own suggested build order; its one prerequisite (the responsive CSS pass) is already done.
-- **The small, order-independent items** (rows 3-6, 9, 11-13) can be interleaved anywhere, including ahead of the bigger lifts — good for sustaining momentum with essentially zero risk of creating rework later. Row 3's former dependency (the ghost-races win/loss table) is now built, so it's fully unblocked.
+- **The small, order-independent items** (rows 3-5, 8, 10-12) can be interleaved anywhere, including ahead of the bigger lifts — good for sustaining momentum with essentially zero risk of creating rework later.
 
 ---
 
@@ -85,7 +84,7 @@ therefore hasn't been archived yet) — see each source doc for full detail.
 | Expanded Achievements & Badges — every item, now archived (all 22 badges + the notifications/count work above) | `docs/archive/achievements-badges-roadmap.md` |
 | Simultaneous-achievements overlay fix (multi-badge queue) | `docs/archive/simultaneous-achievements-roadmap.md` |
 | Daily/Weekly Challenge — all 6 formats, streak tracking, shareable card, Player Profile history tab, 3 challenge-specific badges | `docs/daily-challenge-roadmap.md` |
-| Ghost Opponent (X01 only) — leg-script replay, New Game leg picker, opponent-badge suppression (win/loss tracking is a separate, not-yet-built open item above) | `docs/ghost-opponent-roadmap.md` |
+| Ghost Opponent (X01 only) — leg-script replay, New Game leg picker, opponent-badge suppression (win/loss tracking is a separate, not-yet-built open item above) | `docs/archive/ghost-opponent-roadmap.md` |
 | Server-side error logging + persistent rotating log + Settings "Server Errors" view (Part A); committed `node:test` suite + CI (Part B) | `docs/testing-and-observability-roadmap.md` |
 | Colorblind mode, WCAG contrast audit fixes, `aria-live` announcements, accessible-input-path framing, type-size pass (standing checklist, not archived — ongoing per CLAUDE.md) | `docs/accessibility-roadmap.md` |
 | Mobile: phone-responsive CSS pass (step 1) | `docs/mobile-app-roadmap.md` |
@@ -111,4 +110,4 @@ therefore hasn't been archived yet) — see each source doc for full detail.
 | Preparing the Existing App for Future Roadmaps — all 11 of its own items | `docs/archive/existing-app-prep-roadmap.md` |
 | Dart Builder v1: `dart_components`/`loadouts` schema, component/loadout CRUD, `game_players.loadout_id` game-creation integration (barrel weight snapshot, retires `players.dart_weight` as a write path), PIN-gated default-loadout + loadout-customization actions, per-loadout stats (games/wins/darts/avg/180s/checkouts), Dart Builder screen (loadout list + editor), Player Profile "Default Loadout" selector, New Game "Change Loadout" picker with auto-default selection, Add Player modal's Dart Weight dropdown removed — visual shape/grip icons, quick-add-full-set, photo upload, and the loadout comparison view remain open items above | `docs/dart-builder-roadmap.md` |
 | Cricket badge parity: Night Owl/Early Bird now fire from Cricket turns too, via a shared `awardTimeOfDayBadges(p)` helper called from both `enterTurn()` and `enterTurnCricket()` — previously X01-only by accident of code structure, not design. Two new Cricket-native badges (Whitewash, Cricket Comeback Kid) remain a separate open item above | `docs/game-modes-roadmap.md` |
-| Ghost Opponent: race win/loss tracking — `ghost_races` table, `recordGhostRace()`/`getGhostRaceRecord()` (server-side re-validates the source leg so a client can't fabricate a fake win history), `POST /api/ghost-races` + `GET /api/players/ghost-race-record`, a "👻 Ghost races: W–L" line on the Player Profile. The "Ghost Slayer" first-win badge this unblocks remains a separate open item above | `docs/ghost-opponent-roadmap.md` |
+| Ghost Opponent — every item, now archived: the original race feature, race win/loss tracking (`ghost_races` table, `recordGhostRace()`/`getGhostRaceRecord()` server-side re-validating the source leg so a client can't fabricate a fake win history, `POST /api/ghost-races` + `GET /api/players/ghost-race-record`, a "👻 Ghost races: W–L" line on the Player Profile), and the 👻 Ghost Slayer first-win badge (awarded inline from `recordGhostRace()`, idempotent via `awardBadge()`'s existing `once` mode) | `docs/archive/ghost-opponent-roadmap.md` |

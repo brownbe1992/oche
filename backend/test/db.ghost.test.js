@@ -1,5 +1,5 @@
 'use strict';
-// Committed tests for Ghost Opponent's backend queries (docs/ghost-opponent-roadmap.md):
+// Committed tests for Ghost Opponent's backend queries (docs/archive/ghost-opponent-roadmap.md):
 // getGhostCandidateLegs() (the browsable "past legs you won" list) and
 // getGhostLegScript() (one specific leg's ordered turn/dart replay script), plus
 // getPersonalBests().bestLeg's null case (the non-null case is covered alongside

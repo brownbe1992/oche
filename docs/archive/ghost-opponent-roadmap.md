@@ -1,13 +1,11 @@
 # Ghost Opponent — Design Roadmap
 
-> Status (2026-07): **the original race feature is fully shipped** (below, unchanged
-> from when this doc was briefly archived). **Ghost Race Win/Loss Tracking is now
-> also built** (further down) — a `ghost_races` table, `POST /api/ghost-races`,
-> `GET /api/players/ghost-race-record`, and a "👻 Ghost races: W–L" line on the
-> Player Profile next to the "Race this leg" button. **One item remains**: "Ghost
-> race badges" (a Ghost Slayer first-win badge), which depended on the win/loss
-> table existing and can now be picked up. Per `CLAUDE.md`'s archiving convention,
-> this doc moves back to `docs/archive/` once that item is also done. See
+> Status (2026-07): **✅ Fully done — every item in this doc is built.** The
+> original race feature, Ghost Race Win/Loss Tracking (`ghost_races` table,
+> `POST /api/ghost-races`, `GET /api/players/ghost-race-record`, the "👻 Ghost
+> races: W–L" line on the Player Profile), and the Ghost Slayer first-win badge are
+> all shipped and verified. Per `CLAUDE.md`'s archiving convention, this doc moves
+> to `docs/archive/` in the same change that finishes this last item. See
 > `docs/open-roadmap-items.md` for the live completion tracker across all roadmaps.
 
 > Status: **✅ Done** (2026-07). Every item below is built and verified: a New Game
@@ -269,23 +267,38 @@ yet). Shows nothing (not "0W-0L") until the player has actually raced at least o
   mirroring `getGhostCandidateLegs()`'s shape) remains a natural future
   extension — not built, since the plain counter already answers what was asked.
 
-## Ghost race badges — design (not yet built; its dependency is now built)
+## Ghost race badges — ✅ Built (2026-07)
 
-> Status: **designed, not started.** Tracked as its own item on
-> `docs/open-roadmap-items.md`, separate from win/loss tracking above since it's a
-> genuinely separable follow-on — it needed the `ghost_races` table to exist
-> first, not just the same PR. That table now exists (above), so this is unblocked.
-
-One new badge, one-time (`once:true`, same style as Around the Clock/World):
+> Status: **done.** One new badge, one-time (`once:true`, same style as Around the
+> Clock/World).
 
 - **👻 Ghost Slayer** — fires on a player's first-ever `result='win'` row in
-  `ghost_races` (a simple `COUNT` check in the same `POST /api/ghost-races` write
-  path, mirroring how every other once-badge is checked at its own trigger point
-  rather than via a separate scan). A win-streak variant (beat the ghost N races
-  in a row) was considered and rejected for v1 — it needs a "most recent N
-  results" query that doesn't exist yet for any other badge, and a first win is
-  the more universally-satisfying milestone (everyone gets exactly one first
-  win; not everyone will string together a streak).
+  `ghost_races`. Built as designed: `db.recordGhostRace()` (`backend/db.js`) calls
+  `awardBadge(playerName, 'ghost_slayer', true)` inline on every human win —
+  `awardBadge()`'s `once` mode is already an idempotent `INSERT OR IGNORE`, so no
+  separate `COUNT` check was needed after all; the call is simply harmless to repeat,
+  and its `newlyEarned` flag (returned to the caller as `recordGhostRace()`'s
+  `ghostSlayerNewlyEarned`) tells the frontend when to celebrate. A win-streak
+  variant (beat the ghost N races in a row) was considered and rejected for v1 — it
+  needs a "most recent N results" query that doesn't exist yet for any other badge,
+  and a first win is the more universally-satisfying milestone (everyone gets
+  exactly one first win; not everyone will string together a streak).
 - Deliberately **one badge, not several** — the existing 22-badge set is curated,
   and this is a niche opt-in practice tool, not a core competitive mode; it
   doesn't need Cricket-style badge parity effort.
+- Frontend: `frontend/index.html`'s `onLegWon()` chains `DB.recordGhostRace(...).then(r=>{...})`
+  (previously fire-and-forget) — on `r.ghostSlayerNewlyEarned`, it calls
+  `trackBadgeForUndo()`, `queueBadge('ghostslayer', ...)`, and `fireMomentCard(...)`,
+  the same three-call pattern used by every other once-badge triggered inside
+  `onLegWon()` (e.g. Grudge Match). `BADGE_INFO`/`ACH_LABELS`/`ACH_DURATION`/
+  `ACH_TYPE_TO_BADGE_ID` all gained a `ghost_slayer`/`ghostslayer` entry (the
+  overlay "type" key is compact/no-underscore per existing convention, bridged to
+  the underscored `badge_id` the same way `grudgematch`/`aroundtheclock` are).
+- Tests: `backend/test/db.ghost-race.test.js` — a human win reports
+  `ghostSlayerNewlyEarned:true` and actually awards the badge; a second win doesn't
+  re-earn or inflate the count (idempotent); a loss doesn't award it. Verified
+  end-to-end with Playwright against a live server: a real 9-dart 501 checkout leg,
+  raced and replayed identically for a human win — correctly POSTs
+  `ghostSlayerNewlyEarned:true`, the achievement queue drains to include
+  `ghost_slayer` in `GET /api/players/badges`, and the Player Profile's Badge Case
+  shows it earned (👻 icon, "Earned" date) with zero JS errors.

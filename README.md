@@ -8,7 +8,7 @@ A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player 
 
 **v0.13.0**
 
-You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [46-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. All data lives in a SQLite database on your own server.
+You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [47-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. All data lives in a SQLite database on your own server.
 
 > Looking for exact stat formulas, achievement trigger conditions, the full database schema, or how a feature works internally (e.g. to debug it)? See **[REFERENCE.md](REFERENCE.md)** — the technical reference manual, kept up to date alongside this README.
 
@@ -221,7 +221,7 @@ choice, no checkout hints, and no bust concept:
 
 ### Achievements & Badges
 
-Beyond 180s, Big Fish, and nine-darters, Oche tracks 22 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 2 Cricket-specific badges, 3 Daily Challenge badges, and 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
+Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 2 Cricket-specific badges, 3 Daily Challenge badges, and 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
 
 | Badge | How to earn it |
 |---|---|
@@ -247,6 +247,7 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 22 X01 achievement badges c
 | ⚔️ **Grudge Match** | Play 10+ H2H games against the same opponent |
 | 🕐 **Around the Clock** | Hit every number 1–20 as a single within one session |
 | 🌍 **Around the World** | Hit every dart outcome at least once, over your lifetime — 63 total: singles/doubles/trebles 1–20, outer bull, double bull, and a miss |
+| 👻 **Ghost Slayer** | Win a race against a [👻 Ghost](#new-game) — a replay of one of your own past legs |
 
 **Cricket's 2 badges** (its own analogs of 180 and the nine-darter):
 
@@ -275,7 +276,7 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 22 X01 achievement badges c
 |---|---|
 | 🎯 **180!** | Three darts, sixty each — assuming 3 darts per turn (the same convention as the ladders above), since Just Chuckin' It otherwise has no turn boundary at all |
 
-**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 46-badge roster, grouped into X01/Cricket/Daily Challenge/Just Chuckin' It sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 4 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout), Full Rotation, and all 18 Just Chuckin' It milestones are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
+**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 47-badge roster, grouped into X01/Cricket/Daily Challenge/Just Chuckin' It sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), Full Rotation, and all 18 Just Chuckin' It milestones are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
 
 **Around the World Progress** — a dedicated grid on the Player Profile showing exactly which of the 63 lifetime dart outcomes are still missing, alongside the Badge Case.
 
@@ -314,7 +315,7 @@ A recurring, Wordle-style solo challenge — the same challenge for everyone on 
 
 ### Shareable Moments
 
-Big moments — a 180, a Big Fish, a nine-darter, a match win, any of the 22 [achievement badges](#achievements--badges), an [On This Day](#player-profile) flashback, or a completed [Daily Challenge](#daily-challenge) — get a **📤 Share** button that generates a shareable card image entirely on-device (canvas, styled to match the app), then either opens your phone's native share sheet (to Messages, X, Instagram, Facebook, or anything else it offers) or falls back to a plain image download on browsers without share-sheet support. Nothing is ever uploaded anywhere by this button — it's the same image whether you share it or save it.
+Big moments — a 180, a Big Fish, a nine-darter, a match win, any of the 23 [achievement badges](#achievements--badges), an [On This Day](#player-profile) flashback, or a completed [Daily Challenge](#daily-challenge) — get a **📤 Share** button that generates a shareable card image entirely on-device (canvas, styled to match the app), then either opens your phone's native share sheet (to Messages, X, Instagram, Facebook, or anything else it offers) or falls back to a plain image download on browsers without share-sheet support. Nothing is ever uploaded anywhere by this button — it's the same image whether you share it or save it.
 
 - **Where it shows up:** the achievement overlay (180/Big Fish/nine-darter/any badge) while it's flashing, the Game Over screen after a match win, the Daily Challenge result panel, a badge's entry in the **Badge Case**, and next to Best Leg Average / Fewest Darts to Finish on a **Player Profile**'s Personal Bests.
 - **Card tagline** (**Settings → Shareable Moments**) — a short editable line printed on every card, defaulting to "Darts tracked via Oche — track your darts today!". Update it once you have a real website or social handle to point at.
@@ -359,7 +360,7 @@ regardless of player count or screen orientation.
 
 **Leg/Set/Game banners:** full-screen result announced when a unit ends.
 
-**Achievement overlays:** full-screen flash for 180s (🎯), Big Fish (🐟), and nine-darters (🏆, with confetti) the moment they're scored, plus any of the 22 [achievement badges](#achievements--badges) (Hat Trick, Nerves of Steel, Around the World, and so on) — each with a **📤 Share** button (see [Shareable Moments](#shareable-moments) below). If a single turn or leg genuinely earns more than one badge at once, every one of them shows and shares in sequence instead of only the last one — see [Achievements & Badges](#achievements--badges) below.
+**Achievement overlays:** full-screen flash for 180s (🎯), Big Fish (🐟), and nine-darters (🏆, with confetti) the moment they're scored, plus any of the 23 [achievement badges](#achievements--badges) (Hat Trick, Nerves of Steel, Around the World, and so on) — each with a **📤 Share** button (see [Shareable Moments](#shareable-moments) below). If a single turn or leg genuinely earns more than one badge at once, every one of them shows and shares in sequence instead of only the last one — see [Achievements & Badges](#achievements--badges) below.
 
 The scoreboard is read-only and can be open on any number of screens simultaneously.
 
@@ -463,7 +464,7 @@ On the Doubles Practice toggle, this section shows just **Best Round (Darts)** a
 
 #### Badge Case
 
-The full 46-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (22 badges), a **Cricket** section (2 badges), a **Daily Challenge** section (3 badges), and a **Just Chuckin' It** section (19 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
+The full 47-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (23 badges), a **Cricket** section (2 badges), a **Daily Challenge** section (3 badges), and a **Just Chuckin' It** section (19 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
 
 #### On This Day
 

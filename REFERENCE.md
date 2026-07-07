@@ -610,7 +610,7 @@ the first thing to check if someone asks "why doesn't X match Y."
 which specific leg produced `bestLegAvg` (`null` if no won legs exist yet) — feeds
 the Player Profile's "👻" Race-this-leg button (§ Ghost Opponent, below).
 
-### Ghost Opponent (`docs/ghost-opponent-roadmap.md`) — race a replay of your own past leg
+### Ghost Opponent (`docs/archive/ghost-opponent-roadmap.md`) — race a replay of your own past leg
 
 X01-only. Two backend functions in `backend/db.js`, both scoped so a script/leg list
 can only ever be built from legs the requesting player genuinely won themselves:
@@ -641,7 +641,7 @@ Match/Nerves of Steel (all opponent-based) can never fire against a ghost; badge
 based on the human's own performance (Big Fish, Cruise Control, etc.) are unaffected.
 The ghost's turns are never persisted — no `game_players` row, no stats, no
 leaderboard/badge eligibility. **The race's own result IS tracked**, however
-(2026-07, `docs/ghost-opponent-roadmap.md`): `onLegWon(wi)` already knows which
+(2026-07, `docs/archive/ghost-opponent-roadmap.md`): `onLegWon(wi)` already knows which
 side won (`wi===0` human, `wi===1` ghost, since turns strictly alternate and only
 a checkout ends the leg — no tie case exists), and the leg-win handler records it
 via `recordGhostRace()`/`POST /api/ghost-races` when `game.hasGhost` is set,
@@ -652,7 +652,9 @@ leg server-side via the same `getGhostLegScript()` ownership check used to build
 the script in the first place, so a hostile client can't fabricate a fake win
 history. `GET /api/players/ghost-race-record` returns `{wins, losses, totalRaces}`,
 surfaced as a plain "👻 Ghost races: W–L" line next to the Player Profile's
-"Race this leg" button (`loadGhostRaceRecord()`).
+"Race this leg" button (`loadGhostRaceRecord()`). A win also checks the 👻 Ghost
+Slayer badge (§4's badge table) — `recordGhostRace()`'s `ghostSlayerNewlyEarned`
+return value tells `onLegWon()` whether to run the usual celebration sequence.
 
 ### Top Finishes / Checkout Routes
 
@@ -1026,16 +1028,22 @@ revokes any `chuckin180` badge that dart awarded — see above.
 
 ## 4. Achievements & Badges
 
-46 badges (22 X01 + 2 Cricket + 3 Daily Challenge + 19 Just Chuckin' It) — that
-split is by which table each is listed under below, not a strict statement of
-which game types can trigger it: Night Owl/Early Bird (listed under X01) are the
-one exception, checked from both `enterTurn()` and `enterTurnCricket()` via a
-shared `awardTimeOfDayBadges()` helper (2026-07 — previously Cricket-triggerable
-by neither, an accident of code structure rather than a deliberate scoping
-decision). Tracked in the `player_badges` table (one row per player+badge, with
-a running `count`). X01 detection logic lives in `frontend/index.html`'s
-`enterTurn()`/`onLegWon()`; Cricket's 2 own badges live in
-`enterTurnCricket()`/`onLegWonCricket()`; Daily Challenge's 3 badges are
+47 badges (23 X01 + 2 Cricket + 3 Daily Challenge + 19 Just Chuckin' It) — that
+split is by which table each is listed under below (and which section of the
+Player Profile's Badge Case each renders in, via `BADGE_INFO`'s `cricket`/
+`challenge`/`chuckin` flags — anything without one of those flags buckets as
+X01), not a strict statement of which game types can trigger it: Night Owl/
+Early Bird (listed under X01) are one exception, checked from both
+`enterTurn()` and `enterTurnCricket()` via a shared `awardTimeOfDayBadges()`
+helper (2026-07 — previously Cricket-triggerable by neither, an accident of
+code structure rather than a deliberate scoping decision); Ghost Slayer
+(also listed under X01, since Ghost Opponent is X01-only) is the other,
+checked inline in `recordGhostRace()` (`backend/db.js`) rather than from the
+frontend at all, since the win it depends on is already being written to the
+database right there. Tracked in the `player_badges` table (one row per
+player+badge, with a running `count`). X01 detection logic otherwise lives in
+`frontend/index.html`'s `enterTurn()`/`onLegWon()`; Cricket's 2 own badges live
+in `enterTurnCricket()`/`onLegWonCricket()`; Daily Challenge's 3 badges are
 checked in `checkChallengeBadges()`, called right after every
 `/api/challenges/complete` response; Just Chuckin' It's 18 laddered milestones
 are checked in `checkChuckinMilestones()`, called after every dart from
@@ -1052,9 +1060,13 @@ same function (see §2/§3's own coverage of it).
   state-based badges whose trigger condition stays true forever once crossed
   (`INSERT OR IGNORE`, so re-checking an already-true condition never inflates
   the count past 1): **Around the Clock, Around the World, Grudge Match, First
-  100+ Checkout, Full Rotation**.
+  100+ Checkout, Full Rotation, Ghost Slayer** — Ghost Slayer is the one
+  exception to "a direct `Backend.send()` call": its `awardBadge(..., true)`
+  call happens server-side, inside `recordGhostRace()` itself (see above), and
+  its `newlyEarned` flag reaches the frontend as `recordGhostRace()`'s own
+  `ghostSlayerNewlyEarned` field rather than a separate response.
 
-### The 22 badges, exact trigger conditions
+### The 23 badges, exact trigger conditions
 
 **Expanded-chain badges** (the `CHAIN_CHECKS` list in `enterTurn()` — collected
 as an array and filtered by suppression pairs, not an if/else-if chain, so a
@@ -1098,6 +1110,7 @@ co-fire with a chain badge or with each other in the same turn/leg:
 | ⚔️ **Grudge Match** | On a match win, the same `h2h-summary` lookup shows `totalGames >= 10` against this opponent. **Once-badge** per player — awarded to both the winner and the loser once the threshold is first crossed. |
 | 🕐 **Around the Clock** | `singlesHit.size >= 20` — every number 1–20 hit as a single at least once **within the current game** (`singlesHit` is created fresh in `newMatchPlayer()` at every `startGame()`, persists across legs/sets within that game, and resets when a new game starts — not just on page reload). **Once-badge.** |
 | 🌍 **Around the World** | Lifetime: all 63 dart outcomes hit at least once (20 numbers × single/double/treble = 60, plus outer bull, double bull, and a miss). Checked via an async progress query (`/api/players/around-the-world`), skipped once the client-side `earnedBadgeCache` already has it. **Once-badge.** |
+| 👻 **Ghost Slayer** | First-ever `result==='win'` row this player writes to the `ghost_races` table (§13) — win a race against a replay of one of your own past legs (Ghost Opponent, below). Unlike every other badge in this table, checked server-side: `recordGhostRace()` (`backend/db.js`) calls `awardBadge(playerName, 'ghost_slayer', true)` on every win — `once` mode's `INSERT OR IGNORE` makes the call a no-op past the first time, so no separate first-win check is needed. **Once-badge.** |
 
 **Cricket badges** (checked in `enterTurnCricket()`/`onLegWonCricket()`,
 `frontend/index.html` — game-modes-roadmap.md build-order step 3, the direct
@@ -1178,10 +1191,11 @@ screen-reader announcement (§11). There is no separate copy to maintain in
 three places — if you change a badge's description, change it once in
 `BADGE_INFO`.
 
-Four badges' live-overlay "type" key differs from their persisted `badge_id`
+Five badges' live-overlay "type" key differs from their persisted `badge_id`
 (a historical naming mismatch, bridged by `ACH_TYPE_TO_BADGE_ID`):
 `first100checkout`→`first_100_checkout`, `grudgematch`→`grudge_match`,
-`aroundtheclock`→`around_the_clock`, `aroundtheworld`→`around_the_world`.
+`aroundtheclock`→`around_the_clock`, `aroundtheworld`→`around_the_world`,
+`ghostslayer`→`ghost_slayer`.
 
 ### Undo interaction
 
@@ -1218,8 +1232,8 @@ reference — it defaults to `game.lastTurnSnapshot` at call time (correct for
 the synchronous majority of call sites, called directly from `enterTurn()`/
 `onLegWonCricket()`/etc.), but the handful of call sites that queue a badge
 from inside an async `.then()` (Around the Clock/World, First 100+ Checkout,
-Full Rotation, The Rematch, Grudge Match) pass their own already-captured
-snap variable explicitly instead, since `game.lastTurnSnapshot` may have moved
+Full Rotation, The Rematch, Grudge Match, Ghost Slayer) pass their own
+already-captured snap variable explicitly instead, since `game.lastTurnSnapshot` may have moved
 on to a newer turn by the time the response arrives. Two call sites
 (`challengeweek`, `challengemonth`) pass `null` deliberately — Daily Challenge
 streak badges have no undo-tracking at all (a separate, pre-existing gap;
@@ -1292,7 +1306,7 @@ accurate data. `patchAchievementCount()` is guarded by `currentAchType`/
 badge or a different player's instance of the same badge type by the time the
 response arrives (graceful, not a bug; typically near-instant on a LAN).
 Once-badges (`once:true` — Around the Clock/World, Grudge Match, First 100+
-Checkout, Full Rotation, every Just Chuckin' It milestone tier) skip this
+Checkout, Full Rotation, Ghost Slayer, every Just Chuckin' It milestone tier) skip this
 entirely: they already have the award response in scope at the point they call
 `queueBadge()` inside their own `.then()`, so they pass the literal string
 `'First time!'` immediately rather than a numeric count — showing `count === 1`

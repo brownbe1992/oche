@@ -1391,8 +1391,8 @@ const DB = {
   getDefaultLoadout(player){ return Backend.get(`/api/players/default-loadout?name=${encodeURIComponent(player)}`); },
   setDefaultLoadout(player, loadoutId){ return Backend.send('PUT','/api/players/default-loadout',{name:player, loadoutId}); },
 
-  // Ghost Opponent win/loss tracking (docs/ghost-opponent-roadmap.md)
-  recordGhostRace(player, fields){ Backend.send('POST','/api/ghost-races',{player, ...fields}).catch(logErr); },
+  // Ghost Opponent win/loss tracking (docs/archive/ghost-opponent-roadmap.md)
+  recordGhostRace(player, fields){ return Backend.send('POST','/api/ghost-races',{player, ...fields}); },
   ghostRaceRecord(player){ return Backend.get(`/api/players/ghost-race-record?name=${encodeURIComponent(player)}`); },
 
   // game + turn writes
@@ -2236,7 +2236,7 @@ function setMode(mode){
   document.getElementById('h2h-options').hidden = (mode !== 'h2h');
   // Daily Challenge and Ghost Opponent are both X01-only — force the game-type
   // choice back and hide it entirely rather than offering a combination that was
-  // never designed (docs/ghost-opponent-roadmap.md is explicitly X01-only for v1).
+  // never designed (docs/archive/ghost-opponent-roadmap.md is explicitly X01-only for v1).
   // Doubles Practice and Just Chuckin' It are each their own game_type, not a
   // choice between X01/Cricket, so they hide the same X01/Cricket-specific
   // sections for the same reason — Just Chuckin' It additionally has no config
@@ -2302,7 +2302,7 @@ function setMode(mode){
   }
 }
 
-/* ---------- Ghost Opponent (docs/ghost-opponent-roadmap.md) ---------- */
+/* ---------- Ghost Opponent (docs/archive/ghost-opponent-roadmap.md) ---------- */
 // Set by raceLeg() (Player Profile's "Race this leg" entry point) right before
 // switching into Ghost mode — consumed once, by the next renderGhostLegPicker()
 // fetch, to preselect that specific leg instead of the default (most recent).
@@ -3158,7 +3158,7 @@ async function startGame(){
   } else {
     activeChallenge = null; // guard against a stale challenge from an earlier abandoned attempt
   }
-  // Ghost Opponent (docs/ghost-opponent-roadmap.md): fetch the chosen past leg's
+  // Ghost Opponent (docs/archive/ghost-opponent-roadmap.md): fetch the chosen past leg's
   // full dart-by-dart script before building the game — the ghost's fixed replay.
   let ghostScript = null;
   if(setup.mode === 'ghost'){
@@ -3241,7 +3241,7 @@ async function startGame(){
     lastTurnEvent: null,   // one-shot: outcome of the turn just entered (voice announcements)
     matchResult: null,     // one-shot: leg/set/game just won (voice announcements)
     legStart: null,        // one-shot: a new leg just began, who's throwing first (voice announcements)
-    hasGhost: false,       // true for a Ghost Opponent race (docs/ghost-opponent-roadmap.md)
+    hasGhost: false,       // true for a Ghost Opponent race (docs/archive/ghost-opponent-roadmap.md)
     // Doubles Practice (docs/game-modes-roadmap.md): per-dart evaluation, not
     // per-visit — a round runs until evaluateDartDoublesPractice() ends it
     // (so-close or wrong-double), never on a fixed dart count.
@@ -3252,7 +3252,7 @@ async function startGame(){
   };
   if(setup.mode === 'ghost'){
     game.hasGhost = true;
-    // Captured now rather than read from setup.ghostLeg later (docs/ghost-opponent-roadmap.md
+    // Captured now rather than read from setup.ghostLeg later (docs/archive/ghost-opponent-roadmap.md
     // win/loss tracking) — this survives regardless of what setup.ghostLeg becomes
     // after leaving the New Game screen.
     game.ghostSourceLeg = { gameId: setup.ghostLeg.gameId, setNo: setup.ghostLeg.setNo, legNo: setup.ghostLeg.legNo };
@@ -3316,7 +3316,7 @@ function newMatchPlayer(name, start){
     singlesHit: new Set() };     // distinct 1-20 singles hit this session (Around the Clock)
 }
 
-// Ghost Opponent (docs/ghost-opponent-roadmap.md): a virtual second "player" whose
+// Ghost Opponent (docs/archive/ghost-opponent-roadmap.md): a virtual second "player" whose
 // throws are read from a past leg's recorded script instead of tapped in — same
 // runtime shape as newMatchPlayer() (every render path reads plain player fields,
 // game-type-agnostic), plus isGhost/ghostScript/ghostTurnIndex to drive playGhostTurn().
@@ -4088,6 +4088,7 @@ const BADGE_INFO = {
   challengemonth:      { icon:'🏆', label:'Challenge Streak: Month', desc:'Complete the Daily Challenge 30 days in a row.', challenge:true },
   challengeallformats: { icon:'🗓️', label:'Full Rotation', desc:'Complete every Daily Challenge format at least once.', challenge:true },
   chuckin180: { icon:'🎯', label:'180!', desc:"Three darts, sixty each — treated as a turn, since Just Chuckin' It otherwise has no turn boundary at all.", chuckin:true },
+  ghost_slayer:        { icon:'👻', label:'Ghost Slayer', desc:'Beat your ghost opponent — win a race against a replay of one of your own past legs.' },
 };
 function loadPlayerBadges(){
   const container=document.getElementById('player-badges');
@@ -4292,7 +4293,7 @@ function loadPersonalBests(){
     .then(data=>{ renderPersonalBests(data); loadGhostRaceRecord(); })
     .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load personal bests.</p>`; });
 }
-// docs/ghost-opponent-roadmap.md: populates the #ghost-race-record span next to the
+// docs/archive/ghost-opponent-roadmap.md: populates the #ghost-race-record span next to the
 // "Race this leg" button — a no-op if that span doesn't exist (a non-X01 Personal
 // Bests view has no such button, since ghost races are X01-only).
 function loadGhostRaceRecord(){
@@ -4319,7 +4320,7 @@ function renderPersonalBests(data){
     ? `<div class="stat-block"><div class="stat-val">${data.recentFormAvg.toFixed(1)}</div><div class="stat-label">Recent Form (last 10 legs) ${formDelta>=0?'▲':'▼'} ${Math.abs(formDelta).toFixed(1)}</div></div>`
     : '';
   const shareBtn = (onclick) => `<button class="iconbtn" title="Share" style="margin-top:4px" onclick="${onclick}">📤</button>`;
-  // Ghost Opponent entry point (docs/ghost-opponent-roadmap.md): race the exact leg
+  // Ghost Opponent entry point (docs/archive/ghost-opponent-roadmap.md): race the exact leg
   // that produced this player's best leg average, right from the stat that names it.
   // The win/loss record line (#ghost-race-record) is populated separately by
   // loadGhostRaceRecord(), called right after this renders — plain text, not a new
@@ -4594,7 +4595,7 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   cricket9marks:'9 Marks! 🎯', cricketperfectclose:'🏆 PERFECT LEG! 🏆',
   challengeweek:'Challenge Streak: Week! 🔥', challengemonth:'🏆 CHALLENGE STREAK: MONTH! 🏆',
   challengeallformats:'Full Rotation! 🗓️', nocigar:'No Cigar 🤦', chuckin180:'180! 🎯',
-  staircasefinish:'Staircase Finish! 🪜' };
+  staircasefinish:'Staircase Finish! 🪜', ghostslayer:'Ghost Slayer! 👻' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -4603,13 +4604,14 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500,
   cricket9marks:2500, cricketperfectclose:6000,
   challengeweek:3000, challengemonth:6000, challengeallformats:3500, nocigar:2500, chuckin180:2500,
-  staircasefinish:3000 };
+  staircasefinish:3000, ghostslayer:3500 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
 const ACH_TYPE_TO_BADGE_ID = {
   first100checkout: 'first_100_checkout', grudgematch: 'grudge_match',
   aroundtheclock: 'around_the_clock', aroundtheworld: 'around_the_world',
+  ghostslayer: 'ghost_slayer',
 };
 // 180/Big Fish/Nine-darter aren't in BADGE_INFO (they're older top-level stats, not
 // player_badges rows), so they get their own short explanation lines here.
@@ -5910,7 +5912,7 @@ function enterTurn(){
   pushLive();
   // Ghost Opponent: the ghost has no input of its own — it auto-advances through
   // its scripted leg right after the human's turn rather than waiting on the
-  // original historical pace (docs/ghost-opponent-roadmap.md's open question,
+  // original historical pace (docs/archive/ghost-opponent-roadmap.md's open question,
   // resolved as "advance as fast as the live player throws" for v1 — simpler, no
   // awkward waiting period). A short fixed delay (not a real wait) lets the human
   // see their own result and the "▸ throwing" flag on the ghost's card first, and
@@ -6240,19 +6242,26 @@ function onLegWon(wi){
     lastLegWasChallenge = true;
     activeChallenge = null;
   }
-  // Ghost Opponent win/loss tracking (docs/ghost-opponent-roadmap.md): a ghost
+  // Ghost Opponent win/loss tracking (docs/archive/ghost-opponent-roadmap.md): a ghost
   // race is always exactly 1 leg/1 set, so this leg-win IS the race's result —
   // game.players[0] is always the human, game.players[1] always the ghost (see
   // newGhostPlayer()), so wi identifies which side just won. Recorded once, here,
   // since the leg-complete screen offers no "undo" control past this point.
   if(game.hasGhost && game.ghostSourceLeg && DB.gameId != null){
     const human = game.players[0], ghost = game.players[1];
+    const _snapGs = game.lastTurnSnapshot;
     DB.recordGhostRace(human.name, {
       gameId: DB.gameId,
       sourceGameId: game.ghostSourceLeg.gameId, sourceSetNo: game.ghostSourceLeg.setNo, sourceLegNo: game.ghostSourceLeg.legNo,
       result: wi === 0 ? 'win' : 'loss',
       humanDarts: human.legDarts, ghostDarts: ghost.legDarts,
-    });
+    }).then(r=>{
+      if(r && r.ghostSlayerNewlyEarned){
+        trackBadgeForUndo(_snapGs, human.name, 'ghost_slayer');
+        queueBadge('ghostslayer', human.name, _snapGs, 'First time!');
+        fireMomentCard('ghostslayer', { icon:'👻', headline:'GHOST SLAYER', player:human.name, statLine:'Beat your ghost opponent' });
+      }
+    }).catch(logErr);
   }
   game.matchResult = { ts: Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:_bigFish };
   finishUnit('leg', w.name);

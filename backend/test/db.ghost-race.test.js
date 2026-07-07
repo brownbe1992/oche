@@ -1,8 +1,8 @@
 'use strict';
-// Committed tests for Ghost Opponent win/loss tracking (docs/ghost-opponent-roadmap.md):
+// Committed tests for Ghost Opponent win/loss tracking (docs/archive/ghost-opponent-roadmap.md):
 // recordGhostRace()'s validation (result enum, source-leg ownership re-check, the
-// race game actually belonging to that player) and getGhostRaceRecord()'s win/loss
-// counting.
+// race game actually belonging to that player), getGhostRaceRecord()'s win/loss
+// counting, and the Ghost Slayer first-win badge recordGhostRace() awards inline.
 const { test, describe, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -131,5 +131,41 @@ describe('ghost_races cascade + export behavior', () => {
     assert.equal(db.getGhostRaceRecord(name).totalRaces, 1);
     db.resetStats();
     assert.equal(db.getGhostRaceRecord(name).totalRaces, 0);
+  });
+});
+
+describe('Ghost Slayer badge (docs/archive/ghost-opponent-roadmap.md "Ghost race badges")', () => {
+  test('a human win reports ghostSlayerNewlyEarned:true and actually awards the badge', () => {
+    const name = uniquePlayer();
+    const leg = buildWonLeg(name);
+    const race = buildRaceGame(name);
+    const result = db.recordGhostRace(name, { gameId: race, sourceGameId: leg.gameId, sourceSetNo: leg.setNo, sourceLegNo: leg.legNo, result: 'win' });
+    assert.equal(result.ghostSlayerNewlyEarned, true);
+    const badges = db.getPlayerBadges(name);
+    const gs = badges.find(b => b.badge_id === 'ghost_slayer');
+    assert.ok(gs, 'ghost_slayer badge row should exist');
+    assert.equal(gs.count, 1);
+  });
+
+  test('a second win does not re-earn or inflate the badge count (once:true, idempotent)', () => {
+    const name = uniquePlayer();
+    const leg = buildWonLeg(name);
+    const race1 = buildRaceGame(name);
+    const race2 = buildRaceGame(name);
+    const first = db.recordGhostRace(name, { gameId: race1, sourceGameId: leg.gameId, sourceSetNo: leg.setNo, sourceLegNo: leg.legNo, result: 'win' });
+    const second = db.recordGhostRace(name, { gameId: race2, sourceGameId: leg.gameId, sourceSetNo: leg.setNo, sourceLegNo: leg.legNo, result: 'win' });
+    assert.equal(first.ghostSlayerNewlyEarned, true);
+    assert.equal(second.ghostSlayerNewlyEarned, false);
+    const gs = db.getPlayerBadges(name).find(b => b.badge_id === 'ghost_slayer');
+    assert.equal(gs.count, 1);
+  });
+
+  test('a loss does not award the badge', () => {
+    const name = uniquePlayer();
+    const leg = buildWonLeg(name);
+    const race = buildRaceGame(name);
+    const result = db.recordGhostRace(name, { gameId: race, sourceGameId: leg.gameId, sourceSetNo: leg.setNo, sourceLegNo: leg.legNo, result: 'loss' });
+    assert.equal(result.ghostSlayerNewlyEarned, false);
+    assert.ok(!db.getPlayerBadges(name).some(b => b.badge_id === 'ghost_slayer'));
   });
 });

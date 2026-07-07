@@ -858,7 +858,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, db.setDefaultLoadout(b.name, b.loadoutId));
     }
 
-    // ----- ghost opponent win/loss tracking (docs/ghost-opponent-roadmap.md) -----
+    // ----- ghost opponent win/loss tracking (docs/archive/ghost-opponent-roadmap.md) -----
     if (p === '/api/ghost-races' && m === 'POST') {
       if (!requireWrite(req, res)) return;
       const b = await readJson(req);

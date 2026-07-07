@@ -40,7 +40,7 @@ describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
       'tournaments', 'tournamentPlayers', 'tournamentRounds', 'tournamentMatches',
       // docs/dart-builder-roadmap.md: same standing rule applied to loadout data
       'dartComponents', 'loadouts',
-      // docs/ghost-opponent-roadmap.md: same standing rule applied to ghost races
+      // docs/archive/ghost-opponent-roadmap.md: same standing rule applied to ghost races
       'ghostRaces',
     ].sort());
 
