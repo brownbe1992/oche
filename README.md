@@ -6,7 +6,7 @@
 
 A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player statistics, and no external dependencies.
 
-**v0.11.2**
+**v0.12.0**
 
 You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [46-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. All data lives in a SQLite database on your own server.
 
