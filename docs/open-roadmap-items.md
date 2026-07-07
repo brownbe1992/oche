@@ -33,10 +33,10 @@
 | 7 | Mobile: distribution decision — App Store/Play Store listing vs. simpler sideload distribution (step 6) | `docs/mobile-app-roadmap.md` | Low-Medium |
 | 8 | Localize voice announcements beyond hardcoded English phrases | `docs/voice-announcements-i18n-roadmap.md` | Low-Medium |
 | 9 | Dart Builder: loadout comparison view (side-by-side stats for two or more of a player's loadouts; explicitly a v1 stretch goal, not required) | `docs/dart-builder-roadmap.md` | Low-Medium |
-| 10 | Dartboard zone & miss-area tracking — a nullable `darts.zone` column (`'inner'`\|`'outer'`\|`NULL`) populated only by Dartboard-tap-mode singles, so heatmaps (`topSectors`, and a new `getDartHeatmap()`) can tell "hit above the treble" apart from "hit below the treble" instead of collapsing both into one bucket per number; also generalizes Just Chuckin' It's dartboard-shaped heatmap (today Chuckin-exclusive) to X01, Cricket, and Doubles Practice; also replaces Dartboard mode's flat Miss button with a positional miss ring (20 wedges outside the double, a new `darts.miss_zone` column) so misses show up on the heatmap by direction too, not just as an undifferentiated count | `docs/dartboard-zone-tracking-roadmap.md` | Low-Medium |
-| 11 | Cricket: two new native badges — 🧹 Whitewash (won without the opponent closing a single number) and a Cricket-shaped Comeback Kid (points-based, not X01's remaining-score-based version) | `docs/game-modes-roadmap.md` | Low-Medium |
-| 12 | Tournament: two new badges — 🏆 Champion (win a bracket) and a seed-based Giant Slayer equivalent (beat a meaningfully higher seed) | `docs/tournament-mode-roadmap.md` | Low-Medium |
-| 13 | Tournament: stats on the Player Profile (wins, runner-up count, best finish reached) — the doc's own step 4 stretch goal, expanded into a full design | `docs/tournament-mode-roadmap.md` | Low-Medium |
+| 10 | Cricket: two new native badges — 🧹 Whitewash (won without the opponent closing a single number) and a Cricket-shaped Comeback Kid (points-based, not X01's remaining-score-based version) | `docs/game-modes-roadmap.md` | Low-Medium |
+| 11 | Tournament: two new badges — 🏆 Champion (win a bracket) and a seed-based Giant Slayer equivalent (beat a meaningfully higher seed) | `docs/tournament-mode-roadmap.md` | Low-Medium |
+| 12 | Tournament: stats on the Player Profile (wins, runner-up count, best finish reached) — the doc's own step 4 stretch goal, expanded into a full design | `docs/tournament-mode-roadmap.md` | Low-Medium |
+| 13 | Dartboard zone/miss/bounce-out tracking — a nullable `darts.zone` column so heatmaps can tell an inner single from an outer single instead of one merged bucket; generalizes Just Chuckin' It's dartboard-shaped heatmap (today Chuckin-exclusive) to X01, Cricket, and Doubles Practice; replaces Dartboard mode's flat Miss button with a two-band (near/far) positional miss ring; adds a "Bounce Out" toggle (both input modes) for darts that struck the board but didn't stay, tracked separately via shadow columns so scoring/badges are untouched | `docs/dartboard-zone-tracking-roadmap.md` | Medium |
 | 14 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
 | 15 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
 | 16 | League mode (new tables, no new infra; complements tournament mode) | `docs/league-mode-roadmap.md` | Medium |
@@ -53,7 +53,7 @@
 
 - **Tournament mode (single-elimination) is done** and its `tournament_matches.game_id` FK is the real, shipped precedent league mode's "games link into a context table" pattern (see `CLAUDE.md`) can now follow directly, rather than a hoped-for one.
 - **Mobile app's steps are sequential as listed** (step 2 → 3 → 4 → 5 → 6 → 7) per `docs/mobile-app-roadmap.md`'s own suggested build order; its one prerequisite (the responsive CSS pass) is already done.
-- **The small, order-independent items** (rows 3-5, 8-13) can be interleaved anywhere, including ahead of the bigger lifts — good for sustaining momentum with essentially zero risk of creating rework later.
+- **The small, order-independent items** (rows 3-5, 8-12) can be interleaved anywhere, including ahead of the bigger lifts — good for sustaining momentum with essentially zero risk of creating rework later.
 
 ---
 

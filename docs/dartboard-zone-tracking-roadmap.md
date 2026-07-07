@@ -7,9 +7,12 @@
 > Chuckin' It — to X01, Cricket, and Doubles Practice, since the `darts` table
 > and the SVG geometry are already shared across every game type (see "Beyond
 > Just Chuckin' It" below), and expanded again (2026-07) to replace the flat
-> "Miss" button in Dartboard mode with a positional miss ring outside the
-> double, so misses land on the heatmap too, not just hits (see "Miss-area
-> tracking" below).
+> "Miss" button in Dartboard mode with a two-band (near/far) positional miss
+> ring outside the double, so misses land on the heatmap too, not just hits
+> (see "Miss-area tracking" below), plus a "Bounce Out" toggle (available in
+> both input modes) for darts that struck the board but didn't stay, tracked
+> separately from both hits and misses so they don't distort either (see
+> "Bounce-out tracking" below).
 
 ## Goal (as requested)
 
@@ -249,49 +252,61 @@ see inner-vs-outer single tendencies.
 
 `buildDartboard()` already tiles the board into 20 angular wedges via
 `DB_SECTORS`/`DEG` — the natural, lowest-effort "miss grid" is simply **the
-same 20 wedges, extended radially outward past the double ring**, into a new
-outer annulus. This keeps the existing polar coordinate math
-(`xy(r, deg)`/`annulus(r1, r2, s, e)`) doing all the work — no new grid system,
-no rectangular overlay that would look bolted-on next to a circular board.
+same 20 wedges, extended radially outward past the double ring**, into two new
+outer annuli. This keeps the existing polar coordinate math (`xy(r, deg)`/
+`annulus(r1, r2, s, e)`) doing all the work — no new grid system, no
+rectangular overlay that would look bolted-on next to a circular board.
 Tapping the outer-ring segment nearest the "20" wedge means "missed the board,
 but was headed for roughly where 20 is" — exactly the kind of directional
 information a real coach would note ("you keep missing 20 wide left").
 
-Concretely, `buildDartboard()` gains one more ring beyond `R.bg` (today the
-board's outermost background circle, `r=248`, inside a `viewBox="0 0 500 500"`
-that barely contains it): a `R.missRing` radius (e.g. `290`), with the SVG's
-`viewBox` enlarged to fit it (e.g. `"0 0 620 620"`, board recentered). Each of
-the 20 angular wedges gets one more clickable `annulus(R.bg, R.missRing, s0,
-e0)` path, styled distinctly from the scoring rings (a muted, clearly
-"off-board" texture/color — not one of the light/dark single colors — so it
-reads as *outside the board* at a glance, not as a 21st scoring ring) —
-`onclick="throwDartBoard(0,1,null,${num})"`. **The flat `#board-miss-btn` is
-removed from the Dartboard-mode markup entirely** (both the static
-`screen-game` HTML and `renderGameShell()`'s rebuilt copy) — every miss in
-Dartboard mode now has to land somewhere in the ring, no ungated fallback.
-**Pad mode's Miss button is untouched** — `applyDartMode()` already only shows
-`#board-miss-btn` when `dartboardMode` is true, so Pad mode's copy of the
-button (rendered by `renderPad()`, a separate code path) is unaffected by
-removing the Dartboard-mode one.
+**Two concentric bands, not one** (per follow-up request): a **near** ring
+immediately outside the double (a close call — the dart grazed the double
+wire or landed just past it) and a **far** ring beyond that (a proper miss,
+nowhere close). These are meaningfully different misses to a player working
+on their finishing: consistently near-missing a double is a precision problem;
+consistently far-missing means something else went wrong with the throw
+entirely. Concretely, `buildDartboard()` gains two more rings beyond `R.bg`
+(today the board's outermost background circle, `r=248`, inside a
+`viewBox="0 0 500 500"` that barely contains it): `R.missNear` (e.g. `270`)
+and `R.missFar` (e.g. `310`), with the SVG's `viewBox` enlarged to fit both
+(e.g. `"0 0 660 660"`, board recentered). Each of the 20 angular wedges gets
+two more clickable paths — `annulus(R.bg, R.missNear, s0, e0)` and
+`annulus(R.missNear, R.missFar, s0, e0)` — styled distinctly from the scoring
+rings (a muted, clearly "off-board" texture/color, with the near ring visually
+closer in tone to the board and the far ring more clearly "outside," so the
+two read as different at a glance without needing to consult a legend) —
+`onclick="throwDartBoard(0,1,null,${num},'near')"` and `...,'far'` respectively.
+**The flat `#board-miss-btn` is removed from the Dartboard-mode markup
+entirely** (both the static `screen-game` HTML and `renderGameShell()`'s
+rebuilt copy) — every miss in Dartboard mode now has to land somewhere in one
+of the two rings, no ungated fallback. **Pad mode's Miss button is
+untouched** — `applyDartMode()` already only shows `#board-miss-btn` when
+`dartboardMode` is true, so Pad mode's copy of the button (rendered by
+`renderPad()`, a separate code path) is unaffected by removing the
+Dartboard-mode one.
 
-### Schema: a new, separate column — not the same `zone` field
+### Schema: two new, separate columns — not the same `zone` field
 
 A miss's angular position is a genuinely different concept from a hit's
 inner/outer zone (one describes *which ring of a number was hit*, the other
 describes *which number's direction a total miss was closest to*), and they're
 mutually exclusive per dart (a miss has `sector=0`, so it can never also carry
 a meaningful `zone`). Reusing one column for both would make every query have
-to know which meaning applies for a given row. A second nullable column keeps
-each concept unambiguous:
+to know which meaning applies for a given row. Two new nullable columns keep
+each concept unambiguous — one for direction, one for how close:
 
 ```sql
-ALTER TABLE darts ADD COLUMN miss_zone INTEGER;   -- 1-20 (nearest wedge), NULL otherwise
+ALTER TABLE darts ADD COLUMN miss_zone INTEGER;    -- 1-20 (nearest wedge), NULL otherwise
+ALTER TABLE darts ADD COLUMN miss_depth TEXT;       -- 'near' | 'far', NULL otherwise
 ```
 
 `NULL` covers every non-miss dart, every Pad-mode miss (no positional data
 possible, exactly like Pad-mode singles and `zone`), and every miss recorded
 before this feature existed — the same "precision arrives gradually, never
-retroactively guessed" posture as `zone` above.
+retroactively guessed" posture as `zone` above. `miss_zone` and `miss_depth`
+are always set or unset together (a Dartboard-mode miss always taps a specific
+ring-and-wedge combination, never one without the other).
 
 **`sector`/`multiplier` stay exactly `0`/`1` for every miss, board-mode or
 not** — this is the load-bearing compatibility decision. Every place that
@@ -299,34 +314,35 @@ already means "a miss" by checking `sector===0` keeps working completely
 unchanged: `evaluateVisit()`'s scoring math, the "Where'd It Go?" badge
 (`_d.every(d=>d.sector===0)`, `frontend/index.html` ~5743), `getGhostLegScript()`
 replay, `dartLabel()`/`dartValue()` in `scoring.js`, and `getFullDatabaseExport()`.
-`miss_zone` is purely additive metadata riding alongside an otherwise-identical
-miss row, the same relationship `zone` has to a hit row.
+`miss_zone`/`miss_depth` are purely additive metadata riding alongside an
+otherwise-identical miss row, the same relationship `zone` has to a hit row.
 
 ### Backend
 
-- **`addTurn()`**: accepts an optional `missZone` per dart (only meaningful
-  when `sector===0`), stores it verbatim — same "client is the only party that
-  knows the tap position" reasoning as `zone`.
+- **`addTurn()`**: accepts optional `missZone`/`missDepth` per dart (only
+  meaningful when `sector===0`), stores both verbatim — same "client is the
+  only party that knows the tap position" reasoning as `zone`.
 - **`getDartHeatmap(playerName, gameType, mode)`** (the generalized function
   from "Beyond Just Chuckin' It" above): `GROUP BY` extends once more to
-  include `d.miss_zone`, so `SELECT ... FROM darts d WHERE d.sector=0` rows
-  arrive pre-bucketed by which wedge they were nearest.
+  include `d.miss_zone, d.miss_depth`, so `SELECT ... FROM darts d WHERE
+  d.sector=0` rows arrive pre-bucketed by wedge *and* how close they were.
 
 ### Frontend
 
-- **`throwDartBoard(sector, mult, zone, missZone)`**: the fourth parameter
-  threads through to `throwDart()`, stamped onto the dart object pushed to
-  `game.darts` exactly like `zone` (only one of `zone`/`missZone` is ever
-  non-null on a given dart — a hit can't have a miss wedge, a miss can't have
-  an inner/outer zone).
+- **`throwDartBoard(sector, mult, zone, missZone, missDepth)`**: the extra
+  parameters thread through to `throwDart()`, stamped onto the dart object
+  pushed to `game.darts` exactly like `zone` (only `zone` or
+  `missZone`+`missDepth` is ever set on a given dart — a hit can't have a miss
+  wedge, a miss can't have an inner/outer zone).
 - **`DB.recordTurn()`'s darts payload**: adds `missZone: d.missZone || null`
-  per dart, same shape as `zone`.
-- **`buildDartHeatmap(cells)`**: gains the same outer ring `buildDartboard()`
-  now draws, shaded by `heat(0, 1, null, wedgeNum)` per wedge (reusing the
+  and `missDepth: d.missDepth || null` per dart, same shape as `zone`.
+- **`buildDartHeatmap(cells)`**: gains the same two outer rings
+  `buildDartboard()` now draws, each shaded independently by `heat(0, 1, null,
+  wedgeNum, 'near')` / `heat(0, 1, null, wedgeNum, 'far')` (reusing the
   existing single-hue heat scale — brighter means more misses landed in that
-  direction) — so the *pattern* of a player's misses (which side of the board,
-  which numbers) becomes visible at a glance, not just a single aggregate
-  "N misses" count sitting off to the side.
+  direction/depth) — so the *pattern* of a player's misses (which side of the
+  board, which numbers, how close) becomes visible at a glance, not just a
+  single aggregate "N misses" count sitting off to the side.
 
 ### Per-mode fit
 
@@ -334,6 +350,119 @@ No caveats beyond what "Beyond Just Chuckin' It" already covers — a miss is a
 miss regardless of game type, so the miss ring appears on the same heatmap
 section for X01, Cricket, Doubles Practice, and Chuckin uniformly, with no
 mode-specific behavior.
+
+## Bounce-out tracking: hit the board, didn't stick
+
+### Goal (as requested)
+
+> "There should also be a bounce out option/button. Something that hit the
+> board, would have counted, but it either bounced out or fell out for one
+> reason or another. Those should be counted as misses but for heatmap
+> purposes be treated differently somehow."
+
+This is a **third, distinct dart outcome**, not a variant of the miss-ring
+work above: a genuine miss never touched a scoring area at all (the ring
+tracks *where it went instead*); a bounce-out **did** strike a real number/
+ring — the player saw exactly where — but didn't stay in the board long enough
+to count, so it scores nothing, same as a miss, but its position is real board
+geometry, not a guess at a direction. Conflating the two would make "close
+misses near the double" (the miss ring's near band) indistinguishable from
+"actually hit the double and fell back out," which are very different pieces
+of coaching information — one is an aim problem, the other is often a dart
+weight/grip/board-tension problem entirely unrelated to where it was aimed.
+
+### Design: reuse every existing tap target, add one toggle
+
+A bounce-out's position is captured exactly the same way a real hit's
+position already is — sector, multiplier, and (in Dartboard mode) inner/outer
+`zone` — because the player is tapping the same spot on the board they'd tap
+for a hit that stuck. The only new interaction is a way to say "that one
+didn't count": a **"Bounce Out" toggle**, placed alongside the existing
+Single/Double/Treble multiplier row (`#multi-row`), the same interaction shape
+players already know from that row. Unlike Single/Double/Treble it's not
+mutually exclusive with them — a bounce-out can happen off *any* multiplier
+ring (`Treble` + `Bounce Out` then tap 20 means "that looked like a T20 before
+it bounced out") — so it behaves as an independent toggle (`bounceOutMode`, a
+plain boolean global paralleling `mult`), auto-resetting to off after each
+dart is committed (the same "one-shot, not sticky" behavior the multiplier row
+itself does **not** have today, but a bounce-out toggle should, since forgetting
+to turn it back off would silently zero out every real hit afterward — a much
+worse failure mode than having to re-tap it occasionally). Available in
+**both** Pad and Dartboard mode (this is not the miss-button's "board-only"
+scope restriction — Pad mode already captures sector+multiplier for a normal
+hit, so it can capture a bounce-out's position exactly as precisely as it
+captures anything else; it just never gets `zone`, same as a Pad-mode hit).
+
+### Schema: shadow columns, not a new outcome-type overhaul
+
+The safest possible implementation, and the one this doc recommends: **a
+bounced dart is stored in `sector`/`multiplier` (and `zone`, if applicable)
+exactly as `0`/`1` — a completely ordinary miss row, indistinguishable from a
+real miss to every existing consumer** — with the *intended* position captured
+separately in shadow columns used only by the heatmap:
+
+```sql
+ALTER TABLE darts ADD COLUMN bounced INTEGER;         -- 1 = bounced/fell out, NULL otherwise
+ALTER TABLE darts ADD COLUMN bounce_sector INTEGER;   -- where it actually struck, NULL otherwise
+ALTER TABLE darts ADD COLUMN bounce_multiplier INTEGER;
+ALTER TABLE darts ADD COLUMN bounce_zone TEXT;        -- 'inner' | 'outer' | NULL (board-mode only)
+```
+
+This is deliberately more conservative than it might need to be, and that's
+the point: `dartValue(sector, mult)` already returns `0` for `sector===0`
+(`frontend/scoring.js`), so storing a bounce-out as an ordinary `sector=0`
+miss means **`evaluateVisit()`, every badge chain check (Hat Trick, Bullseye
+Gauntlet, "Where'd It Go?", Busted Maximum, etc.), `getGhostLegScript()`
+replay, and `getFullDatabaseExport()` all require zero code changes** — they
+already handle this row correctly today, because it's shaped exactly like the
+rows they already handle. A bounce-out flag living inside `sector`/`multiplier`
+themselves (e.g. a special sentinel value, or an `outcome` enum column that
+every scoring/badge check would need to learn about) would touch every one of
+those call sites and reopen exactly the kind of scoring-correctness risk
+`CLAUDE.md`'s testing discipline exists to prevent, for a feature that is, in
+the end, purely a heatmap enhancement. Shadow columns get the same visual
+payoff (the heatmap can plot a bounce-out at its true struck position) with
+none of that risk.
+
+### Backend
+
+- **`addTurn()`**: accepts optional `bounced`/`bounceSector`/
+  `bounceMultiplier`/`bounceZone` per dart, stores them verbatim alongside the
+  real (`sector=0`) row — same pass-through-only reasoning as `zone`/
+  `missZone`/`missDepth`.
+- **`getDartHeatmap(playerName, gameType, mode)`**: a second, independent
+  query (or a `UNION`) reading `bounce_sector`/`bounce_multiplier`/
+  `bounce_zone` where `bounced=1`, returned as its own `bounces` array in the
+  response rather than folded into the same `hits`/`misses` counts — the
+  frontend needs to keep these visually and numerically separate (see below),
+  so the API shape should make that separation obvious rather than requiring
+  the caller to filter a mixed list.
+
+### Frontend
+
+- **New toggle button** in `#multi-row` (or immediately adjacent), wired to a
+  `bounceOutMode` boolean exactly like `mult` — `throwDart()`/`throwDartBoard()`
+  check it at the moment a dart is committed: if set, the dart is pushed with
+  its real `sector`/`mult`/`zone` moved into `bounceSector`/`bounceMultiplier`/
+  `bounceZone`, and the dart's *scoring* `sector`/`mult` forced to `0`/`1` (an
+  ordinary miss) before it ever reaches `makeDartCore()`/`evaluateVisit()` —
+  the substitution happens once, at the input layer, so nothing downstream
+  needs to know bounce-outs exist as a concept at all.
+- **`buildDartHeatmap(cells)`**: bounce-outs render as a **small distinct
+  marker** (e.g. a bordered dot or a bounce icon) overlaid on the relevant
+  hit region, **not** blended into that region's own heat-scale color — a
+  wedge shouldn't look "hot" (implying lots of real scoring hits) just because
+  bounce-outs cluster there, since by definition none of those actually
+  counted. Tooltip text distinguishes them explicitly ("T20: 12 hits, 2
+  bounce-outs").
+
+### Per-mode fit
+
+Available in every game type and both input modes, per "Design" above — no
+mode-specific restrictions, unlike the miss ring (which is Dartboard-only
+because only Dartboard mode has the geometry to place a *miss* directionally;
+a bounce-out's position comes from the same sector/multiplier/zone tap targets
+every hit already uses in both modes).
 
 ## Testing
 
@@ -354,19 +483,36 @@ values (via their `<title>` tooltip text) in **both** an X01 game and a
 Chuckin session, and that a Pad-mode-entered single elsewhere doesn't inflate
 either path.
 
-**Miss-zone tests**: a `node:test` proving `getDartHeatmap()` buckets misses
-by `miss_zone` correctly (two misses near wedge 20 and one near wedge 5 arrive
-as separate counted rows), that a `NULL`-`miss_zone` (Pad-mode) miss is counted
+**Miss-zone/miss-depth tests**: a `node:test` proving `getDartHeatmap()`
+buckets misses by `(miss_zone, miss_depth)` correctly (a near-miss and a
+far-miss both near wedge 20 arrive as separate counted rows, distinct from a
+near-miss near wedge 5), that a `NULL`-`miss_zone` (Pad-mode) miss is counted
 separately, and — critically — a regression test confirming `sector===0`-based
-logic elsewhere is completely unaffected by a populated `miss_zone`: the
-"Where'd It Go?" badge still fires correctly on three `sector=0` darts
-regardless of what `miss_zone` each one carries, and `evaluateVisit()`'s scored
-total for a miss-containing visit is unchanged. Verify end-to-end with
-Playwright: tap two different segments of the new outer miss ring, confirm
+logic elsewhere is completely unaffected by populated `miss_zone`/`miss_depth`:
+the "Where'd It Go?" badge still fires correctly on three `sector=0` darts
+regardless of what either column carries, and `evaluateVisit()`'s scored total
+for a miss-containing visit is unchanged. Verify end-to-end with Playwright:
+tap the near ring and the far ring at two different wedges, confirm
 `#board-miss-btn` is absent from the Dartboard-mode DOM entirely (while still
 present and functional switching to Pad mode), and confirm the resulting
 `POST /api/games/:id/turns` payload carries `sector:0, multiplier:1` with the
-expected `missZone` per dart.
+expected `missZone`/`missDepth` per dart.
+
+**Bounce-out tests**: a `node:test` proving a bounce-out dart is stored with
+`sector:0, multiplier:1` (so it scores as a miss) while `bounce_sector`/
+`bounce_multiplier`/`bounce_zone` correctly preserve the struck position, that
+`getDartHeatmap()` returns bounce-outs in a separate `bounces` array rather
+than folded into `hits`, and — the most important regression guard in this
+whole doc — that a bounce-out dart does **not** trigger badges that check the
+dart's *real* struck values (a bounce-out off what would have been a treble
+must not count toward Hat Trick's "three trebles in a visit," since by the
+time it reaches `evaluateVisit()`/the badge chain checks it's already an
+ordinary `sector=0` row and genuinely can't). Verify end-to-end with
+Playwright: toggle "Bounce Out" on, tap a treble, confirm the turn is recorded
+as a miss (0 points, no Hat Trick/other treble-based badges fire) while the
+Player Profile heatmap still shows a bounce-out marker at that treble's
+position; confirm the toggle auto-resets after the dart commits so the very
+next tap scores normally.
 
 ## Open questions for whoever picks this up
 
@@ -397,9 +543,29 @@ expected `missZone` per dart.
   option if real usage shows people hesitating on genuinely ambiguous misses —
   guessing a wedge under time pressure every single miss, forever, could get
   old fast for a mode that's meant to be quick.
-- **Miss-ring width/size on a touch device.** The ring's radial width (`R.bg`
-  → `R.missRing`) needs enough room per 18° wedge to stay tappable at arm's
-  length on a phone or tablet without mis-taps between adjacent wedges — worth
-  a real on-device pass (not just a desktop mouse check) before considering
-  this done, the same "test on the actual hardware" discipline the rest of the
-  scoring UI already follows.
+- **Miss-ring width/size on a touch device.** Splitting the ring into near/far
+  bands means each individual band (`R.bg`→`R.missNear` and
+  `R.missNear`→`R.missFar`) gets *half* the radial room a single ring would
+  have had, across 18° of arc each — a real risk of mis-taps between near and
+  far, or between adjacent wedges, on a phone or small tablet. Worth a real
+  on-device pass (not just a desktop mouse check) before considering this
+  done, the same "test on the actual hardware" discipline the rest of the
+  scoring UI already follows; if two bands prove too cramped in practice, the
+  fallback is a taller overall miss zone (bigger `R.missFar`) rather than
+  dropping back to one band.
+- **Bounce-out toggle discoverability and placement.** A new button in
+  `#multi-row` competes for space with Single/Double/Treble on an already
+  compact scoring screen, especially on a phone. Whether it reads clearly as
+  "off by default, tap before your next dart, then it resets" without
+  onboarding/a tooltip is worth a real playtest — a mislabeled or
+  easily-missed toggle risks the opposite failure from the one being solved:
+  someone forgets to toggle it and a bounce-out silently records as a genuine
+  miss with the wrong intended position, or forgets to toggle it *off* and
+  loses a real scoring dart. The auto-reset behavior (see "Design" above)
+  mitigates the second case but not the first.
+- **Whether the bounce-out marker should be visible on the live scoreboard
+  too** (not just the Player Profile heatmap, which is inherently a
+  post-hoc/session-summary view) — e.g. a small notation next to a dart in the
+  live "darts thrown this visit" display. Not required by the request as
+  stated, but a natural follow-on once the data exists; recommend treating it
+  as a separate, smaller item rather than bundling it into this one.

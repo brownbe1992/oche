@@ -75,6 +75,9 @@ Fixes:
   single (below the treble ring) per number, instead of one merged "single"
   bucket; also bring the geometric dartboard heatmap itself (today Just Chuckin'
   It-only) to X01, Cricket, and Doubles Practice; also replace Dartboard mode's
-  flat Miss button with a positional miss ring outside the double so misses
-  show up on the heatmap by direction, not just as a count (Pad mode keeps its
-  plain Miss button) — full design in docs/dartboard-zone-tracking-roadmap.md
+  flat Miss button with a two-band (near/far) positional miss ring outside the
+  double so misses show up on the heatmap by direction and closeness, not just
+  as a count (Pad mode keeps its plain Miss button); also add a "Bounce Out"
+  toggle (both input modes) for darts that hit the board but didn't stay,
+  tracked separately from real hits/misses on the heatmap — full design in
+  docs/dartboard-zone-tracking-roadmap.md
