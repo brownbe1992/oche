@@ -91,6 +91,15 @@
 > next, not resolved by the toggle-mechanism generalization. (Just Chuckin' It's
 > own backend function set shipped as part of building it, following the same
 > "bespoke per game type" pattern this section anticipated.)
+>
+> **Three more items designed but not started (2026-07)**, each its own tracked
+> item on `docs/open-roadmap-items.md`: extending Night Owl/Early Bird to fire
+> from Cricket turns too (currently X01-only by accident of code structure, not
+> design — see "Cricket badge parity"), two new Cricket-native badges (Whitewash,
+> a Cricket-shaped Comeback Kid), and a Guided Around the Clock/World practice
+> drill mode (a fourth Practice Drill Mode, turning the existing passive
+> completion tracking into something actively practicable with live progress
+> feedback).
 
 ## Goal
 
@@ -592,6 +601,48 @@ stats").
   three sub-modes). Purely a New Game UI reorganization — no change to
   `setMode()`'s underlying state handling or any game logic.
 
+### Guided Around the Clock / Around the World — design (not yet built)
+
+> Status: **designed, not started.** Tracked as its own item on
+> `docs/open-roadmap-items.md`. Distinct from the plain "Round the Clock"
+> backlog bullet above (§Other known variants) — that's a proposed brand-new
+> **game type** with its own win condition (a genuine match, playable H2H);
+> this is a **drill**, the same shape as Doubles Practice/Just Chuckin' It —
+> solo, no opponent, ends when the player finishes or quits.
+
+Right now, Around the Clock (every number 1-20 hit as a single, within one
+game) and Around the World (all 63 dart outcomes, lifetime) are **passive**
+completion badges — they're checked incidentally during whatever game you
+happen to be playing (`singlesHit` in X01's `newMatchPlayer()`,
+`getAroundTheWorldProgress()`'s async lifetime query), not something you
+actively sit down to practice. A player who wants to *work on* Around the
+Clock today has no dedicated mode — they just play regular X01/Cricket and
+hope they happen to hit enough different numbers.
+
+- **Shape**: a third Practice Drill Mode alongside Doubles Practice/Chuckin',
+  its own `throwDartAroundTheClock()`/`renderGameAroundTheClock()` pair (same
+  "hardcode a `gameType` branch" precedent both existing drills established,
+  not a registry redesign) — no legs/sets/opponent, ends when all 20 numbers +
+  bull are hit (a genuine completion, not a timeout).
+- **Live progress feedback** — the whole point of making this a dedicated mode
+  rather than leaving it passive: a persistent on-screen dartboard-style
+  progress view (which numbers are done, which remain), reusing the same
+  heatmap/progress-view UI investment already built for Around the World's
+  Player Profile section (`docs/archive/achievements-badges-roadmap.md` flagged
+  this exact view as "meaningfully more UI work than everything else combined"
+  when it first shipped — reusing it here is the payoff of that earlier work,
+  not a second build from scratch).
+- **Around the World variant**: same drill shape, but tracks progress toward
+  all 63 outcomes (across sessions, not reset per-game like Around the Clock)
+  rather than just the 20 numbers-as-singles — effectively turns the existing
+  lifetime tracker into something you can deliberately sit down and chip away
+  at in one focused session, watching the remaining-outcomes count drop live.
+- **Stats**: darts taken to complete (Around the Clock only — Around the World
+  is open-ended/cross-session), fastest completion (Personal Best), sessions
+  played. Doesn't need new formulas — completion is already boolean per-number
+  tracking, just needs a session/completion-time wrapper around data the app
+  already computes.
+
 ## New Game / Scoring screen changes
 
 New Game gets a game-type selector as a top-level choice (alongside the existing
@@ -691,6 +742,49 @@ X01-only, see its status note above).
    trend chart, and all 3 milestone ladders firing correctly in both
    `index.html` and `display.html`, including a real per-dart rate-limit/data-
    loss bug this testing caught and fixed).
+
+## Cricket badge parity — two gaps (not yet built)
+
+Cricket ships with exactly 2 badges (9 Marks, Perfect Leg) against X01's 20 —
+thin, and part of that gap is an accidental side effect of code structure, not
+a deliberate scoping decision. Split into two separately-tracked items:
+
+### 1. Night Owl / Early Bird are silently X01-only (a gap, arguably a bug)
+
+Per `REFERENCE.md` §4, Night Owl/Early Bird are checked from `enterTurn()` —
+X01's own turn-commit function — not `enterTurnCricket()`. Neither badge's
+condition (`local hour < 5` / `>= 5 && < 7`) has anything to do with X01
+specifically; a Cricket player who only ever plays at 4am currently can never
+earn either badge, purely because the check lives in the wrong function, not
+because of a real design decision to exclude Cricket. Fix: call the same
+time-of-day check from `enterTurnCricket()` too (same `badgeId`s, so a
+player's count is shared across game types — these are about *when* you play,
+not *what* you play).
+
+### 2. New Cricket-native badges (not X01 ports)
+
+Rather than forcing X01 concepts (checkout-based Comeback Kid, average-based
+Giant Slayer) onto a game with no checkouts and a different averaging concept
+(MPR), two badges shaped around what actually makes a Cricket leg dramatic:
+
+- **🧹 Whitewash** — won a leg without the opponent closing a single number
+  (`Object.keys(opp.marks||{}).filter(n=>(opp.marks[n]||0)>=3).length === 0` at
+  the moment the leg is won) — a genuine Cricket-native dominance signal, the
+  same spirit as X01's margin-of-victory badges but shaped around Cricket's own
+  win condition (closing numbers) instead of remaining score.
+- **🔥 Comeback Kid (Cricket)** — won a leg after trailing on points by a
+  meaningful margin at some point during it, mirroring X01 Comeback Kid's
+  structure but tracking Cricket's own `points` field instead of X01's
+  remaining-score deficit. Needs its own `badgeId` (distinct trigger mechanics
+  from the X01 version, same reasoning as the tournament Giant Slayer note
+  above) and, like every Mental Game/Clutch badge before it, a real threshold
+  chosen against actual play data, not guessed here.
+
+A Cricket equivalent of Giant Slayer/The Rematch/Grudge Match (all of which key
+off an X01-specific lifetime-average or H2H-summary lookup) was considered and
+deliberately left **out of scope** for this pass — it would need a
+Cricket-specific "lifetime MPR" comparison surface that doesn't exist yet
+anywhere else in the app, which is a bigger lift than the two badges above.
 
 ## Accessibility, security, and testing considerations
 

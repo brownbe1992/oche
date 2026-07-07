@@ -20,7 +20,7 @@ Player pages:
 - Environmental data (temp/humidity) — full design in docs/environmental-logging-roadmap.md
 - Coaching insights from existing dart analytics — done, see docs/archive/coaching-insights-roadmap.md
 - Shareable moment/stat cards — done, see docs/shareable-moments-roadmap.md (direct social API posting descoped in favor of manual share)
-- Data export (CSV/JSON) — full design in docs/data-export-roadmap.md
+- Data export (CSV/JSON) — full-database admin export done; per-player CSV/JSON re-opened with fresh product direction, not yet built, see docs/data-export-roadmap.md
 
 
 Stats page:
@@ -42,7 +42,7 @@ Others
 - Integrate with Homeassistant
 - Automated scoring with cameras and machine learning — full design in docs/camera-scoring-roadmap.md
 - Settings page - set default player
-- Tournament mode (bracket play, single elimination) — done, see docs/tournament-mode-roadmap.md; double-elimination still open
+- Tournament mode (bracket play, single elimination) — done, see docs/tournament-mode-roadmap.md; double-elimination, tournament-specific badges, and Player Profile tournament stats still open
 - iOS/Android app (hybrid webview client) — full design in docs/mobile-app-roadmap.md
 - Online multiplayer (P2P scoring + live video verification) — full design in docs/online-multiplayer-roadmap.md
 - Expanded achievements/badges beyond 180s/Big Fish/9-darters — done, see docs/achievements-badges-roadmap.md

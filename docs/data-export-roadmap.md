@@ -1,21 +1,25 @@
 # Data Export — Design Roadmap
 
-> Status: **Done (2026-07), built to a deliberately narrower scope than originally
-> drafted below.** Per explicit product direction, the per-player/CSV/PIN-gated half
-> of this doc was **descoped, not built**: there is no per-player export anywhere,
-> and no export-related UI on any Player Profile page. What shipped is the
-> full-database admin export only — **Settings → Admin & Danger Zone → Data
-> Export**, a single "Export all data" button that downloads a complete JSON dump
-> via `GET /api/export-all` (`requireAdmin`). It excludes the `admins`, `sessions`,
-> `settings`, and `server_errors` tables entirely and strips every PIN/credential
-> column from the `players` rows it does include — see `REFERENCE.md`'s §12 "Settings
-> → Data Export" for the exact mechanics. Covered by committed tests
-> (`db.export.test.js`, `server.export.test.js`).
+> Status: **Full-database admin export done (2026-07); per-player export
+> re-opened (2026-07) with fresh product direction, not yet built.**
 >
-> The rest of this document (per-player CSV/JSON export, PIN-gating design) is kept
-> below for historical context only — it is not planned to be picked up as written;
-> any future revival of a per-player export would need fresh product direction, not
-> just implementation of the design below.
+> **What shipped**: the full-database admin export only — **Settings → Admin &
+> Danger Zone → Data Export**, a single "Export all data" button that downloads
+> a complete JSON dump via `GET /api/export-all` (`requireAdmin`). It excludes
+> the `admins`, `sessions`, `settings`, and `server_errors` tables entirely and
+> strips every PIN/credential column from the `players` rows it does include —
+> see `REFERENCE.md`'s §12 "Settings → Data Export" for the exact mechanics.
+> Covered by committed tests (`db.export.test.js`, `server.export.test.js`).
+>
+> **What's re-opened**: this doc originally said any revival of per-player
+> export "would need fresh product direction, not just implementation of the
+> design below" — that direction has now been given (CSV export specifically
+> was the requested gap; reviving it alongside the already-designed per-player
+> JSON export and PIN-gating below, since they were one coherent unit of design
+> work, not three separable ones). Tracked as its own item on
+> `docs/open-roadmap-items.md`. The "Design" and "Security" sections below are
+> the real spec to build from — they were fully designed already, just shelved
+> pending this direction, not written from scratch now.
 
 ## Goal
 

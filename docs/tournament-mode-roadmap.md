@@ -10,7 +10,10 @@
 > started, tracked as its own item on `docs/open-roadmap-items.md` — the schema's
 > `winner_next_*`/`loser_next_*` pointer-pair design (§1 below) already supports it
 > without a migration, so this doc stays open (not archived) until that item ships
-> too. Full mechanics writeup: `REFERENCE.md` §15.
+> too. **Two more items are designed but not started** (§7-8, added 2026-07):
+> tournament-specific badges (Champion, an upset/Giant-Slayer equivalent) and
+> tournament stats on the Player Profile — both also tracked as their own items on
+> `docs/open-roadmap-items.md`. Full mechanics writeup: `REFERENCE.md` §15.
 
 > **Related (2026-07)**: `docs/companion-website-roadmap.md` proposes cross-instance
 > tournaments run through a project-operated site. This doc's bracket-generation logic
@@ -227,3 +230,49 @@ feature, not bolted on after:
   device, or can any device pick up the next "Up Next" match? Not addressed either
   way in this pass — any device with the app open can start any ready match today,
   which is the simpler default behavior, not a deliberate design statement.
+
+## 7. Tournament-specific badges (not yet built)
+
+Tournament mode shipped with **zero badge integration** — a genuine gap, not a
+deliberate omission. The original achievements-badges roadmap explicitly flagged
+"should badges eventually tie into other roadmap items (tournament seeding)?" as
+an open question back when tournament mode was still a future item; tournament
+mode has since shipped and that question was never revisited.
+
+Two new badges, both one-time (`once:true`, same award style as Around the
+Clock/World):
+
+- **🏆 Champion** — fires when `tournaments.status` transitions to `'completed'`
+  and the player is that tournament's `champion_id`. The natural hook point is
+  the same `onGameCompleted` listener `_advanceTournamentMatch()` already runs
+  from (`backend/db.js`) — check there whether this match's win was also the
+  tournament final, not a second parallel hook.
+- **⚔️ Giant Slayer (Tournament)** — fires when a match winner's `seed` number is
+  numerically higher (a worse seed) than their beaten opponent's `seed` by some
+  threshold (e.g. beating a seed at least 3 slots better, mirroring the existing
+  H2H Giant Slayer's "beat a 15+ higher average" spirit rather than reusing its
+  exact threshold, which is average-based and doesn't apply here). Needs its own
+  `badgeId` distinct from the existing H2H `giantslayer` — same headline concept,
+  different trigger mechanics, so reusing the same badge row would conflate two
+  different conditions under one count.
+
+Both need real prototyping against actual bracket data to pick a sensible upset
+threshold, same caveat the original badges doc gave every Mental Game/Clutch
+badge — not something to fix arbitrarily here.
+
+## 8. Tournament stats on the Player Profile (not yet built)
+
+Referenced above (§6 build-order item 4) as a stretch goal, expanded here since
+it's now its own tracked item on `docs/open-roadmap-items.md` rather than just a
+line in a build-order table:
+
+- A small **"Tournaments"** stat block on the Player Profile (alongside the
+  existing H2H/Practice tabs, or its own small section near the top) — wins
+  (`champion_id` count), runner-up count (`runner_up_id`), and best finish
+  reached (semifinal/final/etc., derived from the furthest `tournament_rounds.label`
+  the player was still `active` or `champion` at when their last tournament
+  match resolved).
+- All three are simple `COUNT`/`MAX`-style queries against `tournaments`/
+  `tournament_players`/`tournament_rounds` — no new derived formula invented, just
+  a new stats surface reusing existing tables, so this is a small, low-risk
+  addition once someone picks it up.

@@ -1,11 +1,12 @@
 # Ghost Opponent — Design Roadmap
 
 > Status (2026-07): **the original race feature is fully shipped** (below, unchanged
-> from when this doc was briefly archived). **Reopened** because a new piece — the
-> "Ghost Race Win/Loss Tracking" design further down — is now specified but not yet
-> built. Per `CLAUDE.md`'s archiving convention, this doc moves back to
-> `docs/archive/` once that item is also done. See `docs/open-roadmap-items.md` for
-> the live completion tracker across all roadmaps.
+> from when this doc was briefly archived). **Reopened** because two new pieces are
+> now designed but not yet built: "Ghost Race Win/Loss Tracking" and, depending on
+> it, "Ghost race badges" (a Ghost Slayer first-win badge), both further down. Per
+> `CLAUDE.md`'s archiving convention, this doc moves back to `docs/archive/` once
+> both are also done. See `docs/open-roadmap-items.md` for the live completion
+> tracker across all roadmaps.
 
 > Status: **✅ Done** (2026-07). Every item below is built and verified: a New Game
 > "👻 Ghost" mode (X01-only for v1) lets a player pick one of their own past won X01
@@ -257,12 +258,29 @@ etc.), same lazy-fetch-then-patch-a-container pattern used throughout that page.
   (`GET /api/players/ghost-races`) from day one? Leaning toward shipping the
   counter first — cheap, answers the literal question asked, and a history list
   can be added later without a schema change.
-- Should beating the ghost enough times (a streak, or a first-ever win) earn its
-  own achievement/badge? Not designed here — the existing 22-badge set is
-  curated, and adding a 23rd is a separate product decision, not a natural
-  side-effect of this table existing.
 - `human_darts`/`ghost_darts` — worth shipping in v1, or defer as `NULL` until a
   history view actually wants to show "won by N darts"? Leaning toward shipping
   them now since they cost nothing extra (the frontend already knows both dart
   counts at race end) and a later "backfill" would just leave every pre-existing
   row `NULL` forever anyway.
+
+## Ghost race badges — design (not yet built, depends on the table above)
+
+> Status: **designed, not started.** Tracked as its own item on
+> `docs/open-roadmap-items.md`, separate from win/loss tracking above since it's a
+> genuinely separable follow-on — it needs the `ghost_races` table to exist first,
+> not just the same PR.
+
+One new badge, one-time (`once:true`, same style as Around the Clock/World):
+
+- **👻 Ghost Slayer** — fires on a player's first-ever `result='win'` row in
+  `ghost_races` (a simple `COUNT` check in the same `POST /api/ghost-races` write
+  path, mirroring how every other once-badge is checked at its own trigger point
+  rather than via a separate scan). A win-streak variant (beat the ghost N races
+  in a row) was considered and rejected for v1 — it needs a "most recent N
+  results" query that doesn't exist yet for any other badge, and a first win is
+  the more universally-satisfying milestone (everyone gets exactly one first
+  win; not everyone will string together a streak).
+- Deliberately **one badge, not several** — the existing 22-badge set is curated,
+  and this is a niche opt-in practice tool, not a core competitive mode; it
+  doesn't need Cricket-style badge parity effort.
