@@ -1391,6 +1391,10 @@ const DB = {
   getDefaultLoadout(player){ return Backend.get(`/api/players/default-loadout?name=${encodeURIComponent(player)}`); },
   setDefaultLoadout(player, loadoutId){ return Backend.send('PUT','/api/players/default-loadout',{name:player, loadoutId}); },
 
+  // Ghost Opponent win/loss tracking (docs/ghost-opponent-roadmap.md)
+  recordGhostRace(player, fields){ Backend.send('POST','/api/ghost-races',{player, ...fields}).catch(logErr); },
+  ghostRaceRecord(player){ return Backend.get(`/api/players/ghost-race-record?name=${encodeURIComponent(player)}`); },
+
   // game + turn writes
   async beginGame(meta, names, loadoutByName){
     try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame,
@@ -3248,6 +3252,10 @@ async function startGame(){
   };
   if(setup.mode === 'ghost'){
     game.hasGhost = true;
+    // Captured now rather than read from setup.ghostLeg later (docs/ghost-opponent-roadmap.md
+    // win/loss tracking) — this survives regardless of what setup.ghostLeg becomes
+    // after leaving the New Game screen.
+    game.ghostSourceLeg = { gameId: setup.ghostLeg.gameId, setNo: setup.ghostLeg.setNo, legNo: setup.ghostLeg.legNo };
     const ghostLabel = `👻 Ghost (${new Date(setup.ghostLeg.date).toLocaleDateString(undefined,{month:'short',day:'numeric'})})`;
     game.players.push(newGhostPlayer(ghostLabel, startScore, ghostScript));
   }
@@ -4281,8 +4289,21 @@ function loadPersonalBests(){
   const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
   const gtParam=activeGameTypeParam();
   Backend.get(`/api/players/personal-bests?name=${encodeURIComponent(currentPlayer)}${modeParam}${gtParam}`)
-    .then(data=>renderPersonalBests(data))
+    .then(data=>{ renderPersonalBests(data); loadGhostRaceRecord(); })
     .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load personal bests.</p>`; });
+}
+// docs/ghost-opponent-roadmap.md: populates the #ghost-race-record span next to the
+// "Race this leg" button — a no-op if that span doesn't exist (a non-X01 Personal
+// Bests view has no such button, since ghost races are X01-only).
+function loadGhostRaceRecord(){
+  if(!document.getElementById('ghost-race-record')) return;
+  const player = currentPlayer;
+  DB.ghostRaceRecord(player).then(rec=>{
+    if(currentPlayer !== player) return;   // a newer profile visit took over
+    const el = document.getElementById('ghost-race-record');
+    if(!el) return;
+    el.textContent = (rec && rec.totalRaces > 0) ? `👻 Ghost races: ${rec.wins}W–${rec.losses}L` : '';
+  }).catch(()=>{});
 }
 function renderPersonalBests(data){
   const container=document.getElementById('player-personal-bests');
@@ -4300,8 +4321,12 @@ function renderPersonalBests(data){
   const shareBtn = (onclick) => `<button class="iconbtn" title="Share" style="margin-top:4px" onclick="${onclick}">📤</button>`;
   // Ghost Opponent entry point (docs/ghost-opponent-roadmap.md): race the exact leg
   // that produced this player's best leg average, right from the stat that names it.
+  // The win/loss record line (#ghost-race-record) is populated separately by
+  // loadGhostRaceRecord(), called right after this renders — plain text, not a new
+  // stat-bubble category, since this is a niche opt-in practice tool.
   const raceBtn = data.bestLeg
-    ? `<button class="iconbtn" title="Race this leg" style="margin-top:4px" onclick="raceLeg('${escapeHtml(currentPlayer)}', ${data.bestLeg.gameId}, ${data.bestLeg.setNo}, ${data.bestLeg.legNo})">👻</button>`
+    ? `<button class="iconbtn" title="Race this leg" style="margin-top:4px" onclick="raceLeg('${escapeHtml(currentPlayer)}', ${data.bestLeg.gameId}, ${data.bestLeg.setNo}, ${data.bestLeg.legNo})">👻</button>
+       <span id="ghost-race-record" class="pp-meta" style="display:block;margin-top:2px"></span>`
     : '';
   container.innerHTML=`<div class="summary-grid">
     ${data.bestLegAvg!=null?`<div class="stat-block"><div class="stat-val">${data.bestLegAvg.toFixed(1)}</div><div class="stat-label">Best Leg Average</div>${shareBtn(`sharePersonalBest('legavg', ${data.bestLegAvg})`)}${raceBtn}</div>`:''}
@@ -6214,6 +6239,20 @@ function onLegWon(wi){
       statLine: `${challengeShortLabel(activeChallenge.format, activeChallenge.target)} — ${challengeMetricLabel(activeChallenge.format, _metric)}` });
     lastLegWasChallenge = true;
     activeChallenge = null;
+  }
+  // Ghost Opponent win/loss tracking (docs/ghost-opponent-roadmap.md): a ghost
+  // race is always exactly 1 leg/1 set, so this leg-win IS the race's result —
+  // game.players[0] is always the human, game.players[1] always the ghost (see
+  // newGhostPlayer()), so wi identifies which side just won. Recorded once, here,
+  // since the leg-complete screen offers no "undo" control past this point.
+  if(game.hasGhost && game.ghostSourceLeg && DB.gameId != null){
+    const human = game.players[0], ghost = game.players[1];
+    DB.recordGhostRace(human.name, {
+      gameId: DB.gameId,
+      sourceGameId: game.ghostSourceLeg.gameId, sourceSetNo: game.ghostSourceLeg.setNo, sourceLegNo: game.ghostSourceLeg.legNo,
+      result: wi === 0 ? 'win' : 'loss',
+      humanDarts: human.legDarts, ghostDarts: ghost.legDarts,
+    });
   }
   game.matchResult = { ts: Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:_bigFish };
   finishUnit('leg', w.name);

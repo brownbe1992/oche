@@ -1,12 +1,14 @@
 # Ghost Opponent — Design Roadmap
 
 > Status (2026-07): **the original race feature is fully shipped** (below, unchanged
-> from when this doc was briefly archived). **Reopened** because two new pieces are
-> now designed but not yet built: "Ghost Race Win/Loss Tracking" and, depending on
-> it, "Ghost race badges" (a Ghost Slayer first-win badge), both further down. Per
-> `CLAUDE.md`'s archiving convention, this doc moves back to `docs/archive/` once
-> both are also done. See `docs/open-roadmap-items.md` for the live completion
-> tracker across all roadmaps.
+> from when this doc was briefly archived). **Ghost Race Win/Loss Tracking is now
+> also built** (further down) — a `ghost_races` table, `POST /api/ghost-races`,
+> `GET /api/players/ghost-race-record`, and a "👻 Ghost races: W–L" line on the
+> Player Profile next to the "Race this leg" button. **One item remains**: "Ghost
+> race badges" (a Ghost Slayer first-win badge), which depended on the win/loss
+> table existing and can now be picked up. Per `CLAUDE.md`'s archiving convention,
+> this doc moves back to `docs/archive/` once that item is also done. See
+> `docs/open-roadmap-items.md` for the live completion tracker across all roadmaps.
 
 > Status: **✅ Done** (2026-07). Every item below is built and verified: a New Game
 > "👻 Ghost" mode (X01-only for v1) lets a player pick one of their own past won X01
@@ -135,10 +137,11 @@ approximation of one.
 
 ---
 
-## Ghost Race Win/Loss Tracking — Design (not yet built)
+## Ghost Race Win/Loss Tracking — ✅ Built (2026-07)
 
-> Status: **designed, not started**. Tracked as its own item on
-> `docs/open-roadmap-items.md`.
+> Status: **built and verified end-to-end**, per the design below (one correction
+> from the original design, noted in "Data model"). No longer tracked as an open
+> item on `docs/open-roadmap-items.md`.
 
 ### Why this is a real gap today
 
@@ -192,12 +195,15 @@ human_darts, ghost_darts, created_at`
   **not** cleared by `resetStats()` implicitly the way profile data is — a ghost
   race result is stat/game data (an outcome of a specific practice game), so it
   belongs in the same category as `turns`/`games` and should be wiped by
-  `resetStats()` alongside them (add `DELETE FROM ghost_races;` there explicitly,
-  same reasoning as the tournament-tables precedent — `game_id ON DELETE CASCADE`
-  alone isn't enough since `resetStats()` uses a single multi-table `db.exec()`
-  where ordering isn't guaranteed to fire cascades before the transaction reads
-  are done; explicit is safer and matches existing style). `wipeAllData()` needs
-  no explicit line — deleting all `players` cascades via `player_id` for free.
+  `resetStats()` alongside them. **Correction from the original design**: no
+  explicit `DELETE FROM ghost_races` line was actually needed — `game_id` and
+  `source_game_id` are both `ON DELETE CASCADE`, and SQLite fires cascades as
+  part of executing each individual `DELETE` statement regardless of what other
+  statements share the same `db.exec()` call, so `resetStats()`'s existing
+  `DELETE FROM games` already clears every `ghost_races` row for free (the
+  original design's "explicit is safer" reasoning was overcautious — verified
+  by a committed test). `wipeAllData()` also needs no explicit line — covered
+  twice over by both the `player_id` and game-FK cascades.
 - **`getFullDatabaseExport()`** needs an explicit `ghostRaces: db.prepare('SELECT *
   FROM ghost_races').all()` line, per the same standing "any new user-data table
   must be added here" rule the tournament/loadout tables already follow.
@@ -215,61 +221,60 @@ GET  /api/players/ghost-race-record?name=   { wins, losses, totalRaces } summary
 `POST /api/ghost-races` is gated by `requireWrite`, same as every other
 stat-writing endpoint (`/api/challenges/complete`, `/api/badges/award`) — no new
 auth model needed. Called from `onLegWon()` right alongside the existing
-`finishUnit('leg', w.name)` call, only when `game.hasGhost` is true.
+`finishUnit('leg', w.name)` call, only when `game.hasGhost` is true — the source
+leg reference (`game.ghostSourceLeg`) is captured onto the `game` object at race
+start (mirroring `game.tournamentMatchId`'s pattern) rather than read from
+`setup.ghostLeg` at race-end time, so it survives regardless of what the setup
+screen's own state becomes in between.
 
-A per-race history list (`GET /api/players/ghost-races?name=&limit=`, mirroring
-`getGhostCandidateLegs()`'s shape) is a natural extension but **not required for
-the "simply track wins/losses" ask** — the summary endpoint alone answers that.
-Flagged as an open question below rather than committed to.
+**Shipped without** a per-race history list (`GET /api/players/ghost-races?name=&limit=`)
+— the summary endpoint alone answers the "simply track wins/losses" ask this was
+built for. Still a natural future extension (see "Open questions").
 
-### Frontend surfacing
+### Frontend surfacing — built
 
-A small **"👻 Ghost races: W–L"** line next to the existing "👻 Race this leg"
-button on the Player Profile (near Best Leg Average) — plain text, not a new
-stat-bubble category or leaderboard entry, since this is a niche opt-in practice
-tool, not a core competitive stat. Fetched once per profile visit alongside the
-other `load*()` calls already there (`loadDartWeights()`, `loadPersonalBests()`,
-etc.), same lazy-fetch-then-patch-a-container pattern used throughout that page.
+A **"👻 Ghost races: W–L"** line (`#ghost-race-record` span) next to the existing
+"👻 Race this leg" button on the Player Profile, next to Best Leg Average —
+plain text, not a new stat-bubble category. Populated by `loadGhostRaceRecord()`,
+called right after `loadPersonalBests()`'s response renders (a no-op if the span
+doesn't exist, e.g. on a non-X01 Personal Bests view or a player with no `bestLeg`
+yet). Shows nothing (not "0W-0L") until the player has actually raced at least once.
 
-### Accessibility, security, and testing
+### Accessibility, security, and testing — built
 
 - **Accessibility**: no new UI interaction pattern — a plain text stat line, read
   by a screen reader exactly like every other Player Profile stat already is. The
   existing leg-complete `announce()` call already speaks the winner's name
-  (human or ghost) at race end; no change needed there.
-- **Security**: no new credential/token surface — `requireWrite`-gated like every
-  other stat-writing endpoint, reusing data (`game_id`, leg identifiers) already
-  validated elsewhere (`getGhostLegScript()`'s existing "did this player actually
-  win that leg" ownership check applies to `sourceGameId`/`sourceSetNo`/
-  `sourceLegNo` here too — `recordGhostRace()` should re-validate the source leg
-  belongs to and was won by `player`, not just trust the client's claim, since
-  this is the one place a hostile client could otherwise fabricate a fake "win"
-  history).
-- **Testing**: `recordGhostRace()`'s result validation (rejects anything but
-  `'win'`/`'loss'`, rejects a `sourceGameId`/leg the player didn't actually win)
-  and `getGhostRaceRecord()`'s win/loss counting both need committed `node:test`
-  coverage in the same change that ships them, per the standing "every new
-  calculation gets a test" convention — this isn't a cosmetic feature, it's a
-  new derived number a player will look at over time.
+  (human or ghost) at race end; no change was needed there.
+- **Security**: `requireWrite`-gated like every other stat-writing endpoint.
+  `recordGhostRace()` re-validates the source leg server-side by calling the
+  existing `getGhostLegScript()` internally and rejecting if it returns `null` —
+  a hostile client claiming a leg it never actually won (or belonging to another
+  player) is rejected with the same "source leg not found" error, not trusted
+  from the request body. Covered by `backend/test/db.ghost-race.test.js`'s
+  dedicated "can't fabricate a fake win history" cases.
+- **Testing**: `backend/test/db.ghost-race.test.js` (11 assertions) covers
+  `recordGhostRace()`'s validation (result enum, unowned race game, an unwon
+  source leg, a source leg belonging to a different player, a nonexistent race
+  game, an unknown player) and `getGhostRaceRecord()`'s win/loss counting,
+  plus the export/cascade behavior. Verified end-to-end with Playwright against
+  a live server: a real 9-dart 501 checkout leg, raced twice — replayed
+  identically for a human win, then deliberately missed every dart for a ghost
+  win — correctly POSTs `result:'win'`/`result:'loss'` with accurate
+  `humanDarts`/`ghostDarts`, and the Player Profile shows `1W–1L` after both.
 
 ### Open questions for whoever picks this up
 
-- Is a plain win/loss counter enough, or does this want the fuller history list
-  (`GET /api/players/ghost-races`) from day one? Leaning toward shipping the
-  counter first — cheap, answers the literal question asked, and a history list
-  can be added later without a schema change.
-- `human_darts`/`ghost_darts` — worth shipping in v1, or defer as `NULL` until a
-  history view actually wants to show "won by N darts"? Leaning toward shipping
-  them now since they cost nothing extra (the frontend already knows both dart
-  counts at race end) and a later "backfill" would just leave every pre-existing
-  row `NULL` forever anyway.
+- A fuller per-race history list (`GET /api/players/ghost-races?name=&limit=`,
+  mirroring `getGhostCandidateLegs()`'s shape) remains a natural future
+  extension — not built, since the plain counter already answers what was asked.
 
-## Ghost race badges — design (not yet built, depends on the table above)
+## Ghost race badges — design (not yet built; its dependency is now built)
 
 > Status: **designed, not started.** Tracked as its own item on
 > `docs/open-roadmap-items.md`, separate from win/loss tracking above since it's a
-> genuinely separable follow-on — it needs the `ghost_races` table to exist first,
-> not just the same PR.
+> genuinely separable follow-on — it needed the `ghost_races` table to exist
+> first, not just the same PR. That table now exists (above), so this is unblocked.
 
 One new badge, one-time (`once:true`, same style as Around the Clock/World):
 

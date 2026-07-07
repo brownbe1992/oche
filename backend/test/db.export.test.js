@@ -40,6 +40,8 @@ describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
       'tournaments', 'tournamentPlayers', 'tournamentRounds', 'tournamentMatches',
       // docs/dart-builder-roadmap.md: same standing rule applied to loadout data
       'dartComponents', 'loadouts',
+      // docs/ghost-opponent-roadmap.md: same standing rule applied to ghost races
+      'ghostRaces',
     ].sort());
 
     const alice = dump.players.find(p => p.name === 'export_alice');

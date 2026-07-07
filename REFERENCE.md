@@ -640,7 +640,19 @@ guarded with `!game.hasGhost`, so Comeback Kid/Giant Slayer/The Rematch/Grudge
 Match/Nerves of Steel (all opponent-based) can never fire against a ghost; badges
 based on the human's own performance (Big Fish, Cruise Control, etc.) are unaffected.
 The ghost's turns are never persisted — no `game_players` row, no stats, no
-leaderboard/badge eligibility.
+leaderboard/badge eligibility. **The race's own result IS tracked**, however
+(2026-07, `docs/ghost-opponent-roadmap.md`): `onLegWon(wi)` already knows which
+side won (`wi===0` human, `wi===1` ghost, since turns strictly alternate and only
+a checkout ends the leg — no tie case exists), and the leg-win handler records it
+via `recordGhostRace()`/`POST /api/ghost-races` when `game.hasGhost` is set,
+storing `result` (`'win'`\|`'loss'`, from the human's perspective) plus
+`humanDarts`/`ghostDarts` in a new `ghost_races` table (§13) linked to both the
+race's own game and the historical leg that was raced. Re-validates the source
+leg server-side via the same `getGhostLegScript()` ownership check used to build
+the script in the first place, so a hostile client can't fabricate a fake win
+history. `GET /api/players/ghost-race-record` returns `{wins, losses, totalRaces}`,
+surfaced as a plain "👻 Ghost races: W–L" line next to the Player Profile's
+"Race this leg" button (`loadGhostRaceRecord()`).
 
 ### Top Finishes / Checkout Routes
 
@@ -2142,11 +2154,23 @@ set → `in_progress`; else both player slots filled → `ready`; else `pending`
 | `is_default` | `INTEGER NOT NULL DEFAULT 0` | At most one `1` per `player_id`, enforced by `setDefaultLoadout()` (clears every other of that player's loadouts in the same operation, never by a DB constraint) |
 | `created_at` / `updated_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 
+### `ghost_races` (§10 Ghost Opponent)
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `game_id` | `INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE` | The race's own new practice game |
+| `player_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | |
+| `source_game_id` / `source_set_no` / `source_leg_no` | `INTEGER NOT NULL`, `source_game_id ON DELETE CASCADE` | Which historical leg was raced |
+| `result` | `TEXT NOT NULL CHECK IN ('win','loss')` | From the human's perspective; computed client-side (`wi===0` in `onLegWon()`), re-validated server-side against the source leg, not derived independently (the ghost is never a real `game_players` row) |
+| `human_darts` / `ghost_darts` | `INTEGER` (nullable) | Total darts each side took to finish this specific race |
+| `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
+
 ### Cascade summary
 
 Deleting a `player` cascades: their `game_players` rows, `turns` (and
 transitively their `darts`), `player_badges`, `daily_challenge_attempts`,
-`tournament_players`, and their `dart_components`/`loadouts` rows. `deletePlayer()`
+`tournament_players`, their `dart_components`/`loadouts` rows, and their
+`ghost_races` rows. `deletePlayer()`
 then prunes any `games` row left with zero remaining `game_players` (also run
 once at boot to self-heal older databases). Any `tournament_matches`/`tournaments`
 row referencing the deleted player (`player1_id`/`player2_id`/`winner_id`/

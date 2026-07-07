@@ -65,6 +65,10 @@
        GET  /api/players/default-loadout -> (?name=...) -> the player's is_default loadout, or null (public)
        PUT  /api/players/default-loadout -> { name, loadoutId } -> set (or, with loadoutId null, clear) the default
 
+       POST /api/ghost-races          -> record a ghost race result
+                                          { player, gameId, sourceGameId, sourceSetNo, sourceLegNo, result: "win"|"loss", humanDarts?, ghostDarts? }
+       GET  /api/players/ghost-race-record -> (?name=...) -> { wins, losses, totalRaces } (public)
+
        GET  /api/backups           -> { backups:[{name,size,mtime}], retentionDays } [admin]
        POST /api/backups           -> take an on-demand backup now -> { ok, backup } [admin]
        PUT  /api/backups/retention -> { days } -> { ok, retentionDays, pruned } [admin]
@@ -852,6 +856,16 @@ const server = http.createServer(async (req, res) => {
       if (!requireWrite(req, res)) return;
       const b = await readJson(req);
       return send(res, 200, db.setDefaultLoadout(b.name, b.loadoutId));
+    }
+
+    // ----- ghost opponent win/loss tracking (docs/ghost-opponent-roadmap.md) -----
+    if (p === '/api/ghost-races' && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.recordGhostRace(b.player, b));
+    }
+    if (p === '/api/players/ghost-race-record' && m === 'GET') {
+      return send(res, 200, db.getGhostRaceRecord(url.searchParams.get('name')));
     }
 
     // ----- badges (docs/archive/achievements-badges-roadmap.md) -----

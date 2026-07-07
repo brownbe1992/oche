@@ -59,7 +59,7 @@ Others
 - League/season mode (standings across casual matches over time) — full design in docs/league-mode-roadmap.md
 - Dart Builder (custom loadout screen for barrel/shaft/flight components, saved loadouts, New Game "Change Loadout" picker, per-loadout stats) — v1 done; shape/grip icons, quick-add-full-set, photo upload, and the loadout comparison view still open, see docs/dart-builder-roadmap.md
 - Daily/weekly solo challenge — done (core) plus badges/its own Profile tab, see docs/daily-challenge-roadmap.md
-- Ghost opponent (practice against a replay of your own past leg) — race feature done (X01 only); win/loss tracking designed but not built, see docs/ghost-opponent-roadmap.md
+- Ghost opponent (practice against a replay of your own past leg) — race feature and win/loss tracking both done (X01 only); a "Ghost Slayer" first-win badge still open, see docs/ghost-opponent-roadmap.md
 - Companion website (cloud stat reporting, matchmaking, cross-instance tournaments/leagues, global leaderboards including Daily Challenge) — full design in docs/companion-website-roadmap.md
 - Prep work to reduce future rework across all roadmap items — done, see docs/archive/existing-app-prep-roadmap.md; docs/open-roadmap-items.md is now the central tracker for all open roadmap items
 

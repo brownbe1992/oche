@@ -284,6 +284,25 @@ db.exec(`
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_loadouts_player ON loadouts(player_id);
+
+  -- Ghost Opponent win/loss tracking (docs/ghost-opponent-roadmap.md). A ghost race
+  -- is a genuine interleaved race (playGhostTurn()/enterTurn() alternate, whoever
+  -- checks out first wins) but the result was never recorded anywhere before this —
+  -- game_id is the race's own new practice game; source_game_id/source_set_no/
+  -- source_leg_no identify which historical leg was raced.
+  CREATE TABLE IF NOT EXISTS ghost_races (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id        INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    player_id      INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    source_game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    source_set_no  INTEGER NOT NULL,
+    source_leg_no  INTEGER NOT NULL,
+    result         TEXT NOT NULL CHECK (result IN ('win','loss')),
+    human_darts    INTEGER,
+    ghost_darts    INTEGER,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_ghost_races_player ON ghost_races(player_id);
 `);
 
 // Column migrations for tables not recreated above — safe to re-run.
@@ -1637,6 +1656,43 @@ function getGhostLegScript(gameId, setNo, legNo, playerName) {
   return { category: game.category, config: JSON.parse(game.config), outMode, turns: scriptTurns };
 }
 
+// Ghost race win/loss tracking (docs/ghost-opponent-roadmap.md). Result is always
+// from the human's perspective — the client computes it (whichever side's turn
+// triggered onLegWon() first), since the ghost is never a real players/game_players
+// row for the server to determine a winner from independently. Re-validates the
+// source leg the same way getGhostLegScript() does (game exists, is X01, and this
+// player actually won that leg) so a hostile client can't fabricate a fake "win"
+// history by claiming a leg it never won.
+function recordGhostRace(playerName, { gameId, sourceGameId, sourceSetNo, sourceLegNo, result, humanDarts, ghostDarts }) {
+  const p = getPlayer(playerName);
+  if (!p) throw httpError(404, 'Player not found');
+  if (result !== 'win' && result !== 'loss') throw httpError(400, "result must be 'win' or 'loss'");
+  const gid = Number(gameId);
+  const raceGame = db.prepare('SELECT id FROM games WHERE id = ?').get(gid);
+  if (!raceGame) throw httpError(404, 'Game not found');
+  if (!db.prepare('SELECT 1 FROM game_players WHERE game_id = ? AND player_id = ?').get(gid, p.id)) {
+    throw httpError(400, 'That player did not play in that game');
+  }
+  if (!getGhostLegScript(sourceGameId, sourceSetNo, sourceLegNo, playerName)) {
+    throw httpError(400, 'Source leg not found, not X01, or not won by this player');
+  }
+  const hd = (humanDarts !== undefined && humanDarts !== null && humanDarts !== '') ? Number(humanDarts) : null;
+  const gd = (ghostDarts !== undefined && ghostDarts !== null && ghostDarts !== '') ? Number(ghostDarts) : null;
+  const info = db.prepare(`
+    INSERT INTO ghost_races (game_id, player_id, source_game_id, source_set_no, source_leg_no, result, human_darts, ghost_darts)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(gid, p.id, Number(sourceGameId), Number(sourceSetNo), Number(sourceLegNo), result, hd, gd);
+  return { id: Number(info.lastInsertRowid) };
+}
+
+function getGhostRaceRecord(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return { wins: 0, losses: 0, totalRaces: 0 };
+  const wins = db.prepare("SELECT COUNT(*) AS n FROM ghost_races WHERE player_id = ? AND result = 'win'").get(p.id).n;
+  const losses = db.prepare("SELECT COUNT(*) AS n FROM ghost_races WHERE player_id = ? AND result = 'loss'").get(p.id).n;
+  return { wins, losses, totalRaces: wins + losses };
+}
+
 // Cricket's Personal Bests — same 5-field shape as getPersonalBests() above, but
 // keyed on turns.leg_won instead of turns.checkout (Cricket has no checkout
 // mechanism, so it needs its own "this turn won the leg" signal — see the
@@ -2715,7 +2771,10 @@ function resetStats() {
   // tournaments cascades to tournament_players/rounds/matches.
   // dart_components/loadouts are deliberately NOT touched here — they're player
   // profile data (a player's owned equipment), same category as dart_weight/
-  // out_mode/PIN, which also survive a stats reset.
+  // out_mode/PIN, which also survive a stats reset. ghost_races IS stat/game data
+  // (an outcome of a specific practice game), so it should clear here — and does,
+  // for free: both game_id and source_game_id are ON DELETE CASCADE, so DELETE FROM
+  // games below cascades it without needing its own explicit line.
   db.exec('DELETE FROM turns; DELETE FROM game_players; DELETE FROM games; DELETE FROM tournaments;');
   return { ok: true };
 }
@@ -2728,6 +2787,8 @@ function resetStats() {
 // names) in the Tournaments list. DELETE FROM tournaments cascades all four tables.
 // dart_components/loadouts need no explicit delete either — both have a
 // player_id ON DELETE CASCADE, so wiping players clears them for free.
+// ghost_races is covered twice over — player_id and both game FKs are all
+// ON DELETE CASCADE, so either the player wipe or the game wipe below clears it.
 function wipeAllData() {
   db.exec('DELETE FROM players; DELETE FROM games; DELETE FROM tournaments;');
   return { ok: true };
@@ -2767,6 +2828,9 @@ function getFullDatabaseExport() {
     // ordinary user data with no secrets, so they belong in the export too.
     dartComponents: db.prepare('SELECT * FROM dart_components').all(),
     loadouts: db.prepare('SELECT * FROM loadouts').all(),
+    // docs/ghost-opponent-roadmap.md: same standing rule — a player's ghost-race
+    // win/loss history is ordinary user data with no secrets.
+    ghostRaces: db.prepare('SELECT * FROM ghost_races').all(),
   };
 }
 
@@ -3840,5 +3904,6 @@ module.exports = {
   createComponent, listComponents, updateComponent, deleteComponent,
   createLoadout, listLoadouts, getLoadout, updateLoadout, deleteLoadout, duplicateLoadout,
   setDefaultLoadout, getDefaultLoadout, getLoadoutStats,
+  recordGhostRace, getGhostRaceRecord,
   _db: db,
 };
