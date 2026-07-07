@@ -73,4 +73,6 @@ Fixes:
   in frontend/index.html expands each finish row into its checkout route)
 - Dartboard heatmap: distinguish inner single (above the treble ring) from outer
   single (below the treble ring) per number, instead of one merged "single"
-  bucket — full design in docs/dartboard-zone-tracking-roadmap.md
+  bucket; also bring the geometric dartboard heatmap itself (today Just Chuckin'
+  It-only) to X01, Cricket, and Doubles Practice — full design in
+  docs/dartboard-zone-tracking-roadmap.md

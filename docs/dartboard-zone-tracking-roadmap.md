@@ -2,7 +2,11 @@
 
 > Status: **designed, not started.** Tracked as its own item on
 > `docs/open-roadmap-items.md`. No scoring behavior changes — this is purely a
-> data-granularity and heatmap-visualization enhancement.
+> data-granularity and heatmap-visualization enhancement. Expanded (2026-07) to
+> also generalize the dartboard-shaped heatmap itself — today exclusive to Just
+> Chuckin' It — to X01, Cricket, and Doubles Practice, since the `darts` table
+> and the SVG geometry are already shared across every game type; see "Beyond
+> Just Chuckin' It" below.
 
 ## Goal (as requested)
 
@@ -127,17 +131,112 @@ here, precision unknown" rather than falsely implying an even inner/outer
 split. This keeps the visualization honest as data quality improves gradually
 per-player rather than requiring a backfill or a hard cutover.
 
+## Beyond Just Chuckin' It: the same heatmap for X01, Cricket, and Doubles Practice
+
+**The zone data is captured for every game type automatically, at no extra
+cost** — `darts` is the one universal per-dart table every game type writes
+into (X01, Cricket, Doubles Practice, and Chuckin all go through the same
+`addTurn()`/dart-recording path), so the `zone` column change above already
+captures inner/outer data from a Dartboard-mode X01 or Cricket turn the moment
+it ships. Nothing in "Schema"/"Backend"/"Frontend" above needs to change for
+this — the only gap is that **today, only Just Chuckin' It has anywhere to
+*display* it as a geometric heatmap.** X01 and Cricket only get `topSectors`
+(the flat top-15 list in Coaching Insights); there's no dartboard-shaped
+picture for them at all. That's a real, separate gap worth closing in the same
+pass, since the hard part — correct dartboard SVG geometry, one annulus per
+zone — is already built and would otherwise just sit Chuckin-only for no
+reason once it exists.
+
+### Backend: generalize, don't duplicate
+
+`getChuckinHeatmap(playerName, mode)` becomes `getDartHeatmap(playerName,
+gameType, mode)`, scoped via the existing `_scope({mode, gameType})` helper —
+the same helper every other per-game-type stat query in `backend/db.js`
+already uses, including its `KNOWN_GAME_TYPES` validation, so this is a
+one-function generalization, not new plumbing:
+
+```js
+function getDartHeatmap(playerName, gameType, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return [];
+  const scope = _scope({ mode, gameType });
+  return db.prepare(`
+    SELECT d.sector AS sector, d.multiplier AS multiplier, d.zone AS zone, COUNT(*) AS hits
+    FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id
+    WHERE t.player_id=? ${scope}
+    GROUP BY d.sector, d.multiplier, d.zone
+  `).all(p.id);
+}
+// Chuckin's existing call sites keep working unchanged:
+const getChuckinHeatmap = (playerName, mode) => getDartHeatmap(playerName, 'chuckin', mode);
+```
+
+**API surface**: add `GET /api/players/dart-heatmap?name=&gameType=&mode=`
+alongside the existing `GET /api/players/chuckin-heatmap?name=&mode=` (kept
+as-is, unchanged response shape, for backward compatibility — REFERENCE.md's
+§12 API surface only ever grows here, nothing is removed or renamed out from
+under existing callers).
+
+### Frontend: one reusable renderer, four trigger points
+
+`buildChuckinHeatmap(cells)` (`frontend/index.html` ~7316) is already
+gameType-agnostic in its actual drawing logic — nothing in it reads
+`game.gameType` or hardcodes "Chuckin" beyond the function name and the SVG's
+`aria-label` string. It becomes `buildDartHeatmap(cells, {ariaLabel})`, with
+the caller supplying the label ("Dartboard heatmap of every Just Chuckin' It
+dart thrown" vs "...every X01 dart thrown" vs "...every Cricket dart thrown"
+vs "...every Doubles Practice dart thrown"). The DOM ids
+(`chuckin-heatmap-section`/`chuckin-heatmap-body`) become generic
+(`dart-heatmap-section`/`dart-heatmap-body`), and `loadChuckinHeatmap()`'s
+`if(playerGameType !== 'chuckin'){ section.hidden = true; return; }` early-out
+(the only actual gameType-specific gate in the whole feature) is replaced by
+`loadDartHeatmap()` firing for whichever game type's Player Profile tab is
+currently active, calling `/api/players/dart-heatmap?...&gameType=${gt}`. The
+section shows on all four game-type tabs (X01, Cricket, Doubles Practice,
+Chuckin) instead of Chuckin exclusively — same "Dartboard Heatmap" section
+title and placement in `chartSection`'s shared markup (~`frontend/index.html`
+3877-3882), just no longer gated to one tab.
+
+### Per-mode fit and caveats
+
+- **X01**: identical value proposition to Chuckin's existing heatmap — no
+  caveats, this is the most natural fit besides Chuckin itself.
+- **Doubles Practice**: arguably the *single best* application of zone data of
+  any mode. A player drilling one specific double target directly benefits
+  from seeing exactly where their misses cluster — inner single (aimed too
+  shallow), outer single (aimed too far), wrong number entirely, or the
+  opposite side of the board — in a way Chuckin's freeform practice can't
+  target as precisely, since Doubles Practice always has one declared goal.
+- **Cricket**: classic Cricket only plays 15-20 + Bull, so most of the board
+  stays permanently dark/unlit on a Cricket-only heatmap — expected and fine
+  (Chuckin's heatmap already shows the same natural sparsity for numbers a
+  player rarely throws at; this isn't a bug to work around). Custom Cricket's
+  in-play numbers vary per game and aren't fixed, so the heatmap doesn't try
+  to know or highlight "which 7 were in play this time" — it just aggregates
+  every dart ever thrown in Cricket games, in-play or not, the same
+  unweighted way `topSectors` already does today.
+- **Complexity impact**: this stays the same **Low-Medium** tier on
+  `docs/open-roadmap-items.md` — it's a copy-and-parameterize of code that
+  already works end-to-end for Chuckin, not new design or new geometry.
+
 ## Testing
 
 Per `CLAUDE.md`'s "every new calculation gets a committed test" convention:
-`getChuckinHeatmap()`'s new zone-scoped grouping needs a `node:test` proving an
+`getDartHeatmap()`'s zone-scoped grouping needs a `node:test` proving an
 inner-zone single and an outer-zone single for the same sector land in separate
-rows with correct counts, and that a `NULL`-zone (Pad-mode) single is counted
-separately from both. Verify end-to-end with Playwright: tap the inner single
-region of a number several times, tap the outer single region a different
-number of times, confirm the rendered heatmap SVG's two paths for that number
-carry visibly different `heat()` values (via their `<title>` tooltip text) and
-that a Pad-mode-entered single elsewhere doesn't inflate either path.
+rows with correct counts, that a `NULL`-zone (Pad-mode) single is counted
+separately from both, and that scoping by `gameType` correctly isolates an X01
+dart from a Cricket dart from the same player (mirroring the existing
+`_scope()` test pattern used elsewhere). A dedicated test confirms
+`getChuckinHeatmap(name, mode)` still returns byte-identical results to
+`getDartHeatmap(name, 'chuckin', mode)` — a regression guard for the existing,
+already-shipped Chuckin behavior through the generalization. Verify end-to-end
+with Playwright: tap the inner single region of a number several times, tap
+the outer single region a different number of times, confirm the rendered
+heatmap SVG's two paths for that number carry visibly different `heat()`
+values (via their `<title>` tooltip text) in **both** an X01 game and a
+Chuckin session, and that a Pad-mode-entered single elsewhere doesn't inflate
+either path.
 
 ## Open questions for whoever picks this up
 
@@ -152,3 +251,9 @@ that a Pad-mode-entered single elsewhere doesn't inflate either path.
   before this feature existed actually landed in (Pad mode doesn't know, and
   even historical Dartboard-mode darts were never asked); backfilling with a
   guess would fabricate data. Leave all pre-existing rows `NULL` permanently.
+- Whether the generalized heatmap section's placement should differ per game
+  type (e.g. Doubles Practice showing it more prominently than X01, given it's
+  the best-fit mode per "Per-mode fit and caveats" above) is a nice-to-have,
+  not a blocker — the straightforward default is identical placement and
+  prominence across all four tabs, same as every other shared `chartSection`
+  element already behaves today.
