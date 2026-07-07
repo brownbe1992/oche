@@ -28,6 +28,7 @@ You enter every dart individually — multiplier first, then the number — and 
   - [Live Scoreboard](#live-scoreboard)
   - [Players](#players)
   - [Player Profile](#player-profile)
+  - [Dart Builder](#dart-builder)
   - [Tournaments](#tournaments)
   - [Stats](#stats)
   - [Settings](#settings)
@@ -374,7 +375,7 @@ Actions per player:
 - **Set finish rule** — double out or single out
 - **View profile** — opens the full player profile page
 
-Add new players from this screen. New players can optionally be given a **PIN** and a **dart weight** at creation time — see [Admin Accounts & Player PINs](#admin-accounts--player-pins).
+Add new players from this screen. New players can optionally be given a **PIN** at creation time — see [Admin Accounts & Player PINs](#admin-accounts--player-pins). Dart weight is no longer set here; it's part of building a [Dart Builder](#dart-builder) loadout instead.
 
 Once any admin account exists, destructive actions (deleting a player, resetting stats) are hidden from the UI until you log in as an admin.
 
@@ -500,8 +501,42 @@ exact thresholds.
 
 #### Settings
 
-- **Dart weight** — 10g through 40g; stored per-game for chart filtering
+- **Default Loadout** — pick which of this player's saved [Dart Builder](#dart-builder) loadouts is auto-selected on the New Game screen; replaces the old "Dart weight" dropdown, which no longer exists standalone (weight now lives on a loadout's barrel)
+- **🎯 Manage Loadouts** — opens the Dart Builder screen for this player
 - **Clear stats** — reset H2H stats, Practice stats, or all stats (with confirmation)
+
+Both loadout controls above live in the same PIN-gated block as the finish-rule
+toggle — a PIN-protected player's PIN is required to reach either one, exactly
+like every other player-setting change.
+
+---
+
+### Dart Builder
+
+A "loadout" is a saved combination of one **barrel**, one **shaft**, and one
+**flight** (plus a tip texture), so you can track which actual dart set you're
+using in a game and see stats broken out per loadout — "which combination
+actually performs best for me" gets a real, data-backed answer.
+
+**Building a loadout** — from a player's profile ("🎯 Manage Loadouts"): "+ New
+Loadout" opens the editor, where each of the Barrel/Shaft/Flight sections lets
+you pick an existing component or "+ New" one on the fly (name, length, weight,
+material, shape, grip — whichever fields apply to that component type), plus a
+Tip Texture (smooth/grooved) for the loadout itself. Name the loadout and Save —
+its own stats (games played, wins, darts thrown, 3-dart average, 180s,
+checkouts) appear below once it's saved. "Change Loadout" from the editor
+returns to the list of that player's other loadouts (Edit/Duplicate/Delete).
+
+**Using a loadout in a game** — a **"🎯 [loadout name]"** pill appears under each
+filled player slot on the New Game screen; tap it to pick a different saved
+loadout (or "No loadout" — playing without one is always valid), or jump
+straight into building one if none exist yet. A player's **Default Loadout**
+(set from their profile) is auto-selected whenever they're picked into a New
+Game slot, so a player who only ever throws one set of darts never has to
+actively choose.
+
+A loadout can be saved with empty slots ("in progress"), but can't actually be
+selected for a game until barrel, shaft, and flight are all filled in.
 
 ---
 
@@ -776,11 +811,15 @@ Routes marked `[admin]` require a logged-in admin session (cookie set by `/api/l
 
 ```
 GET    /api/players                         List all players
-POST   /api/players                         Add a player          { name, out, pin?, dartWeight? }
+POST   /api/players                         Add a player          { name, out, pin? }
 PUT    /api/players/rename                  Rename a player       { from, to }
 PUT    /api/players/out                     Set finish rule       { name, out: "double"|"single" }
-PUT    /api/players/dart-weight             Set dart weight       { name, weight }
-GET    /api/players/dart-weights?name=      Dart weight history for a player
+PUT    /api/players/dart-weight             Set a player's legacy dart weight — no
+                                             longer exposed in the UI; see Dart
+                                             Builder below           { name, weight }
+GET    /api/players/dart-weights?name=      Distinct dart weights recorded across a
+                                             player's games (now sourced from
+                                             loadouts, see Dart Builder below)
 DELETE /api/players?name=                   Delete a player and all their data        [admin]
 DELETE /api/players/stats?name=&mode=       Clear stats for a player                  [admin]
                                              mode: "h2h" | "practice" | "all"
@@ -952,6 +991,45 @@ POST /api/games/:id/events                  Record a timeline event
                                                setNo, legNo }
 ```
 
+### Dart Builder / Loadouts
+
+See [Dart Builder](#dart-builder) below and `REFERENCE.md` §16 for full mechanics
+(PIN gating, `players.dart_weight`'s retirement, stats scoping). `player` in a
+request body and `name`/`player` in a query string both identify *whose*
+component/loadout it is — kept distinct from a component's/loadout's own `name`
+field in the same payload.
+
+```
+GET    /api/dart-components/options         Fixed dropdown option lists per component
+                                             type (shapes/materials/grips/etc.) (public)
+GET    /api/dart-components?name=&type=     A player's component catalog, optionally
+                                             filtered to barrel|shaft|flight (public)
+POST   /api/dart-components                 Add a component
+                                             { player, type, name, lengthMm?, weightG?,
+                                               material?, shape?, grip?, notes? }
+PUT    /api/dart-components/:id             Update a component  { player, ...same fields }
+DELETE /api/dart-components/:id?player=     Delete a component (any loadout slot
+                                             referencing it is set back to empty,
+                                             not deleted)
+GET    /api/loadouts?name=                  A player's saved loadouts (public)
+POST   /api/loadouts                        Create a loadout
+                                             { player, name, barrelId?, shaftId?,
+                                               flightId?, tipTexture?, dartCount? }
+GET    /api/loadouts/:id?name=              One loadout, with resolved component
+                                             summaries (public)
+PUT    /api/loadouts/:id                    Update a loadout  { player, ...same fields }
+DELETE /api/loadouts/:id?player=            Delete a loadout
+POST   /api/loadouts/:id/duplicate          Copy a loadout  { player } → named
+                                             "<name> (copy)"
+GET    /api/loadouts/:id/stats?name=        Games/wins/darts/3-dart average/180s/
+                                             checkouts scoped to games played with
+                                             this loadout (public)
+GET    /api/players/default-loadout?name=   The player's is_default loadout, or null
+                                             (public)
+PUT    /api/players/default-loadout         Set (or, with loadoutId: null, clear) the
+                                             default  { name, loadoutId }
+```
+
 ### Tournaments
 
 Single-elimination only (see [Tournaments](#tournaments) below and `REFERENCE.md` §15
@@ -1080,9 +1158,10 @@ oche/
 
 | Table | Purpose |
 |---|---|
-| `players` | Name, double/single-out preference, and dart weight |
+| `players` | Name and double/single-out preference (legacy dart weight column no longer written to, see Dart Builder) |
 | `games` | One row per match; includes format, category, practice flag, winner |
-| `game_players` | Who played in each game; stores dart weight and out mode used |
+| `game_players` | Who played in each game; stores dart weight (from a selected loadout's barrel), out mode used, and which loadout was selected |
+| `dart_components` / `loadouts` | A player's barrel/shaft/flight catalog and saved loadout combinations (see [Dart Builder](#dart-builder)) |
 | `turns` | Every visit: scored points, bust flag, checkout flag |
 | `darts` | Every individual dart: sector, multiplier, dart number within the visit. `scored`, `is_treble`, and `is_double` are computed columns derived from sector and multiplier. |
 | `timeline_events` | Leg/set/game start and end timestamps |

@@ -1943,7 +1943,7 @@ already-migrated database is a safe no-op).
 | `name` | `TEXT NOT NULL UNIQUE COLLATE NOCASE` | Case-insensitive unique |
 | `out_mode` | `TEXT NOT NULL DEFAULT 'double'` | `'double'` \| `'single'` — default checkout rule |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
-| `dart_weight` | `INTEGER` | Current default weight in grams; snapshotted per-game into `game_players.dart_weight` |
+| `dart_weight` | `INTEGER` | **Retired as a write path** (`docs/dart-builder-roadmap.md`) — no UI sets this anymore; a selected loadout's barrel weight is the only source for `game_players.dart_weight` going forward (see §16). Existing values are left in place, unread by any current code path (`getPlayer`/`listPlayers` still return it for API back-compat, but nothing writes it, and `createGame()` never falls back to it) |
 | `pin_hash` / `pin_salt` | `TEXT` | scrypt hash/salt; `NULL` = no PIN, anyone may play as this player |
 | `pin_fail_count` | `INTEGER NOT NULL DEFAULT 0` | Incremented via `RETURNING` (see §9) |
 | `pin_locked_until` | `INTEGER` | Epoch ms |
@@ -1967,7 +1967,8 @@ already-migrated database is a safe no-op).
 | `game_id` | `INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE` | |
 | `player_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | |
 | `out_mode` | `TEXT NOT NULL DEFAULT 'double'` | Per-game checkout rule actually used (may differ from the player's current default) |
-| `dart_weight` | `INTEGER` | Snapshot of `players.dart_weight` at game start |
+| `dart_weight` | `INTEGER` | Snapshot at game start — **as of `docs/dart-builder-roadmap.md`**, sourced from the selected loadout's barrel `weight_g` (`NULL` if no loadout was selected), not from `players.dart_weight` (see §16) |
+| `loadout_id` | `INTEGER REFERENCES loadouts(id) ON DELETE SET NULL` | The loadout selected for this player in this game, if any (§16). Nullable — playing without a loadout remains fully valid |
 
 ### `turns` (one row per visit, indexed on `player_id` and `game_id`)
 | Column | Type | Notes |
@@ -2109,20 +2110,50 @@ set → `in_progress`; else both player slots filled → `ready`; else `pending`
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 | `method` / `path` / `status` / `message` | nullable | One row per server-side 5xx response (§1's "Server error log"); pruned to the most recent 500 rows on every insert |
 
+### `dart_components` (§16, `docs/dart-builder-roadmap.md`)
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `player_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | Personal catalog — not shared/global |
+| `type` | `TEXT NOT NULL CHECK IN ('barrel','shaft','flight')` | No `'tip'` type — tip texture lives on `loadouts` directly (see below) |
+| `name` | `TEXT NOT NULL` | |
+| `length_mm` | `TEXT` | A preset **range label** (e.g. `"medium"`), not a raw millimeter number. Applies to barrel/shaft; always `NULL` for flight (flight length reduces to `shape`) |
+| `weight_g` | `INTEGER` | Barrel only in practice — one of the same 10g–40g individual values `dartWeightOptions()` always offered, now entered once on the barrel instead of picked per-game. Always `NULL` for shaft/flight |
+| `material` | `TEXT` | Closed enum, different list per `type` — see `getDartComponentOptions()` |
+| `shape` | `TEXT` | Barrel: `straight`\|`torpedo`\|`ton`. Shaft: conceptually "type" (`fixed`\|`spinning`), stored in this column rather than a separate one. Flight: `standard`\|`slim`\|`kite`\|`pear` |
+| `grip` | `TEXT` | Barrel only: `smooth`\|`knurled`\|`ringed` — surface texture, kept separate from `shape` (silhouette) |
+| `notes` | `TEXT` | Free text |
+| `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
+
+### `loadouts` (§16)
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `player_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | |
+| `name` | `TEXT NOT NULL` | |
+| `barrel_id` / `shaft_id` / `flight_id` | `INTEGER REFERENCES dart_components(id) ON DELETE SET NULL` | Each individually nullable — a loadout can be saved "in progress." Can't be *selected* for a game until all three are filled (checked at game-creation time, not save time) |
+| `tip_texture` | `TEXT CHECK IN ('smooth','grooved')` | Nullable. Lives here, not as a `dart_components` row — no reusable catalog of named "tip parts" the way barrel/shaft/flight have |
+| `dart_count` | `INTEGER NOT NULL DEFAULT 3` | Informational/display only — not a multiplier fed into any stat; the weight used for `game_players.dart_weight` is always the barrel's per-dart `weight_g` |
+| `is_default` | `INTEGER NOT NULL DEFAULT 0` | At most one `1` per `player_id`, enforced by `setDefaultLoadout()` (clears every other of that player's loadouts in the same operation, never by a DB constraint) |
+| `created_at` / `updated_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
+
 ### Cascade summary
 
 Deleting a `player` cascades: their `game_players` rows, `turns` (and
-transitively their `darts`), `player_badges`, `daily_challenge_attempts`, and
-`tournament_players`. `deletePlayer()` then prunes any `games` row left with
-zero remaining `game_players` (also run once at boot to self-heal older
-databases). Any `tournament_matches`/`tournaments` row referencing the deleted
-player (`player1_id`/`player2_id`/`winner_id`/`champion_id`/`runner_up_id`)
-sets that column to `NULL` rather than cascading — the bracket's shape and
-results stay intact, only the departed player's name is lost from it (the same
-tradeoff already accepted for `games.winner_id`). The player-deletion guard
-(§1, §15) blocks this entirely while the player is still `active` in an
-in-progress tournament, so this SET NULL path only ever fires for an already-
-eliminated player or a completed tournament.
+transitively their `darts`), `player_badges`, `daily_challenge_attempts`,
+`tournament_players`, and their `dart_components`/`loadouts` rows. `deletePlayer()`
+then prunes any `games` row left with zero remaining `game_players` (also run
+once at boot to self-heal older databases). Any `tournament_matches`/`tournaments`
+row referencing the deleted player (`player1_id`/`player2_id`/`winner_id`/
+`champion_id`/`runner_up_id`) sets that column to `NULL` rather than cascading —
+the bracket's shape and results stay intact, only the departed player's name is
+lost from it (the same tradeoff already accepted for `games.winner_id`). The
+player-deletion guard (§1, §15) blocks this entirely while the player is still
+`active` in an in-progress tournament, so this SET NULL path only ever fires for
+an already-eliminated player or a completed tournament. Deleting a single
+`dart_components` row similarly sets any `loadouts.barrel_id`/`shaft_id`/
+`flight_id` slot referencing it back to `NULL` rather than deleting the whole
+loadout.
 
 ---
 
@@ -2280,7 +2311,98 @@ Given N players and `bracketSize` = the smallest power of two ≥ N:
 
 ---
 
-## 16. Known Limitations & Open Gaps
+## 16. Dart Builder / Loadouts
+
+`docs/dart-builder-roadmap.md`. Backend: `backend/db.js`'s "dart builder /
+loadouts" section (component/loadout CRUD, `_resolveLoadoutForParticipant()`,
+`getLoadoutStats()`). Frontend: `frontend/index.html`'s "DART BUILDER /
+LOADOUTS" block, reachable via a player's profile ("🎯 Manage Loadouts") or the
+New Game screen's per-slot "🎯 [loadout name / No loadout]" pill.
+
+### Data model
+
+- **`dart_components`** (§13) — a player's personal catalog of barrel/shaft/flight
+  parts. No `tip` type: steel-vs-soft-tip changes the whole board/game (out of
+  scope, consistent with the app's steel-tip assumption throughout), and tip
+  *texture* (smooth/grooved) is a single attribute of the assembled loadout, not
+  a reusable named part the way barrels/shafts/flights are.
+- **`loadouts`** (§13) — exactly one component per type (each slot individually
+  nullable while "in progress") plus `tip_texture` and `dart_count`. A loadout
+  can't actually be *used in a game* until barrel/shaft/flight are all filled —
+  `_resolveLoadoutForParticipant()` enforces this at game-creation time, not at
+  save time, throwing if an incomplete loadout is selected.
+- **`game_players.loadout_id`** — resolved once at game creation and snapshotted
+  (mirrors `dart_weight`/`out_mode`'s existing snapshot pattern), so renaming or
+  deleting a loadout later never rewrites a past game's history.
+- **Closed enums, no free-text escape hatch** (a deliberate v1 decision):
+  `getDartComponentOptions()` in `backend/db.js` is the single source of truth
+  both the server (validation) and client (dropdown rendering) read from — the
+  frontend never hardcodes a second copy of a shape/material/grip list.
+
+### `players.dart_weight` is retired as a write path
+
+The player-page and Add-Player-modal "Dart Weight" dropdown (`dartWeightOptions()`)
+is gone from the UI entirely. Going forward, `game_players.dart_weight` is
+sourced **only** from the selected loadout's barrel `weight_g` — no loadout
+selected means `NULL`, even for a player who still has an old `players.dart_weight`
+value sitting on their row from before this feature shipped. That old data is
+left orphaned deliberately (no migration into a fabricated "legacy loadout") —
+see §13's `players` table note. The `weight` stat-history filter
+(`getDartWeights()`, `GET /api/players/:name/history?weight=`) is unchanged and
+keeps reading whatever ended up in `game_players.dart_weight`, regardless of
+which mechanism (old per-player picker or new loadout) wrote it.
+
+### PIN gating
+
+Two mutating actions are gated behind a PIN-protected player's own PIN, both by
+virtue of living inside the Player Profile's existing PIN-gated
+`player-controls` block (`unlockPlayerSettings()`/`playerSettingsUnlocked` —
+the same gate that already protects the finish-rule toggle) rather than a new
+check mechanism: setting/changing the **Default Loadout** selector, and opening
+**"🎯 Manage Loadouts"** into the Dart Builder screen at all. A player without a
+PIN keeps today's no-PIN-required behavior. Selecting *which* of a player's
+existing loadouts to use for the current game (the New Game screen's picker) is
+**not** separately PIN-gated beyond the existing per-slot `withPinCheck()` — it's
+a selection among already-visible options for immediate play, not a
+customization action, the same way finish-rule/out-mode picks on New Game aren't
+separately gated either.
+
+### Stats scoping
+
+`getLoadoutStats(playerName, loadoutId)` lives only on the Dart Builder screen
+for the loadout currently open — not a Player Profile filter dropdown. It's a
+dedicated query, not a `_scope()` extension: `_scope()` composes game-level
+dimensions (mode, game type), but a loadout selection is a per-player-per-game
+attribute on `game_players` (same shape as `dart_weight`/`out_mode`), so scoping
+by it needs a join keyed on `(game_id, player_id)`. `gamesPlayed`/`wins` are
+anchored on `game_players`/`games` directly (not `turns`) — a game with zero
+turns recorded so far still counts as "played" under its loadout; this was an
+actual bug caught during end-to-end verification (originally joined through
+`turns`, silently excluding a just-started or abandoned-with-no-turns game),
+fixed before shipping, regression-tested in `backend/test/dart-builder.test.js`.
+Returns games played, wins, darts thrown, 3-dart average, 180 count, and
+checkout count — all reusing `getPlayerStatBubbles()`'s exact existing formulas
+(no new derived formula invented), just re-scoped.
+
+### Deliberately out of scope for this pass
+
+- **Visual icon/diagram per barrel shape, barrel grip, and flight shape option**
+  — the accessibility requirement the design doc called for; v1 ships
+  text-label-only dropdowns instead. Tracked on `docs/open-roadmap-items.md`.
+- **"Quick-add full set" one-shot entry form** — building a loadout is three
+  "+ New {type}" taps plus naming it, not a single combined form. Tracked
+  separately.
+- **Optional photo upload per component.** Tracked separately.
+- **Loadout comparison view** (side-by-side stats for 2+ loadouts) — always a
+  stretch goal, not required for v1. Tracked separately.
+- **A literal CoD/Halo-gunsmith illustration** (centered dart, fanning
+  leader-line callouts) — shipped instead as a stacked grouped-section form,
+  functionally equivalent and inherently mobile-responsive (no wide layout to
+  collapse), just visually plainer than the roadmap doc's original sketch.
+
+---
+
+## 17. Known Limitations & Open Gaps
 
 Cross-referenced from the `docs/*.md` roadmap docs — these are real,
 already-shipped limitations, not just unbuilt future features:
@@ -2324,7 +2446,7 @@ already-shipped limitations, not just unbuilt future features:
 
 ---
 
-## 17. Troubleshooting
+## 18. Troubleshooting
 
 The general method, before the specific symptoms below: **this document is the
 spec.** Find the section describing what the misbehaving feature is supposed to

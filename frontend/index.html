@@ -87,6 +87,9 @@
     border-radius:10px;padding:12px 36px 12px 13px;font-size:15px;font-family:inherit;cursor:pointer}
   .pselect:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
   .slot-stat{font-size:11px;color:var(--muted)}
+  .loadout-pill{background:none;border:1px solid var(--wire);color:var(--muted);border-radius:20px;
+    padding:3px 10px;font-size:11px;font-family:inherit;cursor:pointer}
+  .loadout-pill:hover{color:var(--gold);border-color:var(--gold)}
   /* add player row */
   .add-player-wrap{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
   .add-player-menu{display:none;gap:6px;flex-wrap:wrap}
@@ -863,6 +866,14 @@
     </div>
   </section>
 
+  <!-- ============ DART BUILDER (docs/dart-builder-roadmap.md) ============ -->
+  <section id="screen-dart-builder" class="screen">
+    <div class="card">
+      <button class="pp-back" onclick="show(dartBuilderBackTo)">← Back</button>
+      <div id="dart-builder-body"></div>
+    </div>
+  </section>
+
   <!-- ============ STATS LEGEND ============ -->
   <section id="screen-legend" class="screen">
     <div class="card">
@@ -1364,9 +1375,27 @@ const DB = {
   setDartWeight(name, weight){ Backend.send('PUT','/api/players/dart-weight',{name, weight}).catch(logErr); },
   delete(name){ Backend.send('DELETE','/api/players?name='+encodeURIComponent(name)).catch(logErr); },
 
+  // Dart Builder / loadouts (docs/dart-builder-roadmap.md)
+  dartComponentOptions(){ return Backend.get('/api/dart-components/options'); },
+  listComponents(player, type){ return Backend.get(`/api/dart-components?name=${encodeURIComponent(player)}`+(type?`&type=${type}`:'')); },
+  createComponent(player, type, fields){ return Backend.send('POST','/api/dart-components',{player, type, ...fields}); },
+  updateComponent(player, id, fields){ return Backend.send('PUT',`/api/dart-components/${id}`,{player, ...fields}); },
+  deleteComponent(player, id){ return Backend.send('DELETE',`/api/dart-components/${id}?player=${encodeURIComponent(player)}`); },
+  listLoadouts(player){ return Backend.get(`/api/loadouts?name=${encodeURIComponent(player)}`); },
+  getLoadout(player, id){ return Backend.get(`/api/loadouts/${id}?name=${encodeURIComponent(player)}`); },
+  createLoadout(player, fields){ return Backend.send('POST','/api/loadouts',{player, ...fields}); },
+  updateLoadout(player, id, fields){ return Backend.send('PUT',`/api/loadouts/${id}`,{player, ...fields}); },
+  deleteLoadout(player, id){ return Backend.send('DELETE',`/api/loadouts/${id}?player=${encodeURIComponent(player)}`); },
+  duplicateLoadout(player, id){ return Backend.send('POST',`/api/loadouts/${id}/duplicate`,{player}); },
+  loadoutStats(player, id){ return Backend.get(`/api/loadouts/${id}/stats?name=${encodeURIComponent(player)}`); },
+  getDefaultLoadout(player){ return Backend.get(`/api/players/default-loadout?name=${encodeURIComponent(player)}`); },
+  setDefaultLoadout(player, loadoutId){ return Backend.send('PUT','/api/players/default-loadout',{name:player, loadoutId}); },
+
   // game + turn writes
-  async beginGame(meta, names){
-    try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame, players:names.map(n=>({name:n,out:playerOut(n)})), practice:meta.practice?1:0, gameType:meta.gameType, config:meta.config}); this.gameId=r.gameId; }
+  async beginGame(meta, names, loadoutByName){
+    try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame,
+      players:names.map(n=>({name:n, out:playerOut(n), loadoutId:(loadoutByName && loadoutByName[n]) ? loadoutByName[n].id : undefined})),
+      practice:meta.practice?1:0, gameType:meta.gameType, config:meta.config}); this.gameId=r.gameId; }
     catch(e){ logErr(e); this.gameId=null; }
   },
   recordTurn(t){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/turns`, t)); } },
@@ -1515,7 +1544,10 @@ function makeDart(sector, mult){
    ========================================================================= */
 let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, mode:'h2h',
   gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[], ghostLeg:null,
-  doublesTargets:[] }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice'; gameType: 'x01' | 'cricket' | 'doubles_practice'
+  doublesTargets:[], loadoutByName:{} }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice'; gameType: 'x01' | 'cricket' | 'doubles_practice'
+  // loadoutByName: player name -> {id,name} of the loadout picked for THIS New Game
+  // visit (docs/dart-builder-roadmap.md) — reset each time the setup screen loads;
+  // re-populated by auto-loading each picked player's is_default loadout.
 let game = null;
 let dartTimingEnabled = false;   // admin-toggled; refreshed at boot from /api/settings/dart-timing
 let roster = [];     // saved player names (profiles that own stats)
@@ -1633,7 +1665,7 @@ function show(name){
   if(name==='settings') renderSettings();
   if(name==='home'){ renderHome(); renderHomeChallengeTeaser(); }
   if(name==='setup'){
-    setup.slots=[]; sanitizeSlots(); renderPlayers(); updateFormatLine();
+    setup.slots=[]; setup.loadoutByName={}; sanitizeSlots(); renderPlayers(); updateFormatLine();
     renderChallengeCard();
     // stats are cached client-side and only refetched on demand — without this, averages
     // shown here can be stale after playing a game earlier in the same session.
@@ -1643,11 +1675,23 @@ function show(name){
   if(name==='player'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); }
   if(name==='tournament') renderTournamentScreen();
   if(name==='legend') renderLegend();
+  if(name==='dart-builder') renderDartBuilderScreen();
 }
 let legendBackTo='home';
 function showLegend(backTo){
   legendBackTo = backTo || 'home';
   show('legend');
+}
+let dartBuilderBackTo='player';
+// dartBuilderView: 'list' (loadout list for dartBuilderPlayer) or 'edit' (component
+// slots for dartBuilderLoadoutId, null = new unsaved loadout).
+let dartBuilderPlayer=null, dartBuilderView='list', dartBuilderLoadoutId=null;
+function showDartBuilder(playerName, backTo){
+  dartBuilderPlayer = playerName;
+  dartBuilderBackTo = backTo || 'player';
+  dartBuilderView = 'list';
+  dartBuilderLoadoutId = null;
+  show('dart-builder');
 }
 /* =========================================================================
    DAILY CHALLENGE  (docs/daily-challenge-roadmap.md)
@@ -2818,6 +2862,15 @@ function renderPlayers(){
       ${setup.slots.length>1?`<button class="iconbtn" title="Remove from game" onclick="removePlayer(${i})">✕</button>`:''}`;
     row.appendChild(innerRow);
     if(statHtml) row.insertAdjacentHTML('beforeend', `<div style="padding-left:30px;margin-top:3px">${statHtml}</div>`);
+    if(sel){
+      const lo = setup.loadoutByName[sel];
+      const j = escapeHtml(escapeJs(sel));
+      row.insertAdjacentHTML('beforeend', `<div style="padding-left:30px;margin-top:3px">
+        <button type="button" class="loadout-pill" onclick="openLoadoutPicker('${j}', ${i})">
+          🎯 ${lo ? escapeHtml(lo.name) : 'No loadout'}
+        </button>
+      </div>`);
+    }
     box.appendChild(row);
   });
   updateSetupChrome();
@@ -2859,13 +2912,58 @@ function updateH2HBanner(named){
 function onSlotChange(i, value){
   const prev = setup.slots[i];
   withPinCheck(value,
-    ()=>{ setup.slots[i]=value; renderPlayers(); if(setup.mode==='challenge' && i===0) renderChallengeCard(); if(setup.mode==='ghost' && i===0) renderGhostLegPicker(); },
+    ()=>{
+      setup.slots[i]=value; renderPlayers();
+      if(setup.mode==='challenge' && i===0) renderChallengeCard();
+      if(setup.mode==='ghost' && i===0) renderGhostLegPicker();
+      // Auto-select this player's default loadout, if they have one (docs/dart-builder-roadmap.md) —
+      // a player who only ever throws one set of darts never has to actively pick one.
+      if(value && !setup.loadoutByName[value]){
+        Backend.get(`/api/players/default-loadout?name=${encodeURIComponent(value)}`)
+          .then(lo=>{ if(lo && setup.slots[i]===value){ setup.loadoutByName[value]=lo; renderPlayers(); } })
+          .catch(()=>{});
+      }
+    },
     ()=>{
       // reset the select back to previous value without re-rendering everything
       const sel = document.querySelectorAll(`#players-list .pselect`)[i];
       if(sel) sel.value = prev || '';
     }
   );
+}
+
+// docs/dart-builder-roadmap.md "Change Loadout" picker: selection-only (no editing)
+// scoped to this player's own loadouts, plus a shortcut into the Dart Builder for a
+// player with none yet. Not selecting a loadout at all remains fully valid.
+function openLoadoutPicker(name, slotIndex){
+  const j = escapeHtml(escapeJs(name));
+  Backend.get(`/api/loadouts?name=${encodeURIComponent(name)}`).then(loadouts=>{
+    const current = setup.loadoutByName[name];
+    const rows = loadouts.map(lo=>{
+      const complete = !!(lo.barrel && lo.shaft && lo.flight);
+      const selected = current && current.id===lo.id;
+      return `<button type="button" class="btn btn-ghost" style="width:100%;text-align:left;margin-bottom:6px;${selected?'border-color:var(--gold);color:var(--gold)':''}"
+        ${complete?'':'disabled title="Missing a barrel, shaft, or flight"'}
+        onclick="selectLoadoutForSlot('${j}', ${slotIndex}, ${lo.id})">${escapeHtml(lo.name)}${complete?'':' (incomplete)'}</button>`;
+    }).join('');
+    document.getElementById('modal-body').innerHTML = `
+      <p class="modal-msg">Loadout for ${escapeHtml(name)}</p>
+      <button type="button" class="btn btn-ghost" style="width:100%;text-align:left;margin-bottom:6px${current?'':';border-color:var(--gold);color:var(--gold)'}"
+        onclick="selectLoadoutForSlot('${j}', ${slotIndex}, null)">No loadout</button>
+      ${rows || '<p style="font-size:13px;color:var(--muted);margin:8px 0">No saved loadouts yet.</p>'}
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="closeModal();showDartBuilder('${j}','setup')">Build a loadout</button>
+      </div>`;
+    document.getElementById('modal').hidden=false;
+  }).catch(()=>{ uiAlert('Could not load loadouts.'); });
+}
+function selectLoadoutForSlot(name, slotIndex, loadoutId){
+  closeModal();
+  if(loadoutId==null){ delete setup.loadoutByName[name]; renderPlayers(); return; }
+  Backend.get(`/api/loadouts/${loadoutId}?name=${encodeURIComponent(name)}`)
+    .then(lo=>{ setup.loadoutByName[name] = lo; renderPlayers(); })
+    .catch(()=>{});
 }
 
 function toggleAddPlayerMenu(){
@@ -3165,7 +3263,7 @@ async function startGame(){
       .then(list=>{ earnedBadgeCache[n] = new Set((list||[]).map(b=>b.badge_id)); })
       .catch(()=>{ earnedBadgeCache[n] = new Set(); });
   });
-  await DB.beginGame(game, names);   // registers the game; gets a gameId in api mode
+  await DB.beginGame(game, names, setup.loadoutByName);   // registers the game; gets a gameId in api mode
   if(activeChallenge && DB.gameId != null){
     Backend.send('POST','/api/challenges/start', { player:activeChallenge.player, gameId:DB.gameId,
       challengeDate:activeChallenge.date, format:activeChallenge.format, target:activeChallenge.target })
@@ -3700,6 +3798,14 @@ function setPlayerDartWeight(name, value){
     persist();
   });
 }
+// docs/dart-builder-roadmap.md: lives in the same PIN-gated player-controls block
+// as the finish-rule toggle above, so a PIN-protected player's default loadout is
+// already covered by unlockPlayerSettings()'s existing PIN gate.
+function setPlayerDefaultLoadout(name, value){
+  Auth.ensureCanWrite(()=>{
+    DB.setDefaultLoadout(name, value ? Number(value) : null).catch(logErr);
+  });
+}
 function switchPlayerTab(tab){
   playerPageTab = tab;
   renderPlayerPage();
@@ -3727,7 +3833,6 @@ function renderPlayerPage(){
   const name = currentPlayer;
   const s = stats[name] || {};
   const out = playerOut(name);
-  const dartWeight = s.dartWeight || null;
   const j = escapeHtml(escapeJs(name));
   const tab = playerPageTab;
   const cp = avgChartPeriod;
@@ -3905,11 +4010,13 @@ function renderPlayerPage(){
         <button aria-pressed="${out==='single'}" onclick="setPlayerOut('${j}','single'); renderPlayerPage();">Single out</button>
       </div>
       <div style="margin-top:10px">
-        <label class="field" style="margin-bottom:5px">Dart weight</label>
-        <select class="date-input" style="width:auto" onchange="setPlayerDartWeight('${j}', this.value)">
+        <label class="field" style="margin-bottom:5px">Default loadout</label>
+        <select class="date-input" style="width:auto" id="pp-default-loadout" onchange="setPlayerDefaultLoadout('${j}', this.value)">
           <option value="">Not set</option>
-          ${dartWeightOptions(dartWeight)}
         </select>
+      </div>
+      <div style="margin-top:10px">
+        <button class="btn btn-ghost" onclick="showDartBuilder('${j}','player')">🎯 Manage Loadouts</button>
       </div>
       `}
     </div>
@@ -3929,6 +4036,7 @@ function renderPlayerPage(){
   loadStatBubbles();
   loadAvgChart(avgChartPeriod);
   loadDartWeights();
+  loadPlayerLoadouts();
   loadTopFinishes();
   loadDartAnalytics();
   loadCoachingInsights();
@@ -4726,6 +4834,257 @@ function cancelQueuedAchievementsForSnapshot(snap){
     achievementQueueRunning = false;
     pumpAchievementQueue();
   }
+}
+
+/* =========================================================================
+   DART BUILDER / LOADOUTS  (docs/dart-builder-roadmap.md)
+   Reachable from a player's profile ("Manage Loadouts", inside the same
+   PIN-gated player-controls block as the finish-rule toggle) and from the New
+   Game screen's "Build a loadout" shortcut. Two views inside one screen: a
+   loadout list, and a per-loadout editor (component slots + tip texture +
+   that loadout's own stats). Simplified from the roadmap doc's CoD-gunsmith
+   sketch to a stacked grouped-section layout rather than a literal fanning-
+   callout dart illustration — functionally equivalent, and inherently mobile-
+   responsive since there's no wide side-callout layout to collapse.
+   ========================================================================= */
+const DART_ENUM_LABELS = {
+  tungsten_80:'Tungsten 80%', tungsten_90:'Tungsten 90%', tungsten_95:'Tungsten 95%', tungsten_97:'Tungsten 97%',
+  nickel_silver:'Nickel-Silver', standard_poly:'Standard Polyester', fabric_reinforced:'Fabric-Reinforced',
+  extra_long:'Extra Long', carbon_fiber:'Carbon Fiber',
+};
+function enumLabel(v){
+  if(v==null || v==='') return '';
+  if(DART_ENUM_LABELS[v]) return DART_ENUM_LABELS[v];
+  return String(v).split('_').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+}
+
+let _dartBuilderOptions = null;
+let _dartBuilderComponents = { barrel:[], shaft:[], flight:[] };
+
+async function renderDartBuilderScreen(){
+  const el = document.getElementById('dart-builder-body');
+  if(!el || !dartBuilderPlayer) return;
+  if(!_dartBuilderOptions){
+    try{ _dartBuilderOptions = await DB.dartComponentOptions(); }
+    catch(e){ el.innerHTML = '<p style="color:var(--muted)">Could not load the Dart Builder right now.</p>'; return; }
+  }
+  if(dartBuilderView === 'edit') await renderDartBuilderEdit();
+  else await renderDartBuilderList();
+}
+
+async function renderDartBuilderList(){
+  const el = document.getElementById('dart-builder-body');
+  const player = dartBuilderPlayer;
+  let loadouts = [], defaultLoadout = null;
+  try{ [loadouts, defaultLoadout] = await Promise.all([DB.listLoadouts(player), DB.getDefaultLoadout(player)]); }
+  catch(e){ el.innerHTML = '<p style="color:var(--muted)">Could not load loadouts.</p>'; return; }
+  const defaultId = defaultLoadout ? defaultLoadout.id : null;
+  const cards = loadouts.map(lo=>{
+    const parts = [lo.barrel, lo.shaft, lo.flight].filter(Boolean).map(c=>c.name).join(' · ') || 'No components yet';
+    const lj = escapeHtml(escapeJs(lo.name));
+    return `<div class="card" style="margin-bottom:10px;padding:14px">
+      <div style="font-weight:600">${escapeHtml(lo.name)} ${lo.id===defaultId?'<span style="color:var(--gold);font-size:12px">★ Default</span>':''}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px">${escapeHtml(parts)}</div>
+      <div class="btn-row" style="margin-top:10px">
+        <button class="btn btn-ghost" onclick="openDartBuilderEdit(${lo.id})">Edit</button>
+        <button class="btn btn-ghost" onclick="duplicateDartBuilderLoadout(${lo.id})">Duplicate</button>
+        <button class="btn btn-ghost danger" onclick="deleteDartBuilderLoadout(${lo.id},'${lj}')">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+  el.innerHTML = `
+    <h2 style="font-size:18px;margin-bottom:4px">${escapeHtml(player)}'s Loadouts</h2>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+      Build a saved combination of barrel, shaft, and flight, pick one before a game (New Game's "Change Loadout" button),
+      or set one as the default from ${escapeHtml(player)}'s profile so it's chosen automatically.
+    </p>
+    <button class="btn btn-primary" style="margin-bottom:14px" onclick="openDartBuilderEdit(null)">+ New Loadout</button>
+    ${cards || '<p style="color:var(--muted);font-size:13px">No loadouts yet.</p>'}
+  `;
+}
+
+function openDartBuilderEdit(loadoutId){
+  dartBuilderView = 'edit';
+  dartBuilderLoadoutId = loadoutId;
+  renderDartBuilderScreen();
+}
+function duplicateDartBuilderLoadout(id){
+  DB.duplicateLoadout(dartBuilderPlayer, id).then(()=>renderDartBuilderScreen()).catch(e=>uiAlert(e.message||'Could not duplicate that loadout.'));
+}
+function deleteDartBuilderLoadout(id, name){
+  uiConfirm(`Delete loadout "${name}"? This can't be undone.`, ()=>{
+    DB.deleteLoadout(dartBuilderPlayer, id).then(()=>renderDartBuilderScreen()).catch(e=>uiAlert(e.message||'Could not delete that loadout.'));
+  });
+}
+
+async function loadDartBuilderComponents(){
+  const player = dartBuilderPlayer;
+  const [barrel, shaft, flight] = await Promise.all([
+    DB.listComponents(player, 'barrel'), DB.listComponents(player, 'shaft'), DB.listComponents(player, 'flight'),
+  ]);
+  _dartBuilderComponents = { barrel, shaft, flight };
+}
+function refreshDartBuilderSlot(type, selectId){
+  const sel = document.getElementById('db-slot-'+type);
+  if(!sel) return;
+  const list = _dartBuilderComponents[type] || [];
+  sel.innerHTML = '<option value="">— none —</option>' + list.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  if(selectId) sel.value = selectId;
+}
+
+async function renderDartBuilderEdit(){
+  const el = document.getElementById('dart-builder-body');
+  const player = dartBuilderPlayer;
+  const id = dartBuilderLoadoutId;
+  let loadout = null;
+  if(id){
+    try{ loadout = await DB.getLoadout(player, id); }catch(e){ loadout = null; }
+  }
+  await loadDartBuilderComponents();
+  const name = loadout ? loadout.name : '';
+  const tipTexture = loadout ? (loadout.tipTexture || '') : '';
+  const currentBarrelId = loadout && loadout.barrel ? loadout.barrel.id : null;
+  const currentShaftId  = loadout && loadout.shaft  ? loadout.shaft.id  : null;
+  const currentFlightId = loadout && loadout.flight ? loadout.flight.id : null;
+
+  function slotHtml(type, currentId, label){
+    const list = _dartBuilderComponents[type] || [];
+    return `<div class="pp-section">
+      <div class="pp-section-title">${label}</div>
+      <select id="db-slot-${type}" style="width:auto;margin-bottom:6px">
+        <option value="">— none —</option>
+        ${list.map(c=>`<option value="${c.id}" ${currentId===c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}
+      </select>
+      <button type="button" class="btn btn-ghost" style="margin-left:6px;padding:6px 10px;font-size:12px" onclick="openComponentEditor('${type}')">+ New ${label}</button>
+    </div>`;
+  }
+
+  el.innerHTML = `
+    <div style="margin-bottom:14px">
+      <label class="field">Loadout name</label>
+      <input type="text" id="db-name" maxlength="64" value="${escapeHtml(name)}" placeholder="e.g. Match Set" style="margin-bottom:10px">
+      <button class="btn btn-ghost" onclick="dartBuilderView='list';renderDartBuilderScreen();">Change Loadout</button>
+    </div>
+    ${slotHtml('barrel', currentBarrelId, 'Barrel')}
+    ${slotHtml('shaft', currentShaftId, 'Shaft')}
+    ${slotHtml('flight', currentFlightId, 'Flight')}
+    <div class="pp-section">
+      <div class="pp-section-title">Tip Texture</div>
+      <select id="db-tip-texture" style="width:auto">
+        <option value="">Not set</option>
+        ${(_dartBuilderOptions.tipTextures||[]).map(v=>`<option value="${v}" ${tipTexture===v?'selected':''}>${enumLabel(v)}</option>`).join('')}
+      </select>
+    </div>
+    <div id="db-error" style="color:var(--danger,#e5484d);font-size:12px;margin:10px 0" hidden></div>
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn btn-primary" onclick="submitDartBuilderLoadout()">Save Loadout</button>
+    </div>
+    <div id="db-stats-section" style="margin-top:20px"></div>
+  `;
+  if(id) loadDartBuilderStats(id);
+}
+
+function submitDartBuilderLoadout(){
+  const player = dartBuilderPlayer;
+  const name = document.getElementById('db-name').value.trim();
+  const errEl = document.getElementById('db-error');
+  if(!name){ errEl.textContent = 'Loadout name is required.'; errEl.hidden = false; return; }
+  const fields = {
+    name,
+    barrelId: document.getElementById('db-slot-barrel').value || null,
+    shaftId:  document.getElementById('db-slot-shaft').value  || null,
+    flightId: document.getElementById('db-slot-flight').value || null,
+    tipTexture: document.getElementById('db-tip-texture').value || null,
+  };
+  const req = dartBuilderLoadoutId ? DB.updateLoadout(player, dartBuilderLoadoutId, fields) : DB.createLoadout(player, fields);
+  req.then(lo=>{
+    dartBuilderLoadoutId = lo.id;
+    renderDartBuilderScreen();   // stays on the edit view; now has an id, so stats load below
+  }).catch(e=>{ errEl.textContent = e.message || 'Could not save that loadout.'; errEl.hidden = false; });
+}
+
+function loadDartBuilderStats(id){
+  const el = document.getElementById('db-stats-section');
+  if(!el) return;
+  DB.loadoutStats(dartBuilderPlayer, id).then(s=>{
+    el.innerHTML = `
+      <div class="pp-section-title">Stats with this loadout</div>
+      <div class="pp-cat-lines">
+        <div>Games played: ${s.gamesPlayed}</div>
+        <div>Wins: ${s.wins}</div>
+        <div>Darts thrown: ${s.dartsThrown}</div>
+        <div>3-dart average: ${s.avg!=null ? s.avg.toFixed(1) : '—'}</div>
+        <div>180s: ${s.one80s}</div>
+        <div>Checkouts: ${s.checkouts}</div>
+      </div>`;
+  }).catch(()=>{ el.innerHTML = ''; });
+}
+
+// New-component modal, reused for both the "+ New {type}" slot buttons above.
+// Field set is derived from /api/dart-components/options per type — no
+// duplicated enum list on the frontend (single source of truth stays db.js's
+// getDartComponentOptions()).
+function openComponentEditor(type){
+  const opts = _dartBuilderOptions;
+  if(!opts) return;
+  const typeOpts = opts[type];
+  const isShaft = type === 'shaft';
+  const shapeList = isShaft ? typeOpts.types : typeOpts.shapes;
+  const lengthList = type !== 'flight' ? typeOpts.lengthRanges : null;
+  window.__ceType = type;
+  document.getElementById('modal-body').innerHTML = `
+    <p class="modal-msg">New ${type.charAt(0).toUpperCase()+type.slice(1)}</p>
+    <label class="field">Name</label>
+    <input type="text" id="ce-name" maxlength="64" placeholder="e.g. Red Dragon Razer Edge" style="margin-bottom:10px">
+    ${lengthList ? `<label class="field">Length</label>
+    <select id="ce-length" style="width:auto;margin-bottom:10px">
+      <option value="">Not set</option>
+      ${lengthList.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
+    </select>` : ''}
+    ${type==='barrel' ? `<label class="field">Weight</label>
+    <select id="ce-weight" style="width:auto;margin-bottom:10px">
+      <option value="">Not set</option>
+      ${typeOpts.weights.map(g=>`<option value="${g}">${g}g</option>`).join('')}
+    </select>` : ''}
+    <label class="field">Material</label>
+    <select id="ce-material" style="width:auto;margin-bottom:10px">
+      <option value="">Not set</option>
+      ${typeOpts.materials.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
+    </select>
+    <label class="field">${isShaft?'Type':'Shape'}</label>
+    <select id="ce-shape" style="width:auto;margin-bottom:10px">
+      <option value="">Not set</option>
+      ${shapeList.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
+    </select>
+    ${type==='barrel' ? `<label class="field">Grip</label>
+    <select id="ce-grip" style="width:auto;margin-bottom:10px">
+      <option value="">Not set</option>
+      ${typeOpts.grips.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
+    </select>` : ''}
+    <div id="ce-error" style="color:var(--danger,#e5484d);font-size:12px;margin-bottom:8px" hidden></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitComponentEditor()">Save</button>
+    </div>`;
+  document.getElementById('modal').hidden = false;
+  setTimeout(()=>{ const el=document.getElementById('ce-name'); if(el) el.focus(); },0);
+}
+function submitComponentEditor(){
+  const type = window.__ceType;
+  const name = document.getElementById('ce-name').value.trim();
+  const errEl = document.getElementById('ce-error');
+  if(!name){ errEl.textContent = 'Name is required.'; errEl.hidden = false; return; }
+  const fields = { name };
+  const lengthEl = document.getElementById('ce-length'); if(lengthEl) fields.lengthMm = lengthEl.value || null;
+  const weightEl = document.getElementById('ce-weight'); if(weightEl) fields.weightG = weightEl.value ? Number(weightEl.value) : null;
+  const materialEl = document.getElementById('ce-material'); if(materialEl) fields.material = materialEl.value || null;
+  const shapeEl = document.getElementById('ce-shape'); if(shapeEl) fields.shape = shapeEl.value || null;
+  const gripEl = document.getElementById('ce-grip'); if(gripEl) fields.grip = gripEl.value || null;
+  DB.createComponent(dartBuilderPlayer, type, fields).then(async (comp)=>{
+    closeModal();
+    await loadDartBuilderComponents();
+    refreshDartBuilderSlot(type, comp.id);
+  }).catch(e=>{ errEl.textContent = e.message || 'Could not save that component.'; errEl.hidden = false; });
 }
 
 /* =========================================================================
@@ -6727,6 +7086,23 @@ function loadDartWeights(){
     .then(weights=>{ cachedDartWeights=weights; renderWeightFilters(); })
     .catch(()=>{ container.hidden=true; });
 }
+
+// docs/dart-builder-roadmap.md: populates the Player Profile's "Default loadout"
+// select (only rendered at all once PIN-gated player settings are unlocked, or the
+// player has no PIN — see renderPlayerPage()).
+function loadPlayerLoadouts(){
+  const sel = document.getElementById('pp-default-loadout');
+  if(!sel) return;
+  const player = currentPlayer;
+  Promise.all([DB.listLoadouts(player), DB.getDefaultLoadout(player)]).then(([list, def])=>{
+    if(currentPlayer !== player) return;   // a newer profile visit took over
+    const selEl = document.getElementById('pp-default-loadout');
+    if(!selEl) return;
+    const defaultId = def ? def.id : null;
+    selEl.innerHTML = '<option value="">Not set</option>' +
+      list.map(lo=>`<option value="${lo.id}"${defaultId===lo.id?' selected':''}>${escapeHtml(lo.name)}</option>`).join('');
+  }).catch(()=>{});
+}
 function renderWeightFilters(){
   const container=document.getElementById('avg-weight-filters');
   if(!container) return;
@@ -7152,14 +7528,6 @@ function uiAddPlayer(onSubmit){
      <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
        Set a 4–8 digit PIN to stop other people from playing as this player — it will be asked for each time this player is added to a game. Leave it blank if anyone should be able to pick this player.
      </p>
-     <label class="field">Dart Weight (optional)</label>
-     <select class="date-input" id="ap-weight" style="width:auto;margin-bottom:6px">
-       <option value="">Not set</option>
-       ${dartWeightOptions(null)}
-     </select>
-     <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
-       Optionally choose your preferred dart weight. This can be changed later from your player page.
-     </p>
      <div id="ap-error" style="color:var(--danger,#e5484d);font-size:12px;margin-bottom:8px" hidden></div>
      <div class="modal-actions">
        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
@@ -7175,11 +7543,9 @@ function submitAddPlayer(){
   const out = document.getElementById('ap-out-single').getAttribute('aria-pressed')==='true' ? 'single' : 'double';
   const pin = document.getElementById('ap-pin').value.trim();
   if(pin && !/^\d{4,8}$/.test(pin)){ errEl.textContent='PIN must be 4–8 digits.'; errEl.hidden=false; return; }
-  const weightRaw = document.getElementById('ap-weight').value;
-  const dartWeight = weightRaw ? Number(weightRaw) : null;
   const f = window.__modalAddPlayer;
   closeModal();
-  if(f) f(name, { out, pin: pin||undefined, dartWeight: dartWeight||undefined });
+  if(f) f(name, { out, pin: pin||undefined });
 }
 
 /* ---------- boot ---------- */

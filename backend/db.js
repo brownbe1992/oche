@@ -243,6 +243,47 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_tournament_matches_round ON tournament_matches(round_id);
   CREATE INDEX IF NOT EXISTS idx_tournament_matches_game  ON tournament_matches(game_id);
+
+  -- Dart Builder / loadout customization (docs/dart-builder-roadmap.md). Not a new
+  -- column on games/players — a player's owned catalog of parts, each row personal
+  -- (not shared/global) since real dart preferences are personal. No 'tip' type: tip
+  -- texture is a single attribute of the assembled loadout (see loadouts.tip_texture
+  -- below), not a reusable catalog part the way barrels/shafts/flights are.
+  CREATE TABLE IF NOT EXISTS dart_components (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id  INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    type       TEXT NOT NULL CHECK (type IN ('barrel','shaft','flight')),
+    name       TEXT NOT NULL,
+    length_mm  TEXT,     -- a preset range label (e.g. "medium"), not a raw millimeter number
+    weight_g   INTEGER,  -- barrel only in practice; shaft/flight weight is negligible and left NULL
+    material   TEXT,
+    shape      TEXT,     -- barrel: straight/torpedo/ton. shaft: "type" (fixed/spinning), stored
+                          -- here rather than a separate column since it's the same one-of-a-
+                          -- fixed-list-per-type slot conceptually. flight: standard/slim/kite/pear.
+    grip       TEXT,      -- barrel only: smooth/knurled/ringed (surface texture, separate from shape)
+    notes      TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_dart_components_player ON dart_components(player_id);
+
+  -- A saved, named combination of exactly one component per type. barrel/shaft/
+  -- flight_id are individually nullable (a loadout can be saved "in progress"), but a
+  -- loadout can't be selected for a game until all three are filled (checked at
+  -- selection time in resolveLoadoutForGame(), not at save time).
+  CREATE TABLE IF NOT EXISTS loadouts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id    INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    barrel_id    INTEGER REFERENCES dart_components(id) ON DELETE SET NULL,
+    shaft_id     INTEGER REFERENCES dart_components(id) ON DELETE SET NULL,
+    flight_id    INTEGER REFERENCES dart_components(id) ON DELETE SET NULL,
+    tip_texture  TEXT CHECK (tip_texture IN ('smooth','grooved')),
+    dart_count   INTEGER NOT NULL DEFAULT 3,
+    is_default   INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_loadouts_player ON loadouts(player_id);
 `);
 
 // Column migrations for tables not recreated above — safe to re-run.
@@ -274,6 +315,10 @@ try { db.exec('ALTER TABLE turns ADD COLUMN leg_won INTEGER NOT NULL DEFAULT 0')
 // or resetting a player can never retroactively reclassify a game (a 2-player H2H game
 // stays H2H even after one participant is removed). Backfilled for existing rows below.
 try { db.exec('ALTER TABLE games ADD COLUMN player_count INTEGER'); } catch(e) {}
+// Dart Builder (docs/dart-builder-roadmap.md): resolved once at game creation and
+// snapshotted, same reasoning already applied to game_players.dart_weight/out_mode —
+// renaming/deleting a loadout later never rewrites a past game's history.
+try { db.exec('ALTER TABLE game_players ADD COLUMN loadout_id INTEGER REFERENCES loadouts(id) ON DELETE SET NULL'); } catch(e) {}
 db.exec(`UPDATE games SET player_count = (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = games.id) WHERE player_count IS NULL`);
 // config wasn't backfilled when the column was added (unlike player_count above) —
 // every pre-existing row is X01 (game_type defaults to 'x01') with category as its
@@ -349,7 +394,7 @@ const q = {
   deleteSessionsForAdmin: db.prepare('DELETE FROM sessions WHERE admin_id = ?'),
 
   insertGame   : db.prepare('INSERT INTO games (category, legs_per_set, sets_per_game, practice, game_type, config) VALUES (?, ?, ?, ?, ?, ?)'),
-  addParticipant: db.prepare('INSERT OR IGNORE INTO game_players (game_id, player_id, dart_weight, out_mode) VALUES (?, ?, ?, ?)'),
+  addParticipant: db.prepare('INSERT OR IGNORE INTO game_players (game_id, player_id, dart_weight, out_mode, loadout_id) VALUES (?, ?, ?, ?, ?)'),
   completeGame : db.prepare("UPDATE games SET completed_at = datetime('now'), winner_id = ? WHERE id = ?"),
 
   insertTurn   : db.prepare(`INSERT INTO turns
@@ -519,6 +564,19 @@ function clampMatchFormat(v) {
   if (!Number.isFinite(n) || n < 1) return 1;
   return Math.min(MAX_LEGS_OR_SETS, n);
 }
+// A loadout can be saved "in progress" with empty slots (see dart_components CRUD
+// below), but can't actually be used in a game until barrel/shaft/flight are all
+// filled — checked here, at game-creation/selection time, not at save time.
+function _resolveLoadoutForParticipant(playerId, loadoutId) {
+  if (loadoutId === undefined || loadoutId === null || loadoutId === '') return null;
+  const row = db.prepare('SELECT * FROM loadouts WHERE id = ?').get(Number(loadoutId));
+  if (!row || row.player_id !== playerId) throw httpError(400, 'Loadout not found');
+  if (row.barrel_id == null || row.shaft_id == null || row.flight_id == null) {
+    throw httpError(400, `Loadout "${row.name}" is missing a barrel, shaft, or flight and can't be used in a game yet`);
+  }
+  return row;
+}
+
 function createGame({ category, legsPerSet, setsPerGame, players, practice, gameType, config }) {
   // gameType/config default to X01 for every caller today (no New Game UI sends
   // anything else yet) — see docs/game-modes-roadmap.md. Accepting them as params
@@ -543,7 +601,13 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   (players || []).forEach(entry => {
     const out = entry.out === 'single' ? 'single' : 'double';
     const p   = ensurePlayer(entry.name);
-    q.addParticipant.run(gameId, p.id, p.dart_weight ?? null, out);
+    // docs/dart-builder-roadmap.md: players.dart_weight is retired as a standalone
+    // fallback — a selected loadout's barrel weight is the only source for
+    // game_players.dart_weight going forward; no loadout means NULL, even for a
+    // player who still has an old dart_weight value sitting orphaned on their row.
+    const loadout = _resolveLoadoutForParticipant(p.id, entry.loadoutId);
+    const weight = loadout ? _getComponentOrNull(loadout.barrel_id)?.weight_g ?? null : null;
+    q.addParticipant.run(gameId, p.id, weight, out, loadout ? loadout.id : null);
   });
   // Freeze the participant count now (deduped, since addParticipant is INSERT OR IGNORE)
   // so H2H/practice classification survives later player deletion — see the migration note.
@@ -2649,6 +2713,9 @@ function resetStats() {
   // bracket (game_id NULLed, in-progress matches silently reverting to "ready").
   // A stat reset that guts all games should clear the tournaments too. DELETE FROM
   // tournaments cascades to tournament_players/rounds/matches.
+  // dart_components/loadouts are deliberately NOT touched here — they're player
+  // profile data (a player's owned equipment), same category as dart_weight/
+  // out_mode/PIN, which also survive a stats reset.
   db.exec('DELETE FROM turns; DELETE FROM game_players; DELETE FROM games; DELETE FROM tournaments;');
   return { ok: true };
 }
@@ -2659,6 +2726,8 @@ function resetStats() {
 // nothing references the tournaments PARENT row, so without an explicit delete the
 // tournament/round/match shells survived a total wipe and still showed (with blank
 // names) in the Tournaments list. DELETE FROM tournaments cascades all four tables.
+// dart_components/loadouts need no explicit delete either — both have a
+// player_id ON DELETE CASCADE, so wiping players clears them for free.
 function wipeAllData() {
   db.exec('DELETE FROM players; DELETE FROM games; DELETE FROM tournaments;');
   return { ok: true };
@@ -2693,6 +2762,11 @@ function getFullDatabaseExport() {
     tournamentPlayers: db.prepare('SELECT * FROM tournament_players').all(),
     tournamentRounds: db.prepare('SELECT * FROM tournament_rounds').all(),
     tournamentMatches: db.prepare('SELECT * FROM tournament_matches').all(),
+    // docs/dart-builder-roadmap.md: same "your data, take it with you" standing rule
+    // as the tournament tables above — a player's dart components/loadouts are
+    // ordinary user data with no secrets, so they belong in the export too.
+    dartComponents: db.prepare('SELECT * FROM dart_components').all(),
+    loadouts: db.prepare('SELECT * FROM loadouts').all(),
   };
 }
 
@@ -3422,6 +3496,313 @@ registerDeletePlayerGuard((player) => {
   return row ? `${player.name} is still active in the in-progress tournament "${row.name}" — eliminate them or finish the tournament before deleting.` : null;
 });
 
+/* ---------- dart builder / loadouts (docs/dart-builder-roadmap.md) ----------
+   dart_components is a player-owned catalog of parts; loadouts combine exactly one
+   component per type plus a tip texture. Every enum field is a closed list for v1
+   (the roadmap doc's "closed enum vs free-text escape hatch" open question is
+   resolved this way for now — revisit if a real component doesn't fit). */
+const BARREL_SHAPES    = ['straight', 'torpedo', 'ton'];
+const BARREL_GRIPS     = ['smooth', 'knurled', 'ringed'];
+const BARREL_MATERIALS = ['brass', 'nickel_silver', 'tungsten_80', 'tungsten_90', 'tungsten_95', 'tungsten_97'];
+const BARREL_LENGTH_RANGES = ['short', 'medium', 'long'];
+// Mirrors frontend/index.html's dartWeightOptions() (10g-40g individual values) —
+// the same list, now living on the barrel component instead of the player record.
+const BARREL_WEIGHTS = Array.from({ length: 31 }, (_, i) => 10 + i);
+
+// Stored in dart_components.shape for shaft rows — "type" not "shape" conceptually
+// (fixed/spinning is a mechanical behavior, not a silhouette), but it occupies the
+// same one-of-a-fixed-list-per-type slot as barrel/flight shape.
+const SHAFT_TYPES     = ['fixed', 'spinning'];
+const SHAFT_MATERIALS = ['nylon', 'aluminum', 'titanium', 'polycarbonate', 'carbon_fiber'];
+const SHAFT_LENGTH_RANGES = ['short', 'medium', 'long', 'extra_long'];
+
+const FLIGHT_SHAPES    = ['standard', 'slim', 'kite', 'pear'];
+const FLIGHT_MATERIALS = ['standard_poly', 'fabric_reinforced'];
+
+const TIP_TEXTURES = ['smooth', 'grooved'];
+const COMPONENT_TYPES = ['barrel', 'shaft', 'flight'];
+const MAX_COMPONENT_NAME_LEN = 64;
+const MAX_LOADOUT_NAME_LEN = 64;
+const MAX_COMPONENT_NOTES_LEN = 500;
+const MAX_DART_COUNT = 12;
+
+// Single source of truth for every dropdown's option list, so the frontend never
+// hardcodes a second copy of an enum that could drift out of sync with validation.
+function getDartComponentOptions() {
+  return {
+    barrel: { shapes: BARREL_SHAPES, grips: BARREL_GRIPS, materials: BARREL_MATERIALS, lengthRanges: BARREL_LENGTH_RANGES, weights: BARREL_WEIGHTS },
+    shaft:  { types: SHAFT_TYPES, materials: SHAFT_MATERIALS, lengthRanges: SHAFT_LENGTH_RANGES },
+    flight: { shapes: FLIGHT_SHAPES, materials: FLIGHT_MATERIALS },
+    tipTextures: TIP_TEXTURES,
+  };
+}
+
+function validateComponentFields(type, { name, lengthMm, weightG, material, shape, grip, notes } = {}) {
+  if (!COMPONENT_TYPES.includes(type)) throw httpError(400, `type must be one of ${COMPONENT_TYPES.join(', ')}`);
+  name = String(name || '').trim();
+  if (!name) throw httpError(400, 'Component name is required');
+  if (name.length > MAX_COMPONENT_NAME_LEN) throw httpError(400, `Component name must be ${MAX_COMPONENT_NAME_LEN} characters or fewer`);
+
+  const lengthRanges = type === 'barrel' ? BARREL_LENGTH_RANGES : type === 'shaft' ? SHAFT_LENGTH_RANGES : null;
+  if (lengthMm !== undefined && lengthMm !== null && lengthMm !== '') {
+    if (!lengthRanges) throw httpError(400, `length does not apply to a ${type}`);
+    if (!lengthRanges.includes(lengthMm)) throw httpError(400, `length must be one of ${lengthRanges.join(', ')}`);
+  } else {
+    lengthMm = null;
+  }
+
+  if (weightG !== undefined && weightG !== null && weightG !== '') {
+    if (type !== 'barrel') throw httpError(400, 'weight only applies to a barrel');
+    const w = Number(weightG);
+    if (!BARREL_WEIGHTS.includes(w)) throw httpError(400, `weight must be between ${BARREL_WEIGHTS[0]} and ${BARREL_WEIGHTS[BARREL_WEIGHTS.length - 1]} grams`);
+    weightG = w;
+  } else {
+    weightG = null;
+  }
+
+  const materials = type === 'barrel' ? BARREL_MATERIALS : type === 'shaft' ? SHAFT_MATERIALS : FLIGHT_MATERIALS;
+  if (material !== undefined && material !== null && material !== '') {
+    if (!materials.includes(material)) throw httpError(400, `material must be one of ${materials.join(', ')}`);
+  } else {
+    material = null;
+  }
+
+  const shapes = type === 'barrel' ? BARREL_SHAPES : type === 'shaft' ? SHAFT_TYPES : FLIGHT_SHAPES;
+  if (shape !== undefined && shape !== null && shape !== '') {
+    if (!shapes.includes(shape)) throw httpError(400, `shape must be one of ${shapes.join(', ')}`);
+  } else {
+    shape = null;
+  }
+
+  if (grip !== undefined && grip !== null && grip !== '') {
+    if (type !== 'barrel') throw httpError(400, 'grip only applies to a barrel');
+    if (!BARREL_GRIPS.includes(grip)) throw httpError(400, `grip must be one of ${BARREL_GRIPS.join(', ')}`);
+  } else {
+    grip = null;
+  }
+
+  notes = notes != null ? String(notes).trim() : '';
+  if (notes.length > MAX_COMPONENT_NOTES_LEN) throw httpError(400, `notes must be ${MAX_COMPONENT_NOTES_LEN} characters or fewer`);
+  notes = notes || null;
+
+  return { name, lengthMm, weightG, material, shape, grip, notes };
+}
+
+function _componentRowToObj(r) {
+  if (!r) return null;
+  return {
+    id: r.id, playerId: r.player_id, type: r.type, name: r.name, lengthMm: r.length_mm,
+    weightG: r.weight_g, material: r.material, shape: r.shape, grip: r.grip, notes: r.notes,
+    createdAt: r.created_at,
+  };
+}
+
+function createComponent(playerName, type, fields) {
+  const p = getPlayer(playerName);
+  if (!p) throw httpError(404, 'Player not found');
+  const clean = validateComponentFields(type, fields);
+  const info = db.prepare(`
+    INSERT INTO dart_components (player_id, type, name, length_mm, weight_g, material, shape, grip, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(p.id, type, clean.name, clean.lengthMm, clean.weightG, clean.material, clean.shape, clean.grip, clean.notes);
+  return _componentRowToObj(db.prepare('SELECT * FROM dart_components WHERE id = ?').get(Number(info.lastInsertRowid)));
+}
+
+function listComponents(playerName, type) {
+  const p = getPlayer(playerName);
+  if (!p) return [];
+  const rows = type
+    ? db.prepare('SELECT * FROM dart_components WHERE player_id = ? AND type = ? ORDER BY name COLLATE NOCASE').all(p.id, type)
+    : db.prepare('SELECT * FROM dart_components WHERE player_id = ? ORDER BY type, name COLLATE NOCASE').all(p.id);
+  return rows.map(_componentRowToObj);
+}
+
+function _getOwnedComponent(playerName, componentId) {
+  const p = getPlayer(playerName);
+  if (!p) throw httpError(404, 'Player not found');
+  const row = db.prepare('SELECT * FROM dart_components WHERE id = ?').get(Number(componentId));
+  if (!row || row.player_id !== p.id) throw httpError(404, 'Component not found');
+  return row;
+}
+
+function updateComponent(playerName, componentId, fields) {
+  const row = _getOwnedComponent(playerName, componentId);
+  const clean = validateComponentFields(row.type, fields);
+  db.prepare(`
+    UPDATE dart_components SET name=?, length_mm=?, weight_g=?, material=?, shape=?, grip=?, notes=? WHERE id=?
+  `).run(clean.name, clean.lengthMm, clean.weightG, clean.material, clean.shape, clean.grip, clean.notes, row.id);
+  return _componentRowToObj(db.prepare('SELECT * FROM dart_components WHERE id = ?').get(row.id));
+}
+
+// Deleting a component leaves any loadout that referenced it with that slot set
+// back to NULL (barrel_id/shaft_id/flight_id are ON DELETE SET NULL) rather than
+// deleting the whole loadout — same "loses only that piece" tradeoff already
+// accepted elsewhere (e.g. games.winner_id ON DELETE SET NULL).
+function deleteComponent(playerName, componentId) {
+  const row = _getOwnedComponent(playerName, componentId);
+  db.prepare('DELETE FROM dart_components WHERE id = ?').run(row.id);
+  return { ok: true };
+}
+
+function _getComponentOrNull(id) {
+  return id == null ? null : db.prepare('SELECT * FROM dart_components WHERE id = ?').get(id);
+}
+
+function _loadoutRowToObj(r) {
+  if (!r) return null;
+  return {
+    id: r.id, playerId: r.player_id, name: r.name,
+    barrel: _componentRowToObj(_getComponentOrNull(r.barrel_id)),
+    shaft:  _componentRowToObj(_getComponentOrNull(r.shaft_id)),
+    flight: _componentRowToObj(_getComponentOrNull(r.flight_id)),
+    tipTexture: r.tip_texture, dartCount: r.dart_count, isDefault: !!r.is_default,
+    createdAt: r.created_at, updatedAt: r.updated_at,
+  };
+}
+
+function _resolveSlotComponent(playerId, componentId, expectedType) {
+  if (componentId === undefined || componentId === null || componentId === '') return null;
+  const row = db.prepare('SELECT * FROM dart_components WHERE id = ?').get(Number(componentId));
+  if (!row || row.player_id !== playerId) throw httpError(400, `${expectedType} component not found`);
+  if (row.type !== expectedType) throw httpError(400, `That component is not a ${expectedType}`);
+  return row.id;
+}
+
+function validateLoadoutFields(playerId, { name, barrelId, shaftId, flightId, tipTexture, dartCount } = {}) {
+  name = String(name || '').trim();
+  if (!name) throw httpError(400, 'Loadout name is required');
+  if (name.length > MAX_LOADOUT_NAME_LEN) throw httpError(400, `Loadout name must be ${MAX_LOADOUT_NAME_LEN} characters or fewer`);
+
+  const resolvedBarrelId = _resolveSlotComponent(playerId, barrelId, 'barrel');
+  const resolvedShaftId  = _resolveSlotComponent(playerId, shaftId, 'shaft');
+  const resolvedFlightId = _resolveSlotComponent(playerId, flightId, 'flight');
+
+  if (tipTexture !== undefined && tipTexture !== null && tipTexture !== '') {
+    if (!TIP_TEXTURES.includes(tipTexture)) throw httpError(400, `tipTexture must be one of ${TIP_TEXTURES.join(', ')}`);
+  } else {
+    tipTexture = null;
+  }
+
+  let count = (dartCount !== undefined && dartCount !== null && dartCount !== '') ? Math.floor(Number(dartCount)) : 3;
+  if (!Number.isFinite(count) || count < 1) count = 3;
+  count = Math.min(MAX_DART_COUNT, count);
+
+  return { name, barrelId: resolvedBarrelId, shaftId: resolvedShaftId, flightId: resolvedFlightId, tipTexture, dartCount: count };
+}
+
+function createLoadout(playerName, fields) {
+  const p = getPlayer(playerName);
+  if (!p) throw httpError(404, 'Player not found');
+  const clean = validateLoadoutFields(p.id, fields);
+  const info = db.prepare(`
+    INSERT INTO loadouts (player_id, name, barrel_id, shaft_id, flight_id, tip_texture, dart_count)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(p.id, clean.name, clean.barrelId, clean.shaftId, clean.flightId, clean.tipTexture, clean.dartCount);
+  return _loadoutRowToObj(db.prepare('SELECT * FROM loadouts WHERE id = ?').get(Number(info.lastInsertRowid)));
+}
+
+function listLoadouts(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return [];
+  return db.prepare('SELECT * FROM loadouts WHERE player_id = ? ORDER BY name COLLATE NOCASE').all(p.id).map(_loadoutRowToObj);
+}
+
+function _getOwnedLoadout(playerName, loadoutId) {
+  const p = getPlayer(playerName);
+  if (!p) throw httpError(404, 'Player not found');
+  const row = db.prepare('SELECT * FROM loadouts WHERE id = ?').get(Number(loadoutId));
+  if (!row || row.player_id !== p.id) throw httpError(404, 'Loadout not found');
+  return row;
+}
+
+function getLoadout(playerName, loadoutId) {
+  return _loadoutRowToObj(_getOwnedLoadout(playerName, loadoutId));
+}
+
+function updateLoadout(playerName, loadoutId, fields) {
+  const row = _getOwnedLoadout(playerName, loadoutId);
+  const clean = validateLoadoutFields(row.player_id, fields);
+  db.prepare(`
+    UPDATE loadouts SET name=?, barrel_id=?, shaft_id=?, flight_id=?, tip_texture=?, dart_count=?, updated_at=datetime('now')
+    WHERE id=?
+  `).run(clean.name, clean.barrelId, clean.shaftId, clean.flightId, clean.tipTexture, clean.dartCount, row.id);
+  return _loadoutRowToObj(db.prepare('SELECT * FROM loadouts WHERE id = ?').get(row.id));
+}
+
+function deleteLoadout(playerName, loadoutId) {
+  const row = _getOwnedLoadout(playerName, loadoutId);
+  db.prepare('DELETE FROM loadouts WHERE id = ?').run(row.id);
+  return { ok: true };
+}
+
+function duplicateLoadout(playerName, loadoutId) {
+  const row = _getOwnedLoadout(playerName, loadoutId);
+  const baseName = `${row.name} (copy)`.slice(0, MAX_LOADOUT_NAME_LEN);
+  const info = db.prepare(`
+    INSERT INTO loadouts (player_id, name, barrel_id, shaft_id, flight_id, tip_texture, dart_count)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(row.player_id, baseName, row.barrel_id, row.shaft_id, row.flight_id, row.tip_texture, row.dart_count);
+  return _loadoutRowToObj(db.prepare('SELECT * FROM loadouts WHERE id = ?').get(Number(info.lastInsertRowid)));
+}
+
+// Only one loadout per player is ever the default (pre-selected on New Game) —
+// setting one clears every other of that player's loadouts in the same operation.
+// loadoutId of null/'' clears the default entirely (no loadout pre-selected).
+function setDefaultLoadout(playerName, loadoutId) {
+  const p = getPlayer(playerName);
+  if (!p) throw httpError(404, 'Player not found');
+  if (loadoutId === null || loadoutId === undefined || loadoutId === '') {
+    db.prepare('UPDATE loadouts SET is_default = 0 WHERE player_id = ?').run(p.id);
+    return { ok: true, defaultLoadoutId: null };
+  }
+  const row = _getOwnedLoadout(playerName, loadoutId);
+  db.prepare('UPDATE loadouts SET is_default = 0 WHERE player_id = ?').run(p.id);
+  db.prepare('UPDATE loadouts SET is_default = 1 WHERE id = ?').run(row.id);
+  return { ok: true, defaultLoadoutId: row.id };
+}
+
+function getDefaultLoadout(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  return _loadoutRowToObj(db.prepare('SELECT * FROM loadouts WHERE player_id = ? AND is_default = 1').get(p.id));
+}
+
+// Per docs/dart-builder-roadmap.md's "Stats" section: this lives only on the Dart
+// Builder screen for the loadout currently open, not as a Player Profile filter.
+// No new derived formula — every figure here reuses the exact same computation
+// getPlayerStatBubbles() already uses (X01_ONLY 3-dart average, 180 count), just
+// scoped down to games where THIS loadout was selected via a game_players join,
+// instead of every game the player has ever played.
+function getLoadoutStats(playerName, loadoutId) {
+  const lo = _getOwnedLoadout(playerName, loadoutId);
+  const playerId = lo.player_id;
+  // gamesPlayed/wins are anchored on game_players/games directly, NOT turns — a
+  // game with zero turns recorded so far (just started, or abandoned immediately)
+  // still counts as "played" under this loadout; darts/avg/180s/checkouts below
+  // correctly stay at 0 for it since those genuinely require turns/darts to exist.
+  const GJ = `FROM game_players gp JOIN games g ON g.id=gp.game_id WHERE gp.player_id=? AND gp.loadout_id=?`;
+  const J  = `FROM turns t JOIN games g ON g.id=t.game_id JOIN game_players gp ON gp.game_id=t.game_id AND gp.player_id=t.player_id WHERE t.player_id=? AND gp.loadout_id=?`;
+  const JD = `FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id JOIN game_players gp ON gp.game_id=t.game_id AND gp.player_id=t.player_id WHERE t.player_id=? AND gp.loadout_id=?`;
+
+  const gamesPlayed = db.prepare(`SELECT COUNT(DISTINCT g.id) AS v ${GJ}`).get(playerId, lo.id).v ?? 0;
+  const wins = db.prepare(`SELECT COUNT(DISTINCT g.id) AS v ${GJ} AND g.winner_id = ?`).get(playerId, lo.id, playerId).v ?? 0;
+  const dartsThrown = db.prepare(`SELECT COUNT(*) AS v ${JD}`).get(playerId, lo.id).v ?? 0;
+
+  const avgDarts = db.prepare(`
+    SELECT SUM(adj) AS v FROM (SELECT CASE WHEN t.bust=1 THEN 3 ELSE COUNT(d.id) END AS adj ${JD} ${X01_ONLY} GROUP BY t.id)
+  `).get(playerId, lo.id).v ?? 0;
+  const totalPts = db.prepare(`SELECT SUM(t.scored) AS v ${J} ${X01_ONLY}`).get(playerId, lo.id).v ?? 0;
+  const avg = avgDarts > 0 ? (totalPts / avgDarts * 3) : null;
+
+  const one80s    = db.prepare(`SELECT COUNT(*) AS v ${J} ${X01_ONLY} AND t.scored=180`).get(playerId, lo.id).v ?? 0;
+  const checkouts = db.prepare(`SELECT COUNT(*) AS v ${J} AND t.checkout=1`).get(playerId, lo.id).v ?? 0;
+
+  return {
+    loadoutId: lo.id, loadoutName: lo.name,
+    gamesPlayed, wins, dartsThrown, avg, one80s, checkouts,
+  };
+}
+
 /* ---------- helpers ---------- */
 function httpError(status, message) {
   const e = new Error(message); e.status = status; return e;
@@ -3455,5 +3836,9 @@ module.exports = {
   awardBadge, revokeBadge, getPlayerBadges, getH2HSummary, getAroundTheWorldProgress,
   startChallengeAttempt, completeChallengeAttempt, getChallengeStatus, getChallengeHistory, resetChallengeAttempt,
   createTournament, listTournaments, getTournament, startTournamentMatch, recordWalkover,
+  getDartComponentOptions,
+  createComponent, listComponents, updateComponent, deleteComponent,
+  createLoadout, listLoadouts, getLoadout, updateLoadout, deleteLoadout, duplicateLoadout,
+  setDefaultLoadout, getDefaultLoadout, getLoadoutStats,
   _db: db,
 };

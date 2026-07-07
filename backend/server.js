@@ -50,6 +50,21 @@
        GET  /api/challenges/history -> (?player=...&date=YYYY-MM-DD) -> { played, completed, currentStreak, longestStreak, bestByFormat, attempts } (public)
        DEL  /api/challenges/attempt -> (?player=...&date=YYYY-MM-DD) reset an attempt + wipe its recorded stats [admin]
 
+       GET  /api/dart-components/options -> the fixed dropdown option lists (shapes/materials/grips/etc.) (public)
+       GET  /api/dart-components   -> (?name=...&type=barrel|shaft|flight) a player's component catalog (public)
+       POST /api/dart-components   -> { player, type, name, lengthMm, weightG, material, shape, grip, notes }
+       PUT  /api/dart-components/:id -> { player, ...same fields } update one component
+       DEL  /api/dart-components/:id -> (?player=...) delete one component
+       GET  /api/loadouts          -> (?name=...) a player's saved loadouts (public)
+       POST /api/loadouts          -> { player, name, barrelId, shaftId, flightId, tipTexture, dartCount }
+       GET  /api/loadouts/:id      -> (?name=...) one loadout (public)
+       PUT  /api/loadouts/:id      -> { player, ...same fields as POST } update a loadout
+       DEL  /api/loadouts/:id      -> (?player=...) delete a loadout
+       POST /api/loadouts/:id/duplicate -> { player } -> a copy named "<name> (copy)"
+       GET  /api/loadouts/:id/stats -> (?name=...) games/wins/darts/avg/180s/checkouts scoped to this loadout (public)
+       GET  /api/players/default-loadout -> (?name=...) -> the player's is_default loadout, or null (public)
+       PUT  /api/players/default-loadout -> { name, loadoutId } -> set (or, with loadoutId null, clear) the default
+
        GET  /api/backups           -> { backups:[{name,size,mtime}], retentionDays } [admin]
        POST /api/backups           -> take an on-demand backup now -> { ok, backup } [admin]
        PUT  /api/backups/retention -> { days } -> { ok, retentionDays, pruned } [admin]
@@ -770,6 +785,73 @@ const server = http.createServer(async (req, res) => {
       if (!requireWrite(req, res)) return;
       const b = await readJson(req);
       return send(res, 200, db.recordWalkover(Number(mt[1]), b.winner));
+    }
+
+    // ----- dart builder / loadouts (docs/dart-builder-roadmap.md) -----
+    // Viewing a player's components/loadouts is public, same as every other
+    // stats/profile view; creating/editing/deleting is gated by requireWrite like
+    // every other player-data mutation (setDartWeight, setOut, etc.) — PIN gating
+    // for a PIN-protected player's own loadouts is enforced client-side via the
+    // existing withPinCheck() mechanism before these are ever called, same as
+    // every other PIN-gated action in the app.
+    if (p === '/api/dart-components/options' && m === 'GET') {
+      return send(res, 200, db.getDartComponentOptions());
+    }
+    if (p === '/api/dart-components' && m === 'GET') {
+      return send(res, 200, db.listComponents(url.searchParams.get('name'), url.searchParams.get('type') || undefined));
+    }
+    if (p === '/api/dart-components' && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.createComponent(b.player, b.type, b));
+    }
+    if ((mt = p.match(/^\/api\/dart-components\/(\d+)$/)) && m === 'PUT') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.updateComponent(b.player, Number(mt[1]), b));
+    }
+    if ((mt = p.match(/^\/api\/dart-components\/(\d+)$/)) && m === 'DELETE') {
+      if (!requireWrite(req, res)) return;
+      return send(res, 200, db.deleteComponent(url.searchParams.get('player'), Number(mt[1])));
+    }
+
+    if (p === '/api/loadouts' && m === 'GET') {
+      return send(res, 200, db.listLoadouts(url.searchParams.get('name')));
+    }
+    if (p === '/api/loadouts' && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.createLoadout(b.player, b));
+    }
+    if ((mt = p.match(/^\/api\/loadouts\/(\d+)$/)) && m === 'GET') {
+      const lo = db.getLoadout(url.searchParams.get('name'), Number(mt[1]));
+      if (!lo) return send(res, 404, { error: 'Loadout not found' });
+      return send(res, 200, lo);
+    }
+    if ((mt = p.match(/^\/api\/loadouts\/(\d+)$/)) && m === 'PUT') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.updateLoadout(b.player, Number(mt[1]), b));
+    }
+    if ((mt = p.match(/^\/api\/loadouts\/(\d+)$/)) && m === 'DELETE') {
+      if (!requireWrite(req, res)) return;
+      return send(res, 200, db.deleteLoadout(url.searchParams.get('player'), Number(mt[1])));
+    }
+    if ((mt = p.match(/^\/api\/loadouts\/(\d+)\/duplicate$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.duplicateLoadout(b.player, Number(mt[1])));
+    }
+    if ((mt = p.match(/^\/api\/loadouts\/(\d+)\/stats$/)) && m === 'GET') {
+      return send(res, 200, db.getLoadoutStats(url.searchParams.get('name'), Number(mt[1])));
+    }
+    if (p === '/api/players/default-loadout' && m === 'GET') {
+      return send(res, 200, db.getDefaultLoadout(url.searchParams.get('name')));
+    }
+    if (p === '/api/players/default-loadout' && m === 'PUT') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.setDefaultLoadout(b.name, b.loadoutId));
     }
 
     // ----- badges (docs/archive/achievements-badges-roadmap.md) -----

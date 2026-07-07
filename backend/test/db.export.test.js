@@ -38,6 +38,8 @@ describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
       'dailyChallengeAttempts', 'darts', 'exportedAt', 'gamePlayers', 'games', 'players', 'playerBadges', 'timelineEvents', 'turns',
       // docs/bug-roadmap.md BUG-6: tournament tables must be exported too
       'tournaments', 'tournamentPlayers', 'tournamentRounds', 'tournamentMatches',
+      // docs/dart-builder-roadmap.md: same standing rule applied to loadout data
+      'dartComponents', 'loadouts',
     ].sort());
 
     const alice = dump.players.find(p => p.name === 'export_alice');
@@ -60,6 +62,16 @@ describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
     assert.equal(dump.tournamentPlayers.filter(tp => tp.tournament_id === cup.id).length, 2);
     assert.equal(dump.tournamentRounds.filter(r => r.tournament_id === cup.id).length, 1);
     assert.ok(dump.tournamentMatches.length >= 1, 'match rows exported');
+  });
+
+  test('includes dart components and loadouts (docs/dart-builder-roadmap.md)', () => {
+    db.addPlayer('export_loadout_owner');
+    const barrel = db.createComponent('export_loadout_owner', 'barrel', { name: 'Export Barrel', weightG: 22 });
+    const lo = db.createLoadout('export_loadout_owner', { name: 'Export Loadout', barrelId: barrel.id });
+
+    const dump = db.getFullDatabaseExport();
+    assert.ok(dump.dartComponents.find(c => c.id === barrel.id), 'component row is exported');
+    assert.ok(dump.loadouts.find(l => l.id === lo.id), 'loadout row is exported');
   });
 
   test('never includes admin/session/settings/error tables or any PIN/credential column', async () => {

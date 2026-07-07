@@ -139,12 +139,22 @@ describe('deletePlayer — cascade and orphaned-game pruning', () => {
 });
 
 describe('getDartWeights', () => {
-  test('returns the distinct dart weights this player has used across games', () => {
+  // docs/dart-builder-roadmap.md: players.dart_weight/setDartWeight() no longer
+  // feeds game_players.dart_weight — a selected loadout's barrel weight is the only
+  // source now (see backend/test/dart-builder.test.js's createGame() coverage).
+  // getDartWeights() itself is unchanged: it just reads whatever ended up snapshotted
+  // in game_players.dart_weight, regardless of how that value got there.
+  test('returns the distinct dart weights snapshotted from selected loadouts across games', () => {
     const name = 'Players_DartWeights';
-    db.addPlayer(name, 'double', { dartWeight: 22 });
-    db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
-    db.setDartWeight(name, 24);
-    db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    db.addPlayer(name);
+    const barrel22 = db.createComponent(name, 'barrel', { name: 'B22', weightG: 22, material: 'brass', shape: 'straight' });
+    const barrel24 = db.createComponent(name, 'barrel', { name: 'B24', weightG: 24, material: 'brass', shape: 'straight' });
+    const shaft = db.createComponent(name, 'shaft', { name: 'S', material: 'nylon', shape: 'fixed' });
+    const flight = db.createComponent(name, 'flight', { name: 'F', material: 'standard_poly', shape: 'standard' });
+    const lo22 = db.createLoadout(name, { name: 'Set22', barrelId: barrel22.id, shaftId: shaft.id, flightId: flight.id });
+    const lo24 = db.createLoadout(name, { name: 'Set24', barrelId: barrel24.id, shaftId: shaft.id, flightId: flight.id });
+    db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name, loadoutId: lo22.id }] });
+    db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name, loadoutId: lo24.id }] });
     const weights = db.getDartWeights(name);
     assert.deepEqual(weights.slice().sort((a, b) => a - b), [22, 24]);
   });
