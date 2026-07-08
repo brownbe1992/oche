@@ -1766,6 +1766,27 @@ policy, since inline `<script>`/`onclick` handlers are still used throughout
 `index.html`/`display.html` (a known, documented gap, not an oversight — see
 `docs/security-audit-roadmap.md` SEC-10).
 
+Every static file served by `serveStatic()` (`index.html`, `display.html`,
+`scoring.js`, and any 404 SPA-fallback response) additionally gets
+`Cache-Control: no-store`. There's no build step or filename hashing — the
+frontend is served as plain files at fixed paths — so without an explicit
+no-cache directive, a browser (mobile Safari in particular) can keep serving
+an old cached copy indefinitely after a server upgrade. `/api/*` responses are
+unaffected by this header (each API call already opts out of caching itself
+via `fetch(..., {cache: 'no-store'})` in `Backend.get()`).
+
+The boot sequence (`(async function init(){...})()`, bottom of
+`frontend/index.html`) wraps both `DB.detect()` and `DB.loadAll()` in
+try/catch, falling back to `showBackendErrorScreen()`'s "Can't reach the
+database" retry screen on either failure. `DB.loadAll()`'s guard matters
+independently of `DB.detect()`'s: the backend can be reachable (`DB.detect()`
+passes) while the specific `/api/players`/`/api/stats` calls it makes still
+fail (a stale cached page whose assumptions no longer match the live server,
+a request dropped mid-restart, etc.) — without its own guard, that failure
+left every section of the page frozen on its static "Loading…" placeholder
+forever with no error shown, indistinguishable from the app having actually
+lost its data.
+
 ### Sessions
 
 Server-side, keyed by a SHA-256 hash of the raw token (the raw token itself is

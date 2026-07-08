@@ -147,6 +147,15 @@ const SECURITY_HEADERS = {
     "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
 };
 
+// The frontend is served as plain static files with no build-time versioning/hashing,
+// so a stale cached copy on a client is otherwise indistinguishable from a fresh one
+// after an upgrade — mobile Safari in particular caches these aggressively with no
+// explicit directive telling it not to, which can leave a device running old JS
+// against a new server indefinitely (looks exactly like a data-loss bug: everything
+// stuck "Loading…" because the cached script predates a boot-sequence change). Every
+// static response gets this so a reload always fetches the current version.
+const NO_CACHE = { 'Cache-Control': 'no-store' };
+
 function send(res, status, data, headers = {}) {
   const body = typeof data === 'string' || Buffer.isBuffer(data) ? data : JSON.stringify(data);
   res.writeHead(status, { 'Content-Type': 'application/json', ...SECURITY_HEADERS, ...headers });
@@ -248,9 +257,9 @@ function serveStatic(req, res) {
     if (err) {
       // single-page app: fall back to index.html for unknown non-API paths
       return fs.readFile(path.join(FRONTEND_DIR, 'index.html'), (e2, idx) =>
-        e2 ? send(res, 404, { error: 'Not found' }) : send(res, 200, idx, { 'Content-Type': MIME['.html'] }));
+        e2 ? send(res, 404, { error: 'Not found' }) : send(res, 200, idx, { 'Content-Type': MIME['.html'], ...NO_CACHE }));
     }
-    send(res, 200, buf, { 'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream' });
+    send(res, 200, buf, { 'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream', ...NO_CACHE });
   });
 }
 

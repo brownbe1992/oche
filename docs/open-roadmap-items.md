@@ -87,6 +87,7 @@ therefore hasn't been archived yet) — see each source doc for full detail.
 | Mobile: phone-responsive CSS pass (step 1) | `docs/mobile-app-roadmap.md` |
 | All 14 security-audit findings (SEC-1 through SEC-14) fixed | `docs/security-audit-roadmap.md` |
 | All 3 functional-defect findings (BUG-1 through BUG-3) fixed | `docs/bug-roadmap.md` |
+| BUG-8: static frontend files served with no `Cache-Control` header, plus an unguarded `await DB.loadAll()` in the boot sequence — together could make a live server with intact data look fully broken to a user on a stale-cached device (found via a live bug report, not an audit pass) | `docs/bug-roadmap.md` |
 | Game Modes step 1: X01-to-plugin refactor, no behavior change | `docs/game-modes-roadmap.md` |
 | Game Modes step 2: Cricket engine + customizable numbers, dedicated scoring screen, live scoreboard | `docs/game-modes-roadmap.md` |
 | Game Modes step 3: Cricket stats parity (MPR, 9-Marks, Personal Bests, metric history, 2 achievements) | `docs/game-modes-roadmap.md` |

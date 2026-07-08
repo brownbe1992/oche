@@ -8137,7 +8137,17 @@ function showBackendErrorScreen(){
     showBackendErrorScreen();
     return;
   }
-  await DB.loadAll();       // populate roster / prefs / stats from the backend
+  try{
+    await DB.loadAll();      // populate roster / prefs / stats from the backend
+  }catch(e){
+    // DB.detect() only proves the backend is reachable, not that this specific
+    // request succeeded — without this, any failure here (a stale cached page
+    // hitting an incompatible server, a request dropped mid-restart, etc.) left
+    // every section of the page frozen on its static "Loading…" placeholder
+    // forever, indistinguishable from actual data loss to the user.
+    showBackendErrorScreen();
+    return;
+  }
   try{ const dt = await Backend.get('/api/settings/dart-timing'); dartTimingEnabled = !!dt.enabled; }catch(e){}
   try{ const di = await Backend.get('/api/settings/default-input'); dartboardMode = di.input !== 'pad'; }catch(e){}
   try{ const cb = await Backend.get('/api/settings/colorblind-mode'); colorblindMode = !!cb.enabled; }catch(e){}

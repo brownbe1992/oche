@@ -22,7 +22,10 @@
 >
 > **All fixed.** BUG-1/BUG-2/BUG-3 (second pass); BUG-4/BUG-5/BUG-6/BUG-7 (fixed
 > 2026-07 alongside `security-audit-roadmap.md` SEC-15/SEC-16), each with a committed
-> regression test and the full backend suite green.
+> regression test and the full backend suite green. BUG-8 (fixed 2026-07, from a live
+> user bug report rather than an audit pass) is a UI/error-handling defect rather than
+> a stats/data-integrity one, so its verification is a live Playwright check instead of
+> a `node:test` case.
 
 ## Severity legend
 
@@ -414,6 +417,90 @@ which is worse than a latent drift.
 **Verify:** create a tournament, run "Wipe all player & game data" from Settings,
 reload the Tournaments tab, and confirm it's empty (no orphaned shells); the four
 tournament tables are empty in the DB.
+
+---
+
+## BUG-8 — A stale cached page (mobile Safari) plus an unguarded boot-time `await` made a live server look like it had lost all its data  **(MED, user-facing / error-handling)**
+
+**Status: ✅ Fixed (2026-07).** Two independent gaps compounded into this. Fix:
+(1) `serveStatic()` (`backend/server.js`) now sends `Cache-Control: no-store` on
+every static response (`index.html`, `display.html`, `scoring.js`, and the
+SPA 404 fallback) via a new shared `NO_CACHE` header constant, so a browser can
+no longer keep serving a pre-upgrade cached copy of the frontend indefinitely.
+(2) The boot sequence's `await DB.loadAll()` (bottom of `frontend/index.html`)
+is now wrapped in the same try/catch that already guards `DB.detect()`,
+falling back to the existing `showBackendErrorScreen()` "Can't reach the
+database" retry screen instead of leaving every section of the page frozen on
+its static "Loading…" placeholder with no indication anything went wrong.
+`REFERENCE.md`'s "Response headers" section (§9) documents both. Verified live
+with Playwright: forcing `/api/stats` to fail now shows the retry screen
+instead of a silent freeze; the normal path still renders fully with zero
+console errors. Full 419-test backend suite green (neither change touches
+scoring/stats logic, so no new `node:test` case — the Playwright checks above
+are the closest thing to a regression guard for a boot-sequence/UI behavior
+like this).
+
+**Original report:** a user upgraded their self-hosted instance to the latest
+`main` and reported "all data in the database is inaccessible in the UI" —
+every Home-page section (Today's Challenge, Overview, the weekly pulse)
+stuck permanently on its static "Loading…" placeholder, even though a data
+export confirmed the database itself was intact. Reproducing the exact
+upgrade path (seeding a database on the pre-merge server, then pointing the
+new code at that same file) found no server-side error at all — every
+Home-page endpoint returned correct data, the full test suite passed, and a
+headless-browser load rendered the page fine. The decisive clue: the bug
+reproduced only on the user's iPhone (mobile Safari), never on their laptop,
+against the identical server — and a Private Browsing tab on the same iPhone
+(which forces a fully uncached load) fixed it immediately. That isolates the
+cause to a cached copy of the frontend running on that device, not the data
+or the server.
+
+**Where:**
+- `backend/server.js` `serveStatic()` sent every static file with no
+  `Cache-Control` header at all, leaving cache lifetime entirely up to browser
+  heuristics — which mobile Safari applies more aggressively than desktop
+  browsers typically do, with nothing forcing a revalidation after a server
+  upgrade changes the served files.
+- `frontend/index.html`'s boot IIFE wrapped `DB.detect()` (an explicit
+  reachability probe) in try/catch but left the very next line,
+  `await DB.loadAll()` (which actually fetches `/api/players` then
+  `/api/stats`), unguarded. `DB.detect()` passing only proves the backend
+  process is reachable — it says nothing about whether the specific requests
+  `DB.loadAll()` makes will succeed. Any rejection there — this incident, or
+  any future transient failure (a request dropped mid-restart, etc.) — was an
+  unhandled promise rejection that silently aborted the rest of `init()`,
+  which is also where `renderHome()` and `renderHomeChallengeTeaser()` are
+  called. Nothing downstream of the failure point ever ran, so every
+  "Loading…" placeholder in the static HTML was never replaced — including
+  Today's Challenge, which needs no network call at all and is purely
+  synchronous, making its continued "Loading…" state the tell that the whole
+  boot sequence had aborted rather than any one fetch merely being slow.
+
+**Misbehavior:** a user on a device with a stale cached copy of the frontend
+sees every section of the Home page frozen on "Loading…" forever, with no
+error message, no console entry the app itself surfaces, and no server-side
+log entry (since nothing ever 500'd) — despite the database being completely
+intact. This is very easy to mistake for real data loss, exactly as reported.
+
+**Fix (step by step):**
+1. Add a `NO_CACHE = { 'Cache-Control': 'no-store' }` constant in
+   `backend/server.js` and spread it into every response `serveStatic()`
+   sends (the success path and the SPA-fallback 404 path), so a client always
+   fetches the current version of the frontend.
+2. Wrap `await DB.loadAll()` in the boot IIFE in its own try/catch, calling
+   `showBackendErrorScreen()` on failure — the same remedy `DB.detect()`'s
+   failure path already uses, since the fix (reload/retry) is identical
+   either way.
+3. Document both in `REFERENCE.md` §9 ("Response headers") so a future reader
+   debugging a similar "looks like data loss but isn't" report finds the
+   mechanism immediately instead of re-deriving it.
+
+**Verify:** with a Playwright-driven headless browser, intercepting `/api/stats`
+to return a 500 now shows the "Can't reach the database" retry screen instead
+of a silent freeze; an unmodified request path still renders the full Home
+page with zero console errors; `curl -I` against `/`, `/display`, and
+`/scoring.js` each show `Cache-Control: no-store`; full backend test suite
+(419 tests) still green.
 
 ---
 
