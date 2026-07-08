@@ -320,7 +320,7 @@
   .board-miss{flex:none;margin-top:8px}
   .hidden{display:none!important}
 
-  /* ---- Dart Builder: icon picker (docs/dart-builder-roadmap.md accessibility
+  /* ---- Dart Builder: icon picker (docs/archive/dart-builder-roadmap.md accessibility
      item — a visual diagram per barrel shape/grip and flight shape option, since
      terms like "torpedo"/"knurled"/"kite" aren't self-explanatory by name alone.
      Icon is decorative (aria-hidden) — the button's own text label is the
@@ -880,7 +880,7 @@
     </div>
   </section>
 
-  <!-- ============ DART BUILDER (docs/dart-builder-roadmap.md) ============ -->
+  <!-- ============ DART BUILDER (docs/archive/dart-builder-roadmap.md) ============ -->
   <section id="screen-dart-builder" class="screen">
     <div class="card">
       <button class="pp-back" onclick="show(dartBuilderBackTo)">← Back</button>
@@ -1389,7 +1389,7 @@ const DB = {
   setDartWeight(name, weight){ Backend.send('PUT','/api/players/dart-weight',{name, weight}).catch(logErr); },
   delete(name){ Backend.send('DELETE','/api/players?name='+encodeURIComponent(name)).catch(logErr); },
 
-  // Dart Builder / loadouts (docs/dart-builder-roadmap.md)
+  // Dart Builder / loadouts (docs/archive/dart-builder-roadmap.md)
   dartComponentOptions(){ return Backend.get('/api/dart-components/options'); },
   listComponents(player, type){ return Backend.get(`/api/dart-components?name=${encodeURIComponent(player)}`+(type?`&type=${type}`:'')); },
   createComponent(player, type, fields){ return Backend.send('POST','/api/dart-components',{player, type, ...fields}); },
@@ -1564,7 +1564,7 @@ let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, 
   gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[], ghostLeg:null,
   doublesTargets:[], loadoutByName:{} }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice'; gameType: 'x01' | 'cricket' | 'doubles_practice'
   // loadoutByName: player name -> {id,name} of the loadout picked for THIS New Game
-  // visit (docs/dart-builder-roadmap.md) — reset each time the setup screen loads;
+  // visit (docs/archive/dart-builder-roadmap.md) — reset each time the setup screen loads;
   // re-populated by auto-loading each picked player's is_default loadout.
 let game = null;
 let dartTimingEnabled = false;   // admin-toggled; refreshed at boot from /api/settings/dart-timing
@@ -1703,7 +1703,7 @@ function showLegend(backTo){
 let dartBuilderBackTo='player';
 // dartBuilderView: 'list' (loadout list for dartBuilderPlayer), 'edit' (component
 // slots for dartBuilderLoadoutId, null = new unsaved loadout), 'compare'
-// (docs/dart-builder-roadmap.md "loadout comparison view" — side-by-side stats
+// (docs/archive/dart-builder-roadmap.md "loadout comparison view" — side-by-side stats
 // for two or more of dartBuilderPlayer's loadouts), or 'quickadd' ("quick-add
 // full set" one-shot entry form — name + all barrel/shaft/flight fields on one
 // screen, one save, for logging an off-the-shelf dart set instead of three
@@ -2945,7 +2945,7 @@ function onSlotChange(i, value){
       setup.slots[i]=value; renderPlayers();
       if(setup.mode==='challenge' && i===0) renderChallengeCard();
       if(setup.mode==='ghost' && i===0) renderGhostLegPicker();
-      // Auto-select this player's default loadout, if they have one (docs/dart-builder-roadmap.md) —
+      // Auto-select this player's default loadout, if they have one (docs/archive/dart-builder-roadmap.md) —
       // a player who only ever throws one set of darts never has to actively pick one.
       if(value && !setup.loadoutByName[value]){
         Backend.get(`/api/players/default-loadout?name=${encodeURIComponent(value)}`)
@@ -2961,7 +2961,7 @@ function onSlotChange(i, value){
   );
 }
 
-// docs/dart-builder-roadmap.md "Change Loadout" picker: selection-only (no editing)
+// docs/archive/dart-builder-roadmap.md "Change Loadout" picker: selection-only (no editing)
 // scoped to this player's own loadouts, plus a shortcut into the Dart Builder for a
 // player with none yet. Not selecting a loadout at all remains fully valid.
 function openLoadoutPicker(name, slotIndex){
@@ -3831,7 +3831,7 @@ function setPlayerDartWeight(name, value){
     persist();
   });
 }
-// docs/dart-builder-roadmap.md: lives in the same PIN-gated player-controls block
+// docs/archive/dart-builder-roadmap.md: lives in the same PIN-gated player-controls block
 // as the finish-rule toggle above, so a PIN-protected player's default loadout is
 // already covered by unlockPlayerSettings()'s existing PIN gate.
 function setPlayerDefaultLoadout(name, value){
@@ -4892,7 +4892,7 @@ function cancelQueuedAchievementsForSnapshot(snap){
 }
 
 /* =========================================================================
-   DART BUILDER / LOADOUTS  (docs/dart-builder-roadmap.md)
+   DART BUILDER / LOADOUTS  (docs/archive/dart-builder-roadmap.md)
    Reachable from a player's profile ("Manage Loadouts", inside the same
    PIN-gated player-controls block as the finish-rule toggle) and from the New
    Game screen's "Build a loadout" shortcut. Two views inside one screen: a
@@ -4964,7 +4964,7 @@ async function renderDartBuilderList(){
   `;
 }
 
-// Loadout comparison view (docs/dart-builder-roadmap.md "loadout comparison
+// Loadout comparison view (docs/archive/dart-builder-roadmap.md "loadout comparison
 // view", the v1 stretch goal). Side-by-side stats for two or more of a
 // player's loadouts, entered from the list screen — same "own screen, not a
 // Player Profile filter" placement getLoadoutStats() itself already uses.
@@ -5058,7 +5058,7 @@ function renderDartBuilderCompareTable(){
   </div>`;
 }
 
-// Quick Add Full Set (docs/dart-builder-roadmap.md "quick-add full set" one-shot
+// Quick Add Full Set (docs/archive/dart-builder-roadmap.md "quick-add full set" one-shot
 // entry form). No new backend endpoint — orchestrates the same createComponent()
 // x3 + createLoadout() calls the normal 3-modal flow already makes, just from one
 // screen with one Save button, for logging an off-the-shelf set that came as a
@@ -5300,7 +5300,7 @@ function loadDartBuilderStats(id){
 }
 
 // Simple schematic diagrams for the three enum fields whose plain-text option
-// names aren't self-explanatory (docs/dart-builder-roadmap.md's deferred
+// names aren't self-explanatory (docs/archive/dart-builder-roadmap.md's deferred
 // accessibility item, built 2026-07) — barrel shape/grip (side profile) and
 // flight shape (front-on outline). Deliberately plain/geometric rather than
 // photorealistic, same "hand-coded inline SVG" style buildDartboard() already
@@ -7485,7 +7485,7 @@ function loadDartWeights(){
     .catch(()=>{ container.hidden=true; });
 }
 
-// docs/dart-builder-roadmap.md: populates the Player Profile's "Default loadout"
+// docs/archive/dart-builder-roadmap.md: populates the Player Profile's "Default loadout"
 // select (only rendered at all once PIN-gated player settings are unlocked, or the
 // player has no PIN — see renderPlayerPage()).
 function loadPlayerLoadouts(){

@@ -1,6 +1,6 @@
 # Dart Builder / Loadout Customization — Design Roadmap
 
-> Status (2026-07): **v1 is fully built and playable end-to-end** — schema
+> Status (2026-07): **✅ Every item resolved — archived.** v1 is fully built and playable end-to-end — schema
 > (`dart_components`/`loadouts`, `game_players.loadout_id`), component/loadout CRUD
 > with closed-enum validation, game-creation integration (barrel-weight snapshot into
 > `game_players.dart_weight`, `players.dart_weight` retired as a write path), PIN-gated
@@ -31,9 +31,11 @@
 > and saved in one action instead of three separate "+ New {type}" round trips.
 > See `REFERENCE.md`'s matching sections for full mechanics.
 >
-> **One piece remains explicitly deferred**, tracked as its own item on
-> `docs/open-roadmap-items.md`: optional photo upload per component (an
-> alternative to the icon set above, not required now that it exists).
+> **Optional photo upload per component — considered, explicitly dropped
+> (2026-07)**, not built and not tracked further: it was always framed as an
+> *alternative* to a generic shape/grip icon set, not additive to one, and the
+> icon set above now covers that need. No open items remain, so this doc moves
+> to `docs/archive/` per `CLAUDE.md`'s archiving convention.
 
 ## Goal
 
@@ -330,8 +332,10 @@ Per `CLAUDE.md`'s standing conventions:
   `backend/db.js`) aren't claimed to be exhaustive, just a reasonable v1 set.
 - Should `dart_components` support an optional photo/image upload per component (a
   real photo of the actual barrel) instead of just a generic shape/grip icon, given how
-  visual the gunsmith-style framing is? Still open — tracked on
-  `docs/open-roadmap-items.md`.
+  visual the gunsmith-style framing is? **Resolved: dropped (2026-07)** — it was
+  framed as an *alternative* to a generic icon set, not additive to one, and the
+  icon set built alongside this decision (see section 4) already meets the need
+  the photo idea was reaching for. Not tracked further.
 - Should loadouts be shareable/exportable (e.g. copy a friend's exact spec) or kept
   strictly private per player? No cross-player sharing mechanism exists elsewhere in
   the app today, so default to private-per-player unless there's specific demand.

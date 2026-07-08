@@ -1,6 +1,6 @@
 'use strict';
 // Committed tests for backend/db.js's Dart Builder / loadout customization
-// (docs/dart-builder-roadmap.md): component CRUD + validation, loadout CRUD,
+// (docs/archive/dart-builder-roadmap.md): component CRUD + validation, loadout CRUD,
 // default-loadout selection, and duplication.
 const { test, describe, after } = require('node:test');
 const assert = require('node:assert/strict');
@@ -207,7 +207,7 @@ describe('loadouts CRUD + default selection', () => {
   });
 });
 
-describe('getLoadoutStats — scoping (docs/dart-builder-roadmap.md)', () => {
+describe('getLoadoutStats — scoping (docs/archive/dart-builder-roadmap.md)', () => {
   function buildFullSet(name, barrelWeight) {
     const barrel = db.createComponent(name, 'barrel', { name: 'B', weightG: barrelWeight, material: 'brass', shape: 'straight' });
     const shaft  = db.createComponent(name, 'shaft', { name: 'S', material: 'nylon', shape: 'fixed' });
@@ -261,7 +261,7 @@ describe('getLoadoutStats — scoping (docs/dart-builder-roadmap.md)', () => {
   });
 });
 
-describe('createGame() loadout integration (docs/dart-builder-roadmap.md)', () => {
+describe('createGame() loadout integration (docs/archive/dart-builder-roadmap.md)', () => {
   function buildFullSet(name, barrelWeight) {
     const barrel = db.createComponent(name, 'barrel', { name: 'B', weightG: barrelWeight, material: 'brass', shape: 'straight' });
     const shaft  = db.createComponent(name, 'shaft', { name: 'S', material: 'nylon', shape: 'fixed' });

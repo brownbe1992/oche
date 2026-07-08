@@ -1987,7 +1987,7 @@ already-migrated database is a safe no-op).
 | `name` | `TEXT NOT NULL UNIQUE COLLATE NOCASE` | Case-insensitive unique |
 | `out_mode` | `TEXT NOT NULL DEFAULT 'double'` | `'double'` \| `'single'` — default checkout rule |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
-| `dart_weight` | `INTEGER` | **Retired as a write path** (`docs/dart-builder-roadmap.md`) — no UI sets this anymore; a selected loadout's barrel weight is the only source for `game_players.dart_weight` going forward (see §16). Existing values are left in place, unread by any current code path (`getPlayer`/`listPlayers` still return it for API back-compat, but nothing writes it, and `createGame()` never falls back to it) |
+| `dart_weight` | `INTEGER` | **Retired as a write path** (`docs/archive/dart-builder-roadmap.md`) — no UI sets this anymore; a selected loadout's barrel weight is the only source for `game_players.dart_weight` going forward (see §16). Existing values are left in place, unread by any current code path (`getPlayer`/`listPlayers` still return it for API back-compat, but nothing writes it, and `createGame()` never falls back to it) |
 | `pin_hash` / `pin_salt` | `TEXT` | scrypt hash/salt; `NULL` = no PIN, anyone may play as this player |
 | `pin_fail_count` | `INTEGER NOT NULL DEFAULT 0` | Incremented via `RETURNING` (see §9) |
 | `pin_locked_until` | `INTEGER` | Epoch ms |
@@ -2011,7 +2011,7 @@ already-migrated database is a safe no-op).
 | `game_id` | `INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE` | |
 | `player_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | |
 | `out_mode` | `TEXT NOT NULL DEFAULT 'double'` | Per-game checkout rule actually used (may differ from the player's current default) |
-| `dart_weight` | `INTEGER` | Snapshot at game start — **as of `docs/dart-builder-roadmap.md`**, sourced from the selected loadout's barrel `weight_g` (`NULL` if no loadout was selected), not from `players.dart_weight` (see §16) |
+| `dart_weight` | `INTEGER` | Snapshot at game start — **as of `docs/archive/dart-builder-roadmap.md`**, sourced from the selected loadout's barrel `weight_g` (`NULL` if no loadout was selected), not from `players.dart_weight` (see §16) |
 | `loadout_id` | `INTEGER REFERENCES loadouts(id) ON DELETE SET NULL` | The loadout selected for this player in this game, if any (§16). Nullable — playing without a loadout remains fully valid |
 
 ### `turns` (one row per visit, indexed on `player_id` and `game_id`)
@@ -2154,7 +2154,7 @@ set → `in_progress`; else both player slots filled → `ready`; else `pending`
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 | `method` / `path` / `status` / `message` | nullable | One row per server-side 5xx response (§1's "Server error log"); pruned to the most recent 500 rows on every insert |
 
-### `dart_components` (§16, `docs/dart-builder-roadmap.md`)
+### `dart_components` (§16, `docs/archive/dart-builder-roadmap.md`)
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
@@ -2369,7 +2369,7 @@ Given N players and `bracketSize` = the smallest power of two ≥ N:
 
 ## 16. Dart Builder / Loadouts
 
-`docs/dart-builder-roadmap.md`. Backend: `backend/db.js`'s "dart builder /
+`docs/archive/dart-builder-roadmap.md`. Backend: `backend/db.js`'s "dart builder /
 loadouts" section (component/loadout CRUD, `_resolveLoadoutForParticipant()`,
 `getLoadoutStats()`). Frontend: `frontend/index.html`'s "DART BUILDER /
 LOADOUTS" block, reachable via a player's profile ("🎯 Manage Loadouts") or the
@@ -2518,8 +2518,10 @@ selections correctly persisted on the barrel and flight.
 
 ### Deliberately out of scope for this pass
 
-- **Optional photo upload per component** (an alternative to the icon set
-  above). Tracked on `docs/open-roadmap-items.md`.
+- **Optional photo upload per component** — considered, explicitly dropped
+  (2026-07): it was framed as an *alternative* to a generic shape/grip icon
+  set, not additive to one, and the icon set above already covers that need.
+  Not tracked further.
 - **A literal CoD/Halo-gunsmith illustration** (centered dart, fanning
   leader-line callouts) — shipped instead as a stacked grouped-section form,
   functionally equivalent and inherently mobile-responsive (no wide layout to
