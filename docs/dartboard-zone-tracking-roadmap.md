@@ -9,10 +9,14 @@
 > Just Chuckin' It" below), and expanded again (2026-07) to replace the flat
 > "Miss" button in Dartboard mode with a two-band (near/far) positional miss
 > ring outside the double, so misses land on the heatmap too, not just hits
-> (see "Miss-area tracking" below), plus a "Bounce Out" toggle (available in
+> (see "Miss-area tracking" below), plus a "Bounce Out" button (available in
 > both input modes) for darts that struck the board but didn't stay, tracked
-> separately from both hits and misses so they don't distort either (see
-> "Bounce-out tracking" below).
+> separately from both hits and misses so they don't distort either. **v1 of
+> Bounce Out is a flat count, no position** — a follow-up decision (2026-07)
+> deliberately deferred positional bounce-out capture to a v2 gated on
+> `docs/camera-scoring-roadmap.md`, since a manually-reconstructed "where did
+> it actually strike before it fell" isn't reliable data; see "Bounce-out
+> tracking" below for the full v1/v2 split.
 
 ## Goal (as requested)
 
@@ -361,108 +365,110 @@ mode-specific behavior.
 > purposes be treated differently somehow."
 
 This is a **third, distinct dart outcome**, not a variant of the miss-ring
-work above: a genuine miss never touched a scoring area at all (the ring
-tracks *where it went instead*); a bounce-out **did** strike a real number/
-ring — the player saw exactly where — but didn't stay in the board long enough
-to count, so it scores nothing, same as a miss, but its position is real board
-geometry, not a guess at a direction. Conflating the two would make "close
-misses near the double" (the miss ring's near band) indistinguishable from
-"actually hit the double and fell back out," which are very different pieces
-of coaching information — one is an aim problem, the other is often a dart
-weight/grip/board-tension problem entirely unrelated to where it was aimed.
+work above: a genuine miss never touched a scoring area at all; a bounce-out
+**did** strike a real number/ring but didn't stay in the board long enough to
+count, so it scores nothing, same as a miss, but the *cause* is completely
+different — one is an aim problem, the other is often a dart weight/grip/
+board-tension problem entirely unrelated to where it was aimed. Conflating the
+two into one "miss" count would hide that distinction.
 
-### Design: reuse every existing tap target, add one toggle
+### v1 (build now): a flat button, no position — deliberately deferred
 
-A bounce-out's position is captured exactly the same way a real hit's
-position already is — sector, multiplier, and (in Dartboard mode) inner/outer
-`zone` — because the player is tapping the same spot on the board they'd tap
-for a hit that stuck. The only new interaction is a way to say "that one
-didn't count": a **"Bounce Out" toggle**, placed alongside the existing
-Single/Double/Treble multiplier row (`#multi-row`), the same interaction shape
-players already know from that row. Unlike Single/Double/Treble it's not
-mutually exclusive with them — a bounce-out can happen off *any* multiplier
-ring (`Treble` + `Bounce Out` then tap 20 means "that looked like a T20 before
-it bounced out") — so it behaves as an independent toggle (`bounceOutMode`, a
-plain boolean global paralleling `mult`), auto-resetting to off after each
-dart is committed (the same "one-shot, not sticky" behavior the multiplier row
-itself does **not** have today, but a bounce-out toggle should, since forgetting
-to turn it back off would silently zero out every real hit afterward — a much
-worse failure mode than having to re-tap it occasionally). Available in
-**both** Pad and Dartboard mode (this is not the miss-button's "board-only"
-scope restriction — Pad mode already captures sector+multiplier for a normal
-hit, so it can capture a bounce-out's position exactly as precisely as it
-captures anything else; it just never gets `zone`, same as a Pad-mode hit).
+> Follow-up decision (2026-07): the original design below this point captured a
+> bounce-out's exact struck position (sector/multiplier/zone), reusing the same
+> tap targets a real hit uses. **That positional capture is deliberately
+> deferred to v2** — a human reconstructing exactly where a dart landed
+> *after* it's already fallen off the board, under the time pressure of normal
+> play, is not a reliable source of that data. `docs/camera-scoring-roadmap.md`
+> is the actual reliable source once it exists (a camera has genuine ground
+> truth at the moment of impact, before any bounce); until then, a rough manual
+> guess isn't worth the extra UI complexity or the false precision of data that
+> looks exact but isn't trustworthy.
 
-### Schema: shadow columns, not a new outcome-type overhaul
+v1 is a single **"Bounce Out" button** — no toggle, no board tap required
+after pressing it, no position captured — available in **both** Pad and
+Dartboard mode (this was never the miss-button's "board-only" restriction; a
+bounce-out isn't directional in v1, so there's nothing mode-specific about it).
+In Dartboard mode it sits where the old flat Miss button used to (now that
+Miss itself moved to the two-band ring), giving Dartboard mode exactly one
+non-positional button, symmetric with Pad mode's existing Miss button.
+Pressing it records one dart as a bounce-out and immediately commits it — no
+extra step, no multiplier/number selection needed, since v1 tracks *that* it
+happened, not *where*.
 
-The safest possible implementation, and the one this doc recommends: **a
-bounced dart is stored in `sector`/`multiplier` (and `zone`, if applicable)
-exactly as `0`/`1` — a completely ordinary miss row, indistinguishable from a
-real miss to every existing consumer** — with the *intended* position captured
-separately in shadow columns used only by the heatmap:
+### Schema (v1)
 
 ```sql
-ALTER TABLE darts ADD COLUMN bounced INTEGER;         -- 1 = bounced/fell out, NULL otherwise
-ALTER TABLE darts ADD COLUMN bounce_sector INTEGER;   -- where it actually struck, NULL otherwise
-ALTER TABLE darts ADD COLUMN bounce_multiplier INTEGER;
-ALTER TABLE darts ADD COLUMN bounce_zone TEXT;        -- 'inner' | 'outer' | NULL (board-mode only)
+ALTER TABLE darts ADD COLUMN bounced INTEGER;   -- 1 = bounced/fell out, NULL otherwise
 ```
 
-This is deliberately more conservative than it might need to be, and that's
-the point: `dartValue(sector, mult)` already returns `0` for `sector===0`
-(`frontend/scoring.js`), so storing a bounce-out as an ordinary `sector=0`
-miss means **`evaluateVisit()`, every badge chain check (Hat Trick, Bullseye
-Gauntlet, "Where'd It Go?", Busted Maximum, etc.), `getGhostLegScript()`
-replay, and `getFullDatabaseExport()` all require zero code changes** — they
-already handle this row correctly today, because it's shaped exactly like the
-rows they already handle. A bounce-out flag living inside `sector`/`multiplier`
-themselves (e.g. a special sentinel value, or an `outcome` enum column that
-every scoring/badge check would need to learn about) would touch every one of
-those call sites and reopen exactly the kind of scoring-correctness risk
-`CLAUDE.md`'s testing discipline exists to prevent, for a feature that is, in
-the end, purely a heatmap enhancement. Shadow columns get the same visual
-payoff (the heatmap can plot a bounce-out at its true struck position) with
-none of that risk.
+One column, one purpose: distinguish a bounce-out from a genuine miss in the
+data, nothing more. **`sector`/`multiplier` stay exactly `0`/`1` — a bounced
+dart is, to every existing consumer, a completely ordinary miss row.**
+`dartValue(sector, mult)` already returns `0` for `sector===0`
+(`frontend/scoring.js`), so this requires **zero changes** to `evaluateVisit()`,
+any badge chain check (Hat Trick, Bullseye Gauntlet, "Where'd It Go?", Busted
+Maximum, etc.), `getGhostLegScript()` replay, or `getFullDatabaseExport()` —
+they already handle this row correctly today, because it's shaped exactly
+like the rows they already handle. `bounced` is purely additive metadata, the
+same posture as `zone`/`miss_zone`/`miss_depth` throughout this doc.
 
-### Backend
+### Backend (v1)
 
-- **`addTurn()`**: accepts optional `bounced`/`bounceSector`/
-  `bounceMultiplier`/`bounceZone` per dart, stores them verbatim alongside the
-  real (`sector=0`) row — same pass-through-only reasoning as `zone`/
-  `missZone`/`missDepth`.
-- **`getDartHeatmap(playerName, gameType, mode)`**: a second, independent
-  query (or a `UNION`) reading `bounce_sector`/`bounce_multiplier`/
-  `bounce_zone` where `bounced=1`, returned as its own `bounces` array in the
-  response rather than folded into the same `hits`/`misses` counts — the
-  frontend needs to keep these visually and numerically separate (see below),
-  so the API shape should make that separation obvious rather than requiring
-  the caller to filter a mixed list.
+- **`addTurn()`**: accepts an optional `bounced` flag per dart, stores it
+  verbatim — same pass-through-only reasoning as every other column in this
+  doc.
+- **A simple count, not a heatmap position**: since v1 has no position to
+  plot, `getDartHeatmap()` doesn't need to change for this at all. Instead, a
+  plain `SELECT COUNT(*) FROM darts d JOIN turns t ... WHERE t.player_id=?
+  AND d.bounced=1 ${scope}` (mirroring the existing per-game-type `_scope()`
+  pattern) is enough — surfaced as a stat, not a spatial overlay.
 
-### Frontend
+### Frontend (v1)
 
-- **New toggle button** in `#multi-row` (or immediately adjacent), wired to a
-  `bounceOutMode` boolean exactly like `mult` — `throwDart()`/`throwDartBoard()`
-  check it at the moment a dart is committed: if set, the dart is pushed with
-  its real `sector`/`mult`/`zone` moved into `bounceSector`/`bounceMultiplier`/
-  `bounceZone`, and the dart's *scoring* `sector`/`mult` forced to `0`/`1` (an
-  ordinary miss) before it ever reaches `makeDartCore()`/`evaluateVisit()` —
-  the substitution happens once, at the input layer, so nothing downstream
-  needs to know bounce-outs exist as a concept at all.
-- **`buildDartHeatmap(cells)`**: bounce-outs render as a **small distinct
-  marker** (e.g. a bordered dot or a bounce icon) overlaid on the relevant
-  hit region, **not** blended into that region's own heat-scale color — a
-  wedge shouldn't look "hot" (implying lots of real scoring hits) just because
-  bounce-outs cluster there, since by definition none of those actually
-  counted. Tooltip text distinguishes them explicitly ("T20: 12 hits, 2
-  bounce-outs").
+- **One new button**, not a toggle — no `bounceOutMode` global, no
+  substitution logic in `throwDart()`/`throwDartBoard()` needed. The button's
+  own handler commits a dart with `sector:0, multiplier:1, bounced:true`
+  directly, the same shape `throwDartBoard(0,1)` already produces for a plain
+  miss today, just with the one extra flag.
+- **Surfaced as a count, not on the heatmap SVG** — e.g. a small "Bounce-outs:
+  N" line near the Dartboard Heatmap section (or its own stat bubble,
+  consistent with how other per-game-type counts are already shown), not a
+  marker plotted on the board, since v1 genuinely has no position to plot.
+  This is a real, deliberate scope reduction from the original design below —
+  worth being upfront that "for heatmap purposes... treated differently"
+  becomes "counted separately near the heatmap" in v1, not "shown spatially
+  on the heatmap," until v2 exists.
 
-### Per-mode fit
+### Per-mode fit (v1)
 
-Available in every game type and both input modes, per "Design" above — no
-mode-specific restrictions, unlike the miss ring (which is Dartboard-only
-because only Dartboard mode has the geometry to place a *miss* directionally;
-a bounce-out's position comes from the same sector/multiplier/zone tap targets
-every hit already uses in both modes).
+Available in every game type and both input modes — no mode-specific
+restrictions, since v1 has no geometry-dependent behavior at all.
+
+### v2 (future, gated on `docs/camera-scoring-roadmap.md`): positional capture
+
+Once camera/ML scoring exists and can report where a dart actually struck
+before it fell — genuine ground truth, not a manual reconstruction — the
+original design upgrades cleanly to full positional capture, using the same
+shadow-column approach already proven safe elsewhere in this doc (a
+scoring-shape `sector=0` row plus separate columns nobody but the heatmap
+reads):
+
+```sql
+ALTER TABLE darts ADD COLUMN bounce_sector INTEGER;     -- where it actually struck
+ALTER TABLE darts ADD COLUMN bounce_multiplier INTEGER;
+ALTER TABLE darts ADD COLUMN bounce_zone TEXT;           -- 'inner' | 'outer' | NULL
+```
+
+At that point `getDartHeatmap()` gains a `bounces` array (position-scoped, the
+same way `hits`/`misses` are), and `buildDartHeatmap(cells)` renders bounce-outs
+as a small distinct marker overlaid on the relevant hit region — **not**
+blended into that region's own heat-scale color, so a wedge doesn't look "hot"
+(implying real scoring hits) just because bounce-outs cluster there. Manual
+entry (Pad/Dartboard-mode tapping, as originally designed) could still exist
+as a fallback for anyone without camera hardware, but shouldn't be the primary
+path once cameras can supply it directly — this whole v2 section is explicitly
+a follow-on item, not part of what ships now.
 
 ## Testing
 
@@ -498,21 +504,20 @@ present and functional switching to Pad mode), and confirm the resulting
 `POST /api/games/:id/turns` payload carries `sector:0, multiplier:1` with the
 expected `missZone`/`missDepth` per dart.
 
-**Bounce-out tests**: a `node:test` proving a bounce-out dart is stored with
-`sector:0, multiplier:1` (so it scores as a miss) while `bounce_sector`/
-`bounce_multiplier`/`bounce_zone` correctly preserve the struck position, that
-`getDartHeatmap()` returns bounce-outs in a separate `bounces` array rather
-than folded into `hits`, and — the most important regression guard in this
-whole doc — that a bounce-out dart does **not** trigger badges that check the
-dart's *real* struck values (a bounce-out off what would have been a treble
-must not count toward Hat Trick's "three trebles in a visit," since by the
-time it reaches `evaluateVisit()`/the badge chain checks it's already an
-ordinary `sector=0` row and genuinely can't). Verify end-to-end with
-Playwright: toggle "Bounce Out" on, tap a treble, confirm the turn is recorded
-as a miss (0 points, no Hat Trick/other treble-based badges fire) while the
-Player Profile heatmap still shows a bounce-out marker at that treble's
-position; confirm the toggle auto-resets after the dart commits so the very
-next tap scores normally.
+**Bounce-out tests (v1)**: a `node:test` proving a bounce-out dart is stored
+with `sector:0, multiplier:1, bounced:1` (so it scores as an ordinary miss),
+that the bounce-out count query correctly isolates `bounced=1` rows per
+player/`gameType`/mode, and — the most important regression guard in this
+whole doc — that a bounce-out dart does not trigger any badge or scoring path
+differently than a plain miss would (since it's stored identically apart from
+the one flag, this should be trivially true, but it's exactly the kind of
+"obviously true" claim `CLAUDE.md`'s testing discipline says to prove rather
+than assume). Verify end-to-end with Playwright: press "Bounce Out" in both
+Pad and Dartboard mode, confirm the turn commits immediately as a miss (0
+points) with no board tap required, and confirm the Player Profile's
+bounce-out count increments correctly. (v2's positional tests — confirming a
+`bounces` array entry lands at the correct struck position on the heatmap —
+apply once v2 is actually built, not before.)
 
 ## Open questions for whoever picks this up
 
@@ -553,19 +558,23 @@ next tap scores normally.
   scoring UI already follows; if two bands prove too cramped in practice, the
   fallback is a taller overall miss zone (bigger `R.missFar`) rather than
   dropping back to one band.
-- **Bounce-out toggle discoverability and placement.** A new button in
-  `#multi-row` competes for space with Single/Double/Treble on an already
-  compact scoring screen, especially on a phone. Whether it reads clearly as
-  "off by default, tap before your next dart, then it resets" without
-  onboarding/a tooltip is worth a real playtest — a mislabeled or
-  easily-missed toggle risks the opposite failure from the one being solved:
-  someone forgets to toggle it and a bounce-out silently records as a genuine
-  miss with the wrong intended position, or forgets to toggle it *off* and
-  loses a real scoring dart. The auto-reset behavior (see "Design" above)
-  mitigates the second case but not the first.
-- **Whether the bounce-out marker should be visible on the live scoreboard
-  too** (not just the Player Profile heatmap, which is inherently a
-  post-hoc/session-summary view) — e.g. a small notation next to a dart in the
-  live "darts thrown this visit" display. Not required by the request as
-  stated, but a natural follow-on once the data exists; recommend treating it
+- **Bounce Out button placement (v1).** It needs a home somewhere near Miss/
+  the multiplier row on an already compact scoring screen, especially on a
+  phone — exact placement is a UI-polish detail to settle during
+  implementation, not a design blocker, since (unlike the discarded toggle
+  design) a flat one-press button has no "forgot to turn it off" failure mode
+  to design around.
+- **Whether v1's bounce-out count should be visible on the live scoreboard
+  too** (not just the Player Profile, which is inherently a post-hoc/
+  session-summary view) — e.g. a small running counter alongside the existing
+  180/Big Fish/Bust counters. Not required by the request as stated, but a
+  natural, low-effort follow-on once the count exists; recommend treating it
   as a separate, smaller item rather than bundling it into this one.
+- **v2's actual trigger condition.** This doc gates positional bounce-out
+  capture on `docs/camera-scoring-roadmap.md` existing, but that roadmap item
+  is itself "Extremely high" complexity and has no committed timeline. Confirm
+  whenever v2 is picked up that camera scoring is genuinely available by
+  then — if it's still far off but manual positional tapping turns out to be
+  wanted sooner after all, that's a legitimate reason to revisit the "not
+  reliable enough" judgment above, not an automatic blocker on building it
+  manually.
