@@ -139,7 +139,7 @@ describe('deletePlayer — cascade and orphaned-game pruning', () => {
 });
 
 describe('getDartWeights', () => {
-  // docs/dart-builder-roadmap.md: players.dart_weight/setDartWeight() no longer
+  // docs/archive/dart-builder-roadmap.md: players.dart_weight/setDartWeight() no longer
   // feeds game_players.dart_weight — a selected loadout's barrel weight is the only
   // source now (see backend/test/dart-builder.test.js's createGame() coverage).
   // getDartWeights() itself is unchanged: it just reads whatever ended up snapshotted

@@ -244,7 +244,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tournament_matches_round ON tournament_matches(round_id);
   CREATE INDEX IF NOT EXISTS idx_tournament_matches_game  ON tournament_matches(game_id);
 
-  -- Dart Builder / loadout customization (docs/dart-builder-roadmap.md). Not a new
+  -- Dart Builder / loadout customization (docs/archive/dart-builder-roadmap.md). Not a new
   -- column on games/players — a player's owned catalog of parts, each row personal
   -- (not shared/global) since real dart preferences are personal. No 'tip' type: tip
   -- texture is a single attribute of the assembled loadout (see loadouts.tip_texture
@@ -334,7 +334,7 @@ try { db.exec('ALTER TABLE turns ADD COLUMN leg_won INTEGER NOT NULL DEFAULT 0')
 // or resetting a player can never retroactively reclassify a game (a 2-player H2H game
 // stays H2H even after one participant is removed). Backfilled for existing rows below.
 try { db.exec('ALTER TABLE games ADD COLUMN player_count INTEGER'); } catch(e) {}
-// Dart Builder (docs/dart-builder-roadmap.md): resolved once at game creation and
+// Dart Builder (docs/archive/dart-builder-roadmap.md): resolved once at game creation and
 // snapshotted, same reasoning already applied to game_players.dart_weight/out_mode —
 // renaming/deleting a loadout later never rewrites a past game's history.
 try { db.exec('ALTER TABLE game_players ADD COLUMN loadout_id INTEGER REFERENCES loadouts(id) ON DELETE SET NULL'); } catch(e) {}
@@ -620,7 +620,7 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   (players || []).forEach(entry => {
     const out = entry.out === 'single' ? 'single' : 'double';
     const p   = ensurePlayer(entry.name);
-    // docs/dart-builder-roadmap.md: players.dart_weight is retired as a standalone
+    // docs/archive/dart-builder-roadmap.md: players.dart_weight is retired as a standalone
     // fallback — a selected loadout's barrel weight is the only source for
     // game_players.dart_weight going forward; no loadout means NULL, even for a
     // player who still has an old dart_weight value sitting orphaned on their row.
@@ -2831,7 +2831,7 @@ function getFullDatabaseExport() {
     tournamentPlayers: db.prepare('SELECT * FROM tournament_players').all(),
     tournamentRounds: db.prepare('SELECT * FROM tournament_rounds').all(),
     tournamentMatches: db.prepare('SELECT * FROM tournament_matches').all(),
-    // docs/dart-builder-roadmap.md: same "your data, take it with you" standing rule
+    // docs/archive/dart-builder-roadmap.md: same "your data, take it with you" standing rule
     // as the tournament tables above — a player's dart components/loadouts are
     // ordinary user data with no secrets, so they belong in the export too.
     dartComponents: db.prepare('SELECT * FROM dart_components').all(),
@@ -3568,7 +3568,7 @@ registerDeletePlayerGuard((player) => {
   return row ? `${player.name} is still active in the in-progress tournament "${row.name}" — eliminate them or finish the tournament before deleting.` : null;
 });
 
-/* ---------- dart builder / loadouts (docs/dart-builder-roadmap.md) ----------
+/* ---------- dart builder / loadouts (docs/archive/dart-builder-roadmap.md) ----------
    dart_components is a player-owned catalog of parts; loadouts combine exactly one
    component per type plus a tip texture. Every enum field is a closed list for v1
    (the roadmap doc's "closed enum vs free-text escape hatch" open question is
@@ -3839,7 +3839,7 @@ function getDefaultLoadout(playerName) {
   return _loadoutRowToObj(db.prepare('SELECT * FROM loadouts WHERE player_id = ? AND is_default = 1').get(p.id));
 }
 
-// Per docs/dart-builder-roadmap.md's "Stats" section: this lives only on the Dart
+// Per docs/archive/dart-builder-roadmap.md's "Stats" section: this lives only on the Dart
 // Builder screen for the loadout currently open, not as a Player Profile filter.
 // No new derived formula — every figure here reuses the exact same computation
 // getPlayerStatBubbles() already uses (X01_ONLY 3-dart average, 180 count), just

@@ -791,7 +791,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, db.recordWalkover(Number(mt[1]), b.winner));
     }
 
-    // ----- dart builder / loadouts (docs/dart-builder-roadmap.md) -----
+    // ----- dart builder / loadouts (docs/archive/dart-builder-roadmap.md) -----
     // Viewing a player's components/loadouts is public, same as every other
     // stats/profile view; creating/editing/deleting is gated by requireWrite like
     // every other player-data mutation (setDartWeight, setOut, etc.) — PIN gating

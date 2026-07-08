@@ -1,6 +1,6 @@
 # Dart Builder / Loadout Customization — Design Roadmap
 
-> Status (2026-07): **v1 is fully built and playable end-to-end** — schema
+> Status (2026-07): **✅ Every item resolved — archived.** v1 is fully built and playable end-to-end — schema
 > (`dart_components`/`loadouts`, `game_players.loadout_id`), component/loadout CRUD
 > with closed-enum validation, game-creation integration (barrel-weight snapshot into
 > `game_players.dart_weight`, `players.dart_weight` retired as a write path), PIN-gated
@@ -16,12 +16,26 @@
 > functionally equivalent and inherently mobile-responsive (no wide layout to collapse),
 > but visually plainer than originally envisioned.
 >
-> **Four pieces are explicitly deferred**, each tracked as its own item on
-> `docs/open-roadmap-items.md` rather than left implicit here: a visual icon/diagram
-> per barrel shape/grip/flight-shape option (the accessibility requirement below is
-> not yet met — dropdowns are text-label-only), the "quick-add full set" one-shot
-> entry form, optional photo upload per component, and the loadout comparison view
-> (always marked a stretch goal, not required for v1).
+> **✅ Built (2026-07): the loadout comparison view** — a "⚖️ Compare Loadouts"
+> button on the loadout list screen (shown once a player has 2+ loadouts) opens
+> a side-by-side stats table (components, games/wins/win%/darts/average/180s/
+> checkouts) for whichever loadouts are toggled on, reusing the existing
+> `getLoadoutStats()` query per loadout — no new backend work. See
+> `REFERENCE.md`'s "Loadout comparison view" note for full mechanics.
+>
+> **✅ Built (2026-07): the accessibility icon set and the quick-add form** —
+> barrel shape, barrel grip, and flight shape now get a small hand-coded icon
+> per option (an accessible toggle-button group, `aria-hidden` decorative SVGs,
+> not a replacement for the text label) instead of text-only dropdowns; a "⚡
+> Quick Add Full Set" screen lets a whole barrel+shaft+flight+loadout be entered
+> and saved in one action instead of three separate "+ New {type}" round trips.
+> See `REFERENCE.md`'s matching sections for full mechanics.
+>
+> **Optional photo upload per component — considered, explicitly dropped
+> (2026-07)**, not built and not tracked further: it was always framed as an
+> *alternative* to a generic shape/grip icon set, not additive to one, and the
+> icon set above now covers that need. No open items remain, so this doc moves
+> to `docs/archive/` per `CLAUDE.md`'s archiving convention.
 
 ## Goal
 
@@ -191,15 +205,22 @@ entirely, since a single column has nothing to collapse.
 - **Barrel / Shaft / Flight sections**, each a labeled group with a `<select>` of
   that player's existing components of that type, plus a "+ New {type}" button that
   opens a modal to create one on the fly (fields shown per type are driven entirely
-  by `GET /api/dart-components/options` — no icon/diagram per option yet, see the
-  accessibility note in section 4). A **Tip Texture** section (smooth/grooved) sits
-  alongside them as a plain dropdown on the loadout itself, not a component.
+  by `GET /api/dart-components/options`). **✅ Built (2026-07)**: the modal's
+  barrel-shape, barrel-grip, and flight-shape fields are now an icon-button group
+  instead of a plain `<select>` — see the accessibility note in section 4.
+  A **Tip Texture** section (smooth/grooved) sits alongside them as a plain
+  dropdown on the loadout itself, not a component.
 - Below the three slots + tip texture: **this loadout's stats** (see "Stats" below)
   — scroll-down content on the same screen, not a separate page, appearing once the
   loadout has been saved (has an id).
-- No "quick-add full set" one-shot entry form shipped — building a loadout is three
-  "+ New" taps (one per component type) plus naming the loadout. Tracked as its own
-  deferred item on `docs/open-roadmap-items.md`.
+- **✅ Built (2026-07): a "quick-add full set" one-shot entry form** — a "⚡ Quick
+  Add Full Set" button on the loadout list opens a single screen with the
+  loadout name plus every barrel/shaft/flight field (name, length, weight/type,
+  material, shape/grip) and one Save button, instead of three separate "+ New"
+  modal round trips followed by a fourth loadout-save step. No new backend
+  endpoint — it's client-side orchestration of the same `createComponent()` ×3
+  + `createLoadout()` calls the normal flow already makes, just sequenced
+  behind one button. See `REFERENCE.md`'s matching section for full mechanics.
 
 **Player Profile integration**: the profile page's existing "Dart Weight" row is
 replaced by a **"Default Loadout"** selector — a dropdown of that player's saved
@@ -235,8 +256,24 @@ narrowly than originally sketched:
   same formulas `getPlayerStatBubbles()` already uses. No "checkout %" metric exists
   elsewhere in the codebase to reuse, so it wasn't invented here either — a plain
   checkout count is what shipped.
-- A **loadout comparison view** (stretch, not required for v1) — **not built**,
-  tracked as its own item on `docs/open-roadmap-items.md`.
+- A **loadout comparison view** (stretch, not required for v1) — **✅ Built
+  (2026-07)**: a third `dartBuilderView` state (`'compare'`), reached from a
+  "⚖️ Compare Loadouts" button on the loadout list screen (shown once a player
+  has 2+ loadouts). No new backend query was needed — it calls the existing
+  `getLoadoutStats()` once per loadout (in parallel), caches the results for
+  the screen visit, and renders a side-by-side table (components, games, wins,
+  win %, darts thrown, 3-dart average, 180s, checkouts) for whichever loadouts
+  are toggled on. Every loadout is selected by default; toggling one on/off
+  only re-renders from the cache, never re-fetches, since there's no way to
+  mutate a loadout from within the compare screen itself. Win % is the one new
+  presentational figure (`wins/gamesPlayed*100`, rounded) — deliberately not
+  given its own committed test, the same untested-arithmetic treatment the
+  roster page's existing win-rate chip already gets, since `wins`/`gamesPlayed`
+  themselves are already covered by `getLoadoutStats()`'s own test coverage.
+  Verified end-to-end with Playwright: two loadouts with genuinely different
+  recorded games (a win vs. a loss, different darts/averages/180s/checkouts)
+  render correct, distinct figures per column, and toggling a column off then
+  back on correctly removes/restores it.
 - No new derived formula was invented here (averages/180-count/etc. already exist
   and are already tested) — the new logic needing a committed test was the
   *scoping* itself: `backend/test/dart-builder.test.js`'s "getLoadoutStats —
@@ -249,16 +286,21 @@ narrowly than originally sketched:
 
 Per `CLAUDE.md`'s standing conventions:
 
-- **Accessibility — partially built, one piece explicitly deferred**: the shipped
-  builder uses plain `<select>` dropdowns rather than a card-picker/carousel, so
-  full keyboard operability came for free (native `<select>` is keyboard-accessible
-  by default) — no bespoke arrow/tab handling was needed. What's **not** yet built,
-  and is tracked as its own item on `docs/open-roadmap-items.md`: a visual
-  diagram/icon per barrel shape, barrel grip, and flight shape option, since terms
-  like "torpedo," "knurled," or "kite" aren't self-explanatory by name alone — v1
-  ships text-label-only options for these three fields, which is a real standing
-  accessibility/usability gap per `docs/accessibility-roadmap.md`'s checklist, not
-  a closed item.
+- **Accessibility — ✅ built (2026-07)**: the shipped builder uses plain
+  `<select>` dropdowns rather than a card-picker/carousel for most fields, so
+  full keyboard operability came for free (native `<select>` is
+  keyboard-accessible by default) — no bespoke arrow/tab handling was needed.
+  The one real standing gap — terms like "torpedo," "knurled," or "kite"
+  aren't self-explanatory by name alone (`docs/accessibility-roadmap.md`'s
+  checklist) — is now closed for the three fields it named (barrel shape,
+  barrel grip, flight shape): each is an icon-button group instead of a plain
+  `<select>`, built as a real accessible toggle-group (`role="group"`,
+  per-button `aria-pressed`, the same pattern the Custom Cricket number picker
+  already uses), not a native-select replacement that would have risked
+  regressing keyboard support to gain the visual — every icon is
+  `aria-hidden="true"` and each button's own text label is the accessible
+  name, so meaning is never conveyed by the icon alone. Shaft's "Type" field
+  (fixed/spinning) was never named in the gap and stays a plain `<select>`.
 - **Security**: no new credential/token surface, but a new PIN-gated action: for a
   PIN-protected player, both **setting/changing their Default Loadout** (on the
   Player Profile page) and **opening the Dart Builder screen to customize their
@@ -267,9 +309,12 @@ Per `CLAUDE.md`'s standing conventions:
   to gate PIN-protected players at New Game/tournament-match start (see
   `REFERENCE.md`'s "PIN gate" note), not a new check mechanism. Players without a
   PIN keep today's no-PIN-required behavior, same as every other PIN-gated action
-  in the app. Read-only viewing of a loadout's stats from elsewhere (e.g. a
-  loadout comparison view reached some other way) is not in scope for this gate —
-  only the two mutating entry points above are.
+  in the app. The loadout comparison view (built 2026-07) needed no separate
+  gating decision — it's reachable only from inside the already-PIN-gated Dart
+  Builder screen (the "🎯 Manage Loadouts" entry point above), so it inherits
+  that same PIN check rather than needing one of its own; it's read-only (no
+  mutating action of its own), consistent with only the two entry points above
+  being the actual PIN-gated *actions*.
 - **Testing**: the new stats-scoping predicate (which games count toward which
   loadout's filtered stats) needed committed, re-runnable `node:test` coverage in
   the same change that shipped it — this is exactly the kind of "new calculation"
@@ -287,8 +332,10 @@ Per `CLAUDE.md`'s standing conventions:
   `backend/db.js`) aren't claimed to be exhaustive, just a reasonable v1 set.
 - Should `dart_components` support an optional photo/image upload per component (a
   real photo of the actual barrel) instead of just a generic shape/grip icon, given how
-  visual the gunsmith-style framing is? Still open — tracked on
-  `docs/open-roadmap-items.md`.
+  visual the gunsmith-style framing is? **Resolved: dropped (2026-07)** — it was
+  framed as an *alternative* to a generic icon set, not additive to one, and the
+  icon set built alongside this decision (see section 4) already meets the need
+  the photo idea was reaching for. Not tracked further.
 - Should loadouts be shareable/exportable (e.g. copy a friend's exact spec) or kept
   strictly private per player? No cross-player sharing mechanism exists elsewhere in
   the app today, so default to private-per-player unless there's specific demand.
