@@ -72,14 +72,11 @@ Fixes:
 - Hover/tap on top finishes to see what the finish was — done (`toggleFinishRoute()`
   in frontend/index.html expands each finish row into its checkout route)
 - Dartboard heatmap: distinguish inner single (above the treble ring) from outer
-  single (below the treble ring) per number, instead of one merged "single"
-  bucket; also bring the geometric dartboard heatmap itself (today Just Chuckin'
-  It-only) to X01, Cricket, and Doubles Practice; also replace Dartboard mode's
-  flat Miss button with a two-band (near/far) positional miss ring outside the
-  double so misses show up on the heatmap by direction and closeness, not just
-  as a count (Pad mode keeps its plain Miss button); also add a flat "Bounce
-  Out" button (both input modes) for darts that hit the board but didn't
-  stay, tracked as its own count separate from real hits/misses (v1 — no
-  position; positional bounce-out capture is a v2 saved for once camera
-  scoring exists to supply it reliably) — full design in
-  docs/dartboard-zone-tracking-roadmap.md
+  single (below the treble ring) per number instead of one merged "single"
+  bucket; bring the geometric dartboard heatmap itself to X01, Cricket, and
+  Doubles Practice (not just Just Chuckin' It); replace Dartboard mode's flat
+  Miss button with a two-band (near/far) positional miss ring; a flat "Bounce
+  Out" button (every game type, both input modes) for darts that hit the board
+  but didn't stay — done (v1 — no position; positional bounce-out capture is a
+  v2 saved for once camera scoring exists to supply it reliably), see
+  docs/archive/dartboard-zone-tracking-roadmap.md

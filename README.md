@@ -152,7 +152,7 @@ Players with a PIN set show a 🔒 next to their name in the dropdown. When exac
 
 **Doubles Practice mode** is a solo drill for practicing specific doubles — choose one or more from a 1–20-plus-Bull picker (any number, no fixed count), then throw. All selected doubles stay **live at once** — you choose which one to aim at each dart, not a forced rotation. A **round** keeps going, however many darts it takes, until one of two things happens: a single or treble lands on one of your target numbers ("so close" — right number, wrong ring), or a double lands on a number that isn't one of your targets ("wrong double"). A genuine miss elsewhere on the board doesn't end anything — just keep throwing. When a round ends, **Start next round** resets the tally and keeps the same targets. The scoring screen and Live Scoreboard show the live target set, this round's hit count and darts-thrown, and the running doubles percentage; there's no numeric score, no opponent, and no Enter-turn step — every dart commits the instant it's thrown. See [Player Profile](#player-profile) for its own stat bubbles (Doubles %, Darts/Round, Doubles Hit/Round) and Personal Bests (longest round, most doubles in a round), reachable via the same game-type toggle. Undo Last Dart is supported, one dart deep.
 
-**Just Chuckin' It** is completely freeform, unscored practice — no starting score, no bust, no win, no opponent, just throwing dart after dart until you press **End game**. Selecting it on the [New Game](#new-game) page shows a short explanation of what it's for. The point is pure warm-up/muscle-memory reps without any game pressure at all. Every dart commits instantly (no Enter-turn step, same as Doubles Practice), and there's undo support for the last dart. Its stats are heatmap-heavy on purpose: [Player Profile](#player-profile) gets a non-interactive dartboard heatmap shaded by how often you hit each region (with exact counts on hover), plus 8 stat bubbles (Darts Thrown, Three-Dart Average, 180s, Treble/Bull/Double %, Sessions Played, Avg Darts/Session), a 2-field Personal Bests (longest session, most trebles in a session), and 19 achievements (18 laddered milestones plus its own 180! — see [Achievements & Badges](#achievements--badges)) so there's always another one within reach. Darts thrown in this mode count toward your lifetime/daily/weekly total darts thrown (the one deliberate exception) but never toward any X01/Cricket/Doubles Practice stat, average, or leaderboard.
+**Just Chuckin' It** is completely freeform, unscored practice — no starting score, no bust, no win, no opponent, just throwing dart after dart until you press **End game**. Selecting it on the [New Game](#new-game) page shows a short explanation of what it's for. The point is pure warm-up/muscle-memory reps without any game pressure at all. Every dart commits instantly (no Enter-turn step, same as Doubles Practice), and there's undo support for the last dart. Its stats are heatmap-heavy on purpose: [Player Profile](#player-profile) gets a [Dartboard Heatmap](#player-profile) (shared with every other game type, see below) plus 8 stat bubbles (Darts Thrown, Three-Dart Average, 180s, Treble/Bull/Double %, Sessions Played, Avg Darts/Session), a 2-field Personal Bests (longest session, most trebles in a session), and 19 achievements (18 laddered milestones plus its own 180! — see [Achievements & Badges](#achievements--badges)) so there's always another one within reach. Darts thrown in this mode count toward your lifetime/daily/weekly total darts thrown (the one deliberate exception) but never toward any X01/Cricket/Doubles Practice stat, average, or leaderboard.
 
 The **Live Scoreboard** shows a live dartboard heatmap for this mode too, gradually filling in as the session progresses (a separate, shorter-lived dataset from the lifetime one on the Player Profile), alongside a running darts-thrown counter and three-dart average — side by side on a wide screen, stacked on a narrow one.
 
@@ -172,13 +172,19 @@ The scoring screen is optimised for touchscreen entry on a tablet. Everything fi
 
 **Input modes** — toggle between two ways to enter darts:
 - **Pad** — a grid of numbers (1–20), Bull, and Miss, with Single / Double / Treble multiplier buttons. This is the app's **accessible input path**: ordinary focusable buttons that work the same for keyboard, switch, and screen-reader users, with no visual dartboard shape or precise tap-target aiming required.
-- **🎯 Dartboard** — an interactive SVG dartboard; tap directly on the sector you hit. The multiplier ring is determined by where you tap (singles bed, doubles ring, treble ring, bull).
+- **🎯 Dartboard** — an interactive SVG dartboard; tap directly on the sector you hit. The multiplier ring is determined by where you tap (singles bed, doubles ring, treble ring, bull) — and a single hit also records which half of the wedge you tapped (see [Dartboard Heatmap](#player-profile)).
 
 **Dart entry (Pad mode):**
 1. Tap **Single**, **Double**, or **Treble** to set the multiplier
 2. Tap a number (1–20), **Bull**, or **Miss**
    - *Double Miss* fills two dart slots; *Treble Miss* fills all three
 3. After three darts (or a bust or checkout), tap **Enter turn**
+
+**Dart entry (Dartboard mode):**
+1. Tap directly on the number/ring you hit
+2. A genuine miss taps one of two rings just outside the double instead of a flat Miss button — a **near** band (grazed the wire) or a **far** band (well wide), at whichever of the 20 wedge directions it landed closest to
+3. **Bounce Out** — hit the board but bounced or fell out before it counted? One tap records it as a miss immediately, no board tap required (available in Pad mode too, and on Cricket's own scoring pad)
+4. After three darts (or a bust or checkout), tap **Enter turn**
 
 **Controls:**
 - **Undo dart** — remove the last dart entered in the current visit
@@ -450,7 +456,7 @@ Switching to **Doubles Practice** shows its own 3 stat bubbles instead:
 | **Darts / Round** | Average darts thrown per round |
 | **Doubles Hit / Round** | Average doubles hit per round |
 
-Switching to **Just Chuckin' It** shows its own 8 stat bubbles instead, plus a dartboard heatmap section below the chart:
+Switching to **Just Chuckin' It** shows its own 8 stat bubbles instead:
 
 | Bubble | Description |
 |---|---|
@@ -469,6 +475,10 @@ A line chart showing the selected metric over time. Filters:
 
 - **Period:** Today · Week · Month · Year · All time · Custom date range
 - **Dart weight:** filter to games thrown with a specific dart weight (if recorded)
+
+#### Dartboard Heatmap
+
+A non-interactive dartboard shaded by how often each region has been hit (with exact counts on hover) — shown on **every** game-type toggle (X01, Cricket, Doubles Practice, Just Chuckin' It), not just Just Chuckin' It. **Dartboard-mode** taps carry extra precision the heatmap uses: a single hit shades its inner half (between bull and treble) and outer half (between treble and double) independently, and a miss shades one of two rings just outside the double — a **near** band (grazed the wire) and a **far** band (a proper miss) — instead of just disappearing. A faint diagonal hatch marks a single hit with no inner/outer data (any Pad-mode dart, or one thrown before this existed) so the picture never silently implies precision that isn't there. A **Bounce-outs: N** line underneath counts darts that struck the board but bounced or fell out before they counted — tracked separately from misses since the cause is usually completely different (a grip/weight/board-tension problem, not an aim problem) — available as its own button in every game type and input mode, including Cricket's own scoring pad.
 
 #### Personal Bests
 
@@ -908,7 +918,15 @@ GET  /api/players/personal-bests?name=&mode= Best leg average, fewest darts to f
                                              trebles hit in a session) instead.
 GET  /api/players/chuckin-heatmap?name=&mode= Per-(sector,multiplier) hit counts for Just
                                              Chuckin' It, feeding the Player Profile's dartboard
-                                             heatmap → [ { sector, multiplier, hits } ]
+                                             heatmap → [ { sector, multiplier, hits } ] (kept for
+                                             backward compatibility — see dart-heatmap below)
+GET  /api/players/dart-heatmap              Per-(sector,multiplier,zone,missZone,missDepth) hit
+     ?name=&gameType=&mode=                 counts for any game type, feeding the generalized
+                                             Player Profile dartboard heatmap (X01/Cricket/
+                                             Doubles Practice/Just Chuckin' It) → [ { sector,
+                                             multiplier, zone, missZone, missDepth, hits } ]
+GET  /api/players/bounce-outs               Count of darts that struck the board but bounced
+     ?name=&gameType=&mode=                 or fell out before counting → { count }
 GET  /api/players/top-finishes?name=&mode=  Top 10 checkouts for a player
 GET  /api/players/checkout-route            Most-used routes for a specific checkout score
      ?name=&score=&mode=

@@ -29,18 +29,17 @@
 | 3 | Mobile: native chrome — change-server access, haptics, biometric unlock (step 4) | `docs/mobile-app-roadmap.md` | Low-Medium |
 | 4 | Mobile: distribution decision — App Store/Play Store listing vs. simpler sideload distribution (step 6) | `docs/mobile-app-roadmap.md` | Low-Medium |
 | 5 | Localize voice announcements beyond hardcoded English phrases | `docs/voice-announcements-i18n-roadmap.md` | Low-Medium |
-| 6 | Dartboard zone/miss/bounce-out tracking — a nullable `darts.zone` column so heatmaps can tell an inner single from an outer single instead of one merged bucket; generalizes Just Chuckin' It's dartboard-shaped heatmap (today Chuckin-exclusive) to X01, Cricket, and Doubles Practice; replaces Dartboard mode's flat Miss button with a two-band (near/far) positional miss ring; adds a flat "Bounce Out" button (both input modes, v1 tracks count only — positional capture is a v2 explicitly gated on `docs/camera-scoring-roadmap.md`, since manually reconstructing where a dart struck after it fell isn't reliable data) for darts that struck the board but didn't stay | `docs/dartboard-zone-tracking-roadmap.md` | Medium |
-| 7 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
-| 8 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
-| 9 | League mode (new tables, no new infra; complements tournament mode) | `docs/league-mode-roadmap.md` | Medium |
-| 10 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
-| 11 | Guided Around the Clock / Around the World practice drill mode — turns the existing passive completion tracking into a fourth Practice Drill Mode with live progress feedback, reusing Around the World's existing heatmap/progress-view UI | `docs/game-modes-roadmap.md` | Medium |
-| 12 | Per-player data export (CSV + JSON, PIN-gated) — re-opened with fresh product direction after being explicitly descoped when the admin full-database export shipped; design was already fully written, just shelved | `docs/data-export-roadmap.md` | Medium |
-| 13 | Game Modes: Baseball — the second proof that the plugin shape generalizes beyond Cricket (step 5) | `docs/game-modes-roadmap.md` | High |
-| 14 | Tournament mode: double-elimination bracket support (losers bracket + grand final/reset logic, the genuinely fiddly combinatorial piece — single-elimination already shipped, see the Done ledger) | `docs/tournament-mode-roadmap.md` | High |
-| 15 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
-| 16 | Camera/ML scoring (genuinely novel CV engineering; only useful to whoever mounts the hardware) | `docs/camera-scoring-roadmap.md` | Extremely high |
-| 17 | Companion website (persistent hosted infrastructure — accounts, matchmaking, a cloud database — the one item requiring the project to operate long-term infra, not just be self-hostable) | `docs/companion-website-roadmap.md` | Extremely high |
+| 6 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
+| 7 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
+| 8 | League mode (new tables, no new infra; complements tournament mode) | `docs/league-mode-roadmap.md` | Medium |
+| 9 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
+| 10 | Guided Around the Clock / Around the World practice drill mode — turns the existing passive completion tracking into a fourth Practice Drill Mode with live progress feedback, reusing Around the World's existing heatmap/progress-view UI | `docs/game-modes-roadmap.md` | Medium |
+| 11 | Per-player data export (CSV + JSON, PIN-gated) — re-opened with fresh product direction after being explicitly descoped when the admin full-database export shipped; design was already fully written, just shelved | `docs/data-export-roadmap.md` | Medium |
+| 12 | Game Modes: Baseball — the second proof that the plugin shape generalizes beyond Cricket (step 5) | `docs/game-modes-roadmap.md` | High |
+| 13 | Tournament mode: double-elimination bracket support (losers bracket + grand final/reset logic, the genuinely fiddly combinatorial piece — single-elimination already shipped, see the Done ledger) | `docs/tournament-mode-roadmap.md` | High |
+| 14 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
+| 15 | Camera/ML scoring (genuinely novel CV engineering; only useful to whoever mounts the hardware) | `docs/camera-scoring-roadmap.md` | Extremely high |
+| 16 | Companion website (persistent hosted infrastructure — accounts, matchmaking, a cloud database — the one item requiring the project to operate long-term infra, not just be self-hostable) | `docs/companion-website-roadmap.md` | Extremely high |
 
 ### Build-order notes that still apply
 
@@ -61,6 +60,7 @@ therefore hasn't been archived yet) — see each source doc for full detail.
 | Tournament mode: single-elimination (schema, bracket generation with cascading byes, match lifecycle/walkover, setup screen, bracket tree + Up Next view, live-scoreboard round label, player-deletion guard, committed tests) — double-elimination remains a separate open item above | `docs/tournament-mode-roadmap.md` |
 | Tournament: two new badges — 🏆 Champion (win a bracket) and ⚔️ Giant Slayer (Tournament) (beat an opponent seeded 3+ slots better), both awarded inline from `_advanceTournamentMatch()`, live-celebration detected via an `earnedBadgeCache` diff since neither the award nor the completion hook has a response channel back to the frontend; committed tests | `docs/tournament-mode-roadmap.md` |
 | Tournament: "Tournaments" stat block on the Player Profile (wins, runner-up count, best finish reached) — `getTournamentStats()`, `GET /api/players/tournament-stats`, committed tests | `docs/tournament-mode-roadmap.md` |
+| Dartboard zone/miss/bounce-out tracking — `darts.zone`/`miss_zone`/`miss_depth`/`bounced` columns; the generalized dartboard heatmap (`getDartHeatmap()`, `GET /api/players/dart-heatmap`) now shown on all four game-type Player Profile tabs instead of Just Chuckin' It only, with a "zone unspecified" hatch overlay for Pad-mode/pre-feature singles; Dartboard mode's flat Miss button replaced by a two-band (near/far) positional miss ring; a v1 flat-count "Bounce Out" button in every game type and both input modes (`getBounceOutCount()`, `GET /api/players/bounce-outs`) — v2 positional bounce-out capture remains gated on `docs/camera-scoring-roadmap.md`; committed tests, verified end-to-end with Playwright | `docs/archive/dartboard-zone-tracking-roadmap.md` |
 | Coaching Insights — weak-number, checkout-route, bust-parity, and form-trend insights (`getCoachingInsights`, Player Profile X01 tab, committed tests) | `docs/archive/coaching-insights-roadmap.md` |
 | Home Assistant automation recipe book (`docs/home-assistant-recipes.md`, linked from README) | `docs/archive/ha-recipes-roadmap.md` |
 | Colorblind-friendly palette | `docs/archive/colorblind-mode-roadmap.md` |

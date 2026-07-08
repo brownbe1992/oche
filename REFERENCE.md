@@ -37,8 +37,10 @@ convention in `CLAUDE.md`.
 - [13. Database Schema](#13-database-schema)
 - [14. API Reference](#14-api-reference)
 - [15. Tournament Mode](#15-tournament-mode)
-- [16. Known Limitations & Open Gaps](#16-known-limitations--open-gaps)
-- [17. Troubleshooting](#17-troubleshooting)
+- [16. Dart Builder / Loadouts](#16-dart-builder--loadouts)
+- [17. Dartboard Zone / Miss / Bounce-Out Tracking](#17-dartboard-zone--miss--bounce-out-tracking)
+- [18. Known Limitations & Open Gaps](#18-known-limitations--open-gaps)
+- [19. Troubleshooting](#19-troubleshooting)
 
 ---
 
@@ -2065,6 +2067,10 @@ already-migrated database is a safe no-op).
 | `is_treble` | `INTEGER GENERATED ALWAYS AS (...) STORED` | 1 iff `multiplier=3` on a numbered sector (1-20) |
 | `is_double` | `INTEGER GENERATED ALWAYS AS (...) STORED` | 1 iff `multiplier=2` and not a miss (includes double bull) |
 | `thrown_at` | `TEXT` | ISO timestamp, only populated when "Collect per-dart timing" is on |
+| `zone` | `TEXT` | `'inner'`\|`'outer'`\|`NULL` (docs/archive/dartboard-zone-tracking-roadmap.md) — which physical region of a **single hit** (sector 1-20, multiplier 1) was tapped: between bull and treble ("inner") or between treble and double ("outer"). Only ever populated by a Dartboard-mode tap; `NULL` for Pad-mode singles, every double/treble/bull (no inner/outer distinction exists there), and every row from before this feature existed |
+| `miss_zone` | `INTEGER` | `1`-`20`\|`NULL` — the wedge number nearest a **positioned miss** (Dartboard-mode tap on the miss ring outside the double). Always set together with `miss_depth`, never on a hit (`sector≠0`) |
+| `miss_depth` | `TEXT` | `'near'`\|`'far'`\|`NULL` — how close a positioned miss was: the band immediately outside the double ("near") vs. further out ("far"). Always set together with `miss_zone` |
+| `bounced` | `INTEGER` | `1`=this dart struck a real number/ring but bounced or fell out before it counted, `NULL` otherwise. `sector`/`multiplier` stay exactly `0`/`1` regardless — to every existing consumer (`evaluateVisit()`, every badge, `getGhostLegScript()`, `getFullDatabaseExport()`) a bounced dart is a completely ordinary miss row; v1 tracks only that it happened, not where (see REFERENCE.md §17) |
 
 ### `timeline_events`
 | Column | Type | Notes |
@@ -2582,7 +2588,110 @@ selections correctly persisted on the barrel and flight.
 
 ---
 
-## 17. Known Limitations & Open Gaps
+## 17. Dartboard Zone / Miss / Bounce-Out Tracking
+
+`docs/archive/dartboard-zone-tracking-roadmap.md`. Dartboard-mode-only positional
+metadata riding alongside ordinary `darts` rows — no scoring behavior change,
+purely a data-granularity and heatmap-visualization feature. Backend:
+`getDartHeatmap()`/`getBounceOutCount()` in `backend/db.js`. Frontend:
+`buildDartboard()`, `buildDartHeatmap()`, `throwDart()`/`throwDartBoard()`/
+`throwBounceOut()` in `frontend/index.html`.
+
+### Zone tracking — inner vs. outer single
+
+A real dartboard number wedge has two physically distinct single-scoring
+regions (inner: between bull and treble; outer: between treble and double),
+both scoring identically. `buildDartboard()` already draws them as separate
+SVG paths (`R.bullOut`→`R.trebleIn` and `R.trebleOut`→`R.doubleIn`); each
+path's `onclick` now passes a third argument — `throwDartBoard(sector, 1,
+'inner')` / `throwDartBoard(sector, 1, 'outer')` — that threads through
+`throwDart()` into the dart object as `d.zone`, then into `darts.zone` via
+`addTurn()`. A double, treble, or bull hit never carries a zone (no
+inner/outer distinction physically exists for those), and a Pad-mode single
+never can either (a Multiplier+Number grid has no geometric tap position) —
+`zone` stays `NULL` for both, permanently, by design; **scope is Dartboard-mode
+singles only, never retrofitted or backfilled**.
+
+### Miss-area tracking — a two-band positional miss ring
+
+`buildDartboard()`'s 20 angular wedges extend radially outward past the
+double ring into two new rings — `R.missNear` (270) and `R.missFar` (310),
+the SVG's `viewBox` enlarged from `"0 0 500 500"` to `"0 0 660 660"` (board
+recentered at `CX=CY=330`) to fit them. Tapping a miss-ring segment records
+`sector:0, multiplier:1, missZone:<nearest wedge 1-20>, missDepth:'near'|'far'`
+— `throwDartBoard(0, 1, null, wedgeNum, 'near'|'far')`. **The old flat
+`#board-miss-btn` (Dartboard-mode's only miss entry point) no longer exists**
+— every Dartboard-mode miss now has to land in one of the two rings. Pad
+mode's own inline-created Miss button (built by `renderPad()`, a completely
+separate code path) is untouched and still produces a positionless miss
+(`missZone`/`missDepth` both `NULL`). `miss_zone`/`miss_depth` are always set
+or unset together; `sector`/`multiplier` stay exactly `0`/`1` for every miss
+regardless of input mode, so every existing `sector===0` consumer
+(`evaluateVisit()`, the "Where'd It Go?" badge, `getGhostLegScript()` replay)
+needs zero changes.
+
+### Bounce-out tracking (v1 — flat count, no position)
+
+A **third, distinct dart outcome** from a genuine miss: the dart struck a
+real number/ring but didn't stay long enough to count. `darts.bounced=1`
+marks it, with `sector`/`multiplier` still exactly `0`/`1` — to every
+existing consumer a bounced dart is a completely ordinary miss row. One
+**"Bounce Out" button** (`throwBounceOut()` → `throwDart(0, undefined,
+undefined, undefined, true)`) sits where the old flat Miss button used to,
+available in **every** game type and both input modes — including Cricket's
+own dedicated pad (`renderPadCricket()`), which has no Pad/Dartboard toggle of
+its own to hang that availability off of. No toggle, no position captured,
+one dart committed immediately per press. Surfaced as a plain "Bounce-outs: N"
+count line next to the Player Profile's heatmap (`getBounceOutCount()`, `GET
+/api/players/bounce-outs`), not a spatial marker — v1 genuinely has no
+position to plot. **v2 (positional capture) is explicitly deferred**, gated on
+`docs/camera-scoring-roadmap.md` existing — manually reconstructing where a
+dart struck *after* it already fell isn't reliable data; a camera has genuine
+ground truth at the moment of impact, a human guessing under time pressure
+doesn't.
+
+### The generalized dartboard heatmap (X01, Cricket, Doubles Practice, Chuckin)
+
+Originally Chuckin-exclusive (`getChuckinHeatmap()`/`buildChuckinHeatmap()`);
+generalized since `darts` is the one universal per-dart table every game type
+writes into. `getChuckinHeatmap(playerName, mode)` is now a thin wrapper
+around `getDartHeatmap(playerName, gameType, mode)`, scoped via the same
+`_scope({mode, gameType})` helper every other per-game-type query already
+uses. `GET /api/players/chuckin-heatmap` is kept exactly as-is for backward
+compatibility; `GET /api/players/dart-heatmap?name=&gameType=&mode=` is the
+generalized surface. The Player Profile's "Dartboard Heatmap" section
+(`dart-heatmap-section`/`dart-heatmap-body`, inside the shared `chartSection`
+markup) now shows on all four game-type tabs instead of Chuckin only —
+`loadDartHeatmap()` fires for whichever tab is currently active, replacing the
+old `if(playerGameType !== 'chuckin') return` early-out.
+
+`buildDartHeatmap(cells, {ariaLabel})` renders three things per number: the
+inner-single and outer-single regions (each independently shaded by hit
+count), and — new — the miss ring (shaded by `missHeat(wedge, depth)`, its
+**own independent heat-scale normalization**, not shared with the scoring
+regions, since hit and miss counts are wildly different population sizes per
+player). A **zone-unspecified single** (Pad mode, or a pre-feature row) is
+tracked separately (`unspecMap`) and never silently folded into either real
+bucket or split 50/50 — instead it draws a faint diagonal hatch overlay
+(`url(#zoneHatch)` SVG pattern) across *both* single regions for that number,
+a third visual state distinct from "never hit" and from real inner/outer
+heat. The same distinction extends to the flat `topSectors` list
+(`dartLabelFromParts()` appends `" (zone unknown)"` to a zone-less single,
+never to a double/treble/bull, which never had a zone concept at all).
+
+### Testing
+
+`backend/test/db.chuckin-stats.test.js`'s "getDartHeatmap — zone-scoped
+grouping" and "getBounceOutCount" describe blocks; `backend/test/db.turn-
+validation.test.js`'s "addTurn — zone/missZone/missDepth/bounced validation"
+block; `backend/test/scoring.test.js`'s regression proving this metadata never
+changes `evaluateVisit()`'s outcome. See `docs/archive/dartboard-zone-tracking-
+roadmap.md`'s own "Testing" section for the full list, including a manual
+end-to-end Playwright verification pass against a running server.
+
+---
+
+## 18. Known Limitations & Open Gaps
 
 Cross-referenced from the `docs/*.md` roadmap docs — these are real,
 already-shipped limitations, not just unbuilt future features:
@@ -2626,7 +2735,7 @@ already-shipped limitations, not just unbuilt future features:
 
 ---
 
-## 18. Troubleshooting
+## 19. Troubleshooting
 
 The general method, before the specific symptoms below: **this document is the
 spec.** Find the section describing what the misbehaving feature is supposed to

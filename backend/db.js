@@ -79,7 +79,10 @@ db.exec(`
   -- darts stores one row per physical dart. scored/is_treble/is_double are generated
   -- from sector+multiplier — no app code writes them; SQLite computes and stores them.
   -- thrown_at (added via ALTER TABLE below) is the client-captured tap timestamp, only
-  -- populated when the "collect_dart_timing" setting is on; null otherwise.
+  -- populated when the "collect_dart_timing" setting is on; null otherwise. zone/
+  -- miss_zone/miss_depth/bounced (also added via ALTER TABLE below,
+  -- docs/archive/dartboard-zone-tracking-roadmap.md) are purely additive Dartboard-mode-only
+  -- positional metadata — see that migration's own comment for the full rationale.
   CREATE TABLE IF NOT EXISTS darts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     turn_id    INTEGER NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
@@ -338,6 +341,18 @@ try { db.exec('ALTER TABLE games ADD COLUMN player_count INTEGER'); } catch(e) {
 // snapshotted, same reasoning already applied to game_players.dart_weight/out_mode —
 // renaming/deleting a loadout later never rewrites a past game's history.
 try { db.exec('ALTER TABLE game_players ADD COLUMN loadout_id INTEGER REFERENCES loadouts(id) ON DELETE SET NULL'); } catch(e) {}
+// Dartboard zone/miss/bounce-out tracking (docs/archive/dartboard-zone-tracking-roadmap.md).
+// All four columns are purely additive metadata riding alongside an otherwise-
+// identical dart row — sector/multiplier/scored/is_treble/is_double keep meaning
+// exactly what they always have, so every existing consumer (evaluateVisit(),
+// every badge chain check, getGhostLegScript() replay, getFullDatabaseExport())
+// needs zero changes. Only Dartboard-mode taps ever populate these (Pad mode and
+// Cricket's own pad have no geometric tap position, so they stay NULL forever) —
+// "precision arrives gradually," never backfilled or guessed for existing rows.
+try { db.exec("ALTER TABLE darts ADD COLUMN zone TEXT"); } catch(e) {}         // 'inner'|'outer', single hits only
+try { db.exec('ALTER TABLE darts ADD COLUMN miss_zone INTEGER'); } catch(e) {} // 1-20 (nearest wedge), misses only
+try { db.exec("ALTER TABLE darts ADD COLUMN miss_depth TEXT"); } catch(e) {}   // 'near'|'far', misses only
+try { db.exec('ALTER TABLE darts ADD COLUMN bounced INTEGER'); } catch(e) {}   // 1 = bounced/fell out, misses only
 db.exec(`UPDATE games SET player_count = (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = games.id) WHERE player_count IS NULL`);
 // config wasn't backfilled when the column was added (unlike player_count above) —
 // every pre-existing row is X01 (game_type defaults to 'x01') with category as its
@@ -420,8 +435,8 @@ const q = {
                    (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points, leg_won)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 
-  insertDart   : db.prepare(`INSERT INTO darts (turn_id, dart_no, sector, multiplier, thrown_at)
-                   VALUES (?, ?, ?, ?, ?)`),
+  insertDart   : db.prepare(`INSERT INTO darts (turn_id, dart_no, sector, multiplier, thrown_at, zone, miss_zone, miss_depth, bounced)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 };
 
 /* ---------- player operations ---------- */
@@ -660,8 +675,29 @@ function addTurn(gameId, t) {
     // World progress count, whose 63-outcome total assumes only real combos exist.
     if (sector === 25 && multiplier === 3) throw httpError(400, 'No treble bull exists');
     if (sector === 0 && multiplier !== 1) throw httpError(400, 'A miss must have multiplier 1');
+    // docs/archive/dartboard-zone-tracking-roadmap.md: zone/missZone/missDepth/bounced are all
+    // purely additive, Dartboard-mode-only positional metadata — validated the same
+    // "reject garbage, don't silently coerce" way as sector/multiplier above, and
+    // each only meaningful on the specific dart shape it actually describes (a hit
+    // can't have a miss wedge, a miss can't have an inner/outer zone).
+    const zone = (d.zone === 'inner' || d.zone === 'outer') ? d.zone : null;
+    if (d.zone != null && zone == null) throw httpError(400, "zone must be 'inner' or 'outer'");
+    if (zone != null && !(sector >= 1 && sector <= 20 && multiplier === 1)) {
+      throw httpError(400, 'zone is only valid for a single hit on a number 1-20');
+    }
+    const missDepth = (d.missDepth === 'near' || d.missDepth === 'far') ? d.missDepth : null;
+    if (d.missDepth != null && missDepth == null) throw httpError(400, "missDepth must be 'near' or 'far'");
+    let missZone = null;
+    if (d.missZone != null) {
+      missZone = Number(d.missZone);
+      if (!Number.isInteger(missZone) || missZone < 1 || missZone > 20) throw httpError(400, 'missZone must be an integer 1-20');
+    }
+    if ((missZone != null) !== (missDepth != null)) throw httpError(400, 'missZone and missDepth must be set together');
+    if (missZone != null && sector !== 0) throw httpError(400, 'missZone/missDepth are only valid on a miss (sector 0)');
+    const bounced = !!d.bounced;
+    if (bounced && sector !== 0) throw httpError(400, 'bounced is only valid on a miss (sector 0)');
     return { dartNo: Number.isInteger(Number(d.dartNo)) ? Number(d.dartNo) : i + 1, sector, multiplier,
-             thrownAt: d.thrownAt ? String(d.thrownAt) : null };
+             thrownAt: d.thrownAt ? String(d.thrownAt) : null, zone, missZone, missDepth, bounced };
   });
   // Validate the visit-level numbers too, not just the darts. turns.scored feeds every
   // points/average stat, so a negative or absurd value would silently corrupt them; a
@@ -695,7 +731,10 @@ function addTurn(gameId, t) {
   // thrownAt is an ISO timestamp captured client-side at tap time; only sent when
   // the admin has enabled the "collect_dart_timing" setting.
   const turnId = Number(info.lastInsertRowid);
-  for (const d of darts) q.insertDart.run(turnId, d.dartNo, d.sector, d.multiplier, d.thrownAt);
+  for (const d of darts) {
+    q.insertDart.run(turnId, d.dartNo, d.sector, d.multiplier, d.thrownAt,
+      d.zone, d.missZone, d.missDepth, d.bounced ? 1 : null);
+  }
   return { ok: true };
 }
 
@@ -1940,21 +1979,43 @@ function getChuckinPersonalBests(playerName, mode) {
   return { bestSessionDarts, bestSessionTrebles };
 }
 
-// Per-sector/multiplier hit-count grid feeding the Player Profile's dartboard
-// heatmap — the "heatmap-heavy... patterns and trends" reporting this mode was
-// specifically requested to have. Same flat {sector,multiplier,hits} shape as
-// getDartAnalytics()'s topSectors, just chuckin-scoped and unfiltered by rank
-// (the frontend shades every dartboard region, not just the top 15).
-function getChuckinHeatmap(playerName, mode) {
+// Per-sector/multiplier/zone hit-count grid feeding the Player Profile's dartboard
+// heatmap. Originally Chuckin-only ("heatmap-heavy... patterns and trends" reporting
+// that mode was specifically requested to have); generalized (docs/dartboard-zone-
+// tracking-roadmap.md, "Beyond Just Chuckin' It") to any game type via the same
+// _scope() helper every other per-game-type stat query already uses, since `darts`
+// is the one universal per-dart table every game type writes into. Grouping by zone/
+// miss_zone/miss_depth splits a single number's inner/outer singles (and a miss's
+// wedge+depth) into separate rows instead of one undifferentiated bucket — a hit row
+// only ever has `zone` populated, a miss row (sector=0) only ever has miss_zone/
+// miss_depth populated, so a given row's fields are always unambiguous.
+function getDartHeatmap(playerName, gameType, mode) {
   const p = getPlayer(playerName);
   if (!p) return [];
-  const scope = _scope({ mode, gameType: 'chuckin' });
+  const scope = _scope({ mode, gameType });
   return db.prepare(`
-    SELECT d.sector AS sector, d.multiplier AS multiplier, COUNT(*) AS hits
+    SELECT d.sector AS sector, d.multiplier AS multiplier, d.zone AS zone,
+           d.miss_zone AS missZone, d.miss_depth AS missDepth, COUNT(*) AS hits
     FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id
     WHERE t.player_id=? ${scope}
-    GROUP BY d.sector, d.multiplier
+    GROUP BY d.sector, d.multiplier, d.zone, d.miss_zone, d.miss_depth
   `).all(p.id);
+}
+// Chuckin's existing call sites keep working unchanged.
+function getChuckinHeatmap(playerName, mode) { return getDartHeatmap(playerName, 'chuckin', mode); }
+
+// Bounce-outs have no position to plot (v1, see docs/archive/dartboard-zone-tracking-roadmap.md
+// "Bounce-out tracking") — surfaced as a plain count alongside the heatmap rather than
+// a spatial overlay.
+function getBounceOutCount(playerName, gameType, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return 0;
+  const scope = _scope({ mode, gameType });
+  return db.prepare(`
+    SELECT COUNT(*) AS n
+    FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id
+    WHERE t.player_id=? AND d.bounced=1 ${scope}
+  `).get(p.id).n;
 }
 
 function getMetricHistory(playerName, metric, period, opts = {}) {
@@ -2591,11 +2652,14 @@ function getDartAnalytics(playerName, mode) {
   // dedicated heatmap/treble-rate stats instead of feeding this cross-game-type view.
   const BASE = `FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id WHERE t.player_id = ? AND t.bust = 0 ${NOT_CHUCKIN}`;
 
-  // 1 — Most hit sector/multiplier combinations
+  // 1 — Most hit sector/multiplier combinations. Grouping by zone too (docs/dartboard-
+  // zone-tracking-roadmap.md) splits a single-hit number's inner/outer regions into
+  // separate rows ("S20 (inner)" vs "S20 (outer)") for players who want that precision
+  // in this flat list, same as the geometric heatmap shows it.
   const topSectors = db.prepare(`
-    SELECT d.sector, d.multiplier, COUNT(*) AS hits
+    SELECT d.sector, d.multiplier, d.zone, COUNT(*) AS hits
     ${BASE} ${mf}
-    GROUP BY d.sector, d.multiplier
+    GROUP BY d.sector, d.multiplier, d.zone
     ORDER BY hits DESC
     LIMIT 15
   `).all(p.id);
@@ -3950,7 +4014,7 @@ module.exports = {
   getCricketMprLeaderboard, getCricketWinLeaderboard, getCricketPerfectLegStats,
   getDoublesPracticeStatBubbles, getDoublesPracticePersonalBests,
   getDoublesPracticeAccuracyLeaderboard, getDoublesPracticeBestRoundStats,
-  getChuckinStatBubbles, getChuckinPersonalBests, getChuckinHeatmap,
+  getChuckinStatBubbles, getChuckinPersonalBests, getChuckinHeatmap, getDartHeatmap, getBounceOutCount,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics, getCoachingInsights,

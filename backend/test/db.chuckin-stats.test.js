@@ -196,6 +196,135 @@ describe('getChuckinHeatmap', () => {
   });
 });
 
+// docs/archive/dartboard-zone-tracking-roadmap.md "Beyond Just Chuckin' It": getChuckinHeatmap()
+// generalized to getDartHeatmap(playerName, gameType, mode), plus zone/miss_zone/
+// miss_depth grouping. Chuckin is still the game type exercised here (matching the
+// rest of this file's fixtures) — X01/Cricket isolation is what genuinely needs its
+// own scratch data, covered below.
+describe('getDartHeatmap — zone-scoped grouping', () => {
+  test('an inner-zone single and an outer-zone single for the same sector land in separate rows', () => {
+    const name = 'Heatmap_Zone_A';
+    db.addPlayer(name);
+    const g = chuckinGame(name);
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 20, multiplier: 1, zone: 'inner' }] });
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 20, multiplier: 1, zone: 'inner' }] });
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 20, multiplier: 1, zone: 'outer' }] });
+
+    const cells = db.getDartHeatmap(name, 'chuckin', 'practice');
+    const inner = cells.find(c => c.sector === 20 && c.multiplier === 1 && c.zone === 'inner');
+    const outer = cells.find(c => c.sector === 20 && c.multiplier === 1 && c.zone === 'outer');
+    assert.equal(inner.hits, 2);
+    assert.equal(outer.hits, 1);
+  });
+
+  test('a NULL-zone single (Pad mode) is counted separately from both inner and outer', () => {
+    const name = 'Heatmap_Zone_B';
+    db.addPlayer(name);
+    const g = chuckinGame(name);
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 20, multiplier: 1, zone: 'inner' }] });
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 20, multiplier: 1 }] }); // no zone at all
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 20, multiplier: 1 }] });
+
+    const cells = db.getDartHeatmap(name, 'chuckin', 'practice');
+    const inner = cells.find(c => c.sector === 20 && c.multiplier === 1 && c.zone === 'inner');
+    const unspec = cells.find(c => c.sector === 20 && c.multiplier === 1 && c.zone == null);
+    assert.equal(inner.hits, 1);
+    assert.equal(unspec.hits, 2);
+  });
+
+  test('a treble/double/bull never carries a zone — grouped as a single (zone=null) row same as before', () => {
+    const name = 'Heatmap_Zone_NoZoneShapes';
+    db.addPlayer(name);
+    const g = chuckinGame(name);
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 20, multiplier: 3 }] });
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 20, multiplier: 2 }] });
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 25, multiplier: 2 }] });
+
+    const cells = db.getDartHeatmap(name, 'chuckin', 'practice');
+    assert.equal(cells.find(c => c.sector === 20 && c.multiplier === 3).zone, null);
+    assert.equal(cells.find(c => c.sector === 20 && c.multiplier === 2).zone, null);
+    assert.equal(cells.find(c => c.sector === 25 && c.multiplier === 2).zone, null);
+  });
+
+  test('positioned misses bucket by (miss_zone, miss_depth); a near-miss and a far-miss near the same wedge are separate rows, distinct from a near-miss near a different wedge', () => {
+    const name = 'Heatmap_MissZone';
+    db.addPlayer(name);
+    const g = chuckinGame(name);
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 0, multiplier: 1, missZone: 20, missDepth: 'near' }] });
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 0, multiplier: 1, missZone: 20, missDepth: 'near' }] });
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 0, multiplier: 1, missZone: 20, missDepth: 'far' }] });
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 0, multiplier: 1, missZone: 5, missDepth: 'near' }] });
+    // An unpositioned miss (Pad mode) — no missZone/missDepth at all.
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 0, multiplier: 1 }] });
+
+    const cells = db.getDartHeatmap(name, 'chuckin', 'practice');
+    const near20 = cells.find(c => c.sector === 0 && c.missZone === 20 && c.missDepth === 'near');
+    const far20  = cells.find(c => c.sector === 0 && c.missZone === 20 && c.missDepth === 'far');
+    const near5  = cells.find(c => c.sector === 0 && c.missZone === 5 && c.missDepth === 'near');
+    const unpositioned = cells.find(c => c.sector === 0 && c.missZone == null);
+    assert.equal(near20.hits, 2);
+    assert.equal(far20.hits, 1);
+    assert.equal(near5.hits, 1);
+    assert.equal(unpositioned.hits, 1);
+  });
+
+  test('scoping by gameType isolates an X01 dart from a Cricket dart from the same player', () => {
+    const name = 'Heatmap_GameTypeScope';
+    db.addPlayer(name);
+    const gx = db.createGame({ category: '501', legsPerSet: 3, setsPerGame: 1, practice: 1, gameType: 'x01', players: [{ name }] });
+    const gc = db.createGame({ category: 'Cricket', legsPerSet: 3, setsPerGame: 1, practice: 1, gameType: 'cricket', config: { numbers: [15, 16, 17, 18, 19, 20, 25] }, players: [{ name }] });
+    db.addTurn(gx.gameId, { player: name, set: 1, leg: 1, scored: 20, darts: [{ dartNo: 1, sector: 20, multiplier: 1, zone: 'inner' }] });
+    db.addTurn(gc.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 20, multiplier: 1, zone: 'outer' }] });
+
+    const x01Cells = db.getDartHeatmap(name, 'x01', null);
+    const cricketCells = db.getDartHeatmap(name, 'cricket', null);
+    assert.ok(x01Cells.some(c => c.zone === 'inner'), 'the X01 dart is visible under gameType=x01');
+    assert.ok(!x01Cells.some(c => c.zone === 'outer'), 'the Cricket dart does not leak into gameType=x01');
+    assert.ok(cricketCells.some(c => c.zone === 'outer'), 'the Cricket dart is visible under gameType=cricket');
+    assert.ok(!cricketCells.some(c => c.zone === 'inner'), 'the X01 dart does not leak into gameType=cricket');
+  });
+
+  test('getChuckinHeatmap(name, mode) returns byte-identical results to getDartHeatmap(name, "chuckin", mode) — a regression guard through the generalization', () => {
+    const name = 'Heatmap_Regression';
+    db.addPlayer(name);
+    const g = chuckinGame(name);
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 20, multiplier: 1, zone: 'inner' }] });
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 20, multiplier: 3 }] });
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 0, multiplier: 1, missZone: 5, missDepth: 'far' }] });
+
+    assert.deepEqual(db.getChuckinHeatmap(name, 'practice'), db.getDartHeatmap(name, 'chuckin', 'practice'));
+  });
+});
+
+describe('getBounceOutCount', () => {
+  test('isolates bounced=1 rows per player/gameType/mode', () => {
+    const name = 'BounceOut_A';
+    db.addPlayer(name);
+    const g = chuckinGame(name);
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 0, multiplier: 1, bounced: true }] });
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 0, multiplier: 1, bounced: true }] });
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 0, multiplier: 1 }] }); // plain miss, not bounced
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 20, multiplier: 1, zone: 'inner' }] }); // a hit, irrelevant
+
+    assert.equal(db.getBounceOutCount(name, 'chuckin', 'practice'), 2);
+  });
+
+  test('a bounce-out in one game type does not count toward another', () => {
+    const name = 'BounceOut_GameTypeScope';
+    db.addPlayer(name);
+    const gx = db.createGame({ category: '501', legsPerSet: 3, setsPerGame: 1, practice: 1, gameType: 'x01', players: [{ name }] });
+    db.addTurn(gx.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ dartNo: 1, sector: 0, multiplier: 1, bounced: true }] });
+    assert.equal(db.getBounceOutCount(name, 'x01', null), 1);
+    assert.equal(db.getBounceOutCount(name, 'cricket', null), 0);
+  });
+
+  test('no bounce-outs yet returns 0', () => {
+    const name = 'BounceOut_Empty';
+    db.addPlayer(name);
+    assert.equal(db.getBounceOutCount(name, 'chuckin', 'practice'), 0);
+  });
+});
+
 describe('getMetricHistory matches getChuckinStatBubbles (docs/game-modes-roadmap.md)', () => {
   test('"chuckindartsthrown" over "all" time sums to the stat-bubble dartsThrown', () => {
     const name = 'Chuckin_Metric_Darts';

@@ -99,6 +99,24 @@ describe('evaluateVisit (X01 bust/win rules, REFERENCE.md §2)', () => {
     assert.equal(evaluateVisit({ score: 501, doubleOut: true }, [d(20,1), d(20,3)], {}).trebleLess, false);
     assert.equal(evaluateVisit({ score: 501, doubleOut: true }, [], {}).trebleLess, false, 'zero darts is not trebleless');
   });
+
+  // docs/archive/dartboard-zone-tracking-roadmap.md: zone/missZone/missDepth/bounced are all
+  // purely additive metadata the frontend stamps onto a dart object after makeDart()
+  // returns it (see throwDart() in index.html) — evaluateVisit() never reads any of
+  // them, only d.value, so a visit's scored/bust/win outcome must be byte-identical
+  // whether or not they're present. Also proves a bounce-out dart (sector:0,
+  // multiplier:1, bounced:true) is scored exactly like a plain miss.
+  test('zone/missZone/missDepth/bounced on a dart object never change evaluateVisit()\'s outcome', () => {
+    const plain = [d(20,1), d(20,1), d(0,1)];
+    const withMeta = [
+      Object.assign(d(20,1), { zone: 'inner' }),
+      Object.assign(d(20,1), { zone: 'outer' }),
+      Object.assign(d(0,1), { missZone: 5, missDepth: 'near', bounced: true }),
+    ];
+    const evPlain = evaluateVisit({ score: 501, doubleOut: true }, plain, {});
+    const evMeta = evaluateVisit({ score: 501, doubleOut: true }, withMeta, {});
+    assert.deepEqual(evMeta, evPlain);
+  });
 });
 
 describe('evaluateVisitCricket (mark accumulation + opponent gating + win condition, REFERENCE.md §2)', () => {
