@@ -1687,9 +1687,17 @@ function showLegend(backTo){
   show('legend');
 }
 let dartBuilderBackTo='player';
-// dartBuilderView: 'list' (loadout list for dartBuilderPlayer) or 'edit' (component
-// slots for dartBuilderLoadoutId, null = new unsaved loadout).
+// dartBuilderView: 'list' (loadout list for dartBuilderPlayer), 'edit' (component
+// slots for dartBuilderLoadoutId, null = new unsaved loadout), or 'compare'
+// (docs/dart-builder-roadmap.md "loadout comparison view" — side-by-side stats
+// for two or more of dartBuilderPlayer's loadouts).
 let dartBuilderPlayer=null, dartBuilderView='list', dartBuilderLoadoutId=null;
+// Loadout comparison state (view==='compare' only): which loadout ids are
+// currently checked into the comparison table, and a cache of every loadout's
+// getLoadoutStats() response fetched once per screen-entry (not refetched on
+// every checkbox toggle — toggling only changes which cached columns render).
+let dartBuilderCompareSelected = new Set();
+let _dartBuilderCompareStats = null;
 function showDartBuilder(playerName, backTo){
   dartBuilderPlayer = playerName;
   dartBuilderBackTo = backTo || 'player';
@@ -4899,6 +4907,7 @@ async function renderDartBuilderScreen(){
     catch(e){ el.innerHTML = '<p style="color:var(--muted)">Could not load the Dart Builder right now.</p>'; return; }
   }
   if(dartBuilderView === 'edit') await renderDartBuilderEdit();
+  else if(dartBuilderView === 'compare') await renderDartBuilderCompare();
   else await renderDartBuilderList();
 }
 
@@ -4928,9 +4937,106 @@ async function renderDartBuilderList(){
       Build a saved combination of barrel, shaft, and flight, pick one before a game (New Game's "Change Loadout" button),
       or set one as the default from ${escapeHtml(player)}'s profile so it's chosen automatically.
     </p>
-    <button class="btn btn-primary" style="margin-bottom:14px" onclick="openDartBuilderEdit(null)">+ New Loadout</button>
+    <div class="btn-row" style="margin-bottom:14px">
+      <button class="btn btn-primary" onclick="openDartBuilderEdit(null)">+ New Loadout</button>
+      ${loadouts.length >= 2 ? `<button class="btn btn-ghost" onclick="openDartBuilderCompare()">⚖️ Compare Loadouts</button>` : ''}
+    </div>
     ${cards || '<p style="color:var(--muted);font-size:13px">No loadouts yet.</p>'}
   `;
+}
+
+// Loadout comparison view (docs/dart-builder-roadmap.md "loadout comparison
+// view", the v1 stretch goal). Side-by-side stats for two or more of a
+// player's loadouts, entered from the list screen — same "own screen, not a
+// Player Profile filter" placement getLoadoutStats() itself already uses.
+function openDartBuilderCompare(){
+  dartBuilderView = 'compare';
+  _dartBuilderCompareStats = null;
+  renderDartBuilderScreen();
+}
+let _dartBuilderCompareLoadouts = [];
+async function renderDartBuilderCompare(){
+  const el = document.getElementById('dart-builder-body');
+  const player = dartBuilderPlayer;
+  // Loadouts + every one's stats are fetched once per screen-entry (guarded by
+  // _dartBuilderCompareStats being null, reset only by openDartBuilderCompare()) —
+  // toggling a checkbox afterward only touches dartBuilderCompareSelected and
+  // re-renders from the cached data, no re-fetch.
+  if(!_dartBuilderCompareStats){
+    let loadouts = [];
+    try{ loadouts = await DB.listLoadouts(player); }
+    catch(e){ el.innerHTML = '<p style="color:var(--muted)">Could not load loadouts.</p>'; return; }
+    if(loadouts.length < 2){
+      el.innerHTML = `<p style="color:var(--muted);font-size:13px">Need at least 2 loadouts to compare.</p>
+        <button class="btn btn-ghost" style="margin-top:10px" onclick="dartBuilderView='list';renderDartBuilderScreen();">Back to Loadouts</button>`;
+      return;
+    }
+    try{
+      const statsList = await Promise.all(loadouts.map(lo=>DB.loadoutStats(player, lo.id)));
+      _dartBuilderCompareStats = {};
+      loadouts.forEach((lo,i)=>{ _dartBuilderCompareStats[lo.id] = statsList[i]; });
+    }catch(e){ el.innerHTML = '<p style="color:var(--muted)">Could not load loadout stats.</p>'; return; }
+    _dartBuilderCompareLoadouts = loadouts;
+    dartBuilderCompareSelected = new Set(loadouts.map(lo=>lo.id));   // select all by default
+  }
+  el.innerHTML = `
+    <div style="margin-bottom:14px">
+      <h2 style="font-size:18px;margin-bottom:4px">Compare Loadouts</h2>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 10px;line-height:1.6">Tap a loadout to add or remove it from the table below.</p>
+      <div class="btn-row" role="group" aria-label="Loadouts to compare" style="flex-wrap:wrap" id="db-compare-toggles"></div>
+      <button class="btn btn-ghost" style="margin-top:10px" onclick="dartBuilderView='list';renderDartBuilderScreen();">Back to Loadouts</button>
+    </div>
+    <div id="db-compare-table"></div>
+  `;
+  renderDartBuilderCompareToggles();
+  renderDartBuilderCompareTable();
+}
+function renderDartBuilderCompareToggles(){
+  const el = document.getElementById('db-compare-toggles');
+  if(!el) return;
+  el.innerHTML = _dartBuilderCompareLoadouts.map(lo=>{
+    const on = dartBuilderCompareSelected.has(lo.id);
+    return `<button type="button" class="btn btn-ghost" aria-pressed="${on}" style="${on?'background:var(--surface-2);color:var(--ink);border-color:var(--muted)':''}" onclick="toggleDartBuilderCompareLoadout(${lo.id})">${escapeHtml(lo.name)}</button>`;
+  }).join('');
+}
+function toggleDartBuilderCompareLoadout(id){
+  if(dartBuilderCompareSelected.has(id)) dartBuilderCompareSelected.delete(id);
+  else dartBuilderCompareSelected.add(id);
+  renderDartBuilderCompareToggles();
+  renderDartBuilderCompareTable();
+}
+function renderDartBuilderCompareTable(){
+  const el = document.getElementById('db-compare-table');
+  if(!el) return;
+  const selected = _dartBuilderCompareLoadouts.filter(lo=>dartBuilderCompareSelected.has(lo.id));
+  if(selected.length < 2){
+    el.innerHTML = `<p style="color:var(--muted);font-size:13px">Select at least 2 loadouts to compare.</p>`;
+    return;
+  }
+  const rows = [
+    { label:'Components', fmt:lo=>[lo.barrel,lo.shaft,lo.flight].filter(Boolean).map(c=>c.name).join(' · ') || 'No components yet' },
+    { label:'Games played', fmt:lo=>String(_dartBuilderCompareStats[lo.id].gamesPlayed) },
+    { label:'Wins', fmt:lo=>String(_dartBuilderCompareStats[lo.id].wins) },
+    { label:'Win %', fmt:lo=>{ const s=_dartBuilderCompareStats[lo.id]; return s.gamesPlayed>0 ? Math.round(s.wins/s.gamesPlayed*100)+'%' : '—'; } },
+    { label:'Darts thrown', fmt:lo=>String(_dartBuilderCompareStats[lo.id].dartsThrown) },
+    { label:'3-dart average', fmt:lo=>{ const v=_dartBuilderCompareStats[lo.id].avg; return v!=null ? v.toFixed(1) : '—'; } },
+    { label:'180s', fmt:lo=>String(_dartBuilderCompareStats[lo.id].one80s) },
+    { label:'Checkouts', fmt:lo=>String(_dartBuilderCompareStats[lo.id].checkouts) },
+  ];
+  el.innerHTML = `<div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr>
+        <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--wire);color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em"></th>
+        ${selected.map(lo=>`<th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--wire);font-weight:600">${escapeHtml(lo.name)}</th>`).join('')}
+      </tr></thead>
+      <tbody>
+        ${rows.map(r=>`<tr>
+          <td style="padding:8px 10px;border-bottom:1px solid var(--wire);color:var(--muted)">${r.label}</td>
+          ${selected.map(lo=>`<td style="padding:8px 10px;border-bottom:1px solid var(--wire)">${escapeHtml(r.fmt(lo))}</td>`).join('')}
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
 }
 
 function openDartBuilderEdit(loadoutId){

@@ -16,12 +16,18 @@
 > functionally equivalent and inherently mobile-responsive (no wide layout to collapse),
 > but visually plainer than originally envisioned.
 >
-> **Four pieces are explicitly deferred**, each tracked as its own item on
+> **✅ Built (2026-07): the loadout comparison view** — a "⚖️ Compare Loadouts"
+> button on the loadout list screen (shown once a player has 2+ loadouts) opens
+> a side-by-side stats table (components, games/wins/win%/darts/average/180s/
+> checkouts) for whichever loadouts are toggled on, reusing the existing
+> `getLoadoutStats()` query per loadout — no new backend work. See
+> `REFERENCE.md`'s "Loadout comparison view" note for full mechanics.
+>
+> **Three pieces remain explicitly deferred**, each tracked as its own item on
 > `docs/open-roadmap-items.md` rather than left implicit here: a visual icon/diagram
 > per barrel shape/grip/flight-shape option (the accessibility requirement below is
 > not yet met — dropdowns are text-label-only), the "quick-add full set" one-shot
-> entry form, optional photo upload per component, and the loadout comparison view
-> (always marked a stretch goal, not required for v1).
+> entry form, and optional photo upload per component.
 
 ## Goal
 
@@ -235,8 +241,24 @@ narrowly than originally sketched:
   same formulas `getPlayerStatBubbles()` already uses. No "checkout %" metric exists
   elsewhere in the codebase to reuse, so it wasn't invented here either — a plain
   checkout count is what shipped.
-- A **loadout comparison view** (stretch, not required for v1) — **not built**,
-  tracked as its own item on `docs/open-roadmap-items.md`.
+- A **loadout comparison view** (stretch, not required for v1) — **✅ Built
+  (2026-07)**: a third `dartBuilderView` state (`'compare'`), reached from a
+  "⚖️ Compare Loadouts" button on the loadout list screen (shown once a player
+  has 2+ loadouts). No new backend query was needed — it calls the existing
+  `getLoadoutStats()` once per loadout (in parallel), caches the results for
+  the screen visit, and renders a side-by-side table (components, games, wins,
+  win %, darts thrown, 3-dart average, 180s, checkouts) for whichever loadouts
+  are toggled on. Every loadout is selected by default; toggling one on/off
+  only re-renders from the cache, never re-fetches, since there's no way to
+  mutate a loadout from within the compare screen itself. Win % is the one new
+  presentational figure (`wins/gamesPlayed*100`, rounded) — deliberately not
+  given its own committed test, the same untested-arithmetic treatment the
+  roster page's existing win-rate chip already gets, since `wins`/`gamesPlayed`
+  themselves are already covered by `getLoadoutStats()`'s own test coverage.
+  Verified end-to-end with Playwright: two loadouts with genuinely different
+  recorded games (a win vs. a loss, different darts/averages/180s/checkouts)
+  render correct, distinct figures per column, and toggling a column off then
+  back on correctly removes/restores it.
 - No new derived formula was invented here (averages/180-count/etc. already exist
   and are already tested) — the new logic needing a committed test was the
   *scoping* itself: `backend/test/dart-builder.test.js`'s "getLoadoutStats —
@@ -267,9 +289,12 @@ Per `CLAUDE.md`'s standing conventions:
   to gate PIN-protected players at New Game/tournament-match start (see
   `REFERENCE.md`'s "PIN gate" note), not a new check mechanism. Players without a
   PIN keep today's no-PIN-required behavior, same as every other PIN-gated action
-  in the app. Read-only viewing of a loadout's stats from elsewhere (e.g. a
-  loadout comparison view reached some other way) is not in scope for this gate —
-  only the two mutating entry points above are.
+  in the app. The loadout comparison view (built 2026-07) needed no separate
+  gating decision — it's reachable only from inside the already-PIN-gated Dart
+  Builder screen (the "🎯 Manage Loadouts" entry point above), so it inherits
+  that same PIN check rather than needing one of its own; it's read-only (no
+  mutating action of its own), consistent with only the two entry points above
+  being the actual PIN-gated *actions*.
 - **Testing**: the new stats-scoping predicate (which games count toward which
   loadout's filtered stats) needed committed, re-runnable `node:test` coverage in
   the same change that shipped it — this is exactly the kind of "new calculation"

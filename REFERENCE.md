@@ -2440,6 +2440,31 @@ Returns games played, wins, darts thrown, 3-dart average, 180 count, and
 checkout count — all reusing `getPlayerStatBubbles()`'s exact existing formulas
 (no new derived formula invented), just re-scoped.
 
+### Loadout comparison view (2026-07)
+
+A third `dartBuilderView` state (`'compare'`, alongside `'list'`/`'edit'`),
+reached from a "⚖️ Compare Loadouts" button on the loadout list screen (shown
+once a player has 2+ loadouts). No new backend query — `openDartBuilderCompare()`
+fetches every one of the player's loadouts via the existing `listLoadouts()`
+plus one `getLoadoutStats()` call per loadout (`Promise.all`, not sequential),
+caches both in memory for the screen visit, then renders a side-by-side table:
+components, games played, wins, win % (`wins/gamesPlayed*100`, rounded — not a
+new tested formula, the same untested presentational arithmetic the roster
+page's own win-rate chip already uses), darts thrown, 3-dart average, 180s,
+checkouts. Every loadout is selected by default; tapping a loadout's toggle
+button (`aria-pressed`, same accessible toggle-group pattern the Custom Cricket
+number picker already uses) adds/removes its column from the table **without
+re-fetching** — `_dartBuilderCompareStats` is only cleared (forcing a fresh
+fetch) when the screen is freshly entered via `openDartBuilderCompare()`, since
+there's no way to mutate a loadout from within the compare screen itself.
+Requires at least 2 loadouts selected to render a table (guides toward
+selecting more otherwise); requires at least 2 loadouts to exist at all to
+reach the screen in the first place. Verified end-to-end with Playwright
+against a live server: two loadouts with genuinely different recorded games
+(one win/one loss, different darts/averages/180s/checkouts) render correct,
+distinct per-column figures, and toggling a column off then back on correctly
+removes/restores it without corrupting the cached stats.
+
 ### Deliberately out of scope for this pass
 
 - **Visual icon/diagram per barrel shape, barrel grip, and flight shape option**
@@ -2449,8 +2474,6 @@ checkout count — all reusing `getPlayerStatBubbles()`'s exact existing formula
   "+ New {type}" taps plus naming it, not a single combined form. Tracked
   separately.
 - **Optional photo upload per component.** Tracked separately.
-- **Loadout comparison view** (side-by-side stats for 2+ loadouts) — always a
-  stretch goal, not required for v1. Tracked separately.
 - **A literal CoD/Halo-gunsmith illustration** (centered dart, fanning
   leader-line callouts) — shipped instead as a stacked grouped-section form,
   functionally equivalent and inherently mobile-responsive (no wide layout to
