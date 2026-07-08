@@ -42,6 +42,7 @@
        POST /api/badges/revoke     -> { player, badgeId } -> { count } (public, used by Undo Last Turn)
        GET  /api/players/badges    -> (?name=...) -> [ { badge_id, count, earned_at } ] (public)
        GET  /api/players/h2h-summary -> (?player=...&opponent=...&excludeGameId=) -> { totalGames, previousWinner } (public)
+       GET  /api/players/tournament-stats -> (?name=...) -> { wins, runnerUps, bestFinish } (public)
        GET  /api/players/around-the-world -> (?name=...) -> { hit, count, total } (public)
        GET  /api/players/on-this-day -> (?name=...&tz=...) -> { type, year, yearsAgo, statLine } | null (public)
        POST /api/challenges/start  -> { player, gameId, challengeDate, format, target } (public)
@@ -789,6 +790,9 @@ const server = http.createServer(async (req, res) => {
       if (!requireWrite(req, res)) return;
       const b = await readJson(req);
       return send(res, 200, db.recordWalkover(Number(mt[1]), b.winner));
+    }
+    if (p === '/api/players/tournament-stats' && m === 'GET') {
+      return send(res, 200, db.getTournamentStats(url.searchParams.get('name')));
     }
 
     // ----- dart builder / loadouts (docs/archive/dart-builder-roadmap.md) -----

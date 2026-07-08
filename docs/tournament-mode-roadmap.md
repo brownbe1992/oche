@@ -6,14 +6,14 @@
 > byes), match lifecycle (start/advance/walkover via the existing `onGameCompleted`
 > hook), a New Game-adjacent setup screen (name/category/player-select/seeding/
 > per-round format), a bracket-tree + "Up Next" view, live-scoreboard round labels, and
-> the player-deletion guard. **Double-elimination is explicitly deferred** — not
-> started, tracked as its own item on `docs/open-roadmap-items.md` — the schema's
-> `winner_next_*`/`loser_next_*` pointer-pair design (§1 below) already supports it
-> without a migration, so this doc stays open (not archived) until that item ships
-> too. **Two more items are designed but not started** (§7-8, added 2026-07):
-> tournament-specific badges (Champion, an upset/Giant-Slayer equivalent) and
-> tournament stats on the Player Profile — both also tracked as their own items on
-> `docs/open-roadmap-items.md`. Full mechanics writeup: `REFERENCE.md` §15.
+> the player-deletion guard. **Tournament badges (§7) and Player Profile stats
+> (§8) are now also built** (2026-07): the 🏆 Champion and ⚔️ Giant Slayer
+> (Tournament) badges, and a "Tournaments" stat block (wins/runner-ups/best
+> finish) on the Player Profile. **Double-elimination is explicitly deferred** —
+> not started, tracked as its own item on `docs/open-roadmap-items.md` — the
+> schema's `winner_next_*`/`loser_next_*` pointer-pair design (§1 below) already
+> supports it without a migration, so this doc stays open (not archived) until
+> that item ships too. Full mechanics writeup: `REFERENCE.md` §15.
 
 > **Related (2026-07)**: `docs/companion-website-roadmap.md` proposes cross-instance
 > tournaments run through a project-operated site. This doc's bracket-generation logic
@@ -188,9 +188,11 @@ onto `/display`'s existing top-bar text by `fmtText()`. Simpler than the
    same schema (double-elimination).
 3. **Not started** — Visual bracket tree rendering with winners/losers tabs
    (double-elimination's version of the tree — single-elim's simpler tree is done).
-4. **Partially done** — Per-round format setup UI: done. Seeding UI: done (three
-   methods, see the Decisions table). Tournament stats on player profiles (stretch):
-   not built.
+4. **✅ Done** — Per-round format setup UI, seeding UI (three methods, see the
+   Decisions table), and tournament stats on player profiles (stretch, §8) —
+   all built.
+5. **✅ Done (2026-07, added after this doc's original scope)** — Tournament
+   badges: 🏆 Champion, ⚔️ Giant Slayer (Tournament) (§7).
 
 ## Accessibility, security, and testing considerations
 
@@ -202,13 +204,19 @@ feature, not bolted on after:
   element, not hidden away), plus the "Up Next" list above both, so a screen-reader
   user has two non-spatial ways to follow the tournament, not just the tree. Match
   status is always icon + text (`TOURNEY_STATUS_ICON`/`TOURNEY_STATUS_LABEL`), never
-  color alone. **Still open**: double-elimination's much deeper tree (up to ~19
-  rounds combined for 128 players) will need this revisited at that scale — the
-  simple list-view approach may not stay ergonomic that large.
+  color alone. The two new badges (§7) reuse the existing achievement-overlay
+  machinery unchanged — same icon+text+`announce()` screen-reader treatment every
+  other badge already gets, nothing bespoke to design in. **Still open**:
+  double-elimination's much deeper tree (up to ~19 rounds combined for 128
+  players) will need this revisited at that scale — the simple list-view
+  approach may not stay ergonomic that large.
 - **Testing**: **built** for single-elimination — `backend/test/tournament.test.js`
   covers bracket generation across several player counts (including the 5-player
   bye-cascade case), a full simulated tournament to champion, walkover parity with a
-  played match, validation, and the player-deletion guard. The double-elimination
+  played match, validation, the player-deletion guard, the Champion/Giant Slayer
+  (Tournament) badge conditions (§7, including the bye-never-fires-an-upset
+  case), and `getTournamentStats()` (§8, including the "best result across
+  multiple tournaments" and in-progress-tournament cases). The double-elimination
   bracket generator remains the piece this doc itself calls out as "genuinely
   fiddly" and the highest-risk part of the whole feature — still needs the same
   level of test coverage once it's built.
@@ -231,48 +239,63 @@ feature, not bolted on after:
   way in this pass — any device with the app open can start any ready match today,
   which is the simpler default behavior, not a deliberate design statement.
 
-## 7. Tournament-specific badges (not yet built)
+## 7. Tournament-specific badges (built, 2026-07)
 
-Tournament mode shipped with **zero badge integration** — a genuine gap, not a
-deliberate omission. The original achievements-badges roadmap explicitly flagged
-"should badges eventually tie into other roadmap items (tournament seeding)?" as
-an open question back when tournament mode was still a future item; tournament
-mode has since shipped and that question was never revisited.
+Tournament mode originally shipped with **zero badge integration** — a genuine
+gap, not a deliberate omission. The original achievements-badges roadmap
+explicitly flagged "should badges eventually tie into other roadmap items
+(tournament seeding)?" as an open question back when tournament mode was still
+a future item; tournament mode shipped and that question sat unrevisited until
+now.
 
 Two new badges, both one-time (`once:true`, same award style as Around the
-Clock/World):
+Clock/World). Exact trigger conditions and test coverage: `REFERENCE.md` §4's
+"Tournament badges" table, `backend/test/tournament.test.js`'s "tournament
+badges (§7)" describe block:
 
 - **🏆 Champion** — fires when `tournaments.status` transitions to `'completed'`
-  and the player is that tournament's `champion_id`. The natural hook point is
-  the same `onGameCompleted` listener `_advanceTournamentMatch()` already runs
-  from (`backend/db.js`) — check there whether this match's win was also the
-  tournament final, not a second parallel hook.
+  and the player is that tournament's `champion_id`. **Built exactly as
+  designed**: checked inline in `_advanceTournamentMatch()` (`backend/db.js`),
+  the same function that already sets `champion_id`, not a second parallel
+  hook.
 - **⚔️ Giant Slayer (Tournament)** — fires when a match winner's `seed` number is
-  numerically higher (a worse seed) than their beaten opponent's `seed` by some
-  threshold (e.g. beating a seed at least 3 slots better, mirroring the existing
-  H2H Giant Slayer's "beat a 15+ higher average" spirit rather than reusing its
-  exact threshold, which is average-based and doesn't apply here). Needs its own
-  `badgeId` distinct from the existing H2H `giantslayer` — same headline concept,
-  different trigger mechanics, so reusing the same badge row would conflate two
-  different conditions under one count.
+  numerically higher (a worse seed) than their beaten opponent's `seed` by 3 or
+  more (`TOURNAMENT_GIANT_SLAYER_SEED_THRESHOLD`), mirroring the existing H2H
+  Giant Slayer's "beat someone clearly stronger" spirit with a seed-based
+  threshold instead of its average-based one. Its own `badgeId`
+  (`tournament_giant_slayer`), distinct from the existing H2H `giantslayer` —
+  same headline concept, different trigger mechanics, so reusing the same
+  badge row would have conflated two different conditions under one count.
+  Never fires on a bye advance (no real opponent was beaten).
 
-Both need real prototyping against actual bracket data to pick a sensible upset
-threshold, same caveat the original badges doc gave every Mental Game/Clutch
-badge — not something to fix arbitrarily here.
+Since neither the badge-award endpoint nor `onGameCompleted`'s hook has a
+response channel back to the frontend, the live overlay celebration is
+detected rather than driven directly: `finishUnit()`'s `game.tournamentMatchId`
+branch re-fetches the winner's badge list after the match completes and diffs
+it against the pre-match `earnedBadgeCache` snapshot — the same "already
+earned?" check Around the World already uses — firing `queueBadge()`/
+`fireMomentCard()` for whichever badge is newly present.
 
-## 8. Tournament stats on the Player Profile (not yet built)
+The seed-gap threshold (3) was picked as a reasonable first cut rather than
+prototyped against real bracket data, same caveat the original badges doc gave
+every Mental Game/Clutch badge — revisit if it turns out to fire too often or
+too rarely once used for real.
 
-Referenced above (§6 build-order item 4) as a stretch goal, expanded here since
-it's now its own tracked item on `docs/open-roadmap-items.md` rather than just a
-line in a build-order table:
+## 8. Tournament stats on the Player Profile (built, 2026-07)
 
-- A small **"Tournaments"** stat block on the Player Profile (alongside the
-  existing H2H/Practice tabs, or its own small section near the top) — wins
-  (`champion_id` count), runner-up count (`runner_up_id`), and best finish
-  reached (semifinal/final/etc., derived from the furthest `tournament_rounds.label`
-  the player was still `active` or `champion` at when their last tournament
-  match resolved).
+Referenced above (§6 build-order item 4) as a stretch goal, now built as its
+own tracked item on `docs/open-roadmap-items.md`:
+
+- A small **"Tournaments"** stat block on the Player Profile, in the H2H tab
+  (gated to the X01 game-type toggle, since tournaments are X01-only) —
+  wins (`champion_id` count), runner-up count (`runner_up_id`), and best finish
+  reached (Final/Semifinal/Quarterfinal/Round N), derived from the furthest
+  `tournament_rounds.round_no` this player was ever placed into (win, loss, or
+  bye) across every tournament they've appeared in, converted to a label the
+  same way bracket generation's own `_roundLabel()` does.
 - All three are simple `COUNT`/`MAX`-style queries against `tournaments`/
-  `tournament_players`/`tournament_rounds` — no new derived formula invented, just
-  a new stats surface reusing existing tables, so this is a small, low-risk
-  addition once someone picks it up.
+  `tournament_players`/`tournament_rounds` — no new derived formula invented,
+  just a new stats surface reusing existing tables. `GET
+  /api/players/tournament-stats` (public), `getTournamentStats()`
+  (`backend/db.js`), covered by `backend/test/tournament.test.js`'s
+  "getTournamentStats (§8)" describe block.

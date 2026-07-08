@@ -3291,6 +3291,11 @@ function getAroundTheWorldProgress(playerName) {
    with no server-side reordering. */
 const TOURNAMENT_X01_CATEGORIES = ['501', '301', '170', '101'];
 const TOURNAMENT_MAX_PLAYERS = 128;
+// docs/tournament-mode-roadmap.md §7: how many seed slots worse the winner must be
+// than the opponent they beat to count as an upset — mirrors the spirit of the H2H
+// Giant Slayer's 15-average gap without reusing its exact (average-based) threshold,
+// which doesn't apply to a seed number.
+const TOURNAMENT_GIANT_SLAYER_SEED_THRESHOLD = 3;
 
 function _nextPowerOfTwo(n) { let p = 1; while (p < n) p *= 2; return p; }
 
@@ -3345,6 +3350,18 @@ function _advanceTournamentMatch(matchId, winnerId) {
   if (loserId != null) {
     db.prepare(`UPDATE tournament_players SET status = 'eliminated' WHERE tournament_id = ? AND player_id = ?`)
       .run(tournamentId, loserId);
+    // docs/tournament-mode-roadmap.md §7: Giant Slayer (Tournament) — checked right
+    // here rather than a second parallel hook, same reasoning as Champion below.
+    // Never fires for a bye (loserId is null, guarded by the enclosing `if`).
+    const seedRows = db.prepare(
+      `SELECT player_id, seed FROM tournament_players WHERE tournament_id = ? AND player_id IN (?, ?)`
+    ).all(tournamentId, winnerId, loserId);
+    const winnerSeed = seedRows.find(r => r.player_id === winnerId)?.seed;
+    const loserSeed = seedRows.find(r => r.player_id === loserId)?.seed;
+    if (winnerSeed != null && loserSeed != null && winnerSeed - loserSeed >= TOURNAMENT_GIANT_SLAYER_SEED_THRESHOLD) {
+      const winnerName = db.prepare('SELECT name FROM players WHERE id = ?').get(winnerId)?.name;
+      if (winnerName) awardBadge(winnerName, 'tournament_giant_slayer', true);
+    }
   }
   if (match.winner_next_match_id) {
     const col = match.winner_next_slot === 1 ? 'player1_id' : 'player2_id';
@@ -3355,6 +3372,10 @@ function _advanceTournamentMatch(matchId, winnerId) {
       .run(winnerId, loserId, tournamentId);
     db.prepare(`UPDATE tournament_players SET status = 'champion' WHERE tournament_id = ? AND player_id = ?`)
       .run(tournamentId, winnerId);
+    // docs/tournament-mode-roadmap.md §7: Champion badge, awarded right where
+    // champion_id itself is set — not a second parallel hook.
+    const championName = db.prepare('SELECT name FROM players WHERE id = ?').get(winnerId)?.name;
+    if (championName) awardBadge(championName, 'tournament_champion', true);
   }
 }
 
@@ -3497,6 +3518,38 @@ function getTournament(id) {
   `).all(t.id);
 
   return { ...t, matches, players };
+}
+
+// docs/tournament-mode-roadmap.md §8: Player Profile "Tournaments" stat block —
+// wins, runner-up count, and best finish reached, all simple COUNT/MAX-style
+// queries against the existing tournament tables, no new derived formula.
+function getTournamentStats(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return { wins: 0, runnerUps: 0, bestFinish: null };
+  const wins = db.prepare('SELECT COUNT(*) AS n FROM tournaments WHERE champion_id = ?').get(p.id).n;
+  const runnerUps = db.prepare('SELECT COUNT(*) AS n FROM tournaments WHERE runner_up_id = ?').get(p.id).n;
+  // Best finish reached = the furthest round this player was ever placed into
+  // (win or loss, including a bye placement) across every tournament they've
+  // played, one row per tournament they appear in at all. A player's max
+  // round_no within one tournament IS the furthest they reached there, since
+  // round N+1 placement only ever happens after winning round N.
+  const rows = db.prepare(`
+    SELECT tr.tournament_id AS tid, MAX(tr.round_no) AS maxRoundNo,
+           (SELECT COUNT(*) FROM tournament_rounds WHERE tournament_id = tr.tournament_id) AS totalRounds
+    FROM tournament_matches tm
+    JOIN tournament_rounds tr ON tr.id = tm.round_id
+    WHERE tm.player1_id = ? OR tm.player2_id = ?
+    GROUP BY tr.tournament_id
+  `).all(p.id, p.id);
+  let bestFinish = null, bestRoundsFromFinal = Infinity;
+  for (const r of rows) {
+    const roundsFromFinal = r.totalRounds - r.maxRoundNo;
+    if (roundsFromFinal < bestRoundsFromFinal) {
+      bestRoundsFromFinal = roundsFromFinal;
+      bestFinish = _roundLabel(roundsFromFinal, r.maxRoundNo);
+    }
+  }
+  return { wins, runnerUps, bestFinish };
 }
 
 // Starts the linked game for a "ready" match (both players known, not already
@@ -3907,7 +3960,7 @@ module.exports = {
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,
   awardBadge, revokeBadge, getPlayerBadges, getH2HSummary, getAroundTheWorldProgress,
   startChallengeAttempt, completeChallengeAttempt, getChallengeStatus, getChallengeHistory, resetChallengeAttempt,
-  createTournament, listTournaments, getTournament, startTournamentMatch, recordWalkover,
+  createTournament, listTournaments, getTournament, startTournamentMatch, recordWalkover, getTournamentStats,
   getDartComponentOptions,
   createComponent, listComponents, updateComponent, deleteComponent,
   createLoadout, listLoadouts, getLoadout, updateLoadout, deleteLoadout, duplicateLoadout,

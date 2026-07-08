@@ -1032,22 +1032,25 @@ revokes any `chuckin180` badge that dart awarded — see above.
 
 ## 4. Achievements & Badges
 
-49 badges (23 X01 + 4 Cricket + 3 Daily Challenge + 19 Just Chuckin' It) — that
-split is by which table each is listed under below (and which section of the
-Player Profile's Badge Case each renders in, via `BADGE_INFO`'s `cricket`/
-`challenge`/`chuckin` flags — anything without one of those flags buckets as
-X01), not a strict statement of which game types can trigger it: Night Owl/
-Early Bird (listed under X01) are one exception, checked from both
-`enterTurn()` and `enterTurnCricket()` via a shared `awardTimeOfDayBadges()`
-helper (2026-07 — previously Cricket-triggerable by neither, an accident of
-code structure rather than a deliberate scoping decision); Ghost Slayer
-(also listed under X01, since Ghost Opponent is X01-only) is the other,
-checked inline in `recordGhostRace()` (`backend/db.js`) rather than from the
-frontend at all, since the win it depends on is already being written to the
-database right there. Tracked in the `player_badges` table (one row per
-player+badge, with a running `count`). X01 detection logic otherwise lives in
-`frontend/index.html`'s `enterTurn()`/`onLegWon()`; Cricket's 2 own badges live
-in `enterTurnCricket()`/`onLegWonCricket()`; Daily Challenge's 3 badges are
+51 badges (23 X01 + 4 Cricket + 2 Tournament + 3 Daily Challenge + 19 Just
+Chuckin' It) — that split is by which table each is listed under below (and
+which section of the Player Profile's Badge Case each renders in, via
+`BADGE_INFO`'s `cricket`/`challenge`/`chuckin`/`tournament` flags — anything
+without one of those flags buckets as X01), not a strict statement of which
+game types can trigger it: Night Owl/Early Bird (listed under X01) are one
+exception, checked from both `enterTurn()` and `enterTurnCricket()` via a
+shared `awardTimeOfDayBadges()` helper (2026-07 — previously
+Cricket-triggerable by neither, an accident of code structure rather than a
+deliberate scoping decision); Ghost Slayer (also listed under X01, since Ghost
+Opponent is X01-only) is another, checked inline in `recordGhostRace()`
+(`backend/db.js`) rather than from the frontend at all, since the win it
+depends on is already being written to the database right there. The two
+Tournament badges (Champion, Giant Slayer (Tournament)) are the same shape —
+checked server-side in `_advanceTournamentMatch()` — see their own table
+below. Tracked in the `player_badges` table (one row per player+badge, with a
+running `count`). X01 detection logic otherwise lives in `frontend/index.html`'s
+`enterTurn()`/`onLegWon()`; Cricket's 4 own badges live in
+`enterTurnCricket()`/`onLegWonCricket()`; Daily Challenge's 3 badges are
 checked in `checkChallengeBadges()`, called right after every
 `/api/challenges/complete` response; Just Chuckin' It's 18 laddered milestones
 are checked in `checkChuckinMilestones()`, called after every dart from
@@ -1064,11 +1067,20 @@ same function (see §2/§3's own coverage of it).
   state-based badges whose trigger condition stays true forever once crossed
   (`INSERT OR IGNORE`, so re-checking an already-true condition never inflates
   the count past 1): **Around the Clock, Around the World, Grudge Match, First
-  100+ Checkout, Full Rotation, Ghost Slayer** — Ghost Slayer is the one
-  exception to "a direct `Backend.send()` call": its `awardBadge(..., true)`
-  call happens server-side, inside `recordGhostRace()` itself (see above), and
-  its `newlyEarned` flag reaches the frontend as `recordGhostRace()`'s own
-  `ghostSlayerNewlyEarned` field rather than a separate response.
+  100+ Checkout, Full Rotation, Ghost Slayer, Champion, Giant Slayer
+  (Tournament)** — the last three are the exceptions to "a direct
+  `Backend.send()` call": Ghost Slayer's `awardBadge(..., true)` call happens
+  server-side, inside `recordGhostRace()` itself (see above), and its
+  `newlyEarned` flag reaches the frontend as `recordGhostRace()`'s own
+  `ghostSlayerNewlyEarned` field rather than a separate response. Champion and
+  Giant Slayer (Tournament) go one step further: their `awardBadge(..., true)`
+  calls happen inside `_advanceTournamentMatch()` with no response field for
+  the frontend to read at all — the frontend instead detects a newly-earned
+  badge after the fact by diffing `GET /api/players/badges` against the
+  pre-match `earnedBadgeCache` snapshot (see the Tournament badges table
+  below), since a normal `POST /api/games/:id/complete` triggers the award via
+  the `onGameCompleted` hook with no room to thread a badge result back
+  through that response.
 
 ### The 23 badges, exact trigger conditions
 
@@ -1133,6 +1145,19 @@ logic in `frontend/scoring.js` (`isCricketWhitewash()`/
 | 🏆 **Perfect Leg** | `win && legDarts === theoreticalMinimum`, where the minimum is computed per match from `game.config.numbers`: each non-Bull number can close in a single treble (3 marks); Bull can't be trebled (`makeDart()` already downgrades a "treble bull" tap to a single), so it needs a minimum of 2 darts. A win at exactly this minimum already implies enough bonus marks were scored to strictly lead (the win condition in §2 guarantees that), so no separate points check is needed. **Recurring**, mega-tier overlay (confetti) like Nine-Darter. |
 | 🧹 **Whitewash** | `isCricketWhitewash(opp.marks)` at the moment the leg is won — every value in the opponent's `marks` object is `< 3` (nobody closed), checked in `onLegWonCricket(wi)`. 2-player only. **Recurring.** |
 | 🔥 **Comeback Kid (Cricket)** | `cricketComebackAchieved(w.legWorstPointsDeficit)` — `legWorstPointsDeficit >= 20` (Cricket's own threshold, chosen against Cricket's much smaller/more variable points scale than X01's 501 countdown, not X01's 100). `legWorstPointsDeficit` is the largest `(opponent.points - my.points)` seen at any point this leg, tracked in `enterTurnCricket()` the same "sample before this visit's own update" timing X01's `legWorstDeficit` uses. 2-player only. **Recurring.** |
+
+**Tournament badges** (`docs/tournament-mode-roadmap.md` §7 — checked server-side
+in `_advanceTournamentMatch()`, `backend/db.js`, the same function that already
+sets `winner_id`/`champion_id`, rather than a second parallel hook. Like Ghost
+Slayer, the frontend never computes these conditions itself — it only detects a
+newly-earned badge by diffing `GET /api/players/badges` against the pre-match
+`earnedBadgeCache` snapshot, inside `finishUnit()`'s `game.tournamentMatchId`
+branch, to fire the live celebration):
+
+| Badge | Exact condition |
+|---|---|
+| 🏆 **Champion** | Awarded to the winning player exactly where `_advanceTournamentMatch()` sets `tournaments.champion_id` (no `winner_next_match_id` — this was the final). **Once-badge.** |
+| ⚔️ **Giant Slayer (Tournament)** | On any tournament match result: `winner's tournament_players.seed - loser's seed >= 3` (`TOURNAMENT_GIANT_SLAYER_SEED_THRESHOLD`) — the winner was seeded at least 3 slots worse than the opponent they beat. Never fires on a bye advance (no real opponent was beaten). Mirrors the H2H Giant Slayer's headline concept with a seed-based threshold instead of an average-based one, and uses its own `badgeId` (`tournament_giant_slayer`) rather than the H2H `giantslayer` row, since the two trigger mechanics don't share a meaning. **Once-badge.** |
 
 **Daily Challenge badges** (checked in `checkChallengeBadges(playerName)`,
 `frontend/index.html` — called right after every `/api/challenges/complete`
@@ -1204,11 +1229,12 @@ screen-reader announcement (§11). There is no separate copy to maintain in
 three places — if you change a badge's description, change it once in
 `BADGE_INFO`.
 
-Five badges' live-overlay "type" key differs from their persisted `badge_id`
+Seven badges' live-overlay "type" key differs from their persisted `badge_id`
 (a historical naming mismatch, bridged by `ACH_TYPE_TO_BADGE_ID`):
 `first100checkout`→`first_100_checkout`, `grudgematch`→`grudge_match`,
 `aroundtheclock`→`around_the_clock`, `aroundtheworld`→`around_the_world`,
-`ghostslayer`→`ghost_slayer`.
+`ghostslayer`→`ghost_slayer`, `tournamentchampion`→`tournament_champion`,
+`tournamentgiantslayer`→`tournament_giant_slayer`.
 
 ### Undo interaction
 
@@ -1245,9 +1271,10 @@ reference — it defaults to `game.lastTurnSnapshot` at call time (correct for
 the synchronous majority of call sites, called directly from `enterTurn()`/
 `onLegWonCricket()`/etc.), but the handful of call sites that queue a badge
 from inside an async `.then()` (Around the Clock/World, First 100+ Checkout,
-Full Rotation, The Rematch, Grudge Match, Ghost Slayer) pass their own
-already-captured snap variable explicitly instead, since `game.lastTurnSnapshot` may have moved
-on to a newer turn by the time the response arrives. Two call sites
+Full Rotation, The Rematch, Grudge Match, Ghost Slayer, Champion, Giant Slayer
+(Tournament)) pass their own already-captured snap variable explicitly instead,
+since `game.lastTurnSnapshot` may have moved on to a newer turn by the time the
+response arrives. Two call sites
 (`challengeweek`, `challengemonth`) pass `null` deliberately — Daily Challenge
 streak badges have no undo-tracking at all (a separate, pre-existing gap;
 see `trackBadgeForUndo()` below), so no real snap exists to tag them with.
@@ -2362,8 +2389,34 @@ Given N players and `bracketSize` = the smallest power of two ≥ N:
 - **A "Practice this" style deep link or bracket-tree drag/zoom** — not
   requested; the simple column layout was sufficient for single-elimination's
   much shallower tree (no winners/losers split to manage).
-- **Tournament stats on the player profile** (tournament wins, best finish) —
-  the roadmap doc's own step 4 stretch goal, not built.
+
+### Tournament badges and Player Profile stats (§7-8, built)
+
+- **Champion / Giant Slayer (Tournament) badges** — see §4's "Tournament
+  badges" table for exact trigger conditions. Both are awarded inline from
+  `_advanceTournamentMatch()` (`backend/db.js`), not a second parallel hook —
+  Champion right where `champion_id` itself is set, Giant Slayer (Tournament)
+  right where the loser is marked `eliminated`. Since neither `POST
+  /api/games/:id/complete` nor the `onGameCompleted` hook has any response
+  channel back to the frontend, the live celebration is detected instead —
+  `finishUnit()`'s `game.tournamentMatchId` branch fetches `GET
+  /api/players/badges` after the match completes and diffs it against the
+  pre-match `earnedBadgeCache` snapshot (the same "already earned?" check
+  Around the World already uses), firing `queueBadge()`/`fireMomentCard()` for
+  whichever badge is newly present.
+- **`GET /api/players/tournament-stats`** (`?name=...`, public) →
+  `{ wins, runnerUps, bestFinish }`, backed by `getTournamentStats()`
+  (`backend/db.js`). `wins`/`runnerUps` are plain `COUNT(*)` queries against
+  `tournaments.champion_id`/`runner_up_id`. `bestFinish` is the furthest round
+  label (`"Final"`/`"Semifinal"`/`"Quarterfinal"`/`"Round N"`) this player was
+  ever placed into across every tournament they've appeared in (win, loss, or
+  bye) — computed per tournament as `MAX(tournament_matches.round_no)` among
+  rows naming this player, converted to "rounds from final" via the same
+  `_roundLabel()` helper bracket generation already uses, then the single best
+  (closest-to-final) result across all their tournaments is kept. Rendered as
+  a "Tournaments" `pp-section` on the Player Profile's H2H tab (gated to the
+  X01 game-type toggle, since tournaments are X01-only), loaded by
+  `loadTournamentStats()`.
 
 ---
 

@@ -8,7 +8,7 @@ A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player 
 
 **v0.13.1**
 
-You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [49-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. All data lives in a SQLite database on your own server.
+You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [51-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. All data lives in a SQLite database on your own server.
 
 > Looking for exact stat formulas, achievement trigger conditions, the full database schema, or how a feature works internally (e.g. to debug it)? See **[REFERENCE.md](REFERENCE.md)** — the technical reference manual, kept up to date alongside this README.
 
@@ -221,7 +221,7 @@ choice, no checkout hints, and no bust concept:
 
 ### Achievements & Badges
 
-Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 2 Cricket-specific badges, 3 Daily Challenge badges, and 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
+Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 4 Cricket-specific badges, 2 [Tournament](#tournaments)-specific badges, 3 Daily Challenge badges, and 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
 
 | Badge | How to earn it |
 |---|---|
@@ -258,6 +258,13 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges c
 | 🧹 **Whitewash** | Win a Cricket leg without your opponent closing a single number |
 | 🔥 **Comeback Kid** | Win a Cricket leg after trailing your opponent's points by 20 or more at some point |
 
+**Tournament's 2 badges** (see [Tournaments](#tournaments)):
+
+| Badge | How to earn it |
+|---|---|
+| 🏆 **Champion** | Win a tournament bracket |
+| ⚔️ **Giant Slayer (Tournament)** | Beat an opponent seeded 3 or more slots better than you in a tournament match |
+
 **Daily Challenge's 3 badges** (see [Daily Challenge](#daily-challenge)):
 
 | Badge | How to earn it |
@@ -278,7 +285,7 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges c
 |---|---|
 | 🎯 **180!** | Three darts, sixty each — assuming 3 darts per turn (the same convention as the ladders above), since Just Chuckin' It otherwise has no turn boundary at all |
 
-**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 49-badge roster, grouped into X01/Cricket/Daily Challenge/Just Chuckin' It sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), Full Rotation, and all 18 Just Chuckin' It milestones are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
+**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 51-badge roster, grouped into X01/Cricket/Tournament/Daily Challenge/Just Chuckin' It sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), both Tournament badges (Champion, Giant Slayer (Tournament)), Full Rotation, and all 18 Just Chuckin' It milestones are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
 
 **Around the World Progress** — a dedicated grid on the Player Profile showing exactly which of the 63 lifetime dart outcomes are still missing, alongside the Badge Case.
 
@@ -476,7 +483,7 @@ On the Doubles Practice toggle, this section shows just **Best Round (Darts)** a
 
 #### Badge Case
 
-The full 49-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (23 badges), a **Cricket** section (4 badges), a **Daily Challenge** section (3 badges), and a **Just Chuckin' It** section (19 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
+The full 51-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (23 badges), a **Cricket** section (4 badges), a **Tournament** section (2 badges), a **Daily Challenge** section (3 badges), and a **Just Chuckin' It** section (19 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
 
 #### On This Day
 
@@ -582,6 +589,14 @@ unfinished, since the bracket depends on a real result to advance). A visual
 bracket tree shows the whole tournament at a glance, with a linearized list view
 underneath it for anyone who'd rather read than scan the tree. The champion and
 runner-up are shown once the final resolves.
+
+**Badges** — winning the whole bracket earns 🏆 **Champion**; beating an
+opponent seeded 3 or more slots better than you earns ⚔️ **Giant Slayer
+(Tournament)** — see [Achievements & Badges](#achievements--badges).
+
+**Player Profile stats** — a small **Tournaments** block (tournaments won,
+runner-up finishes, best finish reached) shows on each player's profile
+alongside their H2H stats.
 
 **Double-elimination isn't built** — single-elimination only for now; see
 `REFERENCE.md` for the deferred design.
@@ -1075,7 +1090,13 @@ POST /api/tournaments/matches/:id/walkover  Record a result without playing it o
                                              match doesn't already have a winner,
                                              including recovering an abandoned
                                              mid-game match
+GET  /api/players/tournament-stats?name=   { wins, runnerUps, bestFinish } for the
+                                             Player Profile's Tournaments block (public)
 ```
+
+The 🏆 Champion and ⚔️ Giant Slayer (Tournament) badges are awarded inline from
+the same server-side match-advancement logic — see
+[Achievements & Badges](#achievements--badges).
 
 ### Live Scoreboard
 

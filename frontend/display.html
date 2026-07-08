@@ -311,7 +311,8 @@ const ACH_LABELS  = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter
   cricketwhitewash:'Whitewash! 🧹', cricketcomebackkid:'Comeback Kid! 🔥',
   challengeweek:'Challenge Streak: Week! 🔥', challengemonth:'🏆 CHALLENGE STREAK: MONTH! 🏆',
   challengeallformats:'Full Rotation! 🗓️', nocigar:'No Cigar 🤦', chuckin180:'180! 🎯',
-  staircasefinish:'Staircase Finish! 🪜', ghostslayer:'Ghost Slayer! 👻' };
+  staircasefinish:'Staircase Finish! 🪜', ghostslayer:'Ghost Slayer! 👻',
+  tournamentchampion:'🏆 CHAMPION! 🏆', tournamentgiantslayer:'Giant Slayer ⚔️' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -320,7 +321,7 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500,
   cricket9marks:2500, cricketperfectclose:6000, cricketwhitewash:2500, cricketcomebackkid:3000,
   challengeweek:3000, challengemonth:6000, challengeallformats:3500, nocigar:2500, chuckin180:2500,
-  staircasefinish:3000, ghostslayer:3500 };
+  staircasefinish:3000, ghostslayer:3500, tournamentchampion:6000, tournamentgiantslayer:2500 };
 // Mirror-copied from frontend/index.html's BADGE_INFO[...].desc / ACH_DESC_FALLBACK —
 // this file has no Badge Case UI to source the text from directly, so it's kept as
 // its own flat map (docs/next-session-plan.md item 1).
@@ -359,6 +360,8 @@ const ACH_DESC = {
   nocigar: 'Bust a double-out visit whose darts sum to exactly the score you needed — just not on a double.',
   chuckin180: "Three darts, sixty each — treated as a turn, since Just Chuckin' It otherwise has no turn boundary at all.",
   staircasefinish: 'Check out in exactly three darts by halving the target twice: single, single, then double — e.g. 32 down to 16, down to 8, then double 4.',
+  tournamentchampion: 'Win a tournament bracket.',
+  tournamentgiantslayer: 'Beat an opponent seeded 3 or more slots better than you in a tournament match.',
 };
 // Just Chuckin' It's 18 laddered milestone badges — mirror-copied from frontend/
 // index.html's CHUCKIN_MILESTONE_LADDERS (this file has no shared module with
@@ -471,7 +474,7 @@ function showAchievement(type, player, countText){
   achName.textContent = player || '';
   if(achDesc) achDesc.textContent = ACH_DESC[type] || '';
   if(achCount) achCount.textContent = countText || '';
-  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth';
+  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion';
   achOverlay.classList.toggle('mega', mega);
   achOverlay.classList.add('show');
   if(mega) spawnConfetti(achOverlay, 90);

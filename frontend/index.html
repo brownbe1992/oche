@@ -1408,6 +1408,7 @@ const DB = {
   // Ghost Opponent win/loss tracking (docs/archive/ghost-opponent-roadmap.md)
   recordGhostRace(player, fields){ return Backend.send('POST','/api/ghost-races',{player, ...fields}); },
   ghostRaceRecord(player){ return Backend.get(`/api/players/ghost-race-record?name=${encodeURIComponent(player)}`); },
+  tournamentStats(player){ return Backend.get(`/api/players/tournament-stats?name=${encodeURIComponent(player)}`); },
 
   // game + turn writes
   async beginGame(meta, names, loadoutByName){
@@ -3964,6 +3965,13 @@ function renderPlayerPage(){
   const h2hHtml = h2hCats.length
     ? h2hCats.map(c=>`${c}: <b>${(s.h2hGamesWonByCat||{})[c]||0}</b> games · <b>${(s.h2hSetsWonByCat||{})[c]||0}</b> sets · <b>${(s.h2hLegsWonByCat||{})[c]||0}</b> legs`).join('<br>')
     : '<span style="color:var(--muted)">none yet</span>';
+  // Tournaments are X01-only (docs/tournament-mode-roadmap.md), so this block is
+  // gated the same way the profile's other X01-only surfaces are.
+  const tournamentStatsSection = gt==='x01' ? `
+    <div class="pp-section">
+      <div class="pp-section-title">Tournaments</div>
+      <div id="player-tournament-stats"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </div>` : '';
   const h2hSection = `
     <div class="pp-section">
       <div class="pp-section-title">H2H — Games &amp; Legs Played</div>
@@ -3972,7 +3980,8 @@ function renderPlayerPage(){
     <div class="pp-section">
       <div class="pp-section-title">H2H Wins</div>
       <div class="pp-cat-lines">${h2hHtml}</div>
-    </div>`;
+    </div>
+    ${tournamentStatsSection}`;
 
   // Practice sections (reused by both 'practice' and 'overall' tabs)
   const pracCats = Object.keys(s.practiceLegs||{});
@@ -4075,6 +4084,7 @@ function renderPlayerPage(){
   loadCoachingInsights();
   loadPersonalBests();
   loadPlayerBadges();
+  loadTournamentStats();
   loadAroundTheWorldProgress();
   loadOnThisDay();
   loadChallengeHistory();
@@ -4116,6 +4126,8 @@ const BADGE_INFO = {
   challengeallformats: { icon:'🗓️', label:'Full Rotation', desc:'Complete every Daily Challenge format at least once.', challenge:true },
   chuckin180: { icon:'🎯', label:'180!', desc:"Three darts, sixty each — treated as a turn, since Just Chuckin' It otherwise has no turn boundary at all.", chuckin:true },
   ghost_slayer:        { icon:'👻', label:'Ghost Slayer', desc:'Beat your ghost opponent — win a race against a replay of one of your own past legs.' },
+  tournament_champion:     { icon:'🏆', label:'Champion', desc:'Win a tournament bracket.', tournament:true },
+  tournament_giant_slayer: { icon:'⚔️', label:'Giant Slayer (Tournament)', desc:'Beat an opponent seeded 3 or more slots better than you in a tournament match.', tournament:true },
 };
 function loadPlayerBadges(){
   const container=document.getElementById('player-badges');
@@ -4153,15 +4165,18 @@ function renderPlayerBadges(data){
   // Grouped by game type — X01's badges, Cricket's 2, Daily Challenge's 3, and
   // Just Chuckin' It's 18 each stay visually distinct sub-sections rather than one
   // mixed flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin);
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
   const challengeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].challenge);
   const chuckinIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].chuckin);
+  const tournamentIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].tournament);
   container.innerHTML = `
     <div class="pp-section-title" style="margin-bottom:6px">X01</div>
     <div class="summary-grid">${x01Ids.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Cricket</div>
     <div class="summary-grid">${cricketIds.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">Tournaments</div>
+    <div class="summary-grid">${tournamentIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Daily Challenge</div>
     <div class="summary-grid">${challengeIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Just Chuckin' It</div>
@@ -4319,6 +4334,28 @@ function loadPersonalBests(){
   Backend.get(`/api/players/personal-bests?name=${encodeURIComponent(currentPlayer)}${modeParam}${gtParam}`)
     .then(data=>{ renderPersonalBests(data); loadGhostRaceRecord(); })
     .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load personal bests.</p>`; });
+}
+// docs/tournament-mode-roadmap.md §8: the Player Profile's "Tournaments" stat
+// block — wins/runner-ups/best finish. A no-op if the section isn't rendered
+// (tournaments are X01-only, so a Cricket profile view has no such container).
+function loadTournamentStats(){
+  const container=document.getElementById('player-tournament-stats');
+  if(!container) return;
+  const player = currentPlayer;
+  DB.tournamentStats(player).then(data=>{
+    if(currentPlayer !== player) return;   // a newer profile visit took over
+    const el = document.getElementById('player-tournament-stats');
+    if(!el) return;
+    if(!data || (!data.wins && !data.runnerUps && !data.bestFinish)){
+      el.innerHTML = `<p class="pp-meta" style="padding:4px 0">No tournaments played yet.</p>`;
+      return;
+    }
+    el.innerHTML = `<div class="summary-grid">
+      <div class="stat-block"><div class="stat-val">${data.wins}</div><div class="stat-label">Tournaments Won</div></div>
+      <div class="stat-block"><div class="stat-val">${data.runnerUps}</div><div class="stat-label">Runner-Up Finishes</div></div>
+      ${data.bestFinish?`<div class="stat-block"><div class="stat-val" style="font-size:1.4rem">${escapeHtml(data.bestFinish)}</div><div class="stat-label">Best Finish</div></div>`:''}
+    </div>`;
+  }).catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load tournament stats.</p>`; });
 }
 // docs/archive/ghost-opponent-roadmap.md: populates the #ghost-race-record span next to the
 // "Race this leg" button — a no-op if that span doesn't exist (a non-X01 Personal
@@ -4623,7 +4660,8 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   cricketwhitewash:'Whitewash! 🧹', cricketcomebackkid:'Comeback Kid! 🔥',
   challengeweek:'Challenge Streak: Week! 🔥', challengemonth:'🏆 CHALLENGE STREAK: MONTH! 🏆',
   challengeallformats:'Full Rotation! 🗓️', nocigar:'No Cigar 🤦', chuckin180:'180! 🎯',
-  staircasefinish:'Staircase Finish! 🪜', ghostslayer:'Ghost Slayer! 👻' };
+  staircasefinish:'Staircase Finish! 🪜', ghostslayer:'Ghost Slayer! 👻',
+  tournamentchampion:'🏆 CHAMPION! 🏆', tournamentgiantslayer:'Giant Slayer ⚔️' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -4632,7 +4670,7 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500,
   cricket9marks:2500, cricketperfectclose:6000, cricketwhitewash:2500, cricketcomebackkid:3000,
   challengeweek:3000, challengemonth:6000, challengeallformats:3500, nocigar:2500, chuckin180:2500,
-  staircasefinish:3000, ghostslayer:3500 };
+  staircasefinish:3000, ghostslayer:3500, tournamentchampion:6000, tournamentgiantslayer:2500 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
@@ -4640,6 +4678,7 @@ const ACH_TYPE_TO_BADGE_ID = {
   first100checkout: 'first_100_checkout', grudgematch: 'grudge_match',
   aroundtheclock: 'around_the_clock', aroundtheworld: 'around_the_world',
   ghostslayer: 'ghost_slayer',
+  tournamentchampion: 'tournament_champion', tournamentgiantslayer: 'tournament_giant_slayer',
 };
 // 180/Big Fish/Nine-darter aren't in BADGE_INFO (they're older top-level stats, not
 // player_badges rows), so they get their own short explanation lines here.
@@ -4841,7 +4880,7 @@ function showAchievement(type, player, countText){
   achNameEl.textContent = player || '';
   if(achDescEl) achDescEl.textContent = achDescFor(type);
   if(achCountEl) achCountEl.textContent = countText || '';
-  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth';
+  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion';
   achOverlayEl.classList.toggle('mega', mega);
   achOverlayEl.classList.add('show');
   const shareBtn = document.getElementById('ach-share-btn');
@@ -6686,6 +6725,31 @@ function finishUnit(kind, winner){
     // Tournament mode: the bracket already advanced server-side (the onGameCompleted
     // hook fired from DB.completeGame() above), so route back to the bracket instead
     // of the normal New Game screen.
+    if(game.tournamentMatchId){
+      // docs/tournament-mode-roadmap.md §7: Champion/Giant Slayer (Tournament) are
+      // awarded server-side, inside _advanceTournamentMatch() itself (authoritative
+      // seed/champion data lives right there) — not re-computed or re-awarded here.
+      // This just detects whether either was newly earned, by diffing against
+      // earnedBadgeCache's pre-match snapshot (populated in _reallyBeginTournamentMatch()),
+      // the same "already earned?" check around_the_world already uses, so the
+      // celebration still fires live even though the award itself happened server-side.
+      const _winnerName = winner;
+      const _snapT = game.lastTurnSnapshot;
+      DB._queue(()=>Backend.get(`/api/players/badges?name=${encodeURIComponent(_winnerName)}`)).then(list=>{
+        const earnedNow = new Set((list||[]).map(b=>b.badge_id));
+        const earnedBefore = earnedBadgeCache[_winnerName] || new Set();
+        if(earnedNow.has('tournament_champion') && !earnedBefore.has('tournament_champion')){
+          trackBadgeForUndo(_snapT, _winnerName, 'tournament_champion');
+          queueBadge('tournamentchampion', _winnerName, _snapT, 'First time!');
+          fireMomentCard('tournamentchampion', { icon:'🏆', headline:'CHAMPION', player:_winnerName, statLine:'Won the tournament' });
+        }
+        if(earnedNow.has('tournament_giant_slayer') && !earnedBefore.has('tournament_giant_slayer')){
+          trackBadgeForUndo(_snapT, _winnerName, 'tournament_giant_slayer');
+          queueBadge('tournamentgiantslayer', _winnerName, _snapT, 'First time!');
+          fireMomentCard('tournamentgiantslayer', { icon:'⚔️', headline:'GIANT SLAYER', player:_winnerName, statLine:'Upset a higher seed' });
+        }
+      }).catch(()=>{});
+    }
     const nextBtn = game.tournamentMatchId
       ? `<button class="btn btn-primary" onclick="show('tournament')">Back to bracket</button>`
       : `<button class="btn btn-primary" onclick="show('setup')">New game</button>`;
