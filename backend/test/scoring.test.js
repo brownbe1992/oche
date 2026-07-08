@@ -11,7 +11,8 @@ const path = require('path');
 const scoring = require(path.join('..', '..', 'frontend', 'scoring.js'));
 const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET_STANDARD_NUMBERS,
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
-  evaluateDartDoublesPractice, chuckinTiersReached, isStaircaseFinish } = scoring;
+  evaluateDartDoublesPractice, chuckinTiersReached, isStaircaseFinish,
+  isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved } = scoring;
 
 // Builds a real dart object the same way the app does (makeDart minus the
 // thrownAt timestamp), rather than hand-rolling a fake {value,isDouble,...} shape.
@@ -478,5 +479,48 @@ describe('isStaircaseFinish (Staircase Finish achievement, REFERENCE.md\'s Achie
   test('fewer or more than exactly 3 darts never qualifies', () => {
     assert.equal(isStaircaseFinish(32, [d(16,1), d(8,1)]), false);
     assert.equal(isStaircaseFinish(32, [d(16,1), d(8,1), d(4,2), d(1,1)]), false);
+  });
+});
+
+describe('isCricketWhitewash (Cricket-native badge, docs/game-modes-roadmap.md "New Cricket-native badges")', () => {
+  test('true when every number is still open (0 marks each)', () => {
+    assert.equal(isCricketWhitewash({ 15:0, 16:0, 17:0, 18:0, 19:0, 20:0, 25:0 }), true);
+  });
+
+  test('true when every number has marks but none reached 3 (closed)', () => {
+    assert.equal(isCricketWhitewash({ 15:2, 16:1, 17:0, 18:2, 19:0, 20:1, 25:2 }), true);
+  });
+
+  test('false as soon as a single number is closed (3+ marks), regardless of the rest', () => {
+    assert.equal(isCricketWhitewash({ 15:0, 16:0, 17:0, 18:0, 19:0, 20:3, 25:0 }), false);
+    assert.equal(isCricketWhitewash({ 15:0, 16:0, 17:0, 18:0, 19:0, 20:5, 25:0 }), false, 'beyond 3 (over-closed) still counts as closed');
+  });
+
+  test('an empty or missing marks object counts as a whitewash (nothing closed)', () => {
+    assert.equal(isCricketWhitewash({}), true);
+    assert.equal(isCricketWhitewash(undefined), true);
+    assert.equal(isCricketWhitewash(null), true);
+  });
+});
+
+describe('cricketComebackAchieved (Cricket-native Comeback Kid, docs/game-modes-roadmap.md)', () => {
+  test(`fires at exactly the ${CRICKET_COMEBACK_THRESHOLD}-point threshold and above`, () => {
+    assert.equal(cricketComebackAchieved(CRICKET_COMEBACK_THRESHOLD), true);
+    assert.equal(cricketComebackAchieved(CRICKET_COMEBACK_THRESHOLD + 1), true);
+    assert.equal(cricketComebackAchieved(CRICKET_COMEBACK_THRESHOLD * 3), true);
+  });
+
+  test('does not fire just below the threshold', () => {
+    assert.equal(cricketComebackAchieved(CRICKET_COMEBACK_THRESHOLD - 1), false);
+  });
+
+  test('a zero or negative deficit (never trailed, or led the whole leg) never fires', () => {
+    assert.equal(cricketComebackAchieved(0), false);
+    assert.equal(cricketComebackAchieved(-5), false);
+  });
+
+  test('a missing/undefined deficit is treated as zero, not a crash', () => {
+    assert.equal(cricketComebackAchieved(undefined), false);
+    assert.equal(cricketComebackAchieved(null), false);
   });
 });

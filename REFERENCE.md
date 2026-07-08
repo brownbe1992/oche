@@ -250,8 +250,12 @@ and revokes any badge that turn awarded (`snap.badgeReverts`, populated by
 award runs — see §4/§5 for the undo-vs-async-award race handling). Only one
 level of undo exists — `game.lastTurnSnapshot` is set to `null` immediately
 after an undo, so undo cannot be chained. Cricket has its own, much smaller
-undo (`undoLastTurnCricket()`, dispatched from `undoLastTurn()`) — no
-achievements/challenge state to restore, just `marks`/`points`/dart counts.
+undo (`undoLastTurnCricket()`, dispatched from `undoLastTurn()`) — `marks`/
+`points`/dart counts, `legWorstPointsDeficit` (Comeback Kid (Cricket) — §4,
+added 2026-07 alongside Whitewash), and `badgeReverts`/`voided` for the two
+Cricket achievements (9 Marks, Perfect Leg) plus the two Cricket-native badges
+(Whitewash, Comeback Kid (Cricket)) — no Daily Challenge integration, since
+challenges are X01-only.
 
 ### Cricket rules — `GAME_TYPES.cricket.evaluateVisit(player, darts, game)` (`frontend/index.html`)
 
@@ -1028,7 +1032,7 @@ revokes any `chuckin180` badge that dart awarded — see above.
 
 ## 4. Achievements & Badges
 
-47 badges (23 X01 + 2 Cricket + 3 Daily Challenge + 19 Just Chuckin' It) — that
+49 badges (23 X01 + 4 Cricket + 3 Daily Challenge + 19 Just Chuckin' It) — that
 split is by which table each is listed under below (and which section of the
 Player Profile's Badge Case each renders in, via `BADGE_INFO`'s `cricket`/
 `challenge`/`chuckin` flags — anything without one of those flags buckets as
@@ -1113,13 +1117,22 @@ co-fire with a chain badge or with each other in the same turn/leg:
 | 👻 **Ghost Slayer** | First-ever `result==='win'` row this player writes to the `ghost_races` table (§13) — win a race against a replay of one of your own past legs (Ghost Opponent, below). Unlike every other badge in this table, checked server-side: `recordGhostRace()` (`backend/db.js`) calls `awardBadge(playerName, 'ghost_slayer', true)` on every win — `once` mode's `INSERT OR IGNORE` makes the call a no-op past the first time, so no separate first-win check is needed. **Once-badge.** |
 
 **Cricket badges** (checked in `enterTurnCricket()`/`onLegWonCricket()`,
-`frontend/index.html` — game-modes-roadmap.md build-order step 3, the direct
-analogs of 180 and the nine-darter):
+`frontend/index.html`). 9 Marks/Perfect Leg (game-modes-roadmap.md build-order
+step 3) are the direct analogs of 180 and the nine-darter; Whitewash/Comeback
+Kid (Cricket) (2026-07, "New Cricket-native badges") are deliberately *not*
+X01 ports — shaped around what makes a Cricket leg dramatic (closing numbers,
+points) instead of forcing X01's checkout/remaining-score concepts onto a game
+that has neither. Both are 2-player only, same restriction as X01's own
+social/margin-of-victory badges, and both have their pure trigger-condition
+logic in `frontend/scoring.js` (`isCricketWhitewash()`/
+`cricketComebackAchieved()`), unit-tested in `backend/test/scoring.test.js`:
 
 | Badge | Exact condition |
 |---|---|
 | 🎯 **9 Marks** | `darts.length===3 && marksThisVisit===9` — 3 darts, each a treble on an in-play number, the maximum possible marks in one visit (same framing as 180 being the max possible X01 visit score). **Recurring.** |
 | 🏆 **Perfect Leg** | `win && legDarts === theoreticalMinimum`, where the minimum is computed per match from `game.config.numbers`: each non-Bull number can close in a single treble (3 marks); Bull can't be trebled (`makeDart()` already downgrades a "treble bull" tap to a single), so it needs a minimum of 2 darts. A win at exactly this minimum already implies enough bonus marks were scored to strictly lead (the win condition in §2 guarantees that), so no separate points check is needed. **Recurring**, mega-tier overlay (confetti) like Nine-Darter. |
+| 🧹 **Whitewash** | `isCricketWhitewash(opp.marks)` at the moment the leg is won — every value in the opponent's `marks` object is `< 3` (nobody closed), checked in `onLegWonCricket(wi)`. 2-player only. **Recurring.** |
+| 🔥 **Comeback Kid (Cricket)** | `cricketComebackAchieved(w.legWorstPointsDeficit)` — `legWorstPointsDeficit >= 20` (Cricket's own threshold, chosen against Cricket's much smaller/more variable points scale than X01's 501 countdown, not X01's 100). `legWorstPointsDeficit` is the largest `(opponent.points - my.points)` seen at any point this leg, tracked in `enterTurnCricket()` the same "sample before this visit's own update" timing X01's `legWorstDeficit` uses. 2-player only. **Recurring.** |
 
 **Daily Challenge badges** (checked in `checkChallengeBadges(playerName)`,
 `frontend/index.html` — called right after every `/api/challenges/complete`

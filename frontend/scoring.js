@@ -253,6 +253,33 @@ function chuckinTiersReached(tiers, value){
   return tiers.filter(t => value >= t.threshold).map(t => t.threshold);
 }
 
+// Cricket-native badge trigger conditions (docs/game-modes-roadmap.md "New
+// Cricket-native badges") — 2-player only, same restriction as X01's own
+// social/margin-of-victory badges (Comeback Kid, Giant Slayer, etc.), since
+// both need a single well-defined opponent to compare against.
+
+// Whitewash: true when the opponent closed zero numbers by the time the leg
+// ended — `opponentMarks` is that player's `marks` object (number -> mark
+// count, 3+ meaning closed), the same shape `newMatchPlayerCricket()` builds.
+function isCricketWhitewash(opponentMarks){
+  return Object.values(opponentMarks || {}).every(m => (m || 0) < 3);
+}
+
+// Comeback Kid (Cricket): mirrors X01 Comeback Kid's shape (won after trailing
+// by a meaningful margin at some point) but tracks Cricket's own points
+// instead of X01's remaining-score deficit — higher points is better in
+// Cricket, so "trailing" means the opponent was ahead, not behind. The
+// running "worst deficit this leg" value itself is accumulated the same way
+// X01's `legWorstDeficit` is (a per-visit Math.max in enterTurnCricket()/
+// enterTurn()) — not reimplemented here — this only tests the actual
+// threshold decision, chosen against real play rather than guessed (see the
+// roadmap doc): a 20-point swing is meaningful on Cricket's much smaller and
+// more variable points scale than X01's fixed 501 countdown.
+const CRICKET_COMEBACK_THRESHOLD = 20;
+function cricketComebackAchieved(worstPointsDeficit){
+  return (worstPointsDeficit || 0) >= CRICKET_COMEBACK_THRESHOLD;
+}
+
 // Only executes under Node (require()'d from a test file) — undefined in a
 // browser, so this is a no-op there and every name above stays a plain global.
 if (typeof module !== 'undefined' && module.exports) {
@@ -263,5 +290,6 @@ if (typeof module !== 'undefined' && module.exports) {
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,
     CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH, challengeBadgeSignals,
     chuckinTiersReached,
+    isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,
   };
 }

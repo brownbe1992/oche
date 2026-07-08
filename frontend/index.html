@@ -4084,6 +4084,8 @@ const BADGE_INFO = {
   staircasefinish:    { icon:'🪜', label:'Staircase Finish', desc:'Check out in exactly three darts by halving the target twice: single, single, then double — e.g. 32 down to 16, down to 8, then double 4.' },
   cricket9marks:       { icon:'🎯', label:'9 Marks', desc:'Score 9 marks in one Cricket visit — three trebles, the maximum possible.', cricket:true },
   cricketperfectclose: { icon:'🏆', label:'Perfect Leg', desc:'Close every Cricket number using the fewest darts physically possible for that match.', cricket:true },
+  cricketwhitewash:    { icon:'🧹', label:'Whitewash', desc:"Win a Cricket leg without your opponent closing a single number.", cricket:true },
+  cricketcomebackkid:  { icon:'🔥', label:'Comeback Kid (Cricket)', desc:`Win a Cricket leg after trailing your opponent's points by ${CRICKET_COMEBACK_THRESHOLD}+ at some point.`, cricket:true },
   challengeweek:       { icon:'🔥', label:'Challenge Streak: Week', desc:'Complete the Daily Challenge 7 days in a row.', challenge:true },
   challengemonth:      { icon:'🏆', label:'Challenge Streak: Month', desc:'Complete the Daily Challenge 30 days in a row.', challenge:true },
   challengeallformats: { icon:'🗓️', label:'Full Rotation', desc:'Complete every Daily Challenge format at least once.', challenge:true },
@@ -4593,6 +4595,7 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   grudgematch:'Grudge Match ⚔️', therematch:'The Rematch 🔁', aroundtheclock:'Around the Clock 🕐',
   aroundtheworld:'Around the World! 🌍', doubletrouble:'Double Trouble! 👯', bustedmaximum:'Busted Maximum 💥',
   cricket9marks:'9 Marks! 🎯', cricketperfectclose:'🏆 PERFECT LEG! 🏆',
+  cricketwhitewash:'Whitewash! 🧹', cricketcomebackkid:'Comeback Kid! 🔥',
   challengeweek:'Challenge Streak: Week! 🔥', challengemonth:'🏆 CHALLENGE STREAK: MONTH! 🏆',
   challengeallformats:'Full Rotation! 🗓️', nocigar:'No Cigar 🤦', chuckin180:'180! 🎯',
   staircasefinish:'Staircase Finish! 🪜', ghostslayer:'Ghost Slayer! 👻' };
@@ -4602,7 +4605,7 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   metronome:2500, cruisecontrol:2500, iceintheveins:2500, nervesofsteel:3000,
   comebackkid:3000, giantslayer:2500, grudgematch:3000, therematch:2500,
   aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500,
-  cricket9marks:2500, cricketperfectclose:6000,
+  cricket9marks:2500, cricketperfectclose:6000, cricketwhitewash:2500, cricketcomebackkid:3000,
   challengeweek:3000, challengemonth:6000, challengeallformats:3500, nocigar:2500, chuckin180:2500,
   staircasefinish:3000, ghostslayer:3500 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
@@ -5980,9 +5983,21 @@ function enterTurnCricket(){
   // Cricket has its own achievements to revoke on undo.
   const _snap = { pi:game.current, marks:Object.assign({}, p.marks), points:p.points,
     legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
+    legWorstPointsDeficit:p.legWorstPointsDeficit,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
     badgeReverts:[], voided:false };
   game.lastTurnSnapshot = _snap;
+
+  // Comeback Kid (Cricket) tracking: the worst points deficit seen at any point
+  // this leg (needs an opponent to trail behind — mirrors X01's Comeback Kid,
+  // game-modes-roadmap.md "New Cricket-native badges"). Sampled BEFORE this
+  // visit's points update, same "deepest behind as you step up to throw"
+  // timing X01 uses — the opponent's points can't change during this player's
+  // own visit, so only p.points (pre-update) matters here.
+  if(game.players.length===2){
+    const _opp = game.players.find(x=>x!==p);
+    if(_opp) p.legWorstPointsDeficit = Math.max(p.legWorstPointsDeficit, (_opp.points||0) - p.points);
+  }
 
   p.marks = ev.marks;
   p.points = ev.points;
@@ -6047,6 +6062,7 @@ function undoLastTurnCricket(){
   p.marks = snap.marks;
   p.points = snap.points;
   p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
+  p.legWorstPointsDeficit = snap.legWorstPointsDeficit;
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
 
@@ -6067,14 +6083,33 @@ function undoLastTurnCricket(){
   pushLive();
 }
 /* ----- Cricket leg / set / game progression (dispatched from onLegWon path) -----
-   Cricket's own achievements (9 Marks, Perfect Leg) are detected in enterTurnCricket()
-   before this runs; this function itself carries no achievement or Daily Challenge
-   integration (X01's clutch/social badges and challenges don't apply to Cricket).
-   Set/leg advancement and the completeGame/HA webhook calls are the same generic
-   hooks the X01 path uses. */
+   9 Marks/Perfect Leg (per-visit achievements) are detected in enterTurnCricket()
+   before this runs. Whitewash and Comeback Kid (Cricket) are leg-outcome badges —
+   only knowable once the leg's winner is known — so they're checked here instead,
+   the same split X01 uses (per-visit badges in enterTurn(), leg/match-outcome
+   badges in onLegWon()). Neither is a port of an X01 badge; both are Cricket-native
+   (game-modes-roadmap.md "New Cricket-native badges") and 2-player only, same
+   restriction as X01's own social/margin-of-victory badges. Set/leg advancement
+   and the completeGame/HA webhook calls below are the same generic hooks the X01
+   path uses. */
 function onLegWonCricket(wi){
   const w = game.players[wi];
+  const opp = game.players.length===2 ? game.players.find(p=>p!==w) : null;
   w.legsWon += 1;
+
+  // Whitewash: the opponent closed zero numbers by the time this leg ended.
+  if(opp && isCricketWhitewash(opp.marks)){
+    queueBadge('cricketwhitewash', w.name);
+    awardRecurringBadge(w.name, 'cricketwhitewash', 'cricketwhitewash',
+      { icon:'🧹', headline:'WHITEWASH', player:w.name, statLine:`${opp.name} never closed a number` });
+  }
+  // Comeback Kid (Cricket): won after trailing on points by CRICKET_COMEBACK_THRESHOLD+
+  // at some point this leg (tracked per-visit in enterTurnCricket()).
+  if(opp && cricketComebackAchieved(w.legWorstPointsDeficit)){
+    queueBadge('cricketcomebackkid', w.name);
+    awardRecurringBadge(w.name, 'cricketcomebackkid', 'cricketcomebackkid',
+      { icon:'🔥', headline:'COMEBACK KID', player:w.name, statLine:`Trailed by ${CRICKET_COMEBACK_THRESHOLD}+ points, won anyway` });
+  }
 
   if(!game.practice && w.legsWon >= game.legsPerSet){      // set won (H2H only)
     w.setsWon += 1;
@@ -6646,12 +6681,13 @@ function cricketNumberLabel(n){ return n===25 ? 'Bull' : String(n); }
 function newMatchPlayerCricket(name, config){
   const marks = {};
   (config && config.numbers || CRICKET_STANDARD_NUMBERS).forEach(n=>{ marks[n]=0; });
-  return { name, marks, points:0, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 };
+  return { name, marks, points:0, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0,
+    legWorstPointsDeficit:0 };  // largest (opponent.points - my.points) seen this leg (Comeback Kid — Cricket)
 }
 function resetPlayerForNextLegCricket(p, game, newSet){
   const marks = {};
   (game.config.numbers || CRICKET_STANDARD_NUMBERS).forEach(n=>{ marks[n]=0; });
-  p.marks = marks; p.points = 0; p.legDarts = 0;
+  p.marks = marks; p.points = 0; p.legDarts = 0; p.legWorstPointsDeficit = 0;
   if(newSet) p.setDarts = 0;
 }
 function playerSnapshotCricket(p){
