@@ -11,7 +11,8 @@ const path = require('path');
 const scoring = require(path.join('..', '..', 'frontend', 'scoring.js'));
 const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET_STANDARD_NUMBERS,
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
-  evaluateDartDoublesPractice, chuckinTiersReached, isStaircaseFinish } = scoring;
+  evaluateDartDoublesPractice, chuckinTiersReached, isStaircaseFinish,
+  isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved } = scoring;
 
 // Builds a real dart object the same way the app does (makeDart minus the
 // thrownAt timestamp), rather than hand-rolling a fake {value,isDouble,...} shape.
@@ -97,6 +98,24 @@ describe('evaluateVisit (X01 bust/win rules, REFERENCE.md §2)', () => {
     assert.equal(evaluateVisit({ score: 501, doubleOut: true }, [d(20,1), d(20,2)], {}).trebleLess, true);
     assert.equal(evaluateVisit({ score: 501, doubleOut: true }, [d(20,1), d(20,3)], {}).trebleLess, false);
     assert.equal(evaluateVisit({ score: 501, doubleOut: true }, [], {}).trebleLess, false, 'zero darts is not trebleless');
+  });
+
+  // docs/archive/dartboard-zone-tracking-roadmap.md: zone/missZone/missDepth/bounced are all
+  // purely additive metadata the frontend stamps onto a dart object after makeDart()
+  // returns it (see throwDart() in index.html) — evaluateVisit() never reads any of
+  // them, only d.value, so a visit's scored/bust/win outcome must be byte-identical
+  // whether or not they're present. Also proves a bounce-out dart (sector:0,
+  // multiplier:1, bounced:true) is scored exactly like a plain miss.
+  test('zone/missZone/missDepth/bounced on a dart object never change evaluateVisit()\'s outcome', () => {
+    const plain = [d(20,1), d(20,1), d(0,1)];
+    const withMeta = [
+      Object.assign(d(20,1), { zone: 'inner' }),
+      Object.assign(d(20,1), { zone: 'outer' }),
+      Object.assign(d(0,1), { missZone: 5, missDepth: 'near', bounced: true }),
+    ];
+    const evPlain = evaluateVisit({ score: 501, doubleOut: true }, plain, {});
+    const evMeta = evaluateVisit({ score: 501, doubleOut: true }, withMeta, {});
+    assert.deepEqual(evMeta, evPlain);
   });
 });
 
@@ -478,5 +497,48 @@ describe('isStaircaseFinish (Staircase Finish achievement, REFERENCE.md\'s Achie
   test('fewer or more than exactly 3 darts never qualifies', () => {
     assert.equal(isStaircaseFinish(32, [d(16,1), d(8,1)]), false);
     assert.equal(isStaircaseFinish(32, [d(16,1), d(8,1), d(4,2), d(1,1)]), false);
+  });
+});
+
+describe('isCricketWhitewash (Cricket-native badge, docs/game-modes-roadmap.md "New Cricket-native badges")', () => {
+  test('true when every number is still open (0 marks each)', () => {
+    assert.equal(isCricketWhitewash({ 15:0, 16:0, 17:0, 18:0, 19:0, 20:0, 25:0 }), true);
+  });
+
+  test('true when every number has marks but none reached 3 (closed)', () => {
+    assert.equal(isCricketWhitewash({ 15:2, 16:1, 17:0, 18:2, 19:0, 20:1, 25:2 }), true);
+  });
+
+  test('false as soon as a single number is closed (3+ marks), regardless of the rest', () => {
+    assert.equal(isCricketWhitewash({ 15:0, 16:0, 17:0, 18:0, 19:0, 20:3, 25:0 }), false);
+    assert.equal(isCricketWhitewash({ 15:0, 16:0, 17:0, 18:0, 19:0, 20:5, 25:0 }), false, 'beyond 3 (over-closed) still counts as closed');
+  });
+
+  test('an empty or missing marks object counts as a whitewash (nothing closed)', () => {
+    assert.equal(isCricketWhitewash({}), true);
+    assert.equal(isCricketWhitewash(undefined), true);
+    assert.equal(isCricketWhitewash(null), true);
+  });
+});
+
+describe('cricketComebackAchieved (Cricket-native Comeback Kid, docs/game-modes-roadmap.md)', () => {
+  test(`fires at exactly the ${CRICKET_COMEBACK_THRESHOLD}-point threshold and above`, () => {
+    assert.equal(cricketComebackAchieved(CRICKET_COMEBACK_THRESHOLD), true);
+    assert.equal(cricketComebackAchieved(CRICKET_COMEBACK_THRESHOLD + 1), true);
+    assert.equal(cricketComebackAchieved(CRICKET_COMEBACK_THRESHOLD * 3), true);
+  });
+
+  test('does not fire just below the threshold', () => {
+    assert.equal(cricketComebackAchieved(CRICKET_COMEBACK_THRESHOLD - 1), false);
+  });
+
+  test('a zero or negative deficit (never trailed, or led the whole leg) never fires', () => {
+    assert.equal(cricketComebackAchieved(0), false);
+    assert.equal(cricketComebackAchieved(-5), false);
+  });
+
+  test('a missing/undefined deficit is treated as zero, not a crash', () => {
+    assert.equal(cricketComebackAchieved(undefined), false);
+    assert.equal(cricketComebackAchieved(null), false);
   });
 });

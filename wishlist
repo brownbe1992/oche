@@ -42,7 +42,7 @@ Others
 - Integrate with Homeassistant
 - Automated scoring with cameras and machine learning — full design in docs/camera-scoring-roadmap.md
 - Settings page - set default player
-- Tournament mode (bracket play, single elimination) — done, see docs/tournament-mode-roadmap.md; double-elimination, tournament-specific badges, and Player Profile tournament stats still open
+- Tournament mode (bracket play, single elimination, tournament-specific badges, Player Profile tournament stats) — done, see docs/tournament-mode-roadmap.md; double-elimination still open
 - iOS/Android app (hybrid webview client) — full design in docs/mobile-app-roadmap.md
 - Online multiplayer (P2P scoring + live video verification) — full design in docs/online-multiplayer-roadmap.md
 - Expanded achievements/badges beyond 180s/Big Fish/9-darters — done, see docs/achievements-badges-roadmap.md
@@ -57,7 +57,7 @@ Others
 - Admin account recovery CLI (reset a forgotten password / clear a stuck lockout without email) — full design in docs/admin-account-recovery-roadmap.md
 - Testing & observability (test coverage + server-side error logging) — done (Part A), see docs/testing-and-observability-roadmap.md
 - League/season mode (standings across casual matches over time) — full design in docs/league-mode-roadmap.md
-- Dart Builder (custom loadout screen for barrel/shaft/flight components, saved loadouts, New Game "Change Loadout" picker, per-loadout stats) — v1 done; shape/grip icons, quick-add-full-set, photo upload, and the loadout comparison view still open, see docs/dart-builder-roadmap.md
+- Dart Builder (custom loadout screen for barrel/shaft/flight components, saved loadouts, New Game "Change Loadout" picker, per-loadout stats, loadout comparison view, barrel/flight shape+grip icons, quick-add-full-set) — done; optional photo upload per component was considered and dropped, see docs/archive/dart-builder-roadmap.md
 - Daily/weekly solo challenge — done (core) plus badges/its own Profile tab, see docs/daily-challenge-roadmap.md
 - Ghost opponent (practice against a replay of your own past leg) — done (X01 only): race feature, win/loss tracking, and the "Ghost Slayer" first-win badge, see docs/archive/ghost-opponent-roadmap.md
 - Companion website (cloud stat reporting, matchmaking, cross-instance tournaments/leagues, global leaderboards including Daily Challenge) — full design in docs/companion-website-roadmap.md
@@ -72,14 +72,11 @@ Fixes:
 - Hover/tap on top finishes to see what the finish was — done (`toggleFinishRoute()`
   in frontend/index.html expands each finish row into its checkout route)
 - Dartboard heatmap: distinguish inner single (above the treble ring) from outer
-  single (below the treble ring) per number, instead of one merged "single"
-  bucket; also bring the geometric dartboard heatmap itself (today Just Chuckin'
-  It-only) to X01, Cricket, and Doubles Practice; also replace Dartboard mode's
-  flat Miss button with a two-band (near/far) positional miss ring outside the
-  double so misses show up on the heatmap by direction and closeness, not just
-  as a count (Pad mode keeps its plain Miss button); also add a flat "Bounce
-  Out" button (both input modes) for darts that hit the board but didn't
-  stay, tracked as its own count separate from real hits/misses (v1 — no
-  position; positional bounce-out capture is a v2 saved for once camera
-  scoring exists to supply it reliably) — full design in
-  docs/dartboard-zone-tracking-roadmap.md
+  single (below the treble ring) per number instead of one merged "single"
+  bucket; bring the geometric dartboard heatmap itself to X01, Cricket, and
+  Doubles Practice (not just Just Chuckin' It); replace Dartboard mode's flat
+  Miss button with a two-band (near/far) positional miss ring; a flat "Bounce
+  Out" button (every game type, both input modes) for darts that hit the board
+  but didn't stay — done (v1 — no position; positional bounce-out capture is a
+  v2 saved for once camera scoring exists to supply it reliably), see
+  docs/archive/dartboard-zone-tracking-roadmap.md

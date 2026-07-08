@@ -4,7 +4,8 @@
 // on docs/open-roadmap-items.md). Covers: bracket generation across player counts
 // (round count, standard seeding pairs, bye cascading with no double-byes),
 // advancement propagation through a full simulated tournament to a champion,
-// walkover parity with a played match, validation, and the player-deletion guard.
+// walkover parity with a played match, validation, the player-deletion guard,
+// the Champion/Giant Slayer (Tournament) badges (§7), and getTournamentStats() (§8).
 const { test, describe, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -299,5 +300,133 @@ describe('BUG-7 — wipeAllData clears tournament tables', () => {
       const n = db._db.prepare(`SELECT COUNT(*) AS n FROM ${tbl}`).get().n;
       assert.equal(n, 0, `${tbl} must be empty after wipeAllData`);
     }
+  });
+});
+
+// docs/tournament-mode-roadmap.md §7 — Champion and Giant Slayer (Tournament)
+// badges, awarded inline from _advanceTournamentMatch() (see the "not a second
+// parallel hook" note in the roadmap doc itself).
+describe('tournament badges (§7)', () => {
+  function badgeCount(playerName, badgeId) {
+    const row = db.getPlayerBadges(playerName).find(b => b.badge_id === badgeId);
+    return row ? row.count : 0;
+  }
+
+  test('Champion fires once for the winner only, never for the runner-up or an earlier loser', () => {
+    const players = makePlayers(uniqueName('CHAMP_'), 4); // seeds 1-4: standard pairing 1v4, 2v3
+    const [S1, S2, S3, S4] = players;
+    const { tournamentId } = db.createTournament({ name: 'Champ Cup', category: '501', players, rounds: roundsFor(4) });
+    const t0 = db.getTournament(tournamentId);
+    const semi1 = t0.matches.find(mm => [mm.player1Name, mm.player2Name].sort().join(',') === [S1, S4].sort().join(','));
+    const semi2 = t0.matches.find(mm => [mm.player1Name, mm.player2Name].sort().join(',') === [S2, S3].sort().join(','));
+    db.completeGame(db.startTournamentMatch(semi1.id).gameId, S1); // S4 eliminated, no seed-gap upset (diff 3 — see below)
+    db.completeGame(db.startTournamentMatch(semi2.id).gameId, S2); // S3 eliminated
+    const final = db.getTournament(tournamentId).matches.find(mm => mm.status === 'ready');
+    db.completeGame(db.startTournamentMatch(final.id).gameId, S1);
+
+    assert.equal(db.getTournament(tournamentId).champion_name, S1);
+    assert.equal(badgeCount(S1, 'tournament_champion'), 1, 'the champion earns the badge exactly once');
+    assert.equal(badgeCount(S2, 'tournament_champion'), 0, 'the runner-up does not earn Champion');
+    assert.equal(badgeCount(S3, 'tournament_champion'), 0, 'an earlier-round loser does not earn Champion');
+    assert.equal(badgeCount(S4, 'tournament_champion'), 0);
+  });
+
+  test('Giant Slayer (Tournament) fires only when the winner\'s seed is >= 3 slots worse than the beaten opponent\'s, never on a bye', () => {
+    const players = makePlayers(uniqueName('GS_'), 8); // round 1 standard pairing: 1v8, 4v5, 2v7, 3v6
+    const [S1, S2, S3, S4, S5, S6, S7, S8] = players;
+    const { tournamentId } = db.createTournament({ name: 'Upset Cup', category: '501', players, rounds: roundsFor(8) });
+    const r1 = () => db.getTournament(tournamentId).matches.filter(mm => mm.round_no === 1);
+
+    // Seed 8 (worse) beats seed 1 (better) — gap of 7, a clear upset.
+    const m18 = r1().find(mm => [mm.player1Name, mm.player2Name].sort().join(',') === [S1, S8].sort().join(','));
+    db.completeGame(db.startTournamentMatch(m18.id).gameId, S8);
+    assert.equal(badgeCount(S8, 'tournament_giant_slayer'), 1, 'beating a 7-slots-better seed is an upset');
+
+    // Seed 5 beats seed 4 — gap of only 1, not an upset.
+    const m45 = r1().find(mm => [mm.player1Name, mm.player2Name].sort().join(',') === [S4, S5].sort().join(','));
+    db.completeGame(db.startTournamentMatch(m45.id).gameId, S5);
+    assert.equal(badgeCount(S5, 'tournament_giant_slayer'), 0, 'a 1-slot gap is not an upset');
+
+    // Seed 7 beats seed 2 — gap of 5, an upset; the higher (better) seed winning never fires it.
+    const m27 = r1().find(mm => [mm.player1Name, mm.player2Name].sort().join(',') === [S2, S7].sort().join(','));
+    db.completeGame(db.startTournamentMatch(m27.id).gameId, S7);
+    assert.equal(badgeCount(S7, 'tournament_giant_slayer'), 1);
+    assert.equal(badgeCount(S2, 'tournament_giant_slayer'), 0, 'the better seed winning is never an upset');
+
+    // Seed 3 beats seed 6 (the better seed wins) — no upset either way.
+    const m36 = r1().find(mm => [mm.player1Name, mm.player2Name].sort().join(',') === [S3, S6].sort().join(','));
+    db.completeGame(db.startTournamentMatch(m36.id).gameId, S3);
+    assert.equal(badgeCount(S3, 'tournament_giant_slayer'), 0);
+    assert.equal(badgeCount(S6, 'tournament_giant_slayer'), 0);
+  });
+
+  test('a 5-player bye advance never awards Giant Slayer (no real opponent was beaten)', () => {
+    const players = makePlayers(uniqueName('GSBYE_'), 5); // seed 1 gets a round-1 bye
+    const [S1] = players;
+    db.createTournament({ name: 'Bye Cup', category: '501', players, rounds: roundsFor(5) });
+    assert.equal(badgeCount(S1, 'tournament_giant_slayer'), 0, 'auto-advancing past a bye is not a beaten opponent');
+  });
+});
+
+describe('getTournamentStats (§8)', () => {
+  test('a player with no tournament history gets all-zero/null stats', () => {
+    const [solo] = makePlayers(uniqueName('NONE_'), 1);
+    assert.deepEqual(db.getTournamentStats(solo), { wins: 0, runnerUps: 0, bestFinish: null });
+  });
+
+  test('wins/runnerUps/bestFinish reflect champion, runner-up, and semifinal-loser outcomes', () => {
+    const players = makePlayers(uniqueName('STAT4_'), 4); // seeds 1-4: 1v4, 2v3
+    const [S1, S2, S3, S4] = players;
+    const { tournamentId } = db.createTournament({ name: 'Stat Cup', category: '501', players, rounds: roundsFor(4) });
+    const t0 = db.getTournament(tournamentId);
+    const semi1 = t0.matches.find(mm => [mm.player1Name, mm.player2Name].sort().join(',') === [S1, S4].sort().join(','));
+    const semi2 = t0.matches.find(mm => [mm.player1Name, mm.player2Name].sort().join(',') === [S2, S3].sort().join(','));
+    db.completeGame(db.startTournamentMatch(semi1.id).gameId, S1);
+    db.completeGame(db.startTournamentMatch(semi2.id).gameId, S2);
+    const final = db.getTournament(tournamentId).matches.find(mm => mm.status === 'ready');
+    db.completeGame(db.startTournamentMatch(final.id).gameId, S1);
+
+    assert.deepEqual(db.getTournamentStats(S1), { wins: 1, runnerUps: 0, bestFinish: 'Final' });
+    assert.deepEqual(db.getTournamentStats(S2), { wins: 0, runnerUps: 1, bestFinish: 'Final' });
+    assert.deepEqual(db.getTournamentStats(S3), { wins: 0, runnerUps: 0, bestFinish: 'Semifinal' });
+    assert.deepEqual(db.getTournamentStats(S4), { wins: 0, runnerUps: 0, bestFinish: 'Semifinal' });
+  });
+
+  test('bestFinish takes the best result across multiple tournaments, and wins/runnerUps accumulate', () => {
+    const players = makePlayers(uniqueName('STAT2X_'), 4);
+    const [A, B, C, D] = players;
+    // Tournament 1: A loses in the semifinal (worst finish for A so far).
+    const t1 = db.createTournament({ name: 'Multi Cup 1', category: '501', players, rounds: roundsFor(4) }).tournamentId;
+    let t = db.getTournament(t1);
+    let semi = t.matches.find(mm => [mm.player1Name, mm.player2Name].sort().join(',') === [A, D].sort().join(','));
+    db.completeGame(db.startTournamentMatch(semi.id).gameId, D);
+    semi = db.getTournament(t1).matches.find(mm => [mm.player1Name, mm.player2Name].sort().join(',') === [B, C].sort().join(','));
+    db.completeGame(db.startTournamentMatch(semi.id).gameId, B);
+    let final = db.getTournament(t1).matches.find(mm => mm.status === 'ready');
+    db.completeGame(db.startTournamentMatch(final.id).gameId, D); // B is runner-up
+
+    // Tournament 2: A wins it all — should now override the earlier semifinal finish.
+    const t2 = db.createTournament({ name: 'Multi Cup 2', category: '501', players, rounds: roundsFor(4) }).tournamentId;
+    semi = db.getTournament(t2).matches.find(mm => [mm.player1Name, mm.player2Name].sort().join(',') === [A, D].sort().join(','));
+    db.completeGame(db.startTournamentMatch(semi.id).gameId, A);
+    semi = db.getTournament(t2).matches.find(mm => [mm.player1Name, mm.player2Name].sort().join(',') === [B, C].sort().join(','));
+    db.completeGame(db.startTournamentMatch(semi.id).gameId, C);
+    final = db.getTournament(t2).matches.find(mm => mm.status === 'ready');
+    db.completeGame(db.startTournamentMatch(final.id).gameId, A);
+
+    assert.deepEqual(db.getTournamentStats(A), { wins: 1, runnerUps: 0, bestFinish: 'Final' });
+    assert.equal(db.getTournamentStats(B).runnerUps, 1, 'B was runner-up in tournament 1');
+  });
+
+  test('an in-progress tournament still reports the furthest round reached so far', () => {
+    const players = makePlayers(uniqueName('STATPROG_'), 4);
+    const [A, , , D] = players;
+    const { tournamentId } = db.createTournament({ name: 'In Progress Cup', category: '501', players, rounds: roundsFor(4) });
+    const semi = db.getTournament(tournamentId).matches.find(mm => [mm.player1Name, mm.player2Name].sort().join(',') === [A, D].sort().join(','));
+    db.completeGame(db.startTournamentMatch(semi.id).gameId, A);
+    // The other semifinal hasn't been played yet, so the final isn't "ready" —
+    // but A's win already placed them into the final's row (winner_next_match_id),
+    // and that placement alone should count as "reached the final."
+    assert.equal(db.getTournamentStats(A).bestFinish, 'Final', 'being fed into the not-yet-ready final still counts as reaching it');
   });
 });

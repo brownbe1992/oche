@@ -38,7 +38,7 @@ describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
       'dailyChallengeAttempts', 'darts', 'exportedAt', 'gamePlayers', 'games', 'players', 'playerBadges', 'timelineEvents', 'turns',
       // docs/bug-roadmap.md BUG-6: tournament tables must be exported too
       'tournaments', 'tournamentPlayers', 'tournamentRounds', 'tournamentMatches',
-      // docs/dart-builder-roadmap.md: same standing rule applied to loadout data
+      // docs/archive/dart-builder-roadmap.md: same standing rule applied to loadout data
       'dartComponents', 'loadouts',
       // docs/archive/ghost-opponent-roadmap.md: same standing rule applied to ghost races
       'ghostRaces',
@@ -66,7 +66,7 @@ describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
     assert.ok(dump.tournamentMatches.length >= 1, 'match rows exported');
   });
 
-  test('includes dart components and loadouts (docs/dart-builder-roadmap.md)', () => {
+  test('includes dart components and loadouts (docs/archive/dart-builder-roadmap.md)', () => {
     db.addPlayer('export_loadout_owner');
     const barrel = db.createComponent('export_loadout_owner', 'barrel', { name: 'Export Barrel', weightG: 22 });
     const lo = db.createLoadout('export_loadout_owner', { name: 'Export Loadout', barrelId: barrel.id });

@@ -6,9 +6,9 @@
 
 A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player statistics, and no external dependencies.
 
-**v0.13.1**
+**v0.14.0**
 
-You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [47-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. All data lives in a SQLite database on your own server.
+You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [51-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. All data lives in a SQLite database on your own server.
 
 > Looking for exact stat formulas, achievement trigger conditions, the full database schema, or how a feature works internally (e.g. to debug it)? See **[REFERENCE.md](REFERENCE.md)** — the technical reference manual, kept up to date alongside this README.
 
@@ -144,7 +144,7 @@ H2H mode requires at least two players selected. Practice mode can be played sol
 
 Players with a PIN set show a 🔒 next to their name in the dropdown. When exactly two players are selected in H2H mode, a banner shows their all-time head-to-head record (e.g. *"H2H: Alice leads 3–0 (3 games)"*).
 
-**Cricket** is a second game type alongside X01. Choosing **Classic** locks the targets to the standard 15, 16, 17, 18, 19, 20, and Bull. Choosing **Custom** reveals a 1–20-plus-Bull picker — pick any numbers you like, but always exactly 7 (the same count as classic); Start is blocked until exactly 7 are checked, with a running "N of 7 selected" count and a one-tap "Start from classic" fill-in. Once a Cricket game begins, the scoring screen and live scoreboard both switch to Cricket's own marks/closed/points display — the X01 Pad and Dartboard input screens are never shown during a Cricket game, and there's no per-game choice between them the way there is for X01. See [Scoring](#scoring) below and `REFERENCE.md` for the exact marks/points rules. Cricket has its own stat bubbles (MPR, 9 Marks, Win Rate, Games Played, Darts Thrown, Darts/Won Leg), Personal Bests, 2 achievements (9 Marks and Perfect Leg), and its own Home page leaderboard set (Marks Per Round, Most Cricket Wins, 9 Marks, Perfect Leg) — a game-type toggle on both the Home page and the Player Profile switches between it and every other game type.
+**Cricket** is a second game type alongside X01. Choosing **Classic** locks the targets to the standard 15, 16, 17, 18, 19, 20, and Bull. Choosing **Custom** reveals a 1–20-plus-Bull picker — pick any numbers you like, but always exactly 7 (the same count as classic); Start is blocked until exactly 7 are checked, with a running "N of 7 selected" count and a one-tap "Start from classic" fill-in. Once a Cricket game begins, the scoring screen and live scoreboard both switch to Cricket's own marks/closed/points display — the X01 Pad and Dartboard input screens are never shown during a Cricket game, and there's no per-game choice between them the way there is for X01. See [Scoring](#scoring) below and `REFERENCE.md` for the exact marks/points rules. Cricket has its own stat bubbles (MPR, 9 Marks, Win Rate, Games Played, Darts Thrown, Darts/Won Leg), Personal Bests, 4 achievements (9 Marks, Perfect Leg, Whitewash, and Comeback Kid), and its own Home page leaderboard set (Marks Per Round, Most Cricket Wins, 9 Marks, Perfect Leg) — a game-type toggle on both the Home page and the Player Profile switches between it and every other game type.
 
 **Daily Challenge mode** turns New Game into today's [Daily Challenge](#daily-challenge) launcher instead of a regular match: Starting Score and Format hide (the challenge decides them), and a gold **Today's Challenge** panel shows the challenge description plus whoever is currently in the player slot's streak and results history. Selecting who's attempting it uses the exact same single "Choose player" slot as Practice mode — a PIN-protected player still needs their PIN entered, since it's the identical gate every other slot uses, not a separate picker of its own. The **Start game** button relabels to **Start Challenge** while this mode is active. Daily Challenge is X01-only — the Game-type choice is hidden and forced back to X01 whenever this mode is selected.
 
@@ -152,7 +152,7 @@ Players with a PIN set show a 🔒 next to their name in the dropdown. When exac
 
 **Doubles Practice mode** is a solo drill for practicing specific doubles — choose one or more from a 1–20-plus-Bull picker (any number, no fixed count), then throw. All selected doubles stay **live at once** — you choose which one to aim at each dart, not a forced rotation. A **round** keeps going, however many darts it takes, until one of two things happens: a single or treble lands on one of your target numbers ("so close" — right number, wrong ring), or a double lands on a number that isn't one of your targets ("wrong double"). A genuine miss elsewhere on the board doesn't end anything — just keep throwing. When a round ends, **Start next round** resets the tally and keeps the same targets. The scoring screen and Live Scoreboard show the live target set, this round's hit count and darts-thrown, and the running doubles percentage; there's no numeric score, no opponent, and no Enter-turn step — every dart commits the instant it's thrown. See [Player Profile](#player-profile) for its own stat bubbles (Doubles %, Darts/Round, Doubles Hit/Round) and Personal Bests (longest round, most doubles in a round), reachable via the same game-type toggle. Undo Last Dart is supported, one dart deep.
 
-**Just Chuckin' It** is completely freeform, unscored practice — no starting score, no bust, no win, no opponent, just throwing dart after dart until you press **End game**. Selecting it on the [New Game](#new-game) page shows a short explanation of what it's for. The point is pure warm-up/muscle-memory reps without any game pressure at all. Every dart commits instantly (no Enter-turn step, same as Doubles Practice), and there's undo support for the last dart. Its stats are heatmap-heavy on purpose: [Player Profile](#player-profile) gets a non-interactive dartboard heatmap shaded by how often you hit each region (with exact counts on hover), plus 8 stat bubbles (Darts Thrown, Three-Dart Average, 180s, Treble/Bull/Double %, Sessions Played, Avg Darts/Session), a 2-field Personal Bests (longest session, most trebles in a session), and 19 achievements (18 laddered milestones plus its own 180! — see [Achievements & Badges](#achievements--badges)) so there's always another one within reach. Darts thrown in this mode count toward your lifetime/daily/weekly total darts thrown (the one deliberate exception) but never toward any X01/Cricket/Doubles Practice stat, average, or leaderboard.
+**Just Chuckin' It** is completely freeform, unscored practice — no starting score, no bust, no win, no opponent, just throwing dart after dart until you press **End game**. Selecting it on the [New Game](#new-game) page shows a short explanation of what it's for. The point is pure warm-up/muscle-memory reps without any game pressure at all. Every dart commits instantly (no Enter-turn step, same as Doubles Practice), and there's undo support for the last dart. Its stats are heatmap-heavy on purpose: [Player Profile](#player-profile) gets a [Dartboard Heatmap](#player-profile) (shared with every other game type, see below) plus 8 stat bubbles (Darts Thrown, Three-Dart Average, 180s, Treble/Bull/Double %, Sessions Played, Avg Darts/Session), a 2-field Personal Bests (longest session, most trebles in a session), and 19 achievements (18 laddered milestones plus its own 180! — see [Achievements & Badges](#achievements--badges)) so there's always another one within reach. Darts thrown in this mode count toward your lifetime/daily/weekly total darts thrown (the one deliberate exception) but never toward any X01/Cricket/Doubles Practice stat, average, or leaderboard.
 
 The **Live Scoreboard** shows a live dartboard heatmap for this mode too, gradually filling in as the session progresses (a separate, shorter-lived dataset from the lifetime one on the Player Profile), alongside a running darts-thrown counter and three-dart average — side by side on a wide screen, stacked on a narrow one.
 
@@ -172,13 +172,19 @@ The scoring screen is optimised for touchscreen entry on a tablet. Everything fi
 
 **Input modes** — toggle between two ways to enter darts:
 - **Pad** — a grid of numbers (1–20), Bull, and Miss, with Single / Double / Treble multiplier buttons. This is the app's **accessible input path**: ordinary focusable buttons that work the same for keyboard, switch, and screen-reader users, with no visual dartboard shape or precise tap-target aiming required.
-- **🎯 Dartboard** — an interactive SVG dartboard; tap directly on the sector you hit. The multiplier ring is determined by where you tap (singles bed, doubles ring, treble ring, bull).
+- **🎯 Dartboard** — an interactive SVG dartboard; tap directly on the sector you hit. The multiplier ring is determined by where you tap (singles bed, doubles ring, treble ring, bull) — and a single hit also records which half of the wedge you tapped (see [Dartboard Heatmap](#player-profile)).
 
 **Dart entry (Pad mode):**
 1. Tap **Single**, **Double**, or **Treble** to set the multiplier
 2. Tap a number (1–20), **Bull**, or **Miss**
    - *Double Miss* fills two dart slots; *Treble Miss* fills all three
 3. After three darts (or a bust or checkout), tap **Enter turn**
+
+**Dart entry (Dartboard mode):**
+1. Tap directly on the number/ring you hit
+2. A genuine miss taps one of two rings just outside the double instead of a flat Miss button — a **near** band (grazed the wire) or a **far** band (well wide), at whichever of the 20 wedge directions it landed closest to
+3. **Bounce Out** — hit the board but bounced or fell out before it counted? One tap records it as a miss immediately, no board tap required (available in Pad mode too, and on Cricket's own scoring pad)
+4. After three darts (or a bust or checkout), tap **Enter turn**
 
 **Controls:**
 - **Undo dart** — remove the last dart entered in the current visit
@@ -221,7 +227,7 @@ choice, no checkout hints, and no bust concept:
 
 ### Achievements & Badges
 
-Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 2 Cricket-specific badges, 3 Daily Challenge badges, and 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
+Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 4 Cricket-specific badges, 2 [Tournament](#tournaments)-specific badges, 3 Daily Challenge badges, and 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
 
 | Badge | How to earn it |
 |---|---|
@@ -249,12 +255,21 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges c
 | 🌍 **Around the World** | Hit every dart outcome at least once, over your lifetime — 63 total: singles/doubles/trebles 1–20, outer bull, double bull, and a miss |
 | 👻 **Ghost Slayer** | Win a race against a [👻 Ghost](#new-game) — a replay of one of your own past legs |
 
-**Cricket's 2 badges** (its own analogs of 180 and the nine-darter):
+**Cricket's 4 badges** — 9 Marks and Perfect Leg are its own analogs of 180 and the nine-darter; Whitewash and Comeback Kid are Cricket-native (not ports of the X01 badges of similar names — shaped around closing numbers and points instead of checkouts and remaining score) and, like their X01 counterparts, require exactly 2 players:
 
 | Badge | How to earn it |
 |---|---|
 | 🎯 **9 Marks** | Score 9 marks in one Cricket visit — three trebles, the maximum possible |
 | 🏆 **Perfect Leg** | Close every Cricket number using the fewest darts physically possible for that match |
+| 🧹 **Whitewash** | Win a Cricket leg without your opponent closing a single number |
+| 🔥 **Comeback Kid** | Win a Cricket leg after trailing your opponent's points by 20 or more at some point |
+
+**Tournament's 2 badges** (see [Tournaments](#tournaments)):
+
+| Badge | How to earn it |
+|---|---|
+| 🏆 **Champion** | Win a tournament bracket |
+| ⚔️ **Giant Slayer (Tournament)** | Beat an opponent seeded 3 or more slots better than you in a tournament match |
 
 **Daily Challenge's 3 badges** (see [Daily Challenge](#daily-challenge)):
 
@@ -276,7 +291,7 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges c
 |---|---|
 | 🎯 **180!** | Three darts, sixty each — assuming 3 darts per turn (the same convention as the ladders above), since Just Chuckin' It otherwise has no turn boundary at all |
 
-**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 47-badge roster, grouped into X01/Cricket/Daily Challenge/Just Chuckin' It sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), Full Rotation, and all 18 Just Chuckin' It milestones are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
+**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 51-badge roster, grouped into X01/Cricket/Tournament/Daily Challenge/Just Chuckin' It sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), both Tournament badges (Champion, Giant Slayer (Tournament)), Full Rotation, and all 18 Just Chuckin' It milestones are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
 
 **Around the World Progress** — a dedicated grid on the Player Profile showing exactly which of the 63 lifetime dart outcomes are still missing, alongside the Badge Case.
 
@@ -441,7 +456,7 @@ Switching to **Doubles Practice** shows its own 3 stat bubbles instead:
 | **Darts / Round** | Average darts thrown per round |
 | **Doubles Hit / Round** | Average doubles hit per round |
 
-Switching to **Just Chuckin' It** shows its own 8 stat bubbles instead, plus a dartboard heatmap section below the chart:
+Switching to **Just Chuckin' It** shows its own 8 stat bubbles instead:
 
 | Bubble | Description |
 |---|---|
@@ -461,6 +476,10 @@ A line chart showing the selected metric over time. Filters:
 - **Period:** Today · Week · Month · Year · All time · Custom date range
 - **Dart weight:** filter to games thrown with a specific dart weight (if recorded)
 
+#### Dartboard Heatmap
+
+A non-interactive dartboard shaded by how often each region has been hit (with exact counts on hover) — shown on **every** game-type toggle (X01, Cricket, Doubles Practice, Just Chuckin' It), not just Just Chuckin' It. **Dartboard-mode** taps carry extra precision the heatmap uses: a single hit shades its inner half (between bull and treble) and outer half (between treble and double) independently, and a miss shades one of two rings just outside the double — a **near** band (grazed the wire) and a **far** band (a proper miss) — instead of just disappearing. A faint diagonal hatch marks a single hit with no inner/outer data (any Pad-mode dart, or one thrown before this existed) so the picture never silently implies precision that isn't there. A **Bounce-outs: N** line underneath counts darts that struck the board but bounced or fell out before they counted — tracked separately from misses since the cause is usually completely different (a grip/weight/board-tension problem, not an aim problem) — available as its own button in every game type and input mode, including Cricket's own scoring pad.
+
 #### Personal Bests
 
 - **Best Leg Average**
@@ -474,7 +493,7 @@ On the Doubles Practice toggle, this section shows just **Best Round (Darts)** a
 
 #### Badge Case
 
-The full 47-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (23 badges), a **Cricket** section (2 badges), a **Daily Challenge** section (3 badges), and a **Just Chuckin' It** section (19 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
+The full 51-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (23 badges), a **Cricket** section (4 badges), a **Tournament** section (2 badges), a **Daily Challenge** section (3 badges), and a **Just Chuckin' It** section (19 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
 
 #### On This Day
 
@@ -580,6 +599,14 @@ unfinished, since the bracket depends on a real result to advance). A visual
 bracket tree shows the whole tournament at a glance, with a linearized list view
 underneath it for anyone who'd rather read than scan the tree. The champion and
 runner-up are shown once the final resolves.
+
+**Badges** — winning the whole bracket earns 🏆 **Champion**; beating an
+opponent seeded 3 or more slots better than you earns ⚔️ **Giant Slayer
+(Tournament)** — see [Achievements & Badges](#achievements--badges).
+
+**Player Profile stats** — a small **Tournaments** block (tournaments won,
+runner-up finishes, best finish reached) shows on each player's profile
+alongside their H2H stats.
 
 **Double-elimination isn't built** — single-elimination only for now; see
 `REFERENCE.md` for the deferred design.
@@ -891,7 +918,15 @@ GET  /api/players/personal-bests?name=&mode= Best leg average, fewest darts to f
                                              trebles hit in a session) instead.
 GET  /api/players/chuckin-heatmap?name=&mode= Per-(sector,multiplier) hit counts for Just
                                              Chuckin' It, feeding the Player Profile's dartboard
-                                             heatmap → [ { sector, multiplier, hits } ]
+                                             heatmap → [ { sector, multiplier, hits } ] (kept for
+                                             backward compatibility — see dart-heatmap below)
+GET  /api/players/dart-heatmap              Per-(sector,multiplier,zone,missZone,missDepth) hit
+     ?name=&gameType=&mode=                 counts for any game type, feeding the generalized
+                                             Player Profile dartboard heatmap (X01/Cricket/
+                                             Doubles Practice/Just Chuckin' It) → [ { sector,
+                                             multiplier, zone, missZone, missDepth, hits } ]
+GET  /api/players/bounce-outs               Count of darts that struck the board but bounced
+     ?name=&gameType=&mode=                 or fell out before counting → { count }
 GET  /api/players/top-finishes?name=&mode=  Top 10 checkouts for a player
 GET  /api/players/checkout-route            Most-used routes for a specific checkout score
      ?name=&score=&mode=
@@ -1073,7 +1108,13 @@ POST /api/tournaments/matches/:id/walkover  Record a result without playing it o
                                              match doesn't already have a winner,
                                              including recovering an abandoned
                                              mid-game match
+GET  /api/players/tournament-stats?name=   { wins, runnerUps, bestFinish } for the
+                                             Player Profile's Tournaments block (public)
 ```
+
+The 🏆 Champion and ⚔️ Giant Slayer (Tournament) badges are awarded inline from
+the same server-side match-advancement logic — see
+[Achievements & Badges](#achievements--badges).
 
 ### Live Scoreboard
 

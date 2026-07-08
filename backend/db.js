@@ -79,7 +79,10 @@ db.exec(`
   -- darts stores one row per physical dart. scored/is_treble/is_double are generated
   -- from sector+multiplier — no app code writes them; SQLite computes and stores them.
   -- thrown_at (added via ALTER TABLE below) is the client-captured tap timestamp, only
-  -- populated when the "collect_dart_timing" setting is on; null otherwise.
+  -- populated when the "collect_dart_timing" setting is on; null otherwise. zone/
+  -- miss_zone/miss_depth/bounced (also added via ALTER TABLE below,
+  -- docs/archive/dartboard-zone-tracking-roadmap.md) are purely additive Dartboard-mode-only
+  -- positional metadata — see that migration's own comment for the full rationale.
   CREATE TABLE IF NOT EXISTS darts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     turn_id    INTEGER NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
@@ -244,7 +247,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tournament_matches_round ON tournament_matches(round_id);
   CREATE INDEX IF NOT EXISTS idx_tournament_matches_game  ON tournament_matches(game_id);
 
-  -- Dart Builder / loadout customization (docs/dart-builder-roadmap.md). Not a new
+  -- Dart Builder / loadout customization (docs/archive/dart-builder-roadmap.md). Not a new
   -- column on games/players — a player's owned catalog of parts, each row personal
   -- (not shared/global) since real dart preferences are personal. No 'tip' type: tip
   -- texture is a single attribute of the assembled loadout (see loadouts.tip_texture
@@ -334,10 +337,22 @@ try { db.exec('ALTER TABLE turns ADD COLUMN leg_won INTEGER NOT NULL DEFAULT 0')
 // or resetting a player can never retroactively reclassify a game (a 2-player H2H game
 // stays H2H even after one participant is removed). Backfilled for existing rows below.
 try { db.exec('ALTER TABLE games ADD COLUMN player_count INTEGER'); } catch(e) {}
-// Dart Builder (docs/dart-builder-roadmap.md): resolved once at game creation and
+// Dart Builder (docs/archive/dart-builder-roadmap.md): resolved once at game creation and
 // snapshotted, same reasoning already applied to game_players.dart_weight/out_mode —
 // renaming/deleting a loadout later never rewrites a past game's history.
 try { db.exec('ALTER TABLE game_players ADD COLUMN loadout_id INTEGER REFERENCES loadouts(id) ON DELETE SET NULL'); } catch(e) {}
+// Dartboard zone/miss/bounce-out tracking (docs/archive/dartboard-zone-tracking-roadmap.md).
+// All four columns are purely additive metadata riding alongside an otherwise-
+// identical dart row — sector/multiplier/scored/is_treble/is_double keep meaning
+// exactly what they always have, so every existing consumer (evaluateVisit(),
+// every badge chain check, getGhostLegScript() replay, getFullDatabaseExport())
+// needs zero changes. Only Dartboard-mode taps ever populate these (Pad mode and
+// Cricket's own pad have no geometric tap position, so they stay NULL forever) —
+// "precision arrives gradually," never backfilled or guessed for existing rows.
+try { db.exec("ALTER TABLE darts ADD COLUMN zone TEXT"); } catch(e) {}         // 'inner'|'outer', single hits only
+try { db.exec('ALTER TABLE darts ADD COLUMN miss_zone INTEGER'); } catch(e) {} // 1-20 (nearest wedge), misses only
+try { db.exec("ALTER TABLE darts ADD COLUMN miss_depth TEXT"); } catch(e) {}   // 'near'|'far', misses only
+try { db.exec('ALTER TABLE darts ADD COLUMN bounced INTEGER'); } catch(e) {}   // 1 = bounced/fell out, misses only
 db.exec(`UPDATE games SET player_count = (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = games.id) WHERE player_count IS NULL`);
 // config wasn't backfilled when the column was added (unlike player_count above) —
 // every pre-existing row is X01 (game_type defaults to 'x01') with category as its
@@ -420,8 +435,8 @@ const q = {
                    (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points, leg_won)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 
-  insertDart   : db.prepare(`INSERT INTO darts (turn_id, dart_no, sector, multiplier, thrown_at)
-                   VALUES (?, ?, ?, ?, ?)`),
+  insertDart   : db.prepare(`INSERT INTO darts (turn_id, dart_no, sector, multiplier, thrown_at, zone, miss_zone, miss_depth, bounced)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 };
 
 /* ---------- player operations ---------- */
@@ -620,7 +635,7 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   (players || []).forEach(entry => {
     const out = entry.out === 'single' ? 'single' : 'double';
     const p   = ensurePlayer(entry.name);
-    // docs/dart-builder-roadmap.md: players.dart_weight is retired as a standalone
+    // docs/archive/dart-builder-roadmap.md: players.dart_weight is retired as a standalone
     // fallback — a selected loadout's barrel weight is the only source for
     // game_players.dart_weight going forward; no loadout means NULL, even for a
     // player who still has an old dart_weight value sitting orphaned on their row.
@@ -660,8 +675,29 @@ function addTurn(gameId, t) {
     // World progress count, whose 63-outcome total assumes only real combos exist.
     if (sector === 25 && multiplier === 3) throw httpError(400, 'No treble bull exists');
     if (sector === 0 && multiplier !== 1) throw httpError(400, 'A miss must have multiplier 1');
+    // docs/archive/dartboard-zone-tracking-roadmap.md: zone/missZone/missDepth/bounced are all
+    // purely additive, Dartboard-mode-only positional metadata — validated the same
+    // "reject garbage, don't silently coerce" way as sector/multiplier above, and
+    // each only meaningful on the specific dart shape it actually describes (a hit
+    // can't have a miss wedge, a miss can't have an inner/outer zone).
+    const zone = (d.zone === 'inner' || d.zone === 'outer') ? d.zone : null;
+    if (d.zone != null && zone == null) throw httpError(400, "zone must be 'inner' or 'outer'");
+    if (zone != null && !(sector >= 1 && sector <= 20 && multiplier === 1)) {
+      throw httpError(400, 'zone is only valid for a single hit on a number 1-20');
+    }
+    const missDepth = (d.missDepth === 'near' || d.missDepth === 'far') ? d.missDepth : null;
+    if (d.missDepth != null && missDepth == null) throw httpError(400, "missDepth must be 'near' or 'far'");
+    let missZone = null;
+    if (d.missZone != null) {
+      missZone = Number(d.missZone);
+      if (!Number.isInteger(missZone) || missZone < 1 || missZone > 20) throw httpError(400, 'missZone must be an integer 1-20');
+    }
+    if ((missZone != null) !== (missDepth != null)) throw httpError(400, 'missZone and missDepth must be set together');
+    if (missZone != null && sector !== 0) throw httpError(400, 'missZone/missDepth are only valid on a miss (sector 0)');
+    const bounced = !!d.bounced;
+    if (bounced && sector !== 0) throw httpError(400, 'bounced is only valid on a miss (sector 0)');
     return { dartNo: Number.isInteger(Number(d.dartNo)) ? Number(d.dartNo) : i + 1, sector, multiplier,
-             thrownAt: d.thrownAt ? String(d.thrownAt) : null };
+             thrownAt: d.thrownAt ? String(d.thrownAt) : null, zone, missZone, missDepth, bounced };
   });
   // Validate the visit-level numbers too, not just the darts. turns.scored feeds every
   // points/average stat, so a negative or absurd value would silently corrupt them; a
@@ -695,7 +731,10 @@ function addTurn(gameId, t) {
   // thrownAt is an ISO timestamp captured client-side at tap time; only sent when
   // the admin has enabled the "collect_dart_timing" setting.
   const turnId = Number(info.lastInsertRowid);
-  for (const d of darts) q.insertDart.run(turnId, d.dartNo, d.sector, d.multiplier, d.thrownAt);
+  for (const d of darts) {
+    q.insertDart.run(turnId, d.dartNo, d.sector, d.multiplier, d.thrownAt,
+      d.zone, d.missZone, d.missDepth, d.bounced ? 1 : null);
+  }
   return { ok: true };
 }
 
@@ -1940,21 +1979,43 @@ function getChuckinPersonalBests(playerName, mode) {
   return { bestSessionDarts, bestSessionTrebles };
 }
 
-// Per-sector/multiplier hit-count grid feeding the Player Profile's dartboard
-// heatmap — the "heatmap-heavy... patterns and trends" reporting this mode was
-// specifically requested to have. Same flat {sector,multiplier,hits} shape as
-// getDartAnalytics()'s topSectors, just chuckin-scoped and unfiltered by rank
-// (the frontend shades every dartboard region, not just the top 15).
-function getChuckinHeatmap(playerName, mode) {
+// Per-sector/multiplier/zone hit-count grid feeding the Player Profile's dartboard
+// heatmap. Originally Chuckin-only ("heatmap-heavy... patterns and trends" reporting
+// that mode was specifically requested to have); generalized (docs/dartboard-zone-
+// tracking-roadmap.md, "Beyond Just Chuckin' It") to any game type via the same
+// _scope() helper every other per-game-type stat query already uses, since `darts`
+// is the one universal per-dart table every game type writes into. Grouping by zone/
+// miss_zone/miss_depth splits a single number's inner/outer singles (and a miss's
+// wedge+depth) into separate rows instead of one undifferentiated bucket — a hit row
+// only ever has `zone` populated, a miss row (sector=0) only ever has miss_zone/
+// miss_depth populated, so a given row's fields are always unambiguous.
+function getDartHeatmap(playerName, gameType, mode) {
   const p = getPlayer(playerName);
   if (!p) return [];
-  const scope = _scope({ mode, gameType: 'chuckin' });
+  const scope = _scope({ mode, gameType });
   return db.prepare(`
-    SELECT d.sector AS sector, d.multiplier AS multiplier, COUNT(*) AS hits
+    SELECT d.sector AS sector, d.multiplier AS multiplier, d.zone AS zone,
+           d.miss_zone AS missZone, d.miss_depth AS missDepth, COUNT(*) AS hits
     FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id
     WHERE t.player_id=? ${scope}
-    GROUP BY d.sector, d.multiplier
+    GROUP BY d.sector, d.multiplier, d.zone, d.miss_zone, d.miss_depth
   `).all(p.id);
+}
+// Chuckin's existing call sites keep working unchanged.
+function getChuckinHeatmap(playerName, mode) { return getDartHeatmap(playerName, 'chuckin', mode); }
+
+// Bounce-outs have no position to plot (v1, see docs/archive/dartboard-zone-tracking-roadmap.md
+// "Bounce-out tracking") — surfaced as a plain count alongside the heatmap rather than
+// a spatial overlay.
+function getBounceOutCount(playerName, gameType, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return 0;
+  const scope = _scope({ mode, gameType });
+  return db.prepare(`
+    SELECT COUNT(*) AS n
+    FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id
+    WHERE t.player_id=? AND d.bounced=1 ${scope}
+  `).get(p.id).n;
 }
 
 function getMetricHistory(playerName, metric, period, opts = {}) {
@@ -2591,11 +2652,14 @@ function getDartAnalytics(playerName, mode) {
   // dedicated heatmap/treble-rate stats instead of feeding this cross-game-type view.
   const BASE = `FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id WHERE t.player_id = ? AND t.bust = 0 ${NOT_CHUCKIN}`;
 
-  // 1 — Most hit sector/multiplier combinations
+  // 1 — Most hit sector/multiplier combinations. Grouping by zone too (docs/dartboard-
+  // zone-tracking-roadmap.md) splits a single-hit number's inner/outer regions into
+  // separate rows ("S20 (inner)" vs "S20 (outer)") for players who want that precision
+  // in this flat list, same as the geometric heatmap shows it.
   const topSectors = db.prepare(`
-    SELECT d.sector, d.multiplier, COUNT(*) AS hits
+    SELECT d.sector, d.multiplier, d.zone, COUNT(*) AS hits
     ${BASE} ${mf}
-    GROUP BY d.sector, d.multiplier
+    GROUP BY d.sector, d.multiplier, d.zone
     ORDER BY hits DESC
     LIMIT 15
   `).all(p.id);
@@ -2831,7 +2895,7 @@ function getFullDatabaseExport() {
     tournamentPlayers: db.prepare('SELECT * FROM tournament_players').all(),
     tournamentRounds: db.prepare('SELECT * FROM tournament_rounds').all(),
     tournamentMatches: db.prepare('SELECT * FROM tournament_matches').all(),
-    // docs/dart-builder-roadmap.md: same "your data, take it with you" standing rule
+    // docs/archive/dart-builder-roadmap.md: same "your data, take it with you" standing rule
     // as the tournament tables above — a player's dart components/loadouts are
     // ordinary user data with no secrets, so they belong in the export too.
     dartComponents: db.prepare('SELECT * FROM dart_components').all(),
@@ -3291,6 +3355,11 @@ function getAroundTheWorldProgress(playerName) {
    with no server-side reordering. */
 const TOURNAMENT_X01_CATEGORIES = ['501', '301', '170', '101'];
 const TOURNAMENT_MAX_PLAYERS = 128;
+// docs/tournament-mode-roadmap.md §7: how many seed slots worse the winner must be
+// than the opponent they beat to count as an upset — mirrors the spirit of the H2H
+// Giant Slayer's 15-average gap without reusing its exact (average-based) threshold,
+// which doesn't apply to a seed number.
+const TOURNAMENT_GIANT_SLAYER_SEED_THRESHOLD = 3;
 
 function _nextPowerOfTwo(n) { let p = 1; while (p < n) p *= 2; return p; }
 
@@ -3345,6 +3414,18 @@ function _advanceTournamentMatch(matchId, winnerId) {
   if (loserId != null) {
     db.prepare(`UPDATE tournament_players SET status = 'eliminated' WHERE tournament_id = ? AND player_id = ?`)
       .run(tournamentId, loserId);
+    // docs/tournament-mode-roadmap.md §7: Giant Slayer (Tournament) — checked right
+    // here rather than a second parallel hook, same reasoning as Champion below.
+    // Never fires for a bye (loserId is null, guarded by the enclosing `if`).
+    const seedRows = db.prepare(
+      `SELECT player_id, seed FROM tournament_players WHERE tournament_id = ? AND player_id IN (?, ?)`
+    ).all(tournamentId, winnerId, loserId);
+    const winnerSeed = seedRows.find(r => r.player_id === winnerId)?.seed;
+    const loserSeed = seedRows.find(r => r.player_id === loserId)?.seed;
+    if (winnerSeed != null && loserSeed != null && winnerSeed - loserSeed >= TOURNAMENT_GIANT_SLAYER_SEED_THRESHOLD) {
+      const winnerName = db.prepare('SELECT name FROM players WHERE id = ?').get(winnerId)?.name;
+      if (winnerName) awardBadge(winnerName, 'tournament_giant_slayer', true);
+    }
   }
   if (match.winner_next_match_id) {
     const col = match.winner_next_slot === 1 ? 'player1_id' : 'player2_id';
@@ -3355,6 +3436,10 @@ function _advanceTournamentMatch(matchId, winnerId) {
       .run(winnerId, loserId, tournamentId);
     db.prepare(`UPDATE tournament_players SET status = 'champion' WHERE tournament_id = ? AND player_id = ?`)
       .run(tournamentId, winnerId);
+    // docs/tournament-mode-roadmap.md §7: Champion badge, awarded right where
+    // champion_id itself is set — not a second parallel hook.
+    const championName = db.prepare('SELECT name FROM players WHERE id = ?').get(winnerId)?.name;
+    if (championName) awardBadge(championName, 'tournament_champion', true);
   }
 }
 
@@ -3499,6 +3584,38 @@ function getTournament(id) {
   return { ...t, matches, players };
 }
 
+// docs/tournament-mode-roadmap.md §8: Player Profile "Tournaments" stat block —
+// wins, runner-up count, and best finish reached, all simple COUNT/MAX-style
+// queries against the existing tournament tables, no new derived formula.
+function getTournamentStats(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return { wins: 0, runnerUps: 0, bestFinish: null };
+  const wins = db.prepare('SELECT COUNT(*) AS n FROM tournaments WHERE champion_id = ?').get(p.id).n;
+  const runnerUps = db.prepare('SELECT COUNT(*) AS n FROM tournaments WHERE runner_up_id = ?').get(p.id).n;
+  // Best finish reached = the furthest round this player was ever placed into
+  // (win or loss, including a bye placement) across every tournament they've
+  // played, one row per tournament they appear in at all. A player's max
+  // round_no within one tournament IS the furthest they reached there, since
+  // round N+1 placement only ever happens after winning round N.
+  const rows = db.prepare(`
+    SELECT tr.tournament_id AS tid, MAX(tr.round_no) AS maxRoundNo,
+           (SELECT COUNT(*) FROM tournament_rounds WHERE tournament_id = tr.tournament_id) AS totalRounds
+    FROM tournament_matches tm
+    JOIN tournament_rounds tr ON tr.id = tm.round_id
+    WHERE tm.player1_id = ? OR tm.player2_id = ?
+    GROUP BY tr.tournament_id
+  `).all(p.id, p.id);
+  let bestFinish = null, bestRoundsFromFinal = Infinity;
+  for (const r of rows) {
+    const roundsFromFinal = r.totalRounds - r.maxRoundNo;
+    if (roundsFromFinal < bestRoundsFromFinal) {
+      bestRoundsFromFinal = roundsFromFinal;
+      bestFinish = _roundLabel(roundsFromFinal, r.maxRoundNo);
+    }
+  }
+  return { wins, runnerUps, bestFinish };
+}
+
 // Starts the linked game for a "ready" match (both players known, not already
 // started or complete) — reuses createGame() exactly as a normal New Game H2H
 // match would, with the round's own configured category/legs/sets.
@@ -3568,7 +3685,7 @@ registerDeletePlayerGuard((player) => {
   return row ? `${player.name} is still active in the in-progress tournament "${row.name}" — eliminate them or finish the tournament before deleting.` : null;
 });
 
-/* ---------- dart builder / loadouts (docs/dart-builder-roadmap.md) ----------
+/* ---------- dart builder / loadouts (docs/archive/dart-builder-roadmap.md) ----------
    dart_components is a player-owned catalog of parts; loadouts combine exactly one
    component per type plus a tip texture. Every enum field is a closed list for v1
    (the roadmap doc's "closed enum vs free-text escape hatch" open question is
@@ -3839,7 +3956,7 @@ function getDefaultLoadout(playerName) {
   return _loadoutRowToObj(db.prepare('SELECT * FROM loadouts WHERE player_id = ? AND is_default = 1').get(p.id));
 }
 
-// Per docs/dart-builder-roadmap.md's "Stats" section: this lives only on the Dart
+// Per docs/archive/dart-builder-roadmap.md's "Stats" section: this lives only on the Dart
 // Builder screen for the loadout currently open, not as a Player Profile filter.
 // No new derived formula — every figure here reuses the exact same computation
 // getPlayerStatBubbles() already uses (X01_ONLY 3-dart average, 180 count), just
@@ -3897,7 +4014,7 @@ module.exports = {
   getCricketMprLeaderboard, getCricketWinLeaderboard, getCricketPerfectLegStats,
   getDoublesPracticeStatBubbles, getDoublesPracticePersonalBests,
   getDoublesPracticeAccuracyLeaderboard, getDoublesPracticeBestRoundStats,
-  getChuckinStatBubbles, getChuckinPersonalBests, getChuckinHeatmap,
+  getChuckinStatBubbles, getChuckinPersonalBests, getChuckinHeatmap, getDartHeatmap, getBounceOutCount,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics, getCoachingInsights,
@@ -3907,7 +4024,7 @@ module.exports = {
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,
   awardBadge, revokeBadge, getPlayerBadges, getH2HSummary, getAroundTheWorldProgress,
   startChallengeAttempt, completeChallengeAttempt, getChallengeStatus, getChallengeHistory, resetChallengeAttempt,
-  createTournament, listTournaments, getTournament, startTournamentMatch, recordWalkover,
+  createTournament, listTournaments, getTournament, startTournamentMatch, recordWalkover, getTournamentStats,
   getDartComponentOptions,
   createComponent, listComponents, updateComponent, deleteComponent,
   createLoadout, listLoadouts, getLoadout, updateLoadout, deleteLoadout, duplicateLoadout,

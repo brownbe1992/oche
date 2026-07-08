@@ -94,13 +94,12 @@
 >
 > **✅ Built (2026-07): Night Owl/Early Bird now fire from Cricket turns too**
 > (were X01-only by accident of code structure, not design — see "Cricket badge
-> parity"), via a shared `awardTimeOfDayBadges(p)` helper. **Two more items
-> designed but not started**, each its own tracked item on
-> `docs/open-roadmap-items.md`: two new Cricket-native badges (Whitewash, a
-> Cricket-shaped Comeback Kid), and a Guided Around the Clock/World practice
-> drill mode (a fourth Practice Drill Mode, turning the existing passive
-> completion tracking into something actively practicable with live progress
-> feedback).
+> parity"), via a shared `awardTimeOfDayBadges(p)` helper. **✅ Built (2026-07):
+> two new Cricket-native badges** (🧹 Whitewash, 🔥 Comeback Kid (Cricket)) —
+> see "New Cricket-native badges" below. **One item remains**, tracked on
+> `docs/open-roadmap-items.md`: a Guided Around the Clock/World practice drill
+> mode (a fourth Practice Drill Mode, turning the existing passive completion
+> tracking into something actively practicable with live progress feedback).
 
 ## Goal
 
@@ -770,24 +769,49 @@ Cricket turn committed at a monkey-patched `Date.prototype.getHours() = 3`
 fires `POST /api/badges/award {badgeId:'nightowl'}`, and an X01 turn at hour 6
 still fires `earlybird` unchanged (regression check).
 
-### 2. New Cricket-native badges (not X01 ports) — still open
+### 2. New Cricket-native badges (not X01 ports) — ✅ Built (2026-07)
 
 Rather than forcing X01 concepts (checkout-based Comeback Kid, average-based
 Giant Slayer) onto a game with no checkouts and a different averaging concept
-(MPR), two badges shaped around what actually makes a Cricket leg dramatic:
+(MPR), two badges shaped around what actually makes a Cricket leg dramatic —
+both 2-player only, same restriction as X01's own social/margin-of-victory
+badges:
 
-- **🧹 Whitewash** — won a leg without the opponent closing a single number
-  (`Object.keys(opp.marks||{}).filter(n=>(opp.marks[n]||0)>=3).length === 0` at
-  the moment the leg is won) — a genuine Cricket-native dominance signal, the
-  same spirit as X01's margin-of-victory badges but shaped around Cricket's own
-  win condition (closing numbers) instead of remaining score.
-- **🔥 Comeback Kid (Cricket)** — won a leg after trailing on points by a
-  meaningful margin at some point during it, mirroring X01 Comeback Kid's
-  structure but tracking Cricket's own `points` field instead of X01's
-  remaining-score deficit. Needs its own `badgeId` (distinct trigger mechanics
-  from the X01 version, same reasoning as the tournament Giant Slayer note
-  above) and, like every Mental Game/Clutch badge before it, a real threshold
-  chosen against actual play data, not guessed here.
+- **🧹 Whitewash** (`cricketwhitewash`) — won a leg without the opponent
+  closing a single number. The pure trigger condition,
+  `isCricketWhitewash(opponentMarks)` (`frontend/scoring.js`, unit-tested in
+  `backend/test/scoring.test.js` — the same "extract for testability"
+  precedent `challengeBadgeSignals()`/`chuckinTiersReached()` already set),
+  checked in `onLegWonCricket(wi)` (`frontend/index.html`) once the leg's
+  winner and opponent are known — a genuine Cricket-native dominance signal,
+  the same spirit as X01's margin-of-victory badges but shaped around
+  Cricket's own win condition (closing numbers) instead of remaining score.
+- **🔥 Comeback Kid (Cricket)** (`cricketcomebackkid`) — won a leg after
+  trailing on points by 20+ at some point during it, mirroring X01 Comeback
+  Kid's structure but tracking Cricket's own `points` field instead of X01's
+  remaining-score deficit. A new `p.legWorstPointsDeficit` field on the
+  Cricket player record (`newMatchPlayerCricket()`) accumulates the running
+  worst deficit per-visit in `enterTurnCricket()`, the exact same "sample
+  before this visit's own update, using the opponent's currently-committed
+  points" timing X01's `legWorstDeficit` already uses — restored on undo the
+  same way every other per-leg achievement-tracking field is. The threshold
+  itself (20 points — Cricket's points scale is much smaller/more variable
+  than X01's 501 countdown, so X01's 100-point threshold doesn't transfer
+  directly) is a separate pure function, `cricketComebackAchieved()`
+  (`frontend/scoring.js`, unit-tested), chosen with the user rather than
+  guessed. Has its own `badgeId`, distinct trigger mechanics from the X01
+  version (same reasoning as the tournament Giant Slayer note above).
+
+Both badges reuse the existing generic recurring-badge machinery
+(`awardRecurringBadge()`/`POST /api/badges/award {once:false}`) — no backend
+schema or route changes were needed. Verified end-to-end with Playwright
+against a live server: a 2-player Cricket leg where the opponent never marks a
+single number correctly fires Whitewash; a separate leg where the eventual
+winner trails by 57 points (well past the 20-point threshold) before closing
+everything out for the win correctly fires Comeback Kid (Cricket) — and a
+leg where the "trailing" opponent *did* close a number along the way
+correctly does **not** also fire Whitewash, confirming the two conditions
+don't leak into each other.
 
 A Cricket equivalent of Giant Slayer/The Rematch/Grudge Match (all of which key
 off an X01-specific lifetime-average or H2H-summary lookup) was considered and

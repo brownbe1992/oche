@@ -37,8 +37,10 @@ convention in `CLAUDE.md`.
 - [13. Database Schema](#13-database-schema)
 - [14. API Reference](#14-api-reference)
 - [15. Tournament Mode](#15-tournament-mode)
-- [16. Known Limitations & Open Gaps](#16-known-limitations--open-gaps)
-- [17. Troubleshooting](#17-troubleshooting)
+- [16. Dart Builder / Loadouts](#16-dart-builder--loadouts)
+- [17. Dartboard Zone / Miss / Bounce-Out Tracking](#17-dartboard-zone--miss--bounce-out-tracking)
+- [18. Known Limitations & Open Gaps](#18-known-limitations--open-gaps)
+- [19. Troubleshooting](#19-troubleshooting)
 
 ---
 
@@ -250,8 +252,12 @@ and revokes any badge that turn awarded (`snap.badgeReverts`, populated by
 award runs — see §4/§5 for the undo-vs-async-award race handling). Only one
 level of undo exists — `game.lastTurnSnapshot` is set to `null` immediately
 after an undo, so undo cannot be chained. Cricket has its own, much smaller
-undo (`undoLastTurnCricket()`, dispatched from `undoLastTurn()`) — no
-achievements/challenge state to restore, just `marks`/`points`/dart counts.
+undo (`undoLastTurnCricket()`, dispatched from `undoLastTurn()`) — `marks`/
+`points`/dart counts, `legWorstPointsDeficit` (Comeback Kid (Cricket) — §4,
+added 2026-07 alongside Whitewash), and `badgeReverts`/`voided` for the two
+Cricket achievements (9 Marks, Perfect Leg) plus the two Cricket-native badges
+(Whitewash, Comeback Kid (Cricket)) — no Daily Challenge integration, since
+challenges are X01-only.
 
 ### Cricket rules — `GAME_TYPES.cricket.evaluateVisit(player, darts, game)` (`frontend/index.html`)
 
@@ -1028,22 +1034,25 @@ revokes any `chuckin180` badge that dart awarded — see above.
 
 ## 4. Achievements & Badges
 
-47 badges (23 X01 + 2 Cricket + 3 Daily Challenge + 19 Just Chuckin' It) — that
-split is by which table each is listed under below (and which section of the
-Player Profile's Badge Case each renders in, via `BADGE_INFO`'s `cricket`/
-`challenge`/`chuckin` flags — anything without one of those flags buckets as
-X01), not a strict statement of which game types can trigger it: Night Owl/
-Early Bird (listed under X01) are one exception, checked from both
-`enterTurn()` and `enterTurnCricket()` via a shared `awardTimeOfDayBadges()`
-helper (2026-07 — previously Cricket-triggerable by neither, an accident of
-code structure rather than a deliberate scoping decision); Ghost Slayer
-(also listed under X01, since Ghost Opponent is X01-only) is the other,
-checked inline in `recordGhostRace()` (`backend/db.js`) rather than from the
-frontend at all, since the win it depends on is already being written to the
-database right there. Tracked in the `player_badges` table (one row per
-player+badge, with a running `count`). X01 detection logic otherwise lives in
-`frontend/index.html`'s `enterTurn()`/`onLegWon()`; Cricket's 2 own badges live
-in `enterTurnCricket()`/`onLegWonCricket()`; Daily Challenge's 3 badges are
+51 badges (23 X01 + 4 Cricket + 2 Tournament + 3 Daily Challenge + 19 Just
+Chuckin' It) — that split is by which table each is listed under below (and
+which section of the Player Profile's Badge Case each renders in, via
+`BADGE_INFO`'s `cricket`/`challenge`/`chuckin`/`tournament` flags — anything
+without one of those flags buckets as X01), not a strict statement of which
+game types can trigger it: Night Owl/Early Bird (listed under X01) are one
+exception, checked from both `enterTurn()` and `enterTurnCricket()` via a
+shared `awardTimeOfDayBadges()` helper (2026-07 — previously
+Cricket-triggerable by neither, an accident of code structure rather than a
+deliberate scoping decision); Ghost Slayer (also listed under X01, since Ghost
+Opponent is X01-only) is another, checked inline in `recordGhostRace()`
+(`backend/db.js`) rather than from the frontend at all, since the win it
+depends on is already being written to the database right there. The two
+Tournament badges (Champion, Giant Slayer (Tournament)) are the same shape —
+checked server-side in `_advanceTournamentMatch()` — see their own table
+below. Tracked in the `player_badges` table (one row per player+badge, with a
+running `count`). X01 detection logic otherwise lives in `frontend/index.html`'s
+`enterTurn()`/`onLegWon()`; Cricket's 4 own badges live in
+`enterTurnCricket()`/`onLegWonCricket()`; Daily Challenge's 3 badges are
 checked in `checkChallengeBadges()`, called right after every
 `/api/challenges/complete` response; Just Chuckin' It's 18 laddered milestones
 are checked in `checkChuckinMilestones()`, called after every dart from
@@ -1060,11 +1069,20 @@ same function (see §2/§3's own coverage of it).
   state-based badges whose trigger condition stays true forever once crossed
   (`INSERT OR IGNORE`, so re-checking an already-true condition never inflates
   the count past 1): **Around the Clock, Around the World, Grudge Match, First
-  100+ Checkout, Full Rotation, Ghost Slayer** — Ghost Slayer is the one
-  exception to "a direct `Backend.send()` call": its `awardBadge(..., true)`
-  call happens server-side, inside `recordGhostRace()` itself (see above), and
-  its `newlyEarned` flag reaches the frontend as `recordGhostRace()`'s own
-  `ghostSlayerNewlyEarned` field rather than a separate response.
+  100+ Checkout, Full Rotation, Ghost Slayer, Champion, Giant Slayer
+  (Tournament)** — the last three are the exceptions to "a direct
+  `Backend.send()` call": Ghost Slayer's `awardBadge(..., true)` call happens
+  server-side, inside `recordGhostRace()` itself (see above), and its
+  `newlyEarned` flag reaches the frontend as `recordGhostRace()`'s own
+  `ghostSlayerNewlyEarned` field rather than a separate response. Champion and
+  Giant Slayer (Tournament) go one step further: their `awardBadge(..., true)`
+  calls happen inside `_advanceTournamentMatch()` with no response field for
+  the frontend to read at all — the frontend instead detects a newly-earned
+  badge after the fact by diffing `GET /api/players/badges` against the
+  pre-match `earnedBadgeCache` snapshot (see the Tournament badges table
+  below), since a normal `POST /api/games/:id/complete` triggers the award via
+  the `onGameCompleted` hook with no room to thread a badge result back
+  through that response.
 
 ### The 23 badges, exact trigger conditions
 
@@ -1113,13 +1131,35 @@ co-fire with a chain badge or with each other in the same turn/leg:
 | 👻 **Ghost Slayer** | First-ever `result==='win'` row this player writes to the `ghost_races` table (§13) — win a race against a replay of one of your own past legs (Ghost Opponent, below). Unlike every other badge in this table, checked server-side: `recordGhostRace()` (`backend/db.js`) calls `awardBadge(playerName, 'ghost_slayer', true)` on every win — `once` mode's `INSERT OR IGNORE` makes the call a no-op past the first time, so no separate first-win check is needed. **Once-badge.** |
 
 **Cricket badges** (checked in `enterTurnCricket()`/`onLegWonCricket()`,
-`frontend/index.html` — game-modes-roadmap.md build-order step 3, the direct
-analogs of 180 and the nine-darter):
+`frontend/index.html`). 9 Marks/Perfect Leg (game-modes-roadmap.md build-order
+step 3) are the direct analogs of 180 and the nine-darter; Whitewash/Comeback
+Kid (Cricket) (2026-07, "New Cricket-native badges") are deliberately *not*
+X01 ports — shaped around what makes a Cricket leg dramatic (closing numbers,
+points) instead of forcing X01's checkout/remaining-score concepts onto a game
+that has neither. Both are 2-player only, same restriction as X01's own
+social/margin-of-victory badges, and both have their pure trigger-condition
+logic in `frontend/scoring.js` (`isCricketWhitewash()`/
+`cricketComebackAchieved()`), unit-tested in `backend/test/scoring.test.js`:
 
 | Badge | Exact condition |
 |---|---|
 | 🎯 **9 Marks** | `darts.length===3 && marksThisVisit===9` — 3 darts, each a treble on an in-play number, the maximum possible marks in one visit (same framing as 180 being the max possible X01 visit score). **Recurring.** |
 | 🏆 **Perfect Leg** | `win && legDarts === theoreticalMinimum`, where the minimum is computed per match from `game.config.numbers`: each non-Bull number can close in a single treble (3 marks); Bull can't be trebled (`makeDart()` already downgrades a "treble bull" tap to a single), so it needs a minimum of 2 darts. A win at exactly this minimum already implies enough bonus marks were scored to strictly lead (the win condition in §2 guarantees that), so no separate points check is needed. **Recurring**, mega-tier overlay (confetti) like Nine-Darter. |
+| 🧹 **Whitewash** | `isCricketWhitewash(opp.marks)` at the moment the leg is won — every value in the opponent's `marks` object is `< 3` (nobody closed), checked in `onLegWonCricket(wi)`. 2-player only. **Recurring.** |
+| 🔥 **Comeback Kid (Cricket)** | `cricketComebackAchieved(w.legWorstPointsDeficit)` — `legWorstPointsDeficit >= 20` (Cricket's own threshold, chosen against Cricket's much smaller/more variable points scale than X01's 501 countdown, not X01's 100). `legWorstPointsDeficit` is the largest `(opponent.points - my.points)` seen at any point this leg, tracked in `enterTurnCricket()` the same "sample before this visit's own update" timing X01's `legWorstDeficit` uses. 2-player only. **Recurring.** |
+
+**Tournament badges** (`docs/tournament-mode-roadmap.md` §7 — checked server-side
+in `_advanceTournamentMatch()`, `backend/db.js`, the same function that already
+sets `winner_id`/`champion_id`, rather than a second parallel hook. Like Ghost
+Slayer, the frontend never computes these conditions itself — it only detects a
+newly-earned badge by diffing `GET /api/players/badges` against the pre-match
+`earnedBadgeCache` snapshot, inside `finishUnit()`'s `game.tournamentMatchId`
+branch, to fire the live celebration):
+
+| Badge | Exact condition |
+|---|---|
+| 🏆 **Champion** | Awarded to the winning player exactly where `_advanceTournamentMatch()` sets `tournaments.champion_id` (no `winner_next_match_id` — this was the final). **Once-badge.** |
+| ⚔️ **Giant Slayer (Tournament)** | On any tournament match result: `winner's tournament_players.seed - loser's seed >= 3` (`TOURNAMENT_GIANT_SLAYER_SEED_THRESHOLD`) — the winner was seeded at least 3 slots worse than the opponent they beat. Never fires on a bye advance (no real opponent was beaten). Mirrors the H2H Giant Slayer's headline concept with a seed-based threshold instead of an average-based one, and uses its own `badgeId` (`tournament_giant_slayer`) rather than the H2H `giantslayer` row, since the two trigger mechanics don't share a meaning. **Once-badge.** |
 
 **Daily Challenge badges** (checked in `checkChallengeBadges(playerName)`,
 `frontend/index.html` — called right after every `/api/challenges/complete`
@@ -1191,11 +1231,12 @@ screen-reader announcement (§11). There is no separate copy to maintain in
 three places — if you change a badge's description, change it once in
 `BADGE_INFO`.
 
-Five badges' live-overlay "type" key differs from their persisted `badge_id`
+Seven badges' live-overlay "type" key differs from their persisted `badge_id`
 (a historical naming mismatch, bridged by `ACH_TYPE_TO_BADGE_ID`):
 `first100checkout`→`first_100_checkout`, `grudgematch`→`grudge_match`,
 `aroundtheclock`→`around_the_clock`, `aroundtheworld`→`around_the_world`,
-`ghostslayer`→`ghost_slayer`.
+`ghostslayer`→`ghost_slayer`, `tournamentchampion`→`tournament_champion`,
+`tournamentgiantslayer`→`tournament_giant_slayer`.
 
 ### Undo interaction
 
@@ -1232,9 +1273,10 @@ reference — it defaults to `game.lastTurnSnapshot` at call time (correct for
 the synchronous majority of call sites, called directly from `enterTurn()`/
 `onLegWonCricket()`/etc.), but the handful of call sites that queue a badge
 from inside an async `.then()` (Around the Clock/World, First 100+ Checkout,
-Full Rotation, The Rematch, Grudge Match, Ghost Slayer) pass their own
-already-captured snap variable explicitly instead, since `game.lastTurnSnapshot` may have moved
-on to a newer turn by the time the response arrives. Two call sites
+Full Rotation, The Rematch, Grudge Match, Ghost Slayer, Champion, Giant Slayer
+(Tournament)) pass their own already-captured snap variable explicitly instead,
+since `game.lastTurnSnapshot` may have moved on to a newer turn by the time the
+response arrives. Two call sites
 (`challengeweek`, `challengemonth`) pass `null` deliberately — Daily Challenge
 streak badges have no undo-tracking at all (a separate, pre-existing gap;
 see `trackBadgeForUndo()` below), so no real snap exists to tag them with.
@@ -1974,7 +2016,7 @@ already-migrated database is a safe no-op).
 | `name` | `TEXT NOT NULL UNIQUE COLLATE NOCASE` | Case-insensitive unique |
 | `out_mode` | `TEXT NOT NULL DEFAULT 'double'` | `'double'` \| `'single'` — default checkout rule |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
-| `dart_weight` | `INTEGER` | **Retired as a write path** (`docs/dart-builder-roadmap.md`) — no UI sets this anymore; a selected loadout's barrel weight is the only source for `game_players.dart_weight` going forward (see §16). Existing values are left in place, unread by any current code path (`getPlayer`/`listPlayers` still return it for API back-compat, but nothing writes it, and `createGame()` never falls back to it) |
+| `dart_weight` | `INTEGER` | **Retired as a write path** (`docs/archive/dart-builder-roadmap.md`) — no UI sets this anymore; a selected loadout's barrel weight is the only source for `game_players.dart_weight` going forward (see §16). Existing values are left in place, unread by any current code path (`getPlayer`/`listPlayers` still return it for API back-compat, but nothing writes it, and `createGame()` never falls back to it) |
 | `pin_hash` / `pin_salt` | `TEXT` | scrypt hash/salt; `NULL` = no PIN, anyone may play as this player |
 | `pin_fail_count` | `INTEGER NOT NULL DEFAULT 0` | Incremented via `RETURNING` (see §9) |
 | `pin_locked_until` | `INTEGER` | Epoch ms |
@@ -1998,7 +2040,7 @@ already-migrated database is a safe no-op).
 | `game_id` | `INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE` | |
 | `player_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | |
 | `out_mode` | `TEXT NOT NULL DEFAULT 'double'` | Per-game checkout rule actually used (may differ from the player's current default) |
-| `dart_weight` | `INTEGER` | Snapshot at game start — **as of `docs/dart-builder-roadmap.md`**, sourced from the selected loadout's barrel `weight_g` (`NULL` if no loadout was selected), not from `players.dart_weight` (see §16) |
+| `dart_weight` | `INTEGER` | Snapshot at game start — **as of `docs/archive/dart-builder-roadmap.md`**, sourced from the selected loadout's barrel `weight_g` (`NULL` if no loadout was selected), not from `players.dart_weight` (see §16) |
 | `loadout_id` | `INTEGER REFERENCES loadouts(id) ON DELETE SET NULL` | The loadout selected for this player in this game, if any (§16). Nullable — playing without a loadout remains fully valid |
 
 ### `turns` (one row per visit, indexed on `player_id` and `game_id`)
@@ -2025,6 +2067,10 @@ already-migrated database is a safe no-op).
 | `is_treble` | `INTEGER GENERATED ALWAYS AS (...) STORED` | 1 iff `multiplier=3` on a numbered sector (1-20) |
 | `is_double` | `INTEGER GENERATED ALWAYS AS (...) STORED` | 1 iff `multiplier=2` and not a miss (includes double bull) |
 | `thrown_at` | `TEXT` | ISO timestamp, only populated when "Collect per-dart timing" is on |
+| `zone` | `TEXT` | `'inner'`\|`'outer'`\|`NULL` (docs/archive/dartboard-zone-tracking-roadmap.md) — which physical region of a **single hit** (sector 1-20, multiplier 1) was tapped: between bull and treble ("inner") or between treble and double ("outer"). Only ever populated by a Dartboard-mode tap; `NULL` for Pad-mode singles, every double/treble/bull (no inner/outer distinction exists there), and every row from before this feature existed |
+| `miss_zone` | `INTEGER` | `1`-`20`\|`NULL` — the wedge number nearest a **positioned miss** (Dartboard-mode tap on the miss ring outside the double). Always set together with `miss_depth`, never on a hit (`sector≠0`) |
+| `miss_depth` | `TEXT` | `'near'`\|`'far'`\|`NULL` — how close a positioned miss was: the band immediately outside the double ("near") vs. further out ("far"). Always set together with `miss_zone` |
+| `bounced` | `INTEGER` | `1`=this dart struck a real number/ring but bounced or fell out before it counted, `NULL` otherwise. `sector`/`multiplier` stay exactly `0`/`1` regardless — to every existing consumer (`evaluateVisit()`, every badge, `getGhostLegScript()`, `getFullDatabaseExport()`) a bounced dart is a completely ordinary miss row; v1 tracks only that it happened, not where (see REFERENCE.md §17) |
 
 ### `timeline_events`
 | Column | Type | Notes |
@@ -2141,7 +2187,7 @@ set → `in_progress`; else both player slots filled → `ready`; else `pending`
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 | `method` / `path` / `status` / `message` | nullable | One row per server-side 5xx response (§1's "Server error log"); pruned to the most recent 500 rows on every insert |
 
-### `dart_components` (§16, `docs/dart-builder-roadmap.md`)
+### `dart_components` (§16, `docs/archive/dart-builder-roadmap.md`)
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
@@ -2349,14 +2395,40 @@ Given N players and `bracketSize` = the smallest power of two ≥ N:
 - **A "Practice this" style deep link or bracket-tree drag/zoom** — not
   requested; the simple column layout was sufficient for single-elimination's
   much shallower tree (no winners/losers split to manage).
-- **Tournament stats on the player profile** (tournament wins, best finish) —
-  the roadmap doc's own step 4 stretch goal, not built.
+
+### Tournament badges and Player Profile stats (§7-8, built)
+
+- **Champion / Giant Slayer (Tournament) badges** — see §4's "Tournament
+  badges" table for exact trigger conditions. Both are awarded inline from
+  `_advanceTournamentMatch()` (`backend/db.js`), not a second parallel hook —
+  Champion right where `champion_id` itself is set, Giant Slayer (Tournament)
+  right where the loser is marked `eliminated`. Since neither `POST
+  /api/games/:id/complete` nor the `onGameCompleted` hook has any response
+  channel back to the frontend, the live celebration is detected instead —
+  `finishUnit()`'s `game.tournamentMatchId` branch fetches `GET
+  /api/players/badges` after the match completes and diffs it against the
+  pre-match `earnedBadgeCache` snapshot (the same "already earned?" check
+  Around the World already uses), firing `queueBadge()`/`fireMomentCard()` for
+  whichever badge is newly present.
+- **`GET /api/players/tournament-stats`** (`?name=...`, public) →
+  `{ wins, runnerUps, bestFinish }`, backed by `getTournamentStats()`
+  (`backend/db.js`). `wins`/`runnerUps` are plain `COUNT(*)` queries against
+  `tournaments.champion_id`/`runner_up_id`. `bestFinish` is the furthest round
+  label (`"Final"`/`"Semifinal"`/`"Quarterfinal"`/`"Round N"`) this player was
+  ever placed into across every tournament they've appeared in (win, loss, or
+  bye) — computed per tournament as `MAX(tournament_matches.round_no)` among
+  rows naming this player, converted to "rounds from final" via the same
+  `_roundLabel()` helper bracket generation already uses, then the single best
+  (closest-to-final) result across all their tournaments is kept. Rendered as
+  a "Tournaments" `pp-section` on the Player Profile's H2H tab (gated to the
+  X01 game-type toggle, since tournaments are X01-only), loaded by
+  `loadTournamentStats()`.
 
 ---
 
 ## 16. Dart Builder / Loadouts
 
-`docs/dart-builder-roadmap.md`. Backend: `backend/db.js`'s "dart builder /
+`docs/archive/dart-builder-roadmap.md`. Backend: `backend/db.js`'s "dart builder /
 loadouts" section (component/loadout CRUD, `_resolveLoadoutForParticipant()`,
 `getLoadoutStats()`). Frontend: `frontend/index.html`'s "DART BUILDER /
 LOADOUTS" block, reachable via a player's profile ("🎯 Manage Loadouts") or the
@@ -2427,17 +2499,88 @@ Returns games played, wins, darts thrown, 3-dart average, 180 count, and
 checkout count — all reusing `getPlayerStatBubbles()`'s exact existing formulas
 (no new derived formula invented), just re-scoped.
 
+### Loadout comparison view (2026-07)
+
+A third `dartBuilderView` state (`'compare'`, alongside `'list'`/`'edit'`),
+reached from a "⚖️ Compare Loadouts" button on the loadout list screen (shown
+once a player has 2+ loadouts). No new backend query — `openDartBuilderCompare()`
+fetches every one of the player's loadouts via the existing `listLoadouts()`
+plus one `getLoadoutStats()` call per loadout (`Promise.all`, not sequential),
+caches both in memory for the screen visit, then renders a side-by-side table:
+components, games played, wins, win % (`wins/gamesPlayed*100`, rounded — not a
+new tested formula, the same untested presentational arithmetic the roster
+page's own win-rate chip already uses), darts thrown, 3-dart average, 180s,
+checkouts. Every loadout is selected by default; tapping a loadout's toggle
+button (`aria-pressed`, same accessible toggle-group pattern the Custom Cricket
+number picker already uses) adds/removes its column from the table **without
+re-fetching** — `_dartBuilderCompareStats` is only cleared (forcing a fresh
+fetch) when the screen is freshly entered via `openDartBuilderCompare()`, since
+there's no way to mutate a loadout from within the compare screen itself.
+Requires at least 2 loadouts selected to render a table (guides toward
+selecting more otherwise); requires at least 2 loadouts to exist at all to
+reach the screen in the first place. Verified end-to-end with Playwright
+against a live server: two loadouts with genuinely different recorded games
+(one win/one loss, different darts/averages/180s/checkouts) render correct,
+distinct per-column figures, and toggling a column off then back on correctly
+removes/restores it without corrupting the cached stats.
+
+### Visual icon/diagram per barrel shape/grip and flight shape (2026-07)
+
+Closes the accessibility gap the v1 dropdowns left open (terms like "torpedo,"
+"knurled," or "kite" aren't self-explanatory by name alone). Rather than
+replacing the barrel-shape/barrel-grip/flight-shape `<select>` elements with a
+non-native picker (a real accessibility regression risk if built without full
+keyboard support), they're replaced with an **icon-button group** — the same
+accessible toggle-group shape (`role="group"`, per-button `aria-pressed`) the
+Custom Cricket number picker already uses, so keyboard/focus behavior stays
+equal or better, not worse. `COMPONENT_ICONS` (`frontend/index.html`) holds one
+small hand-coded inline SVG per enum value (10 total: 3 barrel shapes, 3 barrel
+grips, 4 flight shapes) — plain geometric outlines using `currentColor`, the
+same "no external assets, hand-coded SVG" convention `buildDartboard()` already
+established, not a photorealistic illustration. `iconPickerHtml(fieldId,
+iconSetKey, values, groupLabel, selected)` renders one field's button row plus
+a **hidden `<input>`** carrying `fieldId` — deliberately kept as the exact same
+element id (`ce-shape`/`ce-grip`) the old `<select>` used, so
+`submitComponentEditor()`'s existing `document.getElementById(id).value` reads
+needed **zero changes**. Each icon is `aria-hidden="true"` (decorative only —
+the button's own text label, not the icon, is the accessible name, so meaning
+is never conveyed by shape alone); shaft's "Type" field (fixed/spinning) is
+unaffected, staying a plain `<select>` since it was never named in the
+accessibility gap. Verified end-to-end with Playwright: clicking an icon
+button updates the hidden input's value and `aria-pressed` state correctly,
+and the saved component persists the clicked value.
+
+### "Quick-add full set" one-shot entry form (2026-07)
+
+A fourth `dartBuilderView` state (`'quickadd'`), reached from a "⚡ Quick Add
+Full Set" button on the loadout list screen. No new backend endpoint —
+`submitDartBuilderQuickAdd()` orchestrates the same `createComponent()` ×3 +
+`createLoadout()` calls the normal 3-modal flow already makes, sequentially
+(not `Promise.all` — stopping partway on a validation failure is preferable to
+firing all three in parallel and reconciling which succeeded), just from one
+screen with all of a barrel/shaft/flight's fields (name, length, weight/type,
+material, shape/grip via the same icon pickers above) plus the loadout's own
+name and tip texture, and one Save button instead of three separate "+ New
+{type}" round trips followed by a fourth loadout-save step. Field ids are
+`qa-{type}-{field}`-prefixed so all three components' forms can coexist on one
+page without id collisions with each other or with the (unrelated,
+not-simultaneously-open) component-editor modal. On success, navigates
+straight to the new loadout's edit view (its stats section, showing 0s until
+first played). On a partial failure (e.g. the flight name is missing after the
+barrel and shaft already saved), the error message explicitly notes that
+already-created components remain in the player's catalog, assignable from the
+normal editor — nothing is silently lost, since a `dart_components` row is a
+real, independently useful entity on its own, not scoped to the loadout it was
+created alongside. Verified end-to-end with Playwright: one submit creates all
+three components plus a loadout linking them, with icon-picker shape/grip
+selections correctly persisted on the barrel and flight.
+
 ### Deliberately out of scope for this pass
 
-- **Visual icon/diagram per barrel shape, barrel grip, and flight shape option**
-  — the accessibility requirement the design doc called for; v1 ships
-  text-label-only dropdowns instead. Tracked on `docs/open-roadmap-items.md`.
-- **"Quick-add full set" one-shot entry form** — building a loadout is three
-  "+ New {type}" taps plus naming it, not a single combined form. Tracked
-  separately.
-- **Optional photo upload per component.** Tracked separately.
-- **Loadout comparison view** (side-by-side stats for 2+ loadouts) — always a
-  stretch goal, not required for v1. Tracked separately.
+- **Optional photo upload per component** — considered, explicitly dropped
+  (2026-07): it was framed as an *alternative* to a generic shape/grip icon
+  set, not additive to one, and the icon set above already covers that need.
+  Not tracked further.
 - **A literal CoD/Halo-gunsmith illustration** (centered dart, fanning
   leader-line callouts) — shipped instead as a stacked grouped-section form,
   functionally equivalent and inherently mobile-responsive (no wide layout to
@@ -2445,7 +2588,110 @@ checkout count — all reusing `getPlayerStatBubbles()`'s exact existing formula
 
 ---
 
-## 17. Known Limitations & Open Gaps
+## 17. Dartboard Zone / Miss / Bounce-Out Tracking
+
+`docs/archive/dartboard-zone-tracking-roadmap.md`. Dartboard-mode-only positional
+metadata riding alongside ordinary `darts` rows — no scoring behavior change,
+purely a data-granularity and heatmap-visualization feature. Backend:
+`getDartHeatmap()`/`getBounceOutCount()` in `backend/db.js`. Frontend:
+`buildDartboard()`, `buildDartHeatmap()`, `throwDart()`/`throwDartBoard()`/
+`throwBounceOut()` in `frontend/index.html`.
+
+### Zone tracking — inner vs. outer single
+
+A real dartboard number wedge has two physically distinct single-scoring
+regions (inner: between bull and treble; outer: between treble and double),
+both scoring identically. `buildDartboard()` already draws them as separate
+SVG paths (`R.bullOut`→`R.trebleIn` and `R.trebleOut`→`R.doubleIn`); each
+path's `onclick` now passes a third argument — `throwDartBoard(sector, 1,
+'inner')` / `throwDartBoard(sector, 1, 'outer')` — that threads through
+`throwDart()` into the dart object as `d.zone`, then into `darts.zone` via
+`addTurn()`. A double, treble, or bull hit never carries a zone (no
+inner/outer distinction physically exists for those), and a Pad-mode single
+never can either (a Multiplier+Number grid has no geometric tap position) —
+`zone` stays `NULL` for both, permanently, by design; **scope is Dartboard-mode
+singles only, never retrofitted or backfilled**.
+
+### Miss-area tracking — a two-band positional miss ring
+
+`buildDartboard()`'s 20 angular wedges extend radially outward past the
+double ring into two new rings — `R.missNear` (270) and `R.missFar` (310),
+the SVG's `viewBox` enlarged from `"0 0 500 500"` to `"0 0 660 660"` (board
+recentered at `CX=CY=330`) to fit them. Tapping a miss-ring segment records
+`sector:0, multiplier:1, missZone:<nearest wedge 1-20>, missDepth:'near'|'far'`
+— `throwDartBoard(0, 1, null, wedgeNum, 'near'|'far')`. **The old flat
+`#board-miss-btn` (Dartboard-mode's only miss entry point) no longer exists**
+— every Dartboard-mode miss now has to land in one of the two rings. Pad
+mode's own inline-created Miss button (built by `renderPad()`, a completely
+separate code path) is untouched and still produces a positionless miss
+(`missZone`/`missDepth` both `NULL`). `miss_zone`/`miss_depth` are always set
+or unset together; `sector`/`multiplier` stay exactly `0`/`1` for every miss
+regardless of input mode, so every existing `sector===0` consumer
+(`evaluateVisit()`, the "Where'd It Go?" badge, `getGhostLegScript()` replay)
+needs zero changes.
+
+### Bounce-out tracking (v1 — flat count, no position)
+
+A **third, distinct dart outcome** from a genuine miss: the dart struck a
+real number/ring but didn't stay long enough to count. `darts.bounced=1`
+marks it, with `sector`/`multiplier` still exactly `0`/`1` — to every
+existing consumer a bounced dart is a completely ordinary miss row. One
+**"Bounce Out" button** (`throwBounceOut()` → `throwDart(0, undefined,
+undefined, undefined, true)`) sits where the old flat Miss button used to,
+available in **every** game type and both input modes — including Cricket's
+own dedicated pad (`renderPadCricket()`), which has no Pad/Dartboard toggle of
+its own to hang that availability off of. No toggle, no position captured,
+one dart committed immediately per press. Surfaced as a plain "Bounce-outs: N"
+count line next to the Player Profile's heatmap (`getBounceOutCount()`, `GET
+/api/players/bounce-outs`), not a spatial marker — v1 genuinely has no
+position to plot. **v2 (positional capture) is explicitly deferred**, gated on
+`docs/camera-scoring-roadmap.md` existing — manually reconstructing where a
+dart struck *after* it already fell isn't reliable data; a camera has genuine
+ground truth at the moment of impact, a human guessing under time pressure
+doesn't.
+
+### The generalized dartboard heatmap (X01, Cricket, Doubles Practice, Chuckin)
+
+Originally Chuckin-exclusive (`getChuckinHeatmap()`/`buildChuckinHeatmap()`);
+generalized since `darts` is the one universal per-dart table every game type
+writes into. `getChuckinHeatmap(playerName, mode)` is now a thin wrapper
+around `getDartHeatmap(playerName, gameType, mode)`, scoped via the same
+`_scope({mode, gameType})` helper every other per-game-type query already
+uses. `GET /api/players/chuckin-heatmap` is kept exactly as-is for backward
+compatibility; `GET /api/players/dart-heatmap?name=&gameType=&mode=` is the
+generalized surface. The Player Profile's "Dartboard Heatmap" section
+(`dart-heatmap-section`/`dart-heatmap-body`, inside the shared `chartSection`
+markup) now shows on all four game-type tabs instead of Chuckin only —
+`loadDartHeatmap()` fires for whichever tab is currently active, replacing the
+old `if(playerGameType !== 'chuckin') return` early-out.
+
+`buildDartHeatmap(cells, {ariaLabel})` renders three things per number: the
+inner-single and outer-single regions (each independently shaded by hit
+count), and — new — the miss ring (shaded by `missHeat(wedge, depth)`, its
+**own independent heat-scale normalization**, not shared with the scoring
+regions, since hit and miss counts are wildly different population sizes per
+player). A **zone-unspecified single** (Pad mode, or a pre-feature row) is
+tracked separately (`unspecMap`) and never silently folded into either real
+bucket or split 50/50 — instead it draws a faint diagonal hatch overlay
+(`url(#zoneHatch)` SVG pattern) across *both* single regions for that number,
+a third visual state distinct from "never hit" and from real inner/outer
+heat. The same distinction extends to the flat `topSectors` list
+(`dartLabelFromParts()` appends `" (zone unknown)"` to a zone-less single,
+never to a double/treble/bull, which never had a zone concept at all).
+
+### Testing
+
+`backend/test/db.chuckin-stats.test.js`'s "getDartHeatmap — zone-scoped
+grouping" and "getBounceOutCount" describe blocks; `backend/test/db.turn-
+validation.test.js`'s "addTurn — zone/missZone/missDepth/bounced validation"
+block; `backend/test/scoring.test.js`'s regression proving this metadata never
+changes `evaluateVisit()`'s outcome. See `docs/archive/dartboard-zone-tracking-
+roadmap.md`'s own "Testing" section for the full list, including a manual
+end-to-end Playwright verification pass against a running server.
+
+---
+
+## 18. Known Limitations & Open Gaps
 
 Cross-referenced from the `docs/*.md` roadmap docs — these are real,
 already-shipped limitations, not just unbuilt future features:
@@ -2489,7 +2735,7 @@ already-shipped limitations, not just unbuilt future features:
 
 ---
 
-## 18. Troubleshooting
+## 19. Troubleshooting
 
 The general method, before the specific symptoms below: **this document is the
 spec.** Find the section describing what the misbehaving feature is supposed to

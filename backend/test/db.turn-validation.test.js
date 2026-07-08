@@ -99,6 +99,77 @@ describe('addTurn — sector/multiplier validity', () => {
   });
 });
 
+// docs/archive/dartboard-zone-tracking-roadmap.md: zone/missZone/missDepth/bounced are all
+// purely additive Dartboard-mode-only positional metadata — each only meaningful on
+// the specific dart shape it describes (a hit can't have a miss wedge, a miss can't
+// have an inner/outer zone), validated the same "reject garbage, don't silently
+// coerce" way as sector/multiplier above.
+describe('addTurn — zone/missZone/missDepth/bounced validation', () => {
+  test('zone is only valid on a single hit (sector 1-20, multiplier 1)', () => {
+    const name = 'Turns_Zone';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 20, darts: [{ sector: 20, multiplier: 1, zone: 'inner' }] }));
+    assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 20, darts: [{ sector: 20, multiplier: 1, zone: 'outer' }] }));
+    // No zone at all (Pad mode / pre-feature) is still perfectly valid.
+    assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 20, darts: [{ sector: 20, multiplier: 1 }] }));
+  });
+
+  test('rejects a garbage zone value', () => {
+    const name = 'Turns_ZoneGarbage';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 20, darts: [{ sector: 20, multiplier: 1, zone: 'middle' }] }));
+  });
+
+  test('rejects zone on a double, treble, bull, or miss — only a single hit has an inner/outer distinction', () => {
+    const name = 'Turns_ZoneWrongShape';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 40, darts: [{ sector: 20, multiplier: 2, zone: 'inner' }] }));
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 60, darts: [{ sector: 20, multiplier: 3, zone: 'outer' }] }));
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 25, darts: [{ sector: 25, multiplier: 1, zone: 'inner' }] }));
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 0, multiplier: 1, zone: 'inner' }] }));
+  });
+
+  test('missZone/missDepth are only valid together, only on a miss (sector 0), and missZone is 1-20', () => {
+    const name = 'Turns_MissZone';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 0, multiplier: 1, missZone: 20, missDepth: 'near' }] }));
+    assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 0, multiplier: 1, missZone: 1, missDepth: 'far' }] }));
+    // Missing depth or wedge alone is rejected — they're always set or unset together.
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 0, multiplier: 1, missZone: 5 }] }));
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 0, multiplier: 1, missDepth: 'near' }] }));
+    // Wrong depth string, and an out-of-range wedge.
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 0, multiplier: 1, missZone: 5, missDepth: 'medium' }] }));
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 0, multiplier: 1, missZone: 21, missDepth: 'near' }] }));
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 0, multiplier: 1, missZone: 0, missDepth: 'near' }] }));
+    // Only valid on an actual miss.
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 20, darts: [{ sector: 20, multiplier: 1, missZone: 5, missDepth: 'near' }] }));
+  });
+
+  test('bounced is only valid on a miss (sector 0)', () => {
+    const name = 'Turns_Bounced';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    assert.doesNotThrow(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 0, multiplier: 1, bounced: true }] }));
+    expect400(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 20, darts: [{ sector: 20, multiplier: 1, bounced: true }] }));
+  });
+
+  test('a bounce-out dart is stored identically to a plain miss apart from the bounced flag', () => {
+    const name = 'Turns_BouncedStorage';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [{ sector: 0, multiplier: 1, bounced: true }] });
+    const row = db._db.prepare(`
+      SELECT d.sector, d.multiplier, d.scored, d.bounced FROM darts d
+      JOIN turns t ON t.id = d.turn_id WHERE t.game_id = ?
+    `).get(g.gameId);
+    assert.deepEqual({ ...row }, { sector: 0, multiplier: 1, scored: 0, bounced: 1 });
+  });
+});
+
 describe('addTurn — scored/set/leg/checkoutPoints ranges', () => {
   test('scored must be between 0 and 180', () => {
     const name = 'Turns_ScoredRange';

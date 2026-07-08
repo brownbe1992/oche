@@ -42,6 +42,9 @@
        POST /api/badges/revoke     -> { player, badgeId } -> { count } (public, used by Undo Last Turn)
        GET  /api/players/badges    -> (?name=...) -> [ { badge_id, count, earned_at } ] (public)
        GET  /api/players/h2h-summary -> (?player=...&opponent=...&excludeGameId=) -> { totalGames, previousWinner } (public)
+       GET  /api/players/tournament-stats -> (?name=...) -> { wins, runnerUps, bestFinish } (public)
+       GET  /api/players/dart-heatmap -> (?name=...&gameType=...&mode=...) -> [{sector,multiplier,zone,missZone,missDepth,hits}] (public)
+       GET  /api/players/bounce-outs -> (?name=...&gameType=...&mode=...) -> { count } (public)
        GET  /api/players/around-the-world -> (?name=...) -> { hit, count, total } (public)
        GET  /api/players/on-this-day -> (?name=...&tz=...) -> { type, year, yearsAgo, statLine } | null (public)
        POST /api/challenges/start  -> { player, gameId, challengeDate, format, target } (public)
@@ -568,6 +571,15 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/players/chuckin-heatmap' && m === 'GET') {
       return send(res, 200, db.getChuckinHeatmap(url.searchParams.get('name'), url.searchParams.get('mode')));
     }
+    // docs/archive/dartboard-zone-tracking-roadmap.md: the generalized version of the above,
+    // scoped to any game type — chuckin-heatmap stays exactly as-is for backward
+    // compatibility, nothing removed or renamed out from under it.
+    if (p === '/api/players/dart-heatmap' && m === 'GET') {
+      return send(res, 200, db.getDartHeatmap(url.searchParams.get('name'), url.searchParams.get('gameType'), url.searchParams.get('mode')));
+    }
+    if (p === '/api/players/bounce-outs' && m === 'GET') {
+      return send(res, 200, { count: db.getBounceOutCount(url.searchParams.get('name'), url.searchParams.get('gameType'), url.searchParams.get('mode')) });
+    }
     if (p === '/api/players/ghost-legs' && m === 'GET') {
       const limit = url.searchParams.get('limit');
       return send(res, 200, db.getGhostCandidateLegs(url.searchParams.get('name'), limit));
@@ -790,8 +802,11 @@ const server = http.createServer(async (req, res) => {
       const b = await readJson(req);
       return send(res, 200, db.recordWalkover(Number(mt[1]), b.winner));
     }
+    if (p === '/api/players/tournament-stats' && m === 'GET') {
+      return send(res, 200, db.getTournamentStats(url.searchParams.get('name')));
+    }
 
-    // ----- dart builder / loadouts (docs/dart-builder-roadmap.md) -----
+    // ----- dart builder / loadouts (docs/archive/dart-builder-roadmap.md) -----
     // Viewing a player's components/loadouts is public, same as every other
     // stats/profile view; creating/editing/deleting is gated by requireWrite like
     // every other player-data mutation (setDartWeight, setOut, etc.) — PIN gating

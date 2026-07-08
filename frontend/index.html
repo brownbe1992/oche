@@ -320,6 +320,20 @@
   .board-miss{flex:none;margin-top:8px}
   .hidden{display:none!important}
 
+  /* ---- Dart Builder: icon picker (docs/archive/dart-builder-roadmap.md accessibility
+     item — a visual diagram per barrel shape/grip and flight shape option, since
+     terms like "torpedo"/"knurled"/"kite" aren't self-explanatory by name alone.
+     Icon is decorative (aria-hidden) — the button's own text label is the
+     accessible name, so meaning is never conveyed by the icon alone. */
+  .icon-picker{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  .icon-opt{display:flex;flex-direction:column;align-items:center;gap:4px;
+    background:var(--surface);border:1px solid var(--wire);border-radius:10px;
+    padding:8px 10px;cursor:pointer;color:var(--muted);font:inherit;min-width:64px}
+  .icon-opt svg{width:36px;height:22px;color:var(--muted)}
+  .icon-opt span.icon-opt-label{font-size:11px;font-weight:600;letter-spacing:.02em}
+  .icon-opt[aria-pressed="true"]{background:var(--surface-2);border-color:var(--gold);color:var(--ink)}
+  .icon-opt[aria-pressed="true"] svg{color:var(--gold)}
+
   /* ---- stats screen ---- */
   table{width:100%;border-collapse:collapse;font-size:13.5px}
   th,td{text-align:left;padding:11px 10px;border-bottom:1px solid var(--wire)}
@@ -823,7 +837,7 @@
       </div>
       <div class="pad" id="pad"></div>
       <div class="dart-board-wrap" id="dart-board-wrap"></div>
-      <button class="btn btn-ghost board-miss" id="board-miss-btn" onclick="throwDartBoard(0,1)">Miss</button>
+      <button class="btn btn-ghost board-miss" id="bounce-out-btn" onclick="throwBounceOut()">Bounce Out</button>
       <div class="turn-actions">
         <div class="undo-row">
           <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled>Undo Last Turn</button>
@@ -866,7 +880,7 @@
     </div>
   </section>
 
-  <!-- ============ DART BUILDER (docs/dart-builder-roadmap.md) ============ -->
+  <!-- ============ DART BUILDER (docs/archive/dart-builder-roadmap.md) ============ -->
   <section id="screen-dart-builder" class="screen">
     <div class="card">
       <button class="pp-back" onclick="show(dartBuilderBackTo)">← Back</button>
@@ -1375,7 +1389,7 @@ const DB = {
   setDartWeight(name, weight){ Backend.send('PUT','/api/players/dart-weight',{name, weight}).catch(logErr); },
   delete(name){ Backend.send('DELETE','/api/players?name='+encodeURIComponent(name)).catch(logErr); },
 
-  // Dart Builder / loadouts (docs/dart-builder-roadmap.md)
+  // Dart Builder / loadouts (docs/archive/dart-builder-roadmap.md)
   dartComponentOptions(){ return Backend.get('/api/dart-components/options'); },
   listComponents(player, type){ return Backend.get(`/api/dart-components?name=${encodeURIComponent(player)}`+(type?`&type=${type}`:'')); },
   createComponent(player, type, fields){ return Backend.send('POST','/api/dart-components',{player, type, ...fields}); },
@@ -1394,6 +1408,7 @@ const DB = {
   // Ghost Opponent win/loss tracking (docs/archive/ghost-opponent-roadmap.md)
   recordGhostRace(player, fields){ return Backend.send('POST','/api/ghost-races',{player, ...fields}); },
   ghostRaceRecord(player){ return Backend.get(`/api/players/ghost-race-record?name=${encodeURIComponent(player)}`); },
+  tournamentStats(player){ return Backend.get(`/api/players/tournament-stats?name=${encodeURIComponent(player)}`); },
 
   // game + turn writes
   async beginGame(meta, names, loadoutByName){
@@ -1550,7 +1565,7 @@ let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, 
   gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[], ghostLeg:null,
   doublesTargets:[], loadoutByName:{} }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice'; gameType: 'x01' | 'cricket' | 'doubles_practice'
   // loadoutByName: player name -> {id,name} of the loadout picked for THIS New Game
-  // visit (docs/dart-builder-roadmap.md) — reset each time the setup screen loads;
+  // visit (docs/archive/dart-builder-roadmap.md) — reset each time the setup screen loads;
   // re-populated by auto-loading each picked player's is_default loadout.
 let game = null;
 let dartTimingEnabled = false;   // admin-toggled; refreshed at boot from /api/settings/dart-timing
@@ -1566,12 +1581,15 @@ let cardTagline = DEFAULT_CARD_TAGLINE; // admin-editable; refreshed at boot fro
 /* ---------- dartboard input mode ---------- */
 const DB_SECTORS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
 
-function throwDartBoard(sector, m){ mult = m; throwDart(sector); }
+function throwDartBoard(sector, m, zone, missZone, missDepth){ mult = m; throwDart(sector, zone, missZone, missDepth); }
+function throwBounceOut(){ throwDart(0, undefined, undefined, undefined, true); }
 
 function buildDartboard(){
-  // Built once — disabled state is toggled via .board-disabled on the wrapper
-  const CX=250, CY=250;
-  const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248 };
+  // Built once — disabled state is toggled via .board-disabled on the wrapper.
+  // viewBox/CX/CY enlarged and recentered (docs/archive/dartboard-zone-tracking-roadmap.md
+  // "Miss-area tracking") to fit two new outer rings beyond the board itself.
+  const CX=330, CY=330;
+  const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248, missNear:270, missFar:310 };
   const DEG = 360/20;
   function xy(r, deg){ const a=(deg-90)*Math.PI/180; return [CX+r*Math.cos(a), CY+r*Math.sin(a)]; }
   function f(v){ return v.toFixed(2); }
@@ -1580,8 +1598,11 @@ function buildDartboard(){
     const lg=e-s>180?1:0;
     return `M${f(x1)},${f(y1)} A${r1},${r1} 0 ${lg},1 ${f(x2)},${f(y2)} L${f(x3)},${f(y3)} A${r2},${r2} 0 ${lg},0 ${f(x4)},${f(y4)} Z`;
   }
-  const oc = (sec, m) => `onclick="throwDartBoard(${sec},${m})"`;
-  let s = `<svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg"
+  const oc = (sec, m, zone) => `onclick="throwDartBoard(${sec},${m},${zone?`'${zone}'`:'null'})"`;
+  // Miss ring taps: sector always 0/mult always 1 (a genuine miss), with the wedge
+  // number and near/far depth carried as missZone/missDepth instead of zone.
+  const ocMiss = (num, depth) => `onclick="throwDartBoard(0,1,null,${num},'${depth}')"`;
+  let s = `<svg viewBox="0 0 660 660" xmlns="http://www.w3.org/2000/svg"
     style="position:absolute;top:0;right:0;bottom:0;left:0;width:100%;height:100%;touch-action:manipulation;-webkit-tap-highlight-color:transparent"
     preserveAspectRatio="xMidYMid meet">
     <style>
@@ -1593,19 +1614,29 @@ function buildDartboard(){
     <circle cx="${CX}" cy="${CY}" r="${R.doubleOut}" fill="#0d0e0b"/>`;
   const ringA = colorblindMode ? '#e2711d' : '#c8102e';  // orange substitute for red
   const ringB = colorblindMode ? '#2f8fd9' : '#1b8a3a';  // blue substitute for green
+  // Miss-ring fills: deliberately muted/neutral (not tied to ringA/ringB) so they read
+  // as "off the scoring board" at a glance — near stays closer in tone to the board's
+  // own dark background, far is visibly more washed-out/distant.
+  const missNearFill = '#3a3830';
+  const missFarFill = '#221f1a';
   DB_SECTORS.forEach((num,i)=>{
     const s0=i*DEG-DEG/2, e0=s0+DEG;
     const sc = i%2===0 ? '#cbbf96' : '#1c1e1a';  // light/dark singles
     const rc = i%2===0 ? ringA : ringB;  // alternating ring color per sector
     const sw = 'stroke="#151613" stroke-width="0.5"';
-    s += `<path class="dz" d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${sc}" ${sw} ${oc(num,1)}/>`;
+    s += `<path class="dz" d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${sc}" ${sw} ${oc(num,1,'inner')}/>`;
     s += `<path class="dz" d="${annulus(R.trebleIn,R.trebleOut,s0,e0)}" fill="${rc}" ${sw} ${oc(num,3)}/>`;
-    s += `<path class="dz" d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${sc}" ${sw} ${oc(num,1)}/>`;
+    s += `<path class="dz" d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${sc}" ${sw} ${oc(num,1,'outer')}/>`;
     s += `<path class="dz" d="${annulus(R.doubleIn,R.doubleOut,s0,e0)}" fill="${rc}" ${sw} ${oc(num,2)}/>`;
     const [nx,ny]=xy(R.numAt,s0+DEG/2);
     s += `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central"
       font-family="Bebas Neue,sans-serif" font-size="17" fill="#efe7d2"
       style="pointer-events:none;user-select:none">${num}</text>`;
+    // Miss ring: same 20 wedges, extended radially outward past the double ring —
+    // a near band (grazed/just-past the wire) and a far band (a proper miss), so a
+    // dartboard-mode miss carries direction+closeness instead of nothing at all.
+    s += `<path class="dz" d="${annulus(R.bg,R.missNear,s0,e0)}" fill="${missNearFill}" ${sw} ${ocMiss(num,'near')}/>`;
+    s += `<path class="dz" d="${annulus(R.missNear,R.missFar,s0,e0)}" fill="${missFarFill}" ${sw} ${ocMiss(num,'far')}/>`;
   });
   s += `<circle class="dz" cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="${ringB}" stroke="#151613" stroke-width="0.5" ${oc(25,1)}/>`;
   s += `<circle class="dz" cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="${ringA}" stroke="#151613" stroke-width="0.5" ${oc(25,2)}/>`;
@@ -1625,22 +1656,26 @@ function applyDartMode(){
   const pad   = document.getElementById('pad');
   const multi = document.getElementById('multi-row');
   const board = document.getElementById('dart-board-wrap');
-  const missB = document.getElementById('board-miss-btn');
+  // Bounce Out (docs/archive/dartboard-zone-tracking-roadmap.md "Bounce-out tracking") is
+  // available in both Pad and Dartboard mode — unlike the old flat Miss button it
+  // replaced (Dartboard-mode-only, now folded into the miss ring), it's never
+  // hidden by this mode switch, only disabled once the turn/visit is already full.
+  const bounceBtn = document.getElementById('bounce-out-btn');
   const tab1  = document.getElementById('imt-pad');
   const tab2  = document.getElementById('imt-board');
   if(!pad || !board) return;
   const full  = !!(game && (game.darts.length>=3 || game.busted || game.won));
+  if(bounceBtn) bounceBtn.disabled = full;
   if(dartboardMode){
     pad.classList.add('hidden'); if(multi) multi.classList.add('hidden');
     board.classList.remove('hidden');
     if(!board.querySelector('svg')) board.innerHTML = buildDartboard(); // build once
     board.classList.toggle('board-disabled', full);
-    if(missB){ missB.classList.remove('hidden'); missB.disabled = full; }
     if(tab1) tab1.setAttribute('aria-pressed','false');
     if(tab2) tab2.setAttribute('aria-pressed','true');
   } else {
     pad.classList.remove('hidden'); if(multi) multi.classList.remove('hidden');
-    board.classList.add('hidden'); if(missB) missB.classList.add('hidden');
+    board.classList.add('hidden');
     if(tab1) tab1.setAttribute('aria-pressed','true');
     if(tab2) tab2.setAttribute('aria-pressed','false');
     if(game) renderPad();   // populate buttons immediately when switching to pad mode
@@ -1687,9 +1722,20 @@ function showLegend(backTo){
   show('legend');
 }
 let dartBuilderBackTo='player';
-// dartBuilderView: 'list' (loadout list for dartBuilderPlayer) or 'edit' (component
-// slots for dartBuilderLoadoutId, null = new unsaved loadout).
+// dartBuilderView: 'list' (loadout list for dartBuilderPlayer), 'edit' (component
+// slots for dartBuilderLoadoutId, null = new unsaved loadout), 'compare'
+// (docs/archive/dart-builder-roadmap.md "loadout comparison view" — side-by-side stats
+// for two or more of dartBuilderPlayer's loadouts), or 'quickadd' ("quick-add
+// full set" one-shot entry form — name + all barrel/shaft/flight fields on one
+// screen, one save, for logging an off-the-shelf dart set instead of three
+// separate "+ New {type}" round trips).
 let dartBuilderPlayer=null, dartBuilderView='list', dartBuilderLoadoutId=null;
+// Loadout comparison state (view==='compare' only): which loadout ids are
+// currently checked into the comparison table, and a cache of every loadout's
+// getLoadoutStats() response fetched once per screen-entry (not refetched on
+// every checkbox toggle — toggling only changes which cached columns render).
+let dartBuilderCompareSelected = new Set();
+let _dartBuilderCompareStats = null;
 function showDartBuilder(playerName, backTo){
   dartBuilderPlayer = playerName;
   dartBuilderBackTo = backTo || 'player';
@@ -2920,7 +2966,7 @@ function onSlotChange(i, value){
       setup.slots[i]=value; renderPlayers();
       if(setup.mode==='challenge' && i===0) renderChallengeCard();
       if(setup.mode==='ghost' && i===0) renderGhostLegPicker();
-      // Auto-select this player's default loadout, if they have one (docs/dart-builder-roadmap.md) —
+      // Auto-select this player's default loadout, if they have one (docs/archive/dart-builder-roadmap.md) —
       // a player who only ever throws one set of darts never has to actively pick one.
       if(value && !setup.loadoutByName[value]){
         Backend.get(`/api/players/default-loadout?name=${encodeURIComponent(value)}`)
@@ -2936,7 +2982,7 @@ function onSlotChange(i, value){
   );
 }
 
-// docs/dart-builder-roadmap.md "Change Loadout" picker: selection-only (no editing)
+// docs/archive/dart-builder-roadmap.md "Change Loadout" picker: selection-only (no editing)
 // scoped to this player's own loadouts, plus a shortcut into the Dart Builder for a
 // player with none yet. Not selecting a loadout at all remains fully valid.
 function openLoadoutPicker(name, slotIndex){
@@ -3806,7 +3852,7 @@ function setPlayerDartWeight(name, value){
     persist();
   });
 }
-// docs/dart-builder-roadmap.md: lives in the same PIN-gated player-controls block
+// docs/archive/dart-builder-roadmap.md: lives in the same PIN-gated player-controls block
 // as the finish-rule toggle above, so a PIN-protected player's default loadout is
 // already covered by unlockPlayerSettings()'s existing PIN gate.
 function setPlayerDefaultLoadout(name, value){
@@ -3875,10 +3921,11 @@ function renderPlayerPage(){
 
   // shared chart + top-finishes HTML (same structure for both tabs)
   const chartSection = `
-    <div class="pp-section" id="chuckin-heatmap-section" hidden>
+    <div class="pp-section" id="dart-heatmap-section" hidden>
       <div class="pp-section-title">Dartboard Heatmap</div>
-      <p class="pp-meta" style="margin:0 0 8px">Where every Just Chuckin' It dart has landed — brighter means more hits.</p>
-      <div id="chuckin-heatmap-body"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+      <p class="pp-meta" style="margin:0 0 8px">Where every dart has landed — brighter means more hits (Dartboard-mode taps only split inner/outer singles and misses by direction; Pad-mode darts still count, just without that extra precision).</p>
+      <div id="dart-heatmap-body"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+      <p class="pp-meta" id="bounce-out-count" style="margin-top:6px"></p>
     </div>
     <div class="pp-section">
       <div class="pp-section-title" id="chart-metric-title">${(defs.find(d=>d.key===selectedStat)||defs[0]).label} over time</div>
@@ -3939,6 +3986,13 @@ function renderPlayerPage(){
   const h2hHtml = h2hCats.length
     ? h2hCats.map(c=>`${c}: <b>${(s.h2hGamesWonByCat||{})[c]||0}</b> games · <b>${(s.h2hSetsWonByCat||{})[c]||0}</b> sets · <b>${(s.h2hLegsWonByCat||{})[c]||0}</b> legs`).join('<br>')
     : '<span style="color:var(--muted)">none yet</span>';
+  // Tournaments are X01-only (docs/tournament-mode-roadmap.md), so this block is
+  // gated the same way the profile's other X01-only surfaces are.
+  const tournamentStatsSection = gt==='x01' ? `
+    <div class="pp-section">
+      <div class="pp-section-title">Tournaments</div>
+      <div id="player-tournament-stats"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </div>` : '';
   const h2hSection = `
     <div class="pp-section">
       <div class="pp-section-title">H2H — Games &amp; Legs Played</div>
@@ -3947,7 +4001,8 @@ function renderPlayerPage(){
     <div class="pp-section">
       <div class="pp-section-title">H2H Wins</div>
       <div class="pp-cat-lines">${h2hHtml}</div>
-    </div>`;
+    </div>
+    ${tournamentStatsSection}`;
 
   // Practice sections (reused by both 'practice' and 'overall' tabs)
   const pracCats = Object.keys(s.practiceLegs||{});
@@ -4050,10 +4105,11 @@ function renderPlayerPage(){
   loadCoachingInsights();
   loadPersonalBests();
   loadPlayerBadges();
+  loadTournamentStats();
   loadAroundTheWorldProgress();
   loadOnThisDay();
   loadChallengeHistory();
-  loadChuckinHeatmap();
+  loadDartHeatmap();
 }
 // The full achievement roster (docs/archive/achievements-badges-roadmap.md) — every badge
 // in the game, not just milestones. Recurring badges (Hat Trick, Night Owl, etc.)
@@ -4084,11 +4140,15 @@ const BADGE_INFO = {
   staircasefinish:    { icon:'🪜', label:'Staircase Finish', desc:'Check out in exactly three darts by halving the target twice: single, single, then double — e.g. 32 down to 16, down to 8, then double 4.' },
   cricket9marks:       { icon:'🎯', label:'9 Marks', desc:'Score 9 marks in one Cricket visit — three trebles, the maximum possible.', cricket:true },
   cricketperfectclose: { icon:'🏆', label:'Perfect Leg', desc:'Close every Cricket number using the fewest darts physically possible for that match.', cricket:true },
+  cricketwhitewash:    { icon:'🧹', label:'Whitewash', desc:"Win a Cricket leg without your opponent closing a single number.", cricket:true },
+  cricketcomebackkid:  { icon:'🔥', label:'Comeback Kid (Cricket)', desc:`Win a Cricket leg after trailing your opponent's points by ${CRICKET_COMEBACK_THRESHOLD}+ at some point.`, cricket:true },
   challengeweek:       { icon:'🔥', label:'Challenge Streak: Week', desc:'Complete the Daily Challenge 7 days in a row.', challenge:true },
   challengemonth:      { icon:'🏆', label:'Challenge Streak: Month', desc:'Complete the Daily Challenge 30 days in a row.', challenge:true },
   challengeallformats: { icon:'🗓️', label:'Full Rotation', desc:'Complete every Daily Challenge format at least once.', challenge:true },
   chuckin180: { icon:'🎯', label:'180!', desc:"Three darts, sixty each — treated as a turn, since Just Chuckin' It otherwise has no turn boundary at all.", chuckin:true },
   ghost_slayer:        { icon:'👻', label:'Ghost Slayer', desc:'Beat your ghost opponent — win a race against a replay of one of your own past legs.' },
+  tournament_champion:     { icon:'🏆', label:'Champion', desc:'Win a tournament bracket.', tournament:true },
+  tournament_giant_slayer: { icon:'⚔️', label:'Giant Slayer (Tournament)', desc:'Beat an opponent seeded 3 or more slots better than you in a tournament match.', tournament:true },
 };
 function loadPlayerBadges(){
   const container=document.getElementById('player-badges');
@@ -4126,15 +4186,18 @@ function renderPlayerBadges(data){
   // Grouped by game type — X01's badges, Cricket's 2, Daily Challenge's 3, and
   // Just Chuckin' It's 18 each stay visually distinct sub-sections rather than one
   // mixed flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin);
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
   const challengeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].challenge);
   const chuckinIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].chuckin);
+  const tournamentIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].tournament);
   container.innerHTML = `
     <div class="pp-section-title" style="margin-bottom:6px">X01</div>
     <div class="summary-grid">${x01Ids.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Cricket</div>
     <div class="summary-grid">${cricketIds.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">Tournaments</div>
+    <div class="summary-grid">${tournamentIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Daily Challenge</div>
     <div class="summary-grid">${challengeIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Just Chuckin' It</div>
@@ -4292,6 +4355,28 @@ function loadPersonalBests(){
   Backend.get(`/api/players/personal-bests?name=${encodeURIComponent(currentPlayer)}${modeParam}${gtParam}`)
     .then(data=>{ renderPersonalBests(data); loadGhostRaceRecord(); })
     .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load personal bests.</p>`; });
+}
+// docs/tournament-mode-roadmap.md §8: the Player Profile's "Tournaments" stat
+// block — wins/runner-ups/best finish. A no-op if the section isn't rendered
+// (tournaments are X01-only, so a Cricket profile view has no such container).
+function loadTournamentStats(){
+  const container=document.getElementById('player-tournament-stats');
+  if(!container) return;
+  const player = currentPlayer;
+  DB.tournamentStats(player).then(data=>{
+    if(currentPlayer !== player) return;   // a newer profile visit took over
+    const el = document.getElementById('player-tournament-stats');
+    if(!el) return;
+    if(!data || (!data.wins && !data.runnerUps && !data.bestFinish)){
+      el.innerHTML = `<p class="pp-meta" style="padding:4px 0">No tournaments played yet.</p>`;
+      return;
+    }
+    el.innerHTML = `<div class="summary-grid">
+      <div class="stat-block"><div class="stat-val">${data.wins}</div><div class="stat-label">Tournaments Won</div></div>
+      <div class="stat-block"><div class="stat-val">${data.runnerUps}</div><div class="stat-label">Runner-Up Finishes</div></div>
+      ${data.bestFinish?`<div class="stat-block"><div class="stat-val" style="font-size:1.4rem">${escapeHtml(data.bestFinish)}</div><div class="stat-label">Best Finish</div></div>`:''}
+    </div>`;
+  }).catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load tournament stats.</p>`; });
 }
 // docs/archive/ghost-opponent-roadmap.md: populates the #ghost-race-record span next to the
 // "Race this leg" button — a no-op if that span doesn't exist (a non-X01 Personal
@@ -4593,18 +4678,20 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   grudgematch:'Grudge Match ⚔️', therematch:'The Rematch 🔁', aroundtheclock:'Around the Clock 🕐',
   aroundtheworld:'Around the World! 🌍', doubletrouble:'Double Trouble! 👯', bustedmaximum:'Busted Maximum 💥',
   cricket9marks:'9 Marks! 🎯', cricketperfectclose:'🏆 PERFECT LEG! 🏆',
+  cricketwhitewash:'Whitewash! 🧹', cricketcomebackkid:'Comeback Kid! 🔥',
   challengeweek:'Challenge Streak: Week! 🔥', challengemonth:'🏆 CHALLENGE STREAK: MONTH! 🏆',
   challengeallformats:'Full Rotation! 🗓️', nocigar:'No Cigar 🤦', chuckin180:'180! 🎯',
-  staircasefinish:'Staircase Finish! 🪜', ghostslayer:'Ghost Slayer! 👻' };
+  staircasefinish:'Staircase Finish! 🪜', ghostslayer:'Ghost Slayer! 👻',
+  tournamentchampion:'🏆 CHAMPION! 🏆', tournamentgiantslayer:'Giant Slayer ⚔️' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
   metronome:2500, cruisecontrol:2500, iceintheveins:2500, nervesofsteel:3000,
   comebackkid:3000, giantslayer:2500, grudgematch:3000, therematch:2500,
   aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500,
-  cricket9marks:2500, cricketperfectclose:6000,
+  cricket9marks:2500, cricketperfectclose:6000, cricketwhitewash:2500, cricketcomebackkid:3000,
   challengeweek:3000, challengemonth:6000, challengeallformats:3500, nocigar:2500, chuckin180:2500,
-  staircasefinish:3000, ghostslayer:3500 };
+  staircasefinish:3000, ghostslayer:3500, tournamentchampion:6000, tournamentgiantslayer:2500 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
@@ -4612,6 +4699,7 @@ const ACH_TYPE_TO_BADGE_ID = {
   first100checkout: 'first_100_checkout', grudgematch: 'grudge_match',
   aroundtheclock: 'around_the_clock', aroundtheworld: 'around_the_world',
   ghostslayer: 'ghost_slayer',
+  tournamentchampion: 'tournament_champion', tournamentgiantslayer: 'tournament_giant_slayer',
 };
 // 180/Big Fish/Nine-darter aren't in BADGE_INFO (they're older top-level stats, not
 // player_badges rows), so they get their own short explanation lines here.
@@ -4813,7 +4901,7 @@ function showAchievement(type, player, countText){
   achNameEl.textContent = player || '';
   if(achDescEl) achDescEl.textContent = achDescFor(type);
   if(achCountEl) achCountEl.textContent = countText || '';
-  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth';
+  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion';
   achOverlayEl.classList.toggle('mega', mega);
   achOverlayEl.classList.add('show');
   const shareBtn = document.getElementById('ach-share-btn');
@@ -4864,7 +4952,7 @@ function cancelQueuedAchievementsForSnapshot(snap){
 }
 
 /* =========================================================================
-   DART BUILDER / LOADOUTS  (docs/dart-builder-roadmap.md)
+   DART BUILDER / LOADOUTS  (docs/archive/dart-builder-roadmap.md)
    Reachable from a player's profile ("Manage Loadouts", inside the same
    PIN-gated player-controls block as the finish-rule toggle) and from the New
    Game screen's "Build a loadout" shortcut. Two views inside one screen: a
@@ -4896,6 +4984,8 @@ async function renderDartBuilderScreen(){
     catch(e){ el.innerHTML = '<p style="color:var(--muted)">Could not load the Dart Builder right now.</p>'; return; }
   }
   if(dartBuilderView === 'edit') await renderDartBuilderEdit();
+  else if(dartBuilderView === 'compare') await renderDartBuilderCompare();
+  else if(dartBuilderView === 'quickadd') renderDartBuilderQuickAdd();
   else await renderDartBuilderList();
 }
 
@@ -4925,9 +5015,231 @@ async function renderDartBuilderList(){
       Build a saved combination of barrel, shaft, and flight, pick one before a game (New Game's "Change Loadout" button),
       or set one as the default from ${escapeHtml(player)}'s profile so it's chosen automatically.
     </p>
-    <button class="btn btn-primary" style="margin-bottom:14px" onclick="openDartBuilderEdit(null)">+ New Loadout</button>
+    <div class="btn-row" style="margin-bottom:14px">
+      <button class="btn btn-primary" onclick="openDartBuilderEdit(null)">+ New Loadout</button>
+      <button class="btn btn-ghost" onclick="openDartBuilderQuickAdd()">⚡ Quick Add Full Set</button>
+      ${loadouts.length >= 2 ? `<button class="btn btn-ghost" onclick="openDartBuilderCompare()">⚖️ Compare Loadouts</button>` : ''}
+    </div>
     ${cards || '<p style="color:var(--muted);font-size:13px">No loadouts yet.</p>'}
   `;
+}
+
+// Loadout comparison view (docs/archive/dart-builder-roadmap.md "loadout comparison
+// view", the v1 stretch goal). Side-by-side stats for two or more of a
+// player's loadouts, entered from the list screen — same "own screen, not a
+// Player Profile filter" placement getLoadoutStats() itself already uses.
+function openDartBuilderCompare(){
+  dartBuilderView = 'compare';
+  _dartBuilderCompareStats = null;
+  renderDartBuilderScreen();
+}
+let _dartBuilderCompareLoadouts = [];
+async function renderDartBuilderCompare(){
+  const el = document.getElementById('dart-builder-body');
+  const player = dartBuilderPlayer;
+  // Loadouts + every one's stats are fetched once per screen-entry (guarded by
+  // _dartBuilderCompareStats being null, reset only by openDartBuilderCompare()) —
+  // toggling a checkbox afterward only touches dartBuilderCompareSelected and
+  // re-renders from the cached data, no re-fetch.
+  if(!_dartBuilderCompareStats){
+    let loadouts = [];
+    try{ loadouts = await DB.listLoadouts(player); }
+    catch(e){ el.innerHTML = '<p style="color:var(--muted)">Could not load loadouts.</p>'; return; }
+    if(loadouts.length < 2){
+      el.innerHTML = `<p style="color:var(--muted);font-size:13px">Need at least 2 loadouts to compare.</p>
+        <button class="btn btn-ghost" style="margin-top:10px" onclick="dartBuilderView='list';renderDartBuilderScreen();">Back to Loadouts</button>`;
+      return;
+    }
+    try{
+      const statsList = await Promise.all(loadouts.map(lo=>DB.loadoutStats(player, lo.id)));
+      _dartBuilderCompareStats = {};
+      loadouts.forEach((lo,i)=>{ _dartBuilderCompareStats[lo.id] = statsList[i]; });
+    }catch(e){ el.innerHTML = '<p style="color:var(--muted)">Could not load loadout stats.</p>'; return; }
+    _dartBuilderCompareLoadouts = loadouts;
+    dartBuilderCompareSelected = new Set(loadouts.map(lo=>lo.id));   // select all by default
+  }
+  el.innerHTML = `
+    <div style="margin-bottom:14px">
+      <h2 style="font-size:18px;margin-bottom:4px">Compare Loadouts</h2>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 10px;line-height:1.6">Tap a loadout to add or remove it from the table below.</p>
+      <div class="btn-row" role="group" aria-label="Loadouts to compare" style="flex-wrap:wrap" id="db-compare-toggles"></div>
+      <button class="btn btn-ghost" style="margin-top:10px" onclick="dartBuilderView='list';renderDartBuilderScreen();">Back to Loadouts</button>
+    </div>
+    <div id="db-compare-table"></div>
+  `;
+  renderDartBuilderCompareToggles();
+  renderDartBuilderCompareTable();
+}
+function renderDartBuilderCompareToggles(){
+  const el = document.getElementById('db-compare-toggles');
+  if(!el) return;
+  el.innerHTML = _dartBuilderCompareLoadouts.map(lo=>{
+    const on = dartBuilderCompareSelected.has(lo.id);
+    return `<button type="button" class="btn btn-ghost" aria-pressed="${on}" style="${on?'background:var(--surface-2);color:var(--ink);border-color:var(--muted)':''}" onclick="toggleDartBuilderCompareLoadout(${lo.id})">${escapeHtml(lo.name)}</button>`;
+  }).join('');
+}
+function toggleDartBuilderCompareLoadout(id){
+  if(dartBuilderCompareSelected.has(id)) dartBuilderCompareSelected.delete(id);
+  else dartBuilderCompareSelected.add(id);
+  renderDartBuilderCompareToggles();
+  renderDartBuilderCompareTable();
+}
+function renderDartBuilderCompareTable(){
+  const el = document.getElementById('db-compare-table');
+  if(!el) return;
+  const selected = _dartBuilderCompareLoadouts.filter(lo=>dartBuilderCompareSelected.has(lo.id));
+  if(selected.length < 2){
+    el.innerHTML = `<p style="color:var(--muted);font-size:13px">Select at least 2 loadouts to compare.</p>`;
+    return;
+  }
+  const rows = [
+    { label:'Components', fmt:lo=>[lo.barrel,lo.shaft,lo.flight].filter(Boolean).map(c=>c.name).join(' · ') || 'No components yet' },
+    { label:'Games played', fmt:lo=>String(_dartBuilderCompareStats[lo.id].gamesPlayed) },
+    { label:'Wins', fmt:lo=>String(_dartBuilderCompareStats[lo.id].wins) },
+    { label:'Win %', fmt:lo=>{ const s=_dartBuilderCompareStats[lo.id]; return s.gamesPlayed>0 ? Math.round(s.wins/s.gamesPlayed*100)+'%' : '—'; } },
+    { label:'Darts thrown', fmt:lo=>String(_dartBuilderCompareStats[lo.id].dartsThrown) },
+    { label:'3-dart average', fmt:lo=>{ const v=_dartBuilderCompareStats[lo.id].avg; return v!=null ? v.toFixed(1) : '—'; } },
+    { label:'180s', fmt:lo=>String(_dartBuilderCompareStats[lo.id].one80s) },
+    { label:'Checkouts', fmt:lo=>String(_dartBuilderCompareStats[lo.id].checkouts) },
+  ];
+  el.innerHTML = `<div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr>
+        <th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--wire);color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em"></th>
+        ${selected.map(lo=>`<th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--wire);font-weight:600">${escapeHtml(lo.name)}</th>`).join('')}
+      </tr></thead>
+      <tbody>
+        ${rows.map(r=>`<tr>
+          <td style="padding:8px 10px;border-bottom:1px solid var(--wire);color:var(--muted)">${r.label}</td>
+          ${selected.map(lo=>`<td style="padding:8px 10px;border-bottom:1px solid var(--wire)">${escapeHtml(r.fmt(lo))}</td>`).join('')}
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+// Quick Add Full Set (docs/archive/dart-builder-roadmap.md "quick-add full set" one-shot
+// entry form). No new backend endpoint — orchestrates the same createComponent()
+// x3 + createLoadout() calls the normal 3-modal flow already makes, just from one
+// screen with one Save button, for logging an off-the-shelf set that came as a
+// matched barrel/shaft/flight in one go.
+function openDartBuilderQuickAdd(){
+  dartBuilderView = 'quickadd';
+  renderDartBuilderScreen();
+}
+// Renders one component type's field set inline (not in a modal — every id gets
+// a `qa-{type}-` prefix so all three can coexist on the same page). Mirrors
+// openComponentEditor()'s exact field set per type; shape/grip use the same
+// icon pickers, keyed off the same `qa-{type}-shape`/`qa-{type}-grip` ids
+// submitDartBuilderQuickAdd() reads back.
+function quickAddComponentFieldsHtml(type){
+  const typeOpts = _dartBuilderOptions[type];
+  const isShaft = type === 'shaft';
+  const shapeList = isShaft ? typeOpts.types : typeOpts.shapes;
+  const lengthList = type !== 'flight' ? typeOpts.lengthRanges : null;
+  const label = type.charAt(0).toUpperCase()+type.slice(1);
+  return `<div class="pp-section">
+    <div class="pp-section-title">${label}</div>
+    <label class="field">Name</label>
+    <input type="text" id="qa-${type}-name" maxlength="64" placeholder="e.g. Red Dragon Razer Edge" style="margin-bottom:10px">
+    ${lengthList ? `<label class="field">Length</label>
+    <select id="qa-${type}-length" style="width:auto;margin-bottom:10px">
+      <option value="">Not set</option>
+      ${lengthList.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
+    </select>` : ''}
+    ${type==='barrel' ? `<label class="field">Weight</label>
+    <select id="qa-${type}-weight" style="width:auto;margin-bottom:10px">
+      <option value="">Not set</option>
+      ${typeOpts.weights.map(g=>`<option value="${g}">${g}g</option>`).join('')}
+    </select>` : ''}
+    <label class="field">Material</label>
+    <select id="qa-${type}-material" style="width:auto;margin-bottom:10px">
+      <option value="">Not set</option>
+      ${typeOpts.materials.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
+    </select>
+    <label class="field">${isShaft?'Type':'Shape'}</label>
+    ${isShaft
+      ? `<select id="qa-${type}-shape" style="width:auto;margin-bottom:10px">
+          <option value="">Not set</option>
+          ${shapeList.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
+        </select>`
+      : iconPickerHtml(`qa-${type}-shape`, type==='barrel' ? 'barrelShape' : 'flightShape', shapeList, `${label} shape`, null)}
+    ${type==='barrel' ? `<label class="field">Grip</label>
+    ${iconPickerHtml(`qa-${type}-grip`, 'barrelGrip', typeOpts.grips, 'Barrel grip', null)}` : ''}
+  </div>`;
+}
+function renderDartBuilderQuickAdd(){
+  const el = document.getElementById('dart-builder-body');
+  const player = dartBuilderPlayer;
+  el.innerHTML = `
+    <div style="margin-bottom:14px">
+      <h2 style="font-size:18px;margin-bottom:4px">Quick Add Full Set</h2>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 10px;line-height:1.6">
+        Log an off-the-shelf dart set — name the loadout, fill in the barrel, shaft, and flight that came with it, and save once.
+      </p>
+      <label class="field">Loadout name</label>
+      <input type="text" id="qa-name" maxlength="64" placeholder="e.g. Match Set" style="margin-bottom:10px">
+      <button class="btn btn-ghost" onclick="dartBuilderView='list';renderDartBuilderScreen();">Back to Loadouts</button>
+    </div>
+    ${quickAddComponentFieldsHtml('barrel')}
+    ${quickAddComponentFieldsHtml('shaft')}
+    ${quickAddComponentFieldsHtml('flight')}
+    <div class="pp-section">
+      <div class="pp-section-title">Tip Texture</div>
+      <select id="qa-tip-texture" style="width:auto">
+        <option value="">Not set</option>
+        ${(_dartBuilderOptions.tipTextures||[]).map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
+      </select>
+    </div>
+    <div id="qa-error" style="color:var(--danger,#e5484d);font-size:12px;margin:10px 0" hidden></div>
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn btn-primary" onclick="submitDartBuilderQuickAdd()">Save Full Set</button>
+    </div>
+  `;
+}
+function quickAddFields(type){
+  const get = id => { const el = document.getElementById(id); return el && el.value ? el.value : null; };
+  const fields = { name: get(`qa-${type}-name`) };
+  if(type !== 'flight') fields.lengthMm = get(`qa-${type}-length`);
+  if(type === 'barrel') fields.weightG = get(`qa-${type}-weight`) ? Number(get(`qa-${type}-weight`)) : null;
+  fields.material = get(`qa-${type}-material`);
+  fields.shape = get(`qa-${type}-shape`);
+  if(type === 'barrel') fields.grip = get(`qa-${type}-grip`);
+  return fields;
+}
+function submitDartBuilderQuickAdd(){
+  const player = dartBuilderPlayer;
+  const errEl = document.getElementById('qa-error');
+  const loadoutName = document.getElementById('qa-name').value.trim();
+  const barrel = quickAddFields('barrel'), shaft = quickAddFields('shaft'), flight = quickAddFields('flight');
+  if(!loadoutName){ errEl.textContent = 'Loadout name is required.'; errEl.hidden = false; return; }
+  if(!barrel.name || !shaft.name || !flight.name){
+    errEl.textContent = 'Name is required for the barrel, shaft, and flight.';
+    errEl.hidden = false;
+    return;
+  }
+  errEl.hidden = true;
+  // Sequential, not Promise.all: if the shaft or flight name turns out invalid,
+  // stopping partway is preferable to firing all three requests in parallel and
+  // having to reconcile which succeeded — the components created so far are
+  // never lost either way (they're real, independently usable catalog entries),
+  // just not yet attached to a saved loadout.
+  DB.createComponent(player, 'barrel', barrel)
+    .then(b => DB.createComponent(player, 'shaft', shaft).then(s => [b, s]))
+    .then(([b, s]) => DB.createComponent(player, 'flight', flight).then(f => [b, s, f]))
+    .then(([b, s, f]) => DB.createLoadout(player, {
+      name: loadoutName, barrelId: b.id, shaftId: s.id, flightId: f.id,
+      tipTexture: document.getElementById('qa-tip-texture').value || null,
+    }))
+    .then(lo => {
+      dartBuilderView = 'edit';
+      dartBuilderLoadoutId = lo.id;
+      renderDartBuilderScreen();
+    })
+    .catch(e => {
+      errEl.textContent = (e.message || 'Could not save that set.') + ' Any components already created are still in the catalog — you can assign them to a loadout from the normal editor.';
+      errEl.hidden = false;
+    });
 }
 
 function openDartBuilderEdit(loadoutId){
@@ -5047,6 +5359,56 @@ function loadDartBuilderStats(id){
   }).catch(()=>{ el.innerHTML = ''; });
 }
 
+// Simple schematic diagrams for the three enum fields whose plain-text option
+// names aren't self-explanatory (docs/archive/dart-builder-roadmap.md's deferred
+// accessibility item, built 2026-07) — barrel shape/grip (side profile) and
+// flight shape (front-on outline). Deliberately plain/geometric rather than
+// photorealistic, same "hand-coded inline SVG" style buildDartboard() already
+// uses elsewhere — `currentColor` throughout so each icon inherits its button's
+// text color (and so the selected/gold state above just works, in both themes).
+const COMPONENT_ICONS = {
+  barrelShape: {
+    straight: `<svg viewBox="0 0 64 20" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="5" width="48" height="10" rx="5"/></svg>`,
+    torpedo:  `<svg viewBox="0 0 64 20" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="32" cy="10" rx="26" ry="7"/></svg>`,
+    ton:      `<svg viewBox="0 0 64 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M10,10 C10,6 16,4 24,4 L46,4 C54,4 58,7 58,10 C58,13 54,16 46,16 L24,16 C16,16 10,14 10,10 Z"/></svg>`,
+  },
+  barrelGrip: {
+    smooth:  `<svg viewBox="0 0 64 20" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="5" width="48" height="10" rx="5"/></svg>`,
+    knurled: `<svg viewBox="0 0 64 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="8" y="5" width="48" height="10" rx="5"/>
+      <path d="M16,5 L20,15 M22,5 L26,15 M28,5 L32,15 M34,5 L38,15 M40,5 L44,15 M46,5 L50,15"/></svg>`,
+    ringed:  `<svg viewBox="0 0 64 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="8" y="5" width="48" height="10" rx="5"/>
+      <path d="M18,5 L18,15 M26,5 L26,15 M34,5 L34,15 M42,5 L42,15 M50,5 L50,15"/></svg>`,
+  },
+  flightShape: {
+    standard: `<svg viewBox="0 0 32 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M16,3 L28,14 L28,30 C28,34 22,37 16,37 C10,37 4,34 4,30 L4,14 Z"/></svg>`,
+    slim:     `<svg viewBox="0 0 32 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M16,3 L23,14 L23,30 C23,34 20,37 16,37 C12,37 9,34 9,30 L9,14 Z"/></svg>`,
+    kite:     `<svg viewBox="0 0 32 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M16,3 L28,20 L16,37 L4,20 Z"/></svg>`,
+    pear:     `<svg viewBox="0 0 32 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M16,3 C19,3 20,8 19,13 C25,17 29,24 29,29 C29,34 23,37 16,37 C9,37 3,34 3,29 C3,24 7,17 13,13 C12,8 13,3 16,3 Z"/></svg>`,
+  },
+};
+// Renders one field's icon-picker group. `fieldId` is the hidden input whose
+// `.value` submitComponentEditor() actually reads (kept identical to the
+// plain-<select> field ids it replaces, e.g. "ce-shape"/"ce-grip" — so the
+// submit path needed zero changes for this). `iconSetKey` indexes
+// COMPONENT_ICONS; `values` is the enum list from getDartComponentOptions().
+function iconPickerHtml(fieldId, iconSetKey, values, groupLabel, selected){
+  const icons = COMPONENT_ICONS[iconSetKey] || {};
+  const opts = values.map(v => `<button type="button" class="icon-opt" data-val="${v}"
+      aria-pressed="${v===selected}" aria-label="${escapeHtml(enumLabel(v))}"
+      onclick="selectIconOpt('${fieldId}','${v}')">
+      ${icons[v] || ''}<span class="icon-opt-label" aria-hidden="true">${escapeHtml(enumLabel(v))}</span>
+    </button>`).join('');
+  return `<div class="icon-picker" role="group" aria-label="${escapeHtml(groupLabel)}">${opts}</div>
+    <input type="hidden" id="${fieldId}" value="${escapeHtml(selected || '')}">`;
+}
+function selectIconOpt(fieldId, value){
+  const input = document.getElementById(fieldId);
+  if(!input) return;
+  input.value = value;
+  const group = input.previousElementSibling;
+  if(group) [...group.children].forEach(btn => btn.setAttribute('aria-pressed', String(btn.dataset.val === value)));
+}
+
 // New-component modal, reused for both the "+ New {type}" slot buttons above.
 // Field set is derived from /api/dart-components/options per type — no
 // duplicated enum list on the frontend (single source of truth stays db.js's
@@ -5079,15 +5441,14 @@ function openComponentEditor(type){
       ${typeOpts.materials.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
     </select>
     <label class="field">${isShaft?'Type':'Shape'}</label>
-    <select id="ce-shape" style="width:auto;margin-bottom:10px">
-      <option value="">Not set</option>
-      ${shapeList.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
-    </select>
+    ${isShaft
+      ? `<select id="ce-shape" style="width:auto;margin-bottom:10px">
+          <option value="">Not set</option>
+          ${shapeList.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
+        </select>`
+      : iconPickerHtml('ce-shape', type==='barrel' ? 'barrelShape' : 'flightShape', shapeList, `${type==='barrel'?'Barrel':'Flight'} shape`, null)}
     ${type==='barrel' ? `<label class="field">Grip</label>
-    <select id="ce-grip" style="width:auto;margin-bottom:10px">
-      <option value="">Not set</option>
-      ${typeOpts.grips.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
-    </select>` : ''}
+    ${iconPickerHtml('ce-grip', 'barrelGrip', typeOpts.grips, 'Barrel grip', null)}` : ''}
     <div id="ce-error" style="color:var(--danger,#e5484d);font-size:12px;margin-bottom:8px" hidden></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
@@ -5393,14 +5754,14 @@ function renderPad(){
     if(utb0) utb0.disabled = !game.lastTurnSnapshot;
     return;
   }
+  const bounceBtn = document.getElementById('bounce-out-btn');
+  if(bounceBtn) bounceBtn.disabled = full;
   if(dartboardMode){
     const board = document.getElementById('dart-board-wrap');
     if(board){
       if(!board.querySelector('svg')) board.innerHTML = buildDartboard(); // build SVG once
       board.classList.toggle('board-disabled', full);
     }
-    const missB = document.getElementById('board-miss-btn');
-    if(missB) missB.disabled = full;
   } else {
     const pad = document.getElementById('pad');
     if(!pad) return;
@@ -5431,8 +5792,8 @@ function renderPad(){
 function renderPadCricket(full){
   const board = document.getElementById('dart-board-wrap');
   if(board) board.classList.add('hidden');
-  const missB = document.getElementById('board-miss-btn');
-  if(missB) missB.classList.add('hidden');
+  const bounceBtn = document.getElementById('bounce-out-btn');
+  if(bounceBtn) bounceBtn.disabled = full;
   const multi = document.getElementById('multi-row');
   if(multi) multi.classList.remove('hidden');
   const pad = document.getElementById('pad');
@@ -5467,16 +5828,27 @@ function updateMultUI(){
   d.setAttribute('aria-pressed', mult===2);
   t.setAttribute('aria-pressed', mult===3);
 }
-function throwDart(sector){
-  if(game.gameType === 'doubles_practice') return throwDartDoublesPractice(sector);
-  if(game.gameType === 'chuckin') return throwDartChuckin(sector);
+// zone/missZone/missDepth/bounced (docs/archive/dartboard-zone-tracking-roadmap.md) are all
+// Dartboard-mode-only positional metadata, stamped onto the dart object pushed to
+// game.darts alongside sector/mult/thrownAt — Pad mode's calls (throwDart(n)) simply
+// omit them, leaving every field undefined exactly as before this feature existed.
+function throwDart(sector, zone, missZone, missDepth, bounced){
+  if(game.gameType === 'doubles_practice') return throwDartDoublesPractice(sector, zone, missZone, missDepth, bounced);
+  if(game.gameType === 'chuckin') return throwDartChuckin(sector, zone, missZone, missDepth, bounced);
   if(game.darts.length>=3 || game.busted || game.won) return;
-  if(sector === 0 && mult > 1){
+  // The double/treble-Miss shortcut (fill N slots at once) is a Pad-mode-only
+  // convenience — a bounce-out is always exactly one dart, regardless of whatever
+  // multiplier happens to still be selected, so it bypasses this branch entirely.
+  if(!bounced && sector === 0 && mult > 1){
     // Double/Treble Miss fills that many slots at once
     const count = Math.min(mult, 3 - game.darts.length);
     for(let i = 0; i < count; i++) game.darts.push(makeDart(0, 1));
   } else {
-    game.darts.push(makeDart(sector, mult));
+    const d = makeDart(sector, bounced ? 1 : mult);
+    if(zone) d.zone = zone;
+    if(missZone != null){ d.missZone = missZone; d.missDepth = missDepth; }
+    if(bounced) d.bounced = true;
+    game.darts.push(d);
   }
   mult=1; updateMultUI();
 
@@ -5681,7 +6053,8 @@ function enterTurn(){
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.scored, bust:ev.bust,
     checkout:ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null,
-    darts: game.darts.map((d,i) => ({ dartNo: i+1, sector: d.sector, multiplier: d.mult, thrownAt: d.thrownAt })) });
+    darts: game.darts.map((d,i) => ({ dartNo: i+1, sector: d.sector, multiplier: d.mult, thrownAt: d.thrownAt,
+      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
   // one-shot record of this turn's outcome, for voice announcements on the scoreboard
   game.lastTurnEvent = { ts: Date.now(), player: p.name, scored: ev.scored, bust: !!ev.bust,
     win: !!ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null };
@@ -5980,9 +6353,21 @@ function enterTurnCricket(){
   // Cricket has its own achievements to revoke on undo.
   const _snap = { pi:game.current, marks:Object.assign({}, p.marks), points:p.points,
     legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
+    legWorstPointsDeficit:p.legWorstPointsDeficit,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
     badgeReverts:[], voided:false };
   game.lastTurnSnapshot = _snap;
+
+  // Comeback Kid (Cricket) tracking: the worst points deficit seen at any point
+  // this leg (needs an opponent to trail behind — mirrors X01's Comeback Kid,
+  // game-modes-roadmap.md "New Cricket-native badges"). Sampled BEFORE this
+  // visit's points update, same "deepest behind as you step up to throw"
+  // timing X01 uses — the opponent's points can't change during this player's
+  // own visit, so only p.points (pre-update) matters here.
+  if(game.players.length===2){
+    const _opp = game.players.find(x=>x!==p);
+    if(_opp) p.legWorstPointsDeficit = Math.max(p.legWorstPointsDeficit, (_opp.points||0) - p.points);
+  }
 
   p.marks = ev.marks;
   p.points = ev.points;
@@ -5991,7 +6376,8 @@ function enterTurnCricket(){
 
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.scored, bust:false, checkout:false, checkoutPoints:null, legWon:ev.win,
-    darts: game.darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt })) });
+    darts: game.darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
+      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
 
   const turnRecord = { player:p.name, scored:ev.scored, darts:game.darts.slice() };
   game.currentLegTurns.push(turnRecord);
@@ -6047,6 +6433,7 @@ function undoLastTurnCricket(){
   p.marks = snap.marks;
   p.points = snap.points;
   p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
+  p.legWorstPointsDeficit = snap.legWorstPointsDeficit;
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
 
@@ -6067,14 +6454,33 @@ function undoLastTurnCricket(){
   pushLive();
 }
 /* ----- Cricket leg / set / game progression (dispatched from onLegWon path) -----
-   Cricket's own achievements (9 Marks, Perfect Leg) are detected in enterTurnCricket()
-   before this runs; this function itself carries no achievement or Daily Challenge
-   integration (X01's clutch/social badges and challenges don't apply to Cricket).
-   Set/leg advancement and the completeGame/HA webhook calls are the same generic
-   hooks the X01 path uses. */
+   9 Marks/Perfect Leg (per-visit achievements) are detected in enterTurnCricket()
+   before this runs. Whitewash and Comeback Kid (Cricket) are leg-outcome badges —
+   only knowable once the leg's winner is known — so they're checked here instead,
+   the same split X01 uses (per-visit badges in enterTurn(), leg/match-outcome
+   badges in onLegWon()). Neither is a port of an X01 badge; both are Cricket-native
+   (game-modes-roadmap.md "New Cricket-native badges") and 2-player only, same
+   restriction as X01's own social/margin-of-victory badges. Set/leg advancement
+   and the completeGame/HA webhook calls below are the same generic hooks the X01
+   path uses. */
 function onLegWonCricket(wi){
   const w = game.players[wi];
+  const opp = game.players.length===2 ? game.players.find(p=>p!==w) : null;
   w.legsWon += 1;
+
+  // Whitewash: the opponent closed zero numbers by the time this leg ended.
+  if(opp && isCricketWhitewash(opp.marks)){
+    queueBadge('cricketwhitewash', w.name);
+    awardRecurringBadge(w.name, 'cricketwhitewash', 'cricketwhitewash',
+      { icon:'🧹', headline:'WHITEWASH', player:w.name, statLine:`${opp.name} never closed a number` });
+  }
+  // Comeback Kid (Cricket): won after trailing on points by CRICKET_COMEBACK_THRESHOLD+
+  // at some point this leg (tracked per-visit in enterTurnCricket()).
+  if(opp && cricketComebackAchieved(w.legWorstPointsDeficit)){
+    queueBadge('cricketcomebackkid', w.name);
+    awardRecurringBadge(w.name, 'cricketcomebackkid', 'cricketcomebackkid',
+      { icon:'🔥', headline:'COMEBACK KID', player:w.name, statLine:`Trailed by ${CRICKET_COMEBACK_THRESHOLD}+ points, won anyway` });
+  }
 
   if(!game.practice && w.legsWon >= game.legsPerSet){      // set won (H2H only)
     w.setsWon += 1;
@@ -6353,6 +6759,31 @@ function finishUnit(kind, winner){
     // Tournament mode: the bracket already advanced server-side (the onGameCompleted
     // hook fired from DB.completeGame() above), so route back to the bracket instead
     // of the normal New Game screen.
+    if(game.tournamentMatchId){
+      // docs/tournament-mode-roadmap.md §7: Champion/Giant Slayer (Tournament) are
+      // awarded server-side, inside _advanceTournamentMatch() itself (authoritative
+      // seed/champion data lives right there) — not re-computed or re-awarded here.
+      // This just detects whether either was newly earned, by diffing against
+      // earnedBadgeCache's pre-match snapshot (populated in _reallyBeginTournamentMatch()),
+      // the same "already earned?" check around_the_world already uses, so the
+      // celebration still fires live even though the award itself happened server-side.
+      const _winnerName = winner;
+      const _snapT = game.lastTurnSnapshot;
+      DB._queue(()=>Backend.get(`/api/players/badges?name=${encodeURIComponent(_winnerName)}`)).then(list=>{
+        const earnedNow = new Set((list||[]).map(b=>b.badge_id));
+        const earnedBefore = earnedBadgeCache[_winnerName] || new Set();
+        if(earnedNow.has('tournament_champion') && !earnedBefore.has('tournament_champion')){
+          trackBadgeForUndo(_snapT, _winnerName, 'tournament_champion');
+          queueBadge('tournamentchampion', _winnerName, _snapT, 'First time!');
+          fireMomentCard('tournamentchampion', { icon:'🏆', headline:'CHAMPION', player:_winnerName, statLine:'Won the tournament' });
+        }
+        if(earnedNow.has('tournament_giant_slayer') && !earnedBefore.has('tournament_giant_slayer')){
+          trackBadgeForUndo(_snapT, _winnerName, 'tournament_giant_slayer');
+          queueBadge('tournamentgiantslayer', _winnerName, _snapT, 'First time!');
+          fireMomentCard('tournamentgiantslayer', { icon:'⚔️', headline:'GIANT SLAYER', player:_winnerName, statLine:'Upset a higher seed' });
+        }
+      }).catch(()=>{});
+    }
     const nextBtn = game.tournamentMatchId
       ? `<button class="btn btn-primary" onclick="show('tournament')">Back to bracket</button>`
       : `<button class="btn btn-primary" onclick="show('setup')">New game</button>`;
@@ -6435,7 +6866,7 @@ function renderGameShell(){
       </div>
       <div class="pad" id="pad"></div>
       <div class="dart-board-wrap" id="dart-board-wrap"></div>
-      <button class="btn btn-ghost board-miss" id="board-miss-btn" onclick="throwDartBoard(0,1)">Miss</button>
+      <button class="btn btn-ghost board-miss" id="bounce-out-btn" onclick="throwBounceOut()">Bounce Out</button>
       <div class="turn-actions">
         <div class="undo-row">
           <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled>${isPerDartMode ? 'Undo Last Dart' : 'Undo Last Turn'}</button>
@@ -6646,12 +7077,13 @@ function cricketNumberLabel(n){ return n===25 ? 'Bull' : String(n); }
 function newMatchPlayerCricket(name, config){
   const marks = {};
   (config && config.numbers || CRICKET_STANDARD_NUMBERS).forEach(n=>{ marks[n]=0; });
-  return { name, marks, points:0, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 };
+  return { name, marks, points:0, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0,
+    legWorstPointsDeficit:0 };  // largest (opponent.points - my.points) seen this leg (Comeback Kid — Cricket)
 }
 function resetPlayerForNextLegCricket(p, game, newSet){
   const marks = {};
   (game.config.numbers || CRICKET_STANDARD_NUMBERS).forEach(n=>{ marks[n]=0; });
-  p.marks = marks; p.points = 0; p.legDarts = 0;
+  p.marks = marks; p.points = 0; p.legDarts = 0; p.legWorstPointsDeficit = 0;
   if(newSet) p.setDarts = 0;
 }
 function playerSnapshotCricket(p){
@@ -6687,9 +7119,9 @@ function playerSnapshotDoublesPractice(p){
 // its own committed turn, "undo the last turn" and "undo the last dart" are the
 // same action here — one snapshot per dart, same "one level of undo only"
 // convention as X01/Cricket's game.lastTurnSnapshot.
-function throwDartDoublesPractice(sector){
+function throwDartDoublesPractice(sector, zone, missZone, missDepth, bounced){
   if(game.roundOver) return;
-  const dart = makeDart(sector, mult);
+  const dart = makeDart(sector, bounced ? 1 : mult);
   mult = 1; updateMultUI();
   const p = game.players[0];
   const targets = game.config.doubles || [];
@@ -6704,7 +7136,8 @@ function throwDartDoublesPractice(sector){
   if(ev.hit) p.roundHits += 1;
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:0, bust: !!ev.ended, checkout:false, checkoutPoints:null, legWon:false,
-    darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt }] });
+    darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt,
+      zone: zone || null, missZone: missZone != null ? missZone : null, missDepth: missDepth || null, bounced: !!bounced }] });
   game.dpLastDart = { label:dart.label, hit:ev.hit, ended:ev.ended, reason:ev.reason };
   if(ev.ended){
     game.roundOver = true;
@@ -6846,8 +7279,8 @@ function playerSnapshotChuckin(p){
   const sessionAvg = p.sessionDarts>0 ? (p.sessionScore/p.sessionDarts*3) : null;
   return { name:p.name, sessionDarts:p.sessionDarts||0, sessionTrebles:p.sessionTrebles||0, heatmap, sessionAvg };
 }
-function throwDartChuckin(sector){
-  const dart = makeDart(sector, mult);
+function throwDartChuckin(sector, zone, missZone, missDepth, bounced){
+  const dart = makeDart(sector, bounced ? 1 : mult);
   mult = 1; updateMultUI();
   const p = game.players[0];
 
@@ -6880,7 +7313,8 @@ function throwDartChuckin(sector){
 
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:0, bust:false, checkout:false, checkoutPoints:null, legWon:false,
-    darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt }] });
+    darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt,
+      zone: zone || null, missZone: missZone != null ? missZone : null, missDepth: missDepth || null, bounced: !!bounced }] });
   game.chuckinLastDart = { label:dart.label, isTreble:!!dart.isTreble };
   announce(`${dart.label}. ${p.sessionDarts} dart${p.sessionDarts===1?'':'s'} this session.`);
   renderGameChuckin();
@@ -7151,7 +7585,7 @@ function loadDartWeights(){
     .catch(()=>{ container.hidden=true; });
 }
 
-// docs/dart-builder-roadmap.md: populates the Player Profile's "Default loadout"
+// docs/archive/dart-builder-roadmap.md: populates the Player Profile's "Default loadout"
 // select (only rendered at all once PIN-gated player settings are unlocked, or the
 // player has no PIN — see renderPlayerPage()).
 function loadPlayerLoadouts(){
@@ -7302,26 +7736,70 @@ function loadTopFinishes(){
    from buildDartboard() itself (rather than adding a "heatmap mode" flag to it) so
    the heavily-used live scoring board can't regress from a change made for this
    one Player Profile visualization. */
-function loadChuckinHeatmap(){
-  const section = document.getElementById('chuckin-heatmap-section');
-  const body = document.getElementById('chuckin-heatmap-body');
+// docs/archive/dartboard-zone-tracking-roadmap.md "Beyond Just Chuckin' It": generalized
+// from the original Chuckin-only loadChuckinHeatmap() — fires for whichever game
+// type's Player Profile tab is currently active instead of early-outing on anything
+// but Chuckin, since darts is the one universal per-dart table every game type
+// writes into (X01, Cricket, Doubles Practice, and Chuckin all go through the same
+// addTurn() path). Also loads the v1 bounce-out count (a plain number, not part of
+// the heatmap SVG — see "Bounce-out tracking" in the same doc).
+function loadDartHeatmap(){
+  const section = document.getElementById('dart-heatmap-section');
+  const body = document.getElementById('dart-heatmap-body');
   if(!section || !body) return;
-  if(playerGameType !== 'chuckin'){ section.hidden = true; return; }
   section.hidden = false;
+  const gt = playerGameType;
+  const label = (GAME_TYPES[gt] && GAME_TYPES[gt].label) || gt;
   const modeParam = (playerPageTab==='h2h'||playerPageTab==='practice') ? `&mode=${playerPageTab}` : '';
-  Backend.get(`/api/players/chuckin-heatmap?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
-    .then(cells => { body.innerHTML = buildChuckinHeatmap(cells||[]); })
+  Backend.get(`/api/players/dart-heatmap?name=${encodeURIComponent(currentPlayer)}&gameType=${gt}${modeParam}`)
+    .then(cells => { body.innerHTML = buildDartHeatmap(cells||[], { ariaLabel: `Dartboard heatmap of every ${label} dart thrown` }); })
     .catch(()=>{ body.innerHTML = `<p class="pp-meta" style="padding:4px 0">Could not load the heatmap.</p>`; });
+  const bounceEl = document.getElementById('bounce-out-count');
+  if(bounceEl){
+    bounceEl.textContent = '';
+    Backend.get(`/api/players/bounce-outs?name=${encodeURIComponent(currentPlayer)}&gameType=${gt}${modeParam}`)
+      .then(r => { if(r && r.count > 0) bounceEl.textContent = `Bounce-outs: ${r.count}`; })
+      .catch(()=>{});
+  }
 }
-function buildChuckinHeatmap(cells){
-  const hitMap = {};
-  let maxHits = 0;
-  (cells||[]).forEach(c=>{ hitMap[c.sector+'_'+c.multiplier] = c.hits; if(c.hits>maxHits) maxHits = c.hits; });
-  const hits = (sector, m) => hitMap[sector+'_'+m] || 0;
-  const heat = (sector, m) => maxHits>0 ? hits(sector,m)/maxHits : 0;
+function buildDartHeatmap(cells, opts){
+  opts = opts || {};
+  const ariaLabel = opts.ariaLabel || 'Dartboard heatmap of every dart thrown';
+  // Hit regions keyed by sector_multiplier_zone ('' when zone doesn't apply — trebles/
+  // doubles/bull always, singles too before this feature or from Pad mode). Misses
+  // keyed by wedge_depth — only ever populated by a positioned Dartboard-mode miss;
+  // an unpositioned miss (Pad mode, or a pre-feature row) has nothing to plot, same
+  // as it always has. A zone-unspecified single is tracked separately (unspecMap) —
+  // it's real hit data, just not attributable to inner or outer, so it gets its own
+  // "zone unspecified" hatch overlay instead of being silently split 50/50 or folded
+  // into either real bucket.
+  const hitMap = {}, missMap = {}, unspecMap = {};
+  let maxHitHeat = 0, maxMissHeat = 0;
+  (cells||[]).forEach(c=>{
+    if(c.sector === 0){
+      if(c.missZone != null && c.missDepth){
+        const key = c.missZone+'_'+c.missDepth;
+        missMap[key] = (missMap[key]||0) + c.hits;
+        if(missMap[key] > maxMissHeat) maxMissHeat = missMap[key];
+      }
+      return;
+    }
+    if(c.multiplier === 1 && c.sector >= 1 && c.sector <= 20 && !c.zone){
+      unspecMap[c.sector] = (unspecMap[c.sector]||0) + c.hits;
+      return;
+    }
+    const key = c.sector+'_'+c.multiplier+'_'+(c.zone||'');
+    hitMap[key] = (hitMap[key]||0) + c.hits;
+    if(hitMap[key] > maxHitHeat) maxHitHeat = hitMap[key];
+  });
+  const hits = (sector, m, zone) => hitMap[sector+'_'+m+'_'+(zone||'')] || 0;
+  const heat = (sector, m, zone) => maxHitHeat>0 ? hits(sector,m,zone)/maxHitHeat : 0;
+  const missHits = (wedge, depth) => missMap[wedge+'_'+depth] || 0;
+  const missHeat = (wedge, depth) => maxMissHeat>0 ? missHits(wedge,depth)/maxMissHeat : 0;
+  const unspecCount = sector => unspecMap[sector] || 0;
 
-  const CX=250, CY=250;
-  const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248 };
+  const CX=330, CY=330;
+  const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248, missNear:270, missFar:310 };
   const DEG = 360/20;
   const xy = (r, deg) => { const a=(deg-90)*Math.PI/180; return [CX+r*Math.cos(a), CY+r*Math.sin(a)]; };
   const f = v => v.toFixed(2);
@@ -7339,19 +7817,42 @@ function buildChuckinHeatmap(cells){
     const b = Math.round(26 + t*(106-26));
     return `rgb(${r},${g},${b})`;
   };
-  let s = `<svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:360px;height:auto;display:block;margin:0 auto" role="img" aria-label="Dartboard heatmap of every Just Chuckin' It dart thrown">
+  let s = `<svg viewBox="0 0 660 660" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:360px;height:auto;display:block;margin:0 auto" role="img" aria-label="${ariaLabel}">
+    <defs>
+      <pattern id="zoneHatch" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+        <line x1="0" y1="0" x2="0" y2="6" stroke="#efe7d2" stroke-width="1.5" opacity="0.35"/>
+      </pattern>
+    </defs>
     <circle cx="${CX}" cy="${CY}" r="${R.bg}" fill="#0d0e0b"/>
     <circle cx="${CX}" cy="${CY}" r="${R.doubleOut+1}" fill="#111210"/>
     <circle cx="${CX}" cy="${CY}" r="${R.doubleOut}" fill="#0d0e0b"/>`;
   DB_SECTORS.forEach((num,i)=>{
     const s0=i*DEG-DEG/2, e0=s0+DEG;
     const sw = 'stroke="#151613" stroke-width="0.5"';
-    s += `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${heatFill(heat(num,1))}" ${sw}><title>${num}: ${hits(num,1)} single hit${hits(num,1)===1?'':'s'}</title></path>`;
+    const unspec = unspecCount(num);
+    const innerTitle = `${num} (inner): ${hits(num,1,'inner')} hit${hits(num,1,'inner')===1?'':'s'}`
+      + (unspec ? ` · ${unspec} more (zone unknown)` : '');
+    const outerTitle = `${num} (outer): ${hits(num,1,'outer')} hit${hits(num,1,'outer')===1?'':'s'}`
+      + (unspec ? ` · ${unspec} more (zone unknown)` : '');
+    s += `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${heatFill(heat(num,1,'inner'))}" ${sw}><title>${innerTitle}</title></path>`;
     s += `<path d="${annulus(R.trebleIn,R.trebleOut,s0,e0)}" fill="${heatFill(heat(num,3))}" ${sw}><title>T${num}: ${hits(num,3)} treble hit${hits(num,3)===1?'':'s'}</title></path>`;
-    s += `<path d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${heatFill(heat(num,1))}" ${sw}/>`;
+    s += `<path d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${heatFill(heat(num,1,'outer'))}" ${sw}><title>${outerTitle}</title></path>`;
     s += `<path d="${annulus(R.doubleIn,R.doubleOut,s0,e0)}" fill="${heatFill(heat(num,2))}" ${sw}><title>D${num}: ${hits(num,2)} double hit${hits(num,2)===1?'':'s'}</title></path>`;
+    // Zone-unspecified singles (Pad mode, or pre-feature rows): a faint hatch overlay
+    // across BOTH single regions, distinct from the "never hit" dark state and from
+    // real inner/outer heat — never silently folded into either.
+    if(unspec > 0){
+      s += `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="url(#zoneHatch)" pointer-events="none"/>`;
+      s += `<path d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="url(#zoneHatch)" pointer-events="none"/>`;
+    }
     const [nx,ny]=xy(R.numAt,s0+DEG/2);
     s += `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="17" fill="#efe7d2" style="pointer-events:none;user-select:none">${num}</text>`;
+    // Miss ring (docs/archive/dartboard-zone-tracking-roadmap.md "Miss-area tracking") — same
+    // 20 wedges extended past the board, shaded by how many misses landed in that
+    // direction/depth, on their own independent heat scale (a wildly different
+    // population size than scoring hits).
+    s += `<path d="${annulus(R.bg,R.missNear,s0,e0)}" fill="${heatFill(missHeat(num,'near'))}" ${sw}><title>Miss (near), wedge ${num}: ${missHits(num,'near')} miss${missHits(num,'near')===1?'':'es'}</title></path>`;
+    s += `<path d="${annulus(R.missNear,R.missFar,s0,e0)}" fill="${heatFill(missHeat(num,'far'))}" ${sw}><title>Miss (far), wedge ${num}: ${missHits(num,'far')} miss${missHits(num,'far')===1?'':'es'}</title></path>`;
   });
   s += `<circle cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="${heatFill(heat(25,1))}" stroke="#151613" stroke-width="0.5"><title>Bull: ${hits(25,1)} hit${hits(25,1)===1?'':'s'}</title></circle>`;
   s += `<circle cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="${heatFill(heat(25,2))}" stroke="#151613" stroke-width="0.5"><title>Double Bull: ${hits(25,2)} hit${hits(25,2)===1?'':'s'}</title></circle>`;
@@ -7371,11 +7872,19 @@ function loadDartAnalytics(){
     .catch(()=>{ body.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load dart analytics.</p>`; });
 }
 
-function dartLabelFromParts(sector, mult){
+function dartLabelFromParts(sector, mult, zone){
   if(sector == null) return null;
   if(sector === 0) return 'Miss';
   if(sector === 25) return mult === 2 ? 'Bull' : '25';
-  return (mult === 3 ? 'T' : mult === 2 ? 'D' : '') + sector;
+  const base = (mult === 3 ? 'T' : mult === 2 ? 'D' : '') + sector;
+  if(zone) return `${base} (${zone})`;
+  // docs/archive/dartboard-zone-tracking-roadmap.md open question, resolved: a single hit
+  // with no zone at all (Pad mode, or thrown before this feature existed) gets an
+  // explicit text suffix here too, same "don't silently imply precision that isn't
+  // there" posture as the heatmap's own hatch overlay — but only for a genuinely
+  // ambiguous single; a double/treble/bull never had a zone concept to begin with,
+  // so it stays unlabeled exactly as before.
+  return (mult === 1 && sector >= 1 && sector <= 20) ? `${base} (zone unknown)` : base;
 }
 
 function renderDartAnalytics(data, container){
@@ -7387,7 +7896,7 @@ function renderDartAnalytics(data, container){
   // ── Most hit sectors ──────────────────────────────────────────────
   const maxHits = topSectors[0]?.hits || 1;
   const sectorRows = topSectors.map((r,i)=>{
-    const lbl = dartLabelFromParts(r.sector, r.multiplier);
+    const lbl = dartLabelFromParts(r.sector, r.multiplier, r.zone);
     const bar = Math.round(r.hits / maxHits * 100);
     const color = r.multiplier === 3 ? 'var(--green)' : r.multiplier === 2 ? 'var(--red)' : 'var(--surface-2)';
     return `<div class="da-row">

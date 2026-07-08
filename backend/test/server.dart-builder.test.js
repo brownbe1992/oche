@@ -1,6 +1,6 @@
 'use strict';
 // Committed tests for the Dart Builder / loadout API routes added to
-// backend/server.js (docs/dart-builder-roadmap.md). Mirrors
+// backend/server.js (docs/archive/dart-builder-roadmap.md). Mirrors
 // server.export.test.js's spawn-a-real-server pattern since server.js isn't
 // require()-able.
 const { test, describe } = require('node:test');
