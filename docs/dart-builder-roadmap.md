@@ -23,11 +23,17 @@
 > `getLoadoutStats()` query per loadout — no new backend work. See
 > `REFERENCE.md`'s "Loadout comparison view" note for full mechanics.
 >
-> **Three pieces remain explicitly deferred**, each tracked as its own item on
-> `docs/open-roadmap-items.md` rather than left implicit here: a visual icon/diagram
-> per barrel shape/grip/flight-shape option (the accessibility requirement below is
-> not yet met — dropdowns are text-label-only), the "quick-add full set" one-shot
-> entry form, and optional photo upload per component.
+> **✅ Built (2026-07): the accessibility icon set and the quick-add form** —
+> barrel shape, barrel grip, and flight shape now get a small hand-coded icon
+> per option (an accessible toggle-button group, `aria-hidden` decorative SVGs,
+> not a replacement for the text label) instead of text-only dropdowns; a "⚡
+> Quick Add Full Set" screen lets a whole barrel+shaft+flight+loadout be entered
+> and saved in one action instead of three separate "+ New {type}" round trips.
+> See `REFERENCE.md`'s matching sections for full mechanics.
+>
+> **One piece remains explicitly deferred**, tracked as its own item on
+> `docs/open-roadmap-items.md`: optional photo upload per component (an
+> alternative to the icon set above, not required now that it exists).
 
 ## Goal
 
@@ -197,15 +203,22 @@ entirely, since a single column has nothing to collapse.
 - **Barrel / Shaft / Flight sections**, each a labeled group with a `<select>` of
   that player's existing components of that type, plus a "+ New {type}" button that
   opens a modal to create one on the fly (fields shown per type are driven entirely
-  by `GET /api/dart-components/options` — no icon/diagram per option yet, see the
-  accessibility note in section 4). A **Tip Texture** section (smooth/grooved) sits
-  alongside them as a plain dropdown on the loadout itself, not a component.
+  by `GET /api/dart-components/options`). **✅ Built (2026-07)**: the modal's
+  barrel-shape, barrel-grip, and flight-shape fields are now an icon-button group
+  instead of a plain `<select>` — see the accessibility note in section 4.
+  A **Tip Texture** section (smooth/grooved) sits alongside them as a plain
+  dropdown on the loadout itself, not a component.
 - Below the three slots + tip texture: **this loadout's stats** (see "Stats" below)
   — scroll-down content on the same screen, not a separate page, appearing once the
   loadout has been saved (has an id).
-- No "quick-add full set" one-shot entry form shipped — building a loadout is three
-  "+ New" taps (one per component type) plus naming the loadout. Tracked as its own
-  deferred item on `docs/open-roadmap-items.md`.
+- **✅ Built (2026-07): a "quick-add full set" one-shot entry form** — a "⚡ Quick
+  Add Full Set" button on the loadout list opens a single screen with the
+  loadout name plus every barrel/shaft/flight field (name, length, weight/type,
+  material, shape/grip) and one Save button, instead of three separate "+ New"
+  modal round trips followed by a fourth loadout-save step. No new backend
+  endpoint — it's client-side orchestration of the same `createComponent()` ×3
+  + `createLoadout()` calls the normal flow already makes, just sequenced
+  behind one button. See `REFERENCE.md`'s matching section for full mechanics.
 
 **Player Profile integration**: the profile page's existing "Dart Weight" row is
 replaced by a **"Default Loadout"** selector — a dropdown of that player's saved
@@ -271,16 +284,21 @@ narrowly than originally sketched:
 
 Per `CLAUDE.md`'s standing conventions:
 
-- **Accessibility — partially built, one piece explicitly deferred**: the shipped
-  builder uses plain `<select>` dropdowns rather than a card-picker/carousel, so
-  full keyboard operability came for free (native `<select>` is keyboard-accessible
-  by default) — no bespoke arrow/tab handling was needed. What's **not** yet built,
-  and is tracked as its own item on `docs/open-roadmap-items.md`: a visual
-  diagram/icon per barrel shape, barrel grip, and flight shape option, since terms
-  like "torpedo," "knurled," or "kite" aren't self-explanatory by name alone — v1
-  ships text-label-only options for these three fields, which is a real standing
-  accessibility/usability gap per `docs/accessibility-roadmap.md`'s checklist, not
-  a closed item.
+- **Accessibility — ✅ built (2026-07)**: the shipped builder uses plain
+  `<select>` dropdowns rather than a card-picker/carousel for most fields, so
+  full keyboard operability came for free (native `<select>` is
+  keyboard-accessible by default) — no bespoke arrow/tab handling was needed.
+  The one real standing gap — terms like "torpedo," "knurled," or "kite"
+  aren't self-explanatory by name alone (`docs/accessibility-roadmap.md`'s
+  checklist) — is now closed for the three fields it named (barrel shape,
+  barrel grip, flight shape): each is an icon-button group instead of a plain
+  `<select>`, built as a real accessible toggle-group (`role="group"`,
+  per-button `aria-pressed`, the same pattern the Custom Cricket number picker
+  already uses), not a native-select replacement that would have risked
+  regressing keyboard support to gain the visual — every icon is
+  `aria-hidden="true"` and each button's own text label is the accessible
+  name, so meaning is never conveyed by the icon alone. Shaft's "Type" field
+  (fixed/spinning) was never named in the gap and stays a plain `<select>`.
 - **Security**: no new credential/token surface, but a new PIN-gated action: for a
   PIN-protected player, both **setting/changing their Default Loadout** (on the
   Player Profile page) and **opening the Dart Builder screen to customize their

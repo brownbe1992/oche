@@ -320,6 +320,20 @@
   .board-miss{flex:none;margin-top:8px}
   .hidden{display:none!important}
 
+  /* ---- Dart Builder: icon picker (docs/dart-builder-roadmap.md accessibility
+     item — a visual diagram per barrel shape/grip and flight shape option, since
+     terms like "torpedo"/"knurled"/"kite" aren't self-explanatory by name alone.
+     Icon is decorative (aria-hidden) — the button's own text label is the
+     accessible name, so meaning is never conveyed by the icon alone. */
+  .icon-picker{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  .icon-opt{display:flex;flex-direction:column;align-items:center;gap:4px;
+    background:var(--surface);border:1px solid var(--wire);border-radius:10px;
+    padding:8px 10px;cursor:pointer;color:var(--muted);font:inherit;min-width:64px}
+  .icon-opt svg{width:36px;height:22px;color:var(--muted)}
+  .icon-opt span.icon-opt-label{font-size:11px;font-weight:600;letter-spacing:.02em}
+  .icon-opt[aria-pressed="true"]{background:var(--surface-2);border-color:var(--gold);color:var(--ink)}
+  .icon-opt[aria-pressed="true"] svg{color:var(--gold)}
+
   /* ---- stats screen ---- */
   table{width:100%;border-collapse:collapse;font-size:13.5px}
   th,td{text-align:left;padding:11px 10px;border-bottom:1px solid var(--wire)}
@@ -1688,9 +1702,12 @@ function showLegend(backTo){
 }
 let dartBuilderBackTo='player';
 // dartBuilderView: 'list' (loadout list for dartBuilderPlayer), 'edit' (component
-// slots for dartBuilderLoadoutId, null = new unsaved loadout), or 'compare'
+// slots for dartBuilderLoadoutId, null = new unsaved loadout), 'compare'
 // (docs/dart-builder-roadmap.md "loadout comparison view" — side-by-side stats
-// for two or more of dartBuilderPlayer's loadouts).
+// for two or more of dartBuilderPlayer's loadouts), or 'quickadd' ("quick-add
+// full set" one-shot entry form — name + all barrel/shaft/flight fields on one
+// screen, one save, for logging an off-the-shelf dart set instead of three
+// separate "+ New {type}" round trips).
 let dartBuilderPlayer=null, dartBuilderView='list', dartBuilderLoadoutId=null;
 // Loadout comparison state (view==='compare' only): which loadout ids are
 // currently checked into the comparison table, and a cache of every loadout's
@@ -4908,6 +4925,7 @@ async function renderDartBuilderScreen(){
   }
   if(dartBuilderView === 'edit') await renderDartBuilderEdit();
   else if(dartBuilderView === 'compare') await renderDartBuilderCompare();
+  else if(dartBuilderView === 'quickadd') renderDartBuilderQuickAdd();
   else await renderDartBuilderList();
 }
 
@@ -4939,6 +4957,7 @@ async function renderDartBuilderList(){
     </p>
     <div class="btn-row" style="margin-bottom:14px">
       <button class="btn btn-primary" onclick="openDartBuilderEdit(null)">+ New Loadout</button>
+      <button class="btn btn-ghost" onclick="openDartBuilderQuickAdd()">⚡ Quick Add Full Set</button>
       ${loadouts.length >= 2 ? `<button class="btn btn-ghost" onclick="openDartBuilderCompare()">⚖️ Compare Loadouts</button>` : ''}
     </div>
     ${cards || '<p style="color:var(--muted);font-size:13px">No loadouts yet.</p>'}
@@ -5037,6 +5056,130 @@ function renderDartBuilderCompareTable(){
       </tbody>
     </table>
   </div>`;
+}
+
+// Quick Add Full Set (docs/dart-builder-roadmap.md "quick-add full set" one-shot
+// entry form). No new backend endpoint — orchestrates the same createComponent()
+// x3 + createLoadout() calls the normal 3-modal flow already makes, just from one
+// screen with one Save button, for logging an off-the-shelf set that came as a
+// matched barrel/shaft/flight in one go.
+function openDartBuilderQuickAdd(){
+  dartBuilderView = 'quickadd';
+  renderDartBuilderScreen();
+}
+// Renders one component type's field set inline (not in a modal — every id gets
+// a `qa-{type}-` prefix so all three can coexist on the same page). Mirrors
+// openComponentEditor()'s exact field set per type; shape/grip use the same
+// icon pickers, keyed off the same `qa-{type}-shape`/`qa-{type}-grip` ids
+// submitDartBuilderQuickAdd() reads back.
+function quickAddComponentFieldsHtml(type){
+  const typeOpts = _dartBuilderOptions[type];
+  const isShaft = type === 'shaft';
+  const shapeList = isShaft ? typeOpts.types : typeOpts.shapes;
+  const lengthList = type !== 'flight' ? typeOpts.lengthRanges : null;
+  const label = type.charAt(0).toUpperCase()+type.slice(1);
+  return `<div class="pp-section">
+    <div class="pp-section-title">${label}</div>
+    <label class="field">Name</label>
+    <input type="text" id="qa-${type}-name" maxlength="64" placeholder="e.g. Red Dragon Razer Edge" style="margin-bottom:10px">
+    ${lengthList ? `<label class="field">Length</label>
+    <select id="qa-${type}-length" style="width:auto;margin-bottom:10px">
+      <option value="">Not set</option>
+      ${lengthList.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
+    </select>` : ''}
+    ${type==='barrel' ? `<label class="field">Weight</label>
+    <select id="qa-${type}-weight" style="width:auto;margin-bottom:10px">
+      <option value="">Not set</option>
+      ${typeOpts.weights.map(g=>`<option value="${g}">${g}g</option>`).join('')}
+    </select>` : ''}
+    <label class="field">Material</label>
+    <select id="qa-${type}-material" style="width:auto;margin-bottom:10px">
+      <option value="">Not set</option>
+      ${typeOpts.materials.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
+    </select>
+    <label class="field">${isShaft?'Type':'Shape'}</label>
+    ${isShaft
+      ? `<select id="qa-${type}-shape" style="width:auto;margin-bottom:10px">
+          <option value="">Not set</option>
+          ${shapeList.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
+        </select>`
+      : iconPickerHtml(`qa-${type}-shape`, type==='barrel' ? 'barrelShape' : 'flightShape', shapeList, `${label} shape`, null)}
+    ${type==='barrel' ? `<label class="field">Grip</label>
+    ${iconPickerHtml(`qa-${type}-grip`, 'barrelGrip', typeOpts.grips, 'Barrel grip', null)}` : ''}
+  </div>`;
+}
+function renderDartBuilderQuickAdd(){
+  const el = document.getElementById('dart-builder-body');
+  const player = dartBuilderPlayer;
+  el.innerHTML = `
+    <div style="margin-bottom:14px">
+      <h2 style="font-size:18px;margin-bottom:4px">Quick Add Full Set</h2>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 10px;line-height:1.6">
+        Log an off-the-shelf dart set — name the loadout, fill in the barrel, shaft, and flight that came with it, and save once.
+      </p>
+      <label class="field">Loadout name</label>
+      <input type="text" id="qa-name" maxlength="64" placeholder="e.g. Match Set" style="margin-bottom:10px">
+      <button class="btn btn-ghost" onclick="dartBuilderView='list';renderDartBuilderScreen();">Back to Loadouts</button>
+    </div>
+    ${quickAddComponentFieldsHtml('barrel')}
+    ${quickAddComponentFieldsHtml('shaft')}
+    ${quickAddComponentFieldsHtml('flight')}
+    <div class="pp-section">
+      <div class="pp-section-title">Tip Texture</div>
+      <select id="qa-tip-texture" style="width:auto">
+        <option value="">Not set</option>
+        ${(_dartBuilderOptions.tipTextures||[]).map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
+      </select>
+    </div>
+    <div id="qa-error" style="color:var(--danger,#e5484d);font-size:12px;margin:10px 0" hidden></div>
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn btn-primary" onclick="submitDartBuilderQuickAdd()">Save Full Set</button>
+    </div>
+  `;
+}
+function quickAddFields(type){
+  const get = id => { const el = document.getElementById(id); return el && el.value ? el.value : null; };
+  const fields = { name: get(`qa-${type}-name`) };
+  if(type !== 'flight') fields.lengthMm = get(`qa-${type}-length`);
+  if(type === 'barrel') fields.weightG = get(`qa-${type}-weight`) ? Number(get(`qa-${type}-weight`)) : null;
+  fields.material = get(`qa-${type}-material`);
+  fields.shape = get(`qa-${type}-shape`);
+  if(type === 'barrel') fields.grip = get(`qa-${type}-grip`);
+  return fields;
+}
+function submitDartBuilderQuickAdd(){
+  const player = dartBuilderPlayer;
+  const errEl = document.getElementById('qa-error');
+  const loadoutName = document.getElementById('qa-name').value.trim();
+  const barrel = quickAddFields('barrel'), shaft = quickAddFields('shaft'), flight = quickAddFields('flight');
+  if(!loadoutName){ errEl.textContent = 'Loadout name is required.'; errEl.hidden = false; return; }
+  if(!barrel.name || !shaft.name || !flight.name){
+    errEl.textContent = 'Name is required for the barrel, shaft, and flight.';
+    errEl.hidden = false;
+    return;
+  }
+  errEl.hidden = true;
+  // Sequential, not Promise.all: if the shaft or flight name turns out invalid,
+  // stopping partway is preferable to firing all three requests in parallel and
+  // having to reconcile which succeeded — the components created so far are
+  // never lost either way (they're real, independently usable catalog entries),
+  // just not yet attached to a saved loadout.
+  DB.createComponent(player, 'barrel', barrel)
+    .then(b => DB.createComponent(player, 'shaft', shaft).then(s => [b, s]))
+    .then(([b, s]) => DB.createComponent(player, 'flight', flight).then(f => [b, s, f]))
+    .then(([b, s, f]) => DB.createLoadout(player, {
+      name: loadoutName, barrelId: b.id, shaftId: s.id, flightId: f.id,
+      tipTexture: document.getElementById('qa-tip-texture').value || null,
+    }))
+    .then(lo => {
+      dartBuilderView = 'edit';
+      dartBuilderLoadoutId = lo.id;
+      renderDartBuilderScreen();
+    })
+    .catch(e => {
+      errEl.textContent = (e.message || 'Could not save that set.') + ' Any components already created are still in the catalog — you can assign them to a loadout from the normal editor.';
+      errEl.hidden = false;
+    });
 }
 
 function openDartBuilderEdit(loadoutId){
@@ -5156,6 +5299,56 @@ function loadDartBuilderStats(id){
   }).catch(()=>{ el.innerHTML = ''; });
 }
 
+// Simple schematic diagrams for the three enum fields whose plain-text option
+// names aren't self-explanatory (docs/dart-builder-roadmap.md's deferred
+// accessibility item, built 2026-07) — barrel shape/grip (side profile) and
+// flight shape (front-on outline). Deliberately plain/geometric rather than
+// photorealistic, same "hand-coded inline SVG" style buildDartboard() already
+// uses elsewhere — `currentColor` throughout so each icon inherits its button's
+// text color (and so the selected/gold state above just works, in both themes).
+const COMPONENT_ICONS = {
+  barrelShape: {
+    straight: `<svg viewBox="0 0 64 20" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="5" width="48" height="10" rx="5"/></svg>`,
+    torpedo:  `<svg viewBox="0 0 64 20" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="32" cy="10" rx="26" ry="7"/></svg>`,
+    ton:      `<svg viewBox="0 0 64 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M10,10 C10,6 16,4 24,4 L46,4 C54,4 58,7 58,10 C58,13 54,16 46,16 L24,16 C16,16 10,14 10,10 Z"/></svg>`,
+  },
+  barrelGrip: {
+    smooth:  `<svg viewBox="0 0 64 20" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="5" width="48" height="10" rx="5"/></svg>`,
+    knurled: `<svg viewBox="0 0 64 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="8" y="5" width="48" height="10" rx="5"/>
+      <path d="M16,5 L20,15 M22,5 L26,15 M28,5 L32,15 M34,5 L38,15 M40,5 L44,15 M46,5 L50,15"/></svg>`,
+    ringed:  `<svg viewBox="0 0 64 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="8" y="5" width="48" height="10" rx="5"/>
+      <path d="M18,5 L18,15 M26,5 L26,15 M34,5 L34,15 M42,5 L42,15 M50,5 L50,15"/></svg>`,
+  },
+  flightShape: {
+    standard: `<svg viewBox="0 0 32 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M16,3 L28,14 L28,30 C28,34 22,37 16,37 C10,37 4,34 4,30 L4,14 Z"/></svg>`,
+    slim:     `<svg viewBox="0 0 32 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M16,3 L23,14 L23,30 C23,34 20,37 16,37 C12,37 9,34 9,30 L9,14 Z"/></svg>`,
+    kite:     `<svg viewBox="0 0 32 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M16,3 L28,20 L16,37 L4,20 Z"/></svg>`,
+    pear:     `<svg viewBox="0 0 32 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M16,3 C19,3 20,8 19,13 C25,17 29,24 29,29 C29,34 23,37 16,37 C9,37 3,34 3,29 C3,24 7,17 13,13 C12,8 13,3 16,3 Z"/></svg>`,
+  },
+};
+// Renders one field's icon-picker group. `fieldId` is the hidden input whose
+// `.value` submitComponentEditor() actually reads (kept identical to the
+// plain-<select> field ids it replaces, e.g. "ce-shape"/"ce-grip" — so the
+// submit path needed zero changes for this). `iconSetKey` indexes
+// COMPONENT_ICONS; `values` is the enum list from getDartComponentOptions().
+function iconPickerHtml(fieldId, iconSetKey, values, groupLabel, selected){
+  const icons = COMPONENT_ICONS[iconSetKey] || {};
+  const opts = values.map(v => `<button type="button" class="icon-opt" data-val="${v}"
+      aria-pressed="${v===selected}" aria-label="${escapeHtml(enumLabel(v))}"
+      onclick="selectIconOpt('${fieldId}','${v}')">
+      ${icons[v] || ''}<span class="icon-opt-label" aria-hidden="true">${escapeHtml(enumLabel(v))}</span>
+    </button>`).join('');
+  return `<div class="icon-picker" role="group" aria-label="${escapeHtml(groupLabel)}">${opts}</div>
+    <input type="hidden" id="${fieldId}" value="${escapeHtml(selected || '')}">`;
+}
+function selectIconOpt(fieldId, value){
+  const input = document.getElementById(fieldId);
+  if(!input) return;
+  input.value = value;
+  const group = input.previousElementSibling;
+  if(group) [...group.children].forEach(btn => btn.setAttribute('aria-pressed', String(btn.dataset.val === value)));
+}
+
 // New-component modal, reused for both the "+ New {type}" slot buttons above.
 // Field set is derived from /api/dart-components/options per type — no
 // duplicated enum list on the frontend (single source of truth stays db.js's
@@ -5188,15 +5381,14 @@ function openComponentEditor(type){
       ${typeOpts.materials.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
     </select>
     <label class="field">${isShaft?'Type':'Shape'}</label>
-    <select id="ce-shape" style="width:auto;margin-bottom:10px">
-      <option value="">Not set</option>
-      ${shapeList.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
-    </select>
+    ${isShaft
+      ? `<select id="ce-shape" style="width:auto;margin-bottom:10px">
+          <option value="">Not set</option>
+          ${shapeList.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
+        </select>`
+      : iconPickerHtml('ce-shape', type==='barrel' ? 'barrelShape' : 'flightShape', shapeList, `${type==='barrel'?'Barrel':'Flight'} shape`, null)}
     ${type==='barrel' ? `<label class="field">Grip</label>
-    <select id="ce-grip" style="width:auto;margin-bottom:10px">
-      <option value="">Not set</option>
-      ${typeOpts.grips.map(v=>`<option value="${v}">${enumLabel(v)}</option>`).join('')}
-    </select>` : ''}
+    ${iconPickerHtml('ce-grip', 'barrelGrip', typeOpts.grips, 'Barrel grip', null)}` : ''}
     <div id="ce-error" style="color:var(--danger,#e5484d);font-size:12px;margin-bottom:8px" hidden></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>

@@ -2465,15 +2465,61 @@ against a live server: two loadouts with genuinely different recorded games
 distinct per-column figures, and toggling a column off then back on correctly
 removes/restores it without corrupting the cached stats.
 
+### Visual icon/diagram per barrel shape/grip and flight shape (2026-07)
+
+Closes the accessibility gap the v1 dropdowns left open (terms like "torpedo,"
+"knurled," or "kite" aren't self-explanatory by name alone). Rather than
+replacing the barrel-shape/barrel-grip/flight-shape `<select>` elements with a
+non-native picker (a real accessibility regression risk if built without full
+keyboard support), they're replaced with an **icon-button group** — the same
+accessible toggle-group shape (`role="group"`, per-button `aria-pressed`) the
+Custom Cricket number picker already uses, so keyboard/focus behavior stays
+equal or better, not worse. `COMPONENT_ICONS` (`frontend/index.html`) holds one
+small hand-coded inline SVG per enum value (10 total: 3 barrel shapes, 3 barrel
+grips, 4 flight shapes) — plain geometric outlines using `currentColor`, the
+same "no external assets, hand-coded SVG" convention `buildDartboard()` already
+established, not a photorealistic illustration. `iconPickerHtml(fieldId,
+iconSetKey, values, groupLabel, selected)` renders one field's button row plus
+a **hidden `<input>`** carrying `fieldId` — deliberately kept as the exact same
+element id (`ce-shape`/`ce-grip`) the old `<select>` used, so
+`submitComponentEditor()`'s existing `document.getElementById(id).value` reads
+needed **zero changes**. Each icon is `aria-hidden="true"` (decorative only —
+the button's own text label, not the icon, is the accessible name, so meaning
+is never conveyed by shape alone); shaft's "Type" field (fixed/spinning) is
+unaffected, staying a plain `<select>` since it was never named in the
+accessibility gap. Verified end-to-end with Playwright: clicking an icon
+button updates the hidden input's value and `aria-pressed` state correctly,
+and the saved component persists the clicked value.
+
+### "Quick-add full set" one-shot entry form (2026-07)
+
+A fourth `dartBuilderView` state (`'quickadd'`), reached from a "⚡ Quick Add
+Full Set" button on the loadout list screen. No new backend endpoint —
+`submitDartBuilderQuickAdd()` orchestrates the same `createComponent()` ×3 +
+`createLoadout()` calls the normal 3-modal flow already makes, sequentially
+(not `Promise.all` — stopping partway on a validation failure is preferable to
+firing all three in parallel and reconciling which succeeded), just from one
+screen with all of a barrel/shaft/flight's fields (name, length, weight/type,
+material, shape/grip via the same icon pickers above) plus the loadout's own
+name and tip texture, and one Save button instead of three separate "+ New
+{type}" round trips followed by a fourth loadout-save step. Field ids are
+`qa-{type}-{field}`-prefixed so all three components' forms can coexist on one
+page without id collisions with each other or with the (unrelated,
+not-simultaneously-open) component-editor modal. On success, navigates
+straight to the new loadout's edit view (its stats section, showing 0s until
+first played). On a partial failure (e.g. the flight name is missing after the
+barrel and shaft already saved), the error message explicitly notes that
+already-created components remain in the player's catalog, assignable from the
+normal editor — nothing is silently lost, since a `dart_components` row is a
+real, independently useful entity on its own, not scoped to the loadout it was
+created alongside. Verified end-to-end with Playwright: one submit creates all
+three components plus a loadout linking them, with icon-picker shape/grip
+selections correctly persisted on the barrel and flight.
+
 ### Deliberately out of scope for this pass
 
-- **Visual icon/diagram per barrel shape, barrel grip, and flight shape option**
-  — the accessibility requirement the design doc called for; v1 ships
-  text-label-only dropdowns instead. Tracked on `docs/open-roadmap-items.md`.
-- **"Quick-add full set" one-shot entry form** — building a loadout is three
-  "+ New {type}" taps plus naming it, not a single combined form. Tracked
-  separately.
-- **Optional photo upload per component.** Tracked separately.
+- **Optional photo upload per component** (an alternative to the icon set
+  above). Tracked on `docs/open-roadmap-items.md`.
 - **A literal CoD/Halo-gunsmith illustration** (centered dart, fanning
   leader-line callouts) — shipped instead as a stacked grouped-section form,
   functionally equivalent and inherently mobile-responsive (no wide layout to
