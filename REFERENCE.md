@@ -40,8 +40,9 @@ convention in `CLAUDE.md`.
 - [16. Dart Builder / Loadouts](#16-dart-builder--loadouts)
 - [17. Dartboard Zone / Miss / Bounce-Out Tracking](#17-dartboard-zone--miss--bounce-out-tracking)
 - [18. League Mode](#18-league-mode)
-- [19. Known Limitations & Open Gaps](#19-known-limitations--open-gaps)
-- [20. Troubleshooting](#20-troubleshooting)
+- [19. Checkout Trainer](#19-checkout-trainer)
+- [20. Known Limitations & Open Gaps](#20-known-limitations--open-gaps)
+- [21. Troubleshooting](#21-troubleshooting)
 
 ---
 
@@ -2910,7 +2911,127 @@ maintained-tally suggestion, not this one.
 
 ---
 
-## 19. Known Limitations & Open Gaps
+## 19. Checkout Trainer
+
+Full design: `docs/checkout-trainer-roadmap.md`. A pure mental-recall drill —
+no dartboard throwing involved at all — genuinely different from Daily
+Challenge's "Checkout Sprint" format (which measures a real physical throw at
+a real target). The app gives a target score; the player taps out a proposed
+checkout using the same Pad/Dartboard widgets every other mode uses, and it's
+graded instantly against the objectively optimal route. Two sub-modes sharing
+one core mechanic: untimed **Freeform** and the 60-second **Checkout Blitz**
+sprint.
+
+**Game type**: `checkout_trainer`, one of `KNOWN_GAME_TYPES` (`backend/db.js`).
+Every dart-count attempt is its own 1-3 dart `turns` row — the same per-dart-
+turn shape Doubles Practice/Just Chuckin' It already use — reusing
+`evaluateVisit()` (`frontend/scoring.js`) completely unmodified: a checkout
+attempt genuinely IS a normal X01 visit starting from `remaining = target`.
+
+**Schema**: `turns.target_score INTEGER` (nullable) — the target offered for
+that round; only ever populated for this game type, since (unlike X01) there's
+no persistent "remaining score" state to derive it from afterward.
+`games.config.mode`: `'freeform' | 'blitz'` — a mode flag, not a second
+`game_type`, since both sub-modes share identical target selection and grading
+and differ only in pacing/scoring (the same relationship X01's own H2H-vs-
+Practice split has within one `game_type`). `games.config.durationSec`: fixed
+at `60` for Blitz, `null` for Freeform.
+
+**Grading** (`frontend/scoring.js`):
+- `pickCheckoutTarget(doubleOut, rng)` — picks a uniform-random integer target
+  (`[2,170]` under double-out, `[1,170]` under single-out), re-rolling while
+  `checkoutHint()` reports the candidate unfinishable. Reuses `checkoutHint()`'s
+  own `''` unfinishable signal instead of a separate hardcoded bogey-number
+  list.
+- `gradeCheckoutAttempt(target, doubleOut, darts)` — returns
+  `{legal, usedDarts, optimalDarts, optimal, hint}`. `legal` mirrors
+  `evaluateVisit()`'s `win` flag (reached exactly zero, valid last dart under
+  double-out). `optimal` additionally requires `usedDarts === optimalDarts`
+  (`optimalDarts` = `checkoutHint(target, doubleOut, 3)`'s token count) —
+  grading is by dart **count**, not exact route match, since multiple routes
+  can tie for the objective minimum.
+
+Every attempt writes exactly one of three outcomes onto the existing
+`bust`/`checkout`/`leg_won` columns (no new columns needed beyond
+`target_score`): `bust=1` = not a legal finish; `bust=0, checkout=1, leg_won=0`
+= legal but not optimal; `bust=0, checkout=1, leg_won=1` = optimal. Checkout
+Blitz's scoring formula reads directly off this three-way outcome.
+
+**Physical-stat exclusion**: these darts are a *proposed* route, not a real
+throw, and must not pollute sector heatmaps, treble rate, or dart-pace — the
+same problem Just Chuckin' It already solved once. `NOT_HYPOTHETICAL_DARTS`
+(`backend/db.js`, generalized from the earlier Chuckin-only `NOT_CHUCKIN`)
+excludes both `'chuckin'` and `'checkout_trainer'` game types from every
+physical-throwing aggregate it guards. The "total darts thrown" counters
+themselves are the one deliberate exception (same exception Chuckin already
+gets) — Checkout Trainer darts still count toward raw dart-volume totals.
+
+**Stats** (`getCheckoutTrainerStatBubbles`/`getCheckoutTrainerPersonalBests`,
+`backend/db.js`):
+- **Accuracy %** = legal finishes ÷ total attempts.
+- **Optimal %** = attempts matching the minimum dart count ÷ total attempts
+  (the headline stat — hitting the objective optimum is the actual point of
+  the game).
+- **Toughest Checkout Solved** = `MAX(target_score)` where `leg_won=1`.
+- **Best Optimal Streak** = longest-ever run of consecutive optimal answers,
+  computed by walking every attempt in order and resetting on any non-optimal
+  result (not a maintained counter). Freeform and Blitz rounds both count
+  toward every one of these — a round is a round regardless of which sub-mode
+  served it.
+
+**Checkout Blitz scoring**: per-round point value read straight off the
+three-way outcome above — optimal = **2 points**, legal-but-not-optimal =
+**1 point**, illegal = **0 points**. A run's final score is `SUM` of that
+value across every `turns` row in the game, computed at read time — nothing
+pre-aggregated. `getCheckoutBlitzLeaderboard()` (`backend/db.js`): one row per
+player, their single best-ever run score (`{name, bestScore, achievedAt}`,
+sorted desc) — a peak single-run value, so no minimum-attempts floor the
+rate-based leaderboards (Doubles Practice accuracy, Cricket MPR) use.
+`getCheckoutBlitzPersonalStats(playerName)`: that player's own peak score plus
+a lifetime average across every run. The Blitz countdown is a wall-clock
+deadline (`Date.now() + durationSec*1000`), checked on each render tick rather
+than a naively decrementing counter, so a backgrounded/throttled tab can't
+grant extra time. The clock is checked **between** rounds only — a round
+already in progress when the deadline passes always finishes grading normally
+before the run ends.
+
+**Achievements** (`frontend/index.html`) — data-driven off
+`CHECKOUT_TRAINER_MILESTONE_LADDERS` (4 ladders, 22 tiers, both sub-modes
+combined except Session Endurance which is Freeform-only by construction) and
+`CHECKOUT_BLITZ_MILESTONE_LADDERS` (1 ladder, 6 tiers), reusing the exact
+`CHUCKIN_MILESTONE_LADDERS`/`checkChuckinMilestoneTier()` engine wholesale
+(the helper is fully generic despite its name). All once-earned, permanent,
+non-revocable milestones (`INSERT OR IGNORE`), same as Chuckin's own ladders:
+
+| Ladder | Metric | Tiers |
+|---|---|---|
+| Lifetime Attempts | total rounds answered, legal or not | 50 / 200 / 500 / 1,500 / 5,000 / 15,000 / 50,000 |
+| Lifetime Optimal Answers | rounds matching the minimum dart count | 25 / 100 / 300 / 1,000 / 3,000 / 10,000 |
+| Session Endurance (Freeform only) | attempts in one sitting | 50 / 150 / 400 / 1,000 |
+| Best Optimal Streak | longest-ever consecutive-optimal run | 5 / 15 / 30 / 75 / 150 |
+| Best Blitz Score | single best-ever 60-second score | 10 / 20 / 35 / 50 / 75 / 100 |
+
+Plus five one-off flagship badges: 🐟 **The 170 Club** (solve 170 optimally),
+🎯 **One-Darter** (first 1-dart optimal solve), 🌟 **Perfectionist** (end a
+15+-attempt Freeform session with a 100% optimal rate — checked in
+`askEndGame()`), 💎 **Perfect Minute** (every round in a 5+-round Blitz run
+graded optimal — checked in `endBlitzRun()`), 📸 **Photo Finish** (a legal
+Blitz round submitted with under 1 second left on the clock).
+
+**No live scoreboard**: this game type never writes to `liveState` and
+`/display` never renders it — `pushLive()` is a deliberate no-op for
+`game.gameType === 'checkout_trainer'`, a genuinely simpler surface than every
+other mode in that one respect.
+
+**Deferred (not built)**: the trick-question/bogey-number difficulty variant
+("declare this unsolvable") and its conditional 💣 Bogey Buster badge, and
+difficulty tiers (under-40/under-100/full-range) beyond the single full-range
+(2-170) target pool — both tracked as their own open items on
+`docs/open-roadmap-items.md` rather than left silently unbuilt.
+
+---
+
+## 20. Known Limitations & Open Gaps
 
 Cross-referenced from the `docs/*.md` roadmap docs — these are real,
 already-shipped limitations, not just unbuilt future features:
@@ -2954,7 +3075,7 @@ already-shipped limitations, not just unbuilt future features:
 
 ---
 
-## 20. Troubleshooting
+## 21. Troubleshooting
 
 The general method, before the specific symptoms below: **this document is the
 spec.** Find the section describing what the misbehaving feature is supposed to

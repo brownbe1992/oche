@@ -61,7 +61,7 @@ Others
 - Daily/weekly solo challenge — done (core) plus badges/its own Profile tab, see docs/daily-challenge-roadmap.md
 - Ghost opponent (practice against a replay of your own past leg) — done (X01 only): race feature, win/loss tracking, and the "Ghost Slayer" first-win badge, see docs/archive/ghost-opponent-roadmap.md
 - Companion website (cloud stat reporting, matchmaking, cross-instance tournaments/leagues, global leaderboards including Daily Challenge) — full design in docs/companion-website-roadmap.md
-- Checkout Trainer (no-dartboard mental drill: given a target score, enter the fewest-darts checkout from memory, graded instantly — a checkout calculator, not a throwing game; untimed Freeform mode plus a 60-second Checkout Blitz sprint mode with its own leaderboard; laddered achievements for both; no live scoreboard needed) — full design in docs/checkout-trainer-roadmap.md
+- Checkout Trainer (no-dartboard mental drill: given a target score, enter the fewest-darts checkout from memory, graded instantly — a checkout calculator, not a throwing game; untimed Freeform mode plus a 60-second Checkout Blitz sprint mode with its own leaderboard; laddered achievements for both; no live scoreboard needed) — done, see docs/checkout-trainer-roadmap.md (difficulty tiers and the trick-question/Bogey Buster variant remain open, see docs/open-roadmap-items.md)
 - Prep work to reduce future rework across all roadmap items — done, see docs/archive/existing-app-prep-roadmap.md; docs/open-roadmap-items.md is now the central tracker for all open roadmap items
 
 

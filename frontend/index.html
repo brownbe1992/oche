@@ -758,6 +758,7 @@
             <button id="mode-practice" aria-pressed="false" onclick="setMode('practice')">Practice</button>
             <button id="mode-challenge" aria-pressed="false" onclick="setMode('challenge')">🎯 Daily Challenge</button>
             <button id="mode-ghost" aria-pressed="false" onclick="setMode('ghost')">👻 Ghost</button>
+            <button id="mode-checkout-trainer" aria-pressed="false" onclick="setMode('checkout_trainer')">🧮 Checkout Trainer</button>
           </div>
         </div>
       </div>
@@ -798,6 +799,19 @@
       <div class="setup-section" id="chuckin-info-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
         <div class="setup-label" style="color:var(--gold)">Just Chuckin' It</div>
         <p class="pp-meta" style="margin:0">No score to chase, no leg to win — just throw for as long as you like. Every dart still counts toward your lifetime totals and heatmap, so it's a low-pressure way to warm up, find your rhythm, or chase down a milestone badge.</p>
+      </div>
+
+      <!-- Checkout Trainer sub-mode + explanation (Checkout Trainer mode only) -->
+      <div class="setup-section" id="checkout-trainer-options-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
+        <div class="setup-label" style="color:var(--gold)">🧮 Checkout Trainer</div>
+        <p class="pp-meta" style="margin:0 0 10px">No dartboard needed — the app gives you a target score, you tap out the fewest-darts checkout from memory, and it's graded instantly against the objectively optimal route. A pure recall drill, not a throwing game.</p>
+        <div class="opts" style="margin:0">
+          <div class="seg" role="group" aria-label="Checkout Trainer sub-mode">
+            <button id="checkout-trainer-mode-freeform" aria-pressed="true" onclick="setCheckoutTrainerMode('freeform')">Freeform</button>
+            <button id="checkout-trainer-mode-blitz" aria-pressed="false" onclick="setCheckoutTrainerMode('blitz')">⏱️ Checkout Blitz (60s)</button>
+          </div>
+        </div>
+        <p class="pp-meta" id="checkout-trainer-mode-desc" style="margin:10px 0 0"></p>
       </div>
 
       <!-- Format (H2H only) -->
@@ -1581,7 +1595,8 @@ function makeDart(sector, mult){
    ========================================================================= */
 let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, mode:'h2h',
   gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[], ghostLeg:null,
-  doublesTargets:[], loadoutByName:{}, leagueId:null }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice'; gameType: 'x01' | 'cricket' | 'doubles_practice'
+  doublesTargets:[], loadoutByName:{}, leagueId:null,
+  checkoutTrainerMode:'freeform' }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice' | 'checkout_trainer'; gameType: 'x01' | 'cricket' | 'doubles_practice' | 'checkout_trainer'
   // leagueId (docs/league-mode-roadmap.md): only ever set via the "log to league?"
   // picker below, and only when the picker had genuine ambiguity to resolve (>1
   // active league matched) — the common 0-or-1-match case tags server-side with no
@@ -1922,7 +1937,8 @@ function renderHome(){
     Backend.get('/api/stats/cricket-wins'),
     Backend.get('/api/stats/doubles-practice-accuracy'),
     Backend.get('/api/stats/doubles-practice-best-round'),
-  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,dpa,dpb])=>{
+    Backend.get('/api/stats/checkout-blitz-leaderboard'),
+  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,dpa,dpb,ctbl])=>{
     homeData={s, extra,
       h2h:{finishes:f,eighties:e,bigFish:b,nineDarters:n},
       practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn},
@@ -1931,7 +1947,8 @@ function renderHome(){
         practice:{mpr:pcm,nineMarks:pc9,perfectLeg:pcp},
         wins:cw,
       },
-      doublesPractice:{ accuracy:dpa, bestRound:dpb }};
+      doublesPractice:{ accuracy:dpa, bestRound:dpb },
+      checkoutTrainer:{ blitzLeaderboard:ctbl }};
     renderHomeContent();
   }).catch(()=>{
     homeData={s:{players:roster.length,games:null,sets:null,legs:null,darts:null,oneEighties:null,bigFish:null,nineDarters:null,practiceLegs:null},
@@ -1939,7 +1956,8 @@ function renderHome(){
       h2h:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
       practice:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
       cricket:{h2h:{mpr:[],nineMarks:empty,perfectLeg:empty}, practice:{mpr:[],nineMarks:empty,perfectLeg:empty}, wins:[]},
-      doublesPractice:{ accuracy:[], bestRound:[] }};
+      doublesPractice:{ accuracy:[], bestRound:[] },
+      checkoutTrainer:{ blitzLeaderboard:[] }};
     renderHomeContent();
   });
 }
@@ -2248,6 +2266,34 @@ function renderHomeTabBodyDoublesPractice(){
   `;
 }
 
+// Checkout Trainer's Home page presence (docs/checkout-trainer-roadmap.md
+// "Leaderboard") — a single arcade high-score table for Checkout Blitz, the
+// game's one genuinely cross-player leaderboard (Freeform has no win condition
+// to rank on, same reasoning Doubles Practice's own Home tab already applies).
+// No H2H/Practice split — always solo, like Doubles Practice.
+function renderHomeTabBodyCheckoutTrainer(){
+  const el=document.getElementById('home-tab-body');
+  const data=homeData.checkoutTrainer;
+  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
+
+  const board=data.blitzLeaderboard||[];
+  const leaderboard=board.length
+    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.bestScore}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${fmtDate(r.achievedAt)}</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — play a Checkout Blitz run to claim the top spot.</p>`;
+
+  el.innerHTML=`
+    <div class="pp-section">
+      <div class="pp-section-title">⏱️ Checkout Blitz — Best Score</div>
+      ${leaderboard}
+    </div>
+  `;
+}
+
 function hofSection(rows, mode=''){
     if(!rows||!rows.length) return `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
     return `<div class="hof-list">${rows.map((f,i)=>{
@@ -2318,6 +2364,7 @@ function setMode(mode){
   document.getElementById('mode-practice').setAttribute('aria-pressed', practiceFamily);
   document.getElementById('mode-challenge').setAttribute('aria-pressed', mode==='challenge');
   document.getElementById('mode-ghost').setAttribute('aria-pressed', mode==='ghost');
+  document.getElementById('mode-checkout-trainer').setAttribute('aria-pressed', mode==='checkout_trainer');
   document.getElementById('practice-type-section').hidden = !practiceFamily;
   document.getElementById('practice-type-normal').setAttribute('aria-pressed', mode==='practice');
   document.getElementById('practice-type-doubles').setAttribute('aria-pressed', mode==='doubles_practice');
@@ -2330,29 +2377,32 @@ function setMode(mode){
   // choice between X01/Cricket, so they hide the same X01/Cricket-specific
   // sections for the same reason — Just Chuckin' It additionally has no config
   // options at all (no starting score, no targets), unlike Doubles Practice.
-  const isSpecialMode = (mode === 'challenge' || mode === 'ghost' || mode === 'doubles_practice' || mode === 'chuckin');
+  const isSpecialMode = (mode === 'challenge' || mode === 'ghost' || mode === 'doubles_practice' || mode === 'chuckin' || mode === 'checkout_trainer');
   document.getElementById('game-type-section').hidden = isSpecialMode;
-  // Leaving Doubles Practice/Chuckin for any other mode: setup.gameType was force-set
-  // below (bypassing setGameType(), which is the only place that also updates the
-  // X01/Cricket toggle buttons' own visual state) — so it must be reset back to a
-  // real game type here. Without this, the X01/Cricket toggle keeps showing whatever
-  // it visually showed before Doubles Practice/Chuckin was ever chosen, while
-  // setup.gameType silently stays 'doubles_practice'/'chuckin' underneath, and
+  // Leaving Doubles Practice/Chuckin/Checkout Trainer for any other mode: setup.gameType
+  // was force-set below (bypassing setGameType(), which is the only place that also
+  // updates the X01/Cricket toggle buttons' own visual state) — so it must be reset back
+  // to a real game type here. Without this, the X01/Cricket toggle keeps showing whatever
+  // it visually showed before one of these solo modes was ever chosen, while
+  // setup.gameType silently stays on the solo mode's own type underneath, and
   // startGame() (which reads setup.gameType, not the button) builds that game type
   // even though every visible control says otherwise.
-  if(mode !== 'doubles_practice' && mode !== 'chuckin' && (setup.gameType === 'doubles_practice' || setup.gameType === 'chuckin')) setGameType('x01');
+  if(mode !== 'doubles_practice' && mode !== 'chuckin' && mode !== 'checkout_trainer'
+    && (setup.gameType === 'doubles_practice' || setup.gameType === 'chuckin' || setup.gameType === 'checkout_trainer')) setGameType('x01');
   if((mode === 'challenge' || mode === 'ghost') && setup.gameType !== 'x01') setGameType('x01');
   if(mode === 'doubles_practice') setup.gameType = 'doubles_practice';
   if(mode === 'chuckin') setup.gameType = 'chuckin';
+  if(mode === 'checkout_trainer') setup.gameType = 'checkout_trainer';
   document.getElementById('start-score-section').hidden = (isSpecialMode || setup.gameType === 'cricket');
   document.getElementById('cricket-options-section').hidden = (isSpecialMode || setup.gameType !== 'cricket');
   document.getElementById('challenge-info-section').hidden = (mode !== 'challenge');
   document.getElementById('ghost-options-section').hidden = (mode !== 'ghost');
   document.getElementById('doubles-options-section').hidden = (mode !== 'doubles_practice');
   document.getElementById('chuckin-info-section').hidden = (mode !== 'chuckin');
+  document.getElementById('checkout-trainer-options-section').hidden = (mode !== 'checkout_trainer');
   document.getElementById('add-player-wrap').style.display = isSpecialMode ? 'none' : '';
   const startBtn = document.getElementById('start-btn');
-  if(startBtn) startBtn.textContent = (mode === 'challenge') ? 'Start Challenge' : (mode === 'ghost') ? 'Start race' : (mode === 'doubles_practice') ? 'Start practice' : (mode === 'chuckin') ? 'Start chuckin\'' : 'Start game';
+  if(startBtn) startBtn.textContent = (mode === 'challenge') ? 'Start Challenge' : (mode === 'ghost') ? 'Start race' : (mode === 'doubles_practice') ? 'Start practice' : (mode === 'chuckin') ? 'Start chuckin\'' : (mode === 'checkout_trainer') ? (setup.checkoutTrainerMode==='blitz' ? 'Start Blitz' : 'Start training') : 'Start game';
   if(mode === 'challenge'){
     // a challenge is always exactly one player
     setup.slots = setup.slots.slice(0,1);
@@ -2384,6 +2434,14 @@ function setMode(mode){
     renderPlayers();
     const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
     renderGhostLegPicker();
+  } else if(mode === 'checkout_trainer'){
+    // solo drill, no opponent — same single-slot treatment as Doubles Practice/Chuckin
+    setup.slots = setup.slots.slice(0,1);
+    if(!setup.slots.length) setup.slots = [''];
+    setup.legsPerSet = 1; setup.setsPerGame = 1;
+    renderPlayers();
+    const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
+    setCheckoutTrainerMode(setup.checkoutTrainerMode || 'freeform');
   } else if(mode === 'practice'){
     const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
   } else {
@@ -2395,6 +2453,21 @@ function setMode(mode){
   // does) correctly resets it on every mode switch, including the ones that only
   // manually hide #h2h-banner inline above.
   updateLeaguePicker(setup.slots.filter(s=>s));
+}
+
+// Checkout Trainer's Freeform/Blitz sub-toggle (docs/checkout-trainer-roadmap.md
+// "UI integration") — same sibling-toggle pattern as practice-type-*, just nested
+// one level deeper since both sub-modes share the single 'checkout_trainer' mode
+// button rather than being their own top-level modes.
+function setCheckoutTrainerMode(sub){
+  setup.checkoutTrainerMode = sub;
+  document.getElementById('checkout-trainer-mode-freeform').setAttribute('aria-pressed', sub==='freeform');
+  document.getElementById('checkout-trainer-mode-blitz').setAttribute('aria-pressed', sub==='blitz');
+  document.getElementById('checkout-trainer-mode-desc').textContent = sub==='blitz'
+    ? "A 60-second sprint: answer as many targets as you can. Optimal answers score 2 points, legal-but-not-optimal score 1, illegal score 0 — speed alone won't win, accuracy matters more."
+    : 'Untimed — work through targets at your own pace, with the answer revealed after every attempt. Runs until you end the session.';
+  const startBtn = document.getElementById('start-btn');
+  if(startBtn && setup.mode === 'checkout_trainer') startBtn.textContent = sub==='blitz' ? 'Start Blitz' : 'Start training';
 }
 
 /* ---------- Ghost Opponent (docs/archive/ghost-opponent-roadmap.md) ---------- */
@@ -3320,6 +3393,10 @@ async function startGame(){
     if(!player || !roster.includes(player)){ uiAlert('Choose a player to practice.'); return; }
     if(!setup.doublesTargets.length){ uiAlert('Choose at least one double to practice.'); return; }
   }
+  if(setup.mode === 'checkout_trainer'){
+    const player = setup.slots[0];
+    if(!player || !roster.includes(player)){ uiAlert('Choose a player to train.'); return; }
+  }
   if(setup.slots.some(n=>!n)){ uiAlert('Choose a player for each slot before starting.'); return; }
   const names = [];
   setup.slots.forEach(n=>{ if(n && roster.includes(n) && !names.includes(n)) names.push(n); });
@@ -3327,7 +3404,7 @@ async function startGame(){
   if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   // Custom cricket is locked to exactly 7 targets (same count as classic) — never
   // more, never fewer (docs/game-modes-roadmap.md "Decisions made").
-  const gameType = setup.gameType === 'cricket' ? 'cricket' : setup.gameType === 'doubles_practice' ? 'doubles_practice' : setup.gameType === 'chuckin' ? 'chuckin' : 'x01'; // Daily Challenge always forces x01 via setMode()
+  const gameType = setup.gameType === 'cricket' ? 'cricket' : setup.gameType === 'doubles_practice' ? 'doubles_practice' : setup.gameType === 'chuckin' ? 'chuckin' : setup.gameType === 'checkout_trainer' ? 'checkout_trainer' : 'x01'; // Daily Challenge always forces x01 via setMode()
   let cricketNumbers = null;
   if(gameType === 'cricket'){
     cricketNumbers = resolveCricketNumbers();
@@ -3341,11 +3418,16 @@ async function startGame(){
   // (whatever "Starting score" happened to be hidden at, per setMode('ghost')) —
   // otherwise the two "players" wouldn't actually be racing the same leg.
   const startScore = challengeStart != null ? challengeStart : ghostScript ? Number(ghostScript.category) : setup.start;
-  const legsPerSet = (setup.mode==='challenge' || setup.mode==='ghost' || setup.mode==='doubles_practice' || setup.mode==='chuckin') ? 1 : setup.legsPerSet;
-  const setsPerGame = (setup.mode==='challenge' || setup.mode==='ghost' || setup.mode==='doubles_practice' || setup.mode==='chuckin') ? 1 : setup.setsPerGame;
+  const legsPerSet = (setup.mode==='challenge' || setup.mode==='ghost' || setup.mode==='doubles_practice' || setup.mode==='chuckin' || setup.mode==='checkout_trainer') ? 1 : setup.legsPerSet;
+  const setsPerGame = (setup.mode==='challenge' || setup.mode==='ghost' || setup.mode==='doubles_practice' || setup.mode==='chuckin' || setup.mode==='checkout_trainer') ? 1 : setup.setsPerGame;
+  // Checkout Blitz's durationSec is stored even though only 60 exists today — same
+  // "store it even though only one value exists today" precedent tournament_rounds.
+  // legs_per_set already set for a field that was single-valued at first and
+  // configurable later (docs/checkout-trainer-roadmap.md).
   const config = gameType === 'cricket' ? { numbers: cricketNumbers }
     : gameType === 'doubles_practice' ? { doubles: setup.doublesTargets.slice() }
     : gameType === 'chuckin' ? {}
+    : gameType === 'checkout_trainer' ? { mode: setup.checkoutTrainerMode, durationSec: setup.checkoutTrainerMode==='blitz' ? 60 : null }
     : { startingScore: startScore };
   const category = gameType === 'cricket'
     ? (setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
@@ -3353,6 +3435,8 @@ async function startGame(){
     ? `Doubles Practice (${config.doubles.map(doublesTargetLabel).join(', ')})`
     : gameType === 'chuckin'
     ? `Just Chuckin' It`
+    : gameType === 'checkout_trainer'
+    ? (config.mode==='blitz' ? 'Checkout Blitz' : 'Checkout Trainer (Freeform)')
     : String(startScore);
   game = {
     gameType,
@@ -3367,6 +3451,12 @@ async function startGame(){
     // server-side onGameCreated hook re-validates regardless of what's sent here.
     leagueId: setup.leagueId,
     players: names.map(n=>GAME_TYPES[gameType].newMatchPlayer(n, gameType==='cricket' || gameType==='doubles_practice' ? config : startScore)),
+    // Checkout Blitz (docs/checkout-trainer-roadmap.md): a wall-clock deadline, not a
+    // decrementing counter, so a backgrounded/throttled tab can't grant extra time.
+    // Set once startNextRoundCheckoutTrainer() or the run itself begins; null for
+    // Freeform (untimed) and every non-checkout_trainer game type.
+    blitzDeadline: null,
+    blitzEnded: false,
     starter: 0,        // who throws first in the current leg
     current: 0,
     setNo: 1, legNo: 1,
@@ -3401,6 +3491,12 @@ async function startGame(){
     game.ghostSourceLeg = { gameId: setup.ghostLeg.gameId, setNo: setup.ghostLeg.setNo, legNo: setup.ghostLeg.legNo };
     const ghostLabel = `👻 Ghost (${new Date(setup.ghostLeg.date).toLocaleDateString(undefined,{month:'short',day:'numeric'})})`;
     game.players.push(newGhostPlayer(ghostLabel, startScore, ghostScript));
+  }
+  // Checkout Blitz: the wall-clock deadline starts the moment the run begins
+  // (docs/checkout-trainer-roadmap.md "Core loop delta") — set once here, never
+  // recomputed, so a re-render can't accidentally grant extra time.
+  if(gameType === 'checkout_trainer' && config.mode === 'blitz'){
+    game.blitzDeadline = Date.now() + config.durationSec*1000;
   }
   names.forEach(ensurePlayerStats);
   // sessionBadgesShown is deliberately NOT reset here — Night Owl / Early Bird fire
@@ -3438,6 +3534,7 @@ async function startGame(){
   renderGameShell();        // ensure the throwing controls exist (e.g. after a finished game)
   updateMultUI();
   show('game'); renderGame();
+  if(game.gameType === 'checkout_trainer' && game.config.mode === 'blitz') startCheckoutBlitzTimer();
 }
 
 // a player's per-match runtime record (separate from lifetime stats)
@@ -4459,6 +4556,16 @@ const BADGE_INFO = {
   ghost_slayer:        { icon:'👻', label:'Ghost Slayer', desc:'Beat your ghost opponent — win a race against a replay of one of your own past legs.' },
   tournament_champion:     { icon:'🏆', label:'Champion', desc:'Win a tournament bracket.', tournament:true },
   tournament_giant_slayer: { icon:'⚔️', label:'Giant Slayer (Tournament)', desc:'Beat an opponent seeded 3 or more slots better than you in a tournament match.', tournament:true },
+  // Checkout Trainer one-off flagship badges (docs/checkout-trainer-roadmap.md
+  // "Achievements") — the laddered milestones are populated further down (see
+  // CHECKOUT_TRAINER_MILESTONE_LADDERS/CHECKOUT_BLITZ_MILESTONE_LADDERS), but
+  // these five aren't part of a ladder, so they're declared here like every
+  // other one-off badge above.
+  checkout_trainer_170_club:       { icon:'🐟', label:'The 170 Club', desc:'Solve 170 (T20-T20-Bull, the maximum possible checkout) optimally.', checkoutTrainer:true },
+  checkout_trainer_one_darter:     { icon:'🎯', label:'One-Darter', desc:'Solve a target optimally in exactly 1 dart.', checkoutTrainer:true },
+  checkout_trainer_perfectionist:  { icon:'🌟', label:'Perfectionist', desc:'Finish a Freeform session of 15+ attempts with a 100% optimal rate.', checkoutTrainer:true },
+  checkout_trainer_perfect_minute: { icon:'💎', label:'Perfect Minute', desc:'Every round in one Checkout Blitz run (5+ rounds) graded optimal.', checkoutTrainer:true },
+  checkout_trainer_photo_finish:   { icon:'📸', label:'Photo Finish', desc:'Submit a legal Checkout Blitz round with under 1 second left on the clock.', checkoutTrainer:true },
 };
 function loadPlayerBadges(){
   const container=document.getElementById('player-badges');
@@ -4496,11 +4603,12 @@ function renderPlayerBadges(data){
   // Grouped by game type — X01's badges, Cricket's 2, Daily Challenge's 3, and
   // Just Chuckin' It's 18 each stay visually distinct sub-sections rather than one
   // mixed flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament);
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
   const challengeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].challenge);
   const chuckinIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].chuckin);
   const tournamentIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].tournament);
+  const checkoutTrainerIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].checkoutTrainer);
   container.innerHTML = `
     <div class="pp-section-title" style="margin-bottom:6px">X01</div>
     <div class="summary-grid">${x01Ids.map(badgeBlock).join('')}</div>
@@ -4511,7 +4619,9 @@ function renderPlayerBadges(data){
     <div class="pp-section-title" style="margin:16px 0 6px">Daily Challenge</div>
     <div class="summary-grid">${challengeIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Just Chuckin' It</div>
-    <div class="summary-grid">${chuckinIds.map(badgeBlock).join('')}</div>`;
+    <div class="summary-grid">${chuckinIds.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">Checkout Trainer</div>
+    <div class="summary-grid">${checkoutTrainerIds.map(badgeBlock).join('')}</div>`;
 }
 // Around the World progress (docs/archive/achievements-badges-roadmap.md): a compact grid
 // rather than a full dartboard-shaped heatmap — the doc explicitly calls the ideal
@@ -4801,6 +4911,25 @@ function renderChuckinPersonalBests(data){
     ${data.bestSessionTrebles!=null?`<div class="stat-block"><div class="stat-val">${data.bestSessionTrebles}</div><div class="stat-label">Most Trebles in a Session</div></div>`:''}
   </div>`;
 }
+// Merges two backend calls into one record (see server.js's /api/players/personal-bests
+// checkout_trainer branch) — the lifetime toughest-checkout/best-streak record (both
+// sub-modes) plus Checkout Blitz's own peak-score/lifetime-average record. No
+// winStreak/recentForm fields, same reasoning as Doubles Practice/Chuckin above —
+// this mode never "wins" a leg the X01/Cricket way.
+function renderCheckoutTrainerPersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || (data.toughestCheckout==null && !data.bestStreak && data.bestScore==null)){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough attempts recorded yet.</p>`;
+    return;
+  }
+  container.innerHTML=`<div class="summary-grid">
+    ${data.toughestCheckout!=null?`<div class="stat-block"><div class="stat-val">${data.toughestCheckout}</div><div class="stat-label">Toughest Checkout Solved</div></div>`:''}
+    ${data.bestStreak?`<div class="stat-block"><div class="stat-val">${data.bestStreak}</div><div class="stat-label">Best Optimal Streak</div></div>`:''}
+    ${data.bestScore!=null?`<div class="stat-block"><div class="stat-val">${data.bestScore}</div><div class="stat-label">Best Checkout Blitz Score</div></div>`:''}
+    ${data.lifetimeAvgScore!=null?`<div class="stat-block"><div class="stat-val">${data.lifetimeAvgScore.toFixed(1)}</div><div class="stat-label">Avg Checkout Blitz Score</div></div>`:''}
+  </div>`;
+}
 async function sharePersonalBest(kind, value){
   const cfg = { legavg: { icon:'📊', headline:'BEST LEG AVERAGE', statLine: value.toFixed(1) },
     fewestdarts: { icon:'🎯', headline:'FEWEST DARTS TO FINISH', statLine: `${value} darts` } }[kind];
@@ -4840,6 +4969,7 @@ function renderGame(){
   if(game.gameType === 'cricket') return renderGameCricket();
   if(game.gameType === 'doubles_practice') return renderGameDoublesPractice();
   if(game.gameType === 'chuckin') return renderGameChuckin();
+  if(game.gameType === 'checkout_trainer') return renderGameCheckoutTrainer();
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
   game.players.forEach((p,i)=>{
@@ -5149,6 +5279,138 @@ function checkChuckinMilestones(p){
   checkChuckinMilestoneTier(dartsLadder, p.name, (p.lifetimeDartsBase||0) + p.sessionDarts);
   checkChuckinMilestoneTier(treblesLadder, p.name, (p.lifetimeTreblesBase||0) + p.sessionTrebles);
 }
+
+/* ---------- Checkout Trainer achievements (docs/checkout-trainer-roadmap.md
+   "Achievements") ---------- Reuses the exact CHUCKIN_MILESTONE_LADDERS engine
+   above wholesale — same data-driven {metric,idPrefix,statNoun,descFor,tiers}
+   shape, same checkChuckinMilestoneTier() threshold-crossing helper (already
+   fully generic, not Chuckin-specific despite the name), same once:true
+   permanent-milestone semantics. Four Freeform ladders (18 tiers) + one Blitz
+   ladder (6 tiers), plus a handful of one-off flagship badges below. */
+const CHECKOUT_TRAINER_MILESTONE_LADDERS = [
+  { metric:'attempts', idPrefix:'checkout_trainer_attempts_', statNoun:'lifetime attempts',
+    descFor: t => `Answer ${t.toLocaleString()} lifetime Checkout Trainer rounds (Freeform + Blitz combined).`,
+    tiers: [
+      { threshold:50,    label:'Warming the Arm',      icon:'🔥' },
+      { threshold:200,   label:'Out-Chart Regular',    icon:'🎯' },
+      { threshold:500,   label:'Double Vision',        icon:'👀' },
+      { threshold:1500,  label:'Checkout Junkie',      icon:'🧠' },
+      { threshold:5000,  label:'Human Out Chart',      icon:'🖩' },
+      { threshold:15000, label:"Finisher's Instinct",  icon:'🧭' },
+      { threshold:50000, label:'Legend of the Checkout', icon:'👑' },
+    ] },
+  { metric:'optimal', idPrefix:'checkout_trainer_optimal_', statNoun:'lifetime optimal answers',
+    descFor: t => `Answer ${t.toLocaleString()} lifetime Checkout Trainer rounds with the objectively fewest darts.`,
+    tiers: [
+      { threshold:25,    label:'First Finish',            icon:'🎯' },
+      { threshold:100,   label:'Century of Perfection',   icon:'💯' },
+      { threshold:300,   label:'Route Master',            icon:'🗺️' },
+      { threshold:1000,  label:'Out-Chart Encyclopedia',  icon:'📚' },
+      { threshold:3000,  label:'Checkout Savant',         icon:'🧠' },
+      { threshold:10000, label:'The Perfect Finisher',    icon:'👑' },
+    ] },
+  { metric:'session', idPrefix:'checkout_trainer_session_', statNoun:'rounds this session',
+    descFor: t => `Answer ${t.toLocaleString()} Checkout Trainer rounds in a single Freeform session.`,
+    tiers: [
+      { threshold:50,   label:'Quick Study',   icon:'⏱️' },
+      { threshold:150,  label:'Deep Dive',     icon:'🤿' },
+      { threshold:400,  label:'Marathon Mind', icon:'🏃' },
+      { threshold:1000, label:'Iron Focus',    icon:'🔋' },
+    ] },
+  { metric:'streak', idPrefix:'checkout_trainer_streak_', statNoun:'best-ever optimal streak',
+    descFor: t => `Answer ${t.toLocaleString()} Checkout Trainer rounds optimally in a row.`,
+    tiers: [
+      { threshold:5,   label:'On a Roll',        icon:'🎲' },
+      { threshold:15,  label:'Hot Hand',         icon:'🔥' },
+      { threshold:30,  label:'Unstoppable',      icon:'⚡' },
+      { threshold:75,  label:'In the Zone',      icon:'🧘' },
+      { threshold:150, label:'Flawless Machine', icon:'🤖' },
+    ] },
+];
+CHECKOUT_TRAINER_MILESTONE_LADDERS.forEach(ladder=>{
+  ladder.tiers.forEach((tier, i)=>{
+    const id = ladder.idPrefix + tier.threshold;
+    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), checkoutTrainer:true };
+    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
+    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
+  });
+});
+const CHECKOUT_BLITZ_MILESTONE_LADDERS = [
+  { metric:'blitzscore', idPrefix:'checkout_trainer_blitz_', statNoun:'best Checkout Blitz score',
+    descFor: t => `Score ${t.toLocaleString()}+ points in a single 60-second Checkout Blitz run.`,
+    tiers: [
+      { threshold:10,  label:'Quick Draw',         icon:'🤠' },
+      { threshold:20,  label:'Clockwork',          icon:'⏰' },
+      { threshold:35,  label:'Buzzer Beater',      icon:'🚨' },
+      { threshold:50,  label:'Against the Clock',  icon:'⏳' },
+      { threshold:75,  label:'Speed Demon',        icon:'💨' },
+      { threshold:100, label:'One-Minute Wonder',  icon:'🌟' },
+    ] },
+];
+CHECKOUT_BLITZ_MILESTONE_LADDERS.forEach(ladder=>{
+  ladder.tiers.forEach((tier, i)=>{
+    const id = ladder.idPrefix + tier.threshold;
+    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), checkoutTrainer:true };
+    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
+    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
+  });
+});
+// Called after every attempt from submitCheckoutAttempt() (both Freeform and
+// Checkout Blitz — a round is a round, per the roadmap doc's explicit ruling
+// that Lifetime Attempts/Optimal/Streak count both modes). Session Endurance
+// stays Freeform-only "by construction" (doc's own framing) — a 60-second
+// Blitz run could never realistically reach its 50+ threshold, so no special
+// gating code is needed to keep it from firing there. Lifetime ladders read
+// from p.lifetimeAttemptsBase/lifetimeOptimalBase (fetched once at game start
+// by newMatchPlayerCheckoutTrainer(), same "avoid a network round-trip per
+// dart" reasoning checkChuckinMilestones() already documents) plus this
+// session's running counters.
+function checkCheckoutTrainerMilestones(p){
+  const attemptsLadder = CHECKOUT_TRAINER_MILESTONE_LADDERS.find(l=>l.metric==='attempts');
+  const optimalLadder = CHECKOUT_TRAINER_MILESTONE_LADDERS.find(l=>l.metric==='optimal');
+  const sessionLadder = CHECKOUT_TRAINER_MILESTONE_LADDERS.find(l=>l.metric==='session');
+  const streakLadder = CHECKOUT_TRAINER_MILESTONE_LADDERS.find(l=>l.metric==='streak');
+  checkChuckinMilestoneTier(attemptsLadder, p.name, (p.lifetimeAttemptsBase||0) + p.attempts);
+  checkChuckinMilestoneTier(optimalLadder, p.name, (p.lifetimeOptimalBase||0) + p.optimalCount);
+  checkChuckinMilestoneTier(sessionLadder, p.name, p.attempts);
+  checkChuckinMilestoneTier(streakLadder, p.name, p.currentStreak);
+}
+// Called once a Checkout Blitz run ends (endBlitzRun()), against the player's
+// TRUE lifetime-best score fetched from the server — not just this run's score
+// — so a threshold already cleared by an earlier run isn't missed, and one
+// that this run alone doesn't reach but a past run already did still shows as
+// earned. A single extra network call per run (not per dart) is an acceptable
+// cost here, unlike the lifetime ladders above.
+function checkCheckoutBlitzMilestones(playerName){
+  Backend.get(`/api/players/personal-bests?name=${encodeURIComponent(playerName)}&gameType=checkout_trainer`).then(pb=>{
+    if(!pb || pb.bestScore == null) return;
+    const ladder = CHECKOUT_BLITZ_MILESTONE_LADDERS[0];
+    checkChuckinMilestoneTier(ladder, playerName, pb.bestScore);
+  }).catch(()=>{});
+}
+// Shared helper for the one-off flagship badges below — same once:true /
+// earnedBadgeCache / queueBadge / fireMomentCard pattern the ladder tiers use
+// (see checkChuckinMilestoneTier()), just for a single non-laddered badge id.
+function awardCheckoutTrainerBadge(playerName, badgeId, icon, headline, statLine){
+  if(earnedBadgeCache[playerName] && earnedBadgeCache[playerName].has(badgeId)) return;
+  Backend.send('POST','/api/badges/award', { player:playerName, badgeId, once:true }).then(r=>{
+    if(!earnedBadgeCache[playerName]) earnedBadgeCache[playerName] = new Set();
+    earnedBadgeCache[playerName].add(badgeId);
+    if(r && r.newlyEarned){
+      queueBadge(badgeId, playerName, null, 'First time!');
+      fireMomentCard(badgeId, { icon, headline, player:playerName, statLine });
+    }
+  }).catch(()=>{});
+}
+// ACH_LABELS for the five one-off badges declared in BADGE_INFO's own literal
+// above (checkout_trainer_170_club/one_darter/perfectionist/perfect_minute/
+// photo_finish) — same "icon in the label too" convention every other badge's
+// ACH_LABELS entry uses.
+ACH_LABELS['checkout_trainer_170_club'] = 'The 170 Club 🐟';
+ACH_LABELS['checkout_trainer_one_darter'] = 'One-Darter 🎯';
+ACH_LABELS['checkout_trainer_perfectionist'] = 'Perfectionist 🌟';
+ACH_LABELS['checkout_trainer_perfect_minute'] = 'Perfect Minute 💎';
+ACH_LABELS['checkout_trainer_photo_finish'] = 'Photo Finish 📸';
 
 function spawnConfetti(root, count){
   const colors=['#d9b46a','#efe7d2','#f4e3b2','#caa94e'];
@@ -6070,9 +6332,13 @@ function liveSnapshot(message){
   };
 }
 function pushLive(message){
-  const snap = liveSnapshot(message);
   pendingAchievement = null;
   if(game){ game.lastTurnEvent = null; game.matchResult = null; game.legStart = null; }
+  // Checkout Trainer (docs/checkout-trainer-roadmap.md "No live scoreboard, deliberate"):
+  // a single-device, solo-only drill that never needs a /display scoreboard — skip
+  // the broadcast entirely rather than adding an ALLOWED_LIVE_KEYS shape nothing renders.
+  if(game && game.gameType === 'checkout_trainer') return;
+  const snap = liveSnapshot(message);
   DB.pushLive(snap);
 }
 
@@ -6167,6 +6433,7 @@ function updateMultUI(){
 function throwDart(sector, zone, missZone, missDepth, bounced){
   if(game.gameType === 'doubles_practice') return throwDartDoublesPractice(sector, zone, missZone, missDepth, bounced);
   if(game.gameType === 'chuckin') return throwDartChuckin(sector, zone, missZone, missDepth, bounced);
+  if(game.gameType === 'checkout_trainer') return throwDartCheckoutTrainer(sector, zone, missZone, missDepth, bounced);
   if(game.darts.length>=3 || game.busted || game.won) return;
   // The double/treble-Miss shortcut (fill N slots at once) is a Pad-mode-only
   // convenience — a bounce-out is always exactly one dart, regardless of whatever
@@ -6226,6 +6493,17 @@ function askEndGame(){
     : 'Abandon this match early? Recorded stats are kept.';
   uiConfirm(msg, ()=>{
     activeChallenge = null;
+    stopCheckoutBlitzTimer();   // no-op if no Blitz run is in progress
+    // 🌟 Perfectionist (docs/checkout-trainer-roadmap.md): ending a Freeform
+    // session — this mode's only "session over" moment — with 15+ attempts and
+    // every single one graded optimal. Blitz is excluded: its own run-scoped
+    // 💎 Perfect Minute (endBlitzRun()) is the equivalent for that mode.
+    if(game && game.gameType === 'checkout_trainer' && game.config.mode === 'freeform'){
+      const p = game.players[0];
+      if(p.attempts >= 15 && p.optimalCount === p.attempts){
+        awardCheckoutTrainerBadge(p.name, 'checkout_trainer_perfectionist', '🌟', 'PERFECTIONIST', `${p.attempts} for ${p.attempts}, every answer optimal`);
+      }
+    }
     // Clear the game and push an inactive snapshot so any /display scoreboard stops
     // showing the abandoned match as "live" — otherwise liveSnapshot() keeps
     // reporting active:true (game is still set) and the TV freezes on the ended game
@@ -6240,6 +6518,7 @@ function undoLastTurn(){
   if(game && game.gameType === 'cricket') return undoLastTurnCricket();
   if(game && game.gameType === 'doubles_practice') return undoLastTurnDoublesPractice();
   if(game && game.gameType === 'chuckin') return undoLastTurnChuckin();
+  if(game && game.gameType === 'checkout_trainer') return undoLastTurnCheckoutTrainer();
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
   const p = game.players[snap.pi];
@@ -6316,6 +6595,7 @@ function undoDart(){
 }
 function enterTurn(){
   if(game.gameType === 'cricket') return enterTurnCricket();
+  if(game.gameType === 'checkout_trainer') return submitCheckoutAttempt();
   if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
   const p = game.players[game.current];
   const ev = GAME_TYPES[game.gameType].evaluateVisit(p, game.darts, game);
@@ -7184,13 +7464,18 @@ function renderGameShell(){
   const isCricketGame = !!(game && game.gameType === 'cricket');
   const isDoublesPractice = !!(game && game.gameType === 'doubles_practice');
   const isChuckin = !!(game && game.gameType === 'chuckin');
+  const isCheckoutTrainer = !!(game && game.gameType === 'checkout_trainer');
   // Doubles Practice and Just Chuckin' It are both per-dart-commit modes with no
   // staged 3-dart visit — no "Enter turn" step, no slots row (no opponent/score to
   // show), and no separate "Undo Dart" (there's no uncommitted dart to un-stage).
+  // Checkout Trainer is NOT one of these — a checkout attempt genuinely is a staged
+  // up-to-3-dart visit (docs/checkout-trainer-roadmap.md), same shape as X01, just
+  // solo and against a target instead of an opponent — so it keeps the slots row
+  // (showing the darts tapped so far) and the Enter Turn button, just relabeled.
   const isPerDartMode = isDoublesPractice || isChuckin;
   document.querySelector('.oche').innerHTML=`
       <div class="slots" id="slots"${isPerDartMode ? ' hidden' : ''}></div>
-      <div class="status" id="status">${isChuckin ? "Select a multiplier, then tap a number. No score, no pressure — just throw." : isDoublesPractice ? 'Select a multiplier, then tap a number.' : isCricketGame ? 'Select a multiplier, then tap a target number.' : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
+      <div class="status" id="status">${isChuckin ? "Select a multiplier, then tap a number. No score, no pressure — just throw." : isDoublesPractice ? 'Select a multiplier, then tap a number.' : isCricketGame ? 'Select a multiplier, then tap a target number.' : isCheckoutTrainer ? 'Tap out your proposed checkout, then press Submit.' : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
       <div class="multi" id="multi-row" role="group" aria-label="Dart multiplier">
         <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
         <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
@@ -7204,7 +7489,7 @@ function renderGameShell(){
           <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled>${isPerDartMode ? 'Undo Last Dart' : 'Undo Last Turn'}</button>
           <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()"${isPerDartMode ? ' hidden' : ''}>Undo Dart</button>
         </div>
-        <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()"${isPerDartMode ? ' hidden' : ''}>Enter turn</button>
+        <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()"${isPerDartMode ? ' hidden' : ''}>${isCheckoutTrainer ? 'Submit checkout' : 'Enter turn'}</button>
         <button class="btn btn-primary" id="dp-next-round-btn" onclick="startNextRoundDoublesPractice()" hidden>Start next round</button>
       </div>`;
   applyDartMode();
@@ -7283,6 +7568,17 @@ const CHUCKIN_STAT_DEFS = [
 const CHUCKIN_BUBBLE_KEY_MAP = { chuckindartsthrown:'dartsThrown', chuckinsessions:'sessionsPlayed',
   chuckinavgdartspersession:'avgDartsPerSession', chuckintreblepct:'treblePct',
   chuckindoublepct:'doublePct', chuckinbullpct:'bullPct', chuckinavg:'avg', chuckin180s:'oneEighties' };
+
+// Checkout Trainer's own stat vocabulary (docs/checkout-trainer-roadmap.md) —
+// accuracy/optimal-rate are the headline numbers (optimal % is THE point of the
+// game, per the roadmap doc), attempts is the volume figure.
+const CHECKOUT_TRAINER_STAT_DEFS = [
+  { key:'checkouttraineroptimalpct', label:'Optimal %', desc:'Attempts matching the objectively fewest darts, ÷ total attempts', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'checkouttraineraccuracypct', label:'Accuracy %', desc:'Legal finishes ÷ total attempts', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'checkouttrainerattempts', label:'Attempts', desc:'Total checkout attempts, Freeform and Checkout Blitz combined', fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
+];
+const CHECKOUT_TRAINER_BUBBLE_KEY_MAP = { checkouttraineroptimalpct:'optimalPct',
+  checkouttraineraccuracypct:'accuracyPct', checkouttrainerattempts:'totalAttempts' };
 
 // ---------- game-type plugin registry ----------
 // The seam future game types (Cricket, Ghost Opponent's replay engine) plug into.
@@ -7385,6 +7681,26 @@ const GAME_TYPES = {
     // entirely — unlike null ("use the built-in X01-shaped default"), this mode's
     // stats don't map onto that shape and no Home leaderboard was requested for it.
     homeTabRenderer: false
+  },
+  checkout_trainer: {
+    id: 'checkout_trainer',
+    label: 'Checkout Trainer',
+    newMatchPlayer: newMatchPlayerCheckoutTrainer,
+    // Unlike Doubles Practice/Chuckin, this genuinely IS a per-visit evaluation —
+    // a checkout attempt is exactly a normal X01 visit starting from
+    // remaining=target (docs/checkout-trainer-roadmap.md) — so the real,
+    // unmodified X01 evaluateVisit() is reused directly rather than a throwing
+    // stub. throwDart()'s checkout_trainer branch and submitCheckoutAttempt()
+    // both call this the same way X01's own turn flow does.
+    evaluateVisit,
+    resetForNextLeg: resetPlayerForNextLegCheckoutTrainer,
+    playerSnapshot: playerSnapshotCheckoutTrainer,
+    statDefs: CHECKOUT_TRAINER_STAT_DEFS,
+    personalBestsRenderer: renderCheckoutTrainerPersonalBests,
+    homeTabRenderer: renderHomeTabBodyCheckoutTrainer,
+    // Always solo, same reasoning as Doubles Practice — no opponent to play
+    // head-to-head against.
+    soloOnly: true
   }
 };
 // bubbleKeyMap is patched on below, right after each map itself is defined —
@@ -7717,6 +8033,320 @@ function renderGameChuckin(){
   pushLive();
 }
 
+/* ---------- Checkout Trainer (docs/checkout-trainer-roadmap.md) ----------
+   A pure mental-recall drill, not a throwing game: the app picks a target score
+   and the player taps out a proposed checkout using the same Pad/Dartboard
+   widgets every other mode uses (makeDart()/throwDart() reused unmodified). A
+   checkout attempt genuinely IS a staged, up-to-3-dart X01 visit — unlike
+   Doubles Practice/Chuckin's per-dart commits — so GAME_TYPES.checkout_trainer.
+   evaluateVisit is the real, unmodified evaluateVisit() (player.score doubles as
+   "the current target"), and submitCheckoutAttempt() below is this mode's
+   analog of enterTurn()/enterTurnCricket(), just grading against the objective
+   optimum (scoring.js's gradeCheckoutAttempt()) instead of an opponent. */
+function newMatchPlayerCheckoutTrainer(name){
+  const doubleOut = playerOut(name)==='double';
+  const p = { name, score: pickCheckoutTarget(doubleOut), doubleOut,
+    attempts:0, legalCount:0, optimalCount:0, currentStreak:0,
+    lifetimeAttemptsBase:0, lifetimeOptimalBase:0,
+    sessionRounds:[] };
+  // Fetched once at game start (not re-queried per attempt), same "avoid a
+  // network round-trip per dart" reasoning newMatchPlayerChuckin() documents —
+  // checkCheckoutTrainerMilestones() computes lifetime attempts/optimal-answers
+  // entirely from local state (base + this session's counters) from then on.
+  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(name)}&gameType=checkout_trainer`).then(stats=>{
+    if(!stats) return;
+    p.lifetimeAttemptsBase = (stats.totalAttempts || 0) - p.attempts;
+    p.lifetimeOptimalBase = (stats.optimalCount || 0) - p.optimalCount;
+  }).catch(()=>{});
+  return p;
+}
+// Not called by startNextLeg() (this mode never advances a leg the X01 way —
+// each round just serves a new target via submitCheckoutAttempt() below);
+// provided only to satisfy the GAME_TYPES contract, matching Doubles Practice/
+// Chuckin's own precedent.
+function resetPlayerForNextLegCheckoutTrainer(p){
+  p.currentStreak = 0;
+}
+function playerSnapshotCheckoutTrainer(p){
+  return { name:p.name, target:p.score, attempts:p.attempts||0, legalCount:p.legalCount||0,
+    optimalCount:p.optimalCount||0, currentStreak:p.currentStreak||0 };
+}
+function throwDartCheckoutTrainer(sector, zone, missZone, missDepth, bounced){
+  if(game.darts.length>=3 || game.busted || game.won || game.blitzEnded) return;
+  // Checkout Blitz: block STARTING a new round once the deadline has passed — an
+  // already-in-progress round (game.darts.length>0) is deliberately exempt, so a
+  // round never gets cut off mid-entry (docs/checkout-trainer-roadmap.md "Core
+  // loop delta"). This is the authoritative check; the ticking timer's own
+  // idle-end (see tickCheckoutBlitzTimer()) is just a prompt-UX backstop for when
+  // the player stops tapping without ever starting a new round.
+  if(game.config.mode === 'blitz' && game.blitzDeadline != null && game.darts.length===0 && Date.now() >= game.blitzDeadline){
+    return endBlitzRun();
+  }
+  // The double/treble-Miss shortcut (fill N slots at once) is a Pad-mode-only
+  // convenience — mirrors the identical block in the generic throwDart() path.
+  if(!bounced && sector === 0 && mult > 1){
+    const count = Math.min(mult, 3 - game.darts.length);
+    for(let i=0;i<count;i++) game.darts.push(makeDart(0,1));
+  } else {
+    const d = makeDart(sector, bounced ? 1 : mult);
+    if(zone) d.zone = zone;
+    if(missZone != null){ d.missZone = missZone; d.missDepth = missDepth; }
+    if(bounced) d.bounced = true;
+    game.darts.push(d);
+  }
+  mult=1; updateMultUI();
+
+  const p = game.players[0];
+  const ev = evaluateVisit(p, game.darts, game);
+  const status=document.getElementById('status');
+  if(ev.bust){
+    game.busted=true;
+    status.className='status bust'; status.textContent='That overshoots the target — press Submit to see the answer.';
+  } else if(ev.win){
+    game.won=true;
+    status.className='status win'; status.textContent="That's a finish! Press Submit to grade it.";
+  } else if(game.darts.length>=3){
+    status.className='status'; status.textContent='Three darts thrown — press Submit.';
+  } else {
+    status.className='status'; status.textContent=`Leaves ${ev.newScore}. Tap another dart, or press Submit now.`;
+  }
+  renderSlots(); renderPad();
+}
+// This mode's analog of enterTurn()/enterTurnCricket() — grades the staged
+// attempt, commits it, and immediately serves the next target (both Freeform
+// and Checkout Blitz share this exact round-serving behavior; Blitz layers a
+// deadline check on top, see the Checkout Blitz section below).
+function submitCheckoutAttempt(){
+  if(game.darts.length===0){ document.getElementById('status').textContent='Tap out a proposed checkout first, then press Submit.'; return; }
+  const p = game.players[0];
+  // Captured before grading — 📸 Photo Finish (docs/checkout-trainer-roadmap.md)
+  // needs "under 1 second left at the moment of submission," which grading/
+  // network delay could otherwise blur.
+  const remainingMsAtSubmit = (game.config.mode === 'blitz' && game.blitzDeadline != null) ? (game.blitzDeadline - Date.now()) : null;
+  const grade = gradeCheckoutAttempt(p.score, p.doubleOut, game.darts);
+
+  announce(grade.optimal ? `Optimal — ${grade.usedDarts} dart${grade.usedDarts===1?'':'s'} for ${p.score}.`
+    : grade.legal ? `Legal finish, not optimal — used ${grade.usedDarts}, ${grade.optimalDarts} possible.`
+    : `Not a legal finish for ${p.score}.`);
+
+  // snapshot state before mutation so undoLastTurnCheckoutTrainer() can restore it
+  game.lastTurnSnapshot = { target:p.score, attempts:p.attempts, legalCount:p.legalCount,
+    optimalCount:p.optimalCount, currentStreak:p.currentStreak, sessionRoundsLen:p.sessionRounds.length,
+    legNo:game.legNo, badgeReverts:[], voided:false };
+
+  p.attempts += 1;
+  if(grade.legal) p.legalCount += 1;
+  if(grade.optimal){ p.optimalCount += 1; p.currentStreak += 1; }
+  else p.currentStreak = 0;
+  p.sessionRounds.push({ target:p.score, legal:grade.legal, optimal:grade.optimal,
+    usedDarts:grade.usedDarts, optimalDarts:grade.optimalDarts, hint:grade.hint });
+
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:0, bust:!grade.legal, checkout:grade.legal, checkoutPoints:null, legWon:grade.optimal, targetScore:p.score,
+    darts: game.darts.map((d,i) => ({ dartNo: i+1, sector: d.sector, multiplier: d.mult, thrownAt: d.thrownAt,
+      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+
+  game.lastResult = Object.assign({}, grade, { target: p.score });
+
+  // Achievements (docs/checkout-trainer-roadmap.md "Achievements") — the four
+  // laddered milestones plus the one-offs checkable synchronously from this
+  // attempt's own outcome. p.score is still THIS round's target here, not yet
+  // reassigned to the next one below.
+  checkCheckoutTrainerMilestones(p);
+  if(grade.optimal && p.score === 170){
+    awardCheckoutTrainerBadge(p.name, 'checkout_trainer_170_club', '🐟', 'THE 170 CLUB', 'Solved 170 optimally — T20 T20 Bull');
+  }
+  if(grade.optimal && grade.usedDarts === 1){
+    awardCheckoutTrainerBadge(p.name, 'checkout_trainer_one_darter', '🎯', 'ONE-DARTER', `Solved ${p.score} optimally in a single dart`);
+  }
+  if(game.config.mode === 'blitz' && grade.legal && remainingMsAtSubmit != null && remainingMsAtSubmit < 1000){
+    awardCheckoutTrainerBadge(p.name, 'checkout_trainer_photo_finish', '📸', 'PHOTO FINISH', 'Legal finish with under 1 second left');
+  }
+
+  game.legNo += 1;   // round counter, same convention as Doubles Practice
+  game.darts = []; game.busted = false; game.won = false;
+
+  // Checkout Blitz: the clock is checked BETWEEN rounds only — a round already
+  // in flight when the deadline passes always finishes and grades normally
+  // (docs/checkout-trainer-roadmap.md "Core loop delta").
+  if(game.config.mode === 'blitz' && game.blitzDeadline != null && Date.now() >= game.blitzDeadline){
+    return endBlitzRun();
+  }
+
+  p.score = pickCheckoutTarget(p.doubleOut);
+  renderGameCheckoutTrainer();
+}
+// Mirrors undoLastTurnDoublesPractice()/undoLastTurnChuckin()'s snapshot-restore
+// shape. Only available until the next attempt is submitted (same "one level of
+// undo, gone once you move on" rule every other game type follows).
+function undoLastTurnCheckoutTrainer(){
+  if(!game || !game.lastTurnSnapshot) return;
+  const snap = game.lastTurnSnapshot;
+  const p = game.players[0];
+  p.score = snap.target;
+  p.attempts = snap.attempts;
+  p.legalCount = snap.legalCount;
+  p.optimalCount = snap.optimalCount;
+  p.currentStreak = snap.currentStreak;
+  p.sessionRounds.length = snap.sessionRoundsLen;
+  game.legNo = snap.legNo;
+  game.darts = []; game.busted = false; game.won = false;
+  game.lastResult = null;
+
+  snap.voided = true;
+  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+  });
+  cancelQueuedAchievementsForSnapshot(snap);
+
+  game.lastTurnSnapshot = null;
+  DB.deleteLastTurn();
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent='Last attempt undone.'; }
+  renderGameCheckoutTrainer();
+}
+function renderGameCheckoutTrainer(){
+  const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
+  const p = game.players[0];
+  const isBlitz = game.config.mode === 'blitz';
+  const accPct = p.attempts ? Math.round(p.legalCount/p.attempts*100) : 0;
+  const optPct = p.attempts ? Math.round(p.optimalCount/p.attempts*100) : 0;
+  const modeLabel = isBlitz ? '⏱️ Checkout Blitz' : 'Checkout Trainer';
+  const timeLabel = (isBlitz && game.blitzDeadline != null && !game.blitzEnded)
+    ? `${Math.max(0, Math.ceil((game.blitzDeadline - Date.now())/1000))}s left`
+    : `Round ${game.legNo}`;
+  const row = document.createElement('div');
+  row.className = 'pscore active';
+  row.innerHTML = `
+    <div>
+      <div class="nm">${escapeHtml(p.name)} <span class="nm-out">${modeLabel} · ${p.doubleOut?'double out':'single out'}</span></div>
+      <div class="turnflag">▸ target ${p.score}</div>
+    </div>
+    <div class="meta">
+      <div class="avgs">${optPct}% optimal &nbsp;·&nbsp; ${accPct}% legal &nbsp;·&nbsp; ${p.attempts} attempt${p.attempts===1?'':'s'}</div>
+      <div class="standing" id="checkout-trainer-timer">${escapeHtml(timeLabel)}</div>
+    </div>
+    <div class="rem-wrap">
+      <div class="rem">${p.score}</div>
+    </div>`;
+  if(sb) sb.appendChild(row);
+
+  const status = document.getElementById('status');
+  if(status){
+    const r = game.lastResult;
+    if(r){
+      if(r.optimal){
+        status.className = 'status win';
+        status.textContent = `✅ Optimal — ${r.usedDarts} dart${r.usedDarts===1?'':'s'}, that's the best possible.`;
+      } else if(r.legal){
+        status.className = 'status';
+        status.textContent = `⚠️ Legal finish, but not optimal (you used ${r.usedDarts} — ${r.optimalDarts} possible). Best route: ${r.hint}.`;
+      } else {
+        status.className = 'status bust';
+        status.textContent = `❌ Not a legal finish for ${r.target}. Best route: ${r.hint}.`;
+      }
+    } else {
+      status.className = 'status';
+      status.textContent = 'Tap out your proposed checkout, then press Submit.';
+    }
+  }
+  renderPad();
+}
+
+/* ---------- Checkout Blitz timer (docs/checkout-trainer-roadmap.md) ----------
+   A wall-clock deadline (game.blitzDeadline = Date.now() + durationSec*1000),
+   checked on each tick rather than a naively decrementing counter — a plain
+   setInterval counter alone drifts under background-tab throttling, which
+   would let a backgrounded/unfocused run either cheat extra time or end early
+   depending on browser behavior. This ticker only ever READS Date.now() against
+   the fixed deadline; it never advances the deadline itself. */
+let checkoutBlitzTimerHandle = null;
+let checkoutBlitzAnnounced = null;
+function startCheckoutBlitzTimer(){
+  stopCheckoutBlitzTimer();
+  checkoutBlitzAnnounced = new Set();
+  tickCheckoutBlitzTimer();
+  checkoutBlitzTimerHandle = setInterval(tickCheckoutBlitzTimer, 250);
+}
+function stopCheckoutBlitzTimer(){
+  if(checkoutBlitzTimerHandle){ clearInterval(checkoutBlitzTimerHandle); checkoutBlitzTimerHandle = null; }
+}
+function tickCheckoutBlitzTimer(){
+  if(!game || game.gameType !== 'checkout_trainer' || game.config.mode !== 'blitz' || game.blitzEnded || game.blitzDeadline == null){
+    stopCheckoutBlitzTimer();
+    return;
+  }
+  const remainingSec = Math.max(0, Math.ceil((game.blitzDeadline - Date.now())/1000));
+  const el = document.getElementById('checkout-trainer-timer');
+  if(el) el.textContent = `${remainingSec}s left`;
+  // aria-live cues at 30/10/5s remaining (not every second, which would be pure
+  // noise) — docs/checkout-trainer-roadmap.md's explicit accessibility
+  // requirement so a screen-reader user can track time without relying on sight.
+  [30,10,5].forEach(mark=>{
+    if(remainingSec === mark && !checkoutBlitzAnnounced.has(mark)){
+      checkoutBlitzAnnounced.add(mark);
+      announce(`${mark} seconds left.`);
+    }
+  });
+  // Idle end: no round in progress (game.darts.length===0) and time's up — a
+  // prompt-UX backstop so the run visibly ends the instant the clock hits zero
+  // even if the player never taps again. throwDartCheckoutTrainer()'s own guard
+  // is the authoritative enforcement; this just avoids waiting on it.
+  if(remainingSec <= 0 && game.darts.length === 0) endBlitzRun();
+}
+// Ends the current Blitz run: locks input, stops the ticker, and shows the
+// results screen. Called from submitCheckoutAttempt() (after a round that
+// crosses the deadline finishes grading), tickCheckoutBlitzTimer() (idle
+// end), and throwDartCheckoutTrainer() (blocked new-round attempt).
+function endBlitzRun(){
+  if(!game || game.blitzEnded) return;
+  game.blitzEnded = true;
+  stopCheckoutBlitzTimer();
+  game.darts = []; game.busted = false; game.won = false;
+  const p = game.players[0];
+  // 💎 Perfect Minute (docs/checkout-trainer-roadmap.md): every round this run
+  // graded optimal, with a 5-round floor so a 1-round fluke can't trigger it —
+  // same "floor to prevent a lucky small sample" reasoning the leaderboards use.
+  const rounds = p.sessionRounds || [];
+  if(rounds.length >= 5 && rounds.every(r=>r.optimal)){
+    awardCheckoutTrainerBadge(p.name, 'checkout_trainer_perfect_minute', '💎', 'PERFECT MINUTE', `${rounds.length} for ${rounds.length}, every round optimal`);
+  }
+  checkCheckoutBlitzMilestones(p.name);
+  renderBlitzResults();
+}
+// Final score is tallied here from p.sessionRounds — every round this run ever
+// produced (one Checkout Blitz game = exactly one run, never reset mid-game) —
+// using the same 2/1/0 formula getCheckoutBlitzLeaderboard() sums server-side
+// from the persisted turns. This client-side tally is purely for the immediate
+// results screen; the leaderboard itself is always computed fresh from the
+// database, never from a client-submitted total (docs/checkout-trainer-roadmap.md
+// "Security considerations").
+function renderBlitzResults(){
+  const p = game.players[0];
+  const rounds = p.sessionRounds || [];
+  const optimalCount = rounds.filter(r=>r.optimal).length;
+  const legalNotOptimal = rounds.filter(r=>r.legal && !r.optimal).length;
+  const illegalCount = rounds.filter(r=>!r.legal).length;
+  const score = optimalCount*2 + legalNotOptimal*1;
+  const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
+  const oche = document.querySelector('.oche');
+  if(oche) oche.innerHTML = `<div style="text-align:center;padding:14px 4px">
+    <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">TIME'S UP!</div>
+    <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">Checkout Blitz — final score</p>
+    <div class="stat-block" style="margin:0 auto 18px"><div class="stat-val" style="font-size:40px">${score}</div><div class="stat-label">points</div></div>
+    <div class="summary-grid" style="margin-bottom:18px">
+      <div class="stat-block"><div class="stat-val">${optimalCount}</div><div class="stat-label">Optimal (2pt)</div></div>
+      <div class="stat-block"><div class="stat-val">${legalNotOptimal}</div><div class="stat-label">Legal (1pt)</div></div>
+      <div class="stat-block"><div class="stat-val">${illegalCount}</div><div class="stat-label">Illegal (0pt)</div></div>
+    </div>
+    <div class="btn-row" style="justify-content:center">
+      <button class="btn btn-primary" onclick="setMode('checkout_trainer'); setCheckoutTrainerMode('blitz'); show('setup')">Play again</button>
+      <button class="btn btn-ghost" onclick="setMode('h2h'); show('setup')">New Game</button>
+    </div>
+  </div>`;
+  announce(`Time's up. Final score ${score} points.`);
+}
+
 function marksGlyph(n){
   const clamped = Math.min(3, n);
   return clamped>=3 ? '✓' : '●'.repeat(clamped) + '○'.repeat(3-clamped);
@@ -7875,6 +8505,7 @@ GAME_TYPES.x01.bubbleKeyMap = BUBBLE_KEY_MAP;
 GAME_TYPES.cricket.bubbleKeyMap = CRICKET_BUBBLE_KEY_MAP;
 GAME_TYPES.doubles_practice.bubbleKeyMap = DOUBLES_PRACTICE_BUBBLE_KEY_MAP;
 GAME_TYPES.chuckin.bubbleKeyMap = CHUCKIN_BUBBLE_KEY_MAP;
+GAME_TYPES.checkout_trainer.bubbleKeyMap = CHECKOUT_TRAINER_BUBBLE_KEY_MAP;
 function toggleMoreStats(){
   showMoreStats = !showMoreStats;
   renderPlayerPage();

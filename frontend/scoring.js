@@ -194,6 +194,50 @@ function checkoutHint(rem, doubleOut, maxDarts){
   return '';
 }
 
+/* ---------- Checkout Trainer (docs/checkout-trainer-roadmap.md) ----------
+   A pure mental-recall drill built entirely on top of the two functions above:
+   evaluateVisit() grades whether a proposed route legally reaches zero, and
+   checkoutHint() supplies the objective minimum dart count to compare against.
+   Nothing game-type-specific needed inventing here. */
+
+// Picks a random target score that's actually finishable under the given
+// out-mode, reusing checkoutHint()'s own '' unfinishable signal instead of a
+// separate hardcoded bogey-number list (169/168/166/165/163/162/159, and 1
+// under double-out) — asking for an impossible checkout would be a bad-faith
+// question, not a harder one (see the roadmap doc's "Target selection").
+// `rng` defaults to Math.random but is injectable for a deterministic test.
+// The loop is bounded only as a defensive guard against a pathological rng —
+// every integer in the scanned range has a finishable value within a few
+// rolls in practice, so this never meaningfully runs to the fallback.
+function pickCheckoutTarget(doubleOut, rng){
+  const roll = rng || Math.random;
+  const low = doubleOut ? 2 : 1;   // double-out can never finish on 1; straight-out can
+  for(let i=0;i<200;i++){
+    const candidate = low + Math.floor(roll() * (170 - low + 1));
+    if(checkoutHint(candidate, doubleOut, 3) !== '') return candidate;
+  }
+  return doubleOut ? 40 : 1;  // unreachable in practice — every scanned range has finishable values
+}
+
+// Grades one proposed checkout attempt against a target score. `legal` mirrors
+// evaluateVisit()'s win flag (reached exactly zero, valid last dart under
+// double-out) — a partial or over-shooting attempt is simply not legal, same
+// as any other X01 visit. `optimal` additionally requires matching checkoutHint()'s
+// minimum dart count: grading is by dart COUNT, not exact route match, since
+// checkoutHint() only ever returns *a* valid optimal route and real finishes
+// commonly have multiple equally-optimal paths (see the roadmap doc's
+// "Optimal?" section). `hint` is returned alongside so the UI can reveal the
+// route on anything other than an optimal answer without a second call.
+function gradeCheckoutAttempt(target, doubleOut, darts){
+  const ev = evaluateVisit({ score: target, doubleOut }, darts, null);
+  const hint = checkoutHint(target, doubleOut, 3);
+  const optimalDarts = hint ? hint.split(' ').length : null;
+  const legal = !!ev.win;
+  const usedDarts = darts.length;
+  const optimal = legal && optimalDarts != null && usedDarts === optimalDarts;
+  return { legal, usedDarts, optimalDarts, optimal, hint };
+}
+
 // Staircase Finish (REFERENCE.md's Achievements section, docs/achievements-badges-
 // roadmap.md) — checked out a leg by aiming at a double, missing to the single,
 // and repeating that all the way down: single at half the visit's starting
@@ -288,6 +332,7 @@ if (typeof module !== 'undefined' && module.exports) {
     evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS,
     evaluateDartDoublesPractice, isStaircaseFinish,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,
+    pickCheckoutTarget, gradeCheckoutAttempt,
     CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH, challengeBadgeSignals,
     chuckinTiersReached,
     isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,

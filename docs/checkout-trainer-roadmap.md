@@ -1,7 +1,20 @@
 # Checkout Trainer — Design Roadmap
 
-> Status: **not started**. This is a design doc for a future release, captured so the
-> thinking isn't lost. Nothing described here exists in the app yet.
+> Status (2026-07): **Built and playable end-to-end** — both sub-modes
+> (untimed Freeform, 60-second Checkout Blitz), the full grading loop
+> (`pickCheckoutTarget()`/`gradeCheckoutAttempt()`, `frontend/scoring.js`), all
+> five milestone ladders (28 tiers) plus five one-off flagship badges, Personal
+> Bests/stat bubbles, the Checkout Blitz leaderboard, New Game screen
+> integration, and Home page/Player Profile integration. Full detail:
+> `REFERENCE.md` §19. This doc's own design below is kept as-written for
+> context; where the shipped implementation resolved something differently
+> than the original sketch, that's called out inline below rather than
+> silently edited away.
+>
+> **Deferred, not built**: the trick-question/bogey-number difficulty variant
+> (and its conditional 💣 Bogey Buster badge), and difficulty tiers beyond a
+> single full-range (2-170) target pool — both tracked as their own open items
+> on `docs/open-roadmap-items.md` rather than left silently unbuilt.
 
 ## Goal
 
@@ -155,7 +168,9 @@ permanent milestones** (`INSERT OR IGNORE`, not undo-revocable) — a low-stakes
 practice mode's badge staying earned after an undone answer is a harmless edge case,
 not worth the revert plumbing X01/Cricket's competitive-play badges need.
 
-**Four ladders** (18 tiers total, matching Chuckin's own scale):
+**Four ladders** (22 tiers total — the tables below, not the "18" this line
+originally estimated before being tallied against Chuckin's own scale; kept
+accurate as-shipped rather than silently left wrong):
 
 1. **Lifetime Attempts** (`checkout_trainer_attempts_`, metric = total rounds
    answered, legal or not) — pure dedication/volume, the most Chuckin-like of the
@@ -403,7 +418,7 @@ Not yet addressed anywhere in this doc, per `CLAUDE.md`'s standing conventions:
    modeled directly on Doubles Practice's own functions.
 5. The four milestone ladders (attempts, optimal answers, session endurance, best
    streak) — data-driven off one array, exactly like `CHUCKIN_MILESTONE_LADDERS`, so
-   all 18 tiers come from one `.forEach()` rather than 18 hand-written definitions.
+   all 22 tiers come from one `.forEach()` rather than 22 hand-written definitions.
 6. The one-off flagship badges (170 Club, One-Darter, Perfectionist), plus Bogey
    Buster if the trick-question difficulty variant ships.
 7. Difficulty tiers and a leaderboard — later passes once the core loop is proven and
@@ -415,6 +430,24 @@ Not yet addressed anywhere in this doc, per `CLAUDE.md`'s standing conventions:
    `getCheckoutBlitzLeaderboard()`.
 10. Blitz's own ladder (Best Blitz Score) and one-off badges (Perfect Minute, Photo
     Finish) — same data-driven ladder mechanism as every other ladder in this doc.
+
+## Resolved open questions (were listed below as open; now decided and shipped)
+
+- **Persisted vs. lightweight**: shipped as the **full persisted game type** —
+  the lifetime ladders and cross-player Blitz leaderboard this doc itself
+  designed are impossible without server-side persistence, so this was
+  effectively decided by the shape of what was actually built.
+- **Difficulty tiers**: **not built for v1** — a single full-range (2-170,
+  skipping unfinishable targets) pool ships instead; tracked as its own
+  open item on `docs/open-roadmap-items.md` rather than guessed at here.
+- **Trick-question variant**: **deferred**, per this doc's own framing that
+  the core game is complete without it; the 💣 Bogey Buster badge is deferred
+  with it.
+- **Blitz's point weighting** (2×/1×/0×) and **ladder thresholds**: shipped
+  using this doc's own first-pass numeric values as-is, unchanged.
+- **Configurable Blitz duration**: not built — `config.durationSec` is stored
+  (fixed at 60) exactly as this doc anticipated, ready for a future variable-
+  duration variant without a migration.
 
 ## Open questions for whoever picks this up
 

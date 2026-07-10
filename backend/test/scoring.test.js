@@ -12,7 +12,8 @@ const scoring = require(path.join('..', '..', 'frontend', 'scoring.js'));
 const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET_STANDARD_NUMBERS,
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
   evaluateDartDoublesPractice, chuckinTiersReached, isStaircaseFinish,
-  isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved } = scoring;
+  isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,
+  pickCheckoutTarget, gradeCheckoutAttempt } = scoring;
 
 // Builds a real dart object the same way the app does (makeDart minus the
 // thrownAt timestamp), rather than hand-rolling a fake {value,isDouble,...} shape.
@@ -285,6 +286,90 @@ describe('checkoutHint (checkout route calculator, REFERENCE.md §2)', () => {
       if (!hint) continue;
       assert.equal(routeSum(hint), rem, `single-out route "${hint}" for ${rem} should sum to ${rem}`);
     }
+  });
+});
+
+describe('pickCheckoutTarget (Checkout Trainer target selection, docs/checkout-trainer-roadmap.md)', () => {
+  test('double-out: never returns a known bogey number, always finishable', () => {
+    // Sweep the rng across the full [0,1) range so every candidate in [2,170]
+    // gets picked at least once, then assert none of the known double-out bogey
+    // numbers (169, 168, 166, 165, 163, 162, 159, 1) ever survive the re-roll.
+    const bogeys = new Set([169, 168, 166, 165, 163, 162, 159, 1]);
+    for (let i = 0; i < 500; i++) {
+      const roll = i / 500;
+      const target = pickCheckoutTarget(true, () => roll);
+      assert.ok(!bogeys.has(target), `picked bogey number ${target} under double-out`);
+      assert.notEqual(checkoutHint(target, true, 3), '', `picked unfinishable target ${target} under double-out`);
+    }
+  });
+
+  test('double-out: never returns below 2 (1 is unfinishable in double-out)', () => {
+    const target = pickCheckoutTarget(true, () => 0); // lowest possible roll
+    assert.ok(target >= 2);
+  });
+
+  test('single-out: 1 is a legal target (trivially finishable)', () => {
+    const target = pickCheckoutTarget(false, () => 0); // lowest possible roll
+    assert.equal(target, 1);
+  });
+
+  test('every picked target is within [1,170]', () => {
+    for (const roll of [0, 0.25, 0.5, 0.75, 0.999]) {
+      const doubleTarget = pickCheckoutTarget(true, () => roll);
+      const singleTarget = pickCheckoutTarget(false, () => roll);
+      assert.ok(doubleTarget >= 2 && doubleTarget <= 170);
+      assert.ok(singleTarget >= 1 && singleTarget <= 170);
+    }
+  });
+});
+
+describe('gradeCheckoutAttempt (Checkout Trainer grading, docs/checkout-trainer-roadmap.md)', () => {
+  test('optimal: legal finish in the objective minimum dart count', () => {
+    const g = gradeCheckoutAttempt(40, true, [d(20, 2)]); // D20, 1 dart — the minimum for 40
+    assert.equal(g.legal, true);
+    assert.equal(g.optimal, true);
+    assert.equal(g.usedDarts, 1);
+    assert.equal(g.optimalDarts, 1);
+  });
+
+  test('legal but not optimal: reaches zero validly, but in more darts than necessary', () => {
+    const g = gradeCheckoutAttempt(40, true, [d(20, 1), d(10, 1), d(5, 2)]); // 20+10+D5, 3 darts for a 1-dart finish
+    assert.equal(g.legal, true);
+    assert.equal(g.optimal, false);
+    assert.equal(g.usedDarts, 3);
+    assert.equal(g.optimalDarts, 1);
+  });
+
+  test('illegal: overshoots the target (busts)', () => {
+    const g = gradeCheckoutAttempt(40, true, [d(20, 3)]); // 60 > 40
+    assert.equal(g.legal, false);
+    assert.equal(g.optimal, false);
+  });
+
+  test('illegal: reaches zero but last dart is not a double in double-out', () => {
+    const g = gradeCheckoutAttempt(40, true, [d(20, 1), d(20, 1)]); // 20+20=40, no double
+    assert.equal(g.legal, false);
+    assert.equal(g.optimal, false);
+  });
+
+  test('illegal: an early submit that leaves a nonzero remainder', () => {
+    const g = gradeCheckoutAttempt(100, true, [d(20, 1)]); // 20 of 100, nowhere near a finish
+    assert.equal(g.legal, false);
+    assert.equal(g.optimal, false);
+  });
+
+  test('a different (equally-optimal) route to the same minimum dart count still grades optimal', () => {
+    // 32 finishes optimally on D16 (1 dart) via checkoutHint's own route, but any
+    // other 1-dart double finish that lands on exactly 32 must grade optimal too —
+    // grading is by dart COUNT, not exact route match (per the roadmap doc).
+    const g = gradeCheckoutAttempt(32, true, [d(16, 2)]);
+    assert.equal(g.legal, true);
+    assert.equal(g.optimal, true);
+  });
+
+  test('hint is returned alongside the grade, for revealing the optimal route on anything but optimal', () => {
+    const g = gradeCheckoutAttempt(170, true, [d(20, 3)]); // a bust attempt at 170
+    assert.equal(g.hint, 'T20 T20 Bull');
   });
 });
 

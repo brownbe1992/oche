@@ -365,6 +365,11 @@ try { db.exec('ALTER TABLE player_badges ADD COLUMN count INTEGER NOT NULL DEFAU
 // existing/X01 row — X01's own Personal Bests queries keep using checkout=1
 // unchanged. Only Cricket's write path (enterTurnCricket()) sets it.
 try { db.exec('ALTER TABLE turns ADD COLUMN leg_won INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
+// Checkout Trainer (docs/checkout-trainer-roadmap.md): the target score given for
+// that round. Unlike X01 there's no persistent "remaining score" game state to
+// derive it from afterward, so it has to be stored per-turn. Only ever populated
+// for game_type='checkout_trainer'; every other game type leaves it NULL.
+try { db.exec('ALTER TABLE turns ADD COLUMN target_score INTEGER'); } catch(e) {}
 // player_count is the participant count captured once at game creation. H2H-vs-practice
 // classification reads THIS instead of a live COUNT(game_players) subquery, so deleting
 // or resetting a player can never retroactively reclassify a game (a 2-player H2H game
@@ -468,8 +473,8 @@ const q = {
   completeGame : db.prepare("UPDATE games SET completed_at = datetime('now'), winner_id = ? WHERE id = ?"),
 
   insertTurn   : db.prepare(`INSERT INTO turns
-                   (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points, leg_won)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+                   (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points, leg_won, target_score)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 
   insertDart   : db.prepare(`INSERT INTO darts (turn_id, dart_no, sector, multiplier, thrown_at, zone, miss_zone, miss_depth, bounced)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
@@ -781,6 +786,14 @@ function addTurn(gameId, t) {
   if (!Number.isInteger(setNo) || setNo < 1 || !Number.isInteger(legNo) || legNo < 1) throw httpError(400, 'set and leg must be positive integers');
   const checkoutPoints = t.checkout ? (Number(t.checkoutPoints) || 0) : null;
   if (checkoutPoints != null && (!Number.isFinite(checkoutPoints) || checkoutPoints < 0 || checkoutPoints > 170)) throw httpError(400, 'checkoutPoints must be between 0 and 170');
+  // Checkout Trainer (docs/checkout-trainer-roadmap.md): the target score offered
+  // for this round. Server-computed context, not a scored value, so it's only
+  // range-checked (1-170, the finishable range) rather than tied to any other field.
+  let targetScore = null;
+  if (t.targetScore != null) {
+    targetScore = Number(t.targetScore);
+    if (!Number.isInteger(targetScore) || targetScore < 1 || targetScore > 170) throw httpError(400, 'targetScore must be an integer between 1 and 170');
+  }
   const info = q.insertTurn.run(
     Number(gameId), p.id,
     setNo, legNo,
@@ -788,7 +801,8 @@ function addTurn(gameId, t) {
     t.bust ? 1 : 0,
     t.checkout ? 1 : 0,
     checkoutPoints,
-    t.legWon ? 1 : 0
+    t.legWon ? 1 : 0,
+    targetScore
   );
   // Insert individual dart rows — scored/is_treble/is_double are generated columns.
   // thrownAt is an ISO timestamp captured client-side at tap time; only sent when
@@ -1096,14 +1110,14 @@ function computeStats() {
   `).all();
 
   // Practice = explicit practice flag OR solo (1-player) games. Excludes Just
-  // Chuckin' It (NOT_CHUCKIN) — its darts count toward the global dartsThrown
+  // Chuckin' It (NOT_HYPOTHETICAL_DARTS) — its darts count toward the global dartsThrown
   // total below but not toward this per-category legs breakdown.
   const practiceLegs = db.prepare(`
     SELECT t.player_id AS pid, g.category AS cat,
            COUNT(DISTINCT t.game_id || '-' || t.set_no || '-' || t.leg_no) AS legs
     FROM turns t JOIN games g ON g.id = t.game_id
     WHERE (g.practice = 1
-      OR g.player_count = 1) ${NOT_CHUCKIN}
+      OR g.player_count = 1) ${NOT_HYPOTHETICAL_DARTS}
     GROUP BY t.player_id, g.category
   `).all();
 
@@ -1287,7 +1301,7 @@ function getSummary() {
     SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
     FROM turns t JOIN games g ON g.id = t.game_id
     WHERE (g.practice = 1
-      OR g.player_count = 1) ${NOT_CHUCKIN}
+      OR g.player_count = 1) ${NOT_HYPOTHETICAL_DARTS}
   `).get().n;
   return { players, games, sets, legs, darts, tonPlus, oneEighties, bigFish, nineDarters, practiceLegs };
 }
@@ -1378,22 +1392,22 @@ function getHomeExtra() {
     LIMIT 1
   `).get() || null;
 
-  // legs/darts "activity" counts — legs excludes Just Chuckin' It (NOT_CHUCKIN,
+  // legs/darts "activity" counts — legs excludes Just Chuckin' It (NOT_HYPOTHETICAL_DARTS,
   // joins games for the first time here to apply it); darts stays fully unscoped
   // since raw dart-throwing volume is the one thing chuckin should count toward.
   const todayLegs = db.prepare(`
     SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
-    FROM turns t JOIN games g ON g.id = t.game_id WHERE date(t.created_at) = date('now') ${NOT_CHUCKIN}
+    FROM turns t JOIN games g ON g.id = t.game_id WHERE date(t.created_at) = date('now') ${NOT_HYPOTHETICAL_DARTS}
   `).get().n;
   const todayDarts = db.prepare(`SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id WHERE date(t.created_at) = date('now')`).get().n;
   const weekLegs = db.prepare(`
     SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
-    FROM turns t JOIN games g ON g.id = t.game_id WHERE date(t.created_at) >= date('now', '-6 days') ${NOT_CHUCKIN}
+    FROM turns t JOIN games g ON g.id = t.game_id WHERE date(t.created_at) >= date('now', '-6 days') ${NOT_HYPOTHETICAL_DARTS}
   `).get().n;
   const weekDarts = db.prepare(`SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id WHERE date(t.created_at) >= date('now', '-6 days')`).get().n;
 
   // Pace: avg ms between consecutive thrown_at timestamps within the same turn -> darts/min.
-  // Excludes Just Chuckin' It (NOT_CHUCKIN) — its rapid-fire per-dart-only rhythm
+  // Excludes Just Chuckin' It (NOT_HYPOTHETICAL_DARTS) — its rapid-fire per-dart-only rhythm
   // (no scoring pauses, no walking to collect between legs the way a real match
   // has) would skew this as a measure of match-throwing pace.
   const _pace = (modeWhere) => {
@@ -1404,7 +1418,7 @@ function getHomeExtra() {
         JOIN darts prev ON prev.turn_id = d.turn_id AND prev.dart_no = d.dart_no - 1
         JOIN turns t ON t.id = d.turn_id
         JOIN games g ON g.id = t.game_id
-        WHERE d.thrown_at IS NOT NULL AND prev.thrown_at IS NOT NULL AND ${modeWhere} ${NOT_CHUCKIN}
+        WHERE d.thrown_at IS NOT NULL AND prev.thrown_at IS NOT NULL AND ${modeWhere} ${NOT_HYPOTHETICAL_DARTS}
       ) WHERE gap_ms > 0 AND gap_ms < 60000
     `).get();
     if (!row || !row.avgMs) return null;
@@ -1986,7 +2000,7 @@ function getDoublesPracticeBestRoundStats() {
    increment at all (unlike Doubles Practice's per-round leg_no bump) — grouping by
    t.game_id alone is equivalent and clearer intent-wise. Deliberately the INVERSE
    of every other game-type addition: its darts must NOT count toward any existing
-   stat (see NOT_CHUCKIN above) — the one exception, the pure "total darts thrown"
+   stat (see NOT_HYPOTHETICAL_DARTS above) — the one exception, the pure "total darts thrown"
    counters, are already fully unscoped queries that need no change to include it. */
 
 // Groups a player's chuckin darts into non-overlapping runs of 3, in throw
@@ -2057,6 +2071,95 @@ function getChuckinPersonalBests(playerName, mode) {
     if (bestSessionTrebles == null || s.trebles > bestSessionTrebles) bestSessionTrebles = s.trebles;
   }
   return { bestSessionDarts, bestSessionTrebles };
+}
+
+/* ---------- Checkout Trainer (docs/checkout-trainer-roadmap.md) ----------
+   A pure mental-recall drill: every dart is its own 1-dart turn (same per-dart-
+   turn shape Doubles Practice/Chuckin already established), graded by
+   frontend/scoring.js's evaluateVisit()/checkoutHint() before it's ever written
+   here — the three-way outcome (bust=1 "not legal" / checkout=1,leg_won=0
+   "legal but not optimal" / checkout=1,leg_won=1 "legal and optimal") already
+   exists on every turns row, so nothing new to store beyond target_score. Both
+   sub-modes (Freeform, Checkout Blitz — distinguished by config.mode, not a
+   separate game_type) share one game_type='checkout_trainer' and count toward
+   these lifetime stats together — a round is a round regardless of which mode
+   served it (docs/checkout-trainer-roadmap.md's explicit ruling). */
+function getCheckoutTrainerStatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'checkout_trainer' });
+
+  const totalAttempts = db.prepare(`SELECT COUNT(*) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+  const legalCount = db.prepare(`SELECT COUNT(*) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? AND t.checkout=1 ${scope}`).get(p.id)?.v ?? 0;
+  const optimalCount = db.prepare(`SELECT COUNT(*) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? AND t.leg_won=1 ${scope}`).get(p.id)?.v ?? 0;
+  const accuracyPct = totalAttempts > 0 ? (legalCount / totalAttempts * 100) : null;
+  const optimalPct = totalAttempts > 0 ? (optimalCount / totalAttempts * 100) : null;
+
+  return { totalAttempts, legalCount, optimalCount, accuracyPct, optimalPct };
+}
+
+// Personal Bests analog: toughest checkout ever solved optimally (a single
+// standout number, same "one record" shape bestLegAvg/bestRoundDarts already
+// use) plus the best-ever optimal streak — walked from ordered turns and reset
+// on any non-optimal result, the same "walk until broken" approach a win-streak
+// is already computed elsewhere with, not a maintained counter.
+function getCheckoutTrainerPersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'checkout_trainer' });
+
+  const toughestCheckout = db.prepare(`SELECT MAX(t.target_score) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? AND t.leg_won=1 ${scope}`).get(p.id)?.v ?? null;
+
+  const rows = db.prepare(`SELECT t.leg_won AS legWon FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope} ORDER BY t.id`).all(p.id);
+  let bestStreak = 0, current = 0;
+  for (const r of rows) {
+    if (r.legWon) { current += 1; if (current > bestStreak) bestStreak = current; }
+    else current = 0;
+  }
+
+  return { toughestCheckout, bestStreak };
+}
+
+// Checkout Blitz's arcade-style high-score table — one row per player, their
+// single best-ever 60-second run, ranked descending. A peak single-run value
+// (structurally closest to "Highest Checkout"), so no minimum-attempts floor
+// the rate-based leaderboards (Doubles Practice accuracy, Cricket MPR) use to
+// guard against a lucky small sample. Score is computed at read time from the
+// same SUM(2/1/0) formula Checkout Blitz's own scoring design specifies —
+// nothing pre-aggregated, same philosophy as everywhere else in this schema.
+function getCheckoutBlitzLeaderboard() {
+  const rows = db.prepare(`
+    SELECT g.id AS gameId, p.name AS name, MAX(t.created_at) AS achievedAt,
+           COALESCE(SUM(CASE WHEN t.leg_won=1 THEN 2 WHEN t.checkout=1 THEN 1 ELSE 0 END),0) AS score
+    FROM turns t JOIN games g ON g.id=t.game_id JOIN players p ON p.id=t.player_id
+    WHERE g.game_type='checkout_trainer' AND json_extract(g.config,'$.mode')='blitz'
+    GROUP BY g.id
+  `).all();
+  const best = new Map();
+  for (const r of rows) {
+    const cur = best.get(r.name);
+    if (!cur || r.score > cur.bestScore) best.set(r.name, { name: r.name, bestScore: r.score, achievedAt: r.achievedAt });
+  }
+  return Array.from(best.values()).sort((a, b) => b.bestScore - a.bestScore);
+}
+
+// That same player's own peak Blitz run plus a lifetime average across every
+// run — same "peak plus lifetime average for context" shape getPersonalBests()
+// already uses for bestLegAvg/lifetimeAvg.
+function getCheckoutBlitzPersonalStats(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const rows = db.prepare(`
+    SELECT g.id AS gameId,
+           COALESCE(SUM(CASE WHEN t.leg_won=1 THEN 2 WHEN t.checkout=1 THEN 1 ELSE 0 END),0) AS score
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE t.player_id=? AND g.game_type='checkout_trainer' AND json_extract(g.config,'$.mode')='blitz'
+    GROUP BY g.id
+  `).all(p.id);
+  if (!rows.length) return { bestScore: null, lifetimeAvgScore: null, runs: 0 };
+  const bestScore = Math.max(...rows.map(r => r.score));
+  const lifetimeAvgScore = rows.reduce((s, r) => s + r.score, 0) / rows.length;
+  return { bestScore, lifetimeAvgScore, runs: rows.length };
 }
 
 // Per-sector/multiplier/zone hit-count grid feeding the Player Profile's dartboard
@@ -2398,7 +2501,7 @@ function _mf(mode) {
 // 'x01'/'cricket', server.js only uses a query param to pick which function to
 // call), and is whitelisted here regardless as a defense-in-depth measure
 // against string interpolation.
-const KNOWN_GAME_TYPES = ['x01', 'cricket', 'doubles_practice', 'chuckin'];
+const KNOWN_GAME_TYPES = ['x01', 'cricket', 'doubles_practice', 'chuckin', 'checkout_trainer'];
 function _scope({ mode, gameType } = {}) {
   let sql = _mf(mode);
   if (gameType) {
@@ -2435,7 +2538,10 @@ const X01_ONLY = _scope({ gameType: 'x01' });
 // explicit gameType:'chuckin' and would contradict a blanket exclusion baked into
 // _mf('practice') itself — that's why this is a separate constant applied at each
 // specific call site, not folded into the central mode-scoping helpers above).
-const NOT_CHUCKIN = `AND g.game_type != 'chuckin'`;
+// Checkout Trainer (docs/checkout-trainer-roadmap.md) joins this exclusion for the
+// same reason Just Chuckin' It does: its darts are a proposed route, not a real
+// throw, and must not pollute sector heatmaps, treble rate, or dart-pace either.
+const NOT_HYPOTHETICAL_DARTS = `AND g.game_type NOT IN ('chuckin','checkout_trainer')`;
 
 function getOneEightyStats(mode) {
   const mf = _mf(mode);
@@ -2728,9 +2834,9 @@ function getDartAnalytics(playerName, mode) {
 
   // Base FROM for dart-level queries (darts → turns → games)
   // Excludes darts thrown on busted turns — they shouldn't count toward sector/treble
-  // analytics — and Just Chuckin' It darts (NOT_CHUCKIN), which get their own
+  // analytics — and Just Chuckin' It darts (NOT_HYPOTHETICAL_DARTS), which get their own
   // dedicated heatmap/treble-rate stats instead of feeding this cross-game-type view.
-  const BASE = `FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id WHERE t.player_id = ? AND t.bust = 0 ${NOT_CHUCKIN}`;
+  const BASE = `FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id WHERE t.player_id = ? AND t.bust = 0 ${NOT_HYPOTHETICAL_DARTS}`;
 
   // 1 — Most hit sector/multiplier combinations. Grouping by zone too (docs/dartboard-
   // zone-tracking-roadmap.md) splits a single-hit number's inner/outer regions into
@@ -3437,12 +3543,12 @@ function getH2HSummary(name1, name2, excludeGameId) {
 function getAroundTheWorldProgress(playerName) {
   const p = getPlayer(playerName);
   if(!p) return { hit:[], count:0, total:63 };
-  // Joins games to apply NOT_CHUCKIN — Just Chuckin' It hitting a never-before-hit
+  // Joins games to apply NOT_HYPOTHETICAL_DARTS — Just Chuckin' It hitting a never-before-hit
   // outcome shouldn't silently complete this X01 achievement's progress.
   const rows = db.prepare(`
     SELECT DISTINCT d.sector AS sector, d.multiplier AS mult
     FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id
-    WHERE t.player_id = ? ${NOT_CHUCKIN}
+    WHERE t.player_id = ? ${NOT_HYPOTHETICAL_DARTS}
   `).all(p.id);
   return { hit: rows, count: rows.length, total: 63 };
 }
@@ -4341,6 +4447,8 @@ module.exports = {
   getDoublesPracticeStatBubbles, getDoublesPracticePersonalBests,
   getDoublesPracticeAccuracyLeaderboard, getDoublesPracticeBestRoundStats,
   getChuckinStatBubbles, getChuckinPersonalBests, getChuckinHeatmap, getDartHeatmap, getBounceOutCount,
+  getCheckoutTrainerStatBubbles, getCheckoutTrainerPersonalBests,
+  getCheckoutBlitzLeaderboard, getCheckoutBlitzPersonalStats,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics, getCoachingInsights,

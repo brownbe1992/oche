@@ -583,6 +583,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/stats/cricket-perfect-leg' && m === 'GET') return send(res, 200, db.getCricketPerfectLegStats(url.searchParams.get('mode')));
     if (p === '/api/stats/doubles-practice-accuracy' && m === 'GET') return send(res, 200, db.getDoublesPracticeAccuracyLeaderboard());
     if (p === '/api/stats/doubles-practice-best-round' && m === 'GET') return send(res, 200, db.getDoublesPracticeBestRoundStats());
+    if (p === '/api/stats/checkout-blitz-leaderboard' && m === 'GET') return send(res, 200, db.getCheckoutBlitzLeaderboard());
     if (p === '/api/stats/big-fish'     && m === 'GET') return send(res, 200, db.getBigFishStats(url.searchParams.get('mode')));
     if (p === '/api/stats/nine-darters' && m === 'GET') return send(res, 200, db.getNineDarterStats(url.searchParams.get('mode')));
     if (p === '/api/stats' && m === 'GET')  return send(res, 200, db.computeStats());
@@ -597,6 +598,13 @@ const server = http.createServer(async (req, res) => {
       const mode = url.searchParams.get('mode');
       const name = url.searchParams.get('name');
       const gameType = url.searchParams.get('gameType');
+      // Checkout Trainer merges two functions into one response: the lifetime
+      // toughest-checkout/best-streak record (both sub-modes) plus Checkout
+      // Blitz's own peak-score/lifetime-average record — one Personal Bests
+      // block covers both, no separate route needed for the Blitz half.
+      if (gameType === 'checkout_trainer') {
+        return send(res, 200, Object.assign({}, db.getCheckoutTrainerPersonalBests(name, mode), db.getCheckoutBlitzPersonalStats(name)));
+      }
       return send(res, 200, gameType === 'cricket' ? db.getCricketPersonalBests(name, mode)
         : gameType === 'doubles_practice' ? db.getDoublesPracticePersonalBests(name, mode)
         : gameType === 'chuckin' ? db.getChuckinPersonalBests(name, mode)
@@ -609,6 +617,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, gameType === 'cricket' ? db.getCricketStatBubbles(name, mode)
         : gameType === 'doubles_practice' ? db.getDoublesPracticeStatBubbles(name, mode)
         : gameType === 'chuckin' ? db.getChuckinStatBubbles(name, mode)
+        : gameType === 'checkout_trainer' ? db.getCheckoutTrainerStatBubbles(name, mode)
         : db.getPlayerStatBubbles(name, mode));
     }
     if (p === '/api/players/chuckin-heatmap' && m === 'GET') {
