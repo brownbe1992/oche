@@ -724,23 +724,13 @@
         </div>
       </div>
 
-      <!-- Game (X01 / Cricket, plus the standalone solo game modes — Daily
-           Challenge, Ghost, and Checkout Trainer are each a distinct game to
-           play, not a format like H2H/Practice, so they live here rather than
-           under "Mode" below) -->
+      <!-- Game type (X01 / Cricket) -->
       <div class="setup-section" id="game-type-section">
         <div class="setup-label">Game</div>
-        <div class="opts" style="margin:0" id="game-type-seg-wrap">
+        <div class="opts" style="margin:0">
           <div class="seg" role="group" aria-label="Game type">
             <button id="gt-x01" aria-pressed="true" onclick="setGameType('x01')">X01</button>
             <button id="gt-cricket" aria-pressed="false" onclick="setGameType('cricket')">Cricket</button>
-          </div>
-        </div>
-        <div class="opts" style="margin:8px 0 0">
-          <div class="seg seg-wrap" role="group" aria-label="Solo game modes">
-            <button id="mode-challenge" aria-pressed="false" onclick="setMode('challenge')">🎯 Daily Challenge</button>
-            <button id="mode-ghost" aria-pressed="false" onclick="setMode('ghost')">👻 Ghost</button>
-            <button id="mode-checkout-trainer" aria-pressed="false" onclick="setMode('checkout_trainer')">🧮 Checkout Trainer</button>
           </div>
         </div>
       </div>
@@ -778,9 +768,12 @@
       <div class="setup-section">
         <div class="setup-label">Mode</div>
         <div class="opts" style="margin:0">
-          <div class="seg" role="group" aria-label="Game mode">
+          <div class="seg seg-wrap" role="group" aria-label="Game mode">
             <button id="mode-h2h" aria-pressed="true" onclick="setMode('h2h')">H2H</button>
             <button id="mode-practice" aria-pressed="false" onclick="setMode('practice')">Practice</button>
+            <button id="mode-challenge" aria-pressed="false" onclick="setMode('challenge')">🎯 Daily Challenge</button>
+            <button id="mode-ghost" aria-pressed="false" onclick="setMode('ghost')">👻 Ghost</button>
+            <button id="mode-checkout-trainer" aria-pressed="false" onclick="setMode('checkout_trainer')">🧮 Checkout Trainer</button>
           </div>
         </div>
       </div>
@@ -2416,10 +2409,7 @@ function setMode(mode){
   // sections for the same reason — Just Chuckin' It additionally has no config
   // options at all (no starting score, no targets), unlike Doubles Practice.
   const isSpecialMode = (mode === 'challenge' || mode === 'ghost' || mode === 'doubles_practice' || mode === 'chuckin' || mode === 'checkout_trainer');
-  // The "Game" section itself (and its Daily Challenge/Ghost/Checkout Trainer
-  // row) always stays visible now — only the X01/Cricket sub-row is specific
-  // to the standard H2H/Practice games and hides for the solo drills/modes.
-  document.getElementById('game-type-seg-wrap').hidden = isSpecialMode;
+  document.getElementById('game-type-section').hidden = isSpecialMode;
   // Leaving Doubles Practice/Chuckin/Checkout Trainer for any other mode: setup.gameType
   // was force-set below (bypassing setGameType(), which is the only place that also
   // updates the X01/Cricket toggle buttons' own visual state) — so it must be reset back
