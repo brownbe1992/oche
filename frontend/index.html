@@ -7832,7 +7832,7 @@ function throwDartDoublesPractice(sector, zone, missZone, missDepth, bounced){
     game.roundOver = true;
     game.roundEndReason = ev.reason;
     p.sessionRounds.push({ darts:p.roundDarts, hits:p.roundHits, reason:ev.reason });
-    announce(`Round over. ${ev.reason==='so-close' ? 'So close — landed on the number, missed the double.' : "Wrong double — that number wasn't a target."} ${p.roundDarts} darts, ${p.roundHits} hit${p.roundHits===1?'':'s'} this round.`);
+    announce(`Round over. ${doublesPracticeReasonText(ev.reason)} ${p.roundDarts} darts, ${p.roundHits} hit${p.roundHits===1?'':'s'} this round.`);
   } else if(ev.hit){
     announce(`Hit, ${dart.label}. ${p.roundHits} hit${p.roundHits===1?'':'s'} so far this round.`);
   }
@@ -7869,6 +7869,15 @@ function startNextRoundDoublesPractice(){
   DB.recordEvent('leg_start', game.setNo, game.legNo);
   renderGameDoublesPractice();
 }
+// Only a double on a target number keeps a Doubles Practice round alive
+// (evaluateDartDoublesPractice(), frontend/scoring.js) — every other outcome
+// ends it, each with its own explanation for why.
+function doublesPracticeReasonText(reason){
+  if(reason === 'so-close') return 'So close — landed on the number, missed the double.';
+  if(reason === 'wrong-double') return "Wrong double — that number wasn't a target.";
+  if(reason === 'miss') return 'Missed the board entirely.';
+  return "That number wasn't a target double.";
+}
 function renderGameDoublesPractice(){
   const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
   const p = game.players[0];
@@ -7894,9 +7903,7 @@ function renderGameDoublesPractice(){
   const status = document.getElementById('status');
   if(status){
     if(game.roundOver){
-      const reasonTxt = game.roundEndReason === 'so-close'
-        ? 'So close! Landed on the number, missed the double.'
-        : "Wrong double — that number wasn't a target.";
+      const reasonTxt = doublesPracticeReasonText(game.roundEndReason);
       status.className = 'status bust';
       status.textContent = `Round over — ${reasonTxt} ${p.roundDarts} dart${p.roundDarts===1?'':'s'}, ${p.roundHits} hit${p.roundHits===1?'':'s'} this round.`;
     } else if(game.dpLastDart && game.dpLastDart.hit){

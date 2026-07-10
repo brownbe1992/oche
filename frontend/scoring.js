@@ -94,10 +94,9 @@ function evaluateDartDoublesPractice(dart, targets){
     if(targets.includes(dart.sector)) return { hit:true, ended:false, reason:null };
     return { hit:false, ended:true, reason:'wrong-double' };
   }
-  if(dart.sector !== 0 && targets.includes(dart.sector)){
-    return { hit:false, ended:true, reason:'so-close' };
-  }
-  return { hit:false, ended:false, reason:null };
+  if(dart.sector === 0) return { hit:false, ended:true, reason:'miss' };
+  if(targets.includes(dart.sector)) return { hit:false, ended:true, reason:'so-close' };
+  return { hit:false, ended:true, reason:'wrong-number' };
 }
 
 /* ---------- Cricket ----------

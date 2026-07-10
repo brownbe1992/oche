@@ -351,12 +351,14 @@ function evaluateDartDoublesPractice(dart, targets){
     if(targets.includes(dart.sector)) return { hit:true, ended:false, reason:null };
     return { hit:false, ended:true, reason:'wrong-double' };
   }
-  if(dart.sector !== 0 && targets.includes(dart.sector)){
-    return { hit:false, ended:true, reason:'so-close' };
-  }
-  return { hit:false, ended:false, reason:null };
+  if(dart.sector === 0) return { hit:false, ended:true, reason:'miss' };
+  if(targets.includes(dart.sector)) return { hit:false, ended:true, reason:'so-close' };
+  return { hit:false, ended:true, reason:'wrong-number' };
 }
 ```
+
+**Only a double on a target number keeps a round alive — every other outcome
+ends it (2026-07 fix — see below)**:
 
 - A **double on a target number** is a hit — the round continues, and
   `p.roundHits` increments.
@@ -368,11 +370,17 @@ function evaluateDartDoublesPractice(dart, targets){
   on the target number is the identical miss (wrong ring, right number), so
   it's treated the same way — a deliberate completeness decision, not a new
   failure mode the roadmap didn't anticipate.
-- Anything else (a miss on an unrelated number, or a genuine total miss/sector
-  0) is a no-op: doesn't end the round, doesn't count as a hit. Real double-bull
-  scoring is inherited for free from `makeDartCore()`'s existing guard — an
-  attempted "treble bull" tap is silently downgraded to a single, scored as
-  "so close" if bull is a target, exactly like every other game type.
+- A **single OR treble on a number NOT in the target set** is "wrong number" —
+  also ends the round. (Fixed 2026-07: this used to be a silent no-op that let
+  the round continue — a hit anywhere on the board other than a target's own
+  single/treble was wrongly forgiven. A drill where any non-target-double dart
+  is free defeats the point of the drill, so this now ends the round like every
+  other non-hit outcome.)
+- A **genuine total miss (sector 0)** also ends the round, for the same reason.
+  Real double-bull scoring is inherited for free from `makeDartCore()`'s
+  existing guard — an attempted "treble bull" tap is silently downgraded to a
+  single, scored as "so close" if bull is a target, exactly like every other
+  game type.
 
 **Persistence**: every dart is recorded via `DB.recordTurn()` with `scored:0`
 always (no numeric score concept in this mode), `bust: !!ev.ended` (repurposed

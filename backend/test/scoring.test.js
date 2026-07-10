@@ -446,13 +446,13 @@ describe('evaluateDartDoublesPractice (per-dart drill mode, docs/game-modes-road
     assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(25, 1), targets), { hit: false, ended: true, reason: 'so-close' });
   });
 
-  test('a single/treble on an unrelated (non-target) number is a genuine miss: no hit, session does not end', () => {
-    assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(20, 1), targets), { hit: false, ended: false, reason: null });
-    assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(11, 3), targets), { hit: false, ended: false, reason: null });
+  test('a single/treble on an unrelated (non-target) number is "wrong number" and ends the session — only a target double keeps a round alive', () => {
+    assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(20, 1), targets), { hit: false, ended: true, reason: 'wrong-number' });
+    assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(11, 3), targets), { hit: false, ended: true, reason: 'wrong-number' });
   });
 
-  test('a genuine total miss (sector 0) never ends the session or counts as a hit', () => {
-    assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(0, 1), targets), { hit: false, ended: false, reason: null });
+  test('a genuine total miss (sector 0) also ends the session', () => {
+    assert.deepEqual(evaluateDartDoublesPractice(makeDartCore(0, 1), targets), { hit: false, ended: true, reason: 'miss' });
   });
 
   test('an attempted treble-bull downgrades to a single bull (makeDartCore\'s existing guard) and is scored as "so close" when bull is targeted', () => {
