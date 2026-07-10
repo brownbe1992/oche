@@ -247,8 +247,12 @@ describe('BUG-4 — advancement guards (winner validation + already-decided)', (
     const { tournamentId } = db.createTournament({ name: 'Bug4 Cup A', category: '501', players, rounds: roundsFor(2) });
     const final = db.getTournament(tournamentId).matches[0];
     const { gameId } = db.startTournamentMatch(final.id);
-    // Forge a completion naming a real player who isn't in this match.
-    db.completeGame(gameId, outsider);
+    // Forge a completion naming a real player who isn't in this match. docs/bug-roadmap.md
+    // BUG-9 now rejects this at the source (completeGame() itself requires the winner to be
+    // a participant), which is strictly stronger than BUG-4's own hook-level guard — the
+    // non-participant completion never even reaches _advanceTournamentMatch(). Either way,
+    // the bracket must be left uncorrupted, which is what BUG-4 asserts.
+    assert.throws(() => db.completeGame(gameId, outsider), (e) => e.status === 400);
     const t = db.getTournament(tournamentId);
     assert.equal(t.status, 'in_progress', 'tournament must not complete on a non-participant winner');
     assert.equal(t.champion_name, null, 'no champion set');

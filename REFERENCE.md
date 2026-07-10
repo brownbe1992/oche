@@ -150,7 +150,13 @@ oche/
   `catch` calls `db.logServerError({method, path, status, message})` alongside
   its existing `console.error`, for `status >= 500` responses only — a 4xx is an
   expected client mistake (bad login, invalid PIN), not a server fault worth a
-  diagnostic entry. `logServerError()` prunes to the most recent 500 rows on
+  diagnostic entry. To keep that boundary honest, malformed client-controlled
+  input that reaches a decode/parse — a bad percent-escape in a static path or
+  session cookie (`decodeURIComponent`), or an unparseable request body
+  (`JSON.parse`) — is caught and returned as a `400`, never allowed to fall
+  through as a generic `500` (`docs/security-audit-roadmap.md` SEC-17); otherwise
+  an unauthenticated caller could emit 500s at will and flush the whole 500-row
+  window. `logServerError()` prunes to the most recent 500 rows on
   every insert (a rolling diagnostic tail, not a full audit log), so a
   crash-loop can't grow the table unbounded. `GET /api/errors` (admin-only,
   `?limit=`, capped at 500) feeds Settings → Admin & Danger Zone → **Server
@@ -2049,7 +2055,7 @@ already-migrated database is a safe no-op).
 | `category` | `TEXT NOT NULL` | For X01 games: the starting score as a string (`'501'`/`'301'`/`'170'`/`'101'`, or a filler `'1000'` for Daily Challenge's non-scoring formats). Cricket games write a display label instead (`'Cricket (15-20, Bull)'` or `'Custom Cricket'`); Chuckin games write `"Just Chuckin' It"`. Category-scoped stat filters (`OPENING_CATS`'s `IN (501,301,170,101)`, nine-darter detection) either match X01 values explicitly or filter on `game_type`+`config`, so the non-X01 labels never collide with them |
 | `legs_per_set` / `sets_per_game` | `INTEGER NOT NULL` | |
 | `created_at` / `completed_at` | `TEXT` | `completed_at` is `NULL` for in-progress/abandoned games |
-| `winner_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | |
+| `winner_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | Set by `completeGame()`. **Must be a participant of the game** — `completeGame()` rejects a `winner` name that isn't in this game's `game_players` with a `400` (`docs/bug-roadmap.md` BUG-9), the same participant check `recordWalkover()` enforces; a `null` winner (abandoned game) is allowed. Behavior for legitimate input is unchanged — the frontend only ever completes with a real participant |
 | `practice` | `INTEGER NOT NULL DEFAULT 0` | Explicit practice flag, set at creation |
 | `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, `'doubles_practice'`, or `'chuckin'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; the Cricket/Doubles Practice/Chuckin New Game flows pass their own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
 | `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows (no config needed — every number/multiplier is always "in play") |
@@ -2206,7 +2212,7 @@ set → `in_progress`; else both player slots filled → `ready`; else `pending`
 |---|---|---|
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
-| `method` / `path` / `status` / `message` | nullable | One row per server-side 5xx response (§1's "Server error log"); pruned to the most recent 500 rows on every insert |
+| `method` / `path` / `status` / `message` | nullable | One row per server-side 5xx response (§1's "Server error log"); pruned to the most recent 500 rows on every insert. **Malformed client input never reaches here** — a bad percent-escape in the path, a malformed session cookie, or an unparseable JSON body are all classified as `400` client errors, not `500` faults (`docs/security-audit-roadmap.md` SEC-17), so an unauthenticated caller can't flush this diagnostic tail |
 
 ### `dart_components` (§16, `docs/archive/dart-builder-roadmap.md`)
 | Column | Type | Notes |

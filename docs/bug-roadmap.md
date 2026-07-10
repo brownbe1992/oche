@@ -20,12 +20,14 @@
 > the `node:test` suite under `backend/test/` (all green as of this writing). This doc
 > tracks the correctness gaps that suite doesn't yet assert.
 >
-> **All fixed.** BUG-1/BUG-2/BUG-3 (second pass); BUG-4/BUG-5/BUG-6/BUG-7 (fixed
-> 2026-07 alongside `security-audit-roadmap.md` SEC-15/SEC-16), each with a committed
-> regression test and the full backend suite green. BUG-8 (fixed 2026-07, from a live
-> user bug report rather than an audit pass) is a UI/error-handling defect rather than
-> a stats/data-integrity one, so its verification is a live Playwright check instead of
-> a `node:test` case.
+> **BUG-1 … BUG-8 fixed.** BUG-1/BUG-2/BUG-3 (second pass); BUG-4/BUG-5/BUG-6/BUG-7
+> (fixed 2026-07 alongside `security-audit-roadmap.md` SEC-15/SEC-16), each with a
+> committed regression test and the full backend suite green. BUG-8 (fixed 2026-07,
+> from a live user bug report rather than an audit pass) is a UI/error-handling defect
+> rather than a stats/data-integrity one, so its verification is a live Playwright check
+> instead of a `node:test` case. **BUG-9** was opened by the 2026-07 **fifth-pass
+> audit** (the same read that produced `security-audit-roadmap.md` Part 7 / SEC-17) —
+> see the entry at the bottom.
 
 ## Severity legend
 
@@ -501,6 +503,80 @@ of a silent freeze; an unmodified request path still renders the full Home
 page with zero console errors; `curl -I` against `/`, `/display`, and
 `/scoring.js` each show `Cache-Control: no-store`; full backend test suite
 (419 tests) still green.
+
+---
+
+## BUG-9 — `completeGame()` records any player as the winner without checking they played in the game  **(MED, data-integrity)**
+
+**Status: ✅ Fixed (2026-07).** `completeGame()` now rejects a `winner` who isn't in the
+game's `game_players` with a `400` (mirroring `recordWalkover()`'s own check), while
+still allowing a `null` winner (an abandoned game). Committed regression test
+`backend/test/db.complete-game-guard.test.js`: a non-participant winner returns 400,
+leaves `winner_id` NULL, and produces no phantom `h2hGamesWonByCat` entry; a real
+participant still records normally; a null winner still completes. `REFERENCE.md`'s
+`games.winner_id` schema note documents the participant requirement. Full backend suite
+green. (Found in the 2026-07 fifth-pass audit; cross-ref `security-audit-roadmap.md`
+Part 7 / SEC-17.)
+
+**Where:** `backend/db.js` `completeGame(gameId, winnerName)`:
+
+```js
+function completeGame(gameId, winnerName) {
+  const w = winnerName ? getPlayer(winnerName) : null;
+  q.completeGame.run(w ? w.id : null, Number(gameId));   // <-- w.id never checked against this game's participants
+  _fireGameLifecycleHooks('completed', { gameId: Number(gameId), winnerName: w ? w.name : null });
+  return { ok: true };
+}
+```
+
+`winnerName` is a client-supplied name (`POST /api/games/:id/complete { winner }`).
+Any *existing* player is looked up and written straight into `games.winner_id` — with
+no check that they were one of the game's participants (`game_players`).
+
+**The asymmetry that proves it's a gap:** the sibling `recordWalkover()` path *does*
+validate this — `if (!w || (w.id !== m.player1_id && w.id !== m.player2_id)) throw
+400`. And BUG-4 added the same participant check to `_advanceTournamentMatch()` (the
+tournament *consumer* of a completion). But the base `completeGame()` — which sets
+`games.winner_id` **before** the hook fires — was never guarded, so the raw game record
+can still name a non-participant winner even with BUG-4 in place. Same "hardened at one
+consumer, not at the source" shape as `security-audit-roadmap.md` SEC-16.
+
+**Misbehavior (verified):** completing a 2-player 501 game (Alice vs Bob) with
+`winner: "Mallory"` (a real player who never played in it) sets `games.winner_id` to
+Mallory's id, and `computeStats()` then reports `Mallory.h2hGamesWonByCat = {"501": 1}`
+— a phantom H2H game win for a player who wasn't in the game. It also breaks the real
+participants: `getPersonalBests()`'s `winStreak` walk sees `winner_id !== p.id` for
+Alice/Bob on that game and **resets their win streaks**. `getH2HRecord()` counts the
+game toward `total` while crediting neither side (the winner matches neither `p1` nor
+`p2`), inflating "games played" with a winnerless-looking result. In normal play the
+frontend always completes with an actual participant, so this is latent — reachable by
+a malformed/hostile client, or by any anonymous caller under the
+`OCHE_REQUIRE_AUTH=false` LAN opt-out; under the default it requires an admin session.
+Primarily a data-integrity defect (the threat model's "stats must stay accurate" goal),
+not a privilege issue.
+
+**Fix (step by step):**
+1. In `completeGame()`, when `winnerName` resolves to a player `w`, verify they took
+   part in the game before writing `winner_id`:
+   `if (w && !db.prepare('SELECT 1 FROM game_players WHERE game_id = ? AND player_id = ?').get(Number(gameId), w.id))
+   throw httpError(400, 'winner must be a participant of this game');`
+   Keep the `winnerName == null` path (a game completed with no winner — an abandoned
+   game) working unchanged. This mirrors `recordWalkover()`'s existing 400 and completes
+   the guard BUG-4 added only to the tournament-advancement consumer. (A 400 is safe:
+   the frontend only ever completes with a real participant, so this never fires in
+   normal play — same reasoning as BUG-4's own guards.)
+2. Add a committed `node:test` in `backend/test/` (e.g. alongside the other
+   `db.*`-completion tests): completing a game with a non-participant winner returns
+   `400` and leaves `winner_id` NULL / the participants' stats intact; completing with a
+   real participant still works; completing with no winner (abandoned) still works.
+3. `REFERENCE.md` documents game completion (§ around `POST /api/games/:id/complete` /
+   the `games.winner_id` column). Add a one-line note that the winner must be a
+   participant (behavior for legitimate input is unchanged — the guard only rejects
+   input that never occurs in normal play), in the same change.
+
+**Verify:** the new test passes; a full normal game still completes and records its
+winner; a completion naming a non-participant returns 400 and does not touch
+`winner_id`.
 
 ---
 

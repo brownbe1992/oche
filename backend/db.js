@@ -740,6 +740,17 @@ function addTurn(gameId, t) {
 
 function completeGame(gameId, winnerName) {
   const w = winnerName ? getPlayer(winnerName) : null;
+  // docs/bug-roadmap.md BUG-9: only a player who actually took part in this game may be
+  // recorded as its winner. winnerName is client-supplied; without this check, a
+  // malformed/hostile client (or, under the OCHE_REQUIRE_AUTH=false LAN opt-out, any
+  // anonymous caller) could set games.winner_id to any player — crediting a phantom
+  // H2H game win in computeStats() and resetting the real participants' win streaks.
+  // Mirrors recordWalkover()'s own participant check and completes the guard BUG-4
+  // added only to the tournament-advancement consumer (the base game record was left
+  // unguarded). A null winner (an abandoned game) stays allowed.
+  if (w && !db.prepare('SELECT 1 FROM game_players WHERE game_id = ? AND player_id = ?').get(Number(gameId), w.id)) {
+    throw httpError(400, 'winner must be a participant of this game');
+  }
   q.completeGame.run(w ? w.id : null, Number(gameId));
   _fireGameLifecycleHooks('completed', { gameId: Number(gameId), winnerName: w ? w.name : null });
   return { ok: true };

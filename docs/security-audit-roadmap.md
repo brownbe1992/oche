@@ -10,9 +10,14 @@
 > opened **SEC-15** — see "Part 5". A **fourth-pass audit** (2026-07, a deliberate
 > breadth-first re-read of the *whole* codebase weighted evenly across every module
 > rather than the newest features — "make sure nothing slipped through the cracks")
-> opened **SEC-16** (SSRF egress-guard bypass) — see "Part 6" at the bottom.
-> Functional-defect counterparts live in `docs/bug-roadmap.md` (BUG-1/BUG-2/BUG-3
-> from the second pass; BUG-4/BUG-5 from the third; BUG-6/BUG-7 from the fourth).
+> opened **SEC-16** (SSRF egress-guard bypass) — see "Part 6". A **fifth-pass audit**
+> (2026-07, an adversarial re-read specifically hunting for unauthenticated inputs that
+> reach an *unhandled* decode/parse and for write-side records the earlier passes
+> hardened only at one consumer) opened **SEC-17** (unauthenticated `server_errors`
+> diagnostic-log poisoning via client-controlled malformed input) — see "Part 7" at the
+> bottom. Functional-defect counterparts live in `docs/bug-roadmap.md` (BUG-1/BUG-2/BUG-3
+> from the second pass; BUG-4/BUG-5 from the third; BUG-6/BUG-7 from the fourth; BUG-9
+> from the fifth).
 >
 > See the "Status" line
 > under each finding below for what actually shipped, which in a couple of places is
@@ -969,3 +974,117 @@ connecting; confirm a normal LAN HA URL still works.
    omits the tournament tables). Both are "new table not wired into an existing
    whole-system operation" — worth fixing together and adding a standing checklist item
    (see BUG-6's fix) so the next new table doesn't repeat it.
+
+---
+
+## Part 7 — Fifth-pass audit (2026-07, unauthenticated malformed-input → unhandled decode/parse)
+
+A fresh adversarial read looking specifically for a class the earlier passes didn't
+target: **client-controlled input that reaches an unhandled `decodeURIComponent()` /
+`JSON.parse()`**, whose throw then becomes a `500` and — because `server.js`'s
+top-level `catch` persists every `status >= 500` to the `server_errors` table — an
+*unauthenticated write into a security-relevant diagnostic surface*. The
+SQLi/XSS/auth-primitive/path-traversal/SSRF surfaces were re-checked against the whole
+codebase and remain safe (the "zero bare `escapeJs`" invariant still holds; the
+`display.html` live-payload render path still escapes every field; `netguard.js` still
+blocks the full SEC-16 range list). One new finding, plus its functional-defect
+counterpart in `docs/bug-roadmap.md` (**BUG-9** — `completeGame()` accepts a
+non-participant winner, the same "hardened at one consumer, not at the source" shape as
+SEC-16/BUG-4).
+
+### SEC-17 — Unauthenticated `server_errors` diagnostic-log poisoning via malformed client input  **(LOW→MED, unauthenticated)**
+
+**Status: ✅ Fixed (2026-07).** All three decode/parse sites now classify a malformed
+input as a `400` client error instead of letting it throw into the generic 500 +
+`server_errors` path: `serveStatic()` wraps its `decodeURIComponent` and returns `400`
+on failure; `auth.js` `parseCookies()` falls back to the raw value if a cookie value
+won't decode (so a malformed cookie just fails to match a session); and `readJson()`
+tags a `JSON.parse` failure with `status: 400`/`'Invalid JSON body'` before rejecting.
+Committed regression test `backend/test/server.input-hardening.test.js` confirms
+`GET /%ff` → 400, a malformed-cookie `GET /api/me` → 200 (`loggedIn:false`), a
+malformed-body `POST /api/login` → 400, and — the load-bearing assertion — that
+`getServerErrors()` stays **empty** after a burst of all three. `REFERENCE.md`'s §1
+"Server error log" and the `server_errors` schema entry both document the
+malformed-input-is-a-400 invariant. Full backend suite green.
+
+**Where:** three separate client-input decode/parse sites throw an *unhandled*
+exception that propagates to `server.js`'s top-level `catch`, which classifies any
+non-`.status` throw as `500` and calls `db.logServerError(...)`:
+
+1. `backend/server.js` `serveStatic()` — `decodeURIComponent(req.url.split('?')[0])`
+   throws `URIError: URI malformed` on an invalid escape (e.g. `GET /%ff`). The
+   WHATWG `new URL()` at the top of the handler does **not** reject `%ff` in the path,
+   so it reaches `serveStatic` and throws there.
+2. `backend/auth.js` `parseCookies()` — `out[k] = decodeURIComponent(v)` throws on a
+   malformed cookie value (e.g. `Cookie: oche_session=%ff`). Reachable on the **public**
+   `GET /api/me` (which calls `currentAdmin()` → `parseCookies()`), and on every
+   admin route, before any auth check.
+3. `backend/server.js` `readJson()` — `JSON.parse(raw)` throws `SyntaxError` on a
+   malformed body. Reachable pre-auth on `POST /api/login`, `/api/setup`, and
+   `/api/players/verify-pin`; and on every write endpoint under the
+   `OCHE_REQUIRE_AUTH=false` LAN opt-out.
+
+**Attack (verified against a live server):** `GET /api/me` with `Cookie:
+oche_session=%ff`, `GET /%ff`, and `POST /api/login` with body `{bad json` each
+returned **500** and each wrote a row into `server_errors`:
+
+```
+500  GET   /api/me     URI malformed
+500  GET   /%ff        URI malformed
+500  POST  /api/login  Expected property name or '}' in JSON at position 1 ...
+```
+
+Two concrete harms, both from an **unauthenticated** attacker:
+
+- **Diagnostic-log poisoning / eviction.** `server_errors` is capped at the most
+  recent 500 rows (`pruneServerErrors`), is surfaced to admins in Settings, and is the
+  self-hoster's only shell-free view of "what's been going wrong" (§1's "Server error
+  log"). An attacker can emit these bogus 500s up to the global rate limit
+  (300/60s/IP, and more from multiple IPs) and **flush every genuine diagnostic entry
+  out of the 500-row window** — an anti-forensics / log-drowning primitive on an
+  internet-exposed box, plus a table full of attacker-chosen `message` text.
+- **Misclassified status.** Each is a *client* error (malformed request) that should be
+  a `400`, not a `500` — so it also inflates the app's own 5xx signal and `console.error`
+  noise with expected client mistakes.
+
+None of these is RCE or data loss; the impact is on the integrity/usefulness of the
+diagnostic surface and the correctness of the status code. But the whole point of
+`logServerError()` being `status >= 500`-only (Part 4's standing practice) is that a
+4xx is "an expected client mistake, not a server fault worth a diagnostic entry" — and
+these three inputs *are* expected client mistakes currently being logged as faults.
+
+**Fix (step by step):**
+1. `serveStatic()`: wrap the `decodeURIComponent` in a `try/catch` and return `400`
+   (`{ error: 'Bad request' }`) on failure, so a malformed path is a client error, not
+   a thrown 500.
+2. `parseCookies()`: guard the per-cookie `decodeURIComponent(v)` — on throw, fall
+   back to the raw `v` (or skip that pair) rather than letting the whole request 500.
+   A malformed cookie then simply fails to match a session (treated as not-logged-in),
+   which is the correct outcome.
+3. `readJson()`: in the `end` handler's `catch`, tag the error as a client error
+   before rejecting — `e.status = 400; e.message = 'Invalid JSON body';` — so the
+   top-level `catch` returns `400` and does **not** persist it to `server_errors`
+   (which only logs `status >= 500`).
+4. Add committed `node:test` coverage: `parseCookies` on a malformed value returns an
+   object without throwing; `readJson` rejects a malformed body with `err.status ===
+   400`; and (server-level) `GET /%ff` / a malformed-cookie `GET /api/me` / a
+   malformed-body `POST /api/login` each return `400` and leave `getServerErrors()`
+   empty.
+5. **Standing practice (add to the list at the top of Part 3 / "Standing practice"):**
+   any new site that `decodeURIComponent`s or `JSON.parse`s client-controlled input
+   must treat a throw as a `400`, never let it fall through to the generic `500` +
+   `server_errors` path.
+
+**Verify:** the four inputs above each return `400`; `server_errors` stays empty after
+a burst of them; a genuine forced 5xx (an actual unexpected throw) still logs as
+before.
+
+## Suggested order for Part 7
+
+1. **SEC-17** — small, self-contained, closes an unauthenticated write into the
+   diagnostic surface and fixes three misclassified statuses at once. Pair the fix with
+   the `node:test` coverage above so the "malformed client input is a 400, never a
+   logged 500" invariant has a regression guard.
+2. Then `docs/bug-roadmap.md` **BUG-9** (`completeGame()` participant validation) —
+   the functional counterpart, same "guard the source, not just one consumer" theme as
+   SEC-16/BUG-4.

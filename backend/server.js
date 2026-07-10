@@ -235,13 +235,28 @@ function readJson(req) {
         req.destroy(err);
       }
     });
-    req.on('end', () => { try { resolve(raw ? JSON.parse(raw) : {}); } catch (e) { reject(e); } });
+    // docs/security-audit-roadmap.md SEC-17: a malformed JSON body is a client error,
+    // not a server fault — tag it 400 so the top-level catch returns 400 and does NOT
+    // persist it into the server_errors diagnostic table (which only logs status >= 500).
+    // Left untagged it became a 500 an unauthenticated caller could emit at will
+    // (POST /api/login, /api/setup, /api/players/verify-pin all readJson pre-auth).
+    req.on('end', () => {
+      try { resolve(raw ? JSON.parse(raw) : {}); }
+      catch (e) { e.status = 400; e.message = 'Invalid JSON body'; reject(e); }
+    });
     req.on('error', reject);
   });
 }
 
 function serveStatic(req, res) {
-  let rel = decodeURIComponent(req.url.split('?')[0]);
+  // docs/security-audit-roadmap.md SEC-17: a malformed percent-escape in the path
+  // (e.g. GET /%ff) makes decodeURIComponent throw. WHATWG new URL() upstream does not
+  // reject it, so it reaches here — left unguarded it became a 500 logged into the
+  // server_errors diagnostic table (an unauthenticated write into that surface). A
+  // malformed path is a client error: return 400, don't let it 500.
+  let rel;
+  try { rel = decodeURIComponent(req.url.split('?')[0]); }
+  catch (e) { return send(res, 400, { error: 'Bad request' }); }
   if (rel === '/' || rel === '') rel = '/index.html';
   if (rel === '/display') rel = '/display.html';     // friendly URL for the scoreboard
   const filePath = path.normalize(path.join(FRONTEND_DIR, rel));

@@ -58,7 +58,13 @@ function parseCookies(req) {
     if (idx === -1) continue;
     const k = part.slice(0, idx).trim();
     const v = part.slice(idx + 1).trim();
-    if (k) out[k] = decodeURIComponent(v);
+    // docs/security-audit-roadmap.md SEC-17: a malformed cookie value (e.g. a bad
+    // percent-escape like "%ff") makes decodeURIComponent throw — left unguarded that
+    // propagated to the top-level catch as a 500 and got persisted into the
+    // server_errors diagnostic table, an unauthenticated write into that surface via
+    // GET /api/me. Fall back to the raw value instead, so a malformed cookie simply
+    // fails to match a session (treated as not-logged-in) rather than 500-ing.
+    if (k) { try { out[k] = decodeURIComponent(v); } catch (e) { out[k] = v; } }
   }
   return out;
 }
