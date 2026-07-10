@@ -1,7 +1,48 @@
 # League / Season Mode — Design Roadmap
 
-> Status: **not started**. This is a design doc for a future release, captured so the
-> thinking isn't lost. Nothing described here exists in the app yet.
+> Status (2026-07): **Fully built and playable end-to-end** — schema
+> (`leagues`/`league_players`, plus a nullable `games.league_id`), auto-tagging
+> (an `onGameCreated` hook, no extra step in New Game for the common case; a
+> small "log to which league?" picker only when a game genuinely qualifies for
+> more than one active league at once), live standings computation (no
+> maintained tally — see "resolved open questions" below), season lifecycle
+> (active/ended, reversible), a Leagues nav tab (list/setup/detail screens), a
+> Home page teaser, and a Player Profile "Leagues" stat block. Full detail:
+> `REFERENCE.md` §18. This doc's own design below is kept as-written for
+> context; where the shipped implementation resolved something differently
+> than the original sketch, that's called out explicitly rather than silently
+> edited away.
+
+### Resolved open questions (were listed below as open; now decided and shipped)
+
+- **Points system**: simple, admin-configurable `points_win`/`points_loss` per
+  league (default 1/0) — no margin-of-victory or legs-won bonus texture.
+  Simpler was chosen over "more texture," per this doc's own lean.
+- **Multi-league enrollment**: **allowed** — a player can be enrolled in
+  several concurrent active leagues. Any single game they play still only ever
+  tags into **one** of them (resolved via the picker when genuinely
+  ambiguous), so `games.league_id` stays a single nullable FK rather than
+  needing a many-to-many game↔league link.
+- **Per-league match format**: a league only constrains **category** (X01
+  starting score) — legs/sets are NOT fixed by the league the way a
+  tournament round fixes them. Every match is exactly the casual, unstructured
+  match this doc's own "How this differs from tournament mode" section
+  describes; whatever legs/sets the two players choose in New Game is what
+  they play.
+- **Standings storage**: shipped as a **live computation** over
+  `games`/`game_players` (`getLeagueStandings()`), not the `league_players`
+  denormalized tally the Design section below originally sketched — this
+  doc's own text already flagged that as the preferred alternative ("this
+  could equally be a live query over tagged games rather than a maintained
+  tally column, avoiding drift"), and that's the path taken. `league_players`
+  ended up holding only enrollment (`league_id, player_id, joined_at`), no
+  tally columns at all.
+- **Game-type scope**: **X01 only for v1** (the same four starting scores
+  tournament mode uses). Cricket already has full H2H parity and the
+  standings math is game-type-agnostic, so a Cricket-league extension is a
+  clean, separately-scoped follow-up rather than a fundamental blocker — just
+  not built now. Doubles Practice and Just Chuckin' It are excluded
+  regardless, being solo/no-winner formats.
 
 > **Related (2026-07)**: `docs/companion-website-roadmap.md` proposes cross-instance
 > leagues run through a project-operated site, reusing this doc's standings logic —
@@ -51,28 +92,30 @@ unify them into one system.
 
 ## Accessibility, security, and testing considerations
 
-Not yet addressed anywhere in this doc, per `CLAUDE.md`'s standing conventions:
+Addressed as shipped (2026-07), per `CLAUDE.md`'s standing conventions:
 
-- **Testing**: standings computation (points, tiebreakers, the season-freeze
-  snapshot) is pure stats logic over existing tables — exactly what
-  `docs/testing-and-observability-roadmap.md` says new scoring/stats logic should
-  get real test coverage for as it's built, not just eyeballed against a manual
-  spreadsheet.
-- **Accessibility**: the standings table and any "past seasons" archive view need
-  the same keyboard/focus-order and color-only-signal review (e.g. don't rely on
-  color alone to show who's promoted/relegated, if that's ever added) as every other
-  new surface, per `docs/accessibility-roadmap.md`.
-- **Security**: no new credential/token surface — reuses the existing `games.league_id`
-  FK and admin-auth model, so nothing new to harden here.
+- **Testing**: `backend/test/league.test.js` covers creation/validation,
+  enrollment (including multi-league), the auto-tag hook's every eligibility
+  case (0/1/>1 candidates, explicit valid/stale leagueId, every non-eligible
+  game shape), standings computation (points formula, decided-vs-abandoned
+  games, zero-played roster rows, sort order/tiebreak), season status
+  transitions, and the `wipeAllData()`/`resetStats()` standing-rule
+  interactions — a committed, re-runnable suite, not a one-off manual check.
+- **Accessibility**: the standings view is a real `<table>` with
+  `<caption class="sr-only">` and `<th scope="col">` headers (needs no
+  separate linearized fallback, unlike the tournament bracket's spatial
+  layout) — see `REFERENCE.md` §18. Status badges (Active/Ended) are icon +
+  text together, never color alone.
+- **Security**: no new credential/token surface — reuses the existing
+  `requireWrite` admin-auth model on every write route; every input
+  (name/category/dates/points) is bounded and validated at the write boundary
+  the same way every other write in this app is.
 
-## Open questions for whoever picks this up
+## Resolved (see the status header at the top of this doc for the shipped shape)
 
-- Points system: straightforward win=1/loss=0, or something with more texture (bonus
-  points for margin of victory, legs won within a loss, etc.)? Simpler is probably
-  better for a casual home-league use case, but worth confirming against how the
-  intended real-world league (if modeling an actual existing league) scores things.
-- Should a player be able to be enrolled in multiple concurrent leagues (e.g. a
-  friendly-group league and a household league running at the same time)?
-- Does a league need its own format (starting score, legs/sets) distinct from what
-  each individual match is set up with, or does it just track whatever format players
-  choose per match?
+- **Points system**: simple win=1/loss=0, admin-configurable per league —
+  simpler was chosen, per this section's own original lean.
+- **Multi-league enrollment**: allowed.
+- **Per-match format**: a league only constrains category (X01 starting
+  score); legs/sets are whatever each match's players choose, matching this
+  doc's own "unstructured, casual" framing of the feature.

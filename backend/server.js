@@ -42,7 +42,26 @@
        POST /api/badges/revoke     -> { player, badgeId } -> { count } (public, used by Undo Last Turn)
        GET  /api/players/badges    -> (?name=...) -> [ { badge_id, count, earned_at } ] (public)
        GET  /api/players/h2h-summary -> (?player=...&opponent=...&excludeGameId=) -> { totalGames, previousWinner } (public)
+
+       GET  /api/tournaments       -> [ { id, name, category, status, player_count, ... } ] (public)
+       POST /api/tournaments       -> { name, category, players:[names], rounds:[{legsPerSet,setsPerGame}] } -> { tournamentId }
+       GET  /api/tournaments/:id   -> full bracket detail (matches, players) or 404 (public)
+       POST /api/tournaments/matches/:id/start    -> starts a "ready" match's game -> { gameId }
+       POST /api/tournaments/matches/:id/walkover -> { winner } -> records a result without playing it out
        GET  /api/players/tournament-stats -> (?name=...) -> { wins, runnerUps, bestFinish } (public)
+
+       GET  /api/leagues           -> [ { id, name, category, status, startsAt, endsAt, pointsWin, pointsLoss, playerCount } ] (public)
+       POST /api/leagues           -> { name, category, startsAt?, endsAt?, pointsWin?, pointsLoss?, players?:[names] } -> { leagueId }
+       GET  /api/leagues/:id       -> { ...league, standings:[{name,played,won,lost,points,winPct}] } or 404 (public)
+       POST /api/leagues/:id/players -> { name } -> enroll a player -> { ok }
+       PUT  /api/leagues/:id/status  -> { status: 'active'|'ended' } -> { ok }
+       GET  /api/leagues/eligible  -> (?players=NameA,NameB&category=501) -> [ { id, name } ] (public) — leagues both
+                                       players are enrolled in, matching category, currently active; used by the New
+                                       Game screen to decide whether to show a "log to which league?" picker. A game
+                                       matching exactly one active league is tagged automatically with no picker at
+                                       all — this endpoint only matters when there's genuine ambiguity to resolve.
+       GET  /api/players/league-summary -> (?name=...) -> [ { leagueId, name, category, status, rank, totalPlayers,
+                                       played, won, lost, points } ] (public)
        GET  /api/players/dart-heatmap -> (?name=...&gameType=...&mode=...) -> [{sector,multiplier,zone,missZone,missDepth,hits}] (public)
        GET  /api/players/bounce-outs -> (?name=...&gameType=...&mode=...) -> { count } (public)
        GET  /api/players/around-the-world -> (?name=...) -> { hit, count, total } (public)
@@ -828,6 +847,47 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/players/tournament-stats' && m === 'GET') {
       return send(res, 200, db.getTournamentStats(url.searchParams.get('name')));
+    }
+
+    // ----- leagues (docs/league-mode-roadmap.md, X01 only for v1) -----
+    // Same read/write split as tournaments: viewing leagues/standings is public;
+    // creating a league, enrolling a player, and ending/reopening one are all
+    // state-changing writes gated by requireWrite. Games auto-tag into a league via
+    // the onGameCreated hook in db.js — there is no dedicated write route for that,
+    // it rides through the existing POST /api/games (which already spreads its whole
+    // body into createGame(), so an optional leagueId field needs no route change).
+    if (p === '/api/leagues' && m === 'GET') {
+      return send(res, 200, db.listLeagues());
+    }
+    if (p === '/api/leagues' && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.createLeague(b));
+    }
+    if ((mt = p.match(/^\/api\/leagues\/(\d+)$/)) && m === 'GET') {
+      const l = db.getLeague(Number(mt[1]));
+      if (!l) return send(res, 404, { error: 'League not found' });
+      return send(res, 200, l);
+    }
+    if ((mt = p.match(/^\/api\/leagues\/(\d+)\/players$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.enrollLeaguePlayer(Number(mt[1]), b.name));
+    }
+    if ((mt = p.match(/^\/api\/leagues\/(\d+)\/status$/)) && m === 'PUT') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.setLeagueStatus(Number(mt[1]), b.status));
+    }
+    // Public: the New Game screen calls this reactively (once an H2H opponent and
+    // category are both chosen) to decide whether to show a "log to which league?"
+    // picker — see db.js's getEligibleLeagues() for the fail-soft-to-[] contract.
+    if (p === '/api/leagues/eligible' && m === 'GET') {
+      const names = String(url.searchParams.get('players') || '').split(',').map(s => s.trim()).filter(Boolean);
+      return send(res, 200, db.getEligibleLeagues(names[0], names[1], url.searchParams.get('category')));
+    }
+    if (p === '/api/players/league-summary' && m === 'GET') {
+      return send(res, 200, db.getPlayerLeagueSummary(url.searchParams.get('name')));
     }
 
     // ----- dart builder / loadouts (docs/archive/dart-builder-roadmap.md) -----

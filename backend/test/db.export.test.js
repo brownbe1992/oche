@@ -42,6 +42,8 @@ describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
       'dartComponents', 'loadouts',
       // docs/archive/ghost-opponent-roadmap.md: same standing rule applied to ghost races
       'ghostRaces',
+      // docs/league-mode-roadmap.md: same standing rule applied to league data
+      'leagues', 'leaguePlayers',
     ].sort());
 
     const alice = dump.players.find(p => p.name === 'export_alice');
@@ -64,6 +66,17 @@ describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
     assert.equal(dump.tournamentPlayers.filter(tp => tp.tournament_id === cup.id).length, 2);
     assert.equal(dump.tournamentRounds.filter(r => r.tournament_id === cup.id).length, 1);
     assert.ok(dump.tournamentMatches.length >= 1, 'match rows exported');
+  });
+
+  test('includes league data (docs/league-mode-roadmap.md) — an enrolled league appears in the export', () => {
+    db.addPlayer('export_l1'); db.addPlayer('export_l2');
+    const { leagueId } = db.createLeague({ name: 'Export League', category: '501', players: ['export_l1', 'export_l2'] });
+
+    const dump = db.getFullDatabaseExport();
+    const league = dump.leagues.find(l => l.id === leagueId);
+    assert.ok(league, 'league row is exported');
+    assert.equal(league.name, 'Export League');
+    assert.equal(dump.leaguePlayers.filter(lp => lp.league_id === leagueId).length, 2);
   });
 
   test('includes dart components and loadouts (docs/archive/dart-builder-roadmap.md)', () => {

@@ -39,8 +39,9 @@ convention in `CLAUDE.md`.
 - [15. Tournament Mode](#15-tournament-mode)
 - [16. Dart Builder / Loadouts](#16-dart-builder--loadouts)
 - [17. Dartboard Zone / Miss / Bounce-Out Tracking](#17-dartboard-zone--miss--bounce-out-tracking)
-- [18. Known Limitations & Open Gaps](#18-known-limitations--open-gaps)
-- [19. Troubleshooting](#19-troubleshooting)
+- [18. League Mode](#18-league-mode)
+- [19. Known Limitations & Open Gaps](#19-known-limitations--open-gaps)
+- [20. Troubleshooting](#20-troubleshooting)
 
 ---
 
@@ -2007,8 +2008,10 @@ is no export entry point anywhere on a Player Profile page.
 - **`db.getFullDatabaseExport()`** returns `{ exportedAt, players, games,
   gamePlayers, turns, darts, timelineEvents, playerBadges,
   dailyChallengeAttempts, tournaments, tournamentPlayers, tournamentRounds,
-  tournamentMatches }` — every player/game/stat table (including the four
-  tournament tables, `docs/bug-roadmap.md` BUG-6), reformatted as plain JSON. It
+  tournamentMatches, dartComponents, loadouts, ghostRaces, leagues,
+  leaguePlayers }` — every player/game/stat table (including the four
+  tournament tables, `docs/bug-roadmap.md` BUG-6, and the two league tables,
+  §18), reformatted as plain JSON. It
   deliberately excludes the `admins`, `sessions`, `settings`, and `server_errors`
   tables entirely (internal/credential tables, not "your darts data"), and the
   `players` rows only select `id, name, out_mode, created_at, dart_weight` —
@@ -2060,6 +2063,7 @@ already-migrated database is a safe no-op).
 | `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, `'doubles_practice'`, or `'chuckin'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; the Cricket/Doubles Practice/Chuckin New Game flows pass their own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
 | `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows (no config needed — every number/multiplier is always "in play") |
 | `player_count` | `INTEGER` | **Frozen** participant count at creation (not a live subquery) — see §3's mode-scoping note |
+| `league_id` | `INTEGER REFERENCES leagues(id) ON DELETE SET NULL` | Nullable — set by the `onGameCreated` auto-tag hook (§18), never by `createGame()`'s own INSERT. `NULL` for every game that isn't a tagged league match (the overwhelming majority) |
 
 ### `game_players` (composite `PRIMARY KEY (game_id, player_id)`)
 | Column | Type | Notes |
@@ -2179,6 +2183,35 @@ A match's **status** (`pending`/`ready`/`in_progress`/`complete`) is derived at 
 time by `getTournament()`, never stored: `winner_id` set → `complete`; else `game_id`
 set → `in_progress`; else both player slots filled → `ready`; else `pending`. Same
 "compute from raw data" philosophy as the rest of the schema (§1).
+
+### League mode (`docs/league-mode-roadmap.md`, X01 only for v1 — see §18)
+
+**`leagues`**
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `name` | `TEXT NOT NULL` | |
+| `category` | `TEXT NOT NULL` | X01 starting score as a string: `'501'`\|`'301'`\|`'170'`\|`'101'` — every auto-tagged game must match this exactly |
+| `status` | `TEXT NOT NULL DEFAULT 'active' CHECK (IN ('active','ended'))` | Manual admin toggle (`setLeagueStatus()`), reversible. Gates whether *new* games can auto-tag in — already-tagged games keep their `league_id` regardless of a later status change |
+| `starts_at` / `ends_at` | `TEXT NOT NULL` / `TEXT` | `YYYY-MM-DD`. `ends_at` nullable = open-ended/ongoing season; independently gates auto-tag eligibility alongside `status` |
+| `points_win` / `points_loss` | `INTEGER NOT NULL DEFAULT 1` / `INTEGER NOT NULL DEFAULT 0` | Admin-configurable per league — simple win/loss points, no margin-of-victory texture (resolved open question, see §18) |
+| `created_at` / `ended_at` | `TEXT` | `ended_at` set when `status` transitions to `'ended'`, cleared on reopen |
+
+No `player_count` column (unlike `tournaments.player_count`, which is frozen
+because the bracket *shape* depends on it) — a league's roster can grow any
+time during the season, so its count is always a live `COUNT(league_players)`.
+
+**`league_players`** (`PRIMARY KEY (league_id, player_id)`)
+| Column | Type | Notes |
+|---|---|---|
+| `league_id` | `INTEGER NOT NULL REFERENCES leagues(id) ON DELETE CASCADE` | |
+| `player_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | A player may be enrolled in multiple concurrent leagues |
+| `joined_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
+
+No `points`/`played`/`won`/`lost` tally columns — deliberately, unlike the
+roadmap doc's original sketch. Standings are computed **live** by
+`getLeagueStandings()` from `games`/`game_players` at read time (§18), so there
+is nothing here that can drift out of sync with what actually happened.
 
 ### `settings` (key/value)
 `key TEXT PRIMARY KEY`, `value TEXT NOT NULL DEFAULT ''` (booleans stored as
@@ -2718,7 +2751,166 @@ end-to-end Playwright verification pass against a running server.
 
 ---
 
-## 18. Known Limitations & Open Gaps
+## 18. League Mode
+
+`docs/league-mode-roadmap.md`. X01 only for v1 (Doubles Practice/Just Chuckin' It
+are structurally excluded regardless — both are solo/no-winner formats; Cricket
+league support is a documented future extension, not built now). Backend:
+`backend/db.js`'s league section. Frontend: `frontend/index.html`'s "leagues"
+block, reachable via the **Leagues** nav button.
+
+### Design principle: a league game IS a normal game, tagged after the fact
+
+Unlike a tournament match (which has its own bracket position/round/advancement
+state, tracked via a separate `tournament_matches` row with its own `game_id`
+FK — see §13, §15), a league match has no such structure: it's just an ordinary
+casual H2H game that happens to get tagged. Per `CLAUDE.md`'s "context tables
+link into `games` via FK" convention, the link is therefore a direct nullable
+`games.league_id` column (see §13) rather than a junction table — the one
+deliberate exception to the "own table with a `game_id` FK" shape, because
+there's no match-level state for a separate table to hold.
+
+### Standings are computed LIVE, never maintained
+
+`league_players` holds only enrollment (`league_id, player_id, joined_at`) — no
+`points`/`played`/`won`/`lost` tally columns. `getLeagueStandings(leagueId)`
+(`backend/db.js`) fetches the enrolled roster, then a separate aggregate query
+over `games`/`game_players` scoped to `WHERE g.league_id = ? AND g.winner_id IS
+NOT NULL` (only a **decided** result counts — an abandoned game completed with a
+null winner, which `completeGame()` allows, is not a result either way), and
+merges the two in JS the same base-row-then-patch-in-aggregate idiom
+`computeStats()` already uses elsewhere. `points = won * pointsWin + lost *
+pointsLoss` (both admin-configurable per league, default 1/0 — simple win/loss,
+no margin-of-victory texture per the roadmap doc's own resolved open question).
+Sort: points desc, then win% desc (a zero-played enrolled player's `null` win%
+sorts last among equal points via a `?? -1` fallback, never confused with a real
+0% record), then name. Nothing here can drift out of sync, because nothing is
+stored beyond the raw games/enrollment it's computed from — the same standing
+design principle `computeStats()`/`getHomeExtra()` already follow.
+
+### Auto-tagging (`onGameCreated` hook, no `onGameCompleted` needed)
+
+`createGame()` collects each participant's id during its existing player-adding
+loop (`participantIds`) and passes both that and an optional client-supplied
+`leagueId` into the `created` lifecycle-hook payload (see §1's "Game-lifecycle
+hooks"). A league-mode `onGameCreated` listener does the actual tagging:
+
+1. Skip unless the game is X01, non-practice, exactly 2 players.
+2. If `leagueId` was supplied (from the New Game "log to league?" picker below),
+   **re-validate** it via `_findEligibleLeagues(category, playerIds)` rather than
+   trusting it blindly — a few seconds may have passed since the picker's own
+   `GET /api/leagues/eligible` call, so a stale/invalid choice falls through to
+   auto-detection instead of failing game creation.
+3. Otherwise, auto-detect: `_findEligibleLeagues()` returns every `active`
+   league matching this game's category, with both players currently enrolled,
+   whose date window (`starts_at`..`ends_at`, `ends_at` nullable = open-ended)
+   includes today. **Exactly one** candidate auto-tags silently — the common
+   case, no picker ever shown. **Zero or more than one** leaves the game
+   untagged; a non-frontend API caller that doesn't supply a `leagueId` gets no
+   guess either way.
+
+Unlike tournament mode, league mode registers **no** `onGameCompleted` hook —
+there's no propagation step to react to (no "next slot" to fill). A completed
+game with `league_id`/`winner_id` already set is simply read directly at
+standings-query time.
+
+### Season lifecycle
+
+`leagues.status` (`'active'`/`'ended'`) is a manual admin toggle
+(`setLeagueStatus()`, reversible — reopening a league ended by mistake is
+supported) that gates whether **new** games can auto-tag into it; already-tagged
+games keep their `league_id` regardless. `ends_at` independently gates
+eligibility the same way (a league past its end date stops accepting new tagged
+games even if `status` is still `'active'`) — there's no background/cron job
+inside the app process to flip `status` automatically, so this is deliberately
+two independent signals rather than one that needs scheduled maintenance.
+"Standings freeze" once a season ends is automatic by construction (no new
+games can attach), not a separate snapshot step — a "past seasons" archive is
+just `listLeagues()` including ended ones, each still fully viewable.
+
+### `wipeAllData()` / `resetStats()` — an intentional asymmetry
+
+`wipeAllData()` explicitly `DELETE FROM leagues` (cascading `league_players`) —
+the same BUG-7 fix tournament mode needed: wiping all `players` cascades away
+`league_players` for free, but nothing references the `leagues` **parent** row,
+so without this a league shell (name/category/dates, now with an empty roster)
+would survive a total wipe. `resetStats()` deliberately does **NOT** touch
+`leagues`/`league_players` — unlike tournament's `tournament_matches.game_id`,
+nothing in the leagues schema points at a `games` row, so wiping every game
+leaves a league in a fully self-consistent state: standings simply recompute
+live to all-zero, never a stranded half-updated shell the way tournament
+brackets were pre-BUG-7. A league's own config is closer to player-profile
+configuration data (which also survives a stats reset) than to tournament's
+mid-flight bracket state.
+
+### No player-deletion guard (a deliberate non-decision, not an oversight)
+
+Tournament mode registers a `registerDeletePlayerGuard()` (§15) because an
+active bracket structurally depends on that exact player existing at a specific
+slot. League mode registers none: deleting an enrolled player cascades away
+only their own `league_players`/`game_players`/`turns` rows — the surviving
+opponent's `game_players` row and the game's own `winner_id` are untouched
+(`games.winner_id ON DELETE SET NULL` only fires if the *deleted* player was the
+winner), so standings simply recompute over what remains. This is only safe
+*because* standings are computed live rather than incrementally maintained — a
+guard would have been necessary under the roadmap doc's original
+maintained-tally suggestion, not this one.
+
+### Frontend integration points
+
+- **New Game "log to league?" picker**: `updateLeaguePicker()`, modeled
+  directly on the existing H2H-record banner (`updateH2HBanner()`) including its
+  same abort-token pattern for a rapidly-changing selection. Calls `GET
+  /api/leagues/eligible?players=A,B&category=` reactively whenever the H2H
+  opponent pair or starting-score category changes; shows a `<select>` only when
+  more than one active league matches (the 0-or-1-match case tags server-side
+  with no picker at all). `setup.leagueId` threads through `startGame()`'s
+  `game` object and `DB.beginGame()`'s `POST /api/games` payload — purely a
+  hint the server-side hook re-validates, never trusted outright.
+- **Home page teaser**: `getHomeExtra()` includes a plain `activeLeagues`
+  id/name list; `renderHomePulse()` renders it as a lightweight "Active
+  Leagues" card (name + link into the full Leagues screen) only when at least
+  one exists — no embedded mini-standings, to keep the Home page diff small.
+- **Player Profile "Leagues" stat block**: `GET /api/players/league-summary`
+  (public) → `getPlayerLeagueSummary()`, every league this player belongs to
+  plus their current rank/points in each, rendered the same
+  loading-placeholder-then-patch-in pattern `loadTournamentStats()` already
+  uses (`loadPlayerLeagueStats()`), gated to the X01 tab the same way
+  tournament stats are.
+- **Standings table**: a real `<table>` with `<caption class="sr-only">` and
+  `<th scope="col">` headers (`renderLeagueDetail()`) — deliberately not the
+  `.hof-row` flex-leaderboard pattern used for single-stat leaderboards
+  elsewhere, since a proper `<table>` is more accessible for a genuinely
+  multi-column grid (rank/name/played/won/lost/win%/points) and needs no
+  separate linearized fallback the way the tournament bracket's spatial view
+  does. Status badges are icon + text together (`LEAGUE_STATUS_ICON`/
+  `LEAGUE_STATUS_LABEL`), never color alone, matching every other status badge
+  in the app.
+- **Calendar-date formatting**: `starts_at`/`ends_at` are pure `YYYY-MM-DD`
+  values with no time-of-day component — rendered via a dedicated
+  `fmtCalendarDate()` that parses the string directly, **not** the existing
+  `fmtDate()` (which is built for UTC timestamps and reinterprets them through
+  local `Date` getters; doing that to a bare calendar date shifts it by a day
+  in any negative-UTC-offset timezone).
+
+### Deliberately out of scope for this pass
+
+- **Cricket (or any non-X01) leagues** — the standings math is game-type-
+  agnostic (Cricket already has full H2H parity — `winner_id`, a win
+  leaderboard), but `leagues.category` would need a second `game_type` column
+  and the setup screen a game-type selector; deferred as a clean, separately-
+  scoped follow-up rather than built speculatively now.
+- **Multi-league auto-tagging** — a game only ever tags into **one** league
+  (`games.league_id` stays a single nullable FK); a player can be enrolled in
+  several concurrent leagues, but any one game they play logs to at most one of
+  them (resolved via the picker when genuinely ambiguous, per above).
+- **League deletion** — matches tournament mode's own precedent (create + read
+  + one state-changing lifecycle action, no delete route); a league can only be
+  ended, never removed, short of `wipeAllData()`.
+
+---
+
+## 19. Known Limitations & Open Gaps
 
 Cross-referenced from the `docs/*.md` roadmap docs — these are real,
 already-shipped limitations, not just unbuilt future features:
@@ -2762,7 +2954,7 @@ already-shipped limitations, not just unbuilt future features:
 
 ---
 
-## 19. Troubleshooting
+## 20. Troubleshooting
 
 The general method, before the specific symptoms below: **this document is the
 spec.** Find the section describing what the misbehaving feature is supposed to

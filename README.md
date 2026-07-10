@@ -30,6 +30,7 @@ You enter every dart individually — multiplier first, then the number — and 
   - [Player Profile](#player-profile)
   - [Dart Builder](#dart-builder)
   - [Tournaments](#tournaments)
+  - [Leagues](#leagues)
   - [Stats](#stats)
   - [Settings](#settings)
 - [Admin Accounts & Player PINs](#admin-accounts--player-pins)
@@ -613,6 +614,37 @@ alongside their H2H stats.
 
 ---
 
+### Leagues
+
+A lighter-weight, complementary alternative to Tournaments: a season of regular
+casual X01 matches (501/301/170/101) that accumulate into a standings table,
+rather than a knockout bracket completed in one sitting. Any two enrolled
+players can play any casual match at any time during the season — there's no
+schedule and no bracket.
+
+**Creating a league** — from the **Leagues** nav button: name it, pick an X01
+format, optionally enroll players (more can be added later), set a start date
+(and an optional end date — leave it blank for an open-ended season), and how
+many points a win/loss is worth (defaults to 1/0, a simple win/loss table).
+
+**Games log themselves** — no extra step in New Game. Any H2H match between two
+players enrolled in the same active league, in that league's format, gets
+tagged automatically. If a pair of players happens to be enrolled in more than
+one matching league at once, a small **"Log to league"** picker appears on the
+New Game screen so you can pick which one (or neither) — otherwise nothing
+changes about how you start a game.
+
+**Standings** update live as tagged games complete — rank, player,
+played/won/lost, win%, and points. **Ending a league** stops new games from
+logging to it (it can be reopened later); already-tagged games and standings
+stay exactly as they were.
+
+**Player Profile** shows a small **Leagues** block (every league a player
+belongs to, plus their current rank and points in each) alongside their H2H
+stats. A player can be enrolled in multiple concurrent leagues.
+
+---
+
 ### Stats
 
 A summary table of all players showing:
@@ -713,7 +745,7 @@ Shows the most recent server-side failures (up to 500, newest first) — the sam
 
 #### Data Export
 
-- **Export all data** — downloads a complete JSON export of every player, game, stat, and tournament in the database. Admin-only; there's no per-player export and nothing export-related appears on a player's own page. Excludes admin accounts, sessions, app settings, and player PINs.
+- **Export all data** — downloads a complete JSON export of every player, game, stat, tournament, and league in the database. Admin-only; there's no per-player export and nothing export-related appears on a player's own page. Excludes admin accounts, sessions, app settings, and player PINs.
 
 #### Danger Zone
 
@@ -1115,6 +1147,44 @@ GET  /api/players/tournament-stats?name=   { wins, runnerUps, bestFinish } for t
 The 🏆 Champion and ⚔️ Giant Slayer (Tournament) badges are awarded inline from
 the same server-side match-advancement logic — see
 [Achievements & Badges](#achievements--badges).
+
+### Leagues
+
+X01 only, same as Tournaments (see [Leagues](#leagues) below and `REFERENCE.md`
+§18). A league game is a normal H2H game, auto-tagged after the fact — there is
+no separate "start a league match" endpoint; games log themselves via the normal
+`POST /api/games` (with an optional `leagueId` field, only ever sent when the New
+Game screen's ambiguity picker resolved a genuine >1-league match).
+
+```
+GET  /api/leagues                           List leagues (summary shape, live
+                                             player counts), active first, then
+                                             most recently created (public)
+POST /api/leagues                           Create a league
+                                             { name, category: "501"|"301"|"170"|"101",
+                                               startsAt?: "YYYY-MM-DD" (default: today),
+                                               endsAt?: "YYYY-MM-DD" (default: open-ended),
+                                               pointsWin?, pointsLoss? (default 1, 0),
+                                               players?: [name, ...] }
+                                             → { leagueId }
+GET  /api/leagues/:id                       League detail + live standings
+                                             { ...league, standings: [{ name, played,
+                                               won, lost, points, winPct }] } or 404
+                                             (public)
+POST /api/leagues/:id/players               Enroll a player  { name } → { ok }
+PUT  /api/leagues/:id/status                { status: "active"|"ended" } → { ok } —
+                                             reversible; "ended" stops new games
+                                             from auto-tagging in but never un-tags
+                                             an already-logged game
+GET  /api/leagues/eligible?players=A,B      Active leagues matching category with
+       &category=                           both A and B currently enrolled — used
+                                             by the New Game "log to league?"
+                                             picker (public)
+GET  /api/players/league-summary?name=      Every league this player belongs to,
+                                             plus their current rank/points in each,
+                                             for the Player Profile's Leagues block
+                                             (public)
+```
 
 ### Live Scoreboard
 

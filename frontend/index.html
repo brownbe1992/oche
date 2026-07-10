@@ -631,6 +631,7 @@
       <button class="navbtn" id="nav-setup" aria-current="false" onclick="show('setup')">New game</button>
       <button class="navbtn" id="nav-players" aria-current="false" onclick="show('players')">Players</button>
       <button class="navbtn" id="nav-tournament" aria-current="false" onclick="show('tournament')">Tournaments</button>
+      <button class="navbtn" id="nav-league" aria-current="false" onclick="show('league')">Leagues</button>
       <button class="navbtn" id="nav-scoreboard" onclick="openScoreboard()" title="Open the read-only scoreboard for a second screen">Scoreboard ↗</button>
       <button class="navbtn" id="nav-settings" aria-current="false" onclick="show('settings')">Settings</button>
     </nav>
@@ -698,6 +699,14 @@
           <button class="btn btn-ghost" id="shuffle-btn" style="display:none" onclick="shufflePlayers()" title="Randomise throw order">🔀 Shuffle</button>
         </div>
         <div class="h2h-banner" id="h2h-banner"></div>
+        <!-- docs/league-mode-roadmap.md: hidden unless the chosen opponent+category
+             match more than one active league — the 0-or-1-match case auto-tags
+             server-side with no picker shown at all. -->
+        <div id="league-picker-wrap" style="display:none;margin-top:8px">
+          <label class="pp-meta" for="league-picker" style="margin-right:6px">Log to league:</label>
+          <select class="date-input" id="league-picker" style="width:auto" onchange="setup.leagueId = this.value || null">
+          </select>
+        </div>
       </div>
 
       <!-- Game type (X01 / Cricket) -->
@@ -877,6 +886,13 @@
   <section id="screen-tournament" class="screen">
     <div class="card">
       <div id="tournament-body"></div>
+    </div>
+  </section>
+
+  <!-- ============ LEAGUES (docs/league-mode-roadmap.md) ============ -->
+  <section id="screen-league" class="screen">
+    <div class="card">
+      <div id="league-body"></div>
     </div>
   </section>
 
@@ -1409,12 +1425,14 @@ const DB = {
   recordGhostRace(player, fields){ return Backend.send('POST','/api/ghost-races',{player, ...fields}); },
   ghostRaceRecord(player){ return Backend.get(`/api/players/ghost-race-record?name=${encodeURIComponent(player)}`); },
   tournamentStats(player){ return Backend.get(`/api/players/tournament-stats?name=${encodeURIComponent(player)}`); },
+  leagueSummary(player){ return Backend.get(`/api/players/league-summary?name=${encodeURIComponent(player)}`); },
 
   // game + turn writes
   async beginGame(meta, names, loadoutByName){
     try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame,
       players:names.map(n=>({name:n, out:playerOut(n), loadoutId:(loadoutByName && loadoutByName[n]) ? loadoutByName[n].id : undefined})),
-      practice:meta.practice?1:0, gameType:meta.gameType, config:meta.config}); this.gameId=r.gameId; }
+      practice:meta.practice?1:0, gameType:meta.gameType, config:meta.config,
+      leagueId:meta.leagueId}); this.gameId=r.gameId; }
     catch(e){ logErr(e); this.gameId=null; }
   },
   recordTurn(t){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/turns`, t)); } },
@@ -1563,7 +1581,11 @@ function makeDart(sector, mult){
    ========================================================================= */
 let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, mode:'h2h',
   gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[], ghostLeg:null,
-  doublesTargets:[], loadoutByName:{} }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice'; gameType: 'x01' | 'cricket' | 'doubles_practice'
+  doublesTargets:[], loadoutByName:{}, leagueId:null }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice'; gameType: 'x01' | 'cricket' | 'doubles_practice'
+  // leagueId (docs/league-mode-roadmap.md): only ever set via the "log to league?"
+  // picker below, and only when the picker had genuine ambiguity to resolve (>1
+  // active league matched) — the common 0-or-1-match case tags server-side with no
+  // frontend involvement at all. Reset to null whenever the setup screen (re)loads.
   // loadoutByName: player name -> {id,name} of the loadout picked for THIS New Game
   // visit (docs/archive/dart-builder-roadmap.md) — reset each time the setup screen loads;
   // re-populated by auto-loading each picked player's is_default loadout.
@@ -1700,11 +1722,12 @@ function show(name){
   document.getElementById('nav-setup').setAttribute('aria-current', name==='setup');
   document.getElementById('nav-players').setAttribute('aria-current', name==='players'||name==='player');
   document.getElementById('nav-tournament').setAttribute('aria-current', name==='tournament');
+  document.getElementById('nav-league').setAttribute('aria-current', name==='league');
   document.getElementById('nav-settings').setAttribute('aria-current', name==='settings');
   if(name==='settings') renderSettings();
   if(name==='home'){ renderHome(); renderHomeChallengeTeaser(); }
   if(name==='setup'){
-    setup.slots=[]; setup.loadoutByName={}; sanitizeSlots(); renderPlayers(); updateFormatLine();
+    setup.slots=[]; setup.loadoutByName={}; setup.leagueId=null; sanitizeSlots(); renderPlayers(); updateFormatLine();
     renderChallengeCard();
     // stats are cached client-side and only refetched on demand — without this, averages
     // shown here can be stale after playing a game earlier in the same session.
@@ -1713,6 +1736,7 @@ function show(name){
   if(name==='players') renderRoster();
   if(name==='player'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); }
   if(name==='tournament') renderTournamentScreen();
+  if(name==='league') renderLeagueScreen();
   if(name==='legend') renderLegend();
   if(name==='dart-builder') renderDartBuilderScreen();
 }
@@ -1997,6 +2021,24 @@ function renderHomePulse(){
   const lastGameHtml = lg
     ? `<b style="color:var(--ink)">${escapeHtml(lg.players||'')}</b> · ${escapeHtml(lg.category)} · won by <b style="color:var(--ink)">${escapeHtml(lg.winnerName||'—')}</b><br><span class="pp-meta">${fmtDate(lg.completedAt)}</span>`
     : `<span class="pp-meta">No completed games yet.</span>`;
+  // docs/league-mode-roadmap.md: a lightweight teaser only — name + a link into the
+  // full Leagues screen, not embedded mini-standings (keeps the Home page diff small
+  // and avoids duplicating the standings table's render logic here). Hidden entirely
+  // when there are no active leagues, same "don't show an empty section" convention
+  // the rest of Home already follows (e.g. the 9-darter hero card is the deliberate
+  // exception, not the rule).
+  const activeLeagues = extra.activeLeagues || [];
+  const leaguesTeaser = activeLeagues.length ? `
+    <div class="pp-section" style="margin-bottom:14px">
+      <div class="pp-section-title">Active Leagues</div>
+      <div class="roster-list" style="margin-top:8px">
+        ${activeLeagues.map(l=>`<button class="rp-main" onclick="openLeague(${l.id}); show('league')">
+          <div class="rp-name-row">${escapeHtml(l.name)}</div>
+          <div class="rp-stat">View standings →</div>
+        </button>`).join('')}
+      </div>
+    </div>` : '';
+
   el.innerHTML=`
     <div class="home-pair">
       <div class="pp-section">
@@ -2011,7 +2053,8 @@ function renderHomePulse(){
         <div class="pp-section-title">Last game played</div>
         <p style="margin:4px 0 0;line-height:1.6">${lastGameHtml}</p>
       </div>
-    </div>`;
+    </div>
+    ${leaguesTeaser}`;
 }
 
 function renderHomeTabBody(){
@@ -2346,6 +2389,12 @@ function setMode(mode){
   } else {
     updateSetupChrome();
   }
+  // league eligibility (docs/league-mode-roadmap.md) is H2H/X01-only — updateLeaguePicker()
+  // self-gates and hides its own picker for every other mode, so one unconditional call
+  // here (rather than duplicating a hide line into each branch above, the way h2h-banner
+  // does) correctly resets it on every mode switch, including the ones that only
+  // manually hide #h2h-banner inline above.
+  updateLeaguePicker(setup.slots.filter(s=>s));
 }
 
 /* ---------- Ghost Opponent (docs/archive/ghost-opponent-roadmap.md) ---------- */
@@ -2933,6 +2982,7 @@ function updateSetupChrome(){
   if(sb) sb.style.display = named.length >= 2 ? '' : 'none';
   // H2H banner
   updateH2HBanner(named);
+  updateLeaguePicker(named);
 }
 
 let _h2hAbort = null;
@@ -2957,6 +3007,46 @@ function updateH2HBanner(named){
                    : `Tied ${d.p1Wins}–${d.p2Wins}`;
       el.textContent = `H2H: ${leader} (${d.total} game${d.total!==1?'s':''})`;
     }).catch(()=>{ if(!tok.aborted) el.style.display='none'; });
+}
+
+// docs/league-mode-roadmap.md: shows a "log to which league?" picker ONLY when the
+// currently-chosen H2H opponent pair + category match more than one active league —
+// the common 0-or-1-match case tags the resulting game server-side (the
+// onGameCreated hook in db.js) with no picker ever shown. Modeled directly on
+// updateH2HBanner() just above, including its same abort-token pattern (a later
+// selection's fetch must not let an earlier, now-stale one clobber the picker).
+let _leagueAbort = null;
+function updateLeaguePicker(named){
+  const wrap = document.getElementById('league-picker-wrap');
+  const sel = document.getElementById('league-picker');
+  if(!wrap || !sel) return;
+  const screen = document.getElementById('screen-setup');
+  if(!screen || !screen.classList.contains('on')){ wrap.style.display='none'; return; }
+  // League mode is X01-only, H2H (non-practice), exactly 2 players — mirrors the
+  // server-side auto-tag hook's own eligibility gate exactly.
+  if(named.length !== 2 || setup.practice || setup.mode !== 'h2h' || setup.gameType !== 'x01'){
+    wrap.style.display='none'; setup.leagueId=null; return;
+  }
+  const [p1, p2] = named;
+  const category = String(setup.start);
+  if(_leagueAbort) _leagueAbort.aborted = true;
+  const tok = { aborted:false }; _leagueAbort = tok;
+  fetch(`/api/leagues/eligible?players=${encodeURIComponent(p1)},${encodeURIComponent(p2)}&category=${encodeURIComponent(category)}`)
+    .then(r=>r.json()).then(list=>{
+      if(tok.aborted) return;   // a newer selection already took over — don't clobber its result
+      if(!Array.isArray(list) || list.length <= 1){
+        // 0 or exactly 1 match: no picker — the server-side hook resolves this
+        // silently. Clear any leftover choice from a since-changed selection so it
+        // can't linger onto an unrelated game.
+        wrap.style.display='none'; setup.leagueId=null; return;
+      }
+      wrap.style.display='block';
+      sel.innerHTML = `<option value="">Don't log to a league</option>` +
+        list.map(l=>`<option value="${l.id}">${escapeHtml(l.name)}</option>`).join('');
+      // Preserve a still-valid prior choice across re-renders; otherwise default to "don't log".
+      sel.value = list.some(l=>String(l.id)===String(setup.leagueId)) ? String(setup.leagueId) : '';
+      setup.leagueId = sel.value || null;
+    }).catch(()=>{ if(!tok.aborted){ wrap.style.display='none'; setup.leagueId=null; } });
 }
 
 function onSlotChange(i, value){
@@ -3055,6 +3145,7 @@ function applyPreset(legsToWin, sets){
 }
 function pickStartSelect(sel){
   setup.start = Number(sel.value);
+  updateSetupChrome();   // league eligibility (docs/league-mode-roadmap.md) depends on category
 }
 /* ---------- Cricket New Game config (game-modes-roadmap.md) ---------- */
 function setGameType(type){
@@ -3064,6 +3155,7 @@ function setGameType(type){
   document.getElementById('start-score-section').hidden = (type === 'cricket' || setup.mode === 'challenge' || setup.mode === 'ghost');
   document.getElementById('cricket-options-section').hidden = (type !== 'cricket' || setup.mode === 'challenge' || setup.mode === 'ghost');
   if(type === 'cricket') renderCricketNumberGrid();
+  updateSetupChrome();   // league mode is X01-only (docs/league-mode-roadmap.md) — re-check eligibility
 }
 function setCricketPreset(preset){
   setup.cricketPreset = preset;
@@ -3269,6 +3361,11 @@ async function startGame(){
     category,
     legsPerSet, setsPerGame,
     practice: setup.practice,
+    // docs/league-mode-roadmap.md: only ever non-null when the New Game "log to
+    // league?" picker resolved a genuine >1-match ambiguity (see updateLeaguePicker());
+    // the common 0-or-1-match case tags server-side with this staying null. The
+    // server-side onGameCreated hook re-validates regardless of what's sent here.
+    leagueId: setup.leagueId,
     players: names.map(n=>GAME_TYPES[gameType].newMatchPlayer(n, gameType==='cricket' || gameType==='doubles_practice' ? config : startScore)),
     starter: 0,        // who throws first in the current leg
     current: 0,
@@ -3766,6 +3863,211 @@ async function _reallyBeginTournamentMatch(matchId){
   show('game'); renderGame();
 }
 
+/* ---------- leagues (docs/league-mode-roadmap.md, X01 only for v1) ----------
+   Structurally a lighter-weight sibling of the tournament screen just above: same
+   list/setup/detail 3-state view machine, same roster-checklist setup pattern —
+   but no bracket, no per-round format table, no seeding. Games auto-tag into a
+   league via the server-side onGameCreated hook (see the New Game "log to league?"
+   picker in the New Game section below), so this screen is read-mostly: create a
+   league, enroll players, watch standings, end the season when it's over. */
+let leagueView = 'list';        // 'list' | 'setup' | 'detail'
+let currentLeagueId = null;
+let leagueDetailCache = null;   // last-fetched detail for currentLeagueId
+let leagueSetup = null;         // built fresh each time the setup view opens
+
+function renderLeagueScreen(){
+  if(leagueView==='setup') return renderLeagueSetup();
+  if(leagueView==='detail' && currentLeagueId!=null) return loadLeagueDetail();
+  return loadLeagueList();
+}
+
+function loadLeagueList(){
+  const body=document.getElementById('league-body');
+  body.innerHTML = `<p class="pp-meta" style="padding:4px 0">Loading…</p>`;
+  Backend.get('/api/leagues').then(renderLeagueList)
+    .catch(()=>{ body.innerHTML = `<p class="pp-meta">Could not load leagues.</p>`; });
+}
+const LEAGUE_STATUS_ICON  = { active:'▶️', ended:'🏁' };
+const LEAGUE_STATUS_LABEL = { active:'Active', ended:'Ended' };
+function renderLeagueList(list){
+  const body=document.getElementById('league-body');
+  const rows = (list||[]).map(l=>{
+    const statusBadge = `${LEAGUE_STATUS_ICON[l.status]||''} ${LEAGUE_STATUS_LABEL[l.status]||l.status}`;
+    return `<button class="rp-main" onclick="openLeague(${l.id})">
+      <div class="rp-name-row">${escapeHtml(l.name)}</div>
+      <div class="rp-stat">${escapeHtml(l.category)} · ${l.playerCount} player${l.playerCount===1?'':'s'} · ${statusBadge}</div>
+    </button>`;
+  }).join('');
+  body.innerHTML = `
+    <h2 style="font-size:18px;margin-bottom:4px">Leagues</h2>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px">A season of casual X01 matches — any two enrolled players, any time. Games log to a league automatically.</p>
+    <div class="roster-list">${rows || '<div class="empty">No leagues yet.<br>Create your first one below.</div>'}</div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="openLeagueSetup()">+ New League</button>
+    </div>`;
+}
+function openLeague(id){ currentLeagueId=id; leagueView='detail'; renderLeagueScreen(); }
+function openLeagueSetup(){ leagueSetup=null; leagueView='setup'; renderLeagueScreen(); }
+
+/* ---------- setup ---------- */
+function renderLeagueSetup(){
+  if(!leagueSetup) leagueSetup = { name:'', category:'501', selected:[], startsAt: localDateStr(), endsAt:'', pointsWin:1, pointsLoss:0 };
+  const ls = leagueSetup;
+
+  const checklist = roster.map(name=>{
+    const checked = ls.selected.includes(name);
+    const j = escapeHtml(escapeJs(name));
+    return `<label class="tourney-check-row">
+      <input type="checkbox" ${checked?'checked':''} onchange="toggleLeaguePlayer('${j}', this.checked)">
+      <span>${escapeHtml(name)}</span>
+    </label>`;
+  }).join('');
+
+  document.getElementById('league-body').innerHTML = `
+    <button class="pp-back" onclick="leagueView='list'; renderLeagueScreen()">← Leagues</button>
+    <h2 style="font-size:18px;margin:8px 0 4px">New League</h2>
+    <label class="field">League name</label>
+    <input type="text" id="league-name" maxlength="64" value="${escapeHtml(ls.name)}" oninput="leagueSetup.name=this.value" style="margin-bottom:14px">
+    <label class="field">Format (X01)</label>
+    <select class="date-input" id="league-category" style="width:auto;margin-bottom:14px" onchange="leagueSetup.category=this.value">
+      ${['501','301','170','101'].map(c=>`<option value="${c}"${ls.category===c?' selected':''}>${c}</option>`).join('')}
+    </select>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">
+      <div>
+        <label class="field">Starts</label>
+        <input type="date" class="date-input" value="${escapeHtml(ls.startsAt)}" onchange="leagueSetup.startsAt=this.value">
+      </div>
+      <div>
+        <label class="field">Ends <span class="pp-meta">(optional — open-ended if blank)</span></label>
+        <input type="date" class="date-input" value="${escapeHtml(ls.endsAt)}" onchange="leagueSetup.endsAt=this.value">
+      </div>
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">
+      <div>
+        <label class="field">Points for a win</label>
+        <input type="number" style="width:64px" value="${ls.pointsWin}" onchange="leagueSetup.pointsWin=Number(this.value)||0">
+      </div>
+      <div>
+        <label class="field">Points for a loss</label>
+        <input type="number" style="width:64px" value="${ls.pointsLoss}" onchange="leagueSetup.pointsLoss=Number(this.value)||0">
+      </div>
+    </div>
+    <label class="field">Players (${ls.selected.length} selected — more can be enrolled later)</label>
+    <div class="roster-list" style="margin-bottom:14px">${checklist || '<div class="empty">No players yet — add some from the Players tab first.</div>'}</div>
+    <div class="btn-row" style="margin-top:16px">
+      <button class="btn btn-primary" onclick="submitLeagueSetup()">Create League</button>
+    </div>`;
+}
+function toggleLeaguePlayer(name, checked){
+  const ls = leagueSetup;
+  if(checked){ if(!ls.selected.includes(name)) ls.selected.push(name); }
+  else { ls.selected = ls.selected.filter(n=>n!==name); }
+  renderLeagueSetup();
+}
+function submitLeagueSetup(){
+  const ls = leagueSetup;
+  const name = (ls.name||'').trim();
+  if(!name){ uiAlert('Enter a league name.'); return; }
+  Auth.ensureCanWrite(()=>{
+    Backend.send('POST', '/api/leagues', {
+      name, category: ls.category, startsAt: ls.startsAt, endsAt: ls.endsAt,
+      pointsWin: ls.pointsWin, pointsLoss: ls.pointsLoss, players: ls.selected,
+    }).then(r=>{
+      leagueSetup = null;
+      currentLeagueId = r.leagueId;
+      leagueView = 'detail';
+      renderLeagueScreen();
+    }).catch(e=>{ uiAlert('Could not create league: ' + ((e && e.message) || 'unknown error')); });
+  });
+}
+
+/* ---------- detail / standings ---------- */
+// Formats a plain calendar date ("YYYY-MM-DD", e.g. leagues.starts_at/ends_at) —
+// deliberately NOT fmtDate(), which is built for UTC timestamps and reinterprets
+// them via local Date getters. Doing that to a bare calendar date shifts it by a
+// day in any negative-UTC-offset timezone (e.g. "2026-01-01" renders as "Dec 31,
+// 2025" for a US-based self-hoster) — a real bug for a date with no time-of-day
+// component. Parsed directly from the string, no Date object, no timezone math.
+function fmtCalendarDate(dateStr){
+  if(!dateStr) return '';
+  const [yr,mo,dy] = dateStr.slice(0,10).split('-');
+  return `${MONTHS[Number(mo)-1]} ${Number(dy)}, ${yr}`;
+}
+function loadLeagueDetail(){
+  const body=document.getElementById('league-body');
+  body.innerHTML = `<p class="pp-meta" style="padding:4px 0">Loading…</p>`;
+  Backend.get(`/api/leagues/${currentLeagueId}`)
+    .then(l=>{ leagueDetailCache = l; renderLeagueDetail(l); })
+    .catch(()=>{ body.innerHTML = `<p class="pp-meta">Could not load league.</p>`; });
+}
+function renderLeagueDetail(l){
+  const body=document.getElementById('league-body');
+  const th = (label) => `<th scope="col" style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--wire);color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em">${label}</th>`;
+  const rows = l.standings.map((r,i)=>`<tr>
+    <td style="padding:8px 10px;border-bottom:1px solid var(--wire);color:var(--muted)">${i+1}</td>
+    <td style="padding:8px 10px;border-bottom:1px solid var(--wire);font-weight:600">${escapeHtml(r.name)}</td>
+    <td style="padding:8px 10px;border-bottom:1px solid var(--wire)">${r.played}</td>
+    <td style="padding:8px 10px;border-bottom:1px solid var(--wire)">${r.won}</td>
+    <td style="padding:8px 10px;border-bottom:1px solid var(--wire)">${r.lost}</td>
+    <td style="padding:8px 10px;border-bottom:1px solid var(--wire)">${r.winPct!=null?r.winPct+'%':'—'}</td>
+    <td style="padding:8px 10px;border-bottom:1px solid var(--wire);font-weight:700">${r.points}</td>
+  </tr>`).join('');
+  const statusBadge = `${LEAGUE_STATUS_ICON[l.status]||''} ${LEAGUE_STATUS_LABEL[l.status]||l.status}`;
+  const dateRange = l.endsAt ? `${fmtCalendarDate(l.startsAt)} – ${fmtCalendarDate(l.endsAt)}` : `${fmtCalendarDate(l.startsAt)} – ongoing`;
+  const enrolledNames = new Set(l.standings.map(r=>r.name));
+  const notEnrolled = roster.filter(n=>!enrolledNames.has(n));
+
+  body.innerHTML = `
+    <button class="pp-back" onclick="leagueView='list'; renderLeagueScreen()">← Leagues</button>
+    <h2 style="font-size:18px;margin:8px 0 4px">${escapeHtml(l.name)}</h2>
+    <p class="pp-meta" style="margin:0 0 16px">${escapeHtml(l.category)} · ${statusBadge} · ${dateRange} · win ${l.pointsWin} / loss ${l.pointsLoss} pts</p>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <caption class="sr-only">Standings for ${escapeHtml(l.name)}</caption>
+        <thead><tr>${th('#')}${th('Player')}${th('P')}${th('W')}${th('L')}${th('Win%')}${th('Pts')}</tr></thead>
+        <tbody>${rows || `<tr><td colspan="7" style="padding:12px 10px;color:var(--muted)">No players enrolled yet.</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div class="btn-row" style="margin-top:16px;flex-wrap:wrap">
+      ${notEnrolled.length ? `
+        <select class="date-input" id="league-enroll-pick" style="width:auto">
+          ${notEnrolled.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('')}
+        </select>
+        <button class="btn btn-ghost" onclick="submitEnrollLeaguePlayer(${l.id})">+ Enroll player</button>
+      ` : ''}
+      ${l.status==='active'
+        ? `<button class="btn btn-ghost danger" onclick="askEndLeague(${l.id},'${escapeHtml(escapeJs(l.name))}')">End league</button>`
+        : `<button class="btn btn-ghost" onclick="askReopenLeague(${l.id},'${escapeHtml(escapeJs(l.name))}')">Reopen league</button>`}
+    </div>`;
+}
+function submitEnrollLeaguePlayer(leagueId){
+  const sel = document.getElementById('league-enroll-pick');
+  if(!sel || !sel.value) return;
+  Auth.ensureCanWrite(()=>{
+    Backend.send('POST', `/api/leagues/${leagueId}/players`, { name: sel.value })
+      .then(loadLeagueDetail)
+      .catch(e=>uiAlert('Could not enroll player: ' + ((e && e.message) || 'unknown error')));
+  });
+}
+function askEndLeague(leagueId, name){
+  uiConfirm(`End the league "${name}"? Standings stay visible, but new games will stop logging to it automatically. You can reopen it later.`, ()=>{
+    Auth.ensureCanWrite(()=>{
+      Backend.send('PUT', `/api/leagues/${leagueId}/status`, { status: 'ended' })
+        .then(loadLeagueDetail)
+        .catch(e=>uiAlert('Could not end league: ' + ((e && e.message) || 'unknown error')));
+    });
+  });
+}
+function askReopenLeague(leagueId, name){
+  uiConfirm(`Reopen the league "${name}"? New matching games will resume auto-logging to it.`, ()=>{
+    Auth.ensureCanWrite(()=>{
+      Backend.send('PUT', `/api/leagues/${leagueId}/status`, { status: 'active' })
+        .then(loadLeagueDetail)
+        .catch(e=>uiAlert('Could not reopen league: ' + ((e && e.message) || 'unknown error')));
+    });
+  });
+}
+
 /* ---------- players management screen ---------- */
 function renderRoster(){
   const box=document.getElementById('roster-list');
@@ -3993,6 +4295,12 @@ function renderPlayerPage(){
       <div class="pp-section-title">Tournaments</div>
       <div id="player-tournament-stats"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </div>` : '';
+  // League mode is also X01-only (docs/league-mode-roadmap.md v1 scope) — same gate.
+  const leagueStatsSection = gt==='x01' ? `
+    <div class="pp-section">
+      <div class="pp-section-title">Leagues</div>
+      <div id="player-league-stats"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </div>` : '';
   const h2hSection = `
     <div class="pp-section">
       <div class="pp-section-title">H2H — Games &amp; Legs Played</div>
@@ -4002,7 +4310,8 @@ function renderPlayerPage(){
       <div class="pp-section-title">H2H Wins</div>
       <div class="pp-cat-lines">${h2hHtml}</div>
     </div>
-    ${tournamentStatsSection}`;
+    ${tournamentStatsSection}
+    ${leagueStatsSection}`;
 
   // Practice sections (reused by both 'practice' and 'overall' tabs)
   const pracCats = Object.keys(s.practiceLegs||{});
@@ -4106,6 +4415,7 @@ function renderPlayerPage(){
   loadPersonalBests();
   loadPlayerBadges();
   loadTournamentStats();
+  loadPlayerLeagueStats();
   loadAroundTheWorldProgress();
   loadOnThisDay();
   loadChallengeHistory();
@@ -4377,6 +4687,28 @@ function loadTournamentStats(){
       ${data.bestFinish?`<div class="stat-block"><div class="stat-val" style="font-size:1.4rem">${escapeHtml(data.bestFinish)}</div><div class="stat-label">Best Finish</div></div>`:''}
     </div>`;
   }).catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load tournament stats.</p>`; });
+}
+// docs/league-mode-roadmap.md: the Player Profile's "Leagues" stat block — every
+// league this player belongs to, plus their current rank/points in each. Same
+// no-op-if-container-missing shape as loadTournamentStats() just above.
+function loadPlayerLeagueStats(){
+  const container=document.getElementById('player-league-stats');
+  if(!container) return;
+  const player = currentPlayer;
+  DB.leagueSummary(player).then(list=>{
+    if(currentPlayer !== player) return;   // a newer profile visit took over
+    const el = document.getElementById('player-league-stats');
+    if(!el) return;
+    if(!list || !list.length){
+      el.innerHTML = `<p class="pp-meta" style="padding:4px 0">Not enrolled in any league yet.</p>`;
+      return;
+    }
+    el.innerHTML = `<div class="roster-list">${list.map(s=>`
+      <button class="rp-main" onclick="openLeague(${s.leagueId}); show('league')">
+        <div class="rp-name-row">${escapeHtml(s.name)} ${s.status==='ended'?'<span class="pp-meta">(ended)</span>':''}</div>
+        <div class="rp-stat">#${s.rank} of ${s.totalPlayers} · ${s.played} played · ${s.points} pts</div>
+      </button>`).join('')}</div>`;
+  }).catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load league stats.</p>`; });
 }
 // docs/archive/ghost-opponent-roadmap.md: populates the #ghost-race-record span next to the
 // "Race this leg" button — a no-op if that span doesn't exist (a non-X01 Personal

@@ -247,6 +247,39 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tournament_matches_round ON tournament_matches(round_id);
   CREATE INDEX IF NOT EXISTS idx_tournament_matches_game  ON tournament_matches(game_id);
 
+  -- League mode (docs/league-mode-roadmap.md), X01 only for v1. Unlike tournament mode,
+  -- a league game has no bracket position/round/advancement state of its own — it's
+  -- just an ordinary casual H2H game that happens to get tagged — so per CLAUDE.md's
+  -- "context tables link into games via FK" convention, the link is a direct nullable
+  -- games.league_id column (added via ALTER TABLE below) rather than a junction table
+  -- with its own game_id the way tournament_matches has. Deliberately NO points/played/
+  -- won/lost tally columns on league_players: standings are computed LIVE from
+  -- games/game_players (getLeagueStandings()), matching this file's "nothing
+  -- pre-aggregated" design and avoiding a drift-prone maintained counter. Deliberately
+  -- no stored player_count either (unlike tournaments.player_count, which is frozen
+  -- because the bracket SHAPE depends on it) — a league's roster can grow any time
+  -- during the season, so its count is always a live COUNT(league_players).
+  CREATE TABLE IF NOT EXISTS leagues (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL,
+    category      TEXT NOT NULL,   -- X01 starting score as a string: '501'|'301'|'170'|'101'
+    status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','ended')),
+    starts_at     TEXT NOT NULL,   -- YYYY-MM-DD
+    ends_at       TEXT,            -- YYYY-MM-DD, nullable = open-ended/ongoing season
+    points_win    INTEGER NOT NULL DEFAULT 1,
+    points_loss   INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at      TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS league_players (
+    league_id  INTEGER NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+    player_id  INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    joined_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (league_id, player_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_league_players_player ON league_players(player_id);
+
   -- Dart Builder / loadout customization (docs/archive/dart-builder-roadmap.md). Not a new
   -- column on games/players — a player's owned catalog of parts, each row personal
   -- (not shared/global) since real dart preferences are personal. No 'tip' type: tip
@@ -341,6 +374,9 @@ try { db.exec('ALTER TABLE games ADD COLUMN player_count INTEGER'); } catch(e) {
 // snapshotted, same reasoning already applied to game_players.dart_weight/out_mode —
 // renaming/deleting a loadout later never rewrites a past game's history.
 try { db.exec('ALTER TABLE game_players ADD COLUMN loadout_id INTEGER REFERENCES loadouts(id) ON DELETE SET NULL'); } catch(e) {}
+// League mode (docs/league-mode-roadmap.md): nullable, set by the onGameCreated
+// auto-tag hook below (or left NULL for any game that isn't a tagged league match).
+try { db.exec('ALTER TABLE games ADD COLUMN league_id INTEGER REFERENCES leagues(id) ON DELETE SET NULL'); } catch(e) {}
 // Dartboard zone/miss/bounce-out tracking (docs/archive/dartboard-zone-tracking-roadmap.md).
 // All four columns are purely additive metadata riding alongside an otherwise-
 // identical dart row — sector/multiplier/scored/is_treble/is_double keep meaning
@@ -536,13 +572,24 @@ function pruneOrphanedGames() {
 /* ---------- player-deletion guard extensibility (docs/archive/existing-app-prep-roadmap.md item 6) ----------
    Mirrors the game-lifecycle hook pattern below: a small, growing list of "is this
    player referenced by an active thing" checks that deletePlayer() consults before
-   deleting, rather than hardcoding tournament logic directly into deletePlayer() and
-   bolting league logic on top of that later. A guard receives the player row
-   ({id, name, ...}) and returns either a non-empty string (the reason to block the
-   delete) or a falsy value (no objection) — the first blocking reason wins.
-   No guards are registered today; this is pure infrastructure ahead of the next
-   feature that needs one (tournament mode blocking deletion of an active
-   competitor, league mode blocking deletion of an active-season player). */
+   deleting, rather than hardcoding tournament logic directly into deletePlayer(). A
+   guard receives the player row ({id, name, ...}) and returns either a non-empty
+   string (the reason to block the delete) or a falsy value (no objection) — the
+   first blocking reason wins. Tournament mode registers one below (blocking deletion
+   of an active competitor in an in-progress bracket, since bracket advancement
+   depends on that exact player still existing at a specific slot).
+
+   League mode (docs/league-mode-roadmap.md) deliberately registers NO guard, even
+   though an earlier draft of this comment anticipated one: deleting a league-enrolled
+   player cascades away only their own league_players/game_players/turns rows — the
+   surviving opponent's game_players row and the game's own winner_id are untouched
+   (games.winner_id ON DELETE SET NULL only fires if the DELETED player was the
+   winner), so a deleted player's own history disappears exactly the same way it
+   already does everywhere else in this app (H2H stats, badges, etc.), and standings
+   simply recompute live over what remains. This is only safe BECAUSE league
+   standings are computed live rather than incrementally maintained (see the
+   `leagues`/`league_players` schema comment) — a guard would have been necessary
+   under a maintained-tally design, not this one. */
 const deletePlayerGuards = [];
 function registerDeletePlayerGuard(fn) { deletePlayerGuards.push(fn); }
 function _checkDeletePlayerGuards(player) {
@@ -572,10 +619,20 @@ function deletePlayer(name) {
    new consequence stacked on. Fired synchronously, in registration order, right
    after the core DB write — a listener that throws is caught and logged, not
    rethrown, so one broken future feature can't take down game creation/completion
-   itself. No listeners are registered today; this is pure infrastructure ahead of
-   the next feature that needs one — it doesn't retrofit the existing client-side
-   achievement checks (those stay inline in frontend/index.html's enterTurn()/
-   onLegWon(), a different layer entirely). */
+   itself. It doesn't retrofit the existing client-side achievement checks (those
+   stay inline in frontend/index.html's enterTurn()/onLegWon(), a different layer
+   entirely).
+
+   Current 'created' payload: { gameId, gameType, practice, category, playerCount,
+   playerIds, leagueId }. playerIds/leagueId were added for league mode's auto-tag
+   hook below (docs/league-mode-roadmap.md) — playerIds is createGame()'s
+   participants in submission order (not deduped); leagueId is whatever the caller
+   passed through (unvalidated — each listener validates what it needs).
+   Current 'completed' payload: { gameId, winnerName } — used by tournament mode's
+   bracket-advancement hook (see the tournament section below). League mode needs no
+   'completed' hook: unlike a tournament bracket, standings have no propagation step
+   to react to — a completed game with league_id/winner_id already set is read
+   directly at standings-query time. */
 const gameLifecycleHooks = { created: [], completed: [] };
 function onGameCreated(fn) { gameLifecycleHooks.created.push(fn); }
 function onGameCompleted(fn) { gameLifecycleHooks.completed.push(fn); }
@@ -611,7 +668,7 @@ function _resolveLoadoutForParticipant(playerId, loadoutId) {
   return row;
 }
 
-function createGame({ category, legsPerSet, setsPerGame, players, practice, gameType, config }) {
+function createGame({ category, legsPerSet, setsPerGame, players, practice, gameType, config, leagueId }) {
   // gameType/config default to X01 for every caller today (no New Game UI sends
   // anything else yet) — see docs/game-modes-roadmap.md. Accepting them as params
   // means a future Cricket/Baseball New Game flow can pass its own without another
@@ -632,9 +689,15 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   if (Buffer.byteLength(resolvedConfig) > 4096) throw httpError(400, 'config is too large');
   const info = q.insertGame.run(categoryStr, clampMatchFormat(legsPerSet), clampMatchFormat(setsPerGame), practice ? 1 : 0, resolvedGameType, resolvedConfig);
   const gameId = Number(info.lastInsertRowid);
+  // participantIds (submission order, not deduped — see the player_count freeze below
+  // for the deduped count) is threaded into the 'created' hook payload so a listener
+  // (currently only league mode's auto-tag hook) can look up "who played this game"
+  // without a second query — see docs/league-mode-roadmap.md.
+  const participantIds = [];
   (players || []).forEach(entry => {
     const out = entry.out === 'single' ? 'single' : 'double';
     const p   = ensurePlayer(entry.name);
+    participantIds.push(p.id);
     // docs/archive/dart-builder-roadmap.md: players.dart_weight is retired as a standalone
     // fallback — a selected loadout's barrel weight is the only source for
     // game_players.dart_weight going forward; no loadout means NULL, even for a
@@ -648,7 +711,7 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   const pc = db.prepare('SELECT COUNT(*) AS n FROM game_players WHERE game_id = ?').get(gameId).n;
   db.prepare('UPDATE games SET player_count = ? WHERE id = ?').run(pc, gameId);
   _fireGameLifecycleHooks('created', { gameId, gameType: resolvedGameType, practice: !!practice,
-    category: categoryStr, playerCount: pc });
+    category: categoryStr, playerCount: pc, playerIds: participantIds, leagueId });
   return { gameId };
 }
 
@@ -1352,8 +1415,14 @@ function getHomeExtra() {
     practice: _pace(PRACTICE_WHERE)
   };
 
+  // docs/league-mode-roadmap.md: a small Home-page teaser ("N active leagues, view
+  // standings") piggybacks on this existing payload rather than a new endpoint —
+  // just the id/name, not full standings (the Leagues screen fetches those itself).
+  const activeLeagues = db.prepare(`SELECT id, name FROM leagues WHERE status = 'active' ORDER BY created_at DESC`).all();
+
   return { winLeaderboard, trebleLessRows, tonPlusRows, highestCheckout, lastGame,
-    today: { legs: todayLegs, darts: todayDarts }, week: { legs: weekLegs, darts: weekDarts }, pace };
+    today: { legs: todayLegs, darts: todayDarts }, week: { legs: weekLegs, darts: weekDarts }, pace,
+    activeLeagues };
 }
 
 function getPlayerStatBubbles(playerName, mode) {
@@ -2858,6 +2927,15 @@ function resetStats() {
   // (an outcome of a specific practice game), so it should clear here — and does,
   // for free: both game_id and source_game_id are ON DELETE CASCADE, so DELETE FROM
   // games below cascades it without needing its own explicit line.
+  // leagues/league_players are ALSO deliberately NOT touched here — a documented
+  // exception to the "any new user-data table must be wired into resetStats() too"
+  // rule below, not an oversight: unlike tournaments, nothing in the leagues/
+  // league_players schema points at a games row (see the schema comment), so wiping
+  // every game leaves leagues in a fully self-consistent state — standings are
+  // computed LIVE and simply recompute to all-zero, never a stranded/half-updated
+  // shell the way tournament brackets were pre-BUG-7. A league's own config (name/
+  // category/date window/points formula) is closer to player-profile configuration
+  // data than to tournament's mid-flight bracket state.
   db.exec('DELETE FROM turns; DELETE FROM game_players; DELETE FROM games; DELETE FROM tournaments;');
   return { ok: true };
 }
@@ -2872,8 +2950,14 @@ function resetStats() {
 // player_id ON DELETE CASCADE, so wiping players clears them for free.
 // ghost_races is covered twice over — player_id and both game FKs are all
 // ON DELETE CASCADE, so either the player wipe or the game wipe below clears it.
+// docs/league-mode-roadmap.md: leagues needs the same explicit delete tournaments
+// got from BUG-7 — wiping all players cascades away league_players (player_id ON
+// DELETE CASCADE), but nothing references the leagues PARENT row, so without this
+// the league shells (name/category/dates) would survive a total wipe with a now-
+// empty roster, showing an orphaned "0 players" league in the Leagues list. DELETE
+// FROM leagues cascades league_players too.
 function wipeAllData() {
-  db.exec('DELETE FROM players; DELETE FROM games; DELETE FROM tournaments;');
+  db.exec('DELETE FROM players; DELETE FROM games; DELETE FROM tournaments; DELETE FROM leagues;');
   return { ok: true };
 }
 
@@ -2914,6 +2998,10 @@ function getFullDatabaseExport() {
     // docs/archive/ghost-opponent-roadmap.md: same standing rule — a player's ghost-race
     // win/loss history is ordinary user data with no secrets.
     ghostRaces: db.prepare('SELECT * FROM ghost_races').all(),
+    // docs/league-mode-roadmap.md: same standing rule — leagues/league_players carry
+    // no credential columns, so they belong in "take your data with you" too.
+    leagues: db.prepare('SELECT * FROM leagues').all(),
+    leaguePlayers: db.prepare('SELECT * FROM league_players').all(),
   };
 }
 
@@ -3696,6 +3784,233 @@ registerDeletePlayerGuard((player) => {
   return row ? `${player.name} is still active in the in-progress tournament "${row.name}" — eliminate them or finish the tournament before deleting.` : null;
 });
 
+/* ---------- league mode (docs/league-mode-roadmap.md, X01 only for v1) ----------
+   A season over which regular casual H2H matches accumulate into a standings table —
+   deliberately lighter-weight than tournament mode: any two enrolled players can play
+   any casual match any time during the season (no bracket, no pre-determined
+   schedule), and every ordinary New-Game-created match that qualifies gets tagged
+   automatically via the onGameCreated hook below — no extra step in New Game for the
+   common case. A player may be enrolled in multiple concurrent leagues. Standings are
+   always computed LIVE from games/game_players (see the schema comment above), never
+   from a maintained tally, so there is nothing to keep in sync and nothing that can
+   drift. */
+const LEAGUE_X01_CATEGORIES = ['501', '301', '170', '101']; // same 4 values as
+  // TOURNAMENT_X01_CATEGORIES, kept as its own local list rather than shared so a
+  // future Cricket-league extension can diverge from tournament mode's own category
+  // set independently.
+const MAX_LEAGUE_NAME_LEN = 64;
+const LEAGUE_POINTS_MIN = -99, LEAGUE_POINTS_MAX = 99; // sane bound on an admin-set
+  // points formula, same "bound every accepted input" standing practice as
+  // createTournament()'s clampMatchFormat().
+
+function _todayDate() { return db.prepare("SELECT date('now') AS d").get().d; }
+
+function _validateLeagueDate(value, label) {
+  const s = String(value || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw httpError(400, `${label} must be YYYY-MM-DD`);
+  return s;
+}
+
+function _getLeagueOrThrow(id) {
+  const row = db.prepare('SELECT * FROM leagues WHERE id = ?').get(Number(id));
+  if (!row) throw httpError(404, 'League not found');
+  return row;
+}
+
+// Shared by the onGameCreated auto-tag hook below AND the public GET
+// /api/leagues/eligible read (getEligibleLeagues) — one place decides "is this
+// league a legal auto-tag target for these two players," so the two callers can
+// never drift into disagreeing about eligibility.
+function _findEligibleLeagues(category, playerIds) {
+  if (!Array.isArray(playerIds) || playerIds.length !== 2) return [];
+  const [a, b] = playerIds;
+  return db.prepare(`
+    SELECT l.id, l.name FROM leagues l
+    WHERE l.status = 'active' AND l.category = ?
+      AND date('now') >= l.starts_at AND (l.ends_at IS NULL OR date('now') <= l.ends_at)
+      AND EXISTS (SELECT 1 FROM league_players lp WHERE lp.league_id = l.id AND lp.player_id = ?)
+      AND EXISTS (SELECT 1 FROM league_players lp WHERE lp.league_id = l.id AND lp.player_id = ?)
+  `).all(String(category), a, b);
+}
+
+// Public read used by the New Game screen to decide whether to show a "log to which
+// league?" picker. Resolves names via getPlayer() — NOT ensurePlayer() — since this
+// is a read and must never silently create a player; fails soft to [] for anything
+// not fully resolvable (unknown name, missing second name, unknown category), since
+// the New Game screen calls this reactively while the admin is still mid-selection
+// (same defensive posture as the existing H2H-summary fetch it sits alongside).
+function getEligibleLeagues(playerName1, playerName2, category) {
+  const p1 = getPlayer(playerName1), p2 = getPlayer(playerName2);
+  if (!p1 || !p2 || !LEAGUE_X01_CATEGORIES.includes(String(category))) return [];
+  return _findEligibleLeagues(category, [p1.id, p2.id]);
+}
+
+function createLeague({ name, category, startsAt, endsAt, pointsWin, pointsLoss, players }) {
+  name = String(name || '').trim();
+  if (!name) throw httpError(400, 'League name is required');
+  if (name.length > MAX_LEAGUE_NAME_LEN) throw httpError(400, `League name must be ${MAX_LEAGUE_NAME_LEN} characters or fewer`);
+  if (!LEAGUE_X01_CATEGORIES.includes(String(category))) throw httpError(400, 'category must be one of 501, 301, 170, or 101');
+  const starts = (startsAt !== undefined && startsAt !== null && startsAt !== '') ? _validateLeagueDate(startsAt, 'startsAt') : _todayDate();
+  const ends = (endsAt !== undefined && endsAt !== null && endsAt !== '') ? _validateLeagueDate(endsAt, 'endsAt') : null;
+  if (ends != null && ends < starts) throw httpError(400, 'endsAt must not be before startsAt');
+  const pw = (pointsWin !== undefined && pointsWin !== null && pointsWin !== '') ? Number(pointsWin) : 1;
+  const pl = (pointsLoss !== undefined && pointsLoss !== null && pointsLoss !== '') ? Number(pointsLoss) : 0;
+  if (!Number.isInteger(pw) || pw < LEAGUE_POINTS_MIN || pw > LEAGUE_POINTS_MAX) throw httpError(400, `pointsWin must be an integer between ${LEAGUE_POINTS_MIN} and ${LEAGUE_POINTS_MAX}`);
+  if (!Number.isInteger(pl) || pl < LEAGUE_POINTS_MIN || pl > LEAGUE_POINTS_MAX) throw httpError(400, `pointsLoss must be an integer between ${LEAGUE_POINTS_MIN} and ${LEAGUE_POINTS_MAX}`);
+  // Unlike tournament mode, a league needs no minimum player count at creation — an
+  // empty league (create first, enroll people over time) is a legitimate season-setup
+  // flow, since there's no bracket shape that structurally requires players up front.
+  const names = Array.isArray(players) ? players : [];
+  const uniqueNames = new Set(names.map(n => String(n).trim().toLowerCase()));
+  if (uniqueNames.size !== names.length) throw httpError(400, 'Duplicate players are not allowed');
+
+  const playerRows = names.map(n => ensurePlayer(n));
+  const info = db.prepare(`
+    INSERT INTO leagues (name, category, starts_at, ends_at, points_win, points_loss)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(name, String(category), starts, ends, pw, pl);
+  const leagueId = Number(info.lastInsertRowid);
+  const insertMember = db.prepare('INSERT OR IGNORE INTO league_players (league_id, player_id) VALUES (?, ?)');
+  playerRows.forEach(p => insertMember.run(leagueId, p.id));
+  return { leagueId };
+}
+
+function listLeagues() {
+  return db.prepare(`
+    SELECT l.id, l.name, l.category, l.status, l.starts_at AS startsAt, l.ends_at AS endsAt,
+      l.points_win AS pointsWin, l.points_loss AS pointsLoss, l.created_at AS createdAt,
+      (SELECT COUNT(*) FROM league_players lp WHERE lp.league_id = l.id) AS playerCount
+    FROM leagues l
+    ORDER BY (l.status = 'ended'), l.created_at DESC
+  `).all();
+}
+
+// roster-then-merge, mirroring computeStats()'s own base-row-then-patch-in-aggregate
+// idiom: every enrolled player gets a row (played:0 if they haven't played any
+// league-tagged game yet), not just players who've already played (unlike e.g.
+// getHomeExtra()'s winLeaderboard, which only shows players with played>=1 — a
+// season standings table should show the whole roster). Only games with a decided
+// winner_id count as played — an abandoned league game completed with a null winner
+// (completeGame() allows this) is not a result and must not count either way.
+function _computeLeagueStandings(league) {
+  const roster = db.prepare(`
+    SELECT p.id, p.name FROM league_players lp JOIN players p ON p.id = lp.player_id
+    WHERE lp.league_id = ? ORDER BY p.name COLLATE NOCASE
+  `).all(league.id);
+  const results = db.prepare(`
+    SELECT gp.player_id AS pid, COUNT(*) AS played,
+      SUM(CASE WHEN g.winner_id = gp.player_id THEN 1 ELSE 0 END) AS won
+    FROM game_players gp JOIN games g ON g.id = gp.game_id
+    WHERE g.league_id = ? AND g.winner_id IS NOT NULL
+    GROUP BY gp.player_id
+  `).all(league.id);
+  const byId = {}; results.forEach(r => byId[r.pid] = r);
+  const table = roster.map(p => {
+    const r = byId[p.id] || { played: 0, won: 0 };
+    const lost = r.played - r.won;
+    const points = r.won * league.points_win + lost * league.points_loss;
+    return {
+      name: p.name, played: r.played, won: r.won, lost, points,
+      winPct: r.played > 0 ? +((r.won / r.played) * 100).toFixed(1) : null,
+    };
+  });
+  // Sort by points desc, then win% desc (a zero-played row's null win% sorts last
+  // among equal points via the ?? -1 fallback — a real 0% win rate is still >= -1,
+  // so it never gets confused with "hasn't played"), then name for a stable order.
+  table.sort((a, b) => b.points - a.points || (b.winPct ?? -1) - (a.winPct ?? -1) || a.name.localeCompare(b.name));
+  return table;
+}
+
+function getLeagueStandings(leagueId) {
+  return _computeLeagueStandings(_getLeagueOrThrow(leagueId));
+}
+
+function getLeague(id) {
+  const league = db.prepare('SELECT * FROM leagues WHERE id = ?').get(Number(id));
+  if (!league) return null;
+  return {
+    id: league.id, name: league.name, category: league.category, status: league.status,
+    startsAt: league.starts_at, endsAt: league.ends_at,
+    pointsWin: league.points_win, pointsLoss: league.points_loss,
+    createdAt: league.created_at, endedAt: league.ended_at,
+    standings: _computeLeagueStandings(league),
+  };
+}
+
+function enrollLeaguePlayer(leagueId, playerName) {
+  const league = _getLeagueOrThrow(leagueId);
+  const p = ensurePlayer(playerName);
+  db.prepare('INSERT OR IGNORE INTO league_players (league_id, player_id) VALUES (?, ?)').run(league.id, p.id);
+  return { ok: true };
+}
+
+function setLeagueStatus(leagueId, status) {
+  const league = _getLeagueOrThrow(leagueId);
+  if (status !== 'active' && status !== 'ended') throw httpError(400, "status must be 'active' or 'ended'");
+  if (status === 'ended') {
+    db.prepare("UPDATE leagues SET status = 'ended', ended_at = datetime('now') WHERE id = ?").run(league.id);
+  } else {
+    // Reopening is supported (a season ended by mistake shouldn't be a dead end) —
+    // ends_at still independently gates future auto-tagging regardless of status.
+    db.prepare("UPDATE leagues SET status = 'active', ended_at = NULL WHERE id = ?").run(league.id);
+  }
+  return { ok: true };
+}
+
+// Player Profile "Leagues" stat block: every league this player belongs to, plus
+// their current rank/points in each — mirrors getTournamentStats()'s role for
+// tournament mode, just across every league rather than a single aggregate.
+function getPlayerLeagueSummary(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return [];
+  const leagueIds = db.prepare('SELECT league_id FROM league_players WHERE player_id = ?').all(p.id).map(r => r.league_id);
+  return leagueIds.map(id => {
+    const league = db.prepare('SELECT * FROM leagues WHERE id = ?').get(id);
+    const standings = _computeLeagueStandings(league);
+    const idx = standings.findIndex(r => r.name === p.name); // names are unique (players.name COLLATE NOCASE UNIQUE)
+    const row = idx >= 0 ? standings[idx] : { played: 0, won: 0, lost: 0, points: 0 };
+    return {
+      leagueId: league.id, name: league.name, category: league.category, status: league.status,
+      rank: idx >= 0 ? idx + 1 : null, totalPlayers: standings.length,
+      played: row.played, won: row.won, lost: row.lost, points: row.points,
+    };
+  }).sort((a, b) => (a.status === 'ended') - (b.status === 'ended') || b.leagueId - a.leagueId);
+}
+
+// Hook: whenever a new game is created, check whether it should be tagged into a
+// league. See docs/league-mode-roadmap.md and the game-lifecycle-hooks doc comment
+// above for the full payload shape and the "explicit choice is re-validated, not
+// trusted" reasoning. Fires synchronously inside createGame(), before its HTTP
+// response is sent — there's no race between this write and the client seeing the
+// new gameId.
+onGameCreated(({ gameType, practice, category, playerCount, playerIds, leagueId, gameId }) => {
+  // League mode is X01-only, non-practice, exactly 2 players (v1 scope decision —
+  // Doubles Practice/Chuckin are structurally excluded anyway, being solo/no-winner
+  // formats; Cricket may be added later, see docs/league-mode-roadmap.md).
+  if (gameType !== 'x01' || practice || playerCount !== 2 || !Array.isArray(playerIds) || playerIds.length !== 2) return;
+  let targetLeagueId = null;
+  if (leagueId != null && leagueId !== '') {
+    // Client-supplied choice (from the New Game "log to league?" picker, shown only
+    // when more than one league was eligible at picker-render time). A few seconds
+    // may have passed since the picker's own GET /api/leagues/eligible call, so
+    // re-validate rather than trust it — a stale/invalid choice must never fail game
+    // creation, just fall through to auto-detection below.
+    const candidates = _findEligibleLeagues(category, playerIds);
+    if (candidates.some(c => c.id === Number(leagueId))) targetLeagueId = Number(leagueId);
+  }
+  if (targetLeagueId == null) {
+    const candidates = _findEligibleLeagues(category, playerIds);
+    // Exactly one candidate: auto-tag silently — the common case, no picker was ever
+    // shown. Zero or more than one: leave untagged. The New Game picker is meant to
+    // have already resolved a >1 ambiguity; a non-frontend API caller that doesn't
+    // supply a choice gets no guess.
+    if (candidates.length === 1) targetLeagueId = candidates[0].id;
+  }
+  if (targetLeagueId != null) {
+    db.prepare('UPDATE games SET league_id = ? WHERE id = ?').run(targetLeagueId, gameId);
+  }
+});
+
 /* ---------- dart builder / loadouts (docs/archive/dart-builder-roadmap.md) ----------
    dart_components is a player-owned catalog of parts; loadouts combine exactly one
    component per type plus a tip texture. Every enum field is a closed list for v1
@@ -4036,6 +4351,8 @@ module.exports = {
   awardBadge, revokeBadge, getPlayerBadges, getH2HSummary, getAroundTheWorldProgress,
   startChallengeAttempt, completeChallengeAttempt, getChallengeStatus, getChallengeHistory, resetChallengeAttempt,
   createTournament, listTournaments, getTournament, startTournamentMatch, recordWalkover, getTournamentStats,
+  createLeague, listLeagues, getLeague, getLeagueStandings, enrollLeaguePlayer, setLeagueStatus,
+  getPlayerLeagueSummary, getEligibleLeagues,
   getDartComponentOptions,
   createComponent, listComponents, updateComponent, deleteComponent,
   createLoadout, listLoadouts, getLoadout, updateLoadout, deleteLoadout, duplicateLoadout,
