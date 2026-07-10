@@ -526,7 +526,13 @@
 
   /* ---- player page tabs ---- */
   .player-controls{margin-bottom:18px}
-  .player-tabs{display:flex;gap:0;border-bottom:2px solid var(--wire);margin:0 0 20px}
+  /* flex-wrap:wrap — a row with enough tabs (the Player Profile's game-type
+     toggle hit 5 once Checkout Trainer was added) can exceed the card's width;
+     without wrapping, flex items that can't shrink below their own content
+     don't clip, they overflow the container entirely, rendering outside the
+     card's visible bounds instead of dropping to a second line. Purely
+     additive — a row that already fits on one line is unaffected. */
+  .player-tabs{display:flex;flex-wrap:wrap;gap:0;border-bottom:2px solid var(--wire);margin:0 0 20px}
   .tab-btn{background:none;border:none;border-bottom:3px solid transparent;margin-bottom:-2px;
     padding:10px 20px;font:inherit;font-size:14px;font-weight:600;cursor:pointer;color:var(--muted)}
   .tab-btn.active{color:var(--ink);border-bottom-color:var(--gold)}
@@ -953,7 +959,7 @@
         <button class="btn btn-ghost" onclick="adminLogout()">Log out</button>
       </div>
 
-      <div class="player-tabs" style="flex-wrap:wrap">
+      <div class="player-tabs">
         <button class="tab-btn active" data-stab="account" onclick="switchSettingsTab('account')">Account &amp; Access</button>
         <button class="tab-btn" data-stab="gameplay" onclick="switchSettingsTab('gameplay')">Gameplay &amp; Display</button>
         <button class="tab-btn" data-stab="integrations" onclick="switchSettingsTab('integrations')">Integrations</button>
