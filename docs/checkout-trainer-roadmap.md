@@ -121,6 +121,95 @@ lifetime average in the usual sense" shape. Candidates:
   topping the board — same convention `_trebleLess()`/`getCricketMprLeaderboard()`
   already use).
 
+### Achievements: laddered milestones + a few fun one-offs
+
+The core loop is deliberately **fast and repetitive** — a round is seconds, not
+minutes, so a single session can rack up dozens of attempts and a dedicated player
+will blow past normal X01 badge thresholds in no time. This is exactly the shape
+**Just Chuckin' It** was built for, and the request there was the same as here almost
+word-for-word: *"achievements specifically for this game mode, centered around major
+milestones... ladder the achievements so there are a lot to earn and that earning
+them starts early and often."* Reuse that solution wholesale rather than reinventing
+it — `CHUCKIN_MILESTONE_LADDERS` (`frontend/index.html`) is a **data-driven** array
+(`{metric, idPrefix, statNoun, descFor(threshold), tiers:[{threshold,label,icon}]}`),
+generating every `BADGE_INFO`/`ACH_LABELS`/`ACH_DURATION` entry from one `.forEach()`
+instead of hand-writing a badge object per tier, with the actual "has this cumulative
+value crossed this threshold" comparison factored into a pure, unit-tested helper
+(`chuckinTiersReached(tiers, value)`, `frontend/scoring.js`). A
+`checkoutTiersReached()` sibling (or a generalized shared helper both game types call)
+is the right shape here too. Like Chuckin's ladders, these are **once-earned,
+permanent milestones** (`INSERT OR IGNORE`, not undo-revocable) — a low-stakes
+practice mode's badge staying earned after an undone answer is a harmless edge case,
+not worth the revert plumbing X01/Cricket's competitive-play badges need.
+
+**Four ladders** (18 tiers total, matching Chuckin's own scale):
+
+1. **Lifetime Attempts** (`checkout_trainer_attempts_`, metric = total rounds
+   answered, legal or not) — pure dedication/volume, the most Chuckin-like of the
+   four:
+   | Threshold | Label | Icon |
+   |---|---|---|
+   | 50 | Warming the Arm | 🔥 |
+   | 200 | Out-Chart Regular | 🎯 |
+   | 500 | Double Vision | 👀 |
+   | 1,500 | Checkout Junkie | 🧠 |
+   | 5,000 | Human Out Chart | 🖩 |
+   | 15,000 | Finisher's Instinct | 🧭 |
+   | 50,000 | Legend of the Checkout | 👑 |
+
+2. **Lifetime Optimal Answers** (`checkout_trainer_optimal_`, metric = rounds
+   matching the minimum dart count) — the **headline ladder**, since hitting the
+   objective optimum is the actual point of the game, not just attempting:
+   | Threshold | Label | Icon |
+   |---|---|---|
+   | 25 | First Finish | 🎯 |
+   | 100 | Century of Perfection | 💯 |
+   | 300 | Route Master | 🗺️ |
+   | 1,000 | Out-Chart Encyclopedia | 📚 |
+   | 3,000 | Checkout Savant | 🧠 |
+   | 10,000 | The Perfect Finisher | 👑 |
+
+3. **Session Endurance** (`checkout_trainer_session_`, metric = attempts in one
+   sitting) — direct structural twin of Chuckin's own session ladder:
+   | Threshold | Label | Icon |
+   |---|---|---|
+   | 50 | Quick Study | ⏱️ |
+   | 150 | Deep Dive | 🤿 |
+   | 400 | Marathon Mind | 🏃 |
+   | 1,000 | Iron Focus | 🔋 |
+
+4. **Best Optimal Streak** (`checkout_trainer_streak_`, metric = longest-ever run
+   of consecutive optimal answers, tracked the same way a win-streak is already
+   computed elsewhere — walk-until-broken, not a maintained counter) — the
+   skill/bragging-rights ladder, genuinely distinct from the two cumulative-count
+   ladders above since one bad answer resets it to zero:
+   | Threshold | Label | Icon |
+   |---|---|---|
+   | 5 | On a Roll | 🎲 |
+   | 15 | Hot Hand | 🔥 |
+   | 30 | Unstoppable | ⚡ |
+   | 75 | In the Zone | 🧘 |
+   | 150 | Flawless Machine | 🤖 |
+
+**A few fun one-off badges** (not laddered — single flagship achievements, same
+`once:true` semantics, same "no reimplementation, borrow the existing engine" spirit):
+
+- **🐟 The 170 Club** — solve **170** (T20-T20-Bull, the maximum possible checkout)
+  optimally at least once. A deliberate callback to X01's existing 🐟 **Big Fish**
+  badge (a real 170 checkout) — same number, same fish pun, earned by *knowing* the
+  route here instead of *throwing* it there.
+- **🎯 One-Darter** — first time solving a target optimally in exactly 1 dart (any
+  even number 2–40 via its double, or 50 via bull). Celebrates recognizing the
+  simplest cases instantly rather than overthinking them.
+- **🌟 Perfectionist** — finish a session of 15+ attempts with a 100% optimal rate
+  (every single answer, no exceptions) — a per-session flawless-run badge, distinct
+  from the lifetime streak ladder above (this one resets every session; the streak
+  ladder tracks the best run ever, even if it spans multiple sessions).
+- **💣 Bogey Buster** — *conditional on the "trick question" difficulty variant*
+  (see Open Questions below): correctly answer "not possible" when given an actual
+  bogey number, first time. Only makes sense to build if that variant ships; noted
+  here so the achievement idea isn't lost if/when it does.
+
 ### No live scoreboard (deliberate, per the original request)
 
 This game type never writes to `liveState` / needs an `ALLOWED_LIVE_KEYS` entry, and
@@ -157,8 +246,13 @@ Not yet addressed anywhere in this doc, per `CLAUDE.md`'s standing conventions:
    loop (no fixed round count, same shape as Just Chuckin' It).
 4. Stat bubbles + Personal Bests (accuracy %, optimal %, toughest checkout mastered),
    modeled directly on Doubles Practice's own functions.
-5. Difficulty tiers, a leaderboard, and any badge ideas (see open questions) — later
-   passes once the core loop is proven and actually played a few times.
+5. The four milestone ladders (attempts, optimal answers, session endurance, best
+   streak) — data-driven off one array, exactly like `CHUCKIN_MILESTONE_LADDERS`, so
+   all 18 tiers come from one `.forEach()` rather than 18 hand-written definitions.
+6. The one-off flagship badges (170 Club, One-Darter, Perfectionist), plus Bogey
+   Buster if the trick-question difficulty variant ships.
+7. Difficulty tiers and a leaderboard — later passes once the core loop is proven and
+   actually played a few times.
 
 ## Open questions for whoever picks this up
 
@@ -175,10 +269,14 @@ Not yet addressed anywhere in this doc, per `CLAUDE.md`'s standing conventions:
 - Exact difficulty tiers/weighting for target selection — a content decision, best
   made by actually playing it a few times (same framing Daily Challenge's own open
   questions used for its curated target list).
-- Any badge ideas (e.g. N optimal answers in a row, or correctly identifying that a
-  bogey number *can't* be checked out as a "trick question" difficulty variant) — not
-  designed here; a natural follow-up once the core loop exists, not a launch
-  requirement.
+- **Trick-question difficulty variant**: occasionally give an actual bogey number and
+  accept "not possible" as the correct answer, rather than only ever asking legally
+  finishable targets. Not designed in detail here (needs its own UI affordance for
+  "declare unsolvable," and its own grading branch) — the 💣 Bogey Buster badge above
+  is written assuming this ships, but the core game is complete without it.
+- Exact ladder threshold values above are a first pass, not final — tune against
+  actual play the same way Chuckin's own thresholds were picked, not re-derived from
+  first principles here.
 - Whether this should offer a "practice this specific number" deep link from
   elsewhere in the app (e.g. from a Top Finishes row, "drill this checkout") — a nice
   affordance, not required for v1.
