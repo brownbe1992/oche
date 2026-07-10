@@ -1373,6 +1373,22 @@
      the code below still uses exactly as before the extraction. -->
 <script src="scoring.js"></script>
 <script>
+// Surfaces uncaught client-side errors visibly instead of failing silently —
+// on a phone, there's no console to check, so a button that "does nothing"
+// because of an unhandled exception would otherwise be undiagnosable without
+// physical device access. Only fires for genuinely uncaught errors; anything
+// already handled locally (a .catch() on a fetch, etc.) never reaches this.
+window.addEventListener('error', e => {
+  console.error('Uncaught error:', e.error || e.message);
+  const msg = (e.error && e.error.message) || e.message || 'Unknown error';
+  if(typeof uiAlert === 'function') uiAlert(`Something went wrong: ${msg}`);
+});
+window.addEventListener('unhandledrejection', e => {
+  console.error('Unhandled promise rejection:', e.reason);
+  const msg = (e.reason && e.reason.message) || String(e.reason) || 'Unknown error';
+  if(typeof uiAlert === 'function') uiAlert(`Something went wrong: ${msg}`);
+});
+
 /* =========================================================================
    BACKEND ADAPTER
    The app requires a reachable database backend at the same origin — there is
