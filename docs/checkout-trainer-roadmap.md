@@ -117,14 +117,24 @@ game-type-specific needs a new storage shape):
   `bust=0, checkout=1, leg_won=1` (optimal). This three-way result is exactly what
   Checkout Blitz's scoring formula reads directly off of (see its own section below)
   — the whole grading model rides on columns that already exist, nothing new to store.
-- **Must be excluded from every "physical dart" aggregate** the same way Just
-  Chuckin' It's darts are (`NOT_CHUCKIN = "AND g.game_type != 'chuckin'"` in
-  `backend/db.js`) — these darts represent a *proposed* route, not a real throw, and
-  must not pollute sector heatmaps, treble rate, dart-pace, or any other
-  physical-throwing stat. This is the exact same problem Just Chuckin' It already
-  solved once; the fix is the same shape (generalize the exclusion constant to cover
-  both game types, or add a sibling `NOT_HYPOTHETICAL`-style guard at each of the
-  same call sites `NOT_CHUCKIN` already touches).
+- **Must be excluded from every "physical dart" aggregate — and, unlike Chuckin,
+  that includes the raw "total darts thrown" counters too.** These darts represent
+  a *proposed* route, not a real throw, and must not pollute sector heatmaps,
+  treble rate, dart-pace, or any other physical-throwing stat — the same problem
+  Just Chuckin' It already solved once (shipped as `NOT_HYPOTHETICAL_DARTS`, a
+  generalized `backend/db.js` exclusion covering both game types). But Checkout
+  Trainer goes further than Chuckin's own precedent: a real product decision
+  (2026-07) is that these darts must have **zero footprint on any pre-existing
+  stat, full stop** — not just the heatmap/treble/pace exclusion, but also
+  `computeStats()`'s roster turns/darts, `getSummary()`'s global darts total,
+  `getPersonalBests()`'s X01 Personal Bests (bestLegAvg, fewest darts to finish,
+  lifetime/recent-form average — the most severe leak, since `t.checkout=1` is
+  only ever set by X01 and Checkout Trainer), the "most common checkout routes"
+  list, per-loadout dart/checkout counts, and the "last played" timestamp —
+  shipped as a second, narrower `NOT_CHECKOUT_TRAINER` constant applied at each
+  of those specific spots, alongside `NOT_HYPOTHETICAL_DARTS` at the others. The
+  Player Profile's dartboard heatmap is hidden entirely on the Checkout Trainer
+  tab rather than showing a "heatmap" built from typed-in answers.
 - `games.config` needs no new fields **for Freeform mode itself** (unlike Cricket's
   `numbers` or Doubles Practice's `doubles`) — the target lives per-round on
   `turns.target_score`, not per-game. (Checkout Blitz *does* add two `config` fields

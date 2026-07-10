@@ -226,4 +226,66 @@ describe('Checkout Trainer does not pollute physical-throwing stats (regression,
     const after = db.getHomeExtra().todayLegs;
     assert.equal(after, before, 'a Checkout Trainer round is a proposed route, not a real leg, and must not inflate the physical-activity leg count');
   });
+
+  test('NOT_CHECKOUT_TRAINER: getPersonalBests\' X01 fields are untouched by Checkout Trainer rounds', () => {
+    const name = 'CT_Isolation_PersonalBests';
+    db.addPlayer(name);
+    // Real X01: a 3-dart leg win, average 60 (well below a 1-dart-checkout average).
+    const x01Game = db.createGame({
+      category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1,
+      gameType: 'x01', config: { startingScore: 501 },
+      players: [{ name }],
+    });
+    db.addTurn(x01Game.gameId, {
+      player: name, set: 1, leg: 1, scored: 60, bust: false, checkout: true, checkoutPoints: 60,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 1 }, { dartNo: 2, sector: 20, multiplier: 1 }, { dartNo: 3, sector: 20, multiplier: 2 }],
+    });
+    const before = db.getPersonalBests(name, 'practice');
+    assert.equal(before.fewestDartsCheckout, 3);
+
+    // A 1-dart optimal Checkout Trainer "checkout" — without the fix this both
+    // wins "Fewest Darts to Finish" (1 < 3) and, since its scored is always 0,
+    // silently drags bestLegAvg/lifetimeAvg/recentFormAvg toward zero.
+    const g = checkoutTrainerGame(name, 'freeform');
+    ctTurn(g.gameId, name, 1, 1, 40, 'optimal');
+
+    const after = db.getPersonalBests(name, 'practice');
+    assert.equal(after.fewestDartsCheckout, before.fewestDartsCheckout, 'a 1-dart Checkout Trainer round must not become the new "fewest darts to finish" record');
+    assert.equal(after.bestLegAvg, before.bestLegAvg, 'bestLegAvg must not shift');
+    assert.equal(after.lifetimeAvg, before.lifetimeAvg, 'lifetimeAvg must not be dragged toward zero by a scored=0 Checkout Trainer round');
+    assert.equal(after.recentFormAvg, before.recentFormAvg, 'recentFormAvg must not be dragged toward zero by a scored=0 Checkout Trainer round');
+  });
+
+  test('NOT_CHECKOUT_TRAINER: getSummary().darts (global "darts thrown" total) is untouched', () => {
+    const name = 'CT_Isolation_Summary';
+    db.addPlayer(name);
+    const before = db.getSummary().darts;
+    const g = checkoutTrainerGame(name, 'freeform');
+    ctTurn(g.gameId, name, 1, 1, 40, 'optimal');
+    ctTurn(g.gameId, name, 1, 2, 32, 'legal');
+    const after = db.getSummary().darts;
+    assert.equal(after, before, 'Checkout Trainer darts never touched a dartboard and must not inflate the global darts-thrown total');
+  });
+
+  test('NOT_CHECKOUT_TRAINER: getPlayerStatBubbles().dartsThrown (X01 profile bubble) is untouched', () => {
+    const name = 'CT_Isolation_Bubbles';
+    db.addPlayer(name);
+    const before = db.getPlayerStatBubbles(name, 'practice').dartsThrown;
+    const g = checkoutTrainerGame(name, 'freeform');
+    ctTurn(g.gameId, name, 1, 1, 40, 'optimal');
+    ctTurn(g.gameId, name, 1, 2, 32, 'legal');
+    const after = db.getPlayerStatBubbles(name, 'practice').dartsThrown;
+    assert.equal(after, before, 'the X01 profile tab\'s own "Darts Thrown" bubble must not count Checkout Trainer darts');
+  });
+
+  test('NOT_CHECKOUT_TRAINER: computeStats() roster turns/dartsThrown are untouched', () => {
+    const name = 'CT_Isolation_Roster';
+    db.addPlayer(name);
+    const before = db.computeStats()[name];
+    const g = checkoutTrainerGame(name, 'freeform');
+    ctTurn(g.gameId, name, 1, 1, 40, 'optimal');
+    const after = db.computeStats()[name];
+    assert.equal(after.turns, before.turns, 'roster "turns" must not count a Checkout Trainer round');
+    assert.equal(after.dartsThrown, before.dartsThrown, 'roster "darts thrown" must not count a Checkout Trainer dart');
+  });
 });

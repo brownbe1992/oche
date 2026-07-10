@@ -2957,14 +2957,34 @@ Every attempt writes exactly one of three outcomes onto the existing
 = legal but not optimal; `bust=0, checkout=1, leg_won=1` = optimal. Checkout
 Blitz's scoring formula reads directly off this three-way outcome.
 
-**Physical-stat exclusion**: these darts are a *proposed* route, not a real
-throw, and must not pollute sector heatmaps, treble rate, or dart-pace — the
-same problem Just Chuckin' It already solved once. `NOT_HYPOTHETICAL_DARTS`
-(`backend/db.js`, generalized from the earlier Chuckin-only `NOT_CHUCKIN`)
-excludes both `'chuckin'` and `'checkout_trainer'` game types from every
-physical-throwing aggregate it guards. The "total darts thrown" counters
-themselves are the one deliberate exception (same exception Chuckin already
-gets) — Checkout Trainer darts still count toward raw dart-volume totals.
+**Physical-stat exclusion — stricter than Chuckin's**: these darts are a
+*proposed* route, not a real throw, and must have **zero footprint on any
+pre-existing stat, full stop** (explicit product decision) — not just the
+sector-heatmap/treble-rate/dart-pace exclusions Just Chuckin' It's own darts
+already get, but also the raw "total darts thrown"/"last played" counters
+that Chuckin (a real physical throw) deliberately keeps counting toward.
+Two exclusion constants in `backend/db.js`:
+- `NOT_HYPOTHETICAL_DARTS` (generalized from the earlier Chuckin-only
+  `NOT_CHUCKIN`) excludes both `'chuckin'` and `'checkout_trainer'` from
+  sector heatmaps, treble rate, dart-pace, and Around the World progress.
+- `NOT_CHECKOUT_TRAINER`, a narrower Checkout-Trainer-only sibling, additionally
+  excludes it (but not Chuckin) from every "pure total darts thrown" counter
+  Chuckin is a deliberate exception to: `computeStats()`'s roster `turns`/
+  `dartsThrown`, `getSummary()`'s `darts`/`todayDarts`/`weekDarts`, the roster
+  "last played" timestamp, `getPlayerStatBubbles()`'s own `dartsThrown`/
+  `avgDartsPerDay`/`avgDartsPerLeg` (the X01 profile tab's bubbles),
+  `getMetricHistory()`'s `dartsthrown`/`avgdartsperday`/`avgdartsperleg`/`pace`
+  chart metrics, `getPersonalBests()`'s `bestLegAvg`/`fewestDartsCheckout`/
+  `recentFormAvg`/`lifetimeAvg` (X01's own Personal Bests — `t.checkout=1` is
+  only ever set by X01 and Checkout Trainer, so this was the most severe leak:
+  a 1-dart optimal Checkout Trainer answer could otherwise both win "Fewest
+  Darts to Finish" and drag every average toward zero, since Checkout Trainer
+  turns always write `scored=0`), `getCheckoutRoutes()`'s "most common checkout
+  routes" list, `getLoadoutStats()`'s per-loadout `dartsThrown`/`checkouts`, and
+  the practice-side half of the roster's `avgDartsPerLeg`. The Player Profile's
+  dartboard-heatmap section is hidden entirely on the Checkout Trainer tab
+  (`frontend/index.html`'s `loadDartHeatmap()`) rather than showing a heatmap of
+  typed-in answers.
 
 **Stats** (`getCheckoutTrainerStatBubbles`/`getCheckoutTrainerPersonalBests`,
 `backend/db.js`):

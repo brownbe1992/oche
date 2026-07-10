@@ -1131,11 +1131,15 @@ function computeStats() {
     ) GROUP BY pid
   `).all();
 
+  // NOT_CHECKOUT_TRAINER: unlike h2hAvgDarts above (never matches — Checkout
+  // Trainer is always solo/practice, never player_count>1), this practice-side
+  // query WOULD otherwise pick up Checkout Trainer's own "legs" (single-dart-
+  // to-multi-dart rounds that set checkout=1 for a legal attempt).
   const practiceAvgDarts = db.prepare(`
     SELECT pid, AVG(leg_darts) AS avg_darts FROM (
       SELECT t.player_id AS pid, COUNT(d.id) AS leg_darts
       FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-      WHERE g.practice=1 OR g.player_count=1
+      WHERE (g.practice=1 OR g.player_count=1) ${NOT_CHECKOUT_TRAINER}
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout)>0
     ) GROUP BY pid
   `).all();
@@ -1185,14 +1189,21 @@ function computeStats() {
   // (REFERENCE.md §3's cricket-interaction table).
   const allCounts = db.prepare(`
     SELECT t.player_id AS pid, COUNT(*) AS turns, COALESCE(SUM(dt.cnt), 0) AS dartsThrown
-    FROM turns t
+    FROM turns t JOIN games g ON g.id = t.game_id
     LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dt ON dt.turn_id = t.id
+    WHERE 1=1 ${NOT_CHECKOUT_TRAINER}
     GROUP BY t.player_id
   `).all();
 
   // Last played date and recent-form average (last 30 turns) per player — used on the roster page.
+  // Excludes Checkout Trainer (NOT_CHECKOUT_TRAINER) — a session of proposed
+  // checkouts is not "playing darts" for this purpose, unlike every other
+  // solo drill mode (Doubles Practice, Chuckin) which legitimately updates it.
   const lastPlayedRows = db.prepare(`
-    SELECT player_id AS pid, MAX(created_at) AS ts FROM turns GROUP BY player_id
+    SELECT t.player_id AS pid, MAX(t.created_at) AS ts
+    FROM turns t JOIN games g ON g.id = t.game_id
+    WHERE 1=1 ${NOT_CHECKOUT_TRAINER}
+    GROUP BY t.player_id
   `).all();
   const recentAvgRows = db.prepare(`
     SELECT pid, CAST(SUM(scored) AS REAL)/NULLIF(SUM(dcount),0)*3 AS recentAvg FROM (
@@ -1285,7 +1296,10 @@ function getSummary() {
     WHERE g.practice = 0
       AND g.player_count > 1
   `).get().n;
-  const darts        = db.prepare('SELECT COUNT(*) AS n FROM darts').get().n ?? 0;
+  // Excludes Checkout Trainer (NOT_CHECKOUT_TRAINER) — unlike Chuckin, whose darts
+  // are real physical throws and stay counted here, a Checkout Trainer dart never
+  // touched a dartboard and must not inflate the global "darts thrown" total.
+  const darts        = db.prepare(`SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id WHERE 1=1 ${NOT_CHECKOUT_TRAINER}`).get().n ?? 0;
   const tonPlus      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout=1 AND checkout_points>=100').get().n;
   const oneEighties  = db.prepare(`SELECT COUNT(*) AS n FROM turns t JOIN games g ON g.id=t.game_id WHERE t.scored=180 ${X01_ONLY}`).get().n;
   const bigFish      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout=1 AND checkout_points=170').get().n;
@@ -1348,6 +1362,10 @@ function getHomeExtra() {
     rate: r.turns ? +((r.trebleLess / r.turns) * 100).toFixed(1) : 0 }));
   const trebleLessRows = { h2h: _trebleLess(H2H_WHERE), practice: _trebleLess(PRACTICE_WHERE) };
 
+  // NOT_CHECKOUT_TRAINER: checkout_points always being null for Checkout Trainer
+  // rows already protects the tonPlus numerator, but the `checkouts` denominator
+  // (COUNT(*), no checkout_points requirement) would otherwise still count its
+  // legal/optimal attempts, silently diluting a player's Ton+ Finish Rate.
   const _tonPlus = (modeWhere) => db.prepare(`
     SELECT p.name AS name,
       COUNT(*) AS checkouts,
@@ -1355,7 +1373,7 @@ function getHomeExtra() {
     FROM turns t
     JOIN players p ON p.id = t.player_id
     JOIN games g ON g.id = t.game_id
-    WHERE t.checkout = 1 AND ${modeWhere}
+    WHERE t.checkout = 1 AND ${modeWhere} ${NOT_CHECKOUT_TRAINER}
     GROUP BY p.id
     HAVING checkouts >= 3
     ORDER BY (CAST(tonPlus AS REAL) / checkouts) DESC
@@ -1392,19 +1410,26 @@ function getHomeExtra() {
     LIMIT 1
   `).get() || null;
 
-  // legs/darts "activity" counts — legs excludes Just Chuckin' It (NOT_HYPOTHETICAL_DARTS,
-  // joins games for the first time here to apply it); darts stays fully unscoped
-  // since raw dart-throwing volume is the one thing chuckin should count toward.
+  // legs/darts "activity" counts — legs excludes Just Chuckin' It and Checkout
+  // Trainer (NOT_HYPOTHETICAL_DARTS); darts excludes Checkout Trainer only
+  // (NOT_CHECKOUT_TRAINER) — chuckin darts are real physical throws and stay
+  // counted here, but a Checkout Trainer dart never touched a board at all.
   const todayLegs = db.prepare(`
     SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
     FROM turns t JOIN games g ON g.id = t.game_id WHERE date(t.created_at) = date('now') ${NOT_HYPOTHETICAL_DARTS}
   `).get().n;
-  const todayDarts = db.prepare(`SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id WHERE date(t.created_at) = date('now')`).get().n;
+  const todayDarts = db.prepare(`
+    SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id
+    WHERE date(t.created_at) = date('now') ${NOT_CHECKOUT_TRAINER}
+  `).get().n;
   const weekLegs = db.prepare(`
     SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
     FROM turns t JOIN games g ON g.id = t.game_id WHERE date(t.created_at) >= date('now', '-6 days') ${NOT_HYPOTHETICAL_DARTS}
   `).get().n;
-  const weekDarts = db.prepare(`SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id WHERE date(t.created_at) >= date('now', '-6 days')`).get().n;
+  const weekDarts = db.prepare(`
+    SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id
+    WHERE date(t.created_at) >= date('now', '-6 days') ${NOT_CHECKOUT_TRAINER}
+  `).get().n;
 
   // Pace: avg ms between consecutive thrown_at timestamps within the same turn -> darts/min.
   // Excludes Just Chuckin' It (NOT_HYPOTHETICAL_DARTS) — its rapid-fire per-dart-only rhythm
@@ -1446,7 +1471,10 @@ function getPlayerStatBubbles(playerName, mode) {
   const q = (sql) => { const r = db.prepare(sql).get(p.id); return r ? r.v : null; };
   const J = `FROM turns t JOIN games g ON g.id = t.game_id WHERE t.player_id = ?`;
 
-  const JD = `FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id = ?`;
+  // NOT_CHECKOUT_TRAINER: every JD-based figure below is a genuine "darts
+  // physically thrown" count (darts thrown, darts/day, darts/leg) — a Checkout
+  // Trainer dart never touches a board, so it must never inflate any of them.
+  const JD = `FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id = ? ${NOT_CHECKOUT_TRAINER}`;
   const qd = (sql) => { const r = db.prepare(sql).get(p.id); return r ? r.v : null; };
   const dartsThrown    = qd(`SELECT COUNT(*) AS v ${JD} ${mf}`) ?? 0;
   const avgDartsPerDay = qd(`SELECT CAST(COUNT(*) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS v ${JD} ${mf}`);
@@ -1683,12 +1711,17 @@ function getPersonalBests(playerName, mode) {
   if (!p) return null;
   const mf = _mf(mode);
 
+  // NOT_CHECKOUT_TRAINER: t.checkout=1 is only ever set by X01 and Checkout
+  // Trainer (Cricket/Doubles Practice/Chuckin all leave it false, so they're
+  // already excluded by the HAVING clause below) — a proposed-route "checkout"
+  // is not a real leg and must not surface as a Personal Best here, nor drag
+  // down bestLegAvg/recentFormAvg/lifetimeAvg or shrink fewestDartsCheckout.
   const legAvgSql = `
     SELECT t.game_id, t.set_no, t.leg_no, MAX(t.id) AS lastTurnId,
       CAST(SUM(t.scored) AS REAL)/NULLIF(SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END),0)*3 AS la
     FROM turns t JOIN games g ON g.id=t.game_id
     JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id=t.id
-    WHERE t.player_id=? ${mf}
+    WHERE t.player_id=? ${mf} ${NOT_CHECKOUT_TRAINER}
     GROUP BY t.game_id,t.set_no,t.leg_no
     HAVING SUM(t.checkout)>0
   `;
@@ -1701,7 +1734,7 @@ function getPersonalBests(playerName, mode) {
     SELECT MIN(leg_darts) AS v FROM (
       SELECT COUNT(d.id) AS leg_darts
       FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-      WHERE t.player_id=? ${mf}
+      WHERE t.player_id=? ${mf} ${NOT_CHECKOUT_TRAINER}
       GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)>0
     )
   `).get(p.id)?.v ?? null;
@@ -2083,7 +2116,17 @@ function getChuckinPersonalBests(playerName, mode) {
    sub-modes (Freeform, Checkout Blitz — distinguished by config.mode, not a
    separate game_type) share one game_type='checkout_trainer' and count toward
    these lifetime stats together — a round is a round regardless of which mode
-   served it (docs/checkout-trainer-roadmap.md's explicit ruling). */
+   served it (docs/checkout-trainer-roadmap.md's explicit ruling).
+
+   Unlike every other solo drill, a Checkout Trainer dart never touches a real
+   dartboard at all — it's the app grading a proposed route, not a throw. Product
+   decision: it must have zero footprint on any pre-existing stat, full stop —
+   not just the heatmap/treble-rate/pace exclusions Chuckin's proposed-route-
+   adjacent darts already get via NOT_HYPOTHETICAL_DARTS, but also the raw "total
+   darts thrown"/"last played" counters that Chuckin (a real physical throw)
+   deliberately keeps counting toward. See NOT_CHECKOUT_TRAINER, a narrower,
+   Checkout-Trainer-only sibling of NOT_HYPOTHETICAL_DARTS applied at exactly
+   those few spots. */
 function getCheckoutTrainerStatBubbles(playerName, mode) {
   const p = getPlayer(playerName);
   if (!p) return null;
@@ -2245,10 +2288,12 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
   const TBASE = `FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere}`;
 
   switch (metric) {
+    // NOT_CHECKOUT_TRAINER: a genuine "darts physically thrown" figure, same
+    // reasoning as getPlayerStatBubbles()'s own dartsThrown/avgDartsPerDay above.
     case 'dartsthrown':
-      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(d.id) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere} GROUP BY bucket ORDER BY bucket`).all(...params);
+      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(d.id) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere} ${NOT_CHECKOUT_TRAINER} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'avgdartsperday':
-      return db.prepare(`SELECT ${T.fmt} AS bucket, CAST(COUNT(d.id) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere} GROUP BY bucket ORDER BY bucket`).all(...params);
+      return db.prepare(`SELECT ${T.fmt} AS bucket, CAST(COUNT(d.id) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere} ${NOT_CHECKOUT_TRAINER} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'avg':
       // Standard 3-dart average: total points / counted darts * 3 (per-turn darts
       // pre-aggregated so the darts JOIN doesn't inflate SUM(scored)). A bust counts
@@ -2336,18 +2381,25 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
     case 'pace':
       // Darts/minute, derived from the gap between consecutive thrown_at timestamps
       // within the same turn — only populated when "collect per-dart timing" is on.
+      // NOT_HYPOTHETICAL_DARTS: same exclusion getHomeExtra()'s own _pace() already
+      // applies (rapid-fire per-dart Chuckin/Checkout-Trainer rhythm would skew this
+      // as a measure of match-throwing pace) — this per-metric-history version had
+      // been missing it.
       return db.prepare(`SELECT bucket, 60000.0/AVG(gap_ms) AS value FROM (
         SELECT ${T.fmt} AS bucket, (julianday(d.thrown_at) - julianday(prev.thrown_at)) * 86400000 AS gap_ms
         FROM darts d
         JOIN darts prev ON prev.turn_id = d.turn_id AND prev.dart_no = d.dart_no - 1
         JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id
-        WHERE t.player_id=? AND d.thrown_at IS NOT NULL AND prev.thrown_at IS NOT NULL ${T.and} ${modeWhere} ${weightWhere}
+        WHERE t.player_id=? AND d.thrown_at IS NOT NULL AND prev.thrown_at IS NOT NULL ${T.and} ${modeWhere} ${weightWhere} ${NOT_HYPOTHETICAL_DARTS}
       ) WHERE gap_ms > 0 AND gap_ms < 60000 GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'avgdartsperleg':
+      // NOT_CHECKOUT_TRAINER: Chuckin never sets checkout=1 so it's already
+      // excluded by the HAVING clause below, but Checkout Trainer's `checkout`
+      // column IS set to 1 for legal attempts — needs the explicit exclusion.
       return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(leg_darts) AS value FROM (
         SELECT MAX(t.created_at) AS leg_ts, COUNT(d.id) AS leg_darts
         FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-        WHERE t.player_id=? ${modeWhere} ${weightWhere}
+        WHERE t.player_id=? ${modeWhere} ${weightWhere} ${NOT_CHECKOUT_TRAINER}
         GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)>0
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
 
@@ -2542,6 +2594,17 @@ const X01_ONLY = _scope({ gameType: 'x01' });
 // same reason Just Chuckin' It does: its darts are a proposed route, not a real
 // throw, and must not pollute sector heatmaps, treble rate, or dart-pace either.
 const NOT_HYPOTHETICAL_DARTS = `AND g.game_type NOT IN ('chuckin','checkout_trainer')`;
+// Narrower than NOT_HYPOTHETICAL_DARTS above — Just Chuckin' It deliberately DOES
+// count toward the handful of "pure total darts thrown" counters this excludes
+// Checkout Trainer from too (allCounts/getSummary's darts/todayDarts/weekDarts,
+// the roster/profile "last played" timestamp): a chuckin dart is still a real
+// physical throw, so the existing exception for it stands. A Checkout Trainer
+// dart is never physical at all — not a proposed-route exception like chuckin's,
+// a genuine "this never happened on a dartboard" exclusion — so it must not
+// register as activity, a dart thrown, or a "last played" touch on any existing
+// stat, full stop (explicit product decision, not inferred from the chuckin
+// precedent this constant otherwise mirrors).
+const NOT_CHECKOUT_TRAINER = `AND g.game_type != 'checkout_trainer'`;
 
 function getOneEightyStats(mode) {
   const mf = _mf(mode);
@@ -2861,6 +2924,10 @@ function getDartAnalytics(playerName, mode) {
   `).all(p.id);
 
   // 3 — Most common checkout routes (up to 3 darts; d2/d3 are NULL for shorter finishes)
+  // NOT_HYPOTHETICAL_DARTS: unlike topSectors/trebleRates above, this doesn't reuse
+  // ${BASE} (different JOIN shape — three dart-position joins, not one), so it needs
+  // its own exclusion. Chuckin never sets checkout=1 so it's already naturally
+  // excluded, but Checkout Trainer's proposed routes must not appear here either.
   const checkoutRoutes = db.prepare(`
     SELECT d1.sector AS s1, d1.multiplier AS m1,
            d2.sector AS s2, d2.multiplier AS m2,
@@ -2871,7 +2938,7 @@ function getDartAnalytics(playerName, mode) {
     JOIN  darts d1 ON d1.turn_id = t.id AND d1.dart_no = 1
     LEFT JOIN darts d2 ON d2.turn_id = t.id AND d2.dart_no = 2
     LEFT JOIN darts d3 ON d3.turn_id = t.id AND d3.dart_no = 3
-    WHERE t.player_id = ? AND t.checkout = 1 ${mf}
+    WHERE t.player_id = ? AND t.checkout = 1 ${mf} ${NOT_HYPOTHETICAL_DARTS}
     GROUP BY s1, m1, s2, m2, s3, m3
     ORDER BY times DESC
     LIMIT 10
@@ -4401,9 +4468,14 @@ function getLoadoutStats(playerName, loadoutId) {
   // game with zero turns recorded so far (just started, or abandoned immediately)
   // still counts as "played" under this loadout; darts/avg/180s/checkouts below
   // correctly stay at 0 for it since those genuinely require turns/darts to exist.
+  // NOT_CHECKOUT_TRAINER on J/JD: dartsThrown/checkouts below are genuine
+  // "physically thrown" figures (unlike avgDarts/totalPts, already safe via
+  // X01_ONLY) — a Checkout Trainer dart never touched a board and must not
+  // inflate a loadout's dart/checkout counts just because it happened to be
+  // that player's default loadout at the time.
   const GJ = `FROM game_players gp JOIN games g ON g.id=gp.game_id WHERE gp.player_id=? AND gp.loadout_id=?`;
-  const J  = `FROM turns t JOIN games g ON g.id=t.game_id JOIN game_players gp ON gp.game_id=t.game_id AND gp.player_id=t.player_id WHERE t.player_id=? AND gp.loadout_id=?`;
-  const JD = `FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id JOIN game_players gp ON gp.game_id=t.game_id AND gp.player_id=t.player_id WHERE t.player_id=? AND gp.loadout_id=?`;
+  const J  = `FROM turns t JOIN games g ON g.id=t.game_id JOIN game_players gp ON gp.game_id=t.game_id AND gp.player_id=t.player_id WHERE t.player_id=? AND gp.loadout_id=? ${NOT_CHECKOUT_TRAINER}`;
+  const JD = `FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id JOIN game_players gp ON gp.game_id=t.game_id AND gp.player_id=t.player_id WHERE t.player_id=? AND gp.loadout_id=? ${NOT_CHECKOUT_TRAINER}`;
 
   const gamesPlayed = db.prepare(`SELECT COUNT(DISTINCT g.id) AS v ${GJ}`).get(playerId, lo.id).v ?? 0;
   const wins = db.prepare(`SELECT COUNT(DISTINCT g.id) AS v ${GJ} AND g.winner_id = ?`).get(playerId, lo.id, playerId).v ?? 0;

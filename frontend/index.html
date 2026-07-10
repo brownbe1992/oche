@@ -8735,6 +8735,13 @@ function loadDartHeatmap(){
   const section = document.getElementById('dart-heatmap-section');
   const body = document.getElementById('dart-heatmap-body');
   if(!section || !body) return;
+  // Checkout Trainer taps aren't real thrown darts — there's no dartboard, no
+  // aim, nothing physical for a positional heatmap to mean anything about
+  // (docs/checkout-trainer-roadmap.md's "these do not count as darts
+  // whatsoever" product decision, same reasoning as the backend's
+  // NOT_CHECKOUT_TRAINER exclusion). Hide the section entirely rather than
+  // show a "heatmap" of typed-in answers.
+  if(playerGameType === 'checkout_trainer'){ section.hidden = true; return; }
   section.hidden = false;
   const gt = playerGameType;
   const label = (GAME_TYPES[gt] && GAME_TYPES[gt].label) || gt;
