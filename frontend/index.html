@@ -141,6 +141,15 @@
 
   .opts{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 6px}
   .seg{display:inline-flex;border:1px solid var(--wire);border-radius:10px;overflow:hidden}
+  /* Game mode's seg grew to 5 buttons (Checkout Trainer added) — wide enough on
+     a phone-width screen to overflow both the seg's own box and the viewport,
+     rendering the last button (or two) completely off-screen and unreachable
+     rather than merely visually cramped. inline-flex alone never wraps; this
+     modifier lets it wrap onto a second row instead, same look on wide screens
+     where it still fits on one line. Not applied to the base .seg class since
+     every other seg group (multiplier, sub-mode toggles, etc.) is short enough
+     that wrapping would only be a no-op there, not worth the extra selector. */
+  .seg.seg-wrap{flex-wrap:wrap;max-width:100%}
   .seg button{background:var(--board);border:none;color:var(--muted);padding:10px 15px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
   .seg button[aria-pressed="true"]{background:var(--surface-2);color:var(--ink)}
   .seg .lbl{align-self:center;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;padding:0 10px}
@@ -753,7 +762,7 @@
       <div class="setup-section">
         <div class="setup-label">Mode</div>
         <div class="opts" style="margin:0">
-          <div class="seg" role="group" aria-label="Game mode">
+          <div class="seg seg-wrap" role="group" aria-label="Game mode">
             <button id="mode-h2h" aria-pressed="true" onclick="setMode('h2h')">H2H</button>
             <button id="mode-practice" aria-pressed="false" onclick="setMode('practice')">Practice</button>
             <button id="mode-challenge" aria-pressed="false" onclick="setMode('challenge')">🎯 Daily Challenge</button>
