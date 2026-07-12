@@ -2958,14 +2958,25 @@ no persistent "remaining score" state to derive it from afterward.
 `game_type`, since both sub-modes share identical target selection and grading
 and differ only in pacing/scoring (the same relationship X01's own H2H-vs-
 Practice split has within one `game_type`). `games.config.durationSec`: fixed
-at `60` for Blitz, `null` for Freeform.
+at `60` for Blitz, `null` for Freeform. `games.config.difficulty`: one of
+`'under40' | 'under100' | 'over100' | 'full'` (default `'full'`) — set once at
+New Game via the Checkout Trainer options section's difficulty toggle
+(`setCheckoutTrainerDifficulty()`, `frontend/index.html`) and immutable for the
+rest of that session, same "baked into `config` at `startGame()`" treatment
+`mode`/`durationSec` already get.
 
 **Grading** (`frontend/scoring.js`):
-- `pickCheckoutTarget(doubleOut, rng)` — picks a uniform-random integer target
-  (`[2,170]` under double-out, `[1,170]` under single-out), re-rolling while
-  `checkoutHint()` reports the candidate unfinishable. Reuses `checkoutHint()`'s
-  own `''` unfinishable signal instead of a separate hardcoded bogey-number
-  list.
+- `pickCheckoutTarget(doubleOut, rng, difficulty)` — picks a uniform-random
+  integer target within the selected difficulty tier's `[low,high]` bound
+  (`CHECKOUT_TRAINER_DIFFICULTY_TIERS`), intersected with the out-mode's own
+  floor (`2` under double-out since `1` is an unfinishable bogey, `1` under
+  single-out). `difficulty` defaults to `'full'` (`[1,170]` intersected with
+  the out-mode floor — the original, tier-less range) when omitted or
+  unrecognized, so every pre-existing caller keeps working unchanged. Tiers:
+  `under40` `[1,39]`, `under100` `[1,99]`, `over100` `[100,170]`, `full`
+  `[1,170]`. Re-rolls while `checkoutHint()` reports the candidate
+  unfinishable, reusing `checkoutHint()`'s own `''` unfinishable signal
+  instead of a separate hardcoded bogey-number list.
 - `gradeCheckoutAttempt(target, doubleOut, darts)` — returns
   `{legal, usedDarts, optimalDarts, optimal, hint}`. `legal` mirrors
   `evaluateVisit()`'s `win` flag (reached exactly zero, valid last dart under

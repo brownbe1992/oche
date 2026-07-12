@@ -13,7 +13,7 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
   evaluateDartDoublesPractice, chuckinTiersReached, isStaircaseFinish,
   isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,
-  pickCheckoutTarget, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission } = scoring;
+  pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission } = scoring;
 
 // Builds a real dart object the same way the app does (makeDart minus the
 // thrownAt timestamp), rather than hand-rolling a fake {value,isDouble,...} shape.
@@ -319,6 +319,47 @@ describe('pickCheckoutTarget (Checkout Trainer target selection, docs/checkout-t
       const singleTarget = pickCheckoutTarget(false, () => roll);
       assert.ok(doubleTarget >= 2 && doubleTarget <= 170);
       assert.ok(singleTarget >= 1 && singleTarget <= 170);
+    }
+  });
+});
+
+describe('pickCheckoutTarget difficulty tiers (docs/checkout-trainer-roadmap.md "Target selection")', () => {
+  const tiers = ['under40', 'under100', 'over100', 'full'];
+
+  test('every tier stays within its own [low,high] bound, under both out-modes', () => {
+    for (const tierName of tiers) {
+      const { low: tierLow, high: tierHigh } = CHECKOUT_TRAINER_DIFFICULTY_TIERS[tierName];
+      for (const roll of [0, 0.1, 0.25, 0.5, 0.75, 0.9, 0.999]) {
+        for (const doubleOut of [true, false]) {
+          const target = pickCheckoutTarget(doubleOut, () => roll, tierName);
+          const low = Math.max(doubleOut ? 2 : 1, tierLow);
+          assert.ok(target >= low && target <= tierHigh,
+            `${tierName} (doubleOut=${doubleOut}, roll=${roll}) picked ${target}, expected [${low},${tierHigh}]`);
+          assert.notEqual(checkoutHint(target, doubleOut, 3), '',
+            `${tierName} picked unfinishable target ${target}`);
+        }
+      }
+    }
+  });
+
+  test('under40: never returns 40 or above', () => {
+    for (const roll of [0, 0.5, 0.999]) {
+      const target = pickCheckoutTarget(true, () => roll, 'under40');
+      assert.ok(target < 40);
+    }
+  });
+
+  test('over100: never returns below 100', () => {
+    for (const roll of [0, 0.5, 0.999]) {
+      const target = pickCheckoutTarget(true, () => roll, 'over100');
+      assert.ok(target >= 100);
+    }
+  });
+
+  test('an unknown or omitted difficulty falls back to the full [1,170]/[2,170] range unchanged', () => {
+    for (const roll of [0, 0.5, 0.999]) {
+      assert.equal(pickCheckoutTarget(true, () => roll, 'bogus-tier'), pickCheckoutTarget(true, () => roll, 'full'));
+      assert.equal(pickCheckoutTarget(false, () => roll), pickCheckoutTarget(false, () => roll, 'full'));
     }
   });
 });

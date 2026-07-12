@@ -199,23 +199,43 @@ function checkoutHint(rem, doubleOut, maxDarts){
    checkoutHint() supplies the objective minimum dart count to compare against.
    Nothing game-type-specific needed inventing here. */
 
+// Difficulty tiers for target selection (docs/checkout-trainer-roadmap.md
+// "Target selection"). Each tier is a [low,high] bound on the target score;
+// `pickCheckoutTarget()` intersects it with the out-mode's own floor (2 under
+// double-out, 1 under straight-out) so a tier never needs to know about
+// bogey/double-out rules itself. 'full' (2-170) is the default and matches
+// the app's original, tier-less behavior.
+const CHECKOUT_TRAINER_DIFFICULTY_TIERS = {
+  under40:  { low: 1, high: 39  },
+  under100: { low: 1, high: 99  },
+  over100:  { low: 100, high: 170 },
+  full:     { low: 1, high: 170 }
+};
+
 // Picks a random target score that's actually finishable under the given
 // out-mode, reusing checkoutHint()'s own '' unfinishable signal instead of a
 // separate hardcoded bogey-number list (169/168/166/165/163/162/159, and 1
 // under double-out) — asking for an impossible checkout would be a bad-faith
 // question, not a harder one (see the roadmap doc's "Target selection").
 // `rng` defaults to Math.random but is injectable for a deterministic test.
-// The loop is bounded only as a defensive guard against a pathological rng —
-// every integer in the scanned range has a finishable value within a few
-// rolls in practice, so this never meaningfully runs to the fallback.
-function pickCheckoutTarget(doubleOut, rng){
+// `difficulty` selects a CHECKOUT_TRAINER_DIFFICULTY_TIERS key; an unknown or
+// omitted value falls back to 'full', so existing callers/tests keep working
+// unchanged. The random-roll loop is bounded only as a defensive guard
+// against a pathological rng — every tier has finishable values within a few
+// rolls in practice, so this never meaningfully runs to the fallback scan.
+function pickCheckoutTarget(doubleOut, rng, difficulty){
   const roll = rng || Math.random;
-  const low = doubleOut ? 2 : 1;   // double-out can never finish on 1; straight-out can
+  const tier = CHECKOUT_TRAINER_DIFFICULTY_TIERS[difficulty] || CHECKOUT_TRAINER_DIFFICULTY_TIERS.full;
+  const low = Math.max(doubleOut ? 2 : 1, tier.low);   // double-out can never finish on 1; straight-out can
+  const high = tier.high;
   for(let i=0;i<200;i++){
-    const candidate = low + Math.floor(roll() * (170 - low + 1));
+    const candidate = low + Math.floor(roll() * (high - low + 1));
     if(checkoutHint(candidate, doubleOut, 3) !== '') return candidate;
   }
-  return doubleOut ? 40 : 1;  // unreachable in practice — every scanned range has finishable values
+  for(let c=low;c<=high;c++){   // unreachable in practice — deterministic scan of the tier itself
+    if(checkoutHint(c, doubleOut, 3) !== '') return c;
+  }
+  return doubleOut ? 40 : 1;  // unreachable in practice — every tier has at least one finishable value
 }
 
 // Grades one proposed checkout attempt against a target score. `legal` mirrors
@@ -354,7 +374,7 @@ if (typeof module !== 'undefined' && module.exports) {
     evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS,
     evaluateDartDoublesPractice, isStaircaseFinish,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,
-    pickCheckoutTarget, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
+    pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
     CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH, challengeBadgeSignals,
     chuckinTiersReached,
     isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,

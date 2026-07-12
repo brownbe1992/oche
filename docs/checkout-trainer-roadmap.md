@@ -5,15 +5,15 @@
 > (`pickCheckoutTarget()`/`gradeCheckoutAttempt()`, `frontend/scoring.js`), all
 > five milestone ladders (28 tiers) plus five one-off flagship badges, Personal
 > Bests/stat bubbles, the Checkout Blitz leaderboard, New Game screen
-> integration, and Home page/Player Profile integration. Full detail:
+> integration, Home page/Player Profile integration, and four target-selection
+> difficulty tiers (Under 40, Under 100, Over 100, Full Range). Full detail:
 > `REFERENCE.md` §19. This doc's own design below is kept as-written for
 > context; where the shipped implementation resolved something differently
 > than the original sketch, that's called out inline below rather than
 > silently edited away.
 >
 > **Deferred, not built**: the trick-question/bogey-number difficulty variant
-> (and its conditional 💣 Bogey Buster badge), and difficulty tiers beyond a
-> single full-range (2-170) target pool — both tracked as their own open items
+> (and its conditional 💣 Bogey Buster badge) — tracked as its own open item
 > on `docs/open-roadmap-items.md` rather than left silently unbuilt.
 
 ## Goal
@@ -90,11 +90,18 @@ own scoring, leaderboard, and achievements — see its own section further down)
 Only draw from scores that are actually finishable under the player's current
 out-mode — under double-out, that means skipping the known bogey numbers (169, 168,
 166, 165, 163, 162, 159, and 1) entirely; asking for an impossible checkout would be a
-bad-faith question, not a harder one. A difficulty toggle (e.g. "under 40" / "under
-100" / "full range up to 170") is a natural, low-effort addition on top of a uniform
-random pick from the legal set — left as an open question on exact tiers/weighting
-below, the same way Daily Challenge's own doc left its curated-target-list content
-decision open.
+bad-faith question, not a harder one.
+
+**Difficulty tiers — shipped.** A setup-screen toggle (`checkout-trainer-difficulty-*`
+buttons inside the Checkout Trainer options section, `frontend/index.html`) picks one
+of four tiers, baked into `games.config.difficulty` for the session same as
+`mode`/`durationSec`: **Under 40** (`[1,39]`), **Under 100** (`[1,99]`), **Over 100**
+(`[100,170]`), and **Full Range** (`[1,170]`, the default, matching the original
+tier-less behavior). Each tier bound is intersected with the out-mode's own floor
+(2 under double-out, 1 under single-out) rather than the tier needing to know about
+bogey/double-out rules itself — `CHECKOUT_TRAINER_DIFFICULTY_TIERS` /
+`pickCheckoutTarget(doubleOut, rng, difficulty)`, `frontend/scoring.js`. Full detail:
+`REFERENCE.md` §19.
 
 ### Data model
 
@@ -443,8 +450,8 @@ Not yet addressed anywhere in this doc, per `CLAUDE.md`'s standing conventions:
    all 22 tiers come from one `.forEach()` rather than 22 hand-written definitions.
 6. The one-off flagship badges (170 Club, One-Darter, Perfectionist), plus Bogey
    Buster if the trick-question difficulty variant ships.
-7. Difficulty tiers and a leaderboard — later passes once the core loop is proven and
-   actually played a few times.
+7. Difficulty tiers (**shipped**) and a leaderboard — later passes once the core loop
+   is proven and actually played a few times.
 8. **Checkout Blitz**, once Freeform mode is proven and actually played: the
    `config.mode`/`config.durationSec` fields, the wall-clock countdown timer, and the
    "serve the next target on every submission" pacing change.
@@ -459,9 +466,10 @@ Not yet addressed anywhere in this doc, per `CLAUDE.md`'s standing conventions:
   the lifetime ladders and cross-player Blitz leaderboard this doc itself
   designed are impossible without server-side persistence, so this was
   effectively decided by the shape of what was actually built.
-- **Difficulty tiers**: **not built for v1** — a single full-range (2-170,
-  skipping unfinishable targets) pool ships instead; tracked as its own
-  open item on `docs/open-roadmap-items.md` rather than guessed at here.
+- **Difficulty tiers**: **shipped** — four tiers (Under 40, Under 100, Over
+  100, Full Range 2-170), a session-scoped setup-screen toggle baked into
+  `games.config.difficulty`. See "Target selection" above and `REFERENCE.md`
+  §19 for the full detail.
 - **Trick-question variant**: **deferred**, per this doc's own framing that
   the core game is complete without it; the 💣 Bogey Buster badge is deferred
   with it.
@@ -483,9 +491,6 @@ Not yet addressed anywhere in this doc, per `CLAUDE.md`'s standing conventions:
   round-trip per round — is real and worth weighing before committing, since it's a
   much smaller build. Worth deciding by how much the "lifetime stats on this" actually
   matters to whoever's using it, not guessed here.
-- Exact difficulty tiers/weighting for target selection — a content decision, best
-  made by actually playing it a few times (same framing Daily Challenge's own open
-  questions used for its curated target list).
 - **Trick-question difficulty variant**: occasionally give an actual bogey number and
   accept "not possible" as the correct answer, rather than only ever asking legally
   finishable targets. Not designed in detail here (needs its own UI affordance for

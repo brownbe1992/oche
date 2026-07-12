@@ -827,6 +827,14 @@
           </div>
         </div>
         <p class="pp-meta" id="checkout-trainer-mode-desc" style="margin:10px 0 0"></p>
+        <div class="opts" style="margin:10px 0 0">
+          <div class="seg" role="group" aria-label="Checkout Trainer difficulty">
+            <button id="checkout-trainer-difficulty-under40" aria-pressed="false" onclick="setCheckoutTrainerDifficulty('under40')">Under 40</button>
+            <button id="checkout-trainer-difficulty-under100" aria-pressed="false" onclick="setCheckoutTrainerDifficulty('under100')">Under 100</button>
+            <button id="checkout-trainer-difficulty-over100" aria-pressed="false" onclick="setCheckoutTrainerDifficulty('over100')">Over 100</button>
+            <button id="checkout-trainer-difficulty-full" aria-pressed="true" onclick="setCheckoutTrainerDifficulty('full')">Full Range (2-170)</button>
+          </div>
+        </div>
       </div>
 
       <!-- Format (H2H only) -->
@@ -1627,7 +1635,7 @@ function makeDart(sector, mult){
 let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, mode:'h2h',
   gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[], ghostLeg:null,
   doublesTargets:[], loadoutByName:{}, leagueId:null,
-  checkoutTrainerMode:'freeform' }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice' | 'checkout_trainer'; gameType: 'x01' | 'cricket' | 'doubles_practice' | 'checkout_trainer'
+  checkoutTrainerMode:'freeform', checkoutTrainerDifficulty:'full' }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice' | 'checkout_trainer'; gameType: 'x01' | 'cricket' | 'doubles_practice' | 'checkout_trainer'; checkoutTrainerDifficulty: 'under40' | 'under100' | 'over100' | 'full'
   // leagueId (docs/league-mode-roadmap.md): only ever set via the "log to league?"
   // picker below, and only when the picker had genuine ambiguity to resolve (>1
   // active league matched) — the common 0-or-1-match case tags server-side with no
@@ -2473,6 +2481,7 @@ function setMode(mode){
     renderPlayers();
     const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
     setCheckoutTrainerMode(setup.checkoutTrainerMode || 'freeform');
+    setCheckoutTrainerDifficulty(setup.checkoutTrainerDifficulty || 'full');
   } else if(mode === 'practice'){
     const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
   } else {
@@ -2499,6 +2508,19 @@ function setCheckoutTrainerMode(sub){
     : 'Untimed — work through targets at your own pace, with the answer revealed after every attempt. Runs until you end the session.';
   const startBtn = document.getElementById('start-btn');
   if(startBtn && setup.mode === 'checkout_trainer') startBtn.textContent = sub==='blitz' ? 'Start Blitz' : 'Start training';
+}
+
+// Checkout Trainer's difficulty-tier toggle (docs/checkout-trainer-roadmap.md
+// "Target selection") — same sibling-toggle pattern as setCheckoutTrainerMode()
+// above. Tier bounds themselves live in CHECKOUT_TRAINER_DIFFICULTY_TIERS
+// (frontend/scoring.js); this just records the chosen key onto setup, which
+// startGame() bakes into game.config.difficulty for the duration of the session.
+function setCheckoutTrainerDifficulty(tier){
+  setup.checkoutTrainerDifficulty = tier;
+  document.getElementById('checkout-trainer-difficulty-under40').setAttribute('aria-pressed', tier==='under40');
+  document.getElementById('checkout-trainer-difficulty-under100').setAttribute('aria-pressed', tier==='under100');
+  document.getElementById('checkout-trainer-difficulty-over100').setAttribute('aria-pressed', tier==='over100');
+  document.getElementById('checkout-trainer-difficulty-full').setAttribute('aria-pressed', tier==='full');
 }
 
 /* ---------- Ghost Opponent (docs/archive/ghost-opponent-roadmap.md) ---------- */
@@ -3458,7 +3480,7 @@ async function startGame(){
   const config = gameType === 'cricket' ? { numbers: cricketNumbers }
     : gameType === 'doubles_practice' ? { doubles: setup.doublesTargets.slice() }
     : gameType === 'chuckin' ? {}
-    : gameType === 'checkout_trainer' ? { mode: setup.checkoutTrainerMode, durationSec: setup.checkoutTrainerMode==='blitz' ? 60 : null }
+    : gameType === 'checkout_trainer' ? { mode: setup.checkoutTrainerMode, durationSec: setup.checkoutTrainerMode==='blitz' ? 60 : null, difficulty: setup.checkoutTrainerDifficulty || 'full' }
     : { startingScore: startScore };
   const category = gameType === 'cricket'
     ? (setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
@@ -3481,7 +3503,7 @@ async function startGame(){
     // the common 0-or-1-match case tags server-side with this staying null. The
     // server-side onGameCreated hook re-validates regardless of what's sent here.
     leagueId: setup.leagueId,
-    players: names.map(n=>GAME_TYPES[gameType].newMatchPlayer(n, gameType==='cricket' || gameType==='doubles_practice' ? config : startScore)),
+    players: names.map(n=>GAME_TYPES[gameType].newMatchPlayer(n, gameType==='cricket' || gameType==='doubles_practice' || gameType==='checkout_trainer' ? config : startScore)),
     // Checkout Blitz (docs/checkout-trainer-roadmap.md): a wall-clock deadline, not a
     // decrementing counter, so a backgrounded/throttled tab can't grant extra time.
     // Set once startNextRoundCheckoutTrainer() or the run itself begins; null for
@@ -8083,9 +8105,9 @@ function renderGameChuckin(){
    "the current target"), and submitCheckoutAttempt() below is this mode's
    analog of enterTurn()/enterTurnCricket(), just grading against the objective
    optimum (scoring.js's gradeCheckoutAttempt()) instead of an opponent. */
-function newMatchPlayerCheckoutTrainer(name){
+function newMatchPlayerCheckoutTrainer(name, config){
   const doubleOut = playerOut(name)==='double';
-  const p = { name, score: pickCheckoutTarget(doubleOut), doubleOut,
+  const p = { name, score: pickCheckoutTarget(doubleOut, undefined, config && config.difficulty), doubleOut,
     attempts:0, legalCount:0, optimalCount:0, currentStreak:0,
     lifetimeAttemptsBase:0, lifetimeOptimalBase:0,
     sessionRounds:[] };
@@ -8233,7 +8255,7 @@ function submitCheckoutAttempt(){
     return endBlitzRun();
   }
 
-  p.score = pickCheckoutTarget(p.doubleOut);
+  p.score = pickCheckoutTarget(p.doubleOut, undefined, game.config && game.config.difficulty);
   renderGameCheckoutTrainer();
 }
 // Mirrors undoLastTurnDoublesPractice()/undoLastTurnChuckin()'s snapshot-restore
