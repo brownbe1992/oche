@@ -7,11 +7,13 @@
 > more than one active league at once), live standings computation (no
 > maintained tally — see "resolved open questions" below), season lifecycle
 > (active/ended, reversible), a Leagues nav tab (list/setup/detail screens), a
-> Home page teaser, and a Player Profile "Leagues" stat block. Full detail:
-> `REFERENCE.md` §18. This doc's own design below is kept as-written for
-> context; where the shipped implementation resolved something differently
-> than the original sketch, that's called out explicitly rather than silently
-> edited away.
+> Home page teaser, a Player Profile "Leagues" stat block, and **Cricket league
+> support** (a `leagues.game_type` column alongside X01, a setup-screen
+> game-type selector, and full X01/Cricket cross-isolation in the auto-tag
+> hook). Full detail: `REFERENCE.md` §18. This doc's own design below is kept
+> as-written for context; where the shipped implementation resolved something
+> differently than the original sketch, that's called out explicitly rather
+> than silently edited away.
 
 ### Resolved open questions (were listed below as open; now decided and shipped)
 
@@ -37,12 +39,24 @@
   tally column, avoiding drift"), and that's the path taken. `league_players`
   ended up holding only enrollment (`league_id, player_id, joined_at`), no
   tally columns at all.
-- **Game-type scope**: **X01 only for v1** (the same four starting scores
-  tournament mode uses). Cricket already has full H2H parity and the
-  standings math is game-type-agnostic, so a Cricket-league extension is a
-  clean, separately-scoped follow-up rather than a fundamental blocker — just
-  not built now. Doubles Practice and Just Chuckin' It are excluded
-  regardless, being solo/no-winner formats.
+- **Game-type scope**: **X01 or Cricket** — `leagues.game_type` (`'x01'` |
+  `'cricket'`, default `'x01'` for every pre-Cricket league) alongside the
+  original v1 `category` column. X01's `category` stays the numeric starting
+  score (`'501'|'301'|'170'|'101'`); a Cricket league's `category` reuses the
+  exact two-value label a Cricket H2H game is already tagged with at creation
+  (`'Cricket (15-20, Bull)'` for the classic preset, `'Custom Cricket'` for
+  any custom target set) rather than inventing a parallel vocabulary — this
+  means every custom-numbers Cricket game shares one league category
+  regardless of which specific numbers were chosen, the same "a league
+  doesn't fix the exact match format" looseness an X01 league already applies
+  to legs/sets. The `onGameCreated` auto-tag hook and `getEligibleLeagues()`
+  both now filter on `game_type` in addition to `category`, so an X01 game
+  can never tag into a Cricket league (or vice versa) even when both leagues
+  enroll the same two players — verified by committed cross-isolation tests.
+  Standings computation (`_computeLeagueStandings()`) needed **zero changes**
+  — it was already game-type-agnostic, exactly as this doc originally
+  predicted. Doubles Practice, Just Chuckin' It, and Checkout Trainer remain
+  excluded, being solo/no-winner formats.
 
 > **Related (2026-07)**: `docs/companion-website-roadmap.md` proposes cross-instance
 > leagues run through a project-operated site, reusing this doc's standings logic —
@@ -70,8 +84,11 @@ unify them into one system.
 
 ## Design
 
-- **`leagues`** table: `id, name, category, starts_at, ends_at, status, points_win,
-  points_loss` (or a more elaborate points scheme if wanted — see open questions).
+- **`leagues`** table: `id, name, game_type, category, starts_at, ends_at, status,
+  points_win, points_loss` (or a more elaborate points scheme if wanted — see open
+  questions). `game_type` (`'x01'|'cricket'`, shipped as a follow-up to the original
+  v1 design — see "Game-type scope" above) determines which category vocabulary
+  `category` draws from.
 - **`league_players`** table: `league_id, player_id, points, played, won, lost` (a
   denormalized running tally, recomputed or incrementally updated as league-tagged
   games complete — consistent with the rest of the app's "compute from raw data"
@@ -99,8 +116,11 @@ Addressed as shipped (2026-07), per `CLAUDE.md`'s standing conventions:
   case (0/1/>1 candidates, explicit valid/stale leagueId, every non-eligible
   game shape), standings computation (points formula, decided-vs-abandoned
   games, zero-played roster rows, sort order/tiebreak), season status
-  transitions, and the `wipeAllData()`/`resetStats()` standing-rule
-  interactions — a committed, re-runnable suite, not a one-off manual check.
+  transitions, the `wipeAllData()`/`resetStats()` standing-rule interactions,
+  and Cricket league support (gameType validation, category-per-gameType, and
+  X01/Cricket cross-isolation in both directions, including the same two
+  players enrolled in one league of each type) — a committed, re-runnable
+  suite, not a one-off manual check.
 - **Accessibility**: the standings view is a real `<table>` with
   `<caption class="sr-only">` and `<th scope="col">` headers (needs no
   separate linearized fallback, unlike the tournament bracket's spatial

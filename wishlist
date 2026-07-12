@@ -56,7 +56,7 @@ Others
 - Admin login progressive backoff (replace the flat lockout so a real admin can never be fully locked out) — full design in docs/admin-login-backoff-roadmap.md
 - Admin account recovery CLI (reset a forgotten password / clear a stuck lockout without email) — full design in docs/admin-account-recovery-roadmap.md
 - Testing & observability (test coverage + server-side error logging) — done (Part A), see docs/testing-and-observability-roadmap.md
-- League/season mode (standings across casual matches over time) — full design in docs/league-mode-roadmap.md
+- League/season mode (standings across casual matches over time) — done, see docs/archive/league-mode-roadmap.md
 - Dart Builder (custom loadout screen for barrel/shaft/flight components, saved loadouts, New Game "Change Loadout" picker, per-loadout stats, loadout comparison view, barrel/flight shape+grip icons, quick-add-full-set) — done; optional photo upload per component was considered and dropped, see docs/archive/dart-builder-roadmap.md
 - Daily/weekly solo challenge — done (core) plus badges/its own Profile tab, see docs/daily-challenge-roadmap.md
 - Ghost opponent (practice against a replay of your own past leg) — done (X01 only): race feature, win/loss tracking, and the "Ghost Slayer" first-win badge, see docs/archive/ghost-opponent-roadmap.md

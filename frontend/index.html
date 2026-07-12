@@ -3148,16 +3148,22 @@ function updateLeaguePicker(named){
   if(!wrap || !sel) return;
   const screen = document.getElementById('screen-setup');
   if(!screen || !screen.classList.contains('on')){ wrap.style.display='none'; return; }
-  // League mode is X01-only, H2H (non-practice), exactly 2 players — mirrors the
-  // server-side auto-tag hook's own eligibility gate exactly.
-  if(named.length !== 2 || setup.practice || setup.mode !== 'h2h' || setup.gameType !== 'x01'){
+  // League mode is X01 or Cricket, H2H (non-practice), exactly 2 players — mirrors
+  // the server-side auto-tag hook's own eligibility gate exactly.
+  if(named.length !== 2 || setup.practice || setup.mode !== 'h2h' || (setup.gameType !== 'x01' && setup.gameType !== 'cricket')){
     wrap.style.display='none'; setup.leagueId=null; return;
   }
   const [p1, p2] = named;
-  const category = String(setup.start);
+  // Cricket's category is the same descriptive label a Cricket H2H game gets tagged
+  // with at creation (frontend/index.html's own startGame(), category derivation) —
+  // reused verbatim so this picker's eligibility check and the actual game's
+  // eventual games.category value can never disagree.
+  const category = setup.gameType==='cricket'
+    ? (setup.cricketPreset==='custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
+    : String(setup.start);
   if(_leagueAbort) _leagueAbort.aborted = true;
   const tok = { aborted:false }; _leagueAbort = tok;
-  fetch(`/api/leagues/eligible?players=${encodeURIComponent(p1)},${encodeURIComponent(p2)}&category=${encodeURIComponent(category)}`)
+  fetch(`/api/leagues/eligible?players=${encodeURIComponent(p1)},${encodeURIComponent(p2)}&category=${encodeURIComponent(category)}&gameType=${encodeURIComponent(setup.gameType)}`)
     .then(r=>r.json()).then(list=>{
       if(tok.aborted) return;   // a newer selection already took over — don't clobber its result
       if(!Array.isArray(list) || list.length <= 1){
@@ -3281,7 +3287,7 @@ function setGameType(type){
   document.getElementById('start-score-section').hidden = (type === 'cricket' || setup.mode === 'challenge' || setup.mode === 'ghost');
   document.getElementById('cricket-options-section').hidden = (type !== 'cricket' || setup.mode === 'challenge' || setup.mode === 'ghost');
   if(type === 'cricket') renderCricketNumberGrid();
-  updateSetupChrome();   // league mode is X01-only (docs/league-mode-roadmap.md) — re-check eligibility
+  updateSetupChrome();   // league mode is X01 or Cricket (docs/league-mode-roadmap.md) — re-check eligibility
 }
 function setCricketPreset(preset){
   setup.cricketPreset = preset;
@@ -3289,6 +3295,9 @@ function setCricketPreset(preset){
   document.getElementById('cricket-preset-custom').setAttribute('aria-pressed', preset==='custom');
   document.getElementById('cricket-custom-body').hidden = (preset !== 'custom');
   if(preset === 'custom' && setup.cricketCustomNumbers.length===0) fillCricketClassicIntoCustom();
+  // Cricket league eligibility keys off classic-vs-custom (docs/league-mode-roadmap.md
+  // "Game-type scope") — re-check whenever the preset itself changes, not just gameType.
+  updateSetupChrome();
 }
 function fillCricketClassicIntoCustom(){
   setup.cricketCustomNumbers = CRICKET_STANDARD_NUMBERS.slice();
@@ -4013,7 +4022,7 @@ async function _reallyBeginTournamentMatch(matchId){
   show('game'); renderGame();
 }
 
-/* ---------- leagues (docs/league-mode-roadmap.md, X01 only for v1) ----------
+/* ---------- leagues (docs/league-mode-roadmap.md, X01 or Cricket) ----------
    Structurally a lighter-weight sibling of the tournament screen just above: same
    list/setup/detail 3-state view machine, same roster-checklist setup pattern —
    but no bracket, no per-round format table, no seeding. Games auto-tag into a
@@ -4043,14 +4052,15 @@ function renderLeagueList(list){
   const body=document.getElementById('league-body');
   const rows = (list||[]).map(l=>{
     const statusBadge = `${LEAGUE_STATUS_ICON[l.status]||''} ${LEAGUE_STATUS_LABEL[l.status]||l.status}`;
+    const gameTypeBadge = l.gameType==='cricket' ? '🎯 ' : '';
     return `<button class="rp-main" onclick="openLeague(${l.id})">
       <div class="rp-name-row">${escapeHtml(l.name)}</div>
-      <div class="rp-stat">${escapeHtml(l.category)} · ${l.playerCount} player${l.playerCount===1?'':'s'} · ${statusBadge}</div>
+      <div class="rp-stat">${gameTypeBadge}${escapeHtml(l.category)} · ${l.playerCount} player${l.playerCount===1?'':'s'} · ${statusBadge}</div>
     </button>`;
   }).join('');
   body.innerHTML = `
     <h2 style="font-size:18px;margin-bottom:4px">Leagues</h2>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 16px">A season of casual X01 matches — any two enrolled players, any time. Games log to a league automatically.</p>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px">A season of casual X01 or Cricket matches — any two enrolled players, any time. Games log to a league automatically.</p>
     <div class="roster-list">${rows || '<div class="empty">No leagues yet.<br>Create your first one below.</div>'}</div>
     <div class="btn-row">
       <button class="btn btn-primary" onclick="openLeagueSetup()">+ New League</button>
@@ -4060,8 +4070,24 @@ function openLeague(id){ currentLeagueId=id; leagueView='detail'; renderLeagueSc
 function openLeagueSetup(){ leagueSetup=null; leagueView='setup'; renderLeagueScreen(); }
 
 /* ---------- setup ---------- */
+// League game type (docs/league-mode-roadmap.md "Game-type scope") — X01 or Cricket,
+// mirroring the New Game screen's own X01/Cricket toggle in spirit. Cricket leagues
+// reuse the exact two-value games.category label a Cricket H2H game is already
+// tagged with at creation (classic vs. custom target numbers) rather than a numeric
+// starting score.
+const LEAGUE_X01_CATEGORIES = ['501','301','170','101'];
+const LEAGUE_CRICKET_CATEGORIES = [
+  { value:'Cricket (15-20, Bull)', label:'Classic (15-20, Bull)' },
+  { value:'Custom Cricket', label:'Custom numbers' },
+];
+function setLeagueGameType(gameType){
+  const ls = leagueSetup;
+  ls.gameType = gameType;
+  ls.category = gameType==='cricket' ? LEAGUE_CRICKET_CATEGORIES[0].value : LEAGUE_X01_CATEGORIES[0];
+  renderLeagueSetup();
+}
 function renderLeagueSetup(){
-  if(!leagueSetup) leagueSetup = { name:'', category:'501', selected:[], startsAt: localDateStr(), endsAt:'', pointsWin:1, pointsLoss:0 };
+  if(!leagueSetup) leagueSetup = { name:'', gameType:'x01', category:'501', selected:[], startsAt: localDateStr(), endsAt:'', pointsWin:1, pointsLoss:0 };
   const ls = leagueSetup;
 
   const checklist = roster.map(name=>{
@@ -4073,14 +4099,23 @@ function renderLeagueSetup(){
     </label>`;
   }).join('');
 
+  const categoryOptions = ls.gameType==='cricket'
+    ? LEAGUE_CRICKET_CATEGORIES.map(c=>`<option value="${escapeHtml(c.value)}"${ls.category===c.value?' selected':''}>${escapeHtml(c.label)}</option>`).join('')
+    : LEAGUE_X01_CATEGORIES.map(c=>`<option value="${c}"${ls.category===c?' selected':''}>${c}</option>`).join('');
+
   document.getElementById('league-body').innerHTML = `
     <button class="pp-back" onclick="leagueView='list'; renderLeagueScreen()">← Leagues</button>
     <h2 style="font-size:18px;margin:8px 0 4px">New League</h2>
     <label class="field">League name</label>
     <input type="text" id="league-name" maxlength="64" value="${escapeHtml(ls.name)}" oninput="leagueSetup.name=this.value" style="margin-bottom:14px">
-    <label class="field">Format (X01)</label>
+    <label class="field">Game type</label>
+    <div class="seg" role="group" aria-label="League game type" style="margin-bottom:14px">
+      <button type="button" aria-pressed="${ls.gameType==='x01'}" onclick="setLeagueGameType('x01')">X01</button>
+      <button type="button" aria-pressed="${ls.gameType==='cricket'}" onclick="setLeagueGameType('cricket')">🎯 Cricket</button>
+    </div>
+    <label class="field">${ls.gameType==='cricket' ? 'Format (Cricket)' : 'Format (X01)'}</label>
     <select class="date-input" id="league-category" style="width:auto;margin-bottom:14px" onchange="leagueSetup.category=this.value">
-      ${['501','301','170','101'].map(c=>`<option value="${c}"${ls.category===c?' selected':''}>${c}</option>`).join('')}
+      ${categoryOptions}
     </select>
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">
       <div>
@@ -4120,7 +4155,7 @@ function submitLeagueSetup(){
   if(!name){ uiAlert('Enter a league name.'); return; }
   Auth.ensureCanWrite(()=>{
     Backend.send('POST', '/api/leagues', {
-      name, category: ls.category, startsAt: ls.startsAt, endsAt: ls.endsAt,
+      name, gameType: ls.gameType, category: ls.category, startsAt: ls.startsAt, endsAt: ls.endsAt,
       pointsWin: ls.pointsWin, pointsLoss: ls.pointsLoss, players: ls.selected,
     }).then(r=>{
       leagueSetup = null;
@@ -4167,10 +4202,11 @@ function renderLeagueDetail(l){
   const enrolledNames = new Set(l.standings.map(r=>r.name));
   const notEnrolled = roster.filter(n=>!enrolledNames.has(n));
 
+  const gameTypeBadge = l.gameType==='cricket' ? '🎯 ' : '';
   body.innerHTML = `
     <button class="pp-back" onclick="leagueView='list'; renderLeagueScreen()">← Leagues</button>
     <h2 style="font-size:18px;margin:8px 0 4px">${escapeHtml(l.name)}</h2>
-    <p class="pp-meta" style="margin:0 0 16px">${escapeHtml(l.category)} · ${statusBadge} · ${dateRange} · win ${l.pointsWin} / loss ${l.pointsLoss} pts</p>
+    <p class="pp-meta" style="margin:0 0 16px">${gameTypeBadge}${escapeHtml(l.category)} · ${statusBadge} · ${dateRange} · win ${l.pointsWin} / loss ${l.pointsLoss} pts</p>
     <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <caption class="sr-only">Standings for ${escapeHtml(l.name)}</caption>
@@ -4445,8 +4481,8 @@ function renderPlayerPage(){
       <div class="pp-section-title">Tournaments</div>
       <div id="player-tournament-stats"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </div>` : '';
-  // League mode is also X01-only (docs/league-mode-roadmap.md v1 scope) — same gate.
-  const leagueStatsSection = gt==='x01' ? `
+  // League mode is X01 or Cricket (docs/league-mode-roadmap.md) — shown on both tabs.
+  const leagueStatsSection = (gt==='x01' || gt==='cricket') ? `
     <div class="pp-section">
       <div class="pp-section-title">Leagues</div>
       <div id="player-league-stats"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
@@ -4868,7 +4904,7 @@ function loadPlayerLeagueStats(){
     }
     el.innerHTML = `<div class="roster-list">${list.map(s=>`
       <button class="rp-main" onclick="openLeague(${s.leagueId}); show('league')">
-        <div class="rp-name-row">${escapeHtml(s.name)} ${s.status==='ended'?'<span class="pp-meta">(ended)</span>':''}</div>
+        <div class="rp-name-row">${s.gameType==='cricket'?'🎯 ':''}${escapeHtml(s.name)} ${s.status==='ended'?'<span class="pp-meta">(ended)</span>':''}</div>
         <div class="rp-stat">#${s.rank} of ${s.totalPlayers} · ${s.played} played · ${s.points} pts</div>
       </button>`).join('')}</div>`;
   }).catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load league stats.</p>`; });

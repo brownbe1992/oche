@@ -50,18 +50,22 @@
        POST /api/tournaments/matches/:id/walkover -> { winner } -> records a result without playing it out
        GET  /api/players/tournament-stats -> (?name=...) -> { wins, runnerUps, bestFinish } (public)
 
-       GET  /api/leagues           -> [ { id, name, category, status, startsAt, endsAt, pointsWin, pointsLoss, playerCount } ] (public)
-       POST /api/leagues           -> { name, category, startsAt?, endsAt?, pointsWin?, pointsLoss?, players?:[names] } -> { leagueId }
+       GET  /api/leagues           -> [ { id, name, gameType, category, status, startsAt, endsAt, pointsWin, pointsLoss, playerCount } ] (public)
+       POST /api/leagues           -> { name, gameType?:'x01'|'cricket', category, startsAt?, endsAt?, pointsWin?, pointsLoss?, players?:[names] } -> { leagueId }
+                                       gameType omitted -> 'x01'. category must match gameType: '501'|'301'|'170'|'101' for
+                                       x01, 'Cricket (15-20, Bull)'|'Custom Cricket' for cricket (the same label a Cricket
+                                       H2H game is already tagged with at creation).
        GET  /api/leagues/:id       -> { ...league, standings:[{name,played,won,lost,points,winPct}] } or 404 (public)
        POST /api/leagues/:id/players -> { name } -> enroll a player -> { ok }
        PUT  /api/leagues/:id/status  -> { status: 'active'|'ended' } -> { ok }
-       GET  /api/leagues/eligible  -> (?players=NameA,NameB&category=501) -> [ { id, name } ] (public) — leagues both
-                                       players are enrolled in, matching category, currently active; used by the New
-                                       Game screen to decide whether to show a "log to which league?" picker. A game
-                                       matching exactly one active league is tagged automatically with no picker at
-                                       all — this endpoint only matters when there's genuine ambiguity to resolve.
-       GET  /api/players/league-summary -> (?name=...) -> [ { leagueId, name, category, status, rank, totalPlayers,
-                                       played, won, lost, points } ] (public)
+       GET  /api/leagues/eligible  -> (?players=NameA,NameB&category=501&gameType=x01) -> [ { id, name } ] (public) —
+                                       leagues both players are enrolled in, matching gameType+category, currently
+                                       active; used by the New Game screen to decide whether to show a "log to which
+                                       league?" picker. gameType omitted -> 'x01'. A game matching exactly one active
+                                       league is tagged automatically with no picker at all — this endpoint only
+                                       matters when there's genuine ambiguity to resolve.
+       GET  /api/players/league-summary -> (?name=...) -> [ { leagueId, name, gameType, category, status, rank,
+                                       totalPlayers, played, won, lost, points } ] (public)
        GET  /api/players/dart-heatmap -> (?name=...&gameType=...&mode=...) -> [{sector,multiplier,zone,missZone,missDepth,hits}] (public)
        GET  /api/players/bounce-outs -> (?name=...&gameType=...&mode=...) -> { count } (public)
        GET  /api/players/around-the-world -> (?name=...) -> { hit, count, total } (public)
@@ -858,7 +862,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, db.getTournamentStats(url.searchParams.get('name')));
     }
 
-    // ----- leagues (docs/league-mode-roadmap.md, X01 only for v1) -----
+    // ----- leagues (docs/league-mode-roadmap.md, X01 or Cricket) -----
     // Same read/write split as tournaments: viewing leagues/standings is public;
     // creating a league, enrolling a player, and ending/reopening one are all
     // state-changing writes gated by requireWrite. Games auto-tag into a league via
@@ -893,7 +897,7 @@ const server = http.createServer(async (req, res) => {
     // picker — see db.js's getEligibleLeagues() for the fail-soft-to-[] contract.
     if (p === '/api/leagues/eligible' && m === 'GET') {
       const names = String(url.searchParams.get('players') || '').split(',').map(s => s.trim()).filter(Boolean);
-      return send(res, 200, db.getEligibleLeagues(names[0], names[1], url.searchParams.get('category')));
+      return send(res, 200, db.getEligibleLeagues(names[0], names[1], url.searchParams.get('category'), url.searchParams.get('gameType')));
     }
     if (p === '/api/players/league-summary' && m === 'GET') {
       return send(res, 200, db.getPlayerLeagueSummary(url.searchParams.get('name')));

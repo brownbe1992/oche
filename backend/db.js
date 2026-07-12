@@ -262,7 +262,12 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS leagues (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     name          TEXT NOT NULL,
-    category      TEXT NOT NULL,   -- X01 starting score as a string: '501'|'301'|'170'|'101'
+    game_type     TEXT NOT NULL DEFAULT 'x01',   -- 'x01' | 'cricket'
+    category      TEXT NOT NULL,   -- X01: starting score as a string ('501'|'301'|'170'|'101').
+                                    -- Cricket: 'Cricket (15-20, Bull)' | 'Custom Cricket' — the
+                                    -- exact same two-value games.category label a Cricket H2H
+                                    -- game is already tagged with (frontend/index.html), reused
+                                    -- as-is rather than inventing a parallel category vocabulary.
     status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','ended')),
     starts_at     TEXT NOT NULL,   -- YYYY-MM-DD
     ends_at       TEXT,            -- YYYY-MM-DD, nullable = open-ended/ongoing season
@@ -382,6 +387,11 @@ try { db.exec('ALTER TABLE game_players ADD COLUMN loadout_id INTEGER REFERENCES
 // League mode (docs/league-mode-roadmap.md): nullable, set by the onGameCreated
 // auto-tag hook below (or left NULL for any game that isn't a tagged league match).
 try { db.exec('ALTER TABLE games ADD COLUMN league_id INTEGER REFERENCES leagues(id) ON DELETE SET NULL'); } catch(e) {}
+// League mode Cricket support (docs/league-mode-roadmap.md): a second game type
+// alongside the original X01-only v1. Defaults to 'x01' for every pre-existing row
+// (and any insert that omits it) so the column is purely additive — no backfill
+// guesswork needed, since every league created before this shipped genuinely was X01.
+try { db.exec("ALTER TABLE leagues ADD COLUMN game_type TEXT NOT NULL DEFAULT 'x01'"); } catch(e) {}
 // Dartboard zone/miss/bounce-out tracking (docs/archive/dartboard-zone-tracking-roadmap.md).
 // All four columns are purely additive metadata riding alongside an otherwise-
 // identical dart row — sector/multiplier/scored/is_treble/is_double keep meaning
@@ -3957,7 +3967,7 @@ registerDeletePlayerGuard((player) => {
   return row ? `${player.name} is still active in the in-progress tournament "${row.name}" — eliminate them or finish the tournament before deleting.` : null;
 });
 
-/* ---------- league mode (docs/league-mode-roadmap.md, X01 only for v1) ----------
+/* ---------- league mode (docs/league-mode-roadmap.md, X01 or Cricket) ----------
    A season over which regular casual H2H matches accumulate into a standings table —
    deliberately lighter-weight than tournament mode: any two enrolled players can play
    any casual match any time during the season (no bracket, no pre-determined
@@ -3971,6 +3981,17 @@ const LEAGUE_X01_CATEGORIES = ['501', '301', '170', '101']; // same 4 values as
   // TOURNAMENT_X01_CATEGORIES, kept as its own local list rather than shared so a
   // future Cricket-league extension can diverge from tournament mode's own category
   // set independently.
+// Cricket league support: reuses the exact two-value games.category label a Cricket
+// H2H game is already tagged with at creation (frontend/index.html), rather than
+// inventing a parallel category vocabulary — 'Cricket (15-20, Bull)' for the classic
+// preset, 'Custom Cricket' for any custom target set (all custom-number games share
+// this one league category; a league doesn't fix the exact target numbers any more
+// than an X01 league fixes legs/sets — see docs/league-mode-roadmap.md).
+const LEAGUE_CRICKET_CATEGORIES = ['Cricket (15-20, Bull)', 'Custom Cricket'];
+const LEAGUE_GAME_TYPES = ['x01', 'cricket'];
+function _leagueCategoriesFor(gameType) {
+  return gameType === 'cricket' ? LEAGUE_CRICKET_CATEGORIES : LEAGUE_X01_CATEGORIES;
+}
 const MAX_LEAGUE_NAME_LEN = 64;
 const LEAGUE_POINTS_MIN = -99, LEAGUE_POINTS_MAX = 99; // sane bound on an admin-set
   // points formula, same "bound every accepted input" standing practice as
@@ -3994,16 +4015,16 @@ function _getLeagueOrThrow(id) {
 // /api/leagues/eligible read (getEligibleLeagues) — one place decides "is this
 // league a legal auto-tag target for these two players," so the two callers can
 // never drift into disagreeing about eligibility.
-function _findEligibleLeagues(category, playerIds) {
+function _findEligibleLeagues(category, playerIds, gameType) {
   if (!Array.isArray(playerIds) || playerIds.length !== 2) return [];
   const [a, b] = playerIds;
   return db.prepare(`
     SELECT l.id, l.name FROM leagues l
-    WHERE l.status = 'active' AND l.category = ?
+    WHERE l.status = 'active' AND l.category = ? AND l.game_type = ?
       AND date('now') >= l.starts_at AND (l.ends_at IS NULL OR date('now') <= l.ends_at)
       AND EXISTS (SELECT 1 FROM league_players lp WHERE lp.league_id = l.id AND lp.player_id = ?)
       AND EXISTS (SELECT 1 FROM league_players lp WHERE lp.league_id = l.id AND lp.player_id = ?)
-  `).all(String(category), a, b);
+  `).all(String(category), gameType === 'cricket' ? 'cricket' : 'x01', a, b);
 }
 
 // Public read used by the New Game screen to decide whether to show a "log to which
@@ -4012,17 +4033,20 @@ function _findEligibleLeagues(category, playerIds) {
 // not fully resolvable (unknown name, missing second name, unknown category), since
 // the New Game screen calls this reactively while the admin is still mid-selection
 // (same defensive posture as the existing H2H-summary fetch it sits alongside).
-function getEligibleLeagues(playerName1, playerName2, category) {
+function getEligibleLeagues(playerName1, playerName2, category, gameType) {
   const p1 = getPlayer(playerName1), p2 = getPlayer(playerName2);
-  if (!p1 || !p2 || !LEAGUE_X01_CATEGORIES.includes(String(category))) return [];
-  return _findEligibleLeagues(category, [p1.id, p2.id]);
+  if (!p1 || !p2 || !_leagueCategoriesFor(gameType).includes(String(category))) return [];
+  return _findEligibleLeagues(category, [p1.id, p2.id], gameType);
 }
 
-function createLeague({ name, category, startsAt, endsAt, pointsWin, pointsLoss, players }) {
+function createLeague({ name, gameType, category, startsAt, endsAt, pointsWin, pointsLoss, players }) {
   name = String(name || '').trim();
   if (!name) throw httpError(400, 'League name is required');
   if (name.length > MAX_LEAGUE_NAME_LEN) throw httpError(400, `League name must be ${MAX_LEAGUE_NAME_LEN} characters or fewer`);
-  if (!LEAGUE_X01_CATEGORIES.includes(String(category))) throw httpError(400, 'category must be one of 501, 301, 170, or 101');
+  const resolvedGameType = (gameType === undefined || gameType === null || gameType === '') ? 'x01' : String(gameType);   // omitted -> 'x01', same default the pre-Cricket schema always had
+  if (!LEAGUE_GAME_TYPES.includes(resolvedGameType)) throw httpError(400, `gameType must be one of ${LEAGUE_GAME_TYPES.join(', ')}`);
+  const categories = _leagueCategoriesFor(resolvedGameType);
+  if (!categories.includes(String(category))) throw httpError(400, `category must be one of ${categories.join(', ')}`);
   const starts = (startsAt !== undefined && startsAt !== null && startsAt !== '') ? _validateLeagueDate(startsAt, 'startsAt') : _todayDate();
   const ends = (endsAt !== undefined && endsAt !== null && endsAt !== '') ? _validateLeagueDate(endsAt, 'endsAt') : null;
   if (ends != null && ends < starts) throw httpError(400, 'endsAt must not be before startsAt');
@@ -4039,9 +4063,9 @@ function createLeague({ name, category, startsAt, endsAt, pointsWin, pointsLoss,
 
   const playerRows = names.map(n => ensurePlayer(n));
   const info = db.prepare(`
-    INSERT INTO leagues (name, category, starts_at, ends_at, points_win, points_loss)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(name, String(category), starts, ends, pw, pl);
+    INSERT INTO leagues (name, game_type, category, starts_at, ends_at, points_win, points_loss)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(name, resolvedGameType, String(category), starts, ends, pw, pl);
   const leagueId = Number(info.lastInsertRowid);
   const insertMember = db.prepare('INSERT OR IGNORE INTO league_players (league_id, player_id) VALUES (?, ?)');
   playerRows.forEach(p => insertMember.run(leagueId, p.id));
@@ -4050,7 +4074,7 @@ function createLeague({ name, category, startsAt, endsAt, pointsWin, pointsLoss,
 
 function listLeagues() {
   return db.prepare(`
-    SELECT l.id, l.name, l.category, l.status, l.starts_at AS startsAt, l.ends_at AS endsAt,
+    SELECT l.id, l.name, l.game_type AS gameType, l.category, l.status, l.starts_at AS startsAt, l.ends_at AS endsAt,
       l.points_win AS pointsWin, l.points_loss AS pointsLoss, l.created_at AS createdAt,
       (SELECT COUNT(*) FROM league_players lp WHERE lp.league_id = l.id) AS playerCount
     FROM leagues l
@@ -4102,7 +4126,7 @@ function getLeague(id) {
   const league = db.prepare('SELECT * FROM leagues WHERE id = ?').get(Number(id));
   if (!league) return null;
   return {
-    id: league.id, name: league.name, category: league.category, status: league.status,
+    id: league.id, name: league.name, gameType: league.game_type, category: league.category, status: league.status,
     startsAt: league.starts_at, endsAt: league.ends_at,
     pointsWin: league.points_win, pointsLoss: league.points_loss,
     createdAt: league.created_at, endedAt: league.ended_at,
@@ -4143,7 +4167,7 @@ function getPlayerLeagueSummary(playerName) {
     const idx = standings.findIndex(r => r.name === p.name); // names are unique (players.name COLLATE NOCASE UNIQUE)
     const row = idx >= 0 ? standings[idx] : { played: 0, won: 0, lost: 0, points: 0 };
     return {
-      leagueId: league.id, name: league.name, category: league.category, status: league.status,
+      leagueId: league.id, name: league.name, gameType: league.game_type, category: league.category, status: league.status,
       rank: idx >= 0 ? idx + 1 : null, totalPlayers: standings.length,
       played: row.played, won: row.won, lost: row.lost, points: row.points,
     };
@@ -4157,10 +4181,10 @@ function getPlayerLeagueSummary(playerName) {
 // response is sent — there's no race between this write and the client seeing the
 // new gameId.
 onGameCreated(({ gameType, practice, category, playerCount, playerIds, leagueId, gameId }) => {
-  // League mode is X01-only, non-practice, exactly 2 players (v1 scope decision —
-  // Doubles Practice/Chuckin are structurally excluded anyway, being solo/no-winner
-  // formats; Cricket may be added later, see docs/league-mode-roadmap.md).
-  if (gameType !== 'x01' || practice || playerCount !== 2 || !Array.isArray(playerIds) || playerIds.length !== 2) return;
+  // League mode is X01 or Cricket, non-practice, exactly 2 players (Doubles
+  // Practice/Chuckin/Checkout Trainer are structurally excluded regardless, being
+  // solo/no-winner formats — see docs/league-mode-roadmap.md).
+  if ((gameType !== 'x01' && gameType !== 'cricket') || practice || playerCount !== 2 || !Array.isArray(playerIds) || playerIds.length !== 2) return;
   let targetLeagueId = null;
   if (leagueId != null && leagueId !== '') {
     // Client-supplied choice (from the New Game "log to league?" picker, shown only
@@ -4168,11 +4192,11 @@ onGameCreated(({ gameType, practice, category, playerCount, playerIds, leagueId,
     // may have passed since the picker's own GET /api/leagues/eligible call, so
     // re-validate rather than trust it — a stale/invalid choice must never fail game
     // creation, just fall through to auto-detection below.
-    const candidates = _findEligibleLeagues(category, playerIds);
+    const candidates = _findEligibleLeagues(category, playerIds, gameType);
     if (candidates.some(c => c.id === Number(leagueId))) targetLeagueId = Number(leagueId);
   }
   if (targetLeagueId == null) {
-    const candidates = _findEligibleLeagues(category, playerIds);
+    const candidates = _findEligibleLeagues(category, playerIds, gameType);
     // Exactly one candidate: auto-tag silently — the common case, no picker was ever
     // shown. Zero or more than one: leave untagged. The New Game picker is meant to
     // have already resolved a >1 ambiguity; a non-frontend API caller that doesn't

@@ -2193,14 +2193,15 @@ time by `getTournament()`, never stored: `winner_id` set → `complete`; else `g
 set → `in_progress`; else both player slots filled → `ready`; else `pending`. Same
 "compute from raw data" philosophy as the rest of the schema (§1).
 
-### League mode (`docs/league-mode-roadmap.md`, X01 only for v1 — see §18)
+### League mode (`docs/archive/league-mode-roadmap.md`, X01 or Cricket — see §18)
 
 **`leagues`**
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
 | `name` | `TEXT NOT NULL` | |
-| `category` | `TEXT NOT NULL` | X01 starting score as a string: `'501'`\|`'301'`\|`'170'`\|`'101'` — every auto-tagged game must match this exactly |
+| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`\|`'cricket'`. Additive column (every pre-Cricket league defaults to `'x01'`) — determines which `category` vocabulary applies |
+| `category` | `TEXT NOT NULL` | For `game_type='x01'`: starting score as a string, `'501'`\|`'301'`\|`'170'`\|`'101'`. For `game_type='cricket'`: `'Cricket (15-20, Bull)'`\|`'Custom Cricket'` — the same two-value label a Cricket H2H game is already tagged with at creation, reused as-is. Every auto-tagged game must match `game_type` **and** `category` exactly |
 | `status` | `TEXT NOT NULL DEFAULT 'active' CHECK (IN ('active','ended'))` | Manual admin toggle (`setLeagueStatus()`), reversible. Gates whether *new* games can auto-tag in — already-tagged games keep their `league_id` regardless of a later status change |
 | `starts_at` / `ends_at` | `TEXT NOT NULL` / `TEXT` | `YYYY-MM-DD`. `ends_at` nullable = open-ended/ongoing season; independently gates auto-tag eligibility alongside `status` |
 | `points_win` / `points_loss` | `INTEGER NOT NULL DEFAULT 1` / `INTEGER NOT NULL DEFAULT 0` | Admin-configurable per league — simple win/loss points, no margin-of-victory texture (resolved open question, see §18) |
@@ -2766,11 +2767,11 @@ end-to-end Playwright verification pass against a running server.
 
 ## 18. League Mode
 
-`docs/league-mode-roadmap.md`. X01 only for v1 (Doubles Practice/Just Chuckin' It
-are structurally excluded regardless — both are solo/no-winner formats; Cricket
-league support is a documented future extension, not built now). Backend:
-`backend/db.js`'s league section. Frontend: `frontend/index.html`'s "leagues"
-block, reachable via the **Leagues** nav button.
+`docs/archive/league-mode-roadmap.md`. X01 or Cricket, per `leagues.game_type`
+(Doubles Practice/Just Chuckin' It/Checkout Trainer are structurally excluded
+regardless — all solo/no-winner formats). Backend: `backend/db.js`'s league
+section. Frontend: `frontend/index.html`'s "leagues" block, reachable via the
+**Leagues** nav button.
 
 ### Design principle: a league game IS a normal game, tagged after the fact
 
@@ -2808,19 +2809,21 @@ loop (`participantIds`) and passes both that and an optional client-supplied
 `leagueId` into the `created` lifecycle-hook payload (see §1's "Game-lifecycle
 hooks"). A league-mode `onGameCreated` listener does the actual tagging:
 
-1. Skip unless the game is X01, non-practice, exactly 2 players.
+1. Skip unless the game is X01 or Cricket, non-practice, exactly 2 players.
 2. If `leagueId` was supplied (from the New Game "log to league?" picker below),
-   **re-validate** it via `_findEligibleLeagues(category, playerIds)` rather than
-   trusting it blindly — a few seconds may have passed since the picker's own
-   `GET /api/leagues/eligible` call, so a stale/invalid choice falls through to
-   auto-detection instead of failing game creation.
+   **re-validate** it via `_findEligibleLeagues(category, playerIds, gameType)`
+   rather than trusting it blindly — a few seconds may have passed since the
+   picker's own `GET /api/leagues/eligible` call, so a stale/invalid choice
+   falls through to auto-detection instead of failing game creation.
 3. Otherwise, auto-detect: `_findEligibleLeagues()` returns every `active`
-   league matching this game's category, with both players currently enrolled,
-   whose date window (`starts_at`..`ends_at`, `ends_at` nullable = open-ended)
-   includes today. **Exactly one** candidate auto-tags silently — the common
-   case, no picker ever shown. **Zero or more than one** leaves the game
-   untagged; a non-frontend API caller that doesn't supply a `leagueId` gets no
-   guess either way.
+   league matching this game's `game_type` **and** `category`, with both
+   players currently enrolled, whose date window (`starts_at`..`ends_at`,
+   `ends_at` nullable = open-ended) includes today. **Exactly one** candidate
+   auto-tags silently — the common case, no picker ever shown. **Zero or more
+   than one** leaves the game untagged; a non-frontend API caller that doesn't
+   supply a `leagueId` gets no guess either way. Filtering on `game_type` means
+   an X01 game can never tag into a Cricket league (or vice versa) even when
+   both leagues enroll the same two players.
 
 Unlike tournament mode, league mode registers **no** `onGameCompleted` hook —
 there's no propagation step to react to (no "next slot" to fill). A completed
@@ -2874,12 +2877,19 @@ maintained-tally suggestion, not this one.
 - **New Game "log to league?" picker**: `updateLeaguePicker()`, modeled
   directly on the existing H2H-record banner (`updateH2HBanner()`) including its
   same abort-token pattern for a rapidly-changing selection. Calls `GET
-  /api/leagues/eligible?players=A,B&category=` reactively whenever the H2H
-  opponent pair or starting-score category changes; shows a `<select>` only when
-  more than one active league matches (the 0-or-1-match case tags server-side
-  with no picker at all). `setup.leagueId` threads through `startGame()`'s
-  `game` object and `DB.beginGame()`'s `POST /api/games` payload — purely a
-  hint the server-side hook re-validates, never trusted outright.
+  /api/leagues/eligible?players=A,B&category=&gameType=` reactively whenever
+  the H2H opponent pair, game type, category (X01 starting score, or Cricket's
+  classic-vs-custom preset), or custom-vs-classic Cricket toggle changes; shows
+  a `<select>` only when more than one active league matches (the 0-or-1-match
+  case tags server-side with no picker at all). `setup.leagueId` threads
+  through `startGame()`'s `game` object and `DB.beginGame()`'s `POST
+  /api/games` payload — purely a hint the server-side hook re-validates, never
+  trusted outright.
+- **League setup screen**: a `game_type` toggle (X01/Cricket, mirroring the New
+  Game screen's own toggle) alongside the existing category picker, which
+  switches between the X01 starting-score `<select>` and a Cricket
+  classic/custom `<select>` depending on the chosen game type
+  (`setLeagueGameType()`, `renderLeagueSetup()`).
 - **Home page teaser**: `getHomeExtra()` includes a plain `activeLeagues`
   id/name list; `renderHomePulse()` renders it as a lightweight "Active
   Leagues" card (name + link into the full Leagues screen) only when at least
@@ -2888,8 +2898,8 @@ maintained-tally suggestion, not this one.
   (public) → `getPlayerLeagueSummary()`, every league this player belongs to
   plus their current rank/points in each, rendered the same
   loading-placeholder-then-patch-in pattern `loadTournamentStats()` already
-  uses (`loadPlayerLeagueStats()`), gated to the X01 tab the same way
-  tournament stats are.
+  uses (`loadPlayerLeagueStats()`), gated to the X01 **and** Cricket tabs
+  (unlike tournament stats, which stay X01-only).
 - **Standings table**: a real `<table>` with `<caption class="sr-only">` and
   `<th scope="col">` headers (`renderLeagueDetail()`) — deliberately not the
   `.hof-row` flex-leaderboard pattern used for single-stat leaderboards

@@ -1,11 +1,13 @@
 'use strict';
-// Committed tests for backend/db.js's league mode (docs/league-mode-roadmap.md, X01
-// only for v1). Covers: creation/validation, enrollment (including multi-league
+// Committed tests for backend/db.js's league mode (docs/league-mode-roadmap.md, X01 or
+// Cricket). Covers: creation/validation, enrollment (including multi-league
 // enrollment), the onGameCreated auto-tag hook (0/1/>1 eligible-league cases, explicit
 // valid/invalid leagueId, and every non-eligible game shape), live standings
 // computation (points formula, decided-vs-abandoned games, zero-played roster rows,
-// sort order), season status transitions, and the wipeAllData/resetStats standing-rule
-// interactions (docs/bug-roadmap.md BUG-7's own precedent, applied to leagues).
+// sort order), season status transitions, the wipeAllData/resetStats standing-rule
+// interactions (docs/bug-roadmap.md BUG-7's own precedent, applied to leagues), and
+// Cricket league support (gameType validation, category-per-gameType, and X01/Cricket
+// cross-game-type isolation in both directions).
 const { test, describe, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -38,6 +40,17 @@ function expect400(fn) {
 function playX01Game(category, players, winner) {
   const { gameId } = db.createGame({ category, legsPerSet: 1, setsPerGame: 1, practice: 0,
     players: players.map(name => ({ name })) });
+  db.completeGame(gameId, winner);
+  return gameId;
+}
+const CRICKET_CLASSIC_NUMBERS = [15, 16, 17, 18, 19, 20, 25];
+function createCricketGame(category, players, opts) {
+  return db.createGame({ category, legsPerSet: 1, setsPerGame: 1, practice: 0,
+    gameType: 'cricket', config: { numbers: CRICKET_CLASSIC_NUMBERS },
+    players: players.map(name => ({ name })), ...opts });
+}
+function playCricketGame(category, players, winner) {
+  const { gameId } = createCricketGame(category, players);
   db.completeGame(gameId, winner);
   return gameId;
 }
@@ -314,5 +327,80 @@ describe('wipeAllData / resetStats — standing-rule interactions', () => {
     const standings = db.getLeagueStandings(leagueId);
     assert.equal(standings.length, 2, 'the roster survives resetStats');
     for (const r of standings) assert.equal(r.played, 0, 'every game is gone, so every player is back to 0 played');
+  });
+});
+
+describe('Cricket league support (docs/league-mode-roadmap.md "Game-type scope")', () => {
+  test('gameType omitted defaults to x01, matching pre-Cricket behavior', () => {
+    const [A, B] = makePlayers(uniqueName('GTDEF_'), 2);
+    const { leagueId } = db.createLeague({ name: 'Default Cup', category: '501', players: [A, B] });
+    assert.equal(db.getLeague(leagueId).gameType, 'x01');
+  });
+
+  test('rejects an unknown gameType', () => {
+    const [A, B] = makePlayers(uniqueName('GTUNK_'), 2);
+    expect400(() => db.createLeague({ name: 'Cup', gameType: 'doubles_practice', category: '501', players: [A, B] }));
+  });
+
+  test('a Cricket league accepts the classic and custom category labels, but not an X01 score', () => {
+    const [A, B] = makePlayers(uniqueName('GTCAT_'), 2);
+    const r1 = db.createLeague({ name: 'Classic Cup', gameType: 'cricket', category: 'Cricket (15-20, Bull)', players: [A, B] });
+    assert.equal(db.getLeague(r1.leagueId).category, 'Cricket (15-20, Bull)');
+    const r2 = db.createLeague({ name: 'Custom Cup', gameType: 'cricket', category: 'Custom Cricket', players: [A, B] });
+    assert.equal(db.getLeague(r2.leagueId).category, 'Custom Cricket');
+    expect400(() => db.createLeague({ name: 'Bad Cup', gameType: 'cricket', category: '501', players: [A, B] }));
+  });
+
+  test('a Cricket game auto-tags into a Cricket league of the matching category', () => {
+    const [A, B] = makePlayers(uniqueName('GTTAG1_'), 2);
+    const { leagueId } = db.createLeague({ name: 'Cricket Tag Cup', gameType: 'cricket', category: 'Cricket (15-20, Bull)', players: [A, B] });
+    const { gameId } = createCricketGame('Cricket (15-20, Bull)', [A, B]);
+    assert.equal(db._db.prepare('SELECT league_id FROM games WHERE id = ?').get(gameId).league_id, leagueId);
+  });
+
+  test('an X01 game never tags into a Cricket league, even one enrolling the same two players', () => {
+    const [A, B] = makePlayers(uniqueName('GTISO1_'), 2);
+    db.createLeague({ name: 'Cricket-Only Cup', gameType: 'cricket', category: 'Cricket (15-20, Bull)', players: [A, B] });
+    const { gameId } = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: A }, { name: B }] });
+    assert.equal(db._db.prepare('SELECT league_id FROM games WHERE id = ?').get(gameId).league_id, null);
+  });
+
+  test('a Cricket game never tags into an unrelated X01 league, even one enrolling the same two players', () => {
+    const [A, B] = makePlayers(uniqueName('GTISO2_'), 2);
+    db.createLeague({ name: 'X01-Only Cup', category: '501', players: [A, B] });
+    const { gameId } = createCricketGame('Cricket (15-20, Bull)', [A, B]);
+    assert.equal(db._db.prepare('SELECT league_id FROM games WHERE id = ?').get(gameId).league_id, null);
+  });
+
+  test('X01 and Cricket leagues with the same two players and no category collision both auto-tag independently', () => {
+    const [A, B] = makePlayers(uniqueName('GTBOTH_'), 2);
+    const x01League = db.createLeague({ name: 'Both-X01 Cup', category: '501', players: [A, B] });
+    const cricketLeague = db.createLeague({ name: 'Both-Cricket Cup', gameType: 'cricket', category: 'Cricket (15-20, Bull)', players: [A, B] });
+    const x01Game = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: A }, { name: B }] });
+    const cricketGame = createCricketGame('Cricket (15-20, Bull)', [A, B]);
+    assert.equal(db._db.prepare('SELECT league_id FROM games WHERE id = ?').get(x01Game.gameId).league_id, x01League.leagueId);
+    assert.equal(db._db.prepare('SELECT league_id FROM games WHERE id = ?').get(cricketGame.gameId).league_id, cricketLeague.leagueId);
+  });
+
+  test('getEligibleLeagues respects gameType, defaulting to x01 when omitted', () => {
+    const [A, B] = makePlayers(uniqueName('GTELIG_'), 2);
+    const { leagueId } = db.createLeague({ name: 'Eligible Cricket Cup', gameType: 'cricket', category: 'Cricket (15-20, Bull)', players: [A, B] });
+    assert.deepEqual(db.getEligibleLeagues(A, B, 'Cricket (15-20, Bull)', 'cricket').map(l => l.id), [leagueId]);
+    // Omitting gameType defaults to x01, so the same category string finds nothing under a Cricket-only league
+    assert.deepEqual(db.getEligibleLeagues(A, B, 'Cricket (15-20, Bull)'), []);
+  });
+
+  test('standings compute correctly for a Cricket league using the same points formula as X01', () => {
+    const [A, B] = makePlayers(uniqueName('GTSTAND_'), 2);
+    const { leagueId } = db.createLeague({ name: 'Cricket Standings Cup', gameType: 'cricket', category: 'Cricket (15-20, Bull)', players: [A, B], pointsWin: 2, pointsLoss: 0 });
+    playCricketGame('Cricket (15-20, Bull)', [A, B], A);
+    playCricketGame('Cricket (15-20, Bull)', [A, B], A);
+    playCricketGame('Cricket (15-20, Bull)', [A, B], B);
+    const standings = db.getLeagueStandings(leagueId);
+    const a = standings.find(r => r.name === A), b = standings.find(r => r.name === B);
+    assert.deepEqual([a.played, a.won, a.lost, a.points], [3, 2, 1, 4]);
+    assert.deepEqual([b.played, b.won, b.lost, b.points], [3, 1, 2, 2]);
   });
 });
