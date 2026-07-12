@@ -58,6 +58,9 @@ own scoring, leaderboard, and achievements — see its own section further down)
    Dartboard mode's SVG board, whichever the player currently has selected). No new
    input UI to build; this reuses `makeDart()`/`throwDart()` unmodified. The player
    can submit early after 1 or 2 darts if they believe that's already a finish.
+   Pad mode's "Bounce Out", "Miss", and "Undo Last Turn" controls are hidden for
+   this game type (`checkout_trainer`) — they belong to live-match scoring, not a
+   solo recall drill against a target. **Status: Done.**
 3. On submit, grade the proposed route:
    - **Legal?** Does it reach exactly 0 from the target, with a double as the last
      dart under double-out (or single-out's looser "any last dart" rule)? Reuses

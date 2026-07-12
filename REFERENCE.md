@@ -2707,9 +2707,13 @@ marks it, with `sector`/`multiplier` still exactly `0`/`1` — to every
 existing consumer a bounced dart is a completely ordinary miss row. One
 **"Bounce Out" button** (`throwBounceOut()` → `throwDart(0, undefined,
 undefined, undefined, true)`) sits where the old flat Miss button used to,
-available in **every** game type and both input modes — including Cricket's
+available in every game type and both input modes — including Cricket's
 own dedicated pad (`renderPadCricket()`), which has no Pad/Dartboard toggle of
-its own to hang that availability off of. No toggle, no position captured,
+its own to hang that availability off of — **except Checkout Trainer**, whose
+Pad-mode scoring screen hides Bounce Out, the inline Miss button, and Undo
+Last Turn entirely (`renderGameShell()`/`renderPad()`, `frontend/index.html`):
+a checkout attempt is a deliberate, low-pressure drill against a target, not a
+live match, so those three controls have no meaningful role there. No toggle, no position captured,
 one dart committed immediately per press. Surfaced as a plain "Bounce-outs: N"
 count line next to the Player Profile's heatmap (`getBounceOutCount()`, `GET
 /api/players/bounce-outs`), not a spatial marker — v1 genuinely has no
@@ -2929,6 +2933,17 @@ checkout using the same Pad/Dartboard widgets every other mode uses, and it's
 graded instantly against the objectively optimal route. Two sub-modes sharing
 one core mechanic: untimed **Freeform** and the 60-second **Checkout Blitz**
 sprint.
+
+**Scoring-screen UI**: the Pad-mode scoring screen hides three controls that
+every other game type shows — the "Bounce Out" button, the inline "Miss"
+button, and "Undo Last Turn" (`renderGameShell()`/`renderPad()`,
+`frontend/index.html`, gated on `game.gameType === 'checkout_trainer'`). A
+checkout attempt is a deliberate, low-pressure recall drill against a target
+rather than a live match with an opponent to track, so a bounced/missed dart
+and turn-level undo have no meaningful role — "Undo Dart" (which un-stages an
+uncommitted dart within the current attempt) and "Submit checkout" (this
+mode's relabeled Enter Turn) remain, since a checkout attempt is still a
+staged up-to-3-dart visit.
 
 **Game type**: `checkout_trainer`, one of `KNOWN_GAME_TYPES` (`backend/db.js`).
 Every dart-count attempt is its own 1-3 dart `turns` row — the same per-dart-

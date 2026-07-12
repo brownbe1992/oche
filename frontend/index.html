@@ -6404,9 +6404,11 @@ function renderPad(){
     const bull=document.createElement('button');
     bull.className='bull'; bull.textContent='Bull'; bull.disabled=full;
     bull.onclick=()=>throwDart(25); pad.appendChild(bull);
-    const miss=document.createElement('button');
-    miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
-    miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+    if(game.gameType !== 'checkout_trainer'){
+      const miss=document.createElement('button');
+      miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
+      miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+    }
   }
   // keep Undo Last Turn in sync — enabled only when a snapshot exists
   const utb = document.getElementById('undo-turn-btn');
@@ -7514,10 +7516,10 @@ function renderGameShell(){
       </div>
       <div class="pad" id="pad"></div>
       <div class="dart-board-wrap" id="dart-board-wrap"></div>
-      <button class="btn btn-ghost board-miss" id="bounce-out-btn" onclick="throwBounceOut()">Bounce Out</button>
+      <button class="btn btn-ghost board-miss" id="bounce-out-btn" onclick="throwBounceOut()"${isCheckoutTrainer ? ' hidden' : ''}>Bounce Out</button>
       <div class="turn-actions">
         <div class="undo-row">
-          <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled>${isPerDartMode ? 'Undo Last Dart' : 'Undo Last Turn'}</button>
+          <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled${isCheckoutTrainer ? ' hidden' : ''}>${isPerDartMode ? 'Undo Last Dart' : 'Undo Last Turn'}</button>
           <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()"${isPerDartMode ? ' hidden' : ''}>Undo Dart</button>
         </div>
         <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()"${isPerDartMode ? ' hidden' : ''}>${isCheckoutTrainer ? 'Submit checkout' : 'Enter turn'}</button>
