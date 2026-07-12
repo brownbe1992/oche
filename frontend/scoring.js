@@ -237,6 +237,29 @@ function gradeCheckoutAttempt(target, doubleOut, darts){
   return { legal, usedDarts, optimalDarts, optimal, hint };
 }
 
+// Checkout Blitz's wall-clock deadline check (docs/checkout-trainer-roadmap.md
+// "Core loop delta", revised 2026-07) — a single pure predicate shared by all
+// three of index.html's timeout enforcement points (throwDartCheckoutTrainer(),
+// submitCheckoutAttempt(), tickCheckoutBlitzTimer()) so they can never disagree
+// on the exact boundary. `deadline`/`now` are both epoch milliseconds (`now`
+// injectable for tests; index.html always passes `Date.now()`). A `null`
+// deadline (Freeform mode, or a Blitz run that hasn't started its clock yet)
+// never counts as passed.
+function blitzDeadlinePassed(deadline, now){
+  return deadline != null && now >= deadline;
+}
+// 📸 Photo Finish (docs/checkout-trainer-roadmap.md "Achievements") — a legal
+// Checkout Blitz round submitted with under 1 second **genuinely remaining**,
+// never a submission that arrived after the deadline. Fixed 2026-07: the
+// previous version only checked `remainingMs < 1000`, which is also true for
+// any negative value — a round finished and submitted a full minute after the
+// buzzer (remainingMs === -60000) satisfied `< 1000` and wrongly earned this
+// "beat the buzzer" badge. `remainingMs` is `deadline - now` captured at the
+// moment of submission.
+function isPhotoFinishSubmission(remainingMs){
+  return remainingMs != null && remainingMs >= 0 && remainingMs < 1000;
+}
+
 // Staircase Finish (REFERENCE.md's Achievements section, docs/achievements-badges-
 // roadmap.md) — checked out a leg by aiming at a double, missing to the single,
 // and repeating that all the way down: single at half the visit's starting
@@ -331,7 +354,7 @@ if (typeof module !== 'undefined' && module.exports) {
     evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS,
     evaluateDartDoublesPractice, isStaircaseFinish,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,
-    pickCheckoutTarget, gradeCheckoutAttempt,
+    pickCheckoutTarget, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
     CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH, challengeBadgeSignals,
     chuckinTiersReached,
     isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,

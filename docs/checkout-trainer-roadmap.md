@@ -279,11 +279,20 @@ changes:
    or end early depending on browser behavior.
 2. **Every submission — legal, illegal, optimal, or not — immediately serves the
    next target.** There's no "try again on the same number": a wrong or suboptimal
-   answer just costs points, not time, keeping the pace constant. The clock is
-   checked **between** rounds, not mid-entry — a round already in progress when the
-   deadline passes is allowed to finish (grading it normally) before the run ends,
-   so the timer never cuts a player off mid-dart-entry, which would feel broken
-   rather than challenging.
+   answer just costs points, not time, keeping the pace constant. **The deadline is
+   a hard stop** (revised — an earlier version let a round already mid-entry finish
+   and grade normally past the buzzer, on the theory that cutting a player off
+   mid-dart-entry "would feel broken rather than challenging"; in practice this let
+   a player pause mid-round, wait arbitrarily long, then finish and submit a
+   checkout well after time was up — still counted, still eligible for 📸 Photo
+   Finish, which defeats the point of a timed mode entirely). The instant
+   `Date.now() >= deadline`, the run ends: any dart not yet entered can't be
+   (`throwDartCheckoutTrainer()`), a Submit press on an already-tapped-out attempt
+   is discarded ungraded (`submitCheckoutAttempt()`), and an idle run with no
+   further input is ended by the ticking timer itself
+   (`tickCheckoutBlitzTimer()`) — three equally-authoritative checks, whichever
+   notices first ends it (`endBlitzRun()`'s own `blitzEnded` guard makes the other
+   two a no-op).
 
 ### Scoring
 

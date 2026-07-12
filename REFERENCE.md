@@ -3019,9 +3019,17 @@ rate-based leaderboards (Doubles Practice accuracy, Cricket MPR) use.
 a lifetime average across every run. The Blitz countdown is a wall-clock
 deadline (`Date.now() + durationSec*1000`), checked on each render tick rather
 than a naively decrementing counter, so a backgrounded/throttled tab can't
-grant extra time. The clock is checked **between** rounds only — a round
-already in progress when the deadline passes always finishes grading normally
-before the run ends.
+grant extra time. **The deadline is a hard stop** (fixed 2026-07 — a previous
+version let a round already mid-entry finish and grade normally past the
+buzzer; a paused player could resume and submit a checkout arbitrarily long
+after time was actually up, still counted and still eligible for Photo
+Finish below). Three equally-authoritative checks enforce this, whichever
+notices first ending the run (`endBlitzRun()`, idempotent via
+`game.blitzEnded`): `throwDartCheckoutTrainer()` refuses any dart once
+`Date.now() >= deadline`, `submitCheckoutAttempt()` discards (ungraded,
+unrecorded) an already-tapped-out attempt submitted past the deadline, and
+`tickCheckoutBlitzTimer()` ends an idle run within one 250ms tick of the
+buzzer even with no further input at all.
 
 **Achievements** (`frontend/index.html`) — data-driven off
 `CHECKOUT_TRAINER_MILESTONE_LADDERS` (4 ladders, 22 tiers, both sub-modes

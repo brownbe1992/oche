@@ -13,7 +13,7 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
   evaluateDartDoublesPractice, chuckinTiersReached, isStaircaseFinish,
   isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,
-  pickCheckoutTarget, gradeCheckoutAttempt } = scoring;
+  pickCheckoutTarget, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission } = scoring;
 
 // Builds a real dart object the same way the app does (makeDart minus the
 // thrownAt timestamp), rather than hand-rolling a fake {value,isDouble,...} shape.
@@ -370,6 +370,48 @@ describe('gradeCheckoutAttempt (Checkout Trainer grading, docs/checkout-trainer-
   test('hint is returned alongside the grade, for revealing the optimal route on anything but optimal', () => {
     const g = gradeCheckoutAttempt(170, true, [d(20, 3)]); // a bust attempt at 170
     assert.equal(g.hint, 'T20 T20 Bull');
+  });
+});
+
+// Regression coverage for the Checkout Blitz timeout bug reported live: a player
+// paused mid-round after the buzzer, waited roughly a minute, then finished
+// entering and submitted a checkout — it was graded, recorded, and even earned
+// the 📸 Photo Finish "beat the buzzer" badge, because the previous design let
+// any round already in progress finish past the deadline with no bound at all
+// on how late. blitzDeadlinePassed()/isPhotoFinishSubmission() are the two pure
+// predicates index.html's throwDartCheckoutTrainer()/submitCheckoutAttempt()/
+// tickCheckoutBlitzTimer() now all share for this decision.
+describe('blitzDeadlinePassed (Checkout Blitz hard-stop, docs/checkout-trainer-roadmap.md "Core loop delta")', () => {
+  test('false while now is strictly before the deadline', () => {
+    assert.equal(blitzDeadlinePassed(10000, 9999), false);
+  });
+  test('true the instant now reaches the deadline (inclusive boundary)', () => {
+    assert.equal(blitzDeadlinePassed(10000, 10000), true);
+  });
+  test('true arbitrarily far past the deadline — a minute-late resume is still "passed", not "expired and forgotten"', () => {
+    assert.equal(blitzDeadlinePassed(10000, 10000 + 60000), true);
+  });
+  test('a null deadline (Freeform mode, or a run whose clock has not started) never counts as passed', () => {
+    assert.equal(blitzDeadlinePassed(null, Date.now()), false);
+  });
+});
+
+describe('isPhotoFinishSubmission (📸 Photo Finish trigger, docs/checkout-trainer-roadmap.md "Achievements")', () => {
+  test('fires with genuinely under 1 second remaining', () => {
+    assert.equal(isPhotoFinishSubmission(999), true);
+    assert.equal(isPhotoFinishSubmission(1), true);
+    assert.equal(isPhotoFinishSubmission(0), true, 'exactly the buzzer itself still counts as under 1 second left');
+  });
+  test('does not fire with 1 second or more still remaining', () => {
+    assert.equal(isPhotoFinishSubmission(1000), false);
+    assert.equal(isPhotoFinishSubmission(5000), false);
+  });
+  test('does NOT fire for a submission that arrived after the deadline (the exact bug reported live) — negative remaining time is not "under 1 second left"', () => {
+    assert.equal(isPhotoFinishSubmission(-1), false);
+    assert.equal(isPhotoFinishSubmission(-60000), false, 'a full minute late must not read as a buzzer-beater');
+  });
+  test('a null remaining value (Freeform mode, no deadline) never fires', () => {
+    assert.equal(isPhotoFinishSubmission(null), false);
   });
 });
 

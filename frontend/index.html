@@ -8111,13 +8111,18 @@ function playerSnapshotCheckoutTrainer(p){
 }
 function throwDartCheckoutTrainer(sector, zone, missZone, missDepth, bounced){
   if(game.darts.length>=3 || game.busted || game.won || game.blitzEnded) return;
-  // Checkout Blitz: block STARTING a new round once the deadline has passed — an
-  // already-in-progress round (game.darts.length>0) is deliberately exempt, so a
-  // round never gets cut off mid-entry (docs/checkout-trainer-roadmap.md "Core
-  // loop delta"). This is the authoritative check; the ticking timer's own
-  // idle-end (see tickCheckoutBlitzTimer()) is just a prompt-UX backstop for when
-  // the player stops tapping without ever starting a new round.
-  if(game.config.mode === 'blitz' && game.blitzDeadline != null && game.darts.length===0 && Date.now() >= game.blitzDeadline){
+  // Checkout Blitz: a hard deadline — the instant the wall clock passes it, no
+  // further dart can be entered, whether this would start a fresh round or
+  // continue one already mid-entry (docs/checkout-trainer-roadmap.md "Core loop
+  // delta", revised — a previous version exempted an in-progress round so the
+  // timer would never "cut a player off mid-dart-entry"; in practice that grace
+  // period let a player who paused mid-round resume and submit a checkout a full
+  // minute after time ran out, still counted and badged, which is exactly what a
+  // buzzer-beater achievement isn't supposed to be able to do). This check is one
+  // of three equally-authoritative deadline checks (mirrored in
+  // submitCheckoutAttempt() and the tickCheckoutBlitzTimer() backstop) — any of
+  // the three ends the run the moment it notices the deadline has passed.
+  if(game.config.mode === 'blitz' && blitzDeadlinePassed(game.blitzDeadline, Date.now())){
     return endBlitzRun();
   }
   // The double/treble-Miss shortcut (fill N slots at once) is a Pad-mode-only
@@ -8156,10 +8161,21 @@ function throwDartCheckoutTrainer(sector, zone, missZone, missDepth, bounced){
 // deadline check on top, see the Checkout Blitz section below).
 function submitCheckoutAttempt(){
   if(game.darts.length===0){ document.getElementById('status').textContent='Tap out a proposed checkout first, then press Submit.'; return; }
+  // Checkout Blitz: the same hard deadline throwDartCheckoutTrainer() enforces on
+  // dart entry, checked again here — a player can tap out every dart of a legal
+  // checkout before the deadline and then simply sit on the Submit button past
+  // it, a gap dart entry's own guard can never see. Discards this attempt (never
+  // graded, never recorded, never eligible for any badge) rather than counting a
+  // checkout entered/confirmed after time was already up.
+  if(game.config.mode === 'blitz' && blitzDeadlinePassed(game.blitzDeadline, Date.now())){
+    return endBlitzRun();
+  }
   const p = game.players[0];
   // Captured before grading — 📸 Photo Finish (docs/checkout-trainer-roadmap.md)
   // needs "under 1 second left at the moment of submission," which grading/
-  // network delay could otherwise blur.
+  // network delay could otherwise blur. The deadline check just above guarantees
+  // this is always >= 0 here — a submission that arrives after the deadline never
+  // reaches this line at all.
   const remainingMsAtSubmit = (game.config.mode === 'blitz' && game.blitzDeadline != null) ? (game.blitzDeadline - Date.now()) : null;
   const grade = gradeCheckoutAttempt(p.score, p.doubleOut, game.darts);
 
@@ -8197,17 +8213,21 @@ function submitCheckoutAttempt(){
   if(grade.optimal && grade.usedDarts === 1){
     awardCheckoutTrainerBadge(p.name, 'checkout_trainer_one_darter', '🎯', 'ONE-DARTER', `Solved ${p.score} optimally in a single dart`);
   }
-  if(game.config.mode === 'blitz' && grade.legal && remainingMsAtSubmit != null && remainingMsAtSubmit < 1000){
+  // isPhotoFinishSubmission()'s own >= 0 bound is guaranteed by the deadline
+  // check earlier in this function (a late submission never reaches here at
+  // all) — checked explicitly anyway rather than trusted implicitly, so this
+  // stays correct on its own even if that guarantee ever changes.
+  if(game.config.mode === 'blitz' && grade.legal && isPhotoFinishSubmission(remainingMsAtSubmit)){
     awardCheckoutTrainerBadge(p.name, 'checkout_trainer_photo_finish', '📸', 'PHOTO FINISH', 'Legal finish with under 1 second left');
   }
 
   game.legNo += 1;   // round counter, same convention as Doubles Practice
   game.darts = []; game.busted = false; game.won = false;
 
-  // Checkout Blitz: the clock is checked BETWEEN rounds only — a round already
-  // in flight when the deadline passes always finishes and grades normally
-  // (docs/checkout-trainer-roadmap.md "Core loop delta").
-  if(game.config.mode === 'blitz' && game.blitzDeadline != null && Date.now() >= game.blitzDeadline){
+  // This submission already cleared the deadline check above, so it's graded and
+  // recorded no matter what — this second check only decides whether to serve a
+  // NEW target afterward, or end the run here instead of starting one more round.
+  if(game.config.mode === 'blitz' && blitzDeadlinePassed(game.blitzDeadline, Date.now())){
     return endBlitzRun();
   }
 
@@ -8326,16 +8346,21 @@ function tickCheckoutBlitzTimer(){
       announce(`${mark} seconds left.`);
     }
   });
-  // Idle end: no round in progress (game.darts.length===0) and time's up — a
-  // prompt-UX backstop so the run visibly ends the instant the clock hits zero
-  // even if the player never taps again. throwDartCheckoutTrainer()'s own guard
-  // is the authoritative enforcement; this just avoids waiting on it.
-  if(remainingSec <= 0 && game.darts.length === 0) endBlitzRun();
+  // Time's up — ends the run unconditionally, whether or not a round is
+  // mid-entry (discarding it ungraded; see throwDartCheckoutTrainer()/
+  // submitCheckoutAttempt()'s own matching deadline checks). This tick is the
+  // ONLY thing that ever ends an idle run — one sitting untouched after the
+  // buzzer, with no further dart tap or Submit press to trigger either of the
+  // other two checks — so unlike them it can't wait for player input; at most a
+  // 250ms tick period late.
+  if(remainingSec <= 0) endBlitzRun();
 }
 // Ends the current Blitz run: locks input, stops the ticker, and shows the
-// results screen. Called from submitCheckoutAttempt() (after a round that
-// crosses the deadline finishes grading), tickCheckoutBlitzTimer() (idle
-// end), and throwDartCheckoutTrainer() (blocked new-round attempt).
+// results screen. Called from throwDartCheckoutTrainer()/submitCheckoutAttempt()
+// (either one noticing the deadline has passed — a blocked dart or a blocked
+// submission, its darts discarded ungraded) and tickCheckoutBlitzTimer() (the
+// idle-run backstop). Whichever of the three notices first wins — game.blitzEnded
+// makes every call after the first a no-op, so there's no double-ending race.
 function endBlitzRun(){
   if(!game || game.blitzEnded) return;
   game.blitzEnded = true;
