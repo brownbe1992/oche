@@ -719,7 +719,27 @@ a normal boot with no pending restore is unaffected.
 
 ### BUG-12 — `display.html`'s Chuckin card crashes the whole render loop if `sessionAvg` isn't numeric  **(LOW)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** `renderers.chuckin.card()` now computes `sessionAvgNum`
+as `p.sessionAvg == null ? null : Number(p.sessionAvg)` and only calls `.toFixed(1)`
+when `Number.isFinite(sessionAvgNum)`, falling back to `'—'` otherwise — the `== null`
+branch is kept **separate** from the `Number.isFinite()` check because `Number(null)`
+is `0`, not `NaN`, so folding them into one check would have silently broken the
+legitimate "no darts thrown yet this session" case (an early-session `null`) by
+rendering `0.0` instead of the placeholder; this was caught by the regression test
+itself before being shipped. **Also fixed in the same sweep**:
+`buildChuckinLiveHeatmap()`'s `cells||[]` guard let a non-array-but-truthy payload
+value (e.g. a crafted string) through unchanged, crashing on `.forEach` — now
+`Array.isArray(cells) ? cells : []`, matching every other live-payload array field in
+this file. No other unguarded method-call-on-payload-value pattern was found in a
+full sweep of `display.html`'s card renderers. Committed regression test
+`backend/test/display.chuckin-card-hardening.test.js` extracts `renderers.chuckin.
+card()` and its real dependencies directly out of `frontend/display.html`'s source
+(via `vm`, same approach as the SEC-18 test) and confirms: a crafted non-numeric
+`sessionAvg` renders `'—'` and never reaches the output unescaped; a legitimate
+numeric value still renders correctly; a legitimate `null` (not-yet-started session)
+still renders `'—'`, not `'0.0'`; a crafted non-array `heatmap` value doesn't crash.
+Verified the test fails against the pre-fix code (2 of 4 cases) and passes against
+the fix. Full backend suite green (560/560).
 
 **Where:** `frontend/display.html` `renderers.chuckin.card()`:
 

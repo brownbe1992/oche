@@ -528,7 +528,12 @@ const DB_SECTORS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
 function buildChuckinLiveHeatmap(cells){
   const hitMap = {};
   let maxHits = 0;
-  (cells||[]).forEach(c=>{
+  // docs/bug-roadmap.md BUG-12: Array.isArray(), not just a `||[]` truthy check — a
+  // non-array-but-truthy payload value (e.g. a crafted string) would pass `cells||[]`
+  // unchanged and then throw on .forEach, same crash class as the sessionAvg fix
+  // below. Matches the Array.isArray() guard every other live-payload array field in
+  // this file already uses.
+  (Array.isArray(cells) ? cells : []).forEach(c=>{
     const sector = Number(c.sector) || 0, mult = Number(c.multiplier) || 0, hitCount = Number(c.hits) || 0;
     hitMap[sector+'_'+mult] = hitCount;
     if(hitCount>maxHits) maxHits = hitCount;
@@ -796,7 +801,18 @@ const renderers = {
     card(p, i, s, L){
       const active = i===s.currentIndex;
       const pct = p.sessionDarts ? Math.round(p.sessionTrebles/p.sessionDarts*100) : 0;
-      const avgText = p.sessionAvg!=null ? p.sessionAvg.toFixed(1) : '—';
+      // docs/bug-roadmap.md BUG-12: p.sessionAvg comes straight from the /api/live
+      // broadcast payload's per-player array, which ALLOWED_LIVE_KEYS deliberately
+      // leaves unrestricted in shape — a non-numeric value here previously called
+      // .toFixed(1) directly and threw inside renderState()'s render loop, freezing
+      // the whole scoreboard on every subsequent live event. null/undefined is the
+      // legitimate "no darts thrown yet this session" case (Number(null) is 0, NOT
+      // NaN, so it has to be excluded explicitly rather than folded into the same
+      // Number.isFinite() check as actual garbage) — Number.isFinite() then guards
+      // everything else the same way num() already guards every other live-payload
+      // numeric field in this file.
+      const sessionAvgNum = p.sessionAvg == null ? null : Number(p.sessionAvg);
+      const avgText = Number.isFinite(sessionAvgNum) ? sessionAvgNum.toFixed(1) : '—';
       let throwbox = '';
       if(active && s.chuckinLastDart){
         const treble = s.chuckinLastDart.isTreble ? '<span class="flash win" style="position:static;display:inline-block;margin-left:8px">TREBLE</span>' : '';
