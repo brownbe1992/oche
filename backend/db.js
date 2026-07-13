@@ -3642,6 +3642,14 @@ function importPlayerExport(payload) {
 
   let gamesImported = 0, gamesSkipped = 0, turnsImported = 0, dartsImported = 0, badgesImported = 0;
   const gameIdMap = new Map();
+  // Games matched to an existing local row by _findMatchingLocalGame() are skipped
+  // entirely -- their turns/darts already exist locally too (either from the original
+  // play-through or an earlier import) and must NOT be re-inserted under the existing
+  // game. gameIdMap still records the source->local id (needed so a *different*
+  // export that references this same game, e.g. an opponent's own import, can still
+  // resolve it), so the turns loop below checks this set first rather than relying on
+  // gameIdMap.get() being null.
+  const skippedGameIds = new Set();
 
   const insertGame = db.prepare(`INSERT INTO games
     (category, legs_per_set, sets_per_game, created_at, completed_at, winner_id, practice, game_type, config, player_count, league_id)
@@ -3653,7 +3661,7 @@ function importPlayerExport(payload) {
     const targetIds = participants.map(gp => idMap.get(gp.player_id)).filter(id => id != null);
 
     const existingId = _findMatchingLocalGame(g, targetIds);
-    if (existingId) { gameIdMap.set(g.id, existingId); gamesSkipped++; continue; }
+    if (existingId) { gameIdMap.set(g.id, existingId); skippedGameIds.add(g.id); gamesSkipped++; continue; }
 
     const info = insertGame.run(
       g.category, g.legs_per_set, g.sets_per_game, g.created_at, g.completed_at,
@@ -3676,9 +3684,10 @@ function importPlayerExport(payload) {
     (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points, created_at, leg_won, target_score)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   for (const t of turns) {
+    if (skippedGameIds.has(t.game_id)) continue; // game already exists locally -- its turns/darts do too
     const newGameId = gameIdMap.get(t.game_id);
     const tid = idMap.get(t.player_id);
-    if (newGameId == null || tid == null) continue; // belongs to a duplicate-skipped game, or an unresolved player
+    if (newGameId == null || tid == null) continue; // unresolved player, or a game that failed to insert
     const info = insertTurn.run(newGameId, tid, t.set_no, t.leg_no, t.scored, t.bust, t.checkout, t.checkout_points, t.created_at, t.leg_won, t.target_score);
     turnIdMap.set(t.id, Number(info.lastInsertRowid));
     turnsImported++;

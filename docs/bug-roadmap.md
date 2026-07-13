@@ -30,8 +30,9 @@
 > now fixed. **BUG-10** through **BUG-15** were opened by a 2026-07 **sixth-pass
 > audit** (a general code-review pass across the whole app, not scoped to one new
 > feature — the same read that produced `security-audit-roadmap.md` Part 8 / SEC-18
-> through SEC-24) — see the entries at the bottom. **BUG-1 through BUG-15 are all
-> fixed as of this writing** — nothing open on either tracker.
+> through SEC-24) — see the entries at the bottom. **BUG-16** was opened by a live
+> user bug report (2026-07) against `importPlayerExport()`, now fixed. **BUG-1
+> through BUG-16 are all fixed as of this writing** — nothing open on either tracker.
 
 ## Severity legend
 
@@ -932,6 +933,83 @@ being broken rather than a config gap.
 **Verify:** the warning fires once (not per-request) when a proxied setup is detected
 without `TRUST_PROXY`; no change to behavior or logging for the default direct-connect
 deployment (no `X-Forwarded-For` header ever arrives).
+
+---
+
+## BUG-16 — `importPlayerExport()`'s duplicate-game guard skipped re-inserting the game row, but not its turns/darts underneath it  **(MED, data-integrity)**
+
+**Status: ✅ Fixed (2026-07).** `backend/db.js` `importPlayerExport()` now tracks
+skipped-as-duplicate games in a `skippedGameIds` set and checks it first in the turns
+loop, so a duplicate game's turns (and, transitively, its darts) are no longer
+re-inserted under the pre-existing local game. Committed regression test in
+`backend/test/db.export.test.js` (the "imports a fresh player + opponent…" case):
+re-importing the same export now asserts `turnsImported === 0` and `dartsImported ===
+0`, and directly queries `turns`/`darts` row counts under the local game to confirm
+they stay at 2 and 6 respectively rather than doubling. Full backend suite green.
+(Found via a live user bug report: exporting a player and immediately re-importing
+them duplicated all of that player's darts even though the player and the game itself
+were correctly recognized as already existing.)
+
+**Where:** `backend/db.js` `importPlayerExport()`, the per-game loop and the turns loop
+right after it:
+
+```js
+for (const g of games) {
+  ...
+  const existingId = _findMatchingLocalGame(g, targetIds);
+  if (existingId) { gameIdMap.set(g.id, existingId); gamesSkipped++; continue; }  // <-- gameIdMap still gets a non-null value
+  ...
+}
+...
+for (const t of turns) {
+  const newGameId = gameIdMap.get(t.game_id);
+  const tid = idMap.get(t.player_id);
+  if (newGameId == null || tid == null) continue; // <-- comment says "skipped game", but newGameId is never null for one
+  const info = insertTurn.run(newGameId, tid, ...);   // <-- inserts a second copy of the turn under the EXISTING game
+  ...
+}
+```
+
+**The gap that let it ship:** `_findMatchingLocalGame()` correctly recognizes a
+duplicate game by fingerprint (`created_at`/`category`/`game_type`/`legs_per_set`/
+`sets_per_game` + exact participant set) and skips creating a second `games` row —
+`gamesImported`/`gamesSkipped` counts were correct, and the H2H record (which only
+counts games) stayed correct too. But `gameIdMap.set(g.id, existingId)` maps the
+source game id to the *existing* local game id rather than to nothing, so the turns
+loop's `newGameId == null` check — meant to skip turns belonging to a duplicate-skipped
+game — never actually fired for one. Every turn (and every dart under it, via the
+same pattern one loop down) got inserted a second time, silently doubling that
+player's turn/dart counts and every stat derived from them, while the higher-level
+counts (`gamesImported`, `gamesSkipped`, H2H) looked completely correct. The existing
+re-import-idempotency test only asserted `gamesImported`/`gamesSkipped`/H2H total —
+never `turnsImported`/`dartsImported` or actual row counts — so nothing caught it.
+
+**Misbehavior (verified):** exporting a player with 1 completed game (2 turns, 6
+darts) and importing that same export twice reports `gamesImported: 0, gamesSkipped:
+1` correctly on the second import, but before the fix also reported
+`turnsImported: 2, dartsImported: 6` — a second, real set of turn/dart rows landing
+under the one (correctly deduped) game — silently doubling every stat derived from
+that game's darts (averages, checkout stats, badge-eligible throws, etc.) each time
+the same file was re-imported.
+
+**Fix (step by step):**
+1. Track which source game ids were matched to an existing local game
+   (`skippedGameIds`, a `Set`) separately from `gameIdMap` (which still needs the
+   source→local mapping for other purposes, e.g. an opponent's own later import
+   referencing the same shared game).
+2. In the turns loop, check `skippedGameIds.has(t.game_id)` first and `continue`
+   before touching `gameIdMap`/`idMap` at all, so a duplicate-skipped game's turns
+   are never inserted (and its darts, which key off `turnIdMap`, follow automatically
+   since no turn id is ever recorded for them to attach to).
+3. Add a committed `node:test` (extending the existing re-import-idempotency case
+   rather than a new one) that asserts `turnsImported === 0` and `dartsImported === 0`
+   on re-import, plus direct `SELECT COUNT(*)` checks against `turns`/`darts` for the
+   local game — not just the `gamesImported`/`gamesSkipped`/H2H counts that let this
+   ship in the first place.
+
+**Verify:** the new assertions fail on the pre-fix code (`turnsImported`/`dartsImported`
+report 2/6 instead of 0 on re-import) and pass after the fix; the fresh-import and
+opponent-stub-upgrade tests are unaffected; full backend suite green.
 
 ---
 

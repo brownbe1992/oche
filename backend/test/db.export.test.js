@@ -258,8 +258,23 @@ describe('importPlayerExport (docs/data-export-roadmap.md — the export/import 
     assert.equal(again.opponents[0].created, false);
     assert.equal(again.gamesImported, 0);
     assert.equal(again.gamesSkipped, 1);
+    assert.equal(again.turnsImported, 0, 'a skipped duplicate game must not re-insert its turns');
+    assert.equal(again.dartsImported, 0, 'a skipped duplicate game must not re-insert its darts');
     const recAfterReimport = db.getH2HRecord('import_fresh_carl', 'import_fresh_dana');
     assert.equal(recAfterReimport.total, 1, 're-import must not double the H2H record');
+
+    // H2H is derived from game count alone, so it can't catch doubled turns/darts
+    // sitting underneath the one (correctly deduped) game row -- check row counts
+    // directly against the local game.
+    const localGameId = db._db.prepare(
+      `SELECT gp.game_id AS id FROM game_players gp JOIN players p ON p.id = gp.player_id WHERE p.name = ? LIMIT 1`
+    ).get('import_fresh_carl').id;
+    const turnCount = db._db.prepare('SELECT COUNT(*) n FROM turns WHERE game_id = ?').get(localGameId).n;
+    const dartCount = db._db.prepare(
+      'SELECT COUNT(*) n FROM darts d JOIN turns t ON t.id = d.turn_id WHERE t.game_id = ?'
+    ).get(localGameId).n;
+    assert.equal(turnCount, 2, 're-import must not duplicate turns under the existing game');
+    assert.equal(dartCount, 6, 're-import must not duplicate darts under the existing game');
   });
 
   test('a name collision with a different uuid is uniquified, not silently merged onto the unrelated local player', () => {
