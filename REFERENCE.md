@@ -2453,7 +2453,7 @@ time by `getTournament()`, never stored: `winner_id` set → `complete`; else `g
 set → `in_progress`; else both player slots filled → `ready`; else `pending`. Same
 "compute from raw data" philosophy as the rest of the schema (§1).
 
-### League mode (`docs/archive/league-mode-roadmap.md`, X01 or Cricket — see §18)
+### League mode (`docs/league-mode-roadmap.md`, X01 or Cricket — see §18)
 
 **`leagues`**
 | Column | Type | Notes |
@@ -3027,7 +3027,7 @@ end-to-end Playwright verification pass against a running server.
 
 ## 18. League Mode
 
-`docs/archive/league-mode-roadmap.md`. X01 or Cricket, per `leagues.game_type`
+`docs/league-mode-roadmap.md`. X01 or Cricket, per `leagues.game_type`
 (Doubles Practice/Just Chuckin' It/Checkout Trainer are structurally excluded
 regardless — all solo/no-winner formats). Backend: `backend/db.js`'s league
 section. Frontend: `frontend/index.html`'s "leagues" block, reachable via the

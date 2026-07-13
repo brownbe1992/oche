@@ -1,19 +1,30 @@
 # League / Season Mode — Design Roadmap
 
-> Status (2026-07): **Fully built and playable end-to-end** — schema
-> (`leagues`/`league_players`, plus a nullable `games.league_id`), auto-tagging
-> (an `onGameCreated` hook, no extra step in New Game for the common case; a
-> small "log to which league?" picker only when a game genuinely qualifies for
-> more than one active league at once), live standings computation (no
-> maintained tally — see "resolved open questions" below), season lifecycle
-> (active/ended, reversible), a Leagues nav tab (list/setup/detail screens), a
-> Home page teaser, a Player Profile "Leagues" stat block, and **Cricket league
-> support** (a `leagues.game_type` column alongside X01, a setup-screen
-> game-type selector, and full X01/Cricket cross-isolation in the auto-tag
-> hook). Full detail: `REFERENCE.md` §18. This doc's own design below is kept
-> as-written for context; where the shipped implementation resolved something
-> differently than the original sketch, that's called out explicitly rather
-> than silently edited away.
+> Status (2026-07): **Core league mode is fully built and playable
+> end-to-end** — schema (`leagues`/`league_players`, plus a nullable
+> `games.league_id`), auto-tagging (an `onGameCreated` hook, no extra step in
+> New Game for the common case; a small "log to which league?" picker only
+> when a game genuinely qualifies for more than one active league at once),
+> live standings computation (no maintained tally — see "resolved open
+> questions" below), season lifecycle (active/ended, reversible), a Leagues
+> nav tab (list/setup/detail screens), a Home page teaser, a Player Profile
+> "Leagues" stat block, and **Cricket league support** (a `leagues.game_type`
+> column alongside X01, a setup-screen game-type selector, and full
+> X01/Cricket cross-isolation in the auto-tag hook). Full detail:
+> `REFERENCE.md` §18. This doc's own design below is kept as-written for
+> context; where the shipped implementation resolved something differently
+> than the original sketch, that's called out explicitly rather than silently
+> edited away.
+>
+> **Un-archived (2026-07): a new "League fixtures / pending matches" item is
+> now open** — see its own section below, added to support
+> `docs/new-game-flow-roadmap.md`'s "League Game" New Game entry. This is a
+> deliberate reversal of a decision this doc made and shipped against below
+> ("a league only constrains category... every match is exactly the casual,
+> unstructured match," no bracket-scheduled fixtures) — flagged explicitly
+> here rather than silently contradicted. Everything summarized above this
+> note is still fully shipped and unaffected; only the new section below is
+> open.
 
 ### Resolved open questions (were listed below as open; now decided and shipped)
 
@@ -107,9 +118,89 @@ unify them into one system.
   ends, and a "past seasons" archive lets you look back at who won a given month
   without needing to keep manually filtering by date range.
 
+## League fixtures / pending matches (new, not started)
+
+**Goal**: let a New Game session recognize when the two selected players have
+a scheduled-but-unplayed match in a shared active league, and offer it as a
+one-tap "League Game" shortcut (`docs/new-game-flow-roadmap.md`'s Step 2)
+that pre-fills that league's game type/category rather than asking again.
+Today a league only auto-tags a game *after* the players independently
+happen to pick a matching category — there's no concept of "this pairing
+still owes the league a match," which is exactly what this section adds.
+
+- **New table, following this app's standing "own table with a `game_id` FK
+  into `games`" convention** (`CLAUDE.md`, already the shape
+  `tournament_matches` uses): `league_fixtures — id, league_id, player1_id,
+  player2_id, game_id (nullable FK → games.id), created_at`. No stored status
+  column, matching `tournament_matches`'s own "derive it, don't store it"
+  precedent: a fixture is **pending** while `game_id` is null, **in
+  progress** once a `games` row is linked but not yet completed, and
+  **fulfilled** once that game completes — the fixture's own row never needs
+  a write on game completion, only on creation.
+- **Linking a fixture to a game is explicit, not inferred**: unlike the
+  existing `onGameCreated` auto-tag hook (which fuzzy-matches any newly
+  created H2H game against eligible leagues by category), choosing "League
+  Game" in New Game means the player explicitly picked a specific fixture —
+  so `setup`/`startGame()` carries a `leagueFixtureId` through to game
+  creation, and the backend sets `league_fixtures.game_id` directly on that
+  row. This avoids the ambiguity the existing fuzzy-match hook has to solve
+  for (ties `games.league_id` to the right league automatically too, for
+  free, without needing the existing 0/1/>1-candidate eligibility logic at
+  all for fixture-originated games).
+- **New endpoint**: a pending-fixture lookup keyed on just the player pair
+  (`GET /api/leagues/pending-fixture?p1=&p2=`), callable right after Step 1
+  of the New Game flow — *before* any game type is chosen, unlike the
+  existing `/api/leagues/eligible` check this doc's shipped picker uses
+  today (which requires `category`/`gameType` as query params, since it only
+  ever ran after those were already chosen). Returns every pending fixture
+  across every active league both players share (could be more than one, if
+  they're enrolled in multiple leagues with each other).
+- **Selecting "League Game"**: with exactly one pending fixture, auto-fills
+  `setup.gameType`/`setup.start` (or the Cricket preset) from
+  `leagues.game_type`/`category` and sets `setup.leagueFixtureId` — legs/sets
+  still get asked in Step 3 as normal (a league still doesn't fix match
+  format, per the "Resolved open questions" above, unchanged by this
+  section). A Custom Cricket league still needs its 7 targets chosen in Step
+  3 too, for the same reason — the league's `category` value
+  (`'Custom Cricket'`) doesn't pin the exact numbers. With 2+ pending
+  fixtures (the player pair shares more than one active league), selecting
+  "League Game" reveals a secondary "Which league match?" dropdown, mirroring
+  the X01-flavor-dropdown pattern `docs/new-game-flow-roadmap.md` already
+  establishes for X01's starting score.
+
+### Open questions for whoever picks this up
+
+- **Fixture generation**: how do pending fixtures get created in the first
+  place? The natural default is a full round-robin generated once, at league
+  creation (and again for just the new pairings whenever a player joins an
+  already-active league) — but this isn't decided. An admin-driven "schedule
+  a match" action is the alternative, trading automation for control.
+- **Double round-robin**: does each enrolled pair get exactly one fixture per
+  season (single round-robin), or two (a return match, common in real pub
+  leagues)? Leans toward single for v1 simplicity, not decided.
+- **Unfulfilled fixtures at season end**: if a fixture is still pending when
+  a league's season ends, does it just quietly stop mattering (the season
+  view already freezes standings on end), or should the standings/season
+  summary call out unplayed fixtures explicitly?
+- **Manual fixtures**: should an admin be able to create or cancel an
+  individual fixture outside the round-robin generation (e.g. to add a
+  specific replay match), or is round-robin generation the only source of
+  fixtures for v1?
+- **Interaction with today's ambiguity picker**: today's "log to which
+  league?" picker (shown when a game qualifies for 2+ leagues by category
+  alone) and this section's fixture lookup are two different mechanisms that
+  can both apply to the same pair of players — does a fixture-originated
+  game skip the old picker entirely (since `leagueFixtureId` already pins the
+  league unambiguously), confirming the existing auto-tag hook should treat
+  fixture-linked games as already resolved and not re-run its own eligibility
+  check on them?
+
 ## Accessibility, security, and testing considerations
 
-Addressed as shipped (2026-07), per `CLAUDE.md`'s standing conventions:
+Addressed as shipped (2026-07) for everything above the "League fixtures"
+section; the fixtures feature itself still needs its own pass once built
+(a new write path, a new read endpoint, and UI states in New Game), per
+`CLAUDE.md`'s standing conventions:
 
 - **Testing**: `backend/test/league.test.js` covers creation/validation,
   enrollment (including multi-league), the auto-tag hook's every eligibility

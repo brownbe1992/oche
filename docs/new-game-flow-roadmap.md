@@ -21,7 +21,12 @@ single global `setup` state object. Concretely, today's stack is:
 1. **Players** — `#players-list`: each of `setup.slots` is its own always-visible
    `<select class="pselect">` row (`renderPlayers()`), with a persistent
    "+ Add player" control (`toggleAddPlayerMenu()` → "Add existing"/"New
-   player") and a 6-player cap.
+   player") and a 6-player cap. Also holds two conditional, easy-to-miss
+   elements keyed off the two currently-selected names: `#h2h-banner`
+   (`updateH2HBanner()` — a live H2H record line, e.g. "Alice leads 3–1")
+   and `#league-picker-wrap` (`updateLeaguePicker()` — a "Log to league:"
+   dropdown, shown only when the pair's category matches 2+ active leagues).
+   Both are being redesigned — see Step 2 below.
 2. **Game type** — `#game-type-section`: a segmented X01/Cricket toggle
    (`setGameType()`), separate from the Mode row below it.
 3. **Starting score** — `#start-score-section`: a `<select id="start-score-
@@ -126,6 +131,49 @@ makes today, just moved from Play Now time to selection time):
   and proceed normally; only Daily Challenge itself is blocked for the rest
   of the day.
 
+#### H2H banner: dropped
+
+**Resolved**: `#h2h-banner`'s live H2H-record line is not carried into the
+new flow — dropped entirely, at least for now. It's used nowhere else in the
+codebase (`updateH2HBanner()`, `/api/players/h2h`, and the `#h2h-banner`
+element/CSS exist only inside `#screen-setup`), so removing it from the new
+flow means deleting this dead code as part of implementation rather than
+leaving it unreachable.
+
+#### "League Game": a top-of-dropdown quick-start entry
+
+**Resolved** (supersedes the small inline `#league-picker-wrap` dropdown):
+rather than a "log to league?" picker tucked into the Players section,
+**"League Game" becomes its own entry at the top of Step 2's dropdown** —
+above Daily Challenge — whenever the two currently-selected players have a
+**pending fixture** (a scheduled-but-unplayed match) in a shared active
+league. This is new backend work, not just a frontend move — see
+`docs/league-mode-roadmap.md`'s new "League fixtures / pending matches"
+section for the full design (a new `league_fixtures` table and a
+pending-fixture lookup endpoint; today's league mode has no concept of an
+unplayed pairing to check against, only after-the-fact category matching).
+
+- **Check timing**: runs once Step 1 completes (both players picked,
+  "No, continue" pressed) — the same moment `contexts` filtering already
+  needs the final player count for, so this is one combined lookup, not a
+  separate round trip.
+- **`contexts`**: `h2h` only (a league fixture always involves exactly the 2
+  players it was generated for) — see the updated table below.
+- **Selecting it**: auto-fills the game type/category from the matching
+  league (skipping X01-flavor/Cricket-classic-vs-custom questions when the
+  league's category already pins them) and carries the fixture's id through
+  to `startGame()`, so the resulting game gets linked back to that fixture
+  directly — "an easy way to begin the league match with the custom league
+  settings," per the original request. Step 3 still asks for legs/sets,
+  since a league never fixes match format (unchanged existing behavior). If
+  the pair shares 2+ pending fixtures across different leagues, selecting
+  "League Game" reveals a secondary "Which league match?" dropdown, the same
+  pattern as X01's flavor dropdown.
+- **Not shown at all** when there's no pending fixture for the pair — this
+  fully replaces today's narrower "only when 2+ leagues are simultaneously
+  eligible by category" trigger, since the new fixture-based check doesn't
+  need a category to already be chosen to know a match is owed.
+
 #### Practice-only vs. H2H-eligible modes
 
 **Resolved**: rather than resolving the sequencing conflict at the moment a
@@ -140,6 +188,7 @@ or both:
 
 | Entry | `contexts` |
 |---|---|
+| League Game | `h2h` only, and only shown when a pending fixture exists for the pair (see below) |
 | X01 | `practice`, `h2h` |
 | Cricket | `practice`, `h2h` |
 | Daily Challenge | `practice` only |
@@ -188,11 +237,15 @@ it exposes.
 
 ## What doesn't change
 
-- **No data model impact.** `setup`'s shape, `startGame()`'s validation, and
-  the `game` object it builds (via `GAME_TYPES[gameType].newMatchPlayer(...)`)
-  stay the same — this is purely a restructuring of *when/how* the existing
-  controls are shown, not a change to what data New Game collects or sends.
-  No `games`/`config` schema changes, no new API endpoints.
+- **No data model impact, except for "League Game."** `setup`'s shape,
+  `startGame()`'s validation, and the `game` object it builds (via
+  `GAME_TYPES[gameType].newMatchPlayer(...)`) stay the same for every other
+  entry — this is purely a restructuring of *when/how* the existing controls
+  are shown, not a change to what data New Game collects or sends for them.
+  The one exception is "League Game" above: it depends on new backend work
+  (a `league_fixtures` table and a pending-fixture lookup endpoint) tracked
+  separately in `docs/league-mode-roadmap.md`, not something this doc's own
+  frontend restructuring can deliver alone.
 - **No change to any individual control's own logic** — Cricket's exact-7
   validation, Checkout Trainer's difficulty tiers, Ghost's leg-picker data
   source, the 6-player cap, and `startGame()`'s per-mode checks all carry over
@@ -226,10 +279,11 @@ Per `CLAUDE.md`'s standing conventions:
 
 ## Open questions for whoever picks this up
 
-- **League picker / H2H banner**: today's `#league-picker-wrap`/`#h2h-banner`
-  live inside the Players section — which step do they belong to in the new
-  flow, Step 1 (players) or somewhere in Step 2/3 (since league-tagging is
-  really a property of the *match*, not the roster)?
+None remaining specific to this doc — the open questions for "League Game"
+(fixture generation, single vs. double round-robin, manual fixtures, and its
+interaction with today's category-based ambiguity picker) live in
+`docs/league-mode-roadmap.md`'s new "League fixtures / pending matches"
+section, since they're backend design questions, not New Game screen ones.
 
 ## Suggested build order
 
@@ -252,7 +306,12 @@ Per `CLAUDE.md`'s standing conventions:
 4. Move Step 3 (More options) in: relocate each mode's existing options
    section under the new step, resolving the classic-vs-custom Cricket
    sharing between practice and H2H.
-5. Wire Play Now to the existing `startGame()`, then Playwright-test the full
+5. Remove `#h2h-banner`/`updateH2HBanner()`/`/api/players/h2h` (dead code
+   once dropped from the flow).
+6. Wire Play Now to the existing `startGame()`, then Playwright-test the full
    new path per mode (X01 H2H, X01 practice, Cricket both variants, Doubles
    Practice, Just Chuckin' It, Ghost, Daily Challenge, Checkout Trainer,
    Around the Clock/World) to confirm no validation path regressed.
+7. **Depends on `docs/league-mode-roadmap.md`'s "League fixtures" item
+   shipping first**: wire the "League Game" entry once the pending-fixture
+   endpoint exists — this step can't land before that backend work does.

@@ -55,7 +55,7 @@ whoever picks any of these up doesn't duplicate the others' work:
   natural relationship, not a duplication: this site could be the discovery/lobby layer
   that hands two matched players off to the existing P2P design to actually play,
   rather than reinventing a second live-transport mechanism.
-- **`docs/tournament-mode-roadmap.md`** and **`docs/archive/league-mode-roadmap.md`** are both
+- **`docs/tournament-mode-roadmap.md`** and **`docs/league-mode-roadmap.md`** are both
   explicitly scoped to *one instance's own local roster* — a bracket or a season table
   built from players who all already exist on that one household's Oche. Neither
   currently has any concept of a participant who isn't a local player row. Cross-
@@ -146,5 +146,5 @@ league/tournament.
    `docs/online-multiplayer-roadmap.md`'s existing P2P design to actually play, rather
    than building a second live-transport mechanism.
 5. Cross-instance tournaments/leagues, extending `docs/tournament-mode-roadmap.md` and
-   `docs/archive/league-mode-roadmap.md`'s existing bracket/standings logic to a participant
+   `docs/league-mode-roadmap.md`'s existing bracket/standings logic to a participant
    model that includes matched/remote players, per the relationship section above.

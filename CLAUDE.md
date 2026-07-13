@@ -14,7 +14,7 @@ a `game_id` foreign key pointing at `games`** — never a new `is_tournament`/`i
 -style boolean bolted directly onto the `games` table itself.
 
 This is already the shape used by `docs/tournament-mode-roadmap.md`
-(`tournament_matches.game_id`) and `docs/archive/league-mode-roadmap.md`
+(`tournament_matches.game_id`) and `docs/league-mode-roadmap.md`
 (`games.league_id`, nullable FK). Apply the same pattern to any other future context
 (online multiplayer, or anything not yet designed) rather than adding a fourth or
 fifth boolean flag to `games` — `games` already has `practice`; it should not
