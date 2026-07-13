@@ -644,7 +644,31 @@ the SEC-21 byte-counting fix (same code path) is verified together.
 
 ### BUG-11 — Backup restore overwrites the live database file while the server still holds it open, risking corruption if any write lands before the required restart  **(MED)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** `stageRestore()` now writes to a sidecar file
+(`DB_PATH + '.restore-pending'`) instead of touching `DB_PATH` at all. A new
+`applyPendingRestoreIfAny()` runs once at process startup, in `db.js`, **before** the
+live `DatabaseSync` connection is ever opened — it removes any stale `-wal`/`-shm`
+sidecars and atomically `fs.renameSync`s the pending file over `DB_PATH` (same
+directory, so same filesystem — an atomic rename, not a copy). Since this runs before
+anything has opened `DB_PATH` this process, there is no window for a concurrent write
+to land on a half-swapped file — the class of risk is eliminated by construction, not
+just made less likely. The "restart now" UX is unchanged (the admin still restarts the
+container/process manually); the difference is entirely in what happens to the file
+in the meantime. Committed regression coverage in two places: `backend/test/backup-
+lib.test.js`'s `stageRestore`/`applyPendingRestoreIfAny` describe blocks assert at the
+byte level that `stageRestore()` leaves `DB_PATH`'s bytes and `mtime` completely
+unchanged (the only way to reliably prove this — reading through SQLite's own query
+layer on a still-open connection can't distinguish old vs. new behavior, since WAL-
+mode caching and Linux's "delete/overwrite while open" semantics mean a running
+process can still see self-consistent query results even when the path-visible file
+underneath it has silently changed), and that `applyPendingRestoreIfAny()` correctly
+swaps the content in, clears stale WAL/SHM, and consumes the marker (idempotent on a
+second call). `backend/test/backup-restore-two-phase.test.js` adds an end-to-end
+integration check: stage a restore against a live, running server (confirming its own
+on-disk file is byte-for-byte untouched and it keeps working normally afterward), then
+start a fresh process against the same database path (simulating the real restart)
+and confirm that process reflects the restored content, with the pending marker gone.
+Full backend suite green (556/556).
 
 **Where:** `backend/backup-lib.js` `stageRestore()`:
 

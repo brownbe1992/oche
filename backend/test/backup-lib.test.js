@@ -97,21 +97,60 @@ describe('validateSqliteFile', () => {
   });
 });
 
+// docs/bug-roadmap.md BUG-11: stageRestore() used to copy straight over the LIVE
+// DB_PATH while the server process still held it open — any write landing between
+// "staged" and the admin's manual restart risked corrupting the just-restored data.
+// It now stages to a sidecar (.restore-pending) file instead, applied only at the
+// next process startup, before db.js ever opens the live database — see
+// applyPendingRestoreIfAny() below.
 describe('stageRestore', () => {
-  test('copies the source file over DB_PATH and clears stale -wal/-shm files', async () => {
+  test('does NOT touch DB_PATH — writes to a .restore-pending sidecar instead', async () => {
+    const beforeContent = fs.readFileSync(lib.DB_PATH);
+    const beforeMtime = fs.statSync(lib.DB_PATH).mtimeMs;
+    const result = await lib.createBackup();
+
+    lib.stageRestore(result.path);
+
+    assert.deepEqual(fs.readFileSync(lib.DB_PATH), beforeContent, 'DB_PATH bytes must be completely unchanged by staging');
+    assert.equal(fs.statSync(lib.DB_PATH).mtimeMs, beforeMtime, 'DB_PATH must not even be touched (same mtime)');
+    assert.ok(fs.existsSync(lib.RESTORE_PENDING_PATH), 'the pending sidecar file must exist');
+    assert.deepEqual(fs.readFileSync(lib.RESTORE_PENDING_PATH), fs.readFileSync(result.path), 'the pending file has the staged backup\'s exact bytes');
+
+    lib.applyPendingRestoreIfAny(); // clean up the pending file so later tests in this describe block start fresh
+  });
+});
+
+describe('applyPendingRestoreIfAny', () => {
+  test('no-ops (returns false) when nothing is staged', () => {
+    assert.ok(!fs.existsSync(lib.RESTORE_PENDING_PATH));
+    assert.equal(lib.applyPendingRestoreIfAny(), false);
+  });
+
+  test('applies a staged restore onto DB_PATH, clears stale -wal/-shm, and removes the marker', async () => {
     // Simulate stale WAL/SHM files sitting next to the live db, as WAL mode
     // would leave them.
     fs.writeFileSync(lib.DB_PATH + '-wal', 'stale wal data');
     fs.writeFileSync(lib.DB_PATH + '-shm', 'stale shm data');
 
     const result = await lib.createBackup();
-    const beforeSize = fs.statSync(lib.DB_PATH).size;
     lib.stageRestore(result.path);
+    assert.ok(fs.existsSync(lib.RESTORE_PENDING_PATH));
 
+    const applied = lib.applyPendingRestoreIfAny();
+
+    assert.equal(applied, true);
     assert.ok(!fs.existsSync(lib.DB_PATH + '-wal'), 'stale -wal file removed');
     assert.ok(!fs.existsSync(lib.DB_PATH + '-shm'), 'stale -shm file removed');
+    assert.ok(!fs.existsSync(lib.RESTORE_PENDING_PATH), 'the pending marker is consumed');
     const afterContent = fs.readFileSync(lib.DB_PATH);
     const backupContent = fs.readFileSync(result.path);
     assert.deepEqual(afterContent, backupContent, 'DB_PATH now has the backup\'s exact bytes');
+  });
+
+  test('applying twice in a row the second time is a safe no-op', async () => {
+    const result = await lib.createBackup();
+    lib.stageRestore(result.path);
+    assert.equal(lib.applyPendingRestoreIfAny(), true);
+    assert.equal(lib.applyPendingRestoreIfAny(), false, 'nothing pending the second time');
   });
 });

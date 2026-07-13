@@ -20,10 +20,20 @@ const path = require('path');
 const fs = require('fs');
 const auth = require('./auth.js');
 const netguard = require('./netguard.js');
+const backupLib = require('./backup-lib.js');
 const { checkoutHint, dartLabel } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+
+// docs/bug-roadmap.md BUG-11: apply any restore staged via the Settings "Restore
+// backup" flow BEFORE opening the live database connection below — see
+// backup-lib.js's applyPendingRestoreIfAny() for why this ordering is what makes the
+// swap safe (nothing can be mid-write against DB_PATH at a point before it's ever
+// been opened this process).
+if (backupLib.applyPendingRestoreIfAny()) {
+  console.log(`[oche] Applied a pending database restore from ${backupLib.RESTORE_PENDING_PATH}`);
+}
 
 const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL;');

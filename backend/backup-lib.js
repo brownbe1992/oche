@@ -15,6 +15,10 @@ const fs = require('fs');
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 const BACKUP_DIR = process.env.BACKUP_DIR || path.join(path.dirname(DB_PATH), 'backups');
 const DEFAULT_RETENTION_DAYS = 7;
+// docs/bug-roadmap.md BUG-11: a staged restore that lands directly on DB_PATH.
+// See stageRestore()/applyPendingRestoreIfAny() below for why this sits next to
+// DB_PATH (same directory -> same filesystem -> an atomic rename at apply time).
+const RESTORE_PENDING_PATH = DB_PATH + '.restore-pending';
 
 // Every backup this module writes matches this exact pattern (see timestamp()
 // below) — used to validate any filename before it's ever passed to fs
@@ -140,23 +144,47 @@ function validateSqliteFile(filePath) {
   }
 }
 
-// Stages `sourcePath` as the new live database file. This does NOT make the
-// already-running server process pick it up — on Linux, an open file handle
-// keeps reading/writing the old inode until the process reopens the file, so a
-// restart is still required after this returns (docs/backups-roadmap.md's v2
-// design deliberately hands the admin an explicit "restart now" instruction
-// rather than the server triggering its own process exit mid-request).
+// docs/bug-roadmap.md BUG-11: stages `sourcePath` as a PENDING restore — written to
+// a sidecar file next to the live database, never touching DB_PATH itself. The
+// previous version copied straight over the live file while the server process
+// still held it open (node:sqlite in WAL mode); since req/res share one socket with
+// every other in-flight request, the server kept accepting normal gameplay writes in
+// the window between "restore staged" and the admin's manual restart — each of which
+// wrote through the old in-memory WAL state on top of a file that had already been
+// silently replaced out from under it, risking corruption of the just-restored data.
+// This does NOT make the already-running server process pick anything up — the
+// pending file is only ever applied by applyPendingRestoreIfAny(), called once at
+// the very next process startup, before db.js opens the live database. A restart is
+// still required after this returns (docs/backups-roadmap.md's v2 design
+// deliberately hands the admin an explicit "restart now" instruction rather than the
+// server triggering its own process exit mid-request) — the difference is that the
+// live file itself is untouched, and therefore un-corruptible, until that restart.
 function stageRestore(sourcePath) {
+  fs.copyFileSync(sourcePath, RESTORE_PENDING_PATH);
+}
+
+// Called once, at process startup, BEFORE db.js opens the live database — see
+// db.js's own call site. If a restore was staged, applies it now: removes any stale
+// WAL/SHM sidecars for the live database (same reasoning stageRestore() used to
+// apply directly), then atomically renames the pending file over DB_PATH
+// (fs.renameSync between two paths in the same directory is atomic on the same
+// filesystem) and removes the marker. Nothing else can be touching DB_PATH at this
+// point — this runs before the DatabaseSync connection is ever opened — so there is
+// no window for a write to land on a half-swapped file. No-op (returns false) if
+// nothing is pending.
+function applyPendingRestoreIfAny() {
+  if (!fs.existsSync(RESTORE_PENDING_PATH)) return false;
   for (const suffix of ['-wal', '-shm']) {
     const stale = DB_PATH + suffix;
     if (fs.existsSync(stale)) fs.unlinkSync(stale);
   }
-  fs.copyFileSync(sourcePath, DB_PATH);
+  fs.renameSync(RESTORE_PENDING_PATH, DB_PATH);
+  return true;
 }
 
 module.exports = {
-  DB_PATH, BACKUP_DIR, DEFAULT_RETENTION_DAYS,
+  DB_PATH, BACKUP_DIR, DEFAULT_RETENTION_DAYS, RESTORE_PENDING_PATH,
   isValidBackupName, timestamp, resolveRetentionDays,
   createBackup, pruneOldBackups, listBackups, backupPath, deleteBackup,
-  validateSqliteFile, stageRestore,
+  validateSqliteFile, stageRestore, applyPendingRestoreIfAny,
 };
