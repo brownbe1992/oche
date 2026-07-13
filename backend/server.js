@@ -444,6 +444,12 @@ const ALLOWED_LIVE_KEYS = new Set([
   // Tournament mode only (docs/tournament-mode-roadmap.md) — read by display.html's
   // fmtText() for the top-bar round label ("Quarterfinal", "Final", ...).
   'tournamentRoundLabel',
+  // Baseball only (docs/game-modes-roadmap.md) — which inning (1-9, or beyond on a
+  // tie) is currently live; read by display.html's renderers.baseball.scorecard()
+  // for the "Inning N of 9" header. Per-player runs ride inside the already-
+  // unrestricted per-player `players[]` array, same as every other game type's own
+  // per-player fields.
+  'baseballInning',
 ]);
 const MAX_LIVE_BYTES = 65536;
 // Returns the sanitized state, or null if it's over the size cap (caller sends 413).

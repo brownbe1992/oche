@@ -10,6 +10,7 @@ const path = require('path');
 
 const scoring = require(path.join('..', '..', 'frontend', 'scoring.js'));
 const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET_STANDARD_NUMBERS,
+  evaluateVisitBaseball, baseballInningTarget,
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
   evaluateDartDoublesPractice, evaluateDartAroundTheClock, chuckinTiersReached, isStaircaseFinish,
   isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,
@@ -214,6 +215,126 @@ describe('evaluateVisitCricket (mark accumulation + opponent gating + win condit
 
     opponentB.points = 10; // now shooter leads both
     assert.equal(evaluateVisitCricket(shooter, [d(0,1)], g).win, true);
+  });
+});
+
+describe('evaluateVisitBaseball (inning target scoring + round/match completion, docs/game-modes-roadmap.md "Baseball")', () => {
+  const player = (totalRuns) => ({ totalRuns, inningRuns: {} });
+  // `current` is the index of the player whose visit is being evaluated —
+  // evaluateVisit*() always reads it before it's advanced to the next player,
+  // the same timing every other game type's evaluateVisit() relies on.
+  const game = (players, current, inning) => ({ baseballInning: inning, current, players });
+
+  test('a single on the inning target scores 1 run', () => {
+    const p = player(0);
+    const ev = evaluateVisitBaseball(p, [d(3,1)], game([p], 0, 3));
+    assert.equal(ev.runsThisVisit, 1);
+    assert.equal(ev.scored, 1);
+    assert.equal(ev.totalRuns, 1);
+    assert.equal(ev.target, 3);
+  });
+
+  test('a double on the inning target scores 2 runs, a treble scores 3', () => {
+    const p = player(0);
+    assert.equal(evaluateVisitBaseball(p, [d(5,2)], game([p], 0, 5)).runsThisVisit, 2);
+    assert.equal(evaluateVisitBaseball(p, [d(5,3)], game([p], 0, 5)).runsThisVisit, 3);
+  });
+
+  test('a dart on any number other than this inning\'s target scores 0, even a treble', () => {
+    const p = player(0);
+    const ev = evaluateVisitBaseball(p, [d(7,3)], game([p], 0, 4)); // inning 4, hit 7 instead
+    assert.equal(ev.runsThisVisit, 0);
+  });
+
+  test('a miss (sector 0) scores 0', () => {
+    const p = player(0);
+    assert.equal(evaluateVisitBaseball(p, [d(0,1)], game([p], 0, 6)).runsThisVisit, 0);
+  });
+
+  test('a full 3-dart visit sums only the on-target darts', () => {
+    const p = player(0);
+    const ev = evaluateVisitBaseball(p, [d(2,1), d(2,3), d(0,1)], game([p], 0, 2)); // 1 + 3 + 0 (miss)
+    assert.equal(ev.runsThisVisit, 4);
+    assert.equal(ev.totalRuns, 4);
+  });
+
+  test('totalRuns accumulates on top of runs already scored in earlier innings', () => {
+    const p = player(11);
+    const ev = evaluateVisitBaseball(p, [d(9,2)], game([p], 0, 9));
+    assert.equal(ev.totalRuns, 13);
+  });
+
+  test('inningRuns records this inning\'s runs alongside whatever earlier innings already held', () => {
+    const p = { totalRuns: 5, inningRuns: { 1: 2, 2: 3 } };
+    const ev = evaluateVisitBaseball(p, [d(3,1)], game([p], 0, 3));
+    assert.deepEqual(ev.inningRuns, { 1: 2, 2: 3, 3: 1 });
+  });
+
+  test('roundComplete is only true for the LAST player in the rotation this visit', () => {
+    const p1 = player(0), p2 = player(0);
+    assert.equal(evaluateVisitBaseball(p1, [d(1,1)], game([p1, p2], 0, 1)).roundComplete, false, 'player 0 of 2 — not last');
+    assert.equal(evaluateVisitBaseball(p2, [d(1,1)], game([p1, p2], 1, 1)).roundComplete, true, 'player 1 of 2 — last');
+  });
+
+  test('a solo (practice) game is always roundComplete — every visit is the last in a 1-player rotation', () => {
+    const p = player(0);
+    assert.equal(evaluateVisitBaseball(p, [d(1,1)], game([p], 0, 1)).roundComplete, true);
+  });
+
+  test('matchComplete never fires before inning 9, even on the last player\'s visit', () => {
+    const p1 = player(20), p2 = player(5);
+    const ev = evaluateVisitBaseball(p2, [d(0,1)], game([p1, p2], 1, 8));
+    assert.equal(ev.matchComplete, false);
+  });
+
+  test('matchComplete never fires mid-round (round not yet complete), even at inning 9', () => {
+    const p1 = player(20), p2 = player(5);
+    const ev = evaluateVisitBaseball(p1, [d(0,1)], game([p1, p2], 0, 9)); // player 0 of 2 — not last
+    assert.equal(ev.matchComplete, false);
+  });
+
+  test('inning 9, round complete, a unique leader: matchComplete fires with the correct winnerIndex', () => {
+    const p1 = player(20), p2 = player(5);
+    const ev = evaluateVisitBaseball(p2, [d(0,1)], game([p1, p2], 1, 9)); // p2's visit scores 0, still trails
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 0, 'p1 (20) beats p2 (5+0)');
+  });
+
+  test('inning 9, round complete, but the visit itself closes the gap into a unique lead', () => {
+    const p1 = player(20), p2 = player(15);
+    const ev = evaluateVisitBaseball(p2, [d(9,1)], game([p1, p2], 1, 9)); // p2 scores 1 -> 16, still behind
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 0);
+  });
+
+  test('inning 9, round complete, exact tie among the leaders: matchComplete is false — extra innings', () => {
+    const p1 = player(20), p2 = player(17);
+    const ev = evaluateVisitBaseball(p2, [d(9,3)], game([p1, p2], 1, 9)); // p2 scores a treble (3) -> 20, exact tie with p1
+    assert.equal(ev.totalRuns, 20);
+    assert.equal(ev.matchComplete, false, 'an exact tie continues into extra innings, no winner yet');
+    assert.equal(ev.winnerIndex, null);
+  });
+
+  test('inning 9, round complete, exact tie among 2 leaders (3-player game): matchComplete is false', () => {
+    const p1 = player(10), p2 = player(10), p3 = player(3);
+    const ev = evaluateVisitBaseball(p3, [d(0,1)], game([p1, p2, p3], 2, 9)); // p3's visit changes nothing; p1/p2 tied at 10
+    assert.equal(ev.matchComplete, false, 'p1 and p2 are tied for the lead');
+    assert.equal(ev.winnerIndex, null);
+  });
+
+  test('extra innings (past 9) keep targeting number 9, not cycling back to 1', () => {
+    assert.equal(baseballInningTarget(9), 9);
+    assert.equal(baseballInningTarget(10), 9);
+    assert.equal(baseballInningTarget(15), 9);
+    assert.equal(baseballInningTarget(1), 1);
+    assert.equal(baseballInningTarget(8), 8);
+  });
+
+  test('an extra inning (10+) still checks for match completion the same way as inning 9', () => {
+    const p1 = player(20), p2 = player(20); // tied entering inning 10
+    const ev = evaluateVisitBaseball(p2, [d(9,1)], game([p1, p2], 1, 10)); // p2 breaks the tie: 20+1=21
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 1);
   });
 });
 

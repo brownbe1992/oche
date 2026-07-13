@@ -58,8 +58,9 @@ oche/
 │   └── backup.js       Stand-alone WAL-safe backup script
 ├── frontend/
 │   ├── index.html    The entire app — one self-contained HTML file (the controller)
-│   ├── scoring.js    Pure scoring logic (evaluateVisit/evaluateVisitCricket/checkout
-│   │                 math), extracted from index.html so it's unit-testable
+│   ├── scoring.js    Pure scoring logic (evaluateVisit/evaluateVisitCricket/
+│   │                 evaluateVisitBaseball/checkout math), extracted from
+│   │                 index.html so it's unit-testable
 │   └── display.html  Read-only live scoreboard for a second screen
 ```
 
@@ -94,17 +95,19 @@ oche/
   server — it is never written to the database. See [§7](#7-live-scoreboard--real-time-sync).
 - **Game-type plugin seam**: `frontend/index.html` has a `GAME_TYPES` registry with
   `newMatchPlayer`, `evaluateVisit`, `resetForNextLeg`, `playerSnapshot`, and
-  `statDefs` per type — `x01`, `cricket`, and `doubles_practice`.
-  `game.gameType` is stamped once in `startGame()`; every downstream caller
+  `statDefs` per type — `x01`, `cricket`, `baseball`, and `doubles_practice`, among
+  others. `game.gameType` is stamped once in `startGame()`; every downstream caller
   (`enterTurn`, `startNextLeg`, `liveSnapshot`) dispatches through
   `GAME_TYPES[game.gameType]` instead of calling those functions directly, and
-  `display.html`'s `renderers[s.gameType]` table reads the same field. Cricket's turn
-  commit/leg-progression/scoring-screen rendering (`enterTurnCricket`,
-  `onLegWonCricket`, `renderGameCricket`, `renderPadCricket`) are separate sibling
-  functions dispatched from the shared `enterTurn`/`onLegWon`/`renderGame`/`renderPad`
-  entry points, rather than branches inside the X01-heavy originals — Cricket has no
-  achievements, bust concept, or checkout hints, so forcing it through the same code
-  would mean a lot of irrelevant branching. See §2 for Cricket's scoring rules.
+  `display.html`'s `renderers[s.gameType]` table reads the same field. Cricket's and
+  Baseball's turn commit/leg-progression/scoring-screen rendering
+  (`enterTurnCricket`/`enterTurnBaseball`, `onLegWonCricket`/`onLegWonBaseball`,
+  `renderGameCricket`/`renderGameBaseball`, `renderPadCricket`/`renderPadBaseball`)
+  are separate sibling functions dispatched from the shared
+  `enterTurn`/`onLegWon`/`renderGame`/`renderPad` entry points, rather than branches
+  inside the X01-heavy originals — neither has an achievements, bust concept, or
+  checkout-hint equivalent, so forcing them through the same code would mean a lot
+  of irrelevant branching. See §2 for Cricket's and Baseball's scoring rules.
 - **Player Profile/Home page game-type toggle**: each `GAME_TYPES` entry also
   carries 3 UI-facing fields (game-modes-roadmap.md "Toggle mechanism
   generalized") — `label` (button text), `bubbleKeyMap` (patched on right after
@@ -319,6 +322,59 @@ detected in `enterTurnCricket()` before it runs; `onLegWonCricket` itself
 carries no achievement or Daily Challenge integration, since X01's
 clutch/social badges and the Daily Challenge formats don't apply to Cricket.
 Cricket's stat vocabulary is documented in §3 ("Cricket stats").
+
+### Baseball rules — `GAME_TYPES.baseball.evaluateVisit(player, darts, game)` (`frontend/scoring.js`'s `evaluateVisitBaseball`)
+
+docs/game-modes-roadmap.md's "Baseball" — core playable game only (no stat
+vocabulary/achievements yet, tracked as a separate open item). 9 innings, one
+per number 1-9, fixed (`game.config = {innings: 9}`, not a New Game choice).
+Unlike Cricket's independent per-player `marks`, **the current inning is
+game-level state** (`game.baseballInning`) — every player in the match shares
+one live inning, since real darts baseball has everyone throwing at the same
+number in lockstep. Per-player state is `{totalRuns, inningRuns: {inning:
+runs, ...}}` — no `score` field, no bust concept, same shape family as
+Cricket's `marks`/`points`.
+
+**Only the current inning's own number scores**, evaluated dart-by-dart within
+the 3-dart visit — a single scores 1 run, a double 2, a treble 3; anything
+else (a different number, or a genuine miss) scores 0 for that dart:
+
+```js
+const target = inning <= 9 ? inning : 9;   // baseballInningTarget()
+darts.forEach(d => { if (d.sector === target) runsThisVisit += d.mult; });
+```
+
+**The round only completes once the LAST player in the rotation has thrown**
+(`game.current === game.players.length - 1`, read before `game.current`
+advances — the same timing every other `evaluateVisit*()` relies on). A solo
+practice game is always "last in rotation," so it advances one inning per
+visit. The **win condition is only checked on that round-completing visit,
+and only once inning 9 has been reached**: every player's total (including
+the just-evaluated visit) is compared, and the match ends only if there's a
+single unique highest total — an exact tie among the leaders continues into
+extra innings instead, still targeting number 9 (`baseballInningTarget()`
+repeats 9 rather than cycling back to 1 — a judgment call, since the rules
+primer this was built from doesn't specify an extra-innings target number).
+
+Because the round-ending visit and the actual highest scorer aren't always
+the same player (unlike X01/Cricket, where a win is always self-referential —
+the player whose visit just ran is always the winner), `evaluateVisitBaseball()`
+returns `{ matchComplete, winnerIndex }` rather than a simple `win: true`
+implicitly meaning "this player." `enterTurnBaseball()` calls
+`onLegWonBaseball(ev.winnerIndex)`, not `onLegWonBaseball(game.current)`.
+
+Visit-based (3 darts per turn), same undo shape as X01/Cricket
+(`undoLastTurnBaseball()`, dispatched from `undoLastTurn()`) — restores
+`totalRuns`/`inningRuns`/dart counts and `game.baseballInning` from
+`game.lastTurnSnapshot`. Leg/set/game progression (`onLegWonBaseball`)
+mirrors `onLegWonCricket()` structurally; no achievements or Daily Challenge
+integration (X01/Cricket's own don't apply to Baseball either). Scoring
+screen (`renderPadBaseball`) reuses Cricket's exact "select a multiplier,
+then tap the target" interaction with a single target button (this inning's
+number) instead of Cricket's seven. Live scoreboard (`renderers.baseball` in
+`display.html`) is the same chalkboard-table shape as Cricket's (rows =
+innings 1-9, columns = players), always single-column regardless of
+orientation.
 
 ### Doubles Practice per-dart rules — `evaluateDartDoublesPractice(dart, targets)` (`frontend/scoring.js`)
 
@@ -870,9 +926,10 @@ Every stats query needs to scope by mode (h2h/practice, via the existing
 both into one SQL fragment instead of each query hand-rolling its own
 `AND g.game_type='...'` alongside its mode filter
 (`docs/archive/existing-app-prep-roadmap.md` item 1) — `gameType` is whitelisted
-against `KNOWN_GAME_TYPES` (`['x01','cricket','doubles_practice','chuckin',
-'around_the_clock','around_the_world']`) as defense-in-depth, though
-it's always an internally-controlled literal, never raw request input.
+against `KNOWN_GAME_TYPES` (`['x01','cricket','baseball','doubles_practice',
+'chuckin','checkout_trainer','around_the_clock','around_the_world']`) as
+defense-in-depth, though it's always an internally-controlled literal, never
+raw request input.
 `X01_ONLY` is now `_scope({gameType:'x01'})` (byte-identical string, so its
 existing call sites needed no changes), and every Cricket query function below
 routes through `_scope({mode, gameType:'cricket'})`. A future scoping
@@ -1736,21 +1793,24 @@ dies mid-handshake can't leak a permanently-stuck slot.
 Built fresh on every `pushLive()` call from the current `game` object: active
 flag, category/legs/sets/current-player-index, per-player data (shape depends
 on `gameType` — X01: score/averages/darts breakdowns via `playerSnapshotX01`;
-Cricket: `marks`/`points`/darts breakdowns via `playerSnapshotCricket`; Chuckin:
-session darts/trebles plus a live `heatmap` array and `sessionAvg` via
+Cricket: `marks`/`points`/darts breakdowns via `playerSnapshotCricket`;
+Baseball: `totalRuns`/`inningRuns`/darts breakdowns via `playerSnapshotBaseball`;
+Chuckin: session darts/trebles plus a live `heatmap` array and `sessionAvg` via
 `playerSnapshotChuckin`, §3's "Live Scoreboard" coverage; Around the Clock/
 World: `hitNumbers`/`hitOutcomes` plain arrays plus a running hit/progress
 count via `playerSnapshotAroundTheClock`/`playerSnapshotAroundTheWorld`, §3's
 "Guided Around the Clock / Around the World" coverage), current visit's
-darts, checkout hint (X01 only — always empty for Cricket), status,
+darts, checkout hint (X01 only — always empty for Cricket/Baseball), status,
 `pendingAchievement` (§5), one-shot fields (`lastTurnEvent`, `matchResult`,
 `legStart` — cleared immediately after each push, so they only ever announce
-once), a `checkoutTarget` for voice announcements, and (tournament matches
+once), a `checkoutTarget` for voice announcements, `baseballInning` (Baseball
+only — which inning, 1-9 or beyond on a tie, is currently live; per-player
+runs ride inside `players[]` above instead), and (tournament matches
 only, §15) `tournamentRoundLabel`. `ALLOWED_LIVE_KEYS` on the server
 allow-lists exactly these top-level fields (not the per-player shape inside
-`players`, which is how Cricket's differently-shaped player objects — and
-Chuckin's `heatmap`/`sessionAvg` — pass through unchanged) — anything else in
-a `POST /api/live` body is silently dropped (413 if the sanitized payload
+`players`, which is how Cricket's/Baseball's differently-shaped player objects
+— and Chuckin's `heatmap`/`sessionAvg` — pass through unchanged) — anything else
+in a `POST /api/live` body is silently dropped (413 if the sanitized payload
 still exceeds 64KB). **Adding any new top-level `liveSnapshot()` field must add
 it to `ALLOWED_LIVE_KEYS` in the same change** — `tournamentRoundLabel` itself
 was initially missed here during development and silently dropped by the
@@ -2411,8 +2471,8 @@ already-migrated database is a safe no-op).
 | `created_at` / `completed_at` | `TEXT` | `completed_at` is `NULL` for in-progress/abandoned games |
 | `winner_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | Set by `completeGame()`. **Must be a participant of the game** — `completeGame()` rejects a `winner` name that isn't in this game's `game_players` with a `400` (`docs/bug-roadmap.md` BUG-9), the same participant check `recordWalkover()` enforces; a `null` winner (abandoned game) is allowed. Behavior for legitimate input is unchanged — the frontend only ever completes with a real participant |
 | `practice` | `INTEGER NOT NULL DEFAULT 0` | Explicit practice flag, set at creation |
-| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, `'doubles_practice'`, `'chuckin'`, `'around_the_clock'`, or `'around_the_world'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; each New Game flow passes its own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
-| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows and both guided-drill rows (no config needed — every number/multiplier is always "in play") |
+| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, `'baseball'`, `'doubles_practice'`, `'chuckin'`, `'checkout_trainer'`, `'around_the_clock'`, or `'around_the_world'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; each New Game flow passes its own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
+| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{innings: 9}` for Baseball rows (fixed, not yet a New Game choice), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows and both guided-drill rows (no config needed — every number/multiplier is always "in play") |
 | `player_count` | `INTEGER` | **Frozen** participant count at creation (not a live subquery) — see §3's mode-scoping note |
 | `league_id` | `INTEGER REFERENCES leagues(id) ON DELETE SET NULL` | Nullable — set by the `onGameCreated` auto-tag hook (§18), never by `createGame()`'s own INSERT. `NULL` for every game that isn't a tagged league match (the overwhelming majority) |
 

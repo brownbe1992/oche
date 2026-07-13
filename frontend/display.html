@@ -755,6 +755,71 @@ const renderers = {
       </div>`;
     }
   },
+  // Baseball (docs/game-modes-roadmap.md): same shared chalkboard-table shape as
+  // Cricket's (rows=innings 1-9, columns=players) rather than per-player cards —
+  // all players share one live inning, not independent per-player state.
+  baseball: {
+    scorecard(s, L){
+      const players = s.players;
+      const active = s.currentIndex;
+      const inning = s.baseballInning || 1;
+      const lastInning = Math.max(9, inning);
+      const rows = [];
+      for(let i=1;i<=lastInning;i++){
+        const isCurrentInning = i===inning;
+        const cells = players.map((p,pi)=>{
+          const r = p.inningRuns && p.inningRuns[i];
+          const isActive = pi===active && isCurrentInning;
+          return `<div class="cs-cell${isActive?' active':''}">${r!=null?`<span class="cs-points">${num(r)}</span>`:''}</div>`;
+        }).join('');
+        rows.push(`<div class="cs-row"><div class="cs-label">${i}</div>${cells}</div>`);
+      }
+
+      const headCells = players.map((p,i)=>{
+        const isActive = i===active;
+        return `<div class="cs-col-head${isActive?' active':''}">
+          <span>${escapeHtml(p.name)}</span>
+          ${isActive?'<span class="cs-throw-chip">▸ throwing</span>':''}
+        </div>`;
+      }).join('');
+
+      const totalCells = players.map((p,i)=>{
+        const isActive = i===active;
+        return `<div class="cs-cell${isActive?' active':''}"><span class="cs-points${isActive?' active':''}">${num(p.totalRuns)}</span></div>`;
+      }).join('');
+
+      const thrower = players[active];
+      const darts = Array.isArray(s.darts) ? s.darts : [];
+      const slots = [0,1,2].map(k=>{
+        const lab = darts[k];
+        return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
+      }).join('');
+
+      return `<div class="cs-wrap" style="--cs-cols:${players.length}">
+        <div class="cs-table">
+          <div class="cs-row cs-head"><div class="cs-label"></div>${headCells}</div>
+          ${rows.join('')}
+          <div class="cs-row cs-foot"><div class="cs-label">Runs</div>${totalCells}</div>
+        </div>
+        <div class="cs-throw-row">
+          <span class="cs-throw-lbl">${thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Inning ${Math.min(inning,9)} of 9${inning>9?' (extra innings)':''}`:''}</span>
+          <div class="darts">${slots}</div>
+        </div>
+      </div>`;
+    },
+    summary(p){
+      return `
+      <div class="sum-card ${p.won?'winner':''}">
+        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}</div>
+        <div class="sum-stats">
+          <div class="sum-stat">
+            <div class="sv">${num(p.totalRuns)}</div>
+            <div class="sl">Runs</div>
+          </div>
+        </div>
+      </div>`;
+    }
+  },
   // Doubles Practice (docs/game-modes-roadmap.md): solo drill, always exactly one
   // player/card — no legSummary, no scorecard, so this always goes through the
   // generic s.players.map(renderer.card) path below, same as X01.
@@ -1145,15 +1210,15 @@ function render(s){
   // Portrait is narrow and tall — stacking cards single-column gives each one full
   // width (readable at a glance) instead of the side-by-side columns that make sense
   // in landscape's wide-and-short shape but cram score text into narrow cells here.
-  // The cricket scorecard is always a single table spanning the whole grid, not
-  // per-player columns, regardless of orientation.
-  const isCricketScorecard = s.gameType === 'cricket' && !s.legSummary;
-  const cols = isCricketScorecard ? 1 : (isPortrait ? 1 : (n<=1 ? 1 : n<=4 ? 2 : 3));
+  // The cricket/baseball scorecards are always a single table spanning the whole
+  // grid, not per-player columns, regardless of orientation.
+  const isScorecardLayout = (s.gameType === 'cricket' || s.gameType === 'baseball') && !s.legSummary;
+  const cols = isScorecardLayout ? 1 : (isPortrait ? 1 : (n<=1 ? 1 : n<=4 ? 2 : 3));
   grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
 
   if(s.legSummary){
     grid.innerHTML = s.legSummary.map(p=>renderer.summary(p, L)).join('');
-  } else if(isCricketScorecard){
+  } else if(isScorecardLayout){
     grid.innerHTML = renderer.scorecard(s, L);
   } else {
     grid.innerHTML = s.players.map((p,i)=>renderer.card(p, i, s, L)).join('');

@@ -731,8 +731,16 @@
           <div class="seg" role="group" aria-label="Game type">
             <button id="gt-x01" aria-pressed="true" onclick="setGameType('x01')">X01</button>
             <button id="gt-cricket" aria-pressed="false" onclick="setGameType('cricket')">Cricket</button>
+            <button id="gt-baseball" aria-pressed="false" onclick="setGameType('baseball')">Baseball</button>
           </div>
         </div>
+      </div>
+
+      <!-- Baseball explanation (Baseball only — no further config needed, unlike
+           Cricket's classic/custom choice: innings are fixed at 9, one per number 1-9) -->
+      <div class="setup-section" id="baseball-info-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
+        <div class="setup-label" style="color:var(--gold)">Baseball</div>
+        <p class="pp-meta" style="margin:0">9 innings, one per number 1-9. Each visit's 3 darts only count against that inning's number — a single scores 1 run, a double 2, a treble 3. After 9 innings, highest total runs wins (a tie continues into extra innings at number 9).</p>
       </div>
 
       <!-- Starting score (X01 only) -->
@@ -3487,8 +3495,10 @@ function setGameType(type){
   setup.gameType = type;
   document.getElementById('gt-x01').setAttribute('aria-pressed', type==='x01');
   document.getElementById('gt-cricket').setAttribute('aria-pressed', type==='cricket');
-  document.getElementById('start-score-section').hidden = (type === 'cricket' || setup.mode === 'challenge' || setup.mode === 'ghost');
+  document.getElementById('gt-baseball').setAttribute('aria-pressed', type==='baseball');
+  document.getElementById('start-score-section').hidden = (type === 'cricket' || type === 'baseball' || setup.mode === 'challenge' || setup.mode === 'ghost');
   document.getElementById('cricket-options-section').hidden = (type !== 'cricket' || setup.mode === 'challenge' || setup.mode === 'ghost');
+  document.getElementById('baseball-info-section').hidden = (type !== 'baseball' || setup.mode === 'challenge' || setup.mode === 'ghost');
   if(type === 'cricket') renderCricketNumberGrid();
   updateSetupChrome();   // league mode is X01 or Cricket (docs/league-mode-roadmap.md) — re-check eligibility
 }
@@ -3669,7 +3679,7 @@ async function startGame(){
   if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   // Custom cricket is locked to exactly 7 targets (same count as classic) — never
   // more, never fewer (docs/game-modes-roadmap.md "Decisions made").
-  const gameType = ['cricket', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world'].includes(setup.gameType)
+  const gameType = ['cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world'].includes(setup.gameType)
     ? setup.gameType : 'x01'; // Daily Challenge always forces x01 via setMode()
   let cricketNumbers = null;
   if(gameType === 'cricket'){
@@ -3692,6 +3702,9 @@ async function startGame(){
   // legs_per_set already set for a field that was single-valued at first and
   // configurable later (docs/checkout-trainer-roadmap.md).
   const config = gameType === 'cricket' ? { numbers: cricketNumbers }
+    // Innings fixed at 9 (docs/game-modes-roadmap.md "Baseball") — not a New Game
+    // choice, same "one-tap, no further input" precedent as Classic Cricket.
+    : gameType === 'baseball' ? { innings: 9 }
     : gameType === 'doubles_practice' ? { doubles: setup.doublesTargets.slice() }
     : gameType === 'chuckin' ? {}
     : gameType === 'checkout_trainer' ? { mode: setup.checkoutTrainerMode, durationSec: setup.checkoutTrainerMode==='blitz' ? 60 : null, difficulty: setup.checkoutTrainerDifficulty || 'full' }
@@ -3700,6 +3713,8 @@ async function startGame(){
     : { startingScore: startScore };
   const category = gameType === 'cricket'
     ? (setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
+    : gameType === 'baseball'
+    ? 'Baseball'
     : gameType === 'doubles_practice'
     ? `Doubles Practice (${config.doubles.map(doublesTargetLabel).join(', ')})`
     : gameType === 'chuckin'
@@ -3733,6 +3748,7 @@ async function startGame(){
     starter: 0,        // who throws first in the current leg
     current: 0,
     setNo: 1, legNo: 1,
+    baseballInning: 1, // Baseball only (docs/game-modes-roadmap.md) — which inning (1-9, or beyond on a tie) is live
     darts: [],
     busted: false, won: false,
     done: false,
@@ -5336,6 +5352,7 @@ function avgStr(points, darts){ return darts ? (points/darts*3).toFixed(1) : '�
 
 function renderGame(){
   if(game.gameType === 'cricket') return renderGameCricket();
+  if(game.gameType === 'baseball') return renderGameBaseball();
   if(game.gameType === 'doubles_practice') return renderGameDoublesPractice();
   if(game.gameType === 'chuckin') return renderGameChuckin();
   if(game.gameType === 'checkout_trainer') return renderGameCheckoutTrainer();
@@ -5438,19 +5455,82 @@ function cricketMarkGlyph(n, numberLabel){
   return `<span class="cs-mark cs-mark-3" aria-hidden="true">✕</span>${sr}`;
 }
 
+/* Baseball chalkboard scorecard: same shared-table shape as Cricket's (rows=innings
+   1-9, columns=players), showing each player's runs scored per inning and a running
+   total — reuses the .cs-table/.cs-row/.cs-cell CSS wholesale, no new layout needed. */
+function renderGameBaseball(){
+  const sb = document.getElementById('scoreboard'); sb.innerHTML='';
+  const lastInning = Math.max(9, game.baseballInning); // extend the table into extra innings once reached
+  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
+
+  const headCells = game.players.map((p,i)=>{
+    const active = i===game.current;
+    const standing = game.setsPerGame>1
+      ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
+      : game.practice
+      ? `Legs ${p.legsWon}`
+      : `Legs ${p.legsWon}/${game.legsPerSet}`;
+    return `<div class="cs-col-head${active?' active':''}">
+      <span>${escapeHtml(p.name)}</span>
+      ${active?'<span class="cs-throw-chip">▸ throwing</span>':''}
+      ${showStanding?`<span class="cs-standing">${standing}</span>`:''}
+    </div>`;
+  }).join('');
+
+  const rows = [];
+  for(let inning=1; inning<=lastInning; inning++){
+    const isCurrentInning = inning === game.baseballInning;
+    const cells = game.players.map((p,i)=>{
+      const r = p.inningRuns[inning];
+      const active = i===game.current && isCurrentInning;
+      return `<div class="cs-cell${active?' active':''}">${r!=null ? `<span class="cs-points">${r}</span>` : ''}</div>`;
+    }).join('');
+    rows.push(`<div class="cs-row"><div class="cs-label">${inning}</div>${cells}</div>`);
+  }
+  const bodyRowsHtml = rows.join('');
+
+  const totalCells = game.players.map((p,i)=>{
+    const active = i===game.current;
+    return `<div class="cs-cell${active?' active':''}"><span class="cs-points">${p.totalRuns||0}</span></div>`;
+  }).join('');
+
+  const table = document.createElement('div');
+  table.className = 'cs-table';
+  table.style.setProperty('--cs-cols', game.players.length);
+  table.innerHTML = `
+    <div class="cs-row cs-head" role="row"><div class="cs-label"></div>${headCells}</div>
+    ${bodyRowsHtml}
+    <div class="cs-row cs-foot"><div class="cs-label">Runs</div>${totalCells}</div>`;
+  sb.appendChild(table);
+
+  const inningBanner = document.createElement('p');
+  inningBanner.className = 'pp-meta';
+  inningBanner.style.cssText = 'text-align:center;margin:8px 0 0';
+  inningBanner.textContent = `Inning ${Math.min(game.baseballInning,9)} of 9 — target ${baseballInningTarget(game.baseballInning)}${game.baseballInning>9?' (extra innings)':''}`;
+  sb.appendChild(inningBanner);
+
+  renderSlots();
+  renderPad();
+  pushLive();
+}
+
 function renderSlots(){
   const wrap=document.getElementById('slots'); wrap.innerHTML='';
   const isCricket = game.gameType === 'cricket';
+  const isBaseball = game.gameType === 'baseball';
   const cricketNumbers = isCricket ? (game.config.numbers || CRICKET_STANDARD_NUMBERS) : null;
+  const baseballTarget = isBaseball ? baseballInningTarget(game.baseballInning) : null;
   for(let i=0;i<3;i++){
     const d = game.darts[i];
     // The X01 "N pts" subtitle is meaningless in cricket (a T18's 54 X01 points may be
-    // 3 marks, or nothing at all if 18 isn't in play) — show marks instead.
+    // 3 marks, or nothing at all if 18 isn't in play) — show marks instead. Same idea
+    // for Baseball: a dart's raw X01 point value has nothing to do with the runs it
+    // scores (only this inning's own target number counts at all).
     let sub = '';
     if(d){
-      if(!isCricket) sub = `${d.value} pts`;
-      else if(cricketNumbers.includes(d.sector)) sub = `${d.mult} mark${d.mult===1?'':'s'}`;
-      else sub = 'no mark';
+      if(isCricket) sub = cricketNumbers.includes(d.sector) ? `${d.mult} mark${d.mult===1?'':'s'}` : 'no mark';
+      else if(isBaseball) sub = d.sector === baseballTarget ? `${d.mult} run${d.mult===1?'':'s'}` : 'no run';
+      else sub = `${d.value} pts`;
     }
     const div=document.createElement('div');
     div.className='slot'+(d?' filled':'')+(d&&d.isTreble?' t':'')+(d&&d.isDouble?' d':'');
@@ -6684,6 +6764,9 @@ function liveSnapshot(message){
     // X01/Cricket/Doubles-Practice-shaped fields.
     chuckinLastDart: game.gameType === 'chuckin' ? (game.chuckinLastDart || null) : null,
     atwLastDart: game.gameType === 'around_the_world' ? (game.atwLastDart || null) : null,
+    // Baseball only: which inning (1-9, or beyond on a tie) is currently live —
+    // per-player runs ride inside the players[] array above via playerSnapshotBaseball().
+    baseballInning: game.gameType === 'baseball' ? (game.baseballInning || 1) : null,
     achievement: pendingAchievement || null,
     gameOneEighties: game.gameOneEighties || 0,
     gameBigFish: game.gameBigFish || 0,
@@ -6730,6 +6813,12 @@ function renderPad(){
     renderPadCricket(full);
     const utb0 = document.getElementById('undo-turn-btn');
     if(utb0) utb0.disabled = !game.lastTurnSnapshot;
+    return;
+  }
+  if(game.gameType === 'baseball'){
+    renderPadBaseball(full);
+    const utb1 = document.getElementById('undo-turn-btn');
+    if(utb1) utb1.disabled = !game.lastTurnSnapshot;
     return;
   }
   const bounceBtn = document.getElementById('bounce-out-btn');
@@ -6799,6 +6888,37 @@ function renderPadCricket(full){
   miss.onclick=()=>throwDart(0); pad.appendChild(miss);
 }
 
+/* Baseball's dedicated scoring screen — only one number is ever live (this
+   inning's target), so it reuses Cricket's exact multi-row-select-then-tap-
+   number interaction (tap Single/Double/Treble, then tap the one target
+   button) rather than inventing a new input flow. Reuses .cricket-pad/
+   .cricket-target CSS wholesale — visually it's the identical single-big-
+   target-plus-Miss shape, just with one button instead of seven. */
+function renderPadBaseball(full){
+  const board = document.getElementById('dart-board-wrap');
+  if(board) board.classList.add('hidden');
+  const bounceBtn = document.getElementById('bounce-out-btn');
+  if(bounceBtn) bounceBtn.disabled = full;
+  const multi = document.getElementById('multi-row');
+  if(multi) multi.classList.remove('hidden');
+  const pad = document.getElementById('pad');
+  if(!pad) return;
+  pad.classList.remove('hidden');
+  pad.classList.add('cricket-pad');
+  pad.innerHTML = '';
+  const target = baseballInningTarget(game.baseballInning);
+  const b = document.createElement('button');
+  b.className = 'cricket-target';
+  b.disabled = full;
+  b.innerHTML = `<span class="ct-num">${target}</span>`;
+  b.setAttribute('aria-label', `Number ${target} — this inning's target`);
+  b.onclick = () => throwDart(target);
+  pad.appendChild(b);
+  const miss=document.createElement('button');
+  miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
+  miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+}
+
 /* ---------- throwing ---------- */
 function setMult(m){ mult=m; updateMultUI(); }
 function updateMultUI(){
@@ -6838,6 +6958,13 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
   if(game.gameType === 'cricket'){
     // No bust/checkout concept — the cricket pad re-renders the dart slots and its
     // own live marks/points display; committed state only changes on Enter Turn.
+    renderSlots(); renderPad(); pushLive();
+    return;
+  }
+  if(game.gameType === 'baseball'){
+    // No bust concept, and "win" only resolves at the end of a full round of
+    // innings (see evaluateVisitBaseball()) — nothing meaningful to preview live
+    // per-dart, so just re-render the dart slots and pad same as Cricket.
     renderSlots(); renderPad(); pushLive();
     return;
   }
@@ -6900,6 +7027,7 @@ function askEndGame(){
 
 function undoLastTurn(){
   if(game && game.gameType === 'cricket') return undoLastTurnCricket();
+  if(game && game.gameType === 'baseball') return undoLastTurnBaseball();
   if(game && game.gameType === 'doubles_practice') return undoLastTurnDoublesPractice();
   if(game && game.gameType === 'chuckin') return undoLastTurnChuckin();
   if(game && game.gameType === 'checkout_trainer') return undoLastTurnCheckoutTrainer();
@@ -6981,6 +7109,7 @@ function undoDart(){
 }
 function enterTurn(){
   if(game.gameType === 'cricket') return enterTurnCricket();
+  if(game.gameType === 'baseball') return enterTurnBaseball();
   if(game.gameType === 'checkout_trainer') return submitCheckoutAttempt();
   if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
   const p = game.players[game.current];
@@ -7510,6 +7639,124 @@ function onLegWonCricket(wi){
   finishUnit('leg', w.name);
 }
 
+/* ----- Baseball turn commit (dispatched from enterTurn()) -----
+   Visit-based (3 darts per inning), same shape as X01/Cricket's undo, not
+   Doubles Practice's per-dart shape. No achievements/stats for this pass
+   (docs/game-modes-roadmap.md "Baseball" — core playable game only) — just
+   the time-of-day badges every game type already gets for free. */
+function enterTurnBaseball(){
+  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  const p = game.players[game.current];
+  const ev = GAME_TYPES.baseball.evaluateVisit(p, game.darts, game);
+
+  announce(`${p.name} scores ${ev.scored} run${ev.scored===1?'':'s'} in inning ${Math.min(game.baseballInning,9)}.`);
+
+  // snapshot state before mutations so undoLastTurn() can restore it — same
+  // convention as X01/enterTurnCricket's own lastTurnSnapshot.
+  const _snap = { pi:game.current, totalRuns:p.totalRuns, inningRuns:Object.assign({}, p.inningRuns),
+    legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
+    baseballInning:game.baseballInning,
+    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
+    badgeReverts:[], voided:false };
+  game.lastTurnSnapshot = _snap;
+
+  p.totalRuns = ev.totalRuns; p.inningRuns = ev.inningRuns;
+  const dartsThrown = game.darts.length;
+  p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
+
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:ev.scored, bust:false, checkout:false, checkoutPoints:null,
+    darts: game.darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
+      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+
+  const turnRecord = { player:p.name, scored:ev.scored, darts:game.darts.slice() };
+  game.currentLegTurns.push(turnRecord);
+  game.sessionTurns.push(turnRecord);
+
+  // Novelty time-of-day badges — shared with every other game type, see
+  // awardTimeOfDayBadges() (docs/game-modes-roadmap.md "Cricket badge parity").
+  awardTimeOfDayBadges(p);
+
+  if(ev.matchComplete){
+    onLegWonBaseball(ev.winnerIndex);
+    return;
+  }
+
+  if(ev.roundComplete) game.baseballInning += 1;
+  game.darts=[]; game.busted=false; game.won=false;
+  game.current = (game.current+1) % game.players.length;
+  game.turnSeq += 1;
+  document.getElementById('status').className='status';
+  document.getElementById('status').textContent = `Inning ${Math.min(game.baseballInning,9)} of 9 — target ${baseballInningTarget(game.baseballInning)}.`;
+  renderGameBaseball();
+  pushLive();
+}
+function undoLastTurnBaseball(){
+  if(!game || !game.lastTurnSnapshot) return;
+  const snap = game.lastTurnSnapshot;
+  const p = game.players[snap.pi];
+  p.totalRuns = snap.totalRuns;
+  p.inningRuns = snap.inningRuns;
+  p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
+  game.baseballInning = snap.baseballInning;
+  game.currentLegTurns.length = snap.ltLen;
+  game.sessionTurns.length = snap.stLen;
+
+  snap.voided = true;
+  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+  });
+  cancelQueuedAchievementsForSnapshot(snap);
+
+  game.current = snap.pi;
+  game.darts = []; game.busted=false; game.won=false;
+  game.lastTurnSnapshot = null;
+  DB.deleteLastTurn();
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
+  renderGameBaseball();
+  pushLive();
+}
+/* ----- Baseball leg / set / game progression (dispatched from enterTurnBaseball) -----
+   Same leg/set/game progression tree every other game type uses — the only
+   real difference from onLegWonCricket() is that the winner (wi) here is
+   computed by evaluateVisitBaseball() from total runs, not assumed to be
+   whoever's visit just ran (see evaluateVisitBaseball()'s own comment). No
+   Baseball-native achievements this pass (core playable game only). */
+function onLegWonBaseball(wi){
+  const w = game.players[wi];
+  w.legsWon += 1;
+
+  if(!game.practice && w.legsWon >= game.legsPerSet){      // set won (H2H only)
+    w.setsWon += 1;
+    game.players.forEach(p=>p.legsWon=0);
+
+    if(w.setsWon >= game.setsPerGame){   // game (match) won
+      sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+      sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
+      sendHaWebhook('gameend', w.name, game.category);
+      DB.recordEvent('leg_end', game.setNo, game.legNo);
+      DB.recordEvent('set_end', game.setNo, null);
+      DB.recordEvent('game_end', null, null);
+      DB.completeGame(w.name);
+      game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+      finishUnit('game', w.name);
+      return;
+    }
+    sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+    sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
+    DB.recordEvent('leg_end', game.setNo, game.legNo);
+    DB.recordEvent('set_end', game.setNo, null);
+    game.matchResult = { ts:Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+    finishUnit('set', w.name);
+    return;
+  }
+  sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+  DB.recordEvent('leg_end', game.setNo, game.legNo);
+  game.matchResult = { ts:Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+  finishUnit('leg', w.name);
+}
+
 /* ----- leg / set / game progression ----- */
 function onLegWon(wi){
   const w = game.players[wi];
@@ -7682,6 +7929,7 @@ function startNextLeg(newSet){
   game.starter = (game.starter + 1) % game.players.length;
   game.current = game.starter;
   game.players.forEach(p=>GAME_TYPES[game.gameType].resetForNextLeg(p, game, newSet));
+  if(game.gameType === 'baseball') game.baseballInning = 1;
   game.legSummary = null;
   game.currentLegTurns = [];
   game.legVisitLogs = [];
@@ -7749,10 +7997,11 @@ function finishUnit(kind, winner){
 
   const oche=document.querySelector('.oche');
   const isCricket = game.gameType === 'cricket';
-  // No matchwin moment card is built for Cricket this pass (stats/social parity is
-  // build-order step 3, not this one) — suppress the Share button rather than wire
-  // it to a card that doesn't exist.
-  const matchShareBtn = isCricket ? '' : `<button class="btn btn-ghost" id="matchwin-share-btn" onclick="shareMomentCard('matchwin')">📤 Share</button>`;
+  const isBaseball = game.gameType === 'baseball';
+  // No matchwin moment card is built for Cricket or Baseball this pass (stats/social
+  // parity is a later build-order step, not this one) — suppress the Share button
+  // rather than wire it to a card that doesn't exist.
+  const matchShareBtn = (isCricket || isBaseball) ? '' : `<button class="btn btn-ghost" id="matchwin-share-btn" onclick="shareMomentCard('matchwin')">📤 Share</button>`;
   if(kind==='game'){
     // Tournament mode: the bracket already advanced server-side (the onGameCompleted
     // hook fired from DB.completeGame() above), so route back to the bracket instead
@@ -7791,14 +8040,14 @@ function finishUnit(kind, winner){
       <div class="btn-row" style="justify-content:center">
         ${nextBtn}
         ${matchShareBtn}
-      </div>${isCricket ? '' : h2hStatsHtml(winner,'game')}</div>`;
+      </div>${(isCricket || isBaseball) ? '' : h2hStatsHtml(winner,'game')}</div>`;
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
-    // Cricket has no per-leg stat panel yet (X01-only fields; stats parity is
-    // build-order step 3) — skip straight to '' rather than reading fields that
-    // don't exist on a cricket player.
-    const legPanel = isCricket || kind!=='leg' ? '' : game.practice ? `
+    // Cricket/Baseball have no per-leg stat panel yet (X01-only fields; stats parity
+    // is a later build-order step) — skip straight to '' rather than reading fields
+    // that don't exist on a cricket/baseball player.
+    const legPanel = (isCricket || isBaseball) || kind!=='leg' ? '' : game.practice ? `
       <div class="prac-stats">
         <div class="prac-col">
           <div class="prac-col-title">This Leg</div>
@@ -7834,6 +8083,10 @@ function finishUnit(kind, winner){
     name: p.name,
     points: p.points || 0,
     closed: Object.keys(p.marks||{}).filter(n=>(p.marks[n]||0)>=3).length,
+    won: p.name === winner
+  })) : isBaseball ? game.players.map(p=>({
+    name: p.name,
+    totalRuns: p.totalRuns || 0,
     won: p.name === winner
   })) : game.players.map(p=>({
     name: p.name,
@@ -8062,6 +8315,23 @@ const GAME_TYPES = {
     personalBestsRenderer: renderCricketPersonalBests,
     homeTabRenderer: renderHomeTabBodyCricket
   },
+  baseball: {
+    id: 'baseball',
+    label: 'Baseball',
+    newMatchPlayer: newMatchPlayerBaseball,
+    evaluateVisit: evaluateVisitBaseball,
+    resetForNextLeg: resetPlayerForNextLegBaseball,
+    playerSnapshot: playerSnapshotBaseball,
+    // No stat vocabulary yet (docs/game-modes-roadmap.md "Baseball" — core
+    // playable game only for this pass). An empty statDefs deliberately excludes
+    // Baseball from the Player Profile/Home page game-type toggle entirely
+    // (`Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length)`),
+    // the same way it would for any other type with nothing to show there yet —
+    // not a bug, a real follow-up left for whoever builds Baseball stats parity.
+    statDefs: [],
+    personalBestsRenderer: null,
+    homeTabRenderer: null
+  },
   doubles_practice: {
     id: 'doubles_practice',
     label: 'Doubles Practice',
@@ -8186,6 +8456,26 @@ function resetPlayerForNextLegCricket(p, game, newSet){
 function playerSnapshotCricket(p){
   return {
     name:p.name, marks:Object.assign({}, p.marks), points:p.points||0,
+    legsWon:p.legsWon, setsWon:p.setsWon,
+    legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0
+  };
+}
+
+/* ---------- Baseball (game-modes-roadmap.md build-order step 5) ----------
+   9 innings, one per number 1-9, all players in lockstep (the current inning
+   is game-level state — game.baseballInning — not per-player like Cricket's
+   marks). evaluateVisitBaseball()/baseballInningTarget() live in scoring.js;
+   only the stateful player-record helpers stay here, same split as Cricket. */
+function newMatchPlayerBaseball(name){
+  return { name, totalRuns:0, inningRuns:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 };
+}
+function resetPlayerForNextLegBaseball(p, game, newSet){
+  p.totalRuns = 0; p.inningRuns = {}; p.legDarts = 0;
+  if(newSet) p.setDarts = 0;
+}
+function playerSnapshotBaseball(p){
+  return {
+    name:p.name, totalRuns:p.totalRuns||0, inningRuns:Object.assign({}, p.inningRuns),
     legsWon:p.legsWon, setsWon:p.setsWon,
     legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0
   };

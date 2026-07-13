@@ -160,6 +160,44 @@ function evaluateVisitCricket(player, darts, game){
   return { marks, points, pointsThisVisit, scored:pointsThisVisit, win };
 }
 
+/* ---------- Baseball ----------
+   docs/game-modes-roadmap.md "Baseball (rules primer)". 9 innings, one per
+   number 1-9, played in lockstep by every player (the whole match shares one
+   current inning, not a per-player independent state like Cricket's marks).
+   Each visit's 3 darts only score against THIS inning's number: single=1 run,
+   double=2, treble=3; anything else (wrong number, miss) scores 0. After
+   inning 9, highest total runs wins; a tie among the leaders continues into
+   extra innings. Extra-innings target number is a judgment call, not sourced
+   from the roadmap doc (which left it unspecified): repeats number 9 rather
+   than cycling back to 1, on the reasoning that the match stays anchored to
+   the last number actually reached rather than re-opening the whole 1-9
+   sequence from scratch.
+   Visit-based (3 darts per turn), same as X01/Cricket — not per-dart like
+   Doubles Practice — so it reuses the batched-visit evaluate/undo shape. */
+function baseballInningTarget(inning){
+  return inning <= 9 ? inning : 9;
+}
+function evaluateVisitBaseball(player, darts, game){
+  const inning = game.baseballInning;
+  const target = baseballInningTarget(inning);
+  let runsThisVisit = 0;
+  darts.forEach(d=>{ if(d.sector === target) runsThisVisit += d.mult; });
+  const totalRuns = (player.totalRuns || 0) + runsThisVisit;
+  const inningRuns = Object.assign({}, player.inningRuns, { [inning]: runsThisVisit });
+  // The round (inning) only completes once the LAST player in the rotation has
+  // thrown — game.current still holds the throwing player's own index here,
+  // the same "not yet advanced" timing every other evaluateVisit*() relies on.
+  const roundComplete = game.current === game.players.length - 1;
+  let matchComplete = false, winnerIndex = null;
+  if(roundComplete && inning >= 9){
+    const totals = game.players.map((pl, i) => i === game.current ? totalRuns : (pl.totalRuns || 0));
+    const maxTotal = Math.max(...totals);
+    const leaders = totals.reduce((acc, t, i) => { if(t === maxTotal) acc.push(i); return acc; }, []);
+    if(leaders.length === 1){ matchComplete = true; winnerIndex = leaders[0]; }
+  }
+  return { inningRuns, totalRuns, runsThisVisit, scored:runsThisVisit, target, roundComplete, matchComplete, winnerIndex };
+}
+
 /* ---------- checkout calculator ----------
    Computes a real, valid finishing route for ANY reachable score, instead of
    relying on a hardcoded list. Exhaustively verified for every finishable
@@ -388,6 +426,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     dartValue, dartLabel, makeDartCore,
     evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS,
+    evaluateVisitBaseball, baseballInningTarget,
     evaluateDartDoublesPractice, evaluateDartAroundTheClock, isStaircaseFinish,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,
     pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,

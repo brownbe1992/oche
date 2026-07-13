@@ -1,12 +1,14 @@
 # Additional Game Modes — Design Roadmap
 
 > Status: **Cricket is playable with full stats parity (build-order steps 1-4
-> done); step 5 (Baseball) not started.** `frontend/index.html` has a `GAME_TYPES` registry
-> with `x01` and `cricket` entries (`newMatchPlayer`, `evaluateVisit`,
-> `resetForNextLeg`, `playerSnapshot`, `statDefs`); every call site dispatches
-> through `GAME_TYPES[game.gameType]`. Backend `createGame()` accepts
-> `gameType`/`config`; the nine-darter queries read `game_type`/`config` instead
-> of a hardcoded `category='501'`.
+> done). Step 5 (Baseball) is built as a core playable game** (turn engine, New
+> Game setup, dedicated scoring screen, live scoreboard) — **no stats/achievements
+> parity yet**, deliberately deferred (see "Baseball" below). `frontend/index.html`
+> has a `GAME_TYPES` registry with `x01`, `cricket`, and `baseball` entries
+> (`newMatchPlayer`, `evaluateVisit`, `resetForNextLeg`, `playerSnapshot`,
+> `statDefs`); every call site dispatches through `GAME_TYPES[game.gameType]`.
+> Backend `createGame()` accepts `gameType`/`config`; the nine-darter queries read
+> `game_type`/`config` instead of a hardcoded `category='501'`.
 >
 > **Cricket (step 2) is fully playable end-to-end**: a classic-vs-custom New Game
 > prompt (custom locked to exactly 7 targets, validated before Start), a dedicated
@@ -370,16 +372,81 @@ so it didn't add to this list at all).
   who's never touched Cricket doesn't see an all-empty Cricket tab. Genuinely
   undecided, not resolved by this pass — see "Open questions" below.
 
-## Baseball (rules primer — for whoever builds this next)
+## Baseball — ✅ Built (2026-07, core playable game only — see "Still open" below)
 
 9 innings, one per number 1–9. Each turn, a player throws 3 darts at that inning's
 number: a single scores 1 run, a double 2, a treble 3, for that inning only. After 9
 innings, highest total runs wins (extra innings on a tie, like real baseball). Slots
 into the same plugin shape as Cricket — a turn engine that adds runs to the current
 inning, a win condition of "highest total after N innings," and its own stat
-vocabulary (e.g. runs per inning, best single inning). Recommended as the *second*
-game type added, once the plugin seams have been proven on a real second
-implementation (not just fitted to Cricket specifically).
+vocabulary (e.g. runs per inning, best single inning) — the latter deliberately not
+built this pass (see "Still open" below), confirming the doc's own framing above that
+Baseball is the second real proof the plugin shape generalizes beyond Cricket.
+
+- **Innings fixed at 9**, not a New Game config option — the same "one-tap, no
+  further input" precedent as Classic Cricket. `games.config` is `{ innings: 9 }`.
+- **The current inning is game-level state, not per-player** — unlike Cricket's
+  independent `marks` per player, every player in a Baseball match shares one live
+  inning (`game.baseballInning`), since real darts baseball has everyone throwing at
+  the same number in lockstep. It only advances once the *last* player in the
+  rotation has thrown (`evaluateVisitBaseball()`'s `roundComplete`, checked via
+  `game.current === game.players.length - 1` — still un-advanced at evaluation time,
+  the same timing every other `evaluateVisit*()` relies on). A solo practice game is
+  always "last in rotation," so it advances one inning per visit, as expected.
+- **Only the current inning's number scores** — a dart landing anywhere else
+  (including a genuine miss) scores 0 runs for that dart, evaluated dart-by-dart
+  within the 3-dart visit (`evaluateVisitBaseball()` in `frontend/scoring.js`).
+- **Win condition**: only checked on the last player's visit of a round, once inning
+  9 has been reached — computes every player's total (including the just-evaluated
+  visit) and ends the match only if there's a single unique highest total; a tie
+  among the leaders continues into extra innings instead.
+- **Extra-innings target number — a judgment call, not sourced**: the rules primer
+  above left this unspecified (darts baseball is built around exactly 9 numbers,
+  1-9, one per regular inning, so "just keep going" needs *some* number once you run
+  out). Resolved as **repeating number 9** each extra inning (`baseballInningTarget()`
+  in `frontend/scoring.js`) rather than cycling back to 1 — flagged here exactly like
+  Killer's own undocumented judgment calls below, in case a real house-rule source
+  ever contradicts it.
+- **Visit-based (3 darts per turn), same undo shape as X01/Cricket** — not
+  Doubles Practice's per-dart shape. `enterTurnBaseball()`/`undoLastTurnBaseball()`/
+  `onLegWonBaseball()` mirror Cricket's own turn-commit/undo/leg-progression
+  functions almost exactly; the one structural difference is that Baseball's
+  winner (passed to `onLegWonBaseball(wi)`) is *computed* from total runs rather
+  than assumed to be whoever's visit just ran, since the round-ending visit and the
+  actual highest scorer aren't always the same player.
+- **Scoring screen**: reuses Cricket's exact "select a multiplier, then tap the
+  target" interaction (the shared multi-row control), just with one target button
+  (this inning's number) instead of Cricket's seven — no new input paradigm
+  invented. `renderPadBaseball()`/`renderGameBaseball()` (chalkboard scorecard:
+  rows = innings 1-9, columns = players, foot row = running total — visually
+  identical shape to Cricket's own scorecard, reusing its `.cs-table` CSS wholesale).
+- **Live scoreboard**: `renderers.baseball` in `display.html`, same chalkboard-table
+  shape as Cricket's, always single-column regardless of orientation (the shared
+  `isScorecardLayout` check now covers both game types).
+- Legs/sets apply the same way X01/Cricket do — one leg = one complete 9(+)-inning
+  match — same "built the same way as X01 for now, no decision forced" resolution
+  the open-questions section below already gives Cricket for this exact question.
+
+**Still open (deliberately out of scope this pass — core playable game only, per
+build-order step 5's own framing of Baseball as the second plugin-shape proof, not a
+demand for full X01/Cricket parity in one step)**:
+- **No Baseball-specific stat vocabulary yet** (runs per inning, best single inning,
+  etc.) — `GAME_TYPES.baseball.statDefs` is an empty array, which deliberately
+  excludes it from the Player Profile/Home page game-type toggle entirely (the same
+  `filter(g=>g.statDefs && g.statDefs.length)` gate every other type's toggle
+  presence already goes through) rather than showing an all-empty tab.
+- **No Baseball-native achievements/badges** — only the generic time-of-day badges
+  (Night Owl/Early Bird) fire, via the same shared `awardTimeOfDayBadges()` helper
+  every other game type uses.
+- **No matchwin moment card / Share button, and no per-leg practice stat panel** —
+  `finishUnit()` treats Baseball the same way it already treats Cricket (skip
+  straight past the X01-shaped stat panel/share button that assume fields Baseball
+  doesn't have) rather than reading fields that don't exist on a baseball player.
+- **Committed tests**: `backend/test/scoring.test.js`'s
+  `evaluateVisitBaseball`/`baseballInningTarget` suite (16 cases) covers target
+  scoring, round/match completion, the exact-tie-continues-to-extra-innings rule,
+  and the extra-innings target — per CLAUDE.md's "every new calculation gets a
+  committed test" convention. No Playwright end-to-end pass yet.
 
 ## Killer (rules primer — for whoever builds this next)
 
@@ -884,8 +951,15 @@ X01-only, see its status note above).
    Verified with a seeded scratch-DB confirming leaderboard math and
    Playwright end-to-end confirming the toggle switches cleanly with zero
    regression to the existing X01 leaderboards.
-5. **Baseball** (or another variant) as the second proof that the plugin shape
-   generalizes, not just fits Cricket specifically.
+5. **✅ Done (2026-07, core playable game only) — Baseball** as the second proof
+   that the plugin shape generalizes, not just fits Cricket specifically. Turn
+   engine (`evaluateVisitBaseball()`), New Game setup (fixed 9 innings, no further
+   config), dedicated scoring screen and `renderers.baseball` live-scoreboard card
+   (chalkboard shape, reusing Cricket's exact layout/CSS). Stats/achievements
+   parity deliberately not built this pass — see "Baseball" above for the full
+   scope split. Verified with a 16-case committed unit suite
+   (`backend/test/scoring.test.js`) covering inning-target scoring, round/match
+   completion, the exact-tie-continues rule, and extra innings.
 6. **✅ Done (2026-07): generalize the Player Profile/Home page game-type toggle**
    beyond hardcoded per-type buttons — see "Toggle mechanism generalized" above.
    The toggle mechanism itself is N-way now; the backend stat-fetch side of the
