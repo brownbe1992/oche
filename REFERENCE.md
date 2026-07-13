@@ -445,6 +445,97 @@ table), just re-confirmed rather than re-derived for a fourth game type.
 
 Stat vocabulary is documented in §3 ("Just Chuckin' It stats").
 
+### Guided Around the Clock / Around the World — `throwDartAroundTheClock(sector)` / `throwDartAroundTheWorld(sector)` (`frontend/index.html`)
+
+docs/game-modes-roadmap.md's "Guided Around the Clock / Around the World" drill
+modes — two new game types, `around_the_clock` and `around_the_world`, each an
+active practice-drill wrapper around a completion condition that already
+existed passively (§4's `around_the_clock`/`around_the_world` badges). No
+schema changes — both just added to `KNOWN_GAME_TYPES` (`backend/db.js`).
+
+**Around the Clock** is structurally identical to Doubles Practice: a
+**round** is one continuous session tracked via `game.legNo` (reused as
+"round number," incremented by `startNextClockRound()`), ending the instant
+all 20 numbers 1-20 have been hit as singles. The target set is **20 numbers
+only, no bull** — matching the existing passive `around_the_clock` badge's
+exact formula (`singlesHit.size >= 20`), a deliberate 2026-07 decision that
+overrides this doc's own earlier draft wording of "+bull." The pure per-dart
+rule lives in `frontend/scoring.js`:
+
+```js
+function evaluateDartAroundTheClock(dart, hitSet){
+  const isSingleTarget = dart.sector >= 1 && dart.sector <= 20 && dart.mult === 1;
+  const isNewHit = isSingleTarget && !hitSet.has(dart.sector);
+  const completed = isNewHit && (hitSet.size + 1) === 20;
+  return { isNewHit, completed };
+}
+```
+
+- A **single on a number not yet in `hitSet`** is a new hit; `completed`
+  fires exactly once, on the dart that brings the set to size 20.
+- A **treble/double on a number, or any dart on bull** (sector 25, either
+  multiplier) is a real dart thrown but never a hit — the "so close, not a
+  hit" precedent Doubles Practice already established for its own targets,
+  just with no round-ending failure mode here (this mode never "loses").
+- `turns.bust` is repurposed exactly the way Doubles Practice repurposes it:
+  `1` marks whichever dart completed the round (there is no "so-close"/
+  "wrong-target" failure mode to distinguish here, only completion or
+  abandonment — a round with no `bust=1` dart yet was abandoned, not
+  completed).
+
+**Around the World** is structurally identical to Just Chuckin' It: no round
+boundary at all, one continuous stream of 1-dart turns per `games` row
+(`set_no=leg_no=1` throughout), tracking progress toward the same lifetime
+63-outcome set `getAroundTheWorldProgress()` already computes — **not** reset
+per session, and the session never force-ends (reaching 63/63 is a notable
+event, not a stop condition). `newMatchPlayerAroundTheWorld()` fetches the
+lifetime baseline **once** at game start via the existing
+`GET /api/players/around-the-world` endpoint, the same
+`lifetimeDartsBase`/`lifetimeTreblesBase`-style precedent Chuckin's
+`newMatchPlayerChuckin()` established, to avoid a per-dart network round-trip
+and the rate-limiter/dropped-dart risk documented above for Chuckin.
+
+**Undo** is supported for both, one dart deep, mirroring
+`undoLastTurnDoublesPractice()`/`undoLastTurnChuckin()`'s snapshot-restore
+shape exactly — including `badgeReverts`/`voided` plumbing (§4 "Undo
+interaction") so undoing a round-completing (Clock) or lifetime-completing
+(World) dart un-earns the `guided_clock`/`guided_world` badge it awarded.
+
+**Live progress feedback** — the whole point of making these dedicated modes
+rather than leaving the underlying tracking passive: a persistent on-screen
+progress grid, `buildOutcomeGridHtml(hitSet, {cells, live})` (`frontend/
+index.html`), extracted from what used to be inline inside
+`renderAroundTheWorldProgress()` so the Player Profile's static "Around the
+World Progress" section (§3) and both drills' live in-game views share one
+implementation. `cells:'numbers'` renders the 20-cell Clock grid;
+`cells:'all'` (default) renders the full 63-outcome World grid. `live:true`
+wraps the grid in an `aria-live="polite"` region so screen readers announce
+each new hit during an active drill (§11 accessibility — each cell also
+carries a non-color checkmark + `aria-label`, closing a color-only gap that
+existed in the original static grid too, upgraded for free by the
+extraction). `frontend/display.html` gets its own compact mirror-copied port,
+`buildOutcomeGridCompact()`, following the same "no shared module between the
+two files" precedent Chuckin's live heatmap (`buildChuckinLiveHeatmap()`)
+already established.
+
+**Leg/pace exclusion** — Around the World shares Chuckin's exact "no round
+boundary, one continuous stream" shape, so a new `NOT_CONTINUOUS_STREAM` SQL
+constant (`` `AND g.game_type NOT IN ('chuckin','around_the_world')` ``,
+`backend/db.js`) excludes it from the same leg-count/pace aggregates Chuckin
+is excluded from via `NOT_CHUCKIN`: `getSummary()`/`computeStats()`'s
+`practiceLegs`, `getHomeExtra()`'s `todayLegs`/`weekLegs`/`_pace()`. Around
+the Clock — a genuine round=leg boundary, the same shape as Doubles Practice,
+which is *not* excluded from these — stays included in all of them.
+`getDartAnalytics()` and `getAroundTheWorldProgress()` deliberately keep
+using the narrower `NOT_CHUCKIN` instead of the new constant: cross-game-type
+sector analytics should include targeted-practice darts (the existing
+Doubles Practice precedent), and excluding either new type from
+`getAroundTheWorldProgress()` would break the very feature that query exists
+to feed.
+
+Stat vocabulary is documented in §3 ("Guided Around the Clock / Around the
+World stats").
+
 ---
 
 ## 3. Statistics — Every Formula
@@ -763,7 +854,8 @@ Every stats query needs to scope by mode (h2h/practice, via the existing
 both into one SQL fragment instead of each query hand-rolling its own
 `AND g.game_type='...'` alongside its mode filter
 (`docs/archive/existing-app-prep-roadmap.md` item 1) — `gameType` is whitelisted
-against `KNOWN_GAME_TYPES` (`['x01','cricket']`) as defense-in-depth, though
+against `KNOWN_GAME_TYPES` (`['x01','cricket','doubles_practice','chuckin',
+'around_the_clock','around_the_world']`) as defense-in-depth, though
 it's always an internally-controlled literal, never raw request input.
 `X01_ONLY` is now `_scope({gameType:'x01'})` (byte-identical string, so its
 existing call sites needed no changes), and every Cricket query function below
@@ -1030,34 +1122,128 @@ same convention as every other per-dart-commit mode), and
 `undoLastTurnChuckin()` restores it, calls `DB.deleteLastTurn()`, and (new)
 revokes any `chuckin180` badge that dart awarded — see above.
 
+### Guided Around the Clock / Around the World stats (`GAME_TYPES.around_the_clock.statDefs` / `GAME_TYPES.around_the_world.statDefs`)
+
+Two new, deliberately minimal vocabularies — neither mode has a win condition,
+so there's no "games played"/"win rate" concept. Every query is scoped via
+`_scope({mode, gameType:'around_the_clock'})` or `_scope({mode,
+gameType:'around_the_world'})`.
+
+**Around the Clock stat bubbles** (`getAroundTheClockStatBubbles(name, mode)`):
+
+| Key | Label | Formula |
+|---|---|---|
+| `atccompletions` | Completions | Count of `(game_id,set_no,leg_no)` groups with `SUM(bust)=1` — a round that actually completed |
+| `atcavgdartspercompletion` | Darts / Completion | `AVG(darts)` over only the completed-round groups above |
+| `atcdartsthrown` | Darts Thrown | `COUNT(*)` over every dart ever thrown in this mode, lifetime (includes abandoned rounds) |
+
+`getAroundTheClockStatBubbles()` also returns `sessionsPlayed` (completed +
+abandoned rounds, `COUNT(DISTINCT game_id||'-'||leg_no)`) and
+`completionRate` (`completions / sessionsPlayed * 100`) — both plain
+stat-bubble fields, not chart-linked (no matching `getMetricHistory()` case).
+All return `null`/`0` (not `NaN`) when no rounds have been recorded yet.
+
+**Around the Clock Personal Bests** (`getAroundTheClockPersonalBests(name,
+mode)`) — a single field, `bestCompletionDarts`: the fewest darts a
+completed round has ever taken (`MIN(darts)` over completed-round groups,
+`HAVING SUM(bust)=1`). No `winStreak`/`recentForm`/`lifetime` fields, same
+reasoning as Doubles Practice/Chuckin above.
+
+**Around the World stat bubbles** (`getAroundTheWorldDrillStatBubbles(name,
+mode)`): `dartsThrown` (lifetime darts in this mode), `sessionsPlayed`
+(`COUNT(DISTINCT game_id)`, Chuckin's exact pattern — no round concept),
+`avgDartsPerSession`, plus `progress`/`total` — the **same lifetime,
+cross-mode** 63-outcome count `getAroundTheWorldProgress()` already computes
+(the badge table's 🌍 Around the World row above documents its exact
+formula), not a drill-scoped count of its own. A dart thrown in this drill
+that repeats an already-hit outcome still counts toward `dartsThrown` but not
+toward `progress`.
+
+**Around the World Personal Bests** (`getAroundTheWorldPersonalBests(name,
+mode)`) — `sessionsPlayed` + the same `progress`/`total` fraction, not a
+per-round record: this mode never "wins" and its progress is lifetime/
+cross-session by design, so there's no round/session record to chase the way
+every other drill mode has one.
+
+**Metric history** (`getMetricHistory()`): `atcdartsthrown`/`atccompletions`/
+`atcavgdartspercompletion` bucket per-dart or per-round (the latter two via
+the same `L` leg-bucketer Doubles Practice's own per-round metrics use,
+`HAVING SUM(bust)=1` gating out abandoned rounds); `atwdartsthrown`/
+`atwsessions` bucket per-dart or per-session, mirroring Chuckin's own
+`chuckindartsthrown`/`chuckinsessions` cases exactly. `completionRate` and
+lifetime `progress` are deliberately **not** chart-linked — a per-bucket
+ratio-of-two-counts and a cross-mode running total, respectively, neither of
+which fits the existing per-bucket-rate shape without a materially different
+query.
+
+**Player Profile UI**: each mode gets its own button on the same N-way
+`.player-tabs` game-type toggle (`playerGameType`) every other mode uses.
+The existing "Around the World Progress" grid section
+(`renderAroundTheWorldProgress()`, above) is unaffected by which tab is
+active — it's a standalone section, not gated behind the per-game-type
+toggle, so no duplicate grid was added for its own tab.
+
+**Home page leaderboards**: `getAroundTheClockFastestLeaderboard()` (one row
+per player, their fastest completion, ascending) and
+`getAroundTheClockCompletionsLeaderboard()` (completions count, descending) —
+2 boards mirroring Doubles Practice's precedent. `getAroundTheWorldLeaderboard()`
+— 1 board (every player ranked by lifetime progress, descending, filtering out
+players with zero progress) — not 2, since there's no obvious second ranking
+axis for an open-ended, cross-session tracker. None take a `mode` param —
+same "always practice=1 by construction" reasoning as Doubles Practice's own
+Home boards.
+
+**Live Scoreboard**: `renderers.around_the_clock.card()` /
+`renderers.around_the_world.card()` (`frontend/display.html`) each show the
+compact `buildOutcomeGridCompact()` progress grid alongside the running
+hit/progress counter — `playerSnapshotAroundTheClock()`/
+`playerSnapshotAroundTheWorld()` (`frontend/index.html`) send `hitNumbers`/
+`hitOutcomes` (plain arrays, not just counts) inside the per-player
+`players[]` array so the Live Scoreboard can render exactly which
+numbers/outcomes are still outstanding, the same live feedback the controller
+itself shows. Two new top-level `ALLOWED_LIVE_KEYS` entries,
+`atcLastDart`/`atwLastDart` (the last-dart throwbox data — `roundOver`/
+`roundEndReason` are reused as-is from Doubles Practice for Around the
+Clock's round-end signal, no new keys needed there).
+
+**Undo support**: both snapshot round/session state into
+`game.lastTurnSnapshot` before mutating (the same convention as every other
+per-dart-commit mode) including `badgeReverts`/`voided`, and
+`undoLastTurnAroundTheClock()`/`undoLastTurnAroundTheWorld()` restore it,
+call `DB.deleteLastTurn()`, and revoke any `guided_clock`/`guided_world`
+badge that dart awarded.
+
 ---
 
 ## 4. Achievements & Badges
 
-51 badges (23 X01 + 4 Cricket + 2 Tournament + 3 Daily Challenge + 19 Just
-Chuckin' It) — that split is by which table each is listed under below (and
-which section of the Player Profile's Badge Case each renders in, via
-`BADGE_INFO`'s `cricket`/`challenge`/`chuckin`/`tournament` flags — anything
-without one of those flags buckets as X01), not a strict statement of which
-game types can trigger it: Night Owl/Early Bird (listed under X01) are one
-exception, checked from both `enterTurn()` and `enterTurnCricket()` via a
-shared `awardTimeOfDayBadges()` helper (2026-07 — previously
-Cricket-triggerable by neither, an accident of code structure rather than a
-deliberate scoping decision); Ghost Slayer (also listed under X01, since Ghost
-Opponent is X01-only) is another, checked inline in `recordGhostRace()`
-(`backend/db.js`) rather than from the frontend at all, since the win it
-depends on is already being written to the database right there. The two
-Tournament badges (Champion, Giant Slayer (Tournament)) are the same shape —
-checked server-side in `_advanceTournamentMatch()` — see their own table
-below. Tracked in the `player_badges` table (one row per player+badge, with a
-running `count`). X01 detection logic otherwise lives in `frontend/index.html`'s
-`enterTurn()`/`onLegWon()`; Cricket's 4 own badges live in
-`enterTurnCricket()`/`onLegWonCricket()`; Daily Challenge's 3 badges are
-checked in `checkChallengeBadges()`, called right after every
+53 badges (23 X01 + 4 Cricket + 2 Tournament + 3 Daily Challenge + 19 Just
+Chuckin' It + 2 Practice Drills) — that split is by which table each is
+listed under below (and which section of the Player Profile's Badge Case
+each renders in, via `BADGE_INFO`'s `cricket`/`challenge`/`chuckin`/
+`tournament`/`drill` flags — anything without one of those flags buckets as
+X01), not a strict statement of which game types can trigger it: Night Owl/
+Early Bird (listed under X01) are one exception, checked from both
+`enterTurn()` and `enterTurnCricket()` via a shared `awardTimeOfDayBadges()`
+helper (2026-07 — previously Cricket-triggerable by neither, an accident of
+code structure rather than a deliberate scoping decision); Ghost Slayer (also
+listed under X01, since Ghost Opponent is X01-only) is another, checked
+inline in `recordGhostRace()` (`backend/db.js`) rather than from the frontend
+at all, since the win it depends on is already being written to the database
+right there. The two Tournament badges (Champion, Giant Slayer (Tournament))
+are the same shape — checked server-side in `_advanceTournamentMatch()` —
+see their own table below. Tracked in the `player_badges` table (one row per
+player+badge, with a running `count`). X01 detection logic otherwise lives in
+`frontend/index.html`'s `enterTurn()`/`onLegWon()`; Cricket's 4 own badges
+live in `enterTurnCricket()`/`onLegWonCricket()`; Daily Challenge's 3 badges
+are checked in `checkChallengeBadges()`, called right after every
 `/api/challenges/complete` response; Just Chuckin' It's 18 laddered milestones
 are checked in `checkChuckinMilestones()`, called after every dart from
 `throwDartChuckin()` — its 19th badge, `chuckin180`, is checked inline in that
-same function (see §2/§3's own coverage of it).
+same function (see §2/§3's own coverage of it); the 2 Practice Drills badges
+(Guided Clock, Guided World) are checked inline in
+`throwDartAroundTheClock()`/`throwDartAroundTheWorld()` (see §2/§3's own
+coverage of them).
 
 ### Award modes
 
@@ -1221,6 +1407,18 @@ support undo-revocation** — see §2/§3's coverage of `CHUCKIN_GROUPS_OF_3`/
 this one badge, unlike the 18 milestones, gets the full `badgeReverts`/
 `snap.voided` treatment.
 
+**The 2 Guided Around the Clock / Around the World badges** (checked inline in
+`throwDartAroundTheClock()`/`throwDartAroundTheWorld()`, `frontend/index.html`).
+Deliberately distinct from the existing passive `around_the_clock`/
+`around_the_world` badges above (2026-07 decision) — completing a guided
+drill session celebrates the session itself; the two passive badges keep
+firing exactly as they always have, from any mode, unrelated to these:
+
+| Badge | Exact condition |
+|---|---|
+| 🧭 **Guided Clock** | A guided Around the Clock round completes — `evaluateDartAroundTheClock()`'s `completed` flag fires (all 20 numbers 1-20 hit as singles). **Once-badge**, undo-revocable (§2's "Guided Around the Clock / Around the World" section). |
+| 🗺️ **Guided World** | The lifetime Around the World progress count reaches 63/63 as a direct result of a dart thrown during a guided Around the World session (checked inline after every dart, via the same `baselineHitSet + sessionHitSet` running total `playerSnapshotAroundTheWorld()` reports). **Once-badge**, undo-revocable. |
+
 ### Description text
 
 Every badge (except 180/Big Fish/Nine-Darter, which are older top-level stats,
@@ -1347,8 +1545,9 @@ accurate data. `patchAchievementCount()` is guarded by `currentAchType`/
 `currentAchPlayer` — a no-op if the queue has already moved on to a different
 badge or a different player's instance of the same badge type by the time the
 response arrives (graceful, not a bug; typically near-instant on a LAN).
-Once-badges (`once:true` — Around the Clock/World, Grudge Match, First 100+
-Checkout, Full Rotation, Ghost Slayer, every Just Chuckin' It milestone tier) skip this
+Once-badges (`once:true` — Around the Clock/World, Guided Clock/World, Grudge
+Match, First 100+ Checkout, Full Rotation, Ghost Slayer, every Just Chuckin'
+It milestone tier) skip this
 entirely: they already have the award response in scope at the point they call
 `queueBadge()` inside their own `.then()`, so they pass the literal string
 `'First time!'` immediately rather than a numeric count — showing `count === 1`
@@ -1520,7 +1719,10 @@ flag, category/legs/sets/current-player-index, per-player data (shape depends
 on `gameType` — X01: score/averages/darts breakdowns via `playerSnapshotX01`;
 Cricket: `marks`/`points`/darts breakdowns via `playerSnapshotCricket`; Chuckin:
 session darts/trebles plus a live `heatmap` array and `sessionAvg` via
-`playerSnapshotChuckin`, §3's "Live Scoreboard" coverage), current visit's
+`playerSnapshotChuckin`, §3's "Live Scoreboard" coverage; Around the Clock/
+World: `hitNumbers`/`hitOutcomes` plain arrays plus a running hit/progress
+count via `playerSnapshotAroundTheClock`/`playerSnapshotAroundTheWorld`, §3's
+"Guided Around the Clock / Around the World" coverage), current visit's
 darts, checkout hint (X01 only — always empty for Cricket), status,
 `pendingAchievement` (§5), one-shot fields (`lastTurnEvent`, `matchResult`,
 `legStart` — cleared immediately after each push, so they only ever announce
@@ -1848,6 +2050,21 @@ Admin toggle in Settings; swaps the app's red/green double/treble color coding
 checkout flashes and dart-class colors) for a blue/orange palette. Applies to
 both the controller and `/display`.
 
+### Outcome progress grid (`buildOutcomeGridHtml()`, `frontend/index.html`)
+
+The Player Profile's "Around the World Progress" grid and the two guided
+drills' (Around the Clock/World) live in-game progress grids all share one
+implementation, `buildOutcomeGridHtml(hitSet, {cells, live})`. Each cell
+signals "hit" with a non-color checkmark glyph + a per-cell `aria-label`
+("Single 5, hit"/"Single 5, not yet hit"), not gold background color alone —
+closing a color-only gap that existed in the original, Player-Profile-only
+version of this grid before the two drill modes were built
+(docs/game-modes-roadmap.md "Guided Around the Clock / Around the World").
+The live in-drill usage (`live:true`) additionally wraps the grid in an
+`aria-live="polite"` region so a screen reader announces each new hit as it
+happens, without adding that live-announcement behavior to the static
+Player Profile section (which only ever renders once per page load).
+
 ### Input paths
 
 **Pad mode is the app's decided accessible input path** (docs/accessibility-roadmap.md,
@@ -2046,13 +2263,13 @@ already-migrated database is a safe no-op).
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
-| `category` | `TEXT NOT NULL` | For X01 games: the starting score as a string (`'501'`/`'301'`/`'170'`/`'101'`, or a filler `'1000'` for Daily Challenge's non-scoring formats). Cricket games write a display label instead (`'Cricket (15-20, Bull)'` or `'Custom Cricket'`); Chuckin games write `"Just Chuckin' It"`. Category-scoped stat filters (`OPENING_CATS`'s `IN (501,301,170,101)`, nine-darter detection) either match X01 values explicitly or filter on `game_type`+`config`, so the non-X01 labels never collide with them |
+| `category` | `TEXT NOT NULL` | For X01 games: the starting score as a string (`'501'`/`'301'`/`'170'`/`'101'`, or a filler `'1000'` for Daily Challenge's non-scoring formats). Cricket games write a display label instead (`'Cricket (15-20, Bull)'` or `'Custom Cricket'`); Chuckin games write `"Just Chuckin' It"`; the two guided drills write `'Guided Around the Clock'`/`'Guided Around the World'`. Category-scoped stat filters (`OPENING_CATS`'s `IN (501,301,170,101)`, nine-darter detection) either match X01 values explicitly or filter on `game_type`+`config`, so the non-X01 labels never collide with them |
 | `legs_per_set` / `sets_per_game` | `INTEGER NOT NULL` | |
 | `created_at` / `completed_at` | `TEXT` | `completed_at` is `NULL` for in-progress/abandoned games |
 | `winner_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | |
 | `practice` | `INTEGER NOT NULL DEFAULT 0` | Explicit practice flag, set at creation |
-| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, `'doubles_practice'`, or `'chuckin'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; the Cricket/Doubles Practice/Chuckin New Game flows pass their own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
-| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows (no config needed — every number/multiplier is always "in play") |
+| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, `'doubles_practice'`, `'chuckin'`, `'around_the_clock'`, or `'around_the_world'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; each New Game flow passes its own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
+| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows and both guided-drill rows (no config needed — every number/multiplier is always "in play") |
 | `player_count` | `INTEGER` | **Frozen** participant count at creation (not a live subquery) — see §3's mode-scoping note |
 
 ### `game_players` (composite `PRIMARY KEY (game_id, player_id)`)
@@ -2071,7 +2288,7 @@ already-migrated database is a safe no-op).
 | `game_id` / `player_id` | `INTEGER NOT NULL, FK, ON DELETE CASCADE` | |
 | `set_no` / `leg_no` | `INTEGER NOT NULL` | Must be a positive integer (`addTurn()` rejects `0` or negative explicitly — an explicit `0` is validation-rejected, not silently treated as the "omitted" default of `1`) |
 | `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3). `addTurn()` rejects a non-numeric value outright rather than silently coercing it to `0` |
-| `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans. Cricket turns always write `bust=0, checkout=0` — cricket has neither concept. Doubles Practice repurposes `bust` as "this dart ended the round" (so-close or wrong-double, §2) — the closest existing column to that meaning, since this mode has no bust/win concept of its own either; `checkout` stays `0` always |
+| `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans. Cricket turns always write `bust=0, checkout=0` — cricket has neither concept. Doubles Practice repurposes `bust` as "this dart ended the round" (so-close or wrong-double, §2) — the closest existing column to that meaning, since this mode has no bust/win concept of its own either; `checkout` stays `0` always. Guided Around the Clock repurposes `bust` the identical way: `1` marks whichever dart completed the round (all 20 numbers hit) — there's no "so-close"/"wrong-target" failure mode here, only completion or abandonment. Guided Around the World writes `bust=0` always (no round to end, matching Chuckin's own turns) |
 | `checkout_points` | `INTEGER` | Only set when `checkout=1` (X01 only) |
 | `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set only by Cricket's write path (`enterTurnCricket()`) — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |

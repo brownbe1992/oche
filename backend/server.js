@@ -305,11 +305,17 @@ const ALLOWED_LIVE_KEYS = new Set([
   'gameOneEighties', 'gameBigFish', 'gameBusts', 'legSummary', 'practice', 'done',
   'lastTurnEvent', 'matchResult', 'legStart', 'checkoutTarget', 'turnSeq', 'ts',
   // Doubles Practice only (docs/game-modes-roadmap.md) — read by display.html's
-  // renderers.doubles_practice.card(), never by X01/Cricket.
+  // renderers.doubles_practice.card(), never by X01/Cricket. roundOver/roundEndReason
+  // are shared with guided Around the Clock below (same "round ended" concept).
   'doublesTargets', 'dpLastDart', 'roundOver', 'roundEndReason',
   // Just Chuckin' It only (docs/game-modes-roadmap.md) — read by display.html's
   // renderers.chuckin.card().
   'chuckinLastDart',
+  // Guided Around the Clock / Around the World only (docs/game-modes-roadmap.md) —
+  // read by display.html's renderers.around_the_clock.card()/renderers.around_the_world.card().
+  // Per-player hit-set/progress data rides inside the already-unrestricted
+  // per-player `players[]` array, same as Chuckin's heatmap/sessionAvg fields do.
+  'atcLastDart', 'atwLastDart',
   // Tournament mode only (docs/tournament-mode-roadmap.md) — read by display.html's
   // fmtText() for the top-bar round label ("Quarterfinal", "Final", ...).
   'tournamentRoundLabel',
@@ -549,6 +555,9 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/stats/cricket-perfect-leg' && m === 'GET') return send(res, 200, db.getCricketPerfectLegStats(url.searchParams.get('mode')));
     if (p === '/api/stats/doubles-practice-accuracy' && m === 'GET') return send(res, 200, db.getDoublesPracticeAccuracyLeaderboard());
     if (p === '/api/stats/doubles-practice-best-round' && m === 'GET') return send(res, 200, db.getDoublesPracticeBestRoundStats());
+    if (p === '/api/stats/around-the-clock-fastest' && m === 'GET') return send(res, 200, db.getAroundTheClockFastestLeaderboard());
+    if (p === '/api/stats/around-the-clock-completions' && m === 'GET') return send(res, 200, db.getAroundTheClockCompletionsLeaderboard());
+    if (p === '/api/stats/around-the-world-progress' && m === 'GET') return send(res, 200, db.getAroundTheWorldLeaderboard());
     if (p === '/api/stats/big-fish'     && m === 'GET') return send(res, 200, db.getBigFishStats(url.searchParams.get('mode')));
     if (p === '/api/stats/nine-darters' && m === 'GET') return send(res, 200, db.getNineDarterStats(url.searchParams.get('mode')));
     if (p === '/api/stats' && m === 'GET')  return send(res, 200, db.computeStats());
@@ -566,6 +575,8 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, gameType === 'cricket' ? db.getCricketPersonalBests(name, mode)
         : gameType === 'doubles_practice' ? db.getDoublesPracticePersonalBests(name, mode)
         : gameType === 'chuckin' ? db.getChuckinPersonalBests(name, mode)
+        : gameType === 'around_the_clock' ? db.getAroundTheClockPersonalBests(name, mode)
+        : gameType === 'around_the_world' ? db.getAroundTheWorldPersonalBests(name, mode)
         : db.getPersonalBests(name, mode));
     }
     if (p === '/api/players/stat-bubbles' && m === 'GET') {
@@ -575,6 +586,8 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, gameType === 'cricket' ? db.getCricketStatBubbles(name, mode)
         : gameType === 'doubles_practice' ? db.getDoublesPracticeStatBubbles(name, mode)
         : gameType === 'chuckin' ? db.getChuckinStatBubbles(name, mode)
+        : gameType === 'around_the_clock' ? db.getAroundTheClockStatBubbles(name, mode)
+        : gameType === 'around_the_world' ? db.getAroundTheWorldDrillStatBubbles(name, mode)
         : db.getPlayerStatBubbles(name, mode));
     }
     if (p === '/api/players/chuckin-heatmap' && m === 'GET') {

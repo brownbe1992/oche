@@ -561,6 +561,30 @@ function buildChuckinLiveHeatmap(cells){
   return s;
 }
 
+// Compact progress grid for the two guided drills (docs/game-modes-roadmap.md
+// "Guided Around the Clock / Around the World") — mirror-copied from
+// frontend/index.html's buildOutcomeGridHtml() (this file has no shared module
+// with index.html, per the established convention above). hitKeys is a plain
+// array of `${sector}:${mult}` strings (Around the Clock always uses mult 1) —
+// index.html's playerSnapshotAroundTheClock()/playerSnapshotAroundTheWorld()
+// send hitNumbers/hitOutcomes respectively, normalized to that shape below.
+function buildOutcomeGridCompact(hitKeys, cellsMode){
+  const hitSet = new Set(hitKeys||[]);
+  const cell = (label, key, title) => {
+    const hit = hitSet.has(key);
+    return `<div title="${esc(title)}" style="width:24px;height:24px;border-radius:.5vmin;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;position:relative;
+      background:${hit?'var(--gold)':'rgba(255,255,255,.08)'};color:${hit?'#111':'#8a8a80'}">${label}${hit ? '<span aria-hidden="true" style="position:absolute;bottom:-1px;right:0;font-size:7px">✓</span>' : ''}</div>`;
+  };
+  if(cellsMode === 'numbers'){
+    return `<div style="display:flex;flex-wrap:wrap;gap:3px">${Array.from({length:20},(_,i)=>i+1).map(n=>cell(String(n), `${n}:1`, 'Number '+n)).join('')}</div>`;
+  }
+  const numberCells = Array.from({length:20},(_,i)=>i+1).map(n=>
+    `<div style="display:flex;gap:2px">${cell('S'+n,`${n}:1`,'Single '+n)}${cell('D'+n,`${n}:2`,'Double '+n)}${cell('T'+n,`${n}:3`,'Treble '+n)}</div>`
+  ).join('');
+  const specialCells = `<div style="display:flex;gap:2px">${cell('25',`25:1`,'Outer bull')}${cell('Bull',`25:2`,'Double bull')}${cell('Miss',`0:1`,'Miss')}</div>`;
+  return `<div style="display:flex;flex-wrap:wrap;gap:3px">${numberCells}${specialCells}</div>`;
+}
+
 /* ---- per-game-type renderers ----
    The shell above (top bar, match bar, checkout strip, banners, achievement
    overlays, idle state, connection handling) is game-agnostic. Only the player
@@ -782,6 +806,73 @@ const renderers = {
             ${throwbox}
           </div>
           <div class="chuckin-board">${buildChuckinLiveHeatmap(p.heatmap||[])}</div>
+        </div>
+      </div>`;
+    }
+  },
+  // Guided Around the Clock (docs/game-modes-roadmap.md): solo drill, always
+  // exactly one player/card — no legSummary, no scorecard, goes through the
+  // generic s.players.map(renderer.card) path, same as Doubles Practice/Chuckin.
+  around_the_clock: {
+    card(p, i, s, L){
+      const active = i===s.currentIndex;
+      const hitNumbers = Array.isArray(p.hitNumbers) ? p.hitNumbers : [];
+      const hitKeys = hitNumbers.map(n=>`${n}:1`);
+      let flash = '';
+      if(active && s.roundOver){
+        flash = `<div class="flash win">CLOCK COMPLETE</div>`;
+      }
+      let throwbox = '';
+      if(active && s.atcLastDart && !s.roundOver){
+        throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(s.atcLastDart.label)}">${esc(s.atcLastDart.label)}</div></div></div>`;
+      }
+      return `<div class="pcard ${active?'active':''}">
+        ${flash}
+        <div class="chuckin-layout">
+          <div class="chuckin-stats">
+            <div class="prow1">
+              <span class="pname">${escapeHtml(p.name)}</span>
+              ${active?'<span class="throwflag">▸ throwing</span>':''}
+            </div>
+            <div class="score">${num(p.hit)}<span style="font-size:0.4em;opacity:.7"> / 20</span></div>
+            <div class="dart-counts">
+              <div class="dart-counts-title">Around the Clock</div>
+              <div class="dart-count-row"><span class="dart-count-val">${num(p.roundDarts)}</span><span class="dart-count-lbl">Darts this round</span></div>
+            </div>
+            ${throwbox}
+          </div>
+          <div class="chuckin-board">${buildOutcomeGridCompact(hitKeys, 'numbers')}</div>
+        </div>
+        <div class="meta"><span class="standing">Round ${num(s.legNo)}</span></div>
+      </div>`;
+    }
+  },
+  // Guided Around the World (docs/game-modes-roadmap.md): solo, no rounds/legs at
+  // all — always exactly one player/card, same shape as Chuckin.
+  around_the_world: {
+    card(p, i, s, L){
+      const active = i===s.currentIndex;
+      const hitOutcomes = Array.isArray(p.hitOutcomes) ? p.hitOutcomes : [];
+      let throwbox = '';
+      if(active && s.atwLastDart){
+        const newOutcome = s.atwLastDart.isNewLifetimeOutcome ? '<span class="flash win" style="position:static;display:inline-block;margin-left:8px">NEW!</span>' : '';
+        throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(s.atwLastDart.label)}">${esc(s.atwLastDart.label)}</div></div>${newOutcome}</div>`;
+      }
+      return `<div class="pcard ${active?'active':''}">
+        <div class="chuckin-layout">
+          <div class="chuckin-stats">
+            <div class="prow1">
+              <span class="pname">${escapeHtml(p.name)}</span>
+              ${active?'<span class="throwflag">▸ throwing</span>':''}
+            </div>
+            <div class="score">${num(p.progress)}<span style="font-size:0.4em;opacity:.7"> / 63</span></div>
+            <div class="dart-counts">
+              <div class="dart-counts-title">Around the World</div>
+              <div class="dart-count-row"><span class="dart-count-val">${num(p.sessionDarts)}</span><span class="dart-count-lbl">Darts this session</span></div>
+            </div>
+            ${throwbox}
+          </div>
+          <div class="chuckin-board">${buildOutcomeGridCompact(hitOutcomes, 'all')}</div>
         </div>
       </div>`;
     }

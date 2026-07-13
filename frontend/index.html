@@ -753,8 +753,9 @@
         </div>
       </div>
 
-      <!-- Practice type (Practice family only — Doubles Practice and Just
-           Chuckin' It are sub-modes of Practice, not their own top-level mode) -->
+      <!-- Practice type (Practice family only — Doubles Practice, Just
+           Chuckin' It, and the two guided drills are sub-modes of Practice, not
+           their own top-level mode) -->
       <div class="setup-section" id="practice-type-section" hidden>
         <div class="setup-label">Practice type</div>
         <div class="opts" style="margin:0">
@@ -762,6 +763,8 @@
             <button id="practice-type-normal" aria-pressed="true" onclick="setMode('practice')">Practice</button>
             <button id="practice-type-doubles" aria-pressed="false" onclick="setMode('doubles_practice')">Doubles Practice</button>
             <button id="practice-type-chuckin" aria-pressed="false" onclick="setMode('chuckin')">Just Chuckin' It</button>
+            <button id="practice-type-clock" aria-pressed="false" onclick="setMode('around_the_clock')">Around the Clock</button>
+            <button id="practice-type-world" aria-pressed="false" onclick="setMode('around_the_world')">Around the World</button>
           </div>
         </div>
       </div>
@@ -789,6 +792,18 @@
       <div class="setup-section" id="chuckin-info-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
         <div class="setup-label" style="color:var(--gold)">Just Chuckin' It</div>
         <p class="pp-meta" style="margin:0">No score to chase, no leg to win — just throw for as long as you like. Every dart still counts toward your lifetime totals and heatmap, so it's a low-pressure way to warm up, find your rhythm, or chase down a milestone badge.</p>
+      </div>
+
+      <!-- Guided Around the Clock explanation (Around the Clock mode only) -->
+      <div class="setup-section" id="clock-info-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
+        <div class="setup-label" style="color:var(--gold)">🧭 Around the Clock</div>
+        <p class="pp-meta" style="margin:0">Hit every number, 1 through 20, as a single — in any order. Live progress shows exactly which numbers you still need. A round ends the moment all 20 are hit; press "Start Next Clock" to go again.</p>
+      </div>
+
+      <!-- Guided Around the World explanation (Around the World mode only) -->
+      <div class="setup-section" id="world-info-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
+        <div class="setup-label" style="color:var(--gold)">🗺️ Around the World</div>
+        <p class="pp-meta" style="margin:0">Chip away at all 63 lifetime dart outcomes — every number 1-20 as a single, double, and treble, plus outer bull, double bull, and a miss. Tracks the same lifetime progress as your Player Profile, across as many sessions as it takes. No round to finish — throw for as long as you like.</p>
       </div>
 
       <!-- Format (H2H only) -->
@@ -1898,7 +1913,10 @@ function renderHome(){
     Backend.get('/api/stats/cricket-wins'),
     Backend.get('/api/stats/doubles-practice-accuracy'),
     Backend.get('/api/stats/doubles-practice-best-round'),
-  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,dpa,dpb])=>{
+    Backend.get('/api/stats/around-the-clock-fastest'),
+    Backend.get('/api/stats/around-the-clock-completions'),
+    Backend.get('/api/stats/around-the-world-progress'),
+  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,dpa,dpb,atcf,atcc,atwp])=>{
     homeData={s, extra,
       h2h:{finishes:f,eighties:e,bigFish:b,nineDarters:n},
       practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn},
@@ -1907,7 +1925,9 @@ function renderHome(){
         practice:{mpr:pcm,nineMarks:pc9,perfectLeg:pcp},
         wins:cw,
       },
-      doublesPractice:{ accuracy:dpa, bestRound:dpb }};
+      doublesPractice:{ accuracy:dpa, bestRound:dpb },
+      aroundTheClock:{ fastest:atcf, completions:atcc },
+      aroundTheWorld:{ progress:atwp }};
     renderHomeContent();
   }).catch(()=>{
     homeData={s:{players:roster.length,games:null,sets:null,legs:null,darts:null,oneEighties:null,bigFish:null,nineDarters:null,practiceLegs:null},
@@ -1915,7 +1935,9 @@ function renderHome(){
       h2h:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
       practice:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
       cricket:{h2h:{mpr:[],nineMarks:empty,perfectLeg:empty}, practice:{mpr:[],nineMarks:empty,perfectLeg:empty}, wins:[]},
-      doublesPractice:{ accuracy:[], bestRound:[] }};
+      doublesPractice:{ accuracy:[], bestRound:[] },
+      aroundTheClock:{ fastest:[], completions:[] },
+      aroundTheWorld:{ progress:[] }};
     renderHomeContent();
   });
 }
@@ -2205,6 +2227,73 @@ function renderHomeTabBodyDoublesPractice(){
   `;
 }
 
+// Guided Around the Clock's Home page leaderboards. Same "no H2H/Practice split,
+// always solo" reasoning as Doubles Practice above. Two boards: fastest
+// completion (fewest darts) and most completions (mirrors Doubles Practice's
+// two-board precedent).
+function renderHomeTabBodyAroundTheClock(){
+  const el=document.getElementById('home-tab-body');
+  const data=homeData.aroundTheClock;
+  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
+
+  const fastBoard=data.fastest||[];
+  const fastLeaderboard=fastBoard.length
+    ? `<div class="hof-list">${fastBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.darts} darts</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${fmtDate(r.createdAt)}</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
+
+  const compBoard=data.completions||[];
+  const compLeaderboard=compBoard.length
+    ? `<div class="hof-list">${compBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.completions}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
+
+  el.innerHTML=`
+    <div class="home-pair">
+      <div class="pp-section">
+        <div class="pp-section-title">Fastest Completion</div>
+        ${fastLeaderboard}
+      </div>
+      <div class="pp-section">
+        <div class="pp-section-title">Most Completions</div>
+        ${compLeaderboard}
+      </div>
+    </div>
+  `;
+}
+
+// Guided Around the World's Home page leaderboard — one board (lifetime progress
+// out of 63), not two: unlike Around the Clock's per-round darts/completions,
+// there's no obvious second ranking axis for an open-ended, cross-session tracker.
+function renderHomeTabBodyAroundTheWorld(){
+  const el=document.getElementById('home-tab-body');
+  const data=homeData.aroundTheWorld;
+  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
+
+  const progBoard=data.progress||[];
+  const progLeaderboard=progBoard.length
+    ? `<div class="hof-list">${progBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.progress}/${r.total}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
+
+  el.innerHTML=`
+    <div class="pp-section">
+      <div class="pp-section-title">Lifetime Progress</div>
+      ${progLeaderboard}
+    </div>
+  `;
+}
+
 function hofSection(rows, mode=''){
     if(!rows||!rows.length) return `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
     return `<div class="hof-list">${rows.map((f,i)=>{
@@ -2267,10 +2356,12 @@ function hofSection(rows, mode=''){
 function setMode(mode){
   setup.mode = mode;
   setup.practice = (mode !== 'h2h');
-  // Doubles Practice and Just Chuckin' It are sub-modes of Practice, not their
-  // own top-level mode button — the "Practice" button stays pressed for all
-  // three, and a nested "Practice type" sub-toggle picks which one.
-  const practiceFamily = (mode === 'practice' || mode === 'doubles_practice' || mode === 'chuckin');
+  // Doubles Practice, Just Chuckin' It, and the two guided drills are all
+  // sub-modes of Practice, not their own top-level mode button — the "Practice"
+  // button stays pressed for all five, and a nested "Practice type" sub-toggle
+  // picks which one.
+  const practiceFamily = (mode === 'practice' || mode === 'doubles_practice' || mode === 'chuckin'
+    || mode === 'around_the_clock' || mode === 'around_the_world');
   document.getElementById('mode-h2h').setAttribute('aria-pressed', mode==='h2h');
   document.getElementById('mode-practice').setAttribute('aria-pressed', practiceFamily);
   document.getElementById('mode-challenge').setAttribute('aria-pressed', mode==='challenge');
@@ -2279,37 +2370,45 @@ function setMode(mode){
   document.getElementById('practice-type-normal').setAttribute('aria-pressed', mode==='practice');
   document.getElementById('practice-type-doubles').setAttribute('aria-pressed', mode==='doubles_practice');
   document.getElementById('practice-type-chuckin').setAttribute('aria-pressed', mode==='chuckin');
+  document.getElementById('practice-type-clock').setAttribute('aria-pressed', mode==='around_the_clock');
+  document.getElementById('practice-type-world').setAttribute('aria-pressed', mode==='around_the_world');
   document.getElementById('h2h-options').hidden = (mode !== 'h2h');
   // Daily Challenge and Ghost Opponent are both X01-only — force the game-type
   // choice back and hide it entirely rather than offering a combination that was
   // never designed (docs/archive/ghost-opponent-roadmap.md is explicitly X01-only for v1).
-  // Doubles Practice and Just Chuckin' It are each their own game_type, not a
-  // choice between X01/Cricket, so they hide the same X01/Cricket-specific
-  // sections for the same reason — Just Chuckin' It additionally has no config
-  // options at all (no starting score, no targets), unlike Doubles Practice.
-  const isSpecialMode = (mode === 'challenge' || mode === 'ghost' || mode === 'doubles_practice' || mode === 'chuckin');
+  // Doubles Practice, Just Chuckin' It, and the two guided drills are each their
+  // own game_type, not a choice between X01/Cricket, so they hide the same
+  // X01/Cricket-specific sections for the same reason — Just Chuckin' It and both
+  // guided drills additionally have no config options at all (no starting score,
+  // no targets), unlike Doubles Practice.
+  const isSpecialMode = (mode === 'challenge' || mode === 'ghost' || mode === 'doubles_practice' || mode === 'chuckin'
+    || mode === 'around_the_clock' || mode === 'around_the_world');
   document.getElementById('game-type-section').hidden = isSpecialMode;
-  // Leaving Doubles Practice/Chuckin for any other mode: setup.gameType was force-set
-  // below (bypassing setGameType(), which is the only place that also updates the
-  // X01/Cricket toggle buttons' own visual state) — so it must be reset back to a
-  // real game type here. Without this, the X01/Cricket toggle keeps showing whatever
-  // it visually showed before Doubles Practice/Chuckin was ever chosen, while
-  // setup.gameType silently stays 'doubles_practice'/'chuckin' underneath, and
-  // startGame() (which reads setup.gameType, not the button) builds that game type
-  // even though every visible control says otherwise.
-  if(mode !== 'doubles_practice' && mode !== 'chuckin' && (setup.gameType === 'doubles_practice' || setup.gameType === 'chuckin')) setGameType('x01');
+  // Leaving Doubles Practice/Chuckin/a guided drill for any other mode: setup.gameType
+  // was force-set below (bypassing setGameType(), which is the only place that also
+  // updates the X01/Cricket toggle buttons' own visual state) — so it must be reset
+  // back to a real game type here. Without this, the X01/Cricket toggle keeps showing
+  // whatever it visually showed before, while setup.gameType silently stays stuck on
+  // the drill type underneath, and startGame() (which reads setup.gameType, not the
+  // button) builds that game type even though every visible control says otherwise.
+  const drillGameTypes = ['doubles_practice', 'chuckin', 'around_the_clock', 'around_the_world'];
+  if(!drillGameTypes.includes(mode) && drillGameTypes.includes(setup.gameType)) setGameType('x01');
   if((mode === 'challenge' || mode === 'ghost') && setup.gameType !== 'x01') setGameType('x01');
-  if(mode === 'doubles_practice') setup.gameType = 'doubles_practice';
-  if(mode === 'chuckin') setup.gameType = 'chuckin';
+  if(drillGameTypes.includes(mode)) setup.gameType = mode;
   document.getElementById('start-score-section').hidden = (isSpecialMode || setup.gameType === 'cricket');
   document.getElementById('cricket-options-section').hidden = (isSpecialMode || setup.gameType !== 'cricket');
   document.getElementById('challenge-info-section').hidden = (mode !== 'challenge');
   document.getElementById('ghost-options-section').hidden = (mode !== 'ghost');
   document.getElementById('doubles-options-section').hidden = (mode !== 'doubles_practice');
   document.getElementById('chuckin-info-section').hidden = (mode !== 'chuckin');
+  document.getElementById('clock-info-section').hidden = (mode !== 'around_the_clock');
+  document.getElementById('world-info-section').hidden = (mode !== 'around_the_world');
   document.getElementById('add-player-wrap').style.display = isSpecialMode ? 'none' : '';
   const startBtn = document.getElementById('start-btn');
-  if(startBtn) startBtn.textContent = (mode === 'challenge') ? 'Start Challenge' : (mode === 'ghost') ? 'Start race' : (mode === 'doubles_practice') ? 'Start practice' : (mode === 'chuckin') ? 'Start chuckin\'' : 'Start game';
+  if(startBtn) startBtn.textContent = (mode === 'challenge') ? 'Start Challenge' : (mode === 'ghost') ? 'Start race'
+    : (mode === 'doubles_practice') ? 'Start practice' : (mode === 'chuckin') ? 'Start chuckin\''
+    : (mode === 'around_the_clock') ? 'Start the clock' : (mode === 'around_the_world') ? 'Start chipping away'
+    : 'Start game';
   if(mode === 'challenge'){
     // a challenge is always exactly one player
     setup.slots = setup.slots.slice(0,1);
@@ -2325,8 +2424,10 @@ function setMode(mode){
     renderPlayers();
     const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
     renderDoublesTargetGrid();
-  } else if(mode === 'chuckin'){
-    // solo, freeform, no config — same single-slot treatment as Doubles Practice
+  } else if(mode === 'chuckin' || mode === 'around_the_clock' || mode === 'around_the_world'){
+    // solo, no config — same single-slot treatment as Doubles Practice. Neither
+    // guided drill needs a target picker (both cover a fixed target set by
+    // definition), unlike Doubles Practice's renderDoublesTargetGrid().
     setup.slots = setup.slots.slice(0,1);
     if(!setup.slots.length) setup.slots = [''];
     setup.legsPerSet = 1; setup.setsPerGame = 1;
@@ -3235,7 +3336,8 @@ async function startGame(){
   if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   // Custom cricket is locked to exactly 7 targets (same count as classic) — never
   // more, never fewer (docs/game-modes-roadmap.md "Decisions made").
-  const gameType = setup.gameType === 'cricket' ? 'cricket' : setup.gameType === 'doubles_practice' ? 'doubles_practice' : setup.gameType === 'chuckin' ? 'chuckin' : 'x01'; // Daily Challenge always forces x01 via setMode()
+  const gameType = ['cricket', 'doubles_practice', 'chuckin', 'around_the_clock', 'around_the_world'].includes(setup.gameType)
+    ? setup.gameType : 'x01'; // Daily Challenge always forces x01 via setMode()
   let cricketNumbers = null;
   if(gameType === 'cricket'){
     cricketNumbers = resolveCricketNumbers();
@@ -3249,11 +3351,14 @@ async function startGame(){
   // (whatever "Starting score" happened to be hidden at, per setMode('ghost')) —
   // otherwise the two "players" wouldn't actually be racing the same leg.
   const startScore = challengeStart != null ? challengeStart : ghostScript ? Number(ghostScript.category) : setup.start;
-  const legsPerSet = (setup.mode==='challenge' || setup.mode==='ghost' || setup.mode==='doubles_practice' || setup.mode==='chuckin') ? 1 : setup.legsPerSet;
-  const setsPerGame = (setup.mode==='challenge' || setup.mode==='ghost' || setup.mode==='doubles_practice' || setup.mode==='chuckin') ? 1 : setup.setsPerGame;
+  const drillModes = ['challenge', 'ghost', 'doubles_practice', 'chuckin', 'around_the_clock', 'around_the_world'];
+  const legsPerSet = drillModes.includes(setup.mode) ? 1 : setup.legsPerSet;
+  const setsPerGame = drillModes.includes(setup.mode) ? 1 : setup.setsPerGame;
   const config = gameType === 'cricket' ? { numbers: cricketNumbers }
     : gameType === 'doubles_practice' ? { doubles: setup.doublesTargets.slice() }
     : gameType === 'chuckin' ? {}
+    : gameType === 'around_the_clock' ? {}
+    : gameType === 'around_the_world' ? {}
     : { startingScore: startScore };
   const category = gameType === 'cricket'
     ? (setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
@@ -3261,6 +3366,10 @@ async function startGame(){
     ? `Doubles Practice (${config.doubles.map(doublesTargetLabel).join(', ')})`
     : gameType === 'chuckin'
     ? `Just Chuckin' It`
+    : gameType === 'around_the_clock'
+    ? 'Guided Around the Clock'
+    : gameType === 'around_the_world'
+    ? 'Guided Around the World'
     : String(startScore);
   game = {
     gameType,
@@ -3288,13 +3397,14 @@ async function startGame(){
     matchResult: null,     // one-shot: leg/set/game just won (voice announcements)
     legStart: null,        // one-shot: a new leg just began, who's throwing first (voice announcements)
     hasGhost: false,       // true for a Ghost Opponent race (docs/archive/ghost-opponent-roadmap.md)
-    // Doubles Practice (docs/game-modes-roadmap.md): per-dart evaluation, not
-    // per-visit — a round runs until evaluateDartDoublesPractice() ends it
-    // (so-close or wrong-double), never on a fixed dart count.
-    roundOver: false, roundEndReason: null, dpLastDart: null,
-    // Just Chuckin' It (docs/game-modes-roadmap.md): no round-ending condition at
-    // all — the session just runs until "End game" is pressed.
-    chuckinLastDart: null
+    // Doubles Practice / guided Around the Clock (docs/game-modes-roadmap.md):
+    // per-dart evaluation, not per-visit — a round runs until
+    // evaluateDartDoublesPractice()/evaluateDartAroundTheClock() ends it, never on
+    // a fixed dart count. roundOver/roundEndReason are shared by both.
+    roundOver: false, roundEndReason: null, dpLastDart: null, atcLastDart: null,
+    // Just Chuckin' It / guided Around the World (docs/game-modes-roadmap.md): no
+    // round-ending condition at all — the session just runs until "End game" is pressed.
+    chuckinLastDart: null, atwLastDart: null
   };
   if(setup.mode === 'ghost'){
     game.hasGhost = true;
@@ -4149,6 +4259,13 @@ const BADGE_INFO = {
   ghost_slayer:        { icon:'👻', label:'Ghost Slayer', desc:'Beat your ghost opponent — win a race against a replay of one of your own past legs.' },
   tournament_champion:     { icon:'🏆', label:'Champion', desc:'Win a tournament bracket.', tournament:true },
   tournament_giant_slayer: { icon:'⚔️', label:'Giant Slayer (Tournament)', desc:'Beat an opponent seeded 3 or more slots better than you in a tournament match.', tournament:true },
+  // Guided Around the Clock / Around the World (docs/game-modes-roadmap.md) —
+  // deliberately distinct badges from the existing passive around_the_clock/
+  // around_the_world above (2026-07 decision): completing a guided drill session
+  // celebrates the session itself, separate from those two lifetime/per-game
+  // milestones which keep firing exactly as they always have, from any mode.
+  guided_clock: { icon:'🧭', label:'Guided Clock', desc:'Complete a guided Around the Clock drill — hit every number 1-20 as a single.', drill:true },
+  guided_world: { icon:'🗺️', label:'Guided World', desc:'Reach all 63 lifetime dart outcomes while playing a guided Around the World session.', drill:true },
 };
 function loadPlayerBadges(){
   const container=document.getElementById('player-badges');
@@ -4183,14 +4300,15 @@ function renderPlayerBadges(data){
     }
     return `<div class="stat-block" style="opacity:.5;cursor:pointer" ${titleAttr} onclick="showBadgeInfo('${id}')"><div class="stat-val" style="filter:grayscale(1)">${info.icon}</div><div class="stat-label">${info.label}<br>Not yet earned</div></div>`;
   };
-  // Grouped by game type — X01's badges, Cricket's 2, Daily Challenge's 3, and
-  // Just Chuckin' It's 18 each stay visually distinct sub-sections rather than one
-  // mixed flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament);
+  // Grouped by game type — X01's badges, Cricket's 2, Daily Challenge's 3, Just
+  // Chuckin' It's 18, and the guided drills' 2 each stay visually distinct
+  // sub-sections rather than one mixed flat grid.
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].drill);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
   const challengeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].challenge);
   const chuckinIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].chuckin);
   const tournamentIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].tournament);
+  const drillIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].drill);
   container.innerHTML = `
     <div class="pp-section-title" style="margin-bottom:6px">X01</div>
     <div class="summary-grid">${x01Ids.map(badgeBlock).join('')}</div>
@@ -4201,7 +4319,9 @@ function renderPlayerBadges(data){
     <div class="pp-section-title" style="margin:16px 0 6px">Daily Challenge</div>
     <div class="summary-grid">${challengeIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Just Chuckin' It</div>
-    <div class="summary-grid">${chuckinIds.map(badgeBlock).join('')}</div>`;
+    <div class="summary-grid">${chuckinIds.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">Practice Drills</div>
+    <div class="summary-grid">${drillIds.map(badgeBlock).join('')}</div>`;
 }
 // Around the World progress (docs/archive/achievements-badges-roadmap.md): a compact grid
 // rather than a full dartboard-shaped heatmap — the doc explicitly calls the ideal
@@ -4217,18 +4337,48 @@ function renderAroundTheWorldProgress(data){
   const container=document.getElementById('player-atw-progress');
   if(!container) return;
   const hitSet = new Set((data && data.hit || []).map(h=>`${h.sector}:${h.mult}`));
-  const cell = (label, sector, mult) => {
-    const hit = hitSet.has(`${sector}:${mult}`);
-    return `<div title="${label}" style="width:34px;height:34px;border-radius:.6vmin;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;
-      background:${hit?'var(--gold)':'var(--surface-2)'};color:${hit?'var(--board)':'var(--muted)'}">${label}</div>`;
+  container.innerHTML = buildOutcomeGridHtml(hitSet, { cells: 'all' });
+}
+// Shared cell-grid builder — extracted from what used to be inline inside
+// renderAroundTheWorldProgress() so both that static Player Profile section and
+// the two guided drills' live in-game progress views (renderGameAroundTheClock()/
+// renderGameAroundTheWorld()) share one implementation
+// (docs/game-modes-roadmap.md "reusing the same heatmap/progress-view UI
+// investment already built for Around the World"). hitSet keys are always
+// `${sector}:${mult}` strings, matching getAroundTheWorldProgress()'s own shape.
+// cells:'numbers' renders just the 20 number cells (Around the Clock — single hits
+// only); cells:'all' (default) renders the full 63-outcome grid (Around the World).
+// live:true adds an aria-live region so screen readers announce each new hit
+// during an active drill, without re-adding it to the static profile view that
+// only ever renders once per page load. Each cell also carries a non-color
+// checkmark + aria-label (accessibility gap closed as a side effect of this
+// extraction — CLAUDE.md's standing "not color alone" requirement) rather than
+// signaling "hit" via background color alone the way this grid originally did.
+function buildOutcomeGridHtml(hitSet, opts={}){
+  const cellsMode = opts.cells || 'all';
+  const cell = (label, key, ariaLabel) => {
+    const hit = hitSet.has(key);
+    return `<div title="${escapeHtml(ariaLabel)}" aria-label="${escapeHtml(ariaLabel)}${hit ? ', hit' : ', not yet hit'}" role="img"
+      style="width:34px;height:34px;border-radius:.6vmin;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;position:relative;
+      background:${hit?'var(--gold)':'var(--surface-2)'};color:${hit?'var(--board)':'var(--muted)'}">${label}${hit ? '<span aria-hidden="true" style="position:absolute;bottom:-2px;right:1px;font-size:9px">✓</span>' : ''}</div>`;
   };
-  const numberCells = Array.from({length:20},(_,i)=>i+1).map(n=>
-    `<div style="display:flex;gap:3px">${cell('S'+n,n,1)}${cell('D'+n,n,2)}${cell('T'+n,n,3)}</div>`
-  ).join('');
-  const specialCells = `<div style="display:flex;gap:3px">${cell('25',25,1)}${cell('Bull',25,2)}${cell('Miss',0,1)}</div>`;
-  container.innerHTML = `
-    <p class="pp-meta" style="margin:0 0 10px">${(data && data.count) || 0} / ${(data && data.total) || 63} outcomes hit</p>
-    <div style="display:flex;flex-wrap:wrap;gap:6px">${numberCells}${specialCells}</div>`;
+  let bodyHtml, total;
+  if(cellsMode === 'numbers'){
+    total = 20;
+    bodyHtml = Array.from({length:20},(_,i)=>i+1).map(n=>cell(String(n), `${n}:1`, 'Number '+n)).join('');
+  } else {
+    total = 63;
+    const numberCells = Array.from({length:20},(_,i)=>i+1).map(n=>
+      `<div style="display:flex;gap:3px">${cell('S'+n,`${n}:1`,'Single '+n)}${cell('D'+n,`${n}:2`,'Double '+n)}${cell('T'+n,`${n}:3`,'Treble '+n)}</div>`
+    ).join('');
+    const specialCells = `<div style="display:flex;gap:3px">${cell('25',`25:1`,'Outer bull')}${cell('Bull',`25:2`,'Double bull')}${cell('Miss',`0:1`,'Miss')}</div>`;
+    bodyHtml = numberCells + specialCells;
+  }
+  const liveAttrs = opts.live ? ' aria-live="polite" aria-atomic="true"' : '';
+  return `<div${liveAttrs}>
+    <p class="pp-meta" style="margin:0 0 10px">${hitSet.size} / ${total} ${cellsMode==='numbers' ? 'numbers' : 'outcomes'} hit</p>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">${bodyHtml}</div>
+  </div>`;
 }
 // "On This Day": a flashback callback to something notable this player did on
 // today's exact calendar date in a past year (backend/db.js's getOnThisDay()).
@@ -4469,6 +4619,34 @@ function renderChuckinPersonalBests(data){
     ${data.bestSessionTrebles!=null?`<div class="stat-block"><div class="stat-val">${data.bestSessionTrebles}</div><div class="stat-label">Most Trebles in a Session</div></div>`:''}
   </div>`;
 }
+// Fastest completion only (mirrors Doubles Practice/Chuckin's "best round"/"best
+// session" minimalism) — no winStreak/recentForm/lifetime, this mode never "wins".
+function renderAroundTheClockPersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || data.bestCompletionDarts==null){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No completed rounds yet.</p>`;
+    return;
+  }
+  container.innerHTML=`<div class="summary-grid">
+    <div class="stat-block"><div class="stat-val">${data.bestCompletionDarts}</div><div class="stat-label">Fastest Completion (darts)</div></div>
+  </div>`;
+}
+// This mode never "wins" and its progress is lifetime/cross-session by design, so
+// there's no per-round record to chase — sessions played + lifetime progress
+// instead (see backend/db.js's getAroundTheWorldPersonalBests() comment).
+function renderAroundTheWorldPersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || data.sessionsPlayed==null){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No sessions recorded yet.</p>`;
+    return;
+  }
+  container.innerHTML=`<div class="summary-grid">
+    <div class="stat-block"><div class="stat-val">${data.sessionsPlayed}</div><div class="stat-label">Sessions Played</div></div>
+    <div class="stat-block"><div class="stat-val">${data.progress} / ${data.total}</div><div class="stat-label">Lifetime Progress</div></div>
+  </div>`;
+}
 async function sharePersonalBest(kind, value){
   const cfg = { legavg: { icon:'📊', headline:'BEST LEG AVERAGE', statLine: value.toFixed(1) },
     fewestdarts: { icon:'🎯', headline:'FEWEST DARTS TO FINISH', statLine: `${value} darts` } }[kind];
@@ -4508,6 +4686,8 @@ function renderGame(){
   if(game.gameType === 'cricket') return renderGameCricket();
   if(game.gameType === 'doubles_practice') return renderGameDoublesPractice();
   if(game.gameType === 'chuckin') return renderGameChuckin();
+  if(game.gameType === 'around_the_clock') return renderGameAroundTheClock();
+  if(game.gameType === 'around_the_world') return renderGameAroundTheWorld();
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
   game.players.forEach((p,i)=>{
@@ -4682,7 +4862,8 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   challengeweek:'Challenge Streak: Week! 🔥', challengemonth:'🏆 CHALLENGE STREAK: MONTH! 🏆',
   challengeallformats:'Full Rotation! 🗓️', nocigar:'No Cigar 🤦', chuckin180:'180! 🎯',
   staircasefinish:'Staircase Finish! 🪜', ghostslayer:'Ghost Slayer! 👻',
-  tournamentchampion:'🏆 CHAMPION! 🏆', tournamentgiantslayer:'Giant Slayer ⚔️' };
+  tournamentchampion:'🏆 CHAMPION! 🏆', tournamentgiantslayer:'Giant Slayer ⚔️',
+  guided_clock:'Guided Clock! 🧭', guided_world:'Guided World! 🗺️' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -4691,7 +4872,8 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500,
   cricket9marks:2500, cricketperfectclose:6000, cricketwhitewash:2500, cricketcomebackkid:3000,
   challengeweek:3000, challengemonth:6000, challengeallformats:3500, nocigar:2500, chuckin180:2500,
-  staircasefinish:3000, ghostslayer:3500, tournamentchampion:6000, tournamentgiantslayer:2500 };
+  staircasefinish:3000, ghostslayer:3500, tournamentchampion:6000, tournamentgiantslayer:2500,
+  guided_clock:3500, guided_world:5000 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
@@ -5701,18 +5883,22 @@ function liveSnapshot(message){
     players: game.players.map(p=>GAME_TYPES[game.gameType].playerSnapshot(p)),
     darts: game.darts.map(d=>d.label),
     checkout,
-    status: game.gameType === 'doubles_practice' ? (game.roundOver ? 'bust' : 'live') : game.won ? 'won' : (game.busted ? 'bust' : 'live'),
+    status: (game.gameType === 'doubles_practice' || game.gameType === 'around_the_clock') ? (game.roundOver ? 'bust' : 'live') : game.won ? 'won' : (game.busted ? 'bust' : 'live'),
     message: message || '',
-    // Doubles Practice only (docs/game-modes-roadmap.md): the target set, the
-    // outcome of the most recent dart, and why the round ended (if it has) — the
-    // /display renderer reads these instead of the X01/Cricket-shaped fields above.
+    // Doubles Practice / guided Around the Clock (docs/game-modes-roadmap.md): the
+    // target set, the outcome of the most recent dart, and why the round ended (if
+    // it has) — the /display renderer reads these instead of the X01/Cricket-shaped
+    // fields above. roundOver/roundEndReason are shared by both game types.
     doublesTargets: game.gameType === 'doubles_practice' ? (game.config.doubles || []) : null,
     dpLastDart: game.gameType === 'doubles_practice' ? (game.dpLastDart || null) : null,
-    roundOver: game.gameType === 'doubles_practice' ? !!game.roundOver : null,
-    roundEndReason: game.gameType === 'doubles_practice' ? (game.roundEndReason || null) : null,
-    // Just Chuckin' It only: the outcome of the most recent dart — the /display
-    // renderer reads this instead of the X01/Cricket/Doubles-Practice-shaped fields.
+    roundOver: (game.gameType === 'doubles_practice' || game.gameType === 'around_the_clock') ? !!game.roundOver : null,
+    roundEndReason: (game.gameType === 'doubles_practice' || game.gameType === 'around_the_clock') ? (game.roundEndReason || null) : null,
+    atcLastDart: game.gameType === 'around_the_clock' ? (game.atcLastDart || null) : null,
+    // Just Chuckin' It / guided Around the World only: the outcome of the most
+    // recent dart — the /display renderer reads this instead of the
+    // X01/Cricket/Doubles-Practice-shaped fields.
     chuckinLastDart: game.gameType === 'chuckin' ? (game.chuckinLastDart || null) : null,
+    atwLastDart: game.gameType === 'around_the_world' ? (game.atwLastDart || null) : null,
     achievement: pendingAchievement || null,
     gameOneEighties: game.gameOneEighties || 0,
     gameBigFish: game.gameBigFish || 0,
@@ -5745,9 +5931,12 @@ function pushLive(message){
 }
 
 function renderPad(){
-  // Doubles Practice never batches to 3 darts — a round runs until a so-close/
-  // wrong-double dart ends it, so the pad only disables once the round is over.
-  const full = game.gameType === 'doubles_practice' ? !!game.roundOver : !!(game.darts.length>=3 || game.busted || game.won);
+  // Doubles Practice / guided Around the Clock never batch to 3 darts — a round
+  // runs until it's ended (so-close/wrong-double, or all 20 numbers hit), so the
+  // pad only disables once the round is over. Around the World has no round
+  // concept at all — like Chuckin, it falls through to the default (never full).
+  const full = (game.gameType === 'doubles_practice' || game.gameType === 'around_the_clock')
+    ? !!game.roundOver : !!(game.darts.length>=3 || game.busted || game.won);
   if(game.gameType === 'cricket'){
     renderPadCricket(full);
     const utb0 = document.getElementById('undo-turn-btn');
@@ -5835,6 +6024,8 @@ function updateMultUI(){
 function throwDart(sector, zone, missZone, missDepth, bounced){
   if(game.gameType === 'doubles_practice') return throwDartDoublesPractice(sector, zone, missZone, missDepth, bounced);
   if(game.gameType === 'chuckin') return throwDartChuckin(sector, zone, missZone, missDepth, bounced);
+  if(game.gameType === 'around_the_clock') return throwDartAroundTheClock(sector, zone, missZone, missDepth, bounced);
+  if(game.gameType === 'around_the_world') return throwDartAroundTheWorld(sector, zone, missZone, missDepth, bounced);
   if(game.darts.length>=3 || game.busted || game.won) return;
   // The double/treble-Miss shortcut (fill N slots at once) is a Pad-mode-only
   // convenience — a bounce-out is always exactly one dart, regardless of whatever
@@ -5908,6 +6099,8 @@ function undoLastTurn(){
   if(game && game.gameType === 'cricket') return undoLastTurnCricket();
   if(game && game.gameType === 'doubles_practice') return undoLastTurnDoublesPractice();
   if(game && game.gameType === 'chuckin') return undoLastTurnChuckin();
+  if(game && game.gameType === 'around_the_clock') return undoLastTurnAroundTheClock();
+  if(game && game.gameType === 'around_the_world') return undoLastTurnAroundTheWorld();
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
   const p = game.players[snap.pi];
@@ -6852,13 +7045,16 @@ function renderGameShell(){
   const isCricketGame = !!(game && game.gameType === 'cricket');
   const isDoublesPractice = !!(game && game.gameType === 'doubles_practice');
   const isChuckin = !!(game && game.gameType === 'chuckin');
-  // Doubles Practice and Just Chuckin' It are both per-dart-commit modes with no
-  // staged 3-dart visit — no "Enter turn" step, no slots row (no opponent/score to
-  // show), and no separate "Undo Dart" (there's no uncommitted dart to un-stage).
-  const isPerDartMode = isDoublesPractice || isChuckin;
+  const isClock = !!(game && game.gameType === 'around_the_clock');
+  const isWorld = !!(game && game.gameType === 'around_the_world');
+  // Doubles Practice, Just Chuckin' It, and both guided drills are all per-dart-commit
+  // modes with no staged 3-dart visit — no "Enter turn" step, no slots row (no
+  // opponent/score to show), and no separate "Undo Dart" (there's no uncommitted
+  // dart to un-stage).
+  const isPerDartMode = isDoublesPractice || isChuckin || isClock || isWorld;
   document.querySelector('.oche').innerHTML=`
       <div class="slots" id="slots"${isPerDartMode ? ' hidden' : ''}></div>
-      <div class="status" id="status">${isChuckin ? "Select a multiplier, then tap a number. No score, no pressure — just throw." : isDoublesPractice ? 'Select a multiplier, then tap a number.' : isCricketGame ? 'Select a multiplier, then tap a target number.' : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
+      <div class="status" id="status">${isChuckin ? "Select a multiplier, then tap a number. No score, no pressure — just throw." : isClock ? 'Select a multiplier, then tap a number. Hit every 1-20 as a single.' : isWorld ? 'Select a multiplier, then tap a number. Chip away at every lifetime outcome.' : isDoublesPractice ? 'Select a multiplier, then tap a number.' : isCricketGame ? 'Select a multiplier, then tap a target number.' : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
       <div class="multi" id="multi-row" role="group" aria-label="Dart multiplier">
         <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
         <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
@@ -6873,9 +7069,17 @@ function renderGameShell(){
           <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()"${isPerDartMode ? ' hidden' : ''}>Undo Dart</button>
         </div>
         <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()"${isPerDartMode ? ' hidden' : ''}>Enter turn</button>
-        <button class="btn btn-primary" id="dp-next-round-btn" onclick="startNextRoundDoublesPractice()" hidden>Start next round</button>
+        <button class="btn btn-primary" id="dp-next-round-btn" onclick="startNextRound()" hidden>${isClock ? 'Start Next Clock' : 'Start next round'}</button>
       </div>`;
   applyDartMode();
+}
+// Shared "start the next round" dispatcher for the two per-dart drill modes that
+// have a genuine round boundary (Doubles Practice, guided Around the Clock) — Just
+// Chuckin' It and guided Around the World have no round concept at all, so this is
+// never called for them (their "Start next round" button stays permanently hidden).
+function startNextRound(){
+  if(game && game.gameType === 'doubles_practice') return startNextRoundDoublesPractice();
+  if(game && game.gameType === 'around_the_clock') return startNextClockRound();
 }
 
 /* ---------- checkout calculator ----------
@@ -6951,6 +7155,29 @@ const CHUCKIN_STAT_DEFS = [
 const CHUCKIN_BUBBLE_KEY_MAP = { chuckindartsthrown:'dartsThrown', chuckinsessions:'sessionsPlayed',
   chuckinavgdartspersession:'avgDartsPerSession', chuckintreblepct:'treblePct',
   chuckindoublepct:'doublePct', chuckinbullpct:'bullPct', chuckinavg:'avg', chuckin180s:'oneEighties' };
+
+// Guided Around the Clock's own stat vocabulary (docs/game-modes-roadmap.md
+// "Guided Around the Clock / Around the World") — "darts taken to complete" and
+// "sessions played" are exactly what the roadmap doc asked for; completionRate
+// isn't chart-linked (no matching getMetricHistory case) but is still exposed as
+// a plain stat-bubble field.
+const AROUND_THE_CLOCK_STAT_DEFS = [
+  { key:'atccompletions', label:'Completions', desc:'Number of completed Around the Clock rounds (all 20 numbers hit)', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'atcavgdartspercompletion', label:'Darts / Completion', desc:'Average darts taken to complete a round', fmt:v=>v!=null?Number(v).toFixed(1):'—', primary:true },
+  { key:'atcdartsthrown', label:'Darts Thrown', desc:'Total darts thrown in guided Around the Clock', fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
+];
+const AROUND_THE_CLOCK_BUBBLE_KEY_MAP = { atccompletions:'completions',
+  atcavgdartspercompletion:'avgDartsPerCompletion', atcdartsthrown:'dartsThrown' };
+
+// Guided Around the World's own stat vocabulary — open-ended/cross-session, so
+// "sessions played" is the roadmap doc's own requested stat; lifetime progress
+// isn't chart-linked (it's the same cross-mode tracker every mode feeds, not a
+// per-bucket rate) but is still exposed as a plain stat-bubble field.
+const AROUND_THE_WORLD_STAT_DEFS = [
+  { key:'atwsessions', label:'Sessions Played', desc:'Number of guided Around the World sessions', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'atwdartsthrown', label:'Darts Thrown', desc:'Total darts thrown in guided Around the World', fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
+];
+const AROUND_THE_WORLD_BUBBLE_KEY_MAP = { atwsessions:'sessionsPlayed', atwdartsthrown:'dartsThrown' };
 
 // ---------- game-type plugin registry ----------
 // The seam future game types (Cricket, Ghost Opponent's replay engine) plug into.
@@ -7053,6 +7280,35 @@ const GAME_TYPES = {
     // entirely — unlike null ("use the built-in X01-shaped default"), this mode's
     // stats don't map onto that shape and no Home leaderboard was requested for it.
     homeTabRenderer: false
+  },
+  around_the_clock: {
+    id: 'around_the_clock',
+    label: 'Around the Clock',
+    newMatchPlayer: newMatchPlayerAroundTheClock,
+    // Per-dart evaluation (throwDartAroundTheClock()) — same "hardcode a branch"
+    // precedent as Doubles Practice/Chuckin, so this is never actually invoked.
+    evaluateVisit: () => { throw new Error('around_the_clock has no per-visit evaluateVisit — see throwDartAroundTheClock()'); },
+    resetForNextLeg: resetPlayerForNextLegAroundTheClock,
+    playerSnapshot: playerSnapshotAroundTheClock,
+    statDefs: AROUND_THE_CLOCK_STAT_DEFS,
+    personalBestsRenderer: renderAroundTheClockPersonalBests,
+    homeTabRenderer: renderHomeTabBodyAroundTheClock,
+    // Solo, same reasoning as Doubles Practice — no H2H equivalent.
+    soloOnly: true
+  },
+  around_the_world: {
+    id: 'around_the_world',
+    label: 'Around the World',
+    newMatchPlayer: newMatchPlayerAroundTheWorld,
+    // Per-dart, no round-ending condition at all (throwDartAroundTheWorld()) —
+    // same precedent as Chuckin, so this is never actually invoked.
+    evaluateVisit: () => { throw new Error('around_the_world has no per-visit evaluateVisit — see throwDartAroundTheWorld()'); },
+    resetForNextLeg: resetPlayerForNextLegAroundTheWorld,
+    playerSnapshot: playerSnapshotAroundTheWorld,
+    statDefs: AROUND_THE_WORLD_STAT_DEFS,
+    personalBestsRenderer: renderAroundTheWorldPersonalBests,
+    homeTabRenderer: renderHomeTabBodyAroundTheWorld,
+    soloOnly: true
   }
 };
 // bubbleKeyMap is patched on below, right after each map itself is defined —
@@ -7385,6 +7641,273 @@ function renderGameChuckin(){
   pushLive();
 }
 
+/* ---------- Guided Around the Clock (docs/game-modes-roadmap.md "Guided Around
+   the Clock / Around the World") ----------
+   Structurally identical to Doubles Practice: per-dart evaluation
+   (evaluateDartAroundTheClock(), frontend/scoring.js), a "round" is one
+   game.legNo grouping ended the instant hitSet reaches all 20 numbers, and
+   turns.bust is repurposed exactly the way Doubles Practice repurposes it —
+   1 marks whichever dart completed the round. Target set is 20 numbers only
+   (1-20 as singles), matching the existing passive around_the_clock badge's
+   exact formula, not the roadmap doc's "+bull" prose (2026-07 decision). */
+function newMatchPlayerAroundTheClock(name){
+  return { name, hitSet: new Set(), roundDarts:0, sessionRounds:[] };
+}
+// Not called by startNextLeg() (this mode uses startNextClockRound() instead) —
+// provided only to satisfy the GAME_TYPES contract, matching Doubles Practice.
+function resetPlayerForNextLegAroundTheClock(p){
+  p.hitSet = new Set(); p.roundDarts = 0;
+}
+function playerSnapshotAroundTheClock(p){
+  // hitNumbers (not just a count) so the Live Scoreboard can render exactly which
+  // numbers are still outstanding, the same live-progress-grid feedback the
+  // controller itself shows via buildOutcomeGridHtml().
+  return { name:p.name, hitNumbers:[...p.hitSet], hit:p.hitSet.size||0, total:20, roundDarts:p.roundDarts||0 };
+}
+function throwDartAroundTheClock(sector, zone, missZone, missDepth, bounced){
+  if(game.roundOver) return;
+  const dart = makeDart(sector, bounced ? 1 : mult);
+  mult = 1; updateMultUI();
+  const p = game.players[0];
+  const ev = evaluateDartAroundTheClock(dart, p.hitSet);
+
+  // snapshot state before mutation so undoLastTurnAroundTheClock() can restore it.
+  // badgeReverts/voided follow the same convention as every other game type's
+  // snapshot (see trackBadgeForUndo()) — guided_clock is a moment-style
+  // completion badge, so it DOES get revoked on undo.
+  game.lastTurnSnapshot = { hitSet: new Set(p.hitSet), roundDarts:p.roundDarts,
+    roundOver:game.roundOver, roundEndReason:game.roundEndReason,
+    atcLastDart:game.atcLastDart, sessionRoundsLen:p.sessionRounds.length,
+    badgeReverts:[], voided:false };
+
+  p.roundDarts += 1;
+  if(ev.isNewHit) p.hitSet.add(dart.sector);
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:0, bust: !!ev.completed, checkout:false, checkoutPoints:null, legWon:false,
+    darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt,
+      zone: zone || null, missZone: missZone != null ? missZone : null, missDepth: missDepth || null, bounced: !!bounced }] });
+  game.atcLastDart = { label:dart.label, isNewHit:ev.isNewHit, completed:ev.completed };
+  const _snap = game.lastTurnSnapshot;
+  if(ev.completed){
+    game.roundOver = true;
+    game.roundEndReason = 'completed';
+    p.sessionRounds.push({ darts:p.roundDarts });
+    announce(`Around the Clock complete! ${p.roundDarts} darts.`);
+    Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'guided_clock', once:true }).then(r=>{
+      if(r && r.newlyEarned){
+        trackBadgeForUndo(_snap, p.name, 'guided_clock');
+        queueBadge('guided_clock', p.name, _snap, 'First time!');
+        fireMomentCard('guided_clock', { icon:'🧭', headline:'GUIDED CLOCK', player:p.name, statLine:`Completed a guided Around the Clock drill in ${p.roundDarts} darts` });
+      }
+    }).catch(()=>{});
+  } else if(ev.isNewHit){
+    announce(`${dart.label}. ${p.hitSet.size} of 20 numbers hit.`);
+  }
+  renderGameAroundTheClock();
+}
+// Undoes the single most recently thrown dart — mirrors undoLastTurnDoublesPractice()'s
+// shape, plus revoking guided_clock if this dart earned it.
+function undoLastTurnAroundTheClock(){
+  if(!game || !game.lastTurnSnapshot) return;
+  const snap = game.lastTurnSnapshot;
+  const p = game.players[0];
+  p.hitSet = snap.hitSet;
+  p.roundDarts = snap.roundDarts;
+  game.roundOver = snap.roundOver;
+  game.roundEndReason = snap.roundEndReason;
+  game.atcLastDart = snap.atcLastDart;
+  p.sessionRounds.length = snap.sessionRoundsLen;
+
+  snap.voided = true;
+  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+  });
+  cancelQueuedAchievementsForSnapshot(snap);
+
+  game.lastTurnSnapshot = null;
+  DB.deleteLastTurn();
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent='Last dart undone.'; }
+  renderGameAroundTheClock();
+}
+function startNextClockRound(){
+  const p = game.players[0];
+  p.hitSet = new Set(); p.roundDarts = 0;
+  game.roundOver = false; game.roundEndReason = null; game.atcLastDart = null;
+  game.legNo += 1;   // each round is its own "leg" for turn grouping/personal bests
+  game.lastTurnSnapshot = null;  // undo only reaches back into the round just finished
+  DB.recordEvent('leg_start', game.setNo, game.legNo);
+  renderGameAroundTheClock();
+}
+function renderGameAroundTheClock(){
+  const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
+  const p = game.players[0];
+  const row = document.createElement('div');
+  row.className = 'pscore active';
+  row.innerHTML = `
+    <div>
+      <div class="nm">${escapeHtml(p.name)} <span class="nm-out">around the clock</span></div>
+      <div class="turnflag">▸ throwing</div>
+    </div>
+    <div class="meta">
+      <div class="avgs">${p.hitSet.size} / 20 numbers hit &nbsp;·&nbsp; ${p.roundDarts} dart${p.roundDarts===1?'':'s'} this round</div>
+      <div class="standing">Round ${game.legNo}</div>
+    </div>
+    <div class="rem-wrap">
+      <div class="rem">${p.hitSet.size}</div>
+    </div>
+    <div id="atc-live-progress" style="margin-top:10px"></div>`;
+  if(sb) sb.appendChild(row);
+  const progressEl = document.getElementById('atc-live-progress');
+  if(progressEl) progressEl.innerHTML = buildOutcomeGridHtml(
+    new Set([...p.hitSet].map(n=>`${n}:1`)), { cells: 'numbers', live: true });
+
+  const status = document.getElementById('status');
+  if(status){
+    if(game.roundOver){
+      status.className = 'status win';
+      status.textContent = `Around the Clock complete! ${p.roundDarts} dart${p.roundDarts===1?'':'s'}.`;
+    } else if(game.atcLastDart && game.atcLastDart.isNewHit){
+      status.className = 'status win';
+      status.textContent = `Hit! ${game.atcLastDart.label}. ${p.hitSet.size} of 20 hit.`;
+    } else if(game.atcLastDart){
+      status.className = 'status';
+      status.textContent = `${game.atcLastDart.label} — no effect, keep going.`;
+    } else {
+      status.className = 'status';
+      status.textContent = 'Select a multiplier, then tap a number. Hit every 1-20 as a single.';
+    }
+  }
+  renderPad();
+  const nextBtn = document.getElementById('dp-next-round-btn');
+  if(nextBtn) nextBtn.hidden = !game.roundOver;
+  pushLive();
+}
+
+/* ---------- Guided Around the World (docs/game-modes-roadmap.md "Guided Around
+   the Clock / Around the World") ----------
+   Structurally identical to Just Chuckin' It: no round-ending condition at all,
+   one continuous stream of 1-dart turns per games row (set_no=leg_no=1
+   throughout). Tracks progress toward the same lifetime 63-outcome set
+   getAroundTheWorldProgress() already computes (not reset per session — see
+   NOT_CONTINUOUS_STREAM's comment in backend/db.js). */
+function newMatchPlayerAroundTheWorld(name){
+  const p = { name, sessionDarts:0, sessionHitSet: new Set(), baselineHitSet: new Set() };
+  // Fetched once at game start (not re-queried per dart) — same rate-limiter-safety
+  // reasoning as Chuckin's lifetimeDartsBase/lifetimeTreblesBase precedent
+  // (newMatchPlayerChuckin() above): this mode is built around rapid successive
+  // throws, and hitting the network on every single dart would needlessly burn
+  // through the server's per-IP rate limit during a long practice session.
+  Backend.get(`/api/players/around-the-world?name=${encodeURIComponent(name)}`).then(prog=>{
+    if(!prog) return;
+    p.baselineHitSet = new Set((prog.hit||[]).map(h=>`${h.sector}:${h.mult}`));
+    if(game && game.players && game.players[0] === p) renderGameAroundTheWorld();
+  }).catch(()=>{});
+  return p;
+}
+// Not called by startNextLeg() (this mode never advances a leg) — provided only
+// to satisfy the GAME_TYPES contract, matching Chuckin's own precedent.
+function resetPlayerForNextLegAroundTheWorld(p){
+  p.sessionDarts = 0; p.sessionHitSet = new Set();
+}
+function playerSnapshotAroundTheWorld(p){
+  // hitOutcomes (not just a count) so the Live Scoreboard can render the same
+  // outcome grid the controller itself shows via buildOutcomeGridHtml().
+  const combined = new Set([...p.baselineHitSet, ...p.sessionHitSet]);
+  return { name:p.name, sessionDarts:p.sessionDarts||0,
+    hitOutcomes:[...combined], progress: combined.size, total: 63 };
+}
+function throwDartAroundTheWorld(sector, zone, missZone, missDepth, bounced){
+  const dart = makeDart(sector, bounced ? 1 : mult);
+  mult = 1; updateMultUI();
+  const p = game.players[0];
+  const outcomeKey = `${dart.sector}:${dart.mult}`;
+  const isNewLifetimeOutcome = !p.baselineHitSet.has(outcomeKey) && !p.sessionHitSet.has(outcomeKey);
+
+  // snapshot state before mutation so undoLastTurnAroundTheWorld() can restore it.
+  game.lastTurnSnapshot = { sessionDarts:p.sessionDarts, sessionHitSet: new Set(p.sessionHitSet),
+    atwLastDart:game.atwLastDart, badgeReverts:[], voided:false };
+
+  p.sessionDarts += 1;
+  if(isNewLifetimeOutcome) p.sessionHitSet.add(outcomeKey);
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:0, bust:false, checkout:false, checkoutPoints:null, legWon:false,
+    darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt,
+      zone: zone || null, missZone: missZone != null ? missZone : null, missDepth: missDepth || null, bounced: !!bounced }] });
+  game.atwLastDart = { label:dart.label, isNewLifetimeOutcome };
+  const progress = p.baselineHitSet.size + p.sessionHitSet.size;
+  announce(`${dart.label}. ${progress} of 63 lifetime outcomes.`);
+  renderGameAroundTheWorld();
+  if(progress >= 63){
+    const _snap = game.lastTurnSnapshot;
+    Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'guided_world', once:true }).then(r=>{
+      if(r && r.newlyEarned){
+        trackBadgeForUndo(_snap, p.name, 'guided_world');
+        queueBadge('guided_world', p.name, _snap, 'First time!');
+        fireMomentCard('guided_world', { icon:'🗺️', headline:'GUIDED WORLD', player:p.name, statLine:'Completed Around the World during a guided session' });
+      }
+    }).catch(()=>{});
+  }
+}
+// Undoes the single most recently thrown dart — mirrors undoLastTurnChuckin()'s
+// shape, plus revoking guided_world if this dart earned it.
+function undoLastTurnAroundTheWorld(){
+  if(!game || !game.lastTurnSnapshot) return;
+  const snap = game.lastTurnSnapshot;
+  const p = game.players[0];
+  p.sessionDarts = snap.sessionDarts;
+  p.sessionHitSet = snap.sessionHitSet;
+  game.atwLastDart = snap.atwLastDart;
+
+  snap.voided = true;
+  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+  });
+  cancelQueuedAchievementsForSnapshot(snap);
+
+  game.lastTurnSnapshot = null;
+  DB.deleteLastTurn();
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent='Last dart undone.'; }
+  renderGameAroundTheWorld();
+}
+function renderGameAroundTheWorld(){
+  const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
+  const p = game.players[0];
+  const progress = p.baselineHitSet.size + p.sessionHitSet.size;
+  const row = document.createElement('div');
+  row.className = 'pscore active';
+  row.innerHTML = `
+    <div>
+      <div class="nm">${escapeHtml(p.name)} <span class="nm-out">around the world</span></div>
+      <div class="turnflag">▸ throwing</div>
+    </div>
+    <div class="meta">
+      <div class="avgs">${progress} / 63 lifetime outcomes &nbsp;·&nbsp; ${p.sessionDarts} dart${p.sessionDarts===1?'':'s'} this session</div>
+    </div>
+    <div class="rem-wrap">
+      <div class="rem">${progress}</div>
+    </div>
+    <div id="atw-live-progress" style="margin-top:10px"></div>`;
+  if(sb) sb.appendChild(row);
+  const progressEl = document.getElementById('atw-live-progress');
+  const combinedHitSet = new Set([...p.baselineHitSet, ...p.sessionHitSet]);
+  if(progressEl) progressEl.innerHTML = buildOutcomeGridHtml(combinedHitSet, { cells: 'all', live: true });
+
+  const status = document.getElementById('status');
+  if(status){
+    if(game.atwLastDart){
+      status.className = game.atwLastDart.isNewLifetimeOutcome ? 'status win' : 'status';
+      status.textContent = `${game.atwLastDart.label}${game.atwLastDart.isNewLifetimeOutcome ? ' — new outcome!' : ''} · ${progress} of 63.`;
+    } else {
+      status.className = 'status';
+      status.textContent = 'Select a multiplier, then tap a number. Chip away at every lifetime outcome.';
+    }
+  }
+  renderPad();
+  pushLive();
+}
+
 function marksGlyph(n){
   const clamped = Math.min(3, n);
   return clamped>=3 ? '✓' : '●'.repeat(clamped) + '○'.repeat(3-clamped);
@@ -7543,6 +8066,8 @@ GAME_TYPES.x01.bubbleKeyMap = BUBBLE_KEY_MAP;
 GAME_TYPES.cricket.bubbleKeyMap = CRICKET_BUBBLE_KEY_MAP;
 GAME_TYPES.doubles_practice.bubbleKeyMap = DOUBLES_PRACTICE_BUBBLE_KEY_MAP;
 GAME_TYPES.chuckin.bubbleKeyMap = CHUCKIN_BUBBLE_KEY_MAP;
+GAME_TYPES.around_the_clock.bubbleKeyMap = AROUND_THE_CLOCK_BUBBLE_KEY_MAP;
+GAME_TYPES.around_the_world.bubbleKeyMap = AROUND_THE_WORLD_BUBBLE_KEY_MAP;
 function toggleMoreStats(){
   showMoreStats = !showMoreStats;
   renderPlayerPage();

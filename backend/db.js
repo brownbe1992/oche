@@ -1022,14 +1022,15 @@ function computeStats() {
   `).all();
 
   // Practice = explicit practice flag OR solo (1-player) games. Excludes Just
-  // Chuckin' It (NOT_CHUCKIN) — its darts count toward the global dartsThrown
-  // total below but not toward this per-category legs breakdown.
+  // Chuckin' It and guided Around the World (NOT_CONTINUOUS_STREAM) — their darts
+  // count toward the global dartsThrown total below but not toward this
+  // per-category legs breakdown, since neither has a real leg boundary.
   const practiceLegs = db.prepare(`
     SELECT t.player_id AS pid, g.category AS cat,
            COUNT(DISTINCT t.game_id || '-' || t.set_no || '-' || t.leg_no) AS legs
     FROM turns t JOIN games g ON g.id = t.game_id
     WHERE (g.practice = 1
-      OR g.player_count = 1) ${NOT_CHUCKIN}
+      OR g.player_count = 1) ${NOT_CONTINUOUS_STREAM}
     GROUP BY t.player_id, g.category
   `).all();
 
@@ -1213,7 +1214,7 @@ function getSummary() {
     SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
     FROM turns t JOIN games g ON g.id = t.game_id
     WHERE (g.practice = 1
-      OR g.player_count = 1) ${NOT_CHUCKIN}
+      OR g.player_count = 1) ${NOT_CONTINUOUS_STREAM}
   `).get().n;
   return { players, games, sets, legs, darts, tonPlus, oneEighties, bigFish, nineDarters, practiceLegs };
 }
@@ -1304,24 +1305,26 @@ function getHomeExtra() {
     LIMIT 1
   `).get() || null;
 
-  // legs/darts "activity" counts — legs excludes Just Chuckin' It (NOT_CHUCKIN,
-  // joins games for the first time here to apply it); darts stays fully unscoped
-  // since raw dart-throwing volume is the one thing chuckin should count toward.
+  // legs/darts "activity" counts — legs excludes Just Chuckin' It and guided
+  // Around the World (NOT_CONTINUOUS_STREAM, joins games for the first time here to
+  // apply it); darts stays fully unscoped since raw dart-throwing volume is the one
+  // thing every continuous-stream mode should still count toward.
   const todayLegs = db.prepare(`
     SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
-    FROM turns t JOIN games g ON g.id = t.game_id WHERE date(t.created_at) = date('now') ${NOT_CHUCKIN}
+    FROM turns t JOIN games g ON g.id = t.game_id WHERE date(t.created_at) = date('now') ${NOT_CONTINUOUS_STREAM}
   `).get().n;
   const todayDarts = db.prepare(`SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id WHERE date(t.created_at) = date('now')`).get().n;
   const weekLegs = db.prepare(`
     SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS n
-    FROM turns t JOIN games g ON g.id = t.game_id WHERE date(t.created_at) >= date('now', '-6 days') ${NOT_CHUCKIN}
+    FROM turns t JOIN games g ON g.id = t.game_id WHERE date(t.created_at) >= date('now', '-6 days') ${NOT_CONTINUOUS_STREAM}
   `).get().n;
   const weekDarts = db.prepare(`SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id WHERE date(t.created_at) >= date('now', '-6 days')`).get().n;
 
   // Pace: avg ms between consecutive thrown_at timestamps within the same turn -> darts/min.
-  // Excludes Just Chuckin' It (NOT_CHUCKIN) — its rapid-fire per-dart-only rhythm
-  // (no scoring pauses, no walking to collect between legs the way a real match
-  // has) would skew this as a measure of match-throwing pace.
+  // Excludes Just Chuckin' It and guided Around the World (NOT_CONTINUOUS_STREAM) —
+  // both are rapid-fire per-dart-only rhythms (no scoring pauses, no walking to
+  // collect between legs the way a real match has) that would skew this as a
+  // measure of match-throwing pace.
   const _pace = (modeWhere) => {
     const row = db.prepare(`
       SELECT AVG(gap_ms) AS avgMs FROM (
@@ -1330,7 +1333,7 @@ function getHomeExtra() {
         JOIN darts prev ON prev.turn_id = d.turn_id AND prev.dart_no = d.dart_no - 1
         JOIN turns t ON t.id = d.turn_id
         JOIN games g ON g.id = t.game_id
-        WHERE d.thrown_at IS NOT NULL AND prev.thrown_at IS NOT NULL AND ${modeWhere} ${NOT_CHUCKIN}
+        WHERE d.thrown_at IS NOT NULL AND prev.thrown_at IS NOT NULL AND ${modeWhere} ${NOT_CONTINUOUS_STREAM}
       ) WHERE gap_ms > 0 AND gap_ms < 60000
     `).get();
     if (!row || !row.avgMs) return null;
@@ -2018,6 +2021,153 @@ function getBounceOutCount(playerName, gameType, mode) {
   `).get(p.id).n;
 }
 
+/* ---------- Guided Around the Clock / Around the World (docs/game-modes-roadmap.md
+   "Guided Around the Clock / Around the World") ----------
+   Around the Clock: structurally identical to Doubles Practice — a "round" is one
+   turns.leg_no grouping (leg_no repurposed as a round counter, incremented
+   client-side by startNextClockRound()), ending the instant the player has hit all
+   20 numbers 1-20 as singles. turns.bust is repurposed exactly the way Doubles
+   Practice repurposes it: 1 marks whichever dart ended the round (here, always the
+   dart that completed the 20th number — this mode has no "so close"/"wrong target"
+   failure mode, only completion or abandonment). A round with no bust=1 dart yet
+   was abandoned (player quit mid-round) rather than completed.
+   Around the World: structurally identical to Chuckin — one continuous stream of
+   1-dart turns per games row (set_no=leg_no=1 throughout), no round boundary,
+   tracking progress toward the same lifetime 63-outcome set getAroundTheWorldProgress()
+   already computes (deliberately NOT re-scoped to this game_type there — see
+   NOT_CONTINUOUS_STREAM's comment above). */
+
+function getAroundTheClockStatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'around_the_clock' });
+
+  const dartsThrown = db.prepare(`SELECT COUNT(*) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+
+  const rounds = db.prepare(`
+    SELECT COUNT(d.id) AS darts, SUM(t.bust) AS ended
+    FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+    WHERE t.player_id=? ${scope}
+    GROUP BY t.game_id, t.set_no, t.leg_no
+  `).all(p.id);
+
+  const sessionsPlayed = rounds.length;
+  const completedRounds = rounds.filter(r => r.ended === 1);
+  const completions = completedRounds.length;
+  const completionRate = sessionsPlayed > 0 ? (completions / sessionsPlayed * 100) : null;
+  const avgDartsPerCompletion = completions > 0
+    ? (completedRounds.reduce((sum, r) => sum + r.darts, 0) / completions)
+    : null;
+
+  return { dartsThrown, sessionsPlayed, completions, completionRate, avgDartsPerCompletion };
+}
+
+// Personal Bests analog: fastest completion only (mirrors Doubles Practice/Chuckin's
+// "best round"/"best session" minimalism) — no winStreak/recentForm/lifetime, this
+// mode never "wins" against an opponent, and getAroundTheClockStatBubbles()'s
+// completionRate already covers "how am I doing overall."
+function getAroundTheClockPersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'around_the_clock' });
+
+  const completedRounds = db.prepare(`
+    SELECT COUNT(d.id) AS darts
+    FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+    WHERE t.player_id=? ${scope}
+    GROUP BY t.game_id, t.set_no, t.leg_no
+    HAVING SUM(t.bust)=1
+  `).all(p.id);
+
+  let bestCompletionDarts = null;
+  for (const r of completedRounds) {
+    if (bestCompletionDarts == null || r.darts < bestCompletionDarts) bestCompletionDarts = r.darts;
+  }
+  return { bestCompletionDarts };
+}
+
+// Home page leaderboards for Around the Clock — no mode param on either (always
+// practice=1 by construction, same reasoning as Doubles Practice's Home boards).
+function getAroundTheClockFastestLeaderboard() {
+  const scope = _scope({ gameType: 'around_the_clock' });
+  const rows = db.prepare(`
+    SELECT p.name AS name, COUNT(d.id) AS darts, MAX(t.created_at) AS created_at
+    FROM turns t JOIN games g ON g.id=t.game_id JOIN players p ON p.id=t.player_id JOIN darts d ON d.turn_id=t.id
+    WHERE 1=1 ${scope}
+    GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
+    HAVING SUM(t.bust)=1
+  `).all();
+  const best = new Map();
+  for (const r of rows) {
+    const cur = best.get(r.name);
+    if (!cur || r.darts < cur.darts) best.set(r.name, r);
+  }
+  return [...best.values()].sort((a, b) => a.darts - b.darts)
+    .map(r => ({ name: r.name, darts: r.darts, createdAt: r.created_at }));
+}
+
+function getAroundTheClockCompletionsLeaderboard() {
+  const scope = _scope({ gameType: 'around_the_clock' });
+  const rows = db.prepare(`
+    SELECT p.name AS name, COUNT(*) AS completions FROM (
+      SELECT t.player_id
+      FROM turns t JOIN games g ON g.id=t.game_id
+      WHERE 1=1 ${scope}
+      GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
+      HAVING SUM(t.bust)=1
+    ) c JOIN players p ON p.id=c.player_id
+    GROUP BY c.player_id
+  `).all();
+  return rows.sort((a, b) => b.completions - a.completions);
+}
+
+function getAroundTheWorldDrillStatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'around_the_world' });
+
+  const dartsThrown = db.prepare(`SELECT COUNT(*) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+  const sessionsPlayed = db.prepare(`SELECT COUNT(DISTINCT t.game_id) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+  const avgDartsPerSession = sessionsPlayed > 0 ? (dartsThrown / sessionsPlayed) : null;
+
+  // Lifetime progress — the same cross-mode 63-outcome tracker every other mode
+  // already feeds, not a drill-scoped count of its own.
+  const progress = getAroundTheWorldProgress(playerName);
+
+  return { dartsThrown, sessionsPlayed, avgDartsPerSession, progress: progress.count, total: progress.total };
+}
+
+// "Personal Bests" analog for Around the World — this mode never "wins" and its
+// progress is lifetime/cross-session by design, so there's no round/session record
+// to chase the way Doubles Practice/Chuckin/Around the Clock have one. Reuses the
+// same sessions-played + lifetime-progress fields getAroundTheWorldDrillStatBubbles()
+// already computes, kept as its own function purely so the Personal Bests fetch
+// path (a separate endpoint from stat bubbles in every other game type) has a
+// matching entry to dispatch to.
+function getAroundTheWorldPersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'around_the_world' });
+  const sessionsPlayed = db.prepare(`SELECT COUNT(DISTINCT t.game_id) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+  const progress = getAroundTheWorldProgress(playerName);
+  return { sessionsPlayed, progress: progress.count, total: progress.total };
+}
+
+// Home page leaderboard: every player ranked by lifetime Around the World progress
+// (not scoped to this drill's own darts — the same lifetime count the Player
+// Profile's existing progress grid already shows). Filters out players who've never
+// hit anything, same as the other Home boards filtering out zero-activity players.
+function getAroundTheWorldLeaderboard() {
+  const players = db.prepare('SELECT name FROM players').all();
+  return players
+    .map(pl => {
+      const prog = getAroundTheWorldProgress(pl.name);
+      return { name: pl.name, progress: prog.count, total: prog.total };
+    })
+    .filter(r => r.progress > 0)
+    .sort((a, b) => b.progress - a.progress);
+}
+
 function getMetricHistory(playerName, metric, period, opts = {}) {
   const p = getPlayer(playerName);
   if (!p) return [];
@@ -2027,6 +2177,8 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
   const cricketScope = _scope({ mode: opts.mode, gameType: 'cricket' });
   const doublesPracticeScope = _scope({ mode: opts.mode, gameType: 'doubles_practice' });
   const chuckinScope = _scope({ mode: opts.mode, gameType: 'chuckin' });
+  const atcScope = _scope({ mode: opts.mode, gameType: 'around_the_clock' });
+  const atwScope = _scope({ mode: opts.mode, gameType: 'around_the_world' });
   const params = [p.id];
   let weightWhere = '';
   if (opts.dartWeight) {
@@ -2298,6 +2450,39 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         ) GROUP BY game_id, grp
       ) WHERE grp_count=3 AND grp_score=180 ${F.and} GROUP BY bucket ORDER BY bucket`).all(...params);
 
+    // ---- Guided Around the Clock metrics (docs/game-modes-roadmap.md) ----
+    // Round-shaped metrics bucket by leg_ts (like Doubles Practice's own
+    // per-round metrics) — a "round" here is one (game_id,set_no,leg_no) group.
+    case 'atcdartsthrown':
+      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(d.id) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${atcScope} ${T.and} ${weightWhere} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'atccompletions':
+      return db.prepare(`SELECT ${L.fmt} AS bucket, COUNT(*) AS value FROM (
+        SELECT MAX(t.created_at) AS leg_ts
+        FROM turns t JOIN games g ON g.id=t.game_id
+        WHERE t.player_id=? ${atcScope} ${weightWhere}
+        GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.bust)=1
+      ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'atcavgdartspercompletion':
+      return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(round_darts) AS value FROM (
+        SELECT MAX(t.created_at) AS leg_ts, COUNT(d.id) AS round_darts
+        FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+        WHERE t.player_id=? ${atcScope} ${weightWhere}
+        GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.bust)=1
+      ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
+
+    // ---- Guided Around the World metrics (docs/game-modes-roadmap.md) ----
+    // Per-dart/per-session bucketing, same shape as Chuckin's own metrics — no
+    // round boundary exists in this mode to bucket by instead.
+    case 'atwdartsthrown':
+      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(d.id) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${atwScope} ${T.and} ${weightWhere} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'atwsessions':
+      return db.prepare(`SELECT ${L.fmt} AS bucket, COUNT(*) AS value FROM (
+        SELECT MAX(t.created_at) AS leg_ts
+        FROM turns t JOIN games g ON g.id=t.game_id
+        WHERE t.player_id=? ${atwScope} ${weightWhere}
+        GROUP BY t.game_id
+      ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
+
     default:
       return [];
   }
@@ -2318,7 +2503,7 @@ function _mf(mode) {
 // 'x01'/'cricket', server.js only uses a query param to pick which function to
 // call), and is whitelisted here regardless as a defense-in-depth measure
 // against string interpolation.
-const KNOWN_GAME_TYPES = ['x01', 'cricket', 'doubles_practice', 'chuckin'];
+const KNOWN_GAME_TYPES = ['x01', 'cricket', 'doubles_practice', 'chuckin', 'around_the_clock', 'around_the_world'];
 function _scope({ mode, gameType } = {}) {
   let sql = _mf(mode);
   if (gameType) {
@@ -2356,6 +2541,22 @@ const X01_ONLY = _scope({ gameType: 'x01' });
 // _mf('practice') itself — that's why this is a separate constant applied at each
 // specific call site, not folded into the central mode-scoping helpers above).
 const NOT_CHUCKIN = `AND g.game_type != 'chuckin'`;
+
+// Guided Around the World (docs/game-modes-roadmap.md "Guided Around the Clock /
+// Around the World") shares Chuckin's exact shape for leg/pace purposes: one
+// continuous stream of 1-dart turns per games row, set_no=leg_no=1 throughout, no
+// round boundary at all. Counting a single (potentially hours-long) World session
+// as "1 leg" would skew the same leg-count/pace aggregates Chuckin is already
+// excluded from for the identical reason. Guided Around the Clock is the opposite —
+// it repurposes leg_no as a genuine per-round counter (same as Doubles Practice,
+// which is NOT excluded from these), so its darts stay included here. This is
+// intentionally a separate constant from NOT_CHUCKIN, not a broadened version of
+// it — getDartAnalytics() and getAroundTheWorldProgress() below deliberately keep
+// using the narrower NOT_CHUCKIN: cross-game-type sector analytics should include
+// targeted-practice darts (the existing Doubles Practice precedent), and excluding
+// either new type from getAroundTheWorldProgress() would break the very feature
+// that query exists to feed.
+const NOT_CONTINUOUS_STREAM = `AND g.game_type NOT IN ('chuckin','around_the_world')`;
 
 function getOneEightyStats(mode) {
   const mf = _mf(mode);
@@ -4015,6 +4216,9 @@ module.exports = {
   getDoublesPracticeStatBubbles, getDoublesPracticePersonalBests,
   getDoublesPracticeAccuracyLeaderboard, getDoublesPracticeBestRoundStats,
   getChuckinStatBubbles, getChuckinPersonalBests, getChuckinHeatmap, getDartHeatmap, getBounceOutCount,
+  getAroundTheClockStatBubbles, getAroundTheClockPersonalBests,
+  getAroundTheClockFastestLeaderboard, getAroundTheClockCompletionsLeaderboard,
+  getAroundTheWorldDrillStatBubbles, getAroundTheWorldPersonalBests, getAroundTheWorldLeaderboard,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics, getCoachingInsights,
