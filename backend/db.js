@@ -422,10 +422,15 @@ try { db.exec('ALTER TABLE darts ADD COLUMN miss_zone INTEGER'); } catch(e) {} /
 try { db.exec("ALTER TABLE darts ADD COLUMN miss_depth TEXT"); } catch(e) {}   // 'near'|'far', misses only
 try { db.exec('ALTER TABLE darts ADD COLUMN bounced INTEGER'); } catch(e) {}   // 1 = bounced/fell out, misses only
 // docs/data-export-roadmap.md: portable per-player identity for export/import (see
-// the players table comment above). Unlike every other backfill in this block, each
-// row needs a DISTINCT generated value, so this can't be a single UPDATE statement --
-// looped in JS instead, same as any other "one random value per row" migration would
-// have to be.
+// the players table comment above). The ALTER TABLE is required here, unlike some
+// other columns in this block -- CREATE TABLE IF NOT EXISTS above only takes effect
+// on a genuinely fresh database; an existing installation's players table already
+// exists (without this column) and needs this explicit ADD COLUMN to get it at all.
+// Unlike every other backfill in this block, each row also needs a DISTINCT
+// generated value, so the backfill itself can't be a single UPDATE statement --
+// looped in JS instead, same as any other "one random value per row" migration
+// would have to be.
+try { db.exec('ALTER TABLE players ADD COLUMN uuid TEXT'); } catch (e) {}
 {
   const unassigned = db.prepare('SELECT id FROM players WHERE uuid IS NULL').all();
   if (unassigned.length) {
