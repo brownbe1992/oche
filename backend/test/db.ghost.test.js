@@ -70,6 +70,21 @@ describe('getGhostCandidateLegs', () => {
     assert.equal(db.getGhostCandidateLegs(name).length, 5, 'default limit (20) covers all 5');
     assert.equal(db.getGhostCandidateLegs(name, 2).length, 2, 'explicit limit is respected');
   });
+
+  // docs/security-audit-roadmap.md SEC-23: this is a public, unauthenticated route
+  // (GET /api/players/ghost-legs) — an absurdly large explicit limit must be clamped
+  // rather than forcing an unbounded full-history scan/response.
+  test('an absurdly large explicit limit is clamped, not honored as-is', () => {
+    const name = 'Ghost_LimitClamp';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 150, practice: 1, players: [{ name }] });
+    for (let leg = 1; leg <= 150; leg++) {
+      db.addTurn(g.gameId, { player: name, set: 1, leg, scored: 100, checkout: true, checkoutPoints: 100,
+        darts: [{ sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }] });
+    }
+    assert.equal(db.getGhostCandidateLegs(name, 999999999).length, 100, 'clamped to the 100-row ceiling');
+    assert.equal(db.getGhostCandidateLegs(name, 50).length, 50, 'a legitimate smaller explicit limit is unaffected');
+  });
 });
 
 describe('getGhostLegScript', () => {

@@ -1396,7 +1396,18 @@ always submits internally-consistent turns) is unaffected.
 
 ### SEC-23 — Public `?limit=` params have no upper bound on a handful of read endpoints  **(LOW)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** `getGhostCandidateLegs()` now clamps to `Math.min(...,
+100)`, the same ceiling `getServerErrors()` already applies to its own (admin-only)
+`limit`. Swept every other public/client-controlled `limit`-style parameter in
+`server.js`/`db.js` (`grep`-checked every `searchParams.get('limit')` call site and
+every dynamic `LIMIT ?` in `db.js`): `/api/errors`'s `limit` is admin-only and already
+clamped to 500 inside `getServerErrors()`; `/api/top-finishes` always calls
+`getTopFinishesAll()` with a hardcoded `10`, never a client-controlled value — both
+already safe, no change needed. Committed regression test in
+`backend/test/db.ghost.test.js` seeds 150 winnable legs and confirms
+`getGhostCandidateLegs(name, 999999999)` returns exactly 100 rows (clamped) while a
+legitimate smaller explicit limit (50) is unaffected. Full backend suite green
+(550/550).
 
 **Where:** `backend/db.js` `getGhostCandidateLegs()` — `limit` is validated as "a
 positive integer, default 20" but never capped above. `GET

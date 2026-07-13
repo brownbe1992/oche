@@ -1832,7 +1832,11 @@ function getPersonalBests(playerName, mode) {
 function getGhostCandidateLegs(playerName, limit) {
   const p = getPlayer(playerName);
   if (!p) return [];
-  const lim = Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 20;
+  // docs/security-audit-roadmap.md SEC-23: this is a public, unauthenticated route
+  // (GET /api/players/ghost-legs) — an unbounded `limit` forced a full grouped scan
+  // over every X01 leg the player has ever played and returned it in one response.
+  // Clamp the same way getServerErrors() already clamps its own admin-only `limit`.
+  const lim = Math.min(Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 20, 100);
   // Ties on `date` (created_at only has second-level resolution — plausible within
   // one fast-inserted test or a quick real session) break on MAX(t.id) DESC, the
   // same "force a deterministic newest-first order" fix winStreak's own tie case
