@@ -18,6 +18,7 @@
 const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const auth = require('./auth.js');
 const netguard = require('./netguard.js');
 const backupLib = require('./backup-lib.js');
@@ -44,7 +45,13 @@ db.exec(`
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
     out_mode   TEXT NOT NULL DEFAULT 'double' CHECK (out_mode IN ('double','single')),
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    -- docs/data-export-roadmap.md: a portable identity for per-player export/import.
+    -- Unlike the autoincrement id (guaranteed to collide across independently-run
+    -- servers, since every fresh install starts counting from 1), a v4 UUID needs
+    -- no coordination between servers to stay unique -- that's the whole point of
+    -- using one here. Backfilled for pre-existing rows below (ALTER TABLE block).
+    uuid       TEXT
   );
 
   CREATE TABLE IF NOT EXISTS games (
@@ -414,6 +421,19 @@ try { db.exec("ALTER TABLE darts ADD COLUMN zone TEXT"); } catch(e) {}         /
 try { db.exec('ALTER TABLE darts ADD COLUMN miss_zone INTEGER'); } catch(e) {} // 1-20 (nearest wedge), misses only
 try { db.exec("ALTER TABLE darts ADD COLUMN miss_depth TEXT"); } catch(e) {}   // 'near'|'far', misses only
 try { db.exec('ALTER TABLE darts ADD COLUMN bounced INTEGER'); } catch(e) {}   // 1 = bounced/fell out, misses only
+// docs/data-export-roadmap.md: portable per-player identity for export/import (see
+// the players table comment above). Unlike every other backfill in this block, each
+// row needs a DISTINCT generated value, so this can't be a single UPDATE statement --
+// looped in JS instead, same as any other "one random value per row" migration would
+// have to be.
+{
+  const unassigned = db.prepare('SELECT id FROM players WHERE uuid IS NULL').all();
+  if (unassigned.length) {
+    const setUuid = db.prepare('UPDATE players SET uuid = ? WHERE id = ?');
+    for (const row of unassigned) setUuid.run(crypto.randomUUID(), row.id);
+  }
+}
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_players_uuid ON players(uuid)');
 db.exec(`UPDATE games SET player_count = (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = games.id) WHERE player_count IS NULL`);
 // config wasn't backfilled when the column was added (unlike player_count above) —
 // every pre-existing row is X01 (game_type defaults to 'x01') with category as its
@@ -435,7 +455,7 @@ const DEFAULT_BACKUP_RETENTION_DAYS = 7; // mirrors backup-lib.js's own fallback
 /* ---------- prepared statements ---------- */
 const q = {
   playerByName : db.prepare('SELECT id, name, out_mode, dart_weight, pin_hash, pin_salt, pin_fail_count, pin_locked_until FROM players WHERE name = ? COLLATE NOCASE'),
-  insertPlayer : db.prepare("INSERT INTO players (name, out_mode) VALUES (?, ?)"),
+  insertPlayer : db.prepare("INSERT INTO players (name, out_mode, uuid) VALUES (?, ?, ?)"),
   listPlayers  : db.prepare('SELECT id, name, out_mode, dart_weight, pin_hash FROM players ORDER BY name COLLATE NOCASE'),
   renamePlayer : db.prepare('UPDATE players SET name = ? WHERE id = ?'),
   setOut       : db.prepare('UPDATE players SET out_mode = ? WHERE id = ?'),
@@ -533,7 +553,7 @@ function ensurePlayer(name, out = 'double') {
   name = validatePlayerName(name);
   const existing = getPlayer(name);
   if (existing) return existing;
-  q.insertPlayer.run(name, out === 'single' ? 'single' : 'double');
+  q.insertPlayer.run(name, out === 'single' ? 'single' : 'double', crypto.randomUUID());
   return getPlayer(name);
 }
 
@@ -549,7 +569,7 @@ async function addPlayer(name, out = 'double', opts = {}) {
   name = validatePlayerName(name);
   const existing = getPlayer(name);
   if (existing) return { name: existing.name, out: existing.out_mode, hasPin: !!existing.pin_hash, dartWeight: existing.dart_weight ?? null };
-  q.insertPlayer.run(name, out === 'single' ? 'single' : 'double');
+  q.insertPlayer.run(name, out === 'single' ? 'single' : 'double', crypto.randomUUID());
   if (opts.pin) await setPlayerPin(name, opts.pin);
   if (opts.dartWeight !== undefined && opts.dartWeight !== null && opts.dartWeight !== '') {
     setDartWeight(name, opts.dartWeight);
@@ -3442,7 +3462,7 @@ function wipeAllData() {
 function getFullDatabaseExport() {
   return {
     exportedAt: new Date().toISOString(),
-    players: db.prepare('SELECT id, name, out_mode, created_at, dart_weight FROM players').all(),
+    players: db.prepare('SELECT id, uuid, name, out_mode, created_at, dart_weight FROM players').all(),
     games: db.prepare('SELECT * FROM games').all(),
     gamePlayers: db.prepare('SELECT * FROM game_players').all(),
     turns: db.prepare('SELECT * FROM turns').all(),
@@ -3471,6 +3491,55 @@ function getFullDatabaseExport() {
     // no credential columns, so they belong in "take your data with you" too.
     leagues: db.prepare('SELECT * FROM leagues').all(),
     leaguePlayers: db.prepare('SELECT * FROM league_players').all(),
+  };
+}
+
+// Per-player export (docs/data-export-roadmap.md, admin-only, Settings -> Data
+// Export -> Export Player): unlike the full-database dump above, this scopes to
+// one player's own history — but H2H isn't stored anywhere (getH2HRecord() computes
+// it live from games/game_players/turns), so preserving it means bundling the real
+// game/turn/dart rows for every game this player is in, including opponents' own
+// turns within those SAME games — "Ben beat Alaina 3-1" can't be represented
+// without Alaina's side of the board. Opponents therefore get a minimal identity
+// stub (uuid + name only) plus their rows within games shared with this player —
+// never their other games against other people; this isn't a backdoor to exporting
+// someone else's full history. The uuid (assigned to every player at creation, see
+// the players table migration above) is what makes an opponent stub re-attachable
+// on another server without a name collision: a future import path can look a
+// stub up by uuid first and auto-create a placeholder row for it if missing, so
+// "Ben beat Alaina" stays intact even when Alaina herself was never exported.
+// Deliberately out of scope for v1: tournament/league/daily-challenge/ghost-race
+// participation — each ties into structures (brackets, seasons, streaks) bigger
+// than a single player's own record, and is left for a future pass rather than
+// attempted here.
+function getPlayerExport(name) {
+  const p = db.prepare('SELECT id, uuid, name, out_mode, dart_weight, created_at FROM players WHERE name = ? COLLATE NOCASE').get(String(name));
+  if (!p) throw httpError(404, 'Player not found');
+
+  const gameIds = db.prepare('SELECT game_id FROM game_players WHERE player_id = ?').all(p.id).map(r => r.game_id);
+  const gph = gameIds.map(() => '?').join(',');
+
+  const games       = gameIds.length ? db.prepare(`SELECT * FROM games WHERE id IN (${gph})`).all(...gameIds) : [];
+  const gamePlayers = gameIds.length ? db.prepare(`SELECT * FROM game_players WHERE game_id IN (${gph})`).all(...gameIds) : [];
+  const turns       = gameIds.length ? db.prepare(`SELECT * FROM turns WHERE game_id IN (${gph})`).all(...gameIds) : [];
+
+  const turnIds = turns.map(t => t.id);
+  const tph = turnIds.map(() => '?').join(',');
+  const darts = turnIds.length ? db.prepare(`SELECT * FROM darts WHERE turn_id IN (${tph})`).all(...turnIds) : [];
+
+  const opponentIds = [...new Set(gamePlayers.map(gp => gp.player_id))].filter(id => id !== p.id);
+  const oph = opponentIds.map(() => '?').join(',');
+  const opponents = opponentIds.length
+    ? db.prepare(`SELECT uuid, name FROM players WHERE id IN (${oph})`).all(...opponentIds)
+    : [];
+
+  const playerBadges = db.prepare('SELECT badge_id, count, earned_at FROM player_badges WHERE player_id = ?').all(p.id);
+
+  return {
+    exportedAt: new Date().toISOString(),
+    schemaVersion: 1,
+    player: { uuid: p.uuid, name: p.name, outMode: p.out_mode, dartWeight: p.dart_weight ?? null, createdAt: p.created_at },
+    games, gamePlayers, turns, darts, opponents, playerBadges,
   };
 }
 
@@ -4842,7 +4911,7 @@ module.exports = {
   getAroundTheClockStatBubbles, getAroundTheClockPersonalBests,
   getAroundTheClockFastestLeaderboard, getAroundTheClockCompletionsLeaderboard,
   getAroundTheWorldDrillStatBubbles, getAroundTheWorldPersonalBests, getAroundTheWorldLeaderboard,
-  getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport,
+  getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport, getPlayerExport,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics, getCoachingInsights,
   getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, fireHaWebhook,

@@ -800,7 +800,8 @@ Shows the most recent server-side failures (up to 500, newest first) — the sam
 
 #### Data Export
 
-- **Export all data** — downloads a complete JSON export of every player, game, stat, tournament, and league in the database. Admin-only; there's no per-player export and nothing export-related appears on a player's own page. Excludes admin accounts, sessions, app settings, and player PINs.
+- **Export all data** — downloads a complete JSON export of every player, game, stat, tournament, and league in the database. Admin-only. Excludes admin accounts, sessions, app settings, and player PINs.
+- **Export a player…** — opens a dedicated admin page to pick one player and download just their history: every game they've played as JSON, including opponents' turn-by-turn data from those same games (so a result like "Ben beat Alaina" stays intact) plus a minimal identity record for each opponent. Admin-only; nothing export-related appears on a player's own page.
 
 #### Danger Zone
 
@@ -1355,6 +1356,11 @@ POST /api/backups/upload-restore            Raw .db file body, X-Admin-Password 
 GET  /api/export-all                        Streams a full-database JSON export as a download            [admin]
                                              (excludes admins/sessions/settings/server_errors and
                                              all player PIN/credential columns)
+GET  /api/players/export                    (?name=...) Streams one player's JSON export as a             [admin]
+                                             download -- games/turns/darts for every game they're
+                                             in, including opponents' rows within those same games,
+                                             plus minimal {uuid,name} opponent identity stubs.
+                                             404 if the name doesn't exist.
 ```
 
 ---
@@ -1467,8 +1473,12 @@ instead if that precision matters to you.
 
 **Settings → Admin & Danger Zone → Data Export** lets an admin download a complete JSON
 export of every player, game, and stat in the database with one click — it's your data,
-and you can always take it with you. This is admin-only: there is no per-player export
-and no export entry point anywhere on a player's own page. The export never includes
+and you can always take it with you. The same section also has **"Export a player…"**,
+which opens a dedicated page to pick one player and download just their own history —
+every game they've played, including opponents' turn-by-turn data from those same
+games (so a result like "Ben beat Alaina" survives moving to another server intact)
+plus a minimal identity record for each opponent. Both are admin-only: there is no
+export entry point anywhere on a player's own page. Neither export ever includes
 admin accounts, sessions, app settings, or any player's PIN.
 
 ### Admin Account Recovery

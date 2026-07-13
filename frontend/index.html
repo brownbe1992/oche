@@ -1360,7 +1360,10 @@
             it's your data, and you can always take it with you. Admin credentials and session
             data are never included.
           </p>
-          <button class="btn btn-ghost" onclick="window.location='/api/export-all'">Export all data</button>
+          <div class="btn-row">
+            <button class="btn btn-ghost" onclick="window.location='/api/export-all'">Export all data</button>
+            <button class="btn btn-ghost" onclick="show('player-export')">Export a player…</button>
+          </div>
         </div>
       </div>
 
@@ -1383,6 +1386,21 @@
         <button class="btn btn-primary" id="settings-save-btn" onclick="saveSettings()">Save settings</button>
       </div>
     </div>
+    </div>
+  </section>
+
+  <!-- ============ EXPORT PLAYER (docs/data-export-roadmap.md, admin-only) ============ -->
+  <section id="screen-player-export" class="screen">
+    <div class="card">
+      <button class="pp-back" onclick="show('settings')">← Settings</button>
+      <h2 style="font-size:18px;margin-bottom:4px">Export Player</h2>
+      <p style="color:var(--muted);font-size:13px;margin:0 0 20px;line-height:1.6">
+        Download one player's full history as JSON — every game they've played, including
+        opponents' turn data from those same games (so results like "Ben beat Alaina" stay
+        intact when moved to another server), plus a minimal identity record for each
+        opponent. Admin only.
+      </p>
+      <div id="player-export-body"></div>
     </div>
   </section>
 </div>
@@ -1817,6 +1835,7 @@ function show(name){
   if(name==='player'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); }
   if(name==='tournament') renderTournamentScreen();
   if(name==='league') renderLeagueScreen();
+  if(name==='player-export') renderPlayerExportScreen();
   if(name==='legend') renderLegend();
   if(name==='dart-builder') renderDartBuilderScreen();
 }
@@ -2861,6 +2880,31 @@ function toggleSettingsSection(bodyId, titleEl){
   body.hidden = !body.hidden;
   const chevron = titleEl && titleEl.querySelector('.settings-chevron');
   if(chevron) chevron.style.transform = body.hidden ? '' : 'rotate(180deg)';
+}
+// docs/data-export-roadmap.md: per-player export, admin-only. Reuses the already-loaded
+// `roster` array (populated by DB.loadAll()/refreshStats()) rather than a fresh fetch --
+// the same player list already backing every other picker in the app.
+function renderPlayerExportScreen(){
+  const body = document.getElementById('player-export-body');
+  if(!body) return;
+  if(!roster.length){
+    body.innerHTML = `<p style="font-size:13px;color:var(--muted)">No players yet — add one from the Players page first.</p>`;
+    return;
+  }
+  const opts = roster.slice().sort((a,b)=>a.localeCompare(b))
+    .map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+  body.innerHTML = `
+    <label class="pp-meta" for="player-export-select" style="display:block;margin-bottom:6px">Select a player</label>
+    <select id="player-export-select" class="date-input" style="width:100%;max-width:320px;margin-bottom:16px">${opts}</select>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="exportSelectedPlayer()">Export data</button>
+    </div>
+  `;
+}
+function exportSelectedPlayer(){
+  const sel = document.getElementById('player-export-select');
+  if(!sel || !sel.value) return;
+  window.location = '/api/players/export?name=' + encodeURIComponent(sel.value);
 }
 // Settings -> Daily Challenge: admin reset of a player's attempt for a given date.
 // Deletes the attempt AND the game/turns/darts recorded during it (server-side

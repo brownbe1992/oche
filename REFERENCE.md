@@ -2269,10 +2269,11 @@ file.
 ### Settings → Data Export (admin-only)
 
 `docs/data-export-roadmap.md`'s original design proposed a per-player,
-PIN-gated export in addition to an admin-only full-database export; the
-per-player half was deliberately descoped by explicit product direction — this
-app only ever exports the whole database, and only to a logged-in admin. There
-is no export entry point anywhere on a Player Profile page.
+PIN-gated export reachable from a Player Profile page; that was reopened with
+fresh product direction (2026-07) and shipped differently — **admin-only**,
+reached from a dedicated admin page (`Settings → Admin & Danger Zone → Data
+Export → Export a player…`), not from the Player Profile, and not PIN-gated
+(the admin session cookie is the gate, same as the full-database export).
 
 - **`db.getFullDatabaseExport()`** returns `{ exportedAt, players, games,
   gamePlayers, turns, darts, timelineEvents, playerBadges,
@@ -2283,7 +2284,7 @@ is no export entry point anywhere on a Player Profile page.
   §18), reformatted as plain JSON. It
   deliberately excludes the `admins`, `sessions`, `settings`, and `server_errors`
   tables entirely (internal/credential tables, not "your darts data"), and the
-  `players` rows only select `id, name, out_mode, created_at, dart_weight` —
+  `players` rows only select `id, uuid, name, out_mode, created_at, dart_weight` —
   `pin_hash`/`pin_salt`/`pin_fail_count`/`pin_locked_until` never leave the
   server, exported or not, the same write-only handling every other credential in
   this app gets. **Standing rule:** any new user-data table must be added to this
@@ -2293,11 +2294,50 @@ is no export entry point anywhere on a Player Profile page.
   Backups routes and `/api/wipe-all`) streams that object as a
   `Content-Disposition: attachment` download named
   `oche-export-<YYYY-MM-DD>.json`.
-- The Settings → Admin & Danger Zone → **Data Export** section is a single
-  button ("Export all data") that navigates to that URL, mirroring exactly how
-  the Backups section's own download links work — the browser's existing
-  admin session cookie authenticates the request, no separate credential in
-  the URL.
+- **`db.getPlayerExport(name)`** (per-player export, admin-only) returns
+  `{ exportedAt, schemaVersion: 1, player, games, gamePlayers, turns, darts,
+  opponents, playerBadges }`, scoped to one player's own history — but H2H
+  isn't stored anywhere (`getH2HRecord()` computes it live from
+  `games`/`game_players`/`turns`), so preserving it means bundling the real
+  game/turn/dart rows for every game this player is in, **including
+  opponents' own turns within those same games** (a result like "Ben beat
+  Alaina" can't be represented without Alaina's side of the board). Opponents
+  get only a minimal identity stub — `{ uuid, name }`, nothing else — plus
+  their rows within games shared with this player; their other games against
+  other people are never included. `player` is
+  `{ uuid, name, outMode, dartWeight, createdAt }` (no PIN columns, same
+  write-only handling as the full-database export). Throws `httpError(404)`
+  for an unknown name. Deliberately out of scope for v1: tournament/league/
+  daily-challenge/ghost-race participation — see
+  `docs/data-export-roadmap.md` for the reasoning and the (not yet built)
+  import side of this design.
+- **`GET /api/players/export`** (`?name=...`, `requireAdmin`) streams that
+  object as a `Content-Disposition: attachment` download named
+  `oche-export-<sanitized-name>-<YYYY-MM-DD>.json`. `400` with no `name`
+  param, `404` for an unknown player.
+- The Settings → Admin & Danger Zone → **Data Export** section has two
+  buttons: **"Export all data"** navigates straight to `/api/export-all`
+  (unchanged); **"Export a player…"** navigates to a new dedicated screen
+  (`#screen-player-export`, `renderPlayerExportScreen()`) with a `<select>`
+  populated from the already-loaded `roster` array and an "Export data"
+  button that navigates to `/api/players/export?name=...` — the browser's
+  existing admin session cookie authenticates both requests, no separate
+  credential in the URL.
+
+### `players.uuid` — a portable per-player identity
+
+Every player gets a random v4 UUID (`crypto.randomUUID()`) at creation,
+stored in `players.uuid` (backfilled for pre-existing rows via a one-time
+migration loop, since — unlike every other `ALTER TABLE` backfill in this
+codebase — each row needs a *distinct* generated value, not a single
+computed `UPDATE`). This exists specifically to make the per-player export
+above meaningful across independent servers: the autoincrement `id` is
+guaranteed to collide the moment two separately-run instances both have a
+player with `id=1`, but a v4 UUID needs no coordination between servers to
+stay effectively unique. `id` remains the internal join/FK target
+everywhere — `uuid` is exposed only in exports (full-database and
+per-player) as the portable identity a future import path would key
+opponent-stub lookups on.
 
 ---
 
@@ -2313,6 +2353,7 @@ already-migrated database is a safe no-op).
 |---|---|---|
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
 | `name` | `TEXT NOT NULL UNIQUE COLLATE NOCASE` | Case-insensitive unique |
+| `uuid` | `TEXT` (unique index) | v4 UUID assigned at creation, backfilled for pre-existing rows — see "`players.uuid`" below. Portable per-player identity for export; `id` stays the internal join/FK target |
 | `out_mode` | `TEXT NOT NULL DEFAULT 'double'` | `'double'` \| `'single'` — default checkout rule |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 | `dart_weight` | `INTEGER` | **Retired as a write path** (`docs/archive/dart-builder-roadmap.md`) — no UI sets this anymore; a selected loadout's barrel weight is the only source for `game_players.dart_weight` going forward (see §16). Existing values are left in place, unread by any current code path (`getPlayer`/`listPlayers` still return it for API back-compat, but nothing writes it, and `createGame()` never falls back to it) |

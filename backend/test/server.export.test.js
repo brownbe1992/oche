@@ -89,3 +89,35 @@ describe('GET /api/export-all (docs/data-export-roadmap.md)', () => {
     });
   });
 });
+
+describe('GET /api/players/export (docs/data-export-roadmap.md, per-player export)', () => {
+  test('401s without an admin session', async () => {
+    await withServer(8442, async ({ base }) => {
+      assert.equal((await fetch(`${base}/api/players/export?name=whoever`)).status, 401);
+    });
+  });
+
+  test('400s with no name param, 404s for an unknown player, 200s with an attachment header for a real one', async () => {
+    await withServer(8443, async ({ base, cookie }) => {
+      assert.equal((await api(base, cookie, '/api/players/export')).status, 400);
+      assert.equal((await api(base, cookie, '/api/players/export?name=nobody_here')).status, 404);
+
+      await api(base, cookie, '/api/players', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'export_player_route_target', out: 'double' }),
+      });
+
+      const res = await api(base, cookie, '/api/players/export?name=export_player_route_target');
+      assert.equal(res.status, 200);
+      // Filename sanitizes the name (non-alphanumeric -> '-'), so check the shape rather
+      // than an exact transliteration of the underscore-heavy test player name.
+      assert.match(res.headers.get('content-disposition'), /attachment; filename="oche-export-export-player-route-target-.+\.json"/);
+      assert.equal(res.headers.get('content-type'), 'application/json');
+
+      const dump = JSON.parse(await res.text());
+      assert.equal(dump.player.name, 'export_player_route_target');
+      assert.ok(dump.player.uuid);
+      assert.equal(dump.player.pin_hash, undefined);
+    });
+  });
+});

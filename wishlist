@@ -20,7 +20,7 @@ Player pages:
 - Environmental data (temp/humidity) — full design in docs/environmental-logging-roadmap.md
 - Coaching insights from existing dart analytics — done, see docs/archive/coaching-insights-roadmap.md
 - Shareable moment/stat cards — done, see docs/shareable-moments-roadmap.md (direct social API posting descoped in favor of manual share)
-- Data export (CSV/JSON) — full-database admin export done; per-player CSV/JSON re-opened with fresh product direction, not yet built, see docs/data-export-roadmap.md
+- Data export (CSV/JSON) — full-database admin export done; per-player export done (admin-only, JSON, with a portable `players.uuid` + opponent-stub design so H2H data isn't orphaned); re-import and CSV export remain separate, not-yet-built items, see docs/data-export-roadmap.md
 
 
 Stats page:

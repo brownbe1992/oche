@@ -114,6 +114,14 @@
                                        Admin & Danger Zone -> Data Export). Excludes
                                        admins/sessions/settings/server_errors and strips
                                        PIN-hash columns from players. [admin]
+       GET  /api/players/export    -> (?name=...) streams one player's JSON export
+                                       (docs/data-export-roadmap.md, admin-only,
+                                       Settings -> Data Export -> Export Player) --
+                                       games/turns/darts for every game that player is
+                                       in, including opponents' rows within those same
+                                       games (H2H isn't stored anywhere, only derivable
+                                       from them) plus minimal opponent identity stubs
+                                       (uuid+name). 404 if the name doesn't exist. [admin]
 
    Routes marked [admin] require a logged-in admin session (cookie set by /api/login).
    Set COOKIE_SECURE=true when serving over HTTPS (e.g. behind a reverse proxy) so the
@@ -1196,6 +1204,22 @@ const server = http.createServer(async (req, res) => {
       const dump = db.getFullDatabaseExport();
       const body = Buffer.from(JSON.stringify(dump, null, 2));
       const filename = `oche-export-${new Date().toISOString().slice(0, 10)}.json`;
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': String(body.length),
+        ...SECURITY_HEADERS,
+      });
+      return res.end(body);
+    }
+    if (p === '/api/players/export' && m === 'GET') {
+      if (!requireAdmin(req, res)) return;
+      const name = url.searchParams.get('name');
+      if (!name) return send(res, 400, { error: 'name is required' });
+      const dump = db.getPlayerExport(name); // throws httpError(404) if the name doesn't exist -- caught below
+      const body = Buffer.from(JSON.stringify(dump, null, 2));
+      const safeName = String(name).replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '').slice(0, 40) || 'player';
+      const filename = `oche-export-${safeName}-${new Date().toISOString().slice(0, 10)}.json`;
       res.writeHead(200, {
         'Content-Type': 'application/json',
         'Content-Disposition': `attachment; filename="${filename}"`,

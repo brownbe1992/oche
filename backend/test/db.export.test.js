@@ -48,7 +48,7 @@ describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
 
     const alice = dump.players.find(p => p.name === 'export_alice');
     assert.ok(alice, 'exported player is present');
-    assert.deepEqual(Object.keys(alice).sort(), ['created_at', 'dart_weight', 'id', 'name', 'out_mode'].sort());
+    assert.deepEqual(Object.keys(alice).sort(), ['created_at', 'dart_weight', 'id', 'name', 'out_mode', 'uuid'].sort());
 
     assert.equal(dump.games.length, 1);
     assert.equal(dump.turns.length, 1);
@@ -102,5 +102,102 @@ describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
     for (const secret of ['pin_hash', 'pin_salt', 'pin_fail_count', 'pin_locked_until', 'password_hash', 'password_salt']) {
       assert.equal(json.includes(secret), false, `export must not contain "${secret}"`);
     }
+  });
+});
+
+describe('players.uuid (docs/data-export-roadmap.md — portable per-player identity)', () => {
+  test('every player gets a well-formed, unique uuid at creation', () => {
+    db.addPlayer('export_uuid_a');
+    db.addPlayer('export_uuid_b');
+    const dump = db.getFullDatabaseExport();
+    const a = dump.players.find(p => p.name === 'export_uuid_a');
+    const b = dump.players.find(p => p.name === 'export_uuid_b');
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    assert.match(a.uuid, uuidRe);
+    assert.match(b.uuid, uuidRe);
+    assert.notEqual(a.uuid, b.uuid);
+  });
+});
+
+describe('getPlayerExport (docs/data-export-roadmap.md — per-player export)', () => {
+  test('scopes games/turns/darts to the requested player, includes a minimal opponent stub, and excludes the opponent\'s unrelated games', () => {
+    db.addPlayer('export_ben');
+    db.addPlayer('export_alaina');
+
+    // H2H game: Ben vs Alaina, Ben wins.
+    const h2h = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: 'export_ben' }, { name: 'export_alaina' }] });
+    db.addTurn(h2h.gameId, { player: 'export_ben', set: 1, leg: 1, scored: 60, darts: [
+      { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 },
+    ] });
+    db.addTurn(h2h.gameId, { player: 'export_alaina', set: 1, leg: 1, scored: 45, darts: [
+      { sector: 15, multiplier: 1 }, { sector: 15, multiplier: 1 }, { sector: 15, multiplier: 1 },
+    ] });
+    db.completeGame(h2h.gameId, 'export_ben');
+
+    // Ben's own solo practice game -- should also be included.
+    const solo = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1,
+      players: [{ name: 'export_ben' }] });
+    db.addTurn(solo.gameId, { player: 'export_ben', set: 1, leg: 1, scored: 100, darts: [
+      { sector: 20, multiplier: 3 }, { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 },
+    ] });
+
+    // Alaina's unrelated solo game -- must NOT leak into Ben's export.
+    const alainaSolo = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1,
+      players: [{ name: 'export_alaina' }] });
+    db.addTurn(alainaSolo.gameId, { player: 'export_alaina', set: 1, leg: 1, scored: 26, darts: [
+      { sector: 20, multiplier: 1 }, { sector: 3, multiplier: 1 }, { sector: 3, multiplier: 1 },
+    ] });
+
+    const dump = db.getPlayerExport('export_ben');
+
+    assert.equal(dump.schemaVersion, 1);
+    assert.equal(dump.player.name, 'export_ben');
+    assert.ok(dump.player.uuid);
+    assert.equal(dump.player.dartWeight, null);
+
+    assert.deepEqual(dump.games.map(g => g.id).sort((a, b) => a - b), [h2h.gameId, solo.gameId].sort((a, b) => a - b));
+    assert.equal(dump.games.some(g => g.id === alainaSolo.gameId), false, "Alaina's unrelated solo game must not appear");
+
+    // Opponent stub: minimal shape only (uuid+name), never Alaina's own id/out_mode/etc.
+    assert.equal(dump.opponents.length, 1);
+    assert.deepEqual(Object.keys(dump.opponents[0]).sort(), ['name', 'uuid']);
+    assert.equal(dump.opponents[0].name, 'export_alaina');
+
+    // turns: Ben's turn in both games (2) + Alaina's turn in the shared H2H game (1) = 3.
+    // Alaina's solo-game turn must not appear.
+    assert.equal(dump.turns.length, 3);
+    assert.equal(dump.turns.filter(t => t.game_id === alainaSolo.gameId).length, 0);
+
+    // darts follow turns 1:1 here (3 darts per turn) -> 9.
+    assert.equal(dump.darts.length, 9);
+
+    // gamePlayers: 2 rows for the H2H game (both players) + 1 for Ben's solo game = 3.
+    assert.equal(dump.gamePlayers.length, 3);
+  });
+
+  test('throws a 404 for an unknown player name', () => {
+    assert.throws(() => db.getPlayerExport('export_does_not_exist_xyz'), /Player not found/);
+  });
+
+  test('scopes badges to the requested player only', () => {
+    db.addPlayer('export_badge_owner');
+    db.addPlayer('export_badge_other');
+    db._db.prepare("INSERT INTO player_badges (player_id, badge_id) VALUES ((SELECT id FROM players WHERE name=?), ?)").run('export_badge_owner', 'oneEighty');
+    db._db.prepare("INSERT INTO player_badges (player_id, badge_id) VALUES ((SELECT id FROM players WHERE name=?), ?)").run('export_badge_other', 'oneEighty');
+
+    const dump = db.getPlayerExport('export_badge_owner');
+    assert.equal(dump.playerBadges.length, 1);
+    assert.equal(dump.playerBadges[0].badge_id, 'oneEighty');
+  });
+
+  test('a player with no games exports empty arrays, not an error', () => {
+    db.addPlayer('export_no_games');
+    const dump = db.getPlayerExport('export_no_games');
+    assert.deepEqual(dump.games, []);
+    assert.deepEqual(dump.gamePlayers, []);
+    assert.deepEqual(dump.turns, []);
+    assert.deepEqual(dump.darts, []);
+    assert.deepEqual(dump.opponents, []);
   });
 });
