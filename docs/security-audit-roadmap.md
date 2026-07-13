@@ -14,10 +14,14 @@
 > (2026-07, an adversarial re-read specifically hunting for unauthenticated inputs that
 > reach an *unhandled* decode/parse and for write-side records the earlier passes
 > hardened only at one consumer) opened **SEC-17** (unauthenticated `server_errors`
-> diagnostic-log poisoning via client-controlled malformed input) — see "Part 7" at the
-> bottom. Functional-defect counterparts live in `docs/bug-roadmap.md` (BUG-1/BUG-2/BUG-3
-> from the second pass; BUG-4/BUG-5 from the third; BUG-6/BUG-7 from the fourth; BUG-9
-> from the fifth).
+> diagnostic-log poisoning via client-controlled malformed input) — see "Part 7". A
+> **sixth-pass audit** (2026-07, a general code-review pass covering the whole app —
+> not scoped to one new feature — including the Guided Around the Clock/World and
+> Checkout Trainer/League Mode expansions merged since Part 7) opened **SEC-18**
+> through **SEC-24** — see "Part 8" at the bottom. Functional-defect counterparts live
+> in `docs/bug-roadmap.md` (BUG-1/BUG-2/BUG-3 from the second pass; BUG-4/BUG-5 from
+> the third; BUG-6/BUG-7 from the fourth; BUG-9 from the fifth; BUG-10 through BUG-15
+> from the sixth).
 >
 > See the "Status" line
 > under each finding below for what actually shipped, which in a couple of places is
@@ -1088,3 +1092,306 @@ before.
 2. Then `docs/bug-roadmap.md` **BUG-9** (`completeGame()` participant validation) —
    the functional counterpart, same "guard the source, not just one consumer" theme as
    SEC-16/BUG-4.
+
+---
+
+## Part 8 — Sixth-pass audit (2026-07, whole-codebase general review)
+
+A general code-review pass across the whole app (not scoped to a single new feature),
+covering `backend/server.js`, `backend/db.js`, `backend/auth.js`, `backend/netguard.js`,
+`backend/backup-lib.js`, `backend/admin-recovery.js`, `frontend/scoring.js`,
+`frontend/index.html`, and `frontend/display.html` — including the Guided Around the
+Clock/World and Checkout Trainer/League Mode surfaces merged since Part 7. Re-checked
+and still safe: SQL injection (every interpolated query fragment traces to an internal
+whitelisted constant; `_scope()` defensively validates `gameType` against
+`KNOWN_GAME_TYPES` even though callers never pass raw request input), path traversal,
+the SEC-16 SSRF range list (including DNS-rebinding and both IPv4-mapped-IPv6
+spellings), brute-force protection on every credential surface, and the "zero bare
+`escapeJs`" / consistent-`escapeHtml` invariant across `index.html`'s 127 render sites.
+Two new gaps found — one in `display.html`'s live-payload heatmap tooltip (SEC-18, the
+one escaping gap in an otherwise-consistent file) and one structural (SEC-19, no
+`Content-Type` enforcement on writes). Five more lower-severity hardening gaps
+(SEC-20 through SEC-24). Functional-defect counterparts for this same pass are
+`docs/bug-roadmap.md` **BUG-10** through **BUG-15**.
+
+### SEC-18 — Unescaped live-payload field in `display.html`'s Chuckin heatmap tooltip → stored/reflected XSS on the scoreboard  **(MED)**
+
+**Status: Open.**
+
+**Where:** `frontend/display.html` `buildChuckinLiveHeatmap()` (feeds
+`renderers.chuckin.card()` and `renderers.around_the_clock`/`around_the_world`'s shared
+`buildOutcomeGridCompact()` neighbor code):
+
+```js
+const hitMap = {};
+(cells||[]).forEach(c=>{ hitMap[c.sector+'_'+c.multiplier] = c.hits; ... });
+...
+s += `<path ... ><title>${n}: ${hits(n,1)} single hit${hits(n,1)===1?'':'s'}</title></path>`;
+```
+
+`c.hits` comes straight from the `/api/live` broadcast payload (`players[].heatmap[]`,
+part of the unrestricted-shape per-player array `ALLOWED_LIVE_KEYS` deliberately lets
+through — see the comment at `server.js`'s `ALLOWED_LIVE_KEYS` definition) and is
+interpolated into SVG `<title>` markup that's assigned to `grid.innerHTML` in
+`renderState()`. Every other player-controlled string reaching `display.html`'s DOM
+goes through `esc()`/`escapeHtml()` (127+ consistent call sites elsewhere in the file,
+including the sibling `cricketMarkGlyph()` and every player-name interpolation) — this
+is the one place a payload value is trusted as a safe number without either coercion
+or escaping.
+
+**Attack:** whoever can `POST /api/live` (any device on the LAN when
+`OCHE_REQUIRE_AUTH=false`; an admin session otherwise) sets
+`players[0].heatmap[0].hits` to a string like `</title><image href=x onerror=alert(document.cookie)>`
+instead of a number. `liveBroadcast()` re-sends it verbatim to every connected `/display`
+screen, whose `renderState()` assigns the built SVG string via `innerHTML`, executing
+the payload on every open scoreboard — a genuine stored/broadcast XSS reaching every
+screen in the room, not just the attacker's own client.
+
+**Fix (step by step):**
+1. In `buildChuckinLiveHeatmap()`, coerce `c.hits` (and `c.sector`/`c.multiplier`, used
+   as object-key components) to `Number(...) || 0` when building `hitMap`, the same
+   "trust nothing from the payload, coerce at the boundary" pattern `num()` already
+   applies to every other live-state numeric field in this file.
+2. Belt-and-braces: route the tooltip text itself through the file's existing `esc()`
+   even after coercion, so a future field added to this same map without the coercion
+   habit doesn't reopen the gap.
+3. Add a committed `node:test` (or a scratch Node script under `backend/test/`, since
+   `display.html`'s functions aren't currently extracted into a testable module) that
+   feeds `buildChuckinLiveHeatmap()` a crafted non-numeric `hits` value and asserts the
+   returned SVG string contains no unescaped `<`/`>` from that input — or, if that
+   function isn't easily unit-tested in isolation yet, a live Playwright check posting
+   a crafted `/api/live` payload and confirming no script executes on `/display`.
+
+**Verify:** a crafted `hits` string in a `POST /api/live` payload renders as inert text
+(or `0`) on `/display`, not executable markup; the tooltip still shows the real hit
+count for legitimate numeric payloads.
+
+### SEC-19 — No `Content-Type` enforcement on write endpoints → CSRF via cross-origin "simple" requests when `OCHE_REQUIRE_AUTH=false`  **(MED, conditional on the LAN-trust opt-out)**
+
+**Status: Open.**
+
+**Where:** `backend/server.js` `readJson()` and every `requireWrite`-gated route. A
+browser may send a cross-origin POST with a body and no CORS preflight as long as it
+qualifies as a ["simple" request](https://fetch.spec.whatwg.org/#simple-header) —
+which includes `Content-Type: text/plain` bodies. `readJson()` `JSON.parse`s the raw
+body regardless of the request's actual `Content-Type` header, so a same-origin-only
+API is reachable from an arbitrary third-party page's `fetch(..., {method:'POST',
+body: JSON.stringify(...)})` (which browsers send as `text/plain` by default unless
+told otherwise) as long as the visitor's browser can route to the server's address.
+
+**Attack:** under the documented `OCHE_REQUIRE_AUTH=false` LAN-trust opt-out (writes
+open to anyone who can reach the server, no session cookie involved), a malicious
+webpage visited by anyone on the same network as the Oche box can silently POST to
+`/api/games/:id/turns`, `/api/badges/award`, `/api/live`, or `/api/ha-webhook` through
+that visitor's browser — recording fake turns, spamming the live scoreboard (see
+SEC-18), or firing Home Assistant webhooks — with no interaction beyond the visitor
+loading the page. Under the default `OCHE_REQUIRE_AUTH=true`, this is already blocked:
+the session cookie is `SameSite=Strict`, so a cross-site request never carries it and
+`requireWrite`'s 401 stops it. This finding only matters for the household that
+deliberately opts into the open-LAN mode the docs describe as "a fully-trusted
+household network" — worth closing anyway since that's an explicit, documented,
+supported configuration, not a misconfiguration.
+
+**Fix (step by step):**
+1. In `readJson()`, check `req.headers['content-type']` starts with
+   `application/json` (allowing an optional `; charset=...` suffix) before parsing;
+   reject with `415 Unsupported Media Type` otherwise. A cross-site "simple" request
+   cannot set an arbitrary `Content-Type` like `application/json` without triggering a
+   CORS preflight, which this server's `SECURITY_HEADERS` (no `Access-Control-Allow-*`
+   headers at all) will fail — closing the gap without touching same-origin behavior,
+   since `index.html`'s own `Backend` helper already sends `application/json`.
+2. Add a committed `node:test` in `backend/test/`: a `POST` to a write route (e.g.
+   `/api/badges/award`) with `Content-Type: text/plain` returns `415`; the same body
+   with `Content-Type: application/json` succeeds as before.
+3. Note in this doc's threat model (or the `OCHE_REQUIRE_AUTH=false` comment block at
+   the top of `server.js`) that the LAN-trust mode's actual trust boundary is now "any
+   device that can send a same-origin-shaped `application/json` request," which no
+   longer includes an arbitrary cross-origin webpage a household member happens to
+   have open.
+
+**Verify:** the `text/plain` case returns 415 and performs no write; every existing
+`index.html`/`display.html` call site (all of which already send
+`Content-Type: application/json`) continues to work unchanged; full backend suite green.
+
+### SEC-20 — `createFirstAdmin()` check-then-insert is not atomic → two concurrent setup requests can both succeed  **(MED, narrow window)**
+
+**Status: Open.**
+
+**Where:** `backend/db.js` `createFirstAdmin()`:
+
+```js
+async function createFirstAdmin(username, password) {
+  if (!isSetupRequired()) throw httpError(403, 'Setup already completed');
+  username = validateCredentials(username, password);
+  const { hash, salt } = await auth.hashSecret(password);   // ~50-100ms scrypt, per auth.js's own comment
+  try { q.insertAdmin.run(username, hash, salt); }
+  ...
+```
+
+`isSetupRequired()` (`SELECT COUNT(*) FROM admins`) is checked, then the code awaits a
+~50-100ms `scrypt` hash (the same cost `auth.js`'s own header comment flags as
+"blocks the event loop... since login() must pay this cost on every attempt"), and only
+then inserts. Two `POST /api/setup` requests arriving close together both observe
+`isSetupRequired() === true` before either has inserted, so both proceed to
+`insertAdmin` — `admins.username` is `UNIQUE COLLATE NOCASE`, so this only fails if the
+two requests pick the *same* username; two different usernames both succeed, silently
+creating a second, unintended admin account during what the owner believes is a
+single-admin first-run setup.
+
+**Attack:** an attacker racing the legitimate owner's `/api/setup` request during the
+brief window between container start and setup completion (e.g. by watching for the
+server to come up, or on a slower network where the owner's own request is in flight)
+submits their own `POST /api/setup` with a different username. Both requests can insert,
+handing the attacker a fully-privileged, persistent admin account the owner has no
+reason to suspect exists (`isSetupRequired()` is now `false`, so the setup screen never
+reappears to prompt a review).
+
+**Fix (step by step):**
+1. Make the guard atomic at the database level instead of check-then-act in
+   application code:
+   `db.prepare("INSERT INTO admins (username, password_hash, password_salt) SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM admins)").run(username, hash, salt)`
+   — then check `info.changes === 0` and throw the existing `403 'Setup already
+   completed'` in that case, matching the message callers already expect.
+2. Add a committed `node:test`: fire two `createFirstAdmin()` calls concurrently
+   (`Promise.all`) with different usernames against a scratch DB; assert exactly one
+   succeeds and `listAdmins()` has length 1 afterward.
+3. `REFERENCE.md`'s setup-flow section (if it documents the endpoint's guarantees)
+   gets a one-line note that first-admin creation is atomic against concurrent
+   `/api/setup` calls.
+
+**Verify:** the new concurrency test passes; a single legitimate `/api/setup` call
+still succeeds exactly as before; a second call after setup still returns 403.
+
+### SEC-21 — Request-body size cap counts decoded characters, not bytes  **(LOW)**
+
+**Status: Open.**
+
+**Where:** `backend/server.js` `readJson()`:
+
+```js
+req.on('data', c => {
+  raw += c;
+  if (raw.length > 1e6) { ... }
+});
+```
+
+`c` arrives as a `Buffer`; `raw += c` implicitly decodes it to a UTF-8 string and
+appends, and the cap compares `raw.length` (JS string length, i.e. UTF-16 code units)
+against `1e6`. A request body consisting mostly of 4-byte UTF-8 sequences (e.g.
+emoji-heavy content) can reach roughly 4x the intended ~1MB in actual network/memory
+bytes before the check trips, since each 4-byte sequence can contribute as few as 1-2
+JS string length units depending on surrogate-pair counting. Low severity — still a
+firm, if mislabeled, ceiling — but worth fixing alongside BUG-10 below, which touches
+the same accumulation loop for a data-corruption reason.
+
+**Fix (step by step):**
+1. Accumulate raw `Buffer` chunks in an array and track a running byte total via
+   `chunk.length` (already correct in bytes for a `Buffer`); compare that running total
+   against the cap instead of `raw.length`. `Buffer.concat(chunks).toString('utf8')`
+   once at `end`. This is the same change BUG-10's fix makes for a different reason —
+   implement once, get both fixes.
+2. Add a committed `node:test`: a body of ~1MB of 4-byte-UTF-8 characters (well under
+   1e6 JS string-length units, but over 1e6 real bytes) is now correctly rejected as
+   413/`'Request body too large'`.
+
+**Verify:** the new test passes; an ordinary ASCII body just under 1MB still succeeds;
+one just over still rejects, as before.
+
+### SEC-22 — `addTurn()` never cross-checks `scored` against the darts it's paired with  **(LOW, data-integrity, LAN-trust mode only)**
+
+**Status: Open.**
+
+**Where:** `backend/db.js` `addTurn()`. Every dart is validated individually (sector,
+multiplier, physically-impossible-combination rejection) and the visit-level `scored`
+is separately range-checked (`0-180`), but nothing verifies the two agree — a request
+with darts worth `26` total and `scored: 180` (or a checkout's `checkoutPoints` not
+matching `scored`) is accepted as-is. Under the default `OCHE_REQUIRE_AUTH=true` this
+requires an admin session; under the `OCHE_REQUIRE_AUTH=false` LAN-trust opt-out this
+is reachable by anyone who can reach the server, and a buggy client (not just a
+hostile one) hits the same gap.
+
+**Fix (step by step):**
+1. In `addTurn()`, after validating `darts`, compute the same-shaped total
+   `evaluateVisit()`/`scoring.js`'s `dartValue()` would produce (sum of each dart's
+   `sector*multiplier`, with the bull-value special case) and, when `t.bust` is falsy,
+   require it to equal `scored`; when `t.checkout` is truthy, require `checkoutPoints
+   === scored`. Reject a mismatch with `400`.
+2. Add a committed `node:test` in `backend/test/`: a turn whose `darts` sum doesn't
+   match `scored` is rejected 400; a matching turn (including the `bust`/`checkout`
+   special cases) still records normally.
+
+**Verify:** the new test passes; every existing X01/Cricket/drill-mode test (which
+always submits internally-consistent turns) is unaffected.
+
+### SEC-23 — Public `?limit=` params have no upper bound on a handful of read endpoints  **(LOW)**
+
+**Status: Open.**
+
+**Where:** `backend/db.js` `getGhostCandidateLegs()` — `limit` is validated as "a
+positive integer, default 20" but never capped above. `GET
+/api/players/ghost-legs?name=...&limit=999999999` forces a full grouped aggregate scan
+over every X01 leg the player has ever played and returns it in one response. Public,
+unauthenticated, no rate-limit bucket of its own beyond the global 300/60s budget —
+a cheap amplification lever relative to its cost to the server, though not remotely
+comparable to a real DoS primitive.
+
+**Fix (step by step):**
+1. Clamp in `getGhostCandidateLegs()`: `const lim = Math.min(Number.isInteger(...) &&
+   ... > 0 ? Number(limit) : 20, 100)`.
+2. Audit the doc's own "checked and safe" assumption for every other public
+   `?limit=`-style param (`/api/top-finishes`'s hardcoded `10` is fine; sweep for any
+   other user-suppliable `limit`/`count` param added since Part 6) and apply the same
+   cap where one is missing.
+3. Add a committed `node:test`: `getGhostCandidateLegs(name, 999999)` returns at most
+   100 rows.
+
+**Verify:** the new test passes; the existing default (20) and any legitimate smaller
+explicit `limit` still work unchanged.
+
+### SEC-24 — Secure-deployment defaults (`COOKIE_SECURE`, HSTS) are opt-in with no runtime warning  **(LOW, hardening for the "may be internet-facing later" scenario)**
+
+**Status: Open.**
+
+**Where:** `backend/auth.js` (`COOKIE_SECURE` env var, defaults off) and
+`backend/server.js`'s `SECURITY_HEADERS` (no `Strict-Transport-Security` header ever
+sent). Correct and safe for the documented default deployment (plain HTTP on a trusted
+LAN), but silent if the app is later placed behind a reverse proxy or exposed directly
+to the internet without also setting `COOKIE_SECURE=true` — the 30-day admin session
+cookie then travels over plain HTTP with no `Secure` flag and no HSTS to upgrade future
+requests, and nothing in the running app's logs or `/api/errors` surfaces that
+mismatch to the self-hoster.
+
+**Fix (step by step):**
+1. At server startup (`server.js`, near the existing `REQUIRE_AUTH`/`TRUST_PROXY`
+   env-derived constants), log a one-time `console.warn` when `REQUIRE_AUTH` is true,
+   `COOKIE_SECURE` is false, and... there's no reliable in-process signal for "this is
+   reachable over the public internet" — so instead warn unconditionally at startup
+   whenever `COOKIE_SECURE` is unset, framed as "set COOKIE_SECURE=true if this server
+   is reachable over HTTPS from outside this host," matching the existing doc-comment
+   at the top of `server.js` almost verbatim, just surfaced at runtime instead of only
+   in a comment a self-hoster may never read.
+2. When `COOKIE_SECURE=true`, also send `Strict-Transport-Security:
+   max-age=15552000; includeSubDomains` in `SECURITY_HEADERS` (safe only to send when
+   the operator has already told the app it's on HTTPS — sending it over plain HTTP
+   would be actively harmful).
+3. Add a one-paragraph note to the deployment section of `README.md` (or wherever
+   `COOKIE_SECURE`/`TRUST_PROXY` are documented) pairing the two: "if you put this
+   behind a reverse proxy, set both `COOKIE_SECURE=true` and `TRUST_PROXY=true`."
+
+**Verify:** starting the server with `COOKIE_SECURE` unset prints the warning once;
+starting with it set to `true` sends the new HSTS header and prints no warning;
+existing plain-LAN deployments are otherwise unaffected (opt-in, no behavior change to
+the cookie or headers when unset).
+
+## Suggested order for Part 8
+
+1. **SEC-18** — the one escaping gap in an otherwise-consistent file, and the only
+   finding here reachable without the LAN-trust opt-out being deliberately enabled
+   (an admin session can still trigger it via `/api/live`).
+2. **SEC-19** — closes the CSRF gap for the documented open-LAN configuration; pairs
+   naturally with SEC-21 (same function, `readJson()`).
+3. **SEC-20** — narrow window, but full admin compromise if hit; the atomic-insert fix
+   is small.
+4. **SEC-21, SEC-22, SEC-23** — low-severity hardening, any order; SEC-21 shares an
+   implementation with `docs/bug-roadmap.md` BUG-10 so do them together.
+5. **SEC-24** — purely additive (a warning + an opt-in header), no urgency, do last.

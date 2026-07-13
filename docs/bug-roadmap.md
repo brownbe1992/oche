@@ -26,8 +26,11 @@
 > from a live user bug report rather than an audit pass) is a UI/error-handling defect
 > rather than a stats/data-integrity one, so its verification is a live Playwright check
 > instead of a `node:test` case. **BUG-9** was opened by the 2026-07 **fifth-pass
-> audit** (the same read that produced `security-audit-roadmap.md` Part 7 / SEC-17) —
-> see the entry at the bottom.
+> audit** (the same read that produced `security-audit-roadmap.md` Part 7 / SEC-17).
+> **BUG-10** through **BUG-15** were opened by a 2026-07 **sixth-pass audit** (a
+> general code-review pass across the whole app, not scoped to one new feature — the
+> same read that produced `security-audit-roadmap.md` Part 8 / SEC-18 through SEC-24)
+> — see the entries at the bottom.
 
 ## Severity legend
 
@@ -577,6 +580,253 @@ not a privilege issue.
 **Verify:** the new test passes; a full normal game still completes and records its
 winner; a completion naming a non-participant returns 400 and does not touch
 `winner_id`.
+
+---
+
+## Sixth-pass audit (2026-07, whole-codebase general review)
+
+The functional-defect counterparts to `security-audit-roadmap.md` Part 8, found in the
+same general code-review pass. Two data-integrity/corruption risks (BUG-10, BUG-11),
+one render-crash risk (BUG-12), and three lower-severity correctness gaps
+(BUG-13 through BUG-15).
+
+### BUG-10 — `readJson()` accumulates request-body chunks as strings, corrupting multi-byte characters split across a chunk boundary  **(MED)**
+
+**Status: Open.**
+
+**Where:** `backend/server.js` `readJson()`:
+
+```js
+let raw = '';
+req.on('data', c => {
+  raw += c;
+  if (raw.length > 1e6) { ... }
+});
+```
+
+`c` is a `Buffer`; `raw += c` implicitly calls `c.toString()` (UTF-8) on *each chunk
+independently* before concatenating. TCP/HTTP chunking has no obligation to split on a
+character boundary — a multi-byte UTF-8 sequence (an emoji in a player name, an
+accented character, any non-ASCII content sent from `index.html`'s `Backend` helper)
+that happens to straddle two `data` events gets decoded as two separate malformed
+fragments, each contributing a Unicode replacement character (`�`) or, in the worst
+case, invalid bytes that break `JSON.parse` entirely — turning a perfectly valid
+request into either silently-corrupted stored data (a name that displays as `Alic�`
+forever after) or a spurious `400 Invalid JSON body` the client can't explain. Larger
+bodies (a bigger `config` payload, a longer `card_tagline`) are more likely to be
+chunked by Node's own internal buffering, so this gets more likely to fire as request
+size grows, not less.
+
+**Fix (step by step):**
+1. Accumulate raw `Buffer` chunks in an array instead of decoding per-chunk:
+   `const chunks = []; req.on('data', c => { chunks.push(c); ... size check on c.length ... });`
+   then `JSON.parse(Buffer.concat(chunks).toString('utf8'))` once in the `end`
+   handler. This also happens to fix `security-audit-roadmap.md` SEC-21 (the size cap
+   currently counts decoded characters, not bytes) as the same change — implement once.
+2. Add a committed `node:test`: construct a multi-byte character (e.g. an emoji) whose
+   UTF-8 byte sequence is deliberately split across two writes to a mock/real request
+   stream, and assert the resulting parsed JSON string is intact (not `�`-corrupted).
+3. `REFERENCE.md`'s note (if any) on request-body handling gets a one-line mention that
+   chunk boundaries are buffer-safe now.
+
+**Verify:** the new test passes; existing ASCII-only request bodies are unaffected;
+the SEC-21 byte-counting fix (same code path) is verified together.
+
+### BUG-11 — Backup restore overwrites the live database file while the server still holds it open, risking corruption if any write lands before the required restart  **(MED)**
+
+**Status: Open.**
+
+**Where:** `backend/backup-lib.js` `stageRestore()`:
+
+```js
+function stageRestore(sourcePath) {
+  for (const suffix of ['-wal', '-shm']) {
+    const stale = DB_PATH + suffix;
+    if (fs.existsSync(stale)) fs.unlinkSync(stale);
+  }
+  fs.copyFileSync(sourcePath, DB_PATH);
+}
+```
+
+This deletes the live database's WAL/SHM sidecar files and overwrites `DB_PATH`
+*in place* while the running server process still holds its own open `node:sqlite`
+handle on the old inode (the file's own header comment already documents that Linux
+keeps that handle pointing at the old inode's data until the process reopens the
+file — which is exactly why a restart is required afterward). The gap: between
+`stageRestore()` returning `200 { message: 'Restore staged...restart now' }` and the
+admin actually restarting the process, the server is still fully live and will accept
+normal gameplay writes (`addTurn`, `createGame`, etc.) — each of which now writes
+through the *old* in-memory WAL state on top of a file that's been replaced out from
+under it, since `fs.copyFileSync` doesn't coordinate with whatever the live connection
+still thinks the file's current WAL/journal state is. A write landing in that window
+risks either corrupting the just-restored file (defeating the whole point of the
+restore) or corrupting the still-live old data before the restart discards it.
+
+**Fix (step by step):**
+1. Change `stageRestore()` to write the incoming file to a side path (e.g.
+   `DB_PATH + '.restore-pending'`) instead of touching `DB_PATH` directly.
+2. At process startup, before `db.js` opens `DB_PATH` (top of `db.js`, ahead of the
+   `new DatabaseSync(DB_PATH)` call), check for `DB_PATH + '.restore-pending'`; if
+   present, remove any stale `-wal`/`-shm` sidecars, atomically rename the pending file
+   over `DB_PATH` (`fs.renameSync`, same-filesystem so it's atomic), delete the marker,
+   and only then proceed to open the (now-restored) database. This guarantees the swap
+   only ever happens while nothing holds the file open.
+3. Update the "restart now" message and `docs/backups-roadmap.md` to describe the new
+   two-phase behavior (staged now, applied automatically on next start) so it stays
+   accurate — this is a behavior change, not just an implementation detail, per
+   CLAUDE.md's "keep docs in sync" convention.
+4. Add a committed `node:test`: stage a restore against a scratch `DB_PATH`, then
+   invoke the startup-check function directly and assert the scratch DB's content now
+   matches the staged file and the pending marker is gone.
+
+**Verify:** the new test passes; a restore staged and then the process restarted (or
+the startup check invoked directly in a test) ends up with the restored content live;
+a normal boot with no pending restore is unaffected.
+
+### BUG-12 — `display.html`'s Chuckin card crashes the whole render loop if `sessionAvg` isn't numeric  **(LOW)**
+
+**Status: Open.**
+
+**Where:** `frontend/display.html` `renderers.chuckin.card()`:
+
+```js
+const avgText = p.sessionAvg!=null ? p.sessionAvg.toFixed(1) : '—';
+```
+
+`p.sessionAvg` comes from the `/api/live` broadcast payload's per-player array, which
+`ALLOWED_LIVE_KEYS` deliberately leaves unrestricted in shape (documented at its
+definition in `server.js`). The `!=null` guard only rules out `null`/`undefined` — any
+other non-numeric truthy value (a string, an object) reaches `.toFixed(1)` directly and
+throws inside `renderState()`'s `grid.innerHTML = s.players.map(...).join('')`, which
+has no surrounding `try/catch` — the exception propagates out of the SSE `onmessage`
+handler and the scoreboard stops updating on every subsequent live event until a
+reload, with no visible error to the person watching the screen.
+
+**Fix (step by step):**
+1. Coerce before formatting: `const avgNum = Number(p.sessionAvg); const avgText =
+   Number.isFinite(avgNum) ? avgNum.toFixed(1) : '—';` — same pattern this file's own
+   `num()` helper already applies to every other live-payload numeric field, just not
+   consistently to this one.
+2. Sweep the other per-game-type card renderers in this file for the same
+   direct-method-call-on-payload-value pattern (anywhere a `p.<field>` or `s.<field>`
+   from the live payload has a method called on it — `.toFixed`, `.map`, `.join` —
+   without a `Number()`/`Array.isArray()` guard first) and apply the same coercion.
+3. Add a committed `node:test` or scratch script asserting the card-building function
+   returns a fallback string (not a thrown error) when fed a non-numeric `sessionAvg`.
+
+**Verify:** a crafted non-numeric `sessionAvg` in a live payload renders `'—'` instead
+of crashing; the scoreboard keeps updating on the next legitimate event.
+
+### BUG-13 — `deleteLastTurn()` deletes the newest turn for the *game*, not a specific turn, so undo is ambiguous with more than one scoring device  **(LOW)**
+
+**Status: Open.**
+
+**Where:** `backend/db.js` `deleteLastTurn(gameId)`:
+
+```js
+function deleteLastTurn(gameId) {
+  db.prepare('DELETE FROM turns WHERE id = (SELECT MAX(id) FROM turns WHERE game_id = ?)').run(Number(gameId));
+  return { ok: true };
+}
+```
+
+The app's designed usage (one controller device scoring a game) makes "the newest turn
+in this game" and "the turn the person pressing Undo is looking at" identical. But
+nothing in the API or the schema enforces single-device scoring, and if a game is ever
+scored from two devices/tabs concurrently (a second browser tab left open, a phone and
+a tablet both pointed at the same game), pressing Undo on one device deletes whichever
+turn is newest *globally for the game* — which may be the other device's turn, not the
+one the person pressing Undo can see on their own screen. Silent and confusing rather
+than exploitable.
+
+**Fix (step by step):**
+1. Have the client send the id of the turn it believes is "last" (it already has this
+   — `DB.deleteLastTurn()` in `index.html` is called right after recording a turn whose
+   response includes enough to know its id, or a quick follow-up read) as
+   `DELETE /api/games/:id/turns/last?turnId=...`.
+2. In `deleteLastTurn()`, when `turnId` is supplied, verify it actually matches
+   `MAX(id)` for the game before deleting; if it doesn't match, return a `409`-style
+   response the client can use to prompt a refresh instead of silently deleting the
+   wrong turn.
+3. Keep the no-`turnId` call shape working (delete whatever is newest) for backward
+   compatibility / the common single-device case, so this is additive, not breaking.
+4. Add a committed `node:test`: with two turns recorded, calling with a stale
+   `turnId` (not matching current `MAX(id)`) leaves both turns intact and returns the
+   conflict response; calling with the correct `turnId` (or no `turnId`) deletes as
+   before.
+
+**Verify:** the new test passes; the existing single-device Undo flow in `index.html`
+is unaffected (no `turnId` sent, or the id it sends always matches in the normal case).
+
+### BUG-14 — Uploaded-backup stream ignores write-stream backpressure, buffering up to the full 500MB cap in memory on a slow disk  **(LOW)**
+
+**Status: Open.**
+
+**Where:** `backend/server.js` `handleUploadRestore()`:
+
+```js
+req.on('data', chunk => {
+  ...
+  out.write(chunk);
+});
+```
+
+`fs.createWriteStream(...).write()`'s return value (`false` when the internal buffer
+is full and the caller should pause upstream until `'drain'`) is never checked. If disk
+write throughput is slower than the incoming network stream — plausible on
+constrained self-hosted hardware (SD card, network-attached storage, a Pi) — Node
+keeps buffering unwritten chunks in process memory rather than pausing `req`, so a
+large upload (up to the documented `MAX_BACKUP_UPLOAD_BYTES` = 500MB) can transiently
+hold most or all of itself in memory instead of the small streaming footprint the
+design comment (`docs/backups-roadmap.md v2`, "streams straight to disk... rather than
+buffering it as one string") intends. Admin-only route, so this needs a cooperating or
+compromised admin session to trigger — low severity, but a straightforward fix.
+
+**Fix (step by step):**
+1. Respect backpressure: `if (out.write(chunk) === false) { req.pause();
+   out.once('drain', () => req.resume()); }` inside the existing `'data'` handler, or
+   more simply switch to `stream.pipeline(req, out)` (Node's built-in, backpressure-
+   aware pipe) with a `Transform` stream in between that does the existing byte-count
+   cap check per chunk instead of hand-rolling pause/resume.
+2. Add a committed `node:test` (or a scratch integration test) simulating a slow
+   `WriteStream` (e.g. one that never emits `'drain'` until manually triggered) and
+   asserting the request's `'data'` events stop being consumed once the write buffer
+   is full, rather than piling up.
+
+**Verify:** the new test passes; a normal-speed upload (the common case, current CI
+hardware) completes exactly as before with no behavior change.
+
+### BUG-15 — Reverse-proxy deployment without `TRUST_PROXY=true` collapses every client onto one shared rate-limit bucket  **(LOW, deployment foot-gun)**
+
+**Status: Open.**
+
+**Where:** `backend/server.js` `clientIp()` and the `rateLimit('global', ip, 300,
+60000)` call ahead of all routing. Working as designed — `TRUST_PROXY` deliberately
+defaults off so a client can't spoof `X-Forwarded-For` to evade or frame another IP
+(the comment at `clientIp()`'s definition explains this). But if this app is later put
+behind a reverse proxy (a real possibility given "may be exposed to the open internet")
+and the operator doesn't also set `TRUST_PROXY=true`, every request appears to
+originate from the proxy's single loopback/internal address — so the entire
+household shares one 300-requests-per-minute global budget (and one 10/min login
+budget, one 10/min PIN-verify budget, etc.), and ordinary multi-device gameplay can
+trip `429 Too many requests` for everyone during a busy session, misread as the app
+being broken rather than a config gap.
+
+**Fix (step by step):**
+1. At startup, if the server detects it's receiving requests with an
+   `X-Forwarded-For` header while `TRUST_PROXY` is not set to `true`, log a one-time
+   `console.warn` (e.g. the first time `clientIp()` observes `req.headers['x-forwarded-for']`
+   truthy while `TRUST_PROXY` is false) explaining that all such clients are being
+   rate-limited as one IP and pointing at the `TRUST_PROXY` env var.
+2. Add a short paragraph to the reverse-proxy section of `README.md`/deployment docs
+   pairing `TRUST_PROXY=true` with `COOKIE_SECURE=true` (see
+   `security-audit-roadmap.md` SEC-24) as the two settings a proxied deployment needs
+   together, so they're documented as a pair rather than two easy-to-miss independent
+   flags.
+
+**Verify:** the warning fires once (not per-request) when a proxied setup is detected
+without `TRUST_PROXY`; no change to behavior or logging for the default direct-connect
+deployment (no `X-Forwarded-For` header ever arrives).
 
 ---
 
