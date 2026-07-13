@@ -872,7 +872,13 @@ const server = http.createServer(async (req, res) => {
     }
     if ((mt = p.match(/^\/api\/games\/(\d+)\/turns$/)) && m === 'POST') {
       if (!requireWrite(req, res)) return;
-      const b = await readJson(req); return send(res, 200, db.addTurn(Number(mt[1]), b));
+      const b = await readJson(req);
+      // docs/security-audit-roadmap.md SEC-22: this is the one production call site
+      // untrusted input actually reaches, so it's the one place that opts into the
+      // scored/darts consistency cross-check — see addTurn()'s own comment for why
+      // this isn't the default for every caller (backend/test/db.*.test.js calls
+      // addTurn() directly with placeholder scored values unrelated to this invariant).
+      return send(res, 200, db.addTurn(Number(mt[1]), b, { enforceConsistency: true }));
     }
     if ((mt = p.match(/^\/api\/games\/(\d+)\/complete$/)) && m === 'POST') {
       if (!requireWrite(req, res)) return;

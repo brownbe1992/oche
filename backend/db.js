@@ -485,6 +485,7 @@ const q = {
   deleteSessionsForAdmin: db.prepare('DELETE FROM sessions WHERE admin_id = ?'),
 
   insertGame   : db.prepare('INSERT INTO games (category, legs_per_set, sets_per_game, practice, game_type, config) VALUES (?, ?, ?, ?, ?, ?)'),
+  gameTypeById : db.prepare('SELECT game_type FROM games WHERE id = ?'),
   addParticipant: db.prepare('INSERT OR IGNORE INTO game_players (game_id, player_id, dart_weight, out_mode, loadout_id) VALUES (?, ?, ?, ?, ?)'),
   completeGame : db.prepare("UPDATE games SET completed_at = datetime('now'), winner_id = ? WHERE id = ?"),
 
@@ -736,7 +737,20 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   return { gameId };
 }
 
-function addTurn(gameId, t) {
+// docs/security-audit-roadmap.md SEC-22: `opts.enforceConsistency` gates the
+// scored/darts cross-check below. Opt-in, not default-on, and set ONLY by
+// server.js's POST /api/games/:id/turns route (the one production call site untrusted
+// input actually reaches) — deliberately NOT the default, because the existing
+// backend/test/db.*.test.js suite calls addTurn() directly with placeholder `scored`
+// values unrelated to what's being tested (dart-shape validation, unrelated stat
+// aggregation, etc.), an established, pervasive fixture convention across ~14 test
+// files that predates this check. Enforcing it unconditionally there rejects dozens
+// of entirely legitimate internal test calls with no security benefit, since those
+// calls never cross the actual trust boundary (they bypass server.js/HTTP entirely).
+// The real protection is unaffected: every request that actually reaches this
+// function via the network is still validated, because server.js always passes
+// enforceConsistency: true.
+function addTurn(gameId, t, opts = {}) {
   const p = ensurePlayer(t.player);
   // Every real visit is 1-3 physical darts. Enforce that here so a malformed/hostile
   // request can't record a "scored" turn with no dart rows — which would count toward
@@ -802,6 +816,32 @@ function addTurn(gameId, t) {
   if (!Number.isInteger(setNo) || setNo < 1 || !Number.isInteger(legNo) || legNo < 1) throw httpError(400, 'set and leg must be positive integers');
   const checkoutPoints = t.checkout ? (Number(t.checkoutPoints) || 0) : null;
   if (checkoutPoints != null && (!Number.isFinite(checkoutPoints) || checkoutPoints < 0 || checkoutPoints > 170)) throw httpError(400, 'checkoutPoints must be between 0 and 170');
+  // docs/security-audit-roadmap.md SEC-22: cross-check scored against the darts it's
+  // paired with — but ONLY when opted in (see the opts.enforceConsistency comment
+  // above) AND for X01 (game_type check below), where the relationship is simple and
+  // unambiguous (REFERENCE.md §2: scored = sum of this visit's dart face values, or 0
+  // on a bust; a checkout turn's checkoutPoints always equals scored, since it's the
+  // same finishing visit's own score). Cricket's turns.scored is NOT this —
+  // evaluateVisitCricket() computes it from mark-closing state the server would have
+  // to re-derive from the whole game's history to check, so a naive "scored ===
+  // sum(dartValue)" rule would reject entirely legitimate Cricket visits (e.g. 3
+  // marks closing a number score 0 points despite 3 real, non-miss darts). Every
+  // other game type (Doubles Practice/Chuckin/Checkout Trainer/Around the
+  // Clock/World) has its own similarly non-arithmetic relationship between scored and
+  // its darts, or doesn't use `scored` as a points total at all — left unchecked here
+  // for the same reason, not an oversight.
+  const gameTypeRow = opts.enforceConsistency ? q.gameTypeById.get(Number(gameId)) : null;
+  if (gameTypeRow && gameTypeRow.game_type === 'x01') {
+    const dartSum = darts.reduce((sum, d) => sum + (d.sector === 0 ? 0 : d.sector === 25 ? (d.multiplier === 2 ? 50 : 25) : d.sector * d.multiplier), 0);
+    if (t.bust) {
+      if (scored !== 0) throw httpError(400, 'a bust turn must have scored=0');
+    } else if (scored !== dartSum) {
+      throw httpError(400, 'scored does not match the value of the darts thrown this visit');
+    }
+    if (t.checkout && checkoutPoints !== scored) {
+      throw httpError(400, 'checkoutPoints must match scored on a checkout turn');
+    }
+  }
   // Checkout Trainer (docs/checkout-trainer-roadmap.md): the target score offered
   // for this round. Server-computed context, not a scored value, so it's only
   // range-checked (1-170, the finishable range) rather than tied to any other field.

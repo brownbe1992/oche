@@ -1350,7 +1350,27 @@ one just over still rejects, as before.
 
 ### SEC-22 — `addTurn()` never cross-checks `scored` against the darts it's paired with  **(LOW, data-integrity, LAN-trust mode only)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** `addTurn()` gained an `opts.enforceConsistency` flag
+(default off) that, when set and the game is X01, requires `scored` to equal the sum
+of that visit's dart face values (0 on a bust), and `checkoutPoints` to equal `scored`
+on a checkout turn. **Deliberately opt-in, not the default** — an initial
+default-on implementation broke 51 pre-existing test assertions across ~14 unrelated
+`backend/test/db.*.test.js` files, which call `addTurn()` directly with placeholder
+`scored` values that were never meant to satisfy this invariant (dart-shape
+validation tests, unrelated stat-aggregation fixtures, etc.) — none of which cross the
+actual trust boundary, since they bypass `server.js`/HTTP entirely. `server.js`'s
+`POST /api/games/:id/turns` route — the one production call site untrusted input
+actually reaches — passes `{ enforceConsistency: true }`, so the real protection is
+undiminished. Cricket (and every other game type) is explicitly excluded regardless of
+the flag, since `turns.scored` means something structurally different there (mark-
+closing points, not a dart-value sum) — confirmed by a dedicated test that a legitimate
+Cricket visit (3×T20 closing a number, scoring 120 despite 180 in raw dart value)
+still passes even with the flag set. Committed regression test
+`backend/test/db.turn-consistency-guard.test.js` covers the mismatch/bust/checkout/
+bull-value cases directly against `addTurn()`, confirms an unflagged call is
+unaffected (preserving the existing test-fixture convention), and — spawning a real
+server — confirms `POST /api/games/:id/turns` rejects an inconsistent turn over the
+actual HTTP API. Full backend suite green (549/549, no regressions).
 
 **Where:** `backend/db.js` `addTurn()`. Every dart is validated individually (sector,
 multiplier, physically-impossible-combination rejection) and the visit-level `scored`
