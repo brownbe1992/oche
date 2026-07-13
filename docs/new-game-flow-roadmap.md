@@ -83,14 +83,19 @@ being solved is exactly today's "everything stays visible forever" behavior.
   there's nothing to choose between with only one).
 - **One flat dropdown of every game type**, replacing today's three separate
   controls (Mode row + Practice-type sub-toggle + X01/Cricket segmented
-  toggle) with a single list: **Daily Challenge** (listed first, but only
-  when not already attempted today — reuses the existing
-  `/api/challenges/status` check `startGame()` already makes, just moved
-  earlier so the dropdown can conditionally omit/reorder it instead of
-  discovering "already played" only after the player commits), **X01**,
-  **Cricket**, **Just Chuckin' It**, **Doubles Practice**, **Ghost Mode**,
-  and an **"other game modes"** group for the rest (Checkout Trainer, Around
-  the Clock, Around the World).
+  toggle) with a single list, every entry listed individually with no
+  sub-grouping: **Daily Challenge** (listed first — see its own subsection
+  below for how the "already attempted" check works), **X01**, **Cricket**,
+  **Just Chuckin' It**, **Doubles Practice**, **Ghost Mode**, **Checkout
+  Trainer**, **Around the Clock**, **Around the World**. **Resolved**: the
+  original notes' "other game modes" line was shorthand for "whatever I
+  forgot to list, or hasn't been built yet" — not a literal menu entry or
+  group. There's no catch-all bucket to design: today's already-built modes
+  (Checkout Trainer, Around the Clock, Around the World) each get their own
+  flat entry like everything else, and any future mode (Killer, Baseball,
+  etc., once actually built per `docs/game-modes-roadmap.md`) just adds one
+  more flat entry to this same list when it ships — nothing structural to
+  reserve a place for now.
 - **X01 flavor**: selecting X01 reveals a second dropdown — 501/301/170/101 —
   the same four values `#start-score-select`/`pickStartSelect()` already
   offer, just surfaced conditionally instead of always-visible.
@@ -103,6 +108,23 @@ being solved is exactly today's "everything stays visible forever" behavior.
 - A **Continue** button advances to Step 3. A **Back** button at the bottom of
   the screen returns to Step 1, preserving whatever was already selected here
   (see "Back navigation" below).
+
+#### Daily Challenge: check on selection, not before
+
+**Resolved**: the same-day-attempt check is **not** made upfront to decide
+whether to show or reorder the Daily Challenge entry — it's always listed
+first, unconditionally. The check happens the moment a player *selects* it
+(reusing the existing `/api/challenges/status` call `startGame()` already
+makes today, just moved from Play Now time to selection time):
+
+- **Not yet attempted today**: proceeds exactly like any other mode — shows
+  its how-to-play blurb, Continue enabled.
+- **Already attempted today**: instead of the how-to-play blurb, show a
+  blocking message — something like *"You've already attempted today's Daily
+  Challenge. Please come back tomorrow."* — with Continue disabled for this
+  selection. The player can still pick a different entry from the dropdown
+  and proceed normally; only Daily Challenge itself is blocked for the rest
+  of the day.
 
 #### Practice-only vs. H2H-eligible modes
 
@@ -204,15 +226,6 @@ Per `CLAUDE.md`'s standing conventions:
 
 ## Open questions for whoever picks this up
 
-- **"Other game modes" grouping**: confirmed to include Checkout Trainer and
-  Around the Clock/World, based on today's implementation — but should this
-  be a flat sub-list in the same dropdown, a nested "more..." option, or its
-  own secondary dropdown? Not specified in the original notes.
-- **Daily Challenge ordering data fetch**: showing Daily Challenge "first, if
-  not already attempted" means Step 2's dropdown needs the same-day-attempt
-  check *before* rendering, not just at Play Now time as today — is that
-  check made once when Step 2 first loads, or re-checked live (e.g. if the
-  session spans midnight)?
 - **League picker / H2H banner**: today's `#league-picker-wrap`/`#h2h-banner`
   live inside the Players section — which step do they belong to in the new
   flow, Step 1 (players) or somewhere in Step 2/3 (since league-tagging is
@@ -230,8 +243,11 @@ Per `CLAUDE.md`'s standing conventions:
 3. Move Step 2 (Choose a game) in: define the `contexts` (`practice`/`h2h`)
    flag per mode/game-type entry and filter the dropdown by current player
    count, collapse the Mode row + Practice-type sub-toggle + X01/Cricket
-   toggle into that one filtered dropdown, add the X01-flavor second
-   dropdown, and write the missing how-to-play copy for every mode that
+   toggle into that one filtered flat dropdown (Daily Challenge through
+   Around the World, no sub-groups), add the X01-flavor second dropdown,
+   move the `/api/challenges/status` check from Play Now time to Daily
+   Challenge's selection time (with its "come back tomorrow" blocking
+   message), and write the missing how-to-play copy for every mode that
    doesn't have it yet.
 4. Move Step 3 (More options) in: relocate each mode's existing options
    section under the new step, resolving the classic-vs-custom Cricket
