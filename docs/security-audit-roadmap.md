@@ -1432,7 +1432,21 @@ explicit `limit` still work unchanged.
 
 ### SEC-24 — Secure-deployment defaults (`COOKIE_SECURE`, HSTS) are opt-in with no runtime warning  **(LOW, hardening for the "may be internet-facing later" scenario)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** `auth.js` now exports `COOKIE_SECURE`; `server.js`'s
+`server.listen()` callback prints a one-time `console.warn` when it's unset,
+explaining what to set and why. `SECURITY_HEADERS` now conditionally includes
+`Strict-Transport-Security: max-age=15552000; includeSubDomains` — only when
+`COOKIE_SECURE=true`, since sending HSTS over plain HTTP (the documented default LAN
+deployment) would be actively harmful. `README.md`'s "Exposing this to the internet —
+checklist" now explicitly pairs `COOKIE_SECURE=true` with `TRUST_PROXY=true` as the
+two settings a reverse-proxy deployment needs together (closing BUG-15's
+documentation half at the same time, since both findings pointed at the same
+checklist). Committed regression test
+`backend/test/server.cookie-secure-hardening.test.js` spawns the server both ways and
+confirms: unset → the warning appears on stderr and no HSTS header is sent;
+`COOKIE_SECURE=true` → no warning and the HSTS header is sent on every response.
+Manually verified against a live server both ways as well. Full backend suite green
+(552/552).
 
 **Where:** `backend/auth.js` (`COOKIE_SECURE` env var, defaults off) and
 `backend/server.js`'s `SECURITY_HEADERS` (no `Strict-Transport-Security` header ever

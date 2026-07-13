@@ -877,7 +877,12 @@ work through this list. It's also tracked in `docs/security-audit-roadmap.md`.
 
 - **Put it behind a TLS-terminating reverse proxy.** The app itself only speaks plain HTTP.
 - **Set `COOKIE_SECURE=true`** once it's served over HTTPS, so the admin session cookie
-  gets the `Secure` flag.
+  gets the `Secure` flag and the server starts sending `Strict-Transport-Security`. The
+  server prints a startup warning if this is left unset — that's your reminder to check
+  this list, not something to silence by editing logging config. **Pair this with
+  `TRUST_PROXY=true` below** — a reverse-proxy deployment needs both, not just one:
+  `COOKIE_SECURE` protects the session cookie, `TRUST_PROXY` keeps the rate limiter
+  looking at real client IPs instead of the proxy's single address.
 - **Leave `OCHE_REQUIRE_AUTH` at its default (`true`)** — every write already requires a
   logged-in admin with no configuration needed.
 - **Set `TRUST_PROXY=true`** *only* if the reverse proxy in front of it is one you control

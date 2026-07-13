@@ -91,5 +91,5 @@ module.exports = {
   hashSecret, verifySecret,
   newSessionToken, hashToken,
   parseCookies, sessionCookieHeader, clearSessionCookieHeader,
-  SESSION_COOKIE, SESSION_TTL_MS,
+  SESSION_COOKIE, SESSION_TTL_MS, COOKIE_SECURE,
 };

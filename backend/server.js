@@ -168,6 +168,12 @@ const SECURITY_HEADERS = {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
     "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; " +
     "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+  // docs/security-audit-roadmap.md SEC-24: only sent when the operator has told the
+  // app it's on HTTPS (COOKIE_SECURE=true) — sending Strict-Transport-Security over
+  // plain HTTP would be actively harmful (it can lock out a plain-HTTP LAN deployment
+  // that later can't reach HTTPS), so this is opt-in via the same flag that already
+  // gates the session cookie's Secure attribute, not unconditional.
+  ...(auth.COOKIE_SECURE ? { 'Strict-Transport-Security': 'max-age=15552000; includeSubDomains' } : {}),
 };
 
 // The frontend is served as plain static files with no build-time versioning/hashing,
@@ -1193,4 +1199,19 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => console.log(`Darts scorer running on http://localhost:${PORT}`));
+server.listen(PORT, () => {
+  console.log(`Darts scorer running on http://localhost:${PORT}`);
+  // docs/security-audit-roadmap.md SEC-24: correct and safe for the documented
+  // default deployment (plain HTTP on a trusted LAN), but silent if this server is
+  // later placed behind a reverse proxy or exposed to the internet without also
+  // setting COOKIE_SECURE=true — the 30-day admin session cookie then travels over
+  // plain HTTP with no Secure flag and no HSTS to upgrade future requests. One-time
+  // startup warning so a self-hoster who never reads this file's header comment
+  // still finds out.
+  if (!auth.COOKIE_SECURE) {
+    console.warn('[oche] COOKIE_SECURE is not set. If this server is reachable over HTTPS ' +
+      '(e.g. behind a reverse proxy) from outside this host, set COOKIE_SECURE=true so the ' +
+      'admin session cookie gets the Secure flag and Strict-Transport-Security is sent. ' +
+      'Leave unset for a plain-HTTP LAN deployment.');
+  }
+});
