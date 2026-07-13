@@ -601,47 +601,93 @@ stats").
   three sub-modes). Purely a New Game UI reorganization — no change to
   `setMode()`'s underlying state handling or any game logic.
 
-### Guided Around the Clock / Around the World — design (not yet built)
+### Guided Around the Clock / Around the World — ✅ Built (2026-07)
 
-> Status: **designed, not started.** Tracked as its own item on
-> `docs/open-roadmap-items.md`. Distinct from the plain "Round the Clock"
-> backlog bullet above (§Other known variants) — that's a proposed brand-new
-> **game type** with its own win condition (a genuine match, playable H2H);
-> this is a **drill**, the same shape as Doubles Practice/Just Chuckin' It —
-> solo, no opponent, ends when the player finishes or quits.
+> Distinct from the plain "Round the Clock" backlog bullet above (§Other known
+> variants) — that's a proposed brand-new **game type** with its own win
+> condition (a genuine match, playable H2H); this is a **drill**, the same
+> shape as Doubles Practice/Just Chuckin' It — solo, no opponent, ends when
+> the player finishes or quits.
 
-Right now, Around the Clock (every number 1-20 hit as a single, within one
-game) and Around the World (all 63 dart outcomes, lifetime) are **passive**
-completion badges — they're checked incidentally during whatever game you
-happen to be playing (`singlesHit` in X01's `newMatchPlayer()`,
-`getAroundTheWorldProgress()`'s async lifetime query), not something you
-actively sit down to practice. A player who wants to *work on* Around the
-Clock today has no dedicated mode — they just play regular X01/Cricket and
-hope they happen to hit enough different numbers.
+Around the Clock (every number 1-20 hit as a single, within one game) and
+Around the World (all 63 dart outcomes, lifetime) were previously **passive**
+completion badges only — checked incidentally during whatever game you
+happened to be playing (`singlesHit` in X01's `newMatchPlayer()`,
+`getAroundTheWorldProgress()`'s async lifetime query), never something you
+actively sat down to practice. They now also each have a dedicated drill mode
+built on the identical mechanism, with live progress feedback — the existing
+passive badges are unchanged and keep firing exactly as before, from any mode.
 
-- **Shape**: a third Practice Drill Mode alongside Doubles Practice/Chuckin',
-  its own `throwDartAroundTheClock()`/`renderGameAroundTheClock()` pair (same
+- **Built**: two new game types, `around_the_clock` and `around_the_world` —
+  their own `throwDartAroundTheClock()`/`renderGameAroundTheClock()` and
+  `throwDartAroundTheWorld()`/`renderGameAroundTheWorld()` pairs (the same
   "hardcode a `gameType` branch" precedent both existing drills established,
-  not a registry redesign) — no legs/sets/opponent, ends when all 20 numbers +
-  bull are hit (a genuine completion, not a timeout).
-- **Live progress feedback** — the whole point of making this a dedicated mode
-  rather than leaving it passive: a persistent on-screen dartboard-style
-  progress view (which numbers are done, which remain), reusing the same
-  heatmap/progress-view UI investment already built for Around the World's
-  Player Profile section (`docs/archive/achievements-badges-roadmap.md` flagged
-  this exact view as "meaningfully more UI work than everything else combined"
-  when it first shipped — reusing it here is the payoff of that earlier work,
-  not a second build from scratch).
-- **Around the World variant**: same drill shape, but tracks progress toward
-  all 63 outcomes (across sessions, not reset per-game like Around the Clock)
-  rather than just the 20 numbers-as-singles — effectively turns the existing
-  lifetime tracker into something you can deliberately sit down and chip away
-  at in one focused session, watching the remaining-outcomes count drop live.
-- **Stats**: darts taken to complete (Around the Clock only — Around the World
-  is open-ended/cross-session), fastest completion (Personal Best), sessions
-  played. Doesn't need new formulas — completion is already boolean per-number
-  tracking, just needs a session/completion-time wrapper around data the app
-  already computes.
+  not a registry redesign). No schema changes at all — both just added to
+  `KNOWN_GAME_TYPES`.
+- **Resolved (was an open question): Around the Clock's target set is 20
+  numbers only, no bull** — matches the existing passive `around_the_clock`
+  badge's exact formula (`singlesHit.size >= 20`) exactly, even though this
+  section's earlier draft said "+bull". A round ends the instant all 20 are
+  hit as singles; `game.legNo` is repurposed as a round counter and
+  `turns.bust` as "this dart completed the round," the identical repurposing
+  Doubles Practice already established for both columns. "Start Next Clock"
+  starts a fresh round in the same `games` row.
+- **Around the World**: no round boundary at all — structurally identical to
+  Chuckin (one continuous stream of 1-dart turns per `games` row, `set_no=
+  leg_no=1` throughout), tracking progress toward the same lifetime 63-outcome
+  set `getAroundTheWorldProgress()` already computes (not reset per session).
+  The session never force-ends; reaching 63/63 is a notable event, not a stop
+  condition.
+- **Live progress feedback** — the whole point of making these dedicated
+  modes rather than leaving them passive: a persistent on-screen progress
+  grid (which numbers/outcomes are done, which remain), reusing the existing
+  Player Profile "Around the World Progress" grid concept
+  (`docs/archive/achievements-badges-roadmap.md` flagged that view as
+  "meaningfully more UI work than everything else combined" when it first
+  shipped). `buildOutcomeGridHtml()` was extracted from
+  `renderAroundTheWorldProgress()`'s guts into a shared helper (`cells:'all'`
+  for the 63-outcome World grid, `cells:'numbers'` for the 20-cell Clock
+  grid) that both the static Player Profile section and the two drills' live
+  in-game views now share — reusing it here is the payoff of that earlier
+  work, not a second build from scratch. As part of the extraction, each cell
+  gained a non-color checkmark + `aria-label` and the live views wrap it in an
+  `aria-live="polite"` region (docs/accessibility-roadmap.md's standing "not
+  color alone" requirement — this upgrades the existing static Player Profile
+  grid's accessibility for free, not a separate pass). The Live Scoreboard
+  (`display.html`) gets its own compact mirror-copied port,
+  `buildOutcomeGridCompact()`, following the same "no shared module between
+  the two files" precedent Chuckin's live heatmap already established.
+- **New leg/pace exclusion, separate from `NOT_CHUCKIN`**: Around the World
+  shares Chuckin's exact "no round boundary, one continuous stream" shape, so
+  a new `NOT_CONTINUOUS_STREAM` constant (`backend/db.js`) excludes it from
+  the same leg-count/pace aggregates Chuckin is already excluded from
+  (`practiceLegs`, `todayLegs`/`weekLegs`, `_pace()`) — but Around the Clock
+  (genuine round=leg boundary, same shape as Doubles Practice, which is *not*
+  excluded) stays included in all of them. `getDartAnalytics()` and
+  `getAroundTheWorldProgress()` deliberately keep using the narrower
+  `NOT_CHUCKIN` instead — the former because targeted-practice darts belong in
+  cross-game-type sector analytics (the existing Doubles Practice precedent),
+  the latter because it's literally the tracker this feature exists to feed.
+- **Stats**: `getAroundTheClockStatBubbles()`/`getAroundTheClockPersonalBests()`
+  (dartsThrown, sessionsPlayed, completions, completionRate,
+  avgDartsPerCompletion, bestCompletionDarts — "darts taken to complete" and
+  "fastest completion," exactly as originally planned) and
+  `getAroundTheWorldDrillStatBubbles()`/`getAroundTheWorldPersonalBests()`
+  (dartsThrown, sessionsPlayed, avgDartsPerSession, plus the same lifetime
+  progress fraction the Player Profile grid shows — "sessions played," as
+  planned; no per-round "fastest completion" concept, since this mode never
+  finishes). Confirmed no new formulas were needed — completion is boolean
+  per-number/per-outcome tracking, wrapped in a session/round grouping query.
+  Two new Home page leaderboard boards for Around the Clock (Fastest
+  Completion, Most Completions) and one for Around the World (Lifetime
+  Progress), mirroring Doubles Practice's Home tab precedent.
+- **Resolved (was an open question): guided-session completion awards new,
+  distinct badges** — `guided_clock` (🧭) and `guided_world` (🗺️), grouped
+  into a new "Practice Drills" Badge Case section — rather than reusing the
+  existing passive `around_the_clock`/`around_the_world` badges, which keep
+  firing unrelated to this feature. Both are wired through the same
+  per-dart-snapshot `badgeReverts`/`voided` undo-revocation mechanism every
+  other moment-style badge uses, so undoing the completing dart un-earns it.
 
 ## New Game / Scoring screen changes
 

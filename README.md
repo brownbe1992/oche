@@ -8,7 +8,7 @@ A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player 
 
 **v0.14.0**
 
-You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, an [84-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. A solo [Checkout Trainer mode](#new-game) is a no-dartboard mental drill — given a target score, tap out the fewest-darts checkout from memory and get graded instantly — with an untimed Freeform mode and a 60-second Checkout Blitz sprint with its own leaderboard. All data lives in a SQLite database on your own server.
+You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, an [86-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. A solo [Checkout Trainer mode](#new-game) is a no-dartboard mental drill — given a target score, tap out the fewest-darts checkout from memory and get graded instantly — with an untimed Freeform mode and a 60-second Checkout Blitz sprint with its own leaderboard. Two guided practice drills, [🧭 Around the Clock and 🗺️ Around the World](#new-game), turn the app's existing completion tracking into active solo sessions with live progress feedback. All data lives in a SQLite database on your own server.
 
 > Looking for exact stat formulas, achievement trigger conditions, the full database schema, or how a feature works internally (e.g. to debug it)? See **[REFERENCE.md](REFERENCE.md)** — the technical reference manual, kept up to date alongside this README.
 
@@ -94,7 +94,7 @@ The landing page shows a live snapshot of all-time activity:
 
 **This week / Last game played** — legs thrown today and this week, darts thrown this week, and a summary of the most recently completed game (players, category, winner, and when).
 
-**H2H / Practice toggle** — switches the leaderboards below between head-to-head and solo/practice stats. A second game-type toggle — **X01 / Cricket / Doubles Practice / Checkout Trainer** — switches the leaderboards between each game type's own stat vocabulary (the solo-only entries, Doubles Practice and Checkout Trainer, only appear while the Practice tab is selected). (Just Chuckin' It isn't on this toggle — it has no win/opponent-based stats to rank on a leaderboard; its stats are Player Profile-only.)
+**H2H / Practice toggle** — switches the leaderboards below between head-to-head and solo/practice stats. A second game-type toggle — **X01 / Cricket / Doubles Practice / Checkout Trainer / Around the Clock / Around the World** — switches the leaderboards between each game type's own stat vocabulary (the solo-only entries — Doubles Practice, Checkout Trainer, Around the Clock, and Around the World — only appear while the Practice tab is selected). (Just Chuckin' It isn't on this toggle — it has no win/opponent-based stats to rank on a leaderboard; its stats are Player Profile-only.)
 
 **X01 leaderboards:**
 - 3-dart average leaderboard
@@ -124,6 +124,13 @@ The landing page shows a live snapshot of all-time activity:
 **Checkout Trainer leaderboard** (switching the toggle to Checkout Trainer — no mode param, always solo, only shown outside the H2H tab):
 - ⏱️ **Checkout Blitz — Best Score** — each player's single best-ever 60-second run, ranked descending. No minimum-attempts floor (a peak single-run value, like Highest Checkout, not a rate).
 
+**Around the Clock leaderboards** (switching the toggle to Around the Clock — no mode param, always solo):
+- Fastest Completion — each player's own fastest completed round, by darts
+- Most Completions — total completed rounds
+
+**Around the World leaderboard** (switching the toggle to Around the World — no mode param, always solo):
+- Lifetime Progress — every player ranked by how many of the 63 lifetime dart outcomes they've hit
+
 A **"View full stats glossary"** link opens a shared reference explaining every stat term used across the app.
 
 ---
@@ -136,7 +143,7 @@ Configure a game before starting:
 |---|---|
 | **Game** | X01 · Cricket |
 | **Mode** | H2H (head-to-head) · Practice (solo) · 🎯 Daily Challenge · 👻 Ghost · 🧮 Checkout Trainer |
-| **Practice type** (Practice only) | Practice · Doubles Practice · Just Chuckin' It |
+| **Practice type** (Practice only) | Practice · Doubles Practice · Just Chuckin' It · Around the Clock · Around the World |
 | **Checkout Trainer sub-mode** (Checkout Trainer only) | Freeform (untimed) · ⏱️ Checkout Blitz (60 seconds) |
 | **Format (X01)** | 501 · 301 · 170 · 101 (dropdown) |
 | **Targets (Cricket)** | Classic (15–20, Bull) · Custom (any 7 numbers) |
@@ -168,6 +175,10 @@ Two sub-modes:
 - **⏱️ Checkout Blitz** — a 60-second sprint against a wall-clock countdown (announced at 30/10/5 seconds remaining for screen-reader users). Every submission — right or wrong — immediately serves the next target; a round already in progress when time runs out is always allowed to finish. Optimal answers score 2 points, legal-but-not-optimal score 1, illegal scores 0, so rushing to *any* finish scores worse than taking the extra half-second to find the best one. Results show your final score plus the optimal/legal/illegal breakdown. Your best-ever run and its date appear on a dedicated Home page leaderboard, and your Personal Bests block adds Best Checkout Blitz Score and Avg Checkout Blitz Score.
 
 Checkout Trainer has its own 33-badge set (28 laddered milestones across 5 ladders — Lifetime Attempts, Lifetime Optimal Answers, Session Endurance, Best Optimal Streak, and Checkout Blitz's own Best Blitz Score — plus 5 one-off badges: 🐟 The 170 Club, 🎯 One-Darter, 🌟 Perfectionist, 💎 Perfect Minute, and 📸 Photo Finish). Like Just Chuckin' It's milestones, every laddered badge here is a permanent, once-earned achievement. See [Achievements & Badges](#achievements--badges) below.
+
+**🧭 Around the Clock** is a guided solo drill: hit every number 1 through 20 as a single, in any order. A live progress grid on the scoring screen and Live Scoreboard shows exactly which numbers are still outstanding, updating after every dart. A round ends the instant all 20 are hit — **Start Next Clock** resets the grid and starts a fresh round. There's no numeric score, no opponent, and no Enter-turn step, same as Doubles Practice/Just Chuckin' It — every dart commits the instant it's thrown, and Undo Last Dart is supported. The first time you ever complete a round, you earn the **Guided Clock** badge. See [Player Profile](#player-profile) for its own stat bubbles (Completions, Darts/Completion, Darts Thrown) and Personal Bests (fastest completion), and the Home page for its own leaderboards.
+
+**🗺️ Around the World** is the same idea applied to the game's full lifetime tracker: chip away at all 63 dart outcomes (every number 1–20 as a single, double, and treble, plus outer bull, double bull, and a miss) in one focused session. Unlike Around the Clock, progress carries across sessions — the live grid shows your combined lifetime progress, not just what you've hit today — and there's no round to finish; throw for as long as you like, then press **End game**. Reaching all 63 outcomes during a guided session earns the **Guided World** badge (separate from the existing passive **Around the World** badge, which keeps firing from any mode). See [Player Profile](#player-profile) for its own stat bubbles (Sessions Played, Darts Thrown) and Personal Bests (sessions played, lifetime progress), and the Home page for its own leaderboard.
 
 ---
 
@@ -240,7 +251,7 @@ choice, no checkout hints, and no bust concept:
 
 ### Achievements & Badges
 
-Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 4 Cricket-specific badges, 2 [Tournament](#tournaments)-specific badges, 3 Daily Challenge badges, 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!), and 33 Checkout Trainer badges (28 laddered milestones across 5 ladders — 4 Freeform, 1 Checkout Blitz — plus 5 one-off badges). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
+Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 4 Cricket-specific badges, 2 [Tournament](#tournaments)-specific badges, 3 Daily Challenge badges, 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!), 33 Checkout Trainer badges (28 laddered milestones across 5 ladders — 4 Freeform, 1 Checkout Blitz — plus 5 one-off badges), and 2 Practice Drills badges for the two [guided drills](#new-game). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
 
 | Badge | How to earn it |
 |---|---|
@@ -304,7 +315,14 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges c
 |---|---|
 | 🎯 **180!** | Three darts, sixty each — assuming 3 darts per turn (the same convention as the ladders above), since Just Chuckin' It otherwise has no turn boundary at all |
 
-**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 84-badge roster, grouped into X01/Cricket/Tournament/Daily Challenge/Just Chuckin' It/Checkout Trainer sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), both Tournament badges (Champion, Giant Slayer (Tournament)), Full Rotation, all 18 Just Chuckin' It milestones, and all 33 Checkout Trainer badges are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
+**Practice Drills' 2 badges** — deliberately separate from the passive Around the Clock/Around the World badges above, which keep firing from any mode; these two celebrate completing a [guided drill](#new-game) session specifically:
+
+| Badge | How to earn it |
+|---|---|
+| 🧭 **Guided Clock** | Complete a guided Around the Clock drill — hit every number 1–20 as a single |
+| 🗺️ **Guided World** | Reach all 63 lifetime dart outcomes while playing a guided Around the World session |
+
+**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 86-badge roster, grouped into X01/Cricket/Tournament/Daily Challenge/Just Chuckin' It/Checkout Trainer/Practice Drills sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), both Tournament badges (Champion, Giant Slayer (Tournament)), Full Rotation, both Practice Drills badges (Guided Clock, Guided World), all 18 Just Chuckin' It milestones, and all 33 Checkout Trainer badges are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
 
 **Around the World Progress** — a dedicated grid on the Player Profile showing exactly which of the 63 lifetime dart outcomes are still missing, alongside the Badge Case.
 
@@ -426,7 +444,7 @@ Each player has a dedicated profile page with full career statistics, accessible
 
 #### Tabs
 
-**Overall** · **H2H** · **Practice** — all stats and charts filter to the selected mode. A second game-type toggle sits just above the stat bubbles — **X01 / Cricket / Doubles Practice / Just Chuckin' It / Checkout Trainer** — switches the bubbles, chart, and Personal Bests section between each game type's own stat vocabulary (X01's 15 stats, Cricket's 6, Doubles Practice's 3, Chuckin's 8, or Checkout Trainer's 3 — see below). The Home page's leaderboards cover X01, Cricket, Doubles Practice, and Checkout Trainer (its Checkout Blitz leaderboard) — Just Chuckin' It doesn't have a competitive leaderboard shape to show there (no wins, no opponent), so it's Player Profile-only.
+**Overall** · **H2H** · **Practice** — all stats and charts filter to the selected mode. A second game-type toggle sits just above the stat bubbles — **X01 / Cricket / Doubles Practice / Just Chuckin' It / Checkout Trainer / Around the Clock / Around the World** — switches the bubbles, chart, and Personal Bests section between each game type's own stat vocabulary (X01's 15 stats, Cricket's 6, Doubles Practice's 3, Chuckin's 8, Checkout Trainer's 3, Around the Clock's 3, or Around the World's 2 — see below). The Home page's leaderboards cover X01, Cricket, Doubles Practice, Checkout Trainer (its Checkout Blitz leaderboard), Around the Clock, and Around the World — Just Chuckin' It doesn't have a competitive leaderboard shape to show there (no wins, no opponent), so it's Player Profile-only.
 
 #### Stat Bubbles
 
@@ -490,6 +508,21 @@ Switching to **Checkout Trainer** shows its own 3 stat bubbles instead (Freeform
 | **Accuracy %** | Legal finishes ÷ total attempts |
 | **Attempts** | Total checkout attempts, lifetime |
 
+Switching to **Around the Clock** shows its own 3 stat bubbles instead:
+
+| Bubble | Description |
+|---|---|
+| **Completions** | Number of completed rounds (all 20 numbers hit) |
+| **Darts / Completion** | Average darts taken to complete a round |
+| **Darts Thrown** | Total individual darts thrown in this mode, lifetime (includes abandoned rounds) |
+
+Switching to **Around the World** shows its own 2 stat bubbles instead:
+
+| Bubble | Description |
+|---|---|
+| **Sessions Played** | Number of guided Around the World sessions played |
+| **Darts Thrown** | Total individual darts thrown in this mode, lifetime |
+
 #### Chart
 
 A line chart showing the selected metric over time. Filters:
@@ -499,7 +532,7 @@ A line chart showing the selected metric over time. Filters:
 
 #### Dartboard Heatmap
 
-A non-interactive dartboard shaded by how often each region has been hit (with exact counts on hover) — shown on **every** game-type toggle (X01, Cricket, Doubles Practice, Just Chuckin' It), not just Just Chuckin' It. **Dartboard-mode** taps carry extra precision the heatmap uses: a single hit shades its inner half (between bull and treble) and outer half (between treble and double) independently, and a miss shades one of two rings just outside the double — a **near** band (grazed the wire) and a **far** band (a proper miss) — instead of just disappearing. A faint diagonal hatch marks a single hit with no inner/outer data (any Pad-mode dart, or one thrown before this existed) so the picture never silently implies precision that isn't there. A **Bounce-outs: N** line underneath counts darts that struck the board but bounced or fell out before they counted — tracked separately from misses since the cause is usually completely different (a grip/weight/board-tension problem, not an aim problem) — available as its own button in every game type and input mode, including Cricket's own scoring pad.
+A non-interactive dartboard shaded by how often each region has been hit (with exact counts on hover) — shown on **every** game-type toggle (X01, Cricket, Doubles Practice, Just Chuckin' It, Around the Clock, Around the World), not just Just Chuckin' It. **Dartboard-mode** taps carry extra precision the heatmap uses: a single hit shades its inner half (between bull and treble) and outer half (between treble and double) independently, and a miss shades one of two rings just outside the double — a **near** band (grazed the wire) and a **far** band (a proper miss) — instead of just disappearing. A faint diagonal hatch marks a single hit with no inner/outer data (any Pad-mode dart, or one thrown before this existed) so the picture never silently implies precision that isn't there. A **Bounce-outs: N** line underneath counts darts that struck the board but bounced or fell out before they counted — tracked separately from misses since the cause is usually completely different (a grip/weight/board-tension problem, not an aim problem) — available as its own button in every game type and input mode, including Cricket's own scoring pad.
 
 #### Personal Bests
 
@@ -512,9 +545,11 @@ On the Cricket toggle, this section shows **Best Leg MPR**, **Fewest Darts to Cl
 
 On the Doubles Practice toggle, this section shows just **Best Round (Darts)** and **Best Round (Doubles Hit)** — no win-streak/recent-form fields, since this mode has no win condition. On the Just Chuckin' It toggle, it shows **Best Session (Darts)** and **Best Session (Trebles)**, the same deliberately-smaller 2-field shape. On the Checkout Trainer toggle, it shows **Toughest Checkout Solved**, **Best Optimal Streak**, **Best Checkout Blitz Score**, and **Avg Checkout Blitz Score** (whichever fields have data) — same no-win-condition reasoning as Doubles Practice/Chuckin.
 
+On the Around the Clock toggle, this section shows just **Fastest Completion (Darts)** — the fewest darts a completed round has ever taken. On the Around the World toggle, it shows **Sessions Played** and **Lifetime Progress** (e.g. "22 / 63") instead of a per-round record, since this mode's progress is lifetime/cross-session by design and never "wins."
+
 #### Badge Case
 
-The full 84-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (23 badges), a **Cricket** section (4 badges), a **Tournament** section (2 badges), a **Daily Challenge** section (3 badges), a **Just Chuckin' It** section (19 badges), and a **Checkout Trainer** section (33 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
+The full 86-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (23 badges), a **Cricket** section (4 badges), a **Tournament** section (2 badges), a **Daily Challenge** section (3 badges), a **Just Chuckin' It** section (19 badges), a **Checkout Trainer** section (33 badges), and a **Practice Drills** section (2 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
 
 #### On This Day
 
@@ -937,12 +972,15 @@ GET  /api/stats/cricket-perfect-leg?mode=   Cricket "closed in the fewest possib
 GET  /api/stats/doubles-practice-accuracy   Doubles % leaderboard (no mode param — always practice)
 GET  /api/stats/doubles-practice-best-round Doubles Practice best-single-round leaderboard (no mode param)
 GET  /api/stats/checkout-blitz-leaderboard  Checkout Blitz best-single-run leaderboard (no mode param)
+GET  /api/stats/around-the-clock-fastest    Around the Clock fastest-completion leaderboard (no mode param)
+GET  /api/stats/around-the-clock-completions Around the Clock most-completions leaderboard (no mode param)
+GET  /api/stats/around-the-world-progress   Around the World lifetime-progress leaderboard (no mode param)
 ```
 
 All leaderboard endpoints accept `?mode=h2h|practice` to filter by game mode. Omit for overall. The
-Doubles Practice and Checkout Blitz endpoints above never take a `mode` param — both game types are
-always solo practice, so there's no H2H side to split against (same reasoning as `cricket-wins`
-above, just the opposite polarity).
+Doubles Practice, Checkout Blitz, and Around the Clock/World endpoints above never take a `mode`
+param — every one of those game types is always solo practice, so there's no H2H side to split
+against (same reasoning as `cricket-wins` above, just the opposite polarity).
 
 ### Per-Player Stats
 
@@ -961,6 +999,14 @@ GET  /api/players/stat-bubbles?name=&mode=  All 15 stat bubble values for a play
      &gameType=checkout_trainer             Pass gameType=checkout_trainer for Checkout
                                              Trainer's 3 stat bubbles (Optimal %, Accuracy %,
                                              Attempts — Freeform + Blitz combined) instead.
+     &gameType=around_the_clock             Pass gameType=around_the_clock for Around the
+                                             Clock's stat bubbles (Completions, Darts/Completion,
+                                             Darts Thrown; also returns sessionsPlayed and
+                                             completionRate, not chart-linked) instead.
+     &gameType=around_the_world             Pass gameType=around_the_world for Around the
+                                             World's stat bubbles (Sessions Played, Darts Thrown;
+                                             also returns lifetime progress/total, not
+                                             chart-linked) instead.
 GET  /api/players/personal-bests?name=&mode= Best leg average, fewest darts to finish,
                                              current win streak, and recent form.
      &gameType=cricket                      Pass gameType=cricket for Cricket's Personal Bests
@@ -977,6 +1023,12 @@ GET  /api/players/personal-bests?name=&mode= Best leg average, fewest darts to f
                                              best optimal streak, best/avg Checkout Blitz score)
                                              instead — merges getCheckoutTrainerPersonalBests()
                                              and getCheckoutBlitzPersonalStats() server-side.
+     &gameType=around_the_clock             Pass gameType=around_the_clock for Around the
+                                             Clock's Personal Bests (fastest completion by
+                                             darts) instead.
+     &gameType=around_the_world             Pass gameType=around_the_world for Around the
+                                             World's Personal Bests (sessions played, lifetime
+                                             progress/total) instead.
 GET  /api/players/chuckin-heatmap?name=&mode= Per-(sector,multiplier) hit counts for Just
                                              Chuckin' It, feeding the Player Profile's dartboard
                                              heatmap → [ { sector, multiplier, hits } ] (kept for
@@ -984,7 +1036,8 @@ GET  /api/players/chuckin-heatmap?name=&mode= Per-(sector,multiplier) hit counts
 GET  /api/players/dart-heatmap              Per-(sector,multiplier,zone,missZone,missDepth) hit
      ?name=&gameType=&mode=                 counts for any game type, feeding the generalized
                                              Player Profile dartboard heatmap (X01/Cricket/
-                                             Doubles Practice/Just Chuckin' It) → [ { sector,
+                                             Doubles Practice/Just Chuckin' It/Around the
+                                             Clock/Around the World) → [ { sector,
                                              multiplier, zone, missZone, missDepth, hits } ]
 GET  /api/players/bounce-outs               Count of darts that struck the board but bounced
      ?name=&gameType=&mode=                 or fell out before counting → { count }
@@ -1070,11 +1123,13 @@ POST /api/games                             Start a game
                                              { category, legsPerSet, setsPerGame,
                                                players: [{ name, out }], practice: 0|1,
                                                gameType: "x01"|"cricket"|"doubles_practice"|
-                                                         "chuckin" (default "x01"),
+                                                         "chuckin"|"around_the_clock"|
+                                                         "around_the_world" (default "x01"),
                                                config: { startingScore } for x01,
                                                        { numbers: [7 sectors] } for cricket,
                                                        { doubles: [sectors] } for doubles_practice,
-                                                       {} for chuckin }
+                                                       {} for chuckin/around_the_clock/
+                                                       around_the_world }
                                              → { gameId }
 
 POST /api/games/:id/turns                   Record a visit

@@ -99,6 +99,22 @@ function evaluateDartDoublesPractice(dart, targets){
   return { hit:false, ended:true, reason:'wrong-number' };
 }
 
+/* ---------- Guided Around the Clock (docs/game-modes-roadmap.md "Guided Around
+   the Clock / Around the World") ----------
+   Pure per-dart rule, mirroring evaluateDartDoublesPractice()'s shape: a "hit" is
+   a single (mult 1) on a number 1-20 not already in this round's hitSet — matches
+   the existing passive around_the_clock badge's exact formula (singlesHit.size
+   >= 20), not the roadmap doc's "+bull" prose (a treble/double on a number, or
+   any dart on bull, is a real dart thrown but never advances completion — the
+   "so close, not a hit" precedent Doubles Practice already established, just
+   with no round-ending failure mode here since this mode never "loses"). */
+function evaluateDartAroundTheClock(dart, hitSet){
+  const isSingleTarget = dart.sector >= 1 && dart.sector <= 20 && dart.mult === 1;
+  const isNewHit = isSingleTarget && !hitSet.has(dart.sector);
+  const completed = isNewHit && (hitSet.size + 1) === 20;
+  return { isNewHit, completed };
+}
+
 /* ---------- Cricket ----------
    Standard cricket only (v1 scope decision) — highest score wins, cut-throat
    deferred. A match's in-play numbers are locked to exactly 7 (classic:
@@ -372,7 +388,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     dartValue, dartLabel, makeDartCore,
     evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS,
-    evaluateDartDoublesPractice, isStaircaseFinish,
+    evaluateDartDoublesPractice, evaluateDartAroundTheClock, isStaircaseFinish,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,
     pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
     CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH, challengeBadgeSignals,

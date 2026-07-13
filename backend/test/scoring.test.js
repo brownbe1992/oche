@@ -11,7 +11,7 @@ const path = require('path');
 const scoring = require(path.join('..', '..', 'frontend', 'scoring.js'));
 const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET_STANDARD_NUMBERS,
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
-  evaluateDartDoublesPractice, chuckinTiersReached, isStaircaseFinish,
+  evaluateDartDoublesPractice, evaluateDartAroundTheClock, chuckinTiersReached, isStaircaseFinish,
   isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,
   pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission } = scoring;
 
@@ -549,6 +549,45 @@ describe('evaluateDartDoublesPractice (per-dart drill mode, docs/game-modes-road
     assert.equal(evaluateDartDoublesPractice(makeDartCore(16, 2), single).hit, true);
     assert.equal(evaluateDartDoublesPractice(makeDartCore(16, 1), single).reason, 'so-close');
     assert.equal(evaluateDartDoublesPractice(makeDartCore(8, 2), single).reason, 'wrong-double');
+  });
+});
+
+describe('evaluateDartAroundTheClock (guided drill mode, docs/game-modes-roadmap.md "Guided Around the Clock / Around the World")', () => {
+  test('a single on a new number 1-20 is a new hit, not yet completed', () => {
+    const hitSet = new Set();
+    assert.deepEqual(evaluateDartAroundTheClock(makeDartCore(5, 1), hitSet), { isNewHit: true, completed: false });
+  });
+
+  test('a single on a number already in hitSet is not a new hit', () => {
+    const hitSet = new Set([5]);
+    assert.deepEqual(evaluateDartAroundTheClock(makeDartCore(5, 1), hitSet), { isNewHit: false, completed: false });
+  });
+
+  test('a treble or double on a target number is a real dart but never a hit ("so close", same precedent as Doubles Practice)', () => {
+    const hitSet = new Set();
+    assert.deepEqual(evaluateDartAroundTheClock(makeDartCore(5, 2), hitSet), { isNewHit: false, completed: false });
+    assert.deepEqual(evaluateDartAroundTheClock(makeDartCore(5, 3), hitSet), { isNewHit: false, completed: false });
+  });
+
+  test('bull (sector 25) never counts as a hit, matching the existing passive around_the_clock badge (no "+bull")', () => {
+    const hitSet = new Set();
+    assert.deepEqual(evaluateDartAroundTheClock(makeDartCore(25, 1), hitSet), { isNewHit: false, completed: false });
+    assert.deepEqual(evaluateDartAroundTheClock(makeDartCore(25, 2), hitSet), { isNewHit: false, completed: false });
+  });
+
+  test('a genuine miss (sector 0) is never a hit', () => {
+    const hitSet = new Set();
+    assert.deepEqual(evaluateDartAroundTheClock(makeDartCore(0, 1), hitSet), { isNewHit: false, completed: false });
+  });
+
+  test('completed fires exactly when the 20th distinct single lands, not before', () => {
+    const hitSet = new Set(Array.from({ length: 19 }, (_, i) => i + 1)); // 1..19 already hit
+    assert.deepEqual(evaluateDartAroundTheClock(makeDartCore(20, 1), hitSet), { isNewHit: true, completed: true });
+  });
+
+  test('completed does not fire on a repeat hit even if hitSet already has 19 entries', () => {
+    const hitSet = new Set(Array.from({ length: 19 }, (_, i) => i + 1)); // 1..19 already hit
+    assert.deepEqual(evaluateDartAroundTheClock(makeDartCore(5, 1), hitSet), { isNewHit: false, completed: false });
   });
 });
 
