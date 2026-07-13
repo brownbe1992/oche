@@ -61,6 +61,10 @@
 > regression to the existing X01 leaderboards.
 >
 > **Not yet built**: Baseball (step 5). See "Suggested build order" below.
+> **Killer now has a full rules primer** (config schema, per-dart evaluation, win
+> condition, and its own open questions) — see "Killer" below. Design only, not
+> started, and not yet added to the suggested build order pending a priority
+> decision (it's an alternative next variant to Baseball, not a step after it).
 >
 > **Doubles Practice is built (2026-07)** — the first of the two "Practice Drill
 > Modes" candidates below to ship. A genuinely different shape from every other
@@ -376,12 +380,103 @@ vocabulary (e.g. runs per inning, best single inning). Recommended as the *secon
 game type added, once the plugin seams have been proven on a real second
 implementation (not just fitted to Cricket specifically).
 
+## Killer (rules primer — for whoever builds this next)
+
+Elimination-style: each player is racing to be the last one with lives remaining,
+not the first to reach a score. Genuinely different from every game type above in
+one way that matters architecturally — **the set of legal targets is per-player and
+assigned at random when the match starts**, not a fixed shared target set like
+Cricket's `config.numbers`.
+
+- **Setup**: each player is randomly assigned one unique number, 1–20 (no bull) —
+  assignment happens once per match at Start, the same "locked in for real" moment
+  Cricket's exact-7 validation happens at, not re-rolled per leg. Every player also
+  starts with the same fixed life count, a New Game config value (traditionally an
+  odd number like 3 or 5 so lives can't end in an exact split by design, though
+  nothing about the mechanic actually requires that — worth a decision, not an
+  assumption). Needs 3+ players to be meaningful (a 2-player game degenerates into
+  "whoever kills the other first," which is really just X01 with extra steps) —
+  whether to hard-block 2-player Killer at New Game or just let it play out
+  un-interesting is an open question below.
+- **Becoming a "killer"**: a player can't remove anyone else's lives until they hit
+  the **double** of their own assigned number. Until then, every dart they throw —
+  at their own number's single/treble, or at anyone else's number — does nothing.
+  This is the mechanic that makes Killer need **per-dart evaluation**, the same
+  architectural wrinkle Doubles Practice already established: a player can become a
+  killer on dart 1 of a visit and then use darts 2–3 of that *same* visit to attack,
+  so the turn engine can't wait for a full 3-dart visit like X01/Cricket do — it
+  needs `evaluateDartKiller(dart, playerState)` called per dart, not per visit,
+  mirroring `evaluateDartDoublesPractice()`'s precedent in `frontend/scoring.js`.
+- **Attacking**: once a killer, hitting an *opponent's* assigned number removes
+  lives from them — how many is a real open decision (see below), not something to
+  guess. A killer hitting their own number again once already a killer is the other
+  open decision: safe no-op (most forgiving), or "friendly fire" that costs the
+  killer one of their own lives (a well-known stricter house variant that punishes
+  complacency and keeps killers pointed at opponents) — needs to be picked, not
+  assumed, before the turn engine can be written.
+- **Elimination and win condition**: a player reduced to 0 lives is eliminated
+  immediately, mid-visit if that's when it happens — turn order (which already
+  needs to skip eliminated players entirely) must re-derive "whose turn is next"
+  dynamically rather than from a static player list, the same class of problem
+  Cricket's win-check already has to solve for "closed but trailing" players who
+  keep throwing defensively. Last player left with lives >0 wins the leg the
+  instant every other player hits 0 — this can end a leg mid-round, unlike X01/
+  Cricket where the round always finishes for the players who already went.
+- **Config schema**: `{ lives: 3, numbers: { <playerId>: <1-20> } }` — the
+  per-player assignment lives inside `games.config` (assigned once at Start, not
+  re-derived), following the same "no schema migration, just a new JSON shape"
+  extensibility point the rest of this doc already established for Cricket/
+  Baseball's config. Unlike Cricket's shared `config.numbers`, this is a map, not
+  a flat list, since every player's legal "own number" differs.
+- **Scoring screen**: unlike Cricket (locked to exactly 7 targets, so a small
+  dedicated tap-grid made sense), Killer darts can land on *any* of the 20 numbers
+  (someone else's assigned number, an unassigned number, or your own) plus
+  misses — much closer to X01's full-board input shape. The existing interactive
+  Dartboard SVG scoring screen may be reusable as-is (tap anywhere on the board,
+  the turn engine figures out whose number was hit and whether it matters) rather
+  than needing a new bespoke pad the way Cricket did — a real "check before
+  building" candidate once this is picked up, not an assumption to build on
+  without verifying first. Whatever screen is used still needs to show, per
+  player: their assigned number, current life count, and killer status at a
+  glance — none of which the existing X01/Cricket screens display today.
+- **Live scoreboard**: a new `renderers.killer` card showing each player's number,
+  lives (as discrete pips, not just a number — see accessibility note below), and
+  killer status; eliminated players need a distinct "out" visual state rather than
+  just disappearing from the card.
+- **Stats** (sketch, not finalized): kills-per-game, average lives lost per leg,
+  win rate, and a "survived without becoming a killer" style curiosity stat don't
+  exist yet in any form — this needs its own `GAME_TYPES.killer.statDefs` and
+  backend functions the same way Cricket/Baseball would, not a reuse of X01's or
+  Cricket's vocabulary. Achievement ideas floated but not scoped: first blood
+  (first kill of a match), and an "Untouchable" analog for winning without ever
+  losing a life — parking these here rather than designing them prematurely.
+- **Accessibility**: life count must never be color-only (this doc's own standing
+  rule, `docs/accessibility-roadmap.md`) — pips plus an `aria-label` stating the
+  exact count, and killer/eliminated status needs a non-color signal (icon + text)
+  the same way Cricket's closed-number state already does.
+
+### Open questions specific to Killer
+
+- **How many lives does a hit remove?** Common house variants disagree: flat 1
+  life per hit regardless of ring, or 1/2/3 lives for single/double/treble
+  (mirroring how Cricket marks scale by ring). Needs a decision before the turn
+  engine can be written — not assumed from "how Cricket does it."
+- **"Friendly fire"**: does a killer hitting their own number after already
+  becoming a killer do nothing, or cost them a life? Both are real, commonly
+  played variants — pick one deliberately.
+- **Minimum player count**: should New Game block Killer below 3 players (the way
+  Cricket's exact-7 validation blocks an invalid target count), or just let a
+  2-player game play out even though it's a degenerate case?
+- **Number reassignment**: numbers are assigned once at Start for the whole
+  match — does a rematch/"play again" re-roll assignments, or keep the same ones?
+  Leans toward re-roll (matches Cricket's classic/custom being re-chosen per
+  match), not decided.
+
 ## Other known variants (backlog, not designed yet)
 
 - **Round the Clock** — hit 1 through 20 in order, then bull.
 - **Shanghai** — single + double + treble on the same number in one visit is an
   instant win.
-- **Killer** — elimination-style, players "kill" each other's assigned numbers.
 - **High-Low / Halve-It** — miss a target number and your score halves.
 
 ## ✅ Built: 101 as a fourth X01 starting score (2026-07)
