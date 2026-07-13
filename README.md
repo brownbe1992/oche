@@ -1057,7 +1057,9 @@ GET  /api/players/coaching-insights         X01-only plain-language practice gui
 GET  /api/players/h2h?p1=&p2=               Head-to-head record between two players
                                              (used by the New Game H2H banner)
 GET  /api/players/ghost-legs?name=&limit=   X01 legs this player has won, most recent
-                                             first (Ghost Opponent's leg picker)
+                                             first (Ghost Opponent's leg picker);
+                                             limit is capped at 100 (docs/security-
+                                             audit-roadmap.md SEC-23)
 GET  /api/players/ghost-script              A specific past leg's dart-by-dart replay
      ?gameId=&setNo=&legNo=&name=           script — 404 if that player didn't win it
 GET  /api/players/avg-history               Metric history for the chart
@@ -1141,6 +1143,7 @@ POST /api/games/:id/turns                   Record a visit
                                              { player, set, leg, scored,
                                                bust, checkout, checkoutPoints, legWon,
                                                targetScore, darts: [{sector, multiplier}] }
+                                             → { ok: true, turnId }
                                              legWon marks the turn that won the leg —
                                              set by Cricket (which has no checkout
                                              mechanism); X01 omits it and keeps using
@@ -1148,10 +1151,21 @@ POST /api/games/:id/turns                   Record a visit
                                              Trainer reuses legWon to mean "this attempt
                                              was optimal" and targetScore to record the
                                              round's target (the one field no other game
-                                             type sends).
+                                             type sends). Requires Content-Type:
+                                             application/json (415 otherwise, docs/
+                                             security-audit-roadmap.md SEC-19) — every
+                                             write endpoint does. For X01 specifically,
+                                             scored must match the value of the darts it's
+                                             paired with (docs/security-audit-roadmap.md
+                                             SEC-22); mismatches return 400.
 
 DELETE /api/games/:id/turns/last            Delete the most recently recorded turn
                                              (used by Undo Last Turn)
+                                             ?turnId= (optional) — when supplied, must
+                                             match the game's actual newest turn or the
+                                             request is rejected with 409 and nothing is
+                                             deleted (docs/bug-roadmap.md BUG-13); omitted,
+                                             deletes whatever's newest as before.
 
 POST /api/games/:id/complete                Mark a game finished    { winner }
 
@@ -1325,7 +1339,11 @@ PUT  /api/backups/retention                 {days} -> {ok,retentionDays,pruned} 
 GET  /api/backups/download                  (?name=...) streams the backup file                          [admin]
 DEL  /api/backups                           (?name=...) delete one backup                                [admin]
 POST /api/backups/restore                   {name,password} restore from an existing backup;             [admin]
-                                             re-verifies the admin password independent of the session
+                                             re-verifies the admin password independent of the session.
+                                             Stages the file to a sidecar next to the live database —
+                                             the live file is untouched until the next process startup
+                                             actually applies it (docs/bug-roadmap.md BUG-11), so this
+                                             still requires the same manual restart afterward.
 POST /api/backups/upload-restore            Raw .db file body, X-Admin-Password header; validates        [admin]
                                              the file (header + integrity check) before staging it,
                                              same restore as above. Capped at 500MB.

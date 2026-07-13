@@ -1909,7 +1909,22 @@ Each bucket is separate specifically so gameplay PIN checks never get throttled
 by unrelated setup/login traffic (they were briefly merged into one shared
 `'auth'` bucket during development and caused exactly this cross-endpoint
 interference — kept split ever since). `clientIp()` only trusts
-`X-Forwarded-For` when `TRUST_PROXY=true` is explicitly set.
+`X-Forwarded-For` when `TRUST_PROXY=true` is explicitly set — otherwise a
+reverse-proxied deployment collapses every client onto the proxy's one address,
+sharing a single budget across the whole household; `clientIp()` prints a
+one-time startup-adjacent warning (not per-request) the first time it observes
+`X-Forwarded-For` while `TRUST_PROXY` is unset, so this misconfiguration
+actually surfaces instead of silently degrading (`docs/bug-roadmap.md` BUG-15).
+
+Every write endpoint additionally requires `Content-Type: application/json`
+(`415` otherwise, checked in `readJson()` before the body is even read) —
+closes a CSRF path where a cross-origin page's "simple" request (no CORS
+preflight) could otherwise drive a write under the `OCHE_REQUIRE_AUTH=false`
+LAN-trust opt-out (`docs/security-audit-roadmap.md` SEC-19). `readJson()` also
+accumulates the request body as raw `Buffer` chunks (decoded to a string
+exactly once, at the end) rather than concatenating per-chunk decoded strings —
+the size cap is enforced in real bytes rather than decoded character length as
+a result (`docs/bug-roadmap.md` BUG-10 / SEC-21 respectively).
 
 **Client-side interaction with the `global` bucket**: a request that gets a 429
 is not retried — `DB._queue`'s `.catch(logErr)` (`frontend/index.html`) logs it
@@ -1960,6 +1975,15 @@ argument, gated on `!localStorage.getItem('oche_wizard_dismissed')`) uses the
 same generic "created" confirmation it always has, since there's no pending
 action to resume in that path.
 
+Server-side, `createFirstAdmin()` (`db.js`) guards against two concurrent
+`POST /api/setup` calls both succeeding: the actual insert is one atomic `INSERT
+... SELECT ... WHERE NOT EXISTS (SELECT 1 FROM admins)` statement, not a
+separate check followed by an insert — closing the window that used to exist
+between checking `isSetupRequired()` and finishing the ~50-100ms scrypt hash
+(`docs/security-audit-roadmap.md` SEC-20). The plain `isSetupRequired()` check
+at the top of the function remains, purely as a fast-path that skips the hash
+entirely when setup is obviously already done.
+
 ### Egress guard (`netguard.js`) — outbound-request SSRF/DNS-rebinding protection
 
 Used before any server-initiated request to an admin-configured destination
@@ -1985,7 +2009,13 @@ open.
 uses `'unsafe-inline'` for `script-src`/`style-src` — not a strict nonce-based
 policy, since inline `<script>`/`onclick` handlers are still used throughout
 `index.html`/`display.html` (a known, documented gap, not an oversight — see
-`docs/security-audit-roadmap.md` SEC-10).
+`docs/security-audit-roadmap.md` SEC-10). When `COOKIE_SECURE=true`, every
+response also gets `Strict-Transport-Security: max-age=15552000;
+includeSubDomains` — conditional on that flag specifically (not unconditional),
+since sending HSTS over plain HTTP would be actively harmful for the default
+LAN deployment. Leaving `COOKIE_SECURE` unset prints a one-time startup warning
+(`docs/security-audit-roadmap.md` SEC-24) rather than silently shipping the
+session cookie without its `Secure` flag.
 
 Every static file served by `serveStatic()` (`index.html`, `display.html`,
 `scoring.js`, and any 404 SPA-fallback response) additionally gets
@@ -2151,12 +2181,22 @@ setting has never been touched). No new dependencies.
 A restore candidate — whether an existing backup on disk or an uploaded file —
 is always validated before it's used: the 16-byte SQLite file-header magic
 string, then a real read-only open and `PRAGMA integrity_check`. `stageRestore()`
-clears any stale `-wal`/`-shm` files next to the live database and copies the
-validated file over it. **This does not make the already-running server pick it
-up** — on Linux, an open file handle keeps reading/writing the old inode until
-the process reopens the file — so every restore path ends with an explicit
-"restart the container/process now" instruction rather than the server
-restarting itself.
+then copies the validated file to a `.restore-pending` sidecar **next to** the
+live database — it never touches the live database file itself
+(`docs/bug-roadmap.md` BUG-11: the earlier version copied straight over the live
+file while the server process still held it open, so any write landing in the
+window before the required restart risked corrupting the just-restored data).
+`applyPendingRestoreIfAny()`, called once at the very next
+process startup — in `db.js`, before the live `DatabaseSync` connection is ever
+opened — is what actually applies it: clears any stale `-wal`/`-shm` files next
+to the live database, then atomically renames the pending file over it. Nothing
+can be mid-write against the live path at that point, since it hasn't been
+opened yet this process, so there's no window for corruption. **This still does
+not make the already-running server pick anything up** — the pending file sits
+untouched until that next startup — so every restore path still ends with the
+same explicit "restart the container/process now" instruction rather than the
+server restarting itself; the difference is entirely in what happens to the
+live file in the meantime.
 
 ### `node backend/backup.js` — the cron script
 
@@ -2309,7 +2349,7 @@ already-migrated database is a safe no-op).
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
 | `game_id` / `player_id` | `INTEGER NOT NULL, FK, ON DELETE CASCADE` | |
 | `set_no` / `leg_no` | `INTEGER NOT NULL` | Must be a positive integer (`addTurn()` rejects `0` or negative explicitly — an explicit `0` is validation-rejected, not silently treated as the "omitted" default of `1`) |
-| `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3). `addTurn()` rejects a non-numeric value outright rather than silently coercing it to `0` |
+| `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3). `addTurn()` rejects a non-numeric value outright rather than silently coercing it to `0`. For `game_type='x01'` specifically, `POST /api/games/:id/turns` (the one production caller that opts into `addTurn()`'s `enforceConsistency` flag) additionally rejects a `scored` that doesn't match the sum of that visit's dart face values (`0` required on a bust; `checkout_points` must equal `scored` on a checkout) — `docs/security-audit-roadmap.md` SEC-22. Deliberately X01-only: Cricket's `scored` is computed from mark-closing state, not a dart-value sum, so the same rule would reject legitimate Cricket visits |
 | `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans. Cricket turns always write `bust=0, checkout=0` — cricket has neither concept. Doubles Practice repurposes `bust` as "this dart ended the round" (so-close or wrong-double, §2) — the closest existing column to that meaning, since this mode has no bust/win concept of its own either; `checkout` stays `0` always. Guided Around the Clock repurposes `bust` the identical way: `1` marks whichever dart completed the round (all 20 numbers hit) — there's no "so-close"/"wrong-target" failure mode here, only completion or abandonment. Guided Around the World writes `bust=0` always (no round to end, matching Chuckin's own turns) |
 | `checkout_points` | `INTEGER` | Only set when `checkout=1` (X01 only) |
 | `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set only by Cricket's write path (`enterTurnCricket()`) — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged |

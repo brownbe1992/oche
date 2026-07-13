@@ -26,11 +26,12 @@
 > from a live user bug report rather than an audit pass) is a UI/error-handling defect
 > rather than a stats/data-integrity one, so its verification is a live Playwright check
 > instead of a `node:test` case. **BUG-9** was opened by the 2026-07 **fifth-pass
-> audit** (the same read that produced `security-audit-roadmap.md` Part 7 / SEC-17).
-> **BUG-10** through **BUG-15** were opened by a 2026-07 **sixth-pass audit** (a
-> general code-review pass across the whole app, not scoped to one new feature — the
-> same read that produced `security-audit-roadmap.md` Part 8 / SEC-18 through SEC-24)
-> — see the entries at the bottom.
+> audit** (the same read that produced `security-audit-roadmap.md` Part 7 / SEC-17),
+> now fixed. **BUG-10** through **BUG-15** were opened by a 2026-07 **sixth-pass
+> audit** (a general code-review pass across the whole app, not scoped to one new
+> feature — the same read that produced `security-audit-roadmap.md` Part 8 / SEC-18
+> through SEC-24) — see the entries at the bottom. **BUG-1 through BUG-15 are all
+> fixed as of this writing** — nothing open on either tracker.
 
 ## Severity legend
 

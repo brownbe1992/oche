@@ -18,10 +18,12 @@
 > **sixth-pass audit** (2026-07, a general code-review pass covering the whole app —
 > not scoped to one new feature — including the Guided Around the Clock/World and
 > Checkout Trainer/League Mode expansions merged since Part 7) opened **SEC-18**
-> through **SEC-24** — see "Part 8" at the bottom. Functional-defect counterparts live
-> in `docs/bug-roadmap.md` (BUG-1/BUG-2/BUG-3 from the second pass; BUG-4/BUG-5 from
-> the third; BUG-6/BUG-7 from the fourth; BUG-9 from the fifth; BUG-10 through BUG-15
-> from the sixth).
+> through **SEC-24**, **all now fixed** — see "Part 8" at the bottom for each entry's
+> shipped-detail note. Functional-defect counterparts live in `docs/bug-roadmap.md`
+> (BUG-1/BUG-2/BUG-3 from the second pass; BUG-4/BUG-5 from the third; BUG-6/BUG-7
+> from the fourth; BUG-9 from the fifth; BUG-10 through BUG-15 from the sixth, all
+> fixed). **SEC-1 through SEC-24 and BUG-1 through BUG-15 are all fixed as of this
+> writing** — nothing open on either tracker.
 >
 > See the "Status" line
 > under each finding below for what actually shipped, which in a couple of places is
