@@ -70,9 +70,10 @@ being solved is exactly today's "everything stays visible forever" behavior.
   6-player cap is hit.
 - Modes that force a single player today (Daily Challenge, Ghost, Doubles
   Practice, Just Chuckin' It, Checkout Trainer, Around the Clock/World) aren't
-  chosen yet at this point in the new flow — see the open question below on
-  sequencing, since today those are *mode* choices that happen to imply
-  exactly 1 player, and Step 1 now comes first.
+  chosen yet at this point in the new flow — **resolved**: rather than letting
+  a player pick 2+ players here and then hit a conflict in Step 2, Step 2's
+  dropdown simply never offers those modes once 2+ players are selected — see
+  "Practice-only vs. H2H-eligible modes" under Step 2 below.
 
 ### Step 2 — "Choose a game"
 
@@ -99,7 +100,47 @@ being solved is exactly today's "everything stays visible forever" behavior.
   pattern to *every* mode, including the ones that currently have none (X01,
   Cricket, Doubles Practice, Daily Challenge, Ghost, and H2H/Practice
   generally) — new copy needs writing for each.
-- A **Continue** button advances to Step 3.
+- A **Continue** button advances to Step 3. A **Back** button at the bottom of
+  the screen returns to Step 1, preserving whatever was already selected here
+  (see "Back navigation" below).
+
+#### Practice-only vs. H2H-eligible modes
+
+**Resolved**: rather than resolving the sequencing conflict at the moment a
+conflicting mode is picked, Step 2's dropdown is filtered by player count
+before it's ever shown — the conflict simply never arises. Each entry in the
+unified "what am I playing" list carries a `contexts` flag (a small new data
+structure, e.g. `NEW_GAME_MODE_OPTIONS`, decoupled from — but referencing —
+the existing `GAME_TYPES`/`setup.mode` split, since Daily Challenge and Ghost
+Mode aren't `GAME_TYPES` entries today, they're `setup.mode` values that
+happen to force `gameType='x01'`) saying whether it's offered solo, in H2H,
+or both:
+
+| Entry | `contexts` |
+|---|---|
+| X01 | `practice`, `h2h` |
+| Cricket | `practice`, `h2h` |
+| Daily Challenge | `practice` only |
+| Just Chuckin' It | `practice` only |
+| Doubles Practice | `practice` only |
+| Ghost Mode | `practice` only |
+| Checkout Trainer | `practice` only |
+| Around the Clock | `practice` only |
+| Around the World | `practice` only |
+
+With exactly 1 player selected, Step 2 shows every entry (all of them support
+`practice`). With 2+ players selected, Step 2 shows **only X01 and
+Cricket** — today's actual H2H-eligible set — nothing else is offered, so
+there's no "silently drop players back to 1" behavior to design around. This
+also directly answers the earlier "how does H2H get chosen" question: with
+2+ players, the only two entries available are H2H-eligible by construction,
+so picking either one *is* choosing H2H — no separate explicit H2H toggle is
+needed in the new flow (today's standalone `H2H` mode button goes away).
+A useful side effect worth noting for whoever implements this: today's
+per-mode `if` branches that hide `#h2h-options` (`setMode()`, several call
+sites) could likely read this same `contexts` flag instead of repeating the
+mode list — not required for this roadmap item, just a cleanup opportunity
+it exposes.
 
 ### Step 3 — "More options"
 
@@ -119,7 +160,9 @@ being solved is exactly today's "everything stays visible forever" behavior.
   (slot-fill checks, Cricket exact-7, Ghost leg required, Doubles Practice
   ≥1 target, H2H ≥2 players, Daily Challenge same-day-duplicate check) is
   reused as-is; only the surrounding screen structure changes, not what gets
-  validated or what `game` object gets built.
+  validated or what `game` object gets built. A **Back** button at the bottom
+  of the screen returns to Step 2, preserving the game-type/flavor choice
+  already made there.
 
 ## What doesn't change
 
@@ -139,10 +182,13 @@ Per `CLAUDE.md`'s standing conventions:
 
 - **Accessibility**: a multi-step wizard raises new concerns beyond today's
   single static page — focus must move to each new step's first control as it
-  appears (not silently stay on a now-hidden Step 1 button), step changes need
-  an `aria-live` announcement so screen-reader users know the screen advanced,
-  and there must be a way to go back a step without losing already-entered
-  data (see open question below). The "how-to-play" blurbs are plain text and
+  appears (not silently stay on a now-hidden Step 1 button, and not silently
+  stay on a now-hidden Step 2/3 control after Back is pressed either), and
+  step changes need an `aria-live` announcement so screen-reader users know
+  the screen advanced. **Resolved**: back navigation is a persistent Back
+  button at the bottom of Steps 2 and 3 (Step 1 has none, being the first
+  step) — it must restore, not reset, whatever was already selected on the
+  step being returned to. The "how-to-play" blurbs are plain text and
   accessible by default as long as they're real DOM content read in document
   order, not an overlay/tooltip that needs hover.
 - **Security**: no new credential/token surface — reuses the existing New Game
@@ -158,28 +204,10 @@ Per `CLAUDE.md`'s standing conventions:
 
 ## Open questions for whoever picks this up
 
-- **Sequencing conflict**: today, several modes (Daily Challenge, Ghost,
-  Doubles Practice, Checkout Trainer, Around the Clock/World) force exactly 1
-  player as a *side effect* of the mode choice. The new flow asks "who's
-  playing" *before* "choose a game," so picking 2+ players first and then one
-  of those single-player-only modes second is a real conflict this doc
-  doesn't resolve — does choosing such a mode in Step 2 silently drop extra
-  players back to 1 (surprising, loses what was just entered), or does Step 2
-  simply not offer those modes once 2+ players are already selected?
 - **"Other game modes" grouping**: confirmed to include Checkout Trainer and
   Around the Clock/World, based on today's implementation — but should this
   be a flat sub-list in the same dropdown, a nested "more..." option, or its
   own secondary dropdown? Not specified in the original notes.
-- **Back navigation**: can a player go back from Step 2 to Step 1 (e.g. to add
-  a player after seeing what game types are available), or from Step 3 back
-  to Step 2? The notes describe only forward progression (Continue, Play Now).
-  If back navigation exists, it must preserve prior selections, not reset them.
-- **H2H entry point**: the notes specify "for one player, default to
-  practice," but don't say how H2H gets chosen once 2+ players are selected —
-  is it still an explicit choice in Step 2's dropdown (an "H2H" entry
-  alongside the game types), or does selecting 2+ players in Step 1
-  automatically imply H2H unless a practice-only mode is chosen in Step 2?
-  Needs a decision, not an assumption.
 - **Daily Challenge ordering data fetch**: showing Daily Challenge "first, if
   not already attempted" means Step 2's dropdown needs the same-day-attempt
   check *before* rendering, not just at Play Now time as today — is that
@@ -192,16 +220,19 @@ Per `CLAUDE.md`'s standing conventions:
 
 ## Suggested build order
 
-1. Build the wizard shell (step container + Continue/Play Now/back
-   navigation, focus management, `aria-live` step announcements) without
-   changing any control's own behavior yet.
+1. Build the wizard shell (step container + Continue/Play Now/Back buttons,
+   focus management, `aria-live` step announcements) without changing any
+   control's own behavior yet. Back buttons restore prior-step state rather
+   than resetting it.
 2. Move Step 1 (Who's playing?) into the new shell, converting the
    always-visible player rows into the select → "add someone else?" prompt
    loop.
-3. Move Step 2 (Choose a game) in: collapse the Mode row + Practice-type
-   sub-toggle + X01/Cricket toggle into one dropdown, add the X01-flavor
-   second dropdown, and write the missing how-to-play copy for every mode
-   that doesn't have it yet.
+3. Move Step 2 (Choose a game) in: define the `contexts` (`practice`/`h2h`)
+   flag per mode/game-type entry and filter the dropdown by current player
+   count, collapse the Mode row + Practice-type sub-toggle + X01/Cricket
+   toggle into that one filtered dropdown, add the X01-flavor second
+   dropdown, and write the missing how-to-play copy for every mode that
+   doesn't have it yet.
 4. Move Step 3 (More options) in: relocate each mode's existing options
    section under the new step, resolving the classic-vs-custom Cricket
    sharing between practice and H2H.
