@@ -1116,7 +1116,20 @@ one escaping gap in an otherwise-consistent file) and one structural (SEC-19, no
 
 ### SEC-18 — Unescaped live-payload field in `display.html`'s Chuckin heatmap tooltip → stored/reflected XSS on the scoreboard  **(MED)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** `buildChuckinLiveHeatmap()` now coerces `c.sector`,
+`c.multiplier`, and `c.hits` to `Number(...) || 0` when building its lookup map,
+before any of them can reach the `<title>` markup — the same "trust nothing from the
+payload, coerce at the boundary" pattern this file's own `num()` helper already
+applies everywhere else. Committed regression test
+`backend/test/display.heatmap-hardening.test.js` extracts the function directly out
+of `frontend/display.html`'s real source (via a targeted regex into a `vm` context,
+so the test exercises the actual shipped code, not a hand-copied duplicate) and
+confirms: a crafted non-numeric `hits`/`sector`/`multiplier` value never appears
+verbatim in the output and never injects an event-handler attribute; the SVG
+document's own closing `</svg>` still appears exactly once, at the end; legitimate
+numeric hit counts still render correctly. Verified the test fails against the
+pre-fix code (via a stash-and-rerun check) and passes against the fix. Full backend
+suite green (539/539).
 
 **Where:** `frontend/display.html` `buildChuckinLiveHeatmap()` (feeds
 `renderers.chuckin.card()` and `renderers.around_the_clock`/`around_the_world`'s shared

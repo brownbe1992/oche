@@ -516,10 +516,23 @@ const DB_SECTORS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
 // scale, same hover tooltips. `cells` is index.html's playerSnapshotChuckin()'s
 // live {sector,multiplier,hits} array, gradually filling in as the session
 // progresses, not a fetched lifetime dataset.
+// docs/security-audit-roadmap.md SEC-18: c.hits (and c.sector/c.multiplier) come
+// straight from the /api/live broadcast payload, whose per-player heatmap array
+// ALLOWED_LIVE_KEYS deliberately leaves unrestricted in shape. Every other value
+// pulled from that payload elsewhere in this file goes through num()/esc() before
+// reaching the DOM — this is the one place a payload value was trusted as a safe
+// number without coercion, and the result below is interpolated into <title>
+// markup assigned via innerHTML, so an uncoerced string value here is a stored/
+// broadcast XSS reaching every connected /display screen. Number(...)||0 coerces
+// at the boundary, same pattern num() already applies everywhere else in this file.
 function buildChuckinLiveHeatmap(cells){
   const hitMap = {};
   let maxHits = 0;
-  (cells||[]).forEach(c=>{ hitMap[c.sector+'_'+c.multiplier] = c.hits; if(c.hits>maxHits) maxHits = c.hits; });
+  (cells||[]).forEach(c=>{
+    const sector = Number(c.sector) || 0, mult = Number(c.multiplier) || 0, hitCount = Number(c.hits) || 0;
+    hitMap[sector+'_'+mult] = hitCount;
+    if(hitCount>maxHits) maxHits = hitCount;
+  });
   const hits = (sector, m) => hitMap[sector+'_'+m] || 0;
   const heat = (sector, m) => maxHits>0 ? hits(sector,m)/maxHits : 0;
 
