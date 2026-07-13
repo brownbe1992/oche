@@ -453,6 +453,12 @@ const q = {
   playerBadges : db.prepare('SELECT badge_id, count, earned_at FROM player_badges WHERE player_id = ? ORDER BY earned_at DESC'),
 
   insertAdmin    : db.prepare('INSERT INTO admins (username, password_hash, password_salt) VALUES (?, ?, ?)'),
+  // docs/security-audit-roadmap.md SEC-20: an atomic "insert only if no admin exists
+  // yet" for createFirstAdmin() — the WHERE NOT EXISTS makes the whole guard-and-insert
+  // one indivisible statement, so two concurrent /api/setup requests can't both pass a
+  // separate check-then-insert and both create an admin during the same first-run window.
+  insertAdminIfNone: db.prepare(`INSERT INTO admins (username, password_hash, password_salt)
+    SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM admins)`),
   adminByUsername: db.prepare('SELECT id, username, password_hash, password_salt, login_fail_count, login_locked_until FROM admins WHERE username = ? COLLATE NOCASE'),
   adminById      : db.prepare('SELECT id, username FROM admins WHERE id = ?'),
   // Wider shape than adminById — includes the fields needed to actually re-verify a
@@ -3472,15 +3478,23 @@ function validateCredentials(username, password) {
   return username;
 }
 
+// docs/security-audit-roadmap.md SEC-20: the isSetupRequired() check below is a
+// fast-path only (skip the ~50-100ms scrypt hash entirely when setup is obviously
+// already done) — it is NOT what makes this safe against concurrent /api/setup
+// calls. The real guard is q.insertAdminIfNone's WHERE NOT EXISTS, which makes
+// "check and insert" one indivisible synchronous SQL statement executed AFTER the
+// async hash step. Two concurrent requests both awaiting auth.hashSecret() in
+// parallel can both observe isSetupRequired()===true, but once each resumes and
+// calls the synchronous insertAdminIfNone.run(), JS's single-threaded execution
+// means one fully completes (and is now the only admin) before the other's run()
+// call even starts — so the second one's WHERE NOT EXISTS is false and it inserts
+// zero rows, however different its username was from the winner's.
 async function createFirstAdmin(username, password) {
   if (!isSetupRequired()) throw httpError(403, 'Setup already completed');
   username = validateCredentials(username, password);
   const { hash, salt } = await auth.hashSecret(password);
-  try {
-    q.insertAdmin.run(username, hash, salt);
-  } catch (e) {
-    throw httpError(409, 'Username already exists');
-  }
+  const info = q.insertAdminIfNone.run(username, hash, salt);
+  if (info.changes === 0) throw httpError(403, 'Setup already completed');
   return { ok: true };
 }
 

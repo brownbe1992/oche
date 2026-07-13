@@ -1238,7 +1238,21 @@ supported configuration, not a misconfiguration.
 
 ### SEC-20 — `createFirstAdmin()` check-then-insert is not atomic → two concurrent setup requests can both succeed  **(MED, narrow window)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** Replaced the check-then-insert with a single atomic
+statement, `q.insertAdminIfNone` (`INSERT INTO admins (...) SELECT ?, ?, ? WHERE NOT
+EXISTS (SELECT 1 FROM admins)`), checked via `info.changes === 0` → the existing `403
+'Setup already completed'`. The plain `isSetupRequired()` check at the top of
+`createFirstAdmin()` stays as a fast-path only (skips the ~50-100ms scrypt hash when
+setup is obviously already done) — the real guard is the atomic insert afterward.
+Committed regression test `backend/test/db.setup-race.test.js` drives two concurrent
+`createFirstAdmin()` calls through `Promise.allSettled()` against a fresh scratch DB:
+this genuinely interleaves (not simulated) because `auth.hashSecret()` awaits Node's
+real threadpool-backed `crypto.scrypt`, so both calls actually suspend at that await
+point before either reaches the database — exactly the window the vulnerability lived
+in. Confirms exactly one call succeeds, the other fails closed with 403, exactly one
+admin account exists afterward, and a third call after the race also fails closed.
+Verified the test fails against the pre-fix code (2 admins created) and passes
+against the fix. Full backend suite green (541/541).
 
 **Where:** `backend/db.js` `createFirstAdmin()`:
 
