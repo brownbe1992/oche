@@ -3512,6 +3512,13 @@ function getFullDatabaseExport() {
 // participation — each ties into structures (brackets, seasons, streaks) bigger
 // than a single player's own record, and is left for a future pass rather than
 // attempted here.
+//
+// `player`/`opponents` both carry a plain `id` alongside `uuid` -- this is the
+// SOURCE server's local integer id, only meaningful together with this same export
+// payload (games/gamePlayers/turns below reference player_id using these same
+// integers). importPlayerExport() uses it to build a source-id -> target-id map
+// before touching any game data; `uuid` remains the only identity that's portable
+// on its own.
 function getPlayerExport(name) {
   const p = db.prepare('SELECT id, uuid, name, out_mode, dart_weight, created_at FROM players WHERE name = ? COLLATE NOCASE').get(String(name));
   if (!p) throw httpError(404, 'Player not found');
@@ -3530,7 +3537,7 @@ function getPlayerExport(name) {
   const opponentIds = [...new Set(gamePlayers.map(gp => gp.player_id))].filter(id => id !== p.id);
   const oph = opponentIds.map(() => '?').join(',');
   const opponents = opponentIds.length
-    ? db.prepare(`SELECT uuid, name FROM players WHERE id IN (${oph})`).all(...opponentIds)
+    ? db.prepare(`SELECT id, uuid, name FROM players WHERE id IN (${oph})`).all(...opponentIds)
     : [];
 
   const playerBadges = db.prepare('SELECT badge_id, count, earned_at FROM player_badges WHERE player_id = ?').all(p.id);
@@ -3538,9 +3545,159 @@ function getPlayerExport(name) {
   return {
     exportedAt: new Date().toISOString(),
     schemaVersion: 1,
-    player: { uuid: p.uuid, name: p.name, outMode: p.out_mode, dartWeight: p.dart_weight ?? null, createdAt: p.created_at },
+    player: { id: p.id, uuid: p.uuid, name: p.name, outMode: p.out_mode, dartWeight: p.dart_weight ?? null, createdAt: p.created_at },
     games, gamePlayers, turns, darts, opponents, playerBadges,
   };
+}
+
+// Per-player import (docs/data-export-roadmap.md, admin-only, the counterpart to
+// getPlayerExport() above): takes exactly the JSON shape that function produces and
+// writes it into THIS server's database.
+//
+// Player resolution (main player AND every opponent stub, all resolved BEFORE any
+// game/turn/dart is touched) always looks up by `uuid` first -- never by `name`
+// alone, since names are only unique within one server's own roster
+// (`players.name UNIQUE COLLATE NOCASE`), not across independently-run servers. A
+// uuid match reuses that existing local row (this is also what makes importing the
+// SAME player's export twice, or later importing an opponent's own full export
+// after they'd only existed as a stub, land on one row instead of creating
+// duplicates -- see docs/data-export-roadmap.md). No uuid match creates a new
+// player row from the exported uuid+name; if that name collides with an unrelated
+// local player (different uuid -- a genuine coincidence, not the same person), the
+// import uniquifies the name rather than silently merging two different people's
+// histories onto one row, and reports the rename so the admin can see it happened.
+//
+// Games/turns/darts are inserted directly via raw SQL, deliberately bypassing
+// createGame()/addTurn()/completeGame() and their lifecycle hooks (league
+// auto-tagging, badge-award checks, HA webhooks) -- this is a historical data
+// restore, not a live game being played, and the export's own playerBadges array
+// already carries exactly which badges the source earned, so nothing needs
+// re-deriving. league_id is always imported as NULL (leagues aren't part of a
+// per-player export at all, so a source league_id is never meaningful here).
+//
+// Duplicate-import guard: before inserting each game, checks for an existing local
+// game with the same created_at/category/game_type/legs_per_set/sets_per_game and
+// the exact same (already-remapped) participant id set, and skips it if found --
+// this is what makes importing the same export file twice a safe no-op instead of
+// doubling every stat, without needing a separate "have I imported this before"
+// tracking table (computed at import time from data already in the DB, the same
+// "nothing pre-aggregated" philosophy as the rest of this schema).
+function _findMatchingLocalGame(g, participantTargetIds) {
+  if (!participantTargetIds.length) return null;
+  const candidates = db.prepare(
+    `SELECT id FROM games WHERE created_at = ? AND category = ? AND game_type = ? AND legs_per_set = ? AND sets_per_game = ?`
+  ).all(g.created_at, g.category, g.game_type, g.legs_per_set, g.sets_per_game);
+  const wanted = [...participantTargetIds].sort((a, b) => a - b);
+  for (const c of candidates) {
+    const ids = db.prepare('SELECT player_id FROM game_players WHERE game_id = ? ORDER BY player_id').all(c.id).map(r => r.player_id);
+    if (ids.length === wanted.length && ids.every((v, i) => v === wanted[i])) return c.id;
+  }
+  return null;
+}
+
+function importPlayerExport(payload) {
+  if (!payload || typeof payload !== 'object') throw httpError(400, 'Invalid import file');
+  if (payload.schemaVersion !== 1) throw httpError(400, `Unsupported schemaVersion (expected 1, got ${payload.schemaVersion})`);
+  const { player, games, gamePlayers, turns, darts, opponents, playerBadges } = payload;
+  if (!player || typeof player !== 'object' || !Array.isArray(games) || !Array.isArray(gamePlayers)
+      || !Array.isArray(turns) || !Array.isArray(darts) || !Array.isArray(opponents)) {
+    throw httpError(400, 'Malformed import file — expected the shape produced by GET /api/players/export');
+  }
+
+  const idMap = new Map(); // exported (source-server) player id -> this server's local player id
+
+  function resolveStub(stub) {
+    if (!stub || typeof stub.uuid !== 'string' || !stub.uuid || typeof stub.id !== 'number') {
+      throw httpError(400, 'Import file has a player/opponent entry missing id/uuid');
+    }
+    const existing = db.prepare('SELECT id, name FROM players WHERE uuid = ?').get(stub.uuid);
+    if (existing) {
+      idMap.set(stub.id, existing.id);
+      return { name: existing.name, uuid: stub.uuid, created: false, renamed: false };
+    }
+    let finalName = validatePlayerName(stub.name);
+    let n = 2;
+    const originalName = finalName;
+    while (db.prepare('SELECT id FROM players WHERE name = ? COLLATE NOCASE').get(finalName)) {
+      finalName = validatePlayerName(`${originalName} (${n})`);
+      n++;
+    }
+    db.prepare('INSERT INTO players (name, out_mode, uuid) VALUES (?, ?, ?)').run(finalName, 'double', stub.uuid);
+    const created = db.prepare('SELECT id FROM players WHERE uuid = ?').get(stub.uuid);
+    idMap.set(stub.id, created.id);
+    return { name: finalName, uuid: stub.uuid, created: true, renamed: finalName !== originalName };
+  }
+
+  const playerReport = resolveStub(player);
+  if (playerReport.created) {
+    db.prepare('UPDATE players SET out_mode = ?, dart_weight = ? WHERE uuid = ?')
+      .run(player.outMode === 'single' ? 'single' : 'double', player.dartWeight ?? null, player.uuid);
+  }
+  const opponentReports = opponents.map(resolveStub);
+
+  let gamesImported = 0, gamesSkipped = 0, turnsImported = 0, dartsImported = 0, badgesImported = 0;
+  const gameIdMap = new Map();
+
+  const insertGame = db.prepare(`INSERT INTO games
+    (category, legs_per_set, sets_per_game, created_at, completed_at, winner_id, practice, game_type, config, player_count, league_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`);
+  const insertGamePlayer = db.prepare('INSERT INTO game_players (game_id, player_id, out_mode, dart_weight, loadout_id) VALUES (?, ?, ?, ?, NULL)');
+
+  for (const g of games) {
+    const participants = gamePlayers.filter(gp => gp.game_id === g.id);
+    const targetIds = participants.map(gp => idMap.get(gp.player_id)).filter(id => id != null);
+
+    const existingId = _findMatchingLocalGame(g, targetIds);
+    if (existingId) { gameIdMap.set(g.id, existingId); gamesSkipped++; continue; }
+
+    const info = insertGame.run(
+      g.category, g.legs_per_set, g.sets_per_game, g.created_at, g.completed_at,
+      g.winner_id != null ? (idMap.get(g.winner_id) ?? null) : null,
+      g.practice, g.game_type, g.config, g.player_count
+    );
+    const newGameId = Number(info.lastInsertRowid);
+    gameIdMap.set(g.id, newGameId);
+    gamesImported++;
+
+    for (const gp of participants) {
+      const tid = idMap.get(gp.player_id);
+      if (tid == null) continue; // every participant must resolve via player/opponents stubs; skip defensively if not
+      insertGamePlayer.run(newGameId, tid, gp.out_mode, gp.dart_weight ?? null);
+    }
+  }
+
+  const turnIdMap = new Map();
+  const insertTurn = db.prepare(`INSERT INTO turns
+    (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points, created_at, leg_won, target_score)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  for (const t of turns) {
+    const newGameId = gameIdMap.get(t.game_id);
+    const tid = idMap.get(t.player_id);
+    if (newGameId == null || tid == null) continue; // belongs to a duplicate-skipped game, or an unresolved player
+    const info = insertTurn.run(newGameId, tid, t.set_no, t.leg_no, t.scored, t.bust, t.checkout, t.checkout_points, t.created_at, t.leg_won, t.target_score);
+    turnIdMap.set(t.id, Number(info.lastInsertRowid));
+    turnsImported++;
+  }
+
+  const insertDart = db.prepare(`INSERT INTO darts
+    (turn_id, dart_no, sector, multiplier, thrown_at, zone, miss_zone, miss_depth, bounced)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  for (const d of darts) {
+    const newTurnId = turnIdMap.get(d.turn_id);
+    if (newTurnId == null) continue;
+    insertDart.run(newTurnId, d.dart_no, d.sector, d.multiplier, d.thrown_at, d.zone, d.miss_zone, d.miss_depth, d.bounced);
+    dartsImported++;
+  }
+
+  const insertBadge = db.prepare('INSERT INTO player_badges (player_id, badge_id, count, earned_at) VALUES (?, ?, ?, ?)');
+  for (const b of (playerBadges || [])) {
+    const exists = db.prepare('SELECT 1 FROM player_badges WHERE player_id = ? AND badge_id = ?').get(idMap.get(player.id), b.badge_id);
+    if (exists) continue;
+    insertBadge.run(idMap.get(player.id), b.badge_id, b.count, b.earned_at);
+    badgesImported++;
+  }
+
+  return { ok: true, player: playerReport, opponents: opponentReports, gamesImported, gamesSkipped, turnsImported, dartsImported, badgesImported };
 }
 
 /* ---------- settings ---------- */
@@ -4911,7 +5068,7 @@ module.exports = {
   getAroundTheClockStatBubbles, getAroundTheClockPersonalBests,
   getAroundTheClockFastestLeaderboard, getAroundTheClockCompletionsLeaderboard,
   getAroundTheWorldDrillStatBubbles, getAroundTheWorldPersonalBests, getAroundTheWorldLeaderboard,
-  getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport, getPlayerExport,
+  getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport, getPlayerExport, importPlayerExport,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics, getCoachingInsights,
   getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, fireHaWebhook,

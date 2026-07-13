@@ -159,9 +159,11 @@ describe('getPlayerExport (docs/data-export-roadmap.md — per-player export)', 
     assert.deepEqual(dump.games.map(g => g.id).sort((a, b) => a - b), [h2h.gameId, solo.gameId].sort((a, b) => a - b));
     assert.equal(dump.games.some(g => g.id === alainaSolo.gameId), false, "Alaina's unrelated solo game must not appear");
 
-    // Opponent stub: minimal shape only (uuid+name), never Alaina's own id/out_mode/etc.
+    // Opponent stub: minimal shape only (id+uuid+name -- id is the SOURCE server's
+    // local id, needed only to remap game_players/turns.player_id on import, never
+    // a portable identity on its own), never Alaina's own out_mode/dart_weight/etc.
     assert.equal(dump.opponents.length, 1);
-    assert.deepEqual(Object.keys(dump.opponents[0]).sort(), ['name', 'uuid']);
+    assert.deepEqual(Object.keys(dump.opponents[0]).sort(), ['id', 'name', 'uuid']);
     assert.equal(dump.opponents[0].name, 'export_alaina');
 
     // turns: Ben's turn in both games (2) + Alaina's turn in the shared H2H game (1) = 3.
@@ -199,5 +201,129 @@ describe('getPlayerExport (docs/data-export-roadmap.md — per-player export)', 
     assert.deepEqual(dump.turns, []);
     assert.deepEqual(dump.darts, []);
     assert.deepEqual(dump.opponents, []);
+  });
+});
+
+describe('importPlayerExport (docs/data-export-roadmap.md — the export/import round trip)', () => {
+  test('rejects a malformed or wrong-schemaVersion payload', () => {
+    assert.throws(() => db.importPlayerExport(null), /Invalid import file/);
+    assert.throws(() => db.importPlayerExport({ schemaVersion: 2, player: {}, games: [], gamePlayers: [], turns: [], darts: [], opponents: [] }), /Unsupported schemaVersion/);
+    assert.throws(() => db.importPlayerExport({ schemaVersion: 1 }), /Malformed import file/);
+  });
+
+  test('imports a fresh player + opponent (simulating a different server) and reconstructs H2H correctly', () => {
+    db.addPlayer('import_src_carl');
+    db.addPlayer('import_src_dana');
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: 'import_src_carl' }, { name: 'import_src_dana' }] });
+    db.addTurn(g.gameId, { player: 'import_src_carl', set: 1, leg: 1, scored: 100, darts: [
+      { sector: 20, multiplier: 3 }, { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 },
+    ] });
+    db.addTurn(g.gameId, { player: 'import_src_dana', set: 1, leg: 1, scored: 60, darts: [
+      { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 },
+    ] });
+    db.completeGame(g.gameId, 'import_src_carl');
+
+    // A real, structurally-valid export from local data -- then swap in uuids/names
+    // no local player currently has, to simulate this payload having genuinely come
+    // from a different, unconnected server (so the importer must create fresh rows,
+    // not match anything that happens to already exist).
+    const exported = db.getPlayerExport('import_src_carl');
+    exported.player.uuid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    exported.player.name = 'import_fresh_carl';
+    exported.opponents[0].uuid = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    exported.opponents[0].name = 'import_fresh_dana';
+
+    const result = db.importPlayerExport(exported);
+    assert.equal(result.player.created, true);
+    assert.equal(result.player.renamed, false);
+    assert.equal(result.player.name, 'import_fresh_carl');
+    assert.equal(result.opponents[0].created, true);
+    assert.equal(result.gamesImported, 1);
+    assert.equal(result.gamesSkipped, 0);
+    assert.equal(result.turnsImported, 2);
+    assert.equal(result.dartsImported, 6);
+
+    // H2H is reconstructable on the target using the app's normal live computation --
+    // exactly the property this whole design exists to preserve.
+    const rec = db.getH2HRecord('import_fresh_carl', 'import_fresh_dana');
+    assert.equal(rec.total, 1);
+    assert.equal(rec.p1Wins, 1); // carl (p1) won
+
+    // Re-importing the SAME payload is a safe no-op: both players already resolve
+    // by uuid, and the one game already exists locally (same fingerprint), so
+    // nothing new is created and nothing is double-counted.
+    const again = db.importPlayerExport(exported);
+    assert.equal(again.player.created, false);
+    assert.equal(again.opponents[0].created, false);
+    assert.equal(again.gamesImported, 0);
+    assert.equal(again.gamesSkipped, 1);
+    const recAfterReimport = db.getH2HRecord('import_fresh_carl', 'import_fresh_dana');
+    assert.equal(recAfterReimport.total, 1, 're-import must not double the H2H record');
+  });
+
+  test('a name collision with a different uuid is uniquified, not silently merged onto the unrelated local player', () => {
+    db.addPlayer('import_collide_eve');
+
+    const payload = {
+      exportedAt: new Date().toISOString(), schemaVersion: 1,
+      player: { id: 9001, uuid: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', name: 'import_collide_eve', outMode: 'double', dartWeight: null, createdAt: new Date().toISOString() },
+      games: [], gamePlayers: [], turns: [], darts: [], opponents: [], playerBadges: [],
+    };
+    const result = db.importPlayerExport(payload);
+    assert.equal(result.player.created, true);
+    assert.equal(result.player.renamed, true);
+    assert.equal(result.player.name, 'import_collide_eve (2)');
+
+    // The original local player is untouched -- still their own distinct row.
+    const original = db._db.prepare('SELECT id FROM players WHERE name = ?').get('import_collide_eve');
+    const imported = db._db.prepare('SELECT id FROM players WHERE name = ?').get('import_collide_eve (2)');
+    assert.notEqual(original.id, imported.id);
+  });
+
+  test('an opponent stub is upgraded in place when their own full export is imported later, without duplicating the shared game', () => {
+    db.addPlayer('import_src_frank');
+    db.addPlayer('import_src_grace');
+    const shared = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: 'import_src_frank' }, { name: 'import_src_grace' }] });
+    db.addTurn(shared.gameId, { player: 'import_src_frank', set: 1, leg: 1, scored: 60, darts: [
+      { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 },
+    ] });
+    db.addTurn(shared.gameId, { player: 'import_src_grace', set: 1, leg: 1, scored: 45, darts: [
+      { sector: 15, multiplier: 1 }, { sector: 15, multiplier: 1 }, { sector: 15, multiplier: 1 },
+    ] });
+    db.completeGame(shared.gameId, 'import_src_frank');
+
+    // Grace also has her own unrelated solo game on the source server -- not part
+    // of Frank's export, since an opponent stub never carries their other games.
+    const graceSolo = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1,
+      players: [{ name: 'import_src_grace' }] });
+    db.addTurn(graceSolo.gameId, { player: 'import_src_grace', set: 1, leg: 1, scored: 26, darts: [
+      { sector: 20, multiplier: 1 }, { sector: 3, multiplier: 1 }, { sector: 3, multiplier: 1 },
+    ] });
+
+    const frankUuid = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+    const graceUuid = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+
+    const frankExport = db.getPlayerExport('import_src_frank');
+    frankExport.player.uuid = frankUuid; frankExport.player.name = 'import_target_frank';
+    frankExport.opponents[0].uuid = graceUuid; frankExport.opponents[0].name = 'import_target_grace';
+    const r1 = db.importPlayerExport(frankExport);
+    assert.equal(r1.gamesImported, 1); // just the shared game
+    const graceStubId = db._db.prepare('SELECT id FROM players WHERE uuid = ?').get(graceUuid).id;
+
+    const graceExport = db.getPlayerExport('import_src_grace');
+    graceExport.player.uuid = graceUuid; graceExport.player.name = 'import_target_grace_full';
+    graceExport.opponents[0].uuid = frankUuid; graceExport.opponents[0].name = 'import_target_frank';
+    const r2 = db.importPlayerExport(graceExport);
+
+    assert.equal(r2.player.created, false, "Grace's stub row is reused, not duplicated");
+    const graceIdAfter = db._db.prepare('SELECT id FROM players WHERE uuid = ?').get(graceUuid).id;
+    assert.equal(graceIdAfter, graceStubId, 'same row as the stub created during step 1');
+    assert.equal(r2.gamesImported, 1, "only Grace's own solo game is new -- the shared game is a duplicate");
+    assert.equal(r2.gamesSkipped, 1);
+
+    const totalGraceGames = db._db.prepare('SELECT COUNT(*) n FROM game_players WHERE player_id = ?').get(graceIdAfter).n;
+    assert.equal(totalGraceGames, 2, "Grace's single row now has both the shared game and her own solo game");
   });
 });

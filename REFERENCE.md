@@ -2302,27 +2302,68 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   game/turn/dart rows for every game this player is in, **including
   opponents' own turns within those same games** (a result like "Ben beat
   Alaina" can't be represented without Alaina's side of the board). Opponents
-  get only a minimal identity stub — `{ uuid, name }`, nothing else — plus
-  their rows within games shared with this player; their other games against
-  other people are never included. `player` is
-  `{ uuid, name, outMode, dartWeight, createdAt }` (no PIN columns, same
-  write-only handling as the full-database export). Throws `httpError(404)`
-  for an unknown name. Deliberately out of scope for v1: tournament/league/
-  daily-challenge/ghost-race participation — see
-  `docs/data-export-roadmap.md` for the reasoning and the (not yet built)
-  import side of this design.
+  get only a minimal identity stub — `{ id, uuid, name }` — plus their rows
+  within games shared with this player; their other games against other
+  people are never included. `player` is `{ id, uuid, name, outMode,
+  dartWeight, createdAt }` (no PIN columns, same write-only handling as the
+  full-database export). The `id` on both `player` and each `opponents`
+  entry is the SOURCE server's own local integer id — meaningful only
+  together with this same export payload (it's what `games`/`gamePlayers`/
+  `turns` reference as `player_id`/`winner_id`), never a portable identity on
+  its own; `uuid` is the one that's portable. Throws `httpError(404)` for an
+  unknown name. Deliberately out of scope for v1: tournament/league/
+  daily-challenge/ghost-race participation — see `docs/data-export-roadmap.md`
+  for the reasoning.
 - **`GET /api/players/export`** (`?name=...`, `requireAdmin`) streams that
   object as a `Content-Disposition: attachment` download named
   `oche-export-<sanitized-name>-<YYYY-MM-DD>.json`. `400` with no `name`
   param, `404` for an unknown player.
-- The Settings → Admin & Danger Zone → **Data Export** section has two
-  buttons: **"Export all data"** navigates straight to `/api/export-all`
-  (unchanged); **"Export a player…"** navigates to a new dedicated screen
-  (`#screen-player-export`, `renderPlayerExportScreen()`) with a `<select>`
-  populated from the already-loaded `roster` array and an "Export data"
-  button that navigates to `/api/players/export?name=...` — the browser's
-  existing admin session cookie authenticates both requests, no separate
-  credential in the URL.
+- **`db.importPlayerExport(payload)`** (per-player import, admin-only) — the
+  counterpart to `getPlayerExport()`. `400`s if `payload.schemaVersion !== 1`
+  or the shape is otherwise malformed. Resolves the main player and every
+  opponent stub by **`uuid` first** (never `name` alone, since `name` is only
+  unique within one server's own roster): a `uuid` match reuses that existing
+  local row; no match creates a new row from the exported `uuid`+`name`,
+  uniquifying the name (`"Name (2)"`, `"Name (3)"`, …) if it collides with an
+  unrelated local player that has a *different* uuid, rather than silently
+  merging two different people's histories onto one row. Every referenced
+  player must resolve this way before any game/turn/dart is touched, building
+  a source-id → local-id map from the `id` fields `getPlayerExport()` embeds.
+  Games/turns/darts are then inserted directly via raw SQL — deliberately
+  bypassing `createGame()`/`addTurn()`/`completeGame()` and their lifecycle
+  hooks (league auto-tagging, badge-award checks, HA webhooks), since this is
+  a historical data restore, not a live game being played, and the export's
+  own `playerBadges` already carries exactly which badges the source earned.
+  `league_id` is always imported as `NULL` (leagues aren't part of a
+  per-player export). **Duplicate-import guard**: before inserting each game,
+  checks for an existing local game with the same
+  `created_at`/`category`/`game_type`/`legs_per_set`/`sets_per_game` and the
+  exact same (already-remapped) participant id set — if found, that game (and
+  its turns/darts) are skipped rather than duplicated, computed live at
+  import time rather than needing a separate "have I imported this before"
+  tracking table. This is also what makes re-importing the same file twice a
+  safe no-op, and what lets an opponent stub get transparently upgraded in
+  place if that opponent's own full export is imported later (their uuid
+  matches the existing stub row, and their shared games are recognized as
+  already-present duplicates — only their genuinely new games get added).
+  Returns `{ ok, player: {name, uuid, created, renamed}, opponents: [...],
+  gamesImported, gamesSkipped, turnsImported, dartsImported, badgesImported }`.
+- **`POST /api/players/import`** (`requireAdmin`) — body is exactly the JSON
+  `GET /api/players/export` produces. Uses a raised body-size cap
+  (`MAX_PLAYER_IMPORT_BYTES`, 20MB vs. the usual 1MB `readJson()` default —
+  a prolific player's full history can genuinely exceed 1MB as JSON).
+- The Settings → Admin & Danger Zone → **Data Export** section, and the
+  dedicated `#screen-player-export` screen it links to, cover both
+  directions: **"Export all data"** navigates straight to `/api/export-all`
+  (unchanged); **"Export a player…"** opens `#screen-player-export`
+  (`renderPlayerExportScreen()`), which has a `<select>` (populated from the
+  already-loaded `roster` array) + "Export data" button for export, and a
+  file input + "Import" button (`askImportPlayer()`) below it for import —
+  reads the chosen file client-side (catching malformed JSON before it ever
+  reaches the network), confirms via `uiConfirm()`, then `POST`s the parsed
+  payload to `/api/players/import` and shows the result summary via
+  `uiAlert()`. The browser's existing admin session cookie authenticates
+  every request in both directions, no separate credential in the URL or body.
 
 ### `players.uuid` — a portable per-player identity
 
@@ -2335,9 +2376,9 @@ above meaningful across independent servers: the autoincrement `id` is
 guaranteed to collide the moment two separately-run instances both have a
 player with `id=1`, but a v4 UUID needs no coordination between servers to
 stay effectively unique. `id` remains the internal join/FK target
-everywhere — `uuid` is exposed only in exports (full-database and
-per-player) as the portable identity a future import path would key
-opponent-stub lookups on.
+everywhere — `uuid` is exposed in exports (full-database and per-player) as
+the portable identity `importPlayerExport()` (above) keys its player/opponent
+resolution on.
 
 ---
 

@@ -122,6 +122,17 @@
                                        games (H2H isn't stored anywhere, only derivable
                                        from them) plus minimal opponent identity stubs
                                        (uuid+name). 404 if the name doesn't exist. [admin]
+       POST /api/players/import    -> body = exactly the JSON GET /api/players/export
+                                       produces. Resolves the main player + every
+                                       opponent stub by uuid first (creating a new,
+                                       uniquified-if-needed player row on no match), then
+                                       inserts games/turns/darts directly (bypassing
+                                       createGame()/addTurn() and their lifecycle hooks),
+                                       skipping any game that already exists locally
+                                       (same created_at/format/participant set) so
+                                       re-importing the same file twice is a no-op. 400
+                                       for a malformed file or unsupported schemaVersion.
+                                       [admin]
 
    Routes marked [admin] require a logged-in admin session (cookie set by /api/login).
    Set COOKIE_SECURE=true when serving over HTTPS (e.g. behind a reverse proxy) so the
@@ -272,6 +283,12 @@ function requireWrite(req, res) {
 }
 
 const MAX_JSON_BODY_BYTES = 1e6;
+// docs/data-export-roadmap.md: a per-player export/import file is real user data
+// (games/turns/darts), not a normal small write body — a prolific player's full
+// history can genuinely exceed 1MB as JSON. 20MB is generous headroom while still
+// being a bounded, defensive cap (nowhere near the 500MB raw-file backup cap, since
+// this is JSON, not a binary database).
+const MAX_PLAYER_IMPORT_BYTES = 20 * 1024 * 1024;
 // docs/bug-roadmap.md BUG-10 / docs/security-audit-roadmap.md SEC-21: chunks are
 // accumulated as raw Buffers and only decoded to a string ONCE, at the end, from
 // their concatenation. The previous `raw += c` decoded each chunk to UTF-8
@@ -293,7 +310,12 @@ const MAX_JSON_BODY_BYTES = 1e6;
 // Access-Control-Allow-* is ever sent). Every legitimate caller (index.html's
 // `Backend` helper) already sends this header, so this is not a behavior change
 // for same-origin use.
-function readJson(req) {
+// maxBytes defaults to MAX_JSON_BODY_BYTES (1MB, right for every ordinary write
+// body in this app) — POST /api/players/import passes a much larger cap, since a
+// prolific player's full game/turn/dart history can genuinely exceed 1MB as JSON,
+// the same reasoning the backup upload-restore route already applies for its own
+// (much bigger) binary file cap.
+function readJson(req, maxBytes = MAX_JSON_BODY_BYTES) {
   const ct = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
   if (ct !== 'application/json') {
     return Promise.reject(Object.assign(new Error('Content-Type must be application/json'), { status: 415 }));
@@ -313,7 +335,7 @@ function readJson(req) {
       // accumulating/counting bytes once the cap is already exceeded.
       if (tooLarge) return;
       bytes += c.length;
-      if (bytes > MAX_JSON_BODY_BYTES) { tooLarge = true; chunks.length = 0; return; }
+      if (bytes > maxBytes) { tooLarge = true; chunks.length = 0; return; }
       chunks.push(c);
     });
     // docs/security-audit-roadmap.md SEC-17: a malformed JSON body is a client error,
@@ -1227,6 +1249,12 @@ const server = http.createServer(async (req, res) => {
         ...SECURITY_HEADERS,
       });
       return res.end(body);
+    }
+    if (p === '/api/players/import' && m === 'POST') {
+      if (!requireAdmin(req, res)) return;
+      const payload = await readJson(req, MAX_PLAYER_IMPORT_BYTES);
+      const result = db.importPlayerExport(payload); // throws httpError(400) for a malformed/wrong-version file
+      return send(res, 200, result);
     }
 
     return send(res, 404, { error: 'Unknown endpoint' });

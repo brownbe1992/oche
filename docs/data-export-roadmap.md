@@ -1,9 +1,8 @@
 # Data Export — Design Roadmap
 
-> Status: **Full-database admin export done (2026-07). Per-player export done
-> (2026-07), shipped with a materially different design than this doc
-> originally sketched — see below. Re-import is a separate, not-yet-built
-> item.**
+> Status: **Full-database admin export done (2026-07). Per-player export
+> AND import both done (2026-07), shipped with a materially different design
+> than this doc originally sketched — see below.**
 >
 > **What shipped (full-database)**: **Settings → Admin & Danger Zone → Data
 > Export**, a single "Export all data" button that downloads a complete JSON
@@ -11,8 +10,8 @@
 > `sessions`, `settings`, and `server_errors` tables entirely and strips every
 > PIN/credential column from the `players` rows it does include.
 >
-> **What shipped (per-player, 2026-07) — a deliberate redirection from this
-> doc's original design, given by explicit product direction**:
+> **What shipped (per-player export, 2026-07) — a deliberate redirection from
+> this doc's original design, given by explicit product direction**:
 > - **Admin-only, not PIN-gated, not on the Player Profile.** The original
 >   design below proposed a player-PIN-gated "Export data" button on that
 >   player's own Profile page. The actual direction given was the opposite:
@@ -34,10 +33,29 @@
 >   backfilled for existing rows) — the portable per-player identity that
 >   makes the opponent-preservation design below possible. See
 >   `REFERENCE.md`'s "`players.uuid`" subsection for the exact mechanics.
-> - **Full detail**: `REFERENCE.md`'s "Settings → Data Export" section.
->   Covered by committed tests (`db.export.test.js`'s `getPlayerExport`/
->   `players.uuid` describe blocks, `server.export.test.js`'s `GET
->   /api/players/export` describe block).
+>
+> **What shipped (per-player import, 2026-07) — this doc's own recommended
+> design, built essentially as sketched**: `db.importPlayerExport(payload)` /
+> `POST /api/players/import`, reachable from the same `#screen-player-export`
+> admin page as export, below a file-upload control. Resolves the main
+> player and every opponent stub **by `uuid` first**, uniquifying the name on
+> a collision with an unrelated local player rather than merging two
+> different people's histories; inserts games/turns/darts directly
+> (bypassing `createGame()`/`addTurn()`/`completeGame()`'s lifecycle hooks,
+> since this is a historical restore, not a live game); and skips any game
+> that already exists locally by fingerprint (created_at + format +
+> participant set), which is what makes **re-importing the same file twice a
+> safe no-op**, and what lets **an opponent stub transparently upgrade to a
+> full account** when that opponent's own export is imported later — see
+> "Design (import, as shipped)" below. Verified end-to-end in a real browser
+> across two independently-run server instances (export from one, import
+> into the other, confirmed the imported player's H2H record reconstructs
+> correctly via the app's normal live computation on the target server).
+>
+> **Full detail**: `REFERENCE.md`'s "Settings → Data Export" section.
+> Covered by committed tests (`db.export.test.js`'s `getPlayerExport`/
+> `players.uuid`/`importPlayerExport` describe blocks, `server.export.test.js`'s
+> `GET /api/players/export`/`POST /api/players/import` describe blocks).
 
 ## Goal
 
@@ -92,6 +110,63 @@ player…" admin page:
   to be read back by a future importer someday, and an importer needs a
   version to check against.
 
+## Design (import, as shipped)
+
+`db.importPlayerExport(payload)` — admin-only, called from a file input +
+"Import" button on the same `#screen-player-export` page as export, below
+the export controls. `payload` is exactly the JSON `getPlayerExport()`
+produces (a `.json` file downloaded from this or another Oche server).
+
+- **Rejects immediately** if `payload.schemaVersion !== 1` or the shape is
+  otherwise malformed (missing `player`/`games`/`gamePlayers`/`turns`/
+  `darts`/`opponents` arrays) — `400`, checked client-side too (the file is
+  read and `JSON.parse`d in the browser before the request is even sent, so
+  a non-JSON file never reaches the network).
+- **Player resolution happens first, entirely, before any game/turn/dart is
+  touched** — the main player and every opponent stub are each resolved by
+  looking up `players.uuid` for a match:
+  - **Match found** → reuse that existing local row. This is the same
+    lookup regardless of whether the local row is a "real," independently-
+    created local player or a stub created by an *earlier* import — which
+    is what makes the "opponent stub later gets upgraded" scenario work for
+    free, with no separate merge step: if Alaina only ever existed locally
+    as a stub (created while importing Ben's export), and Alaina's *own*
+    full export is imported later, her `uuid` matches that stub row, so her
+    additional games attach to the *same* row rather than creating a second
+    "Alaina."
+  - **No match** → create a new player row from the exported `uuid`+`name`.
+    If that `name` collides with an unrelated local player (a different
+    `uuid` — a genuine coincidence, not the same person), the imported name
+    is uniquified (`"Name (2)"`, incrementing) rather than silently reusing
+    the unrelated player's row — merging two different people's histories
+    onto one row would be actively harmful, worse than a slightly-odd
+    display name the admin can rename by hand afterward. The import result
+    reports whether each player was newly created and/or renamed, so this
+    is visible, not silent.
+- **Games/turns/darts are inserted directly via raw SQL**, deliberately
+  bypassing `createGame()`/`addTurn()`/`completeGame()` and their lifecycle
+  hooks (league auto-tagging, badge-award checks, HA webhooks) — this is a
+  historical data restore, not a live game being played. The export's own
+  `playerBadges` array already carries exactly which badges the source
+  earned, imported directly rather than re-derived. `league_id` is always
+  imported as `NULL` (leagues were never part of a per-player export to
+  begin with).
+- **Duplicate-import guard, computed at import time rather than tracked**:
+  before inserting each game, checks for an existing local game with the
+  same `created_at`/`category`/`game_type`/`legs_per_set`/`sets_per_game`
+  and the exact same (already-remapped) participant id set — if one exists,
+  that game (and its turns/darts) are skipped, not duplicated. This is what
+  makes re-importing the same file twice a safe no-op (verified end-to-end:
+  importing the same export a second time reported 0 games added, 1
+  already present, and the target's H2H record stayed at `total: 1`, not
+  doubled) — with no separate "have I imported this file before" tracking
+  table needed, matching this schema's standing "nothing pre-aggregated"
+  philosophy.
+- Returns a summary: `{ ok, player: {name, uuid, created, renamed},
+  opponents: [...], gamesImported, gamesSkipped, turnsImported,
+  dartsImported, badgesImported }`, shown to the admin as a plain-language
+  result message.
+
 ## Full-database export (already shipped, unchanged by this pass)
 
 A complete dump of all players/games/turns/darts, positioned as the "back up
@@ -100,43 +175,65 @@ SQLite-file copy already documented in the README's Data Storage section.
 
 ## Accessibility, security, and testing considerations
 
-- **Security**: per-player export is admin-only (`requireAdmin`), the same
-  unconditional gate as the full-database export, `/api/wipe-all`, and the
-  Backups routes — this fully resolves the access-control question this doc
-  originally raised (whether per-player export needs its own PIN gate): it
-  doesn't, because it was redirected to be admin-only instead of
+- **Security**: both export and import are admin-only (`requireAdmin`), the
+  same unconditional gate as the full-database export, `/api/wipe-all`, and
+  the Backups routes — this fully resolves the access-control question this
+  doc originally raised (whether per-player export needs its own PIN gate):
+  it doesn't, because it was redirected to be admin-only instead of
   player-self-service, which sidesteps the "shared household device, anyone
   could be looking at anyone's profile" concern the PIN-gating proposal was
   responding to. `getPlayerExport()` itself never returns PIN/credential
-  columns, matching the full-database export's existing write-only handling.
+  columns, matching the full-database export's existing write-only handling;
+  `importPlayerExport()` never accepts or writes one either (imported
+  players always start with no PIN, since an export never carries one).
+  Import's request body uses a raised size cap (`MAX_PLAYER_IMPORT_BYTES`,
+  20MB) rather than the usual 1MB `readJson()` default, since a prolific
+  player's history can genuinely exceed 1MB as JSON.
 - **Testing**: covered — `db.export.test.js` has committed tests for
   `getPlayerExport()`'s game/turn/dart/opponent scoping (including a
   same-server two-player fixture proving an opponent's *unrelated* solo game
   does NOT leak into the export), the 404 on an unknown name, the empty-roster
-  case, and `players.uuid`'s format/uniqueness; `server.export.test.js`
-  covers the route's 401/400/404/200 status codes and response shape.
-- **Accessibility**: the new "Export a player…" screen is a standard
-  `<select>` + button — no special concern beyond the standing keyboard/
-  focus-order checklist in `docs/accessibility-roadmap.md`. The existing
-  "← Settings" back-button pattern (shared with other admin sub-pages) is
-  reused rather than inventing new navigation.
+  case, `players.uuid`'s format/uniqueness, and `importPlayerExport()`'s
+  fresh-import/H2H-reconstruction/re-import-is-a-no-op/name-collision/
+  stub-upgrade behavior; `server.export.test.js` covers both routes'
+  401/400/404/200 status codes and response shapes, including a real
+  export→import round trip through the actual HTTP endpoints. Additionally
+  verified end-to-end in a real browser across two independently-run server
+  instances (not just two rows in one shared test database) — exported a
+  player with an H2H game from one server, imported into a second, empty
+  server, and confirmed the target's own live `getH2HRecord()` computation
+  reconstructs the correct result; re-imported the same file into the same
+  target a second time and confirmed it was reported as a no-op with the
+  H2H record unchanged; and confirmed a non-JSON file is rejected
+  client-side with a clear message before any request is sent.
+- **Accessibility**: the "Export a player…" screen (export controls + the
+  import file input/button below them) uses standard `<select>`/`<input
+  type=file>`/button controls — no special concern beyond the standing
+  keyboard/focus-order checklist in `docs/accessibility-roadmap.md`. The
+  existing "← Settings" back-button pattern (shared with other admin
+  sub-pages) is reused rather than inventing new navigation; import results
+  are shown through the same `uiAlert()`/`uiConfirm()` modal components
+  every other admin write action already uses.
 
 ## Open questions for whoever picks this up
 
-- **Re-import** (taking an exported JSON file back into a different Oche
-  instance) is a separate, not-yet-built item — the export design above
-  (uuid identity, self-contained opponent stubs) was built specifically to
-  make a future import lossless and correct, but import itself was
-  explicitly out of scope for this pass. The recommended shape, if/when it's
-  built: look up each opponent stub by `uuid` first (never by `name` alone);
-  if not found locally, auto-create a minimal stub player row from the
-  exported `uuid`+`name` so the game data has a real local row to attach to
-  (preserving "Ben beat Alaina" even when Alaina herself was never
-  separately imported). If that stub's real account is *later* imported
-  separately and its `uuid` matches, the two should ideally merge into one
-  player rather than end up as two — but merging two players' full histories
-  is a genuinely harder problem than creating a stub, and deserves its own
-  design pass rather than being solved speculatively here.
+- **Merging two already-separate local players** (neither one a stub — two
+  players who were each independently created/played on this same server,
+  who a human recognizes as actually the same person) is explicitly **not**
+  handled by import — `importPlayerExport()`'s uuid-based resolution only
+  ever merges an import's player/opponent stubs onto an *existing* row with
+  a matching `uuid`; it has no concept of "these two different local rows,
+  with two different uuids, are secretly the same person." That would be a
+  general duplicate-player-merge tool, useful on its own regardless of
+  import, and a genuinely harder problem (whose games/turns/badges win on
+  conflict?) than anything this feature needed to solve.
+- **Duplicate-detection is an exact fingerprint match**, not fuzzy — a game
+  re-exported/re-imported with a `created_at` that differs even by a second
+  (clock skew between two machines, a hand-edited export file) won't be
+  recognized as the same game and will be inserted again. Not observed in
+  practice (the timestamp is preserved byte-for-byte from the original
+  export in every tested scenario), but worth flagging as a known,
+  unhandled edge case rather than a guaranteed-impossible one.
 - **CSV export** (a simpler, non-portable "your own stats as a spreadsheet"
   format, one row per turn or per game) remains a real, separate idea — not
   attempted in this pass, and doesn't need to solve anything above since

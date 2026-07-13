@@ -121,3 +121,44 @@ describe('GET /api/players/export (docs/data-export-roadmap.md, per-player expor
     });
   });
 });
+
+describe('POST /api/players/import (docs/data-export-roadmap.md, per-player import)', () => {
+  test('401s without an admin session', async () => {
+    await withServer(8444, async ({ base }) => {
+      const res = await fetch(`${base}/api/players/import`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+      assert.equal(res.status, 401);
+    });
+  });
+
+  test('400s for a malformed body, and a real export/import round trip 200s with the expected summary', async () => {
+    await withServer(8445, async ({ base, cookie }) => {
+      assert.equal((await api(base, cookie, '/api/players/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      })).status, 400);
+
+      // Round trip through the real HTTP routes: create a player, export them, then
+      // feed that exact export straight back into the import route. Same server, so
+      // this exercises the "re-import is a safe no-op" path end-to-end (the player
+      // already resolves by uuid and has no games to skip-as-duplicate).
+      await api(base, cookie, '/api/players', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'import_route_target', out: 'double' }),
+      });
+      const exportRes = await api(base, cookie, '/api/players/export?name=import_route_target');
+      const exported = await exportRes.json();
+
+      const importRes = await api(base, cookie, '/api/players/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exported),
+      });
+      assert.equal(importRes.status, 200);
+      const result = await importRes.json();
+      assert.equal(result.ok, true);
+      assert.equal(result.player.name, 'import_route_target');
+      assert.equal(result.player.created, false, 'already exists locally, matched by uuid');
+      assert.equal(result.gamesImported, 0);
+      assert.equal(result.gamesSkipped, 0);
+    });
+  });
+});

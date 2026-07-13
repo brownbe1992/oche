@@ -1401,6 +1401,21 @@
         opponent. Admin only.
       </p>
       <div id="player-export-body"></div>
+
+      <div class="pp-section" style="margin-top:28px;padding-top:20px;border-top:1px solid var(--wire)">
+        <h3 style="font-size:15px;margin:0 0 4px">Import a player</h3>
+        <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.6">
+          Import a player export downloaded from this or another Oche server. A player
+          is matched to an existing one by its export identity, not just by name — a
+          coincidental same-name player already on this server is never merged with it.
+          Importing the same file twice is safe: already-present games are skipped, not
+          duplicated.
+        </p>
+        <input type="file" id="player-import-file" accept=".json">
+        <div class="btn-row" style="margin-top:10px">
+          <button class="btn btn-primary" onclick="askImportPlayer()">Import</button>
+        </div>
+      </div>
     </div>
   </section>
 </div>
@@ -2905,6 +2920,36 @@ function exportSelectedPlayer(){
   const sel = document.getElementById('player-export-select');
   if(!sel || !sel.value) return;
   window.location = '/api/players/export?name=' + encodeURIComponent(sel.value);
+}
+// docs/data-export-roadmap.md: the import counterpart. Reads the chosen file
+// client-side (catching malformed JSON with a friendly message before it ever
+// reaches the network), confirms, then POSTs the parsed payload straight to
+// POST /api/players/import -- db.importPlayerExport() does all the real work
+// (uuid-based player matching, duplicate-game skipping); this is just wiring.
+function askImportPlayer(){
+  const input = document.getElementById('player-import-file');
+  const file = input && input.files && input.files[0];
+  if(!file){ uiAlert('Choose a player export file first.'); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    let payload;
+    try{ payload = JSON.parse(reader.result); }
+    catch(e){ uiAlert('That file is not valid JSON.'); return; }
+    uiConfirm(`Import "${file.name}"? This adds the player's games to this server's database. Games that already exist here are skipped, not duplicated.`, async () => {
+      try{
+        const r = await Backend.send('POST', '/api/players/import', payload);
+        input.value = '';
+        const oppSummary = r.opponents.length
+          ? ' Opponents: ' + r.opponents.map(o => `${o.name}${o.created ? (o.renamed ? ' (new, renamed to avoid a name clash)' : ' (new)') : ' (matched an existing player)'}`).join(', ') + '.'
+          : '';
+        uiAlert(`Imported "${r.player.name}"${r.player.created ? (r.player.renamed ? ' (new player, renamed to avoid a name clash)' : ' (new player)') : ' (matched an existing player)'}: ${r.gamesImported} game(s) added, ${r.gamesSkipped} already present, ${r.turnsImported} turn(s), ${r.dartsImported} dart(s).${oppSummary}`);
+      }catch(err){
+        uiAlert('Could not import: ' + (err.message || 'Unknown error'));
+      }
+    });
+  };
+  reader.onerror = () => uiAlert('Could not read that file.');
+  reader.readAsText(file);
 }
 // Settings -> Daily Challenge: admin reset of a player's attempt for a given date.
 // Deletes the attempt AND the game/turns/darts recorded during it (server-side

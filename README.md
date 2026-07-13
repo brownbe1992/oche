@@ -802,6 +802,7 @@ Shows the most recent server-side failures (up to 500, newest first) — the sam
 
 - **Export all data** — downloads a complete JSON export of every player, game, stat, tournament, and league in the database. Admin-only. Excludes admin accounts, sessions, app settings, and player PINs.
 - **Export a player…** — opens a dedicated admin page to pick one player and download just their history: every game they've played as JSON, including opponents' turn-by-turn data from those same games (so a result like "Ben beat Alaina" stays intact) plus a minimal identity record for each opponent. Admin-only; nothing export-related appears on a player's own page.
+- **Import a player** — on the same page, pick a player export file (from this or another Oche server) and import it. Players are matched by their export identity, not just by name, so a coincidental same-name player already on this server is never merged with it — a genuine match reuses the existing player, otherwise a new one is created (renamed if the name collides). Importing the same file twice is safe: games already present are skipped, not duplicated.
 
 #### Danger Zone
 
@@ -1359,8 +1360,14 @@ GET  /api/export-all                        Streams a full-database JSON export 
 GET  /api/players/export                    (?name=...) Streams one player's JSON export as a             [admin]
                                              download -- games/turns/darts for every game they're
                                              in, including opponents' rows within those same games,
-                                             plus minimal {uuid,name} opponent identity stubs.
+                                             plus minimal {id,uuid,name} opponent identity stubs.
                                              404 if the name doesn't exist.
+POST /api/players/import                    Body = exactly the JSON GET /api/players/export produces.    [admin]
+                                             Resolves players by uuid first (creating a new,
+                                             uniquified-if-needed row on no match); inserts
+                                             games/turns/darts; skips any game that already exists
+                                             locally so re-importing the same file twice is a no-op.
+                                             400 for a malformed file or unsupported schemaVersion.
 ```
 
 ---
@@ -1477,9 +1484,14 @@ and you can always take it with you. The same section also has **"Export a playe
 which opens a dedicated page to pick one player and download just their own history —
 every game they've played, including opponents' turn-by-turn data from those same
 games (so a result like "Ben beat Alaina" survives moving to another server intact)
-plus a minimal identity record for each opponent. Both are admin-only: there is no
-export entry point anywhere on a player's own page. Neither export ever includes
-admin accounts, sessions, app settings, or any player's PIN.
+plus a minimal identity record for each opponent. That same page can also **import**
+a player export (from this server or a different one): players are matched by a
+portable identity assigned at creation, not just by name, so a same-named but
+unrelated local player is never merged with the imported one, and importing the same
+file twice is a safe no-op — already-present games are skipped, not duplicated.
+Export and import are both admin-only: there is no export or import entry point
+anywhere on a player's own page. Neither export ever includes admin accounts,
+sessions, app settings, or any player's PIN.
 
 ### Admin Account Recovery
 
