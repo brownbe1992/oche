@@ -196,10 +196,22 @@ function send(res, status, data, headers = {}) {
 // sets it) — otherwise any client could put an arbitrary value in that header to
 // evade the limiter or frame another IP.
 const TRUST_PROXY = String(process.env.TRUST_PROXY || '').toLowerCase() === 'true';
+// docs/bug-roadmap.md BUG-15: a reverse-proxy deployment that forgets TRUST_PROXY=true
+// makes every request look like it comes from the proxy's single address, so the
+// whole household shares one rate-limit budget — normal multi-device gameplay can
+// then trip 429s for everyone, misread as the app being broken rather than a config
+// gap. Warn once (not per-request) the first time an X-Forwarded-For header is seen
+// while TRUST_PROXY is off, so this actually surfaces instead of silently degrading.
+let _xffUntrustedWarned = false;
 function clientIp(req) {
   if (TRUST_PROXY) {
     const xff = req.headers['x-forwarded-for'];
     if (xff) return String(xff).split(',')[0].trim();
+  } else if (!_xffUntrustedWarned && req.headers['x-forwarded-for']) {
+    _xffUntrustedWarned = true;
+    console.warn('[oche] Received X-Forwarded-For but TRUST_PROXY is not set — every request through ' +
+      'that proxy is being rate-limited as one shared IP. If this server is behind a reverse proxy you ' +
+      'control, set TRUST_PROXY=true so per-client rate limiting works correctly.');
   }
   return (req.socket && req.socket.remoteAddress) || 'unknown';
 }

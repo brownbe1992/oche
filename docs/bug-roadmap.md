@@ -891,7 +891,18 @@ hardware) completes exactly as before with no behavior change.
 
 ### BUG-15 — Reverse-proxy deployment without `TRUST_PROXY=true` collapses every client onto one shared rate-limit bucket  **(LOW, deployment foot-gun)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** `clientIp()` now warns once (via a module-level flag,
+not per-request) the first time it observes an `X-Forwarded-For` header while
+`TRUST_PROXY` is unset, explaining the shared-bucket consequence and pointing at the
+env var. No behavior change to IP resolution itself — purely additive observability.
+`README.md`'s "Exposing this to the internet — checklist" already pairs
+`TRUST_PROXY=true` with `COOKIE_SECURE=true` as of the SEC-24 fix (both findings
+pointed at the same checklist, closed together). Committed regression test
+`backend/test/server.trust-proxy-warning.test.js` confirms: repeated requests
+carrying `X-Forwarded-For` with `TRUST_PROXY` unset produce exactly one warning, not
+one per request; no `X-Forwarded-For` ever sent produces no warning; `TRUST_PROXY=true`
+produces no warning even with the header present. Verified the test fails against the
+pre-fix code. Full backend suite green (569/569).
 
 **Where:** `backend/server.js` `clientIp()` and the `rateLimit('global', ip, 300,
 60000)` call ahead of all routing. Working as designed — `TRUST_PROXY` deliberately
