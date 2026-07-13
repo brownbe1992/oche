@@ -217,16 +217,23 @@ SQLite-file copy already documented in the README's Data Storage section.
 
 ## Open questions for whoever picks this up
 
-- **Merging two already-separate local players** (neither one a stub — two
-  players who were each independently created/played on this same server,
-  who a human recognizes as actually the same person) is explicitly **not**
-  handled by import — `importPlayerExport()`'s uuid-based resolution only
-  ever merges an import's player/opponent stubs onto an *existing* row with
-  a matching `uuid`; it has no concept of "these two different local rows,
-  with two different uuids, are secretly the same person." That would be a
-  general duplicate-player-merge tool, useful on its own regardless of
-  import, and a genuinely harder problem (whose games/turns/badges win on
-  conflict?) than anything this feature needed to solve.
+- **Resolved (tracked separately): merging two already-separate local
+  players** (neither one a stub — two players who were each independently
+  created/played on this same server, who a human recognizes as actually
+  the same person) is explicitly **not** handled by import —
+  `importPlayerExport()`'s uuid-based resolution only ever merges an
+  import's player/opponent stubs onto an *existing* row with a matching
+  `uuid`; it has no concept of "these two different local rows, with two
+  different uuids, are secretly the same person." Now has its own design
+  doc, `docs/player-merge-roadmap.md` — a general duplicate-player-merge
+  tool, useful on its own regardless of import, and a genuinely harder
+  problem (whose games/turns/badges win on conflict?) than anything this
+  feature needed to solve. That doc also flags a real interaction worth
+  building alongside it: merging deletes the source player's row, which
+  would break a *future* re-import of an old export still carrying that
+  player's now-orphaned `uuid` unless the merge tool records a
+  `player_uuid_aliases` mapping this importer's `resolveStub()` can fall
+  back to.
 - **Duplicate-detection is an exact fingerprint match**, not fuzzy — a game
   re-exported/re-imported with a `created_at` that differs even by a second
   (clock skew between two machines, a hand-edited export file) won't be
