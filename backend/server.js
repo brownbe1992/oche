@@ -874,7 +874,10 @@ const server = http.createServer(async (req, res) => {
     let mt;
     if ((mt = p.match(/^\/api\/games\/(\d+)\/turns\/last$/)) && m === 'DELETE') {
       if (!requireWrite(req, res)) return;
-      return send(res, 200, db.deleteLastTurn(Number(mt[1])));
+      // docs/bug-roadmap.md BUG-13: optional — index.html sends it when it knows
+      // which turn it's actually trying to undo; omitted, this is unchanged
+      // "delete whatever's newest" behavior.
+      return send(res, 200, db.deleteLastTurn(Number(mt[1]), url.searchParams.get('turnId')));
     }
     if ((mt = p.match(/^\/api\/games\/(\d+)\/turns$/)) && m === 'POST') {
       if (!requireWrite(req, res)) return;

@@ -1503,10 +1503,21 @@ const DB = {
       leagueId:meta.leagueId}); this.gameId=r.gameId; }
     catch(e){ logErr(e); this.gameId=null; }
   },
-  recordTurn(t){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/turns`, t)); } },
+  // docs/bug-roadmap.md BUG-13: remembers the id of the turn this device's own last
+  // recordTurn() call actually created, so deleteLastTurn() can tell the server
+  // exactly which turn it means instead of "whatever's newest for this game" (which,
+  // with more than one device/tab scoring the same game, might not be this one's).
+  // Cleared after every delete (rather than guessed forward) so a second undo
+  // pressed right after the first — with no new recordTurn() in between — falls back
+  // to the original unguarded "delete whatever's newest" behavior instead of being
+  // rejected for a turn id that's now stale by design; this is a strict improvement
+  // (protects the one case that's actually verifiable) with no new failure mode.
+  lastTurnId: null,
+  recordTurn(t){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/turns`, t).then(r=>{ if(r && r.turnId!=null) this.lastTurnId=r.turnId; })); } },
   recordEvent(type, setNo, legNo){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/events`, {type, setNo:setNo??null, legNo:legNo??null})); } },
   completeGame(winner){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/complete`, {winner})); } },
-  deleteLastTurn(){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('DELETE',`/api/games/${id}/turns/last`)); } },
+  deleteLastTurn(){ if(this.gameId!=null){ const id=this.gameId; const turnId=this.lastTurnId; this.lastTurnId=null;
+    this._queue(()=>Backend.send('DELETE',`/api/games/${id}/turns/last`+(turnId!=null?`?turnId=${turnId}`:''))); } },
 
   async reset(){ await Backend.send('POST','/api/reset').catch(logErr); await this.refreshStats(); },
   async wipeAll(){ await Backend.send('POST','/api/wipe-all'); await this.refreshStats(); },

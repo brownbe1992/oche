@@ -773,7 +773,29 @@ of crashing; the scoreboard keeps updating on the next legitimate event.
 
 ### BUG-13 — `deleteLastTurn()` deletes the newest turn for the *game*, not a specific turn, so undo is ambiguous with more than one scoring device  **(LOW)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** `addTurn()` now returns `{ ok: true, turnId }` (purely
+additive — nothing previously read beyond `.ok`). `deleteLastTurn(gameId, turnId)`
+takes an optional second argument: omitted, behavior is unchanged (delete whatever's
+newest); supplied, it must match the game's actual newest turn or the call is
+rejected with `409` and nothing is deleted. `server.js`'s `DELETE
+/api/games/:id/turns/last` route reads it from `?turnId=`. `frontend/index.html`'s
+`DB` object threads it through transparently — `recordTurn()` stashes the id its own
+last write actually created (`DB.lastTurnId`), and `deleteLastTurn()` sends it, then
+**clears** it immediately (not guesses the next one) so a second undo pressed right
+after the first, with no new `recordTurn()` in between, falls back to the original
+unguarded behavior instead of being rejected for a turn id that's stale by design —
+this only ever adds protection for the one case that's actually verifiable (undo
+immediately following a turn this device itself recorded), never a new failure mode
+for repeated-undo or a fresh page load (where `lastTurnId` resets to `null`). No
+caller in `index.html` needed to change — `DB.recordTurn`/`DB.deleteLastTurn` are the
+only two functions that needed to know about this, transparent to the 7 call sites
+across every game type. Committed regression test
+`backend/test/db.delete-last-turn-guard.test.js` confirms `addTurn()`'s new return
+shape, the unchanged no-`turnId` behavior, a matching `turnId` deleting normally, a
+stale `turnId` (simulating a second device having recorded a newer turn since)
+rejecting with `409` and deleting nothing, and a `turnId` that never existed also
+rejecting. Verified the test fails entirely against the pre-fix code. Full backend
+suite green (565/565).
 
 **Where:** `backend/db.js` `deleteLastTurn(gameId)`:
 

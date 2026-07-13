@@ -878,7 +878,10 @@ function addTurn(gameId, t, opts = {}) {
     q.insertDart.run(turnId, d.dartNo, d.sector, d.multiplier, d.thrownAt,
       d.zone, d.missZone, d.missDepth, d.bounced ? 1 : null);
   }
-  return { ok: true };
+  // docs/bug-roadmap.md BUG-13: returned so the client can remember exactly which
+  // turn it just recorded and pass it back to deleteLastTurn() — purely additive,
+  // nothing previously read this response beyond `ok`.
+  return { ok: true, turnId };
 }
 
 function completeGame(gameId, winnerName) {
@@ -3141,7 +3144,23 @@ function clearPlayerStats(playerName, mode) {
   return { ok: true };
 }
 
-function deleteLastTurn(gameId) {
+// docs/bug-roadmap.md BUG-13: `turnId` is optional, additive — omitting it (or
+// passing null/undefined) keeps the original "delete whatever's newest" behavior
+// unchanged for backward compatibility / the common single-controller-device case.
+// When supplied (index.html's DB.deleteLastTurn() now remembers the id its own
+// last recordTurn() call returned), it must match the game's actual current newest
+// turn before anything is deleted — otherwise this device's "last turn" is stale
+// (a second device/tab scored this same game since), and blindly deleting the
+// newest turn would delete a turn this device never recorded. Fails closed (409)
+// rather than guessing.
+function deleteLastTurn(gameId, turnId) {
+  if (turnId != null) {
+    const requestedId = Number(turnId);
+    const newest = db.prepare('SELECT id FROM turns WHERE game_id = ? ORDER BY id DESC LIMIT 1').get(Number(gameId));
+    if (!Number.isInteger(requestedId) || !newest || newest.id !== requestedId) {
+      throw httpError(409, 'This is no longer the most recent turn — refresh and try again.');
+    }
+  }
   db.prepare('DELETE FROM turns WHERE id = (SELECT MAX(id) FROM turns WHERE game_id = ?)').run(Number(gameId));
   return { ok: true };
 }
