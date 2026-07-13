@@ -592,7 +592,17 @@ one render-crash risk (BUG-12), and three lower-severity correctness gaps
 
 ### BUG-10 — `readJson()` accumulates request-body chunks as strings, corrupting multi-byte characters split across a chunk boundary  **(MED)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** `readJson()` now accumulates raw `Buffer` chunks in an
+array and decodes to UTF-8 exactly once, via `Buffer.concat(chunks).toString('utf8')`,
+at `end` — implemented together with `security-audit-roadmap.md` SEC-19/SEC-21 (same
+function, same change). Committed regression test
+`backend/test/server.request-body-hardening.test.js` ("BUG-10" describe block) opens a
+raw `net.Socket` to a spawned server, writes a JSON body containing a 4-byte UTF-8
+character (🎯) split into two separate socket writes with a real gap between them
+(deliberately landing the split strictly inside the 4-byte sequence, which the old
+per-chunk-decode would have corrupted into replacement characters), and confirms both
+the HTTP response and the value actually persisted via `GET /api/players` contain the
+character intact. Full backend suite green.
 
 **Where:** `backend/server.js` `readJson()`:
 

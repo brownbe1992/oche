@@ -1168,7 +1168,17 @@ count for legitimate numeric payloads.
 
 ### SEC-19 — No `Content-Type` enforcement on write endpoints → CSRF via cross-origin "simple" requests when `OCHE_REQUIRE_AUTH=false`  **(MED, conditional on the LAN-trust opt-out)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** `readJson()` now rejects any request whose
+`Content-Type` isn't `application/json` (an optional `; charset=...` suffix is
+tolerated) with `415`, before reading any body bytes — implemented together with
+BUG-10/SEC-21 since all three touch the same function. Committed regression test
+`backend/test/server.request-body-hardening.test.js` ("SEC-19" describe block)
+confirms: `Content-Type: text/plain` on a write route returns 415 and performs no
+write; no `Content-Type` header at all also returns 415; `application/json;
+charset=utf-8` still succeeds. Every existing `index.html` call site already sends
+`Content-Type: application/json` via the shared `Backend` helper, so this is not a
+behavior change for legitimate same-origin use — confirmed by the full backend suite
+staying green (535/535) after the change. Full backend suite green.
 
 **Where:** `backend/server.js` `readJson()` and every `requireWrite`-gated route. A
 browser may send a cross-origin POST with a body and no CORS preflight as long as it
@@ -1264,7 +1274,21 @@ still succeeds exactly as before; a second call after setup still returns 403.
 
 ### SEC-21 — Request-body size cap counts decoded characters, not bytes  **(LOW)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** Implemented together with BUG-10/SEC-19 (same
+function). `readJson()` now accumulates raw `Buffer` chunks and tracks the running
+total in real bytes (`chunk.length`) instead of decoded JS string length, decoding
+to a string exactly once at `end`. **Also found and fixed in the same pass** (surfaced
+by writing this finding's own regression test): the size-cap path previously called
+`req.destroy(err)`, which tears the socket down before a response can be written — a
+client tripping the cap saw a raw `ECONNRESET`, never the intended `413` body. Now
+drains-and-discards instead (matching the precedent `handleUploadRestore()` already
+established for its own oversized-upload case), so `'end'` still fires naturally and
+the `413` response reaches the client over an intact connection. Committed regression
+test `backend/test/server.request-body-hardening.test.js` ("SEC-21" describe block)
+sends a body engineered to be under 1e6 in JS string length but over 1e6 in real UTF-8
+bytes (400,000 repeats of `文`, U+6587 — 3 bytes each but 1 UTF-16 code unit) and
+confirms it's rejected with a real `413` response (not a connection reset). Full
+backend suite green.
 
 **Where:** `backend/server.js` `readJson()`:
 

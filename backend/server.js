@@ -245,18 +245,50 @@ function requireWrite(req, res) {
   return !!requireAdmin(req, res);
 }
 
+const MAX_JSON_BODY_BYTES = 1e6;
+// docs/bug-roadmap.md BUG-10 / docs/security-audit-roadmap.md SEC-21: chunks are
+// accumulated as raw Buffers and only decoded to a string ONCE, at the end, from
+// their concatenation. The previous `raw += c` decoded each chunk to UTF-8
+// independently — a multi-byte character (an emoji, an accented letter) that
+// happens to straddle two 'data' events was decoded as two malformed fragments
+// (each becoming a replacement character, or breaking JSON.parse outright), since
+// TCP/HTTP chunking has no obligation to split on a character boundary. Tracking
+// the size cap in real Buffer bytes (chunk.length) rather than JS string length
+// also closes SEC-21: a body of mostly 4-byte UTF-8 sequences could previously
+// reach ~4x the intended 1MB before the char-length check tripped.
+//
+// docs/security-audit-roadmap.md SEC-19: a cross-site page can send a "simple"
+// (no-preflight) POST with an arbitrary text/plain body, which the old code parsed
+// as JSON regardless — under the OCHE_REQUIRE_AUTH=false LAN-trust opt-out (no
+// cookie involved) that let a malicious webpage drive any write endpoint through a
+// visitor's browser. Requiring an explicit application/json Content-Type closes
+// this: a cross-origin "simple" request cannot set that header without triggering
+// a CORS preflight, which this server's headers never approve (no
+// Access-Control-Allow-* is ever sent). Every legitimate caller (index.html's
+// `Backend` helper) already sends this header, so this is not a behavior change
+// for same-origin use.
 function readJson(req) {
+  const ct = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+  if (ct !== 'application/json') {
+    return Promise.reject(Object.assign(new Error('Content-Type must be application/json'), { status: 415 }));
+  }
   return new Promise((resolve, reject) => {
-    let raw = '';
+    const chunks = [];
+    let bytes = 0;
+    let tooLarge = false;
     req.on('data', c => {
-      raw += c;
-      if (raw.length > 1e6) {
-        // destroy() with an error emits 'error' below, so the promise settles instead
-        // of hanging forever (destroy() with no argument emits neither 'end' nor 'error').
-        const err = new Error('Request body too large');
-        err.status = 413;
-        req.destroy(err);
-      }
+      // Found while adding regression coverage for the byte-accurate cap above:
+      // req.destroy(err) tears the socket down before a response can be written,
+      // so the caller only ever saw a raw ECONNRESET, never the intended 413 body.
+      // Drain-and-discard instead (same fix handleUploadRestore() already applies
+      // for its own oversized-upload case, for the same "req and res share one
+      // socket" reason) — keep consuming 'data' events so 'end' still fires
+      // naturally and the connection can carry our 413 response back, just stop
+      // accumulating/counting bytes once the cap is already exceeded.
+      if (tooLarge) return;
+      bytes += c.length;
+      if (bytes > MAX_JSON_BODY_BYTES) { tooLarge = true; chunks.length = 0; return; }
+      chunks.push(c);
     });
     // docs/security-audit-roadmap.md SEC-17: a malformed JSON body is a client error,
     // not a server fault — tag it 400 so the top-level catch returns 400 and does NOT
@@ -264,6 +296,13 @@ function readJson(req) {
     // Left untagged it became a 500 an unauthenticated caller could emit at will
     // (POST /api/login, /api/setup, /api/players/verify-pin all readJson pre-auth).
     req.on('end', () => {
+      if (tooLarge) {
+        const err = new Error('Request body too large');
+        err.status = 413;
+        reject(err);
+        return;
+      }
+      const raw = chunks.length ? Buffer.concat(chunks).toString('utf8') : '';
       try { resolve(raw ? JSON.parse(raw) : {}); }
       catch (e) { e.status = 400; e.message = 'Invalid JSON body'; reject(e); }
     });
