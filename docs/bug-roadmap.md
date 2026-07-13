@@ -836,7 +836,24 @@ is unaffected (no `turnId` sent, or the id it sends always matches in the normal
 
 ### BUG-14 — Uploaded-backup stream ignores write-stream backpressure, buffering up to the full 500MB cap in memory on a slow disk  **(LOW)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** `handleUploadRestore()`'s `'data'` handler now checks
+`out.write(chunk) === false` and, when the write stream's internal buffer is full,
+`req.pause()`s the readable side and `req.resume()`s it once `out` emits `'drain'` —
+the standard Node backpressure handshake. Committed regression coverage in
+`backend/test/server.upload-backpressure.test.js` extracts `handleUploadRestore()`
+directly from `server.js`'s real source and asserts the pattern is present (checks
+`write()`'s return value, pauses on backpressure, waits for `'drain'`, resumes) — a
+deliberate choice over trying to force real backpressure end-to-end: whether
+`write()` ever returns `false` depends on genuine OS/disk write timing, which isn't
+reliably triggerable or observable from outside the process in a fast, deterministic
+test, especially against this sandbox's typically fast overlay filesystem where a
+test-sized payload wouldn't exercise the buffer-full path regardless of whether the
+fix is present — a source-pattern assertion is what actually guards against this
+specific handling being silently reverted later while everything else still appears
+to work. The existing full upload-restore round trip in `server.backups.test.js` (9
+tests) re-confirms the fix doesn't break normal uploads — unchanged, still green.
+Verified the new test fails against the pre-fix code. Full backend suite green
+(566/566).
 
 **Where:** `backend/server.js` `handleUploadRestore()`:
 

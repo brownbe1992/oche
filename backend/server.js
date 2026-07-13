@@ -456,7 +456,17 @@ async function handleUploadRestore(req, res, admin) {
           fail(Object.assign(new Error(`Upload too large (max ${MAX_BACKUP_UPLOAD_BYTES / (1024 * 1024)}MB)`), { status: 413 }));
           return;
         }
-        out.write(chunk);
+        // docs/bug-roadmap.md BUG-14: out.write()'s return value was previously
+        // ignored — on a disk slower than the incoming network stream, Node kept
+        // buffering unwritten chunks in process memory instead of pausing `req`,
+        // letting a large upload (up to the 500MB cap above) transiently hold most
+        // or all of itself in memory. write() returns false when its internal
+        // buffer is full; pause the readable side until 'drain' says it's safe to
+        // keep consuming, the standard Node backpressure handshake.
+        if (out.write(chunk) === false) {
+          req.pause();
+          out.once('drain', () => { if (!settled) req.resume(); });
+        }
       });
       req.on('end', () => { if (!settled) out.end(() => { settled = true; resolve(); }); });
       req.on('error', fail);
