@@ -19,11 +19,15 @@
 > not scoped to one new feature — including the Guided Around the Clock/World and
 > Checkout Trainer/League Mode expansions merged since Part 7) opened **SEC-18**
 > through **SEC-24**, **all now fixed** — see "Part 8" at the bottom for each entry's
-> shipped-detail note. Functional-defect counterparts live in `docs/bug-roadmap.md`
-> (BUG-1/BUG-2/BUG-3 from the second pass; BUG-4/BUG-5 from the third; BUG-6/BUG-7
-> from the fourth; BUG-9 from the fifth; BUG-10 through BUG-15 from the sixth, all
-> fixed). **SEC-1 through SEC-24 and BUG-1 through BUG-15 are all fixed as of this
-> writing** — nothing open on either tracker.
+> shipped-detail note. A **seventh-pass audit** (2026-07, an adversarial re-read
+> weighted toward the Baseball / per-player export-import / league-fixtures /
+> New-Game-wizard code merged since Part 8) opened **SEC-25** (Baseball scored-vs-darts
+> consistency, the one game type SEC-22's per-type analysis never re-ran against) —
+> **now fixed** — see "Part 9". Functional-defect counterparts live in
+> `docs/bug-roadmap.md` (BUG-1/BUG-2/BUG-3 from the second pass; BUG-4/BUG-5 from the
+> third; BUG-6/BUG-7 from the fourth; BUG-9 from the fifth; BUG-10 through BUG-15 from
+> the sixth; BUG-19 from the seventh, all fixed). **SEC-1 through SEC-25 and BUG-1
+> through BUG-19 are all fixed as of this writing** — nothing open on either tracker.
 >
 > See the "Status" line
 > under each finding below for what actually shipped, which in a couple of places is
@@ -1493,3 +1497,91 @@ the cookie or headers when unset).
 4. **SEC-21, SEC-22, SEC-23** — low-severity hardening, any order; SEC-21 shares an
    implementation with `docs/bug-roadmap.md` BUG-10 so do them together.
 5. **SEC-24** — purely additive (a warning + an opt-in header), no urgency, do last.
+
+---
+
+## Part 9 — Seventh-pass audit (2026-07, weighted to code merged since Part 8)
+
+An adversarial re-read weighted toward the features merged since the sixth pass:
+Baseball (core game + full stats/achievements/leaderboards parity), the Triple
+Bull / Bullseye Finish achievements, the dartboard-heatmap zone-unknown change,
+per-player export/import (`getPlayerExport()`/`importPlayerExport()`), league
+fixtures / pending matches, and the New Game 3-step wizard. Re-checked and still
+safe on the new surfaces: SQL injection (every new interpolated fragment traces to
+`_scope()`/internal constants; the export's `IN (...)` lists are placeholder-bound),
+the "zero bare `escapeJs`" invariant (still exactly zero — every new wizard/league/
+Baseball render site escapes at the sink, including `uiAlert`/`uiConfirm`, which
+escape internally), the new `GET /api/players/export` filename (sanitized to
+`[a-z0-9-]` before reaching `Content-Disposition`), and the new public reads
+(`/api/leagues/pending-fixture` resolves via `getPlayer()`, never `ensurePlayer()`,
+and fails soft). Triple Bull / Bullseye Finish match `REFERENCE.md`'s spec exactly,
+including the suppression pairs. One security finding (SEC-25). Functional-defect
+counterparts from this same pass are `docs/bug-roadmap.md` **BUG-19** through
+**BUG-23**.
+
+### SEC-25 — `addTurn()`'s SEC-22 scored-vs-darts consistency guard was never extended to Baseball, so a hostile client can poison every Baseball stat with a `scored` value the darts can't produce  **(LOW, latent / stat poisoning)**
+
+**Status: ✅ Fixed (2026-07).** `addTurn()`'s `enforceConsistency` block now also
+covers `game_type === 'baseball'`: the turn's inning is derived server-side as
+1 + the player's own prior turn count in the same game/set/leg (each player throws
+exactly once per inning, so their own turn count *is* their inning progression —
+correct even mid-round and across undo, which deletes the newest turn), the target
+number is `min(inning, 9)` (extra innings keep targeting 9, matching
+`baseballInningTarget()`), and `scored` must equal the sum of `multiplier` over
+this visit's darts that hit the target sector. Baseball turns must also carry
+`bust=false`/`checkout=false` (the game has neither concept — `enterTurnBaseball()`
+always sends both false). Committed regression tests in
+`backend/test/db.turn-consistency-guard.test.js` (SEC-25 describe block): a
+legitimate mid-game Baseball visit (including a wrong-number 0-run dart, an
+inning-advance to a new target, and an extra-innings turn) still records; `scored:
+180` on a Baseball turn, a `scored` that mismatches the darts, and `bust`/`checkout:
+true` are each rejected with 400; X01's own SEC-22 behavior is unchanged. Verified
+the four rejection cases fail against the pre-fix source. `REFERENCE.md`'s SEC-22
+note updated in the same change. Full backend suite green.
+
+**Where:** `backend/db.js` `addTurn()` — the SEC-22 block:
+
+```js
+const gameTypeRow = opts.enforceConsistency ? q.gameTypeById.get(Number(gameId)) : null;
+if (gameTypeRow && gameTypeRow.game_type === 'x01') { ... }
+```
+
+SEC-22's own comment enumerates why each *then-existing* non-X01 game type is
+exempt (Cricket's `scored` needs whole-game mark state to re-derive; Doubles
+Practice/Chuckin/Checkout Trainer/Around the Clock/World either aren't arithmetic
+or don't use `scored` as a points total). Baseball was added **after** that
+analysis and never re-ran it — but Baseball fails the exemption reasoning:
+`turns.scored` for a Baseball turn *is* a points-like total (runs, feeding the RPI
+leaderboard, the Perfect Innings count, `bestInning`, and `getBaseballWonLegs()`'s
+leg-winner derivation), and it *is* arithmetically derivable from the visit's own
+darts plus the inning number, which the server can reconstruct from data it already
+has (the player's prior turn count in the leg).
+
+**Attack:** whoever can `POST /api/games/:id/turns` (any LAN device under the
+documented `OCHE_REQUIRE_AUTH=false` opt-out; an admin session otherwise) records a
+Baseball turn with legitimate darts but `scored: 180` — `addTurn()`'s only guard is
+the generic X01-shaped `0..180` range, while Baseball's real per-visit maximum is
+9. One such turn multiplies a player's RPI by up to 20x, tops the Best Inning
+bubble forever, and skews `getBaseballWonLegs()`'s max-runs leg-winner derivation
+(handing won-leg Personal Bests to the wrong player). Contrast Cricket, whose 9
+Marks leaderboard deliberately re-derives marks from the `darts` rows rather than
+trusting `turns.scored` — Baseball's `getBaseballPerfectInningsStats()` trusts
+`t.scored = 9` directly, so the poisoned column is load-bearing there too. Same
+"stats must stay accurate" goal as SEC-22; same latency (the shipped UI always
+sends consistent values).
+
+**Fix (step by step):**
+1. In `addTurn()`'s `enforceConsistency` block, add a `game_type === 'baseball'`
+   branch: derive `inning = 1 + COUNT(turns WHERE game_id=? AND player_id=? AND
+   set_no=? AND leg_no=?)`, `target = Math.min(inning, 9)`, and
+   `expectedRuns = Σ multiplier over darts with sector === target`; reject
+   `scored !== expectedRuns` with a 400. Also reject `bust`/`checkout` true on a
+   Baseball turn (neither exists in the game).
+2. Committed `node:test` cases per the Status note above, including the two edge
+   shapes that must keep working: a 0-run visit (all darts on the wrong number)
+   and an extra-innings visit (target stays 9).
+3. `REFERENCE.md`'s SEC-22/consistency note gets Baseball added to its list in the
+   same change.
+
+**Verify:** the new tests pass; a full live Baseball game (played via the UI)
+records normally end-to-end; X01's SEC-22 checks are unchanged.

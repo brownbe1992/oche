@@ -126,6 +126,99 @@ describe('addTurn — scored must match the darts thrown, when opted in (SEC-22,
   });
 });
 
+describe('addTurn — Baseball scored must match the visit\'s runs, when opted in (SEC-25)', () => {
+  // Baseball's turns.scored IS a points-like total (runs) the leaderboards trust, and
+  // IS derivable from the visit's own darts + the inning number — so unlike Cricket it
+  // gets the same consistency guard X01 does, extended to Baseball's own arithmetic.
+  function baseballGame(players) {
+    return db.createGame({
+      category: 'Baseball', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'baseball', players: players.map(name => ({ name })),
+    });
+  }
+
+  test('accepts a legitimate mid-game Baseball visit (target hit + a wrong-number 0-run dart)', async () => {
+    await db.addPlayer('SEC25_A'); await db.addPlayer('SEC25_B');
+    const { gameId } = baseballGame(['SEC25_A', 'SEC25_B']);
+    // Inning 1 (no prior turns for this player), target = 1. One single-1 (1 run) + a
+    // dart on the wrong number (scores 0) + a treble-1 (3 runs) => 4 runs total.
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC25_A', set: 1, leg: 1, scored: 4, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }, { dartNo: 2, sector: 7, multiplier: 3 }, { dartNo: 3, sector: 1, multiplier: 3 }],
+    }, STRICT));
+  });
+
+  test('rejects a Baseball turn claiming scored=180 (real per-visit max is 9)', async () => {
+    const { gameId } = baseballGame(['SEC25_C', 'SEC25_D']);
+    await db.addPlayer('SEC25_C'); await db.addPlayer('SEC25_D');
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC25_C', set: 1, leg: 1, scored: 180, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 3 }, { dartNo: 2, sector: 1, multiplier: 3 }, { dartNo: 3, sector: 1, multiplier: 3 }], // real runs: 9
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('rejects a Baseball turn whose scored mismatches its darts', async () => {
+    const { gameId } = baseballGame(['SEC25_E', 'SEC25_F']);
+    await db.addPlayer('SEC25_E'); await db.addPlayer('SEC25_F');
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC25_E', set: 1, leg: 1, scored: 3, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }], // inning 1, target 1: real runs 1, not 3
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('rejects bust=true or checkout=true on a Baseball turn (the game has neither concept)', async () => {
+    const { gameId } = baseballGame(['SEC25_G', 'SEC25_H']);
+    await db.addPlayer('SEC25_G'); await db.addPlayer('SEC25_H');
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC25_G', set: 1, leg: 1, scored: 0, bust: true, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400);
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC25_G', set: 1, leg: 1, scored: 1, bust: false, checkout: true, checkoutPoints: 1,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('the target advances with the inning: a second visit is scored against number 2', async () => {
+    const { gameId } = baseballGame(['SEC25_I', 'SEC25_J']);
+    await db.addPlayer('SEC25_I'); await db.addPlayer('SEC25_J');
+    // First turn (inning 1, target 1): 1 run on a single-1.
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC25_I', set: 1, leg: 1, scored: 1, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT));
+    // Second turn for the same player (now inning 2, target 2): darts on number 1 score
+    // 0 now; a double-2 scores 2. A stale "still target 1" assumption would reject this.
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC25_I', set: 1, leg: 1, scored: 2, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 3 }, { dartNo: 2, sector: 2, multiplier: 2 }],
+    }, STRICT));
+  });
+
+  test('extra innings keep targeting number 9', async () => {
+    const { gameId } = baseballGame(['SEC25_K', 'SEC25_L']);
+    await db.addPlayer('SEC25_K'); await db.addPlayer('SEC25_L');
+    // Record 9 prior turns (innings 1-9) for this player, then an extra-innings 10th.
+    for (let inning = 1; inning <= 9; inning++) {
+      db.addTurn(gameId, {
+        player: 'SEC25_K', set: 1, leg: 1, scored: 0, bust: false, checkout: false, checkoutPoints: null,
+        darts: [{ dartNo: 1, sector: 12, multiplier: 1 }], // wrong number for every inning -> 0 runs
+      }, STRICT);
+    }
+    // 10th turn: extra innings, target stays 9. A treble-9 = 3 runs.
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC25_K', set: 1, leg: 1, scored: 3, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 9, multiplier: 3 }],
+    }, STRICT));
+    // Same 10th-inning shape but claiming those darts scored against number 10 (which
+    // doesn't exist) — 0 runs, so a non-zero scored is rejected.
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC25_K', set: 1, leg: 1, scored: 3, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 10, multiplier: 3 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+});
+
 describe('SEC-22 — the real HTTP trust boundary enforces this even though addTurn() itself defaults off', () => {
   const SERVER_PATH = path.join(__dirname, '..', 'server.js');
 

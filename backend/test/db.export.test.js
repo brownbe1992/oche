@@ -202,6 +202,37 @@ describe('getPlayerExport (docs/data-export-roadmap.md — per-player export)', 
     assert.deepEqual(dump.darts, []);
     assert.deepEqual(dump.opponents, []);
   });
+
+  // docs/bug-roadmap.md BUG-19: getPlayerExport() built one SQL bound variable per turn
+  // (and per dart), so a player with more turns than SQLite's ~32k variable cap threw
+  // "too many SQL variables" and 500'd. The fix batches the IN(...) reads. Rather than
+  // seed 32k+ rows (slow), the export takes an injectable chunkSize so the test can
+  // force the multi-batch path with a handful of rows — this fails against the pre-fix
+  // single-IN code for any input that spans more than one batch.
+  test('exports every game/turn/dart when the id lists span multiple query batches', () => {
+    db.addPlayer('export_prolific');
+    const gameIds = [];
+    let expectedTurns = 0;
+    for (let i = 0; i < 5; i++) {
+      const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name: 'export_prolific' }] });
+      gameIds.push(g.gameId);
+      for (let j = 0; j < 3; j++) {
+        db.addTurn(g.gameId, { player: 'export_prolific', set: 1, leg: 1, scored: 20, darts: [{ sector: 20, multiplier: 1 }] });
+        expectedTurns++;
+      }
+    }
+    // chunkSize:2 forces games (5 ids), turns, and darts (15 ids) to each span several
+    // batches — the exact condition the pre-fix single-IN code got right only by luck
+    // of never having enough rows.
+    const dump = db.getPlayerExport('export_prolific', 2);
+    assert.equal(dump.games.length, gameIds.length);
+    assert.equal(dump.turns.length, expectedTurns);
+    assert.equal(dump.darts.length, expectedTurns); // one dart per turn above
+    // And the default (no chunkSize) still returns the identical, complete set.
+    const dflt = db.getPlayerExport('export_prolific');
+    assert.equal(dflt.turns.length, expectedTurns);
+    assert.equal(dflt.darts.length, expectedTurns);
+  });
 });
 
 describe('importPlayerExport (docs/data-export-roadmap.md — the export/import round trip)', () => {

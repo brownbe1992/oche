@@ -35,8 +35,12 @@
 > was opened by a live user bug report (2026-07) against Ghost mode's past-leg
 > picker showing "Invalid Date," now fixed. **BUG-18** was opened by a live user
 > bug report (2026-07) against Ghost mode incorrectly offering a "Next leg"
-> button instead of ending the race, now fixed. **BUG-1 through BUG-18 are all
-> fixed as of this writing** — nothing open on either tracker.
+> button instead of ending the race, now fixed. **BUG-19** was opened by a 2026-07
+> **seventh-pass audit** (a re-read weighted toward the Baseball / per-player
+> export-import / league-fixtures / New-Game-wizard code merged since the sixth pass —
+> the same read that produced `security-audit-roadmap.md` Part 9 / SEC-25), against
+> `getPlayerExport()`'s unbatched `IN (...)` id lists, now fixed. **BUG-1 through
+> BUG-19 are all fixed as of this writing** — nothing open on either tracker.
 
 ## Severity legend
 
@@ -1199,6 +1203,80 @@ completed a ghost race against it, confirmed "GAME OVER"/"New game" (not "LEG
 COMPLETE"/"Next leg"); direct SQLite inspection confirmed the ghost race's
 `games` row got `completed_at`/`winner_id` set. Full backend suite green (605
 tests, unaffected — this fix touches no backend code).
+
+---
+
+## Seventh-pass audit (2026-07, weighted to code merged since the sixth pass)
+
+The functional-defect counterparts to `security-audit-roadmap.md` Part 9, from the same
+adversarial re-read weighted toward the Baseball / per-player export-import / league-
+fixtures / New-Game-wizard code merged since the sixth pass. The Baseball stat formulas
+(RPI, Perfect Innings/Game, won-leg derivation, Personal Bests) were cross-checked
+against `REFERENCE.md` §3 and found correct, as were the Triple Bull / Bullseye Finish
+achievement conditions (§ badges) including their suppression pair. One
+data-availability bug found (BUG-19).
+
+### BUG-19 — `getPlayerExport()` builds one SQL bound variable per turn (and per dart), so exporting a prolific player throws "too many SQL variables" and 500s  **(LOW, latent / data-availability)**
+
+**Status: ✅ Fixed (2026-07).** A new `_selectByIdChunks(cols, table, column, ids,
+chunkSize)` helper (default batch 900, well under SQLite's 32766 bound-variable cap)
+replaces all four single-`IN (...)` reads in `getPlayerExport()` (games, gamePlayers,
+turns, darts) and the opponents lookup, so the per-statement variable count is bounded
+regardless of how much history a player has. `getPlayerExport(name, chunkSize)` takes an
+optional chunk size (default 900) purely so the test can force the multi-batch path with
+a handful of rows. `importPlayerExport()` already iterated row-by-row and needed no
+change. Committed regression test in `backend/test/db.export.test.js`: exporting a
+player across several games/turns with `chunkSize:2` returns every game/turn/dart, and
+the default call returns the identical complete set. `REFERENCE.md`'s per-player export
+section unchanged (the payload shape is byte-for-byte identical — this is an internal
+query-batching fix with no behavior change). Full backend suite green.
+
+**Where:** `backend/db.js` `getPlayerExport()` (the `GET /api/players/export` payload,
+admin-only, Settings → Data Export → Export Player):
+
+```js
+const turnIds = turns.map(t => t.id);
+const tph = turnIds.map(() => '?').join(',');
+const darts = turnIds.length ? db.prepare(`SELECT * FROM darts WHERE turn_id IN (${tph})`).all(...turnIds) : [];
+```
+
+Every id is expanded into its own `?` placeholder in a single `IN (...)` list —
+`games`/`gamePlayers`/`turns` keyed on `gameIds`, and `darts` keyed on `turnIds`. SQLite
+(including `node:sqlite`) caps a statement at `SQLITE_MAX_VARIABLE_NUMBER` bound
+parameters — **32766** in current builds (verified in this environment: a 32767-variable
+`IN` list throws `too many SQL variables`, 32766 succeeds).
+
+**Misbehavior:** `turnIds` is the first list to cross the cap — a player with more than
+32766 recorded turns (a heavy multi-year user; every X01/Cricket/Baseball visit is one
+turn) makes the `darts IN (${tph})` prepare throw `too many SQL variables`. That throw
+isn't an `httpError`, so it falls through to the generic `500` handler: the export the UI
+presents as "it's your data, you can always take it with you" simply fails with an opaque
+server error for exactly the most active players, who have the most to lose. The
+`games`/`gamePlayers`/`turns` lists hit the same wall once a player exceeds 32766 games
+(rarer, but the same defect). Latent today only because no test fixture is that large.
+
+**Fix (step by step):**
+1. Add a small `_selectByIdChunks(table, column, ids, extraCols)` helper (or an inline
+   loop) that splits `ids` into batches well under the limit (e.g. 900, matching the
+   conservative SQLite default) and concatenates the `.all(...)` results — so the number
+   of bound variables per prepared statement is bounded regardless of how many rows the
+   player has. Use it for all four `IN (...)` reads in `getPlayerExport()` (games,
+   gamePlayers, turns, darts) and the `opponents` lookup.
+2. The import side (`importPlayerExport()`) already iterates row-by-row rather than
+   building one giant `IN`, so it needs no change — this is export-only.
+3. Add a committed `node:test` in `backend/test/db.export.test.js`: seed a player across
+   several games/turns and export with a small injected `chunkSize` (2) so the
+   `games`/`turns`/`darts` id lists each span multiple batches, then assert the export
+   returns every game/turn/dart (and that the default no-`chunkSize` call returns the
+   identical complete set). This guards the batching logic's own correctness — that
+   multiple `IN (...)` batches concatenate without dropping or duplicating rows, the
+   real risk introduced by the fix. Reproducing the *literal* pre-fix "too many SQL
+   variables" throw would require seeding past the ~32k cap (slow), so the test targets
+   the fix's correctness rather than the raw throw; the injectable `chunkSize` is what
+   makes the multi-batch path exercisable with a handful of rows.
+
+**Verify:** the new test passes; a normal small-history export is unchanged; the full
+backend suite stays green.
 
 ---
 

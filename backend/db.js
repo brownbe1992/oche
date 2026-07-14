@@ -932,6 +932,30 @@ function addTurn(gameId, t, opts = {}) {
     if (t.checkout && checkoutPoints !== scored) {
       throw httpError(400, 'checkoutPoints must match scored on a checkout turn');
     }
+  } else if (gameTypeRow && gameTypeRow.game_type === 'baseball') {
+    // docs/security-audit-roadmap.md SEC-25: Baseball was added after SEC-22's
+    // per-game-type analysis and never re-checked against it — but unlike Cricket
+    // (whose scored needs whole-game mark state to re-derive) Baseball's turns.scored
+    // IS arithmetically derivable from this visit's own darts plus the inning number,
+    // and it IS a points-like total the leaderboards trust (RPI, Perfect Innings,
+    // Best Inning, getBaseballWonLegs()'s leg-winner derivation). Only the range
+    // check (0..180) guarded it, while a real Baseball visit maxes at 9 — so a
+    // hostile scored:180 would multiply RPI ~20x and corrupt the won-leg derivation.
+    // The inning is derived server-side from this player's own prior turn count in
+    // the same game/set/leg (each player throws exactly once per inning, so their
+    // own turn count is their inning progression) — correct mid-round and across
+    // undo (which deletes the newest turn). Extra innings keep targeting 9, matching
+    // baseballInningTarget(). Baseball has no bust/checkout concept, so both must be
+    // false (enterTurnBaseball() always sends them so).
+    if (t.bust) throw httpError(400, 'a Baseball turn cannot be a bust');
+    if (t.checkout) throw httpError(400, 'a Baseball turn cannot be a checkout');
+    const priorTurns = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE game_id = ? AND player_id = ? AND set_no = ? AND leg_no = ?')
+      .get(Number(gameId), p.id, setNo, legNo).n;
+    const target = Math.min(priorTurns + 1, 9);
+    const expectedRuns = darts.reduce((sum, d) => sum + (d.sector === target ? d.multiplier : 0), 0);
+    if (scored !== expectedRuns) {
+      throw httpError(400, 'scored does not match this Baseball visit\'s runs on the target number');
+    }
   }
   // Checkout Trainer (docs/checkout-trainer-roadmap.md): the target score offered
   // for this round. Server-computed context, not a scored value, so it's only
@@ -3822,26 +3846,39 @@ function getFullDatabaseExport() {
 // integers). importPlayerExport() uses it to build a source-id -> target-id map
 // before touching any game data; `uuid` remains the only identity that's portable
 // on its own.
-function getPlayerExport(name) {
+// docs/bug-roadmap.md BUG-19: SQLite caps a single statement at
+// SQLITE_MAX_VARIABLE_NUMBER bound parameters (32766 in current builds), so a naive
+// `... IN (?,?,?,...)` list with one placeholder per id throws "too many SQL
+// variables" once a prolific player has more than that many turns (the first list to
+// cross the cap). Splitting the ids into sub-cap batches and concatenating the reads
+// bounds the per-statement variable count regardless of history size. 900 matches
+// SQLite's own conservative historical default and leaves generous headroom.
+const ID_CHUNK = 900;
+function _selectByIdChunks(cols, table, column, ids, chunkSize = ID_CHUNK) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const batch = ids.slice(i, i + chunkSize);
+    const ph = batch.map(() => '?').join(',');
+    out.push(...db.prepare(`SELECT ${cols} FROM ${table} WHERE ${column} IN (${ph})`).all(...batch));
+  }
+  return out;
+}
+
+function getPlayerExport(name, chunkSize = ID_CHUNK) {
   const p = db.prepare('SELECT id, uuid, name, out_mode, dart_weight, created_at FROM players WHERE name = ? COLLATE NOCASE').get(String(name));
   if (!p) throw httpError(404, 'Player not found');
 
   const gameIds = db.prepare('SELECT game_id FROM game_players WHERE player_id = ?').all(p.id).map(r => r.game_id);
-  const gph = gameIds.map(() => '?').join(',');
 
-  const games       = gameIds.length ? db.prepare(`SELECT * FROM games WHERE id IN (${gph})`).all(...gameIds) : [];
-  const gamePlayers = gameIds.length ? db.prepare(`SELECT * FROM game_players WHERE game_id IN (${gph})`).all(...gameIds) : [];
-  const turns       = gameIds.length ? db.prepare(`SELECT * FROM turns WHERE game_id IN (${gph})`).all(...gameIds) : [];
+  const games       = _selectByIdChunks('*', 'games', 'id', gameIds, chunkSize);
+  const gamePlayers = _selectByIdChunks('*', 'game_players', 'game_id', gameIds, chunkSize);
+  const turns       = _selectByIdChunks('*', 'turns', 'game_id', gameIds, chunkSize);
 
   const turnIds = turns.map(t => t.id);
-  const tph = turnIds.map(() => '?').join(',');
-  const darts = turnIds.length ? db.prepare(`SELECT * FROM darts WHERE turn_id IN (${tph})`).all(...turnIds) : [];
+  const darts = _selectByIdChunks('*', 'darts', 'turn_id', turnIds, chunkSize);
 
   const opponentIds = [...new Set(gamePlayers.map(gp => gp.player_id))].filter(id => id !== p.id);
-  const oph = opponentIds.map(() => '?').join(',');
-  const opponents = opponentIds.length
-    ? db.prepare(`SELECT id, uuid, name FROM players WHERE id IN (${oph})`).all(...opponentIds)
-    : [];
+  const opponents = _selectByIdChunks('id, uuid, name', 'players', 'id', opponentIds, chunkSize);
 
   const playerBadges = db.prepare('SELECT badge_id, count, earned_at FROM player_badges WHERE player_id = ?').all(p.id);
 
