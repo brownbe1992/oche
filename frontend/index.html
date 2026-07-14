@@ -9793,11 +9793,13 @@ function buildDartHeatmap(cells, opts){
   // doubles/bull always, singles too before this feature or from Pad mode). Misses
   // keyed by wedge_depth — only ever populated by a positioned Dartboard-mode miss;
   // an unpositioned miss (Pad mode, or a pre-feature row) has nothing to plot, same
-  // as it always has. A zone-unspecified single is tracked separately (unspecMap) —
-  // it's real hit data, just not attributable to inner or outer, so it gets its own
-  // "zone unspecified" hatch overlay instead of being silently split 50/50 or folded
-  // into either real bucket.
-  const hitMap = {}, missMap = {}, unspecMap = {};
+  // as it always has. A zone-unspecified single (Pad mode, or a pre-feature row) is
+  // excluded from the heatmap entirely, by product decision — it's real hit data,
+  // just not attributable to inner or outer, and rather than show any visual trace
+  // of it (an earlier version drew a hatch overlay across both single regions), it's
+  // simply not plotted: never folded into either real bucket, never split 50/50,
+  // never shown at all.
+  const hitMap = {}, missMap = {};
   let maxHitHeat = 0, maxMissHeat = 0;
   (cells||[]).forEach(c=>{
     if(c.sector === 0){
@@ -9808,10 +9810,7 @@ function buildDartHeatmap(cells, opts){
       }
       return;
     }
-    if(c.multiplier === 1 && c.sector >= 1 && c.sector <= 20 && !c.zone){
-      unspecMap[c.sector] = (unspecMap[c.sector]||0) + c.hits;
-      return;
-    }
+    if(c.multiplier === 1 && c.sector >= 1 && c.sector <= 20 && !c.zone) return; // zone-unspecified single: not plotted at all
     const key = c.sector+'_'+c.multiplier+'_'+(c.zone||'');
     hitMap[key] = (hitMap[key]||0) + c.hits;
     if(hitMap[key] > maxHitHeat) maxHitHeat = hitMap[key];
@@ -9820,7 +9819,6 @@ function buildDartHeatmap(cells, opts){
   const heat = (sector, m, zone) => maxHitHeat>0 ? hits(sector,m,zone)/maxHitHeat : 0;
   const missHits = (wedge, depth) => missMap[wedge+'_'+depth] || 0;
   const missHeat = (wedge, depth) => maxMissHeat>0 ? missHits(wedge,depth)/maxMissHeat : 0;
-  const unspecCount = sector => unspecMap[sector] || 0;
 
   const CX=330, CY=330;
   const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248, missNear:270, missFar:310 };
@@ -9842,33 +9840,16 @@ function buildDartHeatmap(cells, opts){
     return `rgb(${r},${g},${b})`;
   };
   let s = `<svg viewBox="0 0 660 660" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:360px;height:auto;display:block;margin:0 auto" role="img" aria-label="${ariaLabel}">
-    <defs>
-      <pattern id="zoneHatch" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
-        <line x1="0" y1="0" x2="0" y2="6" stroke="#efe7d2" stroke-width="1.5" opacity="0.35"/>
-      </pattern>
-    </defs>
     <circle cx="${CX}" cy="${CY}" r="${R.bg}" fill="#0d0e0b"/>
     <circle cx="${CX}" cy="${CY}" r="${R.doubleOut+1}" fill="#111210"/>
     <circle cx="${CX}" cy="${CY}" r="${R.doubleOut}" fill="#0d0e0b"/>`;
   DB_SECTORS.forEach((num,i)=>{
     const s0=i*DEG-DEG/2, e0=s0+DEG;
     const sw = 'stroke="#151613" stroke-width="0.5"';
-    const unspec = unspecCount(num);
-    const innerTitle = `${num} (inner): ${hits(num,1,'inner')} hit${hits(num,1,'inner')===1?'':'s'}`
-      + (unspec ? ` · ${unspec} more (zone unknown)` : '');
-    const outerTitle = `${num} (outer): ${hits(num,1,'outer')} hit${hits(num,1,'outer')===1?'':'s'}`
-      + (unspec ? ` · ${unspec} more (zone unknown)` : '');
-    s += `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${heatFill(heat(num,1,'inner'))}" ${sw}><title>${innerTitle}</title></path>`;
+    s += `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${heatFill(heat(num,1,'inner'))}" ${sw}><title>${num} (inner): ${hits(num,1,'inner')} hit${hits(num,1,'inner')===1?'':'s'}</title></path>`;
     s += `<path d="${annulus(R.trebleIn,R.trebleOut,s0,e0)}" fill="${heatFill(heat(num,3))}" ${sw}><title>T${num}: ${hits(num,3)} treble hit${hits(num,3)===1?'':'s'}</title></path>`;
-    s += `<path d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${heatFill(heat(num,1,'outer'))}" ${sw}><title>${outerTitle}</title></path>`;
+    s += `<path d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${heatFill(heat(num,1,'outer'))}" ${sw}><title>${num} (outer): ${hits(num,1,'outer')} hit${hits(num,1,'outer')===1?'':'s'}</title></path>`;
     s += `<path d="${annulus(R.doubleIn,R.doubleOut,s0,e0)}" fill="${heatFill(heat(num,2))}" ${sw}><title>D${num}: ${hits(num,2)} double hit${hits(num,2)===1?'':'s'}</title></path>`;
-    // Zone-unspecified singles (Pad mode, or pre-feature rows): a faint hatch overlay
-    // across BOTH single regions, distinct from the "never hit" dark state and from
-    // real inner/outer heat — never silently folded into either.
-    if(unspec > 0){
-      s += `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="url(#zoneHatch)" pointer-events="none"/>`;
-      s += `<path d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="url(#zoneHatch)" pointer-events="none"/>`;
-    }
     const [nx,ny]=xy(R.numAt,s0+DEG/2);
     s += `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="17" fill="#efe7d2" style="pointer-events:none;user-select:none">${num}</text>`;
     // Miss ring (docs/archive/dartboard-zone-tracking-roadmap.md "Miss-area tracking") — same

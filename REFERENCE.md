@@ -3143,17 +3143,22 @@ old `if(playerGameType !== 'chuckin') return` early-out.
 
 `buildDartHeatmap(cells, {ariaLabel})` renders three things per number: the
 inner-single and outer-single regions (each independently shaded by hit
-count), and — new — the miss ring (shaded by `missHeat(wedge, depth)`, its
-**own independent heat-scale normalization**, not shared with the scoring
-regions, since hit and miss counts are wildly different population sizes per
-player). A **zone-unspecified single** (Pad mode, or a pre-feature row) is
-tracked separately (`unspecMap`) and never silently folded into either real
-bucket or split 50/50 — instead it draws a faint diagonal hatch overlay
-(`url(#zoneHatch)` SVG pattern) across *both* single regions for that number,
-a third visual state distinct from "never hit" and from real inner/outer
-heat. The same distinction extends to the flat `topSectors` list
-(`dartLabelFromParts()` appends `" (zone unknown)"` to a zone-less single,
-never to a double/treble/bull, which never had a zone concept at all).
+count), and the miss ring (shaded by `missHeat(wedge, depth)`, its **own
+independent heat-scale normalization**, not shared with the scoring regions,
+since hit and miss counts are wildly different population sizes per player).
+A **zone-unspecified single** (Pad mode, or a pre-feature row) is excluded
+from the heatmap entirely, by product decision — real hit data, just not
+attributable to inner or outer, so rather than show any visual trace of it,
+it's simply not plotted. (An earlier version drew a faint diagonal hatch
+overlay across both single regions for that number instead of omitting it —
+changed 2026-07 per a live user bug report: the hatch box read as a display
+glitch, not a meaningful third state.) It's still never silently folded into
+either real bucket or split 50/50 — omitted is not the same as miscounted.
+The flat `topSectors` list is a separate surface and keeps its own distinct
+textual treatment (`dartLabelFromParts()` appends `" (zone unknown)"` to a
+zone-less single, never to a double/treble/bull, which never had a zone
+concept at all) — unaffected by this change, since that's a text list, not
+the heatmap.
 
 ### Testing
 
