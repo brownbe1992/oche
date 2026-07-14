@@ -58,13 +58,66 @@ describe('SEC-18 — buildChuckinLiveHeatmap() coerces payload values instead of
 
   test('legitimate numeric hit counts still render correctly', () => {
     const buildChuckinLiveHeatmap = loadBuildChuckinLiveHeatmap();
-    const svg = buildChuckinLiveHeatmap([{ sector: 20, multiplier: 1, hits: 7 }]);
-    assert.match(svg, /20: 7 single hits/);
+    // BUG-20: a single is now zone-keyed, so the fixture carries a zone; the tooltip
+    // reads "20 (inner): 7 hits" rather than the old zone-blind "20: 7 single hits".
+    const svg = buildChuckinLiveHeatmap([{ sector: 20, multiplier: 1, zone: 'inner', hits: 7 }]);
+    assert.match(svg, /20 \(inner\): 7 hits/);
   });
 
   test('an empty/missing cells array renders without throwing', () => {
     const buildChuckinLiveHeatmap = loadBuildChuckinLiveHeatmap();
     assert.doesNotThrow(() => buildChuckinLiveHeatmap(null));
     assert.doesNotThrow(() => buildChuckinLiveHeatmap([]));
+  });
+});
+
+// docs/bug-roadmap.md BUG-20: the live Chuckin heatmap shaded BOTH single regions of a
+// number from one zone-blind count, so an inner-only or outer-only single lit up both
+// halves of the wedge on /display. The fix keys singles by zone and renders the inner
+// and outer regions independently, mirroring the lifetime buildDartHeatmap().
+describe('BUG-20 — buildChuckinLiveHeatmap() shades inner and outer singles independently', () => {
+  test('an inner-only single lights the inner region and leaves the outer at 0', () => {
+    const buildChuckinLiveHeatmap = loadBuildChuckinLiveHeatmap();
+    const svg = buildChuckinLiveHeatmap([{ sector: 20, multiplier: 1, zone: 'inner', hits: 3 }]);
+    assert.match(svg, /20 \(inner\): 3 hits/, 'the inner region reflects the 3 inner hits');
+    assert.match(svg, /20 \(outer\): 0 hits/, 'the outer region must stay at 0 — the bug lit it up too');
+  });
+
+  test('an outer-only single lights the outer region and leaves the inner at 0', () => {
+    const buildChuckinLiveHeatmap = loadBuildChuckinLiveHeatmap();
+    const svg = buildChuckinLiveHeatmap([{ sector: 20, multiplier: 1, zone: 'outer', hits: 5 }]);
+    assert.match(svg, /20 \(outer\): 5 hits/, 'the outer region reflects the 5 outer hits');
+    assert.match(svg, /20 \(inner\): 0 hits/, 'the inner region must stay at 0');
+  });
+
+  test('inner and outer counts for the same number are tracked separately', () => {
+    const buildChuckinLiveHeatmap = loadBuildChuckinLiveHeatmap();
+    const svg = buildChuckinLiveHeatmap([
+      { sector: 20, multiplier: 1, zone: 'inner', hits: 2 },
+      { sector: 20, multiplier: 1, zone: 'outer', hits: 6 },
+    ]);
+    assert.match(svg, /20 \(inner\): 2 hits/);
+    assert.match(svg, /20 \(outer\): 6 hits/);
+  });
+
+  test('a zone-unspecified single (Pad mode) is plotted on neither region, not both', () => {
+    const buildChuckinLiveHeatmap = loadBuildChuckinLiveHeatmap();
+    const svg = buildChuckinLiveHeatmap([{ sector: 20, multiplier: 1, hits: 9 }]);
+    assert.match(svg, /20 \(inner\): 0 hits/, 'inner stays 0 for a zone-less single');
+    assert.match(svg, /20 \(outer\): 0 hits/, 'outer stays 0 for a zone-less single — never both-lit');
+  });
+
+  test('trebles, doubles, and bull (which have no zone) still render from their zone-less counts', () => {
+    const buildChuckinLiveHeatmap = loadBuildChuckinLiveHeatmap();
+    const svg = buildChuckinLiveHeatmap([
+      { sector: 20, multiplier: 3, hits: 4 },
+      { sector: 20, multiplier: 2, hits: 1 },
+      { sector: 25, multiplier: 1, hits: 2 },
+      { sector: 25, multiplier: 2, hits: 1 },
+    ]);
+    assert.match(svg, /T20: 4 treble hits/);
+    assert.match(svg, /D20: 1 double hit/);
+    assert.match(svg, /Bull: 2 hits/);
+    assert.match(svg, /Double Bull: 1 hit/);
   });
 });

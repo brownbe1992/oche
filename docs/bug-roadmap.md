@@ -39,8 +39,12 @@
 > **seventh-pass audit** (a re-read weighted toward the Baseball / per-player
 > export-import / league-fixtures / New-Game-wizard code merged since the sixth pass —
 > the same read that produced `security-audit-roadmap.md` Part 9 / SEC-25), against
-> `getPlayerExport()`'s unbatched `IN (...)` id lists, now fixed. **BUG-1 through
-> BUG-19 are all fixed as of this writing** — nothing open on either tracker.
+> `getPlayerExport()`'s unbatched `IN (...)` id lists, now fixed. **BUG-20** was
+> opened by a live user bug report (2026-07) against Just Chuckin' It's live scoreboard
+> heatmap lighting up *both* single regions of a number for any single hit (the live
+> session tally and its renderer were zone-blind, even though dart recording and the
+> lifetime heatmap were already zone-aware), now fixed. **BUG-1 through BUG-20 are all
+> fixed as of this writing** — nothing open on either tracker.
 
 ## Severity legend
 
@@ -1277,6 +1281,69 @@ server error for exactly the most active players, who have the most to lose. The
 
 **Verify:** the new test passes; a normal small-history export is unchanged; the full
 backend suite stays green.
+
+---
+
+### BUG-20 — Just Chuckin' It's live scoreboard heatmap shades both single regions of a number for any single hit, because the session tally and its renderer are zone-blind  **(LOW, user-facing / cosmetic; found via a live user bug report)**
+
+**Status: OPEN.**
+
+**Dart *tracking* is correct — this is a display-only defect.** Confirmed end to end:
+the geometric dartboard input (`buildDartboard()` in `frontend/index.html`) stamps
+`zone:'inner'` on the near-bull single region (`annulus(R.bullOut,R.trebleIn,...)`,
+line ~1696) and `zone:'outer'` on the near-rim single region
+(`annulus(R.trebleOut,R.doubleIn,...)`, line ~1698); `throwDartChuckin()` forwards that
+zone into `DB.recordTurn({ darts:[{ ..., zone }] })`; `backend/db.js`'s
+`getDartHeatmap()` stores it and groups by `d.zone`; and the **lifetime** Player Profile
+heatmap (`buildDartHeatmap()`) already renders the two single regions independently
+(`heat(num,1,'inner')` vs `heat(num,1,'outer')`). So which half a dart landed in is
+recorded and reported correctly everywhere *except* the live scoreboard.
+
+**Where:** the live, session-only path, which drops the zone at three points:
+- `frontend/index.html` `throwDartChuckin()` tallies into `p.heatmap` keyed by
+  `dart.sector+'_'+dart.mult` — **no zone**, so an inner 20 and an outer 20 both land in
+  the same `20_1` bucket.
+- `frontend/index.html` `playerSnapshotChuckin()` emits `{sector,multiplier,hits}` cells
+  with **no zone** field.
+- `frontend/display.html` `buildChuckinLiveHeatmap()` shades *both* single annuli — the
+  inner one (`annulus(R.bullOut,R.trebleIn,...)`) and the outer one
+  (`annulus(R.trebleOut,R.doubleIn,...)`) — from the same `heat(n,1)` value, and only
+  the inner one even carries a `<title>`.
+
+**Misbehavior (as reported):** in a Just Chuckin' It session, entering a single 20
+(inner *or* outer) lights up **both** the top (inner) and bottom (outer) halves of the
+20 wedge on the /display live heatmap equally, instead of only the half actually hit.
+The lifetime heatmap on the Player Profile is unaffected (it was already zone-aware).
+Purely visual — no stat, count, or stored dart is wrong.
+
+**Fix (step by step):**
+1. `throwDartChuckin()`: key the session tally by `dart.sector+'_'+dart.mult+'_'+(zone||'')`,
+   mirroring `buildDartHeatmap()`'s own `sector_mult_zone` keying (`zone` is the param it
+   already receives — only ever set for a Dartboard-mode single; Pad mode leaves it
+   null, trebles/doubles/bull carry none).
+2. `playerSnapshotChuckin()`: parse the zone segment out of the key and include it in
+   each emitted cell (`{sector,multiplier,zone,hits}`).
+3. `buildChuckinLiveHeatmap()`: key `hitMap` by `sector_mult_zone` (normalizing `zone`
+   to only `'inner'`/`'outer'`/`''` at the boundary, same SEC-18 "coerce/constrain
+   payload values" discipline the function already applies to `sector`/`mult`/`hits`);
+   shade the inner single from `heat(n,1,'inner')` and the outer single from
+   `heat(n,1,'outer')`, each with its own `<title>`; and — matching `buildDartHeatmap()`'s
+   deliberate product decision — do **not** plot a zone-unspecified single (Pad-mode
+   dart) on either region rather than lighting up both. Bull/treble/double keep their
+   zone-less keys unchanged.
+4. Update `REFERENCE.md`'s "Live Scoreboard" Chuckin heatmap section (it documents the
+   `{sector_mult: count}` map and `{sector,multiplier,hits}` shape) to the new
+   zone-aware shape, in the same change.
+5. Committed regression test: extend `backend/test/display.heatmap-hardening.test.js`
+   (which already `vm`-extracts `buildChuckinLiveHeatmap()` from the real source) to
+   assert an inner-only single leaves the outer region at 0 hits and vice versa, and
+   that a zone-unspecified single plots on neither — fails against the pre-fix
+   both-regions-lit rendering.
+
+**Verify:** the new test passes (and fails against the pre-fix renderer); a live session
+throwing an inner 20 lights only the inner half of the 20 wedge on /display, an outer 20
+only the outer half; the lifetime Player Profile heatmap is unchanged; full backend
+suite green.
 
 ---
 

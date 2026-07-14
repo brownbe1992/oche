@@ -8922,8 +8922,11 @@ function resetPlayerForNextLegChuckin(p){
 // of the identical formula).
 function playerSnapshotChuckin(p){
   const heatmap = Object.entries(p.heatmap||{}).map(([key,hits])=>{
-    const [sector,multiplier] = key.split('_').map(Number);
-    return { sector, multiplier, hits };
+    // docs/bug-roadmap.md BUG-20: keys are sector_mult_zone now — zone is '' for a
+    // zone-less outcome (Pad-mode single, treble/double/bull), an 'inner'/'outer'
+    // string for a Dartboard-mode single. Parse it as a string, not a Number.
+    const parts = key.split('_');
+    return { sector:Number(parts[0]), multiplier:Number(parts[1]), zone: parts[2] || null, hits };
   });
   const sessionAvg = p.sessionDarts>0 ? (p.sessionScore/p.sessionDarts*3) : null;
   return { name:p.name, sessionDarts:p.sessionDarts||0, sessionTrebles:p.sessionTrebles||0, heatmap, sessionAvg };
@@ -8946,7 +8949,12 @@ function throwDartChuckin(sector, zone, missZone, missDepth, bounced){
   p.sessionDarts += 1;
   if(dart.isTreble) p.sessionTrebles += 1;
   p.sessionScore += dart.value;
-  const hKey = dart.sector+'_'+dart.mult;
+  // docs/bug-roadmap.md BUG-20: key singles by zone (inner/outer) too, so the live
+  // scoreboard heatmap can shade the two single regions of a number independently
+  // instead of lighting up both for any single hit — mirroring the lifetime
+  // buildDartHeatmap()'s own sector_mult_zone keying. zone is only ever set for a
+  // Dartboard-mode single (Pad mode leaves it null; trebles/doubles/bull carry none).
+  const hKey = dart.sector+'_'+dart.mult+'_'+(zone||'');
   p.heatmap[hKey] = (p.heatmap[hKey]||0) + 1;
 
   // "Assuming three darts per turn" (explicitly requested): group darts into

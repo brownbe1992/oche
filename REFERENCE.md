@@ -1243,13 +1243,19 @@ a live, **session-only** dartboard heatmap alongside the darts-thrown counter
 and the running 3-dart average — a genuinely different dataset from the
 lifetime one the Player Profile fetches via `getChuckinHeatmap()`, gradually
 filling in as the session progresses rather than showing accumulated history.
-`throwDartChuckin()` tallies hits into `p.heatmap` (a `{sector_mult: count}`
-map) and `p.sessionScore` (feeding the average) on every dart;
+`throwDartChuckin()` tallies hits into `p.heatmap` (a `{sector_mult_zone: count}`
+map — the `zone` segment is `'inner'`/`'outer'` for a Dartboard-mode single and
+`''` for a zone-less outcome, matching `buildDartHeatmap()`'s lifetime keying)
+and `p.sessionScore` (feeding the average) on every dart;
 `playerSnapshotChuckin()` flattens `p.heatmap` into the same
-`{sector,multiplier,hits}` array shape `getChuckinHeatmap()` already returns,
-so `display.html`'s renderer (`buildChuckinLiveHeatmap()`, a mirror-copied port
-of `buildChuckinHeatmap()`'s SVG geometry — no shared module between the two
-files, per the established convention) can feed it straight in. No
+`{sector,multiplier,zone,hits}` array shape `getChuckinHeatmap()` already
+returns, so `display.html`'s renderer (`buildChuckinLiveHeatmap()`, a
+mirror-copied port of `buildChuckinHeatmap()`'s SVG geometry — no shared module
+between the two files, per the established convention) can feed it straight in.
+The renderer shades a number's inner and outer single regions independently
+(`heat(n,1,'inner')` vs `heat(n,1,'outer')`) and, like the lifetime heatmap,
+does not plot a zone-unspecified single (a Pad-mode dart) on either region
+rather than lighting up both — `docs/bug-roadmap.md` BUG-20. No
 `ALLOWED_LIVE_KEYS` change was needed — both fields ride inside the per-player
 `players[]` array, whose nested shape isn't restricted by that allowlist (only
 top-level payload keys are). Side-by-side with the session stats in landscape,

@@ -535,11 +535,19 @@ function buildChuckinLiveHeatmap(cells){
   // this file already uses.
   (Array.isArray(cells) ? cells : []).forEach(c=>{
     const sector = Number(c.sector) || 0, mult = Number(c.multiplier) || 0, hitCount = Number(c.hits) || 0;
-    hitMap[sector+'_'+mult] = hitCount;
+    // docs/bug-roadmap.md BUG-20: singles are keyed by zone (inner/outer) too, so the
+    // two single regions of a number shade independently instead of both lighting up
+    // for any single hit. zone is normalized to only 'inner'/'outer' at the boundary
+    // (anything else — a Pad-mode null, a pre-feature row, or a crafted payload value —
+    // collapses to '' / zone-unspecified), the same SEC-18 "constrain the payload, don't
+    // trust it" discipline this function already applies to sector/mult/hits, and
+    // mirroring buildDartHeatmap()'s lifetime sector_mult_zone keying.
+    const zone = (c.zone === 'inner' || c.zone === 'outer') ? c.zone : '';
+    hitMap[sector+'_'+mult+'_'+zone] = hitCount;
     if(hitCount>maxHits) maxHits = hitCount;
   });
-  const hits = (sector, m) => hitMap[sector+'_'+m] || 0;
-  const heat = (sector, m) => maxHits>0 ? hits(sector,m)/maxHits : 0;
+  const hits = (sector, m, zone) => hitMap[sector+'_'+m+'_'+(zone||'')] || 0;
+  const heat = (sector, m, zone) => maxHits>0 ? hits(sector,m,zone)/maxHits : 0;
 
   const CX=250, CY=250;
   const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248 };
@@ -565,9 +573,14 @@ function buildChuckinLiveHeatmap(cells){
   DB_SECTORS.forEach((n,i)=>{
     const s0=i*DEG-DEG/2, e0=s0+DEG;
     const sw = 'stroke="#151613" stroke-width="0.5"';
-    s += `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${heatFill(heat(n,1))}" ${sw}><title>${n}: ${hits(n,1)} single hit${hits(n,1)===1?'':'s'}</title></path>`;
+    // BUG-20: inner and outer singles shade from their own zone-keyed counts, each
+    // with its own tooltip — matching buildDartHeatmap()'s lifetime rendering. A
+    // zone-unspecified single (Pad mode) is in neither 'inner' nor 'outer', so it
+    // simply reads 0 on both here rather than lighting up both, the same deliberate
+    // "don't plot a zone-less single" behavior the lifetime heatmap settled on.
+    s += `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${heatFill(heat(n,1,'inner'))}" ${sw}><title>${n} (inner): ${hits(n,1,'inner')} hit${hits(n,1,'inner')===1?'':'s'}</title></path>`;
     s += `<path d="${annulus(R.trebleIn,R.trebleOut,s0,e0)}" fill="${heatFill(heat(n,3))}" ${sw}><title>T${n}: ${hits(n,3)} treble hit${hits(n,3)===1?'':'s'}</title></path>`;
-    s += `<path d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${heatFill(heat(n,1))}" ${sw}/>`;
+    s += `<path d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${heatFill(heat(n,1,'outer'))}" ${sw}><title>${n} (outer): ${hits(n,1,'outer')} hit${hits(n,1,'outer')===1?'':'s'}</title></path>`;
     s += `<path d="${annulus(R.doubleIn,R.doubleOut,s0,e0)}" fill="${heatFill(heat(n,2))}" ${sw}><title>D${n}: ${hits(n,2)} double hit${hits(n,2)===1?'':'s'}</title></path>`;
     const [nx,ny]=xy(R.numAt,s0+DEG/2);
     s += `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="17" fill="#efe7d2" style="pointer-events:none;user-select:none">${n}</text>`;
