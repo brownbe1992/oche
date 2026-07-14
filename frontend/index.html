@@ -2042,13 +2042,20 @@ function renderHome(){
     Backend.get('/api/stats/cricket-9marks?mode=practice'),
     Backend.get('/api/stats/cricket-perfect-leg?mode=practice'),
     Backend.get('/api/stats/cricket-wins'),
+    Backend.get('/api/stats/baseball-rpi?mode=h2h'),
+    Backend.get('/api/stats/baseball-perfect-innings?mode=h2h'),
+    Backend.get('/api/stats/baseball-perfect-game?mode=h2h'),
+    Backend.get('/api/stats/baseball-rpi?mode=practice'),
+    Backend.get('/api/stats/baseball-perfect-innings?mode=practice'),
+    Backend.get('/api/stats/baseball-perfect-game?mode=practice'),
+    Backend.get('/api/stats/baseball-wins'),
     Backend.get('/api/stats/doubles-practice-accuracy'),
     Backend.get('/api/stats/doubles-practice-best-round'),
     Backend.get('/api/stats/checkout-blitz-leaderboard'),
     Backend.get('/api/stats/around-the-clock-fastest'),
     Backend.get('/api/stats/around-the-clock-completions'),
     Backend.get('/api/stats/around-the-world-progress'),
-  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,dpa,dpb,ctbl,atcf,atcc,atwp])=>{
+  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,dpa,dpb,ctbl,atcf,atcc,atwp])=>{
     homeData={s, extra,
       h2h:{finishes:f,eighties:e,bigFish:b,nineDarters:n},
       practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn},
@@ -2056,6 +2063,11 @@ function renderHome(){
         h2h:{mpr:cm,nineMarks:c9,perfectLeg:cp},
         practice:{mpr:pcm,nineMarks:pc9,perfectLeg:pcp},
         wins:cw,
+      },
+      baseball:{
+        h2h:{rpi:br,perfectInnings:b9,perfectGame:bp},
+        practice:{rpi:pbr,perfectInnings:pb9,perfectGame:pbp},
+        wins:bw,
       },
       doublesPractice:{ accuracy:dpa, bestRound:dpb },
       checkoutTrainer:{ blitzLeaderboard:ctbl },
@@ -2068,6 +2080,7 @@ function renderHome(){
       h2h:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
       practice:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
       cricket:{h2h:{mpr:[],nineMarks:empty,perfectLeg:empty}, practice:{mpr:[],nineMarks:empty,perfectLeg:empty}, wins:[]},
+      baseball:{h2h:{rpi:[],perfectInnings:empty,perfectGame:empty}, practice:{rpi:[],perfectInnings:empty,perfectGame:empty}, wins:[]},
       doublesPractice:{ accuracy:[], bestRound:[] },
       checkoutTrainer:{ blitzLeaderboard:[] },
       aroundTheClock:{ fastest:[], completions:[] },
@@ -2332,6 +2345,52 @@ function renderHomeTabBodyCricket(){
     </div>
     ${achievementSection('9 Marks 🎯', data.nineMarks||{leaderboard:[],recent:[]})}
     ${achievementSection('Perfect Leg 🏆', data.perfectLeg||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
+  `;
+}
+
+// Baseball's Home page leaderboards — same four-board shape as Cricket's own
+// (renderHomeTabBodyCricket above), just Baseball's vocabulary: RPI (runs per
+// inning) instead of MPR, Perfect Inning instead of 9 Marks, Perfect Game
+// instead of Perfect Leg. homeData.baseball mirrors homeData.cricket's
+// {h2h:{...}, practice:{...}, wins:...} shape exactly.
+function renderHomeTabBodyBaseball(){
+  const el=document.getElementById('home-tab-body');
+  const mode=homeTab;
+  const data=homeData.baseball && homeData.baseball[mode];
+  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
+
+  const rpiBoard=data.rpi||[];
+  const rpiLeaderboard=rpiBoard.length
+    ? `<div class="hof-list">${rpiBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.rpi.toFixed(1)}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${r.rounds} innings</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet (needs at least 5 innings played).</p>`;
+
+  const winSection=(mode==='h2h' && homeData.baseball.wins && homeData.baseball.wins.length)
+    ? `<div class="pp-section">
+        <div class="pp-section-title">Most Baseball Wins</div>
+        <div class="hof-list">${homeData.baseball.wins.slice(0,10).map((r,i)=>`<div class="hof-row">
+          <span class="hof-rank">${i+1}</span>
+          <span class="hof-score">${r.won}</span>
+          <span class="hof-player">${escapeHtml(r.name)}</span>
+          <span class="hof-dates">${r.rate}% of ${r.played}</span>
+        </div>`).join('')}</div>
+      </div>`
+    : '';
+
+  el.innerHTML=`
+    <div class="home-pair">
+      <div class="pp-section">
+        <div class="pp-section-title">Runs Per Inning (RPI)</div>
+        ${rpiLeaderboard}
+      </div>
+      ${winSection}
+    </div>
+    ${achievementSection('Perfect Inning 🔥', data.perfectInnings||{leaderboard:[],recent:[]})}
+    ${achievementSection('Perfect Game 🏆', data.perfectGame||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
   `;
 }
 
@@ -4864,6 +4923,8 @@ const BADGE_INFO = {
   staircasefinish:    { icon:'🪜', label:'Staircase Finish', desc:'Check out in exactly three darts by halving the target twice: single, single, then double — e.g. 32 down to 16, down to 8, then double 4.' },
   triplebull:         { icon:'🐂', label:'Triple Bull', desc:'Check out on 150 by hitting the double bull three times in one visit.' },
   bullseyefinish:     { icon:'🏹', label:'Bullseye Finish', desc:'Check out with the double bull as your final dart, at any total.' },
+  baseballperfectinning: { icon:'🔥', label:'Perfect Inning', desc:'Score 9 runs in one Baseball inning — three trebles on target.', baseball:true },
+  baseballperfectgame:    { icon:'🏆', label:'Perfect Game', desc:'Win a Baseball leg with a perfect 9 runs in every one of the 9 innings — 81 total.', baseball:true },
   cricket9marks:       { icon:'🎯', label:'9 Marks', desc:'Score 9 marks in one Cricket visit — three trebles, the maximum possible.', cricket:true },
   cricketperfectclose: { icon:'🏆', label:'Perfect Leg', desc:'Close every Cricket number using the fewest darts physically possible for that match.', cricket:true },
   cricketwhitewash:    { icon:'🧹', label:'Whitewash', desc:"Win a Cricket leg without your opponent closing a single number.", cricket:true },
@@ -4926,11 +4987,13 @@ function renderPlayerBadges(data){
     }
     return `<div class="stat-block" style="opacity:.5;cursor:pointer" ${titleAttr} onclick="showBadgeInfo('${id}')"><div class="stat-val" style="filter:grayscale(1)">${info.icon}</div><div class="stat-label">${info.label}<br>Not yet earned</div></div>`;
   };
-  // Grouped by game type — X01's badges, Cricket's 2, Daily Challenge's 3, Just
-  // Chuckin' It's 18, Checkout Trainer's 33, and the guided drills' 2 each stay
-  // visually distinct sub-sections rather than one mixed flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill);
+  // Grouped by game type — X01's badges, Cricket's 2, Baseball's 2, Daily
+  // Challenge's 3, Just Chuckin' It's 18, Checkout Trainer's 33, and the guided
+  // drills' 2 each stay visually distinct sub-sections rather than one mixed
+  // flat grid.
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
+  const baseballIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].baseball);
   const challengeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].challenge);
   const chuckinIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].chuckin);
   const tournamentIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].tournament);
@@ -4941,6 +5004,8 @@ function renderPlayerBadges(data){
     <div class="summary-grid">${x01Ids.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Cricket</div>
     <div class="summary-grid">${cricketIds.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">Baseball</div>
+    <div class="summary-grid">${baseballIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Tournaments</div>
     <div class="summary-grid">${tournamentIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Daily Challenge</div>
@@ -5621,7 +5686,8 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   staircasefinish:'Staircase Finish! 🪜', ghostslayer:'Ghost Slayer! 👻',
   tournamentchampion:'🏆 CHAMPION! 🏆', tournamentgiantslayer:'Giant Slayer ⚔️',
   guided_clock:'Guided Clock! 🧭', guided_world:'Guided World! 🗺️',
-  triplebull:'🐂 TRIPLE BULL! 🐂', bullseyefinish:'Bullseye Finish! 🏹' };
+  triplebull:'🐂 TRIPLE BULL! 🐂', bullseyefinish:'Bullseye Finish! 🏹',
+  baseballperfectinning:'Perfect Inning! 🔥', baseballperfectgame:'🏆 PERFECT GAME! 🏆' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -5632,7 +5698,8 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   challengeweek:3000, challengemonth:6000, challengeallformats:3500, nocigar:2500, chuckin180:2500,
   staircasefinish:3000, ghostslayer:3500, tournamentchampion:6000, tournamentgiantslayer:2500,
   guided_clock:3500, guided_world:5000,
-  triplebull:4000, bullseyefinish:2500 };
+  triplebull:4000, bullseyefinish:2500,
+  baseballperfectinning:2500, baseballperfectgame:6000 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
@@ -5974,9 +6041,10 @@ function showAchievement(type, player, countText){
   achNameEl.textContent = player || '';
   if(achDescEl) achDescEl.textContent = achDescFor(type);
   if(achCountEl) achCountEl.textContent = countText || '';
-  // Triple Bull (three double-bulls in one visit, a 150 checkout) gets the same
-  // showcase treatment as a nine-darter — a comparably rare, celebration-worthy feat.
-  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'triplebull';
+  // Triple Bull (three double-bulls in one visit, a 150 checkout) and Perfect Game
+  // (81 runs, a perfect 9 in every Baseball inning) get the same showcase treatment
+  // as a nine-darter — comparably rare, celebration-worthy feats.
+  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'triplebull' || type === 'baseballperfectgame';
   achOverlayEl.classList.toggle('mega', mega);
   achOverlayEl.classList.add('show');
   const shareBtn = document.getElementById('ach-share-btn');
@@ -7721,6 +7789,16 @@ function enterTurnBaseball(){
   // awardTimeOfDayBadges() (docs/game-modes-roadmap.md "Cricket badge parity").
   awardTimeOfDayBadges(p);
 
+  // Perfect Inning: 3 darts, all treble on this inning's target number — the
+  // maximum possible runs (9) in a single visit, Baseball's 180 analog. Checked
+  // the same "per-visit" way Cricket's 9 Marks is (inside the turn-commit
+  // function, not onLegWon), since it doesn't depend on knowing the leg's outcome.
+  if(dartsThrown===3 && ev.runsThisVisit===9){
+    queueBadge('baseballperfectinning', p.name);
+    awardRecurringBadge(p.name, 'baseballperfectinning', 'baseballperfectinning',
+      { icon:'🔥', headline:'PERFECT INNING!', player:p.name, statLine:'9 runs — three trebles, one visit' });
+  }
+
   if(ev.matchComplete){
     onLegWonBaseball(ev.winnerIndex);
     return;
@@ -7771,6 +7849,22 @@ function onLegWonBaseball(wi){
   const w = game.players[wi];
   w.legsWon += 1;
 
+  // Perfect Game: won this leg with a perfect 9 runs in every one of the 9
+  // innings (81 total) — Baseball's Nine-Darter/Perfect Leg analog. Checked
+  // here (a leg-outcome badge), not per-visit, since it can only be confirmed
+  // once the leg's winner and their full inningRuns are known — the same split
+  // Cricket uses for Whitewash/Comeback Kid vs. its own per-visit 9 Marks.
+  const isPerfectGame = [1,2,3,4,5,6,7,8,9].every(i => w.inningRuns[i] === 9);
+  if(isPerfectGame){
+    queueBadge('baseballperfectgame', w.name);
+    awardRecurringBadge(w.name, 'baseballperfectgame', 'baseballperfectgame',
+      { icon:'🏆', headline:'PERFECT GAME!', player:w.name, statLine:'81 runs — a perfect 9 in every inning' });
+  }
+
+  // Captured before the legs-reset below zeroes everyone out — same "stable
+  // snapshot for the match-win stat line" precedent onLegWon() (X01) uses.
+  const legsAtWin = new Map(game.players.map(p => [p, p.legsWon]));
+
   if(!game.practice && w.legsWon >= game.legsPerSet){      // set won (H2H only)
     w.setsWon += 1;
     game.players.forEach(p=>p.legsWon=0);
@@ -7784,6 +7878,9 @@ function onLegWonBaseball(wi){
       DB.recordEvent('game_end', null, null);
       DB.completeGame(w.name);
       game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+      // matchWinStatLine() is fully generic over legsWon/setsWon/category —
+      // reused as-is, no Baseball-specific version needed.
+      fireMomentCard('matchwin', { icon:'🏅', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) });
       finishUnit('game', w.name);
       return;
     }
@@ -8042,6 +8139,52 @@ function h2hStatsHtml(winner, scope){
   return `<div class="prac-stats">${cols}</div>`;
 }
 
+// Baseball's per-leg/session practice stat panel — same "This Leg/This Session"
+// container pracStatsHtml() builds for X01, but reading Cricket/Baseball's own
+// turnRecord shape ({player, scored, darts: [dart, ...]}) instead of X01's own
+// turns-table shape (t.darts as a plain count, t.bust, t.trebleLess, etc., none
+// of which a Baseball turn record carries).
+function pracStatsHtmlBaseball(turns){
+  if(!turns.length) return '';
+  const darts = turns.reduce((s,t)=>s+t.darts.length,0);
+  const totalRuns = turns.reduce((s,t)=>s+t.scored,0);
+  const perfectInnings = turns.filter(t=>t.scored===9).length;
+  const bestInning = Math.max(...turns.map(t=>t.scored));
+  return [
+    statRow('Darts Thrown', darts),
+    statRow('Total Runs', totalRuns),
+    statRow('Best Inning', bestInning),
+    statRow('Perfect Innings', perfectInnings),
+  ].join('');
+}
+// Baseball's per-player leg/game comparison table (GAME OVER / LEG COMPLETE
+// screens) — same container h2hStatsHtml() builds for X01, but showing runs
+// instead of a score average (a Baseball player object has no
+// gamePoints/legPoints/avgDarts fields at all). "Runs (final leg)" at the
+// game scope is deliberately not a cumulative match total — p.totalRuns resets
+// every leg (resetPlayerForNextLegBaseball()) and Baseball has no game-scoped
+// runs accumulator yet, so a multi-leg match's GAME OVER screen only reflects
+// the deciding leg's runs, same as every other per-leg field here.
+function h2hStatsHtmlBaseball(winner, scope){
+  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
+  const cols = game.players.map(p=>{
+    const rows = scope==='game' ? [
+      statRow('Runs (final leg)', p.totalRuns||0),
+      statRow('Darts (match)', p.gameDarts||0),
+    ] : [
+      statRow('Runs', p.totalRuns||0),
+      statRow('Darts (leg)', p.legDarts||0),
+    ];
+    if(showStanding){
+      const standing = game.setsPerGame>1 ? `Sets ${p.setsWon} · Legs ${p.legsWon}` : `Legs ${p.legsWon}/${game.legsPerSet}`;
+      rows.push(statRow(scope==='game' ? 'Final Standing' : 'Standing', standing, true));
+    }
+    const title = p.name===winner ? `${escapeHtml(p.name)} 🎯` : escapeHtml(p.name);
+    return `<div class="prac-col"><div class="prac-col-title">${title}</div>${rows.join('')}</div>`;
+  }).join('');
+  return `<div class="prac-stats">${cols}</div>`;
+}
+
 function finishUnit(kind, winner){
   game.done = (kind==='game');
   renderGame();
@@ -8055,10 +8198,11 @@ function finishUnit(kind, winner){
   const oche=document.querySelector('.oche');
   const isCricket = game.gameType === 'cricket';
   const isBaseball = game.gameType === 'baseball';
-  // No matchwin moment card is built for Cricket or Baseball this pass (stats/social
-  // parity is a later build-order step, not this one) — suppress the Share button
-  // rather than wire it to a card that doesn't exist.
-  const matchShareBtn = (isCricket || isBaseball) ? '' : `<button class="btn btn-ghost" id="matchwin-share-btn" onclick="shareMomentCard('matchwin')">📤 Share</button>`;
+  // No matchwin moment card is built for Cricket yet (its own social/moment-card
+  // pass is a later build-order step) — suppress the Share button rather than wire
+  // it to a card that doesn't exist. Baseball's own matchwin card IS built
+  // (onLegWonBaseball()'s "game (match) won" branch), so it keeps the button.
+  const matchShareBtn = isCricket ? '' : `<button class="btn btn-ghost" id="matchwin-share-btn" onclick="shareMomentCard('matchwin')">📤 Share</button>`;
   if(kind==='game'){
     // Tournament mode: the bracket already advanced server-side (the onGameCompleted
     // hook fired from DB.completeGame() above), so route back to the bracket instead
@@ -8097,14 +8241,26 @@ function finishUnit(kind, winner){
       <div class="btn-row" style="justify-content:center">
         ${nextBtn}
         ${matchShareBtn}
-      </div>${(isCricket || isBaseball) ? '' : h2hStatsHtml(winner,'game')}</div>`;
+      </div>${isCricket ? '' : isBaseball ? h2hStatsHtmlBaseball(winner,'game') : h2hStatsHtml(winner,'game')}</div>`;
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
-    // Cricket/Baseball have no per-leg stat panel yet (X01-only fields; stats parity
-    // is a later build-order step) — skip straight to '' rather than reading fields
-    // that don't exist on a cricket/baseball player.
-    const legPanel = (isCricket || isBaseball) || kind!=='leg' ? '' : game.practice ? `
+    // Cricket has no per-leg stat panel yet (X01-only fields; its own stats
+    // parity is a later build-order step) — skip straight to '' rather than
+    // reading fields that don't exist on a cricket player. Baseball gets its
+    // own panel (pracStatsHtmlBaseball()/h2hStatsHtmlBaseball()), reading its
+    // own turnRecord/player-object shape instead of X01's.
+    const legPanel = isCricket || kind!=='leg' ? '' : isBaseball ? (game.practice ? `
+      <div class="prac-stats">
+        <div class="prac-col">
+          <div class="prac-col-title">This Leg</div>
+          ${pracStatsHtmlBaseball(game.currentLegTurns||[])}
+        </div>
+        <div class="prac-col">
+          <div class="prac-col-title">This Session</div>
+          ${pracStatsHtmlBaseball(game.sessionTurns||[])}
+        </div>
+      </div>` : h2hStatsHtmlBaseball(winner)) : game.practice ? `
       <div class="prac-stats">
         <div class="prac-col">
           <div class="prac-col-title">This Leg</div>
@@ -8398,18 +8554,9 @@ const GAME_TYPES = {
     // Stats pass (game-modes-roadmap.md "Baseball"): statDefs populated, so
     // Baseball now shows up on the Player Profile toggle
     // (`Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length)`).
-    // homeTabRenderer is `false` (not `null`) — same Chuckin/Doubles-Practice
-    // precedent: `null` means "use the built-in X01-shaped default," which
-    // would silently render X01 leaderboard fields (avg, legsWon, ...) against
-    // Baseball's totally different player-snapshot shape. `false` explicitly
-    // opts Baseball out of the Home page toggle entirely
-    // (`renderHomeGameTypeTabs()`'s `g.homeTabRenderer !== false` check) until
-    // a real Baseball-shaped Home leaderboard is built — a separate follow-up
-    // step, the same order Cricket itself shipped in (stats parity first, Home
-    // page navigation as its own later step).
     statDefs: BASEBALL_STAT_DEFS,
     personalBestsRenderer: renderBaseballPersonalBests,
-    homeTabRenderer: false
+    homeTabRenderer: renderHomeTabBodyBaseball
   },
   doubles_practice: {
     id: 'doubles_practice',

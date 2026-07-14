@@ -2134,6 +2134,81 @@ function getBaseballPersonalBests(playerName, mode) {
   return { bestLegRuns, fewestDartsToWin, winStreak, recentFormRuns, lifetimeRuns };
 }
 
+// Home page leaderboards for Baseball — direct structural analogs of Cricket's
+// four getCricket*() leaderboard/stat functions (9 Marks, MPR, Wins, Perfect Leg),
+// mapped onto Baseball's own vocabulary: Perfect Inning is the per-visit max
+// (9 runs, three trebles) mirroring 9 Marks; RPI (runs per inning) mirrors MPR;
+// Wins is identical in shape; Perfect Game (81 runs across all 9 innings) mirrors
+// Perfect Leg.
+
+// Perfect Inning leaderboard + recent feed — counts every turn where a player
+// scored the inning max (9 runs / three trebles on target), same
+// leaderboard+recent shape as getCricketNineMarksStats().
+function getBaseballPerfectInningsStats(mode) {
+  const scope = _scope({ mode, gameType: 'baseball' });
+  const base = `
+    SELECT t.id, t.player_id, t.created_at
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE t.scored=9 ${scope}
+  `;
+  const leaderboard = db.prepare(`SELECT p.name, COUNT(*) AS count FROM (${base}) x JOIN players p ON p.id=x.player_id GROUP BY x.player_id ORDER BY count DESC`).all();
+  const recent      = db.prepare(`SELECT p.name, x.created_at FROM (${base}) x JOIN players p ON p.id=x.player_id ORDER BY x.created_at DESC LIMIT 10`).all();
+  return { leaderboard, recent };
+}
+
+// RPI (runs per inning) leaderboard — direct analog of getCricketMprLeaderboard(),
+// same minimum-rounds floor to keep one lucky inning from topping the board.
+function getBaseballRpiLeaderboard(mode) {
+  const scope = _scope({ mode, gameType: 'baseball' });
+  const rows = db.prepare(`
+    SELECT p.name AS name, COUNT(*) AS rounds, SUM(t.scored) AS runs
+    FROM turns t JOIN games g ON g.id=t.game_id JOIN players p ON p.id=t.player_id
+    WHERE 1=1 ${scope}
+    GROUP BY t.player_id
+    HAVING rounds >= 5
+  `).all();
+  return rows
+    .map(r => ({ name: r.name, rpi: +(r.runs / r.rounds).toFixed(2), rounds: r.rounds }))
+    .sort((a, b) => b.rpi - a.rpi);
+}
+
+// Win/loss leaderboard — identical shape to getCricketWinLeaderboard() (H2H only
+// by nature: practice mode has no winner_id).
+function getBaseballWinLeaderboard() {
+  const scope = _scope({ mode: 'h2h', gameType: 'baseball' });
+  const winRows = db.prepare(`
+    SELECT p.name AS name, COUNT(*) AS played, SUM(CASE WHEN g.winner_id = p.id THEN 1 ELSE 0 END) AS won
+    FROM game_players gp
+    JOIN players p ON p.id = gp.player_id
+    JOIN games g ON g.id = gp.game_id
+    WHERE g.completed_at IS NOT NULL ${scope}
+    GROUP BY p.id
+    HAVING played >= 1
+    ORDER BY won DESC, played ASC
+  `).all();
+  return winRows.map(r => ({ name: r.name, played: r.played, won: r.won,
+    rate: r.played ? +((r.won / r.played) * 100).toFixed(1) : 0 }));
+}
+
+// Perfect Game leaderboard + recent feed — a leg won with 9 runs in every one of
+// the 9 innings (81 total, the mathematical max), mirroring
+// getCricketPerfectLegStats(). Unlike getBaseballWonLegs(), a Perfect Game is
+// trivially always the leg's winner (81 is the max possible score), so no
+// intersection with the general "won legs" derivation is needed here.
+function getBaseballPerfectGameStats(mode) {
+  const scope = _scope({ mode, gameType: 'baseball' });
+  const base = `
+    SELECT t.player_id, MAX(t.id) AS lastTurnId, MAX(t.created_at) AS created_at
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE g.completed_at IS NOT NULL ${scope}
+    GROUP BY t.game_id, t.set_no, t.leg_no, t.player_id
+    HAVING COUNT(t.id) = 9 AND SUM(t.scored) = 81
+  `;
+  const leaderboard = db.prepare(`SELECT p.name, COUNT(*) AS count FROM (${base}) x JOIN players p ON p.id=x.player_id GROUP BY x.player_id ORDER BY count DESC`).all();
+  const recent      = db.prepare(`SELECT p.name, x.created_at FROM (${base}) x JOIN players p ON p.id=x.player_id ORDER BY x.created_at DESC LIMIT 10`).all();
+  return { leaderboard, recent };
+}
+
 /* ---------- Doubles Practice (docs/game-modes-roadmap.md) ----------
    Solo drill mode: no opponent, no win/loss, no legs won — a "round" is one
    turns.leg_no grouping (incremented client-side by startNextRoundDoublesPractice()
@@ -5230,6 +5305,7 @@ module.exports = {
   getGhostCandidateLegs, getGhostLegScript,
   getCricketStatBubbles, getCricketNineMarksStats, getCricketPersonalBests,
   getBaseballStatBubbles, getBaseballPersonalBests,
+  getBaseballPerfectInningsStats, getBaseballRpiLeaderboard, getBaseballWinLeaderboard, getBaseballPerfectGameStats,
   getCricketMprLeaderboard, getCricketWinLeaderboard, getCricketPerfectLegStats,
   getDoublesPracticeStatBubbles, getDoublesPracticePersonalBests,
   getDoublesPracticeAccuracyLeaderboard, getDoublesPracticeBestRoundStats,

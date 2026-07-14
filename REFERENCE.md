@@ -1358,12 +1358,12 @@ badge that dart awarded.
 
 ## 4. Achievements & Badges
 
-86 badges (23 X01 + 4 Cricket + 2 Tournament + 3 Daily Challenge + 19 Just
-Chuckin' It + 33 Checkout Trainer + 2 Practice Drills) — that split is by
+88 badges (23 X01 + 4 Cricket + 2 Baseball + 2 Tournament + 3 Daily Challenge +
+19 Just Chuckin' It + 33 Checkout Trainer + 2 Practice Drills) — that split is by
 which table each is listed under below (and which section of the Player
 Profile's Badge Case each renders in, via `BADGE_INFO`'s
-`cricket`/`challenge`/`chuckin`/`tournament`/`checkoutTrainer`/`drill` flags —
-anything without one of those flags buckets as X01), not a strict statement
+`cricket`/`baseball`/`challenge`/`chuckin`/`tournament`/`checkoutTrainer`/`drill`
+flags — anything without one of those flags buckets as X01), not a strict statement
 of which game types can trigger it: Checkout Trainer's own 33 badges are
 documented in full in §19 rather than repeated here, since that section
 already covers the mode end-to-end. Night Owl/
@@ -1481,6 +1481,17 @@ logic in `frontend/scoring.js` (`isCricketWhitewash()`/
 | 🏆 **Perfect Leg** | `win && legDarts === theoreticalMinimum`, where the minimum is computed per match from `game.config.numbers`: each non-Bull number can close in a single treble (3 marks); Bull can't be trebled (`makeDart()` already downgrades a "treble bull" tap to a single), so it needs a minimum of 2 darts. A win at exactly this minimum already implies enough bonus marks were scored to strictly lead (the win condition in §2 guarantees that), so no separate points check is needed. **Recurring**, mega-tier overlay (confetti) like Nine-Darter. |
 | 🧹 **Whitewash** | `isCricketWhitewash(opp.marks)` at the moment the leg is won — every value in the opponent's `marks` object is `< 3` (nobody closed), checked in `onLegWonCricket(wi)`. 2-player only. **Recurring.** |
 | 🔥 **Comeback Kid (Cricket)** | `cricketComebackAchieved(w.legWorstPointsDeficit)` — `legWorstPointsDeficit >= 20` (Cricket's own threshold, chosen against Cricket's much smaller/more variable points scale than X01's 501 countdown, not X01's 100). `legWorstPointsDeficit` is the largest `(opponent.points - my.points)` seen at any point this leg, tracked in `enterTurnCricket()` the same "sample before this visit's own update" timing X01's `legWorstDeficit` uses. 2-player only. **Recurring.** |
+
+**Baseball badges** (checked in `enterTurnBaseball()`/`onLegWonBaseball()`,
+`frontend/index.html`) — the direct analogs of Cricket's 9 Marks/Perfect Leg,
+mapped onto Baseball's own vocabulary: Perfect Inning is the per-visit max
+(mirroring 9 Marks/180), Perfect Game is the per-leg max (mirroring Perfect
+Leg/Nine-Darter):
+
+| Badge | Exact condition |
+|---|---|
+| 🔥 **Perfect Inning** | `dartsThrown===3 && ev.runsThisVisit===9` — 3 darts, each a treble on that inning's target number, the maximum possible runs in one visit. Checked per-visit in `enterTurnBaseball()`, the same "doesn't depend on the leg's outcome" timing 9 Marks uses. **Recurring.** |
+| 🏆 **Perfect Game** | `w.inningRuns[i]===9` for every one of innings 1–9 — a won leg with the maximum possible 9 runs in every single inning (81 total). Checked in `onLegWonBaseball(wi)` once the leg's winner and full `inningRuns` are known, the same leg-outcome timing Perfect Leg uses. **Recurring**, mega-tier overlay (confetti) like Nine-Darter/Perfect Leg. |
 
 **Tournament badges** (`docs/tournament-mode-roadmap.md` §7 — checked server-side
 in `_advanceTournamentMatch()`, `backend/db.js`, the same function that already

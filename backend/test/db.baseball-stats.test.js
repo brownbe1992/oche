@@ -108,6 +108,81 @@ describe('getBaseballPersonalBests', () => {
   });
 });
 
+describe('getBaseballPerfectInningsStats', () => {
+  test('leaderboard counts turns scoring exactly 9 runs (three trebles)', () => {
+    const a = 'Baseball_PI_A', b = 'Baseball_PI_B';
+    db.addPlayer(a); db.addPlayer(b);
+    const g = baseballGame([a, b]);
+    baseballTurn(g.gameId, a, 1, 1, [[1,3],[1,3],[1,3]], { scored: 9 }); // qualifies
+    baseballTurn(g.gameId, a, 1, 1, [[2,3],[2,3],[2,1]], { scored: 7 }); // does not qualify
+    baseballTurn(g.gameId, b, 1, 1, [[1,1],[1,1],[1,1]], { scored: 3 }); // does not qualify
+    const stats = db.getBaseballPerfectInningsStats('h2h');
+    const byName = Object.fromEntries(stats.leaderboard.map(r => [r.name, r.count]));
+    assert.equal(byName[a], 1);
+    assert.equal(byName[b], undefined, 'b never scored a perfect inning');
+  });
+});
+
+describe('getBaseballRpiLeaderboard', () => {
+  test('requires at least 5 rounds (mirrors the MPR floor convention)', () => {
+    const under = 'Baseball_RPI_Under5', over = 'Baseball_RPI_Over5';
+    db.addPlayer(under); db.addPlayer(over);
+    const g = baseballGame([under, over]);
+    for (let i = 0; i < 4; i++) baseballTurn(g.gameId, under, 1, 1, [[1,1]], { scored: 1 }); // 4 rounds -> excluded
+    for (let i = 0; i < 5; i++) baseballTurn(g.gameId, over, 1, 1, [[1,1]], { scored: 1 });  // 5 rounds -> included, rpi=1
+    const rows = db.getBaseballRpiLeaderboard('h2h');
+    const names = rows.map(r => r.name);
+    assert.ok(!names.includes(under), 'under the 5-round floor is excluded entirely');
+    const overRow = rows.find(r => r.name === over);
+    assert.equal(overRow.rpi, 1, '1 run per round');
+  });
+});
+
+describe('getBaseballWinLeaderboard', () => {
+  test('rate = won/played*100, H2H only, no mode param', () => {
+    const p1 = 'Baseball_Win_P1', p2 = 'Baseball_Win_P2';
+    db.addPlayer(p1); db.addPlayer(p2);
+    const g1 = baseballGame([p1, p2]); db.completeGame(g1.gameId, p1);
+    const g2 = baseballGame([p1, p2]); db.completeGame(g2.gameId, p2);
+    const rows = db.getBaseballWinLeaderboard();
+    const byName = Object.fromEntries(rows.map(r => [r.name, r]));
+    assert.equal(byName[p1].played, 2);
+    assert.equal(byName[p1].won, 1);
+    assert.equal(byName[p1].rate, 50);
+  });
+});
+
+describe('getBaseballPerfectGameStats', () => {
+  test('a leg won with 9 runs in every one of the 9 innings (81 total)', () => {
+    const name = 'Baseball_Perfect_Player';
+    db.addPlayer(name);
+    const g = baseballGame([name, 'Baseball_Perfect_Opp']);
+    db.addPlayer('Baseball_Perfect_Opp');
+    for (let i = 1; i <= 9; i++) {
+      baseballTurn(g.gameId, name, 1, 1, [[1,3],[1,3],[1,3]], { scored: 9 });
+    }
+    db.completeGame(g.gameId, name);
+    const stats = db.getBaseballPerfectGameStats('h2h');
+    const byName = Object.fromEntries(stats.leaderboard.map(r => [r.name, r.count]));
+    assert.equal(byName[name], 1);
+  });
+
+  test('the same shape but ONE inning short of 9 runs does not qualify', () => {
+    const name = 'Baseball_Imperfect_Player';
+    db.addPlayer(name);
+    const g = baseballGame([name, 'Baseball_Imperfect_Opp']);
+    db.addPlayer('Baseball_Imperfect_Opp');
+    for (let i = 1; i <= 8; i++) {
+      baseballTurn(g.gameId, name, 1, 1, [[1,3],[1,3],[1,3]], { scored: 9 });
+    }
+    baseballTurn(g.gameId, name, 1, 1, [[1,3],[1,3],[1,1]], { scored: 7 }); // 9th inning falls short
+    db.completeGame(g.gameId, name);
+    const stats = db.getBaseballPerfectGameStats('h2h');
+    const byName = Object.fromEntries(stats.leaderboard.map(r => [r.name, r.count]));
+    assert.equal(byName[name], undefined);
+  });
+});
+
 describe('X01/Cricket/Baseball isolation regression (turns.scored means a different quantity per game type)', () => {
   test('a 9-run baseball inning never counts as an X01 180 or feeds Cricket\'s stats', () => {
     const name = 'Isolation_Baseball_Player';

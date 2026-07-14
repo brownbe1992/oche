@@ -1,9 +1,11 @@
 # Additional Game Modes — Design Roadmap
 
 > Status: **Cricket is playable with full stats parity (build-order steps 1-4
-> done). Step 5 (Baseball) is built as a core playable game** (turn engine, New
-> Game setup, dedicated scoring screen, live scoreboard) — **no stats/achievements
-> parity yet**, deliberately deferred (see "Baseball" below). `frontend/index.html`
+> done). Step 5 (Baseball) is now also playable with full stats/achievements
+> parity** — turn engine, New Game setup, dedicated scoring screen, live
+> scoreboard, stat bubbles/Personal Bests/metric history, achievements/badges,
+> matchwin moment card/Share button/practice stat panel, and Home page
+> leaderboards (see "Baseball" below). `frontend/index.html`
 > has a `GAME_TYPES` registry with `x01`, `cricket`, and `baseball` entries
 > (`newMatchPlayer`, `evaluateVisit`, `resetForNextLeg`, `playerSnapshot`,
 > `statDefs`); every call site dispatches through `GAME_TYPES[game.gameType]`.
@@ -372,7 +374,7 @@ so it didn't add to this list at all).
   who's never touched Cricket doesn't see an all-empty Cricket tab. Genuinely
   undecided, not resolved by this pass — see "Open questions" below.
 
-## Baseball — ✅ Built (2026-07, core playable game only — see "Still open" below)
+## Baseball — ✅ Built (2026-07, full stats/achievements parity — see "Still open" below)
 
 9 innings, one per number 1–9. Each turn, a player throws 3 darts at that inning's
 number: a single scores 1 run, a double 2, a treble 3, for that inning only. After 9
@@ -456,16 +458,49 @@ whichever player's turn happened to end the round) and a live Playwright
 check of the full chain: New Game → a full H2H match → Player Profile stat
 bubbles/Personal Bests/metric-history chart, all rendering correctly.
 
-**Still open (deliberately out of scope this pass)**:
-- **No Baseball-native achievements/badges** — only the generic time-of-day badges
-  (Night Owl/Early Bird) fire, via the same shared `awardTimeOfDayBadges()` helper
-  every other game type uses.
-- **No matchwin moment card / Share button, and no per-leg practice stat panel** —
-  `finishUnit()` treats Baseball the same way it already treats Cricket (skip
-  straight past the X01-shaped stat panel/share button that assume fields Baseball
-  doesn't have) rather than reading fields that don't exist on a baseball player.
-- **No Home page leaderboards** — see "stats pass" above; `homeTabRenderer:false`
-  is a deliberate placeholder, not a gap that was missed.
+**✅ Done (2026-07) — achievements, moment card/Share/practice panel, Home page
+leaderboards**: the three items left open by the stats pass above are now built,
+each the direct Baseball-vocabulary analog of a Cricket precedent.
+
+- **Baseball-native achievements**: 🔥 Perfect Inning (`dartsThrown===3 &&
+  ev.runsThisVisit===9` — 3 trebles on target in one visit, checked per-visit in
+  `enterTurnBaseball()`, the same timing 9 Marks uses) and 🏆 Perfect Game (a won
+  leg with `inningRuns[i]===9` for every one of innings 1-9 — 81 total, checked
+  leg-outcome-side in `onLegWonBaseball(wi)`, the same timing Perfect Leg uses;
+  mega-tier confetti overlay like Nine-Darter/Perfect Leg). Both **recurring**,
+  both flagged `baseball:true` in `BADGE_INFO` so the Player Profile's Badge Case
+  gets its own "Baseball" section (mirroring the Cricket section). Full trigger
+  conditions in REFERENCE.md §4.
+- **Matchwin moment card, Share button, per-leg practice stat panel**: Baseball
+  now gets its own `pracStatsHtmlBaseball()`/`h2hStatsHtmlBaseball()` pair
+  (mirroring X01's `pracStatsHtml()`/`h2hStatsHtml()`, since Cricket's own
+  versions read X01-shaped fields — `p.gamePoints`/`avgDarts` — that don't exist
+  on a Baseball player) plumbed into `finishUnit()`. `matchWinStatLine()` needed
+  no Baseball-specific version at all — it only reads `legsWon`/`setsWon`/
+  `category`/`players.length`, already generic across every game type. The Share
+  button, previously excluded for Baseball the same way it's excluded for
+  Cricket (`isCricket || isBaseball` in `finishUnit()`), now only excludes
+  Cricket — Baseball gets the same `shareMomentCard('matchwin')` flow X01 has.
+- **Home page leaderboards** (`renderHomeTabBodyBaseball()`, mirroring
+  `renderHomeTabBodyCricket()` exactly): `homeTabRenderer` flipped from `false`
+  to the new renderer, so Baseball now appears on the Home page's game-type
+  toggle. Four boards, the direct RPI/Perfect Inning/Wins/Perfect Game analogs of
+  Cricket's MPR/9 Marks/Wins/Perfect Leg — `getBaseballRpiLeaderboard(mode)`,
+  `getBaseballPerfectInningsStats(mode)`, `getBaseballWinLeaderboard()` (H2H
+  only, no `mode` param), `getBaseballPerfectGameStats(mode)` — all new
+  `backend/db.js` functions, fetched in the same upfront `renderHome()`
+  `Promise.all` Cricket's own four already use (`homeData.baseball.h2h`/
+  `.practice`/`.wins`).
+
+Verified with an 11-case addition to `backend/test/db.baseball-stats.test.js`
+(4 new `describe` blocks for the leaderboard functions, mirroring
+`db.cricket-stats.test.js`'s own coverage of its 4 equivalents) and a live
+Playwright check of the full chain: a perfect 9-inning, 81-run H2H match →
+both achievements firing and appearing in the Badge Case → GAME OVER screen
+showing the Share button and per-leg stat panel → Home page's Baseball tab
+showing all four leaderboards populated correctly.
+
+**Still open (deliberately out of scope)**:
 - **Committed tests**: `backend/test/scoring.test.js`'s
   `evaluateVisitBaseball`/`baseballInningTarget` suite (16 cases) covers target
   scoring, round/match completion, the exact-tie-continues-to-extra-innings rule,
@@ -977,21 +1012,22 @@ X01-only, see its status note above).
    Verified with a seeded scratch-DB confirming leaderboard math and
    Playwright end-to-end confirming the toggle switches cleanly with zero
    regression to the existing X01 leaderboards.
-5. **✅ Done (2026-07, core playable game only) — Baseball** as the second proof
-   that the plugin shape generalizes, not just fits Cricket specifically. Turn
-   engine (`evaluateVisitBaseball()`), New Game setup (fixed 9 innings, no further
-   config), dedicated scoring screen and `renderers.baseball` live-scoreboard card
-   (chalkboard shape, reusing Cricket's exact layout/CSS). Stats/achievements
-   parity deliberately not built this pass — see "Baseball" above for the full
-   scope split. Verified with a 16-case committed unit suite
+5. **✅ Done (2026-07) — Baseball**, full stats/achievements parity, as the
+   second proof that the plugin shape generalizes, not just fits Cricket
+   specifically. Turn engine (`evaluateVisitBaseball()`), New Game setup (fixed
+   9 innings, no further config), dedicated scoring screen and
+   `renderers.baseball` live-scoreboard card (chalkboard shape, reusing
+   Cricket's exact layout/CSS). Verified with a 16-case committed unit suite
    (`backend/test/scoring.test.js`) covering inning-target scoring, round/match
    completion, the exact-tie-continues rule, and extra innings.
-   **✅ Player Profile stats parity done (2026-07, separate follow-up pass)** —
-   see "Baseball" above for the full write-up (`getBaseballStatBubbles()`/
+   **✅ Player Profile stats parity** (`getBaseballStatBubbles()`/
    `getBaseballPersonalBests()`/`getBaseballWonLegs()`, 6 stat bubbles, 5-field
-   Personal Bests, 6 metric-history cases). Achievements, Home page leaderboards,
-   and the matchwin moment card/share button remain open (tracked as
-   `docs/open-roadmap-items.md` item #12).
+   Personal Bests, 6 metric-history cases).
+   **✅ Achievements, matchwin moment card/Share button/practice stat panel,
+   and Home page leaderboards** (`getBaseballRpiLeaderboard()`/
+   `getBaseballPerfectInningsStats()`/`getBaseballWinLeaderboard()`/
+   `getBaseballPerfectGameStats()`, `renderHomeTabBodyBaseball()`, Perfect
+   Inning/Perfect Game badges) — see "Baseball" above for the full write-up.
 6. **✅ Done (2026-07): generalize the Player Profile/Home page game-type toggle**
    beyond hardcoded per-type buttons — see "Toggle mechanism generalized" above.
    The toggle mechanism itself is N-way now; the backend stat-fetch side of the
