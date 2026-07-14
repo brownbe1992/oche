@@ -90,14 +90,6 @@
   .loadout-pill{background:none;border:1px solid var(--wire);color:var(--muted);border-radius:20px;
     padding:3px 10px;font-size:11px;font-family:inherit;cursor:pointer}
   .loadout-pill:hover{color:var(--gold);border-color:var(--gold)}
-  /* add player row */
-  .add-player-wrap{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
-  .add-player-menu{display:none;gap:6px;flex-wrap:wrap}
-  .add-player-menu.open{display:flex}
-  .add-player-menu .btn{white-space:nowrap;padding:11px 14px;font-size:13.5px}
-  /* h2h banner */
-  .h2h-banner{font-size:12px;color:var(--muted);background:var(--surface-2);border:1px solid var(--wire);
-    border-radius:8px;padding:7px 11px;margin-top:8px;display:none}
   /* format presets */
   .preset-row{display:flex;gap:6px;align-items:center;margin-bottom:6px}
   .preset-btn{background:var(--surface-2);border:1px solid var(--wire);color:var(--ink);
@@ -700,194 +692,123 @@
   <section id="screen-setup" class="screen">
     <div class="card">
       <h2 style="font-size:18px;margin-bottom:4px">New game</h2>
+      <p class="pp-meta" id="setup-step-label" style="margin:0 0 16px">Step 1 of 3 — Who's playing?</p>
 
-      <!-- Players -->
-      <div class="setup-section">
-        <div class="setup-label">Players</div>
-        <div class="players-list" id="players-list"></div>
-        <div class="add-player-wrap" id="add-player-wrap">
-          <button class="btn btn-ghost" id="add-player-btn" onclick="toggleAddPlayerMenu()">+ Add player</button>
-          <div class="add-player-menu" id="add-player-menu">
-            <button class="btn btn-ghost" onclick="addExistingPlayer()">Add existing</button>
-            <button class="btn btn-ghost" onclick="addNewPlayer()">New player</button>
+      <!-- ===== Step 1: Who's playing? (docs/new-game-flow-roadmap.md) =====
+           A select → "Add someone else?" loop, not the old always-visible-rows
+           list — renderPlayers() (unchanged name, rewritten body) drives this. -->
+      <div id="setup-step-1">
+        <div class="setup-section">
+          <div class="setup-label">Players</div>
+          <div class="players-list" id="players-list"></div>
+        </div>
+      </div>
+
+      <!-- ===== Step 2: Choose a game ===== -->
+      <div id="setup-step-2" hidden>
+        <button class="pp-back" onclick="setupBackTo(1)">← Back</button>
+        <div class="setup-section">
+          <div class="setup-label" id="setup-mode-select-label">What are you playing?</div>
+          <select class="date-input" id="setup-mode-select" style="width:100%;max-width:340px" aria-label="What are you playing?" onchange="onSetupModeSelect(this.value)"></select>
+        </div>
+        <!-- X01 starting score, OR "which league match?" when 2+ pending fixtures
+             are shared with the current pair — never both at once (one primary
+             entry is selected at a time). -->
+        <div class="setup-section" id="setup-flavor-section" hidden>
+          <div class="setup-label" id="setup-flavor-label">Starting score</div>
+          <select class="date-input" id="setup-flavor-select" style="width:auto" onchange="onSetupFlavorSelect(this.value)"></select>
+        </div>
+        <div class="setup-section" id="setup-blurb-section" style="border:1px solid var(--gold);border-radius:10px;padding:12px">
+          <div id="setup-blurb-body"></div>
+        </div>
+        <div class="btn-row" style="margin-top:16px">
+          <button class="btn btn-primary" id="setup-step2-continue" onclick="setupGoToStep3()">Continue</button>
+        </div>
+      </div>
+
+      <!-- ===== Step 3: More options ===== -->
+      <div id="setup-step-3" hidden>
+        <button class="pp-back" onclick="setupBackTo(2)">← Back</button>
+
+        <!-- Cricket target numbers (Cricket only) -->
+        <div class="setup-section" id="cricket-options-section" hidden>
+          <div class="setup-label">Cricket targets</div>
+          <div class="opts" style="margin:0">
+            <div class="seg" role="group" aria-label="Cricket target set">
+              <button id="cricket-preset-classic" aria-pressed="true" onclick="setCricketPreset('classic')">Classic (15-20, Bull)</button>
+              <button id="cricket-preset-custom" aria-pressed="false" onclick="setCricketPreset('custom')">Custom</button>
+            </div>
           </div>
-          <button class="btn btn-ghost" id="shuffle-btn" style="display:none" onclick="shufflePlayers()" title="Randomise throw order">🔀 Shuffle</button>
-        </div>
-        <div class="h2h-banner" id="h2h-banner"></div>
-        <!-- docs/league-mode-roadmap.md: hidden unless the chosen opponent+category
-             match more than one active league — the 0-or-1-match case auto-tags
-             server-side with no picker shown at all. -->
-        <div id="league-picker-wrap" style="display:none;margin-top:8px">
-          <label class="pp-meta" for="league-picker" style="margin-right:6px">Log to league:</label>
-          <select class="date-input" id="league-picker" style="width:auto" onchange="setup.leagueId = this.value || null">
-          </select>
-        </div>
-      </div>
-
-      <!-- Game type (X01 / Cricket) -->
-      <div class="setup-section" id="game-type-section">
-        <div class="setup-label">Game</div>
-        <div class="opts" style="margin:0">
-          <div class="seg" role="group" aria-label="Game type">
-            <button id="gt-x01" aria-pressed="true" onclick="setGameType('x01')">X01</button>
-            <button id="gt-cricket" aria-pressed="false" onclick="setGameType('cricket')">Cricket</button>
-            <button id="gt-baseball" aria-pressed="false" onclick="setGameType('baseball')">Baseball</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Baseball explanation (Baseball only — no further config needed, unlike
-           Cricket's classic/custom choice: innings are fixed at 9, one per number 1-9) -->
-      <div class="setup-section" id="baseball-info-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
-        <div class="setup-label" style="color:var(--gold)">Baseball</div>
-        <p class="pp-meta" style="margin:0">9 innings, one per number 1-9. Each visit's 3 darts only count against that inning's number — a single scores 1 run, a double 2, a treble 3. After 9 innings, highest total runs wins (a tie continues into extra innings at number 9).</p>
-      </div>
-
-      <!-- Starting score (X01 only) -->
-      <div class="setup-section" id="start-score-section">
-        <div class="setup-label">Starting score</div>
-        <div class="opts" style="margin:0">
-          <select class="date-input" id="start-score-select" aria-label="Starting score" onchange="pickStartSelect(this)">
-            <option value="501" selected>501</option>
-            <option value="301">301</option>
-            <option value="170">170</option>
-            <option value="101">101</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- Cricket target numbers (Cricket only) -->
-      <div class="setup-section" id="cricket-options-section" hidden>
-        <div class="setup-label">Cricket targets</div>
-        <div class="opts" style="margin:0">
-          <div class="seg" role="group" aria-label="Cricket target set">
-            <button id="cricket-preset-classic" aria-pressed="true" onclick="setCricketPreset('classic')">Classic (15-20, Bull)</button>
-            <button id="cricket-preset-custom" aria-pressed="false" onclick="setCricketPreset('custom')">Custom</button>
+          <div id="cricket-custom-body" hidden style="margin-top:10px">
+            <p class="pp-meta" style="margin:0 0 8px">Choose exactly 7 targets — <span id="cricket-custom-count">0 of 7</span> selected.</p>
+            <div class="cricket-number-grid" id="cricket-number-grid" role="group" aria-label="Custom cricket targets"></div>
+            <button class="btn btn-ghost" style="margin-top:8px" onclick="fillCricketClassicIntoCustom()">Start from classic</button>
           </div>
         </div>
-        <div id="cricket-custom-body" hidden style="margin-top:10px">
-          <p class="pp-meta" style="margin:0 0 8px">Choose exactly 7 targets — <span id="cricket-custom-count">0 of 7</span> selected.</p>
-          <div class="cricket-number-grid" id="cricket-number-grid" role="group" aria-label="Custom cricket targets"></div>
-          <button class="btn btn-ghost" style="margin-top:8px" onclick="fillCricketClassicIntoCustom()">Start from classic</button>
-        </div>
-      </div>
 
-      <!-- Mode -->
-      <div class="setup-section">
-        <div class="setup-label">Mode</div>
-        <div class="opts" style="margin:0">
-          <div class="seg seg-wrap" role="group" aria-label="Game mode">
-            <button id="mode-h2h" aria-pressed="true" onclick="setMode('h2h')">H2H</button>
-            <button id="mode-practice" aria-pressed="false" onclick="setMode('practice')">Practice</button>
-            <button id="mode-challenge" aria-pressed="false" onclick="setMode('challenge')">🎯 Daily Challenge</button>
-            <button id="mode-ghost" aria-pressed="false" onclick="setMode('ghost')">👻 Ghost</button>
-            <button id="mode-checkout-trainer" aria-pressed="false" onclick="setMode('checkout_trainer')">🧮 Checkout Trainer</button>
+        <!-- Ghost leg picker (Ghost Opponent mode only) -->
+        <div class="setup-section" id="ghost-options-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
+          <div class="setup-label" style="color:var(--gold)">👻 Race a past leg</div>
+          <div id="ghost-leg-picker-body"><p class="pp-meta">Choose a player above to see their past won legs.</p></div>
+        </div>
+
+        <!-- Doubles Practice target picker (Doubles Practice mode only) -->
+        <div class="setup-section" id="doubles-options-section" hidden>
+          <div class="setup-label">Doubles to practice</div>
+          <p class="pp-meta" style="margin:0 0 8px">Choose one or more doubles — <span id="doubles-target-count">0</span> selected. All selected doubles stay live at once; a single/treble on a target number, or hitting a different double, ends the round.</p>
+          <div class="cricket-number-grid" id="doubles-target-grid" role="group" aria-label="Doubles to practice"></div>
+        </div>
+
+        <!-- Checkout Trainer sub-mode + difficulty (Checkout Trainer mode only —
+             the intro paragraph itself now lives in Step 2's how-to-play blurb) -->
+        <div class="setup-section" id="checkout-trainer-options-section" hidden>
+          <div class="setup-label">Checkout Trainer options</div>
+          <div class="opts" style="margin:0">
+            <div class="seg" role="group" aria-label="Checkout Trainer sub-mode">
+              <button id="checkout-trainer-mode-freeform" aria-pressed="true" onclick="setCheckoutTrainerMode('freeform')">Freeform</button>
+              <button id="checkout-trainer-mode-blitz" aria-pressed="false" onclick="setCheckoutTrainerMode('blitz')">⏱️ Checkout Blitz (60s)</button>
+            </div>
+          </div>
+          <p class="pp-meta" id="checkout-trainer-mode-desc" style="margin:10px 0 0"></p>
+          <div class="opts" style="margin:10px 0 0">
+            <div class="seg" role="group" aria-label="Checkout Trainer difficulty">
+              <button id="checkout-trainer-difficulty-under40" aria-pressed="false" onclick="setCheckoutTrainerDifficulty('under40')">Under 40</button>
+              <button id="checkout-trainer-difficulty-under100" aria-pressed="false" onclick="setCheckoutTrainerDifficulty('under100')">Under 100</button>
+              <button id="checkout-trainer-difficulty-over100" aria-pressed="false" onclick="setCheckoutTrainerDifficulty('over100')">Over 100</button>
+              <button id="checkout-trainer-difficulty-full" aria-pressed="true" onclick="setCheckoutTrainerDifficulty('full')">Full Range (2-170)</button>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Practice type (Practice family only — Doubles Practice, Just
-           Chuckin' It, and the two guided drills are sub-modes of Practice, not
-           their own top-level mode) -->
-      <div class="setup-section" id="practice-type-section" hidden>
-        <div class="setup-label">Practice type</div>
-        <div class="opts" style="margin:0">
-          <div class="seg" role="group" aria-label="Practice type">
-            <button id="practice-type-normal" aria-pressed="true" onclick="setMode('practice')">Practice</button>
-            <button id="practice-type-doubles" aria-pressed="false" onclick="setMode('doubles_practice')">Doubles Practice</button>
-            <button id="practice-type-chuckin" aria-pressed="false" onclick="setMode('chuckin')">Just Chuckin' It</button>
-            <button id="practice-type-clock" aria-pressed="false" onclick="setMode('around_the_clock')">Around the Clock</button>
-            <button id="practice-type-world" aria-pressed="false" onclick="setMode('around_the_world')">Around the World</button>
+        <!-- Format (H2H only) -->
+        <div id="h2h-options" class="setup-section">
+          <div class="setup-label">Format</div>
+          <div class="preset-row">
+            <span style="font-size:12px;color:var(--muted);margin-right:2px">Quick:</span>
+            <button class="preset-btn" onclick="applyPreset(2,1)">Bo3</button>
+            <button class="preset-btn" onclick="applyPreset(3,1)">Bo5</button>
+            <button class="preset-btn" onclick="applyPreset(4,1)">Bo7</button>
           </div>
-        </div>
-      </div>
-
-      <!-- Today's Challenge (Daily Challenge mode only) -->
-      <div class="setup-section" id="challenge-info-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
-        <div class="setup-label" style="color:var(--gold)">🎯 Today's Challenge</div>
-        <div id="challenge-card-body"><p class="pp-meta">Loading…</p></div>
-      </div>
-
-      <!-- Ghost leg picker (Ghost Opponent mode only) -->
-      <div class="setup-section" id="ghost-options-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
-        <div class="setup-label" style="color:var(--gold)">👻 Race a past leg</div>
-        <div id="ghost-leg-picker-body"><p class="pp-meta">Choose a player above to see their past won legs.</p></div>
-      </div>
-
-      <!-- Doubles Practice target picker (Doubles Practice mode only) -->
-      <div class="setup-section" id="doubles-options-section" hidden>
-        <div class="setup-label">Doubles to practice</div>
-        <p class="pp-meta" style="margin:0 0 8px">Choose one or more doubles — <span id="doubles-target-count">0</span> selected. All selected doubles stay live at once; a single/treble on a target number, or hitting a different double, ends the round.</p>
-        <div class="cricket-number-grid" id="doubles-target-grid" role="group" aria-label="Doubles to practice"></div>
-      </div>
-
-      <!-- Just Chuckin' It explanation (Just Chuckin' It mode only) -->
-      <div class="setup-section" id="chuckin-info-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
-        <div class="setup-label" style="color:var(--gold)">Just Chuckin' It</div>
-        <p class="pp-meta" style="margin:0">No score to chase, no leg to win — just throw for as long as you like. Every dart still counts toward your lifetime totals and heatmap, so it's a low-pressure way to warm up, find your rhythm, or chase down a milestone badge.</p>
-      </div>
-
-      <!-- Checkout Trainer sub-mode + explanation (Checkout Trainer mode only) -->
-      <div class="setup-section" id="checkout-trainer-options-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
-        <div class="setup-label" style="color:var(--gold)">🧮 Checkout Trainer</div>
-        <p class="pp-meta" style="margin:0 0 10px">No dartboard needed — the app gives you a target score, you tap out the fewest-darts checkout from memory, and it's graded instantly against the objectively optimal route. A pure recall drill, not a throwing game.</p>
-        <div class="opts" style="margin:0">
-          <div class="seg" role="group" aria-label="Checkout Trainer sub-mode">
-            <button id="checkout-trainer-mode-freeform" aria-pressed="true" onclick="setCheckoutTrainerMode('freeform')">Freeform</button>
-            <button id="checkout-trainer-mode-blitz" aria-pressed="false" onclick="setCheckoutTrainerMode('blitz')">⏱️ Checkout Blitz (60s)</button>
+          <div class="opts" style="margin:0">
+            <div class="stepper">
+              <span class="lbl">Legs per set</span>
+              <button aria-label="Fewer legs" onclick="bump('legsPerSet',-1)">−</button>
+              <span class="val" id="legs-val">3</span>
+              <button aria-label="More legs" onclick="bump('legsPerSet',1)">+</button>
+            </div>
+            <div class="stepper">
+              <span class="lbl">Sets per game</span>
+              <button aria-label="Fewer sets" onclick="bump('setsPerGame',-1)">−</button>
+              <span class="val" id="sets-val">1</span>
+              <button aria-label="More sets" onclick="bump('setsPerGame',1)">+</button>
+            </div>
           </div>
+          <p style="color:var(--muted);font-size:12px;margin:10px 2px 0" id="format-line"></p>
         </div>
-        <p class="pp-meta" id="checkout-trainer-mode-desc" style="margin:10px 0 0"></p>
-        <div class="opts" style="margin:10px 0 0">
-          <div class="seg" role="group" aria-label="Checkout Trainer difficulty">
-            <button id="checkout-trainer-difficulty-under40" aria-pressed="false" onclick="setCheckoutTrainerDifficulty('under40')">Under 40</button>
-            <button id="checkout-trainer-difficulty-under100" aria-pressed="false" onclick="setCheckoutTrainerDifficulty('under100')">Under 100</button>
-            <button id="checkout-trainer-difficulty-over100" aria-pressed="false" onclick="setCheckoutTrainerDifficulty('over100')">Over 100</button>
-            <button id="checkout-trainer-difficulty-full" aria-pressed="true" onclick="setCheckoutTrainerDifficulty('full')">Full Range (2-170)</button>
-          </div>
+
+        <div class="btn-row">
+          <button class="btn btn-primary" id="start-btn" onclick="startGame()">Play Now</button>
         </div>
-      </div>
-
-      <!-- Guided Around the Clock explanation (Around the Clock mode only) -->
-      <div class="setup-section" id="clock-info-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
-        <div class="setup-label" style="color:var(--gold)">🧭 Around the Clock</div>
-        <p class="pp-meta" style="margin:0">Hit every number, 1 through 20, as a single — in any order. Live progress shows exactly which numbers you still need. A round ends the moment all 20 are hit; press "Start Next Clock" to go again.</p>
-      </div>
-
-      <!-- Guided Around the World explanation (Around the World mode only) -->
-      <div class="setup-section" id="world-info-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
-        <div class="setup-label" style="color:var(--gold)">🗺️ Around the World</div>
-        <p class="pp-meta" style="margin:0">Chip away at all 63 lifetime dart outcomes — every number 1-20 as a single, double, and treble, plus outer bull, double bull, and a miss. Tracks the same lifetime progress as your Player Profile, across as many sessions as it takes. No round to finish — throw for as long as you like.</p>
-      </div>
-
-      <!-- Format (H2H only) -->
-      <div id="h2h-options" class="setup-section">
-        <div class="setup-label">Format</div>
-        <div class="preset-row">
-          <span style="font-size:12px;color:var(--muted);margin-right:2px">Quick:</span>
-          <button class="preset-btn" onclick="applyPreset(2,1)">Bo3</button>
-          <button class="preset-btn" onclick="applyPreset(3,1)">Bo5</button>
-          <button class="preset-btn" onclick="applyPreset(4,1)">Bo7</button>
-        </div>
-        <div class="opts" style="margin:0">
-          <div class="stepper">
-            <span class="lbl">Legs per set</span>
-            <button aria-label="Fewer legs" onclick="bump('legsPerSet',-1)">−</button>
-            <span class="val" id="legs-val">3</span>
-            <button aria-label="More legs" onclick="bump('legsPerSet',1)">+</button>
-          </div>
-          <div class="stepper">
-            <span class="lbl">Sets per game</span>
-            <button aria-label="Fewer sets" onclick="bump('setsPerGame',-1)">−</button>
-            <span class="val" id="sets-val">1</span>
-            <button aria-label="More sets" onclick="bump('setsPerGame',1)">+</button>
-          </div>
-        </div>
-        <p style="color:var(--muted);font-size:12px;margin:10px 2px 0" id="format-line"></p>
-      </div>
-
-      <div class="btn-row">
-        <button class="btn btn-primary" id="start-btn" onclick="startGame()">Start game</button>
       </div>
     </div>
   </section>
@@ -1541,7 +1462,10 @@ const DB = {
     try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame,
       players:names.map(n=>({name:n, out:playerOut(n), loadoutId:(loadoutByName && loadoutByName[n]) ? loadoutByName[n].id : undefined})),
       practice:meta.practice?1:0, gameType:meta.gameType, config:meta.config,
-      leagueId:meta.leagueId}); this.gameId=r.gameId; }
+      // docs/league-mode-roadmap.md "League fixtures / pending matches": an explicit
+      // choice (New Game's "League Game" entry), not a re-validated hint the way the
+      // old leagueId picker was — see docs/new-game-flow-roadmap.md.
+      leagueFixtureId:meta.leagueFixtureId}); this.gameId=r.gameId; }
     catch(e){ logErr(e); this.gameId=null; }
   },
   // docs/bug-roadmap.md BUG-13: remembers the id of the turn this device's own last
@@ -1701,12 +1625,14 @@ function makeDart(sector, mult){
    ========================================================================= */
 let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, mode:'h2h',
   gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[], ghostLeg:null,
-  doublesTargets:[], loadoutByName:{}, leagueId:null,
+  doublesTargets:[], loadoutByName:{}, leagueFixtureId:null, pendingFixtures:[],
   checkoutTrainerMode:'freeform', checkoutTrainerDifficulty:'full' }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice' | 'checkout_trainer'; gameType: 'x01' | 'cricket' | 'doubles_practice' | 'checkout_trainer'; checkoutTrainerDifficulty: 'under40' | 'under100' | 'over100' | 'full'
-  // leagueId (docs/league-mode-roadmap.md): only ever set via the "log to league?"
-  // picker below, and only when the picker had genuine ambiguity to resolve (>1
-  // active league matched) — the common 0-or-1-match case tags server-side with no
-  // frontend involvement at all. Reset to null whenever the setup screen (re)loads.
+  // leagueFixtureId (docs/league-mode-roadmap.md "League fixtures / pending
+  // matches"): only ever set via Step 2's "League Game" entry — an EXPLICIT choice,
+  // unlike the old category-based ambiguity picker this superseded (docs/new-game-flow-roadmap.md).
+  // pendingFixtures: the current player pair's GET /api/leagues/pending-fixture
+  // result, fetched once Step 1 completes — [] means "League Game" isn't offered.
+  // Both reset to null/[] whenever the setup screen (re)loads.
   // loadoutByName: player name -> {id,name} of the loadout picked for THIS New Game
   // visit (docs/archive/dart-builder-roadmap.md) — reset each time the setup screen loads;
   // re-populated by auto-loading each picked player's is_default loadout.
@@ -1848,11 +1774,25 @@ function show(name){
   if(name==='settings') renderSettings();
   if(name==='home'){ renderHome(); renderHomeChallengeTeaser(); }
   if(name==='setup'){
-    setup.slots=[]; setup.loadoutByName={}; setup.leagueId=null; sanitizeSlots(); renderPlayers(); updateFormatLine();
-    renderChallengeCard();
-    // stats are cached client-side and only refetched on demand — without this, averages
-    // shown here can be stale after playing a game earlier in the same session.
-    DB.refreshStats().then(()=>{ sanitizeSlots(); renderPlayers(); }).catch(()=>{});
+    // raceLeg() (Player Profile's "Race this leg" entry point) presets setup.slots
+    // to the one player being raced, calls setMode('ghost'), and sets
+    // _enteringSetupFromRaceLeg right before this — consumed here, synchronously,
+    // so this show('setup') call does NOT reset that selection the way a fresh
+    // visit does. Jump straight to Step 3, which shows the leg picker.
+    if(_enteringSetupFromRaceLeg){
+      _enteringSetupFromRaceLeg = false;
+      setup.loadoutByName={}; setup.leagueFixtureId=null; setup.pendingFixtures=[];
+      sanitizeSlots(); renderPlayers(); updateFormatLine();
+      showSetupStep(3);
+      DB.refreshStats().then(()=>{ sanitizeSlots(); renderPlayers(); }).catch(()=>{});
+    } else {
+      setup.slots=[]; setup.loadoutByName={}; setup.leagueFixtureId=null; setup.pendingFixtures=[];
+      sanitizeSlots(); renderPlayers(); updateFormatLine();
+      showSetupStep(1);
+      // stats are cached client-side and only refetched on demand — without this, averages
+      // shown here can be stale after playing a game earlier in the same session.
+      DB.refreshStats().then(()=>{ sanitizeSlots(); renderPlayers(); }).catch(()=>{});
+    }
   }
   if(name==='players') renderRoster();
   if(name==='player'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); }
@@ -1954,48 +1894,6 @@ function renderHomeChallengeTeaser(){
     <p class="pp-meta" style="margin-top:8px">Start it from <b>New Game</b>.</p>`;
 }
 
-// New Game screen, Daily Challenge mode: a read-only status panel (streak, history,
-// today's result) for whichever player is currently in slot 0. No player picker or
-// Start button of its own — that's the same "Choose player" slot and "Start game"
-// button the other two modes use, so a PIN-protected player is gated exactly the
-// same way as filling a regular H2H/practice slot (see onSlotChange/withPinCheck).
-function renderChallengeCard(){
-  const el = document.getElementById('challenge-card-body');
-  if(!el) return;
-  const challenge = todaysChallenge();
-  const player = setup.slots[0];
-  if(!player || !roster.includes(player)){
-    el.innerHTML = `
-      <p style="margin:0;color:var(--ink);font-size:14px">${escapeHtml(challenge.label)}</p>
-      <p class="pp-meta" style="margin-top:8px">Choose a player above to see your streak.</p>`;
-    return;
-  }
-  el.innerHTML = `<p class="pp-meta" style="margin:0 0 10px">Loading…</p>`;
-  Backend.get(`/api/challenges/status?player=${encodeURIComponent(player)}&date=${challenge.date}`).then(status=>{
-    const streakHtml = status.streak > 0 ? `<span style="color:var(--gold);font-weight:600">🔥 ${status.streak} day streak</span>` : '';
-    let resultHtml;
-    if(status.today && status.today.completed){
-      resultHtml = `<div style="margin-top:10px;color:var(--ink)">✅ Done — ${challengeMetricLabel(status.today.format, status.today.result_darts)}. Nice work.</div>`;
-    } else if(status.today){
-      resultHtml = `<div style="margin-top:10px;color:var(--muted)">Attempted today, not finished.</div>`;
-    } else {
-      resultHtml = `<p class="pp-meta" style="margin-top:8px">Press "Start Challenge" below to play.</p>`;
-    }
-    // Last 7 days strip — gives the streak somewhere visible to live, not just a number
-    const historyHtml = status.history.length ? `<div style="display:flex;gap:6px;margin-top:12px">${
-      status.history.slice().reverse().map(h=>{
-        const day = new Date(h.challenge_date+'T00:00:00Z').toLocaleDateString(undefined,{weekday:'short'})[0];
-        const cls = h.completed ? 'background:var(--gold);color:var(--board)' : 'background:var(--surface-2);color:var(--muted)';
-        return `<div title="${h.challenge_date}${h.completed?' — '+challengeMetricLabel(h.format, h.result_darts):' — not finished'}" style="width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;${cls}">${day}</div>`;
-      }).join('')
-    }</div>` : '';
-    el.innerHTML = `
-      <div style="margin-bottom:8px">${streakHtml}</div>
-      <p style="margin:0;color:var(--ink);font-size:14px">${escapeHtml(challenge.label)}</p>
-      ${resultHtml}
-      ${historyHtml}`;
-  }).catch(()=>{ el.innerHTML = `<p class="pp-meta">Could not load today's challenge.</p>`; });
-}
 
 /* ---------- home screen ---------- */
 let homeTab='h2h';
@@ -2593,121 +2491,54 @@ function hofSection(rows, mode=''){
 // player picker) — selecting it reuses the same PIN-gated "Choose player" slot the
 // other two modes already use, just capped to a single slot since a challenge is
 // inherently solo.
+// mode/gameType are orthogonal (docs/new-game-flow-roadmap.md): mode picks
+// H2H/Practice/Daily Challenge/Ghost/Doubles Practice/Just Chuckin' It/Checkout
+// Trainer/Around the Clock/Around the World; gameType (x01/cricket/baseball) only
+// applies when mode is 'h2h' or 'practice'. Every drill mode is reached through
+// Step 2's single flat dropdown (NEW_GAME_MODE_OPTIONS), which never even offers a
+// solo-only mode once 2+ players are selected in Step 1 — so the single-slot
+// truncation below is purely a safety net for the few call sites that invoke
+// setMode() directly (raceLeg(), the post-game "Try Again"/"Play again" buttons).
 function setMode(mode){
   setup.mode = mode;
   setup.practice = (mode !== 'h2h');
-  // Doubles Practice, Just Chuckin' It, and the two guided drills are all
-  // sub-modes of Practice, not their own top-level mode button — the "Practice"
-  // button stays pressed for all five, and a nested "Practice type" sub-toggle
-  // picks which one.
-  const practiceFamily = (mode === 'practice' || mode === 'doubles_practice' || mode === 'chuckin'
-    || mode === 'around_the_clock' || mode === 'around_the_world');
-  document.getElementById('mode-h2h').setAttribute('aria-pressed', mode==='h2h');
-  document.getElementById('mode-practice').setAttribute('aria-pressed', practiceFamily);
-  document.getElementById('mode-challenge').setAttribute('aria-pressed', mode==='challenge');
-  document.getElementById('mode-ghost').setAttribute('aria-pressed', mode==='ghost');
-  document.getElementById('mode-checkout-trainer').setAttribute('aria-pressed', mode==='checkout_trainer');
-  document.getElementById('practice-type-section').hidden = !practiceFamily;
-  document.getElementById('practice-type-normal').setAttribute('aria-pressed', mode==='practice');
-  document.getElementById('practice-type-doubles').setAttribute('aria-pressed', mode==='doubles_practice');
-  document.getElementById('practice-type-chuckin').setAttribute('aria-pressed', mode==='chuckin');
-  document.getElementById('practice-type-clock').setAttribute('aria-pressed', mode==='around_the_clock');
-  document.getElementById('practice-type-world').setAttribute('aria-pressed', mode==='around_the_world');
   document.getElementById('h2h-options').hidden = (mode !== 'h2h');
-  // Daily Challenge and Ghost Opponent are both X01-only — force the game-type
-  // choice back and hide it entirely rather than offering a combination that was
-  // never designed (docs/archive/ghost-opponent-roadmap.md is explicitly X01-only for v1).
-  // Doubles Practice, Just Chuckin' It, Checkout Trainer, and the two guided
-  // drills are each their own game_type, not a choice between X01/Cricket, so
-  // they hide the same X01/Cricket-specific sections for the same reason —
-  // Just Chuckin' It, Checkout Trainer, and both guided drills additionally
-  // have no config options at all (no starting score, no targets), unlike
-  // Doubles Practice.
   const isSpecialMode = (mode === 'challenge' || mode === 'ghost' || mode === 'doubles_practice' || mode === 'chuckin'
     || mode === 'checkout_trainer' || mode === 'around_the_clock' || mode === 'around_the_world');
-  document.getElementById('game-type-section').hidden = isSpecialMode;
-  // Leaving Doubles Practice/Chuckin/Checkout Trainer/a guided drill for any
-  // other mode: setup.gameType was force-set below (bypassing setGameType(),
-  // which is the only place that also updates the X01/Cricket toggle buttons'
-  // own visual state) — so it must be reset back to a real game type here.
-  // Without this, the X01/Cricket toggle keeps showing whatever it visually
-  // showed before, while setup.gameType silently stays stuck on the solo
-  // mode's own type underneath, and startGame() (which reads setup.gameType,
-  // not the button) builds that game type even though every visible control
-  // says otherwise.
+  // Daily Challenge and Ghost Opponent are both X01-only (docs/archive/ghost-opponent-roadmap.md
+  // is explicitly X01-only for v1); Doubles Practice/Just Chuckin' It/Checkout
+  // Trainer/both guided drills are each their own gameType, not a choice between
+  // X01/Cricket/Baseball. Leaving one of those for any other mode must reset
+  // gameType back to a real one — otherwise it stays stuck on the drill's own
+  // type underneath, and startGame() (which reads setup.gameType, not any
+  // control) would silently build that drill's game type regardless of what
+  // Step 2 visibly shows.
   const drillGameTypes = ['doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world'];
-  if(!drillGameTypes.includes(mode) && drillGameTypes.includes(setup.gameType)) setGameType('x01');
-  if((mode === 'challenge' || mode === 'ghost') && setup.gameType !== 'x01') setGameType('x01');
+  if(!drillGameTypes.includes(mode) && drillGameTypes.includes(setup.gameType)) setup.gameType = 'x01';
+  if((mode === 'challenge' || mode === 'ghost') && setup.gameType !== 'x01') setup.gameType = 'x01';
   if(drillGameTypes.includes(mode)) setup.gameType = mode;
-  document.getElementById('start-score-section').hidden = (isSpecialMode || setup.gameType === 'cricket');
-  document.getElementById('cricket-options-section').hidden = (isSpecialMode || setup.gameType !== 'cricket');
-  document.getElementById('challenge-info-section').hidden = (mode !== 'challenge');
+  document.getElementById('cricket-options-section').hidden = (setup.gameType !== 'cricket');
   document.getElementById('ghost-options-section').hidden = (mode !== 'ghost');
   document.getElementById('doubles-options-section').hidden = (mode !== 'doubles_practice');
-  document.getElementById('chuckin-info-section').hidden = (mode !== 'chuckin');
   document.getElementById('checkout-trainer-options-section').hidden = (mode !== 'checkout_trainer');
-  document.getElementById('clock-info-section').hidden = (mode !== 'around_the_clock');
-  document.getElementById('world-info-section').hidden = (mode !== 'around_the_world');
-  document.getElementById('add-player-wrap').style.display = isSpecialMode ? 'none' : '';
   const startBtn = document.getElementById('start-btn');
   if(startBtn) startBtn.textContent = (mode === 'challenge') ? 'Start Challenge' : (mode === 'ghost') ? 'Start race'
-    : (mode === 'doubles_practice') ? 'Start practice' : (mode === 'chuckin') ? 'Start chuckin\''
+    : (mode === 'doubles_practice') ? 'Start practice' : (mode === 'chuckin') ? "Start chuckin'"
     : (mode === 'checkout_trainer') ? (setup.checkoutTrainerMode==='blitz' ? 'Start Blitz' : 'Start training')
     : (mode === 'around_the_clock') ? 'Start the clock' : (mode === 'around_the_world') ? 'Start chipping away'
-    : 'Start game';
-  if(mode === 'challenge'){
-    // a challenge is always exactly one player
-    setup.slots = setup.slots.slice(0,1);
-    if(!setup.slots.length) setup.slots = [''];
-    renderPlayers();
-    const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
-    renderChallengeCard();
-  } else if(mode === 'doubles_practice'){
-    // solo drill, no opponent — same single-slot treatment as Challenge/Ghost
+    : 'Play Now';
+  if(isSpecialMode){
     setup.slots = setup.slots.slice(0,1);
     if(!setup.slots.length) setup.slots = [''];
     setup.legsPerSet = 1; setup.setsPerGame = 1;
     renderPlayers();
-    const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
-    renderDoublesTargetGrid();
-  } else if(mode === 'chuckin' || mode === 'around_the_clock' || mode === 'around_the_world'){
-    // solo, no config — same single-slot treatment as Doubles Practice. Neither
-    // guided drill needs a target picker (both cover a fixed target set by
-    // definition), unlike Doubles Practice's renderDoublesTargetGrid().
-    setup.slots = setup.slots.slice(0,1);
-    if(!setup.slots.length) setup.slots = [''];
-    setup.legsPerSet = 1; setup.setsPerGame = 1;
-    renderPlayers();
-    const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
-  } else if(mode === 'ghost'){
-    // racing a ghost is always exactly one live player, one leg
-    setup.slots = setup.slots.slice(0,1);
-    if(!setup.slots.length) setup.slots = [''];
-    setup.legsPerSet = 1; setup.setsPerGame = 1;
-    setup.ghostLeg = null;
-    renderPlayers();
-    const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
-    renderGhostLegPicker();
-  } else if(mode === 'checkout_trainer'){
-    // solo drill, no opponent — same single-slot treatment as Doubles Practice/Chuckin
-    setup.slots = setup.slots.slice(0,1);
-    if(!setup.slots.length) setup.slots = [''];
-    setup.legsPerSet = 1; setup.setsPerGame = 1;
-    renderPlayers();
-    const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
+  }
+  if(mode === 'doubles_practice') renderDoublesTargetGrid();
+  else if(mode === 'ghost'){ setup.ghostLeg = null; renderGhostLegPicker(); }
+  else if(mode === 'checkout_trainer'){
     setCheckoutTrainerMode(setup.checkoutTrainerMode || 'freeform');
     setCheckoutTrainerDifficulty(setup.checkoutTrainerDifficulty || 'full');
-  } else if(mode === 'practice'){
-    const b=document.getElementById('h2h-banner'); if(b) b.style.display='none';
-  } else {
-    updateSetupChrome();
   }
-  // league eligibility (docs/league-mode-roadmap.md) is H2H/X01-only — updateLeaguePicker()
-  // self-gates and hides its own picker for every other mode, so one unconditional call
-  // here (rather than duplicating a hide line into each branch above, the way h2h-banner
-  // does) correctly resets it on every mode switch, including the ones that only
-  // manually hide #h2h-banner inline above.
-  updateLeaguePicker(setup.slots.filter(s=>s));
 }
 
 // Checkout Trainer's Freeform/Blitz sub-toggle (docs/checkout-trainer-roadmap.md
@@ -2742,11 +2573,22 @@ function setCheckoutTrainerDifficulty(tier){
 // Set by raceLeg() (Player Profile's "Race this leg" entry point) right before
 // switching into Ghost mode — consumed once, by the next renderGhostLegPicker()
 // fetch, to preselect that specific leg instead of the default (most recent).
+// Only cleared there when a match is actually found (see below) — deliberately
+// NOT what show('setup') uses to detect a raceLeg() entry (see
+// _enteringSetupFromRaceLeg), since that has to be consumed synchronously and
+// unconditionally, before any async leg fetch has had a chance to resolve.
 let _ghostLegTarget = null;
+// Consumed synchronously by the very next show('setup') call, then reset —
+// unlike _ghostLegTarget above, this must never stay stuck true (which would
+// wrongly keep jumping every later "New game" nav click straight to Step 3
+// instead of resetting) regardless of whether raceLeg()'s player turns out to
+// have any ghost-race-able legs at all.
+let _enteringSetupFromRaceLeg = false;
 function raceLeg(playerName, gameId, setNo, legNo){
   if(!roster.includes(playerName)) return;
   setup.slots = [playerName];
   _ghostLegTarget = { gameId, setNo, legNo };
+  _enteringSetupFromRaceLeg = true;
   setMode('ghost');
   show('setup');
 }
@@ -3311,24 +3153,37 @@ function sanitizeSlots(){
   if(setup.slots.length===0 && roster.length) setup.slots = [''];
 }
 
+// Step 1 — "Who's playing?" (docs/new-game-flow-roadmap.md): a select → "Add
+// someone else?" loop, not the old always-visible-rows list. Every already-filled
+// slot renders as a name row (stat line, loadout pill, remove); the one slot still
+// awaiting a pick (if any) renders as a plain "Choose player" select; once every
+// slot is filled, the "Add someone else?" prompt appears below (Add existing / New
+// player / No, continue — the last one is what actually advances to Step 2).
 function renderPlayers(){
-  closeAddPlayerMenu();
   const box = document.getElementById('players-list');
-  box.innerHTML = '';
+  if(!box) return;
   if(roster.length===0){
-    box.innerHTML = `<p style="color:var(--muted);font-size:13px;margin:0">No players yet. Use "+ Add player" to create one.</p>`;
-    updateSetupChrome();
+    box.innerHTML = `<p style="color:var(--muted);font-size:13px;margin:0">No players yet.</p>
+      <div class="btn-row" style="margin-top:12px"><button class="btn btn-primary" onclick="addNewPlayer()">+ New player</button></div>`;
     return;
   }
-  setup.slots.forEach((sel, i)=>{
-    const taken = setup.slots.filter((_,j)=>j!==i);
-    const opts = roster.map(p=>{
-      const lock = (prefs[p] && prefs[p].hasPin) ? ' 🔒' : '';
-      return `<option value="${escapeHtml(p)}" ${p===sel?'selected':''} ${taken.includes(p)?'disabled':''}>${escapeHtml(p)}${lock}</option>`;
-    }).join('');
-    // stat line — prefer H2H stats so practice sessions don't skew the number
+  const rows = setup.slots.map((sel, i)=>{
+    if(!sel){
+      const taken = setup.slots.filter((_,j)=>j!==i);
+      const opts = roster.map(p=>{
+        const lock = (prefs[p] && prefs[p].hasPin) ? ' 🔒' : '';
+        return `<option value="${escapeHtml(p)}" ${taken.includes(p)?'disabled':''}>${escapeHtml(p)}${lock}</option>`;
+      }).join('');
+      return `<div class="player-row">
+        <span class="ix">${i+1}</span>
+        <select class="pselect" aria-label="Player ${i+1}" onchange="onSlotChange(${i}, this.value)">
+          <option value="" selected disabled>Choose player</option>
+          ${opts}
+        </select>
+      </div>`;
+    }
     let statHtml = '';
-    if(sel && stats[sel]){
+    if(stats[sel]){
       const s = stats[sel];
       const src = (s.h2hStats && s.h2hStats.avgDarts) ? s.h2hStats : s;
       const avg = src.avgDarts ? (src.totalPoints / src.avgDarts * 3) : null;
@@ -3344,111 +3199,41 @@ function renderPlayers(){
         statHtml = `<span class="slot-stat">${label} ${avg.toFixed(1)}${form}</span>`;
       }
     }
-    const outTag = sel ? `<span class="out-tag" title="${playerOut(sel)==='double'?'Doubles out':'Singles out'}">${playerOut(sel)==='double'?'DO':'SO'}</span>` : '';
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;flex-direction:column;gap:0';
-    const innerRow = document.createElement('div'); innerRow.className = 'player-row';
-    innerRow.innerHTML = `<span class="ix">${i+1}</span>
-      <select class="pselect" aria-label="Player ${i+1}" onchange="onSlotChange(${i}, this.value)">
-        <option value="" ${sel?'':'selected'} disabled>Choose player</option>
-        ${opts}
-      </select>
-      ${outTag}
-      ${setup.slots.length>1?`<button class="iconbtn" title="Remove from game" onclick="removePlayer(${i})">✕</button>`:''}`;
-    row.appendChild(innerRow);
-    if(statHtml) row.insertAdjacentHTML('beforeend', `<div style="padding-left:30px;margin-top:3px">${statHtml}</div>`);
-    if(sel){
-      const lo = setup.loadoutByName[sel];
-      const j = escapeHtml(escapeJs(sel));
-      row.insertAdjacentHTML('beforeend', `<div style="padding-left:30px;margin-top:3px">
-        <button type="button" class="loadout-pill" onclick="openLoadoutPicker('${j}', ${i})">
-          🎯 ${lo ? escapeHtml(lo.name) : 'No loadout'}
-        </button>
-      </div>`);
-    }
-    box.appendChild(row);
-  });
-  updateSetupChrome();
-}
+    const outTag = `<span class="out-tag" title="${playerOut(sel)==='double'?'Doubles out':'Singles out'}">${playerOut(sel)==='double'?'DO':'SO'}</span>`;
+    const lo = setup.loadoutByName[sel];
+    const j = escapeHtml(escapeJs(sel));
+    return `<div style="display:flex;flex-direction:column;gap:0">
+      <div class="player-row">
+        <span class="ix">${i+1}</span>
+        <span style="flex:1;font-weight:600;color:var(--ink)">${escapeHtml(sel)}</span>
+        ${outTag}
+        <button class="iconbtn" title="Remove from game" onclick="removePlayer(${i})">✕</button>
+      </div>
+      ${statHtml ? `<div style="padding-left:30px;margin-top:3px">${statHtml}</div>` : ''}
+      <div style="padding-left:30px;margin-top:3px">
+        <button type="button" class="loadout-pill" onclick="openLoadoutPicker('${j}', ${i})">🎯 ${lo ? escapeHtml(lo.name) : 'No loadout'}</button>
+      </div>
+    </div>`;
+  }).join('');
 
-function updateSetupChrome(){
-  // Shuffle button
   const named = setup.slots.filter(s=>s);
-  const sb = document.getElementById('shuffle-btn');
-  if(sb) sb.style.display = named.length >= 2 ? '' : 'none';
-  // H2H banner
-  updateH2HBanner(named);
-  updateLeaguePicker(named);
-}
-
-let _h2hAbort = null;
-function updateH2HBanner(named){
-  const el = document.getElementById('h2h-banner');
-  if(!el) return;
-  // Only fetch when the setup screen is active
-  const screen = document.getElementById('screen-setup');
-  if(!screen || !screen.classList.contains('on')){ el.style.display='none'; return; }
-  if(named.length !== 2 || setup.practice){ el.style.display='none'; return; }
-  const [p1, p2] = named;
-  el.style.display = 'block';
-  el.textContent = 'Loading H2H record…';
-  if(_h2hAbort) _h2hAbort.aborted = true;
-  const tok = { aborted:false }; _h2hAbort = tok;
-  fetch(`/api/players/h2h?p1=${encodeURIComponent(p1)}&p2=${encodeURIComponent(p2)}`)
-    .then(r=>r.json()).then(d=>{
-      if(tok.aborted) return;   // a newer selection already took over — don't clobber its result
-      if(!d || d.total===0){ el.style.display='none'; return; }
-      const leader = d.p1Wins>d.p2Wins ? `${p1} leads ${d.p1Wins}–${d.p2Wins}`
-                   : d.p2Wins>d.p1Wins ? `${p2} leads ${d.p2Wins}–${d.p1Wins}`
-                   : `Tied ${d.p1Wins}–${d.p2Wins}`;
-      el.textContent = `H2H: ${leader} (${d.total} game${d.total!==1?'s':''})`;
-    }).catch(()=>{ if(!tok.aborted) el.style.display='none'; });
-}
-
-// docs/league-mode-roadmap.md: shows a "log to which league?" picker ONLY when the
-// currently-chosen H2H opponent pair + category match more than one active league —
-// the common 0-or-1-match case tags the resulting game server-side (the
-// onGameCreated hook in db.js) with no picker ever shown. Modeled directly on
-// updateH2HBanner() just above, including its same abort-token pattern (a later
-// selection's fetch must not let an earlier, now-stale one clobber the picker).
-let _leagueAbort = null;
-function updateLeaguePicker(named){
-  const wrap = document.getElementById('league-picker-wrap');
-  const sel = document.getElementById('league-picker');
-  if(!wrap || !sel) return;
-  const screen = document.getElementById('screen-setup');
-  if(!screen || !screen.classList.contains('on')){ wrap.style.display='none'; return; }
-  // League mode is X01 or Cricket, H2H (non-practice), exactly 2 players — mirrors
-  // the server-side auto-tag hook's own eligibility gate exactly.
-  if(named.length !== 2 || setup.practice || setup.mode !== 'h2h' || (setup.gameType !== 'x01' && setup.gameType !== 'cricket')){
-    wrap.style.display='none'; setup.leagueId=null; return;
+  const allFilled = setup.slots.length>0 && setup.slots.every(s=>s);
+  const atCap = setup.slots.length>=6;
+  let promptHtml = '';
+  if(allFilled && atCap){
+    promptHtml = `<p class="pp-meta" style="margin:12px 0 8px">Maximum of 6 players per game.</p>
+      <div class="btn-row" style="margin:0"><button class="btn btn-primary" onclick="setupGoToStep2()">Continue</button></div>`;
+  } else if(allFilled){
+    promptHtml = `<p class="pp-meta" style="margin:12px 0 8px">Add someone else?</p>
+      <div class="btn-row" style="margin:0">
+        <button class="btn btn-ghost" onclick="addExistingPlayer()">Add existing</button>
+        <button class="btn btn-ghost" onclick="addNewPlayer()">New player</button>
+        <button class="btn btn-primary" onclick="setupGoToStep2()">No, continue</button>
+      </div>`;
   }
-  const [p1, p2] = named;
-  // Cricket's category is the same descriptive label a Cricket H2H game gets tagged
-  // with at creation (frontend/index.html's own startGame(), category derivation) —
-  // reused verbatim so this picker's eligibility check and the actual game's
-  // eventual games.category value can never disagree.
-  const category = setup.gameType==='cricket'
-    ? (setup.cricketPreset==='custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
-    : String(setup.start);
-  if(_leagueAbort) _leagueAbort.aborted = true;
-  const tok = { aborted:false }; _leagueAbort = tok;
-  fetch(`/api/leagues/eligible?players=${encodeURIComponent(p1)},${encodeURIComponent(p2)}&category=${encodeURIComponent(category)}&gameType=${encodeURIComponent(setup.gameType)}`)
-    .then(r=>r.json()).then(list=>{
-      if(tok.aborted) return;   // a newer selection already took over — don't clobber its result
-      if(!Array.isArray(list) || list.length <= 1){
-        // 0 or exactly 1 match: no picker — the server-side hook resolves this
-        // silently. Clear any leftover choice from a since-changed selection so it
-        // can't linger onto an unrelated game.
-        wrap.style.display='none'; setup.leagueId=null; return;
-      }
-      wrap.style.display='block';
-      sel.innerHTML = `<option value="">Don't log to a league</option>` +
-        list.map(l=>`<option value="${l.id}">${escapeHtml(l.name)}</option>`).join('');
-      // Preserve a still-valid prior choice across re-renders; otherwise default to "don't log".
-      sel.value = list.some(l=>String(l.id)===String(setup.leagueId)) ? String(setup.leagueId) : '';
-      setup.leagueId = sel.value || null;
-    }).catch(()=>{ if(!tok.aborted){ wrap.style.display='none'; setup.leagueId=null; } });
+  const shuffleHtml = named.length>=2
+    ? `<div class="btn-row" style="margin-top:8px"><button class="btn btn-ghost" onclick="shufflePlayers()" title="Randomise throw order">🔀 Shuffle order</button></div>` : '';
+  box.innerHTML = rows + shuffleHtml + promptHtml;
 }
 
 function onSlotChange(i, value){
@@ -3456,8 +3241,6 @@ function onSlotChange(i, value){
   withPinCheck(value,
     ()=>{
       setup.slots[i]=value; renderPlayers();
-      if(setup.mode==='challenge' && i===0) renderChallengeCard();
-      if(setup.mode==='ghost' && i===0) renderGhostLegPicker();
       // Auto-select this player's default loadout, if they have one (docs/archive/dart-builder-roadmap.md) —
       // a player who only ever throws one set of darts never has to actively pick one.
       if(value && !setup.loadoutByName[value]){
@@ -3508,23 +3291,12 @@ function selectLoadoutForSlot(name, slotIndex, loadoutId){
     .catch(()=>{});
 }
 
-function toggleAddPlayerMenu(){
-  if(setup.slots.length>=6){ uiAlert('Maximum of 6 players per game.'); return; }
-  if(roster.length===0){ addNewPlayer(); return; }
-  document.getElementById('add-player-menu').classList.toggle('open');
-}
-function closeAddPlayerMenu(){
-  const m = document.getElementById('add-player-menu');
-  if(m) m.classList.remove('open');
-}
 function addExistingPlayer(){
-  closeAddPlayerMenu();
   if(setup.slots.length>=6) return;
   setup.slots.push('');
   renderPlayers();
 }
 function addNewPlayer(){
-  closeAddPlayerMenu();
   if(setup.slots.length>=6) return;
   Auth.ensureCanWrite(()=>uiAddPlayer((name,opts)=>{
     const a=addToRoster(name,opts);
@@ -3545,21 +3317,265 @@ function applyPreset(legsToWin, sets){
   const sv=document.getElementById('sets-val'); if(sv) sv.textContent=sets;
   updateFormatLine();
 }
-function pickStartSelect(sel){
-  setup.start = Number(sel.value);
-  updateSetupChrome();   // league eligibility (docs/league-mode-roadmap.md) depends on category
-}
 /* ---------- Cricket New Game config (game-modes-roadmap.md) ---------- */
 function setGameType(type){
   setup.gameType = type;
-  document.getElementById('gt-x01').setAttribute('aria-pressed', type==='x01');
-  document.getElementById('gt-cricket').setAttribute('aria-pressed', type==='cricket');
-  document.getElementById('gt-baseball').setAttribute('aria-pressed', type==='baseball');
-  document.getElementById('start-score-section').hidden = (type === 'cricket' || type === 'baseball' || setup.mode === 'challenge' || setup.mode === 'ghost');
-  document.getElementById('cricket-options-section').hidden = (type !== 'cricket' || setup.mode === 'challenge' || setup.mode === 'ghost');
-  document.getElementById('baseball-info-section').hidden = (type !== 'baseball' || setup.mode === 'challenge' || setup.mode === 'ghost');
+  document.getElementById('cricket-options-section').hidden = (type !== 'cricket');
   if(type === 'cricket') renderCricketNumberGrid();
-  updateSetupChrome();   // league mode is X01 or Cricket (docs/league-mode-roadmap.md) — re-check eligibility
+}
+
+/* =========================================================================
+   New Game wizard — Step 2 "Choose a game" (docs/new-game-flow-roadmap.md)
+   One flat dropdown replacing the old Mode row + Practice-type sub-toggle +
+   X01/Cricket/Baseball toggle, filtered by how many players Step 1 picked.
+   ========================================================================= */
+function setupPlayerCount(){ return setup.slots.filter(s=>s).length; }
+
+// contexts: which player counts this entry is offered for ('practice' = exactly
+// 1, 'h2h' = 2+ — see docs/new-game-flow-roadmap.md's table). blurb is the
+// how-to-play text shown in Step 2 for every entry except Daily Challenge, which
+// renders a live status card instead (renderSetupChallengeBlurb()). apply()
+// reuses the existing setMode()/setGameType() handlers exactly as they were —
+// only the surrounding screen structure changed, not what gets validated or what
+// the game object ends up looking like.
+const NEW_GAME_MODE_OPTIONS = [
+  { key:'challenge', label:'🎯 Daily Challenge', contexts:['practice'],
+    apply(){ setMode('challenge'); } },
+  { key:'x01', label:'X01', contexts:['practice','h2h'],
+    blurb:"Count down from your starting score to exactly zero, finishing on a double (or single, if that player's finish rule is set to Singles Out). Play solo for practice, or head-to-head against another player.",
+    apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('x01'); } },
+  { key:'cricket', label:'Cricket', contexts:['practice','h2h'],
+    blurb:"Close out 15 through 20 and Bull — hit a number 3 times to open it, then keep scoring on it until it's closed everywhere (against an opponent in H2H, or just for completion in practice).",
+    apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('cricket'); } },
+  { key:'baseball', label:'Baseball', contexts:['practice','h2h'],
+    blurb:"9 innings, one per number 1-9. Each visit's 3 darts only count against that inning's number — a single scores 1 run, a double 2, a treble 3. After 9 innings, highest total runs wins (a tie continues into extra innings at number 9).",
+    apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('baseball'); } },
+  { key:'chuckin', label:"Just Chuckin' It", contexts:['practice'],
+    blurb:"No score to chase, no leg to win — just throw for as long as you like. Every dart still counts toward your lifetime totals and heatmap, so it's a low-pressure way to warm up, find your rhythm, or chase down a milestone badge.",
+    apply(){ setMode('chuckin'); } },
+  { key:'doubles_practice', label:'Doubles Practice', contexts:['practice'],
+    blurb:"Choose one or more doubles to practice below — all stay live at once. A single/treble on a target number, or hitting a different double, ends the round.",
+    apply(){ setMode('doubles_practice'); } },
+  { key:'ghost', label:'👻 Ghost Mode', contexts:['practice'],
+    blurb:"Race against a recording of one of your own past legs, dart for dart — whoever checks out first wins. Choose which leg to race below.",
+    apply(){ setMode('ghost'); } },
+  { key:'checkout_trainer', label:'🧮 Checkout Trainer', contexts:['practice'],
+    blurb:"No dartboard needed — the app gives you a target score, you tap out the fewest-darts checkout from memory, and it's graded instantly against the objectively optimal route. A pure recall drill, not a throwing game.",
+    apply(){ setMode('checkout_trainer'); } },
+  { key:'around_the_clock', label:'Around the Clock', contexts:['practice'],
+    blurb:'Hit every number, 1 through 20, as a single — in any order. Live progress shows exactly which numbers you still need. A round ends the moment all 20 are hit; press "Start Next Clock" to go again.',
+    apply(){ setMode('around_the_clock'); } },
+  { key:'around_the_world', label:'Around the World', contexts:['practice'],
+    blurb:"Chip away at all 63 lifetime dart outcomes — every number 1-20 as a single, double, and treble, plus outer bull, double bull, and a miss. Tracks the same lifetime progress as your Player Profile, across as many sessions as it takes. No round to finish — throw for as long as you like.",
+    apply(){ setMode('around_the_world'); } },
+];
+function setupVisibleOptions(){
+  const ctx = setupPlayerCount()>=2 ? 'h2h' : 'practice';
+  return NEW_GAME_MODE_OPTIONS.filter(o=>o.contexts.includes(ctx));
+}
+// The dropdown's current value: 'league_game' if a fixture is selected, otherwise
+// whatever gameType/mode setMode()/setGameType() last landed on.
+function currentSetupOptionKey(){
+  if(setup.leagueFixtureId != null) return 'league_game';
+  if(setup.mode==='h2h' || setup.mode==='practice') return setup.gameType;
+  return setup.mode;
+}
+
+// League Game (docs/league-mode-roadmap.md "League fixtures / pending matches"):
+// fetched once, right when Step 1 completes with exactly 2 players — see
+// setupGoToStep2(). Injected at the top of the dropdown only when the pair has at
+// least one pending (scheduled-but-unplayed) fixture in a shared active league;
+// absent entirely otherwise, fully replacing the old category-based ambiguity
+// picker this superseded (docs/new-game-flow-roadmap.md).
+function applyLeagueGameSelection(){
+  const fixtures = setup.pendingFixtures;
+  const chosen = fixtures.find(f=>f.fixtureId===setup.leagueFixtureId) || fixtures[0];
+  if(!chosen) return;
+  setup.leagueFixtureId = chosen.fixtureId;
+  setMode('h2h'); // a fixture always involves exactly the 2 players it was generated for
+  setGameType(chosen.gameType);
+  if(chosen.gameType === 'cricket'){
+    setup.cricketPreset = chosen.category === 'Custom Cricket' ? 'custom' : 'classic';
+    if(setup.cricketPreset === 'custom' && setup.cricketCustomNumbers.length===0) fillCricketClassicIntoCustom();
+    const cc = document.getElementById('cricket-preset-classic'), cu = document.getElementById('cricket-preset-custom');
+    if(cc) cc.setAttribute('aria-pressed', setup.cricketPreset==='classic');
+    if(cu) cu.setAttribute('aria-pressed', setup.cricketPreset==='custom');
+    const body = document.getElementById('cricket-custom-body');
+    if(body) body.hidden = (setup.cricketPreset !== 'custom');
+  } else {
+    // X01: the league's category already pins the starting score — no separate
+    // flavor-dropdown question (docs/new-game-flow-roadmap.md "Selecting it").
+    setup.start = Number(chosen.category) || setup.start;
+  }
+}
+
+function onSetupModeSelect(key){
+  setup.leagueFixtureId = null;
+  if(key === 'league_game') applyLeagueGameSelection();
+  else { const opt = NEW_GAME_MODE_OPTIONS.find(o=>o.key===key); if(opt) opt.apply(); }
+  renderSetupFlavorAndBlurb();
+}
+function onSetupFlavorSelect(value){
+  const key = currentSetupOptionKey();
+  if(key === 'league_game'){ setup.leagueFixtureId = Number(value); applyLeagueGameSelection(); renderSetupFlavorAndBlurb(); }
+  else if(key === 'x01'){ setup.start = Number(value); }
+}
+
+let _challengeAvailAbort = null;
+// Daily Challenge: the same-day-attempt check runs the moment it's SELECTED here
+// (docs/new-game-flow-roadmap.md "check on selection, not before"), reusing the
+// same /api/challenges/status call startGame() used to only make at Play Now
+// time. Already attempted today -> a blocking message replaces the blurb and
+// Continue is disabled for this selection; the player can still pick something
+// else and proceed normally.
+function renderSetupChallengeBlurb(){
+  const el = document.getElementById('setup-blurb-body');
+  const continueBtn = document.getElementById('setup-step2-continue');
+  const challenge = todaysChallenge();
+  const player = setup.slots[0]; // guaranteed non-empty: Step 1 requires >=1 player before Step 2
+  el.innerHTML = `<div class="setup-label" style="color:var(--gold)">🎯 Today's Challenge</div>
+    <p style="margin:0;color:var(--ink);font-size:14px">${escapeHtml(challenge.label)}</p>
+    <p class="pp-meta" style="margin-top:8px">Loading…</p>`;
+  if(_challengeAvailAbort) _challengeAvailAbort.aborted = true;
+  const tok = { aborted:false }; _challengeAvailAbort = tok;
+  Backend.get(`/api/challenges/status?player=${encodeURIComponent(player)}&date=${challenge.date}`).then(status=>{
+    if(tok.aborted) return;
+    if(status && status.today){
+      if(continueBtn) continueBtn.disabled = true;
+      el.innerHTML = `<div class="setup-label" style="color:var(--gold)">🎯 Today's Challenge</div>
+        <p style="margin:0;color:var(--ink);font-size:14px">${escapeHtml(challenge.label)}</p>
+        <p style="margin-top:10px;color:var(--ink)">You've already attempted today's Daily Challenge. Please come back tomorrow.</p>`;
+      return;
+    }
+    const streakHtml = status.streak > 0 ? `<span style="color:var(--gold);font-weight:600">🔥 ${status.streak} day streak</span>` : '';
+    const historyHtml = status.history.length ? `<div style="display:flex;gap:6px;margin-top:12px">${
+      status.history.slice().reverse().map(h=>{
+        const day = new Date(h.challenge_date+'T00:00:00Z').toLocaleDateString(undefined,{weekday:'short'})[0];
+        const cls = h.completed ? 'background:var(--gold);color:var(--board)' : 'background:var(--surface-2);color:var(--muted)';
+        return `<div title="${h.challenge_date}${h.completed?' — '+challengeMetricLabel(h.format, h.result_darts):' — not finished'}" style="width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;${cls}">${day}</div>`;
+      }).join('')
+    }</div>` : '';
+    el.innerHTML = `
+      <div style="margin-bottom:8px">${streakHtml}</div>
+      <p style="margin:0;color:var(--ink);font-size:14px">${escapeHtml(challenge.label)}</p>
+      <p class="pp-meta" style="margin-top:8px">Press Continue below to play.</p>
+      ${historyHtml}`;
+  }).catch(()=>{ if(!tok.aborted) el.innerHTML = `<p class="pp-meta">Could not load today's challenge.</p>`; });
+}
+
+// Repaints the (X01 flavor / "which league match?") secondary dropdown and the
+// how-to-play blurb for whatever's currently selected — called after every Step 2
+// selection change, and once when Step 2 is (re-)entered.
+function renderSetupFlavorAndBlurb(){
+  const key = currentSetupOptionKey();
+  const flavorSection = document.getElementById('setup-flavor-section');
+  const flavorLabel = document.getElementById('setup-flavor-label');
+  const flavorSelect = document.getElementById('setup-flavor-select');
+  const continueBtn = document.getElementById('setup-step2-continue');
+  if(continueBtn) continueBtn.disabled = false;
+
+  if(key === 'league_game'){
+    const fixtures = setup.pendingFixtures;
+    if(fixtures.length >= 2){
+      flavorSection.hidden = false;
+      flavorLabel.textContent = 'Which league match?';
+      flavorSelect.innerHTML = fixtures.map(f=>`<option value="${f.fixtureId}">${escapeHtml(f.leagueName)} (${escapeHtml(f.category)})</option>`).join('');
+      flavorSelect.value = String(setup.leagueFixtureId);
+    } else {
+      flavorSection.hidden = true;
+    }
+    const chosen = fixtures.find(f=>f.fixtureId===setup.leagueFixtureId) || fixtures[0];
+    document.getElementById('setup-blurb-body').innerHTML = chosen
+      ? `<div class="setup-label" style="color:var(--gold)">🏆 League Game</div>
+         <p class="pp-meta" style="margin:0">This pairing owes <b>${escapeHtml(chosen.leagueName)}</b> a match — starting here links the result straight back to your league standings. Legs/sets are still chosen next.</p>`
+      : '';
+    return;
+  }
+
+  if(key === 'x01'){
+    flavorSection.hidden = false;
+    flavorLabel.textContent = 'Starting score';
+    flavorSelect.innerHTML = ['501','301','170','101'].map(v=>`<option value="${v}">${v}</option>`).join('');
+    flavorSelect.value = String(setup.start);
+  } else {
+    flavorSection.hidden = true;
+  }
+
+  if(key === 'challenge'){ renderSetupChallengeBlurb(); return; }
+  const opt = NEW_GAME_MODE_OPTIONS.find(o=>o.key===key);
+  document.getElementById('setup-blurb-body').innerHTML = opt
+    ? `<div class="setup-label" style="color:var(--gold)">${opt.label}</div><p class="pp-meta" style="margin:0">${opt.blurb}</p>`
+    : '';
+}
+
+// Rebuilds the Step 2 dropdown from the current player count + pending-fixture
+// state, reconciling a since-invalidated prior selection (e.g. the player went
+// Back to Step 1 and added a second player after picking a practice-only mode)
+// by falling back to X01 rather than leaving a stale, no-longer-offered option
+// selected underneath.
+function renderSetupStep2Content(){
+  const hasFixtures = setup.pendingFixtures.length>0;
+  const visible = setupVisibleOptions();
+  let currentKey = currentSetupOptionKey();
+  const stillValid = (currentKey==='league_game' && hasFixtures) || visible.some(o=>o.key===currentKey);
+  if(!stillValid){
+    setup.leagueFixtureId = null;
+    const fallback = visible.find(o=>o.key==='x01') || visible[0];
+    if(fallback) fallback.apply();
+    currentKey = currentSetupOptionKey();
+  }
+  const sel = document.getElementById('setup-mode-select');
+  sel.innerHTML = (hasFixtures ? `<option value="league_game">🏆 League Game</option>` : '')
+    + visible.map(o=>`<option value="${o.key}">${o.label}</option>`).join('');
+  sel.value = currentKey;
+  renderSetupFlavorAndBlurb();
+}
+
+let _pendingFixtureAbort = null;
+function setupGoToStep2(){
+  const named = setup.slots.filter(s=>s);
+  if(!named.length){ uiAlert('Choose at least one player.'); return; }
+  if(named.length !== 2){
+    setup.pendingFixtures = [];
+    showSetupStep(2); renderSetupStep2Content();
+    return;
+  }
+  if(_pendingFixtureAbort) _pendingFixtureAbort.aborted = true;
+  const tok = { aborted:false }; _pendingFixtureAbort = tok;
+  fetch(`/api/leagues/pending-fixture?p1=${encodeURIComponent(named[0])}&p2=${encodeURIComponent(named[1])}`)
+    .then(r=>r.json()).then(list=>{
+      if(tok.aborted) return;
+      setup.pendingFixtures = Array.isArray(list) ? list : [];
+      showSetupStep(2); renderSetupStep2Content();
+    }).catch(()=>{
+      if(tok.aborted) return;
+      setup.pendingFixtures = [];
+      showSetupStep(2); renderSetupStep2Content();
+    });
+}
+function setupGoToStep3(){ showSetupStep(3); }
+function setupBackTo(n){ showSetupStep(n); if(n===2) renderSetupStep2Content(); }
+
+const SETUP_STEP_LABELS = { 1:"Step 1 of 3 — Who's playing?", 2:'Step 2 of 3 — Choose a game', 3:'Step 3 of 3 — More options' };
+let setupStep = 1;
+function showSetupStep(n){
+  setupStep = n;
+  document.getElementById('setup-step-1').hidden = (n!==1);
+  document.getElementById('setup-step-2').hidden = (n!==2);
+  document.getElementById('setup-step-3').hidden = (n!==3);
+  const label = document.getElementById('setup-step-label');
+  const text = SETUP_STEP_LABELS[n] || '';
+  if(label) label.textContent = text;
+  announce(text);
+  // Focus management (docs/new-game-flow-roadmap.md accessibility): move focus to
+  // each new step's first control, never silently left on a now-hidden one.
+  requestAnimationFrame(()=>{
+    let target;
+    if(n===1) target = document.querySelector('#players-list select, #players-list button');
+    else if(n===2) target = document.getElementById('setup-mode-select');
+    else target = document.querySelector('#setup-step-3 .pp-back');
+    if(target && typeof target.focus==='function') target.focus();
+  });
 }
 function setCricketPreset(preset){
   setup.cricketPreset = preset;
@@ -3567,9 +3583,6 @@ function setCricketPreset(preset){
   document.getElementById('cricket-preset-custom').setAttribute('aria-pressed', preset==='custom');
   document.getElementById('cricket-custom-body').hidden = (preset !== 'custom');
   if(preset === 'custom' && setup.cricketCustomNumbers.length===0) fillCricketClassicIntoCustom();
-  // Cricket league eligibility keys off classic-vs-custom (docs/league-mode-roadmap.md
-  // "Game-type scope") — re-check whenever the preset itself changes, not just gameType.
-  updateSetupChrome();
 }
 function fillCricketClassicIntoCustom(){
   setup.cricketCustomNumbers = CRICKET_STANDARD_NUMBERS.slice();
@@ -3792,11 +3805,12 @@ async function startGame(){
     category,
     legsPerSet, setsPerGame,
     practice: setup.practice,
-    // docs/league-mode-roadmap.md: only ever non-null when the New Game "log to
-    // league?" picker resolved a genuine >1-match ambiguity (see updateLeaguePicker());
-    // the common 0-or-1-match case tags server-side with this staying null. The
-    // server-side onGameCreated hook re-validates regardless of what's sent here.
-    leagueId: setup.leagueId,
+    // docs/league-mode-roadmap.md "League fixtures / pending matches": only ever
+    // non-null when the player explicitly picked "League Game" in Step 2 — the
+    // server fully validates it (fixture exists, unlinked, pair matches, category
+    // matches the league) and REJECTS game creation on any mismatch, unlike a
+    // stale hint.
+    leagueFixtureId: setup.leagueFixtureId,
     players: names.map(n=>GAME_TYPES[gameType].newMatchPlayer(n, gameType==='cricket' || gameType==='doubles_practice' || gameType==='checkout_trainer' ? config : startScore)),
     // Checkout Blitz (docs/checkout-trainer-roadmap.md): a wall-clock deadline, not a
     // decrementing counter, so a backgrounded/throttled tab can't grant extra time.

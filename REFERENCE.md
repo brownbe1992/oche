@@ -3379,22 +3379,22 @@ maintained-tally suggestion, not this one.
 
 ### Frontend integration points
 
-- **New Game "log to league?" picker**: `updateLeaguePicker()`, modeled
-  directly on the existing H2H-record banner (`updateH2HBanner()`) including its
-  same abort-token pattern for a rapidly-changing selection. Calls `GET
-  /api/leagues/eligible?players=A,B&category=&gameType=` reactively whenever
-  the H2H opponent pair, game type, category (X01 starting score, or Cricket's
-  classic-vs-custom preset), or custom-vs-classic Cricket toggle changes; shows
-  a `<select>` only when more than one active league matches (the 0-or-1-match
-  case tags server-side with no picker at all). `setup.leagueId` threads
-  through `startGame()`'s `game` object and `DB.beginGame()`'s `POST
-  /api/games` payload — purely a hint the server-side hook re-validates, never
-  trusted outright.
-- **League setup screen**: a `game_type` toggle (X01/Cricket, mirroring the New
-  Game screen's own toggle) alongside the existing category picker, which
-  switches between the X01 starting-score `<select>` and a Cricket
-  classic/custom `<select>` depending on the chosen game type
-  (`setLeagueGameType()`, `renderLeagueSetup()`).
+- **New Game "log to league?" picker — retired (2026-07)**: `updateLeaguePicker()`/
+  `#league-picker-wrap`/`setup.leagueId` and the H2H banner they sat beside
+  (`updateH2HBanner()`/`#h2h-banner`, `GET /api/players/h2h`) were all removed
+  when the New Game screen became a 3-step wizard (`docs/new-game-flow-roadmap.md`)
+  — superseded by Step 2's fixture-based "League Game" entry, see below and §18's
+  own "League fixtures / pending matches" section. `GET /api/leagues/eligible`
+  and the server-side `onGameCreated` auto-tag hook's own 0/1/>1-candidate
+  fallback (unrelated to any picker) are both unaffected and still fully
+  functional — only the frontend picker UI and its now-unreachable HTTP
+  companion (`/api/players/h2h`; `getH2HRecord()` itself stays, still used
+  internally by per-player export/import and still covered by its own tests)
+  are gone.
+- **League setup screen**: a `game_type` toggle (X01/Cricket) alongside the
+  existing category picker, which switches between the X01 starting-score
+  `<select>` and a Cricket classic/custom `<select>` depending on the chosen
+  game type (`setLeagueGameType()`, `renderLeagueSetup()`).
 - **Home page teaser**: `getHomeExtra()` includes a plain `activeLeagues`
   id/name list; `renderHomePulse()` renders it as a lightweight "Active
   Leagues" card (name + link into the full Leagues screen) only when at least
@@ -3453,10 +3453,21 @@ because a fixture needs to exist *before* any game does.
   (`renderLeagueDetail()`, embedded in `GET /api/leagues/:id`'s `fixtures`
   array via `getLeagueFixtures()`): every fixture with its derived status
   (`FIXTURE_STATUS_ICON`/`FIXTURE_STATUS_LABEL` — Pending/In progress/Played,
-  icon + text together). This is the only UI surface shipped for fixtures so
-  far — the New Game "League Game" one-tap entry that actually *consumes* the
-  pending-fixture endpoint is a separate, still-open item (`docs/open-roadmap-items.md`
-  11b), gated on that screen's own 3-step wizard rework.
+  icon + text together).
+- **New Game "League Game" entry** (§20's Step 2, `docs/new-game-flow-roadmap.md`):
+  once Step 1 finishes with exactly 2 players, `setupGoToStep2()` calls the
+  pending-fixture endpoint above and, if it returns anything, injects a
+  "🏆 League Game" option at the top of Step 2's dropdown
+  (`renderSetupStep2Content()`). Selecting it (`applyLeagueGameSelection()`)
+  auto-fills `setup.gameType`/`setup.start`/`setup.cricketPreset` from the
+  fixture's league and sets `setup.leagueFixtureId`, skipping the X01
+  starting-score question entirely (hidden whenever League Game is selected,
+  since the league already pins it) — a Custom Cricket league still needs its
+  7 targets chosen in Step 3, since the league's category doesn't pin the
+  exact numbers. 2+ pending fixtures reveal a second "Which league match?"
+  dropdown, the same secondary-dropdown slot X01's own flavor question uses.
+  `setup.leagueFixtureId` threads through `startGame()`'s `game` object and
+  `DB.beginGame()`'s `POST /api/games` payload.
 - **`wipeAllData()`/`resetStats()`**: `league_fixtures` needs no explicit
   delete in either — `wipeAllData()`'s `DELETE FROM leagues` cascades it
   (`league_id ON DELETE CASCADE`, also independently covered by the players
@@ -3652,7 +3663,119 @@ difficulty tiers (under-40/under-100/full-range) beyond the single full-range
 
 ---
 
-## 20. Known Limitations & Open Gaps
+## 20. New Game Screen (3-Step Wizard)
+
+Full design: `docs/new-game-flow-roadmap.md`. Replaced the old single
+all-controls-visible `#screen-setup` card with a 3-step flow — Who's playing? →
+Choose a game → More options — so a player only ever sees the controls relevant
+to what they've already chosen. Purely a restructuring of *when/how* the
+existing controls are shown; no change to `startGame()`'s validation or the
+`game` object it builds for any mode except the new League Game entry (§18).
+
+### Step 1 — "Who's playing?"
+
+`renderPlayers()` (name unchanged from the old always-visible-rows layout, body
+rewritten) draws a select → "Add someone else?" loop into `#players-list`: each
+already-filled `setup.slots` entry renders as a name row (stat line, loadout
+pill, remove button); the one slot still awaiting a pick (if any) renders as a
+plain `<select>`. Once every slot is filled, a prompt appears — **Add
+existing** (`addExistingPlayer()`), **New player** (`addNewPlayer()`), or **No,
+continue** (`setupGoToStep2()`) — repeating until "No, continue" or the
+existing 6-player cap. A "🔀 Shuffle order" button appears once 2+ players are
+selected (`shufflePlayers()`, unchanged). Solo-only modes (Daily
+Challenge/Ghost/Doubles Practice/Just Chuckin' It/Checkout Trainer/both guided
+drills) are never truncated to 1 player *here* — Step 2's own dropdown
+filtering (below) makes them structurally unreachable once 2+ players are
+picked, so there's nothing to enforce yet at this step.
+
+### Step 2 — "Choose a game"
+
+One flat `<select id="setup-mode-select">`, replacing the old Mode row +
+Practice-type sub-toggle + X01/Cricket/Baseball toggle. `NEW_GAME_MODE_OPTIONS`
+(`frontend/index.html`) is a flat list of `{ key, label, contexts, blurb,
+apply() }` — `contexts` is `['practice']`, `['practice','h2h']`, or (League
+Game only, injected dynamically rather than listed statically) `['h2h']`.
+`setupVisibleOptions()` filters by `setupPlayerCount()` (1 player → `practice`
+context, 2+ → `h2h` context) — with 2+ players only X01/Cricket/Baseball (plus
+League Game, if eligible) are ever offered, which is what makes picking either
+one *be* the H2H choice; no separate H2H toggle exists anymore.
+`renderSetupStep2Content()` rebuilds the dropdown on every entry into Step 2
+and reconciles a since-invalidated prior selection (e.g. the player went Back
+to Step 1 and added a second player after picking a practice-only mode) by
+falling back to X01 rather than leaving a stale, no-longer-offered option
+selected. `onSetupModeSelect()` calls the chosen entry's `apply()`, which is
+just `setMode()`/`setGameType()` called exactly as the old controls did —
+nothing about validation or the eventual `game` object changed, only what
+triggers the call.
+
+- **X01 flavor**: selecting X01 reveals `#setup-flavor-section` as a starting-
+  score `<select>` (501/301/170/101, `onSetupFlavorSelect()` sets
+  `setup.start`) — the same secondary-dropdown slot League Game's "which
+  league match?" question reuses (never shown simultaneously, since only one
+  primary entry is selected at a time).
+- **How-to-play blurb**: `#setup-blurb-body` shows each entry's static `blurb`
+  text, generalizing the old scattered per-mode `-info-section` blocks (now
+  removed) to every mode uniformly.
+- **Daily Challenge**: not a static blurb — `renderSetupChallengeBlurb()`
+  fetches `GET /api/challenges/status` the moment it's *selected* (moved from
+  Play Now time, where the same call previously only ran as a
+  race-condition backstop) for `setup.slots[0]` (guaranteed non-empty, since
+  Step 1 requires ≥1 player first). Already attempted today (`status.today`
+  truthy) → a blocking message replaces the blurb and `#setup-step2-continue`
+  is disabled for this selection; the player can still pick something else and
+  proceed normally. Not yet attempted → the same streak/history status
+  Home page's challenge teaser shows, Continue enabled.
+- **League Game**: see §18's "League fixtures / pending matches" section for
+  the full mechanism (`setupGoToStep2()`'s pending-fixture fetch,
+  `applyLeagueGameSelection()`, the "which league match?" secondary dropdown).
+
+### Step 3 — "More options"
+
+Every mode-specific options block (Cricket targets, Ghost's leg picker,
+Doubles Practice's target grid, Checkout Trainer's Freeform/Blitz toggle +
+difficulty tiers, the H2H legs/sets Format controls) is unchanged in behavior,
+just relocated under this step — each block's own `hidden` toggling by
+`setMode()`/`setGameType()` still works exactly as before, independent of
+which step wrapper it happens to sit inside. `#start-btn` (labeled "Play Now"
+for H2H/Practice/X01/Cricket/Baseball, a per-mode verb otherwise — "Start
+Challenge", "Start race", etc., unchanged) calls the existing `startGame()`
+unmodified.
+
+### Wizard navigation and step-entry reconciliation
+
+`showSetupStep(n)` (`setupStep` 1/2/3) toggles the three step wrappers,
+updates the step-label text, and calls the global `announce()` (`#sr-announcer`,
+`aria-live="polite"`) so screen-reader users hear the step change; it also
+moves focus to each new step's first control (the first player `<select>`/
+button in Step 1, the mode `<select>` in Step 2, the Back button in Step 3) so
+focus is never silently left on a now-hidden control. Back buttons
+(`setupBackTo(n)`) restore, not reset, whatever was already selected on the
+step being returned to — nothing in `setup` is cleared by navigating backward,
+only by a genuinely fresh entry into the screen.
+
+`show('setup')` resets `setup.slots`/`loadoutByName`/`leagueFixtureId`/
+`pendingFixtures` and starts at Step 1 on every normal entry (nav click, a
+post-game "Try Again"/"New Game" button, etc.) — **except** when
+`_enteringSetupFromRaceLeg` is set, which `raceLeg()` (Player Profile's "Race
+this leg" entry point) sets synchronously right before calling `show('setup')`,
+alongside presetting `setup.slots` to the one player being raced and calling
+`setMode('ghost')`. That flag is consumed (read + reset to `false`)
+synchronously inside `show('setup')` itself — deliberately **not** the same as
+`_ghostLegTarget` (which preselects a specific leg once `renderGhostLegPicker()`'s
+own fetch resolves, and is only cleared when a match is actually found in that
+player's leg history) — a raceLeg() entry must jump straight to Step 3 and
+must never get stuck doing so on every later "New game" nav click even when
+that player turns out to have zero ghost-race-able legs.
+
+### Retired
+
+`updateH2HBanner()`/`#h2h-banner`/`GET /api/players/h2h` and
+`updateLeaguePicker()`/`#league-picker-wrap`/`setup.leagueId` — see §18's
+"New Game 'log to league?' picker — retired" note.
+
+---
+
+## 21. Known Limitations & Open Gaps
 
 Cross-referenced from the `docs/*.md` roadmap docs — these are real,
 already-shipped limitations, not just unbuilt future features:
@@ -3696,7 +3819,7 @@ already-shipped limitations, not just unbuilt future features:
 
 ---
 
-## 21. Troubleshooting
+## 22. Troubleshooting
 
 The general method, before the specific symptoms below: **this document is the
 spec.** Find the section describing what the misbehaving feature is supposed to

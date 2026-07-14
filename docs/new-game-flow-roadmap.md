@@ -1,17 +1,17 @@
 # New Game Page Revamp — Design Roadmap
 
-> Status: **design phase, not started**. This doc captures the user's requested
-> flow for a less-crowded, more interactive New Game page and grounds it in the
-> current implementation (`frontend/index.html`'s `#screen-setup`) so whoever
-> picks this up can see exactly what changes and what doesn't.
->
-> **Update (2026-07)**: the "League Game" entry's backend dependency — a
-> `league_fixtures` table, round-robin generation, `GET
-> /api/leagues/pending-fixture`, and `createGame()`'s `leagueFixtureId` — is
-> now shipped (`docs/league-mode-roadmap.md`'s "League fixtures / pending
-> matches" section, `docs/open-roadmap-items.md`'s Done ledger). This doc's
-> own wizard work (including wiring up the "League Game" entry itself) is
-> still not started; everything below is unchanged design, now unblocked.
+> Status (2026-07): **Shipped.** The 3-step wizard (Who's playing? → Choose a
+> game → More options) described below is fully built —
+> `frontend/index.html`'s `#screen-setup`, `renderPlayers()` (Step 1),
+> `NEW_GAME_MODE_OPTIONS`/`renderSetupStep2Content()` (Step 2, including the
+> "League Game" entry backed by `docs/league-mode-roadmap.md`'s fixture work),
+> and the relocated per-mode option blocks (Step 3) — with every one of this
+> doc's own resolved open questions implemented as designed: the flat
+> player-count-filtered dropdown, Daily Challenge's check-on-selection
+> blocking message, the dropped H2H banner, and the League Game top-of-
+> dropdown entry. Full mechanics: `REFERENCE.md` §20. This doc's own design
+> below is kept as-written for context, same standing convention as every
+> other shipped roadmap doc in this repo.
 
 ## Goal
 
@@ -293,33 +293,43 @@ interaction with today's category-based ambiguity picker) live in
 `docs/league-mode-roadmap.md`'s new "League fixtures / pending matches"
 section, since they're backend design questions, not New Game screen ones.
 
-## Suggested build order
+## Suggested build order (all 7 steps shipped 2026-07)
 
-1. Build the wizard shell (step container + Continue/Play Now/Back buttons,
-   focus management, `aria-live` step announcements) without changing any
-   control's own behavior yet. Back buttons restore prior-step state rather
-   than resetting it.
-2. Move Step 1 (Who's playing?) into the new shell, converting the
-   always-visible player rows into the select → "add someone else?" prompt
-   loop.
-3. Move Step 2 (Choose a game) in: define the `contexts` (`practice`/`h2h`)
-   flag per mode/game-type entry and filter the dropdown by current player
-   count, collapse the Mode row + Practice-type sub-toggle + X01/Cricket
-   toggle into that one filtered flat dropdown (Daily Challenge through
-   Around the World, no sub-groups), add the X01-flavor second dropdown,
-   move the `/api/challenges/status` check from Play Now time to Daily
-   Challenge's selection time (with its "come back tomorrow" blocking
-   message), and write the missing how-to-play copy for every mode that
-   doesn't have it yet.
-4. Move Step 3 (More options) in: relocate each mode's existing options
-   section under the new step, resolving the classic-vs-custom Cricket
-   sharing between practice and H2H.
-5. Remove `#h2h-banner`/`updateH2HBanner()`/`/api/players/h2h` (dead code
-   once dropped from the flow).
-6. Wire Play Now to the existing `startGame()`, then Playwright-test the full
-   new path per mode (X01 H2H, X01 practice, Cricket both variants, Doubles
-   Practice, Just Chuckin' It, Ghost, Daily Challenge, Checkout Trainer,
-   Around the Clock/World) to confirm no validation path regressed.
-7. **Depends on `docs/league-mode-roadmap.md`'s "League fixtures" item
-   shipping first**: wire the "League Game" entry once the pending-fixture
-   endpoint exists — this step can't land before that backend work does.
+1. ✅ Wizard shell (step container + Continue/Play Now/Back buttons, focus
+   management, `aria-live` step announcements via the existing `announce()`/
+   `#sr-announcer`) — `showSetupStep()`/`setupBackTo()`, restoring rather than
+   resetting prior-step state.
+2. ✅ Step 1 (Who's playing?) — `renderPlayers()` rewritten into the select →
+   "Add someone else?" prompt loop, same function name so every existing
+   caller (`onSlotChange`, `addExistingPlayer`/`addNewPlayer`, `removePlayer`,
+   `shufflePlayers`, `setMode()`'s solo-mode truncation) needed no signature
+   change.
+3. ✅ Step 2 (Choose a game) — `NEW_GAME_MODE_OPTIONS`'s `contexts` flag per
+   entry, `setupVisibleOptions()` filtering by player count, the collapsed
+   flat dropdown (Daily Challenge through Around the World, plus Baseball —
+   shipped after this doc was first written, folded in as one more flat entry
+   per this doc's own "any future mode just adds one more entry" framing), the
+   X01-flavor second dropdown, the Daily Challenge same-day check moved to
+   selection time (`renderSetupChallengeBlurb()`), and a how-to-play blurb for
+   every entry.
+4. ✅ Step 3 (More options) — every mode's existing options block relocated
+   under the new step with zero behavior change; Cricket's classic/custom
+   picker is the same shared control for practice and H2H it always was.
+5. ✅ `#h2h-banner`/`updateH2HBanner()` and `#league-picker-wrap`/
+   `updateLeaguePicker()` deleted as dead code (the latter superseded by the
+   League Game entry rather than merely dropped); the now-frontend-unreachable
+   `GET /api/players/h2h` HTTP route was also removed — `getH2HRecord()` the
+   DB function stays, since per-player export/import and other backend code
+   still call it directly (see `REFERENCE.md` §18).
+6. ✅ Play Now wired to the existing `startGame()` unmodified; every mode
+   (X01 H2H/practice, Cricket both variants, Baseball, Doubles Practice, Just
+   Chuckin' It, Ghost — including the `raceLeg()` entry point's jump straight
+   to Step 3 — Daily Challenge both allowed and same-day-blocked, Checkout
+   Trainer, Around the Clock/World, and League Game with both 1 and 2+
+   pending fixtures) verified end-to-end with Playwright against a live
+   server; no committed Playwright suite exists in this repo (ad hoc
+   verification only, matching `docs/testing-and-observability-roadmap.md`'s
+   own current state).
+7. ✅ League Game wired up against `docs/league-mode-roadmap.md`'s shipped
+   fixture endpoint/param — `setupGoToStep2()`'s pending-fixture fetch,
+   `applyLeagueGameSelection()`, the "which league match?" secondary dropdown.
