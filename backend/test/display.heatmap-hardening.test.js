@@ -121,3 +121,44 @@ describe('BUG-20 — buildChuckinLiveHeatmap() shades inner and outer singles in
     assert.match(svg, /Double Bull: 1 hit/);
   });
 });
+
+// The live Chuckin heatmap was ported before the miss ring existed on the lifetime
+// board, so it never rendered the outer near/far miss bands. This brings it to parity:
+// a positioned miss (sector 0 + wedge + near/far depth) is plotted on its own band and
+// its own heat scale, mirroring buildDartHeatmap().
+describe('live Chuckin heatmap — miss ring (near/far bands per wedge)', () => {
+  test('a positioned near miss renders on the near band of its wedge', () => {
+    const buildChuckinLiveHeatmap = loadBuildChuckinLiveHeatmap();
+    const svg = buildChuckinLiveHeatmap([{ sector: 0, multiplier: 1, missZone: 5, missDepth: 'near', hits: 3 }]);
+    assert.match(svg, /Miss \(near\), wedge 5: 3 misses/);
+    assert.match(svg, /Miss \(far\), wedge 5: 0 misses/, 'the far band of the same wedge stays at 0');
+  });
+
+  test('near and far misses on the same wedge are tracked separately', () => {
+    const buildChuckinLiveHeatmap = loadBuildChuckinLiveHeatmap();
+    const svg = buildChuckinLiveHeatmap([
+      { sector: 0, multiplier: 1, missZone: 5, missDepth: 'near', hits: 2 },
+      { sector: 0, multiplier: 1, missZone: 5, missDepth: 'far', hits: 1 },
+    ]);
+    assert.match(svg, /Miss \(near\), wedge 5: 2 misses/);
+    assert.match(svg, /Miss \(far\), wedge 5: 1 miss\b/); // singular "miss" for a count of 1
+  });
+
+  test('an unpositioned miss (Pad mode: no wedge/depth) is not plotted on any band', () => {
+    const buildChuckinLiveHeatmap = loadBuildChuckinLiveHeatmap();
+    const svg = buildChuckinLiveHeatmap([{ sector: 0, multiplier: 1, hits: 9 }]);
+    // Every wedge's miss bands stay at 0 — there's nowhere to attribute a positionless miss.
+    assert.match(svg, /Miss \(near\), wedge 20: 0 misses/);
+    assert.doesNotMatch(svg, /wedge \d+: 9 miss/, 'a positionless miss must never inflate any wedge band');
+  });
+
+  test('a crafted/out-of-range missZone or missDepth is ignored, not plotted', () => {
+    const buildChuckinLiveHeatmap = loadBuildChuckinLiveHeatmap();
+    const svg = buildChuckinLiveHeatmap([
+      { sector: 0, multiplier: 1, missZone: 99, missDepth: 'near', hits: 4 },   // wedge out of 1-20 range
+      { sector: 0, multiplier: 1, missZone: 5, missDepth: 'sideways', hits: 4 }, // depth not near/far
+    ]);
+    assert.doesNotMatch(svg, /: 4 miss/, 'neither invalid miss cell may reach any band');
+    assert.match(svg, /Miss \(near\), wedge 5: 0 misses/);
+  });
+});

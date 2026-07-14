@@ -526,8 +526,8 @@ const DB_SECTORS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
 // broadcast XSS reaching every connected /display screen. Number(...)||0 coerces
 // at the boundary, same pattern num() already applies everywhere else in this file.
 function buildChuckinLiveHeatmap(cells){
-  const hitMap = {};
-  let maxHits = 0;
+  const hitMap = {}, missMap = {};
+  let maxHits = 0, maxMiss = 0;
   // docs/bug-roadmap.md BUG-12: Array.isArray(), not just a `||[]` truthy check — a
   // non-array-but-truthy payload value (e.g. a crafted string) would pass `cells||[]`
   // unchanged and then throw on .forEach, same crash class as the sessionAvg fix
@@ -535,6 +535,21 @@ function buildChuckinLiveHeatmap(cells){
   // this file already uses.
   (Array.isArray(cells) ? cells : []).forEach(c=>{
     const sector = Number(c.sector) || 0, mult = Number(c.multiplier) || 0, hitCount = Number(c.hits) || 0;
+    // A positioned miss (sector 0 with a wedge + near/far depth) goes into its own
+    // map on its own heat scale — same split buildDartHeatmap()'s lifetime board uses,
+    // since miss counts and scoring-hit counts are wildly different population sizes.
+    // missZone is constrained to a real 1-20 wedge and missDepth to 'near'/'far' at the
+    // boundary (SEC-18 discipline); an unpositioned miss (Pad mode) has nothing to plot.
+    if(sector === 0){
+      const missZone = Number(c.missZone);
+      const missDepth = (c.missDepth === 'near' || c.missDepth === 'far') ? c.missDepth : '';
+      if(Number.isInteger(missZone) && missZone >= 1 && missZone <= 20 && missDepth){
+        const mk = missZone+'_'+missDepth;
+        missMap[mk] = hitCount;
+        if(hitCount>maxMiss) maxMiss = hitCount;
+      }
+      return;
+    }
     // docs/bug-roadmap.md BUG-20: singles are keyed by zone (inner/outer) too, so the
     // two single regions of a number shade independently instead of both lighting up
     // for any single hit. zone is normalized to only 'inner'/'outer' at the boundary
@@ -548,9 +563,14 @@ function buildChuckinLiveHeatmap(cells){
   });
   const hits = (sector, m, zone) => hitMap[sector+'_'+m+'_'+(zone||'')] || 0;
   const heat = (sector, m, zone) => maxHits>0 ? hits(sector,m,zone)/maxHits : 0;
+  const missHits = (wedge, depth) => missMap[wedge+'_'+depth] || 0;
+  const missHeat = (wedge, depth) => maxMiss>0 ? missHits(wedge,depth)/maxMiss : 0;
 
-  const CX=250, CY=250;
-  const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248 };
+  // CX/CY/viewBox enlarged to match buildDartHeatmap()'s lifetime geometry, leaving
+  // room past the board (bg:248) for the two miss bands (missNear:270, missFar:310) —
+  // the board proper (doubleOut:212) is unchanged, just no longer flush to the edge.
+  const CX=330, CY=330;
+  const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248, missNear:270, missFar:310 };
   const DEG = 360/20;
   const xy = (r, deg) => { const a=(deg-90)*Math.PI/180; return [CX+r*Math.cos(a), CY+r*Math.sin(a)]; };
   const f = v => v.toFixed(2);
@@ -566,7 +586,7 @@ function buildChuckinLiveHeatmap(cells){
     const b = Math.round(26 + t*(106-26));
     return `rgb(${r},${g},${b})`;
   };
-  let s = `<svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Live dartboard heatmap of this Just Chuckin' It session">
+  let s = `<svg viewBox="0 0 660 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Live dartboard heatmap of this Just Chuckin' It session, including the outer miss ring">
     <circle cx="${CX}" cy="${CY}" r="${R.bg}" fill="#0d0e0b"/>
     <circle cx="${CX}" cy="${CY}" r="${R.doubleOut+1}" fill="#111210"/>
     <circle cx="${CX}" cy="${CY}" r="${R.doubleOut}" fill="#0d0e0b"/>`;
@@ -584,6 +604,13 @@ function buildChuckinLiveHeatmap(cells){
     s += `<path d="${annulus(R.doubleIn,R.doubleOut,s0,e0)}" fill="${heatFill(heat(n,2))}" ${sw}><title>D${n}: ${hits(n,2)} double hit${hits(n,2)===1?'':'s'}</title></path>`;
     const [nx,ny]=xy(R.numAt,s0+DEG/2);
     s += `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="17" fill="#efe7d2" style="pointer-events:none;user-select:none">${n}</text>`;
+    // Miss ring (docs/archive/dartboard-zone-tracking-roadmap.md "Miss-area tracking") —
+    // the two bands extending past the board, shaded by how many misses landed in that
+    // wedge/depth this session, on their own independent heat scale. Mirrors
+    // buildDartHeatmap()'s lifetime miss ring; only ever populated by a Dartboard-mode
+    // positioned miss (a Pad-mode miss has no wedge/depth to plot).
+    s += `<path d="${annulus(R.bg,R.missNear,s0,e0)}" fill="${heatFill(missHeat(n,'near'))}" ${sw}><title>Miss (near), wedge ${n}: ${missHits(n,'near')} miss${missHits(n,'near')===1?'':'es'}</title></path>`;
+    s += `<path d="${annulus(R.missNear,R.missFar,s0,e0)}" fill="${heatFill(missHeat(n,'far'))}" ${sw}><title>Miss (far), wedge ${n}: ${missHits(n,'far')} miss${missHits(n,'far')===1?'':'es'}</title></path>`;
   });
   s += `<circle cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="${heatFill(heat(25,1))}" stroke="#151613" stroke-width="0.5"><title>Bull: ${hits(25,1)} hit${hits(25,1)===1?'':'s'}</title></circle>`;
   s += `<circle cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="${heatFill(heat(25,2))}" stroke="#151613" stroke-width="0.5"><title>Double Bull: ${hits(25,2)} hit${hits(25,2)===1?'':'s'}</title></circle>`;

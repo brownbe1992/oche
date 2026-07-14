@@ -1243,19 +1243,33 @@ a live, **session-only** dartboard heatmap alongside the darts-thrown counter
 and the running 3-dart average — a genuinely different dataset from the
 lifetime one the Player Profile fetches via `getChuckinHeatmap()`, gradually
 filling in as the session progresses rather than showing accumulated history.
-`throwDartChuckin()` tallies hits into `p.heatmap` (a `{sector_mult_zone: count}`
-map — the `zone` segment is `'inner'`/`'outer'` for a Dartboard-mode single and
-`''` for a zone-less outcome, matching `buildDartHeatmap()`'s lifetime keying)
-and `p.sessionScore` (feeding the average) on every dart;
+`throwDartChuckin()` tallies hits into `p.heatmap` (a
+`{sector_mult_zone_missZone_missDepth: count}` map — always 5 underscore-separated
+segments: `zone` is `'inner'`/`'outer'` for a Dartboard-mode single and `''`
+otherwise; `missZone`/`missDepth` are populated only for a positioned miss and
+`''` otherwise — matching `buildDartHeatmap()`'s lifetime keying) and
+`p.sessionScore` (feeding the average) on every dart;
 `playerSnapshotChuckin()` flattens `p.heatmap` into the same
-`{sector,multiplier,zone,hits}` array shape `getChuckinHeatmap()` already
-returns, so `display.html`'s renderer (`buildChuckinLiveHeatmap()`, a
+`{sector,multiplier,zone,missZone,missDepth,hits}` array shape
+`getChuckinHeatmap()` already returns, so `display.html`'s renderer
+(`buildChuckinLiveHeatmap()`, a
 mirror-copied port of `buildChuckinHeatmap()`'s SVG geometry — no shared module
 between the two files, per the established convention) can feed it straight in.
 The renderer shades a number's inner and outer single regions independently
 (`heat(n,1,'inner')` vs `heat(n,1,'outer')`) and, like the lifetime heatmap,
 does not plot a zone-unspecified single (a Pad-mode dart) on either region
-rather than lighting up both — `docs/bug-roadmap.md` BUG-20. No
+rather than lighting up both — `docs/bug-roadmap.md` BUG-20. It also renders
+the outer **miss ring** — the same two near/far bands per wedge the lifetime
+`buildDartHeatmap()` draws, on their own independent heat scale (`missHeat()`,
+separate from the scoring-hit scale since miss and hit populations differ
+wildly). A positioned miss (`sector 0` carrying `missZone`/`missDepth`, only
+ever produced by a Dartboard-mode miss-ring tap) fills its wedge/depth band; an
+unpositioned Pad-mode miss has nothing to plot, same as the lifetime board. To
+make room for the miss bands the live SVG uses the same enlarged geometry as
+`buildDartHeatmap()` (`viewBox` 660, `missNear:270`/`missFar:310`); the board
+proper is unchanged, just no longer flush to the edge. Both the tally key
+(`{sector_mult_zone_missZone_missDepth: count}`) and the flattened cell shape
+(`{sector,multiplier,zone,missZone,missDepth,hits}`) carry the miss fields. No
 `ALLOWED_LIVE_KEYS` change was needed — both fields ride inside the per-player
 `players[]` array, whose nested shape isn't restricted by that allowlist (only
 top-level payload keys are). Side-by-side with the session stats in landscape,

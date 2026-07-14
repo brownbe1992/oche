@@ -8922,11 +8922,13 @@ function resetPlayerForNextLegChuckin(p){
 // of the identical formula).
 function playerSnapshotChuckin(p){
   const heatmap = Object.entries(p.heatmap||{}).map(([key,hits])=>{
-    // docs/bug-roadmap.md BUG-20: keys are sector_mult_zone now — zone is '' for a
-    // zone-less outcome (Pad-mode single, treble/double/bull), an 'inner'/'outer'
-    // string for a Dartboard-mode single. Parse it as a string, not a Number.
+    // docs/bug-roadmap.md BUG-20: keys are sector_mult_zone_missZone_missDepth — zone/
+    // missDepth are strings ('' when absent), missZone a number. Parse zone/missDepth as
+    // strings, missZone as a number, so both the single-region (zone) and miss-ring
+    // (missZone/missDepth) breakdowns survive into the live-scoreboard cell shape.
     const parts = key.split('_');
-    return { sector:Number(parts[0]), multiplier:Number(parts[1]), zone: parts[2] || null, hits };
+    return { sector:Number(parts[0]), multiplier:Number(parts[1]), zone: parts[2] || null,
+      missZone: parts[3] ? Number(parts[3]) : null, missDepth: parts[4] || null, hits };
   });
   const sessionAvg = p.sessionDarts>0 ? (p.sessionScore/p.sessionDarts*3) : null;
   return { name:p.name, sessionDarts:p.sessionDarts||0, sessionTrebles:p.sessionTrebles||0, heatmap, sessionAvg };
@@ -8949,12 +8951,15 @@ function throwDartChuckin(sector, zone, missZone, missDepth, bounced){
   p.sessionDarts += 1;
   if(dart.isTreble) p.sessionTrebles += 1;
   p.sessionScore += dart.value;
-  // docs/bug-roadmap.md BUG-20: key singles by zone (inner/outer) too, so the live
-  // scoreboard heatmap can shade the two single regions of a number independently
-  // instead of lighting up both for any single hit — mirroring the lifetime
-  // buildDartHeatmap()'s own sector_mult_zone keying. zone is only ever set for a
-  // Dartboard-mode single (Pad mode leaves it null; trebles/doubles/bull carry none).
-  const hKey = dart.sector+'_'+dart.mult+'_'+(zone||'');
+  // docs/bug-roadmap.md BUG-20: key singles by zone (inner/outer), and misses by their
+  // wedge+depth (missZone/missDepth), so the live scoreboard heatmap can shade the two
+  // single regions AND the outer miss ring independently — mirroring the lifetime
+  // buildDartHeatmap()'s sector_mult_zone / missZone_missDepth keying. zone is only ever
+  // set for a Dartboard-mode single; missZone/missDepth only for a Dartboard-mode miss;
+  // trebles/doubles/bull and Pad-mode darts carry none. Key layout is always exactly
+  // sector_mult_zone_missZone_missDepth (5 segments), so playerSnapshotChuckin() can
+  // split it back apart unambiguously.
+  const hKey = dart.sector+'_'+dart.mult+'_'+(zone||'')+'_'+(missZone!=null?missZone:'')+'_'+(missDepth||'');
   p.heatmap[hKey] = (p.heatmap[hKey]||0) + 1;
 
   // "Assuming three darts per turn" (explicitly requested): group darts into
