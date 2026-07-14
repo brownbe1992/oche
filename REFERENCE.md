@@ -1972,31 +1972,59 @@ noise via `AudioContext`), not a recorded file — kept dependency/licensing-fre
 
 ## 8. Shareable Moments
 
-`buildMomentCard({icon, headline, player, statLine, footer})` renders an 800×800
-JPEG (quality 0.88) canvas card entirely client-side — no server round-trip, no
-image hosting. `fireMomentCard(type, opts)` builds the card, stores it in
-`momentCards[type]`, and fires the corresponding Home Assistant webhook
-(base64-encoded image) if one is configured. `shareMomentCard(type)` reads the
-stored canvas and opens the native Web Share sheet (or falls back to a plain
-image download).
+`buildMomentCard({icon, headline, player, statLine, desc, footer})` renders an
+800×800 JPEG (quality 0.88) canvas card entirely client-side — no server
+round-trip, no image hosting. Below the icon/headline/player name, `statLine`
+(if given) draws the specific-occurrence recap (e.g. "500 lifetime darts" or
+"501 · Won 3-1 in legs") and `desc` (if given) draws a second, muted, wrapped
+line beneath it — the actual **explanation of the achievement** (e.g. "Throw
+500 lifetime darts in Just Chuckin' It."), chained off whichever of
+player/statLine was drawn last so it never overlaps either. `fireMomentCard(type,
+opts)` is the one choke point nearly every achievement/moment card goes
+through; it resolves `desc` automatically via `achDescFor(type)` (the same
+lookup the live achievement overlay and voice announcements already use — see
+§4) whenever the caller doesn't supply its own, so every card gets a real
+explanation without each of the ~50 call sites needing to pass one. It then
+stores the card in `momentCards[type]` and fires the corresponding Home
+Assistant webhook (base64-encoded image) if one is configured.
+`shareMomentCard(type)` reads the stored canvas and opens the native Web Share
+sheet (or falls back to a plain image download).
 
-**Exception — passive/repeat-view features don't use `fireMomentCard()`
-directly**: the On This Day flashback (§3) calls `buildMomentCard()` directly
-and skips the HA webhook, since it fires on *every* profile page view, not on a
-real occurrence — routing it through `fireMomentCard()` would spam an HA
-webhook every time someone opens a profile page.
+`achDescFor()`'s fallback chain (§4) is the single source for every
+explanation: a badge id's `BADGE_INFO[id].desc` first, then `ACH_DESC_FALLBACK`
+for the handful of card types that aren't a persisted badge (`180`/`bigfish`/
+`ninedarter`, plus `matchwin`/`dailychallenge`, which fire a card on every
+occurrence rather than a one-off milestone). `checkout100` (the On This Day
+flashback's own label for a 100+ checkout, not a real `badge_id`) has its own
+`ACH_DESC_FALLBACK` entry for the same reason.
+
+**Exceptions — call sites that don't go through `fireMomentCard()`, and so
+resolve `desc` themselves**:
+- The On This Day flashback (§3) calls `buildMomentCard()` directly and skips
+  the HA webhook, since it fires on *every* profile page view, not on a real
+  occurrence — routing it through `fireMomentCard()` would spam an HA webhook
+  every time someone opens a profile page. Passes `desc: achDescFor(data.type)`
+  itself.
+- `sharePersonalBest(kind, value)` (Player Profile → Personal Bests → 📤 Share,
+  for Best Leg Average / Fewest Darts to Finish) — these aren't badges (no
+  `BADGE_INFO` entry, so `achDescFor()` doesn't apply), so it carries its own
+  short `desc` per kind.
 
 **Player Profile "Moments" gallery** (`docs/archive/shareable-moments-roadmap.md`):
 the Badge Case (§4) doubles as this — every *earned* badge tile gets a 📤 Share
 button (`shareEarnedBadge(badgeId)`) that regenerates that badge's card on
-demand (icon, label, current player) and shares/downloads it via the same
-`shareOrSaveCanvas()` path, independent of whether the achievement overlay is
-still showing or was ever tapped at the time. This is a genuine "moment from
-the past" replay, not a stored image — resolving the roadmap doc's own open
-question ("cache cards, or regenerate on demand?") in favor of regenerating,
-consistent with this app's standing "recompute at query time, store nothing
-pre-aggregated" philosophy. Not-yet-earned badges (dimmed/greyscale in the
-Badge Case) get no Share button, since there's nothing to regenerate.
+demand (icon, label, current player, and — since this reads straight from
+`BADGE_INFO[badgeId]`, which already has it — `desc`) and shares/downloads it
+via the same `shareOrSaveCanvas()` path, independent of whether the achievement
+overlay is still showing or was ever tapped at the time. This is a genuine
+"moment from the past" replay, not a stored image — resolving the roadmap
+doc's own open question ("cache cards, or regenerate on demand?") in favor of
+regenerating, consistent with this app's standing "recompute at query time,
+store nothing pre-aggregated" philosophy. Not-yet-earned badges (dimmed/
+greyscale in the Badge Case) get no Share button, since there's nothing to
+regenerate. (This re-share path previously omitted `statLine`/`desc` entirely —
+a re-shared badge card showed only the icon, headline, and player name, with
+no explanation of what was earned — see `docs/bug-roadmap.md` BUG-21.)
 
 ---
 

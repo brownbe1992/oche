@@ -5128,7 +5128,7 @@ function loadOnThisDay(){
         <button class="btn btn-ghost" id="otd-share-btn">📤 Share</button>`;
       const canvas = await buildMomentCard({ icon: ON_THIS_DAY_ICON[data.type] || '📅',
         headline: ON_THIS_DAY_LABEL[data.type] || 'FLASHBACK', player: currentPlayer,
-        statLine: `${data.statLine} — ${yearsLabel}` });
+        statLine: `${data.statLine} — ${yearsLabel}`, desc: achDescFor(data.type) });
       momentCards['flashback'] = { canvas, player: currentPlayer, headline: ON_THIS_DAY_LABEL[data.type] || 'FLASHBACK' };
       const btn = document.getElementById('otd-share-btn');
       if(btn) btn.onclick = () => shareMomentCard('flashback');
@@ -5217,7 +5217,7 @@ function renderChallengeHistory(data){
 async function shareEarnedBadge(badgeId){
   const info = BADGE_INFO[badgeId];
   if(!info) return;
-  const canvas = await buildMomentCard({ icon:info.icon, headline:info.label.toUpperCase(), player:currentPlayer });
+  const canvas = await buildMomentCard({ icon:info.icon, headline:info.label.toUpperCase(), player:currentPlayer, desc:info.desc });
   shareOrSaveCanvas(canvas, `oche-${badgeId}-${Date.now()}.${MOMENT_CARD_EXT}`, `${currentPlayer} — ${info.label}`, 'Shared from Oche');
 }
 function loadPersonalBests(){
@@ -5434,10 +5434,12 @@ function renderAroundTheWorldPersonalBests(data){
   </div>`;
 }
 async function sharePersonalBest(kind, value){
-  const cfg = { legavg: { icon:'📊', headline:'BEST LEG AVERAGE', statLine: value.toFixed(1) },
-    fewestdarts: { icon:'🎯', headline:'FEWEST DARTS TO FINISH', statLine: `${value} darts` } }[kind];
+  const cfg = { legavg: { icon:'📊', headline:'BEST LEG AVERAGE', statLine: value.toFixed(1),
+      desc:'Your best 3-dart average across a single leg.' },
+    fewestdarts: { icon:'🎯', headline:'FEWEST DARTS TO FINISH', statLine: `${value} darts`,
+      desc:"The fewest darts you've ever needed to finish a leg." } }[kind];
   if(!cfg) return;
-  const canvas = await buildMomentCard({ icon:cfg.icon, headline:cfg.headline, player:currentPlayer, statLine:cfg.statLine });
+  const canvas = await buildMomentCard({ icon:cfg.icon, headline:cfg.headline, player:currentPlayer, statLine:cfg.statLine, desc:cfg.desc });
   shareOrSaveCanvas(canvas, `oche-${kind}-${Date.now()}.${MOMENT_CARD_EXT}`, `${currentPlayer} — ${cfg.headline}`, 'Shared from Oche');
 }
 function askWipeAllData(){
@@ -5744,6 +5746,17 @@ const ACH_DESC_FALLBACK = {
   '180': 'Three darts, sixty each — the biggest score possible in one visit.',
   bigfish: 'A 170 checkout — the highest finish possible in a leg.',
   ninedarter: 'A perfect leg: 501 down to zero in exactly nine darts.',
+  // matchwin/dailychallenge aren't badges (no BADGE_INFO entry — every match win
+  // and every Daily Challenge completion fires a card, not a one-off milestone),
+  // so they get their own short line here too, same reasoning as the three above —
+  // this is what fireMomentCard()'s achDescFor(momentType) fallback resolves to
+  // for these two, so every shareable moment card ends up with an explanation.
+  matchwin: 'Won the match.',
+  dailychallenge: "Completed today's Daily Challenge.",
+  // "On This Day" flashback only (loadOnThisDay()) — checkout100 isn't a real
+  // badge_id, it's that function's own ON_THIS_DAY_LABEL key for a 100+ checkout
+  // flashback (180/bigfish flashbacks reuse the two entries above).
+  checkout100: 'A checkout of 100 points or more.',
 };
 function achDescFor(type){
   const badgeId = ACH_TYPE_TO_BADGE_ID[type] || type;
@@ -6678,7 +6691,7 @@ function wrapCanvasText(ctx, text, cx, y, maxWidth, lineHeight){
 // the app's own web fonts (already requested via <link> in <head>) to finish
 // loading so canvas text doesn't silently fall back to a system font on the very
 // first card generated in a session.
-async function buildMomentCard({ icon, headline, player, statLine, footer }){
+async function buildMomentCard({ icon, headline, player, statLine, desc, footer }){
   await document.fonts.ready;
   const canvas = document.createElement('canvas');
   canvas.width = MOMENT_CARD_W; canvas.height = MOMENT_CARD_H;
@@ -6706,11 +6719,25 @@ async function buildMomentCard({ icon, headline, player, statLine, footer }){
   ctx.fillStyle = '#d9b46a';
   ctx.font = '600 34px Inter, sans-serif';
   ctx.fillText(player, cx, y + 66);
+  let lastY = y + 66;
 
   if(statLine){
     ctx.fillStyle = '#f3efe4';
     ctx.font = '400 26px Inter, sans-serif';
     ctx.fillText(statLine, cx, y + 115);
+    lastY = y + 115;
+  }
+
+  // Achievement explanation — what the achievement actually IS/how it's earned
+  // (e.g. "Throw 500 lifetime darts in Just Chuckin' It."), distinct from
+  // statLine's specific-occurrence recap above it (e.g. "500 lifetime darts").
+  // fireMomentCard() resolves this via achDescFor(momentType) so every card gets
+  // one automatically; muted/smaller so it reads as supporting text, and chained
+  // off whichever of player/statLine was drawn last so it never overlaps either.
+  if(desc){
+    ctx.fillStyle = '#9a9387';
+    ctx.font = '400 20px Inter, sans-serif';
+    wrapCanvasText(ctx, desc, cx, lastY + 48, MOMENT_CARD_W-100, 26);
   }
 
   // Tagline (Settings -> Shareable Moments -> Card tagline) — a short promotional
@@ -6825,8 +6852,14 @@ function awardRecurringBadge(playerName, badgeId, momentType, momentOpts){
 const momentCards = {};
 async function fireMomentCard(momentType, opts){
   try{
-    const canvas = await buildMomentCard(opts);
-    momentCards[momentType] = { canvas, ...opts };
+    // Every card gets an achievement explanation automatically — achDescFor()
+    // is the same lookup the live overlay/voice announcement already use, so this
+    // is one description per achievement, not a second copy to keep in sync. A
+    // caller can still pass its own opts.desc to override (not currently used by
+    // any call site, but keeps the door open the same way statLine already does).
+    const desc = opts.desc || achDescFor(momentType);
+    const canvas = await buildMomentCard({ ...opts, desc });
+    momentCards[momentType] = { canvas, ...opts, desc };
     const image = canvas.toDataURL(MOMENT_CARD_MIME, MOMENT_CARD_QUALITY);
     sendHaWebhook('momentcard', opts.player, (game && game.category) || '', {
       momentType, headline: opts.headline, statLine: opts.statLine || '', image });
