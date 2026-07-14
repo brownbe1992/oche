@@ -4862,6 +4862,8 @@ const BADGE_INFO = {
   bustedmaximum:      { icon:'💥', label:'Busted Maximum', desc:'Throw three treble 20s (a genuine 180) on a visit that still busts.' },
   nocigar:            { icon:'🤦', label:'No Cigar', desc:'Bust a double-out visit whose darts sum to exactly the score you needed — just not on a double.' },
   staircasefinish:    { icon:'🪜', label:'Staircase Finish', desc:'Check out in exactly three darts by halving the target twice: single, single, then double — e.g. 32 down to 16, down to 8, then double 4.' },
+  triplebull:         { icon:'🐂', label:'Triple Bull', desc:'Check out on 150 by hitting the double bull three times in one visit.' },
+  bullseyefinish:     { icon:'🏹', label:'Bullseye Finish', desc:'Check out with the double bull as your final dart, at any total.' },
   cricket9marks:       { icon:'🎯', label:'9 Marks', desc:'Score 9 marks in one Cricket visit — three trebles, the maximum possible.', cricket:true },
   cricketperfectclose: { icon:'🏆', label:'Perfect Leg', desc:'Close every Cricket number using the fewest darts physically possible for that match.', cricket:true },
   cricketwhitewash:    { icon:'🧹', label:'Whitewash', desc:"Win a Cricket leg without your opponent closing a single number.", cricket:true },
@@ -5596,7 +5598,8 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   challengeallformats:'Full Rotation! 🗓️', nocigar:'No Cigar 🤦', chuckin180:'180! 🎯',
   staircasefinish:'Staircase Finish! 🪜', ghostslayer:'Ghost Slayer! 👻',
   tournamentchampion:'🏆 CHAMPION! 🏆', tournamentgiantslayer:'Giant Slayer ⚔️',
-  guided_clock:'Guided Clock! 🧭', guided_world:'Guided World! 🗺️' };
+  guided_clock:'Guided Clock! 🧭', guided_world:'Guided World! 🗺️',
+  triplebull:'🐂 TRIPLE BULL! 🐂', bullseyefinish:'Bullseye Finish! 🏹' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -5606,7 +5609,8 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   cricket9marks:2500, cricketperfectclose:6000, cricketwhitewash:2500, cricketcomebackkid:3000,
   challengeweek:3000, challengemonth:6000, challengeallformats:3500, nocigar:2500, chuckin180:2500,
   staircasefinish:3000, ghostslayer:3500, tournamentchampion:6000, tournamentgiantslayer:2500,
-  guided_clock:3500, guided_world:5000 };
+  guided_clock:3500, guided_world:5000,
+  triplebull:4000, bullseyefinish:2500 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
@@ -5948,7 +5952,9 @@ function showAchievement(type, player, countText){
   achNameEl.textContent = player || '';
   if(achDescEl) achDescEl.textContent = achDescFor(type);
   if(achCountEl) achCountEl.textContent = countText || '';
-  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion';
+  // Triple Bull (three double-bulls in one visit, a 150 checkout) gets the same
+  // showcase treatment as a nine-darter — a comparably rare, celebration-worthy feat.
+  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'triplebull';
   achOverlayEl.classList.toggle('mega', mega);
   achOverlayEl.classList.add('show');
   const shareBtn = document.getElementById('ach-share-btn');
@@ -7266,6 +7272,22 @@ function enterTurn(){
     // is this visit's PRE-visit remaining (p.score is already mutated to 0 by now).
     { id:'staircasefinish', icon:'🪜', headline:'STAIRCASE FINISH', statLine:'Missed the double, checked out anyway by halving all the way down',
       test: () => ev.win && isStaircaseFinish(_snap.score, _d) },
+    // Triple Bull: checked out on exactly 150 by hitting the double bull three
+    // times in one visit (50+50+50) — there's no treble-bull ring (makeDart()
+    // already downgrades any attempted "treble bull" tap to a single), so this
+    // is three separate double-bull darts, not one dart with a x3 multiplier.
+    // More specific than Bullseye Finish below (a triple-bull checkout's last
+    // dart is trivially also the bull), so it suppresses it rather than both
+    // firing for the same visit — same "same event, more specific label wins"
+    // precedent as Busted Maximum/Ton-titled to Nothing and Bullseye Gauntlet/
+    // Double Trouble above.
+    { id:'triplebull', icon:'🐂', headline:'TRIPLE BULL!', statLine:'150 checkout — three bullseyes',
+      test: () => ev.win && _d.length===3 && _d.every(d=>d.sector===25 && d.mult===2), suppresses:['bullseyefinish'] },
+    // Bullseye Finish: the checkout's last dart is the double bull, at any
+    // total — a standalone achievement distinct from Bullseye Gauntlet above
+    // (which is about hitting double bull twice mid-visit, not finishing on it).
+    { id:'bullseyefinish', icon:'🏹', headline:'BULLSEYE FINISH', statLine:'Checked out on the bull',
+      test: () => ev.win && _d.length>=1 && _d[_d.length-1].sector===25 && _d[_d.length-1].mult===2 },
   ];
   let _chainMatched = CHAIN_CHECKS.filter(c => c.test());
   const _chainSuppressed = new Set(_chainMatched.flatMap(c => c.suppresses || []));

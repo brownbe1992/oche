@@ -1346,7 +1346,7 @@ coverage of them).
   the `onGameCompleted` hook with no room to thread a badge result back
   through that response.
 
-### The 23 badges, exact trigger conditions
+### The 25 badges, exact trigger conditions
 
 **Expanded-chain badges** (the `CHAIN_CHECKS` list in `enterTurn()` — collected
 as an array and filtered by suppression pairs, not an if/else-if chain, so a
@@ -1363,12 +1363,16 @@ turn matching more than one condition queues all of them):
 | 🤦 **No Cigar** | `bust && doubleOut && pointsThisVisit === score` — the visit's attempted points land on exactly the score that was needed, but the last dart wasn't a double (§2's bust rule #3, restated: hitting the target number itself instead of finishing on it). Distinguishable from an overshoot bust (`pointsThisVisit > score`) and a left-on-1 bust (`pointsThisVisit === score - 1`) by this exact equality. Never fires in single-out mode, since hitting the exact remaining there is a win, not a bust. |
 | 😅 **Ton-titled to Nothing** | `bust && sum of attempted dart values >= 100` |
 | 🪜 **Staircase Finish** | `win && isStaircaseFinish(preVisitScore, darts)` (`frontend/scoring.js`, unit-tested in `backend/test/scoring.test.js`) — checked out in exactly 3 darts by aiming at a double, missing to the single, and repeating that all the way down: `darts === [single(N), single(N/2), double(N/4)]` where `N = preVisitScore/2`. Only qualifies when `preVisitScore` is a multiple of 8 with `N<=20` and `N/4>=1` — the 5 qualifying starting scores are 8, 16, 24, 32, and 40 (e.g. 32: single 16, single 8, double 4; 40: single 20, single 10, double 5; 8: single 4, single 2, double 1). `preVisitScore` is read from `_snap.score` (the turn's snapshot, captured before `p.score` is mutated), not `p.score` itself, since by the time `CHAIN_CHECKS` runs `p.score` already reflects the post-visit value. |
+| 🐂 **Triple Bull** | `win && darts.length===3 && every dart is sector===25 && mult===2` — checked out on 150 by hitting the double bull three separate times in one visit. There's no treble-bull ring (`makeDart()` already downgrades any attempted "treble bull" tap to a single), so this is three individual double-bull darts, not one dart at a x3 multiplier. Gets the same mega-tier confetti overlay as a nine-darter (`showAchievement()`'s `mega` check) — a comparably rare feat. |
+| 🏹 **Bullseye Finish** | `win && the visit's last dart has sector===25 && mult===2` — the checkout's final dart is the double bull, at any total. Distinct from Bullseye Gauntlet (double bull hit twice *mid-visit*, not necessarily finishing there) and from Triple Bull (all three darts are the bull, not just the last one). |
 
 **Suppression pairs**: two conditions above are deliberately treated as the same
 event wearing two labels, not two distinct achievements — the more specific one
 suppresses the generic one when both would otherwise match the same visit:
 - **Busted Maximum** suppresses **Ton-titled to Nothing** (a busted 3×T20 is a
   100+ bust by definition).
+- **Triple Bull** suppresses **Bullseye Finish** (a triple-bull checkout's last
+  dart is trivially also the bull, but the more specific story wins).
 - **Bullseye Gauntlet** suppresses **Double Trouble** (double-bull-twice is
   technically "last two darts both doubles" too).
 
