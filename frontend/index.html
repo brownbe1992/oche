@@ -5242,6 +5242,28 @@ function renderCricketPersonalBests(data){
     ${formHtml}
   </div>`;
 }
+// Baseball's Personal Bests — same 5-field shape mirrored from
+// getBaseballPersonalBests(), runs formatted as a whole number in place of
+// X01's avg/Cricket's mpr (a Baseball "average" is runs per inning, a whole-
+// number-feeling scale, not a fractional per-dart one).
+function renderBaseballPersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || (data.bestLegRuns==null && data.fewestDartsToWin==null)){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough legs recorded yet.</p>`;
+    return;
+  }
+  const formDelta = (data.recentFormRuns!=null && data.lifetimeRuns!=null) ? (data.recentFormRuns - data.lifetimeRuns) : null;
+  const formHtml = formDelta!=null
+    ? `<div class="stat-block"><div class="stat-val">${data.recentFormRuns.toFixed(1)}</div><div class="stat-label">Recent Form (last 10 legs) ${formDelta>=0?'▲':'▼'} ${Math.abs(formDelta).toFixed(1)}</div></div>`
+    : '';
+  container.innerHTML=`<div class="summary-grid">
+    ${data.bestLegRuns!=null?`<div class="stat-block"><div class="stat-val">${data.bestLegRuns}</div><div class="stat-label">Best Leg Runs</div></div>`:''}
+    ${data.fewestDartsToWin!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsToWin}</div><div class="stat-label">Fewest Darts to Win</div></div>`:''}
+    ${data.winStreak?`<div class="stat-block"><div class="stat-val">${data.winStreak}</div><div class="stat-label">Current Win Streak</div></div>`:''}
+    ${formHtml}
+  </div>`;
+}
 // No winStreak/recentForm/lifetime fields (see getDoublesPracticePersonalBests()'s
 // own comment) — a round never "wins", so those X01/Cricket concepts don't map.
 function renderDoublesPracticePersonalBests(data){
@@ -8225,6 +8247,22 @@ const CRICKET_STAT_DEFS = [
 const CRICKET_BUBBLE_KEY_MAP = { cricketmpr:'mpr', cricket9marks:'nineMarks', cricketwinpct:'winPct',
   cricketgames:'gamesPlayed', cricketdartsthrown:'dartsThrown', cricketavgdartsperleg:'avgDartsPerLeg' };
 
+// Baseball's own stat-bubble vocabulary (game-modes-roadmap.md "Baseball" — stats
+// pass). Same {key,label,desc,fmt,primary} shape as STAT_DEFS/CRICKET_STAT_DEFS.
+// Keys match getMetricHistory()'s baseball metric case names 1:1, same
+// no-translation-map-needed precedent as Cricket's own keys.
+const BASEBALL_STAT_DEFS = [
+  { key:'baseballrpi',            label:'RPI',            desc:'Runs Per Inning — total runs scored / innings played', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
+  { key:'baseballperfectinnings', label:'Perfect Innings', desc:'Innings where all 3 darts scored the maximum 9 runs', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'baseballwinpct',         label:'Win Rate',       desc:'% of H2H Baseball games won',             fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'baseballgames',          label:'Games Played',   desc:'Baseball games played',                   fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'baseballdartsthrown',    label:'Darts Thrown',   desc:'Total darts thrown in Baseball games',    fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
+  { key:'baseballbestinning',     label:'Best Inning',    desc:'Highest runs scored in a single inning (max 9)', fmt:v=>v!=null?String(Math.round(v)):'—' },
+];
+// Translates a BASEBALL_STAT_DEFS key to getBaseballStatBubbles()'s JSON field name.
+const BASEBALL_BUBBLE_KEY_MAP = { baseballrpi:'rpi', baseballperfectinnings:'perfectInnings', baseballwinpct:'winPct',
+  baseballgames:'gamesPlayed', baseballdartsthrown:'dartsThrown', baseballbestinning:'bestInning' };
+
 // Doubles Practice's own 3 stat bubbles (docs/game-modes-roadmap.md's requested
 // vocabulary: darts per round, doubles hit per round, doubles%) — every bubble
 // here has a matching getMetricHistory() case, same completeness as Cricket's set.
@@ -8357,15 +8395,21 @@ const GAME_TYPES = {
     evaluateVisit: evaluateVisitBaseball,
     resetForNextLeg: resetPlayerForNextLegBaseball,
     playerSnapshot: playerSnapshotBaseball,
-    // No stat vocabulary yet (docs/game-modes-roadmap.md "Baseball" — core
-    // playable game only for this pass). An empty statDefs deliberately excludes
-    // Baseball from the Player Profile/Home page game-type toggle entirely
-    // (`Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length)`),
-    // the same way it would for any other type with nothing to show there yet —
-    // not a bug, a real follow-up left for whoever builds Baseball stats parity.
-    statDefs: [],
-    personalBestsRenderer: null,
-    homeTabRenderer: null
+    // Stats pass (game-modes-roadmap.md "Baseball"): statDefs populated, so
+    // Baseball now shows up on the Player Profile toggle
+    // (`Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length)`).
+    // homeTabRenderer is `false` (not `null`) — same Chuckin/Doubles-Practice
+    // precedent: `null` means "use the built-in X01-shaped default," which
+    // would silently render X01 leaderboard fields (avg, legsWon, ...) against
+    // Baseball's totally different player-snapshot shape. `false` explicitly
+    // opts Baseball out of the Home page toggle entirely
+    // (`renderHomeGameTypeTabs()`'s `g.homeTabRenderer !== false` check) until
+    // a real Baseball-shaped Home leaderboard is built — a separate follow-up
+    // step, the same order Cricket itself shipped in (stats parity first, Home
+    // page navigation as its own later step).
+    statDefs: BASEBALL_STAT_DEFS,
+    personalBestsRenderer: renderBaseballPersonalBests,
+    homeTabRenderer: false
   },
   doubles_practice: {
     id: 'doubles_practice',
@@ -9577,6 +9621,7 @@ const BUBBLE_KEY_MAP = { dartsthrown:'dartsThrown', avgdartsperday:'avgDartsPerD
 // above) since BUBBLE_KEY_MAP itself isn't defined until this point in the file.
 GAME_TYPES.x01.bubbleKeyMap = BUBBLE_KEY_MAP;
 GAME_TYPES.cricket.bubbleKeyMap = CRICKET_BUBBLE_KEY_MAP;
+GAME_TYPES.baseball.bubbleKeyMap = BASEBALL_BUBBLE_KEY_MAP;
 GAME_TYPES.doubles_practice.bubbleKeyMap = DOUBLES_PRACTICE_BUBBLE_KEY_MAP;
 GAME_TYPES.chuckin.bubbleKeyMap = CHUCKIN_BUBBLE_KEY_MAP;
 GAME_TYPES.checkout_trainer.bubbleKeyMap = CHECKOUT_TRAINER_BUBBLE_KEY_MAP;

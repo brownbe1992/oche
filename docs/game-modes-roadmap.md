@@ -427,14 +427,36 @@ Baseball is the second real proof the plugin shape generalizes beyond Cricket.
   match — same "built the same way as X01 for now, no decision forced" resolution
   the open-questions section below already gives Cricket for this exact question.
 
-**Still open (deliberately out of scope this pass — core playable game only, per
-build-order step 5's own framing of Baseball as the second plugin-shape proof, not a
-demand for full X01/Cricket parity in one step)**:
-- **No Baseball-specific stat vocabulary yet** (runs per inning, best single inning,
-  etc.) — `GAME_TYPES.baseball.statDefs` is an empty array, which deliberately
-  excludes it from the Player Profile/Home page game-type toggle entirely (the same
-  `filter(g=>g.statDefs && g.statDefs.length)` gate every other type's toggle
-  presence already goes through) rather than showing an all-empty tab.
+**✅ Done (2026-07) — stats pass**: `GAME_TYPES.baseball.statDefs`
+(`BASEBALL_STAT_DEFS`) is now populated — 6 stat bubbles (RPI, Perfect
+Innings, Win Rate, Games Played, Darts Thrown, Best Inning), a 5-field
+Personal Bests shape (`getBaseballPersonalBests()`), and 6 matching
+`getMetricHistory()` cases, all backed by new `backend/db.js` functions
+(`getBaseballStatBubbles`, `getBaseballPersonalBests`, `getBaseballWonLegs`).
+Baseball now shows up on the Player Profile's game-type toggle. The one
+genuinely novel design problem this required: Baseball has no `turns.leg_won`
+signal the way X01 (`checkout=1`) and Cricket (`turns.leg_won`, set at write
+time) do, because a Baseball leg's winner isn't self-referential to a single
+player's own visit — `evaluateVisitBaseball()`'s round-ending visit and the
+actual highest scorer aren't always the same player. Resolved by deriving
+"won legs" entirely at query time (`getBaseballWonLegs()`): each player's
+total runs per `(game,set,leg)` compared against the max among that leg's
+participants, scoped to `g.completed_at IS NOT NULL` as a safety net against
+an abandoned mid-leg being mistaken for a real result — rather than adding a
+new write-path signal the way Cricket did. **Home page leaderboards
+deliberately not built this pass** — `homeTabRenderer:false` (not `null`)
+explicitly opts Baseball out of the Home page toggle for now, the same
+Chuckin/Doubles-Practice precedent, since `null` would have silently rendered
+X01's leaderboard shape against Baseball's totally different fields (a bug
+caught during this pass's own live verification, before it shipped). Verified
+with a 5-case committed unit suite (`backend/test/db.baseball-stats.test.js`,
+mirroring `db.cricket-stats.test.js`'s structure — including a case that
+specifically proves personal-bests attribution follows total runs, not
+whichever player's turn happened to end the round) and a live Playwright
+check of the full chain: New Game → a full H2H match → Player Profile stat
+bubbles/Personal Bests/metric-history chart, all rendering correctly.
+
+**Still open (deliberately out of scope this pass)**:
 - **No Baseball-native achievements/badges** — only the generic time-of-day badges
   (Night Owl/Early Bird) fire, via the same shared `awardTimeOfDayBadges()` helper
   every other game type uses.
@@ -442,11 +464,15 @@ demand for full X01/Cricket parity in one step)**:
   `finishUnit()` treats Baseball the same way it already treats Cricket (skip
   straight past the X01-shaped stat panel/share button that assume fields Baseball
   doesn't have) rather than reading fields that don't exist on a baseball player.
+- **No Home page leaderboards** — see "stats pass" above; `homeTabRenderer:false`
+  is a deliberate placeholder, not a gap that was missed.
 - **Committed tests**: `backend/test/scoring.test.js`'s
   `evaluateVisitBaseball`/`baseballInningTarget` suite (16 cases) covers target
   scoring, round/match completion, the exact-tie-continues-to-extra-innings rule,
   and the extra-innings target — per CLAUDE.md's "every new calculation gets a
-  committed test" convention. No Playwright end-to-end pass yet.
+  committed test" convention. No Playwright end-to-end pass covering the whole
+  New-Game-to-completion flow as a single automated script yet (verified live and
+  by hand instead, both for the core game and for this stats pass).
 
 ## Killer (rules primer — for whoever builds this next)
 
@@ -960,12 +986,20 @@ X01-only, see its status note above).
    scope split. Verified with a 16-case committed unit suite
    (`backend/test/scoring.test.js`) covering inning-target scoring, round/match
    completion, the exact-tie-continues rule, and extra innings.
+   **✅ Player Profile stats parity done (2026-07, separate follow-up pass)** —
+   see "Baseball" above for the full write-up (`getBaseballStatBubbles()`/
+   `getBaseballPersonalBests()`/`getBaseballWonLegs()`, 6 stat bubbles, 5-field
+   Personal Bests, 6 metric-history cases). Achievements, Home page leaderboards,
+   and the matchwin moment card/share button remain open (tracked as
+   `docs/open-roadmap-items.md` item #12).
 6. **✅ Done (2026-07): generalize the Player Profile/Home page game-type toggle**
    beyond hardcoded per-type buttons — see "Toggle mechanism generalized" above.
    The toggle mechanism itself is N-way now; the backend stat-fetch side of the
-   same concern (a bespoke SQL function set per type, forever) is explicitly
-   still open for Baseball — Just Chuckin' It's own bespoke set shipped as part
-   of item 9 below.
+   same concern (a bespoke SQL function set per type, forever) — Just Chuckin' It's
+   own bespoke set shipped as part of item 9 below, and Baseball's own followed in
+   a later pass (see item 5's update above) — confirming the pattern holds without
+   ever needing the generic-parameterized-query redesign this section originally
+   floated as an open question.
 7. **✅ Done — Doubles Practice** — the first Practice Drill Mode built. Per-dart
    evaluation (`evaluateDartDoublesPractice()`), "all simultaneously live"
    multi-double sessions, its own 3 stat bubbles + 2-field Personal Bests, New

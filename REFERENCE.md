@@ -374,7 +374,7 @@ then tap the target" interaction with a single target button (this inning's
 number) instead of Cricket's seven. Live scoreboard (`renderers.baseball` in
 `display.html`) is the same chalkboard-table shape as Cricket's (rows =
 innings 1-9, columns = players), always single-column regardless of
-orientation.
+orientation. Baseball's stat vocabulary is documented in §3 ("Baseball stats").
 
 ### Doubles Practice per-dart rules — `evaluateDartDoublesPractice(dart, targets)` (`frontend/scoring.js`)
 
@@ -995,6 +995,74 @@ between X01's leaderboard set and Cricket's own:
 All four are fetched in the same upfront `Promise.all` `renderHome()` already
 uses for X01 (`homeData.cricket.h2h`/`.practice`/`.wins`) — no separate loading
 state or lazy-fetch-on-toggle.
+
+### Baseball stats (`GAME_TYPES.baseball.statDefs` / `BASEBALL_STAT_DEFS`)
+
+A separate, smaller stat vocabulary from both X01's and Cricket's — Baseball's
+mechanics (fixed 9 innings, runs-based scoring, no bust/checkout/closing
+concept) don't map onto either. Unlike Cricket's marks (derived from
+`darts.sector`/`multiplier` matched against `config.numbers` at query time),
+`turns.scored` for a Baseball turn already **is** that visit's runs
+(`enterTurnBaseball()` writes `scored:ev.scored` directly), so every formula
+below reads `turns.scored` as-is — no per-dart derivation needed. Every query
+is scoped via `_scope({mode, gameType:'baseball'})`.
+
+**Stat bubbles** (`getBaseballStatBubbles(name, mode)`):
+
+| Key | Label | Formula |
+|---|---|---|
+| `baseballrpi` | RPI | Runs Per Inning — `SUM(scored) / COUNT(rounds)`, Baseball's analog of X01's 3-dart average / Cricket's MPR. A scoreless turn still counts as a round |
+| `baseballperfectinnings` | Perfect Innings | Count of turns where `scored=9` — 3 darts, each a treble on that inning's target number, the maximum possible (Baseball's 180/9-Marks analog) |
+| `baseballwinpct` | Win Rate | `won / played * 100` over completed Baseball games this player took part in |
+| `baseballgames` | Games Played | Count of completed Baseball games this player took part in |
+| `baseballdartsthrown` | Darts Thrown | Count of darts thrown in Baseball games (a baseball-scoped breakdown — the global "Darts Thrown" bubble already includes these too) |
+| `baseballbestinning` | Best Inning | `MAX(scored)` across every turn — the player's personal-best single-inning run total (max possible 9) |
+
+**Personal Bests** (`getBaseballPersonalBests(name, mode)`, same 5-field shape
+as X01's/Cricket's, adapted to what's actually meaningful for a fixed-inning-
+count game): `bestLegRuns` (highest total runs in a single won leg),
+`fewestDartsToWin` (fewest total darts across a won leg — reads as "won in
+regulation vs. needed extra innings," since darts-per-leg in Baseball doesn't
+vary with skill the way X01's does), `winStreak` (current consecutive-win
+streak, Baseball games only), `recentFormRuns` (avg runs over the last 10 won
+legs), `lifetimeRuns` (avg runs over every won leg).
+
+**No `turns.leg_won` signal** — unlike X01 (`checkout=1`) and Cricket
+(`turns.leg_won`, set by `enterTurnCricket()`), Baseball never writes a "this
+turn won the leg" flag to any turn at all, because a Baseball leg's winner
+isn't self-referential to a single player's own visit the way a checkout or
+closing every Cricket number is: `evaluateVisitBaseball()`'s own win check can
+resolve on a visit that belongs to the *losing* player (the round-ending visit
+and the actual highest scorer aren't always the same player — see §2's
+"Baseball rules"). Instead, `getBaseballWonLegs(playerId, mode)` derives a
+"won leg" at query time: each player's total runs per `(game_id, set_no,
+leg_no)`, compared against the max among that leg's participants — exactly
+how the live game itself determines a winner. Scoped to `g.completed_at IS
+NOT NULL` as a safety net: an abandoned mid-leg's partial totals can never be
+mistaken for a real result, since an abandoned game never sets `completed_at`
+at all — this can only ever under-count a real completed leg belonging to a
+since-abandoned multi-leg match, never fabricate a win. (A known pitfall
+avoided here: summing `turns.scored` while joined to `darts` fans out each
+turn's value by its own dart count — every query above pre-aggregates per-turn
+in a subquery first, the same precaution `getMetricHistory()`'s X01 `'avg'`
+case and Cricket's marks derivation already take.)
+
+**Metric history** (`getMetricHistory()`, same 6 keys as the stat bubbles
+above) — `baseballwinpct`/`baseballgames` bucket by the game's completion
+date, matching Cricket's own per-game bucket granularity; the other 4 bucket
+per-turn, reading `turns.scored` directly with no darts join (so no fan-out
+risk in these particular cases, unlike the Personal Bests leg-total queries
+above).
+
+**Player Profile UI**: `playerGameType` toggle, same mechanism as Cricket's.
+**Home page leaderboards**: not built yet — `homeTabRenderer:false` explicitly
+opts Baseball out of the Home page toggle (the same Chuckin/Doubles-Practice
+precedent — `false`, not `null`, since `null` means "fall back to X01's own
+leaderboard shape," which would silently render nonsense against Baseball's
+totally different player-snapshot fields) until a real Baseball-shaped Home
+leaderboard set is built, a separate follow-up step (the same order Cricket's
+own build went: stats parity first, Home page navigation as its own later
+step).
 
 ### Doubles Practice stats (`GAME_TYPES.doubles_practice.statDefs` / `DOUBLES_PRACTICE_STAT_DEFS`)
 

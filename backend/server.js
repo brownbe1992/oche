@@ -722,6 +722,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, Object.assign({}, db.getCheckoutTrainerPersonalBests(name, mode), db.getCheckoutBlitzPersonalStats(name)));
       }
       return send(res, 200, gameType === 'cricket' ? db.getCricketPersonalBests(name, mode)
+        : gameType === 'baseball' ? db.getBaseballPersonalBests(name, mode)
         : gameType === 'doubles_practice' ? db.getDoublesPracticePersonalBests(name, mode)
         : gameType === 'chuckin' ? db.getChuckinPersonalBests(name, mode)
         : gameType === 'around_the_clock' ? db.getAroundTheClockPersonalBests(name, mode)
@@ -733,6 +734,7 @@ const server = http.createServer(async (req, res) => {
       const name = url.searchParams.get('name');
       const gameType = url.searchParams.get('gameType');
       return send(res, 200, gameType === 'cricket' ? db.getCricketStatBubbles(name, mode)
+        : gameType === 'baseball' ? db.getBaseballStatBubbles(name, mode)
         : gameType === 'doubles_practice' ? db.getDoublesPracticeStatBubbles(name, mode)
         : gameType === 'chuckin' ? db.getChuckinStatBubbles(name, mode)
         : gameType === 'checkout_trainer' ? db.getCheckoutTrainerStatBubbles(name, mode)

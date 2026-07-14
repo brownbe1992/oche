@@ -2016,6 +2016,124 @@ function getCricketPersonalBests(playerName, mode) {
   return { bestLegMpr, fewestDartsToClose, winStreak, recentFormMpr, lifetimeMpr };
 }
 
+// Baseball's stat-bubble equivalents (game-modes-roadmap.md "Baseball" — stats
+// pass). Runs Per Inning (RPI) is Baseball's direct analog of X01's 3-dart
+// average / Cricket's MPR: total runs / total rounds (innings/turns) played.
+// Unlike Cricket's marks (derived from darts+config.numbers at query time),
+// turns.scored for a Baseball turn already IS that visit's runs
+// (enterTurnBaseball() writes scored:ev.scored directly), so these read
+// turns.scored as-is — no per-dart derivation needed.
+function getBaseballStatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'baseball' });
+
+  const row = db.prepare(`
+    SELECT COUNT(*) AS rounds, COALESCE(SUM(t.scored),0) AS totalRuns,
+           COALESCE(MAX(t.scored),0) AS bestInning,
+           COALESCE(SUM(CASE WHEN t.scored=9 THEN 1 ELSE 0 END),0) AS perfectInnings
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE t.player_id=? ${scope}
+  `).get(p.id);
+  const rounds = row?.rounds ?? 0;
+  const rpi = rounds > 0 ? (row.totalRuns / rounds) : null;
+  const bestInning = rounds > 0 ? row.bestInning : null;
+
+  const gamesRow = db.prepare(`
+    SELECT COUNT(*) AS played, SUM(CASE WHEN g.winner_id=? THEN 1 ELSE 0 END) AS won
+    FROM game_players gp JOIN games g ON g.id=gp.game_id
+    WHERE gp.player_id=? ${scope} AND g.completed_at IS NOT NULL
+  `).get(p.id, p.id);
+  const gamesPlayed = gamesRow?.played ?? 0;
+  const winPct = gamesPlayed > 0 ? (gamesRow.won / gamesPlayed * 100) : null;
+
+  const dartsThrown = db.prepare(`SELECT COUNT(*) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+
+  return { rpi, perfectInnings: row?.perfectInnings ?? 0, winPct, gamesPlayed, dartsThrown, bestInning };
+}
+
+// Baseball has no turns.leg_won signal (unlike X01/Cricket): a Baseball leg's
+// winner isn't self-referential to a single player's own visit the way a
+// checkout or closing every Cricket number is — evaluateVisitBaseball()'s own
+// comment notes the round-ending visit and the actual highest scorer aren't
+// always the same player, so there's no one turn to flag "this won the leg."
+// Instead, a "won leg" is derived at query time: each player's total runs per
+// (game,set,leg), compared against the max among that leg's participants —
+// exactly how the live game itself determines a winner (see
+// evaluateVisitBaseball()'s matchComplete/winnerIndex). Scoped to
+// g.completed_at IS NOT NULL as a safety net: an abandoned mid-leg's partial
+// totals can never be mistaken for a real result, since an abandoned game
+// never sets completed_at at all — this can only ever under-count a real
+// completed leg belonging to a since-abandoned multi-leg match, never
+// fabricate a win.
+function getBaseballWonLegs(playerId, mode) {
+  const scope = _scope({ mode, gameType: 'baseball' });
+  return db.prepare(`
+    WITH turn_totals AS (
+      -- Per-turn darts pre-aggregated first (like getMetricHistory()'s 'avg' case
+      -- does for X01) so the darts JOIN doesn't fan out t.scored — without this,
+      -- a 3-dart turn's scored value gets summed 3x instead of once.
+      SELECT t.id AS turn_id, t.game_id, t.set_no, t.leg_no, t.player_id,
+             t.scored AS runs, COUNT(d.id) AS darts
+      FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+      WHERE g.completed_at IS NOT NULL ${scope}
+      GROUP BY t.id
+    ),
+    leg_totals AS (
+      SELECT game_id, set_no, leg_no, player_id, MAX(turn_id) AS lastTurnId,
+             SUM(runs) AS runs, SUM(darts) AS darts
+      FROM turn_totals
+      GROUP BY game_id, set_no, leg_no, player_id
+    ),
+    leg_max AS (
+      SELECT game_id, set_no, leg_no, MAX(runs) AS maxRuns
+      FROM leg_totals GROUP BY game_id, set_no, leg_no
+    )
+    SELECT lt.game_id, lt.set_no, lt.leg_no, lt.runs, lt.darts, lt.lastTurnId
+    FROM leg_totals lt JOIN leg_max lm
+      ON lm.game_id=lt.game_id AND lm.set_no=lt.set_no AND lm.leg_no=lt.leg_no
+    WHERE lt.player_id=? AND lt.runs=lm.maxRuns
+  `).all(playerId);
+}
+
+// Baseball's Personal Bests — same 5-field shape as getPersonalBests()/
+// getCricketPersonalBests(), adapted to what's actually meaningful for a
+// fixed-inning-count game: darts-per-leg is nearly constant in X01/Cricket
+// terms of reflecting skill (every leg is 9 innings times however many darts
+// each visit used, extended only by extra innings on a tie), so
+// fewestDartsToWin reads as "won in regulation vs. needed extra innings"
+// rather than Cricket's "closed efficiently" framing — still a genuine skill
+// signal, just a differently-shaped one.
+function getBaseballPersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+
+  const legs = getBaseballWonLegs(p.id, mode);
+  const bestLegRuns = legs.length ? Math.max(...legs.map(l => l.runs)) : null;
+  const fewestDartsToWin = legs.length ? Math.min(...legs.map(l => l.darts)) : null;
+
+  const recentLegs = legs.slice().sort((a, b) => b.lastTurnId - a.lastTurnId).slice(0, 10);
+  const recentFormRuns = recentLegs.length ? recentLegs.reduce((s, l) => s + l.runs, 0) / recentLegs.length : null;
+  const lifetimeRuns = legs.length ? legs.reduce((s, l) => s + l.runs, 0) / legs.length : null;
+
+  let winStreak = 0;
+  if (mode !== 'practice') {
+    const h2hScope = _scope({ mode: 'h2h', gameType: 'baseball' });
+    const recentGames = db.prepare(`
+      SELECT g.winner_id AS winnerId
+      FROM games g JOIN game_players gp ON gp.game_id=g.id
+      WHERE gp.player_id=? AND g.completed_at IS NOT NULL ${h2hScope}
+      ORDER BY g.completed_at DESC
+      LIMIT 50
+    `).all(p.id);
+    for (const r of recentGames) {
+      if (r.winnerId === p.id) winStreak++; else break;
+    }
+  }
+
+  return { bestLegRuns, fewestDartsToWin, winStreak, recentFormRuns, lifetimeRuns };
+}
+
 /* ---------- Doubles Practice (docs/game-modes-roadmap.md) ----------
    Solo drill mode: no opponent, no win/loss, no legs won — a "round" is one
    turns.leg_no grouping (incremented client-side by startNextRoundDoublesPractice()
@@ -2501,6 +2619,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
   // Cricket's metric cases below scope through _scope() (docs/archive/existing-app-prep-roadmap.md
   // item 1) instead of hand-rolling their own "AND g.game_type='cricket'" alongside modeWhere.
   const cricketScope = _scope({ mode: opts.mode, gameType: 'cricket' });
+  const baseballScope = _scope({ mode: opts.mode, gameType: 'baseball' });
   const doublesPracticeScope = _scope({ mode: opts.mode, gameType: 'doubles_practice' });
   const chuckinScope = _scope({ mode: opts.mode, gameType: 'chuckin' });
   const atcScope = _scope({ mode: opts.mode, gameType: 'around_the_clock' });
@@ -2699,6 +2818,43 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         WHERE t.player_id=? ${cricketScope} ${weightWhere}
         GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.leg_won)>0
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
+
+    // ---- Baseball metrics (game-modes-roadmap.md "Baseball" — stats pass) ----
+    case 'baseballrpi':
+      // Runs Per Inning: turns.scored already IS a Baseball visit's runs (set
+      // by enterTurnBaseball()), so this reads it directly — no per-dart
+      // derivation needed, unlike Cricket's marks.
+      return db.prepare(`SELECT ${T.fmt} AS bucket, CAST(SUM(t.scored) AS REAL)/NULLIF(COUNT(*),0) AS value
+        FROM turns t JOIN games g ON g.id=t.game_id
+        WHERE t.player_id=? ${baseballScope} ${T.and} ${weightWhere}
+        GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'baseballperfectinnings':
+      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(*) AS value
+        FROM turns t JOIN games g ON g.id=t.game_id
+        WHERE t.player_id=? ${baseballScope} ${T.and} ${weightWhere} AND t.scored=9
+        GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'baseballwinpct': {
+      const G = bld('g.completed_at');
+      return db.prepare(`SELECT bucket, CAST(SUM(won) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
+        SELECT ${G.fmt} AS bucket, CASE WHEN g.winner_id=? THEN 1 ELSE 0 END AS won
+        FROM game_players gp JOIN games g ON g.id=gp.game_id
+        WHERE gp.player_id=? AND g.completed_at IS NOT NULL ${baseballScope} ${G.and}
+      ) GROUP BY bucket ORDER BY bucket`).all(p.id, p.id);
+    }
+    case 'baseballgames': {
+      const G = bld('g.completed_at');
+      return db.prepare(`SELECT ${G.fmt} AS bucket, COUNT(*) AS value
+        FROM game_players gp JOIN games g ON g.id=gp.game_id
+        WHERE gp.player_id=? AND g.completed_at IS NOT NULL ${baseballScope} ${G.and}
+        GROUP BY bucket ORDER BY bucket`).all(p.id);
+    }
+    case 'baseballdartsthrown':
+      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(d.id) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${baseballScope} ${T.and} ${weightWhere} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'baseballbestinning':
+      return db.prepare(`SELECT ${T.fmt} AS bucket, MAX(t.scored) AS value
+        FROM turns t JOIN games g ON g.id=t.game_id
+        WHERE t.player_id=? ${baseballScope} ${T.and} ${weightWhere}
+        GROUP BY bucket ORDER BY bucket`).all(...params);
 
     // ---- Doubles Practice metrics (docs/game-modes-roadmap.md) ----
     case 'doublespracticepct':
@@ -5073,6 +5229,7 @@ module.exports = {
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
   getGhostCandidateLegs, getGhostLegScript,
   getCricketStatBubbles, getCricketNineMarksStats, getCricketPersonalBests,
+  getBaseballStatBubbles, getBaseballPersonalBests,
   getCricketMprLeaderboard, getCricketWinLeaderboard, getCricketPerfectLegStats,
   getDoublesPracticeStatBubbles, getDoublesPracticePersonalBests,
   getDoublesPracticeAccuracyLeaderboard, getDoublesPracticeBestRoundStats,
