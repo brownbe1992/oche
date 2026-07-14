@@ -33,8 +33,10 @@
 > through SEC-24) — see the entries at the bottom. **BUG-16** was opened by a live
 > user bug report (2026-07) against `importPlayerExport()`, now fixed. **BUG-17**
 > was opened by a live user bug report (2026-07) against Ghost mode's past-leg
-> picker showing "Invalid Date," now fixed. **BUG-1 through BUG-17 are all fixed
-> as of this writing** — nothing open on either tracker.
+> picker showing "Invalid Date," now fixed. **BUG-18** was opened by a live user
+> bug report (2026-07) against Ghost mode incorrectly offering a "Next leg"
+> button instead of ending the race, now fixed. **BUG-1 through BUG-18 are all
+> fixed as of this writing** — nothing open on either tracker.
 
 ## Severity legend
 
@@ -1090,6 +1092,113 @@ did too once a leg was selected and the race started.
 **Verify:** the new test suite passes; a live server + Playwright check confirms
 the Ghost mode leg picker renders a real date for a freshly-won leg instead of
 "Invalid Date"; full backend suite green.
+
+---
+
+## BUG-18 — Ghost mode incorrectly offered a "Next leg" button instead of ending the race, and never marked its game complete server-side  **(MED, user-facing / data-integrity)**
+
+**Status: ✅ Fixed (2026-07).** `onLegWon()`'s set/match-win gate in
+`frontend/index.html` now reads `(!game.practice || game.hasGhost)` instead of
+`!game.practice` alone. Ghost mode's win/loss recording
+(`DB.recordGhostRace()`/Ghost Slayer badge check) was moved from the function's
+unconditional "just a leg" tail into the "game (match) won" branch, since a
+ghost race — always exactly 1 leg/1 set — now always resolves there instead,
+making the tail permanently unreachable for ghost races. Verified end-to-end
+against a live server: won a real leg, started and completed a ghost race
+against it, and confirmed the end screen shows "GAME OVER"/"New game" (not
+"LEG COMPLETE"/"Next leg"), and directly inspected the SQLite file afterward to
+confirm the race's `games` row got `completed_at` and `winner_id` set — which
+it never did before this fix, a second, previously undiscovered bug this same
+change happens to resolve. Full backend suite unaffected (605 tests, this fix
+is frontend-only). (Found via a live user bug report: clicking "Next leg"
+after a ghost race started a new game where the ghost no longer auto-played
+and the user could enter scores for it manually — a direct consequence of the
+race never actually ending.)
+
+**Where:** `frontend/index.html`, `onLegWon()` (the X01 leg/set/game
+progression function; Ghost mode is X01-only — `setMode()` forces
+`setup.gameType` back to `'x01'` whenever mode is `'ghost'` or `'challenge'`,
+so Cricket's/Baseball's own `onLegWon*()` siblings were never affected):
+
+```js
+if(!game.practice && w.legsWon >= game.legsPerSet){      // set won (H2H only)
+  ...
+  if(w.setsWon >= game.setsPerGame){   // game (match) won
+    ...
+    DB.completeGame(w.name);
+    ...
+    finishUnit('game', w.name);
+    return;
+  }
+  ...
+}
+...
+// unconditional tail, always reached when the gate above is false
+if(game.hasGhost && game.ghostSourceLeg && DB.gameId != null){
+  DB.recordGhostRace(...);   // <-- only ever reached here, since game.practice was always true for ghost
+}
+game.matchResult = { ..., kind:'leg', ... };
+finishUnit('leg', w.name);
+```
+
+**Root cause:** `setMode('ghost')` sets `setup.practice = (mode !== 'h2h')` —
+true for every mode except `'h2h'`, with no special case for `'ghost'` — so
+`game.practice` is always `true` for a ghost race, exactly like a genuine
+open-ended practice session. `startGame()` separately forces
+`legsPerSet`/`setsPerGame` to `1` for ghost mode (via its `drillModes` list),
+which would be enough on its own to make `w.legsWon >= game.legsPerSet` true
+after the very first leg — but the outer gate's `!game.practice` check blocked
+entry into that branch regardless, since `game.practice` is unconditionally
+true. The existing comment directly above this gate even asserted this was
+fine ("The set/match-win tree below this is separately gated on
+`!game.practice`, always true for a ghost race anyway") — describing the
+actual (buggy) behavior without anyone verifying it was the *correct*
+behavior. A ghost race therefore always fell through to the same
+unconditional "just a leg" tail every genuine open-ended practice leg uses —
+`kind:'leg'`, `finishUnit('leg', ...)` — rendering "LEG COMPLETE" with "Next
+leg"/"End game" buttons, and never once reaching `DB.completeGame()`.
+
+**Misbehavior (verified):** winning (or losing) a ghost race showed "LEG
+COMPLETE" with a "Next leg" button. Clicking it called `startNextLeg()` on the
+same `game` object — which resets scores/turn order for a fresh leg but has no
+special handling to re-arm the ghost's scripted replay — leaving the ghost
+player present as an ordinary, human-scoreable slot with no auto-play behind
+it, exactly the "entering scores for the ghost" symptom reported. Separately,
+because `DB.completeGame()` was never reached, every ghost race's `games` row
+was left with `completed_at = NULL` and `winner_id = NULL` forever, regardless
+of whether the human ever clicked "End game" — a data-integrity gap only
+visible by inspecting the database directly, not from the UI.
+
+**Fix (step by step):**
+1. Change `onLegWon()`'s gate from `if(!game.practice && w.legsWon >=
+   game.legsPerSet)` to `if((!game.practice || game.hasGhost) && w.legsWon >=
+   game.legsPerSet)` — a ghost race now always enters the set/match-win tree,
+   and since `legsPerSet`/`setsPerGame` are already forced to `1`, it always
+   resolves straight to the innermost "game (match) won" branch.
+2. Move the `game.hasGhost && game.ghostSourceLeg` win/loss-recording block
+   (Ghost Slayer badge, `DB.recordGhostRace()`) from the function's
+   unconditional tail into the "game (match) won" branch, immediately before
+   its own `finishUnit('game', w.name); return;` — leaving it in the tail
+   would have made it permanently unreachable for ghost races the moment step
+   1 started routing them through the branch above instead.
+3. No changes needed to `opp` (`game.players.length===2 && !game.hasGhost ?
+   ... : null`) or anything gated on it (Comeback Kid, Giant Slayer, Rematch,
+   Grudge Match, Nerves of Steel, the H2H-summary fetch) — a ghost is still
+   never treated as a real H2H opponent for any of those, unaffected by this
+   fix. `h2hStatsHtml(winner,'game')` and `matchWinStatLine()` (both already
+   generic over `game.players`, not gated on `opp`) now render for a completed
+   ghost race for the first time — verified safe, since both only read
+   generic per-player stat fields every player object (including the ghost's)
+   already carries.
+4. No committed `node:test` case — this is a DOM/game-state control-flow
+   defect with no pure-function calculation to extract, the same class of gap
+   BUG-8 covered with a live Playwright check instead of a `node:test` case.
+
+**Verify:** live server + Playwright: played and won a source leg, started and
+completed a ghost race against it, confirmed "GAME OVER"/"New game" (not "LEG
+COMPLETE"/"Next leg"); direct SQLite inspection confirmed the ghost race's
+`games` row got `completed_at`/`winner_id` set. Full backend suite green (605
+tests, unaffected — this fix touches no backend code).
 
 ---
 

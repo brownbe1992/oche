@@ -7763,7 +7763,13 @@ function onLegWon(wi){
   // A ghost is never treated as a real H2H opponent — no Comeback Kid, Giant
   // Slayer, Rematch, Grudge Match, or Nerves of Steel for racing your own past
   // leg (those are all gated on `opp` below). The set/match-win tree below this
-  // is separately gated on `!game.practice`, always true for a ghost race anyway.
+  // IS a real match for a ghost race, though: setMode('ghost') sets
+  // game.practice=true (no ghost-specific carve-out there), so that tree checks
+  // `(!game.practice || game.hasGhost)` instead of `!game.practice` alone —
+  // otherwise a ghost race, which is always exactly 1 leg/1 set (docs/archive/
+  // ghost-opponent-roadmap.md), never reaches finishUnit('game', ...) and
+  // incorrectly offers a "Next leg" button instead of ending the race
+  // (BUG-18, found via a live user bug report).
   const opp = game.players.length===2 && !game.hasGhost ? game.players.find(p=>p!==w) : null;
   // Snapshots taken before any of this leg's win bookkeeping mutates legsWon/setsWon —
   // "was this a decider" only makes sense measured against the state entering the leg.
@@ -7793,7 +7799,7 @@ function onLegWon(wi){
   // the next set" bookkeeping that will never actually have a next set to run.
   const legsAtWin = new Map(game.players.map(p => [p, p.legsWon]));
 
-  if(!game.practice && w.legsWon >= game.legsPerSet){      // set won (H2H only)
+  if((!game.practice || game.hasGhost) && w.legsWon >= game.legsPerSet){      // set won (H2H, or a ghost race)
     w.setsWon += 1;
     game.players.forEach(p=>p.legsWon=0);  // reset legs for the next set
 
@@ -7848,6 +7854,31 @@ function onLegWon(wi){
           }
         }).catch(()=>{});
       }
+      // Ghost Opponent win/loss tracking (docs/archive/ghost-opponent-roadmap.md): a ghost
+      // race is always exactly 1 leg/1 set (legsPerSet/setsPerGame are forced to 1 in
+      // startGame()), so with the (!game.practice || game.hasGhost) gate above, a ghost
+      // race's win ALWAYS reaches this "game (match) won" branch — never the plain-leg
+      // tail further down, which is why this now lives here instead of there (moved as
+      // part of the BUG-18 fix — leaving it in the unconditional tail would have made it
+      // permanently unreachable for ghost races the moment this branch started firing for
+      // them). game.players[0] is always the human, game.players[1] always the ghost (see
+      // newGhostPlayer()), so wi identifies which side just won.
+      if(game.hasGhost && game.ghostSourceLeg && DB.gameId != null){
+        const human = game.players[0], ghost = game.players[1];
+        const _snapGs = game.lastTurnSnapshot;
+        DB.recordGhostRace(human.name, {
+          gameId: DB.gameId,
+          sourceGameId: game.ghostSourceLeg.gameId, sourceSetNo: game.ghostSourceLeg.setNo, sourceLegNo: game.ghostSourceLeg.legNo,
+          result: wi === 0 ? 'win' : 'loss',
+          humanDarts: human.legDarts, ghostDarts: ghost.legDarts,
+        }).then(r=>{
+          if(r && r.ghostSlayerNewlyEarned){
+            trackBadgeForUndo(_snapGs, human.name, 'ghost_slayer');
+            queueBadge('ghostslayer', human.name, _snapGs, 'First time!');
+            fireMomentCard('ghostslayer', { icon:'👻', headline:'GHOST SLAYER', player:human.name, statLine:'Beat your ghost opponent' });
+          }
+        }).catch(logErr);
+      }
       game.matchResult = { ts: Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:_bigFish };
       fireMomentCard('matchwin', { icon:'🏅', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) });
       finishUnit('game', w.name);
@@ -7893,27 +7924,9 @@ function onLegWon(wi){
     lastLegWasChallenge = true;
     activeChallenge = null;
   }
-  // Ghost Opponent win/loss tracking (docs/archive/ghost-opponent-roadmap.md): a ghost
-  // race is always exactly 1 leg/1 set, so this leg-win IS the race's result —
-  // game.players[0] is always the human, game.players[1] always the ghost (see
-  // newGhostPlayer()), so wi identifies which side just won. Recorded once, here,
-  // since the leg-complete screen offers no "undo" control past this point.
-  if(game.hasGhost && game.ghostSourceLeg && DB.gameId != null){
-    const human = game.players[0], ghost = game.players[1];
-    const _snapGs = game.lastTurnSnapshot;
-    DB.recordGhostRace(human.name, {
-      gameId: DB.gameId,
-      sourceGameId: game.ghostSourceLeg.gameId, sourceSetNo: game.ghostSourceLeg.setNo, sourceLegNo: game.ghostSourceLeg.legNo,
-      result: wi === 0 ? 'win' : 'loss',
-      humanDarts: human.legDarts, ghostDarts: ghost.legDarts,
-    }).then(r=>{
-      if(r && r.ghostSlayerNewlyEarned){
-        trackBadgeForUndo(_snapGs, human.name, 'ghost_slayer');
-        queueBadge('ghostslayer', human.name, _snapGs, 'First time!');
-        fireMomentCard('ghostslayer', { icon:'👻', headline:'GHOST SLAYER', player:human.name, statLine:'Beat your ghost opponent' });
-      }
-    }).catch(logErr);
-  }
+  // Ghost races never reach this plain-leg tail (they're always exactly 1 leg/1
+  // set, so the gate above always takes the "game (match) won" branch instead —
+  // see the ghost-race-recording block moved there as part of the BUG-18 fix).
   game.matchResult = { ts: Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:_bigFish };
   finishUnit('leg', w.name);
 }
