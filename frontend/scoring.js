@@ -198,6 +198,23 @@ function evaluateVisitBaseball(player, darts, game){
   return { inningRuns, totalRuns, runsThisVisit, scored:runsThisVisit, target, roundComplete, matchComplete, winnerIndex };
 }
 
+/* ---------- server timestamp parsing ----------
+   SQLite's `datetime('now')` (backend/db.js's default for every *_at column)
+   produces "YYYY-MM-DD HH:MM:SS" -- space-separated, always UTC, no 'Z' or
+   offset suffix. That's outside the one format new Date(string) is required
+   to parse consistently (ISO 8601, "...THH:MM:SSZ") -- V8 happens to accept
+   the space-separated form leniently, but engines that don't (this bug was
+   reported from a browser where it produced "Invalid Date" for every entry
+   in the Ghost mode leg picker) return Invalid Date instead. Centralized here
+   since the same gap had already needed three separate inline fixes elsewhere
+   in frontend/index.html before Ghost mode's two call sites turned up with
+   the identical bug, unfixed. */
+function parseSqliteTimestamp(dt){
+  if(!dt) return null;
+  const hasTz = /[zZ]|[+-]\d\d:?\d\d$/.test(dt);
+  return new Date(String(dt).replace(' ', 'T') + (hasTz ? '' : 'Z'));
+}
+
 /* ---------- checkout calculator ----------
    Computes a real, valid finishing route for ANY reachable score, instead of
    relying on a hardcoded list. Exhaustively verified for every finishable
@@ -426,7 +443,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     dartValue, dartLabel, makeDartCore,
     evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS,
-    evaluateVisitBaseball, baseballInningTarget,
+    evaluateVisitBaseball, baseballInningTarget, parseSqliteTimestamp,
     evaluateDartDoublesPractice, evaluateDartAroundTheClock, isStaircaseFinish,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,
     pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,

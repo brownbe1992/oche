@@ -2718,7 +2718,7 @@ function renderGhostLegPicker(){
 function renderGhostLegList(legs){
   const box = document.getElementById('ghost-leg-picker-body');
   box.innerHTML = legs.map((l,i)=>{
-    const date = new Date(l.date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+    const date = parseSqliteTimestamp(l.date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
     const sel = setup.ghostLeg && setup.ghostLeg.gameId===l.gameId && setup.ghostLeg.setNo===l.setNo && setup.ghostLeg.legNo===l.legNo;
     return `<button class="btn ${sel?'btn-primary':'btn-ghost'}" style="display:flex;justify-content:space-between;width:100%;margin-bottom:6px;text-align:left" onclick="selectGhostLeg(${i})">
       <span>${escapeHtml(date)} · ${escapeHtml(l.category)}${l.practice?'':' (H2H)'}</span>
@@ -3779,7 +3779,7 @@ async function startGame(){
     // win/loss tracking) — this survives regardless of what setup.ghostLeg becomes
     // after leaving the New Game screen.
     game.ghostSourceLeg = { gameId: setup.ghostLeg.gameId, setNo: setup.ghostLeg.setNo, legNo: setup.ghostLeg.legNo };
-    const ghostLabel = `👻 Ghost (${new Date(setup.ghostLeg.date).toLocaleDateString(undefined,{month:'short',day:'numeric'})})`;
+    const ghostLabel = `👻 Ghost (${parseSqliteTimestamp(setup.ghostLeg.date).toLocaleDateString(undefined,{month:'short',day:'numeric'})})`;
     game.players.push(newGhostPlayer(ghostLabel, startScore, ghostScript));
   }
   // Checkout Blitz: the wall-clock deadline starts the moment the run begins

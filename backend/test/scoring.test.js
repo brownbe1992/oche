@@ -10,7 +10,7 @@ const path = require('path');
 
 const scoring = require(path.join('..', '..', 'frontend', 'scoring.js'));
 const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET_STANDARD_NUMBERS,
-  evaluateVisitBaseball, baseballInningTarget,
+  evaluateVisitBaseball, baseballInningTarget, parseSqliteTimestamp,
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
   evaluateDartDoublesPractice, evaluateDartAroundTheClock, chuckinTiersReached, isStaircaseFinish,
   isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,
@@ -19,6 +19,39 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
 // Builds a real dart object the same way the app does (makeDart minus the
 // thrownAt timestamp), rather than hand-rolling a fake {value,isDouble,...} shape.
 const d = (sector, mult) => makeDartCore(sector, mult);
+
+describe('parseSqliteTimestamp (Ghost mode "Invalid Date" bug fix, docs/bug-roadmap.md BUG-17)', () => {
+  test('parses SQLite\'s datetime(\'now\') shape ("YYYY-MM-DD HH:MM:SS", no T, no tz) as UTC', () => {
+    const parsed = parseSqliteTimestamp('2024-01-15 10:30:00');
+    assert.equal(isNaN(parsed), false, 'must not be an Invalid Date');
+    assert.equal(parsed.toISOString(), '2024-01-15T10:30:00.000Z');
+  });
+
+  test('does not double-append Z to a string that already ends in Z', () => {
+    const parsed = parseSqliteTimestamp('2024-01-15T10:30:00Z');
+    assert.equal(isNaN(parsed), false);
+    assert.equal(parsed.toISOString(), '2024-01-15T10:30:00.000Z');
+  });
+
+  test('does not append Z to a string that already carries an explicit +/-HH:MM offset', () => {
+    const parsed = parseSqliteTimestamp('2024-01-15T10:30:00+02:00');
+    assert.equal(isNaN(parsed), false);
+    assert.equal(parsed.toISOString(), '2024-01-15T08:30:00.000Z');
+  });
+
+  test('null/undefined/empty input returns null rather than an Invalid Date object', () => {
+    assert.equal(parseSqliteTimestamp(null), null);
+    assert.equal(parseSqliteTimestamp(undefined), null);
+    assert.equal(parseSqliteTimestamp(''), null);
+  });
+
+  test('toLocaleDateString() on the parsed result is never the literal string "Invalid Date" — the exact symptom the bug report described', () => {
+    const parsed = parseSqliteTimestamp('2024-01-15 10:30:00');
+    const rendered = parsed.toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'});
+    assert.notEqual(rendered, 'Invalid Date');
+    assert.match(rendered, /\d{4}/, 'renders a real 4-digit year, not garbage');
+  });
+});
 
 describe('evaluateVisit (X01 bust/win rules, REFERENCE.md §2)', () => {
   test('ordinary scoring visit: no bust, no win', () => {

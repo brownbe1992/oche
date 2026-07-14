@@ -31,8 +31,10 @@
 > audit** (a general code-review pass across the whole app, not scoped to one new
 > feature — the same read that produced `security-audit-roadmap.md` Part 8 / SEC-18
 > through SEC-24) — see the entries at the bottom. **BUG-16** was opened by a live
-> user bug report (2026-07) against `importPlayerExport()`, now fixed. **BUG-1
-> through BUG-16 are all fixed as of this writing** — nothing open on either tracker.
+> user bug report (2026-07) against `importPlayerExport()`, now fixed. **BUG-17**
+> was opened by a live user bug report (2026-07) against Ghost mode's past-leg
+> picker showing "Invalid Date," now fixed. **BUG-1 through BUG-17 are all fixed
+> as of this writing** — nothing open on either tracker.
 
 ## Severity legend
 
@@ -1010,6 +1012,84 @@ the same file was re-imported.
 **Verify:** the new assertions fail on the pre-fix code (`turnsImported`/`dartsImported`
 report 2/6 instead of 0 on re-import) and pass after the fix; the fresh-import and
 opponent-stub-upgrade tests are unaffected; full backend suite green.
+
+---
+
+## BUG-17 — Ghost mode's past-leg picker (and race label) showed "Invalid Date" instead of the leg's date  **(LOW, cosmetic / cross-browser)**
+
+**Status: ✅ Fixed (2026-07).** `renderGhostLegList()` and the Ghost race label
+builder in `frontend/index.html` now call a new `parseSqliteTimestamp()`
+(`frontend/scoring.js`) before handing a leg's date to `.toLocaleDateString()`,
+instead of passing the raw SQLite string straight to `new Date()`. Committed
+regression suite in `backend/test/scoring.test.js` (5 cases): the
+space-separated no-timezone shape parses to the correct UTC instant; a string
+that already carries `Z` or a `+/-HH:MM` offset isn't double-suffixed; `null`/
+`undefined`/`''` return `null` rather than an Invalid Date object; and
+`toLocaleDateString()` on the result is never the literal string "Invalid
+Date". Verified end-to-end with Playwright against a live server: played and
+won a real X01 leg, opened Ghost mode's New Game screen for that player, and
+confirmed the picker shows a real formatted date ("Jul 14, 2026") rather than
+"Invalid Date." Full backend suite green (605 tests). (Found via a live user
+bug report: "for all the past legs, it is showing invalid date" in Ghost mode.)
+
+**Where:** `frontend/index.html`, two call sites both reading
+`getGhostCandidateLegs()`'s `MAX(t.created_at) AS date` column (`backend/db.js`)
+straight into `new Date()`:
+
+```js
+// renderGhostLegList() — the leg picker itself, the exact screen from the bug report
+const date = new Date(l.date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+
+// the Ghost race label, built once a leg is selected and the race starts
+const ghostLabel = `👻 Ghost (${new Date(setup.ghostLeg.date).toLocaleDateString(undefined,{month:'short',day:'numeric'})})`;
+```
+
+**Root cause:** every `*_at` column in `backend/db.js`'s schema defaults to
+SQLite's `datetime('now')`, which produces `"YYYY-MM-DD HH:MM:SS"` — a
+space-separated, always-UTC string with no `T` separator and no timezone
+suffix. That shape sits outside the one format `new Date(string)` is required
+by the ECMAScript spec to parse consistently across engines (ISO 8601, `"...
+THH:MM:SSZ"`). This exact gap had already bitten this codebase **three
+separate times before** — `frontend/index.html` already has three other call
+sites (a challenge-completion timestamp, a badge's `earned_at`, and
+`fmtDate()`'s general-purpose formatter) that each independently learned to
+sanitize the string first (`str.replace(' ','T') + 'Z'`) before handing it to
+`new Date()`. Ghost mode's two call sites were written without that same
+fix — either predating the pattern being established, or simply missed when
+it was — so they inherited the exact same cross-browser "Invalid Date" defect
+the other three call sites had already worked around.
+
+**Misbehavior (verified):** on any JS engine that parses `new
+Date("2024-01-15 10:30:00")` as `Invalid Date` (V8/Node happens to accept this
+non-standard shape leniently, but that's not guaranteed by spec — the reporting
+user's browser did not), every entry in Ghost mode's past-leg picker showed
+"Invalid Date" instead of the leg's actual date, and the in-progress race label
+did too once a leg was selected and the race started.
+
+**Fix (step by step):**
+1. Add `parseSqliteTimestamp(dt)` to `frontend/scoring.js` — the same
+   `.replace(' ','T') + (hasTz ? '' : 'Z')` sanitization the three existing
+   working call sites already use, centralized into one pure, unit-testable
+   function rather than becoming a fourth (now fifth, counting both Ghost call
+   sites) copy-pasted inline fix.
+2. Call it at both of Ghost mode's broken call sites in place of the raw
+   `new Date(...)`, keeping each site's own `.toLocaleDateString()` options
+   (with year for the picker list, without for the compact race label)
+   unchanged — this is a parsing fix, not a display-format change.
+3. Add a committed `node:test` suite for `parseSqliteTimestamp()` covering the
+   untagged shape, an already-`Z`-suffixed shape, an already-offset-suffixed
+   shape, nullish input, and the literal "Invalid Date" symptom via
+   `toLocaleDateString()` — the exact gap that let this ship unnoticed despite
+   the identical bug already having a known fix pattern elsewhere in the same
+   file.
+4. Deliberately **not** touched: the three pre-existing, already-working
+   inline occurrences of this same sanitization pattern — refactoring working
+   code to call the new shared helper is out of scope for a bug fix; only the
+   two genuinely broken call sites were changed.
+
+**Verify:** the new test suite passes; a live server + Playwright check confirms
+the Ghost mode leg picker renders a real date for a freshly-won leg instead of
+"Invalid Date"; full backend suite green.
 
 ---
 
