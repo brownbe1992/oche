@@ -64,6 +64,12 @@
                                        league?" picker. gameType omitted -> 'x01'. A game matching exactly one active
                                        league is tagged automatically with no picker at all — this endpoint only
                                        matters when there's genuine ambiguity to resolve.
+       GET  /api/leagues/pending-fixture -> (?p1=NameA&p2=NameB) -> [ { fixtureId, leagueId, leagueName, gameType,
+                                       category } ] (public) — every pending (scheduled-but-unplayed) fixture across
+                                       every active league both players share, order-independent on the pair. Unlike
+                                       /api/leagues/eligible above, callable before any game type/category is chosen.
+                                       POST /api/games accepts an optional leagueFixtureId -> sets league_fixtures.game_id
+                                       and games.league_id directly (an explicit choice, not the fuzzy auto-tag hook).
        GET  /api/players/league-summary -> (?name=...) -> [ { leagueId, name, gameType, category, status, rank,
                                        totalPlayers, played, won, lost, points } ] (public)
        GET  /api/players/dart-heatmap -> (?name=...&gameType=...&mode=...) -> [{sector,multiplier,zone,missZone,missDepth,hits}] (public)
@@ -1029,6 +1035,13 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/leagues/eligible' && m === 'GET') {
       const names = String(url.searchParams.get('players') || '').split(',').map(s => s.trim()).filter(Boolean);
       return send(res, 200, db.getEligibleLeagues(names[0], names[1], url.searchParams.get('category'), url.searchParams.get('gameType')));
+    }
+    // Public: league fixtures / pending matches (docs/league-mode-roadmap.md) — the
+    // New Game screen's future "League Game" entry (item 11b) calls this right after
+    // Step 1 (opponent pair picked), *before* any game type is chosen — unlike
+    // /api/leagues/eligible above, which needs category/gameType already known.
+    if (p === '/api/leagues/pending-fixture' && m === 'GET') {
+      return send(res, 200, db.getPendingFixturesForPlayers(url.searchParams.get('p1'), url.searchParams.get('p2')));
     }
     if (p === '/api/players/league-summary' && m === 'GET') {
       return send(res, 200, db.getPlayerLeagueSummary(url.searchParams.get('name')));

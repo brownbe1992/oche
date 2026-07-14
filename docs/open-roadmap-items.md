@@ -35,8 +35,7 @@
 | 9 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
 | 10b | Data export: CSV export (a simpler, non-portable "your own stats as a spreadsheet" format, one row per turn or per game) — deliberately separate from the shipped per-player JSON export/import, doesn't need to solve H2H preservation the way JSON does | `docs/data-export-roadmap.md` | Low-Medium |
 | 11 | Checkout Trainer: trick-question/bogey-number difficulty variant ("declare unsolvable" affordance + grading branch) and its conditional 💣 Bogey Buster badge | `docs/checkout-trainer-roadmap.md` | Medium |
-| 11b | New Game page revamp: replace the single all-controls-visible setup screen with a 3-step wizard (Who's playing? → Choose a game → More options, with a Back button on steps 2/3) — consolidates the Mode row/Practice-type sub-toggle/X01-Cricket toggle into one flat, player-count-filtered game-type dropdown (new `contexts: practice/h2h` flag per mode; no "other game modes" grouping), Daily Challenge's already-attempted check runs on selection with a "come back tomorrow" message, adds how-to-play copy for every mode, drops the H2H record banner, and surfaces a "League Game" quick-start entry (depends on the league fixtures item below) | `docs/new-game-flow-roadmap.md` | Medium-High |
-| 11c | League fixtures / pending matches: a new `league_fixtures` table (`game_id` FK into `games`, status derived not stored — same precedent as `tournament_matches`) plus round-robin generation and a pending-fixture lookup endpoint, so New Game's "League Game" entry (item 11b) can offer a one-tap start pre-filled with the league's game type/category; several fixture-generation questions (round-robin timing, single vs. double round-robin, manual fixtures) still open | `docs/league-mode-roadmap.md` | Medium |
+| 11b | New Game page revamp: replace the single all-controls-visible setup screen with a 3-step wizard (Who's playing? → Choose a game → More options, with a Back button on steps 2/3) — consolidates the Mode row/Practice-type sub-toggle/X01-Cricket toggle into one flat, player-count-filtered game-type dropdown (new `contexts: practice/h2h` flag per mode; no "other game modes" grouping), Daily Challenge's already-attempted check runs on selection with a "come back tomorrow" message, adds how-to-play copy for every mode, drops the H2H record banner, and surfaces a "League Game" quick-start entry backed by `GET /api/leagues/pending-fixture` and `createGame()`'s `leagueFixtureId` (both shipped — see the Done ledger's league fixtures entry) | `docs/new-game-flow-roadmap.md` | Medium-High |
 | 11d | Player merge tool (admin-only): reassign one player's full history onto another and delete the duplicate — touches 12 FK-into-`players` tables, 5 with real uniqueness-constraint conflicts (shared game, shared badge, same-day Daily Challenge attempt, shared tournament/league enrollment) needing a preview step + resolution rules before any write; also needs a new `player_uuid_aliases` table so a later re-import of the merged-away player's old export still resolves via `importPlayerExport()`'s `resolveStub()` instead of silently recreating a duplicate | `docs/player-merge-roadmap.md` | Medium-High |
 | 12b | Game Modes: Killer — elimination-style, per-player number assignment, per-dart evaluation for becoming a "killer" (build to 3 lives on your own number, ring-scaled) and attacking opponents (ring-scaled) plus a self-kill rule (own double after killer status = −1 life); ruleset sourced from dartscorner.com; needs its own config shape (`config.numbers` as a per-player map), scoring screen, and stat vocabulary; a few engineering questions (min player count, turn order, config'able threshold) still open | `docs/game-modes-roadmap.md` | High |
 | 13 | Tournament mode: double-elimination bracket support (losers bracket + grand final/reset logic, the genuinely fiddly combinatorial piece — single-elimination already shipped, see the Done ledger) | `docs/tournament-mode-roadmap.md` | High |
@@ -46,19 +45,21 @@
 
 ### Build-order notes that still apply
 
-- **Tournament mode (single-elimination) AND core league mode are both
-  done**, and each is the real, shipped precedent for the "games link into a
-  context table" pattern (see `CLAUDE.md`) any future context (online
-  multiplayer, or anything not yet designed) can now follow directly — a
-  separate `context_matches.game_id` junction table for a context with its
-  own match-level lifecycle state (tournament's shape), or a direct nullable
+- **Tournament mode (single-elimination), core league mode, AND league
+  fixtures / pending matches are all done**, and each is the real, shipped
+  precedent for the "games link into a context table" pattern (see
+  `CLAUDE.md`) any future context (online multiplayer, or anything not yet
+  designed) can now follow directly — a separate `context_matches.game_id`
+  junction table for a context with its own match-level lifecycle state
+  (tournament's shape, and now league fixtures' too), or a direct nullable
   `games.<context>_id` column for a context with none (league's original
-  shape). The new "league fixtures" item (11c) above adds the
-  `tournament_matches`-style junction-table shape *on top of* league mode's
-  existing direct-column shape, for the "pending match" lifecycle state a
-  plain nullable column can't represent — both shapes now coexist within one
-  feature, which is fine: they answer different questions (which league did
-  this game count toward, vs. is this specific pairing's match still owed).
+  shape). League fixtures added the `tournament_matches`-style junction-table
+  shape *on top of* league mode's existing direct-column shape, for the
+  "pending match" lifecycle state a plain nullable column can't represent —
+  both shapes now coexist within one feature, which is fine: they answer
+  different questions (which league did this game count toward, vs. is this
+  specific pairing's match still owed). Row 11b above is the one remaining
+  piece — it now has both prerequisites it needs.
 - **Mobile app's steps are sequential as listed** (step 2 → 3 → 4 → 5 → 6 → 7) per `docs/mobile-app-roadmap.md`'s own suggested build order; its one prerequisite (the responsive CSS pass) is already done.
 - **Row 5** (voice announcement i18n) is the one remaining order-independent Low-Medium item — it can be interleaved anywhere, including ahead of the bigger lifts.
 
@@ -76,7 +77,7 @@ therefore hasn't been archived yet) — see each source doc for full detail.
 | Tournament mode: single-elimination (schema, bracket generation with cascading byes, match lifecycle/walkover, setup screen, bracket tree + Up Next view, live-scoreboard round label, player-deletion guard, committed tests) — double-elimination remains a separate open item above | `docs/tournament-mode-roadmap.md` |
 | Tournament: two new badges — 🏆 Champion (win a bracket) and ⚔️ Giant Slayer (Tournament) (beat an opponent seeded 3+ slots better), both awarded inline from `_advanceTournamentMatch()`, live-celebration detected via an `earnedBadgeCache` diff since neither the award nor the completion hook has a response channel back to the frontend; committed tests | `docs/tournament-mode-roadmap.md` |
 | Tournament: "Tournaments" stat block on the Player Profile (wins, runner-up count, best finish reached) — `getTournamentStats()`, `GET /api/players/tournament-stats`, committed tests | `docs/tournament-mode-roadmap.md` |
-| League mode (schema — `leagues`/`league_players` plus a nullable `games.league_id`; live-computed standings with no maintained tally; an `onGameCreated` auto-tag hook with a New Game "log to league?" picker for genuine multi-league ambiguity; season lifecycle (active/ended, reversible); a Leagues nav tab (list/setup/detail); a Home page teaser; a Player Profile "Leagues" stat block; committed tests) — X01 and Cricket support, both now shipped, see below; league fixtures/pending matches is a separate, not-yet-started item, see above | `docs/league-mode-roadmap.md` |
+| League mode (schema — `leagues`/`league_players` plus a nullable `games.league_id`; live-computed standings with no maintained tally; an `onGameCreated` auto-tag hook with a New Game "log to league?" picker for genuine multi-league ambiguity; season lifecycle (active/ended, reversible); a Leagues nav tab (list/setup/detail); a Home page teaser; a Player Profile "Leagues" stat block; committed tests) — X01 and Cricket support, and league fixtures/pending matches, both now shipped, see below | `docs/league-mode-roadmap.md` |
 | Dartboard zone/miss/bounce-out tracking — `darts.zone`/`miss_zone`/`miss_depth`/`bounced` columns; the generalized dartboard heatmap (`getDartHeatmap()`, `GET /api/players/dart-heatmap`) now shown on all four game-type Player Profile tabs instead of Just Chuckin' It only, with a "zone unspecified" hatch overlay for Pad-mode/pre-feature singles; Dartboard mode's flat Miss button replaced by a two-band (near/far) positional miss ring; a v1 flat-count "Bounce Out" button in every game type and both input modes except Checkout Trainer, which hides it (along with Miss and Undo Last Turn) as a live-match-only control (`getBounceOutCount()`, `GET /api/players/bounce-outs`) — v2 positional bounce-out capture remains gated on `docs/camera-scoring-roadmap.md`; committed tests, verified end-to-end with Playwright | `docs/archive/dartboard-zone-tracking-roadmap.md` |
 | Coaching Insights — weak-number, checkout-route, bust-parity, and form-trend insights (`getCoachingInsights`, Player Profile X01 tab, committed tests) | `docs/archive/coaching-insights-roadmap.md` |
 | Home Assistant automation recipe book (`docs/home-assistant-recipes.md`, linked from README) | `docs/archive/ha-recipes-roadmap.md` |
@@ -96,6 +97,7 @@ therefore hasn't been archived yet) — see each source doc for full detail.
 | 22 of 22 achievements/badges shipped (21 original candidates + Staircase Finish) | `docs/archive/achievements-badges-roadmap.md` |
 | Checkout Trainer: difficulty tiers (Under 40 / Under 100 / Over 100 / Full Range 2-170), a session-scoped setup-screen toggle baked into `games.config.difficulty`; committed tests | `docs/checkout-trainer-roadmap.md` |
 | League mode: Cricket support (`leagues.game_type` column alongside X01, a setup-screen game-type selector, X01/Cricket cross-isolation in the auto-tag hook and `getEligibleLeagues()`, standings computation unchanged since it was already game-type-agnostic; committed tests) | `docs/league-mode-roadmap.md` |
+| League fixtures / pending matches — a new `league_fixtures` table (`game_id` FK into `games`, status derived not stored, same precedent as `tournament_matches`), single round-robin generation at league creation and again for new pairings on enrollment, `GET /api/leagues/pending-fixture` (order-independent pending-fixture lookup by player pair), `createGame()`'s `leagueFixtureId` (explicit fixture-to-game linking that bypasses the fuzzy `onGameCreated` auto-tag hook), and a read-only Fixtures list on the League detail screen; committed tests — the New Game "League Game" one-tap entry that consumes this is a separate item (11b, still open) | `docs/league-mode-roadmap.md` |
 | Badge award count threaded into the live achievement overlay (`patchAchievementCount()`, both `index.html` and `display.html`), not just the shareable moment card | `docs/archive/achievements-badges-roadmap.md` |
 | Expanded Achievements & Badges — every item, now archived (all 22 badges + the notifications/count work above) | `docs/archive/achievements-badges-roadmap.md` |
 | Simultaneous-achievements overlay fix (multi-badge queue) | `docs/archive/simultaneous-achievements-roadmap.md` |

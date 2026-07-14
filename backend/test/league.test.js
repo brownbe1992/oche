@@ -5,9 +5,12 @@
 // valid/invalid leagueId, and every non-eligible game shape), live standings
 // computation (points formula, decided-vs-abandoned games, zero-played roster rows,
 // sort order), season status transitions, the wipeAllData/resetStats standing-rule
-// interactions (docs/bug-roadmap.md BUG-7's own precedent, applied to leagues), and
+// interactions (docs/bug-roadmap.md BUG-7's own precedent, applied to leagues),
 // Cricket league support (gameType validation, category-per-gameType, and X01/Cricket
-// cross-game-type isolation in both directions).
+// cross-game-type isolation in both directions), and league fixtures / pending
+// matches (round-robin generation at creation and on enrollment, derived fixture
+// status, the pending-fixture lookup, createGame()'s leagueFixtureId validation and
+// direct link, and the fixture-linked game's onGameCreated hook bypass).
 const { test, describe, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -402,5 +405,182 @@ describe('Cricket league support (docs/league-mode-roadmap.md "Game-type scope")
     const a = standings.find(r => r.name === A), b = standings.find(r => r.name === B);
     assert.deepEqual([a.played, a.won, a.lost, a.points], [3, 2, 1, 4]);
     assert.deepEqual([b.played, b.won, b.lost, b.points], [3, 1, 2, 2]);
+  });
+});
+
+describe('League fixtures / pending matches (docs/league-mode-roadmap.md "League fixtures / pending matches")', () => {
+  function fixtureRow(leagueId, p1, p2) {
+    return db._db.prepare(`
+      SELECT * FROM league_fixtures WHERE league_id = ?
+        AND ((player1_id = (SELECT id FROM players WHERE name = ?) AND player2_id = (SELECT id FROM players WHERE name = ?))
+          OR (player1_id = (SELECT id FROM players WHERE name = ?) AND player2_id = (SELECT id FROM players WHERE name = ?)))
+    `).get(leagueId, p1, p2, p2, p1);
+  }
+
+  test('createLeague generates exactly one fixture per unique pair in the initial roster', () => {
+    const [A, B, C] = makePlayers(uniqueName('RRCREATE_'), 3);
+    const { leagueId } = db.createLeague({ name: 'RR Cup', category: '501', players: [A, B, C] });
+    const rows = db._db.prepare('SELECT * FROM league_fixtures WHERE league_id = ?').all(leagueId);
+    assert.equal(rows.length, 3); // AB, AC, BC — single round-robin
+    for (const [p1, p2] of [[A, B], [A, C], [B, C]]) {
+      assert.ok(fixtureRow(leagueId, p1, p2), `fixture for ${p1} vs ${p2} exists`);
+    }
+  });
+
+  test('an empty-roster league (players created later via enrollment) starts with no fixtures', () => {
+    const { leagueId } = db.createLeague({ name: 'Empty Cup', category: '501', players: [] });
+    assert.equal(db._db.prepare('SELECT COUNT(*) AS n FROM league_fixtures WHERE league_id = ?').get(leagueId).n, 0);
+  });
+
+  test('enrolling a new player generates fixtures against every existing player, without touching existing pairs', () => {
+    const [A, B, C] = makePlayers(uniqueName('RRENROLL_'), 3);
+    const { leagueId } = db.createLeague({ name: 'Enroll Cup', category: '501', players: [A, B] });
+    const abFixture = fixtureRow(leagueId, A, B);
+    assert.ok(abFixture);
+
+    db.enrollLeaguePlayer(leagueId, C);
+    const rows = db._db.prepare('SELECT * FROM league_fixtures WHERE league_id = ?').all(leagueId);
+    assert.equal(rows.length, 3); // AB (untouched), AC, BC (new)
+    assert.ok(fixtureRow(leagueId, A, C));
+    assert.ok(fixtureRow(leagueId, B, C));
+    // The original AB fixture row is the exact same row, not a duplicate
+    assert.equal(fixtureRow(leagueId, A, B).id, abFixture.id);
+  });
+
+  test('re-enrolling an already-enrolled player is a no-op — no duplicate fixtures', () => {
+    const [A, B] = makePlayers(uniqueName('RRDUPE_'), 2);
+    const { leagueId } = db.createLeague({ name: 'Dupe Cup', category: '501', players: [A, B] });
+    db.enrollLeaguePlayer(leagueId, A); // already enrolled
+    const rows = db._db.prepare('SELECT * FROM league_fixtures WHERE league_id = ?').all(leagueId);
+    assert.equal(rows.length, 1);
+  });
+
+  test('getLeagueFixtures derives pending/in_progress/fulfilled status and never stores it', () => {
+    const [A, B, C] = makePlayers(uniqueName('STATUS_'), 3);
+    const { leagueId } = db.createLeague({ name: 'Status Cup', category: '501', players: [A, B, C] });
+    const fixturesBefore = db.getLeague(leagueId).fixtures;
+    assert.equal(fixturesBefore.length, 3);
+    assert.ok(fixturesBefore.every(f => f.status === 'pending'));
+
+    const bcFixture = fixturesBefore.find(f =>
+      (f.player1Name === B && f.player2Name === C) || (f.player1Name === C && f.player2Name === B));
+    const { gameId } = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: B }, { name: C }], leagueFixtureId: bcFixture.id });
+
+    let fixtures = db.getLeague(leagueId).fixtures;
+    let bc = fixtures.find(f => f.id === bcFixture.id);
+    assert.equal(bc.status, 'in_progress');
+    assert.equal(bc.gameId, gameId);
+
+    db.completeGame(gameId, B);
+    fixtures = db.getLeague(leagueId).fixtures;
+    bc = fixtures.find(f => f.id === bcFixture.id);
+    assert.equal(bc.status, 'fulfilled');
+  });
+
+  test('getPendingFixturesForPlayers is order-independent and only returns unplayed fixtures in active leagues', () => {
+    const [A, B] = makePlayers(uniqueName('PEND_'), 2);
+    const { leagueId } = db.createLeague({ name: 'Pending Cup', category: '501', players: [A, B] });
+    assert.deepEqual(db.getPendingFixturesForPlayers(A, B).map(f => f.leagueId), [leagueId]);
+    assert.deepEqual(db.getPendingFixturesForPlayers(B, A).map(f => f.leagueId), [leagueId]); // order-independent
+
+    const fixture = db.getLeague(leagueId).fixtures[0];
+    db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: A }, { name: B }], leagueFixtureId: fixture.id });
+    assert.deepEqual(db.getPendingFixturesForPlayers(A, B), []); // no longer pending
+  });
+
+  test('getPendingFixturesForPlayers excludes an ended league\'s fixtures', () => {
+    const [A, B] = makePlayers(uniqueName('PENDEND_'), 2);
+    const { leagueId } = db.createLeague({ name: 'Ended Cup', category: '501', players: [A, B] });
+    assert.equal(db.getPendingFixturesForPlayers(A, B).length, 1);
+    db.setLeagueStatus(leagueId, 'ended');
+    assert.equal(db.getPendingFixturesForPlayers(A, B).length, 0);
+  });
+
+  test('getPendingFixturesForPlayers fails soft to [] for an unresolvable player name', () => {
+    const [A] = makePlayers(uniqueName('PENDBAD_'), 1);
+    assert.deepEqual(db.getPendingFixturesForPlayers(A, 'nonexistent_player_xyz'), []);
+  });
+
+  test('createGame with leagueFixtureId sets league_fixtures.game_id and games.league_id directly', () => {
+    const [A, B] = makePlayers(uniqueName('LINK_'), 2);
+    const { leagueId } = db.createLeague({ name: 'Link Cup', category: '501', players: [A, B] });
+    const fixture = db.getLeague(leagueId).fixtures[0];
+    const { gameId } = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: A }, { name: B }], leagueFixtureId: fixture.id });
+    assert.equal(db._db.prepare('SELECT league_id FROM games WHERE id = ?').get(gameId).league_id, leagueId);
+    assert.equal(db._db.prepare('SELECT game_id FROM league_fixtures WHERE id = ?').get(fixture.id).game_id, gameId);
+  });
+
+  test('rejects an unknown leagueFixtureId', () => {
+    const [A, B] = makePlayers(uniqueName('LINKBAD1_'), 2);
+    assert.throws(() => db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: A }, { name: B }], leagueFixtureId: 999999 }), (err) => err.status === 404);
+  });
+
+  test('rejects a fixture that already has a game linked', () => {
+    const [A, B] = makePlayers(uniqueName('LINKBAD2_'), 2);
+    const { leagueId } = db.createLeague({ name: 'Already Cup', category: '501', players: [A, B] });
+    const fixture = db.getLeague(leagueId).fixtures[0];
+    db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: A }, { name: B }], leagueFixtureId: fixture.id });
+    assert.throws(() => db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: A }, { name: B }], leagueFixtureId: fixture.id }), (err) => err.status === 409);
+  });
+
+  test('rejects players that do not match the fixture\'s pair', () => {
+    const [A, B] = makePlayers(uniqueName('LINKBAD3_'), 2);
+    const [C] = makePlayers(uniqueName('LINKBAD3OTHER_'), 1);
+    const { leagueId } = db.createLeague({ name: 'Mismatch Cup', category: '501', players: [A, B] });
+    const fixture = db.getLeague(leagueId).fixtures[0];
+    assert.throws(() => db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: A }, { name: C }], leagueFixtureId: fixture.id }), (err) => err.status === 400);
+  });
+
+  test('rejects a category/gameType that does not match the fixture\'s league', () => {
+    const [A, B] = makePlayers(uniqueName('LINKBAD4_'), 2);
+    const { leagueId } = db.createLeague({ name: 'Format Cup', category: '501', players: [A, B] });
+    const fixture = db.getLeague(leagueId).fixtures[0];
+    assert.throws(() => db.createGame({ category: '301', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: A }, { name: B }], leagueFixtureId: fixture.id }), (err) => err.status === 400);
+  });
+
+  test('a fixture-linked game skips the fuzzy auto-tag hook even when 2+ leagues would otherwise be eligible', () => {
+    const [A, B] = makePlayers(uniqueName('SKIPHOOK_'), 2);
+    // Two active X01/501 leagues both enrolling A and B — normally this is the
+    // >1-candidate case the auto-tag hook leaves untagged (see the ambiguity-picker
+    // tests above). A fixture from EITHER league should still tag unambiguously.
+    const league1 = db.createLeague({ name: 'Ambig Cup 1', category: '501', players: [A, B] });
+    db.createLeague({ name: 'Ambig Cup 2', category: '501', players: [A, B] });
+    const fixture = db.getLeague(league1.leagueId).fixtures[0];
+    const { gameId } = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: A }, { name: B }], leagueFixtureId: fixture.id });
+    assert.equal(db._db.prepare('SELECT league_id FROM games WHERE id = ?').get(gameId).league_id, league1.leagueId);
+  });
+
+  test('wipeAllData clears league_fixtures', () => {
+    const [A, B] = makePlayers(uniqueName('FIXWIPE_'), 2);
+    const { leagueId } = db.createLeague({ name: 'Fixture Wipe Cup', category: '501', players: [A, B] });
+    assert.ok(db._db.prepare('SELECT COUNT(*) AS n FROM league_fixtures WHERE league_id = ?').get(leagueId).n > 0);
+    db.wipeAllData();
+    assert.equal(db._db.prepare('SELECT COUNT(*) AS n FROM league_fixtures').get().n, 0);
+  });
+
+  test('resetStats reverts a fulfilled fixture back to pending (its game is gone) without deleting the fixture row', () => {
+    const [A, B] = makePlayers(uniqueName('FIXRESET_'), 2);
+    const { leagueId } = db.createLeague({ name: 'Fixture Reset Cup', category: '501', players: [A, B] });
+    const fixture = db.getLeague(leagueId).fixtures[0];
+    const { gameId } = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: A }, { name: B }], leagueFixtureId: fixture.id });
+    db.completeGame(gameId, A);
+    assert.equal(db.getLeague(leagueId).fixtures.find(f => f.id === fixture.id).status, 'fulfilled');
+
+    db.resetStats();
+
+    const after = db.getLeague(leagueId).fixtures.find(f => f.id === fixture.id);
+    assert.ok(after, 'the fixture row itself survives resetStats');
+    assert.equal(after.status, 'pending', 'no game exists anymore, so it reverts to pending');
+    assert.equal(after.gameId, null);
   });
 });

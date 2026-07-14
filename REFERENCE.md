@@ -2708,6 +2708,21 @@ roadmap doc's original sketch. Standings are computed **live** by
 `getLeagueStandings()` from `games`/`game_players` at read time (§18), so there
 is nothing here that can drift out of sync with what actually happened.
 
+**`league_fixtures`** — league fixtures / pending matches (§18), following
+`tournament_matches`' own shape rather than `league_players`' direct-column one
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `league_id` | `INTEGER NOT NULL REFERENCES leagues(id) ON DELETE CASCADE` | |
+| `player1_id` / `player2_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | Always stored in canonical (lower id first) order, fixed at generation time |
+| `game_id` | `INTEGER REFERENCES games(id) ON DELETE SET NULL` | `NULL` until this fixture is linked to a game (`createGame({ leagueFixtureId })`) |
+| `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
+
+A fixture's **status** (`pending`/`in_progress`/`fulfilled`) is derived at read
+time by `getLeagueFixtures()`, never stored — same "compute from raw data"
+philosophy as a tournament match's status: `game_id IS NULL` → `pending`; else
+the linked game's `completed_at IS NULL` → `in_progress`; else `fulfilled`.
+
 ### `settings` (key/value)
 `key TEXT PRIMARY KEY`, `value TEXT NOT NULL DEFAULT ''` (booleans stored as
 `'1'`/`'0'`). Known keys: `collect_dart_timing`, `colorblind_mode`,
@@ -3406,13 +3421,53 @@ maintained-tally suggestion, not this one.
   local `Date` getters; doing that to a bare calendar date shifts it by a day
   in any negative-UTC-offset timezone).
 
-### Deliberately out of scope for this pass
+### League fixtures / pending matches (`docs/league-mode-roadmap.md`)
 
-- **Cricket (or any non-X01) leagues** — the standings math is game-type-
-  agnostic (Cricket already has full H2H parity — `winner_id`, a win
-  leaderboard), but `leagues.category` would need a second `game_type` column
-  and the setup screen a game-type selector; deferred as a clean, separately-
-  scoped follow-up rather than built speculatively now.
+A scheduled-but-unplayed pairing, tracked separately from the direct
+`games.league_id` tagging above — `league_fixtures` follows `tournament_matches`'
+own "own table + `game_id` FK" shape instead (see the schema table above),
+because a fixture needs to exist *before* any game does.
+
+- **Round-robin generation** (`_generateRoundRobinFixtures()`, `backend/db.js`):
+  single round-robin — one fixture per unique enrolled pair, generated at
+  league creation for the initial roster and again for just the new pairings
+  whenever a player joins an already-active league (`enrollLeaguePlayer()`,
+  which is now a no-duplicate no-op on re-enrolling an already-enrolled
+  player). No admin-driven manual fixture creation/cancellation.
+- **Linking is explicit, not inferred**: `createGame()` accepts an optional
+  `leagueFixtureId`. When present it's fully validated up front (fixture
+  exists, has no game linked yet, the submitted players are exactly this
+  fixture's pair, and `gameType`/`category` match the fixture's own league) —
+  a mismatch **rejects** game creation (unlike a stale `leagueId` hint, which
+  falls through silently). On success, `league_fixtures.game_id` and
+  `games.league_id` are set directly, before the `created` lifecycle hook
+  fires. The league auto-tag `onGameCreated` listener checks whether
+  `games.league_id` is already non-null and returns immediately if so — a
+  fixture-linked game never re-runs the fuzzy eligibility match, even when the
+  pair shares more than one active league.
+- **`GET /api/leagues/pending-fixture?p1=&p2=`** (public) →
+  `getPendingFixturesForPlayers()` — every pending fixture across every
+  active league both players share, order-independent on the pair, callable
+  *before* any game type/category is chosen (unlike `/api/leagues/eligible`).
+- **Read-only Fixtures list** on the League detail screen
+  (`renderLeagueDetail()`, embedded in `GET /api/leagues/:id`'s `fixtures`
+  array via `getLeagueFixtures()`): every fixture with its derived status
+  (`FIXTURE_STATUS_ICON`/`FIXTURE_STATUS_LABEL` — Pending/In progress/Played,
+  icon + text together). This is the only UI surface shipped for fixtures so
+  far — the New Game "League Game" one-tap entry that actually *consumes* the
+  pending-fixture endpoint is a separate, still-open item (`docs/open-roadmap-items.md`
+  11b), gated on that screen's own 3-step wizard rework.
+- **`wipeAllData()`/`resetStats()`**: `league_fixtures` needs no explicit
+  delete in either — `wipeAllData()`'s `DELETE FROM leagues` cascades it
+  (`league_id ON DELETE CASCADE`, also independently covered by the players
+  delete via `player1_id`/`player2_id ON DELETE CASCADE`); `resetStats()`
+  deleting every game reverts every linked fixture back to `pending`
+  (`game_id ON DELETE SET NULL`, not `CASCADE`) rather than stranding or
+  deleting the fixture row — correct, since the game that would have
+  fulfilled it no longer exists.
+
+### Deliberately out of scope
+
 - **Multi-league auto-tagging** — a game only ever tags into **one** league
   (`games.league_id` stays a single nullable FK); a player can be enrolled in
   several concurrent leagues, but any one game they play logs to at most one of
@@ -3420,6 +3475,10 @@ maintained-tally suggestion, not this one.
 - **League deletion** — matches tournament mode's own precedent (create + read
   + one state-changing lifecycle action, no delete route); a league can only be
   ended, never removed, short of `wipeAllData()`.
+- **Double round-robin, manual fixtures, and end-of-season unplayed-fixture
+  callouts** — each resolved as "not for v1" rather than left open; see
+  `docs/league-mode-roadmap.md`'s "League fixtures / pending matches" section
+  for the reasoning behind each.
 
 ---
 

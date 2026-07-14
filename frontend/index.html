@@ -4335,6 +4335,12 @@ function loadLeagueList(){
 }
 const LEAGUE_STATUS_ICON  = { active:'▶️', ended:'🏁' };
 const LEAGUE_STATUS_LABEL = { active:'Active', ended:'Ended' };
+// League fixtures / pending matches (docs/league-mode-roadmap.md). Status is derived
+// server-side (getLeagueFixtures()), never stored — see the same icon+text-together
+// convention TOURNEY_STATUS_ICON/LABEL use for tournament matches, so color is never
+// the only signal.
+const FIXTURE_STATUS_ICON  = { pending:'⏳', in_progress:'🎯', fulfilled:'✅' };
+const FIXTURE_STATUS_LABEL = { pending:'Pending', in_progress:'In progress', fulfilled:'Played' };
 function renderLeagueList(list){
   const body=document.getElementById('league-body');
   const rows = (list||[]).map(l=>{
@@ -4490,6 +4496,12 @@ function renderLeagueDetail(l){
   const notEnrolled = roster.filter(n=>!enrolledNames.has(n));
 
   const gameTypeBadge = l.gameType==='cricket' ? '🎯 ' : '';
+  const fixtures = l.fixtures || [];
+  const fixturesHtml = fixtures.length ? `<div class="da-list">${fixtures.map(f=>`
+    <div class="da-row"><span class="da-label" style="flex:1;font-size:13px">${escapeHtml(f.player1Name)} vs ${escapeHtml(f.player2Name)}</span>
+      <span class="pp-meta" style="font-size:11px">${FIXTURE_STATUS_ICON[f.status]||''} ${FIXTURE_STATUS_LABEL[f.status]||f.status}</span>
+    </div>`).join('')}</div>` : `<p class="pp-meta">No fixtures yet — enroll at least two players to generate the round-robin schedule.</p>`;
+
   body.innerHTML = `
     <button class="pp-back" onclick="leagueView='list'; renderLeagueScreen()">← Leagues</button>
     <h2 style="font-size:18px;margin:8px 0 4px">${escapeHtml(l.name)}</h2>
@@ -4501,6 +4513,9 @@ function renderLeagueDetail(l){
         <tbody>${rows || `<tr><td colspan="7" style="padding:12px 10px;color:var(--muted)">No players enrolled yet.</td></tr>`}</tbody>
       </table>
     </div>
+    <div class="pp-section-title" style="margin-top:20px">Fixtures</div>
+    <p class="pp-meta" style="margin:0 0 8px">Every enrolled pairing's round-robin match for this season.</p>
+    ${fixturesHtml}
     <div class="btn-row" style="margin-top:16px;flex-wrap:wrap">
       ${notEnrolled.length ? `
         <select class="date-input" id="league-enroll-pick" style="width:auto">

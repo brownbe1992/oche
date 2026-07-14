@@ -4,6 +4,14 @@
 > flow for a less-crowded, more interactive New Game page and grounds it in the
 > current implementation (`frontend/index.html`'s `#screen-setup`) so whoever
 > picks this up can see exactly what changes and what doesn't.
+>
+> **Update (2026-07)**: the "League Game" entry's backend dependency — a
+> `league_fixtures` table, round-robin generation, `GET
+> /api/leagues/pending-fixture`, and `createGame()`'s `leagueFixtureId` — is
+> now shipped (`docs/league-mode-roadmap.md`'s "League fixtures / pending
+> matches" section, `docs/open-roadmap-items.md`'s Done ledger). This doc's
+> own wizard work (including wiring up the "League Game" entry itself) is
+> still not started; everything below is unchanged design, now unblocked.
 
 ## Goal
 

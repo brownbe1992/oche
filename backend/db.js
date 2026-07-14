@@ -302,6 +302,34 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_league_players_player ON league_players(player_id);
 
+  -- League fixtures / pending matches (docs/league-mode-roadmap.md "League fixtures /
+  -- pending matches"). Unlike a plain league game (tagged after the fact via the
+  -- direct games.league_id column above), a fixture is a scheduled-but-maybe-unplayed
+  -- pairing that needs to exist BEFORE any game does -- so, per CLAUDE.md's "own table
+  -- with a game_id FK" convention, this follows tournament_matches' shape instead:
+  -- its own table with a nullable game_id FK. No stored status column, matching
+  -- tournament_matches' own "derive it, don't store it" precedent -- pending while
+  -- game_id IS NULL, in progress once linked but the game isn't complete yet, fulfilled
+  -- once it is (see getLeagueFixtures()/getPendingFixturesForPlayers()). player1_id is
+  -- always the lower player id of the pair (canonical order, chosen at generation time)
+  -- so a lookup never has to try both orderings. Single round-robin only for v1 (a
+  -- return-match "double round-robin" is a resolved-for-now open question, see the
+  -- roadmap doc) -- generated once per unique pair, at league creation for the initial
+  -- roster and again for just the new pairings whenever a player joins an
+  -- already-active league (_generateRoundRobinFixtures()). No admin-driven manual
+  -- fixture creation/cancellation in v1 -- round-robin generation is the only source.
+  CREATE TABLE IF NOT EXISTS league_fixtures (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    league_id  INTEGER NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+    player1_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    player2_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    game_id    INTEGER REFERENCES games(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_league_fixtures_league  ON league_fixtures(league_id);
+  CREATE INDEX IF NOT EXISTS idx_league_fixtures_game    ON league_fixtures(game_id);
+  CREATE INDEX IF NOT EXISTS idx_league_fixtures_players ON league_fixtures(player1_id, player2_id);
+
   -- Dart Builder / loadout customization (docs/archive/dart-builder-roadmap.md). Not a new
   -- column on games/players — a player's owned catalog of parts, each row personal
   -- (not shared/global) since real dart preferences are personal. No 'tip' type: tip
@@ -725,7 +753,7 @@ function _resolveLoadoutForParticipant(playerId, loadoutId) {
   return row;
 }
 
-function createGame({ category, legsPerSet, setsPerGame, players, practice, gameType, config, leagueId }) {
+function createGame({ category, legsPerSet, setsPerGame, players, practice, gameType, config, leagueId, leagueFixtureId }) {
   // gameType/config default to X01 for every caller today (no New Game UI sends
   // anything else yet) — see docs/game-modes-roadmap.md. Accepting them as params
   // means a future Cricket/Baseball New Game flow can pass its own without another
@@ -742,6 +770,26 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   }
   const categoryStr = String(category);
   if (categoryStr.length > 64) throw httpError(400, 'category must be 64 characters or fewer');
+  // League fixtures (docs/league-mode-roadmap.md "League fixtures / pending matches"):
+  // unlike leagueId below (a hint the onGameCreated hook re-validates and silently
+  // falls through on staleness), choosing a specific fixture is an explicit, not an
+  // inferred, choice — so it's fully validated up front and a stale/mismatched one
+  // REJECTS game creation rather than quietly creating an untracked casual game the
+  // caller didn't ask for.
+  let fixture = null;
+  if (leagueFixtureId != null && leagueFixtureId !== '') {
+    fixture = db.prepare('SELECT * FROM league_fixtures WHERE id = ?').get(Number(leagueFixtureId));
+    if (!fixture) throw httpError(404, 'League fixture not found');
+    if (fixture.game_id != null) throw httpError(409, 'This fixture already has a game linked to it');
+    const league = db.prepare('SELECT * FROM leagues WHERE id = ?').get(fixture.league_id);
+    if (league.game_type !== resolvedGameType || league.category !== categoryStr) {
+      throw httpError(400, "gameType/category must match the fixture's league");
+    }
+    const givenIds = (players || []).map(entry => ensurePlayer(entry.name).id);
+    const fixtureIds = [fixture.player1_id, fixture.player2_id];
+    const samePair = givenIds.length === 2 && fixtureIds.every(id => givenIds.includes(id)) && givenIds.every(id => fixtureIds.includes(id));
+    if (!samePair) throw httpError(400, 'The selected players do not match this fixture');
+  }
   const resolvedConfig = config ? JSON.stringify(config) : JSON.stringify({ startingScore: Number(category) || null });
   if (Buffer.byteLength(resolvedConfig) > 4096) throw httpError(400, 'config is too large');
   const info = q.insertGame.run(categoryStr, clampMatchFormat(legsPerSet), clampMatchFormat(setsPerGame), practice ? 1 : 0, resolvedGameType, resolvedConfig);
@@ -767,6 +815,14 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   // so H2H/practice classification survives later player deletion — see the migration note.
   const pc = db.prepare('SELECT COUNT(*) AS n FROM game_players WHERE game_id = ?').get(gameId).n;
   db.prepare('UPDATE games SET player_count = ? WHERE id = ?').run(pc, gameId);
+  if (fixture) {
+    // Sets games.league_id DIRECTLY here, before the 'created' hook fires below —
+    // ties the game to the fixture's league unambiguously, for free, without the
+    // onGameCreated auto-tag hook's fuzzy 0/1/>1-candidate eligibility logic ever
+    // running for a fixture-originated game (see that hook's own early-return check).
+    db.prepare('UPDATE league_fixtures SET game_id = ? WHERE id = ?').run(gameId, fixture.id);
+    db.prepare('UPDATE games SET league_id = ? WHERE id = ?').run(fixture.league_id, gameId);
+  }
   _fireGameLifecycleHooks('created', { gameId, gameType: resolvedGameType, practice: !!practice,
     category: categoryStr, playerCount: pc, playerIds: participantIds, leagueId });
   return { gameId };
@@ -3661,6 +3717,11 @@ function resetStats() {
   // shell the way tournament brackets were pre-BUG-7. A league's own config (name/
   // category/date window/points formula) is closer to player-profile configuration
   // data than to tournament's mid-flight bracket state.
+  // league_fixtures rows DO need no explicit delete despite pointing at a games row
+  // (game_id) -- unlike tournament_matches, that FK is ON DELETE SET NULL, not
+  // CASCADE, so wiping every game just reverts every fixture back to "pending"
+  // (correct: the game that would have fulfilled it no longer exists) rather than
+  // leaving a stranded non-NULL game_id or needing the row itself removed.
   db.exec('DELETE FROM turns; DELETE FROM game_players; DELETE FROM games; DELETE FROM tournaments;');
   return { ok: true };
 }
@@ -3680,7 +3741,10 @@ function resetStats() {
 // DELETE CASCADE), but nothing references the leagues PARENT row, so without this
 // the league shells (name/category/dates) would survive a total wipe with a now-
 // empty roster, showing an orphaned "0 players" league in the Leagues list. DELETE
-// FROM leagues cascades league_players too.
+// FROM leagues cascades league_players too, and league_fixtures with it (league_id
+// ON DELETE CASCADE) — also independently cascaded by the players delete above
+// (player1_id/player2_id are ON DELETE CASCADE too), so it's covered twice over,
+// same as ghost_races below.
 function wipeAllData() {
   db.exec('DELETE FROM players; DELETE FROM games; DELETE FROM tournaments; DELETE FROM leagues;');
   return { ok: true };
@@ -3727,6 +3791,9 @@ function getFullDatabaseExport() {
     // no credential columns, so they belong in "take your data with you" too.
     leagues: db.prepare('SELECT * FROM leagues').all(),
     leaguePlayers: db.prepare('SELECT * FROM league_players').all(),
+    // docs/league-mode-roadmap.md "League fixtures / pending matches": same standing
+    // rule as tournament tables above — ordinary user data, no secrets.
+    leagueFixtures: db.prepare('SELECT * FROM league_fixtures').all(),
   };
 }
 
@@ -4834,7 +4901,30 @@ function createLeague({ name, gameType, category, startsAt, endsAt, pointsWin, p
   const leagueId = Number(info.lastInsertRowid);
   const insertMember = db.prepare('INSERT OR IGNORE INTO league_players (league_id, player_id) VALUES (?, ?)');
   playerRows.forEach(p => insertMember.run(leagueId, p.id));
+  _generateRoundRobinFixtures(leagueId, playerRows.map(p => p.id), []);
   return { leagueId };
+}
+
+// Single round-robin fixture generation (docs/league-mode-roadmap.md "League
+// fixtures / pending matches" — resolved: single, not double, round-robin for v1).
+// Creates exactly one league_fixtures row per unique pair drawn from newPlayerIds
+// paired against existingPlayerIds AND against each other (never a pair drawn
+// only from existingPlayerIds — those already got their fixture the first time
+// around). Called with the whole initial roster as newPlayerIds/[] existing at
+// league creation, and with just the one new id/the rest of the roster as
+// existing whenever a player joins an already-active league (enrollLeaguePlayer())
+// — so an existing pair's fixture (pending, in progress, or fulfilled) is never
+// touched or duplicated. player1_id/player2_id are stored in canonical (lower id
+// first) order so a lookup never has to try both orderings.
+function _generateRoundRobinFixtures(leagueId, newPlayerIds, existingPlayerIds) {
+  const insert = db.prepare('INSERT INTO league_fixtures (league_id, player1_id, player2_id) VALUES (?, ?, ?)');
+  newPlayerIds.forEach((a, i) => {
+    const opponents = [...existingPlayerIds, ...newPlayerIds.slice(i + 1)];
+    opponents.forEach(b => {
+      const [player1Id, player2Id] = a < b ? [a, b] : [b, a];
+      insert.run(leagueId, player1Id, player2Id);
+    });
+  });
 }
 
 function listLeagues() {
@@ -4887,6 +4977,48 @@ function getLeagueStandings(leagueId) {
   return _computeLeagueStandings(_getLeagueOrThrow(leagueId));
 }
 
+// Fixture status is derived, never stored — same "compute from raw data"
+// precedent as tournament_matches' status in getTournament(): pending while
+// game_id IS NULL, in_progress once linked but the game isn't complete yet,
+// fulfilled once it is.
+function getLeagueFixtures(leagueId) {
+  return db.prepare(`
+    SELECT f.id, p1.name AS player1Name, p2.name AS player2Name, f.game_id AS gameId,
+           g.completed_at AS gameCompletedAt, f.created_at AS createdAt
+    FROM league_fixtures f
+    JOIN players p1 ON p1.id = f.player1_id
+    JOIN players p2 ON p2.id = f.player2_id
+    LEFT JOIN games g ON g.id = f.game_id
+    WHERE f.league_id = ?
+    ORDER BY (CASE WHEN f.game_id IS NULL THEN 0 WHEN g.completed_at IS NULL THEN 1 ELSE 2 END),
+      p1.name COLLATE NOCASE, p2.name COLLATE NOCASE
+  `).all(Number(leagueId)).map(f => ({
+    id: f.id, player1Name: f.player1Name, player2Name: f.player2Name, gameId: f.gameId,
+    status: f.gameId == null ? 'pending' : (f.gameCompletedAt == null ? 'in_progress' : 'fulfilled'),
+    createdAt: f.createdAt,
+  }));
+}
+
+// Public read the New Game screen calls right after Step 1 (opponent pair picked) —
+// see docs/league-mode-roadmap.md's "New endpoint" section. Unlike getEligibleLeagues()
+// (which needs gameType/category, since it only ever runs after those are already
+// chosen), this needs neither: a fixture already carries them via its own league.
+// Order-independent on the pair, mirroring _findEligibleLeagues(); fails soft to []
+// for an unresolvable name, same defensive posture as getEligibleLeagues().
+function getPendingFixturesForPlayers(playerName1, playerName2) {
+  const p1 = getPlayer(playerName1), p2 = getPlayer(playerName2);
+  if (!p1 || !p2) return [];
+  const [a, b] = p1.id < p2.id ? [p1.id, p2.id] : [p2.id, p1.id];
+  return db.prepare(`
+    SELECT f.id AS fixtureId, l.id AS leagueId, l.name AS leagueName,
+           l.game_type AS gameType, l.category
+    FROM league_fixtures f JOIN leagues l ON l.id = f.league_id
+    WHERE f.player1_id = ? AND f.player2_id = ? AND f.game_id IS NULL
+      AND l.status = 'active' AND date('now') >= l.starts_at AND (l.ends_at IS NULL OR date('now') <= l.ends_at)
+    ORDER BY l.created_at DESC
+  `).all(a, b);
+}
+
 function getLeague(id) {
   const league = db.prepare('SELECT * FROM leagues WHERE id = ?').get(Number(id));
   if (!league) return null;
@@ -4896,13 +5028,20 @@ function getLeague(id) {
     pointsWin: league.points_win, pointsLoss: league.points_loss,
     createdAt: league.created_at, endedAt: league.ended_at,
     standings: _computeLeagueStandings(league),
+    fixtures: getLeagueFixtures(league.id),
   };
 }
 
 function enrollLeaguePlayer(leagueId, playerName) {
   const league = _getLeagueOrThrow(leagueId);
   const p = ensurePlayer(playerName);
-  db.prepare('INSERT OR IGNORE INTO league_players (league_id, player_id) VALUES (?, ?)').run(league.id, p.id);
+  const existingIds = db.prepare('SELECT player_id FROM league_players WHERE league_id = ?').all(league.id).map(r => r.player_id);
+  const info = db.prepare('INSERT OR IGNORE INTO league_players (league_id, player_id) VALUES (?, ?)').run(league.id, p.id);
+  // Only generate fixtures for a genuinely NEW enrollment — re-enrolling an already-
+  // enrolled player (INSERT OR IGNORE no-ops) must never duplicate their existing pairs.
+  if (info.changes > 0) {
+    _generateRoundRobinFixtures(league.id, [p.id], existingIds);
+  }
   return { ok: true };
 }
 
@@ -4950,6 +5089,12 @@ onGameCreated(({ gameType, practice, category, playerCount, playerIds, leagueId,
   // Practice/Chuckin/Checkout Trainer are structurally excluded regardless, being
   // solo/no-winner formats — see docs/league-mode-roadmap.md).
   if ((gameType !== 'x01' && gameType !== 'cricket') || practice || playerCount !== 2 || !Array.isArray(playerIds) || playerIds.length !== 2) return;
+  // A fixture-originated game (docs/league-mode-roadmap.md "League fixtures / pending
+  // matches") already had games.league_id set DIRECTLY by createGame(), before this
+  // hook fired — that's an explicit, already-resolved choice, so re-running the fuzzy
+  // eligibility match here would be redundant at best and could pick a DIFFERENT
+  // league at worst if the pair happens to share more than one active league.
+  if (db.prepare('SELECT league_id FROM games WHERE id = ?').get(gameId).league_id != null) return;
   let targetLeagueId = null;
   if (leagueId != null && leagueId !== '') {
     // Client-supplied choice (from the New Game "log to league?" picker, shown only
@@ -5326,7 +5471,7 @@ module.exports = {
   startChallengeAttempt, completeChallengeAttempt, getChallengeStatus, getChallengeHistory, resetChallengeAttempt,
   createTournament, listTournaments, getTournament, startTournamentMatch, recordWalkover, getTournamentStats,
   createLeague, listLeagues, getLeague, getLeagueStandings, enrollLeaguePlayer, setLeagueStatus,
-  getPlayerLeagueSummary, getEligibleLeagues,
+  getPlayerLeagueSummary, getEligibleLeagues, getLeagueFixtures, getPendingFixturesForPlayers,
   getDartComponentOptions,
   createComponent, listComponents, updateComponent, deleteComponent,
   createLoadout, listLoadouts, getLoadout, updateLoadout, deleteLoadout, duplicateLoadout,

@@ -16,15 +16,24 @@
 > than the original sketch, that's called out explicitly rather than silently
 > edited away.
 >
-> **Un-archived (2026-07): a new "League fixtures / pending matches" item is
-> now open** — see its own section below, added to support
-> `docs/new-game-flow-roadmap.md`'s "League Game" New Game entry. This is a
-> deliberate reversal of a decision this doc made and shipped against below
-> ("a league only constrains category... every match is exactly the casual,
-> unstructured match," no bracket-scheduled fixtures) — flagged explicitly
-> here rather than silently contradicted. Everything summarized above this
-> note is still fully shipped and unaffected; only the new section below is
-> open.
+> **League fixtures / pending matches — now shipped too (2026-07)**: a new
+> `league_fixtures` table (own table + `game_id` FK into `games`, following
+> `tournament_matches`' precedent — see its own section below for the full
+> design and every resolved open question), single round-robin generation at
+> league creation and again for just the new pairings whenever a player joins
+> an already-active league, a `GET /api/leagues/pending-fixture` lookup, and
+> `createGame()` accepting an explicit `leagueFixtureId` that links a fixture
+> directly (bypassing the fuzzy `onGameCreated` auto-tag hook entirely for
+> that game). A read-only "Fixtures" list is shown on the League detail
+> screen (pending/in progress/played, derived not stored, same icon+text
+> convention as every other status badge). This was a deliberate reversal of
+> a decision this doc made and shipped against below ("a league only
+> constrains category... every match is exactly the casual, unstructured
+> match," no bracket-scheduled fixtures) — flagged explicitly here rather
+> than silently contradicted. `docs/new-game-flow-roadmap.md`'s "League Game"
+> New Game entry (item 11b on `docs/open-roadmap-items.md`) is a separate,
+> still-open item that consumes this endpoint/param pair to offer the actual
+> one-tap start — not built here.
 
 ### Resolved open questions (were listed below as open; now decided and shipped)
 
@@ -118,14 +127,16 @@ unify them into one system.
   ends, and a "past seasons" archive lets you look back at who won a given month
   without needing to keep manually filtering by date range.
 
-## League fixtures / pending matches (new, not started)
+## League fixtures / pending matches (shipped 2026-07 — backend + read-only
+## admin view; the New Game "League Game" one-tap start itself is a separate,
+## still-open item)
 
 **Goal**: let a New Game session recognize when the two selected players have
 a scheduled-but-unplayed match in a shared active league, and offer it as a
 one-tap "League Game" shortcut (`docs/new-game-flow-roadmap.md`'s Step 2)
 that pre-fills that league's game type/category rather than asking again.
-Today a league only auto-tags a game *after* the players independently
-happen to pick a matching category — there's no concept of "this pairing
+Previously a league only auto-tagged a game *after* the players independently
+happened to pick a matching category — there was no concept of "this pairing
 still owes the league a match," which is exactly what this section adds.
 
 - **New table, following this app's standing "own table with a `game_id` FK
@@ -136,71 +147,88 @@ still owes the league a match," which is exactly what this section adds.
   precedent: a fixture is **pending** while `game_id` is null, **in
   progress** once a `games` row is linked but not yet completed, and
   **fulfilled** once that game completes — the fixture's own row never needs
-  a write on game completion, only on creation.
+  a write on game completion, only on creation. `player1_id` is always the
+  lower player id of the pair (canonical order, fixed at generation time).
+- **Round-robin generation** (`_generateRoundRobinFixtures()`): a single
+  round-robin fixture per unique enrolled pair, generated at league creation
+  for the initial roster and again for just the new pairings whenever a
+  player joins an already-active league (`enrollLeaguePlayer()`) — an
+  already-enrolled player re-enrolling is a no-op and never duplicates their
+  existing fixtures. No admin-driven manual fixture creation/cancellation —
+  round-robin generation is the only source of fixtures.
 - **Linking a fixture to a game is explicit, not inferred**: unlike the
   existing `onGameCreated` auto-tag hook (which fuzzy-matches any newly
-  created H2H game against eligible leagues by category), choosing "League
-  Game" in New Game means the player explicitly picked a specific fixture —
-  so `setup`/`startGame()` carries a `leagueFixtureId` through to game
-  creation, and the backend sets `league_fixtures.game_id` directly on that
-  row. This avoids the ambiguity the existing fuzzy-match hook has to solve
-  for (ties `games.league_id` to the right league automatically too, for
-  free, without needing the existing 0/1/>1-candidate eligibility logic at
-  all for fixture-originated games).
+  created H2H game against eligible leagues by category), choosing a specific
+  fixture is an explicit choice — so `createGame()` accepts an optional
+  `leagueFixtureId` and, when present, fully validates it up front (must
+  exist, must not already have a game linked, the two submitted players must
+  be exactly this fixture's pair, and `gameType`/`category` must match the
+  fixture's own league) and **rejects** game creation on any mismatch, rather
+  than silently falling through the way a stale `leagueId` hint does. On
+  success it sets `league_fixtures.game_id` and `games.league_id` directly,
+  before the `created` lifecycle hook fires — the league auto-tag hook
+  (`onGameCreated` listener) checks `games.league_id` first and returns
+  immediately if it's already set, so a fixture-linked game never re-runs the
+  fuzzy 0/1/>1-candidate eligibility match at all, even when the pair happens
+  to share more than one active league.
 - **New endpoint**: a pending-fixture lookup keyed on just the player pair
-  (`GET /api/leagues/pending-fixture?p1=&p2=`), callable right after Step 1
-  of the New Game flow — *before* any game type is chosen, unlike the
-  existing `/api/leagues/eligible` check this doc's shipped picker uses
-  today (which requires `category`/`gameType` as query params, since it only
-  ever ran after those were already chosen). Returns every pending fixture
-  across every active league both players share (could be more than one, if
-  they're enrolled in multiple leagues with each other).
-- **Selecting "League Game"**: with exactly one pending fixture, auto-fills
-  `setup.gameType`/`setup.start` (or the Cricket preset) from
-  `leagues.game_type`/`category` and sets `setup.leagueFixtureId` — legs/sets
-  still get asked in Step 3 as normal (a league still doesn't fix match
-  format, per the "Resolved open questions" above, unchanged by this
-  section). A Custom Cricket league still needs its 7 targets chosen in Step
-  3 too, for the same reason — the league's `category` value
-  (`'Custom Cricket'`) doesn't pin the exact numbers. With 2+ pending
-  fixtures (the player pair shares more than one active league), selecting
-  "League Game" reveals a secondary "Which league match?" dropdown, mirroring
-  the X01-flavor-dropdown pattern `docs/new-game-flow-roadmap.md` already
-  establishes for X01's starting score.
+  (`GET /api/leagues/pending-fixture?p1=&p2=` → `getPendingFixturesForPlayers()`),
+  callable right after Step 1 of the New Game flow — *before* any game type is
+  chosen, unlike the existing `/api/leagues/eligible` check this doc's
+  shipped picker uses today (which requires `category`/`gameType` as query
+  params, since it only ever ran after those were already chosen). Returns
+  every pending fixture across every active league both players share (could
+  be more than one, if they're enrolled in multiple leagues with each
+  other), order-independent on the pair.
+- **Read-only "Fixtures" list** on the League detail screen
+  (`renderLeagueDetail()`): every fixture for the league with its derived
+  status (`FIXTURE_STATUS_ICON`/`LABEL`, icon + text together, same
+  convention as every other status badge in the app) — gives an admin
+  visibility into the round-robin schedule today, ahead of the actual
+  New-Game-integrated one-tap start.
+- **Still open, deliberately not built here — item 11b on
+  `docs/open-roadmap-items.md`**: the New Game screen itself doesn't yet call
+  `GET /api/leagues/pending-fixture` or offer a "League Game" entry — that's
+  `docs/new-game-flow-roadmap.md`'s job, once its own 3-step wizard exists.
+  When it is: with exactly one pending fixture, auto-fill `setup.gameType`/
+  `setup.start` (or the Cricket preset) from `leagues.game_type`/`category`
+  and set `setup.leagueFixtureId` — legs/sets still get asked in Step 3 as
+  normal (a league still doesn't fix match format, per the "Resolved open
+  questions" above, unchanged by this section). A Custom Cricket league still
+  needs its 7 targets chosen in Step 3 too, for the same reason — the
+  league's `category` value (`'Custom Cricket'`) doesn't pin the exact
+  numbers. With 2+ pending fixtures (the player pair shares more than one
+  active league), selecting "League Game" should reveal a secondary "Which
+  league match?" dropdown, mirroring the X01-flavor-dropdown pattern
+  `docs/new-game-flow-roadmap.md` already establishes for X01's starting
+  score.
 
-### Open questions for whoever picks this up
+### Resolved open questions (were listed below as open; now decided and shipped)
 
-- **Fixture generation**: how do pending fixtures get created in the first
-  place? The natural default is a full round-robin generated once, at league
-  creation (and again for just the new pairings whenever a player joins an
-  already-active league) — but this isn't decided. An admin-driven "schedule
-  a match" action is the alternative, trading automation for control.
-- **Double round-robin**: does each enrolled pair get exactly one fixture per
-  season (single round-robin), or two (a return match, common in real pub
-  leagues)? Leans toward single for v1 simplicity, not decided.
-- **Unfulfilled fixtures at season end**: if a fixture is still pending when
-  a league's season ends, does it just quietly stop mattering (the season
-  view already freezes standings on end), or should the standings/season
-  summary call out unplayed fixtures explicitly?
-- **Manual fixtures**: should an admin be able to create or cancel an
-  individual fixture outside the round-robin generation (e.g. to add a
-  specific replay match), or is round-robin generation the only source of
-  fixtures for v1?
-- **Interaction with today's ambiguity picker**: today's "log to which
-  league?" picker (shown when a game qualifies for 2+ leagues by category
-  alone) and this section's fixture lookup are two different mechanisms that
-  can both apply to the same pair of players — does a fixture-originated
-  game skip the old picker entirely (since `leagueFixtureId` already pins the
-  league unambiguously), confirming the existing auto-tag hook should treat
-  fixture-linked games as already resolved and not re-run its own eligibility
-  check on them?
+- **Fixture generation**: automatic — a full round-robin generated at league
+  creation, and again for just the new pairings whenever a player joins an
+  already-active league. No admin-driven "schedule a match" action.
+- **Double round-robin**: single round-robin for v1 — each enrolled pair gets
+  exactly one fixture per season, not a return match.
+- **Unfulfilled fixtures at season end**: quietly stop mattering, matching
+  "standings freeze" already being automatic-by-construction (see "Season
+  lifecycle" above) — no separate end-of-season callout of unplayed
+  fixtures.
+- **Manual fixtures**: not supported in v1 — round-robin generation is the
+  only source of fixtures; no admin create/cancel action for an individual
+  one.
+- **Interaction with today's ambiguity picker**: a fixture-originated game
+  skips the old picker's underlying mechanism (the `onGameCreated` auto-tag
+  hook) entirely — confirmed and shipped via the "already has `league_id`
+  set" early-return check described above.
 
 ## Accessibility, security, and testing considerations
 
-Addressed as shipped (2026-07) for everything above the "League fixtures"
-section; the fixtures feature itself still needs its own pass once built
-(a new write path, a new read endpoint, and UI states in New Game), per
-`CLAUDE.md`'s standing conventions:
+Addressed as shipped (2026-07), including the "League fixtures" section, per
+`CLAUDE.md`'s standing conventions. The New Game "League Game" one-tap start
+itself (item 11b) still needs its own pass once built, since that's the piece
+introducing actual New Game UI states — nothing in this doc's own shipped
+scope was deferred.
 
 - **Testing**: `backend/test/league.test.js` covers creation/validation,
   enrollment (including multi-league), the auto-tag hook's every eligibility
@@ -208,19 +236,30 @@ section; the fixtures feature itself still needs its own pass once built
   game shape), standings computation (points formula, decided-vs-abandoned
   games, zero-played roster rows, sort order/tiebreak), season status
   transitions, the `wipeAllData()`/`resetStats()` standing-rule interactions,
-  and Cricket league support (gameType validation, category-per-gameType, and
+  Cricket league support (gameType validation, category-per-gameType, and
   X01/Cricket cross-isolation in both directions, including the same two
-  players enrolled in one league of each type) — a committed, re-runnable
+  players enrolled in one league of each type), and league fixtures /
+  pending matches (round-robin generation at creation and on enrollment
+  including the no-duplicate-on-re-enroll case, derived fixture status, the
+  order-independent pending-fixture lookup scoped to active leagues,
+  `createGame()`'s full `leagueFixtureId` validation — unknown id, already-
+  linked, mismatched pair, mismatched gameType/category — the auto-tag hook
+  bypass even under 2+-eligible-league ambiguity, and both
+  `wipeAllData()`/`resetStats()` interactions) — a committed, re-runnable
   suite, not a one-off manual check.
 - **Accessibility**: the standings view is a real `<table>` with
   `<caption class="sr-only">` and `<th scope="col">` headers (needs no
   separate linearized fallback, unlike the tournament bracket's spatial
-  layout) — see `REFERENCE.md` §18. Status badges (Active/Ended) are icon +
-  text together, never color alone.
+  layout) — see `REFERENCE.md` §18. Status badges (Active/Ended,
+  Pending/In progress/Played) are icon + text together, never color alone.
 - **Security**: no new credential/token surface — reuses the existing
   `requireWrite` admin-auth model on every write route; every input
-  (name/category/dates/points) is bounded and validated at the write boundary
-  the same way every other write in this app is.
+  (name/category/dates/points, and now `leagueFixtureId`) is bounded and
+  validated at the write boundary the same way every other write in this app
+  is. `GET /api/leagues/pending-fixture` is public, matching every other
+  league read (standings, eligibility) — a pending fixture reveals no more
+  than the standings view already does (which two enrolled players, which
+  league, which format).
 
 ## Resolved (see the status header at the top of this doc for the shipped shape)
 
