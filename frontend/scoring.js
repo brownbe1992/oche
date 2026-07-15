@@ -269,13 +269,13 @@ function checkoutHint(rem, doubleOut, maxDarts){
   return '';
 }
 
-/* ---------- Checkout Trainer (docs/checkout-trainer-roadmap.md) ----------
+/* ---------- Checkout Trainer (docs/archive/checkout-trainer-roadmap.md) ----------
    A pure mental-recall drill built entirely on top of the two functions above:
    evaluateVisit() grades whether a proposed route legally reaches zero, and
    checkoutHint() supplies the objective minimum dart count to compare against.
    Nothing game-type-specific needed inventing here. */
 
-// Difficulty tiers for target selection (docs/checkout-trainer-roadmap.md
+// Difficulty tiers for target selection (docs/archive/checkout-trainer-roadmap.md
 // "Target selection"). Each tier is a [low,high] bound on the target score;
 // `pickCheckoutTarget()` intersects it with the out-mode's own floor (2 under
 // double-out, 1 under straight-out) so a tier never needs to know about
@@ -299,11 +299,50 @@ const CHECKOUT_TRAINER_DIFFICULTY_TIERS = {
 // unchanged. The random-roll loop is bounded only as a defensive guard
 // against a pathological rng — every tier has finishable values within a few
 // rolls in practice, so this never meaningfully runs to the fallback scan.
-function pickCheckoutTarget(doubleOut, rng, difficulty){
+// Trick-question variant (docs/archive/checkout-trainer-roadmap.md "Trick-question
+// difficulty variant", shipped 2026-07): when enabled for the session
+// (games.config.trickQuestions), roughly 1 round in 8 serves an actual bogey
+// number — a target with NO possible 3-dart checkout — and the correct answer
+// is to press the "No possible checkout" button instead of tapping out darts
+// (gradeCheckoutDeclaration() below is that button's grading branch). 1-in-8
+// keeps trick rounds a genuine surprise rather than a coin flip the player
+// starts second-guessing every round over.
+const CHECKOUT_TRAINER_TRICK_CHANCE = 0.125;
+
+// Every unsolvable target within a difficulty tier for the given out-mode,
+// derived from checkoutHint()'s own '' signal rather than a hardcoded list —
+// the same source of truth pickCheckoutTarget() already trusts for the
+// opposite question. Under double-out this is the classic bogey set
+// (159/162/163/165/166/168/169) intersected with the tier's range; straight
+// out has its own, different unreachable-in-3-darts scores near the top of
+// the range. A tier can legitimately come back empty (e.g. Under 40, where
+// every score is finishable) — pickCheckoutTarget() falls through to a
+// normal solvable target in that case rather than failing the roll.
+function listUnsolvableTargets(doubleOut, difficulty){
+  const tier = CHECKOUT_TRAINER_DIFFICULTY_TIERS[difficulty] || CHECKOUT_TRAINER_DIFFICULTY_TIERS.full;
+  const low = Math.max(doubleOut ? 2 : 1, tier.low);
+  const out = [];
+  for(let c=low;c<=tier.high;c++){
+    if(checkoutHint(c, doubleOut, 3) === '') out.push(c);
+  }
+  return out;
+}
+
+// `trickChance` (0..1, default 0 so every existing caller/test keeps its exact
+// pre-trick behavior): probability that this round serves a deliberately
+// unsolvable bogey number from the tier instead of a finishable target. The
+// trick roll consumes one rng draw and the bogey pick a second, so a
+// deterministic test can steer both.
+function pickCheckoutTarget(doubleOut, rng, difficulty, trickChance){
   const roll = rng || Math.random;
   const tier = CHECKOUT_TRAINER_DIFFICULTY_TIERS[difficulty] || CHECKOUT_TRAINER_DIFFICULTY_TIERS.full;
   const low = Math.max(doubleOut ? 2 : 1, tier.low);   // double-out can never finish on 1; straight-out can
   const high = tier.high;
+  if(trickChance > 0 && roll() < trickChance){
+    const bogeys = listUnsolvableTargets(doubleOut, difficulty);
+    if(bogeys.length) return bogeys[Math.floor(roll() * bogeys.length)];
+    // tier has no unsolvable values (e.g. Under 40) — serve a normal target instead
+  }
   for(let i=0;i<200;i++){
     const candidate = low + Math.floor(roll() * (high - low + 1));
     if(checkoutHint(candidate, doubleOut, 3) !== '') return candidate;
@@ -333,7 +372,27 @@ function gradeCheckoutAttempt(target, doubleOut, darts){
   return { legal, usedDarts, optimalDarts, optimal, hint };
 }
 
-// Checkout Blitz's wall-clock deadline check (docs/checkout-trainer-roadmap.md
+// Grades a "no possible checkout" declaration — the trick-question variant's
+// second answer path, alongside gradeCheckoutAttempt() above. Correct exactly
+// when checkoutHint() has no route for the target (a genuine bogey number);
+// declaring a finishable target unsolvable is wrong, and `hint` carries the
+// route that proves it for the reveal. The return shape deliberately mirrors
+// gradeCheckoutAttempt()'s `legal`/`optimal` flags — a correct declaration IS
+// this round's best possible answer, so it maps onto the same three-way
+// bust/checkout/leg_won outcome every stat, ladder, and Blitz's 2/1/0 scoring
+// already read (correct -> optimal, 2 points; wrong -> illegal, 0 points; a
+// declaration is never "legal but not optimal"). `declared:true` is what lets
+// the UI and the one-off badge checks tell the two answer paths apart — a
+// declaration must never count as a 1-dart solve (One-Darter) or a mastered
+// checkout (toughest-checkout Personal Best).
+function gradeCheckoutDeclaration(target, doubleOut){
+  const hint = checkoutHint(target, doubleOut, 3);
+  const correct = hint === '';
+  return { declared: true, correct, legal: correct, optimal: correct,
+    usedDarts: 0, optimalDarts: correct ? null : hint.split(' ').length, hint };
+}
+
+// Checkout Blitz's wall-clock deadline check (docs/archive/checkout-trainer-roadmap.md
 // "Core loop delta", revised 2026-07) — a single pure predicate shared by all
 // three of index.html's timeout enforcement points (throwDartCheckoutTrainer(),
 // submitCheckoutAttempt(), tickCheckoutBlitzTimer()) so they can never disagree
@@ -344,7 +403,7 @@ function gradeCheckoutAttempt(target, doubleOut, darts){
 function blitzDeadlinePassed(deadline, now){
   return deadline != null && now >= deadline;
 }
-// 📸 Photo Finish (docs/checkout-trainer-roadmap.md "Achievements") — a legal
+// 📸 Photo Finish (docs/archive/checkout-trainer-roadmap.md "Achievements") — a legal
 // Checkout Blitz round submitted with under 1 second **genuinely remaining**,
 // never a submission that arrived after the deadline. Fixed 2026-07: the
 // previous version only checked `remainingMs < 1000`, which is also true for
@@ -452,6 +511,7 @@ if (typeof module !== 'undefined' && module.exports) {
     evaluateDartDoublesPractice, evaluateDartAroundTheClock, isStaircaseFinish,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,
     pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
+    CHECKOUT_TRAINER_TRICK_CHANCE, listUnsolvableTargets, gradeCheckoutDeclaration,
     CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH, challengeBadgeSignals,
     chuckinTiersReached,
     isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,

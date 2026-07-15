@@ -16,7 +16,8 @@
        DEL  /api/players           -> delete (?name=...)
        GET  /api/stats             -> computed stats per player
        POST /api/games             -> start a game           { category, legsPerSet, setsPerGame, players:[names] } -> { gameId }
-       POST /api/games/:id/turns   -> record one turn        { player, set, leg, scored, trebleLess, bust, checkout, checkoutPoints, legWon }
+       POST /api/games/:id/turns   -> record one turn        { player, set, leg, scored, trebleLess, bust, checkout, checkoutPoints, legWon,
+                                                               targetScore?, declaredUnsolvable? (both Checkout Trainer only) }
        POST /api/games/:id/complete-> finish a game          { winner }
        POST /api/reset             -> wipe all games/turns (players kept)        [admin]
        POST /api/wipe-all          -> wipe all players/games/stats (admins kept) [admin]

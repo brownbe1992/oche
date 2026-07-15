@@ -226,7 +226,7 @@ it exposes.
 - **Practice games**: mode-specific extras surface here — Checkout Trainer's
   Freeform vs. Checkout Blitz toggle plus its four difficulty tiers (Under 40
   / Under 100 / Over 100 / Full Range, already shipped per
-  `docs/checkout-trainer-roadmap.md`), Ghost's leg picker
+  `docs/archive/checkout-trainer-roadmap.md`), Ghost's leg picker
   (`#ghost-options-section`), Doubles Practice's target multi-select
   (`#doubles-options-section`), and Cricket's classic-vs-custom picker
   (`#cricket-options-section`) when the practice game is Cricket.

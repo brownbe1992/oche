@@ -14,7 +14,8 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
   evaluateDartDoublesPractice, evaluateDartAroundTheClock, chuckinTiersReached, isStaircaseFinish,
   isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,
-  pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission } = scoring;
+  pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
+  CHECKOUT_TRAINER_TRICK_CHANCE, listUnsolvableTargets, gradeCheckoutDeclaration } = scoring;
 
 // Builds a real dart object the same way the app does (makeDart minus the
 // thrownAt timestamp), rather than hand-rolling a fake {value,isDouble,...} shape.
@@ -470,7 +471,7 @@ describe('checkoutHint (checkout route calculator, REFERENCE.md §2)', () => {
   });
 });
 
-describe('pickCheckoutTarget (Checkout Trainer target selection, docs/checkout-trainer-roadmap.md)', () => {
+describe('pickCheckoutTarget (Checkout Trainer target selection, docs/archive/checkout-trainer-roadmap.md)', () => {
   test('double-out: never returns a known bogey number, always finishable', () => {
     // Sweep the rng across the full [0,1) range so every candidate in [2,170]
     // gets picked at least once, then assert none of the known double-out bogey
@@ -504,7 +505,7 @@ describe('pickCheckoutTarget (Checkout Trainer target selection, docs/checkout-t
   });
 });
 
-describe('pickCheckoutTarget difficulty tiers (docs/checkout-trainer-roadmap.md "Target selection")', () => {
+describe('pickCheckoutTarget difficulty tiers (docs/archive/checkout-trainer-roadmap.md "Target selection")', () => {
   const tiers = ['under40', 'under100', 'over100', 'full'];
 
   test('every tier stays within its own [low,high] bound, under both out-modes', () => {
@@ -545,7 +546,7 @@ describe('pickCheckoutTarget difficulty tiers (docs/checkout-trainer-roadmap.md 
   });
 });
 
-describe('gradeCheckoutAttempt (Checkout Trainer grading, docs/checkout-trainer-roadmap.md)', () => {
+describe('gradeCheckoutAttempt (Checkout Trainer grading, docs/archive/checkout-trainer-roadmap.md)', () => {
   test('optimal: legal finish in the objective minimum dart count', () => {
     const g = gradeCheckoutAttempt(40, true, [d(20, 2)]); // D20, 1 dart — the minimum for 40
     assert.equal(g.legal, true);
@@ -593,6 +594,89 @@ describe('gradeCheckoutAttempt (Checkout Trainer grading, docs/checkout-trainer-
     const g = gradeCheckoutAttempt(170, true, [d(20, 3)]); // a bust attempt at 170
     assert.equal(g.hint, 'T20 T20 Bull');
   });
+
+  test('a route submitted against a bogey number grades illegal with an empty hint (nothing to reveal)', () => {
+    const g = gradeCheckoutAttempt(169, true, [d(20, 3), d(20, 3), d(20, 3)]);
+    assert.equal(g.legal, false);
+    assert.equal(g.optimal, false);
+    assert.equal(g.hint, '', 'no route exists for a bogey number');
+    assert.equal(g.optimalDarts, null);
+  });
+});
+
+describe('trick questions (docs/archive/checkout-trainer-roadmap.md "Trick-question difficulty variant")', () => {
+  test('listUnsolvableTargets under double-out is exactly the classic bogey set for the full tier', () => {
+    // The known double-out bogey numbers (1 is excluded by the tier floor of 2).
+    assert.deepEqual(listUnsolvableTargets(true, 'full'), [159, 162, 163, 165, 166, 168, 169]);
+  });
+
+  test('every listed unsolvable target really has no checkoutHint route, and everything else in the tier does', () => {
+    for (const doubleOut of [true, false]) {
+      const bogeys = new Set(listUnsolvableTargets(doubleOut, 'full'));
+      const low = doubleOut ? 2 : 1;
+      for (let c = low; c <= 170; c++) {
+        assert.equal(bogeys.has(c), checkoutHint(c, doubleOut, 3) === '',
+          `target ${c} (${doubleOut ? 'double' : 'single'}-out) must be listed iff it has no route`);
+      }
+    }
+  });
+
+  test('tiers below the bogey range come back empty — every low target is finishable', () => {
+    assert.deepEqual(listUnsolvableTargets(true, 'under40'), []);
+    assert.deepEqual(listUnsolvableTargets(true, 'under100'), []);
+  });
+
+  test('the trick roll serves a bogey number from the tier when it hits', () => {
+    // First rng draw is the trick roll (below the chance), second picks the bogey.
+    const rolls = [0.01, 0]; // trick roll hits, then pick index 0
+    const target = pickCheckoutTarget(true, () => rolls.shift(), 'full', CHECKOUT_TRAINER_TRICK_CHANCE);
+    assert.equal(target, 159, 'lowest bogey — index 0 of the double-out bogey set');
+    assert.equal(checkoutHint(target, true, 3), '', 'served target really is unsolvable');
+  });
+
+  test('a trick roll that misses serves a normal finishable target', () => {
+    const rolls = [0.9, 0.5]; // trick roll misses, then the normal pick
+    const target = pickCheckoutTarget(true, () => rolls.shift() ?? 0.5, 'full', CHECKOUT_TRAINER_TRICK_CHANCE);
+    assert.notEqual(checkoutHint(target, true, 3), '', 'must be finishable');
+  });
+
+  test('trick mode in a tier with no bogeys falls through to a normal finishable target', () => {
+    const rolls = [0.01, 0.5]; // trick roll hits, but under40 has no bogeys
+    const target = pickCheckoutTarget(true, () => rolls.shift() ?? 0.5, 'under40', CHECKOUT_TRAINER_TRICK_CHANCE);
+    assert.ok(target >= 2 && target <= 39, 'still within the tier');
+    assert.notEqual(checkoutHint(target, true, 3), '');
+  });
+
+  test('trickChance omitted or 0 never consumes a trick roll — existing behavior byte-for-byte', () => {
+    for (const roll of [0, 0.01, 0.5, 0.999]) {
+      assert.equal(pickCheckoutTarget(true, () => roll, 'full'), pickCheckoutTarget(true, () => roll, 'full', 0));
+    }
+  });
+
+  test('gradeCheckoutDeclaration: calling a real bogey number is correct, legal, and optimal', () => {
+    const g = gradeCheckoutDeclaration(169, true);
+    assert.equal(g.declared, true);
+    assert.equal(g.correct, true);
+    assert.equal(g.legal, true, 'a correct declaration maps onto checkout=1');
+    assert.equal(g.optimal, true, 'a correct declaration maps onto leg_won=1 (2 Blitz points)');
+    assert.equal(g.usedDarts, 0);
+    assert.equal(g.hint, '');
+  });
+
+  test('gradeCheckoutDeclaration: calling a finishable target unsolvable is wrong, with the route revealed', () => {
+    const g = gradeCheckoutDeclaration(170, true);
+    assert.equal(g.correct, false);
+    assert.equal(g.legal, false, 'a wrong declaration maps onto bust=1 (0 Blitz points)');
+    assert.equal(g.optimal, false);
+    assert.equal(g.hint, 'T20 T20 Bull');
+    assert.equal(g.optimalDarts, 3);
+  });
+
+  test('gradeCheckoutDeclaration respects the out-mode — the same number can be a bogey in one and not the other', () => {
+    // 159 is a classic double-out bogey but IS finishable straight-out (e.g. T20 T20 T13).
+    assert.equal(gradeCheckoutDeclaration(159, true).correct, true);
+    assert.equal(gradeCheckoutDeclaration(159, false).correct, false);
+  });
 });
 
 // Regression coverage for the Checkout Blitz timeout bug reported live: a player
@@ -603,7 +687,7 @@ describe('gradeCheckoutAttempt (Checkout Trainer grading, docs/checkout-trainer-
 // on how late. blitzDeadlinePassed()/isPhotoFinishSubmission() are the two pure
 // predicates index.html's throwDartCheckoutTrainer()/submitCheckoutAttempt()/
 // tickCheckoutBlitzTimer() now all share for this decision.
-describe('blitzDeadlinePassed (Checkout Blitz hard-stop, docs/checkout-trainer-roadmap.md "Core loop delta")', () => {
+describe('blitzDeadlinePassed (Checkout Blitz hard-stop, docs/archive/checkout-trainer-roadmap.md "Core loop delta")', () => {
   test('false while now is strictly before the deadline', () => {
     assert.equal(blitzDeadlinePassed(10000, 9999), false);
   });
@@ -618,7 +702,7 @@ describe('blitzDeadlinePassed (Checkout Blitz hard-stop, docs/checkout-trainer-r
   });
 });
 
-describe('isPhotoFinishSubmission (📸 Photo Finish trigger, docs/checkout-trainer-roadmap.md "Achievements")', () => {
+describe('isPhotoFinishSubmission (📸 Photo Finish trigger, docs/archive/checkout-trainer-roadmap.md "Achievements")', () => {
   test('fires with genuinely under 1 second remaining', () => {
     assert.equal(isPhotoFinishSubmission(999), true);
     assert.equal(isPhotoFinishSubmission(1), true);

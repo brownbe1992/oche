@@ -8,7 +8,7 @@ A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player 
 
 **v0.14.0**
 
-You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, an [86-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. A solo [Checkout Trainer mode](#new-game) is a no-dartboard mental drill — given a target score, tap out the fewest-darts checkout from memory and get graded instantly — with an untimed Freeform mode and a 60-second Checkout Blitz sprint with its own leaderboard. Two guided practice drills, [🧭 Around the Clock and 🗺️ Around the World](#new-game), turn the app's existing completion tracking into active solo sessions with live progress feedback. All data lives in a SQLite database on your own server.
+You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, an [89-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. A solo [Checkout Trainer mode](#new-game) is a no-dartboard mental drill — given a target score, tap out the fewest-darts checkout from memory and get graded instantly — with an untimed Freeform mode and a 60-second Checkout Blitz sprint with its own leaderboard. Two guided practice drills, [🧭 Around the Clock and 🗺️ Around the World](#new-game), turn the app's existing completion tracking into active solo sessions with live progress feedback. All data lives in a SQLite database on your own server.
 
 > Looking for exact stat formulas, achievement trigger conditions, the full database schema, or how a feature works internally (e.g. to debug it)? See **[REFERENCE.md](REFERENCE.md)** — the technical reference manual, kept up to date alongside this README.
 
@@ -145,6 +145,8 @@ Configure a game before starting:
 | **Mode** | H2H (head-to-head) · Practice (solo) · 🎯 Daily Challenge · 👻 Ghost · 🧮 Checkout Trainer |
 | **Practice type** (Practice only) | Practice · Doubles Practice · Just Chuckin' It · Around the Clock · Around the World |
 | **Checkout Trainer sub-mode** (Checkout Trainer only) | Freeform (untimed) · ⏱️ Checkout Blitz (60 seconds) |
+| **Checkout Trainer difficulty** (Checkout Trainer only) | Under 40 · Under 100 · Over 100 · Full Range (2–170) |
+| **Checkout Trainer trick questions** (Checkout Trainer only) | Off (default) · 💣 On (~1 target in 8 is a bogey number — call it) |
 | **Format (X01)** | 501 · 301 · 170 · 101 (dropdown) |
 | **Targets (Cricket)** | Classic (15–20, Bull) · Custom (any 7 numbers) |
 | **Legs per set** | 1 – 9 |
@@ -170,11 +172,13 @@ The **Live Scoreboard** shows a live dartboard heatmap for this mode too, gradua
 
 **🧮 Checkout Trainer** is a pure mental-recall drill, not a throwing game — no dartboard is involved at all. The app gives you a target score and you tap out your proposed checkout (up to 3 darts) using the same Pad or Dartboard input you already use everywhere else; on submit it's graded instantly: ✅ **Optimal** (the objectively fewest possible darts), ⚠️ **Legal, not optimal** (a valid finish, just not the shortest route), or ❌ **Not a legal finish**. Anything short of optimal reveals the best route so you actually learn something from every attempt, not just get scored. This is deliberately different from Daily Challenge's **Checkout Sprint** format, which measures a real physical throw at a real target — Checkout Trainer never involves a real dart, it tests checkout *knowledge*, not throwing performance.
 
+An optional **💣 trick questions** toggle (off by default, chosen at New Game) makes roughly 1 target in 8 an actual **bogey number** — a score with no possible 3-dart checkout (159, 162, 163, 165, 166, 168, 169 under double-out). Spot it and press the **🚫 No possible checkout** button instead of answering: a correct call counts as an optimal answer (and 2 Checkout Blitz points), tapping out any route against a bogey grades as a trick-question miss, and calling a *finishable* target impossible is equally wrong — the real route is revealed. Bogey numbers only exist above 100, so the Under 40/Under 100 difficulty ranges are unaffected. Works in both sub-modes.
+
 Two sub-modes:
 - **Freeform** — untimed, runs at your own pace until you press **End game**. [Player Profile](#player-profile) tracks Accuracy %, Optimal % (the headline stat), and Attempts as stat bubbles, plus a Personal Bests block (Toughest Checkout Solved, Best Optimal Streak).
-- **⏱️ Checkout Blitz** — a 60-second sprint against a wall-clock countdown (announced at 30/10/5 seconds remaining for screen-reader users). Every submission — right or wrong — immediately serves the next target; a round already in progress when time runs out is always allowed to finish. Optimal answers score 2 points, legal-but-not-optimal score 1, illegal scores 0, so rushing to *any* finish scores worse than taking the extra half-second to find the best one. Results show your final score plus the optimal/legal/illegal breakdown. Your best-ever run and its date appear on a dedicated Home page leaderboard, and your Personal Bests block adds Best Checkout Blitz Score and Avg Checkout Blitz Score.
+- **⏱️ Checkout Blitz** — a 60-second sprint against a wall-clock countdown (announced at 30/10/5 seconds remaining for screen-reader users). Every submission — right or wrong — immediately serves the next target; the buzzer is a hard stop (a round still mid-entry when time runs out is discarded ungraded, so pausing past the deadline can't sneak in a late answer). Optimal answers score 2 points, legal-but-not-optimal score 1, illegal scores 0, so rushing to *any* finish scores worse than taking the extra half-second to find the best one. Results show your final score plus the optimal/legal/illegal breakdown. Your best-ever run and its date appear on a dedicated Home page leaderboard, and your Personal Bests block adds Best Checkout Blitz Score and Avg Checkout Blitz Score.
 
-Checkout Trainer has its own 33-badge set (28 laddered milestones across 5 ladders — Lifetime Attempts, Lifetime Optimal Answers, Session Endurance, Best Optimal Streak, and Checkout Blitz's own Best Blitz Score — plus 5 one-off badges: 🐟 The 170 Club, 🎯 One-Darter, 🌟 Perfectionist, 💎 Perfect Minute, and 📸 Photo Finish). Like Just Chuckin' It's milestones, every laddered badge here is a permanent, once-earned achievement. See [Achievements & Badges](#achievements--badges) below.
+Checkout Trainer has its own 34-badge set (28 laddered milestones across 5 ladders — Lifetime Attempts, Lifetime Optimal Answers, Session Endurance, Best Optimal Streak, and Checkout Blitz's own Best Blitz Score — plus 6 one-off badges: 🐟 The 170 Club, 🎯 One-Darter, 🌟 Perfectionist, 💎 Perfect Minute, 📸 Photo Finish, and 💣 Bogey Buster for a first correct "no possible checkout" call with trick questions on). Like Just Chuckin' It's milestones, every laddered badge here is a permanent, once-earned achievement. See [Achievements & Badges](#achievements--badges) below.
 
 **🧭 Around the Clock** is a guided solo drill: hit every number 1 through 20 as a single, in any order. A live progress grid on the scoring screen and Live Scoreboard shows exactly which numbers are still outstanding, updating after every dart. A round ends the instant all 20 are hit — **Start Next Clock** resets the grid and starts a fresh round. There's no numeric score, no opponent, and no Enter-turn step, same as Doubles Practice/Just Chuckin' It — every dart commits the instant it's thrown, and Undo Last Dart is supported. The first time you ever complete a round, you earn the **Guided Clock** badge. See [Player Profile](#player-profile) for its own stat bubbles (Completions, Darts/Completion, Darts Thrown) and Personal Bests (fastest completion), and the Home page for its own leaderboards.
 
@@ -251,7 +255,7 @@ choice, no checkout hints, and no bust concept:
 
 ### Achievements & Badges
 
-Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 4 Cricket-specific badges, 2 [Tournament](#tournaments)-specific badges, 3 Daily Challenge badges, 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!), 33 Checkout Trainer badges (28 laddered milestones across 5 ladders — 4 Freeform, 1 Checkout Blitz — plus 5 one-off badges), and 2 Practice Drills badges for the two [guided drills](#new-game). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
+Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 4 Cricket-specific badges, 2 Baseball badges, 2 [Tournament](#tournaments)-specific badges, 3 Daily Challenge badges, 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!), 34 Checkout Trainer badges (28 laddered milestones across 5 ladders — 4 Freeform, 1 Checkout Blitz — plus 6 one-off badges), and 2 Practice Drills badges for the two [guided drills](#new-game). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
 
 | Badge | How to earn it |
 |---|---|
@@ -322,7 +326,7 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges c
 | 🧭 **Guided Clock** | Complete a guided Around the Clock drill — hit every number 1–20 as a single |
 | 🗺️ **Guided World** | Reach all 63 lifetime dart outcomes while playing a guided Around the World session |
 
-**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 86-badge roster, grouped into X01/Cricket/Tournament/Daily Challenge/Just Chuckin' It/Checkout Trainer/Practice Drills sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), both Tournament badges (Champion, Giant Slayer (Tournament)), Full Rotation, both Practice Drills badges (Guided Clock, Guided World), all 18 Just Chuckin' It milestones, and all 33 Checkout Trainer badges are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
+**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 89-badge roster, grouped into X01/Cricket/Tournament/Daily Challenge/Just Chuckin' It/Checkout Trainer/Practice Drills sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), both Tournament badges (Champion, Giant Slayer (Tournament)), Full Rotation, both Practice Drills badges (Guided Clock, Guided World), all 18 Just Chuckin' It milestones, and all 34 Checkout Trainer badges are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
 
 **Around the World Progress** — a dedicated grid on the Player Profile showing exactly which of the 63 lifetime dart outcomes are still missing, alongside the Badge Case.
 
@@ -549,7 +553,7 @@ On the Around the Clock toggle, this section shows just **Fastest Completion (Da
 
 #### Badge Case
 
-The full 86-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (23 badges), a **Cricket** section (4 badges), a **Tournament** section (2 badges), a **Daily Challenge** section (3 badges), a **Just Chuckin' It** section (19 badges), a **Checkout Trainer** section (33 badges), and a **Practice Drills** section (2 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
+The full 89-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (23 badges), a **Cricket** section (4 badges), a **Baseball** section (2 badges), a **Tournament** section (2 badges), a **Daily Challenge** section (3 badges), a **Just Chuckin' It** section (19 badges), a **Checkout Trainer** section (34 badges), and a **Practice Drills** section (2 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
 
 #### On This Day
 
@@ -1145,16 +1149,21 @@ POST /api/games                             Start a game
 POST /api/games/:id/turns                   Record a visit
                                              { player, set, leg, scored,
                                                bust, checkout, checkoutPoints, legWon,
-                                               targetScore, darts: [{sector, multiplier}] }
+                                               targetScore, declaredUnsolvable,
+                                               darts: [{sector, multiplier}] }
                                              → { ok: true, turnId }
                                              legWon marks the turn that won the leg —
                                              set by Cricket (which has no checkout
                                              mechanism); X01 omits it and keeps using
                                              checkout for its own Personal Bests. Checkout
                                              Trainer reuses legWon to mean "this attempt
-                                             was optimal" and targetScore to record the
-                                             round's target (the one field no other game
-                                             type sends). Requires Content-Type:
+                                             was optimal", targetScore to record the
+                                             round's target, and declaredUnsolvable: true
+                                             for a trick-question "no possible checkout"
+                                             answer — the one turn shape allowed (and
+                                             required) to carry an empty darts array, and
+                                             rejected outside checkout_trainer games.
+                                             Requires Content-Type:
                                              application/json (415 otherwise, docs/
                                              security-audit-roadmap.md SEC-19) — every
                                              write endpoint does. For X01 specifically,

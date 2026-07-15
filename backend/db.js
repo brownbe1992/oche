@@ -415,11 +415,22 @@ try { db.exec('ALTER TABLE player_badges ADD COLUMN count INTEGER NOT NULL DEFAU
 // existing/X01 row — X01's own Personal Bests queries keep using checkout=1
 // unchanged. Only Cricket's write path (enterTurnCricket()) sets it.
 try { db.exec('ALTER TABLE turns ADD COLUMN leg_won INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
-// Checkout Trainer (docs/checkout-trainer-roadmap.md): the target score given for
+// Checkout Trainer (docs/archive/checkout-trainer-roadmap.md): the target score given for
 // that round. Unlike X01 there's no persistent "remaining score" game state to
 // derive it from afterward, so it has to be stored per-turn. Only ever populated
 // for game_type='checkout_trainer'; every other game type leaves it NULL.
 try { db.exec('ALTER TABLE turns ADD COLUMN target_score INTEGER'); } catch(e) {}
+// Checkout Trainer trick questions (docs/archive/checkout-trainer-roadmap.md "Trick-question
+// difficulty variant"): 1 marks a round answered by declaring "no possible checkout"
+// instead of tapping out darts — the only turn shape allowed to carry zero dart rows
+// (see addTurn()'s declaredUnsolvable branch). The grading outcome still lives on
+// the same bust/checkout/leg_won three-way every stat already reads (correct
+// declaration -> checkout=1,leg_won=1; wrong -> bust=1); this flag exists so the
+// queries that specifically mean "a real checkout was solved" (toughest-checkout
+// Personal Best) can exclude declarations — correctly calling 169 a bogey is not
+// the same feat as actually finishing from 169. Defaults to 0 for every existing
+// row and every other game type's write path.
+try { db.exec('ALTER TABLE turns ADD COLUMN declared_unsolvable INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
 // player_count is the participant count captured once at game creation. H2H-vs-practice
 // classification reads THIS instead of a live COUNT(game_players) subquery, so deleting
 // or resetting a player can never retroactively reclassify a game (a 2-player H2H game
@@ -553,8 +564,8 @@ const q = {
   completeGame : db.prepare("UPDATE games SET completed_at = datetime('now'), winner_id = ? WHERE id = ?"),
 
   insertTurn   : db.prepare(`INSERT INTO turns
-                   (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points, leg_won, target_score)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+                   (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points, leg_won, target_score, declared_unsolvable)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 
   insertDart   : db.prepare(`INSERT INTO darts (turn_id, dart_no, sector, multiplier, thrown_at, zone, miss_zone, miss_depth, bounced)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
@@ -843,15 +854,29 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
 // enforceConsistency: true.
 function addTurn(gameId, t, opts = {}) {
   const p = ensurePlayer(t.player);
-  // Every real visit is 1-3 physical darts. Enforce that here so a malformed/hostile
-  // request can't record a "scored" turn with no dart rows — which would count toward
-  // total points but not the darts denominator, silently inflating the 3-dart average.
-  if (!Array.isArray(t.darts) || t.darts.length < 1 || t.darts.length > 3) {
+  // Checkout Trainer trick-question declarations (docs/archive/checkout-trainer-roadmap.md
+  // "Trick-question difficulty variant"): answering "no possible checkout" is the
+  // one turn shape that carries ZERO darts — there's no proposed route to record,
+  // only the graded verdict on bust/checkout/leg_won. Locked to checkout_trainer
+  // games (whose turns already have zero footprint on any physical stat, so an
+  // empty-darts turn can't inflate anything) and to exactly zero darts, so the
+  // 1-3-darts invariant below stays fully intact for every other game type.
+  const declaredUnsolvable = !!t.declaredUnsolvable;
+  if (declaredUnsolvable) {
+    const gt = q.gameTypeById.get(Number(gameId));
+    if (!gt || gt.game_type !== 'checkout_trainer') throw httpError(400, 'declaredUnsolvable is only valid in a Checkout Trainer game');
+    if (Array.isArray(t.darts) && t.darts.length > 0) throw httpError(400, 'A declared-unsolvable turn must not contain darts');
+  } else if (!Array.isArray(t.darts) || t.darts.length < 1 || t.darts.length > 3) {
+    // Every real visit is 1-3 physical darts. Enforce that here so a malformed/hostile
+    // request can't record a "scored" turn with no dart rows — which would count toward
+    // total points but not the darts denominator, silently inflating the 3-dart average.
     throw httpError(400, 'A turn must contain 1 to 3 darts');
   }
   // Validate each dart before writing: sector 0 (miss), 1-20, or 25 (bull); multiplier
   // 1-3. Rejecting garbage here keeps sector/treble/checkout analytics trustworthy.
-  const darts = t.darts.map((d, i) => {
+  // (A declared-unsolvable turn reaches here with no darts array at all — validated
+  // empty above — so it maps over nothing.)
+  const darts = (t.darts || []).map((d, i) => {
     const sector = Number(d.sector), multiplier = Number(d.multiplier);
     const validSector = Number.isInteger(sector) && (sector === 0 || sector === 25 || (sector >= 1 && sector <= 20));
     const validMult   = Number.isInteger(multiplier) && multiplier >= 1 && multiplier <= 3;
@@ -899,6 +924,8 @@ function addTurn(gameId, t, opts = {}) {
   // for exactly the malformed input it exists to catch.
   const scored = t.scored != null ? Number(t.scored) : 0;
   if (!Number.isFinite(scored) || scored < 0 || scored > 180) throw httpError(400, 'scored must be between 0 and 180');
+  // A declaration proposes no darts, so it can never carry points either.
+  if (declaredUnsolvable && scored !== 0) throw httpError(400, 'a declared-unsolvable turn must have scored=0');
   // t.set/t.leg default to 1 only when actually omitted (null/undefined) — a plain
   // `t.set || 1` would also silently coerce an explicit 0 to 1 (0 is falsy), which
   // would defeat the "positive integer" check on the very next line for exactly the
@@ -957,7 +984,7 @@ function addTurn(gameId, t, opts = {}) {
       throw httpError(400, 'scored does not match this Baseball visit\'s runs on the target number');
     }
   }
-  // Checkout Trainer (docs/checkout-trainer-roadmap.md): the target score offered
+  // Checkout Trainer (docs/archive/checkout-trainer-roadmap.md): the target score offered
   // for this round. Server-computed context, not a scored value, so it's only
   // range-checked (1-170, the finishable range) rather than tied to any other field.
   let targetScore = null;
@@ -973,7 +1000,8 @@ function addTurn(gameId, t, opts = {}) {
     t.checkout ? 1 : 0,
     checkoutPoints,
     t.legWon ? 1 : 0,
-    targetScore
+    targetScore,
+    declaredUnsolvable ? 1 : 0
   );
   // Insert individual dart rows — scored/is_treble/is_double are generated columns.
   // thrownAt is an ISO timestamp captured client-side at tap time; only sent when
@@ -2482,7 +2510,7 @@ function getChuckinPersonalBests(playerName, mode) {
   return { bestSessionDarts, bestSessionTrebles };
 }
 
-/* ---------- Checkout Trainer (docs/checkout-trainer-roadmap.md) ----------
+/* ---------- Checkout Trainer (docs/archive/checkout-trainer-roadmap.md) ----------
    A pure mental-recall drill: every dart is its own 1-dart turn (same per-dart-
    turn shape Doubles Practice/Chuckin already established), graded by
    frontend/scoring.js's evaluateVisit()/checkoutHint() before it's ever written
@@ -2492,7 +2520,7 @@ function getChuckinPersonalBests(playerName, mode) {
    sub-modes (Freeform, Checkout Blitz — distinguished by config.mode, not a
    separate game_type) share one game_type='checkout_trainer' and count toward
    these lifetime stats together — a round is a round regardless of which mode
-   served it (docs/checkout-trainer-roadmap.md's explicit ruling).
+   served it (docs/archive/checkout-trainer-roadmap.md's explicit ruling).
 
    Unlike every other solo drill, a Checkout Trainer dart never touches a real
    dartboard at all — it's the app grading a proposed route, not a throw. Product
@@ -2527,7 +2555,11 @@ function getCheckoutTrainerPersonalBests(playerName, mode) {
   if (!p) return null;
   const scope = _scope({ mode, gameType: 'checkout_trainer' });
 
-  const toughestCheckout = db.prepare(`SELECT MAX(t.target_score) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? AND t.leg_won=1 ${scope}`).get(p.id)?.v ?? null;
+  // declared_unsolvable=0: a correctly-called trick question grades leg_won=1
+  // (it's that round's best possible answer), but its bogey target was never a
+  // checkout anyone SOLVED — without this, one correct "169 is a bogey" call
+  // would permanently pin this Personal Best at 169.
+  const toughestCheckout = db.prepare(`SELECT MAX(t.target_score) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? AND t.leg_won=1 AND t.declared_unsolvable=0 ${scope}`).get(p.id)?.v ?? null;
 
   const rows = db.prepare(`SELECT t.leg_won AS legWon FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope} ORDER BY t.id`).all(p.id);
   let bestStreak = 0, current = 0;
@@ -3186,7 +3218,7 @@ const X01_ONLY = _scope({ gameType: 'x01' });
 // explicit gameType:'chuckin' and would contradict a blanket exclusion baked into
 // _mf('practice') itself — that's why this is a separate constant applied at each
 // specific call site, not folded into the central mode-scoping helpers above).
-// Checkout Trainer (docs/checkout-trainer-roadmap.md) joins this exclusion for the
+// Checkout Trainer (docs/archive/checkout-trainer-roadmap.md) joins this exclusion for the
 // same reason Just Chuckin' It does: its darts are a proposed route, not a real
 // throw, and must not pollute sector heatmaps, treble rate, or dart-pace either.
 const NOT_HYPOTHETICAL_DARTS = `AND g.game_type NOT IN ('chuckin','checkout_trainer')`;
@@ -3981,7 +4013,8 @@ function _buildGamesCsv(p) {
 function _buildTurnsCsv(p) {
   const turns = db.prepare(`
     SELECT t.id, t.game_id, g.game_type, g.category, t.created_at, t.set_no, t.leg_no,
-           t.scored, t.bust, t.checkout, t.checkout_points, t.leg_won, t.target_score
+           t.scored, t.bust, t.checkout, t.checkout_points, t.leg_won, t.target_score,
+           t.declared_unsolvable
       FROM turns t JOIN games g ON g.id = t.game_id
      WHERE t.player_id = ?
      ORDER BY t.game_id, t.id
@@ -3999,12 +4032,12 @@ function _buildTurnsCsv(p) {
 
   const header = ['turn_id', 'game_id', 'game_type', 'category', 'turn_at', 'set_no',
     'leg_no', 'scored', 'bust', 'checkout', 'checkout_points', 'leg_won',
-    'target_score', 'darts', 'darts_detail'];
+    'target_score', 'declared_unsolvable', 'darts', 'darts_detail'];
   return _csvDocument(header, turns.map(t => {
     const notations = dartsByTurn.get(t.id) || [];
     return [t.id, t.game_id, t.game_type, t.category, t.created_at, t.set_no,
       t.leg_no, t.scored, t.bust, t.checkout, t.checkout_points, t.leg_won,
-      t.target_score, notations.length, notations.join(' ')];
+      t.target_score, t.declared_unsolvable, notations.length, notations.join(' ')];
   }));
 }
 
@@ -4134,14 +4167,15 @@ function importPlayerExport(payload) {
 
   const turnIdMap = new Map();
   const insertTurn = db.prepare(`INSERT INTO turns
-    (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points, created_at, leg_won, target_score)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points, created_at, leg_won, target_score, declared_unsolvable)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   for (const t of turns) {
     if (skippedGameIds.has(t.game_id)) continue; // game already exists locally -- its turns/darts do too
     const newGameId = gameIdMap.get(t.game_id);
     const tid = idMap.get(t.player_id);
     if (newGameId == null || tid == null) continue; // unresolved player, or a game that failed to insert
-    const info = insertTurn.run(newGameId, tid, t.set_no, t.leg_no, t.scored, t.bust, t.checkout, t.checkout_points, t.created_at, t.leg_won, t.target_score);
+    // `?? 0` keeps an export written before declared_unsolvable existed importable.
+    const info = insertTurn.run(newGameId, tid, t.set_no, t.leg_no, t.scored, t.bust, t.checkout, t.checkout_points, t.created_at, t.leg_won, t.target_score, t.declared_unsolvable ?? 0);
     turnIdMap.set(t.id, Number(info.lastInsertRowid));
     turnsImported++;
   }

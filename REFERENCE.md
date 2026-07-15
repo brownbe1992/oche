@@ -1415,13 +1415,13 @@ badge that dart awarded.
 
 ## 4. Achievements & Badges
 
-88 badges (23 X01 + 4 Cricket + 2 Baseball + 2 Tournament + 3 Daily Challenge +
-19 Just Chuckin' It + 33 Checkout Trainer + 2 Practice Drills) — that split is by
+89 badges (23 X01 + 4 Cricket + 2 Baseball + 2 Tournament + 3 Daily Challenge +
+19 Just Chuckin' It + 34 Checkout Trainer + 2 Practice Drills) — that split is by
 which table each is listed under below (and which section of the Player
 Profile's Badge Case each renders in, via `BADGE_INFO`'s
 `cricket`/`baseball`/`challenge`/`chuckin`/`tournament`/`checkoutTrainer`/`drill`
 flags — anything without one of those flags buckets as X01), not a strict statement
-of which game types can trigger it: Checkout Trainer's own 33 badges are
+of which game types can trigger it: Checkout Trainer's own 34 badges are
 documented in full in §19 rather than repeated here, since that section
 already covers the mode end-to-end. Night Owl/
 Early Bird (listed under X01) are one exception, checked from both
@@ -2563,7 +2563,8 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   `kind='turns'` returns one row per turn **they threw** (never an
   opponent's), ordered by game then turn id: `turn_id, game_id, game_type,
   category, turn_at, set_no, leg_no, scored, bust, checkout, checkout_points,
-  leg_won, target_score, darts, darts_detail` — `darts_detail` is each
+  leg_won, target_score, declared_unsolvable, darts, darts_detail` —
+  `darts_detail` is each
   dart in throw order as `S`/`D`/`T`+sector notation (`T20 S5 D16`), with
   `25` for a single bull, `BULL` for the 50, and `MISS` for sector 0. Column
   semantics follow the underlying schema, so `scored`/`checkout`/`bust` mean
@@ -2700,7 +2701,9 @@ already-migrated database is a safe no-op).
 | `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3). `addTurn()` rejects a non-numeric value outright rather than silently coercing it to `0`. For `game_type='x01'` specifically, `POST /api/games/:id/turns` (the one production caller that opts into `addTurn()`'s `enforceConsistency` flag) additionally rejects a `scored` that doesn't match the sum of that visit's dart face values (`0` required on a bust; `checkout_points` must equal `scored` on a checkout) — `docs/security-audit-roadmap.md` SEC-22. For `game_type='baseball'` the same caller also rejects a `scored` that doesn't equal this visit's runs — the sum of dart `multiplier`s that hit the inning's target number, where the inning is derived server-side from the player's own prior turn count in the leg (`min(inning, 9)` for extra innings); a Baseball turn must also be neither a bust nor a checkout (`docs/security-audit-roadmap.md` SEC-25). Still deliberately skipped for Cricket (`scored` is computed from mark-closing state, not a dart-value sum, so the same rule would reject legitimate Cricket visits) and for Doubles Practice / Chuckin / Checkout Trainer / Around the Clock / World (non-arithmetic or non-points `scored`) |
 | `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans. Cricket turns always write `bust=0, checkout=0` — cricket has neither concept. Doubles Practice repurposes `bust` as "this dart ended the round" (so-close or wrong-double, §2) — the closest existing column to that meaning, since this mode has no bust/win concept of its own either; `checkout` stays `0` always. Guided Around the Clock repurposes `bust` the identical way: `1` marks whichever dart completed the round (all 20 numbers hit) — there's no "so-close"/"wrong-target" failure mode here, only completion or abandonment. Guided Around the World writes `bust=0` always (no round to end, matching Chuckin's own turns) |
 | `checkout_points` | `INTEGER` | Only set when `checkout=1` (X01 only) |
-| `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set only by Cricket's write path (`enterTurnCricket()`) — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged |
+| `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set only by Cricket's write path (`enterTurnCricket()`) — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged. Checkout Trainer repurposes it as "answered with the objectively fewest darts" (§19) |
+| `target_score` | `INTEGER` | Checkout Trainer only (§19): the target offered for that round — unlike X01 there's no persistent "remaining score" state to derive it from afterward. `NULL` for every other game type; `addTurn()` range-checks it to 1–170 |
+| `declared_unsolvable` | `INTEGER NOT NULL DEFAULT 0` | Checkout Trainer trick questions only (§19): `1` marks a round answered by declaring "no possible checkout" instead of tapping out darts — the only turn shape allowed to carry **zero** dart rows (`addTurn()` rejects it outside `checkout_trainer` games, with any darts attached, or with a nonzero `scored`). The verdict still lives on `bust`/`checkout`/`leg_won` (correct call → `checkout=1, leg_won=1`; wrong call → `bust=1`); this flag exists so "a real checkout was solved" queries (Toughest Checkout Solved) can exclude declarations |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 
 ### `darts` (one row per physical dart, indexed on `turn_id` and `(sector,multiplier)`)
@@ -3644,7 +3647,7 @@ because a fixture needs to exist *before* any game does.
 
 ## 19. Checkout Trainer
 
-Full design: `docs/checkout-trainer-roadmap.md`. A pure mental-recall drill —
+Full design: `docs/archive/checkout-trainer-roadmap.md`. A pure mental-recall drill —
 no dartboard throwing involved at all — genuinely different from Daily
 Challenge's "Checkout Sprint" format (which measures a real physical throw at
 a real target). The app gives a target score; the player taps out a proposed
@@ -3662,7 +3665,10 @@ rather than a live match with an opponent to track, so a bounced/missed dart
 and turn-level undo have no meaningful role — "Undo Dart" (which un-stages an
 uncommitted dart within the current attempt) and "Submit checkout" (this
 mode's relabeled Enter Turn) remain, since a checkout attempt is still a
-staged up-to-3-dart visit.
+staged up-to-3-dart visit. When the session has trick questions on
+(`config.trickQuestions`), a "🚫 No possible checkout" button appears
+alongside Submit — the declaration answer path (see **Trick questions**
+below).
 
 **Game type**: `checkout_trainer`, one of `KNOWN_GAME_TYPES` (`backend/db.js`).
 Every dart-count attempt is its own 1-3 dart `turns` row — the same per-dart-
@@ -3673,7 +3679,10 @@ attempt genuinely IS a normal X01 visit starting from `remaining = target`.
 **Schema**: `turns.target_score INTEGER` (nullable) — the target offered for
 that round; only ever populated for this game type, since (unlike X01) there's
 no persistent "remaining score" state to derive it from afterward.
-`games.config.mode`: `'freeform' | 'blitz'` — a mode flag, not a second
+`turns.declared_unsolvable INTEGER NOT NULL DEFAULT 0` — `1` marks a
+trick-question round answered by declaring "no possible checkout" (see
+**Trick questions** below); the only turn shape allowed to carry zero dart
+rows. `games.config.mode`: `'freeform' | 'blitz'` — a mode flag, not a second
 `game_type`, since both sub-modes share identical target selection and grading
 and differ only in pacing/scoring (the same relationship X01's own H2H-vs-
 Practice split has within one `game_type`). `games.config.durationSec`: fixed
@@ -3682,33 +3691,71 @@ at `60` for Blitz, `null` for Freeform. `games.config.difficulty`: one of
 New Game via the Checkout Trainer options section's difficulty toggle
 (`setCheckoutTrainerDifficulty()`, `frontend/index.html`) and immutable for the
 rest of that session, same "baked into `config` at `startGame()`" treatment
-`mode`/`durationSec` already get.
+`mode`/`durationSec` already get. `games.config.trickQuestions`: boolean
+(default `false`) — the trick-question variant's own New Game toggle
+(`setCheckoutTrainerTricks()`), baked in the same way.
 
 **Grading** (`frontend/scoring.js`):
-- `pickCheckoutTarget(doubleOut, rng, difficulty)` — picks a uniform-random
-  integer target within the selected difficulty tier's `[low,high]` bound
-  (`CHECKOUT_TRAINER_DIFFICULTY_TIERS`), intersected with the out-mode's own
-  floor (`2` under double-out since `1` is an unfinishable bogey, `1` under
-  single-out). `difficulty` defaults to `'full'` (`[1,170]` intersected with
-  the out-mode floor — the original, tier-less range) when omitted or
-  unrecognized, so every pre-existing caller keeps working unchanged. Tiers:
-  `under40` `[1,39]`, `under100` `[1,99]`, `over100` `[100,170]`, `full`
-  `[1,170]`. Re-rolls while `checkoutHint()` reports the candidate
-  unfinishable, reusing `checkoutHint()`'s own `''` unfinishable signal
-  instead of a separate hardcoded bogey-number list.
+- `pickCheckoutTarget(doubleOut, rng, difficulty, trickChance)` — picks a
+  uniform-random integer target within the selected difficulty tier's
+  `[low,high]` bound (`CHECKOUT_TRAINER_DIFFICULTY_TIERS`), intersected with
+  the out-mode's own floor (`2` under double-out since `1` is an unfinishable
+  bogey, `1` under single-out). `difficulty` defaults to `'full'` (`[1,170]`
+  intersected with the out-mode floor — the original, tier-less range) when
+  omitted or unrecognized, so every pre-existing caller keeps working
+  unchanged. Tiers: `under40` `[1,39]`, `under100` `[1,99]`, `over100`
+  `[100,170]`, `full` `[1,170]`. Re-rolls while `checkoutHint()` reports the
+  candidate unfinishable, reusing `checkoutHint()`'s own `''` unfinishable
+  signal instead of a separate hardcoded bogey-number list. `trickChance`
+  (0..1, default `0` — the pre-trick behavior byte-for-byte): probability
+  this round instead serves a deliberately **unsolvable** bogey number from
+  the tier (`listUnsolvableTargets()`, also derived from `checkoutHint()`'s
+  `''` signal — `159/162/163/165/166/168/169` under double-out,
+  `163/166/169` under single-out, all above 100 so the Under 40/Under 100
+  tiers simply fall through to a normal target). Set to
+  `CHECKOUT_TRAINER_TRICK_CHANCE` (0.125, ~1 round in 8) when the session has
+  `config.trickQuestions` on.
 - `gradeCheckoutAttempt(target, doubleOut, darts)` — returns
   `{legal, usedDarts, optimalDarts, optimal, hint}`. `legal` mirrors
   `evaluateVisit()`'s `win` flag (reached exactly zero, valid last dart under
   double-out). `optimal` additionally requires `usedDarts === optimalDarts`
   (`optimalDarts` = `checkoutHint(target, doubleOut, 3)`'s token count) —
   grading is by dart **count**, not exact route match, since multiple routes
-  can tie for the objective minimum.
+  can tie for the objective minimum. A route submitted against a bogey
+  target grades illegal with `hint: ''` — the UI shows the "trick question"
+  reveal for that case instead of an empty "best route".
+- `gradeCheckoutDeclaration(target, doubleOut)` — the trick-question
+  variant's second answer path (the "🚫 No possible checkout" button).
+  Correct exactly when `checkoutHint()` has no route for the target; returns
+  `{declared: true, correct, legal, optimal, usedDarts: 0, optimalDarts,
+  hint}` where a **correct** declaration sets `legal`/`optimal` both true (it
+  IS that round's best possible answer) and a **wrong** one sets both false,
+  with `hint` carrying the route that proves the target was finishable.
 
 Every attempt writes exactly one of three outcomes onto the existing
 `bust`/`checkout`/`leg_won` columns (no new columns needed beyond
-`target_score`): `bust=1` = not a legal finish; `bust=0, checkout=1, leg_won=0`
-= legal but not optimal; `bust=0, checkout=1, leg_won=1` = optimal. Checkout
-Blitz's scoring formula reads directly off this three-way outcome.
+`target_score`/`declared_unsolvable`): `bust=1` = not a legal finish;
+`bust=0, checkout=1, leg_won=0` = legal but not optimal; `bust=0, checkout=1,
+leg_won=1` = optimal. Checkout Blitz's scoring formula reads directly off
+this three-way outcome — declarations included (a correct call is `leg_won=1`
+= 2 points; a wrong one is `bust=1` = 0 points), recorded with
+`declared_unsolvable=1` and zero dart rows (`declareUnsolvable()`,
+`frontend/index.html`, which discards any half-staged darts — "there's no
+checkout" supersedes a half-entered route).
+
+**Trick questions** (docs: the roadmap doc's "Trick-question difficulty
+variant", shipped 2026-07): an opt-in New Game toggle
+(`config.trickQuestions`, off by default). When on, ~1 round in 8 serves an
+actual bogey number, the scoring screen shows a "🚫 No possible checkout"
+button alongside "Submit checkout", and the correct answer is pressing it —
+tapping out any route against a bogey grades illegal with a "trick question"
+reveal, and declaring a *finishable* target unsolvable is equally wrong (the
+real route is revealed). Correct declarations count as optimal answers
+everywhere the three-way outcome is read (Accuracy/Optimal %, all four
+milestone ladders, the streak, Blitz's 2 points) but are excluded from
+Toughest Checkout Solved via `declared_unsolvable` and can never trigger the
+route-specific one-offs (170 Club, One-Darter — the declaration path never
+runs those checks).
 
 **Physical-stat exclusion — stricter than Chuckin's**: these darts are a
 *proposed* route, not a real throw, and must have **zero footprint on any
@@ -3745,7 +3792,11 @@ Two exclusion constants in `backend/db.js`:
 - **Optimal %** = attempts matching the minimum dart count ÷ total attempts
   (the headline stat — hitting the objective optimum is the actual point of
   the game).
-- **Toughest Checkout Solved** = `MAX(target_score)` where `leg_won=1`.
+- **Toughest Checkout Solved** = `MAX(target_score)` where `leg_won=1 AND
+  declared_unsolvable=0` — a correctly-called trick question grades
+  `leg_won=1` but its bogey target was never a checkout anyone *solved*, so
+  without the exclusion one correct "169 is a bogey" call would permanently
+  pin this Personal Best at 169.
 - **Best Optimal Streak** = longest-ever run of consecutive optimal answers,
   computed by walking every attempt in order and resetting on any non-optimal
   result (not a maintained counter). Freeform and Blitz rounds both count
@@ -3792,23 +3843,26 @@ non-revocable milestones (`INSERT OR IGNORE`), same as Chuckin's own ladders:
 | Best Optimal Streak | longest-ever consecutive-optimal run | 5 / 15 / 30 / 75 / 150 |
 | Best Blitz Score | single best-ever 60-second score | 10 / 20 / 35 / 50 / 75 / 100 |
 
-Plus five one-off flagship badges: 🐟 **The 170 Club** (solve 170 optimally),
+Plus six one-off flagship badges: 🐟 **The 170 Club** (solve 170 optimally),
 🎯 **One-Darter** (first 1-dart optimal solve), 🌟 **Perfectionist** (end a
 15+-attempt Freeform session with a 100% optimal rate — checked in
 `askEndGame()`), 💎 **Perfect Minute** (every round in a 5+-round Blitz run
 graded optimal — checked in `endBlitzRun()`), 📸 **Photo Finish** (a legal
-Blitz round submitted with under 1 second left on the clock).
+Blitz round submitted with under 1 second left on the clock — a correct
+trick-question declaration under the buzzer qualifies too, same "legal
+answer" bar), and 💣 **Bogey Buster** (with trick questions on, correctly
+call "no possible checkout" on an actual bogey number for the first time —
+awarded in `declareUnsolvable()`).
 
 **No live scoreboard**: this game type never writes to `liveState` and
 `/display` never renders it — `pushLive()` is a deliberate no-op for
 `game.gameType === 'checkout_trainer'`, a genuinely simpler surface than every
 other mode in that one respect.
 
-**Deferred (not built)**: the trick-question/bogey-number difficulty variant
-("declare this unsolvable") and its conditional 💣 Bogey Buster badge, and
-difficulty tiers (under-40/under-100/full-range) beyond the single full-range
-(2-170) target pool — both tracked as their own open items on
-`docs/open-roadmap-items.md` rather than left silently unbuilt.
+Nothing from the original design remains deferred: difficulty tiers shipped
+first (the `config.difficulty` toggle above), and the trick-question/
+bogey-number variant with its 💣 Bogey Buster badge shipped 2026-07 as the
+mode's final open roadmap item.
 
 ---
 

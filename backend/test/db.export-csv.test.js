@@ -203,7 +203,7 @@ describe('getPlayerCsvExport (docs/archive/data-export-roadmap.md — CSV spread
       'checkouts', 'highest_checkout']);
     assert.deepEqual(turns[0], ['turn_id', 'game_id', 'game_type', 'category', 'turn_at', 'set_no',
       'leg_no', 'scored', 'bust', 'checkout', 'checkout_points', 'leg_won',
-      'target_score', 'darts', 'darts_detail']);
+      'target_score', 'declared_unsolvable', 'darts', 'darts_detail']);
   });
 
   test('throws 404 for an unknown player and 400 for an unknown kind', () => {

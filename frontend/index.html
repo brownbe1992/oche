@@ -791,6 +791,13 @@
               <button id="checkout-trainer-difficulty-full" aria-pressed="true" onclick="setCheckoutTrainerDifficulty('full')">Full Range (2-170)</button>
             </div>
           </div>
+          <div class="opts" style="margin:10px 0 0">
+            <div class="seg" role="group" aria-label="Checkout Trainer trick questions">
+              <button id="checkout-trainer-tricks-off" aria-pressed="true" onclick="setCheckoutTrainerTricks(false)">Trick questions off</button>
+              <button id="checkout-trainer-tricks-on" aria-pressed="false" onclick="setCheckoutTrainerTricks(true)">💣 Trick questions on</button>
+            </div>
+          </div>
+          <p class="pp-meta" id="checkout-trainer-tricks-desc" style="margin:10px 0 0"></p>
         </div>
 
         <!-- Format (H2H only) -->
@@ -1639,7 +1646,7 @@ function makeDart(sector, mult){
 let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, mode:'h2h',
   gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[], ghostLeg:null,
   doublesTargets:[], loadoutByName:{}, leagueFixtureId:null, pendingFixtures:[],
-  checkoutTrainerMode:'freeform', checkoutTrainerDifficulty:'full' }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice' | 'checkout_trainer'; gameType: 'x01' | 'cricket' | 'doubles_practice' | 'checkout_trainer'; checkoutTrainerDifficulty: 'under40' | 'under100' | 'over100' | 'full'
+  checkoutTrainerMode:'freeform', checkoutTrainerDifficulty:'full', checkoutTrainerTricks:false }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice' | 'checkout_trainer'; gameType: 'x01' | 'cricket' | 'doubles_practice' | 'checkout_trainer'; checkoutTrainerDifficulty: 'under40' | 'under100' | 'over100' | 'full'
   // leagueFixtureId (docs/league-mode-roadmap.md "League fixtures / pending
   // matches"): only ever set via Step 2's "League Game" entry — an EXPLICIT choice,
   // unlike the old category-based ambiguity picker this superseded (docs/new-game-flow-roadmap.md).
@@ -2355,7 +2362,7 @@ function renderHomeTabBodyDoublesPractice(){
   `;
 }
 
-// Checkout Trainer's Home page presence (docs/checkout-trainer-roadmap.md
+// Checkout Trainer's Home page presence (docs/archive/checkout-trainer-roadmap.md
 // "Leaderboard") — a single arcade high-score table for Checkout Blitz, the
 // game's one genuinely cross-player leaderboard (Freeform has no win condition
 // to rank on, same reasoning Doubles Practice's own Home tab already applies).
@@ -2556,10 +2563,11 @@ function setMode(mode){
   else if(mode === 'checkout_trainer'){
     setCheckoutTrainerMode(setup.checkoutTrainerMode || 'freeform');
     setCheckoutTrainerDifficulty(setup.checkoutTrainerDifficulty || 'full');
+    setCheckoutTrainerTricks(!!setup.checkoutTrainerTricks);
   }
 }
 
-// Checkout Trainer's Freeform/Blitz sub-toggle (docs/checkout-trainer-roadmap.md
+// Checkout Trainer's Freeform/Blitz sub-toggle (docs/archive/checkout-trainer-roadmap.md
 // "UI integration") — same sibling-toggle pattern as practice-type-*, just nested
 // one level deeper since both sub-modes share the single 'checkout_trainer' mode
 // button rather than being their own top-level modes.
@@ -2574,7 +2582,7 @@ function setCheckoutTrainerMode(sub){
   if(startBtn && setup.mode === 'checkout_trainer') startBtn.textContent = sub==='blitz' ? 'Start Blitz' : 'Start training';
 }
 
-// Checkout Trainer's difficulty-tier toggle (docs/checkout-trainer-roadmap.md
+// Checkout Trainer's difficulty-tier toggle (docs/archive/checkout-trainer-roadmap.md
 // "Target selection") — same sibling-toggle pattern as setCheckoutTrainerMode()
 // above. Tier bounds themselves live in CHECKOUT_TRAINER_DIFFICULTY_TIERS
 // (frontend/scoring.js); this just records the chosen key onto setup, which
@@ -2585,6 +2593,20 @@ function setCheckoutTrainerDifficulty(tier){
   document.getElementById('checkout-trainer-difficulty-under100').setAttribute('aria-pressed', tier==='under100');
   document.getElementById('checkout-trainer-difficulty-over100').setAttribute('aria-pressed', tier==='over100');
   document.getElementById('checkout-trainer-difficulty-full').setAttribute('aria-pressed', tier==='full');
+}
+
+// Checkout Trainer's trick-question toggle (docs/archive/checkout-trainer-roadmap.md
+// "Trick-question difficulty variant") — same sibling-toggle pattern as the two
+// above; startGame() bakes the choice into game.config.trickQuestions for the
+// session. Off by default: a bogey trap is a deliberately-opted-into hard mode,
+// not something to spring on someone doing straightforward recall practice.
+function setCheckoutTrainerTricks(on){
+  setup.checkoutTrainerTricks = !!on;
+  document.getElementById('checkout-trainer-tricks-off').setAttribute('aria-pressed', !on);
+  document.getElementById('checkout-trainer-tricks-on').setAttribute('aria-pressed', !!on);
+  document.getElementById('checkout-trainer-tricks-desc').textContent = on
+    ? 'About 1 target in 8 will be a bogey number with no possible 3-dart checkout — spot it and press "No possible checkout" instead of answering. Bogey numbers only exist above 100, so the Under 40/Under 100 ranges are unaffected.'
+    : 'Every target has a real checkout. Turn trick questions on to occasionally face a bogey number where the right answer is calling it impossible.';
 }
 
 /* ---------- Ghost Opponent (docs/archive/ghost-opponent-roadmap.md) ---------- */
@@ -3840,14 +3862,14 @@ async function startGame(){
   // Checkout Blitz's durationSec is stored even though only 60 exists today — same
   // "store it even though only one value exists today" precedent tournament_rounds.
   // legs_per_set already set for a field that was single-valued at first and
-  // configurable later (docs/checkout-trainer-roadmap.md).
+  // configurable later (docs/archive/checkout-trainer-roadmap.md).
   const config = gameType === 'cricket' ? { numbers: cricketNumbers }
     // Innings fixed at 9 (docs/game-modes-roadmap.md "Baseball") — not a New Game
     // choice, same "one-tap, no further input" precedent as Classic Cricket.
     : gameType === 'baseball' ? { innings: 9 }
     : gameType === 'doubles_practice' ? { doubles: setup.doublesTargets.slice() }
     : gameType === 'chuckin' ? {}
-    : gameType === 'checkout_trainer' ? { mode: setup.checkoutTrainerMode, durationSec: setup.checkoutTrainerMode==='blitz' ? 60 : null, difficulty: setup.checkoutTrainerDifficulty || 'full' }
+    : gameType === 'checkout_trainer' ? { mode: setup.checkoutTrainerMode, durationSec: setup.checkoutTrainerMode==='blitz' ? 60 : null, difficulty: setup.checkoutTrainerDifficulty || 'full', trickQuestions: !!setup.checkoutTrainerTricks }
     : gameType === 'around_the_clock' ? {}
     : gameType === 'around_the_world' ? {}
     : { startingScore: startScore };
@@ -3880,7 +3902,7 @@ async function startGame(){
     // stale hint.
     leagueFixtureId: setup.leagueFixtureId,
     players: names.map(n=>GAME_TYPES[gameType].newMatchPlayer(n, gameType==='cricket' || gameType==='doubles_practice' || gameType==='checkout_trainer' ? config : startScore)),
-    // Checkout Blitz (docs/checkout-trainer-roadmap.md): a wall-clock deadline, not a
+    // Checkout Blitz (docs/archive/checkout-trainer-roadmap.md): a wall-clock deadline, not a
     // decrementing counter, so a backgrounded/throttled tab can't grant extra time.
     // Set once startNextRoundCheckoutTrainer() or the run itself begins; null for
     // Freeform (untimed) and every non-checkout_trainer game type.
@@ -3924,7 +3946,7 @@ async function startGame(){
     game.players.push(newGhostPlayer(ghostLabel, startScore, ghostScript));
   }
   // Checkout Blitz: the wall-clock deadline starts the moment the run begins
-  // (docs/checkout-trainer-roadmap.md "Core loop delta") — set once here, never
+  // (docs/archive/checkout-trainer-roadmap.md "Core loop delta") — set once here, never
   // recomputed, so a re-render can't accidentally grant extra time.
   if(gameType === 'checkout_trainer' && config.mode === 'blitz'){
     game.blitzDeadline = Date.now() + config.durationSec*1000;
@@ -5033,7 +5055,7 @@ const BADGE_INFO = {
   ghost_slayer:        { icon:'👻', label:'Ghost Slayer', desc:'Beat your ghost opponent — win a race against a replay of one of your own past legs.' },
   tournament_champion:     { icon:'🏆', label:'Champion', desc:'Win a tournament bracket.', tournament:true },
   tournament_giant_slayer: { icon:'⚔️', label:'Giant Slayer (Tournament)', desc:'Beat an opponent seeded 3 or more slots better than you in a tournament match.', tournament:true },
-  // Checkout Trainer one-off flagship badges (docs/checkout-trainer-roadmap.md
+  // Checkout Trainer one-off flagship badges (docs/archive/checkout-trainer-roadmap.md
   // "Achievements") — the laddered milestones are populated further down (see
   // CHECKOUT_TRAINER_MILESTONE_LADDERS/CHECKOUT_BLITZ_MILESTONE_LADDERS), but
   // these five aren't part of a ladder, so they're declared here like every
@@ -5043,6 +5065,7 @@ const BADGE_INFO = {
   checkout_trainer_perfectionist:  { icon:'🌟', label:'Perfectionist', desc:'Finish a Freeform session of 15+ attempts with a 100% optimal rate.', checkoutTrainer:true },
   checkout_trainer_perfect_minute: { icon:'💎', label:'Perfect Minute', desc:'Every round in one Checkout Blitz run (5+ rounds) graded optimal.', checkoutTrainer:true },
   checkout_trainer_photo_finish:   { icon:'📸', label:'Photo Finish', desc:'Submit a legal Checkout Blitz round with under 1 second left on the clock.', checkoutTrainer:true },
+  checkout_trainer_bogey_buster:   { icon:'💣', label:'Bogey Buster', desc:'With trick questions on, correctly call "no possible checkout" on a bogey number.', checkoutTrainer:true },
   // Guided Around the Clock / Around the World (docs/game-modes-roadmap.md) —
   // deliberately distinct badges from the existing passive around_the_clock/
   // around_the_world above (2026-07 decision): completing a guided drill session
@@ -5085,7 +5108,7 @@ function renderPlayerBadges(data){
     return `<div class="stat-block" style="opacity:.5;cursor:pointer" ${titleAttr} onclick="showBadgeInfo('${id}')"><div class="stat-val" style="filter:grayscale(1)">${info.icon}</div><div class="stat-label">${info.label}<br>Not yet earned</div></div>`;
   };
   // Grouped by game type — X01's badges, Cricket's 2, Baseball's 2, Daily
-  // Challenge's 3, Just Chuckin' It's 18, Checkout Trainer's 33, and the guided
+  // Challenge's 3, Just Chuckin' It's 18, Checkout Trainer's 34, and the guided
   // drills' 2 each stay visually distinct sub-sections rather than one mixed
   // flat grid.
   const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill);
@@ -5936,7 +5959,7 @@ function checkChuckinMilestones(p){
   checkChuckinMilestoneTier(treblesLadder, p.name, (p.lifetimeTreblesBase||0) + p.sessionTrebles);
 }
 
-/* ---------- Checkout Trainer achievements (docs/checkout-trainer-roadmap.md
+/* ---------- Checkout Trainer achievements (docs/archive/checkout-trainer-roadmap.md
    "Achievements") ---------- Reuses the exact CHUCKIN_MILESTONE_LADDERS engine
    above wholesale — same data-driven {metric,idPrefix,statNoun,descFor,tiers}
    shape, same checkChuckinMilestoneTier() threshold-crossing helper (already
@@ -6067,6 +6090,7 @@ ACH_LABELS['checkout_trainer_one_darter'] = 'One-Darter 🎯';
 ACH_LABELS['checkout_trainer_perfectionist'] = 'Perfectionist 🌟';
 ACH_LABELS['checkout_trainer_perfect_minute'] = 'Perfect Minute 💎';
 ACH_LABELS['checkout_trainer_photo_finish'] = 'Photo Finish 📸';
+ACH_LABELS['checkout_trainer_bogey_buster'] = 'Bogey Buster 💣';
 
 function spawnConfetti(root, count){
   const colors=['#d9b46a','#efe7d2','#f4e3b2','#caa94e'];
@@ -7020,7 +7044,7 @@ function liveSnapshot(message){
 function pushLive(message){
   pendingAchievement = null;
   if(game){ game.lastTurnEvent = null; game.matchResult = null; game.legStart = null; }
-  // Checkout Trainer (docs/checkout-trainer-roadmap.md "No live scoreboard, deliberate"):
+  // Checkout Trainer (docs/archive/checkout-trainer-roadmap.md "No live scoreboard, deliberate"):
   // a single-device, solo-only drill that never needs a /display scoreboard — skip
   // the broadcast entirely rather than adding an ALLOWED_LIVE_KEYS shape nothing renders.
   if(game && game.gameType === 'checkout_trainer') return;
@@ -7270,7 +7294,7 @@ function askEndGame(){
   uiConfirm(msg, ()=>{
     activeChallenge = null;
     stopCheckoutBlitzTimer();   // no-op if no Blitz run is in progress
-    // 🌟 Perfectionist (docs/checkout-trainer-roadmap.md): ending a Freeform
+    // 🌟 Perfectionist (docs/archive/checkout-trainer-roadmap.md): ending a Freeform
     // session — this mode's only "session over" moment — with 15+ attempts and
     // every single one graded optimal. Blitz is excluded: its own run-scoped
     // 💎 Perfect Minute (endBlitzRun()) is the equivalent for that mode.
@@ -8480,7 +8504,7 @@ function renderGameShell(){
   // modes with no staged 3-dart visit — no "Enter turn" step, no slots row (no
   // opponent/score to show), and no separate "Undo Dart" (there's no uncommitted
   // dart to un-stage). Checkout Trainer is NOT one of these — a checkout attempt
-  // genuinely is a staged up-to-3-dart visit (docs/checkout-trainer-roadmap.md),
+  // genuinely is a staged up-to-3-dart visit (docs/archive/checkout-trainer-roadmap.md),
   // same shape as X01, just solo and against a target instead of an opponent — so
   // it keeps the slots row (showing the darts tapped so far) and the Enter Turn
   // button, just relabeled.
@@ -8501,6 +8525,7 @@ function renderGameShell(){
           <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled${isCheckoutTrainer ? ' hidden' : ''}>${isPerDartMode ? 'Undo Last Dart' : 'Undo Last Turn'}</button>
           <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()"${isPerDartMode ? ' hidden' : ''}>Undo Dart</button>
         </div>
+        <button class="btn btn-ghost" id="declare-unsolvable-btn" onclick="declareUnsolvable()"${(isCheckoutTrainer && game && game.config && game.config.trickQuestions) ? '' : ' hidden'}>🚫 No possible checkout</button>
         <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()"${isPerDartMode ? ' hidden' : ''}>${isCheckoutTrainer ? 'Submit checkout' : 'Enter turn'}</button>
         <button class="btn btn-primary" id="dp-next-round-btn" onclick="startNextRound()" hidden>${isClock ? 'Start Next Clock' : 'Start next round'}</button>
       </div>`;
@@ -8605,7 +8630,7 @@ const CHUCKIN_BUBBLE_KEY_MAP = { chuckindartsthrown:'dartsThrown', chuckinsessio
   chuckinavgdartspersession:'avgDartsPerSession', chuckintreblepct:'treblePct',
   chuckindoublepct:'doublePct', chuckinbullpct:'bullPct', chuckinavg:'avg', chuckin180s:'oneEighties' };
 
-// Checkout Trainer's own stat vocabulary (docs/checkout-trainer-roadmap.md) —
+// Checkout Trainer's own stat vocabulary (docs/archive/checkout-trainer-roadmap.md) —
 // accuracy/optimal-rate are the headline numbers (optimal % is THE point of the
 // game, per the roadmap doc), attempts is the volume figure.
 const CHECKOUT_TRAINER_STAT_DEFS = [
@@ -8761,7 +8786,7 @@ const GAME_TYPES = {
     newMatchPlayer: newMatchPlayerCheckoutTrainer,
     // Unlike Doubles Practice/Chuckin, this genuinely IS a per-visit evaluation —
     // a checkout attempt is exactly a normal X01 visit starting from
-    // remaining=target (docs/checkout-trainer-roadmap.md) — so the real,
+    // remaining=target (docs/archive/checkout-trainer-roadmap.md) — so the real,
     // unmodified X01 evaluateVisit() is reused directly rather than a throwing
     // stub. throwDart()'s checkout_trainer branch and submitCheckoutAttempt()
     // both call this the same way X01's own turn flow does.
@@ -9176,7 +9201,7 @@ function renderGameChuckin(){
 }
 
 
-/* ---------- Checkout Trainer (docs/checkout-trainer-roadmap.md) ----------
+/* ---------- Checkout Trainer (docs/archive/checkout-trainer-roadmap.md) ----------
    A pure mental-recall drill, not a throwing game: the app picks a target score
    and the player taps out a proposed checkout using the same Pad/Dartboard
    widgets every other mode uses (makeDart()/throwDart() reused unmodified). A
@@ -9188,7 +9213,7 @@ function renderGameChuckin(){
    optimum (scoring.js's gradeCheckoutAttempt()) instead of an opponent. */
 function newMatchPlayerCheckoutTrainer(name, config){
   const doubleOut = playerOut(name)==='double';
-  const p = { name, score: pickCheckoutTarget(doubleOut, undefined, config && config.difficulty), doubleOut,
+  const p = { name, score: pickCheckoutTarget(doubleOut, undefined, config && config.difficulty, (config && config.trickQuestions) ? CHECKOUT_TRAINER_TRICK_CHANCE : 0), doubleOut,
     attempts:0, legalCount:0, optimalCount:0, currentStreak:0,
     lifetimeAttemptsBase:0, lifetimeOptimalBase:0,
     sessionRounds:[] };
@@ -9218,7 +9243,7 @@ function throwDartCheckoutTrainer(sector, zone, missZone, missDepth, bounced){
   if(game.darts.length>=3 || game.busted || game.won || game.blitzEnded) return;
   // Checkout Blitz: a hard deadline — the instant the wall clock passes it, no
   // further dart can be entered, whether this would start a fresh round or
-  // continue one already mid-entry (docs/checkout-trainer-roadmap.md "Core loop
+  // continue one already mid-entry (docs/archive/checkout-trainer-roadmap.md "Core loop
   // delta", revised — a previous version exempted an in-progress round so the
   // timer would never "cut a player off mid-dart-entry"; in practice that grace
   // period let a player who paused mid-round resume and submit a checkout a full
@@ -9276,7 +9301,7 @@ function submitCheckoutAttempt(){
     return endBlitzRun();
   }
   const p = game.players[0];
-  // Captured before grading — 📸 Photo Finish (docs/checkout-trainer-roadmap.md)
+  // Captured before grading — 📸 Photo Finish (docs/archive/checkout-trainer-roadmap.md)
   // needs "under 1 second left at the moment of submission," which grading/
   // network delay could otherwise blur. The deadline check just above guarantees
   // this is always >= 0 here — a submission that arrives after the deadline never
@@ -9286,6 +9311,7 @@ function submitCheckoutAttempt(){
 
   announce(grade.optimal ? `Optimal — ${grade.usedDarts} dart${grade.usedDarts===1?'':'s'} for ${p.score}.`
     : grade.legal ? `Legal finish, not optimal — used ${grade.usedDarts}, ${grade.optimalDarts} possible.`
+    : !grade.hint ? `Trick question — ${p.score} is a bogey number with no possible checkout.`
     : `Not a legal finish for ${p.score}.`);
 
   // snapshot state before mutation so undoLastTurnCheckoutTrainer() can restore it
@@ -9307,7 +9333,7 @@ function submitCheckoutAttempt(){
 
   game.lastResult = Object.assign({}, grade, { target: p.score });
 
-  // Achievements (docs/checkout-trainer-roadmap.md "Achievements") — the four
+  // Achievements (docs/archive/checkout-trainer-roadmap.md "Achievements") — the four
   // laddered milestones plus the one-offs checkable synchronously from this
   // attempt's own outcome. p.score is still THIS round's target here, not yet
   // reassigned to the next one below.
@@ -9336,7 +9362,70 @@ function submitCheckoutAttempt(){
     return endBlitzRun();
   }
 
-  p.score = pickCheckoutTarget(p.doubleOut, undefined, game.config && game.config.difficulty);
+  p.score = pickCheckoutTarget(p.doubleOut, undefined, game.config && game.config.difficulty,
+    (game.config && game.config.trickQuestions) ? CHECKOUT_TRAINER_TRICK_CHANCE : 0);
+  renderGameCheckoutTrainer();
+}
+// The trick-question variant's second answer path (docs/archive/checkout-trainer-roadmap.md
+// "Trick-question difficulty variant") — the player calls the current target a bogey
+// number instead of tapping out a route. Mirrors submitCheckoutAttempt() step for
+// step (same Blitz deadline checks, same counters/undo snapshot/next-target serving,
+// same three-way outcome recorded); only the grading source differs
+// (gradeCheckoutDeclaration(), scoring.js) and the recorded turn carries
+// declaredUnsolvable:true with NO darts — any darts already staged this round are
+// discarded, since "there's no checkout" supersedes a half-entered route. A correct
+// declaration counts as this round's optimal answer everywhere (ladders, streak,
+// Blitz's 2 points); it deliberately does NOT count as a solved checkout for the
+// route-specific one-offs (170 Club, One-Darter) or the toughest-checkout Personal
+// Best (excluded server-side via turns.declared_unsolvable).
+function declareUnsolvable(){
+  if(!game || game.gameType !== 'checkout_trainer' || !game.config.trickQuestions || game.blitzEnded) return;
+  if(game.config.mode === 'blitz' && blitzDeadlinePassed(game.blitzDeadline, Date.now())){
+    return endBlitzRun();
+  }
+  const p = game.players[0];
+  const remainingMsAtSubmit = (game.config.mode === 'blitz' && game.blitzDeadline != null) ? (game.blitzDeadline - Date.now()) : null;
+  const grade = gradeCheckoutDeclaration(p.score, p.doubleOut);
+
+  announce(grade.correct ? `Correct — ${p.score} is a bogey number, no checkout exists.`
+    : `Wrong — ${p.score} is finishable in ${grade.optimalDarts} dart${grade.optimalDarts===1?'':'s'}.`);
+
+  // snapshot state before mutation so undoLastTurnCheckoutTrainer() can restore it
+  game.lastTurnSnapshot = { target:p.score, attempts:p.attempts, legalCount:p.legalCount,
+    optimalCount:p.optimalCount, currentStreak:p.currentStreak, sessionRoundsLen:p.sessionRounds.length,
+    legNo:game.legNo, badgeReverts:[], voided:false };
+
+  p.attempts += 1;
+  if(grade.legal) p.legalCount += 1;
+  if(grade.optimal){ p.optimalCount += 1; p.currentStreak += 1; }
+  else p.currentStreak = 0;
+  p.sessionRounds.push({ target:p.score, legal:grade.legal, optimal:grade.optimal,
+    usedDarts:0, optimalDarts:grade.optimalDarts, hint:grade.hint, declared:true });
+
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:0, bust:!grade.legal, checkout:grade.legal, checkoutPoints:null, legWon:grade.optimal,
+    targetScore:p.score, declaredUnsolvable:true, darts: [] });
+
+  game.lastResult = Object.assign({}, grade, { target: p.score });
+
+  checkCheckoutTrainerMilestones(p);
+  // 💣 Bogey Buster — first correct "not possible" call on an actual bogey number.
+  if(grade.correct){
+    awardCheckoutTrainerBadge(p.name, 'checkout_trainer_bogey_buster', '💣', 'BOGEY BUSTER', `Called it — ${p.score} has no possible checkout`);
+  }
+  if(game.config.mode === 'blitz' && grade.legal && isPhotoFinishSubmission(remainingMsAtSubmit)){
+    awardCheckoutTrainerBadge(p.name, 'checkout_trainer_photo_finish', '📸', 'PHOTO FINISH', 'Correct answer with under 1 second left');
+  }
+
+  game.legNo += 1;
+  game.darts = []; game.busted = false; game.won = false;
+
+  if(game.config.mode === 'blitz' && blitzDeadlinePassed(game.blitzDeadline, Date.now())){
+    return endBlitzRun();
+  }
+
+  p.score = pickCheckoutTarget(p.doubleOut, undefined, game.config && game.config.difficulty,
+    (game.config && game.config.trickQuestions) ? CHECKOUT_TRAINER_TRICK_CHANCE : 0);
   renderGameCheckoutTrainer();
 }
 // Mirrors undoLastTurnDoublesPractice()/undoLastTurnChuckin()'s snapshot-restore
@@ -9370,6 +9459,9 @@ function undoLastTurnCheckoutTrainer(){
 }
 function renderGameCheckoutTrainer(){
   const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
+  renderSlots();   // game.darts was just cleared/changed by the caller — a stale route
+                   // left on display would contradict the fresh target (and a
+                   // declaration explicitly discards any half-staged darts)
   const p = game.players[0];
   const isBlitz = game.config.mode === 'blitz';
   const accPct = p.attempts ? Math.round(p.legalCount/p.attempts*100) : 0;
@@ -9398,25 +9490,37 @@ function renderGameCheckoutTrainer(){
   if(status){
     const r = game.lastResult;
     if(r){
-      if(r.optimal){
+      if(r.declared && r.correct){
+        status.className = 'status win';
+        status.textContent = `💣 Correct — ${r.target} is a bogey number; no 3-dart checkout exists.`;
+      } else if(r.declared){
+        status.className = 'status bust';
+        status.textContent = `❌ ${r.target} IS finishable (${r.optimalDarts} dart${r.optimalDarts===1?'':'s'}). Best route: ${r.hint}.`;
+      } else if(r.optimal){
         status.className = 'status win';
         status.textContent = `✅ Optimal — ${r.usedDarts} dart${r.usedDarts===1?'':'s'}, that's the best possible.`;
       } else if(r.legal){
         status.className = 'status';
         status.textContent = `⚠️ Legal finish, but not optimal (you used ${r.usedDarts} — ${r.optimalDarts} possible). Best route: ${r.hint}.`;
+      } else if(!r.hint){
+        // A route was submitted against a trick question — no checkout exists at all.
+        status.className = 'status bust';
+        status.textContent = `💣 Trick question — ${r.target} is a bogey number with no possible checkout. "No possible checkout" was the answer.`;
       } else {
         status.className = 'status bust';
         status.textContent = `❌ Not a legal finish for ${r.target}. Best route: ${r.hint}.`;
       }
     } else {
       status.className = 'status';
-      status.textContent = 'Tap out your proposed checkout, then press Submit.';
+      status.textContent = game.config.trickQuestions
+        ? 'Tap out your proposed checkout and press Submit — or call "No possible checkout" if it\'s a bogey.'
+        : 'Tap out your proposed checkout, then press Submit.';
     }
   }
   renderPad();
 }
 
-/* ---------- Checkout Blitz timer (docs/checkout-trainer-roadmap.md) ----------
+/* ---------- Checkout Blitz timer (docs/archive/checkout-trainer-roadmap.md) ----------
    A wall-clock deadline (game.blitzDeadline = Date.now() + durationSec*1000),
    checked on each tick rather than a naively decrementing counter — a plain
    setInterval counter alone drifts under background-tab throttling, which
@@ -9443,7 +9547,7 @@ function tickCheckoutBlitzTimer(){
   const el = document.getElementById('checkout-trainer-timer');
   if(el) el.textContent = `${remainingSec}s left`;
   // aria-live cues at 30/10/5s remaining (not every second, which would be pure
-  // noise) — docs/checkout-trainer-roadmap.md's explicit accessibility
+  // noise) — docs/archive/checkout-trainer-roadmap.md's explicit accessibility
   // requirement so a screen-reader user can track time without relying on sight.
   [30,10,5].forEach(mark=>{
     if(remainingSec === mark && !checkoutBlitzAnnounced.has(mark)){
@@ -9472,7 +9576,7 @@ function endBlitzRun(){
   stopCheckoutBlitzTimer();
   game.darts = []; game.busted = false; game.won = false;
   const p = game.players[0];
-  // 💎 Perfect Minute (docs/checkout-trainer-roadmap.md): every round this run
+  // 💎 Perfect Minute (docs/archive/checkout-trainer-roadmap.md): every round this run
   // graded optimal, with a 5-round floor so a 1-round fluke can't trigger it —
   // same "floor to prevent a lucky small sample" reasoning the leaderboards use.
   const rounds = p.sessionRounds || [];
@@ -9487,7 +9591,7 @@ function endBlitzRun(){
 // using the same 2/1/0 formula getCheckoutBlitzLeaderboard() sums server-side
 // from the persisted turns. This client-side tally is purely for the immediate
 // results screen; the leaderboard itself is always computed fresh from the
-// database, never from a client-submitted total (docs/checkout-trainer-roadmap.md
+// database, never from a client-submitted total (docs/archive/checkout-trainer-roadmap.md
 // "Security considerations").
 function renderBlitzResults(){
   const p = game.players[0];
@@ -10150,7 +10254,7 @@ function loadDartHeatmap(){
   if(!section || !body) return;
   // Checkout Trainer taps aren't real thrown darts — there's no dartboard, no
   // aim, nothing physical for a positional heatmap to mean anything about
-  // (docs/checkout-trainer-roadmap.md's "these do not count as darts
+  // (docs/archive/checkout-trainer-roadmap.md's "these do not count as darts
   // whatsoever" product decision, same reasoning as the backend's
   // NOT_CHECKOUT_TRAINER exclusion). Hide the section entirely rather than
   // show a "heatmap" of typed-in answers.

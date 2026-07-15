@@ -1,9 +1,9 @@
 # Checkout Trainer — Design Roadmap
 
-> Status (2026-07): **Built and playable end-to-end** — both sub-modes
+> Status (2026-07): **Every item done, doc archived** — both sub-modes
 > (untimed Freeform, 60-second Checkout Blitz), the full grading loop
 > (`pickCheckoutTarget()`/`gradeCheckoutAttempt()`, `frontend/scoring.js`), all
-> five milestone ladders (28 tiers) plus five one-off flagship badges, Personal
+> five milestone ladders (28 tiers) plus six one-off flagship badges, Personal
 > Bests/stat bubbles, the Checkout Blitz leaderboard, New Game screen
 > integration, Home page/Player Profile integration, and four target-selection
 > difficulty tiers (Under 40, Under 100, Over 100, Full Range). Full detail:
@@ -12,9 +12,27 @@
 > than the original sketch, that's called out inline below rather than
 > silently edited away.
 >
-> **Deferred, not built**: the trick-question/bogey-number difficulty variant
-> (and its conditional 💣 Bogey Buster badge) — tracked as its own open item
-> on `docs/open-roadmap-items.md` rather than left silently unbuilt.
+> **What shipped last (trick-question variant, 2026-07 — this doc's final
+> open item)**: an opt-in New Game toggle (`games.config.trickQuestions`,
+> off by default) makes ~1 target in 8 (`CHECKOUT_TRAINER_TRICK_CHANCE`,
+> 0.125) an actual bogey number — drawn from `listUnsolvableTargets()`
+> (`frontend/scoring.js`), derived from `checkoutHint()`'s own '' signal
+> rather than a hardcoded list, intersected with the difficulty tier (tiers
+> with no bogeys, i.e. Under 40/Under 100, simply fall through to a normal
+> target). The scoring screen gains a "🚫 No possible checkout" button
+> (`declareUnsolvable()`, `frontend/index.html`) graded by
+> `gradeCheckoutDeclaration()`: a correct call maps onto the same three-way
+> outcome as an optimal answer (`checkout=1, leg_won=1` — 2 Blitz points,
+> counts toward every ladder/streak/percentage), a wrong call maps onto
+> `bust=1` with the real route revealed, and tapping out any route against a
+> bogey grades illegal with a "trick question" reveal. Declarations are
+> recorded as `turns.declared_unsolvable=1` with ZERO dart rows (the one
+> turn shape `addTurn()` allows that for, locked to this game type) and are
+> excluded from the Toughest Checkout Solved Personal Best and the
+> route-specific one-offs (170 Club, One-Darter). The conditional 💣 **Bogey
+> Buster** badge shipped with it (first correct call). Committed tests:
+> `scoring.test.js`'s "trick questions" describe block,
+> `db.checkout-trainer-stats.test.js`'s "trick-question declarations" block.
 
 ## Goal
 
@@ -256,7 +274,9 @@ accurate as-shipped rather than silently left wrong):
 - **💣 Bogey Buster** — *conditional on the "trick question" difficulty variant*
   (see Open Questions below): correctly answer "not possible" when given an actual
   bogey number, first time. Only makes sense to build if that variant ships; noted
-  here so the achievement idea isn't lost if/when it does.
+  here so the achievement idea isn't lost if/when it does. **Status: shipped
+  (2026-07), alongside the trick-question variant itself — see the status
+  header.**
 
 ### No live scoreboard (deliberate, per the original request)
 
@@ -470,9 +490,12 @@ Not yet addressed anywhere in this doc, per `CLAUDE.md`'s standing conventions:
   100, Full Range 2-170), a session-scoped setup-screen toggle baked into
   `games.config.difficulty`. See "Target selection" above and `REFERENCE.md`
   §19 for the full detail.
-- **Trick-question variant**: **deferred**, per this doc's own framing that
-  the core game is complete without it; the 💣 Bogey Buster badge is deferred
-  with it.
+- **Trick-question variant**: initially deferred per this doc's own framing
+  that the core game is complete without it — then **shipped (2026-07)** as
+  the doc's final open item, 💣 Bogey Buster included. See the status header
+  for the full as-built design (the "own UI affordance" became the
+  "🚫 No possible checkout" button; the "own grading branch" became
+  `gradeCheckoutDeclaration()`).
 - **Blitz's point weighting** (2×/1×/0×) and **ladder thresholds**: shipped
   using this doc's own first-pass numeric values as-is, unchanged.
 - **Configurable Blitz duration**: not built — `config.durationSec` is stored
@@ -491,11 +514,10 @@ Not yet addressed anywhere in this doc, per `CLAUDE.md`'s standing conventions:
   round-trip per round — is real and worth weighing before committing, since it's a
   much smaller build. Worth deciding by how much the "lifetime stats on this" actually
   matters to whoever's using it, not guessed here.
-- **Trick-question difficulty variant**: occasionally give an actual bogey number and
-  accept "not possible" as the correct answer, rather than only ever asking legally
-  finishable targets. Not designed in detail here (needs its own UI affordance for
-  "declare unsolvable," and its own grading branch) — the 💣 Bogey Buster badge above
-  is written assuming this ships, but the core game is complete without it.
+- **Resolved: trick-question difficulty variant** — shipped 2026-07, exactly
+  the shape sketched here (an actual bogey number served occasionally, "not
+  possible" accepted as the correct answer, its own UI affordance and grading
+  branch). See the status header for the as-built detail.
 - Exact ladder threshold values above are a first pass, not final — tune against
   actual play the same way Chuckin's own thresholds were picked, not re-derived from
   first principles here.
