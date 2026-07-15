@@ -121,6 +121,11 @@ function evaluateDartAroundTheClock(dart, hitSet){
    15,16,17,18,19,20,Bull, or a custom 7-of-21 selection made at New Game time),
    stored as game.config.numbers. */
 const CRICKET_STANDARD_NUMBERS = [15,16,17,18,19,20,25];
+// The full pool a custom Cricket config picks its 7 targets from — every number
+// 1-20 plus bull (25) — same set renderCricketNumberGrid() already builds one
+// button per, and the pool BUG-23's "hit a different number" picker subtracts
+// game.config.numbers from to find which numbers AREN'T in play this match.
+const CRICKET_ALL_NUMBERS = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,25];
 
 // Pure per-dart scoring function, validated standalone against 12 hand-checked
 // scenarios (mark accumulation within a visit, closing-vs-scoring marks, opponent-
@@ -442,7 +447,7 @@ function cricketComebackAchieved(worstPointsDeficit){
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     dartValue, dartLabel, makeDartCore,
-    evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS,
+    evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS, CRICKET_ALL_NUMBERS,
     evaluateVisitBaseball, baseballInningTarget, parseSqliteTimestamp,
     evaluateDartDoublesPractice, evaluateDartAroundTheClock, isStaircaseFinish,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,

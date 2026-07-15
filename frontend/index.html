@@ -226,6 +226,19 @@
      not color alone (docs/accessibility-roadmap.md). */
   .pad.cricket-pad{grid-template-columns:repeat(4,1fr)}
   .pad.cricket-pad button.miss{grid-column:1/-1}
+  /* Off-target number picker (docs/bug-roadmap.md BUG-23) — a dart that hits a
+     real number not in play this match (e.g. 1-14 in classic Cricket) is a
+     genuine board hit, not a miss; this lets it be logged with its real sector
+     instead of being folded into "Miss", which was corrupting Dart Analytics. */
+  .cricket-offtarget-wrap{grid-column:1/-1}
+  .cricket-offtarget-toggle{width:100%;background:none;border:1px dashed var(--wire);color:var(--muted);
+    border-radius:8px;padding:8px 4px;font:inherit;font-size:12.5px;cursor:pointer}
+  .cricket-offtarget-toggle:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
+  .cricket-offtarget-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:8px}
+  .cricket-offtarget-btn{background:var(--surface);border:1px solid var(--wire);color:var(--muted);
+    border-radius:8px;padding:8px 0;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+  .cricket-offtarget-btn:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
+  .cricket-offtarget-btn:disabled{opacity:.3;cursor:not-allowed}
   .cricket-target{background:var(--surface);border:1px solid var(--wire);color:var(--ink);border-radius:10px;
     padding:10px 4px;font:inherit;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px}
   .cricket-target:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
@@ -1643,6 +1656,11 @@ let stats = {};
 let prefs = {};      // name -> { out:'double'|'single' }  (per-player finish rule)
 let mult = 1;
 let dartboardMode = true;   // admin-configurable default; refreshed at boot from /api/settings/default-input
+// docs/bug-roadmap.md BUG-23: whether Cricket's "hit a different number" picker
+// (the 14 numbers not in play this match, e.g. 1-14 in classic Cricket) is
+// expanded — collapsed by default since most darts DO land on a target, kept as
+// simple session-persistent UI state (not per-turn) same as dartboardMode above.
+let cricketOffTargetOpen = false;
 let colorblindMode = false; // admin-toggled; refreshed at boot from /api/settings/colorblind-mode
 const DEFAULT_CARD_TAGLINE = 'Darts tracked via Oche — track your darts today!';
 let cardTagline = DEFAULT_CARD_TAGLINE; // admin-editable; refreshed at boot from /api/settings/card-tagline
@@ -7054,6 +7072,45 @@ function renderPadCricket(full){
   const miss=document.createElement('button');
   miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
   miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+
+  // docs/bug-roadmap.md BUG-23: a dart landing on a real number that just isn't
+  // in play this match (e.g. 1-14 in classic Cricket, since only 7 of the 21
+  // possible numbers are ever live) is a genuine board hit, not a miss — but
+  // the 7 target buttons + Miss above have no way to say which non-target
+  // number it actually was, forcing every one of them to be logged as "Miss"
+  // and corrupting Dart Analytics' sector/treble-rate stats. This collapsed-by-
+  // default picker lets it be logged with its real sector instead; scoring is
+  // unaffected either way (evaluateVisitCricket() already no-ops any sector not
+  // in `numbers`, regardless of which specific non-target number it is).
+  const offTargetNumbers = CRICKET_ALL_NUMBERS.filter(n => !numbers.includes(n));
+  const wrap = document.createElement('div');
+  wrap.className = 'cricket-offtarget-wrap';
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'cricket-offtarget-toggle';
+  toggle.disabled = full;
+  toggle.textContent = cricketOffTargetOpen ? 'Hit a different number ▴' : 'Hit a different number ▾';
+  toggle.setAttribute('aria-expanded', String(cricketOffTargetOpen));
+  toggle.onclick = () => { cricketOffTargetOpen = !cricketOffTargetOpen; renderPad(); };
+  wrap.appendChild(toggle);
+  if(cricketOffTargetOpen){
+    const grid = document.createElement('div');
+    grid.className = 'cricket-offtarget-grid';
+    grid.setAttribute('role', 'group');
+    grid.setAttribute('aria-label', 'Hit a different number — not in play this match, no marks');
+    offTargetNumbers.forEach(n=>{
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cricket-offtarget-btn';
+      b.disabled = full;
+      b.textContent = cricketNumberLabel(n);
+      b.setAttribute('aria-label', `${cricketNumberLabel(n)} — not in play, no marks`);
+      b.onclick = () => throwDart(n);
+      grid.appendChild(b);
+    });
+    wrap.appendChild(grid);
+  }
+  pad.appendChild(wrap);
 }
 
 /* Baseball's dedicated scoring screen — only one number is ever live (this

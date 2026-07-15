@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const path = require('path');
 
 const scoring = require(path.join('..', '..', 'frontend', 'scoring.js'));
-const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET_STANDARD_NUMBERS,
+const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET_STANDARD_NUMBERS, CRICKET_ALL_NUMBERS,
   evaluateVisitBaseball, baseballInningTarget, parseSqliteTimestamp,
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
   evaluateDartDoublesPractice, evaluateDartAroundTheClock, chuckinTiersReached, isStaircaseFinish,
@@ -248,6 +248,33 @@ describe('evaluateVisitCricket (mark accumulation + opponent gating + win condit
 
     opponentB.points = 10; // now shooter leads both
     assert.equal(evaluateVisitCricket(shooter, [d(0,1)], g).win, true);
+  });
+});
+
+// docs/bug-roadmap.md BUG-23: CRICKET_ALL_NUMBERS is the pool frontend/index.html's
+// "hit a different number" picker (renderPadCricket()) subtracts game.config.numbers
+// from, to find which numbers aren't in play this match — the actual DOM/canvas
+// picker itself isn't node:test-able (same class of gap as BUG-8/BUG-18/BUG-22, a
+// live Playwright check covers it), but this constant and the subtraction it enables
+// are a genuine, pure, regression-worthy calculation.
+describe('CRICKET_ALL_NUMBERS (the "hit a different number" picker\'s full pool, docs/bug-roadmap.md BUG-23)', () => {
+  test('is exactly 1-20 plus bull (25) — 21 numbers, no duplicates', () => {
+    assert.equal(CRICKET_ALL_NUMBERS.length, 21);
+    assert.equal(new Set(CRICKET_ALL_NUMBERS).size, 21, 'no duplicate numbers');
+    for (let n = 1; n <= 20; n++) assert.ok(CRICKET_ALL_NUMBERS.includes(n), `missing ${n}`);
+    assert.ok(CRICKET_ALL_NUMBERS.includes(25), 'missing bull (25)');
+  });
+
+  test('subtracting classic cricket\'s 7 targets leaves exactly 1-14 as "off-target"', () => {
+    const offTarget = CRICKET_ALL_NUMBERS.filter(n => !CRICKET_STANDARD_NUMBERS.includes(n));
+    assert.deepEqual(offTarget, [1,2,3,4,5,6,7,8,9,10,11,12,13,14]);
+  });
+
+  test('subtracting any valid custom 7-number selection always leaves exactly 14 off-target numbers', () => {
+    const customNumbers = [1, 5, 9, 13, 17, 20, 25]; // an arbitrary valid 7-of-21 custom pick
+    const offTarget = CRICKET_ALL_NUMBERS.filter(n => !customNumbers.includes(n));
+    assert.equal(offTarget.length, 14);
+    assert.ok(!offTarget.some(n => customNumbers.includes(n)), 'no overlap between targets and off-target numbers');
   });
 });
 

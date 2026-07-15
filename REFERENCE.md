@@ -304,6 +304,20 @@ snapshot is needed). Real-darts bull scoring is inherited for free from the
 existing `makeDart()` guard — single bull is 1 mark, double bull is 2, and a
 "treble bull" tap is silently downgraded to a single (no triple bull exists).
 
+**Logging a real off-target hit vs. a genuine miss** (`docs/bug-roadmap.md`
+BUG-23): `renderPadCricket()`'s main pad only ever shows the match's 7 in-play
+numbers plus `Miss` — but a dart landing on one of the other 14 numbers (1-14
+in classic Cricket) is a real board hit, not a miss, and worth recording
+accurately for Dart Analytics (§3 "Top Finishes / Checkout Routes") even though it scores nothing here
+either way. A collapsed-by-default "Hit a different number ▾" picker lists
+those 14 numbers (`CRICKET_ALL_NUMBERS` in `frontend/scoring.js` — the full
+1-20-plus-Bull pool — minus `game.config.numbers`); tapping one calls the
+exact same `throwDart(n)` the 7 real target buttons use, so it respects the
+ambient single/double/treble selector and needed zero scoring-logic changes —
+the `if (!numbers.includes(d.sector)) return;` no-op above already treats any
+non-target sector identically regardless of which one it is. Only the input
+was ever missing a way to produce a real sector instead of `0`.
+
 **Win condition**: this player has closed all 7 numbers **and** has strictly
 more points than every opponent. If they've closed everything but don't lead,
 the leg just continues — real cricket lets them keep throwing/blocking
@@ -854,6 +868,10 @@ return value tells `onLegWon()` whether to run the usual celebration sequence.
   hits), `trebleRates` (per number 1–20, `% of throws at that number that were
   a treble`), `checkoutRoutes` (top 10 exact 3-dart sequences across all
   checkout scores). **Busted turns are excluded entirely** from all three.
+  Trusts `darts.sector`/`darts.multiplier` as recorded, with no game-type-
+  specific interpretation — so it's only ever as accurate as what each game
+  type's own input UI can produce; Cricket's own picker was the one gap where
+  that wasn't fully true (`docs/bug-roadmap.md` BUG-23, §2's Cricket rules).
 - **`getCheckoutRoutes(name, score)`**: same route query, scoped to one specific
   checkout score, `LIMIT 5` — this is the "how do I usually hit this number"
   drill-down on the Top 10 Finishes list.

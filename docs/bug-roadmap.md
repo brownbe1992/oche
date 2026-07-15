@@ -53,8 +53,12 @@
 > empty no matter how many practice games were played, because
 > `onLegWonBaseball()`'s match-completion gate was copy-pasted from X01/Cricket's
 > open-ended-practice-session template, which Baseball's own completed_at-dependent
-> stat functions can't tolerate — now fixed. **BUG-1 through BUG-22 are all fixed
-> as of this writing** — nothing open on either tracker.
+> stat functions can't tolerate — now fixed. **BUG-23** was opened by a live user
+> bug report (2026-07) against Cricket's scoring pad having no way to log a real
+> off-target number hit (e.g. 1-14 in classic Cricket) — every one was forced
+> through `Miss`, corrupting Dart Analytics' sector/treble-rate stats — now fixed
+> with a "hit a different number" picker. **BUG-1 through BUG-23 are all fixed as
+> of this writing** — nothing open on either tracker.
 
 ## Severity legend
 
@@ -1579,6 +1583,108 @@ populates stats; H2H Bo3 still requires both legs) both pass against the fix
 and fail against the pre-fix code (`gamesPlayed`/personal bests stayed empty
 for the solo practice case); full backend suite green (unaffected — this is a
 frontend-only fix, no backend code touched).
+
+---
+
+### BUG-23 — Cricket's scoring pad had no way to log a real off-target number hit, forcing it to be recorded as a genuine miss and corrupting Dart Analytics  **(LOW, data-integrity / user-facing; found via a live user bug report)**
+
+**Status: ✅ Fixed (2026-07).** `renderPadCricket()` gains a collapsed-by-default
+"Hit a different number ▾" picker beneath the existing 7 target buttons + Miss,
+listing the 14 numbers (of the full 1-20 + Bull pool, a new `CRICKET_ALL_NUMBERS`
+constant in `frontend/scoring.js`) not in play this match — always exactly 14,
+whether classic (1-14) or a custom 7-of-21 selection. Tapping one calls the
+exact same `throwDart(n)` the 7 real target buttons already use (respecting
+the ambient single/double/treble selector, so a treble or double off-target
+hit is captured accurately too, not just a bare single), so it needed **zero**
+scoring-logic changes: `evaluateVisitCricket()` already no-ops any sector not
+in `game.config.numbers` regardless of which specific number it is
+(`if(!numbers.includes(d.sector)) return;`) — this is purely an input-
+affordance fix, letting a real sector reach the database instead of being
+forced through `sector:0`. `cricketOffTargetOpen` (new module-level state,
+same pattern as `dartboardMode`) keeps the picker's expanded/collapsed state
+stable across re-renders within a session. `REFERENCE.md`'s Cricket section
+updated in the same change. Committed regression test in
+`backend/test/scoring.test.js` (`CRICKET_ALL_NUMBERS` describe block): exactly
+21 numbers with no duplicates; subtracting classic Cricket's 7 targets leaves
+precisely `[1..14]`; subtracting an arbitrary valid custom 7-selection always
+leaves exactly 14 with no overlap — the pure calculation the picker's number
+list is built from. The picker itself (a DOM-rendering feature, same class of
+gap as BUG-8/BUG-18/BUG-22) has no `node:test` — verified instead with a real
+Chromium browser driving the actual scoring UI: the toggle is present and
+collapsed by default; expanding it shows exactly `1-14` for classic Cricket;
+tapping treble-7 records `{sector:7, multiplier:3}` (not `sector:0`)
+server-side and appears correctly in `GET /api/players/dart-analytics` (a
+100% treble rate for sector 7, one real miss still correctly counted as
+`sector:0`) instead of being folded into the miss count; and three
+off-target darts followed by "Enter turn" leave every mark and the leg's
+points total at zero, exactly matching a genuine miss — confirming Cricket
+scoring itself is completely unaffected. Full backend suite green.
+
+**Original report:** "Make sure that misses in cricket don't actually count
+as a miss in the dart analytics. Since there is no option for 1-14 when
+playing a classic cricket game, I have to log all those numbers as misses."
+
+**Where:** `frontend/index.html` `renderPadCricket()` built exactly 8 buttons —
+the game's 7 in-play targets plus a single `Miss` (`sector:0`) — with no way
+to specify any other number 1-20:
+
+```js
+numbers.forEach(n=>{ ... b.onclick = () => throwDart(n); pad.appendChild(b); });
+const miss=document.createElement('button');
+miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
+miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+```
+
+Classic Cricket plays 15/16/17/18/19/20/Bull — 7 of the 21 numbers a dart can
+land on (1-20 plus Bull). A dart that genuinely lands on, say, 7 is a real
+board hit, worth recording accurately (which sector, which multiplier), but
+the pad offered no button for it — only `Miss`, identical to a dart that
+missed the dartboard entirely.
+
+**The gap that let it ship:** `getDartAnalytics()`'s "Most Hit Sectors" and
+"Treble Rate by Number" queries read `darts.sector`/`darts.multiplier`
+directly, with no game-type-specific interpretation — they trust whatever
+sector was actually recorded. There was never a bug in the *analytics* query
+itself; the data reaching it was already wrong, because Cricket's own input
+UI was the only game type that had no way to record 13 of the 20 real
+numbers (14 including Bull for a custom config that doesn't select it) at
+all — X01, Baseball, and every other Pad-based mode's target set is either
+"every number" or forced down to exactly one live target with its own
+dedicated screen, so this specific gap only existed for Cricket.
+
+**Misbehavior (verified):** a Cricket player whose darts frequently land
+outside the 7 in-play numbers (a very normal occurrence — half the board
+isn't live in a Cricket match) had every one of those hits recorded as
+`sector:0`, identical to a genuine miss. Their Player Profile's Dart
+Analytics "Most Hit Sectors" list showed an inflated, meaningless "Miss"
+entry combining real off-board misses with real on-board hits that simply
+weren't Cricket targets, while "Treble Rate by Number" silently excluded
+every treble thrown at a non-target number (since those darts had no real
+sector to group by) — an accuracy gap invisible from the Cricket scoring
+screen itself, only surfacing once the player checked their stats.
+
+**Fix (step by step):**
+1. Add `CRICKET_ALL_NUMBERS` (`[1..20, 25]`) to `frontend/scoring.js`, exported
+   alongside the existing `CRICKET_STANDARD_NUMBERS`.
+2. In `renderPadCricket()`, after the existing 7 targets + Miss, add a
+   collapsed-by-default toggle revealing a grid of
+   `CRICKET_ALL_NUMBERS.filter(n => !numbers.includes(n))` — each button
+   calling `throwDart(n)` exactly like a real target button (so multiplier
+   selection and every existing dart-shape/undo/live-broadcast code path is
+   reused unchanged).
+3. No backend or scoring changes needed — `evaluateVisitCricket()` and
+   `getDartAnalytics()` both already handle an arbitrary real sector
+   correctly; only the *input* was ever missing a way to produce one.
+4. `REFERENCE.md`'s Cricket rules section documents the new picker in the
+   same change.
+5. Committed `node:test` for `CRICKET_ALL_NUMBERS`'s pure pool/subtraction
+   math (Status note above); the DOM picker itself verified live instead.
+
+**Verify:** the new test passes; a live Chromium check confirms the picker
+renders the correct 14 off-target numbers, records their real sector/
+multiplier (visible in Dart Analytics, not folded into "Miss"), and scores
+zero marks/points exactly like a genuine miss; a genuine `Miss` tap is
+completely unaffected; full backend suite green.
 
 ---
 
