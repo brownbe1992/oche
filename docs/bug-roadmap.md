@@ -47,8 +47,14 @@
 > live user bug report (2026-07) against a re-shared Badge Case card showing no
 > explanation at all — `shareEarnedBadge()` never used the badge's own `desc` field,
 > the only moment-card-building path in the app that didn't, now fixed (extended to
-> every other card-building path for full coverage in the same change). **BUG-1
-> through BUG-21 are all fixed as of this writing** — nothing open on either tracker.
+> every other card-building path for full coverage in the same change). **BUG-22**
+> was opened by a live user bug report (2026-07) against practice-mode Baseball
+> games never recording — Games Played, Win Rate, and every Personal Best stayed
+> empty no matter how many practice games were played, because
+> `onLegWonBaseball()`'s match-completion gate was copy-pasted from X01/Cricket's
+> open-ended-practice-session template, which Baseball's own completed_at-dependent
+> stat functions can't tolerate — now fixed. **BUG-1 through BUG-22 are all fixed
+> as of this writing** — nothing open on either tracker.
 
 ## Severity legend
 
@@ -1459,6 +1465,120 @@ supply *some* context text; this one alone supplied none.
 with no natural "statLine" (e.g. a laddered milestone re-shared from the Badge
 Case) and doesn't regress any card that already had a `statLine`; full backend
 suite green.
+
+---
+
+### BUG-22 — Practice-mode Baseball games never called `DB.completeGame()`, so Games Played / Win Rate / every Personal Best stayed empty no matter how many practice games were played  **(MED, user-facing / data-integrity; found via a live user bug report)**
+
+**Status: ✅ Fixed (2026-07).** Two changes, mirroring BUG-18's exact precedent
+for the same class of bug (a `!game.practice` gate wrongly blocking a match
+completion the scoring engine had already decided):
+1. `startGame()`'s `drillModes`-derived `legsPerSet`/`setsPerGame` computation now
+   also forces `1`/`1` when `setup.gameType === 'baseball' && setup.mode !== 'h2h'`
+   (`isPracticeBaseball`) — a practice Baseball leg is a complete, standalone
+   9-inning game (its outcome is decided unconditionally by
+   `evaluateVisitBaseball()`, unlike X01/Cricket's open-ended countdown legs), so
+   it's forced to exactly 1 leg/1 set, the same treatment every drill mode
+   (Ghost, Chuckin, Doubles Practice, etc.) already gets. H2H Baseball is
+   untouched — `setup.mode` stays `'h2h'` either way, so a genuine Bo3/Bo5
+   multi-leg H2H match still requires the configured number of legs.
+2. `onLegWonBaseball()`'s outer gate changed from `if(!game.practice &&
+   w.legsWon >= game.legsPerSet)` to `if(w.legsWon >= game.legsPerSet)` — dropping
+   the practice check entirely. This function is Baseball-exclusive, so with (1)
+   in place, `legsWon >= legsPerSet` alone already correctly distinguishes "the
+   single practice leg just finished" (`legsPerSet=1`, completes immediately)
+   from "this leg finished but the H2H match isn't decided yet" (`legsPerSet`
+   unchanged for H2H). `finishUnit('game', ...)` already renders correctly for a
+   practice win with no changes needed (same "GAME OVER"/"New game" UI BUG-18
+   already proved works for a practice-flagged match).
+
+The now-unreachable `pracStatsHtmlBaseball()` dual-column "This Leg/This
+Session" panel (`finishUnit()`'s `kind==='leg'` screen — Baseball can no longer
+reach `kind==='leg'` in practice mode, since it always completes in exactly one
+leg now) was removed in the same change, along with its two call sites;
+`isBaseball` under `kind==='leg'` now always uses `h2hStatsHtmlBaseball()`,
+matching what H2H already used. `docs/game-modes-roadmap.md` and
+`docs/open-roadmap-items.md` updated to drop the stale function reference.
+
+**No committed `node:test`** — this is a DOM/game-state control-flow defect
+(the gating logic and its fix live entirely in `frontend/index.html`'s
+`startGame()`/`onLegWonBaseball()`), the same class of gap BUG-8/BUG-18 covered
+with a live Playwright check instead, not a pure calculation to extract. Verified
+end-to-end with a real Chromium browser driving the actual scoring UI (not the
+raw API):
+- **Solo practice Baseball** (the exact reported scenario): played a full
+  9-inning game via real pad-button/Enter-turn clicks. Before the fix,
+  `GET /api/players/stat-bubbles?...&gameType=baseball` returned `gamesPlayed:
+  0` and `GET /api/players/personal-bests?...` returned all-`null` fields
+  despite 27 real darts thrown; after the fix, the same player/session shows
+  `gamesPlayed: 1` and every Personal Best field populated
+  (`bestLegRuns`/`fewestDartsToWin`/`recentFormRuns`/`lifetimeRuns` all `27`).
+- **H2H Bo3 regression check**: a 2-player, `legsPerSet:2` match correctly does
+  **not** complete after the first (decisively won) leg — `game.done` stays
+  `false`, "Next leg" is offered — and correctly **does** complete after the
+  second leg is also won, confirming multi-leg H2H behavior is unchanged.
+
+**Original report:** "The baseball stats on the player pages aren't
+populating. I played three games and it's not displaying any results."
+
+**Where:** `frontend/index.html` `onLegWonBaseball(wi)` — copy-pasted its outer
+gate wholesale from X01/Cricket's own `onLegWon()`:
+
+```js
+if(!game.practice && w.legsWon >= game.legsPerSet){      // set won (H2H only)
+  ...
+  if(w.setsWon >= game.setsPerGame){   // game (match) won
+    ...
+    DB.completeGame(w.name);
+    ...
+```
+
+**The design mismatch that caused it:** for X01/Cricket, `!game.practice` here
+is *correct* — practice mode is deliberately an open-ended session ("keep
+playing legs until you manually end it"), and every leg-level stat (average,
+checkout, etc.) is captured via `turns.leg_won`, entirely independent of
+`games.completed_at`. Baseball's `onLegWonBaseball()` inherited the identical
+gate from that template, but Baseball has **no equivalent per-turn "this won
+the leg" flag** — its own code comment elsewhere explains why: a Baseball leg's
+winner isn't self-referential to one visit the way a checkout or closing a
+Cricket number is. Every one of Baseball's own stat functions
+(`getBaseballWonLegs()`, and `gamesPlayed`/`winPct` in
+`getBaseballStatBubbles()`) therefore has no choice but to gate on
+`g.completed_at IS NOT NULL` as its only "is this a real, decided result, not
+an abandoned mid-leg" signal. With the `!game.practice` gate blocking
+`DB.completeGame()` unconditionally, that signal could never fire for a
+practice game — so `gamesPlayed` stayed `0` and Personal Bests stayed entirely
+empty forever, no matter how many practice games were played through to a real
+result.
+
+**Misbehavior (verified):** a player who plays Baseball only in practice mode
+(a very natural way to try out a brand-new game type solo, no second player
+needed) sees the RPI/Perfect Innings/Darts Thrown/Best Inning stat bubbles at
+the top of their Player Profile populate correctly (those read straight from
+`turns`, unaffected), but "Games Played" permanently reads `0`, "Win Rate"
+permanently reads `—`, and the entire Personal Bests panel (Best Leg Runs,
+Fewest Darts to Win, Win Streak, Recent Form, Lifetime Runs) stays empty —
+exactly matching "not displaying any results," even after playing several full
+games.
+
+**Fix (step by step):**
+1. In `startGame()`, add `isPracticeBaseball` (`setup.gameType === 'baseball'
+   && setup.mode !== 'h2h'`) to the `legsPerSet`/`setsPerGame` forcing logic
+   alongside `drillModes`.
+2. In `onLegWonBaseball()`, drop `!game.practice` from the outer gate — safe
+   because this function is Baseball-only and (1) already makes
+   `legsWon >= legsPerSet` alone correctly distinguish the two cases.
+3. Remove `pracStatsHtmlBaseball()` and its two call sites in `finishUnit()`
+   (now genuinely unreachable), simplifying the `isBaseball` branch of
+   `kind==='leg'` to always use `h2hStatsHtmlBaseball()`.
+4. Update `docs/game-modes-roadmap.md`'s and `docs/open-roadmap-items.md`'s
+   stale references to the removed function.
+
+**Verify:** the two live-browser checks above (solo practice completes and
+populates stats; H2H Bo3 still requires both legs) both pass against the fix
+and fail against the pre-fix code (`gamesPlayed`/personal bests stayed empty
+for the solo practice case); full backend suite green (unaffected — this is a
+frontend-only fix, no backend code touched).
 
 ---
 

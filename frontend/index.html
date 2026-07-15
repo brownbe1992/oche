@@ -3767,8 +3767,18 @@ async function startGame(){
   // otherwise the two "players" wouldn't actually be racing the same leg.
   const startScore = challengeStart != null ? challengeStart : ghostScript ? Number(ghostScript.category) : setup.start;
   const drillModes = ['challenge', 'ghost', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world'];
-  const legsPerSet = drillModes.includes(setup.mode) ? 1 : setup.legsPerSet;
-  const setsPerGame = drillModes.includes(setup.mode) ? 1 : setup.setsPerGame;
+  // docs/bug-roadmap.md BUG-22: a practice Baseball "leg" is a complete, standalone
+  // 9-inning game (evaluateVisitBaseball() decides its outcome unconditionally,
+  // unlike X01/Cricket's open-ended countdown legs) — so, like every drill mode
+  // above, it's forced to exactly 1 leg/1 set here. Unlike drillModes, this can't
+  // just be added to that list: H2H Baseball legitimately supports a real Bo3/Bo5
+  // multi-leg match (setup.mode stays 'h2h' either way), so this only forces the
+  // practice case. The h2h-options legs/sets stepper is already hidden for
+  // practice regardless of game type (setMode()), so this doesn't remove any
+  // control the player could see.
+  const isPracticeBaseball = setup.gameType === 'baseball' && setup.mode !== 'h2h';
+  const legsPerSet = (drillModes.includes(setup.mode) || isPracticeBaseball) ? 1 : setup.legsPerSet;
+  const setsPerGame = (drillModes.includes(setup.mode) || isPracticeBaseball) ? 1 : setup.setsPerGame;
   // Checkout Blitz's durationSec is stored even though only 60 exists today — same
   // "store it even though only one value exists today" precedent tournament_rounds.
   // legs_per_set already set for a field that was single-valued at first and
@@ -7927,7 +7937,21 @@ function onLegWonBaseball(wi){
   // snapshot for the match-win stat line" precedent onLegWon() (X01) uses.
   const legsAtWin = new Map(game.players.map(p => [p, p.legsWon]));
 
-  if(!game.practice && w.legsWon >= game.legsPerSet){      // set won (H2H only)
+  // docs/bug-roadmap.md BUG-22: unlike onLegWon() (X01/Cricket), this gate is NOT
+  // `!game.practice && ...` — a practice Baseball leg is deliberately forced to
+  // legsPerSet=1/setsPerGame=1 above in startGame() (isPracticeBaseball), so
+  // `w.legsWon >= game.legsPerSet` alone already correctly distinguishes "this
+  // single practice leg just finished" (completes immediately, legsPerSet=1) from
+  // "this leg finished but the H2H match isn't decided yet" (legsPerSet=setup's Bo3/
+  // Bo5/etc, unchanged for H2H). Keeping `!game.practice` here — copied wholesale
+  // from X01/Cricket's OWN open-ended-practice-session template — was the actual
+  // bug: it blocked DB.completeGame() from EVER firing for a practice Baseball
+  // game, no matter how many legs were played, because unlike X01/Cricket (whose
+  // leg-level personal bests read turns.leg_won, independent of games.completed_at),
+  // every one of Baseball's own stat functions (getBaseballWonLegs(), gamesPlayed,
+  // winPct) requires games.completed_at IS NOT NULL — so practice Baseball could
+  // never show a single stat, ever, regardless of how many games were played.
+  if(w.legsWon >= game.legsPerSet){      // leg (or, for practice, the whole game) won
     w.setsWon += 1;
     game.players.forEach(p=>p.legsWon=0);
 
@@ -8201,24 +8225,6 @@ function h2hStatsHtml(winner, scope){
   return `<div class="prac-stats">${cols}</div>`;
 }
 
-// Baseball's per-leg/session practice stat panel — same "This Leg/This Session"
-// container pracStatsHtml() builds for X01, but reading Cricket/Baseball's own
-// turnRecord shape ({player, scored, darts: [dart, ...]}) instead of X01's own
-// turns-table shape (t.darts as a plain count, t.bust, t.trebleLess, etc., none
-// of which a Baseball turn record carries).
-function pracStatsHtmlBaseball(turns){
-  if(!turns.length) return '';
-  const darts = turns.reduce((s,t)=>s+t.darts.length,0);
-  const totalRuns = turns.reduce((s,t)=>s+t.scored,0);
-  const perfectInnings = turns.filter(t=>t.scored===9).length;
-  const bestInning = Math.max(...turns.map(t=>t.scored));
-  return [
-    statRow('Darts Thrown', darts),
-    statRow('Total Runs', totalRuns),
-    statRow('Best Inning', bestInning),
-    statRow('Perfect Innings', perfectInnings),
-  ].join('');
-}
 // Baseball's per-player leg/game comparison table (GAME OVER / LEG COMPLETE
 // screens) — same container h2hStatsHtml() builds for X01, but showing runs
 // instead of a score average (a Baseball player object has no
@@ -8309,20 +8315,12 @@ function finishUnit(kind, winner){
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
     // Cricket has no per-leg stat panel yet (X01-only fields; its own stats
     // parity is a later build-order step) — skip straight to '' rather than
-    // reading fields that don't exist on a cricket player. Baseball gets its
-    // own panel (pracStatsHtmlBaseball()/h2hStatsHtmlBaseball()), reading its
-    // own turnRecord/player-object shape instead of X01's.
-    const legPanel = isCricket || kind!=='leg' ? '' : isBaseball ? (game.practice ? `
-      <div class="prac-stats">
-        <div class="prac-col">
-          <div class="prac-col-title">This Leg</div>
-          ${pracStatsHtmlBaseball(game.currentLegTurns||[])}
-        </div>
-        <div class="prac-col">
-          <div class="prac-col-title">This Session</div>
-          ${pracStatsHtmlBaseball(game.sessionTurns||[])}
-        </div>
-      </div>` : h2hStatsHtmlBaseball(winner)) : game.practice ? `
+    // reading fields that don't exist on a cricket player. Baseball always uses
+    // h2hStatsHtmlBaseball() here, never a practice-style dual-column panel — a
+    // practice Baseball game is forced to exactly 1 leg/1 set (docs/bug-roadmap.md
+    // BUG-22, see onLegWonBaseball()/startGame()'s isPracticeBaseball), so
+    // kind==='leg' is only ever reached for a genuine mid-match H2H leg now.
+    const legPanel = isCricket || kind!=='leg' ? '' : isBaseball ? h2hStatsHtmlBaseball(winner) : game.practice ? `
       <div class="prac-stats">
         <div class="prac-col">
           <div class="prac-col-title">This Leg</div>

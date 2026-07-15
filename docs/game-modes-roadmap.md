@@ -471,16 +471,20 @@ each the direct Baseball-vocabulary analog of a Cricket precedent.
   both flagged `baseball:true` in `BADGE_INFO` so the Player Profile's Badge Case
   gets its own "Baseball" section (mirroring the Cricket section). Full trigger
   conditions in REFERENCE.md §4.
-- **Matchwin moment card, Share button, per-leg practice stat panel**: Baseball
-  now gets its own `pracStatsHtmlBaseball()`/`h2hStatsHtmlBaseball()` pair
-  (mirroring X01's `pracStatsHtml()`/`h2hStatsHtml()`, since Cricket's own
-  versions read X01-shaped fields — `p.gamePoints`/`avgDarts` — that don't exist
-  on a Baseball player) plumbed into `finishUnit()`. `matchWinStatLine()` needed
-  no Baseball-specific version at all — it only reads `legsWon`/`setsWon`/
-  `category`/`players.length`, already generic across every game type. The Share
-  button, previously excluded for Baseball the same way it's excluded for
-  Cricket (`isCricket || isBaseball` in `finishUnit()`), now only excludes
-  Cricket — Baseball gets the same `shareMomentCard('matchwin')` flow X01 has.
+- **Matchwin moment card, Share button, per-leg comparison table**: Baseball
+  now gets its own `h2hStatsHtmlBaseball()` (mirroring X01's `h2hStatsHtml()`,
+  since Cricket's own version reads X01-shaped fields — `p.gamePoints`/
+  `avgDarts` — that don't exist on a Baseball player) plumbed into
+  `finishUnit()`. `matchWinStatLine()` needed no Baseball-specific version at
+  all — it only reads `legsWon`/`setsWon`/`category`/`players.length`, already
+  generic across every game type. The Share button, previously excluded for
+  Baseball the same way it's excluded for Cricket (`isCricket || isBaseball` in
+  `finishUnit()`), now only excludes Cricket — Baseball gets the same
+  `shareMomentCard('matchwin')` flow X01 has. (A `pracStatsHtmlBaseball()`
+  dual-column "This Leg/This Session" panel briefly existed alongside this for
+  practice mode's `kind==='leg'` screen, but was removed by
+  `docs/bug-roadmap.md` BUG-22 — practice Baseball is now always exactly 1 leg/
+  1 set, so that branch became unreachable; see BUG-22 for why.)
 - **Home page leaderboards** (`renderHomeTabBodyBaseball()`, mirroring
   `renderHomeTabBodyCricket()` exactly): `homeTabRenderer` flipped from `false`
   to the new renderer, so Baseball now appears on the Home page's game-type

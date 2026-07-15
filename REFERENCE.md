@@ -367,8 +367,27 @@ Visit-based (3 darts per turn), same undo shape as X01/Cricket
 (`undoLastTurnBaseball()`, dispatched from `undoLastTurn()`) — restores
 `totalRuns`/`inningRuns`/dart counts and `game.baseballInning` from
 `game.lastTurnSnapshot`. Leg/set/game progression (`onLegWonBaseball`)
-mirrors `onLegWonCricket()` structurally; no achievements or Daily Challenge
-integration (X01/Cricket's own don't apply to Baseball either). Scoring
+mirrors `onLegWonCricket()` structurally **with one deliberate divergence**:
+its outer gate is `if(w.legsWon >= game.legsPerSet)`, not X01/Cricket's
+`if(!game.practice && ...)`. Practice-mode Baseball is forced to exactly
+`legsPerSet=1`/`setsPerGame=1` at `startGame()` (`isPracticeBaseball`, the
+same treatment every drill mode gets — Ghost, Chuckin, Doubles Practice,
+etc.), so a practice Baseball leg *is* the whole game, unlike X01/Cricket's
+genuinely open-ended practice legs. This is required, not cosmetic: unlike
+X01/Cricket (whose leg-level stats read `turns.leg_won`, independent of
+`games.completed_at`), every one of Baseball's own stat functions
+(`getBaseballWonLegs()`, `gamesPlayed`/`winPct` in
+`getBaseballStatBubbles()`) requires `g.completed_at IS NOT NULL` as its only
+"this is a real result, not an abandoned mid-leg" signal — and
+`DB.completeGame()` only ever fires from this same gate. Copying X01/Cricket's
+`!game.practice` gate wholesale (as an earlier version of this function did)
+meant a practice Baseball game could never be marked complete at all, so
+`gamesPlayed`/Personal Bests stayed empty forever regardless of how many
+practice games were played — `docs/bug-roadmap.md` BUG-22. H2H Baseball is
+unaffected by this — `legsPerSet`/`setsPerGame` stay whatever the New Game
+wizard's Bo3/Bo5/etc. picker set, so a genuine multi-leg H2H match still
+requires every configured leg before completing. No achievements or Daily
+Challenge integration (X01/Cricket's own don't apply to Baseball either). Scoring
 screen (`renderPadBaseball`) reuses Cricket's exact "select a multiplier,
 then tap the target" interaction with a single target button (this inning's
 number) instead of Cricket's seven. Live scoreboard (`renderers.baseball` in
