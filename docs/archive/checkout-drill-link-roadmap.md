@@ -1,9 +1,10 @@
 # "Drill This Checkout" Deep Link — Design Roadmap
 
-> Status: **design phase, not started.** Promotes the affordance the
-> archived Checkout Trainer doc left as an open question ("practice this
-> specific number" deep link) into a tracked item — it stitches two
-> already-shipped features together for very little new surface.
+> Status: **done, 2026-07.** Promoted the affordance the archived Checkout
+> Trainer doc left as an open question ("practice this specific number" deep
+> link) into a tracked item, and shipped it — it stitches two already-shipped
+> features together for very little new surface. Full mechanics documented in
+> `REFERENCE.md` §19a; see that section for the authoritative behavior.
 
 ## Goal
 
@@ -59,11 +60,16 @@ the random target picker eventually serves it. Two natural sources today:
   toughest-checkout exclusion scope, and the config validation; a
   Playwright pass for the deep-link jump from a real Top Finishes row.
 
-## Open questions for whoever picks this up
+## Resolved at build time
 
-- Should the pin optionally serve a **neighborhood** (the target ±2) so
-  the drill covers the finishes you'd actually be left on after a stray
-  single? Nice idea, not v1 — flag on the setup chip if built.
-- Coaching Insights currently surfaces route-level findings — confirm at
-  build time which insight types carry a concrete drillable number and
-  only show the button there.
+- **Neighborhood serving (target ±2)** was considered and explicitly dropped
+  from v1, per the note above — the pin always drills the exact number
+  clicked. Would need a second, additive change (a `pinnedNeighborhood`
+  flag) if ever built.
+- **Which Coaching Insight types carry a concrete drillable number**:
+  confirmed to be `checkout_route` only (`getCoachingInsights()`,
+  `backend/db.js`) — `weak_number`/`bust_parity`/`form_trend` each describe a
+  pattern across many darts/legs, not a single checkout score to pin. The
+  `checkout_route` insight now carries a `score` field for exactly this
+  purpose; `renderCoachingInsights()` (`frontend/index.html`) only renders
+  the 🎯 Drill button where `insight.score` is present.

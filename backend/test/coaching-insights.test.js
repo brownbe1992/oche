@@ -75,6 +75,9 @@ describe('getCoachingInsights — checkout route', () => {
     const route = insights.find(i => i.type === 'checkout_route');
     assert.ok(route, 'expected a checkout_route insight');
     assert.match(route.text, /D20 finishes it in 1/);
+    // docs/checkout-drill-link-roadmap.md "Drill this checkout": the concrete
+    // number a 🎯 Drill button on this card would pin.
+    assert.equal(route.score, 40);
   });
 
   test('does not flag a route already at the optimal dart count', () => {

@@ -333,7 +333,13 @@ function listUnsolvableTargets(doubleOut, difficulty){
 // unsolvable bogey number from the tier instead of a finishable target. The
 // trick roll consumes one rng draw and the bogey pick a second, so a
 // deterministic test can steer both.
-function pickCheckoutTarget(doubleOut, rng, difficulty, trickChance){
+// `pinnedTarget` (docs/checkout-drill-link-roadmap.md "Drill this checkout" deep
+// link): when set, short-circuits every difficulty/trick roll below and always
+// serves that same number — repetition is the point. Ignored (falls through to
+// the normal roll) if the pin isn't actually finishable under this out-mode, so
+// a stale/bad pin can never wedge the trainer on an impossible target.
+function pickCheckoutTarget(doubleOut, rng, difficulty, trickChance, pinnedTarget){
+  if(pinnedTarget != null && checkoutHint(pinnedTarget, doubleOut, 3) !== '') return pinnedTarget;
   const roll = rng || Math.random;
   const tier = CHECKOUT_TRAINER_DIFFICULTY_TIERS[difficulty] || CHECKOUT_TRAINER_DIFFICULTY_TIERS.full;
   const low = Math.max(doubleOut ? 2 : 1, tier.low);   // double-out can never finish on 1; straight-out can

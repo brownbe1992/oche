@@ -818,6 +818,16 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
     const samePair = givenIds.length === 2 && fixtureIds.every(id => givenIds.includes(id)) && givenIds.every(id => fixtureIds.includes(id));
     if (!samePair) throw httpError(400, 'The selected players do not match this fixture');
   }
+  // docs/checkout-drill-link-roadmap.md "Drill this checkout": pinnedTarget rides
+  // games.config through this same path unchanged — validate it server-side like
+  // any other config field reaching this function from an untrusted client,
+  // independent of whatever the setup screen already enforces client-side.
+  if (resolvedGameType === 'checkout_trainer' && config && config.pinnedTarget != null) {
+    const pin = Number(config.pinnedTarget);
+    if (!Number.isInteger(pin) || pin < 2 || pin > 170) {
+      throw httpError(400, 'pinnedTarget must be an integer between 2 and 170');
+    }
+  }
   const resolvedConfig = config ? JSON.stringify(config) : JSON.stringify({ startingScore: Number(category) || null });
   if (Buffer.byteLength(resolvedConfig) > 4096) throw httpError(400, 'config is too large');
   const info = q.insertGame.run(categoryStr, clampMatchFormat(legsPerSet), clampMatchFormat(setsPerGame), practice ? 1 : 0, resolvedGameType, resolvedConfig);
@@ -2576,7 +2586,12 @@ function getCheckoutTrainerPersonalBests(playerName, mode) {
   // (it's that round's best possible answer), but its bogey target was never a
   // checkout anyone SOLVED — without this, one correct "169 is a bogey" call
   // would permanently pin this Personal Best at 169.
-  const toughestCheckout = db.prepare(`SELECT MAX(t.target_score) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? AND t.leg_won=1 AND t.declared_unsolvable=0 ${scope}`).get(p.id)?.v ?? null;
+  // json_extract(...pinnedTarget) IS NULL (docs/checkout-drill-link-roadmap.md
+  // "Drill this checkout"): grinding one number repeatedly via a pinned drill
+  // shouldn't set a "toughest ever" record the random target pool didn't
+  // actually produce — scoped by the game row's config, no schema change needed
+  // since every turn in a pinned game already shares the same pinnedTarget.
+  const toughestCheckout = db.prepare(`SELECT MAX(t.target_score) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? AND t.leg_won=1 AND t.declared_unsolvable=0 AND json_extract(g.config,'$.pinnedTarget') IS NULL ${scope}`).get(p.id)?.v ?? null;
 
   const rows = db.prepare(`SELECT t.leg_won AS legWon FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope} ORDER BY t.id`).all(p.id);
   let bestStreak = 0, current = 0;
@@ -3694,6 +3709,11 @@ function getCoachingInsights(playerName, mode) {
         insights.push({
           type: 'checkout_route', tone: 'weakness',
           text: `Your usual route for ${scoreRow.score} (${actualLabel}, ${actualParts.length} darts) takes more darts than necessary — ${optimal} finishes it in ${optimalDartCount}.`,
+          // docs/checkout-drill-link-roadmap.md "Drill this checkout": the one coaching
+          // insight type with a concrete drillable number — weak_number/bust_parity/
+          // form_trend below have no single checkout score to pin, so they carry no
+          // `score` field and the frontend only offers the Drill button where one exists.
+          score: scoreRow.score,
         });
       }
     }

@@ -123,6 +123,40 @@ describe('getCheckoutTrainerPersonalBests', () => {
     assert.equal(pb.toughestCheckout, null);
     assert.equal(pb.bestStreak, 0);
   });
+
+  // docs/checkout-drill-link-roadmap.md "Drill this checkout": a pinned round
+  // grinding one known-good number repeatedly shouldn't set a "toughest ever"
+  // record the random target pool didn't actually produce.
+  test('toughestCheckout excludes optimal solves from a pinned-target game, even when higher than any unpinned solve', () => {
+    const name = 'CT_PB_PinExcluded';
+    db.addPlayer(name);
+    const g = checkoutTrainerGame(name, 'freeform');
+    ctTurn(g.gameId, name, 1, 1, 121, 'optimal'); // ordinary roll, must count
+
+    const pinned = db.createGame({
+      category: 'Checkout Trainer (Freeform)', legsPerSet: 1, setsPerGame: 1, practice: 1,
+      gameType: 'checkout_trainer', config: { mode: 'freeform', pinnedTarget: 170 },
+      players: [{ name }],
+    });
+    ctTurn(pinned.gameId, name, 1, 1, 170, 'optimal'); // pinned, higher than 121 -- must NOT count
+
+    const pb = db.getCheckoutTrainerPersonalBests(name, 'practice');
+    assert.equal(pb.toughestCheckout, 121, 'the pinned 170 solve must not override the genuine 121 record');
+  });
+
+  test('toughestCheckout is null when every optimal solve came from a pinned-target game', () => {
+    const name = 'CT_PB_OnlyPinned';
+    db.addPlayer(name);
+    const pinned = db.createGame({
+      category: 'Checkout Trainer (Freeform)', legsPerSet: 1, setsPerGame: 1, practice: 1,
+      gameType: 'checkout_trainer', config: { mode: 'freeform', pinnedTarget: 121 },
+      players: [{ name }],
+    });
+    ctTurn(pinned.gameId, name, 1, 1, 121, 'optimal');
+
+    const pb = db.getCheckoutTrainerPersonalBests(name, 'practice');
+    assert.equal(pb.toughestCheckout, null);
+  });
 });
 
 describe('getCheckoutBlitzLeaderboard', () => {

@@ -243,6 +243,47 @@ describe('createGame — gameType/category/config validation', () => {
     assert.doesNotThrow(() => db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, config: { startingScore: 501 }, players: [] }));
   });
 
+  // docs/checkout-drill-link-roadmap.md "Drill this checkout": pinnedTarget rides
+  // games.config through this same path from an untrusted client, so it gets the
+  // same write-boundary validation as every other config field reaching here.
+  describe('pinnedTarget (checkout_trainer only)', () => {
+    test('accepts an integer in [2, 170]', () => {
+      for (const pinnedTarget of [2, 121, 170]) {
+        assert.doesNotThrow(() => db.createGame({
+          category: 'Checkout Trainer (Freeform)', legsPerSet: 1, setsPerGame: 1, practice: 1,
+          gameType: 'checkout_trainer', config: { mode: 'freeform', pinnedTarget }, players: [],
+        }));
+      }
+    });
+
+    test('rejects below 2, above 170, non-integer, and non-numeric values', () => {
+      for (const pinnedTarget of [1, 0, -5, 171, 1000, 40.5, 'evil']) {
+        expect400(() => db.createGame({
+          category: 'Checkout Trainer (Freeform)', legsPerSet: 1, setsPerGame: 1, practice: 1,
+          gameType: 'checkout_trainer', config: { mode: 'freeform', pinnedTarget }, players: [],
+        }));
+      }
+    });
+
+    test('null/omitted pinnedTarget is fine — an unpinned Checkout Trainer game', () => {
+      assert.doesNotThrow(() => db.createGame({
+        category: 'Checkout Trainer (Freeform)', legsPerSet: 1, setsPerGame: 1, practice: 1,
+        gameType: 'checkout_trainer', config: { mode: 'freeform', pinnedTarget: null }, players: [],
+      }));
+      assert.doesNotThrow(() => db.createGame({
+        category: 'Checkout Trainer (Freeform)', legsPerSet: 1, setsPerGame: 1, practice: 1,
+        gameType: 'checkout_trainer', config: { mode: 'freeform' }, players: [],
+      }));
+    });
+
+    test('is only checked for checkout_trainer games — an out-of-range value on another gameType is ignored', () => {
+      assert.doesNotThrow(() => db.createGame({
+        category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1,
+        gameType: 'x01', config: { startingScore: 501, pinnedTarget: 99999 }, players: [],
+      }));
+    });
+  });
+
   // docs/bug-roadmap.md BUG-5: legsPerSet/setsPerGame are clamped to a whole number
   // in [1, 99] at the write boundary (lenient — garbage floors to 1, no 400).
   test('clamps legsPerSet/setsPerGame to a whole number in [1, 99]', () => {

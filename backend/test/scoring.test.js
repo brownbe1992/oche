@@ -546,6 +546,44 @@ describe('pickCheckoutTarget difficulty tiers (docs/archive/checkout-trainer-roa
   });
 });
 
+describe('pickCheckoutTarget pinnedTarget (docs/checkout-drill-link-roadmap.md "Drill this checkout")', () => {
+  test('a finishable pin is always served, regardless of the rng roll', () => {
+    for (const roll of [0, 0.25, 0.5, 0.75, 0.999]) {
+      assert.equal(pickCheckoutTarget(true, () => roll, 'full', 0, 121), 121);
+      assert.equal(pickCheckoutTarget(false, () => roll, 'full', 0, 121), 121);
+    }
+  });
+
+  test('a pin overrides difficulty tier bounds entirely — 121 is outside under40 but still served', () => {
+    assert.equal(pickCheckoutTarget(true, () => 0.5, 'under40', 0, 121), 121);
+  });
+
+  test('a pin overrides an active trick roll — never redirected to a bogey number', () => {
+    const rolls = [0.01, 0]; // would normally trigger the trick roll + pick bogey 159
+    assert.equal(pickCheckoutTarget(true, () => rolls.shift() ?? 0.5, 'full', CHECKOUT_TRAINER_TRICK_CHANCE, 121), 121);
+  });
+
+  test('an unfinishable pin under the out-mode (a bogey number) is ignored, falling through to a normal roll', () => {
+    // 169 is a classic double-out bogey — pinning it must never wedge the trainer
+    // on an impossible target.
+    const target = pickCheckoutTarget(true, () => 0, 'full', 0, 169);
+    assert.notEqual(target, 169);
+    assert.notEqual(checkoutHint(target, true, 3), '', 'falls through to a genuinely finishable target');
+  });
+
+  test('a pin of 1 under double-out (never finishable) is ignored, falling through to a normal roll', () => {
+    const target = pickCheckoutTarget(true, () => 0, 'full', 0, 1);
+    assert.notEqual(target, 1);
+  });
+
+  test('null/undefined pinnedTarget behaves exactly like the pre-drill-link signature', () => {
+    for (const roll of [0, 0.5, 0.999]) {
+      assert.equal(pickCheckoutTarget(true, () => roll, 'full', 0, null), pickCheckoutTarget(true, () => roll, 'full', 0));
+      assert.equal(pickCheckoutTarget(true, () => roll, 'full'), pickCheckoutTarget(true, () => roll, 'full', 0, undefined));
+    }
+  });
+});
+
 describe('gradeCheckoutAttempt (Checkout Trainer grading, docs/archive/checkout-trainer-roadmap.md)', () => {
   test('optimal: legal finish in the objective minimum dart count', () => {
     const g = gradeCheckoutAttempt(40, true, [d(20, 2)]); // D20, 1 dart — the minimum for 40

@@ -41,6 +41,7 @@ convention in `CLAUDE.md`.
 - [17. Dartboard Zone / Miss / Bounce-Out Tracking](#17-dartboard-zone--miss--bounce-out-tracking)
 - [18. League Mode](#18-league-mode)
 - [19. Checkout Trainer](#19-checkout-trainer)
+- [19a. "Drill this checkout" deep link](#19a-drill-this-checkout-deep-link)
 - [20. Known Limitations & Open Gaps](#20-known-limitations--open-gaps)
 - [21. Troubleshooting](#21-troubleshooting)
 
@@ -3783,8 +3784,8 @@ rest of that session, same "baked into `config` at `startGame()`" treatment
 (`setCheckoutTrainerTricks()`), baked in the same way.
 
 **Grading** (`frontend/scoring.js`):
-- `pickCheckoutTarget(doubleOut, rng, difficulty, trickChance)` — picks a
-  uniform-random integer target within the selected difficulty tier's
+- `pickCheckoutTarget(doubleOut, rng, difficulty, trickChance, pinnedTarget)` —
+  picks a uniform-random integer target within the selected difficulty tier's
   `[low,high]` bound (`CHECKOUT_TRAINER_DIFFICULTY_TIERS`), intersected with
   the out-mode's own floor (`2` under double-out since `1` is an unfinishable
   bogey, `1` under single-out). `difficulty` defaults to `'full'` (`[1,170]`
@@ -3801,7 +3802,12 @@ rest of that session, same "baked into `config` at `startGame()`" treatment
   `163/166/169` under single-out, all above 100 so the Under 40/Under 100
   tiers simply fall through to a normal target). Set to
   `CHECKOUT_TRAINER_TRICK_CHANCE` (0.125, ~1 round in 8) when the session has
-  `config.trickQuestions` on.
+  `config.trickQuestions` on. `pinnedTarget` (§19a, "Drill this checkout" deep
+  link) short-circuits every difficulty/trick roll above: if set and
+  finishable under `doubleOut` (checked via the same `checkoutHint()` signal),
+  it's returned immediately regardless of `rng`; an unfinishable pin (a bogey
+  number, or `1` under double-out) is ignored and falls through to the normal
+  roll.
 - `gradeCheckoutAttempt(target, doubleOut, darts)` — returns
   `{legal, usedDarts, optimalDarts, optimal, hint}`. `legal` mirrors
   `evaluateVisit()`'s `win` flag (reached exactly zero, valid last dart under
@@ -3880,10 +3886,16 @@ Two exclusion constants in `backend/db.js`:
   (the headline stat — hitting the objective optimum is the actual point of
   the game).
 - **Toughest Checkout Solved** = `MAX(target_score)` where `leg_won=1 AND
-  declared_unsolvable=0` — a correctly-called trick question grades
-  `leg_won=1` but its bogey target was never a checkout anyone *solved*, so
-  without the exclusion one correct "169 is a bogey" call would permanently
-  pin this Personal Best at 169.
+  declared_unsolvable=0 AND json_extract(games.config,'$.pinnedTarget') IS
+  NULL` — a correctly-called trick question grades `leg_won=1` but its bogey
+  target was never a checkout anyone *solved*, so without the
+  `declared_unsolvable` exclusion one correct "169 is a bogey" call would
+  permanently pin this Personal Best at 169. The `pinnedTarget` exclusion
+  (§19a) is the same idea for a different reason: grinding one known-good
+  number repeatedly via a "Drill this checkout" pin shouldn't set a "toughest
+  ever" record the random target pool never actually produced. Scoped by the
+  game row's `config`, no schema change — every turn in a pinned game shares
+  the same `pinnedTarget`.
 - **Best Optimal Streak** = longest-ever run of consecutive optimal answers,
   computed by walking every attempt in order and resetting on any non-optimal
   result (not a maintained counter). Freeform and Blitz rounds both count
@@ -3950,6 +3962,78 @@ Nothing from the original design remains deferred: difficulty tiers shipped
 first (the `config.difficulty` toggle above), and the trick-question/
 bogey-number variant with its 💣 Bogey Buster badge shipped 2026-07 as the
 mode's final open roadmap item.
+
+### 19a. "Drill this checkout" deep link
+
+Full design: `docs/archive/checkout-drill-link-roadmap.md`. One tap from a checkout
+worth practicing straight into a Checkout Trainer session drilling exactly
+that number, instead of hoping the random target picker eventually serves it.
+
+**Entry points** — a small `🎯 Drill` button (`drillButtonHtml(jName, score)`,
+`frontend/index.html`):
+- every **Top Finishes** row, both the Player Profile's own list
+  (`loadTopFinishes()`) and the Home page's cross-player "Top Checkouts"
+  leaderboard (`hofSection()`);
+- a **Coaching Insights** card, but only the `checkout_route` insight type
+  (`getCoachingInsights()`, `backend/db.js`) — the only one carrying a
+  concrete drillable number (`insight.score`, the player's most-established
+  checkout score). `weak_number`/`bust_parity`/`form_trend` describe a
+  pattern rather than a single target and carry no `score` field, so
+  `renderCoachingInsights()` only renders the button where one exists.
+
+Every Drill button's `onclick` calls `event.stopPropagation()` first so it
+never also triggers the row's own `toggleFinishRoute()` expansion.
+
+**Schema**: `games.config.pinnedTarget` (nullable integer, `checkout_trainer`
+only) — when set, every round of that session serves that same target instead
+of calling the random picker (see `pickCheckoutTarget()` above). No new
+column: it rides `games.config` exactly like `mode`/`difficulty`/
+`trickQuestions`. `createGame()` (`backend/db.js`) validates it server-side
+for any `checkout_trainer` game — must be an integer in `[2,170]` — the same
+write-boundary treatment every other config field gets; a game of any other
+`gameType` ignores the field entirely if present.
+
+**Deep-link mechanics** (`frontend/index.html`), the same preselect-then-
+confirm pattern `raceLeg()` (§ Ghost Opponent) already established for
+jumping into Ghost mode from a Personal Best:
+- `drillCheckout(playerName, targetScore)` sets `setup.slots = [playerName]`,
+  stashes `targetScore` into the one-shot module-level `_checkoutDrillPin`,
+  sets `_enteringSetupFromDrill = true`, calls `setMode('checkout_trainer')`,
+  then `show('setup')`.
+- `setMode()`'s `checkout_trainer` branch consumes `_checkoutDrillPin` into
+  `setup.checkoutTrainerPin` (resetting the one-shot variable to `null`)
+  every time it runs — so any OTHER way of reaching this mode (the Step 2
+  dropdown, the post-Blitz "Play again" button) naturally lands with no pin,
+  even if a stale one is sitting in `setup.checkoutTrainerPin` from an
+  earlier drill this session. A pin forces `setCheckoutTrainerMode('freeform')`
+  and `setCheckoutTrainerTricks(false)` — **Freeform only**: a Blitz run of
+  one repeated answer isn't a speed test, and trick questions are meaningless
+  against a target guaranteed solvable. `startGame()`'s `config` builder
+  guards the same two fields again independently at the actual write path, in
+  case a stale toggle state ever disagreed with `setup.checkoutTrainerPin`.
+- `show('setup')` consumes `_enteringSetupFromDrill` synchronously (mirroring
+  `_enteringSetupFromRaceLeg`) to jump straight to Step 3 — the player and
+  mode are already fixed, so Steps 1-2 have nothing left to ask. Unlike the
+  Ghost deep link (which focuses Step 3's default first control), focus lands
+  on the Start button instead, since the pin chip/toggles aren't the natural
+  first stop here — the player already chose exactly what to drill.
+
+**Setup screen**: `#checkout-trainer-pin-chip` (hidden unless
+`setup.checkoutTrainerPin` is set) shows "🎯 Drilling: *N*" plus a `✕` button
+(`clearCheckoutTrainerPin()`) — the pin is inspectable and cancelable, never
+invisible state. `renderCheckoutTrainerPinChip()` also disables the Checkout
+Blitz and trick-questions-on buttons while a pin is active (Freeform and
+trick-questions-off stay enabled, since they're exactly the state a pin
+already forces). Applying a pin announces "Checkout Trainer set to drill *N*."
+via the shared `announce()` `aria-live` region; clearing one announces "Drill
+target cleared."
+
+**Stats/badges**: pinned rounds are ordinary Checkout Trainer rounds in every
+other respect — they count toward Accuracy/Optimal %, every milestone ladder,
+and Checkout Blitz scoring unchanged (moot in practice since a pin forces
+Freeform). The one deliberate exception is **Toughest Checkout Solved**,
+which excludes pinned rounds entirely (see above) — repetition is the whole
+point of the drill, so it must never manufacture a "toughest ever" record.
 
 ---
 

@@ -627,6 +627,13 @@
   /* hof-row hover for homepage finishes */
   .hof-row.expandable{cursor:pointer;border-radius:8px;padding:7px 6px;margin:0 -6px;transition:background .15s}
   .hof-row.expandable:hover{background:var(--surface-2)}
+  /* "Drill this checkout" (docs/checkout-drill-link-roadmap.md) — a small icon+text
+     button on a Top Finishes/Top Checkouts row or a Coaching Insights card, distinct
+     from .iconbtn's fixed square sizing since it sits inline in a dense row. */
+  .drill-btn{flex:none;font-size:10.5px;font-weight:700;letter-spacing:.02em;color:var(--gold);
+    background:none;border:1px solid var(--wire);border-radius:7px;padding:3px 8px;
+    cursor:pointer;white-space:nowrap;font-family:inherit;margin-left:6px}
+  .drill-btn:hover{border-color:var(--gold)}
 </style>
 </head>
 <body>
@@ -776,6 +783,14 @@
              the intro paragraph itself now lives in Step 2's how-to-play blurb) -->
         <div class="setup-section" id="checkout-trainer-options-section" hidden>
           <div class="setup-label">Checkout Trainer options</div>
+          <!-- docs/checkout-drill-link-roadmap.md "Drill this checkout": shown only when
+               drillCheckout() applied a pin — inspectable and cancelable, never invisible
+               state. Freeform + trick questions get force-disabled while a pin is active
+               (see renderCheckoutTrainerPinChip()). -->
+          <div id="checkout-trainer-pin-chip" hidden style="padding:8px 10px;background:var(--surface-2);border-radius:8px;align-items:center;justify-content:space-between;gap:10px;margin:0 0 10px">
+            <span id="checkout-trainer-pin-text" style="font-size:13px;color:var(--cream);font-weight:600"></span>
+            <button type="button" class="iconbtn" title="Stop drilling this number" onclick="clearCheckoutTrainerPin()">✕</button>
+          </div>
           <div class="opts" style="margin:0">
             <div class="seg" role="group" aria-label="Checkout Trainer sub-mode">
               <button id="checkout-trainer-mode-freeform" aria-pressed="true" onclick="setCheckoutTrainerMode('freeform')">Freeform</button>
@@ -1671,7 +1686,12 @@ function makeDart(sector, mult){
 let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, mode:'h2h',
   gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[], ghostLeg:null,
   doublesTargets:[], loadoutByName:{}, leagueFixtureId:null, pendingFixtures:[],
-  checkoutTrainerMode:'freeform', checkoutTrainerDifficulty:'full', checkoutTrainerTricks:false }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice' | 'checkout_trainer'; gameType: 'x01' | 'cricket' | 'doubles_practice' | 'checkout_trainer'; checkoutTrainerDifficulty: 'under40' | 'under100' | 'over100' | 'full'
+  checkoutTrainerMode:'freeform', checkoutTrainerDifficulty:'full', checkoutTrainerTricks:false,
+  checkoutTrainerPin:null }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice' | 'checkout_trainer'; gameType: 'x01' | 'cricket' | 'doubles_practice' | 'checkout_trainer'; checkoutTrainerDifficulty: 'under40' | 'under100' | 'over100' | 'full'
+  // checkoutTrainerPin (docs/checkout-drill-link-roadmap.md): a specific target
+  // score to always serve, set only via drillCheckout(); null means "no pin,
+  // roll normally" — see setMode()'s checkout_trainer branch for how it's applied
+  // (and reset) every time this mode is (re)entered.
   // leagueFixtureId (docs/league-mode-roadmap.md "League fixtures / pending
   // matches"): only ever set via Step 2's "League Game" entry — an EXPLICIT choice,
   // unlike the old category-based ambiguity picker this superseded (docs/new-game-flow-roadmap.md).
@@ -1834,6 +1854,23 @@ function show(name){
       setup.loadoutByName={}; setup.leagueFixtureId=null; setup.pendingFixtures=[];
       sanitizeSlots(); renderPlayers(); updateFormatLine();
       showSetupStep(3);
+      DB.refreshStats().then(()=>{ sanitizeSlots(); renderPlayers(); }).catch(()=>{});
+    } else if(_enteringSetupFromDrill){
+      // drillCheckout() (Top Finishes row / Coaching Insights "🎯 Drill" button)
+      // presets setup.slots to the one player drilling, calls setMode('checkout_trainer')
+      // with the pin already applied, and sets this flag right before calling
+      // show('setup') — same jump-straight-to-Step-3 shape as raceLeg() above, except
+      // focus lands on Start rather than the step's default first control (the pin
+      // chip/toggles aren't meant to be the first stop — the player already chose
+      // exactly what to drill).
+      _enteringSetupFromDrill = false;
+      setup.loadoutByName={}; setup.leagueFixtureId=null; setup.pendingFixtures=[];
+      sanitizeSlots(); renderPlayers(); updateFormatLine();
+      showSetupStep(3);
+      requestAnimationFrame(()=>{
+        const startBtn = document.getElementById('start-btn');
+        if(startBtn && typeof startBtn.focus==='function') startBtn.focus();
+      });
       DB.refreshStats().then(()=>{ sanitizeSlots(); renderPlayers(); }).catch(()=>{});
     } else {
       setup.slots=[]; setup.loadoutByName={}; setup.leagueFixtureId=null; setup.pendingFixtures=[];
@@ -2496,9 +2533,17 @@ function hofSection(rows, mode=''){
         <span class="hof-times">${f.times===1?'×1':'×'+f.times}</span>
         <span class="hof-player">${escapeHtml(f.name)}</span>
         <span class="hof-dates">${dates}</span>
+        ${drillButtonHtml(jName, f.score)}
       </div>`;
     }).join('')}</div>`;
   }
+// docs/checkout-drill-link-roadmap.md "Drill this checkout": shared markup for the
+// small 🎯 Drill button on a Top Finishes/Top Checkouts row — stopPropagation() so
+// tapping it doesn't also toggle the row's own checkout-route expansion.
+function drillButtonHtml(jName, score){
+  return `<button type="button" class="drill-btn" title="Drill ${score} in Checkout Trainer"
+    onclick="event.stopPropagation(); drillCheckout('${jName}', ${score})">🎯 Drill</button>`;
+}
 
   function achievementSection(title,data,emptyMsg='None recorded yet — will you be the first?'){
     if(!data||(!data.leaderboard.length&&!data.recent.length))
@@ -2586,10 +2631,50 @@ function setMode(mode){
   if(mode === 'doubles_practice') renderDoublesTargetGrid();
   else if(mode === 'ghost'){ setup.ghostLeg = null; renderGhostLegPicker(); }
   else if(mode === 'checkout_trainer'){
-    setCheckoutTrainerMode(setup.checkoutTrainerMode || 'freeform');
+    // docs/checkout-drill-link-roadmap.md "Drill this checkout": _checkoutDrillPin
+    // is a one-shot value set by drillCheckout() right before this call — same
+    // "module-level variable consumed by the very next setMode() call" pattern
+    // _ghostLegTarget/raceLeg() already established. Consuming it here means every
+    // OTHER way of reaching this mode (the Step 2 dropdown, "Try Again") naturally
+    // lands with no pin, even if a stale one is still sitting in setup.* from an
+    // earlier drill this session.
+    setup.checkoutTrainerPin = _checkoutDrillPin;
+    _checkoutDrillPin = null;
+    setCheckoutTrainerMode(setup.checkoutTrainerPin ? 'freeform' : (setup.checkoutTrainerMode || 'freeform'));
     setCheckoutTrainerDifficulty(setup.checkoutTrainerDifficulty || 'full');
-    setCheckoutTrainerTricks(!!setup.checkoutTrainerTricks);
+    setCheckoutTrainerTricks(setup.checkoutTrainerPin ? false : !!setup.checkoutTrainerTricks);
+    renderCheckoutTrainerPinChip();
+    if(setup.checkoutTrainerPin) announce(`Checkout Trainer set to drill ${setup.checkoutTrainerPin}.`);
   }
+}
+// docs/checkout-drill-link-roadmap.md "Setup screen": renders/hides the "Drilling:
+// N ✕" chip and disables the two options a pin makes meaningless — Checkout
+// Blitz (grinding one known number against a clock isn't a speed test) and trick
+// questions (there's nothing to spot-the-bogey on a target guaranteed solvable).
+// Freeform and trick-questions-off stay enabled since they're exactly the state a
+// pin already forces — only the incompatible sibling options need disabling.
+function renderCheckoutTrainerPinChip(){
+  const chip = document.getElementById('checkout-trainer-pin-chip');
+  const text = document.getElementById('checkout-trainer-pin-text');
+  if(!chip || !text) return;
+  const pin = setup.checkoutTrainerPin;
+  chip.hidden = !pin;
+  // The chip needs `display:flex` (not the default block) when shown, but
+  // setting that inline in HTML would out-specificity the `hidden` attribute's
+  // own `display:none` and leave it visibly stuck open — set it here instead,
+  // explicitly clearing back to '' (not 'flex') whenever hidden so `hidden`
+  // regains control of visibility.
+  chip.style.display = pin ? 'flex' : '';
+  if(pin) text.textContent = `🎯 Drilling: ${pin}`;
+  const blitzBtn = document.getElementById('checkout-trainer-mode-blitz');
+  const tricksOnBtn = document.getElementById('checkout-trainer-tricks-on');
+  if(blitzBtn) blitzBtn.disabled = !!pin;
+  if(tricksOnBtn) tricksOnBtn.disabled = !!pin;
+}
+function clearCheckoutTrainerPin(){
+  setup.checkoutTrainerPin = null;
+  renderCheckoutTrainerPinChip();
+  announce('Drill target cleared.');
 }
 
 // Checkout Trainer's Freeform/Blitz sub-toggle (docs/archive/checkout-trainer-roadmap.md
@@ -2698,6 +2783,23 @@ function selectGhostLeg(i){
   if(!legs || !legs[i]) return;
   setup.ghostLeg = legs[i];
   renderGhostLegList(legs);
+}
+
+/* ---------- "Drill this checkout" deep link (docs/checkout-drill-link-roadmap.md) ----------
+   Same preselect-then-confirm pattern as raceLeg() above: a one-shot module-level
+   variable set right before setMode(), consumed synchronously the moment setMode()
+   lands on 'checkout_trainer' (see that function's own comment), plus a second
+   one-shot flag consumed by show('setup') to jump straight to Step 3 instead of
+   the normal Step 1 player picker. */
+let _checkoutDrillPin = null;
+let _enteringSetupFromDrill = false;
+function drillCheckout(playerName, targetScore){
+  if(!roster.includes(playerName)) return;
+  setup.slots = [playerName];
+  _checkoutDrillPin = Number(targetScore);
+  _enteringSetupFromDrill = true;
+  setMode('checkout_trainer');
+  show('setup');
 }
 
 function openScoreboard(){
@@ -3987,7 +4089,15 @@ async function startGame(){
     : gameType === 'baseball' ? { innings: 9 }
     : gameType === 'doubles_practice' ? { doubles: setup.doublesTargets.slice() }
     : gameType === 'chuckin' ? {}
-    : gameType === 'checkout_trainer' ? { mode: setup.checkoutTrainerMode, durationSec: setup.checkoutTrainerMode==='blitz' ? 60 : null, difficulty: setup.checkoutTrainerDifficulty || 'full', trickQuestions: !!setup.checkoutTrainerTricks }
+    // docs/checkout-drill-link-roadmap.md "Drill this checkout": a pin forces
+    // Freeform + trick questions off regardless of whatever those toggles show —
+    // the setup screen already disables them once a pin is applied (setCheckoutTrainerPin()),
+    // this just guards the actual write path from a stale toggle state too.
+    : gameType === 'checkout_trainer' ? { mode: setup.checkoutTrainerPin ? 'freeform' : setup.checkoutTrainerMode,
+        durationSec: (!setup.checkoutTrainerPin && setup.checkoutTrainerMode==='blitz') ? 60 : null,
+        difficulty: setup.checkoutTrainerDifficulty || 'full',
+        trickQuestions: setup.checkoutTrainerPin ? false : !!setup.checkoutTrainerTricks,
+        pinnedTarget: setup.checkoutTrainerPin || null }
     : gameType === 'around_the_clock' ? {}
     : gameType === 'around_the_world' ? {}
     : { startingScore: startScore };
@@ -9331,7 +9441,7 @@ function renderGameChuckin(){
    optimum (scoring.js's gradeCheckoutAttempt()) instead of an opponent. */
 function newMatchPlayerCheckoutTrainer(name, config){
   const doubleOut = playerOut(name)==='double';
-  const p = { name, score: pickCheckoutTarget(doubleOut, undefined, config && config.difficulty, (config && config.trickQuestions) ? CHECKOUT_TRAINER_TRICK_CHANCE : 0), doubleOut,
+  const p = { name, score: pickCheckoutTarget(doubleOut, undefined, config && config.difficulty, (config && config.trickQuestions) ? CHECKOUT_TRAINER_TRICK_CHANCE : 0, config && config.pinnedTarget), doubleOut,
     attempts:0, legalCount:0, optimalCount:0, currentStreak:0,
     lifetimeAttemptsBase:0, lifetimeOptimalBase:0,
     sessionRounds:[] };
@@ -9481,7 +9591,7 @@ function submitCheckoutAttempt(){
   }
 
   p.score = pickCheckoutTarget(p.doubleOut, undefined, game.config && game.config.difficulty,
-    (game.config && game.config.trickQuestions) ? CHECKOUT_TRAINER_TRICK_CHANCE : 0);
+    (game.config && game.config.trickQuestions) ? CHECKOUT_TRAINER_TRICK_CHANCE : 0, game.config && game.config.pinnedTarget);
   renderGameCheckoutTrainer();
 }
 // The trick-question variant's second answer path (docs/archive/checkout-trainer-roadmap.md
@@ -9543,7 +9653,7 @@ function declareUnsolvable(){
   }
 
   p.score = pickCheckoutTarget(p.doubleOut, undefined, game.config && game.config.difficulty,
-    (game.config && game.config.trickQuestions) ? CHECKOUT_TRAINER_TRICK_CHANCE : 0);
+    (game.config && game.config.trickQuestions) ? CHECKOUT_TRAINER_TRICK_CHANCE : 0, game.config && game.config.pinnedTarget);
   renderGameCheckoutTrainer();
 }
 // Mirrors undoLastTurnDoublesPractice()/undoLastTurnChuckin()'s snapshot-restore
@@ -10345,6 +10455,7 @@ function loadTopFinishes(){
           <span class="finish-score">${r.score}</span>
           <span class="finish-count">${times}</span>
           <span class="finish-dates">${dates}</span>
+          ${drillButtonHtml(jPlayer, r.score)}
           <span class="expand-hint">▾</span>
         </div>`;
       }).join('')}</div>`;
@@ -10609,10 +10720,14 @@ const COACHING_TAG = { weakness: '🔧 Focus area', strength: '✅ Good form' };
 function renderCoachingInsights(insights, section, body){
   if(!Array.isArray(insights) || !insights.length){ section.hidden = true; return; }
   section.hidden = false;
+  // docs/checkout-drill-link-roadmap.md "Drill this checkout": only the
+  // checkout_route insight type carries a concrete drillable number (i.score) —
+  // weak_number/bust_parity/form_trend describe a pattern, not a single target.
+  const jPlayer = escapeHtml(escapeJs(currentPlayer));
   body.innerHTML = `<div class="coaching-list">${insights.map(i => `
     <div class="coaching-row">
       <span class="coaching-tag">${COACHING_TAG[i.tone] || i.tone}</span>
-      <span class="coaching-text">${escapeHtml(i.text)}</span>
+      <span class="coaching-text">${escapeHtml(i.text)}${i.score != null ? drillButtonHtml(jPlayer, i.score) : ''}</span>
     </div>`).join('')}</div>`;
 }
 

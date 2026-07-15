@@ -19,7 +19,7 @@ Player pages:
 - Dropdown to choose game mode to view stats for
 - First-9 average (the standard pro scoring stat — 3-dart average over each leg's first 9 darts) — full design in docs/first-nine-average-roadmap.md
 - Household Elo rating + optional X01 handicapping (per-player starting scores) — full design in docs/rating-and-handicap-roadmap.md
-- "Drill this checkout" deep link from Top Finishes / Coaching Insights into Checkout Trainer — full design in docs/checkout-drill-link-roadmap.md
+- "Drill this checkout" deep link from Top Finishes / Coaching Insights into Checkout Trainer — done, see docs/archive/checkout-drill-link-roadmap.md
 - End-of-night session recap (tonight's games, moments, badges, PBs — one shareable card) — full design in docs/session-recap-roadmap.md
 - Darts-culture badges (Bed & Breakfast, Madhouse, Shanghai visit), a lifetime-180s ladder, and badge parity for Baseball/Doubles Practice — full design in docs/culture-badges-roadmap.md
 - Environmental data (temp/humidity) — full design in docs/environmental-logging-roadmap.md
