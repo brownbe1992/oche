@@ -3571,7 +3571,29 @@ function setupGoToStep2(){
       showSetupStep(2); renderSetupStep2Content();
     });
 }
-function setupGoToStep3(){ showSetupStep(3); }
+// Step 3 ("More options") only has real content for a subset of modes: Cricket's
+// target picker, Ghost's leg picker, Doubles Practice's target picker, Checkout
+// Trainer's sub-mode/difficulty, and the H2H legs/sets format (h2h-options, shown
+// only when setup.mode==='h2h' — including League Game, which forces h2h). Every
+// other mode (X01/Baseball practice, Chuckin, Around the Clock, Around the World,
+// Daily Challenge) has nothing there but the Start button itself — landing on it
+// was an unnecessary, contentless extra tap with no reason to exist. Reads each
+// section's actual DOM `hidden` state (already kept correct by setMode()'s own
+// per-mode toggles) rather than re-deriving the mode->section mapping a second
+// time here, so this can never silently drift out of sync with what setMode()
+// decides to show.
+function setupStep3HasContent(){
+  return ['cricket-options-section', 'ghost-options-section', 'doubles-options-section',
+    'checkout-trainer-options-section', 'h2h-options'].some(id => {
+    const el = document.getElementById(id);
+    return el && !el.hidden;
+  });
+}
+function setupGoToStep3(){
+  if(setupStep3HasContent()) showSetupStep(3);
+  else startGame(); // nothing to configure — Continue doubles as Start, same as
+                     // the challenge blurb's own "Press Continue below to play" already says
+}
 function setupBackTo(n){ showSetupStep(n); if(n===2) renderSetupStep2Content(); }
 
 const SETUP_STEP_LABELS = { 1:"Step 1 of 3 — Who's playing?", 2:'Step 2 of 3 — Choose a game', 3:'Step 3 of 3 — More options' };

@@ -62,7 +62,13 @@
 > revealed every single hit (not just off-target ones) was silently invisible on
 > Cricket's (and Baseball's) lifetime dartboard heatmap, because the two game
 > types can never produce the "zone" data the heatmap's existing exclusion rule
-> assumed was always a Pad-mode choice — now fixed. **BUG-1 through BUG-24 are
+> assumed was always a Pad-mode choice — now fixed. **BUG-25** was opened by a
+> live user bug report (2026-07) against the New Game wizard forcing every
+> mode through Step 3 ("More options") even when that mode had nothing to
+> configure there — Chuckin, X01/Baseball practice, Around the Clock, Around
+> the World, and Daily Challenge all landed on an effectively blank page
+> requiring an extra click, now fixed by skipping straight to Start when Step
+> 3 has no visible content. **BUG-1 through BUG-25 are
 > all fixed as of this writing** — nothing open on either tracker.
 
 ## Severity legend
@@ -1793,6 +1799,68 @@ Cricket single now lights its number's whole single ring instead of showing
 0 hits, with trebles/doubles/bull/misses all unaffected; Baseball's heatmap
 confirmed fixed the same way; X01/Chuckin/Doubles Practice's existing
 zone-aware behavior is completely unchanged; full backend suite green.
+
+---
+
+### BUG-25 — New Game wizard's Step 3 ("More options") forced every mode through it, even modes with nothing to configure there  **(LOW, user-facing / UX; found via a live user bug report)**
+
+**Status: ✅ Fixed (2026-07).** `setupGoToStep3()` — the Step 2 "Continue"
+button's only handler — unconditionally called `showSetupStep(3)`. Step 3
+only has real content for a subset of modes (Cricket's target picker,
+Ghost's leg picker, Doubles Practice's target picker, Checkout Trainer's
+sub-mode/difficulty, and H2H's legs/sets format); every other mode (X01
+practice, Baseball practice, Chuckin, Around the Clock, Around the World,
+Daily Challenge) landed on a page with nothing but the Start button itself —
+an unnecessary extra tap the Daily Challenge blurb already anticipated
+("Press Continue below to play") but never actually delivered on. Added
+`setupStep3HasContent()`, which checks each of Step 3's five conditional
+section elements' own DOM `hidden` state (already kept correct by
+`setMode()`'s per-mode toggles, so this can never drift out of sync with
+what `setMode()` decides to show) rather than re-deriving the mode→section
+mapping a second time. `setupGoToStep3()` now calls `startGame()` directly
+when none of the five sections are visible, skipping Step 3 entirely;
+`startGame()` was already safe to call this way since it validates purely
+from `setup.*` state, not from Step-3 DOM state requiring that step to have
+rendered. Verified end-to-end in a real Chromium browser across all 13 mode
+combinations (X01/Baseball practice, Chuckin, Around the Clock, Around the
+World, Daily Challenge, Cricket practice, Ghost, Doubles Practice, Checkout
+Trainer, and X01/Baseball/Cricket H2H): every contentless mode now starts
+the game the moment Continue is clicked on Step 2, and every mode with real
+Step 3 content still lands there uninterrupted. This is pure frontend
+control flow (an `onclick` handler's branching, not a calculation), so per
+`CLAUDE.md`'s standing rule it's verified with a live Playwright click-driven
+test rather than a `node:test` case — the same category as BUG-8/18/22/23.
+Full backend suite green (663 tests, unaffected since no backend or scoring
+logic changed).
+
+**Where:** `frontend/index.html` `setupGoToStep3()`:
+
+```js
+function setupGoToStep3(){ showSetupStep(3); }
+```
+
+**Misbehavior (verified):** choosing Chuckin (or X01 practice, Baseball
+practice, Around the Clock, Around the World, or Daily Challenge) and
+clicking Continue on Step 2 always advanced to Step 3, which for these
+modes rendered with every conditional section (`cricket-options-section`,
+`ghost-options-section`, `doubles-options-section`,
+`checkout-trainer-options-section`, `h2h-options`) hidden — an
+effectively-blank page whose only purpose was to require a second click on
+its own Start button before the game actually began.
+
+**Fix (step by step):**
+1. Add `setupStep3HasContent()`: returns true if any of the five Step-3
+   conditional sections is currently un-hidden.
+2. Change `setupGoToStep3()` to call `startGame()` directly instead of
+   `showSetupStep(3)` when `setupStep3HasContent()` is false.
+3. No change needed to `startGame()`, `setMode()`, or any Step-3 section's
+   own rendering — they were already correct; only the navigation decision
+   was wrong.
+
+**Verify:** live Chromium sweep across all 13 mode/player-count
+combinations confirms contentless modes skip straight to a started game and
+content-bearing modes still stop on Step 3; full backend suite green (no
+regressions, no backend logic touched).
 
 ---
 

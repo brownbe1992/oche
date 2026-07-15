@@ -3852,6 +3852,19 @@ for H2H/Practice/X01/Cricket/Baseball, a per-mode verb otherwise — "Start
 Challenge", "Start race", etc., unchanged) calls the existing `startGame()`
 unmodified.
 
+**Step 3 is skipped entirely for modes with nothing to configure there**
+(BUG-25, `docs/bug-roadmap.md`): `setupStep3HasContent()` checks whether any
+of the five conditional sections above (`cricket-options-section`,
+`ghost-options-section`, `doubles-options-section`,
+`checkout-trainer-options-section`, `h2h-options`) is currently un-hidden;
+`setupGoToStep3()` — Step 2's "Continue" button handler — calls `startGame()`
+directly instead of `showSetupStep(3)` when none of them are. This affects
+X01 practice, Baseball practice, Chuckin, Around the Clock, Around the World,
+and Daily Challenge, none of which have any Step 3 content; Cricket (any
+context), Ghost, Doubles Practice, Checkout Trainer, and every H2H mode
+(including League Game, which forces H2H) are unaffected and still stop on
+Step 3 as described above.
+
 ### Wizard navigation and step-entry reconciliation
 
 `showSetupStep(n)` (`setupStep` 1/2/3) toggles the three step wrappers,
