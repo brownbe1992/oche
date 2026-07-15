@@ -1612,6 +1612,35 @@ function getHomeExtra() {
     rate: r.checkouts ? +((r.tonPlus / r.checkouts) * 100).toFixed(1) : 0 }));
   const tonPlusRows = { h2h: _tonPlus(H2H_WHERE), practice: _tonPlus(PRACTICE_WHERE) };
 
+  // Best First-9 Average leaderboard (docs/first-nine-average-roadmap.md): same
+  // per-leg first9avg computation getPlayerStatBubbles()/getPersonalBests() use
+  // (OPENING_CATS-scoped, bust-as-3-darts denominator, first up-to-3 visits),
+  // averaged per player and ranked descending. `HAVING legs >= 20` — the same
+  // lifetime-legs floor COACHING_MIN_LEGS_FOR_FORM uses elsewhere in this file
+  // for "trust a small-sample average" — keeps one or two lucky opening legs from
+  // topping the board over a player with a genuinely strong, well-established start.
+  const _first9 = (modeWhere) => db.prepare(`
+    SELECT p.name AS name, COUNT(*) AS legs, AVG(leg.la) AS avgv
+    FROM (
+      SELECT t.player_id, t.game_id, t.set_no, t.leg_no,
+        CAST(SUM(t.scored) AS REAL) / NULLIF(SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END),0) * 3 AS la
+      FROM (
+        SELECT t.id, t.player_id, t.game_id, t.set_no, t.leg_no, t.scored, t.bust,
+               ROW_NUMBER() OVER (PARTITION BY t.player_id,t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
+        FROM turns t JOIN games g ON g.id=t.game_id
+        WHERE ${modeWhere} ${OPENING_CATS}
+      ) t
+      LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
+      WHERE t.rn <= 3
+      GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
+    ) leg
+    JOIN players p ON p.id = leg.player_id
+    GROUP BY leg.player_id
+    HAVING legs >= 20
+    ORDER BY avgv DESC
+  `).all().map(r => ({ name: r.name, legs: r.legs, avg: +r.avgv.toFixed(1) }));
+  const first9Rows = { h2h: _first9(H2H_WHERE), practice: _first9(PRACTICE_WHERE) };
+
   const _highestCheckout = (modeWhere) => db.prepare(`
     SELECT p.name AS name, t.checkout_points AS points, t.created_at AS createdAt
     FROM turns t JOIN players p ON p.id = t.player_id
@@ -1693,7 +1722,7 @@ function getHomeExtra() {
   // just the id/name, not full standings (the Leagues screen fetches those itself).
   const activeLeagues = db.prepare(`SELECT id, name FROM leagues WHERE status = 'active' ORDER BY created_at DESC`).all();
 
-  return { winLeaderboard, trebleLessRows, tonPlusRows, highestCheckout, lastGame,
+  return { winLeaderboard, trebleLessRows, tonPlusRows, first9Rows, highestCheckout, lastGame,
     today: { legs: todayLegs, darts: todayDarts }, week: { legs: weekLegs, darts: weekDarts }, pace,
     activeLeagues };
 }
@@ -1728,19 +1757,9 @@ function getPlayerStatBubbles(playerName, mode) {
   // tlLegs: legs where no dart was a treble
   const tlLegs     = qd(`SELECT COUNT(*) AS v FROM (SELECT t.game_id,t.set_no,t.leg_no ${JD} ${mf} ${X01_ONLY} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(d.is_treble)=0)`) ?? 0;
 
-  // first3avg / first9avg / score140pct ("opening exchanges" stats) are scoped to
-  // exactly the 4 standard X01 starting scores (501/301/170/101) — never any other
-  // game type, and never a non-standard/custom X01 starting score — per an explicit
-  // product decision (2026-07): these three-and-nine-dart-average stats count for
-  // 501/301/170/101 only, ever, unless a future change explicitly says otherwise.
-  // Checks game_type (not just category, which is only a human-readable label) plus
-  // the actual numeric startingScore from config, matching the same robust pattern
-  // getNineDarterStats()/getSummary() already use for their own 501-only scoping —
-  // stronger than a bare category-string match, which a future game type could
-  // coincidentally collide with. Daily Challenge's non-scoring formats (Bullseye
-  // Gauntlet, Steady Hand, Treble Run) use a filler 1000 starting score, already
-  // excluded by this same numeric check.
-  const OPENING_CATS = `AND g.game_type='x01' AND json_extract(g.config,'$.startingScore') IN (501,301,170,101)`;
+  // first3avg / first9avg / score140pct ("opening exchanges" stats) share the
+  // module-level OPENING_CATS scope (exactly 501/301/170/101) — see its own
+  // comment above X01_ONLY for the full rationale.
 
   // first3avg: turn-level score of the leg's first visit. t.scored is already 0 for
   // a busted visit — the previous version summed raw per-dart points instead, which
@@ -1964,6 +1983,31 @@ function getPersonalBests(playerName, mode) {
   const bestLegAvg = bestLegRow ? bestLegRow.la : null;
   const bestLeg = bestLegRow ? { gameId: bestLegRow.game_id, setNo: bestLegRow.set_no, legNo: bestLegRow.leg_no } : null;
 
+  // Best First-9 (docs/first-nine-average-roadmap.md): MAX of the same per-leg
+  // first9avg computation getPlayerStatBubbles() averages — same OPENING_CATS scope
+  // (501/301/170/101), same bust-as-3-darts denominator, same "first up-to-3
+  // visits" window. Deliberately NOT restricted to won legs the way bestLegAvg is
+  // above: the opening 9 darts are already fully determined the moment the 3rd
+  // visit is recorded, regardless of how (or whether yet) the leg ends, and the
+  // stat bubble this mirrors carries no such restriction either — adding one here
+  // would silently disagree with the bubble over what counts. (No "race this leg"
+  // deep link the way bestLeg gets: Ghost mode can only replay a leg this player
+  // actually won, so pointing it at a first9-record leg that's unfinished or lost
+  // would frequently 404.)
+  const bestFirst9 = db.prepare(`
+    SELECT MAX(CAST(total_scored AS REAL) / NULLIF(dart_count,0) * 3) AS v FROM (
+      SELECT SUM(t.scored) AS total_scored,
+             SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END) AS dart_count
+      FROM (SELECT t.id, t.game_id, t.set_no, t.leg_no, t.scored, t.bust,
+                   ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
+            FROM turns t JOIN games g ON g.id=t.game_id
+            WHERE t.player_id=? ${mf} ${OPENING_CATS}) t
+      LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
+      WHERE t.rn <= 3
+      GROUP BY t.game_id, t.set_no, t.leg_no
+    )
+  `).get(p.id)?.v ?? null;
+
   const fewestDartsCheckout = db.prepare(`
     SELECT MIN(leg_darts) AS v FROM (
       SELECT COUNT(d.id) AS leg_darts
@@ -1992,7 +2036,7 @@ function getPersonalBests(playerName, mode) {
     }
   }
 
-  return { bestLegAvg, bestLeg, fewestDartsCheckout, winStreak, recentFormAvg, lifetimeAvg };
+  return { bestLegAvg, bestLeg, bestFirst9, fewestDartsCheckout, winStreak, recentFormAvg, lifetimeAvg };
 }
 
 // Ghost Opponent (docs/archive/ghost-opponent-roadmap.md): pick one of your own past won
@@ -2922,29 +2966,28 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
     case 'first3avg':
       // Turn-level score of the leg's first visit — t.scored is already 0 for a
       // busted visit (the previous version summed raw per-dart points instead,
-      // wrongly counting a busted opening visit's attempted score). Scoped to
-      // exactly 501/301/170/101 — see the OPENING_CATS comment in
-      // getPlayerStatBubbles for why (2026-07 product decision: these three-and-
-      // nine-dart-average stats count for these 4 starting scores only, ever).
+      // wrongly counting a busted opening visit's attempted score). Scoped by the
+      // shared module-level OPENING_CATS (exactly 501/301/170/101) — see its
+      // comment above X01_ONLY for why (2026-07 product decision).
       return db.prepare(`SELECT ${F.fmt} AS bucket, AVG(CAST(scored AS REAL)) AS value FROM (
         SELECT t.created_at, t.scored,
                ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
         FROM turns t JOIN games g ON g.id=t.game_id
-        WHERE t.player_id=? ${modeWhere} ${weightWhere} AND g.game_type='x01' AND json_extract(g.config,'$.startingScore') IN (501,301,170,101)
+        WHERE t.player_id=? ${modeWhere} ${weightWhere} ${OPENING_CATS}
       ) WHERE rn = 1 ${F.and} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'first9avg':
       // 3-dart-average-equivalent over the leg's first up-to-3 visits — uses
       // t.scored (bust-zeroed) for points and the same "bust counts as 3 darts"
       // convention used everywhere else for the denominator, instead of raw
       // per-dart sums that previously counted a busted visit's attempted points as
-      // if they'd scored. Scoped to 501/301/170/101 — see getPlayerStatBubbles.
+      // if they'd scored. Scoped by the shared module-level OPENING_CATS.
       return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(CAST(total_scored AS REAL)/NULLIF(dart_count,0)*3) AS value FROM (
         SELECT MAX(t.created_at) AS leg_ts, SUM(t.scored) AS total_scored,
                SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END) AS dart_count
         FROM (SELECT t.id, t.game_id, t.set_no, t.leg_no, t.created_at, t.scored, t.bust,
                      ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
               FROM turns t JOIN games g ON g.id=t.game_id
-              WHERE t.player_id=? ${modeWhere} ${weightWhere} AND g.game_type='x01' AND json_extract(g.config,'$.startingScore') IN (501,301,170,101)) t
+              WHERE t.player_id=? ${modeWhere} ${weightWhere} ${OPENING_CATS}) t
         LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
         WHERE t.rn <= 3
         GROUP BY t.game_id, t.set_no, t.leg_no
@@ -2962,11 +3005,11 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         GROUP BY t.game_id,t.set_no,t.leg_no
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'score140pct':
-      // Same "opening visit" shape as first3avg above — needs the same
-      // 501/301/170/101 scoping, see the OPENING_CATS comment in getPlayerStatBubbles.
+      // Same "opening visit" shape as first3avg above — needs the same shared
+      // module-level OPENING_CATS scoping.
       return db.prepare(`SELECT ${F.fmt} AS bucket, CAST(SUM(CASE WHEN scored>=140 THEN 1 ELSE 0 END) AS REAL)*100/NULLIF(COUNT(*),0) AS value FROM (
         SELECT t.scored, t.created_at, ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
-        FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere} AND g.game_type='x01' AND json_extract(g.config,'$.startingScore') IN (501,301,170,101)
+        FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${modeWhere} ${weightWhere} ${OPENING_CATS}
       ) WHERE rn=1 ${F.and} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'pace':
       // Darts/minute, derived from the gap between consecutive thrown_at timestamps
@@ -3232,6 +3275,23 @@ function _scope({ mode, gameType } = {}) {
 // World), games/wins/H2H records, and checkout-based stats (cricket never writes
 // checkout=1) deliberately do NOT use this — see REFERENCE.md §3.
 const X01_ONLY = _scope({ gameType: 'x01' });
+
+// "Opening exchange" stats (1st 3 AVG, 1st 9 AVG, 140/Leg, docs/first-nine-average-
+// roadmap.md) are scoped to exactly the 4 standard X01 starting scores (501/301/
+// 170/101) — never any other game type, and never a non-standard/custom X01
+// starting score — per an explicit product decision (2026-07): these three stats
+// count for 501/301/170/101 only, ever, unless a future change explicitly says
+// otherwise. Checks game_type (not just category, which is only a human-readable
+// label) plus the actual numeric startingScore from config, matching the same
+// robust pattern getNineDarterStats()/getSummary() already use for their own
+// 501-only scoping — stronger than a bare category-string match, which a future
+// game type could coincidentally collide with. Daily Challenge's non-scoring
+// formats (Bullseye Gauntlet, Steady Hand, Treble Run) use a filler 1000 starting
+// score, already excluded by this same numeric check. Module-level (not local to
+// getPlayerStatBubbles, where this originated) so getPersonalBests()'s bestFirst9
+// and getHomeExtra()'s First-9 Average leaderboard can share the exact same scope
+// instead of a second, driftable copy of this string.
+const OPENING_CATS = `AND g.game_type='x01' AND json_extract(g.config,'$.startingScore') IN (501,301,170,101)`;
 
 // Just Chuckin' It (game-modes-roadmap.md) is the inverse of every other game-type
 // addition so far: Cricket/Doubles Practice darts were deliberately folded INTO the

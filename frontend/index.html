@@ -2251,6 +2251,21 @@ function renderHomeTabBody(){
                 : `<p class="pp-meta" style="padding:4px 0">No timing data yet — enable "Collect per-dart timing" in Settings to start tracking pace.</p>`}
     </div>`;
 
+  // docs/first-nine-average-roadmap.md: min-20-legs floor, ranked descending
+  // (higher first-9 average is better, unlike Fewest Trebleless Visits' ascending rank).
+  const first9RowsForMode = extra && extra.first9Rows && extra.first9Rows[mode];
+  const first9Section = (first9RowsForMode && first9RowsForMode.length)
+    ? `<div class="pp-section">
+        <div class="pp-section-title">Best First-9 Average</div>
+        <div class="hof-list">${first9RowsForMode.slice(0,10).map((r,i)=>`<div class="hof-row">
+          <span class="hof-rank">${i+1}</span>
+          <span class="hof-score">${r.avg.toFixed(1)}</span>
+          <span class="hof-player">${escapeHtml(r.name)}</span>
+          <span class="hof-dates">${r.legs} legs</span>
+        </div>`).join('')}</div>
+      </div>`
+    : '';
+
   const highestCo = extra && extra.highestCheckout && extra.highestCheckout[mode];
   const highestCoSection = `<div class="pp-section">
       <div class="pp-section-title">Highest Checkout Ever</div>
@@ -2281,6 +2296,7 @@ function renderHomeTabBody(){
     </div>
     <div class="home-pair">
       ${paceSection}
+      ${first9Section}
     </div>
     ${achievementSection('180s 🎯', eighties)}
     ${achievementSection('Big Fish 🐟', bigFishData)}
@@ -5610,7 +5626,7 @@ function renderPersonalBests(data){
   if(!container) return;
   const custom = GAME_TYPES[playerGameType].personalBestsRenderer;
   if(custom) return custom(data);
-  if(!data || (data.bestLegAvg==null && data.fewestDartsCheckout==null)){
+  if(!data || (data.bestLegAvg==null && data.bestFirst9==null && data.fewestDartsCheckout==null)){
     container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough legs recorded yet.</p>`;
     return;
   }
@@ -5630,6 +5646,7 @@ function renderPersonalBests(data){
     : '';
   container.innerHTML=`<div class="summary-grid">
     ${data.bestLegAvg!=null?`<div class="stat-block"><div class="stat-val">${data.bestLegAvg.toFixed(1)}</div><div class="stat-label">Best Leg Average</div>${shareBtn(`sharePersonalBest('legavg', ${data.bestLegAvg})`)}${raceBtn}</div>`:''}
+    ${data.bestFirst9!=null?`<div class="stat-block"><div class="stat-val">${data.bestFirst9.toFixed(1)}</div><div class="stat-label">Best First-9</div>${shareBtn(`sharePersonalBest('first9', ${data.bestFirst9})`)}</div>`:''}
     ${data.fewestDartsCheckout!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsCheckout}</div><div class="stat-label">Fewest Darts to Finish</div>${shareBtn(`sharePersonalBest('fewestdarts', ${data.fewestDartsCheckout})`)}</div>`:''}
     ${data.winStreak?`<div class="stat-block"><div class="stat-val">${data.winStreak}</div><div class="stat-label">Current Win Streak</div></div>`:''}
     ${formHtml}
@@ -5755,6 +5772,8 @@ function renderAroundTheWorldPersonalBests(data){
 async function sharePersonalBest(kind, value){
   const cfg = { legavg: { icon:'📊', headline:'BEST LEG AVERAGE', statLine: value.toFixed(1),
       desc:'Your best 3-dart average across a single leg.' },
+    first9: { icon:'🚀', headline:'BEST FIRST-9', statLine: value.toFixed(1),
+      desc:'Your best 3-dart-average-equivalent across the opening 9 darts of a leg.' },
     fewestdarts: { icon:'🎯', headline:'FEWEST DARTS TO FINISH', statLine: `${value} darts`,
       desc:"The fewest darts you've ever needed to finish a leg." } }[kind];
   if(!cfg) return;
@@ -8786,8 +8805,8 @@ const STAT_DEFS = [
   { key:'avgdartsperleg', label:'Darts / Leg',    desc:'Average darts thrown per won leg',           fmt:v=>v!=null?Number(v).toFixed(1):'—' },
   { key:'pace',           label:'Average Pace', desc:'Darts thrown per minute',                  fmt:v=>v!=null?Number(v).toFixed(1):'—' },
   { key:'treblelesspct', label:'Trebleless %',desc:'% of legs without hitting a treble',      fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
-  { key:'first3avg',     label:'1st 3 AVG',   desc:'Average of 1st 3 darts in a leg (501/301 only)', fmt:v=>v!=null?v.toFixed(1):'—' },
-  { key:'first9avg',     label:'1st 9 AVG',   desc:'Average of 1st 9 darts in a leg (501/301 only)', fmt:v=>v!=null?v.toFixed(1):'—' },
+  { key:'first3avg',     label:'1st 3 AVG',   desc:'Average of 1st 3 darts in a leg (501/301/170/101 only)', fmt:v=>v!=null?v.toFixed(1):'—' },
+  { key:'first9avg',     label:'1st 9 AVG',   desc:'Average of 1st 9 darts in a leg (501/301/170/101 only)', fmt:v=>v!=null?v.toFixed(1):'—' },
   { key:'avg100plus',    label:'100+ AVG',    desc:'% of legs with a 100+ average',           fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
   { key:'avg90minus',    label:'90- AVG',     desc:'% of legs with a 90 or lower average',    fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
   { key:'score140pct',   label:'140/Leg',     desc:'% of opening visits scoring 140 or more', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
@@ -10125,7 +10144,8 @@ const STATS_LEGEND = [
   { group:'Scoring', items:[
     { name:'Three-Dart Average', desc:'All points scored ÷ all darts thrown × 3, across every leg, set and game. A bust still counts as a full 3-dart visit.' },
     { name:'180s', desc:'Count of maximum 180 scores (three treble 20s in one visit).' },
-    { name:'1st 3 AVG / 1st 9 AVG', desc:'Average score of just the opening 3 (or 9) darts of a leg — measures how strong your starts are. 501/301 legs only: a 170 leg is too short for "opening darts" to mean anything, and Daily Challenge formats that aren’t normal X01 legs are excluded entirely.' },
+    { name:'1st 3 AVG / 1st 9 AVG', desc:'Average score of just the opening 3 (or 9) darts of a leg — measures how strong your starts are. 501/301/170/101 legs only; Daily Challenge formats that aren’t normal X01 legs are excluded entirely.' },
+    { name:'Best First-9 Average', desc:'Players ranked by their own average 1st-9-darts score across every eligible leg (minimum 20 legs played, to keep one lucky start from topping the board).' },
     { name:'100+ AVG / 90- AVG', desc:'% of legs where your leg average was 100 or higher / 90 or lower.' },
     { name:'140/Leg', desc:'% of opening visits in a leg that scored 140 or more.' },
     { name:'Fewest Trebleless Visits', desc:'Visits where none of the three darts landed in a treble bed — fewer is better, so the leaderboard ranks the lowest rate first. A bust still counts as a turn and is trebleless if no treble was hit.' },
@@ -10138,6 +10158,7 @@ const STATS_LEGEND = [
     { name:'Highest Checkout / Highest Checkout Ever', desc:'The single largest checkout score recorded.' },
     { name:'Top Checkouts', desc:"A player's highest scoring checkouts, with how many times each was hit and when." },
     { name:'Best Leg Average', desc:'The highest 3-dart average achieved in any single completed leg.' },
+    { name:'Best First-9', desc:"The highest 1st-9-darts average from any single leg (501/301/170/101 only) — unlike Best Leg Average, doesn't require having won that leg, since the opening 9 darts are already locked in well before the leg ends." },
     { name:'Fewest Darts to Finish', desc:'The fewest darts ever used to win a leg (9 is the theoretical minimum in 501).' },
   ]},
   { group:'Volume & Pace', items:[

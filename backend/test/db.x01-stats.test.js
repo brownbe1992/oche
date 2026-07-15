@@ -112,6 +112,153 @@ describe('getPlayerStatBubbles — OPENING_CATS scoping (exactly 501/301/170/101
   });
 });
 
+// docs/first-nine-average-roadmap.md — CLAUDE.md's every-new-calculation rule:
+// a normal leg, a short leg, a busted first visit, multi-leg aggregation, and
+// H2H/practice scoping, per the roadmap doc's own stated test plan.
+describe('getPlayerStatBubbles — first9avg (docs/first-nine-average-roadmap.md)', () => {
+  test('a normal leg counts exactly the first 3 visits (9 darts) — a 4th visit is ignored', () => {
+    const name = 'X01_First9_Normal';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    turn(g.gameId, name, 1, 1, { scored: 60, darts: 3 });
+    turn(g.gameId, name, 1, 1, { scored: 60, darts: 3 });
+    turn(g.gameId, name, 1, 1, { scored: 60, darts: 3 });
+    turn(g.gameId, name, 1, 1, { scored: 100, darts: 3, checkout: true, checkoutPoints: 100 }); // 4th visit — must not count
+    const bubbles = db.getPlayerStatBubbles(name, 'practice');
+    assert.equal(bubbles.first9avg, 60, '(60+60+60)/9 darts * 3 = 60; the 4th visit\'s 100 is excluded');
+  });
+
+  test('a short leg (finished in 2 visits) counts only those 6 darts, not a padded 9', () => {
+    const name = 'X01_First9_Short';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    turn(g.gameId, name, 1, 1, { scored: 100, darts: 3 });
+    turn(g.gameId, name, 1, 1, { scored: 100, darts: 3, checkout: true, checkoutPoints: 100 });
+    const bubbles = db.getPlayerStatBubbles(name, 'practice');
+    assert.equal(bubbles.first9avg, 100, '(100+100)/6 darts * 3 = 100 — the denominator is 6, not padded to 9');
+  });
+
+  test('a busted first visit scores 0 but still counts as 3 darts in the denominator', () => {
+    const name = 'X01_First9_Bust';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    turn(g.gameId, name, 1, 1, { scored: 0, darts: 1, bust: true }); // 1 physical dart, but counts as 3
+    turn(g.gameId, name, 1, 1, { scored: 140, darts: 3, checkout: true, checkoutPoints: 140 });
+    const bubbles = db.getPlayerStatBubbles(name, 'practice');
+    assert.equal(bubbles.first9avg, (0 + 140) / 6 * 3, 'denominator = 3 (bust rule) + 3 (real) = 6');
+  });
+
+  test('multi-leg aggregation averages each leg\'s own first9avg equally, not darts-weighted', () => {
+    const name = 'X01_First9_MultiLeg';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    // Leg 1: 1 visit, avg 150 (150/3*3=150)
+    turn(g.gameId, name, 1, 1, { scored: 150, darts: 3, checkout: true, checkoutPoints: 150 });
+    // Leg 2: 3 visits totalling 90 darts-equivalent avg 30 ((10+10+10)/9*3=10)
+    turn(g.gameId, name, 1, 2, { scored: 10, darts: 3 });
+    turn(g.gameId, name, 1, 2, { scored: 10, darts: 3 });
+    turn(g.gameId, name, 1, 2, { scored: 10, darts: 3, checkout: true, checkoutPoints: 10 });
+    const bubbles = db.getPlayerStatBubbles(name, 'practice');
+    assert.equal(bubbles.first9avg, (150 + 10) / 2, 'mean of the two legs\' own first9avg (150 and 10), not a single pooled ratio');
+  });
+
+  test('H2H/practice scoping applies to first9avg like every other stat', () => {
+    const p1 = 'X01_First9_H2H_A', p2 = 'X01_First9_H2H_B';
+    db.addPlayer(p1); db.addPlayer(p2);
+    const gH2H = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0, players: [{ name: p1 }, { name: p2 }] });
+    turn(gH2H.gameId, p1, 1, 1, { scored: 170, darts: 3, checkout: true, checkoutPoints: 170 });
+    const gPrac = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name: p1 }] });
+    turn(gPrac.gameId, p1, 1, 1, { scored: 20, darts: 3, checkout: true, checkoutPoints: 20 });
+    assert.equal(db.getPlayerStatBubbles(p1, 'h2h').first9avg, 170, 'only the H2H leg counts under h2h scoping');
+    assert.equal(db.getPlayerStatBubbles(p1, 'practice').first9avg, 20, 'only the practice leg counts under practice scoping');
+  });
+
+  test('first9avg respects OPENING_CATS the same way first3avg does — a non-standard starting score is excluded', () => {
+    const name = 'X01_First9_OpeningCats';
+    db.addPlayer(name);
+    const g701 = db.createGame({ category: '701', legsPerSet: 1, setsPerGame: 1, practice: 1, config: { startingScore: 701 }, players: [{ name }] });
+    turn(g701.gameId, name, 1, 1, { scored: 180, darts: 3 });
+    const bubbles = db.getPlayerStatBubbles(name, 'practice');
+    assert.equal(bubbles.first9avg, null, 'no eligible (501/301/170/101) legs recorded');
+  });
+});
+
+describe('getPersonalBests — bestFirst9 (docs/first-nine-average-roadmap.md)', () => {
+  test('MAX of every eligible leg\'s first9avg, mirroring the stat bubble\'s own per-leg computation', () => {
+    const name = 'X01_PB_First9';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    turn(g.gameId, name, 1, 1, { scored: 60, darts: 3, checkout: true, checkoutPoints: 60 });   // leg 1: first9avg = 60
+    turn(g.gameId, name, 1, 2, { scored: 140, darts: 3, checkout: true, checkoutPoints: 140 }); // leg 2: first9avg = 140 (best)
+    turn(g.gameId, name, 1, 3, { scored: 100, darts: 3, checkout: true, checkoutPoints: 100 }); // leg 3: first9avg = 100
+    const pb = db.getPersonalBests(name, 'practice');
+    assert.equal(pb.bestFirst9, 140);
+  });
+
+  test('counts a leg\'s first9avg even when that leg was never won (unlike bestLegAvg)', () => {
+    const name = 'X01_PB_First9_Unfinished';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    // 3 visits recorded, no checkout yet — this "leg" never closes out.
+    turn(g.gameId, name, 1, 1, { scored: 180, darts: 3 });
+    turn(g.gameId, name, 1, 1, { scored: 180, darts: 3 });
+    turn(g.gameId, name, 1, 1, { scored: 180, darts: 3 });
+    const pb = db.getPersonalBests(name, 'practice');
+    assert.equal(pb.bestFirst9, 180, 'the opening 9 darts are already fully determined regardless of whether the leg was ever won');
+    assert.equal(pb.bestLegAvg, null, 'by contrast, bestLegAvg requires a won leg and stays null here');
+  });
+
+  test('null when no eligible legs have been recorded', () => {
+    const name = 'X01_PB_First9_Empty';
+    db.addPlayer(name);
+    assert.equal(db.getPersonalBests(name, 'practice').bestFirst9, null);
+  });
+});
+
+describe('getHomeExtra — Best First-9 Average leaderboard (docs/first-nine-average-roadmap.md)', () => {
+  test('ranks descending and excludes a player under the 20-legs floor', () => {
+    const p1 = 'X01_Home_First9_Over', p2 = 'X01_Home_First9_Under';
+    db.addPlayer(p1); db.addPlayer(p2);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0, players: [{ name: p1 }, { name: p2 }] });
+    for (let i = 1; i <= 20; i++) {
+      turn(g.gameId, p1, 1, i, { scored: 150, darts: 3, checkout: true, checkoutPoints: 150 });
+    }
+    for (let i = 21; i <= 35; i++) { // only 15 legs — under the floor
+      turn(g.gameId, p2, 1, i, { scored: 170, darts: 3, checkout: true, checkoutPoints: 170 });
+    }
+    const rows = db.getHomeExtra().first9Rows.h2h;
+    const names = rows.map(r => r.name);
+    assert.ok(names.includes(p1), 'p1 has exactly 20 legs — meets the floor');
+    assert.ok(!names.includes(p2), 'p2 has only 15 legs — excluded');
+    assert.equal(rows.find(r => r.name === p1).avg, 150);
+  });
+
+  test('a higher first9avg ranks above a lower one', () => {
+    const p1 = 'X01_Home_First9_High', p2 = 'X01_Home_First9_Low';
+    db.addPlayer(p1); db.addPlayer(p2);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0, players: [{ name: p1 }, { name: p2 }] });
+    for (let i = 1; i <= 20; i++) {
+      turn(g.gameId, p1, 1, i, { scored: 170, darts: 3, checkout: true, checkoutPoints: 170 });
+      turn(g.gameId, p2, 1, i, { scored: 40, darts: 3, checkout: true, checkoutPoints: 40 });
+    }
+    const rows = db.getHomeExtra().first9Rows.h2h;
+    const iHigh = rows.findIndex(r => r.name === p1), iLow = rows.findIndex(r => r.name === p2);
+    assert.ok(iHigh >= 0 && iLow >= 0 && iHigh < iLow, 'the higher first9avg (170) ranks ahead of the lower (40)');
+  });
+
+  test('h2h/practice scoping applies to the leaderboard like every other getHomeExtra board', () => {
+    const name = 'X01_Home_First9_Practice';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    for (let i = 1; i <= 20; i++) {
+      turn(g.gameId, name, 1, i, { scored: 100, darts: 3, checkout: true, checkoutPoints: 100 });
+    }
+    const extra = db.getHomeExtra();
+    assert.ok(!extra.first9Rows.h2h.some(r => r.name === name), 'a practice-only player never appears on the h2h board');
+    assert.ok(extra.first9Rows.practice.some(r => r.name === name), 'but does appear on the practice board');
+  });
+});
+
 describe('getPlayerStatBubbles — nine-darter detection', () => {
   test('exactly 3 turns, 9 total darts, a checkout, in a 501 leg: counts as a nine-darter', () => {
     const name = 'X01_NineDarter';
@@ -269,5 +416,20 @@ describe('getMetricHistory matches getPlayerStatBubbles for the same metric (doc
     assert.equal(history.length, 1, 'both eligible legs land in the same (current) month bucket');
     assert.equal(history[0].value, bubble, 'getMetricHistory reproduces the exact same scoped average as the bubble');
     assert.equal(bubble, (140 + 170) / 2, '701 (non-standard) is excluded from both');
+  });
+
+  test('"first9avg" is byte-for-byte identical between the two functions (docs/first-nine-average-roadmap.md)', () => {
+    const name = 'X01_History_First9';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    turn(g.gameId, name, 1, 1, { scored: 60, darts: 3 });
+    turn(g.gameId, name, 1, 1, { scored: 60, darts: 3 });
+    turn(g.gameId, name, 1, 1, { scored: 60, darts: 3, checkout: true, checkoutPoints: 60 });
+    turn(g.gameId, name, 1, 2, { scored: 140, darts: 3, checkout: true, checkoutPoints: 140 });
+    const bubble = db.getPlayerStatBubbles(name, 'practice').first9avg;
+    const history = db.getMetricHistory(name, 'first9avg', 'all', { mode: 'practice' });
+    assert.equal(history.length, 1, 'both legs land in the same (current) month bucket');
+    assert.equal(history[0].value, bubble, 'getMetricHistory reproduces the exact same scoped average as the bubble');
+    assert.equal(bubble, (60 + 140) / 2);
   });
 });

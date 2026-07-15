@@ -665,7 +665,7 @@ audit. The exact split:
 | Category | Cricket games… | Why |
 |---|---|---|
 | `scored`-derived (3-dart avg, 180s, 180s/leg, 100+/90− leg averages, trebleless %, recent-form avg, On This Day's 180 detection, metric-history equivalents) | **Excluded** (`X01_ONLY`) | `scored` means a different quantity in cricket |
-| Opening-window stats (1st 3/1st 9 avg, 140/leg) | Excluded already | `OPENING_CATS` requires `game_type='x01'` plus `config.startingScore` in `(501,301,170,101)` |
+| Opening-window stats (1st 3/1st 9 avg, 140/leg, Best First-9, Best First-9 Average leaderboard) | Excluded already | `OPENING_CATS` requires `game_type='x01'` plus `config.startingScore` in `(501,301,170,101)` |
 | Checkout-based (Big Fish, ton+ finishes, highest checkout, checkout routes, fewest darts to finish, darts/leg, best leg avg) | Naturally excluded | cricket never writes `checkout=1`, and these are all scoped to won legs / checkout rows |
 | Physical-dart stats (Darts Thrown, Darts/Day, Average Pace, dart analytics sector/treble maps, Around the World progress) | **Included** | a dart thrown in cricket is a real dart; these count physical throws, not X01 arithmetic |
 | Games / wins / win rate / win streak / H2H records / activity counters (legs, sets, darts, turns, today/this-week) | **Included** | a completed cricket H2H match is a real match; "Games Played" counts completed H2H matches of any game type. Per-category legs/sets **won** (`computeStats()`'s `h2hLegsWonByCat`/`h2hSetsWonByCat`) count a won leg via `(checkout=1 OR leg_won=1)` — X01 signals a won leg with `checkout`, Cricket with `leg_won`. The roster/profile "turns"/"darts thrown" totals are likewise unscoped (a cricket visit is a real visit); only the X01-scoped copies inside `h2hStats`/`practiceStats` feed the averages |
@@ -718,6 +718,13 @@ them:
   2026-07 audit; the ordering was always ascending — the title was what changed).
 - **Ton+ leaderboard**: `SUM(checkouts >=100)/checkouts*100` — rate among a
   player's own *finishing* visits, `HAVING checkouts >= 3`.
+- **Best First-9 Average leaderboard** (`first9Rows`, docs/archive/first-nine-average-
+  roadmap.md): each player's own per-leg 1st 9 AVG (`OPENING_CATS`-scoped,
+  bust-as-3-darts denominator), averaged across their eligible legs, `HAVING
+  legs >= 20` — the same lifetime-legs floor `COACHING_MIN_LEGS_FOR_FORM` uses
+  elsewhere in this file, chosen so one or two lucky opening legs can't top the
+  board over a genuinely well-established start. Ranked **descending**
+  (unlike Fewest Trebleless Visits above) — a higher first-9 average is better.
 - **Highest checkout**: `MAX(checkout_points)`, ties broken by earliest date; `overall`/`h2h`/`practice` variants.
 - **Today/week activity**: legs/darts with `date(created_at)` today or in the
   trailing 7 days — **not mode-scoped** (H2H and practice both count), and not
@@ -769,7 +776,12 @@ means a future game type's category string can never accidentally collide with
 these four values the way a bare string match could. If a future starting score
 is added to X01 (per `docs/game-modes-roadmap.md`), it does **not** automatically
 join this scope — it must be added to this exact `IN (...)` list explicitly, the
-same deliberate step that added 170 and 101 here.
+same deliberate step that added 170 and 101 here. `OPENING_CATS` is a
+module-level constant in `backend/db.js` (declared beside `X01_ONLY`) — Best
+First-9 (`getPersonalBests()`) and the Best First-9 Average leaderboard
+(`getHomeExtra()`) both reuse it directly rather than a second copy of the
+string, so all four "opening exchange" surfaces (2 stat bubbles, 1 Personal
+Best, 1 leaderboard) can never drift out of scope with each other.
 
 **Historical bug, fixed**: `1st 3 AVG`/`1st 9 AVG` originally summed raw
 per-dart values instead of using the bust-zeroed `turns.scored` column, so a
@@ -794,6 +806,16 @@ re-verify they still match.
 
 - **Best Leg Average**: `MAX` of the 3-dart-avg-convention leg average (darts,
   bust-as-3), **won legs only**.
+- **Best First-9** (`bestFirst9`, docs/archive/first-nine-average-roadmap.md): `MAX` of the
+  same per-leg 1st 9 AVG computation the stat bubble averages (`OPENING_CATS`-scoped
+  to 501/301/170/101, bust-as-3-darts denominator, first up-to-3 visits) —
+  **not** restricted to won legs, unlike Best Leg Average: the opening 9 darts
+  are already fully determined the moment the 3rd visit is recorded, regardless
+  of whether (or how) the leg eventually ends, and the stat bubble it mirrors
+  carries no such restriction either. No `bestLeg`-style leg-location companion
+  field and no Ghost Opponent "Race this leg" button — Ghost mode can only
+  replay a leg the player actually won, so pointing it at a possibly-unfinished
+  first-9 record leg would frequently 404.
 - **Fewest Darts to Finish**: `MIN` raw darts in a won leg.
 - **Recent Form**: mean of the 3-dart-avg leg average over the **last 10 won
   legs by most-recent finishing turn's row id** (a proxy for chronological

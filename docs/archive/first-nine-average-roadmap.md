@@ -1,6 +1,13 @@
 # First-9 Average — Design Roadmap
 
-> Status: **design phase, not started.**
+> Status: **done, 2026-07.** Full mechanics documented in `REFERENCE.md`'s
+> Player Profile stat bubbles / Personal Bests / Home page leaderboards
+> sections — see those for the authoritative behavior. The bubble and chart
+> metric (`first9avg`) turned out to already exist from an earlier session's
+> "opening exchange" stats work (`first3avg`/`first9avg`/`score140pct`,
+> 2026-07) but were never wired up to a Personal Best or leaderboard, and had
+> a stale UI label left over from before that work's own 101-inclusion
+> decision — see "Open questions," below, for how this picked up from there.
 
 ## Goal
 
@@ -54,11 +61,23 @@ same family and arguably the bigger omission.
   Personal Best get the same fixture treatment. CLAUDE.md's
   every-new-calculation rule, straightforwardly.
 
-## Open questions for whoever picks this up
+## Resolved at build time
 
-- Include **101 games**? A 101 leg can end inside 9 darts nearly every
-  time, which pollutes the stat's meaning. Lean: restrict to 301+
-  categories (still "X01 only", one extra predicate), and say so on the
-  bubble's hover text.
-- Leaderboard in v1 or later? It's a one-liner once the formula exists —
-  lean: ship it with the same min-20-legs floor Trebleless % uses.
+- **Include 101 games?** This doc's own lean was 301+ only, but by the time
+  this item was picked up, `first9avg` (along with `first3avg`/`score140pct`)
+  had already been built in an earlier session with an explicit, documented
+  2026-07 product decision to include **all four** standard starting scores
+  (501/301/170/101) — `OPENING_CATS` in `backend/db.js`, see `REFERENCE.md`'s
+  "Why 1st 3 AVG / 1st 9 AVG / 140/Leg are scoped to exactly 501, 301, 170,
+  and 101" for the full rationale. That decision stands; this build reused it
+  rather than re-litigating it. The one real gap it left behind: the Player
+  Profile bubble and stats-legend text still said "(501/301 only)" — a stale
+  label from before that decision, fixed in this same change.
+- **Leaderboard in v1 or later?** Shipped now — "Best First-9 Average" on the
+  Home page, `HAVING legs >= 20` (the same floor `COACHING_MIN_LEGS_FOR_FORM`
+  uses elsewhere for "trust a small-sample average"), ranked descending.
+- **Best First-9 Personal Best**: shipped — `bestFirst9` in
+  `getPersonalBests()`, deliberately **not** restricted to won legs the way
+  `bestLegAvg` is (see `REFERENCE.md`'s Personal Bests section for why), and
+  with no Ghost Opponent "Race this leg" button (Ghost mode requires a leg
+  the player actually won, which a first-9 record leg isn't guaranteed to be).
