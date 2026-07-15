@@ -3309,7 +3309,7 @@ dart struck *after* it already fell isn't reliable data; a camera has genuine
 ground truth at the moment of impact, a human guessing under time pressure
 doesn't.
 
-### The generalized dartboard heatmap (X01, Cricket, Doubles Practice, Chuckin)
+### The generalized dartboard heatmap (X01, Cricket, Baseball, Doubles Practice, Chuckin)
 
 Originally Chuckin-exclusive (`getChuckinHeatmap()`/`buildChuckinHeatmap()`);
 generalized since `darts` is the one universal per-dart table every game type
@@ -3320,28 +3320,51 @@ uses. `GET /api/players/chuckin-heatmap` is kept exactly as-is for backward
 compatibility; `GET /api/players/dart-heatmap?name=&gameType=&mode=` is the
 generalized surface. The Player Profile's "Dartboard Heatmap" section
 (`dart-heatmap-section`/`dart-heatmap-body`, inside the shared `chartSection`
-markup) now shows on all four game-type tabs instead of Chuckin only —
-`loadDartHeatmap()` fires for whichever tab is currently active, replacing the
-old `if(playerGameType !== 'chuckin') return` early-out.
+markup) shows on every game-type tab that has one — `loadDartHeatmap()` fires
+for whichever tab is currently active, except Checkout Trainer (hidden
+entirely, since its taps aren't real thrown darts).
 
-`buildDartHeatmap(cells, {ariaLabel})` renders three things per number: the
-inner-single and outer-single regions (each independently shaded by hit
-count), and the miss ring (shaded by `missHeat(wedge, depth)`, its **own
-independent heat-scale normalization**, not shared with the scoring regions,
-since hit and miss counts are wildly different population sizes per player).
-A **zone-unspecified single** (Pad mode, or a pre-feature row) is excluded
-from the heatmap entirely, by product decision — real hit data, just not
-attributable to inner or outer, so rather than show any visual trace of it,
-it's simply not plotted. (An earlier version drew a faint diagonal hatch
-overlay across both single regions for that number instead of omitting it —
-changed 2026-07 per a live user bug report: the hatch box read as a display
-glitch, not a meaningful third state.) It's still never silently folded into
-either real bucket or split 50/50 — omitted is not the same as miscounted.
-The flat `topSectors` list is a separate surface and keeps its own distinct
-textual treatment (`dartLabelFromParts()` appends `" (zone unknown)"` to a
-zone-less single, never to a double/treble/bull, which never had a zone
-concept at all) — unaffected by this change, since that's a text list, not
-the heatmap.
+`buildDartHeatmap(cells, {ariaLabel, noZoneTracking})` renders three things
+per number: the inner-single and outer-single regions (each independently
+shaded by hit count), and the miss ring (shaded by `missHeat(wedge, depth)`,
+its **own independent heat-scale normalization**, not shared with the
+scoring regions, since hit and miss counts are wildly different population
+sizes per player).
+
+A **zone-unspecified single** — `d.zone` is only ever set by the geometric
+Dartboard-mode board's own single-region taps (`buildDartboard()`'s `oc(sec,
+1,'inner'|'outer')`) — is handled two different ways, depending on whether
+the game type can ever produce a zone value at all (`docs/bug-roadmap.md`
+BUG-24):
+- **X01, Chuckin, Doubles Practice** (`noZoneTracking` unset/false — these all
+  have a real Dartboard-mode alternative to Pad mode, so an unzoned single
+  reflects the player's own input-mode choice): excluded from the heatmap
+  entirely, by product decision — real hit data, just not attributable to
+  inner or outer, so rather than show any visual trace of it, it's simply not
+  plotted. (An earlier version drew a faint diagonal hatch overlay across
+  both single regions for that number instead of omitting it — changed
+  2026-07 per a live user bug report: the hatch box read as a display glitch,
+  not a meaningful third state.) It's still never silently folded into either
+  real bucket or split 50/50 — omitted is not the same as miscounted.
+- **Cricket, Baseball** (`noZoneTracking` true — `renderPadCricket()`/
+  `renderPadBaseball()` are always used regardless of the `dartboardMode`
+  preference, so these two game types can **never** produce a zone value;
+  every single they ever record is unzoned, permanently, not by choice):
+  the exclusion is skipped, and both the inner and outer sub-regions read one
+  merged bucket (every single for that number, zone ignored) instead of two
+  separately-keyed always-empty ones — so the whole single ring lights up
+  with the real total, tooltip reading e.g. `"15: 3 hits"` with no
+  "(inner)"/"(outer)" claim, rather than staying permanently blank. Applying
+  the X01-style exclusion here had silently hidden every single hit —
+  including on real Cricket targets — from these two game types' own
+  heatmaps entirely.
+
+The flat `topSectors` list (§3, Dart Analytics) is a separate surface and
+keeps its own distinct textual treatment (`dartLabelFromParts()` appends `"
+(zone unknown)"` to a zone-less single, never to a double/treble/bull, which
+never had a zone concept at all) — unaffected by either heatmap behavior
+above, since that's a text list, not the heatmap, and was never gated on zone
+at all.
 
 ### Testing
 
@@ -3349,9 +3372,12 @@ the heatmap.
 grouping" and "getBounceOutCount" describe blocks; `backend/test/db.turn-
 validation.test.js`'s "addTurn — zone/missZone/missDepth/bounced validation"
 block; `backend/test/scoring.test.js`'s regression proving this metadata never
-changes `evaluateVisit()`'s outcome. See `docs/archive/dartboard-zone-tracking-
-roadmap.md`'s own "Testing" section for the full list, including a manual
-end-to-end Playwright verification pass against a running server.
+changes `evaluateVisit()`'s outcome; `backend/test/dart-heatmap.test.js`'s
+`noZoneTracking` describe block (`docs/bug-roadmap.md` BUG-24), vm-extracting
+`buildDartHeatmap()` directly from `frontend/index.html`. See
+`docs/archive/dartboard-zone-tracking-roadmap.md`'s own "Testing" section for
+the full list, including a manual end-to-end Playwright verification pass
+against a running server.
 
 ---
 

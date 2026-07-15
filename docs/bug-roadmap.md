@@ -57,8 +57,13 @@
 > bug report (2026-07) against Cricket's scoring pad having no way to log a real
 > off-target number hit (e.g. 1-14 in classic Cricket) — every one was forced
 > through `Miss`, corrupting Dart Analytics' sector/treble-rate stats — now fixed
-> with a "hit a different number" picker. **BUG-1 through BUG-23 are all fixed as
-> of this writing** — nothing open on either tracker.
+> with a "hit a different number" picker. **BUG-24** was found while verifying
+> BUG-23's fix, when a follow-up "check the heatmap works for Cricket" request
+> revealed every single hit (not just off-target ones) was silently invisible on
+> Cricket's (and Baseball's) lifetime dartboard heatmap, because the two game
+> types can never produce the "zone" data the heatmap's existing exclusion rule
+> assumed was always a Pad-mode choice — now fixed. **BUG-1 through BUG-24 are
+> all fixed as of this writing** — nothing open on either tracker.
 
 ## Severity legend
 
@@ -1685,6 +1690,109 @@ renders the correct 14 off-target numbers, records their real sector/
 multiplier (visible in Dart Analytics, not folded into "Miss"), and scores
 zero marks/points exactly like a genuine miss; a genuine `Miss` tap is
 completely unaffected; full backend suite green.
+
+---
+
+### BUG-24 — Cricket's (and Baseball's) lifetime dartboard heatmap silently hid every single hit, including on real target numbers  **(MED, data-integrity / user-facing; found while verifying BUG-23's fix)**
+
+**Status: ✅ Fixed (2026-07).** `buildDartHeatmap()` gains a `noZoneTracking`
+option. `loadDartHeatmap()` sets it whenever the active Player Profile tab is
+`cricket` or `baseball` — the two game types whose `renderPad*()` never has a
+Dartboard-mode alternative, unlike X01/Chuckin/Doubles Practice. When set: the
+existing "zone-unspecified single: not plotted at all" exclusion is skipped,
+and both the inner and outer single sub-regions read the SAME merged bucket
+(every single for that number, regardless of the always-`null` `zone` field)
+instead of two separately-keyed, permanently-empty buckets — so the whole
+single ring lights up honestly reflecting "this many singles, position
+unknown" rather than showing nothing. Tooltips drop the false "(inner)"/
+"(outer)" precision claim for these two game types, reading e.g. `"15: 3
+hits"` instead of `"15 (inner): 0 hits"` / `"15 (outer): 0 hits"`. Trebles,
+doubles, and bull were never affected by the exclusion (`multiplier !== 1`)
+and needed no change. `REFERENCE.md`'s Cricket rules and generalized-heatmap
+sections updated in the same change. Committed regression test
+`backend/test/dart-heatmap.test.js` (vm-extracts the real `buildDartHeatmap()`
++ `DB_SECTORS` from `frontend/index.html`, the same technique
+`display.heatmap-hardening.test.js` already established for its sibling
+function — `buildDartHeatmap()` is pure string-building, unlike the moment
+card's real-Canvas dependency, so unlike BUG-8/18/22/23 this one **is**
+fully `node:test`-able): a zone-unspecified single stays excluded without
+`noZoneTracking` (X01/Chuckin/Doubles Practice, unchanged); with
+`noZoneTracking` the same single now renders on both sub-regions with the
+real count and no false inner/outer label; trebles/doubles/bull are
+unaffected either way; an unpositioned miss still plots nothing (unrelated to
+this fix); ordinary zoned X01 data still renders exactly as before. Verified
+the exclusion-still-applies-without-the-flag test fails against the pre-fix
+code. Verified end-to-end in a real Chromium browser: a genuine Cricket
+target (single-15) that showed **"0 hits" on the heatmap despite being
+correctly stored server-side** before the fix now shows "1 hit"; a mixed real
+game (singles, an off-target BUG-23 single, a treble, a double) all render
+correctly together, confirmed both numerically (SVG tooltips) and visually
+(screenshot: solid lit single wedges where the board was previously blank);
+Baseball's heatmap confirmed fixed identically. Full backend suite green (663
+tests, +6 new).
+
+**How this was found:** while verifying BUG-23's fix (confirming Dart
+Analytics correctly reflects a Cricket off-target hit), a broader "does the
+heatmap work for Cricket" check was requested. Reproducing a plain, genuine
+Cricket **target** hit (a single on one of the 7 in-play numbers — nothing to
+do with BUG-23's off-target case) against the fixed BUG-23 code still showed
+"0 hits" on the rendered heatmap despite the backend correctly storing it —
+revealing this as a distinct, pre-existing defect, not a side effect of the
+BUG-23 change.
+
+**Where:** `frontend/index.html` `buildDartHeatmap()`:
+
+```js
+if(c.multiplier === 1 && c.sector >= 1 && c.sector <= 20 && !c.zone) return; // zone-unspecified single: not plotted at all
+```
+
+Per this function's own long-standing comment (and the commit that introduced
+it, "Dartboard heatmap: don't display zone-unknown darts at all"), this
+exclusion was a deliberate product decision **for game types where Pad mode
+is the player's own choice over an available Dartboard mode** (X01, Chuckin,
+Doubles Practice) — a real, meaningful signal is being *withheld*, not lost,
+in that case, since the player could switch input modes to get zone
+precision if they wanted it. `renderPadCricket()`/`renderPadBaseball()`,
+however, are unconditionally used regardless of the `dartboardMode`
+preference (`renderPad()`: `if(game.gameType === 'cricket'){
+renderPadCricket(full); ... return; }`, no `dartboardMode` check at all) — so
+for these two game types, `zone` is not withheld by choice, it is
+**structurally impossible to ever capture**. The exact same exclusion rule,
+applied to data that can never satisfy its own precondition, silently
+discarded every single dart these two game types ever recorded.
+
+**Misbehavior (verified):** a Cricket player's lifetime dartboard heatmap on
+their Player Profile showed data for treble/double/bull hits but a
+permanently blank, unlit single ring for every number — including the 7 real
+in-play targets, the darts a Cricket player throws most often — with no
+indication anything was missing (the heatmap simply looked "cold" there,
+indistinguishable from a number genuinely never hit). Baseball's own
+heatmap, sharing the same input shape and the same generalized
+`buildDartHeatmap()`, had the identical defect.
+
+**Fix (step by step):**
+1. Add a `noZoneTracking` option to `buildDartHeatmap(cells, opts)`: when
+   true, skip the zone-unspecified-single exclusion, and key every single for
+   a number into one merged bucket (empty zone key) rather than the real
+   `c.zone` value — so both the inner and outer render calls
+   (`heat(num,1,singleInnerZone)` / `heat(num,1,singleOuterZone)`, with
+   `singleInnerZone`/`singleOuterZone` both resolving to `''` when
+   `noZoneTracking`) read the same total automatically, needing no separate
+   SVG-building branch.
+2. Drop the false "(inner)"/"(outer)" tooltip suffix for `noZoneTracking`
+   game types — the position genuinely isn't known, so the label shouldn't
+   claim otherwise.
+3. `loadDartHeatmap()` passes `noZoneTracking: (gt === 'cricket' || gt ===
+   'baseball')` based on the active Player Profile game-type tab.
+4. `REFERENCE.md` updated in the same change.
+5. Committed `node:test` per the Status note above.
+
+**Verify:** the new tests pass (and the "still excluded without the flag"
+case fails against pre-fix code); a live Chromium check confirms a genuine
+Cricket single now lights its number's whole single ring instead of showing
+0 hits, with trebles/doubles/bull/misses all unaffected; Baseball's heatmap
+confirmed fixed the same way; X01/Chuckin/Doubles Practice's existing
+zone-aware behavior is completely unchanged; full backend suite green.
 
 ---
 

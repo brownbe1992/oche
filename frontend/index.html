@@ -10119,8 +10119,13 @@ function loadDartHeatmap(){
   const gt = playerGameType;
   const label = (GAME_TYPES[gt] && GAME_TYPES[gt].label) || gt;
   const modeParam = (playerPageTab==='h2h'||playerPageTab==='practice') ? `&mode=${playerPageTab}` : '';
+  // docs/bug-roadmap.md BUG-24: Cricket and Baseball never have a Dartboard-mode
+  // input (renderPadCricket()/renderPadBaseball() are always used), so every
+  // single they record is permanently zone-unspecified — not a Pad-mode choice
+  // the way it is for X01/Chuckin/Doubles Practice. See buildDartHeatmap().
+  const noZoneTracking = (gt === 'cricket' || gt === 'baseball');
   Backend.get(`/api/players/dart-heatmap?name=${encodeURIComponent(currentPlayer)}&gameType=${gt}${modeParam}`)
-    .then(cells => { body.innerHTML = buildDartHeatmap(cells||[], { ariaLabel: `Dartboard heatmap of every ${label} dart thrown` }); })
+    .then(cells => { body.innerHTML = buildDartHeatmap(cells||[], { ariaLabel: `Dartboard heatmap of every ${label} dart thrown`, noZoneTracking }); })
     .catch(()=>{ body.innerHTML = `<p class="pp-meta" style="padding:4px 0">Could not load the heatmap.</p>`; });
   const bounceEl = document.getElementById('bounce-out-count');
   if(bounceEl){
@@ -10133,16 +10138,31 @@ function loadDartHeatmap(){
 function buildDartHeatmap(cells, opts){
   opts = opts || {};
   const ariaLabel = opts.ariaLabel || 'Dartboard heatmap of every dart thrown';
+  // docs/bug-roadmap.md BUG-24: Cricket and Baseball have no Dartboard-mode input
+  // at all (renderPadCricket()/renderPadBaseball() are always used, regardless of
+  // the dartboardMode preference) — so EVERY single they ever record is
+  // "zone-unspecified", not by the player's own choice of Pad mode (the case the
+  // exclusion below was designed for — X01/Chuckin/Doubles Practice all have a
+  // real Dartboard-mode alternative). Applying the same exclusion to these two
+  // game types silently hid every single hit (by far the most common outcome)
+  // from their own heatmap, including on real Cricket target numbers — not just
+  // the off-target numbers BUG-23 fixed. loadDartHeatmap() sets this true only
+  // for cricket/baseball.
+  const noZoneTracking = !!opts.noZoneTracking;
   // Hit regions keyed by sector_multiplier_zone ('' when zone doesn't apply — trebles/
   // doubles/bull always, singles too before this feature or from Pad mode). Misses
   // keyed by wedge_depth — only ever populated by a positioned Dartboard-mode miss;
   // an unpositioned miss (Pad mode, or a pre-feature row) has nothing to plot, same
-  // as it always has. A zone-unspecified single (Pad mode, or a pre-feature row) is
-  // excluded from the heatmap entirely, by product decision — it's real hit data,
-  // just not attributable to inner or outer, and rather than show any visual trace
-  // of it (an earlier version drew a hatch overlay across both single regions), it's
-  // simply not plotted: never folded into either real bucket, never split 50/50,
-  // never shown at all.
+  // as it always has. A zone-unspecified single from a game type that CAN capture
+  // zone (X01/Chuckin/Doubles Practice, when Pad mode was chosen) is excluded from
+  // the heatmap entirely, by product decision — it's real hit data, just not
+  // attributable to inner or outer, and rather than show any visual trace of it (an
+  // earlier version drew a hatch overlay across both single regions), it's simply
+  // not plotted: never folded into either real bucket, never split 50/50, never
+  // shown at all. Cricket/Baseball (noZoneTracking) skip that exclusion and instead
+  // merge every single into ONE bucket (empty zone key, ignoring whatever `c.zone`
+  // says) so both the inner and outer regions render the same total — the only
+  // honest representation when the position was never capturable to begin with.
   const hitMap = {}, missMap = {};
   let maxHitHeat = 0, maxMissHeat = 0;
   (cells||[]).forEach(c=>{
@@ -10154,13 +10174,21 @@ function buildDartHeatmap(cells, opts){
       }
       return;
     }
-    if(c.multiplier === 1 && c.sector >= 1 && c.sector <= 20 && !c.zone) return; // zone-unspecified single: not plotted at all
-    const key = c.sector+'_'+c.multiplier+'_'+(c.zone||'');
+    const isUnzonedSingle = c.multiplier === 1 && c.sector >= 1 && c.sector <= 20 && !c.zone;
+    if(isUnzonedSingle && !noZoneTracking) return; // zone-unspecified single: not plotted at all
+    const zoneKey = (isUnzonedSingle && noZoneTracking) ? '' : (c.zone||'');
+    const key = c.sector+'_'+c.multiplier+'_'+zoneKey;
     hitMap[key] = (hitMap[key]||0) + c.hits;
     if(hitMap[key] > maxHitHeat) maxHitHeat = hitMap[key];
   });
   const hits = (sector, m, zone) => hitMap[sector+'_'+m+'_'+(zone||'')] || 0;
   const heat = (sector, m, zone) => maxHitHeat>0 ? hits(sector,m,zone)/maxHitHeat : 0;
+  // Both single sub-regions read the SAME merged (zone-less) bucket for
+  // noZoneTracking game types, so they always render identically — the whole
+  // single ring lights up as one, honestly reflecting that inner/outer was never
+  // knowable, rather than falsely implying positional precision.
+  const singleInnerZone = noZoneTracking ? '' : 'inner';
+  const singleOuterZone = noZoneTracking ? '' : 'outer';
   const missHits = (wedge, depth) => missMap[wedge+'_'+depth] || 0;
   const missHeat = (wedge, depth) => maxMissHeat>0 ? missHits(wedge,depth)/maxMissHeat : 0;
 
@@ -10190,9 +10218,11 @@ function buildDartHeatmap(cells, opts){
   DB_SECTORS.forEach((num,i)=>{
     const s0=i*DEG-DEG/2, e0=s0+DEG;
     const sw = 'stroke="#151613" stroke-width="0.5"';
-    s += `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${heatFill(heat(num,1,'inner'))}" ${sw}><title>${num} (inner): ${hits(num,1,'inner')} hit${hits(num,1,'inner')===1?'':'s'}</title></path>`;
+    const innerLabel = noZoneTracking ? `${num}` : `${num} (inner)`;
+    const outerLabel = noZoneTracking ? `${num}` : `${num} (outer)`;
+    s += `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${heatFill(heat(num,1,singleInnerZone))}" ${sw}><title>${innerLabel}: ${hits(num,1,singleInnerZone)} hit${hits(num,1,singleInnerZone)===1?'':'s'}</title></path>`;
     s += `<path d="${annulus(R.trebleIn,R.trebleOut,s0,e0)}" fill="${heatFill(heat(num,3))}" ${sw}><title>T${num}: ${hits(num,3)} treble hit${hits(num,3)===1?'':'s'}</title></path>`;
-    s += `<path d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${heatFill(heat(num,1,'outer'))}" ${sw}><title>${num} (outer): ${hits(num,1,'outer')} hit${hits(num,1,'outer')===1?'':'s'}</title></path>`;
+    s += `<path d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${heatFill(heat(num,1,singleOuterZone))}" ${sw}><title>${outerLabel}: ${hits(num,1,singleOuterZone)} hit${hits(num,1,singleOuterZone)===1?'':'s'}</title></path>`;
     s += `<path d="${annulus(R.doubleIn,R.doubleOut,s0,e0)}" fill="${heatFill(heat(num,2))}" ${sw}><title>D${num}: ${hits(num,2)} double hit${hits(num,2)===1?'':'s'}</title></path>`;
     const [nx,ny]=xy(R.numAt,s0+DEG/2);
     s += `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="17" fill="#efe7d2" style="pointer-events:none;user-select:none">${num}</text>`;
