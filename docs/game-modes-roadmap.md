@@ -123,7 +123,7 @@ added later without starting from scratch each time.
 |---|---|
 | Architecture approach | Proper generalization now — refactor X01 into "the first plugin" in a real game-type framework, rather than bolting Cricket on separately |
 | Cricket stats depth | ✅ Built. A dedicated Cricket stat (Marks Per Round) plus 5 more stat bubbles, Personal Bests, and profile charts (Player Profile), and its own Home page leaderboard set (MPR, Most Cricket Wins, 9 Marks, Perfect Leg) |
-| Cricket variant scope for v1 | Standard cricket only (highest score wins). Cut-throat (points scored against opponents) deferred to later |
+| Cricket variant scope for v1 | Standard cricket only (highest score wins). Cut-throat (points scored against opponents) deferred to later — now has its own design doc, `docs/cutthroat-cricket-roadmap.md` |
 | Custom cricket target count | ✅ Built. Fixed at 7 targets — the same count as classic cricket (15, 16, 17, 18, 19, 20, Bull) — freely chosen from 1-20 + Bull, but never more or fewer than 7. Enforced at Start (`startGame()` blocks with an alert if the count is wrong) |
 | Scoring screen during Cricket | ✅ Built. A dedicated Cricket scoring screen (traditional chalkboard scorecard — slash/X/circled-X marks), not the X01 Pad or Dartboard screens — it's the automatic default the instant a Cricket game is active, with no player choice to fall back to Pad/Dartboard |
 | Live scoreboard orientation | ✅ Built. Cricket's `renderers.cricket` inherits portrait/landscape detection from the shared shell — see `docs/archive/existing-app-prep-roadmap.md` item 11 |
@@ -265,7 +265,9 @@ depends on it.
   logic, not simplified away.
 - Cut-throat (points scored against opponents instead of for yourself, lowest score
   wins) is explicitly out of scope for v1 — deferred since it inverts the scoring and
-  win-condition logic and is cleaner to add once standard mode is solid.
+  win-condition logic and is cleaner to add once standard mode is solid. **Standard
+  mode has long since proven solid; the variant now has its own design doc,
+  `docs/cutthroat-cricket-roadmap.md`, tracked on `docs/open-roadmap-items.md`.**
 
 ## Cricket stats (full parity with X01)
 
