@@ -13,6 +13,7 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   evaluateVisitBaseball, baseballInningTarget, parseSqliteTimestamp,
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
   evaluateDartDoublesPractice, evaluateDartAroundTheClock, chuckinTiersReached, isStaircaseFinish,
+  isBedAndBreakfast, isMadhouseFinish, isShanghaiVisit,
   isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,
   pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
   CHECKOUT_TRAINER_TRICK_CHANCE, listUnsolvableTargets, gradeCheckoutDeclaration } = scoring;
@@ -1007,6 +1008,105 @@ describe('isStaircaseFinish (Staircase Finish achievement, REFERENCE.md\'s Achie
   test('fewer or more than exactly 3 darts never qualifies', () => {
     assert.equal(isStaircaseFinish(32, [d(16,1), d(8,1)]), false);
     assert.equal(isStaircaseFinish(32, [d(16,1), d(8,1), d(4,2), d(1,1)]), false);
+  });
+});
+
+describe('isBedAndBreakfast (docs/culture-badges-roadmap.md Part A)', () => {
+  test('S20, S5, S1 in the canonical order', () => {
+    assert.equal(isBedAndBreakfast([d(20,1), d(5,1), d(1,1)]), true);
+  });
+
+  test('any order still qualifies — the joke is the three numbers, not the sequence', () => {
+    assert.equal(isBedAndBreakfast([d(1,1), d(20,1), d(5,1)]), true);
+    assert.equal(isBedAndBreakfast([d(5,1), d(1,1), d(20,1)]), true);
+  });
+
+  test('scoring 26 a different way (not S20/S5/S1) does not qualify', () => {
+    // 16+9+1 also totals 26, but it isn't the specific "hotel breakfast" splash —
+    // the predicate matches on the exact dart set, not just the total.
+    assert.equal(isBedAndBreakfast([d(16,1), d(9,1), d(1,1)]), false);
+  });
+
+  test('right numbers, wrong multiplier on any dart fails', () => {
+    assert.equal(isBedAndBreakfast([d(20,2), d(5,1), d(1,1)]), false); // double 20, not single
+    assert.equal(isBedAndBreakfast([d(20,1), d(5,3), d(1,1)]), false); // treble 5, not single
+  });
+
+  test('fewer or more than exactly 3 darts never qualifies', () => {
+    assert.equal(isBedAndBreakfast([d(20,1), d(5,1)]), false);
+    assert.equal(isBedAndBreakfast([d(20,1), d(5,1), d(1,1), d(1,1)]), false);
+  });
+
+  test('a missing/empty darts array never qualifies', () => {
+    assert.equal(isBedAndBreakfast(null), false);
+    assert.equal(isBedAndBreakfast([]), false);
+  });
+});
+
+describe('isMadhouseFinish (docs/culture-badges-roadmap.md Part A)', () => {
+  test('won the leg and the last dart is double 1', () => {
+    assert.equal(isMadhouseFinish(true, [d(20,3), d(20,1), d(1,2)]), true);
+  });
+
+  test('a single-dart double-1 checkout still qualifies — only the last dart matters', () => {
+    assert.equal(isMadhouseFinish(true, [d(1,2)]), true);
+  });
+
+  test('did not win the leg — never qualifies even with a trailing double 1', () => {
+    assert.equal(isMadhouseFinish(false, [d(20,3), d(20,1), d(1,2)]), false);
+  });
+
+  test('won, but the last dart is a different double', () => {
+    assert.equal(isMadhouseFinish(true, [d(20,3), d(20,1), d(2,2)]), false);
+  });
+
+  test('won, but the last dart on sector 1 is not a double', () => {
+    assert.equal(isMadhouseFinish(true, [d(1,1)]), false); // single 1
+    assert.equal(isMadhouseFinish(true, [d(1,3)]), false); // treble 1
+  });
+
+  test('no darts recorded never qualifies', () => {
+    assert.equal(isMadhouseFinish(true, []), false);
+    assert.equal(isMadhouseFinish(true, null), false);
+  });
+});
+
+describe('isShanghaiVisit (docs/culture-badges-roadmap.md Part A)', () => {
+  test('single, double, and treble of the same number, in order', () => {
+    assert.equal(isShanghaiVisit([d(20,1), d(20,2), d(20,3)]), true);
+  });
+
+  test('any order still qualifies', () => {
+    assert.equal(isShanghaiVisit([d(7,3), d(7,1), d(7,2)]), true);
+  });
+
+  test('every number 1-20 can Shanghai, not just 20', () => {
+    assert.equal(isShanghaiVisit([d(1,1), d(1,2), d(1,3)]), true);
+  });
+
+  test('two singles and a treble (not a genuine Shanghai) fails', () => {
+    assert.equal(isShanghaiVisit([d(20,1), d(20,1), d(20,3)]), false);
+  });
+
+  test('a double and two trebles (missing the single) fails', () => {
+    assert.equal(isShanghaiVisit([d(20,2), d(20,3), d(20,3)]), false);
+  });
+
+  test('S/D/T of DIFFERENT numbers does not qualify — must be the same number', () => {
+    assert.equal(isShanghaiVisit([d(20,1), d(19,2), d(18,3)]), false);
+  });
+
+  test('the bull can never Shanghai — no treble-bull ring exists', () => {
+    assert.equal(isShanghaiVisit([d(25,1), d(25,2), d(25,2)]), false);
+  });
+
+  test('a miss anywhere in the visit fails', () => {
+    assert.equal(isShanghaiVisit([d(20,1), d(20,2), d(0,0)]), false);
+  });
+
+  test('fewer or more than exactly 3 darts never qualifies', () => {
+    assert.equal(isShanghaiVisit([d(20,1), d(20,2)]), false);
+    assert.equal(isShanghaiVisit([d(20,1), d(20,2), d(20,3), d(20,1)]), false);
   });
 });
 

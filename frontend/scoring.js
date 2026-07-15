@@ -442,6 +442,58 @@ function isStaircaseFinish(startScore, darts){
     d3.sector===quarter && d3.mult===2;
 }
 
+// Darts-culture one-off badges (docs/culture-badges-roadmap.md Part A) — real
+// moments players already shout about at the board, each a pure predicate over
+// a visit's darts (or the visit's outcome), following isStaircaseFinish()'s own
+// precedent immediately above: checked where checkout darts are already
+// inspected, unit-tested here rather than only covered by a one-off manual check.
+
+// 🍳 Bed & Breakfast: the classic "26" splash around the 20 — S20, S5, S1, in
+// any order. An exact sector/multiplier match on all three darts, not merely
+// `scored===26` — the joke is specifically that splash, not just any route to
+// 26 (which for a legal 3-single visit happens to be the only route anyway, but
+// matching on darts directly keeps the predicate self-contained and correct
+// even if a future 1-2-dart short visit could otherwise coincidentally net 26).
+function isBedAndBreakfast(darts){
+  if(!darts || darts.length !== 3) return false;
+  const need = [[20,1], [5,1], [1,1]];
+  const remaining = need.slice();
+  for(const dart of darts){
+    const i = remaining.findIndex(([s,m]) => s===dart.sector && m===dart.mult);
+    if(i < 0) return false;
+    remaining.splice(i, 1);
+  }
+  return true;
+}
+
+// 🏚️ Madhouse: won the leg by checking out on double 1 — the finish nobody
+// wants to be left on. Same "last dart" shape the Bullseye Finish chain check
+// already uses inline in index.html, pulled into its own pure predicate here
+// per the roadmap's explicit direction to follow the Staircase Finish precedent.
+function isMadhouseFinish(win, darts){
+  if(!win || !darts || !darts.length) return false;
+  const last = darts[darts.length-1];
+  return last.sector===1 && last.mult===2;
+}
+
+// 🀄 Shanghai visit: a single, double, AND treble of the SAME number in one
+// visit, any order, any number 1-20 — the feat landing inside a normal X01 leg,
+// deliberately independent of the Shanghai game mode's own instant-win badge
+// (docs/shanghai-roadmap.md), which is its own separate thing entirely (see
+// that doc and this one for the cross-reference). The bull is never eligible —
+// there's no treble-bull ring (makeDartCore() already downgrades an attempted
+// "treble bull" tap to a single), so a same-number single+double+treble set is
+// structurally impossible there — which the sector<=20 range check below
+// already rules out with no special case needed.
+function isShanghaiVisit(darts){
+  if(!darts || darts.length !== 3) return false;
+  const sector = darts[0].sector;
+  if(sector < 1 || sector > 20) return false;
+  if(!darts.every(dart => dart.sector === sector)) return false;
+  const mults = darts.map(dart => dart.mult).sort();
+  return mults[0]===1 && mults[1]===2 && mults[2]===3;
+}
+
 // Daily Challenge badge trigger thresholds (REFERENCE.md's Achievements section,
 // docs/archive/achievements-badges-roadmap.md) — a day-count streak, not a visit/leg count,
 // so "recurring" here means "can fire again after a later streak reaches the same
@@ -515,6 +567,7 @@ if (typeof module !== 'undefined' && module.exports) {
     evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS, CRICKET_ALL_NUMBERS,
     evaluateVisitBaseball, baseballInningTarget, parseSqliteTimestamp,
     evaluateDartDoublesPractice, evaluateDartAroundTheClock, isStaircaseFinish,
+    isBedAndBreakfast, isMadhouseFinish, isShanghaiVisit,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,
     pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
     CHECKOUT_TRAINER_TRICK_CHANCE, listUnsolvableTargets, gradeCheckoutDeclaration,

@@ -1438,7 +1438,7 @@ badge that dart awarded.
 
 ## 4. Achievements & Badges
 
-89 badges (23 X01 + 4 Cricket + 2 Baseball + 2 Tournament + 3 Daily Challenge +
+99 badges (33 X01 + 4 Cricket + 2 Baseball + 2 Tournament + 3 Daily Challenge +
 19 Just Chuckin' It + 34 Checkout Trainer + 2 Practice Drills) — that split is by
 which table each is listed under below (and which section of the Player
 Profile's Badge Case each renders in, via `BADGE_INFO`'s
@@ -1494,7 +1494,7 @@ coverage of them).
   the `onGameCompleted` hook with no room to thread a badge result back
   through that response.
 
-### The 25 badges, exact trigger conditions
+### The 28 badges, exact trigger conditions
 
 **Expanded-chain badges** (the `CHAIN_CHECKS` list in `enterTurn()` — collected
 as an array and filtered by suppression pairs, not an if/else-if chain, so a
@@ -1513,6 +1513,9 @@ turn matching more than one condition queues all of them):
 | 🪜 **Staircase Finish** | `win && isStaircaseFinish(preVisitScore, darts)` (`frontend/scoring.js`, unit-tested in `backend/test/scoring.test.js`) — checked out in exactly 3 darts by aiming at a double, missing to the single, and repeating that all the way down: `darts === [single(N), single(N/2), double(N/4)]` where `N = preVisitScore/2`. Only qualifies when `preVisitScore` is a multiple of 8 with `N<=20` and `N/4>=1` — the 5 qualifying starting scores are 8, 16, 24, 32, and 40 (e.g. 32: single 16, single 8, double 4; 40: single 20, single 10, double 5; 8: single 4, single 2, double 1). `preVisitScore` is read from `_snap.score` (the turn's snapshot, captured before `p.score` is mutated), not `p.score` itself, since by the time `CHAIN_CHECKS` runs `p.score` already reflects the post-visit value. |
 | 🐂 **Triple Bull** | `win && darts.length===3 && every dart is sector===25 && mult===2` — checked out on 150 by hitting the double bull three separate times in one visit. There's no treble-bull ring (`makeDart()` already downgrades any attempted "treble bull" tap to a single), so this is three individual double-bull darts, not one dart at a x3 multiplier. Gets the same mega-tier confetti overlay as a nine-darter (`showAchievement()`'s `mega` check) — a comparably rare feat. |
 | 🏹 **Bullseye Finish** | `win && the visit's last dart has sector===25 && mult===2` — the checkout's final dart is the double bull, at any total. Distinct from Bullseye Gauntlet (double bull hit twice *mid-visit*, not necessarily finishing there) and from Triple Bull (all three darts are the bull, not just the last one). |
+| 🍳 **Bed & Breakfast** | `isBedAndBreakfast(darts)` (`frontend/scoring.js`, unit-tested in `backend/test/scoring.test.js`, docs/culture-badges-roadmap.md Part A) — the classic "26" splash around the 20: a visit of exactly single 20, single 5, and single 1, in any order. An exact sector/multiplier match on all three darts, not merely `scored===26` (other routes to that same total aren't the joke). No `win`/`bust` requirement — the splash itself is the achievement, whatever the visit's outcome. |
+| 🏚️ **Madhouse** | `isMadhouseFinish(win, darts)` (`frontend/scoring.js`, unit-tested) — won the leg and the visit's last dart is double 1, the finish nobody wants to be left on. Same "last dart" shape as Bullseye Finish above, with sector 1 in place of the bull. |
+| 🀄 **Shanghai** | `isShanghaiVisit(darts)` (`frontend/scoring.js`, unit-tested) — a single, double, AND treble of the *same* number in one visit, any order, any number 1-20 (the bull is structurally excluded — there's no treble-bull ring, `makeDartCore()` already downgrades an attempted "treble bull" tap to a single). Deliberately independent of the Shanghai *game mode*'s own instant-win badge (`docs/shanghai-roadmap.md`) — this is the same feat landing inside a normal X01 leg; each doc cross-references the other so the two features never merge. |
 
 **Suppression pairs**: two conditions above are deliberately treated as the same
 event wearing two labels, not two distinct achievements — the more specific one
@@ -1523,6 +1526,15 @@ suppresses the generic one when both would otherwise match the same visit:
   dart is trivially also the bull, but the more specific story wins).
 - **Bullseye Gauntlet** suppresses **Double Trouble** (double-bull-twice is
   technically "last two darts both doubles" too).
+
+Bed & Breakfast, Madhouse, and Shanghai each co-fire freely alongside any other
+matching entry (no suppression pair) — their dart-shape requirements don't
+overlap closely enough with an existing condition to be "the same event wearing
+two labels": Bed & Breakfast requires an all-singles visit no other entry needs,
+Madhouse only inspects the last dart's sector/multiplier (distinct from Bullseye
+Finish's sector 25), and Shanghai's exact `{single, double, treble}` multiplier
+set can never also satisfy Hat Trick (which requires all three darts to be
+trebles).
 
 All other badges are checked independently (own `if` blocks), so any of them can
 co-fire with a chain badge or with each other in the same turn/leg:
@@ -1543,6 +1555,38 @@ co-fire with a chain badge or with each other in the same turn/leg:
 | 🕐 **Around the Clock** | `singlesHit.size >= 20` — every number 1–20 hit as a single at least once **within the current game** (`singlesHit` is created fresh in `newMatchPlayer()` at every `startGame()`, persists across legs/sets within that game, and resets when a new game starts — not just on page reload). **Once-badge.** |
 | 🌍 **Around the World** | Lifetime: all 63 dart outcomes hit at least once (20 numbers × single/double/treble = 60, plus outer bull, double bull, and a miss). Checked via an async progress query (`/api/players/around-the-world`), skipped once the client-side `earnedBadgeCache` already has it. **Once-badge.** |
 | 👻 **Ghost Slayer** | First-ever `result==='win'` row this player writes to the `ghost_races` table (§13) — win a race against a replay of one of your own past legs (Ghost Opponent, below). Unlike every other badge in this table, checked server-side: `recordGhostRace()` (`backend/db.js`) calls `awardBadge(playerName, 'ghost_slayer', true)` on every win — `once` mode's `INSERT OR IGNORE` makes the call a no-op past the first time, so no separate first-win check is needed. **Once-badge.** |
+
+**The lifetime-180s milestone ladder** (docs/culture-badges-roadmap.md Part A,
+`ONE_EIGHTY_MILESTONE_LADDERS` in `frontend/index.html`, checked from `enterTurn()`'s
+existing `if(ev.scored===180){...}` block). 180! has always been a live
+celebration (`queueBadge('180', p.name)`) but never a `player_badges` row at all —
+it's one of the three older top-level stats (180/Big Fish/Nine-Darter, see
+"Description text" below), so it had no milestone tiers despite how central
+180s are and how well this data-driven ladder shape has worked for Just
+Chuckin' It and Checkout Trainer. Reuses `CHUCKIN_MILESTONE_LADDERS`'s exact
+`{metric,idPrefix,statNoun,descFor,tiers}` shape and `checkChuckinMilestoneTier()`
+wholesale (that helper is fully generic despite its name, already shared with
+Checkout Trainer's own ladders) — a single ladder, X01-only, whose value is
+`(p.lifetimeOneEightiesBase||0) + p.sessionOneEighties`: `lifetimeOneEightiesBase`
+is fetched once per game at `newMatchPlayer()` time via `GET /api/players/stat-
+bubbles?name=<player>` with **no `mode` param** (`_mf(undefined)` returns `''`
+server-side, so this is a genuinely unscoped H2H+practice lifetime count, not
+one mode's own slice), and `sessionOneEighties` increments locally on every
+180 this game — the same "avoid a network round-trip per dart/turn" reasoning
+`newMatchPlayerChuckin()` documents for its own lifetime bases. **Permanent,
+once-earned tiers** (`once:true`, never undo-revoked) — the roadmap doc's own
+framing: "ladder tiers are permanent, like every other ladder," the same rule
+Chuckin/Checkout Trainer's ladders already follow regardless of how
+competitive the surrounding game mode is. Its `BADGE_INFO` rows carry **no
+category flag** (unlike Chuckin's `chuckin:true`/Checkout Trainer's
+`checkoutTrainer:true`) — X01 already has a Badge Case section to fold into,
+unlike those two modes when their own ladders were built, so these 5 tiers
+render inside the existing X01 section alongside the 28 badges above instead
+of getting a new section of their own.
+
+| Ladder | Metric | Tiers (threshold → label) |
+|---|---|---|
+| Lifetime 180s | `lifetimeOneEightiesBase + p.sessionOneEighties` | 10 Ton-Eighty Club 🎯 · 25 Maximum Regular 🔴 · 50 Half-Century of Maximums 🌟 · 100 Century of Maximums 💯 · 250 Maximum Machine 🤖 |
 
 **Cricket badges** (checked in `enterTurnCricket()`/`onLegWonCricket()`,
 `frontend/index.html`). 9 Marks/Perfect Leg (game-modes-roadmap.md build-order

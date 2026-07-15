@@ -4236,7 +4236,7 @@ async function startGame(){
 
 // a player's per-match runtime record (separate from lifetime stats)
 function newMatchPlayer(name, start){
-  return { name, score:start,
+  const p = { name, score:start,
     doubleOut: playerOut(name)==='double', // this player's own finish rule
     legPoints:0,  legVisits:0,    // resets every leg  -> per-leg average
     legDarts:0,   legBusts:0,     // darts thrown + busts this leg
@@ -4250,7 +4250,21 @@ function newMatchPlayer(name, start){
     metronomeFired:false,        // Metronome fires once per leg, not once per qualifying turn
     pendingIceInTheVeins:false,  // true right after a bust, cleared after the player's next visit
     legWorstDeficit:0,           // largest (my remaining - opponent remaining) seen this leg (Comeback Kid)
-    singlesHit: new Set() };     // distinct 1-20 singles hit this session (Around the Clock)
+    singlesHit: new Set(),       // distinct 1-20 singles hit this session (Around the Clock)
+    sessionOneEighties:0, lifetimeOneEightiesBase:0 }; // Lifetime 180s ladder (docs/culture-badges-roadmap.md Part A)
+  // Fetched once at game start (not re-queried per turn) — same "avoid a network
+  // round-trip per dart/turn" reasoning newMatchPlayerChuckin() documents for its
+  // own lifetime bases. No mode param -> _mf(undefined) returns '' server-side ->
+  // genuinely unscoped lifetime (H2H + practice combined), matching what "lifetime"
+  // should mean for a ladder that counts a 180 regardless of which mode it was hit
+  // in. If this hasn't resolved by the time a 180 is hit, the milestone check just
+  // uses 0 as the base and catches up once it lands — worst case a tier is checked
+  // one 180 late, never a false positive (same tradeoff Chuckin's ladders accept).
+  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(name)}`).then(stats=>{
+    if(!stats) return;
+    p.lifetimeOneEightiesBase = (stats.one80s || 0) - p.sessionOneEighties;
+  }).catch(()=>{});
+  return p;
 }
 
 // Ghost Opponent (docs/archive/ghost-opponent-roadmap.md): a virtual second "player" whose
@@ -5286,6 +5300,12 @@ const BADGE_INFO = {
   staircasefinish:    { icon:'🪜', label:'Staircase Finish', desc:'Check out in exactly three darts by halving the target twice: single, single, then double — e.g. 32 down to 16, down to 8, then double 4.' },
   triplebull:         { icon:'🐂', label:'Triple Bull', desc:'Check out on 150 by hitting the double bull three times in one visit.' },
   bullseyefinish:     { icon:'🏹', label:'Bullseye Finish', desc:'Check out with the double bull as your final dart, at any total.' },
+  // Darts-culture one-offs (docs/culture-badges-roadmap.md Part A) — same
+  // no-category-flag treatment as every other plain X01 badge above, so they
+  // fold into the existing X01 Badge Case section rather than getting their own.
+  bedandbreakfast:    { icon:'🍳', label:'Bed & Breakfast', desc:'Throw the classic "26" splash — single 20, single 5, single 1 — in one visit, any order.' },
+  madhouse:           { icon:'🏚️', label:'Madhouse', desc:'Win a leg by checking out on double 1 — the finish nobody wants to be left on.' },
+  shanghaivisit:      { icon:'🀄', label:'Shanghai', desc:'Hit a single, double, AND treble of the same number in one visit.' },
   baseballperfectinning: { icon:'🔥', label:'Perfect Inning', desc:'Score 9 runs in one Baseball inning — three trebles on target.', baseball:true },
   baseballperfectgame:    { icon:'🏆', label:'Perfect Game', desc:'Win a Baseball leg with a perfect 9 runs in every one of the 9 innings — 81 total.', baseball:true },
   cricket9marks:       { icon:'🎯', label:'9 Marks', desc:'Score 9 marks in one Cricket visit — three trebles, the maximum possible.', cricket:true },
@@ -6154,6 +6174,39 @@ CHUCKIN_MILESTONE_LADDERS.forEach(ladder=>{
     // The top tier of each ladder gets a longer celebration, same convention as
     // Around the World (the biggest completionist milestone) getting 5000 vs. the
     // usual 2500-3000.
+    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
+  });
+});
+// Lifetime 180s ladder (docs/culture-badges-roadmap.md Part A) — 180! has always
+// been a recurring live celebration (queueBadge('180',...) in enterTurn()) but
+// never a player_badges row at all (see REFERENCE.md's Achievements section: 180/
+// Big Fish/Nine-Darter are older top-level stats, not badges), so it had no
+// milestone tiers despite how central 180s are and how well this data-driven
+// ladder shape has worked five times now. Reuses CHUCKIN_MILESTONE_LADDERS'
+// exact {metric,idPrefix,statNoun,descFor,tiers} shape and (below)
+// checkChuckinMilestoneTier() wholesale — that helper is fully generic despite
+// its name, already shared by Checkout Trainer's own ladders. X01-only (one
+// ladder, one array entry); its BADGE_INFO rows deliberately carry no category
+// flag, unlike Chuckin/Checkout Trainer's ladders, so they fold into the
+// existing X01 Badge Case section (renderPlayerBadges()'s x01Ids bucket is
+// "anything without one of the other flags") instead of getting a new section
+// of their own — X01 already has one to fold into, unlike those two modes.
+const ONE_EIGHTY_MILESTONE_LADDERS = [
+  { metric:'lifetime180s', idPrefix:'x01_180_', statNoun:'lifetime 180s',
+    descFor: t => `Hit ${t.toLocaleString()} lifetime 180s in X01.`,
+    tiers: [
+      { threshold:10,  label:'Ton-Eighty Club',          icon:'🎯' },
+      { threshold:25,  label:'Maximum Regular',          icon:'🔴' },
+      { threshold:50,  label:'Half-Century of Maximums', icon:'🌟' },
+      { threshold:100, label:'Century of Maximums',      icon:'💯' },
+      { threshold:250, label:'Maximum Machine',          icon:'🤖' },
+    ] },
+];
+ONE_EIGHTY_MILESTONE_LADDERS.forEach(ladder=>{
+  ladder.tiers.forEach((tier, i)=>{
+    const id = ladder.idPrefix + tier.threshold;
+    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold) };
+    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
     ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
   });
 });
@@ -7738,6 +7791,11 @@ function enterTurn(){
     sendHaWebhook('oneeighty', p.name, game.category);
     fireMomentCard('180', { icon:'🎯', headline:'ONE-EIGHTY!', player:p.name,
       statLine: `${game.category} · ${game.practice?'Practice':'H2H'}` });
+    // Lifetime 180s ladder (docs/culture-badges-roadmap.md Part A) — permanent
+    // milestone tiers, not undo-revocable, same "ladder tiers are permanent, like
+    // every other ladder" convention Chuckin/Checkout Trainer's own ladders follow.
+    p.sessionOneEighties += 1;
+    checkChuckinMilestoneTier(ONE_EIGHTY_MILESTONE_LADDERS[0], p.name, (p.lifetimeOneEightiesBase||0) + p.sessionOneEighties);
   }
   if(ev.win && ev.pointsThisVisit === 170){
     game.gameBigFish += 1;
@@ -7818,6 +7876,22 @@ function enterTurn(){
     // (which is about hitting double bull twice mid-visit, not finishing on it).
     { id:'bullseyefinish', icon:'🏹', headline:'BULLSEYE FINISH', statLine:'Checked out on the bull',
       test: () => ev.win && _d.length>=1 && _d[_d.length-1].sector===25 && _d[_d.length-1].mult===2 },
+    // Darts-culture one-offs (docs/culture-badges-roadmap.md Part A) — pure
+    // predicates over this visit's darts, same shape as Staircase Finish above,
+    // living in scoring.js so they're covered by a committed test rather than
+    // only a manual/Playwright check. None of these overlap with an existing
+    // chain entry closely enough to need a suppression pair: Bed & Breakfast is
+    // an all-singles visit (no chain entry above requires that shape), Madhouse
+    // only inspects the last dart's sector/multiplier (distinct from Bullseye
+    // Finish's sector 25), and Shanghai visit's exact {single,double,treble}
+    // multiplier set can never also satisfy Hat Trick (which requires all three
+    // darts to be trebles).
+    { id:'bedandbreakfast', icon:'🍳', headline:'BED & BREAKFAST!', statLine:'S20, S5, S1 — the classic 26 splash',
+      test: () => isBedAndBreakfast(_d) },
+    { id:'madhouse', icon:'🏚️', headline:'MADHOUSE!', statLine:'Checked out on double 1',
+      test: () => isMadhouseFinish(ev.win, _d) },
+    { id:'shanghaivisit', icon:'🀄', headline:'SHANGHAI!', statLine:'Single, double, and treble of the same number',
+      test: () => isShanghaiVisit(_d) },
   ];
   let _chainMatched = CHAIN_CHECKS.filter(c => c.test());
   const _chainSuppressed = new Set(_chainMatched.flatMap(c => c.suppresses || []));

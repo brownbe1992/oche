@@ -1,10 +1,14 @@
 # Badge Expansion 2 — Darts-Culture One-Offs & Coverage Parity — Design Roadmap
 
-> Status: **design phase, not started.** Two independently shippable
-> halves, tracked as two items on `docs/open-roadmap-items.md`: (A) culture
-> one-offs + a lifetime-180s ladder, (B) badge-coverage parity for the
-> modes the 89-badge roster currently shortchanges (Baseball: 2 badges,
-> Doubles Practice: 0).
+> Status: **Part A done, 2026-07 — Part B not started.** Two independently
+> shippable halves, tracked as two items on `docs/open-roadmap-items.md`:
+> (A) culture one-offs + a lifetime-180s ladder — **shipped**, see
+> `REFERENCE.md`'s Achievements section (the `CHAIN_CHECKS` table and the
+> new "lifetime-180s milestone ladder" subsection) for the authoritative
+> behavior; (B) badge-coverage parity for the modes the (now 99-badge)
+> roster still shortchanges (Baseball: 2 badges, Doubles Practice: 0) —
+> still open, see `docs/open-roadmap-items.md` item 29. This doc stays in
+> `docs/` (not archived) until Part B ships too.
 
 ## Part A — Culture one-offs + the 180s ladder
 
@@ -77,16 +81,22 @@ leaves real feats uncelebrated:
   "two singles + treble is not a Shanghai" negative, The Cycle;
   ladder-threshold tests via the existing `chuckinTiersReached()` helper
   they'll reuse). REFERENCE.md's Achievements section and the badge-count
-  totals (89 today, updated in README in three places — they have drifted
-  before) update in the same change.
+  totals (89 before Part A, now 99 — updated in README in three places
+  plus the sum-of-parts sentence, since this exact count has drifted
+  before) update in the same change. Part B's own badges get the same
+  treatment when they ship.
 
-## Open questions for whoever picks this up
+## Resolved for Part A
 
-- Exact ladder thresholds above are first passes per house convention —
-  tune against real play, don't re-derive.
-- Should **Bed & Breakfast** also fire in Cricket (where S20/S5/S1 is
-  possible but 5s/1s are usually deliberate off-target taps post-BUG-23)?
-  Lean: X01 only — in Cricket it isn't the accident the joke requires.
+- Ladder thresholds shipped exactly as first-passed above (10/25/50/100/250)
+  — not re-derived.
+- **Bed & Breakfast** is X01 only, per this doc's own lean — it's checked in
+  `enterTurn()`'s `CHAIN_CHECKS`, a function Cricket's own turn-entry path
+  (`enterTurnCricket()`) never calls, so this is structural rather than an
+  extra condition to maintain.
+
+## Open questions for whoever picks up Part B
+
 - Whether Part B should wait for Shanghai/Halve-It (which arrive with
   their own badge sets) so the Badge Case reorganizes once — lean: no,
   parity is worth having now; new modes slot in fine.
