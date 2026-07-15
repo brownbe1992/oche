@@ -275,7 +275,7 @@ SQLite-file copy already documented in the README's Data Storage section.
   import's player/opponent stubs onto an *existing* row with a matching
   `uuid`; it has no concept of "these two different local rows, with two
   different uuids, are secretly the same person." Now has its own design
-  doc, `docs/player-merge-roadmap.md` — a general duplicate-player-merge
+  doc, `docs/archive/player-merge-roadmap.md` — a general duplicate-player-merge
   tool, useful on its own regardless of import, and a genuinely harder
   problem (whose games/turns/badges win on conflict?) than anything this
   feature needed to solve. That doc also flags a real interaction worth

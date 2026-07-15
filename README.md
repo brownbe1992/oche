@@ -722,7 +722,7 @@ Plus global leaderboards for 180s, Big Fish, and nine-dart finishes, each filter
 
 ### Settings
 
-The Settings page (accessible from the top navigation) holds app-wide configuration, grouped into four tabs: **Account & Access**, **Gameplay & Display**, **Integrations**, and **Admin & Danger Zone**. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, **Daily Challenge**, **Server Errors**, **Backups**, **Data Export**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
+The Settings page (accessible from the top navigation) holds app-wide configuration, grouped into four tabs: **Account & Access**, **Gameplay & Display**, **Integrations**, and **Admin & Danger Zone**. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, **Daily Challenge**, **Server Errors**, **Backups**, **Data Export**, **Merge Players**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
 
 Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accounts--player-pins)) — until an admin account exists, the page offers to create the first one.
 
@@ -808,6 +808,10 @@ Shows the most recent server-side failures (up to 500, newest first) — the sam
 - **Export a player…** — opens a dedicated admin page to pick one player and download just their history: every game they've played as JSON, including opponents' turn-by-turn data from those same games (so a result like "Ben beat Alaina" stays intact) plus a minimal identity record for each opponent. Admin-only; nothing export-related appears on a player's own page.
 - **Spreadsheet (CSV) export** — the same page can also download a simpler CSV of the selected player's own stats for Excel/Numbers/Google Sheets, either one row per game (with per-game totals: points, average per turn, busts, checkouts, result, opponents) or one row per turn (with each dart in plain notation like `T20 S5 D16`). Their stats only — no opponents' turn data — and not importable back into Oche; the JSON export above is the one that moves a player between servers.
 - **Import a player** — on the same page, pick a player export file (from this or another Oche server) and import it. Players are matched by their export identity, not just by name, so a coincidental same-name player already on this server is never merged with it — a genuine match reuses the existing player, otherwise a new one is created (renamed if the name collides). Importing the same file twice is safe: games already present are skipped, not duplicated.
+
+#### Merge Players
+
+Combine two player records that are really the same person — a typo'd second account, or someone added twice under different names. Pick the duplicate to merge away and the player who survives; the survivor keeps their own name, finish rule, and PIN, and absorbs the duplicate's entire history: games, turns, wins, badges, Daily Challenge attempts, tournament and league records, dart components/loadouts, and ghost races. Before anything happens you get a full **preview** of exactly what will move, and the merge refuses to run at all if the two records genuinely conflict — they've played each other, share a tournament or league, or both attempted the same day's Daily Challenge — with each conflict listed so you can resolve it by hand first. A badge both players earned is kept once (with the higher count and the earliest earned date), and a same-day challenge attempt where only one of them finished keeps the finished one. The whole merge is atomic (it either fully completes or changes nothing), can't be undone afterward, and even keeps old **player exports** of the merged-away player importable — they resolve onto the survivor instead of recreating the duplicate. Admin-only.
 
 #### Danger Zone
 
@@ -963,6 +967,22 @@ DELETE /api/players/stats?name=&mode=       Clear stats for a player            
 POST   /api/players/verify-pin              Verify a player's PIN  { name, pin } (public, rate-limited)
 PUT    /api/players/pin                     Set/reset a player's PIN { name, pin }    [admin]
 DELETE /api/players/pin?name=               Remove a player's PIN                     [admin]
+GET    /api/players/merge-preview           (?source=&target=) Everything a merge     [admin]
+                                             WOULD do, computed without writing:
+                                             per-table move counts, auto-resolved
+                                             badge/challenge conflicts, and the
+                                             blocking-conflict list (shared game/
+                                             tournament/league, ambiguous same-day
+                                             challenge attempts). 404 unknown player,
+                                             400 same player.
+POST   /api/players/merge                   { source, target } Absorb source's full   [admin]
+                                             history into target and delete source's
+                                             row, atomically. Target's name/finish
+                                             rule/PIN always win. 400 if any blocking
+                                             conflict exists (same list the preview
+                                             shows). Old exports of the merged-away
+                                             player keep importing onto the survivor
+                                             (player_uuid_aliases). Rate-limited.
 ```
 
 ### Stats & Leaderboards

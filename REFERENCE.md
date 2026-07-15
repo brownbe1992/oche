@@ -2507,9 +2507,10 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   gamePlayers, turns, darts, timelineEvents, playerBadges,
   dailyChallengeAttempts, tournaments, tournamentPlayers, tournamentRounds,
   tournamentMatches, dartComponents, loadouts, ghostRaces, leagues,
-  leaguePlayers }` — every player/game/stat table (including the four
-  tournament tables, `docs/bug-roadmap.md` BUG-6, and the two league tables,
-  §18), reformatted as plain JSON. It
+  leaguePlayers, leagueFixtures, playerUuidAliases }` — every
+  player/game/stat table (including the four
+  tournament tables, `docs/bug-roadmap.md` BUG-6, the three league tables,
+  §18, and the merge tool's uuid-alias table), reformatted as plain JSON. It
   deliberately excludes the `admins`, `sessions`, `settings`, and `server_errors`
   tables entirely (internal/credential tables, not "your darts data"), and the
   `players` rows only select `id, uuid, name, out_mode, created_at, dart_weight` —
@@ -2587,7 +2588,11 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   or the shape is otherwise malformed. Resolves the main player and every
   opponent stub by **`uuid` first** (never `name` alone, since `name` is only
   unique within one server's own roster): a `uuid` match reuses that existing
-  local row; no match creates a new row from the exported `uuid`+`name`,
+  local row; failing that, the **`player_uuid_aliases` table** (written by
+  the player-merge tool, see "Settings → Merge Players" below) is checked so
+  an old export of a since-merged-away player resolves onto the surviving
+  row instead of recreating a stub duplicate; no match on either creates a
+  new row from the exported `uuid`+`name`,
   uniquifying the name (`"Name (2)"`, `"Name (3)"`, …) if it collides with an
   unrelated local player that has a *different* uuid, rather than silently
   merging two different people's histories onto one row. Every referenced
@@ -2646,6 +2651,81 @@ stay effectively unique. `id` remains the internal join/FK target
 everywhere — `uuid` is exposed in exports (full-database and per-player) as
 the portable identity `importPlayerExport()` (above) keys its player/opponent
 resolution on.
+
+### Settings → Merge Players (admin-only)
+
+`docs/archive/player-merge-roadmap.md`. Combines two player records that are
+really the same person (a typo'd second account, someone added twice): the
+**target** (an explicit admin choice, never inferred from age/game count)
+absorbs the **source**'s full history and the source's row is deleted. Lives
+in **Settings → Admin & Danger Zone → Merge Players** — two `<select>`s
+(source = "duplicate to merge away", target = "player who keeps everything")
+and a **Preview merge…** button; there is no merge without a preview.
+
+- **`db.getMergePreview(sourceName, targetName)`** / **`GET
+  /api/players/merge-preview`** (`?source=...&target=...`, `requireAdmin`) —
+  computes everything a merge WOULD do without writing a byte: `{ ok,
+  blocked, source, target, moves, resolutions, blockers }`. `moves` is
+  per-table counts of the source's rows (games, turns, gameWins, badges,
+  challengeAttempts, tournamentEnrollments, tournamentTitles,
+  tournamentMatchSlots, leagueEnrollments, leagueFixtures, dartComponents,
+  loadouts, ghostRaces, uuidAliases); `resolutions` lists what will be
+  auto-resolved (`sharedBadges`, `resolvableChallengeDates`); `blockers`
+  lists what stops the merge outright (`sharedGames`, `sharedTournaments`,
+  `sharedLeagues`, `ambiguousChallengeDates`). `404` unknown player, `400`
+  same player.
+- **`db.mergePlayers(sourceName, targetName)`** / **`POST
+  /api/players/merge`** (`{ source, target }`, `requireAdmin`, rate-limited
+  10/min like the backup-restore routes, logged server-side) — re-derives
+  the same blockers itself (the API can't be called blind or raced past the
+  preview) and `400`s if any exist; otherwise runs the whole rewrite in a
+  **single transaction** (any failure rolls back to the exact pre-merge
+  state) across every table with a FK into `players.id`:
+  - **Plain reassignment** (no uniqueness constraint, or no shared row can
+    exist once the blockers pass): `game_players`, `turns`,
+    `games.winner_id`, `daily_challenge_attempts`,
+    `tournaments.champion_id`/`runner_up_id`, `tournament_players`,
+    `tournament_matches.player1_id`/`player2_id`/`winner_id`,
+    `league_players`, `dart_components`, `loadouts`, `ghost_races`.
+  - **`player_badges`** (both earned the same badge): the target keeps
+    `MAX(count)` — a merge must never inflate a count beyond what either
+    history actually earned — and `MIN(earned_at)`; the source's remaining
+    unshared badges reassign as-is.
+  - **`daily_challenge_attempts`** (same date from both, exactly one
+    completed — the only unblocked kind): the completed attempt survives,
+    whichever side it came from.
+  - **`league_fixtures`**: `player1_id`/`player2_id` reassign, then any
+    pair the swap left inverted is re-canonicalized back to
+    `player1_id < player2_id` (the invariant
+    `getPendingFixturesForPlayers()`'s order-independent lookup relies on).
+    A source-vs-target fixture can never survive to this point — it would
+    require a shared league, which blocks.
+  - **`loadouts.is_default`**: if the target already has a default loadout,
+    the source's default flag is cleared — the target never ends up with
+    two defaults, same "target's own settings/preferences always win" rule
+    as name/`out_mode`/`dart_weight`/PIN/`uuid` (none of which ever change).
+  - **Blocked outright** — shared game (`game_players`' composite PK would
+    collide, and a "played themselves" row is a structural oddity worth
+    surfacing, not papering over), shared tournament or league enrollment
+    (same collision + silent bracket/standings corruption risk), and a
+    same-date challenge pair where both or neither completed (no
+    non-destructive default; the admin deletes one first via the existing
+    Settings → Daily Challenge reset tool).
+  - **Identity**: aliases already pointing at the source repoint to the
+    target (a chained merge A→B→C leaves A's alias resolving to C in one
+    hop), the source's own `uuid` is recorded in `player_uuid_aliases`
+    pointing at the target, and the source row is deleted via plain SQL —
+    not `deletePlayer()`, whose guards exist to protect exactly the history
+    that has just become the target's. Returns the same
+    `moves`/`resolutions` shape as the preview, captured pre-write.
+
+**Why `player_uuid_aliases` exists**: merging deletes the source's row, so
+its `uuid` would stop resolving — and a *later* import of an old export
+still carrying that uuid (from another server) would silently recreate a
+stub duplicate of the player the admin just consolidated.
+`importPlayerExport()`'s `resolveStub()` therefore checks the alias table as
+a fallback whenever a direct `players.uuid` match fails, before falling
+through to "create a new player" — resolving old exports onto the survivor.
 
 ---
 
@@ -2921,12 +3001,19 @@ the linked game's `completed_at IS NULL` → `in_progress`; else `fulfilled`.
 | `human_darts` / `ghost_darts` | `INTEGER` (nullable) | Total darts each side took to finish this specific race |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 
+### `player_uuid_aliases` (player merge — "Settings → Merge Players")
+| Column | Type | Notes |
+|---|---|---|
+| `uuid` | `TEXT PRIMARY KEY` | A merged-away player's old `uuid` — kept resolvable so an old export still imports onto the survivor instead of recreating a stub duplicate |
+| `player_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | The surviving player this uuid now resolves to. A merge repoints any aliases that targeted the (now-deleted) source, so a chained merge always resolves in one hop |
+| `merged_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
+
 ### Cascade summary
 
 Deleting a `player` cascades: their `game_players` rows, `turns` (and
 transitively their `darts`), `player_badges`, `daily_challenge_attempts`,
-`tournament_players`, their `dart_components`/`loadouts` rows, and their
-`ghost_races` rows. `deletePlayer()`
+`tournament_players`, their `dart_components`/`loadouts` rows, their
+`ghost_races` rows, and any `player_uuid_aliases` rows pointing at them. `deletePlayer()`
 then prunes any `games` row left with zero remaining `game_players` (also run
 once at boot to self-heal older databases). Any `tournament_matches`/`tournaments`
 row referencing the deleted player (`player1_id`/`player2_id`/`winner_id`/

@@ -21,7 +21,7 @@ Player pages:
 - Coaching insights from existing dart analytics — done, see docs/archive/coaching-insights-roadmap.md
 - Shareable moment/stat cards — done, see docs/shareable-moments-roadmap.md (direct social API posting descoped in favor of manual share)
 - Data export (CSV/JSON) — done, all of it: full-database admin export; per-player export AND import (admin-only, JSON, with a portable `players.uuid` + opponent-stub design so H2H data isn't orphaned, and duplicate-safe re-import); and per-player CSV spreadsheet export (games-per-row or turns-per-row, own stats only, non-portable by design), see docs/archive/data-export-roadmap.md
-- Player merge tool (admin-only, combine two duplicate player records into one) — full design in docs/player-merge-roadmap.md, not yet built
+- Player merge tool (admin-only, combine two duplicate player records into one) — done: Settings → Admin & Danger Zone → Merge Players, with a required preview step, hard blocks on genuinely conflicting records, and a `player_uuid_aliases` table keeping old exports of the merged-away player importable, see docs/archive/player-merge-roadmap.md
 
 
 Stats page:

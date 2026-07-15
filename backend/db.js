@@ -389,6 +389,23 @@ db.exec(`
     created_at     TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_ghost_races_player ON ghost_races(player_id);
+
+  -- Player merge (docs/archive/player-merge-roadmap.md): when mergePlayers() absorbs one
+  -- player row into another, the deleted source row's uuid is recorded here pointing
+  -- at the surviving player, so importPlayerExport()'s resolveStub() can still
+  -- resolve an OLD export (from another server, still carrying the merged-away
+  -- uuid) onto the surviving row instead of silently recreating a duplicate stub —
+  -- without this, the merge tool and the import feature actively work against each
+  -- other over time. A merge also REPOINTS any aliases already targeting the source
+  -- (a chained merge A->B then B->C leaves A's alias pointing at C), so an alias
+  -- always resolves to a live players row in one hop. ON DELETE CASCADE: if the
+  -- surviving player is ever genuinely deleted, their accumulated aliases go too.
+  CREATE TABLE IF NOT EXISTS player_uuid_aliases (
+    uuid       TEXT PRIMARY KEY,
+    player_id  INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    merged_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_uuid_aliases_player ON player_uuid_aliases(player_id);
 `);
 
 // Column migrations for tables not recreated above — safe to re-run.
@@ -3790,6 +3807,8 @@ function resetStats() {
 // names) in the Tournaments list. DELETE FROM tournaments cascades all four tables.
 // dart_components/loadouts need no explicit delete either — both have a
 // player_id ON DELETE CASCADE, so wiping players clears them for free.
+// player_uuid_aliases (docs/archive/player-merge-roadmap.md) is covered the same way
+// (player_id ON DELETE CASCADE onto the surviving player's row).
 // ghost_races is covered twice over — player_id and both game FKs are all
 // ON DELETE CASCADE, so either the player wipe or the game wipe below clears it.
 // docs/league-mode-roadmap.md: leagues needs the same explicit delete tournaments
@@ -3850,6 +3869,10 @@ function getFullDatabaseExport() {
     // docs/league-mode-roadmap.md "League fixtures / pending matches": same standing
     // rule as tournament tables above — ordinary user data, no secrets.
     leagueFixtures: db.prepare('SELECT * FROM league_fixtures').all(),
+    // docs/archive/player-merge-roadmap.md: merged-away-uuid aliases are ordinary user data
+    // (identity mappings, no secrets) and materially affect how future per-player
+    // imports resolve, so they belong in "take your data with you" too.
+    playerUuidAliases: db.prepare('SELECT * FROM player_uuid_aliases').all(),
   };
 }
 
@@ -4106,6 +4129,18 @@ function importPlayerExport(payload) {
       idMap.set(stub.id, existing.id);
       return { name: existing.name, uuid: stub.uuid, created: false, renamed: false };
     }
+    // docs/archive/player-merge-roadmap.md: a merged-away player's uuid no longer exists on
+    // any players row, but an OLD export (from another server) can still carry it.
+    // The alias table mergePlayers() maintains resolves it onto the surviving row —
+    // otherwise this import would recreate a stub duplicate of a player the admin
+    // had deliberately consolidated.
+    const aliased = db.prepare(
+      `SELECT p.id, p.name FROM player_uuid_aliases a JOIN players p ON p.id = a.player_id WHERE a.uuid = ?`
+    ).get(stub.uuid);
+    if (aliased) {
+      idMap.set(stub.id, aliased.id);
+      return { name: aliased.name, uuid: stub.uuid, created: false, renamed: false };
+    }
     let finalName = validatePlayerName(stub.name);
     let n = 2;
     const originalName = finalName;
@@ -4199,6 +4234,210 @@ function importPlayerExport(payload) {
   }
 
   return { ok: true, player: playerReport, opponents: opponentReports, gamesImported, gamesSkipped, turnsImported, dartsImported, badgesImported };
+}
+
+/* ---------- player merge (docs/archive/player-merge-roadmap.md) ----------
+   Admin-only: absorbs one player row (the SOURCE) into another (the TARGET —
+   always an explicit admin choice, never inferred) and deletes the source.
+   Touches every table with a FK into players.id (grounded in this file's actual
+   schema, `grep "REFERENCES players"`): game_players, turns, games.winner_id,
+   player_badges, daily_challenge_attempts, tournaments.champion_id/runner_up_id,
+   tournament_players, tournament_matches.player1/player2/winner_id,
+   league_players, league_fixtures.player1_id/player2_id, dart_components,
+   loadouts, ghost_races, player_uuid_aliases.
+
+   Conflict policy (the roadmap doc's recommendations, adopted):
+   - BLOCKED outright — the merge refuses to run — when source and target share
+     a game (game_players' composite PK would collide, and a "played themselves"
+     row is a structural oddity worth surfacing, not papering over), share a
+     tournament or league enrollment (same composite-PK collision, plus silent
+     bracket/standings corruption risk), or both attempted the same Daily
+     Challenge date without exactly one of the two being completed (no
+     non-destructive default exists; the admin resolves it first with the
+     existing Settings -> Daily Challenge reset tool). Blocking the shared-league
+     case also blocks every source-vs-target league fixture, so a fixture can
+     never end up pairing a player with themselves.
+   - AUTO-RESOLVED — a badge both earned keeps MAX(count) (a merge must never
+     inflate a count beyond what either history actually earned) and
+     MIN(earned_at) (the genuinely earliest "first earned"); a same-date
+     challenge pair where exactly one is completed keeps the completed one.
+   - The target's own profile row (name/out_mode/dart_weight/PIN/uuid) always
+     wins, untouched — transplanting the source's PIN onto a different surviving
+     record has security texture the roadmap doc deliberately declined.
+
+   getMergePreview() computes everything the merge WOULD do — per-table move
+   counts, auto-resolutions, and the full blocker list — without writing a byte;
+   the UI requires it before any merge, and mergePlayers() re-derives the same
+   blockers itself so the API can't be raced or called blind. The merge runs in
+   a real transaction (the schema-wide rewrite is atomic: any failure rolls back
+   to exactly the pre-merge state). */
+function _mergeBlockers(sourceId, targetId) {
+  const sharedGames = db.prepare(`
+    SELECT g.id, g.created_at, g.game_type, g.category FROM games g
+     WHERE EXISTS (SELECT 1 FROM game_players WHERE game_id = g.id AND player_id = ?)
+       AND EXISTS (SELECT 1 FROM game_players WHERE game_id = g.id AND player_id = ?)
+     ORDER BY g.id`).all(sourceId, targetId);
+  const sharedTournaments = db.prepare(`
+    SELECT t.id, t.name FROM tournaments t
+     WHERE EXISTS (SELECT 1 FROM tournament_players WHERE tournament_id = t.id AND player_id = ?)
+       AND EXISTS (SELECT 1 FROM tournament_players WHERE tournament_id = t.id AND player_id = ?)
+     ORDER BY t.id`).all(sourceId, targetId);
+  const sharedLeagues = db.prepare(`
+    SELECT l.id, l.name FROM leagues l
+     WHERE EXISTS (SELECT 1 FROM league_players WHERE league_id = l.id AND player_id = ?)
+       AND EXISTS (SELECT 1 FROM league_players WHERE league_id = l.id AND player_id = ?)
+     ORDER BY l.id`).all(sourceId, targetId);
+  // Same-date Daily Challenge attempts from both, where the "keep the completed
+  // one" rule can't decide (both completed, or neither) — needs the admin to
+  // delete one first via the existing challenge reset tool.
+  const ambiguousChallengeDates = db.prepare(`
+    SELECT s.challenge_date AS date FROM daily_challenge_attempts s
+      JOIN daily_challenge_attempts t ON t.challenge_date = s.challenge_date AND t.player_id = ?
+     WHERE s.player_id = ? AND s.completed = t.completed
+     ORDER BY s.challenge_date`).all(targetId, sourceId).map(r => r.date);
+  return { sharedGames, sharedTournaments, sharedLeagues, ambiguousChallengeDates };
+}
+
+function _resolveMergePlayers(sourceName, targetName) {
+  const source = db.prepare('SELECT id, uuid, name FROM players WHERE name = ? COLLATE NOCASE').get(String(sourceName ?? ''));
+  const target = db.prepare('SELECT id, uuid, name FROM players WHERE name = ? COLLATE NOCASE').get(String(targetName ?? ''));
+  if (!source || !target) throw httpError(404, 'Player not found');
+  if (source.id === target.id) throw httpError(400, 'Source and target must be two different players');
+  return { source, target };
+}
+
+function getMergePreview(sourceName, targetName) {
+  const { source, target } = _resolveMergePlayers(sourceName, targetName);
+  const blockers = _mergeBlockers(source.id, target.id);
+  const count = (sql, ...args) => db.prepare(sql).get(...args).n;
+
+  const moves = {
+    games:                 count('SELECT COUNT(*) n FROM game_players WHERE player_id = ?', source.id),
+    turns:                 count('SELECT COUNT(*) n FROM turns WHERE player_id = ?', source.id),
+    gameWins:              count('SELECT COUNT(*) n FROM games WHERE winner_id = ?', source.id),
+    badges:                count('SELECT COUNT(*) n FROM player_badges WHERE player_id = ?', source.id),
+    challengeAttempts:     count('SELECT COUNT(*) n FROM daily_challenge_attempts WHERE player_id = ?', source.id),
+    tournamentEnrollments: count('SELECT COUNT(*) n FROM tournament_players WHERE player_id = ?', source.id),
+    tournamentTitles:      count('SELECT COUNT(*) n FROM tournaments WHERE champion_id = ? OR runner_up_id = ?', source.id, source.id),
+    tournamentMatchSlots:  count('SELECT COUNT(*) n FROM tournament_matches WHERE player1_id = ? OR player2_id = ? OR winner_id = ?', source.id, source.id, source.id),
+    leagueEnrollments:     count('SELECT COUNT(*) n FROM league_players WHERE player_id = ?', source.id),
+    leagueFixtures:        count('SELECT COUNT(*) n FROM league_fixtures WHERE player1_id = ? OR player2_id = ?', source.id, source.id),
+    dartComponents:        count('SELECT COUNT(*) n FROM dart_components WHERE player_id = ?', source.id),
+    loadouts:              count('SELECT COUNT(*) n FROM loadouts WHERE player_id = ?', source.id),
+    ghostRaces:            count('SELECT COUNT(*) n FROM ghost_races WHERE player_id = ?', source.id),
+    uuidAliases:           count('SELECT COUNT(*) n FROM player_uuid_aliases WHERE player_id = ?', source.id),
+  };
+  const resolutions = {
+    // Badges both players earned — target keeps MAX(count)/MIN(earned_at).
+    sharedBadges: db.prepare(`
+      SELECT s.badge_id AS badgeId FROM player_badges s
+        JOIN player_badges t ON t.badge_id = s.badge_id AND t.player_id = ?
+       WHERE s.player_id = ? ORDER BY s.badge_id`).all(target.id, source.id).map(r => r.badgeId),
+    // Same-date challenge pairs where exactly one is completed — that one is kept.
+    resolvableChallengeDates: db.prepare(`
+      SELECT s.challenge_date AS date FROM daily_challenge_attempts s
+        JOIN daily_challenge_attempts t ON t.challenge_date = s.challenge_date AND t.player_id = ?
+       WHERE s.player_id = ? AND s.completed != t.completed
+       ORDER BY s.challenge_date`).all(target.id, source.id).map(r => r.date),
+  };
+  const blocked = !!(blockers.sharedGames.length || blockers.sharedTournaments.length
+    || blockers.sharedLeagues.length || blockers.ambiguousChallengeDates.length);
+  return { ok: !blocked, blocked,
+    source: { name: source.name, uuid: source.uuid },
+    target: { name: target.name, uuid: target.uuid },
+    moves, resolutions, blockers };
+}
+
+function mergePlayers(sourceName, targetName) {
+  const { source, target } = _resolveMergePlayers(sourceName, targetName);
+  const blockers = _mergeBlockers(source.id, target.id);
+  if (blockers.sharedGames.length || blockers.sharedTournaments.length
+      || blockers.sharedLeagues.length || blockers.ambiguousChallengeDates.length) {
+    const parts = [];
+    if (blockers.sharedGames.length) parts.push(`${blockers.sharedGames.length} shared game(s)`);
+    if (blockers.sharedTournaments.length) parts.push(`${blockers.sharedTournaments.length} shared tournament(s)`);
+    if (blockers.sharedLeagues.length) parts.push(`${blockers.sharedLeagues.length} shared league(s)`);
+    if (blockers.ambiguousChallengeDates.length) parts.push(`${blockers.ambiguousChallengeDates.length} unresolvable same-day Daily Challenge attempt(s)`);
+    throw httpError(400, `Merge blocked: ${parts.join(', ')} — resolve these by hand first (see the merge preview for the full list)`);
+  }
+
+  const preview = getMergePreview(sourceName, targetName); // captured pre-write, returned as the summary
+  const run = (sql, ...args) => db.prepare(sql).run(...args);
+
+  db.exec('BEGIN');
+  try {
+    // Conflict-free reassignments (no shared game/tournament/league rows exist —
+    // verified above — so none of the composite PKs can collide).
+    run('UPDATE game_players SET player_id = ? WHERE player_id = ?', target.id, source.id);
+    run('UPDATE turns SET player_id = ? WHERE player_id = ?', target.id, source.id);
+    run('UPDATE games SET winner_id = ? WHERE winner_id = ?', target.id, source.id);
+
+    // Badges: shared ones fold into the target (MAX count, earliest earned_at),
+    // then the source's remaining, unshared rows reassign wholesale.
+    run(`UPDATE player_badges SET
+           count = MAX(count, (SELECT s.count FROM player_badges s WHERE s.player_id = ? AND s.badge_id = player_badges.badge_id)),
+           earned_at = MIN(earned_at, (SELECT s.earned_at FROM player_badges s WHERE s.player_id = ? AND s.badge_id = player_badges.badge_id))
+         WHERE player_id = ? AND badge_id IN (SELECT badge_id FROM player_badges WHERE player_id = ?)`,
+      source.id, source.id, target.id, source.id);
+    run(`DELETE FROM player_badges WHERE player_id = ? AND badge_id IN (SELECT badge_id FROM player_badges WHERE player_id = ?)`,
+      source.id, target.id);
+    run('UPDATE player_badges SET player_id = ? WHERE player_id = ?', target.id, source.id);
+
+    // Daily Challenge: every remaining same-date pair has exactly one completed
+    // attempt (the ambiguous ones blocked above) — keep the completed one,
+    // whichever side it came from, then reassign the source's remaining dates.
+    run(`DELETE FROM daily_challenge_attempts WHERE player_id = ? AND completed = 0
+           AND challenge_date IN (SELECT challenge_date FROM daily_challenge_attempts WHERE player_id = ? AND completed = 1)`,
+      target.id, source.id);
+    run(`DELETE FROM daily_challenge_attempts WHERE player_id = ? AND completed = 0
+           AND challenge_date IN (SELECT challenge_date FROM daily_challenge_attempts WHERE player_id = ? AND completed = 1)`,
+      source.id, target.id);
+    run('UPDATE daily_challenge_attempts SET player_id = ? WHERE player_id = ?', target.id, source.id);
+
+    // Tournaments: title columns are plain SET NULL FKs (no uniqueness), and no
+    // shared enrollment exists, so these are all straight reassignments.
+    run('UPDATE tournaments SET champion_id = ? WHERE champion_id = ?', target.id, source.id);
+    run('UPDATE tournaments SET runner_up_id = ? WHERE runner_up_id = ?', target.id, source.id);
+    run('UPDATE tournament_players SET player_id = ? WHERE player_id = ?', target.id, source.id);
+    run('UPDATE tournament_matches SET player1_id = ? WHERE player1_id = ?', target.id, source.id);
+    run('UPDATE tournament_matches SET player2_id = ? WHERE player2_id = ?', target.id, source.id);
+    run('UPDATE tournament_matches SET winner_id = ? WHERE winner_id = ?', target.id, source.id);
+
+    // Leagues: enrollment reassigns (no shared league exists), and fixtures keep
+    // their canonical player1_id < player2_id invariant (getPendingFixturesForPlayers()
+    // relies on it for order-independent lookup) — a reassignment can flip a pair
+    // out of order, so re-canonicalize any fixture the swap left inverted. A
+    // source-vs-target fixture can't exist here (it would require a shared league).
+    run('UPDATE league_players SET player_id = ? WHERE player_id = ?', target.id, source.id);
+    run('UPDATE league_fixtures SET player1_id = ? WHERE player1_id = ?', target.id, source.id);
+    run('UPDATE league_fixtures SET player2_id = ? WHERE player2_id = ?', target.id, source.id);
+    run(`UPDATE league_fixtures SET player1_id = player2_id, player2_id = player1_id WHERE player1_id > player2_id`);
+
+    // Equipment: reassign, but never leave the target with two default loadouts —
+    // if the target already has one, the source's default flag is cleared (the
+    // target's own settings/preferences always win, same rule as name/PIN/uuid).
+    run('UPDATE dart_components SET player_id = ? WHERE player_id = ?', target.id, source.id);
+    const targetHasDefault = db.prepare('SELECT 1 FROM loadouts WHERE player_id = ? AND is_default = 1').get(target.id);
+    if (targetHasDefault) run('UPDATE loadouts SET is_default = 0 WHERE player_id = ?', source.id);
+    run('UPDATE loadouts SET player_id = ? WHERE player_id = ?', target.id, source.id);
+
+    run('UPDATE ghost_races SET player_id = ? WHERE player_id = ?', target.id, source.id);
+
+    // Identity: repoint any aliases already targeting the source (chained merges),
+    // record the source's own uuid as an alias of the target, then delete the
+    // source row — a plain DELETE, not deletePlayer(), since every reference has
+    // just been reassigned and the deletion guards exist to protect exactly the
+    // history that's now the target's.
+    run('UPDATE player_uuid_aliases SET player_id = ? WHERE player_id = ?', target.id, source.id);
+    if (source.uuid) run('INSERT INTO player_uuid_aliases (uuid, player_id) VALUES (?, ?)', source.uuid, target.id);
+    run('DELETE FROM players WHERE id = ?', source.id);
+
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  return { ok: true, source: preview.source, target: preview.target, moves: preview.moves, resolutions: preview.resolutions };
 }
 
 /* ---------- settings ---------- */
@@ -5649,7 +5888,7 @@ module.exports = {
   getAroundTheClockStatBubbles, getAroundTheClockPersonalBests,
   getAroundTheClockFastestLeaderboard, getAroundTheClockCompletionsLeaderboard,
   getAroundTheWorldDrillStatBubbles, getAroundTheWorldPersonalBests, getAroundTheWorldLeaderboard,
-  getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport, getPlayerExport, getPlayerCsvExport, importPlayerExport,
+  getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport, getPlayerExport, getPlayerCsvExport, importPlayerExport, getMergePreview, mergePlayers,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics, getCoachingInsights,
   getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, fireHaWebhook,

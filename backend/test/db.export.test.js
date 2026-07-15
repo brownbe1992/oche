@@ -44,6 +44,8 @@ describe('getFullDatabaseExport (docs/archive/data-export-roadmap.md)', () => {
       'ghostRaces',
       // docs/league-mode-roadmap.md: same standing rule applied to league data
       'leagues', 'leaguePlayers', 'leagueFixtures',
+      // docs/archive/player-merge-roadmap.md: merged-away-uuid aliases
+      'playerUuidAliases',
     ].sort());
 
     const alice = dump.players.find(p => p.name === 'export_alice');

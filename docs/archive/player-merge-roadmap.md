@@ -1,6 +1,47 @@
 # Player Merge Tool — Design Roadmap
 
-> Status: **design phase, not started.**
+> Status: **Shipped (2026-07), doc archived.** Built essentially as designed
+> below — every "proposed, not decided" recommendation was adopted as-is:
+>
+> - **`db.getMergePreview()`/`db.mergePlayers()`** (`backend/db.js`),
+>   **`GET /api/players/merge-preview`** + **`POST /api/players/merge`**
+>   (`requireAdmin`, rate-limited like the backup-restore routes, logged
+>   server-side), and a **Settings → Admin & Danger Zone → Merge Players**
+>   section (source/target pickers + a required "Preview merge…" step whose
+>   modal shows per-table move counts, auto-resolutions, and — when blocked —
+>   the full ⛔ conflict list with per-item resolution hints; there is no
+>   merge button without a preview).
+> - **Conflict policy as recommended**: shared game/tournament/league
+>   enrollment and ambiguous same-day Daily Challenge attempts (both or
+>   neither completed) **block outright**; a shared badge keeps
+>   `MAX(count)`/`MIN(earned_at)`; a same-day challenge pair with exactly one
+>   completed keeps the completed one; target vs source is always an explicit
+>   admin choice; the target's name/out_mode/dart_weight/PIN/uuid always win.
+> - **`player_uuid_aliases` shipped alongside, as this doc required** —
+>   `importPlayerExport()`'s `resolveStub()` now falls back to it, so an old
+>   export of a merged-away player resolves onto the survivor; a merge also
+>   repoints existing aliases at the new survivor, so chained merges (A→B,
+>   then B→C) resolve in one hop.
+> - Beyond this doc's own FK inventory (written before league fixtures
+>   existed): **`league_fixtures.player1_id`/`player2_id`** are reassigned
+>   too, with the canonical `player1_id < player2_id` ordering re-established
+>   after the swap — a source-vs-target fixture can never survive, since it
+>   would require the shared league enrollment that already blocks.
+> - The merge runs in a **single transaction** (the first explicit
+>   BEGIN/COMMIT in this codebase — a 12-table rewrite is the case atomicity
+>   exists for); any failure rolls back to the exact pre-merge state.
+> - Open questions resolved as leaned: no soft-delete undo window (the
+>   required preview is the safeguard), ambiguous challenge conflicts are
+>   blocked (reusing the existing Daily Challenge reset tool to resolve),
+>   multi-way merges are "merge twice", and the target's settings/PIN always
+>   win.
+>
+> Committed tests: `db.merge.test.js` (every reassignment table, every
+> blocker, both auto-resolutions, fixture re-canonicalization, the alias
+> fallback through a real `importPlayerExport()`, chained merges),
+> `server.merge.test.js` (route auth/validation and a real preview→merge
+> round trip). Full detail: `REFERENCE.md`'s "Settings → Merge Players"
+> section.
 
 ## Where this need comes from
 

@@ -1316,6 +1316,31 @@
         </div>
       </div>
 
+      <!-- Merge Players (docs/archive/player-merge-roadmap.md, admin-only) -->
+      <div class="pp-section" style="margin-top:24px">
+        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('merge-players-body',this);renderMergePlayersControls()">
+          Merge Players
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="merge-players-body" hidden>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+            Combine two player records that are really the same person — a typo'd second
+            account, or someone added twice under different names. One player keeps their
+            name and settings and absorbs the other's entire history (games, stats, badges,
+            equipment); the duplicate is then deleted. You'll see a full preview of exactly
+            what will move before anything happens, and the merge refuses to run if the two
+            records conflict (e.g. they've played each other). This can't be undone.
+          </p>
+          <label class="pp-meta" for="merge-source-select" style="display:block;margin-bottom:4px">Duplicate to merge away (deleted)</label>
+          <select id="merge-source-select" class="date-input" style="width:100%;max-width:320px;margin-bottom:10px"></select>
+          <label class="pp-meta" for="merge-target-select" style="display:block;margin-bottom:4px">Player who keeps everything (survives)</label>
+          <select id="merge-target-select" class="date-input" style="width:100%;max-width:320px;margin-bottom:12px"></select>
+          <div class="btn-row">
+            <button class="btn btn-ghost danger" onclick="askMergePlayers()">Preview merge…</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Danger Zone -->
       <div class="pp-section" style="margin-top:24px">
         <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('danger-zone-body',this)">
@@ -2939,6 +2964,99 @@ function askResetChallengeAttempt(){
       .then(()=>uiAlert(`Reset complete — ${player} can retake the ${date} challenge.`))
       .catch(e=>uiAlert('Could not reset: '+(e.message||'Unknown error')));
   });
+}
+// Merge Players (docs/archive/player-merge-roadmap.md, admin-only, Settings -> Admin &
+// Danger Zone). The preview step is REQUIRED: askMergePlayers() always fetches
+// GET /api/players/merge-preview and shows exactly what will move (and any
+// blocking conflicts) in a modal before POST /api/players/merge can be clicked —
+// a heavier version of the uiConfirm() pattern every other admin write uses,
+// with real headings/lists (not a wall of text) and icon+text conflict rows
+// (never color alone), per the roadmap doc's accessibility notes.
+function renderMergePlayersControls(){
+  const src = document.getElementById('merge-source-select');
+  const tgt = document.getElementById('merge-target-select');
+  if(!src || !tgt) return;
+  const opts = roster.slice().sort((a,b)=>a.localeCompare(b))
+    .map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+  const prevSrc = src.value, prevTgt = tgt.value;
+  src.innerHTML = opts || '<option value="">No players yet</option>';
+  tgt.innerHTML = opts || '<option value="">No players yet</option>';
+  if(prevSrc) src.value = prevSrc;
+  if(prevTgt) tgt.value = prevTgt;
+  // Default to two DIFFERENT players so a distracted double-Enter can't even ask
+  // for a self-merge (the server rejects it anyway).
+  if(src.value && src.value === tgt.value && tgt.options.length > 1){
+    tgt.selectedIndex = (src.selectedIndex + 1) % tgt.options.length;
+  }
+}
+function askMergePlayers(){
+  const source = (document.getElementById('merge-source-select')||{}).value;
+  const target = (document.getElementById('merge-target-select')||{}).value;
+  if(!source || !target){ uiAlert('Pick two players first.'); return; }
+  if(source === target){ uiAlert('Pick two different players — a player can\'t be merged into themselves.'); return; }
+  Backend.get(`/api/players/merge-preview?source=${encodeURIComponent(source)}&target=${encodeURIComponent(target)}`)
+    .then(showMergePreviewModal)
+    .catch(e=>uiAlert('Could not build the merge preview: '+(e.message||'Unknown error')));
+}
+function showMergePreviewModal(p){
+  const esc = escapeHtml;
+  const m = p.moves, b = p.blockers, r = p.resolutions;
+  const moveLines = [
+    [m.games, 'game', 'games'], [m.turns, 'recorded turn', 'recorded turns'],
+    [m.gameWins, 'game win', 'game wins'], [m.badges, 'badge', 'badges'],
+    [m.challengeAttempts, 'Daily Challenge attempt', 'Daily Challenge attempts'],
+    [m.tournamentEnrollments, 'tournament enrollment', 'tournament enrollments'],
+    [m.tournamentTitles, 'tournament title/runner-up record', 'tournament title/runner-up records'],
+    [m.tournamentMatchSlots, 'tournament match slot', 'tournament match slots'],
+    [m.leagueEnrollments, 'league enrollment', 'league enrollments'],
+    [m.leagueFixtures, 'league fixture', 'league fixtures'],
+    [m.dartComponents, 'dart component', 'dart components'], [m.loadouts, 'loadout', 'loadouts'],
+    [m.ghostRaces, 'ghost race', 'ghost races'],
+  ].filter(([n])=>n>0).map(([n,s,pl])=>`<li>${n} ${n===1?esc(s):esc(pl)}</li>`).join('') || '<li>No history to move — the duplicate is empty.</li>';
+  const resLines = [
+    ...(r.sharedBadges.length ? [`🔁 ${r.sharedBadges.length} badge(s) both players earned — kept once, with the higher count and earliest earned date`] : []),
+    ...(r.resolvableChallengeDates.length ? [`🔁 ${r.resolvableChallengeDates.length} same-day Daily Challenge attempt(s) — the completed one is kept`] : []),
+  ].map(t=>`<li>${esc(t)}</li>`).join('');
+  const blockLines = [
+    ...b.sharedGames.map(g=>`⛔ Shared game #${g.id} (${g.game_type} ${g.category}, ${g.created_at}) — they played each other; delete that game first if these really are one person`),
+    ...b.sharedTournaments.map(t=>`⛔ Both enrolled in tournament "${t.name}" — a bracket can't hold one person twice; resolve it by hand first`),
+    ...b.sharedLeagues.map(l=>`⛔ Both enrolled in league "${l.name}" — a season can't hold one person twice; resolve it by hand first`),
+    ...b.ambiguousChallengeDates.map(d=>`⛔ Both attempted the ${d} Daily Challenge (both finished, or neither) — delete one via Settings → Daily Challenge first`),
+  ].map(t=>`<li>${esc(t)}</li>`).join('');
+  document.getElementById('modal-body').innerHTML = `
+    <h3 style="margin:0 0 8px;font-size:16px">Merge preview</h3>
+    <p class="modal-msg" style="margin-bottom:10px">
+      <b>${esc(p.source.name)}</b> will be merged into <b>${esc(p.target.name)}</b> and deleted.
+      ${esc(p.target.name)} keeps their own name, finish rule, and PIN.
+    </p>
+    ${p.blocked ? `
+      <h4 style="margin:0 0 6px;font-size:13px">⛔ This merge is blocked</h4>
+      <ul style="font-size:12px;line-height:1.6;margin:0 0 12px;padding-left:18px">${blockLines}</ul>
+      <p class="modal-msg" style="font-size:12px">Nothing was changed. Resolve the conflicts above, then preview again.</p>
+      <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Close</button></div>
+    ` : `
+      <h4 style="margin:0 0 6px;font-size:13px">Moving to ${esc(p.target.name)}</h4>
+      <ul style="font-size:12px;line-height:1.6;margin:0 0 ${resLines?'10px':'12px'};padding-left:18px">${moveLines}</ul>
+      ${resLines ? `<h4 style="margin:0 0 6px;font-size:13px">Resolved automatically</h4>
+      <ul style="font-size:12px;line-height:1.6;margin:0 0 12px;padding-left:18px">${resLines}</ul>` : ''}
+      <p class="modal-msg" style="font-size:12px">This can't be undone.</p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="confirmMergePlayers('${esc(escapeJs(p.source.name))}','${esc(escapeJs(p.target.name))}')">Merge players</button>
+      </div>
+    `}`;
+  document.getElementById('modal').hidden = false;
+}
+function confirmMergePlayers(source, target){
+  closeModal();
+  Backend.send('POST','/api/players/merge', { source, target })
+    .then(async r=>{
+      await DB.refreshStats().catch(()=>{});
+      renderMergePlayersControls();
+      renderPinPlayersList();
+      uiAlert(`Merged "${r.source.name}" into "${r.target.name}": ${r.moves.games} game(s), ${r.moves.turns} turn(s), and ${r.moves.badges} badge(s) moved; the duplicate record was deleted.`);
+    })
+    .catch(e=>uiAlert('Merge failed — nothing was changed: '+(e.message||'Unknown error')));
 }
 // Server Errors settings section (docs/testing-and-observability-roadmap.md Part A) —
 // fetched only when the section is actually expanded (toggleSettingsSection() runs

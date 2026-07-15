@@ -139,6 +139,21 @@
                                        uuids, no opponents' turns, no import path). 400
                                        for a missing name or bad kind, 404 if the name
                                        doesn't exist. [admin]
+       GET  /api/players/merge-preview -> (?source=...&target=...) everything a merge
+                                       WOULD do, computed without writing: per-table
+                                       move counts, auto-resolved badge/challenge
+                                       conflicts, and the blocking-conflict list
+                                       (shared game/tournament/league, ambiguous
+                                       same-day challenge attempts). 404 unknown
+                                       player, 400 same player. (docs/archive/
+                                       player-merge-roadmap.md) [admin]
+       POST /api/players/merge     -> { source, target } -> absorbs source's full
+                                       history into target and deletes source's row,
+                                       atomically; records source's uuid in
+                                       player_uuid_aliases so old exports still
+                                       import onto the survivor. 400 if any blocking
+                                       conflict exists (same list as the preview).
+                                       Rate-limited; logged server-side. [admin]
        POST /api/players/import    -> body = exactly the JSON GET /api/players/export
                                        produces. Resolves the main player + every
                                        opponent stub by uuid first (creating a new,
@@ -1305,6 +1320,24 @@ const server = http.createServer(async (req, res) => {
       if (!requireAdmin(req, res)) return;
       const payload = await readJson(req, MAX_PLAYER_IMPORT_BYTES);
       const result = db.importPlayerExport(payload); // throws httpError(400) for a malformed/wrong-version file
+      return send(res, 200, result);
+    }
+    if (p === '/api/players/merge-preview' && m === 'GET') {
+      if (!requireAdmin(req, res)) return;
+      const source = url.searchParams.get('source'), target = url.searchParams.get('target');
+      if (!source || !target) return send(res, 400, { error: 'source and target are required' });
+      return send(res, 200, db.getMergePreview(source, target)); // throws 404 unknown player / 400 same player
+    }
+    if (p === '/api/players/merge' && m === 'POST') {
+      if (!requireAdmin(req, res)) return;
+      // docs/archive/player-merge-roadmap.md "Security": rate-limited like the backup-restore
+      // routes — an irreversible cross-table rewrite shouldn't be hammerable — and
+      // logged server-side so a mistaken merge leaves an audit trail in `docker logs`.
+      if (!rateLimit('player-merge', ip, 10, 60000)) return tooManyRequests(res, 60);
+      const b = await readJson(req);
+      if (!b.source || !b.target) return send(res, 400, { error: 'source and target are required' });
+      const result = db.mergePlayers(b.source, b.target); // throws 400 (blocked/same player) / 404 (unknown)
+      console.log(`[${new Date().toISOString()}] player merge: "${result.source.name}" -> "${result.target.name}" (${JSON.stringify(result.moves)})`);
       return send(res, 200, result);
     }
 
