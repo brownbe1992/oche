@@ -1,8 +1,17 @@
 # Data Export — Design Roadmap
 
-> Status: **Full-database admin export done (2026-07). Per-player export
-> AND import both done (2026-07), shipped with a materially different design
-> than this doc originally sketched — see below.**
+> Status: **Every item done, doc archived (2026-07). Full-database admin
+> export done (2026-07). Per-player export AND import both done (2026-07),
+> shipped with a materially different design than this doc originally
+> sketched — see below. CSV export done (2026-07) — the last open item.**
+>
+> **What shipped (CSV export, 2026-07)**: `db.getPlayerCsvExport(name, kind)`
+> / `GET /api/players/export-csv?name=...&kind=games|turns` (`requireAdmin`),
+> reachable from the same `#screen-player-export` admin page as the JSON
+> export ("Spreadsheet (CSV) export" — "Games CSV" / "Turns CSV" buttons
+> under the same player picker). Exactly the "simpler, non-portable 'your
+> own stats as a spreadsheet'" idea this doc always envisioned — see
+> "Design (CSV export, as shipped)" below.
 >
 > **What shipped (full-database)**: **Settings → Admin & Danger Zone → Data
 > Export**, a single "Export all data" button that downloads a complete JSON
@@ -167,6 +176,47 @@ produces (a `.json` file downloaded from this or another Oche server).
   dartsImported, badgesImported }`, shown to the admin as a plain-language
   result message.
 
+## Design (CSV export, as shipped)
+
+`db.getPlayerCsvExport(name, kind)` — admin-only, the "your own stats as a
+spreadsheet" flavor, deliberately simpler than (and separate from) the JSON
+export/import above:
+
+- **Non-portable by design**: no uuids, no opponents' turns, no import path.
+  It never needed to solve H2H preservation — that's the JSON export's job.
+  Opponents appear only as a names column on the games CSV, so this can never
+  become a backdoor to anyone else's turn data.
+- **`kind='games'`** — one row per game the player is in, with per-game
+  aggregates of their own turns only (points, avg/turn rounded to 2 decimals,
+  best turn, busts, checkouts, highest checkout, darts thrown) plus game
+  context (type/category/format/practice), an alphabetized `; `-joined
+  opponents column, and a `result` relative to that player
+  (won/lost/completed/unfinished).
+- **`kind='turns'`** — one row per turn they threw, in game-then-turn order,
+  carrying the turn row's own columns plus each dart in plain notation
+  (`T20 S5 D16`; `25` = single bull, `BULL` = 50, `MISS` = sector 0) as a
+  space-joined `darts_detail` column — no fixed dart_1/dart_2/dart_3 columns,
+  so a turn with any dart count fits.
+- **Column semantics follow the schema**: `scored`/`checkout`/`bust` mean
+  whatever they mean for that row's `game_type`, same as the underlying
+  tables — the CSV is honest raw-ish data, not a re-interpretation layer.
+- **Encoding**: RFC-4180 (quote+double `"` cells containing `"`/`,`/newlines,
+  CRLF line endings), and — per `CLAUDE.md`'s standing security-surface
+  convention — any string cell starting with `=`/`+`/`-`/`@`/tab is prefixed
+  with `'`, the standard CSV-formula-injection neutralization. Player names
+  are the one user-controlled string in these files and only control
+  characters are rejected at creation, so a name like `=HYPERLINK(...)` is
+  legal roster data the CSV layer has to defuse, not something the roster
+  can be trusted to never contain.
+- **Testing**: committed — `db.export-csv.test.js` proves every calculated
+  column's math (per `CLAUDE.md`'s every-new-calculation rule), the
+  own-rows-only scoping (an opponent's turns in a shared game never leak into
+  the player's aggregates or turn rows), the dart notation, the RFC-4180
+  quoting + formula guard (via an implementation-independent CSV parser), the
+  header-only empty case, and the 404/400 errors; `server.export-csv.test.js`
+  covers the route's 401/400/404/200 statuses, `text/csv` + attachment
+  headers, and the `kind` default.
+
 ## Full-database export (already shipped, unchanged by this pass)
 
 A complete dump of all players/games/turns/darts, positioned as the "back up
@@ -241,10 +291,9 @@ SQLite-file copy already documented in the README's Data Storage section.
   practice (the timestamp is preserved byte-for-byte from the original
   export in every tested scenario), but worth flagging as a known,
   unhandled edge case rather than a guaranteed-impossible one.
-- **CSV export** (a simpler, non-portable "your own stats as a spreadsheet"
-  format, one row per turn or per game) remains a real, separate idea — not
-  attempted in this pass, and doesn't need to solve anything above since
-  it's explicitly not meant to preserve/round-trip H2H data the way the JSON
-  export does.
+- **Resolved: CSV export** (a simpler, non-portable "your own stats as a
+  spreadsheet" format, one row per turn or per game) — shipped 2026-07 as
+  its own pass, see "Design (CSV export, as shipped)" above. As predicted,
+  it needed to solve none of the portability/H2H machinery above.
 - Should per-player export eventually cover tournament/league/daily-challenge/
   ghost-race participation, or stay scoped to games/turns/darts indefinitely?

@@ -5,7 +5,7 @@
 ## Where this need comes from
 
 Flagged explicitly as out of scope while building per-player export/import
-(`docs/data-export-roadmap.md`'s "Open questions"): `importPlayerExport()`'s
+(`docs/archive/data-export-roadmap.md`'s "Open questions"): `importPlayerExport()`'s
 uuid-based resolution only ever merges an import's player/opponent stubs
 onto an *existing* row with a matching `uuid` — it has no concept of "these
 two different local rows, with two different uuids, are secretly the same
@@ -101,7 +101,7 @@ than those simpler cases need.
 
 Merging **deletes** the source player's row, which means the source's
 `uuid` stops resolving to anything. This matters specifically because of
-`importPlayerExport()` (`docs/data-export-roadmap.md`): if "Ben" (uuid `X`)
+`importPlayerExport()` (`docs/archive/data-export-roadmap.md`): if "Ben" (uuid `X`)
 is later merged into "Benjamin," and someone re-imports an *old* export of
 "Ben" from another server (still carrying uuid `X`), today's importer would
 find no match for `X` and recreate a brand-new stub "Ben" row — silently

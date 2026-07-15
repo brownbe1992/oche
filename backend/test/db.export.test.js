@@ -1,5 +1,5 @@
 'use strict';
-// Committed test for getFullDatabaseExport() (docs/data-export-roadmap.md, admin-only
+// Committed test for getFullDatabaseExport() (docs/archive/data-export-roadmap.md, admin-only
 // full-database export). Confirms the export contains real, correctly-counted game
 // data, and — the security-sensitive part — that it never includes the admins/
 // sessions/settings/server_errors tables or any player PIN/credential column, even
@@ -23,7 +23,7 @@ after(() => {
   try { fs.rmdirSync(scratchDir); } catch (e) {}
 });
 
-describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
+describe('getFullDatabaseExport (docs/archive/data-export-roadmap.md)', () => {
   test('includes real player/game/turn/dart data with correct shape and counts', async () => {
     db.addPlayer('export_alice');
     await db.setPlayerPin('export_alice', '1234');
@@ -105,7 +105,7 @@ describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
   });
 });
 
-describe('players.uuid (docs/data-export-roadmap.md — portable per-player identity)', () => {
+describe('players.uuid (docs/archive/data-export-roadmap.md — portable per-player identity)', () => {
   test('every player gets a well-formed, unique uuid at creation', () => {
     db.addPlayer('export_uuid_a');
     db.addPlayer('export_uuid_b');
@@ -119,7 +119,7 @@ describe('players.uuid (docs/data-export-roadmap.md — portable per-player iden
   });
 });
 
-describe('getPlayerExport (docs/data-export-roadmap.md — per-player export)', () => {
+describe('getPlayerExport (docs/archive/data-export-roadmap.md — per-player export)', () => {
   test('scopes games/turns/darts to the requested player, includes a minimal opponent stub, and excludes the opponent\'s unrelated games', () => {
     db.addPlayer('export_ben');
     db.addPlayer('export_alaina');
@@ -235,7 +235,7 @@ describe('getPlayerExport (docs/data-export-roadmap.md — per-player export)', 
   });
 });
 
-describe('importPlayerExport (docs/data-export-roadmap.md — the export/import round trip)', () => {
+describe('importPlayerExport (docs/archive/data-export-roadmap.md — the export/import round trip)', () => {
   test('rejects a malformed or wrong-schemaVersion payload', () => {
     assert.throws(() => db.importPlayerExport(null), /Invalid import file/);
     assert.throws(() => db.importPlayerExport({ schemaVersion: 2, player: {}, games: [], gamePlayers: [], turns: [], darts: [], opponents: [] }), /Unsupported schemaVersion/);

@@ -2496,7 +2496,7 @@ file.
 
 ### Settings → Data Export (admin-only)
 
-`docs/data-export-roadmap.md`'s original design proposed a per-player,
+`docs/archive/data-export-roadmap.md`'s original design proposed a per-player,
 PIN-gated export reachable from a Player Profile page; that was reopened with
 fresh product direction (2026-07) and shipped differently — **admin-only**,
 reached from a dedicated admin page (`Settings → Admin & Danger Zone → Data
@@ -2540,12 +2540,47 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   `turns` reference as `player_id`/`winner_id`), never a portable identity on
   its own; `uuid` is the one that's portable. Throws `httpError(404)` for an
   unknown name. Deliberately out of scope for v1: tournament/league/
-  daily-challenge/ghost-race participation — see `docs/data-export-roadmap.md`
+  daily-challenge/ghost-race participation — see `docs/archive/data-export-roadmap.md`
   for the reasoning.
 - **`GET /api/players/export`** (`?name=...`, `requireAdmin`) streams that
   object as a `Content-Disposition: attachment` download named
   `oche-export-<sanitized-name>-<YYYY-MM-DD>.json`. `400` with no `name`
   param, `404` for an unknown player.
+- **`db.getPlayerCsvExport(name, kind)`** (CSV spreadsheet export, admin-only)
+  — the deliberately simpler, **non-portable** "your own stats as a
+  spreadsheet" flavor: no uuids, no opponents' turns, no import path (so
+  unlike the JSON export it cannot reconstruct H2H and isn't meant to).
+  `kind='games'` returns one row per game the player is in, with per-game
+  aggregates of **their own turns only**: `game_id, started_at, completed_at,
+  game_type, category, legs_per_set, sets_per_game, practice, opponents,
+  result, turns, darts_thrown, points_scored, avg_per_turn, best_turn, busts,
+  checkouts, highest_checkout` — `opponents` is the other participants'
+  names, `; `-joined and alphabetized; `result` is relative to this player
+  (`won` / `lost` / `completed` for a finished game with no recorded winner /
+  `unfinished`); `avg_per_turn` is `points_scored / turns` rounded to 2
+  decimals (empty when they had no turns); `highest_checkout` is
+  `MAX(checkout_points)` over their `checkout=1` turns (empty when none).
+  `kind='turns'` returns one row per turn **they threw** (never an
+  opponent's), ordered by game then turn id: `turn_id, game_id, game_type,
+  category, turn_at, set_no, leg_no, scored, bust, checkout, checkout_points,
+  leg_won, target_score, darts, darts_detail` — `darts_detail` is each
+  dart in throw order as `S`/`D`/`T`+sector notation (`T20 S5 D16`), with
+  `25` for a single bull, `BULL` for the 50, and `MISS` for sector 0. Column
+  semantics follow the underlying schema, so `scored`/`checkout`/`bust` mean
+  whatever they mean for that row's `game_type` (Cricket's `scored` is
+  points, `target_score` is Checkout-Trainer-only, etc.). Encoding is
+  RFC-4180 (cells containing `"`, `,`, or newlines are quoted with `""`
+  doubling; CRLF line endings), and any string cell starting with
+  `=`/`+`/`-`/`@`/tab is prefixed with `'` — the standard CSV-formula-
+  injection neutralization, since player names may legally start with those
+  characters. Throws `httpError(404)` for an unknown name, `httpError(400)`
+  for a `kind` other than `games`/`turns`.
+- **`GET /api/players/export-csv`** (`?name=...&kind=games|turns`,
+  `requireAdmin`) streams that CSV as a `Content-Disposition: attachment`
+  download named `oche-export-<sanitized-name>-<kind>-<YYYY-MM-DD>.csv`
+  (`Content-Type: text/csv; charset=utf-8`). `kind` defaults to `games` when
+  omitted; `400` with no `name` param or a bad `kind`, `404` for an unknown
+  player.
 - **`db.importPlayerExport(payload)`** (per-player import, admin-only) — the
   counterpart to `getPlayerExport()`. `400`s if `payload.schemaVersion !== 1`
   or the shape is otherwise malformed. Resolves the main player and every
@@ -2585,7 +2620,10 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   directions: **"Export all data"** navigates straight to `/api/export-all`
   (unchanged); **"Export a player…"** opens `#screen-player-export`
   (`renderPlayerExportScreen()`), which has a `<select>` (populated from the
-  already-loaded `roster` array) + "Export data" button for export, and a
+  already-loaded `roster` array) + "Export data" button for export, a
+  "Spreadsheet (CSV) export" subsection with "Games CSV" / "Turns CSV"
+  buttons (`exportSelectedPlayerCsv(kind)`, navigating to
+  `/api/players/export-csv` for the same selected player), and a
   file input + "Import" button (`askImportPlayer()`) below it for import —
   reads the chosen file client-side (catching malformed JSON before it ever
   reaches the network), confirms via `uiConfirm()`, then `POST`s the parsed

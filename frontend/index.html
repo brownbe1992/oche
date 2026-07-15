@@ -1331,7 +1331,7 @@
     </div>
   </section>
 
-  <!-- ============ EXPORT PLAYER (docs/data-export-roadmap.md, admin-only) ============ -->
+  <!-- ============ EXPORT PLAYER (docs/archive/data-export-roadmap.md, admin-only) ============ -->
   <section id="screen-player-export" class="screen">
     <div class="card">
       <button class="pp-back" onclick="show('settings')">← Settings</button>
@@ -1340,7 +1340,7 @@
         Download one player's full history as JSON — every game they've played, including
         opponents' turn data from those same games (so results like "Ben beat Alaina" stay
         intact when moved to another server), plus a minimal identity record for each
-        opponent. Admin only.
+        opponent. Or grab a simpler CSV of just their own stats for a spreadsheet. Admin only.
       </p>
       <div id="player-export-body"></div>
 
@@ -2823,7 +2823,7 @@ function toggleSettingsSection(bodyId, titleEl){
   const chevron = titleEl && titleEl.querySelector('.settings-chevron');
   if(chevron) chevron.style.transform = body.hidden ? '' : 'rotate(180deg)';
 }
-// docs/data-export-roadmap.md: per-player export, admin-only. Reuses the already-loaded
+// docs/archive/data-export-roadmap.md: per-player export, admin-only. Reuses the already-loaded
 // `roster` array (populated by DB.loadAll()/refreshStats()) rather than a fresh fetch --
 // the same player list already backing every other picker in the app.
 function renderPlayerExportScreen(){
@@ -2841,6 +2841,16 @@ function renderPlayerExportScreen(){
     <div class="btn-row">
       <button class="btn btn-primary" onclick="exportSelectedPlayer()">Export data</button>
     </div>
+    <h3 style="font-size:15px;margin:24px 0 4px">Spreadsheet (CSV) export</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 12px;line-height:1.6">
+      A simpler download of the selected player's own history for Excel, Numbers, or
+      Google Sheets — their stats only, without opponents' turn data, and not importable
+      back into Oche (use the JSON export above to move a player between servers).
+    </p>
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="exportSelectedPlayerCsv('games')">Games CSV (one row per game)</button>
+      <button class="btn btn-ghost" onclick="exportSelectedPlayerCsv('turns')">Turns CSV (one row per turn)</button>
+    </div>
   `;
 }
 function exportSelectedPlayer(){
@@ -2848,7 +2858,15 @@ function exportSelectedPlayer(){
   if(!sel || !sel.value) return;
   window.location = '/api/players/export?name=' + encodeURIComponent(sel.value);
 }
-// docs/data-export-roadmap.md: the import counterpart. Reads the chosen file
+// docs/archive/data-export-roadmap.md: the CSV "your own stats as a spreadsheet" flavor —
+// same navigation as the JSON export above (a plain download authenticated by the
+// existing admin session cookie), just a different endpoint + kind parameter.
+function exportSelectedPlayerCsv(kind){
+  const sel = document.getElementById('player-export-select');
+  if(!sel || !sel.value) return;
+  window.location = '/api/players/export-csv?name=' + encodeURIComponent(sel.value) + '&kind=' + encodeURIComponent(kind);
+}
+// docs/archive/data-export-roadmap.md: the import counterpart. Reads the chosen file
 // client-side (catching malformed JSON with a friendly message before it ever
 // reaches the network), confirms, then POSTs the parsed payload straight to
 // POST /api/players/import -- db.importPlayerExport() does all the real work

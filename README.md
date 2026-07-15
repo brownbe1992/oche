@@ -802,6 +802,7 @@ Shows the most recent server-side failures (up to 500, newest first) — the sam
 
 - **Export all data** — downloads a complete JSON export of every player, game, stat, tournament, and league in the database. Admin-only. Excludes admin accounts, sessions, app settings, and player PINs.
 - **Export a player…** — opens a dedicated admin page to pick one player and download just their history: every game they've played as JSON, including opponents' turn-by-turn data from those same games (so a result like "Ben beat Alaina" stays intact) plus a minimal identity record for each opponent. Admin-only; nothing export-related appears on a player's own page.
+- **Spreadsheet (CSV) export** — the same page can also download a simpler CSV of the selected player's own stats for Excel/Numbers/Google Sheets, either one row per game (with per-game totals: points, average per turn, busts, checkouts, result, opponents) or one row per turn (with each dart in plain notation like `T20 S5 D16`). Their stats only — no opponents' turn data — and not importable back into Oche; the JSON export above is the one that moves a player between servers.
 - **Import a player** — on the same page, pick a player export file (from this or another Oche server) and import it. Players are matched by their export identity, not just by name, so a coincidental same-name player already on this server is never merged with it — a genuine match reuses the existing player, otherwise a new one is created (renamed if the name collides). Importing the same file twice is safe: games already present are skipped, not duplicated.
 
 #### Danger Zone
@@ -1362,6 +1363,13 @@ GET  /api/players/export                    (?name=...) Streams one player's JSO
                                              in, including opponents' rows within those same games,
                                              plus minimal {id,uuid,name} opponent identity stubs.
                                              404 if the name doesn't exist.
+GET  /api/players/export-csv                (?name=...&kind=games|turns) Streams one player's own         [admin]
+                                             history as a CSV spreadsheet download -- kind=games is
+                                             one row per game with per-game aggregates, kind=turns
+                                             is one row per turn with per-dart notation. Their own
+                                             rows only (no opponents' turns), not importable.
+                                             400 for a missing name or bad kind, 404 if the name
+                                             doesn't exist.
 POST /api/players/import                    Body = exactly the JSON GET /api/players/export produces.    [admin]
                                              Resolves players by uuid first (creating a new,
                                              uniquified-if-needed row on no match); inserts
@@ -1489,9 +1497,12 @@ a player export (from this server or a different one): players are matched by a
 portable identity assigned at creation, not just by name, so a same-named but
 unrelated local player is never merged with the imported one, and importing the same
 file twice is a safe no-op — already-present games are skipped, not duplicated.
-Export and import are both admin-only: there is no export or import entry point
-anywhere on a player's own page. Neither export ever includes admin accounts,
-sessions, app settings, or any player's PIN.
+The same page also offers a **spreadsheet (CSV) export** of the selected player's
+own stats — one row per game or one row per turn — for opening in Excel, Numbers,
+or Google Sheets; unlike the JSON export it carries no opponents' turn data and
+can't be imported back. Export and import are all admin-only: there is no export
+or import entry point anywhere on a player's own page. No export ever includes
+admin accounts, sessions, app settings, or any player's PIN.
 
 ### Admin Account Recovery
 

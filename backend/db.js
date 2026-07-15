@@ -46,7 +46,7 @@ db.exec(`
     name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
     out_mode   TEXT NOT NULL DEFAULT 'double' CHECK (out_mode IN ('double','single')),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    -- docs/data-export-roadmap.md: a portable identity for per-player export/import.
+    -- docs/archive/data-export-roadmap.md: a portable identity for per-player export/import.
     -- Unlike the autoincrement id (guaranteed to collide across independently-run
     -- servers, since every fresh install starts counting from 1), a v4 UUID needs
     -- no coordination between servers to stay unique -- that's the whole point of
@@ -449,7 +449,7 @@ try { db.exec("ALTER TABLE darts ADD COLUMN zone TEXT"); } catch(e) {}         /
 try { db.exec('ALTER TABLE darts ADD COLUMN miss_zone INTEGER'); } catch(e) {} // 1-20 (nearest wedge), misses only
 try { db.exec("ALTER TABLE darts ADD COLUMN miss_depth TEXT"); } catch(e) {}   // 'near'|'far', misses only
 try { db.exec('ALTER TABLE darts ADD COLUMN bounced INTEGER'); } catch(e) {}   // 1 = bounced/fell out, misses only
-// docs/data-export-roadmap.md: portable per-player identity for export/import (see
+// docs/archive/data-export-roadmap.md: portable per-player identity for export/import (see
 // the players table comment above). The ALTER TABLE is required here, unlike some
 // other columns in this block -- CREATE TABLE IF NOT EXISTS above only takes effect
 // on a genuinely fresh database; an existing installation's players table already
@@ -3774,7 +3774,7 @@ function wipeAllData() {
   return { ok: true };
 }
 
-// Full-database export (docs/data-export-roadmap.md, admin-only, Settings ->
+// Full-database export (docs/archive/data-export-roadmap.md, admin-only, Settings ->
 // Admin & Danger Zone -> Data Export): a complete, human-readable JSON dump of
 // every player/game/stat table — "it's your data, and you can always take it
 // with you." Deliberately excludes admins/sessions/settings/server_errors
@@ -3821,7 +3821,7 @@ function getFullDatabaseExport() {
   };
 }
 
-// Per-player export (docs/data-export-roadmap.md, admin-only, Settings -> Data
+// Per-player export (docs/archive/data-export-roadmap.md, admin-only, Settings -> Data
 // Export -> Export Player): unlike the full-database dump above, this scopes to
 // one player's own history — but H2H isn't stored anywhere (getH2HRecord() computes
 // it live from games/game_players/turns), so preserving it means bundling the real
@@ -3890,7 +3890,125 @@ function getPlayerExport(name, chunkSize = ID_CHUNK) {
   };
 }
 
-// Per-player import (docs/data-export-roadmap.md, admin-only, the counterpart to
+// CSV export (docs/archive/data-export-roadmap.md, admin-only, the "your own stats as a
+// spreadsheet" counterpart to the JSON export above): deliberately simpler and
+// NON-portable — no uuids, no opponents' turns, no round-trip/import story. Two
+// flavors, both scoped strictly to the named player's OWN rows:
+//   kind='games' -> one row per game they played, with per-game aggregates of
+//                   their own turns (points, avg/turn, busts, checkouts, ...)
+//   kind='turns' -> one row per turn they threw, with per-dart notation
+//                   ("T20 S5 D16"; "25"=single bull, "BULL"=50, "MISS")
+// Opponents appear only as a names column on the games CSV — never their turns,
+// so unlike the JSON export this can't reconstruct H2H and isn't meant to.
+// Column semantics follow the underlying schema: `scored`/`checkout`/`bust` mean
+// whatever they mean for that row's game_type (e.g. Cricket's scored is points,
+// Checkout Trainer's target_score is only ever set for its own turns).
+//
+// Cell encoding is RFC-4180 (quote+double any cell containing `"`, `,`, or a
+// newline; CRLF line endings for spreadsheet-app friendliness). Player names are
+// the one user-controlled string that lands in these cells, and names may start
+// with `=`/`+`/`-`/`@` (only control characters are rejected at creation) — a
+// classic CSV-formula-injection vector when the file is opened in Excel/Sheets,
+// so any string cell starting with one of those is prefixed with a `'` (the
+// standard OWASP neutralization; displays near-identically, never executes).
+// Numeric cells are app-computed and pass through untouched.
+function _csvCell(v) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'number') return String(v);
+  let s = String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  if (/[",\r\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+function _csvDocument(header, rows) {
+  return [header, ...rows].map(cells => cells.map(_csvCell).join(',')).join('\r\n') + '\r\n';
+}
+function _dartNotation(d) {
+  if (d.sector === 0) return 'MISS';
+  if (d.sector === 25) return d.multiplier === 2 ? 'BULL' : '25';
+  return (d.multiplier === 3 ? 'T' : d.multiplier === 2 ? 'D' : 'S') + d.sector;
+}
+
+const CSV_EXPORT_KINDS = ['games', 'turns'];
+
+function getPlayerCsvExport(name, kind) {
+  if (!CSV_EXPORT_KINDS.includes(kind)) throw httpError(400, `kind must be one of: ${CSV_EXPORT_KINDS.join(', ')}`);
+  const p = db.prepare('SELECT id, name FROM players WHERE name = ? COLLATE NOCASE').get(String(name));
+  if (!p) throw httpError(404, 'Player not found');
+  return kind === 'games' ? _buildGamesCsv(p) : _buildTurnsCsv(p);
+}
+
+function _buildGamesCsv(p) {
+  const rows = db.prepare(`
+    SELECT g.id, g.created_at, g.completed_at, g.game_type, g.category,
+           g.legs_per_set, g.sets_per_game, g.practice, g.winner_id,
+           COUNT(t.id)                                          AS turns,
+           COALESCE(SUM(t.scored), 0)                           AS points_scored,
+           MAX(t.scored)                                        AS best_turn,
+           COALESCE(SUM(t.bust), 0)                             AS busts,
+           COALESCE(SUM(t.checkout), 0)                         AS checkouts,
+           MAX(CASE WHEN t.checkout = 1 THEN t.checkout_points END) AS highest_checkout,
+           (SELECT COUNT(*) FROM darts d JOIN turns t2 ON t2.id = d.turn_id
+             WHERE t2.game_id = g.id AND t2.player_id = ?)      AS darts_thrown,
+           (SELECT GROUP_CONCAT(name, '; ') FROM (
+              SELECT p2.name FROM game_players gp2 JOIN players p2 ON p2.id = gp2.player_id
+               WHERE gp2.game_id = g.id AND gp2.player_id != ? ORDER BY p2.name)) AS opponents
+      FROM games g
+      JOIN game_players gp ON gp.game_id = g.id AND gp.player_id = ?
+      LEFT JOIN turns t ON t.game_id = g.id AND t.player_id = ?
+     GROUP BY g.id
+     ORDER BY g.created_at, g.id
+  `).all(p.id, p.id, p.id, p.id);
+
+  const header = ['game_id', 'started_at', 'completed_at', 'game_type', 'category',
+    'legs_per_set', 'sets_per_game', 'practice', 'opponents', 'result', 'turns',
+    'darts_thrown', 'points_scored', 'avg_per_turn', 'best_turn', 'busts',
+    'checkouts', 'highest_checkout'];
+  return _csvDocument(header, rows.map(g => {
+    // result is relative to THIS player: 'won'/'lost' when a completed game has a
+    // recorded winner, 'completed' when it finished without one (some practice
+    // flows), 'unfinished' when it never completed at all.
+    const result = g.winner_id === p.id ? 'won'
+      : (g.completed_at ? (g.winner_id != null ? 'lost' : 'completed') : 'unfinished');
+    const avg = g.turns ? Math.round((g.points_scored / g.turns) * 100) / 100 : null;
+    return [g.id, g.created_at, g.completed_at, g.game_type, g.category,
+      g.legs_per_set, g.sets_per_game, g.practice, g.opponents, result, g.turns,
+      g.darts_thrown, g.points_scored, avg, g.best_turn, g.busts,
+      g.checkouts, g.highest_checkout];
+  }));
+}
+
+function _buildTurnsCsv(p) {
+  const turns = db.prepare(`
+    SELECT t.id, t.game_id, g.game_type, g.category, t.created_at, t.set_no, t.leg_no,
+           t.scored, t.bust, t.checkout, t.checkout_points, t.leg_won, t.target_score
+      FROM turns t JOIN games g ON g.id = t.game_id
+     WHERE t.player_id = ?
+     ORDER BY t.game_id, t.id
+  `).all(p.id);
+  const dartsByTurn = new Map();
+  for (const d of db.prepare(`
+    SELECT d.turn_id, d.sector, d.multiplier FROM darts d
+      JOIN turns t ON t.id = d.turn_id
+     WHERE t.player_id = ?
+     ORDER BY d.turn_id, d.dart_no
+  `).all(p.id)) {
+    if (!dartsByTurn.has(d.turn_id)) dartsByTurn.set(d.turn_id, []);
+    dartsByTurn.get(d.turn_id).push(_dartNotation(d));
+  }
+
+  const header = ['turn_id', 'game_id', 'game_type', 'category', 'turn_at', 'set_no',
+    'leg_no', 'scored', 'bust', 'checkout', 'checkout_points', 'leg_won',
+    'target_score', 'darts', 'darts_detail'];
+  return _csvDocument(header, turns.map(t => {
+    const notations = dartsByTurn.get(t.id) || [];
+    return [t.id, t.game_id, t.game_type, t.category, t.created_at, t.set_no,
+      t.leg_no, t.scored, t.bust, t.checkout, t.checkout_points, t.leg_won,
+      t.target_score, notations.length, notations.join(' ')];
+  }));
+}
+
+// Per-player import (docs/archive/data-export-roadmap.md, admin-only, the counterpart to
 // getPlayerExport() above): takes exactly the JSON shape that function produces and
 // writes it into THIS server's database.
 //
@@ -3901,7 +4019,7 @@ function getPlayerExport(name, chunkSize = ID_CHUNK) {
 // uuid match reuses that existing local row (this is also what makes importing the
 // SAME player's export twice, or later importing an opponent's own full export
 // after they'd only existed as a stub, land on one row instead of creating
-// duplicates -- see docs/data-export-roadmap.md). No uuid match creates a new
+// duplicates -- see docs/archive/data-export-roadmap.md). No uuid match creates a new
 // player row from the exported uuid+name; if that name collides with an unrelated
 // local player (different uuid -- a genuine coincidence, not the same person), the
 // import uniquifies the name rather than silently merging two different people's
@@ -5497,7 +5615,7 @@ module.exports = {
   getAroundTheClockStatBubbles, getAroundTheClockPersonalBests,
   getAroundTheClockFastestLeaderboard, getAroundTheClockCompletionsLeaderboard,
   getAroundTheWorldDrillStatBubbles, getAroundTheWorldPersonalBests, getAroundTheWorldLeaderboard,
-  getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport, getPlayerExport, importPlayerExport,
+  getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport, getPlayerExport, getPlayerCsvExport, importPlayerExport,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics, getCoachingInsights,
   getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, fireHaWebhook,

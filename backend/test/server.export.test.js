@@ -1,5 +1,5 @@
 'use strict';
-// Committed tests for GET /api/export-all (docs/data-export-roadmap.md), the
+// Committed tests for GET /api/export-all (docs/archive/data-export-roadmap.md), the
 // admin-only full-database export route added to backend/server.js. Mirrors
 // server.backups.test.js's spawn-a-real-server pattern since server.js isn't
 // require()-able.
@@ -60,7 +60,7 @@ function api(base, cookie, p, opts = {}) {
   return fetch(base + p, { ...opts, headers: { Cookie: cookie, ...(opts.headers || {}) } });
 }
 
-describe('GET /api/export-all (docs/data-export-roadmap.md)', () => {
+describe('GET /api/export-all (docs/archive/data-export-roadmap.md)', () => {
   test('401s without an admin session', async () => {
     await withServer(8440, async ({ base }) => {
       assert.equal((await fetch(`${base}/api/export-all`)).status, 401);
@@ -90,7 +90,7 @@ describe('GET /api/export-all (docs/data-export-roadmap.md)', () => {
   });
 });
 
-describe('GET /api/players/export (docs/data-export-roadmap.md, per-player export)', () => {
+describe('GET /api/players/export (docs/archive/data-export-roadmap.md, per-player export)', () => {
   test('401s without an admin session', async () => {
     await withServer(8442, async ({ base }) => {
       assert.equal((await fetch(`${base}/api/players/export?name=whoever`)).status, 401);
@@ -122,7 +122,7 @@ describe('GET /api/players/export (docs/data-export-roadmap.md, per-player expor
   });
 });
 
-describe('POST /api/players/import (docs/data-export-roadmap.md, per-player import)', () => {
+describe('POST /api/players/import (docs/archive/data-export-roadmap.md, per-player import)', () => {
   test('401s without an admin session', async () => {
     await withServer(8444, async ({ base }) => {
       const res = await fetch(`${base}/api/players/import`, {

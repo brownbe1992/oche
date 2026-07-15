@@ -115,19 +115,29 @@
                                        validates it's a genuine, non-corrupt SQLite file
                                        (header + PRAGMA integrity_check) before staging the
                                        same restore as above. Capped at 500MB. [admin]
-       GET  /api/export-all        -> streams a full-database JSON export (docs/
+       GET  /api/export-all        -> streams a full-database JSON export (docs/archive/
                                        data-export-roadmap.md, admin-only, Settings ->
                                        Admin & Danger Zone -> Data Export). Excludes
                                        admins/sessions/settings/server_errors and strips
                                        PIN-hash columns from players. [admin]
        GET  /api/players/export    -> (?name=...) streams one player's JSON export
-                                       (docs/data-export-roadmap.md, admin-only,
+                                       (docs/archive/data-export-roadmap.md, admin-only,
                                        Settings -> Data Export -> Export Player) --
                                        games/turns/darts for every game that player is
                                        in, including opponents' rows within those same
                                        games (H2H isn't stored anywhere, only derivable
                                        from them) plus minimal opponent identity stubs
                                        (uuid+name). 404 if the name doesn't exist. [admin]
+       GET  /api/players/export-csv -> (?name=...&kind=games|turns) streams one player's
+                                       history as a CSV spreadsheet (docs/archive/
+                                       data-export-roadmap.md, admin-only, same screen as
+                                       the JSON export) -- kind=games is one row per game
+                                       with per-game aggregates of the player's own turns,
+                                       kind=turns is one row per turn they threw with
+                                       per-dart notation. Non-portable by design (no
+                                       uuids, no opponents' turns, no import path). 400
+                                       for a missing name or bad kind, 404 if the name
+                                       doesn't exist. [admin]
        POST /api/players/import    -> body = exactly the JSON GET /api/players/export
                                        produces. Resolves the main player + every
                                        opponent stub by uuid first (creating a new,
@@ -289,7 +299,7 @@ function requireWrite(req, res) {
 }
 
 const MAX_JSON_BODY_BYTES = 1e6;
-// docs/data-export-roadmap.md: a per-player export/import file is real user data
+// docs/archive/data-export-roadmap.md: a per-player export/import file is real user data
 // (games/turns/darts), not a normal small write body — a prolific player's full
 // history can genuinely exceed 1MB as JSON. 20MB is generous headroom while still
 // being a bounded, defensive cap (nowhere near the 500MB raw-file backup cap, since
@@ -1266,6 +1276,24 @@ const server = http.createServer(async (req, res) => {
       const filename = `oche-export-${safeName}-${new Date().toISOString().slice(0, 10)}.json`;
       res.writeHead(200, {
         'Content-Type': 'application/json',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': String(body.length),
+        ...SECURITY_HEADERS,
+      });
+      return res.end(body);
+    }
+    if (p === '/api/players/export-csv' && m === 'GET') {
+      if (!requireAdmin(req, res)) return;
+      const name = url.searchParams.get('name');
+      if (!name) return send(res, 400, { error: 'name is required' });
+      const kind = url.searchParams.get('kind') || 'games';
+      // throws httpError(400) for an unknown kind, httpError(404) for an unknown name -- caught below
+      const csv = db.getPlayerCsvExport(name, kind);
+      const body = Buffer.from(csv);
+      const safeName = String(name).replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '').slice(0, 40) || 'player';
+      const filename = `oche-export-${safeName}-${kind}-${new Date().toISOString().slice(0, 10)}.csv`;
+      res.writeHead(200, {
+        'Content-Type': 'text/csv; charset=utf-8',
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Content-Length': String(body.length),
         ...SECURITY_HEADERS,
