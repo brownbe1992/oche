@@ -103,6 +103,17 @@ their explicit confirmation before editing either file. This applies even when t
 user has already asked for "a version bump" in general terms; confirm the specific
 number, since the next logical version isn't always obvious from git history alone.
 
+## Standing security-review methodology
+
+When the owner asks for a "risk assessment" or "security risk assessment" of Oche,
+follow the methodology in `docs/security/AI Risk Assessment Prompt.md` verbatim —
+same threat model, review areas, report structure, finding format, and metadata —
+unless they explicitly say otherwise. That document is the owner's canonical process,
+version-controlled on purpose. The most recent output lives alongside it
+(`docs/security/oche-internet-exposure-risk-assessment.md`). If a future request
+conflicts with the stored methodology, ask which version to use before proceeding
+rather than guessing.
+
 ## Reference manual — `REFERENCE.md` must be kept current
 
 `REFERENCE.md` (repo root) is the **specification** — the single authoritative
