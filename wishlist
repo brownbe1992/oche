@@ -21,7 +21,7 @@ Player pages:
 - Household Elo rating + optional X01 handicapping (per-player starting scores) — full design in docs/rating-and-handicap-roadmap.md
 - "Drill this checkout" deep link from Top Finishes / Coaching Insights into Checkout Trainer — done, see docs/archive/checkout-drill-link-roadmap.md
 - End-of-night session recap (tonight's games, moments, badges, PBs — one shareable card) — full design in docs/session-recap-roadmap.md
-- Darts-culture badges (Bed & Breakfast, Madhouse, Shanghai visit) and a lifetime-180s ladder — done; badge parity for Baseball/Doubles Practice remains open — see docs/culture-badges-roadmap.md
+- Darts-culture badges (Bed & Breakfast, Madhouse, Shanghai visit), a lifetime-180s ladder, and badge parity for Baseball (⚾ Walk-Off, 🔄 The Cycle, a lifetime-runs ladder) and Doubles Practice (a lifetime doubles-hit ladder, 🎪 Ring Master) — done, see docs/archive/culture-badges-roadmap.md
 - Environmental data (temp/humidity) — full design in docs/environmental-logging-roadmap.md
 - Coaching insights from existing dart analytics — done, see docs/archive/coaching-insights-roadmap.md
 - Shareable moment/stat cards — done, see docs/shareable-moments-roadmap.md (direct social API posting descoped in favor of manual share)

@@ -203,6 +203,19 @@ function evaluateVisitBaseball(player, darts, game){
   return { inningRuns, totalRuns, runsThisVisit, scored:runsThisVisit, target, roundComplete, matchComplete, winnerIndex };
 }
 
+// 🔄 The Cycle (docs/archive/culture-badges-roadmap.md Part B): a visit containing a
+// single, double, AND treble of the CURRENT inning's target number — exactly 6
+// runs the scenic way. Baseball's own cousin of isShanghaiVisit() above, same
+// pure-predicate shape, just parameterized by the inning's fixed target instead
+// of "any number 1-20", since a Baseball visit only ever scores against the one
+// number evaluateVisitBaseball() already computes as `target`.
+function isBaseballCycle(darts, target){
+  if(!darts || darts.length !== 3) return false;
+  if(!darts.every(d => d.sector === target)) return false;
+  const mults = darts.map(d => d.mult).sort();
+  return mults[0]===1 && mults[1]===2 && mults[2]===3;
+}
+
 /* ---------- server timestamp parsing ----------
    SQLite's `datetime('now')` (backend/db.js's default for every *_at column)
    produces "YYYY-MM-DD HH:MM:SS" -- space-separated, always UTC, no 'Z' or
@@ -442,7 +455,7 @@ function isStaircaseFinish(startScore, darts){
     d3.sector===quarter && d3.mult===2;
 }
 
-// Darts-culture one-off badges (docs/culture-badges-roadmap.md Part A) — real
+// Darts-culture one-off badges (docs/archive/culture-badges-roadmap.md Part A) — real
 // moments players already shout about at the board, each a pure predicate over
 // a visit's darts (or the visit's outcome), following isStaircaseFinish()'s own
 // precedent immediately above: checked where checkout darts are already
@@ -565,7 +578,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     dartValue, dartLabel, makeDartCore,
     evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS, CRICKET_ALL_NUMBERS,
-    evaluateVisitBaseball, baseballInningTarget, parseSqliteTimestamp,
+    evaluateVisitBaseball, baseballInningTarget, isBaseballCycle, parseSqliteTimestamp,
     evaluateDartDoublesPractice, evaluateDartAroundTheClock, isStaircaseFinish,
     isBedAndBreakfast, isMadhouseFinish, isShanghaiVisit,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,

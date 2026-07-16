@@ -10,7 +10,7 @@ const path = require('path');
 
 const scoring = require(path.join('..', '..', 'frontend', 'scoring.js'));
 const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET_STANDARD_NUMBERS, CRICKET_ALL_NUMBERS,
-  evaluateVisitBaseball, baseballInningTarget, parseSqliteTimestamp,
+  evaluateVisitBaseball, baseballInningTarget, isBaseballCycle, parseSqliteTimestamp,
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
   evaluateDartDoublesPractice, evaluateDartAroundTheClock, chuckinTiersReached, isStaircaseFinish,
   isBedAndBreakfast, isMadhouseFinish, isShanghaiVisit,
@@ -1011,7 +1011,7 @@ describe('isStaircaseFinish (Staircase Finish achievement, REFERENCE.md\'s Achie
   });
 });
 
-describe('isBedAndBreakfast (docs/culture-badges-roadmap.md Part A)', () => {
+describe('isBedAndBreakfast (docs/archive/culture-badges-roadmap.md Part A)', () => {
   test('S20, S5, S1 in the canonical order', () => {
     assert.equal(isBedAndBreakfast([d(20,1), d(5,1), d(1,1)]), true);
   });
@@ -1043,7 +1043,7 @@ describe('isBedAndBreakfast (docs/culture-badges-roadmap.md Part A)', () => {
   });
 });
 
-describe('isMadhouseFinish (docs/culture-badges-roadmap.md Part A)', () => {
+describe('isMadhouseFinish (docs/archive/culture-badges-roadmap.md Part A)', () => {
   test('won the leg and the last dart is double 1', () => {
     assert.equal(isMadhouseFinish(true, [d(20,3), d(20,1), d(1,2)]), true);
   });
@@ -1071,7 +1071,7 @@ describe('isMadhouseFinish (docs/culture-badges-roadmap.md Part A)', () => {
   });
 });
 
-describe('isShanghaiVisit (docs/culture-badges-roadmap.md Part A)', () => {
+describe('isShanghaiVisit (docs/archive/culture-badges-roadmap.md Part A)', () => {
   test('single, double, and treble of the same number, in order', () => {
     assert.equal(isShanghaiVisit([d(20,1), d(20,2), d(20,3)]), true);
   });
@@ -1107,6 +1107,33 @@ describe('isShanghaiVisit (docs/culture-badges-roadmap.md Part A)', () => {
   test('fewer or more than exactly 3 darts never qualifies', () => {
     assert.equal(isShanghaiVisit([d(20,1), d(20,2)]), false);
     assert.equal(isShanghaiVisit([d(20,1), d(20,2), d(20,3), d(20,1)]), false);
+  });
+});
+
+describe('isBaseballCycle (docs/archive/culture-badges-roadmap.md Part B)', () => {
+  test('single, double, and treble of the inning target, in order', () => {
+    assert.equal(isBaseballCycle([d(4,1), d(4,2), d(4,3)], 4), true);
+  });
+
+  test('any order still qualifies', () => {
+    assert.equal(isBaseballCycle([d(7,3), d(7,1), d(7,2)], 7), true);
+  });
+
+  test('two singles and a treble (not a genuine Cycle) fails', () => {
+    assert.equal(isBaseballCycle([d(4,1), d(4,1), d(4,3)], 4), false);
+  });
+
+  test('S/D/T of a DIFFERENT number than the inning target does not qualify', () => {
+    assert.equal(isBaseballCycle([d(3,1), d(3,2), d(3,3)], 4), false);
+  });
+
+  test('a miss anywhere in the visit fails', () => {
+    assert.equal(isBaseballCycle([d(4,1), d(4,2), d(0,0)], 4), false);
+  });
+
+  test('fewer or more than exactly 3 darts never qualifies', () => {
+    assert.equal(isBaseballCycle([d(4,1), d(4,2)], 4), false);
+    assert.equal(isBaseballCycle([d(4,1), d(4,2), d(4,3), d(4,1)], 4), false);
   });
 });
 

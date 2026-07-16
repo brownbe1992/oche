@@ -1078,6 +1078,12 @@ is scoped via `_scope({mode, gameType:'baseball'})`.
 | `baseballdartsthrown` | Darts Thrown | Count of darts thrown in Baseball games (a baseball-scoped breakdown — the global "Darts Thrown" bubble already includes these too) |
 | `baseballbestinning` | Best Inning | `MAX(scored)` across every turn — the player's personal-best single-inning run total (max possible 9) |
 
+The same response also carries a raw `totalRuns` (`SUM(scored)`, the figure
+`baseballrpi` is itself derived from) — not a UI bubble (no
+`BASEBALL_BUBBLE_KEY_MAP` entry), only fetched via a no-`mode`-param call as
+the lifetime-runs achievement ladder's base (docs/archive/culture-badges-roadmap.md
+Part B, see §4).
+
 **Personal Bests** (`getBaseballPersonalBests(name, mode)`, same 5-field shape
 as X01's/Cricket's, adapted to what's actually meaningful for a fixed-inning-
 count game): `bestLegRuns` (highest total runs in a single won leg),
@@ -1142,6 +1148,11 @@ of a 1-3 mark value. Every query is scoped via
 | `doublespracticepct` | Doubles % | `hits / dartsThrown * 100` — every dart ever thrown in this mode, lifetime |
 | `doublespracticedartsperround` | Darts / Round | `dartsThrown / roundsPlayed` — a round is one `(game_id, set_no, leg_no)` grouping |
 | `doublespracticehitsperround` | Doubles Hit / Round | `hits / roundsPlayed` |
+
+The same response also carries a raw `hits` (the lifetime doubles-hit count
+`doublespracticepct` is itself derived from) — not a UI bubble, only fetched
+via a no-`mode`-param call as the lifetime doubles-hit ladder's base
+(docs/archive/culture-badges-roadmap.md Part B, see §4).
 
 **Personal Bests** (`getDoublesPracticePersonalBests(name, mode)`) — deliberately
 just 2 fields, not the 5-field X01/Cricket shape: `bestRoundDarts` (the longest
@@ -1438,11 +1449,11 @@ badge that dart awarded.
 
 ## 4. Achievements & Badges
 
-99 badges (33 X01 + 4 Cricket + 2 Baseball + 2 Tournament + 3 Daily Challenge +
-19 Just Chuckin' It + 34 Checkout Trainer + 2 Practice Drills) — that split is by
-which table each is listed under below (and which section of the Player
-Profile's Badge Case each renders in, via `BADGE_INFO`'s
-`cricket`/`baseball`/`challenge`/`chuckin`/`tournament`/`checkoutTrainer`/`drill`
+110 badges (33 X01 + 4 Cricket + 8 Baseball + 5 Doubles Practice + 2 Tournament +
+3 Daily Challenge + 19 Just Chuckin' It + 34 Checkout Trainer + 2 Practice Drills)
+— that split is by which table each is listed under below (and which section of
+the Player Profile's Badge Case each renders in, via `BADGE_INFO`'s
+`cricket`/`baseball`/`doublesPractice`/`challenge`/`chuckin`/`tournament`/`checkoutTrainer`/`drill`
 flags — anything without one of those flags buckets as X01), not a strict statement
 of which game types can trigger it: Checkout Trainer's own 34 badges are
 documented in full in §19 rather than repeated here, since that section
@@ -1459,7 +1470,12 @@ are the same shape — checked server-side in `_advanceTournamentMatch()` —
 see their own table below. Tracked in the `player_badges` table (one row per
 player+badge, with a running `count`). X01 detection logic otherwise lives in
 `frontend/index.html`'s `enterTurn()`/`onLegWon()`; Cricket's 4 own badges
-live in `enterTurnCricket()`/`onLegWonCricket()`; Daily Challenge's 3 badges
+live in `enterTurnCricket()`/`onLegWonCricket()`; Baseball's 8 own badges
+(docs/archive/culture-badges-roadmap.md Part B added 6 of them — Walk-Off, The Cycle,
+and a 4-tier lifetime-runs ladder — to the 2 that already existed) live in
+`enterTurnBaseball()`/`onLegWonBaseball()`; Doubles Practice's 5 own badges
+(also Part B — this mode had none before) are checked in
+`throwDartDoublesPractice()`; Daily Challenge's 3 badges
 are checked in `checkChallengeBadges()`, called right after every
 `/api/challenges/complete` response; Just Chuckin' It's 18 laddered milestones
 are checked in `checkChuckinMilestones()`, called after every dart from
@@ -1478,9 +1494,9 @@ coverage of them).
   {once:true})` call, checked for `newlyEarned` before celebrating — used for
   state-based badges whose trigger condition stays true forever once crossed
   (`INSERT OR IGNORE`, so re-checking an already-true condition never inflates
-  the count past 1): **Around the Clock, Around the World, Grudge Match, First
-  100+ Checkout, Full Rotation, Ghost Slayer, Champion, Giant Slayer
-  (Tournament)** — the last three are the exceptions to "a direct
+  the count past 1): **Around the Clock, Around the World, Ring Master, Grudge
+  Match, First 100+ Checkout, Full Rotation, Ghost Slayer, Champion, Giant
+  Slayer (Tournament)** — the last three are the exceptions to "a direct
   `Backend.send()` call": Ghost Slayer's `awardBadge(..., true)` call happens
   server-side, inside `recordGhostRace()` itself (see above), and its
   `newlyEarned` flag reaches the frontend as `recordGhostRace()`'s own
@@ -1513,7 +1529,7 @@ turn matching more than one condition queues all of them):
 | 🪜 **Staircase Finish** | `win && isStaircaseFinish(preVisitScore, darts)` (`frontend/scoring.js`, unit-tested in `backend/test/scoring.test.js`) — checked out in exactly 3 darts by aiming at a double, missing to the single, and repeating that all the way down: `darts === [single(N), single(N/2), double(N/4)]` where `N = preVisitScore/2`. Only qualifies when `preVisitScore` is a multiple of 8 with `N<=20` and `N/4>=1` — the 5 qualifying starting scores are 8, 16, 24, 32, and 40 (e.g. 32: single 16, single 8, double 4; 40: single 20, single 10, double 5; 8: single 4, single 2, double 1). `preVisitScore` is read from `_snap.score` (the turn's snapshot, captured before `p.score` is mutated), not `p.score` itself, since by the time `CHAIN_CHECKS` runs `p.score` already reflects the post-visit value. |
 | 🐂 **Triple Bull** | `win && darts.length===3 && every dart is sector===25 && mult===2` — checked out on 150 by hitting the double bull three separate times in one visit. There's no treble-bull ring (`makeDart()` already downgrades any attempted "treble bull" tap to a single), so this is three individual double-bull darts, not one dart at a x3 multiplier. Gets the same mega-tier confetti overlay as a nine-darter (`showAchievement()`'s `mega` check) — a comparably rare feat. |
 | 🏹 **Bullseye Finish** | `win && the visit's last dart has sector===25 && mult===2` — the checkout's final dart is the double bull, at any total. Distinct from Bullseye Gauntlet (double bull hit twice *mid-visit*, not necessarily finishing there) and from Triple Bull (all three darts are the bull, not just the last one). |
-| 🍳 **Bed & Breakfast** | `isBedAndBreakfast(darts)` (`frontend/scoring.js`, unit-tested in `backend/test/scoring.test.js`, docs/culture-badges-roadmap.md Part A) — the classic "26" splash around the 20: a visit of exactly single 20, single 5, and single 1, in any order. An exact sector/multiplier match on all three darts, not merely `scored===26` (other routes to that same total aren't the joke). No `win`/`bust` requirement — the splash itself is the achievement, whatever the visit's outcome. |
+| 🍳 **Bed & Breakfast** | `isBedAndBreakfast(darts)` (`frontend/scoring.js`, unit-tested in `backend/test/scoring.test.js`, docs/archive/culture-badges-roadmap.md Part A) — the classic "26" splash around the 20: a visit of exactly single 20, single 5, and single 1, in any order. An exact sector/multiplier match on all three darts, not merely `scored===26` (other routes to that same total aren't the joke). No `win`/`bust` requirement — the splash itself is the achievement, whatever the visit's outcome. |
 | 🏚️ **Madhouse** | `isMadhouseFinish(win, darts)` (`frontend/scoring.js`, unit-tested) — won the leg and the visit's last dart is double 1, the finish nobody wants to be left on. Same "last dart" shape as Bullseye Finish above, with sector 1 in place of the bull. |
 | 🀄 **Shanghai** | `isShanghaiVisit(darts)` (`frontend/scoring.js`, unit-tested) — a single, double, AND treble of the *same* number in one visit, any order, any number 1-20 (the bull is structurally excluded — there's no treble-bull ring, `makeDartCore()` already downgrades an attempted "treble bull" tap to a single). Deliberately independent of the Shanghai *game mode*'s own instant-win badge (`docs/shanghai-roadmap.md`) — this is the same feat landing inside a normal X01 leg; each doc cross-references the other so the two features never merge. |
 
@@ -1556,7 +1572,7 @@ co-fire with a chain badge or with each other in the same turn/leg:
 | 🌍 **Around the World** | Lifetime: all 63 dart outcomes hit at least once (20 numbers × single/double/treble = 60, plus outer bull, double bull, and a miss). Checked via an async progress query (`/api/players/around-the-world`), skipped once the client-side `earnedBadgeCache` already has it. **Once-badge.** |
 | 👻 **Ghost Slayer** | First-ever `result==='win'` row this player writes to the `ghost_races` table (§13) — win a race against a replay of one of your own past legs (Ghost Opponent, below). Unlike every other badge in this table, checked server-side: `recordGhostRace()` (`backend/db.js`) calls `awardBadge(playerName, 'ghost_slayer', true)` on every win — `once` mode's `INSERT OR IGNORE` makes the call a no-op past the first time, so no separate first-win check is needed. **Once-badge.** |
 
-**The lifetime-180s milestone ladder** (docs/culture-badges-roadmap.md Part A,
+**The lifetime-180s milestone ladder** (docs/archive/culture-badges-roadmap.md Part A,
 `ONE_EIGHTY_MILESTONE_LADDERS` in `frontend/index.html`, checked from `enterTurn()`'s
 existing `if(ev.scored===180){...}` block). 180! has always been a live
 celebration (`queueBadge('180', p.name)`) but never a `player_badges` row at all —
@@ -1610,12 +1626,69 @@ logic in `frontend/scoring.js` (`isCricketWhitewash()`/
 `frontend/index.html`) — the direct analogs of Cricket's 9 Marks/Perfect Leg,
 mapped onto Baseball's own vocabulary: Perfect Inning is the per-visit max
 (mirroring 9 Marks/180), Perfect Game is the per-leg max (mirroring Perfect
-Leg/Nine-Darter):
+Leg/Nine-Darter). Walk-Off and The Cycle (docs/archive/culture-badges-roadmap.md Part
+B — Baseball/Doubles Practice coverage parity) round the set out to 4:
 
 | Badge | Exact condition |
 |---|---|
 | 🔥 **Perfect Inning** | `dartsThrown===3 && ev.runsThisVisit===9` — 3 darts, each a treble on that inning's target number, the maximum possible runs in one visit. Checked per-visit in `enterTurnBaseball()`, the same "doesn't depend on the leg's outcome" timing 9 Marks uses. **Recurring.** |
 | 🏆 **Perfect Game** | `w.inningRuns[i]===9` for every one of innings 1–9 — a won leg with the maximum possible 9 runs in every single inning (81 total). Checked in `onLegWonBaseball(wi)` once the leg's winner and full `inningRuns` are known, the same leg-outcome timing Perfect Leg uses. **Recurring**, mega-tier overlay (confetti) like Nine-Darter/Perfect Leg. |
+| ⚾ **Walk-Off** | `game.baseballInning > 9` at the moment the leg is won — the match ran past the regulation 9 innings before a sole leader emerged. Checked in `onLegWonBaseball(wi)`; `game.baseballInning` still holds the deciding visit's own inning number at that point, since `enterTurnBaseball()` only increments it *after* dispatching to `onLegWonBaseball()` on `ev.matchComplete`. **Recurring.** |
+| 🔄 **The Cycle** | `isBaseballCycle(darts, ev.target)` (`frontend/scoring.js`, unit-tested in `backend/test/scoring.test.js`) — a single, double, AND treble of the *current inning's own number* in one visit (6 runs the scenic way), Baseball's cousin of Shanghai visit parameterized by the fixed inning target instead of "any number 1-20." Checked per-visit in `enterTurnBaseball()`, same timing as Perfect Inning; mutually exclusive with it (three trebles vs. one of each), so no suppression pairing is needed. **Recurring.** |
+
+**The Baseball lifetime-runs ladder** (docs/archive/culture-badges-roadmap.md Part B,
+`BASEBALL_RUNS_MILESTONE_LADDERS` in `frontend/index.html`, checked from
+`enterTurnBaseball()` after every visit). Reuses `checkChuckinMilestoneTier()`
+wholesale, same as the lifetime-180s ladder above — a single ladder, whose
+value is `(p.lifetimeRunsBase||0) + p.sessionRuns`: `lifetimeRunsBase` is
+fetched once per game at `newMatchPlayerBaseball()` time via the same
+no-`mode`-param `GET /api/players/stat-bubbles` pattern (now returning
+`totalRuns` from `getBaseballStatBubbles()`), and `sessionRuns` accumulates
+locally across every visit this game (not reset per leg, unlike
+`p.totalRuns`). **Permanent, once-earned tiers** (`once:true`, never
+undo-revoked), `baseball:true` — Baseball already has a Badge Case section to
+fold into.
+
+| Ladder | Metric | Tiers (threshold → label) |
+|---|---|---|
+| Lifetime Runs | `lifetimeRunsBase + p.sessionRuns` | 100 Rookie Season ⚾ · 500 Everyday Player 🧢 · 1,500 All-Star ⭐ · 5,000 Hall of Fame 🏟️ |
+
+**Doubles Practice badges** (docs/archive/culture-badges-roadmap.md Part B — this mode
+had zero badges before this change). Both checked in
+`throwDartDoublesPractice()`, `frontend/index.html`, right after a dart
+registers as a "hit" (a double landed on one of that round's own
+`config.doubles` targets — the same `ev.hit` `evaluateDartDoublesPractice()`
+already computes). Both are explicitly **one-off, permanent** per the roadmap
+doc — neither calls `trackBadgeForUndo()`, so unlike Around the Clock/World
+(this mode's nearest structural analogs), an undone dart never revokes
+either, matching the milestone ladders' own "permanent, once-earned"
+treatment instead:
+
+**The lifetime doubles-hit ladder** (`DOUBLES_HIT_MILESTONE_LADDERS`) reuses
+`checkChuckinMilestoneTier()` wholesale, same shape as the runs/180s ladders
+above — value is `(p.lifetimeHitsBase||0) + p.sessionHits`: `lifetimeHitsBase`
+fetched once per game at `newMatchPlayerDoublesPractice()` time via
+`GET /api/players/stat-bubbles?...&gameType=doubles_practice` (now returning
+`hits` from `getDoublesPracticeStatBubbles()`), `sessionHits` accumulates
+locally across every round this game (not reset per round, unlike
+`p.roundHits`). `doublesPractice:true` — the new Badge Case section this
+change adds (`renderPlayerBadges()`'s `doublesPracticeIds` bucket).
+
+| Ladder | Metric | Tiers (threshold → label) |
+|---|---|---|
+| Lifetime Doubles Hit | `lifetimeHitsBase + p.sessionHits` | 50 Ring Finder 🎯 · 250 Double Duty 🔁 · 1,000 Precision Expert 🔬 · 5,000 Doubles Legend 👑 |
+
+🎪 **Ring Master** — hit every double D1 through D20 plus the bull (21
+distinct targets) in Doubles Practice, lifetime. Direct structural analog of
+the passive Around the World badge: `GET /api/players/doubles-hit-sectors`
+(`getDoublesPracticeHitSectors()`, `backend/db.js` — same `{hit,count,total}`
+shape as `getAroundTheWorldProgress()`, just scoped to this mode's own "hit"
+definition via `DOUBLES_HIT_CASE` instead of every raw dart outcome) is
+queried after every hit, behind `DB._queue` so the query only runs once that
+dart's own `DB.recordTurn()` write has landed; `prog.count >= prog.total`
+triggers a direct `Backend.send(..., {once:true})` call, checked for
+`newlyEarned`, guarded by `earnedBadgeCache` so an already-earned player skips
+the query entirely on every subsequent hit.
 
 **Tournament badges** (`docs/tournament-mode-roadmap.md` §7 — checked server-side
 in `_advanceTournamentMatch()`, `backend/db.js`, the same function that already
