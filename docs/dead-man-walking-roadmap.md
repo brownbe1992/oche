@@ -15,7 +15,7 @@ worst history and keep recurring until they're solved.
 
 ## How this differs from every existing mode (don't conflate)
 
-- **The 121 Checkout Ladder** (`docs/practice-ladders-roadmap.md`, Part B)
+- **The 121 Checkout Ladder** (`docs/archive/practice-ladders-roadmap.md`, Part B)
   is the closest structural precedent — real X01-shaped visits from a
   non-501 starting deficit, `evaluateVisit()` and its existing bust rules
   reused unmodified, a fixed dart cap per attempt (its 9-dart/3-visit

@@ -1,6 +1,6 @@
 'use strict';
 // Committed tests for backend/db.js's Bob's 27 stat formulas
-// (docs/practice-ladders-roadmap.md Part A, REFERENCE.md's Bob's 27
+// (docs/archive/practice-ladders-roadmap.md Part A, REFERENCE.md's Bob's 27
 // section) — against a scratch SQLite database. Not exhaustive; see
 // db.x01-stats.test.js's header comment for the same "focused, not 100%
 // coverage" framing.

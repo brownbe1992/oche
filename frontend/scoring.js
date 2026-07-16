@@ -257,7 +257,7 @@ function isBaseballCycle(darts, target){
 }
 
 /* ---------- Bob's 27 ----------
-   docs/practice-ladders-roadmap.md Part A. Bob Anderson's famous doubles
+   docs/archive/practice-ladders-roadmap.md Part A. Bob Anderson's famous doubles
    routine: start with 27, throw 3 darts at D1, then D2, ... through D20 (one
    round per double, `game.bobs27Round` — game-level state, the same "current
    target lives on game, not per-player" shape Baseball's `baseballInning`
@@ -292,14 +292,14 @@ function evaluateVisitBobs27(player, darts, game){
   return { running, gain, scored:gain, hits, dead, matchComplete, round };
 }
 
-// 🎯 Full House (docs/practice-ladders-roadmap.md Part A): all three darts
+// 🎯 Full House (docs/archive/practice-ladders-roadmap.md Part A): all three darts
 // of a visit hit the round's double — the maximum possible gain for that
 // round (Bob's 27's own "180" for a single round).
 function isBobs27FullHouse(hits){
   return hits === 3;
 }
 
-// 🏔️ The Full Anderson (docs/practice-ladders-roadmap.md Part A): a perfect
+// 🏔️ The Full Anderson (docs/archive/practice-ladders-roadmap.md Part A): a perfect
 // run — every one of the 20 rounds hit with all three darts, so the running
 // total is exactly 27 + 3*(2+4+...+40) = 1287. A running total can only ever
 // reach exactly 1287 by hitting every single round with all three darts (any
@@ -920,7 +920,7 @@ function rebuildAroundTheClockState({ turns }){
   return { hitSet, roundDarts, legNo, roundOver };
 }
 
-// Bob's 27 (solo — docs/practice-ladders-roadmap.md Part A) — one
+// Bob's 27 (solo — docs/archive/practice-ladders-roadmap.md Part A) — one
 // visit per round, round derived purely from replay position (the 1st turn is
 // round 1/D1, the 2nd is round 2/D2, ...), no starter rotation (always the one
 // player) and no leg/set concept at all: a run IS the whole game, so a SAVED
@@ -937,6 +937,50 @@ function rebuildBobs27State({ turns }){
     round += 1;
   }
   return { running, round };
+}
+
+// The 121 Checkout Ladder (docs/archive/practice-ladders-roadmap.md Part B) — solo
+// only, so no starter rotation/leg-set structure to replay: every leg_no is
+// simply this player's own next attempt in sequence. Each attempt reuses
+// evaluateVisit() UNMODIFIED (this game type's whole design is "an ordinary
+// X01 visit, just starting from a target that isn't 501/301/etc") — replayed
+// with player.score seeded from that attempt's own target and doubleOut
+// forced true (the ladder is always double-out, the classic rule). The
+// target itself is re-derived leg by leg (121, +1 per win, -1 per fail,
+// floor 61) — never trusted from any stored value, same "replay, not
+// snapshot" contract every other rebuild*State() function follows.
+function rebuildCheckoutLadderState({ turns }){
+  const byLeg = new Map();
+  turns.forEach(t => { if(!byLeg.has(t.legNo)) byLeg.set(t.legNo, []); byLeg.get(t.legNo).push(t); });
+  const legNos = Array.from(byLeg.keys()).sort((a,b)=>a-b);
+  let target = 121, currentLeg = 1, remaining = target, visitsThisLeg = 0;
+  for(const ln of legNos){
+    const legTurns = byLeg.get(ln);
+    const player = { score: target, doubleOut: true };
+    let won = false, lastRemaining = target;
+    for(const t of legTurns){
+      const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
+      const ev = evaluateVisit(player, dartsCore, {});
+      if(!ev.bust) player.score = ev.newScore;
+      lastRemaining = player.score;
+      if(ev.win){ won = true; break; }
+    }
+    const resolved = won || legTurns.length >= 3;
+    if(resolved){
+      // Capped at 170 (same reasoning as the write-time guard in db.js's
+      // addTurn(): turns.target_score is a shared column whose valid range
+      // tops out at 170, the highest possible double-out finish).
+      target = won ? Math.min(170, target + 1) : Math.max(61, target - 1);
+      currentLeg = ln + 1;
+      remaining = target;
+      visitsThisLeg = 0;
+    } else {
+      currentLeg = ln;
+      remaining = lastRemaining;
+      visitsThisLeg = legTurns.length;
+    }
+  }
+  return { target, legNo: currentLeg, remaining, visitsThisLeg };
 }
 
 // Around the World (solo, guided drill) — no round/leg concept at all (one
@@ -971,5 +1015,6 @@ if (typeof module !== 'undefined' && module.exports) {
     evaluateVisitBobs27, isBobs27FullHouse, isBobs27FullAnderson,
     rebuildX01State, rebuildCricketState, rebuildBaseballState,
     rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State,
+    rebuildCheckoutLadderState,
   };
 }

@@ -48,6 +48,7 @@ convention in `CLAUDE.md`.
 - [23. Saved Games / Pause & Resume](#23-saved-games--pause--resume)
 - [24. Household Elo Rating](#24-household-elo-rating)
 - [25. Handicapping](#25-handicapping)
+- [26. 121 Checkout Ladder](#26-121-checkout-ladder)
 
 ---
 
@@ -463,7 +464,7 @@ orientation. Baseball's stat vocabulary is documented in §3 ("Baseball stats").
 
 ### Bob's 27 rules — `GAME_TYPES.bobs_27.evaluateVisit(player, darts, game)` (`evaluateVisitBobs27()`, `frontend/scoring.js`)
 
-`docs/practice-ladders-roadmap.md` Part A — Bob Anderson's doubles-
+`docs/archive/practice-ladders-roadmap.md` Part A — Bob Anderson's doubles-
 practice routine. Solo only (`GAME_TYPES.bobs_27.soloOnly = true`), visit-based
 (3 darts per round) like Baseball, with the same "always exactly one player,
 `game.current` never moves" shape. Starts on 27; **the current round IS the
@@ -1863,7 +1864,7 @@ triggers a direct `Backend.send(..., {once:true})` call, checked for
 `newlyEarned`, guarded by `earnedBadgeCache` so an already-earned player skips
 the query entirely on every subsequent hit.
 
-**Bob's 27 badges** (`docs/practice-ladders-roadmap.md` Part A, checked
+**Bob's 27 badges** (`docs/archive/practice-ladders-roadmap.md` Part A, checked
 in `enterTurnBobs27()`/`onLegWonBobs27()`, `frontend/index.html`):
 
 | Badge | Exact condition |
@@ -3118,7 +3119,7 @@ already-migrated database is a safe no-op).
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
 | `game_id` / `player_id` | `INTEGER NOT NULL, FK, ON DELETE CASCADE` | |
 | `set_no` / `leg_no` | `INTEGER NOT NULL` | Must be a positive integer (`addTurn()` rejects `0` or negative explicitly — an explicit `0` is validation-rejected, not silently treated as the "omitted" default of `1`) |
-| `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3). `addTurn()` rejects a non-numeric value outright rather than silently coercing it to `0`. For `game_type='x01'` specifically, `POST /api/games/:id/turns` (the one production caller that opts into `addTurn()`'s `enforceConsistency` flag) additionally rejects a `scored` that doesn't match the sum of that visit's dart face values (`0` required on a bust; `checkout_points` must equal `scored` on a checkout) — `docs/security-audit-roadmap.md` SEC-22. For `game_type='baseball'` the same caller also rejects a `scored` that doesn't equal this visit's runs — the sum of dart `multiplier`s that hit the inning's target number, where the inning is derived server-side from the player's own prior turn count in the leg (`min(inning, 9)` for extra innings); a Baseball turn must also be neither a bust nor a checkout (`docs/security-audit-roadmap.md` SEC-25). For `game_type='bobs_27'`, `scored` is that round's own *gain only* — never a negative penalty (see §2's "store the gain, derive the penalty"); the same caller derives the round from the player's own prior turn count (capped at 20), rejects a `scored` that doesn't match `hits * round*2` on the submitted darts, rejects `checkout=true` outright, and requires `bust` to match whether replaying every prior round's gain/penalty plus this round's own would drop the running score to 0 or below (`docs/practice-ladders-roadmap.md` Part A). Still deliberately skipped for Cricket (`scored` is computed from mark-closing state, not a dart-value sum, so the same rule would reject legitimate Cricket visits) and for Doubles Practice / Chuckin / Checkout Trainer / Around the Clock / World (non-arithmetic or non-points `scored`) |
+| `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3). `addTurn()` rejects a non-numeric value outright rather than silently coercing it to `0`. For `game_type='x01'` specifically, `POST /api/games/:id/turns` (the one production caller that opts into `addTurn()`'s `enforceConsistency` flag) additionally rejects a `scored` that doesn't match the sum of that visit's dart face values (`0` required on a bust; `checkout_points` must equal `scored` on a checkout) — `docs/security-audit-roadmap.md` SEC-22. For `game_type='baseball'` the same caller also rejects a `scored` that doesn't equal this visit's runs — the sum of dart `multiplier`s that hit the inning's target number, where the inning is derived server-side from the player's own prior turn count in the leg (`min(inning, 9)` for extra innings); a Baseball turn must also be neither a bust nor a checkout (`docs/security-audit-roadmap.md` SEC-25). For `game_type='bobs_27'`, `scored` is that round's own *gain only* — never a negative penalty (see §2's "store the gain, derive the penalty"); the same caller derives the round from the player's own prior turn count (capped at 20), rejects a `scored` that doesn't match `hits * round*2` on the submitted darts, rejects `checkout=true` outright, and requires `bust` to match whether replaying every prior round's gain/penalty plus this round's own would drop the running score to 0 or below (`docs/archive/practice-ladders-roadmap.md` Part A). Still deliberately skipped for Cricket (`scored` is computed from mark-closing state, not a dart-value sum, so the same rule would reject legitimate Cricket visits) and for Doubles Practice / Chuckin / Checkout Trainer / Around the Clock / World (non-arithmetic or non-points `scored`) |
 | `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans. Cricket turns always write `bust=0, checkout=0` — cricket has neither concept. Doubles Practice repurposes `bust` as "this dart ended the round" (so-close or wrong-double, §2) — the closest existing column to that meaning, since this mode has no bust/win concept of its own either; `checkout` stays `0` always. Guided Around the Clock repurposes `bust` the identical way: `1` marks whichever dart completed the round (all 20 numbers hit) — there's no "so-close"/"wrong-target" failure mode here, only completion or abandonment. Guided Around the World writes `bust=0` always (no round to end, matching Chuckin's own turns) |
 | `checkout_points` | `INTEGER` | Only set when `checkout=1` (X01 only) |
 | `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set only by Cricket's write path (`enterTurnCricket()`) — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged. Checkout Trainer repurposes it as "answered with the objectively fewest darts" (§19) |
@@ -5039,3 +5040,151 @@ Playwright: a real 2-player X01 match set up through the actual New Game UI
 (one player handicapped to 401, the other a real 501), confirming both
 players' starting scores are exactly right, the match completes, and the
 handicapped winner's Elo rating correctly shows zero rated games afterward.
+
+## 26. 121 Checkout Ladder
+
+`docs/archive/practice-ladders-roadmap.md` Part B. The classic solo checkout
+ladder: start on **121**, double out, up to **3 visits (9 darts)** to check
+it out. Check out and the target climbs one rung; use all 3 visits without
+checking out and it drops one rung (floored at **61**). Play as long as you
+like — the story is how high you climb. Deliberately the *physical* sibling
+of Checkout Trainer (§19): that mode asks what you'd *throw*; this one makes
+you actually throw it.
+
+### Design
+
+`checkout_ladder` game type, solo-only (`GAME_TYPES.checkout_ladder.soloOnly
+= true`). Each target attempt is its own **leg** (`turns.leg_no` increments
+per attempt) of ordinary X01-shaped visits — `evaluateVisit()` (the same
+shared X01 evaluator, `frontend/scoring.js`) is reused **completely
+unmodified**; the 3-visit cap and the ladder's up-one/down-one movement are
+the only new rules layered on top. The game never completes — no
+`finishUnit('game', ...)`/`DB.completeGame()` call anywhere in this chain,
+matching Doubles Practice/Just Chuckin' It's "runs until End Game is
+pressed" shape (`games.completed_at` stays `NULL` forever, same as those two
+modes).
+
+### Ladder movement is derived, not stored
+
+The current target is never trusted from any stored value — it's derived
+fresh, every time, by replaying every prior attempt's own recorded outcome:
+start at 121; a win (`checkout=1`) climbs one rung; a loss (3 visits
+recorded, no checkout) drops one rung, floored at 61. **Capped at 170**
+(not just the highest badge rung but a hard ceiling): `turns.target_score`
+is the same shared column Checkout Trainer uses for "a checkout target,"
+whose valid range tops out at 170 (the highest possible double-out finish,
+T20 T20 Bull) — repeatedly clearing 170 just keeps a run parked at the
+summit rather than requesting a target outside that column's own valid
+range. This "nothing pre-aggregated" replay happens in three independent
+places that must all agree: the write-time guard (`backend/db.js`
+`addTurn()`), the stats/personal-bests reads (`_checkoutLadderAttempts()`),
+and the pure rebuild function used for saved-game resume
+(`rebuildCheckoutLadderState()`, `frontend/scoring.js`).
+
+### Write-time validation (`addTurn()`, `backend/db.js`)
+
+A `checkout_ladder` turn is checked the same way an X01 visit is
+(`scored` must equal the sum of the darts thrown, or `0` on a bust;
+`checkoutPoints` must equal `scored` on a checkout), plus two new rules:
+- **At most 3 visits per attempt** — a 4th turn recorded against the same
+  `(game_id, leg_no)` is rejected (the attempt should already have resolved).
+- **`targetScore` must match the attempt's derived ladder position** —
+  computed server-side from every turn with a strictly smaller `leg_no`
+  (grouped by leg, a leg with any `checkout=1` turn counts as a win,
+  otherwise a loss), never trusted from the client. A first attempt must
+  target 121; any other value is rejected.
+
+### Engine (`frontend/index.html`)
+
+`newMatchPlayerCheckoutLadder(name)` seeds `p.score = 121`, `doubleOut:
+true` (always double-out regardless of that player's own X01 finish-rule
+preference elsewhere). `enterTurnCheckoutLadder()` (dispatched from
+`enterTurn()`) commits a visit via `evaluateVisit()` unmodified, tracks
+`game.checkoutLadderVisits` (0-2 while an attempt is still live), and on a
+win or a 3rd used visit hands off to `resolveCheckoutLadderAttempt()`,
+which climbs/drops `game.checkoutLadderTarget` and then calls
+`startNextLeg(false)` — the **same generic leg-transition function X01
+itself uses** (increments `game.legNo`, resets each player via
+`resetForNextLeg()`, clears `currentLegTurns`/`lastTurnSnapshot`,
+re-renders) rather than a bespoke reimplementation of that bookkeeping.
+`startNextLeg()` gets one small `checkout_ladder`-specific addition
+(resetting `game.checkoutLadderVisits` to 0), the same pattern
+`baseballInning`'s own reset there already established. Undo
+(`undoLastTurnCheckoutLadder()`) only reaches back into the still-live
+attempt — once an attempt resolves, `lastTurnSnapshot` is cleared by the
+leg transition, so (same as every other game type) a player can't undo past
+a leg boundary.
+
+### Stats, Personal Bests, Home leaderboard
+
+- **Stat bubbles** (`getCheckoutLadderStatBubbles`): `attempts`,
+  `successRate` (wins ÷ attempts), `currentPosition` (replays only the
+  *temporally latest game's* own resolved attempts — "where would my next
+  attempt in that run start from," the closest a lifetime bubble can get to
+  a genuinely live position for a mode with no persistent cross-session
+  ladder), `dartsThrown`.
+- **Personal Bests** (`getCheckoutLadderPersonalBests`): `highestTargetReached`
+  (a peak — attempted, win or fail, since standing at rung 150 already means
+  you climbed that high regardless of how that attempt ends) and
+  `fewestDartsOnHighestCheckout` (darts thrown on the highest attempt
+  actually *won*, which can be lower than `highestTargetReached` if the
+  peak attempt itself failed).
+- **Home leaderboard** (`getCheckoutLadderLeaderboard`): one row per player,
+  their own highest-ever target reached (`MAX(turns.target_score)`), no
+  minimum-attempts floor — same "a single best run" precedent Checkout
+  Blitz's own board established.
+- Real throws: darts count toward heatmaps/doubles% like every other
+  physical game type — no hypothetical exclusion.
+
+### Badges
+
+- A highest-rung ladder (`CHECKOUT_LADDER_MILESTONE_LADDERS`, the same
+  data-driven `checkChuckinMilestoneTier()` engine every other milestone
+  ladder in this app uses): Climbing 🧗 (125), Ascending ⛰️ (130), High
+  Ground 🏕️ (140), Summit Push 🚩 (150), Near The Top 🌤️ (160), Peak Rung
+  🏔️ (170) — checked against the **new** target just climbed to, so a tier
+  fires the moment a climb first reaches that rung.
+- 🧗 **Peak Bagged** (`checkoutladderpeakbagged`) — the separate, harder
+  feat of actually *checking out* 170 (T20 T20 Bull, the same double-out
+  maximum X01's Big Fish celebrates), not just reaching that rung. Recurring
+  (`awardRecurringBadge`) — climbing back up to 170 and clearing it again in
+  a later run is a real repeatable feat, not a one-off.
+
+### Live scoreboard
+
+`playerSnapshotCheckoutLadder(p)` rides the per-player `players[]` array
+(`score`, `out:'double'`, dart counts); `liveSnapshot()` adds
+`checkoutLadderTarget`/`checkoutLadderVisits` (mirroring `bobs27Round`'s own
+game-level field) and treats this game type as X01-shaped for the
+checkout-hint calculation (`isX01` also matches `'checkout_ladder'`, since
+it's a genuine double-out visit). `display.html`'s
+`renderers.checkout_ladder.card()` mirrors X01's own card almost exactly —
+swapping the "Leg N" standing line for "Target N · Attempt N · Visit N/3."
+
+### Saved games
+
+Follows `docs/archive/saved-games-roadmap.md` for free — the ladder's own
+"nothing pre-aggregated" design means `rebuildCheckoutLadderState()`
+(`frontend/scoring.js`) is a pure replay of `turns`, no extra schema needed.
+`_savedGamePosition()` (`backend/db.js`) returns `{target, legNo,
+remaining}` for this game type; `savedGamePositionLabel()`
+(`frontend/index.html`) renders it as "Target N · attempt N · N remaining."
+
+### Testing
+
+`backend/test/scoring.test.js`: `rebuildCheckoutLadderState()`'s up/down
+movement, the 61 floor, a still-live (unresolved) attempt, and a bust
+burning a visit without ending the attempt early.
+`backend/test/db.turn-consistency-guard.test.js`: the write-time guard's
+dart-sum/checkout-points checks, the 3-visit cap, `targetScore` validation
+after both a win and a loss, and the 170 ceiling never producing an
+out-of-range `targetScore`. `backend/test/db.checkout-ladder-stats.test.js`:
+all three stats/PB/leaderboard functions, including the
+"`highestTargetReached` counts a failed peak attempt but
+`fewestDartsOnHighestCheckout` only looks at the highest **won** target"
+distinction. Verified end-to-end with Playwright: a real solo game climbing
+121→126 across 6 real 3-dart double-out checkouts (confirming the 🧗
+Climbing badge fires at 125), a failed attempt dropping the target back
+down, undo restoring state mid-attempt, save/resume round-tripping a
+mid-attempt position exactly, and the live `/display` scoreboard rendering
+the target/attempt/visit line with no console errors.

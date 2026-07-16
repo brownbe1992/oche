@@ -326,7 +326,8 @@ const ACH_LABELS  = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter
   baseballwalkoff:'Walk-Off! ⚾', baseballcycle:'The Cycle! 🔄', doublespracticeringmaster:'Ring Master! 🎪',
   cricketstonecold:'Stone Cold! 🔪',
   bobs27fullhouse:'Full House! 🎯', bobs27fullanderson:'🏔️ THE FULL ANDERSON! 🏔️',
-  topofthehouse:'👑 TOP OF THE HOUSE! 👑', upset:'Upset! 🗡️' };
+  topofthehouse:'👑 TOP OF THE HOUSE! 👑', upset:'Upset! 🗡️',
+  checkoutladderpeakbagged:'Peak Bagged! 🧗' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -342,7 +343,8 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   baseballwalkoff:3000, baseballcycle:2500, doublespracticeringmaster:5000,
   cricketstonecold:3500,
   bobs27fullhouse:2500, bobs27fullanderson:6000,
-  topofthehouse:6000, upset:2500 };
+  topofthehouse:6000, upset:2500,
+  checkoutladderpeakbagged:4000 };
 // Mirror-copied from frontend/index.html's BADGE_INFO[...].desc / ACH_DESC_FALLBACK —
 // this file has no Badge Case UI to source the text from directly, so it's kept as
 // its own flat map (docs/next-session-plan.md item 1).
@@ -399,6 +401,7 @@ const ACH_DESC = {
   bobs27fullanderson: "A perfect Bob's 27 run — every double from D1 through D20 hit with all three darts, finishing on exactly 1287.",
   topofthehouse: 'Reach #1 in the Household Ratings leaderboard.',
   upset: 'Win a rated 2-player match against an opponent rated 150+ points above you.',
+  checkoutladderpeakbagged: 'Check out 170 on the 121 Checkout Ladder.',
 };
 // Just Chuckin' It's 18 laddered milestone badges — mirror-copied from frontend/
 // index.html's CHUCKIN_MILESTONE_LADDERS (this file has no shared module with
@@ -484,7 +487,7 @@ const DOUBLES_HIT_MILESTONE_LADDERS = [
       { threshold:5000, label:'Doubles Legend',   icon:'👑' },
     ] },
 ];
-// Bob's 27 survival/score ladder (docs/practice-ladders-roadmap.md Part A)
+// Bob's 27 survival/score ladder (docs/archive/practice-ladders-roadmap.md Part A)
 // — mirror-copied from index.html's BOBS27_SCORE_MILESTONE_LADDERS.
 const BOBS27_SCORE_MILESTONE_LADDERS = [
   { idPrefix:'bobs27_score_',
@@ -497,7 +500,21 @@ const BOBS27_SCORE_MILESTONE_LADDERS = [
       { threshold:1000, label:'Four Figures',  icon:'👑' },
     ] },
 ];
-[ONE_EIGHTY_MILESTONE_LADDERS, BASEBALL_RUNS_MILESTONE_LADDERS, DOUBLES_HIT_MILESTONE_LADDERS, BOBS27_SCORE_MILESTONE_LADDERS].forEach(ladders=>{
+// 121 Checkout Ladder highest-rung ladder (docs/archive/practice-ladders-roadmap.md
+// Part B) — mirror-copied from index.html's CHECKOUT_LADDER_MILESTONE_LADDERS.
+const CHECKOUT_LADDER_MILESTONE_LADDERS = [
+  { idPrefix:'checkout_ladder_',
+    descFor: t => `Climb the 121 Checkout Ladder to a target of ${t}.`,
+    tiers: [
+      { threshold:125, label:'Climbing',    icon:'🧗' },
+      { threshold:130, label:'Ascending',    icon:'⛰️' },
+      { threshold:140, label:'High Ground',  icon:'🏕️' },
+      { threshold:150, label:'Summit Push',  icon:'🚩' },
+      { threshold:160, label:'Near The Top', icon:'🌤️' },
+      { threshold:170, label:'Peak Rung',    icon:'🏔️' },
+    ] },
+];
+[ONE_EIGHTY_MILESTONE_LADDERS, BASEBALL_RUNS_MILESTONE_LADDERS, DOUBLES_HIT_MILESTONE_LADDERS, BOBS27_SCORE_MILESTONE_LADDERS, CHECKOUT_LADDER_MILESTONE_LADDERS].forEach(ladders=>{
   ladders.forEach(ladder=>{
     ladder.tiers.forEach((tier, i)=>{
       const id = ladder.idPrefix + tier.threshold;
@@ -964,7 +981,7 @@ const renderers = {
       </div>`;
     }
   },
-  // Bob's 27 (docs/practice-ladders-roadmap.md Part A): same shared
+  // Bob's 27 (docs/archive/practice-ladders-roadmap.md Part A): same shared
   // chalkboard-table shape as Cricket/Baseball's (rows=rounds D1-D20, one
   // column since it's always solo), just fixed at exactly 20 rows — no
   // "extra innings"-style dynamic extension the way Baseball's table needs.
@@ -1006,6 +1023,63 @@ const renderers = {
           <div class="sum-stat">
             <div class="sv">${num(p.running)}</div>
             <div class="sl">Final Score</div>
+          </div>
+        </div>
+      </div>`;
+    }
+  },
+  // 121 Checkout Ladder (docs/archive/practice-ladders-roadmap.md Part B): solo drill,
+  // always exactly one player/card — a genuine X01-shaped visit (double-out,
+  // checkout hints, dart slots), just against a climbing/dropping target
+  // instead of an opponent, so this mirrors x01's own card almost exactly —
+  // swapping "Leg N" for "Target N · Attempt N" and Darts Thrown for a
+  // visit-of-3 counter, since neither leg-scoped nor session-scoped darts is
+  // as meaningful here as which visit of this attempt is live.
+  checkout_ladder: {
+    card(p, i, s, L){
+      const active = i===s.currentIndex;
+      const target = num(s.checkoutLadderTarget || 121);
+      const visit = Math.min((s.checkoutLadderVisits||0)+1, 3);
+      let throwbox = '';
+      if(active){
+        const darts = Array.isArray(s.darts) ? s.darts : [];
+        const slots = [0,1,2].map(k=>{
+          const lab = darts[k];
+          return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
+        }).join('');
+        const co = s.checkout
+          ? `<div class="checkout"><span class="lab">Checkout</span><span class="route">${esc(s.checkout).replace(/ /g,'  →  ')}</span></div>`
+          : '';
+        throwbox = `<div class="throwbox"><div class="darts">${slots}</div>${co}</div>`;
+      }
+      let flash = '';
+      if(active && s.status==='bust') flash = `<div class="flash bust">BUST</div>`;
+      if(active && s.status==='won')  flash = `<div class="flash shot">TARGET CLEARED</div>`;
+
+      const meta = !L.showMeta ? '' : `<div class="meta"><span class="standing">Target ${target} · Attempt ${num(s.legNo)} · Visit ${visit}/3</span></div>`;
+
+      return `<div class="pcard ${active?'active':''}">
+        ${flash}
+        <div>
+          <div class="prow1">
+            <span class="pname">${escapeHtml(p.name)}</span>
+            ${L.showTag ? `<span class="ptag">DOUBLE OUT</span>` : ''}
+            ${active?'<span class="throwflag">▸ throwing</span>':''}
+          </div>
+          <div class="score">${num(p.score)}</div>
+        </div>
+        ${meta}
+        ${throwbox}
+      </div>`;
+    },
+    summary(p){
+      return `
+      <div class="sum-card">
+        <div class="sum-name">${escapeHtml(p.name)}</div>
+        <div class="sum-stats">
+          <div class="sum-stat">
+            <div class="sv">${num(p.legDarts)}</div>
+            <div class="sl">Darts This Attempt</div>
           </div>
         </div>
       </div>`;

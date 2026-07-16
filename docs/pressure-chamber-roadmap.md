@@ -28,7 +28,7 @@ sequence** head-to-head, so it's a fair contest of nerve, not just skill.
   borrows that shape but adds a *variable* per-round modifier on top of a
   fixed target sequence, where Halve-It's only variable is the target
   itself.
-- **Bob's 27 / the 121 Checkout Ladder** (`docs/practice-ladders-roadmap.md`)
+- **Bob's 27 / the 121 Checkout Ladder** (`docs/archive/practice-ladders-roadmap.md`)
   are single-mechanic solo routines with no modifier layer and no H2H
   identical-sequence mode.
 - This is **not** a new way to *play out* a leg of X01/Cricket — it's a

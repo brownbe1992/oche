@@ -1,13 +1,12 @@
 # Structured Practice Ladders — Bob's 27 & the 121 Checkout Ladder — Design Roadmap
 
-> Status: **Part A (Bob's 27) shipped 2026-07; Part B (the 121 Checkout
-> Ladder) still design phase, not started.** Two famous, self-contained solo
+> Status: **Both parts shipped 2026-07.** Two famous, self-contained solo
 > practice routines with real scoring shapes (unlike freeform drills, each
 > run produces a number worth ranking and laddering). Bundled in one doc
-> because they share framing, but they are **independently shippable** —
-> tracked as two separate items on `docs/open-roadmap-items.md`. This doc
-> stays in `docs/` (not archived) until Part B is also done, per
-> `CLAUDE.md`'s "only archive once every split-out item is Done" rule.
+> because they share framing, but they were **independently shippable** —
+> tracked as two separate items on `docs/open-roadmap-items.md`. Both items
+> are now Done, so this doc has moved to `docs/archive/`, per `CLAUDE.md`'s
+> "only archive once every split-out item is Done" rule.
 
 ## Part A — Bob's 27
 
@@ -115,6 +114,49 @@ run's story is how high you climbed.
   ladder badges self-contained and let Big Fish stay a real-match feat.
 - Floor: the target never drops below 61 (keeps every attempt a genuine
   2–3 dart combination finish rather than a single-double grind).
+
+### Implementation notes (2026-07, shipped)
+
+Built essentially as designed, with one addition and one clarification the
+design above didn't spell out:
+
+- **A ceiling at 170, not just a floor at 61.** `turns.target_score` is the
+  same shared column Checkout Trainer uses for "a checkout target," whose
+  valid range tops out at 170 (the highest possible double-out finish, T20
+  T20 Bull) — the design above only specified the 61 floor, but climbing
+  indefinitely past 170 would eventually request a `targetScore` outside
+  that column's own valid range and fail to write. The shipped version caps
+  the climb at 170: clearing 170 repeatedly just keeps a run parked at the
+  summit (and re-fires 🧗 Peak Bagged every time, since it's a recurring
+  badge) rather than erroring out on run N+1.
+- **The "highest-rung ladder" badges are checked against the position just
+  climbed TO, not the target just cleared** — reaching rung 125 means a win
+  that advances the target from 124 to 125, the same "value entering the
+  next attempt" framing the design's own ladder-movement math already uses.
+  🧗 Peak Bagged is the separate, deliberately different case: it fires on
+  actually *checking out* 170 itself (`clearedTarget === 170`), which the
+  ladder-rung badges don't otherwise capture (reaching rung 170 only
+  requires clearing 169).
+
+Everything else matches this doc's design: `checkout_ladder` game type,
+solo-only, each attempt its own leg (`leg_no` increments per attempt),
+`evaluateVisit()` reused completely unmodified, ladder movement derived
+fresh from replaying every prior attempt's own outcome (never stored), the
+3-visit/9-dart cap, the 4-bubble stat set, the 2-field Personal Bests
+(highest target reached counts a failed peak attempt; fewest darts on the
+highest checkout only looks at the highest attempt actually *won*), the
+peak-single-run Home leaderboard, and the highest-rung ladder (125/130/140/
+150/160/170) plus 🧗 Peak Bagged, both via the existing data-driven ladder
+engine (`checkChuckinMilestoneTier()`, reused wholesale). Saved games work
+exactly as this doc predicted — pure replay from `turns`
+(`rebuildCheckoutLadderState()`), no extra schema. Full write-up:
+`REFERENCE.md`'s "121 Checkout Ladder" section (§26); committed tests in
+`backend/test/scoring.test.js`, `backend/test/db.turn-consistency-guard.test.js`,
+and `backend/test/db.checkout-ladder-stats.test.js`.
+
+The "lean: per-run starts at 121, lifetime highest-ever is the Personal
+Best" call under "Open questions" below held — ladder position does NOT
+persist across sessions/runs.
 
 ## Accessibility, security, and testing considerations
 

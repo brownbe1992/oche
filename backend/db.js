@@ -24,7 +24,8 @@ const netguard = require('./netguard.js');
 const backupLib = require('./backup-lib.js');
 const { checkoutHint, dartLabel,
   rebuildX01State, rebuildCricketState, rebuildBaseballState,
-  rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State } = require('../frontend/scoring.js');
+  rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State,
+  rebuildCheckoutLadderState } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -1071,7 +1072,7 @@ function addTurn(gameId, t, opts = {}) {
       throw httpError(400, 'scored does not match this Baseball visit\'s runs on the target number');
     }
   } else if (gameTypeRow && gameTypeRow.game_type === 'bobs_27') {
-    // docs/practice-ladders-roadmap.md Part A: scored is this round's GAIN
+    // docs/archive/practice-ladders-roadmap.md Part A: scored is this round's GAIN
     // (0 when all 3 darts missed the double — it can't go negative, so the
     // penalty is derived at read time from scored===0, not stored directly;
     // see evaluateVisitBobs27()'s own comment in frontend/scoring.js). Round is
@@ -1098,6 +1099,47 @@ function addTurn(gameId, t, opts = {}) {
     const expectedRunning = running + (expectedGain > 0 ? expectedGain : -doubleValue);
     if (!!t.bust !== (expectedRunning <= 0)) {
       throw httpError(400, 'bust must reflect whether this round drops the running score to 0 or below');
+    }
+  } else if (gameTypeRow && gameTypeRow.game_type === 'checkout_ladder') {
+    // docs/archive/practice-ladders-roadmap.md Part B: a genuine X01 visit (identical
+    // dart-sum/bust/checkout arithmetic to the 'x01' branch above, reused
+    // wholesale — this game type's whole design is "an ordinary X01 visit,
+    // just starting from a target that isn't 501/301/etc") from a per-attempt
+    // starting remainder — each attempt is its own leg (leg_no increments per
+    // attempt), capped at 3 visits (9 darts) before the attempt fails.
+    const dartSum = darts.reduce((sum, d) => sum + (d.sector === 0 ? 0 : d.sector === 25 ? (d.multiplier === 2 ? 50 : 25) : d.sector * d.multiplier), 0);
+    if (t.bust) {
+      if (scored !== 0) throw httpError(400, 'a bust turn must have scored=0');
+    } else if (scored !== dartSum) {
+      throw httpError(400, 'scored does not match the value of the darts thrown this visit');
+    }
+    if (t.checkout && checkoutPoints !== scored) {
+      throw httpError(400, 'checkoutPoints must match scored on a checkout turn');
+    }
+    // At most 3 visits per attempt — a 4th would mean the attempt should have
+    // already resolved (won, or failed after visit 3) and the client is
+    // trying to keep going past the cap.
+    const visitsThisLeg = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE game_id=? AND player_id=? AND set_no=? AND leg_no=?')
+      .get(Number(gameId), p.id, setNo, legNo).n;
+    if (visitsThisLeg >= 3) throw httpError(400, 'a checkout ladder attempt is capped at 3 visits');
+    // The ladder's current target is never trusted from the client — it's
+    // derived from every STRICTLY PRIOR attempt's own outcome (a leg only
+    // ever advances once it's actually resolved): a win (any turn with
+    // checkout=1) climbs the ladder by 1; a loss (3 visits recorded with no
+    // checkout) drops it by 1, floored at 61. Capped at 170 (not just the
+    // highest badge rung but a hard ceiling): turns.target_score is the same
+    // shared column Checkout Trainer uses for "a checkout target," which by
+    // definition can never exceed the highest possible double-out finish —
+    // repeatedly clearing 170 just keeps the run parked there rather than
+    // requesting a target outside the column's own valid range.
+    const priorLegRows = db.prepare('SELECT leg_no, checkout FROM turns WHERE game_id=? AND player_id=? AND set_no=? AND leg_no<? ORDER BY leg_no, id')
+      .all(Number(gameId), p.id, setNo, legNo);
+    const byLeg = new Map();
+    priorLegRows.forEach(r => { if (!byLeg.has(r.leg_no)) byLeg.set(r.leg_no, false); if (r.checkout) byLeg.set(r.leg_no, true); });
+    let expectedTarget = 121;
+    for (const won of byLeg.values()) expectedTarget = won ? Math.min(170, expectedTarget + 1) : Math.max(61, expectedTarget - 1);
+    if (Number(t.targetScore) !== expectedTarget) {
+      throw httpError(400, "targetScore does not match this attempt's derived ladder position");
     }
   }
   // Checkout Trainer (docs/archive/checkout-trainer-roadmap.md): the target score offered
@@ -1168,10 +1210,10 @@ function completeGame(gameId, winnerName) {
    portable history — an imported incomplete game just arrives unsaved) but IS
    in getFullDatabaseExport() below (ordinary "your data" for a full-server
    dump).
-   bobs_27 (docs/practice-ladders-roadmap.md Part A) IS savable — its
+   bobs_27 (docs/archive/practice-ladders-roadmap.md Part A) IS savable — its
    running total replays deterministically from `turns` the same way every
    other entry here does (rebuildBobs27State(), frontend/scoring.js). */
-const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27'];
+const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder'];
 
 function _savedGameRow(gameId) {
   return db.prepare('SELECT * FROM saved_games WHERE game_id = ?').get(Number(gameId));
@@ -1290,6 +1332,10 @@ function _savedGamePosition(game, participants, turns) {
   if (game.game_type === 'bobs_27') {
     const r = rebuildBobs27State({ turns });
     return { round: r.round, running: r.running };
+  }
+  if (game.game_type === 'checkout_ladder') {
+    const r = rebuildCheckoutLadderState({ turns });
+    return { target: r.target, legNo: r.legNo, remaining: r.remaining };
   }
   return null;
 }
@@ -3027,7 +3073,7 @@ function getCheckoutBlitzPersonalStats(playerName) {
   return { bestScore, lifetimeAvgScore, runs: rows.length };
 }
 
-/* ---------- Bob's 27 (docs/practice-ladders-roadmap.md Part A) ----------
+/* ---------- Bob's 27 (docs/archive/practice-ladders-roadmap.md Part A) ----------
    Nothing is pre-aggregated (same house style as everywhere else in this
    schema): a run's final score is derived at read time from its own turns via
    the identical store-gain/derive-penalty formula the live client and the
@@ -3063,7 +3109,7 @@ function getBobs27StatBubbles(playerName, mode) {
 
   // Doubles hit rate: of every dart actually thrown across every round, what
   // fraction landed on that round's own double — real darts, real board
-  // outcomes (docs/practice-ladders-roadmap.md Part A: "no hypothetical
+  // outcomes (docs/archive/practice-ladders-roadmap.md Part A: "no hypothetical
   // exclusion"), same shape Doubles Practice's own hit-rate bubble uses.
   const dartsRow = db.prepare(`
     WITH numbered AS (
@@ -3262,6 +3308,99 @@ function getPlayerElo(playerName) {
     // else could have completed a 2-player game in between.
     lastCompetitiveGame: lastGame,
   };
+}
+
+/* ---------- The 121 Checkout Ladder (docs/archive/practice-ladders-roadmap.md Part B) ----------
+   Nothing pre-aggregated, same house style as everywhere else: every
+   `(game_id, leg_no)` group of turns is one attempt at a target — a win if
+   any turn in it has checkout=1, a fail otherwise (the write-time guard
+   already enforces at most 3 turns per attempt). The ladder's target for a
+   given attempt is stamped on `turns.target_score` at write time (validated
+   server-side against the same "replay every prior attempt's outcome"
+   derivation `addTurn()`'s own guard uses), so read-time queries can just
+   read it back rather than re-deriving it. */
+function _checkoutLadderAttempts(playerId, scope) {
+  return db.prepare(`
+    SELECT t.game_id AS gameId, t.leg_no AS legNo, MAX(t.checkout) AS won,
+      MAX(t.target_score) AS target, COUNT(*) AS visits, MAX(t.id) AS lastId
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE t.player_id=? ${scope}
+    GROUP BY t.game_id, t.leg_no
+  `).all(playerId);
+}
+
+function getCheckoutLadderStatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'checkout_ladder' });
+  const attempts = _checkoutLadderAttempts(p.id, scope);
+  const attemptCount = attempts.length;
+  const wins = attempts.filter(a => a.won).length;
+  const successRate = attemptCount > 0 ? (wins / attemptCount * 100) : null;
+
+  // Current ladder position: replay the temporally-latest game's own resolved
+  // attempts (121, +1 per win, -1 per fail, floor 61) — "where would my next
+  // attempt in that run start from," the closest a lifetime stat bubble can
+  // get to a genuinely live "current position" for a mode with no persistent
+  // cross-session ladder.
+  let currentPosition = null;
+  if (attemptCount > 0) {
+    const latestGameId = Math.max(...attempts.map(a => a.gameId));
+    const latestAttempts = attempts.filter(a => a.gameId === latestGameId).sort((a, b) => a.legNo - b.legNo);
+    let target = 121;
+    latestAttempts.forEach(a => { target = a.won ? target + 1 : Math.max(61, target - 1); });
+    currentPosition = target;
+  }
+
+  const dartsThrown = db.prepare(`
+    SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id
+    WHERE t.player_id=? ${scope}
+  `).get(p.id).n;
+
+  return { attempts: attemptCount, successRate, currentPosition, dartsThrown };
+}
+
+// Personal Bests: highest target ever reached (a peak, no minimum floor —
+// "reached" means attempted, win or fail, since standing at rung 150
+// already means you climbed that high regardless of how that attempt ends)
+// and fewest darts on the highest attempt actually WON (the "how efficiently
+// did you bag your best rung" companion number).
+function getCheckoutLadderPersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'checkout_ladder' });
+  const attempts = _checkoutLadderAttempts(p.id, scope);
+  if (!attempts.length) return { highestTargetReached: null, fewestDartsOnHighestCheckout: null };
+
+  const highestTargetReached = Math.max(...attempts.map(a => a.target));
+  const wonAttempts = attempts.filter(a => a.won);
+  let fewestDartsOnHighestCheckout = null;
+  if (wonAttempts.length) {
+    const highestWonTarget = Math.max(...wonAttempts.map(a => a.target));
+    // Which (game_id, leg_no) attempts actually won at that peak target — the
+    // attempts array already has everything needed, so this is a plain JS
+    // filter rather than a second SQL round-trip per candidate.
+    const pegLegs = wonAttempts.filter(a => a.target === highestWonTarget);
+    const dartsCounts = pegLegs.map(a => db.prepare(`
+      SELECT COUNT(d.id) AS n FROM turns t JOIN darts d ON d.turn_id=t.id
+      WHERE t.player_id=? AND t.game_id=? AND t.leg_no=?
+    `).get(p.id, a.gameId, a.legNo).n);
+    fewestDartsOnHighestCheckout = dartsCounts.length ? Math.min(...dartsCounts) : null;
+  }
+  return { highestTargetReached, fewestDartsOnHighestCheckout };
+}
+
+// Home page leaderboard: one row per player, their own highest-ever target
+// reached (a peak, no minimum-attempts floor — same reasoning every other
+// single-best-run board in this app uses).
+function getCheckoutLadderLeaderboard() {
+  const rows = db.prepare(`
+    SELECT p.name AS name, MAX(t.target_score) AS bestTarget, MAX(t.created_at) AS achievedAt
+    FROM turns t JOIN games g ON g.id=t.game_id JOIN players p ON p.id=t.player_id
+    WHERE g.game_type='checkout_ladder'
+    GROUP BY t.player_id
+  `).all();
+  return rows.sort((a, b) => b.bestTarget - a.bestTarget);
 }
 
 // Per-sector/multiplier/zone hit-count grid feeding the Player Profile's dartboard
@@ -3831,7 +3970,7 @@ function _mf(mode) {
 // 'x01'/'cricket', server.js only uses a query param to pick which function to
 // call), and is whitelisted here regardless as a defense-in-depth measure
 // against string interpolation.
-const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27'];
+const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder'];
 function _scope({ mode, gameType } = {}) {
   let sql = _mf(mode);
   if (gameType) {
@@ -6618,6 +6757,7 @@ module.exports = {
   getCheckoutBlitzLeaderboard, getCheckoutBlitzPersonalStats,
   getBobs27StatBubbles, getBobs27PersonalBests, getBobs27Leaderboard,
   getEloRatings, getEloLeaderboard, getPlayerElo,
+  getCheckoutLadderStatBubbles, getCheckoutLadderPersonalBests, getCheckoutLadderLeaderboard,
   getAroundTheClockStatBubbles, getAroundTheClockPersonalBests,
   getAroundTheClockFastestLeaderboard, getAroundTheClockCompletionsLeaderboard,
   getAroundTheWorldDrillStatBubbles, getAroundTheWorldPersonalBests, getAroundTheWorldLeaderboard,

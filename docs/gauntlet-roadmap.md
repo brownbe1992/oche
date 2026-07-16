@@ -33,7 +33,7 @@ weakness log that accumulates across sessions.
   is no seed-generation machinery to build here at all, which is worth
   stating plainly given how central that machinery was to the Pressure
   Chamber doc.
-- **Bob's 27** (`docs/practice-ladders-roadmap.md`, Part A) is the closest
+- **Bob's 27** (`docs/archive/practice-ladders-roadmap.md`, Part A) is the closest
   precedent for "one bad round can end/scar the run and a repeat-adjacent
   concept exists," but Bob's 27 has no retry mechanic at all (a missed
   double just costs you) and only one target type (doubles), not three

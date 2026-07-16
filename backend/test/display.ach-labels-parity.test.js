@@ -19,7 +19,7 @@
 // ACH_LABELS entry in index.html itself (docs/archive/culture-badges-roadmap.md
 // Part B), just in the other file. Found (and fixed, alongside all of the above)
 // while adding cricketstonecold (docs/archive/cutthroat-cricket-roadmap.md) and
-// Bob's 27 (docs/practice-ladders-roadmap.md Part A) and checking
+// Bob's 27 (docs/archive/practice-ladders-roadmap.md Part A) and checking
 // display.html stayed in sync both times.
 //
 // Neither file is require()-able as a module (no build step, no shared module) —

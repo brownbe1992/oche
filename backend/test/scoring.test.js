@@ -19,7 +19,7 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
   CHECKOUT_TRAINER_TRICK_CHANCE, listUnsolvableTargets, gradeCheckoutDeclaration,
   rebuildX01State, rebuildCricketState, rebuildBaseballState,
-  rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State } = scoring;
+  rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State, rebuildCheckoutLadderState } = scoring;
 
 // Shorthand for building a rebuild-function turn record: v(playerIndex, setNo,
 // legNo, [[sector,mult], ...]) — mirrors the {playerIndex,setNo,legNo,darts}
@@ -1261,7 +1261,7 @@ describe('isBaseballCycle (docs/archive/culture-badges-roadmap.md Part B)', () =
   });
 });
 
-describe('evaluateVisitBobs27 (docs/practice-ladders-roadmap.md Part A)', () => {
+describe('evaluateVisitBobs27 (docs/archive/practice-ladders-roadmap.md Part A)', () => {
   const player = (running) => ({ running });
   const game = (round) => ({ bobs27Round: round });
 
@@ -1346,7 +1346,7 @@ describe('evaluateVisitBobs27 (docs/practice-ladders-roadmap.md Part A)', () => 
   });
 });
 
-describe('isBobs27FullHouse / isBobs27FullAnderson (docs/practice-ladders-roadmap.md Part A)', () => {
+describe('isBobs27FullHouse / isBobs27FullAnderson (docs/archive/practice-ladders-roadmap.md Part A)', () => {
   test('Full House requires exactly 3 hits this visit', () => {
     assert.equal(isBobs27FullHouse(3), true);
     assert.equal(isBobs27FullHouse(2), false);
@@ -1376,6 +1376,74 @@ describe('rebuildBobs27State (docs/archive/saved-games-roadmap.md, pure replay r
     const r = rebuildBobs27State({ turns: [] });
     assert.equal(r.running, 27);
     assert.equal(r.round, 1);
+  });
+});
+
+describe('rebuildCheckoutLadderState (docs/archive/practice-ladders-roadmap.md Part B, pure replay rebuild)', () => {
+  test('an empty turn history starts fresh at target 121, attempt 1', () => {
+    const r = rebuildCheckoutLadderState({ turns: [] });
+    assert.equal(r.target, 121);
+    assert.equal(r.legNo, 1);
+    assert.equal(r.remaining, 121);
+    assert.equal(r.visitsThisLeg, 0);
+  });
+
+  test('a checkout in a single visit climbs the target one rung and starts a fresh attempt', () => {
+    // 121 = T19(57) + T20(60) + D2(4), a legal double-out finish.
+    const turns = [ v(0,1,1,[[19,3],[20,3],[2,2]]) ];
+    const r = rebuildCheckoutLadderState({ turns });
+    assert.equal(r.target, 122, 'climbed one rung after clearing 121');
+    assert.equal(r.legNo, 2, 'moved on to attempt 2');
+    assert.equal(r.remaining, 122, 'attempt 2 starts fresh from the new target');
+    assert.equal(r.visitsThisLeg, 0);
+  });
+
+  test('3 visits used without a checkout fails the attempt and drops the target one rung', () => {
+    const turns = [
+      v(0,1,1,[[20,3],[20,3],[1,1]]),  // 60+60+1=121 leaves exactly 0, but the last dart isn't a double -> bust, stays on 121
+      v(0,1,1,[[5,1]]),                // second visit: single 5, doesn't finish
+      v(0,1,1,[[7,1]]),                // third (decisive) visit: single 7, still doesn't finish -> attempt fails
+    ];
+    const r = rebuildCheckoutLadderState({ turns });
+    assert.equal(r.target, 120, 'dropped one rung after failing target 121');
+    assert.equal(r.legNo, 2);
+    assert.equal(r.remaining, 120);
+    assert.equal(r.visitsThisLeg, 0);
+  });
+
+  test('the target never drops below the 61 floor', () => {
+    // Simulate 65 consecutive failed attempts (leg_no 1..65), each burning all
+    // 3 visits on a single 1 (never finishes, never busts) — enough to walk
+    // the target from 121 all the way down past 61 if the floor didn't hold.
+    const turns = [];
+    for(let leg = 1; leg <= 65; leg++){
+      turns.push(v(0,1,leg,[[1,1]]));
+      turns.push(v(0,1,leg,[[1,1]]));
+      turns.push(v(0,1,leg,[[1,1]]));
+    }
+    const r = rebuildCheckoutLadderState({ turns });
+    assert.equal(r.target, 61, 'floored at 61, never lower');
+  });
+
+  test('a still-live attempt (fewer than 3 visits, no checkout yet) reports the in-progress remaining score and visit count', () => {
+    const turns = [
+      v(0,1,1,[[20,3]]),   // 60 scored, 61 remaining — visit 1 of 3, not resolved
+    ];
+    const r = rebuildCheckoutLadderState({ turns });
+    assert.equal(r.target, 121, 'attempt still live on the original target');
+    assert.equal(r.legNo, 1, 'still attempt 1 — not yet resolved');
+    assert.equal(r.remaining, 61);
+    assert.equal(r.visitsThisLeg, 1);
+  });
+
+  test('a bust burns the visit without ending the attempt early', () => {
+    const turns = [
+      v(0,1,1,[[20,3],[20,3],[20,3]]), // 180 scored against a 121 target -> bust, stays on 121
+    ];
+    const r = rebuildCheckoutLadderState({ turns });
+    assert.equal(r.remaining, 121, 'a bust leaves the player exactly where they started this visit');
+    assert.equal(r.visitsThisLeg, 1, 'the bust visit still counts toward the 3-visit cap');
+    assert.equal(r.legNo, 1, 'attempt not yet resolved — 2 visits remain');
   });
 });
 

@@ -219,7 +219,7 @@ describe('addTurn — Baseball scored must match the visit\'s runs, when opted i
   });
 });
 
-describe("addTurn — Bob's 27 scored/bust must match the round's double hits, when opted in (docs/practice-ladders-roadmap.md Part A)", () => {
+describe("addTurn — Bob's 27 scored/bust must match the round's double hits, when opted in (docs/archive/practice-ladders-roadmap.md Part A)", () => {
   // Bob's 27's turns.scored is this round's GAIN (0 when the round's double was
   // missed entirely — the penalty is derived at read time, never stored
   // negative), arithmetically derivable from the visit's own darts + the round
@@ -349,6 +349,151 @@ describe("addTurn — Bob's 27 scored/bust must match the round's double hits, w
       player: 'B27_I', set: 1, leg: 1, scored: 0, bust: false, checkout: false, checkoutPoints: null,
       darts: [{ dartNo: 1, sector: 20, multiplier: 2 }],
     }, STRICT), (err) => err.status === 400);
+  });
+});
+
+describe('addTurn — 121 Checkout Ladder scored/targetScore/visit-cap must match, when opted in (docs/archive/practice-ladders-roadmap.md Part B)', () => {
+  // A genuine X01 visit (identical dart-sum/bust/checkout arithmetic to the
+  // 'x01' branch) capped at 3 visits per attempt, with the attempt's own
+  // target derived from every strictly-prior leg's own recorded outcome
+  // (never trusted from the client) — same shape SEC-22/SEC-25 already
+  // establish for X01/Baseball, applied to this game type's own new rules.
+  function checkoutLadderGame(players) {
+    return db.createGame({
+      category: '121 Checkout Ladder', legsPerSet: 1, setsPerGame: 1, practice: 1,
+      gameType: 'checkout_ladder', players: players.map(name => ({ name })),
+    });
+  }
+
+  test('accepts a legitimate non-finishing first visit at the mandatory target 121', async () => {
+    await db.addPlayer('CL_A');
+    const { gameId } = checkoutLadderGame(['CL_A']);
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'CL_A', set: 1, leg: 1, scored: 60, bust: false, checkout: false, checkoutPoints: null, targetScore: 121,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 3 }],
+    }, STRICT));
+  });
+
+  test('rejects a scored value that does not match the sum of the darts thrown', async () => {
+    await db.addPlayer('CL_B');
+    const { gameId } = checkoutLadderGame(['CL_B']);
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'CL_B', set: 1, leg: 1, scored: 100, bust: false, checkout: false, checkoutPoints: null, targetScore: 121,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 3 }], // real sum: 60, not 100
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('rejects a bust turn claiming a nonzero scored', async () => {
+    await db.addPlayer('CL_C');
+    const { gameId } = checkoutLadderGame(['CL_C']);
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'CL_C', set: 1, leg: 1, scored: 60, bust: true, checkout: false, checkoutPoints: null, targetScore: 121,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 3 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('accepts a legitimate checkout (121 = T19 + T20 + D2, double-out)', async () => {
+    await db.addPlayer('CL_D');
+    const { gameId } = checkoutLadderGame(['CL_D']);
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'CL_D', set: 1, leg: 1, scored: 121, bust: false, checkout: true, checkoutPoints: 121, targetScore: 121,
+      darts: [{ dartNo: 1, sector: 19, multiplier: 3 }, { dartNo: 2, sector: 20, multiplier: 3 }, { dartNo: 3, sector: 2, multiplier: 2 }],
+    }, STRICT));
+  });
+
+  test('rejects checkoutPoints that does not match scored on a checkout turn', async () => {
+    await db.addPlayer('CL_E');
+    const { gameId } = checkoutLadderGame(['CL_E']);
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'CL_E', set: 1, leg: 1, scored: 121, bust: false, checkout: true, checkoutPoints: 100, targetScore: 121,
+      darts: [{ dartNo: 1, sector: 19, multiplier: 3 }, { dartNo: 2, sector: 20, multiplier: 3 }, { dartNo: 3, sector: 2, multiplier: 2 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('rejects a targetScore other than 121 for a player\'s very first attempt', async () => {
+    await db.addPlayer('CL_F');
+    const { gameId } = checkoutLadderGame(['CL_F']);
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'CL_F', set: 1, leg: 1, scored: 60, bust: false, checkout: false, checkoutPoints: null, targetScore: 130,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 3 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('rejects a 4th visit within the same attempt (capped at 3)', async () => {
+    await db.addPlayer('CL_G');
+    const { gameId } = checkoutLadderGame(['CL_G']);
+    for (let visit = 1; visit <= 3; visit++) {
+      db.addTurn(gameId, {
+        player: 'CL_G', set: 1, leg: 1, scored: 1, bust: false, checkout: false, checkoutPoints: null, targetScore: 121,
+        darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+      }, STRICT);
+    }
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'CL_G', set: 1, leg: 1, scored: 1, bust: false, checkout: false, checkoutPoints: null, targetScore: 121,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400, 'a checkout ladder attempt is capped at 3 visits');
+  });
+
+  test('after a win, the next attempt must target one rung higher (122)', async () => {
+    await db.addPlayer('CL_H');
+    const { gameId } = checkoutLadderGame(['CL_H']);
+    db.addTurn(gameId, {
+      player: 'CL_H', set: 1, leg: 1, scored: 121, bust: false, checkout: true, checkoutPoints: 121, targetScore: 121,
+      darts: [{ dartNo: 1, sector: 19, multiplier: 3 }, { dartNo: 2, sector: 20, multiplier: 3 }, { dartNo: 3, sector: 2, multiplier: 2 }],
+    }, STRICT);
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'CL_H', set: 1, leg: 2, scored: 1, bust: false, checkout: false, checkoutPoints: null, targetScore: 121,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400, 'stale target -- leg 1 was won, attempt 2 must target 122');
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'CL_H', set: 1, leg: 2, scored: 1, bust: false, checkout: false, checkoutPoints: null, targetScore: 122,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT));
+  });
+
+  test('after a fail (3 visits, no checkout), the next attempt must target one rung lower (120)', async () => {
+    await db.addPlayer('CL_I');
+    const { gameId } = checkoutLadderGame(['CL_I']);
+    for (let visit = 1; visit <= 3; visit++) {
+      db.addTurn(gameId, {
+        player: 'CL_I', set: 1, leg: 1, scored: 1, bust: false, checkout: false, checkoutPoints: null, targetScore: 121,
+        darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+      }, STRICT);
+    }
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'CL_I', set: 1, leg: 2, scored: 1, bust: false, checkout: false, checkoutPoints: null, targetScore: 121,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400, 'stale target -- leg 1 was lost, attempt 2 must target 120');
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'CL_I', set: 1, leg: 2, scored: 1, bust: false, checkout: false, checkoutPoints: null, targetScore: 120,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT));
+  });
+
+  test('the target floors at 61 and never goes lower, however many attempts fail in a row', async () => {
+    await db.addPlayer('CL_J');
+    const { gameId } = checkoutLadderGame(['CL_J']);
+    let target = 121;
+    // Fail enough attempts (61 of them) to reach the floor: 121 - 61 = 60 < 61.
+    for (let leg = 1; leg <= 61; leg++) {
+      for (let visit = 1; visit <= 3; visit++) {
+        db.addTurn(gameId, {
+          player: 'CL_J', set: 1, leg, scored: 1, bust: false, checkout: false, checkoutPoints: null, targetScore: target,
+          darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+        }, STRICT);
+      }
+      target = Math.max(61, target - 1);
+    }
+    assert.equal(target, 61, 'sanity check on the test\'s own math');
+    // The next attempt (leg 62) must target 61 again, not 60 -- the floor held.
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'CL_J', set: 1, leg: 62, scored: 1, bust: false, checkout: false, checkoutPoints: null, targetScore: 60,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400);
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'CL_J', set: 1, leg: 62, scored: 1, bust: false, checkout: false, checkoutPoints: null, targetScore: 61,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT));
   });
 });
 

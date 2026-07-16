@@ -2079,10 +2079,11 @@ function renderHome(){
     Backend.get('/api/stats/doubles-practice-best-round'),
     Backend.get('/api/stats/checkout-blitz-leaderboard'),
     Backend.get('/api/stats/bobs27-leaderboard'),
+    Backend.get('/api/stats/checkout-ladder-leaderboard'),
     Backend.get('/api/stats/around-the-clock-fastest'),
     Backend.get('/api/stats/around-the-clock-completions'),
     Backend.get('/api/stats/around-the-world-progress'),
-  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,dpa,dpb,ctbl,b27,atcf,atcc,atwp])=>{
+  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,dpa,dpb,ctbl,b27,cl,atcf,atcc,atwp])=>{
     homeData={s, extra,
       h2h:{finishes:f,eighties:e,bigFish:b,nineDarters:n},
       practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn},
@@ -2099,6 +2100,7 @@ function renderHome(){
       doublesPractice:{ accuracy:dpa, bestRound:dpb },
       checkoutTrainer:{ blitzLeaderboard:ctbl },
       bobs27:{ leaderboard:b27 },
+      checkoutLadder:{ leaderboard:cl },
       aroundTheClock:{ fastest:atcf, completions:atcc },
       aroundTheWorld:{ progress:atwp }};
     renderHomeContent();
@@ -2112,6 +2114,7 @@ function renderHome(){
       doublesPractice:{ accuracy:[], bestRound:[] },
       checkoutTrainer:{ blitzLeaderboard:[] },
       bobs27:{ leaderboard:[] },
+      checkoutLadder:{ leaderboard:[] },
       aroundTheClock:{ fastest:[], completions:[] },
       aroundTheWorld:{ progress:[] }};
     renderHomeContent();
@@ -2538,7 +2541,7 @@ function renderHomeTabBodyCheckoutTrainer(){
 }
 
 // Bob's 27's Home page leaderboard — same peak-single-run shape as Checkout
-// Blitz's above (docs/practice-ladders-roadmap.md Part A: "the Checkout
+// Blitz's above (docs/archive/practice-ladders-roadmap.md Part A: "the Checkout
 // Blitz precedent"), no H2H/Practice split (always solo).
 function renderHomeTabBodyBobs27(){
   const el=document.getElementById('home-tab-body');
@@ -2558,6 +2561,31 @@ function renderHomeTabBodyBobs27(){
   el.innerHTML=`
     <div class="pp-section">
       <div class="pp-section-title">🎯 Bob's 27 — Best Final Score</div>
+      ${leaderboard}
+    </div>
+  `;
+}
+
+// The 121 Checkout Ladder's Home page leaderboard (docs/archive/practice-ladders-roadmap.md
+// Part B) — same "peak single-run value, no minimum floor" shape as Bob's 27's.
+function renderHomeTabBodyCheckoutLadder(){
+  const el=document.getElementById('home-tab-body');
+  const data=homeData.checkoutLadder;
+  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
+
+  const board=data.leaderboard||[];
+  const leaderboard=board.length
+    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.bestTarget}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${fmtDate(r.achievedAt)}</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — climb the checkout ladder to claim the top spot.</p>`;
+
+  el.innerHTML=`
+    <div class="pp-section">
+      <div class="pp-section-title">🪜 Checkout Ladder — Highest Target Reached</div>
       ${leaderboard}
     </div>
   `;
@@ -2710,7 +2738,8 @@ function setMode(mode){
   setup.practice = (mode !== 'h2h');
   document.getElementById('h2h-options').hidden = (mode !== 'h2h');
   const isSpecialMode = (mode === 'challenge' || mode === 'ghost' || mode === 'doubles_practice' || mode === 'chuckin'
-    || mode === 'checkout_trainer' || mode === 'around_the_clock' || mode === 'around_the_world' || mode === 'bobs_27');
+    || mode === 'checkout_trainer' || mode === 'around_the_clock' || mode === 'around_the_world' || mode === 'bobs_27'
+    || mode === 'checkout_ladder');
   // Daily Challenge and Ghost Opponent are both X01-only (docs/archive/ghost-opponent-roadmap.md
   // is explicitly X01-only for v1); Doubles Practice/Just Chuckin' It/Checkout
   // Trainer/both guided drills/Bob's 27 are each their own gameType, not a
@@ -2719,7 +2748,7 @@ function setMode(mode){
   // the drill's own type underneath, and startGame() (which reads
   // setup.gameType, not any control) would silently build that drill's game
   // type regardless of what Step 2 visibly shows.
-  const drillGameTypes = ['doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27'];
+  const drillGameTypes = ['doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder'];
   if(!drillGameTypes.includes(mode) && drillGameTypes.includes(setup.gameType)) setup.gameType = 'x01';
   if((mode === 'challenge' || mode === 'ghost') && setup.gameType !== 'x01') setup.gameType = 'x01';
   if(drillGameTypes.includes(mode)) setup.gameType = mode;
@@ -2733,6 +2762,7 @@ function setMode(mode){
     : (mode === 'checkout_trainer') ? (setup.checkoutTrainerMode==='blitz' ? 'Start Blitz' : 'Start training')
     : (mode === 'around_the_clock') ? 'Start the clock' : (mode === 'around_the_world') ? 'Start chipping away'
     : (mode === 'bobs_27') ? 'Start the run'
+    : (mode === 'checkout_ladder') ? 'Start climbing'
     : 'Play Now';
   if(isSpecialMode){
     setup.slots = setup.slots.slice(0,1);
@@ -3761,6 +3791,9 @@ const NEW_GAME_MODE_OPTIONS = [
   { key:'bobs_27', label:"Bob's 27", contexts:['practice'],
     blurb:"Bob Anderson's famous doubles routine. Start with 27 points, then throw 3 darts at D1, then D2, all the way to D20 — every dart that hits the double adds its value, but if all three miss, that double's value is SUBTRACTED instead. Drop to 0 or below and the run is over; survive to D20 and your final score is the result (a perfect run is 1287).",
     apply(){ setMode('bobs_27'); } },
+  { key:'checkout_ladder', label:'🧗 121 Checkout Ladder', contexts:['practice'],
+    blurb:"The classic checkout ladder — the physical sibling of Checkout Trainer (that one asks what you'd throw; this makes you throw it). Start on 121, double out, up to 3 visits (9 darts) to check out. Check out and the target climbs one rung; fail all 3 visits and it drops one (never below 61). Play as long as you like — the story is how high you climb.",
+    apply(){ setMode('checkout_ladder'); } },
 ];
 function setupVisibleOptions(){
   const ctx = setupPlayerCount()>=2 ? 'h2h' : 'practice';
@@ -4232,7 +4265,7 @@ async function startGame(){
   if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   // Custom cricket is locked to exactly 7 targets (same count as classic) — never
   // more, never fewer (docs/game-modes-roadmap.md "Decisions made").
-  const gameType = ['cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27'].includes(setup.gameType)
+  const gameType = ['cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder'].includes(setup.gameType)
     ? setup.gameType : 'x01'; // Daily Challenge always forces x01 via setMode()
   let cricketNumbers = null;
   if(gameType === 'cricket'){
@@ -4266,7 +4299,7 @@ async function startGame(){
   // (whatever "Starting score" happened to be hidden at, per setMode('ghost')) —
   // otherwise the two "players" wouldn't actually be racing the same leg.
   const startScore = challengeStart != null ? challengeStart : ghostScript ? Number(ghostScript.category) : setup.start;
-  const drillModes = ['challenge', 'ghost', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27'];
+  const drillModes = ['challenge', 'ghost', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder'];
   // docs/bug-roadmap.md BUG-22: a practice Baseball "leg" is a complete, standalone
   // 9-inning game (evaluateVisitBaseball() decides its outcome unconditionally,
   // unlike X01/Cricket's open-ended countdown legs) — so, like every drill mode
@@ -4303,6 +4336,7 @@ async function startGame(){
     : gameType === 'around_the_clock' ? {}
     : gameType === 'around_the_world' ? {}
     : gameType === 'bobs_27' ? {}
+    : gameType === 'checkout_ladder' ? {}
     : { startingScore: startScore };
   const category = gameType === 'cricket'
     ? (setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
@@ -4320,6 +4354,8 @@ async function startGame(){
     ? "Bob's 27"
     : gameType === 'around_the_world'
     ? 'Guided Around the World'
+    : gameType === 'checkout_ladder'
+    ? '121 Checkout Ladder'
     : String(startScore);
   game = {
     gameType,
@@ -4356,7 +4392,9 @@ async function startGame(){
     current: 0,
     setNo: 1, legNo: 1,
     baseballInning: 1, // Baseball only (docs/game-modes-roadmap.md) — which inning (1-9, or beyond on a tie) is live
-    bobs27Round: 1,    // Bob's 27 only (docs/practice-ladders-roadmap.md Part A) — which double (1-20) is live
+    bobs27Round: 1,    // Bob's 27 only (docs/archive/practice-ladders-roadmap.md Part A) — which double (1-20) is live
+    checkoutLadderTarget: 121, // 121 Checkout Ladder only (docs/archive/practice-ladders-roadmap.md Part B) — current attempt's target
+    checkoutLadderVisits: 0,  // visits used so far in the current attempt (0-2 while live)
     darts: [],
     busted: false, won: false,
     done: false,
@@ -5614,7 +5652,7 @@ function renderPlayerBadges(data){
   // Practice's 5 (docs/archive/culture-badges-roadmap.md Part B), and the guided
   // drills' 2 each stay visually distinct sub-sections rather than one mixed
   // flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo);
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder);
   const eloIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].elo);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
   const baseballIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].baseball);
@@ -5625,6 +5663,7 @@ function renderPlayerBadges(data){
   const doublesPracticeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].doublesPractice);
   const drillIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].drill);
   const bobs27Ids = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].bobs27);
+  const checkoutLadderIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].checkoutLadder);
   container.innerHTML = `
     <div class="pp-section-title" style="margin-bottom:6px">X01</div>
     <div class="summary-grid">${x01Ids.map(badgeBlock).join('')}</div>
@@ -5636,6 +5675,8 @@ function renderPlayerBadges(data){
     <div class="summary-grid">${doublesPracticeIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Bob's 27</div>
     <div class="summary-grid">${bobs27Ids.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">121 Checkout Ladder</div>
+    <div class="summary-grid">${checkoutLadderIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Household Rating</div>
     <div class="summary-grid">${eloIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Tournaments</div>
@@ -6025,6 +6066,18 @@ function renderBobs27PersonalBests(data){
     ${data.deepestDoubleOnFail!=null?`<div class="stat-block"><div class="stat-val">D${data.deepestDoubleOnFail}</div><div class="stat-label">Deepest Double Reached on a Fail</div></div>`:''}
   </div>`;
 }
+function renderCheckoutLadderPersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || (data.highestTargetReached==null && data.fewestDartsOnHighestCheckout==null)){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough attempts recorded yet.</p>`;
+    return;
+  }
+  container.innerHTML=`<div class="summary-grid">
+    ${data.highestTargetReached!=null?`<div class="stat-block"><div class="stat-val">${data.highestTargetReached}</div><div class="stat-label">Highest Target Reached</div></div>`:''}
+    ${data.fewestDartsOnHighestCheckout!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsOnHighestCheckout}</div><div class="stat-label">Fewest Darts on the Highest Checkout</div></div>`:''}
+  </div>`;
+}
 // No winStreak/recentForm/lifetime fields (see getDoublesPracticePersonalBests()'s
 // own comment) — a round never "wins", so those X01/Cricket concepts don't map.
 function renderDoublesPracticePersonalBests(data){
@@ -6148,6 +6201,7 @@ function renderGame(){
   if(game.gameType === 'around_the_clock') return renderGameAroundTheClock();
   if(game.gameType === 'around_the_world') return renderGameAroundTheWorld();
   if(game.gameType === 'bobs_27') return renderGameBobs27();
+  if(game.gameType === 'checkout_ladder') return renderGameCheckoutLadder();
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
   game.players.forEach((p,i)=>{
@@ -6308,7 +6362,7 @@ function renderGameBaseball(){
   pushLive();
 }
 
-/* docs/practice-ladders-roadmap.md Part A: same shared chalkboard-table
+/* docs/archive/practice-ladders-roadmap.md Part A: same shared chalkboard-table
    shape as Cricket/Baseball's (rows=rounds, one column since it's always solo),
    just fixed at exactly 20 rows — no "extra innings"-style dynamic extension
    the way Baseball's own table needs. */
@@ -6625,7 +6679,7 @@ DOUBLES_HIT_MILESTONE_LADDERS.forEach(ladder=>{
     ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
   });
 });
-// Bob's 27 survival/score ladder (docs/practice-ladders-roadmap.md Part A)
+// Bob's 27 survival/score ladder (docs/archive/practice-ladders-roadmap.md Part A)
 // — reuses the SAME generic engine (checkChuckinMilestoneTier() below) as
 // every ladder above, but with a DIFFERENT kind of "value": every other ladder
 // here checks a LIFETIME-cumulative counter (fetched once at game start,
@@ -6657,6 +6711,43 @@ BOBS27_SCORE_MILESTONE_LADDERS.forEach(ladder=>{
     ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
   });
 });
+
+/* ---------- 121 Checkout Ladder highest-rung ladder (docs/practice-ladders-
+   roadmap.md Part B) ---------- Same data-driven {metric,idPrefix,statNoun,
+   descFor,tiers} shape as every other milestone ladder above — checked from
+   resolveCheckoutLadderAttempt() against the NEW target just climbed to
+   (clearedTarget+1 on a win), so a tier fires the moment a player's climb
+   first reaches that rung, even if they later slip back down and re-climb. */
+const CHECKOUT_LADDER_MILESTONE_LADDERS = [
+  { metric:'position', idPrefix:'checkout_ladder_', statNoun:'ladder position',
+    descFor: t => `Climb the 121 Checkout Ladder to a target of ${t}.`,
+    tiers: [
+      { threshold:125, label:'Climbing',    icon:'🧗' },
+      { threshold:130, label:'Ascending',    icon:'⛰️' },
+      { threshold:140, label:'High Ground',  icon:'🏕️' },
+      { threshold:150, label:'Summit Push',  icon:'🚩' },
+      { threshold:160, label:'Near The Top', icon:'🌤️' },
+      { threshold:170, label:'Peak Rung',    icon:'🏔️' },
+    ] },
+];
+CHECKOUT_LADDER_MILESTONE_LADDERS.forEach(ladder=>{
+  ladder.tiers.forEach((tier, i)=>{
+    const id = ladder.idPrefix + tier.threshold;
+    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), checkoutLadder:true };
+    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
+    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
+  });
+});
+// 🧗 Peak Bagged (docs/archive/practice-ladders-roadmap.md Part B) — the harder,
+// separate feat of actually checking OUT 170 on the ladder (T20 T20 Bull, the
+// same double-out maximum X01's Big Fish celebrates), not just reaching that
+// rung. Recurring (awardRecurringBadge, see resolveCheckoutLadderAttempt()) —
+// climbing back up to 170 and clearing it again in a later run is a real
+// repeatable feat, not a one-off.
+BADGE_INFO['checkoutladderpeakbagged'] = { icon:'🧗', label:'Peak Bagged',
+  desc:'Check out 170 on the 121 Checkout Ladder.', checkoutLadder:true };
+ACH_LABELS['checkoutladderpeakbagged'] = 'Peak Bagged 🧗';
+ACH_DURATION['checkoutladderpeakbagged'] = 4000;
 // Checks one ladder against a current value, awarding (once:true) any tier not
 // already cached as earned. Shared by the session ladder and the darts/trebles
 // (lifetime) ladders — see checkChuckinMilestones() below. The actual >=
@@ -7731,7 +7822,10 @@ function liveSnapshot(message){
   const cur = game.players[game.current];
   // Checkout-route hints are an X01 concept (a countdown finishing route) — Cricket
   // has no equivalent, so it just never has a pending checkout suggestion.
-  const isX01 = game.gameType === 'x01';
+  // 121 Checkout Ladder (docs/archive/practice-ladders-roadmap.md Part B) reuses evaluateVisit()
+  // unmodified and is always double-out, so the same checkout-hint math X01 uses
+  // applies unchanged.
+  const isX01 = game.gameType === 'x01' || game.gameType === 'checkout_ladder';
   const dbl = isX01 ? cur.doubleOut : false;
   const startedOn = isX01 && checkoutHint(cur.score, dbl, 3) !== '';
   const dartsLeft = 3 - game.darts.length;
@@ -7768,10 +7862,16 @@ function liveSnapshot(message){
     // cricket scorecard label its points footer "lowest wins" for cutthroat,
     // the one thing that otherwise renders identically to standard.
     cricketVariant: game.gameType === 'cricket' ? (game.config.variant || 'standard') : null,
-    // Bob's 27 only (docs/practice-ladders-roadmap.md Part A): which
+    // Bob's 27 only (docs/archive/practice-ladders-roadmap.md Part A): which
     // double (1-20) is currently live — per-player running score/round history
     // ride inside the players[] array above via playerSnapshotBobs27().
     bobs27Round: game.gameType === 'bobs_27' ? (game.bobs27Round || 1) : null,
+    // 121 Checkout Ladder only (docs/archive/practice-ladders-roadmap.md Part B): the
+    // current attempt's target and how many of its 3 visits are used —
+    // per-player remaining score rides inside the players[] array above via
+    // playerSnapshotCheckoutLadder().
+    checkoutLadderTarget: game.gameType === 'checkout_ladder' ? (game.checkoutLadderTarget || 121) : null,
+    checkoutLadderVisits: game.gameType === 'checkout_ladder' ? (game.checkoutLadderVisits || 0) : null,
     achievement: pendingAchievement || null,
     gameOneEighties: game.gameOneEighties || 0,
     gameBigFish: game.gameBigFish || 0,
@@ -7969,7 +8069,7 @@ function renderPadBaseball(full){
   miss.onclick=()=>throwDart(0); pad.appendChild(miss);
 }
 
-/* docs/practice-ladders-roadmap.md Part A: one button, the round's own
+/* docs/archive/practice-ladders-roadmap.md Part A: one button, the round's own
    double — the player selects Double via the ambient multi-row (same S/D/T
    selector every other Pad-mode dart uses) then taps it to log a hit; Single/
    Treble of the same number, or Miss, all correctly log as "missed the
@@ -8079,7 +8179,7 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
 // independently re-validates this on every write, never trusting this check
 // (docs/archive/saved-games-roadmap.md's own security section: "never trust the
 // client's eligibility check").
-const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27'];
+const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder'];
 function isCurrentGameSavable(){
   return !!(game && !game.done && SAVABLE_GAME_TYPES.includes(game.gameType));
 }
@@ -8154,7 +8254,7 @@ async function resumeGame(gameId){
   const players = names.map(n => GAME_TYPES[gameType].newMatchPlayer(n,
     gameType === 'cricket' ? config : startScore));
 
-  let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, bobs27Round = 1, roundOver = false;
+  let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, bobs27Round = 1, roundOver = false, checkoutLadderTarget = 121, checkoutLadderVisits = 0;
   let statusMsg = '';
   if(gameType === 'x01'){
     const r = rebuildX01State({ names, outModes, startScore, practice: !!state.practice, legsPerSet: state.legsPerSet, turns: state.turns });
@@ -8198,6 +8298,13 @@ async function resumeGame(gameId){
     players[0].running = r.running;
     bobs27Round = r.round;
     statusMsg = `Resumed — D${bobs27Round}, running score: ${r.running}.`;
+  } else if(gameType === 'checkout_ladder'){
+    const r = rebuildCheckoutLadderState({ turns: state.turns });
+    players[0].score = r.remaining;
+    checkoutLadderTarget = r.target;
+    legNo = r.legNo;
+    checkoutLadderVisits = r.visitsThisLeg;
+    statusMsg = `Resumed — target ${checkoutLadderTarget}, ${r.remaining} remaining, visit ${checkoutLadderVisits+1} of 3.`;
   } else {
     uiAlert(`${gameType} games can't be resumed.`);
     return;
@@ -8211,7 +8318,7 @@ async function resumeGame(gameId){
     players,
     blitzDeadline: null, blitzEnded: false,
     starter, current, setNo, legNo,
-    baseballInning, bobs27Round,
+    baseballInning, bobs27Round, checkoutLadderTarget, checkoutLadderVisits,
     darts: [], busted:false, won:false, done:false,
     gameOneEighties:0, gameBigFish:0, gameBusts:0,
     currentLegTurns: [], legVisitLogs: [], sessionTurns: [],
@@ -8275,6 +8382,7 @@ function savedGamePositionLabel(sg){
   if(pos.hit != null) return `Round ${pos.legNo} · ${pos.hit}/${pos.total} numbers hit`;
   if(pos.sessionDarts != null) return `${pos.sessionDarts} dart${pos.sessionDarts===1?'':'s'} this session`;
   if(pos.round != null) return `D${pos.round} · running score ${pos.running}`;
+  if(pos.target != null) return `Target ${pos.target} · attempt ${pos.legNo} · ${pos.remaining} remaining`;
   return '';
 }
 function savedGameDateLabel(iso){
@@ -8401,6 +8509,7 @@ function undoLastTurn(){
   if(game && game.gameType === 'around_the_clock') return undoLastTurnAroundTheClock();
   if(game && game.gameType === 'around_the_world') return undoLastTurnAroundTheWorld();
   if(game && game.gameType === 'bobs_27') return undoLastTurnBobs27();
+  if(game && game.gameType === 'checkout_ladder') return undoLastTurnCheckoutLadder();
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
   const p = game.players[snap.pi];
@@ -8479,6 +8588,7 @@ function enterTurn(){
   if(game.gameType === 'cricket') return enterTurnCricket();
   if(game.gameType === 'baseball') return enterTurnBaseball();
   if(game.gameType === 'bobs_27') return enterTurnBobs27();
+  if(game.gameType === 'checkout_ladder') return enterTurnCheckoutLadder();
   if(game.gameType === 'checkout_trainer') return submitCheckoutAttempt();
   if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
   const p = game.players[game.current];
@@ -9337,7 +9447,7 @@ function onLegWonBaseball(wi){
 }
 
 /* ----- Bob's 27 turn commit (dispatched from enterTurn()) -----
-   docs/practice-ladders-roadmap.md Part A. Visit-based (3 darts per
+   docs/archive/practice-ladders-roadmap.md Part A. Visit-based (3 darts per
    round), same shape as Baseball's — always exactly one player (game.current
    never moves), one round per double, game.bobs27Round advancing after every
    committed visit (there's no "roundComplete" distinction to make the way
@@ -9365,7 +9475,7 @@ function enterTurnBobs27(){
   const dartsThrown = game.darts.length;
   p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
 
-  // bust (docs/practice-ladders-roadmap.md Part A): reused, X01-style, to
+  // bust (docs/archive/practice-ladders-roadmap.md Part A): reused, X01-style, to
   // mark the fatal round — the SEC-25-style write-time guard in addTurn()
   // (backend/db.js) independently re-derives and checks this exact value,
   // never trusting the client's own ev.dead.
@@ -9676,6 +9786,7 @@ function startNextLeg(newSet){
   game.current = game.starter;
   game.players.forEach(p=>GAME_TYPES[game.gameType].resetForNextLeg(p, game, newSet));
   if(game.gameType === 'baseball') game.baseballInning = 1;
+  if(game.gameType === 'checkout_ladder') game.checkoutLadderVisits = 0;
   game.legSummary = null;
   game.currentLegTurns = [];
   game.legVisitLogs = [];
@@ -10003,7 +10114,7 @@ const BASEBALL_STAT_DEFS = [
 const BASEBALL_BUBBLE_KEY_MAP = { baseballrpi:'rpi', baseballperfectinnings:'perfectInnings', baseballwinpct:'winPct',
   baseballgames:'gamesPlayed', baseballdartsthrown:'dartsThrown', baseballbestinning:'bestInning' };
 
-// Bob's 27's own stat vocabulary (docs/practice-ladders-roadmap.md Part A) —
+// Bob's 27's own stat vocabulary (docs/archive/practice-ladders-roadmap.md Part A) —
 // solo, so no win-rate/games-vs-opponent bubble the way Baseball has; "Runs
 // Played" plays that role instead. Every bubble here has a matching
 // getBobs27StatBubbles() field (backend/db.js).
@@ -10016,6 +10127,16 @@ const BOBS_27_STAT_DEFS = [
 ];
 const BOBS_27_BUBBLE_KEY_MAP = { bobs27survivalrate:'survivalRate', bobs27avgscore:'avgFinalScore',
   bobs27runs:'runs', bobs27dartsthrown:'dartsThrown', bobs27doubleshitrate:'doublesHitRate' };
+
+// The 121 Checkout Ladder (docs/archive/practice-ladders-roadmap.md Part B).
+const CHECKOUT_LADDER_STAT_DEFS = [
+  { key:'checkoutladderattempts', label:'Attempts', desc:'Number of checkout ladder attempts made', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'checkoutladdersuccessrate', label:'Success Rate', desc:'% of attempts that checked out before running out of visits', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'checkoutladdercurrentposition', label:'Current Position', desc:"This player's ladder position at the end of their most recent run", fmt:v=>v!=null?String(v):'—', primary:true },
+  { key:'checkoutladderdartsthrown', label:'Darts Thrown', desc:'Total darts thrown on the checkout ladder', fmt:v=>v!=null?Number(v).toLocaleString():'—' },
+];
+const CHECKOUT_LADDER_BUBBLE_KEY_MAP = { checkoutladderattempts:'attempts', checkoutladdersuccessrate:'successRate',
+  checkoutladdercurrentposition:'currentPosition', checkoutladderdartsthrown:'dartsThrown' };
 
 // Doubles Practice's own 3 stat bubbles (docs/game-modes-roadmap.md's requested
 // vocabulary: darts per round, doubles hit per round, doubles%) — every bubble
@@ -10263,6 +10384,22 @@ const GAME_TYPES = {
     // Always solo — there's no opponent to play head-to-head against, same
     // reasoning as Doubles Practice/Checkout Trainer/both guided drills.
     soloOnly: true
+  },
+  checkout_ladder: {
+    id: 'checkout_ladder',
+    label: 'Checkout Ladder',
+    newMatchPlayer: newMatchPlayerCheckoutLadder,
+    // evaluateVisit() (the shared X01 evaluator) is reused UNMODIFIED — see
+    // enterTurnCheckoutLadder()'s own dispatch, which calls it directly
+    // rather than through this registry slot (it also needs the 9-dart-cap/
+    // ladder-advance logic evaluateVisit() itself knows nothing about).
+    evaluateVisit,
+    resetForNextLeg: resetPlayerForNextLegCheckoutLadder,
+    playerSnapshot: playerSnapshotCheckoutLadder,
+    statDefs: CHECKOUT_LADDER_STAT_DEFS,
+    personalBestsRenderer: renderCheckoutLadderPersonalBests,
+    homeTabRenderer: renderHomeTabBodyCheckoutLadder,
+    soloOnly: true
   }
 };
 // bubbleKeyMap is patched on below, right after each map itself is defined —
@@ -10336,7 +10473,7 @@ function playerSnapshotBaseball(p){
   };
 }
 
-/* ---------- Bob's 27 (docs/practice-ladders-roadmap.md Part A) ----------
+/* ---------- Bob's 27 (docs/archive/practice-ladders-roadmap.md Part A) ----------
    Solo-only, one leg per run — a run IS the game (forced legsPerSet=setsPerGame=1,
    the same practice-Baseball-style "always completes after its one leg" shape
    BUG-22 established, see startGame()'s drillModes/isPracticeBaseball handling).
@@ -10364,6 +10501,178 @@ function playerSnapshotBobs27(p){
     legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0,
     roundResults:Object.assign({}, p.roundResults)
   };
+}
+
+/* ---------- The 121 Checkout Ladder (docs/archive/practice-ladders-roadmap.md Part B) ----------
+   Solo-only, perpetual — unlike Bob's 27 (a run IS the game, forced to
+   1 leg/1 set), there's no natural end here at all: each target attempt is
+   its own leg (game.legNo increments per attempt, exactly like the design
+   doc specifies), and the session just keeps climbing (or slipping) until
+   the player presses End Game — the same "never calls DB.completeGame(),
+   games.completed_at stays NULL forever" shape Doubles Practice/Chuckin
+   already established for open-ended drills, not a gap. game.checkoutLadderTarget
+   (game-level, mirroring bobs27Round/baseballInning) is the CURRENT
+   attempt's own target; game.checkoutLadderVisits counts visits used so far
+   in that attempt (0-2 while still live; the 3rd, decisive visit is what
+   enterTurnCheckoutLadder() itself resolves, never left sitting at 3).
+   evaluateVisit() (scoring.js's shared X01 evaluator, GAME_TYPES.x01's own
+   function) is reused UNMODIFIED — this mode's whole design is "an ordinary
+   X01 visit, just starting from a target that isn't 501/301/etc," per the
+   roadmap doc. Always double-out (the classic checkout-ladder rule),
+   regardless of this player's own X01 out-mode preference elsewhere. */
+function newMatchPlayerCheckoutLadder(name){
+  return { name, score:121, doubleOut:true, legDarts:0, setDarts:0, gameDarts:0 };
+}
+function resetPlayerForNextLegCheckoutLadder(p, game, newSet){
+  p.score = game.checkoutLadderTarget;
+  p.legDarts = 0;
+  if(newSet) p.setDarts = 0;
+}
+function playerSnapshotCheckoutLadder(p){
+  return { name:p.name, score:p.score, out:'double', legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0 };
+}
+
+/* ----- 121 Checkout Ladder turn commit (dispatched from enterTurn()) -----
+   docs/archive/practice-ladders-roadmap.md Part B. Visit-based (up to 3 visits per
+   attempt) exactly like X01/Bob's 27 — evaluateVisit() (scoring.js's shared
+   X01 evaluator) is reused completely unmodified; the only new rule layered on
+   top is the 9-dart/3-visit cap and the ladder's up-one/down-one target
+   movement. Always exactly one player (game.current never moves). Each
+   attempt is its own "leg" (game.legNo increments per attempt, matching the
+   write-time guard in addTurn()'s derivation of expectedTarget from
+   turns.leg_no) — a resolved attempt (win, or 3 visits used without one)
+   hands off to startNextLeg(false), the SAME generic leg-transition function
+   X01 uses, rather than a bespoke reimplementation of its reset bookkeeping.
+   The ladder never completes — no finishUnit()/DB.completeGame() call
+   anywhere in this chain, matching Doubles Practice/Chuckin's "runs until End
+   game is pressed" shape (neither of those calls DB.completeGame() either). */
+function enterTurnCheckoutLadder(){
+  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  const p = game.players[0];
+  const ev = evaluateVisit(p, game.darts, game);
+
+  if(ev.win) announce(`Checks out with ${ev.pointsThisVisit}! Target ${game.checkoutLadderTarget} cleared.`);
+  else if(ev.bust) announce(`Bust, stays on ${p.score}.`);
+  else announce(`Scores ${ev.scored}, ${ev.newScore} remaining.`);
+
+  // snapshot state before mutations so undoLastTurnCheckoutLadder() can restore
+  // it — only reachable while this attempt is still live (a resolving visit
+  // clears it via startNextLeg(), same "can't undo past a leg boundary" rule
+  // every other game type follows).
+  const _snap = { score:p.score, legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
+    visits:game.checkoutLadderVisits,
+    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
+    badgeReverts:[], voided:false };
+  game.lastTurnSnapshot = _snap;
+
+  const dartsThrown = game.darts.length;
+  p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
+  if(!ev.bust) p.score = ev.newScore;
+
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:ev.scored, bust:ev.bust, checkout:ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null,
+    targetScore: game.checkoutLadderTarget,
+    darts: game.darts.map((d,i) => ({ dartNo: i+1, sector: d.sector, multiplier: d.mult, thrownAt: d.thrownAt,
+      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+
+  const turnRecord = { player:p.name, scored:ev.scored, bust:ev.bust, checkout:ev.win, darts:game.darts.slice() };
+  game.currentLegTurns.push(turnRecord);
+  game.sessionTurns.push(turnRecord);
+
+  awardTimeOfDayBadges(p);
+
+  const visitsUsed = game.checkoutLadderVisits + 1;
+  if(ev.win){
+    resolveCheckoutLadderAttempt(true);
+  } else if(visitsUsed >= 3){
+    resolveCheckoutLadderAttempt(false);
+  } else {
+    game.checkoutLadderVisits = visitsUsed;
+    game.darts=[]; game.busted=false; game.won=false;
+    game.turnSeq += 1;
+    document.getElementById('status').className='status';
+    document.getElementById('status').textContent = `Target ${game.checkoutLadderTarget} — ${p.score} remaining, visit ${visitsUsed+1} of 3.`;
+    renderGameCheckoutLadder();
+    pushLive();
+  }
+}
+function undoLastTurnCheckoutLadder(){
+  if(!game || !game.lastTurnSnapshot) return;
+  const snap = game.lastTurnSnapshot;
+  const p = game.players[0];
+  p.score = snap.score;
+  p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
+  game.checkoutLadderVisits = snap.visits;
+  game.currentLegTurns.length = snap.ltLen;
+  game.sessionTurns.length = snap.stLen;
+
+  snap.voided = true;
+  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+  });
+  cancelQueuedAchievementsForSnapshot(snap);
+
+  game.darts = []; game.busted=false; game.won=false;
+  game.lastTurnSnapshot = null;
+  DB.deleteLastTurn();
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
+  renderGameCheckoutLadder();
+  pushLive();
+}
+// Resolves the current attempt (win, or 3 visits used without one) — climbs the
+// target one rung on a win, drops it one rung (floored at 61, docs/practice-
+// ladders-roadmap.md Part B) on a fail, then hands off to startNextLeg(false),
+// the same generic leg-transition X01 itself uses (legNo++, resetForNextLeg()
+// per player, currentLegTurns/legVisitLogs/lastTurnSnapshot cleared, re-render)
+// — nothing ladder-specific to duplicate there beyond the target-visits reset
+// startNextLeg() already handles inline (its own "if gameType==='checkout_ladder'"
+// line, mirroring baseballInning's).
+function resolveCheckoutLadderAttempt(won){
+  const p = game.players[0];
+  const clearedTarget = game.checkoutLadderTarget;
+  if(won){
+    checkChuckinMilestoneTier(CHECKOUT_LADDER_MILESTONE_LADDERS[0], p.name, clearedTarget + 1);
+    // 🧗 Peak Bagged: the ladder-rung ladder above already covers "reached
+    // position 170"; this is the separate, harder feat of actually checking
+    // OUT 170 itself (T20 T20 Bull, the same double-out maximum Big Fish
+    // celebrates in a real match) — recurring, since climbing back up to
+    // (and clearing) 170 again in a later run/session is a real repeatable feat.
+    if(clearedTarget === 170){
+      queueBadge('checkoutladderpeakbagged', p.name);
+      awardRecurringBadge(p.name, 'checkoutladderpeakbagged', 'checkoutladderpeakbagged',
+        { icon:'🧗', headline:'PEAK BAGGED!', player:p.name, statLine:'Checked out 170 on the ladder' });
+    }
+  }
+  // Capped at 170 — same reasoning as the write-time guard in db.js's addTurn():
+  // turns.target_score is a shared column whose valid range tops out at 170,
+  // the highest possible double-out finish. Clearing 170 again and again just
+  // keeps the run parked at the summit rather than requesting an out-of-range target.
+  game.checkoutLadderTarget = won ? Math.min(170, clearedTarget + 1) : Math.max(61, clearedTarget - 1);
+  announce(won ? `Ladder up — ${game.checkoutLadderTarget}.` : `Ladder down — ${game.checkoutLadderTarget}.`);
+  startNextLeg(false);
+}
+function renderGameCheckoutLadder(){
+  const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
+  renderSlots();
+  const p = game.players[0];
+  const row = document.createElement('div');
+  row.className = 'pscore active';
+  row.innerHTML = `
+    <div>
+      <div class="nm">${escapeHtml(p.name)} <span class="nm-out">🧗 Checkout Ladder · double out</span></div>
+      <div class="turnflag">▸ target ${game.checkoutLadderTarget}</div>
+    </div>
+    <div class="meta">
+      <div class="avgs">Visit ${game.checkoutLadderVisits+1} of 3</div>
+      <div class="standing">Attempt ${game.legNo}</div>
+    </div>
+    <div class="rem-wrap">
+      <div class="rem">${p.score}</div>
+    </div>`;
+  if(sb) sb.appendChild(row);
+  renderPad();
+  pushLive();
 }
 
 /* ---------- Doubles Practice (docs/game-modes-roadmap.md) ----------
