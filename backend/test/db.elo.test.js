@@ -1,6 +1,6 @@
 'use strict';
 // Committed tests for backend/db.js's Household Elo rating
-// (docs/rating-and-handicap-roadmap.md Part A, REFERENCE.md's Household Elo
+// (docs/archive/rating-and-handicap-roadmap.md Part A, REFERENCE.md's Household Elo
 // section) — against a scratch SQLite database. Hand-verified K=32 arithmetic
 // for the two exact-value cases (a single win, then a rematch), plus
 // derivation-only checks (not re-verifying the same formula a third time)

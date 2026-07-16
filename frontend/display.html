@@ -793,6 +793,7 @@ const renderers = {
           <div class="prow1">
             <span class="pname">${escapeHtml(p.name)}</span>
             ${L.showTag ? `<span class="ptag">${p.out==='double'?'DOUBLE OUT':'SINGLE OUT'}</span>` : ''}
+            ${p.startScore != null && String(p.startScore) !== String(s.category) ? `<span class="ptag" title="Handicap: started this leg from ${num(p.startScore)} instead of ${esc(s.category)}">STARTED ${num(p.startScore)}</span>` : ''}
             ${active?'<span class="throwflag">▸ throwing</span>':''}
           </div>
           <div class="score">${num(p.score)}</div>

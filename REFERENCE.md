@@ -47,6 +47,7 @@ convention in `CLAUDE.md`.
 - [22. Troubleshooting](#22-troubleshooting)
 - [23. Saved Games / Pause & Resume](#23-saved-games--pause--resume)
 - [24. Household Elo Rating](#24-household-elo-rating)
+- [25. Handicapping](#25-handicapping)
 
 ---
 
@@ -4829,7 +4830,7 @@ advances cycle, the player-deletion guard, and the merge-collision block).
 
 ## 24. Household Elo Rating
 
-`docs/rating-and-handicap-roadmap.md` Part A. A single evolving number per
+`docs/archive/rating-and-handicap-roadmap.md` Part A. A single evolving number per
 player answering "who's actually on top right now?" — more responsive than
 raw win totals (beating the house champion moves you more than beating the
 newest player), self-correcting as form changes.
@@ -4930,3 +4931,111 @@ X01 match played through the actual UI, confirming `/api/players/elo`
 returns the exact hand-computed rating, the Home page's Household Ratings
 section renders (including the below-floor empty state), and the Player
 Profile's Household Rating section renders the correct rating/record/rank.
+
+---
+
+## 25. Handicapping
+
+`docs/archive/rating-and-handicap-roadmap.md` Part B. Lets mismatched players have a
+real game: the stronger player starts an X01 leg from a higher score (e.g.
+501 vs. 401), chosen per player at setup. Nothing about the throwing
+changes — just the mountain's height. **X01 only** — starting score is
+X01's natural handicap lever; Cricket/Baseball have no equivalent single
+knob.
+
+### Schema
+
+`game_players.start_score INTEGER` — nullable, a per-game snapshot
+following the established `out_mode`/`dart_weight`/`loadout_id` precedent.
+`NULL` (the default for every existing row and every game that doesn't use
+it) means "the game's own `config.startingScore`"; a value overrides it for
+that player only — the game's own `category`/`config.startingScore` stay
+whatever the *other* (unhandicapped) participant is really playing, since
+they aren't handicapped. Purely additive; every existing game reads
+unchanged.
+
+### Write-time validation (`createGame()`, `backend/db.js`)
+
+Server-side, never trusting the client's own setup-screen eligibility check
+(the same precedent `pinnedTarget`/Cricket's `config.variant` already
+establish): a supplied `startScore` must be for an X01 game (400 otherwise),
+an integer, `>= 101` (the lowest starting score this app supports at all),
+and **strictly less than** the game's own category value — equal-or-above
+isn't a real handicap, and would otherwise still wrongly exclude that
+player from Elo/nine-darter/fewest-darts credit for a game they didn't
+actually shorten. Checked for every participant before any `game_players`
+row is written.
+
+### Setup UI
+
+An optional, collapsed-by-default "Handicap" `<details>` disclosure inside
+the X01 options step (`renderHandicapOptions()`, `frontend/index.html`) —
+shown only when `setup.gameType === 'x01'` and 2+ player slots are filled.
+One per-player `<select>` (steps of 50 between 101 and the chosen
+category's own value minus 50, plus a "No handicap" default), keyed by
+`setup.handicaps = {playerName: overrideStartScore}`. Rebuilt fresh on
+every call from current setup state (mirroring `renderPlayers()`'s own "just
+re-render" convention) rather than patched incrementally, and re-derived
+whenever the mode/game type/starting category changes
+(`renderSetupFlavorAndBlurb()`) or Step 3 is entered
+(`setupGoToStep3()`, in case Step 1's slots changed since).
+
+### Engine
+
+`newMatchPlayer(name, start)` seeds both `p.score` and a new `p.startScore`
+field from `start` — `startGame()` passes `setup.handicaps[name] ||
+startScore` per player instead of the one shared `startScore` every other
+game type gets. `resetPlayerForNextLegX01()` resets `p.score` to
+`p.startScore` (this player's own start), not `game.start` (the shared
+category) — a handicap is chosen once at setup and holds for every
+subsequent leg/set of the same match, not just its first leg.
+`evaluateVisitX01()`/the bust/checkout logic need nothing — they never knew
+where scores start.
+
+### Live scoreboard
+
+`playerSnapshotX01()` includes `startScore` in the live payload (rides
+inside the already-unrestricted per-player `players[]` array — no
+`ALLOWED_LIVE_KEYS` change needed). `display.html`'s `renderers.x01.card()`
+shows a "STARTED 401" tag next to a player's name whenever their own
+`startScore` differs from the game's `category` — visible only for the
+handicapped player, so the handicap is legible from the second screen
+without cluttering an even match.
+
+### Interaction with other features
+
+- **Household Elo (§24) excludes handicapped games entirely** —
+  `getEloRatings()`'s own `WHERE` clause skips any game where either
+  participant's `game_players.start_score` is non-`NULL`, since a
+  compensated result says nothing about raw strength.
+- **Win-based stats count a handicapped win as a real win, deliberately** —
+  the whole point of a handicap is a fair contest, so `getSummary()`/win-rate/
+  streak stats are unaffected.
+- **"Fewest darts to finish"-shaped Personal Bests and nine-darter
+  detection exclude a handicapped leg** — a shortened start makes finishing
+  in fewer darts mechanically easier, not a skill feat. A new `NOT_HANDICAPPED`
+  SQL fragment (`backend/db.js`, alongside `NOT_CHECKOUT_TRAINER`) — `NOT
+  EXISTS (... game_players ... start_score IS NOT NULL)`, scoped to the
+  *same* player and game the surrounding query is already reading —
+  excludes it from all 6 nine-darter-detection call sites
+  (`nineDarterBase`, `getSummary`, `getPlayerStatBubbles`,
+  `getMetricHistory`'s `ninedarters` case, both `getNineDarterStats`
+  queries) and `getPersonalBests()`'s `fewestDartsCheckout`. **Average-based
+  stats (`bestLegAvg`, `recentFormAvg`, `lifetimeAvg`, 3-dart average, 1st-9
+  average) are deliberately NOT excluded** — a leg average is
+  starting-score-agnostic (points scored ÷ darts thrown), so a shortened
+  start doesn't inflate it the way "fewest darts" does; excluding those too
+  would just be throwing away real, fairly-earned data.
+
+### Testing
+
+`backend/test/db.handicap.test.js`: `createGame()`'s validation (rejects a
+non-X01 game type, rejects out-of-range/non-integer values, accepts a valid
+override), nine-darter detection excluding a handicapped player's
+shortened-start finish while the *same game's* unhandicapped opponent keeps
+full credit, and `fewestDartsCheckout` excluding a handicapped leg while a
+genuine unhandicapped one still sets it normally. Verified end-to-end with
+Playwright: a real 2-player X01 match set up through the actual New Game UI
+(one player handicapped to 401, the other a real 501), confirming both
+players' starting scores are exactly right, the match completes, and the
+handicapped winner's Elo rating correctly shows zero rated games afterward.

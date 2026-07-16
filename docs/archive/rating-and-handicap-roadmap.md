@@ -1,14 +1,12 @@
 # Household Rating (Elo) & Handicapping — Design Roadmap
 
-> Status: **Part A (Household Elo rating) shipped 2026-07; Part B
-> (Handicapping) still design phase, not started.** Two features in one doc
-> because they answer the same household problem — players of different
-> strengths — from opposite ends: the rating *measures* the gap,
-> handicapping *closes* it. **Independently shippable**, tracked as two
-> separate items on `docs/open-roadmap-items.md`; the rating was the
-> natural first half. This doc stays in `docs/` (not archived) until Part B
-> is also done, per `CLAUDE.md`'s "only archive once every split-out item is
-> Done" rule.
+> Status: **Both parts shipped 2026-07 — Part A (Household Elo rating) and
+> Part B (Handicapping).** Two features in one doc because they answer the
+> same household problem — players of different strengths — from opposite
+> ends: the rating *measures* the gap, handicapping *closes* it.
+> Independently shippable, tracked as two separate items (24 and 25) on
+> `docs/open-roadmap-items.md`'s Done ledger. Archived here per `CLAUDE.md`'s
+> "move to `docs/archive/` once every split-out item is Done" rule.
 
 ## Part A — Household Elo rating
 
@@ -131,6 +129,46 @@ about the throwing changes — just the mountain's height.
 - **The pairing**: once both halves exist, the setup screen can *suggest* a
   handicap from the Elo gap ("Alaina +100 start?") — a one-line nicety,
   explicitly not v1 of either half.
+
+### Implementation notes (2026-07, shipped)
+
+Built essentially as designed, with one addition beyond the original scope:
+
+- **The "verify during implementation" Personal Bests gap was real** — the
+  existing category-scoping did *not* already cover it. `fewestDartsCheckout`
+  and all 6 nine-darter-detection call sites (`nineDarterBase`, `getSummary`,
+  `getPlayerStatBubbles`, `getMetricHistory`'s `ninedarters` case, both
+  `getNineDarterStats` queries) only ever checked `games.config.startingScore`
+  — which stays the game's own nominal category (e.g. "501") regardless of a
+  *player's own* handicap override, since only the unhandicapped participant
+  is really playing that category. Without an explicit fix, a handicapped
+  player finishing a shortened 401-start leg in 9 darts would have been
+  silently counted as a real 501 nine-darter. Fixed with a new
+  `NOT_HANDICAPPED` SQL fragment (`backend/db.js`, the same shape
+  `NOT_CHECKOUT_TRAINER` already established) added to all 7 call sites,
+  scoped to the *same* player and game the surrounding query already reads —
+  the unhandicapped opponent in the same game keeps their own real credit.
+- **Handicap presets/step size**: shipped as a plain per-player `<select>`
+  in steps of 50 from 101 up to (category − 50), matching this doc's own
+  "picker is v1, presets are polish" framing — no presets built.
+- **The Elo-gap-suggested handicap pairing** was not built — explicitly out
+  of v1 scope per this doc's own framing, unchanged.
+
+Everything else matches this doc's design: `game_players.start_score`
+(nullable, X01-only, snapshot-per-game); server-side validation in
+`createGame()` (integer, `101 <= startScore < category`, X01-only — the
+same "never trust the client" precedent `pinnedTarget`/Cricket's variant
+validation already set); the collapsed-by-default Handicap disclosure
+(`renderHandicapOptions()`); `newMatchPlayer()`/`resetPlayerForNextLegX01()`
+seeding/resetting from each player's own start; the live scoreboard's
+"STARTED 401" tag (`renderers.x01.card()`, `display.html`); win-based stats
+counting a handicapped win normally; Elo's exclusion (already shipped as
+part of Part A, since its own query needed the column to exist). Full
+write-up: `REFERENCE.md` §25. Committed tests:
+`backend/test/db.handicap.test.js`. Verified end-to-end with Playwright: a
+real 2-player X01 match set up through the actual New Game UI with one
+player handicapped to 401, confirming both starting scores, match
+completion, and the handicapped winner's Elo correctly excluding the game.
 
 ## Accessibility, security, and testing considerations
 

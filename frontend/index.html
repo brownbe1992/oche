@@ -858,6 +858,7 @@
             </div>
           </div>
           <p style="color:var(--muted);font-size:12px;margin:10px 2px 0" id="format-line"></p>
+          <div id="handicap-options-section" hidden></div>
         </div>
 
         <div class="btn-row">
@@ -1540,7 +1541,10 @@ const DB = {
   // game + turn writes
   async beginGame(meta, names, loadoutByName){
     try{ const r = await Backend.send('POST','/api/games',{category:meta.category, legsPerSet:meta.legsPerSet, setsPerGame:meta.setsPerGame,
-      players:names.map(n=>({name:n, out:playerOut(n), loadoutId:(loadoutByName && loadoutByName[n]) ? loadoutByName[n].id : undefined})),
+      players:names.map(n=>({name:n, out:playerOut(n), loadoutId:(loadoutByName && loadoutByName[n]) ? loadoutByName[n].id : undefined,
+        // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): undefined
+        // (not null) when unset, matching loadoutId's own convention just above.
+        startScore:(meta.playerHandicaps && meta.playerHandicaps[n]) || undefined})),
       practice:meta.practice?1:0, gameType:meta.gameType, config:meta.config,
       // docs/league-mode-roadmap.md "League fixtures / pending matches": an explicit
       // choice (New Game's "League Game" entry), not a re-validated hint the way the
@@ -1718,7 +1722,12 @@ let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, 
   gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[], cricketVariant:'standard', ghostLeg:null,
   doublesTargets:[], loadoutByName:{}, leagueFixtureId:null, pendingFixtures:[],
   checkoutTrainerMode:'freeform', checkoutTrainerDifficulty:'full', checkoutTrainerTricks:false,
-  checkoutTrainerPin:null }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice' | 'checkout_trainer'; gameType: 'x01' | 'cricket' | 'doubles_practice' | 'checkout_trainer'; checkoutTrainerDifficulty: 'under40' | 'under100' | 'over100' | 'full'
+  checkoutTrainerPin:null,
+  // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): {playerName:
+  // overrideStartScore}. X01 only, 2+ players; a name with no entry (or an
+  // entry of undefined) plays the game's own regular starting score — see
+  // renderHandicapOptions()/startGame()'s per-player start-score lookup.
+  handicaps:{} }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice' | 'checkout_trainer'; gameType: 'x01' | 'cricket' | 'doubles_practice' | 'checkout_trainer'; checkoutTrainerDifficulty: 'under40' | 'under100' | 'over100' | 'full'
   // checkoutTrainerPin (docs/checkout-drill-link-roadmap.md): a specific target
   // score to always serve, set only via drillCheckout(); null means "no pin,
   // roll normally" — see setMode()'s checkout_trainer branch for how it's applied
@@ -2204,7 +2213,7 @@ function renderHomePulse(){
       </div>
     </div>` : '';
 
-  // Household Elo (docs/rating-and-handicap-roadmap.md Part A): lives here,
+  // Household Elo (docs/archive/rating-and-handicap-roadmap.md Part A): lives here,
   // not inside renderHomeTabBody()'s per-game-type dispatch, since the
   // rating is deliberately "who beats whom" across every competitive game
   // type combined — pinning it to whichever per-type tab happens to be
@@ -3895,6 +3904,52 @@ function renderSetupFlavorAndBlurb(){
   document.getElementById('setup-blurb-body').innerHTML = opt
     ? `<div class="setup-label" style="color:var(--gold)">${opt.label}</div><p class="pp-meta" style="margin:0">${opt.blurb}</p>`
     : '';
+  renderHandicapOptions();
+}
+// Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): an optional,
+// collapsed-by-default disclosure — X01 only, 2+ real players filled in —
+// with one per-player starting-score picker each. Rebuilt fresh on every
+// call (mirroring renderPlayers()'s own "just re-render from setup state"
+// convention) rather than patched incrementally, since the relevant inputs
+// (which players, which starting category) change together infrequently.
+function renderHandicapOptions(){
+  const el = document.getElementById('handicap-options-section');
+  if(!el) return;
+  const names = setup.slots.filter(Boolean);
+  if(setup.gameType !== 'x01' || names.length < 2){
+    el.hidden = true;
+    setup.handicaps = {};
+    return;
+  }
+  el.hidden = false;
+  // Prune any stale entry for a name no longer in this slot list.
+  const kept = {};
+  names.forEach(n=>{ if(setup.handicaps[n] != null) kept[n] = setup.handicaps[n]; });
+  setup.handicaps = kept;
+  const cat = setup.start;
+  const options = [`<option value="">No handicap (${cat})</option>`];
+  for(let v = cat - 50; v >= 101; v -= 50) options.push(`<option value="${v}">${v}</option>`);
+  const optionsHtml = options.join('');
+  el.innerHTML = `
+    <details class="setup-section" style="margin-top:10px">
+      <summary class="setup-label" style="cursor:pointer">Handicap (optional)</summary>
+      <p class="pp-meta" style="margin:6px 2px 10px">Give a weaker player a head start — they play this leg from a lower starting score, same finish rule, everyone still throws the same darts. Doesn't affect the household rating (a handicapped result isn't a fair strength comparison).</p>
+      ${names.map(n=>`
+        <div class="stepper" style="justify-content:space-between">
+          <span class="lbl">${escapeHtml(n)}</span>
+          <select class="date-input" style="width:auto" onchange="setHandicap('${escapeJs(n)}', this.value)">${optionsHtml}</select>
+        </div>`).join('')}
+    </details>`;
+  // Re-select each player's current choice (innerHTML above always resets to
+  // the option list's own default) now that the elements actually exist.
+  names.forEach((n,i)=>{
+    const sel = el.querySelectorAll('select')[i];
+    if(sel) sel.value = setup.handicaps[n] != null ? String(setup.handicaps[n]) : '';
+  });
+}
+function setHandicap(name, value){
+  if(value === '') delete setup.handicaps[name];
+  else setup.handicaps[name] = Number(value);
 }
 
 // Rebuilds the Step 2 dropdown from the current player count + pending-fixture
@@ -3961,6 +4016,7 @@ function setupStep3HasContent(){
   });
 }
 function setupGoToStep3(){
+  renderHandicapOptions(); // re-derive from the current slot list before checking for content
   if(setupStep3HasContent()) showSetupStep(3);
   else startGame(); // nothing to configure — Continue doubles as Start, same as
                      // the challenge blurb's own "Press Continue below to play" already says
@@ -4278,7 +4334,18 @@ async function startGame(){
     // matches the league) and REJECTS game creation on any mismatch, unlike a
     // stale hint.
     leagueFixtureId: setup.leagueFixtureId,
-    players: names.map(n=>GAME_TYPES[gameType].newMatchPlayer(n, gameType==='cricket' || gameType==='doubles_practice' || gameType==='checkout_trainer' ? config : startScore)),
+    // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): a snapshot
+    // (not a live reference to setup.handicaps, which the New Game screen
+    // could go on to mutate for its NEXT game) of who's playing this
+    // specific game from a shortened start — read once here by
+    // DB.beginGame() to populate each game_players row, and shown on the
+    // live scoreboard so the handicap is visible, not mysterious.
+    playerHandicaps: { ...setup.handicaps },
+    // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): a per-player
+    // override of this leg's own starting score, X01 only — setup.handicaps
+    // only ever has entries when gameType==='x01' (renderHandicapOptions()
+    // clears it for every other type), so this lookup is a no-op elsewhere.
+    players: names.map(n=>GAME_TYPES[gameType].newMatchPlayer(n, gameType==='cricket' || gameType==='doubles_practice' || gameType==='checkout_trainer' ? config : (setup.handicaps[n] || startScore))),
     // Checkout Blitz (docs/archive/checkout-trainer-roadmap.md): a wall-clock deadline, not a
     // decrementing counter, so a backgrounded/throttled tab can't grant extra time.
     // Set once startNextRoundCheckoutTrainer() or the run itself begins; null for
@@ -4371,6 +4438,13 @@ async function startGame(){
 // a player's per-match runtime record (separate from lifetime stats)
 function newMatchPlayer(name, start){
   const p = { name, score:start,
+    // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): this
+    // player's OWN starting score for the whole match — `start` here is
+    // already setup.handicaps[name] || the game's regular starting score
+    // (see startGame()'s newMatchPlayer() call), so this is just remembered
+    // for leg/set resets and the live-scoreboard "Ben 501 · Alaina 401"
+    // display, which both need it long after p.score itself has decremented.
+    startScore: start,
     doubleOut: playerOut(name)==='double', // this player's own finish rule
     legPoints:0,  legVisits:0,    // resets every leg  -> per-leg average
     legDarts:0,   legBusts:0,     // darts thrown + busts this leg
@@ -5285,7 +5359,7 @@ function renderPlayerPage(){
       <div class="pp-section-title">Leagues</div>
       <div id="player-league-stats"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </div>` : '';
-  // Household Elo (docs/rating-and-handicap-roadmap.md Part A): unlike
+  // Household Elo (docs/archive/rating-and-handicap-roadmap.md Part A): unlike
   // Tournaments/Leagues just above, not gated on `gt` — the rating is
   // deliberately combined across every competitive game type, so it's shown
   // once regardless of which per-game-type toggle is active.
@@ -5495,7 +5569,7 @@ const BADGE_INFO = {
   // milestones which keep firing exactly as they always have, from any mode.
   guided_clock: { icon:'🧭', label:'Guided Clock', desc:'Complete a guided Around the Clock drill — hit every number 1-20 as a single.', drill:true },
   guided_world: { icon:'🗺️', label:'Guided World', desc:'Reach all 63 lifetime dart outcomes while playing a guided Around the World session.', drill:true },
-  // Household Elo (docs/rating-and-handicap-roadmap.md Part A) — combined
+  // Household Elo (docs/archive/rating-and-handicap-roadmap.md Part A) — combined
   // across every competitive game type, so these get their own Badge Case
   // section rather than folding into X01's, the same reasoning Bob's 27's
   // `bobs27:true` flag already established for a genuinely separate concern.
@@ -5780,7 +5854,7 @@ function loadTournamentStats(){
     </div>`;
   }).catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load tournament stats.</p>`; });
 }
-// docs/rating-and-handicap-roadmap.md Part A: rating + rank + a rating-over-
+// docs/archive/rating-and-handicap-roadmap.md Part A: rating + rank + a rating-over-
 // time sparkline. Deliberately a bespoke minimal SVG (drawEloSparkline()
 // below) rather than reusing drawAvgChart() — that function is tightly
 // coupled to activeStatDefs()/selectedStat (period buttons, a value
@@ -8958,7 +9032,7 @@ function undoLastTurnCricket(){
    restriction as X01's own social/margin-of-victory badges. Set/leg advancement
    and the completeGame/HA webhook calls below are the same generic hooks the X01
    path uses. */
-// Household Elo (docs/rating-and-handicap-roadmap.md Part A) — shared by
+// Household Elo (docs/archive/rating-and-handicap-roadmap.md Part A) — shared by
 // every H2H-capable game type's own "game (match) won" branch
 // (onLegWon()/onLegWonCricket()/onLegWonBaseball()), called right after
 // DB.completeGame() so the just-finished game is already reflected in the
@@ -10012,7 +10086,11 @@ const AROUND_THE_WORLD_BUBBLE_KEY_MAP = { atwsessions:'sessionsPlayed', atwdarts
 // dispatches through GAME_TYPES[game.gameType] instead of calling these directly,
 // so a second entry is a pure addition, not a rewrite of call sites.
 function resetPlayerForNextLegX01(p, game, newSet){
-  p.score = game.start;
+  // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): reuse THIS
+  // player's own start (which may differ from game.start) for every
+  // subsequent leg/set of the same match — a handicap is chosen once at
+  // setup and holds for the whole game, not just its first leg.
+  p.score = p.startScore;
   p.legPoints = 0; p.legVisits = 0; p.legDarts = 0; p.legAvgDarts = 0; p.legBusts = 0;
   if(newSet) p.setDarts = 0;
   p.legVisitScores = []; p.metronomeFired = false; p.pendingIceInTheVeins = false; p.legWorstDeficit = 0;
@@ -10020,6 +10098,7 @@ function resetPlayerForNextLegX01(p, game, newSet){
 function playerSnapshotX01(p){
   return {
     name:p.name, score:p.score, out:p.doubleOut?'double':'single',
+    startScore:p.startScore,
     legAvg:  p.legAvgDarts  ? (p.legPoints/p.legAvgDarts*3).toFixed(1)   : null,
     gameAvg: p.gameAvgDarts ? (p.gamePoints/p.gameAvgDarts*3).toFixed(1) : null,
     legsWon:p.legsWon, setsWon:p.setsWon,

@@ -479,7 +479,7 @@ try { db.exec('ALTER TABLE game_players ADD COLUMN loadout_id INTEGER REFERENCES
 // League mode (docs/league-mode-roadmap.md): nullable, set by the onGameCreated
 // auto-tag hook below (or left NULL for any game that isn't a tagged league match).
 try { db.exec('ALTER TABLE games ADD COLUMN league_id INTEGER REFERENCES leagues(id) ON DELETE SET NULL'); } catch(e) {}
-// Handicapping (docs/rating-and-handicap-roadmap.md Part B): a per-player,
+// Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): a per-player,
 // per-game starting-score override — NULL (the default for every existing
 // row and every game that doesn't use it) means "the game's own
 // config.startingScore", the same snapshot-column shape out_mode/dart_weight/
@@ -866,6 +866,24 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   }
   const resolvedConfig = config ? JSON.stringify(config) : JSON.stringify({ startingScore: Number(category) || null });
   if (Buffer.byteLength(resolvedConfig) > 4096) throw httpError(400, 'config is too large');
+  // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): validated here,
+  // server-side, the same "never trust the client's own eligibility check"
+  // precedent pinnedTarget/cricket variant already establish above — a
+  // hostile client could otherwise create a 2-point-start farm for win-rate
+  // stats. X01 only (the setup screen never offers this outside X01); must be
+  // strictly less than the game's own category (equal-or-above isn't a real
+  // handicap, and would otherwise still wrongly exclude this player from Elo/
+  // nine-darter/fewest-darts credit for a game they didn't actually shorten);
+  // 101 is the lowest starting score this app supports at all.
+  const categoryNum = Number(category);
+  (players || []).forEach(entry => {
+    if (entry.startScore == null) return;
+    if (resolvedGameType !== 'x01') throw httpError(400, 'startScore is only valid for X01 games');
+    const s = Number(entry.startScore);
+    if (!Number.isInteger(s) || s < 101 || s >= categoryNum) {
+      throw httpError(400, `startScore must be an integer between 101 and ${categoryNum - 1}`);
+    }
+  });
   const info = q.insertGame.run(categoryStr, clampMatchFormat(legsPerSet), clampMatchFormat(setsPerGame), practice ? 1 : 0, resolvedGameType, resolvedConfig);
   const gameId = Number(info.lastInsertRowid);
   // participantIds (submission order, not deduped — see the player_count freeze below
@@ -883,16 +901,11 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
     // player who still has an old dart_weight value sitting orphaned on their row.
     const loadout = _resolveLoadoutForParticipant(p.id, entry.loadoutId);
     const weight = loadout ? _getComponentOrNull(loadout.barrel_id)?.weight_g ?? null : null;
-    // Handicapping (docs/rating-and-handicap-roadmap.md Part B): a per-player
-    // starting-score override for this one game, X01 only. NULL (the default
-    // for every caller today — no New Game UI sends this yet) means "use the
-    // game's own config.startingScore" — see game_players.start_score's own
-    // migration comment. Bounds/game-type validation is Part B's own New
-    // Game UI's job (the setup screen never offers this outside X01, and a
-    // future server-side check will reject an out-of-range value the same
-    // way pinnedTarget/cricket variant are validated above) — accepted
-    // as-is here for now, the same "schema groundwork ahead of the UI that
-    // populates it" precedent league_id/loadout_id set on this codebase.
+    // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): a per-player
+    // starting-score override for this one game, X01 only. NULL means "use
+    // the game's own config.startingScore" — see game_players.start_score's
+    // own migration comment. Already validated (range, X01-only) in the loop
+    // above, before any row is written.
     const startScore = entry.startScore != null ? Number(entry.startScore) : null;
     q.addParticipant.run(gameId, p.id, weight, out, loadout ? loadout.id : null, startScore);
   });
@@ -1668,7 +1681,7 @@ function computeStats() {
     SELECT pid, COUNT(*) AS n FROM (
       SELECT t.player_id AS pid
       FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-      WHERE g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501 ${extraWhere}
+      WHERE g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501 ${extraWhere} ${NOT_HANDICAPPED}
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
       HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9
     ) GROUP BY pid
@@ -1825,7 +1838,7 @@ function getSummary() {
   const nineDarters  = db.prepare(`
     SELECT COUNT(*) AS n FROM (
       SELECT t.player_id FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-      WHERE g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501
+      WHERE g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501 ${NOT_HANDICAPPED}
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
       HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9
     )
@@ -2010,7 +2023,7 @@ function getHomeExtra() {
   // just the id/name, not full standings (the Leagues screen fetches those itself).
   const activeLeagues = db.prepare(`SELECT id, name FROM leagues WHERE status = 'active' ORDER BY created_at DESC`).all();
 
-  // Household Elo (docs/rating-and-handicap-roadmap.md Part A): piggybacks on
+  // Household Elo (docs/archive/rating-and-handicap-roadmap.md Part A): piggybacks on
   // this existing payload the same way activeLeagues does just above — a
   // cross-game-type teaser that doesn't belong to any one game type's own
   // Home tab, so it's always visible regardless of which per-game-type
@@ -2046,7 +2059,7 @@ function getPlayerStatBubbles(playerName, mode) {
   const avg        = avgDarts > 0 ? (totalPts / avgDarts * 3) : null;
   const one80s     = q(`SELECT COUNT(*) AS v ${J} ${mf} ${X01_ONLY} AND t.scored=180`) ?? 0;
   const bigFish    = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.checkout=1 AND t.checkout_points=170`) ?? 0;
-  const nineDarters= qd(`SELECT COUNT(*) AS v FROM (SELECT 1 ${JD} ${mf} AND g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501 GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9)`) ?? 0;
+  const nineDarters= qd(`SELECT COUNT(*) AS v FROM (SELECT 1 ${JD} ${mf} AND g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501 ${NOT_HANDICAPPED} GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9)`) ?? 0;
   // totalLegs is only ever a denominator for the X01 leg stats below (trebleless %,
   // 180s/leg) — X01-scoped so a cricket leg can't dilute either.
   const totalLegs  = q(`SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS v ${J} ${mf} ${X01_ONLY}`) ?? 0;
@@ -2308,7 +2321,7 @@ function getPersonalBests(playerName, mode) {
     SELECT MIN(leg_darts) AS v FROM (
       SELECT COUNT(d.id) AS leg_darts
       FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-      WHERE t.player_id=? ${mf} ${NOT_CHECKOUT_TRAINER}
+      WHERE t.player_id=? ${mf} ${NOT_CHECKOUT_TRAINER} ${NOT_HANDICAPPED}
       GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)>0
     )
   `).get(p.id)?.v ?? null;
@@ -3125,7 +3138,7 @@ function getBobs27Leaderboard() {
   return Array.from(best.values()).sort((a, b) => b.bestScore - a.bestScore);
 }
 
-/* ---------- Household Elo rating (docs/rating-and-handicap-roadmap.md Part A) ----------
+/* ---------- Household Elo rating (docs/archive/rating-and-handicap-roadmap.md Part A) ----------
    Live-computed, never stored — the standing "nothing pre-aggregated" schema
    philosophy fits Elo unusually well: every completed, non-practice, 2-player
    game (across every competitive game type combined into one household
@@ -3140,7 +3153,7 @@ function getBobs27Leaderboard() {
    every request — a few thousand games is a trivial walk at household scale
    (see the roadmap doc's own reasoning); revisit only if a server ever
    accumulates enough games for this to matter.
-   Handicapped games (docs/rating-and-handicap-roadmap.md Part B) are
+   Handicapped games (docs/archive/rating-and-handicap-roadmap.md Part B) are
    excluded once game_players.start_score exists — see the WHERE clause
    below, added in the same change that ships Part B. */
 function getEloRatings() {
@@ -3195,7 +3208,7 @@ function getEloRatings() {
     lastGame = {
       gameId: g.gameId, winnerName: winner.name, loserName: loser.name,
       winnerDelta: winnerIsA ? deltaA : -deltaA, winnerRating: winner.rating,
-      // Upset (docs/rating-and-handicap-roadmap.md Part A): beat an opponent
+      // Upset (docs/archive/rating-and-handicap-roadmap.md Part A): beat an opponent
       // rated 150+ above you, checked against PRE-game ratings (the gap that
       // made the win an upset in the first place), not the post-game ones.
       isUpset: (loserPre - winnerPre) >= 150,
@@ -3515,7 +3528,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
       return db.prepare(`SELECT ${L.fmt} AS bucket, COUNT(*) AS value FROM (
         SELECT MAX(t.created_at) AS leg_ts
         FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-        WHERE t.player_id=? AND g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501 ${modeWhere} ${weightWhere}
+        WHERE t.player_id=? AND g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501 ${modeWhere} ${weightWhere} ${NOT_HANDICAPPED}
         GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'treblelesspct':
@@ -3888,6 +3901,20 @@ const NOT_HYPOTHETICAL_DARTS = `AND g.game_type NOT IN ('chuckin','checkout_trai
 // precedent this constant otherwise mirrors).
 const NOT_CHECKOUT_TRAINER = `AND g.game_type != 'checkout_trainer'`;
 
+// Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): a handicapped
+// player's own game_players.start_score overrides games.config.startingScore
+// for THAT PLAYER ONLY — the game's own category/config keeps reading e.g.
+// "501" regardless, since the other (unhandicapped) participant really is
+// playing a straight 501. That means nine-darter detection (which checks
+// config.startingScore=501) and "fewest darts to finish" Personal Bests would
+// otherwise silently credit a handicapped player's shortened-start leg (say,
+// finishing a 401-start leg in 9 darts) as a genuine 501 nine-darter/record —
+// a fewer-darts feat that's mechanical, not earned, once the start is
+// shortened. Every turns-table query below scopes on `t.` (turns), so this
+// checks the SAME player's own start_score override for the SAME game, not
+// just "was anyone in this game handicapped."
+const NOT_HANDICAPPED = `AND NOT EXISTS (SELECT 1 FROM game_players gph WHERE gph.game_id = t.game_id AND gph.player_id = t.player_id AND gph.start_score IS NOT NULL)`;
+
 // Guided Around the World (docs/game-modes-roadmap.md "Guided Around the Clock /
 // Around the World") shares Chuckin's exact shape for leg/pace purposes: one
 // continuous stream of 1-dart turns per games row, set_no=leg_no=1 throughout, no
@@ -3929,7 +3956,7 @@ function getNineDarterStats(mode) {
   const leaderboard = db.prepare(`
     SELECT p.name, COUNT(*) AS count FROM (
       SELECT t.player_id FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-      WHERE g.game_type = 'x01' AND json_extract(g.config,'$.startingScore') = 501 ${mf}
+      WHERE g.game_type = 'x01' AND json_extract(g.config,'$.startingScore') = 501 ${mf} ${NOT_HANDICAPPED}
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
       HAVING COUNT(DISTINCT t.id) = 3 AND SUM(t.checkout) > 0 AND COUNT(d.id) = 9
     ) x JOIN players p ON p.id = x.player_id
@@ -3939,7 +3966,7 @@ function getNineDarterStats(mode) {
     SELECT p.name, MAX(t.created_at) AS created_at
     FROM turns t JOIN games g ON g.id=t.game_id JOIN players p ON p.id=t.player_id
     JOIN darts d ON d.turn_id=t.id
-    WHERE g.game_type = 'x01' AND json_extract(g.config,'$.startingScore') = 501 ${mf}
+    WHERE g.game_type = 'x01' AND json_extract(g.config,'$.startingScore') = 501 ${mf} ${NOT_HANDICAPPED}
     GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
     HAVING COUNT(DISTINCT t.id) = 3 AND SUM(t.checkout) > 0 AND COUNT(d.id) = 9
     ORDER BY created_at DESC LIMIT 10
