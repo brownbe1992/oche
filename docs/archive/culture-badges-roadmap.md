@@ -1,14 +1,15 @@
 # Badge Expansion 2 — Darts-Culture One-Offs & Coverage Parity — Design Roadmap
 
-> Status: **Part A done, 2026-07 — Part B not started.** Two independently
-> shippable halves, tracked as two items on `docs/open-roadmap-items.md`:
-> (A) culture one-offs + a lifetime-180s ladder — **shipped**, see
-> `REFERENCE.md`'s Achievements section (the `CHAIN_CHECKS` table and the
-> new "lifetime-180s milestone ladder" subsection) for the authoritative
-> behavior; (B) badge-coverage parity for the modes the (now 99-badge)
-> roster still shortchanges (Baseball: 2 badges, Doubles Practice: 0) —
-> still open, see `docs/open-roadmap-items.md` item 29. This doc stays in
-> `docs/` (not archived) until Part B ships too.
+> Status: **Done, 2026-07 — both halves shipped.** (A) culture one-offs + a
+> lifetime-180s ladder — see `REFERENCE.md`'s Achievements section (the
+> `CHAIN_CHECKS` table and the "lifetime-180s milestone ladder" subsection)
+> for the authoritative behavior; (B) badge-coverage parity for Baseball
+> (⚾ Walk-Off, 🔄 The Cycle, a 4-tier lifetime-runs ladder) and Doubles
+> Practice (a 4-tier lifetime doubles-hit ladder, 🎪 Ring Master — this mode
+> had zero badges before) — see `REFERENCE.md`'s Achievements section for the
+> Baseball/Doubles Practice badge tables. Badge total 99→110 (Baseball 2→8,
+> Doubles Practice 0→5). Archived — every item split from this doc on
+> `docs/open-roadmap-items.md` is now Done.
 
 ## Part A — Culture one-offs + the 180s ladder
 

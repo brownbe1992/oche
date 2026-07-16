@@ -4293,7 +4293,7 @@ function newMatchPlayer(name, start){
     pendingIceInTheVeins:false,  // true right after a bust, cleared after the player's next visit
     legWorstDeficit:0,           // largest (my remaining - opponent remaining) seen this leg (Comeback Kid)
     singlesHit: new Set(),       // distinct 1-20 singles hit this session (Around the Clock)
-    sessionOneEighties:0, lifetimeOneEightiesBase:0 }; // Lifetime 180s ladder (docs/culture-badges-roadmap.md Part A)
+    sessionOneEighties:0, lifetimeOneEightiesBase:0 }; // Lifetime 180s ladder (docs/archive/culture-badges-roadmap.md Part A)
   // Fetched once at game start (not re-queried per turn) — same "avoid a network
   // round-trip per dart/turn" reasoning newMatchPlayerChuckin() documents for its
   // own lifetime bases. No mode param -> _mf(undefined) returns '' server-side ->
@@ -5342,7 +5342,7 @@ const BADGE_INFO = {
   staircasefinish:    { icon:'🪜', label:'Staircase Finish', desc:'Check out in exactly three darts by halving the target twice: single, single, then double — e.g. 32 down to 16, down to 8, then double 4.' },
   triplebull:         { icon:'🐂', label:'Triple Bull', desc:'Check out on 150 by hitting the double bull three times in one visit.' },
   bullseyefinish:     { icon:'🏹', label:'Bullseye Finish', desc:'Check out with the double bull as your final dart, at any total.' },
-  // Darts-culture one-offs (docs/culture-badges-roadmap.md Part A) — same
+  // Darts-culture one-offs (docs/archive/culture-badges-roadmap.md Part A) — same
   // no-category-flag treatment as every other plain X01 badge above, so they
   // fold into the existing X01 Badge Case section rather than getting their own.
   bedandbreakfast:    { icon:'🍳', label:'Bed & Breakfast', desc:'Throw the classic "26" splash — single 20, single 5, single 1 — in one visit, any order.' },
@@ -5350,6 +5350,16 @@ const BADGE_INFO = {
   shanghaivisit:      { icon:'🀄', label:'Shanghai', desc:'Hit a single, double, AND treble of the same number in one visit.' },
   baseballperfectinning: { icon:'🔥', label:'Perfect Inning', desc:'Score 9 runs in one Baseball inning — three trebles on target.', baseball:true },
   baseballperfectgame:    { icon:'🏆', label:'Perfect Game', desc:'Win a Baseball leg with a perfect 9 runs in every one of the 9 innings — 81 total.', baseball:true },
+  // Baseball/Doubles Practice coverage parity (docs/archive/culture-badges-roadmap.md
+  // Part B — Badge Expansion 2's second half; Part A shipped the X01 culture
+  // one-offs + 180s ladder above). Walk-Off and The Cycle fold into the existing
+  // Baseball Badge Case section (baseball:true) the same way Part A's ladder
+  // folded into X01's; Doubles Practice had no section at all before this, so its
+  // 5 new badges (see the doublesPractice:true ladder below plus Ring Master
+  // here) get a new one — see renderPlayerBadges()'s doublesPracticeIds bucket.
+  baseballwalkoff: { icon:'⚾', label:'Walk-Off', desc:'Win a Baseball leg in extra innings — the game went past inning 9.', baseball:true },
+  baseballcycle:   { icon:'🔄', label:'The Cycle', desc:"Hit a single, double, AND treble of the current inning's number in one visit — 6 runs the scenic way.", baseball:true },
+  doublespracticeringmaster: { icon:'🎪', label:'Ring Master', desc:'Hit every double, D1 through D20 plus the bull, in Doubles Practice — lifetime.', doublesPractice:true },
   cricket9marks:       { icon:'🎯', label:'9 Marks', desc:'Score 9 marks in one Cricket visit — three trebles, the maximum possible.', cricket:true },
   cricketperfectclose: { icon:'🏆', label:'Perfect Leg', desc:'Close every Cricket number using the fewest darts physically possible for that match.', cricket:true },
   cricketwhitewash:    { icon:'🧹', label:'Whitewash', desc:"Win a Cricket leg without your opponent closing a single number.", cricket:true },
@@ -5413,17 +5423,19 @@ function renderPlayerBadges(data){
     }
     return `<div class="stat-block" style="opacity:.5;cursor:pointer" ${titleAttr} onclick="showBadgeInfo('${id}')"><div class="stat-val" style="filter:grayscale(1)">${info.icon}</div><div class="stat-label">${info.label}<br>Not yet earned</div></div>`;
   };
-  // Grouped by game type — X01's badges, Cricket's 2, Baseball's 2, Daily
-  // Challenge's 3, Just Chuckin' It's 18, Checkout Trainer's 34, and the guided
+  // Grouped by game type — X01's badges, Cricket's 2, Baseball's 4, Daily
+  // Challenge's 3, Just Chuckin' It's 18, Checkout Trainer's 34, Doubles
+  // Practice's 5 (docs/archive/culture-badges-roadmap.md Part B), and the guided
   // drills' 2 each stay visually distinct sub-sections rather than one mixed
   // flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill);
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
   const baseballIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].baseball);
   const challengeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].challenge);
   const chuckinIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].chuckin);
   const tournamentIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].tournament);
   const checkoutTrainerIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].checkoutTrainer);
+  const doublesPracticeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].doublesPractice);
   const drillIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].drill);
   container.innerHTML = `
     <div class="pp-section-title" style="margin-bottom:6px">X01</div>
@@ -5432,6 +5444,8 @@ function renderPlayerBadges(data){
     <div class="summary-grid">${cricketIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Baseball</div>
     <div class="summary-grid">${baseballIds.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">Doubles Practice</div>
+    <div class="summary-grid">${doublesPracticeIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Tournaments</div>
     <div class="summary-grid">${tournamentIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Daily Challenge</div>
@@ -6118,7 +6132,8 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   tournamentchampion:'🏆 CHAMPION! 🏆', tournamentgiantslayer:'Giant Slayer ⚔️',
   guided_clock:'Guided Clock! 🧭', guided_world:'Guided World! 🗺️',
   triplebull:'🐂 TRIPLE BULL! 🐂', bullseyefinish:'Bullseye Finish! 🏹',
-  baseballperfectinning:'Perfect Inning! 🔥', baseballperfectgame:'🏆 PERFECT GAME! 🏆' };
+  baseballperfectinning:'Perfect Inning! 🔥', baseballperfectgame:'🏆 PERFECT GAME! 🏆',
+  baseballwalkoff:'Walk-Off! ⚾', baseballcycle:'The Cycle! 🔄', doublespracticeringmaster:'Ring Master! 🎪' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -6130,7 +6145,8 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   staircasefinish:3000, ghostslayer:3500, tournamentchampion:6000, tournamentgiantslayer:2500,
   guided_clock:3500, guided_world:5000,
   triplebull:4000, bullseyefinish:2500,
-  baseballperfectinning:2500, baseballperfectgame:6000 };
+  baseballperfectinning:2500, baseballperfectgame:6000,
+  baseballwalkoff:3000, baseballcycle:2500, doublespracticeringmaster:5000 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
@@ -6219,7 +6235,7 @@ CHUCKIN_MILESTONE_LADDERS.forEach(ladder=>{
     ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
   });
 });
-// Lifetime 180s ladder (docs/culture-badges-roadmap.md Part A) — 180! has always
+// Lifetime 180s ladder (docs/archive/culture-badges-roadmap.md Part A) — 180! has always
 // been a recurring live celebration (queueBadge('180',...) in enterTurn()) but
 // never a player_badges row at all (see REFERENCE.md's Achievements section: 180/
 // Big Fish/Nine-Darter are older top-level stats, not badges), so it had no
@@ -6248,6 +6264,60 @@ ONE_EIGHTY_MILESTONE_LADDERS.forEach(ladder=>{
   ladder.tiers.forEach((tier, i)=>{
     const id = ladder.idPrefix + tier.threshold;
     BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold) };
+    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
+    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
+  });
+});
+// Lifetime runs ladder (docs/archive/culture-badges-roadmap.md Part B) — Baseball's own
+// analog of the lifetime-180s ladder above, same reused engine, same "no network
+// round-trip per dart" reasoning: lifetimeRunsBase is fetched once per game at
+// newMatchPlayerBaseball() time via the same no-mode-param stat-bubbles call,
+// sessionRuns accumulates locally across every visit this game (not reset per
+// leg, unlike p.totalRuns). Its BADGE_INFO rows carry baseball:true — Baseball
+// already has a Badge Case section to fold into, same reasoning the 180s ladder
+// used for X01.
+const BASEBALL_RUNS_MILESTONE_LADDERS = [
+  { metric:'lifetimeRuns', idPrefix:'baseball_runs_', statNoun:'lifetime runs',
+    descFor: t => `Score ${t.toLocaleString()} lifetime runs in Baseball.`,
+    tiers: [
+      { threshold:100,  label:'Rookie Season',   icon:'⚾' },
+      { threshold:500,  label:'Everyday Player', icon:'🧢' },
+      { threshold:1500, label:'All-Star',        icon:'⭐' },
+      { threshold:5000, label:'Hall of Fame',    icon:'🏟️' },
+    ] },
+];
+BASEBALL_RUNS_MILESTONE_LADDERS.forEach(ladder=>{
+  ladder.tiers.forEach((tier, i)=>{
+    const id = ladder.idPrefix + tier.threshold;
+    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), baseball:true };
+    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
+    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
+  });
+});
+// Lifetime doubles-hit ladder (docs/archive/culture-badges-roadmap.md Part B) — Doubles
+// Practice's own mode-defining count (a "hit" is a double landed on one of that
+// round's own targets), already computed for its stat bubbles
+// (getDoublesPracticeStatBubbles()'s `hits`). Same reused-engine/no-network-
+// round-trip-per-dart shape as the two ladders above: lifetimeHitsBase fetched
+// once per game at newMatchPlayerDoublesPractice() time, sessionHits accumulates
+// locally across every round this game (not reset per round, unlike
+// p.roundHits). doublesPractice:true — Doubles Practice had no Badge Case
+// section before this change; see renderPlayerBadges()'s new
+// doublesPracticeIds bucket below.
+const DOUBLES_HIT_MILESTONE_LADDERS = [
+  { metric:'lifetimeHits', idPrefix:'doubles_practice_hits_', statNoun:'lifetime doubles hit',
+    descFor: t => `Hit ${t.toLocaleString()} lifetime doubles in Doubles Practice.`,
+    tiers: [
+      { threshold:50,   label:'Ring Finder',      icon:'🎯' },
+      { threshold:250,  label:'Double Duty',      icon:'🔁' },
+      { threshold:1000, label:'Precision Expert', icon:'🔬' },
+      { threshold:5000, label:'Doubles Legend',   icon:'👑' },
+    ] },
+];
+DOUBLES_HIT_MILESTONE_LADDERS.forEach(ladder=>{
+  ladder.tiers.forEach((tier, i)=>{
+    const id = ladder.idPrefix + tier.threshold;
+    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), doublesPractice:true };
     ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
     ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
   });
@@ -8106,7 +8176,7 @@ function enterTurn(){
     sendHaWebhook('oneeighty', p.name, game.category);
     fireMomentCard('180', { icon:'🎯', headline:'ONE-EIGHTY!', player:p.name,
       statLine: `${game.category} · ${game.practice?'Practice':'H2H'}` });
-    // Lifetime 180s ladder (docs/culture-badges-roadmap.md Part A) — permanent
+    // Lifetime 180s ladder (docs/archive/culture-badges-roadmap.md Part A) — permanent
     // milestone tiers, not undo-revocable, same "ladder tiers are permanent, like
     // every other ladder" convention Chuckin/Checkout Trainer's own ladders follow.
     p.sessionOneEighties += 1;
@@ -8191,7 +8261,7 @@ function enterTurn(){
     // (which is about hitting double bull twice mid-visit, not finishing on it).
     { id:'bullseyefinish', icon:'🏹', headline:'BULLSEYE FINISH', statLine:'Checked out on the bull',
       test: () => ev.win && _d.length>=1 && _d[_d.length-1].sector===25 && _d[_d.length-1].mult===2 },
-    // Darts-culture one-offs (docs/culture-badges-roadmap.md Part A) — pure
+    // Darts-culture one-offs (docs/archive/culture-badges-roadmap.md Part A) — pure
     // predicates over this visit's darts, same shape as Staircase Finish above,
     // living in scoring.js so they're covered by a committed test rather than
     // only a manual/Playwright check. None of these overlap with an existing
@@ -8604,6 +8674,9 @@ function enterTurnBaseball(){
   p.totalRuns = ev.totalRuns; p.inningRuns = ev.inningRuns;
   const dartsThrown = game.darts.length;
   p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
+  // Lifetime runs ladder (docs/archive/culture-badges-roadmap.md Part B) — accumulates
+  // across the whole client session, not reset per leg like p.totalRuns.
+  p.sessionRuns = (p.sessionRuns||0) + ev.runsThisVisit;
 
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.scored, bust:false, checkout:false, checkoutPoints:null,
@@ -8627,6 +8700,22 @@ function enterTurnBaseball(){
     awardRecurringBadge(p.name, 'baseballperfectinning', 'baseballperfectinning',
       { icon:'🔥', headline:'PERFECT INNING!', player:p.name, statLine:'9 runs — three trebles, one visit' });
   }
+
+  // 🔄 The Cycle (docs/archive/culture-badges-roadmap.md Part B): a single, double, AND
+  // treble of this inning's number in one visit — 6 runs the scenic way.
+  // Mutually exclusive with Perfect Inning above (that's three trebles; this is
+  // one of each), so no suppression pairing is needed. isBaseballCycle() lives
+  // in scoring.js so it's covered by a committed test.
+  if(dartsThrown===3 && isBaseballCycle(game.darts, ev.target)){
+    queueBadge('baseballcycle', p.name);
+    awardRecurringBadge(p.name, 'baseballcycle', 'baseballcycle',
+      { icon:'🔄', headline:'THE CYCLE!', player:p.name, statLine:"Single, double, and treble of the inning's number" });
+  }
+
+  // Lifetime runs ladder (docs/archive/culture-badges-roadmap.md Part B) — permanent
+  // milestone tiers, same "ladder tiers are permanent" convention every other
+  // ladder in this app follows.
+  checkChuckinMilestoneTier(BASEBALL_RUNS_MILESTONE_LADDERS[0], p.name, (p.lifetimeRunsBase||0) + p.sessionRuns);
 
   if(ev.matchComplete){
     onLegWonBaseball(ev.winnerIndex);
@@ -8672,11 +8761,21 @@ function undoLastTurnBaseball(){
    Same leg/set/game progression tree every other game type uses — the only
    real difference from onLegWonCricket() is that the winner (wi) here is
    computed by evaluateVisitBaseball() from total runs, not assumed to be
-   whoever's visit just ran (see evaluateVisitBaseball()'s own comment). No
-   Baseball-native achievements this pass (core playable game only). */
+   whoever's visit just ran (see evaluateVisitBaseball()'s own comment). */
 function onLegWonBaseball(wi){
   const w = game.players[wi];
   w.legsWon += 1;
+
+  // ⚾ Walk-Off (docs/archive/culture-badges-roadmap.md Part B): the leg was decided in
+  // extra innings. game.baseballInning still holds the deciding visit's own
+  // inning number here — enterTurnBaseball() only increments it AFTER checking
+  // ev.matchComplete and dispatching here, so this read is the same "not yet
+  // advanced" timing evaluateVisitBaseball()'s own roundComplete check relies on.
+  if(game.baseballInning > 9){
+    queueBadge('baseballwalkoff', w.name);
+    awardRecurringBadge(w.name, 'baseballwalkoff', 'baseballwalkoff',
+      { icon:'⚾', headline:'WALK-OFF!', player:w.name, statLine:`Won in extra innings — inning ${game.baseballInning}` });
+  }
 
   // Perfect Game: won this leg with a perfect 9 runs in every one of the 9
   // innings (81 total) — Baseball's Nine-Darter/Perfect Leg analog. Checked
@@ -9513,7 +9612,18 @@ function playerSnapshotCricket(p){
    marks). evaluateVisitBaseball()/baseballInningTarget() live in scoring.js;
    only the stateful player-record helpers stay here, same split as Cricket. */
 function newMatchPlayerBaseball(name){
-  return { name, totalRuns:0, inningRuns:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 };
+  const p = { name, totalRuns:0, inningRuns:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0,
+    sessionRuns:0, lifetimeRunsBase:0 }; // Lifetime runs ladder (docs/archive/culture-badges-roadmap.md Part B)
+  // Fetched once at game start, not re-queried per visit — same "avoid a network
+  // round-trip per turn" reasoning newMatchPlayer()'s own 180s-ladder fetch
+  // documents. No mode param -> genuinely unscoped lifetime (H2H + practice
+  // combined). If this hasn't resolved by the time a run is scored, the
+  // milestone check just uses 0 as the base and catches up once it lands.
+  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(name)}&gameType=baseball`).then(stats=>{
+    if(!stats) return;
+    p.lifetimeRunsBase = (stats.totalRuns || 0) - p.sessionRuns;
+  }).catch(()=>{});
+  return p;
 }
 function resetPlayerForNextLegBaseball(p, game, newSet){
   p.totalRuns = 0; p.inningRuns = {}; p.legDarts = 0;
@@ -9533,7 +9643,17 @@ function playerSnapshotBaseball(p){
    ends it, and game.legNo (reused as "round number") increments per round via
    startNextRoundDoublesPractice(), not startNextLeg(). */
 function newMatchPlayerDoublesPractice(name){
-  return { name, roundDarts:0, roundHits:0, sessionRounds:[] };
+  const p = { name, roundDarts:0, roundHits:0, sessionRounds:[],
+    sessionHits:0, lifetimeHitsBase:0 }; // Lifetime doubles-hit ladder (docs/archive/culture-badges-roadmap.md Part B)
+  // Fetched once at game start, not re-queried per dart — same "avoid a network
+  // round-trip per throw" reasoning newMatchPlayerChuckin()/newMatchPlayerBaseball()
+  // document for their own lifetime bases. No mode param -> genuinely unscoped
+  // lifetime (this mode is always practice=1 anyway, but matches the pattern).
+  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(name)}&gameType=doubles_practice`).then(stats=>{
+    if(!stats) return;
+    p.lifetimeHitsBase = (stats.hits || 0) - p.sessionHits;
+  }).catch(()=>{});
+  return p;
 }
 // Not called by startNextLeg() (Doubles Practice never uses it — see
 // startNextRoundDoublesPractice() instead); provided only to satisfy the
@@ -9579,6 +9699,35 @@ function throwDartDoublesPractice(sector, zone, missZone, missDepth, bounced){
     announce(`Round over. ${doublesPracticeReasonText(ev.reason)} ${p.roundDarts} darts, ${p.roundHits} hit${p.roundHits===1?'':'s'} this round.`);
   } else if(ev.hit){
     announce(`Hit, ${dart.label}. ${p.roundHits} hit${p.roundHits===1?'':'s'} so far this round.`);
+  }
+  if(ev.hit){
+    // Lifetime doubles-hit ladder (docs/archive/culture-badges-roadmap.md Part B) —
+    // permanent milestone tiers, accumulated across the whole client session
+    // (not reset per round, unlike p.roundHits).
+    p.sessionHits = (p.sessionHits||0) + 1;
+    checkChuckinMilestoneTier(DOUBLES_HIT_MILESTONE_LADDERS[0], p.name, (p.lifetimeHitsBase||0) + p.sessionHits);
+    // 🎪 Ring Master (docs/archive/culture-badges-roadmap.md Part B): lifetime completion
+    // over every double D1-D20 plus bull — same "query the server, compare
+    // count>=total" shape as the passive Around the World badge (throwDartAroundTheWorld()),
+    // queued behind DB._queue so the query only runs once this dart's own
+    // DB.recordTurn() write above has actually landed. Explicitly a ONE-OFF
+    // PERMANENT badge per the roadmap doc — unlike Around the Clock/World, this
+    // one deliberately skips trackBadgeForUndo/badgeReverts (no undo-revocation),
+    // matching the milestone ladders' own "permanent, once-earned" treatment.
+    if(!(earnedBadgeCache[p.name] && earnedBadgeCache[p.name].has('doublespracticeringmaster'))){
+      DB._queue(()=>Backend.get(`/api/players/doubles-hit-sectors?name=${encodeURIComponent(p.name)}`).then(prog=>{
+        if(prog && prog.count >= prog.total){
+          Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'doublespracticeringmaster', once:true }).then(r=>{
+            if(!earnedBadgeCache[p.name]) earnedBadgeCache[p.name] = new Set();
+            earnedBadgeCache[p.name].add('doublespracticeringmaster');
+            if(r && r.newlyEarned){
+              queueBadge('doublespracticeringmaster', p.name, null, 'First time!');
+              fireMomentCard('doublespracticeringmaster', { icon:'🎪', headline:'RING MASTER', player:p.name, statLine:'Every double, D1 to Bull, lifetime' });
+            }
+          }).catch(()=>{});
+        }
+      }).catch(()=>{}));
+    }
   }
   renderGameDoublesPractice();
 }

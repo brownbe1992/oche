@@ -49,7 +49,7 @@ perfectly onto the existing achievement/moment-card machinery.
   leaderboard set, and the obvious badges: 🀄 **Shanghai!** (win by
   Shanghai — recurring), plus a lifetime-points or Shanghais-thrown ladder
   if play shows appetite. The X01 **Shanghai-visit** badge in
-  `docs/culture-badges-roadmap.md` is deliberately separate (same feat,
+  `docs/archive/culture-badges-roadmap.md` is deliberately separate (same feat,
   different game) — don't merge them.
 
 ## Accessibility, security, and testing considerations

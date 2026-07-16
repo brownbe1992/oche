@@ -81,6 +81,7 @@
        GET  /api/players/dart-heatmap -> (?name=...&gameType=...&mode=...) -> [{sector,multiplier,zone,missZone,missDepth,hits}] (public)
        GET  /api/players/bounce-outs -> (?name=...&gameType=...&mode=...) -> { count } (public)
        GET  /api/players/around-the-world -> (?name=...) -> { hit, count, total } (public)
+       GET  /api/players/doubles-hit-sectors -> (?name=...) -> { hit, count, total } (public)
        GET  /api/players/on-this-day -> (?name=...&tz=...) -> { type, year, yearsAgo, statLine } | null (public)
        POST /api/challenges/start  -> { player, gameId, challengeDate, format, target } (public)
        POST /api/challenges/complete -> { player, challengeDate, resultDarts } -> { ok, isPersonalBest } (public)
@@ -1195,6 +1196,13 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/players/around-the-world' && m === 'GET') {
       return send(res, 200, db.getAroundTheWorldProgress(url.searchParams.get('name')));
+    }
+    // docs/archive/culture-badges-roadmap.md Part B: Ring Master's own lifetime-progress
+    // query — same {hit,count,total} shape as around-the-world above, just scoped
+    // to Doubles Practice's own "hit" definition (a double landed on a genuine
+    // target) instead of every raw dart outcome.
+    if (p === '/api/players/doubles-hit-sectors' && m === 'GET') {
+      return send(res, 200, db.getDoublesPracticeHitSectors(url.searchParams.get('name')));
     }
     if (p === '/api/players/on-this-day' && m === 'GET') {
       const tzRaw = url.searchParams.get('tz');

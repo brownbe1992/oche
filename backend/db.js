@@ -2452,7 +2452,11 @@ function getBaseballStatBubbles(playerName, mode) {
 
   const dartsThrown = db.prepare(`SELECT COUNT(*) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
 
-  return { rpi, perfectInnings: row?.perfectInnings ?? 0, winPct, gamesPlayed, dartsThrown, bestInning };
+  // totalRuns (docs/archive/culture-badges-roadmap.md Part B): the raw SUM(scored) rpi is
+  // already computed from, exposed directly so the frontend's lifetime runs ladder
+  // (newMatchPlayerBaseball()'s lifetimeRunsBase) has a base to fetch — same
+  // "no mode param -> genuinely unscoped lifetime" pattern the 180s ladder uses.
+  return { rpi, perfectInnings: row?.perfectInnings ?? 0, winPct, gamesPlayed, dartsThrown, bestInning, totalRuns: row?.totalRuns ?? 0 };
 }
 
 // Baseball has no turns.leg_won signal (unlike X01/Cricket): a Baseball leg's
@@ -2642,7 +2646,11 @@ function getDoublesPracticeStatBubbles(playerName, mode) {
   const avgDartsPerRound = roundsPlayed > 0 ? (dartsThrown / roundsPlayed) : null;
   const avgHitsPerRound = roundsPlayed > 0 ? (hits / roundsPlayed) : null;
 
-  return { doublesPct, avgDartsPerRound, avgHitsPerRound, roundsPlayed, dartsThrown };
+  // hits (docs/archive/culture-badges-roadmap.md Part B): the raw lifetime doubles-hit
+  // count doublesPct is already computed from, exposed directly as the base for
+  // the frontend's lifetime doubles-hit ladder (newMatchPlayerDoublesPractice()'s
+  // lifetimeHitsBase) — same pattern as Baseball's totalRuns above.
+  return { doublesPct, avgDartsPerRound, avgHitsPerRound, roundsPlayed, dartsThrown, hits };
 }
 
 // Personal Bests analog: "best round" records rather than X01/Cricket's win-
@@ -2719,6 +2727,27 @@ function getDoublesPracticeBestRoundStats() {
   return [...best.values()]
     .sort((a, b) => b.hits - a.hits || a.darts - b.darts)
     .map(r => ({ name: r.name, hits: r.hits, darts: r.darts, createdAt: r.created_at }));
+}
+
+// 🎪 Ring Master progress (docs/archive/culture-badges-roadmap.md Part B): lifetime
+// completion over every double D1-D20 plus bull (21 distinct targets) in
+// Doubles Practice — direct structural analog of getAroundTheWorldProgress()
+// above, just scoped to this mode's own "hit" definition (DOUBLES_HIT_CASE:
+// multiplier=2 AND the sector was a genuine target in that round's
+// config.doubles) instead of every raw dart outcome. No mode param — Doubles
+// Practice is always practice=1 by construction (same reasoning as
+// getDoublesPracticeAccuracyLeaderboard() above), so an h2h/practice split
+// would always leave one side empty.
+function getDoublesPracticeHitSectors(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return { hit: [], count: 0, total: 21 };
+  const scope = _scope({ gameType: 'doubles_practice' });
+  const rows = db.prepare(`
+    SELECT DISTINCT d.sector AS sector
+    FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id
+    WHERE t.player_id=? AND ${DOUBLES_HIT_CASE('d')}=1 ${scope}
+  `).all(p.id);
+  return { hit: rows.map(r => r.sector), count: rows.length, total: 21 };
 }
 
 /* ---------- Just Chuckin' It (game-modes-roadmap.md "Just Chuckin' It") ----------
@@ -6247,7 +6276,7 @@ module.exports = {
   getBaseballPerfectInningsStats, getBaseballRpiLeaderboard, getBaseballWinLeaderboard, getBaseballPerfectGameStats,
   getCricketMprLeaderboard, getCricketWinLeaderboard, getCricketPerfectLegStats,
   getDoublesPracticeStatBubbles, getDoublesPracticePersonalBests,
-  getDoublesPracticeAccuracyLeaderboard, getDoublesPracticeBestRoundStats,
+  getDoublesPracticeAccuracyLeaderboard, getDoublesPracticeBestRoundStats, getDoublesPracticeHitSectors,
   getChuckinStatBubbles, getChuckinPersonalBests, getChuckinHeatmap, getDartHeatmap, getBounceOutCount,
   getCheckoutTrainerStatBubbles, getCheckoutTrainerPersonalBests,
   getCheckoutBlitzLeaderboard, getCheckoutBlitzPersonalStats,
