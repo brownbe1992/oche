@@ -6,7 +6,7 @@
 
 A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player statistics, and no external dependencies.
 
-**v0.14.0**
+**v0.15.0**
 
 You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [110-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. A solo [Checkout Trainer mode](#new-game) is a no-dartboard mental drill — given a target score, tap out the fewest-darts checkout from memory and get graded instantly — with an untimed Freeform mode and a 60-second Checkout Blitz sprint with its own leaderboard. Two guided practice drills, [🧭 Around the Clock and 🗺️ Around the World](#new-game), turn the app's existing completion tracking into active solo sessions with live progress feedback. All data lives in a SQLite database on your own server.
 
@@ -61,6 +61,18 @@ A separate compose file runs on port **8056** with its own isolated database:
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d --build
+```
+
+### Live test / internet-facing environment
+
+A third compose file, `docker-compose.live-test.yml`, is preconfigured for a server open to
+the internet (its own network segment, behind a TLS-terminating reverse proxy you control) —
+`COOKIE_SECURE`/`TRUST_PROXY` already set correctly, on port **8066** with its own isolated
+database. Read the file's header comment before deploying it, and see "Exposing this to the
+internet" below either way:
+
+```bash
+docker compose -f docker-compose.live-test.yml up -d --build
 ```
 
 ### Port
@@ -1498,6 +1510,7 @@ oche/
 │   └── display.html  Read-only live scoreboard for a second screen
 ├── docker-compose.yml
 ├── docker-compose.dev.yml        Dev instance on port 8056
+├── docker-compose.live-test.yml  Internet-facing test server on port 8066
 ├── docker-compose.portainer.yml  No-build variant for Portainer/Unraid
 ├── docker-entrypoint.sh          Fixes /data ownership, then drops to non-root
 └── Dockerfile
