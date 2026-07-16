@@ -50,6 +50,7 @@ Others
 - Cut-throat Cricket variant (points score onto open opponents, lowest wins — the piece deferred at Cricket v1) — done, see docs/archive/cutthroat-cricket-roadmap.md
 - Structured practice ladders: Bob's 27 doubles routine + the 121 checkout ladder — full design in docs/practice-ladders-roadmap.md
 - The Pressure Chamber (15-round pressure-training drill, solo or identical-sequence H2H — a seeded Pressure Card per round pairing a target with a situational modifier like Sudden Death/No Warmup/Match Dart, Composure Points, a Composure Rating, and a self-declare-before-verifying honesty mechanic) — full design in docs/pressure-chamber-roadmap.md
+- The Gauntlet (solo endurance warm-up — 20 stations in a fixed clock-adjacency order, single→triple→double per station in strict throw order, a Scar tally with a one-time repeat rule and doubled Deep Scars, a result tier from Unmarked to The Gauntlet Wins, and a per-station Scar Map weakness heatmap that accumulates across sessions) — full design in docs/gauntlet-roadmap.md
 - Integrate with Homeassistant
 - Automated scoring with cameras and machine learning — full design in docs/camera-scoring-roadmap.md
 - Settings page - set default player
