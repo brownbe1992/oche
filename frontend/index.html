@@ -123,6 +123,12 @@
   .modal-overlay{position:fixed;top:0;right:0;bottom:0;left:0;background:rgba(8,9,7,.72);display:flex;align-items:center;
     justify-content:center;padding:24px;z-index:50}
   .modal-overlay[hidden]{display:none}
+  /* #modal (uiConfirm()/uiPrompt()) must always layer above #wizard — confirmSkipWizard()
+     opens a #modal confirm dialog WHILE #wizard is still showing underneath it (closeWizard()
+     only runs from the confirm's own Yes callback), and both shared the same z-index with
+     #wizard later in the DOM, so #wizard silently painted on top and swallowed every click on
+     the confirm dialog's buttons — "Skip for now" was effectively unusable. */
+  #modal{z-index:60}
   .modal-card{background:var(--surface);border:1px solid var(--gold);border-radius:14px;padding:22px;
     width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
   .modal-msg{margin:0 0 16px;font-size:15px;line-height:1.5}
