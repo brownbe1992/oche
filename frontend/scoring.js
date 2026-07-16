@@ -983,6 +983,82 @@ function rebuildCheckoutLadderState({ turns }){
   return { target, legNo: currentLeg, remaining, visitsThisLeg };
 }
 
+/* ---------- The Gauntlet (docs/archive/gauntlet-roadmap.md) ----------
+   A solo endurance drill: 20 stations, one per board number, in a FIXED
+   clock-adjacency order — identical on every run, forever, so unlike
+   Pressure Chamber's per-game seeded card sequence there is no generation
+   step here at all. */
+const GAUNTLET_STATION_ORDER = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
+
+// Strictly positional grading, no re-matching across positions (docs/gauntlet-
+// roadmap.md "At each station" — an inference flagged as such in that doc's
+// own Open Questions, adopted here per its stated default): dart 1 must be
+// the station's single, dart 2 its treble, dart 3 its double, each judged
+// only against its own slot regardless of what the OTHER darts this attempt
+// happened to hit. Always exactly 3 darts (no early-completion condition the
+// way X01 has bust/win) — darts[i] undefined counts as a miss for that slot.
+function evaluateGauntletStation(stationNumber, darts){
+  const wantSingle = d => !!d && d.sector === stationNumber && d.mult === 1;
+  const wantTreble = d => !!d && d.sector === stationNumber && d.isTreble;
+  const wantDouble = d => !!d && d.sector === stationNumber && d.isDouble;
+  const checks = [wantSingle, wantTreble, wantDouble];
+  const hits = [0,1,2].map(i => checks[i](darts[i]));
+  const misses = hits.filter(h => !h).length;
+  return { hits, misses };
+}
+
+// Total Scars across every station: the final (post-any-repeat) miss count
+// summed, DOUBLED for any station whose final result is 3 misses (a Deep
+// Scar) — derived here, never stored pre-multiplied, same "store the raw
+// number, derive the special-case scaling" shape Halve-It's halving rule
+// uses. `finalMisses` is one integer (0-3) per station, in any order.
+function gauntletTotalScars(finalMisses){
+  return finalMisses.reduce((sum, m) => sum + (m === 3 ? 6 : m), 0);
+}
+const GAUNTLET_RESULT_TIERS = [
+  { max:5,  label:'Unmarked' },
+  { max:12, label:'Scarred but Standing' },
+  { max:20, label:'Bloodied' },
+  { max:30, label:'Broken Down' },
+  { max:Infinity, label:'The Gauntlet Wins' },
+];
+function gauntletResultTier(totalScars){
+  return GAUNTLET_RESULT_TIERS.find(t => totalScars <= t.max).label;
+}
+
+// Pure replay for resume (docs/archive/saved-games-roadmap.md) and for the
+// write-time sequence/repeat-count guards (backend/db.js) — both need the
+// exact same "which stations are settled, and is one awaiting its one
+// allowed repeat" derivation, so it lives here once. `turns`: ordered
+// (insertion order) {targetScore (station number), scored (this attempt's
+// miss count)} rows for one game. A station settles the moment either its
+// first attempt scores something other than 2, or a second attempt (the
+// repeat) exists for it at all — the repeat's own result is authoritative
+// regardless of what it comes back as.
+function rebuildGauntletState({ turns }){
+  const byStation = new Map(); // station -> array of {scored} in submission order
+  turns.forEach(t => {
+    if(!byStation.has(t.targetScore)) byStation.set(t.targetScore, []);
+    byStation.get(t.targetScore).push(t.scored);
+  });
+  const finalMisses = [];
+  let pendingRepeatStation = null;
+  for(const station of GAUNTLET_STATION_ORDER){
+    const attempts = byStation.get(station);
+    if(!attempts || attempts.length === 0) break; // this and every later station: not yet reached
+    if(attempts.length === 1 && attempts[0] === 2){ pendingRepeatStation = station; break; }
+    finalMisses.push(attempts[attempts.length - 1]); // settled — last attempt (only one, or the repeat) is authoritative
+  }
+  const settledCount = finalMisses.length;
+  const currentStation = pendingRepeatStation != null ? pendingRepeatStation : GAUNTLET_STATION_ORDER[settledCount];
+  const awaitingRepeat = pendingRepeatStation != null;
+  return {
+    finalMisses, settledCount, currentStation, awaitingRepeat,
+    totalScars: gauntletTotalScars(finalMisses),
+    done: settledCount === GAUNTLET_STATION_ORDER.length,
+  };
+}
+
 // Around the World (solo, guided drill) — no round/leg concept at all (one
 // continuous stream, set_no=leg_no=1 for the whole session, same as Just
 // Chuckin' It). Its real lifetime progress is refetched fresh at resume time
@@ -1016,5 +1092,7 @@ if (typeof module !== 'undefined' && module.exports) {
     rebuildX01State, rebuildCricketState, rebuildBaseballState,
     rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State,
     rebuildCheckoutLadderState,
+    GAUNTLET_STATION_ORDER, evaluateGauntletStation, gauntletTotalScars, gauntletResultTier,
+    rebuildGauntletState,
   };
 }

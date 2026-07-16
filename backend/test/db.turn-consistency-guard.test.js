@@ -497,6 +497,94 @@ describe('addTurn — 121 Checkout Ladder scored/targetScore/visit-cap must matc
   });
 });
 
+describe('addTurn — The Gauntlet sequence/repeat-count/scored-range must match, when opted in (docs/archive/gauntlet-roadmap.md)', () => {
+  function gauntletGame(players) {
+    return db.createGame({
+      category: 'The Gauntlet', legsPerSet: 1, setsPerGame: 1, practice: 1,
+      gameType: 'gauntlet', players: players.map(name => ({ name })),
+    });
+  }
+  const STATIONS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
+  function gt(gameId, player, station, scored) {
+    return db.addTurn(gameId, {
+      player, set: 1, leg: 1, scored, bust: false, checkout: false, checkoutPoints: null, targetScore: station,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT);
+  }
+
+  test('accepts a legitimate first attempt at the mandatory first station (20)', () => {
+    db.addPlayer('GA_A');
+    const { gameId } = gauntletGame(['GA_A']);
+    assert.doesNotThrow(() => gt(gameId, 'GA_A', STATIONS[0], 0));
+  });
+
+  test('rejects a targetScore that skips ahead of the first station', () => {
+    db.addPlayer('GA_B');
+    const { gameId } = gauntletGame(['GA_B']);
+    assert.throws(() => gt(gameId, 'GA_B', STATIONS[1], 0), (err) => err.status === 400);
+  });
+
+  test('rejects a scored (miss count) outside 0-3', () => {
+    db.addPlayer('GA_C');
+    const { gameId } = gauntletGame(['GA_C']);
+    assert.throws(() => gt(gameId, 'GA_C', STATIONS[0], 4), (err) => err.status === 400);
+    assert.throws(() => gt(gameId, 'GA_C', STATIONS[0], -1), (err) => err.status === 400);
+  });
+
+  test('rejects checkout=true and bust=true (Gauntlet has neither concept)', () => {
+    db.addPlayer('GA_D');
+    const { gameId } = gauntletGame(['GA_D']);
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'GA_D', set: 1, leg: 1, scored: 0, bust: false, checkout: true, checkoutPoints: 0, targetScore: STATIONS[0],
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400);
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'GA_D', set: 1, leg: 1, scored: 0, bust: true, checkout: false, checkoutPoints: null, targetScore: STATIONS[0],
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('a clean pass (0 misses) settles immediately -- the next attempt must target the 2nd station, not the 1st again', () => {
+    db.addPlayer('GA_E');
+    const { gameId } = gauntletGame(['GA_E']);
+    gt(gameId, 'GA_E', STATIONS[0], 0);
+    assert.throws(() => gt(gameId, 'GA_E', STATIONS[0], 0), (err) => err.status === 400, 'station 1 already settled');
+    assert.doesNotThrow(() => gt(gameId, 'GA_E', STATIONS[1], 1));
+  });
+
+  test('a first attempt scoring 2 misses is NOT settled -- the very next turn must repeat the SAME station', () => {
+    db.addPlayer('GA_F');
+    const { gameId } = gauntletGame(['GA_F']);
+    gt(gameId, 'GA_F', STATIONS[0], 2);
+    assert.throws(() => gt(gameId, 'GA_F', STATIONS[1], 0), (err) => err.status === 400, 'station 1 is awaiting its one repeat, not settled');
+    assert.doesNotThrow(() => gt(gameId, 'GA_F', STATIONS[0], 1), 'the repeat, at the same station');
+  });
+
+  test('after the repeat resolves, a 3rd attempt at that station is rejected -- only ever one repeat', () => {
+    db.addPlayer('GA_G');
+    const { gameId } = gauntletGame(['GA_G']);
+    gt(gameId, 'GA_G', STATIONS[0], 2);
+    gt(gameId, 'GA_G', STATIONS[0], 3); // the one allowed repeat, came back worse -- still final
+    assert.throws(() => gt(gameId, 'GA_G', STATIONS[0], 0), (err) => err.status === 400, 'station 1 already settled by its repeat');
+    assert.doesNotThrow(() => gt(gameId, 'GA_G', STATIONS[1], 0), 'now correctly expects station 2');
+  });
+
+  test('a 3-miss (Deep Scar) first attempt settles immediately, no repeat offered', () => {
+    db.addPlayer('GA_H');
+    const { gameId } = gauntletGame(['GA_H']);
+    gt(gameId, 'GA_H', STATIONS[0], 3);
+    assert.throws(() => gt(gameId, 'GA_H', STATIONS[0], 0), (err) => err.status === 400, 'no repeat for a Deep Scar');
+    assert.doesNotThrow(() => gt(gameId, 'GA_H', STATIONS[1], 0));
+  });
+
+  test('once all 20 stations are settled, no further turn is accepted', () => {
+    db.addPlayer('GA_I');
+    const { gameId } = gauntletGame(['GA_I']);
+    STATIONS.forEach(station => gt(gameId, 'GA_I', station, 0));
+    assert.throws(() => gt(gameId, 'GA_I', STATIONS[0], 0), (err) => err.status === 400, 'the run is already complete');
+  });
+});
+
 describe('SEC-22 — the real HTTP trust boundary enforces this even though addTurn() itself defaults off', () => {
   const SERVER_PATH = path.join(__dirname, '..', 'server.js');
 

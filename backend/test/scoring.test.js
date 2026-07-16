@@ -19,7 +19,8 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
   CHECKOUT_TRAINER_TRICK_CHANCE, listUnsolvableTargets, gradeCheckoutDeclaration,
   rebuildX01State, rebuildCricketState, rebuildBaseballState,
-  rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State, rebuildCheckoutLadderState } = scoring;
+  rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State, rebuildCheckoutLadderState,
+  GAUNTLET_STATION_ORDER, evaluateGauntletStation, gauntletTotalScars, gauntletResultTier, rebuildGauntletState } = scoring;
 
 // Shorthand for building a rebuild-function turn record: v(playerIndex, setNo,
 // legNo, [[sector,mult], ...]) — mirrors the {playerIndex,setNo,legNo,darts}
@@ -1444,6 +1445,119 @@ describe('rebuildCheckoutLadderState (docs/archive/practice-ladders-roadmap.md P
     assert.equal(r.remaining, 121, 'a bust leaves the player exactly where they started this visit');
     assert.equal(r.visitsThisLeg, 1, 'the bust visit still counts toward the 3-visit cap');
     assert.equal(r.legNo, 1, 'attempt not yet resolved — 2 visits remain');
+  });
+});
+
+describe('evaluateGauntletStation (docs/archive/gauntlet-roadmap.md, strictly positional per-dart grading)', () => {
+  test('a clean pass: dart 1 the single, dart 2 the treble, dart 3 the double, all on the station number', () => {
+    const r = evaluateGauntletStation(20, [d(20,1), d(20,3), d(20,2)]);
+    assert.deepEqual(r.hits, [true, true, true]);
+    assert.equal(r.misses, 0);
+  });
+
+  test('no re-matching across positions: a double thrown first does not satisfy dart 1\'s single task', () => {
+    const r = evaluateGauntletStation(20, [d(20,2), d(20,3), d(20,2)]);
+    assert.deepEqual(r.hits, [false, true, true], 'dart 1 landed the double, not the single it was asked for');
+    assert.equal(r.misses, 1);
+  });
+
+  test('a dart on the wrong number never counts, regardless of ring', () => {
+    const r = evaluateGauntletStation(20, [d(5,1), d(20,3), d(20,2)]);
+    assert.deepEqual(r.hits, [false, true, true]);
+    assert.equal(r.misses, 1);
+  });
+
+  test('all three tasks missed -> misses=3 (a Deep Scar upstream)', () => {
+    const r = evaluateGauntletStation(20, [d(1,1), d(2,1), d(3,1)]);
+    assert.equal(r.misses, 3);
+  });
+
+  test('a missing dart (attempt cut short) counts as a miss for that slot', () => {
+    const r = evaluateGauntletStation(20, [d(20,1), d(20,3)]); // no 3rd dart
+    assert.deepEqual(r.hits, [true, true, false]);
+    assert.equal(r.misses, 1);
+  });
+});
+
+describe('gauntletTotalScars / gauntletResultTier (docs/archive/gauntlet-roadmap.md Scar tally + result tiers)', () => {
+  test('sums final per-station miss counts, doubling any Deep Scar (a final result of 3)', () => {
+    assert.equal(gauntletTotalScars([0,0,0]), 0);
+    assert.equal(gauntletTotalScars([1,2,0]), 3);
+    assert.equal(gauntletTotalScars([3]), 6, 'a single Deep Scar contributes 6, not 3');
+    assert.equal(gauntletTotalScars([3,3,1]), 13, '6 + 6 + 1');
+  });
+
+  test('result tier boundaries: 0-5 Unmarked, 6-12 Scarred but Standing, 13-20 Bloodied, 21-30 Broken Down, 31+ The Gauntlet Wins', () => {
+    assert.equal(gauntletResultTier(0), 'Unmarked');
+    assert.equal(gauntletResultTier(5), 'Unmarked');
+    assert.equal(gauntletResultTier(6), 'Scarred but Standing');
+    assert.equal(gauntletResultTier(12), 'Scarred but Standing');
+    assert.equal(gauntletResultTier(13), 'Bloodied');
+    assert.equal(gauntletResultTier(20), 'Bloodied');
+    assert.equal(gauntletResultTier(21), 'Broken Down');
+    assert.equal(gauntletResultTier(30), 'Broken Down');
+    assert.equal(gauntletResultTier(31), 'The Gauntlet Wins');
+    assert.equal(gauntletResultTier(120), 'The Gauntlet Wins');
+  });
+});
+
+describe('rebuildGauntletState (docs/archive/saved-games-roadmap.md, pure replay rebuild)', () => {
+  const gt = (station, scored) => ({ targetScore: station, scored });
+
+  test('an empty turn history starts at the first station in GAUNTLET_STATION_ORDER, nothing settled', () => {
+    const r = rebuildGauntletState({ turns: [] });
+    assert.equal(r.currentStation, GAUNTLET_STATION_ORDER[0]);
+    assert.equal(r.settledCount, 0);
+    assert.equal(r.awaitingRepeat, false);
+    assert.equal(r.totalScars, 0);
+    assert.equal(r.done, false);
+  });
+
+  test('clean passes settle immediately and advance to the next station in order', () => {
+    const turns = [ gt(GAUNTLET_STATION_ORDER[0], 0), gt(GAUNTLET_STATION_ORDER[1], 1) ];
+    const r = rebuildGauntletState({ turns });
+    assert.equal(r.settledCount, 2);
+    assert.equal(r.currentStation, GAUNTLET_STATION_ORDER[2]);
+    assert.equal(r.awaitingRepeat, false);
+    assert.deepEqual(r.finalMisses, [0, 1]);
+    assert.equal(r.totalScars, 1);
+  });
+
+  test('a first attempt scoring 2 misses is NOT settled -- it awaits its one repeat, and stays the current station', () => {
+    const turns = [ gt(GAUNTLET_STATION_ORDER[0], 0), gt(GAUNTLET_STATION_ORDER[1], 2) ];
+    const r = rebuildGauntletState({ turns });
+    assert.equal(r.settledCount, 1, 'only the first station settled -- the second is awaiting repeat');
+    assert.equal(r.currentStation, GAUNTLET_STATION_ORDER[1]);
+    assert.equal(r.awaitingRepeat, true);
+  });
+
+  test('a repeat attempt (a 2nd turn for the same station) is authoritative regardless of its own result', () => {
+    const turns = [
+      gt(GAUNTLET_STATION_ORDER[0], 2), gt(GAUNTLET_STATION_ORDER[0], 3), // repeated, came back WORSE (3) -- still final
+      gt(GAUNTLET_STATION_ORDER[1], 2), gt(GAUNTLET_STATION_ORDER[1], 0), // repeated, came back clean
+    ];
+    const r = rebuildGauntletState({ turns });
+    assert.equal(r.settledCount, 2);
+    assert.deepEqual(r.finalMisses, [3, 0]);
+    assert.equal(r.awaitingRepeat, false);
+    assert.equal(r.currentStation, GAUNTLET_STATION_ORDER[2]);
+  });
+
+  test('a 3-miss (Deep Scar) first attempt settles immediately, no repeat offered', () => {
+    const turns = [ gt(GAUNTLET_STATION_ORDER[0], 3) ];
+    const r = rebuildGauntletState({ turns });
+    assert.equal(r.settledCount, 1);
+    assert.deepEqual(r.finalMisses, [3]);
+    assert.equal(r.currentStation, GAUNTLET_STATION_ORDER[1]);
+  });
+
+  test('all 20 stations settled -> done=true, no current station to report as "next"', () => {
+    const turns = GAUNTLET_STATION_ORDER.map(station => gt(station, 0));
+    const r = rebuildGauntletState({ turns });
+    assert.equal(r.settledCount, 20);
+    assert.equal(r.done, true);
+    assert.equal(r.totalScars, 0);
+    assert.equal(r.currentStation, undefined);
   });
 });
 

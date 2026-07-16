@@ -25,7 +25,8 @@ const backupLib = require('./backup-lib.js');
 const { checkoutHint, dartLabel,
   rebuildX01State, rebuildCricketState, rebuildBaseballState,
   rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State,
-  rebuildCheckoutLadderState } = require('../frontend/scoring.js');
+  rebuildCheckoutLadderState,
+  GAUNTLET_STATION_ORDER, gauntletTotalScars, gauntletResultTier, rebuildGauntletState } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -1141,6 +1142,27 @@ function addTurn(gameId, t, opts = {}) {
     if (Number(t.targetScore) !== expectedTarget) {
       throw httpError(400, "targetScore does not match this attempt's derived ladder position");
     }
+  } else if (gameTypeRow && gameTypeRow.game_type === 'gauntlet') {
+    // docs/archive/gauntlet-roadmap.md: turns.scored is this attempt's own miss count
+    // (0-3, "Scored-range guard"); turns.target_score is which station (1-20)
+    // this attempt was for. The "sequence guard" (only the next station in
+    // GAUNTLET_STATION_ORDER) and the "repeat-count guard" (at most 2 rows
+    // per station, and only if the first came back as exactly 2) collapse
+    // into ONE check here: rebuildGauntletState()'s own derivation of "which
+    // station is next" already accounts for a pending one-time repeat, so
+    // re-deriving it from every prior turn and comparing against it catches
+    // both a skipped-ahead station and a 3rd attempt at an already-settled
+    // one in a single comparison.
+    if (t.checkout) throw httpError(400, 'a Gauntlet turn cannot be a checkout');
+    if (t.bust) throw httpError(400, 'a Gauntlet turn cannot be a bust');
+    if (scored < 0 || scored > 3) throw httpError(400, "a Gauntlet turn's scored (miss count) must be between 0 and 3");
+    const priorTurns = db.prepare('SELECT target_score AS targetScore, scored FROM turns WHERE game_id=? AND player_id=? ORDER BY id')
+      .all(Number(gameId), p.id);
+    const state = rebuildGauntletState({ turns: priorTurns });
+    if (state.done) throw httpError(400, 'this Gauntlet run has already completed all 20 stations');
+    if (Number(t.targetScore) !== state.currentStation) {
+      throw httpError(400, "targetScore does not match this run's next station (in fixed clock-adjacency order, or its one pending repeat)");
+    }
   }
   // Checkout Trainer (docs/archive/checkout-trainer-roadmap.md): the target score offered
   // for this round. Server-computed context, not a scored value, so it's only
@@ -1213,7 +1235,7 @@ function completeGame(gameId, winnerName) {
    bobs_27 (docs/archive/practice-ladders-roadmap.md Part A) IS savable — its
    running total replays deterministically from `turns` the same way every
    other entry here does (rebuildBobs27State(), frontend/scoring.js). */
-const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder'];
+const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
 
 function _savedGameRow(gameId) {
   return db.prepare('SELECT * FROM saved_games WHERE game_id = ?').get(Number(gameId));
@@ -1290,10 +1312,17 @@ function _resumeStateTurns(gameId) {
   const idToIndex = new Map(participants.map((p, i) => [p.playerId, i]));
   const dartStmt = db.prepare('SELECT sector, multiplier AS mult FROM darts WHERE turn_id = ? ORDER BY dart_no');
   const turns = db.prepare(`
-    SELECT t.id, t.player_id AS playerId, t.set_no AS setNo, t.leg_no AS legNo
+    SELECT t.id, t.player_id AS playerId, t.set_no AS setNo, t.leg_no AS legNo,
+      t.target_score AS targetScore, t.scored AS scored
     FROM turns t WHERE t.game_id = ? ORDER BY t.id
   `).all(Number(gameId)).map(t => ({
     playerIndex: idToIndex.get(t.playerId), setNo: t.setNo, legNo: t.legNo,
+    // targetScore/scored: ignored by every rebuild*State() that derives its own
+    // state purely from darts (the "replay, not snapshot" contract) — carried
+    // through only for rebuildGauntletState(), whose meaningful state legitimately
+    // lives in these two stored scalars (docs/archive/gauntlet-roadmap.md's own "storing
+    // the station explicitly sidesteps needing that derivation at all").
+    targetScore: t.targetScore, scored: t.scored,
     darts: dartStmt.all(t.id).map(d => ({ sector: d.sector, mult: d.mult })),
   }));
   return { participants, turns };
@@ -1336,6 +1365,10 @@ function _savedGamePosition(game, participants, turns) {
   if (game.game_type === 'checkout_ladder') {
     const r = rebuildCheckoutLadderState({ turns });
     return { target: r.target, legNo: r.legNo, remaining: r.remaining };
+  }
+  if (game.game_type === 'gauntlet') {
+    const r = rebuildGauntletState({ turns });
+    return { station: r.currentStation, settled: r.settledCount, totalScars: r.totalScars, awaitingRepeat: r.awaitingRepeat };
   }
   return null;
 }
@@ -3403,6 +3436,143 @@ function getCheckoutLadderLeaderboard() {
   return rows.sort((a, b) => b.bestTarget - a.bestTarget);
 }
 
+/* ---------- The Gauntlet (docs/archive/gauntlet-roadmap.md) ----------
+   Nothing pre-aggregated: every (game_id, target_score) group of turns is
+   one station's attempt history (1 row, or 2 if it was repeated) — replayed
+   via rebuildGauntletState() (frontend/scoring.js), the SAME pure function
+   the write-time guard and saved-game resume both use, so "which stations
+   are settled, is the run done, what's the total Scars" is derived exactly
+   once and never drifts between call sites. */
+function _gauntletRuns(playerId, scope) {
+  const rows = db.prepare(`
+    SELECT t.game_id AS gameId, t.target_score AS targetScore, t.scored AS scored, t.id AS id
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE t.player_id=? ${scope}
+    ORDER BY t.game_id, t.id
+  `).all(playerId);
+  const byGame = new Map();
+  rows.forEach(r => { if (!byGame.has(r.gameId)) byGame.set(r.gameId, []); byGame.get(r.gameId).push(r); });
+  return Array.from(byGame.entries()).map(([gameId, turns]) => {
+    const state = rebuildGauntletState({ turns });
+    const byStation = new Map();
+    turns.forEach(t => byStation.set(t.targetScore, (byStation.get(t.targetScore) || 0) + 1));
+    const retries = Array.from(byStation.values()).filter(c => c > 1).length;
+    return { gameId, ...state, retries };
+  });
+}
+
+function getGauntletStatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'gauntlet' });
+  const runs = _gauntletRuns(p.id, scope);
+  const completedRuns = runs.filter(r => r.done);
+  // Clean-station/Deep-Scar/retry rates are scoped to every SETTLED station
+  // across every run (completed or still in progress) — a settled station is
+  // a real, final result regardless of whether the rest of that run was ever
+  // finished. avgTotalScars is completed-runs-only: a partial run's running
+  // total isn't comparable to a real finished run's.
+  const allSettled = runs.flatMap(r => r.finalMisses);
+  const totalSettled = allSettled.length;
+  const totalRetries = runs.reduce((s, r) => s + r.retries, 0);
+  return {
+    runsCompleted: completedRuns.length,
+    avgTotalScars: completedRuns.length ? completedRuns.reduce((s, r) => s + r.totalScars, 0) / completedRuns.length : null,
+    cleanStationRate: totalSettled ? (allSettled.filter(m => m === 0).length / totalSettled * 100) : null,
+    deepScarRate: totalSettled ? (allSettled.filter(m => m === 3).length / totalSettled * 100) : null,
+    retryRate: totalSettled ? (totalRetries / totalSettled * 100) : null,
+    // Not one of this bubble set's 5 user-facing fields (docs/archive/gauntlet-roadmap.md
+    // "Stat bubbles" only names the rate) — a raw lifetime count, purely so the
+    // frontend's lifetime-clean-stations achievement ladder (newMatchPlayerGauntlet())
+    // has a base to add this session's own count onto, the same "fetch once at
+    // game start" pattern Chuckin's own lifetime ladders use.
+    cleanStations: allSettled.filter(m => m === 0).length,
+  };
+}
+
+// Personal Best: LOWEST total Scars in a completed run — ascending-is-better,
+// same MIN()-not-MAX() shape X01's fewestDartsCheckout/Baseball's
+// fewestDartsToWin use, just applied to a brand-new metric. Only completed
+// runs are eligible (an abandoned run's partial total isn't a real result).
+function getGauntletPersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'gauntlet' });
+  const completedRuns = _gauntletRuns(p.id, scope).filter(r => r.done);
+  if (!completedRuns.length) return { lowestTotalScars: null };
+  return { lowestTotalScars: Math.min(...completedRuns.map(r => r.totalScars)) };
+}
+
+// Home page leaderboard: one row per player, their own lowest-ever total
+// Scars across a completed run — ascending sort (lower is better), the
+// opposite polarity from every other "single best run" board in this app.
+function getGauntletLeaderboard() {
+  const rows = db.prepare(`
+    SELECT t.player_id AS playerId, t.game_id AS gameId, t.target_score AS targetScore, t.scored AS scored, t.id AS id, t.created_at AS createdAt
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE g.game_type='gauntlet'
+    ORDER BY t.player_id, t.game_id, t.id
+  `).all();
+  const byPlayer = new Map();
+  rows.forEach(r => {
+    if (!byPlayer.has(r.playerId)) byPlayer.set(r.playerId, new Map());
+    const games = byPlayer.get(r.playerId);
+    if (!games.has(r.gameId)) games.set(r.gameId, []);
+    games.get(r.gameId).push(r);
+  });
+  const result = [];
+  byPlayer.forEach((games, playerId) => {
+    let best = null, achievedAt = null;
+    games.forEach(turns => {
+      const state = rebuildGauntletState({ turns });
+      if (state.done && (best == null || state.totalScars < best)) {
+        best = state.totalScars;
+        achievedAt = turns[turns.length - 1].createdAt;
+      }
+    });
+    if (best != null) {
+      const player = db.prepare('SELECT name FROM players WHERE id=?').get(playerId);
+      result.push({ name: player.name, bestTotalScars: best, achievedAt });
+    }
+  });
+  return result.sort((a, b) => a.bestTotalScars - b.bestTotalScars);
+}
+
+// The Scar Map — the actual point of the game (docs/archive/gauntlet-roadmap.md "The
+// Scar Map — the actual point of the game"): for every COMPLETED Gauntlet run,
+// take each station's final (post-any-repeat) miss count and average it per
+// station number across every run this player has ever finished — the direct
+// structural sibling of getDartHeatmap(), just shaded by average Scar
+// severity instead of hit frequency.
+function getGauntletScarMap(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const rows = db.prepare(`
+    SELECT t.game_id AS gameId, t.target_score AS targetScore, t.scored AS scored, t.id AS id
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE t.player_id=? AND g.game_type='gauntlet'
+    ORDER BY t.game_id, t.id
+  `).all(p.id);
+  const byGame = new Map();
+  rows.forEach(r => { if (!byGame.has(r.gameId)) byGame.set(r.gameId, []); byGame.get(r.gameId).push(r); });
+  const perStation = new Map();
+  byGame.forEach(turns => {
+    const state = rebuildGauntletState({ turns });
+    if (!state.done) return;
+    GAUNTLET_STATION_ORDER.forEach((station, i) => {
+      if (!perStation.has(station)) perStation.set(station, { sum: 0, count: 0 });
+      const entry = perStation.get(station);
+      entry.sum += state.finalMisses[i];
+      entry.count += 1;
+    });
+  });
+  const stations = GAUNTLET_STATION_ORDER.map(station => {
+    const entry = perStation.get(station);
+    return { station, avgScars: entry ? entry.sum / entry.count : null, runs: entry ? entry.count : 0 };
+  });
+  return { stations };
+}
+
 // Per-sector/multiplier/zone hit-count grid feeding the Player Profile's dartboard
 // heatmap. Originally Chuckin-only ("heatmap-heavy... patterns and trends" reporting
 // that mode was specifically requested to have); generalized (docs/dartboard-zone-
@@ -3970,7 +4140,7 @@ function _mf(mode) {
 // 'x01'/'cricket', server.js only uses a query param to pick which function to
 // call), and is whitelisted here regardless as a defense-in-depth measure
 // against string interpolation.
-const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder'];
+const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
 function _scope({ mode, gameType } = {}) {
   let sql = _mf(mode);
   if (gameType) {
@@ -6758,6 +6928,7 @@ module.exports = {
   getBobs27StatBubbles, getBobs27PersonalBests, getBobs27Leaderboard,
   getEloRatings, getEloLeaderboard, getPlayerElo,
   getCheckoutLadderStatBubbles, getCheckoutLadderPersonalBests, getCheckoutLadderLeaderboard,
+  getGauntletStatBubbles, getGauntletPersonalBests, getGauntletLeaderboard, getGauntletScarMap,
   getAroundTheClockStatBubbles, getAroundTheClockPersonalBests,
   getAroundTheClockFastestLeaderboard, getAroundTheClockCompletionsLeaderboard,
   getAroundTheWorldDrillStatBubbles, getAroundTheWorldPersonalBests, getAroundTheWorldLeaderboard,

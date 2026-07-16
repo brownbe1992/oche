@@ -2080,10 +2080,11 @@ function renderHome(){
     Backend.get('/api/stats/checkout-blitz-leaderboard'),
     Backend.get('/api/stats/bobs27-leaderboard'),
     Backend.get('/api/stats/checkout-ladder-leaderboard'),
+    Backend.get('/api/stats/gauntlet-leaderboard'),
     Backend.get('/api/stats/around-the-clock-fastest'),
     Backend.get('/api/stats/around-the-clock-completions'),
     Backend.get('/api/stats/around-the-world-progress'),
-  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,dpa,dpb,ctbl,b27,cl,atcf,atcc,atwp])=>{
+  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,dpa,dpb,ctbl,b27,cl,ga,atcf,atcc,atwp])=>{
     homeData={s, extra,
       h2h:{finishes:f,eighties:e,bigFish:b,nineDarters:n},
       practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn},
@@ -2101,6 +2102,7 @@ function renderHome(){
       checkoutTrainer:{ blitzLeaderboard:ctbl },
       bobs27:{ leaderboard:b27 },
       checkoutLadder:{ leaderboard:cl },
+      gauntlet:{ leaderboard:ga },
       aroundTheClock:{ fastest:atcf, completions:atcc },
       aroundTheWorld:{ progress:atwp }};
     renderHomeContent();
@@ -2115,6 +2117,7 @@ function renderHome(){
       checkoutTrainer:{ blitzLeaderboard:[] },
       bobs27:{ leaderboard:[] },
       checkoutLadder:{ leaderboard:[] },
+      gauntlet:{ leaderboard:[] },
       aroundTheClock:{ fastest:[], completions:[] },
       aroundTheWorld:{ progress:[] }};
     renderHomeContent();
@@ -2591,6 +2594,31 @@ function renderHomeTabBodyCheckoutLadder(){
   `;
 }
 
+// The Gauntlet's Home page leaderboard (docs/archive/gauntlet-roadmap.md) — the one
+// leaderboard in this app sorted ASCENDING (lowest total Scars first).
+function renderHomeTabBodyGauntlet(){
+  const el=document.getElementById('home-tab-body');
+  const data=homeData.gauntlet;
+  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
+
+  const board=data.leaderboard||[];
+  const leaderboard=board.length
+    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.bestTotalScars}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${fmtDate(r.achievedAt)}</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — complete a Gauntlet run to claim the top spot.</p>`;
+
+  el.innerHTML=`
+    <div class="pp-section">
+      <div class="pp-section-title">🥋 The Gauntlet — Lowest Total Scars</div>
+      ${leaderboard}
+    </div>
+  `;
+}
+
 // Guided Around the Clock's Home page leaderboards. Same "no H2H/Practice split,
 // always solo" reasoning as Doubles Practice above. Two boards: fastest
 // completion (fewest darts) and most completions (mirrors Doubles Practice's
@@ -2739,7 +2767,7 @@ function setMode(mode){
   document.getElementById('h2h-options').hidden = (mode !== 'h2h');
   const isSpecialMode = (mode === 'challenge' || mode === 'ghost' || mode === 'doubles_practice' || mode === 'chuckin'
     || mode === 'checkout_trainer' || mode === 'around_the_clock' || mode === 'around_the_world' || mode === 'bobs_27'
-    || mode === 'checkout_ladder');
+    || mode === 'checkout_ladder' || mode === 'gauntlet');
   // Daily Challenge and Ghost Opponent are both X01-only (docs/archive/ghost-opponent-roadmap.md
   // is explicitly X01-only for v1); Doubles Practice/Just Chuckin' It/Checkout
   // Trainer/both guided drills/Bob's 27 are each their own gameType, not a
@@ -2748,7 +2776,7 @@ function setMode(mode){
   // the drill's own type underneath, and startGame() (which reads
   // setup.gameType, not any control) would silently build that drill's game
   // type regardless of what Step 2 visibly shows.
-  const drillGameTypes = ['doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder'];
+  const drillGameTypes = ['doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
   if(!drillGameTypes.includes(mode) && drillGameTypes.includes(setup.gameType)) setup.gameType = 'x01';
   if((mode === 'challenge' || mode === 'ghost') && setup.gameType !== 'x01') setup.gameType = 'x01';
   if(drillGameTypes.includes(mode)) setup.gameType = mode;
@@ -2763,6 +2791,7 @@ function setMode(mode){
     : (mode === 'around_the_clock') ? 'Start the clock' : (mode === 'around_the_world') ? 'Start chipping away'
     : (mode === 'bobs_27') ? 'Start the run'
     : (mode === 'checkout_ladder') ? 'Start climbing'
+    : (mode === 'gauntlet') ? 'Run the Gauntlet'
     : 'Play Now';
   if(isSpecialMode){
     setup.slots = setup.slots.slice(0,1);
@@ -3794,6 +3823,9 @@ const NEW_GAME_MODE_OPTIONS = [
   { key:'checkout_ladder', label:'🧗 121 Checkout Ladder', contexts:['practice'],
     blurb:"The classic checkout ladder — the physical sibling of Checkout Trainer (that one asks what you'd throw; this makes you throw it). Start on 121, double out, up to 3 visits (9 darts) to check out. Check out and the target climbs one rung; fail all 3 visits and it drops one (never below 61). Play as long as you like — the story is how high you climb.",
     apply(){ setMode('checkout_ladder'); } },
+  { key:'gauntlet', label:'🥋 The Gauntlet', contexts:['practice'],
+    blurb:"A 20-station endurance warm-up, one per board number, in a fixed order that never repeats a nearby number twice in a row. Each station is 3 darts, strictly in order: the single, then the treble, then the double. Miss 2 and you get one repeat attempt at that station; miss all 3 and it's a Deep Scar. Total Scars across all 20 stations lands on a result — from Unmarked to The Gauntlet Wins. Runs about 15 minutes.",
+    apply(){ setMode('gauntlet'); } },
 ];
 function setupVisibleOptions(){
   const ctx = setupPlayerCount()>=2 ? 'h2h' : 'practice';
@@ -4265,7 +4297,7 @@ async function startGame(){
   if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   // Custom cricket is locked to exactly 7 targets (same count as classic) — never
   // more, never fewer (docs/game-modes-roadmap.md "Decisions made").
-  const gameType = ['cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder'].includes(setup.gameType)
+  const gameType = ['cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'].includes(setup.gameType)
     ? setup.gameType : 'x01'; // Daily Challenge always forces x01 via setMode()
   let cricketNumbers = null;
   if(gameType === 'cricket'){
@@ -4299,7 +4331,7 @@ async function startGame(){
   // (whatever "Starting score" happened to be hidden at, per setMode('ghost')) —
   // otherwise the two "players" wouldn't actually be racing the same leg.
   const startScore = challengeStart != null ? challengeStart : ghostScript ? Number(ghostScript.category) : setup.start;
-  const drillModes = ['challenge', 'ghost', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder'];
+  const drillModes = ['challenge', 'ghost', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
   // docs/bug-roadmap.md BUG-22: a practice Baseball "leg" is a complete, standalone
   // 9-inning game (evaluateVisitBaseball() decides its outcome unconditionally,
   // unlike X01/Cricket's open-ended countdown legs) — so, like every drill mode
@@ -4337,6 +4369,7 @@ async function startGame(){
     : gameType === 'around_the_world' ? {}
     : gameType === 'bobs_27' ? {}
     : gameType === 'checkout_ladder' ? {}
+    : gameType === 'gauntlet' ? {}
     : { startingScore: startScore };
   const category = gameType === 'cricket'
     ? (setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
@@ -4356,6 +4389,8 @@ async function startGame(){
     ? 'Guided Around the World'
     : gameType === 'checkout_ladder'
     ? '121 Checkout Ladder'
+    : gameType === 'gauntlet'
+    ? 'The Gauntlet'
     : String(startScore);
   game = {
     gameType,
@@ -4395,6 +4430,11 @@ async function startGame(){
     bobs27Round: 1,    // Bob's 27 only (docs/archive/practice-ladders-roadmap.md Part A) — which double (1-20) is live
     checkoutLadderTarget: 121, // 121 Checkout Ladder only (docs/archive/practice-ladders-roadmap.md Part B) — current attempt's target
     checkoutLadderVisits: 0,  // visits used so far in the current attempt (0-2 while live)
+    gauntletStationIndex: 0,  // The Gauntlet only (docs/archive/gauntlet-roadmap.md) — index into GAUNTLET_STATION_ORDER of the live station
+    gauntletAwaitingRepeat: false, // true iff the current attempt IS the one allowed repeat
+    gauntletFinalMisses: [],  // settled per-station final miss counts so far, in station order
+    gauntletCleanStreak: 0,   // current run of consecutive clean (0-miss) stations
+    gauntletBestCleanStreak: 0, // this run's own peak clean streak (checked against GAUNTLET_STREAK_MILESTONE_LADDERS at run end)
     darts: [],
     busted: false, won: false,
     done: false,
@@ -5365,6 +5405,10 @@ function renderPlayerPage(){
       <div id="player-atw-progress"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>
     <details class="pp-section">
+      <summary class="pp-section-title">🥋 Gauntlet Scar Map</summary>
+      <div id="player-gauntlet-scarmap"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </details>
+    <details class="pp-section">
       <summary class="pp-section-title">Top Checkouts</summary>
       <div id="player-top-finishes"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>
@@ -5524,6 +5568,7 @@ function renderPlayerPage(){
   loadTournamentStats();
   loadPlayerLeagueStats();
   loadAroundTheWorldProgress();
+  loadGauntletScarMap();
   loadOnThisDay();
   loadChallengeHistory();
   loadDartHeatmap();
@@ -5652,7 +5697,7 @@ function renderPlayerBadges(data){
   // Practice's 5 (docs/archive/culture-badges-roadmap.md Part B), and the guided
   // drills' 2 each stay visually distinct sub-sections rather than one mixed
   // flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder);
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder && !BADGE_INFO[id].gauntlet);
   const eloIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].elo);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
   const baseballIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].baseball);
@@ -5664,6 +5709,7 @@ function renderPlayerBadges(data){
   const drillIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].drill);
   const bobs27Ids = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].bobs27);
   const checkoutLadderIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].checkoutLadder);
+  const gauntletIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].gauntlet);
   container.innerHTML = `
     <div class="pp-section-title" style="margin-bottom:6px">X01</div>
     <div class="summary-grid">${x01Ids.map(badgeBlock).join('')}</div>
@@ -5677,6 +5723,8 @@ function renderPlayerBadges(data){
     <div class="summary-grid">${bobs27Ids.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">121 Checkout Ladder</div>
     <div class="summary-grid">${checkoutLadderIds.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">The Gauntlet</div>
+    <div class="summary-grid">${gauntletIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Household Rating</div>
     <div class="summary-grid">${eloIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Tournaments</div>
@@ -5705,6 +5753,54 @@ function renderAroundTheWorldProgress(data){
   if(!container) return;
   const hitSet = new Set((data && data.hit || []).map(h=>`${h.sector}:${h.mult}`));
   container.innerHTML = buildOutcomeGridHtml(hitSet, { cells: 'all' });
+}
+// The Gauntlet's Scar Map (docs/archive/gauntlet-roadmap.md "The Scar Map — the actual
+// point of the game") — the direct structural sibling of the dartboard heatmap
+// above, just shaded by average Scar severity (across every COMPLETED run)
+// instead of hit frequency. GAUNTLET_STATION_ORDER is itself the standard
+// clockwise dartboard walk, so rendering stations in that array order already
+// reads as "around the board," with no separate layout math needed. A plain
+// text table sits alongside the colored grid (docs/archive/gauntlet-roadmap.md
+// Accessibility: "needs a text-table fallback/equivalent alongside the colored
+// board graphic").
+function loadGauntletScarMap(){
+  const container=document.getElementById('player-gauntlet-scarmap');
+  if(!container) return;
+  Backend.get(`/api/players/gauntlet-scar-map?name=${encodeURIComponent(currentPlayer)}`)
+    .then(data=>renderGauntletScarMap(data))
+    .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load the Scar Map.</p>`; });
+}
+function renderGauntletScarMap(data){
+  const container=document.getElementById('player-gauntlet-scarmap');
+  if(!container) return;
+  if(!data || !data.stations || !data.stations.some(s=>s.runs>0)){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No completed Gauntlet runs recorded yet.</p>`;
+    return;
+  }
+  const maxAvg = Math.max(1, ...data.stations.map(s=>s.avgScars||0));
+  const cells = data.stations.map(s=>{
+    const has = s.runs>0;
+    const sev = has ? (s.avgScars||0)/maxAvg : 0;
+    const bg = has ? `rgba(196,60,44,${(0.15+0.65*sev).toFixed(2)})` : 'var(--surface-2)';
+    const label = has ? s.avgScars.toFixed(1) : '—';
+    return `<div title="Station ${s.station}: avg ${has?s.avgScars.toFixed(2):'—'} Scars across ${s.runs} run${s.runs===1?'':'s'}"
+      role="img" aria-label="Station ${s.station}, average ${has?s.avgScars.toFixed(1)+' Scars':'no data'}"
+      style="width:52px;height:52px;border-radius:.6vmin;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:700;background:${bg};color:${has?'#fff':'var(--muted)'}">
+      <span>${s.station}</span><span style="font-size:9px;font-weight:500">${label}</span>
+    </div>`;
+  }).join('');
+  const rows = data.stations.map(s=>
+    `<tr><td>${s.station}</td><td>${s.runs>0?s.avgScars.toFixed(2):'—'}</td><td>${s.runs}</td></tr>`
+  ).join('');
+  container.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:6px;max-width:440px">${cells}</div>
+    <details style="margin-top:10px">
+      <summary class="pp-meta" style="cursor:pointer">Text table (screen-reader friendly)</summary>
+      <table style="width:100%;margin-top:6px;font-size:12px;border-collapse:collapse">
+        <thead><tr><th style="text-align:left">Station</th><th style="text-align:left">Avg Scars</th><th style="text-align:left">Runs</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </details>`;
 }
 // Shared cell-grid builder — extracted from what used to be inline inside
 // renderAroundTheWorldProgress() so both that static Player Profile section and
@@ -6078,6 +6174,20 @@ function renderCheckoutLadderPersonalBests(data){
     ${data.fewestDartsOnHighestCheckout!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsOnHighestCheckout}</div><div class="stat-label">Fewest Darts on the Highest Checkout</div></div>`:''}
   </div>`;
 }
+// Ascending-is-better (docs/archive/gauntlet-roadmap.md): LOWEST total Scars, the
+// opposite polarity from every other "peak single run" Personal Best in this
+// app (Bob's 27's final score, Checkout Blitz's score, ...).
+function renderGauntletPersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || data.lowestTotalScars==null){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No completed runs recorded yet.</p>`;
+    return;
+  }
+  container.innerHTML=`<div class="summary-grid">
+    <div class="stat-block"><div class="stat-val">${data.lowestTotalScars}</div><div class="stat-label">Lowest Total Scars</div></div>
+  </div>`;
+}
 // No winStreak/recentForm/lifetime fields (see getDoublesPracticePersonalBests()'s
 // own comment) — a round never "wins", so those X01/Cricket concepts don't map.
 function renderDoublesPracticePersonalBests(data){
@@ -6202,6 +6312,7 @@ function renderGame(){
   if(game.gameType === 'around_the_world') return renderGameAroundTheWorld();
   if(game.gameType === 'bobs_27') return renderGameBobs27();
   if(game.gameType === 'checkout_ladder') return renderGameCheckoutLadder();
+  if(game.gameType === 'gauntlet') return renderGameGauntlet();
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
   game.players.forEach((p,i)=>{
@@ -6748,6 +6859,78 @@ BADGE_INFO['checkoutladderpeakbagged'] = { icon:'🧗', label:'Peak Bagged',
   desc:'Check out 170 on the 121 Checkout Ladder.', checkoutLadder:true };
 ACH_LABELS['checkoutladderpeakbagged'] = 'Peak Bagged 🧗';
 ACH_DURATION['checkoutladderpeakbagged'] = 4000;
+
+/* ---------- The Gauntlet (docs/archive/gauntlet-roadmap.md) ---------- Three
+   data-driven ladders off the same checkChuckinMilestoneTier() engine: two
+   lifetime ladders (runs completed, clean stations — base+session, the
+   Chuckin darts/trebles pattern) and one PER-RUN ladder (longest streak of
+   consecutive clean stations within that one run — checked once at run
+   completion against the run's own peak value, the Bob's 27 final-score
+   pattern, not a lifetime accumulator). Exact thresholds are a first pass
+   for playtesting, same "not final" caveat the roadmap doc's own numbers
+   carry. */
+const GAUNTLET_RUNS_MILESTONE_LADDERS = [
+  { metric:'runs', idPrefix:'gauntlet_runs_', statNoun:'lifetime Gauntlet runs completed',
+    descFor: t => `Complete ${t.toLocaleString()} lifetime Gauntlet runs.`,
+    tiers: [
+      { threshold:5,   label:'Warmed Up',        icon:'🔥' },
+      { threshold:25,  label:'Battle-Tested',    icon:'🛡️' },
+      { threshold:100, label:'Hardened',         icon:'⚔️' },
+      { threshold:250, label:'Gauntlet Veteran', icon:'🎖️' },
+    ] },
+];
+const GAUNTLET_CLEAN_STATIONS_MILESTONE_LADDERS = [
+  { metric:'cleanStations', idPrefix:'gauntlet_clean_', statNoun:'lifetime clean stations',
+    descFor: t => `Finish ${t.toLocaleString()} lifetime Gauntlet stations with zero misses.`,
+    tiers: [
+      { threshold:50,   label:'Sharp Eye',          icon:'🎯' },
+      { threshold:250,  label:'Precision Strikes',  icon:'🔬' },
+      { threshold:1000, label:'Flawless Instinct',  icon:'✨' },
+      { threshold:2500, label:'Living Legend',      icon:'👑' },
+    ] },
+];
+// Checked once, at the moment a run ENDS (onGauntletComplete()), against that
+// run's own peak consecutive-clean-station streak — "have you EVER strung
+// together at least this many clean stations in one run," not a cumulative
+// lifetime count. Same "diff which tiers a freshly-computed value crosses"
+// mechanism as every other ladder; just a different kind of value, exactly
+// like Bob's 27's own final-score ladder.
+const GAUNTLET_STREAK_MILESTONE_LADDERS = [
+  { metric:'streak', idPrefix:'gauntlet_streak_', statNoun:'consecutive clean stations in one run',
+    descFor: t => `String together ${t.toLocaleString()} consecutive clean stations in a single Gauntlet run.`,
+    tiers: [
+      { threshold:5,  label:'In The Zone',  icon:'🎯' },
+      { threshold:10, label:'Unbroken',     icon:'🔗' },
+      { threshold:15, label:'Iron Focus',   icon:'🧠' },
+    ] },
+];
+[GAUNTLET_RUNS_MILESTONE_LADDERS, GAUNTLET_CLEAN_STATIONS_MILESTONE_LADDERS, GAUNTLET_STREAK_MILESTONE_LADDERS].forEach(ladders=>{
+  ladders.forEach(ladder=>{
+    ladder.tiers.forEach((tier, i)=>{
+      const id = ladder.idPrefix + tier.threshold;
+      BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), gauntlet:true };
+      ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
+      ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
+    });
+  });
+});
+// One-off badges (docs/archive/gauntlet-roadmap.md "Achievements"). 💎 Flawless
+// Gauntlet is deliberately not mutually exclusive with 🥋 Unmarked (a
+// zero-Scar run is also, trivially, a 0-5-tier run) — both can and should
+// fire together on a perfect run, the same "a single moment can earn more
+// than one badge" precedent every other multi-badge moment in this app follows.
+BADGE_INFO['gauntletflawless'] = { icon:'💎', label:'Flawless Gauntlet',
+  desc:'Complete a full 20-station Gauntlet run with zero Scars anywhere.', gauntlet:true };
+ACH_LABELS['gauntletflawless'] = 'Flawless Gauntlet! 💎';
+ACH_DURATION['gauntletflawless'] = 6000;
+BADGE_INFO['gauntletunmarked'] = { icon:'🥋', label:'Unmarked',
+  desc:'Finish a Gauntlet run in the Unmarked tier (0-5 total Scars).', gauntlet:true };
+ACH_LABELS['gauntletunmarked'] = 'Unmarked 🥋';
+ACH_DURATION['gauntletunmarked'] = 3000;
+BADGE_INFO['gauntletsecondwind'] = { icon:'🩹', label:'Second Wind',
+  desc:'Pass a repeat attempt clean (0 misses) after failing the original station with 2 misses.', gauntlet:true };
+ACH_LABELS['gauntletsecondwind'] = 'Second Wind 🩹';
+ACH_DURATION['gauntletsecondwind'] = 3000;
 // Checks one ladder against a current value, awarding (once:true) any tier not
 // already cached as earned. Shared by the session ladder and the darts/trebles
 // (lifetime) ladders — see checkChuckinMilestones() below. The actual >=
@@ -7016,7 +7199,7 @@ function showAchievement(type, player, countText){
   // Triple Bull (three double-bulls in one visit, a 150 checkout) and Perfect Game
   // (81 runs, a perfect 9 in every Baseball inning) get the same showcase treatment
   // as a nine-darter — comparably rare, celebration-worthy feats.
-  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'triplebull' || type === 'baseballperfectgame' || type === 'cricketstonecold' || type === 'bobs27fullanderson' || type === 'topofthehouse';
+  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'triplebull' || type === 'baseballperfectgame' || type === 'cricketstonecold' || type === 'bobs27fullanderson' || type === 'topofthehouse' || type === 'gauntletflawless';
   achOverlayEl.classList.toggle('mega', mega);
   achOverlayEl.classList.add('show');
   const shareBtn = document.getElementById('ach-share-btn');
@@ -8156,6 +8339,13 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
     renderSlots(); renderPad(); pushLive();
     return;
   }
+  if(game.gameType === 'gauntlet'){
+    // renderGameGauntlet() itself rebuilds the "next task" label from
+    // game.darts.length, so a single call covers slots+pad+status together —
+    // no pushLive() (docs/archive/gauntlet-roadmap.md "No live-scoreboard sync needed").
+    renderGameGauntlet();
+    return;
+  }
 
   // live bust/win feedback before committing
   const ev = GAME_TYPES[game.gameType].evaluateVisit(game.players[game.current], game.darts, game);
@@ -8179,7 +8369,7 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
 // independently re-validates this on every write, never trusting this check
 // (docs/archive/saved-games-roadmap.md's own security section: "never trust the
 // client's eligibility check").
-const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder'];
+const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
 function isCurrentGameSavable(){
   return !!(game && !game.done && SAVABLE_GAME_TYPES.includes(game.gameType));
 }
@@ -8255,6 +8445,7 @@ async function resumeGame(gameId){
     gameType === 'cricket' ? config : startScore));
 
   let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, bobs27Round = 1, roundOver = false, checkoutLadderTarget = 121, checkoutLadderVisits = 0;
+  let gauntletStationIndex = 0, gauntletAwaitingRepeat = false, gauntletFinalMisses = [], gauntletCleanStreak = 0, gauntletBestCleanStreak = 0;
   let statusMsg = '';
   if(gameType === 'x01'){
     const r = rebuildX01State({ names, outModes, startScore, practice: !!state.practice, legsPerSet: state.legsPerSet, turns: state.turns });
@@ -8305,6 +8496,21 @@ async function resumeGame(gameId){
     legNo = r.legNo;
     checkoutLadderVisits = r.visitsThisLeg;
     statusMsg = `Resumed — target ${checkoutLadderTarget}, ${r.remaining} remaining, visit ${checkoutLadderVisits+1} of 3.`;
+  } else if(gameType === 'gauntlet'){
+    const r = rebuildGauntletState({ turns: state.turns });
+    gauntletStationIndex = r.settledCount;
+    gauntletAwaitingRepeat = r.awaitingRepeat;
+    gauntletFinalMisses = r.finalMisses;
+    // Streaks aren't part of rebuildGauntletState()'s own return (they're a
+    // frontend-only running counter, not needed by the write-time guard or
+    // the stats queries that also consume that function) — re-derived here
+    // as a pure function of the settled finalMisses array.
+    let _cur = 0, _best = 0;
+    r.finalMisses.forEach(m => { if(m===0){ _cur++; _best = Math.max(_best,_cur); } else _cur = 0; });
+    gauntletCleanStreak = _cur; gauntletBestCleanStreak = _best;
+    statusMsg = r.done
+      ? `Resumed — all 20 stations settled, total Scars: ${r.totalScars}.`
+      : `Resumed — station ${gauntletStationIndex+1} of 20 (target ${r.currentStation}), total Scars so far: ${r.totalScars}.`;
   } else {
     uiAlert(`${gameType} games can't be resumed.`);
     return;
@@ -8319,6 +8525,7 @@ async function resumeGame(gameId){
     blitzDeadline: null, blitzEnded: false,
     starter, current, setNo, legNo,
     baseballInning, bobs27Round, checkoutLadderTarget, checkoutLadderVisits,
+    gauntletStationIndex, gauntletAwaitingRepeat, gauntletFinalMisses, gauntletCleanStreak, gauntletBestCleanStreak,
     darts: [], busted:false, won:false, done:false,
     gameOneEighties:0, gameBigFish:0, gameBusts:0,
     currentLegTurns: [], legVisitLogs: [], sessionTurns: [],
@@ -8383,6 +8590,7 @@ function savedGamePositionLabel(sg){
   if(pos.sessionDarts != null) return `${pos.sessionDarts} dart${pos.sessionDarts===1?'':'s'} this session`;
   if(pos.round != null) return `D${pos.round} · running score ${pos.running}`;
   if(pos.target != null) return `Target ${pos.target} · attempt ${pos.legNo} · ${pos.remaining} remaining`;
+  if(pos.station != null) return `Station ${pos.settled+1} of 20 · total Scars ${pos.totalScars}${pos.awaitingRepeat ? ' · repeat pending' : ''}`;
   return '';
 }
 function savedGameDateLabel(iso){
@@ -8510,6 +8718,7 @@ function undoLastTurn(){
   if(game && game.gameType === 'around_the_world') return undoLastTurnAroundTheWorld();
   if(game && game.gameType === 'bobs_27') return undoLastTurnBobs27();
   if(game && game.gameType === 'checkout_ladder') return undoLastTurnCheckoutLadder();
+  if(game && game.gameType === 'gauntlet') return undoLastTurnGauntlet();
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
   const p = game.players[snap.pi];
@@ -8589,6 +8798,7 @@ function enterTurn(){
   if(game.gameType === 'baseball') return enterTurnBaseball();
   if(game.gameType === 'bobs_27') return enterTurnBobs27();
   if(game.gameType === 'checkout_ladder') return enterTurnCheckoutLadder();
+  if(game.gameType === 'gauntlet') return enterTurnGauntlet();
   if(game.gameType === 'checkout_trainer') return submitCheckoutAttempt();
   if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
   const p = game.players[game.current];
@@ -9885,6 +10095,7 @@ function finishUnit(kind, winner){
   const isCricket = game.gameType === 'cricket';
   const isBaseball = game.gameType === 'baseball';
   const isBobs27 = game.gameType === 'bobs_27';
+  const isGauntlet = game.gameType === 'gauntlet';
   // No matchwin moment card is built for Cricket yet (its own social/moment-card
   // pass is a later build-order step) — suppress the Share button rather than wire
   // it to a card that doesn't exist. Baseball's/Bob's 27's own matchwin cards ARE
@@ -9935,6 +10146,17 @@ function finishUnit(kind, winner){
         <div class="stat-block"><div class="stat-val">${survived ? 'Survived' : 'D'+Object.keys(p.roundResults).length}</div><div class="stat-label">${survived ? 'All 20 Doubles' : 'Died On'}</div></div>
       </div>`;
     })() : '';
+    // The Gauntlet's own tiny run-summary block (docs/archive/gauntlet-roadmap.md) —
+    // same reasoning as bobs27Summary above: h2hStatsHtml()/h2hStatsHtmlBaseball()
+    // read X01/Baseball-shaped player fields a gauntlet player doesn't have.
+    const gauntletSummary = isGauntlet ? (()=>{
+      const totalScars = gauntletTotalScars(game.gauntletFinalMisses);
+      const tier = gauntletResultTier(totalScars);
+      return `<div class="summary-grid" style="margin-top:14px">
+        <div class="stat-block"><div class="stat-val">${totalScars}</div><div class="stat-label">Total Scars</div></div>
+        <div class="stat-block"><div class="stat-val">${escapeHtml(tier)}</div><div class="stat-label">Result</div></div>
+      </div>`;
+    })() : '';
     oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
       <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">GAME OVER</div>
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${escapeHtml(winner)} takes the match. Stats saved.</p>
@@ -9942,7 +10164,7 @@ function finishUnit(kind, winner){
       <div class="btn-row" style="justify-content:center">
         ${nextBtn}
         ${matchShareBtn}
-      </div>${isCricket || isBobs27 ? '' : isBaseball ? h2hStatsHtmlBaseball(winner,'game') : h2hStatsHtml(winner,'game')}${bobs27Summary}</div>`;
+      </div>${isCricket || isBobs27 || isGauntlet ? '' : isBaseball ? h2hStatsHtmlBaseball(winner,'game') : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}</div>`;
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
@@ -10137,6 +10359,17 @@ const CHECKOUT_LADDER_STAT_DEFS = [
 ];
 const CHECKOUT_LADDER_BUBBLE_KEY_MAP = { checkoutladderattempts:'attempts', checkoutladdersuccessrate:'successRate',
   checkoutladdercurrentposition:'currentPosition', checkoutladderdartsthrown:'dartsThrown' };
+
+// The Gauntlet's own 5 stat bubbles (docs/archive/gauntlet-roadmap.md "Stat bubbles").
+const GAUNTLET_STAT_DEFS = [
+  { key:'gauntletrunscompleted', label:'Runs Completed', desc:'Number of full 20-station Gauntlet runs completed', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'gauntletavgtotalscars', label:'Avg Total Scars', desc:'Average total Scars per completed run', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
+  { key:'gauntletcleanstationrate', label:'Clean Station Rate', desc:'% of stations finished with 0 misses on their final attempt', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'gauntletdeepscarrate', label:'Deep Scar Rate', desc:'% of stations that finished with all 3 tasks missed', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'gauntletretryrate', label:'Retry Rate', desc:'% of stations that needed the one-time repeat', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+];
+const GAUNTLET_BUBBLE_KEY_MAP = { gauntletrunscompleted:'runsCompleted', gauntletavgtotalscars:'avgTotalScars',
+  gauntletcleanstationrate:'cleanStationRate', gauntletdeepscarrate:'deepScarRate', gauntletretryrate:'retryRate' };
 
 // Doubles Practice's own 3 stat bubbles (docs/game-modes-roadmap.md's requested
 // vocabulary: darts per round, doubles hit per round, doubles%) — every bubble
@@ -10399,6 +10632,22 @@ const GAME_TYPES = {
     statDefs: CHECKOUT_LADDER_STAT_DEFS,
     personalBestsRenderer: renderCheckoutLadderPersonalBests,
     homeTabRenderer: renderHomeTabBodyCheckoutLadder,
+    soloOnly: true
+  },
+  gauntlet: {
+    id: 'gauntlet',
+    label: 'The Gauntlet',
+    newMatchPlayer: newMatchPlayerGauntlet,
+    // Per-position grading (evaluateGauntletStation(stationNumber, darts)), not
+    // a batched-visit evaluateVisit — every call site is a dedicated
+    // gameType==='gauntlet' branch (enterTurn, renderGame, undoLastTurn), the
+    // same "hardcode a branch" precedent Doubles Practice/Cricket established.
+    evaluateVisit: () => { throw new Error('gauntlet has no per-visit evaluateVisit — see enterTurnGauntlet()'); },
+    resetForNextLeg: resetPlayerForNextLegGauntlet,
+    playerSnapshot: playerSnapshotGauntlet,
+    statDefs: GAUNTLET_STAT_DEFS,
+    personalBestsRenderer: renderGauntletPersonalBests,
+    homeTabRenderer: renderHomeTabBodyGauntlet,
     soloOnly: true
   }
 };
@@ -10673,6 +10922,221 @@ function renderGameCheckoutLadder(){
   if(sb) sb.appendChild(row);
   renderPad();
   pushLive();
+}
+
+/* ---------- The Gauntlet (docs/archive/gauntlet-roadmap.md) ----------
+   Solo endurance drill: 20 stations, one hardcoded clock-adjacency order
+   (GAUNTLET_STATION_ORDER, scoring.js), 3 positionally-graded darts per
+   station (evaluateGauntletStation() — dart 1 the single, dart 2 the
+   treble, dart 3 the double, no re-matching across positions). Unlike every
+   other drill in this app, a run has a DEFINITE end (all 20 stations
+   settled) — legsPerSet/setsPerGame are forced to 1 in startGame() (a run
+   IS the game, the same "a run IS the game" shape practice Baseball/Bob's
+   27 both established), so onGauntletComplete() always reaches the real
+   finishUnit('game', ...) ending, unlike Checkout Ladder/Doubles Practice's
+   perpetual "runs until End Game" shape. No live-scoreboard sync (docs/
+   gauntlet-roadmap.md "No live-scoreboard sync needed" — same reasoning
+   Checkout Trainer's own reached): no pushLive() call anywhere in this
+   block, and no renderers.gauntlet exists in display.html. */
+function newMatchPlayerGauntlet(name){
+  const p = { name, legDarts:0, setDarts:0, gameDarts:0, lifetimeRunsBase:0, lifetimeCleanStationsBase:0 };
+  // Fetched once at game start — onGauntletComplete() only ever checks its
+  // lifetime ladders ONCE, at the very end of a ~15-minute run, so (unlike
+  // Chuckin's own per-dart lifetime-base fetch) there's no race to correct
+  // for: this fetch will always have long since resolved by then.
+  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(name)}&gameType=gauntlet&mode=practice`).then(stats=>{
+    if(!stats) return;
+    p.lifetimeRunsBase = stats.runsCompleted || 0;
+    p.lifetimeCleanStationsBase = stats.cleanStations || 0;
+  }).catch(()=>{});
+  return p;
+}
+// Never actually called — legsPerSet/setsPerGame are forced to 1 (a run IS the
+// game) and onGauntletComplete() always reaches the "game complete" branch
+// directly, the same structurally-unreachable-but-contract-satisfying shape
+// Bob's 27's own resetPlayerForNextLegBobs27() documents.
+function resetPlayerForNextLegGauntlet(p, game, newSet){}
+function playerSnapshotGauntlet(p){
+  return { name:p.name, legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0 };
+}
+function enterTurnGauntlet(){
+  if(game.darts.length < 3){
+    document.getElementById('status').textContent = 'Throw all 3 darts for this station first — single, then treble, then double.';
+    return;
+  }
+  const p = game.players[0];
+  const station = GAUNTLET_STATION_ORDER[game.gauntletStationIndex];
+  const ev = evaluateGauntletStation(station, game.darts);
+  const wasRepeat = game.gauntletAwaitingRepeat;
+
+  const taskNames = ['single','treble','double'];
+  const missed = ev.hits.map((h,i)=>h?null:taskNames[i]).filter(Boolean);
+  if(ev.misses===0) announce(`Clean pass at station ${station}.`);
+  else announce(`${ev.misses} miss${ev.misses===1?'':'es'} at station ${station} — missed the ${missed.join(' and ')}.`);
+
+  // snapshot state before mutations so undoLastTurnGauntlet() can restore it —
+  // only reachable while this attempt is still the live one (a settled attempt
+  // that advances the station index is a leg-boundary-style event, same "can't
+  // undo past it" rule every other game type follows).
+  const _snap = { legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
+    stationIndex:game.gauntletStationIndex, awaitingRepeat:game.gauntletAwaitingRepeat,
+    finalMissesLen:game.gauntletFinalMisses.length,
+    cleanStreak:game.gauntletCleanStreak, bestCleanStreak:game.gauntletBestCleanStreak,
+    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
+    badgeReverts:[], voided:false };
+  game.lastTurnSnapshot = _snap;
+
+  const dartsThrown = game.darts.length;
+  p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
+
+  DB.recordTurn({ player:p.name, set:1, leg:1,
+    scored: ev.misses, bust:false, checkout:false, checkoutPoints:null, targetScore: station,
+    darts: game.darts.map((d,i) => ({ dartNo: i+1, sector: d.sector, multiplier: d.mult, thrownAt: d.thrownAt,
+      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+
+  const turnRecord = { player:p.name, scored:ev.misses, darts:game.darts.slice() };
+  game.currentLegTurns.push(turnRecord);
+  game.sessionTurns.push(turnRecord);
+
+  awardTimeOfDayBadges(p);
+
+  if(!wasRepeat && ev.misses === 2){
+    // 2 misses on the ORIGINAL attempt: not settled yet — one repeat allowed,
+    // same station, no station advance.
+    game.gauntletAwaitingRepeat = true;
+    game.darts=[]; game.busted=false; game.won=false;
+    game.turnSeq += 1;
+    document.getElementById('status').className='status';
+    document.getElementById('status').textContent = `2 misses at station ${station} — one repeat attempt allowed. Throw again.`;
+    renderGameGauntlet();
+    return;
+  }
+
+  // Settled: either the original attempt wasn't a 2, or this WAS the repeat —
+  // the repeat's own result is final regardless of what it comes back as.
+  const finalMisses = ev.misses;
+  game.gauntletFinalMisses.push(finalMisses);
+  game.gauntletAwaitingRepeat = false;
+
+  // 🩹 Second Wind: passed the repeat clean after failing the original with 2.
+  if(wasRepeat && finalMisses === 0){
+    queueBadge('gauntletsecondwind', p.name);
+    awardRecurringBadge(p.name, 'gauntletsecondwind', 'gauntletsecondwind',
+      { icon:'🩹', headline:'SECOND WIND!', player:p.name, statLine:`Station ${station} — clean on the repeat` });
+  }
+
+  // This run's own longest consecutive-clean-station streak (checked against
+  // the lifetime GAUNTLET_STREAK_MILESTONE_LADDERS threshold once the run ends).
+  if(finalMisses === 0){
+    game.gauntletCleanStreak += 1;
+    game.gauntletBestCleanStreak = Math.max(game.gauntletBestCleanStreak, game.gauntletCleanStreak);
+  } else {
+    game.gauntletCleanStreak = 0;
+  }
+
+  game.gauntletStationIndex += 1;
+  if(game.gauntletStationIndex >= GAUNTLET_STATION_ORDER.length){
+    onGauntletComplete();
+    return;
+  }
+  game.darts=[]; game.busted=false; game.won=false;
+  game.turnSeq += 1;
+  document.getElementById('status').className='status';
+  document.getElementById('status').textContent = `Station ${GAUNTLET_STATION_ORDER[game.gauntletStationIndex]} — dart 1: single.`;
+  renderGameGauntlet();
+}
+function undoLastTurnGauntlet(){
+  if(!game || !game.lastTurnSnapshot) return;
+  const snap = game.lastTurnSnapshot;
+  const p = game.players[0];
+  p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
+  game.gauntletStationIndex = snap.stationIndex;
+  game.gauntletAwaitingRepeat = snap.awaitingRepeat;
+  game.gauntletFinalMisses.length = snap.finalMissesLen;
+  game.gauntletCleanStreak = snap.cleanStreak;
+  game.gauntletBestCleanStreak = snap.bestCleanStreak;
+  game.currentLegTurns.length = snap.ltLen;
+  game.sessionTurns.length = snap.stLen;
+
+  snap.voided = true;
+  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+  });
+  cancelQueuedAchievementsForSnapshot(snap);
+
+  game.darts = []; game.busted=false; game.won=false;
+  game.lastTurnSnapshot = null;
+  DB.deleteLastTurn();
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent='Last attempt undone.'; }
+  renderGameGauntlet();
+}
+// Ends the run (all 20 stations settled) — the one point in this game type's
+// whole lifecycle that reaches finishUnit('game', ...), same "a run IS the
+// game" shape onLegWonBobs27()'s own "game complete" branch documents.
+function onGauntletComplete(){
+  const p = game.players[0];
+  const totalScars = gauntletTotalScars(game.gauntletFinalMisses);
+  const tier = gauntletResultTier(totalScars);
+  const flawless = game.gauntletFinalMisses.every(m => m === 0);
+
+  checkChuckinMilestoneTier(GAUNTLET_RUNS_MILESTONE_LADDERS[0], p.name, (p.lifetimeRunsBase||0) + 1);
+  const cleanThisRun = game.gauntletFinalMisses.filter(m => m === 0).length;
+  checkChuckinMilestoneTier(GAUNTLET_CLEAN_STATIONS_MILESTONE_LADDERS[0], p.name, (p.lifetimeCleanStationsBase||0) + cleanThisRun);
+  // Per-run streak ladder (Bob's 27 final-score pattern) — checked against
+  // THIS run's own peak value, not a lifetime accumulator.
+  checkChuckinMilestoneTier(GAUNTLET_STREAK_MILESTONE_LADDERS[0], p.name, game.gauntletBestCleanStreak);
+
+  if(flawless){
+    queueBadge('gauntletflawless', p.name);
+    awardRecurringBadge(p.name, 'gauntletflawless', 'gauntletflawless',
+      { icon:'💎', headline:'FLAWLESS GAUNTLET!', player:p.name, statLine:'All 20 stations, zero Scars' });
+  }
+  if(tier === 'Unmarked'){
+    queueBadge('gauntletunmarked', p.name);
+    awardRecurringBadge(p.name, 'gauntletunmarked', 'gauntletunmarked',
+      { icon:'🥋', headline:'UNMARKED', player:p.name, statLine:`${totalScars} total Scars` });
+  }
+
+  sendHaWebhook('legend', p.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+  sendHaWebhook('setend', p.name, game.category, { setNo: game.setNo });
+  sendHaWebhook('gameend', p.name, game.category);
+  DB.recordEvent('leg_end', game.setNo, game.legNo);
+  DB.recordEvent('set_end', game.setNo, null);
+  DB.recordEvent('game_end', null, null);
+  DB.completeGame(p.name);
+  game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:p.name, bigFish:false };
+  fireMomentCard('matchwin', { icon: flawless ? '💎' : '🥋', headline: flawless ? 'FLAWLESS GAUNTLET!' : 'GAUNTLET COMPLETE!',
+    player:p.name, statLine: `${totalScars} total Scars — ${tier}` });
+  finishUnit('game', p.name);
+}
+function renderGameGauntlet(){
+  const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
+  renderSlots();
+  const p = game.players[0];
+  const stationIndex = game.gauntletStationIndex;
+  const station = GAUNTLET_STATION_ORDER[stationIndex];
+  const taskNames = ['SINGLE','TREBLE','DOUBLE'];
+  const nextTaskLabel = game.darts.length >= 3
+    ? 'All 3 darts thrown — press Enter turn'
+    : `Next: dart ${game.darts.length+1} — ${taskNames[game.darts.length]} ${station}`;
+  const totalScarsSoFar = gauntletTotalScars(game.gauntletFinalMisses);
+  const row = document.createElement('div');
+  row.className = 'pscore active';
+  row.innerHTML = `
+    <div>
+      <div class="nm">${escapeHtml(p.name)} <span class="nm-out">🥋 The Gauntlet${game.gauntletAwaitingRepeat ? ' · REPEAT' : ''}</span></div>
+      <div class="turnflag">▸ Station ${stationIndex+1} of 20 — target ${station}</div>
+    </div>
+    <div class="meta">
+      <div class="avgs">${escapeHtml(nextTaskLabel)}</div>
+      <div class="standing">Total Scars: ${totalScarsSoFar}</div>
+    </div>
+    <div class="rem-wrap">
+      <div class="rem">${station}</div>
+    </div>`;
+  if(sb) sb.appendChild(row);
+  renderPad();
 }
 
 /* ---------- Doubles Practice (docs/game-modes-roadmap.md) ----------
@@ -11876,6 +12340,14 @@ GAME_TYPES.checkout_trainer.bubbleKeyMap = CHECKOUT_TRAINER_BUBBLE_KEY_MAP;
 GAME_TYPES.around_the_clock.bubbleKeyMap = AROUND_THE_CLOCK_BUBBLE_KEY_MAP;
 GAME_TYPES.around_the_world.bubbleKeyMap = AROUND_THE_WORLD_BUBBLE_KEY_MAP;
 GAME_TYPES.bobs_27.bubbleKeyMap = BOBS_27_BUBBLE_KEY_MAP;
+// docs/bug-roadmap.md-class gap, found while wiring the Gauntlet's own bubbleKeyMap
+// here: Checkout Ladder's (item 22) never got patched onto this list at all,
+// leaving GAME_TYPES.checkout_ladder.bubbleKeyMap undefined — activeBubbleKeyMap()
+// would silently return undefined the moment a player switched the Player Profile
+// toggle to Checkout Ladder, blanking its stat bubbles. Fixed alongside Gauntlet's
+// own wiring below rather than left for a future session to rediscover.
+GAME_TYPES.checkout_ladder.bubbleKeyMap = CHECKOUT_LADDER_BUBBLE_KEY_MAP;
+GAME_TYPES.gauntlet.bubbleKeyMap = GAUNTLET_BUBBLE_KEY_MAP;
 function toggleMoreStats(){
   showMoreStats = !showMoreStats;
   renderPlayerPage();

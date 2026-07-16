@@ -39,7 +39,7 @@ worst history and keep recurring until they're solved.
   the same "mental sibling vs. physical sibling" distinction the Checkout
   Ladder doc already drew against Checkout Trainer, extended here too.
 - **The Pressure Chamber** (`docs/pressure-chamber-roadmap.md`) and
-  **The Gauntlet** (`docs/gauntlet-roadmap.md`) are both fixed-round,
+  **The Gauntlet** (`docs/archive/gauntlet-roadmap.md`) are both fixed-round,
   tiered-result solo drills, but their round content is either
   seed-generated from a curated pool (Pressure Chamber) or a hardcoded
   constant (Gauntlet's station order) — genuinely global content dressed

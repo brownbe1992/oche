@@ -49,6 +49,7 @@ convention in `CLAUDE.md`.
 - [24. Household Elo Rating](#24-household-elo-rating)
 - [25. Handicapping](#25-handicapping)
 - [26. 121 Checkout Ladder](#26-121-checkout-ladder)
+- [27. The Gauntlet](#27-the-gauntlet)
 
 ---
 
@@ -5188,3 +5189,208 @@ Climbing badge fires at 125), a failed attempt dropping the target back
 down, undo restoring state mid-attempt, save/resume round-tripping a
 mid-attempt position exactly, and the live `/display` scoreboard rendering
 the target/attempt/visit line with no console errors.
+
+## 27. The Gauntlet
+
+`docs/archive/gauntlet-roadmap.md`. A solo endurance warm-up: **20 stations**, one
+per board number, played in a **fixed clock-adjacency order** that never
+sits two consecutive stations near each other on the board
+(`GAUNTLET_STATION_ORDER = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5]`
+— itself the standard clockwise dartboard walk, identical every run,
+forever). At each station, 3 darts must each complete a specific task **in
+strict throw order**: dart 1 the single, dart 2 the treble, dart 3 the
+double — no partial credit, and no re-matching across positions (a double
+thrown as dart 1 doesn't count for dart 3's own task). Misses earn **Scars**;
+2 misses gets one repeat attempt at that same station; 3 misses is a **Deep
+Scar** (no repeat, and it counts double toward the run's total). Runs ~15
+minutes and always ends after all 20 stations settle — unlike Checkout
+Ladder/Doubles Practice's perpetual "runs until End Game," a run **IS** the
+game (the same shape practice Baseball/Bob's 27 both established).
+
+### Design
+
+`gauntlet` game type, solo-only, `legsPerSet`/`setsPerGame` forced to 1.
+Every turn is stamped `set=1, leg=1` — there's no leg/set progression
+concept at all for this mode; station identity lives entirely in
+`turns.target_score`, not in `leg_no` (contrast Checkout Ladder, where
+`leg_no` increments per attempt).
+
+### The Scar / repeat rule
+
+| Misses this attempt | Outcome |
+|---|---|
+| 0 | Clean pass — advance |
+| 1 | 1 Scar — carry it, advance |
+| 2 | **One repeat attempt**, same station — the retry's own result is final regardless of what it comes back as (even another 2 or 3) |
+| 3 | **Deep Scar** directly, no repeat offered — advance |
+
+A station **settles** the moment either its first attempt scores something
+other than 2, or a second attempt (the repeat) exists for it at all — this
+single derivation (`rebuildGauntletState()`, `frontend/scoring.js`) is
+shared by the write-time guard, every stats query, and saved-game resume, so
+"which stations are settled, is one awaiting its repeat, what's the running
+Scar tally" is computed exactly once and can never drift between call sites.
+
+### Per-dart grading (`evaluateGauntletStation`, `frontend/scoring.js`)
+
+Pure, positional: `evaluateGauntletStation(stationNumber, darts)` checks
+`darts[0]` against the station's single, `darts[1]` against its treble,
+`darts[2]` against its double — each independently, never best-fit across
+positions. Returns `{hits:[bool,bool,bool], misses}`. A missing dart (an
+attempt somehow cut short) counts as a miss for that slot, though in
+practice every Gauntlet attempt is always exactly 3 darts (no bust/win
+early-exit condition the way X01 has).
+
+### Scar tally and result tiers
+
+`gauntletTotalScars(finalMisses)` (`frontend/scoring.js`) sums every
+station's **final** (post-any-repeat) miss count, **doubling** any station
+whose final result is 3 (a Deep Scar contributes 6, not 3) — derived at read
+time, never stored pre-multiplied, the same "store the raw number, derive
+the special-case scaling" shape Halve-It's halving rule uses.
+`gauntletResultTier(totalScars)`:
+
+| Scars | Result |
+|---|---|
+| 0–5 | Unmarked |
+| 6–12 | Scarred but Standing |
+| 13–20 | Bloodied |
+| 21–30 | Broken Down |
+| 31+ | The Gauntlet Wins |
+
+### Data model
+
+Reuses the existing per-dart-turn shape; no new columns. `turns.target_score`
+(already exists, already range-checked 1–170, comfortably covers 1–20)
+stores which station this attempt was for — read back directly rather than
+derived from prior-turn count, since a repeat attempt would otherwise break
+the usual "turn count maps 1:1 to position" trick (SEC-25/Baseball-inning
+style). `turns.scored` stores the raw miss count for that specific attempt
+(0–3). Whether a station was repeated is derivable from row count (more
+than one `turns` row sharing the same `(game_id, target_score)`); no
+`was_repeat` column exists. Every dart is a real physical throw — full
+participation in heatmaps/treble-rate/dart-pace, no hypothetical exclusion
+(same conclusion Bob's 27/Checkout Ladder both reached).
+
+### Write-time validation (`addTurn()`, `backend/db.js`)
+
+`scored` (miss count) must be 0–3; `checkout`/`bust` must both be false
+(Gauntlet has neither concept). The **sequence guard** (only the next
+station in `GAUNTLET_STATION_ORDER`, or the current station's own pending
+repeat) and the **repeat-count guard** (at most 2 rows per station, and only
+if the first came back as exactly 2) collapse into a single check:
+`rebuildGauntletState()` re-derives "which station is expected next" from
+every prior turn for this player+game, and the submitted `targetScore` must
+match it exactly — this one comparison rejects both a skipped-ahead station
+and a 3rd attempt at an already-settled one. Once all 20 stations are
+settled, no further turn is accepted at all.
+
+### Engine (`frontend/index.html`)
+
+`enterTurnGauntlet()` (dispatched from `enterTurn()`) commits a 3-dart
+attempt via `evaluateGauntletStation()`. If the (non-repeat) attempt scores
+exactly 2, `game.gauntletAwaitingRepeat` is set and the SAME station is
+re-attempted next — no station advance, no push to
+`game.gauntletFinalMisses`. Otherwise the attempt is final: pushed to
+`gauntletFinalMisses`, `gauntletStationIndex` advances, and once it reaches
+20, `onGauntletComplete()` runs — the one point in this game type's whole
+lifecycle that reaches `finishUnit('game', ...)`, calling `DB.completeGame()`
+and building the run's own "GAME OVER" summary (Total Scars + Result tier,
+`finishUnit()`'s `gauntletSummary` block, mirroring Bob's 27's own
+`bobs27Summary`). Undo (`undoLastTurnGauntlet()`) only reaches back into the
+still-live attempt — once an attempt settles and the station advances,
+`lastTurnSnapshot` only covers up to that settling turn (same "can't undo
+past a leg boundary" rule every other game type follows).
+
+### Stats, Personal Bests, Home leaderboard, Scar Map
+
+- **Stat bubbles** (`getGauntletStatBubbles`): runs completed, average total
+  Scars per completed run, clean-station rate (% of every settled station,
+  across all runs — completed or not — finished with 0 misses on its final
+  attempt), Deep Scar rate, retry rate.
+- **Personal Best** (`getGauntletPersonalBests`): **lowest** total Scars
+  across completed runs only — ascending-is-better, the opposite polarity
+  from most "best run" Personal Bests in this app (`MIN()`, not `MAX()`,
+  same shape X01's `fewestDartsCheckout` uses).
+- **Home leaderboard** (`getGauntletLeaderboard`): one row per player, their
+  own lowest-ever total Scars — sorted **ascending** (lower is better), the
+  one leaderboard in this app sorted that direction.
+- **The Scar Map** (`getGauntletScarMap`) — the actual point of the game:
+  for every **completed** run, each station's final miss count averaged per
+  station number across every run a player has ever finished. Rendered
+  (`renderGauntletScarMap()`) as a 20-cell severity-shaded grid in
+  `GAUNTLET_STATION_ORDER`'s own order (already the standard clockwise
+  board walk, so no separate layout math is needed to read as "around the
+  board"), plus a plain text table alongside it for screen readers
+  (docs/archive/gauntlet-roadmap.md's own accessibility requirement).
+
+### Achievements
+
+Three data-driven ladders off the existing `checkChuckinMilestoneTier()`
+engine: lifetime runs completed (`GAUNTLET_RUNS_MILESTONE_LADDERS`, base+session,
+fetched once at game start the way Chuckin's own lifetime bases are),
+lifetime clean stations (`GAUNTLET_CLEAN_STATIONS_MILESTONE_LADDERS`, same
+pattern), and — checked once, at run completion, against **that run's own
+peak value**, the Bob's 27 final-score pattern, not a lifetime accumulator —
+longest streak of consecutive clean stations within one run
+(`GAUNTLET_STREAK_MILESTONE_LADDERS`). Plus three one-offs: 💎 **Flawless
+Gauntlet** (all 20 stations, zero Scars anywhere — deliberately not mutually
+exclusive with 🥋 Unmarked, since a flawless run is trivially also an
+Unmarked-tier run), 🥋 **Unmarked** (finish in the 0–5 tier), and 🩹 **Second
+Wind** (pass a repeat attempt clean after failing the original with 2).
+
+### No live-scoreboard sync
+
+Same conclusion Checkout Trainer reached, for the same reason: single-device,
+solo, no second-screen `/display` broadcast. No `pushLive()` call anywhere
+in this game type's code path, and no `renderers.gauntlet` exists in
+`display.html` — an ordinary in-game UI state (`renderGameGauntlet()`) is
+enough, the same as Checkout Trainer's own scoring screen.
+
+### Saved games
+
+Fully reconstructable: current station = `rebuildGauntletState()`'s own
+`currentStation` (the first `GAUNTLET_STATION_ORDER` entry with no settled
+final result yet, or the pending repeat's station if one is live), running
+Scar tally = `gauntletTotalScars()` of the settled `finalMisses` so far —
+pure functions of recorded turns, per `docs/archive/saved-games-roadmap.md`.
+The run's own clean-streak counters (`gauntletCleanStreak`/
+`gauntletBestCleanStreak`) aren't part of that shared rebuild function (they're
+a frontend-only running counter, not needed by the write-time guard or any
+stats query) — re-derived on resume as a pure pass over the settled
+`finalMisses` array instead.
+
+### Testing
+
+`backend/test/scoring.test.js`: `evaluateGauntletStation()`'s strict
+positional grading (including "no re-matching across positions" and a
+missing dart counting as a miss), `gauntletTotalScars()`/`gauntletResultTier()`'s
+Deep-Scar-doubling and tier boundaries, and `rebuildGauntletState()`'s
+settle/repeat/done derivation. `backend/test/db.turn-consistency-guard.test.js`:
+the sequence guard, the repeat-count guard, the scored-range guard, and
+rejecting any turn once all 20 stations are settled.
+`backend/test/db.gauntlet-stats.test.js`: all four stats/PB/leaderboard/Scar-Map
+functions, including the "clean-station rate counts every settled station
+across completed AND in-progress runs, but avgTotalScars/Personal
+Best/leaderboard/Scar Map only ever look at completed runs" distinction.
+Verified end-to-end with Playwright: a full 20-station run (17 clean, one
+2-miss station resolved by a clean repeat earning 🩹 Second Wind, one Deep
+Scar, and a final clean station) landing on 6 total Scars/"Scarred but
+Standing" and awarding the 5/10/15 streak-ladder tiers correctly; the
+Checkout Ladder stat-bubble parity bug found and fixed along the way (see
+below); a partial run saved and resumed with its station index, final
+misses, and awaiting-repeat state exactly intact; and undo restoring
+mid-attempt state correctly.
+
+### Bug found and fixed while building this: Checkout Ladder's stat bubbles were never wired up
+
+While patching `GAME_TYPES.gauntlet.bubbleKeyMap` onto the shared
+`bubbleKeyMap`-assignment list (`frontend/index.html`), the equivalent line
+for `checkout_ladder` (item 22, shipped just before this one) turned out to
+have never been added at all — `GAME_TYPES.checkout_ladder.bubbleKeyMap` was
+`undefined`, so `activeBubbleKeyMap()` silently returned `undefined` the
+moment a player switched the Player Profile toggle to Checkout Ladder,
+blanking its stat bubble values. Fixed in the same change (both lines added
+together) rather than left for a future session to rediscover — the same
+class of gap BUG-26 was for the badge-label maps, just for the bubble-key
+maps instead.

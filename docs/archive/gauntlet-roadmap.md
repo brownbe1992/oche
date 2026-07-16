@@ -1,6 +1,8 @@
 # The Gauntlet — Design Roadmap
 
-> Status: **design phase, not started.**
+> Status: **shipped 2026-07.** See "Implementation notes" near the end of
+> this doc for what matched the design below exactly and what was decided
+> along the way. Full write-up: `REFERENCE.md` §27.
 
 ## Goal
 
@@ -314,3 +316,46 @@ same as every other drill in this doc set.
 - Exact ladder thresholds and the 3 one-off badges above are a first pass
   for playtesting, same "not final" caveat every other doc's numbers
   carry.
+
+## Implementation notes (2026-07, shipped)
+
+Built essentially as designed, following this doc's own suggested build
+order end to end. The open questions above were resolved as follows:
+
+- **Strictly positional grading** (this doc's own stated default) was
+  adopted — `evaluateGauntletStation()` never re-matches a dart against a
+  task other than its own throw-order slot.
+- **A repeat's darts DO count toward physical stats twice** (both the
+  failed original attempt and the retry are real recorded turns/darts —
+  heatmap, treble rate, dart-pace, everything), while only the Scar tally
+  itself uses the final (retry's) result — exactly as this doc guessed.
+- **The Scar Map averages per station across every COMPLETED run** (this
+  doc's stated default) rather than most-recent-run or worst-ever. Worth
+  revisiting once there's real multi-session data to look at, per this
+  doc's own note.
+- **Extending to H2H** stayed out of scope, as planned.
+- Exact ladder thresholds (lifetime runs 5/25/100/250; lifetime clean
+  stations 50/250/1,000/2,500; per-run streak 5/10/15) and the 3 one-off
+  badges (💎 Flawless Gauntlet, 🥋 Unmarked, 🩹 Second Wind) shipped as a
+  first pass, per this doc's own "not final" caveat — worth revisiting once
+  real play data shows whether they're paced right.
+
+Everything else matches this doc's design: `gauntlet` game type, solo-only,
+`legsPerSet`/`setsPerGame` forced to 1 (a run IS the game — it always
+completes after all 20 stations settle, unlike Checkout Ladder/Doubles
+Practice's perpetual shape); the fixed `GAUNTLET_STATION_ORDER` constant, no
+generation machinery; the Scar/repeat rule exactly as specified (2 misses →
+one repeat, 3 → an immediate Deep Scar, no repeat); the Deep-Scar-doubles-
+at-tally-time derivation; the 5 result tiers; the 3 consistency guards
+(collapsed into one shared `rebuildGauntletState()`-based comparison for the
+sequence + repeat-count guards, plus a separate scored-range check); the
+5-bubble stat set, ascending-is-better Personal Best, ascending Home
+leaderboard, and the Scar Map with its text-table accessibility fallback;
+no live-scoreboard sync. One bug found and fixed along the way, unrelated to
+this doc's own design: `docs/archive/practice-ladders-roadmap.md`'s
+Checkout Ladder (item 22, shipped just before this one) had never actually
+been wired into the Player Profile's stat-bubble-key-map list, silently
+blanking its bubbles — see `REFERENCE.md` §27's own note. Full write-up:
+`REFERENCE.md` §27; committed tests in `backend/test/scoring.test.js`,
+`backend/test/db.turn-consistency-guard.test.js`, and
+`backend/test/db.gauntlet-stats.test.js`.
