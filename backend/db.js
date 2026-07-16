@@ -26,7 +26,8 @@ const { checkoutHint, dartLabel,
   rebuildX01State, rebuildCricketState, rebuildBaseballState,
   rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State,
   rebuildCheckoutLadderState,
-  GAUNTLET_STATION_ORDER, gauntletTotalScars, gauntletResultTier, rebuildGauntletState } = require('../frontend/scoring.js');
+  GAUNTLET_STATION_ORDER, gauntletTotalScars, gauntletResultTier, rebuildGauntletState,
+  KILLER_DEFAULT_LIVES, assignKillerNumbers, evaluateDartKiller, rebuildKillerState } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -469,6 +470,16 @@ try { db.exec('ALTER TABLE turns ADD COLUMN target_score INTEGER'); } catch(e) {
 // the same feat as actually finishing from 169. Defaults to 0 for every existing
 // row and every other game type's write path.
 try { db.exec('ALTER TABLE turns ADD COLUMN declared_unsolvable INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
+// Killer (docs/archive/game-modes-roadmap.md "Killer"): which player, if any, had
+// their own life total change because of THIS dart — the one game type where a
+// single dart can affect a DIFFERENT player than the one who threw it (an attack).
+// NULL means the dart changed nothing at all; equal to the thrower's own player_id
+// means a self-effect (building toward killer, or a self-kill); any other player_id
+// means an attack landed on that opponent. `scored` stays the plain non-negative
+// magnitude of the change (0-3) either way — the direction (gain vs loss) is
+// derived by replay (rebuildKillerState(), frontend/scoring.js), never stored,
+// same "derive the special case, don't pre-compute it" shape Halve-It/Gauntlet use.
+try { db.exec('ALTER TABLE turns ADD COLUMN affected_player_id INTEGER'); } catch(e) {}
 // player_count is the participant count captured once at game creation. H2H-vs-practice
 // classification reads THIS instead of a live COUNT(game_players) subquery, so deleting
 // or resetting a player can never retroactively reclassify a game (a 2-player H2H game
@@ -611,8 +622,8 @@ const q = {
   completeGame : db.prepare("UPDATE games SET completed_at = datetime('now'), winner_id = ? WHERE id = ?"),
 
   insertTurn   : db.prepare(`INSERT INTO turns
-                   (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points, leg_won, target_score, declared_unsolvable)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+                   (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points, leg_won, target_score, declared_unsolvable, affected_player_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 
   insertDart   : db.prepare(`INSERT INTO darts (turn_id, dart_no, sector, multiplier, thrown_at, zone, miss_zone, miss_depth, bounced)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
@@ -866,7 +877,27 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   if (resolvedGameType === 'cricket' && config && config.variant != null && !['standard', 'cutthroat'].includes(config.variant)) {
     throw httpError(400, "variant must be 'standard' or 'cutthroat'");
   }
-  const resolvedConfig = config ? JSON.stringify(config) : JSON.stringify({ startingScore: Number(category) || null });
+  // Killer (docs/archive/game-modes-roadmap.md "Killer"): the become-a-killer
+  // lives threshold is a New Game option (validated here, same as every other
+  // config field reaching this function from an untrusted client), but the
+  // per-player number ASSIGNMENT is never trusted from the client at all — a
+  // hostile submission could otherwise hand itself a favorable matchup.
+  // Assigned here, server-side, once per match (not re-derived per leg — every
+  // leg of this same game reuses this same assignment).
+  let killerConfig = null;
+  if (resolvedGameType === 'killer') {
+    const names = [];
+    (players || []).forEach(entry => { if (entry.name && !names.includes(entry.name)) names.push(entry.name); });
+    if (names.length < 2) throw httpError(400, 'Killer requires at least 2 players');
+    let lives = KILLER_DEFAULT_LIVES;
+    if (config && config.lives != null) {
+      lives = Number(config.lives);
+      if (!Number.isInteger(lives) || lives < 1 || lives > 20) throw httpError(400, 'lives must be an integer between 1 and 20');
+    }
+    killerConfig = { lives, numbers: assignKillerNumbers(names) };
+  }
+  const resolvedConfig = killerConfig ? JSON.stringify(killerConfig)
+    : config ? JSON.stringify(config) : JSON.stringify({ startingScore: Number(category) || null });
   if (Buffer.byteLength(resolvedConfig) > 4096) throw httpError(400, 'config is too large');
   // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): validated here,
   // server-side, the same "never trust the client's own eligibility check"
@@ -925,7 +956,11 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   }
   _fireGameLifecycleHooks('created', { gameId, gameType: resolvedGameType, practice: !!practice,
     category: categoryStr, playerCount: pc, playerIds: participantIds, leagueId });
-  return { gameId };
+  // Killer's number assignment is decided HERE, server-side (never trusted from
+  // the client — see killerConfig's own comment above) — the client has no other
+  // way to learn it, so it rides back on this same response rather than needing
+  // a second round-trip right after every game creation.
+  return killerConfig ? { gameId, config: killerConfig } : { gameId };
 }
 
 // docs/security-audit-roadmap.md SEC-22: `opts.enforceConsistency` gates the
@@ -1163,6 +1198,59 @@ function addTurn(gameId, t, opts = {}) {
     if (Number(t.targetScore) !== state.currentStation) {
       throw httpError(400, "targetScore does not match this run's next station (in fixed clock-adjacency order, or its one pending repeat)");
     }
+  } else if (gameTypeRow && gameTypeRow.game_type === 'killer') {
+    // docs/archive/game-modes-roadmap.md "Killer": scored is the plain non-negative
+    // magnitude of this dart's life-total change (0-3); affected_player_id says
+    // WHOSE total it landed on (see that column's own migration comment for why).
+    // Both are independently re-derived here by replaying every prior dart this
+    // LEG (numbers/lives reset every leg; the assignment itself is match-wide,
+    // read from the game's own config) and running evaluateDartKiller() against
+    // the reconstructed state — the same "the server re-derives the expected
+    // shape and rejects a submission that couldn't have produced it" spirit as
+    // every other consistency guard, just for a game type where a single dart
+    // can affect a DIFFERENT player than the one who threw it. Turn ORDER itself
+    // is not enforced here, matching every other existing guard's scope (SEC-22/
+    // SEC-25 verify arithmetic, never who-throws-next — the client is trusted
+    // for sequencing the same way it already is everywhere else).
+    if (t.checkout) throw httpError(400, 'a Killer turn cannot be a checkout');
+    if (t.bust) throw httpError(400, 'a Killer turn cannot be a bust');
+    if (scored < 0 || scored > 3) throw httpError(400, "a Killer turn's scored (life change) must be between 0 and 3");
+    if (darts.length !== 1) throw httpError(400, 'a Killer turn must be exactly 1 dart (per-dart evaluation)');
+    const gameRow = db.prepare('SELECT config FROM games WHERE id=?').get(Number(gameId));
+    const cfg = gameRow && gameRow.config ? JSON.parse(gameRow.config) : null;
+    if (!cfg || !cfg.numbers) throw httpError(400, 'this game has no Killer number assignment');
+    const participants = db.prepare(`
+      SELECT p.id, p.name FROM game_players gp JOIN players p ON p.id=gp.player_id
+      WHERE gp.game_id=? ORDER BY gp.rowid
+    `).all(Number(gameId));
+    const idToName = new Map(participants.map(pp => [pp.id, pp.name]));
+    const names = participants.map(pp => pp.name);
+    const throwerName = idToName.get(p.id);
+    if (!throwerName) throw httpError(400, 'thrower is not a participant in this game');
+
+    const priorRows = db.prepare(`
+      SELECT t.player_id AS playerId, d.sector AS sector, d.multiplier AS mult
+      FROM turns t JOIN darts d ON d.turn_id=t.id
+      WHERE t.game_id=? AND t.set_no=? AND t.leg_no=? ORDER BY t.id
+    `).all(Number(gameId), setNo, legNo);
+    const priorTurns = priorRows.map(r => ({ throwerName: idToName.get(r.playerId), sector: r.sector, mult: r.mult }));
+    const state = rebuildKillerState({ names, numbers: cfg.numbers, turns: priorTurns, threshold: cfg.lives });
+    if (state.winner) throw httpError(400, 'this Killer leg has already been won');
+    const thrower = state.players.find(pl => pl.name === throwerName);
+    if (!thrower || thrower.eliminated) throw httpError(400, 'this player has already been eliminated this leg');
+
+    const dart = darts[0];
+    const dartCore = { sector: dart.sector, mult: dart.multiplier, isDouble: dart.multiplier === 2 && dart.sector !== 0 };
+    const expected = evaluateDartKiller(dartCore, throwerName, state.players);
+    const expectedAffectedName = expected ? expected.affectedName : null;
+    const expectedDelta = expected ? expected.delta : 0;
+    const submittedAffectedName = t.affectedPlayer != null ? String(t.affectedPlayer) : null;
+    if (submittedAffectedName !== expectedAffectedName) {
+      throw httpError(400, "affectedPlayer does not match this dart's derived effect");
+    }
+    if (scored !== expectedDelta) {
+      throw httpError(400, "scored does not match this dart's derived life-change magnitude");
+    }
   }
   // Checkout Trainer (docs/archive/checkout-trainer-roadmap.md): the target score offered
   // for this round. Server-computed context, not a scored value, so it's only
@@ -1171,6 +1259,14 @@ function addTurn(gameId, t, opts = {}) {
   if (t.targetScore != null) {
     targetScore = Number(t.targetScore);
     if (!Number.isInteger(targetScore) || targetScore < 1 || targetScore > 170) throw httpError(400, 'targetScore must be an integer between 1 and 170');
+  }
+  // Killer (docs/archive/game-modes-roadmap.md "Killer"): which player this dart's
+  // life-total change landed on, by name — resolved to an id the same way `player`
+  // itself is. NULL for every non-Killer turn, and NULL for a Killer dart that
+  // changed nothing (see the killer branch below for what's actually enforced).
+  let affectedPlayerId = null;
+  if (t.affectedPlayer != null) {
+    affectedPlayerId = ensurePlayer(t.affectedPlayer).id;
   }
   const info = q.insertTurn.run(
     Number(gameId), p.id,
@@ -1181,7 +1277,8 @@ function addTurn(gameId, t, opts = {}) {
     checkoutPoints,
     t.legWon ? 1 : 0,
     targetScore,
-    declaredUnsolvable ? 1 : 0
+    declaredUnsolvable ? 1 : 0,
+    affectedPlayerId
   );
   // Insert individual dart rows — scored/is_treble/is_double are generated columns.
   // thrownAt is an ISO timestamp captured client-side at tap time; only sent when
@@ -3573,6 +3670,102 @@ function getGauntletScarMap(playerName) {
   return { stations };
 }
 
+/* ---------- Killer (docs/archive/game-modes-roadmap.md "Killer") ----------
+   games.winner_id/completed_at cover games-played/win-rate for free, exactly
+   like Baseball/Cricket's own win leaderboards (Killer plays real best-of-N
+   matches, DB.completeGame() called once the match is decided) — no replay
+   needed for those two. Kills/lives-lost/"survived without becoming a
+   killer" are genuinely new per-LEG metrics with no existing column to read,
+   so they're derived by replaying every leg's own turn history through
+   rebuildKillerState() (frontend/scoring.js), the same shared function the
+   write-time guard uses. */
+function _killerLegOutcomesForPlayer(playerName, playerId, scope) {
+  const games = db.prepare(`
+    SELECT DISTINCT g.id AS gameId, g.config AS config
+    FROM games g JOIN game_players gp ON gp.game_id=g.id
+    WHERE gp.player_id=? AND g.game_type='killer' ${scope}
+  `).all(playerId);
+  const outcomes = [];
+  games.forEach(g => {
+    const cfg = g.config ? JSON.parse(g.config) : null;
+    if (!cfg || !cfg.numbers) return;
+    const participants = db.prepare(`
+      SELECT p.id, p.name FROM game_players gp JOIN players p ON p.id=gp.player_id
+      WHERE gp.game_id=? ORDER BY gp.rowid
+    `).all(g.gameId);
+    const idToName = new Map(participants.map(pp => [pp.id, pp.name]));
+    const names = participants.map(pp => pp.name);
+    if (!names.includes(playerName)) return;
+    const legRows = db.prepare('SELECT DISTINCT set_no AS setNo, leg_no AS legNo FROM turns WHERE game_id=? ORDER BY set_no, leg_no').all(g.gameId);
+    legRows.forEach(({ setNo, legNo }) => {
+      const turnRows = db.prepare(`
+        SELECT t.player_id AS playerId, d.sector AS sector, d.multiplier AS mult
+        FROM turns t JOIN darts d ON d.turn_id=t.id
+        WHERE t.game_id=? AND t.set_no=? AND t.leg_no=? ORDER BY t.id
+      `).all(g.gameId, setNo, legNo);
+      const turns = turnRows.map(r => ({ throwerName: idToName.get(r.playerId), sector: r.sector, mult: r.mult }));
+      const state = rebuildKillerState({ names, numbers: cfg.numbers, turns, threshold: cfg.lives });
+      const me = state.players.find(pl => pl.name === playerName);
+      if (!me) return;
+      outcomes.push({ won: state.winner === playerName, kills: me.kills, livesLost: me.livesLost, becameKiller: me.isKiller, eliminated: me.eliminated });
+    });
+  });
+  return outcomes;
+}
+
+function getKillerStatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'killer' });
+  const matchRow = db.prepare(`
+    SELECT COUNT(*) AS played, SUM(CASE WHEN g.winner_id=? THEN 1 ELSE 0 END) AS won
+    FROM game_players gp JOIN games g ON g.id=gp.game_id
+    WHERE gp.player_id=? AND g.completed_at IS NOT NULL ${scope}
+  `).get(p.id, p.id);
+  const outcomes = _killerLegOutcomesForPlayer(playerName, p.id, scope);
+  const n = outcomes.length;
+  return {
+    gamesPlayed: matchRow.played || 0,
+    winRate: matchRow.played ? (matchRow.won / matchRow.played * 100) : null,
+    avgKillsPerLeg: n ? (outcomes.reduce((s, o) => s + o.kills, 0) / n) : null,
+    avgLivesLostPerLeg: n ? (outcomes.reduce((s, o) => s + o.livesLost, 0) / n) : null,
+    // A curiosity stat (docs/archive/game-modes-roadmap.md's own sketch): how often
+    // this player rode out an entire leg alive without ever becoming a killer
+    // themselves — everyone else eliminated each other while they sat back.
+    survivedWithoutKillerRate: n ? (outcomes.filter(o => !o.becameKiller && !o.eliminated).length / n * 100) : null,
+  };
+}
+
+// Personal Best: most kills landed in a single leg — higher-is-better, same
+// MAX() shape most "best run" Personal Bests in this app use.
+function getKillerPersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'killer' });
+  const outcomes = _killerLegOutcomesForPlayer(playerName, p.id, scope);
+  if (!outcomes.length) return { mostKillsInALeg: null };
+  return { mostKillsInALeg: Math.max(...outcomes.map(o => o.kills)) };
+}
+
+// Win-rate leaderboard, H2H only (no mode param) — identical shape to
+// getBaseballWinLeaderboard()/Cricket's own win leaderboard, since Killer's
+// win/loss lives on games.winner_id the same generic way.
+function getKillerWinLeaderboard() {
+  const scope = _scope({ mode: 'h2h', gameType: 'killer' });
+  const winRows = db.prepare(`
+    SELECT p.name AS name, COUNT(*) AS played, SUM(CASE WHEN g.winner_id = p.id THEN 1 ELSE 0 END) AS won
+    FROM game_players gp
+    JOIN players p ON p.id = gp.player_id
+    JOIN games g ON g.id = gp.game_id
+    WHERE g.completed_at IS NOT NULL ${scope}
+    GROUP BY p.id
+    HAVING played >= 1
+    ORDER BY won DESC, played ASC
+  `).all();
+  return winRows.map(r => ({ name: r.name, played: r.played, won: r.won,
+    rate: r.played ? +((r.won / r.played) * 100).toFixed(1) : 0 }));
+}
+
 // Per-sector/multiplier/zone hit-count grid feeding the Player Profile's dartboard
 // heatmap. Originally Chuckin-only ("heatmap-heavy... patterns and trends" reporting
 // that mode was specifically requested to have); generalized (docs/dartboard-zone-
@@ -4140,7 +4333,7 @@ function _mf(mode) {
 // 'x01'/'cricket', server.js only uses a query param to pick which function to
 // call), and is whitelisted here regardless as a defense-in-depth measure
 // against string interpolation.
-const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
+const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer'];
 function _scope({ mode, gameType } = {}) {
   let sql = _mf(mode);
   if (gameType) {
@@ -6929,6 +7122,7 @@ module.exports = {
   getEloRatings, getEloLeaderboard, getPlayerElo,
   getCheckoutLadderStatBubbles, getCheckoutLadderPersonalBests, getCheckoutLadderLeaderboard,
   getGauntletStatBubbles, getGauntletPersonalBests, getGauntletLeaderboard, getGauntletScarMap,
+  getKillerStatBubbles, getKillerPersonalBests, getKillerWinLeaderboard,
   getAroundTheClockStatBubbles, getAroundTheClockPersonalBests,
   getAroundTheClockFastestLeaderboard, getAroundTheClockCompletionsLeaderboard,
   getAroundTheWorldDrillStatBubbles, getAroundTheWorldPersonalBests, getAroundTheWorldLeaderboard,

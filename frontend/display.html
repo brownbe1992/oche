@@ -327,7 +327,8 @@ const ACH_LABELS  = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter
   cricketstonecold:'Stone Cold! 🔪',
   bobs27fullhouse:'Full House! 🎯', bobs27fullanderson:'🏔️ THE FULL ANDERSON! 🏔️',
   topofthehouse:'👑 TOP OF THE HOUSE! 👑', upset:'Upset! 🗡️',
-  checkoutladderpeakbagged:'Peak Bagged! 🧗' };
+  checkoutladderpeakbagged:'Peak Bagged! 🧗',
+  killerfirstblood:'First Blood 🩸', killeruntouchable:'Untouchable 🛡️', killerownworstenemy:'Own Worst Enemy 🙈' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -344,7 +345,8 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   cricketstonecold:3500,
   bobs27fullhouse:2500, bobs27fullanderson:6000,
   topofthehouse:6000, upset:2500,
-  checkoutladderpeakbagged:4000 };
+  checkoutladderpeakbagged:4000,
+  killerfirstblood:3000, killeruntouchable:4000, killerownworstenemy:3000 };
 // Mirror-copied from frontend/index.html's BADGE_INFO[...].desc / ACH_DESC_FALLBACK —
 // this file has no Badge Case UI to source the text from directly, so it's kept as
 // its own flat map (docs/next-session-plan.md item 1).
@@ -402,6 +404,9 @@ const ACH_DESC = {
   topofthehouse: 'Reach #1 in the Household Ratings leaderboard.',
   upset: 'Win a rated 2-player match against an opponent rated 150+ points above you.',
   checkoutladderpeakbagged: 'Check out 170 on the 121 Checkout Ladder.',
+  killerfirstblood: 'Land the first elimination of a Killer match.',
+  killeruntouchable: 'Win a Killer match without ever losing a life.',
+  killerownworstenemy: 'Eliminate yourself via your own double after becoming a killer.',
 };
 // Just Chuckin' It's 18 laddered milestone badges — mirror-copied from frontend/
 // index.html's CHUCKIN_MILESTONE_LADDERS (this file has no shared module with
@@ -1080,6 +1085,49 @@ const renderers = {
           <div class="sum-stat">
             <div class="sv">${num(p.legDarts)}</div>
             <div class="sl">Darts This Attempt</div>
+          </div>
+        </div>
+      </div>`;
+    }
+  },
+  // Killer (docs/archive/game-modes-roadmap.md "Killer"): elimination H2H, always
+  // multiple players/cards (never scorecard-layout) — one card per player showing
+  // their randomly-assigned number, lives-as-pips (mirrors index.html's own
+  // renderGameKiller()), killer status, and kills. s.killerLives comes from
+  // liveSnapshot()'s own killerLives field (index.html).
+  killer: {
+    card(p, i, s, L){
+      const active = i===s.currentIndex && !p.eliminated;
+      const livesTarget = num(s.killerLives) || 3;
+      const lives = num(p.lives);
+      const pips = Array.from({length: Math.max(lives, livesTarget)}, (_,k) =>
+        `<span aria-hidden="true">${k < lives ? '●' : '○'}</span>`).join(' ');
+      const flash = p.eliminated ? `<div class="flash bust">ELIMINATED</div>` : '';
+      return `<div class="pcard ${active?'active':''}${p.eliminated?' bust':''}">
+        ${flash}
+        <div>
+          <div class="prow1">
+            <span class="pname">${escapeHtml(p.name)}</span>
+            <span class="ptag">№ ${num(p.number)}${p.isKiller?' · 🔪 KILLER':''}</span>
+            ${active?'<span class="throwflag">▸ throwing</span>':''}
+          </div>
+          <div class="score" aria-label="${lives} of ${livesTarget} lives">${pips || '—'}</div>
+        </div>
+        <div class="meta"><span class="standing">${num(p.kills)} kill${num(p.kills)===1?'':'s'}</span></div>
+      </div>`;
+    },
+    summary(p){
+      return `
+      <div class="sum-card ${p.won?'winner':''}">
+        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}${p.eliminated?' <span style="opacity:.7">☠️</span>':''}</div>
+        <div class="sum-stats">
+          <div class="sum-stat">
+            <div class="sv">№ ${num(p.number)}</div>
+            <div class="sl">Number</div>
+          </div>
+          <div class="sum-stat">
+            <div class="sv">${num(p.kills)}</div>
+            <div class="sl">Kills</div>
           </div>
         </div>
       </div>`;

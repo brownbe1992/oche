@@ -65,11 +65,10 @@
 > regression to the existing X01 leaderboards.
 >
 > **Not yet built**: Baseball (step 5). See "Suggested build order" below.
-> **Killer now has a full rules primer** (config schema, per-dart evaluation, win
-> condition, and its own open questions), grounded in dartscorner.com's published
-> ruleset — see "Killer" below. Design only, not started, and not yet added to the
-> suggested build order pending a priority decision (it's an alternative next
-> variant to Baseball, not a step after it).
+> **Killer is now built and shipped (2026-07)** — elimination-format H2H, per the
+> rules primer below (dartscorner.com's published ruleset). See "Killer"'s own
+> "Implementation notes" subsection for exactly how each open question was
+> resolved; full write-up in `REFERENCE.md` §28.
 >
 > **Doubles Practice is built (2026-07)** — the first of the two "Practice Drill
 > Modes" candidates below to ship. A genuinely different shape from every other
@@ -640,6 +639,69 @@ by ring throughout, in both directions:
   configurable**, or should it just be hardcoded to the sourced standard of 3
   since no variant has been requested yet? Leans toward configurable (cheap to
   build, matches X01's precedent of exposing this kind of number), not decided.
+
+### Implementation notes (2026-07, shipped)
+
+Built essentially as designed. The open questions above were resolved as follows:
+
+- **Minimum player count**: no dedicated block below 3 — Killer just requires
+  2+ players like every other H2H game type (a new `h2hOnly` flag, the inverse
+  of the existing `soloOnly` flag, keeps it off the practice/1-player New Game
+  list entirely). A 2-player game is allowed and does play out as "X01 with
+  extra steps," exactly as this doc anticipated, rather than being blocked.
+- **Number reassignment**: re-rolled every time, not persisted — numbers are
+  assigned inside `createGame()` fresh for every new game row (`assignKillerNumbers()`),
+  so a rematch/"Play again" (which always calls `startGame()` again) gets a
+  brand-new random assignment, resolving this doc's "leans toward re-roll" note.
+- **Turn order**: the existing player-entry-order convention, not a simulated
+  closest-to-bull throw-off — resolving this doc's other open lean.
+- **`config.lives` configurable**: yes — a New Game setup section offers 2/3/5,
+  defaulting to the sourced standard of 3.
+- **Config schema**: shipped as `{ lives, numbers: { <playerName>: <1-20> } }` —
+  keyed by player **name**, not player id, since `assignKillerNumbers()` zips
+  the shuffled 1-20 pool directly against the same name strings every other
+  part of the write path already keys on (turns, badges, stats).
+- **Scoring screen**: the existing interactive Dartboard SVG is reused
+  unmodified, confirming this doc's suspicion — `throwDartKiller(sector, zone,
+  missZone, missDepth, bounced)` has the exact same signature as every other
+  per-dart-commit mode's handler (Doubles Practice, Just Chuckin' It), so no
+  new bespoke pad was needed.
+- **Per-dart evaluation required a genuine schema change, not just a code
+  wrinkle**: because one 3-dart visit's darts can each affect a *different*
+  player (a self-life-build on dart 1, an attack on dart 2), a single `turns`
+  row per *visit* could never represent it — this needed a new nullable
+  `turns.affected_player_id` column, one row per *dart* for this game type
+  only. Validated as an actual architectural necessity, not a convenience,
+  before building it.
+- **Live scoreboard**: shipped as designed — a new `renderers.killer` card
+  (number, lives as pips with an `aria-label` stating the exact count, killer
+  status, a distinct "ELIMINATED" state) plus `game.legSummary`'s own
+  Killer-shaped branch for the end-of-leg summary cards.
+- **Stats**: shipped `GAME_TYPES.killer.statDefs` (games played, win rate, avg
+  kills/leg, avg lives lost/leg, and the "survived without becoming a killer"
+  curiosity stat this doc floated), a Personal Best (most kills in a leg), and
+  a win-rate leaderboard (reusing `getBaseballWinLeaderboard()`'s exact shape,
+  since Killer has a real `games.winner_id` the way Baseball does).
+- **Achievements**: all three floated ideas shipped exactly as sketched — 🩸
+  First Blood (first elimination of the match), 🛡️ Untouchable (won without
+  ever losing a life), 🙈 Own Worst Enemy (eliminated via your own double).
+- **Accessibility**: life count is pips + an `aria-label` stating the exact
+  count, never color-only; killer/eliminated status is an icon + text label
+  (🔪 Killer / ☠️ Eliminated), not a color signal.
+
+**Deliberately out of scope, decided during the build (not covered by this
+doc's own open questions)**: **no save/resume support** — `SAVABLE_GAME_TYPES`
+does not include `killer`, unlike every other H2H game type. Mid-match state
+(who's a killer, remaining lives, who's eliminated) is fully re-derivable from
+replaying `turns` either way, so this is a scope call, not a technical
+limitation — worth revisiting if it's ever requested. Turn-order enforcement
+(rejecting a turn from a player who isn't actually up next) was also left out
+of the write-time consistency guard, matching the existing precedent that no
+guard in this app enforces turn order, only arithmetic.
+
+Full write-up: `REFERENCE.md` §28; committed tests in
+`backend/test/scoring.test.js`, `backend/test/db.turn-consistency-guard.test.js`,
+`backend/test/db.killer-stats.test.js`.
 
 ## Other known variants (backlog, not designed yet)
 

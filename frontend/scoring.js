@@ -1059,6 +1059,119 @@ function rebuildGauntletState({ turns }){
   };
 }
 
+/* ---------- Killer (docs/archive/game-modes-roadmap.md "Killer") ----------
+   Elimination-format H2H: each player is randomly assigned their own number
+   once per MATCH (not re-rolled per leg — the same assignment carries across
+   every leg, only a genuine new match/rematch re-rolls). Hitting your own
+   number builds lives toward becoming a "killer" — scaled by ring like every
+   other score in this app (single=1, double=2, treble=3). Once a killer,
+   hitting an OPPONENT's number removes lives from THEIR total at the same
+   scaled rate; hitting your own double again after becoming a killer costs a
+   flat 1 life (self-kill) — the one place the multiplier doesn't matter, and
+   a single/treble on your own number post-killer is a documented no-op.
+   Per-dart evaluation (the Doubles Practice precedent): a player can cross
+   the killer threshold on dart 1 of a visit and use darts 2-3 of that SAME
+   visit to attack, so turn-passing still happens per 3-dart visit (or
+   earlier, if a self-kill eliminates the thrower mid-visit) but each dart's
+   CONSEQUENCE is evaluated immediately, never batched like X01/Cricket. */
+const KILLER_DEFAULT_LIVES = 3;
+
+// Fisher-Yates over an injectable RNG (defaults to Math.random in production;
+// tests pass a deterministic one) so the shuffle itself stays unit-testable
+// without mocking the global Math object.
+function shuffleKillerNumbers(pool, rng){
+  const r = rng || Math.random;
+  const arr = pool.slice();
+  for(let i = arr.length - 1; i > 0; i--){
+    const j = Math.floor(r() * (i + 1));
+    const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+  }
+  return arr;
+}
+// Randomly assigns each player a distinct number 1-20 (docs/archive/game-modes-
+// roadmap.md: "assigning numbers randomly at Start is the pragmatic digital
+// equivalent" of the physical non-dominant-hand throw). Returns { [name]: number }.
+function assignKillerNumbers(names, rng){
+  const pool = shuffleKillerNumbers([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], rng);
+  const out = {};
+  names.forEach((name, i) => { out[name] = pool[i]; });
+  return out;
+}
+
+// Pure per-dart evaluation. `players` is every player in this leg (eliminated
+// ones included — their number stays theirs even after death, so an
+// already-eliminated player's number is still recognized, just a no-op to
+// hit) as {name, number, lives, isKiller, eliminated}. Returns null for a
+// dart that changes nothing at all (a miss, an unclaimed number, hitting an
+// already-eliminated player's number, or a post-killer non-double re-hit of
+// your own number) — the caller applies a non-null result's delta to
+// `affectedName`'s own lives (gain: add; loss: subtract, floored at 0).
+function evaluateDartKiller(dart, throwerName, players){
+  const thrower = players.find(p => p.name === throwerName);
+  const hitPlayer = players.find(p => p.number === dart.sector);
+  if(!hitPlayer || hitPlayer.eliminated) return null;
+
+  if(hitPlayer.name === throwerName){
+    if(!thrower.isKiller){
+      return { affectedName: throwerName, delta: dart.mult, isGain: true, selfKill: false };
+    }
+    // Already a killer: only your own DOUBLE costs a life (flat 1, never
+    // scaled by multiplier) — a single/treble here is a documented no-op.
+    if(dart.isDouble) return { affectedName: throwerName, delta: 1, isGain: false, selfKill: true };
+    return null;
+  }
+
+  // Someone else's number — only a killer can attack.
+  if(!thrower.isKiller) return null;
+  return { affectedName: hitPlayer.name, delta: dart.mult, isGain: false, selfKill: false };
+}
+
+// Pure replay for the write-time consistency guard (backend/db.js): given
+// every prior dart thrown this leg (in order), reconstructs each player's
+// lives/killer/eliminated state and whether the leg has already been won.
+// Does NOT track "whose turn is next" — matching every other existing
+// consistency guard's scope (SEC-22/SEC-25 verify the ARITHMETIC of a
+// submitted turn, never enforce turn order server-side; the client is
+// trusted for sequencing the same way it already is everywhere else).
+// `turns`: ordered {throwerName, sector, mult} rows for one leg.
+// `numbers`: this match's own {name: number} assignment (leg-invariant).
+// `kills` (opponents THIS player personally eliminated via attack, never via
+// someone else's self-kill) and `livesLost` (total magnitude of losses this
+// player absorbed, attacks + self-kills combined) ride alongside each
+// player's own lives/killer/eliminated state — both needed for stats
+// (kills-per-game, avg lives lost per leg) as well as live display, derived
+// here once rather than recomputed by a second replay pass.
+function rebuildKillerState({ names, numbers, turns, threshold }){
+  const liveThreshold = threshold || KILLER_DEFAULT_LIVES;
+  const players = names.map(name => ({ name, number: numbers[name], lives: 0, isKiller: false, eliminated: false, kills: 0, livesLost: 0 }));
+  const byName = new Map(players.map(p => [p.name, p]));
+  let winner = null;
+  turns.forEach(t => {
+    if(winner) return; // defensive: no legitimate turn should exist after the leg's already won
+    const thrower = byName.get(t.throwerName);
+    if(!thrower || thrower.eliminated) return; // an eliminated player's turn can't affect anything
+    const dart = { sector: t.sector, mult: t.mult, isDouble: t.mult === 2 && t.sector !== 0 };
+    const ev = evaluateDartKiller(dart, t.throwerName, players);
+    if(ev){
+      const affected = byName.get(ev.affectedName);
+      if(ev.isGain){
+        affected.lives += ev.delta;
+        if(!affected.isKiller && affected.lives >= liveThreshold) affected.isKiller = true;
+      } else {
+        affected.lives = Math.max(0, affected.lives - ev.delta);
+        affected.livesLost += ev.delta;
+        if(affected.lives === 0 && !affected.eliminated){
+          affected.eliminated = true;
+          if(ev.affectedName !== t.throwerName) thrower.kills += 1;
+        }
+      }
+    }
+    const alive = players.filter(p => !p.eliminated);
+    if(alive.length === 1 && players.length > 1) winner = alive[0].name;
+  });
+  return { players, winner };
+}
+
 // Around the World (solo, guided drill) — no round/leg concept at all (one
 // continuous stream, set_no=leg_no=1 for the whole session, same as Just
 // Chuckin' It). Its real lifetime progress is refetched fresh at resume time
@@ -1094,5 +1207,6 @@ if (typeof module !== 'undefined' && module.exports) {
     rebuildCheckoutLadderState,
     GAUNTLET_STATION_ORDER, evaluateGauntletStation, gauntletTotalScars, gauntletResultTier,
     rebuildGauntletState,
+    KILLER_DEFAULT_LIVES, shuffleKillerNumbers, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
   };
 }

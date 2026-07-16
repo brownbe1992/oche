@@ -754,6 +754,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/stats/elo-leaderboard' && m === 'GET') return send(res, 200, db.getEloLeaderboard());
     if (p === '/api/stats/checkout-ladder-leaderboard' && m === 'GET') return send(res, 200, db.getCheckoutLadderLeaderboard());
     if (p === '/api/stats/gauntlet-leaderboard' && m === 'GET') return send(res, 200, db.getGauntletLeaderboard());
+    if (p === '/api/stats/killer-wins' && m === 'GET') return send(res, 200, db.getKillerWinLeaderboard());
     if (p === '/api/stats/around-the-clock-fastest' && m === 'GET') return send(res, 200, db.getAroundTheClockFastestLeaderboard());
     if (p === '/api/stats/around-the-clock-completions' && m === 'GET') return send(res, 200, db.getAroundTheClockCompletionsLeaderboard());
     if (p === '/api/stats/around-the-world-progress' && m === 'GET') return send(res, 200, db.getAroundTheWorldLeaderboard());
@@ -779,6 +780,7 @@ const server = http.createServer(async (req, res) => {
         : gameType === 'bobs_27' ? db.getBobs27PersonalBests(name, mode)
         : gameType === 'checkout_ladder' ? db.getCheckoutLadderPersonalBests(name, mode)
         : gameType === 'gauntlet' ? db.getGauntletPersonalBests(name, mode)
+        : gameType === 'killer' ? db.getKillerPersonalBests(name, mode)
         : gameType === 'baseball' ? db.getBaseballPersonalBests(name, mode)
         : gameType === 'doubles_practice' ? db.getDoublesPracticePersonalBests(name, mode)
         : gameType === 'chuckin' ? db.getChuckinPersonalBests(name, mode)
@@ -800,6 +802,7 @@ const server = http.createServer(async (req, res) => {
         : gameType === 'bobs_27' ? db.getBobs27StatBubbles(name, mode)
         : gameType === 'checkout_ladder' ? db.getCheckoutLadderStatBubbles(name, mode)
         : gameType === 'gauntlet' ? db.getGauntletStatBubbles(name, mode)
+        : gameType === 'killer' ? db.getKillerStatBubbles(name, mode)
         : db.getPlayerStatBubbles(name, mode));
     }
     if (p === '/api/players/gauntlet-scar-map' && m === 'GET') {

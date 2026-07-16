@@ -585,6 +585,171 @@ describe('addTurn — The Gauntlet sequence/repeat-count/scored-range must match
   });
 });
 
+describe('createGame — Killer number assignment/validation (docs/archive/game-modes-roadmap.md "Killer")', () => {
+  test('rejects fewer than 2 players', () => {
+    db.addPlayer('K_Solo');
+    assert.throws(() => db.createGame({
+      category: 'Killer', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'killer', players: [{ name: 'K_Solo' }],
+    }), (err) => err.status === 400);
+  });
+
+  test('rejects an out-of-range or non-integer lives threshold', () => {
+    db.addPlayer('K_LivesA'); db.addPlayer('K_LivesB');
+    const mk = (lives) => () => db.createGame({
+      category: 'Killer', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'killer', config: { lives }, players: [{ name: 'K_LivesA' }, { name: 'K_LivesB' }],
+    });
+    assert.throws(mk(0), (err) => err.status === 400);
+    assert.throws(mk(21), (err) => err.status === 400);
+    assert.throws(mk(2.5), (err) => err.status === 400);
+  });
+
+  test('defaults lives to 3 when omitted, and assigns every player a distinct number 1-20 -- never trusting a client-submitted numbers map', () => {
+    db.addPlayer('K_AssignA'); db.addPlayer('K_AssignB'); db.addPlayer('K_AssignC');
+    const { config } = db.createGame({
+      category: 'Killer', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'killer',
+      config: { numbers: { K_AssignA: 1, K_AssignB: 1, K_AssignC: 1 } }, // hostile/bogus -- must be ignored entirely
+      players: [{ name: 'K_AssignA' }, { name: 'K_AssignB' }, { name: 'K_AssignC' }],
+    });
+    assert.equal(config.lives, 3);
+    const values = ['K_AssignA','K_AssignB','K_AssignC'].map(n => config.numbers[n]);
+    assert.equal(new Set(values).size, 3, 'every player got a distinct number -- the bogus duplicate submission was ignored');
+    values.forEach(v => assert.ok(v >= 1 && v <= 20));
+  });
+
+  test('a valid custom lives threshold is honored', () => {
+    db.addPlayer('K_CustomA'); db.addPlayer('K_CustomB');
+    const { config } = db.createGame({
+      category: 'Killer', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'killer', config: { lives: 5 }, players: [{ name: 'K_CustomA' }, { name: 'K_CustomB' }],
+    });
+    assert.equal(config.lives, 5);
+  });
+});
+
+describe('addTurn — Killer scored/affectedPlayer must match the derived life-change, when opted in (docs/archive/game-modes-roadmap.md "Killer")', () => {
+  function killerGame(names, lives) {
+    return db.createGame({
+      category: 'Killer', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'killer', config: lives ? { lives } : {}, players: names.map(name => ({ name })),
+    });
+  }
+  function kt(gameId, player, sector, mult, { scored, affectedPlayer = null } = {}) {
+    return db.addTurn(gameId, {
+      player, set: 1, leg: 1, scored, bust: false, checkout: false, checkoutPoints: null, affectedPlayer,
+      darts: [{ dartNo: 1, sector, multiplier: mult }],
+    }, STRICT);
+  }
+
+  test('accepts a legitimate own-number gain (single = 1 life)', () => {
+    db.addPlayer('K_A'); db.addPlayer('K_B');
+    const { gameId, config } = killerGame(['K_A', 'K_B']);
+    const a = config.numbers.K_A;
+    assert.doesNotThrow(() => kt(gameId, 'K_A', a, 1, { scored: 1, affectedPlayer: 'K_A' }));
+  });
+
+  test('rejects a scored magnitude that does not match the dart\'s own ring', () => {
+    db.addPlayer('K_C'); db.addPlayer('K_D');
+    const { gameId, config } = killerGame(['K_C', 'K_D']);
+    const c = config.numbers.K_C;
+    assert.throws(() => kt(gameId, 'K_C', c, 3, { scored: 1, affectedPlayer: 'K_C' }), (err) => err.status === 400);
+  });
+
+  test('rejects checkout=true and bust=true (Killer has neither concept)', () => {
+    db.addPlayer('K_E'); db.addPlayer('K_F');
+    const { gameId, config } = killerGame(['K_E', 'K_F']);
+    const e = config.numbers.K_E;
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'K_E', set: 1, leg: 1, scored: 1, bust: false, checkout: true, checkoutPoints: 1, affectedPlayer: 'K_E',
+      darts: [{ dartNo: 1, sector: e, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400);
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'K_E', set: 1, leg: 1, scored: 1, bust: true, checkout: false, checkoutPoints: null, affectedPlayer: 'K_E',
+      darts: [{ dartNo: 1, sector: e, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('rejects more than 1 dart in a single turn (per-dart evaluation only)', () => {
+    db.addPlayer('K_G'); db.addPlayer('K_H');
+    const { gameId, config } = killerGame(['K_G', 'K_H']);
+    const g = config.numbers.K_G;
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'K_G', set: 1, leg: 1, scored: 1, bust: false, checkout: false, checkoutPoints: null, affectedPlayer: 'K_G',
+      darts: [{ dartNo: 1, sector: g, multiplier: 1 }, { dartNo: 2, sector: g, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('rejects attacking an opponent before becoming a killer', () => {
+    db.addPlayer('K_I'); db.addPlayer('K_J');
+    const { gameId, config } = killerGame(['K_I', 'K_J']);
+    const j = config.numbers.K_J;
+    assert.throws(() => kt(gameId, 'K_I', j, 1, { scored: 1, affectedPlayer: 'K_J' }), (err) => err.status === 400);
+  });
+
+  test('accepts a legitimate attack once a killer, at the correct scaled magnitude, against the correct opponent', () => {
+    db.addPlayer('K_K'); db.addPlayer('K_L');
+    const { gameId, config } = killerGame(['K_K', 'K_L']);
+    const k = config.numbers.K_K, l = config.numbers.K_L;
+    kt(gameId, 'K_K', k, 3, { scored: 3, affectedPlayer: 'K_K' }); // K_K becomes a killer (3 lives)
+    assert.doesNotThrow(() => kt(gameId, 'K_K', l, 2, { scored: 2, affectedPlayer: 'K_L' })); // attacks K_L for 2
+  });
+
+  test('rejects an attack claiming the wrong affected player', () => {
+    db.addPlayer('K_M'); db.addPlayer('K_N'); db.addPlayer('K_O');
+    const { gameId, config } = killerGame(['K_M', 'K_N', 'K_O']);
+    const m = config.numbers.K_M, n = config.numbers.K_N;
+    kt(gameId, 'K_M', m, 3, { scored: 3, affectedPlayer: 'K_M' }); // K_M becomes a killer
+    assert.throws(() => kt(gameId, 'K_M', n, 1, { scored: 1, affectedPlayer: 'K_O' }), (err) => err.status === 400, 'the dart actually hit K_N\'s number, not K_O\'s');
+  });
+
+  test('accepts a legitimate self-kill (own double after becoming a killer, flat 1 life)', () => {
+    db.addPlayer('K_P'); db.addPlayer('K_Q');
+    const { gameId, config } = killerGame(['K_P', 'K_Q']);
+    const p = config.numbers.K_P;
+    kt(gameId, 'K_P', p, 3, { scored: 3, affectedPlayer: 'K_P' }); // killer, 3 lives
+    assert.doesNotThrow(() => kt(gameId, 'K_P', p, 2, { scored: 1, affectedPlayer: 'K_P' })); // self-kill: flat 1, not 2
+  });
+
+  test('rejects claiming a self-kill\'s scored as the multiplier instead of the flat 1', () => {
+    db.addPlayer('K_R'); db.addPlayer('K_S');
+    const { gameId, config } = killerGame(['K_R', 'K_S']);
+    const r = config.numbers.K_R;
+    kt(gameId, 'K_R', r, 3, { scored: 3, affectedPlayer: 'K_R' }); // killer, 3 lives
+    assert.throws(() => kt(gameId, 'K_R', r, 2, { scored: 2, affectedPlayer: 'K_R' }), (err) => err.status === 400);
+  });
+
+  test('a single/treble on your own number again post-killer is a no-op -- rejects a nonzero claim', () => {
+    db.addPlayer('K_T'); db.addPlayer('K_U');
+    const { gameId, config } = killerGame(['K_T', 'K_U']);
+    const t = config.numbers.K_T;
+    kt(gameId, 'K_T', t, 3, { scored: 3, affectedPlayer: 'K_T' }); // killer
+    assert.throws(() => kt(gameId, 'K_T', t, 1, { scored: 1, affectedPlayer: 'K_T' }), (err) => err.status === 400);
+    assert.doesNotThrow(() => kt(gameId, 'K_T', t, 1, { scored: 0, affectedPlayer: null }));
+  });
+
+  test('rejects any turn from an already-eliminated player', () => {
+    db.addPlayer('K_V'); db.addPlayer('K_W');
+    const { gameId, config } = killerGame(['K_V', 'K_W']);
+    const v = config.numbers.K_V, w = config.numbers.K_W;
+    kt(gameId, 'K_V', v, 3, { scored: 3, affectedPlayer: 'K_V' }); // K_V killer
+    kt(gameId, 'K_W', w, 1, { scored: 1, affectedPlayer: 'K_W' }); // K_W builds 1 life
+    kt(gameId, 'K_V', w, 1, { scored: 1, affectedPlayer: 'K_W' }); // K_V attacks K_W's last life -> eliminated, K_V wins
+    assert.throws(() => kt(gameId, 'K_W', w, 1, { scored: 0, affectedPlayer: null }), (err) => err.status === 400, 'K_W is eliminated and the leg is already won');
+  });
+
+  test('rejects any turn once the leg has already been won', () => {
+    db.addPlayer('K_X'); db.addPlayer('K_Y');
+    const { gameId, config } = killerGame(['K_X', 'K_Y']);
+    const x = config.numbers.K_X, y = config.numbers.K_Y;
+    kt(gameId, 'K_X', x, 3, { scored: 3, affectedPlayer: 'K_X' });
+    kt(gameId, 'K_Y', y, 1, { scored: 1, affectedPlayer: 'K_Y' });
+    kt(gameId, 'K_X', y, 1, { scored: 1, affectedPlayer: 'K_Y' }); // eliminates K_Y, K_X wins
+    assert.throws(() => kt(gameId, 'K_X', x, 1, { scored: 0, affectedPlayer: null }), (err) => err.status === 400);
+  });
+});
+
 describe('SEC-22 — the real HTTP trust boundary enforces this even though addTurn() itself defaults off', () => {
   const SERVER_PATH = path.join(__dirname, '..', 'server.js');
 

@@ -50,6 +50,7 @@ convention in `CLAUDE.md`.
 - [25. Handicapping](#25-handicapping)
 - [26. 121 Checkout Ladder](#26-121-checkout-ladder)
 - [27. The Gauntlet](#27-the-gauntlet)
+- [28. Killer](#28-killer)
 
 ---
 
@@ -5394,3 +5395,176 @@ blanking its stat bubble values. Fixed in the same change (both lines added
 together) rather than left for a future session to rediscover — the same
 class of gap BUG-26 was for the badge-label maps, just for the bubble-key
 maps instead.
+
+## 28. Killer
+
+`docs/game-modes-roadmap.md`'s "Killer" section (ruleset sourced from
+dartscorner.com's published rules). Elimination-format **H2H** — the only
+game type in this app whose set of legal per-player targets isn't fixed or
+shared: each player is randomly assigned their own number, 1-20, when the
+match starts. Real best-of-N legs/sets (like Cricket/Baseball), never forced
+to 1 the way every solo drill in this app is — Killer never appears in the
+1-player/practice New Game context at all (a new `h2hOnly` flag on
+`GAME_TYPES`, the inverse of the existing `soloOnly` flag).
+
+### Number assignment (`assignKillerNumbers`, `frontend/scoring.js`)
+
+Assigned **server-side**, inside `createGame()` (`backend/db.js`) — never
+trusted from the client. A Fisher-Yates shuffle (`shuffleKillerNumbers`, an
+injectable-RNG pure function so it's deterministically testable) of the pool
+`[1..20]`, zipped one-to-one against the match's player names. Assigned once
+per **match** (not re-derived per leg — `resetPlayerForNextLegKiller()`
+explicitly preserves `player.number` while resetting every other per-leg
+field), and re-rolled fresh on every new game row — a rematch/"Play again"
+always calls `startGame()` → `createGame()` again, so it gets a brand-new
+random assignment rather than reusing the previous match's numbers.
+`createGame()`'s return value carries the assignment back to the client as
+`config.numbers` (`{playerName: number}`) — the *only* way the client ever
+learns them; `DB.beginGame()` (`frontend/index.html`) assigns each
+`game.players[i].number` from that response before the scoreboard's first
+render.
+
+### Becoming a killer, and attacking (`evaluateDartKiller`, `frontend/scoring.js`)
+
+Every player starts at **0 lives** on their own number. Hitting your own
+number scores lives at the same rate every ring scores elsewhere in this
+app — single = 1, double = 2, treble = 3. The instant a player's own-number
+life total reaches the match's own `config.lives` threshold (2, 3, or 5 —
+chosen at New Game setup; 3 is the sourced standard default), they become a
+**killer** and can start attacking. Until then, every dart at anyone else's
+number is a no-op. Once a killer, hitting an **opponent's** assigned number
+removes lives from their total at the identical rate (single = −1, double =
+−2, treble = −3) — this directly mirrors the multiplier, not a flat
+per-hit cost. **Self-kill**: hitting your own **double** after you're already
+a killer costs exactly **1 life**, a flat cost never scaled by multiplier —
+hitting your own single/treble again post-threshold is a no-op. A player
+reduced to 0 lives is eliminated immediately, mid-visit if that's when it
+happens; the last player left with lives > 0 wins the leg the instant every
+other player hits 0 — this can end a leg mid-round, unlike X01/Cricket where
+the round always finishes for players who already went.
+
+`evaluateDartKiller(dart, throwerName, players)` is a **per-dart**
+evaluation, not a batched 3-dart visit — the same architectural pattern
+Doubles Practice established, required here because a single visit's three
+darts can each affect a **different** player (a self-life-build on dart 1,
+an attack on a different opponent on dart 2). It returns `null` for a no-op
+dart, or `{affectedName, delta, isGain, selfKill}` describing exactly whose
+life total changes and by how much; `rebuildKillerState({names, numbers,
+turns, threshold})` replays a whole leg's turns through it to derive
+lives/`isKiller`/`eliminated`/kills for every player at any point in the
+turn history — shared identically by the write-time consistency guard and
+every stats query.
+
+### Data model
+
+Because one visit's darts can each affect a different player, a single
+`turns` row per **visit** could never represent Killer's own effects — this
+needed a genuine schema change, not just new application logic. A new
+nullable `turns.affected_player_id` column (FK to `players`) records which
+player a dart's life-change landed on; only Killer ever populates it. As a
+consequence, Killer stores **one `turns` row per dart** (not per visit) —
+the one game type in this app that does. `turns.scored` stores the plain
+non-negative magnitude of the change (0-3); direction (gain vs. loss) is
+never stored, only derived by replaying `evaluateDartKiller()` again at read
+time. `checkout`/`bust` are always false (Killer has neither concept).
+`games.config` stores `{lives, numbers: {playerName: 1-20}}` — keyed by
+player **name**, not id, matching every other part of the write path
+(turns, badges, stats) that already keys on name.
+
+### Write-time validation (`addTurn()`, `backend/db.js`)
+
+Validates `checkout=false`/`bust=false`/`scored` in 0-3/exactly one dart per
+turn, then replays the leg's full turn history via `rebuildKillerState()`
+and rejects the incoming turn unless its claimed `affectedPlayer`/`scored`
+exactly matches `evaluateDartKiller()`'s own independently-computed
+expectation for that dart. Also rejects a turn once the leg already has a
+winner, or if the thrower is already eliminated. Turn-order itself (whether
+this player is really "next") is **not** enforced — matching the existing
+precedent that no consistency guard in this app enforces turn order, only
+arithmetic.
+
+### Engine (`frontend/index.html`)
+
+Per-dart commit, no staged "Enter Turn" step — `throwDartKiller(sector,
+zone, missZone, missDepth, bounced)` has the identical signature every other
+per-dart-commit mode's handler does (Doubles Practice, Just Chuckin' It), so
+the existing interactive Dartboard SVG scoring screen is reused unmodified;
+no bespoke Killer pad was needed. A "visit" is still up to 3 darts (fewer if
+the thrower self-eliminates early) before turn passes to the next
+non-eliminated player — `game.killerDartsThisVisit` tracks progress through
+it, and `advanceKillerTurn()` skips eliminated players (a static
+`(current+1)%n` the way X01 advances doesn't work here). `onKillerLegWon()`
+mirrors `onLegWonBaseball()`'s own legs/sets/match tree (Killer gets its own
+bespoke leg-win handler, not the generic X01 one, since X01's assumes
+X01-shaped player fields). Undo (`undoLastTurnKiller()`) restores both the
+thrower's and the affected player's state from a single snapshot — same
+"can't undo past a visit boundary" rule every other game type follows.
+
+### Live scoreboard
+
+The one new game type this batch with live-scoreboard sync (`pushLive()`
+calls throughout `throwDartKiller`/`advanceKillerTurn`/`renderGameKiller`).
+`renderers.killer` (`display.html`) renders one card per player: number,
+lives as pips (`●`/`○`) with an `aria-label` stating the exact count (never
+color-only), killer status (🔪), and a distinct "ELIMINATED" flash state —
+mirroring `renderGameKiller()`'s own in-game content. `game.legSummary` has
+its own Killer-shaped branch (number, kills, eliminated, won) for the
+end-of-leg summary cards, rather than falling through to X01's shape.
+
+### Stats, Personal Bests, Home leaderboard
+
+- **Stat bubbles** (`getKillerStatBubbles`): games played, win rate (from
+  `games.winner_id`, the same source Baseball's win rate uses), average
+  kills per leg, average lives lost per leg, and "survived without becoming
+  a killer" rate (rode out the whole leg alive, never crossing the
+  threshold) — all derived from leg replay via `rebuildKillerState()`.
+- **Personal Best** (`getKillerPersonalBests`): most kills in a single leg
+  (`MAX()` across every leg played).
+- **Home leaderboard** (`getKillerWinLeaderboard`): one row per player,
+  `{name, played, won, rate}` — reuses `getBaseballWinLeaderboard()`'s exact
+  shape unmodified, since Killer has a real `games.winner_id` the way
+  Baseball does (unlike Gauntlet/Checkout Ladder, which have no opponent to
+  win against).
+
+### Achievements
+
+Three one-off, all-recurring badges (no lifetime ladder, unlike Gauntlet/Bob's
+27) — 🩸 **First Blood** (the match's first elimination, whichever leg it
+happens in — `game.killerFirstBloodAwarded` lives on the game object itself,
+never reset per leg, so it fires at most once per match), 🛡️ **Untouchable**
+(win the match having never lost a single life across any leg —
+`gameLivesLost` is match-lifetime, never reset by
+`resetPlayerForNextLegKiller()`), and 🙈 **Own Worst Enemy** (eliminate
+yourself via your own double after becoming a killer).
+
+### Deliberately out of scope: no save/resume support
+
+Unlike every other H2H game type, `SAVABLE_GAME_TYPES` does not include
+`killer`. Mid-match state is fully re-derivable from replaying `turns`
+either way (`rebuildKillerState()` already does exactly this for stats), so
+this is a scope decision, not a technical limitation — worth revisiting if
+ever requested.
+
+### Testing
+
+`backend/test/scoring.test.js`: `shuffleKillerNumbers`/`assignKillerNumbers`'s
+even distribution and no-duplicates guarantee, `evaluateDartKiller()`'s full
+matrix (own-number builds at each multiplier, attacks at each multiplier,
+self-kill on double only, no-ops on an eliminated target or a post-threshold
+single/treble on your own number), and `rebuildKillerState()`'s lives/killer/
+eliminated/kills/winner derivation across a full leg. `backend/test/db.turn-
+consistency-guard.test.js`: `createGame()`'s number-assignment validation
+(min 2 distinct names, `lives` range), and the full scored/affectedPlayer
+guard matrix. `backend/test/db.killer-stats.test.js`: all three stats/PB/
+leaderboard functions, including the zeroed/null shape for a player with no
+Killer history. Verified end-to-end with Playwright: the New Game setup flow
+(lives-threshold selector, H2H-only visibility), random distinct number
+assignment surfaced via `DB.beginGame()`'s `config.numbers` handling, a
+single treble instantly clearing the become-a-killer threshold, an attack
+eliminating an opponent (including the degenerate case of eliminating a
+player who never built any lives), First Blood and Untouchable firing
+correctly, a full multi-leg best-of-N match playing out to the correct
+winner (leg wins that don't reach `legsPerSet` correctly stop at "LEG
+COMPLETE" rather than ending the match), the GAME OVER summary panel, stat
+bubbles/Personal Best/win leaderboard via the API, and the live `/display`
+`renderers.killer` card (number, lives-as-pips, throwing indicator).

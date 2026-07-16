@@ -20,7 +20,8 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   CHECKOUT_TRAINER_TRICK_CHANCE, listUnsolvableTargets, gradeCheckoutDeclaration,
   rebuildX01State, rebuildCricketState, rebuildBaseballState,
   rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State, rebuildCheckoutLadderState,
-  GAUNTLET_STATION_ORDER, evaluateGauntletStation, gauntletTotalScars, gauntletResultTier, rebuildGauntletState } = scoring;
+  GAUNTLET_STATION_ORDER, evaluateGauntletStation, gauntletTotalScars, gauntletResultTier, rebuildGauntletState,
+  KILLER_DEFAULT_LIVES, shuffleKillerNumbers, assignKillerNumbers, evaluateDartKiller, rebuildKillerState } = scoring;
 
 // Shorthand for building a rebuild-function turn record: v(playerIndex, setNo,
 // legNo, [[sector,mult], ...]) — mirrors the {playerIndex,setNo,legNo,darts}
@@ -1558,6 +1559,156 @@ describe('rebuildGauntletState (docs/archive/saved-games-roadmap.md, pure replay
     assert.equal(r.done, true);
     assert.equal(r.totalScars, 0);
     assert.equal(r.currentStation, undefined);
+  });
+});
+
+describe('assignKillerNumbers / shuffleKillerNumbers (docs/archive/game-modes-roadmap.md "Killer")', () => {
+  test('shuffleKillerNumbers returns a permutation of the input (same multiset), deterministic given a fixed rng', () => {
+    let calls = 0;
+    const fixedRng = () => { calls++; return 0; };
+    const shuffled = shuffleKillerNumbers([1,2,3,4,5], fixedRng);
+    assert.deepEqual([...shuffled].sort((a,b)=>a-b), [1,2,3,4,5], 'same multiset, just reordered');
+    assert.equal(calls, 4, 'Fisher-Yates makes n-1 rng calls for n items');
+  });
+
+  test('assignKillerNumbers gives every player a distinct number from 1-20', () => {
+    const names = ['Alice','Bob','Carol','Dave'];
+    const assignment = assignKillerNumbers(names);
+    const values = names.map(n => assignment[n]);
+    assert.equal(new Set(values).size, names.length, 'no two players share a number');
+    values.forEach(v => assert.ok(v >= 1 && v <= 20, `number ${v} out of 1-20 range`));
+  });
+
+  test('assignKillerNumbers is reproducible given the same seeded rng sequence', () => {
+    const seq = [0.1, 0.2, 0.3];
+    let i = 0;
+    const rng = () => seq[i++ % seq.length];
+    const a = assignKillerNumbers(['A','B','C'], rng);
+    i = 0;
+    const b = assignKillerNumbers(['A','B','C'], rng);
+    assert.deepEqual(a, b);
+  });
+});
+
+describe('evaluateDartKiller (docs/archive/game-modes-roadmap.md "Killer")', () => {
+  const mkPlayers = (overrides) => {
+    const base = [
+      { name:'A', number:5,  lives:0, isKiller:false, eliminated:false },
+      { name:'B', number:9,  lives:0, isKiller:false, eliminated:false },
+      { name:'C', number:14, lives:0, isKiller:false, eliminated:false },
+    ];
+    return base.map(p => Object.assign({}, p, overrides && overrides[p.name]));
+  };
+
+  test('pre-killer, hitting your own number builds lives scaled by ring (single=1, double=2, treble=3)', () => {
+    const players = mkPlayers();
+    assert.deepEqual(evaluateDartKiller(d(5,1), 'A', players), { affectedName:'A', delta:1, isGain:true, selfKill:false });
+    assert.equal(evaluateDartKiller(d(5,3), 'A', players).delta, 3);
+  });
+
+  test('pre-killer, hitting an opponent\'s number is a no-op — can\'t attack until you\'re a killer', () => {
+    const players = mkPlayers();
+    assert.equal(evaluateDartKiller(d(9,2), 'A', players), null);
+  });
+
+  test('a miss or an unclaimed number is a no-op', () => {
+    const players = mkPlayers();
+    assert.equal(evaluateDartKiller(d(0,1), 'A', players), null);
+    assert.equal(evaluateDartKiller(d(20,1), 'A', players), null); // 20 is unassigned in this fixture
+  });
+
+  test('once a killer, hitting an opponent\'s number removes lives at the same scaled rate', () => {
+    const players = mkPlayers({ A: { isKiller:true, lives:3 } });
+    assert.deepEqual(evaluateDartKiller(d(9,3), 'A', players), { affectedName:'B', delta:3, isGain:false, selfKill:false });
+  });
+
+  test('once a killer, hitting your own DOUBLE costs a flat 1 life (self-kill), never scaled by multiplier', () => {
+    const players = mkPlayers({ A: { isKiller:true, lives:3 } });
+    assert.deepEqual(evaluateDartKiller(d(5,2), 'A', players), { affectedName:'A', delta:1, isGain:false, selfKill:true });
+  });
+
+  test('once a killer, a single or treble on your own number again is a no-op', () => {
+    const players = mkPlayers({ A: { isKiller:true, lives:3 } });
+    assert.equal(evaluateDartKiller(d(5,1), 'A', players), null);
+    assert.equal(evaluateDartKiller(d(5,3), 'A', players), null);
+  });
+
+  test('hitting an already-eliminated player\'s number is a no-op, even for a killer', () => {
+    const players = mkPlayers({ A: { isKiller:true, lives:3 }, B: { eliminated:true, lives:0 } });
+    assert.equal(evaluateDartKiller(d(9,1), 'A', players), null);
+  });
+});
+
+describe('rebuildKillerState (docs/archive/game-modes-roadmap.md "Killer", pure replay)', () => {
+  const kt = (throwerName, sector, mult) => ({ throwerName, sector, mult });
+
+  test('an empty turn history: everyone at 0 lives, nobody a killer, no winner', () => {
+    const r = rebuildKillerState({ names:['A','B'], numbers:{A:5,B:9}, turns:[] });
+    assert.equal(r.winner, null);
+    assert.deepEqual(r.players.map(p=>p.lives), [0,0]);
+    assert.deepEqual(r.players.map(p=>p.isKiller), [false,false]);
+  });
+
+  test('a treble on the first dart makes a player an instant killer (3 >= default threshold)', () => {
+    const r = rebuildKillerState({ names:['A','B'], numbers:{A:5,B:9}, turns:[ kt('A',5,3) ] });
+    const a = r.players.find(p=>p.name==='A');
+    assert.equal(a.lives, 3);
+    assert.equal(a.isKiller, true);
+  });
+
+  test('a killer attacking an opponent down to exactly 0 lives eliminates them and ends a 2-player match', () => {
+    const turns = [
+      kt('A',5,3),   // A: treble own number -> 3 lives, killer
+      kt('B',9,1),   // B: single own number -> 1 life (not yet a killer)
+      kt('A',9,1),   // A attacks B for 1 -> B: 1-1=0 -> eliminated -> A is last one standing
+    ];
+    const r = rebuildKillerState({ names:['A','B'], numbers:{A:5,B:9}, turns });
+    assert.equal(r.winner, 'A');
+    const b = r.players.find(p=>p.name==='B');
+    assert.equal(b.lives, 0);
+    assert.equal(b.eliminated, true);
+    assert.equal(b.livesLost, 1);
+    const a = r.players.find(p=>p.name==='A');
+    assert.equal(a.kills, 1, "A's attack eliminated B -- a real kill");
+  });
+
+  test('a self-kill (own double after becoming a killer) can eliminate the thrower themselves, and does NOT count as a kill for anyone', () => {
+    const turns = [
+      kt('A',5,3),   // A: treble own -> 3 lives, killer
+      kt('B',9,3),   // B: treble own -> 3 lives, killer (so it isn't already over)
+      kt('B',5,2),   // B attacks A's number for 2 -> A: 3-2=1 life, still a killer
+      kt('A',5,2),   // A hits own double (already a killer) -> self-kill, -1 -> A: 1-1=0, eliminated
+    ];
+    const r = rebuildKillerState({ names:['A','B'], numbers:{A:5,B:9}, turns });
+    const a = r.players.find(p=>p.name==='A');
+    assert.equal(a.lives, 0);
+    assert.equal(a.eliminated, true);
+    assert.equal(a.livesLost, 3, "A lost 2 to B's attack + 1 to the self-kill = 3 total");
+    assert.equal(a.kills, 0, "A never eliminated anyone -- the self-kill doesn't count as B's kill either");
+    const b = r.players.find(p=>p.name==='B');
+    assert.equal(b.kills, 0, "B's own attack only brought A to 1 life, not 0 -- B never actually landed the elimination");
+    assert.equal(r.winner, 'B');
+  });
+
+  test('threshold is configurable — a lower lives threshold makes killer status kick in sooner', () => {
+    const turns = [ kt('A',5,2) ]; // double own number -> 2 lives
+    const withDefault = rebuildKillerState({ names:['A','B'], numbers:{A:5,B:9}, turns });
+    assert.equal(withDefault.players.find(p=>p.name==='A').isKiller, false, 'default threshold is 3 -- 2 lives isn\'t enough yet');
+    const withThreshold2 = rebuildKillerState({ names:['A','B'], numbers:{A:5,B:9}, turns, threshold:2 });
+    assert.equal(withThreshold2.players.find(p=>p.name==='A').isKiller, true);
+  });
+
+  test('a turn thrown by an already-eliminated player is ignored (defensive replay)', () => {
+    const turns = [
+      kt('A',5,3),  // A killer, 3 lives
+      kt('B',9,3),  // B killer, 3 lives
+      kt('B',5,3),  // B attacks A for 3 -> A eliminated, B wins
+      kt('A',9,1),  // A (already eliminated) somehow throws again -- must be a no-op
+    ];
+    const r = rebuildKillerState({ names:['A','B'], numbers:{A:5,B:9}, turns });
+    assert.equal(r.winner, 'B');
+    const b = r.players.find(p=>p.name==='B');
+    assert.equal(b.lives, 3, "the eliminated player's bogus extra turn had no effect");
   });
 });
 

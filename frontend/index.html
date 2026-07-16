@@ -798,6 +798,23 @@
           <div class="cricket-number-grid" id="doubles-target-grid" role="group" aria-label="Doubles to practice"></div>
         </div>
 
+        <!-- Killer options (Killer game type only, docs/archive/game-modes-roadmap.md
+             "Killer") — each player is randomly assigned their own number when the
+             match starts (re-rolled for a rematch, never re-shown/editable here —
+             there's nothing to configure about the assignment itself, only the
+             become-a-killer lives threshold). -->
+        <div class="setup-section" id="killer-options-section" hidden>
+          <div class="setup-label">Killer options</div>
+          <p class="pp-meta" style="margin:0 0 8px">Each player is randomly assigned their own number when the match starts. Choose how many lives it takes to become a killer:</p>
+          <div class="opts" style="margin:0">
+            <div class="seg" role="group" aria-label="Killer lives threshold">
+              <button id="killer-lives-2" aria-pressed="false" onclick="setKillerLives(2)">2</button>
+              <button id="killer-lives-3" aria-pressed="true" onclick="setKillerLives(3)">3 (standard)</button>
+              <button id="killer-lives-5" aria-pressed="false" onclick="setKillerLives(5)">5</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Checkout Trainer sub-mode + difficulty (Checkout Trainer mode only —
              the intro paragraph itself now lives in Step 2's how-to-play blurb) -->
         <div class="setup-section" id="checkout-trainer-options-section" hidden>
@@ -1549,7 +1566,17 @@ const DB = {
       // docs/league-mode-roadmap.md "League fixtures / pending matches": an explicit
       // choice (New Game's "League Game" entry), not a re-validated hint the way the
       // old leagueId picker was — see docs/new-game-flow-roadmap.md.
-      leagueFixtureId:meta.leagueFixtureId}); this.gameId=r.gameId; }
+      leagueFixtureId:meta.leagueFixtureId}); this.gameId=r.gameId;
+      // Killer (docs/archive/game-modes-roadmap.md "Killer"): the server assigns
+      // each player's number randomly at createGame() time (never trusted from
+      // the client) and returns it as {name: number} on r.config.numbers — this
+      // is the only way the client ever learns them, so assign onto the actual
+      // game.players objects (meta === game, passed by reference) right here,
+      // before the scoreboard's first render.
+      if(r.config && r.config.numbers){
+        meta.players.forEach(p => { if(r.config.numbers[p.name] != null) p.number = r.config.numbers[p.name]; });
+      }
+    }
     catch(e){ logErr(e); this.gameId=null; }
   },
   // docs/bug-roadmap.md BUG-13: remembers the id of the turn this device's own last
@@ -1723,6 +1750,10 @@ let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, 
   doublesTargets:[], loadoutByName:{}, leagueFixtureId:null, pendingFixtures:[],
   checkoutTrainerMode:'freeform', checkoutTrainerDifficulty:'full', checkoutTrainerTricks:false,
   checkoutTrainerPin:null,
+  // Killer (docs/archive/game-modes-roadmap.md "Killer"): how many lives it takes
+  // to become a killer — the only thing this mode's own setup step configures
+  // (player numbers are randomly assigned server-side, not chosen here).
+  killerLives:KILLER_DEFAULT_LIVES,
   // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): {playerName:
   // overrideStartScore}. X01 only, 2+ players; a name with no entry (or an
   // entry of undefined) plays the game's own regular starting score — see
@@ -2040,7 +2071,7 @@ function renderHomeGameTypeTabs(){
   const el=document.getElementById('home-gtype-tabs');
   if(!el) return;
   el.innerHTML = Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length && g.homeTabRenderer !== false
-    && !(g.soloOnly && homeTab==='h2h')).map(g=>
+    && !(g.soloOnly && homeTab==='h2h') && !(g.h2hOnly && homeTab==='practice')).map(g=>
     `<button class="tab-btn${homeGameType===g.id?' active':''}" data-gtype="${g.id}" onclick="switchHomeGameType('${g.id}')">${g.label}</button>`
   ).join('');
 }
@@ -2081,10 +2112,11 @@ function renderHome(){
     Backend.get('/api/stats/bobs27-leaderboard'),
     Backend.get('/api/stats/checkout-ladder-leaderboard'),
     Backend.get('/api/stats/gauntlet-leaderboard'),
+    Backend.get('/api/stats/killer-wins'),
     Backend.get('/api/stats/around-the-clock-fastest'),
     Backend.get('/api/stats/around-the-clock-completions'),
     Backend.get('/api/stats/around-the-world-progress'),
-  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,dpa,dpb,ctbl,b27,cl,ga,atcf,atcc,atwp])=>{
+  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,dpa,dpb,ctbl,b27,cl,ga,kw,atcf,atcc,atwp])=>{
     homeData={s, extra,
       h2h:{finishes:f,eighties:e,bigFish:b,nineDarters:n},
       practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn},
@@ -2103,6 +2135,7 @@ function renderHome(){
       bobs27:{ leaderboard:b27 },
       checkoutLadder:{ leaderboard:cl },
       gauntlet:{ leaderboard:ga },
+      killer:{ winLeaderboard:kw },
       aroundTheClock:{ fastest:atcf, completions:atcc },
       aroundTheWorld:{ progress:atwp }};
     renderHomeContent();
@@ -2118,6 +2151,7 @@ function renderHome(){
       bobs27:{ leaderboard:[] },
       checkoutLadder:{ leaderboard:[] },
       gauntlet:{ leaderboard:[] },
+      killer:{ winLeaderboard:[] },
       aroundTheClock:{ fastest:[], completions:[] },
       aroundTheWorld:{ progress:[] }};
     renderHomeContent();
@@ -2619,6 +2653,33 @@ function renderHomeTabBodyGauntlet(){
   `;
 }
 
+// Killer's Home page leaderboard (docs/archive/game-modes-roadmap.md "Killer") —
+// win rate, H2H only, same "Most Wins"-style shape Cricket/Baseball's own win
+// leaderboards use (getKillerWinLeaderboard() shares their exact {name,played,
+// won,rate} row shape, since Killer's win/loss lives on games.winner_id too).
+function renderHomeTabBodyKiller(){
+  const el=document.getElementById('home-tab-body');
+  const data=homeData.killer;
+  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
+
+  const board=data.winLeaderboard||[];
+  const leaderboard=board.length
+    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.won}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${r.rate}% of ${r.played}</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — play a Killer match to claim the top spot.</p>`;
+
+  el.innerHTML=`
+    <div class="pp-section">
+      <div class="pp-section-title">🔪 Killer — Most Wins</div>
+      ${leaderboard}
+    </div>
+  `;
+}
+
 // Guided Around the Clock's Home page leaderboards. Same "no H2H/Practice split,
 // always solo" reasoning as Doubles Practice above. Two boards: fastest
 // completion (fewest darts) and most completions (mirrors Doubles Practice's
@@ -2781,6 +2842,7 @@ function setMode(mode){
   if((mode === 'challenge' || mode === 'ghost') && setup.gameType !== 'x01') setup.gameType = 'x01';
   if(drillGameTypes.includes(mode)) setup.gameType = mode;
   document.getElementById('cricket-options-section').hidden = (setup.gameType !== 'cricket');
+  document.getElementById('killer-options-section').hidden = (setup.gameType !== 'killer');
   document.getElementById('ghost-options-section').hidden = (mode !== 'ghost');
   document.getElementById('doubles-options-section').hidden = (mode !== 'doubles_practice');
   document.getElementById('checkout-trainer-options-section').hidden = (mode !== 'checkout_trainer');
@@ -3770,7 +3832,18 @@ function applyPreset(legsToWin, sets){
 function setGameType(type){
   setup.gameType = type;
   document.getElementById('cricket-options-section').hidden = (type !== 'cricket');
+  document.getElementById('killer-options-section').hidden = (type !== 'killer');
   if(type === 'cricket') renderCricketNumberGrid();
+}
+// Killer lives threshold (docs/archive/game-modes-roadmap.md "Killer") — a simple
+// 3-way segmented control, same aria-pressed toggle pattern as
+// setCheckoutTrainerDifficulty().
+function setKillerLives(n){
+  setup.killerLives = n;
+  [2,3,5].forEach(v => {
+    const btn = document.getElementById('killer-lives-'+v);
+    if(btn) btn.setAttribute('aria-pressed', String(v===n));
+  });
 }
 
 /* =========================================================================
@@ -3826,6 +3899,9 @@ const NEW_GAME_MODE_OPTIONS = [
   { key:'gauntlet', label:'🥋 The Gauntlet', contexts:['practice'],
     blurb:"A 20-station endurance warm-up, one per board number, in a fixed order that never repeats a nearby number twice in a row. Each station is 3 darts, strictly in order: the single, then the treble, then the double. Miss 2 and you get one repeat attempt at that station; miss all 3 and it's a Deep Scar. Total Scars across all 20 stations lands on a result — from Unmarked to The Gauntlet Wins. Runs about 15 minutes.",
     apply(){ setMode('gauntlet'); } },
+  { key:'killer', label:'🔪 Killer', contexts:['h2h'],
+    blurb:"Elimination darts. Each player is randomly assigned their own number when the match starts. Land darts on your own number to build lives — reach the lives threshold and you become a killer. Once you're a killer, hitting an opponent's number costs them lives instead; drop to 0 lives and you're eliminated. Last player standing wins the leg (your own double is a self-kill if you're already a killer). Choose the lives threshold on the next step.",
+    apply(){ setMode('h2h'); setGameType('killer'); } },
 ];
 function setupVisibleOptions(){
   const ctx = setupPlayerCount()>=2 ? 'h2h' : 'practice';
@@ -4075,7 +4151,7 @@ function setupGoToStep2(){
 // decides to show.
 function setupStep3HasContent(){
   return ['cricket-options-section', 'ghost-options-section', 'doubles-options-section',
-    'checkout-trainer-options-section', 'h2h-options'].some(id => {
+    'checkout-trainer-options-section', 'killer-options-section', 'h2h-options'].some(id => {
     const el = document.getElementById(id);
     return el && !el.hidden;
   });
@@ -4297,7 +4373,7 @@ async function startGame(){
   if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   // Custom cricket is locked to exactly 7 targets (same count as classic) — never
   // more, never fewer (docs/game-modes-roadmap.md "Decisions made").
-  const gameType = ['cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'].includes(setup.gameType)
+  const gameType = ['cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer'].includes(setup.gameType)
     ? setup.gameType : 'x01'; // Daily Challenge always forces x01 via setMode()
   let cricketNumbers = null;
   if(gameType === 'cricket'){
@@ -4370,6 +4446,10 @@ async function startGame(){
     : gameType === 'bobs_27' ? {}
     : gameType === 'checkout_ladder' ? {}
     : gameType === 'gauntlet' ? {}
+    // lives (docs/archive/game-modes-roadmap.md "Killer"): the only setup choice
+    // this mode has — player numbers are randomly assigned server-side
+    // (createGame()'s killerConfig), never chosen or sent from here.
+    : gameType === 'killer' ? { lives: setup.killerLives || KILLER_DEFAULT_LIVES }
     : { startingScore: startScore };
   const category = gameType === 'cricket'
     ? (setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
@@ -4391,6 +4471,8 @@ async function startGame(){
     ? '121 Checkout Ladder'
     : gameType === 'gauntlet'
     ? 'The Gauntlet'
+    : gameType === 'killer'
+    ? 'Killer'
     : String(startScore);
   game = {
     gameType,
@@ -4435,6 +4517,15 @@ async function startGame(){
     gauntletFinalMisses: [],  // settled per-station final miss counts so far, in station order
     gauntletCleanStreak: 0,   // current run of consecutive clean (0-miss) stations
     gauntletBestCleanStreak: 0, // this run's own peak clean streak (checked against GAUNTLET_STREAK_MILESTONE_LADDERS at run end)
+    // Killer only (docs/archive/game-modes-roadmap.md) — killerLives is the
+    // become-a-killer threshold chosen at setup; killerDartsThisVisit tracks
+    // progress through the current 3-dart visit (advanceKillerTurn() resets it);
+    // killerFirstBloodAwarded is match-lifetime (never reset per leg, unlike
+    // most other per-leg fields here) since 🩸 First Blood fires at most once
+    // per match, whichever leg it happens in.
+    killerLives: gameType === 'killer' ? (config.lives || KILLER_DEFAULT_LIVES) : null,
+    killerDartsThisVisit: 0,
+    killerFirstBloodAwarded: false,
     darts: [],
     busted: false, won: false,
     done: false,
@@ -5697,7 +5788,7 @@ function renderPlayerBadges(data){
   // Practice's 5 (docs/archive/culture-badges-roadmap.md Part B), and the guided
   // drills' 2 each stay visually distinct sub-sections rather than one mixed
   // flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder && !BADGE_INFO[id].gauntlet);
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder && !BADGE_INFO[id].gauntlet && !BADGE_INFO[id].killer);
   const eloIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].elo);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
   const baseballIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].baseball);
@@ -5710,6 +5801,7 @@ function renderPlayerBadges(data){
   const bobs27Ids = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].bobs27);
   const checkoutLadderIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].checkoutLadder);
   const gauntletIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].gauntlet);
+  const killerIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].killer);
   container.innerHTML = `
     <div class="pp-section-title" style="margin-bottom:6px">X01</div>
     <div class="summary-grid">${x01Ids.map(badgeBlock).join('')}</div>
@@ -5725,6 +5817,8 @@ function renderPlayerBadges(data){
     <div class="summary-grid">${checkoutLadderIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">The Gauntlet</div>
     <div class="summary-grid">${gauntletIds.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">Killer</div>
+    <div class="summary-grid">${killerIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Household Rating</div>
     <div class="summary-grid">${eloIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Tournaments</div>
@@ -6188,6 +6282,17 @@ function renderGauntletPersonalBests(data){
     <div class="stat-block"><div class="stat-val">${data.lowestTotalScars}</div><div class="stat-label">Lowest Total Scars</div></div>
   </div>`;
 }
+function renderKillerPersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || data.mostKillsInALeg==null){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No Killer legs recorded yet.</p>`;
+    return;
+  }
+  container.innerHTML=`<div class="summary-grid">
+    <div class="stat-block"><div class="stat-val">${data.mostKillsInALeg}</div><div class="stat-label">Most Kills in a Leg</div></div>
+  </div>`;
+}
 // No winStreak/recentForm/lifetime fields (see getDoublesPracticePersonalBests()'s
 // own comment) — a round never "wins", so those X01/Cricket concepts don't map.
 function renderDoublesPracticePersonalBests(data){
@@ -6313,6 +6418,7 @@ function renderGame(){
   if(game.gameType === 'bobs_27') return renderGameBobs27();
   if(game.gameType === 'checkout_ladder') return renderGameCheckoutLadder();
   if(game.gameType === 'gauntlet') return renderGameGauntlet();
+  if(game.gameType === 'killer') return renderGameKiller();
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
   game.players.forEach((p,i)=>{
@@ -6931,6 +7037,22 @@ BADGE_INFO['gauntletsecondwind'] = { icon:'🩹', label:'Second Wind',
   desc:'Pass a repeat attempt clean (0 misses) after failing the original station with 2 misses.', gauntlet:true };
 ACH_LABELS['gauntletsecondwind'] = 'Second Wind 🩹';
 ACH_DURATION['gauntletsecondwind'] = 3000;
+
+/* ---------- Killer (docs/archive/game-modes-roadmap.md "Killer") ---------- Three
+   one-off badges, all recurring (a real repeatable feat across different
+   matches) — no lifetime ladder proposed for this game type. */
+BADGE_INFO['killerfirstblood'] = { icon:'🩸', label:'First Blood',
+  desc:'Land the first elimination of a Killer match.', killer:true };
+ACH_LABELS['killerfirstblood'] = 'First Blood 🩸';
+ACH_DURATION['killerfirstblood'] = 3000;
+BADGE_INFO['killeruntouchable'] = { icon:'🛡️', label:'Untouchable',
+  desc:'Win a Killer match without ever losing a life.', killer:true };
+ACH_LABELS['killeruntouchable'] = 'Untouchable 🛡️';
+ACH_DURATION['killeruntouchable'] = 4000;
+BADGE_INFO['killerownworstenemy'] = { icon:'🙈', label:'Own Worst Enemy',
+  desc:'Eliminate yourself via your own double after becoming a killer.', killer:true };
+ACH_LABELS['killerownworstenemy'] = 'Own Worst Enemy 🙈';
+ACH_DURATION['killerownworstenemy'] = 3000;
 // Checks one ladder against a current value, awarding (once:true) any tier not
 // already cached as earned. Shared by the session ladder and the darts/trebles
 // (lifetime) ladders — see checkChuckinMilestones() below. The actual >=
@@ -8055,6 +8177,10 @@ function liveSnapshot(message){
     // playerSnapshotCheckoutLadder().
     checkoutLadderTarget: game.gameType === 'checkout_ladder' ? (game.checkoutLadderTarget || 121) : null,
     checkoutLadderVisits: game.gameType === 'checkout_ladder' ? (game.checkoutLadderVisits || 0) : null,
+    // Killer only (docs/archive/game-modes-roadmap.md "Killer"): the become-a-killer
+    // lives threshold — per-player number/lives/isKiller/eliminated/kills ride
+    // inside the players[] array above via playerSnapshotKiller().
+    killerLives: game.gameType === 'killer' ? (game.killerLives || KILLER_DEFAULT_LIVES) : null,
     achievement: pendingAchievement || null,
     gameOneEighties: game.gameOneEighties || 0,
     gameBigFish: game.gameBigFish || 0,
@@ -8095,8 +8221,12 @@ function renderPad(){
   // runs until it's ended (so-close/wrong-double, or all 20 numbers hit), so the
   // pad only disables once the round is over. Around the World has no round
   // concept at all — like Chuckin, it falls through to the default (never full).
+  // Killer commits every dart immediately (throwDartKiller()) and advances
+  // the visit/turn itself as part of that same commit — there's no "3 darts
+  // staged, waiting for Enter Turn" pause the way X01 has, so the pad never
+  // needs a mid-visit disable; it's always tappable while the match is live.
   const full = (game.gameType === 'doubles_practice' || game.gameType === 'around_the_clock')
-    ? !!game.roundOver : !!(game.darts.length>=3 || game.busted || game.won);
+    ? !!game.roundOver : game.gameType === 'killer' ? false : !!(game.darts.length>=3 || game.busted || game.won);
   if(game.gameType === 'cricket'){
     renderPadCricket(full);
     const utb0 = document.getElementById('undo-turn-btn');
@@ -8302,6 +8432,7 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
   if(game.gameType === 'checkout_trainer') return throwDartCheckoutTrainer(sector, zone, missZone, missDepth, bounced);
   if(game.gameType === 'around_the_clock') return throwDartAroundTheClock(sector, zone, missZone, missDepth, bounced);
   if(game.gameType === 'around_the_world') return throwDartAroundTheWorld(sector, zone, missZone, missDepth, bounced);
+  if(game.gameType === 'killer') return throwDartKiller(sector, zone, missZone, missDepth, bounced);
   if(game.darts.length>=3 || game.busted || game.won) return;
   // The double/treble-Miss shortcut (fill N slots at once) is a Pad-mode-only
   // convenience — a bounce-out is always exactly one dart, regardless of whatever
@@ -8719,6 +8850,7 @@ function undoLastTurn(){
   if(game && game.gameType === 'bobs_27') return undoLastTurnBobs27();
   if(game && game.gameType === 'checkout_ladder') return undoLastTurnCheckoutLadder();
   if(game && game.gameType === 'gauntlet') return undoLastTurnGauntlet();
+  if(game && game.gameType === 'killer') return undoLastTurnKiller();
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
   const p = game.players[snap.pi];
@@ -10096,6 +10228,7 @@ function finishUnit(kind, winner){
   const isBaseball = game.gameType === 'baseball';
   const isBobs27 = game.gameType === 'bobs_27';
   const isGauntlet = game.gameType === 'gauntlet';
+  const isKiller = game.gameType === 'killer';
   // No matchwin moment card is built for Cricket yet (its own social/moment-card
   // pass is a later build-order step) — suppress the Share button rather than wire
   // it to a card that doesn't exist. Baseball's/Bob's 27's own matchwin cards ARE
@@ -10157,6 +10290,13 @@ function finishUnit(kind, winner){
         <div class="stat-block"><div class="stat-val">${escapeHtml(tier)}</div><div class="stat-label">Result</div></div>
       </div>`;
     })() : '';
+    // Killer's own tiny match-summary block (docs/archive/game-modes-roadmap.md
+    // "Killer") — same reasoning as bobs27Summary/gauntletSummary above:
+    // h2hStatsHtml() reads X01-shaped fields (score/legPoints) a killer player
+    // doesn't have. Shows each player's assigned number, final status, and kills.
+    const killerSummary = isKiller ? `<div class="summary-grid" style="margin-top:14px">
+        ${game.players.map(pl => `<div class="stat-block"><div class="stat-val">${pl.number}</div><div class="stat-label">${escapeHtml(pl.name)}${pl.eliminated?' — eliminated':' — survived'}${pl.kills?` · ${pl.kills} kill${pl.kills===1?'':'s'}`:''}</div></div>`).join('')}
+      </div>` : '';
     oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
       <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">GAME OVER</div>
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${escapeHtml(winner)} takes the match. Stats saved.</p>
@@ -10164,7 +10304,7 @@ function finishUnit(kind, winner){
       <div class="btn-row" style="justify-content:center">
         ${nextBtn}
         ${matchShareBtn}
-      </div>${isCricket || isBobs27 || isGauntlet ? '' : isBaseball ? h2hStatsHtmlBaseball(winner,'game') : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}</div>`;
+      </div>${isCricket || isBobs27 || isGauntlet || isKiller ? '' : isBaseball ? h2hStatsHtmlBaseball(winner,'game') : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}${killerSummary}</div>`;
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
@@ -10175,7 +10315,7 @@ function finishUnit(kind, winner){
     // practice Baseball game is forced to exactly 1 leg/1 set (docs/bug-roadmap.md
     // BUG-22, see onLegWonBaseball()/startGame()'s isPracticeBaseball), so
     // kind==='leg' is only ever reached for a genuine mid-match H2H leg now.
-    const legPanel = isCricket || kind!=='leg' ? '' : isBaseball ? h2hStatsHtmlBaseball(winner) : game.practice ? `
+    const legPanel = isCricket || isKiller || kind!=='leg' ? '' : isBaseball ? h2hStatsHtmlBaseball(winner) : game.practice ? `
       <div class="prac-stats">
         <div class="prac-col">
           <div class="prac-col-title">This Leg</div>
@@ -10216,6 +10356,12 @@ function finishUnit(kind, winner){
     name: p.name,
     totalRuns: p.totalRuns || 0,
     won: p.name === winner
+  })) : isKiller ? game.players.map(p=>({
+    name: p.name,
+    number: p.number,
+    kills: p.kills || 0,
+    eliminated: !!p.eliminated,
+    won: p.name === winner
   })) : game.players.map(p=>({
     name: p.name,
     avg:   p.legAvgDarts ? (p.legPoints / p.legAvgDarts * 3).toFixed(1) : null,
@@ -10234,6 +10380,7 @@ function renderGameShell(){
   const isCheckoutTrainer = !!(game && game.gameType === 'checkout_trainer');
   const isClock = !!(game && game.gameType === 'around_the_clock');
   const isWorld = !!(game && game.gameType === 'around_the_world');
+  const isKillerGame = !!(game && game.gameType === 'killer');
   // Doubles Practice, Just Chuckin' It, and both guided drills are all per-dart-commit
   // modes with no staged 3-dart visit — no "Enter turn" step, no slots row (no
   // opponent/score to show), and no separate "Undo Dart" (there's no uncommitted
@@ -10241,11 +10388,13 @@ function renderGameShell(){
   // genuinely is a staged up-to-3-dart visit (docs/archive/checkout-trainer-roadmap.md),
   // same shape as X01, just solo and against a target instead of an opponent — so
   // it keeps the slots row (showing the darts tapped so far) and the Enter Turn
-  // button, just relabeled.
-  const isPerDartMode = isDoublesPractice || isChuckin || isClock || isWorld;
+  // button, just relabeled. Killer IS one of these too (docs/archive/game-modes-
+  // roadmap.md "Killer"): every dart commits immediately via throwDartKiller(),
+  // which also advances the visit/turn itself — there's no staged visit to enter.
+  const isPerDartMode = isDoublesPractice || isChuckin || isClock || isWorld || isKillerGame;
   document.querySelector('.oche').innerHTML=`
       <div class="slots" id="slots"${isPerDartMode ? ' hidden' : ''}></div>
-      <div class="status" id="status">${isChuckin ? "Select a multiplier, then tap a number. No score, no pressure — just throw." : isClock ? 'Select a multiplier, then tap a number. Hit every 1-20 as a single.' : isWorld ? 'Select a multiplier, then tap a number. Chip away at every lifetime outcome.' : isDoublesPractice ? 'Select a multiplier, then tap a number.' : isCricketGame ? 'Select a multiplier, then tap a target number.' : isCheckoutTrainer ? 'Tap out your proposed checkout, then press Submit.' : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
+      <div class="status" id="status">${isChuckin ? "Select a multiplier, then tap a number. No score, no pressure — just throw." : isClock ? 'Select a multiplier, then tap a number. Hit every 1-20 as a single.' : isWorld ? 'Select a multiplier, then tap a number. Chip away at every lifetime outcome.' : isDoublesPractice ? 'Select a multiplier, then tap a number.' : isCricketGame ? 'Select a multiplier, then tap a target number.' : isCheckoutTrainer ? 'Tap out your proposed checkout, then press Submit.' : isKillerGame ? 'Select a multiplier, then tap a number — your own to build lives, an opponent\'s to attack once you\'re a killer.' : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
       <div class="multi" id="multi-row" role="group" aria-label="Dart multiplier">
         <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
         <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
@@ -10370,6 +10519,20 @@ const GAUNTLET_STAT_DEFS = [
 ];
 const GAUNTLET_BUBBLE_KEY_MAP = { gauntletrunscompleted:'runsCompleted', gauntletavgtotalscars:'avgTotalScars',
   gauntletcleanstationrate:'cleanStationRate', gauntletdeepscarrate:'deepScarRate', gauntletretryrate:'retryRate' };
+
+// Killer's own 5 stat bubbles (docs/archive/game-modes-roadmap.md "Killer" sketch:
+// "kills-per-game, average lives lost per leg, win rate, and a 'survived
+// without becoming a killer' style curiosity stat").
+const KILLER_STAT_DEFS = [
+  { key:'killergamesplayed', label:'Games Played', desc:'Number of completed Killer matches', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'killerwinrate', label:'Win Rate', desc:'% of Killer matches won', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'killeravgkillsperleg', label:'Avg Kills / Leg', desc:'Average number of opponents eliminated per leg', fmt:v=>v!=null?v.toFixed(2):'—', primary:true },
+  { key:'killeravgliveslostperleg', label:'Avg Lives Lost / Leg', desc:'Average lives lost per leg, to attacks and self-kills combined', fmt:v=>v!=null?v.toFixed(2):'—' },
+  { key:'killersurvivedwithoutkillerrate', label:'Survived Without Killer', desc:"% of legs finished alive without ever becoming a killer yourself", fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+];
+const KILLER_BUBBLE_KEY_MAP = { killergamesplayed:'gamesPlayed', killerwinrate:'winRate',
+  killeravgkillsperleg:'avgKillsPerLeg', killeravgliveslostperleg:'avgLivesLostPerLeg',
+  killersurvivedwithoutkillerrate:'survivedWithoutKillerRate' };
 
 // Doubles Practice's own 3 stat bubbles (docs/game-modes-roadmap.md's requested
 // vocabulary: darts per round, doubles hit per round, doubles%) — every bubble
@@ -10649,6 +10812,25 @@ const GAME_TYPES = {
     personalBestsRenderer: renderGauntletPersonalBests,
     homeTabRenderer: renderHomeTabBodyGauntlet,
     soloOnly: true
+  },
+  killer: {
+    id: 'killer',
+    label: 'Killer',
+    newMatchPlayer: newMatchPlayerKiller,
+    // Per-dart evaluation (evaluateDartKiller(dart, throwerName, players)), not
+    // a batched-visit evaluateVisit — every call site is a dedicated
+    // gameType==='killer' branch (throwDart, renderGame, undoLastTurn), the
+    // same "hardcode a branch" precedent Doubles Practice/Cricket established.
+    evaluateVisit: () => { throw new Error('killer has no per-visit evaluateVisit — see throwDartKiller()'); },
+    resetForNextLeg: resetPlayerForNextLegKiller,
+    playerSnapshot: playerSnapshotKiller,
+    statDefs: KILLER_STAT_DEFS,
+    personalBestsRenderer: renderKillerPersonalBests,
+    homeTabRenderer: renderHomeTabBodyKiller,
+    // The inverse of soloOnly (docs/archive/game-modes-roadmap.md "Killer": the
+    // whole mechanic needs opponents to attack) — never offered/shown as a
+    // solo/practice-only option the way Bob's 27 etc. are.
+    h2hOnly: true
   }
 };
 // bubbleKeyMap is patched on below, right after each map itself is defined —
@@ -11137,6 +11319,235 @@ function renderGameGauntlet(){
     </div>`;
   if(sb) sb.appendChild(row);
   renderPad();
+}
+
+/* ---------- Killer (docs/archive/game-modes-roadmap.md "Killer") ----------
+   Elimination-format H2H. Per-dart commit (no "Enter Turn" staging) — the
+   Doubles Practice precedent — since a single visit's own darts can each
+   affect a DIFFERENT player (a self-effect on dart 1, an attack on dart 2),
+   which the turns table can only represent as separate rows anyway (see
+   backend/db.js's affected_player_id column comment). A "visit" is still 3
+   darts (or fewer, if the thrower eliminates themselves early) before turn
+   passes to the next non-eliminated player — game.killerDartsThisVisit
+   tracks progress through it. Real best-of-N legs/sets, like Cricket/
+   Baseball — legsPerSet/setsPerGame are NOT forced to 1 the way every solo
+   drill in this app is. */
+function newMatchPlayerKiller(name){
+  return { name, number:null, lives:0, isKiller:false, eliminated:false, kills:0, gameLivesLost:0,
+    legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 };
+}
+// Resets per-leg state but keeps `number` (assigned once for the whole match,
+// docs/archive/game-modes-roadmap.md: "assigned once at Start ... not re-derived
+// per leg"), `kills`, and `gameLivesLost` (both match-lifetime tallies, not
+// per-leg — 🛡️ Untouchable needs the whole match's own history, not just
+// whichever leg happened to decide it).
+function resetPlayerForNextLegKiller(p, game, newSet){
+  p.lives = 0; p.isKiller = false; p.eliminated = false;
+  p.legDarts = 0;
+  if(newSet) p.setDarts = 0;
+}
+function playerSnapshotKiller(p){
+  return { name:p.name, number:p.number, lives:p.lives, isKiller:p.isKiller, eliminated:p.eliminated,
+    kills:p.kills||0, legsWon:p.legsWon, setsWon:p.setsWon,
+    legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0 };
+}
+// Advances game.current to the next non-eliminated player, wrapping — a
+// static (current+1)%n the way X01 advances doesn't work here, since
+// eliminated players must be skipped entirely.
+function advanceKillerTurn(){
+  game.killerDartsThisVisit = 0;
+  let idx = game.current;
+  for(let step=1; step<=game.players.length; step++){
+    idx = (idx+1) % game.players.length;
+    if(!game.players[idx].eliminated){ game.current = idx; break; }
+  }
+  game.lastTurnSnapshot = null; // can't undo across a visit boundary
+  game.turnSeq += 1;
+  renderGameKiller();
+  pushLive();
+}
+function throwDartKiller(sector, zone, missZone, missDepth, bounced){
+  const thrower = game.players[game.current];
+  const dart = makeDart(sector, bounced ? 1 : mult);
+  if(zone) dart.zone = zone;
+  if(missZone != null){ dart.missZone = missZone; dart.missDepth = missDepth; }
+  if(bounced) dart.bounced = true;
+  mult = 1; updateMultUI();
+
+  const ev = evaluateDartKiller(dart, thrower.name, game.players);
+  const affected = ev ? game.players.find(pl => pl.name === ev.affectedName) : null;
+
+  // snapshot state before mutation so undoLastTurnKiller() can restore it —
+  // only reachable while this visit is still live (a visit-ending dart clears
+  // it via advanceKillerTurn()/onKillerLegWon(), the same "can't undo past a
+  // boundary" rule every other game type follows).
+  const _snap = { affectedName: affected ? affected.name : null,
+    lives: affected ? affected.lives : null, isKiller: affected ? affected.isKiller : null,
+    eliminated: affected ? affected.eliminated : null, affectedGameLivesLost: affected ? affected.gameLivesLost : null,
+    throwerKills: thrower.kills,
+    legDarts: thrower.legDarts, setDarts: thrower.setDarts, gameDarts: thrower.gameDarts,
+    dartsThisVisit: game.killerDartsThisVisit,
+    ltLen: game.currentLegTurns.length, stLen: game.sessionTurns.length,
+    badgeReverts:[], voided:false };
+  game.lastTurnSnapshot = _snap;
+
+  let delta = 0;
+  if(ev){
+    delta = ev.delta;
+    if(ev.isGain){
+      affected.lives += delta;
+      if(!affected.isKiller && affected.lives >= game.killerLives) affected.isKiller = true;
+      announce(`${thrower.name} builds toward killer status — ${affected.lives} of ${game.killerLives}.`);
+    } else {
+      affected.lives = Math.max(0, affected.lives - delta);
+      affected.gameLivesLost += delta;
+      if(affected.lives === 0 && !affected.eliminated){
+        affected.eliminated = true;
+        if(ev.affectedName !== thrower.name){
+          thrower.kills += 1;
+          // 🩸 First Blood: the first elimination of this MATCH (not per-leg) —
+          // game.killerFirstBloodAwarded lives on the game object itself
+          // (never reset by resetPlayerForNextLegKiller), so it only ever
+          // fires once per match, whichever leg it happens in.
+          if(!game.killerFirstBloodAwarded){
+            game.killerFirstBloodAwarded = true;
+            queueBadge('killerfirstblood', thrower.name);
+            awardRecurringBadge(thrower.name, 'killerfirstblood', 'killerfirstblood',
+              { icon:'🩸', headline:'FIRST BLOOD!', player:thrower.name, statLine:'First elimination of the match' });
+          }
+        } else {
+          queueBadge('killerownworstenemy', thrower.name);
+          awardRecurringBadge(thrower.name, 'killerownworstenemy', 'killerownworstenemy',
+            { icon:'🙈', headline:'OWN WORST ENEMY', player:thrower.name, statLine:'Eliminated by your own double' });
+        }
+        announce(ev.selfKill ? `${thrower.name} self-kills and is eliminated!` : `${thrower.name} eliminates ${affected.name}!`);
+      } else {
+        announce(ev.selfKill ? `${thrower.name} hits their own double — down to ${affected.lives}.`
+          : `${thrower.name} attacks ${affected.name} for ${delta} — down to ${affected.lives}.`);
+      }
+    }
+  } else {
+    announce(`${thrower.name} throws ${dart.label} — no effect.`);
+  }
+
+  thrower.legDarts += 1; thrower.setDarts += 1; thrower.gameDarts += 1;
+
+  DB.recordTurn({ player:thrower.name, set:game.setNo, leg:game.legNo,
+    scored: delta, bust:false, checkout:false, checkoutPoints:null,
+    affectedPlayer: ev ? ev.affectedName : null,
+    darts: [{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt,
+      zone: dart.zone || null, missZone: dart.missZone != null ? dart.missZone : null, missDepth: dart.missDepth || null, bounced: !!dart.bounced }] });
+
+  const turnRecord = { player:thrower.name, scored:delta, darts:[dart] };
+  game.currentLegTurns.push(turnRecord);
+  game.sessionTurns.push(turnRecord);
+
+  awardTimeOfDayBadges(thrower);
+
+  const alive = game.players.filter(pl => !pl.eliminated);
+  if(alive.length === 1){
+    onKillerLegWon(alive[0]);
+    return;
+  }
+
+  game.killerDartsThisVisit += 1;
+  if(thrower.eliminated || game.killerDartsThisVisit >= 3){
+    advanceKillerTurn();
+  } else {
+    renderGameKiller();
+  }
+}
+function undoLastTurnKiller(){
+  if(!game || !game.lastTurnSnapshot) return;
+  const snap = game.lastTurnSnapshot;
+  const thrower = game.players[game.current];
+  if(snap.affectedName != null){
+    const affected = game.players.find(pl => pl.name === snap.affectedName);
+    affected.lives = snap.lives; affected.isKiller = snap.isKiller; affected.eliminated = snap.eliminated;
+    affected.gameLivesLost = snap.affectedGameLivesLost;
+  }
+  thrower.kills = snap.throwerKills;
+  thrower.legDarts = snap.legDarts; thrower.setDarts = snap.setDarts; thrower.gameDarts = snap.gameDarts;
+  game.killerDartsThisVisit = snap.dartsThisVisit;
+  game.currentLegTurns.length = snap.ltLen;
+  game.sessionTurns.length = snap.stLen;
+
+  snap.voided = true;
+  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+  });
+  cancelQueuedAchievementsForSnapshot(snap);
+
+  game.lastTurnSnapshot = null;
+  DB.deleteLastTurn();
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent='Last dart undone.'; }
+  renderGameKiller();
+  pushLive();
+}
+/* ----- Killer leg / set / match progression (dispatched from throwDartKiller()) ----- */
+function onKillerLegWon(w){
+  w.legsWon += 1;
+  const legsAtWin = new Map(game.players.map(p => [p, p.legsWon]));
+
+  if(w.legsWon >= game.legsPerSet){
+    w.setsWon += 1;
+    game.players.forEach(p=>p.legsWon=0);
+
+    if(w.setsWon >= game.setsPerGame){   // match won
+      sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+      sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
+      sendHaWebhook('gameend', w.name, game.category);
+      DB.recordEvent('leg_end', game.setNo, game.legNo);
+      DB.recordEvent('set_end', game.setNo, null);
+      DB.recordEvent('game_end', null, null);
+      DB.completeGame(w.name);
+      // 🛡️ Untouchable: won the match having never lost a single life,
+      // across every leg (gameLivesLost is match-lifetime, never reset per leg).
+      if(w.gameLivesLost === 0){
+        queueBadge('killeruntouchable', w.name);
+        awardRecurringBadge(w.name, 'killeruntouchable', 'killeruntouchable',
+          { icon:'🛡️', headline:'UNTOUCHABLE!', player:w.name, statLine:'Won without ever losing a life' });
+      }
+      game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+      fireMomentCard('matchwin', { icon:'🔪', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) });
+      finishUnit('game', w.name);
+      return;
+    }
+    sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+    sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
+    DB.recordEvent('leg_end', game.setNo, game.legNo);
+    DB.recordEvent('set_end', game.setNo, null);
+    game.matchResult = { ts:Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+    finishUnit('set', w.name);
+    return;
+  }
+  sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+  DB.recordEvent('leg_end', game.setNo, game.legNo);
+  game.matchResult = { ts:Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+  finishUnit('leg', w.name);
+}
+function renderGameKiller(){
+  const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
+  game.players.forEach((p,i)=>{
+    const row = document.createElement('div');
+    row.className = 'pscore' + (i===game.current && !p.eliminated ? ' active' : '') + (p.eliminated ? ' bust' : '');
+    const pips = Array.from({length: Math.max(p.lives, game.killerLives)}, (_,k) =>
+      `<span aria-hidden="true">${k < p.lives ? '●' : '○'}</span>`).join(' ');
+    row.innerHTML = `
+      <div>
+        <div class="nm">${escapeHtml(p.name)} <span class="nm-out">№ ${p.number}${p.isKiller ? ' · 🔪 Killer' : ''}${p.eliminated ? ' · ☠️ Eliminated' : ''}</span>
+          ${i===game.current && !p.eliminated ? '<span class="throwflag">▸ throwing</span>' : ''}</div>
+        <div class="turnflag" aria-label="${p.lives} of ${game.killerLives} lives">${pips || '—'}</div>
+      </div>
+      <div class="meta">
+        <div class="avgs">${p.kills} kill${p.kills===1?'':'s'}</div>
+        <div class="standing">Set ${p.setsWon} · Leg ${p.legsWon}</div>
+      </div>`;
+    if(sb) sb.appendChild(row);
+  });
+  renderPad();
+  pushLive();
 }
 
 /* ---------- Doubles Practice (docs/game-modes-roadmap.md) ----------
@@ -12348,6 +12759,7 @@ GAME_TYPES.bobs_27.bubbleKeyMap = BOBS_27_BUBBLE_KEY_MAP;
 // own wiring below rather than left for a future session to rediscover.
 GAME_TYPES.checkout_ladder.bubbleKeyMap = CHECKOUT_LADDER_BUBBLE_KEY_MAP;
 GAME_TYPES.gauntlet.bubbleKeyMap = GAUNTLET_BUBBLE_KEY_MAP;
+GAME_TYPES.killer.bubbleKeyMap = KILLER_BUBBLE_KEY_MAP;
 function toggleMoreStats(){
   showMoreStats = !showMoreStats;
   renderPlayerPage();
