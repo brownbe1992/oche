@@ -146,6 +146,47 @@ describe('getResumeState — the full replay payload, and the two-device diverge
     assert.ok(!db.getSavedGames().some(s => s.gameId === gameId), 'saved_games row consumed by the resume itself');
   });
 
+  test('resuming never re-inserts turns/darts, and never inflates stats built from them — the replay is read-only, client and server alike', () => {
+    const [a, b] = [uniqueName('sg_a'), uniqueName('sg_b')];
+    db.addPlayer(a); db.addPlayer(b);
+    const gameId = startX01([a, b]);
+    throwVisit(gameId, a, 1, 1, [[20,1],[20,1],[20,1]], 60);
+    throwVisit(gameId, b, 1, 1, [[19,1],[19,1],[19,1]], 57);
+    db.saveGame(gameId);
+
+    const turnCount = () => db._db.prepare('SELECT COUNT(*) AS n FROM turns WHERE game_id = ?').get(gameId).n;
+    const dartCount = () => db._db.prepare(`
+      SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id WHERE t.game_id = ?
+    `).get(gameId).n;
+    const turnsBefore = turnCount(), dartsBefore = dartCount();
+    const aDartsThrownBefore = db.getPlayerStatBubbles(a).dartsThrown;
+    const bDartsThrownBefore = db.getPlayerStatBubbles(b).dartsThrown;
+    assert.equal(turnsBefore, 2);
+    assert.equal(dartsBefore, 6);
+
+    // getResumeState() is the whole replay payload -- everything the client's
+    // pure rebuildX01State() etc. (frontend/scoring.js) then replays through
+    // in memory only, with zero network calls of its own (grep the file: no
+    // Backend./DB./fetch( anywhere in it). Fetching it must never change a
+    // single turns/darts row -- it's a read (plus the one documented
+    // saved_games delete), never a write to turns/darts.
+    db.getResumeState(gameId);
+
+    assert.equal(turnCount(), turnsBefore, 'no new turn rows from resuming');
+    assert.equal(dartCount(), dartsBefore, 'no new dart rows from resuming');
+    assert.equal(db.getPlayerStatBubbles(a).dartsThrown, aDartsThrownBefore, "resuming must not inflate darts-thrown stats");
+    assert.equal(db.getPlayerStatBubbles(b).dartsThrown, bDartsThrownBefore);
+
+    // A genuinely NEW turn recorded after resume (exactly what the live client
+    // does when the resumed player actually throws again) is the only thing
+    // that should ever move these numbers, and by exactly one turn/3 darts --
+    // proving the earlier replay contributed nothing of its own to add to.
+    throwVisit(gameId, a, 1, 1, [[18,1],[18,1],[18,1]], 54);
+    assert.equal(turnCount(), turnsBefore + 1);
+    assert.equal(dartCount(), dartsBefore + 3);
+    assert.equal(db.getPlayerStatBubbles(a).dartsThrown, aDartsThrownBefore + 3);
+  });
+
   test('a second resume-state call on the same game (two devices racing) gets a clean 409, not a silent double-drive', () => {
     const [a, b] = [uniqueName('sg_a'), uniqueName('sg_b')];
     db.addPlayer(a); db.addPlayer(b);
