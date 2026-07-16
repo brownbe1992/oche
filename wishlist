@@ -48,7 +48,7 @@ Others
 - Shanghai game mode (round-by-round numbers, instant win on single+double+treble) — full design in docs/shanghai-roadmap.md
 - Halve-It game mode (hit each round's target or your score halves) — full design in docs/halve-it-roadmap.md
 - Cut-throat Cricket variant (points score onto open opponents, lowest wins — the piece deferred at Cricket v1) — done, see docs/archive/cutthroat-cricket-roadmap.md
-- Structured practice ladders: Bob's 27 doubles routine + the 121 checkout ladder — full design in docs/practice-ladders-roadmap.md
+- Structured practice ladders: Bob's 27 doubles routine — done, see docs/practice-ladders-roadmap.md (Part A); the 121 checkout ladder (Part B) still open
 - Integrate with Homeassistant
 - Automated scoring with cameras and machine learning — full design in docs/camera-scoring-roadmap.md
 - Settings page - set default player

@@ -459,6 +459,75 @@ number) instead of Cricket's seven. Live scoreboard (`renderers.baseball` in
 innings 1-9, columns = players), always single-column regardless of
 orientation. Baseball's stat vocabulary is documented in §3 ("Baseball stats").
 
+### Bob's 27 rules — `GAME_TYPES.bobs_27.evaluateVisit(player, darts, game)` (`evaluateVisitBobs27()`, `frontend/scoring.js`)
+
+`docs/practice-ladders-roadmap.md` Part A — Bob Anderson's doubles-
+practice routine. Solo only (`GAME_TYPES.bobs_27.soloOnly = true`), visit-based
+(3 darts per round) like Baseball, with the same "always exactly one player,
+`game.current` never moves" shape. Starts on 27; **the current round IS the
+live double target** — round 1 targets D1, round 2 D2, ... round 20 D20, one
+number per round, never repeating. Game-level round counter (`game.bobs27Round`,
+mirroring `game.baseballInning`) rather than per-player, since the mode is
+always solo.
+
+**Each round's outcome is all-or-nothing per dart, summed**: every dart that
+lands on *that round's own double* (`sector === round && multiplier === 2`)
+adds `round * 2` to the running score; a round with zero such hits subtracts
+`round * 2` instead — there's no partial credit for landing a single or treble
+on the right number, and no penalty scaling by "how many darts missed":
+
+```js
+const hits = darts.filter(d => d.sector === round && d.isDouble).length;
+const gain = hits * round * 2;
+running += gain > 0 ? gain : -(round * 2);
+```
+
+A run ends the moment `running <= 0` (**dead**) or after round 20 completes
+(survived) — both set `matchComplete`, checked identically to Baseball's
+`ev.matchComplete` dispatch. `evaluateVisitBobs27()` returns `{running, gain,
+scored, hits, dead, matchComplete, round}` — `scored` is deliberately just an
+alias for `gain` (never negative), not the actual signed change to `running`;
+see "store the gain, derive the penalty" below.
+
+**"Store the gain, derive the penalty"**: `turns.scored` only ever holds a
+round's *positive* gain (`0` on a miss-all round) — the penalty is never
+written as a negative number anywhere. Both the live client and
+`rebuildBobs27State({turns})` (the pure resume/replay rebuilder, `frontend/
+scoring.js`, same "replay every turn with zero side effects" contract as
+Baseball's and X01's own rebuilders) derive the actual running-score delta at
+read time from `scored > 0 ? scored : -2*round` — `round` itself is never
+stored either, always re-derived as that turn's own 1-indexed position within
+the game (`ROW_NUMBER() OVER (PARTITION BY game_id ORDER BY id)` server-side;
+a plain loop counter client-side, since a player only ever has one turn per
+round). This is the same design `docs/halve-it-roadmap.md` proposed for a
+similar "hit gains, miss loses" shape, applied here for the first time.
+
+**Write-time guard** (`addTurn()`, `backend/db.js`, SEC-25-style, opted in via
+`{enforceConsistency:true}`): rejects `checkout=true` outright (no checkout
+concept); derives `round` from this player's own prior-turn count in this
+game/set/leg (`+1`), rejecting anything past round 20; replays every prior
+turn's `scored` to reconstruct the running score entering this round; computes
+`expectedGain` from the submitted darts the same `hits * round*2` formula
+above; 400s if `scored !== expectedGain`; computes `expectedRunning` from that
+and 400s if the submitted `bust` flag doesn't match `expectedRunning <= 0`.
+Never trusts the client's own `ev.dead`.
+
+**Undo** (`undoLastTurnBobs27()`, dispatched from `undoLastTurn()`) — same
+`lastTurnSnapshot` shape as Baseball's, restoring `running`/`roundResults`/
+dart counts/`game.bobs27Round` and calling `DB.deleteLastTurn()`.
+
+**"A run IS the game"** (practice Baseball's BUG-22 precedent, §2's own
+Baseball write-up above): `legsPerSet`/`setsPerGame` are forced to 1 at
+`startGame()` (bobs_27 is in `drillModes`), so the very first `matchComplete`
+(survive-to-20 or die) auto-completes the whole game via the same generic
+leg/set/game progression tree every other mode uses (`onLegWonBobs27`, mirrors
+`onLegWonBaseball`'s structure including its "structurally unreachable but
+kept for tree consistency" leg/set branches). Its own moment card picks a
+survived-vs-died headline (`'RUN COMPLETE!'`/`'RUN OVER'`, `🎯`/`💀`) since
+X01/Baseball's generic "MATCH WON!" framing reads wrong for a run that ended
+in death. Bob's 27's stat vocabulary is documented in §3 ("Bob's 27 stats");
+its badges in §4.
+
 ### Doubles Practice per-dart rules — `evaluateDartDoublesPractice(dart, targets)` (`frontend/scoring.js`)
 
 docs/game-modes-roadmap.md's "Doubles Practice" drill mode — genuinely
@@ -1036,7 +1105,7 @@ both into one SQL fragment instead of each query hand-rolling its own
 `AND g.game_type='...'` alongside its mode filter
 (`docs/archive/existing-app-prep-roadmap.md` item 1) — `gameType` is whitelisted
 against `KNOWN_GAME_TYPES` (`['x01','cricket','baseball','doubles_practice',
-'chuckin','checkout_trainer','around_the_clock','around_the_world']`) as
+'chuckin','checkout_trainer','around_the_clock','around_the_world','bobs_27']`) as
 defense-in-depth, though it's always an internally-controlled literal, never
 raw request input.
 `X01_ONLY` is now `_scope({gameType:'x01'})` (byte-identical string, so its
@@ -1403,6 +1472,52 @@ same convention as every other per-dart-commit mode), and
 `undoLastTurnChuckin()` restores it, calls `DB.deleteLastTurn()`, and (new)
 revokes any `chuckin180` badge that dart awarded — see above.
 
+### Bob's 27 stats (`GAME_TYPES.bobs_27.statDefs` / `BOBS_27_STAT_DEFS`)
+
+Nothing is pre-aggregated (`backend/db.js`'s standing house style) — a run's
+final score is derived at read time from its own turns via the identical
+store-gain/derive-penalty formula §2's rules write-up and the write-time guard
+both use: `27 + SUM(scored>0 ? scored : -2*round)`, `round` re-derived per
+turn via `ROW_NUMBER() OVER (PARTITION BY game_id ORDER BY id)` (unambiguous
+since a bobs_27 game always has exactly one player/set/leg). A run that died
+early and one that finished all 20 rounds both fall out of this same formula
+for free — no separate "did they survive" input is needed beyond that game's
+own turn count and `bust` flag. Every query is scoped via `_scope({mode,
+gameType:'bobs_27'})`.
+
+**Stat bubbles** (`getBobs27StatBubbles(name, mode)`):
+
+| Key | Label | Formula |
+|---|---|---|
+| `bobs27survivalrate` | Survival Rate | `runsWithNoBustTurn / runs * 100` — a run "survives" if none of its turns has `bust=1`, independent of its final score's sign |
+| `bobs27avgscore` | Avg Final Score | Mean of every run's own `27 + SUM(...)` final score (§2 formula), including died runs (their final score is typically ≤0) |
+| `bobs27runs` | Runs Played | `COUNT(DISTINCT game_id)` |
+| `bobs27dartsthrown` | Darts Thrown | Count of darts thrown across every Bob's 27 run |
+| `bobs27doubleshitrate` | Doubles Hit % | Of every dart actually thrown across every round, the fraction that landed on *that round's own* double (`sector=round AND multiplier=2`) — real board outcomes only, same "no hypothetical exclusion" convention Doubles Practice's own hit-rate bubble uses |
+
+All 5 return `null` when the player has no Bob's 27 runs yet, matching every
+other stat bubble's "no data" convention.
+
+**Personal Bests** (`getBobs27PersonalBests(name, mode)`) — deliberately just
+2 fields, following Chuckin/Doubles Practice's precedent that a drill mode
+doesn't need X01/Cricket's 5-field shape: `bestFinalScore` (`MAX()` across
+every run's own final score, no minimum floor — a died run can still be the
+peak if it died deep enough into the ladder with enough gains along the way)
+and `deepestDoubleOnFail` (`MAX(roundsReached)` scoped to only runs that
+actually have a `bust=1` turn — a survived run has no "reached on a fail" to
+report, so it's excluded entirely rather than counted as round 20).
+
+**Home page leaderboard** (`getBobs27Leaderboard()`, `renderHomeTabBodyBobs27()`)
+— an arcade-style high-score table: one row per player, their own single
+best-ever run's final score (`MAX()` across every run, same "peak single run"
+shape Checkout Blitz's own leaderboard uses), ranked descending, **no
+minimum-runs floor** — a single legendary run (up to and including The Full
+Anderson's 1287 itself, §4) is exactly the kind of feat this exists to
+surface, not something a floor should hide behind "not enough games played."
+
+**Player Profile UI**: its own button on the `.player-tabs` game-type toggle
+(`playerGameType`), same mechanism as every other mode.
+
 ### Guided Around the Clock / Around the World stats (`GAME_TYPES.around_the_clock.statDefs` / `GAME_TYPES.around_the_world.statDefs`)
 
 Two new, deliberately minimal vocabularies — neither mode has a win condition,
@@ -1745,6 +1860,33 @@ dart's own `DB.recordTurn()` write has landed; `prog.count >= prog.total`
 triggers a direct `Backend.send(..., {once:true})` call, checked for
 `newlyEarned`, guarded by `earnedBadgeCache` so an already-earned player skips
 the query entirely on every subsequent hit.
+
+**Bob's 27 badges** (`docs/practice-ladders-roadmap.md` Part A, checked
+in `enterTurnBobs27()`/`onLegWonBobs27()`, `frontend/index.html`):
+
+| Badge | Exact condition |
+|---|---|
+| 🎯 **Full House** | `dartsThrown===3 && hits===3` — all three darts landed on the round's own double, the maximum possible gain for that round (Bob's 27's own "180" for a single visit). Checked per-visit in `enterTurnBobs27()`. **Recurring.** |
+| 🏔️ **The Full Anderson** | `w.running === 1287` at run-end — every one of the 20 rounds hit with all three darts (27 + 3×2×(1+2+...+20) = 1287), the maximum possible run. Checked once in `onLegWonBobs27(wi)`, mega-tier overlay (confetti) like Nine-Darter/Perfect Leg/Perfect Game/Stone Cold. **Recurring**, though only ever achievable once per run by construction. |
+
+**The survival/score ladder** (`BOBS27_SCORE_MILESTONE_LADDERS`, checked once
+in `onLegWonBobs27(wi)` against `w.running`) reuses `checkChuckinMilestoneTier()`
+wholesale, same generic engine as the lifetime ladders above — **but its
+"value" is genuinely different in kind**: every other ladder's value is a
+lifetime-cumulative counter (`lifetimeXBase + p.sessionX`) that only ever
+grows across a player's whole history; this ladder's value is **this single
+run's own final score**, checked once at the moment the run ends, never
+accumulated across runs. `checkChuckinMilestoneTier()` is agnostic to where
+its `value` argument comes from — it just tests tiers against a number and
+caches "have I ever crossed this tier," which works identically whether that
+number is a running lifetime total or a fresh per-run score — so no engine
+changes were needed, only a different call site. **Permanent, once-earned
+tiers** (`once:true`), its own Badge Case section (`renderPlayerBadges()`'s
+`bobs27Ids` bucket).
+
+| Ladder | Metric | Tiers (threshold → label) |
+|---|---|---|
+| Survival/Score | This run's own final `running` score | 1 Survivor 🛡️ · 100 Century 💯 · 250 Quarter Grand 🌟 · 500 Half Grand 🚀 · 1000 Four Figures 👑 |
 
 **Tournament badges** (`docs/tournament-mode-roadmap.md` §7 — checked server-side
 in `_advanceTournamentMatch()`, `backend/db.js`, the same function that already
@@ -2954,8 +3096,8 @@ already-migrated database is a safe no-op).
 | `created_at` / `completed_at` | `TEXT` | `completed_at` is `NULL` for in-progress/abandoned games |
 | `winner_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | Set by `completeGame()`. **Must be a participant of the game** — `completeGame()` rejects a `winner` name that isn't in this game's `game_players` with a `400` (`docs/bug-roadmap.md` BUG-9), the same participant check `recordWalkover()` enforces; a `null` winner (abandoned game) is allowed. Behavior for legitimate input is unchanged — the frontend only ever completes with a real participant |
 | `practice` | `INTEGER NOT NULL DEFAULT 0` | Explicit practice flag, set at creation |
-| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, `'baseball'`, `'doubles_practice'`, `'chuckin'`, `'checkout_trainer'`, `'around_the_clock'`, or `'around_the_world'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; each New Game flow passes its own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
-| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{innings: 9}` for Baseball rows (fixed, not yet a New Game choice), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows and both guided-drill rows (no config needed — every number/multiplier is always "in play") |
+| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, `'baseball'`, `'doubles_practice'`, `'chuckin'`, `'checkout_trainer'`, `'around_the_clock'`, `'around_the_world'`, or `'bobs_27'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; each New Game flow passes its own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
+| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{innings: 9}` for Baseball rows (fixed, not yet a New Game choice), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows, both guided-drill rows, and Bob's 27 rows (no config needed — Bob's 27 always plays the fixed D1-D20 ladder) |
 | `player_count` | `INTEGER` | **Frozen** participant count at creation (not a live subquery) — see §3's mode-scoping note |
 | `league_id` | `INTEGER REFERENCES leagues(id) ON DELETE SET NULL` | Nullable — set by the `onGameCreated` auto-tag hook (§18), never by `createGame()`'s own INSERT. `NULL` for every game that isn't a tagged league match (the overwhelming majority) |
 
@@ -2974,7 +3116,7 @@ already-migrated database is a safe no-op).
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
 | `game_id` / `player_id` | `INTEGER NOT NULL, FK, ON DELETE CASCADE` | |
 | `set_no` / `leg_no` | `INTEGER NOT NULL` | Must be a positive integer (`addTurn()` rejects `0` or negative explicitly — an explicit `0` is validation-rejected, not silently treated as the "omitted" default of `1`) |
-| `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3). `addTurn()` rejects a non-numeric value outright rather than silently coercing it to `0`. For `game_type='x01'` specifically, `POST /api/games/:id/turns` (the one production caller that opts into `addTurn()`'s `enforceConsistency` flag) additionally rejects a `scored` that doesn't match the sum of that visit's dart face values (`0` required on a bust; `checkout_points` must equal `scored` on a checkout) — `docs/security-audit-roadmap.md` SEC-22. For `game_type='baseball'` the same caller also rejects a `scored` that doesn't equal this visit's runs — the sum of dart `multiplier`s that hit the inning's target number, where the inning is derived server-side from the player's own prior turn count in the leg (`min(inning, 9)` for extra innings); a Baseball turn must also be neither a bust nor a checkout (`docs/security-audit-roadmap.md` SEC-25). Still deliberately skipped for Cricket (`scored` is computed from mark-closing state, not a dart-value sum, so the same rule would reject legitimate Cricket visits) and for Doubles Practice / Chuckin / Checkout Trainer / Around the Clock / World (non-arithmetic or non-points `scored`) |
+| `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3). `addTurn()` rejects a non-numeric value outright rather than silently coercing it to `0`. For `game_type='x01'` specifically, `POST /api/games/:id/turns` (the one production caller that opts into `addTurn()`'s `enforceConsistency` flag) additionally rejects a `scored` that doesn't match the sum of that visit's dart face values (`0` required on a bust; `checkout_points` must equal `scored` on a checkout) — `docs/security-audit-roadmap.md` SEC-22. For `game_type='baseball'` the same caller also rejects a `scored` that doesn't equal this visit's runs — the sum of dart `multiplier`s that hit the inning's target number, where the inning is derived server-side from the player's own prior turn count in the leg (`min(inning, 9)` for extra innings); a Baseball turn must also be neither a bust nor a checkout (`docs/security-audit-roadmap.md` SEC-25). For `game_type='bobs_27'`, `scored` is that round's own *gain only* — never a negative penalty (see §2's "store the gain, derive the penalty"); the same caller derives the round from the player's own prior turn count (capped at 20), rejects a `scored` that doesn't match `hits * round*2` on the submitted darts, rejects `checkout=true` outright, and requires `bust` to match whether replaying every prior round's gain/penalty plus this round's own would drop the running score to 0 or below (`docs/practice-ladders-roadmap.md` Part A). Still deliberately skipped for Cricket (`scored` is computed from mark-closing state, not a dart-value sum, so the same rule would reject legitimate Cricket visits) and for Doubles Practice / Chuckin / Checkout Trainer / Around the Clock / World (non-arithmetic or non-points `scored`) |
 | `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans. Cricket turns always write `bust=0, checkout=0` — cricket has neither concept. Doubles Practice repurposes `bust` as "this dart ended the round" (so-close or wrong-double, §2) — the closest existing column to that meaning, since this mode has no bust/win concept of its own either; `checkout` stays `0` always. Guided Around the Clock repurposes `bust` the identical way: `1` marks whichever dart completed the round (all 20 numbers hit) — there's no "so-close"/"wrong-target" failure mode here, only completion or abandonment. Guided Around the World writes `bust=0` always (no round to end, matching Chuckin's own turns) |
 | `checkout_points` | `INTEGER` | Only set when `checkout=1` (X01 only) |
 | `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set only by Cricket's write path (`enterTurnCricket()`) — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged. Checkout Trainer repurposes it as "answered with the objectively fewest darts" (§19) |
@@ -4461,14 +4603,18 @@ Backend: `backend/db.js`'s "Saved games" section. Frontend:
 `frontend/index.html`'s `saveCurrentGame()`/`resumeGame()`/Saved Games list
 block. Pure replay-rebuild math: `frontend/scoring.js`'s
 `rebuildX01State()`/`rebuildCricketState()`/`rebuildBaseballState()`/
-`rebuildAroundTheClockState()`/`rebuildAroundTheWorldState()`.
+`rebuildAroundTheClockState()`/`rebuildAroundTheWorldState()`/`rebuildBobs27State()`.
 
 ### Scope — what's savable
 
 **Any H2H game** (any participant count the mode allows) or **solo practice
-game**, X01/Cricket/Baseball/guided Around the Clock/guided Around the World
-(`SAVABLE_GAME_TYPES`, defined identically in both `backend/db.js` and
-`frontend/index.html` — the server never trusts the client's own copy).
+game**, X01/Cricket/Baseball/guided Around the Clock/guided Around the World/
+Bob's 27 (`SAVABLE_GAME_TYPES`, defined identically in both `backend/db.js` and
+`frontend/index.html` — the server never trusts the client's own copy). Bob's
+27 is savable for the same reason the guided drills are and Doubles Practice/
+Chuckin/Checkout Trainer aren't: it has a genuine mid-run "position" worth
+resuming — the current round and running score — rather than being open-ended
+with nothing lost by starting fresh.
 **Tournament matches and league fixture games are savable** — normal games
 under the hood, so nothing extra is needed beyond restoring their
 `tournamentMatchId`/`leagueFixtureId` linkage on resume (see below).

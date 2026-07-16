@@ -24,7 +24,7 @@ const netguard = require('./netguard.js');
 const backupLib = require('./backup-lib.js');
 const { checkoutHint, dartLabel,
   rebuildX01State, rebuildCricketState, rebuildBaseballState,
-  rebuildAroundTheClockState, rebuildAroundTheWorldState } = require('../frontend/scoring.js');
+  rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -847,7 +847,7 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
       throw httpError(400, 'pinnedTarget must be an integer between 2 and 170');
     }
   }
-  // docs/cutthroat-cricket-roadmap.md: same "validate a config field reaching this
+  // docs/archive/cutthroat-cricket-roadmap.md: same "validate a config field reaching this
   // function from an untrusted client" precedent as pinnedTarget above — an
   // unrecognized value would otherwise ride into games.config as-is and be silently
   // treated as 'standard' by evaluateVisitCricket()'s own `=== 'cutthroat'` check,
@@ -1037,6 +1037,35 @@ function addTurn(gameId, t, opts = {}) {
     if (scored !== expectedRuns) {
       throw httpError(400, 'scored does not match this Baseball visit\'s runs on the target number');
     }
+  } else if (gameTypeRow && gameTypeRow.game_type === 'bobs_27') {
+    // docs/practice-ladders-roadmap.md Part A: scored is this round's GAIN
+    // (0 when all 3 darts missed the double — it can't go negative, so the
+    // penalty is derived at read time from scored===0, not stored directly;
+    // see evaluateVisitBobs27()'s own comment in frontend/scoring.js). Round is
+    // derived the same "this player's own prior-turn count in this game/set/
+    // leg" way Baseball's inning is (SEC-25) — bobs_27 always has exactly one
+    // set/leg, but the query stays scoped identically for consistency. bust
+    // must reflect whether THIS round's outcome drops the running score to 0
+    // or below, which needs replaying every prior round's own gain/penalty to
+    // know the running total entering this one — cheap (at most 19 rows, since
+    // a run is capped at 20 rounds).
+    if (t.checkout) throw httpError(400, "a Bob's 27 turn cannot be a checkout");
+    const priorTurns = db.prepare('SELECT scored FROM turns WHERE game_id = ? AND player_id = ? AND set_no = ? AND leg_no = ? ORDER BY id')
+      .all(Number(gameId), p.id, setNo, legNo);
+    const round = priorTurns.length + 1;
+    if (round > 20) throw httpError(400, "Bob's 27 only has 20 rounds (D1 through D20)");
+    let running = 27;
+    priorTurns.forEach((pt, i) => { const r = i + 1; running += pt.scored > 0 ? pt.scored : -2 * r; });
+    const doubleValue = round * 2;
+    const hits = darts.filter(d => d.sector === round && d.multiplier === 2).length;
+    const expectedGain = hits * doubleValue;
+    if (scored !== expectedGain) {
+      throw httpError(400, "scored does not match this round's double hits");
+    }
+    const expectedRunning = running + (expectedGain > 0 ? expectedGain : -doubleValue);
+    if (!!t.bust !== (expectedRunning <= 0)) {
+      throw httpError(400, 'bust must reflect whether this round drops the running score to 0 or below');
+    }
   }
   // Checkout Trainer (docs/archive/checkout-trainer-roadmap.md): the target score offered
   // for this round. Server-computed context, not a scored value, so it's only
@@ -1105,8 +1134,11 @@ function completeGame(gameId, winnerName) {
    deliberately NOT in getPlayerExport() (a pause is local workflow state, not
    portable history — an imported incomplete game just arrives unsaved) but IS
    in getFullDatabaseExport() below (ordinary "your data" for a full-server
-   dump). */
-const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world'];
+   dump).
+   bobs_27 (docs/practice-ladders-roadmap.md Part A) IS savable — its
+   running total replays deterministically from `turns` the same way every
+   other entry here does (rebuildBobs27State(), frontend/scoring.js). */
+const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27'];
 
 function _savedGameRow(gameId) {
   return db.prepare('SELECT * FROM saved_games WHERE game_id = ?').get(Number(gameId));
@@ -1221,6 +1253,10 @@ function _savedGamePosition(game, participants, turns) {
   if (game.game_type === 'around_the_world') {
     const r = rebuildAroundTheWorldState({ turns });
     return { sessionDarts: r.sessionDarts };
+  }
+  if (game.game_type === 'bobs_27') {
+    const r = rebuildBobs27State({ turns });
+    return { round: r.round, running: r.running };
   }
   return null;
 }
@@ -2950,6 +2986,117 @@ function getCheckoutBlitzPersonalStats(playerName) {
   return { bestScore, lifetimeAvgScore, runs: rows.length };
 }
 
+/* ---------- Bob's 27 (docs/practice-ladders-roadmap.md Part A) ----------
+   Nothing is pre-aggregated (same house style as everywhere else in this
+   schema): a run's final score is derived at read time from its own turns via
+   the identical store-gain/derive-penalty formula the live client and the
+   SEC-25-style write-time guard (addTurn()) both use — 27 + SUM(scored if >0
+   else -2*round), where `round` is the turn's own 1-indexed position within
+   its game (ROW_NUMBER() OVER game_id — bobs_27 always has exactly one
+   player/set/leg per game, so partitioning by game_id alone is unambiguous).
+   A run that died early and one that finished all 20 rounds both fall out of
+   this same formula for free — the fatal or 20th-round turn is simply the
+   last row for that game either way, so no separate "did they survive" input
+   is needed beyond that game's own turn count / bust flag. */
+function getBobs27StatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'bobs_27' });
+
+  const runs = db.prepare(`
+    WITH numbered AS (
+      SELECT t.game_id AS gameId, t.scored, t.bust,
+        ROW_NUMBER() OVER (PARTITION BY t.game_id ORDER BY t.id) AS round
+      FROM turns t JOIN games g ON g.id=t.game_id
+      WHERE t.player_id=? ${scope}
+    )
+    SELECT gameId,
+      27 + SUM(CASE WHEN scored>0 THEN scored ELSE -2*round END) AS finalScore,
+      MAX(bust) AS died
+    FROM numbered GROUP BY gameId
+  `).all(p.id);
+
+  const runCount = runs.length;
+  const survivalRate = runCount > 0 ? (runs.filter(r => !r.died).length / runCount * 100) : null;
+  const avgFinalScore = runCount > 0 ? (runs.reduce((s, r) => s + r.finalScore, 0) / runCount) : null;
+
+  // Doubles hit rate: of every dart actually thrown across every round, what
+  // fraction landed on that round's own double — real darts, real board
+  // outcomes (docs/practice-ladders-roadmap.md Part A: "no hypothetical
+  // exclusion"), same shape Doubles Practice's own hit-rate bubble uses.
+  const dartsRow = db.prepare(`
+    WITH numbered AS (
+      SELECT t.id AS turnId, ROW_NUMBER() OVER (PARTITION BY t.game_id ORDER BY t.id) AS round
+      FROM turns t JOIN games g ON g.id=t.game_id
+      WHERE t.player_id=? ${scope}
+    )
+    SELECT COUNT(*) AS dartsThrown,
+      COALESCE(SUM(CASE WHEN d.sector=n.round AND d.multiplier=2 THEN 1 ELSE 0 END),0) AS hits
+    FROM darts d JOIN numbered n ON n.turnId=d.turn_id
+  `).get(p.id);
+  const dartsThrown = dartsRow?.dartsThrown ?? 0;
+  const doublesHitRate = dartsThrown > 0 ? (dartsRow.hits / dartsThrown * 100) : null;
+
+  return { runs: runCount, survivalRate, avgFinalScore, doublesHitRate, dartsThrown };
+}
+
+// Personal Bests: best-ever final score (peak single run, same "no minimum
+// floor" reasoning a peak stat never needs one) and the deepest double reached
+// on a run that ended in death — the "how close did I get" companion number,
+// scoped to only the runs that actually failed (a survived run has no
+// "reached on a fail" to report).
+function getBobs27PersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'bobs_27' });
+
+  const runs = db.prepare(`
+    WITH numbered AS (
+      SELECT t.game_id AS gameId, t.scored, t.bust,
+        ROW_NUMBER() OVER (PARTITION BY t.game_id ORDER BY t.id) AS round
+      FROM turns t JOIN games g ON g.id=t.game_id
+      WHERE t.player_id=? ${scope}
+    )
+    SELECT gameId,
+      27 + SUM(CASE WHEN scored>0 THEN scored ELSE -2*round END) AS finalScore,
+      COUNT(*) AS roundsReached,
+      MAX(bust) AS died
+    FROM numbered GROUP BY gameId
+  `).all(p.id);
+
+  const bestFinalScore = runs.length ? Math.max(...runs.map(r => r.finalScore)) : null;
+  const failedRuns = runs.filter(r => r.died);
+  const deepestDoubleOnFail = failedRuns.length ? Math.max(...failedRuns.map(r => r.roundsReached)) : null;
+
+  return { bestFinalScore, deepestDoubleOnFail };
+}
+
+// Bob's 27's arcade-style high-score table — one row per player, their single
+// best-ever run's final score, ranked descending. Peak single-run value
+// (structurally identical to Checkout Blitz's own leaderboard above — a
+// single legendary run, even The Full Anderson's 1287 itself, is exactly the
+// kind of feat this exists to surface), so no minimum-runs floor.
+function getBobs27Leaderboard() {
+  const rows = db.prepare(`
+    WITH numbered AS (
+      SELECT t.game_id AS gameId, t.player_id AS playerId, t.scored, t.created_at,
+        ROW_NUMBER() OVER (PARTITION BY t.game_id ORDER BY t.id) AS round
+      FROM turns t JOIN games g ON g.id=t.game_id
+      WHERE g.game_type='bobs_27'
+    )
+    SELECT n.gameId AS gameId, p.name AS name, MAX(n.created_at) AS achievedAt,
+      27 + SUM(CASE WHEN n.scored>0 THEN n.scored ELSE -2*n.round END) AS finalScore
+    FROM numbered n JOIN players p ON p.id=n.playerId
+    GROUP BY n.gameId
+  `).all();
+  const best = new Map();
+  for (const r of rows) {
+    const cur = best.get(r.name);
+    if (!cur || r.finalScore > cur.bestScore) best.set(r.name, { name: r.name, bestScore: r.finalScore, achievedAt: r.achievedAt });
+  }
+  return Array.from(best.values()).sort((a, b) => b.bestScore - a.bestScore);
+}
+
 // Per-sector/multiplier/zone hit-count grid feeding the Player Profile's dartboard
 // heatmap. Originally Chuckin-only ("heatmap-heavy... patterns and trends" reporting
 // that mode was specifically requested to have); generalized (docs/dartboard-zone-
@@ -3517,7 +3664,7 @@ function _mf(mode) {
 // 'x01'/'cricket', server.js only uses a query param to pick which function to
 // call), and is whitelisted here regardless as a defense-in-depth measure
 // against string interpolation.
-const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world'];
+const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27'];
 function _scope({ mode, gameType } = {}) {
   let sql = _mf(mode);
   if (gameType) {
@@ -6288,6 +6435,7 @@ module.exports = {
   getChuckinStatBubbles, getChuckinPersonalBests, getChuckinHeatmap, getDartHeatmap, getBounceOutCount,
   getCheckoutTrainerStatBubbles, getCheckoutTrainerPersonalBests,
   getCheckoutBlitzLeaderboard, getCheckoutBlitzPersonalStats,
+  getBobs27StatBubbles, getBobs27PersonalBests, getBobs27Leaderboard,
   getAroundTheClockStatBubbles, getAroundTheClockPersonalBests,
   getAroundTheClockFastestLeaderboard, getAroundTheClockCompletionsLeaderboard,
   getAroundTheWorldDrillStatBubbles, getAroundTheWorldPersonalBests, getAroundTheWorldLeaderboard,

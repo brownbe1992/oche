@@ -1,10 +1,13 @@
 # Structured Practice Ladders — Bob's 27 & the 121 Checkout Ladder — Design Roadmap
 
-> Status: **design phase, not started.** Two famous, self-contained solo
+> Status: **Part A (Bob's 27) shipped 2026-07; Part B (the 121 Checkout
+> Ladder) still design phase, not started.** Two famous, self-contained solo
 > practice routines with real scoring shapes (unlike freeform drills, each
 > run produces a number worth ranking and laddering). Bundled in one doc
 > because they share framing, but they are **independently shippable** —
-> tracked as two separate items on `docs/open-roadmap-items.md`.
+> tracked as two separate items on `docs/open-roadmap-items.md`. This doc
+> stays in `docs/` (not archived) until Part B is also done, per
+> `CLAUDE.md`'s "only archive once every split-out item is Done" rule.
 
 ## Part A — Bob's 27
 
@@ -41,6 +44,42 @@ positive at the end is a "survival").
   500+ / 1000+), plus 🎯 **Full House** (hit all three darts on one
   double) and 🏔️ **The Full Anderson** (a perfect 1287) as one-offs — all
   via the existing data-driven ladder engine.
+
+### Implementation notes (2026-07, shipped)
+
+Built essentially as designed, with two small deviations:
+
+- **`turns.target_score` was never used.** The design above suggested
+  "also" stamping the round's double onto it; the shipped version derives
+  `round` purely from the player's own prior-turn count in the game/set/leg
+  (the same SEC-25/Baseball-inning pattern), both client-side and in the
+  write-time guard — a second, redundant source of truth for the same
+  number wasn't needed and would have been one more place for a stored
+  value to drift out of sync with the turns that are supposed to define it.
+- **The write-time guard is an exact match, not a max-gain cap.** Rather
+  than "reject if gain exceeds 6× the round's double" (the ceiling this doc
+  originally proposed), `addTurn()` recomputes the *exact* expected gain
+  from the submitted darts (`hits * round*2`, where `hits` counts only
+  darts on this round's own double) and rejects any mismatch — tighter than
+  a ceiling check, and no harder to compute.
+
+Everything else matches this doc's design: `bobs_27` game type, solo-only,
+one leg = one run (`legsPerSet`/`setsPerGame` forced to 1, the practice-
+Baseball "a run IS the game" shape); store-the-gain/derive-the-penalty data
+model exactly as specified; the 5-field stat-bubble set, 2-field Personal
+Bests, and peak-single-run Home leaderboard; the survival/score ladder
+(Survivor/Century/Quarter Grand/Half Grand/Four Figures at 1/100/250/500/
+1000) plus 🎯 Full House and 🏔️ The Full Anderson as one-off badges, all via
+the existing data-driven ladder engine (`checkChuckinMilestoneTier()`,
+reused wholesale). Saved games work exactly as this doc predicted — pure
+replay from `turns`, no extra schema. Full write-up: `REFERENCE.md`'s "Bob's
+27 rules" (§2), "Bob's 27 stats" (§3), and "Bob's 27 badges" (§4) sections;
+committed tests in `backend/test/scoring.test.js`,
+`backend/test/db.turn-consistency-guard.test.js`, and
+`backend/test/db.bobs27-stats.test.js`.
+
+The "v1 ships the standard die-at-zero, D1–D20 rules; variants only if
+asked for" call under "Open questions" below held — no variants were built.
 
 ## Part B — The 121 Checkout Ladder
 

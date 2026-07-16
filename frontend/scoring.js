@@ -256,6 +256,60 @@ function isBaseballCycle(darts, target){
   return mults[0]===1 && mults[1]===2 && mults[2]===3;
 }
 
+/* ---------- Bob's 27 ----------
+   docs/practice-ladders-roadmap.md Part A. Bob Anderson's famous doubles
+   routine: start with 27, throw 3 darts at D1, then D2, ... through D20 (one
+   round per double, `game.bobs27Round` — game-level state, the same "current
+   target lives on game, not per-player" shape Baseball's `baseballInning`
+   uses, since this is always solo anyway). Every dart that HITS the round's
+   double (sector matches AND it's actually a double, not a single/treble of
+   that number) adds its value (D1 hit = +2, D20 hit = +40); if all three
+   darts miss the double, the double's value is SUBTRACTED instead. Drop to 0
+   or below and the run is over (a fail); survive past D20 and the final
+   running total is the run's result (perfect = 1287).
+
+   Visit-based (3 darts per round), same batched-evaluate/undo shape as X01/
+   Cricket/Baseball — not per-dart like Doubles Practice, even though only one
+   specific dart (a double of the round's number) ever does anything, because
+   the "did ALL THREE miss" fail condition can only be judged once the whole
+   visit is in. */
+function evaluateVisitBobs27(player, darts, game){
+  const round = game.bobs27Round;
+  const doubleValue = round * 2;
+  const hits = darts.filter(d => d.sector === round && d.isDouble).length;
+  const gain = hits * doubleValue;
+  // A miss-all round (gain === 0) subtracts the double's value instead of
+  // storing a negative "scored" — turns.scored can't go negative, so the
+  // penalty is DERIVED at replay time from scored===0 (docs/halve-it-roadmap.md's
+  // "store the gain, derive the penalty" shape), not stored directly. Any
+  // hit is always a positive gain (a double is worth 2x its number, always
+  // >0), so scored===0 unambiguously means "missed" — no separate flag needed
+  // to tell "scored 0 because missed" apart from any other zero-gain case,
+  // because there isn't another one.
+  const running = gain > 0 ? player.running + gain : player.running - doubleValue;
+  const dead = running <= 0;
+  const matchComplete = dead || round >= 20;
+  return { running, gain, scored:gain, hits, dead, matchComplete, round };
+}
+
+// 🎯 Full House (docs/practice-ladders-roadmap.md Part A): all three darts
+// of a visit hit the round's double — the maximum possible gain for that
+// round (Bob's 27's own "180" for a single round).
+function isBobs27FullHouse(hits){
+  return hits === 3;
+}
+
+// 🏔️ The Full Anderson (docs/practice-ladders-roadmap.md Part A): a perfect
+// run — every one of the 20 rounds hit with all three darts, so the running
+// total is exactly 27 + 3*(2+4+...+40) = 1287. A running total can only ever
+// reach exactly 1287 by hitting every single round with all three darts (any
+// miss subtracts, any partial hit under-gains relative to the maximum), so
+// this is a sufficient check on its own — no separate "never missed" flag to
+// track alongside it.
+function isBobs27FullAnderson(running){
+  return running === 1287;
+}
+
 /* ---------- server timestamp parsing ----------
    SQLite's `datetime('now')` (backend/db.js's default for every *_at column)
    produces "YYYY-MM-DD HH:MM:SS" -- space-separated, always UTC, no 'Z' or
@@ -866,6 +920,25 @@ function rebuildAroundTheClockState({ turns }){
   return { hitSet, roundDarts, legNo, roundOver };
 }
 
+// Bob's 27 (solo — docs/practice-ladders-roadmap.md Part A) — one
+// visit per round, round derived purely from replay position (the 1st turn is
+// round 1/D1, the 2nd is round 2/D2, ...), no starter rotation (always the one
+// player) and no leg/set concept at all: a run IS the whole game, so a SAVED
+// bobs_27 game's turns can never include the fatal or 20th-round-completing
+// visit (either one finishes the game immediately, at which point it's no
+// longer savable) — every turn here is guaranteed mid-run, `running` always
+// positive, `round` always landing 1-20 for the resumed player's next visit.
+function rebuildBobs27State({ turns }){
+  let running = 27, round = 1;
+  for(const t of turns){
+    const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
+    const ev = evaluateVisitBobs27({ running }, dartsCore, { bobs27Round: round });
+    running = ev.running;
+    round += 1;
+  }
+  return { running, round };
+}
+
 // Around the World (solo, guided drill) — no round/leg concept at all (one
 // continuous stream, set_no=leg_no=1 for the whole session, same as Just
 // Chuckin' It). Its real lifetime progress is refetched fresh at resume time
@@ -895,7 +968,8 @@ if (typeof module !== 'undefined' && module.exports) {
     CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH, challengeBadgeSignals,
     chuckinTiersReached,
     isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved, cricketStoneColdAchieved,
+    evaluateVisitBobs27, isBobs27FullHouse, isBobs27FullAnderson,
     rebuildX01State, rebuildCricketState, rebuildBaseballState,
-    rebuildAroundTheClockState, rebuildAroundTheWorldState,
+    rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State,
   };
 }

@@ -219,6 +219,139 @@ describe('addTurn — Baseball scored must match the visit\'s runs, when opted i
   });
 });
 
+describe("addTurn — Bob's 27 scored/bust must match the round's double hits, when opted in (docs/practice-ladders-roadmap.md Part A)", () => {
+  // Bob's 27's turns.scored is this round's GAIN (0 when the round's double was
+  // missed entirely — the penalty is derived at read time, never stored
+  // negative), arithmetically derivable from the visit's own darts + the round
+  // number the same way Baseball's SEC-25 guard derives runs from the inning
+  // number. Unlike Baseball, Bob's 27 DOES have a bust concept (the fatal
+  // round), so the guard also re-derives the running score entering this round
+  // from every prior turn to check bust reflects whether THIS round's outcome
+  // actually drops it to 0 or below.
+  function bobs27Game(players) {
+    return db.createGame({
+      category: "Bob's 27", legsPerSet: 1, setsPerGame: 1, practice: 1,
+      gameType: 'bobs_27', players: players.map(name => ({ name })),
+    });
+  }
+
+  test('accepts a legitimate D1 hit (round 1, one double-1)', async () => {
+    await db.addPlayer('B27_A');
+    const { gameId } = bobs27Game(['B27_A']);
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'B27_A', set: 1, leg: 1, scored: 2, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 2 }],
+    }, STRICT));
+  });
+
+  test('accepts a legitimate miss-all round (scored=0, no bust while running stays positive)', async () => {
+    await db.addPlayer('B27_B');
+    const { gameId } = bobs27Game(['B27_B']);
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'B27_B', set: 1, leg: 1, scored: 0, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }, { dartNo: 2, sector: 1, multiplier: 3 }, { dartNo: 3, sector: 0, multiplier: 1 }],
+    }, STRICT));
+  });
+
+  test('rejects a scored value that doesn\'t match the round\'s actual double hits', async () => {
+    await db.addPlayer('B27_C');
+    const { gameId } = bobs27Game(['B27_C']);
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'B27_C', set: 1, leg: 1, scored: 100, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 2 }], // real gain: 2, not 100
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('rejects checkout=true (Bob\'s 27 has no checkout concept)', async () => {
+    await db.addPlayer('B27_D');
+    const { gameId } = bobs27Game(['B27_D']);
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'B27_D', set: 1, leg: 1, scored: 2, bust: false, checkout: true, checkoutPoints: 2,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 2 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('rejects bust=false on a round that stays positive', async () => {
+    await db.addPlayer('B27_E');
+    const { gameId } = bobs27Game(['B27_E']);
+    // Round 1: miss D1 -> 27 - 2 = 25, not fatal.
+    db.addTurn(gameId, {
+      player: 'B27_E', set: 1, leg: 1, scored: 0, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 0, multiplier: 1 }],
+    }, STRICT);
+    // Round 2: miss D2 -> 25 - 4 = 21, still not fatal. Claiming bust=true here is wrong.
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'B27_E', set: 1, leg: 1, scored: 0, bust: true, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 0, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400, 'running is still 21 after this round, not <= 0');
+  });
+
+  test('rejects bust=true claimed on a round that actually GAINED (a hit round can never be fatal)', async () => {
+    await db.addPlayer('B27_F');
+    const { gameId } = bobs27Game(['B27_F']);
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'B27_F', set: 1, leg: 1, scored: 2, bust: true, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 2 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('accepts a legitimate death: 5 straight misses (27→25→21→15→7→−3) requires bust=true on the 5th', async () => {
+    await db.addPlayer('B27_G');
+    const { gameId } = bobs27Game(['B27_G']);
+    // Rounds 1-4: miss every one (27-2=25, 25-4=21, 21-6=15, 15-8=7) — none fatal yet.
+    for (let round = 1; round <= 4; round++) {
+      db.addTurn(gameId, {
+        player: 'B27_G', set: 1, leg: 1, scored: 0, bust: false, checkout: false, checkoutPoints: null,
+        darts: [{ dartNo: 1, sector: 0, multiplier: 1 }],
+      }, STRICT);
+    }
+    // Round 5: bust=false would be wrong — 7 - 2*5 = -3, which IS fatal.
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'B27_G', set: 1, leg: 1, scored: 0, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 0, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400, 'running drops to -3 this round, which must be flagged bust=true');
+    // The correct bust=true is accepted.
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'B27_G', set: 1, leg: 1, scored: 0, bust: true, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 0, multiplier: 1 }],
+    }, STRICT));
+  });
+
+  test('the round number advances with prior turn count: round 2 checks doubles against sector 2, not sector 1', async () => {
+    await db.addPlayer('B27_H');
+    const { gameId } = bobs27Game(['B27_H']);
+    // Round 1: hit D1.
+    db.addTurn(gameId, {
+      player: 'B27_H', set: 1, leg: 1, scored: 2, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 2 }],
+    }, STRICT);
+    // Round 2: a double-1 (stale target) now scores nothing; only double-2 counts.
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'B27_H', set: 1, leg: 1, scored: 2, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 2 }],
+    }, STRICT), (err) => err.status === 400, 'D1 is stale in round 2 -- real gain is 0');
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'B27_H', set: 1, leg: 1, scored: 4, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 2, multiplier: 2 }],
+    }, STRICT));
+  });
+
+  test('rejects a 21st round (Bob\'s 27 only has 20)', async () => {
+    await db.addPlayer('B27_I');
+    const { gameId } = bobs27Game(['B27_I']);
+    for (let round = 1; round <= 20; round++) {
+      db.addTurn(gameId, {
+        player: 'B27_I', set: 1, leg: 1, scored: round * 2, bust: false, checkout: false, checkoutPoints: null,
+        darts: [{ dartNo: 1, sector: round, multiplier: 2 }],
+      }, STRICT);
+    }
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'B27_I', set: 1, leg: 1, scored: 0, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 2 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+});
+
 describe('SEC-22 — the real HTTP trust boundary enforces this even though addTurn() itself defaults off', () => {
   const SERVER_PATH = path.join(__dirname, '..', 'server.js');
 

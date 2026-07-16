@@ -488,11 +488,17 @@ const ALLOWED_LIVE_KEYS = new Set([
   // unrestricted per-player `players[]` array, same as every other game type's own
   // per-player fields.
   'baseballInning',
-  // Cricket only (docs/cutthroat-cricket-roadmap.md) — 'standard' | 'cutthroat';
+  // Cricket only (docs/archive/cutthroat-cricket-roadmap.md) — 'standard' | 'cutthroat';
   // read by display.html's renderers.cricket.scorecard() to label the points
   // footer "lowest wins" for cutthroat, the one thing that otherwise renders
   // identically to standard.
   'cricketVariant',
+  // Bob's 27 only (docs/practice-ladders-roadmap.md Part A) — which
+  // double (1-20) is currently live; read by display.html's
+  // renderers.bobs_27.scorecard() for the round header. Per-player running
+  // score/round history ride inside the already-unrestricted per-player
+  // `players[]` array, same as every other game type's own per-player fields.
+  'bobs27Round',
 ]);
 const MAX_LIVE_BYTES = 65536;
 // Returns the sanitized state, or null if it's over the size cap (caller sends 413).
@@ -744,6 +750,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/stats/doubles-practice-accuracy' && m === 'GET') return send(res, 200, db.getDoublesPracticeAccuracyLeaderboard());
     if (p === '/api/stats/doubles-practice-best-round' && m === 'GET') return send(res, 200, db.getDoublesPracticeBestRoundStats());
     if (p === '/api/stats/checkout-blitz-leaderboard' && m === 'GET') return send(res, 200, db.getCheckoutBlitzLeaderboard());
+    if (p === '/api/stats/bobs27-leaderboard' && m === 'GET') return send(res, 200, db.getBobs27Leaderboard());
     if (p === '/api/stats/around-the-clock-fastest' && m === 'GET') return send(res, 200, db.getAroundTheClockFastestLeaderboard());
     if (p === '/api/stats/around-the-clock-completions' && m === 'GET') return send(res, 200, db.getAroundTheClockCompletionsLeaderboard());
     if (p === '/api/stats/around-the-world-progress' && m === 'GET') return send(res, 200, db.getAroundTheWorldLeaderboard());
@@ -766,6 +773,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, Object.assign({}, db.getCheckoutTrainerPersonalBests(name, mode), db.getCheckoutBlitzPersonalStats(name)));
       }
       return send(res, 200, gameType === 'cricket' ? db.getCricketPersonalBests(name, mode)
+        : gameType === 'bobs_27' ? db.getBobs27PersonalBests(name, mode)
         : gameType === 'baseball' ? db.getBaseballPersonalBests(name, mode)
         : gameType === 'doubles_practice' ? db.getDoublesPracticePersonalBests(name, mode)
         : gameType === 'chuckin' ? db.getChuckinPersonalBests(name, mode)
@@ -784,6 +792,7 @@ const server = http.createServer(async (req, res) => {
         : gameType === 'checkout_trainer' ? db.getCheckoutTrainerStatBubbles(name, mode)
         : gameType === 'around_the_clock' ? db.getAroundTheClockStatBubbles(name, mode)
         : gameType === 'around_the_world' ? db.getAroundTheWorldDrillStatBubbles(name, mode)
+        : gameType === 'bobs_27' ? db.getBobs27StatBubbles(name, mode)
         : db.getPlayerStatBubbles(name, mode));
     }
     if (p === '/api/players/chuckin-heatmap' && m === 'GET') {

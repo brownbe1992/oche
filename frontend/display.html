@@ -324,7 +324,8 @@ const ACH_LABELS  = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter
   triplebull:'🐂 TRIPLE BULL! 🐂', bullseyefinish:'Bullseye Finish! 🏹',
   baseballperfectinning:'Perfect Inning! 🔥', baseballperfectgame:'🏆 PERFECT GAME! 🏆',
   baseballwalkoff:'Walk-Off! ⚾', baseballcycle:'The Cycle! 🔄', doublespracticeringmaster:'Ring Master! 🎪',
-  cricketstonecold:'Stone Cold! 🔪' };
+  cricketstonecold:'Stone Cold! 🔪',
+  bobs27fullhouse:'Full House! 🎯', bobs27fullanderson:'🏔️ THE FULL ANDERSON! 🏔️' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -338,7 +339,8 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   triplebull:4000, bullseyefinish:2500,
   baseballperfectinning:2500, baseballperfectgame:6000,
   baseballwalkoff:3000, baseballcycle:2500, doublespracticeringmaster:5000,
-  cricketstonecold:3500 };
+  cricketstonecold:3500,
+  bobs27fullhouse:2500, bobs27fullanderson:6000 };
 // Mirror-copied from frontend/index.html's BADGE_INFO[...].desc / ACH_DESC_FALLBACK —
 // this file has no Badge Case UI to source the text from directly, so it's kept as
 // its own flat map (docs/next-session-plan.md item 1).
@@ -391,6 +393,8 @@ const ACH_DESC = {
   baseballcycle: "Hit a single, double, AND treble of the current inning's number in one visit — 6 runs the scenic way.",
   doublespracticeringmaster: 'Hit every double, D1 through D20 plus the bull, in Doubles Practice — lifetime.',
   cricketstonecold: 'Win a 3+ player Cut-throat Cricket game without receiving a single point.',
+  bobs27fullhouse: "Hit all three darts of a visit on that round's double, in Bob's 27.",
+  bobs27fullanderson: "A perfect Bob's 27 run — every double from D1 through D20 hit with all three darts, finishing on exactly 1287.",
 };
 // Just Chuckin' It's 18 laddered milestone badges — mirror-copied from frontend/
 // index.html's CHUCKIN_MILESTONE_LADDERS (this file has no shared module with
@@ -435,6 +439,68 @@ CHUCKIN_MILESTONE_LADDERS.forEach(ladder=>{
     ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
     ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
     ACH_DESC[id] = ladder.descFor(tier.threshold);
+  });
+});
+// docs/bug-roadmap.md BUG-26: the lifetime-180s, Baseball-runs, and Doubles
+// Practice-hits ladders (index.html's ONE_EIGHTY_MILESTONE_LADDERS/
+// BASEBALL_RUNS_MILESTONE_LADDERS/DOUBLES_HIT_MILESTONE_LADDERS) were NEVER
+// mirrored here at all — only Chuckin's own ladder above ever got the
+// mirror-loop treatment, so the live overlay's headline has been rendering
+// blank for every one of these 13 badges since each one shipped. Found (and
+// fixed here, alongside adding Bob's 27's own new ladder below) via the same
+// full ACH_LABELS key-set diff that caught the first 9 static badges.
+const ONE_EIGHTY_MILESTONE_LADDERS = [
+  { idPrefix:'x01_180_',
+    descFor: t => `Hit ${t.toLocaleString()} lifetime 180s in X01.`,
+    tiers: [
+      { threshold:10,  label:'Ton-Eighty Club',          icon:'🎯' },
+      { threshold:25,  label:'Maximum Regular',          icon:'🔴' },
+      { threshold:50,  label:'Half-Century of Maximums', icon:'🌟' },
+      { threshold:100, label:'Century of Maximums',      icon:'💯' },
+      { threshold:250, label:'Maximum Machine',          icon:'🤖' },
+    ] },
+];
+const BASEBALL_RUNS_MILESTONE_LADDERS = [
+  { idPrefix:'baseball_runs_',
+    descFor: t => `Score ${t.toLocaleString()} lifetime runs in Baseball.`,
+    tiers: [
+      { threshold:100,  label:'Rookie Season',   icon:'⚾' },
+      { threshold:500,  label:'Everyday Player', icon:'🧢' },
+      { threshold:1500, label:'All-Star',        icon:'⭐' },
+      { threshold:5000, label:'Hall of Fame',    icon:'🏟️' },
+    ] },
+];
+const DOUBLES_HIT_MILESTONE_LADDERS = [
+  { idPrefix:'doubles_practice_hits_',
+    descFor: t => `Hit ${t.toLocaleString()} lifetime doubles in Doubles Practice.`,
+    tiers: [
+      { threshold:50,   label:'Ring Finder',      icon:'🎯' },
+      { threshold:250,  label:'Double Duty',      icon:'🔁' },
+      { threshold:1000, label:'Precision Expert', icon:'🔬' },
+      { threshold:5000, label:'Doubles Legend',   icon:'👑' },
+    ] },
+];
+// Bob's 27 survival/score ladder (docs/practice-ladders-roadmap.md Part A)
+// — mirror-copied from index.html's BOBS27_SCORE_MILESTONE_LADDERS.
+const BOBS27_SCORE_MILESTONE_LADDERS = [
+  { idPrefix:'bobs27_score_',
+    descFor: t => t===1 ? "Survive a full Bob's 27 run (finish with a positive score)." : `Finish a Bob's 27 run with a final score of ${t.toLocaleString()} or more.`,
+    tiers: [
+      { threshold:1,    label:'Survivor',      icon:'🛡️' },
+      { threshold:100,  label:'Century',       icon:'💯' },
+      { threshold:250,  label:'Quarter Grand', icon:'🌟' },
+      { threshold:500,  label:'Half Grand',    icon:'🚀' },
+      { threshold:1000, label:'Four Figures',  icon:'👑' },
+    ] },
+];
+[ONE_EIGHTY_MILESTONE_LADDERS, BASEBALL_RUNS_MILESTONE_LADDERS, DOUBLES_HIT_MILESTONE_LADDERS, BOBS27_SCORE_MILESTONE_LADDERS].forEach(ladders=>{
+  ladders.forEach(ladder=>{
+    ladder.tiers.forEach((tier, i)=>{
+      const id = ladder.idPrefix + tier.threshold;
+      ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
+      ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
+      ACH_DESC[id] = ladder.descFor(tier.threshold);
+    });
   });
 });
 
@@ -503,7 +569,7 @@ function showAchievement(type, player, countText){
   achName.textContent = player || '';
   if(achDesc) achDesc.textContent = ACH_DESC[type] || '';
   if(achCount) achCount.textContent = countText || '';
-  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'cricketstonecold';
+  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'cricketstonecold' || type === 'bobs27fullanderson';
   achOverlay.classList.toggle('mega', mega);
   achOverlay.classList.add('show');
   if(mega) spawnConfetti(achOverlay, 90);
@@ -888,6 +954,53 @@ const renderers = {
           <div class="sum-stat">
             <div class="sv">${num(p.totalRuns)}</div>
             <div class="sl">Runs</div>
+          </div>
+        </div>
+      </div>`;
+    }
+  },
+  // Bob's 27 (docs/practice-ladders-roadmap.md Part A): same shared
+  // chalkboard-table shape as Cricket/Baseball's (rows=rounds D1-D20, one
+  // column since it's always solo), just fixed at exactly 20 rows — no
+  // "extra innings"-style dynamic extension the way Baseball's table needs.
+  bobs_27: {
+    scorecard(s, L){
+      const p = s.players[0];
+      const round = s.bobs27Round || 1;
+      const rows = [];
+      for(let r=1;r<=20;r++){
+        const isCurrentRound = r===round;
+        const result = p.roundResults && p.roundResults[r];
+        const cellText = result==null ? '' : `<span class="cs-points">${result>0?'+'+num(result):'−'+num(r*2)}</span>`;
+        rows.push(`<div class="cs-row"><div class="cs-label">D${r}</div><div class="cs-cell${isCurrentRound?' active':''}">${cellText}</div></div>`);
+      }
+
+      const darts = Array.isArray(s.darts) ? s.darts : [];
+      const slots = [0,1,2].map(k=>{
+        const lab = darts[k];
+        return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
+      }).join('');
+
+      return `<div class="cs-wrap" style="--cs-cols:1">
+        <div class="cs-table">
+          <div class="cs-row cs-head"><div class="cs-label"></div><div class="cs-col-head active"><span>${escapeHtml(p.name)}</span><span class="cs-throw-chip">▸ throwing</span></div></div>
+          ${rows.join('')}
+          <div class="cs-row cs-foot"><div class="cs-label">Score</div><div class="cs-cell"><span class="cs-points active">${num(p.running)}</span></div></div>
+        </div>
+        <div class="cs-throw-row">
+          <span class="cs-throw-lbl"><b>${escapeHtml(p.name)}</b> at the oche — D${round}, running score ${num(p.running)}</span>
+          <div class="darts">${slots}</div>
+        </div>
+      </div>`;
+    },
+    summary(p){
+      return `
+      <div class="sum-card ${p.won?'winner':''}">
+        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}</div>
+        <div class="sum-stats">
+          <div class="sum-stat">
+            <div class="sv">${num(p.running)}</div>
+            <div class="sl">Final Score</div>
           </div>
         </div>
       </div>`;
@@ -1285,7 +1398,7 @@ function render(s){
   // in landscape's wide-and-short shape but cram score text into narrow cells here.
   // The cricket/baseball scorecards are always a single table spanning the whole
   // grid, not per-player columns, regardless of orientation.
-  const isScorecardLayout = (s.gameType === 'cricket' || s.gameType === 'baseball') && !s.legSummary;
+  const isScorecardLayout = (s.gameType === 'cricket' || s.gameType === 'baseball' || s.gameType === 'bobs_27') && !s.legSummary;
   const cols = isScorecardLayout ? 1 : (isPortrait ? 1 : (n<=1 ? 1 : n<=4 ? 2 : 3));
   grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
 

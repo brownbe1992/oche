@@ -15,10 +15,11 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   evaluateDartDoublesPractice, evaluateDartAroundTheClock, chuckinTiersReached, isStaircaseFinish,
   isBedAndBreakfast, isMadhouseFinish, isShanghaiVisit,
   isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved, cricketStoneColdAchieved,
+  evaluateVisitBobs27, isBobs27FullHouse, isBobs27FullAnderson,
   pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
   CHECKOUT_TRAINER_TRICK_CHANCE, listUnsolvableTargets, gradeCheckoutDeclaration,
   rebuildX01State, rebuildCricketState, rebuildBaseballState,
-  rebuildAroundTheClockState, rebuildAroundTheWorldState } = scoring;
+  rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State } = scoring;
 
 // Shorthand for building a rebuild-function turn record: v(playerIndex, setNo,
 // legNo, [[sector,mult], ...]) — mirrors the {playerIndex,setNo,legNo,darts}
@@ -1257,6 +1258,124 @@ describe('isBaseballCycle (docs/archive/culture-badges-roadmap.md Part B)', () =
   test('fewer or more than exactly 3 darts never qualifies', () => {
     assert.equal(isBaseballCycle([d(4,1), d(4,2)], 4), false);
     assert.equal(isBaseballCycle([d(4,1), d(4,2), d(4,3), d(4,1)], 4), false);
+  });
+});
+
+describe('evaluateVisitBobs27 (docs/practice-ladders-roadmap.md Part A)', () => {
+  const player = (running) => ({ running });
+  const game = (round) => ({ bobs27Round: round });
+
+  test('a single dart on the round\'s double adds exactly 2x the round number', () => {
+    const ev = evaluateVisitBobs27(player(27), [d(1,2)], game(1));
+    assert.equal(ev.hits, 1);
+    assert.equal(ev.gain, 2);
+    assert.equal(ev.running, 29);
+    assert.equal(ev.scored, 2);
+    assert.equal(ev.dead, false);
+  });
+
+  test('multiple darts on the double each add their own 2x — D20 hit twice adds 80', () => {
+    const ev = evaluateVisitBobs27(player(100), [d(20,2), d(20,2)], game(20));
+    assert.equal(ev.hits, 2);
+    assert.equal(ev.gain, 80);
+    assert.equal(ev.running, 180);
+  });
+
+  test('all three darts hitting the double add the maximum possible gain (Full House shape)', () => {
+    const ev = evaluateVisitBobs27(player(27), [d(5,2), d(5,2), d(5,2)], game(5));
+    assert.equal(ev.hits, 3);
+    assert.equal(ev.gain, 30, '3 darts * 2*5');
+    assert.equal(ev.running, 57);
+  });
+
+  test('all three darts missing the double SUBTRACTS the double\'s value instead of storing negative scored', () => {
+    const ev = evaluateVisitBobs27(player(27), [d(3,1), d(3,3), d(0,1)], game(3));
+    assert.equal(ev.hits, 0);
+    assert.equal(ev.gain, 0, 'scored/gain is 0, never negative -- the penalty is derived, not stored');
+    assert.equal(ev.scored, 0);
+    assert.equal(ev.running, 21, '27 - 2*3');
+  });
+
+  test('a single or treble of the round\'s OWN number does not count as a hit (only a double does)', () => {
+    const ev = evaluateVisitBobs27(player(27), [d(7,1), d(7,3), d(7,1)], game(7));
+    assert.equal(ev.hits, 0);
+    assert.equal(ev.running, 13, '27 - 2*7');
+  });
+
+  test('a double of a DIFFERENT number than the round\'s own does not count as a hit', () => {
+    const ev = evaluateVisitBobs27(player(27), [d(8,2), d(8,2), d(8,2)], game(9));
+    assert.equal(ev.hits, 0, 'D8 hits are irrelevant when the live round is D9');
+    assert.equal(ev.running, 9, '27 - 2*9');
+  });
+
+  test('dead flips true the moment running reaches exactly 0', () => {
+    const ev = evaluateVisitBobs27(player(4), [d(0,1)], game(2)); // miss D2: 4 - 2*2 = 0
+    assert.equal(ev.running, 0);
+    assert.equal(ev.dead, true, 'exactly 0 counts as dead ("drop to 0 or below")');
+  });
+
+  test('dead stays false while the running score is still positive after a miss', () => {
+    const ev = evaluateVisitBobs27(player(27), [d(0,1)], game(3)); // miss D3: 27 - 6 = 21
+    assert.equal(ev.running, 21);
+    assert.equal(ev.dead, false);
+  });
+
+  test('matchComplete is true once dead, even before round 20', () => {
+    const ev = evaluateVisitBobs27(player(4), [d(0,1)], game(2));
+    assert.equal(ev.matchComplete, true);
+  });
+
+  test('matchComplete is true at round 20 even without dying (a full survival)', () => {
+    const ev = evaluateVisitBobs27(player(1200), [d(20,2)], game(20));
+    assert.equal(ev.dead, false);
+    assert.equal(ev.matchComplete, true);
+  });
+
+  test('matchComplete is false for an ordinary surviving round before D20', () => {
+    const ev = evaluateVisitBobs27(player(27), [d(5,2)], game(5));
+    assert.equal(ev.matchComplete, false);
+  });
+
+  test('a perfect run through every round reaches exactly 1287 (27 + 3*(2+4+...+40))', () => {
+    let running = 27;
+    for (let round = 1; round <= 20; round++) {
+      const ev = evaluateVisitBobs27({ running }, [d(round,2), d(round,2), d(round,2)], { bobs27Round: round });
+      running = ev.running;
+    }
+    assert.equal(running, 1287);
+  });
+});
+
+describe('isBobs27FullHouse / isBobs27FullAnderson (docs/practice-ladders-roadmap.md Part A)', () => {
+  test('Full House requires exactly 3 hits this visit', () => {
+    assert.equal(isBobs27FullHouse(3), true);
+    assert.equal(isBobs27FullHouse(2), false);
+    assert.equal(isBobs27FullHouse(0), false);
+  });
+
+  test('The Full Anderson requires the exact perfect-run total, 1287', () => {
+    assert.equal(isBobs27FullAnderson(1287), true);
+    assert.equal(isBobs27FullAnderson(1286), false);
+    assert.equal(isBobs27FullAnderson(0), false);
+  });
+});
+
+describe('rebuildBobs27State (docs/archive/saved-games-roadmap.md, pure replay rebuild)', () => {
+  test('replays a mixed hit/miss run and lands on the correct running score and next round', () => {
+    const turns = [
+      v(0,1,1,[[1,2]]),               // D1 hit: 27+2=29
+      v(0,1,1,[[2,1],[2,3],[0,1]]),   // D2 miss (single+treble+miss, no double): 29-4=25
+      v(0,1,1,[[3,2],[3,2]]),         // D3 two hits: 25+12=37
+    ];
+    const r = rebuildBobs27State({ turns });
+    assert.equal(r.running, 37);
+    assert.equal(r.round, 4, 'next round to play is D4');
+  });
+
+  test('an empty turn history starts fresh at 27, round 1', () => {
+    const r = rebuildBobs27State({ turns: [] });
+    assert.equal(r.running, 27);
+    assert.equal(r.round, 1);
   });
 });
 

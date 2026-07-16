@@ -774,7 +774,7 @@
             <div class="cricket-number-grid" id="cricket-number-grid" role="group" aria-label="Custom cricket targets"></div>
             <button class="btn btn-ghost" style="margin-top:8px" onclick="fillCricketClassicIntoCustom()">Start from classic</button>
           </div>
-          <!-- docs/cutthroat-cricket-roadmap.md -->
+          <!-- docs/archive/cutthroat-cricket-roadmap.md -->
           <div class="setup-label" style="margin-top:14px">Cricket variant</div>
           <div class="opts" style="margin:0">
             <div class="seg" role="group" aria-label="Cricket variant">
@@ -2069,10 +2069,11 @@ function renderHome(){
     Backend.get('/api/stats/doubles-practice-accuracy'),
     Backend.get('/api/stats/doubles-practice-best-round'),
     Backend.get('/api/stats/checkout-blitz-leaderboard'),
+    Backend.get('/api/stats/bobs27-leaderboard'),
     Backend.get('/api/stats/around-the-clock-fastest'),
     Backend.get('/api/stats/around-the-clock-completions'),
     Backend.get('/api/stats/around-the-world-progress'),
-  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,dpa,dpb,ctbl,atcf,atcc,atwp])=>{
+  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,dpa,dpb,ctbl,b27,atcf,atcc,atwp])=>{
     homeData={s, extra,
       h2h:{finishes:f,eighties:e,bigFish:b,nineDarters:n},
       practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn},
@@ -2088,6 +2089,7 @@ function renderHome(){
       },
       doublesPractice:{ accuracy:dpa, bestRound:dpb },
       checkoutTrainer:{ blitzLeaderboard:ctbl },
+      bobs27:{ leaderboard:b27 },
       aroundTheClock:{ fastest:atcf, completions:atcc },
       aroundTheWorld:{ progress:atwp }};
     renderHomeContent();
@@ -2100,6 +2102,7 @@ function renderHome(){
       baseball:{h2h:{rpi:[],perfectInnings:empty,perfectGame:empty}, practice:{rpi:[],perfectInnings:empty,perfectGame:empty}, wins:[]},
       doublesPractice:{ accuracy:[], bestRound:[] },
       checkoutTrainer:{ blitzLeaderboard:[] },
+      bobs27:{ leaderboard:[] },
       aroundTheClock:{ fastest:[], completions:[] },
       aroundTheWorld:{ progress:[] }};
     renderHomeContent();
@@ -2500,6 +2503,32 @@ function renderHomeTabBodyCheckoutTrainer(){
   `;
 }
 
+// Bob's 27's Home page leaderboard — same peak-single-run shape as Checkout
+// Blitz's above (docs/practice-ladders-roadmap.md Part A: "the Checkout
+// Blitz precedent"), no H2H/Practice split (always solo).
+function renderHomeTabBodyBobs27(){
+  const el=document.getElementById('home-tab-body');
+  const data=homeData.bobs27;
+  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
+
+  const board=data.leaderboard||[];
+  const leaderboard=board.length
+    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.bestScore}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${fmtDate(r.achievedAt)}</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — play a Bob's 27 run to claim the top spot.</p>`;
+
+  el.innerHTML=`
+    <div class="pp-section">
+      <div class="pp-section-title">🎯 Bob's 27 — Best Final Score</div>
+      ${leaderboard}
+    </div>
+  `;
+}
+
 // Guided Around the Clock's Home page leaderboards. Same "no H2H/Practice split,
 // always solo" reasoning as Doubles Practice above. Two boards: fastest
 // completion (fewest darts) and most completions (mirrors Doubles Practice's
@@ -2647,16 +2676,16 @@ function setMode(mode){
   setup.practice = (mode !== 'h2h');
   document.getElementById('h2h-options').hidden = (mode !== 'h2h');
   const isSpecialMode = (mode === 'challenge' || mode === 'ghost' || mode === 'doubles_practice' || mode === 'chuckin'
-    || mode === 'checkout_trainer' || mode === 'around_the_clock' || mode === 'around_the_world');
+    || mode === 'checkout_trainer' || mode === 'around_the_clock' || mode === 'around_the_world' || mode === 'bobs_27');
   // Daily Challenge and Ghost Opponent are both X01-only (docs/archive/ghost-opponent-roadmap.md
   // is explicitly X01-only for v1); Doubles Practice/Just Chuckin' It/Checkout
-  // Trainer/both guided drills are each their own gameType, not a choice between
-  // X01/Cricket/Baseball. Leaving one of those for any other mode must reset
-  // gameType back to a real one — otherwise it stays stuck on the drill's own
-  // type underneath, and startGame() (which reads setup.gameType, not any
-  // control) would silently build that drill's game type regardless of what
-  // Step 2 visibly shows.
-  const drillGameTypes = ['doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world'];
+  // Trainer/both guided drills/Bob's 27 are each their own gameType, not a
+  // choice between X01/Cricket/Baseball. Leaving one of those for any other
+  // mode must reset gameType back to a real one — otherwise it stays stuck on
+  // the drill's own type underneath, and startGame() (which reads
+  // setup.gameType, not any control) would silently build that drill's game
+  // type regardless of what Step 2 visibly shows.
+  const drillGameTypes = ['doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27'];
   if(!drillGameTypes.includes(mode) && drillGameTypes.includes(setup.gameType)) setup.gameType = 'x01';
   if((mode === 'challenge' || mode === 'ghost') && setup.gameType !== 'x01') setup.gameType = 'x01';
   if(drillGameTypes.includes(mode)) setup.gameType = mode;
@@ -2669,6 +2698,7 @@ function setMode(mode){
     : (mode === 'doubles_practice') ? 'Start practice' : (mode === 'chuckin') ? "Start chuckin'"
     : (mode === 'checkout_trainer') ? (setup.checkoutTrainerMode==='blitz' ? 'Start Blitz' : 'Start training')
     : (mode === 'around_the_clock') ? 'Start the clock' : (mode === 'around_the_world') ? 'Start chipping away'
+    : (mode === 'bobs_27') ? 'Start the run'
     : 'Play Now';
   if(isSpecialMode){
     setup.slots = setup.slots.slice(0,1);
@@ -3694,6 +3724,9 @@ const NEW_GAME_MODE_OPTIONS = [
   { key:'around_the_world', label:'Around the World', contexts:['practice'],
     blurb:"Chip away at all 63 lifetime dart outcomes — every number 1-20 as a single, double, and treble, plus outer bull, double bull, and a miss. Tracks the same lifetime progress as your Player Profile, across as many sessions as it takes. No round to finish — throw for as long as you like.",
     apply(){ setMode('around_the_world'); } },
+  { key:'bobs_27', label:"Bob's 27", contexts:['practice'],
+    blurb:"Bob Anderson's famous doubles routine. Start with 27 points, then throw 3 darts at D1, then D2, all the way to D20 — every dart that hits the double adds its value, but if all three miss, that double's value is SUBTRACTED instead. Drop to 0 or below and the run is over; survive to D20 and your final score is the result (a perfect run is 1287).",
+    apply(){ setMode('bobs_27'); } },
 ];
 function setupVisibleOptions(){
   const ctx = setupPlayerCount()>=2 ? 'h2h' : 'practice';
@@ -3937,7 +3970,7 @@ function setCricketPreset(preset){
   document.getElementById('cricket-custom-body').hidden = (preset !== 'custom');
   if(preset === 'custom' && setup.cricketCustomNumbers.length===0) fillCricketClassicIntoCustom();
 }
-// docs/cutthroat-cricket-roadmap.md's Standard/Cut-throat toggle. Resolved open
+// docs/archive/cutthroat-cricket-roadmap.md's Standard/Cut-throat toggle. Resolved open
 // question: 2-player cut-throat is allowed (simplest — it's still a legal,
 // nearly-standard-equivalent game with inverted totals), just nudged toward 3+
 // in the blurb below, where the variant's real bite (points landing on EVERY
@@ -4118,7 +4151,7 @@ async function startGame(){
   if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   // Custom cricket is locked to exactly 7 targets (same count as classic) — never
   // more, never fewer (docs/game-modes-roadmap.md "Decisions made").
-  const gameType = ['cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world'].includes(setup.gameType)
+  const gameType = ['cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27'].includes(setup.gameType)
     ? setup.gameType : 'x01'; // Daily Challenge always forces x01 via setMode()
   let cricketNumbers = null;
   if(gameType === 'cricket'){
@@ -4152,7 +4185,7 @@ async function startGame(){
   // (whatever "Starting score" happened to be hidden at, per setMode('ghost')) —
   // otherwise the two "players" wouldn't actually be racing the same leg.
   const startScore = challengeStart != null ? challengeStart : ghostScript ? Number(ghostScript.category) : setup.start;
-  const drillModes = ['challenge', 'ghost', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world'];
+  const drillModes = ['challenge', 'ghost', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27'];
   // docs/bug-roadmap.md BUG-22: a practice Baseball "leg" is a complete, standalone
   // 9-inning game (evaluateVisitBaseball() decides its outcome unconditionally,
   // unlike X01/Cricket's open-ended countdown legs) — so, like every drill mode
@@ -4169,7 +4202,7 @@ async function startGame(){
   // "store it even though only one value exists today" precedent tournament_rounds.
   // legs_per_set already set for a field that was single-valued at first and
   // configurable later (docs/archive/checkout-trainer-roadmap.md).
-  // variant (docs/cutthroat-cricket-roadmap.md): a config flag on the same
+  // variant (docs/archive/cutthroat-cricket-roadmap.md): a config flag on the same
   // game_type='cricket', not a new game type — see that doc's "Design" section.
   const config = gameType === 'cricket' ? { numbers: cricketNumbers, variant: setup.cricketVariant === 'cutthroat' ? 'cutthroat' : 'standard' }
     // Innings fixed at 9 (docs/game-modes-roadmap.md "Baseball") — not a New Game
@@ -4188,6 +4221,7 @@ async function startGame(){
         pinnedTarget: setup.checkoutTrainerPin || null }
     : gameType === 'around_the_clock' ? {}
     : gameType === 'around_the_world' ? {}
+    : gameType === 'bobs_27' ? {}
     : { startingScore: startScore };
   const category = gameType === 'cricket'
     ? (setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
@@ -4201,6 +4235,8 @@ async function startGame(){
     ? (config.mode==='blitz' ? 'Checkout Blitz' : 'Checkout Trainer (Freeform)')
     : gameType === 'around_the_clock'
     ? 'Guided Around the Clock'
+    : gameType === 'bobs_27'
+    ? "Bob's 27"
     : gameType === 'around_the_world'
     ? 'Guided Around the World'
     : String(startScore);
@@ -4228,6 +4264,7 @@ async function startGame(){
     current: 0,
     setNo: 1, legNo: 1,
     baseballInning: 1, // Baseball only (docs/game-modes-roadmap.md) — which inning (1-9, or beyond on a tie) is live
+    bobs27Round: 1,    // Bob's 27 only (docs/practice-ladders-roadmap.md Part A) — which double (1-20) is live
     darts: [],
     busted: false, won: false,
     done: false,
@@ -5394,7 +5431,9 @@ const BADGE_INFO = {
   cricketperfectclose: { icon:'🏆', label:'Perfect Leg', desc:'Close every Cricket number using the fewest darts physically possible for that match.', cricket:true },
   cricketwhitewash:    { icon:'🧹', label:'Whitewash', desc:"Win a Cricket leg without your opponent closing a single number.", cricket:true },
   cricketcomebackkid:  { icon:'🔥', label:'Comeback Kid (Cricket)', desc:`Win a Cricket leg after trailing your opponent's points by ${CRICKET_COMEBACK_THRESHOLD}+ at some point.`, cricket:true },
-  cricketstonecold:    { icon:'🔪', label:'Stone Cold', desc:'Win a 3+ player Cut-throat Cricket game without receiving a single point (docs/cutthroat-cricket-roadmap.md).', cricket:true },
+  cricketstonecold:    { icon:'🔪', label:'Stone Cold', desc:'Win a 3+ player Cut-throat Cricket game without receiving a single point (docs/archive/cutthroat-cricket-roadmap.md).', cricket:true },
+  bobs27fullhouse:  { icon:'🎯', label:'Full House', desc:"Hit all three darts of a visit on that round's double, in Bob's 27.", bobs27:true },
+  bobs27fullanderson: { icon:'🏔️', label:'The Full Anderson', desc:"A perfect Bob's 27 run — every double from D1 through D20 hit with all three darts, finishing on exactly 1287.", bobs27:true },
   challengeweek:       { icon:'🔥', label:'Challenge Streak: Week', desc:'Complete the Daily Challenge 7 days in a row.', challenge:true },
   challengemonth:      { icon:'🏆', label:'Challenge Streak: Month', desc:'Complete the Daily Challenge 30 days in a row.', challenge:true },
   challengeallformats: { icon:'🗓️', label:'Full Rotation', desc:'Complete every Daily Challenge format at least once.', challenge:true },
@@ -5459,7 +5498,7 @@ function renderPlayerBadges(data){
   // Practice's 5 (docs/archive/culture-badges-roadmap.md Part B), and the guided
   // drills' 2 each stay visually distinct sub-sections rather than one mixed
   // flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice);
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
   const baseballIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].baseball);
   const challengeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].challenge);
@@ -5468,6 +5507,7 @@ function renderPlayerBadges(data){
   const checkoutTrainerIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].checkoutTrainer);
   const doublesPracticeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].doublesPractice);
   const drillIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].drill);
+  const bobs27Ids = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].bobs27);
   container.innerHTML = `
     <div class="pp-section-title" style="margin-bottom:6px">X01</div>
     <div class="summary-grid">${x01Ids.map(badgeBlock).join('')}</div>
@@ -5477,6 +5517,8 @@ function renderPlayerBadges(data){
     <div class="summary-grid">${baseballIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Doubles Practice</div>
     <div class="summary-grid">${doublesPracticeIds.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">Bob's 27</div>
+    <div class="summary-grid">${bobs27Ids.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Tournaments</div>
     <div class="summary-grid">${tournamentIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Daily Challenge</div>
@@ -5801,6 +5843,20 @@ function renderBaseballPersonalBests(data){
     ${formHtml}
   </div>`;
 }
+// Bob's 27's Personal Bests — same "no win-streak, a solo run never wins
+// against anyone" shape Doubles Practice/Chuckin use below.
+function renderBobs27PersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || (data.bestFinalScore==null && data.deepestDoubleOnFail==null)){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough runs recorded yet.</p>`;
+    return;
+  }
+  container.innerHTML=`<div class="summary-grid">
+    ${data.bestFinalScore!=null?`<div class="stat-block"><div class="stat-val">${data.bestFinalScore}</div><div class="stat-label">Best Final Score</div></div>`:''}
+    ${data.deepestDoubleOnFail!=null?`<div class="stat-block"><div class="stat-val">D${data.deepestDoubleOnFail}</div><div class="stat-label">Deepest Double Reached on a Fail</div></div>`:''}
+  </div>`;
+}
 // No winStreak/recentForm/lifetime fields (see getDoublesPracticePersonalBests()'s
 // own comment) — a round never "wins", so those X01/Cricket concepts don't map.
 function renderDoublesPracticePersonalBests(data){
@@ -5923,6 +5979,7 @@ function renderGame(){
   if(game.gameType === 'checkout_trainer') return renderGameCheckoutTrainer();
   if(game.gameType === 'around_the_clock') return renderGameAroundTheClock();
   if(game.gameType === 'around_the_world') return renderGameAroundTheWorld();
+  if(game.gameType === 'bobs_27') return renderGameBobs27();
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
   game.players.forEach((p,i)=>{
@@ -5998,7 +6055,7 @@ function renderGameCricket(){
     return `<div class="cs-cell${active?' active':''}"><span class="cs-points">${p.points||0}</span></div>`;
   }).join('');
 
-  // docs/cutthroat-cricket-roadmap.md: the footer label is the one place the
+  // docs/archive/cutthroat-cricket-roadmap.md: the footer label is the one place the
   // scoreboard needs to say which direction "winning" points go, since cutthroat
   // otherwise renders identically to standard (same marks, same points cells).
   const ptsLabel = game.config.variant === 'cutthroat' ? 'Pts (lowest wins)' : 'Pts';
@@ -6077,6 +6134,43 @@ function renderGameBaseball(){
   inningBanner.style.cssText = 'text-align:center;margin:8px 0 0';
   inningBanner.textContent = `Inning ${Math.min(game.baseballInning,9)} of 9 — target ${baseballInningTarget(game.baseballInning)}${game.baseballInning>9?' (extra innings)':''}`;
   sb.appendChild(inningBanner);
+
+  renderSlots();
+  renderPad();
+  pushLive();
+}
+
+/* docs/practice-ladders-roadmap.md Part A: same shared chalkboard-table
+   shape as Cricket/Baseball's (rows=rounds, one column since it's always solo),
+   just fixed at exactly 20 rows — no "extra innings"-style dynamic extension
+   the way Baseball's own table needs. */
+function renderGameBobs27(){
+  const sb = document.getElementById('scoreboard'); sb.innerHTML='';
+  const p = game.players[0];
+
+  const rows = [];
+  for(let round=1; round<=20; round++){
+    const isCurrentRound = round === game.bobs27Round;
+    const result = p.roundResults[round];
+    const cellText = result==null ? '' : `<span class="cs-points">${result>0?'+'+result:'−'+(round*2)}</span>`;
+    rows.push(`<div class="cs-row"><div class="cs-label">D${round}</div><div class="cs-cell${isCurrentRound?' active':''}">${cellText}</div></div>`);
+  }
+  const bodyRowsHtml = rows.join('');
+
+  const table = document.createElement('div');
+  table.className = 'cs-table';
+  table.style.setProperty('--cs-cols', 1);
+  table.innerHTML = `
+    <div class="cs-row cs-head" role="row"><div class="cs-label"></div><div class="cs-col-head active"><span>${escapeHtml(p.name)}</span><span class="cs-throw-chip">▸ throwing</span></div></div>
+    ${bodyRowsHtml}
+    <div class="cs-row cs-foot"><div class="cs-label">Score</div><div class="cs-cell"><span class="cs-points">${p.running}</span></div></div>`;
+  sb.appendChild(table);
+
+  const roundBanner = document.createElement('p');
+  roundBanner.className = 'pp-meta';
+  roundBanner.style.cssText = 'text-align:center;margin:8px 0 0';
+  roundBanner.textContent = `D${game.bobs27Round} — running score: ${p.running}`;
+  sb.appendChild(roundBanner);
 
   renderSlots();
   renderPad();
@@ -6169,7 +6263,8 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   triplebull:'🐂 TRIPLE BULL! 🐂', bullseyefinish:'Bullseye Finish! 🏹',
   baseballperfectinning:'Perfect Inning! 🔥', baseballperfectgame:'🏆 PERFECT GAME! 🏆',
   baseballwalkoff:'Walk-Off! ⚾', baseballcycle:'The Cycle! 🔄', doublespracticeringmaster:'Ring Master! 🎪',
-  cricketstonecold:'Stone Cold! 🔪' };
+  cricketstonecold:'Stone Cold! 🔪',
+  bobs27fullhouse:'Full House! 🎯', bobs27fullanderson:'🏔️ THE FULL ANDERSON! 🏔️' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -6183,7 +6278,8 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   triplebull:4000, bullseyefinish:2500,
   baseballperfectinning:2500, baseballperfectgame:6000,
   baseballwalkoff:3000, baseballcycle:2500, doublespracticeringmaster:5000,
-  cricketstonecold:3500 };
+  cricketstonecold:3500,
+  bobs27fullhouse:2500, bobs27fullanderson:6000 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
@@ -6355,6 +6451,38 @@ DOUBLES_HIT_MILESTONE_LADDERS.forEach(ladder=>{
   ladder.tiers.forEach((tier, i)=>{
     const id = ladder.idPrefix + tier.threshold;
     BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), doublesPractice:true };
+    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
+    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
+  });
+});
+// Bob's 27 survival/score ladder (docs/practice-ladders-roadmap.md Part A)
+// — reuses the SAME generic engine (checkChuckinMilestoneTier() below) as
+// every ladder above, but with a DIFFERENT kind of "value": every other ladder
+// here checks a LIFETIME-cumulative counter (fetched once at game start,
+// accumulated across the whole session); this one checks THIS RUN's own final
+// score directly, once, at the moment the run ends (onLegWonBobs27()) — "have
+// you EVER finished a run at least this good" rather than "how many have you
+// done in total." No lifetime-base fetch is needed at game start because of
+// that (see newMatchPlayerBobs27()'s own comment) — the value being compared
+// IS the number just computed, not accumulated. The engine itself doesn't
+// care either way (it just diffs "which tiers does this value cross that
+// aren't already cached as earned"), so this is a genuinely different USE of
+// the same mechanism, not a different mechanism.
+const BOBS27_SCORE_MILESTONE_LADDERS = [
+  { metric:'finalScore', idPrefix:'bobs27_score_', statNoun:'final score',
+    descFor: t => t===1 ? "Survive a full Bob's 27 run (finish with a positive score)." : `Finish a Bob's 27 run with a final score of ${t.toLocaleString()} or more.`,
+    tiers: [
+      { threshold:1,    label:'Survivor',      icon:'🛡️' },
+      { threshold:100,  label:'Century',       icon:'💯' },
+      { threshold:250,  label:'Quarter Grand', icon:'🌟' },
+      { threshold:500,  label:'Half Grand',    icon:'🚀' },
+      { threshold:1000, label:'Four Figures',  icon:'👑' },
+    ] },
+];
+BOBS27_SCORE_MILESTONE_LADDERS.forEach(ladder=>{
+  ladder.tiers.forEach((tier, i)=>{
+    const id = ladder.idPrefix + tier.threshold;
+    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), bobs27:true };
     ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
     ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
   });
@@ -6627,7 +6755,7 @@ function showAchievement(type, player, countText){
   // Triple Bull (three double-bulls in one visit, a 150 checkout) and Perfect Game
   // (81 runs, a perfect 9 in every Baseball inning) get the same showcase treatment
   // as a nine-darter — comparably rare, celebration-worthy feats.
-  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'triplebull' || type === 'baseballperfectgame' || type === 'cricketstonecold';
+  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'triplebull' || type === 'baseballperfectgame' || type === 'cricketstonecold' || type === 'bobs27fullanderson';
   achOverlayEl.classList.toggle('mega', mega);
   achOverlayEl.classList.add('show');
   const shareBtn = document.getElementById('ach-share-btn');
@@ -7466,10 +7594,14 @@ function liveSnapshot(message){
     // Baseball only: which inning (1-9, or beyond on a tie) is currently live —
     // per-player runs ride inside the players[] array above via playerSnapshotBaseball().
     baseballInning: game.gameType === 'baseball' ? (game.baseballInning || 1) : null,
-    // Cricket only (docs/cutthroat-cricket-roadmap.md): lets display.html's
+    // Cricket only (docs/archive/cutthroat-cricket-roadmap.md): lets display.html's
     // cricket scorecard label its points footer "lowest wins" for cutthroat,
     // the one thing that otherwise renders identically to standard.
     cricketVariant: game.gameType === 'cricket' ? (game.config.variant || 'standard') : null,
+    // Bob's 27 only (docs/practice-ladders-roadmap.md Part A): which
+    // double (1-20) is currently live — per-player running score/round history
+    // ride inside the players[] array above via playerSnapshotBobs27().
+    bobs27Round: game.gameType === 'bobs_27' ? (game.bobs27Round || 1) : null,
     achievement: pendingAchievement || null,
     gameOneEighties: game.gameOneEighties || 0,
     gameBigFish: game.gameBigFish || 0,
@@ -7522,6 +7654,12 @@ function renderPad(){
     renderPadBaseball(full);
     const utb1 = document.getElementById('undo-turn-btn');
     if(utb1) utb1.disabled = !game.lastTurnSnapshot;
+    return;
+  }
+  if(game.gameType === 'bobs_27'){
+    renderPadBobs27(full);
+    const utb2 = document.getElementById('undo-turn-btn');
+    if(utb2) utb2.disabled = !game.lastTurnSnapshot;
     return;
   }
   const bounceBtn = document.getElementById('bounce-out-btn');
@@ -7661,6 +7799,37 @@ function renderPadBaseball(full){
   miss.onclick=()=>throwDart(0); pad.appendChild(miss);
 }
 
+/* docs/practice-ladders-roadmap.md Part A: one button, the round's own
+   double — the player selects Double via the ambient multi-row (same S/D/T
+   selector every other Pad-mode dart uses) then taps it to log a hit; Single/
+   Treble of the same number, or Miss, all correctly log as "missed the
+   double" via the ambient mult the same way Baseball's own single pad button
+   already relies on. */
+function renderPadBobs27(full){
+  const board = document.getElementById('dart-board-wrap');
+  if(board) board.classList.add('hidden');
+  const bounceBtn = document.getElementById('bounce-out-btn');
+  if(bounceBtn) bounceBtn.disabled = full;
+  const multi = document.getElementById('multi-row');
+  if(multi) multi.classList.remove('hidden');
+  const pad = document.getElementById('pad');
+  if(!pad) return;
+  pad.classList.remove('hidden');
+  pad.classList.add('cricket-pad');
+  pad.innerHTML = '';
+  const target = game.bobs27Round;
+  const b = document.createElement('button');
+  b.className = 'cricket-target';
+  b.disabled = full;
+  b.innerHTML = `<span class="ct-num">D${target}</span>`;
+  b.setAttribute('aria-label', `Double ${target} — this round's target`);
+  b.onclick = () => throwDart(target);
+  pad.appendChild(b);
+  const miss=document.createElement('button');
+  miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
+  miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+}
+
 /* ---------- throwing ---------- */
 function setMult(m){ mult=m; updateMultUI(); }
 function updateMultUI(){
@@ -7710,6 +7879,13 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
     renderSlots(); renderPad(); pushLive();
     return;
   }
+  if(game.gameType === 'bobs_27'){
+    // Same reasoning as Baseball — "all three darts missed" can only be judged
+    // once the whole visit is in, so there's nothing meaningful to preview
+    // live per-dart either.
+    renderSlots(); renderPad(); pushLive();
+    return;
+  }
 
   // live bust/win feedback before committing
   const ev = GAME_TYPES[game.gameType].evaluateVisit(game.players[game.current], game.darts, game);
@@ -7733,7 +7909,7 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
 // independently re-validates this on every write, never trusting this check
 // (docs/archive/saved-games-roadmap.md's own security section: "never trust the
 // client's eligibility check").
-const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world'];
+const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27'];
 function isCurrentGameSavable(){
   return !!(game && !game.done && SAVABLE_GAME_TYPES.includes(game.gameType));
 }
@@ -7808,7 +7984,7 @@ async function resumeGame(gameId){
   const players = names.map(n => GAME_TYPES[gameType].newMatchPlayer(n,
     gameType === 'cricket' ? config : startScore));
 
-  let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, roundOver = false;
+  let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, bobs27Round = 1, roundOver = false;
   let statusMsg = '';
   if(gameType === 'x01'){
     const r = rebuildX01State({ names, outModes, startScore, practice: !!state.practice, legsPerSet: state.legsPerSet, turns: state.turns });
@@ -7847,6 +8023,11 @@ async function resumeGame(gameId){
     const r = rebuildAroundTheWorldState({ turns: state.turns });
     players[0].sessionDarts = r.sessionDarts;
     statusMsg = `Resumed — ${r.sessionDarts} darts this session so far.`;
+  } else if(gameType === 'bobs_27'){
+    const r = rebuildBobs27State({ turns: state.turns });
+    players[0].running = r.running;
+    bobs27Round = r.round;
+    statusMsg = `Resumed — D${bobs27Round}, running score: ${r.running}.`;
   } else {
     uiAlert(`${gameType} games can't be resumed.`);
     return;
@@ -7860,7 +8041,7 @@ async function resumeGame(gameId){
     players,
     blitzDeadline: null, blitzEnded: false,
     starter, current, setNo, legNo,
-    baseballInning,
+    baseballInning, bobs27Round,
     darts: [], busted:false, won:false, done:false,
     gameOneEighties:0, gameBigFish:0, gameBusts:0,
     currentLegTurns: [], legVisitLogs: [], sessionTurns: [],
@@ -7923,6 +8104,7 @@ function savedGamePositionLabel(sg){
   }
   if(pos.hit != null) return `Round ${pos.legNo} · ${pos.hit}/${pos.total} numbers hit`;
   if(pos.sessionDarts != null) return `${pos.sessionDarts} dart${pos.sessionDarts===1?'':'s'} this session`;
+  if(pos.round != null) return `D${pos.round} · running score ${pos.running}`;
   return '';
 }
 function savedGameDateLabel(iso){
@@ -8048,6 +8230,7 @@ function undoLastTurn(){
   if(game && game.gameType === 'checkout_trainer') return undoLastTurnCheckoutTrainer();
   if(game && game.gameType === 'around_the_clock') return undoLastTurnAroundTheClock();
   if(game && game.gameType === 'around_the_world') return undoLastTurnAroundTheWorld();
+  if(game && game.gameType === 'bobs_27') return undoLastTurnBobs27();
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
   const p = game.players[snap.pi];
@@ -8125,6 +8308,7 @@ function undoDart(){
 function enterTurn(){
   if(game.gameType === 'cricket') return enterTurnCricket();
   if(game.gameType === 'baseball') return enterTurnBaseball();
+  if(game.gameType === 'bobs_27') return enterTurnBobs27();
   if(game.gameType === 'checkout_trainer') return submitCheckoutAttempt();
   if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
   const p = game.players[game.current];
@@ -8526,7 +8710,7 @@ function enterTurnCricket(){
   // Same screen-reader convention as X01's enterTurn(): announce the committed
   // outcome, with a distinct phrasing for the leg-winning visit and — cutthroat
   // only — for a visit that put points ONTO opponents rather than the shooter's
-  // own total (docs/cutthroat-cricket-roadmap.md's accessibility section: "a new
+  // own total (docs/archive/cutthroat-cricket-roadmap.md's accessibility section: "a new
   // event class... announce it, not just a number ticking up").
   const _hitOpponents = cutthroat ? ev.opponentGains.filter(g=>g.gained>0) : [];
   if(ev.win) announce(cutthroat
@@ -8557,7 +8741,7 @@ function enterTurnCricket(){
   // regardless of variant. Standard: higher points is better, so "trailing" means
   // the opponent is ahead (opp - me). Cutthroat inverts which side "ahead" means
   // (lower is better), so "trailing" means I've received MORE than they have
-  // (me - opp) — docs/cutthroat-cricket-roadmap.md's open question, resolved as a
+  // (me - opp) — docs/archive/cutthroat-cricket-roadmap.md's open question, resolved as a
   // variant-aware condition rather than a scope-out.
   if(game.players.length===2){
     const _opp = game.players.find(x=>x!==p);
@@ -8709,7 +8893,7 @@ function onLegWonCricket(wi){
       DB.recordEvent('set_end', game.setNo, null);
       DB.recordEvent('game_end', null, null);
       DB.completeGame(w.name);
-      // 🔪 Stone Cold (docs/cutthroat-cricket-roadmap.md): won a 3+ player cut-throat
+      // 🔪 Stone Cold (docs/archive/cutthroat-cricket-roadmap.md): won a 3+ player cut-throat
       // GAME having received zero points across every leg of it — checked here (not
       // per-leg) since "the game" is what the badge is scoped to; w.gamePointsReceived
       // is never leg-reset (see newMatchPlayerCricket()), so it already reflects the
@@ -8910,6 +9094,156 @@ function onLegWonBaseball(wi){
       // matchWinStatLine() is fully generic over legsWon/setsWon/category —
       // reused as-is, no Baseball-specific version needed.
       fireMomentCard('matchwin', { icon:'🏅', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) });
+      finishUnit('game', w.name);
+      return;
+    }
+    sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+    sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
+    DB.recordEvent('leg_end', game.setNo, game.legNo);
+    DB.recordEvent('set_end', game.setNo, null);
+    game.matchResult = { ts:Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+    finishUnit('set', w.name);
+    return;
+  }
+  sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+  DB.recordEvent('leg_end', game.setNo, game.legNo);
+  game.matchResult = { ts:Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+  finishUnit('leg', w.name);
+}
+
+/* ----- Bob's 27 turn commit (dispatched from enterTurn()) -----
+   docs/practice-ladders-roadmap.md Part A. Visit-based (3 darts per
+   round), same shape as Baseball's — always exactly one player (game.current
+   never moves), one round per double, game.bobs27Round advancing after every
+   committed visit (there's no "roundComplete" distinction to make the way
+   Baseball's rotation needs — solo, so every visit always completes its own
+   round). */
+function enterTurnBobs27(){
+  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  const p = game.players[game.current];
+  const ev = GAME_TYPES.bobs_27.evaluateVisit(p, game.darts, game);
+
+  if(ev.gain>0) announce(`${p.name} hits D${ev.round} ${ev.hits===1?'once':ev.hits+' times'} — plus ${ev.gain}, now on ${ev.running}.`);
+  else announce(`${p.name} misses D${ev.round} completely — minus ${ev.round*2}, now on ${ev.running}.`);
+
+  // snapshot state before mutations so undoLastTurn() can restore it — same
+  // convention as X01/enterTurnCricket()/enterTurnBaseball()'s own lastTurnSnapshot.
+  const _snap = { pi:game.current, running:p.running, roundResults:Object.assign({}, p.roundResults),
+    legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
+    bobs27Round:game.bobs27Round,
+    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
+    badgeReverts:[], voided:false };
+  game.lastTurnSnapshot = _snap;
+
+  p.running = ev.running;
+  p.roundResults = Object.assign({}, p.roundResults, { [ev.round]: ev.gain });
+  const dartsThrown = game.darts.length;
+  p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
+
+  // bust (docs/practice-ladders-roadmap.md Part A): reused, X01-style, to
+  // mark the fatal round — the SEC-25-style write-time guard in addTurn()
+  // (backend/db.js) independently re-derives and checks this exact value,
+  // never trusting the client's own ev.dead.
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:ev.scored, bust:ev.dead, checkout:false, checkoutPoints:null,
+    darts: game.darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
+      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+
+  const turnRecord = { player:p.name, scored:ev.scored, darts:game.darts.slice() };
+  game.currentLegTurns.push(turnRecord);
+  game.sessionTurns.push(turnRecord);
+
+  awardTimeOfDayBadges(p);
+
+  // 🎯 Full House: all three darts hit the round's double — the maximum
+  // possible gain for that round, Bob's 27's own "180" for a single visit.
+  if(dartsThrown===3 && isBobs27FullHouse(ev.hits)){
+    queueBadge('bobs27fullhouse', p.name);
+    awardRecurringBadge(p.name, 'bobs27fullhouse', 'bobs27fullhouse',
+      { icon:'🎯', headline:'FULL HOUSE!', player:p.name, statLine:`All three darts on D${ev.round}` });
+  }
+
+  if(ev.matchComplete){
+    onLegWonBobs27(game.current);
+    return;
+  }
+
+  game.bobs27Round += 1;
+  game.darts=[]; game.busted=false; game.won=false;
+  game.turnSeq += 1;
+  document.getElementById('status').className='status';
+  document.getElementById('status').textContent = `D${game.bobs27Round} — three darts. Running score: ${p.running}.`;
+  renderGameBobs27();
+  pushLive();
+}
+function undoLastTurnBobs27(){
+  if(!game || !game.lastTurnSnapshot) return;
+  const snap = game.lastTurnSnapshot;
+  const p = game.players[snap.pi];
+  p.running = snap.running;
+  p.roundResults = snap.roundResults;
+  p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
+  game.bobs27Round = snap.bobs27Round;
+  game.currentLegTurns.length = snap.ltLen;
+  game.sessionTurns.length = snap.stLen;
+
+  snap.voided = true;
+  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+  });
+  cancelQueuedAchievementsForSnapshot(snap);
+
+  game.darts = []; game.busted=false; game.won=false;
+  game.lastTurnSnapshot = null;
+  DB.deleteLastTurn();
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
+  renderGameBobs27();
+  pushLive();
+}
+/* ----- Bob's 27 leg / set / game progression (dispatched from enterTurnBobs27) -----
+   Always exactly one player (wi is always 0) and always completes after its
+   one leg — legsPerSet/setsPerGame are forced to 1 in startGame() (bobs_27 is
+   in drillModes, the same "a run IS the game" shape practice Baseball's own
+   BUG-22 fix established), so the "set won"/"leg won but not set" branches
+   below are structurally unreachable in practice — kept anyway for the same
+   generic-tree consistency onLegWonBaseball()'s own comment explains. */
+function onLegWonBobs27(wi){
+  const w = game.players[wi];
+  w.legsWon += 1;
+
+  // Survival/score ladder + 🏔️ The Full Anderson — checked once, here,
+  // against THIS RUN's own final score, not a lifetime accumulator (see
+  // BOBS27_SCORE_MILESTONE_LADDERS' own comment on why that's still the same
+  // generic engine, just a different kind of "value").
+  checkChuckinMilestoneTier(BOBS27_SCORE_MILESTONE_LADDERS[0], w.name, w.running);
+  if(isBobs27FullAnderson(w.running)){
+    queueBadge('bobs27fullanderson', w.name);
+    awardRecurringBadge(w.name, 'bobs27fullanderson', 'bobs27fullanderson',
+      { icon:'🏔️', headline:'THE FULL ANDERSON!', player:w.name, statLine:'Every double, all three darts — 1287' });
+  }
+
+  if(w.legsWon >= game.legsPerSet){
+    w.setsWon += 1;
+    game.players.forEach(p=>p.legsWon=0);
+
+    if(w.setsWon >= game.setsPerGame){   // game (run) complete
+      sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+      sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
+      sendHaWebhook('gameend', w.name, game.category);
+      DB.recordEvent('leg_end', game.setNo, game.legNo);
+      DB.recordEvent('set_end', game.setNo, null);
+      DB.recordEvent('game_end', null, null);
+      DB.completeGame(w.name);
+      game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+      // Bob's 27's own moment card — a run always completes (never re-plays as
+      // a leg/set) so this is the only outcome to celebrate, "MATCH WON!"
+      // reads wrong for a died-early run so this uses a survived-vs-died
+      // headline instead, same "the generic matchWinStatLine() doesn't know
+      // about `running`" reasoning that gives every solo drill its own card copy.
+      const survived = w.running > 0;
+      fireMomentCard('matchwin', { icon: survived ? '🎯' : '💀', headline: survived ? 'RUN COMPLETE!' : 'RUN OVER',
+        player:w.name, statLine: survived ? `Final score: ${w.running} — survived all 20` : `Died on D${Object.keys(w.roundResults).length} · final score ${w.running}` });
       finishUnit('game', w.name);
       return;
     }
@@ -9210,10 +9544,12 @@ function finishUnit(kind, winner){
   const oche=document.querySelector('.oche');
   const isCricket = game.gameType === 'cricket';
   const isBaseball = game.gameType === 'baseball';
+  const isBobs27 = game.gameType === 'bobs_27';
   // No matchwin moment card is built for Cricket yet (its own social/moment-card
   // pass is a later build-order step) — suppress the Share button rather than wire
-  // it to a card that doesn't exist. Baseball's own matchwin card IS built
-  // (onLegWonBaseball()'s "game (match) won" branch), so it keeps the button.
+  // it to a card that doesn't exist. Baseball's/Bob's 27's own matchwin cards ARE
+  // built (onLegWonBaseball()/onLegWonBobs27()'s "game (match/run) complete"
+  // branches), so they keep the button.
   const matchShareBtn = isCricket ? '' : `<button class="btn btn-ghost" id="matchwin-share-btn" onclick="shareMomentCard('matchwin')">📤 Share</button>`;
   if(kind==='game'){
     // Tournament mode: the bracket already advanced server-side (the onGameCompleted
@@ -9247,13 +9583,25 @@ function finishUnit(kind, winner){
     const nextBtn = game.tournamentMatchId
       ? `<button class="btn btn-primary" onclick="show('tournament')">Back to bracket</button>`
       : `<button class="btn btn-primary" onclick="show('setup')">New game</button>`;
+    // Bob's 27's own tiny run-summary block — h2hStatsHtml()/h2hStatsHtmlBaseball()
+    // both read X01/Baseball-shaped player fields (score/doubleOut, totalRuns/
+    // inningRuns) that don't exist on a bobs_27 player, same reasoning Cricket's
+    // own '' suppression already documents above.
+    const bobs27Summary = isBobs27 ? (()=>{
+      const p = game.players[0];
+      const survived = p.running > 0;
+      return `<div class="summary-grid" style="margin-top:14px">
+        <div class="stat-block"><div class="stat-val">${p.running}</div><div class="stat-label">Final Score</div></div>
+        <div class="stat-block"><div class="stat-val">${survived ? 'Survived' : 'D'+Object.keys(p.roundResults).length}</div><div class="stat-label">${survived ? 'All 20 Doubles' : 'Died On'}</div></div>
+      </div>`;
+    })() : '';
     oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
       <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">GAME OVER</div>
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${escapeHtml(winner)} takes the match. Stats saved.</p>
       <div class="btn-row" style="justify-content:center">
         ${nextBtn}
         ${matchShareBtn}
-      </div>${isCricket ? '' : isBaseball ? h2hStatsHtmlBaseball(winner,'game') : h2hStatsHtml(winner,'game')}</div>`;
+      </div>${isCricket || isBobs27 ? '' : isBaseball ? h2hStatsHtmlBaseball(winner,'game') : h2hStatsHtml(winner,'game')}${bobs27Summary}</div>`;
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
@@ -9424,6 +9772,20 @@ const BASEBALL_STAT_DEFS = [
 // Translates a BASEBALL_STAT_DEFS key to getBaseballStatBubbles()'s JSON field name.
 const BASEBALL_BUBBLE_KEY_MAP = { baseballrpi:'rpi', baseballperfectinnings:'perfectInnings', baseballwinpct:'winPct',
   baseballgames:'gamesPlayed', baseballdartsthrown:'dartsThrown', baseballbestinning:'bestInning' };
+
+// Bob's 27's own stat vocabulary (docs/practice-ladders-roadmap.md Part A) —
+// solo, so no win-rate/games-vs-opponent bubble the way Baseball has; "Runs
+// Played" plays that role instead. Every bubble here has a matching
+// getBobs27StatBubbles() field (backend/db.js).
+const BOBS_27_STAT_DEFS = [
+  { key:'bobs27survivalrate', label:'Survival Rate', desc:"% of Bob's 27 runs that survived all 20 rounds", fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'bobs27avgscore', label:'Avg Final Score', desc:"Average final score across every Bob's 27 run", fmt:v=>v!=null?v.toFixed(0):'—', primary:true },
+  { key:'bobs27runs', label:'Runs Played', desc:"Number of Bob's 27 runs played", fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'bobs27dartsthrown', label:'Darts Thrown', desc:"Total darts thrown in Bob's 27", fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
+  { key:'bobs27doubleshitrate', label:'Doubles Hit %', desc:"% of darts thrown that hit that round's own double", fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+];
+const BOBS_27_BUBBLE_KEY_MAP = { bobs27survivalrate:'survivalRate', bobs27avgscore:'avgFinalScore',
+  bobs27runs:'runs', bobs27dartsthrown:'dartsThrown', bobs27doubleshitrate:'doublesHitRate' };
 
 // Doubles Practice's own 3 stat bubbles (docs/game-modes-roadmap.md's requested
 // vocabulary: darts per round, doubles hit per round, doubles%) — every bubble
@@ -9652,6 +10014,20 @@ const GAME_TYPES = {
     personalBestsRenderer: renderAroundTheWorldPersonalBests,
     homeTabRenderer: renderHomeTabBodyAroundTheWorld,
     soloOnly: true
+  },
+  bobs_27: {
+    id: 'bobs_27',
+    label: "Bob's 27",
+    newMatchPlayer: newMatchPlayerBobs27,
+    evaluateVisit: evaluateVisitBobs27,
+    resetForNextLeg: resetPlayerForNextLegBobs27,
+    playerSnapshot: playerSnapshotBobs27,
+    statDefs: BOBS_27_STAT_DEFS,
+    personalBestsRenderer: renderBobs27PersonalBests,
+    homeTabRenderer: renderHomeTabBodyBobs27,
+    // Always solo — there's no opponent to play head-to-head against, same
+    // reasoning as Doubles Practice/Checkout Trainer/both guided drills.
+    soloOnly: true
   }
 };
 // bubbleKeyMap is patched on below, right after each map itself is defined —
@@ -9722,6 +10098,36 @@ function playerSnapshotBaseball(p){
     name:p.name, totalRuns:p.totalRuns||0, inningRuns:Object.assign({}, p.inningRuns),
     legsWon:p.legsWon, setsWon:p.setsWon,
     legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0
+  };
+}
+
+/* ---------- Bob's 27 (docs/practice-ladders-roadmap.md Part A) ----------
+   Solo-only, one leg per run — a run IS the game (forced legsPerSet=setsPerGame=1,
+   the same practice-Baseball-style "always completes after its one leg" shape
+   BUG-22 established, see startGame()'s drillModes/isPracticeBaseball handling).
+   game.bobs27Round is game-level state (which double, 1-20, is currently live) —
+   the same "current target lives on game, not per-player" shape Baseball's
+   baseballInning uses, since this mode is always exactly one player anyway.
+   evaluateVisitBobs27() lives in scoring.js; only the stateful player-record
+   helpers stay here, same split as Cricket/Baseball. roundResults mirrors
+   Baseball's inningRuns exactly ({round: gain}, undefined = not reached yet,
+   0 = reached and missed) — same "not yet played vs. a real zero" distinction
+   its own renderer needs. No lifetime-ladder base fetch at game start (unlike
+   Baseball's lifetimeRunsBase): the survival/score ladder (see
+   BOBS27_SCORE_MILESTONE_LADDERS below) checks THIS RUN's own final score
+   directly, not a lifetime-cumulative total, so there's nothing to pre-fetch. */
+function newMatchPlayerBobs27(name){
+  return { name, running:27, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0, roundResults:{} };
+}
+function resetPlayerForNextLegBobs27(p, game, newSet){
+  p.running = 27; p.legDarts = 0; p.roundResults = {};
+  if(newSet) p.setDarts = 0;
+}
+function playerSnapshotBobs27(p){
+  return {
+    name:p.name, running:p.running, legsWon:p.legsWon, setsWon:p.setsWon,
+    legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0,
+    roundResults:Object.assign({}, p.roundResults)
   };
 }
 
@@ -10925,6 +11331,7 @@ GAME_TYPES.chuckin.bubbleKeyMap = CHUCKIN_BUBBLE_KEY_MAP;
 GAME_TYPES.checkout_trainer.bubbleKeyMap = CHECKOUT_TRAINER_BUBBLE_KEY_MAP;
 GAME_TYPES.around_the_clock.bubbleKeyMap = AROUND_THE_CLOCK_BUBBLE_KEY_MAP;
 GAME_TYPES.around_the_world.bubbleKeyMap = AROUND_THE_WORLD_BUBBLE_KEY_MAP;
+GAME_TYPES.bobs_27.bubbleKeyMap = BOBS_27_BUBBLE_KEY_MAP;
 function toggleMoreStats(){
   showMoreStats = !showMoreStats;
   renderPlayerPage();
