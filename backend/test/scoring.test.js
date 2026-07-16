@@ -14,7 +14,7 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
   evaluateDartDoublesPractice, evaluateDartAroundTheClock, chuckinTiersReached, isStaircaseFinish,
   isBedAndBreakfast, isMadhouseFinish, isShanghaiVisit,
-  isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,
+  isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved, cricketStoneColdAchieved,
   pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
   CHECKOUT_TRAINER_TRICK_CHANCE, listUnsolvableTargets, gradeCheckoutDeclaration,
   rebuildX01State, rebuildCricketState, rebuildBaseballState,
@@ -257,6 +257,122 @@ describe('evaluateVisitCricket (mark accumulation + opponent gating + win condit
 
     opponentB.points = 10; // now shooter leads both
     assert.equal(evaluateVisitCricket(shooter, [d(0,1)], g).win, true);
+  });
+});
+
+describe('evaluateVisitCricket — cutthroat variant (docs/cutthroat-cricket-roadmap.md)', () => {
+  const numbers = CRICKET_STANDARD_NUMBERS;
+  const freshMarks = () => Object.fromEntries(numbers.map(n => [n, 0]));
+  const player = (name, marks, points) => ({ name, marks, points });
+  const cutthroatGame = (players) => ({ config: { numbers, variant: 'cutthroat' }, players });
+
+  test('closing marks (exactly 3) still score 0 onto anyone, same as standard', () => {
+    const shooter = player('A', freshMarks(), 0);
+    const opp = player('B', freshMarks(), 0);
+    const ev = evaluateVisitCricket(shooter, [d(20,3)], cutthroatGame([shooter, opp]));
+    assert.equal(ev.pointsThisVisit, 0);
+    assert.equal(ev.points, 0, "shooter's own total never moves in cutthroat");
+    assert.deepEqual(ev.opponentGains, [{ name:'B', gained:0 }]);
+  });
+
+  test('marks beyond closing land on the OPPONENT, not the shooter, while the opponent is still open', () => {
+    const shooter = player('A', freshMarks(), 0);
+    const opp = player('B', freshMarks(), 0);
+    const ev = evaluateVisitCricket(shooter, [d(20,3), d(20,3)], cutthroatGame([shooter, opp]));
+    // dart1: 0->3 (closes, 0 pts). dart2: 3->6, 3 marks beyond * 20 = 60 -> onto B, not A.
+    assert.equal(ev.pointsThisVisit, 60, 'the visit still generated 60 points of value');
+    assert.equal(ev.points, 0, "shooter's own points are untouched by their own hits");
+    assert.deepEqual(ev.opponentGains, [{ name:'B', gained:60 }]);
+  });
+
+  test('with 2+ opponents still open on the number, EVERY open opponent gets the FULL amount (not a split)', () => {
+    const shooter = player('A', { ...freshMarks(), 20: 3 }, 0); // already closed 20
+    const oppB = player('B', freshMarks(), 0); // 20 open
+    const oppC = player('C', freshMarks(), 0); // 20 open
+    const ev = evaluateVisitCricket(shooter, [d(20,3)], cutthroatGame([shooter, oppB, oppC])); // 3->6, 3 beyond * 20 = 60
+    assert.equal(ev.pointsThisVisit, 60);
+    assert.deepEqual(ev.opponentGains, [{ name:'B', gained:60 }, { name:'C', gained:60 }], 'each open opponent gets the full 60, not 30 each');
+  });
+
+  test('an opponent who has already closed the number receives nothing, even while another opponent is still open', () => {
+    const shooter = player('A', { ...freshMarks(), 20: 3 }, 0);
+    const closedOpp = player('B', { ...freshMarks(), 20: 3 }, 0); // B already closed 20
+    const openOpp = player('C', freshMarks(), 0); // C still open
+    const ev = evaluateVisitCricket(shooter, [d(20,3)], cutthroatGame([shooter, closedOpp, openOpp]));
+    assert.deepEqual(ev.opponentGains, [{ name:'B', gained:0 }, { name:'C', gained:60 }]);
+  });
+
+  test('once every opponent has closed the number, further marks score nothing onto anyone (same gating rule as standard)', () => {
+    const shooter = player('A', { ...freshMarks(), 20: 3 }, 0);
+    const opp = player('B', { ...freshMarks(), 20: 3 }, 0); // opponent already closed 20 too
+    const ev = evaluateVisitCricket(shooter, [d(20,3), d(20,3)], cutthroatGame([shooter, opp]));
+    assert.equal(ev.pointsThisVisit, 0);
+    assert.deepEqual(ev.opponentGains, [{ name:'B', gained:0 }]);
+  });
+
+  test('win requires every number closed AND strictly FEWER points than every opponent (lowest wins, inverted from standard)', () => {
+    const closedMarks = Object.fromEntries(numbers.map(n => [n, 3]));
+    const shooter = player('A', closedMarks, 5);
+    const opp = player('B', freshMarks(), 10); // opponent has more (worse) points
+    const ev = evaluateVisitCricket(shooter, [d(0,1)], cutthroatGame([shooter, opp]));
+    assert.equal(ev.win, true);
+  });
+
+  test('closed everything but has MORE points than an opponent: not a win', () => {
+    const closedMarks = Object.fromEntries(numbers.map(n => [n, 3]));
+    const shooter = player('A', closedMarks, 15);
+    const opp = player('B', freshMarks(), 10);
+    assert.equal(evaluateVisitCricket(shooter, [d(0,1)], cutthroatGame([shooter, opp])).win, false);
+  });
+
+  test('exact tie on points at the moment of closing is not a win (same known edge case as standard, direction-independent)', () => {
+    const closedMarks = Object.fromEntries(numbers.map(n => [n, 3]));
+    const shooter = player('A', closedMarks, 10);
+    const opp = player('B', freshMarks(), 10);
+    assert.equal(evaluateVisitCricket(shooter, [d(0,1)], cutthroatGame([shooter, opp])).win, false);
+  });
+
+  test('a winning visit\'s OWN points-onto-opponents count toward the win check (opponent totals are compared as of AFTER this visit)', () => {
+    // Shooter closes their last number (Bull) while opponent still has it open —
+    // this same visit both closes the shooter out AND pushes points onto the
+    // opponent. The win check must use the opponent's POST-visit total (100+50),
+    // not their pre-visit total (100), since the shooter's own hit is what
+    // pushed the opponent further behind in the same visit.
+    const almostClosed = { ...Object.fromEntries(numbers.map(n => [n, 3])), 25: 0 }; // Bull still open
+    const shooter = player('A', almostClosed, 90);
+    const opp = player('B', freshMarks(), 100); // opponent already worse than shooter even before this visit
+    const ev = evaluateVisitCricket(shooter, [d(25,2), d(25,1)], cutthroatGame([shooter, opp])); // closes bull (0->3), no beyond marks
+    assert.equal(ev.win, true, 'shooter (90) beats opponent (100) even with no bonus marks this visit');
+  });
+
+  test('3+ players: win requires strictly fewer points than EVERY opponent, not just one', () => {
+    const closedMarks = Object.fromEntries(numbers.map(n => [n, 3]));
+    const shooter = player('A', closedMarks, 5);
+    const opponentB = player('B', freshMarks(), 10); // shooter beats this one
+    const opponentC = player('C', freshMarks(), 3);  // shooter is behind (worse than) this one
+    const g = cutthroatGame([shooter, opponentB, opponentC]);
+    assert.equal(evaluateVisitCricket(shooter, [d(0,1)], g).win, false, 'still worse than opponentC');
+
+    opponentC.points = 8; // now shooter leads (has fewer points than) both
+    assert.equal(evaluateVisitCricket(shooter, [d(0,1)], g).win, true);
+  });
+});
+
+describe('cricketStoneColdAchieved (docs/cutthroat-cricket-roadmap.md 🔪 Stone Cold)', () => {
+  test('requires 3+ players', () => {
+    assert.equal(cricketStoneColdAchieved(0, 2), false, '2-player cutthroat never qualifies, even at 0 points received');
+    assert.equal(cricketStoneColdAchieved(0, 3), true);
+    assert.equal(cricketStoneColdAchieved(0, 4), true);
+  });
+
+  test('requires exactly zero points ever received', () => {
+    assert.equal(cricketStoneColdAchieved(1, 3), false);
+    assert.equal(cricketStoneColdAchieved(60, 4), false);
+  });
+
+  test('null/undefined gamePointsReceived treated as zero', () => {
+    assert.equal(cricketStoneColdAchieved(null, 3), true);
+    assert.equal(cricketStoneColdAchieved(undefined, 3), true);
   });
 });
 
@@ -1299,6 +1415,22 @@ describe('rebuildCricketState (docs/archive/saved-games-roadmap.md, pure replay 
     assert.equal(dog.legsWon, 0);
     assert.equal(dog.setsWon, 0);
     assert.equal(dog.gameDarts, 7, '3+3+1');
+  });
+
+  test('cutthroat variant (docs/cutthroat-cricket-roadmap.md): opponentGains apply to EVERY opponent across the replay, not just the first', () => {
+    const turns = [
+      // A: closes 20 (0->3, 0 pts), then 3->6 (3 beyond * 20 = 60) -- both B and
+      // C have 20 open, so cutthroat puts the full 60 on EACH of them, not a split.
+      v(0,1,1,[[20,3],[20,3]]),
+      v(1,1,1,[[0,1]]), // B: a no-op miss, just to advance the turn
+    ];
+    const r = rebuildCricketState({ names:['A','B','C'], config:{ numbers:CRICKET_STANDARD_NUMBERS, variant:'cutthroat' }, practice:false, legsPerSet:1, turns });
+    const [a, b, c] = r.players;
+    assert.equal(a.points, 0, "the shooter's own points never move in cutthroat, even across a multi-turn replay");
+    assert.equal(a.marks[20], 6);
+    assert.equal(b.points, 60, 'B received the full 60, not a split');
+    assert.equal(c.points, 60, 'C ALSO received the full 60 -- the same visit hit every open opponent');
+    assert.equal(r.current, 2, "C's turn next");
   });
 });
 

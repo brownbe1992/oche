@@ -1,9 +1,17 @@
 # Cut-throat Cricket — Design Roadmap
 
-> Status: **design phase, not started.** Picks up the variant explicitly
-> deferred when Cricket v1 shipped (`docs/game-modes-roadmap.md`, "Cricket
-> variant scope for v1: standard cricket only — cut-throat deferred to
-> later"). This doc exists so that deferral finally has a tracked home.
+> Status: **✅ Done (2026-07).** Picks up the variant explicitly deferred when
+> Cricket v1 shipped (`docs/game-modes-roadmap.md`, "Cricket variant scope for
+> v1: standard cricket only — cut-throat deferred to later"). Shipped exactly
+> as designed below: `config.variant` flag on the existing `game_type='cricket'`
+> (`evaluateVisitCricket()`/`rebuildCricketState()`, `frontend/scoring.js`),
+> the Standard/Cut-throat toggle in New Game Step 3, the "puts N on X and Y"
+> announce phrasing, a "Pts (lowest wins)" scoreboard label (both the live
+> screen and `/display`), server-side `config.variant` validation, and the 🔪
+> Stone Cold badge. Both "Open questions" below resolved during
+> implementation (see that section). Full details: `REFERENCE.md` §2 ("Cricket
+> rules") and §4 ("Cricket badges"), `backend/test/scoring.test.js`'s
+> cutthroat-specific describe blocks.
 
 ## Goal
 
@@ -67,13 +75,19 @@ different (and nastier) game, which is exactly why people ask for it.
   one full-game replay proving derived totals match live totals (the
   saved-games contract).
 
-## Open questions for whoever picks this up
+## Open questions — resolved during implementation
 
 - 2-player cut-throat is legal but nearly equivalent to standard with
   inverted totals — allow it (simplest) or nudge toward 3+ in the setup
-  blurb? Lean: allow, note in the blurb that it shines with 3+.
+  blurb? **Resolved: allow.** `setCricketVariant('cutthroat')` has no
+  player-count gate; the setup blurb nudges toward 3+ ("Shines with 3+
+  players") without blocking 2.
 - Do cut-throat wins share Cricket's existing win-based badges (Whitewash,
-  Comeback Kid (Cricket))? Whitewash's "opponent closed nothing" reads the
-  same; Comeback Kid's points-deficit logic inverts — likely needs a
-  variant-aware condition or a scope-out. Decide during implementation,
-  with tests either way.
+  Comeback Kid (Cricket))? **Resolved: both apply, Comeback Kid with a
+  variant-aware condition.** Whitewash's "opponent closed nothing" is
+  unchanged — never a points condition to begin with. Comeback Kid's
+  deficit direction flips (`enterTurnCricket()`: `opponent.points -
+  my.points` in standard, `my.points - opponent.points` in cutthroat — lower
+  is better there, so "trailing" means *I've* received more), with the same
+  `CRICKET_COMEBACK_THRESHOLD` (20) either way. Both covered by dedicated
+  cutthroat test cases in `backend/test/scoring.test.js`.

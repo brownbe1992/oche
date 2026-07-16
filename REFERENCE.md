@@ -273,13 +273,22 @@ Cricket achievements (9 Marks, Perfect Leg) plus the two Cricket-native badges
 (Whitewash, Comeback Kid (Cricket)) — no Daily Challenge integration, since
 challenges are X01-only.
 
-### Cricket rules — `GAME_TYPES.cricket.evaluateVisit(player, darts, game)` (`frontend/index.html`)
+### Cricket rules — `GAME_TYPES.cricket.evaluateVisit(player, darts, game)` (`evaluateVisitCricket()`, `frontend/scoring.js`)
 
-Standard cricket only (v1 scope decision — cut-throat deferred). A match's
-in-play numbers are locked to exactly 7, chosen at New Game time: classic
-(15, 16, 17, 18, 19, 20, Bull) or a custom 7-of-21 selection, stored as
+A match's in-play numbers are locked to exactly 7, chosen at New Game time:
+classic (15, 16, 17, 18, 19, 20, Bull) or a custom 7-of-21 selection, stored as
 `game.config.numbers`. Per-player state is `{marks: {sector: count, ...},
 points}` — no `score` field, no bust concept.
+
+**Two variants share this one engine** (`game.config.variant: 'standard' |
+'cutthroat'`, missing/unrecognized treated as `'standard'` — `docs/archive/cutthroat-cricket-roadmap.md`):
+- **Standard**: closing a number the shooter has but an opponent hasn't lets
+  further hits on it score points onto the **shooter's own** total. Highest
+  score (once every number is closed) wins.
+- **Cutthroat**: the same marks/closing rules, but those points land on
+  **every opponent who still has the number open** instead — each gets the
+  **full** amount, not a split — and the shooter's own total never moves from
+  their own hits. Lowest score (once every number is closed) wins.
 
 **Marks accumulate dart-by-dart within a visit**, not per-visit-total — a
 number can go from open to closed mid-visit, with the remaining darts in that
@@ -293,8 +302,12 @@ darts.forEach(d => {
   marks[d.sector] = after;
   const newBeyond = Math.max(0, after - 3) - Math.max(0, before - 3);
   if (newBeyond > 0) {
-    const opponentOpen = opponents.some(o => (o.marks[d.sector] || 0) < 3);
-    if (opponentOpen) pointsThisVisit += newBeyond * d.sector;   // Bull's "sector" is 25
+    const openOpponents = opponents.filter(o => (o.marks[d.sector] || 0) < 3);
+    if (openOpponents.length) {
+      const value = newBeyond * d.sector;          // Bull's "sector" is 25
+      pointsThisVisit += value;                     // the visit's total GENERATED value, either variant
+      if (cutthroat) openOpponents.forEach(o => gains.set(o, gains.get(o) + value)); // full value to EACH open opponent
+    }
   }
 });
 ```
@@ -306,6 +319,21 @@ closed it yet. Opponents' closed status is read as of the start of the visit
 snapshot is needed). Real-darts bull scoring is inherited for free from the
 existing `makeDart()` guard — single bull is 1 mark, double bull is 2, and a
 "treble bull" tap is silently downgraded to a single (no triple bull exists).
+
+**Data model**: `turns.scored` is always the points this visit *generated*
+(`pointsThisVisit`), attributed to the shooter's row, regardless of which
+player(s) it actually lands on — a single cutthroat visit can score onto
+several players at once, and `turns` rows belong to the shooter, so there's no
+per-recipient row to attribute it to instead. Each player's own *received*
+total (`player.points`) is a live, in-memory quantity the client mutates
+directly (standard: the shooter's own; cutthroat: every hit opponent's) and
+the saved-games replay (`rebuildCricketState()`, `docs/archive/saved-games-roadmap.md`)
+reconstructs identically by replaying `evaluateVisitCricket()`'s
+`opponentGains` across every recorded turn — it is never derived from
+`turns.scored` at query time. Cricket's mark-based stats (MPR, 9 Marks — §3)
+are unaffected by variant either way, since they read darts/marks, not
+`points`; no points-based Cricket leaderboard exists today, so none needs
+variant-scoping.
 
 **Logging a real off-target hit vs. a genuine miss** (`docs/bug-roadmap.md`
 BUG-23): `renderPadCricket()`'s main pad only ever shows the match's 7 in-play
@@ -321,24 +349,43 @@ the `if (!numbers.includes(d.sector)) return;` no-op above already treats any
 non-target sector identically regardless of which one it is. Only the input
 was ever missing a way to produce a real sector instead of `0`.
 
-**Win condition**: this player has closed all 7 numbers **and** has strictly
-more points than every opponent. If they've closed everything but don't lead,
-the leg just continues — real cricket lets them keep throwing/blocking
-normally, and the per-dart rule above already lets them score against any
-opponent still open on a number they've closed, with no extra logic needed.
+**Win condition**: this player has closed all 7 numbers **and** — standard —
+has strictly more points than every opponent, **or** — cutthroat — has
+strictly fewer points than every opponent, compared as of *after* this
+visit's own gains are applied (a visit that closes the shooter's last number
+can, in cutthroat, also be the one that pushes an opponent's total up in the
+same visit). If they've closed everything but the points check fails, the leg
+just continues — real cricket lets them keep throwing/blocking normally, and
+the per-dart rule above already lets them score against any opponent still
+open on a number they've closed, with no extra logic needed.
 
-**Known open edge case, not silently resolved**: an exact points *tie* at the
-moment the last number closes is not a win by this rule — the leg continues
-with no tie-break implemented. Verified behavior (not a bug): two players
-tied 0-0 when the second one closes their last number keep playing.
+**Known open edge case, not silently resolved, same in both variants**: an
+exact points *tie* at the moment the last number closes is not a win by this
+rule — the leg continues with no tie-break implemented. Verified behavior
+(not a bug): two players tied 0-0 when the second one closes their last
+number keep playing.
 
 Leg/set/game progression (`onLegWonCricket`) mirrors X01's `onLegWon`
 structurally (legs/sets advance the same way, same `DB.completeGame`/HA
-webhook calls). Cricket's two achievements (9 Marks, Perfect Leg — §4) are
-detected in `enterTurnCricket()` before it runs; `onLegWonCricket` itself
-carries no achievement or Daily Challenge integration, since X01's
-clutch/social badges and the Daily Challenge formats don't apply to Cricket.
+webhook calls). Cricket's achievements (9 Marks, Perfect Leg — variant-agnostic,
+mark/dart-based — plus cutthroat's own 🔪 Stone Cold, §4) are detected in
+`enterTurnCricket()`/`onLegWonCricket()`; carries no Daily Challenge
+integration, since the Daily Challenge formats don't apply to Cricket.
 Cricket's stat vocabulary is documented in §3 ("Cricket stats").
+
+**Comeback Kid (Cricket)'s deficit direction flips with the variant**: the
+running "worst points deficit seen this leg" (`p.legWorstPointsDeficit`,
+sampled before each visit's own points update, since neither player's points
+have changed yet at that moment regardless of variant) is `opponent.points -
+my.points` in standard (higher is better, so trailing means the opponent is
+ahead) and `my.points - opponent.points` in cutthroat (lower is better, so
+trailing means *I've* received more). The threshold itself
+(`CRICKET_COMEBACK_THRESHOLD`, 20) and the badge condition
+(`cricketComebackAchieved()`) are unchanged either way — only which side
+"ahead" points at is variant-aware, computed in `enterTurnCricket()` rather
+than in the pure `cricketComebackAchieved()` predicate itself. Whitewash
+("the opponent closed zero numbers") reads identically in both variants — it
+was never a points-based condition to begin with.
 
 ### Baseball rules — `GAME_TYPES.baseball.evaluateVisit(player, darts, game)` (`frontend/scoring.js`'s `evaluateVisitBaseball`)
 
@@ -1451,7 +1498,7 @@ badge that dart awarded.
 
 ## 4. Achievements & Badges
 
-110 badges (33 X01 + 4 Cricket + 8 Baseball + 5 Doubles Practice + 2 Tournament +
+111 badges (33 X01 + 5 Cricket + 8 Baseball + 5 Doubles Practice + 2 Tournament +
 3 Daily Challenge + 19 Just Chuckin' It + 34 Checkout Trainer + 2 Practice Drills)
 — that split is by which table each is listed under below (and which section of
 the Player Profile's Badge Case each renders in, via `BADGE_INFO`'s
@@ -1612,17 +1659,24 @@ step 3) are the direct analogs of 180 and the nine-darter; Whitewash/Comeback
 Kid (Cricket) (2026-07, "New Cricket-native badges") are deliberately *not*
 X01 ports — shaped around what makes a Cricket leg dramatic (closing numbers,
 points) instead of forcing X01's checkout/remaining-score concepts onto a game
-that has neither. Both are 2-player only, same restriction as X01's own
-social/margin-of-victory badges, and both have their pure trigger-condition
-logic in `frontend/scoring.js` (`isCricketWhitewash()`/
-`cricketComebackAchieved()`), unit-tested in `backend/test/scoring.test.js`:
+that has neither. Whitewash/Comeback Kid are both 2-player only, same
+restriction as X01's own social/margin-of-victory badges, and both have their
+pure trigger-condition logic in `frontend/scoring.js` (`isCricketWhitewash()`/
+`cricketComebackAchieved()`), unit-tested in `backend/test/scoring.test.js`.
+9 Marks and Perfect Leg fire identically in both Cricket variants (mark/dart-based,
+not points-based); Whitewash reads the same in both too (never a points
+condition); Comeback Kid's deficit *direction* flips per variant (§2's own
+"Comeback Kid (Cricket)'s deficit direction flips with the variant" — the
+badge condition itself, `legWorstPointsDeficit >= 20`, is unchanged). 🔪 Stone
+Cold is cutthroat-only, checked at the whole-*game* level rather than per-leg:
 
 | Badge | Exact condition |
 |---|---|
 | 🎯 **9 Marks** | `darts.length===3 && marksThisVisit===9` — 3 darts, each a treble on an in-play number, the maximum possible marks in one visit (same framing as 180 being the max possible X01 visit score). **Recurring.** |
 | 🏆 **Perfect Leg** | `win && legDarts === theoreticalMinimum`, where the minimum is computed per match from `game.config.numbers`: each non-Bull number can close in a single treble (3 marks); Bull can't be trebled (`makeDart()` already downgrades a "treble bull" tap to a single), so it needs a minimum of 2 darts. A win at exactly this minimum already implies enough bonus marks were scored to strictly lead (the win condition in §2 guarantees that), so no separate points check is needed. **Recurring**, mega-tier overlay (confetti) like Nine-Darter. |
 | 🧹 **Whitewash** | `isCricketWhitewash(opp.marks)` at the moment the leg is won — every value in the opponent's `marks` object is `< 3` (nobody closed), checked in `onLegWonCricket(wi)`. 2-player only. **Recurring.** |
-| 🔥 **Comeback Kid (Cricket)** | `cricketComebackAchieved(w.legWorstPointsDeficit)` — `legWorstPointsDeficit >= 20` (Cricket's own threshold, chosen against Cricket's much smaller/more variable points scale than X01's 501 countdown, not X01's 100). `legWorstPointsDeficit` is the largest `(opponent.points - my.points)` seen at any point this leg, tracked in `enterTurnCricket()` the same "sample before this visit's own update" timing X01's `legWorstDeficit` uses. 2-player only. **Recurring.** |
+| 🔥 **Comeback Kid (Cricket)** | `cricketComebackAchieved(w.legWorstPointsDeficit)` — `legWorstPointsDeficit >= 20` (Cricket's own threshold, chosen against Cricket's much smaller/more variable points scale than X01's 501 countdown, not X01's 100). `legWorstPointsDeficit` is the largest deficit seen at any point this leg, direction depending on variant (§2), tracked in `enterTurnCricket()` the same "sample before this visit's own update" timing X01's `legWorstDeficit` uses. 2-player only. **Recurring.** |
+| 🔪 **Stone Cold** | `cricketStoneColdAchieved(w.gamePointsReceived, game.players.length)` — `game.players.length >= 3 && gamePointsReceived === 0`, checked at GAME-win time (not per-leg) in `onLegWonCricket(wi)`, cutthroat only (`game.config.variant === 'cutthroat'`). `w.gamePointsReceived` is a running total of every point ever received across the *whole match* (every leg, not leg-reset — parallel to `gameDarts`), bumped in `enterTurnCricket()` whenever this player is one of an opponent's `opponentGains`. Not resumable — like every other badge-trigger tracker, it starts fresh on a resumed game (`docs/archive/saved-games-roadmap.md`'s "what resume deliberately does NOT rebuild"). **Recurring**, mega-tier overlay (confetti) like Nine-Darter/Perfect Leg. |
 
 **Baseball badges** (checked in `enterTurnBaseball()`/`onLegWonBaseball()`,
 `frontend/index.html`) — the direct analogs of Cricket's 9 Marks/Perfect Leg,
@@ -4246,12 +4300,15 @@ triggers the call.
 
 ### Step 3 — "More options"
 
-Every mode-specific options block (Cricket targets, Ghost's leg picker,
-Doubles Practice's target grid, Checkout Trainer's Freeform/Blitz toggle +
-difficulty tiers, the H2H legs/sets Format controls) is unchanged in behavior,
-just relocated under this step — each block's own `hidden` toggling by
-`setMode()`/`setGameType()` still works exactly as before, independent of
-which step wrapper it happens to sit inside. `#start-btn` (labeled "Play Now"
+Every mode-specific options block (Cricket targets **and** its Standard/
+Cut-throat variant toggle — `docs/archive/cutthroat-cricket-roadmap.md`,
+`setCricketVariant()` — both feed `startGame()`'s `config` the same way the
+targets themselves already did — Ghost's leg picker, Doubles Practice's
+target grid, Checkout Trainer's Freeform/Blitz toggle + difficulty tiers, the
+H2H legs/sets Format controls) is unchanged in behavior, just relocated under
+this step — each block's own `hidden` toggling by `setMode()`/`setGameType()`
+still works exactly as before, independent of which step wrapper it happens
+to sit inside. `#start-btn` (labeled "Play Now"
 for H2H/Practice/X01/Cricket/Baseball, a per-mode verb otherwise — "Start
 Challenge", "Start race", etc., unchanged) calls the existing `startGame()`
 unmodified.

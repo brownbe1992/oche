@@ -312,7 +312,19 @@ const ACH_LABELS  = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter
   challengeweek:'Challenge Streak: Week! 🔥', challengemonth:'🏆 CHALLENGE STREAK: MONTH! 🏆',
   challengeallformats:'Full Rotation! 🗓️', nocigar:'No Cigar 🤦', chuckin180:'180! 🎯',
   staircasefinish:'Staircase Finish! 🪜', ghostslayer:'Ghost Slayer! 👻',
-  tournamentchampion:'🏆 CHAMPION! 🏆', tournamentgiantslayer:'Giant Slayer ⚔️' };
+  tournamentchampion:'🏆 CHAMPION! 🏆', tournamentgiantslayer:'Giant Slayer ⚔️',
+  // Mirror-copied from frontend/index.html's ACH_LABELS — these five (plus the
+  // guided_clock/guided_world pair below) were previously missing here entirely,
+  // found while adding cricketstonecold and checking this file stayed in sync
+  // (docs/bug-roadmap.md — the same class of gap Ring Master's own ACH_LABELS
+  // omission was, see docs/archive/culture-badges-roadmap.md Part B). A missing
+  // entry here means the live overlay's headline renders blank on the /display
+  // second screen even though the badge awards and persists correctly.
+  guided_clock:'Guided Clock! 🧭', guided_world:'Guided World! 🗺️',
+  triplebull:'🐂 TRIPLE BULL! 🐂', bullseyefinish:'Bullseye Finish! 🏹',
+  baseballperfectinning:'Perfect Inning! 🔥', baseballperfectgame:'🏆 PERFECT GAME! 🏆',
+  baseballwalkoff:'Walk-Off! ⚾', baseballcycle:'The Cycle! 🔄', doublespracticeringmaster:'Ring Master! 🎪',
+  cricketstonecold:'Stone Cold! 🔪' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -321,7 +333,12 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   aroundtheclock:3500, aroundtheworld:5000, doubletrouble:2500, bustedmaximum:2500,
   cricket9marks:2500, cricketperfectclose:6000, cricketwhitewash:2500, cricketcomebackkid:3000,
   challengeweek:3000, challengemonth:6000, challengeallformats:3500, nocigar:2500, chuckin180:2500,
-  staircasefinish:3000, ghostslayer:3500, tournamentchampion:6000, tournamentgiantslayer:2500 };
+  staircasefinish:3000, ghostslayer:3500, tournamentchampion:6000, tournamentgiantslayer:2500,
+  guided_clock:3500, guided_world:5000,
+  triplebull:4000, bullseyefinish:2500,
+  baseballperfectinning:2500, baseballperfectgame:6000,
+  baseballwalkoff:3000, baseballcycle:2500, doublespracticeringmaster:5000,
+  cricketstonecold:3500 };
 // Mirror-copied from frontend/index.html's BADGE_INFO[...].desc / ACH_DESC_FALLBACK —
 // this file has no Badge Case UI to source the text from directly, so it's kept as
 // its own flat map (docs/next-session-plan.md item 1).
@@ -362,6 +379,18 @@ const ACH_DESC = {
   staircasefinish: 'Check out in exactly three darts by halving the target twice: single, single, then double — e.g. 32 down to 16, down to 8, then double 4.',
   tournamentchampion: 'Win a tournament bracket.',
   tournamentgiantslayer: 'Beat an opponent seeded 3 or more slots better than you in a tournament match.',
+  // Mirror-copied from frontend/index.html's BADGE_INFO[...].desc — see the
+  // ACH_LABELS block above for why these were added together.
+  guided_clock: 'Complete a guided Around the Clock drill — hit every number 1-20 as a single.',
+  guided_world: 'Reach all 63 lifetime dart outcomes while playing a guided Around the World session.',
+  triplebull: 'Check out on 150 by hitting the double bull three times in one visit.',
+  bullseyefinish: 'Check out with the double bull as your final dart, at any total.',
+  baseballperfectinning: 'Score 9 runs in one Baseball inning — three trebles on target.',
+  baseballperfectgame: 'Win a Baseball leg with a perfect 9 runs in every one of the 9 innings — 81 total.',
+  baseballwalkoff: 'Win a Baseball leg in extra innings — the game went past inning 9.',
+  baseballcycle: "Hit a single, double, AND treble of the current inning's number in one visit — 6 runs the scenic way.",
+  doublespracticeringmaster: 'Hit every double, D1 through D20 plus the bull, in Doubles Practice — lifetime.',
+  cricketstonecold: 'Win a 3+ player Cut-throat Cricket game without receiving a single point.',
 };
 // Just Chuckin' It's 18 laddered milestone badges — mirror-copied from frontend/
 // index.html's CHUCKIN_MILESTONE_LADDERS (this file has no shared module with
@@ -474,7 +503,7 @@ function showAchievement(type, player, countText){
   achName.textContent = player || '';
   if(achDesc) achDesc.textContent = ACH_DESC[type] || '';
   if(achCount) achCount.textContent = countText || '';
-  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion';
+  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'cricketstonecold';
   achOverlay.classList.toggle('mega', mega);
   achOverlay.classList.add('show');
   if(mega) spawnConfetti(achOverlay, 90);
@@ -765,12 +794,16 @@ const renderers = {
         const lab = darts[k];
         return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
       }).join('');
+      // docs/cutthroat-cricket-roadmap.md: the one visible difference from
+      // standard on this screen — everything else (marks grid, points cells)
+      // renders identically either way.
+      const ptsLabel = s.cricketVariant === 'cutthroat' ? 'Pts (lowest wins)' : 'Pts';
 
       return `<div class="cs-wrap" style="--cs-cols:${players.length}">
         <div class="cs-table">
           <div class="cs-row cs-head"><div class="cs-label"></div>${headCells}</div>
           ${bodyRows}
-          <div class="cs-row cs-foot"><div class="cs-label">Pts</div>${pointCells}</div>
+          <div class="cs-row cs-foot"><div class="cs-label">${ptsLabel}</div>${pointCells}</div>
         </div>
         <div class="cs-throw-row">
           <span class="cs-throw-lbl">${thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche`:''}</span>

@@ -774,6 +774,15 @@
             <div class="cricket-number-grid" id="cricket-number-grid" role="group" aria-label="Custom cricket targets"></div>
             <button class="btn btn-ghost" style="margin-top:8px" onclick="fillCricketClassicIntoCustom()">Start from classic</button>
           </div>
+          <!-- docs/cutthroat-cricket-roadmap.md -->
+          <div class="setup-label" style="margin-top:14px">Cricket variant</div>
+          <div class="opts" style="margin:0">
+            <div class="seg" role="group" aria-label="Cricket variant">
+              <button id="cricket-variant-standard" aria-pressed="true" onclick="setCricketVariant('standard')">Standard</button>
+              <button id="cricket-variant-cutthroat" aria-pressed="false" onclick="setCricketVariant('cutthroat')">Cut-throat</button>
+            </div>
+          </div>
+          <p class="pp-meta" id="cricket-variant-blurb" style="margin:6px 0 0">Closing a number your opponent hasn't lets you keep scoring on it — highest points wins.</p>
         </div>
 
         <!-- Ghost leg picker (Ghost Opponent mode only) -->
@@ -1706,7 +1715,7 @@ function makeDart(sector, mult){
    APP STATE
    ========================================================================= */
 let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, mode:'h2h',
-  gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[], ghostLeg:null,
+  gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[], cricketVariant:'standard', ghostLeg:null,
   doublesTargets:[], loadoutByName:{}, leagueFixtureId:null, pendingFixtures:[],
   checkoutTrainerMode:'freeform', checkoutTrainerDifficulty:'full', checkoutTrainerTricks:false,
   checkoutTrainerPin:null }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice' | 'checkout_trainer'; gameType: 'x01' | 'cricket' | 'doubles_practice' | 'checkout_trainer'; checkoutTrainerDifficulty: 'under40' | 'under100' | 'over100' | 'full'
@@ -3662,7 +3671,7 @@ const NEW_GAME_MODE_OPTIONS = [
     blurb:"Count down from your starting score to exactly zero, finishing on a double (or single, if that player's finish rule is set to Singles Out). Play solo for practice, or head-to-head against another player.",
     apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('x01'); } },
   { key:'cricket', label:'Cricket', contexts:['practice','h2h'],
-    blurb:"Close out 15 through 20 and Bull — hit a number 3 times to open it, then keep scoring on it until it's closed everywhere (against an opponent in H2H, or just for completion in practice).",
+    blurb:"Close out 15 through 20 and Bull — hit a number 3 times to open it, then keep scoring on it until it's closed everywhere (against an opponent in H2H, or just for completion in practice). Choose Standard (highest score wins) or Cut-throat (those points land on your opponents instead, lowest score wins) on the next step.",
     apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('cricket'); } },
   { key:'baseball', label:'Baseball', contexts:['practice','h2h'],
     blurb:"9 innings, one per number 1-9. Each visit's 3 darts only count against that inning's number — a single scores 1 run, a double 2, a treble 3. After 9 innings, highest total runs wins (a tie continues into extra innings at number 9).",
@@ -3719,6 +3728,11 @@ function applyLeagueGameSelection(){
     if(cu) cu.setAttribute('aria-pressed', setup.cricketPreset==='custom');
     const body = document.getElementById('cricket-custom-body');
     if(body) body.hidden = (setup.cricketPreset !== 'custom');
+    // League play is always Standard Cricket for now (docs/cutthroat-cricket-
+    // roadmap.md doesn't cover league fixtures) — reset explicitly rather than
+    // silently carrying over whatever variant a previous, unrelated Cricket setup
+    // left selected.
+    setCricketVariant('standard');
   } else {
     // X01: the league's category already pins the starting score — no separate
     // flavor-dropdown question (docs/new-game-flow-roadmap.md "Selecting it").
@@ -3922,6 +3936,20 @@ function setCricketPreset(preset){
   document.getElementById('cricket-preset-custom').setAttribute('aria-pressed', preset==='custom');
   document.getElementById('cricket-custom-body').hidden = (preset !== 'custom');
   if(preset === 'custom' && setup.cricketCustomNumbers.length===0) fillCricketClassicIntoCustom();
+}
+// docs/cutthroat-cricket-roadmap.md's Standard/Cut-throat toggle. Resolved open
+// question: 2-player cut-throat is allowed (simplest — it's still a legal,
+// nearly-standard-equivalent game with inverted totals), just nudged toward 3+
+// in the blurb below, where the variant's real bite (points landing on EVERY
+// open opponent at once) actually shows up.
+function setCricketVariant(variant){
+  setup.cricketVariant = variant;
+  document.getElementById('cricket-variant-standard').setAttribute('aria-pressed', variant==='standard');
+  document.getElementById('cricket-variant-cutthroat').setAttribute('aria-pressed', variant==='cutthroat');
+  const blurb = document.getElementById('cricket-variant-blurb');
+  if(blurb) blurb.textContent = variant==='cutthroat'
+    ? "Closing a number an opponent hasn't puts YOUR points on every opponent who still has it open instead — lowest points wins. Shines with 3+ players."
+    : "Closing a number your opponent hasn't lets you keep scoring on it — highest points wins.";
 }
 function fillCricketClassicIntoCustom(){
   setup.cricketCustomNumbers = CRICKET_STANDARD_NUMBERS.slice();
@@ -4141,7 +4169,9 @@ async function startGame(){
   // "store it even though only one value exists today" precedent tournament_rounds.
   // legs_per_set already set for a field that was single-valued at first and
   // configurable later (docs/archive/checkout-trainer-roadmap.md).
-  const config = gameType === 'cricket' ? { numbers: cricketNumbers }
+  // variant (docs/cutthroat-cricket-roadmap.md): a config flag on the same
+  // game_type='cricket', not a new game type — see that doc's "Design" section.
+  const config = gameType === 'cricket' ? { numbers: cricketNumbers, variant: setup.cricketVariant === 'cutthroat' ? 'cutthroat' : 'standard' }
     // Innings fixed at 9 (docs/game-modes-roadmap.md "Baseball") — not a New Game
     // choice, same "one-tap, no further input" precedent as Classic Cricket.
     : gameType === 'baseball' ? { innings: 9 }
@@ -5364,6 +5394,7 @@ const BADGE_INFO = {
   cricketperfectclose: { icon:'🏆', label:'Perfect Leg', desc:'Close every Cricket number using the fewest darts physically possible for that match.', cricket:true },
   cricketwhitewash:    { icon:'🧹', label:'Whitewash', desc:"Win a Cricket leg without your opponent closing a single number.", cricket:true },
   cricketcomebackkid:  { icon:'🔥', label:'Comeback Kid (Cricket)', desc:`Win a Cricket leg after trailing your opponent's points by ${CRICKET_COMEBACK_THRESHOLD}+ at some point.`, cricket:true },
+  cricketstonecold:    { icon:'🔪', label:'Stone Cold', desc:'Win a 3+ player Cut-throat Cricket game without receiving a single point (docs/cutthroat-cricket-roadmap.md).', cricket:true },
   challengeweek:       { icon:'🔥', label:'Challenge Streak: Week', desc:'Complete the Daily Challenge 7 days in a row.', challenge:true },
   challengemonth:      { icon:'🏆', label:'Challenge Streak: Month', desc:'Complete the Daily Challenge 30 days in a row.', challenge:true },
   challengeallformats: { icon:'🗓️', label:'Full Rotation', desc:'Complete every Daily Challenge format at least once.', challenge:true },
@@ -5967,13 +5998,17 @@ function renderGameCricket(){
     return `<div class="cs-cell${active?' active':''}"><span class="cs-points">${p.points||0}</span></div>`;
   }).join('');
 
+  // docs/cutthroat-cricket-roadmap.md: the footer label is the one place the
+  // scoreboard needs to say which direction "winning" points go, since cutthroat
+  // otherwise renders identically to standard (same marks, same points cells).
+  const ptsLabel = game.config.variant === 'cutthroat' ? 'Pts (lowest wins)' : 'Pts';
   const table = document.createElement('div');
   table.className = 'cs-table';
   table.style.setProperty('--cs-cols', game.players.length);
   table.innerHTML = `
     <div class="cs-row cs-head" role="row"><div class="cs-label"></div>${headCells}</div>
     ${bodyRows}
-    <div class="cs-row cs-foot"><div class="cs-label">Pts</div>${pointCells}</div>`;
+    <div class="cs-row cs-foot"><div class="cs-label">${ptsLabel}</div>${pointCells}</div>`;
   sb.appendChild(table);
 
   renderSlots();
@@ -6133,7 +6168,8 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   guided_clock:'Guided Clock! 🧭', guided_world:'Guided World! 🗺️',
   triplebull:'🐂 TRIPLE BULL! 🐂', bullseyefinish:'Bullseye Finish! 🏹',
   baseballperfectinning:'Perfect Inning! 🔥', baseballperfectgame:'🏆 PERFECT GAME! 🏆',
-  baseballwalkoff:'Walk-Off! ⚾', baseballcycle:'The Cycle! 🔄', doublespracticeringmaster:'Ring Master! 🎪' };
+  baseballwalkoff:'Walk-Off! ⚾', baseballcycle:'The Cycle! 🔄', doublespracticeringmaster:'Ring Master! 🎪',
+  cricketstonecold:'Stone Cold! 🔪' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -6146,7 +6182,8 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   guided_clock:3500, guided_world:5000,
   triplebull:4000, bullseyefinish:2500,
   baseballperfectinning:2500, baseballperfectgame:6000,
-  baseballwalkoff:3000, baseballcycle:2500, doublespracticeringmaster:5000 };
+  baseballwalkoff:3000, baseballcycle:2500, doublespracticeringmaster:5000,
+  cricketstonecold:3500 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
@@ -6590,7 +6627,7 @@ function showAchievement(type, player, countText){
   // Triple Bull (three double-bulls in one visit, a 150 checkout) and Perfect Game
   // (81 runs, a perfect 9 in every Baseball inning) get the same showcase treatment
   // as a nine-darter — comparably rare, celebration-worthy feats.
-  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'triplebull' || type === 'baseballperfectgame';
+  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'triplebull' || type === 'baseballperfectgame' || type === 'cricketstonecold';
   achOverlayEl.classList.toggle('mega', mega);
   achOverlayEl.classList.add('show');
   const shareBtn = document.getElementById('ach-share-btn');
@@ -7429,6 +7466,10 @@ function liveSnapshot(message){
     // Baseball only: which inning (1-9, or beyond on a tie) is currently live —
     // per-player runs ride inside the players[] array above via playerSnapshotBaseball().
     baseballInning: game.gameType === 'baseball' ? (game.baseballInning || 1) : null,
+    // Cricket only (docs/cutthroat-cricket-roadmap.md): lets display.html's
+    // cricket scorecard label its points footer "lowest wins" for cutthroat,
+    // the one thing that otherwise renders identically to standard.
+    cricketVariant: game.gameType === 'cricket' ? (game.config.variant || 'standard') : null,
     achievement: pendingAchievement || null,
     gameOneEighties: game.gameOneEighties || 0,
     gameBigFish: game.gameBigFish || 0,
@@ -8480,16 +8521,28 @@ function enterTurnCricket(){
   if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
   const p = game.players[game.current];
   const ev = GAME_TYPES.cricket.evaluateVisit(p, game.darts, game);
+  const cutthroat = game.config.variant === 'cutthroat';
 
   // Same screen-reader convention as X01's enterTurn(): announce the committed
-  // outcome, with a distinct phrasing for the leg-winning visit.
-  if(ev.win) announce(`${p.name} closes out and wins the leg with ${ev.points} points.`);
+  // outcome, with a distinct phrasing for the leg-winning visit and — cutthroat
+  // only — for a visit that put points ONTO opponents rather than the shooter's
+  // own total (docs/cutthroat-cricket-roadmap.md's accessibility section: "a new
+  // event class... announce it, not just a number ticking up").
+  const _hitOpponents = cutthroat ? ev.opponentGains.filter(g=>g.gained>0) : [];
+  if(ev.win) announce(cutthroat
+    ? `${p.name} closes out and wins the leg with only ${ev.points} point${ev.points===1?'':'s'} against.`
+    : `${p.name} closes out and wins the leg with ${ev.points} points.`);
+  else if(_hitOpponents.length) announce(`${p.name} puts ${ev.pointsThisVisit} point${ev.pointsThisVisit===1?'':'s'} on ${_hitOpponents.map(g=>g.name).join(' and ')}.`);
   else announce(`${p.name} scores ${ev.pointsThisVisit} point${ev.pointsThisVisit===1?'':'s'} this visit.`);
 
   // snapshot state before mutations so undoLastTurn() can restore it. badgeReverts/
   // voided mirror X01's enterTurn() snapshot (see its comment) — needed now that
-  // Cricket has its own achievements to revoke on undo.
-  const _snap = { pi:game.current, marks:Object.assign({}, p.marks), points:p.points,
+  // Cricket has its own achievements to revoke on undo. playersPoints snapshots
+  // EVERY player's points/gamePointsReceived, not just the shooter's — a cutthroat
+  // visit can change opponents' totals too (see evaluateVisitCricket()'s own
+  // comment), so undo must be able to restore all of them, not just p.
+  const _snap = { pi:game.current, marks:Object.assign({}, p.marks),
+    playersPoints: game.players.map(pl => ({ points:pl.points, gamePointsReceived:pl.gamePointsReceived })),
     legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
     legWorstPointsDeficit:p.legWorstPointsDeficit,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
@@ -8500,15 +8553,33 @@ function enterTurnCricket(){
   // this leg (needs an opponent to trail behind — mirrors X01's Comeback Kid,
   // game-modes-roadmap.md "New Cricket-native badges"). Sampled BEFORE this
   // visit's points update, same "deepest behind as you step up to throw"
-  // timing X01 uses — the opponent's points can't change during this player's
-  // own visit, so only p.points (pre-update) matters here.
+  // timing X01 uses — neither player's points have changed yet at sampling time,
+  // regardless of variant. Standard: higher points is better, so "trailing" means
+  // the opponent is ahead (opp - me). Cutthroat inverts which side "ahead" means
+  // (lower is better), so "trailing" means I've received MORE than they have
+  // (me - opp) — docs/cutthroat-cricket-roadmap.md's open question, resolved as a
+  // variant-aware condition rather than a scope-out.
   if(game.players.length===2){
     const _opp = game.players.find(x=>x!==p);
-    if(_opp) p.legWorstPointsDeficit = Math.max(p.legWorstPointsDeficit, (_opp.points||0) - p.points);
+    if(_opp){
+      const deficit = cutthroat ? (p.points - _opp.points) : ((_opp.points||0) - p.points);
+      p.legWorstPointsDeficit = Math.max(p.legWorstPointsDeficit, deficit);
+    }
   }
 
   p.marks = ev.marks;
   p.points = ev.points;
+  // Cutthroat: apply this visit's points onto every opponent it hit — both their
+  // leg-scoped `points` (what the scoreboard shows) and their game-scoped
+  // `gamePointsReceived` (never leg-reset — 🔪 Stone Cold's tracker, checked at
+  // game-win time in onLegWonCricket()).
+  if(cutthroat){
+    _hitOpponents.forEach(g=>{
+      const opp = game.players.find(x=>x.name===g.name);
+      opp.points += g.gained;
+      opp.gamePointsReceived = (opp.gamePointsReceived||0) + g.gained;
+    });
+  }
   const dartsThrown = game.darts.length;
   p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
 
@@ -8569,7 +8640,13 @@ function undoLastTurnCricket(){
   const snap = game.lastTurnSnapshot;
   const p = game.players[snap.pi];
   p.marks = snap.marks;
-  p.points = snap.points;
+  // Restore every player's points/gamePointsReceived, not just the shooter's —
+  // a cutthroat visit can change opponents' totals too (see enterTurnCricket()'s
+  // own comment on why _snap.playersPoints covers the whole roster).
+  game.players.forEach((pl, i) => {
+    pl.points = snap.playersPoints[i].points;
+    pl.gamePointsReceived = snap.playersPoints[i].gamePointsReceived;
+  });
   p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
   p.legWorstPointsDeficit = snap.legWorstPointsDeficit;
   game.currentLegTurns.length = snap.ltLen;
@@ -8632,6 +8709,16 @@ function onLegWonCricket(wi){
       DB.recordEvent('set_end', game.setNo, null);
       DB.recordEvent('game_end', null, null);
       DB.completeGame(w.name);
+      // 🔪 Stone Cold (docs/cutthroat-cricket-roadmap.md): won a 3+ player cut-throat
+      // GAME having received zero points across every leg of it — checked here (not
+      // per-leg) since "the game" is what the badge is scoped to; w.gamePointsReceived
+      // is never leg-reset (see newMatchPlayerCricket()), so it already reflects the
+      // whole match by the time the winning leg gets here.
+      if(game.config.variant === 'cutthroat' && cricketStoneColdAchieved(w.gamePointsReceived, game.players.length)){
+        queueBadge('cricketstonecold', w.name);
+        awardRecurringBadge(w.name, 'cricketstonecold', 'cricketstonecold',
+          { icon:'🔪', headline:'STONE COLD', player:w.name, statLine:'Won a cut-throat game without receiving a point' });
+      }
       game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
       finishUnit('game', w.name);
       return;
@@ -9590,7 +9677,8 @@ function newMatchPlayerCricket(name, config){
   const marks = {};
   (config && config.numbers || CRICKET_STANDARD_NUMBERS).forEach(n=>{ marks[n]=0; });
   return { name, marks, points:0, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0,
-    legWorstPointsDeficit:0 };  // largest (opponent.points - my.points) seen this leg (Comeback Kid — Cricket)
+    legWorstPointsDeficit:0,   // largest deficit seen this leg (Comeback Kid — Cricket; direction depends on variant, see enterTurnCricket())
+    gamePointsReceived:0 };    // cutthroat only: total points received across the WHOLE match (never leg-reset) — 🔪 Stone Cold's tracker
 }
 function resetPlayerForNextLegCricket(p, game, newSet){
   const marks = {};

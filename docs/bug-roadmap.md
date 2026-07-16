@@ -1864,6 +1864,67 @@ regressions, no backend logic touched).
 
 ---
 
+### BUG-26 — `display.html`'s ACH_LABELS/ACH_DURATION/ACH_DESC (the live overlay's
+own hand-copied badge-text maps) had drifted 9 static entries behind
+`index.html`'s, rendering a blank achievement headline on the /display second
+screen  **(LOW, cosmetic; found while adding a new badge for docs/archive/cutthroat-cricket-roadmap.md)**
+
+**Status: ✅ Fixed (2026-07).** `frontend/display.html` has no build step and no
+shared module with `frontend/index.html` (documented in its own "mirror-copied"
+comment above `ACH_DESC`), so every badge added to `index.html`'s
+`ACH_LABELS`/`ACH_DURATION`/`BADGE_INFO[...].desc` needs a matching, by-hand
+entry added here too. Nine static badges shipped across several earlier
+features — `guided_clock`/`guided_world` (guided drills), `triplebull`/
+`bullseyefinish` (X01 chain-check badges), `baseballperfectinning`/
+`baseballperfectgame`/`baseballwalkoff`/`baseballcycle` (Baseball), and
+`doublespracticeringmaster` (Doubles Practice's Ring Master) — never got that
+second entry. `achText.textContent = ACH_LABELS[type] || ''` silently falls
+back to an empty string, so the live overlay's full-screen headline rendered
+**blank** on the /display screen for all nine, even though every one of them
+awarded and persisted correctly server-side (Badge Case, stats, and the
+moment card all read from a different, unaffected source) — exactly the same
+gap class as Ring Master's own missing `index.html` `ACH_LABELS` entry
+(`docs/archive/culture-badges-roadmap.md` Part B), just the mirror-file
+version of it. Added all nine entries to `display.html`'s three maps, plus
+its own `mega`-duration flag for the ones that belong in that list to match
+`index.html`. Committed regression test `backend/test/display.ach-labels-parity.test.js`:
+extracts both files' static `ACH_LABELS`/`ACH_DURATION`/`ACH_DESC` object-literal
+key sets directly from source (no shared module to `require()`, so a
+line-anchored regex reads the real current source rather than a hand-copied
+duplicate that can drift again unnoticed) and asserts `index.html`'s key set
+is a subset of `display.html`'s for each map — fails loudly the moment a
+future badge is added to one file and not the other, instead of shipping a
+silent blank headline. Ladder-generated ids (`CHUCKIN_MILESTONE_LADDERS` and
+its siblings) are deliberately out of scope for this test: those are
+populated via an already-mirrored `forEach` loop in both files, a different,
+already-correct mechanism from the one that actually drifted here.
+
+**How this was found:** while adding `cricketstonecold`
+(`docs/archive/cutthroat-cricket-roadmap.md`'s 🔪 Stone Cold badge) and checking
+`display.html` stayed in sync per the Ring Master precedent, a full key-set
+diff between the two files' `ACH_LABELS` turned up eight *other*, pre-existing
+gaps unrelated to the new badge.
+
+**Where:** `frontend/display.html`'s `ACH_LABELS`/`ACH_DURATION`/`ACH_DESC`
+declarations (missing entries; `frontend/index.html`'s own copies were
+already correct and are the source of truth).
+
+**Fix (step by step):**
+1. Diff `index.html`'s `ACH_LABELS` key set against `display.html`'s to find
+   every static badge id present in one but not the other.
+2. Copy each missing id's label/duration/description text verbatim from
+   `index.html`'s `ACH_LABELS`/`ACH_DURATION`/`BADGE_INFO[...].desc` into
+   `display.html`'s three maps.
+3. Add a committed parity test comparing the two files' key sets directly, so
+   a future one-off addition to only one file fails CI instead of shipping
+   silently.
+
+**Verify:** `backend/test/display.ach-labels-parity.test.js` passes (and
+would have failed against the pre-fix `display.html`, confirmed by re-running
+it before the nine entries were added); full backend suite green.
+
+---
+
 ## Standing practice
 
 When a functional bug is found: add it here with a repro and a fix outline before fixing,

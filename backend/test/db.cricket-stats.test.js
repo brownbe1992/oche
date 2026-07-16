@@ -211,3 +211,35 @@ describe('X01/Cricket isolation regression (turns.scored means a different quant
     assert.equal(bubbles.one80s, 0);
   });
 });
+
+describe('createGame() cricket config.variant validation (docs/cutthroat-cricket-roadmap.md)', () => {
+  test("accepts 'standard' and 'cutthroat', and accepts a missing variant (defaults client-side)", () => {
+    const a = 'CutthroatValidate_A', b = 'CutthroatValidate_B';
+    db.addPlayer(a); db.addPlayer(b);
+    assert.doesNotThrow(() => db.createGame({
+      category: 'Cricket (15-20, Bull)', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'cricket', config: { numbers: CLASSIC, variant: 'cutthroat' },
+      players: [{ name: a }, { name: b }],
+    }));
+    assert.doesNotThrow(() => db.createGame({
+      category: 'Cricket (15-20, Bull)', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'cricket', config: { numbers: CLASSIC, variant: 'standard' },
+      players: [{ name: a }, { name: b }],
+    }));
+    assert.doesNotThrow(() => db.createGame({
+      category: 'Cricket (15-20, Bull)', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'cricket', config: { numbers: CLASSIC },
+      players: [{ name: a }, { name: b }],
+    }));
+  });
+
+  test('rejects an unrecognized variant value rather than silently storing it', () => {
+    const a = 'CutthroatValidate_C', b = 'CutthroatValidate_D';
+    db.addPlayer(a); db.addPlayer(b);
+    assert.throws(() => db.createGame({
+      category: 'Cricket (15-20, Bull)', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'cricket', config: { numbers: CLASSIC, variant: 'anarchy' },
+      players: [{ name: a }, { name: b }],
+    }), /variant must be/);
+  });
+});

@@ -488,6 +488,11 @@ const ALLOWED_LIVE_KEYS = new Set([
   // unrestricted per-player `players[]` array, same as every other game type's own
   // per-player fields.
   'baseballInning',
+  // Cricket only (docs/cutthroat-cricket-roadmap.md) — 'standard' | 'cutthroat';
+  // read by display.html's renderers.cricket.scorecard() to label the points
+  // footer "lowest wins" for cutthroat, the one thing that otherwise renders
+  // identically to standard.
+  'cricketVariant',
 ]);
 const MAX_LIVE_BYTES = 65536;
 // Returns the sanitized state, or null if it's over the size cap (caller sends 413).

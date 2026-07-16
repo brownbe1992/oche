@@ -79,7 +79,7 @@ describe('BUG-21 — achDescFor() resolves a non-empty explanation for every mom
     const { achDescFor } = loadAchDescFor();
     const representative = [
       'hattrick', 'triplebull', 'bullseyefinish',            // X01 chain-check badges
-      'cricket9marks', 'cricketperfectclose', 'cricketwhitewash', 'cricketcomebackkid', // Cricket
+      'cricket9marks', 'cricketperfectclose', 'cricketwhitewash', 'cricketcomebackkid', 'cricketstonecold', // Cricket
       'baseballperfectinning', 'baseballperfectgame',        // Baseball
       'challengeweek', 'challengemonth', 'challengeallformats', // Daily Challenge
       'chuckin180',                                          // Just Chuckin' It (the one static entry)

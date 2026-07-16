@@ -847,6 +847,14 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
       throw httpError(400, 'pinnedTarget must be an integer between 2 and 170');
     }
   }
+  // docs/cutthroat-cricket-roadmap.md: same "validate a config field reaching this
+  // function from an untrusted client" precedent as pinnedTarget above — an
+  // unrecognized value would otherwise ride into games.config as-is and be silently
+  // treated as 'standard' by evaluateVisitCricket()'s own `=== 'cutthroat'` check,
+  // which is a confusing way to fail rather than an explicit rejection.
+  if (resolvedGameType === 'cricket' && config && config.variant != null && !['standard', 'cutthroat'].includes(config.variant)) {
+    throw httpError(400, "variant must be 'standard' or 'cutthroat'");
+  }
   const resolvedConfig = config ? JSON.stringify(config) : JSON.stringify({ startingScore: Number(category) || null });
   if (Buffer.byteLength(resolvedConfig) > 4096) throw httpError(400, 'config is too large');
   const info = q.insertGame.run(categoryStr, clampMatchFormat(legsPerSet), clampMatchFormat(setsPerGame), practice ? 1 : 0, resolvedGameType, resolvedConfig);

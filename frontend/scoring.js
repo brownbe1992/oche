@@ -116,10 +116,18 @@ function evaluateDartAroundTheClock(dart, hitSet){
 }
 
 /* ---------- Cricket ----------
-   Standard cricket only (v1 scope decision) — highest score wins, cut-throat
-   deferred. A match's in-play numbers are locked to exactly 7 (classic:
-   15,16,17,18,19,20,Bull, or a custom 7-of-21 selection made at New Game time),
-   stored as game.config.numbers. */
+   A match's in-play numbers are locked to exactly 7 (classic: 15,16,17,18,19,20,
+   Bull, or a custom 7-of-21 selection made at New Game time), stored as
+   game.config.numbers. Two variants share this one engine (docs/cutthroat-
+   cricket-roadmap.md) — game.config.variant: 'standard' | 'cutthroat' (missing/
+   unrecognized treated as 'standard', the pre-cutthroat default):
+   - standard: closing a number the shooter has but an opponent hasn't yet lets
+     FURTHER hits on it score points onto the SHOOTER's own total. Highest score
+     (once every number is closed) wins.
+   - cutthroat: the same marks/closing rules, but those points land on EVERY
+     OPPONENT who still has the number open instead (each gets the full amount,
+     not a split) — the shooter's own total never moves from their own hits.
+     Lowest score (once every number is closed) wins. */
 const CRICKET_STANDARD_NUMBERS = [15,16,17,18,19,20,25];
 // The full pool a custom Cricket config picks its 7 targets from — every number
 // 1-20 plus bull (25) — same set renderCricketNumberGrid() already builds one
@@ -127,9 +135,9 @@ const CRICKET_STANDARD_NUMBERS = [15,16,17,18,19,20,25];
 // game.config.numbers from to find which numbers AREN'T in play this match.
 const CRICKET_ALL_NUMBERS = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,25];
 
-// Pure per-dart scoring function, validated standalone against 12 hand-checked
+// Pure per-dart scoring function, validated standalone against hand-checked
 // scenarios (mark accumulation within a visit, closing-vs-scoring marks, opponent-
-// closed gating, multi-opponent win checks) before being wired in here.
+// closed gating, multi-opponent win checks, both variants) before being wired in.
 //
 // Marks accumulate dart-by-dart *within* a visit — a number can go from open to
 // closed mid-visit, with the remaining darts in that same visit scoring points.
@@ -137,15 +145,26 @@ const CRICKET_ALL_NUMBERS = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,
 // marks, counting the closing marks themselves as 0 points) AND at least one
 // opponent hasn't closed it yet (checked against opponents' state as of the start
 // of this visit — only the shooter's own marks change during their own visit).
+// `pointsThisVisit`/`scored` is always the total value this visit GENERATED
+// (matches turns.scored's meaning either way — see the roadmap doc's "Data
+// model" section), regardless of which player(s) it actually lands on.
+// `opponentGains` (cutthroat only; always present, zero-filled in standard) is
+// `[{name, gained}]` for every opponent, letting the caller (enterTurnCricket())
+// apply those totals onto the right player objects — a single visit can score
+// onto several players at once, which is why this can't just be a delta on
+// `player.points` the way standard's own return already is.
 //
 // Known open edge case (matches the roadmap doc's own framing, not silently
 // resolved): an exact points TIE at the moment the last number closes is not a
-// win by this rule — the leg just continues with no tie-break implemented.
+// win by this rule — the leg just continues with no tie-break implemented. This
+// applies the same way in both variants (the tie check just flips direction).
 function evaluateVisitCricket(player, darts, game){
   const numbers = game.config.numbers || CRICKET_STANDARD_NUMBERS;
+  const cutthroat = game.config.variant === 'cutthroat';
   const opponents = game.players.filter(pl=>pl!==player);
   const marks = Object.assign({}, player.marks);
   let pointsThisVisit = 0;
+  const gains = new Map(opponents.map(o=>[o, 0])); // opponent object -> points gained this visit
   darts.forEach(d=>{
     if(!numbers.includes(d.sector)) return; // miss or out-of-play number: no-op
     const before = marks[d.sector] || 0;
@@ -155,14 +174,35 @@ function evaluateVisitCricket(player, darts, game){
     const beyondAfter = Math.max(0, after - 3);
     const newBeyond = beyondAfter - beyondBefore;
     if(newBeyond > 0){
-      const opponentOpen = opponents.some(o=>(o.marks[d.sector]||0) < 3);
-      if(opponentOpen) pointsThisVisit += newBeyond * d.sector;
+      const openOpponents = opponents.filter(o=>(o.marks[d.sector]||0) < 3);
+      if(openOpponents.length){
+        const value = newBeyond * d.sector;
+        pointsThisVisit += value;
+        if(cutthroat) openOpponents.forEach(o=>gains.set(o, gains.get(o) + value));
+      }
     }
   });
-  const points = player.points + pointsThisVisit;
+  const opponentGains = opponents.map(o=>({ name:o.name, gained:gains.get(o) }));
+  // Standard: the shooter's own total absorbs this visit's points. Cutthroat: the
+  // shooter's own total is untouched by their own hits — only opponentGains move.
+  const points = cutthroat ? player.points : player.points + pointsThisVisit;
   const allClosed = numbers.every(n=>(marks[n]||0) >= 3);
-  const win = allClosed && opponents.every(o=>points > (o.points||0));
-  return { marks, points, pointsThisVisit, scored:pointsThisVisit, win };
+  const win = cutthroat
+    ? allClosed && opponents.every(o=>points < ((o.points||0) + gains.get(o)))
+    : allClosed && opponents.every(o=>points > (o.points||0));
+  return { marks, points, pointsThisVisit, scored:pointsThisVisit, win, opponentGains };
+}
+
+// 🔪 Stone Cold (docs/cutthroat-cricket-roadmap.md): won a 3+ player cut-throat
+// GAME (the whole match, every leg, not just the winning one) having received
+// zero points the entire time — the cutthroat analog of a shutout. Takes the
+// running "points ever received this game" total directly (accumulated in
+// enterTurnCricket(), a game-scoped field that survives leg resets the same way
+// gameDarts already does) rather than re-deriving it, the same "test the actual
+// threshold decision, not the accumulation" shape isCricketWhitewash()/
+// cricketComebackAchieved() already use above.
+function cricketStoneColdAchieved(gamePointsReceived, playerCount){
+  return playerCount >= 3 && (gamePointsReceived || 0) === 0;
 }
 
 /* ---------- Baseball ----------
@@ -684,11 +724,21 @@ function rebuildX01State({ names, outModes, startScore, practice, legsPerSet, tu
 
 // Cricket — same replay shape as X01 above, adapted to marks+points instead of
 // a countdown score. evaluateVisitCricket() needs game.players (to check
-// opponents' closed-number status) and game.config.numbers, both satisfied by
-// the { players, config } stub passed in below (mirrors the live game object's
-// own shape closely enough for this pure function's needs).
+// opponents' closed-number status) and game.config.{numbers,variant}, both
+// satisfied by the { players, config } stub passed in below (mirrors the live
+// game object's own shape closely enough for this pure function's needs).
+// Cutthroat's opponentGains are applied the same way enterTurnCricket() applies
+// them live — this is what keeps a resumed cutthroat game's points (and
+// therefore its win checks, since those compare points) correct; see
+// evaluateVisitCricket()'s own header comment for why a single visit can't just
+// be a delta on the shooter's own `points`. Per-leg badge-trigger trackers
+// (Comeback Kid's deficit, Stone Cold's gamePointsReceived) are deliberately
+// NOT rebuilt here — same "cosmetic/session bookkeeping already accepted as
+// lost on resume" precedent as every other game type's own trackers (see this
+// section's own header comment above).
 function rebuildCricketState({ names, config, practice, legsPerSet, turns }){
   const numbers = (config && config.numbers) || CRICKET_STANDARD_NUMBERS;
+  const variant = (config && config.variant) === 'cutthroat' ? 'cutthroat' : 'standard';
   const players = names.map(name => {
     const marks = {}; numbers.forEach(n => { marks[n] = 0; });
     return { name, marks, points:0, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 };
@@ -713,8 +763,16 @@ function rebuildCricketState({ names, config, practice, legsPerSet, turns }){
     pendingNewLeg = false; pendingNewSet = false;
     const p = players[t.playerIndex];
     const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
-    const ev = evaluateVisitCricket(p, dartsCore, { players, config: { numbers } });
+    const ev = evaluateVisitCricket(p, dartsCore, { players, config: { numbers, variant } });
     p.marks = ev.marks; p.points = ev.points;
+    if(variant === 'cutthroat'){
+      ev.opponentGains.forEach(g => {
+        if(g.gained > 0){
+          const opp = players.find(pl => pl.name === g.name);
+          if(opp) opp.points += g.gained;
+        }
+      });
+    }
     p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
     if(ev.win){
       pendingNewSet = _applyLegWin(players, t.playerIndex, legsPerSet, setsGateOpen);
@@ -836,7 +894,7 @@ if (typeof module !== 'undefined' && module.exports) {
     CHECKOUT_TRAINER_TRICK_CHANCE, listUnsolvableTargets, gradeCheckoutDeclaration,
     CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH, challengeBadgeSignals,
     chuckinTiersReached,
-    isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,
+    isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved, cricketStoneColdAchieved,
     rebuildX01State, rebuildCricketState, rebuildBaseballState,
     rebuildAroundTheClockState, rebuildAroundTheWorldState,
   };
