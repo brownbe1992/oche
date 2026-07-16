@@ -113,7 +113,7 @@ describe('BUG-26 — display.html\'s ACH_LABELS/ACH_DURATION/ACH_DESC stay in sy
   test('the cutthroat cricket and Bob\'s 27 one-off badges are present in all three maps', () => {
     const dspSrc = fs.readFileSync(DISPLAY_HTML_PATH, 'utf8');
     const idxSrc = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
-    for (const id of ['cricketstonecold', 'bobs27fullhouse', 'bobs27fullanderson']) {
+    for (const id of ['cricketstonecold', 'bobs27fullhouse', 'bobs27fullanderson', 'topofthehouse', 'upset']) {
       for (const constName of ['ACH_LABELS', 'ACH_DURATION', 'ACH_DESC']) {
         assert.ok(extractKeys(dspSrc, constName).has(id), `display.html's ${constName} must include ${id}`);
       }

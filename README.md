@@ -109,6 +109,8 @@ The landing page shows a live snapshot of all-time activity:
 
 **H2H / Practice toggle** — switches the leaderboards below between head-to-head and solo/practice stats. A second game-type toggle — **X01 / Cricket / Doubles Practice / Bob's 27 / Checkout Trainer / Around the Clock / Around the World** — switches the leaderboards between each game type's own stat vocabulary (the solo-only entries — Doubles Practice, Bob's 27, Checkout Trainer, Around the Clock, and Around the World — only appear while the Practice tab is selected). (Just Chuckin' It isn't on this toggle — it has no win/opponent-based stats to rank on a leaderboard; its stats are Player Profile-only.)
 
+**📈 Household Ratings** — always visible regardless of which game-type tab is selected, since it's a single rating combined across every competitive game type (X01, Cricket, Baseball — "who beats whom," not a per-game-type number). Shows rating + win/loss record, ranked descending, for every player with at least 5 rated H2H games. See [Player Profile](#player-profile) for a player's own rating, rank, and rating-over-time chart, and [Achievements & Badges](#achievements--badges) for its two badges.
+
 **X01 leaderboards:**
 - 3-dart average leaderboard
 - Most Wins (win rate) — H2H only
@@ -302,7 +304,7 @@ mechanics.
 
 ### Achievements & Badges
 
-Beyond 180s, Big Fish, and nine-darters, Oche tracks 33 X01 achievement badges (including a 5-tier lifetime-180s ladder and a handful of darts-culture one-offs — Bed & Breakfast, Madhouse, Shanghai) covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 5 Cricket-specific badges (including cut-throat's own 🔪 Stone Cold), 8 Baseball badges (Perfect Inning, Perfect Game, ⚾ Walk-Off, 🔄 The Cycle, and a 4-tier lifetime-runs ladder), 5 Doubles Practice badges (a 4-tier lifetime doubles-hit ladder plus 🎪 Ring Master for hitting every double lifetime), 7 Bob's 27 badges (🎯 Full House, 🏔️ The Full Anderson, and a 5-tier survival/score ladder), 2 [Tournament](#tournaments)-specific badges, 3 Daily Challenge badges, 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!), 34 Checkout Trainer badges (28 laddered milestones across 5 ladders — 4 Freeform, 1 Checkout Blitz — plus 6 one-off badges), and 2 Practice Drills badges for the two [guided drills](#new-game). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
+Beyond 180s, Big Fish, and nine-darters, Oche tracks 33 X01 achievement badges (including a 5-tier lifetime-180s ladder and a handful of darts-culture one-offs — Bed & Breakfast, Madhouse, Shanghai) covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 5 Cricket-specific badges (including cut-throat's own 🔪 Stone Cold), 8 Baseball badges (Perfect Inning, Perfect Game, ⚾ Walk-Off, 🔄 The Cycle, and a 4-tier lifetime-runs ladder), 5 Doubles Practice badges (a 4-tier lifetime doubles-hit ladder plus 🎪 Ring Master for hitting every double lifetime), 7 Bob's 27 badges (🎯 Full House, 🏔️ The Full Anderson, and a 5-tier survival/score ladder), 2 Household Rating badges (👑 Top of the House, 🗡️ Upset), 2 [Tournament](#tournaments)-specific badges, 3 Daily Challenge badges, 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!), 34 Checkout Trainer badges (28 laddered milestones across 5 ladders — 4 Freeform, 1 Checkout Blitz — plus 6 one-off badges), and 2 Practice Drills badges for the two [guided drills](#new-game). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
 
 | Badge | How to earn it |
 |---|---|
@@ -374,6 +376,13 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 33 X01 achievement badges (
 |---|---|
 | Survival/Score | 1 Survivor 🛡️ · 100 Century 💯 · 250 Quarter Grand 🌟 · 500 Half Grand 🚀 · 1,000 Four Figures 👑 |
 
+**Household Rating's 2 badges** — both keyed off the [📈 Household Ratings](#home) leaderboard, checked right after a rated 2-player match completes:
+
+| Badge | How to earn it |
+|---|---|
+| 👑 **Top of the House** | Reach #1 in the Household Ratings leaderboard (requires at least 5 rated games to qualify) |
+| 🗡️ **Upset** | Win a rated 2-player match against an opponent rated 150 or more points above you |
+
 **Tournament's 2 badges** (see [Tournaments](#tournaments)):
 
 | Badge | How to earn it |
@@ -408,7 +417,7 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 33 X01 achievement badges (
 | 🧭 **Guided Clock** | Complete a guided Around the Clock drill — hit every number 1–20 as a single |
 | 🗺️ **Guided World** | Reach all 63 lifetime dart outcomes while playing a guided Around the World session |
 
-**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 118-badge roster, grouped into X01/Cricket/Baseball/Doubles Practice/Bob's 27/Tournament/Daily Challenge/Just Chuckin' It/Checkout Trainer/Practice Drills sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), all 4 Baseball lifetime-runs ladder tiers, both Tournament badges (Champion, Giant Slayer (Tournament)), Full Rotation, both Practice Drills badges (Guided Clock, Guided World), all 18 Just Chuckin' It milestones, all 34 Checkout Trainer badges, all 5 Doubles Practice badges, and all 5 Bob's 27 survival/score ladder tiers are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
+**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 120-badge roster, grouped into X01/Cricket/Baseball/Doubles Practice/Bob's 27/Household Rating/Tournament/Daily Challenge/Just Chuckin' It/Checkout Trainer/Practice Drills sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), all 4 Baseball lifetime-runs ladder tiers, both Tournament badges (Champion, Giant Slayer (Tournament)), Full Rotation, both Practice Drills badges (Guided Clock, Guided World), all 18 Just Chuckin' It milestones, all 34 Checkout Trainer badges, all 5 Doubles Practice badges, all 5 Bob's 27 survival/score ladder tiers, and 👑 Top of the House are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
 
 **Around the World Progress** — a dedicated grid on the Player Profile showing exactly which of the 63 lifetime dart outcomes are still missing, alongside the Badge Case.
 
@@ -643,9 +652,13 @@ On the Doubles Practice toggle, this section shows just **Best Round (Darts)** a
 
 On the Around the Clock toggle, this section shows just **Fastest Completion (Darts)** — the fewest darts a completed round has ever taken. On the Around the World toggle, it shows **Sessions Played** and **Lifetime Progress** (e.g. "22 / 63") instead of a per-round record, since this mode's progress is lifetime/cross-session by design and never "wins."
 
+#### Household Rating
+
+Shown once on the Overall/H2H tabs, regardless of which per-game-type toggle above is selected — this rating is deliberately combined across every competitive game type, not scoped to any one of them. Shows current rating, win-loss record, and household rank (e.g. "#2 of 6" — requires at least 5 rated games to be ranked at all), plus a rating-over-time line chart. See [Home](#home) for the full leaderboard.
+
 #### Badge Case
 
-The full 118-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (33 badges), a **Cricket** section (5 badges), a **Baseball** section (8 badges), a **Doubles Practice** section (5 badges), a **Bob's 27** section (7 badges), a **Tournament** section (2 badges), a **Daily Challenge** section (3 badges), a **Just Chuckin' It** section (19 badges), a **Checkout Trainer** section (34 badges), and a **Practice Drills** section (2 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
+The full 120-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (33 badges), a **Cricket** section (5 badges), a **Baseball** section (8 badges), a **Doubles Practice** section (5 badges), a **Bob's 27** section (7 badges), a **Household Rating** section (2 badges), a **Tournament** section (2 badges), a **Daily Challenge** section (3 badges), a **Just Chuckin' It** section (19 badges), a **Checkout Trainer** section (34 badges), and a **Practice Drills** section (2 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
 
 #### On This Day
 
@@ -1100,12 +1113,16 @@ GET  /api/stats/checkout-blitz-leaderboard  Checkout Blitz best-single-run leade
 GET  /api/stats/around-the-clock-fastest    Around the Clock fastest-completion leaderboard (no mode param)
 GET  /api/stats/around-the-clock-completions Around the Clock most-completions leaderboard (no mode param)
 GET  /api/stats/around-the-world-progress   Around the World lifetime-progress leaderboard (no mode param)
+GET  /api/stats/elo-leaderboard             Household Elo rating leaderboard — rating + W/L, min 5
+                                             rated games, combined across every competitive game
+                                             type (no mode param — inherently H2H-only already)
 ```
 
 All leaderboard endpoints accept `?mode=h2h|practice` to filter by game mode. Omit for overall. The
-Doubles Practice, Bob's 27, Checkout Blitz, and Around the Clock/World endpoints above never take a
-`mode` param — every one of those game types is always solo practice, so there's no H2H side to split
-against (same reasoning as `cricket-wins` above, just the opposite polarity).
+Doubles Practice, Bob's 27, Checkout Blitz, Around the Clock/World, and Elo leaderboard endpoints
+above never take a `mode` param — every one of those game types is always solo practice (or, for
+Elo, inherently H2H-only already), so there's no H2H side to split against (same reasoning as
+`cricket-wins` above, just the opposite polarity).
 
 ### Per-Player Stats
 
@@ -1183,6 +1200,12 @@ GET  /api/players/coaching-insights         X01-only plain-language practice gui
                                              bust parity, form trend) — see REFERENCE.md
 GET  /api/players/h2h?p1=&p2=               Head-to-head record between two players
                                              (used by the New Game H2H banner)
+GET  /api/players/elo?name=                 Household Elo rating for one player: rating, wins,
+                                             losses, played, qualifies (5+ rated games), rank,
+                                             ratedPlayers, history (rating after each rated game),
+                                             lastCompetitiveGame (the most recently completed rated
+                                             game — used for the match-win delta banner and the
+                                             Top of the House / Upset badge checks)
 GET  /api/players/ghost-legs?name=&limit=   X01 legs this player has won, most recent
                                              first (Ghost Opponent's leg picker);
                                              limit is capped at 100 (docs/security-

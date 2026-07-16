@@ -1,10 +1,14 @@
 # Household Rating (Elo) & Handicapping — Design Roadmap
 
-> Status: **design phase, not started.** Two features in one doc because
-> they answer the same household problem — players of different strengths —
-> from opposite ends: the rating *measures* the gap, handicapping *closes*
-> it. **Independently shippable**, tracked as two separate items on
-> `docs/open-roadmap-items.md`; the rating is the natural first half.
+> Status: **Part A (Household Elo rating) shipped 2026-07; Part B
+> (Handicapping) still design phase, not started.** Two features in one doc
+> because they answer the same household problem — players of different
+> strengths — from opposite ends: the rating *measures* the gap,
+> handicapping *closes* it. **Independently shippable**, tracked as two
+> separate items on `docs/open-roadmap-items.md`; the rating was the
+> natural first half. This doc stays in `docs/` (not archived) until Part B
+> is also done, per `CLAUDE.md`'s "only archive once every split-out item is
+> Done" rule.
 
 ## Part A — Household Elo rating
 
@@ -44,6 +48,50 @@ self-correcting as form changes.
 - **Badges**: 👑 **Top of the House** (hold #1 — awarded on first reaching
   it) and 🗡️ **Upset** (beat an opponent rated 150+ above you), both
   computable inside the same walk.
+
+### Implementation notes (2026-07, shipped)
+
+Built essentially as designed, with two deviations:
+
+- **The rating-over-time chart is a bespoke sparkline, not `getMetricHistory()`-
+  style.** That function's charts bucket by calendar period (day/week/month) and
+  average within each bucket — a natural fit for a per-dart/per-leg stat, but
+  Elo is an event-driven series (one point per rated game, not per time
+  bucket) where averaging within a period would blur out the exact
+  post-game rating the walk already produces. `drawEloSparkline()`
+  (`frontend/index.html`) plots the raw per-game history directly instead —
+  simpler than teaching the existing chart's period-bucketing machinery a
+  second, incompatible x-axis semantic.
+- **The match-win delta isn't baked into the "MATCH WON!" moment card.**
+  That card fires synchronously, before the async Elo fetch (which needs
+  `DB.completeGame()`'s write to have landed first) can resolve — the same
+  timing gap Grudge Match's own async badge check already has to work
+  around. Rather than delaying the card, the delta patches into a separate
+  `#elo-delta-banner` placeholder on the GAME OVER screen once the fetch
+  resolves — the same "celebrate now, patch in extra detail once confirmed"
+  pattern `#challenge-pb-banner` already established for Daily Challenge PBs.
+
+Everything else matches this doc's design: live-computed via `getEloRatings()`
+(`backend/db.js`), K=32, `expected=1/(1+10^((theirs-mine)/400))`, zero-sum
+delta application (not two independently-rounded formulas, which could
+drift apart by a point); scope is completed/non-practice/2-player games
+across every competitive game type combined into one rating; Home page
+leaderboard with the 5-rated-games floor (`ELO_MIN_GAMES`); Player Profile
+rating/rank/history section; both badges, checked via the same async
+post-match fetch that drives the delta banner. Full write-up:
+`REFERENCE.md` §24. Committed tests: `backend/test/db.elo.test.js`
+(hand-verified K=32 arithmetic for a single win and a rematch, plus
+derivation-only checks for the Upset threshold, the games-floor, and every
+exclusion — practice, 3+ player, and handicapped games). Verified
+end-to-end with Playwright: a real 2-player X01 match played through the
+actual UI, confirming the rating, Home page section, and Player Profile
+section all render exactly as the hand-computed math predicts.
+
+The open question about K-factor/provisional periods was resolved as
+proposed: flat K=32 for v1, no provisional-period logic — household sample
+sizes are small enough that it would be tuning noise. Per-game-type ratings
+(the other open question) were not built — combined-only, as this doc
+leaned toward.
 
 ## Part B — Handicapping
 

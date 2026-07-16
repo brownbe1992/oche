@@ -325,7 +325,8 @@ const ACH_LABELS  = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter
   baseballperfectinning:'Perfect Inning! 🔥', baseballperfectgame:'🏆 PERFECT GAME! 🏆',
   baseballwalkoff:'Walk-Off! ⚾', baseballcycle:'The Cycle! 🔄', doublespracticeringmaster:'Ring Master! 🎪',
   cricketstonecold:'Stone Cold! 🔪',
-  bobs27fullhouse:'Full House! 🎯', bobs27fullanderson:'🏔️ THE FULL ANDERSON! 🏔️' };
+  bobs27fullhouse:'Full House! 🎯', bobs27fullanderson:'🏔️ THE FULL ANDERSON! 🏔️',
+  topofthehouse:'👑 TOP OF THE HOUSE! 👑', upset:'Upset! 🗡️' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -340,7 +341,8 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   baseballperfectinning:2500, baseballperfectgame:6000,
   baseballwalkoff:3000, baseballcycle:2500, doublespracticeringmaster:5000,
   cricketstonecold:3500,
-  bobs27fullhouse:2500, bobs27fullanderson:6000 };
+  bobs27fullhouse:2500, bobs27fullanderson:6000,
+  topofthehouse:6000, upset:2500 };
 // Mirror-copied from frontend/index.html's BADGE_INFO[...].desc / ACH_DESC_FALLBACK —
 // this file has no Badge Case UI to source the text from directly, so it's kept as
 // its own flat map (docs/next-session-plan.md item 1).
@@ -395,6 +397,8 @@ const ACH_DESC = {
   cricketstonecold: 'Win a 3+ player Cut-throat Cricket game without receiving a single point.',
   bobs27fullhouse: "Hit all three darts of a visit on that round's double, in Bob's 27.",
   bobs27fullanderson: "A perfect Bob's 27 run — every double from D1 through D20 hit with all three darts, finishing on exactly 1287.",
+  topofthehouse: 'Reach #1 in the Household Ratings leaderboard.',
+  upset: 'Win a rated 2-player match against an opponent rated 150+ points above you.',
 };
 // Just Chuckin' It's 18 laddered milestone badges — mirror-copied from frontend/
 // index.html's CHUCKIN_MILESTONE_LADDERS (this file has no shared module with
@@ -569,7 +573,7 @@ function showAchievement(type, player, countText){
   achName.textContent = player || '';
   if(achDesc) achDesc.textContent = ACH_DESC[type] || '';
   if(achCount) achCount.textContent = countText || '';
-  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'cricketstonecold' || type === 'bobs27fullanderson';
+  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'cricketstonecold' || type === 'bobs27fullanderson' || type === 'topofthehouse';
   achOverlay.classList.toggle('mega', mega);
   achOverlay.classList.add('show');
   if(mega) spawnConfetti(achOverlay, 90);

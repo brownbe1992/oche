@@ -46,6 +46,7 @@ convention in `CLAUDE.md`.
 - [21. Known Limitations & Open Gaps](#21-known-limitations--open-gaps)
 - [22. Troubleshooting](#22-troubleshooting)
 - [23. Saved Games / Pause & Resume](#23-saved-games--pause--resume)
+- [24. Household Elo Rating](#24-household-elo-rating)
 
 ---
 
@@ -4823,3 +4824,109 @@ Clock/World's own simpler shapes) and `backend/test/db.saved-games.test.js`
 server-side eligibility checks, the two-device divergence guard, tournament-
 match linkage restore through a full resume-then-complete-then-bracket-
 advances cycle, the player-deletion guard, and the merge-collision block).
+
+---
+
+## 24. Household Elo Rating
+
+`docs/rating-and-handicap-roadmap.md` Part A. A single evolving number per
+player answering "who's actually on top right now?" — more responsive than
+raw win totals (beating the house champion moves you more than beating the
+newest player), self-correcting as form changes.
+
+### Live-computed, never stored
+
+`getEloRatings()` (`backend/db.js`) walks every completed, non-practice,
+2-player game — across every competitive game type combined into **one
+household rating** (deliberately "who beats whom," not a per-game-type
+number; Tournament and league-fixture games count, since they're real
+competitive results; Ghost/Daily Challenge/solo drills never enter, since
+there's no second real player) — in `(created_at, id)` order, folding the
+textbook update: start 1000, `K=32`, `expected = 1/(1+10^((opponent-mine)/
+400))`, the winner gains `round(K*(1-expected))` and the loser loses the
+*exact same amount* (a simple zero-sum split, not each side independently
+rounding its own formula, which could drift apart by a point). This means
+ratings retroactively heal after `deleteLastTurn`, player merges, game
+deletions, or imports, with zero migration/backfill machinery — the
+standing "nothing pre-aggregated" schema philosophy applied to Elo. A few
+thousand games is a trivial walk at household scale; revisit only if a
+server ever accumulates enough games for this to matter.
+
+**Handicapped games are excluded** (§25 below): the walk's `WHERE` clause
+skips any game where either `game_players` row has a non-`NULL`
+`start_score` — a compensated result says nothing about raw strength.
+
+### Surfaces
+
+- **Home page** "📈 Household Ratings" leaderboard (`getEloLeaderboard()`,
+  `GET /api/stats/elo-leaderboard`) — rating + W/L, sorted descending, a
+  **minimum 5 rated games** before a player appears (`ELO_MIN_GAMES`), so a
+  1-game player isn't ranked off a single result. Lives in
+  `renderHomePulse()` (piggybacked onto `getHomeExtra()`'s existing payload,
+  the same way the Active Leagues teaser is), not inside
+  `renderHomeTabBody()`'s per-game-type dispatch — the rating deliberately
+  spans every competitive game type, so pinning it to whichever per-type tab
+  happens to be selected (the way "Most Wins" today only visibly shows on
+  the X01 tab despite its own query already spanning every type) would
+  misleadingly suggest it's type-scoped.
+- **Player Profile** "📈 Household Rating" section (`getPlayerElo(name)`,
+  `GET /api/players/elo?name=`) — rating, W-L record, and rank (`#N of M`
+  qualifying players, or "Not yet ranked" below the 5-game floor — rank is
+  computed against the *same* qualifying pool the Home leaderboard uses, so
+  "rank #1" and "topping the Home leaderboard" are always the same claim)
+  plus a rating-over-time sparkline (`drawEloSparkline()`, a bespoke minimal
+  SVG rather than reusing `drawAvgChart()` — that function is tightly
+  coupled to `activeStatDefs()`/`selectedStat`'s period-picker/value-
+  formatter machinery, none of which applies to a single always-on number
+  with no period picker). Shown once inside the `overall`/`h2h` tabs'
+  shared `h2hSection`, unconditional on the per-game-type toggle (`gt`) —
+  unlike Tournaments/Leagues just above it, which *are* gated on `gt`.
+- **Match-win delta**: `checkEloOnMatchWin(w, opp)` (`frontend/index.html`)
+  is called from the "game (match) won" branch of every H2H-capable game
+  type's own `onLegWon`/`onLegWonCricket`/`onLegWonBaseball`, right after
+  `DB.completeGame()` so the just-finished game is already reflected in the
+  walk by the time the async fetch resolves. Guards on `opp` (null for
+  solo/practice/3+-player games — Baseball's own gate isn't `!game.practice`
+  the way X01/Cricket's is, per BUG-22, so `opp` is derived fresh there
+  rather than assumed) and `!game.practice` (excludes a Ghost race even
+  though it has a real `opp` object). Patches a `#elo-delta-banner`
+  placeholder on the GAME OVER screen once the fetch resolves (`📈
+  Household rating: 1016 (+16)`) — the same "celebrate the win now, patch in
+  extra detail once confirmed" pattern `#challenge-pb-banner` already uses,
+  since the rating can't be known synchronously at match-end time.
+
+### Badges
+
+| Badge | Exact condition |
+|---|---|
+| 👑 **Top of the House** | `qualifies && rank === 1` for the winner, checked via the same async fetch as the delta banner. **Once-badge** — manually managed (`Backend.send(..., {once:true})` + explicit `trackBadgeForUndo()`) rather than trusted to `awardRecurringBadge()`'s own internal `game.lastTurnSnapshot` read, since by the time this network round-trip resolves the live game state may have moved on — the same precaution Grudge Match's own async check already takes. Mega-tier overlay (confetti) like Nine-Darter/Perfect Leg/Champion. |
+| 🗡️ **Upset** | `lastCompetitiveGame.isUpset` for the winner — the loser's *pre-game* rating was 150+ above the winner's pre-game rating (`getEloRatings()` captures both pre-game ratings before applying the update, so this checks the gap that made the win an upset in the first place, not the post-game ratings). **Recurring** — mirrors The Rematch's own async `awardRecurringBadge()` call. |
+
+Both get their own Badge Case section ("Household Rating") on the Player
+Profile — cross-game-type, so folding into X01's section (the way most
+one-off badges do) would misrepresent their scope, the same reasoning
+Bob's 27's own `bobs27:true` flag already established.
+
+### API
+
+```
+GET /api/stats/elo-leaderboard     Home page leaderboard (rating+W/L, min 5 rated games, no mode param)
+GET /api/players/elo?name=         Single-player view: rating, wins, losses, played,
+                                    qualifies, rank, ratedPlayers, history (rating after
+                                    each rated game), lastCompetitiveGame (global — the
+                                    most recently completed rated game, for the delta
+                                    banner/badge checks right after a match ends)
+```
+
+### Testing
+
+`backend/test/db.elo.test.js`: hand-verified K=32 arithmetic for a single
+win (1000→1016/984) and a rematch (999/1001, proving the zero-sum delta
+application), plus derivation-only checks (not re-verifying the same
+formula a third time) for the Upset threshold, the min-5-games floor,
+practice/3+-player/handicapped-game exclusion, and `getPlayerElo()`'s
+qualifies/rank fields. Verified end-to-end with Playwright: a real 2-player
+X01 match played through the actual UI, confirming `/api/players/elo`
+returns the exact hand-computed rating, the Home page's Household Ratings
+section renders (including the below-floor empty state), and the Player
+Profile's Household Rating section renders the correct rating/record/rank.

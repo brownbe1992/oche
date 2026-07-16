@@ -751,6 +751,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/stats/doubles-practice-best-round' && m === 'GET') return send(res, 200, db.getDoublesPracticeBestRoundStats());
     if (p === '/api/stats/checkout-blitz-leaderboard' && m === 'GET') return send(res, 200, db.getCheckoutBlitzLeaderboard());
     if (p === '/api/stats/bobs27-leaderboard' && m === 'GET') return send(res, 200, db.getBobs27Leaderboard());
+    if (p === '/api/stats/elo-leaderboard' && m === 'GET') return send(res, 200, db.getEloLeaderboard());
     if (p === '/api/stats/around-the-clock-fastest' && m === 'GET') return send(res, 200, db.getAroundTheClockFastestLeaderboard());
     if (p === '/api/stats/around-the-clock-completions' && m === 'GET') return send(res, 200, db.getAroundTheClockCompletionsLeaderboard());
     if (p === '/api/stats/around-the-world-progress' && m === 'GET') return send(res, 200, db.getAroundTheWorldLeaderboard());
@@ -1203,6 +1204,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/players/badges' && m === 'GET') {
       return send(res, 200, db.getPlayerBadges(url.searchParams.get('name')));
+    }
+    if (p === '/api/players/elo' && m === 'GET') {
+      return send(res, 200, db.getPlayerElo(url.searchParams.get('name')));
     }
     if (p === '/api/players/h2h-summary' && m === 'GET') {
       const exGid = Number(url.searchParams.get('excludeGameId'));

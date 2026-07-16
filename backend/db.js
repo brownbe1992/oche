@@ -479,6 +479,15 @@ try { db.exec('ALTER TABLE game_players ADD COLUMN loadout_id INTEGER REFERENCES
 // League mode (docs/league-mode-roadmap.md): nullable, set by the onGameCreated
 // auto-tag hook below (or left NULL for any game that isn't a tagged league match).
 try { db.exec('ALTER TABLE games ADD COLUMN league_id INTEGER REFERENCES leagues(id) ON DELETE SET NULL'); } catch(e) {}
+// Handicapping (docs/rating-and-handicap-roadmap.md Part B): a per-player,
+// per-game starting-score override — NULL (the default for every existing
+// row and every game that doesn't use it) means "the game's own
+// config.startingScore", the same snapshot-column shape out_mode/dart_weight/
+// loadout_id already use above. Added here (ahead of Part B's own UI/engine
+// work) because getEloRatings() (Part A) already needs to query it to
+// exclude handicapped games from the rating walk — see that function's own
+// comment.
+try { db.exec('ALTER TABLE game_players ADD COLUMN start_score INTEGER'); } catch(e) {}
 // League mode Cricket support (docs/league-mode-roadmap.md): a second game type
 // alongside the original X01-only v1. Defaults to 'x01' for every pre-existing row
 // (and any insert that omits it) so the column is purely additive — no backfill
@@ -596,7 +605,7 @@ const q = {
 
   insertGame   : db.prepare('INSERT INTO games (category, legs_per_set, sets_per_game, practice, game_type, config) VALUES (?, ?, ?, ?, ?, ?)'),
   gameTypeById : db.prepare('SELECT game_type FROM games WHERE id = ?'),
-  addParticipant: db.prepare('INSERT OR IGNORE INTO game_players (game_id, player_id, dart_weight, out_mode, loadout_id) VALUES (?, ?, ?, ?, ?)'),
+  addParticipant: db.prepare('INSERT OR IGNORE INTO game_players (game_id, player_id, dart_weight, out_mode, loadout_id, start_score) VALUES (?, ?, ?, ?, ?, ?)'),
   completeGame : db.prepare("UPDATE games SET completed_at = datetime('now'), winner_id = ? WHERE id = ?"),
 
   insertTurn   : db.prepare(`INSERT INTO turns
@@ -874,7 +883,18 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
     // player who still has an old dart_weight value sitting orphaned on their row.
     const loadout = _resolveLoadoutForParticipant(p.id, entry.loadoutId);
     const weight = loadout ? _getComponentOrNull(loadout.barrel_id)?.weight_g ?? null : null;
-    q.addParticipant.run(gameId, p.id, weight, out, loadout ? loadout.id : null);
+    // Handicapping (docs/rating-and-handicap-roadmap.md Part B): a per-player
+    // starting-score override for this one game, X01 only. NULL (the default
+    // for every caller today — no New Game UI sends this yet) means "use the
+    // game's own config.startingScore" — see game_players.start_score's own
+    // migration comment. Bounds/game-type validation is Part B's own New
+    // Game UI's job (the setup screen never offers this outside X01, and a
+    // future server-side check will reject an out-of-range value the same
+    // way pinnedTarget/cricket variant are validated above) — accepted
+    // as-is here for now, the same "schema groundwork ahead of the UI that
+    // populates it" precedent league_id/loadout_id set on this codebase.
+    const startScore = entry.startScore != null ? Number(entry.startScore) : null;
+    q.addParticipant.run(gameId, p.id, weight, out, loadout ? loadout.id : null, startScore);
   });
   // Freeze the participant count now (deduped, since addParticipant is INSERT OR IGNORE)
   // so H2H/practice classification survives later player deletion — see the migration note.
@@ -1990,9 +2010,17 @@ function getHomeExtra() {
   // just the id/name, not full standings (the Leagues screen fetches those itself).
   const activeLeagues = db.prepare(`SELECT id, name FROM leagues WHERE status = 'active' ORDER BY created_at DESC`).all();
 
+  // Household Elo (docs/rating-and-handicap-roadmap.md Part A): piggybacks on
+  // this existing payload the same way activeLeagues does just above — a
+  // cross-game-type teaser that doesn't belong to any one game type's own
+  // Home tab, so it's always visible regardless of which per-game-type
+  // toggle is selected, rather than living inside renderHomeTabBody()'s
+  // per-type dispatch.
+  const eloLeaderboard = getEloLeaderboard();
+
   return { winLeaderboard, trebleLessRows, tonPlusRows, first9Rows, highestCheckout, lastGame,
     today: { legs: todayLegs, darts: todayDarts }, week: { legs: weekLegs, darts: weekDarts }, pace,
-    activeLeagues };
+    activeLeagues, eloLeaderboard };
 }
 
 function getPlayerStatBubbles(playerName, mode) {
@@ -3095,6 +3123,132 @@ function getBobs27Leaderboard() {
     if (!cur || r.finalScore > cur.bestScore) best.set(r.name, { name: r.name, bestScore: r.finalScore, achievedAt: r.achievedAt });
   }
   return Array.from(best.values()).sort((a, b) => b.bestScore - a.bestScore);
+}
+
+/* ---------- Household Elo rating (docs/rating-and-handicap-roadmap.md Part A) ----------
+   Live-computed, never stored — the standing "nothing pre-aggregated" schema
+   philosophy fits Elo unusually well: every completed, non-practice, 2-player
+   game (across every competitive game type combined into one household
+   rating — this is "who beats whom," not a per-game-type number) is walked in
+   (created_at, id) order, folding the textbook update (start 1000, K=32,
+   expected = 1/(1+10^((opponent-mine)/400)), winner gets K*(1-expected),
+   loser gets the exact same amount subtracted — a simple zero-sum split
+   rather than rounding each side's own formula independently, which could
+   drift by a point through independent rounding). This means ratings
+   retroactively heal after undo/merge/game-deletion/import with zero
+   migration machinery, at the cost of re-walking the whole games table on
+   every request — a few thousand games is a trivial walk at household scale
+   (see the roadmap doc's own reasoning); revisit only if a server ever
+   accumulates enough games for this to matter.
+   Handicapped games (docs/rating-and-handicap-roadmap.md Part B) are
+   excluded once game_players.start_score exists — see the WHERE clause
+   below, added in the same change that ships Part B. */
+function getEloRatings() {
+  const K = 32;
+  const rows = db.prepare(`
+    SELECT g.id AS gameId, g.created_at AS createdAt, g.completed_at AS completedAt, g.winner_id AS winnerId,
+      gp.player_id AS playerId, p.name AS name
+    FROM games g
+    JOIN game_players gp ON gp.game_id = g.id
+    JOIN players p ON p.id = gp.player_id
+    WHERE g.completed_at IS NOT NULL AND g.practice = 0 AND g.player_count = 2
+      -- Handicapping (Part B): a game where either participant's start_score
+      -- was overridden says nothing about raw strength, so it never enters
+      -- the walk at all — same reasoning a compensated result shouldn't move
+      -- an uncompensated rating.
+      AND NOT EXISTS (SELECT 1 FROM game_players gp2 WHERE gp2.game_id = g.id AND gp2.start_score IS NOT NULL)
+    ORDER BY g.created_at ASC, g.id ASC, gp.player_id ASC
+  `).all();
+
+  const byGame = new Map();
+  rows.forEach(r => {
+    if (!byGame.has(r.gameId)) byGame.set(r.gameId, { gameId: r.gameId, createdAt: r.createdAt, completedAt: r.completedAt, winnerId: r.winnerId, players: [] });
+    byGame.get(r.gameId).players.push({ id: r.playerId, name: r.name });
+  });
+
+  const ratings = new Map(); // playerId -> { name, rating, wins, losses, played, history:[{gameId,date,rating}] }
+  const ensure = (id, name) => {
+    if (!ratings.has(id)) ratings.set(id, { name, rating: 1000, wins: 0, losses: 0, played: 0, history: [] });
+    return ratings.get(id);
+  };
+  let lastGame = null;
+  for (const g of byGame.values()) {
+    // player_count=2 already guarantees exactly 2 rows; winnerId is required
+    // for a completed game (completeGame() always sets it) — both defensive,
+    // not expected to ever actually skip a row.
+    if (g.players.length !== 2 || g.winnerId == null) continue;
+    const [a, b] = g.players;
+    const ra = ensure(a.id, a.name), rb = ensure(b.id, b.name);
+    const winnerIsA = g.winnerId === a.id;
+    const preA = ra.rating, preB = rb.rating;
+    const expectedA = 1 / (1 + Math.pow(10, (preB - preA) / 400));
+    const deltaA = Math.round(K * ((winnerIsA ? 1 : 0) - expectedA));
+    ra.rating = preA + deltaA;
+    rb.rating = preB - deltaA;
+    if (winnerIsA) { ra.wins++; rb.losses++; } else { rb.wins++; ra.losses++; }
+    ra.played++; rb.played++;
+    const date = (g.completedAt || g.createdAt).slice(0, 10);
+    ra.history.push({ gameId: g.gameId, date, rating: ra.rating });
+    rb.history.push({ gameId: g.gameId, date, rating: rb.rating });
+    const winner = winnerIsA ? ra : rb, loser = winnerIsA ? rb : ra;
+    const winnerPre = winnerIsA ? preA : preB, loserPre = winnerIsA ? preB : preA;
+    lastGame = {
+      gameId: g.gameId, winnerName: winner.name, loserName: loser.name,
+      winnerDelta: winnerIsA ? deltaA : -deltaA, winnerRating: winner.rating,
+      // Upset (docs/rating-and-handicap-roadmap.md Part A): beat an opponent
+      // rated 150+ above you, checked against PRE-game ratings (the gap that
+      // made the win an upset in the first place), not the post-game ones.
+      isUpset: (loserPre - winnerPre) >= 150,
+    };
+  }
+
+  const list = Array.from(ratings.entries()).map(([playerId, r]) => ({
+    playerId, name: r.name, rating: r.rating, wins: r.wins, losses: r.losses, played: r.played, history: r.history,
+  })).sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name));
+  return { ratings: list, lastGame };
+}
+
+// Home page leaderboard: rating + W/L, sorted desc, min 5 rated games before
+// appearing so a 1-game player isn't ranked off a single result.
+const ELO_MIN_GAMES = 5;
+function getEloLeaderboard() {
+  return getEloRatings().ratings.filter(r => r.played >= ELO_MIN_GAMES)
+    .map(r => ({ name: r.name, rating: r.rating, wins: r.wins, losses: r.losses, played: r.played }));
+}
+
+// Single-player Elo view for the Player Profile (rating + rank + history
+// chart) and for the post-match badge check (👑 Top of the House / 🗡️
+// Upset) — both read from the same walk so the numbers can never disagree.
+// `rank`/`qualifies` are computed against the SAME min-5-games-played pool
+// the Home leaderboard itself uses, so "rank #1" and "topping the Home
+// leaderboard" are always the same claim — a player under the floor can't
+// become Top of the House by playing one lucky game.
+function getPlayerElo(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const { ratings, lastGame } = getEloRatings();
+  const mine = ratings.find(r => r.playerId === p.id);
+  const qualified = ratings.filter(r => r.played >= ELO_MIN_GAMES);
+  const rank = mine && mine.played >= ELO_MIN_GAMES
+    ? qualified.findIndex(r => r.playerId === p.id) + 1
+    : null;
+  return {
+    rating: mine ? mine.rating : 1000,
+    wins: mine ? mine.wins : 0,
+    losses: mine ? mine.losses : 0,
+    played: mine ? mine.played : 0,
+    qualifies: !!mine && mine.played >= ELO_MIN_GAMES,
+    rank,
+    ratedPlayers: qualified.length,
+    history: mine ? mine.history : [],
+    // Global, not player-scoped — the client only reads this when it's the
+    // player who just won a match, immediately after that match completed
+    // (see checkEloOnMatchWin() in index.html), the same "no explicit
+    // gameId correlation needed" assumption every other post-match async
+    // lookup in this app already makes (h2h-summary, etc.) since nothing
+    // else could have completed a 2-player game in between.
+    lastCompetitiveGame: lastGame,
+  };
 }
 
 // Per-sector/multiplier/zone hit-count grid feeding the Player Profile's dartboard
@@ -6436,6 +6590,7 @@ module.exports = {
   getCheckoutTrainerStatBubbles, getCheckoutTrainerPersonalBests,
   getCheckoutBlitzLeaderboard, getCheckoutBlitzPersonalStats,
   getBobs27StatBubbles, getBobs27PersonalBests, getBobs27Leaderboard,
+  getEloRatings, getEloLeaderboard, getPlayerElo,
   getAroundTheClockStatBubbles, getAroundTheClockPersonalBests,
   getAroundTheClockFastestLeaderboard, getAroundTheClockCompletionsLeaderboard,
   getAroundTheWorldDrillStatBubbles, getAroundTheWorldPersonalBests, getAroundTheWorldLeaderboard,

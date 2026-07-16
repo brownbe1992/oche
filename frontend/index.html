@@ -2204,6 +2204,30 @@ function renderHomePulse(){
       </div>
     </div>` : '';
 
+  // Household Elo (docs/rating-and-handicap-roadmap.md Part A): lives here,
+  // not inside renderHomeTabBody()'s per-game-type dispatch, since the
+  // rating is deliberately "who beats whom" across every competitive game
+  // type combined — pinning it to whichever per-type tab happens to be
+  // selected (the way "Most Wins" today only shows on the X01 tab despite
+  // itself spanning every type) would misleadingly suggest it's an X01-only
+  // number. Min-5-rated-games floor is already applied server-side
+  // (getEloLeaderboard()), so every row here is genuinely ranked.
+  const eloBoard = extra.eloLeaderboard || [];
+  const eloTeaser = eloBoard.length ? `
+    <div class="pp-section" style="margin-bottom:14px">
+      <div class="pp-section-title">📈 Household Ratings</div>
+      <div class="hof-list" style="margin-top:8px">${eloBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.rating}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${r.wins}-${r.losses}</span>
+      </div>`).join('')}</div>
+    </div>` : `
+    <div class="pp-section" style="margin-bottom:14px">
+      <div class="pp-section-title">📈 Household Ratings</div>
+      <p class="pp-meta" style="margin-top:8px">Needs at least 5 rated H2H games per player to appear.</p>
+    </div>`;
+
   el.innerHTML=`
     <div class="home-pair">
       <div class="pp-section">
@@ -2219,7 +2243,8 @@ function renderHomePulse(){
         <p style="margin:4px 0 0;line-height:1.6">${lastGameHtml}</p>
       </div>
     </div>
-    ${leaguesTeaser}`;
+    ${leaguesTeaser}
+    ${eloTeaser}`;
 }
 
 function renderHomeTabBody(){
@@ -5260,6 +5285,15 @@ function renderPlayerPage(){
       <div class="pp-section-title">Leagues</div>
       <div id="player-league-stats"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </div>` : '';
+  // Household Elo (docs/rating-and-handicap-roadmap.md Part A): unlike
+  // Tournaments/Leagues just above, not gated on `gt` — the rating is
+  // deliberately combined across every competitive game type, so it's shown
+  // once regardless of which per-game-type toggle is active.
+  const eloSection = `
+    <div class="pp-section">
+      <div class="pp-section-title">📈 Household Rating</div>
+      <div id="player-elo-body"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </div>`;
   const h2hSection = `
     <div class="pp-section">
       <div class="pp-section-title">H2H — Games &amp; Legs Played</div>
@@ -5269,6 +5303,7 @@ function renderPlayerPage(){
       <div class="pp-section-title">H2H Wins</div>
       <div class="pp-cat-lines">${h2hHtml}</div>
     </div>
+    ${eloSection}
     ${tournamentStatsSection}
     ${leagueStatsSection}`;
 
@@ -5373,6 +5408,7 @@ function renderPlayerPage(){
   loadCoachingInsights();
   loadPersonalBests();
   loadPlayerBadges();
+  loadPlayerElo();
   loadTournamentStats();
   loadPlayerLeagueStats();
   loadAroundTheWorldProgress();
@@ -5459,6 +5495,12 @@ const BADGE_INFO = {
   // milestones which keep firing exactly as they always have, from any mode.
   guided_clock: { icon:'🧭', label:'Guided Clock', desc:'Complete a guided Around the Clock drill — hit every number 1-20 as a single.', drill:true },
   guided_world: { icon:'🗺️', label:'Guided World', desc:'Reach all 63 lifetime dart outcomes while playing a guided Around the World session.', drill:true },
+  // Household Elo (docs/rating-and-handicap-roadmap.md Part A) — combined
+  // across every competitive game type, so these get their own Badge Case
+  // section rather than folding into X01's, the same reasoning Bob's 27's
+  // `bobs27:true` flag already established for a genuinely separate concern.
+  topofthehouse: { icon:'👑', label:'Top of the House', desc:'Reach #1 in the Household Ratings leaderboard.', elo:true },
+  upset:         { icon:'🗡️', label:'Upset', desc:'Win a rated 2-player match against an opponent rated 150+ points above you.', elo:true },
 };
 function loadPlayerBadges(){
   const container=document.getElementById('player-badges');
@@ -5498,7 +5540,8 @@ function renderPlayerBadges(data){
   // Practice's 5 (docs/archive/culture-badges-roadmap.md Part B), and the guided
   // drills' 2 each stay visually distinct sub-sections rather than one mixed
   // flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27);
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo);
+  const eloIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].elo);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
   const baseballIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].baseball);
   const challengeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].challenge);
@@ -5519,6 +5562,8 @@ function renderPlayerBadges(data){
     <div class="summary-grid">${doublesPracticeIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Bob's 27</div>
     <div class="summary-grid">${bobs27Ids.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">Household Rating</div>
+    <div class="summary-grid">${eloIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Tournaments</div>
     <div class="summary-grid">${tournamentIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Daily Challenge</div>
@@ -5734,6 +5779,55 @@ function loadTournamentStats(){
       ${data.bestFinish?`<div class="stat-block"><div class="stat-val" style="font-size:1.4rem">${escapeHtml(data.bestFinish)}</div><div class="stat-label">Best Finish</div></div>`:''}
     </div>`;
   }).catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load tournament stats.</p>`; });
+}
+// docs/rating-and-handicap-roadmap.md Part A: rating + rank + a rating-over-
+// time sparkline. Deliberately a bespoke minimal SVG (drawEloSparkline()
+// below) rather than reusing drawAvgChart() — that function is tightly
+// coupled to activeStatDefs()/selectedStat (period buttons, a value
+// formatter keyed off the currently-selected stat bubble), none of which
+// apply to a single always-on rating number with no period picker of its
+// own; duplicating its ~15 lines of point-plotting math directly was judged
+// simpler than bending its stat-bubble-specific assumptions to fit.
+function loadPlayerElo(){
+  const container=document.getElementById('player-elo-body');
+  if(!container) return;
+  const player = currentPlayer;
+  Backend.get(`/api/players/elo?name=${encodeURIComponent(player)}`).then(data=>{
+    if(currentPlayer !== player) return;   // a newer profile visit took over
+    const el = document.getElementById('player-elo-body');
+    if(!el || !data) return;
+    if(!data.played){
+      el.innerHTML = `<p class="pp-meta" style="padding:4px 0">No rated H2H games yet — play a 2-player X01, Cricket, or Baseball match to get started.</p>`;
+      return;
+    }
+    const rankLabel = data.qualifies ? `#${data.rank} of ${data.ratedPlayers}` : `Not yet ranked (needs 5 rated games, has ${data.played})`;
+    el.innerHTML = `<div class="summary-grid">
+      <div class="stat-block"><div class="stat-val">${data.rating}</div><div class="stat-label">Rating</div></div>
+      <div class="stat-block"><div class="stat-val">${data.wins}-${data.losses}</div><div class="stat-label">Record</div></div>
+      <div class="stat-block"><div class="stat-val" style="font-size:1.1rem">${escapeHtml(rankLabel)}</div><div class="stat-label">Household Rank</div></div>
+    </div>
+    ${drawEloSparkline(data.history)}`;
+  }).catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load rating.</p>`; });
+}
+function drawEloSparkline(history){
+  if(!history || history.length < 2) return '';
+  const W=560,H=90,ml=10,mr=10,mt=10,mb=10;
+  const cw=W-ml-mr, ch=H-mt-mb;
+  const vals = history.map(h=>h.rating);
+  const rawMin=Math.min(...vals), rawMax=Math.max(...vals);
+  const pad = Math.max((rawMax-rawMin)*0.15, 5);
+  const yMin=rawMin-pad, yMax=rawMax+pad, yRange=yMax-yMin||1;
+  const n=vals.length;
+  const pts = vals.map((v,i)=>({
+    x: ml+(n===1?cw/2:(i/(n-1))*cw),
+    y: mt+ch-((v-yMin)/yRange)*ch
+  }));
+  const linePts = pts.map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  return `<p class="pp-meta" style="margin:10px 0 4px">Rating over time (last ${n} rated game${n===1?'':'s'})</p>
+    <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;display:block" role="img" aria-label="Rating history from ${vals[0]} to ${vals[n-1]}">
+      <polyline points="${linePts}" fill="none" stroke="#d9b46a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${pts[n-1].x.toFixed(1)}" cy="${pts[n-1].y.toFixed(1)}" r="3" fill="#d9b46a"/>
+    </svg>`;
 }
 // docs/league-mode-roadmap.md: the Player Profile's "Leagues" stat block — every
 // league this player belongs to, plus their current rank/points in each. Same
@@ -6264,7 +6358,8 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   baseballperfectinning:'Perfect Inning! 🔥', baseballperfectgame:'🏆 PERFECT GAME! 🏆',
   baseballwalkoff:'Walk-Off! ⚾', baseballcycle:'The Cycle! 🔄', doublespracticeringmaster:'Ring Master! 🎪',
   cricketstonecold:'Stone Cold! 🔪',
-  bobs27fullhouse:'Full House! 🎯', bobs27fullanderson:'🏔️ THE FULL ANDERSON! 🏔️' };
+  bobs27fullhouse:'Full House! 🎯', bobs27fullanderson:'🏔️ THE FULL ANDERSON! 🏔️',
+  topofthehouse:'👑 TOP OF THE HOUSE! 👑', upset:'Upset! 🗡️' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -6279,7 +6374,8 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   baseballperfectinning:2500, baseballperfectgame:6000,
   baseballwalkoff:3000, baseballcycle:2500, doublespracticeringmaster:5000,
   cricketstonecold:3500,
-  bobs27fullhouse:2500, bobs27fullanderson:6000 };
+  bobs27fullhouse:2500, bobs27fullanderson:6000,
+  topofthehouse:6000, upset:2500 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
@@ -6755,7 +6851,7 @@ function showAchievement(type, player, countText){
   // Triple Bull (three double-bulls in one visit, a 150 checkout) and Perfect Game
   // (81 runs, a perfect 9 in every Baseball inning) get the same showcase treatment
   // as a nine-darter — comparably rare, celebration-worthy feats.
-  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'triplebull' || type === 'baseballperfectgame' || type === 'cricketstonecold' || type === 'bobs27fullanderson';
+  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'triplebull' || type === 'baseballperfectgame' || type === 'cricketstonecold' || type === 'bobs27fullanderson' || type === 'topofthehouse';
   achOverlayEl.classList.toggle('mega', mega);
   achOverlayEl.classList.add('show');
   const shareBtn = document.getElementById('ach-share-btn');
@@ -8862,6 +8958,55 @@ function undoLastTurnCricket(){
    restriction as X01's own social/margin-of-victory badges. Set/leg advancement
    and the completeGame/HA webhook calls below are the same generic hooks the X01
    path uses. */
+// Household Elo (docs/rating-and-handicap-roadmap.md Part A) — shared by
+// every H2H-capable game type's own "game (match) won" branch
+// (onLegWon()/onLegWonCricket()/onLegWonBaseball()), called right after
+// DB.completeGame() so the just-finished game is already reflected in the
+// server-side rating walk (getEloRatings(), backend/db.js) by the time this
+// resolves. `_snap` is captured HERE, synchronously, rather than trusted to
+// awardRecurringBadge()'s own internal `game.lastTurnSnapshot` read — same
+// "capture before the async gap, pass it through explicitly" precaution
+// Grudge Match's own async badge check already takes, since by the time
+// this network round-trip resolves the live game state may have moved on.
+function checkEloOnMatchWin(w, opp){
+  if(!opp || game.practice) return;
+  const _snap = game.lastTurnSnapshot;
+  DB._queue(()=>Backend.get(`/api/players/elo?name=${encodeURIComponent(w.name)}`)).then(data=>{
+    if(!data) return;
+    // Rating delta banner — every rated win gets one, not just a badge-worthy
+    // one. #elo-delta-banner is a placeholder finishUnit() renders synchronously
+    // on the GAME OVER screen and patches in once this resolves, the same
+    // "celebrate now, patch in extra detail once confirmed" pattern
+    // #challenge-pb-banner already uses.
+    const lcg = data.lastCompetitiveGame;
+    if(lcg && lcg.winnerName === w.name){
+      const banner = document.getElementById('elo-delta-banner');
+      if(banner){
+        const d = lcg.winnerDelta;
+        banner.innerHTML = `<p style="color:var(--gold);font-weight:700;font-size:13px;margin:0 0 14px">📈 Household rating: ${data.rating} (${d>=0?'+':''}${d})</p>`;
+      }
+    }
+    // 👑 Top of the House: reaching #1 among rated (5+ game) players. Once-badge —
+    // celebrates only the first time it happens, mirroring Grudge Match/Tournament
+    // Champion's own manual once:true + explicit trackBadgeForUndo pattern rather
+    // than awardRecurringBadge()'s internal (by-now-possibly-stale) snapshot read.
+    if(data.qualifies && data.rank === 1){
+      Backend.send('POST','/api/badges/award', { player:w.name, badgeId:'topofthehouse', once:true }).then(r=>{
+        if(r && r.newlyEarned){
+          trackBadgeForUndo(_snap, w.name, 'topofthehouse');
+          queueBadge('topofthehouse', w.name, _snap, 'First time!');
+          fireMomentCard('topofthehouse', { icon:'👑', headline:'TOP OF THE HOUSE', player:w.name, statLine:`Household rating ${data.rating}` });
+        }
+      }).catch(()=>{});
+    }
+    // 🗡️ Upset: won this rated match despite a 150+ pre-game rating deficit.
+    // Recurring — mirrors The Rematch's own async awardRecurringBadge() call.
+    if(lcg && lcg.winnerName === w.name && lcg.isUpset){
+      queueBadge('upset', w.name, _snap);
+      awardRecurringBadge(w.name, 'upset', 'upset', { icon:'🗡️', headline:'UPSET!', player:w.name, statLine:'Beat a much higher-rated opponent' });
+    }
+  }).catch(()=>{});
+}
 function onLegWonCricket(wi){
   const w = game.players[wi];
   const opp = game.players.length===2 ? game.players.find(p=>p!==w) : null;
@@ -8893,6 +9038,7 @@ function onLegWonCricket(wi){
       DB.recordEvent('set_end', game.setNo, null);
       DB.recordEvent('game_end', null, null);
       DB.completeGame(w.name);
+      checkEloOnMatchWin(w, opp);
       // 🔪 Stone Cold (docs/archive/cutthroat-cricket-roadmap.md): won a 3+ player cut-throat
       // GAME having received zero points across every leg of it — checked here (not
       // per-leg) since "the game" is what the badge is scoped to; w.gamePointsReceived
@@ -9090,6 +9236,11 @@ function onLegWonBaseball(wi){
       DB.recordEvent('set_end', game.setNo, null);
       DB.recordEvent('game_end', null, null);
       DB.completeGame(w.name);
+      // checkEloOnMatchWin() itself already guards on !game.practice — this
+      // function's own gate (unlike X01/Cricket's) deliberately isn't
+      // !game.practice && ... (see BUG-22 above), so opp is derived fresh
+      // here rather than assumed from an outer H2H-only condition.
+      checkEloOnMatchWin(w, game.players.length===2 ? game.players.find(p=>p!==w) : null);
       game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
       // matchWinStatLine() is fully generic over legsWon/setsWon/category —
       // reused as-is, no Baseball-specific version needed.
@@ -9319,6 +9470,10 @@ function onLegWon(wi){
       DB.recordEvent('game_end', null, null);
       DB.completeGame(w.name);   // api marks the game complete in the database
       persist();
+      // checkEloOnMatchWin() itself guards on game.practice, so a ghost race
+      // (practice=true, reaches this branch via the || game.hasGhost above)
+      // is correctly excluded even though it has a real `opp` object.
+      checkEloOnMatchWin(w, opp);
       if(_setDecider || _matchDecider){
         queueBadge('nervesofsteel', w.name);
         awardRecurringBadge(w.name, 'nervesofsteel', 'nervesofsteel', { icon:'🧊', headline:'NERVES OF STEEL', player:w.name, statLine: _matchDecider ? 'Won the deciding set' : 'Won the deciding leg' });
@@ -9598,6 +9753,7 @@ function finishUnit(kind, winner){
     oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
       <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">GAME OVER</div>
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${escapeHtml(winner)} takes the match. Stats saved.</p>
+      <div id="elo-delta-banner"></div>
       <div class="btn-row" style="justify-content:center">
         ${nextBtn}
         ${matchShareBtn}
