@@ -52,7 +52,7 @@ Others
 - Integrate with Homeassistant
 - Automated scoring with cameras and machine learning — full design in docs/camera-scoring-roadmap.md
 - Settings page - set default player
-- Saved games / pause & resume (save an in-progress H2H or solo-practice game, come back later, resume exactly where it left off; resume-or-abandon prompt when the same matchup starts a new game; abandoning keeps the stats) — full design in docs/saved-games-roadmap.md
+- Saved games / pause & resume (save an in-progress H2H or solo-practice game, come back later, resume exactly where it left off; resume-or-abandon prompt when the same matchup starts a new game; abandoning keeps the stats) — done, see docs/archive/saved-games-roadmap.md
 - Tournament mode (bracket play, single elimination, tournament-specific badges, Player Profile tournament stats) — done, see docs/tournament-mode-roadmap.md; double-elimination still open
 - iOS/Android app (hybrid webview client) — full design in docs/mobile-app-roadmap.md
 - Online multiplayer (P2P scoring + live video verification) — full design in docs/online-multiplayer-roadmap.md

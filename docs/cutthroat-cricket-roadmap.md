@@ -37,7 +37,7 @@ different (and nastier) game, which is exactly why people ask for it.
   `turns.scored` stays **the points this visit generated** (attributed to
   the shooter's row), and each player's *received* total is derived at read
   time by replaying visits — which the client already does live and the
-  saved-games replay (`docs/saved-games-roadmap.md`) will do on resume.
+  saved-games replay (`docs/archive/saved-games-roadmap.md`) will do on resume.
   Confirm during implementation that no existing Cricket stat silently
   assumes `SUM(scored)` = "points benefiting the shooter"; MPR and
   marks-based stats are unaffected either way, points-based ones need a

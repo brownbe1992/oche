@@ -35,7 +35,7 @@ in one bad visit, which keeps every player in it until the end.
   querying, the same column-repurposing precedent Doubles Practice and
   guided Around the Clock already set (documented in REFERENCE.md's `bust`
   row). Halves round **up** (odd 25 → 13), flagged below as tunable.
-- **Saved games** (`docs/saved-games-roadmap.md`): running totals replay
+- **Saved games** (`docs/archive/saved-games-roadmap.md`): running totals replay
   deterministically from `scored`/`bust` per the rule above — position is a
   pure function of turns; state it explicitly in the implementation.
 - **Consistency guard**: like Baseball/Shanghai (SEC-25 precedent), the

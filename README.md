@@ -22,6 +22,7 @@ You enter every dart individually — multiplier first, then the number — and 
   - [Home](#home)
   - [New Game](#new-game)
   - [Scoring](#scoring)
+  - [Saved Games](#saved-games)
   - [Achievements & Badges](#achievements--badges)
   - [Daily Challenge](#daily-challenge)
   - [Shareable Moments](#shareable-moments)
@@ -250,6 +251,34 @@ choice, no checkout hints, and no bust concept:
   the leg. Closing everything without the lead doesn't end the leg — you keep
   throwing (and can still score against anyone still open on a number you've
   closed) until you take the lead or an opponent closes out ahead of you.
+
+---
+
+### Saved Games
+
+Playing someone and need to stop mid-match? Tap **⏸ Save for later** (it lives
+next to **End game**, in both Pad and Dartboard input modes) to pause an
+in-progress X01, Cricket, Baseball, or guided Around the Clock/World game —
+H2H or solo practice, tournament matches and league fixtures included. Any
+staged-but-not-yet-entered darts of the current turn are discarded (a confirm
+dialog says so); everything already recorded is kept. The app returns to the
+New Game screen, free to start other games while the paused one waits — at
+most one saved game per exact matchup and game type.
+
+Starting a New Game whose players and game type match a saved game prompts
+**Resume**, **Abandon & start fresh**, or **Cancel**. A **Saved games**
+section also appears at the top of the New Game screen itself whenever at
+least one exists, listing each with its players, a one-line position summary
+(legs/sets or round progress), and its own Resume/Abandon buttons — for
+finding a forgotten save without recreating the exact matchup. Resuming
+rebuilds the match to *exactly* where it left off — same leg, same scores,
+same thrower — by replaying every recorded dart back through the same scoring
+engine that recorded it live, not from a saved snapshot. Abandoning a saved
+game keeps its recorded stats (same as quitting a live game early); abandoning
+a tournament match instead routes to the bracket's walkover control, since a
+bracket match can't just be left dangling. See
+[REFERENCE.md §23](REFERENCE.md#23-saved-games--pause--resume) for full
+mechanics.
 
 ---
 
@@ -1206,6 +1235,24 @@ POST /api/games/:id/events                  Record a timeline event
                                                       "set_start"|"set_end"|
                                                       "game_start"|"game_end",
                                                setNo, legNo }
+```
+
+### Saved Games / Pause & Resume
+
+See [REFERENCE.md §23](REFERENCE.md#23-saved-games--pause--resume) for full
+mechanics (savable game types, the replay-rebuild engine, the divergence
+guard, tournament walkover routing on abandon).
+
+```
+GET    /api/saved-games                     Saved-game list + one-line position
+                                             summaries (public)
+POST   /api/games/:id/save                  Pause an in-progress game for later
+GET    /api/games/:id/resume-state          The full replay payload -- ALSO deletes
+                                             the saved_games row (this is the two-
+                                             device divergence guard, not an oversight)
+DELETE /api/saved-games/:id                 Abandon a saved game (:id is the game id,
+                                             not the saved_games row's own id) --
+                                             recorded stats are kept either way
 ```
 
 ### Dart Builder / Loadouts

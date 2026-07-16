@@ -46,6 +46,8 @@ describe('getFullDatabaseExport (docs/archive/data-export-roadmap.md)', () => {
       'leagues', 'leaguePlayers', 'leagueFixtures',
       // docs/archive/player-merge-roadmap.md: merged-away-uuid aliases
       'playerUuidAliases',
+      // docs/archive/saved-games-roadmap.md: same standing rule applied to saved-game state
+      'savedGames',
     ].sort());
 
     const alice = dump.players.find(p => p.name === 'export_alice');

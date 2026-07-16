@@ -22,7 +22,9 @@ const crypto = require('crypto');
 const auth = require('./auth.js');
 const netguard = require('./netguard.js');
 const backupLib = require('./backup-lib.js');
-const { checkoutHint, dartLabel } = require('../frontend/scoring.js');
+const { checkoutHint, dartLabel,
+  rebuildX01State, rebuildCricketState, rebuildBaseballState,
+  rebuildAroundTheClockState, rebuildAroundTheWorldState } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -329,6 +331,23 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_league_fixtures_league  ON league_fixtures(league_id);
   CREATE INDEX IF NOT EXISTS idx_league_fixtures_game    ON league_fixtures(game_id);
   CREATE INDEX IF NOT EXISTS idx_league_fixtures_players ON league_fixtures(player1_id, player2_id);
+
+  -- Saved games / pause & resume (docs/archive/saved-games-roadmap.md). "This game is
+  -- paused" is the only new fact — per CLAUDE.md's "context table, never a
+  -- boolean on games" convention, same tournament_matches/league_fixtures shape,
+  -- just with a UNIQUE + CASCADE game_id instead of a nullable + SET NULL one:
+  -- a saved game always points at exactly one real games row, and deleting that
+  -- row (a total wipe, a stats reset) should take the pause state with it rather
+  -- than leaving a dangling saved_games row. Everything needed to actually resume
+  -- (scores, marks, innings, legs/sets, whose turn) is DERIVED from the turns/
+  -- darts already recorded live — no snapshot blob, no schema-versioned client
+  -- state to drift; see getResumeState()'s own comment for the replay-not-
+  -- snapshot rebuild.
+  CREATE TABLE IF NOT EXISTS saved_games (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id   INTEGER NOT NULL UNIQUE REFERENCES games(id) ON DELETE CASCADE,
+    saved_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 
   -- Dart Builder / loadout customization (docs/archive/dart-builder-roadmap.md). Not a new
   -- column on games/players — a player's owned catalog of parts, each row personal
@@ -1060,6 +1079,211 @@ function completeGame(gameId, winnerName) {
   q.completeGame.run(w ? w.id : null, Number(gameId));
   _fireGameLifecycleHooks('completed', { gameId: Number(gameId), winnerName: w ? w.name : null });
   return { ok: true };
+}
+
+/* ---------- Saved games / pause & resume (docs/archive/saved-games-roadmap.md) ----------
+   "This game is paused" is the only new fact (saved_games.game_id) — everything
+   needed to actually resume is DERIVED from the turns/darts already recorded
+   live, via the pure rebuild functions in frontend/scoring.js (required in at
+   the top of this file) — "replay, not snapshot," see that section's own header
+   comment. Savable game types are enforced here, server-side, never trusting
+   the client's own eligibility check (per the roadmap doc's security section).
+   Not savable: Daily Challenge, Ghost mode, Doubles Practice, Just Chuckin' It,
+   Checkout Trainer — each has its own reason (see the roadmap doc's "Scope"
+   section), not an oversight.
+   Standing-rule follow-through: saved_games needs NO extra code in
+   wipeAllData()/resetStats() — game_id is ON DELETE CASCADE, so deleting the
+   games it wipes already cascades away the pause state for free. It's also
+   deliberately NOT in getPlayerExport() (a pause is local workflow state, not
+   portable history — an imported incomplete game just arrives unsaved) but IS
+   in getFullDatabaseExport() below (ordinary "your data" for a full-server
+   dump). */
+const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world'];
+
+function _savedGameRow(gameId) {
+  return db.prepare('SELECT * FROM saved_games WHERE game_id = ?').get(Number(gameId));
+}
+
+// Participant NAMES, sorted case-insensitively — the canonical, order-
+// independent form the "one saved game per matchup" check and the merge-
+// collision check both compare against ("Ben & Alaina" and "Alaina & Ben" are
+// the same matchup).
+function _participantNames(gameId) {
+  return db.prepare(`
+    SELECT p.name FROM game_players gp JOIN players p ON p.id = gp.player_id
+    WHERE gp.game_id = ? ORDER BY p.name COLLATE NOCASE
+  `).all(Number(gameId)).map(r => r.name);
+}
+
+// One saved game per (participant set, game type) [decided 2026-07] — returns
+// the existing saved game's id for this exact matchup+type, or null. Used both
+// by saveGame() (reject a second save into an occupied slot) and by the New
+// Game resume prompt (client-side match against getSavedGames()' own list —
+// "the check reuses the same endpoint the list below uses," per the roadmap
+// doc — so this function itself is only ever called server-side).
+function findSavedGameForParticipants(names, gameType) {
+  const target = names.slice().sort((a, b) => a.localeCompare(b));
+  const rows = db.prepare(`
+    SELECT sg.game_id AS gameId FROM saved_games sg JOIN games g ON g.id = sg.game_id
+    WHERE g.game_type = ?
+  `).all(gameType);
+  for (const row of rows) {
+    const existing = _participantNames(row.gameId);
+    if (existing.length === target.length && existing.every((n, i) => n.toLowerCase() === target[i].toLowerCase())) {
+      return row.gameId;
+    }
+  }
+  return null;
+}
+
+function saveGame(gameId) {
+  const game = db.prepare('SELECT id, game_type, completed_at FROM games WHERE id = ?').get(Number(gameId));
+  if (!game) throw httpError(404, 'Game not found');
+  if (game.completed_at != null) throw httpError(409, 'This game is already complete and cannot be saved');
+  if (!SAVABLE_GAME_TYPES.includes(game.game_type)) throw httpError(400, `${game.game_type} games can't be saved for later`);
+  // Idempotent-safe: saving an already-saved game id is a no-op 200 (double-tap
+  // protection), not an error — see the roadmap doc's "Saving" section.
+  if (_savedGameRow(game.id)) return { ok: true, alreadySaved: true };
+  const names = _participantNames(game.id);
+  const existingId = findSavedGameForParticipants(names, game.game_type);
+  if (existingId != null) {
+    throw httpError(409, 'A saved game already exists for these players and this game type — abandon it first.');
+  }
+  db.prepare('INSERT INTO saved_games (game_id) VALUES (?)').run(game.id);
+  return { ok: true, alreadySaved: false };
+}
+
+function abandonSavedGame(gameId) {
+  const info = db.prepare('DELETE FROM saved_games WHERE game_id = ?').run(Number(gameId));
+  if (info.changes === 0) throw httpError(404, 'No saved game found for that game id');
+  return { ok: true };
+}
+
+// Shared by getSavedGames() (the list's one-line position summary) and
+// getResumeState() (the real resume payload) — same participant/turn query,
+// same {playerIndex,setNo,legNo,darts} shape the pure rebuild functions in
+// frontend/scoring.js expect. playerIndex is recovered from game_players'
+// insertion order (an implicit SQLite rowid — no other signal records
+// "submission order" once players() no longer preserves array position),
+// which is the same order createGame() itself inserted them in.
+function _resumeStateTurns(gameId) {
+  const participants = db.prepare(`
+    SELECT p.id AS playerId, p.name AS name, gp.out_mode AS outMode
+    FROM game_players gp JOIN players p ON p.id = gp.player_id
+    WHERE gp.game_id = ? ORDER BY gp.rowid
+  `).all(Number(gameId));
+  const idToIndex = new Map(participants.map((p, i) => [p.playerId, i]));
+  const dartStmt = db.prepare('SELECT sector, multiplier AS mult FROM darts WHERE turn_id = ? ORDER BY dart_no');
+  const turns = db.prepare(`
+    SELECT t.id, t.player_id AS playerId, t.set_no AS setNo, t.leg_no AS legNo
+    FROM turns t WHERE t.game_id = ? ORDER BY t.id
+  `).all(Number(gameId)).map(t => ({
+    playerIndex: idToIndex.get(t.playerId), setNo: t.setNo, legNo: t.legNo,
+    darts: dartStmt.all(t.id).map(d => ({ sector: d.sector, mult: d.mult })),
+  }));
+  return { participants, turns };
+}
+
+// Reuses the exact same pure rebuild functions the real resume path uses
+// (frontend/scoring.js) to compute the Saved Games list's one-line position
+// summary — rather than a second, parallel "roughly where things stand"
+// implementation that could silently drift from what resuming actually
+// produces. Returns null for a game type with no meaningful "position" beyond
+// the raw turn count (none currently — every SAVABLE_GAME_TYPES entry has one).
+function _savedGamePosition(game, participants, turns) {
+  const names = participants.map(p => p.name);
+  const legsPerSet = game.legs_per_set;
+  if (game.game_type === 'x01') {
+    const r = rebuildX01State({ names, outModes: participants.map(p => p.outMode), startScore: Number(game.category) || 501, practice: !!game.practice, legsPerSet, turns });
+    return { setNo: r.setNo, legNo: r.legNo, players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, score: p.score })) };
+  }
+  if (game.game_type === 'cricket') {
+    const config = game.config ? JSON.parse(game.config) : null;
+    const r = rebuildCricketState({ names, config, practice: !!game.practice, legsPerSet, turns });
+    return { setNo: r.setNo, legNo: r.legNo, players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, points: p.points })) };
+  }
+  if (game.game_type === 'baseball') {
+    const r = rebuildBaseballState({ names, legsPerSet, turns });
+    return { setNo: r.setNo, legNo: r.legNo, baseballInning: r.baseballInning, players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, totalRuns: p.totalRuns })) };
+  }
+  if (game.game_type === 'around_the_clock') {
+    const r = rebuildAroundTheClockState({ turns });
+    return { legNo: r.legNo, hit: r.hitSet.size, total: 20 };
+  }
+  if (game.game_type === 'around_the_world') {
+    const r = rebuildAroundTheWorldState({ turns });
+    return { sessionDarts: r.sessionDarts };
+  }
+  return null;
+}
+
+// Everything the New Game resume prompt and the Saved Games list both need —
+// one row per saved game, with enough position/opponent context for a
+// one-line summary ("Ben & Alaina, 501, Ben leads 2-1, saved July 3rd")
+// without a second round-trip per row.
+function getSavedGames() {
+  const rows = db.prepare(`
+    SELECT sg.id AS savedGameId, sg.game_id AS gameId, sg.saved_at AS savedAt,
+           g.category AS category, g.game_type AS gameType, g.legs_per_set AS legsPerSet,
+           g.sets_per_game AS setsPerGame, g.practice AS practice, g.config AS config
+    FROM saved_games sg JOIN games g ON g.id = sg.game_id
+    ORDER BY sg.saved_at DESC
+  `).all();
+  return rows.map(r => {
+    const { participants, turns } = _resumeStateTurns(r.gameId);
+    const gameRow = { game_type: r.gameType, category: r.category, practice: r.practice, legs_per_set: r.legsPerSet, config: r.config };
+    // Tournament linkage (docs/archive/saved-games-roadmap.md "Abandoning"): the client
+    // needs to know this UP FRONT, before the admin taps Abandon, so it can route
+    // to the bracket/walkover control instead of a plain delete — a tournament
+    // match can't just be orphaned the way a casual game can.
+    const tm = db.prepare('SELECT id FROM tournament_matches WHERE game_id = ?').get(r.gameId);
+    return {
+      savedGameId: r.savedGameId, gameId: r.gameId, savedAt: r.savedAt,
+      category: r.category, gameType: r.gameType, practice: !!r.practice,
+      players: participants.map(p => p.name),
+      position: _savedGamePosition(gameRow, participants, turns),
+      tournamentMatchId: tm ? tm.id : null,
+    };
+  });
+}
+
+// The real resume payload — GET /api/games/:id/resume-state (server.js).
+// Deliberately mutates (deletes the saved_games row) as part of this same
+// "read": the divergence guard (docs/archive/saved-games-roadmap.md "two devices could
+// race") re-verifies the game is still genuinely saved right before consuming
+// the pause, so a second device racing the same resume gets a clean 409
+// instead of silently double-driving one game from two controllers — doing
+// this as a separate mutation call would let a network hiccup between the two
+// leave a phantom saved_games row (or a resumed game that still LOOKS saved).
+// "The game is simply live again" (the roadmap doc's own framing) — pausing
+// again just re-saves it.
+function getResumeState(gameId) {
+  const game = db.prepare('SELECT id, category, game_type, config, legs_per_set, sets_per_game, practice, completed_at FROM games WHERE id = ?').get(Number(gameId));
+  if (!game) throw httpError(404, 'Game not found');
+  if (game.completed_at != null) throw httpError(409, 'This game is already complete');
+  if (!_savedGameRow(game.id)) {
+    throw httpError(409, 'This game is not currently saved — it may already have been resumed or abandoned elsewhere');
+  }
+  db.prepare('DELETE FROM saved_games WHERE game_id = ?').run(game.id);
+
+  const { participants, turns } = _resumeStateTurns(game.id);
+  const tm = db.prepare('SELECT id FROM tournament_matches WHERE game_id = ?').get(game.id);
+  const fx = db.prepare('SELECT id FROM league_fixtures WHERE game_id = ?').get(game.id);
+  return {
+    gameId: game.id, category: game.category, gameType: game.game_type,
+    config: game.config ? JSON.parse(game.config) : null,
+    legsPerSet: game.legs_per_set, setsPerGame: game.sets_per_game, practice: !!game.practice,
+    players: participants.map(p => ({ name: p.name, outMode: p.outMode })),
+    turns,
+    // Tournament/league-fixture linkage restore (docs/archive/saved-games-roadmap.md
+    // "Tournament matches and league fixture games... are savable [decided
+    // 2026-07]") — the client threads these straight back onto game.tournamentMatchId/
+    // game.leagueFixtureId exactly as _reallyBeginTournamentMatch()/startGame()
+    // set them the first time, so completion advances the bracket/fulfills the
+    // fixture exactly as if never paused.
+    tournamentMatchId: tm ? tm.id : null,
+    leagueFixtureId: fx ? fx.id : null,
+  };
 }
 
 /* ---------- daily challenge (docs/daily-challenge-roadmap.md) ---------- */
@@ -3875,6 +4099,9 @@ function resetStats() {
   // CASCADE, so wiping every game just reverts every fixture back to "pending"
   // (correct: the game that would have fulfilled it no longer exists) rather than
   // leaving a stranded non-NULL game_id or needing the row itself removed.
+  // docs/archive/saved-games-roadmap.md: saved_games needs no explicit delete either --
+  // its game_id IS CASCADE (unlike league_fixtures' SET NULL above), so wiping
+  // every game takes any pause state with it for free, same as tournament_matches.
   db.exec('DELETE FROM turns; DELETE FROM game_players; DELETE FROM games; DELETE FROM tournaments;');
   return { ok: true };
 }
@@ -3891,6 +4118,9 @@ function resetStats() {
 // (player_id ON DELETE CASCADE onto the surviving player's row).
 // ghost_races is covered twice over — player_id and both game FKs are all
 // ON DELETE CASCADE, so either the player wipe or the game wipe below clears it.
+// docs/archive/saved-games-roadmap.md: saved_games is covered twice over too — deleting
+// all players cascades away their games (and with them, CASCADE, saved_games),
+// and the explicit games delete below would clear it independently either way.
 // docs/league-mode-roadmap.md: leagues needs the same explicit delete tournaments
 // got from BUG-7 — wiping all players cascades away league_players (player_id ON
 // DELETE CASCADE), but nothing references the leagues PARENT row, so without this
@@ -3953,6 +4183,11 @@ function getFullDatabaseExport() {
     // (identity mappings, no secrets) and materially affect how future per-player
     // imports resolve, so they belong in "take your data with you" too.
     playerUuidAliases: db.prepare('SELECT * FROM player_uuid_aliases').all(),
+    // docs/archive/saved-games-roadmap.md: same standing rule — a pause is ordinary local
+    // workflow state (which games are currently sitting mid-match, no secrets),
+    // so it belongs in the full-database "take your data with you" dump. Deliberately
+    // NOT in the per-player export below — see this table's own schema comment.
+    savedGames: db.prepare('SELECT * FROM saved_games').all(),
   };
 }
 
@@ -4375,7 +4610,43 @@ function _mergeBlockers(sourceId, targetId) {
       JOIN daily_challenge_attempts t ON t.challenge_date = s.challenge_date AND t.player_id = ?
      WHERE s.player_id = ? AND s.completed = t.completed
      ORDER BY s.challenge_date`).all(targetId, sourceId).map(r => r.date);
-  return { sharedGames, sharedTournaments, sharedLeagues, ambiguousChallengeDates };
+  // docs/archive/saved-games-roadmap.md "Interactions with existing features": a saved
+  // game between source and target is already a shared game (blocked above).
+  // A saved game against a THIRD player can still collide after the merge —
+  // if target independently has their OWN saved game against that same third
+  // player (and game type), reassigning source's saved game onto target would
+  // leave target with two saved games in one (participants, game type) slot,
+  // something normal play can never produce (saveGame() enforces "one per
+  // slot" at save time). Blocked, consistent with every other shared-row case.
+  const savedGameCollisions = _savedGameCollisions(sourceId, targetId);
+  return { sharedGames, sharedTournaments, sharedLeagues, ambiguousChallengeDates, savedGameCollisions };
+}
+
+function _savedGameCollisions(sourceId, targetId) {
+  const savedFor = (playerId) => db.prepare(`
+    SELECT sg.game_id AS gameId, g.game_type AS gameType FROM saved_games sg
+    JOIN games g ON g.id = sg.game_id
+    WHERE EXISTS (SELECT 1 FROM game_players WHERE game_id = g.id AND player_id = ?)
+  `).all(playerId);
+  const sourceSaved = savedFor(sourceId);
+  if (!sourceSaved.length) return [];
+  const targetSaved = savedFor(targetId);
+  if (!targetSaved.length) return [];
+  const idsFor = (gameId) => new Set(db.prepare('SELECT player_id FROM game_players WHERE game_id = ?').all(gameId).map(r => r.player_id));
+  const collisions = [];
+  for (const s of sourceSaved) {
+    // The source's saved game's participant set AFTER the merge — source's own
+    // id becomes target's.
+    const afterIds = new Set([...idsFor(s.gameId)].map(id => id === sourceId ? targetId : id));
+    for (const t of targetSaved) {
+      if (t.gameType !== s.gameType) continue;
+      const targetIds = idsFor(t.gameId);
+      if (afterIds.size === targetIds.size && [...afterIds].every(id => targetIds.has(id))) {
+        collisions.push({ sourceGameId: s.gameId, targetGameId: t.gameId, gameType: s.gameType });
+      }
+    }
+  }
+  return collisions;
 }
 
 function _resolveMergePlayers(sourceName, targetName) {
@@ -4421,7 +4692,7 @@ function getMergePreview(sourceName, targetName) {
        ORDER BY s.challenge_date`).all(target.id, source.id).map(r => r.date),
   };
   const blocked = !!(blockers.sharedGames.length || blockers.sharedTournaments.length
-    || blockers.sharedLeagues.length || blockers.ambiguousChallengeDates.length);
+    || blockers.sharedLeagues.length || blockers.ambiguousChallengeDates.length || blockers.savedGameCollisions.length);
   return { ok: !blocked, blocked,
     source: { name: source.name, uuid: source.uuid },
     target: { name: target.name, uuid: target.uuid },
@@ -4432,12 +4703,13 @@ function mergePlayers(sourceName, targetName) {
   const { source, target } = _resolveMergePlayers(sourceName, targetName);
   const blockers = _mergeBlockers(source.id, target.id);
   if (blockers.sharedGames.length || blockers.sharedTournaments.length
-      || blockers.sharedLeagues.length || blockers.ambiguousChallengeDates.length) {
+      || blockers.sharedLeagues.length || blockers.ambiguousChallengeDates.length || blockers.savedGameCollisions.length) {
     const parts = [];
     if (blockers.sharedGames.length) parts.push(`${blockers.sharedGames.length} shared game(s)`);
     if (blockers.sharedTournaments.length) parts.push(`${blockers.sharedTournaments.length} shared tournament(s)`);
     if (blockers.sharedLeagues.length) parts.push(`${blockers.sharedLeagues.length} shared league(s)`);
     if (blockers.ambiguousChallengeDates.length) parts.push(`${blockers.ambiguousChallengeDates.length} unresolvable same-day Daily Challenge attempt(s)`);
+    if (blockers.savedGameCollisions.length) parts.push(`${blockers.savedGameCollisions.length} saved-game slot collision(s)`);
     throw httpError(400, `Merge blocked: ${parts.join(', ')} — resolve these by hand first (see the merge preview for the full list)`);
   }
 
@@ -5307,6 +5579,20 @@ registerDeletePlayerGuard((player) => {
   return row ? `${player.name} is still active in the in-progress tournament "${row.name}" — eliminate them or finish the tournament before deleting.` : null;
 });
 
+// docs/archive/saved-games-roadmap.md "Interactions with existing features": block
+// deleting a player who's in a currently-saved game — resuming it would try to
+// rebuild a match that includes a player who no longer exists. Cheaper and
+// louder than an auto-abandon side effect buried inside a delete; the admin
+// abandons the saved game first (its recorded stats are kept either way).
+registerDeletePlayerGuard((player) => {
+  const row = db.prepare(`
+    SELECT g.category AS category FROM saved_games sg
+    JOIN games g ON g.id = sg.game_id
+    WHERE EXISTS (SELECT 1 FROM game_players WHERE game_id = g.id AND player_id = ?)
+  `).get(player.id);
+  return row ? `${player.name} is in a saved ${row.category} game — abandon it (or resume and finish it) before deleting.` : null;
+});
+
 /* ---------- league mode (docs/league-mode-roadmap.md, X01 or Cricket) ----------
    A season over which regular casual H2H matches accumulate into a standings table —
    deliberately lighter-weight than tournament mode: any two enrolled players can play
@@ -5985,5 +6271,6 @@ module.exports = {
   createLoadout, listLoadouts, getLoadout, updateLoadout, deleteLoadout, duplicateLoadout,
   setDefaultLoadout, getDefaultLoadout, getLoadoutStats,
   recordGhostRace, getGhostRaceRecord,
+  saveGame, abandonSavedGame, getSavedGames, getResumeState, findSavedGameForParticipants,
   _db: db,
 };

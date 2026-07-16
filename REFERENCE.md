@@ -42,8 +42,10 @@ convention in `CLAUDE.md`.
 - [18. League Mode](#18-league-mode)
 - [19. Checkout Trainer](#19-checkout-trainer)
 - [19a. "Drill this checkout" deep link](#19a-drill-this-checkout-deep-link)
-- [20. Known Limitations & Open Gaps](#20-known-limitations--open-gaps)
-- [21. Troubleshooting](#21-troubleshooting)
+- [20. New Game Screen (3-Step Wizard)](#20-new-game-screen-3-step-wizard)
+- [21. Known Limitations & Open Gaps](#21-known-limitations--open-gaps)
+- [22. Troubleshooting](#22-troubleshooting)
+- [23. Saved Games / Pause & Resume](#23-saved-games--pause--resume)
 
 ---
 
@@ -4317,3 +4319,231 @@ the resolved host is blocked (loopback/link-local always; private-range only if
 mechanics — default thresholds are 5 (admin) / 10 (PIN) failed attempts, 5-minute
 lockout, configurable in Settings. The `RETURNING`-based increment means the
 count is always accurate even under concurrent attempts.
+
+---
+
+## 23. Saved Games / Pause & Resume
+
+`docs/archive/saved-games-roadmap.md`. Pause an in-progress game and come back to it
+later — the New Game screen offers **Resume** or **Abandon** for a matching
+in-progress match instead of forcing it to be finished or thrown away.
+Backend: `backend/db.js`'s "Saved games" section. Frontend:
+`frontend/index.html`'s `saveCurrentGame()`/`resumeGame()`/Saved Games list
+block. Pure replay-rebuild math: `frontend/scoring.js`'s
+`rebuildX01State()`/`rebuildCricketState()`/`rebuildBaseballState()`/
+`rebuildAroundTheClockState()`/`rebuildAroundTheWorldState()`.
+
+### Scope — what's savable
+
+**Any H2H game** (any participant count the mode allows) or **solo practice
+game**, X01/Cricket/Baseball/guided Around the Clock/guided Around the World
+(`SAVABLE_GAME_TYPES`, defined identically in both `backend/db.js` and
+`frontend/index.html` — the server never trusts the client's own copy).
+**Tournament matches and league fixture games are savable** — normal games
+under the hood, so nothing extra is needed beyond restoring their
+`tournamentMatchId`/`leagueFixtureId` linkage on resume (see below).
+**Not savable**: Daily Challenge (one attempt per calendar day is the whole
+format), Ghost mode (the opponent is a replay with in-memory script position),
+Doubles Practice/Just Chuckin' It/Checkout Trainer (open-ended solo drills
+with no meaningful "position" — ending and starting fresh loses nothing).
+
+### Schema — a context table, never a boolean on `games`
+
+Per `CLAUDE.md`'s standing convention (`tournament_matches.game_id` /
+`league_fixtures.game_id` precedent), except `game_id` here is `UNIQUE` and
+`ON DELETE CASCADE` rather than nullable/`SET NULL` — a saved game always
+points at exactly one real `games` row, and deleting that row (a total wipe,
+a stats reset) should take the pause state with it:
+
+```sql
+CREATE TABLE saved_games (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  game_id   INTEGER NOT NULL UNIQUE REFERENCES games(id) ON DELETE CASCADE,
+  saved_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+That's the whole table — "this game is paused" is the only new fact.
+Everything needed to resume is **derived from the turns/darts already
+recorded live** (see "Resuming" below) — no snapshot blob, no schema-versioned
+client state to drift. Wired into `getFullDatabaseExport()` (ordinary "your
+data," no secrets); needs **no extra code** in `wipeAllData()`/`resetStats()`
+— `game_id ON DELETE CASCADE` means wiping the games it touches already
+cascades away any pause state for free, same as `tournament_matches`.
+Deliberately **NOT** in the per-player portable export (`getPlayerExport()`)
+— a pause is local workflow state, not portable history; an imported
+incomplete game simply arrives unsaved, its stats intact.
+
+### One saved game per matchup
+
+At most one saved game per **(exact participant set, game type)**
+(`findSavedGameForParticipants()`, order-independent — compares sorted,
+case-insensitive name lists). `saveGame(gameId)` rejects (409) a second save
+into an occupied slot rather than replacing or stacking; saving an
+already-saved game id is an idempotent no-op (`{ok:true, alreadySaved:true}`,
+double-tap protection).
+
+### Saving
+
+**"⏸ Save for later"** — icon + text, in both the persistent game-screen
+header and the bottom button row (outside `.oche`'s per-turn re-rendered
+content, so it survives the "leg won — Next leg?" transition screen too,
+which only replaces `.oche`'s own innerHTML). Visibility is driven by
+`updateSaveButtonVisibility()`, called from `renderGameShell()` (every new
+game/leg) and from `finishUnit()`'s game-complete branch (`game.done`).
+`saveCurrentGame()` warns if darts are staged in the current, uncommitted
+visit ("The N darts of the current turn haven't been entered and won't be
+kept" — **staged darts are always discarded**, never stored; only committed
+turns exist server-side), then `POST /api/games/:id/save` → `saveGame()`
+(`backend/db.js`) re-validates eligibility server-side (game exists,
+`completed_at IS NULL`, `game_type` is in `SAVABLE_GAME_TYPES`) before
+inserting the row — never trusting the client's own check. On success, the
+client clears `game`, pushes an inactive `pushLive()` snapshot (so `/display`
+stops showing the paused match as live — same pattern `askEndGame()` uses),
+and returns to the New Game screen.
+
+### Where saved games surface
+
+1. **The resume prompt** — `startGame()` checks, at Start time (after the
+   final participant set/game type are known, not buried in step 1) via
+   `findMatchingSavedGame()` against the same `GET /api/saved-games` list the
+   list below renders from (no bespoke lookup). A match interrupts with a
+   real 3-action modal (`showResumeOrAbandonPrompt()`): **Resume**,
+   **Abandon & start fresh**, or **Cancel**. Skipped for Ghost/Daily
+   Challenge (`setup.mode`), even though their `gameType` is `'x01'` — neither
+   mode is itself savable.
+2. **The Saved Games list** (`refreshSavedGamesList()`) — a New Game step-1
+   section, above the player slots, shown only when at least one exists.
+   Each row: players, category, a one-line position summary
+   (`savedGamePositionLabel()`), saved date, and **Resume**/**Abandon**
+   buttons — real buttons/headings, not click-anywhere divs.
+
+Both surfaces read `getSavedGames()` (`backend/db.js`): one row per saved
+game with a **position summary computed via the exact same pure rebuild
+functions the real resume uses** (`_savedGamePosition()`) — never a second,
+parallel "roughly where things stand" implementation that could drift from
+what resuming actually produces.
+
+### Resuming — replay, not snapshot
+
+`GET /api/games/:id/resume-state` (`getResumeState()`) returns the game's
+full metadata plus every committed turn **in original chronological order**
+(`{playerIndex, setNo, legNo, darts:[{sector,mult}]}` — `playerIndex` is
+recovered from `game_players`' insertion-order rowid, the same order
+`createGame()` inserted participants in). The client rebuilds the live `game`
+object by feeding every turn back through the **pure**
+`rebuildX01State()`/`rebuildCricketState()`/`rebuildBaseballState()`/
+`rebuildAroundTheClockState()`/`rebuildAroundTheWorldState()` functions
+(`frontend/scoring.js`) — the same `evaluateVisit()`/`evaluateVisitCricket()`/
+`evaluateVisitBaseball()`/`evaluateDartAroundTheClock()` engines that scored
+each turn live, called from a dedicated, side-effect-free orchestrator
+instead of the live `enterTurn()`/`onLegWon()`/`startNextLeg()` UI functions
+(which carry real side effects — DB writes, badge awards, HA webhooks,
+rendering — that must never re-fire for turns the server already recorded
+once). `resumeGame()` (`frontend/index.html`) then builds full player objects
+via each type's own `GAME_TYPES.*.newMatchPlayer()` (for normal defaults and
+async lifetime-ladder-base fetches, exactly as any new game gets) and
+overlays the rebuilt core fields on top — remaining scores/marks+points/
+innings+runs, legs/sets won, current set/leg, whose turn (deterministic from
+the turn sequence plus the same leg-starter rotation `startNextLeg()` applies
+live — a **trailing leg win with no next-leg turn recorded yet** — saved on
+the "leg won — Next leg?" screen before that button was ever tapped — is
+handled explicitly: the rebuild functions apply one more rotation/reset pass
+so the resumed game lands on the new leg's first throw, never the stale
+summary screen). `DB.gameId` is pointed back at the existing game id, so
+subsequent turns append to the same game; the live scoreboard picks the match
+back up on the next `pushLive()`.
+
+**What resume deliberately does NOT rebuild** (cosmetic, session-scoped,
+already lost today by a page refresh mid-game): past-leg summary cards
+(`game.legSummary`), the one-level undo snapshot (`lastTurnSnapshot: null` —
+undo is unavailable for the first turn after resume, same as the first turn
+of any game), voice-announcement/celebration state, and every per-leg
+badge-trigger tracker (Metronome streaks, Comeback Kid deficits, Around the
+Clock's lifetime `singlesHit`, etc.) — a resumed leg's in-leg-so-far badge
+opportunities are cosmetically lost, the same tradeoff Chuckin/Checkout
+Trainer's own milestone ladders already accept elsewhere.
+
+**Tournament/league-fixture linkage restore**: `getResumeState()` looks up
+`tournament_matches`/`league_fixtures` by `game_id` and returns
+`tournamentMatchId`/`leagueFixtureId` alongside the replay payload;
+`resumeGame()` threads them straight back onto `game.tournamentMatchId`/
+`game.leagueFixtureId` exactly as `_reallyBeginTournamentMatch()`/
+`startGame()` set them the first time, so completion advances the
+bracket/fulfills the fixture exactly as if never paused.
+
+**Divergence guard** (two devices racing the same resume): `getResumeState()`
+re-verifies the game is still incomplete AND still has a `saved_games` row
+immediately before deleting it — a 409 ("not currently saved — it may
+already have been resumed or abandoned elsewhere") beats silently
+double-driving one game from two controllers. The delete happens **as part
+of the same read** (a deliberate GET-with-a-side-effect, not a separate
+mutation call) — "the game is simply live again," and a separate mutation
+call would let a network hiccup between the two leave a phantom
+`saved_games` row.
+
+### Abandoning
+
+`DELETE /api/saved-games/:id` (`:id` is the **game id**, matching every other
+saved-games route's numbering — not the `saved_games` row's own id) deletes
+only the `saved_games` row; the game stays a permanently incomplete `games`
+row, and **stats recorded during it are kept** (matches `askEndGame()`'s
+existing behavior for quitting a live game). A **tournament-linked** saved
+game can't just be orphaned this way — `askAbandonSavedGame()` detects
+`tournamentMatchId` (surfaced by `getSavedGames()`) and instead deletes the
+`saved_games` row THEN routes to the bracket (`show('tournament')`) with the
+same message `askEndGame()` already gives for quitting a *live* tournament
+match, so the admin can record a walkover there. The saved-games row is
+deleted proactively in this path (not left for `recordWalkover()` to clean
+up) because `_advanceTournamentMatch()` never touches `games.completed_at` —
+a walked-over match's underlying game stays incomplete forever, so leaving
+`saved_games` in place would strand it in the list indefinitely, pointing at
+a match the bracket has already moved on from.
+
+### Interactions with existing features
+
+- **Player deletion**: `registerDeletePlayerGuard()` blocks deleting a player
+  who's in a currently-saved game ("abandon it (or resume and finish it)
+  before deleting") — cheaper and louder than an auto-abandon side effect
+  buried inside a delete.
+- **Player merge**: a saved game between source and target is already a
+  shared game (blocks the merge via the existing `sharedGames` check). A
+  saved game against a THIRD player can still collide after reassignment —
+  `_savedGameCollisions()` detects when the merge would leave the target
+  with two saved games in one (participants, game type) slot (something
+  normal play can never produce) and blocks it, consistent with every other
+  shared-row case in `_mergeBlockers()`. No explicit reassignment SQL is
+  needed in `mergePlayers()`'s own write transaction — `saved_games` has no
+  `player_id` column, so it "follows" `game_players.player_id`'s
+  reassignment automatically.
+- **Backups/restore**: nothing special — `saved_games` rides along in the
+  SQLite file like every other table.
+
+### API
+
+```
+GET  /api/saved-games            -> saved-game list + one-line position summaries (public)
+POST /api/games/:id/save         -> pause an in-progress game for later
+GET  /api/games/:id/resume-state -> the full replay payload -- ALSO deletes the
+                                     saved_games row (divergence guard, see above)
+DEL  /api/saved-games/:id        -> abandon a saved game (:id is the game id) -- stats kept
+```
+
+Save/resume/abandon are all `requireWrite` (same tier as recording a turn —
+pausing is gameplay, not admin surgery); the resume-state endpoint exposes
+only data already readable via existing stats endpoints, and mutates
+(deletes the `saved_games` row) as an explicit, documented exception to
+GET-is-safe (see "Divergence guard" above).
+
+### Testing
+
+Committed tests: `backend/test/scoring.test.js` (`rebuildX01State`/
+`rebuildCricketState`/`rebuildBaseballState`/`rebuildAroundTheClockState`/
+`rebuildAroundTheWorldState` — mid-game state across a leg boundary, a
+trailing leg win with no next-leg turn recorded, a practice game's
+`!practice` set-completion gate, a full 9-inning Baseball leg, and Around the
+Clock/World's own simpler shapes) and `backend/test/db.saved-games.test.js`
+(save/list/resume-state/abandon lifecycle, the one-per-matchup constraint,
+server-side eligibility checks, the two-device divergence guard, tournament-
+match linkage restore through a full resume-then-complete-then-bracket-
+advances cycle, the player-deletion guard, and the merge-collision block).

@@ -559,6 +559,256 @@ function cricketComebackAchieved(worstPointsDeficit){
   return (worstPointsDeficit || 0) >= CRICKET_COMEBACK_THRESHOLD;
 }
 
+/* =============================================================================
+   Saved games / pause & resume — pure replay rebuild (docs/archive/saved-games-roadmap.md)
+
+   Rebuilds a game's live-play state (scores/marks/runs, legs/sets won, whose
+   turn, game-type extras) by feeding every recorded turn back through the SAME
+   evaluateVisit()/evaluateVisitCricket()/evaluateVisitBaseball()/
+   evaluateDartAroundTheClock() functions that scored it live — "replay, not
+   snapshot," so a resumed game can never disagree with what actually happened.
+   Deliberately NOT the live enterTurn()/onLegWon()/startNextLeg() functions
+   (frontend/index.html) — those carry real side effects (DB writes, badge
+   awards, HA webhooks, rendering) that must never re-fire for turns the server
+   already recorded once. These functions are pure — same inputs, same outputs,
+   no network/DOM/global-state access — so they're reachable from the browser
+   (a real resume), from backend/db.js (require()'d, computing the Saved Games
+   list's one-line position summary without a second parallel implementation),
+   and from node:test directly.
+
+   Only what's actually resumable is rebuilt (the roadmap doc's own "Resume"
+   list): remaining scores/marks+points/innings+runs, legs/sets won, current
+   set/leg, whose turn — NOT per-leg badge-trigger trackers (Metronome streaks,
+   Comeback Kid deficits, Around the Clock's singlesHit, etc.), which are
+   cosmetic/session bookkeeping already accepted as lost on a page refresh, same
+   as the doc's own "what resume deliberately does NOT rebuild" section.
+
+   `turns` is always the FULL ordered turn history for the game (original
+   insertion order), each `{ playerIndex, setNo, legNo, darts:[{sector,mult}] }`. */
+
+// Shared leg/set-win bookkeeping X01 and Cricket both apply identically once a
+// visit's evaluate*() call reports a leg win: legsWon increments for the
+// winner; a set completes (setsWon++, everyone's legsWon resets to 0) once
+// legsPerSet is reached — but only when setsGateOpen (each game type's own
+// "does practice mode even track sets" rule: X01 onLegWon() gates on
+// `!practice` — ghost races are never resumable, so that half of its real
+// condition doesn't apply here; Cricket's onLegWonCricket() also gates on
+// `!practice`; see frontend/index.html for both). A genuinely complete MATCH
+// can never appear here — only an incomplete game can be saved, so the leg
+// just won is never the game's final one — so there's no "match complete"
+// branch to replicate. Returns true when a set completed (so the caller knows
+// whether the FOLLOWING leg, if replayed, is also a new set).
+function _applyLegWin(players, winnerIndex, legsPerSet, setsGateOpen){
+  const w = players[winnerIndex];
+  w.legsWon += 1;
+  if(setsGateOpen && w.legsWon >= legsPerSet){
+    w.setsWon += 1;
+    players.forEach(p => { p.legsWon = 0; });
+    return true;
+  }
+  return false;
+}
+
+// X01 (docs/archive/saved-games-roadmap.md build-order step 2 — "X01 has the most
+// derived state... and proves the pattern"). Mirrors enterTurn()'s score/leg/
+// game bookkeeping and resetPlayerForNextLegX01()'s leg reset, minus every
+// side effect (DB writes, badges, webhooks, rendering) — see this section's
+// own header comment for why those are deliberately not replayed.
+function rebuildX01State({ names, outModes, startScore, practice, legsPerSet, turns }){
+  const players = names.map((name, i) => ({
+    name, score: startScore, doubleOut: (outModes[i] !== 'single'),
+    legPoints:0, legVisits:0, legDarts:0, legAvgDarts:0,
+    setDarts:0, gameDarts:0, gamePoints:0, gameVisits:0, gameAvgDarts:0,
+    legsWon:0, setsWon:0,
+  }));
+  const setsGateOpen = !practice;
+  let current = 0, starter = 0, setNo = 1, legNo = 1, seenFirst = false;
+  let pendingNewLeg = false, pendingNewSet = false;
+  for(const t of turns){
+    // A new (set,leg) pair began — apply the same starter-rotation + leg reset
+    // startNextLeg() applies live, whether it's this iteration's own turn
+    // starting a fresh leg (the common case) or, via pendingNewLeg below, a
+    // trailing leg win with no next-leg turn recorded yet (saved mid-transition,
+    // on the "leg won — Next leg?" screen, before that button was ever tapped).
+    if(seenFirst && (t.setNo !== setNo || t.legNo !== legNo)){
+      starter = (starter + 1) % players.length;
+      current = starter;
+      const newSet = t.setNo !== setNo;
+      players.forEach(p => { p.score = startScore; p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legAvgDarts=0; if(newSet) p.setDarts=0; });
+      setNo = t.setNo; legNo = t.legNo;
+    }
+    seenFirst = true;
+    pendingNewLeg = false; pendingNewSet = false;
+    const p = players[t.playerIndex];
+    const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
+    const ev = evaluateVisit(p, dartsCore, { players });
+    const adj = ev.bust ? 3 : dartsCore.length;
+    p.legPoints += ev.scored; p.legVisits += 1;
+    p.legDarts += dartsCore.length; p.legAvgDarts += adj;
+    p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length; p.gameAvgDarts += adj;
+    p.gamePoints += ev.scored; p.gameVisits += 1;
+    if(!ev.bust) p.score = ev.newScore;
+    if(ev.win){
+      pendingNewSet = _applyLegWin(players, t.playerIndex, legsPerSet, setsGateOpen);
+      pendingNewLeg = true;
+      current = t.playerIndex; // provisional — overwritten above if a further turn follows
+    } else {
+      current = (t.playerIndex + 1) % players.length;
+    }
+  }
+  // Trailing leg win, no next-leg turn recorded yet — land exactly where
+  // "Next leg"/"Next set" would have (see the comment above): rotate the
+  // starter and reset every player's leg-scoped fields, one leg/set ahead of
+  // the last one actually recorded.
+  if(pendingNewLeg){
+    starter = (starter + 1) % players.length;
+    current = starter;
+    players.forEach(p => { p.score = startScore; p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legAvgDarts=0; if(pendingNewSet) p.setDarts=0; });
+    if(pendingNewSet){ setNo += 1; legNo = 1; } else { legNo += 1; }
+  }
+  return { players, current, starter, setNo, legNo };
+}
+
+// Cricket — same replay shape as X01 above, adapted to marks+points instead of
+// a countdown score. evaluateVisitCricket() needs game.players (to check
+// opponents' closed-number status) and game.config.numbers, both satisfied by
+// the { players, config } stub passed in below (mirrors the live game object's
+// own shape closely enough for this pure function's needs).
+function rebuildCricketState({ names, config, practice, legsPerSet, turns }){
+  const numbers = (config && config.numbers) || CRICKET_STANDARD_NUMBERS;
+  const players = names.map(name => {
+    const marks = {}; numbers.forEach(n => { marks[n] = 0; });
+    return { name, marks, points:0, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 };
+  });
+  const setsGateOpen = !practice;
+  let current = 0, starter = 0, setNo = 1, legNo = 1, seenFirst = false;
+  let pendingNewLeg = false, pendingNewSet = false;
+  const resetLegMarks = (p, newSet) => {
+    const marks = {}; numbers.forEach(n => { marks[n] = 0; });
+    p.marks = marks; p.points = 0; p.legDarts = 0;
+    if(newSet) p.setDarts = 0;
+  };
+  for(const t of turns){
+    if(seenFirst && (t.setNo !== setNo || t.legNo !== legNo)){
+      starter = (starter + 1) % players.length;
+      current = starter;
+      const newSet = t.setNo !== setNo;
+      players.forEach(p => resetLegMarks(p, newSet));
+      setNo = t.setNo; legNo = t.legNo;
+    }
+    seenFirst = true;
+    pendingNewLeg = false; pendingNewSet = false;
+    const p = players[t.playerIndex];
+    const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
+    const ev = evaluateVisitCricket(p, dartsCore, { players, config: { numbers } });
+    p.marks = ev.marks; p.points = ev.points;
+    p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
+    if(ev.win){
+      pendingNewSet = _applyLegWin(players, t.playerIndex, legsPerSet, setsGateOpen);
+      pendingNewLeg = true;
+      current = t.playerIndex;
+    } else {
+      current = (t.playerIndex + 1) % players.length;
+    }
+  }
+  if(pendingNewLeg){
+    starter = (starter + 1) % players.length;
+    current = starter;
+    players.forEach(p => resetLegMarks(p, pendingNewSet));
+    if(pendingNewSet){ setNo += 1; legNo = 1; } else { legNo += 1; }
+  }
+  return { players, current, starter, setNo, legNo };
+}
+
+// Baseball — structurally different from X01/Cricket: every player shares one
+// game-level "current inning" (game.baseballInning, not per-player state), the
+// round only completes once the LAST player in rotation has thrown, and the
+// player whose visit just ran isn't necessarily the winner (evaluateVisitBaseball()
+// decides that from total runs once the round completes) — see enterTurnBaseball()/
+// onLegWonBaseball() in frontend/index.html for the live equivalents this mirrors.
+// No practice gate on the set-completion check (matches onLegWonBaseball()'s own
+// unconditional `if(w.legsWon >= game.legsPerSet)` — docs/bug-roadmap.md BUG-22:
+// practice Baseball is forced to exactly 1 leg/1 set at creation, so the gate
+// would be a no-op here even if applied).
+function rebuildBaseballState({ names, legsPerSet, turns }){
+  const players = names.map(name => ({ name, totalRuns:0, inningRuns:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 }));
+  let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, seenFirst = false;
+  let pendingNewLeg = false, pendingNewSet = false;
+  const resetLeg = (p, newSet) => { p.totalRuns = 0; p.inningRuns = {}; p.legDarts = 0; if(newSet) p.setDarts = 0; };
+  for(const t of turns){
+    if(seenFirst && (t.setNo !== setNo || t.legNo !== legNo)){
+      starter = (starter + 1) % players.length;
+      current = starter;
+      const newSet = t.setNo !== setNo;
+      players.forEach(p => resetLeg(p, newSet));
+      setNo = t.setNo; legNo = t.legNo; baseballInning = 1;
+    }
+    seenFirst = true;
+    pendingNewLeg = false; pendingNewSet = false;
+    current = t.playerIndex;
+    const p = players[t.playerIndex];
+    const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
+    const ev = evaluateVisitBaseball(p, dartsCore, { players, current, baseballInning });
+    p.totalRuns = ev.totalRuns; p.inningRuns = ev.inningRuns;
+    p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
+    if(ev.matchComplete){
+      const w = players[ev.winnerIndex];
+      w.legsWon += 1;
+      if(w.legsWon >= legsPerSet){
+        w.setsWon += 1;
+        players.forEach(pp => { pp.legsWon = 0; });
+        pendingNewSet = true;
+      }
+      pendingNewLeg = true;
+      current = ev.winnerIndex;
+    } else {
+      if(ev.roundComplete) baseballInning += 1;
+      current = (t.playerIndex + 1) % players.length;
+    }
+  }
+  if(pendingNewLeg){
+    starter = (starter + 1) % players.length;
+    current = starter;
+    players.forEach(p => resetLeg(p, pendingNewSet));
+    if(pendingNewSet){ setNo += 1; legNo = 1; } else { legNo += 1; }
+    baseballInning = 1;
+  }
+  return { players, current, starter, setNo, legNo, baseballInning };
+}
+
+// Around the Clock (solo, guided drill) — a "round" is one leg, ended by
+// evaluateDartAroundTheClock()'s own `completed` flag rather than a leg-win
+// visit; no starter rotation (always the one player). Each recorded turn is a
+// single dart (this mode's own per-dart-turn shape, mirroring Doubles
+// Practice/Chuckin — see throwDartAroundTheClock()).
+function rebuildAroundTheClockState({ turns }){
+  let hitSet = new Set(), roundDarts = 0, legNo = 1, roundOver = false, seenFirst = false;
+  for(const t of turns){
+    if(seenFirst && t.legNo !== legNo){ hitSet = new Set(); roundDarts = 0; roundOver = false; legNo = t.legNo; }
+    seenFirst = true;
+    const dart = makeDartCore(t.darts[0].sector, t.darts[0].mult);
+    const ev = evaluateDartAroundTheClock(dart, hitSet);
+    roundDarts += 1;
+    if(ev.isNewHit) hitSet.add(dart.sector);
+    roundOver = ev.completed;
+  }
+  return { hitSet, roundDarts, legNo, roundOver };
+}
+
+// Around the World (solo, guided drill) — no round/leg concept at all (one
+// continuous stream, set_no=leg_no=1 for the whole session, same as Just
+// Chuckin' It). Its real lifetime progress is refetched fresh at resume time
+// the same way newMatchPlayerAroundTheWorld() always does at any game start —
+// this only needs to restore the session dart COUNT, a cosmetic display
+// figure; which specific outcomes were "this session" vs. baseline is exactly
+// the kind of session-scoped bookkeeping the roadmap doc's own "what resume
+// deliberately does NOT rebuild" section accepts losing (the combined lifetime
+// progress total stays fully correct either way, since that's server-derived,
+// not built from this count).
+function rebuildAroundTheWorldState({ turns }){
+  return { sessionDarts: turns.length };
+}
+
 // Only executes under Node (require()'d from a test file) — undefined in a
 // browser, so this is a no-op there and every name above stays a plain global.
 if (typeof module !== 'undefined' && module.exports) {
@@ -574,5 +824,7 @@ if (typeof module !== 'undefined' && module.exports) {
     CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH, challengeBadgeSignals,
     chuckinTiersReached,
     isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,
+    rebuildX01State, rebuildCricketState, rebuildBaseballState,
+    rebuildAroundTheClockState, rebuildAroundTheWorldState,
   };
 }

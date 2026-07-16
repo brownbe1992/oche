@@ -38,7 +38,7 @@ perfectly onto the existing achievement/moment-card machinery.
   a hostile `scored` that the round's number can't produce must be
   rejected, not trusted (max legit visit = 6× the round number, and a
   Shanghai visit is exactly 6×).
-- **Saved games** (`docs/saved-games-roadmap.md`): position must be a pure
+- **Saved games** (`docs/archive/saved-games-roadmap.md`): position must be a pure
   function of recorded turns — it is (running totals + round number derive
   from the turn sequence). State that in the implementation, don't leave it
   implicit; savability is part of any new mode's definition of done now.

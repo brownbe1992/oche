@@ -16,7 +16,14 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   isBedAndBreakfast, isMadhouseFinish, isShanghaiVisit,
   isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,
   pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
-  CHECKOUT_TRAINER_TRICK_CHANCE, listUnsolvableTargets, gradeCheckoutDeclaration } = scoring;
+  CHECKOUT_TRAINER_TRICK_CHANCE, listUnsolvableTargets, gradeCheckoutDeclaration,
+  rebuildX01State, rebuildCricketState, rebuildBaseballState,
+  rebuildAroundTheClockState, rebuildAroundTheWorldState } = scoring;
+
+// Shorthand for building a rebuild-function turn record: v(playerIndex, setNo,
+// legNo, [[sector,mult], ...]) — mirrors the {playerIndex,setNo,legNo,darts}
+// shape getResumeState() (backend/db.js) sends the client.
+const v = (playerIndex, setNo, legNo, darts) => ({ playerIndex, setNo, legNo, darts: darts.map(([sector, mult]) => ({ sector, mult })) });
 
 // Builds a real dart object the same way the app does (makeDart minus the
 // thrownAt timestamp), rather than hand-rolling a fake {value,isDouble,...} shape.
@@ -1150,5 +1157,188 @@ describe('cricketComebackAchieved (Cricket-native Comeback Kid, docs/game-modes-
   test('a missing/undefined deficit is treated as zero, not a crash', () => {
     assert.equal(cricketComebackAchieved(undefined), false);
     assert.equal(cricketComebackAchieved(null), false);
+  });
+});
+
+describe('rebuildX01State (docs/archive/saved-games-roadmap.md, pure replay rebuild)', () => {
+  test('mid-game across a leg boundary: scores, legsWon/setsWon, rotation, and current thrower all match hand-derived state', () => {
+    const turns = [
+      v(0,1,1,[[20,3],[20,3],[20,3]]),   // Ben: 180 -> 321
+      v(1,1,1,[[20,3],[20,3],[20,3]]),   // Alaina: 180 -> 321
+      v(0,1,1,[[20,3],[20,3],[20,3]]),   // Ben: 180 -> 141
+      v(1,1,1,[[20,3],[20,3],[20,3]]),   // Alaina: 180 -> 141
+      v(0,1,1,[[20,3],[19,3],[12,2]]),   // Ben: 60+57+24=141 -> 0, double-out WIN (leg1=set1, legsPerSet 1)
+      v(1,2,1,[[20,1]]),                 // Alaina (new set, starter rotates to her): 501-20=481
+      v(0,2,1,[[5,1]]),                  // Ben: 501-5=496 (mid-leg -- this is the "saved" point)
+    ];
+    const r = rebuildX01State({ names:['Ben','Alaina'], outModes:['double','double'], startScore:501, practice:false, legsPerSet:1, turns });
+    assert.equal(r.setNo, 2);
+    assert.equal(r.legNo, 1);
+    assert.equal(r.starter, 1, 'starter rotates by exactly one leg transition, like startNextLeg()');
+    assert.equal(r.current, 1, "Alaina's turn next -- Ben's last visit didn't win");
+    const [ben, alaina] = r.players;
+    assert.equal(ben.score, 496);
+    assert.equal(ben.legsWon, 0, 'reset when the new set began');
+    assert.equal(ben.setsWon, 1);
+    assert.equal(ben.legDarts, 1, 'only this new leg\'s own turn counts');
+    assert.equal(ben.gameDarts, 10, '3+3+3+1 across the whole match');
+    assert.equal(ben.gamePoints, 506, '180+180+141+5');
+    assert.equal(ben.gameVisits, 4);
+    assert.equal(alaina.score, 481);
+    assert.equal(alaina.legsWon, 0);
+    assert.equal(alaina.setsWon, 0);
+    assert.equal(alaina.legDarts, 1);
+    assert.equal(alaina.gameDarts, 7, '3+3+1');
+    assert.equal(alaina.gamePoints, 380, '180+180+20');
+  });
+
+  test("a trailing leg win with no next-leg turn recorded yet lands on the next leg's first throw, not the leg-complete screen", () => {
+    // Saved on the "leg won -- Next leg?" screen, before that button was ever
+    // tapped -- the same turn history as the previous test's first 5 turns,
+    // stopping right at the win instead of continuing into leg 2.
+    const turns = [
+      v(0,1,1,[[20,3],[20,3],[20,3]]),   // Ben: 180 -> 321
+      v(1,1,1,[[20,3],[20,3],[20,3]]),   // Alaina: 180 -> 321
+      v(0,1,1,[[20,3],[20,3],[20,3]]),   // Ben: 180 -> 141
+      v(1,1,1,[[20,3],[20,3],[20,3]]),   // Alaina: 180 -> 141
+      v(0,1,1,[[20,3],[19,3],[12,2]]),   // Ben: 141 -> 0, double-out WIN (leg1=set1, legsPerSet 1)
+    ];
+    const r = rebuildX01State({ names:['Ben','Alaina'], outModes:['double','double'], startScore:501, practice:false, legsPerSet:1, turns });
+    assert.equal(r.setNo, 2, 'auto-advanced one set past the win, same as tapping Next Set would have');
+    assert.equal(r.legNo, 1);
+    assert.equal(r.starter, 1);
+    assert.equal(r.current, 1);
+    const [ben, alaina] = r.players;
+    assert.equal(ben.score, 501, 'fresh leg -- back to the starting score');
+    assert.equal(ben.legsWon, 0);
+    assert.equal(ben.setsWon, 1);
+    assert.equal(ben.legDarts, 0, 'no turns recorded in the not-yet-started leg 2');
+    assert.equal(ben.setDarts, 0, 'a new SET too -- setDarts resets, not just legDarts');
+    assert.equal(ben.gameDarts, 9, '3+3+3 from the leg actually played');
+    assert.equal(ben.gamePoints, 501, '180+180+141');
+    assert.equal(alaina.score, 501);
+    assert.equal(alaina.legsWon, 0);
+    assert.equal(alaina.setsWon, 0);
+    assert.equal(alaina.gameDarts, 6);
+    assert.equal(alaina.gamePoints, 360, '180+180');
+  });
+
+  test('a practice game never advances legsWon into a set win (matches onLegWon()\'s !practice gate)', () => {
+    const turns = [
+      v(0,1,1,[[20,3],[20,3],[20,3]]),   // Ben: 180 -> 321
+      v(1,1,1,[[1,1]]),                  // Alaina: a filler visit, 501-1=500
+      v(0,1,1,[[20,3],[20,3],[20,3]]),   // Ben: 180 -> 141
+      v(1,1,1,[[1,1]]),
+      v(0,1,1,[[20,3],[19,3],[12,2]]),   // Ben wins the leg
+    ];
+    const r = rebuildX01State({ names:['Ben','Alaina'], outModes:['double','double'], startScore:501, practice:true, legsPerSet:1, turns });
+    // practice=true -> setsGateOpen=false -> legsWon increments but never
+    // triggers a set win, so there's no "new set" transition to auto-advance
+    // into -- the trailing-win branch still fires (pendingNewLeg), just
+    // without a set boundary.
+    assert.equal(r.setNo, 1, 'practice never completes a set');
+    assert.equal(r.legNo, 2, 'still auto-advances to the next leg, just not a new set');
+    assert.equal(r.players[0].legsWon, 1, 'never reset -- no set win occurred to zero it');
+    assert.equal(r.players[0].setsWon, 0);
+  });
+});
+
+describe('rebuildCricketState (docs/archive/saved-games-roadmap.md, pure replay rebuild)', () => {
+  test('mid-game across a leg boundary: marks/points, legsWon/setsWon, rotation all match hand-derived state', () => {
+    const turns = [
+      v(0,1,1,[[20,3],[19,3],[18,3]]),   // Cat closes 20,19,18 exactly (0 points -- no bonus marks)
+      v(1,1,1,[[20,3],[19,3],[18,3]]),   // Dog closes the same 3
+      v(0,1,1,[[17,3],[16,3],[15,3]]),   // Cat closes 17,16,15 too (6 of 7 -- everything but bull)
+      v(1,1,1,[[17,3],[16,3],[15,3]]),   // Dog closes the same 6
+      v(0,1,1,[[25,2],[25,2],[25,1]]),   // Cat: double-bull, double-bull, single-bull -- 2 bonus marks on bull once closed, Dog's bull still open -> 2*25=50 points, closes bull -> allClosed -> Cat WINS (50 > 0)
+      v(1,2,1,[[20,1]]),                 // Dog (new set, starter rotates to him): single 20 -> 1 mark, 0 points
+      v(0,2,1,[[19,1]]),                 // Cat: single 19 -> 1 mark, 0 points (mid-leg -- the "saved" point)
+    ];
+    const r = rebuildCricketState({ names:['Cat','Dog'], config:{ numbers:CRICKET_STANDARD_NUMBERS }, practice:false, legsPerSet:1, turns });
+    assert.equal(r.setNo, 2);
+    assert.equal(r.legNo, 1);
+    assert.equal(r.starter, 1);
+    assert.equal(r.current, 1);
+    const [cat, dog] = r.players;
+    assert.equal(cat.points, 0, 'reset for the new leg');
+    assert.equal(cat.marks[19], 1);
+    assert.equal(cat.marks[20], 0, 'reset for the new leg');
+    assert.equal(cat.legsWon, 0);
+    assert.equal(cat.setsWon, 1);
+    assert.equal(cat.legDarts, 1, "only this new leg's own turn");
+    assert.equal(cat.gameDarts, 10, '3+3+3+1 across the whole match');
+    assert.equal(dog.points, 0);
+    assert.equal(dog.marks[20], 1);
+    assert.equal(dog.legsWon, 0);
+    assert.equal(dog.setsWon, 0);
+    assert.equal(dog.gameDarts, 7, '3+3+1');
+  });
+});
+
+describe('rebuildBaseballState (docs/archive/saved-games-roadmap.md, pure replay rebuild)', () => {
+  test('a full leg win (9 real innings) plus a trailing partial next-leg turn matches hand-derived state', () => {
+    const turns = [];
+    for(let inning=1; inning<=8; inning++){
+      turns.push(v(0,1,1,[[0,1],[0,1],[0,1]])); // Ann misses all 3
+      turns.push(v(1,1,1,[[0,1],[0,1],[0,1]])); // Bob misses all 3
+    }
+    turns.push(v(0,1,1,[[9,1],[9,1],[9,1]]));   // inning 9: Ann scores 3 (target=9)
+    turns.push(v(1,1,1,[[0,1],[0,1],[0,1]]));   // inning 9: Bob scores 0 -> Ann wins the leg (3 > 0)
+    // Leg 2, inning 1: Ann throws (the test only cares about the rebuild's own
+    // leg/set-transition bookkeeping here -- starter/current tracking is
+    // exercised directly by the assertions below, independent of which
+    // player's own turn record happens to follow).
+    turns.push(v(0,2,1,[[1,1]]));
+    const r = rebuildBaseballState({ names:['Ann','Bob'], legsPerSet:1, turns });
+    assert.equal(r.setNo, 2);
+    assert.equal(r.legNo, 1);
+    assert.equal(r.starter, 1, 'rotated from 0');
+    assert.equal(r.baseballInning, 1, 'fresh leg -- back to inning 1');
+    const [ann, bob] = r.players;
+    assert.equal(ann.totalRuns, 1, "this leg's own single run so far");
+    assert.equal(ann.legsWon, 0, 'reset -- the set completed');
+    assert.equal(ann.setsWon, 1);
+    assert.equal(ann.gameDarts, 28, '8 misses-innings*3 + inning9(3) + leg2(1) = 24+3+1');
+    assert.equal(bob.totalRuns, 0);
+    assert.equal(bob.legsWon, 0);
+    assert.equal(bob.setsWon, 0);
+    assert.equal(bob.gameDarts, 27, '24+3, no leg2 turn yet');
+    // current: Ann's leg2 single-dart visit didn't complete the round (Bob,
+    // index 1, hasn't thrown leg2's inning 1 yet), so it's his turn next.
+    assert.equal(r.current, 1);
+  });
+});
+
+describe('rebuildAroundTheClockState (docs/archive/saved-games-roadmap.md, pure replay rebuild)', () => {
+  test('rebuilds the CURRENT round\'s hitSet only, not earlier completed rounds', () => {
+    const turns = [
+      v(0,1,1,[[1,1]]),   // round 1: hit 1
+      v(0,1,1,[[2,1]]),   // round 1: hit 2 (round then abandoned/completed some other way in this fixture)
+      v(0,1,2,[[5,1]]),   // round 2 (new leg): hit 5
+      v(0,1,2,[[5,1]]),   // round 2: repeat hit on 5 -- a real dart, but not a NEW hit
+    ];
+    const r = rebuildAroundTheClockState({ turns });
+    assert.equal(r.legNo, 2);
+    assert.equal(r.roundDarts, 2, 'only round 2\'s own 2 darts, not round 1\'s');
+    assert.equal(r.hitSet.size, 1);
+    assert.ok(r.hitSet.has(5));
+    assert.ok(!r.hitSet.has(1), "round 1's hits don't carry over");
+    assert.equal(r.roundOver, false);
+  });
+
+  test('roundOver is true once all 20 numbers are hit', () => {
+    const turns = [];
+    for(let n=1;n<=20;n++) turns.push(v(0,1,1,[[n,1]]));
+    const r = rebuildAroundTheClockState({ turns });
+    assert.equal(r.hitSet.size, 20);
+    assert.equal(r.roundOver, true);
+  });
+});
+
+describe('rebuildAroundTheWorldState (docs/archive/saved-games-roadmap.md, pure replay rebuild)', () => {
+  test('restores the session dart count -- the one cosmetic figure worth resuming for a lifetime-cumulative mode', () => {
+    const turns = [v(0,1,1,[[1,1]]), v(0,1,1,[[2,2]]), v(0,1,1,[[3,3]])];
+    const r = rebuildAroundTheWorldState({ turns });
+    assert.equal(r.sessionDarts, 3);
   });
 });

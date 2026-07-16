@@ -30,7 +30,7 @@ positive at the end is a "survival").
   uses for its halving rule. `bust=1` marks the fatal round (running ≤ 0),
   the established Doubles Practice column-repurposing precedent.
 - **Saved games**: running total replays deterministically from the rules
-  above — pure function of turns, per `docs/saved-games-roadmap.md`.
+  above — pure function of turns, per `docs/archive/saved-games-roadmap.md`.
 - **Stats**: bubbles (runs, survival rate, avg final score, doubles hit
   rate); Personal Bests (best final score, deepest double reached on a
   fail); a Home leaderboard on best final score (peak single-run value, no

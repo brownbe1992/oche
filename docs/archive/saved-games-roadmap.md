@@ -1,6 +1,13 @@
 # Saved Games (Pause & Resume) — Design Roadmap
 
-> Status: **design phase, not started.**
+> Status: **Done, 2026-07.** Every item in this doc's scope shipped in one
+> change — schema, save/resume/abandon endpoints, the replay-rebuild engine
+> for all five savable game types, the New Game resume prompt + Saved Games
+> list, tournament/league-fixture linkage restore with walkover-routed
+> abandon, and all three guards (one-per-matchup, player-deletion, merge-
+> collision). See `REFERENCE.md` §23 for the authoritative behavior and
+> `docs/open-roadmap-items.md`'s completion ledger for the summary. Archived —
+> nothing from this doc remains open.
 >
 > Product decisions below marked **[decided 2026-07]** were confirmed
 > explicitly with the product owner before this doc was written — they are

@@ -19,6 +19,11 @@
        POST /api/games/:id/turns   -> record one turn        { player, set, leg, scored, trebleLess, bust, checkout, checkoutPoints, legWon,
                                                                targetScore?, declaredUnsolvable? (both Checkout Trainer only) }
        POST /api/games/:id/complete-> finish a game          { winner }
+       GET  /api/saved-games       -> saved-game list + one-line position summaries (public)
+       POST /api/games/:id/save    -> pause an in-progress game for later
+       GET  /api/games/:id/resume-state -> the full replay payload -- ALSO deletes the
+                                            saved_games row (divergence guard, see db.js)
+       DEL  /api/saved-games/:id   -> abandon a saved game (:id is the game id) -- stats kept
        POST /api/reset             -> wipe all games/turns (players kept)        [admin]
        POST /api/wipe-all          -> wipe all players/games/stats (admins kept) [admin]
 
@@ -990,6 +995,29 @@ const server = http.createServer(async (req, res) => {
       if (!requireWrite(req, res)) return;
       const b = await readJson(req);
       return send(res, 200, db.recordEvent(Number(mt[1]), b.type, b.setNo ?? null, b.legNo ?? null));
+    }
+
+    // ----- saved games / pause & resume (docs/archive/saved-games-roadmap.md) -----
+    // Viewing the list is public, same as every other stats/scoreboard read;
+    // saving/resuming/abandoning are all state-changing writes, same requireWrite
+    // tier as recording a turn (pausing is gameplay, not admin surgery — per the
+    // roadmap doc's security section). GET .../resume-state is the one read that
+    // also mutates (consumes the pause) — see getResumeState()'s own comment in
+    // db.js for why that's deliberate, not an oversight.
+    if (p === '/api/saved-games' && m === 'GET') {
+      return send(res, 200, db.getSavedGames());
+    }
+    if ((mt = p.match(/^\/api\/games\/(\d+)\/save$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      return send(res, 200, db.saveGame(Number(mt[1])));
+    }
+    if ((mt = p.match(/^\/api\/games\/(\d+)\/resume-state$/)) && m === 'GET') {
+      if (!requireWrite(req, res)) return;
+      return send(res, 200, db.getResumeState(Number(mt[1])));
+    }
+    if ((mt = p.match(/^\/api\/saved-games\/(\d+)$/)) && m === 'DELETE') {
+      if (!requireWrite(req, res)) return;
+      return send(res, 200, db.abandonSavedGame(Number(mt[1])));
     }
 
     // ----- tournaments (docs/tournament-mode-roadmap.md, single-elimination only) -----

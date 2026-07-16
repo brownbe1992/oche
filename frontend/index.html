@@ -390,11 +390,11 @@
     align-items:center; flex:1; gap:8px;
   }
   body.game-active #game-header-controls .imt-row{justify-self:center}
-  body.game-active #game-header-controls .end-game-btn{justify-self:end}
+  body.game-active #game-header-controls .header-actions{justify-self:end;display:flex;gap:8px}
   /* Cricket has no Pad/Dartboard choice — its scoring screen replaces both. */
   body.cricket-active #game-header-controls .imt-row{display:none}
   body.game-active .imt-btn{font-size:12px;padding:5px 13px}
-  body.game-active #game-header-controls .end-game-btn{font-size:12px;padding:5px 12px}
+  body.game-active #game-header-controls .header-actions .btn{font-size:12px;padding:5px 12px}
   /* screen container */
   body.game-active #screen-game{
     flex:1; display:flex; flex-direction:column; min-height:0; padding:8px 10px 0;
@@ -668,7 +668,10 @@
         <button class="imt-btn" id="imt-pad"   onclick="setDartMode('pad')"   aria-pressed="false">Pad</button>
         <button class="imt-btn" id="imt-board" onclick="setDartMode('board')" aria-pressed="true">🎯</button>
       </div>
-      <button class="btn btn-ghost end-game-btn" onclick="askEndGame()">End game</button>
+      <div class="header-actions">
+        <button class="btn btn-ghost save-game-btn" onclick="saveCurrentGame()" hidden>⏸ Save for later</button>
+        <button class="btn btn-ghost end-game-btn" onclick="askEndGame()">End game</button>
+      </div>
     </div>
   </header>
 
@@ -718,6 +721,13 @@
            A select → "Add someone else?" loop, not the old always-visible-rows
            list — renderPlayers() (unchanged name, rewritten body) drives this. -->
       <div id="setup-step-1">
+        <!-- Saved games (docs/archive/saved-games-roadmap.md) — above the player slots,
+             visible before any setup effort is spent; hidden entirely when none
+             exist (refreshSavedGamesList()). -->
+        <div class="setup-section" id="saved-games-section" hidden>
+          <div class="setup-label">⏸ Saved games</div>
+          <div id="saved-games-list"></div>
+        </div>
         <div class="setup-section">
           <div class="setup-label">Players</div>
           <div class="players-list" id="players-list"></div>
@@ -873,6 +883,7 @@
     </div>
 
     <div class="btn-row">
+      <button class="btn btn-ghost save-game-btn" onclick="saveCurrentGame()" hidden>⏸ Save for later</button>
       <button class="btn btn-ghost" onclick="askEndGame()">End game</button>
     </div>
   </section>
@@ -1544,6 +1555,17 @@ const DB = {
   deleteLastTurn(){ if(this.gameId!=null){ const id=this.gameId; const turnId=this.lastTurnId; this.lastTurnId=null;
     this._queue(()=>Backend.send('DELETE',`/api/games/${id}/turns/last`+(turnId!=null?`?turnId=${turnId}`:''))); } },
 
+  // Saved games / pause & resume (docs/archive/saved-games-roadmap.md) — not queued
+  // through DB._queue like recordTurn/recordEvent above: save/resume/abandon
+  // are one-shot navigational actions (not a rapid-fire stream of writes that
+  // could race each other), and the caller needs to await the real response
+  // (a resume needs the actual payload; a save/abandon needs to know it
+  // actually succeeded before navigating away) rather than fire-and-forget.
+  listSavedGames(){ return Backend.get('/api/saved-games'); },
+  saveGame(gameId){ return Backend.send('POST',`/api/games/${gameId}/save`); },
+  getResumeState(gameId){ return Backend.get(`/api/games/${gameId}/resume-state`); },
+  abandonSavedGame(gameId){ return Backend.send('DELETE',`/api/saved-games/${gameId}`); },
+
   async reset(){ await Backend.send('POST','/api/reset').catch(logErr); await this.refreshStats(); },
   async wipeAll(){ await Backend.send('POST','/api/wipe-all'); await this.refreshStats(); },
 
@@ -1844,6 +1866,7 @@ function show(name){
   if(name==='settings') renderSettings();
   if(name==='home'){ renderHome(); renderHomeChallengeTeaser(); }
   if(name==='setup'){
+    refreshSavedGamesList();
     // raceLeg() (Player Profile's "Race this leg" entry point) presets setup.slots
     // to the one player being raced, calls setMode('ghost'), and sets
     // _enteringSetupFromRaceLeg right before this — consumed here, synchronously,
@@ -4077,6 +4100,25 @@ async function startGame(){
       return;
     }
   }
+  // Resume-or-abandon prompt (docs/archive/saved-games-roadmap.md "Where saved games
+  // surface" #1) — checked HERE, at Start time, not buried in step 1, so it sees
+  // the FINAL participant set and game type. Ghost/Daily Challenge are excluded
+  // even though their gameType is 'x01' (matches SAVABLE_GAME_TYPES) — neither
+  // mode is itself savable (docs/archive/saved-games-roadmap.md "Scope"), so a match here
+  // would be a false positive. Skipped entirely once the prompt has already been
+  // resolved for this attempt (setup._skipResumePrompt, set by "abandon and start
+  // fresh" below before it retries startGame()).
+  if(SAVABLE_GAME_TYPES.includes(gameType) && setup.mode !== 'ghost' && setup.mode !== 'challenge' && !setup._skipResumePrompt){
+    let list = [];
+    try{ list = await DB.listSavedGames(); }catch(e){ list = []; }
+    savedGamesCache = list;
+    const match = findMatchingSavedGame(list, names, gameType);
+    if(match){
+      showResumeOrAbandonPrompt(match);
+      return;
+    }
+  }
+  setup._skipResumePrompt = false;
   saveSetup();
   // A ghost race always starts from the historical leg's own starting score
   // (whatever "Starting score" happened to be hidden at, per setMode('ghost')) —
@@ -7574,6 +7616,279 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
   }
   renderSlots(); renderPad(); updateCheckout(true); pushLive();
 }
+// Saved games / pause & resume (docs/archive/saved-games-roadmap.md) — mirrors the
+// server's own SAVABLE_GAME_TYPES (backend/db.js) so the "⏸ Save for later"
+// button only ever appears where a save could actually succeed; the server
+// independently re-validates this on every write, never trusting this check
+// (docs/archive/saved-games-roadmap.md's own security section: "never trust the
+// client's eligibility check").
+const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world'];
+function isCurrentGameSavable(){
+  return !!(game && !game.done && SAVABLE_GAME_TYPES.includes(game.gameType));
+}
+// Called from renderGameShell() (every new game/leg) and from finishUnit()'s
+// game-complete branch (neither of which touches the header/footer "⏸ Save
+// for later" buttons themselves — both live OUTSIDE `.oche`, which is all
+// those two paths actually re-render).
+function updateSaveButtonVisibility(){
+  document.querySelectorAll('.save-game-btn').forEach(btn => { btn.hidden = !isCurrentGameSavable(); });
+}
+// "⏸ Save for later" — icon + text, never icon-only (docs/archive/saved-games-roadmap.md's
+// accessibility section). Lives with the header/turn-actions, not inside either
+// input widget, so both Pad and Dartboard modes get it for free — the same
+// placement reasoning as End game. Reachable even mid-"leg won — Next leg?"
+// transition (that screen only replaces `.oche`'s own content, not the header/
+// footer this button lives in) — a trailing leg win with no next-leg turn yet
+// is a real, handled resume-rebuild case (see rebuildX01State()'s own test).
+function saveCurrentGame(){
+  if(!isCurrentGameSavable() || DB.gameId == null) return;
+  const staged = game.darts.length;
+  const warn = staged > 0
+    ? ` The ${staged} dart${staged===1?'':'s'} of the current turn haven't been entered and won't be kept.`
+    : '';
+  uiConfirm(`Save this game for later?${warn}`, async ()=>{
+    let gameIdToSave = DB.gameId;
+    try{
+      await DB.saveGame(gameIdToSave);
+    }catch(e){
+      uiAlert('Could not save this game: ' + ((e && e.message) || 'unknown error'));
+      return;
+    }
+    // Same "clear game + push an inactive snapshot" pattern askEndGame() uses —
+    // any /display scoreboard stops showing the paused match as "live."
+    game = null;
+    pushLive();
+    show('setup');
+    refreshSavedGamesList();
+  });
+}
+
+// Resume (docs/archive/saved-games-roadmap.md "Resuming — replay, not snapshot"): fetches
+// the full recorded turn history (GET .../resume-state, which ALSO deletes the
+// saved_games row server-side — see getResumeState()'s own comment in db.js for
+// why that's deliberate) and rebuilds the live `game` object by feeding every
+// turn back through the pure rebuildX01State()/rebuildCricketState()/
+// rebuildBaseballState()/rebuildAroundTheClockState()/rebuildAroundTheWorldState()
+// functions (frontend/scoring.js) — never the live enterTurn()/onLegWon()
+// functions themselves, which carry real side effects (DB writes, badge awards,
+// webhooks) that must never re-fire for turns the server already recorded once.
+// Player objects are still built via each type's own GAME_TYPES.*.newMatchPlayer()
+// first (for its normal defaults and async lifetime-ladder-base fetches — exactly
+// as any new game gets), then the rebuilt CORE fields are overlaid on top; badge-
+// trigger trackers (Metronome streaks, Comeback Kid deficits, singlesHit, etc.)
+// stay at their fresh defaults — cosmetic/session bookkeeping the roadmap doc's
+// own "what resume deliberately does NOT rebuild" section accepts losing.
+async function resumeGame(gameId){
+  if(Auth.requireAuth && !Auth.loggedIn){ Auth.ensureCanWrite(()=>resumeGame(gameId)); return; }
+  let state;
+  try{
+    state = await DB.getResumeState(gameId);
+  }catch(e){
+    uiAlert('Could not resume this game: ' + ((e && e.message) || 'unknown error'));
+    refreshSavedGamesList();
+    return;
+  }
+  const gameType = state.gameType;
+  const names = state.players.map(p => p.name);
+  const outModes = state.players.map(p => p.outMode);
+  const startScore = Number(state.category) || 501;
+  const config = state.config || {};
+
+  const players = names.map(n => GAME_TYPES[gameType].newMatchPlayer(n,
+    gameType === 'cricket' ? config : startScore));
+
+  let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, roundOver = false;
+  let statusMsg = '';
+  if(gameType === 'x01'){
+    const r = rebuildX01State({ names, outModes, startScore, practice: !!state.practice, legsPerSet: state.legsPerSet, turns: state.turns });
+    players.forEach((p,i) => {
+      const rp = r.players[i];
+      Object.assign(p, { score:rp.score, doubleOut:rp.doubleOut, legsWon:rp.legsWon, setsWon:rp.setsWon,
+        legPoints:rp.legPoints, legVisits:rp.legVisits, legDarts:rp.legDarts, legAvgDarts:rp.legAvgDarts,
+        setDarts:rp.setDarts, gameDarts:rp.gameDarts, gamePoints:rp.gamePoints, gameVisits:rp.gameVisits, gameAvgDarts:rp.gameAvgDarts });
+    });
+    current = r.current; starter = r.starter; setNo = r.setNo; legNo = r.legNo;
+    statusMsg = `Resumed — set ${setNo} leg ${legNo}, ${players[current].name} to throw, ${players[current].score} left.`;
+  } else if(gameType === 'cricket'){
+    const r = rebuildCricketState({ names, config, practice: !!state.practice, legsPerSet: state.legsPerSet, turns: state.turns });
+    players.forEach((p,i) => {
+      const rp = r.players[i];
+      Object.assign(p, { marks:rp.marks, points:rp.points, legsWon:rp.legsWon, setsWon:rp.setsWon,
+        legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
+    });
+    current = r.current; starter = r.starter; setNo = r.setNo; legNo = r.legNo;
+    statusMsg = `Resumed — set ${setNo} leg ${legNo}, ${players[current].name} to throw.`;
+  } else if(gameType === 'baseball'){
+    const r = rebuildBaseballState({ names, legsPerSet: state.legsPerSet, turns: state.turns });
+    players.forEach((p,i) => {
+      const rp = r.players[i];
+      Object.assign(p, { totalRuns:rp.totalRuns, inningRuns:rp.inningRuns, legsWon:rp.legsWon, setsWon:rp.setsWon,
+        legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
+    });
+    current = r.current; starter = r.starter; setNo = r.setNo; legNo = r.legNo; baseballInning = r.baseballInning;
+    statusMsg = `Resumed — set ${setNo} leg ${legNo}, inning ${Math.min(baseballInning,9)}, ${players[current].name} to throw.`;
+  } else if(gameType === 'around_the_clock'){
+    const r = rebuildAroundTheClockState({ turns: state.turns });
+    Object.assign(players[0], { hitSet:r.hitSet, roundDarts:r.roundDarts });
+    legNo = r.legNo; roundOver = r.roundOver;
+    statusMsg = `Resumed — round ${legNo}, ${r.hitSet.size} of 20 numbers hit.`;
+  } else if(gameType === 'around_the_world'){
+    const r = rebuildAroundTheWorldState({ turns: state.turns });
+    players[0].sessionDarts = r.sessionDarts;
+    statusMsg = `Resumed — ${r.sessionDarts} darts this session so far.`;
+  } else {
+    uiAlert(`${gameType} games can't be resumed.`);
+    return;
+  }
+
+  game = {
+    gameType, config, start: startScore, category: state.category,
+    legsPerSet: state.legsPerSet, setsPerGame: state.setsPerGame,
+    practice: !!state.practice,
+    leagueFixtureId: state.leagueFixtureId,
+    players,
+    blitzDeadline: null, blitzEnded: false,
+    starter, current, setNo, legNo,
+    baseballInning,
+    darts: [], busted:false, won:false, done:false,
+    gameOneEighties:0, gameBigFish:0, gameBusts:0,
+    currentLegTurns: [], legVisitLogs: [], sessionTurns: [],
+    lastTurnSnapshot: null, // undo unavailable for the first turn after resume, same as the first turn of any game
+    turnSeq: 0, lastTurnEvent: null, matchResult: null,
+    legStart: { ts: Date.now(), starter: players[starter] ? players[starter].name : players[0].name },
+    hasGhost: false,
+    roundOver, roundEndReason: roundOver ? 'completed' : null, dpLastDart: null, atcLastDart: null,
+    chuckinLastDart: null, atwLastDart: null,
+    tournamentMatchId: state.tournamentMatchId || null,
+  };
+  DB.gameId = state.gameId;
+  names.forEach(ensurePlayerStats);
+  earnedBadgeCache = {};
+  names.forEach(n=>{
+    Backend.get(`/api/players/badges?name=${encodeURIComponent(n)}`)
+      .then(list=>{ earnedBadgeCache[n] = new Set((list||[]).map(b=>b.badge_id)); })
+      .catch(()=>{ earnedBadgeCache[n] = new Set(); });
+  });
+  mult = 1;
+  renderGameShell();
+  updateMultUI();
+  show('game');
+  renderGame();
+  announce(statusMsg);
+}
+
+/* ---------- Saved Games list + resume prompt (docs/archive/saved-games-roadmap.md) ----------
+   "Where saved games surface": a New Game step-1 list (refreshSavedGamesList(),
+   shown only when at least one exists) AND a resume-or-abandon prompt at Start
+   time (wired into startGame() above) — both driven by the SAME GET
+   /api/saved-games list ("the check reuses the same endpoint the list below
+   uses — no bespoke lookup"), cached here so a resume/abandon action triggered
+   from either surface can look up a saved game's own category/tournament
+   linkage without a second round-trip. */
+let savedGamesCache = [];
+
+// Order-independent participant-set + game-type match — "Ben & Alaina" and
+// "Alaina & Ben" are the same matchup. Mirrors findSavedGameForParticipants()
+// (backend/db.js) exactly, just client-side against the already-fetched list.
+function findMatchingSavedGame(list, names, gameType){
+  const target = names.map(n=>n.toLowerCase()).sort();
+  return list.find(sg => {
+    if(sg.gameType !== gameType) return false;
+    const players = sg.players.map(n=>n.toLowerCase()).sort();
+    return players.length === target.length && players.every((n,i)=>n===target[i]);
+  }) || null;
+}
+
+// One-line position summary — legs/sets won per player (X01/Cricket/Baseball),
+// round progress (Around the Clock), or session darts (Around the World).
+// Reads the raw fields _savedGamePosition() (backend/db.js) already computed
+// via the exact same rebuild functions resuming itself uses.
+function savedGamePositionLabel(sg){
+  const pos = sg.position;
+  if(!pos) return '';
+  if(pos.players){
+    const parts = pos.players.map(p => `${p.name} ${p.legsWon}`);
+    return `Set ${pos.setNo} leg ${pos.legNo} · ${parts.join(' – ')}`;
+  }
+  if(pos.hit != null) return `Round ${pos.legNo} · ${pos.hit}/${pos.total} numbers hit`;
+  if(pos.sessionDarts != null) return `${pos.sessionDarts} dart${pos.sessionDarts===1?'':'s'} this session`;
+  return '';
+}
+function savedGameDateLabel(iso){
+  const d = parseSqliteTimestamp(iso);
+  return isNaN(d) ? '' : d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
+}
+
+// New Game step 1's Saved Games section — "above the player slots, visible
+// before any setup effort is spent," shown only when at least one exists.
+async function refreshSavedGamesList(){
+  const section = document.getElementById('saved-games-section');
+  const container = document.getElementById('saved-games-list');
+  if(!section || !container) return;
+  try{ savedGamesCache = await DB.listSavedGames(); }
+  catch(e){ savedGamesCache = []; }
+  section.hidden = savedGamesCache.length === 0;
+  if(!savedGamesCache.length) return;
+  // Rows are real headings/buttons, not click-anywhere divs (docs/saved-games-
+  // roadmap.md's accessibility section).
+  container.innerHTML = savedGamesCache.map(sg => `
+    <div class="saved-game-row" style="padding:10px 0;border-bottom:1px solid var(--wire)">
+      <div class="rp-name-row" style="font-weight:600">${escapeHtml(sg.players.join(' & '))} <span class="pp-meta">${escapeHtml(sg.category)}</span></div>
+      <div class="pp-meta">${escapeHtml(savedGamePositionLabel(sg))} · saved ${escapeHtml(savedGameDateLabel(sg.savedAt))}</div>
+      <div class="btn-row" style="margin-top:6px">
+        <button class="btn btn-primary" style="padding:6px 14px;font-size:13px" onclick="resumeGame(${sg.gameId})">Resume</button>
+        <button class="btn btn-ghost" style="padding:6px 14px;font-size:13px" onclick="askAbandonSavedGame(${sg.gameId})">Abandon</button>
+      </div>
+    </div>`).join('');
+}
+
+// Resume-or-abandon prompt: a real modal with a heading and three clearly-
+// labeled actions, not color-coded buttons alone (docs/archive/saved-games-roadmap.md's
+// accessibility section).
+function showResumeOrAbandonPrompt(sg){
+  document.getElementById('modal-body').innerHTML = `
+    <p class="modal-msg">${escapeHtml(sg.players.join(' & '))} already have a saved ${escapeHtml(sg.category)} game (${escapeHtml(savedGamePositionLabel(sg))}), saved ${escapeHtml(savedGameDateLabel(sg.savedAt))}.</p>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 12px">Resume it, abandon it and start fresh, or cancel?</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-ghost" onclick="closeModal();askAbandonSavedGame(${sg.gameId}, true)">Abandon &amp; start fresh</button>
+      <button class="btn btn-primary" onclick="closeModal();resumeGame(${sg.gameId})">Resume</button>
+    </div>`;
+  document.getElementById('modal').hidden = false;
+}
+
+// Abandon (from the list or the resume prompt): deletes the saved_games row —
+// stats recorded so far are kept either way (docs/archive/saved-games-roadmap.md
+// "Abandoning"). A tournament-linked saved game can't just be orphaned the way
+// a casual game can — it routes to the bracket/walkover control instead (same
+// message askEndGame() already gives for quitting a LIVE tournament match),
+// after first clearing the pause itself (recordWalkover() never touches
+// saved_games, so leaving it in place would strand it in the list forever
+// pointing at a match the bracket has already moved on from).
+// retryStartGame: when true (the wizard's "abandon and start fresh" button),
+// a successful non-tournament abandon re-attempts startGame() so the game the
+// admin actually asked for gets created.
+function askAbandonSavedGame(gameId, retryStartGame){
+  const sg = savedGamesCache.find(s => s.gameId === gameId);
+  const category = sg ? sg.category : 'saved';
+  if(sg && sg.tournamentMatchId){
+    uiConfirm(
+      "This is a tournament match — leaving it unfinished would leave the bracket stuck. Abandon the save and go back to the bracket? You can record a walkover there for whichever player should advance.",
+      async ()=>{
+        try{ await DB.abandonSavedGame(gameId); }catch(e){}
+        refreshSavedGamesList();
+        show('tournament');
+      });
+    return;
+  }
+  uiConfirm(`Abandon this saved ${category} game? It can't be resumed afterward, but the stats already recorded stay.`, async ()=>{
+    try{ await DB.abandonSavedGame(gameId); }
+    catch(e){ uiAlert('Could not abandon this saved game: ' + ((e && e.message) || 'unknown error')); return; }
+    refreshSavedGamesList();
+    if(retryStartGame){ setup._skipResumePrompt = true; startGame(); }
+  });
+}
+
 function askEndGame(){
   // Tournament mode (docs/tournament-mode-roadmap.md): a plain "abandon and forget"
   // isn't allowed here — the bracket needs an actual result to advance. Send the
@@ -8697,6 +9012,7 @@ function h2hStatsHtmlBaseball(winner, scope){
 
 function finishUnit(kind, winner){
   game.done = (kind==='game');
+  updateSaveButtonVisibility(); // a just-completed match is no longer savable
   renderGame();
   const sb=document.getElementById('scoreboard');
   const labels = { leg:'wins the leg', set:'wins the set', game:'wins the game' };
@@ -8851,6 +9167,7 @@ function renderGameShell(){
         <button class="btn btn-primary" id="dp-next-round-btn" onclick="startNextRound()" hidden>${isClock ? 'Start Next Clock' : 'Start next round'}</button>
       </div>`;
   applyDartMode();
+  updateSaveButtonVisibility();
 }
 // Shared "start the next round" dispatcher for the two per-dart drill modes that
 // have a genuine round boundary (Doubles Practice, guided Around the Clock) — Just
