@@ -329,7 +329,7 @@ function evaluateVisitBobs27(player, darts, game){
   const gain = hits * doubleValue;
   // A miss-all round (gain === 0) subtracts the double's value instead of
   // storing a negative "scored" — turns.scored can't go negative, so the
-  // penalty is DERIVED at replay time from scored===0 (docs/halve-it-roadmap.md's
+  // penalty is DERIVED at replay time from scored===0 (docs/archive/halve-it-roadmap.md's
   // "store the gain, derive the penalty" shape), not stored directly. Any
   // hit is always a positive gain (a double is worth 2x its number, always
   // >0), so scored===0 unambiguously means "missed" — no separate flag needed
@@ -1000,7 +1000,7 @@ function rebuildShanghaiState({ names, legsPerSet, maxRounds, turns }){
   return { players, current, starter, setNo, legNo, shanghaiRound };
 }
 
-// Halve-It (docs/halve-it-roadmap.md). Structurally another Baseball/
+// Halve-It (docs/archive/halve-it-roadmap.md). Structurally another Baseball/
 // Shanghai sibling (fixed round sequence, all players in lockstep on one
 // shared live round), with two differences: the round's own "target" is a
 // {sector, ring?} pair rather than a single number (ring omitted = any ring
@@ -1010,7 +1010,7 @@ function rebuildShanghaiState({ names, legsPerSet, maxRounds, turns }){
 // (never Shanghai's early-exit case).
 const HALVE_IT_RING_MULT = { single: 1, double: 2, treble: 3 };
 // The classic pub set this game defaults to when no custom config.targets is
-// supplied (docs/halve-it-roadmap.md's own "common set"): 20, 16,
+// supplied (docs/archive/halve-it-roadmap.md's own "common set"): 20, 16,
 // double 7, 14, treble 10, 17, Bull.
 const HALVE_IT_DEFAULT_TARGETS = [
   { sector: 20 },
@@ -1037,7 +1037,7 @@ function halveItDartValue(d, target){
   if(target.ring && d.mult !== HALVE_IT_RING_MULT[target.ring]) return 0;
   return d.mult * d.sector;
 }
-// Halving rounds UP (docs/halve-it-roadmap.md's own recommendation,
+// Halving rounds UP (docs/archive/halve-it-roadmap.md's own recommendation,
 // since round-down can spiral a score to a permanent 0 — 1 -> 0 -> 0 forever
 // — while round-up's floor is 1 -> 1, never lower).
 function evaluateVisitHalveIt(player, darts, game){

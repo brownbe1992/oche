@@ -28,7 +28,7 @@ positive at the end is a "survival").
   range-checked 1–170). `scored` = points **gained** this round (0–120 for
   D20); a subtraction is derived at read time — `scored === 0` on round *n*
   means `running -= 2n` — because `turns.scored` can't go negative, the
-  same store-the-gain/derive-the-penalty shape `docs/halve-it-roadmap.md`
+  same store-the-gain/derive-the-penalty shape `docs/archive/halve-it-roadmap.md`
   uses for its halving rule. `bust=1` marks the fatal round (running ≤ 0),
   the established Doubles Practice column-repurposing precedent.
 - **Saved games**: running total replays deterministically from the rules

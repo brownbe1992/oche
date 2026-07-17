@@ -1,6 +1,6 @@
 'use strict';
 // Committed tests for backend/db.js's Halve-It stat formulas (REFERENCE.md
-// "Halve-It stats", docs/halve-it-roadmap.md) — against a scratch
+// "Halve-It stats", docs/archive/halve-it-roadmap.md) — against a scratch
 // SQLite database. Not exhaustive; see db.x01-stats.test.js's header comment
 // for the same "focused, not 100% coverage" framing.
 const { test, describe, after } = require('node:test');
@@ -32,7 +32,7 @@ function halveItGame(players, targets) {
   });
 }
 // darts: array of [sector, mult]. scored is that visit's GAIN (0 on a halved
-// visit); bust marks the halved visit itself (docs/halve-it-roadmap.md's
+// visit); bust marks the halved visit itself (docs/archive/halve-it-roadmap.md's
 // own column-repurposing precedent — see enterTurnHalveIt()'s own comment).
 function halveItTurn(gameId, player, set, leg, darts, { scored = 0, bust = false } = {}) {
   db.addTurn(gameId, {
@@ -167,5 +167,52 @@ describe('X01/Cricket/Baseball/Shanghai/Halve-It isolation regression (turns.sco
     assert.equal(cricketBubbles.mpr, null, 'no cricket rounds recorded for this player at all');
     const shanghaiBubbles = db.getShanghaiStatBubbles(name, 'h2h');
     assert.equal(shanghaiBubbles.ppr, null, 'no shanghai rounds recorded for this player at all');
+  });
+});
+
+// Custom target editor (docs/archive/halve-it-roadmap.md "Custom target editor",
+// docs/open-roadmap-items.md item 19): config.targets rides in from the untrusted client,
+// so createGame() validates it — a malformed target array must be rejected before it can
+// reach the write-time consistency guard / saved-game replay that both derive each round's
+// expected points from it. A well-formed custom set (including single/double/treble rings
+// and the Bull) is accepted and normalized to the {sector[, ring]} shape.
+describe('createGame — Halve-It custom target validation (item 19)', () => {
+  const P = [{ name: 'HITargA' }, { name: 'HITargB' }];
+  const make = (targets) => db.createGame({
+    category: 'Custom Halve-It', legsPerSet: 1, setsPerGame: 1, practice: 0,
+    gameType: 'halve_it', config: { targets }, players: P,
+  });
+
+  test('accepts a well-formed custom target sequence and stores the normalized shape', () => {
+    const g = make([{ sector: 20 }, { sector: 7, ring: 'double' }, { sector: 5, ring: 'treble' }, { sector: 19, ring: 'single' }, { sector: 25 }, { sector: 25, ring: 'double' }]);
+    const stored = JSON.parse(db._db.prepare('SELECT config FROM games WHERE id=?').get(g.gameId).config);
+    assert.deepEqual(stored.targets, [
+      { sector: 20 }, { sector: 7, ring: 'double' }, { sector: 5, ring: 'treble' },
+      { sector: 19, ring: 'single' }, { sector: 25 }, { sector: 25, ring: 'double' },
+    ], 'normalized to exactly {sector[, ring]}, no extra fields');
+  });
+
+  test('strips any extra client-supplied field on a target entry', () => {
+    const g = make([{ sector: 20, ring: 'double', evil: '<script>', bonus: 999 }]);
+    const stored = JSON.parse(db._db.prepare('SELECT config FROM games WHERE id=?').get(g.gameId).config);
+    assert.deepEqual(stored.targets, [{ sector: 20, ring: 'double' }]);
+  });
+
+  test('rejects malformed target arrays', () => {
+    assert.throws(() => make([]), /1 to 20 rounds/);
+    assert.throws(() => make(new Array(21).fill({ sector: 20 })), /1 to 20 rounds/);
+    assert.throws(() => make('nope'), /1 to 20 rounds/);
+    assert.throws(() => make([{ sector: 21 }]), /sector must be an integer 1-20 or 25/);
+    assert.throws(() => make([{ sector: 0 }]), /sector must be an integer 1-20 or 25/);
+    assert.throws(() => make([{ sector: 20, ring: 'quad' }]), /ring must be/);
+    assert.throws(() => make([{ sector: 25, ring: 'treble' }]), /Bull has no treble ring/);
+    assert.throws(() => make([null]), /each target must be an object/);
+  });
+
+  test('omitted config.targets is allowed (keeps the classic default)', () => {
+    assert.doesNotThrow(() => db.createGame({
+      category: 'Halve-It', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'halve_it', config: {}, players: P,
+    }));
   });
 });

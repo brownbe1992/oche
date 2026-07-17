@@ -1,14 +1,12 @@
 # Halve-It — Design Roadmap
 
-> Status: **core game shipped (2026-07); the custom target editor is a
-> separate, still-open item.** See "Implementation notes" at the bottom of
-> this doc for exactly how each open question was resolved, and
-> `REFERENCE.md` §32 for the full write-up of what shipped. This doc stays
-> in `docs/` (not archived) because `docs/open-roadmap-items.md` tracks the
-> custom target editor mentioned in "Design" below as its own,
-> independently-scoped, Not-started item sourced from this same doc — per
-> CLAUDE.md's archiving rule, a doc only moves to `docs/archive/` once every
-> item split out from it is Done.
+> Status: **complete (core game 2026-07; custom target editor 2026-07).**
+> Every item split out from this doc is now Done — the classic game and the
+> custom target editor both shipped. See "Implementation notes" at the bottom
+> of this doc for exactly how each open question was resolved, and
+> `REFERENCE.md` §32 for the full write-up of what shipped. This doc is ready
+> to move to `docs/archive/` (per CLAUDE.md's archiving rule) now that its
+> last split-out item — the custom target editor — is Done.
 
 ## Goal
 
@@ -85,14 +83,25 @@ in one bad visit, which keeps every player in it until the end.
   floor and a 0→0 no-op (an early-round miss with nothing built up yet).
 - **Reaching 0**: confirmed by test — round-up never produces a permanent
   0 the way round-down could.
-- **Custom target editor**: **not built in v1**. The classic 7-round default
-  (`HALVE_IT_DEFAULT_TARGETS` in `frontend/scoring.js`) ships; the "customize
-  targets" editor this doc's own Design section describes (reusing Cricket's
-  custom-numbers picker pattern) is deliberately deferred and tracked as its
-  own separate, independently-scoped item on `docs/open-roadmap-items.md` —
-  per CLAUDE.md's discipline for a v1/v2 split, rather than silently dropped
-  or claimed done. This is why this doc stays in `docs/` instead of moving to
-  `docs/archive/` — see the status line at the top.
+- **Custom target editor**: **shipped 2026-07** (the v2 item split out of the
+  core-game v1). The classic 7-round default (`HALVE_IT_DEFAULT_TARGETS` in
+  `frontend/scoring.js`) remains the default when the setup screen's Classic
+  toggle is left selected; the Custom toggle reveals the "customize targets"
+  editor this doc's Design section described, reusing Cricket's custom-numbers
+  picker pattern. It builds an ordered 1–20-round sequence of `{sector, ring?}`
+  rows — each row a native `<select>` for the sector (Bull 25, or 20…1) and one
+  for the required ring (Any / Single / Double / Treble, Treble hidden for
+  Bull). Classic omits `config.targets` and plays the default; Custom sends the
+  built list and the game's category label reads "Custom Halve-It". The
+  presets-vs-editor open question below was resolved in favour of **default +
+  custom editor only** (no named presets), exactly the lean stated there.
+  `createGame()` (`backend/db.js`) validates and normalises `config.targets`
+  server-side (array of 1–20 entries; sector 1–20 or 25; ring
+  single/double/treble; treble-Bull rejected as unwinnable; extra fields
+  stripped), covered by `backend/test/db.halve-it-stats.test.js`. Frontend
+  wiring — `setHalveItPreset`, `addHalveItTargetRow`, `updateHalveItTarget`,
+  `renderHalveItTargetRows`, `resolveHalveItTargets` — lives in
+  `frontend/index.html`. See `REFERENCE.md` §32.
 - **Tie-breaking after the final round**: this doc's own Design/Open-questions
   sections never explicitly addressed what happens on a tie — filled using
   the established Baseball/Shanghai precedent instead: extra rounds, repeating

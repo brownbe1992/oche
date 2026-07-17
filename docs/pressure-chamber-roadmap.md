@@ -28,7 +28,7 @@ sequence** head-to-head, so it's a fair contest of nerve, not just skill.
   identical-sequence mode — Pressure Chamber's card-and-modifier engine is
   the genuinely new piece here, not the "seeded generation" idea itself
   (see Data model below for where that precedent is reused directly).
-- **Halve-It** (`docs/halve-it-roadmap.md`) is the closest existing
+- **Halve-It** (`docs/archive/halve-it-roadmap.md`) is the closest existing
   precedent for "a fixed round sequence where missing has a real,
   derived-not-stored cost to your running score" — Pressure Chamber
   borrows that shape but adds a *variable* per-round modifier on top of a

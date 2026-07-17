@@ -338,12 +338,12 @@ describe('addTurn — Shanghai scored must match the visit\'s points, when opted
   });
 });
 
-describe('addTurn — Halve-It scored/bust must match the visit\'s points on the round\'s target, when opted in (docs/halve-it-roadmap.md)', () => {
+describe('addTurn — Halve-It scored/bust must match the visit\'s points on the round\'s target, when opted in (docs/archive/halve-it-roadmap.md)', () => {
   // Halve-It's turns.scored IS the visit's GAIN (0 on a halved visit), derivable
   // from the visit's own darts + the round's target (sector, optionally
   // ring-restricted) -- same SEC-25 shape as Baseball/Shanghai above. UNLIKE
   // those two, `bust` is legitimately repurposed here as "this visit halved
-  // the running total" (docs/halve-it-roadmap.md's own column-repurposing
+  // the running total" (docs/archive/halve-it-roadmap.md's own column-repurposing
   // precedent), so the guard checks it for CONSISTENCY (bust iff gained===0)
   // rather than rejecting it outright.
   function halveItGame(players, targets) {

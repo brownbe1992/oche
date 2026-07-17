@@ -504,7 +504,7 @@ const ALLOWED_LIVE_KEYS = new Set([
   // for the round header and the current-round highlight. Per-player round points ride
   // inside the already-unrestricted per-player `players[]` array.
   'shanghaiRound', 'shanghaiMaxRounds',
-  // Halve-It only (docs/halve-it-roadmap.md) — the live round plus the FULL target
+  // Halve-It only (docs/archive/halve-it-roadmap.md) — the live round plus the FULL target
   // sequence (display.html has no shared scoring.js module to derive per-round targets
   // from, so it needs every round's target up front); read by renderers.halve_it.scorecard()
   // for the per-row target labels. Per-player running totals ride inside `players[]`.

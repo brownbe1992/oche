@@ -2108,7 +2108,7 @@ describe('evaluateVisitShanghai (docs/archive/shanghai-roadmap.md)', () => {
   });
 });
 
-describe('halveItRoundTarget (docs/halve-it-roadmap.md)', () => {
+describe('halveItRoundTarget (docs/archive/halve-it-roadmap.md)', () => {
   test('within range returns the target at that index; beyond the list caps at the final target', () => {
     const targets = HALVE_IT_DEFAULT_TARGETS;
     assert.deepEqual(halveItRoundTarget(1, targets), { sector: 20 });
@@ -2122,7 +2122,7 @@ describe('halveItRoundTarget (docs/halve-it-roadmap.md)', () => {
   });
 });
 
-describe('halveItDartValue (docs/halve-it-roadmap.md)', () => {
+describe('halveItDartValue (docs/archive/halve-it-roadmap.md)', () => {
   test('an unrestricted target counts any ring at face value', () => {
     const target = { sector: 20 };
     assert.equal(halveItDartValue({ sector: 20, mult: 1 }, target), 20, 'single');
@@ -2150,7 +2150,7 @@ describe('halveItDartValue (docs/halve-it-roadmap.md)', () => {
   });
 });
 
-describe('evaluateVisitHalveIt (docs/halve-it-roadmap.md)', () => {
+describe('evaluateVisitHalveIt (docs/archive/halve-it-roadmap.md)', () => {
   function mkGame(round, current, players, targets){
     return { halveItRound: round, current, players, config: { targets: targets || HALVE_IT_DEFAULT_TARGETS } };
   }

@@ -912,6 +912,40 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   if (resolvedGameType === 'cricket' && config && config.variant != null && !['standard', 'cutthroat'].includes(config.variant)) {
     throw httpError(400, "variant must be 'standard' or 'cutthroat'");
   }
+  // Halve-It custom target editor (docs/archive/halve-it-roadmap.md "Custom target editor"):
+  // config.targets rides in from the untrusted client just like cricket's variant/
+  // numbers above, and both the write-time consistency guard (addTurn) and the
+  // saved-game replay derive each round's expected points from it — so a malformed
+  // entry (a non-existent sector, an unhittable ring, a wrong shape) must be rejected
+  // here, not silently stored. Absent config.targets keeps the classic default
+  // (HALVE_IT_DEFAULT_TARGETS). Each entry is { sector: 1-20 or 25, ring?: 'single' |
+  // 'double' | 'treble' }; a treble on the Bull (25) can never be hit (no treble-bull
+  // ring exists) so it's rejected as an unwinnable round. Length is bounded 1-20, the
+  // same ceiling Shanghai's long-form uses.
+  if (resolvedGameType === 'halve_it' && config && config.targets != null) {
+    const t = config.targets;
+    if (!Array.isArray(t) || t.length < 1 || t.length > 20) {
+      throw httpError(400, 'targets must be an array of 1 to 20 rounds');
+    }
+    for (const entry of t) {
+      if (!entry || typeof entry !== 'object') throw httpError(400, 'each target must be an object');
+      const sector = Number(entry.sector);
+      if (!Number.isInteger(sector) || !((sector >= 1 && sector <= 20) || sector === 25)) {
+        throw httpError(400, 'each target sector must be an integer 1-20 or 25 (Bull)');
+      }
+      if (entry.ring != null && !['single', 'double', 'treble'].includes(entry.ring)) {
+        throw httpError(400, "target ring must be 'single', 'double', or 'treble'");
+      }
+      if (sector === 25 && entry.ring === 'treble') {
+        throw httpError(400, 'the Bull has no treble ring — a treble-25 round can never be won');
+      }
+    }
+    // Normalize to exactly {sector} or {sector, ring} so no extra client-supplied field
+    // rides into games.config — the server owns the stored shape.
+    config.targets = t.map(e => e.ring != null
+      ? { sector: Number(e.sector), ring: e.ring }
+      : { sector: Number(e.sector) });
+  }
   // Killer (docs/archive/game-modes-roadmap.md "Killer"): the become-a-killer
   // lives threshold is a New Game option (validated here, same as every other
   // config field reaching this function from an untrusted client), but the
@@ -1346,12 +1380,12 @@ function addTurn(gameId, t, opts = {}) {
       throw httpError(400, "scored does not match this Shanghai visit's points on the round's own number");
     }
   } else if (gameTypeRow && gameTypeRow.game_type === 'halve_it') {
-    // docs/halve-it-roadmap.md: same SEC-25 shape as Baseball/Shanghai's own
+    // docs/archive/halve-it-roadmap.md: same SEC-25 shape as Baseball/Shanghai's own
     // branches above — turns.scored IS arithmetically derivable from this visit's
     // own darts plus the round's target (sector, optionally ring-restricted), and
     // is the points-gained total every Halve-It stat trusts. Unlike Shanghai,
     // `bust` is NOT rejected here -- it's repurposed as the "this visit halved the
-    // running total" flag (docs/halve-it-roadmap.md's own column-repurposing
+    // running total" flag (docs/archive/halve-it-roadmap.md's own column-repurposing
     // precedent, same as Doubles Practice/guided Around the Clock), so it's
     // validated for CONSISTENCY with the derived points instead: bust must be true
     // iff the visit gained exactly 0 (hitting the target always scores >0, so
@@ -3643,7 +3677,7 @@ function getShanghaiWinLeaderboard() {
     rate: r.played ? +((r.won / r.played) * 100).toFixed(1) : 0 }));
 }
 
-/* ---------- Halve-It (docs/halve-it-roadmap.md) ----------
+/* ---------- Halve-It (docs/archive/halve-it-roadmap.md) ----------
    Structurally another Baseball/Shanghai sibling, but with one genuine
    complication neither of those has: Halve-It's running total is NOT a
    simple SUM(scored) -- the halving rule (ceil(total/2) whenever a visit
@@ -3734,7 +3768,7 @@ function getHalveItWonLegs(playerId, mode) {
 
 // Halve-It's Personal Bests -- same 5-field shape as getBaseballPersonalBests()/
 // getShanghaiPersonalBests(), bestFinalTotal replacing bestLegRuns/bestLegPoints
-// (docs/halve-it-roadmap.md's own "best final total" is this field;
+// (docs/archive/halve-it-roadmap.md's own "best final total" is this field;
 // its "best single round" lives in the stat bubbles above instead, matching
 // Baseball's own split between Personal Bests and its Best Inning bubble).
 function getHalveItPersonalBests(playerName, mode) {

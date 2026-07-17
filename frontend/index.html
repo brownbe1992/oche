@@ -843,6 +843,28 @@
           </div>
         </div>
 
+        <!-- Halve-It targets (Halve-It game type only, docs/archive/halve-it-roadmap.md
+             "Custom target editor", item 19) — Classic plays the standard 7-round set;
+             Custom reveals an ordered per-round editor (each round: a sector + an optional
+             required ring). Same Classic/Custom toggle shape as Cricket's own picker. -->
+        <div class="setup-section" id="halve-it-options-section" hidden>
+          <div class="setup-label">Halve-It targets</div>
+          <div class="opts" style="margin:0">
+            <div class="seg" role="group" aria-label="Halve-It target set">
+              <button id="halve-it-preset-classic" aria-pressed="true" onclick="setHalveItPreset('classic')">Classic (7 rounds)</button>
+              <button id="halve-it-preset-custom" aria-pressed="false" onclick="setHalveItPreset('custom')">Custom</button>
+            </div>
+          </div>
+          <div id="halve-it-custom-body" hidden style="margin-top:10px">
+            <p class="pp-meta" style="margin:0 0 8px">Build your own round sequence — <span id="halve-it-round-count">0</span> rounds. Each round targets a number (or the Bull); pick a required ring, or “Any” to count any hit on that number.</p>
+            <div id="halve-it-target-rows" role="group" aria-label="Halve-It custom rounds"></div>
+            <div class="btn-row" style="margin-top:8px">
+              <button class="btn btn-ghost" type="button" onclick="addHalveItTargetRow()">+ Add round</button>
+              <button class="btn btn-ghost" type="button" onclick="fillHalveItClassicIntoCustom()">Start from classic</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Checkout Trainer sub-mode + difficulty (Checkout Trainer mode only —
              the intro paragraph itself now lives in Step 2's how-to-play blurb) -->
         <div class="setup-section" id="checkout-trainer-options-section" hidden>
@@ -1808,6 +1830,10 @@ let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, 
   // Shanghai (docs/archive/shanghai-roadmap.md): how many rounds the fixed sequence
   // runs — default 7 (the common pub format), with a 1-20 long-form option.
   shanghaiRounds:7,
+  // Halve-It (docs/archive/halve-it-roadmap.md "Custom target editor", item 19): the target
+  // sequence — 'classic' plays HALVE_IT_DEFAULT_TARGETS, 'custom' plays the editable
+  // halveItCustomTargets list below (an ordered array of {sector, ring?}).
+  halveItPreset:'classic', halveItCustomTargets:[],
   // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): {playerName:
   // overrideStartScore}. X01 only, 2+ players; a name with no entry (or an
   // entry of undefined) plays the game's own regular starting score — see
@@ -3266,6 +3292,7 @@ function setMode(mode){
   document.getElementById('cricket-options-section').hidden = (setup.gameType !== 'cricket');
   document.getElementById('killer-options-section').hidden = (setup.gameType !== 'killer');
   document.getElementById('shanghai-options-section').hidden = (setup.gameType !== 'shanghai');
+  document.getElementById('halve-it-options-section').hidden = (setup.gameType !== 'halve_it');
   document.getElementById('ghost-options-section').hidden = (mode !== 'ghost');
   document.getElementById('doubles-options-section').hidden = (mode !== 'doubles_practice');
   document.getElementById('checkout-trainer-options-section').hidden = (mode !== 'checkout_trainer');
@@ -4259,7 +4286,9 @@ function setGameType(type){
   document.getElementById('cricket-options-section').hidden = (type !== 'cricket');
   document.getElementById('killer-options-section').hidden = (type !== 'killer');
   document.getElementById('shanghai-options-section').hidden = (type !== 'shanghai');
+  document.getElementById('halve-it-options-section').hidden = (type !== 'halve_it');
   if(type === 'cricket') renderCricketNumberGrid();
+  if(type === 'halve_it') setHalveItPreset(setup.halveItPreset);
 }
 // Killer lives threshold (docs/archive/game-modes-roadmap.md "Killer") — a simple
 // 3-way segmented control, same aria-pressed toggle pattern as
@@ -4279,6 +4308,80 @@ function setKillerLives(n){
     const btn = document.getElementById('killer-lives-'+v);
     if(btn) btn.setAttribute('aria-pressed', String(v===n));
   });
+}
+
+/* ---------- Halve-It custom target editor (docs/archive/halve-it-roadmap.md, item 19) ----------
+   Classic plays HALVE_IT_DEFAULT_TARGETS (frontend/scoring.js); Custom builds an ordered
+   {sector, ring?} sequence the server re-validates in createGame(). ring undefined = "Any"
+   (any hit on the sector scores at face value); 'single'/'double'/'treble' restrict it. */
+const HALVE_IT_MAX_ROUNDS = 20;
+function setHalveItPreset(preset){
+  setup.halveItPreset = preset;
+  const cc = document.getElementById('halve-it-preset-classic');
+  const cu = document.getElementById('halve-it-preset-custom');
+  if(cc) cc.setAttribute('aria-pressed', String(preset==='classic'));
+  if(cu) cu.setAttribute('aria-pressed', String(preset==='custom'));
+  const body = document.getElementById('halve-it-custom-body');
+  if(body) body.hidden = (preset !== 'custom');
+  // Seed the custom list from the classic default the first time it's opened empty, so the
+  // editor starts from a familiar, valid sequence rather than a blank slate.
+  if(preset === 'custom' && setup.halveItCustomTargets.length === 0) fillHalveItClassicIntoCustom();
+  else renderHalveItTargetRows();
+}
+function fillHalveItClassicIntoCustom(){
+  setup.halveItCustomTargets = HALVE_IT_DEFAULT_TARGETS.map(t => ({ sector:t.sector, ring:t.ring }));
+  renderHalveItTargetRows();
+}
+function addHalveItTargetRow(){
+  if(setup.halveItCustomTargets.length >= HALVE_IT_MAX_ROUNDS){
+    uiAlert(`Halve-It supports at most ${HALVE_IT_MAX_ROUNDS} rounds.`);
+    return;
+  }
+  setup.halveItCustomTargets.push({ sector:20, ring:undefined });
+  renderHalveItTargetRows();
+}
+function removeHalveItTargetRow(idx){
+  setup.halveItCustomTargets.splice(idx, 1);
+  renderHalveItTargetRows();
+}
+function updateHalveItTarget(idx, field, value){
+  const t = setup.halveItCustomTargets[idx];
+  if(!t) return;
+  if(field === 'sector') t.sector = Number(value);
+  else t.ring = value || undefined;  // '' (Any) -> undefined
+  // The Bull has no treble ring — the server rejects it, so snap an invalid pick back to a
+  // valid one and re-render rather than letting an unwinnable round be built.
+  if(t.sector === 25 && t.ring === 'treble') t.ring = 'double';
+  renderHalveItTargetRows();
+}
+function renderHalveItTargetRows(){
+  const host = document.getElementById('halve-it-target-rows');
+  const count = document.getElementById('halve-it-round-count');
+  if(count) count.textContent = String(setup.halveItCustomTargets.length);
+  if(!host) return;
+  const sectorOpts = (sel) => {
+    const opts = ['<option value="25"' + (sel===25?' selected':'') + '>Bull (25)</option>'];
+    for(let n=20;n>=1;n--) opts.push(`<option value="${n}"${sel===n?' selected':''}>${n}</option>`);
+    return opts.join('');
+  };
+  const ringOpts = (t) => {
+    const rings = [['','Any'],['single','Single'],['double','Double']];
+    if(t.sector !== 25) rings.push(['treble','Treble']);  // no treble-bull ring exists
+    return rings.map(([v,l]) => `<option value="${v}"${(t.ring||'')===v?' selected':''}>${l}</option>`).join('');
+  };
+  host.innerHTML = setup.halveItCustomTargets.map((t,i) => `
+    <div class="halve-it-row" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span class="pp-meta" style="min-width:64px">Round ${i+1}</span>
+      <select aria-label="Round ${i+1} target number" onchange="updateHalveItTarget(${i},'sector',this.value)">${sectorOpts(t.sector)}</select>
+      <select aria-label="Round ${i+1} required ring" onchange="updateHalveItTarget(${i},'ring',this.value)">${ringOpts(t)}</select>
+      <button class="iconbtn" type="button" aria-label="Remove round ${i+1}" title="Remove round" onclick="removeHalveItTargetRow(${i})">✕</button>
+    </div>`).join('');
+}
+// Returns the target sequence startGame() sends as config.targets, or null to use the
+// classic default (omitting config.targets keeps HALVE_IT_DEFAULT_TARGETS server-side).
+function resolveHalveItTargets(){
+  if(setup.halveItPreset !== 'custom') return null;
+  return setup.halveItCustomTargets.map(t => t.ring ? { sector:t.sector, ring:t.ring } : { sector:t.sector });
 }
 
 /* =========================================================================
@@ -4885,7 +4988,7 @@ async function startGame(){
   const isPracticeShanghai = setup.gameType === 'shanghai' && setup.mode !== 'h2h';
   // Same BUG-22 reasoning again: a practice Halve-It "leg" is a complete,
   // standalone game (evaluateVisitHalveIt() only ever completes once the
-  // final round settles, per docs/halve-it-roadmap.md), forced to
+  // final round settles, per docs/archive/halve-it-roadmap.md), forced to
   // exactly 1 leg/1 set here; H2H Halve-It keeps a real Bo3/Bo5 multi-leg match.
   const isPracticeHalveIt = setup.gameType === 'halve_it' && setup.mode !== 'h2h';
   // Dead Man Walking (docs/archive/dead-man-walking-roadmap.md "Session structure"):
@@ -4920,10 +5023,12 @@ async function startGame(){
     // Rounds (docs/archive/shanghai-roadmap.md) — default 1-7 (the common pub format),
     // with a 1-20 long-form option chosen on the setup screen.
     : gameType === 'shanghai' ? { rounds: setup.shanghaiRounds || 7 }
-    // Targets (docs/halve-it-roadmap.md) — the classic 7-round pub set;
-    // no custom-target editor in v1 (see docs/open-roadmap-items.md's own
-    // Halve-It custom target editor entry, split out separately).
-    : gameType === 'halve_it' ? { targets: HALVE_IT_DEFAULT_TARGETS }
+    // Targets (docs/archive/halve-it-roadmap.md) — the classic 7-round pub set by
+    // default, or a player-defined sector+ring sequence from the custom target
+    // editor (resolveHalveItTargets() returns null for the classic preset, in
+    // which case config.targets is omitted and createGame() falls back to
+    // HALVE_IT_DEFAULT_TARGETS server-side).
+    : gameType === 'halve_it' ? (resolveHalveItTargets() ? { targets: resolveHalveItTargets() } : {})
     // Rounds (docs/pressure-chamber-roadmap.md) — fixed at 15, never a New
     // Game choice; sent here only as a "store a currently-single value"
     // placeholder matching PRESSURE_ROUNDS — createGame() (backend/db.js)
@@ -4965,7 +5070,7 @@ async function startGame(){
     : gameType === 'shanghai'
     ? 'Shanghai'
     : gameType === 'halve_it'
-    ? 'Halve-It'
+    ? (setup.halveItPreset === 'custom' ? 'Custom Halve-It' : 'Halve-It')
     : gameType === 'pressure_chamber'
     ? 'The Pressure Chamber'
     : gameType === 'doubles_practice'
@@ -5025,7 +5130,7 @@ async function startGame(){
     setNo: 1, legNo: 1,
     baseballInning: 1, // Baseball only (docs/game-modes-roadmap.md) — which inning (1-9, or beyond on a tie) is live
     shanghaiRound: 1, // Shanghai only (docs/archive/shanghai-roadmap.md) — which round (1-config.rounds, or beyond on a tie) is live
-    halveItRound: 1, // Halve-It only (docs/halve-it-roadmap.md) — which round (1-config.targets.length, or beyond on a tie) is live
+    halveItRound: 1, // Halve-It only (docs/archive/halve-it-roadmap.md) — which round (1-config.targets.length, or beyond on a tie) is live
     // The Pressure Chamber only (docs/pressure-chamber-roadmap.md) — which
     // round (1-15) is live; gameId is the real games.id, the seed
     // generatePressureCard() needs (set right after DB.beginGame() resolves
@@ -6258,7 +6363,7 @@ const BADGE_INFO = {
   // number in one visit — wins the WHOLE match instantly, mid-round. Deliberately
   // separate from 'shanghaivisit' above (same feat, different game — see that doc).
   shanghai: { icon:'🀄', label:'Shanghai!', desc:"Win a Shanghai game instantly — single, double, AND treble of the round's own number in one visit.", shanghai:true },
-  // docs/halve-it-roadmap.md's own two flavor badges.
+  // docs/archive/halve-it-roadmap.md's own two flavor badges.
   halveitdeath: { icon:'🪓', label:'Halved at the Death', desc:'Win a Halve-It game after your own final-round visit halved your total.', halveIt:true },
   halveitnohalf: { icon:'🛡️', label:'No Half Measures', desc:'Win a Halve-It game without ever being halved.', halveIt:true },
   doublespracticeringmaster: { icon:'🎪', label:'Ring Master', desc:'Hit every double, D1 through D20 plus the bull, in Doubles Practice — lifetime.', doublesPractice:true },
@@ -7291,7 +7396,7 @@ function renderGameShanghai(){
    shows the RUNNING TOTAL after that round (not a per-round delta) since a
    bare "0" on a halved round would hide the actual halving that just
    happened — a ½ icon on a halved cell makes that state visible without
-   relying on color alone (docs/halve-it-roadmap.md's own
+   relying on color alone (docs/archive/halve-it-roadmap.md's own
    accessibility note). */
 function renderGameHalveIt(){
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
@@ -9203,7 +9308,7 @@ function liveSnapshot(message){
     // players[] array above via playerSnapshotShanghai().
     shanghaiRound: game.gameType === 'shanghai' ? (game.shanghaiRound || 1) : null,
     shanghaiMaxRounds: game.gameType === 'shanghai' ? ((game.config && game.config.rounds) || 7) : null,
-    // Halve-It only (docs/halve-it-roadmap.md): which round is
+    // Halve-It only (docs/archive/halve-it-roadmap.md): which round is
     // currently live, plus the round's own target -- per-player totals ride
     // inside the players[] array above via playerSnapshotHalveIt().
     halveItRound: game.gameType === 'halve_it' ? (game.halveItRound || 1) : null,
@@ -11085,7 +11190,7 @@ function undoLastTurnShanghai(){
   pushLive();
 }
 
-// Halve-It's own target label (docs/halve-it-roadmap.md) — a plain
+// Halve-It's own target label (docs/archive/halve-it-roadmap.md) — a plain
 // sector shows just the number; a ring-restricted target shows "Double 7"/
 // "Treble 10"; sector 25 shows "Bull" (matching every other UI's own Bull
 // label rather than the numeric 25).
@@ -11130,7 +11235,7 @@ function enterTurnHalveIt(){
   const dartsThrown = game.darts.length;
   p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
 
-  // docs/halve-it-roadmap.md's own "bust=1 marks the halved visit" data-model
+  // docs/archive/halve-it-roadmap.md's own "bust=1 marks the halved visit" data-model
   // precedent — turns.scored stores the GAIN (0 on a halved visit), never the
   // halving delta itself, mirroring the Baseball/Shanghai "store the gain, derive
   // the rest" shape.
@@ -12377,7 +12482,7 @@ const SHANGHAI_STAT_DEFS = [
 const SHANGHAI_BUBBLE_KEY_MAP = { shanghaippr:'ppr', shanghaisthrown:'shanghaisThrown', shanghaiwinpct:'winPct',
   shanghaigames:'gamesPlayed', shanghaidartsthrown:'dartsThrown', shanghaibestround:'bestRound' };
 
-// Halve-It's own stat vocabulary (docs/halve-it-roadmap.md).
+// Halve-It's own stat vocabulary (docs/archive/halve-it-roadmap.md).
 const HALVE_IT_STAT_DEFS = [
   { key:'halveitavgtotal',       label:'Avg Final Total', desc:'Average final total across every completed leg', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
   { key:'halveittimeshalved',    label:'Times Halved',   desc:'Total visits where all 3 darts missed the round\'s target', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
@@ -12921,7 +13026,7 @@ function playerSnapshotShanghai(p){
   };
 }
 
-/* ---------- Halve-It (docs/halve-it-roadmap.md) ----------
+/* ---------- Halve-It (docs/archive/halve-it-roadmap.md) ----------
    Another Baseball/Shanghai sibling (fixed round sequence, all players in
    lockstep on one shared live round, game.halveItRound) with no instant-win
    condition at all — the match only ever completes once the final round
@@ -12929,7 +13034,7 @@ function playerSnapshotShanghai(p){
    only the stateful player-record helpers stay here, same split as Baseball/
    Shanghai. */
 function newMatchPlayerHalveIt(name){
-  // everHalved/lastVisitHalved (docs/halve-it-roadmap.md's own 🛡️ No Half
+  // everHalved/lastVisitHalved (docs/archive/halve-it-roadmap.md's own 🛡️ No Half
   // Measures / 🪓 Halved at the Death badges): per-leg tracking, reset every leg
   // by resetPlayerForNextLegHalveIt() below.
   return { name, total:0, roundTotals:{}, roundHalved:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0,

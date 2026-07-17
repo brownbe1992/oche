@@ -510,7 +510,7 @@ read time from `scored > 0 ? scored : -2*round` — `round` itself is never
 stored either, always re-derived as that turn's own 1-indexed position within
 the game (`ROW_NUMBER() OVER (PARTITION BY game_id ORDER BY id)` server-side;
 a plain loop counter client-side, since a player only ever has one turn per
-round). This is the same design `docs/halve-it-roadmap.md` proposed for a
+round). This is the same design `docs/archive/halve-it-roadmap.md` proposed for a
 similar "hit gains, miss loses" shape, applied here for the first time.
 
 **Write-time guard** (`addTurn()`, `backend/db.js`, SEC-25-style, opted in via
@@ -6016,7 +6016,7 @@ bubbles/personal bests/win leaderboard, and the live `/display` scorecard.
 
 ## 32. Halve-It
 
-`docs/halve-it-roadmap.md`. The classic pressure game —
+`docs/archive/halve-it-roadmap.md`. The classic pressure game —
 `game_type='halve_it'`, structurally another Baseball/Shanghai sibling (a
 fixed round sequence, all players in lockstep on one shared live round,
 `game.halveItRound`) with no instant-win condition at all — the match only
@@ -6032,11 +6032,31 @@ halved round would hide the halving that just happened.
 An ordered array of `{sector, ring?}` pairs. `ring` omitted means any ring of
 that sector counts at face value (single = sector, double = 2×sector, treble
 = 3×sector); `ring` present (`'single'`/`'double'`/`'treble'`) restricts
-scoring to exactly that ring. v1 ships only the classic 7-round default —
-20, 16, double 7, 14, treble 10, 17, Bull — with **no custom-target editor**
-(`docs/open-roadmap-items.md` tracks that as its own separate, independently-
-scoped item, per CLAUDE.md's v1/v2-split discipline rather than leaving it
-silently unbuilt).
+scoring to exactly that ring. The default is the classic 7-round set —
+20, 16, double 7, 14, treble 10, 17, Bull (`HALVE_IT_DEFAULT_TARGETS` in
+`frontend/scoring.js`).
+
+**Custom target editor.** The New Game setup screen offers a Classic/Custom
+toggle (`#halve-it-options-section`, same shape as Cricket's custom-numbers
+picker). Classic omits `config.targets` entirely and the game plays the
+default; Custom exposes a per-round editor (`setHalveItPreset`,
+`addHalveItTargetRow`, `updateHalveItTarget`, `renderHalveItTargetRows`,
+`resolveHalveItTargets` in `frontend/index.html`) building an ordered
+1–20-round sequence of `{sector, ring?}` rows — each row a native `<select>`
+for the sector (Bull 25, or 20…1) and one for the required ring (Any / Single
+/ Double / Treble, with Treble hidden for Bull). A custom set is sent as
+`config.targets` and the game's category label reads **"Custom Halve-It"**
+instead of "Halve-It".
+
+**Server-side validation (`createGame()`, `backend/db.js`).** When
+`game_type='halve_it'` and `config.targets` is supplied it must be an array of
+1–20 entries; each entry's `sector` must be an integer 1–20 or 25 (Bull), each
+`ring` (if present) one of `single`/`double`/`treble`, and a treble-25 round is
+rejected outright (the Bull has no treble ring, so the round could never be
+won). Each entry is normalised to `{sector}` or `{sector, ring}`, stripping any
+extra fields before storage. Omitting `config.targets` is always valid and
+keeps `HALVE_IT_DEFAULT_TARGETS`. Covered by
+`backend/test/db.halve-it-stats.test.js`.
 
 ### Scoring — `GAME_TYPES.halve_it.evaluateVisit(player, darts, game)` (`frontend/scoring.js`'s `evaluateVisitHalveIt`)
 
@@ -6179,8 +6199,10 @@ ring-restricted/wrong-sector/bull cases, and `evaluateVisitHalveIt()`'s
 hit/halve/round-up/final-round/tie/extra-round cases. `backend/test/db.halve-it-stats.test.js`:
 stat-bubble formulas, `getHalveItWonLegs()`'s pure-total derivation (including
 a case proving the order-dependent replay differs from a naive
-`SUM(scored)`), the best-total/win leaderboards, and an
-X01/Cricket/Baseball/Shanghai/Halve-It cross-contamination regression.
+`SUM(scored)`), the best-total/win leaderboards, an
+X01/Cricket/Baseball/Shanghai/Halve-It cross-contamination regression, and
+`createGame()`'s custom-target validation/normalisation (well-formed accept,
+extra-field stripping, malformed-array reject, treble-Bull reject, omitted-OK).
 `backend/test/db.turn-consistency-guard.test.js`: the SEC-25-style guard's
 accept/reject cases, including the bust-must-match-the-derived-halving
 consistency check and the ring-restricted/extra-round target-advancement
