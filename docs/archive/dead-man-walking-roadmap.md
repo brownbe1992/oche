@@ -1,6 +1,9 @@
 # Dead Man Walking — Design Roadmap
 
-> Status: **design phase, not started.**
+> Status: **done.** Built as roadmap item 30 — see `docs/open-roadmap-items.md`'s
+> completion ledger and `REFERENCE.md` §33 for the shipped implementation. The
+> "Implementation notes" section at the bottom of this doc answers every open
+> question below with what was actually decided/built.
 
 ## Goal
 
@@ -330,3 +333,58 @@ drill in this set.
 - Exact ladder thresholds and the one-off badges above are a first pass
   for playtesting, same "not final" caveat every other doc's numbers
   carry.
+
+## Implementation notes (as shipped)
+
+Everything in this doc was built as designed, with the following resolutions
+to the open questions above:
+
+- **"Avoided" checkouts** — not built. Confirmed, same as this doc's own
+  reasoning: there's no reliable signal in recorded data for "the player
+  routed around this number on purpose," so `getWeakestCheckouts()` measures
+  only bust rate and non-completion rate, exactly as specified.
+- **Band granularity** — shipped with three bands (Low 32–60 / Mid 61–100 /
+  High 101–170, `DEAD_MAN_WALKING_BANDS` in `frontend/scoring.js`), this doc's
+  own starting recommendation. Not tuned against real play data yet — a
+  candidate for revisiting once there's a meaningful volume of real runs.
+- **Executed-by-bust vs. Executed-by-budget distinctness** — resolved as:
+  **not stored distinctly** (both collapse to "not Walked Out" for every
+  tally, stat, and badge condition), but the live scoreboard's `announce()`
+  calls and status text DO distinguish them in the moment ("EXECUTED — bust"
+  vs. "EXECUTED — out of darts"), matching this doc's own framing that the
+  distinction "matters for live feedback but not for anything stored or
+  tallied."
+- **Session personalization / repeats once `config.rounds` is frozen** — a
+  thin weak-checkout pool does repeat targets across the 15 rounds (a real,
+  uniform draw with replacement via `pickDeadManWalkingTargets()`), and
+  repeats are **not** flagged in the UI as "this one again" — they're
+  presented identically to any other round. Revisit if playtesting shows
+  players are confused by an apparent duplicate.
+- **The "Drill this number" cross-link** into Checkout Trainer's
+  `pinnedTarget` flow — **not built**, exactly as this doc's own "Suggested
+  build order" step 9 and this "Open questions" entry both frame it: optional
+  future work, not part of the core session loop. Per this doc's own
+  optional/v2 framing, it does not have its own tracked row on
+  `docs/open-roadmap-items.md` — pick this doc back up directly if it's ever
+  wanted.
+- **Ladder thresholds and the 3 one-off badges** — shipped as specified in
+  the Achievements section above (🕊️ Full Reprieve for 15/15, ⚰️ Pardoned for
+  13+/15, 💀 Last Request for 0/15), plus a `4/4/3`-tier three-ladder set
+  (lifetime runs completed, lifetime Walked Out rounds, longest Walked-Out
+  streak) for 14 badges total. Unchanged from this doc's first pass; still
+  not confirmed against real playtesting data.
+- **A real bug found along the way, outside this doc's own scope**: building
+  this drill's stats surfaced a pre-existing isolation gap in
+  `getPersonalBests()`/`getPlayerStatBubbles()` — several X01-specific fields
+  (`bestLegAvg`, `bestLeg`, `recentFormAvg`, `lifetimeAvg`, `avgDartsPerLeg`,
+  `fewestDartsCheckout`) filtered on `t.checkout=1` with no `game_type='x01'`
+  guard, so 121 Checkout Ladder's (and now Dead Man Walking's) own checkouts
+  were silently leaking into X01's Personal Bests. Fixed alongside this
+  feature; see `REFERENCE.md` §33's "Stats" section for the full writeup.
+
+Every new calculation here (the weakness ranking, the par/floor formula, the
+per-dart evaluator, the write-time budget guard, and the result tiers) has a
+committed, re-runnable test in `backend/test/scoring.test.js`,
+`backend/test/db.dead-man-walking-stats.test.js`, and
+`backend/test/db.turn-consistency-guard.test.js`, per `CLAUDE.md`'s standing
+testing rule.
