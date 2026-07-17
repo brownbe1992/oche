@@ -46,10 +46,10 @@ Others
   explanatory + count-aware achievement notifications) — done, see docs/archive/next-session-plan.md
 - Add additional games (Cricket, Baseball, etc.) — full design in docs/game-modes-roadmap.md
 - Shanghai game mode (round-by-round numbers, instant win on single+double+treble) — done, see docs/archive/shanghai-roadmap.md
-- Halve-It game mode (hit each round's target or your score halves) — core game done, see docs/archive/halve-it-roadmap.md; the custom target editor is a separate, still-open item on docs/open-roadmap-items.md
+- Halve-It game mode (hit each round's target or your score halves) — done, including the custom target editor, see docs/archive/halve-it-roadmap.md
 - Cut-throat Cricket variant (points score onto open opponents, lowest wins — the piece deferred at Cricket v1) — done, see docs/archive/cutthroat-cricket-roadmap.md
 - Structured practice ladders: Bob's 27 doubles routine and the 121 checkout ladder — done, both parts, see docs/archive/practice-ladders-roadmap.md
-- The Pressure Chamber (15-round pressure-training drill, solo or identical-sequence H2H — a seeded Pressure Card per round pairing a target with a situational modifier like Sudden Death/No Warmup/Match Dart, Composure Points, a Composure Rating) — core game done, see docs/archive/pressure-chamber-roadmap.md; the self-declare-before-verifying honesty mechanic (`declared_hit` + Honesty%) is a separate, still-open item on docs/open-roadmap-items.md
+- The Pressure Chamber (15-round pressure-training drill, solo or identical-sequence H2H — a seeded Pressure Card per round pairing a target with a situational modifier like Sudden Death/No Warmup/Match Dart, Composure Points, a Composure Rating) — done, including the self-declare-before-verifying honesty mechanic (`declared_hit` + Honesty%), see docs/archive/pressure-chamber-roadmap.md
 - The Gauntlet (solo endurance warm-up — 20 stations in a fixed clock-adjacency order, single→triple→double per station in strict throw order, a Scar tally with a one-time repeat rule and doubled Deep Scars, a result tier from Unmarked to The Gauntlet Wins, and a per-station Scar Map weakness heatmap that accumulates across sessions) — done, see docs/archive/gauntlet-roadmap.md
 - Killer (elimination-format H2H — each player randomly assigned their own number, build lives on it to become a killer, then attack opponents' numbers at the same ring-scaled rate, with a flat-1-life self-kill via your own double; last player standing wins the leg) — done, see docs/game-modes-roadmap.md "Killer"
 - Dead Man Walking (15-round solo drill that drops each round mid-checkout on the player's own historically weakest finishes, with a personalized "one dart fewer than you should need" budget per round and a Pardoned-to-Executed result tier — pulls its targets from real X01 history via a new weakness query built on Coaching Insights' own techniques) — done, see docs/archive/dead-man-walking-roadmap.md
@@ -58,7 +58,7 @@ Others
 - Automated scoring with cameras and machine learning — full design in docs/camera-scoring-roadmap.md
 - Settings page - set default player
 - Saved games / pause & resume (save an in-progress H2H or solo-practice game, come back later, resume exactly where it left off; resume-or-abandon prompt when the same matchup starts a new game; abandoning keeps the stats) — done, see docs/archive/saved-games-roadmap.md
-- Tournament mode (bracket play, single AND double elimination, tournament-specific badges, Player Profile tournament stats) — done, see docs/tournament-mode-roadmap.md; only the winners/losers-tabbed visual bracket tree still open
+- Tournament mode (bracket play, single AND double elimination, a tabbed winners/losers/grand-final bracket view, tournament-specific badges, Player Profile tournament stats) — fully done, see docs/archive/tournament-mode-roadmap.md
 - iOS/Android app (hybrid webview client) — full design in docs/mobile-app-roadmap.md
 - Online multiplayer (P2P scoring + live video verification) — full design in docs/online-multiplayer-roadmap.md
 - Expanded achievements/badges beyond 180s/Big Fish/9-darters — done, see docs/achievements-badges-roadmap.md

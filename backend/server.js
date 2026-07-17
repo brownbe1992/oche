@@ -479,7 +479,7 @@ const ALLOWED_LIVE_KEYS = new Set([
   // Per-player hit-set/progress data rides inside the already-unrestricted
   // per-player `players[]` array, same as Chuckin's heatmap/sessionAvg fields do.
   'atcLastDart', 'atwLastDart',
-  // Tournament mode only (docs/tournament-mode-roadmap.md) — read by display.html's
+  // Tournament mode only (docs/archive/tournament-mode-roadmap.md) — read by display.html's
   // fmtText() for the top-bar round label ("Quarterfinal", "Final", ...).
   'tournamentRoundLabel',
   // Baseball only (docs/game-modes-roadmap.md) — which inning (1-9, or beyond on a
@@ -1078,7 +1078,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, db.abandonSavedGame(Number(mt[1])));
     }
 
-    // ----- tournaments (docs/tournament-mode-roadmap.md, single-elimination only) -----
+    // ----- tournaments (docs/archive/tournament-mode-roadmap.md, single-elimination only) -----
     // Viewing a bracket is public, same as every other stats/scoreboard view; creating
     // a tournament, starting a match, and recording a walkover are all state-changing
     // writes and go through the same requireWrite gate as starting/completing a game.

@@ -101,7 +101,7 @@ a single-elimination tournament.
 
 ## How this differs from tournament mode
 
-Tournament mode (see `docs/tournament-mode-roadmap.md`) is bracket-structured: matches
+Tournament mode (see `docs/archive/tournament-mode-roadmap.md`) is bracket-structured: matches
 are pre-determined by the bracket shape, and losing (in single-elim) ends your
 participation. A league is unstructured by comparison: any two enrolled players can
 play any casual H2H match at any time during the season, and every result — not just

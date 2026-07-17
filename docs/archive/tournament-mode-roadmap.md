@@ -1,22 +1,18 @@
 # Tournament Mode — Design Roadmap
 
-> Status (2026-07): **Single- AND double-elimination are built and playable
-> end-to-end.** Single-elim: schema, bracket generation (arbitrary player counts,
-> standard seeding, cascading byes), match lifecycle, the setup screen, a
-> bracket-tree + "Up Next" view, live-scoreboard round labels, the player-deletion
-> guard, tournament badges (§7) and Player Profile stats (§8). **Double-elimination
-> (build-order step 2) now also ships** (2026-07, roadmap item 13): losers-bracket
-> generation + grand-final/reset logic on the same schema (the
-> `winner_next_*`/`loser_next_*` pointer pair, §1), restricted to exact powers of
-> two (4/8/16/32/64/128) per §2's de-risking; a Single/Double toggle on the setup
-> screen; and a functional grouped-column bracket view (Winners / Losers / Grand
-> Final sections). Full mechanics writeup: `REFERENCE.md` §15.
->
-> **One piece is still open**: the fancier winners/losers-**tabbed** *visual*
-> bracket tree (build-order step 3), including the accessibility revisit its much
-> deeper tree needs at 128 players — tracked as its own separate item on
-> `docs/open-roadmap-items.md`. This doc stays open (not archived) until that ships
-> too.
+> Status (2026-07): **COMPLETE — every build-order step is done, so this doc is
+> archived.** Single- AND double-elimination are built and playable end-to-end.
+> Single-elim: schema, bracket generation (arbitrary player counts, standard
+> seeding, cascading byes), match lifecycle, the setup screen, the bracket + "Up
+> Next" view, live-scoreboard round labels, the player-deletion guard, tournament
+> badges (§7) and Player Profile stats (§8). Double-elimination (build-order step
+> 2, roadmap item 13): losers-bracket generation + grand-final/reset logic on the
+> same schema (the `winner_next_*`/`loser_next_*` pointer pair, §1), restricted to
+> exact powers of two (4/8/16/32/64/128) per §2's de-risking. The
+> winners/losers-**tabbed** visual bracket view (build-order step 3, roadmap item
+> 33): a Winners / Losers / Grand Final tab switcher (roving-tabindex WAI-ARIA
+> tablist) showing one bracket panel at a time, so the deep double-elim tree stays
+> readable at 128 players. Full mechanics writeup: `REFERENCE.md` §15.
 
 > **Related (2026-07)**: `docs/companion-website-roadmap.md` proposes cross-instance
 > tournaments run through a project-operated site. This doc's bracket-generation logic
@@ -42,7 +38,7 @@ for them:
 | Bracket format | **Both built (2026-07).** Single-elimination (arbitrary player counts) and double-elimination (item 13, restricted to exact powers of two 4/8/16/32/64/128 — see §2). Chosen via a Single/Double toggle on the setup screen. |
 | Category scope | **Built.** Any X01 starting score (501/301/170/101) — the whole tournament uses one, chosen at setup. Not scoped to other game types (Cricket, etc.). |
 | Match format across rounds | **Built.** Per-round configurable (legs/sets per round), same as originally decided — the setup screen pre-fills Bo3 early rounds stepping to Bo5 in the final, editable per round before generating. |
-| Bracket visualization | **Built** (grouped-column layout, not a procedurally-generated SVG). Single-elim is one column per round; double-elim groups those columns into Winners / Losers / Grand Final sections. A linearized list view sits alongside for accessibility. The fancier winners/losers-**tabbed** tree is still open (build-order step 3). |
+| Bracket visualization | **Built** (flex columns per round, not a procedurally-generated SVG). Single-elim is one column per round; double-elim (item 33) adds a Winners / Losers / Grand Final **tab switcher** (`role="tablist"`, roving tabindex) showing one bracket panel at a time. A linearized list view sits alongside for accessibility. |
 | Seeding | **Built.** Three methods, all client-side: random shuffle, manual reorder, or by existing lifetime 3-dart average (best first, no-data-yet sorts last). See REFERENCE.md §15. |
 
 ## 1. Data model
@@ -156,10 +152,12 @@ roster is realistically tens of names, not hundreds), the three seeding methods 
 the Decisions table above, and the per-round format table with editable legs/sets
 per round before generating.
 
-**Bracket view** — **built**, but as a plain flex column per round (`.tourney-bracket`
-in `frontend/index.html`) rather than a procedurally-generated SVG — single-
-elimination has no winners/losers split to render, so the "two scrollable panels
-with a tab switcher" design below is double-elimination-specific and still unbuilt.
+**Bracket view** — **built** as flex columns per round (`.tourney-bracket` in
+`frontend/index.html`) rather than a procedurally-generated SVG. Single-elimination
+has no winners/losers split, so it shows the columns directly. Double-elimination
+uses the "two scrollable panels with a tab switcher" design (built 2026-07, item
+33): a Winners / Losers / Grand Final `role="tablist"` shows one bracket's columns
+at a time, keeping the deep tree readable.
 
 **"Up Next" list** — **built**, exactly as described: the actual entry point for
 starting a match, listing every `ready` match (plus any `in_progress` one, for a
@@ -198,10 +196,11 @@ onto `/display`'s existing top-bar text by `fmtText()`. Simpler than the
    on top of the same schema (double-elimination), restricted to exact powers of two.
    Ships with a Single/Double setup toggle and a functional grouped-column bracket
    view (Winners / Losers / Grand Final sections).
-3. **Not started** — Visual bracket tree rendering with winners/losers **tabs**
-   (double-elimination's version of the tree — single-elim's simpler tree is done,
-   and double-elim currently uses the grouped-column view from step 2). Tracked as
-   its own separate open item on `docs/open-roadmap-items.md`.
+3. **✅ Done (2026-07, item 33)** — Visual bracket view with winners/losers **tabs**
+   for double-elimination: a Winners / Losers / Grand Final tab switcher
+   (`.tourney-tabs`, `role="tablist"`, roving tabindex + ArrowLeft/Right/Home/End)
+   showing one bracket panel at a time, so the deep double-elim tree stays readable.
+   Single-elim keeps its single-column view (no tabs). `REFERENCE.md` §15.
 4. **✅ Done** — Per-round format setup UI, seeding UI (three methods, see the
    Decisions table), and tournament stats on player profiles (stretch, §8) —
    all built.
@@ -220,12 +219,13 @@ feature, not bolted on after:
   status is always icon + text (`TOURNEY_STATUS_ICON`/`TOURNEY_STATUS_LABEL`), never
   color alone. The two new badges (§7) reuse the existing achievement-overlay
   machinery unchanged — same icon+text+`announce()` screen-reader treatment every
-  other badge already gets, nothing bespoke to design in. The double-elim view
-  reuses the same linearized list view + Up Next list, so it has the same two
-  non-spatial paths. **Still open**: double-elimination's much deeper tree (up to
-  ~19 rounds combined for 128 players) will need the *visual tabbed tree* (step 3)
-  designed with this in mind at that scale — the current grouped-column view stays
-  readable, but the eventual tab layout must not regress it.
+  other badge already gets, nothing bespoke to design in. The double-elim tabbed
+  view (item 33) reuses the same linearized list view + Up Next list, so it has the
+  same two non-spatial paths, and the tab switcher itself is a standard
+  roving-tabindex WAI-ARIA tablist (ArrowLeft/Right/Home/End move both selection and
+  focus). Showing one bracket panel at a time is exactly what keeps the deep
+  double-elim tree (~19 rounds combined at 128 players) readable rather than one
+  giant scroll.
 - **Testing**: **built** for both bracket types. `backend/test/tournament.test.js`
   covers single-elim: generation across several player counts (including the
   5-player bye-cascade case), a full simulated tournament to champion, walkover

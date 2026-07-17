@@ -215,7 +215,7 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_challenge_player_date ON daily_challenge_attempts(player_id, challenge_date);
 
-  -- Tournament mode (docs/tournament-mode-roadmap.md), single-elimination only —
+  -- Tournament mode (docs/archive/tournament-mode-roadmap.md), single-elimination only —
   -- built on top of the existing 1v1 scoring engine rather than a parallel system.
   -- A tournament match IS a normal games row under the hood (tournament_matches.game_id),
   -- so PINs, checkout hints, undo, live scoreboard, and all existing stats keep
@@ -7542,17 +7542,17 @@ function getAroundTheWorldProgress(playerName) {
   return { hit: rows, count: rows.length, total: 63 };
 }
 
-/* ---------- tournament mode (docs/tournament-mode-roadmap.md, single-elim only) ----------
+/* ---------- tournament mode (docs/archive/tournament-mode-roadmap.md, single-elim only) ----------
    Seeding (random shuffle / manual reorder / by lifetime 3-dart average) all happens
    client-side — `players` here is already the final seed order (index 0 = seed 1),
    the same way createGame()'s `players` array order already determines throw order
    with no server-side reordering. */
 const TOURNAMENT_X01_CATEGORIES = ['501', '301', '170', '101'];
 const TOURNAMENT_MAX_PLAYERS = 128;
-// docs/tournament-mode-roadmap.md §2: double-elimination is restricted to exact
+// docs/archive/tournament-mode-roadmap.md §2: double-elimination is restricted to exact
 // powers of two for v1 (no cascading byes in the losers bracket).
 const TOURNAMENT_DOUBLE_ELIM_COUNTS = [4, 8, 16, 32, 64, 128];
-// docs/tournament-mode-roadmap.md §7: how many seed slots worse the winner must be
+// docs/archive/tournament-mode-roadmap.md §7: how many seed slots worse the winner must be
 // than the opponent they beat to count as an upset — mirrors the spirit of the H2H
 // Giant Slayer's 15-average gap without reusing its exact (average-based) threshold,
 // which doesn't apply to a seed number.
@@ -7590,7 +7590,7 @@ function _roundLabel(roundsFromFinal, roundNo) {
 // match, completes the whole tournament). Called identically whether the result
 // came from a played game, an admin-recorded walkover, or a round-1 bye cascading
 // forward at generation time — advancement logic doesn't need to know which.
-// docs/tournament-mode-roadmap.md §7: Giant Slayer (Tournament) — awarded per
+// docs/archive/tournament-mode-roadmap.md §7: Giant Slayer (Tournament) — awarded per
 // match whenever the winner was seeded at least TOURNAMENT_GIANT_SLAYER_SEED_THRESHOLD
 // slots WORSE than the opponent they just beat. Called from every real (non-bye)
 // match result, single- or double-elimination alike, so a winners-bracket upset
@@ -7610,7 +7610,7 @@ function _maybeAwardTournamentGiantSlayer(tournamentId, winnerId, loserId) {
 }
 
 // Settles the whole tournament on its deciding match: champion, runner-up, status,
-// and the Champion badge (docs/tournament-mode-roadmap.md §7), all in one place.
+// and the Champion badge (docs/archive/tournament-mode-roadmap.md §7), all in one place.
 function _completeTournament(tournamentId, championId, runnerUpId) {
   db.prepare(`UPDATE tournaments SET status = 'completed', champion_id = ?, runner_up_id = ?, completed_at = datetime('now') WHERE id = ?`)
     .run(championId, runnerUpId, tournamentId);
@@ -7620,7 +7620,7 @@ function _completeTournament(tournamentId, championId, runnerUpId) {
   if (championName) awardBadge(championName, 'tournament_champion', true);
 }
 
-// The grand final's conditional "bracket reset" (docs/tournament-mode-roadmap.md §2).
+// The grand final's conditional "bracket reset" (docs/archive/tournament-mode-roadmap.md §2).
 // By construction GF game 1's slot 1 is the winners-bracket champion and slot 2 is
 // the losers-bracket champion (they arrive from the WB/LB finals' winner_next
 // pointers). If the WB champion wins game 1, they have zero losses and the tournament
@@ -7721,7 +7721,7 @@ function createTournament({ name, category, players, rounds, bracketType }) {
   if (uniqueNames.size !== players.length) throw httpError(400, 'Duplicate players are not allowed');
 
   const bracketTypeClean = bracketType === 'double_elim' ? 'double_elim' : 'single_elim';
-  // docs/tournament-mode-roadmap.md §2: double-elimination is v1-restricted to exact
+  // docs/archive/tournament-mode-roadmap.md §2: double-elimination is v1-restricted to exact
   // powers of two (4/8/16/32/64/128), the deliberate de-risking that keeps the losers
   // bracket free of the cascading-bye problem entirely — single-elim still handles
   // arbitrary counts, since its bye propagation is simple.
@@ -7823,7 +7823,7 @@ function _generateSingleElimBracket(tournamentId, bracketSize, roundCount, clean
   byeAdvances.forEach(([matchId, winnerId]) => _advanceTournamentMatch(matchId, winnerId));
 }
 
-// Double-elimination generation (docs/tournament-mode-roadmap.md §2). k = log2 of
+// Double-elimination generation (docs/archive/tournament-mode-roadmap.md §2). k = log2 of
 // the exact player count (guaranteed a power of two here, so zero byes). Creates
 // every round and match up-front, then wires the winner_next / loser_next pointer
 // pairs the schema was designed for. Match layout per round comes from
@@ -7934,7 +7934,7 @@ function getTournament(id) {
   return { ...t, matches, players };
 }
 
-// docs/tournament-mode-roadmap.md §8: Player Profile "Tournaments" stat block —
+// docs/archive/tournament-mode-roadmap.md §8: Player Profile "Tournaments" stat block —
 // wins, runner-up count, and best finish reached, all simple COUNT/MAX-style
 // queries against the existing tournament tables, no new derived formula.
 function getTournamentStats(playerName) {

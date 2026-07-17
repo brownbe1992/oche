@@ -1,5 +1,5 @@
 'use strict';
-// Committed tests for backend/db.js's tournament mode (docs/tournament-mode-roadmap.md,
+// Committed tests for backend/db.js's tournament mode (docs/archive/tournament-mode-roadmap.md,
 // single-elimination only — double-elimination explicitly deferred, tracked separately
 // on docs/open-roadmap-items.md). Covers: bracket generation across player counts
 // (round count, standard seeding pairs, bye cascading with no double-byes),
@@ -307,7 +307,7 @@ describe('BUG-7 — wipeAllData clears tournament tables', () => {
   });
 });
 
-// docs/tournament-mode-roadmap.md §7 — Champion and Giant Slayer (Tournament)
+// docs/archive/tournament-mode-roadmap.md §7 — Champion and Giant Slayer (Tournament)
 // badges, awarded inline from _advanceTournamentMatch() (see the "not a second
 // parallel hook" note in the roadmap doc itself).
 describe('tournament badges (§7)', () => {

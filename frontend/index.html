@@ -304,13 +304,22 @@
   .da-count{font-family:'Bebas Neue';font-size:15px;color:var(--cream);flex:none;min-width:38px;text-align:right}
   .da-sub{font-size:10px;color:var(--muted);flex:none}
 
-  /* ---- tournament mode (docs/tournament-mode-roadmap.md) ---- */
+  /* ---- tournament mode (docs/archive/tournament-mode-roadmap.md) ---- */
   .tourney-check-row{display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:13px;color:var(--cream)}
   .tourney-bracket{display:flex;gap:16px;overflow-x:auto;padding-bottom:8px}
   .tourney-round-col{display:flex;flex-direction:column;gap:10px;min-width:150px;flex:none}
   .tourney-round-col .pp-section-title{margin-bottom:2px}
   .tourney-match-card{background:var(--surface-2);border:1px solid var(--wire);border-radius:8px;
     padding:8px 10px;font-size:13px;color:var(--cream);display:flex;flex-direction:column;gap:2px}
+  /* Winners/Losers/Grand Final tab switcher for a double-elimination bracket
+     (docs/archive/tournament-mode-roadmap.md §4 — the deep double-elim tree is shown one
+     bracket panel at a time rather than all stacked, so it stays readable at 128
+     players). Single-elimination renders without tabs. */
+  .tourney-tabs{display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap}
+  .tourney-tab{background:var(--surface-2);border:1px solid var(--wire);border-radius:8px;
+    padding:6px 12px;font-size:13px;color:var(--cream);cursor:pointer}
+  .tourney-tab[aria-selected="true"]{background:var(--gold,#c9a227);border-color:var(--gold,#c9a227);color:#1a1a1a;font-weight:700}
+  .tourney-tab:focus-visible{outline:2px solid var(--gold,#c9a227);outline-offset:2px}
 
   /* ---- coaching insights ---- */
   /* Icon + text tag rather than a color-coded strip, so strength vs. focus-area
@@ -5344,7 +5353,7 @@ function ensurePlayerStats(name){
 function persist(){}
 
 /* =========================================================================
-   TOURNAMENT MODE (docs/tournament-mode-roadmap.md) — single-elimination only.
+   TOURNAMENT MODE (docs/archive/tournament-mode-roadmap.md) — single-elimination only.
    A tournament match IS a normal X01 game under the hood (see beginTournamentMatch
    below) — this section is purely the bracket setup/view/orchestration UI on top;
    the actual scoring screen, live scoreboard, undo, achievements, etc. are all the
@@ -5354,6 +5363,7 @@ let tournamentView = 'list';        // 'list' | 'setup' | 'detail'
 let currentTournamentId = null;
 let tournamentDetailCache = null;   // last-fetched detail for currentTournamentId
 let tournamentSetup = null;         // built fresh each time the setup view opens
+let tournamentBracketTab = null;    // active bracket tab in a double-elim detail view ('winners'|'losers'|'grand_final')
 
 function renderTournamentScreen(){
   if(tournamentView==='setup') return renderTournamentSetup();
@@ -5384,7 +5394,7 @@ function renderTournamentList(list){
       <button class="btn btn-primary" onclick="openTournamentSetup()">+ New Tournament</button>
     </div>`;
 }
-function openTournament(id){ currentTournamentId=id; tournamentView='detail'; renderTournamentScreen(); }
+function openTournament(id){ currentTournamentId=id; tournamentBracketTab=null; tournamentView='detail'; renderTournamentScreen(); }
 function openTournamentSetup(){ tournamentSetup=null; tournamentView='setup'; renderTournamentScreen(); }
 
 /* ---------- setup ---------- */
@@ -5397,7 +5407,7 @@ function tournamentRoundLabel(roundNo, roundCount){
   if(fromFinal===2) return 'Quarterfinal';
   return `Round ${roundNo}`;
 }
-// docs/tournament-mode-roadmap.md §2: double-elimination is v1-restricted to exact
+// docs/archive/tournament-mode-roadmap.md §2: double-elimination is v1-restricted to exact
 // powers of two (matches the backend's TOURNAMENT_DOUBLE_ELIM_COUNTS).
 const TOURNAMENT_DOUBLE_ELIM_COUNTS = [4, 8, 16, 32, 64, 128];
 function tournamentIsValidDoubleElimCount(n){ return TOURNAMENT_DOUBLE_ELIM_COUNTS.includes(n); }
@@ -5426,7 +5436,7 @@ function renderTournamentSetup(){
   if(!ts.bracketType) ts.bracketType = 'single_elim';
   const n = ts.selected.length;
   // Single-elim accepts any 2+ players; double-elim is restricted to exact powers
-  // of two (docs/tournament-mode-roadmap.md §2), so a non-conforming count blocks
+  // of two (docs/archive/tournament-mode-roadmap.md §2), so a non-conforming count blocks
   // Create with an explanatory note rather than silently generating a broken bracket.
   const doubleElimCountOk = ts.bracketType !== 'double_elim' || tournamentIsValidDoubleElimCount(n);
   const canBuild = n >= 2 && doubleElimCountOk;
@@ -5617,7 +5627,7 @@ function renderTournamentDetail(t){
   // (winners / losers / grand final). Single-elimination has only the winners
   // bracket, so it renders exactly as before — no bracket subheadings. A
   // double-elimination bracket adds a labeled section per bracket
-  // (docs/tournament-mode-roadmap.md §2/§4 — a functional grouped-column view; the
+  // (docs/archive/tournament-mode-roadmap.md §2/§4 — a functional grouped-column view; the
   // fancier winners/losers-tab tree is tracked as its own separate open item).
   const roundColumns = (matches)=>{
     const rounds = {};
@@ -5628,14 +5638,27 @@ function renderTournamentDetail(t){
     }).join('');
   };
   const BRACKET_ORDER = ['winners','losers','grand_final'];
-  const BRACKET_LABEL = { winners:'Winners Bracket', losers:'Losers Bracket', grand_final:'Grand Final' };
+  const BRACKET_LABEL = { winners:'Winners', losers:'Losers', grand_final:'Grand Final' };
   const bracketsPresent = BRACKET_ORDER.filter(b => t.matches.some(m => (m.bracket||'winners')===b));
   const isMultiBracket = bracketsPresent.length > 1;
-  const bracketHtml = bracketsPresent.map(b=>{
-    const bm = t.matches.filter(m => (m.bracket||'winners')===b);
-    const heading = isMultiBracket ? `<div class="pp-section-title" style="margin-top:8px">${BRACKET_LABEL[b]}</div>` : '';
-    return `${heading}<div class="tourney-bracket">${roundColumns(bm)}</div>`;
-  }).join('');
+  let bracketHtml;
+  if(isMultiBracket){
+    // Double-elimination: a Winners / Losers / Grand Final tab switcher, one bracket
+    // panel shown at a time (docs/archive/tournament-mode-roadmap.md §4). Keeps the deep
+    // double-elim tree readable rather than stacking every bracket in one long scroll.
+    if(!bracketsPresent.includes(tournamentBracketTab)) tournamentBracketTab = bracketsPresent[0];
+    const tabs = bracketsPresent.map(b=>{
+      const sel = b===tournamentBracketTab;
+      return `<button role="tab" class="tourney-tab" id="tourney-tab-${b}" aria-selected="${sel}" aria-controls="tourney-panel" tabindex="${sel?0:-1}" onclick="setTournamentBracketTab('${b}')" onkeydown="tournamentTabKeydown(event)">${BRACKET_LABEL[b]}</button>`;
+    }).join('');
+    const activeBm = t.matches.filter(m => (m.bracket||'winners')===tournamentBracketTab);
+    bracketHtml = `
+      <div class="tourney-tabs" role="tablist" aria-label="Bracket section">${tabs}</div>
+      <div id="tourney-panel" role="tabpanel" aria-labelledby="tourney-tab-${tournamentBracketTab}" class="tourney-bracket">${roundColumns(activeBm)}</div>`;
+  } else {
+    // Single-elimination: the one winners bracket, no tabs (unchanged).
+    bracketHtml = `<div class="tourney-bracket">${roundColumns(t.matches)}</div>`;
+  }
 
   // Linearized "who plays whom next" text list — the bracket tree above is a
   // spatial/visual layout with no non-visual equivalent of its own, so this list
@@ -5666,6 +5689,33 @@ function renderTournamentDetail(t){
       ${bracketHtml}
       ${linearHtml}
     </div>`;
+}
+
+// Switches the active Winners/Losers/Grand Final bracket panel (double-elim only).
+// Re-renders from the cached detail — no network round-trip — so switching tabs is
+// instant; pass focus=true (arrow-key navigation) to move keyboard focus onto the
+// newly-selected tab after the re-render.
+function setTournamentBracketTab(bracket, focus){
+  tournamentBracketTab = bracket;
+  if(tournamentDetailCache) renderTournamentDetail(tournamentDetailCache);
+  if(focus){ const el = document.getElementById('tourney-tab-'+bracket); if(el) el.focus(); }
+}
+// Roving-tabindex keyboard support for the bracket tablist (ArrowLeft/Right +
+// Home/End), the standard WAI-ARIA tabs pattern — so the bracket switcher is
+// operable without a pointer, per docs/accessibility-roadmap.md.
+function tournamentTabKeydown(e){
+  const keys = ['ArrowRight','ArrowLeft','Home','End'];
+  if(!keys.includes(e.key)) return;
+  e.preventDefault();
+  const tabs = [...document.querySelectorAll('.tourney-tabs [role="tab"]')];
+  const i = tabs.indexOf(e.target);
+  if(i < 0) return;
+  let ni;
+  if(e.key==='Home') ni = 0;
+  else if(e.key==='End') ni = tabs.length - 1;
+  else ni = (i + (e.key==='ArrowRight'?1:-1) + tabs.length) % tabs.length;
+  const bracket = tabs[ni].id.replace('tourney-tab-','');
+  setTournamentBracketTab(bracket, true);
 }
 
 function askTournamentWalkover(matchId, p1, p2){
@@ -6222,7 +6272,7 @@ function renderPlayerPage(){
   const h2hHtml = h2hCats.length
     ? h2hCats.map(c=>`${c}: <b>${(s.h2hGamesWonByCat||{})[c]||0}</b> games · <b>${(s.h2hSetsWonByCat||{})[c]||0}</b> sets · <b>${(s.h2hLegsWonByCat||{})[c]||0}</b> legs`).join('<br>')
     : '<span style="color:var(--muted)">none yet</span>';
-  // Tournaments are X01-only (docs/tournament-mode-roadmap.md), so this block is
+  // Tournaments are X01-only (docs/archive/tournament-mode-roadmap.md), so this block is
   // gated the same way the profile's other X01-only surfaces are.
   const tournamentStatsSection = gt==='x01' ? `
     <div class="pp-section">
@@ -6788,7 +6838,7 @@ function loadPersonalBests(){
     .then(data=>{ renderPersonalBests(data); loadGhostRaceRecord(); })
     .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load personal bests.</p>`; });
 }
-// docs/tournament-mode-roadmap.md §8: the Player Profile's "Tournaments" stat
+// docs/archive/tournament-mode-roadmap.md §8: the Player Profile's "Tournaments" stat
 // block — wins/runner-ups/best finish. A no-op if the section isn't rendered
 // (tournaments are X01-only, so a Cricket profile view has no such container).
 function loadTournamentStats(){
@@ -9413,7 +9463,7 @@ function liveSnapshot(message){
     legSummary: game.legSummary || null,
     practice: !!game.practice,
     done: !!game.done,
-    // Tournament mode (docs/tournament-mode-roadmap.md): the round label ("Quarterfinal",
+    // Tournament mode (docs/archive/tournament-mode-roadmap.md): the round label ("Quarterfinal",
     // "Final", ...) when this game is a tournament match, so /display can show tournament
     // context in the top bar — null for every normal game, unchanged shape otherwise.
     tournamentRoundLabel: game.tournamentRoundLabel || null,
@@ -10288,7 +10338,7 @@ function askAbandonSavedGame(gameId, retryStartGame){
 }
 
 function askEndGame(){
-  // Tournament mode (docs/tournament-mode-roadmap.md): a plain "abandon and forget"
+  // Tournament mode (docs/archive/tournament-mode-roadmap.md): a plain "abandon and forget"
   // isn't allowed here — the bracket needs an actual result to advance. Send the
   // admin back to the bracket to record a walkover instead (recordWalkover() on the
   // backend allows overriding an abandoned mid-game match exactly like this one).
@@ -12300,7 +12350,7 @@ function finishUnit(kind, winner){
     // hook fired from DB.completeGame() above), so route back to the bracket instead
     // of the normal New Game screen.
     if(game.tournamentMatchId){
-      // docs/tournament-mode-roadmap.md §7: Champion/Giant Slayer (Tournament) are
+      // docs/archive/tournament-mode-roadmap.md §7: Champion/Giant Slayer (Tournament) are
       // awarded server-side, inside _advanceTournamentMatch() itself (authoritative
       // seed/champion data lives right there) — not re-computed or re-awarded here.
       // This just detects whether either was newly earned, by diffing against

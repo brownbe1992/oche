@@ -1908,7 +1908,7 @@ tiers** (`once:true`), its own Badge Case section (`renderPlayerBadges()`'s
 |---|---|---|
 | Survival/Score | This run's own final `running` score | 1 Survivor 🛡️ · 100 Century 💯 · 250 Quarter Grand 🌟 · 500 Half Grand 🚀 · 1000 Four Figures 👑 |
 
-**Tournament badges** (`docs/tournament-mode-roadmap.md` §7 — checked server-side
+**Tournament badges** (`docs/archive/tournament-mode-roadmap.md` §7 — checked server-side
 in `_advanceTournamentMatch()`, `backend/db.js`, the same function that already
 sets `winner_id`/`champion_id`, rather than a second parallel hook. Like Ghost
 Slayer, the frontend never computes these conditions itself — it only detects a
@@ -3194,7 +3194,7 @@ already-migrated database is a safe no-op).
 | `completed` | `INTEGER NOT NULL DEFAULT 0` | |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 
-### Tournament mode (`docs/tournament-mode-roadmap.md`, single- and double-elimination — see §15)
+### Tournament mode (`docs/archive/tournament-mode-roadmap.md`, single- and double-elimination — see §15)
 
 **`tournaments`**
 | Column | Type | Notes |
@@ -3412,16 +3412,16 @@ hard connection caps, not a `rateLimit()` bucket.
 
 ## 15. Tournament Mode
 
-`docs/tournament-mode-roadmap.md`. **Single- AND double-elimination** —
+`docs/archive/tournament-mode-roadmap.md`. **Single- AND double-elimination** —
 `tournaments.bracket_type` (`'single_elim'` default | `'double_elim'`) chosen on
 the setup screen. Both share one schema: the `winner_next_*`/`loser_next_*`
 pointer-pair design (§13) makes a losers-bracket drop just "a loser with a
 `loser_next_match_id` instead of `NULL`." X01 only — any of the four starting
 scores (501/301/170/101). Backend: `backend/db.js`'s tournament section.
 Frontend: `frontend/index.html`'s "TOURNAMENT MODE" block, reachable via the
-**Tournaments** nav button. (The only piece still open is the fancier
-winners/losers-**tabbed** visual bracket tree — the current double-elim view is a
-functional grouped-column layout; see "Deliberately out of scope" below.)
+**Tournaments** nav button. Tournament mode is now **feature-complete** — both
+bracket types, the setup screen, the tabbed double-elim bracket view, badges, and
+Player Profile stats all ship.
 
 ### Design principle: a tournament match IS a normal game
 
@@ -3586,21 +3586,24 @@ pointer pairs in a second UPDATE pass:
   (4/8/16/32/64/128). The per-round format table derives its rows and labels from
   `tournamentRoundPlan()`, which for double-elim calls the **same**
   `doubleElimStructure()` the backend generates from.
-- **Bracket view** (`renderTournamentDetail()`): matches are grouped into
-  per-round columns and those columns grouped by bracket, with a **Winners
-  Bracket / Losers Bracket / Grand Final** subheading per group when more than one
-  bracket is present. Single-elim (only the winners bracket) renders exactly as
-  before, with no subheadings. The linearized "Full bracket (list view)" and "Up
-  Next" lists work unchanged for both.
+- **Bracket view** (`renderTournamentDetail()`): matches are grouped into per-round
+  columns. Single-elim (only the winners bracket) shows the columns directly, no
+  tabs. Double-elim renders a **Winners / Losers / Grand Final tab switcher**
+  (`.tourney-tabs`, `role="tablist"`) showing one bracket panel
+  (`role="tabpanel"`) at a time — the roadmap's §4 "two scrollable panels with a
+  tab switcher," which keeps the deep double-elim tree (up to ~19 rounds at 128
+  players) readable rather than stacking every bracket in one long scroll.
+  `tournamentBracketTab` holds the active tab (module-level, persists across the
+  re-renders an action triggers; reset in `openTournament()`); `setTournamentBracketTab()`
+  re-renders from `tournamentDetailCache` with no network round-trip. The tablist
+  is a standard roving-tabindex WAI-ARIA pattern — the selected tab has
+  `tabindex="0"`, the rest `-1`, and `tournamentTabKeydown()` handles
+  ArrowLeft/Right + Home/End, moving both selection and focus. The linearized
+  "Full bracket (list view)" and "Up Next" lists (both bracket-agnostic, always
+  visible) remain the non-spatial way to follow either bracket type.
 
 ### Deliberately out of scope for this pass
 
-- **A winners/losers-**tabbed** visual bracket tree** — the roadmap's build-order
-  step 3, tracked as its own separate open item on `docs/open-roadmap-items.md`.
-  The shipped double-elim bracket view is a functional grouped-column layout
-  (above); the deeper procedurally-drawn tree with bracket tabs (and the
-  accessibility revisit its ~19-round depth at 128 players will need) is the
-  still-open piece.
 - **Anti-rematch losers-bracket seeding** — the pairing is valid and fully
   playable but not rematch-minimizing (see generation above).
 - **A "Practice this" style deep link or bracket-tree drag/zoom** — not requested.
@@ -4624,12 +4627,11 @@ already-shipped limitations, not just unbuilt future features:
   such game, `previousWinner` still reports one of the two named players. Only reaches
   the Rematch/Grudge badges, which the controller evaluates for 2-player matches only,
   so it's latent in practice.
-- **Double-elimination's fancier bracket tree isn't built** — double-elimination
-  generation, advancement, the grand-final/reset logic, and a functional
-  grouped-column bracket view all ship (§15); the one remaining piece is the
-  procedurally-drawn winners/losers-**tabbed** visual tree (the roadmap's
-  build-order step 3), tracked as its own open item on
-  `docs/open-roadmap-items.md`.
+- **Tournament mode is feature-complete** — single- and double-elimination,
+  generation/advancement/reset logic, the setup screen, the tabbed double-elim
+  bracket view, badges, and Player Profile stats all ship (§15). (Optional future
+  refinements only: anti-rematch losers-bracket seeding, arbitrary double-elim
+  counts, a bracket-tree drag/zoom.)
 - See the individual `docs/*.md` files for full design detail on every other
   not-yet-built feature (league mode, Baseball/other game-mode variants,
   camera scoring, mobile app, online multiplayer, and more).

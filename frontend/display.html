@@ -692,7 +692,7 @@ function showAchievement(type, player, countText){
 function fmtText(s){
   const cat = s.category != null ? esc(s.category) : '';
   const legNo = num(s.legNo), setNo = num(s.setNo), lps = num(s.legsPerSet), spg = num(s.setsPerGame);
-  // Tournament mode (docs/tournament-mode-roadmap.md): a small addition to the
+  // Tournament mode (docs/archive/tournament-mode-roadmap.md): a small addition to the
   // existing gameType-style snapshot fields — same shape as everything else
   // fmtText already reads off `s`, no new rendering path needed.
   const roundPrefix = s.tournamentRoundLabel ? `${esc(s.tournamentRoundLabel)} &nbsp;·&nbsp; ` : '';

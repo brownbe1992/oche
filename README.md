@@ -965,10 +965,11 @@ normal scoring screen for those two players, and a **Walkover** button for
 recording a result without playing it out (also the recovery path if a match was
 started and abandoned via End Game — tournament matches can't just be left
 unfinished, since the bracket depends on a real result to advance). A bracket view
-shows the whole tournament at a glance — for double elimination it's grouped into
-Winners / Losers / Grand Final sections — with a linearized list view underneath it
-for anyone who'd rather read than scan the columns. The champion and runner-up are
-shown once the final resolves.
+shows the whole tournament at a glance — for double elimination it's split into
+**Winners / Losers / Grand Final** tabs (keyboard-navigable), one bracket at a time
+so even a large tree stays readable — with a linearized list view underneath it for
+anyone who'd rather read than scan the columns. The champion and runner-up are shown
+once the final resolves.
 
 **Badges** — winning the whole bracket earns 🏆 **Champion**; beating an
 opponent seeded 3 or more slots better than you earns ⚔️ **Giant Slayer
@@ -978,9 +979,7 @@ opponent seeded 3 or more slots better than you earns ⚔️ **Giant Slayer
 runner-up finishes, best finish reached) shows on each player's profile
 alongside their H2H stats.
 
-**Still to come** — the only unbuilt piece is a fancier winners/losers-**tabbed**
-visual bracket tree; double-elimination currently uses the grouped-column view
-described above. See `REFERENCE.md` §15 for full mechanics.
+See `REFERENCE.md` §15 for full mechanics.
 
 ---
 

@@ -1,6 +1,6 @@
 'use strict';
 // Committed tests for backend/db.js's DOUBLE-elimination tournament support
-// (docs/tournament-mode-roadmap.md §2, roadmap item 13). Single-elimination lives
+// (docs/archive/tournament-mode-roadmap.md §2, roadmap item 13). Single-elimination lives
 // in tournament.test.js; this file covers only the losers-bracket + grand-final /
 // bracket-reset machinery layered on top of the same schema. Everything is driven
 // through recordWalkover() (no real games needed) exactly as the single-elim tests

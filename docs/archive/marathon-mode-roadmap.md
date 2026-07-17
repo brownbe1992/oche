@@ -38,7 +38,7 @@ X01 legs together and read the results back."
   explicit start/end boundary, and its whole point is the trend/fatigue
   analysis, not a broad recap.
 - **League/Tournament mode** (`docs/league-mode-roadmap.md`,
-  `docs/tournament-mode-roadmap.md`) are the direct **architectural**
+  `docs/archive/tournament-mode-roadmap.md`) are the direct **architectural**
   precedent, not a gameplay one — see Data model below.
 - **Daily Challenge's "Speed to Zero" format** (a single full 501 leg,
   fewest darts) is a related but much narrower idea — one leg, no chaining,

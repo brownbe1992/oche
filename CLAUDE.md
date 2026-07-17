@@ -13,7 +13,7 @@ game, an online session, or anything similar), that context gets its **own table
 a `game_id` foreign key pointing at `games`** — never a new `is_tournament`/`is_online`
 -style boolean bolted directly onto the `games` table itself.
 
-This is already the shape used by `docs/tournament-mode-roadmap.md`
+This is already the shape used by `docs/archive/tournament-mode-roadmap.md`
 (`tournament_matches.game_id`) and `docs/league-mode-roadmap.md`
 (`games.league_id`, nullable FK). Apply the same pattern to any other future context
 (online multiplayer, or anything not yet designed) rather than adding a fourth or

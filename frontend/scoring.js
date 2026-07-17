@@ -1995,7 +1995,7 @@ function rebuildDeadManWalkingState({ rounds, turns }){
   };
 }
 
-// docs/tournament-mode-roadmap.md §2: the ordered round plan for a
+// docs/archive/tournament-mode-roadmap.md §2: the ordered round plan for a
 // double-elimination bracket of exactly 2^k players (k >= 2 — v1 restricts
 // double-elim to exact powers of two 4/8/16/32/64/128, so there are never any
 // byes to cascade, the whole point of that de-risking restriction). Returns
