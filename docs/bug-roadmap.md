@@ -72,10 +72,12 @@
 > ACH-labels parity gap. An **eighth-pass audit** (2026-07, weighted to the six
 > game modes merged since the seventh pass — Session Recap, Marathon, Shanghai,
 > Halve-It, The Pressure Chamber, Dead Man Walking) opened **BUG-27** through
-> **BUG-29** (all **Open**), plus one coupled security finding
-> (`security-audit-roadmap.md` **SEC-26**, Open) that rides on BUG-28's fix — see
-> the "Eighth-pass audit" section at the bottom. **BUG-1 through BUG-26 are fixed;
-> BUG-27 through BUG-29 are open.**
+> **BUG-29**, plus one coupled security finding (`security-audit-roadmap.md`
+> **SEC-26**) that rode on BUG-28's fix — see the "Eighth-pass audit" section at
+> the bottom. All four were **fixed** in the same pass (2026-07), each with a
+> committed regression test and `REFERENCE.md` updated where the behavior it
+> documents changed. **BUG-1 through BUG-29 are all fixed as of this writing** —
+> nothing open on either tracker.
 
 ## Severity legend
 
@@ -1948,7 +1950,26 @@ BUG-28's own entry.
 
 ### BUG-27 — Checkout-based X01 stats (Ton+, Big Fish, Highest Checkout, Top Finishes, On This Day, Session Recap) silently count Checkout Ladder and Dead Man Walking checkouts, which are real `checkout=1` rows but not X01 legs  **(MED, silent data-integrity drift)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** Added the `X01_ONLY` guard (joining `games` where a query
+didn't already) to every leaking read site: `getSummary()`'s Ton+ and Big Fish counts,
+`getPlayerStatBubbles()`'s Big Fish bubble (the one field the earlier partial fix missed),
+`getHomeExtra()`'s Ton+ Finish Rate leaderboard and both highest-checkout queries,
+`getBigFishStats()`, `getTopFinishesAll()`, `getTopFinishes()`, `getCheckoutRoutes()`,
+`getOnThisDay()`'s 170/100+ CASE tiers and their return branches, `getMetricHistory()`'s
+`'bigfish'` case, and `getSessionRecap()`'s `tonPlusStmt` / pre+tonight highest-checkout /
+pre+tonight fewest-darts-checkout statements / moments timeline (the fewest-darts pair keys
+on `SUM(checkout)>0`, the same non-X01-exclusive signal, so it was brought into line with
+`getPersonalBests()` too). `computeStats()`'s `_agg`, `getCoachingInsights()`'s route
+insight, and the Dead Man Walking target-builders were already correctly scoped and left
+unchanged. Committed regression test `backend/test/db.checkout-stat-x01-isolation.test.js`:
+plays a Checkout Ladder run (170/140/121 checkouts) alongside a real X01 game (170/121/100)
+and asserts all of the above read a value reflecting only the X01 checkouts — Big Fish count
+1 not 2, the drill player absent from every leaderboard/record/recap/flashback — and would
+report the leaked (higher) numbers against the pre-fix source. `REFERENCE.md` §3's
+Cricket-interaction grid updated in the same change (the "Checkout-based" row now reads
+"**Excluded** (`X01_ONLY`)" with the Checkout Ladder / Dead Man Walking rationale, replacing
+the stale "naturally excluded — cricket never writes `checkout=1`" wording). Full backend
+suite green.
 
 **What actually goes wrong (plain language):** `REFERENCE.md`'s Cricket-interaction
 table (§3, the "Category → Cricket games…" grid) states that the checkout-based stats —
@@ -2049,7 +2070,19 @@ corrected (the exclusion is now enforced by `X01_ONLY`, not by "cricket never wr
 
 ### BUG-28 — The live-scoreboard allowlist (`ALLOWED_LIVE_KEYS`) was never extended for Shanghai, Halve-It, or The Pressure Chamber, so the server strips their `/display` fields and the second-screen scoreboard renders broken for all three  **(MED, user-facing / feature-degraded)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** Added the seven missing keys to `ALLOWED_LIVE_KEYS`
+(`backend/server.js`) — `shanghaiRound`/`shanghaiMaxRounds`, `halveItRound`/`halveItTargets`,
+`pressureChamberRound`/`pressureChamberDeadline`/`pressureChamberCards` — each with the same
+per-key "only read by renderers.X" comment the existing Baseball/Bob's 27 entries carry, so
+the server now forwards them to `/display` instead of stripping them. Landed **together with
+SEC-26's fix** (escaping `modifier.icon` at the `display.html` sink) in the same change, so
+allowlisting `pressureChamberCards` doesn't open the XSS. Committed regression test
+`backend/test/server.live-state-keys.test.js`: spawns the real server, POSTs a payload
+carrying all seven fields plus an unknown control key to `/api/live`, GETs it back, and
+asserts the seven survive while the unknown key is still stripped — fails against the pre-fix
+allowlist. Verified the three `/display` scorecards render correctly (Halve-It shows the full
+target ladder, Pressure Chamber shows the target/modifier banner + No Warmup countdown,
+Shanghai advances the active-round highlight). Full backend suite green.
 
 **What actually goes wrong (plain language):** the `/display` second screen is driven by
 the live-state payload the playing device POSTs to `/api/live`. For safety, the server's
@@ -2121,7 +2154,22 @@ suite green.
 
 ### BUG-29 — The `(checkout=1 OR leg_won=1)` won-leg heuristic in `computeStats()` assumes exactly one such signal per won leg, but Pressure Chamber writes it on every hit round — inflating its H2H per-category legs/sets — while Halve-It and Shanghai under-count  **(MED, silent data-integrity drift)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** Replaced the raw turn-count heuristic with a new
+`_h2hWonLegs()` helper that returns one row per actually-won completed H2H leg and credits
+each to its real winner **per game type**: the `(checkout=1 OR leg_won=1)` winning-turn
+signal for the types where it marks exactly the leg winner (X01/Cricket/Baseball/Killer/
+Checkout Ladder), `getShanghaiWonLegs()`'s instant-or-final-total hybrid for Shanghai,
+`getHalveItWonLegs()`'s final-total comparison for Halve-It, and the highest-CP leg winner
+(`_pressureChamberLegTotals()`, tie-broken fewest misses then fewest darts, mirroring
+`pressureChamberDecideWinnerIndex()`) for The Pressure Chamber. `computeStats()` now derives
+`h2hLegs`/`h2hSets` from that list in JS (a set is won by whoever took ≥ `legs_per_set` of
+its legs), and `h2hAvgDarts` is now `X01_ONLY` so a Pressure Chamber leg's ~45 darts no
+longer dilute the H2H "avg darts per leg." Committed regression test
+`backend/test/db.h2h-won-legs.test.js`: a Pressure Chamber H2H leg where both players hit
+all 15 rounds now credits the higher-CP player with exactly **1** leg (was 15) and the
+loser with **0** (was 15); a Halve-It H2H leg now credits the higher-total winner with 1
+leg (was 0); and an X01 H2H leg still counts one checkout = one won leg. `REFERENCE.md` §3's
+won-leg description updated in the same change. Full backend suite green.
 
 **What actually goes wrong (plain language):** `computeStats()` derives each player's
 per-category H2H record (`h2hLegsWonByCat` / `h2hSetsWonByCat`, shown on the Player

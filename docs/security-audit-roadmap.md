@@ -32,9 +32,11 @@
 > `docs/bug-roadmap.md` (BUG-1/BUG-2/BUG-3 from the second pass; BUG-4/BUG-5 from the
 > third; BUG-6/BUG-7 from the fourth; BUG-9 from the fifth; BUG-10 through BUG-15 from
 > the sixth; BUG-19 from the seventh, all fixed; **BUG-27 through BUG-29** from the
-> eighth, open). **SEC-1 through SEC-25 are fixed; SEC-26 is open** (opened by the
-> eighth pass, coupled to BUG-28). BUG-1 through BUG-26 are fixed; BUG-27 through BUG-29
-> are open.
+> eighth, all fixed). **SEC-1 through SEC-26 are all fixed as of this writing** — SEC-26
+> (opened by the eighth pass, coupled to BUG-28) shipped its escape-at-the-sink fix in the
+> same change as BUG-28's allowlist addition, so the field never became forwardable in an
+> unescaped released state. BUG-1 through BUG-29 are all fixed — nothing open on either
+> tracker.
 >
 > See the "Status" line
 > under each finding below for what actually shipped, which in a couple of places is
@@ -1615,7 +1617,21 @@ are `docs/bug-roadmap.md` **BUG-27** through **BUG-29**.
 
 ### SEC-26 — `display.html`'s Pressure Chamber `/display` renderer inserts `modifier.icon` into `innerHTML` without escaping; latent only because BUG-28 currently strips the field that feeds it, but fixing BUG-28 turns it into stored XSS on the second screen  **(LOW, latent / stored XSS behind the auth-off LAN default)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** Wrapped the sink in `escapeHtml`
+(`${escapeHtml(liveCard.modifier.icon)}` in `renderers.pressure_chamber.scorecard()`), so the
+icon is now escaped exactly like its sibling `target.label`/`modifier.label`/`modifier.flavor`
+fields. Shipped **in the same change** as `docs/bug-roadmap.md` BUG-28's allowlist addition, so
+the field became forwardable and safe simultaneously — the window where an allowlisted-but-
+unescaped `pressureChamberCards` could carry live markup never existed in a released state.
+Committed regression test `backend/test/display.pressure-chamber-hardening.test.js`: extracts
+the real `scorecard()` (plus its `escapeHtml`/`esc`/`num`/`dartClass` deps) from `display.html`
+into a `vm` context and calls it with `modifier.icon = '<img src=x onerror=window.__xss=1>'`,
+asserting the output contains no live `<img` tag and only the escaped `&lt;img…&gt;` text —
+fails against the pre-fix bare interpolation. Re-checked the other `display.html` renderers'
+`scorecard()`/`card()` return strings: `modifier.icon` was the only bare (un-`escapeHtml`'d)
+interpolation of a live-payload field into `innerHTML`; the `queueSpeech()` builders that also
+read payload fields (`matchResult.winner`, `legStart.starter`, `checkoutTarget.player`) feed
+the Speech API as plain text, not the DOM, so they are not HTML sinks. Full backend suite green.
 
 **Where:** `frontend/display.html`, `renderers.pressure_chamber.scorecard()` — the card
 banner it builds:

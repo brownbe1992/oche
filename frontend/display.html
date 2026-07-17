@@ -1277,7 +1277,7 @@ const renderers = {
       const remainingSec = (noWarmup && s.pressureChamberDeadline != null) ? Math.max(0, Math.ceil((s.pressureChamberDeadline - Date.now())/1000)) : null;
       const banner = liveCard ? `<div style="margin-top:10px;padding:12px;border:2px solid #c9a227;border-radius:10px;text-align:center;background:rgba(201,162,39,0.08)">
         <div style="font-size:22px;font-weight:800">${escapeHtml(liveCard.target.label)}</div>
-        <div style="font-size:16px;font-weight:700;margin-top:4px">${liveCard.modifier.icon} ${escapeHtml(liveCard.modifier.label)}</div>
+        <div style="font-size:16px;font-weight:700;margin-top:4px">${escapeHtml(liveCard.modifier.icon)} ${escapeHtml(liveCard.modifier.label)}</div>
         <div style="font-style:italic;font-size:13px;color:#999;margin-top:2px">${escapeHtml(liveCard.modifier.flavor)}</div>
         ${remainingSec!=null?`<div style="margin-top:6px;font-size:20px;font-weight:800">${remainingSec}s</div>`:''}
       </div>` : '';

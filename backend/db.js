@@ -1980,6 +1980,67 @@ function getChallengeHistory(playerName, todayDate) {
   return { played: totals.played || 0, completed: totals.completedCount || 0, currentStreak, longestStreak, bestByFormat, attempts };
 }
 
+// docs/bug-roadmap.md BUG-29: one row per actually-won completed H2H leg
+// ({gameId, setNo, legNo, pid, cat, legsPerSet}), used to build the per-category
+// H2H legs/sets records. The old `(t.checkout=1 OR t.leg_won=1)` heuristic assumed
+// exactly one such signal per won leg — true for X01/Cricket/Baseball/Killer/Checkout
+// Ladder, but The Pressure Chamber writes checkout=1 on EVERY hit round (so a single
+// run counted as up to 15 "won legs"), while Halve-It writes neither signal and
+// Shanghai writes leg_won=1 only on an instant win (both under-counted). Here each
+// game type's real leg winner is derived the same way its own stat functions already
+// do it, so a leg is credited to exactly the player who won it.
+function _h2hWonLegs() {
+  const gameMeta = new Map(db.prepare(`
+    SELECT id, category AS cat, legs_per_set AS legsPerSet
+    FROM games WHERE practice=0 AND player_count>1
+  `).all().map(g => [g.id, g]));
+  const won = [];
+  const push = (gameId, setNo, legNo, pid) => {
+    const m = gameMeta.get(gameId);
+    if (m) won.push({ gameId, setNo, legNo, pid, cat: m.cat, legsPerSet: m.legsPerSet });
+  };
+
+  // Signal types: (checkout=1 OR leg_won=1) marks exactly the leg winner. Excludes the
+  // types whose signal doesn't identify a leg winner — pressure_chamber/checkout_trainer
+  // (per-round signal), halve_it (no signal), shanghai (points-wins have no signal);
+  // each of those is handled by its own derivation below.
+  db.prepare(`
+    SELECT DISTINCT t.game_id AS gameId, t.set_no AS setNo, t.leg_no AS legNo, t.player_id AS pid
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE (t.checkout=1 OR t.leg_won=1) AND g.practice=0 AND g.player_count>1
+      AND g.game_type NOT IN ('pressure_chamber','checkout_trainer','halve_it','shanghai')
+  `).all().forEach(r => push(r.gameId, r.setNo, r.legNo, r.pid));
+
+  // Shanghai (hybrid instant/points) and Halve-It (final-total comparison): reuse the
+  // exact per-leg winner derivation their own Personal Bests/leaderboards use.
+  for (const gt of ['shanghai', 'halve_it']) {
+    const pids = db.prepare(`
+      SELECT DISTINCT gp.player_id AS pid FROM game_players gp JOIN games g ON g.id=gp.game_id
+      WHERE g.practice=0 AND g.player_count>1 AND g.game_type=?
+    `).all(gt).map(r => r.pid);
+    for (const pid of pids) {
+      const legs = gt === 'shanghai' ? getShanghaiWonLegs(pid, 'h2h') : getHalveItWonLegs(pid, 'h2h');
+      for (const l of legs) push(l.gameId ?? l.game_id, l.setNo ?? l.set_no, l.legNo ?? l.leg_no, pid);
+    }
+  }
+
+  // The Pressure Chamber: the leg winner is the highest CP total in that leg (the same
+  // metric pressureChamberDecideWinnerIndex() ranks on), tie-broken fewest misses then
+  // fewest darts — a real CP tie is vanishingly unlikely.
+  const pcByLeg = new Map();
+  for (const l of _pressureChamberLegTotals('h2h').filter(l => l.completed)) {
+    const key = `${l.gameId}|${l.setNo}|${l.legNo}`;
+    if (!pcByLeg.has(key)) pcByLeg.set(key, []);
+    pcByLeg.get(key).push(l);
+  }
+  for (const legs of pcByLeg.values()) {
+    const winner = legs.slice().sort((a, b) => b.total - a.total || a.misses - b.misses || a.darts - b.darts)[0];
+    push(winner.gameId, winner.setNo, winner.legNo, winner.playerId);
+  }
+
+  return won;
+}
+
 /* ---------- statistics (computed with SQL) ---------- */
 function computeStats() {
   const players = q.listPlayers.all();
@@ -2004,29 +2065,36 @@ function computeStats() {
     GROUP BY gp.player_id, g.category
   `).all();
 
-  // A won leg is signaled by checkout=1 in X01 but leg_won=1 in Cricket (which has
-  // no checkout concept) — count both, or a profile's per-category H2H record shows
-  // cricket wins as "N games · 0 sets · 0 legs".
-  const h2hLegs = db.prepare(`
-    SELECT t.player_id AS pid, g.category AS cat, COUNT(*) AS legs
-    FROM turns t JOIN games g ON g.id = t.game_id
-    WHERE (t.checkout = 1 OR t.leg_won = 1) AND g.practice = 0
-      AND g.player_count > 1
-    GROUP BY t.player_id, g.category
-  `).all();
-
-  const h2hSets = db.prepare(`
-    SELECT player_id AS pid, category AS cat, COUNT(*) AS sets
-    FROM (
-      SELECT t.player_id, g.category
-      FROM turns t JOIN games g ON g.id = t.game_id
-      WHERE (t.checkout = 1 OR t.leg_won = 1) AND g.practice = 0
-        AND g.player_count > 1
-      GROUP BY t.game_id, t.player_id, g.category, t.set_no
-      HAVING COUNT(*) >= g.legs_per_set
-    )
-    GROUP BY player_id, category
-  `).all();
+  // docs/bug-roadmap.md BUG-29: per-category H2H legs/sets won, derived from the
+  // game-type-aware won-leg list (_h2hWonLegs()) instead of the old
+  // `(checkout=1 OR leg_won=1)` turn-count heuristic, which over-counted The Pressure
+  // Chamber (per-round checkout=1) and under-counted Halve-It/Shanghai. Each won leg is
+  // credited to exactly its real winner; a set is won by whoever took at least
+  // legs_per_set of its legs.
+  const wonLegs = _h2hWonLegs();
+  const legsByPidCat = new Map();          // pid -> Map(cat -> legs)
+  const setLegCount = new Map();           // "game|set|pid" -> { count, cat, legsPerSet, pid }
+  for (const l of wonLegs) {
+    if (!legsByPidCat.has(l.pid)) legsByPidCat.set(l.pid, new Map());
+    const cm = legsByPidCat.get(l.pid);
+    cm.set(l.cat, (cm.get(l.cat) || 0) + 1);
+    const sk = `${l.gameId}|${l.setNo}|${l.pid}`;
+    let e = setLegCount.get(sk);
+    if (!e) { e = { count: 0, cat: l.cat, legsPerSet: l.legsPerSet, pid: l.pid }; setLegCount.set(sk, e); }
+    e.count += 1;
+  }
+  const h2hLegs = [];
+  for (const [pid, cm] of legsByPidCat) for (const [cat, legs] of cm) h2hLegs.push({ pid, cat, legs });
+  const setsByPidCat = new Map();          // pid -> Map(cat -> sets)
+  for (const e of setLegCount.values()) {
+    if (e.count >= e.legsPerSet) {
+      if (!setsByPidCat.has(e.pid)) setsByPidCat.set(e.pid, new Map());
+      const cm = setsByPidCat.get(e.pid);
+      cm.set(e.cat, (cm.get(e.cat) || 0) + 1);
+    }
+  }
+  const h2hSets = [];
+  for (const [pid, cm] of setsByPidCat) for (const [cat, sets] of cm) h2hSets.push({ pid, cat, sets });
 
   const h2hGames = db.prepare(`
     SELECT g.winner_id AS pid, g.category AS cat, COUNT(*) AS games
@@ -2050,12 +2118,15 @@ function computeStats() {
     GROUP BY t.player_id, g.category
   `).all();
 
-  // Average actual darts per won leg — COUNT(darts) replaces the removed darts_thrown column
+  // Average actual darts per won leg — COUNT(darts) replaces the removed darts_thrown
+  // column. docs/bug-roadmap.md BUG-29: X01_ONLY — "darts per leg" is an X01 figure
+  // (REFERENCE.md §3), and SUM(checkout)>0 is no longer X01-exclusive (a Pressure Chamber
+  // leg's ~45 darts across 15 hit rounds would otherwise dilute the average).
   const h2hAvgDarts = db.prepare(`
     SELECT pid, AVG(leg_darts) AS avg_darts FROM (
       SELECT t.player_id AS pid, COUNT(d.id) AS leg_darts
       FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-      WHERE g.practice=0 AND g.player_count>1
+      WHERE g.practice=0 AND g.player_count>1 ${X01_ONLY}
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout)>0
     ) GROUP BY pid
   `).all();
@@ -2229,9 +2300,13 @@ function getSummary() {
   // are real physical throws and stay counted here, a Checkout Trainer dart never
   // touched a dartboard and must not inflate the global "darts thrown" total.
   const darts        = db.prepare(`SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id WHERE 1=1 ${NOT_CHECKOUT_TRAINER}`).get().n ?? 0;
-  const tonPlus      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout=1 AND checkout_points>=100').get().n;
+  // docs/bug-roadmap.md BUG-27: X01_ONLY — checkout=1 + checkout_points is no longer an
+  // X01-exclusive signal (121 Checkout Ladder and Dead Man Walking both write real
+  // checkouts too), so Ton+ and Big Fish must scope to X01 or they silently fold in drill
+  // checkouts, the same guard getPersonalBests() already applies.
+  const tonPlus      = db.prepare(`SELECT COUNT(*) AS n FROM turns t JOIN games g ON g.id=t.game_id WHERE t.checkout=1 AND t.checkout_points>=100 ${X01_ONLY}`).get().n;
   const oneEighties  = db.prepare(`SELECT COUNT(*) AS n FROM turns t JOIN games g ON g.id=t.game_id WHERE t.scored=180 ${X01_ONLY}`).get().n;
-  const bigFish      = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE checkout=1 AND checkout_points=170').get().n;
+  const bigFish      = db.prepare(`SELECT COUNT(*) AS n FROM turns t JOIN games g ON g.id=t.game_id WHERE t.checkout=1 AND t.checkout_points=170 ${X01_ONLY}`).get().n;
   const nineDarters  = db.prepare(`
     SELECT COUNT(*) AS n FROM (
       SELECT t.player_id FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
@@ -2302,7 +2377,7 @@ function getHomeExtra() {
     FROM turns t
     JOIN players p ON p.id = t.player_id
     JOIN games g ON g.id = t.game_id
-    WHERE t.checkout = 1 AND ${modeWhere} ${NOT_CHECKOUT_TRAINER}
+    WHERE t.checkout = 1 AND ${modeWhere} ${NOT_CHECKOUT_TRAINER} ${X01_ONLY}
     GROUP BY p.id
     HAVING checkouts >= 3
     ORDER BY (CAST(tonPlus AS REAL) / checkouts) DESC
@@ -2339,11 +2414,14 @@ function getHomeExtra() {
   `).all().map(r => ({ name: r.name, legs: r.legs, avg: +r.avgv.toFixed(1) }));
   const first9Rows = { h2h: _first9(H2H_WHERE), practice: _first9(PRACTICE_WHERE) };
 
+  // docs/bug-roadmap.md BUG-27: X01_ONLY — "highest checkout" is an X01-scoped record
+  // (REFERENCE.md §3); without it a 121-170 Checkout Ladder / Dead Man Walking finish
+  // would top the household record.
   const _highestCheckout = (modeWhere) => db.prepare(`
     SELECT p.name AS name, t.checkout_points AS points, t.created_at AS createdAt
     FROM turns t JOIN players p ON p.id = t.player_id
     JOIN games g ON g.id = t.game_id
-    WHERE t.checkout = 1 AND t.checkout_points IS NOT NULL AND ${modeWhere}
+    WHERE t.checkout = 1 AND t.checkout_points IS NOT NULL AND ${modeWhere} ${X01_ONLY}
     ORDER BY t.checkout_points DESC, t.created_at ASC
     LIMIT 1
   `).get() || null;
@@ -2351,7 +2429,8 @@ function getHomeExtra() {
     overall: db.prepare(`
       SELECT p.name AS name, t.checkout_points AS points, t.created_at AS createdAt
       FROM turns t JOIN players p ON p.id = t.player_id
-      WHERE t.checkout = 1 AND t.checkout_points IS NOT NULL
+      JOIN games g ON g.id = t.game_id
+      WHERE t.checkout = 1 AND t.checkout_points IS NOT NULL ${X01_ONLY}
       ORDER BY t.checkout_points DESC, t.created_at ASC
       LIMIT 1
     `).get() || null,
@@ -2513,8 +2592,8 @@ function getSessionRecap(date) {
     WHERE t.player_id = ? AND date(t.created_at) = ? AND t.scored = 180 ${X01_ONLY}
   `);
   const tonPlusStmt = db.prepare(`
-    SELECT COUNT(*) AS n FROM turns t
-    WHERE t.player_id = ? AND date(t.created_at) = ? AND t.checkout = 1 AND t.checkout_points >= 100
+    SELECT COUNT(*) AS n FROM turns t JOIN games g ON g.id = t.game_id
+    WHERE t.player_id = ? AND date(t.created_at) = ? AND t.checkout = 1 AND t.checkout_points >= 100 ${X01_ONLY}
   `);
   const bestVisitStmt = db.prepare(`
     SELECT MAX(t.scored) AS v FROM turns t JOIN games g ON g.id = t.game_id
@@ -2601,24 +2680,29 @@ function getSessionRecap(date) {
   const preFewestDartsStmt = db.prepare(`
     SELECT MIN(legDarts) AS v FROM (
       SELECT COUNT(d.id) AS legDarts FROM turns t JOIN games g ON g.id = t.game_id JOIN darts d ON d.turn_id = t.id
-      WHERE t.player_id = ? AND date(t.created_at) < ? ${NOT_CHECKOUT_TRAINER} ${NOT_HANDICAPPED}
+      WHERE t.player_id = ? AND date(t.created_at) < ? ${NOT_CHECKOUT_TRAINER} ${NOT_HANDICAPPED} ${X01_ONLY}
       GROUP BY t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout) > 0
     )
   `);
+  // docs/bug-roadmap.md BUG-27: X01_ONLY on all four Personal-Best-tonight checkout
+  // statements — highest checkout and fewest-darts-to-checkout are X01-scoped records
+  // (matching getPersonalBests()), and checkout=1 is no longer X01-exclusive (121
+  // Checkout Ladder / Dead Man Walking both write it), so without this a drill checkout
+  // would fire a false "new personal best tonight."
   const preHighestCheckoutStmt = db.prepare(`
-    SELECT MAX(t.checkout_points) AS v FROM turns t
-    WHERE t.player_id = ? AND date(t.created_at) < ? AND t.checkout = 1 AND t.checkout_points IS NOT NULL
+    SELECT MAX(t.checkout_points) AS v FROM turns t JOIN games g ON g.id = t.game_id
+    WHERE t.player_id = ? AND date(t.created_at) < ? AND t.checkout = 1 AND t.checkout_points IS NOT NULL ${X01_ONLY}
   `);
   const tonightFewestDartsStmt = db.prepare(`
     SELECT MIN(legDarts) AS v FROM (
       SELECT COUNT(d.id) AS legDarts FROM turns t JOIN games g ON g.id = t.game_id JOIN darts d ON d.turn_id = t.id
-      WHERE t.player_id = ? AND date(t.created_at) = ? ${NOT_CHECKOUT_TRAINER} ${NOT_HANDICAPPED}
+      WHERE t.player_id = ? AND date(t.created_at) = ? ${NOT_CHECKOUT_TRAINER} ${NOT_HANDICAPPED} ${X01_ONLY}
       GROUP BY t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout) > 0
     )
   `);
   const tonightHighestCheckoutStmt = db.prepare(`
-    SELECT MAX(t.checkout_points) AS v FROM turns t
-    WHERE t.player_id = ? AND date(t.created_at) = ? AND t.checkout = 1 AND t.checkout_points IS NOT NULL
+    SELECT MAX(t.checkout_points) AS v FROM turns t JOIN games g ON g.id = t.game_id
+    WHERE t.player_id = ? AND date(t.created_at) = ? AND t.checkout = 1 AND t.checkout_points IS NOT NULL ${X01_ONLY}
   `);
   const personalBestsSetTonight = [];
   activePlayers.forEach(p => {
@@ -2647,8 +2731,8 @@ function getSessionRecap(date) {
     WHERE date(t.created_at) = ? AND t.scored = 180 ${X01_ONLY}
   `).all(date).forEach(r => moments.push({ ts: r.ts, type: '180', player: r.player, text: '180!' }));
   db.prepare(`
-    SELECT t.created_at AS ts, p.name AS player, t.checkout_points AS points FROM turns t JOIN players p ON p.id = t.player_id
-    WHERE date(t.created_at) = ? AND t.checkout = 1 AND t.checkout_points >= 100
+    SELECT t.created_at AS ts, p.name AS player, t.checkout_points AS points FROM turns t JOIN players p ON p.id = t.player_id JOIN games g ON g.id = t.game_id
+    WHERE date(t.created_at) = ? AND t.checkout = 1 AND t.checkout_points >= 100 ${X01_ONLY}
   `).all(date).forEach(r => moments.push({ ts: r.ts, type: r.points === 170 ? 'bigfish' : 'tonplus', player: r.player, text: `Checked out ${r.points}` }));
   h2hGames.forEach(g => { if (g.winnerName) moments.push({ ts: g.completedAt, type: 'matchwin', player: g.winnerName, text: `Won ${g.category}` }); });
   badgesEarnedTonight.forEach(b => moments.push({ ts: b.earnedAt, type: 'badge', player: b.player, text: b.badgeId }));
@@ -2688,7 +2772,7 @@ function getPlayerStatBubbles(playerName, mode) {
   const totalPts   = q(`SELECT SUM(t.scored) AS v ${J} ${mf} ${X01_ONLY}`) ?? 0;
   const avg        = avgDarts > 0 ? (totalPts / avgDarts * 3) : null;
   const one80s     = q(`SELECT COUNT(*) AS v ${J} ${mf} ${X01_ONLY} AND t.scored=180`) ?? 0;
-  const bigFish    = q(`SELECT COUNT(*) AS v ${J} ${mf} AND t.checkout=1 AND t.checkout_points=170`) ?? 0;
+  const bigFish    = q(`SELECT COUNT(*) AS v ${J} ${mf} ${X01_ONLY} AND t.checkout=1 AND t.checkout_points=170`) ?? 0;
   const nineDarters= qd(`SELECT COUNT(*) AS v FROM (SELECT 1 ${JD} ${mf} AND g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501 ${NOT_HANDICAPPED} GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9)`) ?? 0;
   // totalLegs is only ever a denominator for the X01 leg stats below (trebleless %,
   // 180s/leg) — X01-scoped so a cricket leg can't dilute either.
@@ -5108,7 +5192,9 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
     case '180s':
       return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(*) AS value ${TBASE} ${X01_ONLY} AND t.scored=180 GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'bigfish':
-      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(*) AS value ${TBASE} AND t.checkout=1 AND t.checkout_points=170 GROUP BY bucket ORDER BY bucket`).all(...params);
+      // docs/bug-roadmap.md BUG-27: X01_ONLY, matching the '180s' case above — a Big Fish
+      // is an X01 170 checkout, not a drill (Checkout Ladder / Dead Man Walking) 170.
+      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(*) AS value ${TBASE} ${X01_ONLY} AND t.checkout=1 AND t.checkout_points=170 GROUP BY bucket ORDER BY bucket`).all(...params);
     case '180sperleg':
       return db.prepare(`SELECT ${L.fmt} AS bucket, CAST(SUM(has_180) AS REAL)/NULLIF(COUNT(*),0) AS value FROM (
         SELECT MAX(t.created_at) AS leg_ts, MAX(CASE WHEN t.scored=180 THEN 1 ELSE 0 END) AS has_180
@@ -5538,8 +5624,11 @@ function getOneEightyStats(mode) {
 function getBigFishStats(mode) {
   const mf = _mf(mode);
   const J = `FROM turns t JOIN games g ON g.id = t.game_id JOIN players p ON p.id = t.player_id`;
-  const leaderboard = db.prepare(`SELECT p.name, COUNT(*) AS count ${J} WHERE t.checkout = 1 AND t.checkout_points = 170 ${mf} GROUP BY t.player_id ORDER BY count DESC`).all();
-  const recent      = db.prepare(`SELECT p.name, t.created_at ${J} WHERE t.checkout = 1 AND t.checkout_points = 170 ${mf} ORDER BY t.created_at DESC LIMIT 10`).all();
+  // docs/bug-roadmap.md BUG-27: X01_ONLY — a Big Fish is a 170 checkout in an X01 game;
+  // without this, a 170 finish in a 121 Checkout Ladder / Dead Man Walking drill would
+  // top the Big Fish leaderboard.
+  const leaderboard = db.prepare(`SELECT p.name, COUNT(*) AS count ${J} WHERE t.checkout = 1 AND t.checkout_points = 170 ${mf} ${X01_ONLY} GROUP BY t.player_id ORDER BY count DESC`).all();
+  const recent      = db.prepare(`SELECT p.name, t.created_at ${J} WHERE t.checkout = 1 AND t.checkout_points = 170 ${mf} ${X01_ONLY} ORDER BY t.created_at DESC LIMIT 10`).all();
   return { leaderboard, recent };
 }
 
@@ -5639,7 +5728,7 @@ function getTopFinishesAll(limit = 10, mode) {
     JOIN games g ON g.id = t.game_id
     JOIN players p ON p.id = t.player_id
     JOIN game_players gp ON gp.game_id = t.game_id AND gp.player_id = t.player_id
-    WHERE t.checkout = 1 AND t.checkout_points > 0 ${mf}
+    WHERE t.checkout = 1 AND t.checkout_points > 0 ${mf} ${X01_ONLY}
     GROUP BY t.player_id, t.checkout_points, gp.out_mode
     ORDER BY t.checkout_points DESC, first_date ASC
     LIMIT ?
@@ -5691,7 +5780,7 @@ function getTopFinishes(playerName, mode) {
     WHERE t.player_id = ?
       AND t.checkout = 1
       AND t.checkout_points > 0
-      ${mf}
+      ${mf} ${X01_ONLY}
     GROUP BY t.checkout_points, gp.out_mode
     ORDER BY t.checkout_points DESC
     LIMIT 10
@@ -5723,8 +5812,8 @@ function getOnThisDay(playerName, tz) {
       AND strftime('%Y',    t.created_at${tzMod}) != strftime('%Y', 'now'${tzMod})
     ORDER BY
       (CASE WHEN t.scored = 180 AND g.game_type = 'x01' THEN 3
-            WHEN t.checkout = 1 AND t.checkout_points = 170 THEN 2
-            WHEN t.checkout = 1 AND t.checkout_points >= 100 THEN 1
+            WHEN t.checkout = 1 AND t.checkout_points = 170 AND g.game_type = 'x01' THEN 2
+            WHEN t.checkout = 1 AND t.checkout_points >= 100 AND g.game_type = 'x01' THEN 1
             ELSE 0 END) DESC,
       yr DESC
     LIMIT 1
@@ -5735,10 +5824,13 @@ function getOnThisDay(playerName, tz) {
   if (row.scored === 180 && row.game_type === 'x01') {
     return { type: '180', year: Number(row.yr), yearsAgo, statLine: `A 180, ${row.category}` };
   }
-  if (row.checkout && row.checkout_points === 170) {
+  // docs/bug-roadmap.md BUG-27: the checkout flashbacks are X01-only (a 170/100+ checkout
+  // in a 121 Checkout Ladder / Dead Man Walking drill isn't the X01 "big fish"/ton+ this
+  // celebrates) — same game_type guard the 180 branch above already carries.
+  if (row.checkout && row.checkout_points === 170 && row.game_type === 'x01') {
     return { type: 'bigfish', year: Number(row.yr), yearsAgo, statLine: `A 170 checkout, ${row.category}` };
   }
-  if (row.checkout && row.checkout_points >= 100) {
+  if (row.checkout && row.checkout_points >= 100 && row.game_type === 'x01') {
     return { type: 'checkout100', year: Number(row.yr), yearsAgo, statLine: `A ${row.checkout_points} checkout, ${row.category}` };
   }
   return null;
@@ -5820,7 +5912,7 @@ function getCheckoutRoutes(playerName, score, mode) {
     JOIN  darts d1 ON d1.turn_id = t.id AND d1.dart_no = 1
     LEFT JOIN darts d2 ON d2.turn_id = t.id AND d2.dart_no = 2
     LEFT JOIN darts d3 ON d3.turn_id = t.id AND d3.dart_no = 3
-    WHERE t.player_id = ? AND t.checkout = 1 AND t.checkout_points = ? ${mf}
+    WHERE t.player_id = ? AND t.checkout = 1 AND t.checkout_points = ? ${mf} ${X01_ONLY}
     GROUP BY s1, m1, s2, m2, s3, m3
     ORDER BY times DESC
     LIMIT 5

@@ -499,6 +499,23 @@ const ALLOWED_LIVE_KEYS = new Set([
   // score/round history ride inside the already-unrestricted per-player
   // `players[]` array, same as every other game type's own per-player fields.
   'bobs27Round',
+  // Shanghai only (docs/archive/shanghai-roadmap.md) — which round is currently live
+  // and the game's own round count; read by display.html's renderers.shanghai.scorecard()
+  // for the round header and the current-round highlight. Per-player round points ride
+  // inside the already-unrestricted per-player `players[]` array.
+  'shanghaiRound', 'shanghaiMaxRounds',
+  // Halve-It only (docs/halve-it-roadmap.md) — the live round plus the FULL target
+  // sequence (display.html has no shared scoring.js module to derive per-round targets
+  // from, so it needs every round's target up front); read by renderers.halve_it.scorecard()
+  // for the per-row target labels. Per-player running totals ride inside `players[]`.
+  'halveItRound', 'halveItTargets',
+  // The Pressure Chamber only (docs/pressure-chamber-roadmap.md) — the live round, its
+  // No Warmup wall-clock deadline (if any), and the FULL 15-round card sequence up front
+  // (same "no shared scoring.js module" reasoning as halveItTargets); read by
+  // renderers.pressure_chamber.scorecard() for the target/modifier banner and countdown.
+  // Every card field is escaped at the display.html sink (docs/security-audit-roadmap.md
+  // SEC-26 — modifier.icon in particular). Per-player CP totals ride inside `players[]`.
+  'pressureChamberRound', 'pressureChamberDeadline', 'pressureChamberCards',
 ]);
 const MAX_LIVE_BYTES = 65536;
 // Returns the sanitized state, or null if it's over the size cap (caller sends 413).
