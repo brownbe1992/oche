@@ -328,7 +328,8 @@ const ACH_LABELS  = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter
   bobs27fullhouse:'Full House! 🎯', bobs27fullanderson:'🏔️ THE FULL ANDERSON! 🏔️',
   topofthehouse:'👑 TOP OF THE HOUSE! 👑', upset:'Upset! 🗡️',
   checkoutladderpeakbagged:'Peak Bagged! 🧗',
-  killerfirstblood:'First Blood 🩸', killeruntouchable:'Untouchable 🛡️', killerownworstenemy:'Own Worst Enemy 🙈' };
+  killerfirstblood:'First Blood 🩸', killeruntouchable:'Untouchable 🛡️', killerownworstenemy:'Own Worst Enemy 🙈',
+  shanghai:'🀄 SHANGHAI! 🀄' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -346,7 +347,8 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   bobs27fullhouse:2500, bobs27fullanderson:6000,
   topofthehouse:6000, upset:2500,
   checkoutladderpeakbagged:4000,
-  killerfirstblood:3000, killeruntouchable:4000, killerownworstenemy:3000 };
+  killerfirstblood:3000, killeruntouchable:4000, killerownworstenemy:3000,
+  shanghai:6000 };
 // Mirror-copied from frontend/index.html's BADGE_INFO[...].desc / ACH_DESC_FALLBACK —
 // this file has no Badge Case UI to source the text from directly, so it's kept as
 // its own flat map (docs/next-session-plan.md item 1).
@@ -407,6 +409,7 @@ const ACH_DESC = {
   killerfirstblood: 'Land the first elimination of a Killer match.',
   killeruntouchable: 'Win a Killer match without ever losing a life.',
   killerownworstenemy: 'Eliminate yourself via your own double after becoming a killer.',
+  shanghai: "Win a Shanghai game instantly — single, double, AND treble of the round's own number in one visit.",
 };
 // Just Chuckin' It's 18 laddered milestone badges — mirror-copied from frontend/
 // index.html's CHUCKIN_MILESTONE_LADDERS (this file has no shared module with
@@ -986,6 +989,75 @@ const renderers = {
       </div>`;
     }
   },
+  // Shanghai (docs/shanghai-roadmap.md): same shared chalkboard-table shape as
+  // Baseball's own (rows=rounds 1-config.rounds, columns=players) — all players
+  // share one live round, not independent per-player state. Row labels show the
+  // round's own TARGET NUMBER (not the round index) so the live board matches
+  // what's actually live to score against.
+  shanghai: {
+    scorecard(s, L){
+      const players = s.players;
+      const active = s.currentIndex;
+      const maxRounds = s.shanghaiMaxRounds || 7;
+      const round = s.shanghaiRound || 1;
+      const lastRound = Math.max(maxRounds, round);
+      const rows = [];
+      for(let i=1;i<=lastRound;i++){
+        const isCurrentRound = i===round;
+        const target = i<=maxRounds ? i : maxRounds;
+        const cells = players.map((p,pi)=>{
+          const r = p.roundPoints && p.roundPoints[i];
+          const isActive = pi===active && isCurrentRound;
+          return `<div class="cs-cell${isActive?' active':''}">${r!=null?`<span class="cs-points">${num(r)}</span>`:''}</div>`;
+        }).join('');
+        rows.push(`<div class="cs-row"><div class="cs-label">${target}</div>${cells}</div>`);
+      }
+
+      const headCells = players.map((p,i)=>{
+        const isActive = i===active;
+        return `<div class="cs-col-head${isActive?' active':''}">
+          <span>${escapeHtml(p.name)}</span>
+          ${isActive?'<span class="cs-throw-chip">▸ throwing</span>':''}
+        </div>`;
+      }).join('');
+
+      const totalCells = players.map((p,i)=>{
+        const isActive = i===active;
+        return `<div class="cs-cell${isActive?' active':''}"><span class="cs-points${isActive?' active':''}">${num(p.totalPoints)}</span></div>`;
+      }).join('');
+
+      const thrower = players[active];
+      const darts = Array.isArray(s.darts) ? s.darts : [];
+      const slots = [0,1,2].map(k=>{
+        const lab = darts[k];
+        return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
+      }).join('');
+
+      return `<div class="cs-wrap" style="--cs-cols:${players.length}">
+        <div class="cs-table">
+          <div class="cs-row cs-head"><div class="cs-label"></div>${headCells}</div>
+          ${rows.join('')}
+          <div class="cs-row cs-foot"><div class="cs-label">Points</div>${totalCells}</div>
+        </div>
+        <div class="cs-throw-row">
+          <span class="cs-throw-lbl">${thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Round ${Math.min(round,maxRounds)} of ${maxRounds}${round>maxRounds?' (extra rounds)':''}`:''}</span>
+          <div class="darts">${slots}</div>
+        </div>
+      </div>`;
+    },
+    summary(p){
+      return `
+      <div class="sum-card ${p.won?'winner':''}">
+        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}</div>
+        <div class="sum-stats">
+          <div class="sum-stat">
+            <div class="sv">${num(p.totalPoints)}</div>
+            <div class="sl">Points</div>
+          </div>
+        </div>
+      </div>`;
+    }
+  },
   // Bob's 27 (docs/archive/practice-ladders-roadmap.md Part A): same shared
   // chalkboard-table shape as Cricket/Baseball's (rows=rounds D1-D20, one
   // column since it's always solo), just fixed at exactly 20 rows — no
@@ -1525,7 +1597,7 @@ function render(s){
   // in landscape's wide-and-short shape but cram score text into narrow cells here.
   // The cricket/baseball scorecards are always a single table spanning the whole
   // grid, not per-player columns, regardless of orientation.
-  const isScorecardLayout = (s.gameType === 'cricket' || s.gameType === 'baseball' || s.gameType === 'bobs_27') && !s.legSummary;
+  const isScorecardLayout = (s.gameType === 'cricket' || s.gameType === 'baseball' || s.gameType === 'shanghai' || s.gameType === 'bobs_27') && !s.legSummary;
   const cols = isScorecardLayout ? 1 : (isPortrait ? 1 : (n<=1 ? 1 : n<=4 ? 2 : 3));
   grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
 

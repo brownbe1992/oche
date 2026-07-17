@@ -109,7 +109,7 @@ The landing page shows a live snapshot of all-time activity:
 
 **🌙 Tonight's Recap** — appears once at least one H2H game has completed today: a one-tap digest of the night so far (game count, player count, badges earned, personal bests set), opening a full recap screen with a date picker (any past night is recomputable for free — nothing about the recap is stored). The recap screen shows the night's results (per-matchup win/loss records, or a flat list for 3+ player games), each player's own tonight-only stats (games won/lost, darts thrown, best visit, best leg average, 180s, ton+ checkouts — best visit/leg scoped to X01), a light "also tonight" line for any solo/practice activity, badges earned, personal bests set (compared against each player's own best from every night before this one), and a chronological moments timeline (180s, high checkouts, match wins, badges). A **📤 Share** button renders the whole night as a single summary card through the same shareable-moment card engine every other achievement uses.
 
-**H2H / Practice toggle** — switches the leaderboards below between head-to-head and solo/practice stats. A second game-type toggle — **X01 / Cricket / Doubles Practice / Bob's 27 / 121 Checkout Ladder / The Gauntlet / Checkout Trainer / Around the Clock / Around the World / Killer / Marathon Mode** — switches the leaderboards between each game type's own stat vocabulary (the solo-only entries — Doubles Practice, Bob's 27, 121 Checkout Ladder, The Gauntlet, Checkout Trainer, Around the Clock, Around the World, and Marathon Mode — only appear while the Practice tab is selected; **Killer** is the inverse — always H2H, since the whole mechanic needs opponents to attack — and only appears while the H2H tab is selected). (Just Chuckin' It isn't on this toggle — it has no win/opponent-based stats to rank on a leaderboard; its stats are Player Profile-only.)
+**H2H / Practice toggle** — switches the leaderboards below between head-to-head and solo/practice stats. A second game-type toggle — **X01 / Cricket / Baseball / Shanghai / Doubles Practice / Bob's 27 / 121 Checkout Ladder / The Gauntlet / Checkout Trainer / Around the Clock / Around the World / Killer / Marathon Mode** — switches the leaderboards between each game type's own stat vocabulary (the solo-only entries — Doubles Practice, Bob's 27, 121 Checkout Ladder, The Gauntlet, Checkout Trainer, Around the Clock, Around the World, and Marathon Mode — only appear while the Practice tab is selected; **Killer** is the inverse — always H2H, since the whole mechanic needs opponents to attack — and only appears while the H2H tab is selected). (Just Chuckin' It isn't on this toggle — it has no win/opponent-based stats to rank on a leaderboard; its stats are Player Profile-only.)
 
 **📈 Household Ratings** — always visible regardless of which game-type tab is selected, since it's a single rating combined across every competitive game type (X01, Cricket, Baseball — "who beats whom," not a per-game-type number). Shows rating + win/loss record, ranked descending, for every player with at least 5 rated H2H games. See [Player Profile](#player-profile) for a player's own rating, rank, and rating-over-time chart, and [Achievements & Badges](#achievements--badges) for its two badges.
 
@@ -302,7 +302,7 @@ choice, no checkout hints, and no bust concept:
 
 Playing someone and need to stop mid-match? Tap **⏸ Save for later** (it lives
 next to **End game**, in both Pad and Dartboard input modes) to pause an
-in-progress X01, Cricket, Baseball, Bob's 27, 121 Checkout Ladder, The
+in-progress X01, Cricket, Baseball, Shanghai, Bob's 27, 121 Checkout Ladder, The
 Gauntlet, or guided Around the Clock/World game — H2H or solo practice, tournament matches and
 league fixtures included. Any
 staged-but-not-yet-entered darts of the current turn are discarded (a confirm
@@ -329,7 +329,7 @@ mechanics.
 
 ### Achievements & Badges
 
-Beyond 180s, Big Fish, and nine-darters, Oche tracks 33 X01 achievement badges (including a 5-tier lifetime-180s ladder and a handful of darts-culture one-offs — Bed & Breakfast, Madhouse, Shanghai) covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 5 Cricket-specific badges (including cut-throat's own 🔪 Stone Cold), 8 Baseball badges (Perfect Inning, Perfect Game, ⚾ Walk-Off, 🔄 The Cycle, and a 4-tier lifetime-runs ladder), 5 Doubles Practice badges (a 4-tier lifetime doubles-hit ladder plus 🎪 Ring Master for hitting every double lifetime), 7 Bob's 27 badges (🎯 Full House, 🏔️ The Full Anderson, and a 5-tier survival/score ladder), 7 121 Checkout Ladder badges (a 6-tier highest-rung ladder plus 🧗 Peak Bagged for checking out 170), 14 The Gauntlet badges (a 4-tier lifetime-runs ladder, a 4-tier lifetime-clean-stations ladder, a 3-tier per-run clean-streak ladder, plus 💎 Flawless Gauntlet, 🥋 Unmarked, and 🩹 Second Wind), 3 Killer badges (🩸 First Blood, 🛡️ Untouchable, 🙈 Own Worst Enemy — all recurring), 11 Marathon Mode badges (a 4-tier lifetime-sessions-completed ladder, a 4-tier lifetime-legs-completed ladder, plus 🛡️ Iron, 📉 Flat Line, and ⏱️ Full Distance), 2 Household Rating badges (👑 Top of the House, 🗡️ Upset), 2 [Tournament](#tournaments)-specific badges, 3 Daily Challenge badges, 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!), 34 Checkout Trainer badges (28 laddered milestones across 5 ladders — 4 Freeform, 1 Checkout Blitz — plus 6 one-off badges), and 2 Practice Drills badges for the two [guided drills](#new-game). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
+Beyond 180s, Big Fish, and nine-darters, Oche tracks 33 X01 achievement badges (including a 5-tier lifetime-180s ladder and a handful of darts-culture one-offs — Bed & Breakfast, Madhouse, Shanghai) covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 5 Cricket-specific badges (including cut-throat's own 🔪 Stone Cold), 8 Baseball badges (Perfect Inning, Perfect Game, ⚾ Walk-Off, 🔄 The Cycle, and a 4-tier lifetime-runs ladder), 1 Shanghai badge (🀄 Shanghai! — win the game instantly), 5 Doubles Practice badges (a 4-tier lifetime doubles-hit ladder plus 🎪 Ring Master for hitting every double lifetime), 7 Bob's 27 badges (🎯 Full House, 🏔️ The Full Anderson, and a 5-tier survival/score ladder), 7 121 Checkout Ladder badges (a 6-tier highest-rung ladder plus 🧗 Peak Bagged for checking out 170), 14 The Gauntlet badges (a 4-tier lifetime-runs ladder, a 4-tier lifetime-clean-stations ladder, a 3-tier per-run clean-streak ladder, plus 💎 Flawless Gauntlet, 🥋 Unmarked, and 🩹 Second Wind), 3 Killer badges (🩸 First Blood, 🛡️ Untouchable, 🙈 Own Worst Enemy — all recurring), 11 Marathon Mode badges (a 4-tier lifetime-sessions-completed ladder, a 4-tier lifetime-legs-completed ladder, plus 🛡️ Iron, 📉 Flat Line, and ⏱️ Full Distance), 2 Household Rating badges (👑 Top of the House, 🗡️ Upset), 2 [Tournament](#tournaments)-specific badges, 3 Daily Challenge badges, 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!), 34 Checkout Trainer badges (28 laddered milestones across 5 ladders — 4 Freeform, 1 Checkout Blitz — plus 6 one-off badges), and 2 Practice Drills badges for the two [guided drills](#new-game). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
 
 | Badge | How to earn it |
 |---|---|
@@ -379,6 +379,12 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 33 X01 achievement badges (
 | Ladder | Tiers (threshold — label) |
 |---|---|
 | Lifetime Runs | 100 Rookie Season ⚾ · 500 Everyday Player 🧢 · 1,500 All-Star ⭐ · 5,000 Hall of Fame 🏟️ |
+
+**Shanghai's 1 badge** — win the game outright with a Shanghai instead of grinding out the final round:
+
+| Badge | How to earn it |
+|---|---|
+| 🀄 **Shanghai!** | Win a Shanghai game instantly — single, double, AND treble of the round's own number in one visit |
 
 **Doubles Practice's 5 badges** (docs/archive/culture-badges-roadmap.md Part B — this mode had none before) — a 4-tier lifetime doubles-hit ladder plus one completion badge:
 
@@ -487,7 +493,7 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 33 X01 achievement badges (
 | 🧭 **Guided Clock** | Complete a guided Around the Clock drill — hit every number 1–20 as a single |
 | 🗺️ **Guided World** | Reach all 63 lifetime dart outcomes while playing a guided Around the World session |
 
-**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 155-badge roster, grouped into X01/Cricket/Baseball/Doubles Practice/Bob's 27/121 Checkout Ladder/The Gauntlet/Killer/Marathon Mode/Household Rating/Tournament/Daily Challenge/Just Chuckin' It/Checkout Trainer/Practice Drills sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), all 4 Baseball lifetime-runs ladder tiers, both Tournament badges (Champion, Giant Slayer (Tournament)), Full Rotation, both Practice Drills badges (Guided Clock, Guided World), all 18 Just Chuckin' It milestones, all 34 Checkout Trainer badges, all 5 Doubles Practice badges, all 5 Bob's 27 survival/score ladder tiers, all 6 121 Checkout Ladder ladder tiers, all 11 Gauntlet ladder tiers, all 8 Marathon Mode ladder tiers, and 👑 Top of the House are one-time-only by nature and never show a counter beyond 1 (🧗 Peak Bagged, Gauntlet's own 💎 Flawless Gauntlet/🥋 Unmarked/🩹 Second Wind, all 3 Killer badges, and all 3 Marathon Mode one-off badges — 🛡️ Iron/📉 Flat Line/⏱️ Full Distance — are all recurring/repeatable instead, so those ten DO show a counter after a second occurrence). **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
+**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 156-badge roster, grouped into X01/Cricket/Baseball/Shanghai/Doubles Practice/Bob's 27/121 Checkout Ladder/The Gauntlet/Killer/Marathon Mode/Household Rating/Tournament/Daily Challenge/Just Chuckin' It/Checkout Trainer/Practice Drills sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), all 4 Baseball lifetime-runs ladder tiers, both Tournament badges (Champion, Giant Slayer (Tournament)), Full Rotation, both Practice Drills badges (Guided Clock, Guided World), all 18 Just Chuckin' It milestones, all 34 Checkout Trainer badges, all 5 Doubles Practice badges, all 5 Bob's 27 survival/score ladder tiers, all 6 121 Checkout Ladder ladder tiers, all 11 Gauntlet ladder tiers, all 8 Marathon Mode ladder tiers, and 👑 Top of the House are one-time-only by nature and never show a counter beyond 1 (🧗 Peak Bagged, Gauntlet's own 💎 Flawless Gauntlet/🥋 Unmarked/🩹 Second Wind, all 3 Killer badges, and all 3 Marathon Mode one-off badges — 🛡️ Iron/📉 Flat Line/⏱️ Full Distance — are all recurring/repeatable instead, so those ten DO show a counter after a second occurrence). **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
 
 **Around the World Progress** — a dedicated grid on the Player Profile showing exactly which of the 63 lifetime dart outcomes are still missing, alongside the Badge Case.
 
@@ -609,7 +615,7 @@ Each player has a dedicated profile page with full career statistics, accessible
 
 #### Tabs
 
-**Overall** · **H2H** · **Practice** — all stats and charts filter to the selected mode. A second game-type toggle sits just above the stat bubbles — **X01 / Cricket / Doubles Practice / Bob's 27 / 121 Checkout Ladder / The Gauntlet / Killer / Marathon Mode / Just Chuckin' It / Checkout Trainer / Around the Clock / Around the World** — switches the bubbles, chart, and Personal Bests section between each game type's own stat vocabulary (X01's 15 stats, Cricket's 6, Doubles Practice's 3, Bob's 27's 5, 121 Checkout Ladder's 4, The Gauntlet's 5, Killer's 5, Marathon Mode's 6, Chuckin's 8, Checkout Trainer's 3, Around the Clock's 3, or Around the World's 2 — see below). The Home page's leaderboards cover X01, Cricket, Doubles Practice, Bob's 27, 121 Checkout Ladder, The Gauntlet, Killer, Marathon Mode, Checkout Trainer (its Checkout Blitz leaderboard), Around the Clock, and Around the World — Just Chuckin' It doesn't have a competitive leaderboard shape to show there (no wins, no opponent), so it's Player Profile-only.
+**Overall** · **H2H** · **Practice** — all stats and charts filter to the selected mode. A second game-type toggle sits just above the stat bubbles — **X01 / Cricket / Baseball / Shanghai / Doubles Practice / Bob's 27 / 121 Checkout Ladder / The Gauntlet / Killer / Marathon Mode / Just Chuckin' It / Checkout Trainer / Around the Clock / Around the World** — switches the bubbles, chart, and Personal Bests section between each game type's own stat vocabulary (X01's 15 stats, Cricket's 6, Shanghai's 6, Doubles Practice's 3, Bob's 27's 5, 121 Checkout Ladder's 4, The Gauntlet's 5, Killer's 5, Marathon Mode's 6, Chuckin's 8, Checkout Trainer's 3, Around the Clock's 3, or Around the World's 2 — see below). The Home page's leaderboards cover X01, Cricket, Baseball, Shanghai, Doubles Practice, Bob's 27, 121 Checkout Ladder, The Gauntlet, Killer, Marathon Mode, Checkout Trainer (its Checkout Blitz leaderboard), Around the Clock, and Around the World — Just Chuckin' It doesn't have a competitive leaderboard shape to show there (no wins, no opponent), so it's Player Profile-only.
 
 #### Stat Bubbles
 
@@ -702,6 +708,17 @@ Switching to **Marathon Mode** shows its own 6 stat bubbles instead:
 | **The Warm Machine** | Sessions classified The Warm Machine |
 | **Flat Line** | Sessions classified Flat Line |
 
+Switching to **Shanghai** shows its own 6 stat bubbles instead:
+
+| Bubble | Description |
+|---|---|
+| **Points/Round** | Total points scored ÷ rounds played, Shanghai's direct analog of Baseball's RPI |
+| **Shanghais Thrown** | Instant wins — single, double, AND treble of the round's own number in one visit |
+| **Win Rate** | Percentage of H2H Shanghai games won |
+| **Games Played** | Shanghai games played |
+| **Darts Thrown** | Darts thrown in Shanghai games specifically |
+| **Best Round** | Highest points scored in a single round |
+
 Switching to **Just Chuckin' It** shows its own 8 stat bubbles instead:
 
 | Bubble | Description |
@@ -756,7 +773,7 @@ A non-interactive dartboard shaded by how often each region has been hit (with e
 - **Current Win Streak**
 - **Recent Form** — average of the last 10 legs, with an arrow showing the delta vs. lifetime average
 
-On the Cricket toggle, this section shows **Best Leg MPR**, **Fewest Darts to Close**, **Current Win Streak**, and **Recent Form** (MPR-based) instead — the same shape, keyed off the turn that won each Cricket leg rather than an X01 checkout.
+On the Cricket toggle, this section shows **Best Leg MPR**, **Fewest Darts to Close**, **Current Win Streak**, and **Recent Form** (MPR-based) instead — the same shape, keyed off the turn that won each Cricket leg rather than an X01 checkout. On the Shanghai toggle, it shows **Best Leg Points**, **Fewest Darts to Win**, **Current Win Streak**, and **Recent Form** (points-based) — the same shape again, keyed off whichever visit actually won each Shanghai leg (either a genuine instant Shanghai, or whoever led on points once the final round settled).
 
 On the Doubles Practice toggle, this section shows just **Best Round (Darts)** and **Best Round (Doubles Hit)** — no win-streak/recent-form fields, since this mode has no win condition. On the Bob's 27 toggle, it shows **Best Final Score** (the peak across every run, including a run that died with a high score) and **Deepest Double Reached on a Fail** (scoped to runs that actually ended in death — a survived run has nothing to report here). On the 121 Checkout Ladder toggle, it shows **Highest Target Reached** (a peak — attempted, win or fail, since standing at rung 150 already means you climbed that high regardless of how that attempt ends) and **Fewest Darts on the Highest Checkout** (scoped to the highest target you actually checked out, which can be lower than the peak reached if that top attempt itself failed). On The Gauntlet toggle, it shows just **Lowest Total Scars** across every completed run — an ascending-is-better ("fewer is better") Personal Best field, so it's shown alone rather than paired with a second field the way every other solo drill's Personal Bests are. On the Killer toggle, it shows just **Most Kills in a Leg** — the highest single-leg elimination count across every match played. On the Marathon Mode toggle, it shows **Lowest Fatigue Split** (the other ascending-is-better field in this app) and **Most Legs in a Session** (a stamina/throughput metric, descending as usual). On the Just Chuckin' It toggle, it shows **Best Session (Darts)** and **Best Session (Trebles)**, the same deliberately-smaller 2-field shape. On the Checkout Trainer toggle, it shows **Toughest Checkout Solved**, **Best Optimal Streak**, **Best Checkout Blitz Score**, and **Avg Checkout Blitz Score** (whichever fields have data) — same no-win-condition reasoning as Doubles Practice/Chuckin.
 
@@ -768,7 +785,7 @@ Shown once on the Overall/H2H tabs, regardless of which per-game-type toggle abo
 
 #### Badge Case
 
-The full 155-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (33 badges), a **Cricket** section (5 badges), a **Baseball** section (8 badges), a **Doubles Practice** section (5 badges), a **Bob's 27** section (7 badges), a **121 Checkout Ladder** section (7 badges), a **The Gauntlet** section (14 badges), a **Killer** section (3 badges), a **Marathon Mode** section (11 badges), a **Household Rating** section (2 badges), a **Tournament** section (2 badges), a **Daily Challenge** section (3 badges), a **Just Chuckin' It** section (19 badges), a **Checkout Trainer** section (34 badges), and a **Practice Drills** section (2 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
+The full 156-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (33 badges), a **Cricket** section (5 badges), a **Baseball** section (8 badges), a **Shanghai** section (1 badge), a **Doubles Practice** section (5 badges), a **Bob's 27** section (7 badges), a **121 Checkout Ladder** section (7 badges), a **The Gauntlet** section (14 badges), a **Killer** section (3 badges), a **Marathon Mode** section (11 badges), a **Household Rating** section (2 badges), a **Tournament** section (2 badges), a **Daily Challenge** section (3 badges), a **Just Chuckin' It** section (19 badges), a **Checkout Trainer** section (34 badges), and a **Practice Drills** section (2 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
 
 #### On This Day
 
@@ -1221,6 +1238,9 @@ GET  /api/stats/cricket-9marks?mode=        Cricket 9-marks-in-one-visit leaderb
 GET  /api/stats/cricket-mpr?mode=           Cricket Marks Per Round leaderboard (min. 5 rounds)
 GET  /api/stats/cricket-wins                Cricket win-rate leaderboard (H2H only, no mode param)
 GET  /api/stats/cricket-perfect-leg?mode=   Cricket "closed in the fewest possible darts" leaderboard
+GET  /api/stats/shanghai-ppr?mode=          Shanghai Points Per Round leaderboard (min. 5 rounds)
+GET  /api/stats/shanghai-shanghais?mode=    Shanghai instant-win (🀄 Shanghai!) leaderboard
+GET  /api/stats/shanghai-wins               Shanghai win-rate leaderboard (H2H only, no mode param)
 GET  /api/stats/doubles-practice-accuracy   Doubles % leaderboard (no mode param — always practice)
 GET  /api/stats/doubles-practice-best-round Doubles Practice best-single-round leaderboard (no mode param)
 GET  /api/stats/bobs27-leaderboard          Bob's 27 best-single-run final-score leaderboard (no mode param)
@@ -1253,6 +1273,9 @@ GET  /api/players/stat-bubbles?name=&mode=  All 15 stat bubble values for a play
      &gameType=cricket                      Pass gameType=cricket for Cricket's 6 stat bubbles
                                              (MPR, 9 Marks, Win Rate, Games Played, Darts
                                              Thrown, Darts/Won Leg) instead of X01's 15.
+     &gameType=shanghai                      Pass gameType=shanghai for Shanghai's 6 stat
+                                             bubbles (Points/Round, Shanghais Thrown, Win Rate,
+                                             Games Played, Darts Thrown, Best Round) instead.
      &gameType=doubles_practice             Pass gameType=doubles_practice for Doubles
                                              Practice's 3 stat bubbles (Doubles %, Darts/Round,
                                              Doubles Hit/Round) instead.
@@ -1288,6 +1311,9 @@ GET  /api/players/personal-bests?name=&mode= Best leg average, fewest darts to f
      &gameType=cricket                      Pass gameType=cricket for Cricket's Personal Bests
                                              (best leg MPR, fewest darts to close, win streak,
                                              recent/lifetime MPR) instead.
+     &gameType=shanghai                      Pass gameType=shanghai for Shanghai's Personal
+                                             Bests (best leg points, fewest darts to win, win
+                                             streak, recent/lifetime points) instead.
      &gameType=doubles_practice             Pass gameType=doubles_practice for Doubles
                                              Practice's Personal Bests (longest round by darts,
                                              most doubles hit in a round) instead.

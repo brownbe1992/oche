@@ -28,7 +28,8 @@ const { checkoutHint, dartLabel,
   rebuildCheckoutLadderState,
   GAUNTLET_STATION_ORDER, gauntletTotalScars, gauntletResultTier, rebuildGauntletState,
   KILLER_DEFAULT_LIVES, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
-  computeFatigueSplit, classifyMarathonTrend } = require('../frontend/scoring.js');
+  computeFatigueSplit, classifyMarathonTrend,
+  shanghaiRoundTarget, evaluateVisitShanghai, rebuildShanghaiState } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -1280,6 +1281,31 @@ function addTurn(gameId, t, opts = {}) {
     if (scored !== expectedDelta) {
       throw httpError(400, "scored does not match this dart's derived life-change magnitude");
     }
+  } else if (gameTypeRow && gameTypeRow.game_type === 'shanghai') {
+    // docs/archive/shanghai-roadmap.md: same SEC-25 shape Baseball's own branch above
+    // uses — turns.scored IS arithmetically derivable from this visit's own
+    // darts plus the round number, and is the points total every Shanghai
+    // stat/leaderboard trusts. The round is derived server-side from this
+    // player's own prior turn count in this game/set/leg (SEC-25 pattern),
+    // capped at config.rounds (default 7) for extra rounds, matching
+    // shanghaiRoundTarget()/evaluateVisitShanghai() exactly. Note: the
+    // roadmap doc's own draft text says "max legit visit = 6x the round
+    // number" — that undersells it; three trebles of the round's number is
+    // a real, non-Shanghai 9x-the-round-number visit, so the real ceiling
+    // enforced here is 9x, not 6x (a correctness fix over the doc's literal
+    // wording, not a deviation from its actual intent).
+    if (t.bust) throw httpError(400, 'a Shanghai turn cannot be a bust');
+    if (t.checkout) throw httpError(400, 'a Shanghai turn cannot be a checkout');
+    const gameRow = db.prepare('SELECT config FROM games WHERE id=?').get(Number(gameId));
+    const cfg = gameRow && gameRow.config ? JSON.parse(gameRow.config) : null;
+    const maxRounds = (cfg && cfg.rounds) || 7;
+    const priorTurns = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE game_id = ? AND player_id = ? AND set_no = ? AND leg_no = ?')
+      .get(Number(gameId), p.id, setNo, legNo).n;
+    const round = shanghaiRoundTarget(priorTurns + 1, maxRounds);
+    const expectedPoints = darts.reduce((sum, d) => sum + (d.sector === round ? d.multiplier * round : 0), 0);
+    if (scored !== expectedPoints) {
+      throw httpError(400, "scored does not match this Shanghai visit's points on the round's own number");
+    }
   }
   // Checkout Trainer (docs/archive/checkout-trainer-roadmap.md): the target score offered
   // for this round. Server-computed context, not a scored value, so it's only
@@ -1361,7 +1387,7 @@ function completeGame(gameId, winnerName) {
    bobs_27 (docs/archive/practice-ladders-roadmap.md Part A) IS savable — its
    running total replays deterministically from `turns` the same way every
    other entry here does (rebuildBobs27State(), frontend/scoring.js). */
-const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
+const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'shanghai'];
 
 function _savedGameRow(gameId) {
   return db.prepare('SELECT * FROM saved_games WHERE game_id = ?').get(Number(gameId));
@@ -1475,6 +1501,12 @@ function _savedGamePosition(game, participants, turns) {
   if (game.game_type === 'baseball') {
     const r = rebuildBaseballState({ names, legsPerSet, turns });
     return { setNo: r.setNo, legNo: r.legNo, baseballInning: r.baseballInning, players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, totalRuns: p.totalRuns })) };
+  }
+  if (game.game_type === 'shanghai') {
+    const config = game.config ? JSON.parse(game.config) : null;
+    const maxRounds = (config && config.rounds) || 7;
+    const r = rebuildShanghaiState({ names, legsPerSet, maxRounds, turns });
+    return { setNo: r.setNo, legNo: r.legNo, shanghaiRound: r.shanghaiRound, players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, totalPoints: p.totalPoints })) };
   }
   if (game.game_type === 'around_the_clock') {
     const r = rebuildAroundTheClockState({ turns });
@@ -3136,6 +3168,170 @@ function getBaseballPerfectGameStats(mode) {
   return { leaderboard, recent };
 }
 
+/* ---------- Shanghai (docs/archive/shanghai-roadmap.md) ----------
+   turns.scored for a Shanghai turn already IS that visit's points on the
+   round's own number (enterTurnShanghai() writes scored:ev.scored directly,
+   same as Baseball), so these read turns.scored as-is like Baseball's own
+   block above. Points-per-round is Shanghai's direct analog of Baseball's RPI. */
+function getShanghaiStatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'shanghai' });
+
+  const row = db.prepare(`
+    SELECT COUNT(*) AS rounds, COALESCE(SUM(t.scored),0) AS totalPoints,
+           COALESCE(MAX(t.scored),0) AS bestRound,
+           COALESCE(SUM(t.leg_won),0) AS shanghaisThrown
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE t.player_id=? ${scope}
+  `).get(p.id);
+  const rounds = row?.rounds ?? 0;
+  const ppr = rounds > 0 ? (row.totalPoints / rounds) : null;
+  const bestRound = rounds > 0 ? row.bestRound : null;
+
+  const gamesRow = db.prepare(`
+    SELECT COUNT(*) AS played, SUM(CASE WHEN g.winner_id=? THEN 1 ELSE 0 END) AS won
+    FROM game_players gp JOIN games g ON g.id=gp.game_id
+    WHERE gp.player_id=? ${scope} AND g.completed_at IS NOT NULL
+  `).get(p.id, p.id);
+  const gamesPlayed = gamesRow?.played ?? 0;
+  const winPct = gamesPlayed > 0 ? (gamesRow.won / gamesPlayed * 100) : null;
+
+  const dartsThrown = db.prepare(`SELECT COUNT(*) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+
+  return { ppr, bestRound, shanghaisThrown: row?.shanghaisThrown ?? 0, winPct, gamesPlayed, dartsThrown, totalPoints: row?.totalPoints ?? 0 };
+}
+
+// A completed Shanghai leg ends exactly one of two ways (evaluateVisitShanghai()
+// never allows a third): (1) an instant Shanghai -- self-referential to the
+// winning player's own visit, same signal Cricket/Killer use turns.leg_won for;
+// or (2) the final round completes with no Shanghai thrown, decided by whichever
+// player has the higher point total -- NOT self-referential to any one turn
+// (the round-ending visit and the actual leader aren't always the same player),
+// same situation getBaseballWonLegs() handles. So this unions both derivations:
+// legs already decided by a leg_won=1 turn use that signal directly; every other
+// completed leg falls back to the total-points-max comparison.
+function getShanghaiWonLegs(playerId, mode) {
+  const scope = _scope({ mode, gameType: 'shanghai' });
+
+  const shanghaiWins = db.prepare(`
+    SELECT t.game_id, t.set_no, t.leg_no,
+      (SELECT COALESCE(SUM(t2.scored),0) FROM turns t2 WHERE t2.game_id=t.game_id AND t2.set_no=t.set_no AND t2.leg_no=t.leg_no AND t2.player_id=t.player_id) AS points,
+      (SELECT COUNT(d2.id) FROM turns t2 JOIN darts d2 ON d2.turn_id=t2.id WHERE t2.game_id=t.game_id AND t2.set_no=t.set_no AND t2.leg_no=t.leg_no AND t2.player_id=t.player_id) AS darts,
+      t.id AS lastTurnId
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE t.leg_won=1 AND t.player_id=? ${scope}
+  `).all(playerId);
+
+  const finalRoundWins = db.prepare(`
+    WITH turn_totals AS (
+      SELECT t.id AS turn_id, t.game_id, t.set_no, t.leg_no, t.player_id, t.scored AS points, COUNT(d.id) AS darts
+      FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+      WHERE g.completed_at IS NOT NULL ${scope}
+      GROUP BY t.id
+    ),
+    leg_totals AS (
+      SELECT game_id, set_no, leg_no, player_id, MAX(turn_id) AS lastTurnId, SUM(points) AS points, SUM(darts) AS darts
+      FROM turn_totals GROUP BY game_id, set_no, leg_no, player_id
+    ),
+    decided_by_shanghai AS (
+      SELECT DISTINCT game_id, set_no, leg_no FROM turns WHERE leg_won=1
+    ),
+    leg_max AS (
+      SELECT lt.game_id, lt.set_no, lt.leg_no, MAX(lt.points) AS maxPoints
+      FROM leg_totals lt
+      LEFT JOIN decided_by_shanghai dbs ON dbs.game_id=lt.game_id AND dbs.set_no=lt.set_no AND dbs.leg_no=lt.leg_no
+      WHERE dbs.game_id IS NULL
+      GROUP BY lt.game_id, lt.set_no, lt.leg_no
+    )
+    SELECT lt.game_id, lt.set_no, lt.leg_no, lt.points, lt.darts, lt.lastTurnId
+    FROM leg_totals lt JOIN leg_max lm ON lm.game_id=lt.game_id AND lm.set_no=lt.set_no AND lm.leg_no=lt.leg_no
+    WHERE lt.player_id=? AND lt.points=lm.maxPoints
+  `).all(playerId);
+
+  return shanghaiWins.concat(finalRoundWins);
+}
+
+// Shanghai's Personal Bests -- same 5-field shape as getBaseballPersonalBests(),
+// built on getShanghaiWonLegs()'s hybrid leg-winner derivation.
+function getShanghaiPersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+
+  const legs = getShanghaiWonLegs(p.id, mode);
+  const bestLegPoints = legs.length ? Math.max(...legs.map(l => l.points)) : null;
+  const fewestDartsToWin = legs.length ? Math.min(...legs.map(l => l.darts)) : null;
+
+  const recentLegs = legs.slice().sort((a, b) => b.lastTurnId - a.lastTurnId).slice(0, 10);
+  const recentFormPoints = recentLegs.length ? recentLegs.reduce((s, l) => s + l.points, 0) / recentLegs.length : null;
+  const lifetimePoints = legs.length ? legs.reduce((s, l) => s + l.points, 0) / legs.length : null;
+
+  let winStreak = 0;
+  if (mode !== 'practice') {
+    const h2hScope = _scope({ mode: 'h2h', gameType: 'shanghai' });
+    const recentGames = db.prepare(`
+      SELECT g.winner_id AS winnerId
+      FROM games g JOIN game_players gp ON gp.game_id=g.id
+      WHERE gp.player_id=? AND g.completed_at IS NOT NULL ${h2hScope}
+      ORDER BY g.completed_at DESC
+      LIMIT 50
+    `).all(p.id);
+    for (const r of recentGames) {
+      if (r.winnerId === p.id) winStreak++; else break;
+    }
+  }
+
+  return { bestLegPoints, fewestDartsToWin, winStreak, recentFormPoints, lifetimePoints };
+}
+
+// Points-per-round leaderboard -- direct analog of getBaseballRpiLeaderboard(),
+// same minimum-rounds floor to keep one lucky round from topping the board.
+function getShanghaiPprLeaderboard(mode) {
+  const scope = _scope({ mode, gameType: 'shanghai' });
+  const rows = db.prepare(`
+    SELECT p.name AS name, COUNT(*) AS rounds, SUM(t.scored) AS points
+    FROM turns t JOIN games g ON g.id=t.game_id JOIN players p ON p.id=t.player_id
+    WHERE 1=1 ${scope}
+    GROUP BY t.player_id
+    HAVING rounds >= 5
+  `).all();
+  return rows
+    .map(r => ({ name: r.name, ppr: +(r.points / r.rounds).toFixed(2), rounds: r.rounds }))
+    .sort((a, b) => b.ppr - a.ppr);
+}
+
+// Shanghai! leaderboard + recent feed -- counts every instant-Shanghai win
+// (turns.leg_won=1), same leaderboard+recent shape as getBaseballPerfectInningsStats().
+function getShanghaiShanghaisStats(mode) {
+  const scope = _scope({ mode, gameType: 'shanghai' });
+  const base = `
+    SELECT t.id, t.player_id, t.created_at
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE t.leg_won=1 ${scope}
+  `;
+  const leaderboard = db.prepare(`SELECT p.name, COUNT(*) AS count FROM (${base}) x JOIN players p ON p.id=x.player_id GROUP BY x.player_id ORDER BY count DESC`).all();
+  const recent      = db.prepare(`SELECT p.name, x.created_at FROM (${base}) x JOIN players p ON p.id=x.player_id ORDER BY x.created_at DESC LIMIT 10`).all();
+  return { leaderboard, recent };
+}
+
+// Win/loss leaderboard -- identical shape to getBaseballWinLeaderboard() (H2H
+// only by nature: practice mode has no winner_id).
+function getShanghaiWinLeaderboard() {
+  const scope = _scope({ mode: 'h2h', gameType: 'shanghai' });
+  const winRows = db.prepare(`
+    SELECT p.name AS name, COUNT(*) AS played, SUM(CASE WHEN g.winner_id = p.id THEN 1 ELSE 0 END) AS won
+    FROM game_players gp
+    JOIN players p ON p.id = gp.player_id
+    JOIN games g ON g.id = gp.game_id
+    WHERE g.completed_at IS NOT NULL ${scope}
+    GROUP BY p.id
+    HAVING played >= 1
+    ORDER BY won DESC, played ASC
+  `).all();
+  return winRows.map(r => ({ name: r.name, played: r.played, won: r.won,
+    rate: r.played ? +((r.won / r.played) * 100).toFixed(1) : 0 }));
+}
+
 /* ---------- Doubles Practice (docs/game-modes-roadmap.md) ----------
    Solo drill mode: no opponent, no win/loss, no legs won — a "round" is one
    turns.leg_no grouping (incremented client-side by startNextRoundDoublesPractice()
@@ -4592,7 +4788,7 @@ function _mf(mode) {
 // 'x01'/'cricket', server.js only uses a query param to pick which function to
 // call), and is whitelisted here regardless as a defense-in-depth measure
 // against string interpolation.
-const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer'];
+const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer', 'shanghai'];
 function _scope({ mode, gameType } = {}) {
   let sql = _mf(mode);
   if (gameType) {
@@ -7545,6 +7741,7 @@ module.exports = {
   getCricketStatBubbles, getCricketNineMarksStats, getCricketPersonalBests,
   getBaseballStatBubbles, getBaseballPersonalBests,
   getBaseballPerfectInningsStats, getBaseballRpiLeaderboard, getBaseballWinLeaderboard, getBaseballPerfectGameStats,
+  getShanghaiStatBubbles, getShanghaiPersonalBests, getShanghaiShanghaisStats, getShanghaiWinLeaderboard, getShanghaiPprLeaderboard,
   getCricketMprLeaderboard, getCricketWinLeaderboard, getCricketPerfectLegStats,
   getDoublesPracticeStatBubbles, getDoublesPracticePersonalBests,
   getDoublesPracticeAccuracyLeaderboard, getDoublesPracticeBestRoundStats, getDoublesPracticeHitSectors,

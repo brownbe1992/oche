@@ -829,6 +829,20 @@
           </div>
         </div>
 
+        <!-- Shanghai options (Shanghai game type only, docs/archive/shanghai-roadmap.md) —
+             a fixed round sequence 1..rounds; each round's 3 darts only score
+             against that round's own number. -->
+        <div class="setup-section" id="shanghai-options-section" hidden>
+          <div class="setup-label">Shanghai options</div>
+          <p class="pp-meta" style="margin:0 0 8px">Round 1 targets the number 1, round 2 the number 2, and so on. A single, double, AND treble of the round's own number in one visit — a Shanghai — wins instantly.</p>
+          <div class="opts" style="margin:0">
+            <div class="seg" role="group" aria-label="Shanghai round count">
+              <button id="shanghai-rounds-7" aria-pressed="true" onclick="setShanghaiRounds(7)">7 (standard)</button>
+              <button id="shanghai-rounds-20" aria-pressed="false" onclick="setShanghaiRounds(20)">20 (long-form)</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Checkout Trainer sub-mode + difficulty (Checkout Trainer mode only —
              the intro paragraph itself now lives in Step 2's how-to-play blurb) -->
         <div class="setup-section" id="checkout-trainer-options-section" hidden>
@@ -1782,6 +1796,9 @@ let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, 
   // to become a killer — the only thing this mode's own setup step configures
   // (player numbers are randomly assigned server-side, not chosen here).
   killerLives:KILLER_DEFAULT_LIVES,
+  // Shanghai (docs/archive/shanghai-roadmap.md): how many rounds the fixed sequence
+  // runs — default 7 (the common pub format), with a 1-20 long-form option.
+  shanghaiRounds:7,
   // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): {playerName:
   // overrideStartScore}. X01 only, 2+ players; a name with no entry (or an
   // entry of undefined) plays the game's own regular starting score — see
@@ -2307,6 +2324,11 @@ function renderHome(){
     Backend.get('/api/stats/baseball-perfect-innings?mode=practice'),
     Backend.get('/api/stats/baseball-perfect-game?mode=practice'),
     Backend.get('/api/stats/baseball-wins'),
+    Backend.get('/api/stats/shanghai-ppr?mode=h2h'),
+    Backend.get('/api/stats/shanghai-shanghais?mode=h2h'),
+    Backend.get('/api/stats/shanghai-ppr?mode=practice'),
+    Backend.get('/api/stats/shanghai-shanghais?mode=practice'),
+    Backend.get('/api/stats/shanghai-wins'),
     Backend.get('/api/stats/doubles-practice-accuracy'),
     Backend.get('/api/stats/doubles-practice-best-round'),
     Backend.get('/api/stats/checkout-blitz-leaderboard'),
@@ -2318,7 +2340,7 @@ function renderHome(){
     Backend.get('/api/stats/around-the-clock-fastest'),
     Backend.get('/api/stats/around-the-clock-completions'),
     Backend.get('/api/stats/around-the-world-progress'),
-  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,dpa,dpb,ctbl,b27,cl,ga,kw,mm,atcf,atcc,atwp])=>{
+  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,shr,shs,pshr,pshs,shw,dpa,dpb,ctbl,b27,cl,ga,kw,mm,atcf,atcc,atwp])=>{
     homeData={s, extra,
       h2h:{finishes:f,eighties:e,bigFish:b,nineDarters:n},
       practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn},
@@ -2331,6 +2353,11 @@ function renderHome(){
         h2h:{rpi:br,perfectInnings:b9,perfectGame:bp},
         practice:{rpi:pbr,perfectInnings:pb9,perfectGame:pbp},
         wins:bw,
+      },
+      shanghai:{
+        h2h:{ppr:shr,shanghais:shs},
+        practice:{ppr:pshr,shanghais:pshs},
+        wins:shw,
       },
       doublesPractice:{ accuracy:dpa, bestRound:dpb },
       checkoutTrainer:{ blitzLeaderboard:ctbl },
@@ -2349,6 +2376,7 @@ function renderHome(){
       practice:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
       cricket:{h2h:{mpr:[],nineMarks:empty,perfectLeg:empty}, practice:{mpr:[],nineMarks:empty,perfectLeg:empty}, wins:[]},
       baseball:{h2h:{rpi:[],perfectInnings:empty,perfectGame:empty}, practice:{rpi:[],perfectInnings:empty,perfectGame:empty}, wins:[]},
+      shanghai:{h2h:{ppr:[],shanghais:empty}, practice:{ppr:[],shanghais:empty}, wins:[]},
       doublesPractice:{ accuracy:[], bestRound:[] },
       checkoutTrainer:{ blitzLeaderboard:[] },
       bobs27:{ leaderboard:[] },
@@ -2708,6 +2736,52 @@ function renderHomeTabBodyBaseball(){
   `;
 }
 
+// Shanghai's Home page leaderboards — same four-board shape as Baseball's own
+// (renderHomeTabBodyBaseball above), just Shanghai's vocabulary: PPR (points
+// per round) instead of RPI, Shanghais Thrown instead of Perfect Inning, no
+// Perfect Game analog (a Shanghai win is instant, not a perfect-every-round
+// feat). homeData.shanghai mirrors homeData.baseball's {h2h:{...}, practice:{...},
+// wins:...} shape.
+function renderHomeTabBodyShanghai(){
+  const el=document.getElementById('home-tab-body');
+  const mode=homeTab;
+  const data=homeData.shanghai && homeData.shanghai[mode];
+  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
+
+  const pprBoard=data.ppr||[];
+  const pprLeaderboard=pprBoard.length
+    ? `<div class="hof-list">${pprBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.ppr.toFixed(1)}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${r.rounds} rounds</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet (needs at least 5 rounds played).</p>`;
+
+  const winSection=(mode==='h2h' && homeData.shanghai.wins && homeData.shanghai.wins.length)
+    ? `<div class="pp-section">
+        <div class="pp-section-title">Most Shanghai Wins</div>
+        <div class="hof-list">${homeData.shanghai.wins.slice(0,10).map((r,i)=>`<div class="hof-row">
+          <span class="hof-rank">${i+1}</span>
+          <span class="hof-score">${r.won}</span>
+          <span class="hof-player">${escapeHtml(r.name)}</span>
+          <span class="hof-dates">${r.rate}% of ${r.played}</span>
+        </div>`).join('')}</div>
+      </div>`
+    : '';
+
+  el.innerHTML=`
+    <div class="home-pair">
+      <div class="pp-section">
+        <div class="pp-section-title">Points Per Round (PPR)</div>
+        ${pprLeaderboard}
+      </div>
+      ${winSection}
+    </div>
+    ${achievementSection('Shanghai! 🀄', data.shanghais||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
+  `;
+}
+
 // Doubles Practice's Home page leaderboards (game-modes-roadmap.md, previously a
 // known gap). No H2H/Practice split — this mode is always solo practice, so
 // homeData.doublesPractice is a single flat dataset, not h2h/practice-keyed like
@@ -3047,6 +3121,7 @@ function setMode(mode){
   if(drillGameTypes.includes(mode)) setup.gameType = mode;
   document.getElementById('cricket-options-section').hidden = (setup.gameType !== 'cricket');
   document.getElementById('killer-options-section').hidden = (setup.gameType !== 'killer');
+  document.getElementById('shanghai-options-section').hidden = (setup.gameType !== 'shanghai');
   document.getElementById('ghost-options-section').hidden = (mode !== 'ghost');
   document.getElementById('doubles-options-section').hidden = (mode !== 'doubles_practice');
   document.getElementById('checkout-trainer-options-section').hidden = (mode !== 'checkout_trainer');
@@ -4038,11 +4113,21 @@ function setGameType(type){
   setup.gameType = type;
   document.getElementById('cricket-options-section').hidden = (type !== 'cricket');
   document.getElementById('killer-options-section').hidden = (type !== 'killer');
+  document.getElementById('shanghai-options-section').hidden = (type !== 'shanghai');
   if(type === 'cricket') renderCricketNumberGrid();
 }
 // Killer lives threshold (docs/archive/game-modes-roadmap.md "Killer") — a simple
 // 3-way segmented control, same aria-pressed toggle pattern as
 // setCheckoutTrainerDifficulty().
+// Shanghai round count (docs/archive/shanghai-roadmap.md) — a 2-way segmented control,
+// same aria-pressed toggle pattern as setKillerLives().
+function setShanghaiRounds(n){
+  setup.shanghaiRounds = n;
+  [7,20].forEach(v => {
+    const btn = document.getElementById('shanghai-rounds-'+v);
+    if(btn) btn.setAttribute('aria-pressed', String(v===n));
+  });
+}
 function setKillerLives(n){
   setup.killerLives = n;
   [2,3,5].forEach(v => {
@@ -4077,6 +4162,9 @@ const NEW_GAME_MODE_OPTIONS = [
   { key:'baseball', label:'Baseball', contexts:['practice','h2h'],
     blurb:"9 innings, one per number 1-9. Each visit's 3 darts only count against that inning's number — a single scores 1 run, a double 2, a treble 3. After 9 innings, highest total runs wins (a tie continues into extra innings at number 9).",
     apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('baseball'); } },
+  { key:'shanghai', label:'🀄 Shanghai', contexts:['practice','h2h'],
+    blurb:"A fixed round sequence — round 1 targets the number 1, round 2 the number 2, and so on. Each visit's 3 darts only score on that round's own number — a single scores 1×, a double 2×, a treble 3× the number. Highest total after the last round wins — unless someone throws a Shanghai: single, double, AND treble of the round's number in one visit, which wins the WHOLE game instantly. Choose how many rounds on the next step.",
+    apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('shanghai'); } },
   { key:'chuckin', label:"Just Chuckin' It", contexts:['practice'],
     blurb:"No score to chase, no leg to win — just throw for as long as you like. Every dart still counts toward your lifetime totals and heatmap, so it's a low-pressure way to warm up, find your rhythm, or chase down a milestone badge.",
     apply(){ setMode('chuckin'); } },
@@ -4586,7 +4674,7 @@ async function startGame(){
   if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   // Custom cricket is locked to exactly 7 targets (same count as classic) — never
   // more, never fewer (docs/game-modes-roadmap.md "Decisions made").
-  const gameType = ['cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer'].includes(setup.gameType)
+  const gameType = ['cricket', 'baseball', 'shanghai', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer'].includes(setup.gameType)
     ? setup.gameType : 'x01'; // Daily Challenge always forces x01 via setMode()
   let cricketNumbers = null;
   if(gameType === 'cricket'){
@@ -4631,8 +4719,14 @@ async function startGame(){
   // practice regardless of game type (setMode()), so this doesn't remove any
   // control the player could see.
   const isPracticeBaseball = setup.gameType === 'baseball' && setup.mode !== 'h2h';
-  const legsPerSet = (drillModes.includes(setup.mode) || isPracticeBaseball) ? 1 : setup.legsPerSet;
-  const setsPerGame = (drillModes.includes(setup.mode) || isPracticeBaseball) ? 1 : setup.setsPerGame;
+  // Same BUG-22 reasoning as isPracticeBaseball above: a practice Shanghai
+  // "leg" is a complete, standalone game (evaluateVisitShanghai() decides its
+  // outcome unconditionally — an instant Shanghai, or the last round's totals),
+  // so it's forced to exactly 1 leg/1 set here too. H2H Shanghai legitimately
+  // supports a real Bo3/Bo5 multi-leg match, so this only forces the practice case.
+  const isPracticeShanghai = setup.gameType === 'shanghai' && setup.mode !== 'h2h';
+  const legsPerSet = (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai) ? 1 : setup.legsPerSet;
+  const setsPerGame = (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai) ? 1 : setup.setsPerGame;
   // Checkout Blitz's durationSec is stored even though only 60 exists today — same
   // "store it even though only one value exists today" precedent tournament_rounds.
   // legs_per_set already set for a field that was single-valued at first and
@@ -4643,6 +4737,9 @@ async function startGame(){
     // Innings fixed at 9 (docs/game-modes-roadmap.md "Baseball") — not a New Game
     // choice, same "one-tap, no further input" precedent as Classic Cricket.
     : gameType === 'baseball' ? { innings: 9 }
+    // Rounds (docs/archive/shanghai-roadmap.md) — default 1-7 (the common pub format),
+    // with a 1-20 long-form option chosen on the setup screen.
+    : gameType === 'shanghai' ? { rounds: setup.shanghaiRounds || 7 }
     : gameType === 'doubles_practice' ? { doubles: setup.doublesTargets.slice() }
     : gameType === 'chuckin' ? {}
     // docs/checkout-drill-link-roadmap.md "Drill this checkout": a pin forces
@@ -4668,6 +4765,8 @@ async function startGame(){
     ? (setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
     : gameType === 'baseball'
     ? 'Baseball'
+    : gameType === 'shanghai'
+    ? 'Shanghai'
     : gameType === 'doubles_practice'
     ? `Doubles Practice (${config.doubles.map(doublesTargetLabel).join(', ')})`
     : gameType === 'chuckin'
@@ -4722,6 +4821,7 @@ async function startGame(){
     current: 0,
     setNo: 1, legNo: 1,
     baseballInning: 1, // Baseball only (docs/game-modes-roadmap.md) — which inning (1-9, or beyond on a tie) is live
+    shanghaiRound: 1, // Shanghai only (docs/archive/shanghai-roadmap.md) — which round (1-config.rounds, or beyond on a tie) is live
     bobs27Round: 1,    // Bob's 27 only (docs/archive/practice-ladders-roadmap.md Part A) — which double (1-20) is live
     checkoutLadderTarget: 121, // 121 Checkout Ladder only (docs/archive/practice-ladders-roadmap.md Part B) — current attempt's target
     checkoutLadderVisits: 0,  // visits used so far in the current attempt (0-2 while live)
@@ -5923,6 +6023,10 @@ const BADGE_INFO = {
   // here) get a new one — see renderPlayerBadges()'s doublesPracticeIds bucket.
   baseballwalkoff: { icon:'⚾', label:'Walk-Off', desc:'Win a Baseball leg in extra innings — the game went past inning 9.', baseball:true },
   baseballcycle:   { icon:'🔄', label:'The Cycle', desc:"Hit a single, double, AND treble of the current inning's number in one visit — 6 runs the scenic way.", baseball:true },
+  // docs/archive/shanghai-roadmap.md: single, double, AND treble of the round's own
+  // number in one visit — wins the WHOLE match instantly, mid-round. Deliberately
+  // separate from 'shanghaivisit' above (same feat, different game — see that doc).
+  shanghai: { icon:'🀄', label:'Shanghai!', desc:"Win a Shanghai game instantly — single, double, AND treble of the round's own number in one visit.", shanghai:true },
   doublespracticeringmaster: { icon:'🎪', label:'Ring Master', desc:'Hit every double, D1 through D20 plus the bull, in Doubles Practice — lifetime.', doublesPractice:true },
   cricket9marks:       { icon:'🎯', label:'9 Marks', desc:'Score 9 marks in one Cricket visit — three trebles, the maximum possible.', cricket:true },
   cricketperfectclose: { icon:'🏆', label:'Perfect Leg', desc:'Close every Cricket number using the fewest darts physically possible for that match.', cricket:true },
@@ -6001,10 +6105,11 @@ function renderPlayerBadges(data){
   // Practice's 5 (docs/archive/culture-badges-roadmap.md Part B), and the guided
   // drills' 2 each stay visually distinct sub-sections rather than one mixed
   // flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder && !BADGE_INFO[id].gauntlet && !BADGE_INFO[id].killer && !BADGE_INFO[id].marathon);
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].shanghai && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder && !BADGE_INFO[id].gauntlet && !BADGE_INFO[id].killer && !BADGE_INFO[id].marathon);
   const eloIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].elo);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
   const baseballIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].baseball);
+  const shanghaiIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].shanghai);
   const challengeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].challenge);
   const chuckinIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].chuckin);
   const tournamentIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].tournament);
@@ -6023,6 +6128,8 @@ function renderPlayerBadges(data){
     <div class="summary-grid">${cricketIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Baseball</div>
     <div class="summary-grid">${baseballIds.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">Shanghai</div>
+    <div class="summary-grid">${shanghaiIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Doubles Practice</div>
     <div class="summary-grid">${doublesPracticeIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Bob's 27</div>
@@ -6458,6 +6565,27 @@ function renderBaseballPersonalBests(data){
     ${formHtml}
   </div>`;
 }
+// Shanghai's Personal Bests — same 5-field shape mirrored from
+// getShanghaiPersonalBests(), points formatted as a whole number in place of
+// X01's avg/Cricket's mpr, same reasoning as Baseball's own renderer above.
+function renderShanghaiPersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || (data.bestLegPoints==null && data.fewestDartsToWin==null)){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough legs recorded yet.</p>`;
+    return;
+  }
+  const formDelta = (data.recentFormPoints!=null && data.lifetimePoints!=null) ? (data.recentFormPoints - data.lifetimePoints) : null;
+  const formHtml = formDelta!=null
+    ? `<div class="stat-block"><div class="stat-val">${data.recentFormPoints.toFixed(1)}</div><div class="stat-label">Recent Form (last 10 legs) ${formDelta>=0?'▲':'▼'} ${Math.abs(formDelta).toFixed(1)}</div></div>`
+    : '';
+  container.innerHTML=`<div class="summary-grid">
+    ${data.bestLegPoints!=null?`<div class="stat-block"><div class="stat-val">${data.bestLegPoints}</div><div class="stat-label">Best Leg Points</div></div>`:''}
+    ${data.fewestDartsToWin!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsToWin}</div><div class="stat-label">Fewest Darts to Win</div></div>`:''}
+    ${data.winStreak?`<div class="stat-block"><div class="stat-val">${data.winStreak}</div><div class="stat-label">Current Win Streak</div></div>`:''}
+    ${formHtml}
+  </div>`;
+}
 // Bob's 27's Personal Bests — same "no win-streak, a solo run never wins
 // against anyone" shape Doubles Practice/Chuckin use below.
 function renderBobs27PersonalBests(data){
@@ -6626,6 +6754,7 @@ function avgStr(points, darts){ return darts ? (points/darts*3).toFixed(1) : '�
 function renderGame(){
   if(game.gameType === 'cricket') return renderGameCricket();
   if(game.gameType === 'baseball') return renderGameBaseball();
+  if(game.gameType === 'shanghai') return renderGameShanghai();
   if(game.gameType === 'doubles_practice') return renderGameDoublesPractice();
   if(game.gameType === 'chuckin') return renderGameChuckin();
   if(game.gameType === 'checkout_trainer') return renderGameCheckoutTrainer();
@@ -6795,6 +6924,68 @@ function renderGameBaseball(){
   pushLive();
 }
 
+/* Shanghai chalkboard scorecard: same shared-table shape as Baseball's own
+   (rows=rounds, columns=players), showing each player's points scored per
+   round and a running total — row/column headers keep it screen-reader
+   navigable per docs/archive/shanghai-roadmap.md's accessibility section. */
+function renderGameShanghai(){
+  const sb = document.getElementById('scoreboard'); sb.innerHTML='';
+  const maxRounds = (game.config && game.config.rounds) || 7;
+  const lastRound = Math.max(maxRounds, game.shanghaiRound); // extend into extra rounds once reached
+  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
+
+  const headCells = game.players.map((p,i)=>{
+    const active = i===game.current;
+    const standing = game.setsPerGame>1
+      ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
+      : game.practice
+      ? `Legs ${p.legsWon}`
+      : `Legs ${p.legsWon}/${game.legsPerSet}`;
+    return `<div class="cs-col-head${active?' active':''}">
+      <span>${escapeHtml(p.name)}</span>
+      ${active?'<span class="cs-throw-chip">▸ throwing</span>':''}
+      ${showStanding?`<span class="cs-standing">${standing}</span>`:''}
+    </div>`;
+  }).join('');
+
+  const rows = [];
+  for(let round=1; round<=lastRound; round++){
+    const isCurrentRound = round === game.shanghaiRound;
+    const target = shanghaiRoundTarget(round, maxRounds);
+    const cells = game.players.map((p,i)=>{
+      const r = p.roundPoints[round];
+      const active = i===game.current && isCurrentRound;
+      return `<div class="cs-cell${active?' active':''}">${r!=null ? `<span class="cs-points">${r}</span>` : ''}</div>`;
+    }).join('');
+    rows.push(`<div class="cs-row"><div class="cs-label">${target}</div>${cells}</div>`);
+  }
+  const bodyRowsHtml = rows.join('');
+
+  const totalCells = game.players.map((p,i)=>{
+    const active = i===game.current;
+    return `<div class="cs-cell${active?' active':''}"><span class="cs-points">${p.totalPoints||0}</span></div>`;
+  }).join('');
+
+  const table = document.createElement('div');
+  table.className = 'cs-table';
+  table.style.setProperty('--cs-cols', game.players.length);
+  table.innerHTML = `
+    <div class="cs-row cs-head" role="row"><div class="cs-label"></div>${headCells}</div>
+    ${bodyRowsHtml}
+    <div class="cs-row cs-foot"><div class="cs-label">Points</div>${totalCells}</div>`;
+  sb.appendChild(table);
+
+  const roundBanner = document.createElement('p');
+  roundBanner.className = 'pp-meta';
+  roundBanner.style.cssText = 'text-align:center;margin:8px 0 0';
+  roundBanner.textContent = `Round ${Math.min(game.shanghaiRound,maxRounds)} of ${maxRounds} — target ${shanghaiRoundTarget(game.shanghaiRound, maxRounds)}${game.shanghaiRound>maxRounds?' (extra rounds)':''}`;
+  sb.appendChild(roundBanner);
+
+  renderSlots();
+  renderPad();
+  pushLive();
+}
+
 /* docs/archive/practice-ladders-roadmap.md Part A: same shared chalkboard-table
    shape as Cricket/Baseball's (rows=rounds, one column since it's always solo),
    just fixed at exactly 20 rows — no "extra innings"-style dynamic extension
@@ -6836,18 +7027,21 @@ function renderSlots(){
   const wrap=document.getElementById('slots'); wrap.innerHTML='';
   const isCricket = game.gameType === 'cricket';
   const isBaseball = game.gameType === 'baseball';
+  const isShanghai = game.gameType === 'shanghai';
   const cricketNumbers = isCricket ? (game.config.numbers || CRICKET_STANDARD_NUMBERS) : null;
   const baseballTarget = isBaseball ? baseballInningTarget(game.baseballInning) : null;
+  const shanghaiTarget = isShanghai ? shanghaiRoundTarget(game.shanghaiRound, (game.config && game.config.rounds) || 7) : null;
   for(let i=0;i<3;i++){
     const d = game.darts[i];
     // The X01 "N pts" subtitle is meaningless in cricket (a T18's 54 X01 points may be
     // 3 marks, or nothing at all if 18 isn't in play) — show marks instead. Same idea
-    // for Baseball: a dart's raw X01 point value has nothing to do with the runs it
-    // scores (only this inning's own target number counts at all).
+    // for Baseball/Shanghai: a dart's raw X01 point value has nothing to do with the
+    // points it scores (only the live round/inning's own target number counts at all).
     let sub = '';
     if(d){
       if(isCricket) sub = cricketNumbers.includes(d.sector) ? `${d.mult} mark${d.mult===1?'':'s'}` : 'no mark';
       else if(isBaseball) sub = d.sector === baseballTarget ? `${d.mult} run${d.mult===1?'':'s'}` : 'no run';
+      else if(isShanghai) sub = d.sector === shanghaiTarget ? `${d.mult * shanghaiTarget} pt${d.mult===1?'':'s'}` : 'no points';
       else sub = `${d.value} pts`;
     }
     const div=document.createElement('div');
@@ -6920,7 +7114,7 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   baseballwalkoff:'Walk-Off! ⚾', baseballcycle:'The Cycle! 🔄', doublespracticeringmaster:'Ring Master! 🎪',
   cricketstonecold:'Stone Cold! 🔪',
   bobs27fullhouse:'Full House! 🎯', bobs27fullanderson:'🏔️ THE FULL ANDERSON! 🏔️',
-  topofthehouse:'👑 TOP OF THE HOUSE! 👑', upset:'Upset! 🗡️' };
+  topofthehouse:'👑 TOP OF THE HOUSE! 👑', upset:'Upset! 🗡️', shanghai:'🀄 SHANGHAI! 🀄' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -6936,7 +7130,7 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   baseballwalkoff:3000, baseballcycle:2500, doublespracticeringmaster:5000,
   cricketstonecold:3500,
   bobs27fullhouse:2500, bobs27fullanderson:6000,
-  topofthehouse:6000, upset:2500 };
+  topofthehouse:6000, upset:2500, shanghai:6000 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
@@ -8379,6 +8573,11 @@ function liveSnapshot(message){
     // Baseball only: which inning (1-9, or beyond on a tie) is currently live —
     // per-player runs ride inside the players[] array above via playerSnapshotBaseball().
     baseballInning: game.gameType === 'baseball' ? (game.baseballInning || 1) : null,
+    // Shanghai only (docs/archive/shanghai-roadmap.md): which round (1-config.rounds, or
+    // beyond on a tie) is currently live — per-player points ride inside the
+    // players[] array above via playerSnapshotShanghai().
+    shanghaiRound: game.gameType === 'shanghai' ? (game.shanghaiRound || 1) : null,
+    shanghaiMaxRounds: game.gameType === 'shanghai' ? ((game.config && game.config.rounds) || 7) : null,
     // Cricket only (docs/archive/cutthroat-cricket-roadmap.md): lets display.html's
     // cricket scorecard label its points footer "lowest wins" for cutthroat,
     // the one thing that otherwise renders identically to standard.
@@ -8453,6 +8652,12 @@ function renderPad(){
     renderPadBaseball(full);
     const utb1 = document.getElementById('undo-turn-btn');
     if(utb1) utb1.disabled = !game.lastTurnSnapshot;
+    return;
+  }
+  if(game.gameType === 'shanghai'){
+    renderPadShanghai(full);
+    const utbS = document.getElementById('undo-turn-btn');
+    if(utbS) utbS.disabled = !game.lastTurnSnapshot;
     return;
   }
   if(game.gameType === 'bobs_27'){
@@ -8598,6 +8803,34 @@ function renderPadBaseball(full){
   miss.onclick=()=>throwDart(0); pad.appendChild(miss);
 }
 
+/* Shanghai's dedicated scoring screen — only one number is ever live (this
+   round's target), same single-big-target-plus-Miss shape as Baseball's own. */
+function renderPadShanghai(full){
+  const board = document.getElementById('dart-board-wrap');
+  if(board) board.classList.add('hidden');
+  const bounceBtn = document.getElementById('bounce-out-btn');
+  if(bounceBtn) bounceBtn.disabled = full;
+  const multi = document.getElementById('multi-row');
+  if(multi) multi.classList.remove('hidden');
+  const pad = document.getElementById('pad');
+  if(!pad) return;
+  pad.classList.remove('hidden');
+  pad.classList.add('cricket-pad');
+  pad.innerHTML = '';
+  const maxRounds = (game.config && game.config.rounds) || 7;
+  const target = shanghaiRoundTarget(game.shanghaiRound, maxRounds);
+  const b = document.createElement('button');
+  b.className = 'cricket-target';
+  b.disabled = full;
+  b.innerHTML = `<span class="ct-num">${target}</span>`;
+  b.setAttribute('aria-label', `Number ${target} — this round's target`);
+  b.onclick = () => throwDart(target);
+  pad.appendChild(b);
+  const miss=document.createElement('button');
+  miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
+  miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+}
+
 /* docs/archive/practice-ladders-roadmap.md Part A: one button, the round's own
    double — the player selects Double via the ambient multi-row (same S/D/T
    selector every other Pad-mode dart uses) then taps it to log a hit; Single/
@@ -8716,7 +8949,7 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
 // independently re-validates this on every write, never trusting this check
 // (docs/archive/saved-games-roadmap.md's own security section: "never trust the
 // client's eligibility check").
-const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
+const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'shanghai', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
 function isCurrentGameSavable(){
   // Marathon Mode (docs/archive/marathon-mode-roadmap.md): deliberately excluded, same
   // "no save/resume support" scope decision Killer already made. A saved-then-
@@ -8797,7 +9030,7 @@ async function resumeGame(gameId){
   const players = names.map(n => GAME_TYPES[gameType].newMatchPlayer(n,
     gameType === 'cricket' ? config : startScore));
 
-  let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, bobs27Round = 1, roundOver = false, checkoutLadderTarget = 121, checkoutLadderVisits = 0;
+  let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, shanghaiRound = 1, bobs27Round = 1, roundOver = false, checkoutLadderTarget = 121, checkoutLadderVisits = 0;
   let gauntletStationIndex = 0, gauntletAwaitingRepeat = false, gauntletFinalMisses = [], gauntletCleanStreak = 0, gauntletBestCleanStreak = 0;
   let statusMsg = '';
   if(gameType === 'x01'){
@@ -8828,6 +9061,16 @@ async function resumeGame(gameId){
     });
     current = r.current; starter = r.starter; setNo = r.setNo; legNo = r.legNo; baseballInning = r.baseballInning;
     statusMsg = `Resumed — set ${setNo} leg ${legNo}, inning ${Math.min(baseballInning,9)}, ${players[current].name} to throw.`;
+  } else if(gameType === 'shanghai'){
+    const maxRounds = config.rounds || 7;
+    const r = rebuildShanghaiState({ names, legsPerSet: state.legsPerSet, maxRounds, turns: state.turns });
+    players.forEach((p,i) => {
+      const rp = r.players[i];
+      Object.assign(p, { totalPoints:rp.totalPoints, roundPoints:rp.roundPoints, legsWon:rp.legsWon, setsWon:rp.setsWon,
+        legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
+    });
+    current = r.current; starter = r.starter; setNo = r.setNo; legNo = r.legNo; shanghaiRound = r.shanghaiRound;
+    statusMsg = `Resumed — set ${setNo} leg ${legNo}, round ${Math.min(shanghaiRound,maxRounds)} of ${maxRounds}, ${players[current].name} to throw.`;
   } else if(gameType === 'around_the_clock'){
     const r = rebuildAroundTheClockState({ turns: state.turns });
     Object.assign(players[0], { hitSet:r.hitSet, roundDarts:r.roundDarts });
@@ -8877,7 +9120,7 @@ async function resumeGame(gameId){
     players,
     blitzDeadline: null, blitzEnded: false,
     starter, current, setNo, legNo,
-    baseballInning, bobs27Round, checkoutLadderTarget, checkoutLadderVisits,
+    baseballInning, shanghaiRound, bobs27Round, checkoutLadderTarget, checkoutLadderVisits,
     gauntletStationIndex, gauntletAwaitingRepeat, gauntletFinalMisses, gauntletCleanStreak, gauntletBestCleanStreak,
     darts: [], busted:false, won:false, done:false,
     gameOneEighties:0, gameBigFish:0, gameBusts:0,
@@ -9064,6 +9307,7 @@ function askEndGame(){
 function undoLastTurn(){
   if(game && game.gameType === 'cricket') return undoLastTurnCricket();
   if(game && game.gameType === 'baseball') return undoLastTurnBaseball();
+  if(game && game.gameType === 'shanghai') return undoLastTurnShanghai();
   if(game && game.gameType === 'doubles_practice') return undoLastTurnDoublesPractice();
   if(game && game.gameType === 'chuckin') return undoLastTurnChuckin();
   if(game && game.gameType === 'checkout_trainer') return undoLastTurnCheckoutTrainer();
@@ -9150,6 +9394,7 @@ function undoDart(){
 function enterTurn(){
   if(game.gameType === 'cricket') return enterTurnCricket();
   if(game.gameType === 'baseball') return enterTurnBaseball();
+  if(game.gameType === 'shanghai') return enterTurnShanghai();
   if(game.gameType === 'bobs_27') return enterTurnBobs27();
   if(game.gameType === 'checkout_ladder') return enterTurnCheckoutLadder();
   if(game.gameType === 'gauntlet') return enterTurnGauntlet();
@@ -9922,6 +10167,99 @@ function undoLastTurnBaseball(){
   renderGameBaseball();
   pushLive();
 }
+
+/* ----- Shanghai turn commit (dispatched from enterTurn()) -----
+   Visit-based (3 darts per round), same shape as Baseball's own. */
+function enterTurnShanghai(){
+  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  const p = game.players[game.current];
+  const ev = GAME_TYPES.shanghai.evaluateVisit(p, game.darts, game);
+  const maxRounds = (game.config && game.config.rounds) || 7;
+
+  announce(ev.shanghai ? `${p.name} throws a SHANGHAI on ${ev.target}!`
+    : `${p.name} scores ${ev.scored} point${ev.scored===1?'':'s'} in round ${Math.min(game.shanghaiRound, maxRounds)}.`);
+
+  // snapshot state before mutations so undoLastTurn() can restore it — same
+  // convention as enterTurnBaseball()'s own lastTurnSnapshot.
+  const _snap = { pi:game.current, totalPoints:p.totalPoints, roundPoints:Object.assign({}, p.roundPoints),
+    legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
+    shanghaiRound:game.shanghaiRound,
+    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
+    badgeReverts:[], voided:false };
+  game.lastTurnSnapshot = _snap;
+
+  p.totalPoints = ev.totalPoints; p.roundPoints = ev.roundPoints;
+  const dartsThrown = game.darts.length;
+  p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
+
+  // legWon (docs/archive/shanghai-roadmap.md's data-model section, refined per this
+  // build's own getShanghaiWonLegs()): set ONLY on a genuine instant Shanghai —
+  // that visit really is self-referential to the winning player, the same
+  // signal Cricket/Killer use turns.leg_won for. A final-round win decided by
+  // point totals is NOT self-referential (the round-ending visit and the actual
+  // leader aren't always the same player, exactly Baseball's own situation) —
+  // never flagged here, so db.js's leg-winner derivation falls back to comparing
+  // totals for those legs instead, exactly like getBaseballWonLegs().
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:ev.scored, bust:false, checkout:false, checkoutPoints:null, legWon:!!ev.shanghai,
+    darts: game.darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
+      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+
+  const turnRecord = { player:p.name, scored:ev.scored, darts:game.darts.slice() };
+  game.currentLegTurns.push(turnRecord);
+  game.sessionTurns.push(turnRecord);
+
+  // Novelty time-of-day badges — shared with every other game type.
+  awardTimeOfDayBadges(p);
+
+  // 🀄 Shanghai! (docs/archive/shanghai-roadmap.md) — single, double, AND treble of the
+  // round's own number in one visit, wins the WHOLE match instantly.
+  if(ev.shanghai){
+    queueBadge('shanghai', p.name);
+    awardRecurringBadge(p.name, 'shanghai', 'shanghai',
+      { icon:'🀄', headline:'SHANGHAI!', player:p.name, statLine:`Single, double, and treble of ${ev.target} — instant win` });
+  }
+
+  if(ev.matchComplete){
+    onLegWonShanghai(ev.winnerIndex);
+    return;
+  }
+
+  if(ev.roundComplete) game.shanghaiRound += 1;
+  game.darts=[]; game.busted=false; game.won=false;
+  game.current = (game.current+1) % game.players.length;
+  game.turnSeq += 1;
+  document.getElementById('status').className='status';
+  document.getElementById('status').textContent = `Round ${Math.min(game.shanghaiRound,maxRounds)} of ${maxRounds} — target ${shanghaiRoundTarget(game.shanghaiRound, maxRounds)}.`;
+  renderGameShanghai();
+  pushLive();
+}
+function undoLastTurnShanghai(){
+  if(!game || !game.lastTurnSnapshot) return;
+  const snap = game.lastTurnSnapshot;
+  const p = game.players[snap.pi];
+  p.totalPoints = snap.totalPoints;
+  p.roundPoints = snap.roundPoints;
+  p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
+  game.shanghaiRound = snap.shanghaiRound;
+  game.currentLegTurns.length = snap.ltLen;
+  game.sessionTurns.length = snap.stLen;
+
+  snap.voided = true;
+  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+  });
+  cancelQueuedAchievementsForSnapshot(snap);
+
+  game.current = snap.pi;
+  game.darts = []; game.busted=false; game.won=false;
+  game.lastTurnSnapshot = null;
+  DB.deleteLastTurn();
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
+  renderGameShanghai();
+  pushLive();
+}
 /* ----- Baseball leg / set / game progression (dispatched from enterTurnBaseball) -----
    Same leg/set/game progression tree every other game type uses — the only
    real difference from onLegWonCricket() is that the winner (wi) here is
@@ -9992,6 +10330,54 @@ function onLegWonBaseball(wi){
       game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
       // matchWinStatLine() is fully generic over legsWon/setsWon/category —
       // reused as-is, no Baseball-specific version needed.
+      fireMomentCard('matchwin', { icon:'🏅', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) });
+      finishUnit('game', w.name);
+      return;
+    }
+    sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+    sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
+    DB.recordEvent('leg_end', game.setNo, game.legNo);
+    DB.recordEvent('set_end', game.setNo, null);
+    game.matchResult = { ts:Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+    finishUnit('set', w.name);
+    return;
+  }
+  sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+  DB.recordEvent('leg_end', game.setNo, game.legNo);
+  game.matchResult = { ts:Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+  finishUnit('leg', w.name);
+}
+
+/* ----- Shanghai leg / set / game progression (dispatched from enterTurnShanghai) -----
+   Same leg/set/game progression tree as onLegWonBaseball() — the winner (wi)
+   here is computed by evaluateVisitShanghai() (either the Shanghai-throwing
+   player, or whoever leads on points after the final round), not assumed to be
+   whoever's visit just ran. docs/bug-roadmap.md BUG-22-class: this gate is
+   deliberately NOT `!game.practice && ...` — a practice Shanghai "leg" is
+   forced to legsPerSet=1/setsPerGame=1 above in startGame() (isPracticeShanghai),
+   the same "no !game.practice gate" precedent onLegWonBaseball() itself
+   established, for the identical reason. */
+function onLegWonShanghai(wi){
+  const w = game.players[wi];
+  w.legsWon += 1;
+
+  // Captured before the legs-reset below zeroes everyone out.
+  const legsAtWin = new Map(game.players.map(p => [p, p.legsWon]));
+
+  if(w.legsWon >= game.legsPerSet){      // leg (or, for practice, the whole game) won
+    w.setsWon += 1;
+    game.players.forEach(p=>p.legsWon=0);
+
+    if(w.setsWon >= game.setsPerGame){   // game (match) won
+      sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+      sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
+      sendHaWebhook('gameend', w.name, game.category);
+      DB.recordEvent('leg_end', game.setNo, game.legNo);
+      DB.recordEvent('set_end', game.setNo, null);
+      DB.recordEvent('game_end', null, null);
+      DB.completeGame(w.name);
+      checkEloOnMatchWin(w, game.players.length===2 ? game.players.find(p=>p!==w) : null);
+      game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
       fireMomentCard('matchwin', { icon:'🏅', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) });
       finishUnit('game', w.name);
       return;
@@ -10355,6 +10741,7 @@ function startNextLeg(newSet){
   game.current = game.starter;
   game.players.forEach(p=>GAME_TYPES[game.gameType].resetForNextLeg(p, game, newSet));
   if(game.gameType === 'baseball') game.baseballInning = 1;
+  if(game.gameType === 'shanghai') game.shanghaiRound = 1;
   if(game.gameType === 'checkout_ladder') game.checkoutLadderVisits = 0;
   game.legSummary = null;
   game.currentLegTurns = [];
@@ -10439,6 +10826,26 @@ function h2hStatsHtmlBaseball(winner, scope){
   return `<div class="prac-stats">${cols}</div>`;
 }
 
+function h2hStatsHtmlShanghai(winner, scope){
+  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
+  const cols = game.players.map(p=>{
+    const rows = scope==='game' ? [
+      statRow('Points (final leg)', p.totalPoints||0),
+      statRow('Darts (match)', p.gameDarts||0),
+    ] : [
+      statRow('Points', p.totalPoints||0),
+      statRow('Darts (leg)', p.legDarts||0),
+    ];
+    if(showStanding){
+      const standing = game.setsPerGame>1 ? `Sets ${p.setsWon} · Legs ${p.legsWon}` : `Legs ${p.legsWon}/${game.legsPerSet}`;
+      rows.push(statRow(scope==='game' ? 'Final Standing' : 'Standing', standing, true));
+    }
+    const title = p.name===winner ? `${escapeHtml(p.name)} 🎯` : escapeHtml(p.name);
+    return `<div class="prac-col"><div class="prac-col-title">${title}</div>${rows.join('')}</div>`;
+  }).join('');
+  return `<div class="prac-stats">${cols}</div>`;
+}
+
 function finishUnit(kind, winner){
   game.done = (kind==='game');
   updateSaveButtonVisibility(); // a just-completed match is no longer savable
@@ -10453,6 +10860,7 @@ function finishUnit(kind, winner){
   const oche=document.querySelector('.oche');
   const isCricket = game.gameType === 'cricket';
   const isBaseball = game.gameType === 'baseball';
+  const isShanghai = game.gameType === 'shanghai';
   const isBobs27 = game.gameType === 'bobs_27';
   const isGauntlet = game.gameType === 'gauntlet';
   const isKiller = game.gameType === 'killer';
@@ -10538,7 +10946,7 @@ function finishUnit(kind, winner){
       <div class="btn-row" style="justify-content:center">
         ${nextBtn}
         ${matchShareBtn}
-      </div>${isCricket || isBobs27 || isGauntlet || isKiller ? '' : isBaseball ? h2hStatsHtmlBaseball(winner,'game') : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}${killerSummary}</div>`;
+      </div>${isCricket || isBobs27 || isGauntlet || isKiller ? '' : isBaseball ? h2hStatsHtmlBaseball(winner,'game') : isShanghai ? h2hStatsHtmlShanghai(winner,'game') : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}${killerSummary}</div>`;
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
@@ -10549,7 +10957,7 @@ function finishUnit(kind, winner){
     // practice Baseball game is forced to exactly 1 leg/1 set (docs/bug-roadmap.md
     // BUG-22, see onLegWonBaseball()/startGame()'s isPracticeBaseball), so
     // kind==='leg' is only ever reached for a genuine mid-match H2H leg now.
-    const legPanel = isCricket || isKiller || kind!=='leg' ? '' : isBaseball ? h2hStatsHtmlBaseball(winner) : game.practice ? `
+    const legPanel = isCricket || isKiller || kind!=='leg' ? '' : isBaseball ? h2hStatsHtmlBaseball(winner) : isShanghai ? h2hStatsHtmlShanghai(winner) : game.practice ? `
       <div class="prac-stats">
         <div class="prac-col">
           <div class="prac-col-title">This Leg</div>
@@ -10589,6 +10997,10 @@ function finishUnit(kind, winner){
   })) : isBaseball ? game.players.map(p=>({
     name: p.name,
     totalRuns: p.totalRuns || 0,
+    won: p.name === winner
+  })) : isShanghai ? game.players.map(p=>({
+    name: p.name,
+    totalPoints: p.totalPoints || 0,
     won: p.name === winner
   })) : isKiller ? game.players.map(p=>({
     name: p.name,
@@ -10718,6 +11130,21 @@ const BASEBALL_STAT_DEFS = [
 // Translates a BASEBALL_STAT_DEFS key to getBaseballStatBubbles()'s JSON field name.
 const BASEBALL_BUBBLE_KEY_MAP = { baseballrpi:'rpi', baseballperfectinnings:'perfectInnings', baseballwinpct:'winPct',
   baseballgames:'gamesPlayed', baseballdartsthrown:'dartsThrown', baseballbestinning:'bestInning' };
+
+// Shanghai's own stat vocabulary (docs/archive/shanghai-roadmap.md) — points-per-round
+// is Shanghai's direct analog of Baseball's RPI; Shanghais Thrown is its own
+// instant-win count (turns.leg_won). Same {key,label,desc,fmt,primary} shape.
+const SHANGHAI_STAT_DEFS = [
+  { key:'shanghaippr',          label:'Points/Round',   desc:'Total points scored / rounds played', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
+  { key:'shanghaisthrown',      label:'Shanghais Thrown', desc:'Instant wins — single, double, AND treble of the round\'s number in one visit', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'shanghaiwinpct',       label:'Win Rate',       desc:'% of H2H Shanghai games won',             fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'shanghaigames',        label:'Games Played',   desc:'Shanghai games played',                   fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'shanghaidartsthrown',  label:'Darts Thrown',   desc:'Total darts thrown in Shanghai games',    fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
+  { key:'shanghaibestround',    label:'Best Round',     desc:'Highest points scored in a single round', fmt:v=>v!=null?String(Math.round(v)):'—' },
+];
+// Translates a SHANGHAI_STAT_DEFS key to getShanghaiStatBubbles()'s JSON field name.
+const SHANGHAI_BUBBLE_KEY_MAP = { shanghaippr:'ppr', shanghaisthrown:'shanghaisThrown', shanghaiwinpct:'winPct',
+  shanghaigames:'gamesPlayed', shanghaidartsthrown:'dartsThrown', shanghaibestround:'bestRound' };
 
 // Bob's 27's own stat vocabulary (docs/archive/practice-ladders-roadmap.md Part A) —
 // solo, so no win-rate/games-vs-opponent bubble the way Baseball has; "Runs
@@ -10911,6 +11338,17 @@ const GAME_TYPES = {
     statDefs: BASEBALL_STAT_DEFS,
     personalBestsRenderer: renderBaseballPersonalBests,
     homeTabRenderer: renderHomeTabBodyBaseball
+  },
+  shanghai: {
+    id: 'shanghai',
+    label: 'Shanghai',
+    newMatchPlayer: newMatchPlayerShanghai,
+    evaluateVisit: evaluateVisitShanghai,
+    resetForNextLeg: resetPlayerForNextLegShanghai,
+    playerSnapshot: playerSnapshotShanghai,
+    statDefs: SHANGHAI_STAT_DEFS,
+    personalBestsRenderer: renderShanghaiPersonalBests,
+    homeTabRenderer: renderHomeTabBodyShanghai
   },
   doubles_practice: {
     id: 'doubles_practice',
@@ -11133,6 +11571,27 @@ function resetPlayerForNextLegBaseball(p, game, newSet){
 function playerSnapshotBaseball(p){
   return {
     name:p.name, totalRuns:p.totalRuns||0, inningRuns:Object.assign({}, p.inningRuns),
+    legsWon:p.legsWon, setsWon:p.setsWon,
+    legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0
+  };
+}
+
+/* ---------- Shanghai (docs/archive/shanghai-roadmap.md) ----------
+   Structurally a sibling of Baseball — a fixed round sequence, all players in
+   lockstep (the current round is game-level state, game.shanghaiRound, not
+   per-player). evaluateVisitShanghai()/shanghaiRoundTarget() live in
+   scoring.js; only the stateful player-record helpers stay here, same split
+   as Baseball. */
+function newMatchPlayerShanghai(name){
+  return { name, totalPoints:0, roundPoints:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 };
+}
+function resetPlayerForNextLegShanghai(p, game, newSet){
+  p.totalPoints = 0; p.roundPoints = {}; p.legDarts = 0;
+  if(newSet) p.setDarts = 0;
+}
+function playerSnapshotShanghai(p){
+  return {
+    name:p.name, totalPoints:p.totalPoints||0, roundPoints:Object.assign({}, p.roundPoints),
     legsWon:p.legsWon, setsWon:p.setsWon,
     legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0
   };
@@ -13263,6 +13722,7 @@ const BUBBLE_KEY_MAP = { dartsthrown:'dartsThrown', avgdartsperday:'avgDartsPerD
 GAME_TYPES.x01.bubbleKeyMap = BUBBLE_KEY_MAP;
 GAME_TYPES.cricket.bubbleKeyMap = CRICKET_BUBBLE_KEY_MAP;
 GAME_TYPES.baseball.bubbleKeyMap = BASEBALL_BUBBLE_KEY_MAP;
+GAME_TYPES.shanghai.bubbleKeyMap = SHANGHAI_BUBBLE_KEY_MAP;
 GAME_TYPES.doubles_practice.bubbleKeyMap = DOUBLES_PRACTICE_BUBBLE_KEY_MAP;
 GAME_TYPES.chuckin.bubbleKeyMap = CHUCKIN_BUBBLE_KEY_MAP;
 GAME_TYPES.checkout_trainer.bubbleKeyMap = CHECKOUT_TRAINER_BUBBLE_KEY_MAP;
@@ -13494,11 +13954,12 @@ function loadDartHeatmap(){
   const gt = playerGameType;
   const label = (GAME_TYPES[gt] && GAME_TYPES[gt].label) || gt;
   const modeParam = (playerPageTab==='h2h'||playerPageTab==='practice') ? `&mode=${playerPageTab}` : '';
-  // docs/bug-roadmap.md BUG-24: Cricket and Baseball never have a Dartboard-mode
-  // input (renderPadCricket()/renderPadBaseball() are always used), so every
-  // single they record is permanently zone-unspecified — not a Pad-mode choice
-  // the way it is for X01/Chuckin/Doubles Practice. See buildDartHeatmap().
-  const noZoneTracking = (gt === 'cricket' || gt === 'baseball');
+  // docs/bug-roadmap.md BUG-24: Cricket, Baseball, and Shanghai never have a
+  // Dartboard-mode input (renderPadCricket()/renderPadBaseball()/
+  // renderPadShanghai() are always used), so every single they record is
+  // permanently zone-unspecified — not a Pad-mode choice the way it is for
+  // X01/Chuckin/Doubles Practice. See buildDartHeatmap().
+  const noZoneTracking = (gt === 'cricket' || gt === 'baseball' || gt === 'shanghai');
   Backend.get(`/api/players/dart-heatmap?name=${encodeURIComponent(currentPlayer)}&gameType=${gt}${modeParam}`)
     .then(cells => { body.innerHTML = buildDartHeatmap(cells||[], { ariaLabel: `Dartboard heatmap of every ${label} dart thrown`, noZoneTracking }); })
     .catch(()=>{ body.innerHTML = `<p class="pp-meta" style="padding:4px 0">Could not load the heatmap.</p>`; });

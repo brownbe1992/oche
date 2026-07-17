@@ -27,7 +27,7 @@ detectable from dart data the app already records (no schema changes):
 - 🀄 **Shanghai visit** — single, double, AND treble of the same number in
   one X01 visit (any order, any number). A pure three-dart predicate like
   `isStaircaseFinish()`. Recurring. Deliberately independent of the
-  Shanghai *game mode* (`docs/shanghai-roadmap.md`) — this is the feat
+  Shanghai *game mode* (`docs/archive/shanghai-roadmap.md`) — this is the feat
   landing inside a normal X01 leg; the mode's own instant-win badge is its
   own thing, and each doc references the other so they never merge.
 - **Lifetime 180s ladder** — 180! is currently a recurring counter badge

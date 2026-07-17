@@ -219,6 +219,125 @@ describe('addTurn — Baseball scored must match the visit\'s runs, when opted i
   });
 });
 
+describe('addTurn — Shanghai scored must match the visit\'s points, when opted in (docs/archive/shanghai-roadmap.md, same SEC-25 shape as Baseball)', () => {
+  // Shanghai's turns.scored IS a points-like total the leaderboards trust, and
+  // IS derivable from the visit's own darts + the round number, exactly the
+  // way Baseball's own guard above works — see that block's own comment.
+  // Ceiling note: the roadmap doc's own draft text says "max legit visit = 6x
+  // the round number" — that undersells it; three trebles of the round's own
+  // number is a real, legal, NON-Shanghai 9x-the-round-number visit, so the
+  // real ceiling this guard enforces (naturally, via the darts themselves) is
+  // 9x, not 6x — a correctness fix over the doc's literal wording, not a
+  // deviation from its actual intent.
+  function shanghaiGame(players, rounds) {
+    return db.createGame({
+      category: 'Shanghai', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'shanghai', config: { rounds: rounds || 7 }, players: players.map(name => ({ name })),
+    });
+  }
+
+  test('accepts a legitimate mid-game Shanghai visit (target hit + a wrong-number 0-point dart)', async () => {
+    await db.addPlayer('SEC25_SH_A'); await db.addPlayer('SEC25_SH_B');
+    const { gameId } = shanghaiGame(['SEC25_SH_A', 'SEC25_SH_B']);
+    // Round 1 (no prior turns for this player), target = 1. A single-1 (1 point) + a
+    // dart on the wrong number (scores 0) + a treble-1 (3 points) => 4 points total.
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC25_SH_A', set: 1, leg: 1, scored: 4, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }, { dartNo: 2, sector: 7, multiplier: 3 }, { dartNo: 3, sector: 1, multiplier: 3 }],
+    }, STRICT));
+  });
+
+  test('accepts a genuine Shanghai visit (single+double+treble of the round\'s number = 6x)', async () => {
+    await db.addPlayer('SEC25_SH_Shanghai1'); await db.addPlayer('SEC25_SH_Shanghai2');
+    const { gameId } = shanghaiGame(['SEC25_SH_Shanghai1', 'SEC25_SH_Shanghai2']);
+    // Round 1, target 1: single(1) + double(2) + treble(3) = 6 points -- a real Shanghai.
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC25_SH_Shanghai1', set: 1, leg: 1, scored: 6, bust: false, checkout: false, checkoutPoints: null, legWon: true,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }, { dartNo: 2, sector: 1, multiplier: 2 }, { dartNo: 3, sector: 1, multiplier: 3 }],
+    }, STRICT));
+  });
+
+  test('accepts three trebles of the round\'s number (9x) -- a real, legal, non-Shanghai visit', async () => {
+    await db.addPlayer('SEC25_SH_NineX_A'); await db.addPlayer('SEC25_SH_NineX_B');
+    const { gameId } = shanghaiGame(['SEC25_SH_NineX_A', 'SEC25_SH_NineX_B']);
+    // Round 1, target 1: three trebles = 9 points -- MORE than a Shanghai's 6, and legal.
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC25_SH_NineX_A', set: 1, leg: 1, scored: 9, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 3 }, { dartNo: 2, sector: 1, multiplier: 3 }, { dartNo: 3, sector: 1, multiplier: 3 }],
+    }, STRICT));
+  });
+
+  test('rejects a Shanghai turn claiming scored=180 (real per-visit max on round 1 is 9)', async () => {
+    const { gameId } = shanghaiGame(['SEC25_SH_C', 'SEC25_SH_D']);
+    await db.addPlayer('SEC25_SH_C'); await db.addPlayer('SEC25_SH_D');
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC25_SH_C', set: 1, leg: 1, scored: 180, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 3 }, { dartNo: 2, sector: 1, multiplier: 3 }, { dartNo: 3, sector: 1, multiplier: 3 }], // real points: 9
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('rejects a Shanghai turn whose scored mismatches its darts', async () => {
+    const { gameId } = shanghaiGame(['SEC25_SH_E', 'SEC25_SH_F']);
+    await db.addPlayer('SEC25_SH_E'); await db.addPlayer('SEC25_SH_F');
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC25_SH_E', set: 1, leg: 1, scored: 3, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }], // round 1, target 1: real points 1, not 3
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('rejects bust=true or checkout=true on a Shanghai turn (the game has neither concept)', async () => {
+    const { gameId } = shanghaiGame(['SEC25_SH_G', 'SEC25_SH_H']);
+    await db.addPlayer('SEC25_SH_G'); await db.addPlayer('SEC25_SH_H');
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC25_SH_G', set: 1, leg: 1, scored: 0, bust: true, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400);
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC25_SH_G', set: 1, leg: 1, scored: 1, bust: false, checkout: true, checkoutPoints: 1,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('the target advances with the round: a second visit is scored against number 2', async () => {
+    const { gameId } = shanghaiGame(['SEC25_SH_I', 'SEC25_SH_J']);
+    await db.addPlayer('SEC25_SH_I'); await db.addPlayer('SEC25_SH_J');
+    // First turn (round 1, target 1): 1 point on a single-1.
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC25_SH_I', set: 1, leg: 1, scored: 1, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT));
+    // Second turn for the same player (now round 2, target 2): darts on number 1 score
+    // 0 now; a double-2 scores 4. A stale "still target 1" assumption would reject this.
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC25_SH_I', set: 1, leg: 1, scored: 4, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 3 }, { dartNo: 2, sector: 2, multiplier: 2 }],
+    }, STRICT));
+  });
+
+  test('extra rounds (a tie after the final round) keep targeting the last round\'s number', async () => {
+    const { gameId } = shanghaiGame(['SEC25_SH_K', 'SEC25_SH_L'], 7);
+    await db.addPlayer('SEC25_SH_K'); await db.addPlayer('SEC25_SH_L');
+    // Record 7 prior turns (rounds 1-7) for this player, then an extra-round 8th.
+    for (let round = 1; round <= 7; round++) {
+      db.addTurn(gameId, {
+        player: 'SEC25_SH_K', set: 1, leg: 1, scored: 0, bust: false, checkout: false, checkoutPoints: null,
+        darts: [{ dartNo: 1, sector: 12, multiplier: 1 }], // wrong number for every round -> 0 points
+      }, STRICT);
+    }
+    // 8th turn: extra rounds, target stays 7. A treble-7 = 21 points.
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC25_SH_K', set: 1, leg: 1, scored: 21, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 7, multiplier: 3 }],
+    }, STRICT));
+    // Same 8th-round shape but claiming those darts scored against number 8 (which
+    // doesn't exist as a round target) -- 0 points, so a non-zero scored is rejected.
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC25_SH_K', set: 1, leg: 1, scored: 21, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 8, multiplier: 3 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+});
+
 describe("addTurn — Bob's 27 scored/bust must match the round's double hits, when opted in (docs/archive/practice-ladders-roadmap.md Part A)", () => {
   // Bob's 27's turns.scored is this round's GAIN (0 when the round's double was
   // missed entirely — the penalty is derived at read time, never stored

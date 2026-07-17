@@ -45,7 +45,7 @@ Others
 - Schedule for the next session (Double Trouble badge, Busted Maximum badge,
   explanatory + count-aware achievement notifications) — done, see docs/archive/next-session-plan.md
 - Add additional games (Cricket, Baseball, etc.) — full design in docs/game-modes-roadmap.md
-- Shanghai game mode (round-by-round numbers, instant win on single+double+treble) — full design in docs/shanghai-roadmap.md
+- Shanghai game mode (round-by-round numbers, instant win on single+double+treble) — done, see docs/archive/shanghai-roadmap.md
 - Halve-It game mode (hit each round's target or your score halves) — full design in docs/halve-it-roadmap.md
 - Cut-throat Cricket variant (points score onto open opponents, lowest wins — the piece deferred at Cricket v1) — done, see docs/archive/cutthroat-cricket-roadmap.md
 - Structured practice ladders: Bob's 27 doubles routine and the 121 checkout ladder — done, both parts, see docs/archive/practice-ladders-roadmap.md

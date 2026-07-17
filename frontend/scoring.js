@@ -256,6 +256,55 @@ function isBaseballCycle(darts, target){
   return mults[0]===1 && mults[1]===2 && mults[2]===3;
 }
 
+/* ---------- Shanghai ----------
+   docs/archive/shanghai-roadmap.md. Baseball is the direct structural template: a
+   fixed round sequence (1..config.rounds, default 1-7), the whole match
+   sharing one current round (not per-player), each visit's 3 darts only
+   scoring against THAT round's own number. Unlike Baseball, the SCORE isn't
+   1 run per dart — it's multiplier × the round number (single=1x, double=2x,
+   treble=3x), and a Shanghai (single, double, AND treble of the round's
+   number in one visit, any order) wins the WHOLE match instantly, mid-round,
+   regardless of anyone's running total. */
+function shanghaiRoundTarget(round, maxRounds){
+  return round <= maxRounds ? round : maxRounds;
+}
+// isShanghaiWin() is Baseball's isBaseballCycle() with the win-condition
+// meaning attached — same pure-predicate shape (all 3 darts on target,
+// multipliers a permutation of {1,2,3}), just named for what it means in
+// THIS game: a Shanghai visit isn't a bonus feat here, it's the whole game.
+function isShanghaiWin(darts, target){
+  if(!darts || darts.length !== 3) return false;
+  if(!darts.every(d => d.sector === target)) return false;
+  const mults = darts.map(d => d.mult).sort();
+  return mults[0]===1 && mults[1]===2 && mults[2]===3;
+}
+function evaluateVisitShanghai(player, darts, game){
+  const round = game.shanghaiRound;
+  const maxRounds = (game.config && game.config.rounds) || 7;
+  const target = shanghaiRoundTarget(round, maxRounds);
+  let pointsThisVisit = 0;
+  darts.forEach(d => { if(d.sector === target) pointsThisVisit += d.mult * target; });
+  const totalPoints = (player.totalPoints || 0) + pointsThisVisit;
+  const roundPoints = Object.assign({}, player.roundPoints, { [round]: pointsThisVisit });
+  const shanghai = isShanghaiWin(darts, target);
+  // Same "not yet advanced" timing every other evaluateVisit*() relies on —
+  // game.current still holds the throwing player's own index here.
+  const roundComplete = game.current === game.players.length - 1;
+  let matchComplete = false, winnerIndex = null;
+  if(shanghai){
+    matchComplete = true; winnerIndex = game.current;
+  } else if(roundComplete && round >= maxRounds){
+    const totals = game.players.map((pl, i) => i === game.current ? totalPoints : (pl.totalPoints || 0));
+    const maxTotal = Math.max(...totals);
+    const leaders = totals.reduce((acc, t, i) => { if(t === maxTotal) acc.push(i); return acc; }, []);
+    // A tie among the leaders continues into an extra round repeating the
+    // final round's own number (matching Baseball's extra-innings precedent,
+    // per this doc's own "Open questions" lean) rather than a shared loss.
+    if(leaders.length === 1){ matchComplete = true; winnerIndex = leaders[0]; }
+  }
+  return { roundPoints, totalPoints, pointsThisVisit, scored:pointsThisVisit, target, shanghai, roundComplete, matchComplete, winnerIndex };
+}
+
 /* ---------- Bob's 27 ----------
    docs/archive/practice-ladders-roadmap.md Part A. Bob Anderson's famous doubles
    routine: start with 27, throw 3 darts at D1, then D2, ... through D20 (one
@@ -586,7 +635,7 @@ function isMadhouseFinish(win, darts){
 // 🀄 Shanghai visit: a single, double, AND treble of the SAME number in one
 // visit, any order, any number 1-20 — the feat landing inside a normal X01 leg,
 // deliberately independent of the Shanghai game mode's own instant-win badge
-// (docs/shanghai-roadmap.md), which is its own separate thing entirely (see
+// (docs/archive/shanghai-roadmap.md), which is its own separate thing entirely (see
 // that doc and this one for the cross-reference). The bull is never eligible —
 // there's no treble-bull ring (makeDartCore() already downgrades an attempted
 // "treble bull" tap to a single), so a same-number single+double+treble set is
@@ -899,6 +948,56 @@ function rebuildBaseballState({ names, legsPerSet, turns }){
     baseballInning = 1;
   }
   return { players, current, starter, setNo, legNo, baseballInning };
+}
+
+// Shanghai (docs/archive/shanghai-roadmap.md) — Baseball's rebuildBaseballState()
+// with the round target parameterized by maxRounds (config.rounds) instead
+// of a hardcoded 9, and a Shanghai ending the match instantly instead of
+// needing the final round to complete.
+function rebuildShanghaiState({ names, legsPerSet, maxRounds, turns }){
+  const players = names.map(name => ({ name, totalPoints:0, roundPoints:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 }));
+  let current = 0, starter = 0, setNo = 1, legNo = 1, shanghaiRound = 1, seenFirst = false;
+  let pendingNewLeg = false, pendingNewSet = false;
+  const resetLeg = (p, newSet) => { p.totalPoints = 0; p.roundPoints = {}; p.legDarts = 0; if(newSet) p.setDarts = 0; };
+  for(const t of turns){
+    if(seenFirst && (t.setNo !== setNo || t.legNo !== legNo)){
+      starter = (starter + 1) % players.length;
+      current = starter;
+      const newSet = t.setNo !== setNo;
+      players.forEach(p => resetLeg(p, newSet));
+      setNo = t.setNo; legNo = t.legNo; shanghaiRound = 1;
+    }
+    seenFirst = true;
+    pendingNewLeg = false; pendingNewSet = false;
+    current = t.playerIndex;
+    const p = players[t.playerIndex];
+    const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
+    const ev = evaluateVisitShanghai(p, dartsCore, { players, current, shanghaiRound, config:{ rounds:maxRounds } });
+    p.totalPoints = ev.totalPoints; p.roundPoints = ev.roundPoints;
+    p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
+    if(ev.matchComplete){
+      const w = players[ev.winnerIndex];
+      w.legsWon += 1;
+      if(w.legsWon >= legsPerSet){
+        w.setsWon += 1;
+        players.forEach(pp => { pp.legsWon = 0; });
+        pendingNewSet = true;
+      }
+      pendingNewLeg = true;
+      current = ev.winnerIndex;
+    } else {
+      if(ev.roundComplete) shanghaiRound += 1;
+      current = (t.playerIndex + 1) % players.length;
+    }
+  }
+  if(pendingNewLeg){
+    starter = (starter + 1) % players.length;
+    current = starter;
+    players.forEach(p => resetLeg(p, pendingNewSet));
+    if(pendingNewSet){ setNo += 1; legNo = 1; } else { legNo += 1; }
+    shanghaiRound = 1;
+  }
+  return { players, current, starter, setNo, legNo, shanghaiRound };
 }
 
 // Around the Clock (solo, guided drill) — a "round" is one leg, ended by
@@ -1267,5 +1366,6 @@ if (typeof module !== 'undefined' && module.exports) {
     rebuildGauntletState,
     KILLER_DEFAULT_LIVES, shuffleKillerNumbers, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
     MARATHON_FATIGUE_TIERS, computeFatigueSplit, MARATHON_TREND_MIN_LEGS, MARATHON_TREND_TOLERANCE, classifyMarathonTrend,
+    shanghaiRoundTarget, isShanghaiWin, evaluateVisitShanghai, rebuildShanghaiState,
   };
 }

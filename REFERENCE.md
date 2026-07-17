@@ -53,6 +53,7 @@ convention in `CLAUDE.md`.
 - [28. Killer](#28-killer)
 - [29. End-of-Night Session Recap](#29-end-of-night-session-recap)
 - [30. Marathon Mode](#30-marathon-mode)
+- [31. Shanghai](#31-shanghai)
 
 ---
 
@@ -1702,7 +1703,7 @@ turn matching more than one condition queues all of them):
 | 🏹 **Bullseye Finish** | `win && the visit's last dart has sector===25 && mult===2` — the checkout's final dart is the double bull, at any total. Distinct from Bullseye Gauntlet (double bull hit twice *mid-visit*, not necessarily finishing there) and from Triple Bull (all three darts are the bull, not just the last one). |
 | 🍳 **Bed & Breakfast** | `isBedAndBreakfast(darts)` (`frontend/scoring.js`, unit-tested in `backend/test/scoring.test.js`, docs/archive/culture-badges-roadmap.md Part A) — the classic "26" splash around the 20: a visit of exactly single 20, single 5, and single 1, in any order. An exact sector/multiplier match on all three darts, not merely `scored===26` (other routes to that same total aren't the joke). No `win`/`bust` requirement — the splash itself is the achievement, whatever the visit's outcome. |
 | 🏚️ **Madhouse** | `isMadhouseFinish(win, darts)` (`frontend/scoring.js`, unit-tested) — won the leg and the visit's last dart is double 1, the finish nobody wants to be left on. Same "last dart" shape as Bullseye Finish above, with sector 1 in place of the bull. |
-| 🀄 **Shanghai** | `isShanghaiVisit(darts)` (`frontend/scoring.js`, unit-tested) — a single, double, AND treble of the *same* number in one visit, any order, any number 1-20 (the bull is structurally excluded — there's no treble-bull ring, `makeDartCore()` already downgrades an attempted "treble bull" tap to a single). Deliberately independent of the Shanghai *game mode*'s own instant-win badge (`docs/shanghai-roadmap.md`) — this is the same feat landing inside a normal X01 leg; each doc cross-references the other so the two features never merge. |
+| 🀄 **Shanghai** | `isShanghaiVisit(darts)` (`frontend/scoring.js`, unit-tested) — a single, double, AND treble of the *same* number in one visit, any order, any number 1-20 (the bull is structurally excluded — there's no treble-bull ring, `makeDartCore()` already downgrades an attempted "treble bull" tap to a single). Deliberately independent of the Shanghai *game mode*'s own instant-win badge (§31, `docs/archive/shanghai-roadmap.md`) — this is the same feat landing inside a normal X01 leg; each doc cross-references the other so the two features never merge. |
 
 **Suppression pairs**: two conditions above are deliberately treated as the same
 event wearing two labels, not two distinct achievements — the more specific one
@@ -5831,3 +5832,172 @@ end-to-end with Playwright: the full New Game → Marathon Mode flow, the
 persistent banner, a leg auto-chaining into the next on completion, a
 manual "End Marathon" stop, the analysis screen, badges (First Marathon,
 Iron), and Player Profile/Home page wiring.
+
+## 31. Shanghai
+
+`docs/archive/shanghai-roadmap.md`. The classic pub game — `game_type='shanghai'`, a
+genuine new game type, structurally a sibling of Baseball: a fixed round
+sequence, all players in lockstep on one shared live round
+(`game.shanghaiRound`, game-level state, not per-player). Round 1 targets the
+number 1, round 2 the number 2, and so on through `config.rounds` (default
+**7**, the common pub format; a **20**-round long-form option is offered on
+the setup screen — `NEW_GAME_MODE_OPTIONS`'s `shanghai` entry, `setShanghaiRounds()`).
+Per-player state is `{totalPoints, roundPoints: {round: points, ...}}` — no
+`score` field, no bust/checkout concept, the same shape family as Baseball's
+`totalRuns`/`inningRuns`.
+
+### Scoring — `GAME_TYPES.shanghai.evaluateVisit(player, darts, game)` (`frontend/scoring.js`'s `evaluateVisitShanghai`)
+
+**Only the current round's own number scores**, evaluated dart-by-dart within
+the 3-dart visit — a single scores 1× the round number, a double 2×, a treble
+3×; anything else (a different number, or a genuine miss) scores 0 for that
+dart:
+
+```js
+const target = shanghaiRoundTarget(round, maxRounds); // round <= maxRounds ? round : maxRounds
+darts.forEach(d => { if (d.sector === target) pointsThisVisit += d.mult * target; });
+```
+
+**A Shanghai — single, double, AND treble of the round's own number, in one
+visit, any order — wins the WHOLE match instantly, mid-round**
+(`isShanghaiWin(darts, target)`), regardless of running point totals. This is
+the one genuine difference from Baseball's shape: Baseball's win condition is
+always decided by totals after the fixed round count; Shanghai's can end
+early, self-referentially, on the exact visit that threw it.
+
+Absent a Shanghai, **the round only completes once the LAST player in the
+rotation has thrown** (`game.current === game.players.length - 1`, read
+before `game.current` advances — same timing convention as
+`evaluateVisitBaseball()`), and **the win condition is only checked on that
+round-completing visit, and only once `config.rounds` has been reached**:
+every player's total (including the just-evaluated visit) is compared, and
+the match ends only if there's a single unique highest total — an exact tie
+among the leaders continues into extra rounds instead, still targeting the
+final round's own number (`shanghaiRoundTarget()` caps at `maxRounds` rather
+than cycling back to 1, matching Baseball's extra-innings precedent per the
+roadmap doc's own "Open questions" answer).
+
+Because a final-round win isn't always self-referential to the round-ending
+visit (exactly Baseball's own situation — the player whose turn ends the
+round and the player with the higher point total aren't always the same
+person), `evaluateVisitShanghai()` returns `{ matchComplete, winnerIndex }`
+rather than a simple `win: true` implicitly meaning "this player."
+`enterTurnShanghai()` calls `onLegWonShanghai(ev.winnerIndex)`, not
+`onLegWonShanghai(game.current)`.
+
+### `turns.leg_won` — set ONLY for a genuine instant Shanghai
+
+Unlike Baseball (which never sets `turns.leg_won` at all, see §Baseball
+stats), Shanghai's win condition is a genuine hybrid: an instant Shanghai
+really is self-referential to one visit, the same signal Cricket/Killer use
+`turns.leg_won` for — so `enterTurnShanghai()` passes `legWon: !!ev.shanghai`
+on every turn it records. **A final-round win decided by point totals is
+never flagged this way** — only the Shanghai-throwing visit itself ever sets
+it. `getShanghaiWonLegs()` (`backend/db.js`) reads this hybrid signal at
+query time: legs with a `leg_won=1` turn use that player directly; every
+other completed leg falls back to comparing `SUM(scored)` totals per
+`(game, set, leg, player)`, exactly `getBaseballWonLegs()`'s own derivation.
+This matters for correctness, not just symmetry: a player who throws a
+Shanghai on an early round can have a LOWER running point total than an
+opponent who was still leading on points right up until that visit ended the
+match — a pure "highest total wins" derivation (Baseball's own shape) would
+misattribute the win to the wrong player for that case, so Shanghai cannot
+use Baseball's derivation unmodified.
+
+### Consistency guard (SEC-25-style, `addTurn()` in `backend/db.js`)
+
+Same shape as Baseball's own guard: the round is re-derived from the
+player's own prior-turn count in that game/set/leg
+(`shanghaiRoundTarget(priorTurns + 1, maxRounds)`), and a hostile `scored`
+that the round's own number can't produce is rejected. `bust`/`checkout`
+are rejected outright (the game has neither concept). **Ceiling note**: the
+roadmap doc's own draft text says "max legit visit = 6× the round number,
+and a Shanghai visit is exactly 6×" — this undersells it. Three trebles of
+the round's own number is a real, legal, non-Shanghai visit worth 9× the
+round number, more than a Shanghai's 6× — so the actual ceiling this guard
+enforces (naturally, via summing each dart's own contribution) is 9×, not
+6×. A correctness fix over the doc's literal wording, not a deviation from
+its actual intent — the same class of correction Dead Man Walking's own
+open-roadmap-items.md entry independently made over its own pitch doc.
+
+### Saved games
+
+Position is a pure function of recorded turns, same as every other savable
+game type: `rebuildShanghaiState({names, legsPerSet, maxRounds, turns})`
+(`frontend/scoring.js`) replays `running totals + round number` from the
+turn sequence, reused identically by `_savedGamePosition()` (write-time) and
+`resumeGame()`'s `shanghai` branch (read-time resume). `'shanghai'` is in
+both `SAVABLE_GAME_TYPES` lists (`backend/db.js` and `frontend/index.html`).
+
+### Live scoreboard
+
+`renderGameShanghai()` (`frontend/index.html`) and `renderers.shanghai`
+(`frontend/display.html`) both render a per-round score grid (players ×
+rounds) — same shared chalkboard-table shape as Baseball's own, extended into
+extra rounds once reached. **Row labels show the round's own TARGET NUMBER**
+(not the round index) so the grid always matches what's actually live to
+score against — meaningfully different from Baseball's row labels (which
+show the inning index, since Baseball's target number and inning index are
+always numerically identical anyway; Shanghai's round index and target
+number diverge once extra rounds begin, e.g. round 9 of a 7-round game still
+targets 7). `renderPadShanghai()` hides the dartboard entirely and shows one
+big single-button pad for the round's target + Miss, mirroring
+`renderPadBaseball()` — only one number is ever live. The instant-Shanghai
+moment fires `announce()` plus an icon+text 🀄 moment card banner (never
+color/confetti alone, per the roadmap doc's own accessibility note).
+
+### Stats (`GAME_TYPES.shanghai.statDefs` / `SHANGHAI_STAT_DEFS`)
+
+A separate, smaller stat vocabulary, structurally mirroring Baseball's own —
+`turns.scored` for a Shanghai turn already **is** that visit's points
+(`enterTurnShanghai()` writes `scored:ev.scored` directly), so every formula
+reads it as-is. Every query is scoped via `_scope({mode, gameType:'shanghai'})`.
+
+**Stat bubbles** (`getShanghaiStatBubbles(name, mode)`):
+
+| Key | Label | Formula |
+|---|---|---|
+| `shanghaippr` | Points/Round | Points Per Round — `SUM(scored) / COUNT(rounds)`, Shanghai's analog of Baseball's RPI |
+| `shanghaisthrown` | Shanghais Thrown | `SUM(leg_won)` — count of turns that were a genuine instant Shanghai |
+| `shanghaiwinpct` | Win Rate | `won / played * 100` over completed Shanghai games this player took part in |
+| `shanghaigames` | Games Played | Count of completed Shanghai games this player took part in |
+| `shanghaidartsthrown` | Darts Thrown | Count of darts thrown in Shanghai games |
+| `shanghaibestround` | Best Round | `MAX(scored)` across every turn — the player's personal-best single-round points |
+
+**Personal Bests** (`getShanghaiPersonalBests(name, mode)`, built on
+`getShanghaiWonLegs()`'s hybrid derivation above): `bestLegPoints`,
+`fewestDartsToWin`, `winStreak`, `recentFormPoints` (avg over the last 10 won
+legs), `lifetimePoints` (avg over every won leg) — same 5-field shape as
+Baseball's own.
+
+**Home page leaderboards**: Points Per Round (`getShanghaiPprLeaderboard()`,
+5-round floor, mirrors `getBaseballRpiLeaderboard()`), Shanghais Thrown
+(`getShanghaiShanghaisStats()`, leaderboard + recent feed off `leg_won=1`,
+mirrors `getBaseballPerfectInningsStats()`), and Most Shanghai Wins
+(`getShanghaiWinLeaderboard()`, H2H only, identical shape to
+`getBaseballWinLeaderboard()`). No Perfect-Game analog — a Shanghai win is
+instant, not a perfect-every-round feat, so there's nothing for one to mean.
+
+### Badges
+
+🀄 **Shanghai!** (recurring) — win a Shanghai game instantly. Fires from
+`enterTurnShanghai()` the moment `ev.shanghai` is true, via the same
+`queueBadge`/`awardRecurringBadge` pair every other in-visit badge uses.
+
+### Testing
+
+`backend/test/scoring.test.js`: `shanghaiRoundTarget()`'s in-range/extra-round
+capping, `isShanghaiWin()`'s exact single+double+treble match (including the
+"two singles and a treble is NOT a Shanghai" negative case), and
+`evaluateVisitShanghai()`'s scoring/instant-win/final-round-tie/non-final-round/
+extra-round cases. `backend/test/db.shanghai-stats.test.js`: stat-bubble
+formulas, the hybrid `getShanghaiWonLegs()` derivation (both the instant-Shanghai
+path and the final-round-points path, plus an abandoned-game exclusion), the
+PPR/win leaderboards, and an X01/Cricket/Baseball/Shanghai cross-contamination
+regression. `backend/test/db.turn-consistency-guard.test.js`: the SEC-25-style
+guard's accept/reject cases, including the 6×-vs-9× ceiling correctness fix
+and the extra-round target-advancement case. Verified end-to-end with
+Playwright: the full New Game → Shanghai flow (practice and H2H), an instant
+mid-round Shanghai win, a final-round decider correctly awarded to the
+higher-points player rather than whoever's turn ended the round, badges/stat
+bubbles/personal bests/win leaderboard, and the live `/display` scorecard.

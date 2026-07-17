@@ -22,7 +22,8 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State, rebuildCheckoutLadderState,
   GAUNTLET_STATION_ORDER, evaluateGauntletStation, gauntletTotalScars, gauntletResultTier, rebuildGauntletState,
   KILLER_DEFAULT_LIVES, shuffleKillerNumbers, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
-  MARATHON_FATIGUE_TIERS, computeFatigueSplit, MARATHON_TREND_MIN_LEGS, MARATHON_TREND_TOLERANCE, classifyMarathonTrend } = scoring;
+  MARATHON_FATIGUE_TIERS, computeFatigueSplit, MARATHON_TREND_MIN_LEGS, MARATHON_TREND_TOLERANCE, classifyMarathonTrend,
+  shanghaiRoundTarget, isShanghaiWin, evaluateVisitShanghai } = scoring;
 
 // Shorthand for building a rebuild-function turn record: v(playerIndex, setNo,
 // legNo, [[sector,mult], ...]) — mirrors the {playerIndex,setNo,legNo,darts}
@@ -2008,5 +2009,91 @@ describe('classifyMarathonTrend (docs/archive/marathon-mode-roadmap.md)', () => 
   test('a shape matching no named pattern (steady gradual climb) is Inconclusive, not forced into one', () => {
     const legs = [8, 10, 12, 14, 16, 18, 20, 22, 24];
     assert.equal(classifyMarathonTrend(legs), 'Inconclusive');
+  });
+});
+
+describe('shanghaiRoundTarget (docs/archive/shanghai-roadmap.md)', () => {
+  test('within range returns the round itself; beyond maxRounds caps at maxRounds (extra rounds)', () => {
+    assert.equal(shanghaiRoundTarget(3, 7), 3);
+    assert.equal(shanghaiRoundTarget(7, 7), 7);
+    assert.equal(shanghaiRoundTarget(8, 7), 7);
+    assert.equal(shanghaiRoundTarget(20, 7), 7);
+  });
+});
+
+describe('isShanghaiWin (docs/archive/shanghai-roadmap.md)', () => {
+  test('single, double, and treble of the target, any order, IS a Shanghai', () => {
+    assert.equal(isShanghaiWin([{sector:5,mult:1},{sector:5,mult:2},{sector:5,mult:3}], 5), true);
+    assert.equal(isShanghaiWin([{sector:5,mult:3},{sector:5,mult:1},{sector:5,mult:2}], 5), true);
+  });
+  test('two singles and a treble is NOT a Shanghai (missing the double)', () => {
+    assert.equal(isShanghaiWin([{sector:5,mult:1},{sector:5,mult:1},{sector:5,mult:3}], 5), false);
+  });
+  test('any dart off the target number breaks it, even if the multiplier set is right', () => {
+    assert.equal(isShanghaiWin([{sector:5,mult:1},{sector:5,mult:2},{sector:6,mult:3}], 5), false);
+  });
+  test('fewer than 3 darts is never a Shanghai', () => {
+    assert.equal(isShanghaiWin([{sector:5,mult:1},{sector:5,mult:2}], 5), false);
+  });
+});
+
+describe('evaluateVisitShanghai (docs/archive/shanghai-roadmap.md)', () => {
+  function mkGame(round, current, players, maxRounds){
+    return { shanghaiRound: round, current, players, config: { rounds: maxRounds || 7 } };
+  }
+  test('scores multiplier x round-number for darts on target, zero for darts off it', () => {
+    const player = { totalPoints: 0, roundPoints: {} };
+    const game = mkGame(4, 0, [player, { totalPoints: 0 }]);
+    const ev = evaluateVisitShanghai(player, [{sector:4,mult:1},{sector:4,mult:3},{sector:9,mult:2}], game);
+    // single 4 = 4, treble 4 = 12, sector 9 (off-target) = 0 -> 16 total
+    assert.equal(ev.pointsThisVisit, 16);
+    assert.equal(ev.scored, 16);
+    assert.equal(ev.target, 4);
+    assert.equal(ev.shanghai, false);
+  });
+
+  test('a Shanghai wins the WHOLE match instantly, mid-round, regardless of running totals', () => {
+    const p0 = { totalPoints: 0, roundPoints: {} };
+    const p1 = { totalPoints: 500, roundPoints: {} }; // far ahead on points
+    const game = mkGame(3, 0, [p0, p1]); // p0 throws first, round not complete yet
+    const ev = evaluateVisitShanghai(p0, [{sector:3,mult:1},{sector:3,mult:2},{sector:3,mult:3}], game);
+    assert.equal(ev.shanghai, true);
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 0, 'the Shanghai thrower wins regardless of who is ahead on points');
+  });
+
+  test('final round, single leader: match completes for the leader', () => {
+    const p0 = { totalPoints: 10, roundPoints: {} };
+    const p1 = { totalPoints: 20, roundPoints: {} };
+    // p1 (index 1) is the last player in the rotation -- roundComplete=true
+    const game = mkGame(7, 1, [p0, p1], 7);
+    const ev = evaluateVisitShanghai(p1, [{sector:0,mult:1}], game); // miss, p1 stays at 20
+    assert.equal(ev.roundComplete, true);
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 1);
+  });
+
+  test('final round tie, no Shanghai: match does not complete', () => {
+    const p0 = { totalPoints: 20, roundPoints: {} };
+    const p1 = { totalPoints: 20, roundPoints: {} };
+    const game = mkGame(7, 1, [p0, p1], 7);
+    const ev = evaluateVisitShanghai(p1, [{sector:0,mult:1}], game); // miss, stays tied 20-20
+    assert.equal(ev.roundComplete, true);
+    assert.equal(ev.matchComplete, false, 'a tie with no Shanghai continues into an extra round');
+  });
+
+  test('not the final round: match never completes even with a big lead', () => {
+    const p0 = { totalPoints: 100, roundPoints: {} };
+    const p1 = { totalPoints: 5, roundPoints: {} };
+    const game = mkGame(3, 1, [p0, p1], 7);
+    const ev = evaluateVisitShanghai(p1, [{sector:0,mult:1}], game);
+    assert.equal(ev.matchComplete, false);
+  });
+
+  test('extra rounds keep targeting maxRounds, not cycling back to 1', () => {
+    const player = { totalPoints: 0, roundPoints: {} };
+    const game = mkGame(9, 0, [player, {totalPoints:0}], 7); // round 9 > maxRounds 7
+    const ev = evaluateVisitShanghai(player, [{sector:7,mult:1}], game);
+    assert.equal(ev.target, 7, 'extra rounds repeat the final round\'s own number, matching Baseball');
   });
 });
