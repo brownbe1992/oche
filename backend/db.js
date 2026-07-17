@@ -34,7 +34,8 @@ const { checkoutHint, dartLabel,
   deadManWalkingBandFor, deadManWalkingParForTarget, pickDeadManWalkingTargets,
   rebuildDeadManWalkingState, deadManWalkingResultTier, CHALLENGE_CHECKOUTS,
   makeDartCore, PRESSURE_ROUNDS, generatePressureCard, computePressureRoundResult,
-  pressureMissPenaltyForCard, pressureComposureRating, rebuildPressureChamberState } = require('../frontend/scoring.js');
+  pressureMissPenaltyForCard, pressureComposureRating, rebuildPressureChamberState,
+  doubleElimStructure } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -7548,6 +7549,9 @@ function getAroundTheWorldProgress(playerName) {
    with no server-side reordering. */
 const TOURNAMENT_X01_CATEGORIES = ['501', '301', '170', '101'];
 const TOURNAMENT_MAX_PLAYERS = 128;
+// docs/tournament-mode-roadmap.md §2: double-elimination is restricted to exact
+// powers of two for v1 (no cascading byes in the losers bracket).
+const TOURNAMENT_DOUBLE_ELIM_COUNTS = [4, 8, 16, 32, 64, 128];
 // docs/tournament-mode-roadmap.md §7: how many seed slots worse the winner must be
 // than the opponent they beat to count as an upset — mirrors the spirit of the H2H
 // Giant Slayer's 15-average gap without reusing its exact (average-based) threshold,
@@ -7586,6 +7590,69 @@ function _roundLabel(roundsFromFinal, roundNo) {
 // match, completes the whole tournament). Called identically whether the result
 // came from a played game, an admin-recorded walkover, or a round-1 bye cascading
 // forward at generation time — advancement logic doesn't need to know which.
+// docs/tournament-mode-roadmap.md §7: Giant Slayer (Tournament) — awarded per
+// match whenever the winner was seeded at least TOURNAMENT_GIANT_SLAYER_SEED_THRESHOLD
+// slots WORSE than the opponent they just beat. Called from every real (non-bye)
+// match result, single- or double-elimination alike, so a winners-bracket upset
+// still counts even though that loser only drops to the losers bracket rather than
+// being eliminated outright.
+function _maybeAwardTournamentGiantSlayer(tournamentId, winnerId, loserId) {
+  if (loserId == null) return;
+  const seedRows = db.prepare(
+    `SELECT player_id, seed FROM tournament_players WHERE tournament_id = ? AND player_id IN (?, ?)`
+  ).all(tournamentId, winnerId, loserId);
+  const winnerSeed = seedRows.find(r => r.player_id === winnerId)?.seed;
+  const loserSeed = seedRows.find(r => r.player_id === loserId)?.seed;
+  if (winnerSeed != null && loserSeed != null && winnerSeed - loserSeed >= TOURNAMENT_GIANT_SLAYER_SEED_THRESHOLD) {
+    const winnerName = db.prepare('SELECT name FROM players WHERE id = ?').get(winnerId)?.name;
+    if (winnerName) awardBadge(winnerName, 'tournament_giant_slayer', true);
+  }
+}
+
+// Settles the whole tournament on its deciding match: champion, runner-up, status,
+// and the Champion badge (docs/tournament-mode-roadmap.md §7), all in one place.
+function _completeTournament(tournamentId, championId, runnerUpId) {
+  db.prepare(`UPDATE tournaments SET status = 'completed', champion_id = ?, runner_up_id = ?, completed_at = datetime('now') WHERE id = ?`)
+    .run(championId, runnerUpId, tournamentId);
+  db.prepare(`UPDATE tournament_players SET status = 'champion' WHERE tournament_id = ? AND player_id = ?`)
+    .run(tournamentId, championId);
+  const championName = db.prepare('SELECT name FROM players WHERE id = ?').get(championId)?.name;
+  if (championName) awardBadge(championName, 'tournament_champion', true);
+}
+
+// The grand final's conditional "bracket reset" (docs/tournament-mode-roadmap.md §2).
+// By construction GF game 1's slot 1 is the winners-bracket champion and slot 2 is
+// the losers-bracket champion (they arrive from the WB/LB finals' winner_next
+// pointers). If the WB champion wins game 1, they have zero losses and the tournament
+// ends. If the LB champion (slot 2) wins game 1, BOTH players now hold exactly one
+// loss, so a single decider game (the pre-created reset match) is played — this just
+// populates that reset match's two slots and stops, without eliminating anyone or
+// completing the tournament. The reset match itself, once decided, always ends the
+// tournament.
+function _resolveGrandFinal(match, winnerId, loserId, tournamentId) {
+  const gfRounds = db.prepare(
+    `SELECT id, round_no FROM tournament_rounds WHERE tournament_id = ? AND bracket = 'grand_final' ORDER BY round_no`
+  ).all(tournamentId);
+  const resetRoundId = gfRounds.length > 1 ? gfRounds[gfRounds.length - 1].id : null;
+  const isResetMatch = resetRoundId != null && match.round_id === resetRoundId;
+
+  if (!isResetMatch && resetRoundId != null && winnerId === match.player2_id) {
+    // LB champion took game 1 — force the decider. Seed the reset match with the same
+    // two finalists (WB champ still in slot 1, LB champ in slot 2) and stop here.
+    const resetMatch = db.prepare('SELECT id FROM tournament_matches WHERE round_id = ? ORDER BY slot LIMIT 1').get(resetRoundId);
+    if (resetMatch) {
+      db.prepare('UPDATE tournament_matches SET player1_id = ?, player2_id = ? WHERE id = ?')
+        .run(match.player1_id, match.player2_id, resetMatch.id);
+    }
+    return;
+  }
+  // Decisive: WB champ won game 1, or the reset game just finished. Whoever won is champion.
+  db.prepare(`UPDATE tournament_players SET status = 'eliminated' WHERE tournament_id = ? AND player_id = ?`)
+    .run(tournamentId, loserId);
+  _maybeAwardTournamentGiantSlayer(tournamentId, winnerId, loserId);
+  _completeTournament(tournamentId, winnerId, loserId);
+}
+
 function _advanceTournamentMatch(matchId, winnerId) {
   const match = db.prepare('SELECT * FROM tournament_matches WHERE id = ?').get(matchId);
   if (!match) return;
@@ -7603,43 +7670,47 @@ function _advanceTournamentMatch(matchId, winnerId) {
   if (winnerId !== match.player1_id && winnerId !== match.player2_id) return;
   const loserId = winnerId === match.player1_id ? match.player2_id : match.player1_id;
   db.prepare('UPDATE tournament_matches SET winner_id = ? WHERE id = ?').run(winnerId, matchId);
-  const tournamentId = db.prepare('SELECT tournament_id FROM tournament_rounds WHERE id = ?').get(match.round_id).tournament_id;
-  if (loserId != null) {
-    db.prepare(`UPDATE tournament_players SET status = 'eliminated' WHERE tournament_id = ? AND player_id = ?`)
-      .run(tournamentId, loserId);
-    // docs/tournament-mode-roadmap.md §7: Giant Slayer (Tournament) — checked right
-    // here rather than a second parallel hook, same reasoning as Champion below.
-    // Never fires for a bye (loserId is null, guarded by the enclosing `if`).
-    const seedRows = db.prepare(
-      `SELECT player_id, seed FROM tournament_players WHERE tournament_id = ? AND player_id IN (?, ?)`
-    ).all(tournamentId, winnerId, loserId);
-    const winnerSeed = seedRows.find(r => r.player_id === winnerId)?.seed;
-    const loserSeed = seedRows.find(r => r.player_id === loserId)?.seed;
-    if (winnerSeed != null && loserSeed != null && winnerSeed - loserSeed >= TOURNAMENT_GIANT_SLAYER_SEED_THRESHOLD) {
-      const winnerName = db.prepare('SELECT name FROM players WHERE id = ?').get(winnerId)?.name;
-      if (winnerName) awardBadge(winnerName, 'tournament_giant_slayer', true);
-    }
+  const round = db.prepare('SELECT tournament_id, bracket FROM tournament_rounds WHERE id = ?').get(match.round_id);
+  const tournamentId = round.tournament_id;
+
+  // The grand final (and its optional reset) has its own settle logic — a plain
+  // "no winner_next => complete" rule can't express the conditional decider.
+  if (round.bracket === 'grand_final') {
+    return _resolveGrandFinal(match, winnerId, loserId, tournamentId);
   }
+
+  if (loserId != null) {
+    if (match.loser_next_match_id) {
+      // Double-elimination: a winners-bracket loss drops the loser into the losers
+      // bracket rather than eliminating them. (Losers-bracket matches leave
+      // loser_next_match_id NULL, so a second loss there falls through to elimination.)
+      const col = match.loser_next_slot === 1 ? 'player1_id' : 'player2_id';
+      db.prepare(`UPDATE tournament_matches SET ${col} = ? WHERE id = ?`).run(loserId, match.loser_next_match_id);
+    } else {
+      db.prepare(`UPDATE tournament_players SET status = 'eliminated' WHERE tournament_id = ? AND player_id = ?`)
+        .run(tournamentId, loserId);
+    }
+    // Awarded per match (see the helper) — never for a bye (loserId is null).
+    _maybeAwardTournamentGiantSlayer(tournamentId, winnerId, loserId);
+  }
+
   if (match.winner_next_match_id) {
     const col = match.winner_next_slot === 1 ? 'player1_id' : 'player2_id';
     db.prepare(`UPDATE tournament_matches SET ${col} = ? WHERE id = ?`).run(winnerId, match.winner_next_match_id);
   } else {
-    // No next match — this was the final. The whole tournament is decided.
-    db.prepare(`UPDATE tournaments SET status = 'completed', champion_id = ?, runner_up_id = ?, completed_at = datetime('now') WHERE id = ?`)
-      .run(winnerId, loserId, tournamentId);
-    db.prepare(`UPDATE tournament_players SET status = 'champion' WHERE tournament_id = ? AND player_id = ?`)
-      .run(tournamentId, winnerId);
-    // docs/tournament-mode-roadmap.md §7: Champion badge, awarded right where
-    // champion_id itself is set — not a second parallel hook.
-    const championName = db.prepare('SELECT name FROM players WHERE id = ?').get(winnerId)?.name;
-    if (championName) awardBadge(championName, 'tournament_champion', true);
+    // No next match and not a grand final — this is a single-elimination final, so
+    // the whole tournament is decided. (Every double-elimination match except the
+    // grand final has a winner_next pointer, so this branch is single-elim only.)
+    _completeTournament(tournamentId, winnerId, loserId);
   }
 }
 
 // players: ordered array of names, index 0 = seed 1. rounds: [{legsPerSet,
-// setsPerGame}, ...], earliest round first — must have exactly as many entries
-// as the bracket has rounds (ceil(log2(next power of two >= player count))).
-function createTournament({ name, category, players, rounds }) {
+// setsPerGame}, ...], earliest round first — must have exactly as many entries as
+// the bracket has rounds (single-elim: ceil(log2(next power of two >= player
+// count)); double-elim: doubleElimStructure(k).length). bracketType:
+// 'single_elim' (default) | 'double_elim'.
+function createTournament({ name, category, players, rounds, bracketType }) {
   name = String(name || '').trim();
   if (!name) throw httpError(400, 'Tournament name is required');
   if (name.length > 64) throw httpError(400, 'Tournament name must be 64 characters or fewer');
@@ -7649,10 +7720,21 @@ function createTournament({ name, category, players, rounds }) {
   const uniqueNames = new Set(players.map(n => String(n).trim().toLowerCase()));
   if (uniqueNames.size !== players.length) throw httpError(400, 'Duplicate players are not allowed');
 
+  const bracketTypeClean = bracketType === 'double_elim' ? 'double_elim' : 'single_elim';
+  // docs/tournament-mode-roadmap.md §2: double-elimination is v1-restricted to exact
+  // powers of two (4/8/16/32/64/128), the deliberate de-risking that keeps the losers
+  // bracket free of the cascading-bye problem entirely — single-elim still handles
+  // arbitrary counts, since its bye propagation is simple.
+  if (bracketTypeClean === 'double_elim' && !TOURNAMENT_DOUBLE_ELIM_COUNTS.includes(players.length)) {
+    throw httpError(400, `Double-elimination requires exactly ${TOURNAMENT_DOUBLE_ELIM_COUNTS.join(', ')} players`);
+  }
+
   const bracketSize = _nextPowerOfTwo(players.length);
-  const roundCount = Math.log2(bracketSize);
-  if (!Array.isArray(rounds) || rounds.length !== roundCount) {
-    throw httpError(400, `rounds must have exactly ${roundCount} entries for ${players.length} players`);
+  const k = Math.log2(bracketSize);
+  const plan = bracketTypeClean === 'double_elim' ? doubleElimStructure(k) : null;
+  const expectedRoundCount = plan ? plan.length : k;
+  if (!Array.isArray(rounds) || rounds.length !== expectedRoundCount) {
+    throw httpError(400, `rounds must have exactly ${expectedRoundCount} entries for a ${bracketTypeClean === 'double_elim' ? 'double' : 'single'}-elimination bracket of ${players.length} players`);
   }
   const cleanRounds = rounds.map((r, i) => {
     const legsPerSet = Number(r.legsPerSet), setsPerGame = Number(r.setsPerGame);
@@ -7669,14 +7751,30 @@ function createTournament({ name, category, players, rounds }) {
   const playerRows = players.map(n => ensurePlayer(n));
 
   const tournamentId = Number(db.prepare(
-    'INSERT INTO tournaments (name, category, player_count) VALUES (?, ?, ?)'
-  ).run(name, String(category), playerRows.length).lastInsertRowid);
+    'INSERT INTO tournaments (name, category, bracket_type, player_count) VALUES (?, ?, ?, ?)'
+  ).run(name, String(category), bracketTypeClean, playerRows.length).lastInsertRowid);
 
   playerRows.forEach((p, i) => {
     db.prepare('INSERT INTO tournament_players (tournament_id, player_id, seed) VALUES (?, ?, ?)')
       .run(tournamentId, p.id, i + 1);
   });
 
+  const seedToPlayerId = {};
+  playerRows.forEach((p, i) => { seedToPlayerId[i + 1] = p.id; });
+
+  if (bracketTypeClean === 'double_elim') {
+    _generateDoubleElimBracket(tournamentId, k, cleanRounds, plan, seedToPlayerId);
+  } else {
+    _generateSingleElimBracket(tournamentId, bracketSize, k, cleanRounds, seedToPlayerId);
+  }
+
+  return { tournamentId };
+}
+
+// Single-elimination generation (extracted unchanged from the original
+// createTournament so double-elim could branch alongside it): one round per
+// halving, standard seeding placement, cascading byes.
+function _generateSingleElimBracket(tournamentId, bracketSize, roundCount, cleanRounds, seedToPlayerId) {
   const roundIds = cleanRounds.map((r, i) => {
     const roundNo = i + 1;
     const label = _roundLabel(roundCount - roundNo, roundNo);
@@ -7709,9 +7807,6 @@ function createTournament({ name, category, players, rounds }) {
   // Fill round 1 from the seed order; a slot whose seed number exceeds the real
   // player count has no player (a bye) — the other side auto-advances immediately.
   const seedSlots = _bracketSeedOrder(bracketSize);
-  const seedToPlayerId = {};
-  playerRows.forEach((p, i) => { seedToPlayerId[i + 1] = p.id; });
-
   const round1MatchIds = matchIdsByRound[0];
   const byeAdvances = [];
   for (let m = 0; m < round1MatchIds.length; m++) {
@@ -7726,8 +7821,70 @@ function createTournament({ name, category, players, rounds }) {
   // separate round-1 byes ends up immediately "ready" (both real players known)
   // without either bye needing to reference the other.
   byeAdvances.forEach(([matchId, winnerId]) => _advanceTournamentMatch(matchId, winnerId));
+}
 
-  return { tournamentId };
+// Double-elimination generation (docs/tournament-mode-roadmap.md §2). k = log2 of
+// the exact player count (guaranteed a power of two here, so zero byes). Creates
+// every round and match up-front, then wires the winner_next / loser_next pointer
+// pairs the schema was designed for. Match layout per round comes from
+// doubleElimStructure(k) (the shared plan). All rows are created first, so pointers
+// are set by a second UPDATE pass — no last-to-first ordering dance needed.
+function _generateDoubleElimBracket(tournamentId, k, cleanRounds, plan, seedToPlayerId) {
+  const N = Math.pow(2, k);
+  const roundIds = plan.map((r, i) => Number(db.prepare(
+    'INSERT INTO tournament_rounds (tournament_id, bracket, round_no, label, legs_per_set, sets_per_game) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(tournamentId, r.bracket, i + 1, r.label, cleanRounds[i].legsPerSet, cleanRounds[i].setsPerGame).lastInsertRowid));
+
+  // Create every match, grouped by plan-round index; matchIds[i] = array of match ids.
+  const matchIds = plan.map((r, i) => Array.from({ length: r.matches }, (_, s) => Number(db.prepare(
+    'INSERT INTO tournament_matches (round_id, slot) VALUES (?, ?)'
+  ).run(roundIds[i], s + 1).lastInsertRowid)));
+
+  // Convenience accessors into matchIds by bracket-relative round number.
+  const WB = (i) => matchIds[i - 1];              // winners round i (1..k)
+  const LB = (j) => matchIds[k + j - 1];          // losers round j (1..2k-2)
+  const lbRounds = 2 * k - 2;
+  const GF1 = matchIds[k + lbRounds][0];          // grand final game 1
+  const GF2 = matchIds[k + lbRounds + 1][0];      // grand final reset (decider)
+  const setWinnerNext = (id, nextId, slot) =>
+    db.prepare('UPDATE tournament_matches SET winner_next_match_id = ?, winner_next_slot = ? WHERE id = ?').run(nextId, slot, id);
+  const setLoserNext = (id, nextId, slot) =>
+    db.prepare('UPDATE tournament_matches SET loser_next_match_id = ?, loser_next_slot = ? WHERE id = ?').run(nextId, slot, id);
+
+  // Winners-bracket winner advancement (standard single-elim shape), the WB final
+  // winner going on to grand-final slot 1.
+  for (let i = 1; i <= k; i++) {
+    WB(i).forEach((mid, s) => {
+      if (i < k) setWinnerNext(mid, WB(i + 1)[Math.floor(s / 2)], (s % 2) + 1);
+      else setWinnerNext(mid, GF1, 1);
+    });
+  }
+  // Winners-bracket loser drops. WB round 1 losers pair up into losers round 1; each
+  // later WB round i (>=2) drops its losers into losers round 2(i-1)'s slot 2.
+  for (let i = 1; i <= k; i++) {
+    WB(i).forEach((mid, s) => {
+      if (i === 1) setLoserNext(mid, LB(1)[Math.floor(s / 2)], (s % 2) + 1);
+      else setLoserNext(mid, LB(2 * (i - 1))[s], 2);
+    });
+  }
+  // Losers-bracket winner advancement. Minor rounds (odd j) feed the next drop round
+  // 1:1 into slot 1; drop rounds (even j) pair their winners into the next minor
+  // round; the losers final (j = 2k-2) sends its winner to grand-final slot 2.
+  for (let j = 1; j <= lbRounds; j++) {
+    LB(j).forEach((mid, s) => {
+      if (j === lbRounds) setWinnerNext(mid, GF1, 2);
+      else if (j % 2 === 1) setWinnerNext(mid, LB(j + 1)[s], 1);
+      else setWinnerNext(mid, LB(j + 1)[Math.floor(s / 2)], (s % 2) + 1);
+    });
+  }
+
+  // Seed winners round 1 (no byes — exact power of two).
+  const seedSlots = _bracketSeedOrder(N);
+  WB(1).forEach((mid, s) => {
+    const playerA = seedToPlayerId[seedSlots[s * 2]] ?? null;
+    const playerB = seedToPlayerId[seedSlots[s * 2 + 1]] ?? null;
+    db.prepare('UPDATE tournament_matches SET player1_id = ?, player2_id = ? WHERE id = ?').run(playerA, playerB, mid);
+  });
 }
 
 function listTournaments() {
@@ -7752,7 +7909,7 @@ function getTournament(id) {
   const matches = db.prepare(`
     SELECT m.id, m.round_id, m.slot, m.is_bye, m.game_id, m.winner_id,
            m.winner_next_match_id, m.winner_next_slot,
-           r.round_no, r.label, r.legs_per_set AS legsPerSet, r.sets_per_game AS setsPerGame,
+           r.round_no, r.label, r.bracket, r.legs_per_set AS legsPerSet, r.sets_per_game AS setsPerGame,
            p1.name AS player1Name, p2.name AS player2Name, w.name AS winnerName
     FROM tournament_matches m
     JOIN tournament_rounds r ON r.id = m.round_id
@@ -7789,7 +7946,13 @@ function getTournamentStats(playerName) {
   // (win or loss, including a bye placement) across every tournament they've
   // played, one row per tournament they appear in at all. A player's max
   // round_no within one tournament IS the furthest they reached there, since
-  // round N+1 placement only ever happens after winning round N.
+  // round N+1 placement only ever happens after winning round N — and because a
+  // double-elimination tournament numbers its rounds globally in play order
+  // (winners, then losers, then the grand final), this stays true across both
+  // bracket types. The reported LABEL is read from that furthest round itself
+  // (`tournament_rounds.label`), not recomputed, so a double-elim "Losers Final"
+  // or "Grand Final" reads correctly rather than being mislabeled by the
+  // single-elim `_roundLabel()` naming.
   const rows = db.prepare(`
     SELECT tr.tournament_id AS tid, MAX(tr.round_no) AS maxRoundNo,
            (SELECT COUNT(*) FROM tournament_rounds WHERE tournament_id = tr.tournament_id) AS totalRounds
@@ -7798,14 +7961,18 @@ function getTournamentStats(playerName) {
     WHERE tm.player1_id = ? OR tm.player2_id = ?
     GROUP BY tr.tournament_id
   `).all(p.id, p.id);
-  let bestFinish = null, bestRoundsFromFinal = Infinity;
+  let bestRoundsFromFinal = Infinity, bestTid = null, bestRoundNo = null;
   for (const r of rows) {
     const roundsFromFinal = r.totalRounds - r.maxRoundNo;
     if (roundsFromFinal < bestRoundsFromFinal) {
       bestRoundsFromFinal = roundsFromFinal;
-      bestFinish = _roundLabel(roundsFromFinal, r.maxRoundNo);
+      bestTid = r.tid;
+      bestRoundNo = r.maxRoundNo;
     }
   }
+  const bestFinish = bestTid != null
+    ? (db.prepare('SELECT label FROM tournament_rounds WHERE tournament_id = ? AND round_no = ?').get(bestTid, bestRoundNo)?.label ?? null)
+    : null;
   return { wins, runnerUps, bestFinish };
 }
 

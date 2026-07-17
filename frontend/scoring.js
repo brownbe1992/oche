@@ -1995,6 +1995,39 @@ function rebuildDeadManWalkingState({ rounds, turns }){
   };
 }
 
+// docs/tournament-mode-roadmap.md §2: the ordered round plan for a
+// double-elimination bracket of exactly 2^k players (k >= 2 — v1 restricts
+// double-elim to exact powers of two 4/8/16/32/64/128, so there are never any
+// byes to cascade, the whole point of that de-risking restriction). Returns
+// every round in creation/play order — the winners bracket (k rounds), then the
+// losers bracket (2k-2 rounds, alternating a "minor" round of LB survivors and a
+// "major"/drop round where that round's winners-bracket losers enter), then the
+// grand final and its conditional bracket-reset decider. Each entry is
+// { bracket, label, matches }. Both backend/db.js's generation and the frontend
+// setup screen's per-round format table derive from this ONE function so the
+// round count/order/labels can never drift between them.
+function doubleElimStructure(k) {
+  const N = Math.pow(2, k);
+  const rounds = [];
+  // Winners bracket: round i (1..k) has N/2^i matches; the last is the WB final.
+  for (let i = 1; i <= k; i++) {
+    const label = i === k ? 'Winners Final' : i === k - 1 ? 'Winners Semifinal' : `Winners Round ${i}`;
+    rounds.push({ bracket: 'winners', label, matches: N / Math.pow(2, i) });
+  }
+  // Losers bracket: 2k-2 rounds. Match count halves every PAIR of rounds
+  // (minor+drop), so round j has N / 2^(floor((j+1)/2)+1) matches.
+  const lbRounds = 2 * k - 2;
+  for (let j = 1; j <= lbRounds; j++) {
+    const label = j === lbRounds ? 'Losers Final' : `Losers Round ${j}`;
+    rounds.push({ bracket: 'losers', label, matches: N / Math.pow(2, Math.floor((j + 1) / 2) + 1) });
+  }
+  // Grand final, plus the conditional "bracket reset" decider (only played if the
+  // losers-bracket finalist wins game one — see _advanceTournamentMatch).
+  rounds.push({ bracket: 'grand_final', label: 'Grand Final', matches: 1 });
+  rounds.push({ bracket: 'grand_final', label: 'Grand Final (Reset)', matches: 1 });
+  return rounds;
+}
+
 // Daily Challenge's curated checkout-target pool (docs/daily-challenge-roadmap.md)
 // — Dead Man Walking's own cold-start fallback for a player with too little
 // double-out X01 history for a confident weakness ranking reuses this exact
@@ -2038,5 +2071,6 @@ if (typeof module !== 'undefined' && module.exports) {
     pressureMissPenaltyForCard, pressureRoundOutcome, computePressureRoundResult, pressureComposureRating,
     isPressureIceRun, isPressureModifierFullHit, pressureChamberDecideWinnerIndex,
     evaluateVisitPressureChamber, rebuildPressureChamberState,
+    doubleElimStructure,
   };
 }

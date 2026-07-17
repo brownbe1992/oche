@@ -1918,8 +1918,8 @@ branch, to fire the live celebration):
 
 | Badge | Exact condition |
 |---|---|
-| 🏆 **Champion** | Awarded to the winning player exactly where `_advanceTournamentMatch()` sets `tournaments.champion_id` (no `winner_next_match_id` — this was the final). **Once-badge.** |
-| ⚔️ **Giant Slayer (Tournament)** | On any tournament match result: `winner's tournament_players.seed - loser's seed >= 3` (`TOURNAMENT_GIANT_SLAYER_SEED_THRESHOLD`) — the winner was seeded at least 3 slots worse than the opponent they beat. Never fires on a bye advance (no real opponent was beaten). Mirrors the H2H Giant Slayer's headline concept with a seed-based threshold instead of an average-based one, and uses its own `badgeId` (`tournament_giant_slayer`) rather than the H2H `giantslayer` row, since the two trigger mechanics don't share a meaning. **Once-badge.** |
+| 🏆 **Champion** | Awarded to the winning player exactly where `_completeTournament()` sets `tournaments.champion_id` — the single-elim final, or the double-elim grand final / reset decider. **Once-badge.** |
+| ⚔️ **Giant Slayer (Tournament)** | On any real (non-bye) tournament match result — awarded by `_maybeAwardTournamentGiantSlayer()` per match, so a double-elim winners-bracket upset counts even though that loser only drops to the losers bracket: `winner's tournament_players.seed - loser's seed >= 3` (`TOURNAMENT_GIANT_SLAYER_SEED_THRESHOLD`) — the winner was seeded at least 3 slots worse than the opponent they beat. (In the grand final it's awarded only on the decisive result, never on a game-one loss that triggers a reset, so a reset can't double-count one conquest.) Uses its own `badgeId` (`tournament_giant_slayer`) rather than the H2H `giantslayer` row. **Once-badge.** |
 
 **Daily Challenge badges** (checked in `checkChallengeBadges(playerName)`,
 `frontend/index.html` — called right after every `/api/challenges/complete`
@@ -3194,7 +3194,7 @@ already-migrated database is a safe no-op).
 | `completed` | `INTEGER NOT NULL DEFAULT 0` | |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 
-### Tournament mode (`docs/tournament-mode-roadmap.md`, single-elimination only — see §15)
+### Tournament mode (`docs/tournament-mode-roadmap.md`, single- and double-elimination — see §15)
 
 **`tournaments`**
 | Column | Type | Notes |
@@ -3202,7 +3202,7 @@ already-migrated database is a safe no-op).
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
 | `name` | `TEXT NOT NULL` | |
 | `category` | `TEXT NOT NULL` | X01 starting score as a string: `'501'`\|`'301'`\|`'170'`\|`'101'` — every match in the tournament uses this same format |
-| `bracket_type` | `TEXT NOT NULL DEFAULT 'single_elim' CHECK (IN ('single_elim','double_elim'))` | Always `'single_elim'` today — the column exists so a future double-elimination pass (tracked separately, not yet started) needs no migration |
+| `bracket_type` | `TEXT NOT NULL DEFAULT 'single_elim' CHECK (IN ('single_elim','double_elim'))` | `'single_elim'` or `'double_elim'` — chosen at creation (§15). Double-elim is restricted to exact powers of two (4/8/16/32/64/128) |
 | `player_count` | `INTEGER NOT NULL` | Frozen at creation |
 | `status` | `TEXT NOT NULL DEFAULT 'in_progress' CHECK (IN ('in_progress','completed'))` | |
 | `champion_id` / `runner_up_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | Set together, atomically, the instant the final resolves |
@@ -3221,7 +3221,7 @@ already-migrated database is a safe no-op).
 |---|---|---|
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
 | `tournament_id` | `INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE` | |
-| `bracket` | `TEXT NOT NULL DEFAULT 'winners' CHECK (IN ('winners','losers','grand_final'))` | Always `'winners'` today (no losers bracket in single-elim) |
+| `bracket` | `TEXT NOT NULL DEFAULT 'winners' CHECK (IN ('winners','losers','grand_final'))` | `'winners'` for every single-elim round; a double-elim tournament also has `'losers'` rounds and two `'grand_final'` rounds (the final and its reset decider) |
 | `round_no` | `INTEGER NOT NULL` | 1-based, earliest round first |
 | `label` | `TEXT NOT NULL` | `"Quarterfinal"`/`"Semifinal"`/`"Final"`/`"Round N"` — computed once at creation, not looked up dynamically (see §15) |
 | `legs_per_set` / `sets_per_game` | `INTEGER NOT NULL` | This round's own match format |
@@ -3237,7 +3237,7 @@ already-migrated database is a safe no-op).
 | `game_id` | `INTEGER REFERENCES games(id) ON DELETE SET NULL` | The normal `games` row this match's play created — `NULL` until started, stays `NULL` forever for a walkover |
 | `winner_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | Set once, never changed |
 | `winner_next_match_id` / `winner_next_slot` | `INTEGER` / `INTEGER (1 or 2)` | Where the winner advances to |
-| `loser_next_match_id` / `loser_next_slot` | `INTEGER` / `INTEGER` | Always `NULL` in v1 (single-elim has no losers bracket) — reserved for a future double-elimination pass, per the roadmap doc's original schema design |
+| `loser_next_match_id` / `loser_next_slot` | `INTEGER` / `INTEGER` | Where the loser drops to. `NULL` for single-elim (a loss eliminates) and for double-elim losers-bracket matches (a second loss eliminates); set on double-elim winners-bracket matches so the loser drops into the losers bracket |
 
 A match's **status** (`pending`/`ready`/`in_progress`/`complete`) is derived at read
 time by `getTournament()`, never stored: `winner_id` set → `complete`; else `game_id`
@@ -3412,13 +3412,16 @@ hard connection caps, not a `rateLimit()` bucket.
 
 ## 15. Tournament Mode
 
-`docs/tournament-mode-roadmap.md`. Single-elimination only — double-elimination
-is explicitly deferred (tracked as its own Not-started item on
-`docs/open-roadmap-items.md`; the schema's `winner_next_*`/`loser_next_*`
-pointer-pair design already supports it without a migration, see §13). X01
-only — any of the four starting scores (501/301/170/101). Backend:
-`backend/db.js`'s tournament section. Frontend: `frontend/index.html`'s
-"TOURNAMENT MODE" block, reachable via the **Tournaments** nav button.
+`docs/tournament-mode-roadmap.md`. **Single- AND double-elimination** —
+`tournaments.bracket_type` (`'single_elim'` default | `'double_elim'`) chosen on
+the setup screen. Both share one schema: the `winner_next_*`/`loser_next_*`
+pointer-pair design (§13) makes a losers-bracket drop just "a loser with a
+`loser_next_match_id` instead of `NULL`." X01 only — any of the four starting
+scores (501/301/170/101). Backend: `backend/db.js`'s tournament section.
+Frontend: `frontend/index.html`'s "TOURNAMENT MODE" block, reachable via the
+**Tournaments** nav button. (The only piece still open is the fancier
+winners/losers-**tabbed** visual bracket tree — the current double-elim view is a
+functional grouped-column layout; see "Deliberately out of scope" below.)
 
 ### Design principle: a tournament match IS a normal game
 
@@ -3444,7 +3447,15 @@ screen offers three seeding methods, all computed in `frontend/index.html`:
 
 ### Bracket generation (`createTournament()`, `backend/db.js`)
 
-Given N players and `bracketSize` = the smallest power of two ≥ N:
+`createTournament({name, category, players, rounds, bracketType})` dispatches to
+`_generateSingleElimBracket()` or `_generateDoubleElimBracket()` on
+`bracketType`. Both take the seed-ordered `players` and the per-round
+`rounds` format array; the expected `rounds` length is the round count for that
+bracket shape (single: `log2(bracketSize)`; double:
+`doubleElimStructure(k).length`), validated up-front.
+
+**Single-elimination** — given N players and `bracketSize` = the smallest power of
+two ≥ N:
 
 - **Standard tournament seeding placement** (`_bracketSeedOrder()`): recursively
   expands `[1,2]` → `[1,4,2,3]` → `[1,8,4,5,2,7,3,6]` → ..., pairing each
@@ -3471,6 +3482,31 @@ Given N players and `bracketSize` = the smallest power of two ≥ N:
   `"Quarterfinal"`, else `"Round N"` — and stored on `tournament_rounds.label`,
   not recomputed on read.
 
+**Double-elimination** — v1 is restricted to exact powers of two (4/8/16/32/64/128,
+`TOURNAMENT_DOUBLE_ELIM_COUNTS`), the deliberate de-risking from the roadmap's §2:
+with an exact power of two there are **zero byes**, so the losers bracket has no
+cascading-bye problem to solve. The round plan comes from
+`doubleElimStructure(k)` in `frontend/scoring.js` (shared with the frontend's
+per-round format table so counts/labels can never drift): `k` winners rounds
+(match counts N/2, N/4, …, 1), then `2k−2` losers rounds alternating a **minor**
+round (LB survivors pair off) and a **major/drop** round (that round's
+winners-bracket losers enter), then the **Grand Final** and its conditional
+**Grand Final (Reset)** decider — `3k` rounds and `2N−1` matches total (the
+reset only ever gets played out when the reset condition is met).
+`_generateDoubleElimBracket()` creates every round/match up-front, then wires the
+pointer pairs in a second UPDATE pass:
+  - Winners winners advance normally; the winners-final winner → Grand Final slot 1.
+  - Winners-round-1 losers pair into losers round 1; each later winners round `i`
+    (≥2) drops its losers into losers round `2(i−1)` slot 2 (`loser_next_*`).
+  - Losers minor rounds feed the next drop round 1:1 (slot 1); drop rounds pair
+    their winners into the next minor round; the **losers final** winner → Grand
+    Final slot 2.
+  So by construction Grand Final slot 1 is always the winners-bracket champion and
+  slot 2 the losers-bracket champion. (Anti-rematch losers-bracket seeding — the
+  optional refinement that reorders which LB survivors meet — is a deliberate v1
+  simplification: the bracket is a valid, fully-playable pairing, just not the
+  rematch-minimizing one.)
+
 ### Match lifecycle
 
 1. **`startTournamentMatch(matchId)`**: validates the match is `ready` (both
@@ -3481,11 +3517,22 @@ Given N players and `bracketSize` = the smallest power of two ≥ N:
 2. **On completion**: an `onGameCompleted` hook (registered once at module
    load — see §1's "Game-lifecycle hooks") checks whether the finished game's
    id matches a `tournament_matches.game_id`; if so it calls
-   `_advanceTournamentMatch(matchId, winnerId)`, which records the winner,
-   marks the loser `eliminated` in `tournament_players`, and either fills the
-   winner into `winner_next_match_id`'s slot or — if there is no next match
-   (this was the final) — sets `tournaments.champion_id`/`runner_up_id`/
-   `status='completed'`/`completed_at` and marks the winner `champion`.
+   `_advanceTournamentMatch(matchId, winnerId)`, which records the winner and then:
+   the **loser** drops into `loser_next_match_id`'s slot if set (a
+   double-elimination winners-bracket loss) or is marked `eliminated` in
+   `tournament_players` if not (single-elim, or a losers-bracket loss); the
+   **winner** fills `winner_next_match_id`'s slot, or — if there is no next match
+   (a single-elim final) — the tournament completes via `_completeTournament()`
+   (sets `champion_id`/`runner_up_id`/`status='completed'`/`completed_at`, marks
+   the winner `champion`). **Giant Slayer** (§7) is awarded per real (non-bye)
+   match by `_maybeAwardTournamentGiantSlayer()`, so a winners-bracket upset still
+   counts even though that loser only drops rather than being eliminated.
+   The **grand final** is settled separately by `_resolveGrandFinal()` (a plain
+   "no next match → complete" rule can't express the conditional decider): if the
+   winners-bracket champion (slot 1) wins game one the tournament ends; if the
+   losers-bracket champion (slot 2) wins game one, both hold exactly one loss, so
+   the pre-created **reset** match is populated with the same two finalists and
+   becomes `ready` — the tournament only completes once that decider resolves.
    `_advanceTournamentMatch()` **guards** before doing any of that
    (`docs/bug-roadmap.md` BUG-4): it silently returns if the match already has a
    `winner_id` (a replayed/forged completion can't overwrite a decided match) or
@@ -3531,13 +3578,32 @@ Given N players and `bracketSize` = the smallest power of two ≥ N:
   `in_progress`/`complete`) is always icon + text label together
   (`TOURNEY_STATUS_ICON`/`TOURNEY_STATUS_LABEL`), never color alone.
 
+### Frontend: double-elimination setup and bracket view
+
+- **Setup** (`renderTournamentSetup()`): a Single/Double-elimination toggle
+  (`setTournamentBracketType()`). Double-elim blocks Create with an explanatory
+  note unless the selected count is one of `TOURNAMENT_DOUBLE_ELIM_COUNTS`
+  (4/8/16/32/64/128). The per-round format table derives its rows and labels from
+  `tournamentRoundPlan()`, which for double-elim calls the **same**
+  `doubleElimStructure()` the backend generates from.
+- **Bracket view** (`renderTournamentDetail()`): matches are grouped into
+  per-round columns and those columns grouped by bracket, with a **Winners
+  Bracket / Losers Bracket / Grand Final** subheading per group when more than one
+  bracket is present. Single-elim (only the winners bracket) renders exactly as
+  before, with no subheadings. The linearized "Full bracket (list view)" and "Up
+  Next" lists work unchanged for both.
+
 ### Deliberately out of scope for this pass
 
-- **Double-elimination** — schema supports it (§13), generation/advancement
-  logic doesn't exist yet. Tracked separately on `docs/open-roadmap-items.md`.
-- **A "Practice this" style deep link or bracket-tree drag/zoom** — not
-  requested; the simple column layout was sufficient for single-elimination's
-  much shallower tree (no winners/losers split to manage).
+- **A winners/losers-**tabbed** visual bracket tree** — the roadmap's build-order
+  step 3, tracked as its own separate open item on `docs/open-roadmap-items.md`.
+  The shipped double-elim bracket view is a functional grouped-column layout
+  (above); the deeper procedurally-drawn tree with bracket tabs (and the
+  accessibility revisit its ~19-round depth at 128 players will need) is the
+  still-open piece.
+- **Anti-rematch losers-bracket seeding** — the pairing is valid and fully
+  playable but not rematch-minimizing (see generation above).
+- **A "Practice this" style deep link or bracket-tree drag/zoom** — not requested.
 
 ### Tournament badges and Player Profile stats (§7-8, built)
 
@@ -4558,9 +4624,11 @@ already-shipped limitations, not just unbuilt future features:
   such game, `previousWinner` still reports one of the two named players. Only reaches
   the Rematch/Grudge badges, which the controller evaluates for 2-player matches only,
   so it's latent in practice.
-- **Double-elimination tournaments aren't built** — single-elimination only
-  (§15); the schema already supports double-elim without a migration, but the
-  generation/advancement logic doesn't exist yet. Tracked as its own item on
+- **Double-elimination's fancier bracket tree isn't built** — double-elimination
+  generation, advancement, the grand-final/reset logic, and a functional
+  grouped-column bracket view all ship (§15); the one remaining piece is the
+  procedurally-drawn winners/losers-**tabbed** visual tree (the roadmap's
+  build-order step 3), tracked as its own open item on
   `docs/open-roadmap-items.md`.
 - See the individual `docs/*.md` files for full design detail on every other
   not-yet-built feature (league mode, Baseball/other game-mode variants,

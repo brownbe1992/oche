@@ -5397,19 +5397,41 @@ function tournamentRoundLabel(roundNo, roundCount){
   if(fromFinal===2) return 'Quarterfinal';
   return `Round ${roundNo}`;
 }
-// Sensible default: best-of-3 legs every round, stepping up to best-of-5 in the
-// final — the admin can edit any of these before creating the bracket.
-function defaultTournamentRounds(n){
+// docs/tournament-mode-roadmap.md §2: double-elimination is v1-restricted to exact
+// powers of two (matches the backend's TOURNAMENT_DOUBLE_ELIM_COUNTS).
+const TOURNAMENT_DOUBLE_ELIM_COUNTS = [4, 8, 16, 32, 64, 128];
+function tournamentIsValidDoubleElimCount(n){ return TOURNAMENT_DOUBLE_ELIM_COUNTS.includes(n); }
+// The ordered per-round plan the format table needs, as [{label}, ...]. Single-elim
+// derives it from the round count; double-elim reuses the SAME doubleElimStructure()
+// the backend generates from (frontend/scoring.js), so the round order/count/labels
+// can never drift between the two.
+function tournamentRoundPlan(bracketType, n){
+  if(bracketType === 'double_elim'){
+    return doubleElimStructure(Math.log2(tournamentNextPow2(Math.max(n,2))));
+  }
   const count = tournamentRoundCount(n);
+  return Array.from({length:count}, (_,i)=>({ label: tournamentRoundLabel(i+1, count) }));
+}
+// Sensible default: best-of-3 legs every round, stepping up to best-of-5 in the
+// last round (single-elim's final, or double-elim's reset decider) — the admin can
+// edit any of these before creating the bracket.
+function defaultTournamentRounds(n, bracketType){
+  const count = tournamentRoundPlan(bracketType, n).length;
   return Array.from({length:count}, (_,i)=>({ legsPerSet: i===count-1?5:3, setsPerGame:1 }));
 }
 
 function renderTournamentSetup(){
-  if(!tournamentSetup) tournamentSetup = { name:'', category:'501', selected:[], seedMethod:'random', rounds:[], avgByName:null };
+  if(!tournamentSetup) tournamentSetup = { name:'', category:'501', selected:[], seedMethod:'random', rounds:[], avgByName:null, bracketType:'single_elim' };
   const ts = tournamentSetup;
+  if(!ts.bracketType) ts.bracketType = 'single_elim';
   const n = ts.selected.length;
-  const canBuild = n >= 2;
-  if(canBuild && ts.rounds.length !== tournamentRoundCount(n)) ts.rounds = defaultTournamentRounds(n);
+  // Single-elim accepts any 2+ players; double-elim is restricted to exact powers
+  // of two (docs/tournament-mode-roadmap.md §2), so a non-conforming count blocks
+  // Create with an explanatory note rather than silently generating a broken bracket.
+  const doubleElimCountOk = ts.bracketType !== 'double_elim' || tournamentIsValidDoubleElimCount(n);
+  const canBuild = n >= 2 && doubleElimCountOk;
+  const expectedRounds = tournamentRoundPlan(ts.bracketType, n).length;
+  if(canBuild && ts.rounds.length !== expectedRounds) ts.rounds = defaultTournamentRounds(n, ts.bracketType);
 
   const checklist = roster.map(name=>{
     const checked = ts.selected.includes(name);
@@ -5429,8 +5451,17 @@ function renderTournamentSetup(){
     <select class="date-input" id="tourney-category" style="width:auto;margin-bottom:14px" onchange="tournamentSetup.category=this.value">
       ${['501','301','170','101'].map(c=>`<option value="${c}"${ts.category===c?' selected':''}>${c}</option>`).join('')}
     </select>
+    <label class="field">Bracket</label>
+    <div class="seg out-seg" role="group" aria-label="Bracket type" style="margin-bottom:6px">
+      <button type="button" aria-pressed="${ts.bracketType==='single_elim'}" onclick="setTournamentBracketType('single_elim')">Single elimination</button>
+      <button type="button" aria-pressed="${ts.bracketType==='double_elim'}" onclick="setTournamentBracketType('double_elim')">Double elimination</button>
+    </div>
+    <p class="pp-meta" style="margin:0 0 14px">${ts.bracketType==='double_elim'
+      ? 'Every player gets a second life in the losers bracket; a loss only eliminates you the second time. Requires exactly 4, 8, 16, 32, 64, or 128 players.'
+      : 'One loss and you\'re out. Any number of players (2+); byes fill an uneven bracket.'}</p>
     <label class="field">Players (${n} selected)</label>
     <div class="roster-list" style="margin-bottom:14px">${checklist || '<div class="empty">No players yet — add some from the Players tab first.</div>'}</div>
+    ${(n >= 2 && !doubleElimCountOk) ? `<p class="pp-meta" style="color:var(--warn,#e0a800);margin-bottom:12px">Double elimination needs exactly ${TOURNAMENT_DOUBLE_ELIM_COUNTS.join(', ')} players — ${n} selected. Adjust the roster, or switch to single elimination.</p>` : ''}
     ${canBuild ? `
     <label class="field">Seeding</label>
     <div class="seg out-seg" role="group" aria-label="Seeding method" style="margin-bottom:10px">
@@ -5452,6 +5483,11 @@ function toggleTournamentPlayer(name, checked){
   if(checked){ if(!ts.selected.includes(name)) ts.selected.push(name); }
   else { ts.selected = ts.selected.filter(n=>n!==name); }
   ts.avgByName = null;   // stale once the player set changes
+  renderTournamentSetup();
+}
+function setTournamentBracketType(type){
+  tournamentSetup.bracketType = (type === 'double_elim') ? 'double_elim' : 'single_elim';
+  tournamentSetup.rounds = [];   // round plan differs by bracket type — rebuilt on re-render
   renderTournamentSetup();
 }
 function setTournamentSeedMethod(method){
@@ -5510,11 +5546,11 @@ function moveTournamentSeed(i, dir){
 }
 function renderTournamentRoundsTable(){
   const ts = tournamentSetup;
-  const count = ts.rounds.length;
+  const plan = tournamentRoundPlan(ts.bracketType, ts.selected.length);
   const rows = ts.rounds.map((r,i)=>{
-    const label = tournamentRoundLabel(i+1, count);
+    const label = (plan[i] && plan[i].label) || `Round ${i+1}`;
     return `<div class="da-row">
-      <span class="da-label" style="flex:1;font-size:13px">${label}</span>
+      <span class="da-label" style="flex:1;font-size:13px">${escapeHtml(label)}</span>
       <label class="pp-meta" style="margin-right:4px">Legs</label>
       <input type="number" min="1" max="15" value="${r.legsPerSet}" style="width:48px" onchange="setTournamentRoundField(${i},'legsPerSet',this.value)">
       <label class="pp-meta" style="margin:0 4px">Sets</label>
@@ -5531,7 +5567,7 @@ function submitTournamentSetup(){
   const name = (ts.name||'').trim();
   if(!name){ uiAlert('Enter a tournament name.'); return; }
   if(ts.selected.length < 2){ uiAlert('Select at least 2 players.'); return; }
-  Backend.send('POST', '/api/tournaments', { name, category: ts.category, players: ts.selected, rounds: ts.rounds })
+  Backend.send('POST', '/api/tournaments', { name, category: ts.category, players: ts.selected, rounds: ts.rounds, bracketType: ts.bracketType || 'single_elim' })
     .then(r=>{
       tournamentSetup = null;
       currentTournamentId = r.tournamentId;
@@ -5577,26 +5613,40 @@ function renderTournamentDetail(t){
       <button class="btn btn-ghost" onclick="askTournamentWalkover(${m.id}, '${escapeHtml(escapeJs(m.player1Name))}', '${escapeHtml(escapeJs(m.player2Name))}')">Walkover</button>
     </div>`).join('') : `<p class="pp-meta">Nothing ready to play right now.</p>`;
 
-  const rounds = {};
-  t.matches.forEach(m=>{ (rounds[m.round_no] = rounds[m.round_no] || []).push(m); });
-  const roundNos = Object.keys(rounds).map(Number).sort((a,b)=>a-b);
-  const bracketHtml = `<div class="tourney-bracket">${roundNos.map(rn=>{
-    const ms = rounds[rn].slice().sort((a,b)=>a.slot-b.slot);
-    return `<div class="tourney-round-col">
-      <div class="pp-section-title">${escapeHtml(ms[0].label)}</div>
-      ${ms.map(tournamentMatchCardHtml).join('')}
-    </div>`;
-  }).join('')}</div>`;
+  // Group matches into per-round columns, then group those columns by bracket
+  // (winners / losers / grand final). Single-elimination has only the winners
+  // bracket, so it renders exactly as before — no bracket subheadings. A
+  // double-elimination bracket adds a labeled section per bracket
+  // (docs/tournament-mode-roadmap.md §2/§4 — a functional grouped-column view; the
+  // fancier winners/losers-tab tree is tracked as its own separate open item).
+  const roundColumns = (matches)=>{
+    const rounds = {};
+    matches.forEach(m=>{ (rounds[m.round_no] = rounds[m.round_no] || []).push(m); });
+    return Object.keys(rounds).map(Number).sort((a,b)=>a-b).map(rn=>{
+      const ms = rounds[rn].slice().sort((a,b)=>a.slot-b.slot);
+      return `<div class="tourney-round-col"><div class="pp-section-title">${escapeHtml(ms[0].label)}</div>${ms.map(tournamentMatchCardHtml).join('')}</div>`;
+    }).join('');
+  };
+  const BRACKET_ORDER = ['winners','losers','grand_final'];
+  const BRACKET_LABEL = { winners:'Winners Bracket', losers:'Losers Bracket', grand_final:'Grand Final' };
+  const bracketsPresent = BRACKET_ORDER.filter(b => t.matches.some(m => (m.bracket||'winners')===b));
+  const isMultiBracket = bracketsPresent.length > 1;
+  const bracketHtml = bracketsPresent.map(b=>{
+    const bm = t.matches.filter(m => (m.bracket||'winners')===b);
+    const heading = isMultiBracket ? `<div class="pp-section-title" style="margin-top:8px">${BRACKET_LABEL[b]}</div>` : '';
+    return `${heading}<div class="tourney-bracket">${roundColumns(bm)}</div>`;
+  }).join('');
 
   // Linearized "who plays whom next" text list — the bracket tree above is a
   // spatial/visual layout with no non-visual equivalent of its own, so this list
   // (plus the Up Next list above it) is what a screen-reader user actually
   // follows the tournament through, per docs/accessibility-roadmap.md's standing
   // checklist on not relying on a spatial UI as the only way to understand state.
+  const orderedMatches = t.matches.slice().sort((a,b)=> (a.round_no-b.round_no) || (a.slot-b.slot));
   const linearHtml = `<details style="margin-top:12px"><summary class="pp-section-title">Full bracket (list view)</summary>
-    <div class="da-list">${roundNos.map(rn=>rounds[rn].slice().sort((a,b)=>a.slot-b.slot).map(m=>
+    <div class="da-list">${orderedMatches.map(m=>
       `<div class="da-row"><span class="da-label" style="flex:1;font-size:13px">${escapeHtml(m.label)}: ${escapeHtml(m.player1Name||'TBD')} vs ${escapeHtml(m.player2Name||'TBD')}${m.winnerName?` — winner: ${escapeHtml(m.winnerName)}`:''}</span></div>`
-    ).join('')).join('')}</div>
+    ).join('')}</div>
   </details>`;
 
   const header = t.status==='completed'

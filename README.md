@@ -935,33 +935,40 @@ selected for a game until barrel, shaft, and flight are all filled in.
 
 ### Tournaments
 
-Single-elimination brackets, any X01 format (501/301/170/101) — built on top of the
-existing scoring engine, not a parallel one: a tournament match is a normal H2H game
-under the hood, so PINs, checkout hints, undo, the live scoreboard, and every stat
-keep working exactly as they do outside a tournament.
+Single- **and** double-elimination brackets, any X01 format (501/301/170/101) —
+built on top of the existing scoring engine, not a parallel one: a tournament match
+is a normal H2H game under the hood, so PINs, checkout hints, undo, the live
+scoreboard, and every stat keep working exactly as they do outside a tournament.
 
 **Creating a bracket** — from the **Tournaments** nav button: name it, pick an X01
-format, check off who's playing, choose a seeding method, then set the match format
-(legs/sets) for each round before generating:
+format, choose **Single** or **Double elimination**, check off who's playing, choose
+a seeding method, then set the match format (legs/sets) for each round before
+generating:
 
 - **Random** — a shuffle of the selected players, same as the New Game screen's own 🔀 Shuffle.
 - **Manual order** — reorder the selected players yourself (▲/▼) before generating.
 - **By 3-dart average** — seeds by each player's existing lifetime average, best first; a player with no recorded legs yet is seeded last rather than treated as a last-place average.
 
-Any player count works — the bracket pads to the next power of two with byes,
-which auto-advance immediately (including cascading: a later round can already be
-fully set once two separate byes have resolved into it, with neither of those
-first-round "matches" ever actually played).
+For **single elimination**, any player count works — the bracket pads to the next
+power of two with byes, which auto-advance immediately (including cascading: a later
+round can already be fully set once two separate byes have resolved into it, with
+neither of those first-round "matches" ever actually played). **Double elimination**
+gives every player a second life in a losers bracket (a first loss only drops you
+there; a second loss knocks you out) and requires exactly 4, 8, 16, 32, 64, or 128
+players — the setup screen enforces that. Its grand final can trigger a **bracket
+reset**: if the losers-bracket finalist wins the first grand-final game, both
+players have one loss each and a single decider game settles it.
 
 **Playing it out** — the bracket screen has an **Up Next** list of every match
 that's ready to play, each with a **Start** button that drops straight into the
 normal scoring screen for those two players, and a **Walkover** button for
 recording a result without playing it out (also the recovery path if a match was
 started and abandoned via End Game — tournament matches can't just be left
-unfinished, since the bracket depends on a real result to advance). A visual
-bracket tree shows the whole tournament at a glance, with a linearized list view
-underneath it for anyone who'd rather read than scan the tree. The champion and
-runner-up are shown once the final resolves.
+unfinished, since the bracket depends on a real result to advance). A bracket view
+shows the whole tournament at a glance — for double elimination it's grouped into
+Winners / Losers / Grand Final sections — with a linearized list view underneath it
+for anyone who'd rather read than scan the columns. The champion and runner-up are
+shown once the final resolves.
 
 **Badges** — winning the whole bracket earns 🏆 **Champion**; beating an
 opponent seeded 3 or more slots better than you earns ⚔️ **Giant Slayer
@@ -971,8 +978,9 @@ opponent seeded 3 or more slots better than you earns ⚔️ **Giant Slayer
 runner-up finishes, best finish reached) shows on each player's profile
 alongside their H2H stats.
 
-**Double-elimination isn't built** — single-elimination only for now; see
-`REFERENCE.md` for the deferred design.
+**Still to come** — the only unbuilt piece is a fancier winners/losers-**tabbed**
+visual bracket tree; double-elimination currently uses the grouped-column view
+described above. See `REFERENCE.md` §15 for full mechanics.
 
 ---
 
