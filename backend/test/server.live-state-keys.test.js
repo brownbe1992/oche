@@ -53,7 +53,9 @@ async function withServer(port, fn) {
 }
 
 test('sanitizeLiveState preserves the Shanghai/Halve-It/Pressure Chamber /display fields (BUG-28)', async () => {
-  const port = 34110;
+  // Fixed port in the same 84xx block the other server-spawn tests reserve, so parallel
+  // `node --test` runs never collide (next free slot after 8496 in db.turn-consistency-guard).
+  const port = 8497;
   await withServer(port, async () => {
     const payload = {
       active: true,

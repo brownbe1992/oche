@@ -98,4 +98,46 @@ describe('BUG-29 — H2H per-category legs/sets credit the real per-leg winner',
     assert.equal(stats[E].h2hLegsWonByCat['501'], 1, 'the checkout player wins the leg');
     assert.equal(stats[F].h2hLegsWonByCat['501'], undefined, 'the non-checkout player wins none');
   });
+
+  test('Shanghai H2H decided on points (no instant Shanghai) credits the higher-total player', () => {
+    const G = 'SH_G', H = 'SH_H';
+    db.addPlayer(G); db.addPlayer(H);
+    const g = db.createGame({
+      category: 'Shanghai', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'shanghai', players: [{ name: G }, { name: H }],
+    });
+    // No leg_won=1 anywhere (no instant Shanghai) — the leg is decided purely by final
+    // totals, the exact under-count case the old checkout=1/leg_won=1 heuristic scored 0.
+    const shTurn = (player, round, scored) => db.addTurn(g.gameId, {
+      player, set: 1, leg: 1, scored, bust: false, checkout: false, legWon: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: round, multiplier: 1 }],
+    });
+    for (let r = 1; r <= 3; r++) { shTurn(G, r, 20); shTurn(H, r, 5); }
+    db.completeGame(g.gameId, G);
+
+    const stats = db.computeStats();
+    assert.equal(stats[G].h2hLegsWonByCat['Shanghai'], 1, 'the higher-total player wins the points-decided leg');
+    assert.equal(stats[H].h2hLegsWonByCat['Shanghai'], undefined, 'the loser wins none');
+  });
+
+  test('a set is won only once ≥ legs_per_set of its legs are taken (legs_per_set > 1)', () => {
+    const I = 'SET_I', J = 'SET_J';
+    db.addPlayer(I); db.addPlayer(J);
+    const g = db.createGame({
+      category: '501', legsPerSet: 2, setsPerGame: 1, practice: 0, players: [{ name: I }, { name: J }],
+    });
+    // I wins both legs of set 1 (two checkouts) → 2 legs, which meets legs_per_set=2 → 1 set.
+    for (const leg of [1, 2]) {
+      db.addTurn(g.gameId, { player: I, set: 1, leg, scored: 40, bust: false, checkout: true, checkoutPoints: 40,
+        darts: [{ dartNo: 1, sector: 20, multiplier: 2 }] });
+      db.addTurn(g.gameId, { player: J, set: 1, leg, scored: 20, bust: false, checkout: false, checkoutPoints: null,
+        darts: [{ dartNo: 1, sector: 20, multiplier: 1 }] });
+    }
+    db.completeGame(g.gameId, I);
+
+    const stats = db.computeStats();
+    assert.equal(stats[I].h2hLegsWonByCat['501'], 2, 'both legs credited');
+    assert.equal(stats[I].h2hSetsWonByCat['501'], 1, 'two won legs meet legs_per_set=2 → exactly one set');
+    assert.equal(stats[J].h2hSetsWonByCat['501'], undefined, 'the loser took no set');
+  });
 });
