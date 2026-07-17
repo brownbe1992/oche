@@ -740,7 +740,7 @@
       <h2 style="font-size:18px;margin-bottom:4px">New game</h2>
       <p class="pp-meta" id="setup-step-label" style="margin:0 0 16px">Step 1 of 3 — Who's playing?</p>
 
-      <!-- ===== Step 1: Who's playing? (docs/new-game-flow-roadmap.md) =====
+      <!-- ===== Step 1: Who's playing? (docs/archive/new-game-flow-roadmap.md) =====
            A select → "Add someone else?" loop, not the old always-visible-rows
            list — renderPlayers() (unchanged name, rewritten body) drives this. -->
       <div id="setup-step-1">
@@ -1002,7 +1002,7 @@
     </div>
   </section>
 
-  <!-- ============ LEAGUES (docs/league-mode-roadmap.md) ============ -->
+  <!-- ============ LEAGUES (docs/archive/league-mode-roadmap.md) ============ -->
   <section id="screen-league" class="screen">
     <div class="card">
       <div id="league-body"></div>
@@ -1636,9 +1636,9 @@ const DB = {
         // (not null) when unset, matching loadoutId's own convention just above.
         startScore:(meta.playerHandicaps && meta.playerHandicaps[n]) || undefined})),
       practice:meta.practice?1:0, gameType:meta.gameType, config:meta.config,
-      // docs/league-mode-roadmap.md "League fixtures / pending matches": an explicit
+      // docs/archive/league-mode-roadmap.md "League fixtures / pending matches": an explicit
       // choice (New Game's "League Game" entry), not a re-validated hint the way the
-      // old leagueId picker was — see docs/new-game-flow-roadmap.md.
+      // old leagueId picker was — see docs/archive/new-game-flow-roadmap.md.
       leagueFixtureId:meta.leagueFixtureId}); this.gameId=r.gameId;
       // Killer (docs/archive/game-modes-roadmap.md "Killer"): the server assigns
       // each player's number randomly at createGame() time (never trusted from
@@ -1852,9 +1852,9 @@ let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, 
   // score to always serve, set only via drillCheckout(); null means "no pin,
   // roll normally" — see setMode()'s checkout_trainer branch for how it's applied
   // (and reset) every time this mode is (re)entered.
-  // leagueFixtureId (docs/league-mode-roadmap.md "League fixtures / pending
+  // leagueFixtureId (docs/archive/league-mode-roadmap.md "League fixtures / pending
   // matches"): only ever set via Step 2's "League Game" entry — an EXPLICIT choice,
-  // unlike the old category-based ambiguity picker this superseded (docs/new-game-flow-roadmap.md).
+  // unlike the old category-based ambiguity picker this superseded (docs/archive/new-game-flow-roadmap.md).
   // pendingFixtures: the current player pair's GET /api/leagues/pending-fixture
   // result, fetched once Step 1 completes — [] means "League Game" isn't offered.
   // Both reset to null/[] whenever the setup screen (re)loads.
@@ -2084,7 +2084,7 @@ function showDartBuilder(playerName, backTo){
   show('dart-builder');
 }
 /* =========================================================================
-   DAILY CHALLENGE  (docs/daily-challenge-roadmap.md)
+   DAILY CHALLENGE  (docs/archive/daily-challenge-roadmap.md)
    A pool of genuinely different challenge shapes, picked deterministically by
    date (pure function, no server-side randomness) so the format itself varies
    day to day, not just a number inside the same task shape every time.
@@ -2535,7 +2535,7 @@ function renderHomePulse(){
   const lastGameHtml = lg
     ? `<b style="color:var(--ink)">${escapeHtml(lg.players||'')}</b> · ${escapeHtml(lg.category)} · won by <b style="color:var(--ink)">${escapeHtml(lg.winnerName||'—')}</b><br><span class="pp-meta">${fmtDate(lg.completedAt)}</span>`
     : `<span class="pp-meta">No completed games yet.</span>`;
-  // docs/league-mode-roadmap.md: a lightweight teaser only — name + a link into the
+  // docs/archive/league-mode-roadmap.md: a lightweight teaser only — name + a link into the
   // full Leagues screen, not embedded mini-standings (keeps the Home page diff small
   // and avoids duplicating the standings table's render logic here). Hidden entirely
   // when there are no active leagues, same "don't show an empty section" convention
@@ -3271,7 +3271,7 @@ function drillButtonHtml(jName, score){
 // player picker) — selecting it reuses the same PIN-gated "Choose player" slot the
 // other two modes already use, just capped to a single slot since a challenge is
 // inherently solo.
-// mode/gameType are orthogonal (docs/new-game-flow-roadmap.md): mode picks
+// mode/gameType are orthogonal (docs/archive/new-game-flow-roadmap.md): mode picks
 // H2H/Practice/Daily Challenge/Ghost/Doubles Practice/Just Chuckin' It/Checkout
 // Trainer/Around the Clock/Around the World; gameType (x01/cricket/baseball) only
 // applies when mode is 'h2h' or 'practice'. Every drill mode is reached through
@@ -3880,7 +3880,7 @@ function renderServerErrors(rows){
   }).join('');
 }
 
-/* ---------- Settings -> Backups (docs/backups-roadmap.md v2) ---------- */
+/* ---------- Settings -> Backups (docs/archive/backups-roadmap.md v2) ---------- */
 function formatBytes(n){
   if(n==null) return '—';
   const units=['B','KB','MB','GB']; let v=Number(n), i=0;
@@ -3942,7 +3942,7 @@ function saveBackupRetention(){
 // Restoring is at least as destructive as "Wipe all data" — it replaces the
 // entire live database — so it re-asks for the admin password even though the
 // browser already has an active session, rather than relying on the session
-// alone (docs/backups-roadmap.md v2's confirmed design decision).
+// alone (docs/archive/backups-roadmap.md v2's confirmed design decision).
 function uiPasswordConfirm(msg, onSubmit){
   window.__modalPwSubmit = onSubmit;
   document.getElementById('modal-body').innerHTML=
@@ -4125,7 +4125,7 @@ function sanitizeSlots(){
   if(setup.slots.length===0 && roster.length) setup.slots = [''];
 }
 
-// Step 1 — "Who's playing?" (docs/new-game-flow-roadmap.md): a select → "Add
+// Step 1 — "Who's playing?" (docs/archive/new-game-flow-roadmap.md): a select → "Add
 // someone else?" loop, not the old always-visible-rows list. Every already-filled
 // slot renders as a name row (stat line, loadout pill, remove); the one slot still
 // awaiting a pick (if any) renders as a plain "Choose player" select; once every
@@ -4394,14 +4394,14 @@ function resolveHalveItTargets(){
 }
 
 /* =========================================================================
-   New Game wizard — Step 2 "Choose a game" (docs/new-game-flow-roadmap.md)
+   New Game wizard — Step 2 "Choose a game" (docs/archive/new-game-flow-roadmap.md)
    One flat dropdown replacing the old Mode row + Practice-type sub-toggle +
    X01/Cricket/Baseball toggle, filtered by how many players Step 1 picked.
    ========================================================================= */
 function setupPlayerCount(){ return setup.slots.filter(s=>s).length; }
 
 // contexts: which player counts this entry is offered for ('practice' = exactly
-// 1, 'h2h' = 2+ — see docs/new-game-flow-roadmap.md's table). blurb is the
+// 1, 'h2h' = 2+ — see docs/archive/new-game-flow-roadmap.md's table). blurb is the
 // how-to-play text shown in Step 2 for every entry except Daily Challenge, which
 // renders a live status card instead (renderSetupChallengeBlurb()). apply()
 // reuses the existing setMode()/setGameType() handlers exactly as they were —
@@ -4477,12 +4477,12 @@ function currentSetupOptionKey(){
   return setup.mode;
 }
 
-// League Game (docs/league-mode-roadmap.md "League fixtures / pending matches"):
+// League Game (docs/archive/league-mode-roadmap.md "League fixtures / pending matches"):
 // fetched once, right when Step 1 completes with exactly 2 players — see
 // setupGoToStep2(). Injected at the top of the dropdown only when the pair has at
 // least one pending (scheduled-but-unplayed) fixture in a shared active league;
 // absent entirely otherwise, fully replacing the old category-based ambiguity
-// picker this superseded (docs/new-game-flow-roadmap.md).
+// picker this superseded (docs/archive/new-game-flow-roadmap.md).
 function applyLeagueGameSelection(){
   const fixtures = setup.pendingFixtures;
   const chosen = fixtures.find(f=>f.fixtureId===setup.leagueFixtureId) || fixtures[0];
@@ -4505,7 +4505,7 @@ function applyLeagueGameSelection(){
     setCricketVariant('standard');
   } else {
     // X01: the league's category already pins the starting score — no separate
-    // flavor-dropdown question (docs/new-game-flow-roadmap.md "Selecting it").
+    // flavor-dropdown question (docs/archive/new-game-flow-roadmap.md "Selecting it").
     setup.start = Number(chosen.category) || setup.start;
   }
 }
@@ -4524,7 +4524,7 @@ function onSetupFlavorSelect(value){
 
 let _challengeAvailAbort = null;
 // Daily Challenge: the same-day-attempt check runs the moment it's SELECTED here
-// (docs/new-game-flow-roadmap.md "check on selection, not before"), reusing the
+// (docs/archive/new-game-flow-roadmap.md "check on selection, not before"), reusing the
 // same /api/challenges/status call startGame() used to only make at Play Now
 // time. Already attempted today -> a blocking message replaces the blurb and
 // Continue is disabled for this selection; the player can still pick something
@@ -4737,7 +4737,7 @@ function showSetupStep(n){
   const text = SETUP_STEP_LABELS[n] || '';
   if(label) label.textContent = text;
   announce(text);
-  // Focus management (docs/new-game-flow-roadmap.md accessibility): move focus to
+  // Focus management (docs/archive/new-game-flow-roadmap.md accessibility): move focus to
   // each new step's first control, never silently left on a now-hidden one.
   requestAnimationFrame(()=>{
     let target;
@@ -5110,7 +5110,7 @@ async function startGame(){
     category,
     legsPerSet, setsPerGame,
     practice: setup.practice,
-    // docs/league-mode-roadmap.md "League fixtures / pending matches": only ever
+    // docs/archive/league-mode-roadmap.md "League fixtures / pending matches": only ever
     // non-null when the player explicitly picked "League Game" in Step 2 — the
     // server fully validates it (fixture exists, unlinked, pair matches, category
     // matches the league) and REJECTS game creation on any mismatch, unlike a
@@ -5801,7 +5801,7 @@ async function _reallyBeginTournamentMatch(matchId){
   show('game'); renderGame();
 }
 
-/* ---------- leagues (docs/league-mode-roadmap.md, X01 or Cricket) ----------
+/* ---------- leagues (docs/archive/league-mode-roadmap.md, X01 or Cricket) ----------
    Structurally a lighter-weight sibling of the tournament screen just above: same
    list/setup/detail 3-state view machine, same roster-checklist setup pattern —
    but no bracket, no per-round format table, no seeding. Games auto-tag into a
@@ -5827,7 +5827,7 @@ function loadLeagueList(){
 }
 const LEAGUE_STATUS_ICON  = { active:'▶️', ended:'🏁' };
 const LEAGUE_STATUS_LABEL = { active:'Active', ended:'Ended' };
-// League fixtures / pending matches (docs/league-mode-roadmap.md). Status is derived
+// League fixtures / pending matches (docs/archive/league-mode-roadmap.md). Status is derived
 // server-side (getLeagueFixtures()), never stored — see the same icon+text-together
 // convention TOURNEY_STATUS_ICON/LABEL use for tournament matches, so color is never
 // the only signal.
@@ -5855,7 +5855,7 @@ function openLeague(id){ currentLeagueId=id; leagueView='detail'; renderLeagueSc
 function openLeagueSetup(){ leagueSetup=null; leagueView='setup'; renderLeagueScreen(); }
 
 /* ---------- setup ---------- */
-// League game type (docs/league-mode-roadmap.md "Game-type scope") — X01 or Cricket,
+// League game type (docs/archive/league-mode-roadmap.md "Game-type scope") — X01 or Cricket,
 // mirroring the New Game screen's own X01/Cricket toggle in spirit. Cricket leagues
 // reuse the exact two-value games.category label a Cricket H2H game is already
 // tagged with at creation (classic vs. custom target numbers) rather than a numeric
@@ -6279,7 +6279,7 @@ function renderPlayerPage(){
       <div class="pp-section-title">Tournaments</div>
       <div id="player-tournament-stats"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </div>` : '';
-  // League mode is X01 or Cricket (docs/league-mode-roadmap.md) — shown on both tabs.
+  // League mode is X01 or Cricket (docs/archive/league-mode-roadmap.md) — shown on both tabs.
   const leagueStatsSection = (gt==='x01' || gt==='cricket') ? `
     <div class="pp-section">
       <div class="pp-section-title">Leagues</div>
@@ -6744,7 +6744,7 @@ function loadOnThisDay(){
     })
     .catch(()=>{ section.hidden = true; });
 }
-// Daily Challenge history (docs/daily-challenge-roadmap.md "Player Profile: Daily
+// Daily Challenge history (docs/archive/daily-challenge-roadmap.md "Player Profile: Daily
 // Challenge history"): lifetime completion record, best result per format (reusing
 // challengeMetricLabel()/challengeShortLabel() — no new copy to write), and the
 // full attempt-by-attempt log.
@@ -6909,7 +6909,7 @@ function drawEloSparkline(history){
       <circle cx="${pts[n-1].x.toFixed(1)}" cy="${pts[n-1].y.toFixed(1)}" r="3" fill="#d9b46a"/>
     </svg>`;
 }
-// docs/league-mode-roadmap.md: the Player Profile's "Leagues" stat block — every
+// docs/archive/league-mode-roadmap.md: the Player Profile's "Leagues" stat block — every
 // league this player belongs to, plus their current rank/points in each. Same
 // no-op-if-container-missing shape as loadTournamentStats() just above.
 function loadPlayerLeagueStats(){

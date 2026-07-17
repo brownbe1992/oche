@@ -49,7 +49,7 @@ own scoring, leaderboard, and achievements — see its own section further down)
 
 ## How this differs from every existing mode (important — don't conflate)
 
-- **Daily Challenge's "Checkout Sprint" format** (`docs/daily-challenge-roadmap.md`)
+- **Daily Challenge's "Checkout Sprint" format** (`docs/archive/daily-challenge-roadmap.md`)
   sounds similar but tests the opposite skill: the player **physically throws real
   darts** at a real target and the app measures how many it *actually* took them.
   Checkout Trainer never involves a real throw — the player is asked "what **would**

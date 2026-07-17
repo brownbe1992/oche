@@ -55,7 +55,7 @@ whoever picks any of these up doesn't duplicate the others' work:
   natural relationship, not a duplication: this site could be the discovery/lobby layer
   that hands two matched players off to the existing P2P design to actually play,
   rather than reinventing a second live-transport mechanism.
-- **`docs/archive/tournament-mode-roadmap.md`** and **`docs/league-mode-roadmap.md`** are both
+- **`docs/archive/tournament-mode-roadmap.md`** and **`docs/archive/league-mode-roadmap.md`** are both
   explicitly scoped to *one instance's own local roster* — a bracket or a season table
   built from players who all already exist on that one household's Oche. Neither
   currently has any concept of a participant who isn't a local player row. Cross-
@@ -64,7 +64,7 @@ whoever picks any of these up doesn't duplicate the others' work:
   *logic* in both docs is reusable, but the participant model underneath would need to
   grow from "a local `players.id`" to "a local player, or a companion-site account
   playing a matched/remote match," which those two docs don't attempt today.
-- **`docs/daily-challenge-roadmap.md`** already generates the same challenge
+- **`docs/archive/daily-challenge-roadmap.md`** already generates the same challenge
   deterministically from the calendar date alone (`todaysChallenge(dateStr)`) — every
   instance, opted in or not, already computes an identical challenge for a given day
   with zero synchronization needed. That makes it the single easiest global
@@ -255,5 +255,5 @@ kind of system is raising the cost of cheating above the reward, not eliminating
    `docs/online-multiplayer-roadmap.md`'s existing P2P design to actually play, rather
    than building a second live-transport mechanism.
 5. Cross-instance tournaments/leagues, extending `docs/archive/tournament-mode-roadmap.md` and
-   `docs/league-mode-roadmap.md`'s existing bracket/standings logic to a participant
+   `docs/archive/league-mode-roadmap.md`'s existing bracket/standings logic to a participant
    model that includes matched/remote players, per the relationship section above.

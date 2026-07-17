@@ -197,7 +197,7 @@ db.exec(`
     UNIQUE(player_id, badge_id)
   );
 
-  -- Daily Challenge attempts (docs/daily-challenge-roadmap.md). Per the games-context
+  -- Daily Challenge attempts (docs/archive/daily-challenge-roadmap.md). Per the games-context
   -- convention in CLAUDE.md, a challenge attempt links into games via its own table
   -- with a game_id FK rather than a new boolean column on games itself.
   CREATE TABLE IF NOT EXISTS daily_challenge_attempts (
@@ -277,7 +277,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tournament_matches_round ON tournament_matches(round_id);
   CREATE INDEX IF NOT EXISTS idx_tournament_matches_game  ON tournament_matches(game_id);
 
-  -- League mode (docs/league-mode-roadmap.md), X01 only for v1. Unlike tournament mode,
+  -- League mode (docs/archive/league-mode-roadmap.md), X01 only for v1. Unlike tournament mode,
   -- a league game has no bracket position/round/advancement state of its own — it's
   -- just an ordinary casual H2H game that happens to get tagged — so per CLAUDE.md's
   -- "context tables link into games via FK" convention, the link is a direct nullable
@@ -315,7 +315,7 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_league_players_player ON league_players(player_id);
 
-  -- League fixtures / pending matches (docs/league-mode-roadmap.md "League fixtures /
+  -- League fixtures / pending matches (docs/archive/league-mode-roadmap.md "League fixtures /
   -- pending matches"). Unlike a plain league game (tagged after the fact via the
   -- direct games.league_id column above), a fixture is a scheduled-but-maybe-unplayed
   -- pairing that needs to exist BEFORE any game does -- so, per CLAUDE.md's "own table
@@ -539,7 +539,7 @@ try { db.exec('ALTER TABLE games ADD COLUMN player_count INTEGER'); } catch(e) {
 // snapshotted, same reasoning already applied to game_players.dart_weight/out_mode —
 // renaming/deleting a loadout later never rewrites a past game's history.
 try { db.exec('ALTER TABLE game_players ADD COLUMN loadout_id INTEGER REFERENCES loadouts(id) ON DELETE SET NULL'); } catch(e) {}
-// League mode (docs/league-mode-roadmap.md): nullable, set by the onGameCreated
+// League mode (docs/archive/league-mode-roadmap.md): nullable, set by the onGameCreated
 // auto-tag hook below (or left NULL for any game that isn't a tagged league match).
 try { db.exec('ALTER TABLE games ADD COLUMN league_id INTEGER REFERENCES leagues(id) ON DELETE SET NULL'); } catch(e) {}
 // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): a per-player,
@@ -551,7 +551,7 @@ try { db.exec('ALTER TABLE games ADD COLUMN league_id INTEGER REFERENCES leagues
 // exclude handicapped games from the rating walk — see that function's own
 // comment.
 try { db.exec('ALTER TABLE game_players ADD COLUMN start_score INTEGER'); } catch(e) {}
-// League mode Cricket support (docs/league-mode-roadmap.md): a second game type
+// League mode Cricket support (docs/archive/league-mode-roadmap.md): a second game type
 // alongside the original X01-only v1. Defaults to 'x01' for every pre-existing row
 // (and any insert that omits it) so the column is purely additive — no backfill
 // guesswork needed, since every league created before this shipped genuinely was X01.
@@ -783,7 +783,7 @@ function pruneOrphanedGames() {
    of an active competitor in an in-progress bracket, since bracket advancement
    depends on that exact player still existing at a specific slot).
 
-   League mode (docs/league-mode-roadmap.md) deliberately registers NO guard, even
+   League mode (docs/archive/league-mode-roadmap.md) deliberately registers NO guard, even
    though an earlier draft of this comment anticipated one: deleting a league-enrolled
    player cascades away only their own league_players/game_players/turns rows — the
    surviving opponent's game_players row and the game's own winner_id are untouched
@@ -829,7 +829,7 @@ function deletePlayer(name) {
 
    Current 'created' payload: { gameId, gameType, practice, category, playerCount,
    playerIds, leagueId }. playerIds/leagueId were added for league mode's auto-tag
-   hook below (docs/league-mode-roadmap.md) — playerIds is createGame()'s
+   hook below (docs/archive/league-mode-roadmap.md) — playerIds is createGame()'s
    participants in submission order (not deduped); leagueId is whatever the caller
    passed through (unvalidated — each listener validates what it needs).
    Current 'completed' payload: { gameId, winnerName } — used by tournament mode's
@@ -889,7 +889,7 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   }
   const categoryStr = String(category);
   if (categoryStr.length > 64) throw httpError(400, 'category must be 64 characters or fewer');
-  // League fixtures (docs/league-mode-roadmap.md "League fixtures / pending matches"):
+  // League fixtures (docs/archive/league-mode-roadmap.md "League fixtures / pending matches"):
   // unlike leagueId below (a hint the onGameCreated hook re-validates and silently
   // falls through on staleness), choosing a specific fixture is an explicit, not an
   // inferred, choice — so it's fully validated up front and a stale/mismatched one
@@ -1031,7 +1031,7 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   // participantIds (submission order, not deduped — see the player_count freeze below
   // for the deduped count) is threaded into the 'created' hook payload so a listener
   // (currently only league mode's auto-tag hook) can look up "who played this game"
-  // without a second query — see docs/league-mode-roadmap.md.
+  // without a second query — see docs/archive/league-mode-roadmap.md.
   const participantIds = [];
   (players || []).forEach(entry => {
     const out = entry.out === 'single' ? 'single' : 'double';
@@ -1877,7 +1877,7 @@ function getResumeState(gameId) {
   };
 }
 
-/* ---------- daily challenge (docs/daily-challenge-roadmap.md) ---------- */
+/* ---------- daily challenge (docs/archive/daily-challenge-roadmap.md) ---------- */
 // Links a just-started practice game to today's challenge attempt. One attempt per
 // player per calendar date (UNIQUE(player_id, challenge_date)) — a second attempt on
 // the same date fails quietly rather than overwriting the first, since "today's"
@@ -2039,7 +2039,7 @@ function getChallengeStatus(playerName, todayDate) {
 }
 
 // Full lifetime Daily Challenge history for a player's profile
-// (docs/daily-challenge-roadmap.md "Player Profile: Daily Challenge history"):
+// (docs/archive/daily-challenge-roadmap.md "Player Profile: Daily Challenge history"):
 // completion record (Wordle-stats-style: played, completed, current streak,
 // longest-ever streak), best result per format (six separate personal-best lines,
 // not one combined number — mirrors how Personal Bests already separates unrelated
@@ -2611,7 +2611,7 @@ function getHomeExtra() {
     practice: _pace(PRACTICE_WHERE)
   };
 
-  // docs/league-mode-roadmap.md: a small Home-page teaser ("N active leagues, view
+  // docs/archive/league-mode-roadmap.md: a small Home-page teaser ("N active leagues, view
   // standings") piggybacks on this existing payload rather than a new endpoint —
   // just the id/name, not full standings (the Leagues screen fetches those itself).
   const activeLeagues = db.prepare(`SELECT id, name FROM leagues WHERE status = 'active' ORDER BY created_at DESC`).all();
@@ -6421,7 +6421,7 @@ function resetStats() {
 // docs/archive/saved-games-roadmap.md: saved_games is covered twice over too — deleting
 // all players cascades away their games (and with them, CASCADE, saved_games),
 // and the explicit games delete below would clear it independently either way.
-// docs/league-mode-roadmap.md: leagues needs the same explicit delete tournaments
+// docs/archive/league-mode-roadmap.md: leagues needs the same explicit delete tournaments
 // got from BUG-7 — wiping all players cascades away league_players (player_id ON
 // DELETE CASCADE), but nothing references the leagues PARENT row, so without this
 // the league shells (name/category/dates) would survive a total wipe with a now-
@@ -6472,11 +6472,11 @@ function getFullDatabaseExport() {
     // docs/archive/ghost-opponent-roadmap.md: same standing rule — a player's ghost-race
     // win/loss history is ordinary user data with no secrets.
     ghostRaces: db.prepare('SELECT * FROM ghost_races').all(),
-    // docs/league-mode-roadmap.md: same standing rule — leagues/league_players carry
+    // docs/archive/league-mode-roadmap.md: same standing rule — leagues/league_players carry
     // no credential columns, so they belong in "take your data with you" too.
     leagues: db.prepare('SELECT * FROM leagues').all(),
     leaguePlayers: db.prepare('SELECT * FROM league_players').all(),
-    // docs/league-mode-roadmap.md "League fixtures / pending matches": same standing
+    // docs/archive/league-mode-roadmap.md "League fixtures / pending matches": same standing
     // rule as tournament tables above — ordinary user data, no secrets.
     leagueFixtures: db.prepare('SELECT * FROM league_fixtures').all(),
     // docs/archive/player-merge-roadmap.md: merged-away-uuid aliases are ordinary user data
@@ -7360,7 +7360,7 @@ function logout(token) {
 
 // Re-verifies the password of an *already-known* admin (by id, from the current
 // session) without creating a new session — used to gate restoring a database
-// backup (docs/backups-roadmap.md v2), which is at least as destructive as
+// backup (docs/archive/backups-roadmap.md v2), which is at least as destructive as
 // "Wipe all data" and shouldn't rely on an active session alone. Reuses the same
 // login_fail_count/login_locked_until lockout columns and progressive-backoff
 // formula as login() itself, since this is a genuine additional password-guessing
@@ -8059,7 +8059,7 @@ registerDeletePlayerGuard((player) => {
   return row ? `${player.name} is in a saved ${row.category} game — abandon it (or resume and finish it) before deleting.` : null;
 });
 
-/* ---------- league mode (docs/league-mode-roadmap.md, X01 or Cricket) ----------
+/* ---------- league mode (docs/archive/league-mode-roadmap.md, X01 or Cricket) ----------
    A season over which regular casual H2H matches accumulate into a standings table —
    deliberately lighter-weight than tournament mode: any two enrolled players can play
    any casual match any time during the season (no bracket, no pre-determined
@@ -8078,7 +8078,7 @@ const LEAGUE_X01_CATEGORIES = ['501', '301', '170', '101']; // same 4 values as
 // inventing a parallel category vocabulary — 'Cricket (15-20, Bull)' for the classic
 // preset, 'Custom Cricket' for any custom target set (all custom-number games share
 // this one league category; a league doesn't fix the exact target numbers any more
-// than an X01 league fixes legs/sets — see docs/league-mode-roadmap.md).
+// than an X01 league fixes legs/sets — see docs/archive/league-mode-roadmap.md).
 const LEAGUE_CRICKET_CATEGORIES = ['Cricket (15-20, Bull)', 'Custom Cricket'];
 const LEAGUE_GAME_TYPES = ['x01', 'cricket'];
 function _leagueCategoriesFor(gameType) {
@@ -8165,7 +8165,7 @@ function createLeague({ name, gameType, category, startsAt, endsAt, pointsWin, p
   return { leagueId };
 }
 
-// Single round-robin fixture generation (docs/league-mode-roadmap.md "League
+// Single round-robin fixture generation (docs/archive/league-mode-roadmap.md "League
 // fixtures / pending matches" — resolved: single, not double, round-robin for v1).
 // Creates exactly one league_fixtures row per unique pair drawn from newPlayerIds
 // paired against existingPlayerIds AND against each other (never a pair drawn
@@ -8260,7 +8260,7 @@ function getLeagueFixtures(leagueId) {
 }
 
 // Public read the New Game screen calls right after Step 1 (opponent pair picked) —
-// see docs/league-mode-roadmap.md's "New endpoint" section. Unlike getEligibleLeagues()
+// see docs/archive/league-mode-roadmap.md's "New endpoint" section. Unlike getEligibleLeagues()
 // (which needs gameType/category, since it only ever runs after those are already
 // chosen), this needs neither: a fixture already carries them via its own league.
 // Order-independent on the pair, mirroring _findEligibleLeagues(); fails soft to []
@@ -8339,7 +8339,7 @@ function getPlayerLeagueSummary(playerName) {
 }
 
 // Hook: whenever a new game is created, check whether it should be tagged into a
-// league. See docs/league-mode-roadmap.md and the game-lifecycle-hooks doc comment
+// league. See docs/archive/league-mode-roadmap.md and the game-lifecycle-hooks doc comment
 // above for the full payload shape and the "explicit choice is re-validated, not
 // trusted" reasoning. Fires synchronously inside createGame(), before its HTTP
 // response is sent — there's no race between this write and the client seeing the
@@ -8347,9 +8347,9 @@ function getPlayerLeagueSummary(playerName) {
 onGameCreated(({ gameType, practice, category, playerCount, playerIds, leagueId, gameId }) => {
   // League mode is X01 or Cricket, non-practice, exactly 2 players (Doubles
   // Practice/Chuckin/Checkout Trainer are structurally excluded regardless, being
-  // solo/no-winner formats — see docs/league-mode-roadmap.md).
+  // solo/no-winner formats — see docs/archive/league-mode-roadmap.md).
   if ((gameType !== 'x01' && gameType !== 'cricket') || practice || playerCount !== 2 || !Array.isArray(playerIds) || playerIds.length !== 2) return;
-  // A fixture-originated game (docs/league-mode-roadmap.md "League fixtures / pending
+  // A fixture-originated game (docs/archive/league-mode-roadmap.md "League fixtures / pending
   // matches") already had games.league_id set DIRECTLY by createGame(), before this
   // hook fired — that's an explicit, already-resolved choice, so re-running the fuzzy
   // eligibility match here would be redundant at best and could pick a DIFFERENT

@@ -2028,7 +2028,7 @@ function doubleElimStructure(k) {
   return rounds;
 }
 
-// Daily Challenge's curated checkout-target pool (docs/daily-challenge-roadmap.md)
+// Daily Challenge's curated checkout-target pool (docs/archive/daily-challenge-roadmap.md)
 // — Dead Man Walking's own cold-start fallback for a player with too little
 // double-out X01 history for a confident weakness ranking reuses this exact
 // array (docs/archive/dead-man-walking-roadmap.md "Cold start": "reuse existing

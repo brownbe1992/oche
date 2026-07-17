@@ -1,7 +1,8 @@
 # Backups & Disaster Recovery — Design Roadmap
 
-> Status: **v1 ✅ Done** (v0.6.2), **v2 ✅ Done** (2026-07), and **the Compose-profile
-> sidecar stretch goal ✅ Done** (2026-07). `backend/backup.js` implements exactly the
+> Status: **COMPLETE — v1, v2, and the stretch goal are all done, so this doc is now
+> archived.** v1 ✅ Done (v0.6.2), v2 ✅ Done (2026-07), and the Compose-profile
+> sidecar stretch goal ✅ Done (2026-07). `backend/backup.js` implements exactly the
 > v1 design below — verified end-to-end against a real seeded database: backup
 > written, restored from the `.db` file alone (no `-wal`/`-shm` needed), retention
 > pruning tested. README's "Backups" section documents the cron schedule and restore

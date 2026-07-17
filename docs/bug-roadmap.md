@@ -752,7 +752,7 @@ restore) or corrupting the still-live old data before the restart discards it.
    over `DB_PATH` (`fs.renameSync`, same-filesystem so it's atomic), delete the marker,
    and only then proceed to open the (now-restored) database. This guarantees the swap
    only ever happens while nothing holds the file open.
-3. Update the "restart now" message and `docs/backups-roadmap.md` to describe the new
+3. Update the "restart now" message and `docs/archive/backups-roadmap.md` to describe the new
    two-phase behavior (staged now, applied automatically on next start) so it stays
    accurate — this is a behavior change, not just an implementation detail, per
    CLAUDE.md's "keep docs in sync" convention.
@@ -918,7 +918,7 @@ constrained self-hosted hardware (SD card, network-attached storage, a Pi) — N
 keeps buffering unwritten chunks in process memory rather than pausing `req`, so a
 large upload (up to the documented `MAX_BACKUP_UPLOAD_BYTES` = 500MB) can transiently
 hold most or all of itself in memory instead of the small streaming footprint the
-design comment (`docs/backups-roadmap.md v2`, "streams straight to disk... rather than
+design comment (`docs/archive/backups-roadmap.md v2`, "streams straight to disk... rather than
 buffering it as one string") intends. Admin-only route, so this needs a cooperating or
 compromised admin session to trigger — low severity, but a straightforward fix.
 

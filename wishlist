@@ -66,20 +66,20 @@ Others
 - Home Assistant automation recipe book (lights/sounds/notifications) — done, see docs/home-assistant-recipes.md (design rationale archived at docs/archive/ha-recipes-roadmap.md)
 - Colorblind-friendly dartboard palette — done, see docs/archive/colorblind-mode-roadmap.md
 - Accessibility roadmap & standing checklist (aria-live, contrast audit, and more) — full design in docs/accessibility-roadmap.md
-- Backups & disaster recovery for the SQLite database — done (v1), see docs/backups-roadmap.md
+- Backups & disaster recovery for the SQLite database — done (v1, v2 Settings management, and the Compose-profile sidecar), see docs/archive/backups-roadmap.md
 - Security hardening (admin login rate limiting + standing checklist) — done, see docs/security-hardening-roadmap.md
 - Security audit findings (adversarial whole-codebase review: DoS, SSRF/egress, container hardening) — step-by-step fixes in docs/security-audit-roadmap.md
 - Admin login progressive backoff (replace the flat lockout so a real admin can never be fully locked out) — full design in docs/admin-login-backoff-roadmap.md
 - Admin account recovery CLI (reset a forgotten password / clear a stuck lockout without email) — full design in docs/admin-account-recovery-roadmap.md
 - Testing & observability (test coverage + server-side error logging) — done (Part A), see docs/testing-and-observability-roadmap.md
-- League/season mode (standings across casual matches over time) — core done, see docs/league-mode-roadmap.md; league fixtures/pending matches still open
+- League/season mode (standings across casual matches over time) — fully done, including Cricket league support and league fixtures/pending matches with the New Game "League Game" one-tap start, see docs/archive/league-mode-roadmap.md
 - Dart Builder (custom loadout screen for barrel/shaft/flight components, saved loadouts, New Game "Change Loadout" picker, per-loadout stats, loadout comparison view, barrel/flight shape+grip icons, quick-add-full-set) — done; optional photo upload per component was considered and dropped, see docs/archive/dart-builder-roadmap.md
-- Daily/weekly solo challenge — done (core) plus badges/its own Profile tab, see docs/daily-challenge-roadmap.md
+- Daily/weekly solo challenge — done (core) plus badges/its own Profile tab, see docs/archive/daily-challenge-roadmap.md
 - Ghost opponent (practice against a replay of your own past leg) — done (X01 only): race feature, win/loss tracking, and the "Ghost Slayer" first-win badge, see docs/archive/ghost-opponent-roadmap.md
 - Companion website (cloud stat reporting, matchmaking, cross-instance tournaments/leagues, global leaderboards including Daily Challenge) — full design in docs/companion-website-roadmap.md
 - Checkout Trainer (no-dartboard mental drill: given a target score, enter the fewest-darts checkout from memory, graded instantly — a checkout calculator, not a throwing game; untimed Freeform mode plus a 60-second Checkout Blitz sprint mode with its own leaderboard; laddered achievements for both; no live scoreboard needed) — done, all of it: difficulty tiers and the trick-question/💣 Bogey Buster variant included, see docs/archive/checkout-trainer-roadmap.md
 - Prep work to reduce future rework across all roadmap items — done, see docs/archive/existing-app-prep-roadmap.md; docs/open-roadmap-items.md is now the central tracker for all open roadmap items
-- New Game page revamp (less-crowded, step-by-step Who's playing?/Choose a game/More options flow, replacing the current all-controls-visible setup screen) — full design in docs/new-game-flow-roadmap.md
+- New Game page revamp (less-crowded, step-by-step Who's playing?/Choose a game/More options flow, replacing the current all-controls-visible setup screen) — done, see docs/archive/new-game-flow-roadmap.md
 
 
 Fixes:

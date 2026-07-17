@@ -1,7 +1,10 @@
 # League / Season Mode — Design Roadmap
 
-> Status (2026-07): **Core league mode is fully built and playable
-> end-to-end** — schema (`leagues`/`league_players`, plus a nullable
+> Status (2026-07): **COMPLETE — every piece of this doc is built, so it is now
+> archived.** Core league mode, Cricket league support, league fixtures / pending
+> matches, and the New Game "League Game" one-tap start are all shipped (details
+> below and in the follow-on status notes). Core league mode is fully built and
+> playable end-to-end — schema (`leagues`/`league_players`, plus a nullable
 > `games.league_id`), auto-tagging (an `onGameCreated` hook, no extra step in
 > New Game for the common case; exactly 1 eligible league auto-tags silently,
 > 2+ leaves the game untagged — see "League Game" below for why there's no
@@ -33,7 +36,7 @@
 > than silently contradicted.
 >
 > **New Game "League Game" entry — now shipped too (2026-07)**:
-> `docs/new-game-flow-roadmap.md`'s 3-step New Game wizard consumes the
+> `docs/archive/new-game-flow-roadmap.md`'s 3-step New Game wizard consumes the
 > fixture endpoint/param above to offer the actual one-tap start — a
 > "🏆 League Game" entry at the top of Step 2's dropdown whenever the current
 > pair has a pending fixture, auto-filling the league's game type/category
@@ -134,13 +137,13 @@ unify them into one system.
   ends, and a "past seasons" archive lets you look back at who won a given month
   without needing to keep manually filtering by date range.
 
-## League fixtures / pending matches (shipped 2026-07 — backend + read-only
-## admin view; the New Game "League Game" one-tap start itself is a separate,
-## still-open item)
+## League fixtures / pending matches (shipped 2026-07 — backend, read-only admin
+## view, AND the New Game "League Game" one-tap start, all done; see the top-of-doc
+## status for the wizard entry that consumes this)
 
 **Goal**: let a New Game session recognize when the two selected players have
 a scheduled-but-unplayed match in a shared active league, and offer it as a
-one-tap "League Game" shortcut (`docs/new-game-flow-roadmap.md`'s Step 2)
+one-tap "League Game" shortcut (`docs/archive/new-game-flow-roadmap.md`'s Step 2)
 that pre-fills that league's game type/category rather than asking again.
 Previously a league only auto-tagged a game *after* the players independently
 happened to pick a matching category — there was no concept of "this pairing
@@ -192,7 +195,7 @@ still owes the league a match," which is exactly what this section adds.
   (`renderLeagueDetail()`): every fixture for the league with its derived
   status (`FIXTURE_STATUS_ICON`/`LABEL`, icon + text together, same
   convention as every other status badge in the app).
-- **New Game "League Game" entry — shipped** (`docs/new-game-flow-roadmap.md`'s
+- **New Game "League Game" entry — shipped** (`docs/archive/new-game-flow-roadmap.md`'s
   3-step wizard, `REFERENCE.md` §20): Step 1 completing with exactly 2 players
   triggers the pending-fixture lookup above; a match injects a "🏆 League
   Game" entry at the top of Step 2's dropdown. Selecting it auto-fills
@@ -231,7 +234,7 @@ still owes the league a match," which is exactly what this section adds.
 Addressed as shipped (2026-07), including the "League fixtures" section and
 the New Game "League Game" entry (its own accessibility pass — focus
 management, `aria-live` step announcements, icon+text status badges — is
-covered by `docs/new-game-flow-roadmap.md`'s own accessibility section and
+covered by `docs/archive/new-game-flow-roadmap.md`'s own accessibility section and
 `REFERENCE.md` §20, since it's that doc's UI surface), per `CLAUDE.md`'s
 standing conventions.
 

@@ -3244,7 +3244,7 @@ time by `getTournament()`, never stored: `winner_id` set → `complete`; else `g
 set → `in_progress`; else both player slots filled → `ready`; else `pending`. Same
 "compute from raw data" philosophy as the rest of the schema (§1).
 
-### League mode (`docs/league-mode-roadmap.md`, X01 or Cricket — see §18)
+### League mode (`docs/archive/league-mode-roadmap.md`, X01 or Cricket — see §18)
 
 **`leagues`**
 | Column | Type | Notes |
@@ -3940,7 +3940,7 @@ against a running server.
 
 ## 18. League Mode
 
-`docs/league-mode-roadmap.md`. X01 or Cricket, per `leagues.game_type`
+`docs/archive/league-mode-roadmap.md`. X01 or Cricket, per `leagues.game_type`
 (Doubles Practice/Just Chuckin' It/Checkout Trainer are structurally excluded
 regardless — all solo/no-winner formats). Backend: `backend/db.js`'s league
 section. Frontend: `frontend/index.html`'s "leagues" block, reachable via the
@@ -4050,7 +4050,7 @@ maintained-tally suggestion, not this one.
 - **New Game "log to league?" picker — retired (2026-07)**: `updateLeaguePicker()`/
   `#league-picker-wrap`/`setup.leagueId` and the H2H banner they sat beside
   (`updateH2HBanner()`/`#h2h-banner`, `GET /api/players/h2h`) were all removed
-  when the New Game screen became a 3-step wizard (`docs/new-game-flow-roadmap.md`)
+  when the New Game screen became a 3-step wizard (`docs/archive/new-game-flow-roadmap.md`)
   — superseded by Step 2's fixture-based "League Game" entry, see below and §18's
   own "League fixtures / pending matches" section. `GET /api/leagues/eligible`
   and the server-side `onGameCreated` auto-tag hook's own 0/1/>1-candidate
@@ -4089,7 +4089,7 @@ maintained-tally suggestion, not this one.
   local `Date` getters; doing that to a bare calendar date shifts it by a day
   in any negative-UTC-offset timezone).
 
-### League fixtures / pending matches (`docs/league-mode-roadmap.md`)
+### League fixtures / pending matches (`docs/archive/league-mode-roadmap.md`)
 
 A scheduled-but-unplayed pairing, tracked separately from the direct
 `games.league_id` tagging above — `league_fixtures` follows `tournament_matches`'
@@ -4122,7 +4122,7 @@ because a fixture needs to exist *before* any game does.
   array via `getLeagueFixtures()`): every fixture with its derived status
   (`FIXTURE_STATUS_ICON`/`FIXTURE_STATUS_LABEL` — Pending/In progress/Played,
   icon + text together).
-- **New Game "League Game" entry** (§20's Step 2, `docs/new-game-flow-roadmap.md`):
+- **New Game "League Game" entry** (§20's Step 2, `docs/archive/new-game-flow-roadmap.md`):
   once Step 1 finishes with exactly 2 players, `setupGoToStep2()` calls the
   pending-fixture endpoint above and, if it returns anything, injects a
   "🏆 League Game" option at the top of Step 2's dropdown
@@ -4156,7 +4156,7 @@ because a fixture needs to exist *before* any game does.
   ended, never removed, short of `wipeAllData()`.
 - **Double round-robin, manual fixtures, and end-of-season unplayed-fixture
   callouts** — each resolved as "not for v1" rather than left open; see
-  `docs/league-mode-roadmap.md`'s "League fixtures / pending matches" section
+  `docs/archive/league-mode-roadmap.md`'s "League fixtures / pending matches" section
   for the reasoning behind each.
 
 ---
@@ -4467,7 +4467,7 @@ point of the drill, so it must never manufacture a "toughest ever" record.
 
 ## 20. New Game Screen (3-Step Wizard)
 
-Full design: `docs/new-game-flow-roadmap.md`. Replaced the old single
+Full design: `docs/archive/new-game-flow-roadmap.md`. Replaced the old single
 all-controls-visible `#screen-setup` card with a 3-step flow — Who's playing? →
 Choose a game → More options — so a player only ever sees the controls relevant
 to what they've already chosen. Purely a restructuring of *when/how* the

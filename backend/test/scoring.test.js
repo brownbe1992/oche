@@ -1033,7 +1033,7 @@ describe('evaluateDartAroundTheClock (guided drill mode, docs/game-modes-roadmap
   });
 });
 
-describe('challengeBadgeSignals (Daily Challenge badges: streak + format-completionist, docs/daily-challenge-roadmap.md)', () => {
+describe('challengeBadgeSignals (Daily Challenge badges: streak + format-completionist, docs/archive/daily-challenge-roadmap.md)', () => {
   test('week badge fires only at exactly a 7-day streak, not before or after', () => {
     assert.equal(challengeBadgeSignals({ currentStreak: 6, bestByFormat: {} }, CHALLENGE_FORMATS).week, false);
     assert.equal(challengeBadgeSignals({ currentStreak: CHALLENGE_STREAK_WEEK, bestByFormat: {} }, CHALLENGE_FORMATS).week, true);

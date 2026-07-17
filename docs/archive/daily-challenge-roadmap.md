@@ -1,11 +1,13 @@
 # Daily/Weekly Challenge — Design Roadmap
 
-> **Un-archived (2026-07)** — three new Daily Challenge badges and a dedicated
-> Player Profile tab were added (per an explicit user request for "stats,
-> reporting, badges, and achievements for daily challenges"), so this doc moved
-> back out of `docs/archive/` per CLAUDE.md's "partially-done docs stay in
-> `docs/`" convention. See `docs/open-roadmap-items.md` for the live
-> completion tracker across all roadmaps.
+> **Re-archived (2026-07)** — this doc was briefly un-archived to add three new
+> Daily Challenge badges and a dedicated Player Profile tab (per an explicit user
+> request for "stats, reporting, badges, and achievements for daily challenges").
+> That work is now fully shipped (see the status line below and the Done ledger in
+> `docs/open-roadmap-items.md`), so the doc returns to `docs/archive/` — every piece
+> of its design is built, and the only remaining "open questions" below are product/
+> content decisions (rotation weighting, streak-grace policy), not deferred
+> engineering.
 
 > Status: **fully shipped**, including the "beat your best" live callout, the
 > Player Profile history view (now its own tab, see below), and Daily-Challenge-

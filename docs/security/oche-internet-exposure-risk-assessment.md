@@ -775,7 +775,7 @@ Medium findings up or down.
 - **MITRE ATT&CK** — T1110 (Brute Force), T1557 (AiTM), T1498/T1499 (DoS), T1611 (Escape to
   Host).
 - **Internal** — `docs/security-audit-roadmap.md` (SEC-1…SEC-25), `docs/security-hardening-roadmap.md`,
-  `docs/archive/admin-login-backoff-roadmap.md`, `docs/backups-roadmap.md`, `REFERENCE.md`
+  `docs/archive/admin-login-backoff-roadmap.md`, `docs/archive/backups-roadmap.md`, `REFERENCE.md`
   (security model), `docs/security/AI Risk Assessment Prompt.md` (this methodology).
 
 ---

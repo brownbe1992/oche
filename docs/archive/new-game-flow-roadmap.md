@@ -1,10 +1,12 @@
 # New Game Page Revamp — Design Roadmap
 
-> Status (2026-07): **Shipped.** The 3-step wizard (Who's playing? → Choose a
+> Status (2026-07): **Shipped — and now archived**, since every step of this doc's
+> design is built (all 7 build-order steps done, see the bottom of this doc). The
+> 3-step wizard (Who's playing? → Choose a
 > game → More options) described below is fully built —
 > `frontend/index.html`'s `#screen-setup`, `renderPlayers()` (Step 1),
 > `NEW_GAME_MODE_OPTIONS`/`renderSetupStep2Content()` (Step 2, including the
-> "League Game" entry backed by `docs/league-mode-roadmap.md`'s fixture work),
+> "League Game" entry backed by `docs/archive/league-mode-roadmap.md`'s fixture work),
 > and the relocated per-mode option blocks (Step 3) — with every one of this
 > doc's own resolved open questions implemented as designed: the flat
 > player-count-filtered dropdown, Daily Challenge's check-on-selection
@@ -156,7 +158,7 @@ rather than a "log to league?" picker tucked into the Players section,
 above Daily Challenge — whenever the two currently-selected players have a
 **pending fixture** (a scheduled-but-unplayed match) in a shared active
 league. This is new backend work, not just a frontend move — see
-`docs/league-mode-roadmap.md`'s new "League fixtures / pending matches"
+`docs/archive/league-mode-roadmap.md`'s new "League fixtures / pending matches"
 section for the full design (a new `league_fixtures` table and a
 pending-fixture lookup endpoint; today's league mode has no concept of an
 unplayed pairing to check against, only after-the-fact category matching).
@@ -252,7 +254,7 @@ it exposes.
   are shown, not a change to what data New Game collects or sends for them.
   The one exception is "League Game" above: it depends on new backend work
   (a `league_fixtures` table and a pending-fixture lookup endpoint) tracked
-  separately in `docs/league-mode-roadmap.md`, not something this doc's own
+  separately in `docs/archive/league-mode-roadmap.md`, not something this doc's own
   frontend restructuring can deliver alone.
 - **No change to any individual control's own logic** — Cricket's exact-7
   validation, Checkout Trainer's difficulty tiers, Ghost's leg-picker data
@@ -290,7 +292,7 @@ Per `CLAUDE.md`'s standing conventions:
 None remaining specific to this doc — the open questions for "League Game"
 (fixture generation, single vs. double round-robin, manual fixtures, and its
 interaction with today's category-based ambiguity picker) live in
-`docs/league-mode-roadmap.md`'s new "League fixtures / pending matches"
+`docs/archive/league-mode-roadmap.md`'s new "League fixtures / pending matches"
 section, since they're backend design questions, not New Game screen ones.
 
 ## Suggested build order (all 7 steps shipped 2026-07)
@@ -330,6 +332,6 @@ section, since they're backend design questions, not New Game screen ones.
    server; no committed Playwright suite exists in this repo (ad hoc
    verification only, matching `docs/testing-and-observability-roadmap.md`'s
    own current state).
-7. ✅ League Game wired up against `docs/league-mode-roadmap.md`'s shipped
+7. ✅ League Game wired up against `docs/archive/league-mode-roadmap.md`'s shipped
    fixture endpoint/param — `setupGoToStep2()`'s pending-fixture fetch,
    `applyLeagueGameSelection()`, the "which league match?" secondary dropdown.

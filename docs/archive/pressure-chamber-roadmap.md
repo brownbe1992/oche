@@ -21,7 +21,7 @@ sequence** head-to-head, so it's a fair contest of nerve, not just skill.
 
 ## How this differs from every existing mode (don't conflate)
 
-- **Daily Challenge** (`docs/daily-challenge-roadmap.md`) is also a
+- **Daily Challenge** (`docs/archive/daily-challenge-roadmap.md`) is also a
   deterministically-generated, single-metric solo drill, but it's one
   format per calendar day with no modifier system and no multiplayer
   identical-sequence mode — Pressure Chamber's card-and-modifier engine is

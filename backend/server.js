@@ -450,7 +450,7 @@ const MAX_SSE_TOTAL = 50;
 const MAX_SSE_PER_IP = 5;
 const sseByIp = new Map(); // ip -> open connection count
 
-// docs/backups-roadmap.md v2: an uploaded backup file bypasses readJson()'s 1MB
+// docs/archive/backups-roadmap.md v2: an uploaded backup file bypasses readJson()'s 1MB
 // cap entirely (streamed straight to disk, never buffered as one JSON string) —
 // this is its own, independent ceiling. 500MB comfortably covers years of
 // per-dart history for a household while still bounding worst-case disk use
@@ -528,7 +528,7 @@ function sanitizeLiveState(b) {
   return out;
 }
 
-// docs/backups-roadmap.md v2: streams an uploaded .db file straight to a temp
+// docs/archive/backups-roadmap.md v2: streams an uploaded .db file straight to a temp
 // file on disk rather than buffering it as one string — every other endpoint
 // goes through readJson()'s 1MB cap, which a real backup file will exceed as
 // data grows over years, so this is its own path (manual 'data'/'end'/'error'
@@ -1108,7 +1108,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, db.getTournamentStats(url.searchParams.get('name')));
     }
 
-    // ----- leagues (docs/league-mode-roadmap.md, X01 or Cricket) -----
+    // ----- leagues (docs/archive/league-mode-roadmap.md, X01 or Cricket) -----
     // Same read/write split as tournaments: viewing leagues/standings is public;
     // creating a league, enrolling a player, and ending/reopening one are all
     // state-changing writes gated by requireWrite. Games auto-tag into a league via
@@ -1145,7 +1145,7 @@ const server = http.createServer(async (req, res) => {
       const names = String(url.searchParams.get('players') || '').split(',').map(s => s.trim()).filter(Boolean);
       return send(res, 200, db.getEligibleLeagues(names[0], names[1], url.searchParams.get('category'), url.searchParams.get('gameType')));
     }
-    // Public: league fixtures / pending matches (docs/league-mode-roadmap.md) — the
+    // Public: league fixtures / pending matches (docs/archive/league-mode-roadmap.md) — the
     // New Game screen's future "League Game" entry (item 11b) calls this right after
     // Step 1 (opponent pair picked), *before* any game type is chosen — unlike
     // /api/leagues/eligible above, which needs category/gameType already known.
@@ -1274,7 +1274,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, db.getOnThisDay(url.searchParams.get('name'), tzSafe));
     }
 
-    // ----- daily challenge (docs/daily-challenge-roadmap.md) -----
+    // ----- daily challenge (docs/archive/daily-challenge-roadmap.md) -----
     if (p === '/api/challenges/start' && m === 'POST') {
       if (!requireWrite(req, res)) return;
       const b = await readJson(req);
@@ -1298,7 +1298,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, db.resetChallengeAttempt(url.searchParams.get('player'), url.searchParams.get('date')));
     }
 
-    // ----- backups (docs/backups-roadmap.md v2) -----
+    // ----- backups (docs/archive/backups-roadmap.md v2) -----
     // Every route here is unconditionally admin-gated (requireAdmin, not
     // requireWrite) regardless of OCHE_REQUIRE_AUTH — managing or restoring the
     // whole database is at least as sensitive as /api/wipe-all and /api/admins,

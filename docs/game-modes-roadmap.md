@@ -64,7 +64,6 @@
 > confirming the toggle switches cleanly in both H2H/Practice modes with zero
 > regression to the existing X01 leaderboards.
 >
-> **Not yet built**: Baseball (step 5). See "Suggested build order" below.
 > **Killer is now built and shipped (2026-07)** — elimination-format H2H, per the
 > rules primer below (dartscorner.com's published ruleset). See "Killer"'s own
 > "Implementation notes" subsection for exactly how each open question was
@@ -909,8 +908,11 @@ stats").
   single round by hits, ties broken by fewest darts). Neither takes a `mode`
   param, since this game type is always `practice=1` by construction — an
   h2h/practice split would always leave the h2h side empty.
-- **Still not built**: achievements/badges for this mode (none were requested
-  for this pass).
+- **Built later (2026-07)**: achievements/badges for this mode — none were
+  requested in this pass, but `docs/archive/culture-badges-roadmap.md` Part B
+  subsequently added a lifetime doubles-hit milestone ladder plus 🎪 **Ring
+  Master** (hit every double D1–D20 + bull lifetime), `DOUBLES_HIT_MILESTONE_LADDERS`
+  in `frontend/index.html`.
 - **Fixed (2026-07, follow-up pass): the Doubles Practice Home page tab no
   longer shows while H2H is selected.** Since this mode has no H2H equivalent
   at all, its Home leaderboard tab only makes sense under Practice — a new
