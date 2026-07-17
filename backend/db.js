@@ -1522,7 +1522,55 @@ function completeGame(gameId, winnerName) {
 // run replays from the frozen config.rounds array plus a count of completed
 // legs so far -- pure function of stored config + turns, same shape every
 // other entry here already follows.
-const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'shanghai', 'halve_it', 'dead_man_walking', 'pressure_chamber'];
+// One registry for every game type, so adding a mode is a single record here
+// rather than edits scattered across KNOWN_GAME_TYPES, SAVABLE_GAME_TYPES, and the
+// two per-type dispatch chains that used to live in server.js. Each entry declares:
+//   savable       — whether a paused game of this type can be resumed (SAVABLE list)
+//   statBubbles   — the Player Profile stat-bubble function for this type
+//   personalBests — the Player Profile Personal-Bests function for this type
+//   dispatchOnly  — true for 'marathon', a routing key that isn't a real games.game_type
+//                   value (every Marathon leg is a plain 'x01' game) — it takes part in
+//                   the stat dispatch but must NOT appear in KNOWN/SAVABLE_GAME_TYPES.
+// Every function referenced here is a hoisted top-level declaration below, so this
+// literal can name them regardless of file order. KNOWN_GAME_TYPES, SAVABLE_GAME_TYPES,
+// and getStatBubblesFor()/getPersonalBestsFor() all derive from this — see each below.
+const GAME_TYPE_REGISTRY = {
+  x01:              { savable: true,  statBubbles: getPlayerStatBubbles,            personalBests: getPersonalBests },
+  cricket:          { savable: true,  statBubbles: getCricketStatBubbles,           personalBests: getCricketPersonalBests },
+  baseball:         { savable: true,  statBubbles: getBaseballStatBubbles,          personalBests: getBaseballPersonalBests },
+  doubles_practice: { savable: false, statBubbles: getDoublesPracticeStatBubbles,   personalBests: getDoublesPracticePersonalBests },
+  chuckin:          { savable: false, statBubbles: getChuckinStatBubbles,           personalBests: getChuckinPersonalBests },
+  // Checkout Trainer's Personal Bests merge two records (the trainer's toughest-checkout/
+  // best-streak plus Checkout Blitz's peak/lifetime score) into one response.
+  checkout_trainer: { savable: false, statBubbles: getCheckoutTrainerStatBubbles,
+                      personalBests: (name, mode) => Object.assign({}, getCheckoutTrainerPersonalBests(name, mode), getCheckoutBlitzPersonalStats(name)) },
+  around_the_clock: { savable: true,  statBubbles: getAroundTheClockStatBubbles,    personalBests: getAroundTheClockPersonalBests },
+  // Note the stat-bubble function's own "Drill" name (distinct from the passive Around
+  // the World badge helper) — preserved exactly as the old dispatch had it.
+  around_the_world: { savable: true,  statBubbles: getAroundTheWorldDrillStatBubbles, personalBests: getAroundTheWorldPersonalBests },
+  bobs_27:          { savable: true,  statBubbles: getBobs27StatBubbles,            personalBests: getBobs27PersonalBests },
+  checkout_ladder:  { savable: true,  statBubbles: getCheckoutLadderStatBubbles,    personalBests: getCheckoutLadderPersonalBests },
+  gauntlet:         { savable: true,  statBubbles: getGauntletStatBubbles,          personalBests: getGauntletPersonalBests },
+  killer:           { savable: false, statBubbles: getKillerStatBubbles,            personalBests: getKillerPersonalBests },
+  shanghai:         { savable: true,  statBubbles: getShanghaiStatBubbles,          personalBests: getShanghaiPersonalBests },
+  halve_it:         { savable: true,  statBubbles: getHalveItStatBubbles,           personalBests: getHalveItPersonalBests },
+  dead_man_walking: { savable: true,  statBubbles: getDeadManWalkingStatBubbles,    personalBests: getDeadManWalkingPersonalBests },
+  pressure_chamber: { savable: true,  statBubbles: getPressureChamberStatBubbles,   personalBests: getPressureChamberPersonalBests },
+  marathon:         { dispatchOnly: true, statBubbles: getMarathonStatBubbles,      personalBests: getMarathonPersonalBests },
+};
+// Resolves the per-type Player Profile stat function, falling back to the X01 default
+// for an unknown/absent type — the same behavior the old server.js ternary's trailing
+// `: db.getPlayerStatBubbles(...)` gave. server.js now calls these instead of dispatching.
+function getStatBubblesFor(gameType, name, mode) {
+  const e = GAME_TYPE_REGISTRY[gameType];
+  return (e && e.statBubbles ? e.statBubbles : getPlayerStatBubbles)(name, mode);
+}
+function getPersonalBestsFor(gameType, name, mode) {
+  const e = GAME_TYPE_REGISTRY[gameType];
+  return (e && e.personalBests ? e.personalBests : getPersonalBests)(name, mode);
+}
+
+const SAVABLE_GAME_TYPES = Object.keys(GAME_TYPE_REGISTRY).filter(k => GAME_TYPE_REGISTRY[k].savable);
 
 function _savedGameRow(gameId) {
   return db.prepare('SELECT * FROM saved_games WHERE game_id = ?').get(Number(gameId));
@@ -5509,7 +5557,10 @@ function _mf(mode) {
 // 'x01'/'cricket', server.js only uses a query param to pick which function to
 // call), and is whitelisted here regardless as a defense-in-depth measure
 // against string interpolation.
-const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer', 'shanghai', 'halve_it', 'dead_man_walking', 'pressure_chamber'];
+// Every real games.game_type value — derived from GAME_TYPE_REGISTRY (above) minus the
+// dispatch-only 'marathon' routing key, so adding a game type to the registry
+// automatically registers it here (and in SAVABLE_GAME_TYPES) with no separate edit.
+const KNOWN_GAME_TYPES = Object.keys(GAME_TYPE_REGISTRY).filter(k => !GAME_TYPE_REGISTRY[k].dispatchOnly);
 function _scope({ mode, gameType } = {}) {
   let sql = _mf(mode);
   if (gameType) {
@@ -8577,6 +8628,7 @@ module.exports = {
   logServerError, getServerErrors,
   computeStats, getSummary, getHomeExtra, getSessionRecap, getOneEightyStats, getBigFishStats, getNineDarterStats,
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
+  getStatBubblesFor, getPersonalBestsFor, KNOWN_GAME_TYPES, SAVABLE_GAME_TYPES,
   startMarathonSession, startNextMarathonLeg, endMarathonSession, getMarathonSessionDetail,
   getMarathonStatBubbles, getMarathonPersonalBests, getMarathonLeaderboard,
   getGhostCandidateLegs, getGhostLegScript,

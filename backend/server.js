@@ -798,53 +798,18 @@ const server = http.createServer(async (req, res) => {
       const mode = url.searchParams.get('mode');
       const name = url.searchParams.get('name');
       const gameType = url.searchParams.get('gameType');
-      // Checkout Trainer merges two functions into one response: the lifetime
-      // toughest-checkout/best-streak record (both sub-modes) plus Checkout
-      // Blitz's own peak-score/lifetime-average record — one Personal Bests
-      // block covers both, no separate route needed for the Blitz half.
-      if (gameType === 'checkout_trainer') {
-        return send(res, 200, Object.assign({}, db.getCheckoutTrainerPersonalBests(name, mode), db.getCheckoutBlitzPersonalStats(name)));
-      }
-      return send(res, 200, gameType === 'cricket' ? db.getCricketPersonalBests(name, mode)
-        : gameType === 'bobs_27' ? db.getBobs27PersonalBests(name, mode)
-        : gameType === 'checkout_ladder' ? db.getCheckoutLadderPersonalBests(name, mode)
-        : gameType === 'gauntlet' ? db.getGauntletPersonalBests(name, mode)
-        : gameType === 'dead_man_walking' ? db.getDeadManWalkingPersonalBests(name, mode)
-        : gameType === 'killer' ? db.getKillerPersonalBests(name, mode)
-        // 'marathon' is a routing key only, never a real games.game_type value
-        // (every Marathon leg is a plain 'x01' game) — see docs/archive/marathon-mode-roadmap.md.
-        : gameType === 'marathon' ? db.getMarathonPersonalBests(name, mode)
-        : gameType === 'baseball' ? db.getBaseballPersonalBests(name, mode)
-        : gameType === 'shanghai' ? db.getShanghaiPersonalBests(name, mode)
-        : gameType === 'halve_it' ? db.getHalveItPersonalBests(name, mode)
-        : gameType === 'pressure_chamber' ? db.getPressureChamberPersonalBests(name, mode)
-        : gameType === 'doubles_practice' ? db.getDoublesPracticePersonalBests(name, mode)
-        : gameType === 'chuckin' ? db.getChuckinPersonalBests(name, mode)
-        : gameType === 'around_the_clock' ? db.getAroundTheClockPersonalBests(name, mode)
-        : gameType === 'around_the_world' ? db.getAroundTheWorldPersonalBests(name, mode)
-        : db.getPersonalBests(name, mode));
+      // Per-type dispatch (including Checkout Trainer's merged trainer+Blitz record,
+      // Marathon's routing-key-only mapping, and the X01 default) lives in db.js's
+      // GAME_TYPE_REGISTRY now — one record per type instead of a ternary here.
+      return send(res, 200, db.getPersonalBestsFor(gameType, name, mode));
     }
     if (p === '/api/players/stat-bubbles' && m === 'GET') {
       const mode = url.searchParams.get('mode');
       const name = url.searchParams.get('name');
       const gameType = url.searchParams.get('gameType');
-      return send(res, 200, gameType === 'cricket' ? db.getCricketStatBubbles(name, mode)
-        : gameType === 'baseball' ? db.getBaseballStatBubbles(name, mode)
-        : gameType === 'shanghai' ? db.getShanghaiStatBubbles(name, mode)
-        : gameType === 'halve_it' ? db.getHalveItStatBubbles(name, mode)
-        : gameType === 'pressure_chamber' ? db.getPressureChamberStatBubbles(name, mode)
-        : gameType === 'doubles_practice' ? db.getDoublesPracticeStatBubbles(name, mode)
-        : gameType === 'chuckin' ? db.getChuckinStatBubbles(name, mode)
-        : gameType === 'checkout_trainer' ? db.getCheckoutTrainerStatBubbles(name, mode)
-        : gameType === 'around_the_clock' ? db.getAroundTheClockStatBubbles(name, mode)
-        : gameType === 'around_the_world' ? db.getAroundTheWorldDrillStatBubbles(name, mode)
-        : gameType === 'bobs_27' ? db.getBobs27StatBubbles(name, mode)
-        : gameType === 'checkout_ladder' ? db.getCheckoutLadderStatBubbles(name, mode)
-        : gameType === 'gauntlet' ? db.getGauntletStatBubbles(name, mode)
-        : gameType === 'dead_man_walking' ? db.getDeadManWalkingStatBubbles(name, mode)
-        : gameType === 'killer' ? db.getKillerStatBubbles(name, mode)
-        : gameType === 'marathon' ? db.getMarathonStatBubbles(name, mode)
-        : db.getPlayerStatBubbles(name, mode));
+      // Same GAME_TYPE_REGISTRY dispatch as personal-bests above (X01 default for an
+      // unknown/absent type) — one record per type in db.js, no ternary here.
+      return send(res, 200, db.getStatBubblesFor(gameType, name, mode));
     }
     if (p === '/api/players/gauntlet-scar-map' && m === 'GET') {
       return send(res, 200, db.getGauntletScarMap(url.searchParams.get('name')));
