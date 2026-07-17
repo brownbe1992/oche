@@ -515,6 +515,20 @@ try { db.exec('ALTER TABLE turns ADD COLUMN declared_unsolvable INTEGER NOT NULL
 // derived by replay (rebuildKillerState(), frontend/scoring.js), never stored,
 // same "derive the special case, don't pre-compute it" shape Halve-It/Gauntlet use.
 try { db.exec('ALTER TABLE turns ADD COLUMN affected_player_id INTEGER'); } catch(e) {}
+// The Pressure Chamber self-declare honesty mechanic (docs/archive/pressure-chamber-roadmap.md
+// build-order step 10): the player's SELF-DECLARED hit/miss call for this round,
+// made BEFORE their actual darts are read off the board — 1 = "I'll hit it",
+// 0 = "I'll miss". NULL for every turn that carries no declaration at all (every
+// other game type, and any pre-existing Pressure Chamber turn recorded before this
+// mechanic shipped). Explicitly NOT a scoring input and carries no leaderboard
+// weight — it feeds only the informational Honesty% stat, which compares the
+// declaration against the round's real bust/checkout outcome at read time. The
+// server can never verify the declaration was truly made before verifying (a
+// determined client can submit one matching the outcome in hindsight), so unlike
+// every other new column there is no consistency guard for it — it is an
+// honor-system self-discipline signal by design. Purely additive, same pattern as
+// target_score/declared_unsolvable/affected_player_id above.
+try { db.exec('ALTER TABLE turns ADD COLUMN declared_hit INTEGER'); } catch(e) {}
 // player_count is the participant count captured once at game creation. H2H-vs-practice
 // classification reads THIS instead of a live COUNT(game_players) subquery, so deleting
 // or resetting a player can never retroactively reclassify a game (a 2-player H2H game
@@ -657,8 +671,8 @@ const q = {
   completeGame : db.prepare("UPDATE games SET completed_at = datetime('now'), winner_id = ? WHERE id = ?"),
 
   insertTurn   : db.prepare(`INSERT INTO turns
-                   (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points, leg_won, target_score, declared_unsolvable, affected_player_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+                   (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points, leg_won, target_score, declared_unsolvable, affected_player_id, declared_hit)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 
   insertDart   : db.prepare(`INSERT INTO darts (turn_id, dart_no, sector, multiplier, thrown_at, zone, miss_zone, miss_depth, bounced)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
@@ -982,7 +996,7 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
     if (names.length !== 1) throw httpError(400, 'Dead Man Walking is solo only');
     dmwConfig = { rounds: _buildDeadManWalkingRounds(names[0]) };
   }
-  // The Pressure Chamber (docs/pressure-chamber-roadmap.md): rounds is fixed
+  // The Pressure Chamber (docs/archive/pressure-chamber-roadmap.md): rounds is fixed
   // at 15, never a client choice — overridden server-side the same way
   // Killer's number assignment is above, so a hostile client can't submit a
   // shorter/longer run that generatePressureCard()'s own round-index math
@@ -1448,7 +1462,7 @@ function addTurn(gameId, t, opts = {}) {
       throw httpError(400, `this round's dart budget (${budget}) would be exceeded`);
     }
   } else if (gameTypeRow && gameTypeRow.game_type === 'pressure_chamber') {
-    // docs/pressure-chamber-roadmap.md: reuses Checkout Trainer's exact 3-way
+    // docs/archive/pressure-chamber-roadmap.md: reuses Checkout Trainer's exact 3-way
     // bust=1(miss)/checkout=1,leg_won=0(partial)/checkout=1,leg_won=1(full)
     // outcome. The round's card (target+modifier) is never stored — it's a
     // pure function of (gameId, roundIndex), re-derived here exactly the way
@@ -1492,6 +1506,21 @@ function addTurn(gameId, t, opts = {}) {
   if (t.affectedPlayer != null) {
     affectedPlayerId = ensurePlayer(t.affectedPlayer).id;
   }
+  // The Pressure Chamber self-declare honesty mechanic (docs/archive/pressure-chamber-roadmap.md
+  // build-order step 10): 1 = declared hit, 0 = declared miss, NULL = no declaration.
+  // Only valid for pressure_chamber games (gated the same way declaredUnsolvable is
+  // gated to checkout_trainer, and looked up only when a declaration is actually
+  // present so the common no-declaration path stays query-free). It is deliberately
+  // NOT cross-checked against the round's real outcome — see the column's migration
+  // comment: the whole point is that the declaration is unverifiable, an honor-system
+  // self-discipline signal feeding only the informational Honesty% stat.
+  let declaredHit = null;
+  if (t.declaredHit != null) {
+    declaredHit = Number(t.declaredHit);
+    if (declaredHit !== 0 && declaredHit !== 1) throw httpError(400, 'declaredHit must be 0 (declared miss) or 1 (declared hit)');
+    const gt = q.gameTypeById.get(Number(gameId));
+    if (!gt || gt.game_type !== 'pressure_chamber') throw httpError(400, 'declaredHit is only valid in a Pressure Chamber game');
+  }
   const info = q.insertTurn.run(
     Number(gameId), p.id,
     setNo, legNo,
@@ -1502,7 +1531,8 @@ function addTurn(gameId, t, opts = {}) {
     t.legWon ? 1 : 0,
     targetScore,
     declaredUnsolvable ? 1 : 0,
-    affectedPlayerId
+    affectedPlayerId,
+    declaredHit
   );
   // Insert individual dart rows — scored/is_treble/is_double are generated columns.
   // thrownAt is an ISO timestamp captured client-side at tap time; only sent when
@@ -3986,7 +4016,7 @@ function getDeadManWalkingLongestStreak(playerName) {
 }
 
 
-/* ---------- The Pressure Chamber (docs/pressure-chamber-roadmap.md) ----------
+/* ---------- The Pressure Chamber (docs/archive/pressure-chamber-roadmap.md) ----------
    Reuses Checkout Trainer's exact 3-way bust=1(miss)/checkout=1,leg_won=0
    (partial)/checkout=1,leg_won=1(full) outcome, so full/partial-hit rate read
    directly off those columns with no replay needed. The one genuine
@@ -4067,20 +4097,36 @@ function getPressureChamberStatBubbles(playerName, mode){
   const fullHitRate = rounds > 0 ? (roundsRow.fullHits / rounds * 100) : null;
   const partialHitRate = rounds > 0 ? (roundsRow.partialHits / rounds * 100) : null;
 
+  // Honesty% (docs/archive/pressure-chamber-roadmap.md build-order step 10): of every round
+  // where the player made a self-declaration (declared_hit IS NOT NULL), what % were
+  // honest — the declaration matching the round's real outcome. A round is an actual
+  // HIT when it graded at least a partial hit (checkout=1) and an actual MISS when it
+  // graded a whole miss (bust=1), so an honest call is "declared hit AND checked out"
+  // or "declared miss AND busted". Purely informational, never a scoring input — null
+  // until the player has made at least one declaration.
+  const honestyRow = db.prepare(`
+    SELECT COUNT(*) AS declared,
+      COALESCE(SUM(CASE WHEN (t.declared_hit=1 AND t.checkout=1) OR (t.declared_hit=0 AND t.bust=1) THEN 1 ELSE 0 END),0) AS honest
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE t.player_id=? ${scope} AND t.declared_hit IS NOT NULL
+  `).get(p.id);
+  const declaredRounds = honestyRow?.declared ?? 0;
+  const honestyPct = declaredRounds > 0 ? (honestyRow.honest / declaredRounds * 100) : null;
+
   const myLegs = _pressureChamberLegTotals(mode).filter(l => l.playerId === p.id && l.completed);
   const runsCompleted = myLegs.length;
   const avgCp = runsCompleted > 0 ? (myLegs.reduce((s, l) => s + l.total, 0) / runsCompleted) : null;
-  // Lifetime CP earned (docs/pressure-chamber-roadmap.md "Achievements" ladder
+  // Lifetime CP earned (docs/archive/pressure-chamber-roadmap.md "Achievements" ladder
   // metric) -- clamped at 0 per run before summing, so a heavily-missed run
   // (net negative under Double Down) never subtracts from a lifetime
   // cumulative achievement total the way it legitimately can from a single
   // run's own Personal Best/leaderboard peak.
   const totalCpEarned = myLegs.reduce((s, l) => s + Math.max(0, l.total), 0);
 
-  return { gamesPlayed, winPct, dartsThrown, runsCompleted, avgCp, fullHitRate, partialHitRate, totalCpEarned };
+  return { gamesPlayed, winPct, dartsThrown, runsCompleted, avgCp, fullHitRate, partialHitRate, totalCpEarned, honestyPct, declaredRounds };
 }
 
-// Personal Bests (docs/pressure-chamber-roadmap.md "Stats, Personal Bests,
+// Personal Bests (docs/archive/pressure-chamber-roadmap.md "Stats, Personal Bests,
 // leaderboard"): best single-run CP total (a peak, no minimum-attempts floor
 // -- the Checkout Blitz/Halve-It "Highest Final Total" precedent), best
 // Composure Rating ever reached (since the rating thresholds are monotonic

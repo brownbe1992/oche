@@ -398,7 +398,7 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 33 X01 achievement badges (
 | 🪓 **Halved at the Death** | Win a Halve-It game after your own final-round visit halved your total |
 | 🛡️ **No Half Measures** | Win a Halve-It game without ever being halved |
 
-**The Pressure Chamber's 15 badges** (`docs/pressure-chamber-roadmap.md`) — a lifetime-runs ladder, a lifetime-CP-earned ladder, a per-run full-hit-streak ladder, and 4 modifier-specific flavor badges:
+**The Pressure Chamber's 15 badges** (`docs/archive/pressure-chamber-roadmap.md`) — a lifetime-runs ladder, a lifetime-CP-earned ladder, a per-run full-hit-streak ladder, and 4 modifier-specific flavor badges:
 
 | Badge | How to earn it |
 |---|---|

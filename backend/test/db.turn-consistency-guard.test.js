@@ -448,7 +448,7 @@ describe('addTurn — Halve-It scored/bust must match the visit\'s points on the
   });
 });
 
-describe('addTurn — The Pressure Chamber scored/bust/checkout/legWon must match the derived round outcome, when opted in (docs/pressure-chamber-roadmap.md)', () => {
+describe('addTurn — The Pressure Chamber scored/bust/checkout/legWon must match the derived round outcome, when opted in (docs/archive/pressure-chamber-roadmap.md)', () => {
   // The Pressure Chamber's card (target+modifier) is a pure function of
   // (gameId, roundIndex) -- generatePressureCard() -- so it's re-derived here
   // with the REAL gameId createGame() assigns, exactly like the guard itself

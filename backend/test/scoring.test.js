@@ -2445,7 +2445,7 @@ describe('Dead Man Walking (docs/archive/dead-man-walking-roadmap.md)', () => {
   });
 });
 
-describe('generatePressureCard (docs/pressure-chamber-roadmap.md "The card sequence is generated, never stored")', () => {
+describe('generatePressureCard (docs/archive/pressure-chamber-roadmap.md "The card sequence is generated, never stored")', () => {
   test('deterministic: same (gameId, roundIndex) always yields the same card', () => {
     const a = generatePressureCard(7, 3);
     const b = generatePressureCard(7, 3);
@@ -2479,7 +2479,7 @@ describe('generatePressureCard (docs/pressure-chamber-roadmap.md "The card seque
   });
 });
 
-describe('gradePressureSectorRound (docs/pressure-chamber-roadmap.md "Targets")', () => {
+describe('gradePressureSectorRound (docs/archive/pressure-chamber-roadmap.md "Targets")', () => {
   const target = { type:'sector', sector:20, ring:'double', label:'Double 20', difficulty:'double' };
   test('an exact ring+sector match on any dart is a full hit', () => {
     const darts = [{sector:1,mult:1},{sector:20,mult:2},{sector:5,mult:1}];
@@ -2504,7 +2504,7 @@ describe('gradePressureSectorRound (docs/pressure-chamber-roadmap.md "Targets")'
   });
 });
 
-describe('evaluateDartPressureSector (Sudden Death per-dart early-stop, docs/pressure-chamber-roadmap.md)', () => {
+describe('evaluateDartPressureSector (Sudden Death per-dart early-stop, docs/archive/pressure-chamber-roadmap.md)', () => {
   const target = { type:'sector', sector:16, ring:'double', label:'Double 16', difficulty:'double' };
   test('an exact ring+sector hit continues (not ended)', () => {
     const r = evaluateDartPressureSector({sector:16,mult:2}, target);
@@ -2524,7 +2524,7 @@ describe('evaluateDartPressureSector (Sudden Death per-dart early-stop, docs/pre
   });
 });
 
-describe('pressureBaseCp / pressureFinishBaseCp / pressureMissPenaltyBase (docs/pressure-chamber-roadmap.md "Composure Points formula")', () => {
+describe('pressureBaseCp / pressureFinishBaseCp / pressureMissPenaltyBase (docs/archive/pressure-chamber-roadmap.md "Composure Points formula")', () => {
   test('base CP scales single < double < treble < bullseye', () => {
     const single = pressureBaseCp({ type:'sector', difficulty:'single' });
     const double = pressureBaseCp({ type:'sector', difficulty:'double' });
@@ -2543,7 +2543,7 @@ describe('pressureBaseCp / pressureFinishBaseCp / pressureMissPenaltyBase (docs/
   });
 });
 
-describe('pressureMissPenaltyForCard (docs/pressure-chamber-roadmap.md "derived-at-read-time" miss penalty)', () => {
+describe('pressureMissPenaltyForCard (docs/archive/pressure-chamber-roadmap.md "derived-at-read-time" miss penalty)', () => {
   test('Double Down doubles the miss penalty relative to Dead Calm on the same target', () => {
     const target = { type:'sector', difficulty:'double' };
     const deadCalm = PRESSURE_MODIFIERS.find(m => m.key === 'dead_calm');
@@ -2561,7 +2561,7 @@ describe('pressureMissPenaltyForCard (docs/pressure-chamber-roadmap.md "derived-
   });
 });
 
-describe('pressureRoundOutcome / computePressureRoundResult (docs/pressure-chamber-roadmap.md "Composure Points formula")', () => {
+describe('pressureRoundOutcome / computePressureRoundResult (docs/archive/pressure-chamber-roadmap.md "Composure Points formula")', () => {
   const deadCalm = PRESSURE_MODIFIERS.find(m => m.key === 'dead_calm');
   const doubleDown = PRESSURE_MODIFIERS.find(m => m.key === 'double_down');
   const comeback = PRESSURE_MODIFIERS.find(m => m.key === 'comeback');
@@ -2632,7 +2632,7 @@ describe('pressureRoundOutcome / computePressureRoundResult (docs/pressure-chamb
   });
 });
 
-describe('pressureComposureRating (docs/pressure-chamber-roadmap.md "Composure Rating")', () => {
+describe('pressureComposureRating (docs/archive/pressure-chamber-roadmap.md "Composure Rating")', () => {
   test('threshold table matches the roadmap doc exactly', () => {
     assert.equal(pressureComposureRating(120), 'Ice');
     assert.equal(pressureComposureRating(200), 'Ice');
@@ -2647,7 +2647,7 @@ describe('pressureComposureRating (docs/pressure-chamber-roadmap.md "Composure R
   });
 });
 
-describe('isPressureIceRun / isPressureModifierFullHit (docs/pressure-chamber-roadmap.md "Achievements")', () => {
+describe('isPressureIceRun / isPressureModifierFullHit (docs/archive/pressure-chamber-roadmap.md "Achievements")', () => {
   test('isPressureIceRun is true only at 120+ CP', () => {
     assert.equal(isPressureIceRun(120), true);
     assert.equal(isPressureIceRun(119), false);
@@ -2660,7 +2660,7 @@ describe('isPressureIceRun / isPressureModifierFullHit (docs/pressure-chamber-ro
   });
 });
 
-describe('pressureChamberDecideWinnerIndex (docs/pressure-chamber-roadmap.md "Solo vs. H2H tie-breaking")', () => {
+describe('pressureChamberDecideWinnerIndex (docs/archive/pressure-chamber-roadmap.md "Solo vs. H2H tie-breaking")', () => {
   test('highest total CP wins outright', () => {
     const idx = pressureChamberDecideWinnerIndex([{totalCp:80,misses:2,darts:30},{totalCp:100,misses:5,darts:30}]);
     assert.equal(idx, 1);
@@ -2679,7 +2679,7 @@ describe('pressureChamberDecideWinnerIndex (docs/pressure-chamber-roadmap.md "So
   });
 });
 
-describe('evaluateVisitPressureChamber (docs/pressure-chamber-roadmap.md "Data model")', () => {
+describe('evaluateVisitPressureChamber (docs/archive/pressure-chamber-roadmap.md "Data model")', () => {
   function mkGame(round, current, players, gameId){
     return { gameId: gameId || 999, pressureChamberRound: round, current, players, config: { rounds: PRESSURE_ROUNDS } };
   }
@@ -2716,7 +2716,7 @@ describe('evaluateVisitPressureChamber (docs/pressure-chamber-roadmap.md "Data m
   });
 });
 
-describe('rebuildPressureChamberState (docs/archive/saved-games-roadmap.md pure replay rebuild, adapted for docs/pressure-chamber-roadmap.md)', () => {
+describe('rebuildPressureChamberState (docs/archive/saved-games-roadmap.md pure replay rebuild, adapted for docs/archive/pressure-chamber-roadmap.md)', () => {
   test('replays turns and lands on the correct next round/player', () => {
     const gameId = 321;
     const names = ['Ben', 'Alaina'];

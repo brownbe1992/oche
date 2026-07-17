@@ -3142,6 +3142,8 @@ already-migrated database is a safe no-op).
 | `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set only by Cricket's write path (`enterTurnCricket()`) — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged. Checkout Trainer repurposes it as "answered with the objectively fewest darts" (§19) |
 | `target_score` | `INTEGER` | Checkout Trainer only (§19): the target offered for that round — unlike X01 there's no persistent "remaining score" state to derive it from afterward. `NULL` for every other game type; `addTurn()` range-checks it to 1–170 |
 | `declared_unsolvable` | `INTEGER NOT NULL DEFAULT 0` | Checkout Trainer trick questions only (§19): `1` marks a round answered by declaring "no possible checkout" instead of tapping out darts — the only turn shape allowed to carry **zero** dart rows (`addTurn()` rejects it outside `checkout_trainer` games, with any darts attached, or with a nonzero `scored`). The verdict still lives on `bust`/`checkout`/`leg_won` (correct call → `checkout=1, leg_won=1`; wrong call → `bust=1`); this flag exists so "a real checkout was solved" queries (Toughest Checkout Solved) can exclude declarations |
+| `affected_player_id` | `INTEGER` | Killer only (§ Killer): which player's life total this dart changed (`NULL` = no effect, thrower's own id = self-effect, another id = an attack). `NULL` for every other game type |
+| `declared_hit` | `INTEGER` | The Pressure Chamber only (§34): the player's before-the-throw self-declaration — `1` = declared hit, `0` = declared miss, `NULL` = no declaration / every other game type. **Not a scoring input** and carries no leaderboard weight; feeds only the informational Honesty % stat. Deliberately has **no consistency guard** (unverifiable by design — an honor-system signal); `addTurn()` validates only its shape (`0`/`1`) and rejects it outside `pressure_chamber` games |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 
 ### `darts` (one row per physical dart, indexed on `turn_id` and `(sector,multiplier)`)
@@ -6596,7 +6598,7 @@ Out tally) exactly.
 
 ## 34. The Pressure Chamber
 
-`docs/pressure-chamber-roadmap.md`. A 15-round pressure-training drill —
+`docs/archive/pressure-chamber-roadmap.md`. A 15-round pressure-training drill —
 `game_type='pressure_chamber'`, `config.rounds: 15` (fixed, server-overridden
 regardless of whatever the client sends, the same never-trust-the-client
 precedent Killer's number assignment already established), 1-4 players
@@ -6784,9 +6786,39 @@ introducing one just for this feature.
 Full-Hit Rate, Partial-Hit Rate (all `getPressureChamberStatBubbles`'
 `avgCp`/`fullHitRate`/`partialHitRate` — the roadmap doc's own explicit list),
 plus Win Rate/Runs Completed/Darts Thrown for parity with Shanghai's/
-Halve-It's own bubble sets. `totalCpEarned` (lifetime CP, clamped at 0 per
+Halve-It's own bubble sets, and **Honesty %** (`honestyPct` — see the
+self-declare mechanic below). `totalCpEarned` (lifetime CP, clamped at 0 per
 run before summing) also rides in this response as the achievement-ladder
 base — see Achievements below.
+
+### Self-declare honesty mechanic — `turns.declared_hit` + Honesty %
+
+Before each visit's darts are read off the board, the player makes a
+**self-declaration**: tapping "🎯 I'll hit it" or "❌ I'll miss" on a declare
+screen that sits ahead of the normal dart pad (`renderPadPressureChamber()`
+shows the two declare buttons and hides the number pad / S·D·T multi-row until
+a call is made; No Warmup's 5-second clock only arms once the call is made, not
+when the card first shows). The call is stored on the new nullable
+`turns.declared_hit` column (`1` = declared hit, `0` = declared miss, `NULL` =
+no declaration / every other game type). It is transient per-visit client state
+(`game.pressureDeclared`, reset to `NULL` each turn, never saved or resumed) and
+is passed to `db.recordTurn()` as `declaredHit`.
+
+`declared_hit` is **explicitly not a scoring input** and carries no leaderboard
+weight. It feeds only the informational **Honesty %** stat
+(`getPressureChamberStatBubbles`' `honestyPct`/`declaredRounds`): of every round
+where a declaration was made, the percentage that matched the round's real
+outcome — a declared hit is honest iff the round graded at least a partial hit
+(`checkout=1`), a declared miss is honest iff the round busted (`bust=1`).
+`honestyPct` is `null` until at least one declaration exists. Unlike every other
+new column there is **no consistency guard** for `declared_hit`: the server can
+never prove the declaration was truly made before verifying (a determined client
+can submit one matching the outcome in hindsight), so it is an honor-system
+self-discipline signal by design. `addTurn()` validates only its shape (`0`/`1`)
+and rejects it on any non-`pressure_chamber` game, the same gating
+`declared_unsolvable` uses for Checkout Trainer. Covered by
+`backend/test/db.pressure-chamber-stats.test.js` (honest→100%, mixed→50%,
+undeclared→`null`, and the game-type/shape guards).
 
 **Personal Bests** (`getPressureChamberPersonalBests(name, mode)`):
 `bestRunCp` (a peak, no minimum-attempts floor — the Checkout Blitz/Halve-It
@@ -6872,19 +6904,17 @@ directly. Reused identically by `_savedGamePosition()` (write-time) and
 is in both `SAVABLE_GAME_TYPES` lists (`backend/db.js` and
 `frontend/index.html`).
 
-### Explicitly out of scope — the self-declare honesty mechanic
+### The self-declare honesty mechanic (build-order step 10, shipped)
 
-The roadmap doc's own build-order step 10 (`declared_hit`, a self-declare
+The roadmap doc's own build-order step 10 — `declared_hit`, a self-declare
 hit/miss step before darts are read, and an Honesty% stat comparing the
-declaration against the real outcome) is **not built**. The roadmap doc's own
-"Open questions" section already flags this as genuinely uncertain ("is
-`declared_hit` worth building at all in v1") since it's the one piece of this
-design that can never be made tamper-resistant by a single atomic write — so
-deferring it follows the doc's own lean, not a cut corner. Tracked as its own
-separate, independently-scoped item in `docs/open-roadmap-items.md` (the same
-v1/v2-split discipline Halve-It's custom target editor already used).
-`docs/pressure-chamber-roadmap.md` stays in `docs/` (not archived) because of
-this one remaining open item.
+declaration against the real outcome — **shipped** as its own v2 item (split out
+of the core-game v1 the same way Halve-It's custom target editor was). Its full
+data model, the declare-screen UI, the informational Honesty % stat, and the
+"no consistency guard, honor-system by design" rationale are documented under
+"Self-declare honesty mechanic" above. With this item done,
+`docs/archive/pressure-chamber-roadmap.md` is fully complete and moved to
+`docs/archive/`.
 
 ### Testing
 

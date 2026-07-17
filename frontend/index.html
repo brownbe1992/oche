@@ -2883,7 +2883,7 @@ function renderHomeTabBodyHalveIt(){
   `;
 }
 
-// The Pressure Chamber's Home page leaderboard (docs/pressure-chamber-roadmap.md
+// The Pressure Chamber's Home page leaderboard (docs/archive/pressure-chamber-roadmap.md
 // "Home leaderboard" — "best single-run CP, same peak-no-floor shape as
 // Checkout Blitz's own board") plus a Most Wins board (H2H only), same
 // {h2h:{...}, practice:{...}, wins:...} shape as homeData.halveIt.
@@ -5002,7 +5002,7 @@ async function startGame(){
   const isDeadManWalking = gameType === 'dead_man_walking';
   // Same BUG-22 reasoning again: a practice Pressure Chamber "run" is a
   // complete, standalone 15-round game (evaluateVisitPressureChamber() only
-  // ever completes once round 15 settles, per docs/pressure-chamber-roadmap.md),
+  // ever completes once round 15 settles, per docs/archive/pressure-chamber-roadmap.md),
   // forced to exactly 1 leg/1 set here; H2H Pressure Chamber keeps a real
   // Bo3/Bo5 multi-leg match (each leg its own fresh 15-round run).
   const isPracticePressureChamber = setup.gameType === 'pressure_chamber' && setup.mode !== 'h2h';
@@ -5029,7 +5029,7 @@ async function startGame(){
     // which case config.targets is omitted and createGame() falls back to
     // HALVE_IT_DEFAULT_TARGETS server-side).
     : gameType === 'halve_it' ? (resolveHalveItTargets() ? { targets: resolveHalveItTargets() } : {})
-    // Rounds (docs/pressure-chamber-roadmap.md) — fixed at 15, never a New
+    // Rounds (docs/archive/pressure-chamber-roadmap.md) — fixed at 15, never a New
     // Game choice; sent here only as a "store a currently-single value"
     // placeholder matching PRESSURE_ROUNDS — createGame() (backend/db.js)
     // overrides this server-side unconditionally regardless of what's sent,
@@ -5131,13 +5131,17 @@ async function startGame(){
     baseballInning: 1, // Baseball only (docs/game-modes-roadmap.md) — which inning (1-9, or beyond on a tie) is live
     shanghaiRound: 1, // Shanghai only (docs/archive/shanghai-roadmap.md) — which round (1-config.rounds, or beyond on a tie) is live
     halveItRound: 1, // Halve-It only (docs/archive/halve-it-roadmap.md) — which round (1-config.targets.length, or beyond on a tie) is live
-    // The Pressure Chamber only (docs/pressure-chamber-roadmap.md) — which
+    // The Pressure Chamber only (docs/archive/pressure-chamber-roadmap.md) — which
     // round (1-15) is live; gameId is the real games.id, the seed
     // generatePressureCard() needs (set right after DB.beginGame() resolves
     // below, since it isn't known until the server assigns it); the deadline
     // is No Warmup's own wall-clock cutoff, armed per-round by
     // renderGamePressureChamber() itself, not set here.
     pressureChamberRound: 1, gameId: null, pressureChamberDeadline: null, _pcTimerRound: null,
+    // The self-declare hit/miss call for the CURRENT visit (docs/archive/pressure-chamber-roadmap.md
+    // build-order step 10): null = not yet declared (declare step showing), 1/0 once called.
+    // Transient per-visit state, reset to null every turn — never persisted or resumed.
+    pressureDeclared: null,
     bobs27Round: 1,    // Bob's 27 only (docs/archive/practice-ladders-roadmap.md Part A) — which double (1-20) is live
     checkoutLadderTarget: 121, // 121 Checkout Ladder only (docs/archive/practice-ladders-roadmap.md Part B) — current attempt's target
     checkoutLadderVisits: 0,  // visits used so far in the current attempt (0-2 while live)
@@ -5224,7 +5228,7 @@ async function startGame(){
     p.score = first ? first.target : 0;
     p.doubleOut = true;
   }
-  // The Pressure Chamber (docs/pressure-chamber-roadmap.md): generatePressureCard()'s
+  // The Pressure Chamber (docs/archive/pressure-chamber-roadmap.md): generatePressureCard()'s
   // seed is the real games.id, only known once the server assigns it here.
   if(game.gameType === 'pressure_chamber') game.gameId = DB.gameId;
   if(activeChallenge && DB.gameId != null){
@@ -6955,7 +6959,7 @@ function renderHalveItPersonalBests(data){
   </div>`;
 }
 // The Pressure Chamber's Personal Bests — getPressureChamberPersonalBests()'s
-// 3-field shape (docs/pressure-chamber-roadmap.md "Stats, Personal Bests,
+// 3-field shape (docs/archive/pressure-chamber-roadmap.md "Stats, Personal Bests,
 // leaderboard"): a peak single-run CP total (no minimum floor, the Checkout
 // Blitz/Halve-It precedent), the Composure Rating that peak corresponds to,
 // and the longest full-hit streak reached in any single run.
@@ -7459,7 +7463,7 @@ function renderGameHalveIt(){
   pushLive();
 }
 
-/* The Pressure Chamber chalkboard scorecard (docs/pressure-chamber-roadmap.md
+/* The Pressure Chamber chalkboard scorecard (docs/archive/pressure-chamber-roadmap.md
    "Live scoreboard"): same shared cs-table shape as Baseball/Shanghai/
    Halve-It's own (rows=rounds 1-15, columns=players), each settled cell
    showing an icon for that round's outcome (✅ full / ➗ partial / ❌ miss —
@@ -7540,11 +7544,13 @@ function renderGamePressureChamber(){
   roundBanner.textContent = `Round ${Math.min(game.pressureChamberRound,maxRounds)} of ${maxRounds}`;
   sb.appendChild(roundBanner);
 
-  // No Warmup's wall-clock deadline (docs/pressure-chamber-roadmap.md): armed
-  // once per round, the moment its own card is first revealed — a re-render
-  // within the SAME round (undo, a live-scoreboard refresh) must never reset
-  // an already-ticking clock, hence the _pcTimerRound guard.
-  if(game.darts.length === 0 && noWarmup && game._pcTimerRound !== game.pressureChamberRound){
+  // No Warmup's wall-clock deadline (docs/archive/pressure-chamber-roadmap.md): armed
+  // once per round, the moment the dart pad is first revealed — which, since the
+  // self-declare step now sits ahead of the pad, means the moment the player
+  // COMMITS their call (game.pressureDeclared != null), not when the card first
+  // shows. A re-render within the SAME round (undo, a live-scoreboard refresh)
+  // must never reset an already-ticking clock, hence the _pcTimerRound guard.
+  if(game.darts.length === 0 && game.pressureDeclared != null && noWarmup && game._pcTimerRound !== game.pressureChamberRound){
     game._pcTimerRound = game.pressureChamberRound;
     game.pressureChamberDeadline = Date.now() + PRESSURE_NO_WARMUP_MS;
     startPressureChamberNoWarmupTimer();
@@ -8092,7 +8098,7 @@ const DMW_STREAK_MILESTONE_LADDERS = [
     });
   });
 });
-/* ---------- The Pressure Chamber (docs/pressure-chamber-roadmap.md) ----------
+/* ---------- The Pressure Chamber (docs/archive/pressure-chamber-roadmap.md) ----------
    Three data-driven lifetime ladders (runs completed, CP earned — base+session,
    the Chuckin/Baseball pattern) plus one PER-RUN ladder (longest full-hit
    streak within that one run — checked once at run completion against the
@@ -8160,7 +8166,7 @@ BADGE_INFO['dmwlastrequest'] = { icon:'💀', label:'Last Request',
   desc:'Walk Out of zero of the 15 rounds in a single Dead Man Walking run — you showed up.', deadManWalking:true };
 ACH_LABELS['dmwlastrequest'] = 'Last Request 💀';
 ACH_DURATION['dmwlastrequest'] = 3000;
-// One-off flavor badges (docs/pressure-chamber-roadmap.md "Achievements"),
+// One-off flavor badges (docs/archive/pressure-chamber-roadmap.md "Achievements"),
 // each tied to a full hit under a specific modifier — all recurring (a real
 // repeatable feat across different runs), checked in enterTurnPressureChamber()
 // the moment a round is graded.
@@ -9317,7 +9323,7 @@ function liveSnapshot(message){
     // labels from, so it needs every round's target up front to render the
     // whole scorecard grid, not just the live one.
     halveItTargets: game.gameType === 'halve_it' ? ((game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS) : null,
-    // The Pressure Chamber only (docs/pressure-chamber-roadmap.md): which
+    // The Pressure Chamber only (docs/archive/pressure-chamber-roadmap.md): which
     // round is currently live, its own wall-clock No Warmup deadline (if
     // any), and the FULL 15-round card sequence up front (target+modifier
     // for every round) — same "display.html has no shared scoring.js module"
@@ -9633,7 +9639,7 @@ function renderPadHalveIt(full){
   miss.onclick=()=>throwDart(0); pad.appendChild(miss);
 }
 
-/* The Pressure Chamber's pad (docs/pressure-chamber-roadmap.md): deliberately
+/* The Pressure Chamber's pad (docs/archive/pressure-chamber-roadmap.md): deliberately
    the FULL 1-20+Bull number grid (same shape as X01's own default Pad-mode
    grid, via the ambient multi-row S/D/T selector), not a single restricted
    target button — unlike Halve-It/Bob's 27, a Pressure Chamber dart can
@@ -9648,14 +9654,45 @@ function renderPadPressureChamber(full){
   const board = document.getElementById('dart-board-wrap');
   if(board) board.classList.add('hidden');
   const bounceBtn = document.getElementById('bounce-out-btn');
-  if(bounceBtn) bounceBtn.disabled = full;
   const multi = document.getElementById('multi-row');
-  if(multi) multi.classList.remove('hidden');
   const pad = document.getElementById('pad');
   if(!pad) return;
   pad.classList.remove('hidden');
   pad.classList.remove('cricket-pad');
   pad.innerHTML = '';
+
+  // docs/archive/pressure-chamber-roadmap.md build-order step 10: the self-declare hit/miss
+  // step is its own screen state AHEAD of the normal dart-input widget. Until the
+  // player has committed a call for this round (game.pressureDeclared == null), the
+  // number pad and the S/D/T multi-row are hidden and replaced by the two declare
+  // buttons; only once a call is made does the real dart pad appear (No Warmup's
+  // clock doesn't start until then either — see renderGamePressureChamber()).
+  if(game.pressureDeclared == null && !full && game.darts.length === 0){
+    if(bounceBtn) bounceBtn.disabled = true;
+    if(multi) multi.classList.add('hidden');
+    pad.classList.add('cricket-pad');
+    const prompt = document.createElement('div');
+    prompt.className = 'pp-meta';
+    prompt.style.cssText = 'grid-column:1/-1;text-align:center;margin-bottom:8px;font-weight:700';
+    prompt.textContent = 'Call it before you throw — will you HIT this target, or MISS?';
+    pad.appendChild(prompt);
+    const hitBtn = document.createElement('button');
+    hitBtn.className = 'cricket-target';
+    hitBtn.innerHTML = '<span class="ct-num">🎯 I\'ll hit it</span>';
+    hitBtn.setAttribute('aria-label', "Declare: I'll hit this round's target");
+    hitBtn.onclick = () => declarePressureHit(true);
+    pad.appendChild(hitBtn);
+    const missBtn = document.createElement('button');
+    missBtn.className = 'miss';
+    missBtn.innerHTML = '<span class="ct-num">❌ I\'ll miss</span>';
+    missBtn.setAttribute('aria-label', "Declare: I'll miss this round's target");
+    missBtn.onclick = () => declarePressureHit(false);
+    pad.appendChild(missBtn);
+    return;
+  }
+
+  if(bounceBtn) bounceBtn.disabled = full;
+  if(multi) multi.classList.remove('hidden');
   for(let n=1;n<=20;n++){
     const b=document.createElement('button');
     b.textContent=n; b.disabled=full;
@@ -9668,6 +9705,16 @@ function renderPadPressureChamber(full){
   const miss=document.createElement('button');
   miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
   miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+}
+// Records this round's before-the-throw self-declaration and reveals the dart pad.
+// Purely a self-discipline signal (docs/archive/pressure-chamber-roadmap.md) — it never
+// changes what the player is allowed to throw or how the round is scored.
+function declarePressureHit(hit){
+  if(game.pressureDeclared != null) return;
+  game.pressureDeclared = hit ? 1 : 0;
+  const card = generatePressureCard(game.gameId, Math.min(game.pressureChamberRound, (game.config && game.config.rounds) || PRESSURE_ROUNDS));
+  announce(`${game.players[game.current].name} calls ${hit ? 'a HIT' : 'a MISS'} on ${card.target.label}.`);
+  renderGamePressureChamber();
 }
 
 /* docs/archive/practice-ladders-roadmap.md Part A: one button, the round's own
@@ -10036,7 +10083,7 @@ async function resumeGame(gameId){
     baseballInning, shanghaiRound, halveItRound, bobs27Round, checkoutLadderTarget, checkoutLadderVisits,
     gauntletStationIndex, gauntletAwaitingRepeat, gauntletFinalMisses, gauntletCleanStreak, gauntletBestCleanStreak,
     dmwTarget, dmwBudget, dmwDartsUsedThisRound, dmwWalkedOutCount, dmwCurrentStreak, dmwBestStreak,
-    // The Pressure Chamber only (docs/pressure-chamber-roadmap.md): gameId is
+    // The Pressure Chamber only (docs/archive/pressure-chamber-roadmap.md): gameId is
     // the real games.id generatePressureCard() seeds on — already known here
     // (unlike startGame(), which only learns it after DB.beginGame()
     // resolves), so it's set directly rather than patched in afterward.
@@ -10044,6 +10091,9 @@ async function resumeGame(gameId){
     // guard treats this as a fresh round and arms the timer if needed.
     pressureChamberRound, gameId: gameType === 'pressure_chamber' ? state.gameId : null,
     pressureChamberDeadline: null, _pcTimerRound: null,
+    // A resumed run always re-opens on the declare step for the current visit —
+    // the call is transient per-visit state, never saved (see the setup default).
+    pressureDeclared: null,
     darts: [], busted:false, won:false, done:false,
     gameOneEighties:0, gameBigFish:0, gameBusts:0,
     currentLegTurns: [], legVisitLogs: [], sessionTurns: [],
@@ -11509,6 +11559,7 @@ function enterTurnPressureChamber(){
     roundResults:Object.assign({}, p.roundResults),
     legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
     pressureChamberRound:game.pressureChamberRound, pressureChamberDeadline:game.pressureChamberDeadline, _pcTimerRound:game._pcTimerRound,
+    pressureDeclared:game.pressureDeclared,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
     badgeReverts:[], voided:false };
   game.lastTurnSnapshot = _snap;
@@ -11519,7 +11570,7 @@ function enterTurnPressureChamber(){
   const dartsThrown = game.darts.length;
   p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
 
-  // One-off flavor badges (docs/pressure-chamber-roadmap.md "Achievements") —
+  // One-off flavor badges (docs/archive/pressure-chamber-roadmap.md "Achievements") —
   // checked the moment a round is graded, same "checked where the outcome is
   // already known" precedent onLegWonHalveIt()'s own two badges use.
   if(isPressureModifierFullHit(card, ev.outcome, 'sudden_death')){
@@ -11538,11 +11589,15 @@ function enterTurnPressureChamber(){
       { icon:'🃏', headline:'DEAD CALM, STEADY HANDS!', player:p.name, statLine:`Full hit on ${card.target.label} — no modifier, no excuses` });
   }
 
-  // docs/pressure-chamber-roadmap.md's own "store the gain, derive the rest"
+  // docs/archive/pressure-chamber-roadmap.md's own "store the gain, derive the rest"
   // data model — turns.scored is the CP GAINED this round (never negative),
   // reusing Checkout Trainer's exact bust/checkout/leg_won 3-way outcome.
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.gained, bust:ev.outcome==='miss', checkout:ev.outcome!=='miss', legWon:ev.outcome==='full', checkoutPoints:null,
+    // docs/archive/pressure-chamber-roadmap.md build-order step 10: the player's own
+    // before-the-throw hit/miss call, stored alongside the real outcome for the
+    // informational Honesty% stat. Never a scoring input.
+    declaredHit: game.pressureDeclared,
     darts: game.darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
       zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
 
@@ -11559,6 +11614,7 @@ function enterTurnPressureChamber(){
 
   if(ev.roundComplete) game.pressureChamberRound += 1;
   game.darts=[]; game.busted=false; game.won=false;
+  game.pressureDeclared = null;  // the next player/round makes its own call
   game.current = (game.current+1) % game.players.length;
   game.turnSeq += 1;
   document.getElementById('status').className='status';
@@ -11576,6 +11632,7 @@ function undoLastTurnPressureChamber(){
   p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
   game.pressureChamberRound = snap.pressureChamberRound;
   game.pressureChamberDeadline = snap.pressureChamberDeadline; game._pcTimerRound = snap._pcTimerRound;
+  game.pressureDeclared = snap.pressureDeclared;  // restore the call this round was made under
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
 
@@ -12007,7 +12064,7 @@ function startNextLeg(newSet){
   if(game.gameType === 'baseball') game.baseballInning = 1;
   if(game.gameType === 'shanghai') game.shanghaiRound = 1;
   if(game.gameType === 'halve_it') game.halveItRound = 1;
-  if(game.gameType === 'pressure_chamber'){ game.pressureChamberRound = 1; game.pressureChamberDeadline = null; game._pcTimerRound = null; stopPressureChamberNoWarmupTimer(); }
+  if(game.gameType === 'pressure_chamber'){ game.pressureChamberRound = 1; game.pressureChamberDeadline = null; game._pcTimerRound = null; game.pressureDeclared = null; stopPressureChamberNoWarmupTimer(); }
   if(game.gameType === 'checkout_ladder') game.checkoutLadderVisits = 0;
   game.legSummary = null;
   game.currentLegTurns = [];
@@ -12495,7 +12552,7 @@ const HALVE_IT_STAT_DEFS = [
 const HALVE_IT_BUBBLE_KEY_MAP = { halveitavgtotal:'avgFinalTotal', halveittimeshalved:'timesHalved', halveitwinpct:'winPct',
   halveitgames:'gamesPlayed', halveitdartsthrown:'dartsThrown', halveitbestround:'bestRound' };
 
-// The Pressure Chamber's own stat vocabulary (docs/pressure-chamber-roadmap.md
+// The Pressure Chamber's own stat vocabulary (docs/archive/pressure-chamber-roadmap.md
 // "Stat bubbles"): runs completed, average CP, full-hit rate, partial-hit
 // rate are the doc's own explicit list; gamesPlayed/winPct/dartsThrown are
 // added for parity with every sibling drill's own bubble set (Shanghai/
@@ -12508,10 +12565,15 @@ const PRESSURE_CHAMBER_STAT_DEFS = [
   { key:'pcwinpct',       label:'Win Rate',       desc:'% of H2H Pressure Chamber runs won',      fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
   { key:'pcruns',         label:'Runs Completed', desc:'Pressure Chamber runs completed',         fmt:v=>v!=null?String(Math.round(v)):'—' },
   { key:'pcdartsthrown',  label:'Darts Thrown',   desc:'Total darts thrown in Pressure Chamber runs', fmt:v=>v!=null?Number(v).toLocaleString():'—' },
+  // docs/archive/pressure-chamber-roadmap.md build-order step 10: an informational
+  // self-discipline signal — how often the player's own before-the-throw hit/miss
+  // declaration matched the round's real outcome. Never a scoring input; '—' until
+  // a declaration has actually been made.
+  { key:'pchonesty',      label:'Honesty %',      desc:'% of self-declared calls that matched the round\'s real hit/miss outcome', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
 ];
 // Translates a PRESSURE_CHAMBER_STAT_DEFS key to getPressureChamberStatBubbles()'s JSON field name.
 const PRESSURE_CHAMBER_BUBBLE_KEY_MAP = { pcavgcp:'avgCp', pcfullhitrate:'fullHitRate', pcpartialhitrate:'partialHitRate',
-  pcwinpct:'winPct', pcruns:'runsCompleted', pcdartsthrown:'dartsThrown' };
+  pcwinpct:'winPct', pcruns:'runsCompleted', pcdartsthrown:'dartsThrown', pchonesty:'honestyPct' };
 
 // Bob's 27's own stat vocabulary (docs/archive/practice-ladders-roadmap.md Part A) —
 // solo, so no win-rate/games-vs-opponent bubble the way Baseball has; "Runs
@@ -13054,7 +13116,7 @@ function playerSnapshotHalveIt(p){
   };
 }
 
-/* ---------- The Pressure Chamber (docs/pressure-chamber-roadmap.md) ----------
+/* ---------- The Pressure Chamber (docs/archive/pressure-chamber-roadmap.md) ----------
    Another Baseball/Shanghai/Halve-It sibling (fixed round sequence, all
    players in lockstep on one shared live round, game.pressureChamberRound)
    with no instant-win condition and no extra-rounds extension at all — the
@@ -13066,7 +13128,7 @@ function playerSnapshotHalveIt(p){
 function newMatchPlayerPressureChamber(name){
   const p = { name, totalCp:0, misses:0, fullHits:0, currentFullHitStreak:0, bestFullHitStreak:0,
     roundResults:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0,
-    // Lifetime achievement-ladder bases (docs/pressure-chamber-roadmap.md
+    // Lifetime achievement-ladder bases (docs/archive/pressure-chamber-roadmap.md
     // "Achievements") — fetched once at game start, same "avoid a network
     // round-trip per turn" reasoning newMatchPlayerBaseball()'s own
     // lifetimeRunsBase fetch documents. No mode param -> genuinely unscoped
@@ -13854,7 +13916,7 @@ function advanceKillerTurn(){
   renderGameKiller();
   pushLive();
 }
-/* The Pressure Chamber per-dart commit (docs/pressure-chamber-roadmap.md
+/* The Pressure Chamber per-dart commit (docs/archive/pressure-chamber-roadmap.md
    "Sudden Death"): the round normally batches to 3 darts like any other
    visit-based game type, but Sudden Death needs a per-dart early stop the
    instant a dart isn't a full hit at all — reusing the existing per-dart
@@ -15102,7 +15164,7 @@ function tickCheckoutBlitzTimer(){
   if(remainingSec <= 0) endBlitzRun();
 }
 
-/* ---------- The Pressure Chamber's No Warmup timer (docs/pressure-chamber-roadmap.md
+/* ---------- The Pressure Chamber's No Warmup timer (docs/archive/pressure-chamber-roadmap.md
    "No Warmup") ---------- Same Date.now()-based wall-clock deadline precedent
    as Checkout Blitz's own timer above (never a naively decrementing counter,
    so a backgrounded/throttled tab can't grant extra time) — armed for exactly
@@ -15139,7 +15201,7 @@ function tickPressureChamberNoWarmupTimer(){
   if(blitzDeadlinePassed(game.pressureChamberDeadline, Date.now())){
     stopPressureChamberNoWarmupTimer();
     // Dart 1 never landed before the deadline — the round is scored as a
-    // miss automatically (docs/pressure-chamber-roadmap.md's own explicit
+    // miss automatically (docs/archive/pressure-chamber-roadmap.md's own explicit
     // wording), recorded as a genuine miss dart (sector 0) so the server's
     // own consistency guard (which knows nothing about client-side wall-clock
     // timing) sees exactly the same darts the client graded from — never a
@@ -15872,7 +15934,7 @@ function loadDartHeatmap(){
   // renderPadShanghai() are always used), so every single they record is
   // permanently zone-unspecified — not a Pad-mode choice the way it is for
   // X01/Chuckin/Doubles Practice. See buildDartHeatmap(). Pressure Chamber
-  // extends the same BUG-24 fix (docs/pressure-chamber-roadmap.md): its own
+  // extends the same BUG-24 fix (docs/archive/pressure-chamber-roadmap.md): its own
   // renderPadPressureChamber() is Pad-mode-only by design too (a real
   // dartboard would let No Warmup/Sudden Death's per-dart timing/early-stop
   // logic race real device input), so its singles are equally always

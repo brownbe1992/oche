@@ -1,6 +1,6 @@
 'use strict';
 // Committed tests for backend/db.js's Pressure Chamber stat formulas
-// (REFERENCE.md "Pressure Chamber stats", docs/pressure-chamber-roadmap.md)
+// (REFERENCE.md "Pressure Chamber stats", docs/archive/pressure-chamber-roadmap.md)
 // against a scratch SQLite database. Not exhaustive; see
 // db.x01-stats.test.js's header comment for the same "focused, not 100%
 // coverage" framing.
@@ -191,6 +191,85 @@ describe('getPressureChamberWinLeaderboard', () => {
     assert.equal(byName[p1].played, 2);
     assert.equal(byName[p1].won, 1);
     assert.equal(byName[p1].rate, 50);
+  });
+});
+
+// Honesty% (docs/archive/pressure-chamber-roadmap.md build-order step 10): of every round
+// where the player made a before-the-throw self-declaration, what % matched the
+// round's real hit/miss outcome. A declared hit is honest iff the round checked out
+// (full OR partial); a declared miss is honest iff the round busted. Informational
+// only, never a scoring input — verified here against hand-known declarations.
+describe('getPressureChamberStatBubbles — Honesty% (item 32)', () => {
+  // Records a round the same engine-derived way pcRound does, but with an explicit
+  // self-declaration attached (declaredHit: 1 = called a hit, 0 = called a miss).
+  function pcRoundDeclared(gameId, player, round, outcome, declaredHit) {
+    const card = generatePressureCard(gameId, round);
+    const darts = outcome === 'full' ? fullHitDarts(card.target) : missDarts;
+    const result = computePressureRoundResult(card, darts.map(d => makeDartCore(d.sector, d.multiplier)));
+    db.addTurn(gameId, {
+      player, set: 1, leg: 1, scored: result.gained,
+      bust: result.outcome === 'miss', checkout: result.outcome !== 'miss', legWon: result.outcome === 'full',
+      checkoutPoints: null, declaredHit, darts,
+    });
+    return result;
+  }
+
+  test('honestyPct is null until a declaration has been made, and ignores un-declared rounds', () => {
+    const a = 'PC_Honesty_None_A', b = 'PC_Honesty_None_B';
+    db.addPlayer(a); db.addPlayer(b);
+    const g = pcGame([a, b]);
+    // a plays rounds with NO declaration at all — honestyPct must stay null.
+    pcRound(g.gameId, a, 1, 'full');
+    pcRound(g.gameId, a, 2, 'miss');
+    pcRound(g.gameId, b, 1, 'miss'); pcRound(g.gameId, b, 2, 'miss');
+    db.completeGame(g.gameId, a);
+    const bubbles = db.getPressureChamberStatBubbles(a, 'h2h');
+    assert.equal(bubbles.declaredRounds, 0);
+    assert.equal(bubbles.honestyPct, null);
+  });
+
+  test('honest declarations (hit→checkout, miss→bust) score 100%', () => {
+    const a = 'PC_Honesty_Perfect_A', b = 'PC_Honesty_Perfect_B';
+    db.addPlayer(a); db.addPlayer(b);
+    const g = pcGame([a, b]);
+    pcRoundDeclared(g.gameId, a, 1, 'full', 1);  // called hit, hit
+    pcRoundDeclared(g.gameId, a, 2, 'miss', 0);  // called miss, missed
+    pcRound(g.gameId, b, 1, 'miss'); pcRound(g.gameId, b, 2, 'miss');
+    db.completeGame(g.gameId, a);
+    const bubbles = db.getPressureChamberStatBubbles(a, 'h2h');
+    assert.equal(bubbles.declaredRounds, 2);
+    assert.equal(bubbles.honestyPct, 100);
+  });
+
+  test('a call that contradicts the outcome (declared hit but missed, declared miss but hit) is counted dishonest', () => {
+    const a = 'PC_Honesty_Mixed_A', b = 'PC_Honesty_Mixed_B';
+    db.addPlayer(a); db.addPlayer(b);
+    const g = pcGame([a, b]);
+    pcRoundDeclared(g.gameId, a, 1, 'full', 1);  // honest: called hit, hit
+    pcRoundDeclared(g.gameId, a, 2, 'miss', 1);  // dishonest: called hit, missed
+    pcRoundDeclared(g.gameId, a, 3, 'full', 0);  // dishonest: called miss, hit
+    pcRoundDeclared(g.gameId, a, 4, 'miss', 0);  // honest: called miss, missed
+    for (let r = 1; r <= 4; r++) pcRound(g.gameId, b, r, 'miss');
+    db.completeGame(g.gameId, a);
+    const bubbles = db.getPressureChamberStatBubbles(a, 'h2h');
+    assert.equal(bubbles.declaredRounds, 4);
+    assert.equal(bubbles.honestyPct, 50, '2 of 4 declarations matched the real outcome');
+  });
+
+  test('declaredHit is rejected on a non-Pressure-Chamber game and only accepts 0/1', () => {
+    const name = 'PC_Honesty_Guard';
+    db.addPlayer(name); db.addPlayer('PC_Honesty_Guard_Opp');
+    const x01 = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name }, { name: 'PC_Honesty_Guard_Opp' }] });
+    assert.throws(() => db.addTurn(x01.gameId, { player: name, set: 1, leg: 1, scored: 0, bust: true,
+      checkout: false, checkoutPoints: null, declaredHit: 1,
+      darts: [{ dartNo: 1, sector: 0, multiplier: 1 }] }), /only valid in a Pressure Chamber/);
+    const g = pcGame([name, 'PC_Honesty_Guard_Opp']);
+    // raw addTurn (no enforceConsistency) skips the card-outcome check, so only
+    // the declaredHit shape guard is under test here — 2 is neither 0 nor 1.
+    assert.throws(() => db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, bust: true,
+      checkout: false, checkoutPoints: null, declaredHit: 2,
+      darts: [{ dartNo: 1, sector: 0, multiplier: 1 }] }), /declaredHit must be 0 .* or 1/);
   });
 });
 

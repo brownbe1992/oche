@@ -41,7 +41,7 @@ worst history and keep recurring until they're solved.
   a typed-in answer. Dead Man Walking is a real physical throwing drill,
   the same "mental sibling vs. physical sibling" distinction the Checkout
   Ladder doc already drew against Checkout Trainer, extended here too.
-- **The Pressure Chamber** (`docs/pressure-chamber-roadmap.md`) and
+- **The Pressure Chamber** (`docs/archive/pressure-chamber-roadmap.md`) and
   **The Gauntlet** (`docs/archive/gauntlet-roadmap.md`) are both fixed-round,
   tiered-result solo drills, but their round content is either
   seed-generated from a curated pool (Pressure Chamber) or a hardcoded

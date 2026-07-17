@@ -1,12 +1,11 @@
 # The Pressure Chamber — Design Roadmap
 
-> Status: **core game built and shipped** (roadmap item 28 on
-> `docs/open-roadmap-items.md`). The self-declare-before-verifying honesty
-> mechanic (`declared_hit` + Honesty%, build-order step 10) is deliberately
-> deferred, split out as its own separate, independently-tracked open item —
-> see "Implementation notes" at the bottom of this doc for the full account
-> of what shipped, what was deferred and why, and every judgment call made
-> where this doc left a number or a design question open.
+> Status: **complete** (core game shipped as roadmap item 28; the
+> self-declare-before-verifying honesty mechanic — `declared_hit` + Honesty%,
+> build-order step 10 — shipped as item 32). Every item split out from this doc
+> is now Done, so this doc has moved to `docs/archive/`. See "Implementation
+> notes" at the bottom for the full account of what shipped and every judgment
+> call made where this doc left a number or a design question open.
 
 ## Goal
 
@@ -271,7 +270,8 @@ entry) is its own screen state ahead of the normal dart-input widget.
 7. H2H identical-sequence mode (2–4 players sharing one `game.id`).
 8. Stat bubbles, Personal Bests, Home leaderboard.
 9. Achievement ladders + one-off modifier badges.
-10. The self-declare hit/miss step + Honesty % stat.
+10. The self-declare hit/miss step + Honesty % stat. **(Shipped as item 32 —
+    see "Implementation notes" below.)**
 
 ## Open questions for whoever picks this up
 
@@ -314,12 +314,13 @@ entry) is its own screen state ahead of the normal dart-input widget.
 
 ## Implementation notes
 
-Everything in this doc is built except the one piece explicitly split out
-below — see `REFERENCE.md` §33 for the full technical account (data model,
-consistency guard, formulas, badges, testing) and `docs/open-roadmap-items.md`
-for the Done-ledger entry. This section closes out every "Open question"
-above and records the judgment calls this build made where a number or a
-design decision was left open.
+Everything in this doc is now built, across two items — the core game (item 28)
+and the self-declare honesty mechanic (item 32, see below). See `REFERENCE.md`
+§34 for the full technical account (data model, consistency guard, formulas,
+badges, the honesty mechanic, testing) and `docs/open-roadmap-items.md` for both
+Done-ledger entries. This section closes out every "Open question" above and
+records the judgment calls this build made where a number or a design decision
+was left open.
 
 ### What shipped
 
@@ -343,29 +344,35 @@ flavor badges, and both the live scoreboard (`frontend/index.html`) and its
 predicted — it fell out for free once the core loop worked, needing no
 special engine work beyond normal multi-player game-literal handling.
 
-### Deferred: the self-declare honesty mechanic
+### The self-declare honesty mechanic (item 32 — shipped)
 
-**Build-order step 10 — `declared_hit` + Honesty% — is explicitly out of
-scope for this build**, split out as its own separate, independently-tracked
-item on `docs/open-roadmap-items.md` (mirroring exactly how Halve-It's own
-custom target editor was split out). This doc's own "Open questions" section
-already flagged this piece as genuinely uncertain ("is `declared_hit` worth
-building at all in v1"), since it's the one part of this design that can
-never be made tamper-resistant by a single atomic write — a determined
-client can always submit a declaration matching the real outcome in
-hindsight. Deferring it follows this doc's own lean, not a cut corner. No
-`declared_hit` column was added, no declare-before-verifying screen was
-built, and no Honesty% stat bubble exists. Because of this one remaining
-item, this doc stays in `docs/` rather than moving to `docs/archive/` —
-CLAUDE.md's rule that a doc archives only once every item split out from it
-is Done.
+**Build-order step 10 — `declared_hit` + Honesty% — shipped as its own
+separate, independently-tracked v2 item** (mirroring exactly how Halve-It's own
+custom target editor was split out and then finished). A nullable
+`turns.declared_hit` column (`1`=declared hit, `0`=declared miss, `NULL`
+otherwise) stores the player's before-the-throw call; a declare screen sits
+ahead of the dart pad (`renderPadPressureChamber()` shows two declare buttons
+and hides the number pad / multi-row until a call is made, and No Warmup's clock
+only arms once the call is committed); and an informational **Honesty %** stat
+bubble (`getPressureChamberStatBubbles`' `honestyPct`) compares each declaration
+against the round's real outcome (declared hit honest iff `checkout=1`, declared
+miss honest iff `bust=1`). Exactly as this doc's own "Open questions" section
+anticipated, the mechanic is the one part of the design that can never be made
+tamper-resistant by a single atomic write (a determined client can submit a
+declaration matching the outcome in hindsight) — so it ships deliberately as a
+**best-effort, honor-system self-discipline signal**: never a scoring input,
+never leaderboard weight, and with **no consistency guard** (the server
+validates only the `0`/`1` shape and the pressure-chamber game-type gate). See
+`REFERENCE.md` §34 and `backend/test/db.pressure-chamber-stats.test.js`.
 
 ### Answers to every other open question
 
-- **Does Honesty % feed the Composure Rating at all?** Moot for this build —
-  Honesty% doesn't exist yet (see above). Whoever picks up the deferred item
-  should treat this doc's own default ("informational only") as the starting
-  position, same as it always was.
+- **Does Honesty % feed the Composure Rating at all?** No — it shipped
+  **informational only**, exactly this doc's own default. Honesty% is presented
+  as its own stat bubble and never folded into the CP total or the Composure
+  Rating (the pitch always framed the declare-before-verifying rule as a
+  self-discipline tool, not a scoring mechanic). The "Rattled floor for chronic
+  dishonesty" alternative remains an untried playtest idea, not built.
 - **Comeback's persistent-deficit version** — not built. This build ships
   only the doc's own v1 (a fixed per-round swing: a full hit adds a flat
   bonus, a miss doubles the penalty). A real cross-round deficit counter
@@ -375,7 +382,7 @@ is Done.
 - **Exact CP values** — a specific, internally-consistent first pass was
   chosen and is documented in both `frontend/scoring.js` (inline comments on
   `PRESSURE_BASE_CP`/`PRESSURE_MISS_PENALTY_BASE`/`PRESSURE_MODIFIERS`) and
-  `REFERENCE.md` §33: base CP 5/10/15/20 for single/double/treble/bull, a
+  `REFERENCE.md` §34: base CP 5/10/15/20 for single/double/treble/bull, a
   finish target's base scaling with `checkoutHint()`'s own optimal dart count
   (15/20/25 for a 1/2/3-dart finish), miss penalties roughly a third of the
   matching base CP, and modifier multipliers from Dead Calm's 1.0 up through

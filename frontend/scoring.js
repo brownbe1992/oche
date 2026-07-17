@@ -1118,7 +1118,7 @@ function rebuildHalveItState({ names, legsPerSet, targets, turns }){
   return { players, current, starter, setNo, legNo, halveItRound };
 }
 
-/* ---------- The Pressure Chamber (docs/pressure-chamber-roadmap.md) ----------
+/* ---------- The Pressure Chamber (docs/archive/pressure-chamber-roadmap.md) ----------
    The single load-bearing design decision: a round's "Pressure Card" (target +
    modifier) is a PURE function of (gameId, roundIndex) — never stored, so
    there's no target_sector/modifier_id column to add. generatePressureCard()
@@ -1140,7 +1140,7 @@ function _pcSeededIndex(s, mod){
   return Math.abs(h) % mod;
 }
 
-// Curated target pool (docs/pressure-chamber-roadmap.md "Targets" — curated,
+// Curated target pool (docs/archive/pressure-chamber-roadmap.md "Targets" — curated,
 // not purely algorithmic, so a random roll can never land on something
 // trivial like Single 5 or a genuinely unfinishable checkout). Two shapes:
 // sector/ring targets (graded by gradePressureSectorRound() below) and finish
@@ -1170,7 +1170,7 @@ const PRESSURE_TARGET_POOL = [
 // Sector-target ring name -> the dart multiplier that satisfies it.
 const PRESSURE_RING_MULT = { single:1, double:2, treble:3 };
 
-// The 8 Pressure Modifiers (docs/pressure-chamber-roadmap.md "The 8 Pressure
+// The 8 Pressure Modifiers (docs/archive/pressure-chamber-roadmap.md "The 8 Pressure
 // Modifiers"). `cpMultiplier` is the "modifier multiplier applied on top of
 // the base" the roadmap doc calls for (Dead Calm 1.0 up through Sudden
 // Death/Comeback's own ~1.5, per the doc's own explicit example — "Sudden
@@ -1211,7 +1211,7 @@ function generatePressureCard(gameId, roundIndex){
   return { round: roundIndex, target: PRESSURE_TARGET_POOL[targetIdx], modifier: PRESSURE_MODIFIERS[modifierIdx] };
 }
 
-// Sector/ring grading — "best of the round's darts" (docs/pressure-chamber-roadmap.md
+// Sector/ring grading — "best of the round's darts" (docs/archive/pressure-chamber-roadmap.md
 // "Targets"): an exact ring+sector match on ANY dart = full hit; the sector
 // hit but the wrong ring = partial; neither = miss. Under Match Dart
 // (`matchDartOnly`), darts 1-2 are ignored entirely — only a genuine 3rd dart
@@ -1229,7 +1229,7 @@ function gradePressureSectorRound(target, darts, matchDartOnly){
   return sawSector ? 'partial' : 'miss';
 }
 
-// Sudden Death's per-dart early-stop (docs/pressure-chamber-roadmap.md
+// Sudden Death's per-dart early-stop (docs/archive/pressure-chamber-roadmap.md
 // "Sudden Death" — "the round stops the instant a dart doesn't hit the
 // target at all, not even a partial/wrong-ring hit"), mirroring
 // evaluateDartDoublesPractice()'s {hit,ended,reason} shape exactly so the
@@ -1243,7 +1243,7 @@ function evaluateDartPressureSector(dart, target){
   return { hit:false, ended:true, reason: dart.sector === target.sector ? 'wrong-ring' : 'miss' };
 }
 
-// Base Composure Points by target difficulty (docs/pressure-chamber-roadmap.md
+// Base Composure Points by target difficulty (docs/archive/pressure-chamber-roadmap.md
 // "Composure Points formula" — "scaled by how hard it is to hit at all: single
 // < double < treble < bullseye"). First-pass playtesting constants, per the
 // roadmap doc's own framing — not final.
@@ -1253,7 +1253,7 @@ const PRESSURE_BASE_CP = { single:5, double:10, treble:15, bull:20 };
 const PRESSURE_MISS_PENALTY_BASE = { single:2, double:4, treble:6, bull:8, finish:10 };
 
 // A finish target's base CP scales with checkoutHint()'s own optimal dart
-// count (docs/pressure-chamber-roadmap.md: "itself scaled by the dart count
+// count (docs/archive/pressure-chamber-roadmap.md: "itself scaled by the dart count
 // checkoutHint() says the optimal route needs — a 2-dart finish is worth less
 // than a 3-dart one"). Always double-out (the standard "real" finish
 // convention) — the roadmap doc doesn't pin this down explicitly, a judgment
@@ -1270,7 +1270,7 @@ function pressureMissPenaltyBase(target){
   return target.type === 'finish' ? PRESSURE_MISS_PENALTY_BASE.finish : (PRESSURE_MISS_PENALTY_BASE[target.difficulty] || 2);
 }
 // The miss penalty a round's card alone determines — pure function of the
-// card, no darts needed (docs/pressure-chamber-roadmap.md: "for every bust=1
+// card, no darts needed (docs/archive/pressure-chamber-roadmap.md: "for every bust=1
 // turn, re-run generatePressureCard(...) to recover that round's miss-penalty
 // value"), which is exactly what lets a run's total be derived at read time
 // without storing the penalty anywhere.
@@ -1304,7 +1304,7 @@ function pressureRoundOutcome(card, darts){
   return gradePressureSectorRound(target, darts, isMatchDart);
 }
 
-// The Composure Points formula (docs/pressure-chamber-roadmap.md "Composure
+// The Composure Points formula (docs/archive/pressure-chamber-roadmap.md "Composure
 // Points formula"): full hit = base x modifier multiplier; partial hit = half
 // that; miss = lose the (separately scaled) miss penalty, doubled again under
 // Double Down/Comeback (missMultiplier). Comeback additionally adds a flat
@@ -1337,7 +1337,7 @@ function computePressureRoundResult(card, darts){
   return { outcome, gained, missPenalty };
 }
 
-// Composure Rating (docs/pressure-chamber-roadmap.md "Composure Rating"),
+// Composure Rating (docs/archive/pressure-chamber-roadmap.md "Composure Rating"),
 // derived at read time from a run's total CP, never stored. Since the
 // thresholds are monotonic in totalCp, "the best rating ever reached" is
 // always simply the rating of the single highest totalCp ever recorded — no
@@ -1350,14 +1350,14 @@ function pressureComposureRating(totalCp){
   return 'Rattled';
 }
 
-// One-off flavor badge trigger conditions (docs/pressure-chamber-roadmap.md
+// One-off flavor badge trigger conditions (docs/archive/pressure-chamber-roadmap.md
 // "Achievements") — each a pure predicate over a just-graded round, unit-
 // tested per CLAUDE.md's "every new calculation gets a committed test" rule
 // rather than only checked inline.
 function isPressureIceRun(totalCp){ return pressureComposureRating(totalCp) === 'Ice'; }
 function isPressureModifierFullHit(card, outcome, modifierKey){ return outcome === 'full' && card.modifier.key === modifierKey; }
 
-// Solo-vs-H2H tie-breaking (docs/pressure-chamber-roadmap.md's own last "Open
+// Solo-vs-H2H tie-breaking (docs/archive/pressure-chamber-roadmap.md's own last "Open
 // question" — left undecided there). Chosen convention, documented rather
 // than left unhandled: highest total CP wins; a tie breaks on fewest total
 // misses (the more composed run); a further tie breaks on fewest darts
@@ -1380,7 +1380,7 @@ function pressureChamberDecideWinnerIndex(totals){
   return bestIdx;
 }
 
-// Per-visit evaluator (docs/pressure-chamber-roadmap.md "Data model") — same
+// Per-visit evaluator (docs/archive/pressure-chamber-roadmap.md "Data model") — same
 // shape as evaluateVisitHalveIt()/evaluateVisitShanghai(): all players in
 // lockstep on one shared live round (game.pressureChamberRound), the round
 // completing once the LAST player in rotation has thrown. `game.gameId` is

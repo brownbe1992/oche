@@ -27,7 +27,7 @@ weakness log that accumulates across sessions.
   has no scoring/tally beyond a hit rate — Gauntlet's fixed non-adjacent
   order, three-different-rings-per-station structure, retry rule, and
   Scar tally are all new on top of that shared shape.
-- **The Pressure Chamber** (`docs/pressure-chamber-roadmap.md`) is also a
+- **The Pressure Chamber** (`docs/archive/pressure-chamber-roadmap.md`) is also a
   fixed-round solo/H2H drill with a scored outcome per round, but its
   round sequence is **seeded and variable** (a different card each run)
   and its modifiers are the whole point. Gauntlet's station order is a

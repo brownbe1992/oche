@@ -509,7 +509,7 @@ const ALLOWED_LIVE_KEYS = new Set([
   // from, so it needs every round's target up front); read by renderers.halve_it.scorecard()
   // for the per-row target labels. Per-player running totals ride inside `players[]`.
   'halveItRound', 'halveItTargets',
-  // The Pressure Chamber only (docs/pressure-chamber-roadmap.md) — the live round, its
+  // The Pressure Chamber only (docs/archive/pressure-chamber-roadmap.md) — the live round, its
   // No Warmup wall-clock deadline (if any), and the FULL 15-round card sequence up front
   // (same "no shared scoring.js module" reasoning as halveItTargets); read by
   // renderers.pressure_chamber.scorecard() for the target/modifier banner and countdown.
