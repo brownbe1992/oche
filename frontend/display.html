@@ -329,7 +329,11 @@ const ACH_LABELS  = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter
   topofthehouse:'👑 TOP OF THE HOUSE! 👑', upset:'Upset! 🗡️',
   checkoutladderpeakbagged:'Peak Bagged! 🧗',
   killerfirstblood:'First Blood 🩸', killeruntouchable:'Untouchable 🛡️', killerownworstenemy:'Own Worst Enemy 🙈',
-  shanghai:'🀄 SHANGHAI! 🀄', halveitdeath:'Halved at the Death! 🪓', halveitnohalf:'No Half Measures! 🛡️' };
+  shanghai:'🀄 SHANGHAI! 🀄', halveitdeath:'Halved at the Death! 🪓', halveitnohalf:'No Half Measures! 🛡️',
+  // Dead Man Walking (docs/archive/dead-man-walking-roadmap.md) — the 3 one-off
+  // badges, mirror-copied from frontend/index.html's own BADGE_INFO entries
+  // right when this game type shipped (not a later BUG-26-style gap fix).
+  dmwfullreprieve:'Full Reprieve! 🕊️', dmwpardoned:'Pardoned ⚰️', dmwlastrequest:'Last Request 💀' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -348,7 +352,8 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   topofthehouse:6000, upset:2500,
   checkoutladderpeakbagged:4000,
   killerfirstblood:3000, killeruntouchable:4000, killerownworstenemy:3000,
-  shanghai:6000, halveitdeath:4000, halveitnohalf:3000 };
+  shanghai:6000, halveitdeath:4000, halveitnohalf:3000,
+  dmwfullreprieve:5000, dmwpardoned:4000, dmwlastrequest:3000 };
 // Mirror-copied from frontend/index.html's BADGE_INFO[...].desc / ACH_DESC_FALLBACK —
 // this file has no Badge Case UI to source the text from directly, so it's kept as
 // its own flat map (docs/next-session-plan.md item 1).
@@ -412,6 +417,9 @@ const ACH_DESC = {
   shanghai: "Win a Shanghai game instantly — single, double, AND treble of the round's own number in one visit.",
   halveitdeath: 'Win a Halve-It game after your own final-round visit halved your total.',
   halveitnohalf: 'Win a Halve-It game without ever being halved.',
+  dmwfullreprieve: 'Walk Out of all 15 rounds in a single Dead Man Walking run.',
+  dmwpardoned: 'Walk Out of 13 or more of the 15 rounds in a single Dead Man Walking run.',
+  dmwlastrequest: 'Walk Out of zero of the 15 rounds in a single Dead Man Walking run — you showed up.',
 };
 // Just Chuckin' It's 18 laddered milestone badges — mirror-copied from frontend/
 // index.html's CHUCKIN_MILESTONE_LADDERS (this file has no shared module with
@@ -524,7 +532,41 @@ const CHECKOUT_LADDER_MILESTONE_LADDERS = [
       { threshold:170, label:'Peak Rung',    icon:'🏔️' },
     ] },
 ];
-[ONE_EIGHTY_MILESTONE_LADDERS, BASEBALL_RUNS_MILESTONE_LADDERS, DOUBLES_HIT_MILESTONE_LADDERS, BOBS27_SCORE_MILESTONE_LADDERS, CHECKOUT_LADDER_MILESTONE_LADDERS].forEach(ladders=>{
+// Dead Man Walking (docs/archive/dead-man-walking-roadmap.md "Achievements") —
+// mirror-copied from index.html's DMW_RUNS_MILESTONE_LADDERS/
+// DMW_WALKED_OUT_MILESTONE_LADDERS/DMW_STREAK_MILESTONE_LADDERS, shipped
+// alongside this game type (not a later gap fix, unlike the BUG-26 note above).
+const DMW_RUNS_MILESTONE_LADDERS = [
+  { idPrefix:'dmw_runs_',
+    descFor: t => `Complete ${t.toLocaleString()} lifetime Dead Man Walking runs.`,
+    tiers: [
+      { threshold:5,   label:'Repeat Offender', icon:'🔁' },
+      { threshold:25,  label:'Frequent Flyer',  icon:'✈️' },
+      { threshold:100, label:'Death Row Regular', icon:'⛓️' },
+      { threshold:250, label:'Old Sparky',      icon:'⚡' },
+    ] },
+];
+const DMW_WALKED_OUT_MILESTONE_LADDERS = [
+  { idPrefix:'dmw_walkedout_',
+    descFor: t => `Walk Out of ${t.toLocaleString()} lifetime Dead Man Walking rounds.`,
+    tiers: [
+      { threshold:50,   label:'Free Man',        icon:'🕊️' },
+      { threshold:250,  label:'Habitual Escapee', icon:'🏃' },
+      { threshold:1000, label:'Uncatchable',     icon:'💨' },
+      { threshold:2500, label:'Legend of the Yard', icon:'👑' },
+    ] },
+];
+const DMW_STREAK_MILESTONE_LADDERS = [
+  { idPrefix:'dmw_streak_',
+    descFor: t => `String together ${t.toLocaleString()} consecutive Walked Out rounds, lifetime (within or across runs).`,
+    tiers: [
+      { threshold:3,  label:'On A Roll',   icon:'🎲' },
+      { threshold:5,  label:'Charmed Life', icon:'🍀' },
+      { threshold:10, label:'Untouchable',  icon:'🌟' },
+    ] },
+];
+[ONE_EIGHTY_MILESTONE_LADDERS, BASEBALL_RUNS_MILESTONE_LADDERS, DOUBLES_HIT_MILESTONE_LADDERS, BOBS27_SCORE_MILESTONE_LADDERS, CHECKOUT_LADDER_MILESTONE_LADDERS,
+ DMW_RUNS_MILESTONE_LADDERS, DMW_WALKED_OUT_MILESTONE_LADDERS, DMW_STREAK_MILESTONE_LADDERS].forEach(ladders=>{
   ladders.forEach(ladder=>{
     ladder.tiers.forEach((tier, i)=>{
       const id = ladder.idPrefix + tier.threshold;

@@ -1461,6 +1461,197 @@ function classifyMarathonTrend(dartCountsPerLeg){
   return 'Inconclusive';
 }
 
+/* ---------- Dead Man Walking (docs/archive/dead-man-walking-roadmap.md) ----------
+   A 15-round solo drill: each round drops the player onto a real X01 checkout
+   deficit pulled from their OWN weakest historical finishes, with a
+   personalized "par minus one" dart budget. Close it -> Walked Out. Bust, or
+   run out of darts -> Executed. Structurally the closest existing precedent is
+   the 121 Checkout Ladder (real X01-shaped visits from a non-501 deficit), but
+   two things are genuinely different here, both handled below:
+   (1) the starting number and the dart budget are PERSONALIZED and computed
+   ONCE, server-side, at game creation (backend/db.js's getWeakestCheckouts()
+   + the par calculation), frozen into games.config.rounds — a client never
+   supplies or influences them;
+   (2) a bust or a run-out-of-budget must end the ROUND (leg) IMMEDIATELY,
+   unlike the Checkout Ladder's forgiving up-to-3-visits-per-attempt shape —
+   there's no second visit to try again within the same round. That's what
+   makes evaluateDeadManDart() a genuinely new PER-DART evaluator (the
+   Doubles Practice precedent for live per-dart evaluation) rather than a
+   reuse of evaluateVisit()'s own per-VISIT bust logic. */
+
+// Difficulty bands for the par calculation (docs/archive/dead-man-walking-roadmap.md
+// "Par" — "bands: roughly Low 32-60 / Mid 61-100 / High 101-170, continuous
+// banding is a fine alternative, not load-bearing"). Three bands is this
+// build's chosen granularity — a first pass, not confirmed against real play,
+// per the roadmap doc's own "Band granularity" open question.
+const DEAD_MAN_WALKING_BANDS = [
+  { low: 32,  high: 60,  name: 'low'  },
+  { low: 61,  high: 100, name: 'mid'  },
+  { low: 101, high: 170, name: 'high' },
+];
+function deadManWalkingBandFor(target){
+  return DEAD_MAN_WALKING_BANDS.find(b => target >= b.low && target <= b.high) || DEAD_MAN_WALKING_BANDS[DEAD_MAN_WALKING_BANDS.length - 1];
+}
+
+// Par = the player's own historical average total darts-to-finish for
+// checkouts in the same band (historicalAverage, null if no history in that
+// band — the caller, backend/db.js, computes it from real X01 legs), floored
+// at the objective-optimal dart count (checkoutHint()) plus 1 so `par - 1`
+// (the round's actual dart budget) can never drop below the theoretical
+// minimum — the one concrete correctness fix this doc's own design makes over
+// the original pitch's literal "par minus one" wording (see the roadmap doc's
+// "Par" section: using the objective optimal AS par directly would make every
+// round mathematically impossible). With no history yet in this band, par
+// defaults to objectiveOptimal + 2 — a generous grace amount so the mode is
+// playable session one without inventing a fake historical average.
+// `target` must be a genuinely finishable double-out score (checkoutHint()
+// returns a non-empty route) — every real caller (getWeakestCheckouts()'s
+// pool, the CHALLENGE_CHECKOUTS cold-start fallback) already guarantees this.
+function deadManWalkingParForTarget(target, historicalAverage){
+  const hint = checkoutHint(target, true, 3);
+  const objectiveOptimal = hint ? hint.split(' ').length : 1;
+  const floor = objectiveOptimal + 1;
+  if(historicalAverage != null) return Math.max(historicalAverage, floor);
+  return objectiveOptimal + 2;
+}
+
+// Draws `n` targets from `pool` WITH REPLACEMENT (docs/dead-man-walking-
+// roadmap.md "15 are drawn from it, with repeats allowed if a player's
+// genuinely-weak pool is smaller than 15") — uniform random, same injectable-
+// rng shape as shuffleKillerNumbers() so a test can steer it deterministically.
+// Never called with an empty pool (the caller always falls back to
+// CHALLENGE_CHECKOUTS first).
+function pickDeadManWalkingTargets(pool, n, rng){
+  const r = rng || Math.random;
+  const out = [];
+  for(let i = 0; i < n; i++) out.push(pool[Math.floor(r() * pool.length)]);
+  return out;
+}
+
+// The pure per-dart evaluator (docs/archive/dead-man-walking-roadmap.md "Execution —
+// per-dart evaluation, not per-visit") — generalizes evaluateVisit()'s own
+// bust/win logic from "the sum of a whole visit" to "one dart against a
+// running remaining," since a bust or a finish here must end the round the
+// instant it happens, not wait for a 3-dart batch boundary. Budget/"out of
+// darts" is NOT this function's concern (it takes only remaining/dart/
+// doubleOut, no budget) — that's a separate, composable check layered on top
+// by resolveDeadManDart() below, which both frontend/index.html's live UI and
+// backend/db.js's write-time guard share so they can never disagree.
+function evaluateDeadManDart(remaining, dart, doubleOut){
+  const newRemaining = remaining - dart.value;
+  let bust = false, win = false;
+  if(newRemaining < 0) bust = true;
+  else if(doubleOut && newRemaining === 1) bust = true;
+  else if(newRemaining === 0){
+    if(doubleOut && !dart.isDouble) bust = true;
+    else win = true;
+  }
+  return { newRemaining: bust ? remaining : newRemaining, bust, win };
+}
+
+// Composes evaluateDeadManDart() with the round's own dart budget:
+// `dartsUsedThisRound` is how many darts this round has ALREADY consumed
+// (across any earlier visits this same round), `budget` is the round's total
+// dart allowance (par - 1). A dart that neither busts nor wins but exhausts
+// the budget still ends the round — "Executed, out of darts" — a real, valid,
+// non-bust visit that simply ran out of room (scored keeps its real point
+// value; see backend/db.js's write-time guard for why this is NOT stored as
+// bust=1 the way a genuine bust is). `roundOver` is true for all three
+// terminal outcomes (win/bust/outOfDarts); only one continue path remains.
+function resolveDeadManDart(remaining, dart, doubleOut, dartsUsedThisRound, budget){
+  const ev = evaluateDeadManDart(remaining, dart, doubleOut);
+  const dartsUsedAfter = dartsUsedThisRound + 1;
+  const outOfDarts = !ev.bust && !ev.win && dartsUsedAfter >= budget;
+  return { newRemaining: ev.newRemaining, bust: ev.bust, win: ev.win, outOfDarts,
+    roundOver: ev.bust || ev.win || outOfDarts };
+}
+
+// Result tiers (docs/archive/dead-man-walking-roadmap.md "Result tiers") — derived at
+// read time from the count of Walked Out rounds out of 15, never stored.
+// Exact thresholds are a first pass for playtesting, same "not final" caveat
+// every other tiered result in this doc set carries.
+const DEAD_MAN_WALKING_RESULT_TIERS = [
+  { min: 13, max: 15, label: 'Pardoned'    },
+  { min: 10, max: 12, label: 'Reprieve'    },
+  { min: 7,  max: 9,  label: 'Last Rites'  },
+  { min: 4,  max: 6,  label: 'The Walk'    },
+  { min: 0,  max: 3,  label: 'Executed'    },
+];
+function deadManWalkingResultTier(walkedOutCount){
+  const t = DEAD_MAN_WALKING_RESULT_TIERS.find(t => walkedOutCount >= t.min && walkedOutCount <= t.max);
+  return t ? t.label : 'Executed';
+}
+
+// Pure replay for the write-time guard, saved-game resume, and stats — the
+// same "replay, not snapshot" contract every rebuild*State() function above
+// follows. Unlike every other rebuild function, this one needs the game's own
+// FROZEN config (`rounds`, an array of 15 {target, par} pairs computed once
+// server-side at creation — see backend/db.js's createGame()) since a round's
+// target/budget isn't derivable from the turns alone the way Checkout
+// Ladder's climbing target is. `turns`: ordered (insertion order) per-leg
+// groups of {legNo, darts:[{sector,mult}]} — a leg can span more than one
+// (1-3-dart) turn/visit, replayed dart-by-dart via resolveDeadManDart() until
+// that round settles or the recorded turns run out (a live/resumed game).
+// Always double-out (matches the source data getWeakestCheckouts() draws
+// from, and Checkout Ladder's own "always double-out regardless of this
+// player's own X01 preference" precedent).
+function rebuildDeadManWalkingState({ rounds, turns }){
+  const byLeg = new Map();
+  turns.forEach(t => { if(!byLeg.has(t.legNo)) byLeg.set(t.legNo, []); byLeg.get(t.legNo).push(t); });
+  const legNos = Array.from(byLeg.keys()).sort((a, b) => a - b);
+  const totalRounds = rounds.length;
+  let walkedOutCount = 0, roundIndex = 0, dartsUsedThisRound = 0;
+  let remaining = totalRounds ? rounds[0].target : 0;
+  // One boolean per SETTLED round, in order — the frontend's own resume-time
+  // streak re-derivation (undoing a badge-trigger tracker's loss on refresh,
+  // the same "recompute from the settled history" shape every other resumed
+  // game type's own streak/deficit trackers use) reads this directly instead
+  // of re-scanning raw turns for a `checkout` field the resume payload
+  // doesn't even carry.
+  const walkedOutRounds = [];
+  for(const ln of legNos){
+    const idx = ln - 1;
+    const round = rounds[idx];
+    if(!round) break; // defensive: a leg beyond the frozen 15 rounds shouldn't exist
+    const budget = round.par - 1;
+    let rem = round.target, used = 0, settled = false, walked = false;
+    outer:
+    for(const t of byLeg.get(ln)){
+      for(const d of t.darts){
+        const r = resolveDeadManDart(rem, makeDartCore(d.sector, d.mult), true, used, budget);
+        used += 1;
+        rem = r.newRemaining;
+        if(r.roundOver){ settled = true; walked = r.win; break outer; }
+      }
+    }
+    if(settled){
+      walkedOutRounds.push(walked);
+      if(walked) walkedOutCount += 1;
+      roundIndex = idx + 1;
+      dartsUsedThisRound = 0;
+      remaining = rounds[roundIndex] ? rounds[roundIndex].target : 0;
+    } else {
+      roundIndex = idx;
+      dartsUsedThisRound = used;
+      remaining = rem;
+    }
+  }
+  return {
+    walkedOutCount, roundIndex, remaining, dartsUsedThisRound, walkedOutRounds,
+    done: roundIndex >= totalRounds,
+    budget: rounds[roundIndex] ? rounds[roundIndex].par - 1 : 0,
+  };
+}
+
+// Daily Challenge's curated checkout-target pool (docs/daily-challenge-roadmap.md)
+// — Dead Man Walking's own cold-start fallback for a player with too little
+// double-out X01 history for a confident weakness ranking reuses this exact
+// array (docs/archive/dead-man-walking-roadmap.md "Cold start": "reuse existing
+// curated content... rather than inventing a second curated list"), which is
+// why it lives here instead of only in frontend/index.html — backend/db.js's
+// createGame() needs it server-side too.
+const CHALLENGE_CHECKOUTS = [121, 96, 100, 141, 170, 40, 32, 50, 60, 80, 110, 130];
+
 // Only executes under Node (require()'d from a test file) — undefined in a
 // browser, so this is a no-op there and every name above stays a plain global.
 if (typeof module !== 'undefined' && module.exports) {
@@ -1486,5 +1677,8 @@ if (typeof module !== 'undefined' && module.exports) {
     MARATHON_FATIGUE_TIERS, computeFatigueSplit, MARATHON_TREND_MIN_LEGS, MARATHON_TREND_TOLERANCE, classifyMarathonTrend,
     shanghaiRoundTarget, isShanghaiWin, evaluateVisitShanghai, rebuildShanghaiState,
     HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, evaluateVisitHalveIt, rebuildHalveItState,
+    DEAD_MAN_WALKING_BANDS, deadManWalkingBandFor, deadManWalkingParForTarget, pickDeadManWalkingTargets,
+    evaluateDeadManDart, resolveDeadManDart, DEAD_MAN_WALKING_RESULT_TIERS, deadManWalkingResultTier,
+    rebuildDeadManWalkingState, CHALLENGE_CHECKOUTS,
   };
 }

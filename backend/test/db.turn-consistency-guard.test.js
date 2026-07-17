@@ -979,6 +979,140 @@ describe('addTurn — Killer scored/affectedPlayer must match the derived life-c
   });
 });
 
+describe('addTurn — Dead Man Walking scored/targetScore/dart-budget must match, when opted in (docs/archive/dead-man-walking-roadmap.md)', () => {
+  const { checkoutHint } = require(path.join('..', '..', 'frontend', 'scoring.js'));
+  // Solo-only, cold-start (a fresh test player has no X01 history), so
+  // config.rounds is drawn from CHALLENGE_CHECKOUTS — real, per-round
+  // target/par pairs, never hand-picked by the test itself (the whole point
+  // of this game type is that a client can never choose its own target/par).
+  function deadManWalkingGame(player) {
+    return db.createGame({
+      category: 'Dead Man Walking', legsPerSet: 15, setsPerGame: 1, practice: 1,
+      gameType: 'dead_man_walking', players: [{ name: player }],
+    });
+  }
+  function dmwTurn(gameId, player, leg, targetScore, { darts, scored, bust = false, checkout = false, checkoutPoints = null }) {
+    return db.addTurn(gameId, {
+      player, set: 1, leg, scored, bust, checkout, checkoutPoints, targetScore,
+      darts: darts.map(([sector, multiplier], i) => ({ dartNo: i + 1, sector, multiplier })),
+    }, STRICT);
+  }
+  // Turns checkoutHint()'s own route string ("T20 T20 Bull") into real
+  // [sector,multiplier] dart pairs — guarantees a genuinely legal double-out
+  // finish for WHATEVER target this game's round 1 actually drew, without
+  // hand-encoding a route for every possible cold-start target.
+  function routeToDarts(route) {
+    return route.split(' ').map(label => {
+      if (label === 'Bull') return [25, 2];
+      if (label === '25') return [25, 1];
+      if (label[0] === 'T') return [Number(label.slice(1)), 3];
+      if (label[0] === 'D') return [Number(label.slice(1)), 2];
+      return [Number(label), 1];
+    });
+  }
+
+  test('createGame freezes 15 real {target,par} rounds, never accepting a client-supplied config.rounds', () => {
+    db.addPlayer('DMW_Create');
+    // A hostile config.rounds is passed but must be silently ignored entirely.
+    const { config } = db.createGame({
+      category: 'Dead Man Walking', legsPerSet: 15, setsPerGame: 1, practice: 1,
+      gameType: 'dead_man_walking', players: [{ name: 'DMW_Create' }],
+      config: { rounds: [{ target: 2, par: 100 }] },
+    });
+    assert.equal(config.rounds.length, 15);
+    config.rounds.forEach(r => {
+      assert.notEqual(checkoutHint(r.target, true, 3), '', `target ${r.target} must be a genuinely finishable double-out checkout`);
+      const optimal = checkoutHint(r.target, true, 3).split(' ').length;
+      assert.ok(r.par - 1 >= optimal, `par ${r.par} must keep the budget (par-1) at or above the objective optimal (${optimal})`);
+    });
+  });
+
+  test('accepts a legitimate non-terminal visit at round 1\'s own frozen target', () => {
+    db.addPlayer('DMW_A');
+    const { gameId, config } = deadManWalkingGame('DMW_A');
+    const round = config.rounds[0];
+    assert.doesNotThrow(() => dmwTurn(gameId, 'DMW_A', 1, round.target, { darts: [[1, 1]], scored: 1 }));
+  });
+
+  test('rejects a targetScore that does not match round 1\'s own frozen target', () => {
+    db.addPlayer('DMW_B');
+    const { gameId, config } = deadManWalkingGame('DMW_B');
+    const wrongTarget = config.rounds[0].target === 40 ? 60 : 40;
+    assert.throws(() => dmwTurn(gameId, 'DMW_B', 1, wrongTarget, { darts: [[1, 1]], scored: 1 }),
+      (err) => err.status === 400, "targetScore does not match this round's frozen target");
+  });
+
+  test('rejects a scored value that does not match the sum of the darts thrown', () => {
+    db.addPlayer('DMW_C');
+    const { gameId, config } = deadManWalkingGame('DMW_C');
+    const round = config.rounds[0];
+    assert.throws(() => dmwTurn(gameId, 'DMW_C', 1, round.target, { darts: [[20, 3]], scored: 999 }),
+      (err) => err.status === 400);
+  });
+
+  test('accepts a legitimate Walked Out checkout using checkoutHint()\'s own optimal route', () => {
+    db.addPlayer('DMW_D');
+    const { gameId, config } = deadManWalkingGame('DMW_D');
+    const round = config.rounds[0];
+    const darts = routeToDarts(checkoutHint(round.target, true, 3));
+    assert.doesNotThrow(() => dmwTurn(gameId, 'DMW_D', 1, round.target,
+      { darts, scored: round.target, checkout: true, checkoutPoints: round.target }));
+  });
+
+  test('rejects checkoutPoints that does not match scored on a checkout turn', () => {
+    db.addPlayer('DMW_E');
+    const { gameId, config } = deadManWalkingGame('DMW_E');
+    const round = config.rounds[0];
+    const darts = routeToDarts(checkoutHint(round.target, true, 3));
+    assert.throws(() => dmwTurn(gameId, 'DMW_E', 1, round.target,
+      { darts, scored: round.target, checkout: true, checkoutPoints: round.target - 1 }),
+      (err) => err.status === 400);
+  });
+
+  test('rejects a bust turn claiming a nonzero scored', () => {
+    db.addPlayer('DMW_F');
+    const { gameId, config } = deadManWalkingGame('DMW_F');
+    const round = config.rounds[0];
+    assert.throws(() => dmwTurn(gameId, 'DMW_F', 1, round.target, { darts: [[20, 3]], scored: 60, bust: true }),
+      (err) => err.status === 400, 'a bust turn must have scored=0');
+  });
+
+  test('single-dart turns exactly filling the round\'s own dart budget are accepted, but a turn past the budget is rejected', () => {
+    db.addPlayer('DMW_G');
+    const { gameId, config } = deadManWalkingGame('DMW_G');
+    const round = config.rounds[0];
+    const budget = round.par - 1;
+    // Every dart here is a harmless single-1 -- remaining stays comfortably
+    // above 1 for every genuinely finishable cold-start target (>= 32),
+    // so none of these darts could accidentally bust or check out; the guard
+    // itself doesn't re-derive bust/win at all (see addTurn()'s own comment),
+    // it purely counts cumulative darts against the frozen budget.
+    for (let i = 0; i < budget; i++) {
+      assert.doesNotThrow(() => dmwTurn(gameId, 'DMW_G', 1, round.target, { darts: [[1, 1]], scored: 1 }),
+        `dart ${i + 1} of ${budget} should still be within budget`);
+    }
+    assert.throws(() => dmwTurn(gameId, 'DMW_G', 1, round.target, { darts: [[1, 1]], scored: 1 }),
+      (err) => err.status === 400, 'this Dead Man Walking round has already ended');
+  });
+
+  test('rejects any further turn once the round has already been Walked Out', () => {
+    db.addPlayer('DMW_H');
+    const { gameId, config } = deadManWalkingGame('DMW_H');
+    const round = config.rounds[0];
+    const darts = routeToDarts(checkoutHint(round.target, true, 3));
+    dmwTurn(gameId, 'DMW_H', 1, round.target, { darts, scored: round.target, checkout: true, checkoutPoints: round.target });
+    assert.throws(() => dmwTurn(gameId, 'DMW_H', 1, round.target, { darts: [[1, 1]], scored: 1 }),
+      (err) => err.status === 400, 'this Dead Man Walking round has already ended');
+  });
+
+  test('rejects a leg number beyond the frozen 15 rounds', () => {
+    db.addPlayer('DMW_I');
+    const { gameId, config } = deadManWalkingGame('DMW_I');
+    assert.throws(() => dmwTurn(gameId, 'DMW_I', 16, config.rounds[0].target, { darts: [[1, 1]], scored: 1 }),
+      (err) => err.status === 400, 'Dead Man Walking only has 15 rounds');
+  });
+});
+
 describe('SEC-22 — the real HTTP trust boundary enforces this even though addTurn() itself defaults off', () => {
   const SERVER_PATH = path.join(__dirname, '..', 'server.js');
 

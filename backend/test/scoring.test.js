@@ -24,7 +24,10 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   KILLER_DEFAULT_LIVES, shuffleKillerNumbers, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
   MARATHON_FATIGUE_TIERS, computeFatigueSplit, MARATHON_TREND_MIN_LEGS, MARATHON_TREND_TOLERANCE, classifyMarathonTrend,
   shanghaiRoundTarget, isShanghaiWin, evaluateVisitShanghai,
-  HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, evaluateVisitHalveIt } = scoring;
+  HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, evaluateVisitHalveIt,
+  DEAD_MAN_WALKING_BANDS, deadManWalkingBandFor, deadManWalkingParForTarget, pickDeadManWalkingTargets,
+  evaluateDeadManDart, resolveDeadManDart, DEAD_MAN_WALKING_RESULT_TIERS, deadManWalkingResultTier,
+  rebuildDeadManWalkingState, CHALLENGE_CHECKOUTS } = scoring;
 
 // Shorthand for building a rebuild-function turn record: v(playerIndex, setNo,
 // legNo, [[sector,mult], ...]) — mirrors the {playerIndex,setNo,legNo,darts}
@@ -2214,5 +2217,224 @@ describe('evaluateVisitHalveIt (docs/halve-it-roadmap.md)', () => {
     const game = mkGame(9, 0, [player, { total: 0 }], HALVE_IT_DEFAULT_TARGETS); // round 9 > 7 targets
     const ev = evaluateVisitHalveIt(player, [{sector:25,mult:1}], game);
     assert.deepEqual(ev.target, { sector: 25 }, 'round 9 still targets round 7\'s own Bull, matching Baseball/Shanghai');
+  });
+});
+
+describe('Dead Man Walking (docs/archive/dead-man-walking-roadmap.md)', () => {
+  describe('deadManWalkingBandFor', () => {
+    test('band boundaries: 32/60 low, 61/100 mid, 101/170 high', () => {
+      assert.equal(deadManWalkingBandFor(32).name, 'low');
+      assert.equal(deadManWalkingBandFor(60).name, 'low');
+      assert.equal(deadManWalkingBandFor(61).name, 'mid');
+      assert.equal(deadManWalkingBandFor(100).name, 'mid');
+      assert.equal(deadManWalkingBandFor(101).name, 'high');
+      assert.equal(deadManWalkingBandFor(170).name, 'high');
+    });
+  });
+
+  describe('deadManWalkingParForTarget', () => {
+    test('with no historical average, defaults to objective-optimal + 2', () => {
+      // 40 finishes optimally in 1 dart (D20).
+      assert.equal(deadManWalkingParForTarget(40, null), 1 + 2);
+      // 170 (T20 T20 Bull) finishes optimally in 3 darts.
+      assert.equal(deadManWalkingParForTarget(170, null), 3 + 2);
+    });
+    test('with a historical average above the floor, par is the historical average', () => {
+      assert.equal(deadManWalkingParForTarget(40, 4.5), 4.5, 'D20 is 1 dart optimally, but this player usually needs 4.5');
+    });
+    test('with a historical average BELOW the objective floor, the floor wins -- par can never make the round unachievable', () => {
+      // 40 -> D20, 1 dart optimal, floor = 2. A (bogus/optimistic) historical
+      // average of 1 must still be floored up to 2.
+      assert.equal(deadManWalkingParForTarget(40, 1), 2);
+    });
+    test('exhaustive: for every finishable score 2-170, par-1 (the actual dart budget) is never below the objective-optimal dart count, regardless of historicalAverage', () => {
+      // Mirrors checkoutHint()'s own exhaustive-range verification (backend/test/
+      // scoring.test.js's "checkoutHint" describe block) -- this is the one
+      // concrete, testable correctness property the roadmap doc calls out by name.
+      let checked = 0;
+      for (let score = 2; score <= 170; score++) {
+        const hint = checkoutHint(score, true, 3);
+        if (!hint) continue; // bogey/unfinishable -- Dead Man Walking never serves these
+        const optimal = hint.split(' ').length;
+        for (const historicalAverage of [null, 0, 1, optimal - 1, optimal, optimal + 5, 20]) {
+          const par = deadManWalkingParForTarget(score, historicalAverage);
+          const budget = par - 1;
+          assert.ok(budget >= optimal,
+            `score ${score}: optimal=${optimal}, historicalAverage=${historicalAverage} -> par=${par}, budget=${budget} must be >= ${optimal}`);
+          checked++;
+        }
+      }
+      assert.ok(checked > 900, `sanity: exercised a real range of finishable scores (got ${checked} checks)`);
+    });
+  });
+
+  describe('pickDeadManWalkingTargets', () => {
+    test('draws n targets from the pool with replacement, using the injectable rng deterministically', () => {
+      const pool = [40, 60, 90];
+      let calls = 0;
+      const seq = [0.0, 0.5, 0.99, 0.34, 0.1];
+      const rng = () => seq[calls++ % seq.length];
+      const drawn = pickDeadManWalkingTargets(pool, 5, rng);
+      assert.deepEqual(drawn, [40, 60, 90, 60, 40]);
+    });
+    test('a pool smaller than 15 still produces exactly 15 draws, with repeats', () => {
+      const pool = [50];
+      const drawn = pickDeadManWalkingTargets(pool, 15, () => 0.4);
+      assert.equal(drawn.length, 15);
+      assert.ok(drawn.every(t => t === 50));
+    });
+  });
+
+  describe('evaluateDeadManDart', () => {
+    test('overshoot (new remaining < 0) is a bust -- remaining stays unchanged', () => {
+      const ev = evaluateDeadManDart(20, makeDartCore(20, 3), true); // T20 = 60, way over
+      assert.equal(ev.bust, true);
+      assert.equal(ev.win, false);
+      assert.equal(ev.newRemaining, 20, 'a bust never changes the remaining score');
+    });
+    test('leaving exactly 1 under double-out is a bust', () => {
+      const ev = evaluateDeadManDart(21, makeDartCore(20, 1), true); // 21-20=1
+      assert.equal(ev.bust, true);
+      assert.equal(ev.newRemaining, 21);
+    });
+    test('reaching 0 on a double is a Walked Out win', () => {
+      const ev = evaluateDeadManDart(40, makeDartCore(20, 2), true); // D20
+      assert.equal(ev.win, true);
+      assert.equal(ev.bust, false);
+      assert.equal(ev.newRemaining, 0);
+    });
+    test('reaching 0 on a non-double under double-out is a bust, not a win', () => {
+      const ev = evaluateDeadManDart(20, makeDartCore(20, 1), true); // single 20, not a double
+      assert.equal(ev.bust, true);
+      assert.equal(ev.win, false);
+      assert.equal(ev.newRemaining, 20);
+    });
+    test('a normal scoring dart that leaves a positive, non-1 remainder just continues', () => {
+      const ev = evaluateDeadManDart(90, makeDartCore(20, 3), true); // T20 = 60, leaves 30
+      assert.equal(ev.bust, false);
+      assert.equal(ev.win, false);
+      assert.equal(ev.newRemaining, 30);
+    });
+  });
+
+  describe('resolveDeadManDart', () => {
+    test('a dart that neither busts nor wins, but exhausts the round budget, is Executed "out of darts"', () => {
+      // budget=1 (par=2, e.g. a 1-dart-optimal target the player gets no grace
+      // on), dartsUsedThisRound=0 -- this is the round's only allowed dart.
+      const r = resolveDeadManDart(32, makeDartCore(20, 1), true, 0, 1); // single 20, leaves 12 -- no bust, no win
+      assert.equal(r.bust, false);
+      assert.equal(r.win, false);
+      assert.equal(r.outOfDarts, true);
+      assert.equal(r.roundOver, true);
+      assert.equal(r.newRemaining, 12, 'a real, non-bust visit keeps its actual scored value');
+    });
+    test('the same dart with budget still remaining just continues -- roundOver is false', () => {
+      const r = resolveDeadManDart(32, makeDartCore(20, 1), true, 0, 3);
+      assert.equal(r.outOfDarts, false);
+      assert.equal(r.roundOver, false);
+    });
+    test('a bust ends the round even with darts left in the budget', () => {
+      const r = resolveDeadManDart(20, makeDartCore(20, 3), true, 0, 9); // way over, plenty of budget left
+      assert.equal(r.bust, true);
+      assert.equal(r.roundOver, true);
+    });
+    test('a win ends the round even with darts left in the budget', () => {
+      const r = resolveDeadManDart(40, makeDartCore(20, 2), true, 0, 9);
+      assert.equal(r.win, true);
+      assert.equal(r.roundOver, true);
+    });
+  });
+
+  describe('deadManWalkingResultTier', () => {
+    test('every documented threshold boundary lands on the right tier', () => {
+      assert.equal(deadManWalkingResultTier(15), 'Pardoned');
+      assert.equal(deadManWalkingResultTier(13), 'Pardoned');
+      assert.equal(deadManWalkingResultTier(12), 'Reprieve');
+      assert.equal(deadManWalkingResultTier(10), 'Reprieve');
+      assert.equal(deadManWalkingResultTier(9), 'Last Rites');
+      assert.equal(deadManWalkingResultTier(7), 'Last Rites');
+      assert.equal(deadManWalkingResultTier(6), 'The Walk');
+      assert.equal(deadManWalkingResultTier(4), 'The Walk');
+      assert.equal(deadManWalkingResultTier(3), 'Executed');
+      assert.equal(deadManWalkingResultTier(0), 'Executed');
+    });
+  });
+
+  describe('rebuildDeadManWalkingState', () => {
+    // A tiny 3-round frozen config for replay tests (real sessions always
+    // freeze 15, but the replay logic itself doesn't care about the count).
+    const rounds = [
+      { target: 40, par: 3 },  // round 1: D20 optimal in 1, budget 2
+      { target: 32, par: 3 },  // round 2: D16 optimal in 1, budget 2
+      { target: 61, par: 4 },  // round 3: T7 D20 optimal in 2, budget 3
+    ];
+    test('a Walked Out round (single dart double-out finish) advances to the next round\'s own target/budget', () => {
+      const turns = [ v(0, 1, 1, [[20, 2]]) ]; // D20 checks out round 1 (target 40) in 1 dart
+      const r = rebuildDeadManWalkingState({ rounds, turns });
+      assert.equal(r.walkedOutCount, 1);
+      assert.equal(r.roundIndex, 1, 'advanced to round 2 (0-based index 1)');
+      assert.equal(r.remaining, 32, 'round 2\'s own frozen target');
+      assert.equal(r.dartsUsedThisRound, 0);
+      assert.equal(r.done, false);
+    });
+    test('a bust ends the round immediately (Executed), even mid-visit -- only the darts actually thrown are replayed', () => {
+      // Round 1: first dart overshoots (T20=60 against remaining 40) -- a bust,
+      // second/third darts of what would have been a 3-dart visit never happen.
+      const turns = [ v(0, 1, 1, [[20, 3]]) ];
+      const r = rebuildDeadManWalkingState({ rounds, turns });
+      assert.equal(r.walkedOutCount, 0);
+      assert.equal(r.roundIndex, 1, 'still advances to round 2 -- Executed rounds progress the session too');
+      assert.equal(r.remaining, 32);
+    });
+    test('running out of darts without busting also Executes the round (no checkout)', () => {
+      // Round 1 target 40, budget 2 (par 3). Two single-20s: dart 1 leaves 20
+      // (no bust, no win, 1 dart used of 2) -- dart 2 (single 20 again) leaves 0
+      // but on a SINGLE under double-out, which is itself a bust (not merely
+      // out-of-darts) -- so instead use a genuine "ran the clock out cleanly"
+      // shape: single 5 (leaves 35), single 5 (leaves 30, budget exhausted, not 0).
+      const turns = [ v(0, 1, 1, [[5, 1]]), v(0, 1, 1, [[5, 1]]) ];
+      const r = rebuildDeadManWalkingState({ rounds, turns });
+      assert.equal(r.walkedOutCount, 0);
+      assert.equal(r.roundIndex, 1, 'round 1 settled (out of darts) and advanced to round 2');
+    });
+    test('a round still in progress (mid-replay, e.g. a resumed game) reports its own live remaining/darts-used', () => {
+      // Round 1, budget 2: one dart used (single 5, leaves 35), round not yet settled.
+      const turns = [ v(0, 1, 1, [[5, 1]]) ];
+      const r = rebuildDeadManWalkingState({ rounds, turns });
+      assert.equal(r.roundIndex, 0, 'still on round 1 (0-based index 0)');
+      assert.equal(r.remaining, 35);
+      assert.equal(r.dartsUsedThisRound, 1);
+      assert.equal(r.done, false);
+    });
+    test('reaching and settling the final round marks the session done', () => {
+      const turns = [
+        v(0, 1, 1, [[20, 2]]),   // round 1: walked out
+        v(0, 1, 2, [[16, 2]]),   // round 2: walked out (D16, target 32)
+        v(0, 1, 3, [[7, 3], [20, 2]]), // round 3: T7 (21) + D20 (40) = 61, walked out
+      ];
+      const r = rebuildDeadManWalkingState({ rounds, turns });
+      assert.equal(r.walkedOutCount, 3);
+      assert.equal(r.roundIndex, 3, 'past the last round');
+      assert.equal(r.done, true);
+    });
+    test('a leg spanning multiple visits within one round (no early stop) replays all of them', () => {
+      // Round 3, target 61, budget 3: visit 1 misses everything (leaves 61, 3
+      // darts used -- exactly the budget), so the round settles "out of darts"
+      // on the 3rd dart of the FIRST visit, never reaching a second visit.
+      const turns = [ v(0, 1, 3, [[0, 1], [0, 1], [0, 1]]) ];
+      // Splice round 3 to be reached directly by starting the fixture at round 3
+      // (rounds[] is 0-indexed by leg_no - 1, so leg 3 maps to rounds[2]).
+      const r = rebuildDeadManWalkingState({ rounds, turns: [ v(0, 1, 1, [[20, 2]]), v(0, 1, 2, [[16, 2]]), ...turns ] });
+      assert.equal(r.walkedOutCount, 2, 'rounds 1 and 2 walked out; round 3 missed entirely');
+      assert.equal(r.done, true);
+    });
+  });
+
+  describe('CHALLENGE_CHECKOUTS (shared with Daily Challenge, docs/archive/dead-man-walking-roadmap.md "Cold start")', () => {
+    test('every value is a genuinely finishable double-out checkout', () => {
+      CHALLENGE_CHECKOUTS.forEach(target => {
+        assert.notEqual(checkoutHint(target, true, 3), '', `${target} must be finishable under double-out`);
+      });
+    });
   });
 });

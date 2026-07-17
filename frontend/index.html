@@ -1618,6 +1618,15 @@ const DB = {
       if(r.config && r.config.numbers){
         meta.players.forEach(p => { if(r.config.numbers[p.name] != null) p.number = r.config.numbers[p.name]; });
       }
+      // Dead Man Walking (docs/archive/dead-man-walking-roadmap.md "Server-authoritative
+      // round generation"): the frozen 15 {target,par} rounds are computed
+      // server-side at creation and were never client-supplied in the first
+      // place — this is the only way the client ever learns them, same
+      // "assign onto the actual game object right here" shape Killer's own
+      // number assignment above uses.
+      if(r.config && r.config.rounds){
+        meta.config.rounds = r.config.rounds;
+      }
     }
     catch(e){ logErr(e); this.gameId=null; }
   },
@@ -2045,7 +2054,10 @@ function showDartBuilder(playerName, backTo){
    date (pure function, no server-side randomness) so the format itself varies
    day to day, not just a number inside the same task shape every time.
    ========================================================================= */
-const CHALLENGE_CHECKOUTS = [121, 96, 100, 141, 170, 40, 32, 50, 60, 80, 110, 130];
+// CHALLENGE_CHECKOUTS now lives in scoring.js (docs/archive/dead-man-walking-roadmap.md
+// "Cold start" — Dead Man Walking's own cold-start fallback reuses this exact
+// pool server-side, so it moved to the shared module both index.html and
+// backend/db.js already require in, rather than being duplicated).
 const CHALLENGE_FORMATS = ['checkout_sprint','speed_to_zero','bullseye_gauntlet','steady_hand','treble_run','long_game'];
 const CHALLENGE_LABELS = {
   checkout_sprint:   (t)=>`Checkout Sprint — finish ${t} in the fewest darts`,
@@ -2340,10 +2352,11 @@ function renderHome(){
     Backend.get('/api/stats/gauntlet-leaderboard'),
     Backend.get('/api/stats/killer-wins'),
     Backend.get('/api/stats/marathon-leaderboard'),
+    Backend.get('/api/stats/dead-man-walking-leaderboard'),
     Backend.get('/api/stats/around-the-clock-fastest'),
     Backend.get('/api/stats/around-the-clock-completions'),
     Backend.get('/api/stats/around-the-world-progress'),
-  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,shr,shs,pshr,pshs,shw,hibt,pihbt,hiw,dpa,dpb,ctbl,b27,cl,ga,kw,mm,atcf,atcc,atwp])=>{
+  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,shr,shs,pshr,pshs,shw,hibt,pihbt,hiw,dpa,dpb,ctbl,b27,cl,ga,kw,mm,dmw,atcf,atcc,atwp])=>{
     homeData={s, extra,
       h2h:{finishes:f,eighties:e,bigFish:b,nineDarters:n},
       practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn},
@@ -2374,6 +2387,7 @@ function renderHome(){
       gauntlet:{ leaderboard:ga },
       killer:{ winLeaderboard:kw },
       marathon:{ leaderboard:mm },
+      deadManWalking:{ leaderboard:dmw },
       aroundTheClock:{ fastest:atcf, completions:atcc },
       aroundTheWorld:{ progress:atwp }};
     renderHomeContent();
@@ -2393,6 +2407,7 @@ function renderHome(){
       gauntlet:{ leaderboard:[] },
       killer:{ winLeaderboard:[] },
       marathon:{ leaderboard:[] },
+      deadManWalking:{ leaderboard:[] },
       aroundTheClock:{ fastest:[], completions:[] },
       aroundTheWorld:{ progress:[] }};
     renderHomeContent();
@@ -2982,6 +2997,33 @@ function renderHomeTabBodyGauntlet(){
   `;
 }
 
+// Dead Man Walking's Home page leaderboard (docs/archive/dead-man-walking-roadmap.md
+// "Home leaderboard") — best (highest) Walked Out count, one row per player,
+// their peak run. Same "single best-ever run, no minimum floor" shape as
+// Checkout Ladder/The Gauntlet's own boards above.
+function renderHomeTabBodyDeadManWalking(){
+  const el=document.getElementById('home-tab-body');
+  const data=homeData.deadManWalking;
+  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
+
+  const board=data.leaderboard||[];
+  const leaderboard=board.length
+    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.bestWalkedOut}/15</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${fmtDate(r.achievedAt)}</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — complete a Dead Man Walking run to claim the top spot.</p>`;
+
+  el.innerHTML=`
+    <div class="pp-section">
+      <div class="pp-section-title">💀 Dead Man Walking — Most Walked Out</div>
+      ${leaderboard}
+    </div>
+  `;
+}
+
 // Killer's Home page leaderboard (docs/archive/game-modes-roadmap.md "Killer") —
 // win rate, H2H only, same "Most Wins"-style shape Cricket/Baseball's own win
 // leaderboards use (getKillerWinLeaderboard() shares their exact {name,played,
@@ -3157,7 +3199,7 @@ function setMode(mode){
   document.getElementById('h2h-options').hidden = (mode !== 'h2h');
   const isSpecialMode = (mode === 'challenge' || mode === 'ghost' || mode === 'doubles_practice' || mode === 'chuckin'
     || mode === 'checkout_trainer' || mode === 'around_the_clock' || mode === 'around_the_world' || mode === 'bobs_27'
-    || mode === 'checkout_ladder' || mode === 'gauntlet' || mode === 'marathon');
+    || mode === 'checkout_ladder' || mode === 'gauntlet' || mode === 'marathon' || mode === 'dead_man_walking');
   // Daily Challenge and Ghost Opponent are both X01-only (docs/archive/ghost-opponent-roadmap.md
   // is explicitly X01-only for v1); Doubles Practice/Just Chuckin' It/Checkout
   // Trainer/both guided drills/Bob's 27 are each their own gameType, not a
@@ -3166,7 +3208,7 @@ function setMode(mode){
   // the drill's own type underneath, and startGame() (which reads
   // setup.gameType, not any control) would silently build that drill's game
   // type regardless of what Step 2 visibly shows.
-  const drillGameTypes = ['doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
+  const drillGameTypes = ['doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'dead_man_walking'];
   if(!drillGameTypes.includes(mode) && drillGameTypes.includes(setup.gameType)) setup.gameType = 'x01';
   if((mode === 'challenge' || mode === 'ghost') && setup.gameType !== 'x01') setup.gameType = 'x01';
   if(drillGameTypes.includes(mode)) setup.gameType = mode;
@@ -3185,6 +3227,7 @@ function setMode(mode){
     : (mode === 'checkout_ladder') ? 'Start climbing'
     : (mode === 'gauntlet') ? 'Run the Gauntlet'
     : (mode === 'marathon') ? 'Start the marathon'
+    : (mode === 'dead_man_walking') ? 'Begin the walk'
     : 'Play Now';
   if(isSpecialMode){
     setup.slots = setup.slots.slice(0,1);
@@ -4249,6 +4292,9 @@ const NEW_GAME_MODE_OPTIONS = [
   { key:'marathon', label:'🏃 Marathon Mode', contexts:['practice'],
     blurb:"A 45-minute solo endurance session — ordinary 501 legs, chained back to back with no return to this setup screen. When time runs out, the leg in progress finishes normally, then you get the story: dart count per leg, a fatigue split (did the second half run slower than the first?), and a trend read across the whole session — The Cliff, The Warm Machine, or The Flat Line.",
     apply(){ setMode('marathon'); } },
+  { key:'dead_man_walking', label:'💀 Dead Man Walking', contexts:['practice'],
+    blurb:"15 rounds. Each one drops you mid-checkout on one of YOUR OWN historically weakest finishes, with one fewer dart than you'd usually need. Close it — Walked Out. Bust, or run out of darts — Executed. No warmup, no easy numbers: the deficits are pulled straight from your own worst history and keep recurring until you solve them. The count of Walked Out rounds out of 15 lands on a result, from Pardoned down to Executed.",
+    apply(){ setMode('dead_man_walking'); } },
   { key:'killer', label:'🔪 Killer', contexts:['h2h'],
     blurb:"Elimination darts. Each player is randomly assigned their own number when the match starts. Land darts on your own number to build lives — reach the lives threshold and you become a killer. Once you're a killer, hitting an opponent's number costs them lives instead; drop to 0 lives and you're eliminated. Last player standing wins the leg (your own double is a self-kill if you're already a killer). Choose the lives threshold on the next step.",
     apply(){ setMode('h2h'); setGameType('killer'); } },
@@ -4728,7 +4774,7 @@ async function startGame(){
   if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   // Custom cricket is locked to exactly 7 targets (same count as classic) — never
   // more, never fewer (docs/game-modes-roadmap.md "Decisions made").
-  const gameType = ['cricket', 'baseball', 'shanghai', 'halve_it', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer'].includes(setup.gameType)
+  const gameType = ['cricket', 'baseball', 'shanghai', 'halve_it', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer', 'dead_man_walking'].includes(setup.gameType)
     ? setup.gameType : 'x01'; // Daily Challenge always forces x01 via setMode()
   let cricketNumbers = null;
   if(gameType === 'cricket'){
@@ -4784,8 +4830,19 @@ async function startGame(){
   // final round settles, per docs/halve-it-roadmap.md), forced to
   // exactly 1 leg/1 set here; H2H Halve-It keeps a real Bo3/Bo5 multi-leg match.
   const isPracticeHalveIt = setup.gameType === 'halve_it' && setup.mode !== 'h2h';
-  const legsPerSet = (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai || isPracticeHalveIt) ? 1 : setup.legsPerSet;
-  const setsPerGame = (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai || isPracticeHalveIt) ? 1 : setup.setsPerGame;
+  // Dead Man Walking (docs/archive/dead-man-walking-roadmap.md "Session structure"):
+  // NOT added to drillModes above (which forces 1/1) — each of the 15 rounds
+  // is its OWN leg inside ONE game (leg_no increments per round), so the
+  // "match" here is the whole 15-round session and what ends it is reaching
+  // round 15, never the usual legsPerSet/setsPerGame machinery every other
+  // drill mode's forced-1/1 shape leans on. Solo-only, so this is always
+  // exactly 15/1 regardless of whatever the (hidden, for this mode)
+  // legs/sets stepper last held.
+  const isDeadManWalking = gameType === 'dead_man_walking';
+  const legsPerSet = isDeadManWalking ? 15
+    : (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai || isPracticeHalveIt) ? 1 : setup.legsPerSet;
+  const setsPerGame = isDeadManWalking ? 1
+    : (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai || isPracticeHalveIt) ? 1 : setup.setsPerGame;
   // Checkout Blitz's durationSec is stored even though only 60 exists today — same
   // "store it even though only one value exists today" precedent tournament_rounds.
   // legs_per_set already set for a field that was single-valued at first and
@@ -4823,6 +4880,13 @@ async function startGame(){
     // this mode has — player numbers are randomly assigned server-side
     // (createGame()'s killerConfig), never chosen or sent from here.
     : gameType === 'killer' ? { lives: setup.killerLives || KILLER_DEFAULT_LIVES }
+    // Dead Man Walking (docs/archive/dead-man-walking-roadmap.md "Server-authoritative
+    // round generation"): NO client-supplied config field at all — sent empty
+    // and entirely ignored either way, since createGame() computes the real
+    // config.rounds itself, server-side, from a live snapshot of this
+    // player's own history. Sending {} rather than omitting config keeps this
+    // branch's shape consistent with every sibling drill above.
+    : gameType === 'dead_man_walking' ? {}
     : { startingScore: startScore };
   const category = gameType === 'cricket'
     ? (setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
@@ -4850,6 +4914,8 @@ async function startGame(){
     ? 'The Gauntlet'
     : gameType === 'killer'
     ? 'Killer'
+    : gameType === 'dead_man_walking'
+    ? 'Dead Man Walking'
     : String(startScore);
   game = {
     gameType,
@@ -4957,6 +5023,23 @@ async function startGame(){
       .catch(()=>{ earnedBadgeCache[n] = new Set(); });
   });
   await DB.beginGame(game, names, setup.loadoutByName);   // registers the game; gets a gameId in api mode
+  // Dead Man Walking: game.config.rounds only exists AFTER beginGame() resolves
+  // (DB.beginGame() just threaded it on from the server's response — see its
+  // own comment) — seed round 1's own frozen target/par onto the live game/
+  // player state here, the first point at which they're actually known.
+  if(gameType === 'dead_man_walking'){
+    const rounds = game.config.rounds || [];
+    const first = rounds[0];
+    game.dmwTarget = first ? first.target : 0;
+    game.dmwBudget = first ? (first.par - 1) : 0;
+    game.dmwDartsUsedThisRound = 0;
+    game.dmwWalkedOutCount = 0;
+    game.dmwCurrentStreak = 0;
+    game.dmwBestStreak = 0;
+    const p = game.players[0];
+    p.score = first ? first.target : 0;
+    p.doubleOut = true;
+  }
   if(activeChallenge && DB.gameId != null){
     Backend.send('POST','/api/challenges/start', { player:activeChallenge.player, gameId:DB.gameId,
       challengeDate:activeChallenge.date, format:activeChallenge.format, target:activeChallenge.target })
@@ -6174,7 +6257,7 @@ function renderPlayerBadges(data){
   // Practice's 5 (docs/archive/culture-badges-roadmap.md Part B), and the guided
   // drills' 2 each stay visually distinct sub-sections rather than one mixed
   // flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].shanghai && !BADGE_INFO[id].halveIt && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder && !BADGE_INFO[id].gauntlet && !BADGE_INFO[id].killer && !BADGE_INFO[id].marathon);
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].shanghai && !BADGE_INFO[id].halveIt && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder && !BADGE_INFO[id].gauntlet && !BADGE_INFO[id].killer && !BADGE_INFO[id].marathon && !BADGE_INFO[id].deadManWalking);
   const eloIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].elo);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
   const baseballIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].baseball);
@@ -6191,6 +6274,7 @@ function renderPlayerBadges(data){
   const gauntletIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].gauntlet);
   const killerIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].killer);
   const marathonIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].marathon);
+  const deadManWalkingIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].deadManWalking);
   container.innerHTML = `
     <div class="pp-section-title" style="margin-bottom:6px">X01</div>
     <div class="summary-grid">${x01Ids.map(badgeBlock).join('')}</div>
@@ -6214,6 +6298,8 @@ function renderPlayerBadges(data){
     <div class="summary-grid">${killerIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Marathon Mode</div>
     <div class="summary-grid">${marathonIds.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">Dead Man Walking</div>
+    <div class="summary-grid">${deadManWalkingIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Household Rating</div>
     <div class="summary-grid">${eloIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Tournaments</div>
@@ -6718,6 +6804,21 @@ function renderGauntletPersonalBests(data){
     <div class="stat-block"><div class="stat-val">${data.lowestTotalScars}</div><div class="stat-label">Lowest Total Scars</div></div>
   </div>`;
 }
+// Dead Man Walking's ONE Personal Best (docs/archive/dead-man-walking-roadmap.md
+// "Personal Bests") — most Walked Out rounds in a single run, a normal
+// descending "best" board (contrast The Gauntlet's own deliberately
+// ascending Lowest Total Scars just above — this one isn't inverted).
+function renderDeadManWalkingPersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || data.mostWalkedOut==null){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No completed runs recorded yet.</p>`;
+    return;
+  }
+  container.innerHTML=`<div class="summary-grid">
+    <div class="stat-block"><div class="stat-val">${data.mostWalkedOut}/15</div><div class="stat-label">Most Walked Out</div></div>
+  </div>`;
+}
 function renderKillerPersonalBests(data){
   const container=document.getElementById('player-personal-bests');
   if(!container) return;
@@ -6857,6 +6958,7 @@ function renderGame(){
   if(game.gameType === 'checkout_ladder') return renderGameCheckoutLadder();
   if(game.gameType === 'gauntlet') return renderGameGauntlet();
   if(game.gameType === 'killer') return renderGameKiller();
+  if(game.gameType === 'dead_man_walking') return renderGameDeadManWalking();
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
   game.players.forEach((p,i)=>{
@@ -7613,6 +7715,78 @@ BADGE_INFO['gauntletsecondwind'] = { icon:'🩹', label:'Second Wind',
   desc:'Pass a repeat attempt clean (0 misses) after failing the original station with 2 misses.', gauntlet:true };
 ACH_LABELS['gauntletsecondwind'] = 'Second Wind 🩹';
 ACH_DURATION['gauntletsecondwind'] = 3000;
+
+/* ---------- Dead Man Walking (docs/archive/dead-man-walking-roadmap.md "Achievements")
+   ---------- Data-driven ladders off the same checkChuckinMilestoneTier()
+   engine every other milestone ladder in this app uses: two lifetime ladders
+   (runs completed, Walked Out rounds — the Chuckin darts/trebles base+session
+   pattern) and one LIFETIME, CROSS-RUN streak ladder (longest consecutive
+   Walked-Out streak — unlike Gauntlet's own per-run-peak streak ladder, this
+   one is checked against a server-computed value that can span multiple runs,
+   see getDeadManWalkingLongestStreak() in backend/db.js and
+   onDeadManWalkingComplete()'s own post-match fetch). Exact thresholds are a
+   first pass for playtesting, same "not final" caveat every other milestone
+   ladder in this app carries. */
+const DMW_RUNS_MILESTONE_LADDERS = [
+  { metric:'runs', idPrefix:'dmw_runs_', statNoun:'lifetime Dead Man Walking runs completed',
+    descFor: t => `Complete ${t.toLocaleString()} lifetime Dead Man Walking runs.`,
+    tiers: [
+      { threshold:5,   label:'Repeat Offender', icon:'🔁' },
+      { threshold:25,  label:'Frequent Flyer',  icon:'✈️' },
+      { threshold:100, label:'Death Row Regular', icon:'⛓️' },
+      { threshold:250, label:'Old Sparky',      icon:'⚡' },
+    ] },
+];
+const DMW_WALKED_OUT_MILESTONE_LADDERS = [
+  { metric:'walkedOut', idPrefix:'dmw_walkedout_', statNoun:'lifetime rounds Walked Out',
+    descFor: t => `Walk Out of ${t.toLocaleString()} lifetime Dead Man Walking rounds.`,
+    tiers: [
+      { threshold:50,   label:'Free Man',        icon:'🕊️' },
+      { threshold:250,  label:'Habitual Escapee', icon:'🏃' },
+      { threshold:1000, label:'Uncatchable',     icon:'💨' },
+      { threshold:2500, label:'Legend of the Yard', icon:'👑' },
+    ] },
+];
+// Lifetime, cross-run streak (docs/archive/dead-man-walking-roadmap.md "within or
+// across runs") — checked once at the end of EVERY run, against a fresh
+// server-computed value (getDeadManWalkingLongestStreak()), not a per-run
+// local counter the way Gauntlet's own streak ladder is.
+const DMW_STREAK_MILESTONE_LADDERS = [
+  { metric:'streak', idPrefix:'dmw_streak_', statNoun:'consecutive rounds Walked Out, lifetime',
+    descFor: t => `String together ${t.toLocaleString()} consecutive Walked Out rounds, lifetime (within or across runs).`,
+    tiers: [
+      { threshold:3,  label:'On A Roll',   icon:'🎲' },
+      { threshold:5,  label:'Charmed Life', icon:'🍀' },
+      { threshold:10, label:'Untouchable',  icon:'🌟' },
+    ] },
+];
+[DMW_RUNS_MILESTONE_LADDERS, DMW_WALKED_OUT_MILESTONE_LADDERS, DMW_STREAK_MILESTONE_LADDERS].forEach(ladders=>{
+  ladders.forEach(ladder=>{
+    ladder.tiers.forEach((tier, i)=>{
+      const id = ladder.idPrefix + tier.threshold;
+      BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), deadManWalking:true };
+      ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
+      ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
+    });
+  });
+});
+// One-off badges (docs/archive/dead-man-walking-roadmap.md "Achievements") — framed
+// with the mode's own dark, self-aware humor per the doc's own tone note, not
+// purely celebratory across the board: 💀 Last Request is deliberately a "you
+// showed up" badge for going 0/15, not a taunt. All three recurring
+// (awardRecurringBadge) — a later run can clear the same tier again.
+BADGE_INFO['dmwfullreprieve'] = { icon:'🕊️', label:'Full Reprieve',
+  desc:'Walk Out of all 15 rounds in a single Dead Man Walking run.', deadManWalking:true };
+ACH_LABELS['dmwfullreprieve'] = 'Full Reprieve 🕊️';
+ACH_DURATION['dmwfullreprieve'] = 5000;
+BADGE_INFO['dmwpardoned'] = { icon:'⚰️', label:'Pardoned',
+  desc:'Walk Out of 13 or more of the 15 rounds in a single Dead Man Walking run.', deadManWalking:true };
+ACH_LABELS['dmwpardoned'] = 'Pardoned ⚰️';
+ACH_DURATION['dmwpardoned'] = 4000;
+BADGE_INFO['dmwlastrequest'] = { icon:'💀', label:'Last Request',
+  desc:'Walk Out of zero of the 15 rounds in a single Dead Man Walking run — you showed up.', deadManWalking:true };
+ACH_LABELS['dmwlastrequest'] = 'Last Request 💀';
+ACH_DURATION['dmwlastrequest'] = 3000;
 
 /* ---------- Killer (docs/archive/game-modes-roadmap.md "Killer") ---------- Three
    one-off badges, all recurring (a real repeatable feat across different
@@ -9143,6 +9317,40 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
     renderGameGauntlet();
     return;
   }
+  if(game.gameType === 'dead_man_walking'){
+    // docs/archive/dead-man-walking-roadmap.md "Execution — per-dart evaluation, not
+    // per-visit": nothing about the physical input widget changes (darts still
+    // accumulate into game.darts up to 3, same as X01) — only the LIVE
+    // evaluation is per-dart, generalizing the default block's own bust/win
+    // check below with a third stop condition (outOfDarts). game.busted is
+    // reused for BOTH a real bust and an out-of-darts stop (both block further
+    // entry identically); the write-time commit (enterTurnDeadManWalking())
+    // independently re-derives which one actually happened from the darts
+    // themselves, never trusting this flag.
+    const p = game.players[0];
+    const ev = evaluateVisitDeadManWalking(p, game.darts, game);
+    const status=document.getElementById('status');
+    if(ev.bust){
+      game.busted=true;
+      status.className='status bust'; status.textContent='EXECUTED — bust. Press Enter turn.';
+      announce('Bust.');
+    } else if(ev.win){
+      game.won=true;
+      status.className='status win'; status.textContent='WALKED OUT! Press Enter turn to record it.';
+      announce('Walked out!');
+    } else if(ev.outOfDarts){
+      game.busted=true;
+      status.className='status bust'; status.textContent='EXECUTED — out of darts. Press Enter turn.';
+      announce('Out of darts.');
+    } else {
+      const dartsLeft = game.dmwBudget - (game.dmwDartsUsedThisRound||0) - game.darts.length;
+      status.className='status';
+      status.textContent = `Leaves ${ev.newScore}. ${dartsLeft} dart${dartsLeft===1?'':'s'} left this round.`;
+      if(dartsLeft <= 1) announce(`${dartsLeft} dart left this round.`);
+    }
+    renderSlots(); renderPad(); updateCheckout(true); pushLive();
+    return;
+  }
 
   // live bust/win feedback before committing
   const ev = GAME_TYPES[game.gameType].evaluateVisit(game.players[game.current], game.darts, game);
@@ -9166,7 +9374,7 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
 // independently re-validates this on every write, never trusting this check
 // (docs/archive/saved-games-roadmap.md's own security section: "never trust the
 // client's eligibility check").
-const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'shanghai', 'halve_it', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
+const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'shanghai', 'halve_it', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'dead_man_walking'];
 function isCurrentGameSavable(){
   // Marathon Mode (docs/archive/marathon-mode-roadmap.md): deliberately excluded, same
   // "no save/resume support" scope decision Killer already made. A saved-then-
@@ -9249,6 +9457,7 @@ async function resumeGame(gameId){
 
   let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, shanghaiRound = 1, halveItRound = 1, bobs27Round = 1, roundOver = false, checkoutLadderTarget = 121, checkoutLadderVisits = 0;
   let gauntletStationIndex = 0, gauntletAwaitingRepeat = false, gauntletFinalMisses = [], gauntletCleanStreak = 0, gauntletBestCleanStreak = 0;
+  let dmwTarget = 0, dmwBudget = 0, dmwDartsUsedThisRound = 0, dmwWalkedOutCount = 0, dmwCurrentStreak = 0, dmwBestStreak = 0;
   let statusMsg = '';
   if(gameType === 'x01'){
     const r = rebuildX01State({ names, outModes, startScore, practice: !!state.practice, legsPerSet: state.legsPerSet, turns: state.turns });
@@ -9334,6 +9543,26 @@ async function resumeGame(gameId){
     statusMsg = r.done
       ? `Resumed — all 20 stations settled, total Scars: ${r.totalScars}.`
       : `Resumed — station ${gauntletStationIndex+1} of 20 (target ${r.currentStation}), total Scars so far: ${r.totalScars}.`;
+  } else if(gameType === 'dead_man_walking'){
+    const rounds = (config && config.rounds) || [];
+    const r = rebuildDeadManWalkingState({ rounds, turns: state.turns });
+    players[0].score = r.remaining;
+    players[0].doubleOut = true;
+    legNo = r.roundIndex + 1;
+    dmwTarget = r.remaining;
+    dmwBudget = r.budget;
+    dmwDartsUsedThisRound = r.dartsUsedThisRound;
+    dmwWalkedOutCount = r.walkedOutCount;
+    // The running current/best streak (badge-trigger bookkeeping, not needed
+    // by the write-time guard or stats) is re-derived here as a pure function
+    // of rebuildDeadManWalkingState()'s own settled-round history, mirroring
+    // Gauntlet's own resume-time streak re-derivation immediately above.
+    let _dcur = 0, _dbest = 0;
+    r.walkedOutRounds.forEach(walked => { if(walked){ _dcur++; _dbest = Math.max(_dbest, _dcur); } else _dcur = 0; });
+    dmwCurrentStreak = _dcur; dmwBestStreak = _dbest;
+    statusMsg = r.done
+      ? `Resumed — all 15 rounds settled, ${dmwWalkedOutCount} Walked Out.`
+      : `Resumed — round ${legNo} of 15 (target ${dmwTarget}), ${dmwWalkedOutCount} Walked Out so far.`;
   } else {
     uiAlert(`${gameType} games can't be resumed.`);
     return;
@@ -9349,6 +9578,7 @@ async function resumeGame(gameId){
     starter, current, setNo, legNo,
     baseballInning, shanghaiRound, halveItRound, bobs27Round, checkoutLadderTarget, checkoutLadderVisits,
     gauntletStationIndex, gauntletAwaitingRepeat, gauntletFinalMisses, gauntletCleanStreak, gauntletBestCleanStreak,
+    dmwTarget, dmwBudget, dmwDartsUsedThisRound, dmwWalkedOutCount, dmwCurrentStreak, dmwBestStreak,
     darts: [], busted:false, won:false, done:false,
     gameOneEighties:0, gameBigFish:0, gameBusts:0,
     currentLegTurns: [], legVisitLogs: [], sessionTurns: [],
@@ -9414,6 +9644,7 @@ function savedGamePositionLabel(sg){
   if(pos.round != null) return `D${pos.round} · running score ${pos.running}`;
   if(pos.target != null) return `Target ${pos.target} · attempt ${pos.legNo} · ${pos.remaining} remaining`;
   if(pos.station != null) return `Station ${pos.settled+1} of 20 · total Scars ${pos.totalScars}${pos.awaitingRepeat ? ' · repeat pending' : ''}`;
+  if(pos.dmwRound != null) return `Round ${pos.dmwRound} of ${pos.dmwTotalRounds} · target ${pos.dmwTarget} · ${pos.dmwWalkedOutCount} Walked Out`;
   return '';
 }
 function savedGameDateLabel(iso){
@@ -9545,6 +9776,7 @@ function undoLastTurn(){
   if(game && game.gameType === 'checkout_ladder') return undoLastTurnCheckoutLadder();
   if(game && game.gameType === 'gauntlet') return undoLastTurnGauntlet();
   if(game && game.gameType === 'killer') return undoLastTurnKiller();
+  if(game && game.gameType === 'dead_man_walking') return undoLastTurnDeadManWalking();
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
   const p = game.players[snap.pi];
@@ -9627,6 +9859,7 @@ function enterTurn(){
   if(game.gameType === 'bobs_27') return enterTurnBobs27();
   if(game.gameType === 'checkout_ladder') return enterTurnCheckoutLadder();
   if(game.gameType === 'gauntlet') return enterTurnGauntlet();
+  if(game.gameType === 'dead_man_walking') return enterTurnDeadManWalking();
   if(game.gameType === 'checkout_trainer') return submitCheckoutAttempt();
   if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
   const p = game.players[game.current];
@@ -11277,6 +11510,7 @@ function finishUnit(kind, winner){
   const isBobs27 = game.gameType === 'bobs_27';
   const isGauntlet = game.gameType === 'gauntlet';
   const isKiller = game.gameType === 'killer';
+  const isDeadManWalking = game.gameType === 'dead_man_walking';
   // No matchwin moment card is built for Cricket yet (its own social/moment-card
   // pass is a later build-order step) — suppress the Share button rather than wire
   // it to a card that doesn't exist. Baseball's/Bob's 27's own matchwin cards ARE
@@ -11352,6 +11586,18 @@ function finishUnit(kind, winner){
     const killerSummary = isKiller ? `<div class="summary-grid" style="margin-top:14px">
         ${game.players.map(pl => `<div class="stat-block"><div class="stat-val">${pl.number}</div><div class="stat-label">${escapeHtml(pl.name)}${pl.eliminated?' — eliminated':' — survived'}${pl.kills?` · ${pl.kills} kill${pl.kills===1?'':'s'}`:''}</div></div>`).join('')}
       </div>` : '';
+    // Dead Man Walking's own tiny run-summary block (docs/dead-man-walking-
+    // roadmap.md "Result tiers") — same reasoning as bobs27Summary/
+    // gauntletSummary above: h2hStatsHtml() reads X01-shaped per-leg fields
+    // (legPoints/legAvgDarts) a Dead Man Walking player object doesn't carry.
+    const deadManWalkingSummary = isDeadManWalking ? (()=>{
+      const walkedOut = game.dmwWalkedOutCount;
+      const tier = deadManWalkingResultTier(walkedOut);
+      return `<div class="summary-grid" style="margin-top:14px">
+        <div class="stat-block"><div class="stat-val">${walkedOut}/15</div><div class="stat-label">Walked Out</div></div>
+        <div class="stat-block"><div class="stat-val">${escapeHtml(tier)}</div><div class="stat-label">Result</div></div>
+      </div>`;
+    })() : '';
     oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
       <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">GAME OVER</div>
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${escapeHtml(winner)} takes the match. Stats saved.</p>
@@ -11359,7 +11605,7 @@ function finishUnit(kind, winner){
       <div class="btn-row" style="justify-content:center">
         ${nextBtn}
         ${matchShareBtn}
-      </div>${isCricket || isBobs27 || isGauntlet || isKiller ? '' : isBaseball ? h2hStatsHtmlBaseball(winner,'game') : isShanghai ? h2hStatsHtmlShanghai(winner,'game') : isHalveIt ? h2hStatsHtmlHalveIt(winner,'game') : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}${killerSummary}</div>`;
+      </div>${isCricket || isBobs27 || isGauntlet || isKiller || isDeadManWalking ? '' : isBaseball ? h2hStatsHtmlBaseball(winner,'game') : isShanghai ? h2hStatsHtmlShanghai(winner,'game') : isHalveIt ? h2hStatsHtmlHalveIt(winner,'game') : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}${killerSummary}${deadManWalkingSummary}</div>`;
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
@@ -11425,7 +11671,11 @@ function finishUnit(kind, winner){
     kills: p.kills || 0,
     eliminated: !!p.eliminated,
     won: p.name === winner
-  })) : game.players.map(p=>({
+  })) : isDeadManWalking ? [{
+    name: game.players[0].name,
+    walkedOut: game.dmwWalkedOutCount,
+    won: true,
+  }] : game.players.map(p=>({
     name: p.name,
     avg:   p.legAvgDarts ? (p.legPoints / p.legAvgDarts * 3).toFixed(1) : null,
     darts: p.legDarts  || 0,
@@ -11624,6 +11874,25 @@ const KILLER_STAT_DEFS = [
 const KILLER_BUBBLE_KEY_MAP = { killergamesplayed:'gamesPlayed', killerwinrate:'winRate',
   killeravgkillsperleg:'avgKillsPerLeg', killeravgliveslostperleg:'avgLivesLostPerLeg',
   killersurvivedwithoutkillerrate:'survivedWithoutKillerRate' };
+
+// Dead Man Walking's own stat bubbles (docs/archive/dead-man-walking-roadmap.md
+// "Stat bubbles" — "runs completed, average Walked Out count per run, bust
+// rate vs. ran-out-of-darts rate, average darts of margin remaining on a
+// Walked Out round"). longestWalkedOutStreak (a lifetime, cross-run figure —
+// see getDeadManWalkingLongestStreak(), backend/db.js) rides along here too,
+// same "expose the achievement-ladder input as a real bubble too" precedent
+// the Elo rating section already set.
+const DEAD_MAN_WALKING_STAT_DEFS = [
+  { key:'dmwrunscompleted', label:'Runs Completed', desc:'Number of full 15-round Dead Man Walking runs completed', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'dmwavgwalkedout', label:'Avg Walked Out / Run', desc:'Average number of rounds Walked Out per completed run (out of 15)', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
+  { key:'dmwbustrate', label:'Bust Rate', desc:'% of rounds Executed by a real bust', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'dmwranoutofdartsrate', label:'Out-of-Darts Rate', desc:'% of rounds Executed by running out of the round\'s dart budget, without busting', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'dmwavgmargin', label:'Avg Margin (Walked Out)', desc:'Average darts of budget left unused on a Walked Out round', fmt:v=>v!=null?v.toFixed(1):'—' },
+  { key:'dmwlongeststreak', label:'Longest Walked-Out Streak', desc:'Longest run of consecutive Walked Out rounds, lifetime (within or across runs)', fmt:v=>v!=null?String(Math.round(v)):'—' },
+];
+const DEAD_MAN_WALKING_BUBBLE_KEY_MAP = { dmwrunscompleted:'runsCompleted', dmwavgwalkedout:'avgWalkedOutPerRun',
+  dmwbustrate:'bustRate', dmwranoutofdartsrate:'ranOutOfDartsRate', dmwavgmargin:'avgMarginOnWalkedOut',
+  dmwlongeststreak:'longestWalkedOutStreak' };
 
 // Doubles Practice's own 3 stat bubbles (docs/game-modes-roadmap.md's requested
 // vocabulary: darts per round, doubles hit per round, doubles%) — every bubble
@@ -11944,6 +12213,25 @@ const GAME_TYPES = {
     // whole mechanic needs opponents to attack) — never offered/shown as a
     // solo/practice-only option the way Bob's 27 etc. are.
     h2hOnly: true
+  },
+  dead_man_walking: {
+    id: 'dead_man_walking',
+    label: 'Dead Man Walking',
+    newMatchPlayer: newMatchPlayerDeadManWalking,
+    // Per-dart evaluation (evaluateVisitDeadManWalking(), a real function —
+    // both throwDart()'s live-preview branch AND enterTurnDeadManWalking()'s
+    // commit call it directly, not through this registry slot, the same
+    // "registered for real but invoked directly" precedent Checkout Ladder's
+    // own evaluateVisit field already established).
+    evaluateVisit: evaluateVisitDeadManWalking,
+    resetForNextLeg: resetPlayerForNextLegDeadManWalking,
+    playerSnapshot: playerSnapshotDeadManWalking,
+    statDefs: DEAD_MAN_WALKING_STAT_DEFS,
+    personalBestsRenderer: renderDeadManWalkingPersonalBests,
+    homeTabRenderer: renderHomeTabBodyDeadManWalking,
+    // Solo only — no opponent, same reasoning Bob's 27/Checkout Ladder/The
+    // Gauntlet's own soloOnly already established.
+    soloOnly: true
   }
 };
 // bubbleKeyMap is patched on below, right after each map itself is defined —
@@ -12481,6 +12769,306 @@ function renderGameGauntlet(){
     </div>`;
   if(sb) sb.appendChild(row);
   renderPad();
+}
+
+/* ---------- Dead Man Walking (docs/archive/dead-man-walking-roadmap.md) ----------
+   Solo drill: 15 rounds, each its own leg (game.legNo increments per round,
+   the same "each attempt is its own leg" shape Checkout Ladder already
+   established) drawn from THIS player's own weakest historical checkouts,
+   frozen server-side into game.config.rounds at creation (never recomputed
+   live — see backend/db.js's createGame()). Genuinely different from every
+   other fixed-round-per-visit game type in this app (Baseball/Shanghai/
+   Halve-It): those are all "one visit = one round," each with its own
+   dedicated onLegWon*() reimplementing leg/set/game bookkeeping from
+   scratch. Dead Man Walking is structurally closer to a real X01 leg that
+   can span MULTIPLE visits (evaluateDeadManDart()/resolveDeadManDart(),
+   frontend/scoring.js, are per-dart, not per-visit, and a round only settles
+   once a real bust/win/out-of-darts event fires) — but a bust here is
+   IMMEDIATELY FATAL to the round (no second visit to try again within the
+   same round, unlike Checkout Ladder's forgiving up-to-3-visits shape), and
+   "the round is over" never corresponds to X01's own onLegWon() win event
+   for two of this mode's three outcomes (a bust or running out of darts are
+   never a "win"). That mismatch is why this gets its OWN dedicated
+   round-progression function (resolveDeadManWalkingRound() below) rather
+   than a `|| game.<flag>`-style carve-out bolted onto the generic X01
+   onLegWon() the way Marathon Mode's own practice-leg carve-out works —
+   there's simply no X01 leg-win EVENT to carve into for 2 of the 3 ways a
+   round can end here. legsPerSet is forced to 15 / setsPerGame to 1 at
+   startGame() time purely so the live scoreboard's "Round N of 15" framing
+   has somewhere sane to read game.legNo from — the actual 15-round-and-stop
+   logic lives entirely in resolveDeadManWalkingRound(), never in the generic
+   legsPerSet/setsPerGame machinery (which this mode never actually checks). */
+function newMatchPlayerDeadManWalking(name){
+  const p = { name, score:0, doubleOut:true, legDarts:0, setDarts:0, gameDarts:0,
+    lifetimeRunsBase:0, lifetimeWalkedOutBase:0 };
+  // Fetched once at game start, the same Gauntlet/Chuckin precedent (a run
+  // takes several minutes, so there's no meaningful race with the one lifetime
+  // check that happens at the very end, in onDeadManWalkingComplete()).
+  // score/doubleOut are placeholders here — startGame() overwrites them with
+  // round 1's own frozen target the moment game.config.rounds is actually
+  // known (only true after DB.beginGame()'s POST resolves; see that
+  // function's own dead_man_walking branch).
+  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(name)}&gameType=dead_man_walking&mode=practice`).then(stats=>{
+    if(!stats) return;
+    p.lifetimeRunsBase = stats.runsCompleted || 0;
+    p.lifetimeWalkedOutBase = stats.totalWalkedOut || 0;
+  }).catch(()=>{});
+  return p;
+}
+// Never actually called — resolveDeadManWalkingRound() below handles the real
+// per-round reset inline (it needs the NEXT round's own frozen target/par,
+// which this generic per-game-type hook has no way to receive), the same
+// structurally-unreachable-but-registry-shape-consistent stub Gauntlet's own
+// resetPlayerForNextLegGauntlet() already established.
+function resetPlayerForNextLegDeadManWalking(p, game, newSet){}
+function playerSnapshotDeadManWalking(p){
+  return { name:p.name, score:p.score, out:'double', legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0 };
+}
+
+// The live, per-visit-shaped wrapper around resolveDeadManDart() (scoring.js)
+// used by BOTH throwDart()'s live preview and enterTurnDeadManWalking()'s
+// actual commit — one function, two call sites, so they can never disagree.
+// Unlike evaluateVisit(), this checks EACH dart in `darts` in order and stops
+// the instant one of them settles the round (bust/win/out-of-darts) — any
+// remaining, not-yet-reached darts in that same batch are simply never
+// evaluated (matches how a dart that ends the round makes a hypothetical
+// next dart in the same tap sequence moot; throwDart()'s own live gate
+// already stops further taps once the round settles, so in practice `darts`
+// is never actually longer than dartsConsumed by more than a stale race).
+function evaluateVisitDeadManWalking(player, darts, game){
+  const budget = game.dmwBudget;
+  const dartsUsedBefore = game.dmwDartsUsedThisRound || 0;
+  let remaining = player.score;
+  let bust = false, win = false, outOfDarts = false, dartsConsumed = 0;
+  for(const dart of darts){
+    const r = resolveDeadManDart(remaining, dart, true, dartsUsedBefore + dartsConsumed, budget);
+    dartsConsumed += 1;
+    remaining = r.newRemaining;
+    if(r.bust){ bust = true; break; }
+    if(r.win){ win = true; break; }
+    if(r.outOfDarts){ outOfDarts = true; break; }
+  }
+  const pointsThisVisit = bust ? 0 : (player.score - remaining);
+  const consumedDarts = darts.slice(0, dartsConsumed);
+  return {
+    pointsThisVisit, scored: bust ? 0 : pointsThisVisit,
+    newScore: bust ? player.score : remaining,
+    bust, win, outOfDarts, dartsConsumed,
+    trebleLess: consumedDarts.length>0 && consumedDarts.every(d=>!d.isTreble),
+  };
+}
+
+/* ----- Dead Man Walking turn commit (dispatched from enterTurn()) ----- */
+function enterTurnDeadManWalking(){
+  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  const p = game.players[0];
+  const ev = evaluateVisitDeadManWalking(p, game.darts, game);
+
+  if(ev.win) announce(`Walked out with ${ev.pointsThisVisit}! Round ${game.legNo} of 15 cleared.`);
+  else if(ev.bust) announce(`Executed — bust. Round ${game.legNo} of 15 over.`);
+  else if(ev.outOfDarts) announce(`Executed — out of darts. Round ${game.legNo} of 15 over.`);
+  else announce(`Scores ${ev.scored}, ${ev.newScore} remaining.`);
+
+  // snapshot state before mutations so undoLastTurnDeadManWalking() can
+  // restore it — only reachable while this ROUND is still live (a settled
+  // round clears it via resolveDeadManWalkingRound(), the same "can't undo
+  // past a leg boundary" rule every other game type follows).
+  const _snap = { score:p.score, legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
+    dartsUsedThisRound: game.dmwDartsUsedThisRound,
+    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
+    badgeReverts:[], voided:false };
+  game.lastTurnSnapshot = _snap;
+
+  // Only the darts actually reached before the round settled are ever
+  // recorded — evaluateVisitDeadManWalking()'s own dartsConsumed, not simply
+  // game.darts.length (see that function's own header comment for why these
+  // are practically always the same number, and this guards the rare stale-
+  // input edge case explicitly rather than trusting it).
+  const dartsThrown = ev.dartsConsumed;
+  const recordedDarts = game.darts.slice(0, dartsThrown);
+  p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
+  if(!ev.bust) p.score = ev.newScore;
+  game.dmwDartsUsedThisRound = (game.dmwDartsUsedThisRound||0) + dartsThrown;
+
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:ev.scored, bust: ev.bust, checkout: ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null,
+    targetScore: game.dmwTarget,
+    darts: recordedDarts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
+      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+
+  const turnRecord = { player:p.name, scored:ev.scored, bust:ev.bust, checkout:ev.win, darts:recordedDarts.slice() };
+  game.currentLegTurns.push(turnRecord);
+  game.sessionTurns.push(turnRecord);
+
+  awardTimeOfDayBadges(p);
+
+  const roundOver = ev.win || ev.bust || ev.outOfDarts;
+  if(roundOver){
+    resolveDeadManWalkingRound(ev.win);
+  } else {
+    game.darts=[]; game.busted=false; game.won=false;
+    game.turnSeq += 1;
+    const dartsLeft = game.dmwBudget - game.dmwDartsUsedThisRound;
+    document.getElementById('status').className='status';
+    document.getElementById('status').textContent = `Round ${game.legNo} of 15 — ${p.score} remaining, ${dartsLeft} dart${dartsLeft===1?'':'s'} left.`;
+    renderGameDeadManWalking();
+    pushLive();
+  }
+}
+function undoLastTurnDeadManWalking(){
+  if(!game || !game.lastTurnSnapshot) return;
+  const snap = game.lastTurnSnapshot;
+  const p = game.players[0];
+  p.score = snap.score;
+  p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
+  game.dmwDartsUsedThisRound = snap.dartsUsedThisRound;
+  game.currentLegTurns.length = snap.ltLen;
+  game.sessionTurns.length = snap.stLen;
+
+  snap.voided = true;
+  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+  });
+  cancelQueuedAchievementsForSnapshot(snap);
+
+  game.darts = []; game.busted=false; game.won=false;
+  game.lastTurnSnapshot = null;
+  DB.deleteLastTurn();
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
+  renderGameDeadManWalking();
+  pushLive();
+}
+// Resolves the round just settled (Walked Out, or Executed by bust/out-of-
+// darts) — tallies it, advances game.legNo, and either seeds the NEXT
+// round's own frozen target/par (rounds 1-14 settling) or ends the whole
+// 15-round session (round 15 settling). Deliberately its OWN dedicated
+// progression function rather than a carve-out on the generic X01
+// onLegWon() — see this section's own header comment for why: a bust or an
+// out-of-darts round is never an X01 "leg win" event, so there's no
+// existing hook to carve into for 2 of this mode's 3 outcomes.
+function resolveDeadManWalkingRound(walkedOut){
+  const p = game.players[0];
+  if(walkedOut){
+    game.dmwWalkedOutCount += 1;
+    game.dmwCurrentStreak += 1;
+    game.dmwBestStreak = Math.max(game.dmwBestStreak, game.dmwCurrentStreak);
+  } else {
+    game.dmwCurrentStreak = 0;
+  }
+
+  sendHaWebhook('legend', p.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+  DB.recordEvent('leg_end', game.setNo, game.legNo);
+
+  if(game.legNo >= 15){
+    onDeadManWalkingComplete();
+    return;
+  }
+
+  // config.rounds[] is 0-indexed; game.legNo (1-based) is the round that JUST
+  // settled, so config.rounds[game.legNo] is the NEXT round's own frozen entry.
+  const nextRound = game.config.rounds[game.legNo];
+  game.legNo += 1;
+  game.dmwTarget = nextRound.target;
+  game.dmwBudget = nextRound.par - 1;
+  game.dmwDartsUsedThisRound = 0;
+  p.score = nextRound.target;
+  p.doubleOut = true;
+  p.legDarts = 0;
+  game.legSummary = null;
+  game.currentLegTurns = [];
+  game.legVisitLogs = [];
+  game.lastTurnSnapshot = null;
+  game.darts=[]; game.busted=false; game.won=false;
+  game.turnSeq += 1;
+  game.legStart = { ts: Date.now(), starter: p.name };
+  mult=1;
+  DB.recordEvent('leg_start', game.setNo, game.legNo);
+  sendHaWebhook('legstart', '', game.category, { setNo: game.setNo, legNo: game.legNo });
+  renderGameShell(); updateMultUI(); renderGame();
+}
+// Ends the whole 15-round session — the one point in this game type's
+// lifecycle that reaches finishUnit('game', ...), the same "a run IS the
+// game" shape onGauntletComplete()/onLegWonBobs27() already established for
+// this app's other fixed-length solo drills.
+function onDeadManWalkingComplete(){
+  const p = game.players[0];
+  const walkedOut = game.dmwWalkedOutCount;
+  const tier = deadManWalkingResultTier(walkedOut);
+
+  checkChuckinMilestoneTier(DMW_RUNS_MILESTONE_LADDERS[0], p.name, (p.lifetimeRunsBase||0) + 1);
+  checkChuckinMilestoneTier(DMW_WALKED_OUT_MILESTONE_LADDERS[0], p.name, (p.lifetimeWalkedOutBase||0) + walkedOut);
+
+  // One-off badges, framed with the mode's own dark, self-aware humor
+  // (docs/archive/dead-man-walking-roadmap.md "Achievements") — 💀 Last Request is
+  // deliberately "you showed up," not purely celebratory, matching that tone.
+  if(walkedOut === 15){
+    queueBadge('dmwfullreprieve', p.name);
+    awardRecurringBadge(p.name, 'dmwfullreprieve', 'dmwfullreprieve',
+      { icon:'🕊️', headline:'FULL REPRIEVE!', player:p.name, statLine:'15 of 15 rounds Walked Out' });
+  }
+  if(walkedOut >= 13){
+    queueBadge('dmwpardoned', p.name);
+    awardRecurringBadge(p.name, 'dmwpardoned', 'dmwpardoned',
+      { icon:'⚰️', headline:'PARDONED', player:p.name, statLine:`${walkedOut} of 15 rounds Walked Out` });
+  }
+  if(walkedOut === 0){
+    queueBadge('dmwlastrequest', p.name);
+    awardRecurringBadge(p.name, 'dmwlastrequest', 'dmwlastrequest',
+      { icon:'💀', headline:'LAST REQUEST', player:p.name, statLine:'0 of 15 rounds Walked Out — you showed up' });
+  }
+
+  // Lifetime longest Walked-Out streak (docs/archive/dead-man-walking-roadmap.md
+  // "within or across runs") is server-computed (getDeadManWalkingLongestStreak(),
+  // backend/db.js) since it can span multiple runs — fetched fresh right after
+  // this run's own final turn has landed, the same "post-match fetch resolves"
+  // pattern Household Elo's own delta banner uses.
+  DB._queue(()=>Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(p.name)}&gameType=dead_man_walking&mode=practice`)).then(stats=>{
+    if(stats && stats.longestWalkedOutStreak != null){
+      checkChuckinMilestoneTier(DMW_STREAK_MILESTONE_LADDERS[0], p.name, stats.longestWalkedOutStreak);
+    }
+  }).catch(()=>{});
+
+  sendHaWebhook('setend', p.name, game.category, { setNo: game.setNo });
+  sendHaWebhook('gameend', p.name, game.category);
+  DB.recordEvent('set_end', game.setNo, null);
+  DB.recordEvent('game_end', null, null);
+  DB.completeGame(p.name);
+  game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:p.name, bigFish:false };
+  fireMomentCard('matchwin', { icon: walkedOut===15 ? '🕊️' : walkedOut===0 ? '💀' : '⚰️', headline: tier.toUpperCase(),
+    player:p.name, statLine: `${walkedOut} of 15 rounds Walked Out` });
+  finishUnit('game', p.name);
+}
+// Live scoreboard (docs/archive/dead-man-walking-roadmap.md "Live scoreboard"): round
+// N/15, the deficit, a DART-COUNT countdown (never a wall-clock one — a
+// deliberately different flavor from The Pressure Chamber's own No Warmup
+// timer), and the running Walked Out tally — all as persistent, always-
+// visible text (docs/archive/dead-man-walking-roadmap.md's own accessibility section:
+// "a screen-reader user can't infer this from a highlighted dartboard region
+// alone"), with the darts-remaining line also aria-live so it's announced as
+// the budget runs low, not just visually updated.
+function renderGameDeadManWalking(){
+  const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
+  renderSlots();
+  const p = game.players[0];
+  const dartsLeft = game.dmwBudget - (game.dmwDartsUsedThisRound||0);
+  const row = document.createElement('div');
+  row.className = 'pscore active';
+  row.innerHTML = `
+    <div>
+      <div class="nm">${escapeHtml(p.name)} <span class="nm-out">💀 Dead Man Walking · double out</span></div>
+      <div class="turnflag">▸ Round ${game.legNo} of 15</div>
+    </div>
+    <div class="meta">
+      <div class="avgs" aria-live="polite">${dartsLeft} dart${dartsLeft===1?'':'s'} left this round</div>
+      <div class="standing">Walked Out: ${game.dmwWalkedOutCount} / ${game.legNo - 1}</div>
+    </div>
+    <div class="rem-wrap">
+      <div class="rem">${p.score}</div>
+    </div>`;
+  if(sb) sb.appendChild(row);
+  renderPad();
+  pushLive();
 }
 
 /* ---------- Killer (docs/archive/game-modes-roadmap.md "Killer") ----------
@@ -14208,6 +14796,7 @@ GAME_TYPES.bobs_27.bubbleKeyMap = BOBS_27_BUBBLE_KEY_MAP;
 GAME_TYPES.checkout_ladder.bubbleKeyMap = CHECKOUT_LADDER_BUBBLE_KEY_MAP;
 GAME_TYPES.gauntlet.bubbleKeyMap = GAUNTLET_BUBBLE_KEY_MAP;
 GAME_TYPES.killer.bubbleKeyMap = KILLER_BUBBLE_KEY_MAP;
+GAME_TYPES.dead_man_walking.bubbleKeyMap = DEAD_MAN_WALKING_BUBBLE_KEY_MAP;
 function toggleMoreStats(){
   showMoreStats = !showMoreStats;
   renderPlayerPage();

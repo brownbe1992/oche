@@ -30,7 +30,9 @@ const { checkoutHint, dartLabel,
   KILLER_DEFAULT_LIVES, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
   computeFatigueSplit, classifyMarathonTrend,
   shanghaiRoundTarget, evaluateVisitShanghai, rebuildShanghaiState,
-  HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, rebuildHalveItState } = require('../frontend/scoring.js');
+  HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, rebuildHalveItState,
+  deadManWalkingBandFor, deadManWalkingParForTarget, pickDeadManWalkingTargets,
+  rebuildDeadManWalkingState, deadManWalkingResultTier, CHALLENGE_CHECKOUTS } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -927,7 +929,25 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
     }
     killerConfig = { lives, numbers: assignKillerNumbers(names) };
   }
+  // Dead Man Walking (docs/archive/dead-man-walking-roadmap.md "Data model" /
+  // "Server-authoritative round generation"): config.rounds — the frozen
+  // array of 15 {target, par} pairs — is computed HERE, server-side, from a
+  // live snapshot of this specific player's own X01 history, and NEVER
+  // accepted from the client at all (unlike killerConfig above, there isn't
+  // even a client-supplied field to validate against; any config the request
+  // body carries for this game type is simply ignored). A hostile client
+  // choosing its own easy targets/generous pars for itself is exactly what
+  // this closes off — the real security requirement this doc calls out by
+  // name, not just tidiness.
+  let dmwConfig = null;
+  if (resolvedGameType === 'dead_man_walking') {
+    const names = [];
+    (players || []).forEach(entry => { if (entry.name && !names.includes(entry.name)) names.push(entry.name); });
+    if (names.length !== 1) throw httpError(400, 'Dead Man Walking is solo only');
+    dmwConfig = { rounds: _buildDeadManWalkingRounds(names[0]) };
+  }
   const resolvedConfig = killerConfig ? JSON.stringify(killerConfig)
+    : dmwConfig ? JSON.stringify(dmwConfig)
     : config ? JSON.stringify(config) : JSON.stringify({ startingScore: Number(category) || null });
   if (Buffer.byteLength(resolvedConfig) > 4096) throw httpError(400, 'config is too large');
   // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): validated here,
@@ -990,8 +1010,13 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   // Killer's number assignment is decided HERE, server-side (never trusted from
   // the client — see killerConfig's own comment above) — the client has no other
   // way to learn it, so it rides back on this same response rather than needing
-  // a second round-trip right after every game creation.
-  return killerConfig ? { gameId, config: killerConfig } : { gameId };
+  // a second round-trip right after every game creation. Dead Man Walking's
+  // frozen config.rounds is the same shape of problem — the client has no
+  // other way to learn its own 15 personalized targets/pars, since they were
+  // never client-supplied in the first place (see dmwConfig's own comment above).
+  return killerConfig ? { gameId, config: killerConfig }
+    : dmwConfig ? { gameId, config: dmwConfig }
+    : { gameId };
 }
 
 // docs/security-audit-roadmap.md SEC-22: `opts.enforceConsistency` gates the
@@ -1332,6 +1357,49 @@ function addTurn(gameId, t, opts = {}) {
     if (!!t.bust !== (expectedGained === 0)) {
       throw httpError(400, 'bust must reflect whether this Halve-It visit missed the round\'s target entirely');
     }
+  } else if (gameTypeRow && gameTypeRow.game_type === 'dead_man_walking') {
+    // docs/archive/dead-man-walking-roadmap.md "Data model": ordinary X01 bust/checkout
+    // columns reused in their normal sense (no repurposing needed) — the same
+    // dart-sum/bust/checkoutPoints arithmetic as the 'x01'/'checkout_ladder'
+    // branches above, reused wholesale. What's new is the per-round variable
+    // dart-budget guard (generalizing Checkout Ladder's flat 9-dart/3-visit cap
+    // to a variable `config.rounds[leg-1].par - 1`) and validating targetScore
+    // against the FROZEN round the server itself computed at creation, never
+    // the ladder's own live-derived climbing target.
+    const dartSum = darts.reduce((sum, d) => sum + (d.sector === 0 ? 0 : d.sector === 25 ? (d.multiplier === 2 ? 50 : 25) : d.sector * d.multiplier), 0);
+    if (t.bust) {
+      if (scored !== 0) throw httpError(400, 'a bust turn must have scored=0');
+    } else if (scored !== dartSum) {
+      throw httpError(400, 'scored does not match the value of the darts thrown this visit');
+    }
+    if (t.checkout && checkoutPoints !== scored) {
+      throw httpError(400, 'checkoutPoints must match scored on a checkout turn');
+    }
+    const gameRow = db.prepare('SELECT config FROM games WHERE id=?').get(Number(gameId));
+    const cfg = gameRow && gameRow.config ? JSON.parse(gameRow.config) : null;
+    const rounds = (cfg && cfg.rounds) || [];
+    if (legNo < 1 || legNo > rounds.length) throw httpError(400, `Dead Man Walking only has ${rounds.length} rounds`);
+    const round = rounds[legNo - 1];
+    if (Number(t.targetScore) !== round.target) {
+      throw httpError(400, "targetScore does not match this round's frozen target");
+    }
+    const priorTurns = db.prepare('SELECT bust, checkout FROM turns WHERE game_id=? AND player_id=? AND set_no=? AND leg_no=? ORDER BY id')
+      .all(Number(gameId), p.id, setNo, legNo);
+    const priorDarts = db.prepare(`
+      SELECT COUNT(*) AS n FROM turns t JOIN darts d ON d.turn_id=t.id
+      WHERE t.game_id=? AND t.player_id=? AND t.set_no=? AND t.leg_no=?
+    `).get(Number(gameId), p.id, setNo, legNo).n;
+    const budget = round.par - 1;
+    // A round already ended the instant it resolved (a real bust, a checkout,
+    // or the budget already fully spent without either — "Executed, out of
+    // darts," see evaluateDeadManDart()/resolveDeadManDart()'s own header
+    // comments for why that last case is bust=0) — a further turn against the
+    // same leg is always illegitimate.
+    const alreadyResolved = priorTurns.some(pt => pt.checkout) || priorTurns.some(pt => pt.bust) || priorDarts >= budget;
+    if (alreadyResolved) throw httpError(400, 'this Dead Man Walking round has already ended');
+    if (priorDarts + darts.length > budget) {
+      throw httpError(400, `this round's dart budget (${budget}) would be exceeded`);
+    }
   }
   // Checkout Trainer (docs/archive/checkout-trainer-roadmap.md): the target score offered
   // for this round. Server-computed context, not a scored value, so it's only
@@ -1413,7 +1481,11 @@ function completeGame(gameId, winnerName) {
    bobs_27 (docs/archive/practice-ladders-roadmap.md Part A) IS savable — its
    running total replays deterministically from `turns` the same way every
    other entry here does (rebuildBobs27State(), frontend/scoring.js). */
-const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'shanghai', 'halve_it'];
+// dead_man_walking (docs/archive/dead-man-walking-roadmap.md "Saved games"): a resumed
+// run replays from the frozen config.rounds array plus a count of completed
+// legs so far -- pure function of stored config + turns, same shape every
+// other entry here already follows.
+const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'shanghai', 'halve_it', 'dead_man_walking'];
 
 function _savedGameRow(gameId) {
   return db.prepare('SELECT * FROM saved_games WHERE game_id = ?').get(Number(gameId));
@@ -1559,6 +1631,18 @@ function _savedGamePosition(game, participants, turns) {
   if (game.game_type === 'gauntlet') {
     const r = rebuildGauntletState({ turns });
     return { station: r.currentStation, settled: r.settledCount, totalScars: r.totalScars, awaitingRepeat: r.awaitingRepeat };
+  }
+  if (game.game_type === 'dead_man_walking') {
+    // Field names deliberately don't reuse `round`/`target` (Bob's 27/
+    // Checkout Ladder's own position shapes already claim those, and
+    // savedGamePositionLabel() (frontend/index.html) branches on field
+    // PRESENCE, not game type — a name collision would silently match the
+    // wrong branch).
+    const config = game.config ? JSON.parse(game.config) : null;
+    const rounds = (config && config.rounds) || [];
+    const r = rebuildDeadManWalkingState({ rounds, turns });
+    return { dmwRound: r.roundIndex + 1, dmwTotalRounds: rounds.length, dmwTarget: r.remaining,
+      dmwWalkedOutCount: r.walkedOutCount, dmwDartsUsedThisRound: r.dartsUsedThisRound, dmwBudget: r.budget };
   }
   return null;
 }
@@ -2549,7 +2633,10 @@ function getPlayerStatBubbles(playerName, mode) {
   const qd = (sql) => { const r = db.prepare(sql).get(p.id); return r ? r.v : null; };
   const dartsThrown    = qd(`SELECT COUNT(*) AS v ${JD} ${mf}`) ?? 0;
   const avgDartsPerDay = qd(`SELECT CAST(COUNT(*) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS v ${JD} ${mf}`);
-  const avgDartsPerLeg = qd(`SELECT AVG(leg_darts) AS v FROM (SELECT COUNT(d.id) AS leg_darts ${JD} ${mf} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)>0)`);
+  // X01_ONLY: same fix as getPersonalBests()'s legAvgSql/fewestDartsCheckout —
+  // checkout=1 alone no longer implies "this is an X01 leg" now that Checkout
+  // Ladder and Dead Man Walking both set it too on non-X01 turns.
+  const avgDartsPerLeg = qd(`SELECT AVG(leg_darts) AS v FROM (SELECT COUNT(d.id) AS leg_darts ${JD} ${mf} ${X01_ONLY} GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)>0)`);
   const legsWithOneEighty = q(`SELECT COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS v ${J} ${mf} ${X01_ONLY} AND t.scored=180`) ?? 0;
   // Standard 3-dart average: total points / counted darts * 3, where a bust counts
   // as a full 3-dart visit and a winning visit counts only the darts actually thrown.
@@ -2772,17 +2859,27 @@ function getPersonalBests(playerName, mode) {
   if (!p) return null;
   const mf = _mf(mode);
 
-  // NOT_CHECKOUT_TRAINER: t.checkout=1 is only ever set by X01 and Checkout
-  // Trainer (Cricket/Doubles Practice/Chuckin all leave it false, so they're
-  // already excluded by the HAVING clause below) — a proposed-route "checkout"
-  // is not a real leg and must not surface as a Personal Best here, nor drag
-  // down bestLegAvg/recentFormAvg/lifetimeAvg or shrink fewestDartsCheckout.
+  // X01_ONLY: t.checkout=1 is no longer a reliable "this is a real X01 leg"
+  // signal on its own — it started out only ever set by X01 (and Checkout
+  // Trainer's proposed-route checkout, excluded via NOT_CHECKOUT_TRAINER), but
+  // Checkout Ladder and Dead Man Walking both now set a genuine checkout=1 too,
+  // on ordinary turns rows that AREN'T X01 legs at all. Without an explicit
+  // X01_ONLY filter here, a player's Checkout Ladder climbs or Dead Man
+  // Walking Walked Out rounds silently leaked into this "X01 Personal Bests"
+  // computation — found via a real committed test (docs/dead-man-walking-
+  // roadmap.md's own isolation-regression requirement) that played a Dead Man
+  // Walking run and caught bestLegAvg/bestLeg/recentFormAvg/lifetimeAvg all
+  // changing from null to real (wrong) values. bestLeg in particular feeds the
+  // Ghost Opponent "Race this leg" button, which is explicitly X01-only
+  // (docs/archive/ghost-opponent-roadmap.md) — pointing it at a personalized-
+  // deficit Dead Man Walking round or a non-501 Checkout Ladder attempt would
+  // have made that button silently replay the wrong thing.
   const legAvgSql = `
     SELECT t.game_id, t.set_no, t.leg_no, MAX(t.id) AS lastTurnId,
       CAST(SUM(t.scored) AS REAL)/NULLIF(SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END),0)*3 AS la
     FROM turns t JOIN games g ON g.id=t.game_id
     JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id=t.id
-    WHERE t.player_id=? ${mf} ${NOT_CHECKOUT_TRAINER}
+    WHERE t.player_id=? ${mf} ${NOT_CHECKOUT_TRAINER} ${X01_ONLY}
     GROUP BY t.game_id,t.set_no,t.leg_no
     HAVING SUM(t.checkout)>0
   `;
@@ -2816,11 +2913,13 @@ function getPersonalBests(playerName, mode) {
     )
   `).get(p.id)?.v ?? null;
 
+  // Same X01_ONLY fix as legAvgSql above — a Checkout Ladder/Dead Man Walking
+  // checkout is real, but not an X01 leg, and must not shrink this figure.
   const fewestDartsCheckout = db.prepare(`
     SELECT MIN(leg_darts) AS v FROM (
       SELECT COUNT(d.id) AS leg_darts
       FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-      WHERE t.player_id=? ${mf} ${NOT_CHECKOUT_TRAINER} ${NOT_HANDICAPPED}
+      WHERE t.player_id=? ${mf} ${NOT_CHECKOUT_TRAINER} ${NOT_HANDICAPPED} ${X01_ONLY}
       GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)>0
     )
   `).get(p.id)?.v ?? null;
@@ -3521,6 +3620,155 @@ function getHalveItWinLeaderboard() {
   `).all();
   return winRows.map(r => ({ name: r.name, played: r.played, won: r.won,
     rate: r.played ? +((r.won / r.played) * 100).toFixed(1) : 0 }));
+}
+
+/* ---------- Dead Man Walking (docs/archive/dead-man-walking-roadmap.md) ----------
+   Solo only — no win/loss leaderboard (there's no opponent, same reasoning
+   Bob's 27/Checkout Ladder/The Gauntlet already established). Each round is
+   its own leg; a round is Walked Out iff any turn within it has checkout=1,
+   Executed otherwise — but "Executed" itself splits into two distinct,
+   separately-tallied failure modes (a real bust vs. simply running out of
+   the round's dart budget without one — see evaluateDeadManDart()'s own
+   header comment in frontend/scoring.js), which is why this needs its own
+   per-leg replay (`_replayDeadManWalkingLegs()`) rather than a single SUM()
+   aggregate, the same "nothing pre-aggregated, replay the raw turns"
+   complication Halve-It's own `_replayHalveItLegTotals()` already hit. */
+function _replayDeadManWalkingLegs(mode) {
+  const scope = _scope({ mode, gameType: 'dead_man_walking' });
+  const rows = db.prepare(`
+    SELECT t.game_id AS gameId, t.player_id AS playerId, t.leg_no AS legNo,
+           MAX(t.checkout) AS walked, MAX(t.bust) AS busted,
+           (SELECT COUNT(*) FROM darts d JOIN turns t2 ON t2.id=d.turn_id
+              WHERE t2.game_id=t.game_id AND t2.player_id=t.player_id AND t2.leg_no=t.leg_no) AS dartsUsed,
+           g.completed_at AS completedAt, g.config AS config
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE 1=1 ${scope}
+    GROUP BY t.game_id, t.player_id, t.leg_no
+  `).all();
+  return rows.map(r => {
+    const cfg = r.config ? JSON.parse(r.config) : null;
+    const rounds = (cfg && cfg.rounds) || [];
+    const round = rounds[r.legNo - 1];
+    const par = round ? round.par : null;
+    const budget = par != null ? par - 1 : null;
+    const walked = !!r.walked;
+    return {
+      gameId: r.gameId, playerId: r.playerId, legNo: r.legNo,
+      walked,
+      bustEnded: !walked && !!r.busted,
+      outOfDartsEnded: !walked && !r.busted,
+      dartsUsed: r.dartsUsed, budget,
+      // Margin of darts NOT needed on a Walked Out round — a Personal-Best-
+      // adjacent flavor stat (docs/archive/dead-man-walking-roadmap.md "Stat bubbles":
+      // "average darts of margin remaining on a Walked Out round").
+      margin: (walked && budget != null) ? (budget - r.dartsUsed) : null,
+      completed: !!r.completedAt,
+      completedAt: r.completedAt,
+    };
+  });
+}
+
+function getDeadManWalkingStatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const legs = _replayDeadManWalkingLegs(mode).filter(l => l.playerId === p.id && l.completed);
+
+  const runsMap = new Map(); // gameId -> walked-out count this run
+  legs.forEach(l => {
+    if (!runsMap.has(l.gameId)) runsMap.set(l.gameId, 0);
+    if (l.walked) runsMap.set(l.gameId, runsMap.get(l.gameId) + 1);
+  });
+  const runsCompleted = runsMap.size;
+  // Exact integer sum (not derived by re-multiplying the average, which would
+  // risk a floating-point drift the lifetime-Walked-Out-rounds achievement
+  // ladder's exact >= threshold check shouldn't have to tolerate) — the raw
+  // ingredient newMatchPlayerDeadManWalking()'s own lifetime-base fetch reads.
+  const totalWalkedOut = Array.from(runsMap.values()).reduce((s, v) => s + v, 0);
+  const avgWalkedOutPerRun = runsCompleted ? totalWalkedOut / runsCompleted : null;
+
+  const totalLegs = legs.length;
+  const bustRate = totalLegs ? (legs.filter(l => l.bustEnded).length / totalLegs) * 100 : null;
+  const ranOutOfDartsRate = totalLegs ? (legs.filter(l => l.outOfDartsEnded).length / totalLegs) * 100 : null;
+
+  const walkedLegs = legs.filter(l => l.walked && l.margin != null);
+  const avgMarginOnWalkedOut = walkedLegs.length ? walkedLegs.reduce((s, l) => s + l.margin, 0) / walkedLegs.length : null;
+
+  // Longest Walked-Out streak (lifetime, chronological, spanning any number of
+  // runs — docs/archive/dead-man-walking-roadmap.md "Achievements": "within or across
+  // runs") — exposed here too (not just as an achievement-ladder input) since
+  // it's a genuinely interesting lifetime number in its own right.
+  const longestWalkedOutStreak = getDeadManWalkingLongestStreak(playerName);
+
+  return { runsCompleted, totalWalkedOut, avgWalkedOutPerRun, bustRate, ranOutOfDartsRate, avgMarginOnWalkedOut, longestWalkedOutStreak };
+}
+
+// ONE Personal Best (docs/archive/dead-man-walking-roadmap.md "Personal Bests"): most
+// Walked Out rounds in a single run — a higher-is-better peak (MAX()), the
+// standard descending shape most "best run" boards in this app already use
+// (contrast The Gauntlet's deliberately ascending Scar count — this one isn't
+// inverted). No win-streak/recent-form/lifetime-average fields — there's no
+// opponent, same reasoning Bob's 27/Checkout Ladder/The Gauntlet's own single-
+// or-few-field Personal Bests already settled on.
+function getDeadManWalkingPersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const legs = _replayDeadManWalkingLegs(mode).filter(l => l.playerId === p.id && l.completed);
+  const runsMap = new Map();
+  legs.forEach(l => {
+    if (!runsMap.has(l.gameId)) runsMap.set(l.gameId, 0);
+    if (l.walked) runsMap.set(l.gameId, runsMap.get(l.gameId) + 1);
+  });
+  const mostWalkedOut = runsMap.size ? Math.max(...runsMap.values()) : null;
+  return { mostWalkedOut };
+}
+
+// Home leaderboard (docs/archive/dead-man-walking-roadmap.md "Home leaderboard"): best
+// (highest) Walked Out count, one row per player, their peak run — no mode
+// param (always solo/practice, same "no h2h/practice split needed" precedent
+// Doubles Practice's own leaderboards already established).
+function getDeadManWalkingLeaderboard() {
+  const legs = _replayDeadManWalkingLegs().filter(l => l.completed);
+  const runsMap = new Map(); // "gameId|playerId" -> {playerId, walked, achievedAt}
+  legs.forEach(l => {
+    const key = `${l.gameId}|${l.playerId}`;
+    if (!runsMap.has(key)) runsMap.set(key, { playerId: l.playerId, walked: 0, achievedAt: l.completedAt });
+    if (l.walked) runsMap.get(key).walked += 1;
+  });
+  const byPlayer = new Map();
+  for (const r of runsMap.values()) {
+    const cur = byPlayer.get(r.playerId);
+    if (cur == null || r.walked > cur.walked) byPlayer.set(r.playerId, r);
+  }
+  return Array.from(byPlayer.values())
+    .map(r => ({ name: db.prepare('SELECT name FROM players WHERE id=?').get(r.playerId)?.name, bestWalkedOut: r.walked, achievedAt: r.achievedAt }))
+    .filter(r => r.name)
+    .sort((a, b) => b.bestWalkedOut - a.bestWalkedOut);
+}
+
+// Longest lifetime consecutive-Walked-Out streak (docs/dead-man-walking-
+// roadmap.md "Achievements": "within or across runs") — a flat chronological
+// scan of EVERY round this player has ever played, across every game, since
+// game_id increases with creation time and MIN(turn id) orders rounds within
+// a game correctly too; this naturally lets a streak begun at the tail of one
+// run continue into the next run's opening rounds, which a per-run-only
+// calculation (checked once at each run's own end, the way Gauntlet's
+// clean-station streak is) could never represent.
+function getDeadManWalkingLongestStreak(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return 0;
+  const rows = db.prepare(`
+    SELECT t.leg_no AS legNo, MAX(t.checkout) AS walked, MIN(t.id) AS firstId
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE t.player_id=? AND g.game_type='dead_man_walking'
+    GROUP BY t.game_id, t.leg_no
+    ORDER BY firstId
+  `).all(p.id);
+  let longest = 0, current = 0;
+  rows.forEach(r => {
+    if (r.walked) { current += 1; longest = Math.max(longest, current); }
+    else current = 0;
+  });
+  return longest;
 }
 
 /* ---------- Doubles Practice (docs/game-modes-roadmap.md) ----------
@@ -4979,7 +5227,7 @@ function _mf(mode) {
 // 'x01'/'cricket', server.js only uses a query param to pick which function to
 // call), and is whitelisted here regardless as a defense-in-depth measure
 // against string interpolation.
-const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer', 'shanghai', 'halve_it'];
+const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer', 'shanghai', 'halve_it', 'dead_man_walking'];
 function _scope({ mode, gameType } = {}) {
   let sql = _mf(mode);
   if (gameType) {
@@ -5584,6 +5832,121 @@ function getCoachingInsights(playerName, mode) {
   }
 
   return insights;
+}
+
+/* ---------- Dead Man Walking (docs/archive/dead-man-walking-roadmap.md) ----------
+   getWeakestCheckouts() reuses Coaching Insight #3's own remaining-score
+   reconstruction technique directly above (the same window-function trick,
+   the same "starting score minus running prior-scored sum, per leg" formula)
+   to find every double-out X01 turn's OWN remaining-before-the-turn, then
+   groups those by that remaining value into a per-number weakness score.
+   Sample-size floor mirrors COACHING_MIN_NUMBER_DARTS/COACHING_MIN_ROUTE_USES
+   (see that section's own header comment) rather than inventing a fresh
+   threshold from nothing -- a first-pass number, not confirmed against real
+   play, same "not final" caveat every tunable constant in this feature set
+   carries. */
+const DMW_MIN_NUMBER_SAMPLES = 8; // encounters at a remaining value required before it's trusted as a real weakness
+const DMW_TARGET_MIN = 32, DMW_TARGET_MAX = 170; // roadmap doc's own "32-170" range -- below 32 isn't "genuinely weak" territory for this drill
+
+// Per-number weakness ranking, worst-first, capped at `count` -- the
+// candidate pool getWeakestCheckouts()'s own caller (createGame(), via
+// _buildDeadManWalkingRounds() below) draws this session's 15 rounds from
+// (with repeats allowed via pickDeadManWalkingTargets(), frontend/scoring.js).
+// Weakness score = 0.5*bustRate + 0.5*nonCompletionRate (deliberately
+// overlapping -- every bust IS a non-completion too, so a number a player
+// busts on often is weighted extra vs. one they merely leave unfinished
+// without busting). Bogey numbers (159/162/163/165/166/168/169 under
+// double-out) are excluded via checkoutHint()'s own '' unfinishable signal --
+// the same source of truth the Checkout Trainer trick-question tier already
+// trusts -- never served as a round's deficit; a player can't legally be
+// asked to finish what can't be finished in 3 darts anyway. "Avoided"
+// checkouts (the pitch's third failure category) aren't measured here at all
+// -- see the roadmap doc's own "Open questions": no reliable signal exists in
+// recorded data for "the player routed around this number on purpose."
+function getWeakestCheckouts(playerName, count) {
+  const p = getPlayer(playerName);
+  if (!p) return [];
+  const rows = db.prepare(`
+    WITH ordered AS (
+      SELECT t.bust, t.checkout,
+             json_extract(g.config,'$.startingScore')
+               - COALESCE(SUM(t.scored) OVER (
+                   PARTITION BY t.game_id, t.set_no, t.leg_no
+                   ORDER BY t.id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                 ), 0) AS remaining
+      FROM turns t
+      JOIN games g ON g.id = t.game_id
+      JOIN game_players gp ON gp.game_id = t.game_id AND gp.player_id = t.player_id
+      WHERE t.player_id = ? AND gp.out_mode = 'double'
+        AND g.game_type = 'x01' AND json_extract(g.config,'$.startingScore') IN (501,301,170,101)
+    )
+    SELECT remaining, COUNT(*) AS attempts, SUM(bust) AS busts, SUM(checkout) AS completions
+    FROM ordered
+    WHERE remaining BETWEEN ${DMW_TARGET_MIN} AND ${DMW_TARGET_MAX}
+    GROUP BY remaining
+  `).all(p.id);
+
+  return rows
+    .filter(r => r.attempts >= DMW_MIN_NUMBER_SAMPLES)
+    .filter(r => checkoutHint(r.remaining, true, 3) !== '')
+    .map(r => {
+      const bustRate = r.busts / r.attempts;
+      const nonCompletionRate = 1 - (r.completions / r.attempts);
+      return {
+        target: r.remaining,
+        weaknessScore: 0.5 * bustRate + 0.5 * nonCompletionRate,
+        attempts: r.attempts, busts: r.busts, completions: r.completions,
+      };
+    })
+    .sort((a, b) => b.weaknessScore - a.weaknessScore || b.attempts - a.attempts || a.target - b.target)
+    .slice(0, count);
+}
+
+// Historical average total darts-to-finish for the player's OWN won X01
+// double-out legs whose checkout value falls in the given band -- the raw
+// ingredient deadManWalkingParForTarget() (frontend/scoring.js) turns into a
+// round's actual par. turns.checkout_points already IS the deficit that
+// checkout turn closed (see getCoachingInsights()'s own checkout-route
+// insight above, which reads it the same way) -- no window-function
+// reconstruction needed here, unlike getWeakestCheckouts() above, since a WON
+// leg's checkout_points is stored directly. "Total darts" spans every visit
+// in that leg (including any earlier busts within it), matching how
+// fewestDartsCheckout/getShanghaiWonLegs() etc. already count a real
+// multi-visit checkout -- just averaged instead of minimum-ed.
+function _dmwHistoricalAverageDarts(playerId, band) {
+  const row = db.prepare(`
+    SELECT AVG(leg_darts) AS avg FROM (
+      SELECT COUNT(d.id) AS leg_darts
+      FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+      JOIN game_players gp ON gp.game_id=t.game_id AND gp.player_id=t.player_id
+      WHERE t.player_id=? AND g.game_type='x01' AND gp.out_mode='double'
+      GROUP BY t.game_id, t.set_no, t.leg_no
+      HAVING SUM(t.checkout)>0 AND MAX(t.checkout_points) BETWEEN ? AND ?
+    )
+  `).get(playerId, band.low, band.high);
+  return row && row.avg != null ? row.avg : null;
+}
+
+// Server-authoritative round generation (docs/archive/dead-man-walking-roadmap.md
+// "Data model": "config.rounds is computed once, server-side, at game
+// creation... never accepted from the client") -- the whole security point of
+// this function is that createGame() calls it itself, ignoring any
+// client-supplied config.rounds entirely (see createGame()'s own
+// dead_man_walking branch below). Cold start: a player with too little
+// double-out X01 checkout history for a confident weakness ranking falls back
+// to CHALLENGE_CHECKOUTS (frontend/scoring.js, shared with Daily Challenge)
+// rather than inventing a second curated list.
+function _buildDeadManWalkingRounds(playerName) {
+  const p = getPlayer(playerName);
+  let pool = getWeakestCheckouts(playerName, 15).map(c => c.target);
+  if (!pool.length) pool = CHALLENGE_CHECKOUTS.slice();
+  const targets = pickDeadManWalkingTargets(pool, 15, Math.random);
+  return targets.map(target => {
+    const band = deadManWalkingBandFor(target);
+    const historicalAverage = p ? _dmwHistoricalAverageDarts(p.id, band) : null;
+    const par = deadManWalkingParForTarget(target, historicalAverage);
+    return { target, par };
+  });
 }
 
 function resetStats() {
@@ -7934,6 +8297,8 @@ module.exports = {
   getBaseballPerfectInningsStats, getBaseballRpiLeaderboard, getBaseballWinLeaderboard, getBaseballPerfectGameStats,
   getShanghaiStatBubbles, getShanghaiPersonalBests, getShanghaiShanghaisStats, getShanghaiWinLeaderboard, getShanghaiPprLeaderboard,
   getHalveItStatBubbles, getHalveItPersonalBests, getHalveItBestTotalLeaderboard, getHalveItWinLeaderboard,
+  getWeakestCheckouts,
+  getDeadManWalkingStatBubbles, getDeadManWalkingPersonalBests, getDeadManWalkingLeaderboard, getDeadManWalkingLongestStreak,
   getCricketMprLeaderboard, getCricketWinLeaderboard, getCricketPerfectLegStats,
   getDoublesPracticeStatBubbles, getDoublesPracticePersonalBests,
   getDoublesPracticeAccuracyLeaderboard, getDoublesPracticeBestRoundStats, getDoublesPracticeHitSectors,

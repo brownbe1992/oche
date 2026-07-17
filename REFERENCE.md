@@ -55,6 +55,7 @@ convention in `CLAUDE.md`.
 - [30. Marathon Mode](#30-marathon-mode)
 - [31. Shanghai](#31-shanghai)
 - [32. Halve-It](#32-halve-it)
+- [33. Dead Man Walking](#33-dead-man-walking)
 
 ---
 
@@ -1114,8 +1115,9 @@ both into one SQL fragment instead of each query hand-rolling its own
 `AND g.game_type='...'` alongside its mode filter
 (`docs/archive/existing-app-prep-roadmap.md` item 1) — `gameType` is whitelisted
 against `KNOWN_GAME_TYPES` (`['x01','cricket','baseball','doubles_practice',
-'chuckin','checkout_trainer','around_the_clock','around_the_world','bobs_27']`) as
-defense-in-depth, though it's always an internally-controlled literal, never
+'chuckin','checkout_trainer','around_the_clock','around_the_world','bobs_27',
+'checkout_ladder','gauntlet','killer','shanghai','halve_it','dead_man_walking']`)
+as defense-in-depth, though it's always an internally-controlled literal, never
 raw request input.
 `X01_ONLY` is now `_scope({gameType:'x01'})` (byte-identical string, so its
 existing call sites needed no changes), and every Cricket query function below
@@ -1622,8 +1624,14 @@ badge that dart awarded.
 
 ## 4. Achievements & Badges
 
-111 badges (33 X01 + 5 Cricket + 8 Baseball + 5 Doubles Practice + 2 Tournament +
-3 Daily Challenge + 19 Just Chuckin' It + 34 Checkout Trainer + 2 Practice Drills)
+172 badges (33 X01 + 5 Cricket + 8 Baseball + 1 Shanghai + 2 Halve-It + 5 Doubles
+Practice + 7 Bob's 27 + 7 121 Checkout Ladder + 14 The Gauntlet + 3 Killer +
+11 Marathon Mode + 14 Dead Man Walking + 2 Household Rating + 2 Tournament +
+3 Daily Challenge + 19 Just Chuckin' It + 34 Checkout Trainer + 2 Practice Drills
+— this header count previously drifted out of sync as later game types
+(Shanghai onward) each shipped their own badges without it being updated;
+fixed here to match README.md's own fully-enumerated total, which stayed
+current the whole time)
 — that split is by which table each is listed under below (and which section of
 the Player Profile's Badge Case each renders in, via `BADGE_INFO`'s
 `cricket`/`baseball`/`doublesPractice`/`challenge`/`chuckin`/`tournament`/`checkoutTrainer`/`drill`
@@ -3105,8 +3113,8 @@ already-migrated database is a safe no-op).
 | `created_at` / `completed_at` | `TEXT` | `completed_at` is `NULL` for in-progress/abandoned games |
 | `winner_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | Set by `completeGame()`. **Must be a participant of the game** — `completeGame()` rejects a `winner` name that isn't in this game's `game_players` with a `400` (`docs/bug-roadmap.md` BUG-9), the same participant check `recordWalkover()` enforces; a `null` winner (abandoned game) is allowed. Behavior for legitimate input is unchanged — the frontend only ever completes with a real participant |
 | `practice` | `INTEGER NOT NULL DEFAULT 0` | Explicit practice flag, set at creation |
-| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, `'baseball'`, `'doubles_practice'`, `'chuckin'`, `'checkout_trainer'`, `'around_the_clock'`, `'around_the_world'`, or `'bobs_27'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; each New Game flow passes its own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
-| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{innings: 9}` for Baseball rows (fixed, not yet a New Game choice), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows, both guided-drill rows, and Bob's 27 rows (no config needed — Bob's 27 always plays the fixed D1-D20 ladder) |
+| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, `'baseball'`, `'doubles_practice'`, `'chuckin'`, `'checkout_trainer'`, `'around_the_clock'`, `'around_the_world'`, `'bobs_27'`, `'checkout_ladder'`, `'gauntlet'`, `'killer'`, `'shanghai'`, `'halve_it'`, or `'dead_man_walking'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; each New Game flow passes its own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
+| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{innings: 9}` for Baseball rows (fixed, not yet a New Game choice), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows, both guided-drill rows, and Bob's 27 rows (no config needed — Bob's 27 always plays the fixed D1-D20 ladder), `{targets: [...]}` for Halve-It rows (§32), and `{rounds: [15 frozen {target, par} pairs]}` for Dead Man Walking rows — computed once server-side at creation and never client-supplied or recomputed (§33) |
 | `player_count` | `INTEGER` | **Frozen** participant count at creation (not a live subquery) — see §3's mode-scoping note |
 | `league_id` | `INTEGER REFERENCES leagues(id) ON DELETE SET NULL` | Nullable — set by the `onGameCreated` auto-tag hook (§18), never by `createGame()`'s own INSERT. `NULL` for every game that isn't a tagged league match (the overwhelming majority) |
 
@@ -6178,3 +6186,385 @@ practice flow (a hit, a halving with correct round-up math, a ring-restricted
 round, a full 7-round game to completion), the 🛡️ No Half Measures badge,
 stat bubbles/personal bests/best-total leaderboard, the live scorecard's
 target-label row headers, and the `/display` scorecard.
+
+## 33. Dead Man Walking
+
+`docs/archive/dead-man-walking-roadmap.md`. A solo drill that skips the warmup:
+**15 rounds** (`game_type='dead_man_walking'`, solo-only), each one dropping
+the player mid-checkout on one of *their own* historically weakest X01
+finishes, with a personalized dart budget one tighter than they'd usually
+need. Close it → **Walked Out**. Bust, or run out of darts → **Executed**.
+The count of Walked Out rounds out of 15 lands on a result tier at the end,
+Pardoned down to Executed. Structurally the closest existing precedent is
+the 121 Checkout Ladder (§26) — real X01-shaped visits from a non-501
+deficit, reusing X01's own bust/win legality — but two things are
+genuinely different: the deficit and dart budget are **personalized and
+frozen server-side at creation**, never client-supplied or recomputed
+mid-session, and a bust here is **immediately fatal to the round** (no
+second visit to retry within the same round the way the Ladder's
+up-to-3-visits shape allows).
+
+### Sourcing the deficit — `getWeakestCheckouts(playerName, count)` (`backend/db.js`)
+
+Reuses Coaching Insight #3's own remaining-score reconstruction technique
+(§3's "Bust pattern by parity" formula) verbatim: the remaining score
+entering each X01 turn isn't stored, so it's rebuilt with the same
+window-function trick —
+
+```sql
+json_extract(g.config,'$.startingScore')
+  - COALESCE(SUM(t.scored) OVER (
+      PARTITION BY t.game_id, t.set_no, t.leg_no
+      ORDER BY t.id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+    ), 0) AS remaining
+```
+
+— filtered to this player's own double-out X01 turns (`gp.out_mode='double'`,
+`g.game_type='x01'`, `startingScore IN (501,301,170,101)`) where the
+reconstructed `remaining` falls in **32–170** (the doc's own range —
+below 32 isn't "genuinely weak" territory for this drill), grouped by that
+exact remaining value into a per-number **weakness score**:
+
+```
+weaknessScore = 0.5 * bustRate + 0.5 * nonCompletionRate
+```
+
+(deliberately overlapping — every bust is also a non-completion, so a
+number the player busts on often is weighted extra versus one merely left
+unfinished without busting). A `DMW_MIN_NUMBER_SAMPLES` floor (8, a first
+pass mirroring Coaching Insights' own `COACHING_MIN_ROUTE_USES`) excludes any
+remaining value seen too rarely to trust. Bogey numbers (159/162/163/165/166/
+168/169 under double-out) are excluded via `checkoutHint()`'s own `''`
+unfinishable signal — the same source of truth the Checkout Trainer
+trick-question tier already uses — never served as a round's deficit.
+Results sort worst-first (ties broken by larger sample, then lower number)
+and cap at `count`. **"Avoided" checkouts** (a third failure mode the
+original pitch mentions) aren't measured — there's no reliable signal in
+recorded data for "the player routed around this number on purpose," per
+the roadmap doc's own "Open questions."
+
+**A known characteristic, not a bug**: a fresh leg's very first turn is
+itself an "encounter" this same query reconstructs, at `remaining =
+startingScore` (170 or 101, since 501/301 fall outside `checkoutHint()`'s
+170-max range and are excluded by the bogey filter) — a real X01 player's
+opening visit essentially never checks out immediately, so a player with a
+lot of 170- or 101-category play will tend to see that exact category
+number itself surface as a moderately "weak" pool entry. This is the same
+reconstruction-technique artifact Coaching Insight #3's own bust-parity
+check already carries (just diluted there across an odd/even bucket rather
+than concentrated on one specific number) — inherited by faithfully reusing
+that technique, not introduced fresh here, and not addressed by this doc.
+
+**Cold start**: a player with too little double-out X01 history (an empty
+pool) falls back to `CHALLENGE_CHECKOUTS` (`frontend/scoring.js` — moved
+there from `frontend/index.html` specifically so this server-side path can
+share it, since Daily Challenge's own copy was frontend-only) — the same
+"reuse existing curated content" precedent Daily Challenge itself set.
+`pickDeadManWalkingTargets(pool, 15, rng)` (`frontend/scoring.js`) then draws
+15 targets from whichever pool applies, **with replacement** (a real,
+uniform random draw, not a fixed cycle — repeats are expected whenever a
+player's own weak pool is smaller than 15).
+
+### Par — `deadManWalkingParForTarget(target, historicalAverage)` (`frontend/scoring.js`)
+
+The pitch's "par minus one" only makes sense if par is a personalized
+standard **above** the theoretical minimum — using `checkoutHint()`'s own
+optimal dart count as par directly would make every round mathematically
+impossible (you cannot finish in fewer darts than the theoretical minimum).
+This doc's own correctness fix:
+
+```
+par = historicalAverage != null
+  ? max(historicalAverage, objectiveOptimal + 1)   // the floor
+  : objectiveOptimal + 2                            // no history yet in this band
+```
+
+`historicalAverage` (`_dmwHistoricalAverageDarts(playerId, band)`,
+`backend/db.js`) is this player's own **average total darts-to-finish**
+across their real won X01 double-out legs whose `checkout_points` (stored
+directly on the checkout turn — no reconstruction needed here, unlike the
+weakness query above) falls in the same **band** as this round's target:
+Low 32–60 / Mid 61–100 / High 101–170 (`DEAD_MAN_WALKING_BANDS`,
+`deadManWalkingBandFor()`, `frontend/scoring.js` — three bands is this
+build's chosen granularity, a first pass per the roadmap doc's own "Band
+granularity" open question, not confirmed against real play). "Total
+darts" already spans every visit in a won leg (including any earlier busts
+within it), the same convention `fewestDartsCheckout`/`getShanghaiWonLegs()`
+already use for "how many darts did this checkout actually take." The floor
+(`objectiveOptimal + 1`) is the one concrete, testable correctness property
+this doc adds: **the round's actual dart budget (`par - 1`) can never drop
+below the objective-optimal dart count**, verified by an exhaustive test
+across every finishable score 2–170 (`backend/test/scoring.test.js`, the
+same rigor `checkoutHint()`'s own exhaustive test already has).
+
+### `config.rounds` — frozen, server-authoritative, never client-supplied
+
+`games.config.rounds` is an array of exactly 15 `{target, par}` pairs,
+computed **once, server-side, inside `createGame()`** (`_buildDeadManWalkingRounds()`,
+`backend/db.js`) from a live snapshot of the player's own history at that
+exact moment, then frozen for the whole session — recomputing it live
+mid-session would make a resumed/saved game non-reproducible, and (the real
+security point) **a client can never supply or influence `config.rounds`
+at all** — any `config` the request body carries for this game type is
+simply ignored, closing off a hostile client choosing its own easy
+targets/generous pars for itself. The one way the client learns its own 15
+personalized rounds is the same channel Killer's number assignment already
+uses: `createGame()`'s response carries `{gameId, config: {rounds}}` back,
+and `DB.beginGame()` (`frontend/index.html`) threads it onto the live
+`game.config.rounds` the moment the POST resolves.
+
+### Execution — per-dart, not per-visit (`evaluateDeadManDart`/`resolveDeadManDart`, `frontend/scoring.js`)
+
+Because the budget won't generally be a multiple of 3, and a bust or a
+finish must end the round the **instant** it happens, this can't wait for
+`evaluateVisit()`'s batched 3-darts-at-once shape — a new pure per-dart
+evaluator generalizes its own bust/win logic:
+
+```js
+function evaluateDeadManDart(remaining, dart, doubleOut){
+  const newRemaining = remaining - dart.value;
+  let bust=false, win=false;
+  if(newRemaining < 0) bust = true;
+  else if(doubleOut && newRemaining === 1) bust = true;
+  else if(newRemaining === 0){
+    if(doubleOut && !dart.isDouble) bust = true;
+    else win = true;
+  }
+  return { newRemaining: bust ? remaining : newRemaining, bust, win };
+}
+```
+
+`resolveDeadManDart(remaining, dart, doubleOut, dartsUsedThisRound, budget)`
+composes this with the round's own budget: a dart that neither busts nor
+wins but exhausts the budget still ends the round — **Executed, out of
+darts** — a real, valid, non-bust visit that simply ran out of room
+(`scored` keeps its genuine point value; this is NOT stored as `bust=1`,
+since nothing about the scoring itself failed). Both `frontend/index.html`'s
+live per-dart preview (`throwDart()`'s `dead_man_walking` branch) and the
+actual commit (`enterTurnDeadManWalking()`) call this SAME function, so they
+can never disagree about which of the three outcomes just happened.
+
+### Data model — ordinary X01 columns, reused in their normal sense
+
+**No new columns at all.** Each round is its own `leg_no` (`turns.target_score`
+stores that round's frozen deficit); `bust`/`checkout` are used in their
+**ordinary X01 sense**, no repurposing — a round is **Walked Out** iff any
+turn within its leg has `checkout=1`, **Executed** otherwise, whether by a
+real bust (`bust=1` on the terminal turn) or by exhausting the budget
+without one (`bust=0`, `checkout=0`, but the round settled anyway because
+`darts used == budget`). This doc's own open question ("should the two
+Executed flavors be visibly distinct?") is resolved as: **not stored
+distinctly** (both collapse to "not Walked Out" for every tally/stat/badge),
+but the live UI/`announce()` calls DO distinguish them in the moment
+("EXECUTED — bust" vs. "EXECUTED — out of darts"), matching the doc's own
+framing that the distinction "matters for live feedback but not for
+anything stored or tallied."
+
+### Write-time guard (`addTurn()`, `backend/db.js`)
+
+Same dart-sum/bust/checkoutPoints arithmetic as the `'x01'`/`'checkout_ladder'`
+branches, reused wholesale, plus what's genuinely new here: a **per-round
+variable dart-budget guard**, generalizing the Checkout Ladder's flat
+9-dart/3-visit cap to a variable `config.rounds[leg-1].par - 1`. `targetScore`
+is validated against the FROZEN round the server itself computed at
+creation (never a live-derived climbing target the way the Ladder's own
+guard re-derives). A round already resolved (any prior turn has
+`checkout=1` or `bust=1`, OR the cumulative recorded darts already equal
+the budget) rejects any further turn against that same leg outright.
+
+### Round progression — a dedicated function, not an X01 `onLegWon()` carve-out
+
+Every prior fixed-round-per-visit game type in this app (Baseball/Shanghai/
+Halve-It) is "one visit = one round," each with its own dedicated
+`onLegWon*()` reimplementing leg/set/game bookkeeping from scratch. Dead Man
+Walking is structurally closer to a real X01 leg that can span **multiple**
+visits (a round only settles once a genuine bust/win/out-of-darts event
+fires) — but a bust here is immediately fatal to the round, unlike Checkout
+Ladder's forgiving up-to-3-visits shape, and **two of the three ways a
+round can end (a bust, or running out of darts) are never an X01 leg-win
+EVENT at all** — there's no `onLegWon()` hook to carve into for them the
+way Marathon Mode's own practice-leg carve-out (`|| game.marathonSessionId`)
+worked. `resolveDeadManWalkingRound(walkedOut)` (`frontend/index.html`) is
+therefore its own dedicated progression function: it tallies the round,
+advances `game.legNo`, and either seeds the next round's own frozen
+target/par (rounds 1–14 settling) or calls `onDeadManWalkingComplete()` →
+`finishUnit('game', ...)` (round 15 settling) — `legsPerSet`/`setsPerGame`
+are forced to 15/1 at `startGame()` time purely so the live scoreboard's
+"Round N of 15" framing has somewhere sane to read `game.legNo` from; the
+actual 15-round-and-stop logic lives entirely in this function, never in
+the generic `legsPerSet`/`setsPerGame` machinery (which this mode never
+actually checks, the same "a run IS the game" shape Gauntlet/Bob's 27 use,
+just with 15 legs instead of 1).
+
+### Result tiers (derived, never stored)
+
+| Walked Out | Result |
+|---|---|
+| 13–15 | Pardoned |
+| 10–12 | Reprieve |
+| 7–9 | Last Rites |
+| 4–6 | The Walk |
+| 0–3 | Executed |
+
+`deadManWalkingResultTier(walkedOutCount)` (`frontend/scoring.js`), computed
+fresh at read time (the GAME OVER screen, the moment-card headline) — never
+stored, same derive-don't-store precedent every tiered result in this app
+uses.
+
+### Stats (`GAME_TYPES.dead_man_walking.statDefs` / `DEAD_MAN_WALKING_STAT_DEFS`)
+
+Because a round's own termination reason (Walked Out / bust / out-of-darts)
+isn't a single `SUM()`-able column, `_replayDeadManWalkingLegs(mode)`
+(`backend/db.js`) replays every matching `(game, player, leg)` group once —
+the same "nothing pre-aggregated" complication Halve-It's own
+`_replayHalveItLegTotals()` hit — reading each leg's config to know its own
+frozen `par` (for the margin calculation below).
+
+**Stat bubbles** (`getDeadManWalkingStatBubbles(name, mode)`): Runs
+Completed, Avg Walked Out / Run, Bust Rate (% of rounds Executed by a real
+bust), Out-of-Darts Rate (% Executed by running out of budget without
+busting — two DISTINCT tallies, both ways to not Walk Out), Avg Margin
+(Walked Out) (average darts of budget left unused on a Walked Out round —
+`(par-1) - dartsUsed`), and Longest Walked-Out Streak (see below). `totalWalkedOut`
+(the exact lifetime sum, not derived by re-multiplying the average) also
+rides along in this same response as the raw ingredient the lifetime
+achievement ladder reads.
+
+**Personal Best** (`getDeadManWalkingPersonalBests(name, mode)`): **one
+field**, `mostWalkedOut` — the most Walked Out rounds in a single run, a
+**higher-is-better** peak (`MAX()`, the standard descending "best run" shape
+most Personal Bests in this app use — contrast The Gauntlet's own
+deliberately-ascending Scar count, which this one is NOT). No win-streak/
+recent-form/lifetime-average fields — there's no opponent, the same reasoning
+Bob's 27/Checkout Ladder/The Gauntlet's own single-or-few-field Personal
+Bests already settled on.
+
+**Home leaderboard** (`getDeadManWalkingLeaderboard()`): best (highest)
+Walked Out count, one row per player, their peak run — no mode param
+(always solo/practice), same "no h2h/practice split needed" precedent
+Doubles Practice's own leaderboards established.
+
+**Longest Walked-Out Streak** (`getDeadManWalkingLongestStreak(playerName)`):
+a **lifetime, cross-run** figure (the roadmap doc's own "within or across
+runs") — a flat chronological scan of every round this player has ever
+played, across every game (`ORDER BY MIN(t.id)`, since `game_id` increases
+with creation time and turn id orders rounds within a game correctly too),
+counting the longest run of consecutive Walked Out rounds. This naturally
+lets a streak begun at the tail of one run continue into the next run's
+opening rounds, which a per-run-only calculation (checked once at each
+run's own end, the way Gauntlet's own clean-station streak is) could never
+represent.
+
+**A real isolation bug found and fixed along the way**: `getPersonalBests()`'s
+`bestLegAvg`/`bestLeg`/`recentFormAvg`/`lifetimeAvg` (the X01 Personal
+Bests) and `getPlayerStatBubbles()`'s `avgDartsPerLeg`, plus
+`getPersonalBests()`'s `fewestDartsCheckout`, all relied on `t.checkout=1`
+as an implicit "this is a real X01 leg" signal with no explicit
+`game_type='x01'` filter — true only as long as X01 (and Checkout Trainer,
+excluded separately via `NOT_CHECKOUT_TRAINER`) were the only game types
+that ever set `checkout=1`. Checkout Ladder broke that assumption when it
+shipped, and Dead Man Walking's own real Walked Out checkouts made it
+concrete: a committed isolation-regression test (played a full Dead Man
+Walking run) caught `bestLegAvg`/`bestLeg`/`recentFormAvg`/`lifetimeAvg` all
+changing from `null` to real (wrong) values. `bestLeg` in particular feeds
+the Ghost Opponent "Race this leg" button, explicitly X01-only
+(`docs/archive/ghost-opponent-roadmap.md`) — pointing it at a
+personalized-deficit Dead Man Walking round would have made that button
+silently replay the wrong thing. Fixed by adding `X01_ONLY` to all three
+queries. (`dartsThrown`/`avgDartsPerDay`/`bigFish`/`fewestDartsCheckout`
+remain deliberately global/cross-game-type — §3's own "Physical-dart stats"
+scoping table already documents that as intentional, not part of this fix.)
+
+### Badges
+
+Data-driven ladders off the same `checkChuckinMilestoneTier()` engine every
+other milestone ladder in this app uses — two lifetime ladders (`DMW_RUNS_MILESTONE_LADDERS`:
+runs completed; `DMW_WALKED_OUT_MILESTONE_LADDERS`: lifetime Walked Out
+rounds, the Chuckin base+session pattern) plus one **lifetime, cross-run**
+streak ladder (`DMW_STREAK_MILESTONE_LADDERS`), checked at the end of
+EVERY run against a fresh server-computed value
+(`getDeadManWalkingLongestStreak()`) rather than a per-run local counter the
+way Gauntlet's own streak ladder is — since this streak can genuinely span
+multiple runs. Three one-off badges, all recurring, framed with the mode's
+own dark, self-aware humor per the roadmap doc's tone note:
+
+| Badge | Exact condition |
+|---|---|
+| 🕊️ **Full Reprieve** | `walkedOutCount === 15` — a perfect run |
+| ⚰️ **Pardoned** | `walkedOutCount >= 13` — reached the top result tier |
+| 💀 **Last Request** | `walkedOutCount === 0` — "you showed up," not purely celebratory, matching the mode's own tone |
+
+### Live scoreboard
+
+Single-device, solo, no cross-device `/display` sync needed — the same
+conclusion Checkout Trainer/Gauntlet both reached, so there is deliberately
+**no `renderers.dead_man_walking` in `display.html`** (its own badge ids
+are still hand-copied into `display.html`'s `ACH_LABELS`/`ACH_DURATION`/
+`ACH_DESC` maps, per the standing convention, so the live achievement
+overlay's headline isn't blank for a session watching `/display` while
+these badges are earned elsewhere). `renderGameDeadManWalking()`
+(`frontend/index.html`) shows current round N/15, the deficit (`p.score`),
+a **dart-count countdown** (never a wall-clock one — a deliberately
+different flavor from The Pressure Chamber's own timer) computed as
+`budget - dartsUsedThisRound`, and the running Walked Out tally, all as
+persistent always-visible text (not merely inferred from a highlighted
+dartboard region), with the darts-remaining line also `aria-live` so it's
+announced as the budget runs low. A bust, a Walked Out, and an
+Executed-by-budget result each get their own `announce()` call and
+icon+text status change (never color/flash alone).
+
+### Saved games
+
+`rebuildDeadManWalkingState({rounds, turns})` (`frontend/scoring.js`) is a
+pure replay of recorded turns against the frozen `config.rounds` array —
+reused identically by the write-time guard's "already resolved" check,
+`_savedGamePosition()` (write-time list summary), and `resumeGame()`'s
+`dead_man_walking` branch (read-time resume). `'dead_man_walking'` is in
+both `SAVABLE_GAME_TYPES` lists (`backend/db.js` and `frontend/index.html`).
+`_savedGamePosition()`'s own field names (`dmwRound`/`dmwTotalRounds`/
+`dmwTarget`/`dmwWalkedOutCount`/`dmwDartsUsedThisRound`/`dmwBudget`)
+deliberately avoid colliding with Bob's 27's/Checkout Ladder's own `round`/
+`target` fields, since `savedGamePositionLabel()` (`frontend/index.html`)
+branches on field PRESENCE across every game type's differently-shaped
+position object.
+
+### Accessibility and security
+
+Same accessibility treatment as every live scoreboard in this app (see
+"Live scoreboard" above) — no color-only signals, persistent text labels,
+`aria-live` on the darts-remaining countdown. Security: `config.rounds` is
+server-generated at creation and never client-supplied (see "`config.rounds`"
+above); the per-round dart-budget guard (see "Write-time guard" above); no
+new credential/secret surface.
+
+### Testing
+
+`backend/test/scoring.test.js`: `deadManWalkingBandFor()`'s band boundaries;
+`deadManWalkingParForTarget()`'s historical-average/floor/cold-start-default
+cases, plus the **exhaustive** floor-never-violated test across every
+finishable score 2–170; `pickDeadManWalkingTargets()`'s deterministic draw
+with an injectable rng; `evaluateDeadManDart()`'s three-way bust/win/continue
+outcomes; `resolveDeadManDart()`'s budget-exhaustion "out of darts" case;
+`deadManWalkingResultTier()`'s threshold boundaries; `rebuildDeadManWalkingState()`'s
+Walked-Out/bust/out-of-darts/still-in-progress/session-complete replay
+cases. `backend/test/db.turn-consistency-guard.test.js`: the write-time
+guard's dart-sum/checkoutPoints/budget-exhaustion/already-resolved/
+beyond-15-rounds cases, using `createGame()`'s own real (cold-start)
+`config.rounds` rather than hand-picked values. `backend/test/db.dead-man-walking-stats.test.js`:
+`getWeakestCheckouts()`'s ranking/sample-floor/bogey-exclusion/single-out-
+exclusion/other-game-type-exclusion cases; the par calculation's
+historical-average and cold-start-default paths via real `createGame()`
+calls; all four stats/PB/leaderboard functions; the lifetime cross-run
+streak (including a streak spanning the tail of one run into the head of
+the next); and an isolation-regression suite proving Dead Man Walking turns
+never leak into X01's own arithmetic-scoped stats (and the `X01_ONLY` fix
+above) or vice versa. Verified end-to-end with Playwright: both the
+real-weak-checkout-history path (a seeded player with genuine bust/
+completion history driving a deterministic, personalized `config.rounds`)
+and the cold-start fallback path (a fresh player drawing from
+`CHALLENGE_CHECKOUTS`), a Walked Out round, an Executed-by-bust round, an
+Executed-by-out-of-darts round, a full 15-round run reaching a real result
+tier (Pardoned) with the correct streak-ladder and `dmwpardoned` badges,
+stat bubbles/Personal Best/Home leaderboard via the live API, and
+save-for-later/resume round-tripping mid-run state (round, target, Walked
+Out tally) exactly.

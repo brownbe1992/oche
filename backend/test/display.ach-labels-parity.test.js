@@ -138,11 +138,40 @@ describe('BUG-26 — display.html\'s ACH_LABELS/ACH_DURATION/ACH_DESC stay in sy
       'BASEBALL_RUNS_MILESTONE_LADDERS',
       'DOUBLES_HIT_MILESTONE_LADDERS',
       'BOBS27_SCORE_MILESTONE_LADDERS',
+      'DMW_RUNS_MILESTONE_LADDERS',
+      'DMW_WALKED_OUT_MILESTONE_LADDERS',
+      'DMW_STREAK_MILESTONE_LADDERS',
     ]) {
       const idxIds = extractLadderIds(idxSrc, ladderName);
       const dspIds = extractLadderIds(dspSrc, ladderName);
       assert.ok(idxIds.length > 0, `${ladderName} in index.html should have at least one tier`);
       assert.deepEqual(dspIds, idxIds, `${ladderName}'s badge ids differ between index.html and display.html`);
+    }
+  });
+
+  // Dead Man Walking's 3 one-off badges (docs/archive/dead-man-walking-roadmap.md) are
+  // registered via bracket-assignment in index.html (BADGE_INFO['dmwfullreprieve']
+  // = ...; ACH_LABELS['dmwfullreprieve'] = ...; — the same style Killer/The
+  // Gauntlet's own one-offs already use), NOT inside the big literal
+  // `const ACH_LABELS = {...}` object extractKeys() scans above — so they can't
+  // be checked via that mechanism (the same reason killerfirstblood/
+  // gauntletflawless aren't in the hardcoded literal-based check either).
+  // display.html has no such bracket-assignment convention of its own (every
+  // badge there lives in the flat literal), so this checks each side with the
+  // extraction method that actually matches how that file spells the badge.
+  test('Dead Man Walking\'s 3 one-off badges are registered in index.html and mirrored into display.html\'s literal maps', () => {
+    const idxSrc = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+    const dspSrc = fs.readFileSync(DISPLAY_HTML_PATH, 'utf8');
+    const dspLabelKeys = extractKeys(dspSrc, 'ACH_LABELS');
+    const dspDurationKeys = extractKeys(dspSrc, 'ACH_DURATION');
+    const dspDescKeys = extractKeys(dspSrc, 'ACH_DESC');
+    for (const id of ['dmwfullreprieve', 'dmwpardoned', 'dmwlastrequest']) {
+      assert.ok(idxSrc.includes(`ACH_LABELS['${id}']`), `index.html must register ACH_LABELS['${id}']`);
+      assert.ok(idxSrc.includes(`ACH_DURATION['${id}']`), `index.html must register ACH_DURATION['${id}']`);
+      assert.ok(idxSrc.includes(`BADGE_INFO['${id}']`), `index.html must register BADGE_INFO['${id}']`);
+      assert.ok(dspLabelKeys.has(id), `display.html's ACH_LABELS is missing ${id}`);
+      assert.ok(dspDurationKeys.has(id), `display.html's ACH_DURATION is missing ${id}`);
+      assert.ok(dspDescKeys.has(id), `display.html's ACH_DESC is missing ${id}`);
     }
   });
 });
