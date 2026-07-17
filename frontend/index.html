@@ -4828,8 +4828,12 @@ async function startGame(){
   if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   // Custom cricket is locked to exactly 7 targets (same count as classic) — never
   // more, never fewer (docs/game-modes-roadmap.md "Decisions made").
-  const gameType = ['cricket', 'baseball', 'shanghai', 'halve_it', 'pressure_chamber', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer', 'dead_man_walking'].includes(setup.gameType)
-    ? setup.gameType : 'x01'; // Daily Challenge always forces x01 via setMode()
+  // P1-b: the valid game types are exactly the real (non-dispatchOnly) GAME_TYPES
+  // registry keys, so a new mode is recognized here automatically — no separate whitelist
+  // to forget (the bug that once silently fell a new game type back to x01). Marathon
+  // (dispatchOnly) and any unknown/absent value fall back to x01, exactly as before.
+  const _gt = GAME_TYPES[setup.gameType];
+  const gameType = (_gt && !_gt.dispatchOnly) ? setup.gameType : 'x01'; // Daily Challenge always forces x01 via setMode()
   let cricketNumbers = null;
   if(gameType === 'cricket'){
     cricketNumbers = resolveCricketNumbers();
@@ -9708,13 +9712,10 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
   }
   renderSlots(); renderPad(); updateCheckout(true); pushLive();
 }
-// Saved games / pause & resume (docs/archive/saved-games-roadmap.md) — mirrors the
-// server's own SAVABLE_GAME_TYPES (backend/db.js) so the "⏸ Save for later"
-// button only ever appears where a save could actually succeed; the server
-// independently re-validates this on every write, never trusting this check
-// (docs/archive/saved-games-roadmap.md's own security section: "never trust the
-// client's eligibility check").
-const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'shanghai', 'halve_it', 'pressure_chamber', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'dead_man_walking'];
+// Saved games / pause & resume — SAVABLE_GAME_TYPES is derived from the GAME_TYPES
+// registry (defined below) right after that registry, so it can't drift out of the
+// list of real game types; see its declaration there. isCurrentGameSavable() runs at
+// click time, long after the registry initializes, so referencing it here is safe.
 function isCurrentGameSavable(){
   // Marathon Mode (docs/archive/marathon-mode-roadmap.md): deliberately excluded, same
   // "no save/resume support" scope decision Killer already made. A saved-then-
@@ -12826,6 +12827,8 @@ const GAME_TYPES = {
     soloOnly: true
   }
 };
+// SAVABLE_GAME_TYPES is derived from GAME_TYPES further below (after the Marathon patch,
+// so Object.keys() sees the whole registry) — see its declaration there.
 // bubbleKeyMap is patched on below, right after each map itself is defined —
 // BUBBLE_KEY_MAP in particular is declared later in the file (near
 // loadStatBubbles()), so referencing it inside the object literal above would hit
@@ -14260,8 +14263,24 @@ GAME_TYPES.marathon = {
   personalBestsRenderer: renderMarathonPersonalBests,
   homeTabRenderer: renderHomeTabBodyMarathon,
   soloOnly: true,
+  // Marathon is a Home/Profile-toggle-only entry, never a real games.gameType or a
+  // startGame() target (matches the backend registry's own 'marathon' dispatchOnly key).
+  // The derivations below exclude it so it can't leak into the New Game whitelist or
+  // the savable-types list.
+  dispatchOnly: true,
 };
 GAME_TYPES.marathon.bubbleKeyMap = MARATHON_BUBBLE_KEY_MAP;
+// P1-b: pause/resume eligibility, derived from the GAME_TYPES registry (all real,
+// non-dispatchOnly game types) minus the non-resumable exceptions — the continuous/
+// one-shot drills (Doubles Practice, Just Chuckin' It, Checkout Trainer) and Killer.
+// Declared here, after every GAME_TYPES entry (including this marathon patch) is in
+// place, so Object.keys() sees the complete registry; its only readers
+// (isCurrentGameSavable(), startGame()) run at click time, long after load. Mirrors the
+// server's SAVABLE_GAME_TYPES (backend/db.js); the server re-validates every write and
+// never trusts this check (docs/archive/saved-games-roadmap.md).
+const NON_SAVABLE_GAME_TYPES = ['doubles_practice', 'chuckin', 'checkout_trainer', 'killer'];
+const SAVABLE_GAME_TYPES = Object.keys(GAME_TYPES).filter(k =>
+  !GAME_TYPES[k].dispatchOnly && !NON_SAVABLE_GAME_TYPES.includes(k));
 
 /* ---------- Doubles Practice (docs/game-modes-roadmap.md) ----------
    Solo drill mode: no opponent, no legs/sets in the usual sense — a "round" is
