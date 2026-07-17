@@ -2344,6 +2344,9 @@ function renderHome(){
     Backend.get('/api/stats/halve-it-best-total?mode=h2h'),
     Backend.get('/api/stats/halve-it-best-total?mode=practice'),
     Backend.get('/api/stats/halve-it-wins'),
+    Backend.get('/api/stats/pressure-chamber-best-cp?mode=h2h'),
+    Backend.get('/api/stats/pressure-chamber-best-cp?mode=practice'),
+    Backend.get('/api/stats/pressure-chamber-wins'),
     Backend.get('/api/stats/doubles-practice-accuracy'),
     Backend.get('/api/stats/doubles-practice-best-round'),
     Backend.get('/api/stats/checkout-blitz-leaderboard'),
@@ -2356,7 +2359,7 @@ function renderHome(){
     Backend.get('/api/stats/around-the-clock-fastest'),
     Backend.get('/api/stats/around-the-clock-completions'),
     Backend.get('/api/stats/around-the-world-progress'),
-  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,shr,shs,pshr,pshs,shw,hibt,pihbt,hiw,dpa,dpb,ctbl,b27,cl,ga,kw,mm,dmw,atcf,atcc,atwp])=>{
+  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,shr,shs,pshr,pshs,shw,hibt,pihbt,hiw,pcbt,ppcbt,pcw,dpa,dpb,ctbl,b27,cl,ga,kw,mm,dmw,atcf,atcc,atwp])=>{
     homeData={s, extra,
       h2h:{finishes:f,eighties:e,bigFish:b,nineDarters:n},
       practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn},
@@ -2380,6 +2383,11 @@ function renderHome(){
         practice:{bestTotal:pihbt},
         wins:hiw,
       },
+      pressureChamber:{
+        h2h:{bestCp:pcbt},
+        practice:{bestCp:ppcbt},
+        wins:pcw,
+      },
       doublesPractice:{ accuracy:dpa, bestRound:dpb },
       checkoutTrainer:{ blitzLeaderboard:ctbl },
       bobs27:{ leaderboard:b27 },
@@ -2400,6 +2408,7 @@ function renderHome(){
       baseball:{h2h:{rpi:[],perfectInnings:empty,perfectGame:empty}, practice:{rpi:[],perfectInnings:empty,perfectGame:empty}, wins:[]},
       shanghai:{h2h:{ppr:[],shanghais:empty}, practice:{ppr:[],shanghais:empty}, wins:[]},
       halveIt:{h2h:{bestTotal:[]}, practice:{bestTotal:[]}, wins:[]},
+      pressureChamber:{h2h:{bestCp:[]}, practice:{bestCp:[]}, wins:[]},
       doublesPractice:{ accuracy:[], bestRound:[] },
       checkoutTrainer:{ blitzLeaderboard:[] },
       bobs27:{ leaderboard:[] },
@@ -2841,6 +2850,48 @@ function renderHomeTabBodyHalveIt(){
     <div class="home-pair">
       <div class="pp-section">
         <div class="pp-section-title">🪓 Highest Final Total</div>
+        ${leaderboard}
+      </div>
+      ${winSection}
+    </div>
+  `;
+}
+
+// The Pressure Chamber's Home page leaderboard (docs/pressure-chamber-roadmap.md
+// "Home leaderboard" — "best single-run CP, same peak-no-floor shape as
+// Checkout Blitz's own board") plus a Most Wins board (H2H only), same
+// {h2h:{...}, practice:{...}, wins:...} shape as homeData.halveIt.
+function renderHomeTabBodyPressureChamber(){
+  const el=document.getElementById('home-tab-body');
+  const mode=homeTab;
+  const data=homeData.pressureChamber && homeData.pressureChamber[mode];
+  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
+
+  const board=data.bestCp||[];
+  const leaderboard=board.length
+    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.total} <span class="pp-meta" style="font-size:11px">(${escapeHtml(r.rating)})</span></span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — complete a run to claim the top spot.</p>`;
+
+  const winSection=(mode==='h2h' && homeData.pressureChamber.wins && homeData.pressureChamber.wins.length)
+    ? `<div class="pp-section">
+        <div class="pp-section-title">Most Pressure Chamber Wins</div>
+        <div class="hof-list">${homeData.pressureChamber.wins.slice(0,10).map((r,i)=>`<div class="hof-row">
+          <span class="hof-rank">${i+1}</span>
+          <span class="hof-score">${r.won}</span>
+          <span class="hof-player">${escapeHtml(r.name)}</span>
+          <span class="hof-dates">${r.rate}% of ${r.played}</span>
+        </div>`).join('')}</div>
+      </div>`
+    : '';
+
+  el.innerHTML=`
+    <div class="home-pair">
+      <div class="pp-section">
+        <div class="pp-section-title">🔒 Best Run CP</div>
         ${leaderboard}
       </div>
       ${winSection}
@@ -4262,6 +4313,9 @@ const NEW_GAME_MODE_OPTIONS = [
   { key:'halve_it', label:'🪓 Halve-It', contexts:['practice','h2h'],
     blurb:"A fixed sequence of 7 targets — 20, 16, double 7, 14, treble 10, 17, and Bull. Each round's 3 darts only score against that round's own target: every dart that hits it adds its value to your running total — but if all three miss, your total is HALVED (rounded up). Highest total after the last round wins. One bad visit can cost a leader half their game, so nobody's really out of it until the end.",
     apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('halve_it'); } },
+  { key:'pressure_chamber', label:'🔒 The Pressure Chamber', contexts:['practice','h2h'],
+    blurb:"15 rounds, 15 fresh Pressure Cards — a target, the stakes, and one of 8 situational modifiers (a 5-second shot clock, an instant-loss condition, a doubled penalty, or just Dead Calm — no modifier at all, sometimes the scariest of all). Bank Composure Points and land on a rating from Ice down to Rattled. Play solo to chase your own rating, or with up to 3 others on the identical card sequence — a fair contest of nerve, not just skill.",
+    apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('pressure_chamber'); } },
   { key:'chuckin', label:"Just Chuckin' It", contexts:['practice'],
     blurb:"No score to chase, no leg to win — just throw for as long as you like. Every dart still counts toward your lifetime totals and heatmap, so it's a low-pressure way to warm up, find your rhythm, or chase down a milestone badge.",
     apply(){ setMode('chuckin'); } },
@@ -4774,7 +4828,7 @@ async function startGame(){
   if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   // Custom cricket is locked to exactly 7 targets (same count as classic) — never
   // more, never fewer (docs/game-modes-roadmap.md "Decisions made").
-  const gameType = ['cricket', 'baseball', 'shanghai', 'halve_it', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer', 'dead_man_walking'].includes(setup.gameType)
+  const gameType = ['cricket', 'baseball', 'shanghai', 'halve_it', 'pressure_chamber', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer', 'dead_man_walking'].includes(setup.gameType)
     ? setup.gameType : 'x01'; // Daily Challenge always forces x01 via setMode()
   let cricketNumbers = null;
   if(gameType === 'cricket'){
@@ -4839,10 +4893,16 @@ async function startGame(){
   // exactly 15/1 regardless of whatever the (hidden, for this mode)
   // legs/sets stepper last held.
   const isDeadManWalking = gameType === 'dead_man_walking';
+  // Same BUG-22 reasoning again: a practice Pressure Chamber "run" is a
+  // complete, standalone 15-round game (evaluateVisitPressureChamber() only
+  // ever completes once round 15 settles, per docs/pressure-chamber-roadmap.md),
+  // forced to exactly 1 leg/1 set here; H2H Pressure Chamber keeps a real
+  // Bo3/Bo5 multi-leg match (each leg its own fresh 15-round run).
+  const isPracticePressureChamber = setup.gameType === 'pressure_chamber' && setup.mode !== 'h2h';
   const legsPerSet = isDeadManWalking ? 15
-    : (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai || isPracticeHalveIt) ? 1 : setup.legsPerSet;
+    : (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai || isPracticeHalveIt || isPracticePressureChamber) ? 1 : setup.legsPerSet;
   const setsPerGame = isDeadManWalking ? 1
-    : (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai || isPracticeHalveIt) ? 1 : setup.setsPerGame;
+    : (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai || isPracticeHalveIt || isPracticePressureChamber) ? 1 : setup.setsPerGame;
   // Checkout Blitz's durationSec is stored even though only 60 exists today — same
   // "store it even though only one value exists today" precedent tournament_rounds.
   // legs_per_set already set for a field that was single-valued at first and
@@ -4860,6 +4920,12 @@ async function startGame(){
     // no custom-target editor in v1 (see docs/open-roadmap-items.md's own
     // Halve-It custom target editor entry, split out separately).
     : gameType === 'halve_it' ? { targets: HALVE_IT_DEFAULT_TARGETS }
+    // Rounds (docs/pressure-chamber-roadmap.md) — fixed at 15, never a New
+    // Game choice; sent here only as a "store a currently-single value"
+    // placeholder matching PRESSURE_ROUNDS — createGame() (backend/db.js)
+    // overrides this server-side unconditionally regardless of what's sent,
+    // the same way it overrides Killer's number assignment.
+    : gameType === 'pressure_chamber' ? { rounds: PRESSURE_ROUNDS }
     : gameType === 'doubles_practice' ? { doubles: setup.doublesTargets.slice() }
     : gameType === 'chuckin' ? {}
     // docs/checkout-drill-link-roadmap.md "Drill this checkout": a pin forces
@@ -4896,6 +4962,8 @@ async function startGame(){
     ? 'Shanghai'
     : gameType === 'halve_it'
     ? 'Halve-It'
+    : gameType === 'pressure_chamber'
+    ? 'The Pressure Chamber'
     : gameType === 'doubles_practice'
     ? `Doubles Practice (${config.doubles.map(doublesTargetLabel).join(', ')})`
     : gameType === 'chuckin'
@@ -4954,6 +5022,13 @@ async function startGame(){
     baseballInning: 1, // Baseball only (docs/game-modes-roadmap.md) — which inning (1-9, or beyond on a tie) is live
     shanghaiRound: 1, // Shanghai only (docs/archive/shanghai-roadmap.md) — which round (1-config.rounds, or beyond on a tie) is live
     halveItRound: 1, // Halve-It only (docs/halve-it-roadmap.md) — which round (1-config.targets.length, or beyond on a tie) is live
+    // The Pressure Chamber only (docs/pressure-chamber-roadmap.md) — which
+    // round (1-15) is live; gameId is the real games.id, the seed
+    // generatePressureCard() needs (set right after DB.beginGame() resolves
+    // below, since it isn't known until the server assigns it); the deadline
+    // is No Warmup's own wall-clock cutoff, armed per-round by
+    // renderGamePressureChamber() itself, not set here.
+    pressureChamberRound: 1, gameId: null, pressureChamberDeadline: null, _pcTimerRound: null,
     bobs27Round: 1,    // Bob's 27 only (docs/archive/practice-ladders-roadmap.md Part A) — which double (1-20) is live
     checkoutLadderTarget: 121, // 121 Checkout Ladder only (docs/archive/practice-ladders-roadmap.md Part B) — current attempt's target
     checkoutLadderVisits: 0,  // visits used so far in the current attempt (0-2 while live)
@@ -5040,6 +5115,9 @@ async function startGame(){
     p.score = first ? first.target : 0;
     p.doubleOut = true;
   }
+  // The Pressure Chamber (docs/pressure-chamber-roadmap.md): generatePressureCard()'s
+  // seed is the real games.id, only known once the server assigns it here.
+  if(game.gameType === 'pressure_chamber') game.gameId = DB.gameId;
   if(activeChallenge && DB.gameId != null){
     Backend.send('POST','/api/challenges/start', { player:activeChallenge.player, gameId:DB.gameId,
       challengeDate:activeChallenge.date, format:activeChallenge.format, target:activeChallenge.target })
@@ -6257,12 +6335,13 @@ function renderPlayerBadges(data){
   // Practice's 5 (docs/archive/culture-badges-roadmap.md Part B), and the guided
   // drills' 2 each stay visually distinct sub-sections rather than one mixed
   // flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].shanghai && !BADGE_INFO[id].halveIt && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder && !BADGE_INFO[id].gauntlet && !BADGE_INFO[id].killer && !BADGE_INFO[id].marathon && !BADGE_INFO[id].deadManWalking);
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].shanghai && !BADGE_INFO[id].halveIt && !BADGE_INFO[id].pressureChamber && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder && !BADGE_INFO[id].gauntlet && !BADGE_INFO[id].killer && !BADGE_INFO[id].marathon && !BADGE_INFO[id].deadManWalking);
   const eloIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].elo);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
   const baseballIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].baseball);
   const shanghaiIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].shanghai);
   const halveItIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].halveIt);
+  const pressureChamberIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].pressureChamber);
   const challengeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].challenge);
   const chuckinIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].chuckin);
   const tournamentIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].tournament);
@@ -6286,6 +6365,8 @@ function renderPlayerBadges(data){
     <div class="summary-grid">${shanghaiIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Halve-It</div>
     <div class="summary-grid">${halveItIds.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">The Pressure Chamber</div>
+    <div class="summary-grid">${pressureChamberIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Doubles Practice</div>
     <div class="summary-grid">${doublesPracticeIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Bob's 27</div>
@@ -6764,6 +6845,24 @@ function renderHalveItPersonalBests(data){
     ${formHtml}
   </div>`;
 }
+// The Pressure Chamber's Personal Bests — getPressureChamberPersonalBests()'s
+// 3-field shape (docs/pressure-chamber-roadmap.md "Stats, Personal Bests,
+// leaderboard"): a peak single-run CP total (no minimum floor, the Checkout
+// Blitz/Halve-It precedent), the Composure Rating that peak corresponds to,
+// and the longest full-hit streak reached in any single run.
+function renderPressureChamberPersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || data.bestRunCp==null){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough runs recorded yet.</p>`;
+    return;
+  }
+  container.innerHTML=`<div class="summary-grid">
+    <div class="stat-block"><div class="stat-val">${data.bestRunCp}</div><div class="stat-label">Best Run CP</div></div>
+    ${data.bestRating!=null?`<div class="stat-block"><div class="stat-val">${escapeHtml(data.bestRating)}</div><div class="stat-label">Best Composure Rating</div></div>`:''}
+    ${data.longestFullHitStreak!=null?`<div class="stat-block"><div class="stat-val">${data.longestFullHitStreak}</div><div class="stat-label">Longest Full-Hit Streak</div></div>`:''}
+  </div>`;
+}
 // Bob's 27's Personal Bests — same "no win-streak, a solo run never wins
 // against anyone" shape Doubles Practice/Chuckin use below.
 function renderBobs27PersonalBests(data){
@@ -6949,6 +7048,7 @@ function renderGame(){
   if(game.gameType === 'baseball') return renderGameBaseball();
   if(game.gameType === 'shanghai') return renderGameShanghai();
   if(game.gameType === 'halve_it') return renderGameHalveIt();
+  if(game.gameType === 'pressure_chamber') return renderGamePressureChamber();
   if(game.gameType === 'doubles_practice') return renderGameDoublesPractice();
   if(game.gameType === 'chuckin') return renderGameChuckin();
   if(game.gameType === 'checkout_trainer') return renderGameCheckoutTrainer();
@@ -7250,6 +7350,105 @@ function renderGameHalveIt(){
   pushLive();
 }
 
+/* The Pressure Chamber chalkboard scorecard (docs/pressure-chamber-roadmap.md
+   "Live scoreboard"): same shared cs-table shape as Baseball/Shanghai/
+   Halve-It's own (rows=rounds 1-15, columns=players), each settled cell
+   showing an icon for that round's outcome (✅ full / ➗ partial / ❌ miss —
+   icon+text via a title/aria-label, never color alone, per the doc's own
+   accessibility note), plus a big, unmissable Pressure Card banner above the
+   table for the CURRENT round (target, stakes, and modifier — icon, label,
+   AND flavor text), and a live No Warmup countdown when that modifier is
+   drawn. */
+function renderGamePressureChamber(){
+  const sb = document.getElementById('scoreboard'); sb.innerHTML='';
+  const maxRounds = (game.config && game.config.rounds) || PRESSURE_ROUNDS;
+  const lastRound = Math.max(maxRounds, game.pressureChamberRound);
+  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
+
+  const headCells = game.players.map((p,i)=>{
+    const active = i===game.current;
+    const standing = game.setsPerGame>1
+      ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
+      : game.practice
+      ? `Legs ${p.legsWon}`
+      : `Legs ${p.legsWon}/${game.legsPerSet}`;
+    return `<div class="cs-col-head${active?' active':''}">
+      <span>${escapeHtml(p.name)}</span>
+      ${active?'<span class="cs-throw-chip">▸ throwing</span>':''}
+      ${showStanding?`<span class="cs-standing">${standing}</span>`:''}
+    </div>`;
+  }).join('');
+
+  const OUTCOME_ICON = { full:'✅', partial:'➗', miss:'❌' };
+  const OUTCOME_LABEL = { full:'full hit', partial:'partial hit', miss:'miss' };
+  const rows = [];
+  for(let round=1; round<=lastRound; round++){
+    const isCurrentRound = round === game.pressureChamberRound;
+    const rCard = generatePressureCard(game.gameId, Math.min(round, maxRounds));
+    const cells = game.players.map((p,i)=>{
+      const r = p.roundResults[round];
+      const active = i===game.current && isCurrentRound;
+      const cellText = r ? `<span class="cs-points" title="${escapeHtml(OUTCOME_LABEL[r])}" aria-label="${escapeHtml(OUTCOME_LABEL[r])}">${OUTCOME_ICON[r]}</span>` : '';
+      return `<div class="cs-cell${active?' active':''}">${cellText}</div>`;
+    }).join('');
+    rows.push(`<div class="cs-row"><div class="cs-label" title="${escapeHtml(rCard.target.label)} · ${escapeHtml(rCard.modifier.label)}">${round}</div>${cells}</div>`);
+  }
+  const bodyRowsHtml = rows.join('');
+
+  const totalCells = game.players.map((p,i)=>{
+    const active = i===game.current;
+    return `<div class="cs-cell${active?' active':''}"><span class="cs-points">${p.totalCp||0}</span></div>`;
+  }).join('');
+
+  const table = document.createElement('div');
+  table.className = 'cs-table';
+  table.style.setProperty('--cs-cols', game.players.length);
+  table.innerHTML = `
+    <div class="cs-row cs-head" role="row"><div class="cs-label"></div>${headCells}</div>
+    ${bodyRowsHtml}
+    <div class="cs-row cs-foot"><div class="cs-label">CP</div>${totalCells}</div>`;
+  sb.appendChild(table);
+
+  const card = generatePressureCard(game.gameId, Math.min(game.pressureChamberRound, maxRounds));
+  const baseCp = pressureBaseCp(card.target);
+  const missP = pressureMissPenaltyForCard(card);
+  const noWarmup = card.modifier.key === 'no_warmup';
+  const banner = document.createElement('div');
+  banner.setAttribute('role','status');
+  banner.style.cssText = 'margin-top:12px;padding:14px;border:2px solid var(--gold,#c9a227);border-radius:10px;text-align:center;background:rgba(201,162,39,0.08)';
+  banner.innerHTML = `
+    <div style="font-size:22px;font-weight:800">${escapeHtml(card.target.label)}</div>
+    <div style="font-size:16px;font-weight:700;margin-top:4px">${card.modifier.icon} ${escapeHtml(card.modifier.label)}</div>
+    <div class="pp-meta" style="font-style:italic;margin-top:2px">${escapeHtml(card.modifier.flavor)}</div>
+    <div style="margin-top:6px;font-weight:600">Full hit: +${Math.round(baseCp*card.modifier.cpMultiplier)}${card.modifier.comebackBonus?' (+bonus)':''} CP · Miss: −${missP} CP</div>
+    ${noWarmup?`<div style="margin-top:6px;font-size:20px;font-weight:800" id="pressure-chamber-no-warmup-timer" aria-live="polite">5s</div>`:''}
+  `;
+  sb.appendChild(banner);
+
+  const roundBanner = document.createElement('p');
+  roundBanner.className = 'pp-meta';
+  roundBanner.style.cssText = 'text-align:center;margin:8px 0 0';
+  roundBanner.textContent = `Round ${Math.min(game.pressureChamberRound,maxRounds)} of ${maxRounds}`;
+  sb.appendChild(roundBanner);
+
+  // No Warmup's wall-clock deadline (docs/pressure-chamber-roadmap.md): armed
+  // once per round, the moment its own card is first revealed — a re-render
+  // within the SAME round (undo, a live-scoreboard refresh) must never reset
+  // an already-ticking clock, hence the _pcTimerRound guard.
+  if(game.darts.length === 0 && noWarmup && game._pcTimerRound !== game.pressureChamberRound){
+    game._pcTimerRound = game.pressureChamberRound;
+    game.pressureChamberDeadline = Date.now() + PRESSURE_NO_WARMUP_MS;
+    startPressureChamberNoWarmupTimer();
+  } else if(!noWarmup){
+    game.pressureChamberDeadline = null;
+    stopPressureChamberNoWarmupTimer();
+  }
+
+  renderSlots();
+  renderPad();
+  pushLive();
+}
+
 /* docs/archive/practice-ladders-roadmap.md Part A: same shared chalkboard-table
    shape as Cricket/Baseball's (rows=rounds, one column since it's always solo),
    just fixed at exactly 20 rows — no "extra innings"-style dynamic extension
@@ -7293,22 +7492,34 @@ function renderSlots(){
   const isBaseball = game.gameType === 'baseball';
   const isShanghai = game.gameType === 'shanghai';
   const isHalveIt = game.gameType === 'halve_it';
+  const isPressureChamber = game.gameType === 'pressure_chamber';
   const cricketNumbers = isCricket ? (game.config.numbers || CRICKET_STANDARD_NUMBERS) : null;
   const baseballTarget = isBaseball ? baseballInningTarget(game.baseballInning) : null;
   const shanghaiTarget = isShanghai ? shanghaiRoundTarget(game.shanghaiRound, (game.config && game.config.rounds) || 7) : null;
   const halveItTarget = isHalveIt ? halveItRoundTarget(game.halveItRound, (game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS) : null;
+  const pressureChamberCard = isPressureChamber ? generatePressureCard(game.gameId, Math.min(game.pressureChamberRound, (game.config && game.config.rounds) || PRESSURE_ROUNDS)) : null;
   for(let i=0;i<3;i++){
     const d = game.darts[i];
     // The X01 "N pts" subtitle is meaningless in cricket (a T18's 54 X01 points may be
     // 3 marks, or nothing at all if 18 isn't in play) — show marks instead. Same idea
-    // for Baseball/Shanghai/Halve-It: a dart's raw X01 point value has nothing to do
-    // with the points it scores (only the live round/inning's own target counts at all).
+    // for Baseball/Shanghai/Halve-It/Pressure Chamber: a dart's raw X01 point value has
+    // nothing to do with the points it scores (only the live round/inning/card's own
+    // target counts at all).
     let sub = '';
     if(d){
       if(isCricket) sub = cricketNumbers.includes(d.sector) ? `${d.mult} mark${d.mult===1?'':'s'}` : 'no mark';
       else if(isBaseball) sub = d.sector === baseballTarget ? `${d.mult} run${d.mult===1?'':'s'}` : 'no run';
       else if(isShanghai) sub = d.sector === shanghaiTarget ? `${d.mult * shanghaiTarget} pt${d.mult===1?'':'s'}` : 'no points';
       else if(isHalveIt){ const v = halveItDartValue({sector:d.sector, mult:d.mult}, halveItTarget); sub = v>0 ? `${v} pt${v===1?'':'s'}` : 'no points'; }
+      else if(isPressureChamber){
+        if(pressureChamberCard.target.type === 'sector'){
+          sub = (d.sector === pressureChamberCard.target.sector)
+            ? (d.mult === PRESSURE_RING_MULT[pressureChamberCard.target.ring] ? 'on target' : 'wrong ring')
+            : 'off target';
+        } else {
+          sub = `${d.value} pts`;
+        }
+      }
       else sub = `${d.value} pts`;
     }
     const div=document.createElement('div');
@@ -7382,7 +7593,8 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   cricketstonecold:'Stone Cold! 🔪',
   bobs27fullhouse:'Full House! 🎯', bobs27fullanderson:'🏔️ THE FULL ANDERSON! 🏔️',
   topofthehouse:'👑 TOP OF THE HOUSE! 👑', upset:'Upset! 🗡️', shanghai:'🀄 SHANGHAI! 🀄',
-  halveitdeath:'Halved at the Death! 🪓', halveitnohalf:'No Half Measures! 🛡️' };
+  halveitdeath:'Halved at the Death! 🪓', halveitnohalf:'No Half Measures! 🛡️',
+  pcice:'Ice! 🥶', pcnervesofsteel:'Nerves of Steel 🎯', pcnowarmup:'No Warmup Needed! ⏱️', pcdeadcalm:'Dead Calm, Steady Hands 🃏' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -7398,7 +7610,8 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   baseballwalkoff:3000, baseballcycle:2500, doublespracticeringmaster:5000,
   cricketstonecold:3500,
   bobs27fullhouse:2500, bobs27fullanderson:6000,
-  topofthehouse:6000, upset:2500, shanghai:6000, halveitdeath:4000, halveitnohalf:3000 };
+  topofthehouse:6000, upset:2500, shanghai:6000, halveitdeath:4000, halveitnohalf:3000,
+  pcice:5000, pcnervesofsteel:3500, pcnowarmup:3500, pcdeadcalm:3500 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
@@ -7770,6 +7983,57 @@ const DMW_STREAK_MILESTONE_LADDERS = [
     });
   });
 });
+/* ---------- The Pressure Chamber (docs/pressure-chamber-roadmap.md) ----------
+   Three data-driven lifetime ladders (runs completed, CP earned — base+session,
+   the Chuckin/Baseball pattern) plus one PER-RUN ladder (longest full-hit
+   streak within that one run — checked once at run completion against the
+   run's own peak, the Bob's 27/Gauntlet-streak pattern, not a lifetime
+   accumulator), plus 4 one-off flavor badges. Exact thresholds are a first
+   pass for playtesting, same "not final" caveat every other new milestone
+   ladder's own numbers carry per the roadmap doc's own framing. */
+const PRESSURE_RUNS_MILESTONE_LADDERS = [
+  { metric:'runs', idPrefix:'pc_runs_', statNoun:'lifetime Pressure Chamber runs completed',
+    descFor: t => `Complete ${t.toLocaleString()} lifetime Pressure Chamber runs.`,
+    tiers: [
+      { threshold:5,   label:'First Nerve',    icon:'😬' },
+      { threshold:25,  label:'Under Control',  icon:'🧊' },
+      { threshold:100, label:'Battle-Hardened', icon:'🛡️' },
+      { threshold:250, label:'Ice Veteran',    icon:'🥶' },
+    ] },
+];
+const PRESSURE_CP_MILESTONE_LADDERS = [
+  { metric:'cpEarned', idPrefix:'pc_cp_', statNoun:'lifetime Composure Points earned',
+    descFor: t => `Earn ${t.toLocaleString()} lifetime Composure Points in The Pressure Chamber.`,
+    tiers: [
+      { threshold:500,   label:'Steady Nerve',    icon:'🎯' },
+      { threshold:2000,  label:'Cool Customer',   icon:'😎' },
+      { threshold:5000,  label:'Unshakeable',     icon:'🗿' },
+      { threshold:15000, label:'Composure Legend', icon:'👑' },
+    ] },
+];
+// Checked once, at the moment a run ENDS (onLegWonPressureChamber()), against
+// that run's own peak full-hit streak — same "have you EVER strung together
+// at least this many in one run" shape GAUNTLET_STREAK_MILESTONE_LADDERS uses,
+// not a cumulative lifetime count.
+const PRESSURE_STREAK_MILESTONE_LADDERS = [
+  { metric:'streak', idPrefix:'pc_streak_', statNoun:'consecutive full hits in one run',
+    descFor: t => `String together ${t.toLocaleString()} consecutive full hits in a single Pressure Chamber run.`,
+    tiers: [
+      { threshold:5,  label:'In The Pocket', icon:'🎯' },
+      { threshold:8,  label:'Locked In',     icon:'🔒' },
+      { threshold:12, label:'Untouchable',   icon:'💎' },
+    ] },
+];
+[PRESSURE_RUNS_MILESTONE_LADDERS, PRESSURE_CP_MILESTONE_LADDERS, PRESSURE_STREAK_MILESTONE_LADDERS].forEach(ladders=>{
+  ladders.forEach(ladder=>{
+    ladder.tiers.forEach((tier, i)=>{
+      const id = ladder.idPrefix + tier.threshold;
+      BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), pressureChamber:true };
+      ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
+      ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
+    });
+  });
+});
 // One-off badges (docs/archive/dead-man-walking-roadmap.md "Achievements") — framed
 // with the mode's own dark, self-aware humor per the doc's own tone note, not
 // purely celebratory across the board: 💀 Last Request is deliberately a "you
@@ -7787,6 +8051,23 @@ BADGE_INFO['dmwlastrequest'] = { icon:'💀', label:'Last Request',
   desc:'Walk Out of zero of the 15 rounds in a single Dead Man Walking run — you showed up.', deadManWalking:true };
 ACH_LABELS['dmwlastrequest'] = 'Last Request 💀';
 ACH_DURATION['dmwlastrequest'] = 3000;
+// One-off flavor badges (docs/pressure-chamber-roadmap.md "Achievements"),
+// each tied to a full hit under a specific modifier — all recurring (a real
+// repeatable feat across different runs), checked in enterTurnPressureChamber()
+// the moment a round is graded.
+// ACH_LABELS/ACH_DURATION entries for these four live in the const literals
+// above (same convention cricketstonecold/shanghai/halveitdeath already use)
+// so the BUG-26 parity check (backend/test/display.ach-labels-parity.test.js)
+// can see them; only BADGE_INFO (the Badge Case's own richer {icon,label,desc}
+// shape) is set here.
+BADGE_INFO['pcice'] = { icon:'🥶', label:'Ice',
+  desc:'Reach the Ice Composure Rating (120+ CP) in a single Pressure Chamber run.', pressureChamber:true };
+BADGE_INFO['pcnervesofsteel'] = { icon:'🎯', label:'Nerves of Steel',
+  desc:'Land a full hit under Sudden Death.', pressureChamber:true };
+BADGE_INFO['pcnowarmup'] = { icon:'⏱️', label:'No Warmup Needed',
+  desc:'Land a full hit under No Warmup.', pressureChamber:true };
+BADGE_INFO['pcdeadcalm'] = { icon:'🃏', label:'Dead Calm, Steady Hands',
+  desc:'Land a full hit under Dead Calm — no modifier, no excuses.', pressureChamber:true };
 
 /* ---------- Killer (docs/archive/game-modes-roadmap.md "Killer") ---------- Three
    one-off badges, all recurring (a real repeatable feat across different
@@ -8927,6 +9208,21 @@ function liveSnapshot(message){
     // labels from, so it needs every round's target up front to render the
     // whole scorecard grid, not just the live one.
     halveItTargets: game.gameType === 'halve_it' ? ((game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS) : null,
+    // The Pressure Chamber only (docs/pressure-chamber-roadmap.md): which
+    // round is currently live, its own wall-clock No Warmup deadline (if
+    // any), and the FULL 15-round card sequence up front (target+modifier
+    // for every round) — same "display.html has no shared scoring.js module"
+    // reasoning as halveItTargets above, since generatePressureCard() itself
+    // isn't reachable there. Per-player CP totals ride inside the players[]
+    // array above via playerSnapshotPressureChamber().
+    pressureChamberRound: game.gameType === 'pressure_chamber' ? (game.pressureChamberRound || 1) : null,
+    pressureChamberDeadline: game.gameType === 'pressure_chamber' ? (game.pressureChamberDeadline || null) : null,
+    pressureChamberCards: game.gameType === 'pressure_chamber'
+      ? Array.from({ length: (game.config && game.config.rounds) || PRESSURE_ROUNDS }, (_, i) => {
+          const c = generatePressureCard(game.gameId, i + 1);
+          return { target: c.target, modifier: { key: c.modifier.key, label: c.modifier.label, icon: c.modifier.icon, flavor: c.modifier.flavor } };
+        })
+      : null,
     // Cricket only (docs/archive/cutthroat-cricket-roadmap.md): lets display.html's
     // cricket scorecard label its points footer "lowest wins" for cutthroat,
     // the one thing that otherwise renders identically to standard.
@@ -9013,6 +9309,12 @@ function renderPad(){
     renderPadHalveIt(full);
     const utbH = document.getElementById('undo-turn-btn');
     if(utbH) utbH.disabled = !game.lastTurnSnapshot;
+    return;
+  }
+  if(game.gameType === 'pressure_chamber'){
+    renderPadPressureChamber(full);
+    const utbPC = document.getElementById('undo-turn-btn');
+    if(utbPC) utbPC.disabled = !game.lastTurnSnapshot;
     return;
   }
   if(game.gameType === 'bobs_27'){
@@ -9222,6 +9524,43 @@ function renderPadHalveIt(full){
   miss.onclick=()=>throwDart(0); pad.appendChild(miss);
 }
 
+/* The Pressure Chamber's pad (docs/pressure-chamber-roadmap.md): deliberately
+   the FULL 1-20+Bull number grid (same shape as X01's own default Pad-mode
+   grid, via the ambient multi-row S/D/T selector), not a single restricted
+   target button — unlike Halve-It/Bob's 27, a Pressure Chamber dart can
+   legitimately land on ANY sector for a finish-target round (evaluateVisit()
+   grades a real multi-number checkout route), and even for a sector-target
+   round the player needs to be able to record a genuine off-target hit, not
+   just "hit or miss." Always Pad-mode, never the Dartboard SVG (see
+   noZoneTracking's own comment) — Sudden Death's per-dart early-stop and No
+   Warmup's wall-clock deadline both need throwDart() to route through this
+   app's existing per-dart commit path, not race a second live input surface. */
+function renderPadPressureChamber(full){
+  const board = document.getElementById('dart-board-wrap');
+  if(board) board.classList.add('hidden');
+  const bounceBtn = document.getElementById('bounce-out-btn');
+  if(bounceBtn) bounceBtn.disabled = full;
+  const multi = document.getElementById('multi-row');
+  if(multi) multi.classList.remove('hidden');
+  const pad = document.getElementById('pad');
+  if(!pad) return;
+  pad.classList.remove('hidden');
+  pad.classList.remove('cricket-pad');
+  pad.innerHTML = '';
+  for(let n=1;n<=20;n++){
+    const b=document.createElement('button');
+    b.textContent=n; b.disabled=full;
+    b.onclick=()=>throwDart(n);
+    pad.appendChild(b);
+  }
+  const bull=document.createElement('button');
+  bull.className='bull'; bull.textContent='Bull'; bull.disabled=full;
+  bull.onclick=()=>throwDart(25); pad.appendChild(bull);
+  const miss=document.createElement('button');
+  miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
+  miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+}
+
 /* docs/archive/practice-ladders-roadmap.md Part A: one button, the round's own
    double — the player selects Double via the ambient multi-row (same S/D/T
    selector every other Pad-mode dart uses) then taps it to log a hit; Single/
@@ -9273,6 +9612,7 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
   if(game.gameType === 'around_the_clock') return throwDartAroundTheClock(sector, zone, missZone, missDepth, bounced);
   if(game.gameType === 'around_the_world') return throwDartAroundTheWorld(sector, zone, missZone, missDepth, bounced);
   if(game.gameType === 'killer') return throwDartKiller(sector, zone, missZone, missDepth, bounced);
+  if(game.gameType === 'pressure_chamber') return throwDartPressureChamber(sector, zone, missZone, missDepth, bounced);
   if(game.darts.length>=3 || game.busted || game.won) return;
   // The double/treble-Miss shortcut (fill N slots at once) is a Pad-mode-only
   // convenience — a bounce-out is always exactly one dart, regardless of whatever
@@ -9374,7 +9714,7 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
 // independently re-validates this on every write, never trusting this check
 // (docs/archive/saved-games-roadmap.md's own security section: "never trust the
 // client's eligibility check").
-const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'shanghai', 'halve_it', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'dead_man_walking'];
+const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'shanghai', 'halve_it', 'pressure_chamber', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'dead_man_walking'];
 function isCurrentGameSavable(){
   // Marathon Mode (docs/archive/marathon-mode-roadmap.md): deliberately excluded, same
   // "no save/resume support" scope decision Killer already made. A saved-then-
@@ -9455,7 +9795,7 @@ async function resumeGame(gameId){
   const players = names.map(n => GAME_TYPES[gameType].newMatchPlayer(n,
     gameType === 'cricket' ? config : startScore));
 
-  let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, shanghaiRound = 1, halveItRound = 1, bobs27Round = 1, roundOver = false, checkoutLadderTarget = 121, checkoutLadderVisits = 0;
+  let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, shanghaiRound = 1, halveItRound = 1, pressureChamberRound = 1, bobs27Round = 1, roundOver = false, checkoutLadderTarget = 121, checkoutLadderVisits = 0;
   let gauntletStationIndex = 0, gauntletAwaitingRepeat = false, gauntletFinalMisses = [], gauntletCleanStreak = 0, gauntletBestCleanStreak = 0;
   let dmwTarget = 0, dmwBudget = 0, dmwDartsUsedThisRound = 0, dmwWalkedOutCount = 0, dmwCurrentStreak = 0, dmwBestStreak = 0;
   let statusMsg = '';
@@ -9507,6 +9847,17 @@ async function resumeGame(gameId){
     });
     current = r.current; starter = r.starter; setNo = r.setNo; legNo = r.legNo; halveItRound = r.halveItRound;
     statusMsg = `Resumed — set ${setNo} leg ${legNo}, round ${Math.min(halveItRound,targets.length)} of ${targets.length}, ${players[current].name} to throw.`;
+  } else if(gameType === 'pressure_chamber'){
+    const maxRounds = (config && config.rounds) || PRESSURE_ROUNDS;
+    const r = rebuildPressureChamberState({ gameId, names, legsPerSet: state.legsPerSet, maxRounds, turns: state.turns });
+    players.forEach((p,i) => {
+      const rp = r.players[i];
+      Object.assign(p, { totalCp:rp.totalCp, misses:rp.misses, fullHits:rp.fullHits,
+        currentFullHitStreak:rp.currentFullHitStreak, bestFullHitStreak:rp.bestFullHitStreak, roundResults:rp.roundResults,
+        legsWon:rp.legsWon, setsWon:rp.setsWon, legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
+    });
+    current = r.current; starter = r.starter; setNo = r.setNo; legNo = r.legNo; pressureChamberRound = r.pressureChamberRound;
+    statusMsg = `Resumed — set ${setNo} leg ${legNo}, round ${Math.min(pressureChamberRound,maxRounds)} of ${maxRounds}, ${players[current].name} to throw.`;
   } else if(gameType === 'around_the_clock'){
     const r = rebuildAroundTheClockState({ turns: state.turns });
     Object.assign(players[0], { hitSet:r.hitSet, roundDarts:r.roundDarts });
@@ -9579,6 +9930,14 @@ async function resumeGame(gameId){
     baseballInning, shanghaiRound, halveItRound, bobs27Round, checkoutLadderTarget, checkoutLadderVisits,
     gauntletStationIndex, gauntletAwaitingRepeat, gauntletFinalMisses, gauntletCleanStreak, gauntletBestCleanStreak,
     dmwTarget, dmwBudget, dmwDartsUsedThisRound, dmwWalkedOutCount, dmwCurrentStreak, dmwBestStreak,
+    // The Pressure Chamber only (docs/pressure-chamber-roadmap.md): gameId is
+    // the real games.id generatePressureCard() seeds on — already known here
+    // (unlike startGame(), which only learns it after DB.beginGame()
+    // resolves), so it's set directly rather than patched in afterward.
+    // _pcTimerRound stays null so renderGamePressureChamber()'s own No Warmup
+    // guard treats this as a fresh round and arms the timer if needed.
+    pressureChamberRound, gameId: gameType === 'pressure_chamber' ? state.gameId : null,
+    pressureChamberDeadline: null, _pcTimerRound: null,
     darts: [], busted:false, won:false, done:false,
     gameOneEighties:0, gameBigFish:0, gameBusts:0,
     currentLegTurns: [], legVisitLogs: [], sessionTurns: [],
@@ -9767,6 +10126,7 @@ function undoLastTurn(){
   if(game && game.gameType === 'baseball') return undoLastTurnBaseball();
   if(game && game.gameType === 'shanghai') return undoLastTurnShanghai();
   if(game && game.gameType === 'halve_it') return undoLastTurnHalveIt();
+  if(game && game.gameType === 'pressure_chamber') return undoLastTurnPressureChamber();
   if(game && game.gameType === 'doubles_practice') return undoLastTurnDoublesPractice();
   if(game && game.gameType === 'chuckin') return undoLastTurnChuckin();
   if(game && game.gameType === 'checkout_trainer') return undoLastTurnCheckoutTrainer();
@@ -9856,6 +10216,7 @@ function enterTurn(){
   if(game.gameType === 'baseball') return enterTurnBaseball();
   if(game.gameType === 'shanghai') return enterTurnShanghai();
   if(game.gameType === 'halve_it') return enterTurnHalveIt();
+  if(game.gameType === 'pressure_chamber') return enterTurnPressureChamber();
   if(game.gameType === 'bobs_27') return enterTurnBobs27();
   if(game.gameType === 'checkout_ladder') return enterTurnCheckoutLadder();
   if(game.gameType === 'gauntlet') return enterTurnGauntlet();
@@ -11020,6 +11381,179 @@ function onLegWonHalveIt(wi){
   finishUnit('leg', w.name);
 }
 
+/* ----- The Pressure Chamber turn commit (dispatched from enterTurn()) -----
+   Visit-based (1-3 darts per round — fewer under Sudden Death's per-dart
+   early stop, see throwDartPressureChamber()), same lockstep-round shape as
+   Baseball/Shanghai/Halve-It's own. */
+function enterTurnPressureChamber(){
+  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  const p = game.players[game.current];
+  const card = generatePressureCard(game.gameId, game.pressureChamberRound);
+  const ev = GAME_TYPES.pressure_chamber.evaluateVisit(p, game.darts, game);
+
+  announce(ev.outcome === 'miss'
+    ? `${p.name} misses ${card.target.label} entirely under ${card.modifier.label} — loses ${ev.missPenalty} Composure Points.`
+    : ev.outcome === 'full'
+    ? `${p.name} lands a FULL HIT on ${card.target.label} — plus ${ev.gained} Composure Points, now on ${ev.totalCp}.`
+    : `${p.name} lands a partial hit on ${card.target.label} — plus ${ev.gained} Composure Points, now on ${ev.totalCp}.`);
+
+  // snapshot state before mutations so undoLastTurn() can restore it.
+  const _snap = { pi:game.current, totalCp:p.totalCp, misses:p.misses, fullHits:p.fullHits,
+    currentFullHitStreak:p.currentFullHitStreak, bestFullHitStreak:p.bestFullHitStreak,
+    roundResults:Object.assign({}, p.roundResults),
+    legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
+    pressureChamberRound:game.pressureChamberRound, pressureChamberDeadline:game.pressureChamberDeadline, _pcTimerRound:game._pcTimerRound,
+    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
+    badgeReverts:[], voided:false };
+  game.lastTurnSnapshot = _snap;
+
+  p.totalCp = ev.totalCp; p.misses = ev.misses; p.fullHits = ev.fullHits;
+  p.currentFullHitStreak = ev.currentFullHitStreak; p.bestFullHitStreak = ev.bestFullHitStreak;
+  p.roundResults = ev.roundResults;
+  const dartsThrown = game.darts.length;
+  p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
+
+  // One-off flavor badges (docs/pressure-chamber-roadmap.md "Achievements") —
+  // checked the moment a round is graded, same "checked where the outcome is
+  // already known" precedent onLegWonHalveIt()'s own two badges use.
+  if(isPressureModifierFullHit(card, ev.outcome, 'sudden_death')){
+    queueBadge('pcnervesofsteel', p.name);
+    awardRecurringBadge(p.name, 'pcnervesofsteel', 'pcnervesofsteel',
+      { icon:'🎯', headline:'NERVES OF STEEL!', player:p.name, statLine:`Full hit on ${card.target.label} under Sudden Death` });
+  }
+  if(isPressureModifierFullHit(card, ev.outcome, 'no_warmup')){
+    queueBadge('pcnowarmup', p.name);
+    awardRecurringBadge(p.name, 'pcnowarmup', 'pcnowarmup',
+      { icon:'⏱️', headline:'NO WARMUP NEEDED!', player:p.name, statLine:`Full hit on ${card.target.label} with no time to prepare` });
+  }
+  if(isPressureModifierFullHit(card, ev.outcome, 'dead_calm')){
+    queueBadge('pcdeadcalm', p.name);
+    awardRecurringBadge(p.name, 'pcdeadcalm', 'pcdeadcalm',
+      { icon:'🃏', headline:'DEAD CALM, STEADY HANDS!', player:p.name, statLine:`Full hit on ${card.target.label} — no modifier, no excuses` });
+  }
+
+  // docs/pressure-chamber-roadmap.md's own "store the gain, derive the rest"
+  // data model — turns.scored is the CP GAINED this round (never negative),
+  // reusing Checkout Trainer's exact bust/checkout/leg_won 3-way outcome.
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:ev.gained, bust:ev.outcome==='miss', checkout:ev.outcome!=='miss', legWon:ev.outcome==='full', checkoutPoints:null,
+    darts: game.darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
+      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+
+  const turnRecord = { player:p.name, scored:ev.gained, darts:game.darts.slice() };
+  game.currentLegTurns.push(turnRecord);
+  game.sessionTurns.push(turnRecord);
+
+  awardTimeOfDayBadges(p);
+
+  if(ev.matchComplete){
+    onLegWonPressureChamber(ev.winnerIndex);
+    return;
+  }
+
+  if(ev.roundComplete) game.pressureChamberRound += 1;
+  game.darts=[]; game.busted=false; game.won=false;
+  game.current = (game.current+1) % game.players.length;
+  game.turnSeq += 1;
+  document.getElementById('status').className='status';
+  document.getElementById('status').textContent = `Round ${Math.min(game.pressureChamberRound,PRESSURE_ROUNDS)} of ${PRESSURE_ROUNDS}.`;
+  renderGamePressureChamber();
+  pushLive();
+}
+function undoLastTurnPressureChamber(){
+  if(!game || !game.lastTurnSnapshot) return;
+  const snap = game.lastTurnSnapshot;
+  const p = game.players[snap.pi];
+  p.totalCp = snap.totalCp; p.misses = snap.misses; p.fullHits = snap.fullHits;
+  p.currentFullHitStreak = snap.currentFullHitStreak; p.bestFullHitStreak = snap.bestFullHitStreak;
+  p.roundResults = snap.roundResults;
+  p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
+  game.pressureChamberRound = snap.pressureChamberRound;
+  game.pressureChamberDeadline = snap.pressureChamberDeadline; game._pcTimerRound = snap._pcTimerRound;
+  game.currentLegTurns.length = snap.ltLen;
+  game.sessionTurns.length = snap.stLen;
+
+  snap.voided = true;
+  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+  });
+  cancelQueuedAchievementsForSnapshot(snap);
+
+  game.current = snap.pi;
+  game.darts = []; game.busted=false; game.won=false;
+  game.lastTurnSnapshot = null;
+  DB.deleteLastTurn();
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
+  renderGamePressureChamber();
+  pushLive();
+}
+
+/* ----- The Pressure Chamber leg / set / game progression (dispatched from
+   enterTurnPressureChamber) -----
+   Same leg/set/game progression tree as onLegWonHalveIt() — no !game.practice
+   gate here either, for the identical BUG-22-class reason (a practice
+   Pressure Chamber leg is forced to legsPerSet=1/setsPerGame=1 above in
+   startGame(), see isPracticePressureChamber). Composure Rating is a PERSONAL
+   achievement even in H2H (per the roadmap doc's own "solo players chase
+   their own rating" framing) — so unlike Halve-It's own two win-gated flavor
+   badges, 🥶 Ice and the lifetime achievement ladders are checked for EVERY
+   player once their own run settles, not just the match winner. All players'
+   round-15 turns are already recorded by the time this fires (the round only
+   advances once everyone's thrown), so every player's final totalCp for this
+   leg is already known here. */
+function onLegWonPressureChamber(wi){
+  const w = game.players[wi];
+
+  game.players.forEach(p=>{
+    if(isPressureIceRun(p.totalCp)){
+      queueBadge('pcice', p.name);
+      awardRecurringBadge(p.name, 'pcice', 'pcice',
+        { icon:'🥶', headline:'ICE!', player:p.name, statLine:`Finished the Chamber on ${p.totalCp} CP — Ice rating` });
+    }
+    p.sessionRunsCompleted = (p.sessionRunsCompleted||0) + 1;
+    p.sessionCpEarned = (p.sessionCpEarned||0) + Math.max(0, p.totalCp);
+    checkChuckinMilestoneTier(PRESSURE_RUNS_MILESTONE_LADDERS[0], p.name, (p.lifetimeRunsBase||0) + p.sessionRunsCompleted);
+    checkChuckinMilestoneTier(PRESSURE_CP_MILESTONE_LADDERS[0], p.name, (p.lifetimeCpBase||0) + p.sessionCpEarned);
+    checkChuckinMilestoneTier(PRESSURE_STREAK_MILESTONE_LADDERS[0], p.name, p.bestFullHitStreak||0);
+  });
+
+  w.legsWon += 1;
+
+  const legsAtWin = new Map(game.players.map(p => [p, p.legsWon]));
+
+  if(w.legsWon >= game.legsPerSet){      // leg (or, for practice, the whole game) won
+    w.setsWon += 1;
+    game.players.forEach(p=>p.legsWon=0);
+
+    if(w.setsWon >= game.setsPerGame){   // game (match) won
+      sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+      sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
+      sendHaWebhook('gameend', w.name, game.category);
+      DB.recordEvent('leg_end', game.setNo, game.legNo);
+      DB.recordEvent('set_end', game.setNo, null);
+      DB.recordEvent('game_end', null, null);
+      DB.completeGame(w.name);
+      checkEloOnMatchWin(w, game.players.length===2 ? game.players.find(p=>p!==w) : null);
+      game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+      fireMomentCard('matchwin', { icon:'🏅', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) });
+      finishUnit('game', w.name);
+      return;
+    }
+    sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+    sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
+    DB.recordEvent('leg_end', game.setNo, game.legNo);
+    DB.recordEvent('set_end', game.setNo, null);
+    game.matchResult = { ts:Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+    finishUnit('set', w.name);
+    return;
+  }
+  sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+  DB.recordEvent('leg_end', game.setNo, game.legNo);
+  game.matchResult = { ts:Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+  finishUnit('leg', w.name);
+}
+
 /* ----- Bob's 27 turn commit (dispatched from enterTurn()) -----
    docs/archive/practice-ladders-roadmap.md Part A. Visit-based (3 darts per
    round), same shape as Baseball's — always exactly one player (game.current
@@ -11367,6 +11901,7 @@ function startNextLeg(newSet){
   if(game.gameType === 'baseball') game.baseballInning = 1;
   if(game.gameType === 'shanghai') game.shanghaiRound = 1;
   if(game.gameType === 'halve_it') game.halveItRound = 1;
+  if(game.gameType === 'pressure_chamber'){ game.pressureChamberRound = 1; game.pressureChamberDeadline = null; game._pcTimerRound = null; stopPressureChamberNoWarmupTimer(); }
   if(game.gameType === 'checkout_ladder') game.checkoutLadderVisits = 0;
   game.legSummary = null;
   game.currentLegTurns = [];
@@ -11491,6 +12026,28 @@ function h2hStatsHtmlHalveIt(winner, scope){
   return `<div class="prac-stats">${cols}</div>`;
 }
 
+function h2hStatsHtmlPressureChamber(winner, scope){
+  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
+  const cols = game.players.map(p=>{
+    const rows = scope==='game' ? [
+      statRow('Composure Points (final run)', p.totalCp||0),
+      statRow('Composure Rating', pressureComposureRating(p.totalCp||0)),
+      statRow('Darts (match)', p.gameDarts||0),
+    ] : [
+      statRow('Composure Points', p.totalCp||0),
+      statRow('Composure Rating', pressureComposureRating(p.totalCp||0)),
+      statRow('Darts (run)', p.legDarts||0),
+    ];
+    if(showStanding){
+      const standing = game.setsPerGame>1 ? `Sets ${p.setsWon} · Legs ${p.legsWon}` : `Legs ${p.legsWon}/${game.legsPerSet}`;
+      rows.push(statRow(scope==='game' ? 'Final Standing' : 'Standing', standing, true));
+    }
+    const title = p.name===winner ? `${escapeHtml(p.name)} 🎯` : escapeHtml(p.name);
+    return `<div class="prac-col"><div class="prac-col-title">${title}</div>${rows.join('')}</div>`;
+  }).join('');
+  return `<div class="prac-stats">${cols}</div>`;
+}
+
 function finishUnit(kind, winner){
   game.done = (kind==='game');
   updateSaveButtonVisibility(); // a just-completed match is no longer savable
@@ -11507,6 +12064,7 @@ function finishUnit(kind, winner){
   const isBaseball = game.gameType === 'baseball';
   const isShanghai = game.gameType === 'shanghai';
   const isHalveIt = game.gameType === 'halve_it';
+  const isPressureChamber = game.gameType === 'pressure_chamber';
   const isBobs27 = game.gameType === 'bobs_27';
   const isGauntlet = game.gameType === 'gauntlet';
   const isKiller = game.gameType === 'killer';
@@ -11605,7 +12163,7 @@ function finishUnit(kind, winner){
       <div class="btn-row" style="justify-content:center">
         ${nextBtn}
         ${matchShareBtn}
-      </div>${isCricket || isBobs27 || isGauntlet || isKiller || isDeadManWalking ? '' : isBaseball ? h2hStatsHtmlBaseball(winner,'game') : isShanghai ? h2hStatsHtmlShanghai(winner,'game') : isHalveIt ? h2hStatsHtmlHalveIt(winner,'game') : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}${killerSummary}${deadManWalkingSummary}</div>`;
+      </div>${isCricket || isBobs27 || isGauntlet || isKiller || isDeadManWalking ? '' : isBaseball ? h2hStatsHtmlBaseball(winner,'game') : isShanghai ? h2hStatsHtmlShanghai(winner,'game') : isHalveIt ? h2hStatsHtmlHalveIt(winner,'game') : isPressureChamber ? h2hStatsHtmlPressureChamber(winner,'game') : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}${killerSummary}${deadManWalkingSummary}</div>`;
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
@@ -11616,7 +12174,7 @@ function finishUnit(kind, winner){
     // practice Baseball game is forced to exactly 1 leg/1 set (docs/bug-roadmap.md
     // BUG-22, see onLegWonBaseball()/startGame()'s isPracticeBaseball), so
     // kind==='leg' is only ever reached for a genuine mid-match H2H leg now.
-    const legPanel = isCricket || isKiller || kind!=='leg' ? '' : isBaseball ? h2hStatsHtmlBaseball(winner) : isShanghai ? h2hStatsHtmlShanghai(winner) : isHalveIt ? h2hStatsHtmlHalveIt(winner) : game.practice ? `
+    const legPanel = isCricket || isKiller || kind!=='leg' ? '' : isBaseball ? h2hStatsHtmlBaseball(winner) : isShanghai ? h2hStatsHtmlShanghai(winner) : isHalveIt ? h2hStatsHtmlHalveIt(winner) : isPressureChamber ? h2hStatsHtmlPressureChamber(winner) : game.practice ? `
       <div class="prac-stats">
         <div class="prac-col">
           <div class="prac-col-title">This Leg</div>
@@ -11664,6 +12222,11 @@ function finishUnit(kind, winner){
   })) : isHalveIt ? game.players.map(p=>({
     name: p.name,
     total: p.total || 0,
+    won: p.name === winner
+  })) : isPressureChamber ? game.players.map(p=>({
+    name: p.name,
+    totalCp: p.totalCp || 0,
+    rating: pressureComposureRating(p.totalCp || 0),
     won: p.name === winner
   })) : isKiller ? game.players.map(p=>({
     name: p.name,
@@ -11825,6 +12388,24 @@ const HALVE_IT_STAT_DEFS = [
 // Translates a HALVE_IT_STAT_DEFS key to getHalveItStatBubbles()'s JSON field name.
 const HALVE_IT_BUBBLE_KEY_MAP = { halveitavgtotal:'avgFinalTotal', halveittimeshalved:'timesHalved', halveitwinpct:'winPct',
   halveitgames:'gamesPlayed', halveitdartsthrown:'dartsThrown', halveitbestround:'bestRound' };
+
+// The Pressure Chamber's own stat vocabulary (docs/pressure-chamber-roadmap.md
+// "Stat bubbles"): runs completed, average CP, full-hit rate, partial-hit
+// rate are the doc's own explicit list; gamesPlayed/winPct/dartsThrown are
+// added for parity with every sibling drill's own bubble set (Shanghai/
+// Halve-It both include them even though their own source docs didn't spell
+// them out individually either).
+const PRESSURE_CHAMBER_STAT_DEFS = [
+  { key:'pcavgcp',        label:'Avg Run CP',     desc:'Average total Composure Points across every completed run', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
+  { key:'pcfullhitrate',  label:'Full-Hit Rate',  desc:'% of rounds graded a full hit',           fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'pcpartialhitrate', label:'Partial-Hit Rate', desc:'% of rounds graded a partial hit (right sector, wrong ring)', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'pcwinpct',       label:'Win Rate',       desc:'% of H2H Pressure Chamber runs won',      fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'pcruns',         label:'Runs Completed', desc:'Pressure Chamber runs completed',         fmt:v=>v!=null?String(Math.round(v)):'—' },
+  { key:'pcdartsthrown',  label:'Darts Thrown',   desc:'Total darts thrown in Pressure Chamber runs', fmt:v=>v!=null?Number(v).toLocaleString():'—' },
+];
+// Translates a PRESSURE_CHAMBER_STAT_DEFS key to getPressureChamberStatBubbles()'s JSON field name.
+const PRESSURE_CHAMBER_BUBBLE_KEY_MAP = { pcavgcp:'avgCp', pcfullhitrate:'fullHitRate', pcpartialhitrate:'partialHitRate',
+  pcwinpct:'winPct', pcruns:'runsCompleted', pcdartsthrown:'dartsThrown' };
 
 // Bob's 27's own stat vocabulary (docs/archive/practice-ladders-roadmap.md Part A) —
 // solo, so no win-rate/games-vs-opponent bubble the way Baseball has; "Runs
@@ -12059,6 +12640,17 @@ const GAME_TYPES = {
     statDefs: HALVE_IT_STAT_DEFS,
     personalBestsRenderer: renderHalveItPersonalBests,
     homeTabRenderer: renderHomeTabBodyHalveIt
+  },
+  pressure_chamber: {
+    id: 'pressure_chamber',
+    label: 'The Pressure Chamber',
+    newMatchPlayer: newMatchPlayerPressureChamber,
+    evaluateVisit: evaluateVisitPressureChamber,
+    resetForNextLeg: resetPlayerForNextLegPressureChamber,
+    playerSnapshot: playerSnapshotPressureChamber,
+    statDefs: PRESSURE_CHAMBER_STAT_DEFS,
+    personalBestsRenderer: renderPressureChamberPersonalBests,
+    homeTabRenderer: renderHomeTabBodyPressureChamber
   },
   doubles_practice: {
     id: 'doubles_practice',
@@ -12349,6 +12941,44 @@ function playerSnapshotHalveIt(p){
   return {
     name:p.name, total:p.total||0, roundTotals:Object.assign({}, p.roundTotals),
     roundHalved:Object.assign({}, p.roundHalved),
+    legsWon:p.legsWon, setsWon:p.setsWon,
+    legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0
+  };
+}
+
+/* ---------- The Pressure Chamber (docs/pressure-chamber-roadmap.md) ----------
+   Another Baseball/Shanghai/Halve-It sibling (fixed round sequence, all
+   players in lockstep on one shared live round, game.pressureChamberRound)
+   with no instant-win condition and no extra-rounds extension at all — the
+   match always completes exactly once round 15 settles, with a definite
+   winner even on a tie (pressureChamberDecideWinnerIndex()'s deterministic
+   tie-break chain, scoring.js). evaluateVisitPressureChamber()/
+   generatePressureCard() live in scoring.js; only the stateful player-record
+   helpers stay here, same split as every sibling above. */
+function newMatchPlayerPressureChamber(name){
+  const p = { name, totalCp:0, misses:0, fullHits:0, currentFullHitStreak:0, bestFullHitStreak:0,
+    roundResults:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0,
+    // Lifetime achievement-ladder bases (docs/pressure-chamber-roadmap.md
+    // "Achievements") — fetched once at game start, same "avoid a network
+    // round-trip per turn" reasoning newMatchPlayerBaseball()'s own
+    // lifetimeRunsBase fetch documents. No mode param -> genuinely unscoped
+    // lifetime (H2H + practice combined).
+    sessionRunsCompleted:0, lifetimeRunsBase:0, sessionCpEarned:0, lifetimeCpBase:0 };
+  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(name)}&gameType=pressure_chamber`).then(stats=>{
+    p.lifetimeRunsBase = (stats.runsCompleted || 0) - p.sessionRunsCompleted;
+    p.lifetimeCpBase = (stats.totalCpEarned || 0) - p.sessionCpEarned;
+  }).catch(()=>{});
+  return p;
+}
+function resetPlayerForNextLegPressureChamber(p, game, newSet){
+  p.totalCp = 0; p.misses = 0; p.fullHits = 0;
+  p.currentFullHitStreak = 0; p.bestFullHitStreak = 0; p.roundResults = {}; p.legDarts = 0;
+  if(newSet) p.setDarts = 0;
+}
+function playerSnapshotPressureChamber(p){
+  return {
+    name:p.name, totalCp:p.totalCp||0, roundResults:Object.assign({}, p.roundResults),
+    misses:p.misses||0, fullHits:p.fullHits||0, bestFullHitStreak:p.bestFullHitStreak||0,
     legsWon:p.legsWon, setsWon:p.setsWon,
     legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0
   };
@@ -13116,6 +13746,55 @@ function advanceKillerTurn(){
   renderGameKiller();
   pushLive();
 }
+/* The Pressure Chamber per-dart commit (docs/pressure-chamber-roadmap.md
+   "Sudden Death"): the round normally batches to 3 darts like any other
+   visit-based game type, but Sudden Death needs a per-dart early stop the
+   instant a dart isn't a full hit at all — reusing the existing per-dart
+   live-feedback pattern already established for Doubles Practice
+   (evaluateDartDoublesPractice()), just with its own predicate
+   (evaluateDartPressureSector()). Sector/ring targets only — see that
+   function's own comment for the finish-target judgment call. */
+function throwDartPressureChamber(sector, zone, missZone, missDepth, bounced){
+  if(game.darts.length>=3 || game.busted || game.won) return;
+  if(!bounced && sector === 0 && mult > 1){
+    const count = Math.min(mult, 3 - game.darts.length);
+    for(let i=0;i<count;i++) game.darts.push(makeDart(0,1));
+  } else {
+    const d = makeDart(sector, bounced ? 1 : mult);
+    if(zone) d.zone = zone;
+    if(missZone != null){ d.missZone = missZone; d.missDepth = missDepth; }
+    if(bounced) d.bounced = true;
+    game.darts.push(d);
+  }
+  mult=1; updateMultUI();
+
+  const maxRounds = (game.config && game.config.rounds) || PRESSURE_ROUNDS;
+  const card = generatePressureCard(game.gameId, Math.min(game.pressureChamberRound, maxRounds));
+  const status = document.getElementById('status');
+
+  if(card.modifier.key === 'sudden_death' && card.target.type === 'sector'){
+    const lastDart = game.darts[game.darts.length-1];
+    const r = evaluateDartPressureSector(lastDart, card.target);
+    if(r.ended){
+      // Reused purely as "stop asking for more darts, Enter Turn to commit"
+      // — NOT X01's own bust meaning (enterTurnPressureChamber() re-grades
+      // from game.darts itself, so this flag never leaks into scored/bust).
+      game.busted = true;
+      status.className = 'status bust';
+      status.textContent = r.reason === 'wrong-ring' ? 'SUDDEN DEATH — wrong ring, round over. Press Enter turn.' : 'SUDDEN DEATH — missed, round over. Press Enter turn.';
+      announce('Sudden Death ends the round.');
+      renderSlots(); renderPad(); pushLive();
+      return;
+    }
+  }
+  if(game.darts.length>=3){
+    status.className='status'; status.textContent='Three darts thrown — press Enter turn.';
+  } else {
+    status.className='status'; status.textContent=`Dart ${game.darts.length} of 3 recorded.`;
+  }
+  renderSlots(); renderPad(); pushLive();
+}
+
 function throwDartKiller(sector, zone, missZone, missDepth, bounced){
   const thrower = game.players[game.current];
   const dart = makeDart(sector, bounced ? 1 : mult);
@@ -14298,6 +14977,56 @@ function tickCheckoutBlitzTimer(){
   // 250ms tick period late.
   if(remainingSec <= 0) endBlitzRun();
 }
+
+/* ---------- The Pressure Chamber's No Warmup timer (docs/pressure-chamber-roadmap.md
+   "No Warmup") ---------- Same Date.now()-based wall-clock deadline precedent
+   as Checkout Blitz's own timer above (never a naively decrementing counter,
+   so a backgrounded/throttled tab can't grant extra time) — armed for exactly
+   5 seconds by renderGamePressureChamber() the instant a No Warmup card is
+   revealed, and only ever checked while dart 1 hasn't landed yet. */
+let pressureChamberTimerHandle = null;
+let pressureChamberAnnounced = null;
+function startPressureChamberNoWarmupTimer(){
+  stopPressureChamberNoWarmupTimer();
+  pressureChamberAnnounced = new Set();
+  tickPressureChamberNoWarmupTimer();
+  pressureChamberTimerHandle = setInterval(tickPressureChamberNoWarmupTimer, 250);
+}
+function stopPressureChamberNoWarmupTimer(){
+  if(pressureChamberTimerHandle){ clearInterval(pressureChamberTimerHandle); pressureChamberTimerHandle = null; }
+}
+function tickPressureChamberNoWarmupTimer(){
+  if(!game || game.gameType !== 'pressure_chamber' || game.pressureChamberDeadline == null || game.darts.length > 0){
+    stopPressureChamberNoWarmupTimer();
+    return;
+  }
+  const remainingSec = Math.max(0, Math.ceil((game.pressureChamberDeadline - Date.now())/1000));
+  const el = document.getElementById('pressure-chamber-no-warmup-timer');
+  if(el) el.textContent = `${remainingSec}s`;
+  // aria-live cues at 3s/1s remaining (not every second — pure noise), the
+  // same "periodic, not every second" accessibility requirement Checkout
+  // Blitz's own countdown follows, scaled down for a 5-second window.
+  [3,1].forEach(mark=>{
+    if(remainingSec === mark && !pressureChamberAnnounced.has(mark)){
+      pressureChamberAnnounced.add(mark);
+      announce(`${mark} second${mark===1?'':'s'} left.`);
+    }
+  });
+  if(blitzDeadlinePassed(game.pressureChamberDeadline, Date.now())){
+    stopPressureChamberNoWarmupTimer();
+    // Dart 1 never landed before the deadline — the round is scored as a
+    // miss automatically (docs/pressure-chamber-roadmap.md's own explicit
+    // wording), recorded as a genuine miss dart (sector 0) so the server's
+    // own consistency guard (which knows nothing about client-side wall-clock
+    // timing) sees exactly the same darts the client graded from — never a
+    // client-only "trust me, this was late" flag.
+    game.darts.push(makeDart(0,1));
+    const status = document.getElementById('status');
+    if(status){ status.className='status bust'; status.textContent = 'NO WARMUP — too slow, scored as a miss. Press Enter turn.'; }
+    announce('Too slow — scored as a miss.');
+    renderSlots(); renderPad(); pushLive();
+  }
+}
 // Ends the current Blitz run: locks input, stops the ticker, and shows the
 // results screen. Called from throwDartCheckoutTrainer()/submitCheckoutAttempt()
 // (either one noticing the deadline has passed — a blocked dart or a blocked
@@ -14781,6 +15510,7 @@ GAME_TYPES.cricket.bubbleKeyMap = CRICKET_BUBBLE_KEY_MAP;
 GAME_TYPES.baseball.bubbleKeyMap = BASEBALL_BUBBLE_KEY_MAP;
 GAME_TYPES.shanghai.bubbleKeyMap = SHANGHAI_BUBBLE_KEY_MAP;
 GAME_TYPES.halve_it.bubbleKeyMap = HALVE_IT_BUBBLE_KEY_MAP;
+GAME_TYPES.pressure_chamber.bubbleKeyMap = PRESSURE_CHAMBER_BUBBLE_KEY_MAP;
 GAME_TYPES.doubles_practice.bubbleKeyMap = DOUBLES_PRACTICE_BUBBLE_KEY_MAP;
 GAME_TYPES.chuckin.bubbleKeyMap = CHUCKIN_BUBBLE_KEY_MAP;
 GAME_TYPES.checkout_trainer.bubbleKeyMap = CHECKOUT_TRAINER_BUBBLE_KEY_MAP;
@@ -15017,8 +15747,13 @@ function loadDartHeatmap(){
   // Dartboard-mode input (renderPadCricket()/renderPadBaseball()/
   // renderPadShanghai() are always used), so every single they record is
   // permanently zone-unspecified — not a Pad-mode choice the way it is for
-  // X01/Chuckin/Doubles Practice. See buildDartHeatmap().
-  const noZoneTracking = (gt === 'cricket' || gt === 'baseball' || gt === 'shanghai');
+  // X01/Chuckin/Doubles Practice. See buildDartHeatmap(). Pressure Chamber
+  // extends the same BUG-24 fix (docs/pressure-chamber-roadmap.md): its own
+  // renderPadPressureChamber() is Pad-mode-only by design too (a real
+  // dartboard would let No Warmup/Sudden Death's per-dart timing/early-stop
+  // logic race real device input), so its singles are equally always
+  // zone-unspecified.
+  const noZoneTracking = (gt === 'cricket' || gt === 'baseball' || gt === 'shanghai' || gt === 'pressure_chamber');
   Backend.get(`/api/players/dart-heatmap?name=${encodeURIComponent(currentPlayer)}&gameType=${gt}${modeParam}`)
     .then(cells => { body.innerHTML = buildDartHeatmap(cells||[], { ariaLabel: `Dartboard heatmap of every ${label} dart thrown`, noZoneTracking }); })
     .catch(()=>{ body.innerHTML = `<p class="pp-meta" style="padding:4px 0">Could not load the heatmap.</p>`; });

@@ -113,7 +113,8 @@ describe('BUG-26 — display.html\'s ACH_LABELS/ACH_DURATION/ACH_DESC stay in sy
   test('the cutthroat cricket and Bob\'s 27 one-off badges are present in all three maps', () => {
     const dspSrc = fs.readFileSync(DISPLAY_HTML_PATH, 'utf8');
     const idxSrc = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
-    for (const id of ['cricketstonecold', 'bobs27fullhouse', 'bobs27fullanderson', 'topofthehouse', 'upset']) {
+    for (const id of ['cricketstonecold', 'bobs27fullhouse', 'bobs27fullanderson', 'topofthehouse', 'upset',
+      'pcice', 'pcnervesofsteel', 'pcnowarmup', 'pcdeadcalm']) {
       for (const constName of ['ACH_LABELS', 'ACH_DURATION', 'ACH_DESC']) {
         assert.ok(extractKeys(dspSrc, constName).has(id), `display.html's ${constName} must include ${id}`);
       }
@@ -141,6 +142,9 @@ describe('BUG-26 — display.html\'s ACH_LABELS/ACH_DURATION/ACH_DESC stay in sy
       'DMW_RUNS_MILESTONE_LADDERS',
       'DMW_WALKED_OUT_MILESTONE_LADDERS',
       'DMW_STREAK_MILESTONE_LADDERS',
+      'PRESSURE_RUNS_MILESTONE_LADDERS',
+      'PRESSURE_CP_MILESTONE_LADDERS',
+      'PRESSURE_STREAK_MILESTONE_LADDERS',
     ]) {
       const idxIds = extractLadderIds(idxSrc, ladderName);
       const dspIds = extractLadderIds(dspSrc, ladderName);

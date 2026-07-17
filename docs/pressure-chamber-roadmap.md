@@ -1,6 +1,12 @@
 # The Pressure Chamber — Design Roadmap
 
-> Status: **design phase, not started.**
+> Status: **core game built and shipped** (roadmap item 28 on
+> `docs/open-roadmap-items.md`). The self-declare-before-verifying honesty
+> mechanic (`declared_hit` + Honesty%, build-order step 10) is deliberately
+> deferred, split out as its own separate, independently-tracked open item —
+> see "Implementation notes" at the bottom of this doc for the full account
+> of what shipped, what was deferred and why, and every judgment call made
+> where this doc left a number or a design question open.
 
 ## Goal
 
@@ -305,3 +311,110 @@ entry) is its own screen state ahead of the normal dart-input widget.
 - **Solo vs. H2H tie-breaking** — if two H2H players land the same total
   CP on the identical sequence, is that a genuine tie, or does a secondary
   metric (fewest misses, best single-round CP) break it? Not decided here.
+
+## Implementation notes
+
+Everything in this doc is built except the one piece explicitly split out
+below — see `REFERENCE.md` §33 for the full technical account (data model,
+consistency guard, formulas, badges, testing) and `docs/open-roadmap-items.md`
+for the Done-ledger entry. This section closes out every "Open question"
+above and records the judgment calls this build made where a number or a
+design decision was left open.
+
+### What shipped
+
+The full core loop: `generatePressureCard(gameId, roundIndex)` (a pure
+function of the real `games.id` and the round number, never stored), both
+grading paths (sector/ring via a new `gradePressureSectorRound()`; finish
+targets reusing `evaluateVisit()` completely unmodified, always double-out),
+all 8 modifiers — including the 3 that need real engine changes, built in
+full rather than deferred: **Match Dart** (only the round's 3rd dart counts,
+and a finish checkout landing on dart 1 or 2 does not count), **Sudden
+Death** (a genuine per-dart early stop, `evaluateDartPressureSector()`,
+reusing the Doubles Practice per-dart live-feedback pattern), and **No
+Warmup** (a real 5-second `Date.now()`-based wall-clock deadline, the
+Checkout Blitz precedent). The Composure Points formula, the Composure
+Rating table, the SEC-25-style consistency guard, saved games, stat bubbles,
+Personal Bests, a Home leaderboard, the achievement ladders plus 4 one-off
+flavor badges, and both the live scoreboard (`frontend/index.html`) and its
+`/display` mirror are all built and tested — see "Testing" below.
+
+**H2H** (2-4 players sharing one `game.id`) works exactly as the doc
+predicted — it fell out for free once the core loop worked, needing no
+special engine work beyond normal multi-player game-literal handling.
+
+### Deferred: the self-declare honesty mechanic
+
+**Build-order step 10 — `declared_hit` + Honesty% — is explicitly out of
+scope for this build**, split out as its own separate, independently-tracked
+item on `docs/open-roadmap-items.md` (mirroring exactly how Halve-It's own
+custom target editor was split out). This doc's own "Open questions" section
+already flagged this piece as genuinely uncertain ("is `declared_hit` worth
+building at all in v1"), since it's the one part of this design that can
+never be made tamper-resistant by a single atomic write — a determined
+client can always submit a declaration matching the real outcome in
+hindsight. Deferring it follows this doc's own lean, not a cut corner. No
+`declared_hit` column was added, no declare-before-verifying screen was
+built, and no Honesty% stat bubble exists. Because of this one remaining
+item, this doc stays in `docs/` rather than moving to `docs/archive/` —
+CLAUDE.md's rule that a doc archives only once every item split out from it
+is Done.
+
+### Answers to every other open question
+
+- **Does Honesty % feed the Composure Rating at all?** Moot for this build —
+  Honesty% doesn't exist yet (see above). Whoever picks up the deferred item
+  should treat this doc's own default ("informational only") as the starting
+  position, same as it always was.
+- **Comeback's persistent-deficit version** — not built. This build ships
+  only the doc's own v1 (a fixed per-round swing: a full hit adds a flat
+  bonus, a miss doubles the penalty). A real cross-round deficit counter
+  would need genuine state beyond `(gameId, roundIndex)`, which this whole
+  design deliberately avoids — worth trying only once the simpler version has
+  been played, exactly as the doc originally suggested.
+- **Exact CP values** — a specific, internally-consistent first pass was
+  chosen and is documented in both `frontend/scoring.js` (inline comments on
+  `PRESSURE_BASE_CP`/`PRESSURE_MISS_PENALTY_BASE`/`PRESSURE_MODIFIERS`) and
+  `REFERENCE.md` §33: base CP 5/10/15/20 for single/double/treble/bull, a
+  finish target's base scaling with `checkoutHint()`'s own optimal dart count
+  (15/20/25 for a 1/2/3-dart finish), miss penalties roughly a third of the
+  matching base CP, and modifier multipliers from Dead Calm's 1.0 up through
+  Sudden Death's 1.5 — the FORMULA'S SHAPE (base × modifier, half on partial,
+  doubled miss penalty under Double Down/Comeback) is what's tested and
+  guaranteed stable; these specific constants remain a playtesting starting
+  point, exactly as this doc always framed them.
+- **Curated pool size and rotation** — 14 target-pool entries (11 sector/ring,
+  3 finish) and all 8 modifiers, drawn uniformly (no weighting toward Dead
+  Calm over Sudden Death). Large enough that a 15-round run rarely repeats a
+  target twice in practice; not weighted, since the doc itself only floated
+  weighting as a "worth trying" idea, not a requirement.
+- **Ghost Leg / Audience going camera-verified** — untouched, exactly as this
+  doc anticipated; still gated on `docs/camera-scoring-roadmap.md` existing
+  at all.
+- **Solo vs. H2H tie-breaking** — decided and built:
+  `pressureChamberDecideWinnerIndex()` (`frontend/scoring.js`) breaks a CP tie
+  on fewest total misses, a further tie on fewest darts thrown, and a
+  genuinely remaining coincidence on turn order — always returning a
+  definite winner rather than introducing a distinct "draw" result/UI class
+  this app has for no other game type. Real numeric CP totals make an exact
+  3-way tie vanishingly unlikely in practice, which is why this was chosen
+  over building draw-handling machinery for an edge case this unlikely.
+
+### Testing
+
+Every new calculation has a committed test, per `CLAUDE.md`'s standing
+discipline: `generatePressureCard()`'s determinism, both grading paths (full/
+partial/miss, Match Dart, Sudden Death's early stop), the CP formula (full/
+partial/miss/Double-Down/Comeback/finish/Match-Dart-on-a-finish cases), the
+Composure Rating thresholds, the tie-break chain, `evaluateVisitPressureChamber()`'s
+round/match-completion timing, and `rebuildPressureChamberState()`'s replay —
+all in `backend/test/scoring.test.js`. Stat/Personal-Bests/leaderboard
+formulas and an X01/Cricket/Baseball/Shanghai/Halve-It/Pressure Chamber
+cross-contamination regression are in `backend/test/db.pressure-chamber-stats.test.js`.
+The SEC-25-style consistency guard's accept/reject cases are in
+`backend/test/db.turn-consistency-guard.test.js`. `backend/test/display.ach-labels-parity.test.js`
+was extended to cover the 4 new one-off badges and 3 new ladders. Verified
+end-to-end with Playwright: practice and H2H New Game setup, a full 15-round
+solo run to a Composure Rating, Sudden Death's early stop, Match Dart
+grading, badges/stat bubbles/personal bests/leaderboards via the live API,
+and the `/display` scorecard.
