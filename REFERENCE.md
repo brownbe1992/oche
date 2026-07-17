@@ -55,6 +55,7 @@ convention in `CLAUDE.md`.
 - [30. Marathon Mode](#30-marathon-mode)
 - [31. Shanghai](#31-shanghai)
 - [32. Halve-It](#32-halve-it)
+- [33. The Pressure Chamber](#33-the-pressure-chamber)
 
 ---
 
@@ -6178,3 +6179,323 @@ practice flow (a hit, a halving with correct round-up math, a ring-restricted
 round, a full 7-round game to completion), the 🛡️ No Half Measures badge,
 stat bubbles/personal bests/best-total leaderboard, the live scorecard's
 target-label row headers, and the `/display` scorecard.
+
+## 33. The Pressure Chamber
+
+`docs/pressure-chamber-roadmap.md`. A 15-round pressure-training drill —
+`game_type='pressure_chamber'`, `config.rounds: 15` (fixed, server-overridden
+regardless of whatever the client sends, the same never-trust-the-client
+precedent Killer's number assignment already established), 1-4 players
+(`contexts: ['practice', 'h2h']`). Structurally another Baseball/Shanghai/
+Halve-It sibling — a fixed round sequence, all players in lockstep on one
+shared live round (`game.pressureChamberRound`) — but with a genuinely new
+mechanic none of those three have: each round's **Pressure Card** (a target +
+a situational modifier) is a **pure function of `(gameId, roundIndex)`**,
+never stored, re-derived identically by the live client, the write-time
+consistency guard, and every read-time stats query.
+
+### The card sequence — generated, never stored
+
+`generatePressureCard(gameId, roundIndex)` (`frontend/scoring.js`):
+
+```js
+function generatePressureCard(gameId, roundIndex){
+  const targetIdx = _pcSeededIndex(`${gameId}|${roundIndex}|target`, PRESSURE_TARGET_POOL.length);
+  const modifierIdx = _pcSeededIndex(`${gameId}|${roundIndex}|modifier`, PRESSURE_MODIFIERS.length);
+  return { round: roundIndex, target: PRESSURE_TARGET_POOL[targetIdx], modifier: PRESSURE_MODIFIERS[modifierIdx] };
+}
+```
+
+`_pcSeededIndex()` is `scoring.js`'s own copy of `frontend/index.html`'s
+`_seededIndex(seedStr, poolSize)` (the same deterministic string-hash used by
+Daily Challenge) — duplicated rather than shared because `scoring.js` has no
+reach into `index.html`'s globals and vice versa, and both the live client
+*and* `backend/db.js` need to call `generatePressureCard()` directly. Because
+the seed is `gameId` (the real `games.id`, never a per-player value), every
+player sharing one `games` row sees byte-identical cards round for round —
+H2H's "identical sequence" falls out of this for free, no sequence pre-rolled
+or stored anywhere. **No `target_sector`/`modifier_id` column exists at all**
+— grading only ever needs the recorded `darts` for that round plus a
+re-derivation of the card that produced it.
+
+`PRESSURE_TARGET_POOL` (14 curated entries, `frontend/scoring.js`) has two
+shapes: `{type:'sector', sector, ring, label, difficulty}` (ring one of
+`'single'/'double'/'treble'`) and `{type:'finish', score, label,
+difficulty:'finish'}` (2, 3, or 4-figure finish targets: 40/81/121).
+`PRESSURE_MODIFIERS` (8 entries) carries `{key, label, icon, flavor,
+cpMultiplier, missMultiplier?, comebackBonus?, matchDart?, suddenDeath?,
+noWarmup?}` — see "The 8 modifiers" below for exactly what each flag changes.
+
+### Grading — two shapes, two paths
+
+**Sector/ring targets** — `gradePressureSectorRound(target, darts,
+matchDartOnly)`: "best of the round's darts" — an exact ring+sector match on
+ANY dart is a **full** hit; the sector hit but the wrong ring is a
+**partial**; neither is a **miss**. Under Match Dart (`matchDartOnly`), darts
+1-2 are ignored entirely — only a genuine 3rd dart is ever consulted (fewer
+than 3 darts thrown is always a miss under this modifier).
+
+**Finish targets** — `pressureRoundOutcome()` reuses `evaluateVisit()`
+**unmodified** (`{score: target.score, doubleOut:true}` — always double-out,
+a judgment call this doc settles since the roadmap doc itself didn't pin it
+down): a legal double-out finish is a **full** hit, anything else (a bust, an
+illegal last dart, a non-double checkout) is a **miss** — there is no partial
+tier for a finish target. Under Match Dart, a legal finish reached on dart 1
+or 2 does **not** count — `darts.length===3` is required alongside `ev.win`,
+since a real visit only ever contains as many darts as were actually thrown
+before a checkout ended it.
+
+`darts` passed into any Pressure Chamber grading function must be full
+dart-core objects (`makeDartCore()`'s own `{sector, mult, value, isDouble,
+...}` shape) — sector grading only reads `.sector`/`.mult`, but finish
+grading's `evaluateVisit()` call needs `.value`/`.isDouble` too, so every real
+caller (the live client, `backend/db.js`'s write-time guard) always deals in
+full dart-core objects, never raw `{sector, mult}` pairs.
+
+### The 8 modifiers — what's digitally enforceable and what isn't
+
+| Modifier | Key | Effect |
+|---|---|---|
+| Dead Calm | `dead_calm` | Baseline — `cpMultiplier:1.0`, no other flags. |
+| Double Down | `double_down` | `cpMultiplier:1.0`, `missMultiplier:2` — doubles the miss penalty only; a full/partial hit's reward is unchanged. |
+| Comeback | `comeback` | `cpMultiplier:1.4`, `missMultiplier:2`, `comebackBonus:true` — a full hit adds a flat bonus (half the base CP) on top of the normal reward; a miss doubles the penalty, same as Double Down. |
+| Audience | `audience` | `cpMultiplier:1.15`. Flavor/instruction text only (`flavor` shown on the card banner) — unenforceable, honor system. |
+| Ghost Leg | `ghost_leg` | `cpMultiplier:1.15`. Same unenforceable honor-system shape as Audience. |
+| Sudden Death | `sudden_death`, flag `suddenDeath:true` | `cpMultiplier:1.5`. **Enforced**: the round stops the instant a dart isn't a full hit at all (sector/ring targets only — see below), via a real per-dart engine function, not just flavor text. |
+| Match Dart | `match_dart`, flag `matchDart:true` | `cpMultiplier:1.3`. **Enforced**: only the round's 3rd dart counts (see grading above). |
+| No Warmup | `no_warmup`, flag `noWarmup:true` | `cpMultiplier:1.25`. **Enforced**: a real 5-second wall-clock deadline (`Date.now()`-based, the Checkout Blitz precedent) from card reveal to dart 1. |
+
+**Sudden Death's per-dart early stop** (`evaluateDartPressureSector(dart,
+target)`, mirroring `evaluateDartDoublesPractice()`'s `{hit, ended, reason}`
+shape): stops the instant a dart isn't a full hit — including a
+partial/wrong-ring hit, per the roadmap doc's own explicit wording. **Judgment
+call**: scoped to sector/ring targets only — a finish target under Sudden
+Death grades exactly as it would under Dead Calm, since "hit" isn't a single
+binary per-dart event the way it is for a sector target (the roadmap doc left
+this combination unspecified).
+
+**No Warmup's deadline** is enforced **client-side only**, the same
+established limitation Checkout Blitz's own deadline already has (neither
+`backend/db.js` nor `server.js` know anything about wall-clock timing — only
+`scored`/`bust`/`checkout`/`leg_won` arithmetic is ever validated
+server-side). The client auto-commits a genuine miss dart (`sector:0`) the
+instant the deadline passes with no dart 1 yet thrown, so the server's
+consistency guard always re-derives from the SAME real darts the client
+graded — never a client-only "trust me, this was late" flag.
+
+### Composure Points formula
+
+`computePressureRoundResult(card, darts)` (`frontend/scoring.js`):
+
+- **Base CP** by target difficulty (`PRESSURE_BASE_CP`): single 5, double 10,
+  treble 15, bull 20. A finish target's base
+  (`pressureFinishBaseCp(score)`) instead scales with `checkoutHint()`'s own
+  optimal dart count: `10 + optimalDarts*5` (15/20/25 for a 1/2/3-dart
+  finish) — a 2-dart finish is worth less than a 3-dart one, per the roadmap
+  doc.
+- **Miss-penalty base** (`PRESSURE_MISS_PENALTY_BASE`), always smaller than
+  the base CP: single 2, double 4, treble 6, bull 8, finish 10.
+- **Full hit**: `gained = round(baseCp * modifier.cpMultiplier)`, plus a flat
+  `round(baseCp * 0.5)` bonus under Comeback.
+- **Partial hit**: `gained = round(baseCp * modifier.cpMultiplier / 2)`.
+- **Miss**: `gained = 0` (never negative — satisfies `turns.scored`'s
+  existing non-negative validation unchanged); `missPenalty =
+  round(missBase * modifier.cpMultiplier * (modifier.missMultiplier || 1))` —
+  "base-and-modifier-scaled," per the roadmap doc's own formula wording, with
+  Double Down/Comeback's `missMultiplier` doubling it again on top.
+
+All of these numeric constants are a first-pass playtesting default per the
+roadmap doc's own explicit framing ("not final") — what's actually tested is
+the FORMULA'S SHAPE (base × modifier, half on partial, doubled miss penalty
+under Double Down/Comeback), not these specific values.
+
+### Composure Rating
+
+Derived at read time from a run's total CP, never stored (monotonic
+thresholds, so "the best rating ever reached" is always just
+`pressureComposureRating()` of the single highest total CP ever recorded —
+no separate tracking needed):
+
+| Total CP | Rating |
+|---|---|
+| 120+ | Ice |
+| 90–119 | Steel |
+| 60–89 | Copper |
+| 30–59 | Tin |
+| Below 30 | Rattled |
+
+### Data model — `turns.scored`/`bust`/`checkout`/`leg_won`
+
+Reuses Checkout Trainer's exact 3-way outcome verbatim: `bust=1` = miss,
+`checkout=1, leg_won=0` = partial, `checkout=1, leg_won=1` = full. No new
+columns of any kind — `turns.scored` stores the CP **gained** this round
+(never the miss penalty, which is never stored anywhere). A run's total CP
+is:
+
+```
+total = SUM(scored) − SUM(pressureMissPenaltyForCard(card) for every bust=1 turn)
+```
+
+recomputed at read time by re-rolling `generatePressureCard(gameId, round)`
+for every missed round — the same "derive the rest, don't store it"
+philosophy Halve-It's halving rule already established, just simpler here
+since the total isn't order-dependent (a plain `SUM` minus a derived
+subtraction, not a running replay — `_pressureChamberLegTotals(mode)` in
+`backend/db.js`).
+
+### Consistency guard (SEC-25-style, `addTurn()` in `backend/db.js`)
+
+The round is derived from the player's own prior-turn count in this
+game/set/leg (`priorTurns+1`, the same SEC-25 pattern Baseball/Shanghai/
+Halve-It's own guards use), rejected outright past round 15 (no extra-rounds
+extension exists for this game type — see tie-breaking below). The card is
+re-derived via `generatePressureCard(gameId, round)` and
+`computePressureRoundResult(card, dartsCore)` recomputes the expected
+`scored`/`bust`/`checkout`/`leg_won`; any mismatch is rejected.
+
+### Solo vs. H2H tie-breaking (a judgment call — the roadmap doc's own last open question)
+
+`pressureChamberDecideWinnerIndex(totals)` (`frontend/scoring.js`): highest
+total CP wins outright; a CP tie breaks on fewest total misses (the more
+composed run); a further tie breaks on fewest darts thrown (efficiency); a
+genuine remaining coincidence resolves to whichever player is earlier in turn
+order. **Always returns a definite winner** — this app has no distinct "draw"
+result/UI class for any other game type, and a real numeric CP total makes an
+exact 3-way tie vanishingly unlikely in practice, so this was chosen over
+introducing one just for this feature.
+
+### Stats (`GAME_TYPES.pressure_chamber.statDefs` / `PRESSURE_CHAMBER_STAT_DEFS`)
+
+**Stat bubbles** (`getPressureChamberStatBubbles(name, mode)`): Avg Run CP,
+Full-Hit Rate, Partial-Hit Rate (all `getPressureChamberStatBubbles`'
+`avgCp`/`fullHitRate`/`partialHitRate` — the roadmap doc's own explicit list),
+plus Win Rate/Runs Completed/Darts Thrown for parity with Shanghai's/
+Halve-It's own bubble sets. `totalCpEarned` (lifetime CP, clamped at 0 per
+run before summing) also rides in this response as the achievement-ladder
+base — see Achievements below.
+
+**Personal Bests** (`getPressureChamberPersonalBests(name, mode)`):
+`bestRunCp` (a peak, no minimum-attempts floor — the Checkout Blitz/Halve-It
+precedent), `bestRating` (`pressureComposureRating(bestRunCp)` — see
+Composure Rating above for why no separate tracking is needed), and
+`longestFullHitStreak` (the best of every completed run's own peak
+consecutive-full-hit streak).
+
+**Home page leaderboard**: Best Run CP (`getPressureChamberBestCpLeaderboard(mode)`,
+one row per player, their peak total across BOTH won and lost runs — same
+no-minimum-floor shape as Halve-It's own board, each row annotated with its
+Composure Rating) and Most Pressure Chamber Wins
+(`getPressureChamberWinLeaderboard()`, H2H only, identical shape to
+Halve-It's/Shanghai's own).
+
+### Achievements
+
+Three data-driven ladders, `chuckinTiersReached()`/`checkChuckinMilestoneTier()`-powered
+(the `CHUCKIN_MILESTONE_LADDERS` engine, reused wholesale): **lifetime runs
+completed** (`PRESSURE_RUNS_MILESTONE_LADDERS`, 4 tiers, 5/25/100/250),
+**lifetime CP earned** (`PRESSURE_CP_MILESTONE_LADDERS`, 4 tiers,
+500/2,000/5,000/15,000, base+session fetched once per game like Baseball's
+own `lifetimeRunsBase`), and **longest full-hit streak in a single run**
+(`PRESSURE_STREAK_MILESTONE_LADDERS`, 3 tiers, 5/8/12 — checked once at run
+end against that run's own peak streak, the Bob's 27/Gauntlet-streak
+pattern, not a lifetime accumulator).
+
+**Judgment call**: unlike every sibling game type's own leg-outcome badges
+(checked only for the match winner in `onLegWon*()`), Composure Rating is a
+**personal** achievement even in H2H — the roadmap doc's own Goal section
+says "solo players chase their own rating; 2-4 players can run the identical
+card sequence head-to-head," meaning a losing player who still reaches Ice
+should still earn it. `onLegWonPressureChamber()` therefore checks 🥶 Ice and
+every lifetime ladder for **every player**, not just the leg winner (all
+players' round-15 turns are already recorded by the time it fires, since the
+round only advances once everyone's thrown) — win/loss progression
+(`legsWon`/`setsWon`) is still applied to the winner only.
+
+Four one-off flavor badges, all recurring, checked the moment a round is
+graded in `enterTurnPressureChamber()`: 🥶 **Ice** (reach the Ice Composure
+Rating, 120+ CP, in a single run), 🎯 **Nerves of Steel** (a full hit under
+Sudden Death), ⏱️ **No Warmup Needed** (a full hit under No Warmup), 🃏
+**Dead Calm, Steady Hands** (a full hit under Dead Calm — "sometimes the
+scariest of all," per the roadmap doc).
+
+### Live scoreboard
+
+`renderGamePressureChamber()` (`frontend/index.html`) and
+`renderers.pressure_chamber` (`frontend/display.html`) both render a
+per-round chalkboard grid (rows = rounds 1-15, cells showing ✅/➗/❌ for a
+settled round — icon+text via a `title`/`aria-label`, never color alone) plus
+a large, unmissable **Pressure Card banner** below the table: the current
+round's target, modifier (icon + label + flavor text), and stakes
+(full-hit/miss CP values) — "the whole game hinges on the player registering
+what's on the line before they throw," per the roadmap doc's own
+accessibility note. A live No Warmup countdown (`aria-live`, cued at 3s/1s
+remaining — not every second) shows when that modifier is drawn.
+`display.html` has no shared `scoring.js` module, so `liveSnapshot()` sends
+the FULL 15-round card sequence up front (`pressureChamberCards`, same
+"can't derive it there" reasoning `halveItTargets` already documents) plus
+the live round/deadline.
+
+`renderPadPressureChamber()` is deliberately the FULL 1-20+Bull number grid
+(the same shape X01's own default Pad-mode grid uses), **not** a single
+restricted target button like Halve-It's/Bob's 27's own pads — a finish-
+target round can legitimately need a multi-number checkout route, and even a
+sector-target round needs to record a genuine off-target hit, not just
+"hit or miss." Always Pad-mode, **never the Dartboard SVG** — Sudden Death's
+per-dart early stop and No Warmup's wall-clock deadline both need
+`throwDart()` to route through this one commit path, not race a second live
+input surface. Because of this, Pressure Chamber's own singles are always
+zone-unspecified, the same BUG-24 gap class Cricket/Baseball/Shanghai already
+have (`noZoneTracking` in `frontend/index.html` includes `'pressure_chamber'`).
+
+### Saved games
+
+Position is a pure function of recorded turns:
+`rebuildPressureChamberState({gameId, names, legsPerSet, maxRounds, turns})`
+(`frontend/scoring.js`) replays CP totals/misses/full-hit streaks/round
+number from the turn sequence, reusing `evaluateVisitPressureChamber()`
+directly. Reused identically by `_savedGamePosition()` (write-time) and
+`resumeGame()`'s `pressure_chamber` branch (read-time). `'pressure_chamber'`
+is in both `SAVABLE_GAME_TYPES` lists (`backend/db.js` and
+`frontend/index.html`).
+
+### Explicitly out of scope — the self-declare honesty mechanic
+
+The roadmap doc's own build-order step 10 (`declared_hit`, a self-declare
+hit/miss step before darts are read, and an Honesty% stat comparing the
+declaration against the real outcome) is **not built**. The roadmap doc's own
+"Open questions" section already flags this as genuinely uncertain ("is
+`declared_hit` worth building at all in v1") since it's the one piece of this
+design that can never be made tamper-resistant by a single atomic write — so
+deferring it follows the doc's own lean, not a cut corner. Tracked as its own
+separate, independently-scoped item in `docs/open-roadmap-items.md` (the same
+v1/v2-split discipline Halve-It's custom target editor already used).
+`docs/pressure-chamber-roadmap.md` stays in `docs/` (not archived) because of
+this one remaining open item.
+
+### Testing
+
+`backend/test/scoring.test.js`: `generatePressureCard()`'s determinism
+(including a same-gameId-different-round and different-gameId sweep),
+`gradePressureSectorRound()`'s full/partial/miss + Match Dart cases,
+`evaluateDartPressureSector()`'s Sudden Death early-stop cases,
+`pressureBaseCp()`/`pressureFinishBaseCp()`/`pressureMissPenaltyBase()`'s
+scaling, `pressureMissPenaltyForCard()`'s pure-function-of-the-card property,
+`computePressureRoundResult()`'s full/partial/miss/Double-Down/Comeback/
+finish/Match-Dart-on-a-finish cases, `pressureComposureRating()`'s threshold
+table, `isPressureIceRun()`/`isPressureModifierFullHit()`,
+`pressureChamberDecideWinnerIndex()`'s CP/misses/darts/order tie-break chain,
+`evaluateVisitPressureChamber()`'s round/match-completion timing, and
+`rebuildPressureChamberState()`'s replay + leg-progression cases.
+`backend/test/db.pressure-chamber-stats.test.js`: stat-bubble formulas
+(deriving expected values from the real engine, never hand-picked numbers),
+Personal Bests, the best-CP/win leaderboards, and an X01/Cricket/Baseball/
+Shanghai/Halve-It/Pressure Chamber cross-contamination regression (both
+directions). `backend/test/db.turn-consistency-guard.test.js`: the SEC-25-style
+guard's accept/reject cases (a genuine full hit, a claimed-but-unreal full
+hit, a genuine miss, an inconsistent 3-way outcome, the 16th-round rejection,
+and a finish-target grading case). `backend/test/display.ach-labels-parity.test.js`
+extended to cover the 4 new one-off badges and 3 new ladders. Verified
+end-to-end with Playwright: the full New Game → Pressure Chamber practice and
+H2H flows, a full 15-round solo run to a Composure Rating, badges/stat
+bubbles/personal bests/leaderboards via the API, and the live `/display`
+scorecard.

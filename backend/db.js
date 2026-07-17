@@ -30,7 +30,9 @@ const { checkoutHint, dartLabel,
   KILLER_DEFAULT_LIVES, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
   computeFatigueSplit, classifyMarathonTrend,
   shanghaiRoundTarget, evaluateVisitShanghai, rebuildShanghaiState,
-  HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, rebuildHalveItState } = require('../frontend/scoring.js');
+  HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, rebuildHalveItState,
+  makeDartCore, PRESSURE_ROUNDS, generatePressureCard, computePressureRoundResult,
+  pressureMissPenaltyForCard, pressureComposureRating, rebuildPressureChamberState } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -927,7 +929,14 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
     }
     killerConfig = { lives, numbers: assignKillerNumbers(names) };
   }
+  // The Pressure Chamber (docs/pressure-chamber-roadmap.md): rounds is fixed
+  // at 15, never a client choice — overridden server-side the same way
+  // Killer's number assignment is above, so a hostile client can't submit a
+  // shorter/longer run that generatePressureCard()'s own round-index math
+  // (and the PRESSURE_ROUNDS-capped write-time guard) wasn't built for.
+  const pressureChamberConfig = resolvedGameType === 'pressure_chamber' ? { rounds: PRESSURE_ROUNDS } : null;
   const resolvedConfig = killerConfig ? JSON.stringify(killerConfig)
+    : pressureChamberConfig ? JSON.stringify(pressureChamberConfig)
     : config ? JSON.stringify(config) : JSON.stringify({ startingScore: Number(category) || null });
   if (Buffer.byteLength(resolvedConfig) > 4096) throw httpError(400, 'config is too large');
   // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): validated here,
@@ -1332,6 +1341,34 @@ function addTurn(gameId, t, opts = {}) {
     if (!!t.bust !== (expectedGained === 0)) {
       throw httpError(400, 'bust must reflect whether this Halve-It visit missed the round\'s target entirely');
     }
+  } else if (gameTypeRow && gameTypeRow.game_type === 'pressure_chamber') {
+    // docs/pressure-chamber-roadmap.md: reuses Checkout Trainer's exact 3-way
+    // bust=1(miss)/checkout=1,leg_won=0(partial)/checkout=1,leg_won=1(full)
+    // outcome. The round's card (target+modifier) is never stored — it's a
+    // pure function of (gameId, roundIndex), re-derived here exactly the way
+    // the client derived it (generatePressureCard()), same SEC-25
+    // "recompute the expected shape server-side, reject a mismatch"
+    // principle as every branch above. Round is this player's own prior turn
+    // count in this game/set/leg (SEC-25 pattern); fixed at exactly 15 rounds
+    // — no extra-rounds extension exists for this game type (see
+    // pressureChamberDecideWinnerIndex() in scoring.js for how a tie at the
+    // final round resolves instead).
+    const priorTurns = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE game_id = ? AND player_id = ? AND set_no = ? AND leg_no = ?')
+      .get(Number(gameId), p.id, setNo, legNo).n;
+    const round = priorTurns + 1;
+    if (round > PRESSURE_ROUNDS) throw httpError(400, `a Pressure Chamber run only has ${PRESSURE_ROUNDS} rounds`);
+    const card = generatePressureCard(Number(gameId), round);
+    const dartsCore = darts.map(d => makeDartCore(d.sector, d.multiplier));
+    const result = computePressureRoundResult(card, dartsCore);
+    if (scored !== result.gained) {
+      throw httpError(400, "scored does not match this round's derived Composure Points");
+    }
+    const expectedBust = result.outcome === 'miss';
+    const expectedCheckout = result.outcome !== 'miss';
+    const expectedLegWon = result.outcome === 'full';
+    if (!!t.bust !== expectedBust) throw httpError(400, 'bust must reflect whether this round was missed entirely');
+    if (!!t.checkout !== expectedCheckout) throw httpError(400, 'checkout must reflect whether this round was at least a partial hit');
+    if (!!t.legWon !== expectedLegWon) throw httpError(400, 'legWon must reflect whether this round was a full hit');
   }
   // Checkout Trainer (docs/archive/checkout-trainer-roadmap.md): the target score offered
   // for this round. Server-computed context, not a scored value, so it's only
@@ -1413,7 +1450,7 @@ function completeGame(gameId, winnerName) {
    bobs_27 (docs/archive/practice-ladders-roadmap.md Part A) IS savable — its
    running total replays deterministically from `turns` the same way every
    other entry here does (rebuildBobs27State(), frontend/scoring.js). */
-const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'shanghai', 'halve_it'];
+const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'shanghai', 'halve_it', 'pressure_chamber'];
 
 function _savedGameRow(gameId) {
   return db.prepare('SELECT * FROM saved_games WHERE game_id = ?').get(Number(gameId));
@@ -1560,6 +1597,13 @@ function _savedGamePosition(game, participants, turns) {
     const r = rebuildGauntletState({ turns });
     return { station: r.currentStation, settled: r.settledCount, totalScars: r.totalScars, awaitingRepeat: r.awaitingRepeat };
   }
+  if (game.game_type === 'pressure_chamber') {
+    const config = game.config ? JSON.parse(game.config) : null;
+    const maxRounds = (config && config.rounds) || PRESSURE_ROUNDS;
+    const r = rebuildPressureChamberState({ gameId: game.id, names, legsPerSet, maxRounds, turns });
+    return { setNo: r.setNo, legNo: r.legNo, pressureChamberRound: r.pressureChamberRound,
+      players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, totalCp: p.totalCp })) };
+  }
   return null;
 }
 
@@ -1577,7 +1621,7 @@ function getSavedGames() {
   `).all();
   return rows.map(r => {
     const { participants, turns } = _resumeStateTurns(r.gameId);
-    const gameRow = { game_type: r.gameType, category: r.category, practice: r.practice, legs_per_set: r.legsPerSet, config: r.config };
+    const gameRow = { id: r.gameId, game_type: r.gameType, category: r.category, practice: r.practice, legs_per_set: r.legsPerSet, config: r.config };
     // Tournament linkage (docs/archive/saved-games-roadmap.md "Abandoning"): the client
     // needs to know this UP FRONT, before the admin taps Abandon, so it can route
     // to the bracket/walkover control instead of a plain delete — a tournament
@@ -3523,6 +3567,157 @@ function getHalveItWinLeaderboard() {
     rate: r.played ? +((r.won / r.played) * 100).toFixed(1) : 0 }));
 }
 
+/* ---------- The Pressure Chamber (docs/pressure-chamber-roadmap.md) ----------
+   Reuses Checkout Trainer's exact 3-way bust=1(miss)/checkout=1,leg_won=0
+   (partial)/checkout=1,leg_won=1(full) outcome, so full/partial-hit rate read
+   directly off those columns with no replay needed. The one genuine
+   complication: a run's total CP is NOT SUM(scored) alone -- it's
+   SUM(scored) MINUS a derived total miss penalty (every bust=1 turn's own
+   card, re-rolled via generatePressureCard(), never stored) -- so per-leg
+   totals need one JS pass over the raw turns, the same "nothing
+   pre-aggregated, replay once" philosophy _replayHalveItLegTotals() already
+   uses, just simpler here since CP total isn't order-dependent the way
+   Halve-It's halving-interspersed total is -- a plain SUM minus a derived
+   subtraction, not a running replay. */
+function _pressureChamberLegTotals(mode){
+  const scope = _scope({ mode, gameType: 'pressure_chamber' });
+  const rows = db.prepare(`
+    SELECT t.id, t.game_id, t.set_no, t.leg_no, t.player_id, t.scored, t.bust, t.checkout, t.leg_won,
+           g.completed_at,
+           (SELECT COUNT(*) FROM darts d WHERE d.turn_id=t.id) AS darts,
+           ROW_NUMBER() OVER (PARTITION BY t.game_id, t.set_no, t.leg_no, t.player_id ORDER BY t.id) AS round
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE 1=1 ${scope}
+    ORDER BY t.game_id, t.set_no, t.leg_no, t.player_id, t.id
+  `).all();
+  const legs = new Map();
+  for (const r of rows) {
+    const key = `${r.game_id}|${r.set_no}|${r.leg_no}|${r.player_id}`;
+    let leg = legs.get(key);
+    if (!leg) {
+      leg = { gameId: r.game_id, setNo: r.set_no, legNo: r.leg_no, playerId: r.player_id,
+        gainedTotal: 0, missPenaltyTotal: 0, darts: 0, rounds: 0, fullHits: 0, partialHits: 0, misses: 0,
+        currentFullHitStreak: 0, bestFullHitStreak: 0, lastTurnId: r.id, completed: !!r.completed_at };
+      legs.set(key, leg);
+    }
+    leg.gainedTotal += r.scored;
+    leg.darts += r.darts;
+    leg.rounds += 1;
+    leg.lastTurnId = r.id;
+    leg.completed = !!r.completed_at;
+    if (r.bust) {
+      const card = generatePressureCard(r.game_id, r.round);
+      leg.missPenaltyTotal += pressureMissPenaltyForCard(card);
+      leg.misses += 1;
+      leg.currentFullHitStreak = 0;
+    } else if (r.leg_won) {
+      leg.fullHits += 1;
+      leg.currentFullHitStreak += 1;
+      leg.bestFullHitStreak = Math.max(leg.bestFullHitStreak, leg.currentFullHitStreak);
+    } else if (r.checkout) {
+      leg.partialHits += 1;
+      leg.currentFullHitStreak = 0;
+    }
+  }
+  return Array.from(legs.values()).map(l => Object.assign(l, { total: l.gainedTotal - l.missPenaltyTotal }));
+}
+
+function getPressureChamberStatBubbles(playerName, mode){
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'pressure_chamber' });
+
+  const gamesRow = db.prepare(`
+    SELECT COUNT(*) AS played, SUM(CASE WHEN g.winner_id=? THEN 1 ELSE 0 END) AS won
+    FROM game_players gp JOIN games g ON g.id=gp.game_id
+    WHERE gp.player_id=? ${scope} AND g.completed_at IS NOT NULL
+  `).get(p.id, p.id);
+  const gamesPlayed = gamesRow?.played ?? 0;
+  const winPct = gamesPlayed > 0 ? (gamesRow.won / gamesPlayed * 100) : null;
+
+  const dartsThrown = db.prepare(`SELECT COUNT(*) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+
+  const roundsRow = db.prepare(`
+    SELECT COUNT(*) AS rounds,
+      COALESCE(SUM(CASE WHEN t.leg_won=1 THEN 1 ELSE 0 END),0) AS fullHits,
+      COALESCE(SUM(CASE WHEN t.checkout=1 AND t.leg_won=0 THEN 1 ELSE 0 END),0) AS partialHits
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE t.player_id=? ${scope}
+  `).get(p.id);
+  const rounds = roundsRow?.rounds ?? 0;
+  const fullHitRate = rounds > 0 ? (roundsRow.fullHits / rounds * 100) : null;
+  const partialHitRate = rounds > 0 ? (roundsRow.partialHits / rounds * 100) : null;
+
+  const myLegs = _pressureChamberLegTotals(mode).filter(l => l.playerId === p.id && l.completed);
+  const runsCompleted = myLegs.length;
+  const avgCp = runsCompleted > 0 ? (myLegs.reduce((s, l) => s + l.total, 0) / runsCompleted) : null;
+  // Lifetime CP earned (docs/pressure-chamber-roadmap.md "Achievements" ladder
+  // metric) -- clamped at 0 per run before summing, so a heavily-missed run
+  // (net negative under Double Down) never subtracts from a lifetime
+  // cumulative achievement total the way it legitimately can from a single
+  // run's own Personal Best/leaderboard peak.
+  const totalCpEarned = myLegs.reduce((s, l) => s + Math.max(0, l.total), 0);
+
+  return { gamesPlayed, winPct, dartsThrown, runsCompleted, avgCp, fullHitRate, partialHitRate, totalCpEarned };
+}
+
+// Personal Bests (docs/pressure-chamber-roadmap.md "Stats, Personal Bests,
+// leaderboard"): best single-run CP total (a peak, no minimum-attempts floor
+// -- the Checkout Blitz/Halve-It "Highest Final Total" precedent), best
+// Composure Rating ever reached (since the rating thresholds are monotonic
+// in totalCp, this is always just pressureComposureRating() of bestRunCp --
+// no separate tracking needed), and the longest full-hit streak reached in
+// any single run (bestFullHitStreak is already computed per-run above).
+function getPressureChamberPersonalBests(playerName, mode){
+  const p = getPlayer(playerName);
+  if (!p) return null;
+
+  const legs = _pressureChamberLegTotals(mode).filter(l => l.playerId === p.id && l.completed);
+  const bestRunCp = legs.length ? Math.max(...legs.map(l => l.total)) : null;
+  const bestRating = bestRunCp != null ? pressureComposureRating(bestRunCp) : null;
+  const longestFullHitStreak = legs.length ? Math.max(...legs.map(l => l.bestFullHitStreak)) : null;
+
+  return { bestRunCp, bestRating, longestFullHitStreak };
+}
+
+// Home leaderboard -- one row per player, their own peak single-run CP total,
+// same "no minimum floor" shape as getHalveItBestTotalLeaderboard()/
+// getCheckoutBlitzLeaderboard().
+function getPressureChamberBestCpLeaderboard(mode){
+  const legs = _pressureChamberLegTotals(mode).filter(l => l.completed);
+  const byPlayer = new Map();
+  for (const l of legs) {
+    const cur = byPlayer.get(l.playerId);
+    if (cur == null || l.total > cur) byPlayer.set(l.playerId, l.total);
+  }
+  return Array.from(byPlayer.entries())
+    .map(([playerId, total]) => ({ name: db.prepare('SELECT name FROM players WHERE id=?').get(playerId)?.name, total, rating: pressureComposureRating(total) }))
+    .filter(r => r.name)
+    .sort((a, b) => b.total - a.total);
+}
+
+// Win/loss leaderboard -- identical shape to getHalveItWinLeaderboard()/
+// getShanghaiWinLeaderboard() (H2H only by nature: practice mode has no
+// winner_id). The match winner itself is decided the normal way (a real
+// completeGame(winnerName) call at the final round, per
+// pressureChamberDecideWinnerIndex()'s deterministic tie-break) -- no replay
+// needed here, unlike the CP-total queries above.
+function getPressureChamberWinLeaderboard() {
+  const scope = _scope({ mode: 'h2h', gameType: 'pressure_chamber' });
+  const winRows = db.prepare(`
+    SELECT p.name AS name, COUNT(*) AS played, SUM(CASE WHEN g.winner_id = p.id THEN 1 ELSE 0 END) AS won
+    FROM game_players gp
+    JOIN players p ON p.id = gp.player_id
+    JOIN games g ON g.id = gp.game_id
+    WHERE g.completed_at IS NOT NULL ${scope}
+    GROUP BY p.id
+    HAVING played >= 1
+    ORDER BY won DESC, played ASC
+  `).all();
+  return winRows.map(r => ({ name: r.name, played: r.played, won: r.won,
+    rate: r.played ? +((r.won / r.played) * 100).toFixed(1) : 0 }));
+}
+
 /* ---------- Doubles Practice (docs/game-modes-roadmap.md) ----------
    Solo drill mode: no opponent, no win/loss, no legs won — a "round" is one
    turns.leg_no grouping (incremented client-side by startNextRoundDoublesPractice()
@@ -4979,7 +5174,7 @@ function _mf(mode) {
 // 'x01'/'cricket', server.js only uses a query param to pick which function to
 // call), and is whitelisted here regardless as a defense-in-depth measure
 // against string interpolation.
-const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer', 'shanghai', 'halve_it'];
+const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer', 'shanghai', 'halve_it', 'pressure_chamber'];
 function _scope({ mode, gameType } = {}) {
   let sql = _mf(mode);
   if (gameType) {
@@ -7934,6 +8129,7 @@ module.exports = {
   getBaseballPerfectInningsStats, getBaseballRpiLeaderboard, getBaseballWinLeaderboard, getBaseballPerfectGameStats,
   getShanghaiStatBubbles, getShanghaiPersonalBests, getShanghaiShanghaisStats, getShanghaiWinLeaderboard, getShanghaiPprLeaderboard,
   getHalveItStatBubbles, getHalveItPersonalBests, getHalveItBestTotalLeaderboard, getHalveItWinLeaderboard,
+  getPressureChamberStatBubbles, getPressureChamberPersonalBests, getPressureChamberBestCpLeaderboard, getPressureChamberWinLeaderboard,
   getCricketMprLeaderboard, getCricketWinLeaderboard, getCricketPerfectLegStats,
   getDoublesPracticeStatBubbles, getDoublesPracticePersonalBests,
   getDoublesPracticeAccuracyLeaderboard, getDoublesPracticeBestRoundStats, getDoublesPracticeHitSectors,

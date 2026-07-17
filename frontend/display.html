@@ -329,7 +329,8 @@ const ACH_LABELS  = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarter
   topofthehouse:'👑 TOP OF THE HOUSE! 👑', upset:'Upset! 🗡️',
   checkoutladderpeakbagged:'Peak Bagged! 🧗',
   killerfirstblood:'First Blood 🩸', killeruntouchable:'Untouchable 🛡️', killerownworstenemy:'Own Worst Enemy 🙈',
-  shanghai:'🀄 SHANGHAI! 🀄', halveitdeath:'Halved at the Death! 🪓', halveitnohalf:'No Half Measures! 🛡️' };
+  shanghai:'🀄 SHANGHAI! 🀄', halveitdeath:'Halved at the Death! 🪓', halveitnohalf:'No Half Measures! 🛡️',
+  pcice:'Ice! 🥶', pcnervesofsteel:'Nerves of Steel 🎯', pcnowarmup:'No Warmup Needed! ⏱️', pcdeadcalm:'Dead Calm, Steady Hands 🃏' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -348,7 +349,8 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   topofthehouse:6000, upset:2500,
   checkoutladderpeakbagged:4000,
   killerfirstblood:3000, killeruntouchable:4000, killerownworstenemy:3000,
-  shanghai:6000, halveitdeath:4000, halveitnohalf:3000 };
+  shanghai:6000, halveitdeath:4000, halveitnohalf:3000,
+  pcice:5000, pcnervesofsteel:3500, pcnowarmup:3500, pcdeadcalm:3500 };
 // Mirror-copied from frontend/index.html's BADGE_INFO[...].desc / ACH_DESC_FALLBACK —
 // this file has no Badge Case UI to source the text from directly, so it's kept as
 // its own flat map (docs/next-session-plan.md item 1).
@@ -412,6 +414,10 @@ const ACH_DESC = {
   shanghai: "Win a Shanghai game instantly — single, double, AND treble of the round's own number in one visit.",
   halveitdeath: 'Win a Halve-It game after your own final-round visit halved your total.',
   halveitnohalf: 'Win a Halve-It game without ever being halved.',
+  pcice: 'Reach the Ice Composure Rating (120+ CP) in a single Pressure Chamber run.',
+  pcnervesofsteel: 'Land a full hit under Sudden Death in The Pressure Chamber.',
+  pcnowarmup: 'Land a full hit under No Warmup in The Pressure Chamber.',
+  pcdeadcalm: 'Land a full hit under Dead Calm in The Pressure Chamber — no modifier, no excuses.',
 };
 // Just Chuckin' It's 18 laddered milestone badges — mirror-copied from frontend/
 // index.html's CHUCKIN_MILESTONE_LADDERS (this file has no shared module with
@@ -524,7 +530,40 @@ const CHECKOUT_LADDER_MILESTONE_LADDERS = [
       { threshold:170, label:'Peak Rung',    icon:'🏔️' },
     ] },
 ];
-[ONE_EIGHTY_MILESTONE_LADDERS, BASEBALL_RUNS_MILESTONE_LADDERS, DOUBLES_HIT_MILESTONE_LADDERS, BOBS27_SCORE_MILESTONE_LADDERS, CHECKOUT_LADDER_MILESTONE_LADDERS].forEach(ladders=>{
+// The Pressure Chamber's three ladders (docs/pressure-chamber-roadmap.md) —
+// mirror-copied from index.html's PRESSURE_RUNS_MILESTONE_LADDERS/
+// PRESSURE_CP_MILESTONE_LADDERS/PRESSURE_STREAK_MILESTONE_LADDERS.
+const PRESSURE_RUNS_MILESTONE_LADDERS = [
+  { idPrefix:'pc_runs_',
+    descFor: t => `Complete ${t.toLocaleString()} lifetime Pressure Chamber runs.`,
+    tiers: [
+      { threshold:5,   label:'First Nerve',    icon:'😬' },
+      { threshold:25,  label:'Under Control',  icon:'🧊' },
+      { threshold:100, label:'Battle-Hardened', icon:'🛡️' },
+      { threshold:250, label:'Ice Veteran',    icon:'🥶' },
+    ] },
+];
+const PRESSURE_CP_MILESTONE_LADDERS = [
+  { idPrefix:'pc_cp_',
+    descFor: t => `Earn ${t.toLocaleString()} lifetime Composure Points in The Pressure Chamber.`,
+    tiers: [
+      { threshold:500,   label:'Steady Nerve',    icon:'🎯' },
+      { threshold:2000,  label:'Cool Customer',   icon:'😎' },
+      { threshold:5000,  label:'Unshakeable',     icon:'🗿' },
+      { threshold:15000, label:'Composure Legend', icon:'👑' },
+    ] },
+];
+const PRESSURE_STREAK_MILESTONE_LADDERS = [
+  { idPrefix:'pc_streak_',
+    descFor: t => `String together ${t.toLocaleString()} consecutive full hits in a single Pressure Chamber run.`,
+    tiers: [
+      { threshold:5,  label:'In The Pocket', icon:'🎯' },
+      { threshold:8,  label:'Locked In',     icon:'🔒' },
+      { threshold:12, label:'Untouchable',   icon:'💎' },
+    ] },
+];
+[ONE_EIGHTY_MILESTONE_LADDERS, BASEBALL_RUNS_MILESTONE_LADDERS, DOUBLES_HIT_MILESTONE_LADDERS, BOBS27_SCORE_MILESTONE_LADDERS, CHECKOUT_LADDER_MILESTONE_LADDERS,
+ PRESSURE_RUNS_MILESTONE_LADDERS, PRESSURE_CP_MILESTONE_LADDERS, PRESSURE_STREAK_MILESTONE_LADDERS].forEach(ladders=>{
   ladders.forEach(ladder=>{
     ladder.tiers.forEach((tier, i)=>{
       const id = ladder.idPrefix + tier.threshold;
@@ -1140,6 +1179,97 @@ const renderers = {
       </div>`;
     }
   },
+  // The Pressure Chamber (docs/pressure-chamber-roadmap.md): same shared
+  // cs-table chalkboard shape as Shanghai/Halve-It's own (rows=rounds
+  // 1-config.rounds, columns=players), each settled cell showing an icon for
+  // that round's outcome (✅ full / ➗ partial / ❌ miss). The full 15-round
+  // card sequence rides in s.pressureChamberCards (this file has no shared
+  // scoring.js module to derive per-round targets from, same reasoning
+  // s.halveItTargets already documents) — a big banner below the table shows
+  // the CURRENT round's target/modifier/flavor text, large and unmissable,
+  // plus a live No Warmup countdown read from s.pressureChamberDeadline.
+  pressure_chamber: {
+    scorecard(s, L){
+      const players = s.players;
+      const active = s.currentIndex;
+      const cards = Array.isArray(s.pressureChamberCards) ? s.pressureChamberCards : [];
+      const maxRounds = cards.length || 15;
+      const round = s.pressureChamberRound || 1;
+      const lastRound = Math.max(maxRounds, round);
+      const cardAt = i => cards[Math.min(i, maxRounds) - 1];
+      const OUTCOME_ICON = { full:'✅', partial:'➗', miss:'❌' };
+      const rows = [];
+      for(let i=1;i<=lastRound;i++){
+        const isCurrentRound = i===round;
+        const c = cardAt(i);
+        const cells = players.map((p,pi)=>{
+          const r = p.roundResults && p.roundResults[i];
+          const isActive = pi===active && isCurrentRound;
+          return `<div class="cs-cell${isActive?' active':''}">${r?`<span class="cs-points">${OUTCOME_ICON[r]||''}</span>`:''}</div>`;
+        }).join('');
+        rows.push(`<div class="cs-row"><div class="cs-label">${i}</div>${cells}</div>`);
+      }
+
+      const headCells = players.map((p,i)=>{
+        const isActive = i===active;
+        return `<div class="cs-col-head${isActive?' active':''}">
+          <span>${escapeHtml(p.name)}</span>
+          ${isActive?'<span class="cs-throw-chip">▸ throwing</span>':''}
+        </div>`;
+      }).join('');
+
+      const totalCells = players.map((p,i)=>{
+        const isActive = i===active;
+        return `<div class="cs-cell${isActive?' active':''}"><span class="cs-points${isActive?' active':''}">${num(p.totalCp)}</span></div>`;
+      }).join('');
+
+      const thrower = players[active];
+      const darts = Array.isArray(s.darts) ? s.darts : [];
+      const slots = [0,1,2].map(k=>{
+        const lab = darts[k];
+        return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
+      }).join('');
+
+      const liveCard = cardAt(round);
+      const noWarmup = liveCard && liveCard.modifier && liveCard.modifier.key === 'no_warmup';
+      const remainingSec = (noWarmup && s.pressureChamberDeadline != null) ? Math.max(0, Math.ceil((s.pressureChamberDeadline - Date.now())/1000)) : null;
+      const banner = liveCard ? `<div style="margin-top:10px;padding:12px;border:2px solid #c9a227;border-radius:10px;text-align:center;background:rgba(201,162,39,0.08)">
+        <div style="font-size:22px;font-weight:800">${escapeHtml(liveCard.target.label)}</div>
+        <div style="font-size:16px;font-weight:700;margin-top:4px">${liveCard.modifier.icon} ${escapeHtml(liveCard.modifier.label)}</div>
+        <div style="font-style:italic;font-size:13px;color:#999;margin-top:2px">${escapeHtml(liveCard.modifier.flavor)}</div>
+        ${remainingSec!=null?`<div style="margin-top:6px;font-size:20px;font-weight:800">${remainingSec}s</div>`:''}
+      </div>` : '';
+
+      return `<div class="cs-wrap" style="--cs-cols:${players.length}">
+        <div class="cs-table">
+          <div class="cs-row cs-head"><div class="cs-label"></div>${headCells}</div>
+          ${rows.join('')}
+          <div class="cs-row cs-foot"><div class="cs-label">CP</div>${totalCells}</div>
+        </div>
+        ${banner}
+        <div class="cs-throw-row">
+          <span class="cs-throw-lbl">${thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Round ${Math.min(round,maxRounds)} of ${maxRounds}`:''}</span>
+          <div class="darts">${slots}</div>
+        </div>
+      </div>`;
+    },
+    summary(p){
+      return `
+      <div class="sum-card ${p.won?'winner':''}">
+        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}</div>
+        <div class="sum-stats">
+          <div class="sum-stat">
+            <div class="sv">${num(p.totalCp)}</div>
+            <div class="sl">CP</div>
+          </div>
+          <div class="sum-stat">
+            <div class="sv">${escapeHtml(p.rating||'')}</div>
+            <div class="sl">Rating</div>
+          </div>
+        </div>
+      </div>`;
+    }
+  },
   // Bob's 27 (docs/archive/practice-ladders-roadmap.md Part A): same shared
   // chalkboard-table shape as Cricket/Baseball's (rows=rounds D1-D20, one
   // column since it's always solo), just fixed at exactly 20 rows — no
@@ -1679,7 +1809,7 @@ function render(s){
   // in landscape's wide-and-short shape but cram score text into narrow cells here.
   // The cricket/baseball scorecards are always a single table spanning the whole
   // grid, not per-player columns, regardless of orientation.
-  const isScorecardLayout = (s.gameType === 'cricket' || s.gameType === 'baseball' || s.gameType === 'shanghai' || s.gameType === 'halve_it' || s.gameType === 'bobs_27') && !s.legSummary;
+  const isScorecardLayout = (s.gameType === 'cricket' || s.gameType === 'baseball' || s.gameType === 'shanghai' || s.gameType === 'halve_it' || s.gameType === 'pressure_chamber' || s.gameType === 'bobs_27') && !s.legSummary;
   const cols = isScorecardLayout ? 1 : (isPortrait ? 1 : (n<=1 ? 1 : n<=4 ? 2 : 3));
   grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
 

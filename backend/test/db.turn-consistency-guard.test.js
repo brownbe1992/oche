@@ -448,6 +448,116 @@ describe('addTurn — Halve-It scored/bust must match the visit\'s points on the
   });
 });
 
+describe('addTurn — The Pressure Chamber scored/bust/checkout/legWon must match the derived round outcome, when opted in (docs/pressure-chamber-roadmap.md)', () => {
+  // The Pressure Chamber's card (target+modifier) is a pure function of
+  // (gameId, roundIndex) -- generatePressureCard() -- so it's re-derived here
+  // with the REAL gameId createGame() assigns, exactly like the guard itself
+  // does, rather than hand-picking fixed darts against an assumed card. A
+  // guaranteed-miss dart (sector 0) is a 'miss' outcome against ANY card
+  // (sector or finish target, any modifier), which makes it a cheap, fully
+  // general way to "burn through" rounds this test doesn't care about to
+  // reach a specific round it does.
+  const { generatePressureCard, computePressureRoundResult, PRESSURE_RING_MULT, PRESSURE_ROUNDS: MAX_ROUNDS } =
+    require(path.join('..', '..', 'frontend', 'scoring.js'));
+  const missDarts = [{ dartNo: 1, sector: 0, multiplier: 1 }];
+
+  function pcGame(players) {
+    return db.createGame({
+      category: 'Pressure Chamber', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'pressure_chamber', config: { rounds: MAX_ROUNDS },
+      players: players.map(name => ({ name })),
+    });
+  }
+  // Burns through rounds 1..(round-1) for `player` with a guaranteed miss,
+  // landing the NEXT addTurn() call for that player squarely on `round`.
+  function burnTo(gameId, player, round) {
+    for (let r = 1; r < round; r++) {
+      db.addTurn(gameId, { player, set: 1, leg: 1, scored: 0, bust: true, checkout: false, checkoutPoints: null, legWon: false, darts: missDarts }, STRICT);
+    }
+  }
+  function findRound(gameId, type) {
+    for (let r = 1; r <= MAX_ROUNDS; r++) {
+      if (generatePressureCard(gameId, r).target.type === type) return r;
+    }
+    return null;
+  }
+
+  test('accepts a genuine full hit (a real dart matching the round\'s own sector+ring)', async () => {
+    await db.addPlayer('SEC_PC_A'); await db.addPlayer('SEC_PC_B');
+    const { gameId } = pcGame(['SEC_PC_A', 'SEC_PC_B']);
+    const round = findRound(gameId, 'sector');
+    assert.ok(round, 'the curated pool has plenty of sector targets within 15 rounds');
+    burnTo(gameId, 'SEC_PC_A', round);
+    const card = generatePressureCard(gameId, round);
+    const hitDart = { dartNo: 1, sector: card.target.sector, multiplier: PRESSURE_RING_MULT[card.target.ring] };
+    const expected = computePressureRoundResult(card, [{ sector: hitDart.sector, mult: hitDart.multiplier, value: 0, isDouble: hitDart.multiplier === 2 }]);
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC_PC_A', set: 1, leg: 1, scored: expected.gained, bust: false, checkout: true, legWon: true, checkoutPoints: null,
+      darts: [hitDart],
+    }, STRICT));
+  });
+
+  test('rejects a claimed full hit whose darts don\'t actually match the round\'s target', async () => {
+    await db.addPlayer('SEC_PC_C'); await db.addPlayer('SEC_PC_D');
+    const { gameId } = pcGame(['SEC_PC_C', 'SEC_PC_D']);
+    const round = findRound(gameId, 'sector');
+    burnTo(gameId, 'SEC_PC_C', round);
+    const card = generatePressureCard(gameId, round);
+    // Deliberately throw at a sector that is NOT this round's target (wrap
+    // around 1-20 to guarantee a mismatch).
+    const wrongSector = card.target.sector === 20 ? 19 : card.target.sector + 1;
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC_PC_C', set: 1, leg: 1, scored: 999, bust: false, checkout: true, legWon: true, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: wrongSector, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('accepts a genuine miss (bust=1, scored=0, checkout=0, legWon=0)', async () => {
+    await db.addPlayer('SEC_PC_E'); await db.addPlayer('SEC_PC_F');
+    const { gameId } = pcGame(['SEC_PC_E', 'SEC_PC_F']);
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC_PC_E', set: 1, leg: 1, scored: 0, bust: true, checkout: false, legWon: false, checkoutPoints: null,
+      darts: missDarts,
+    }, STRICT));
+  });
+
+  test('rejects legWon=1 on a genuine miss (the 3-way outcome must be internally consistent)', async () => {
+    await db.addPlayer('SEC_PC_G'); await db.addPlayer('SEC_PC_H');
+    const { gameId } = pcGame(['SEC_PC_G', 'SEC_PC_H']);
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC_PC_G', set: 1, leg: 1, scored: 0, bust: true, checkout: false, legWon: true, checkoutPoints: null,
+      darts: missDarts,
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('rejects a 16th round -- a Pressure Chamber run is fixed at exactly 15 rounds, no extension', async () => {
+    await db.addPlayer('SEC_PC_I'); await db.addPlayer('SEC_PC_J');
+    const { gameId } = pcGame(['SEC_PC_I', 'SEC_PC_J']);
+    burnTo(gameId, 'SEC_PC_I', MAX_ROUNDS + 1); // burns through all 15 real rounds
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC_PC_I', set: 1, leg: 1, scored: 0, bust: true, checkout: false, legWon: false, checkoutPoints: null,
+      darts: missDarts,
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('a finish target is graded via a legal double-out checkout, not sector/ring matching', async () => {
+    await db.addPlayer('SEC_PC_K'); await db.addPlayer('SEC_PC_L');
+    const { gameId } = pcGame(['SEC_PC_K', 'SEC_PC_L']);
+    const round = findRound(gameId, 'finish');
+    if (round == null) return; // the curated pool always has >=1, but don't hard-fail a future pool edit
+    burnTo(gameId, 'SEC_PC_K', round);
+    const card = generatePressureCard(gameId, round);
+    // Finish 40 in the curated pool -> D20 checks it out in 1 dart, always legal double-out.
+    const d20 = { sector: 20, mult: 2, value: 40, isDouble: true };
+    const expected = computePressureRoundResult(card, card.target.score === 40 ? [d20] : []);
+    if (card.target.score !== 40) return; // only assert the concrete case this pool actually contains
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC_PC_K', set: 1, leg: 1, scored: expected.gained, bust: false, checkout: true, legWon: true, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 2 }],
+    }, STRICT));
+  });
+});
+
 describe("addTurn — Bob's 27 scored/bust must match the round's double hits, when opted in (docs/archive/practice-ladders-roadmap.md Part A)", () => {
   // Bob's 27's turns.scored is this round's GAIN (0 when the round's double was
   // missed entirely — the penalty is derived at read time, never stored

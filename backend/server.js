@@ -756,6 +756,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/stats/shanghai-wins' && m === 'GET') return send(res, 200, db.getShanghaiWinLeaderboard());
     if (p === '/api/stats/halve-it-best-total' && m === 'GET') return send(res, 200, db.getHalveItBestTotalLeaderboard(url.searchParams.get('mode')));
     if (p === '/api/stats/halve-it-wins' && m === 'GET') return send(res, 200, db.getHalveItWinLeaderboard());
+    if (p === '/api/stats/pressure-chamber-best-cp' && m === 'GET') return send(res, 200, db.getPressureChamberBestCpLeaderboard(url.searchParams.get('mode')));
+    if (p === '/api/stats/pressure-chamber-wins' && m === 'GET') return send(res, 200, db.getPressureChamberWinLeaderboard());
     if (p === '/api/stats/doubles-practice-accuracy' && m === 'GET') return send(res, 200, db.getDoublesPracticeAccuracyLeaderboard());
     if (p === '/api/stats/doubles-practice-best-round' && m === 'GET') return send(res, 200, db.getDoublesPracticeBestRoundStats());
     if (p === '/api/stats/checkout-blitz-leaderboard' && m === 'GET') return send(res, 200, db.getCheckoutBlitzLeaderboard());
@@ -796,6 +798,7 @@ const server = http.createServer(async (req, res) => {
         : gameType === 'baseball' ? db.getBaseballPersonalBests(name, mode)
         : gameType === 'shanghai' ? db.getShanghaiPersonalBests(name, mode)
         : gameType === 'halve_it' ? db.getHalveItPersonalBests(name, mode)
+        : gameType === 'pressure_chamber' ? db.getPressureChamberPersonalBests(name, mode)
         : gameType === 'doubles_practice' ? db.getDoublesPracticePersonalBests(name, mode)
         : gameType === 'chuckin' ? db.getChuckinPersonalBests(name, mode)
         : gameType === 'around_the_clock' ? db.getAroundTheClockPersonalBests(name, mode)
@@ -810,6 +813,7 @@ const server = http.createServer(async (req, res) => {
         : gameType === 'baseball' ? db.getBaseballStatBubbles(name, mode)
         : gameType === 'shanghai' ? db.getShanghaiStatBubbles(name, mode)
         : gameType === 'halve_it' ? db.getHalveItStatBubbles(name, mode)
+        : gameType === 'pressure_chamber' ? db.getPressureChamberStatBubbles(name, mode)
         : gameType === 'doubles_practice' ? db.getDoublesPracticeStatBubbles(name, mode)
         : gameType === 'chuckin' ? db.getChuckinStatBubbles(name, mode)
         : gameType === 'checkout_trainer' ? db.getCheckoutTrainerStatBubbles(name, mode)

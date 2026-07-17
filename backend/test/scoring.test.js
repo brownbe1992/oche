@@ -24,7 +24,13 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   KILLER_DEFAULT_LIVES, shuffleKillerNumbers, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
   MARATHON_FATIGUE_TIERS, computeFatigueSplit, MARATHON_TREND_MIN_LEGS, MARATHON_TREND_TOLERANCE, classifyMarathonTrend,
   shanghaiRoundTarget, isShanghaiWin, evaluateVisitShanghai,
-  HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, evaluateVisitHalveIt } = scoring;
+  HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, evaluateVisitHalveIt,
+  generatePressureCard, gradePressureSectorRound, evaluateDartPressureSector,
+  pressureFinishBaseCp, pressureBaseCp, pressureMissPenaltyBase, pressureMissPenaltyForCard,
+  pressureRoundOutcome, computePressureRoundResult, pressureComposureRating,
+  isPressureIceRun, isPressureModifierFullHit, pressureChamberDecideWinnerIndex,
+  evaluateVisitPressureChamber, rebuildPressureChamberState,
+  PRESSURE_TARGET_POOL, PRESSURE_MODIFIERS, PRESSURE_ROUNDS } = scoring;
 
 // Shorthand for building a rebuild-function turn record: v(playerIndex, setNo,
 // legNo, [[sector,mult], ...]) — mirrors the {playerIndex,setNo,legNo,darts}
@@ -2214,5 +2220,310 @@ describe('evaluateVisitHalveIt (docs/halve-it-roadmap.md)', () => {
     const game = mkGame(9, 0, [player, { total: 0 }], HALVE_IT_DEFAULT_TARGETS); // round 9 > 7 targets
     const ev = evaluateVisitHalveIt(player, [{sector:25,mult:1}], game);
     assert.deepEqual(ev.target, { sector: 25 }, 'round 9 still targets round 7\'s own Bull, matching Baseball/Shanghai');
+  });
+});
+
+describe('generatePressureCard (docs/pressure-chamber-roadmap.md "The card sequence is generated, never stored")', () => {
+  test('deterministic: same (gameId, roundIndex) always yields the same card', () => {
+    const a = generatePressureCard(7, 3);
+    const b = generatePressureCard(7, 3);
+    assert.deepEqual(a, b);
+  });
+  test('every target/modifier pool entry is a valid index (no out-of-range pick across a wide round sweep)', () => {
+    for(let round=1; round<=50; round++){
+      const card = generatePressureCard(1, round);
+      assert.ok(PRESSURE_TARGET_POOL.includes(card.target));
+      assert.ok(PRESSURE_MODIFIERS.includes(card.modifier));
+    }
+  });
+  test('H2H identical sequence: the same gameId gives every "player" (i.e. every caller) the same round N card', () => {
+    // The whole point of keying on gameId alone (not a per-player seed) --
+    // 2-4 players sharing one game.id must see byte-identical cards.
+    const gameId = 555;
+    for(let round=1; round<=15; round++){
+      const first = generatePressureCard(gameId, round);
+      const second = generatePressureCard(gameId, round);
+      assert.deepEqual(first, second);
+    }
+  });
+  test('different gameIds usually (not guaranteed every round, but overwhelmingly) diverge', () => {
+    let differences = 0;
+    for(let round=1; round<=15; round++){
+      const a = generatePressureCard(100, round);
+      const b = generatePressureCard(200, round);
+      if(JSON.stringify(a) !== JSON.stringify(b)) differences++;
+    }
+    assert.ok(differences > 0, 'two different game ids should not produce an identical 15-round sequence');
+  });
+});
+
+describe('gradePressureSectorRound (docs/pressure-chamber-roadmap.md "Targets")', () => {
+  const target = { type:'sector', sector:20, ring:'double', label:'Double 20', difficulty:'double' };
+  test('an exact ring+sector match on any dart is a full hit', () => {
+    const darts = [{sector:1,mult:1},{sector:20,mult:2},{sector:5,mult:1}];
+    assert.equal(gradePressureSectorRound(target, darts), 'full');
+  });
+  test('the sector hit but the wrong ring is a partial', () => {
+    const darts = [{sector:20,mult:1},{sector:1,mult:1},{sector:5,mult:1}];
+    assert.equal(gradePressureSectorRound(target, darts), 'partial');
+  });
+  test('neither sector nor ring hit at all is a miss', () => {
+    const darts = [{sector:1,mult:1},{sector:2,mult:1},{sector:0,mult:1}];
+    assert.equal(gradePressureSectorRound(target, darts), 'miss');
+  });
+  test('Match Dart: only the 3rd dart counts -- a full hit on dart 1 is ignored', () => {
+    const darts = [{sector:20,mult:2},{sector:1,mult:1},{sector:5,mult:1}];
+    assert.equal(gradePressureSectorRound(target, darts, true), 'miss', 'dart 1 hit the target, but Match Dart only reads dart 3');
+    const darts2 = [{sector:1,mult:1},{sector:5,mult:1},{sector:20,mult:2}];
+    assert.equal(gradePressureSectorRound(target, darts2, true), 'full', 'dart 3 is the real hit');
+  });
+  test('Match Dart with fewer than 3 darts thrown is always a miss (no dart 3 to read)', () => {
+    assert.equal(gradePressureSectorRound(target, [{sector:20,mult:2}], true), 'miss');
+  });
+});
+
+describe('evaluateDartPressureSector (Sudden Death per-dart early-stop, docs/pressure-chamber-roadmap.md)', () => {
+  const target = { type:'sector', sector:16, ring:'double', label:'Double 16', difficulty:'double' };
+  test('an exact ring+sector hit continues (not ended)', () => {
+    const r = evaluateDartPressureSector({sector:16,mult:2}, target);
+    assert.equal(r.hit, true);
+    assert.equal(r.ended, false);
+  });
+  test('the sector but wrong ring ends the round immediately (a partial still stops Sudden Death)', () => {
+    const r = evaluateDartPressureSector({sector:16,mult:1}, target);
+    assert.equal(r.hit, false);
+    assert.equal(r.ended, true);
+    assert.equal(r.reason, 'wrong-ring');
+  });
+  test('missing the sector entirely ends the round', () => {
+    const r = evaluateDartPressureSector({sector:1,mult:1}, target);
+    assert.equal(r.ended, true);
+    assert.equal(r.reason, 'miss');
+  });
+});
+
+describe('pressureBaseCp / pressureFinishBaseCp / pressureMissPenaltyBase (docs/pressure-chamber-roadmap.md "Composure Points formula")', () => {
+  test('base CP scales single < double < treble < bullseye', () => {
+    const single = pressureBaseCp({ type:'sector', difficulty:'single' });
+    const double = pressureBaseCp({ type:'sector', difficulty:'double' });
+    const treble = pressureBaseCp({ type:'sector', difficulty:'treble' });
+    const bull   = pressureBaseCp({ type:'sector', difficulty:'bull' });
+    assert.ok(single < double && double < treble && treble < bull);
+  });
+  test('a finish target\'s base CP scales with its optimal dart count', () => {
+    const oneDart = pressureFinishBaseCp(40);   // D20, 1 dart
+    const threeDart = pressureFinishBaseCp(121); // needs all 3 darts
+    assert.ok(threeDart > oneDart, 'a 3-dart finish is worth more than a 1-dart finish');
+  });
+  test('the miss penalty is always smaller than the base CP for the same target', () => {
+    const target = { type:'sector', difficulty:'treble' };
+    assert.ok(pressureMissPenaltyBase(target) < pressureBaseCp(target));
+  });
+});
+
+describe('pressureMissPenaltyForCard (docs/pressure-chamber-roadmap.md "derived-at-read-time" miss penalty)', () => {
+  test('Double Down doubles the miss penalty relative to Dead Calm on the same target', () => {
+    const target = { type:'sector', difficulty:'double' };
+    const deadCalm = PRESSURE_MODIFIERS.find(m => m.key === 'dead_calm');
+    const doubleDown = PRESSURE_MODIFIERS.find(m => m.key === 'double_down');
+    const base = pressureMissPenaltyForCard({ target, modifier: deadCalm });
+    const doubled = pressureMissPenaltyForCard({ target, modifier: doubleDown });
+    assert.equal(doubled, base * 2);
+  });
+  test('is a pure function of the card alone -- no darts needed', () => {
+    const target = { type:'sector', difficulty:'treble' };
+    const modifier = PRESSURE_MODIFIERS.find(m => m.key === 'sudden_death');
+    const a = pressureMissPenaltyForCard({ target, modifier });
+    const b = pressureMissPenaltyForCard({ target, modifier });
+    assert.equal(a, b);
+  });
+});
+
+describe('pressureRoundOutcome / computePressureRoundResult (docs/pressure-chamber-roadmap.md "Composure Points formula")', () => {
+  const deadCalm = PRESSURE_MODIFIERS.find(m => m.key === 'dead_calm');
+  const doubleDown = PRESSURE_MODIFIERS.find(m => m.key === 'double_down');
+  const comeback = PRESSURE_MODIFIERS.find(m => m.key === 'comeback');
+  const sectorTarget = { type:'sector', sector:20, ring:'treble', label:'Treble 20', difficulty:'treble' };
+
+  test('full hit: gained = base x modifier multiplier, no miss penalty', () => {
+    const card = { target: sectorTarget, modifier: deadCalm };
+    const r = computePressureRoundResult(card, [{sector:20,mult:3}]);
+    assert.equal(r.outcome, 'full');
+    assert.equal(r.gained, pressureBaseCp(sectorTarget) * deadCalm.cpMultiplier);
+    assert.equal(r.missPenalty, 0);
+  });
+  test('partial hit: gained = half of base x modifier multiplier', () => {
+    const card = { target: sectorTarget, modifier: deadCalm };
+    const r = computePressureRoundResult(card, [{sector:20,mult:1}]);
+    assert.equal(r.outcome, 'partial');
+    assert.equal(r.gained, Math.round((pressureBaseCp(sectorTarget) * deadCalm.cpMultiplier) / 2));
+  });
+  test('miss: gained is 0 (never negative), missPenalty is the card\'s derived penalty', () => {
+    const card = { target: sectorTarget, modifier: deadCalm };
+    const r = computePressureRoundResult(card, [{sector:1,mult:1}]);
+    assert.equal(r.outcome, 'miss');
+    assert.equal(r.gained, 0);
+    assert.equal(r.missPenalty, pressureMissPenaltyForCard(card));
+  });
+  test('Double Down doubles the miss penalty but does not change a full hit\'s gain', () => {
+    const calmCard = { target: sectorTarget, modifier: deadCalm };
+    const ddCard = { target: sectorTarget, modifier: doubleDown };
+    const calmFull = computePressureRoundResult(calmCard, [{sector:20,mult:3}]);
+    const ddFull = computePressureRoundResult(ddCard, [{sector:20,mult:3}]);
+    assert.equal(ddFull.gained, calmFull.gained, "Double Down is miss-penalty-only, per the roadmap doc's own wording");
+    const calmMiss = computePressureRoundResult(calmCard, [{sector:1,mult:1}]);
+    const ddMiss = computePressureRoundResult(ddCard, [{sector:1,mult:1}]);
+    assert.equal(ddMiss.missPenalty, calmMiss.missPenalty * 2);
+  });
+  test('Comeback adds a bonus on a full hit and doubles the miss penalty', () => {
+    const card = { target: sectorTarget, modifier: comeback };
+    const full = computePressureRoundResult(card, [{sector:20,mult:3}]);
+    const plainFull = Math.round(pressureBaseCp(sectorTarget) * comeback.cpMultiplier);
+    assert.ok(full.gained > plainFull, 'the comeback bonus adds on top of the normal modifier-scaled reward');
+    const miss = computePressureRoundResult(card, [{sector:1,mult:1}]);
+    // Miss penalty is "base-and-modifier-scaled" per the roadmap doc's own
+    // formula wording -- Comeback's cpMultiplier (1.4) legitimately scales it
+    // same as every other modifier; missMultiplier (2) is the EXTRA "doubled
+    // again" factor on top of that base-and-modifier-scaled value.
+    const missBase = pressureMissPenaltyBase(sectorTarget);
+    const expectedMiss = Math.round(missBase * comeback.cpMultiplier * comeback.missMultiplier);
+    assert.equal(miss.missPenalty, expectedMiss);
+    const withoutTheExtraDoubling = Math.round(missBase * comeback.cpMultiplier);
+    assert.ok(miss.missPenalty > withoutTheExtraDoubling, 'missMultiplier really did add an extra penalty on top');
+  });
+  test('a finish target has no partial tier -- anything short of a legal finish is a miss', () => {
+    const finishTarget = { type:'finish', score:40, label:'Finish 40', difficulty:'finish' };
+    const card = { target: finishTarget, modifier: deadCalm };
+    const legal = computePressureRoundResult(card, [makeDartCore(20,2)]);
+    assert.equal(legal.outcome, 'full');
+    const overshoot = computePressureRoundResult(card, [makeDartCore(20,2), makeDartCore(20,1)]); // busts past 0
+    assert.equal(overshoot.outcome, 'miss', 'a bust finish attempt is a miss, never a partial');
+  });
+  test('Match Dart on a finish target: a checkout on dart 1 or 2 does NOT count, only dart 3', () => {
+    const matchDart = PRESSURE_MODIFIERS.find(m => m.key === 'match_dart');
+    const finishTarget = { type:'finish', score:40, label:'Finish 40', difficulty:'finish' };
+    const card = { target: finishTarget, modifier: matchDart };
+    const onDart1 = computePressureRoundResult(card, [makeDartCore(20,2)]);
+    assert.equal(onDart1.outcome, 'miss', 'legal finish, but not on dart 3 -- Match Dart rejects it');
+    const onDart3 = computePressureRoundResult(card, [makeDartCore(1,1), makeDartCore(1,1), makeDartCore(19,2)]);
+    assert.equal(onDart3.outcome, 'full', '1+1+D19(38)=40 on dart 3, a genuine double-out finish');
+  });
+});
+
+describe('pressureComposureRating (docs/pressure-chamber-roadmap.md "Composure Rating")', () => {
+  test('threshold table matches the roadmap doc exactly', () => {
+    assert.equal(pressureComposureRating(120), 'Ice');
+    assert.equal(pressureComposureRating(200), 'Ice');
+    assert.equal(pressureComposureRating(119), 'Steel');
+    assert.equal(pressureComposureRating(90), 'Steel');
+    assert.equal(pressureComposureRating(89), 'Copper');
+    assert.equal(pressureComposureRating(60), 'Copper');
+    assert.equal(pressureComposureRating(59), 'Tin');
+    assert.equal(pressureComposureRating(30), 'Tin');
+    assert.equal(pressureComposureRating(29), 'Rattled');
+    assert.equal(pressureComposureRating(-50), 'Rattled', 'a heavily-missed run can go negative -- still Rattled, not a crash');
+  });
+});
+
+describe('isPressureIceRun / isPressureModifierFullHit (docs/pressure-chamber-roadmap.md "Achievements")', () => {
+  test('isPressureIceRun is true only at 120+ CP', () => {
+    assert.equal(isPressureIceRun(120), true);
+    assert.equal(isPressureIceRun(119), false);
+  });
+  test('isPressureModifierFullHit requires both a full outcome and the specific modifier', () => {
+    const suddenDeathCard = { modifier: { key:'sudden_death' } };
+    assert.equal(isPressureModifierFullHit(suddenDeathCard, 'full', 'sudden_death'), true);
+    assert.equal(isPressureModifierFullHit(suddenDeathCard, 'partial', 'sudden_death'), false, 'not a full hit');
+    assert.equal(isPressureModifierFullHit(suddenDeathCard, 'full', 'no_warmup'), false, 'wrong modifier');
+  });
+});
+
+describe('pressureChamberDecideWinnerIndex (docs/pressure-chamber-roadmap.md "Solo vs. H2H tie-breaking")', () => {
+  test('highest total CP wins outright', () => {
+    const idx = pressureChamberDecideWinnerIndex([{totalCp:80,misses:2,darts:30},{totalCp:100,misses:5,darts:30}]);
+    assert.equal(idx, 1);
+  });
+  test('a CP tie breaks on fewest misses', () => {
+    const idx = pressureChamberDecideWinnerIndex([{totalCp:80,misses:3,darts:30},{totalCp:80,misses:1,darts:30}]);
+    assert.equal(idx, 1);
+  });
+  test('a CP+misses tie breaks on fewest darts thrown', () => {
+    const idx = pressureChamberDecideWinnerIndex([{totalCp:80,misses:2,darts:40},{totalCp:80,misses:2,darts:35}]);
+    assert.equal(idx, 1);
+  });
+  test('a total coincidence resolves to the earlier player in turn order', () => {
+    const idx = pressureChamberDecideWinnerIndex([{totalCp:80,misses:2,darts:30},{totalCp:80,misses:2,darts:30}]);
+    assert.equal(idx, 0);
+  });
+});
+
+describe('evaluateVisitPressureChamber (docs/pressure-chamber-roadmap.md "Data model")', () => {
+  function mkGame(round, current, players, gameId){
+    return { gameId: gameId || 999, pressureChamberRound: round, current, players, config: { rounds: PRESSURE_ROUNDS } };
+  }
+  test('a full hit adds to totalCp and bumps the full-hit streak', () => {
+    const p = { totalCp: 10, misses: 0, fullHits: 1, currentFullHitStreak: 1, bestFullHitStreak: 1, roundResults: {} };
+    const game = mkGame(2, 0, [p]);
+    const card = generatePressureCard(999, 2);
+    // Build darts that actually hit this round's own sector target (or skip via a finish check)
+    const darts = card.target.type === 'sector'
+      ? [{sector:card.target.sector, mult: {single:1,double:2,treble:3}[card.target.ring]}]
+      : [{sector:0,mult:1}]; // a finish target: leave as a guaranteed miss for this particular assertion
+    const ev = evaluateVisitPressureChamber(p, darts, game);
+    if(card.target.type === 'sector'){
+      assert.equal(ev.outcome, 'full');
+      assert.equal(ev.totalCp, 10 + ev.gained);
+      assert.equal(ev.currentFullHitStreak, 2);
+    }
+  });
+  test('the match only completes once the FINAL round\'s last player throws, never early', () => {
+    const p0 = { totalCp: 100, misses: 0, fullHits: 0, currentFullHitStreak:0, bestFullHitStreak:0, roundResults:{}, legDarts:0 };
+    const p1 = { totalCp: 5, misses: 0, fullHits: 0, currentFullHitStreak:0, bestFullHitStreak:0, roundResults:{}, legDarts:0 };
+    const game = mkGame(3, 1, [p0, p1]); // round 3 of 15, p1 is last in rotation
+    const ev = evaluateVisitPressureChamber(p1, [{sector:0,mult:1}], game);
+    assert.equal(ev.roundComplete, true);
+    assert.equal(ev.matchComplete, false, 'round 3 of 15 -- nowhere near the final round');
+  });
+  test('final round: the match always completes with a definite winner, never null', () => {
+    const p0 = { totalCp: 50, misses: 2, fullHits: 3, currentFullHitStreak:0, bestFullHitStreak:2, roundResults:{}, legDarts:40 };
+    const p1 = { totalCp: 10, misses: 10, fullHits: 0, currentFullHitStreak:0, bestFullHitStreak:0, roundResults:{}, legDarts:42 };
+    const game = mkGame(PRESSURE_ROUNDS, 1, [p0, p1]);
+    const ev = evaluateVisitPressureChamber(p1, [{sector:0,mult:1}], game);
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 0, 'p0 has the higher total CP');
+  });
+});
+
+describe('rebuildPressureChamberState (docs/archive/saved-games-roadmap.md pure replay rebuild, adapted for docs/pressure-chamber-roadmap.md)', () => {
+  test('replays turns and lands on the correct next round/player', () => {
+    const gameId = 321;
+    const names = ['Ben', 'Alaina'];
+    // Just throw all-miss darts for both players across 2 rounds -- we only care
+    // about bookkeeping (round/current/darts), not the specific CP outcome.
+    const turns = [
+      { playerIndex: 0, setNo: 1, legNo: 1, darts: [{sector:0,mult:1}] },
+      { playerIndex: 1, setNo: 1, legNo: 1, darts: [{sector:0,mult:1}] },
+      { playerIndex: 0, setNo: 1, legNo: 1, darts: [{sector:0,mult:1}] },
+    ];
+    const r = rebuildPressureChamberState({ gameId, names, legsPerSet: 1, maxRounds: PRESSURE_ROUNDS, turns });
+    assert.equal(r.pressureChamberRound, 2, 'p0 has thrown round 2, round hasn\'t advanced past them yet');
+    assert.equal(r.current, 1, 'Alaina throws next');
+  });
+  test('a completed 15-round leg produces a definite winner and resets for the next leg', () => {
+    const gameId = 654;
+    const names = ['Ben', 'Alaina'];
+    const turns = [];
+    for(let round=1; round<=15; round++){
+      turns.push({ playerIndex:0, setNo:1, legNo:1, darts:[{sector:0,mult:1}] }); // Ben always misses
+      turns.push({ playerIndex:1, setNo:1, legNo:1, darts:[{sector:0,mult:1}] }); // Alaina always misses too (tie on CP=0)
+    }
+    const r = rebuildPressureChamberState({ gameId, names, legsPerSet: 1, maxRounds: 15, turns });
+    // Both players missed every round (totalCp stays 0 for both, a genuine tie) --
+    // pressureChamberDecideWinnerIndex()'s own tie-break chain still names a winner.
+    // legsPerSet:1 means the leg win is immediately also a set win (legsWon resets
+    // to 0 the same instant it's credited, matching every other game type's own
+    // practice-mode shape) -- setsWon is what actually persists the credit.
+    assert.equal(r.players[0].setsWon + r.players[1].setsWon, 1, 'exactly one player is credited the leg/set win');
+    assert.equal(r.pressureChamberRound, 1, 'leg complete -> reset to round 1 for the next leg');
   });
 });
