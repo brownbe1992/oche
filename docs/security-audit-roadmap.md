@@ -23,11 +23,18 @@
 > weighted toward the Baseball / per-player export-import / league-fixtures /
 > New-Game-wizard code merged since Part 8) opened **SEC-25** (Baseball scored-vs-darts
 > consistency, the one game type SEC-22's per-type analysis never re-ran against) —
-> **now fixed** — see "Part 9". Functional-defect counterparts live in
+> **now fixed** — see "Part 9". An **eighth-pass audit** (2026-07, weighted to the six
+> game modes merged since Part 9 — End-of-Night Session Recap, Marathon Mode, Shanghai,
+> Halve-It, The Pressure Chamber, and Dead Man Walking) opened **SEC-26** (an unescaped
+> `modifier.icon` sink in the Pressure Chamber `/display` renderer — latent today because
+> its feeding field is stripped, but a stored-XSS the moment `docs/bug-roadmap.md`
+> **BUG-28** is fixed) — see "Part 10". Functional-defect counterparts live in
 > `docs/bug-roadmap.md` (BUG-1/BUG-2/BUG-3 from the second pass; BUG-4/BUG-5 from the
 > third; BUG-6/BUG-7 from the fourth; BUG-9 from the fifth; BUG-10 through BUG-15 from
-> the sixth; BUG-19 from the seventh, all fixed). **SEC-1 through SEC-25 and BUG-1
-> through BUG-19 are all fixed as of this writing** — nothing open on either tracker.
+> the sixth; BUG-19 from the seventh, all fixed; **BUG-27 through BUG-29** from the
+> eighth, open). **SEC-1 through SEC-25 are fixed; SEC-26 is open** (opened by the
+> eighth pass, coupled to BUG-28). BUG-1 through BUG-26 are fixed; BUG-27 through BUG-29
+> are open.
 >
 > See the "Status" line
 > under each finding below for what actually shipped, which in a couple of places is
@@ -1585,3 +1592,78 @@ sends consistent values).
 
 **Verify:** the new tests pass; a full live Baseball game (played via the UI)
 records normally end-to-end; X01's SEC-22 checks are unchanged.
+
+## Part 10 — Eighth-pass audit (2026-07, weighted to the six game modes merged since Part 9)
+
+An adversarial re-read weighted toward the six game modes merged since the seventh
+pass: End-of-Night Session Recap, Marathon Mode, Shanghai, Halve-It, The Pressure
+Chamber, and Dead Man Walking. Re-checked and still safe on the new surfaces: SQL
+injection (every new interpolated fragment traces to `_scope()`/internal constants;
+the new game-type write guards bind all user values as parameters), the write-time
+consistency guards for all six types (`addTurn()`'s per-game-type branches re-derive
+the expected `scored`/`bust`/`checkout`/`leg_won`/round server-side and reject a
+mismatch — same SEC-22/SEC-25 spirit), the new public reads (`/api/session-recap`
+validates its `date` against `^\d{4}-\d{2}-\d{2}$`; the marathon/leaderboard reads
+resolve via `getPlayer()` and fail soft), the new write endpoints (all behind
+`requireWrite`; `startMarathonSession()` bounds `durationMinutes` to 5-240;
+`createGame()` computes Dead Man Walking's rounds and the Pressure Chamber's
+`rounds:15` server-side and never trusts a client-supplied config for them), and
+`generatePressureCard()`'s determinism (a pure function of `(gameId, roundIndex)`, no
+stored card to tamper with). One security finding (**SEC-26**), tightly coupled to
+`docs/bug-roadmap.md` **BUG-28**. Functional-defect counterparts from this same pass
+are `docs/bug-roadmap.md` **BUG-27** through **BUG-29**.
+
+### SEC-26 — `display.html`'s Pressure Chamber `/display` renderer inserts `modifier.icon` into `innerHTML` without escaping; latent only because BUG-28 currently strips the field that feeds it, but fixing BUG-28 turns it into stored XSS on the second screen  **(LOW, latent / stored XSS behind the auth-off LAN default)**
+
+**Status: Open.**
+
+**Where:** `frontend/display.html`, `renderers.pressure_chamber.scorecard()` — the card
+banner it builds:
+
+```js
+const liveCard = cardAt(round);   // cardAt(i) => s.pressureChamberCards[...]
+...
+<div style="...">${liveCard.modifier.icon} ${escapeHtml(liveCard.modifier.label)}</div>
+```
+
+Every other interpolated field in that banner (`target.label`, `modifier.label`,
+`modifier.flavor`) is wrapped in `escapeHtml`. `modifier.icon` alone is inserted raw.
+
+**Attack:** the `/display` second screen renders from the live-state payload the playing
+device POSTs to `/api/live`. `sanitizeLiveState()` (`backend/server.js`) allowlists
+top-level keys and bounds total size, but does **not** recursively escape nested values.
+Today `pressureChamberCards` is *not* in `ALLOWED_LIVE_KEYS`, so the server strips it,
+`cardAt(round)` returns `undefined`, and the raw-`icon` branch never renders — the sink is
+**latent**. But that stripping is exactly BUG-28: the whole Pressure Chamber `/display`
+scorecard is broken because those fields are dropped. The natural fix for BUG-28 is to add
+`pressureChamberCards` to `ALLOWED_LIVE_KEYS` — at which point a hostile `POST /api/live`
+(any LAN device under the documented `OCHE_REQUIRE_AUTH=false` default; an admin session
+otherwise) can set `pressureChamberCards[i].modifier.icon` to
+`<img src=x onerror=…>` and have it execute in every `/display` viewer's browser. So this
+is a real, if presently dormant, XSS in the untrusted-live-payload render path — the same
+"escape at every sink" invariant SEC-12/SEC-15 established, with one sink missed on the
+newest renderer.
+
+**Fix (step by step):**
+1. Wrap the icon at the sink: `${escapeHtml(liveCard.modifier.icon)}` (icons are emoji, so
+   escaping is invisible in normal use). This is the minimal, order-independent fix and
+   should land **before or with** BUG-28's allowlist change.
+2. Defense-in-depth: when adding `pressureChamberCards` to `ALLOWED_LIVE_KEYS` (BUG-28),
+   consider validating the card array's shape server-side (each entry's `modifier.key`
+   against the known `PRESSURE_MODIFIERS` keys, `target` against the pool) rather than
+   passing an arbitrary client object straight through to the renderer — the same
+   "re-derive/validate server-side, don't trust the client" posture the write-time guards
+   already take. (`generatePressureCard()` is deterministic from `(gameId, round)`, so the
+   server can even reconstruct the authoritative card sequence itself instead of trusting
+   the payload's copy.)
+3. Re-assert the "no bare interpolation of a live-payload field into `innerHTML`" invariant
+   across all `display.html` renderers with a grep check (the `queueSpeech()` text builders
+   that also interpolate payload fields are safe — they feed the Speech API, not the DOM —
+   so scope the check to the `scorecard()`/`card()` return strings).
+
+**Verify:** create a Pressure Chamber game, then (after BUG-28's allowlist change) `POST
+/api/live` a payload whose `pressureChamberCards[0].modifier.icon` is
+`<img src=x onerror=window.__xss=true>`, open `/display`, and confirm `window.__xss` stays
+`undefined`, no image request fires, and the icon renders as literal escaped text. Confirm
+the same payload against the pre-fix `display.html` (with the key temporarily allowlisted)
+*does* set `window.__xss`, proving the sink was live.
