@@ -1028,19 +1028,23 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
     : { gameId };
 }
 
-// docs/security-audit-roadmap.md SEC-22: `opts.enforceConsistency` gates the
-// scored/darts cross-check below. Opt-in, not default-on, and set ONLY by
-// server.js's POST /api/games/:id/turns route (the one production call site untrusted
-// input actually reaches) — deliberately NOT the default, because the existing
-// backend/test/db.*.test.js suite calls addTurn() directly with placeholder `scored`
-// values unrelated to what's being tested (dart-shape validation, unrelated stat
-// aggregation, etc.), an established, pervasive fixture convention across ~14 test
-// files that predates this check. Enforcing it unconditionally there rejects dozens
-// of entirely legitimate internal test calls with no security benefit, since those
-// calls never cross the actual trust boundary (they bypass server.js/HTTP entirely).
-// The real protection is unaffected: every request that actually reaches this
-// function via the network is still validated, because server.js always passes
-// enforceConsistency: true.
+// recordTurn() is the ONE entry point any network/untrusted write must use — it always
+// validates (Architecture Roadmap P1-d / Structural Security). It takes no options, so a
+// caller structurally *cannot* skip the scored/darts consistency cross-check the way a
+// bare addTurn() call could by omitting a flag. server.js's POST /api/games/:id/turns
+// route calls this; any future write path that records a turn should reach for this verb.
+function recordTurn(gameId, t) {
+  return addTurn(gameId, t, { enforceConsistency: true });
+}
+
+// addTurn() is the raw persistence primitive — the lower-level seam recordTurn() wraps,
+// and the one the backend/test/db.*.test.js suite calls directly to seed hand-picked
+// turns (arbitrary `scored`/`checkout` values unrelated to the invariant under test — a
+// pervasive fixture convention across ~14 test files). Its `opts.enforceConsistency`
+// gates the scored/darts cross-check (docs/security-audit-roadmap.md SEC-22); it stays
+// opt-in HERE so those internal seeders keep working, but the network never calls addTurn
+// directly — it goes through recordTurn() above, which is validated by construction, so
+// the trust boundary doesn't depend on a caller remembering to pass a flag.
 function addTurn(gameId, t, opts = {}) {
   const p = ensurePlayer(t.player);
   // Checkout Trainer trick-question declarations (docs/archive/checkout-trainer-roadmap.md
@@ -8623,7 +8627,7 @@ pruneOrphanedGames();
 
 module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer, registerDeletePlayerGuard,
-  createGame, addTurn, completeGame, recordEvent,
+  createGame, addTurn, recordTurn, completeGame, recordEvent,
   onGameCreated, onGameCompleted,
   logServerError, getServerErrors,
   computeStats, getSummary, getHomeExtra, getSessionRecap, getOneEightyStats, getBigFishStats, getNineDarterStats,

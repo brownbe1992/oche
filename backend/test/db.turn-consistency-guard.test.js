@@ -1276,3 +1276,30 @@ describe('SEC-22 — the real HTTP trust boundary enforces this even though addT
     });
   });
 });
+
+// Architecture Roadmap P1-d: recordTurn() is the validated-by-construction public write
+// entry — it always runs the SEC-22 consistency guard, with no flag to omit. This proves
+// a mismatched turn that the raw addTurn() (no opts) would silently accept is rejected by
+// recordTurn(), so a future network write path can't bypass validation by forgetting a flag.
+describe('recordTurn — always validates, unlike the raw addTurn() primitive', () => {
+  test('recordTurn rejects an X01 scored/darts mismatch that raw addTurn() would accept', async () => {
+    await db.addPlayer('REC_A'); await db.addPlayer('REC_B');
+    const { gameId } = x01Game(['REC_A', 'REC_B']);
+    const badTurn = {
+      player: 'REC_A', set: 1, leg: 1, scored: 180, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 1 }, { dartNo: 2, sector: 5, multiplier: 1 }, { dartNo: 3, sector: 1, multiplier: 1 }], // real value: 26
+    };
+    // The raw primitive, with no opts, does NOT validate — it seeds the turn as-is.
+    assert.doesNotThrow(() => db.addTurn(gameId, badTurn));
+    // The public entry validates by construction — same payload, rejected 400, no flag passed.
+    assert.throws(() => db.recordTurn(gameId, badTurn), (err) => err.status === 400);
+  });
+
+  test('recordTurn accepts a legitimate turn', () => {
+    const { gameId } = x01Game(['REC_A', 'REC_B']);
+    assert.doesNotThrow(() => db.recordTurn(gameId, {
+      player: 'REC_A', set: 1, leg: 1, scored: 60, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 3 }],
+    }));
+  });
+});
