@@ -2329,6 +2329,9 @@ function renderHome(){
     Backend.get('/api/stats/shanghai-ppr?mode=practice'),
     Backend.get('/api/stats/shanghai-shanghais?mode=practice'),
     Backend.get('/api/stats/shanghai-wins'),
+    Backend.get('/api/stats/halve-it-best-total?mode=h2h'),
+    Backend.get('/api/stats/halve-it-best-total?mode=practice'),
+    Backend.get('/api/stats/halve-it-wins'),
     Backend.get('/api/stats/doubles-practice-accuracy'),
     Backend.get('/api/stats/doubles-practice-best-round'),
     Backend.get('/api/stats/checkout-blitz-leaderboard'),
@@ -2340,7 +2343,7 @@ function renderHome(){
     Backend.get('/api/stats/around-the-clock-fastest'),
     Backend.get('/api/stats/around-the-clock-completions'),
     Backend.get('/api/stats/around-the-world-progress'),
-  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,shr,shs,pshr,pshs,shw,dpa,dpb,ctbl,b27,cl,ga,kw,mm,atcf,atcc,atwp])=>{
+  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,shr,shs,pshr,pshs,shw,hibt,pihbt,hiw,dpa,dpb,ctbl,b27,cl,ga,kw,mm,atcf,atcc,atwp])=>{
     homeData={s, extra,
       h2h:{finishes:f,eighties:e,bigFish:b,nineDarters:n},
       practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn},
@@ -2358,6 +2361,11 @@ function renderHome(){
         h2h:{ppr:shr,shanghais:shs},
         practice:{ppr:pshr,shanghais:pshs},
         wins:shw,
+      },
+      halveIt:{
+        h2h:{bestTotal:hibt},
+        practice:{bestTotal:pihbt},
+        wins:hiw,
       },
       doublesPractice:{ accuracy:dpa, bestRound:dpb },
       checkoutTrainer:{ blitzLeaderboard:ctbl },
@@ -2377,6 +2385,7 @@ function renderHome(){
       cricket:{h2h:{mpr:[],nineMarks:empty,perfectLeg:empty}, practice:{mpr:[],nineMarks:empty,perfectLeg:empty}, wins:[]},
       baseball:{h2h:{rpi:[],perfectInnings:empty,perfectGame:empty}, practice:{rpi:[],perfectInnings:empty,perfectGame:empty}, wins:[]},
       shanghai:{h2h:{ppr:[],shanghais:empty}, practice:{ppr:[],shanghais:empty}, wins:[]},
+      halveIt:{h2h:{bestTotal:[]}, practice:{bestTotal:[]}, wins:[]},
       doublesPractice:{ accuracy:[], bestRound:[] },
       checkoutTrainer:{ blitzLeaderboard:[] },
       bobs27:{ leaderboard:[] },
@@ -2779,6 +2788,48 @@ function renderHomeTabBodyShanghai(){
       ${winSection}
     </div>
     ${achievementSection('Shanghai! 🀄', data.shanghais||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
+  `;
+}
+
+// Halve-It's Home page leaderboards — a "Highest Final Total" peak board (same
+// no-minimum-floor shape as Checkout Ladder's own "Highest Target Reached")
+// plus a Most Wins board (H2H only). homeData.halveIt mirrors homeData.shanghai's
+// {h2h:{...}, practice:{...}, wins:...} shape.
+function renderHomeTabBodyHalveIt(){
+  const el=document.getElementById('home-tab-body');
+  const mode=homeTab;
+  const data=homeData.halveIt && homeData.halveIt[mode];
+  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
+
+  const board=data.bestTotal||[];
+  const leaderboard=board.length
+    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.total}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — win a leg to claim the top spot.</p>`;
+
+  const winSection=(mode==='h2h' && homeData.halveIt.wins && homeData.halveIt.wins.length)
+    ? `<div class="pp-section">
+        <div class="pp-section-title">Most Halve-It Wins</div>
+        <div class="hof-list">${homeData.halveIt.wins.slice(0,10).map((r,i)=>`<div class="hof-row">
+          <span class="hof-rank">${i+1}</span>
+          <span class="hof-score">${r.won}</span>
+          <span class="hof-player">${escapeHtml(r.name)}</span>
+          <span class="hof-dates">${r.rate}% of ${r.played}</span>
+        </div>`).join('')}</div>
+      </div>`
+    : '';
+
+  el.innerHTML=`
+    <div class="home-pair">
+      <div class="pp-section">
+        <div class="pp-section-title">🪓 Highest Final Total</div>
+        ${leaderboard}
+      </div>
+      ${winSection}
+    </div>
   `;
 }
 
@@ -4165,6 +4216,9 @@ const NEW_GAME_MODE_OPTIONS = [
   { key:'shanghai', label:'🀄 Shanghai', contexts:['practice','h2h'],
     blurb:"A fixed round sequence — round 1 targets the number 1, round 2 the number 2, and so on. Each visit's 3 darts only score on that round's own number — a single scores 1×, a double 2×, a treble 3× the number. Highest total after the last round wins — unless someone throws a Shanghai: single, double, AND treble of the round's number in one visit, which wins the WHOLE game instantly. Choose how many rounds on the next step.",
     apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('shanghai'); } },
+  { key:'halve_it', label:'🪓 Halve-It', contexts:['practice','h2h'],
+    blurb:"A fixed sequence of 7 targets — 20, 16, double 7, 14, treble 10, 17, and Bull. Each round's 3 darts only score against that round's own target: every dart that hits it adds its value to your running total — but if all three miss, your total is HALVED (rounded up). Highest total after the last round wins. One bad visit can cost a leader half their game, so nobody's really out of it until the end.",
+    apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('halve_it'); } },
   { key:'chuckin', label:"Just Chuckin' It", contexts:['practice'],
     blurb:"No score to chase, no leg to win — just throw for as long as you like. Every dart still counts toward your lifetime totals and heatmap, so it's a low-pressure way to warm up, find your rhythm, or chase down a milestone badge.",
     apply(){ setMode('chuckin'); } },
@@ -4674,7 +4728,7 @@ async function startGame(){
   if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   // Custom cricket is locked to exactly 7 targets (same count as classic) — never
   // more, never fewer (docs/game-modes-roadmap.md "Decisions made").
-  const gameType = ['cricket', 'baseball', 'shanghai', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer'].includes(setup.gameType)
+  const gameType = ['cricket', 'baseball', 'shanghai', 'halve_it', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer'].includes(setup.gameType)
     ? setup.gameType : 'x01'; // Daily Challenge always forces x01 via setMode()
   let cricketNumbers = null;
   if(gameType === 'cricket'){
@@ -4725,8 +4779,13 @@ async function startGame(){
   // so it's forced to exactly 1 leg/1 set here too. H2H Shanghai legitimately
   // supports a real Bo3/Bo5 multi-leg match, so this only forces the practice case.
   const isPracticeShanghai = setup.gameType === 'shanghai' && setup.mode !== 'h2h';
-  const legsPerSet = (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai) ? 1 : setup.legsPerSet;
-  const setsPerGame = (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai) ? 1 : setup.setsPerGame;
+  // Same BUG-22 reasoning again: a practice Halve-It "leg" is a complete,
+  // standalone game (evaluateVisitHalveIt() only ever completes once the
+  // final round settles, per docs/halve-it-roadmap.md), forced to
+  // exactly 1 leg/1 set here; H2H Halve-It keeps a real Bo3/Bo5 multi-leg match.
+  const isPracticeHalveIt = setup.gameType === 'halve_it' && setup.mode !== 'h2h';
+  const legsPerSet = (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai || isPracticeHalveIt) ? 1 : setup.legsPerSet;
+  const setsPerGame = (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai || isPracticeHalveIt) ? 1 : setup.setsPerGame;
   // Checkout Blitz's durationSec is stored even though only 60 exists today — same
   // "store it even though only one value exists today" precedent tournament_rounds.
   // legs_per_set already set for a field that was single-valued at first and
@@ -4740,6 +4799,10 @@ async function startGame(){
     // Rounds (docs/archive/shanghai-roadmap.md) — default 1-7 (the common pub format),
     // with a 1-20 long-form option chosen on the setup screen.
     : gameType === 'shanghai' ? { rounds: setup.shanghaiRounds || 7 }
+    // Targets (docs/halve-it-roadmap.md) — the classic 7-round pub set;
+    // no custom-target editor in v1 (see docs/open-roadmap-items.md's own
+    // Halve-It custom target editor entry, split out separately).
+    : gameType === 'halve_it' ? { targets: HALVE_IT_DEFAULT_TARGETS }
     : gameType === 'doubles_practice' ? { doubles: setup.doublesTargets.slice() }
     : gameType === 'chuckin' ? {}
     // docs/checkout-drill-link-roadmap.md "Drill this checkout": a pin forces
@@ -4767,6 +4830,8 @@ async function startGame(){
     ? 'Baseball'
     : gameType === 'shanghai'
     ? 'Shanghai'
+    : gameType === 'halve_it'
+    ? 'Halve-It'
     : gameType === 'doubles_practice'
     ? `Doubles Practice (${config.doubles.map(doublesTargetLabel).join(', ')})`
     : gameType === 'chuckin'
@@ -4822,6 +4887,7 @@ async function startGame(){
     setNo: 1, legNo: 1,
     baseballInning: 1, // Baseball only (docs/game-modes-roadmap.md) — which inning (1-9, or beyond on a tie) is live
     shanghaiRound: 1, // Shanghai only (docs/archive/shanghai-roadmap.md) — which round (1-config.rounds, or beyond on a tie) is live
+    halveItRound: 1, // Halve-It only (docs/halve-it-roadmap.md) — which round (1-config.targets.length, or beyond on a tie) is live
     bobs27Round: 1,    // Bob's 27 only (docs/archive/practice-ladders-roadmap.md Part A) — which double (1-20) is live
     checkoutLadderTarget: 121, // 121 Checkout Ladder only (docs/archive/practice-ladders-roadmap.md Part B) — current attempt's target
     checkoutLadderVisits: 0,  // visits used so far in the current attempt (0-2 while live)
@@ -6027,6 +6093,9 @@ const BADGE_INFO = {
   // number in one visit — wins the WHOLE match instantly, mid-round. Deliberately
   // separate from 'shanghaivisit' above (same feat, different game — see that doc).
   shanghai: { icon:'🀄', label:'Shanghai!', desc:"Win a Shanghai game instantly — single, double, AND treble of the round's own number in one visit.", shanghai:true },
+  // docs/halve-it-roadmap.md's own two flavor badges.
+  halveitdeath: { icon:'🪓', label:'Halved at the Death', desc:'Win a Halve-It game after your own final-round visit halved your total.', halveIt:true },
+  halveitnohalf: { icon:'🛡️', label:'No Half Measures', desc:'Win a Halve-It game without ever being halved.', halveIt:true },
   doublespracticeringmaster: { icon:'🎪', label:'Ring Master', desc:'Hit every double, D1 through D20 plus the bull, in Doubles Practice — lifetime.', doublesPractice:true },
   cricket9marks:       { icon:'🎯', label:'9 Marks', desc:'Score 9 marks in one Cricket visit — three trebles, the maximum possible.', cricket:true },
   cricketperfectclose: { icon:'🏆', label:'Perfect Leg', desc:'Close every Cricket number using the fewest darts physically possible for that match.', cricket:true },
@@ -6105,11 +6174,12 @@ function renderPlayerBadges(data){
   // Practice's 5 (docs/archive/culture-badges-roadmap.md Part B), and the guided
   // drills' 2 each stay visually distinct sub-sections rather than one mixed
   // flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].shanghai && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder && !BADGE_INFO[id].gauntlet && !BADGE_INFO[id].killer && !BADGE_INFO[id].marathon);
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].shanghai && !BADGE_INFO[id].halveIt && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder && !BADGE_INFO[id].gauntlet && !BADGE_INFO[id].killer && !BADGE_INFO[id].marathon);
   const eloIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].elo);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
   const baseballIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].baseball);
   const shanghaiIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].shanghai);
+  const halveItIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].halveIt);
   const challengeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].challenge);
   const chuckinIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].chuckin);
   const tournamentIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].tournament);
@@ -6130,6 +6200,8 @@ function renderPlayerBadges(data){
     <div class="summary-grid">${baseballIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Shanghai</div>
     <div class="summary-grid">${shanghaiIds.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">Halve-It</div>
+    <div class="summary-grid">${halveItIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Doubles Practice</div>
     <div class="summary-grid">${doublesPracticeIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Bob's 27</div>
@@ -6586,6 +6658,26 @@ function renderShanghaiPersonalBests(data){
     ${formHtml}
   </div>`;
 }
+// Halve-It's Personal Bests — same 5-field shape mirrored from
+// getHalveItPersonalBests(), bestFinalTotal in place of bestLegPoints.
+function renderHalveItPersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || (data.bestFinalTotal==null && data.fewestDartsToWin==null)){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough legs recorded yet.</p>`;
+    return;
+  }
+  const formDelta = (data.recentFormTotal!=null && data.lifetimeTotal!=null) ? (data.recentFormTotal - data.lifetimeTotal) : null;
+  const formHtml = formDelta!=null
+    ? `<div class="stat-block"><div class="stat-val">${data.recentFormTotal.toFixed(1)}</div><div class="stat-label">Recent Form (last 10 legs) ${formDelta>=0?'▲':'▼'} ${Math.abs(formDelta).toFixed(1)}</div></div>`
+    : '';
+  container.innerHTML=`<div class="summary-grid">
+    ${data.bestFinalTotal!=null?`<div class="stat-block"><div class="stat-val">${data.bestFinalTotal}</div><div class="stat-label">Best Final Total</div></div>`:''}
+    ${data.fewestDartsToWin!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsToWin}</div><div class="stat-label">Fewest Darts to Win</div></div>`:''}
+    ${data.winStreak?`<div class="stat-block"><div class="stat-val">${data.winStreak}</div><div class="stat-label">Current Win Streak</div></div>`:''}
+    ${formHtml}
+  </div>`;
+}
 // Bob's 27's Personal Bests — same "no win-streak, a solo run never wins
 // against anyone" shape Doubles Practice/Chuckin use below.
 function renderBobs27PersonalBests(data){
@@ -6755,6 +6847,7 @@ function renderGame(){
   if(game.gameType === 'cricket') return renderGameCricket();
   if(game.gameType === 'baseball') return renderGameBaseball();
   if(game.gameType === 'shanghai') return renderGameShanghai();
+  if(game.gameType === 'halve_it') return renderGameHalveIt();
   if(game.gameType === 'doubles_practice') return renderGameDoublesPractice();
   if(game.gameType === 'chuckin') return renderGameChuckin();
   if(game.gameType === 'checkout_trainer') return renderGameCheckoutTrainer();
@@ -6986,6 +7079,75 @@ function renderGameShanghai(){
   pushLive();
 }
 
+/* Halve-It chalkboard scorecard: same shared-table shape as Baseball/
+   Shanghai's own, with two differences: row labels show the round's own
+   TARGET LABEL (e.g. "Double 7", "Bull"), not a plain number, and each cell
+   shows the RUNNING TOTAL after that round (not a per-round delta) since a
+   bare "0" on a halved round would hide the actual halving that just
+   happened — a ½ icon on a halved cell makes that state visible without
+   relying on color alone (docs/halve-it-roadmap.md's own
+   accessibility note). */
+function renderGameHalveIt(){
+  const sb = document.getElementById('scoreboard'); sb.innerHTML='';
+  const targets = (game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS;
+  const maxRounds = targets.length;
+  const lastRound = Math.max(maxRounds, game.halveItRound); // extend into extra rounds once reached
+  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
+
+  const headCells = game.players.map((p,i)=>{
+    const active = i===game.current;
+    const standing = game.setsPerGame>1
+      ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
+      : game.practice
+      ? `Legs ${p.legsWon}`
+      : `Legs ${p.legsWon}/${game.legsPerSet}`;
+    return `<div class="cs-col-head${active?' active':''}">
+      <span>${escapeHtml(p.name)}</span>
+      ${active?'<span class="cs-throw-chip">▸ throwing</span>':''}
+      ${showStanding?`<span class="cs-standing">${standing}</span>`:''}
+    </div>`;
+  }).join('');
+
+  const rows = [];
+  for(let round=1; round<=lastRound; round++){
+    const isCurrentRound = round === game.halveItRound;
+    const target = halveItRoundTarget(round, targets);
+    const cells = game.players.map((p,i)=>{
+      const r = p.roundTotals[round];
+      const halved = p.roundHalved && p.roundHalved[round];
+      const active = i===game.current && isCurrentRound;
+      return `<div class="cs-cell${active?' active':''}">${r!=null ? `<span class="cs-points">${halved?'½ ':''}${r}</span>` : ''}</div>`;
+    }).join('');
+    rows.push(`<div class="cs-row"><div class="cs-label">${escapeHtml(halveItTargetLabel(target))}</div>${cells}</div>`);
+  }
+  const bodyRowsHtml = rows.join('');
+
+  const totalCells = game.players.map((p,i)=>{
+    const active = i===game.current;
+    return `<div class="cs-cell${active?' active':''}"><span class="cs-points">${p.total||0}</span></div>`;
+  }).join('');
+
+  const table = document.createElement('div');
+  table.className = 'cs-table';
+  table.style.setProperty('--cs-cols', game.players.length);
+  table.innerHTML = `
+    <div class="cs-row cs-head" role="row"><div class="cs-label"></div>${headCells}</div>
+    ${bodyRowsHtml}
+    <div class="cs-row cs-foot"><div class="cs-label">Total</div>${totalCells}</div>`;
+  sb.appendChild(table);
+
+  const roundBanner = document.createElement('p');
+  roundBanner.className = 'pp-meta';
+  roundBanner.style.cssText = 'text-align:center;margin:8px 0 0';
+  const liveTarget = halveItRoundTarget(game.halveItRound, targets);
+  roundBanner.textContent = `Round ${Math.min(game.halveItRound,maxRounds)} of ${maxRounds} — target ${halveItTargetLabel(liveTarget)}${game.halveItRound>maxRounds?' (extra rounds)':''}`;
+  sb.appendChild(roundBanner);
+
+  renderSlots();
+  renderPad();
+  pushLive();
+}
+
 /* docs/archive/practice-ladders-roadmap.md Part A: same shared chalkboard-table
    shape as Cricket/Baseball's (rows=rounds, one column since it's always solo),
    just fixed at exactly 20 rows — no "extra innings"-style dynamic extension
@@ -7028,20 +7190,23 @@ function renderSlots(){
   const isCricket = game.gameType === 'cricket';
   const isBaseball = game.gameType === 'baseball';
   const isShanghai = game.gameType === 'shanghai';
+  const isHalveIt = game.gameType === 'halve_it';
   const cricketNumbers = isCricket ? (game.config.numbers || CRICKET_STANDARD_NUMBERS) : null;
   const baseballTarget = isBaseball ? baseballInningTarget(game.baseballInning) : null;
   const shanghaiTarget = isShanghai ? shanghaiRoundTarget(game.shanghaiRound, (game.config && game.config.rounds) || 7) : null;
+  const halveItTarget = isHalveIt ? halveItRoundTarget(game.halveItRound, (game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS) : null;
   for(let i=0;i<3;i++){
     const d = game.darts[i];
     // The X01 "N pts" subtitle is meaningless in cricket (a T18's 54 X01 points may be
     // 3 marks, or nothing at all if 18 isn't in play) — show marks instead. Same idea
-    // for Baseball/Shanghai: a dart's raw X01 point value has nothing to do with the
-    // points it scores (only the live round/inning's own target number counts at all).
+    // for Baseball/Shanghai/Halve-It: a dart's raw X01 point value has nothing to do
+    // with the points it scores (only the live round/inning's own target counts at all).
     let sub = '';
     if(d){
       if(isCricket) sub = cricketNumbers.includes(d.sector) ? `${d.mult} mark${d.mult===1?'':'s'}` : 'no mark';
       else if(isBaseball) sub = d.sector === baseballTarget ? `${d.mult} run${d.mult===1?'':'s'}` : 'no run';
       else if(isShanghai) sub = d.sector === shanghaiTarget ? `${d.mult * shanghaiTarget} pt${d.mult===1?'':'s'}` : 'no points';
+      else if(isHalveIt){ const v = halveItDartValue({sector:d.sector, mult:d.mult}, halveItTarget); sub = v>0 ? `${v} pt${v===1?'':'s'}` : 'no points'; }
       else sub = `${d.value} pts`;
     }
     const div=document.createElement('div');
@@ -7114,7 +7279,8 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   baseballwalkoff:'Walk-Off! ⚾', baseballcycle:'The Cycle! 🔄', doublespracticeringmaster:'Ring Master! 🎪',
   cricketstonecold:'Stone Cold! 🔪',
   bobs27fullhouse:'Full House! 🎯', bobs27fullanderson:'🏔️ THE FULL ANDERSON! 🏔️',
-  topofthehouse:'👑 TOP OF THE HOUSE! 👑', upset:'Upset! 🗡️', shanghai:'🀄 SHANGHAI! 🀄' };
+  topofthehouse:'👑 TOP OF THE HOUSE! 👑', upset:'Upset! 🗡️', shanghai:'🀄 SHANGHAI! 🀄',
+  halveitdeath:'Halved at the Death! 🪓', halveitnohalf:'No Half Measures! 🛡️' };
 const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   hattrick:2500, bullseyegauntlet:2500, wherediditgo:2500, socloseshot:2500,
   tontitled:2500, nightowl:2500, earlybird:2500, first100checkout:3000,
@@ -7130,7 +7296,7 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   baseballwalkoff:3000, baseballcycle:2500, doublespracticeringmaster:5000,
   cricketstonecold:3500,
   bobs27fullhouse:2500, bobs27fullanderson:6000,
-  topofthehouse:6000, upset:2500, shanghai:6000 };
+  topofthehouse:6000, upset:2500, shanghai:6000, halveitdeath:4000, halveitnohalf:3000 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
 // instead of duplicating copy (docs/next-session-plan.md item 1).
@@ -8578,6 +8744,15 @@ function liveSnapshot(message){
     // players[] array above via playerSnapshotShanghai().
     shanghaiRound: game.gameType === 'shanghai' ? (game.shanghaiRound || 1) : null,
     shanghaiMaxRounds: game.gameType === 'shanghai' ? ((game.config && game.config.rounds) || 7) : null,
+    // Halve-It only (docs/halve-it-roadmap.md): which round is
+    // currently live, plus the round's own target -- per-player totals ride
+    // inside the players[] array above via playerSnapshotHalveIt().
+    halveItRound: game.gameType === 'halve_it' ? (game.halveItRound || 1) : null,
+    // The FULL target sequence (not just the live round's own target) — the
+    // /display renderer has no shared scoring.js module to derive per-row
+    // labels from, so it needs every round's target up front to render the
+    // whole scorecard grid, not just the live one.
+    halveItTargets: game.gameType === 'halve_it' ? ((game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS) : null,
     // Cricket only (docs/archive/cutthroat-cricket-roadmap.md): lets display.html's
     // cricket scorecard label its points footer "lowest wins" for cutthroat,
     // the one thing that otherwise renders identically to standard.
@@ -8658,6 +8833,12 @@ function renderPad(){
     renderPadShanghai(full);
     const utbS = document.getElementById('undo-turn-btn');
     if(utbS) utbS.disabled = !game.lastTurnSnapshot;
+    return;
+  }
+  if(game.gameType === 'halve_it'){
+    renderPadHalveIt(full);
+    const utbH = document.getElementById('undo-turn-btn');
+    if(utbH) utbH.disabled = !game.lastTurnSnapshot;
     return;
   }
   if(game.gameType === 'bobs_27'){
@@ -8831,6 +9012,42 @@ function renderPadShanghai(full){
   miss.onclick=()=>throwDart(0); pad.appendChild(miss);
 }
 
+/* Halve-It's dedicated scoring screen — one button, the round's own target.
+   An unrestricted round (e.g. plain 20) works exactly like Baseball/Shanghai's
+   own single-target pad: any ring the ambient multi-row selects counts. A
+   ring-restricted round (e.g. double 7) shows the ring prefix on the button
+   itself (D7/T10) and relies on the SAME ambient multi-row selector Bob's 27's
+   own pad already uses — tapping the button with the wrong multiplier selected
+   correctly scores 0 for this round (halveItDartValue() rejects the wrong
+   ring), same "selector determines the actual outcome" shape. */
+function renderPadHalveIt(full){
+  const board = document.getElementById('dart-board-wrap');
+  if(board) board.classList.add('hidden');
+  const bounceBtn = document.getElementById('bounce-out-btn');
+  if(bounceBtn) bounceBtn.disabled = full;
+  const multi = document.getElementById('multi-row');
+  if(multi) multi.classList.remove('hidden');
+  const pad = document.getElementById('pad');
+  if(!pad) return;
+  pad.classList.remove('hidden');
+  pad.classList.add('cricket-pad');
+  pad.innerHTML = '';
+  const targets = (game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS;
+  const target = halveItRoundTarget(game.halveItRound, targets);
+  const b = document.createElement('button');
+  b.className = 'cricket-target';
+  b.disabled = full;
+  const ringPrefix = target.ring === 'double' ? 'D' : target.ring === 'treble' ? 'T' : '';
+  const numLabel = target.sector === 25 ? 'Bull' : String(target.sector);
+  b.innerHTML = `<span class="ct-num">${ringPrefix}${numLabel}</span>`;
+  b.setAttribute('aria-label', `${halveItTargetLabel(target)} — this round's target`);
+  b.onclick = () => throwDart(target.sector);
+  pad.appendChild(b);
+  const miss=document.createElement('button');
+  miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
+  miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+}
+
 /* docs/archive/practice-ladders-roadmap.md Part A: one button, the round's own
    double — the player selects Double via the ambient multi-row (same S/D/T
    selector every other Pad-mode dart uses) then taps it to log a hit; Single/
@@ -8949,7 +9166,7 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
 // independently re-validates this on every write, never trusting this check
 // (docs/archive/saved-games-roadmap.md's own security section: "never trust the
 // client's eligibility check").
-const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'shanghai', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
+const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'shanghai', 'halve_it', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
 function isCurrentGameSavable(){
   // Marathon Mode (docs/archive/marathon-mode-roadmap.md): deliberately excluded, same
   // "no save/resume support" scope decision Killer already made. A saved-then-
@@ -9030,7 +9247,7 @@ async function resumeGame(gameId){
   const players = names.map(n => GAME_TYPES[gameType].newMatchPlayer(n,
     gameType === 'cricket' ? config : startScore));
 
-  let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, shanghaiRound = 1, bobs27Round = 1, roundOver = false, checkoutLadderTarget = 121, checkoutLadderVisits = 0;
+  let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, shanghaiRound = 1, halveItRound = 1, bobs27Round = 1, roundOver = false, checkoutLadderTarget = 121, checkoutLadderVisits = 0;
   let gauntletStationIndex = 0, gauntletAwaitingRepeat = false, gauntletFinalMisses = [], gauntletCleanStreak = 0, gauntletBestCleanStreak = 0;
   let statusMsg = '';
   if(gameType === 'x01'){
@@ -9071,6 +9288,16 @@ async function resumeGame(gameId){
     });
     current = r.current; starter = r.starter; setNo = r.setNo; legNo = r.legNo; shanghaiRound = r.shanghaiRound;
     statusMsg = `Resumed — set ${setNo} leg ${legNo}, round ${Math.min(shanghaiRound,maxRounds)} of ${maxRounds}, ${players[current].name} to throw.`;
+  } else if(gameType === 'halve_it'){
+    const targets = (config && config.targets) || HALVE_IT_DEFAULT_TARGETS;
+    const r = rebuildHalveItState({ names, legsPerSet: state.legsPerSet, targets, turns: state.turns });
+    players.forEach((p,i) => {
+      const rp = r.players[i];
+      Object.assign(p, { total:rp.total, roundTotals:rp.roundTotals, everHalved:rp.everHalved, lastVisitHalved:rp.lastVisitHalved,
+        legsWon:rp.legsWon, setsWon:rp.setsWon, legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
+    });
+    current = r.current; starter = r.starter; setNo = r.setNo; legNo = r.legNo; halveItRound = r.halveItRound;
+    statusMsg = `Resumed — set ${setNo} leg ${legNo}, round ${Math.min(halveItRound,targets.length)} of ${targets.length}, ${players[current].name} to throw.`;
   } else if(gameType === 'around_the_clock'){
     const r = rebuildAroundTheClockState({ turns: state.turns });
     Object.assign(players[0], { hitSet:r.hitSet, roundDarts:r.roundDarts });
@@ -9120,7 +9347,7 @@ async function resumeGame(gameId){
     players,
     blitzDeadline: null, blitzEnded: false,
     starter, current, setNo, legNo,
-    baseballInning, shanghaiRound, bobs27Round, checkoutLadderTarget, checkoutLadderVisits,
+    baseballInning, shanghaiRound, halveItRound, bobs27Round, checkoutLadderTarget, checkoutLadderVisits,
     gauntletStationIndex, gauntletAwaitingRepeat, gauntletFinalMisses, gauntletCleanStreak, gauntletBestCleanStreak,
     darts: [], busted:false, won:false, done:false,
     gameOneEighties:0, gameBigFish:0, gameBusts:0,
@@ -9308,6 +9535,7 @@ function undoLastTurn(){
   if(game && game.gameType === 'cricket') return undoLastTurnCricket();
   if(game && game.gameType === 'baseball') return undoLastTurnBaseball();
   if(game && game.gameType === 'shanghai') return undoLastTurnShanghai();
+  if(game && game.gameType === 'halve_it') return undoLastTurnHalveIt();
   if(game && game.gameType === 'doubles_practice') return undoLastTurnDoublesPractice();
   if(game && game.gameType === 'chuckin') return undoLastTurnChuckin();
   if(game && game.gameType === 'checkout_trainer') return undoLastTurnCheckoutTrainer();
@@ -9395,6 +9623,7 @@ function enterTurn(){
   if(game.gameType === 'cricket') return enterTurnCricket();
   if(game.gameType === 'baseball') return enterTurnBaseball();
   if(game.gameType === 'shanghai') return enterTurnShanghai();
+  if(game.gameType === 'halve_it') return enterTurnHalveIt();
   if(game.gameType === 'bobs_27') return enterTurnBobs27();
   if(game.gameType === 'checkout_ladder') return enterTurnCheckoutLadder();
   if(game.gameType === 'gauntlet') return enterTurnGauntlet();
@@ -10260,6 +10489,109 @@ function undoLastTurnShanghai(){
   renderGameShanghai();
   pushLive();
 }
+
+// Halve-It's own target label (docs/halve-it-roadmap.md) — a plain
+// sector shows just the number; a ring-restricted target shows "Double 7"/
+// "Treble 10"; sector 25 shows "Bull" (matching every other UI's own Bull
+// label rather than the numeric 25).
+function halveItTargetLabel(target){
+  if(!target) return '';
+  const num = target.sector === 25 ? 'Bull' : String(target.sector);
+  if(!target.ring) return num;
+  const ringLabel = target.ring === 'double' ? 'Double' : target.ring === 'treble' ? 'Treble' : 'Single';
+  return `${ringLabel} ${num}`;
+}
+
+/* ----- Halve-It turn commit (dispatched from enterTurn()) -----
+   Visit-based (3 darts per round), same shape as Baseball/Shanghai's own. */
+function enterTurnHalveIt(){
+  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  const p = game.players[game.current];
+  const ev = GAME_TYPES.halve_it.evaluateVisit(p, game.darts, game);
+  const maxRounds = ((game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS).length;
+
+  announce(ev.halved
+    ? `${p.name} misses ${halveItTargetLabel(ev.target)} entirely — halved to ${ev.total}.`
+    : `${p.name} scores ${ev.gained} point${ev.gained===1?'':'s'} on ${halveItTargetLabel(ev.target)} — total ${ev.total}.`);
+
+  // snapshot state before mutations so undoLastTurn() can restore it.
+  const _snap = { pi:game.current, total:p.total, roundTotals:Object.assign({}, p.roundTotals),
+    everHalved:p.everHalved, lastVisitHalved:p.lastVisitHalved,
+    legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
+    halveItRound:game.halveItRound,
+    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
+    badgeReverts:[], voided:false };
+  game.lastTurnSnapshot = _snap;
+
+  p.total = ev.total; p.roundTotals = ev.roundTotals;
+  // roundHalved (display-only, not part of evaluateVisitHalveIt()'s own pure
+  // return): which rounds' cells the live scorecard marks with a ½ icon, per
+  // the roadmap doc's own "icon + text, not a red flash alone" accessibility
+  // note. Not reconstructed on resume (a cosmetic gap only — the running
+  // totals themselves resume correctly via rebuildHalveItState()).
+  p.roundHalved = Object.assign({}, p.roundHalved, { [game.halveItRound]: ev.halved });
+  p.lastVisitHalved = ev.halved;
+  if(ev.halved) p.everHalved = true;
+  const dartsThrown = game.darts.length;
+  p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
+
+  // docs/halve-it-roadmap.md's own "bust=1 marks the halved visit" data-model
+  // precedent — turns.scored stores the GAIN (0 on a halved visit), never the
+  // halving delta itself, mirroring the Baseball/Shanghai "store the gain, derive
+  // the rest" shape.
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:ev.gained, bust:ev.halved, checkout:false, checkoutPoints:null, legWon:false,
+    darts: game.darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
+      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+
+  const turnRecord = { player:p.name, scored:ev.gained, darts:game.darts.slice() };
+  game.currentLegTurns.push(turnRecord);
+  game.sessionTurns.push(turnRecord);
+
+  awardTimeOfDayBadges(p);
+
+  if(ev.matchComplete){
+    onLegWonHalveIt(ev.winnerIndex);
+    return;
+  }
+
+  if(ev.roundComplete) game.halveItRound += 1;
+  game.darts=[]; game.busted=false; game.won=false;
+  game.current = (game.current+1) % game.players.length;
+  game.turnSeq += 1;
+  document.getElementById('status').className='status';
+  document.getElementById('status').textContent = `Round ${Math.min(game.halveItRound,maxRounds)} of ${maxRounds} — target ${halveItTargetLabel(halveItRoundTarget(game.halveItRound, (game.config&&game.config.targets)||HALVE_IT_DEFAULT_TARGETS))}.`;
+  renderGameHalveIt();
+  pushLive();
+}
+function undoLastTurnHalveIt(){
+  if(!game || !game.lastTurnSnapshot) return;
+  const snap = game.lastTurnSnapshot;
+  const p = game.players[snap.pi];
+  p.total = snap.total;
+  p.roundTotals = snap.roundTotals;
+  p.everHalved = snap.everHalved; p.lastVisitHalved = snap.lastVisitHalved;
+  p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
+  game.halveItRound = snap.halveItRound;
+  game.currentLegTurns.length = snap.ltLen;
+  game.sessionTurns.length = snap.stLen;
+
+  snap.voided = true;
+  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+  });
+  cancelQueuedAchievementsForSnapshot(snap);
+
+  game.current = snap.pi;
+  game.darts = []; game.busted=false; game.won=false;
+  game.lastTurnSnapshot = null;
+  DB.deleteLastTurn();
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
+  renderGameHalveIt();
+  pushLive();
+}
+
 /* ----- Baseball leg / set / game progression (dispatched from enterTurnBaseball) -----
    Same leg/set/game progression tree every other game type uses — the only
    real difference from onLegWonCricket() is that the winner (wi) here is
@@ -10362,6 +10694,65 @@ function onLegWonShanghai(wi){
   w.legsWon += 1;
 
   // Captured before the legs-reset below zeroes everyone out.
+  const legsAtWin = new Map(game.players.map(p => [p, p.legsWon]));
+
+  if(w.legsWon >= game.legsPerSet){      // leg (or, for practice, the whole game) won
+    w.setsWon += 1;
+    game.players.forEach(p=>p.legsWon=0);
+
+    if(w.setsWon >= game.setsPerGame){   // game (match) won
+      sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+      sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
+      sendHaWebhook('gameend', w.name, game.category);
+      DB.recordEvent('leg_end', game.setNo, game.legNo);
+      DB.recordEvent('set_end', game.setNo, null);
+      DB.recordEvent('game_end', null, null);
+      DB.completeGame(w.name);
+      checkEloOnMatchWin(w, game.players.length===2 ? game.players.find(p=>p!==w) : null);
+      game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+      fireMomentCard('matchwin', { icon:'🏅', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) });
+      finishUnit('game', w.name);
+      return;
+    }
+    sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+    sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
+    DB.recordEvent('leg_end', game.setNo, game.legNo);
+    DB.recordEvent('set_end', game.setNo, null);
+    game.matchResult = { ts:Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+    finishUnit('set', w.name);
+    return;
+  }
+  sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+  DB.recordEvent('leg_end', game.setNo, game.legNo);
+  game.matchResult = { ts:Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+  finishUnit('leg', w.name);
+}
+
+/* ----- Halve-It leg / set / game progression (dispatched from enterTurnHalveIt) -----
+   Same leg/set/game progression tree as onLegWonShanghai() — no !game.practice
+   gate here either, for the identical BUG-22-class reason (a practice Halve-It
+   leg is forced to legsPerSet=1/setsPerGame=1 above in startGame(), see
+   isPracticeHalveIt). Halve-It's own two flavor badges (docs/archive/
+   halve-it-roadmap.md) are leg-OUTCOME badges — checked here, once the
+   winner is known, same split Baseball's Perfect Game/Walk-Off use. */
+function onLegWonHalveIt(wi){
+  const w = game.players[wi];
+  w.legsWon += 1;
+
+  // 🪓 Halved at the Death — the winner's own most recent visit (which
+  // decided this leg) halved their total, and they still won.
+  if(w.lastVisitHalved){
+    queueBadge('halveitdeath', w.name);
+    awardRecurringBadge(w.name, 'halveitdeath', 'halveitdeath',
+      { icon:'🪓', headline:'HALVED AT THE DEATH!', player:w.name, statLine:`Won on ${w.total} after the final visit halved it` });
+  }
+  // 🛡️ No Half Measures — won without ever being halved, the whole leg.
+  if(!w.everHalved){
+    queueBadge('halveitnohalf', w.name);
+    awardRecurringBadge(w.name, 'halveitnohalf', 'halveitnohalf',
+      { icon:'🛡️', headline:'NO HALF MEASURES!', player:w.name, statLine:`Won on ${w.total} without ever being halved` });
+  }
+
   const legsAtWin = new Map(game.players.map(p => [p, p.legsWon]));
 
   if(w.legsWon >= game.legsPerSet){      // leg (or, for practice, the whole game) won
@@ -10742,6 +11133,7 @@ function startNextLeg(newSet){
   game.players.forEach(p=>GAME_TYPES[game.gameType].resetForNextLeg(p, game, newSet));
   if(game.gameType === 'baseball') game.baseballInning = 1;
   if(game.gameType === 'shanghai') game.shanghaiRound = 1;
+  if(game.gameType === 'halve_it') game.halveItRound = 1;
   if(game.gameType === 'checkout_ladder') game.checkoutLadderVisits = 0;
   game.legSummary = null;
   game.currentLegTurns = [];
@@ -10846,6 +11238,26 @@ function h2hStatsHtmlShanghai(winner, scope){
   return `<div class="prac-stats">${cols}</div>`;
 }
 
+function h2hStatsHtmlHalveIt(winner, scope){
+  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
+  const cols = game.players.map(p=>{
+    const rows = scope==='game' ? [
+      statRow('Total (final leg)', p.total||0),
+      statRow('Darts (match)', p.gameDarts||0),
+    ] : [
+      statRow('Total', p.total||0),
+      statRow('Darts (leg)', p.legDarts||0),
+    ];
+    if(showStanding){
+      const standing = game.setsPerGame>1 ? `Sets ${p.setsWon} · Legs ${p.legsWon}` : `Legs ${p.legsWon}/${game.legsPerSet}`;
+      rows.push(statRow(scope==='game' ? 'Final Standing' : 'Standing', standing, true));
+    }
+    const title = p.name===winner ? `${escapeHtml(p.name)} 🎯` : escapeHtml(p.name);
+    return `<div class="prac-col"><div class="prac-col-title">${title}</div>${rows.join('')}</div>`;
+  }).join('');
+  return `<div class="prac-stats">${cols}</div>`;
+}
+
 function finishUnit(kind, winner){
   game.done = (kind==='game');
   updateSaveButtonVisibility(); // a just-completed match is no longer savable
@@ -10861,6 +11273,7 @@ function finishUnit(kind, winner){
   const isCricket = game.gameType === 'cricket';
   const isBaseball = game.gameType === 'baseball';
   const isShanghai = game.gameType === 'shanghai';
+  const isHalveIt = game.gameType === 'halve_it';
   const isBobs27 = game.gameType === 'bobs_27';
   const isGauntlet = game.gameType === 'gauntlet';
   const isKiller = game.gameType === 'killer';
@@ -10946,7 +11359,7 @@ function finishUnit(kind, winner){
       <div class="btn-row" style="justify-content:center">
         ${nextBtn}
         ${matchShareBtn}
-      </div>${isCricket || isBobs27 || isGauntlet || isKiller ? '' : isBaseball ? h2hStatsHtmlBaseball(winner,'game') : isShanghai ? h2hStatsHtmlShanghai(winner,'game') : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}${killerSummary}</div>`;
+      </div>${isCricket || isBobs27 || isGauntlet || isKiller ? '' : isBaseball ? h2hStatsHtmlBaseball(winner,'game') : isShanghai ? h2hStatsHtmlShanghai(winner,'game') : isHalveIt ? h2hStatsHtmlHalveIt(winner,'game') : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}${killerSummary}</div>`;
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
@@ -10957,7 +11370,7 @@ function finishUnit(kind, winner){
     // practice Baseball game is forced to exactly 1 leg/1 set (docs/bug-roadmap.md
     // BUG-22, see onLegWonBaseball()/startGame()'s isPracticeBaseball), so
     // kind==='leg' is only ever reached for a genuine mid-match H2H leg now.
-    const legPanel = isCricket || isKiller || kind!=='leg' ? '' : isBaseball ? h2hStatsHtmlBaseball(winner) : isShanghai ? h2hStatsHtmlShanghai(winner) : game.practice ? `
+    const legPanel = isCricket || isKiller || kind!=='leg' ? '' : isBaseball ? h2hStatsHtmlBaseball(winner) : isShanghai ? h2hStatsHtmlShanghai(winner) : isHalveIt ? h2hStatsHtmlHalveIt(winner) : game.practice ? `
       <div class="prac-stats">
         <div class="prac-col">
           <div class="prac-col-title">This Leg</div>
@@ -11001,6 +11414,10 @@ function finishUnit(kind, winner){
   })) : isShanghai ? game.players.map(p=>({
     name: p.name,
     totalPoints: p.totalPoints || 0,
+    won: p.name === winner
+  })) : isHalveIt ? game.players.map(p=>({
+    name: p.name,
+    total: p.total || 0,
     won: p.name === winner
   })) : isKiller ? game.players.map(p=>({
     name: p.name,
@@ -11145,6 +11562,19 @@ const SHANGHAI_STAT_DEFS = [
 // Translates a SHANGHAI_STAT_DEFS key to getShanghaiStatBubbles()'s JSON field name.
 const SHANGHAI_BUBBLE_KEY_MAP = { shanghaippr:'ppr', shanghaisthrown:'shanghaisThrown', shanghaiwinpct:'winPct',
   shanghaigames:'gamesPlayed', shanghaidartsthrown:'dartsThrown', shanghaibestround:'bestRound' };
+
+// Halve-It's own stat vocabulary (docs/halve-it-roadmap.md).
+const HALVE_IT_STAT_DEFS = [
+  { key:'halveitavgtotal',       label:'Avg Final Total', desc:'Average final total across every completed leg', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
+  { key:'halveittimeshalved',    label:'Times Halved',   desc:'Total visits where all 3 darts missed the round\'s target', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'halveitwinpct',         label:'Win Rate',       desc:'% of H2H Halve-It games won',             fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'halveitgames',          label:'Games Played',   desc:'Halve-It games played',                   fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'halveitdartsthrown',    label:'Darts Thrown',   desc:'Total darts thrown in Halve-It games',    fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
+  { key:'halveitbestround',      label:'Best Round',     desc:'Highest points gained in a single round', fmt:v=>v!=null?String(Math.round(v)):'—' },
+];
+// Translates a HALVE_IT_STAT_DEFS key to getHalveItStatBubbles()'s JSON field name.
+const HALVE_IT_BUBBLE_KEY_MAP = { halveitavgtotal:'avgFinalTotal', halveittimeshalved:'timesHalved', halveitwinpct:'winPct',
+  halveitgames:'gamesPlayed', halveitdartsthrown:'dartsThrown', halveitbestround:'bestRound' };
 
 // Bob's 27's own stat vocabulary (docs/archive/practice-ladders-roadmap.md Part A) —
 // solo, so no win-rate/games-vs-opponent bubble the way Baseball has; "Runs
@@ -11349,6 +11779,17 @@ const GAME_TYPES = {
     statDefs: SHANGHAI_STAT_DEFS,
     personalBestsRenderer: renderShanghaiPersonalBests,
     homeTabRenderer: renderHomeTabBodyShanghai
+  },
+  halve_it: {
+    id: 'halve_it',
+    label: 'Halve-It',
+    newMatchPlayer: newMatchPlayerHalveIt,
+    evaluateVisit: evaluateVisitHalveIt,
+    resetForNextLeg: resetPlayerForNextLegHalveIt,
+    playerSnapshot: playerSnapshotHalveIt,
+    statDefs: HALVE_IT_STAT_DEFS,
+    personalBestsRenderer: renderHalveItPersonalBests,
+    homeTabRenderer: renderHomeTabBodyHalveIt
   },
   doubles_practice: {
     id: 'doubles_practice',
@@ -11592,6 +12033,34 @@ function resetPlayerForNextLegShanghai(p, game, newSet){
 function playerSnapshotShanghai(p){
   return {
     name:p.name, totalPoints:p.totalPoints||0, roundPoints:Object.assign({}, p.roundPoints),
+    legsWon:p.legsWon, setsWon:p.setsWon,
+    legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0
+  };
+}
+
+/* ---------- Halve-It (docs/halve-it-roadmap.md) ----------
+   Another Baseball/Shanghai sibling (fixed round sequence, all players in
+   lockstep on one shared live round, game.halveItRound) with no instant-win
+   condition at all — the match only ever completes once the final round
+   settles. evaluateVisitHalveIt()/halveItRoundTarget() live in scoring.js;
+   only the stateful player-record helpers stay here, same split as Baseball/
+   Shanghai. */
+function newMatchPlayerHalveIt(name){
+  // everHalved/lastVisitHalved (docs/halve-it-roadmap.md's own 🛡️ No Half
+  // Measures / 🪓 Halved at the Death badges): per-leg tracking, reset every leg
+  // by resetPlayerForNextLegHalveIt() below.
+  return { name, total:0, roundTotals:{}, roundHalved:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0,
+    everHalved:false, lastVisitHalved:false };
+}
+function resetPlayerForNextLegHalveIt(p, game, newSet){
+  p.total = 0; p.roundTotals = {}; p.roundHalved = {}; p.legDarts = 0;
+  p.everHalved = false; p.lastVisitHalved = false;
+  if(newSet) p.setDarts = 0;
+}
+function playerSnapshotHalveIt(p){
+  return {
+    name:p.name, total:p.total||0, roundTotals:Object.assign({}, p.roundTotals),
+    roundHalved:Object.assign({}, p.roundHalved),
     legsWon:p.legsWon, setsWon:p.setsWon,
     legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0
   };
@@ -13723,6 +14192,7 @@ GAME_TYPES.x01.bubbleKeyMap = BUBBLE_KEY_MAP;
 GAME_TYPES.cricket.bubbleKeyMap = CRICKET_BUBBLE_KEY_MAP;
 GAME_TYPES.baseball.bubbleKeyMap = BASEBALL_BUBBLE_KEY_MAP;
 GAME_TYPES.shanghai.bubbleKeyMap = SHANGHAI_BUBBLE_KEY_MAP;
+GAME_TYPES.halve_it.bubbleKeyMap = HALVE_IT_BUBBLE_KEY_MAP;
 GAME_TYPES.doubles_practice.bubbleKeyMap = DOUBLES_PRACTICE_BUBBLE_KEY_MAP;
 GAME_TYPES.chuckin.bubbleKeyMap = CHUCKIN_BUBBLE_KEY_MAP;
 GAME_TYPES.checkout_trainer.bubbleKeyMap = CHECKOUT_TRAINER_BUBBLE_KEY_MAP;

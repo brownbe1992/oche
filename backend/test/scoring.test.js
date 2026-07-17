@@ -23,7 +23,8 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   GAUNTLET_STATION_ORDER, evaluateGauntletStation, gauntletTotalScars, gauntletResultTier, rebuildGauntletState,
   KILLER_DEFAULT_LIVES, shuffleKillerNumbers, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
   MARATHON_FATIGUE_TIERS, computeFatigueSplit, MARATHON_TREND_MIN_LEGS, MARATHON_TREND_TOLERANCE, classifyMarathonTrend,
-  shanghaiRoundTarget, isShanghaiWin, evaluateVisitShanghai } = scoring;
+  shanghaiRoundTarget, isShanghaiWin, evaluateVisitShanghai,
+  HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, evaluateVisitHalveIt } = scoring;
 
 // Shorthand for building a rebuild-function turn record: v(playerIndex, setNo,
 // legNo, [[sector,mult], ...]) — mirrors the {playerIndex,setNo,legNo,darts}
@@ -2095,5 +2096,123 @@ describe('evaluateVisitShanghai (docs/archive/shanghai-roadmap.md)', () => {
     const game = mkGame(9, 0, [player, {totalPoints:0}], 7); // round 9 > maxRounds 7
     const ev = evaluateVisitShanghai(player, [{sector:7,mult:1}], game);
     assert.equal(ev.target, 7, 'extra rounds repeat the final round\'s own number, matching Baseball');
+  });
+});
+
+describe('halveItRoundTarget (docs/halve-it-roadmap.md)', () => {
+  test('within range returns the target at that index; beyond the list caps at the final target', () => {
+    const targets = HALVE_IT_DEFAULT_TARGETS;
+    assert.deepEqual(halveItRoundTarget(1, targets), { sector: 20 });
+    assert.deepEqual(halveItRoundTarget(7, targets), { sector: 25 });
+    assert.deepEqual(halveItRoundTarget(8, targets), { sector: 25 }, 'extra rounds repeat the final target');
+    assert.deepEqual(halveItRoundTarget(20, targets), { sector: 25 });
+  });
+  test('an empty/missing targets list falls back to the default set', () => {
+    assert.deepEqual(halveItRoundTarget(1, null), { sector: 20 });
+    assert.deepEqual(halveItRoundTarget(1, []), { sector: 20 });
+  });
+});
+
+describe('halveItDartValue (docs/halve-it-roadmap.md)', () => {
+  test('an unrestricted target counts any ring at face value', () => {
+    const target = { sector: 20 };
+    assert.equal(halveItDartValue({ sector: 20, mult: 1 }, target), 20, 'single');
+    assert.equal(halveItDartValue({ sector: 20, mult: 2 }, target), 40, 'double');
+    assert.equal(halveItDartValue({ sector: 20, mult: 3 }, target), 60, 'treble');
+  });
+  test('a wrong sector scores 0 regardless of ring', () => {
+    assert.equal(halveItDartValue({ sector: 5, mult: 3 }, { sector: 20 }), 0);
+  });
+  test('a ring-restricted target rejects the right sector on the wrong ring', () => {
+    const target = { sector: 7, ring: 'double' };
+    assert.equal(halveItDartValue({ sector: 7, mult: 2 }, target), 14, 'the required ring counts');
+    assert.equal(halveItDartValue({ sector: 7, mult: 1 }, target), 0, 'single 7 does not satisfy a double-7 round');
+    assert.equal(halveItDartValue({ sector: 7, mult: 3 }, target), 0, 'treble 7 does not satisfy a double-7 round either');
+  });
+  test('a treble-restricted target only counts the treble', () => {
+    const target = { sector: 10, ring: 'treble' };
+    assert.equal(halveItDartValue({ sector: 10, mult: 3 }, target), 30);
+    assert.equal(halveItDartValue({ sector: 10, mult: 1 }, target), 0);
+  });
+  test('bull (sector 25) scores via the same mult*sector formula -- single 25, double 50, no treble ring exists', () => {
+    const target = { sector: 25 };
+    assert.equal(halveItDartValue({ sector: 25, mult: 1 }, target), 25);
+    assert.equal(halveItDartValue({ sector: 25, mult: 2 }, target), 50);
+  });
+});
+
+describe('evaluateVisitHalveIt (docs/halve-it-roadmap.md)', () => {
+  function mkGame(round, current, players, targets){
+    return { halveItRound: round, current, players, config: { targets: targets || HALVE_IT_DEFAULT_TARGETS } };
+  }
+  test('a hit adds the visit\'s value to the running total -- never halves', () => {
+    const player = { total: 10, roundTotals: {} };
+    const game = mkGame(1, 0, [player, { total: 0 }]); // round 1 targets plain 20
+    const ev = evaluateVisitHalveIt(player, [{sector:20,mult:1},{sector:20,mult:1},{sector:0,mult:1}], game);
+    assert.equal(ev.gained, 40, '20 + 20 + a miss dart');
+    assert.equal(ev.halved, false);
+    assert.equal(ev.total, 50, '10 prior + 40 gained');
+  });
+  test('missing the target with all 3 darts halves the running total, rounding UP', () => {
+    const player = { total: 25, roundTotals: {} };
+    const game = mkGame(1, 0, [player, { total: 0 }]);
+    const ev = evaluateVisitHalveIt(player, [{sector:1,mult:1},{sector:2,mult:1},{sector:3,mult:1}], game); // none hit 20
+    assert.equal(ev.gained, 0);
+    assert.equal(ev.halved, true);
+    assert.equal(ev.total, 13, 'ceil(25/2) = 13, not floor\'s 12');
+  });
+  test('halving a total of 1 stays at 1 -- round-up never reaches a permanent 0', () => {
+    const player = { total: 1, roundTotals: {} };
+    const game = mkGame(1, 0, [player, { total: 0 }]);
+    const ev = evaluateVisitHalveIt(player, [{sector:0,mult:1}], game);
+    assert.equal(ev.total, 1, 'ceil(1/2) = 1');
+  });
+  test('halving a total of 0 stays at 0 (an early-round miss with nothing built up yet)', () => {
+    const player = { total: 0, roundTotals: {} };
+    const game = mkGame(1, 0, [player, { total: 0 }]);
+    const ev = evaluateVisitHalveIt(player, [{sector:0,mult:1}], game);
+    assert.equal(ev.total, 0);
+  });
+  test('a ring-restricted round (double 7) only credits the exact ring', () => {
+    const player = { total: 0, roundTotals: {} };
+    const game = mkGame(3, 0, [player, { total: 0 }]); // round 3 = {sector:7, ring:'double'}
+    const ev = evaluateVisitHalveIt(player, [{sector:7,mult:1},{sector:7,mult:2},{sector:7,mult:3}], game);
+    assert.equal(ev.gained, 14, 'only the double-7 dart counts -- single/treble 7 both score 0 here');
+    assert.equal(ev.target.ring, 'double');
+  });
+  test('the match only completes once the FINAL round\'s last player throws, never early', () => {
+    const p0 = { total: 100, roundTotals: {} };
+    const p1 = { total: 5, roundTotals: {} };
+    const game = mkGame(3, 1, [p0, p1], HALVE_IT_DEFAULT_TARGETS); // round 3 of 7, p1 is last in rotation
+    const ev = evaluateVisitHalveIt(p1, [{sector:0,mult:1}], game);
+    assert.equal(ev.roundComplete, true, 'p1 is last in the rotation this round');
+    assert.equal(ev.matchComplete, false, 'round 3 of 7 -- not the final round yet, even with a huge lead');
+  });
+  test('final round, single leader: match completes for the leader', () => {
+    const p0 = { total: 10, roundTotals: {} };
+    const p1 = { total: 20, roundTotals: {} };
+    const game = mkGame(7, 1, [p0, p1], HALVE_IT_DEFAULT_TARGETS); // round 7 = Bull, unrestricted
+    // p1 hits a single bull (+25) instead of missing, so this visit doesn't trigger
+    // Halve-It's own halving rule -- isolates "single leader after final round" from
+    // the halving mechanic, which is covered by its own tests above.
+    const ev = evaluateVisitHalveIt(p1, [{sector:25,mult:1}], game);
+    assert.equal(ev.total, 45, '20 prior + 25 gained');
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 1);
+  });
+  test('final round tie: match does not complete, continues into an extra round', () => {
+    const p0 = { total: 20, roundTotals: {} };
+    const p1 = { total: 40, roundTotals: {} };
+    const game = mkGame(7, 1, [p0, p1], HALVE_IT_DEFAULT_TARGETS);
+    // p1 misses the final round entirely -> halved from 40 to 20, tying p0.
+    const ev = evaluateVisitHalveIt(p1, [{sector:0,mult:1}], game);
+    assert.equal(ev.total, 20, 'ceil(40/2) = 20, now tied with p0');
+    assert.equal(ev.matchComplete, false, 'a tie after the final round continues into an extra round');
+  });
+  test('extra rounds keep targeting the final round\'s own target, not cycling back to round 1', () => {
+    const player = { total: 0, roundTotals: {} };
+    const game = mkGame(9, 0, [player, { total: 0 }], HALVE_IT_DEFAULT_TARGETS); // round 9 > 7 targets
+    const ev = evaluateVisitHalveIt(player, [{sector:25,mult:1}], game);
+    assert.deepEqual(ev.target, { sector: 25 }, 'round 9 still targets round 7\'s own Bull, matching Baseball/Shanghai');
   });
 });

@@ -338,6 +338,116 @@ describe('addTurn — Shanghai scored must match the visit\'s points, when opted
   });
 });
 
+describe('addTurn — Halve-It scored/bust must match the visit\'s points on the round\'s target, when opted in (docs/halve-it-roadmap.md)', () => {
+  // Halve-It's turns.scored IS the visit's GAIN (0 on a halved visit), derivable
+  // from the visit's own darts + the round's target (sector, optionally
+  // ring-restricted) -- same SEC-25 shape as Baseball/Shanghai above. UNLIKE
+  // those two, `bust` is legitimately repurposed here as "this visit halved
+  // the running total" (docs/halve-it-roadmap.md's own column-repurposing
+  // precedent), so the guard checks it for CONSISTENCY (bust iff gained===0)
+  // rather than rejecting it outright.
+  function halveItGame(players, targets) {
+    return db.createGame({
+      category: 'Halve-It', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'halve_it', config: { targets: targets || [{ sector: 20 }, { sector: 7, ring: 'double' }] },
+      players: players.map(name => ({ name })),
+    });
+  }
+
+  test('accepts a legitimate mid-game Halve-It visit on an unrestricted target', async () => {
+    await db.addPlayer('SEC25_HI_A'); await db.addPlayer('SEC25_HI_B');
+    const { gameId } = halveItGame(['SEC25_HI_A', 'SEC25_HI_B']);
+    // Round 1 (no prior turns), target = plain 20. Single 20 + a wrong-number
+    // dart (0) + treble 20 => 20 + 0 + 60 = 80 points, bust must be false.
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC25_HI_A', set: 1, leg: 1, scored: 80, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 1 }, { dartNo: 2, sector: 7, multiplier: 1 }, { dartNo: 3, sector: 20, multiplier: 3 }],
+    }, STRICT));
+  });
+
+  test('accepts a fully-missed visit with bust=true (the halving flag) and scored=0', async () => {
+    const { gameId } = halveItGame(['SEC25_HI_C', 'SEC25_HI_D']);
+    await db.addPlayer('SEC25_HI_C'); await db.addPlayer('SEC25_HI_D');
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC25_HI_C', set: 1, leg: 1, scored: 0, bust: true, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }, { dartNo: 2, sector: 2, multiplier: 1 }, { dartNo: 3, sector: 3, multiplier: 1 }], // none hit round 1's target (20)
+    }, STRICT));
+  });
+
+  test('rejects bust=false on a visit that actually gained 0 (the halving flag must reflect reality)', async () => {
+    const { gameId } = halveItGame(['SEC25_HI_E', 'SEC25_HI_F']);
+    await db.addPlayer('SEC25_HI_E'); await db.addPlayer('SEC25_HI_F');
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC25_HI_E', set: 1, leg: 1, scored: 0, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 1, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('rejects bust=true on a visit that actually hit the target (the halving flag must reflect reality)', async () => {
+    const { gameId } = halveItGame(['SEC25_HI_G', 'SEC25_HI_H']);
+    await db.addPlayer('SEC25_HI_G'); await db.addPlayer('SEC25_HI_H');
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC25_HI_G', set: 1, leg: 1, scored: 20, bust: true, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('rejects a Halve-It turn whose scored mismatches its darts', async () => {
+    const { gameId } = halveItGame(['SEC25_HI_I', 'SEC25_HI_J']);
+    await db.addPlayer('SEC25_HI_I'); await db.addPlayer('SEC25_HI_J');
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC25_HI_I', set: 1, leg: 1, scored: 99, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 1 }], // real gain: 20, not 99
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('rejects checkout=true on a Halve-It turn (the game has no checkout concept)', async () => {
+    const { gameId } = halveItGame(['SEC25_HI_K', 'SEC25_HI_L']);
+    await db.addPlayer('SEC25_HI_K'); await db.addPlayer('SEC25_HI_L');
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC25_HI_K', set: 1, leg: 1, scored: 20, bust: false, checkout: true, checkoutPoints: 20,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 1 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('a ring-restricted target (double 7) only credits the exact ring, and the target advances with the round', async () => {
+    const { gameId } = halveItGame(['SEC25_HI_M', 'SEC25_HI_N'], [{ sector: 20 }, { sector: 7, ring: 'double' }]);
+    await db.addPlayer('SEC25_HI_M'); await db.addPlayer('SEC25_HI_N');
+    // First turn (round 1, plain 20): 20 points on a single-20.
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC25_HI_M', set: 1, leg: 1, scored: 20, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 1 }],
+    }, STRICT));
+    // Second turn (now round 2, double 7 only): a single-7 and a treble-7 both
+    // score 0 here; only the double-7 counts, for 14.
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC25_HI_M', set: 1, leg: 1, scored: 14, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 7, multiplier: 1 }, { dartNo: 2, sector: 7, multiplier: 3 }, { dartNo: 3, sector: 7, multiplier: 2 }],
+    }, STRICT));
+    // Claiming the single/treble sevens also counted (scored=14+7+21=42) is rejected.
+    assert.throws(() => db.addTurn(gameId, {
+      player: 'SEC25_HI_M', set: 1, leg: 1, scored: 42, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 7, multiplier: 1 }, { dartNo: 2, sector: 7, multiplier: 3 }, { dartNo: 3, sector: 7, multiplier: 2 }],
+    }, STRICT), (err) => err.status === 400);
+  });
+
+  test('extra rounds (a tie after the final round) keep targeting the last round\'s own target', async () => {
+    const { gameId } = halveItGame(['SEC25_HI_O', 'SEC25_HI_P'], [{ sector: 20 }]);
+    await db.addPlayer('SEC25_HI_O'); await db.addPlayer('SEC25_HI_P');
+    // First turn uses up the only configured round (round 1, target 20).
+    db.addTurn(gameId, {
+      player: 'SEC25_HI_O', set: 1, leg: 1, scored: 20, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 1 }],
+    }, STRICT);
+    // Second turn: extra round, target stays 20 (the only/final target). A
+    // treble-20 = 60 points.
+    assert.doesNotThrow(() => db.addTurn(gameId, {
+      player: 'SEC25_HI_O', set: 1, leg: 1, scored: 60, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 3 }],
+    }, STRICT));
+  });
+});
+
 describe("addTurn — Bob's 27 scored/bust must match the round's double hits, when opted in (docs/archive/practice-ladders-roadmap.md Part A)", () => {
   // Bob's 27's turns.scored is this round's GAIN (0 when the round's double was
   // missed entirely — the penalty is derived at read time, never stored

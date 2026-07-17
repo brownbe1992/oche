@@ -54,6 +54,7 @@ convention in `CLAUDE.md`.
 - [29. End-of-Night Session Recap](#29-end-of-night-session-recap)
 - [30. Marathon Mode](#30-marathon-mode)
 - [31. Shanghai](#31-shanghai)
+- [32. Halve-It](#32-halve-it)
 
 ---
 
@@ -6001,3 +6002,179 @@ Playwright: the full New Game → Shanghai flow (practice and H2H), an instant
 mid-round Shanghai win, a final-round decider correctly awarded to the
 higher-points player rather than whoever's turn ended the round, badges/stat
 bubbles/personal bests/win leaderboard, and the live `/display` scorecard.
+
+## 32. Halve-It
+
+`docs/halve-it-roadmap.md`. The classic pressure game —
+`game_type='halve_it'`, structurally another Baseball/Shanghai sibling (a
+fixed round sequence, all players in lockstep on one shared live round,
+`game.halveItRound`) with no instant-win condition at all — the match only
+ever completes once the final round settles, same shape as Baseball (never
+Shanghai's early-exit case). Per-player state is `{total, roundTotals:
+{round: runningTotalAfterThatRound, ...}}` — `roundTotals` stores the
+CUMULATIVE running total after each round (not a per-round delta the way
+Baseball's `inningRuns`/Shanghai's `roundPoints` do), since a bare `0` on a
+halved round would hide the halving that just happened.
+
+### Targets — `config.targets`
+
+An ordered array of `{sector, ring?}` pairs. `ring` omitted means any ring of
+that sector counts at face value (single = sector, double = 2×sector, treble
+= 3×sector); `ring` present (`'single'`/`'double'`/`'treble'`) restricts
+scoring to exactly that ring. v1 ships only the classic 7-round default —
+20, 16, double 7, 14, treble 10, 17, Bull — with **no custom-target editor**
+(`docs/open-roadmap-items.md` tracks that as its own separate, independently-
+scoped item, per CLAUDE.md's v1/v2-split discipline rather than leaving it
+silently unbuilt).
+
+### Scoring — `GAME_TYPES.halve_it.evaluateVisit(player, darts, game)` (`frontend/scoring.js`'s `evaluateVisitHalveIt`)
+
+```js
+function halveItDartValue(d, target){
+  if(!target || d.sector !== target.sector) return 0;
+  if(target.ring && d.mult !== HALVE_IT_RING_MULT[target.ring]) return 0;
+  return d.mult * d.sector;
+}
+```
+
+This single formula covers Bull for free: `makeDartCore()` already downgrades
+an attempted "treble bull" tap to a single (there's no treble-bull ring), so
+`mult*sector` alone yields 25/50 for single/double bull with no bull-specific
+branch anywhere.
+
+**The halving rule**: if a visit's total gain across all 3 darts is exactly
+`0` (every dart missed the target/ring entirely — hitting it always scores
+`>0`, so `gained===0` is unambiguous), the running total **halves, rounding
+UP**: `total = Math.ceil(priorTotal / 2)`. Round-up is deliberate — round-down
+risks a permanent `1 → 0 → 0` death spiral, while round-up's floor is `1 → 1`,
+never lower (both are covered by committed tests). A non-halved visit simply
+adds its gain: `total = priorTotal + gained`.
+
+**The round only completes once the LAST player in the rotation has thrown**
+(`game.current === game.players.length - 1`, same timing convention as
+Baseball/Shanghai), and **the win condition is only checked on that
+round-completing visit, and only once every configured target has been
+reached**: totals are compared, and the match ends only on a single unique
+highest total — a tie continues into extra rounds, repeating the final
+target (`halveItRoundTarget()` caps at the target list's own length rather
+than cycling back to round 1, the same Baseball/Shanghai extra-round
+precedent — this doc's own design section didn't explicitly address ties,
+so this fills that gap using the established convention rather than
+inventing a new one). Like Baseball/Shanghai, a final-round win isn't always
+self-referential to the round-ending visit, so `evaluateVisitHalveIt()`
+returns `{ matchComplete, winnerIndex }` rather than assuming the current
+player won; `enterTurnHalveIt()` calls `onLegWonHalveIt(ev.winnerIndex)`.
+
+### `turns.bust` — repurposed as the halving flag, `turns.scored` as the gain
+
+Following the exact column-repurposing precedent Doubles Practice/guided
+Around the Clock already established for `bust`: `turns.scored` stores the
+visit's **gain only** (`0` on a halved visit, never the halving delta
+itself — the same "store the gain, derive the rest" shape Bob's 27's own
+penalty already uses), and `turns.bust=1` marks a halved visit for cheap
+querying. `turns.checkout`/`turns.leg_won` are never set (no checkout or
+self-referential-win concept exists here).
+
+### Consistency guard (SEC-25-style, `addTurn()` in `backend/db.js`)
+
+Same shape as Baseball/Shanghai's own guards — the round is re-derived from
+the player's own prior-turn count (`halveItRoundTarget(priorTurns+1,
+targets)`), and a hostile `scored` the target/ring can't produce is
+rejected. `checkout` is rejected outright. **Unlike** Shanghai/Baseball,
+`bust` is NOT rejected — it's validated for **consistency** instead: `bust`
+must be `true` iff the derived gain is exactly `0`, since `bust` here
+legitimately means "this visit halved the total," not "this is illegal."
+
+### Stats not computable by a single SQL aggregate — the one genuine complication this drill has that Baseball/Shanghai don't
+
+Because the running total is **order-dependent** (`ceil(total/2)` interspersed
+with additions, not a flat sum), it can't be derived with `SUM(scored)` the
+way RPI/PPR are. `_replayHalveItLegTotals(mode)` (`backend/db.js`) replays
+every matching turn once, in order, computing each `(game, set, leg,
+player)` group's final total exactly the way `rebuildHalveItState()` does for
+live resume — same "nothing pre-aggregated, replay the raw turns" philosophy,
+just read-only and grouped for stats instead of resuming a game.
+`getHalveItWonLegs(playerId, mode)` derives each completed leg's winner from
+this replay by comparing final totals (Halve-It has no `leg_won=1` signal at
+all, ever — there's no instant-win condition, so unlike Shanghai's hybrid
+derivation this is a pure Baseball-style comparison with no self-referential
+case to special-case).
+
+### Stats (`GAME_TYPES.halve_it.statDefs` / `HALVE_IT_STAT_DEFS`)
+
+**Stat bubbles** (`getHalveItStatBubbles(name, mode)`): Avg Final Total
+(`avgFinalTotal`, averaged over every completed leg via the replay above),
+Times Halved (`SUM(bust)`), Win Rate, Games Played, Darts Thrown, and Best
+Round (`MAX(scored)` — highest single-round gain, the same "peak single-round
+figure in the bubbles, not Personal Bests" split Baseball's own Best Inning
+uses).
+
+**Personal Bests** (`getHalveItPersonalBests(name, mode)`, built on
+`getHalveItWonLegs()`): `bestFinalTotal`, `fewestDartsToWin`, `winStreak`,
+`recentFormTotal` (last 10 won legs), `lifetimeTotal` — same 5-field shape as
+Baseball's/Shanghai's own.
+
+**Home page leaderboards**: Highest Final Total (`getHalveItBestTotalLeaderboard()`,
+one row per player, their peak total across BOTH won and lost legs — same
+no-minimum-floor "single best-ever run" shape as Checkout Ladder's/Checkout
+Blitz's own boards, not gated on having actually won) and Most Halve-It Wins
+(`getHalveItWinLeaderboard()`, H2H only, identical shape to Baseball's/
+Shanghai's own).
+
+### Badges
+
+🪓 **Halved at the Death** (recurring) — the winner's own most recent visit
+(the one that decided the leg) halved their total, and they still won.
+Tracked via a per-player `lastVisitHalved` flag, overwritten every visit.
+🛡️ **No Half Measures** (recurring) — won the leg without ever being halved,
+tracked via a per-player `everHalved` flag, reset every leg. Both are
+leg-OUTCOME badges (checked once the winner is known, in `onLegWonHalveIt()`),
+the same split Baseball's Perfect Game/Walk-Off use.
+
+### Live scoreboard
+
+`renderGameHalveIt()` (`frontend/index.html`) and `renderers.halve_it`
+(`frontend/display.html`) both render a per-round chalkboard grid — row
+labels show the round's own **target label** ("Double 7", "Bull"), not a
+bare number, and each cell shows the **running total after that round**
+(never a per-round delta) with a `½` marker on a halved round, so the
+halving is visible without relying on color alone (per the roadmap doc's own
+accessibility note). `display.html` has no shared `scoring.js` module, so
+`liveSnapshot()` sends the FULL `halveItTargets` array (not just the live
+round's own target) so its renderer can compute every row's label itself.
+`renderPadHalveIt()` shows one button for the round's live target — an
+unrestricted round works exactly like Baseball's/Shanghai's own single-target
+pad; a ring-restricted round (e.g. double 7) shows the ring prefix on the
+button (`D7`) and relies on the same ambient multi-row selector Bob's 27's own
+pad already uses, since `halveItDartValue()` naturally scores the wrong ring
+as `0` regardless of which button was tapped.
+
+### Saved games
+
+Position is a pure function of recorded turns: `rebuildHalveItState({names,
+legsPerSet, targets, turns})` (`frontend/scoring.js`) replays running totals
++ round number from the turn sequence — including `everHalved`/
+`lastVisitHalved` per player, so a resumed leg's badge check still sees the
+whole leg's halving history, not just turns recorded after the resume.
+Reused identically by `_savedGamePosition()` (write-time) and `resumeGame()`'s
+`halve_it` branch (read-time). `'halve_it'` is in both `SAVABLE_GAME_TYPES`
+lists (`backend/db.js` and `frontend/index.html`).
+
+### Testing
+
+`backend/test/scoring.test.js`: `halveItRoundTarget()`'s in-range/extra-round
+capping and empty-list fallback, `halveItDartValue()`'s unrestricted/
+ring-restricted/wrong-sector/bull cases, and `evaluateVisitHalveIt()`'s
+hit/halve/round-up/final-round/tie/extra-round cases. `backend/test/db.halve-it-stats.test.js`:
+stat-bubble formulas, `getHalveItWonLegs()`'s pure-total derivation (including
+a case proving the order-dependent replay differs from a naive
+`SUM(scored)`), the best-total/win leaderboards, and an
+X01/Cricket/Baseball/Shanghai/Halve-It cross-contamination regression.
+`backend/test/db.turn-consistency-guard.test.js`: the SEC-25-style guard's
+accept/reject cases, including the bust-must-match-the-derived-halving
+consistency check and the ring-restricted/extra-round target-advancement
+cases. Verified end-to-end with Playwright: the full New Game → Halve-It
+practice flow (a hit, a halving with correct round-up math, a ring-restricted
+round, a full 7-round game to completion), the 🛡️ No Half Measures badge,
+stat bubbles/personal bests/best-total leaderboard, the live scorecard's
+target-label row headers, and the `/display` scorecard.

@@ -46,7 +46,7 @@ Others
   explanatory + count-aware achievement notifications) — done, see docs/archive/next-session-plan.md
 - Add additional games (Cricket, Baseball, etc.) — full design in docs/game-modes-roadmap.md
 - Shanghai game mode (round-by-round numbers, instant win on single+double+treble) — done, see docs/archive/shanghai-roadmap.md
-- Halve-It game mode (hit each round's target or your score halves) — full design in docs/halve-it-roadmap.md
+- Halve-It game mode (hit each round's target or your score halves) — core game done, see docs/halve-it-roadmap.md; the custom target editor is a separate, still-open item on docs/open-roadmap-items.md
 - Cut-throat Cricket variant (points score onto open opponents, lowest wins — the piece deferred at Cricket v1) — done, see docs/archive/cutthroat-cricket-roadmap.md
 - Structured practice ladders: Bob's 27 doubles routine and the 121 checkout ladder — done, both parts, see docs/archive/practice-ladders-roadmap.md
 - The Pressure Chamber (15-round pressure-training drill, solo or identical-sequence H2H — a seeded Pressure Card per round pairing a target with a situational modifier like Sudden Death/No Warmup/Match Dart, Composure Points, a Composure Rating, and a self-declare-before-verifying honesty mechanic) — full design in docs/pressure-chamber-roadmap.md

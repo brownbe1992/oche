@@ -1000,6 +1000,124 @@ function rebuildShanghaiState({ names, legsPerSet, maxRounds, turns }){
   return { players, current, starter, setNo, legNo, shanghaiRound };
 }
 
+// Halve-It (docs/halve-it-roadmap.md). Structurally another Baseball/
+// Shanghai sibling (fixed round sequence, all players in lockstep on one
+// shared live round), with two differences: the round's own "target" is a
+// {sector, ring?} pair rather than a single number (ring omitted = any ring
+// of that sector counts at face value; ring present = only that exact ring
+// counts), and there is no instant-win condition at all — the match only
+// ever completes once the final round settles, same as Baseball's own shape
+// (never Shanghai's early-exit case).
+const HALVE_IT_RING_MULT = { single: 1, double: 2, treble: 3 };
+// The classic pub set this game defaults to when no custom config.targets is
+// supplied (docs/halve-it-roadmap.md's own "common set"): 20, 16,
+// double 7, 14, treble 10, 17, Bull.
+const HALVE_IT_DEFAULT_TARGETS = [
+  { sector: 20 },
+  { sector: 16 },
+  { sector: 7, ring: 'double' },
+  { sector: 14 },
+  { sector: 10, ring: 'treble' },
+  { sector: 17 },
+  { sector: 25 },
+];
+function halveItRoundTarget(round, targets){
+  const list = (targets && targets.length) ? targets : HALVE_IT_DEFAULT_TARGETS;
+  const idx = Math.min(round, list.length) - 1;
+  return list[idx];
+}
+// A single dart's value against a given round target — 0 if it doesn't
+// satisfy the target's sector (and ring, when restricted); mult*sector
+// otherwise. Doubles as bull scoring for free: makeDartCore() already
+// downgrades an attempted "treble bull" tap to a single (no treble-bull ring
+// physically exists), so sector 25 never sees mult=3, and mult*sector already
+// yields 25/50 for single/double bull without any bull-specific branch.
+function halveItDartValue(d, target){
+  if(!target || d.sector !== target.sector) return 0;
+  if(target.ring && d.mult !== HALVE_IT_RING_MULT[target.ring]) return 0;
+  return d.mult * d.sector;
+}
+// Halving rounds UP (docs/halve-it-roadmap.md's own recommendation,
+// since round-down can spiral a score to a permanent 0 — 1 -> 0 -> 0 forever
+// — while round-up's floor is 1 -> 1, never lower).
+function evaluateVisitHalveIt(player, darts, game){
+  const round = game.halveItRound;
+  const targets = (game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS;
+  const maxRounds = targets.length;
+  const target = halveItRoundTarget(round, targets);
+  let gained = 0;
+  darts.forEach(d => { gained += halveItDartValue(d, target); });
+  const halved = gained === 0;
+  const priorTotal = player.total || 0;
+  const total = halved ? Math.ceil(priorTotal / 2) : priorTotal + gained;
+  const roundTotals = Object.assign({}, player.roundTotals, { [round]: total });
+  const roundComplete = game.current === game.players.length - 1;
+  let matchComplete = false, winnerIndex = null;
+  if(roundComplete && round >= maxRounds){
+    const totals = game.players.map((pl, i) => i === game.current ? total : (pl.total || 0));
+    const maxTotal = Math.max(...totals);
+    const leaders = totals.reduce((acc, t, i) => { if(t === maxTotal) acc.push(i); return acc; }, []);
+    if(leaders.length === 1){ matchComplete = true; winnerIndex = leaders[0]; }
+  }
+  return { scored: gained, gained, halved, total, roundTotals, target, roundComplete, matchComplete, winnerIndex };
+}
+
+// rebuildBaseballState()/rebuildShanghaiState() with the round target keyed
+// off config.targets instead of a hardcoded/parameterized number, and no
+// instant-win branch to special-case (Halve-It never ends early).
+function rebuildHalveItState({ names, legsPerSet, targets, turns }){
+  // everHalved/lastVisitHalved: per-leg tracking the live UI reads to award
+  // 🛡️ No Half Measures / 🪓 Halved at the Death — reconstructed here too so a
+  // resumed leg's badge check still sees the leg's FULL halving history, not
+  // just turns recorded after the resume.
+  const players = names.map(name => ({ name, total:0, roundTotals:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0,
+    everHalved:false, lastVisitHalved:false }));
+  let current = 0, starter = 0, setNo = 1, legNo = 1, halveItRound = 1, seenFirst = false;
+  let pendingNewLeg = false, pendingNewSet = false;
+  const resetLeg = (p, newSet) => { p.total = 0; p.roundTotals = {}; p.everHalved = false; p.lastVisitHalved = false; p.legDarts = 0; if(newSet) p.setDarts = 0; };
+  for(const t of turns){
+    if(seenFirst && (t.setNo !== setNo || t.legNo !== legNo)){
+      starter = (starter + 1) % players.length;
+      current = starter;
+      const newSet = t.setNo !== setNo;
+      players.forEach(p => resetLeg(p, newSet));
+      setNo = t.setNo; legNo = t.legNo; halveItRound = 1;
+    }
+    seenFirst = true;
+    pendingNewLeg = false; pendingNewSet = false;
+    current = t.playerIndex;
+    const p = players[t.playerIndex];
+    const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
+    const ev = evaluateVisitHalveIt(p, dartsCore, { players, current, halveItRound, config:{ targets } });
+    p.total = ev.total; p.roundTotals = ev.roundTotals;
+    p.lastVisitHalved = ev.halved;
+    if(ev.halved) p.everHalved = true;
+    p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
+    if(ev.matchComplete){
+      const w = players[ev.winnerIndex];
+      w.legsWon += 1;
+      if(w.legsWon >= legsPerSet){
+        w.setsWon += 1;
+        players.forEach(pp => { pp.legsWon = 0; });
+        pendingNewSet = true;
+      }
+      pendingNewLeg = true;
+      current = ev.winnerIndex;
+    } else {
+      if(ev.roundComplete) halveItRound += 1;
+      current = (t.playerIndex + 1) % players.length;
+    }
+  }
+  if(pendingNewLeg){
+    starter = (starter + 1) % players.length;
+    current = starter;
+    players.forEach(p => resetLeg(p, pendingNewSet));
+    if(pendingNewSet){ setNo += 1; legNo = 1; } else { legNo += 1; }
+    halveItRound = 1;
+  }
+  return { players, current, starter, setNo, legNo, halveItRound };
+}
+
 // Around the Clock (solo, guided drill) — a "round" is one leg, ended by
 // evaluateDartAroundTheClock()'s own `completed` flag rather than a leg-win
 // visit; no starter rotation (always the one player). Each recorded turn is a
@@ -1367,5 +1485,6 @@ if (typeof module !== 'undefined' && module.exports) {
     KILLER_DEFAULT_LIVES, shuffleKillerNumbers, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
     MARATHON_FATIGUE_TIERS, computeFatigueSplit, MARATHON_TREND_MIN_LEGS, MARATHON_TREND_TOLERANCE, classifyMarathonTrend,
     shanghaiRoundTarget, isShanghaiWin, evaluateVisitShanghai, rebuildShanghaiState,
+    HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, evaluateVisitHalveIt, rebuildHalveItState,
   };
 }

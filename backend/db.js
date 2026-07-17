@@ -29,7 +29,8 @@ const { checkoutHint, dartLabel,
   GAUNTLET_STATION_ORDER, gauntletTotalScars, gauntletResultTier, rebuildGauntletState,
   KILLER_DEFAULT_LIVES, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
   computeFatigueSplit, classifyMarathonTrend,
-  shanghaiRoundTarget, evaluateVisitShanghai, rebuildShanghaiState } = require('../frontend/scoring.js');
+  shanghaiRoundTarget, evaluateVisitShanghai, rebuildShanghaiState,
+  HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, rebuildHalveItState } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -1306,6 +1307,31 @@ function addTurn(gameId, t, opts = {}) {
     if (scored !== expectedPoints) {
       throw httpError(400, "scored does not match this Shanghai visit's points on the round's own number");
     }
+  } else if (gameTypeRow && gameTypeRow.game_type === 'halve_it') {
+    // docs/halve-it-roadmap.md: same SEC-25 shape as Baseball/Shanghai's own
+    // branches above — turns.scored IS arithmetically derivable from this visit's
+    // own darts plus the round's target (sector, optionally ring-restricted), and
+    // is the points-gained total every Halve-It stat trusts. Unlike Shanghai,
+    // `bust` is NOT rejected here -- it's repurposed as the "this visit halved the
+    // running total" flag (docs/halve-it-roadmap.md's own column-repurposing
+    // precedent, same as Doubles Practice/guided Around the Clock), so it's
+    // validated for CONSISTENCY with the derived points instead: bust must be true
+    // iff the visit gained exactly 0 (hitting the target always scores >0, so
+    // scored===0 is unambiguous). `checkout` has no meaning here and is rejected.
+    if (t.checkout) throw httpError(400, 'a Halve-It turn cannot be a checkout');
+    const gameRow = db.prepare('SELECT config FROM games WHERE id=?').get(Number(gameId));
+    const cfg = gameRow && gameRow.config ? JSON.parse(gameRow.config) : null;
+    const targets = (cfg && cfg.targets) || HALVE_IT_DEFAULT_TARGETS;
+    const priorTurns = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE game_id = ? AND player_id = ? AND set_no = ? AND leg_no = ?')
+      .get(Number(gameId), p.id, setNo, legNo).n;
+    const target = halveItRoundTarget(priorTurns + 1, targets);
+    const expectedGained = darts.reduce((sum, d) => sum + halveItDartValue({ sector: d.sector, mult: d.multiplier }, target), 0);
+    if (scored !== expectedGained) {
+      throw httpError(400, "scored does not match this Halve-It visit's points on the round's own target");
+    }
+    if (!!t.bust !== (expectedGained === 0)) {
+      throw httpError(400, 'bust must reflect whether this Halve-It visit missed the round\'s target entirely');
+    }
   }
   // Checkout Trainer (docs/archive/checkout-trainer-roadmap.md): the target score offered
   // for this round. Server-computed context, not a scored value, so it's only
@@ -1387,7 +1413,7 @@ function completeGame(gameId, winnerName) {
    bobs_27 (docs/archive/practice-ladders-roadmap.md Part A) IS savable — its
    running total replays deterministically from `turns` the same way every
    other entry here does (rebuildBobs27State(), frontend/scoring.js). */
-const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'shanghai'];
+const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'shanghai', 'halve_it'];
 
 function _savedGameRow(gameId) {
   return db.prepare('SELECT * FROM saved_games WHERE game_id = ?').get(Number(gameId));
@@ -1507,6 +1533,12 @@ function _savedGamePosition(game, participants, turns) {
     const maxRounds = (config && config.rounds) || 7;
     const r = rebuildShanghaiState({ names, legsPerSet, maxRounds, turns });
     return { setNo: r.setNo, legNo: r.legNo, shanghaiRound: r.shanghaiRound, players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, totalPoints: p.totalPoints })) };
+  }
+  if (game.game_type === 'halve_it') {
+    const config = game.config ? JSON.parse(game.config) : null;
+    const targets = (config && config.targets) || HALVE_IT_DEFAULT_TARGETS;
+    const r = rebuildHalveItState({ names, legsPerSet, targets, turns });
+    return { setNo: r.setNo, legNo: r.legNo, halveItRound: r.halveItRound, players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, total: p.total })) };
   }
   if (game.game_type === 'around_the_clock') {
     const r = rebuildAroundTheClockState({ turns });
@@ -3332,6 +3364,165 @@ function getShanghaiWinLeaderboard() {
     rate: r.played ? +((r.won / r.played) * 100).toFixed(1) : 0 }));
 }
 
+/* ---------- Halve-It (docs/halve-it-roadmap.md) ----------
+   Structurally another Baseball/Shanghai sibling, but with one genuine
+   complication neither of those has: Halve-It's running total is NOT a
+   simple SUM(scored) -- the halving rule (ceil(total/2) whenever a visit
+   gains 0) makes the total order-dependent, so it can't be computed with a
+   single SQL aggregate the way RPI/PPR can. Replayed once here in JS instead
+   -- the same "nothing pre-aggregated, replay the raw turns" philosophy
+   rebuildHalveItState() already uses for live resume, just read-only and
+   grouped for stats. Also unlike Baseball/Shanghai, Halve-It never sets
+   turns.leg_won at all -- there's no instant-win condition, ever (the match
+   only completes once the final round settles), so a leg's winner is ALWAYS
+   derived from final totals, with no hybrid self-referential case to handle. */
+function _replayHalveItLegTotals(mode) {
+  const scope = _scope({ mode, gameType: 'halve_it' });
+  const rows = db.prepare(`
+    SELECT t.id, t.game_id, t.set_no, t.leg_no, t.player_id, t.scored, t.bust,
+           g.completed_at,
+           (SELECT COUNT(*) FROM darts d WHERE d.turn_id=t.id) AS darts
+    FROM turns t JOIN games g ON g.id=t.game_id
+    WHERE 1=1 ${scope}
+    ORDER BY t.game_id, t.set_no, t.leg_no, t.player_id, t.id
+  `).all();
+  const legs = new Map();
+  for (const r of rows) {
+    const key = `${r.game_id}|${r.set_no}|${r.leg_no}|${r.player_id}`;
+    let leg = legs.get(key);
+    if (!leg) {
+      leg = { gameId: r.game_id, setNo: r.set_no, legNo: r.leg_no, playerId: r.player_id, total: 0, darts: 0, halvedCount: 0, lastTurnId: r.id, completed: !!r.completed_at };
+      legs.set(key, leg);
+    }
+    leg.total = r.bust ? Math.ceil(leg.total / 2) : leg.total + r.scored;
+    leg.darts += r.darts;
+    if (r.bust) leg.halvedCount += 1;
+    leg.lastTurnId = r.id;
+    leg.completed = !!r.completed_at;
+  }
+  return Array.from(legs.values());
+}
+
+function getHalveItStatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'halve_it' });
+
+  const gamesRow = db.prepare(`
+    SELECT COUNT(*) AS played, SUM(CASE WHEN g.winner_id=? THEN 1 ELSE 0 END) AS won
+    FROM game_players gp JOIN games g ON g.id=gp.game_id
+    WHERE gp.player_id=? ${scope} AND g.completed_at IS NOT NULL
+  `).get(p.id, p.id);
+  const gamesPlayed = gamesRow?.played ?? 0;
+  const winPct = gamesPlayed > 0 ? (gamesRow.won / gamesPlayed * 100) : null;
+
+  const dartsThrown = db.prepare(`SELECT COUNT(*) AS v FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+
+  const timesHalved = db.prepare(`SELECT COALESCE(SUM(t.bust),0) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
+
+  // Best Round -- highest single-round GAIN (never a halved visit, which
+  // always gains 0), same "peak single-round figure" shape as Baseball's own
+  // Best Inning bubble.
+  const bestRoundRow = db.prepare(`SELECT MAX(t.scored) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id);
+  const bestRound = (dartsThrown > 0) ? (bestRoundRow?.v ?? null) : null;
+
+  const myLegs = _replayHalveItLegTotals(mode).filter(l => l.playerId === p.id && l.completed);
+  const avgFinalTotal = myLegs.length ? myLegs.reduce((s, l) => s + l.total, 0) / myLegs.length : null;
+
+  return { gamesPlayed, winPct, dartsThrown, timesHalved, bestRound, avgFinalTotal };
+}
+
+// A completed Halve-It leg's winner is ALWAYS derived from final totals
+// (never a leg_won=1 turn -- see this section's own header comment) --
+// direct analog of getBaseballWonLegs(), just built on the halving-aware
+// replay above instead of a plain SUM(scored).
+function getHalveItWonLegs(playerId, mode) {
+  const all = _replayHalveItLegTotals(mode).filter(l => l.completed);
+  const byLeg = new Map();
+  for (const l of all) {
+    const key = `${l.gameId}|${l.setNo}|${l.legNo}`;
+    if (!byLeg.has(key)) byLeg.set(key, []);
+    byLeg.get(key).push(l);
+  }
+  const won = [];
+  for (const legs of byLeg.values()) {
+    const maxTotal = Math.max(...legs.map(l => l.total));
+    const mine = legs.find(l => l.playerId === playerId && l.total === maxTotal);
+    if (mine) won.push(mine);
+  }
+  return won;
+}
+
+// Halve-It's Personal Bests -- same 5-field shape as getBaseballPersonalBests()/
+// getShanghaiPersonalBests(), bestFinalTotal replacing bestLegRuns/bestLegPoints
+// (docs/halve-it-roadmap.md's own "best final total" is this field;
+// its "best single round" lives in the stat bubbles above instead, matching
+// Baseball's own split between Personal Bests and its Best Inning bubble).
+function getHalveItPersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+
+  const legs = getHalveItWonLegs(p.id, mode);
+  const bestFinalTotal = legs.length ? Math.max(...legs.map(l => l.total)) : null;
+  const fewestDartsToWin = legs.length ? Math.min(...legs.map(l => l.darts)) : null;
+
+  const recentLegs = legs.slice().sort((a, b) => b.lastTurnId - a.lastTurnId).slice(0, 10);
+  const recentFormTotal = recentLegs.length ? recentLegs.reduce((s, l) => s + l.total, 0) / recentLegs.length : null;
+  const lifetimeTotal = legs.length ? legs.reduce((s, l) => s + l.total, 0) / legs.length : null;
+
+  let winStreak = 0;
+  if (mode !== 'practice') {
+    const h2hScope = _scope({ mode: 'h2h', gameType: 'halve_it' });
+    const recentGames = db.prepare(`
+      SELECT g.winner_id AS winnerId
+      FROM games g JOIN game_players gp ON gp.game_id=g.id
+      WHERE gp.player_id=? AND g.completed_at IS NOT NULL ${h2hScope}
+      ORDER BY g.completed_at DESC
+      LIMIT 50
+    `).all(p.id);
+    for (const r of recentGames) {
+      if (r.winnerId === p.id) winStreak++; else break;
+    }
+  }
+
+  return { bestFinalTotal, fewestDartsToWin, winStreak, recentFormTotal, lifetimeTotal };
+}
+
+// Highest final total ever reached, one row per player -- same "single best-
+// ever run, no minimum floor" shape as Checkout Blitz's/121 Checkout Ladder's
+// own Home leaderboards, scoped across BOTH won and lost legs (a peak total
+// is a real feat even in a leg that was eventually lost to an even bigger one).
+function getHalveItBestTotalLeaderboard(mode) {
+  const legs = _replayHalveItLegTotals(mode).filter(l => l.completed);
+  const byPlayer = new Map();
+  for (const l of legs) {
+    const cur = byPlayer.get(l.playerId);
+    if (cur == null || l.total > cur) byPlayer.set(l.playerId, l.total);
+  }
+  return Array.from(byPlayer.entries())
+    .map(([playerId, total]) => ({ name: db.prepare('SELECT name FROM players WHERE id=?').get(playerId)?.name, total }))
+    .filter(r => r.name)
+    .sort((a, b) => b.total - a.total);
+}
+
+// Win/loss leaderboard -- identical shape to getBaseballWinLeaderboard()/
+// getShanghaiWinLeaderboard() (H2H only by nature: practice mode has no winner_id).
+function getHalveItWinLeaderboard() {
+  const scope = _scope({ mode: 'h2h', gameType: 'halve_it' });
+  const winRows = db.prepare(`
+    SELECT p.name AS name, COUNT(*) AS played, SUM(CASE WHEN g.winner_id = p.id THEN 1 ELSE 0 END) AS won
+    FROM game_players gp
+    JOIN players p ON p.id = gp.player_id
+    JOIN games g ON g.id = gp.game_id
+    WHERE g.completed_at IS NOT NULL ${scope}
+    GROUP BY p.id
+    HAVING played >= 1
+    ORDER BY won DESC, played ASC
+  `).all();
+  return winRows.map(r => ({ name: r.name, played: r.played, won: r.won,
+    rate: r.played ? +((r.won / r.played) * 100).toFixed(1) : 0 }));
+}
+
 /* ---------- Doubles Practice (docs/game-modes-roadmap.md) ----------
    Solo drill mode: no opponent, no win/loss, no legs won — a "round" is one
    turns.leg_no grouping (incremented client-side by startNextRoundDoublesPractice()
@@ -4788,7 +4979,7 @@ function _mf(mode) {
 // 'x01'/'cricket', server.js only uses a query param to pick which function to
 // call), and is whitelisted here regardless as a defense-in-depth measure
 // against string interpolation.
-const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer', 'shanghai'];
+const KNOWN_GAME_TYPES = ['x01', 'cricket', 'baseball', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'killer', 'shanghai', 'halve_it'];
 function _scope({ mode, gameType } = {}) {
   let sql = _mf(mode);
   if (gameType) {
@@ -7742,6 +7933,7 @@ module.exports = {
   getBaseballStatBubbles, getBaseballPersonalBests,
   getBaseballPerfectInningsStats, getBaseballRpiLeaderboard, getBaseballWinLeaderboard, getBaseballPerfectGameStats,
   getShanghaiStatBubbles, getShanghaiPersonalBests, getShanghaiShanghaisStats, getShanghaiWinLeaderboard, getShanghaiPprLeaderboard,
+  getHalveItStatBubbles, getHalveItPersonalBests, getHalveItBestTotalLeaderboard, getHalveItWinLeaderboard,
   getCricketMprLeaderboard, getCricketWinLeaderboard, getCricketPerfectLegStats,
   getDoublesPracticeStatBubbles, getDoublesPracticePersonalBests,
   getDoublesPracticeAccuracyLeaderboard, getDoublesPracticeBestRoundStats, getDoublesPracticeHitSectors,
