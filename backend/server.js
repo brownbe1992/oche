@@ -737,7 +737,7 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/summary'       && m === 'GET') return send(res, 200, db.getSummary());
     if (p === '/api/home-extra'    && m === 'GET') return send(res, 200, db.getHomeExtra());
-    // End-of-Night Session Recap (docs/session-recap-roadmap.md) — same public-read
+    // End-of-Night Session Recap (docs/archive/session-recap-roadmap.md) — same public-read
     // tier as every other stats endpoint it aggregates; date validated inside
     // getSessionRecap() itself (YYYY-MM-DD), same pattern as /api/challenges/status.
     if (p === '/api/session-recap' && m === 'GET') return send(res, 200, db.getSessionRecap(url.searchParams.get('date')));
@@ -785,6 +785,9 @@ const server = http.createServer(async (req, res) => {
         : gameType === 'checkout_ladder' ? db.getCheckoutLadderPersonalBests(name, mode)
         : gameType === 'gauntlet' ? db.getGauntletPersonalBests(name, mode)
         : gameType === 'killer' ? db.getKillerPersonalBests(name, mode)
+        // 'marathon' is a routing key only, never a real games.game_type value
+        // (every Marathon leg is a plain 'x01' game) — see docs/archive/marathon-mode-roadmap.md.
+        : gameType === 'marathon' ? db.getMarathonPersonalBests(name, mode)
         : gameType === 'baseball' ? db.getBaseballPersonalBests(name, mode)
         : gameType === 'doubles_practice' ? db.getDoublesPracticePersonalBests(name, mode)
         : gameType === 'chuckin' ? db.getChuckinPersonalBests(name, mode)
@@ -807,6 +810,7 @@ const server = http.createServer(async (req, res) => {
         : gameType === 'checkout_ladder' ? db.getCheckoutLadderStatBubbles(name, mode)
         : gameType === 'gauntlet' ? db.getGauntletStatBubbles(name, mode)
         : gameType === 'killer' ? db.getKillerStatBubbles(name, mode)
+        : gameType === 'marathon' ? db.getMarathonStatBubbles(name, mode)
         : db.getPlayerStatBubbles(name, mode));
     }
     if (p === '/api/players/gauntlet-scar-map' && m === 'GET') {
@@ -1001,7 +1005,33 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/games' && m === 'POST') { if (!requireWrite(req, res)) return; const b = await readJson(req); return send(res, 200, db.createGame({ ...b, practice: b.practice ? 1 : 0 })); }
 
+    // Marathon Mode (docs/archive/marathon-mode-roadmap.md) — the session/leg-chaining
+    // endpoints. Never accepts a client-supplied game_id anywhere; each leg's
+    // game is always created server-side, inside db.js, by these calls
+    // themselves.
+    if (p === '/api/marathon/sessions' && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.startMarathonSession(b.player, b.durationMinutes));
+    }
     let mt;
+    if ((mt = p.match(/^\/api\/marathon\/sessions\/(\d+)$/)) && m === 'GET') {
+      return send(res, 200, db.getMarathonSessionDetail(Number(mt[1])));
+    }
+    if ((mt = p.match(/^\/api\/marathon\/sessions\/(\d+)\/legs$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.startNextMarathonLeg(Number(mt[1]), b.player));
+    }
+    if ((mt = p.match(/^\/api\/marathon\/sessions\/(\d+)\/end$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      return send(res, 200, db.endMarathonSession(Number(mt[1])));
+    }
+    if (p === '/api/stats/marathon-leaderboard' && m === 'GET') {
+      return send(res, 200, db.getMarathonLeaderboard());
+    }
+
+
     if ((mt = p.match(/^\/api\/games\/(\d+)\/turns\/last$/)) && m === 'DELETE') {
       if (!requireWrite(req, res)) return;
       // docs/bug-roadmap.md BUG-13: optional — index.html sends it when it knows

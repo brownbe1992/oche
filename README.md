@@ -109,7 +109,7 @@ The landing page shows a live snapshot of all-time activity:
 
 **🌙 Tonight's Recap** — appears once at least one H2H game has completed today: a one-tap digest of the night so far (game count, player count, badges earned, personal bests set), opening a full recap screen with a date picker (any past night is recomputable for free — nothing about the recap is stored). The recap screen shows the night's results (per-matchup win/loss records, or a flat list for 3+ player games), each player's own tonight-only stats (games won/lost, darts thrown, best visit, best leg average, 180s, ton+ checkouts — best visit/leg scoped to X01), a light "also tonight" line for any solo/practice activity, badges earned, personal bests set (compared against each player's own best from every night before this one), and a chronological moments timeline (180s, high checkouts, match wins, badges). A **📤 Share** button renders the whole night as a single summary card through the same shareable-moment card engine every other achievement uses.
 
-**H2H / Practice toggle** — switches the leaderboards below between head-to-head and solo/practice stats. A second game-type toggle — **X01 / Cricket / Doubles Practice / Bob's 27 / 121 Checkout Ladder / The Gauntlet / Checkout Trainer / Around the Clock / Around the World / Killer** — switches the leaderboards between each game type's own stat vocabulary (the solo-only entries — Doubles Practice, Bob's 27, 121 Checkout Ladder, The Gauntlet, Checkout Trainer, Around the Clock, and Around the World — only appear while the Practice tab is selected; **Killer** is the inverse — always H2H, since the whole mechanic needs opponents to attack — and only appears while the H2H tab is selected). (Just Chuckin' It isn't on this toggle — it has no win/opponent-based stats to rank on a leaderboard; its stats are Player Profile-only.)
+**H2H / Practice toggle** — switches the leaderboards below between head-to-head and solo/practice stats. A second game-type toggle — **X01 / Cricket / Doubles Practice / Bob's 27 / 121 Checkout Ladder / The Gauntlet / Checkout Trainer / Around the Clock / Around the World / Killer / Marathon Mode** — switches the leaderboards between each game type's own stat vocabulary (the solo-only entries — Doubles Practice, Bob's 27, 121 Checkout Ladder, The Gauntlet, Checkout Trainer, Around the Clock, Around the World, and Marathon Mode — only appear while the Practice tab is selected; **Killer** is the inverse — always H2H, since the whole mechanic needs opponents to attack — and only appears while the H2H tab is selected). (Just Chuckin' It isn't on this toggle — it has no win/opponent-based stats to rank on a leaderboard; its stats are Player Profile-only.)
 
 **📈 Household Ratings** — always visible regardless of which game-type tab is selected, since it's a single rating combined across every competitive game type (X01, Cricket, Baseball — "who beats whom," not a per-game-type number). Shows rating + win/loss record, ranked descending, for every player with at least 5 rated H2H games. See [Player Profile](#player-profile) for a player's own rating, rank, and rating-over-time chart, and [Achievements & Badges](#achievements--badges) for its two badges.
 
@@ -149,6 +149,9 @@ The landing page shows a live snapshot of all-time activity:
 
 **Killer leaderboard** (switching the toggle to Killer — no mode param, always H2H, only shown outside the Practice tab):
 - 🔪 **Most Wins (win rate)** — same shape as X01/Cricket's own Most Wins leaderboards, since Killer has a real winner per match.
+
+**Marathon Mode leaderboard** (switching the toggle to Marathon Mode — no mode param, always solo, only shown outside the H2H tab):
+- 🏃 **Best Session — Lowest Fatigue Split** — each player's own single best (lowest) session, ranked **ascending**, same sort direction as The Gauntlet's own leaderboard.
 
 **Checkout Trainer leaderboard** (switching the toggle to Checkout Trainer — no mode param, always solo, only shown outside the H2H tab):
 - ⏱️ **Checkout Blitz — Best Score** — each player's single best-ever 60-second run, ranked descending. No minimum-attempts floor (a peak single-run value, like Highest Checkout, not a rate).
@@ -223,6 +226,8 @@ Checkout Trainer has its own 34-badge set (28 laddered milestones across 5 ladde
 **🥋 The Gauntlet** is a 20-station solo endurance warm-up — one station per board number, in a fixed order that never puts two nearby numbers back to back (so you're always re-targeting across the board, never settling into one spot). Each station is 3 darts, strictly in order: the single, then the treble, then the double of that station's own number — no partial credit for landing the right number on the wrong ring. Miss 2 of the 3 and you get one repeat attempt at that same station; miss all 3 and it's a Deep Scar (counts double toward your total). A run always ends after all 20 stations settle (~15 minutes), landing on a result from Unmarked (0-5 total Scars) up through The Gauntlet Wins (31+). The scoring screen shows the live station, which of the 3 tasks is next, and the running Scar tally; Save Game mid-run and Undo Last Turn are both supported. See [Player Profile](#player-profile) for its own stat bubbles (Runs Completed, Avg Total Scars, Clean Station Rate, Deep Scar Rate, Retry Rate), a Personal Best (Lowest Total Scars — the one ascending-is-better Personal Best in this app), the Home page for its own leaderboard (also sorted ascending), and the **Gauntlet Scar Map** — a per-station weakness heatmap, averaged across every completed run you've ever finished, that accumulates the more you play.
 
 **🔪 Killer** is an elimination-format head-to-head game, always 2+ players — the only game type where every player's legal target is their own, randomly assigned. When the match starts, each player is dealt a random number, 1-20 (choose the become-a-killer lives threshold — 2, 3, or 5, standard is 3 — right there in New Game). Hit your own number to build lives toward that threshold (single = 1, double = 2, treble = 3, same as scoring anywhere else); the instant you reach it, you become a **killer** and can start attacking. From then on, hitting an opponent's number removes lives from them at the same rate; drop an opponent to 0 lives and they're eliminated. Watch out for friendly fire, though — hitting your *own* double after you're already a killer costs you exactly 1 life, a genuine way to eliminate yourself. Last player standing wins the leg; real best-of-N legs and sets are supported, same as X01/Cricket/Baseball. The live scoreboard shows every player's number, lives (as pips), and killer status at a glance. See [Player Profile](#player-profile) for its own stat bubbles (Games Played, Win Rate, Avg Kills/Leg, Avg Lives Lost/Leg, Survived Without Killer Rate), a Personal Best (Most Kills in a Leg), the Home page for its own win-rate leaderboard, and 3 achievements (🩸 First Blood, 🛡️ Untouchable, 🙈 Own Worst Enemy). Killer has no Save Game support — an intentional scope decision, not a limitation.
+
+**🏃 Marathon Mode** is a 45-minute solo endurance session — not a new way to score darts, a session *wrapper* chaining ordinary, unmodified 501 practice legs back to back with no return to the New Game screen between them. A persistent banner shows the leg count and time remaining, with an **End Marathon** control to stop early (the leg in progress is left unfinished; everything completed so far is kept). The 45-minute check happens only between legs, never mid-leg, so the actual session can run a little past 45 minutes if the final leg takes a while. When it's over, you get the story: a **fatigue split** (how much slower the second half ran than the first, clamped at zero — getting *faster* isn't a fatigue problem) landing on a tier from Iron down to Running on Empty, and a **trend read** across the whole session — The Cliff (fine, then a drop-off), The Warm Machine (slow start, steady finish), Flat Line (the goal — steady the whole way), or Inconclusive (too few legs, or too irregular a shape, for a clean read). Every leg is a genuinely real 501 leg — it counts toward lifetime X01 stats, Personal Bests, and even Nine-Darter, exactly like any other practice leg. Marathon Mode has no Save Game support, same reasoning as Killer. See [Player Profile](#player-profile) for its own stat bubbles (Sessions Completed, Avg Legs/Session, Avg Fatigue Split, plus a lifetime trend-pattern breakdown), Personal Bests (Lowest Fatigue Split, Most Legs in a Session), the Home page for its own leaderboard (lowest fatigue split, ascending), and 11 achievements (two lifetime ladders — sessions completed, legs completed — plus 🛡️ Iron, 📉 Flat Line, and ⏱️ Full Distance).
 
 ---
 
@@ -324,7 +329,7 @@ mechanics.
 
 ### Achievements & Badges
 
-Beyond 180s, Big Fish, and nine-darters, Oche tracks 33 X01 achievement badges (including a 5-tier lifetime-180s ladder and a handful of darts-culture one-offs — Bed & Breakfast, Madhouse, Shanghai) covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 5 Cricket-specific badges (including cut-throat's own 🔪 Stone Cold), 8 Baseball badges (Perfect Inning, Perfect Game, ⚾ Walk-Off, 🔄 The Cycle, and a 4-tier lifetime-runs ladder), 5 Doubles Practice badges (a 4-tier lifetime doubles-hit ladder plus 🎪 Ring Master for hitting every double lifetime), 7 Bob's 27 badges (🎯 Full House, 🏔️ The Full Anderson, and a 5-tier survival/score ladder), 7 121 Checkout Ladder badges (a 6-tier highest-rung ladder plus 🧗 Peak Bagged for checking out 170), 14 The Gauntlet badges (a 4-tier lifetime-runs ladder, a 4-tier lifetime-clean-stations ladder, a 3-tier per-run clean-streak ladder, plus 💎 Flawless Gauntlet, 🥋 Unmarked, and 🩹 Second Wind), 3 Killer badges (🩸 First Blood, 🛡️ Untouchable, 🙈 Own Worst Enemy — all recurring), 2 Household Rating badges (👑 Top of the House, 🗡️ Upset), 2 [Tournament](#tournaments)-specific badges, 3 Daily Challenge badges, 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!), 34 Checkout Trainer badges (28 laddered milestones across 5 ladders — 4 Freeform, 1 Checkout Blitz — plus 6 one-off badges), and 2 Practice Drills badges for the two [guided drills](#new-game). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
+Beyond 180s, Big Fish, and nine-darters, Oche tracks 33 X01 achievement badges (including a 5-tier lifetime-180s ladder and a handful of darts-culture one-offs — Bed & Breakfast, Madhouse, Shanghai) covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 5 Cricket-specific badges (including cut-throat's own 🔪 Stone Cold), 8 Baseball badges (Perfect Inning, Perfect Game, ⚾ Walk-Off, 🔄 The Cycle, and a 4-tier lifetime-runs ladder), 5 Doubles Practice badges (a 4-tier lifetime doubles-hit ladder plus 🎪 Ring Master for hitting every double lifetime), 7 Bob's 27 badges (🎯 Full House, 🏔️ The Full Anderson, and a 5-tier survival/score ladder), 7 121 Checkout Ladder badges (a 6-tier highest-rung ladder plus 🧗 Peak Bagged for checking out 170), 14 The Gauntlet badges (a 4-tier lifetime-runs ladder, a 4-tier lifetime-clean-stations ladder, a 3-tier per-run clean-streak ladder, plus 💎 Flawless Gauntlet, 🥋 Unmarked, and 🩹 Second Wind), 3 Killer badges (🩸 First Blood, 🛡️ Untouchable, 🙈 Own Worst Enemy — all recurring), 11 Marathon Mode badges (a 4-tier lifetime-sessions-completed ladder, a 4-tier lifetime-legs-completed ladder, plus 🛡️ Iron, 📉 Flat Line, and ⏱️ Full Distance), 2 Household Rating badges (👑 Top of the House, 🗡️ Upset), 2 [Tournament](#tournaments)-specific badges, 3 Daily Challenge badges, 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!), 34 Checkout Trainer badges (28 laddered milestones across 5 ladders — 4 Freeform, 1 Checkout Blitz — plus 6 one-off badges), and 2 Practice Drills badges for the two [guided drills](#new-game). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
 
 | Badge | How to earn it |
 |---|---|
@@ -428,6 +433,19 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 33 X01 achievement badges (
 | 🛡️ **Untouchable** | Win a Killer match without ever losing a life |
 | 🙈 **Own Worst Enemy** | Eliminate yourself via your own double after becoming a killer |
 
+**Marathon Mode's 11 badges** — two lifetime ladders (checked once a session ends) plus three one-off, all-recurring condition badges (each can fire again in a later session):
+
+| Badge | How to earn it |
+|---|---|
+| 🛡️ **Iron** | End a Marathon Mode session with the Iron fatigue-split tier |
+| 📉 **Flat Line** | Complete a Marathon Mode session classified Flat Line |
+| ⏱️ **Full Distance** | Complete the full 45 minutes without an early "End Marathon" stop |
+
+| Ladder | Tiers (threshold — label) |
+|---|---|
+| Lifetime Sessions Completed | 1 First Marathon 🏁 · 5 Regular Runner 🏃 · 15 Seasoned Endurer 🥾 · 30 Marathon Veteran 🎖️ |
+| Lifetime Legs Completed | 25 Getting Going 👟 · 100 In Stride 🏃 · 250 Long Hauler 🚛 · 500 Ultra Marathoner 🌋 |
+
 **Household Rating's 2 badges** — both keyed off the [📈 Household Ratings](#home) leaderboard, checked right after a rated 2-player match completes:
 
 | Badge | How to earn it |
@@ -469,7 +487,7 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 33 X01 achievement badges (
 | 🧭 **Guided Clock** | Complete a guided Around the Clock drill — hit every number 1–20 as a single |
 | 🗺️ **Guided World** | Reach all 63 lifetime dart outcomes while playing a guided Around the World session |
 
-**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 144-badge roster, grouped into X01/Cricket/Baseball/Doubles Practice/Bob's 27/121 Checkout Ladder/The Gauntlet/Killer/Household Rating/Tournament/Daily Challenge/Just Chuckin' It/Checkout Trainer/Practice Drills sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), all 4 Baseball lifetime-runs ladder tiers, both Tournament badges (Champion, Giant Slayer (Tournament)), Full Rotation, both Practice Drills badges (Guided Clock, Guided World), all 18 Just Chuckin' It milestones, all 34 Checkout Trainer badges, all 5 Doubles Practice badges, all 5 Bob's 27 survival/score ladder tiers, all 6 121 Checkout Ladder ladder tiers, all 11 Gauntlet ladder tiers, and 👑 Top of the House are one-time-only by nature and never show a counter beyond 1 (🧗 Peak Bagged, Gauntlet's own 💎 Flawless Gauntlet/🥋 Unmarked/🩹 Second Wind, and all 3 Killer badges are all recurring/repeatable instead, so those seven DO show a counter after a second occurrence). **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
+**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 155-badge roster, grouped into X01/Cricket/Baseball/Doubles Practice/Bob's 27/121 Checkout Ladder/The Gauntlet/Killer/Marathon Mode/Household Rating/Tournament/Daily Challenge/Just Chuckin' It/Checkout Trainer/Practice Drills sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), all 4 Baseball lifetime-runs ladder tiers, both Tournament badges (Champion, Giant Slayer (Tournament)), Full Rotation, both Practice Drills badges (Guided Clock, Guided World), all 18 Just Chuckin' It milestones, all 34 Checkout Trainer badges, all 5 Doubles Practice badges, all 5 Bob's 27 survival/score ladder tiers, all 6 121 Checkout Ladder ladder tiers, all 11 Gauntlet ladder tiers, all 8 Marathon Mode ladder tiers, and 👑 Top of the House are one-time-only by nature and never show a counter beyond 1 (🧗 Peak Bagged, Gauntlet's own 💎 Flawless Gauntlet/🥋 Unmarked/🩹 Second Wind, all 3 Killer badges, and all 3 Marathon Mode one-off badges — 🛡️ Iron/📉 Flat Line/⏱️ Full Distance — are all recurring/repeatable instead, so those ten DO show a counter after a second occurrence). **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
 
 **Around the World Progress** — a dedicated grid on the Player Profile showing exactly which of the 63 lifetime dart outcomes are still missing, alongside the Badge Case.
 
@@ -591,7 +609,7 @@ Each player has a dedicated profile page with full career statistics, accessible
 
 #### Tabs
 
-**Overall** · **H2H** · **Practice** — all stats and charts filter to the selected mode. A second game-type toggle sits just above the stat bubbles — **X01 / Cricket / Doubles Practice / Bob's 27 / 121 Checkout Ladder / The Gauntlet / Killer / Just Chuckin' It / Checkout Trainer / Around the Clock / Around the World** — switches the bubbles, chart, and Personal Bests section between each game type's own stat vocabulary (X01's 15 stats, Cricket's 6, Doubles Practice's 3, Bob's 27's 5, 121 Checkout Ladder's 4, The Gauntlet's 5, Killer's 5, Chuckin's 8, Checkout Trainer's 3, Around the Clock's 3, or Around the World's 2 — see below). The Home page's leaderboards cover X01, Cricket, Doubles Practice, Bob's 27, 121 Checkout Ladder, The Gauntlet, Killer, Checkout Trainer (its Checkout Blitz leaderboard), Around the Clock, and Around the World — Just Chuckin' It doesn't have a competitive leaderboard shape to show there (no wins, no opponent), so it's Player Profile-only.
+**Overall** · **H2H** · **Practice** — all stats and charts filter to the selected mode. A second game-type toggle sits just above the stat bubbles — **X01 / Cricket / Doubles Practice / Bob's 27 / 121 Checkout Ladder / The Gauntlet / Killer / Marathon Mode / Just Chuckin' It / Checkout Trainer / Around the Clock / Around the World** — switches the bubbles, chart, and Personal Bests section between each game type's own stat vocabulary (X01's 15 stats, Cricket's 6, Doubles Practice's 3, Bob's 27's 5, 121 Checkout Ladder's 4, The Gauntlet's 5, Killer's 5, Marathon Mode's 6, Chuckin's 8, Checkout Trainer's 3, Around the Clock's 3, or Around the World's 2 — see below). The Home page's leaderboards cover X01, Cricket, Doubles Practice, Bob's 27, 121 Checkout Ladder, The Gauntlet, Killer, Marathon Mode, Checkout Trainer (its Checkout Blitz leaderboard), Around the Clock, and Around the World — Just Chuckin' It doesn't have a competitive leaderboard shape to show there (no wins, no opponent), so it's Player Profile-only.
 
 #### Stat Bubbles
 
@@ -673,6 +691,17 @@ Switching to **Killer** shows its own 5 stat bubbles instead:
 | **Avg Lives Lost / Leg** | Average lives lost per leg |
 | **Survived Without Killer** | Percentage of legs survived to the end without ever becoming a killer |
 
+Switching to **Marathon Mode** shows its own 6 stat bubbles instead:
+
+| Bubble | Description |
+|---|---|
+| **Sessions Completed** | Number of completed Marathon Mode sessions |
+| **Avg Legs / Session** | Average legs completed per session |
+| **Avg Fatigue Split** | Average fatigue split (second-half minus first-half average dart count, clamped at zero) across every session |
+| **The Cliff** | Sessions classified The Cliff |
+| **The Warm Machine** | Sessions classified The Warm Machine |
+| **Flat Line** | Sessions classified Flat Line |
+
 Switching to **Just Chuckin' It** shows its own 8 stat bubbles instead:
 
 | Bubble | Description |
@@ -729,7 +758,7 @@ A non-interactive dartboard shaded by how often each region has been hit (with e
 
 On the Cricket toggle, this section shows **Best Leg MPR**, **Fewest Darts to Close**, **Current Win Streak**, and **Recent Form** (MPR-based) instead — the same shape, keyed off the turn that won each Cricket leg rather than an X01 checkout.
 
-On the Doubles Practice toggle, this section shows just **Best Round (Darts)** and **Best Round (Doubles Hit)** — no win-streak/recent-form fields, since this mode has no win condition. On the Bob's 27 toggle, it shows **Best Final Score** (the peak across every run, including a run that died with a high score) and **Deepest Double Reached on a Fail** (scoped to runs that actually ended in death — a survived run has nothing to report here). On the 121 Checkout Ladder toggle, it shows **Highest Target Reached** (a peak — attempted, win or fail, since standing at rung 150 already means you climbed that high regardless of how that attempt ends) and **Fewest Darts on the Highest Checkout** (scoped to the highest target you actually checked out, which can be lower than the peak reached if that top attempt itself failed). On The Gauntlet toggle, it shows just **Lowest Total Scars** across every completed run — the one ascending-is-better ("fewer is better") Personal Best field in this app, so it's shown alone rather than paired with a second field the way every other solo drill's Personal Bests are. On the Killer toggle, it shows just **Most Kills in a Leg** — the highest single-leg elimination count across every match played. On the Just Chuckin' It toggle, it shows **Best Session (Darts)** and **Best Session (Trebles)**, the same deliberately-smaller 2-field shape. On the Checkout Trainer toggle, it shows **Toughest Checkout Solved**, **Best Optimal Streak**, **Best Checkout Blitz Score**, and **Avg Checkout Blitz Score** (whichever fields have data) — same no-win-condition reasoning as Doubles Practice/Chuckin.
+On the Doubles Practice toggle, this section shows just **Best Round (Darts)** and **Best Round (Doubles Hit)** — no win-streak/recent-form fields, since this mode has no win condition. On the Bob's 27 toggle, it shows **Best Final Score** (the peak across every run, including a run that died with a high score) and **Deepest Double Reached on a Fail** (scoped to runs that actually ended in death — a survived run has nothing to report here). On the 121 Checkout Ladder toggle, it shows **Highest Target Reached** (a peak — attempted, win or fail, since standing at rung 150 already means you climbed that high regardless of how that attempt ends) and **Fewest Darts on the Highest Checkout** (scoped to the highest target you actually checked out, which can be lower than the peak reached if that top attempt itself failed). On The Gauntlet toggle, it shows just **Lowest Total Scars** across every completed run — an ascending-is-better ("fewer is better") Personal Best field, so it's shown alone rather than paired with a second field the way every other solo drill's Personal Bests are. On the Killer toggle, it shows just **Most Kills in a Leg** — the highest single-leg elimination count across every match played. On the Marathon Mode toggle, it shows **Lowest Fatigue Split** (the other ascending-is-better field in this app) and **Most Legs in a Session** (a stamina/throughput metric, descending as usual). On the Just Chuckin' It toggle, it shows **Best Session (Darts)** and **Best Session (Trebles)**, the same deliberately-smaller 2-field shape. On the Checkout Trainer toggle, it shows **Toughest Checkout Solved**, **Best Optimal Streak**, **Best Checkout Blitz Score**, and **Avg Checkout Blitz Score** (whichever fields have data) — same no-win-condition reasoning as Doubles Practice/Chuckin.
 
 On the Around the Clock toggle, this section shows just **Fastest Completion (Darts)** — the fewest darts a completed round has ever taken. On the Around the World toggle, it shows **Sessions Played** and **Lifetime Progress** (e.g. "22 / 63") instead of a per-round record, since this mode's progress is lifetime/cross-session by design and never "wins."
 
@@ -739,7 +768,7 @@ Shown once on the Overall/H2H tabs, regardless of which per-game-type toggle abo
 
 #### Badge Case
 
-The full 144-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (33 badges), a **Cricket** section (5 badges), a **Baseball** section (8 badges), a **Doubles Practice** section (5 badges), a **Bob's 27** section (7 badges), a **121 Checkout Ladder** section (7 badges), a **The Gauntlet** section (14 badges), a **Killer** section (3 badges), a **Household Rating** section (2 badges), a **Tournament** section (2 badges), a **Daily Challenge** section (3 badges), a **Just Chuckin' It** section (19 badges), a **Checkout Trainer** section (34 badges), and a **Practice Drills** section (2 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
+The full 155-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (33 badges), a **Cricket** section (5 badges), a **Baseball** section (8 badges), a **Doubles Practice** section (5 badges), a **Bob's 27** section (7 badges), a **121 Checkout Ladder** section (7 badges), a **The Gauntlet** section (14 badges), a **Killer** section (3 badges), a **Marathon Mode** section (11 badges), a **Household Rating** section (2 badges), a **Tournament** section (2 badges), a **Daily Challenge** section (3 badges), a **Just Chuckin' It** section (19 badges), a **Checkout Trainer** section (34 badges), and a **Practice Drills** section (2 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
 
 #### On This Day
 
@@ -1199,6 +1228,8 @@ GET  /api/stats/checkout-ladder-leaderboard 121 Checkout Ladder best-target-reac
 GET  /api/stats/gauntlet-leaderboard        The Gauntlet lowest-total-Scars leaderboard, ASCENDING (no mode param)
 GET  /api/stats/killer-wins                 Killer win-rate leaderboard (H2H only, no mode param —
                                              same reasoning as cricket-wins/baseball-wins)
+GET  /api/stats/marathon-leaderboard        Marathon Mode lowest-fatigue-split leaderboard, ASCENDING
+                                             (no mode param — always solo)
 GET  /api/stats/checkout-blitz-leaderboard  Checkout Blitz best-single-run leaderboard (no mode param)
 GET  /api/stats/around-the-clock-fastest    Around the Clock fastest-completion leaderboard (no mode param)
 GET  /api/stats/around-the-clock-completions Around the Clock most-completions leaderboard (no mode param)
@@ -1450,6 +1481,31 @@ POST /api/games/:id/events                  Record a timeline event
                                                       "set_start"|"set_end"|
                                                       "game_start"|"game_end",
                                                setNo, legNo }
+```
+
+### Marathon Mode
+
+```
+POST /api/marathon/sessions                 Start a session — creates leg 1's own
+                                             ordinary solo practice 501 game too
+                                             { player, durationMinutes (default 45,
+                                               5-240) }
+                                             → { sessionId, gameId, legOrder: 1,
+                                                  startedAt, durationMinutes }
+
+GET  /api/marathon/sessions/:id             Full session detail — per-leg dart
+                                             count/checkout/busts, plus the
+                                             computed fatigueSplit/fatigueTier/trend
+
+POST /api/marathon/sessions/:id/legs        Create and link the NEXT leg's own
+                                             ordinary solo practice 501 game
+                                             { player } → { gameId, legOrder }
+                                             409 if the session has already ended
+
+POST /api/marathon/sessions/:id/end         End the session (idempotent — ending
+                                             an already-ended session just returns
+                                             its unchanged detail) → full session
+                                             detail, same shape as the GET above
 ```
 
 ### Saved Games / Pause & Resume

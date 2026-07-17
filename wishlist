@@ -20,7 +20,7 @@ Player pages:
 - First-9 average (the standard pro scoring stat — 3-dart average over each leg's first 9 darts) — done, see docs/archive/first-nine-average-roadmap.md
 - Household Elo rating + optional X01 handicapping (per-player starting scores) — done, both halves, see docs/archive/rating-and-handicap-roadmap.md
 - "Drill this checkout" deep link from Top Finishes / Coaching Insights into Checkout Trainer — done, see docs/archive/checkout-drill-link-roadmap.md
-- End-of-night session recap (tonight's games, moments, badges, PBs — one shareable card) — full design in docs/session-recap-roadmap.md
+- End-of-night session recap (tonight's games, moments, badges, PBs — one shareable card) — done, see docs/archive/session-recap-roadmap.md
 - Darts-culture badges (Bed & Breakfast, Madhouse, Shanghai visit), a lifetime-180s ladder, and badge parity for Baseball (⚾ Walk-Off, 🔄 The Cycle, a lifetime-runs ladder) and Doubles Practice (a lifetime doubles-hit ladder, 🎪 Ring Master) — done, see docs/archive/culture-badges-roadmap.md
 - Environmental data (temp/humidity) — full design in docs/environmental-logging-roadmap.md
 - Coaching insights from existing dart analytics — done, see docs/archive/coaching-insights-roadmap.md
@@ -53,7 +53,7 @@ Others
 - The Gauntlet (solo endurance warm-up — 20 stations in a fixed clock-adjacency order, single→triple→double per station in strict throw order, a Scar tally with a one-time repeat rule and doubled Deep Scars, a result tier from Unmarked to The Gauntlet Wins, and a per-station Scar Map weakness heatmap that accumulates across sessions) — done, see docs/archive/gauntlet-roadmap.md
 - Killer (elimination-format H2H — each player randomly assigned their own number, build lives on it to become a killer, then attack opponents' numbers at the same ring-scaled rate, with a flat-1-life self-kill via your own double; last player standing wins the leg) — done, see docs/game-modes-roadmap.md "Killer"
 - Dead Man Walking (15-round solo drill that drops each round mid-checkout on the player's own historically weakest finishes, with a personalized "one dart fewer than you should need" budget per round and a Pardoned-to-Executed result tier — pulls its targets from real X01 history via a new weakness query built on Coaching Insights' own techniques) — full design in docs/dead-man-walking-roadmap.md
-- Marathon Mode (45-minute solo endurance session chaining ordinary 501 practice legs back-to-back with no setup screen between them, then reading the session back as a fatigue split — Iron through Running on Empty — and a trend pattern — The Cliff / The Warm Machine / The Flat Line; a context-table wrapper around unmodified X01 legs, not a new game type) — full design in docs/marathon-mode-roadmap.md
+- Marathon Mode (45-minute solo endurance session chaining ordinary 501 practice legs back-to-back with no setup screen between them, then reading the session back as a fatigue split — Iron through Running on Empty — and a trend pattern — The Cliff / The Warm Machine / The Flat Line; a context-table wrapper around unmodified X01 legs, not a new game type) — done, see docs/archive/marathon-mode-roadmap.md
 - Integrate with Homeassistant
 - Automated scoring with cameras and machine learning — full design in docs/camera-scoring-roadmap.md
 - Settings page - set default player

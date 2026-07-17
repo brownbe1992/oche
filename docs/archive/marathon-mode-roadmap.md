@@ -1,6 +1,8 @@
 # Marathon Mode — Design Roadmap
 
-> Status: **design phase, not started.**
+> Status: **shipped (2026-07).** See "Implementation notes" at the bottom of
+> this doc for exactly how each open question was resolved, and
+> `REFERENCE.md` §30 for the full write-up.
 
 ## Goal
 
@@ -278,3 +280,68 @@ quality-of-performance badges above.
   and the fatigue-split/trend analysis (dart count per leg) maps cleanly
   onto any per-leg-darts-thrown metric, so this could generalize, but
   isn't designed here and shouldn't be assumed for v1.
+
+## Implementation notes (2026-07, shipped)
+
+Built essentially exactly as designed, following this doc's own suggested
+build order end to end. The open questions above were resolved as follows:
+
+- **Hard mid-leg cutoff vs. finish-the-leg-then-stop**: shipped exactly as
+  this doc's own recommended default — the wall clock is checked only at
+  leg boundaries (`finishMarathonLeg()`), never mid-leg. A manual "End
+  Marathon" tap, however, ends the session **immediately** (not "wait for
+  the current leg"), abandoning whatever leg was in progress — its own
+  darts/turns are still real and still count toward lifetime stats, the
+  same "stats have been saved" precedent every other early-ended practice
+  session already follows. That leg simply never appears in the completed-
+  legs list `computeFatigueSplit()`/`classifyMarathonTrend()` read.
+- **Second-half improvement**: shipped as this doc's own default — clamps
+  to 0 (reads identically to a session with zero fatigue, "Iron"). No
+  distinct positive callout was added; still a real, not-yet-designed
+  enhancement if it's ever requested.
+- **Tolerance-band width (±2 darts) and the 6-leg minimum** for
+  `classifyMarathonTrend()`: shipped as this doc's own first-pass numbers,
+  unconfirmed against real sessions, exactly as flagged.
+- **Configurable session length**: `marathon_sessions.duration_minutes` is
+  stored per-session and the backend (`startMarathonSession()`) already
+  validates any value 5–240, but v1's own New Game entry always requests a
+  flat 45 — no UI control to choose a different length yet.
+- **Beyond X01**: not built. Every leg is still exactly a 501 practice game.
+
+**A real, BUG-18-class bug found and fixed while building this**: the
+generic X01 `onLegWon()` only ever cascades a leg win up into a full
+`finishUnit('game', ...)` when `!game.practice` — practice mode's own
+default is to treat every win as "just a leg," offering an endless "Next
+leg" button forever, since an ordinary practice session has no match
+structure to complete. Ghost Opponent races already needed (and got, back
+when BUG-18 was originally found and fixed) a `|| game.hasGhost` carve-out
+for exactly this reason. Marathon Mode legs are `practice=1` too (an
+ordinary practice game is exactly what each leg genuinely is) — without the
+same kind of carve-out, a leg win would never reach `finishMarathonLeg()`
+at all, and every leg would just show the ordinary "Next leg" panel
+forever, with no auto-chaining and no session ever actually ending. Fixed
+by extending the existing condition to `(!game.practice || game.hasGhost ||
+game.marathonSessionId)`, mirroring the ghost precedent exactly rather than
+inventing a parallel mechanism.
+
+A related decision made during the build, not covered by this doc's own
+open questions: **Marathon Mode has no Save Game support**, the same scope
+decision Killer already made — `isCurrentGameSavable()` explicitly excludes
+any leg carrying a `marathonSessionId`, since the generic resume path
+rebuilds a plain `rebuildX01State()` game object with no marathon linkage
+at all; a resumed leg would silently finish as an ordinary standalone
+practice game instead of continuing the session.
+
+Everything else matches this doc's design: the `marathon_sessions`/
+`marathon_session_legs` schema exactly as specified; every leg a completely
+ordinary solo practice 501 X01 game (`legsPerSet=1`, `setsPerGame=1`,
+contributing to lifetime X01 stats/Personal Bests/Nine-Darter unmodified);
+`computeFatigueSplit()`/`classifyMarathonTrend()` in `frontend/scoring.js`,
+unit-tested first per the suggested build order; the persistent session
+banner (elapsed/remaining time, leg count, `aria-live`) layered above the
+unmodified `renderers.x01` scoreboard; the post-session analysis screen;
+6 stat bubbles, 2 Personal Bests (one ascending, one descending), a
+lowest-fatigue-split Home leaderboard; and the achievement ladders/one-offs.
+No `/display` work was needed beyond what X01 already has, exactly as this
+doc anticipated. Full write-up: `REFERENCE.md` §30; committed tests in
+`backend/test/scoring.test.js` and `backend/test/db.marathon-mode.test.js`.

@@ -21,7 +21,8 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   rebuildX01State, rebuildCricketState, rebuildBaseballState,
   rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State, rebuildCheckoutLadderState,
   GAUNTLET_STATION_ORDER, evaluateGauntletStation, gauntletTotalScars, gauntletResultTier, rebuildGauntletState,
-  KILLER_DEFAULT_LIVES, shuffleKillerNumbers, assignKillerNumbers, evaluateDartKiller, rebuildKillerState } = scoring;
+  KILLER_DEFAULT_LIVES, shuffleKillerNumbers, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
+  MARATHON_FATIGUE_TIERS, computeFatigueSplit, MARATHON_TREND_MIN_LEGS, MARATHON_TREND_TOLERANCE, classifyMarathonTrend } = scoring;
 
 // Shorthand for building a rebuild-function turn record: v(playerIndex, setNo,
 // legNo, [[sector,mult], ...]) — mirrors the {playerIndex,setNo,legNo,darts}
@@ -1951,5 +1952,61 @@ describe('rebuildAroundTheWorldState (docs/archive/saved-games-roadmap.md, pure 
     const turns = [v(0,1,1,[[1,1]]), v(0,1,1,[[2,2]]), v(0,1,1,[[3,3]])];
     const r = rebuildAroundTheWorldState({ turns });
     assert.equal(r.sessionDarts, 3);
+  });
+});
+
+describe('computeFatigueSplit (docs/archive/marathon-mode-roadmap.md)', () => {
+  test('splits an odd leg count with the floor half first, per the roadmap doc', () => {
+    // 5 legs: floor(5/2)=2 in the first half, 3 in the second.
+    const r = computeFatigueSplit([10, 10, 20, 20, 20]);
+    // first avg = 10, second avg = (20+20+20)/3 = 20 -> split = 10
+    assert.equal(r.split, 10);
+    assert.equal(r.tier, 'Running on Empty');
+  });
+
+  test('a session that got FASTER in the second half clamps to zero, not negative', () => {
+    const r = computeFatigueSplit([20, 20, 10, 10]);
+    assert.equal(r.split, 0);
+    assert.equal(r.tier, 'Iron');
+  });
+
+  test('tier boundaries: 0-2 Iron, 3-5 Tested, 6-9 Fading, 10+ Running on Empty', () => {
+    assert.equal(computeFatigueSplit([10, 12]).tier, 'Iron');   // split=2
+    assert.equal(computeFatigueSplit([10, 14]).tier, 'Tested'); // split=4
+    assert.equal(computeFatigueSplit([10, 18]).tier, 'Fading'); // split=8
+    assert.equal(computeFatigueSplit([10, 20]).tier, 'Running on Empty'); // split=10
+  });
+
+  test('a 0- or 1-leg session has no second half to compare -- reads as zero fatigue', () => {
+    assert.equal(computeFatigueSplit([]).split, 0);
+    assert.equal(computeFatigueSplit([15]).split, 0);
+  });
+});
+
+describe('classifyMarathonTrend (docs/archive/marathon-mode-roadmap.md)', () => {
+  test('fewer than MARATHON_TREND_MIN_LEGS legs is always Inconclusive', () => {
+    const legs = Array(MARATHON_TREND_MIN_LEGS - 1).fill(9);
+    assert.equal(classifyMarathonTrend(legs), 'Inconclusive');
+  });
+
+  test('a clear Cliff: early and middle roughly equal, late meaningfully worse', () => {
+    // 9 legs -> 3/3/3 segments. early=9, middle=9, late=20.
+    const legs = [9, 9, 9, 9, 9, 9, 20, 20, 20];
+    assert.equal(classifyMarathonTrend(legs), 'The Cliff');
+  });
+
+  test('a clear Warm Machine: early worse than middle, late holds at middle\'s level', () => {
+    const legs = [20, 20, 20, 9, 9, 9, 9, 9, 9];
+    assert.equal(classifyMarathonTrend(legs), 'The Warm Machine');
+  });
+
+  test('a clear Flat Line: all three segments within tolerance of each other', () => {
+    const legs = [9, 10, 9, 10, 9, 10, 9, 10, 9];
+    assert.equal(classifyMarathonTrend(legs), 'Flat Line');
+  });
+
+  test('a shape matching no named pattern (steady gradual climb) is Inconclusive, not forced into one', () => {
+    const legs = [8, 10, 12, 14, 16, 18, 20, 22, 24];
+    assert.equal(classifyMarathonTrend(legs), 'Inconclusive');
   });
 });

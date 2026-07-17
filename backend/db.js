@@ -27,7 +27,8 @@ const { checkoutHint, dartLabel,
   rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State,
   rebuildCheckoutLadderState,
   GAUNTLET_STATION_ORDER, gauntletTotalScars, gauntletResultTier, rebuildGauntletState,
-  KILLER_DEFAULT_LIVES, assignKillerNumbers, evaluateDartKiller, rebuildKillerState } = require('../frontend/scoring.js');
+  KILLER_DEFAULT_LIVES, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
+  computeFatigueSplit, classifyMarathonTrend } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -428,6 +429,34 @@ db.exec(`
     merged_at  TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_uuid_aliases_player ON player_uuid_aliases(player_id);
+
+  -- Marathon Mode (docs/archive/marathon-mode-roadmap.md) — the same "context table with a
+  -- game_id FK" pattern league_fixtures already established (CLAUDE.md's standing
+  -- convention), NOT a new game_type: every leg is a completely ordinary solo
+  -- practice 501 game, contributing to lifetime X01 stats exactly like any other
+  -- practice leg. ended_at NULL means the session is still in progress (mirrors
+  -- games.completed_at's own nullable-lifecycle-marker shape).
+  CREATE TABLE IF NOT EXISTS marathon_sessions (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id        INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    duration_minutes INTEGER NOT NULL DEFAULT 45,
+    started_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at         TEXT
+  );
+  -- game_id is only ever populated by startMarathonSession()/startNextMarathonLeg()
+  -- themselves (they create the underlying game server-side and link it in the same
+  -- call) — no endpoint ever accepts a client-supplied game_id to link, so the
+  -- roadmap doc's own flagged worry about validating an externally-supplied game_id
+  -- never actually applies here.
+  CREATE TABLE IF NOT EXISTS marathon_session_legs (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES marathon_sessions(id) ON DELETE CASCADE,
+    game_id    INTEGER REFERENCES games(id) ON DELETE SET NULL,
+    leg_order  INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_marathon_session_legs_session ON marathon_session_legs(session_id);
+  CREATE INDEX IF NOT EXISTS idx_marathon_session_legs_game    ON marathon_session_legs(game_id);
 `);
 
 // Column migrations for tables not recreated above — safe to re-run.
@@ -2212,7 +2241,7 @@ function getHomeExtra() {
     activeLeagues, eloLeaderboard };
 }
 
-// End-of-Night Session Recap (docs/session-recap-roadmap.md) — one read-time
+// End-of-Night Session Recap (docs/archive/session-recap-roadmap.md) — one read-time
 // aggregation over a single local calendar date's activity; nothing stored,
 // matching the "nothing pre-aggregated" house rule (CLAUDE.md). "The session"
 // = the local calendar date of turns.created_at/games.completed_at — the same
@@ -2224,7 +2253,7 @@ function getHomeExtra() {
 function getSessionRecap(date) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) throw httpError(400, 'date must be YYYY-MM-DD');
 
-  // The recap's spine (docs/session-recap-roadmap.md: "the recap's spine is the
+  // The recap's spine (docs/archive/session-recap-roadmap.md: "the recap's spine is the
   // games people played against each other") — every H2H game (practice=0,
   // player_count>1) that COMPLETED on this date. A single 3+ player game has no
   // single "matchup" pair, so it's listed in h2hGames but left out of
@@ -7321,6 +7350,178 @@ function getLoadoutStats(playerName, loadoutId) {
   };
 }
 
+/* =========================================================================
+   MARATHON MODE (docs/archive/marathon-mode-roadmap.md)
+   Not a new game_type — every leg is a completely ordinary solo practice 501
+   X01 game, chained together only via marathon_session_legs.game_id (the
+   league_fixtures-style "context table with a game_id FK" pattern, per
+   CLAUDE.md). The 45-minute wall-clock check happens in the FRONTEND, at leg
+   boundaries only — these functions just create/link/end sessions and legs;
+   none of them know or care what time it is.
+   ========================================================================= */
+function _createMarathonLegGame(playerName) {
+  // Deliberately bypasses the New Game setup screen's own config — every leg
+  // is always a straight solo practice 501, no exceptions, so this calls
+  // createGame() directly rather than routing through any client-supplied
+  // shape. Never accepts a client-supplied game_id anywhere in this feature —
+  // see marathon_session_legs' own schema comment for why that means the
+  // roadmap doc's "validate a linked game_id belongs to this player" worry
+  // never actually applies here.
+  return createGame({
+    category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1,
+    gameType: 'x01', config: { startingScore: 501 },
+    players: [{ name: playerName }],
+  }).gameId;
+}
+function _getMarathonSession(sessionId) {
+  const s = db.prepare('SELECT * FROM marathon_sessions WHERE id = ?').get(Number(sessionId));
+  if (!s) throw httpError(404, 'Marathon session not found');
+  return s;
+}
+function startMarathonSession(playerName, durationMinutes) {
+  const p = getPlayer(playerName);
+  if (!p) throw httpError(404, 'Player not found');
+  const duration = durationMinutes != null ? Number(durationMinutes) : 45;
+  if (!Number.isInteger(duration) || duration < 5 || duration > 240) {
+    throw httpError(400, 'durationMinutes must be an integer between 5 and 240');
+  }
+  const info = db.prepare('INSERT INTO marathon_sessions (player_id, duration_minutes) VALUES (?, ?)').run(p.id, duration);
+  const sessionId = Number(info.lastInsertRowid);
+  const gameId = _createMarathonLegGame(playerName);
+  db.prepare('INSERT INTO marathon_session_legs (session_id, game_id, leg_order) VALUES (?, ?, 1)').run(sessionId, gameId);
+  const row = db.prepare('SELECT started_at FROM marathon_sessions WHERE id = ?').get(sessionId);
+  return { sessionId, gameId, legOrder: 1, startedAt: row.started_at, durationMinutes: duration };
+}
+// Called once the CURRENT leg's own game has already completed (normal X01
+// win) — creates the NEXT leg's game and links it. Rejects once the session
+// has ended (`ended_at` already set) — the roadmap doc's own flagged linkage
+// guard — and rejects a player mismatch, since a session belongs to exactly
+// one player throughout.
+function startNextMarathonLeg(sessionId, playerName) {
+  const s = _getMarathonSession(sessionId);
+  if (s.ended_at != null) throw httpError(409, 'This marathon session has already ended');
+  const p = getPlayer(playerName);
+  if (!p || p.id !== s.player_id) throw httpError(403, 'Player does not match this marathon session');
+  const maxLeg = db.prepare('SELECT MAX(leg_order) AS n FROM marathon_session_legs WHERE session_id = ?').get(s.id).n || 0;
+  const gameId = _createMarathonLegGame(playerName);
+  const legOrder = maxLeg + 1;
+  db.prepare('INSERT INTO marathon_session_legs (session_id, game_id, leg_order) VALUES (?, ?, ?)').run(s.id, gameId, legOrder);
+  return { gameId, legOrder };
+}
+// Idempotent — ending an already-ended session just returns its existing
+// (unchanged) detail rather than erroring, so a client retry after a dropped
+// response can't double-process anything.
+function endMarathonSession(sessionId) {
+  const s = _getMarathonSession(sessionId);
+  if (s.ended_at == null) {
+    db.prepare("UPDATE marathon_sessions SET ended_at = datetime('now') WHERE id = ?").run(s.id);
+  }
+  return getMarathonSessionDetail(s.id);
+}
+// Full session detail, including the two analysis functions (frontend/scoring.js)
+// run over this session's own completed legs' dart counts. A leg still
+// in-progress (no completed_at on its game) is listed but excluded from the
+// dart-count series the analysis reads — an unfinished leg has no final dart
+// count to compare against the others yet.
+function getMarathonSessionDetail(sessionId) {
+  const s = _getMarathonSession(sessionId);
+  const player = db.prepare('SELECT name FROM players WHERE id = ?').get(s.player_id);
+  const legs = db.prepare(`
+    SELECT msl.leg_order AS legOrder, msl.game_id AS gameId, g.completed_at AS completedAt,
+      (SELECT COUNT(*) FROM darts d JOIN turns t ON t.id = d.turn_id WHERE t.game_id = msl.game_id) AS dartCount,
+      (SELECT t.checkout_points FROM turns t WHERE t.game_id = msl.game_id AND t.checkout = 1 LIMIT 1) AS checkoutPoints,
+      (SELECT COUNT(*) FROM turns t WHERE t.game_id = msl.game_id AND t.bust = 1) AS busts
+    FROM marathon_session_legs msl JOIN games g ON g.id = msl.game_id
+    WHERE msl.session_id = ?
+    ORDER BY msl.leg_order ASC
+  `).all(s.id);
+  const completedLegs = legs.filter(l => l.completedAt != null);
+  const dartCounts = completedLegs.map(l => l.dartCount);
+  const fatigue = computeFatigueSplit(dartCounts);
+  const trend = classifyMarathonTrend(dartCounts);
+  return {
+    sessionId: s.id, player: player.name, durationMinutes: s.duration_minutes,
+    startedAt: s.started_at, endedAt: s.ended_at,
+    legs, legsCompleted: completedLegs.length,
+    fatigueSplit: fatigue.split, fatigueTier: fatigue.tier, trend,
+  };
+}
+
+// Every Marathon leg's underlying game is always practice=1 — an 'h2h' mode
+// request reaches the same "zero sessions" answer a SQL-side _scope() join
+// would, just without the extra join, since there is never an H2H marathon
+// session to find.
+function getMarathonStatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const empty = { sessionsCompleted: 0, avgLegsPerSession: null, avgFatigueSplit: null,
+    trendBreakdown: { cliff: 0, warmMachine: 0, flatLine: 0, inconclusive: 0 },
+    cliffSessions: 0, warmMachineSessions: 0, flatLineSessions: 0 };
+  if (mode === 'h2h') return empty;
+  const sessions = db.prepare('SELECT id FROM marathon_sessions WHERE player_id = ? AND ended_at IS NOT NULL').all(p.id);
+  if (!sessions.length) return empty;
+  let totalLegs = 0, totalSplit = 0;
+  const trendBreakdown = { cliff: 0, warmMachine: 0, flatLine: 0, inconclusive: 0 };
+  sessions.forEach(row => {
+    const d = getMarathonSessionDetail(row.id);
+    totalLegs += d.legsCompleted;
+    totalSplit += d.fatigueSplit;
+    if (d.trend === 'The Cliff') trendBreakdown.cliff++;
+    else if (d.trend === 'The Warm Machine') trendBreakdown.warmMachine++;
+    else if (d.trend === 'Flat Line') trendBreakdown.flatLine++;
+    else trendBreakdown.inconclusive++;
+  });
+  return {
+    sessionsCompleted: sessions.length,
+    avgLegsPerSession: +(totalLegs / sessions.length).toFixed(1),
+    avgFatigueSplit: +(totalSplit / sessions.length).toFixed(1),
+    trendBreakdown,
+    // Lifetime total (not the average above) -- feeds the "lifetime legs
+    // completed inside Marathon sessions" milestone ladder, which needs an
+    // exact running total, not a derived-from-average approximation.
+    totalLegsCompleted: totalLegs,
+    // Flat convenience fields for the Player Profile's own flat stat-bubble
+    // lookup (renderStatBubbles() reads data[bubbleKeyMap[key]], no nested-path
+    // support) — same values as trendBreakdown above, just unnested.
+    cliffSessions: trendBreakdown.cliff, warmMachineSessions: trendBreakdown.warmMachine, flatLineSessions: trendBreakdown.flatLine,
+  };
+}
+// Personal Bests: lowest fatigue split ever (ascending-is-better, the same
+// polarity The Gauntlet's Scar count uses) and most legs completed in a
+// single session (a stamina/throughput metric). A session with zero
+// completed legs (ended immediately) contributes to neither.
+function getMarathonPersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const empty = { lowestFatigueSplit: null, mostLegsInASession: null };
+  if (mode === 'h2h') return empty;
+  const sessions = db.prepare('SELECT id FROM marathon_sessions WHERE player_id = ? AND ended_at IS NOT NULL').all(p.id);
+  if (!sessions.length) return empty;
+  let lowestSplit = null, mostLegs = null;
+  sessions.forEach(row => {
+    const d = getMarathonSessionDetail(row.id);
+    if (d.legsCompleted === 0) return;
+    if (lowestSplit == null || d.fatigueSplit < lowestSplit) lowestSplit = d.fatigueSplit;
+    if (mostLegs == null || d.legsCompleted > mostLegs) mostLegs = d.legsCompleted;
+  });
+  return { lowestFatigueSplit: lowestSplit, mostLegsInASession: mostLegs };
+}
+// Home leaderboard: one row per player, their own single best (lowest)
+// fatigue split ever — same peak-value, no-minimum-floor shape every other
+// single-best-run board in this app already uses, sorted ascending (lower is
+// better) like The Gauntlet's own leaderboard.
+function getMarathonLeaderboard() {
+  const players = db.prepare(`
+    SELECT DISTINCT p.id, p.name FROM marathon_sessions ms JOIN players p ON p.id = ms.player_id
+    WHERE ms.ended_at IS NOT NULL
+  `).all();
+  return players.map(p => {
+    const pb = getMarathonPersonalBests(p.name, null);
+    return { name: p.name, lowestFatigueSplit: pb.lowestFatigueSplit, mostLegsInASession: pb.mostLegsInASession };
+  }).filter(r => r.lowestFatigueSplit != null)
+    .sort((a, b) => a.lowestFatigueSplit - b.lowestFatigueSplit);
+}
+
 /* ---------- helpers ---------- */
 function httpError(status, message) {
   const e = new Error(message); e.status = status; return e;
@@ -7338,6 +7539,8 @@ module.exports = {
   logServerError, getServerErrors,
   computeStats, getSummary, getHomeExtra, getSessionRecap, getOneEightyStats, getBigFishStats, getNineDarterStats,
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
+  startMarathonSession, startNextMarathonLeg, endMarathonSession, getMarathonSessionDetail,
+  getMarathonStatBubbles, getMarathonPersonalBests, getMarathonLeaderboard,
   getGhostCandidateLegs, getGhostLegScript,
   getCricketStatBubbles, getCricketNineMarksStats, getCricketPersonalBests,
   getBaseballStatBubbles, getBaseballPersonalBests,

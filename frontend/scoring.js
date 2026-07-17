@@ -1186,6 +1186,64 @@ function rebuildAroundTheWorldState({ turns }){
   return { sessionDarts: turns.length };
 }
 
+// Marathon Mode (docs/archive/marathon-mode-roadmap.md) — the two genuinely new
+// calculations this feature needs; every leg itself is an ordinary,
+// unmodified X01 practice leg. Both take a plain array of dart counts, one
+// per leg, in play order.
+const MARATHON_FATIGUE_TIERS = [
+  { max: 2,        tier: 'Iron' },
+  { max: 5,        tier: 'Tested' },
+  { max: 9,        tier: 'Fading' },
+  { max: Infinity, tier: 'Running on Empty' },
+];
+// First half vs. second half average dart count (floor the split on an odd
+// leg count, per the roadmap doc: the smaller half is first). Clamped at
+// zero — a player who got FASTER in the second half isn't a fatigue problem
+// to score against them, so that reads identically to zero fatigue (Iron),
+// not a negative/bonus value. A 0- or 1-leg session has no second half to
+// compare against and reads as a flat 0 (no evidence of fatigue either way).
+function computeFatigueSplit(dartCountsPerLeg){
+  const n = dartCountsPerLeg.length;
+  const half = Math.floor(n / 2);
+  const first = dartCountsPerLeg.slice(0, half);
+  const second = dartCountsPerLeg.slice(half);
+  const avg = arr => arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : null;
+  const firstAvg = avg(first), secondAvg = avg(second);
+  const split = (firstAvg == null || secondAvg == null) ? 0 : Math.max(0, secondAvg - firstAvg);
+  const tier = MARATHON_FATIGUE_TIERS.find(t => split <= t.max).tier;
+  return { split: Math.round(split * 100) / 100, tier };
+}
+const MARATHON_TREND_MIN_LEGS = 6;   // first-pass floor, matching this doc's own
+                                      // "don't compute a trend on too small a
+                                      // sample" call — not confirmed against real
+                                      // sessions yet, tunable.
+const MARATHON_TREND_TOLERANCE = 2;  // dart-count band width for "roughly equal";
+                                      // also a first-pass number, per the roadmap
+                                      // doc's own flagged open question.
+// Splits the session into three roughly-equal segments (floor-sized early/middle,
+// remainder in late — same "smaller segments first" shape computeFatigueSplit()
+// uses) and reads the shape of the trend across them. Fewer than
+// MARATHON_TREND_MIN_LEGS legs, or a shape that doesn't cleanly match one of the
+// three named patterns (e.g. a steady gradual climb, or fatigue then partial
+// recovery), returns 'Inconclusive' rather than forcing a label onto ambiguous
+// data.
+function classifyMarathonTrend(dartCountsPerLeg){
+  const n = dartCountsPerLeg.length;
+  if(n < MARATHON_TREND_MIN_LEGS) return 'Inconclusive';
+  const third = Math.floor(n / 3);
+  const early = dartCountsPerLeg.slice(0, third);
+  const middle = dartCountsPerLeg.slice(third, third * 2);
+  const late = dartCountsPerLeg.slice(third * 2);
+  const avg = arr => arr.reduce((s, v) => s + v, 0) / arr.length;
+  const earlyAvg = avg(early), middleAvg = avg(middle), lateAvg = avg(late);
+  const within = (a, b) => Math.abs(a - b) <= MARATHON_TREND_TOLERANCE;
+
+  if(within(earlyAvg, middleAvg) && within(middleAvg, lateAvg) && within(earlyAvg, lateAvg)) return 'Flat Line';
+  if(within(earlyAvg, middleAvg) && (lateAvg - middleAvg) > MARATHON_TREND_TOLERANCE) return 'The Cliff';
+  if((earlyAvg - middleAvg) > MARATHON_TREND_TOLERANCE && within(middleAvg, lateAvg)) return 'The Warm Machine';
+  return 'Inconclusive';
+}
+
 // Only executes under Node (require()'d from a test file) — undefined in a
 // browser, so this is a no-op there and every name above stays a plain global.
 if (typeof module !== 'undefined' && module.exports) {
@@ -1208,5 +1266,6 @@ if (typeof module !== 'undefined' && module.exports) {
     GAUNTLET_STATION_ORDER, evaluateGauntletStation, gauntletTotalScars, gauntletResultTier,
     rebuildGauntletState,
     KILLER_DEFAULT_LIVES, shuffleKillerNumbers, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
+    MARATHON_FATIGUE_TIERS, computeFatigueSplit, MARATHON_TREND_MIN_LEGS, MARATHON_TREND_TOLERANCE, classifyMarathonTrend,
   };
 }

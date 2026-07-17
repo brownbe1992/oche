@@ -687,7 +687,7 @@
       <h2 style="font-size:20px;margin-bottom:12px">🎯 Today's Challenge</h2>
       <div id="home-challenge-body"><p class="pp-meta">Loading…</p></div>
     </div>
-    <!-- End-of-Night Session Recap (docs/session-recap-roadmap.md) — hidden
+    <!-- End-of-Night Session Recap (docs/archive/session-recap-roadmap.md) — hidden
          entirely until renderHomeRecapTeaser() confirms today has at least one
          completed H2H game, same conditional-teaser pattern as the Checkout
          Trainer/League teasers elsewhere on this page. -->
@@ -982,7 +982,7 @@
     </div>
   </section>
 
-  <!-- ============ SESSION RECAP (docs/session-recap-roadmap.md) ============ -->
+  <!-- ============ SESSION RECAP (docs/archive/session-recap-roadmap.md) ============ -->
   <section id="screen-session-recap" class="screen">
     <div class="card">
       <button class="pp-back" onclick="show('home')">← Back</button>
@@ -2088,7 +2088,7 @@ function renderHomeChallengeTeaser(){
 }
 
 /* =========================================================================
-   END-OF-NIGHT SESSION RECAP (docs/session-recap-roadmap.md)
+   END-OF-NIGHT SESSION RECAP (docs/archive/session-recap-roadmap.md)
    A one-tap digest of a night's activity — read-time only, nothing stored;
    getSessionRecap(date) (backend/db.js) does all the real work. The teaser
    below fetches today's own recap on every Home load (a genuine network
@@ -2235,7 +2235,7 @@ function renderSessionRecapBody(r){
     </div>`;
 }
 // Renders the recap through the existing shareable-moment card generator
-// (docs/session-recap-roadmap.md: "one new card layout, the rest of the
+// (docs/archive/session-recap-roadmap.md: "one new card layout, the rest of the
 // pipeline ... already built") — no new canvas code, just a recap-shaped
 // headline/statLine fed into buildMomentCard() via fireMomentCard().
 function shareSessionRecap(){
@@ -2314,10 +2314,11 @@ function renderHome(){
     Backend.get('/api/stats/checkout-ladder-leaderboard'),
     Backend.get('/api/stats/gauntlet-leaderboard'),
     Backend.get('/api/stats/killer-wins'),
+    Backend.get('/api/stats/marathon-leaderboard'),
     Backend.get('/api/stats/around-the-clock-fastest'),
     Backend.get('/api/stats/around-the-clock-completions'),
     Backend.get('/api/stats/around-the-world-progress'),
-  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,dpa,dpb,ctbl,b27,cl,ga,kw,atcf,atcc,atwp])=>{
+  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,dpa,dpb,ctbl,b27,cl,ga,kw,mm,atcf,atcc,atwp])=>{
     homeData={s, extra,
       h2h:{finishes:f,eighties:e,bigFish:b,nineDarters:n},
       practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn},
@@ -2337,6 +2338,7 @@ function renderHome(){
       checkoutLadder:{ leaderboard:cl },
       gauntlet:{ leaderboard:ga },
       killer:{ winLeaderboard:kw },
+      marathon:{ leaderboard:mm },
       aroundTheClock:{ fastest:atcf, completions:atcc },
       aroundTheWorld:{ progress:atwp }};
     renderHomeContent();
@@ -2353,6 +2355,7 @@ function renderHome(){
       checkoutLadder:{ leaderboard:[] },
       gauntlet:{ leaderboard:[] },
       killer:{ winLeaderboard:[] },
+      marathon:{ leaderboard:[] },
       aroundTheClock:{ fastest:[], completions:[] },
       aroundTheWorld:{ progress:[] }};
     renderHomeContent();
@@ -3029,7 +3032,7 @@ function setMode(mode){
   document.getElementById('h2h-options').hidden = (mode !== 'h2h');
   const isSpecialMode = (mode === 'challenge' || mode === 'ghost' || mode === 'doubles_practice' || mode === 'chuckin'
     || mode === 'checkout_trainer' || mode === 'around_the_clock' || mode === 'around_the_world' || mode === 'bobs_27'
-    || mode === 'checkout_ladder' || mode === 'gauntlet');
+    || mode === 'checkout_ladder' || mode === 'gauntlet' || mode === 'marathon');
   // Daily Challenge and Ghost Opponent are both X01-only (docs/archive/ghost-opponent-roadmap.md
   // is explicitly X01-only for v1); Doubles Practice/Just Chuckin' It/Checkout
   // Trainer/both guided drills/Bob's 27 are each their own gameType, not a
@@ -3055,6 +3058,7 @@ function setMode(mode){
     : (mode === 'bobs_27') ? 'Start the run'
     : (mode === 'checkout_ladder') ? 'Start climbing'
     : (mode === 'gauntlet') ? 'Run the Gauntlet'
+    : (mode === 'marathon') ? 'Start the marathon'
     : 'Play Now';
   if(isSpecialMode){
     setup.slots = setup.slots.slice(0,1);
@@ -4100,6 +4104,9 @@ const NEW_GAME_MODE_OPTIONS = [
   { key:'gauntlet', label:'🥋 The Gauntlet', contexts:['practice'],
     blurb:"A 20-station endurance warm-up, one per board number, in a fixed order that never repeats a nearby number twice in a row. Each station is 3 darts, strictly in order: the single, then the treble, then the double. Miss 2 and you get one repeat attempt at that station; miss all 3 and it's a Deep Scar. Total Scars across all 20 stations lands on a result — from Unmarked to The Gauntlet Wins. Runs about 15 minutes.",
     apply(){ setMode('gauntlet'); } },
+  { key:'marathon', label:'🏃 Marathon Mode', contexts:['practice'],
+    blurb:"A 45-minute solo endurance session — ordinary 501 legs, chained back to back with no return to this setup screen. When time runs out, the leg in progress finishes normally, then you get the story: dart count per leg, a fatigue split (did the second half run slower than the first?), and a trend read across the whole session — The Cliff, The Warm Machine, or The Flat Line.",
+    apply(){ setMode('marathon'); } },
   { key:'killer', label:'🔪 Killer', contexts:['h2h'],
     blurb:"Elimination darts. Each player is randomly assigned their own number when the match starts. Land darts on your own number to build lives — reach the lives threshold and you become a killer. Once you're a killer, hitting an opponent's number costs them lives instead; drop to 0 lives and you're eliminated. Last player standing wins the leg (your own double is a self-kill if you're already a killer). Choose the lives threshold on the next step.",
     apply(){ setMode('h2h'); setGameType('killer'); } },
@@ -4507,6 +4514,11 @@ async function startGame(){
   // When the server requires auth for writes, make sure we're logged in before
   // starting — otherwise every turn POST would 401 and the game wouldn't record.
   if(Auth.requireAuth && !Auth.loggedIn){ Auth.ensureCanWrite(()=>startGame()); return; }
+  // Marathon Mode (docs/archive/marathon-mode-roadmap.md): a session wrapper around a
+  // CHAIN of ordinary X01 games, not a single createGame() call — genuinely
+  // can't share the rest of this function's one-game-per-Start-tap shape, so
+  // it diverts to its own dedicated flow before any of the normal setup below.
+  if(setup.mode === 'marathon'){ startMarathonMode(); return; }
   // Daily Challenge mode determines its own starting score/legs/sets from today's
   // challenge shape — computed into locals rather than written into setup.start/
   // legsPerSet/setsPerGame, since those persist across sessions (saveSetup() below)
@@ -5989,7 +6001,7 @@ function renderPlayerBadges(data){
   // Practice's 5 (docs/archive/culture-badges-roadmap.md Part B), and the guided
   // drills' 2 each stay visually distinct sub-sections rather than one mixed
   // flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder && !BADGE_INFO[id].gauntlet && !BADGE_INFO[id].killer);
+  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder && !BADGE_INFO[id].gauntlet && !BADGE_INFO[id].killer && !BADGE_INFO[id].marathon);
   const eloIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].elo);
   const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
   const baseballIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].baseball);
@@ -6003,6 +6015,7 @@ function renderPlayerBadges(data){
   const checkoutLadderIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].checkoutLadder);
   const gauntletIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].gauntlet);
   const killerIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].killer);
+  const marathonIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].marathon);
   container.innerHTML = `
     <div class="pp-section-title" style="margin-bottom:6px">X01</div>
     <div class="summary-grid">${x01Ids.map(badgeBlock).join('')}</div>
@@ -6020,6 +6033,8 @@ function renderPlayerBadges(data){
     <div class="summary-grid">${gauntletIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Killer</div>
     <div class="summary-grid">${killerIds.map(badgeBlock).join('')}</div>
+    <div class="pp-section-title" style="margin:16px 0 6px">Marathon Mode</div>
+    <div class="summary-grid">${marathonIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Household Rating</div>
     <div class="summary-grid">${eloIds.map(badgeBlock).join('')}</div>
     <div class="pp-section-title" style="margin:16px 0 6px">Tournaments</div>
@@ -8703,7 +8718,13 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
 // client's eligibility check").
 const SAVABLE_GAME_TYPES = ['x01', 'cricket', 'baseball', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
 function isCurrentGameSavable(){
-  return !!(game && !game.done && SAVABLE_GAME_TYPES.includes(game.gameType));
+  // Marathon Mode (docs/archive/marathon-mode-roadmap.md): deliberately excluded, same
+  // "no save/resume support" scope decision Killer already made. A saved-then-
+  // resumed marathon leg would rebuild through the NORMAL resume path (a plain
+  // rebuildX01State() call, not beginMarathonLeg()) and come back with no
+  // marathonSessionId at all — finishing it would silently complete as an
+  // ordinary standalone practice game instead of continuing the session.
+  return !!(game && !game.done && !game.marathonSessionId && SAVABLE_GAME_TYPES.includes(game.gameType));
 }
 // Called from renderGameShell() (every new game/leg) and from finishUnit()'s
 // game-complete branch (neither of which touches the header/footer "⏸ Save
@@ -10181,7 +10202,12 @@ function onLegWon(wi){
   // the next set" bookkeeping that will never actually have a next set to run.
   const legsAtWin = new Map(game.players.map(p => [p, p.legsWon]));
 
-  if((!game.practice || game.hasGhost) && w.legsWon >= game.legsPerSet){      // set won (H2H, or a ghost race)
+  // Marathon Mode (docs/archive/marathon-mode-roadmap.md): the SAME BUG-18-class carve-out
+  // ghost races already needed — every leg is practice=1/legsPerSet=1/setsPerGame=1
+  // and must still reach finishUnit('game', ...) so finishMarathonLeg() gets a
+  // chance to run, instead of practice mode's own default "offer Next Leg forever"
+  // behavior treating a marathon leg like an open-ended practice session.
+  if((!game.practice || game.hasGhost || game.marathonSessionId) && w.legsWon >= game.legsPerSet){      // set won (H2H, ghost race, or a Marathon leg)
     w.setsWon += 1;
     game.players.forEach(p=>p.legsWon=0);  // reset legs for the next set
 
@@ -10437,6 +10463,13 @@ function finishUnit(kind, winner){
   // branches), so they keep the button.
   const matchShareBtn = isCricket ? '' : `<button class="btn btn-ghost" id="matchwin-share-btn" onclick="shareMomentCard('matchwin')">📤 Share</button>`;
   if(kind==='game'){
+    // Marathon Mode (docs/archive/marathon-mode-roadmap.md): every leg is legsPerSet=1/
+    // setsPerGame=1, so a leg win always reaches this 'game' branch immediately
+    // — but a marathon leg finishing is never the WHOLE session finishing (that's
+    // decided by the wall clock, at this exact leg boundary) — divert entirely
+    // to finishMarathonLeg() rather than any of the normal GAME OVER machinery
+    // below, which assumes a single standalone game.
+    if(game.marathonSessionId){ finishMarathonLeg(); return; }
     // Tournament mode: the bracket already advanced server-side (the onGameCompleted
     // hook fired from DB.completeGame() above), so route back to the bracket instead
     // of the normal New Game screen.
@@ -11750,6 +11783,290 @@ function renderGameKiller(){
   renderPad();
   pushLive();
 }
+
+/* ---------- Marathon Mode (docs/archive/marathon-mode-roadmap.md) ----------
+   A session WRAPPER around ordinary, completely unmodified X01 practice
+   legs — not a new game type. game.gameType stays 'x01' for every leg
+   (renderers.x01/renderGame()/throwDart() etc. all dispatch exactly as they
+   would for any other solo practice X01 game); only game.marathonSessionId
+   (checked by finishUnit()'s 'game'-kind branch) marks a leg as belonging to
+   a marathon session and diverts its post-leg flow here instead of the
+   normal GAME OVER screen. The 45-minute wall clock is checked ONLY at leg
+   boundaries (never mid-leg, a deliberate tradeoff — see the roadmap doc). */
+let marathonSession = null; // {sessionId, player, durationMinutes, startedAtMs, legOrder, dartCountsPerLeg}
+let marathonTimerInterval = null;
+
+async function startMarathonMode(){
+  const player = setup.slots[0];
+  if(!player || !roster.includes(player)){ uiAlert('Choose a player for Marathon Mode.'); return; }
+  saveSetup();
+  let result;
+  try{ result = await Backend.send('POST', '/api/marathon/sessions', { player, durationMinutes: 45 }); }
+  catch(e){ uiAlert('Could not start Marathon Mode: ' + ((e && e.message) || 'unknown error')); return; }
+  marathonSession = { sessionId: result.sessionId, player, durationMinutes: result.durationMinutes,
+    startedAtMs: Date.now(), legOrder: 1, dartCountsPerLeg: [] };
+  beginMarathonLeg(result.gameId, 1, player);
+}
+// Builds an ordinary solo practice 501 game object and points DB.gameId at
+// the ALREADY-CREATED game (server-side, by startMarathonMode()/
+// finishMarathonLeg() below) — same "the game already exists server-side,
+// so set DB.gameId directly rather than via DB.beginGame()'s own POST"
+// precedent beginTournamentMatch() already established.
+function beginMarathonLeg(gameId, legOrder, player){
+  const startScore = 501;
+  game = {
+    gameType:'x01', config:{startingScore:startScore}, start:startScore, category:'501',
+    legsPerSet:1, setsPerGame:1, practice:1,
+    players:[GAME_TYPES.x01.newMatchPlayer(player, startScore)],
+    starter:0, current:0, setNo:1, legNo:1,
+    darts:[], busted:false, won:false, done:false,
+    gameOneEighties:0, gameBigFish:0, gameBusts:0,
+    currentLegTurns:[], legVisitLogs:[], sessionTurns:[],
+    lastTurnSnapshot:null, turnSeq:0, lastTurnEvent:null, matchResult:null, legStart:null,
+    hasGhost:false, roundOver:false, roundEndReason:null, dpLastDart:null, chuckinLastDart:null,
+    // Marathon linkage — checked by finishUnit() to divert to finishMarathonLeg()
+    // instead of the normal GAME OVER flow.
+    marathonSessionId: marathonSession.sessionId,
+    marathonLegOrder: legOrder,
+  };
+  DB.gameId = gameId;
+  ensurePlayerStats(player);
+  earnedBadgeCache = {};
+  Backend.get(`/api/players/badges?name=${encodeURIComponent(player)}`)
+    .then(list=>{ earnedBadgeCache[player] = new Set((list||[]).map(b=>b.badge_id)); })
+    .catch(()=>{ earnedBadgeCache[player] = new Set(); });
+  DB.recordEvent('game_start', null, null);
+  DB.recordEvent('set_start', 1, null);
+  DB.recordEvent('leg_start', 1, 1);
+  mult = 1;
+  game.legStart = { ts: Date.now(), starter: player };
+  renderGameShell();
+  updateMultUI();
+  show('game'); renderGame();
+  renderMarathonBanner();
+  if(!marathonTimerInterval) marathonTimerInterval = setInterval(renderMarathonBanner, 15000);
+  announce(`Leg ${legOrder} starting.`);
+}
+// A persistent banner layered above the normal X01 scoreboard (elapsed/
+// remaining time, leg count so far) plus a manual "End Marathon" control —
+// the one genuinely new piece of UI this whole feature needs, per the
+// roadmap doc's own framing. aria-live, but on a coarse ~15s cadence — a
+// 45-minute session needs a periodic time check, not Checkout Blitz's own
+// urgent 30s/10s/5s countdown cadence, which would be noise here.
+function renderMarathonBanner(){
+  if(!marathonSession) return;
+  const oche = document.querySelector('.oche');
+  if(!oche || !oche.parentNode) return;
+  let banner = document.getElementById('marathon-banner');
+  if(!banner){
+    banner = document.createElement('div');
+    banner.id = 'marathon-banner';
+    banner.className = 'note';
+    banner.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 10px;padding:10px 14px';
+    oche.parentNode.insertBefore(banner, oche);
+  }
+  const elapsedMs = Date.now() - marathonSession.startedAtMs;
+  const remainingMs = Math.max(0, marathonSession.durationMinutes*60000 - elapsedMs);
+  const fmt = ms => { const m = Math.floor(ms/60000); const s = Math.floor((ms%60000)/1000); return `${m}:${String(s).padStart(2,'0')}`; };
+  banner.innerHTML = `<span aria-live="polite">🏃 <b style="color:var(--ink)">Marathon Mode</b> — Leg ${marathonSession.legOrder} · ${fmt(remainingMs)} remaining</span>
+    <button class="btn btn-ghost" style="padding:6px 12px;font-size:12px" onclick="askEndMarathon()">End Marathon</button>`;
+}
+// "sets ended_at immediately" (docs/archive/marathon-mode-roadmap.md) — unlike a
+// normal leg win, this does NOT wait for the current leg to finish; the leg
+// in progress is simply left unfinished (its own recorded turns/darts still
+// count toward lifetime stats, same as ending any other practice session
+// early — see askEndGame()'s own "stats have been saved" precedent).
+function askEndMarathon(){
+  if(!marathonSession) return;
+  uiConfirm('End the marathon now? The leg in progress is left unfinished (its darts are still saved); everything completed so far is kept.', ()=>{
+    endMarathonMode(false);
+  });
+}
+// Dispatched from finishUnit()'s kind==='game' branch. Every marathon leg is
+// legsPerSet=1/setsPerGame=1, so a leg win always reaches that branch
+// immediately (the practice-Baseball/Bob's 27/Gauntlet "a unit IS the whole
+// game" shape) — but a leg finishing is never the whole SESSION finishing;
+// that's decided here, by the wall clock, at this exact leg boundary.
+async function finishMarathonLeg(){
+  const dartsThisLeg = game.players[0].legDarts;
+  marathonSession.dartCountsPerLeg.push(dartsThisLeg);
+  const elapsedMs = Date.now() - marathonSession.startedAtMs;
+  const timeUp = elapsedMs >= marathonSession.durationMinutes*60000;
+  if(timeUp){ endMarathonMode(true); return; }
+  const oche = document.querySelector('.oche');
+  if(oche) oche.innerHTML = `<div style="text-align:center;padding:40px 4px">
+    <div style="font-family:'Bebas Neue';font-size:28px;color:var(--gold)">Leg ${marathonSession.legOrder} complete — ${dartsThisLeg} darts</div>
+    <p class="pp-meta" style="margin:10px 0 0">Starting the next leg…</p>
+  </div>`;
+  let result;
+  try{ result = await Backend.send('POST', `/api/marathon/sessions/${marathonSession.sessionId}/legs`, { player: marathonSession.player }); }
+  catch(e){ uiAlert('Could not start the next leg — ending the marathon here.'); endMarathonMode(false); return; }
+  marathonSession.legOrder = result.legOrder;
+  setTimeout(()=>beginMarathonLeg(result.gameId, result.legOrder, marathonSession.player), 1200);
+}
+// fullDistance is true only when the session ended because the wall clock ran
+// out (finishMarathonLeg()'s own timeUp path) — never on a manual "End
+// Marathon" stop — feeding ⏱️ Full Distance below.
+async function endMarathonMode(fullDistance){
+  if(marathonTimerInterval){ clearInterval(marathonTimerInterval); marathonTimerInterval = null; }
+  const banner = document.getElementById('marathon-banner');
+  if(banner) banner.remove();
+  const sess = marathonSession;
+  game = null; pushLive();
+  let detail = null;
+  try{ detail = await Backend.send('POST', `/api/marathon/sessions/${sess.sessionId}/end`); }
+  catch(e){ uiAlert("Couldn't close out the marathon session cleanly, but everything played so far is saved."); }
+  marathonSession = null;
+  if(detail){ renderMarathonAnalysisScreen(detail, fullDistance); checkMarathonAchievements(sess.player, detail, fullDistance); }
+  else show('setup');
+}
+const MARATHON_TREND_ICON = { 'The Cliff':'📉', 'The Warm Machine':'🔥', 'Flat Line':'📏', 'Inconclusive':'❔' };
+const MARATHON_TREND_DESC = {
+  'The Cliff': "Early and middle held steady, then late fell off a cliff.",
+  'The Warm Machine': "Started slower, then found its rhythm and held it.",
+  'Flat Line': "Dart count stayed steady the whole session — the goal pattern.",
+  'Inconclusive': "Not enough legs (or too irregular a shape) for a clean read.",
+};
+function renderMarathonAnalysisScreen(detail, fullDistance){
+  const completed = detail.legs.filter(l=>l.completedAt!=null);
+  const rows = completed.map(l=>`<div class="dart-count-row"><span class="dart-count-val">${l.dartCount}</span><span class="dart-count-lbl">Leg ${l.legOrder}</span></div>`).join('');
+  const oche=document.querySelector('.oche');
+  const legPanel = `<div class="summary-grid" style="margin-top:14px">
+    <button class="btn btn-ghost" onclick="show('setup')">New game</button>
+  </div>`;
+  if(oche) oche.innerHTML = `<div style="text-align:center;padding:14px 4px">
+    <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream)">🏁 MARATHON COMPLETE</div>
+    <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${completed.length} leg${completed.length===1?'':'s'} completed${fullDistance ? ' · Full 45 minutes' : ''}</p>
+    <div class="summary-grid">
+      <div class="stat-block"><div class="stat-val">${detail.fatigueSplit}</div><div class="stat-label">Fatigue Split — ${escapeHtml(detail.fatigueTier)}</div></div>
+      <div class="stat-block"><div class="stat-val">${MARATHON_TREND_ICON[detail.trend]||''} ${escapeHtml(detail.trend)}</div><div class="stat-label">Trend</div></div>
+    </div>
+    <p class="pp-meta" style="margin:10px 0 0">${escapeHtml(MARATHON_TREND_DESC[detail.trend]||'')}</p>
+    <div class="dart-counts" style="margin-top:18px;text-align:left">
+      <div class="dart-counts-title">Darts per leg</div>
+      ${rows || '<p class="pp-meta">No legs completed.</p>'}
+    </div>
+    ${legPanel}
+  </div>`;
+}
+// Achievement check, run once the session detail (from endMarathonMode()) is
+// known: two one-shot condition badges scoped to THIS session, plus a
+// completion badge, plus the two lifetime milestone ladders (fetched fresh
+// from the stat-bubbles endpoint, which already reflects this just-ended
+// session server-side).
+function checkMarathonAchievements(player, detail, fullDistance){
+  if(detail.fatigueTier === 'Iron'){
+    awardRecurringBadge(player, 'marathon_iron', 'marathoniron',
+      { icon:'🛡️', headline:'IRON', player, statLine:'Fatigue split stayed in the Iron tier' });
+  }
+  if(detail.trend === 'Flat Line'){
+    awardRecurringBadge(player, 'marathon_flatline', 'marathonflatline',
+      { icon:'📉', headline:'FLAT LINE', player, statLine:'Dart count held steady the whole session' });
+  }
+  if(fullDistance){
+    awardRecurringBadge(player, 'marathon_fulldistance', 'marathonfulldistance',
+      { icon:'⏱️', headline:'FULL DISTANCE', player, statLine:'Completed the full 45 minutes' });
+  }
+  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(player)}&gameType=marathon`).then(bubbles=>{
+    if(!bubbles) return;
+    const sessionsLadder = MARATHON_MILESTONE_LADDERS.find(l=>l.metric==='sessions');
+    checkChuckinMilestoneTier(sessionsLadder, player, bubbles.sessionsCompleted);
+    const legsLadder = MARATHON_MILESTONE_LADDERS.find(l=>l.metric==='legs');
+    checkChuckinMilestoneTier(legsLadder, player, bubbles.totalLegsCompleted);
+  }).catch(()=>{});
+}
+const MARATHON_MILESTONE_LADDERS = [
+  { metric:'sessions', idPrefix:'marathon_sessions_', statNoun:'lifetime Marathon Mode sessions completed',
+    descFor: t => `Complete ${t.toLocaleString()} lifetime Marathon Mode sessions.`,
+    tiers: [
+      { threshold:1,  label:'First Marathon',   icon:'🏁' },
+      { threshold:5,  label:'Regular Runner',   icon:'🏃' },
+      { threshold:15, label:'Seasoned Endurer', icon:'🥾' },
+      { threshold:30, label:'Marathon Veteran', icon:'🎖️' },
+    ] },
+  { metric:'legs', idPrefix:'marathon_legs_', statNoun:'lifetime legs completed inside Marathon Mode sessions',
+    descFor: t => `Complete ${t.toLocaleString()} lifetime legs inside Marathon Mode sessions.`,
+    tiers: [
+      { threshold:25,  label:'Getting Going',    icon:'👟' },
+      { threshold:100, label:'In Stride',        icon:'🏃' },
+      { threshold:250, label:'Long Hauler',      icon:'🚛' },
+      { threshold:500, label:'Ultra Marathoner', icon:'🌋' },
+    ] },
+];
+MARATHON_MILESTONE_LADDERS.forEach(ladder=>{
+  ladder.tiers.forEach((tier, i)=>{
+    const id = ladder.idPrefix + tier.threshold;
+    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), marathon:true };
+    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
+    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
+  });
+});
+BADGE_INFO['marathon_iron'] = { icon:'🛡️', label:'Iron', desc:'Reach the Iron fatigue-split tier in a Marathon Mode session.', marathon:true };
+ACH_LABELS['marathon_iron'] = 'Iron 🛡️'; ACH_DURATION['marathon_iron'] = 3000;
+BADGE_INFO['marathon_flatline'] = { icon:'📉', label:'Flat Line', desc:'Complete a Marathon Mode session classified Flat Line.', marathon:true };
+ACH_LABELS['marathon_flatline'] = 'Flat Line 📉'; ACH_DURATION['marathon_flatline'] = 3000;
+BADGE_INFO['marathon_fulldistance'] = { icon:'⏱️', label:'Full Distance', desc:'Complete the full 45 minutes of a Marathon Mode session without an early "End Marathon" stop.', marathon:true };
+ACH_LABELS['marathon_fulldistance'] = 'Full Distance ⏱️'; ACH_DURATION['marathon_fulldistance'] = 3000;
+
+const MARATHON_STAT_DEFS = [
+  { key:'marathonsessions', label:'Sessions Completed', desc:'Number of completed Marathon Mode sessions', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'marathonavglegs', label:'Avg Legs / Session', desc:'Average legs completed per Marathon Mode session', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
+  { key:'marathonavgfatigue', label:'Avg Fatigue Split', desc:'Average fatigue split (second-half minus first-half average dart count, clamped at zero) across every session', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
+  { key:'marathoncliff', label:'The Cliff', desc:'Sessions classified The Cliff', fmt:v=>v!=null?String(Math.round(v)):'—' },
+  { key:'marathonwarmmachine', label:'The Warm Machine', desc:'Sessions classified The Warm Machine', fmt:v=>v!=null?String(Math.round(v)):'—' },
+  { key:'marathonflatline', label:'Flat Line', desc:'Sessions classified Flat Line', fmt:v=>v!=null?String(Math.round(v)):'—' },
+];
+const MARATHON_BUBBLE_KEY_MAP = { marathonsessions:'sessionsCompleted', marathonavglegs:'avgLegsPerSession',
+  marathonavgfatigue:'avgFatigueSplit', marathoncliff:'cliffSessions', marathonwarmmachine:'warmMachineSessions', marathonflatline:'flatLineSessions' };
+function renderMarathonPersonalBests(data){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  if(!data || data.lowestFatigueSplit==null){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No completed Marathon Mode sessions yet.</p>`;
+    return;
+  }
+  container.innerHTML=`<div class="summary-grid">
+    <div class="stat-block"><div class="stat-val">${data.lowestFatigueSplit}</div><div class="stat-label">Lowest Fatigue Split</div></div>
+    <div class="stat-block"><div class="stat-val">${data.mostLegsInASession}</div><div class="stat-label">Most Legs in a Session</div></div>
+  </div>`;
+}
+function renderHomeTabBodyMarathon(){
+  const el=document.getElementById('home-tab-body');
+  const data=homeData.marathon;
+  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
+  const board=data.leaderboard||[];
+  const leaderboard=board.length
+    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
+        <span class="hof-rank">${i+1}</span>
+        <span class="hof-score">${r.lowestFatigueSplit}</span>
+        <span class="hof-player">${escapeHtml(r.name)}</span>
+        <span class="hof-dates">${r.mostLegsInASession} legs</span>
+      </div>`).join('')}</div>`
+    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — complete a Marathon Mode session to claim the top spot.</p>`;
+  el.innerHTML=`
+    <div class="pp-section">
+      <div class="pp-section-title">🏃 Marathon Mode — Lowest Fatigue Split</div>
+      ${leaderboard}
+    </div>
+  `;
+}
+GAME_TYPES.marathon = {
+  id: 'marathon',
+  label: 'Marathon Mode',
+  // Marathon Mode is never actually dispatched through GAME_TYPES during real
+  // play — every leg's game.gameType stays 'x01' throughout (see
+  // beginMarathonLeg()) — this entry exists purely so it can plug into the
+  // same Home/Player Profile game-type-toggle filter every other type uses.
+  newMatchPlayer: () => { throw new Error('marathon is never dispatched through GAME_TYPES — see beginMarathonLeg()'); },
+  evaluateVisit: () => { throw new Error('marathon is never dispatched through GAME_TYPES — see beginMarathonLeg()'); },
+  resetForNextLeg: () => {},
+  playerSnapshot: p => p,
+  statDefs: MARATHON_STAT_DEFS,
+  personalBestsRenderer: renderMarathonPersonalBests,
+  homeTabRenderer: renderHomeTabBodyMarathon,
+  soloOnly: true,
+};
+GAME_TYPES.marathon.bubbleKeyMap = MARATHON_BUBBLE_KEY_MAP;
 
 /* ---------- Doubles Practice (docs/game-modes-roadmap.md) ----------
    Solo drill mode: no opponent, no legs/sets in the usual sense — a "round" is

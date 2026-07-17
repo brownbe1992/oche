@@ -52,6 +52,7 @@ convention in `CLAUDE.md`.
 - [27. The Gauntlet](#27-the-gauntlet)
 - [28. Killer](#28-killer)
 - [29. End-of-Night Session Recap](#29-end-of-night-session-recap)
+- [30. Marathon Mode](#30-marathon-mode)
 
 ---
 
@@ -5686,3 +5687,147 @@ before midnight vs. just after land in two different recaps). Verified
 end-to-end with Playwright: the Home teaser appearing after a completed H2H
 match, the recap screen's full render, and the Share button producing a real
 downloaded card image.
+
+## 30. Marathon Mode
+
+`docs/archive/marathon-mode-roadmap.md`. A 45-minute solo endurance session —
+not a new way to score darts, a **session wrapper** chaining ordinary,
+completely unmodified 501 practice legs back to back with no return to the
+New Game screen between them. `game.gameType` stays `'x01'` for every leg
+throughout; only `marathon_session_legs`'s own `game_id` FK marks a leg as
+belonging to a session (the `league_fixtures`-style "context table with a
+`game_id` FK" pattern per CLAUDE.md — never a new `game_type`).
+
+### Data model
+
+```sql
+marathon_sessions (id, player_id, duration_minutes, started_at, ended_at)
+marathon_session_legs (id, session_id, game_id, leg_order, created_at)
+```
+
+`ended_at` NULL means the session is still in progress. Every leg's `game_id`
+is created **server-side**, inside `startMarathonSession()`/
+`startNextMarathonLeg()` themselves (`backend/db.js`) — no endpoint ever
+accepts a client-supplied `game_id` to link, which means the roadmap doc's
+own flagged worry about validating an externally-supplied `game_id` never
+actually applies: there's nothing to validate.
+
+### The chaining loop
+
+`POST /api/marathon/sessions` creates the session row and leg 1's own
+ordinary solo practice 501 game in one call. Each leg plays through the
+**completely unmodified** X01 engine (`renderers.x01`, `enterTurn()`,
+`evaluateVisit()` — no marathon-specific scoring code anywhere). The instant
+a leg is won, `finishMarathonLeg()` (`frontend/index.html`) checks the wall
+clock against `startedAtMs + durationMinutes*60000` — **only at this leg
+boundary, never mid-leg** (a deliberate tradeoff: real session length can run
+a little past 45 minutes by however long the final leg takes, rather than
+ever truncating a leg in progress). If time remains, it calls `POST
+/api/marathon/sessions/:id/legs` (creates and links the next leg's game,
+rejecting with 409 once the session has already ended) and transitions
+straight into that leg's live scoreboard via `beginMarathonLeg()` — no return
+to New Game. A persistent banner (`renderMarathonBanner()`) sits above the
+scoreboard showing elapsed/remaining time and leg count, `aria-live` on a
+~15s cadence, with an **End Marathon** control that ends the session
+**immediately** (not "wait for this leg to finish") via `POST
+/api/marathon/sessions/:id/end` — idempotent, so retrying a dropped response
+can't double-process anything.
+
+### A real bug found and fixed while building this (BUG-18-class)
+
+The generic X01 `onLegWon()` only cascades a leg win up into a full
+`finishUnit('game', ...)` when `!game.practice` — practice mode's own
+default is to treat every win as "just a leg" and offer an endless "Next
+leg" button, since an ordinary practice session has no match structure to
+complete. Ghost Opponent races already needed (and got, when BUG-18 was
+originally found) a `|| game.hasGhost` carve-out for the identical reason —
+a ghost race is `practice=true` but is always exactly 1 leg/1 set and must
+still reach `finishUnit('game', ...)`. Marathon Mode legs are `practice=1`
+too (an ordinary practice game is exactly what each leg genuinely is);
+without the same carve-out, a leg win would never reach
+`finishMarathonLeg()` at all — every leg would just show the ordinary "Next
+leg" panel forever, with no auto-chaining and no session ever ending. Fixed
+by extending the existing condition to `(!game.practice || game.hasGhost ||
+game.marathonSessionId)`, mirroring the ghost precedent exactly.
+
+### The analysis (`frontend/scoring.js`)
+
+Two pure functions, the only genuinely new calculations this feature needs
+(every other per-leg figure — dart count, checkout, busts — is already
+derivable from existing X01 turn/dart data, no new columns):
+
+- **`computeFatigueSplit(dartCountsPerLeg)`** — splits the ordered leg list
+  into a first half and second half (`Math.floor(n/2)` in the first half,
+  the roadmap doc's own "floor the smaller half" convention), averages each,
+  and returns `max(0, secondHalfAvg - firstHalfAvg)` — clamped at zero, since
+  a session where the player got *faster* in the second half isn't a
+  fatigue problem to score against them. A 0- or 1-leg session (no second
+  half to compare) reads as a flat 0.
+
+  | Fatigue Split | Tier |
+  |---|---|
+  | 0–2 darts | Iron |
+  | 3–5 darts | Tested |
+  | 6–9 darts | Fading |
+  | 10+ darts | Running on Empty |
+
+- **`classifyMarathonTrend(dartCountsPerLeg)`** — fewer than
+  `MARATHON_TREND_MIN_LEGS` (6) legs is always `'Inconclusive'`. Otherwise
+  splits into three roughly-equal segments (early/middle/late,
+  `Math.floor(n/3)`-sized early/middle, remainder in late) and reads the
+  shape within a ±`MARATHON_TREND_TOLERANCE` (2 darts) band: all three
+  segments mutually within tolerance → **Flat Line**; early≈middle, late
+  meaningfully worse → **The Cliff**; early meaningfully worse than middle,
+  late≈middle → **The Warm Machine**; any other shape (a steady gradual
+  climb, fatigue then partial recovery, etc.) → **Inconclusive** rather than
+  forcing a label onto ambiguous data. Both the minimum-legs floor and the
+  tolerance width are first-pass numbers, not confirmed against real
+  sessions (the roadmap doc's own caveat).
+
+### Stats, Personal Bests, Home leaderboard
+
+- **Stat bubbles** (`getMarathonStatBubbles`): sessions completed, average
+  legs per session, average fatigue split, and a 3-way lifetime trend-pattern
+  breakdown (Cliff/Warm Machine/Flat Line session counts) — all scoped to
+  **ended** sessions only (`ended_at IS NOT NULL`); an `'h2h'` mode request
+  always reads as zero sessions (Marathon Mode is inherently solo — the same
+  answer a SQL-side `_scope()` join would reach, computed directly instead).
+- **Personal Bests** (`getMarathonPersonalBests`): **lowest** fatigue split
+  ever (`MIN()` — ascending-is-better, the same polarity The Gauntlet's Scar
+  count uses) and **most legs completed** in a single session (`MAX()`, a
+  stamina/throughput metric).
+- **Home leaderboard** (`getMarathonLeaderboard`): one row per player, their
+  own lowest-ever fatigue split, sorted **ascending** — the same direction
+  The Gauntlet's own leaderboard uses.
+
+### Achievements
+
+Two data-driven ladders off the existing `checkChuckinMilestoneTier()`
+engine (once-earned, not recurring): lifetime sessions completed (1/5/15/30)
+and lifetime legs completed inside Marathon sessions (25/100/250/500). Plus
+three one-off, all-recurring condition badges, checked once a session ends:
+🛡️ **Iron** (session's own fatigue tier is Iron), 📉 **Flat Line** (session
+classified Flat Line), and ⏱️ **Full Distance** (the session ended because
+the wall clock ran out, never on a manual "End Marathon" stop).
+
+### Deliberately out of scope: no save/resume support
+
+Same scope decision Killer already made. `isCurrentGameSavable()`
+explicitly excludes any leg carrying a `marathonSessionId` — the generic
+resume path rebuilds a plain `rebuildX01State()` game object with no
+marathon linkage at all, so a resumed leg would silently finish as an
+ordinary standalone practice game instead of continuing the session.
+
+### Testing
+
+`backend/test/scoring.test.js`: `computeFatigueSplit()`'s floor-half split,
+zero-clamping, tier boundaries, and 0/1-leg edge case; `classifyMarathonTrend()`'s
+too-few-legs floor and all three named patterns plus the no-match
+Inconclusive fallback. `backend/test/db.marathon-mode.test.js`: session/leg
+creation and linkage guards (rejects once ended, rejects a player mismatch),
+per-leg dart-count/checkout/bust derivation (excluding an in-progress leg
+from the analysis series), and the stats/PB/leaderboard functions. Verified
+end-to-end with Playwright: the full New Game → Marathon Mode flow, the
+persistent banner, a leg auto-chaining into the next on completion, a
+manual "End Marathon" stop, the analysis screen, badges (First Marathon,
+Iron), and Player Profile/Home page wiring.
