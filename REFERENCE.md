@@ -51,6 +51,7 @@ convention in `CLAUDE.md`.
 - [26. 121 Checkout Ladder](#26-121-checkout-ladder)
 - [27. The Gauntlet](#27-the-gauntlet)
 - [28. Killer](#28-killer)
+- [29. End-of-Night Session Recap](#29-end-of-night-session-recap)
 
 ---
 
@@ -5568,3 +5569,120 @@ winner (leg wins that don't reach `legsPerSet` correctly stop at "LEG
 COMPLETE" rather than ending the match), the GAME OVER summary panel, stat
 bubbles/Personal Best/win leaderboard via the API, and the live `/display`
 `renderers.killer` card (number, lives-as-pips, throwing indicator).
+
+## 29. End-of-Night Session Recap
+
+`docs/archive/session-recap-roadmap.md`. A one-tap digest of everything played on a
+single **local calendar date** — the same day-boundary convention Daily
+Challenge and `getSummary()`'s `todayDarts` already use (a night that
+straddles midnight splits in two, an accepted v1 tradeoff, same as Daily
+Challenge's own). Purely read-time: `getSessionRecap(date)` (`backend/db.js`)
+aggregates over existing `turns`/`games`/`player_badges` rows — nothing is
+stored, so any past date is recomputable for free.
+
+### Scope: H2H is the spine, solo is a footnote
+
+Per the roadmap doc's own framing ("the recap's spine is the games people
+played against each other"): every **completed** H2H game (`practice=0`,
+`player_count>1`, `completed_at` on the given date) is fully itemized —
+per-matchup win/loss records for 2-player games, a flat list for 3+ player
+games. Non-H2H activity (practice or solo, any game type) is folded into a
+light `soloActivity` summary grouped by player+game type (legs/rounds +
+darts thrown, `legs` omitted for the continuous-stream types — Chuckin,
+Checkout Trainer, guided Around the World — where a "leg" is meaningless),
+never itemized.
+
+### Response shape (`GET /api/session-recap?date=YYYY-MM-DD`)
+
+```
+{
+  date, totalGames,               // totalGames = completed H2H games only
+  h2hGames: [ {gameId, category, gameType, completedAt, winnerId, winnerName, players:[name,...]} ],
+  h2hResultsByMatchup: [ {players:[a,b], games:[{gameId,category,gameType,winner}], record:{name:wins}} ],
+  perPlayer: [ {name, gamesPlayed, gamesWon, gamesLost, dartsThrown, oneEighties,
+                tonPlusCheckouts, bestVisit, bestLegAvg} ],
+  soloActivity: [ {name, gameType, legs, darts} ],
+  badgesEarnedTonight: [ {player, badgeId, count, earnedAt} ],
+  personalBestsSetTonight: [ {player, metric, value, previousBest} ],
+  moments: [ {ts, type, player, text} ],   // chronological
+}
+```
+
+- **`perPlayer`'s `bestVisit`/`bestLegAvg` are X01-only** (same scope
+  `getPersonalBests()`'s own `bestLegAvg` uses) — extending "best leg" to
+  every other game type's own formula is left for a future pass rather than
+  ballooning this one aggregation. `gamesWon`/`gamesLost`/`dartsThrown`/
+  `oneEighties`/`tonPlusCheckouts` cover every game type a player touched
+  that date (darts thrown excludes Checkout Trainer's non-physical darts,
+  same `NOT_CHECKOUT_TRAINER` convention as `getHomeExtra()`'s own
+  `todayDarts`).
+- **`h2hResultsByMatchup`** only covers exactly-2-player games, grouped by
+  the unordered player pair in first-played order; a 3+ player game has no
+  single pairwise record and is listed only in `h2hGames`.
+- **`badgesEarnedTonight`** returns the raw `badge_id` only — label/icon/
+  description resolve through the frontend's own `BADGE_INFO` map (the
+  single source of truth for that data everywhere else badges surface, not
+  duplicated server-side).
+
+### Personal bests set tonight
+
+The roadmap doc's own flagged risk ("the pre-tonight comparison is the
+easiest formula to get subtly wrong"). For each player active on the date,
+three well-defined single-number X01 records are each computed twice — once
+scoped to `date(t.created_at) = ?` (tonight) and once to `date(t.created_at)
+< ?` (every day strictly before it) — and a record only lands in
+`personalBestsSetTonight` if tonight's own best exists **and** either no
+pre-tonight value exists at all, or tonight's value beats it in the correct
+direction:
+
+| Metric | Direction | Pre-tonight baseline query |
+|---|---|---|
+| `legAvg` | ascending (higher wins) | `MAX` of every won leg's average, dated before tonight |
+| `fewestDartsCheckout` | descending (lower wins) | `MIN` darts across every won leg, dated before tonight (`NOT_HANDICAPPED`-scoped, same as `getPersonalBests()`) |
+| `highestCheckout` | ascending (higher wins) | `MAX(checkout_points)`, dated before tonight |
+
+A worse leg played later the same night never adds a second entry for a
+metric already recorded as beaten earlier that night — the comparison is
+always "tonight's own best vs. the pre-tonight baseline," not per-leg.
+
+### Moments timeline
+
+A chronological merge of the same event classes the live moment cards
+already fire on — 180s (X01-only), ton+/Big Fish checkouts
+(`checkout_points >= 100`, `170` specifically tagged `bigfish`), H2H match
+wins, and badges earned that date — sorted ascending by timestamp so the
+recap reads start-to-finish like the night actually happened.
+
+### Frontend
+
+A **🌙 Tonight's recap** teaser card on the Home page (`renderHomeRecapTeaser()`),
+hidden entirely until a network round-trip confirms `totalGames > 0` for
+today — unlike the Daily Challenge teaser just above it (purely derived
+client-side, no fetch needed), "did anyone finish a game tonight" can't be
+known without asking the server. Wired into both `show('home')` and the
+page's own boot sequence (the initial load never calls `show('home')` since
+the Home screen starts already `.on` in the static markup — the same reason
+`renderHomeChallengeTeaser()` needed its own explicit boot-time call).
+
+The recap screen itself (`renderSessionRecapBody()`) takes a date (a plain
+`<input type="date">`, default today) and renders Results / Tonight-per-player
+/ Also tonight / Badges / Personal bests / Moments sections, each hidden when
+empty. **📤 Share** renders the night through the existing shareable-moment
+card generator (`fireMomentCard('sessionrecap', {...})` → `shareMomentCard()`)
+as a single summary card — headline "TONIGHT'S RECAP", the date as the
+"player" line, and a stat-line summary (game count, player count, top-180
+scorer, badge count) — no new canvas code, matching the roadmap doc's own
+"one new card layout, the rest of the pipeline already built."
+
+### Testing
+
+`backend/test/db.session-recap.test.js`: invalid-date rejection, an
+empty-activity date, a full 2-player H2H fixture (results grid, per-player
+stats, moments), personal-bests-set-tonight firing only on a genuine
+improvement over the pre-tonight baseline (and not re-firing for a worse leg
+played later the same night), badge date-scoping, solo-activity grouping
+kept separate from the H2H spine, and date-boundary scoping (a turn just
+before midnight vs. just after land in two different recaps). Verified
+end-to-end with Playwright: the Home teaser appearing after a completed H2H
+match, the recap screen's full render, and the Share button producing a real
+downloaded card image.

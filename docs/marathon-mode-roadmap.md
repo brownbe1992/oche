@@ -27,7 +27,7 @@ X01 legs together and read the results back."
 
 ## How this differs from every existing mode (don't conflate)
 
-- **Session Recap** (`docs/session-recap-roadmap.md`) is the closest
+- **Session Recap** (`docs/archive/session-recap-roadmap.md`) is the closest
   thematic precedent — a read-time aggregation over already-ordinary
   games, nothing new stored. But it's scoped to a **calendar day**, covers
   **everything** played (any game type, any opponent), and reports "what

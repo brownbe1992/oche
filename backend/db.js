@@ -2212,6 +2212,236 @@ function getHomeExtra() {
     activeLeagues, eloLeaderboard };
 }
 
+// End-of-Night Session Recap (docs/session-recap-roadmap.md) — one read-time
+// aggregation over a single local calendar date's activity; nothing stored,
+// matching the "nothing pre-aggregated" house rule (CLAUDE.md). "The session"
+// = the local calendar date of turns.created_at/games.completed_at — the same
+// day-boundary convention Daily Challenge/getSummary()'s todayDarts already
+// use (a night that straddles midnight splits in two; accepted for v1, same
+// as Daily Challenge's own tradeoff — see the roadmap doc's Open Questions).
+// date is caller-supplied (server.js passes the query param straight through)
+// and validated here, matching getChallengeStatus()'s own pattern.
+function getSessionRecap(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) throw httpError(400, 'date must be YYYY-MM-DD');
+
+  // The recap's spine (docs/session-recap-roadmap.md: "the recap's spine is the
+  // games people played against each other") — every H2H game (practice=0,
+  // player_count>1) that COMPLETED on this date. A single 3+ player game has no
+  // single "matchup" pair, so it's listed in h2hGames but left out of
+  // h2hResultsByMatchup below.
+  const h2hGames = db.prepare(`
+    SELECT g.id AS gameId, g.category, g.game_type AS gameType, g.completed_at AS completedAt,
+      g.winner_id AS winnerId, w.name AS winnerName
+    FROM games g LEFT JOIN players w ON w.id = g.winner_id
+    WHERE g.practice = 0 AND g.player_count > 1 AND g.completed_at IS NOT NULL
+      AND date(g.completed_at) = ?
+    ORDER BY g.completed_at ASC
+  `).all(date);
+  const gamePlayersStmt = db.prepare(`
+    SELECT p.name FROM game_players gp JOIN players p ON p.id = gp.player_id
+    WHERE gp.game_id = ? ORDER BY p.name COLLATE NOCASE
+  `);
+  h2hGames.forEach(g => { g.players = gamePlayersStmt.all(g.gameId).map(r => r.name); });
+  const totalGames = h2hGames.length;
+
+  // Pairwise records (2-player matchups only, per the roadmap doc's "head-to-head
+  // results grid for the night's matchups") — grouped by the unordered pair, in
+  // first-played order.
+  const matchupOrder = [];
+  const matchupMap = new Map();
+  h2hGames.filter(g => g.players.length === 2).forEach(g => {
+    const key = g.players.slice().sort((a, b) => a.localeCompare(b)).join(' ');
+    if (!matchupMap.has(key)) { matchupMap.set(key, { players: g.players.slice(), games: [], record: {} }); matchupOrder.push(key); }
+    const m = matchupMap.get(key);
+    m.games.push({ gameId: g.gameId, category: g.category, gameType: g.gameType, winner: g.winnerName });
+    if (g.winnerName) m.record[g.winnerName] = (m.record[g.winnerName] || 0) + 1;
+  });
+  const h2hResultsByMatchup = matchupOrder.map(k => matchupMap.get(k));
+
+  // Every player who threw a dart today (H2H or solo/practice) — the universe
+  // for perPlayer/soloActivity below.
+  const activePlayers = db.prepare(`
+    SELECT DISTINCT p.id, p.name FROM turns t
+    JOIN players p ON p.id = t.player_id
+    WHERE date(t.created_at) = ?
+    ORDER BY p.name COLLATE NOCASE
+  `).all(date);
+
+  // Per-player H2H participation tonight (games/legs won-lost, darts thrown,
+  // 180s, ton+ checkouts, best visit, best leg) — scoped to H2H games only, per
+  // the roadmap doc's "the recap's spine is the games people played against
+  // each other." Best visit/leg are X01-only (same scope getPersonalBests()'s
+  // own bestLegAvg uses) — extending "best leg" to every other game type's own
+  // formula is left for a future pass rather than ballooning this aggregation.
+  const H2H_TODAY = `AND g.practice = 0 AND g.player_count > 1 AND date(t.created_at) = ?`;
+  const gamesWonStmt = db.prepare(`
+    SELECT COUNT(*) AS n FROM games g JOIN game_players gp ON gp.game_id = g.id
+    WHERE gp.player_id = ? AND g.winner_id = gp.player_id AND g.practice = 0 AND g.player_count > 1
+      AND date(g.completed_at) = ?
+  `);
+  const gamesPlayedStmt = db.prepare(`
+    SELECT COUNT(DISTINCT g.id) AS n FROM games g JOIN game_players gp ON gp.game_id = g.id
+    WHERE gp.player_id = ? AND g.practice = 0 AND g.player_count > 1 AND date(g.completed_at) = ?
+  `);
+  const dartsTodayStmt = db.prepare(`
+    SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id
+    WHERE t.player_id = ? AND date(t.created_at) = ? ${NOT_CHECKOUT_TRAINER}
+  `);
+  const oneEightiesStmt = db.prepare(`
+    SELECT COUNT(*) AS n FROM turns t JOIN games g ON g.id = t.game_id
+    WHERE t.player_id = ? AND date(t.created_at) = ? AND t.scored = 180 ${X01_ONLY}
+  `);
+  const tonPlusStmt = db.prepare(`
+    SELECT COUNT(*) AS n FROM turns t
+    WHERE t.player_id = ? AND date(t.created_at) = ? AND t.checkout = 1 AND t.checkout_points >= 100
+  `);
+  const bestVisitStmt = db.prepare(`
+    SELECT MAX(t.scored) AS v FROM turns t JOIN games g ON g.id = t.game_id
+    WHERE t.player_id = ? AND date(t.created_at) = ? AND t.bust = 0 ${X01_ONLY}
+  `);
+  const bestLegStmt = db.prepare(`
+    SELECT MAX(la) AS avg, MIN(darts) AS minDartsAtBest FROM (
+      SELECT CAST(SUM(t.scored) AS REAL)/NULLIF(SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END),0)*3 AS la,
+        SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END) AS darts
+      FROM turns t JOIN games g ON g.id = t.game_id
+      JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
+      WHERE t.player_id = ? AND date(t.created_at) = ? ${X01_ONLY}
+      GROUP BY t.game_id, t.set_no, t.leg_no
+      HAVING SUM(t.checkout) > 0
+    )
+  `);
+  const perPlayer = activePlayers.map(p => {
+    const gamesWon = gamesWonStmt.get(p.id, date).n;
+    const gamesPlayed = gamesPlayedStmt.get(p.id, date).n;
+    const bestLegRow = bestLegStmt.get(p.id, date);
+    return {
+      name: p.name,
+      gamesPlayed, gamesWon, gamesLost: gamesPlayed - gamesWon,
+      dartsThrown: dartsTodayStmt.get(p.id, date).n,
+      oneEighties: oneEightiesStmt.get(p.id, date).n,
+      tonPlusCheckouts: tonPlusStmt.get(p.id, date).n,
+      bestVisit: bestVisitStmt.get(p.id, date).v ?? null,
+      bestLegAvg: bestLegRow.avg != null ? +bestLegRow.avg.toFixed(1) : null,
+    };
+  });
+
+  // "Also tonight" — non-H2H (practice or solo) activity, deliberately NOT
+  // itemized (roadmap doc: "appear as a light 'also tonight' line, not fully
+  // itemized"). Grouped by player+game_type: rounds/legs played (excluding the
+  // continuous-stream types, same NOT_CONTINUOUS_STREAM convention as
+  // getHomeExtra()'s todayLegs) and darts thrown.
+  const soloActivity = db.prepare(`
+    SELECT p.name AS name, g.game_type AS gameType,
+      COUNT(DISTINCT t.game_id||'-'||t.set_no||'-'||t.leg_no) AS legs,
+      COUNT(d.id) AS darts
+    FROM turns t
+    JOIN players p ON p.id = t.player_id
+    JOIN games g ON g.id = t.game_id
+    LEFT JOIN darts d ON d.turn_id = t.id
+    WHERE date(t.created_at) = ? AND (g.practice = 1 OR g.player_count = 1)
+    GROUP BY p.id, g.game_type
+    ORDER BY p.name COLLATE NOCASE, g.game_type
+  `).all(date).map(r => ({
+    name: r.name, gameType: r.gameType,
+    // "legs" is meaningless for the continuous-stream types (one long session,
+    // no round boundary) — same set NOT_CONTINUOUS_STREAM excludes elsewhere —
+    // so only darts thrown is reported for those; every other solo/practice
+    // type reports both.
+    legs: ['chuckin', 'checkout_trainer', 'around_the_world'].includes(r.gameType) ? null : r.legs,
+    darts: r.darts,
+  }));
+
+  // Badges earned tonight (player_badges.earned_at date-scoped) — raw badge_id
+  // only; label/icon/description live in the frontend's own BADGE_INFO map
+  // (single source of truth, same as everywhere else badges surface).
+  const badgesEarnedTonight = db.prepare(`
+    SELECT p.name AS player, pb.badge_id AS badgeId, pb.count AS count, pb.earned_at AS earnedAt
+    FROM player_badges pb JOIN players p ON p.id = pb.player_id
+    WHERE date(pb.earned_at) = ?
+    ORDER BY pb.earned_at ASC
+  `).all(date);
+
+  // Personal bests set tonight (X01 only — see perPlayer's own scoping note
+  // above) — tonight's own best for each of 3 well-defined single-number
+  // records, compared against the SAME player's best from every day BEFORE
+  // this one. A record only counts if tonight's value exists and beats (or, for
+  // a first-ever occurrence, simply exists where there was no prior value) the
+  // pre-tonight baseline in the correct direction — ascending for leg average/
+  // highest checkout, descending for fewest-darts checkout.
+  const preLegAvgStmt = db.prepare(`
+    SELECT MAX(la) AS v FROM (
+      SELECT CAST(SUM(t.scored) AS REAL)/NULLIF(SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END),0)*3 AS la
+      FROM turns t JOIN games g ON g.id = t.game_id
+      JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
+      WHERE t.player_id = ? AND date(t.created_at) < ? ${X01_ONLY}
+      GROUP BY t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout) > 0
+    )
+  `);
+  const preFewestDartsStmt = db.prepare(`
+    SELECT MIN(legDarts) AS v FROM (
+      SELECT COUNT(d.id) AS legDarts FROM turns t JOIN games g ON g.id = t.game_id JOIN darts d ON d.turn_id = t.id
+      WHERE t.player_id = ? AND date(t.created_at) < ? ${NOT_CHECKOUT_TRAINER} ${NOT_HANDICAPPED}
+      GROUP BY t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout) > 0
+    )
+  `);
+  const preHighestCheckoutStmt = db.prepare(`
+    SELECT MAX(t.checkout_points) AS v FROM turns t
+    WHERE t.player_id = ? AND date(t.created_at) < ? AND t.checkout = 1 AND t.checkout_points IS NOT NULL
+  `);
+  const tonightFewestDartsStmt = db.prepare(`
+    SELECT MIN(legDarts) AS v FROM (
+      SELECT COUNT(d.id) AS legDarts FROM turns t JOIN games g ON g.id = t.game_id JOIN darts d ON d.turn_id = t.id
+      WHERE t.player_id = ? AND date(t.created_at) = ? ${NOT_CHECKOUT_TRAINER} ${NOT_HANDICAPPED}
+      GROUP BY t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout) > 0
+    )
+  `);
+  const tonightHighestCheckoutStmt = db.prepare(`
+    SELECT MAX(t.checkout_points) AS v FROM turns t
+    WHERE t.player_id = ? AND date(t.created_at) = ? AND t.checkout = 1 AND t.checkout_points IS NOT NULL
+  `);
+  const personalBestsSetTonight = [];
+  activePlayers.forEach(p => {
+    const tonightLegAvg = perPlayer.find(pp => pp.name === p.name)?.bestLegAvg ?? null;
+    const preLegAvg = preLegAvgStmt.get(p.id, date).v;
+    if (tonightLegAvg != null && (preLegAvg == null || tonightLegAvg > preLegAvg)) {
+      personalBestsSetTonight.push({ player: p.name, metric: 'legAvg', value: tonightLegAvg, previousBest: preLegAvg != null ? +preLegAvg.toFixed(1) : null });
+    }
+    const tonightFewest = tonightFewestDartsStmt.get(p.id, date).v;
+    const preFewest = preFewestDartsStmt.get(p.id, date).v;
+    if (tonightFewest != null && (preFewest == null || tonightFewest < preFewest)) {
+      personalBestsSetTonight.push({ player: p.name, metric: 'fewestDartsCheckout', value: tonightFewest, previousBest: preFewest ?? null });
+    }
+    const tonightHighest = tonightHighestCheckoutStmt.get(p.id, date).v;
+    const preHighest = preHighestCheckoutStmt.get(p.id, date).v;
+    if (tonightHighest != null && (preHighest == null || tonightHighest > preHighest)) {
+      personalBestsSetTonight.push({ player: p.name, metric: 'highestCheckout', value: tonightHighest, previousBest: preHighest ?? null });
+    }
+  });
+
+  // Chronological moments timeline — the same event classes the live moment
+  // cards already fire on, merged and sorted by when they actually happened.
+  const moments = [];
+  db.prepare(`
+    SELECT t.created_at AS ts, p.name AS player FROM turns t JOIN players p ON p.id = t.player_id JOIN games g ON g.id = t.game_id
+    WHERE date(t.created_at) = ? AND t.scored = 180 ${X01_ONLY}
+  `).all(date).forEach(r => moments.push({ ts: r.ts, type: '180', player: r.player, text: '180!' }));
+  db.prepare(`
+    SELECT t.created_at AS ts, p.name AS player, t.checkout_points AS points FROM turns t JOIN players p ON p.id = t.player_id
+    WHERE date(t.created_at) = ? AND t.checkout = 1 AND t.checkout_points >= 100
+  `).all(date).forEach(r => moments.push({ ts: r.ts, type: r.points === 170 ? 'bigfish' : 'tonplus', player: r.player, text: `Checked out ${r.points}` }));
+  h2hGames.forEach(g => { if (g.winnerName) moments.push({ ts: g.completedAt, type: 'matchwin', player: g.winnerName, text: `Won ${g.category}` }); });
+  badgesEarnedTonight.forEach(b => moments.push({ ts: b.earnedAt, type: 'badge', player: b.player, text: b.badgeId }));
+  moments.sort((a, b) => a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0);
+
+  return {
+    date, totalGames,
+    h2hGames, h2hResultsByMatchup,
+    perPlayer, soloActivity,
+    badgesEarnedTonight, personalBestsSetTonight,
+    moments,
+  };
+}
+
 function getPlayerStatBubbles(playerName, mode) {
   const p = getPlayer(playerName);
   if (!p) return null;
@@ -7106,7 +7336,7 @@ module.exports = {
   createGame, addTurn, completeGame, recordEvent,
   onGameCreated, onGameCompleted,
   logServerError, getServerErrors,
-  computeStats, getSummary, getHomeExtra, getOneEightyStats, getBigFishStats, getNineDarterStats,
+  computeStats, getSummary, getHomeExtra, getSessionRecap, getOneEightyStats, getBigFishStats, getNineDarterStats,
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
   getGhostCandidateLegs, getGhostLegScript,
   getCricketStatBubbles, getCricketNineMarksStats, getCricketPersonalBests,

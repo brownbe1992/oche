@@ -1,6 +1,8 @@
 # End-of-Night Session Recap — Design Roadmap
 
-> Status: **design phase, not started.**
+> Status: **shipped (2026-07).** See "Implementation notes" at the bottom of
+> this doc for exactly how each open question was resolved, and
+> `REFERENCE.md` §29 for the full write-up.
 
 ## Goal
 
@@ -72,3 +74,31 @@ zoomed out to the whole session.
 - Whether the Home Assistant webhook should get a `session_recap` event
   (nightly summary to a wall display) — natural follow-on for the HA
   recipe book, not v1.
+
+## Implementation notes (2026-07, shipped)
+
+Built essentially as designed. The open questions above were resolved as
+follows:
+
+- **Midnight-straddling sessions**: shipped exactly as this doc's own
+  accepted-tradeoff default — a night that crosses midnight splits across
+  two dates, matching Daily Challenge's own convention. Not revisited.
+- **Auto-surfacing**: no auto-prompt — only the Home page teaser, which
+  itself only appears once at least one H2H game has completed that date
+  (a genuine network round-trip on every Home load, unlike the Daily
+  Challenge teaser beside it, since "did anyone finish a game tonight"
+  can't be derived client-side).
+- **Home Assistant `session_recap` webhook event**: not built — left for a
+  future HA-recipe-book pass, as this doc anticipated.
+
+A few scoping decisions this doc left open were resolved during the build:
+**"best visit"/"best leg average"** in `perPlayer` are X01-only (the same
+scope `getPersonalBests()`'s own `bestLegAvg` already uses) rather than
+re-deriving a "best leg" formula for every other game type; **personal bests
+set tonight** covers exactly 3 well-defined single-number X01 records (leg
+average, fewest darts to check out, highest checkout) compared against each
+player's own pre-tonight baseline, not every game type's own Personal Bests
+vocabulary — both deliberate scope cuts to keep one aggregation function
+from ballooning into re-implementing every other stats query in the app.
+Full write-up: `REFERENCE.md` §29; committed tests in
+`backend/test/db.session-recap.test.js`.

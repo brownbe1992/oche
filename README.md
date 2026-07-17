@@ -107,6 +107,8 @@ The landing page shows a live snapshot of all-time activity:
 
 **This week / Last game played** — legs thrown today and this week, darts thrown this week, and a summary of the most recently completed game (players, category, winner, and when).
 
+**🌙 Tonight's Recap** — appears once at least one H2H game has completed today: a one-tap digest of the night so far (game count, player count, badges earned, personal bests set), opening a full recap screen with a date picker (any past night is recomputable for free — nothing about the recap is stored). The recap screen shows the night's results (per-matchup win/loss records, or a flat list for 3+ player games), each player's own tonight-only stats (games won/lost, darts thrown, best visit, best leg average, 180s, ton+ checkouts — best visit/leg scoped to X01), a light "also tonight" line for any solo/practice activity, badges earned, personal bests set (compared against each player's own best from every night before this one), and a chronological moments timeline (180s, high checkouts, match wins, badges). A **📤 Share** button renders the whole night as a single summary card through the same shareable-moment card engine every other achievement uses.
+
 **H2H / Practice toggle** — switches the leaderboards below between head-to-head and solo/practice stats. A second game-type toggle — **X01 / Cricket / Doubles Practice / Bob's 27 / 121 Checkout Ladder / The Gauntlet / Checkout Trainer / Around the Clock / Around the World / Killer** — switches the leaderboards between each game type's own stat vocabulary (the solo-only entries — Doubles Practice, Bob's 27, 121 Checkout Ladder, The Gauntlet, Checkout Trainer, Around the Clock, and Around the World — only appear while the Practice tab is selected; **Killer** is the inverse — always H2H, since the whole mechanic needs opponents to attack — and only appears while the H2H tab is selected). (Just Chuckin' It isn't on this toggle — it has no win/opponent-based stats to rank on a leaderboard; its stats are Player Profile-only.)
 
 **📈 Household Ratings** — always visible regardless of which game-type tab is selected, since it's a single rating combined across every competitive game type (X01, Cricket, Baseball — "who beats whom," not a per-game-type number). Shows rating + win/loss record, ranked descending, for every player with at least 5 rated H2H games. See [Player Profile](#player-profile) for a player's own rating, rank, and rating-over-time chart, and [Achievements & Badges](#achievements--badges) for its two badges.
@@ -1174,6 +1176,11 @@ POST   /api/players/merge                   { source, target } Absorb source's f
 ```
 GET  /api/stats                             All player stats (full computed object)
 GET  /api/summary                           Site-wide totals (darts, legs, 180s, etc.)
+GET  /api/session-recap?date=                End-of-Night Session Recap for one local
+                                             calendar date (YYYY-MM-DD, default today) —
+                                             results, per-player stats, solo activity,
+                                             badges, personal bests set that night, and
+                                             a chronological moments timeline
 GET  /api/home-extra                        Home page extras: win/trebleless/ton+ leaderboards,
                                              highest checkout, last game played, today/week
                                              activity, and dart pace

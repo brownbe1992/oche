@@ -737,6 +737,10 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/summary'       && m === 'GET') return send(res, 200, db.getSummary());
     if (p === '/api/home-extra'    && m === 'GET') return send(res, 200, db.getHomeExtra());
+    // End-of-Night Session Recap (docs/session-recap-roadmap.md) — same public-read
+    // tier as every other stats endpoint it aggregates; date validated inside
+    // getSessionRecap() itself (YYYY-MM-DD), same pattern as /api/challenges/status.
+    if (p === '/api/session-recap' && m === 'GET') return send(res, 200, db.getSessionRecap(url.searchParams.get('date')));
     if (p === '/api/top-finishes'  && m === 'GET') return send(res, 200, db.getTopFinishesAll(10, url.searchParams.get('mode')));
     if (p === '/api/stats/180s'         && m === 'GET') return send(res, 200, db.getOneEightyStats(url.searchParams.get('mode')));
     if (p === '/api/stats/cricket-9marks' && m === 'GET') return send(res, 200, db.getCricketNineMarksStats(url.searchParams.get('mode')));
