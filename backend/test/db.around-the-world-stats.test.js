@@ -1,6 +1,6 @@
 'use strict';
 // Committed tests for backend/db.js's guided Around the World stat formulas
-// (docs/game-modes-roadmap.md "Guided Around the Clock / Around the World",
+// (docs/archive/game-modes-roadmap.md "Guided Around the Clock / Around the World",
 // REFERENCE.md §3) against a scratch SQLite database. Mirrors
 // db.chuckin-stats.test.js's structure. getAroundTheWorldProgress()'s own
 // 63-outcome-counting formula is already covered by db.leaderboards.test.js —

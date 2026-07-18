@@ -38,7 +38,7 @@ sequence** head-to-head, so it's a fair contest of nerve, not just skill.
   identical-sequence mode.
 - This is **not** a new way to *play out* a leg of X01/Cricket — it's a
   standalone drill, like Halve-It/Shanghai, and gets its own doc rather
-  than a `docs/game-modes-roadmap.md` section.
+  than a `docs/archive/game-modes-roadmap.md` section.
 
 ## Design
 

@@ -1520,7 +1520,7 @@ Session" panel (`finishUnit()`'s `kind==='leg'` screen — Baseball can no longe
 reach `kind==='leg'` in practice mode, since it always completes in exactly one
 leg now) was removed in the same change, along with its two call sites;
 `isBaseball` under `kind==='leg'` now always uses `h2hStatsHtmlBaseball()`,
-matching what H2H already used. `docs/game-modes-roadmap.md` and
+matching what H2H already used. `docs/archive/game-modes-roadmap.md` and
 `docs/open-roadmap-items.md` updated to drop the stale function reference.
 
 **No committed `node:test`** — this is a DOM/game-state control-flow defect
@@ -1594,7 +1594,7 @@ games.
 3. Remove `pracStatsHtmlBaseball()` and its two call sites in `finishUnit()`
    (now genuinely unreachable), simplifying the `isBaseball` branch of
    `kind==='leg'` to always use `h2hStatsHtmlBaseball()`.
-4. Update `docs/game-modes-roadmap.md`'s and `docs/open-roadmap-items.md`'s
+4. Update `docs/archive/game-modes-roadmap.md`'s and `docs/open-roadmap-items.md`'s
    stale references to the removed function.
 
 **Verify:** the two live-browser checks above (solo practice completes and

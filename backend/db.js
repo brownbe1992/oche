@@ -477,7 +477,7 @@ try { db.exec('ALTER TABLE players ADD COLUMN pin_fail_count INTEGER NOT NULL DE
 try { db.exec('ALTER TABLE players ADD COLUMN pin_locked_until INTEGER'); } catch(e) {}
 try { db.exec('ALTER TABLE darts ADD COLUMN thrown_at TEXT'); } catch(e) {}
 // game_type/config lay the groundwork for future non-X01 game types (see
-// docs/game-modes-roadmap.md) without changing any current behavior — every game
+// docs/archive/game-modes-roadmap.md) without changing any current behavior — every game
 // created today is still 'x01', config just carries its starting score.
 try { db.exec("ALTER TABLE games ADD COLUMN game_type TEXT NOT NULL DEFAULT 'x01'"); } catch(e) {}
 try { db.exec('ALTER TABLE games ADD COLUMN config TEXT'); } catch(e) {}
@@ -874,7 +874,7 @@ function _resolveLoadoutForParticipant(playerId, loadoutId) {
 
 function createGame({ category, legsPerSet, setsPerGame, players, practice, gameType, config, leagueId, leagueFixtureId }) {
   // gameType/config default to X01 for every caller today (no New Game UI sends
-  // anything else yet) — see docs/game-modes-roadmap.md. Accepting them as params
+  // anything else yet) — see docs/archive/game-modes-roadmap.md. Accepting them as params
   // means a future Cricket/Baseball New Game flow can pass its own without another
   // signature change here.
   const resolvedGameType = gameType || 'x01';
@@ -2967,13 +2967,13 @@ function getPlayerStatBubbles(playerName, mode) {
 // (1/2/3) if its sector is one of this match's config.numbers, else 0. Used
 // everywhere a Cricket formula needs "marks scored," derived at query time from
 // darts+games.config rather than any persisted mark/closed state (matching the
-// engine's own "nothing pre-aggregated" design, docs/game-modes-roadmap.md).
+// engine's own "nothing pre-aggregated" design, docs/archive/game-modes-roadmap.md).
 // Achieving SUM(...)=9 over exactly 3 darts (COUNT=3) necessarily means every dart
 // hit an in-play number as a treble (3 is the per-dart maximum), so the 9-marks
 // check below needs no separate "all in-play" condition.
 const CRICKET_MARK_CASE = (d) => `CASE WHEN EXISTS (SELECT 1 FROM json_each(g.config,'$.numbers') je WHERE je.value=${d}.sector) THEN ${d}.multiplier ELSE 0 END`;
 
-// Cricket's stat-bubble equivalents (game-modes-roadmap.md build-order step 3).
+// Cricket's stat-bubble equivalents (docs/archive/game-modes-roadmap.md build-order step 3).
 // Marks Per Round (MPR) is Cricket's direct analog of X01's 3-dart average: total
 // marks scored / total rounds (turns) played — a miss-only turn still counts as a
 // round, matching real MPR's definition. Everything here is scoped by
@@ -3035,7 +3035,7 @@ function getCricketNineMarksStats(mode) {
   return { leaderboard, recent };
 }
 
-// Home page's Cricket leaderboards (game-modes-roadmap.md build-order step 4).
+// Home page's Cricket leaderboards (docs/archive/game-modes-roadmap.md build-order step 4).
 // Marks Per Round across every player, mirroring getCricketStatBubbles()'s mpr
 // formula but grouped across all players at once instead of one name. A
 // minimum-rounds floor (matching _trebleLess()'s HAVING turns>=10 convention)
@@ -3347,7 +3347,7 @@ function getCricketPersonalBests(playerName, mode) {
   return { bestLegMpr, fewestDartsToClose, winStreak, recentFormMpr, lifetimeMpr };
 }
 
-// Baseball's stat-bubble equivalents (game-modes-roadmap.md "Baseball" — stats
+// Baseball's stat-bubble equivalents (docs/archive/game-modes-roadmap.md "Baseball" — stats
 // pass). Runs Per Inning (RPI) is Baseball's direct analog of X01's 3-dart
 // average / Cricket's MPR: total runs / total rounds (innings/turns) played.
 // Unlike Cricket's marks (derived from darts+config.numbers at query time),
@@ -4184,7 +4184,7 @@ function getPressureChamberWinLeaderboard() {
     rate: r.played ? +((r.won / r.played) * 100).toFixed(1) : 0 }));
 }
 
-/* ---------- Doubles Practice (docs/game-modes-roadmap.md) ----------
+/* ---------- Doubles Practice (docs/archive/game-modes-roadmap.md) ----------
    Solo drill mode: no opponent, no win/loss, no legs won — a "round" is one
    turns.leg_no grouping (incremented client-side by startNextRoundDoublesPractice()
    every time evaluateDartDoublesPractice() ends it), spanning as many single-dart
@@ -4247,7 +4247,7 @@ function getDoublesPracticePersonalBests(playerName, mode) {
   return { bestRoundDarts, bestRoundHits };
 }
 
-// Home page leaderboards for Doubles Practice (game-modes-roadmap.md, previously a
+// Home page leaderboards for Doubles Practice (docs/archive/game-modes-roadmap.md, previously a
 // known gap — deliberately deferred when the mode first shipped). No mode param on
 // either function: this mode is always practice=1 (startGame() forces it via
 // setup.practice, set whenever setup.mode !== 'h2h'), so an h2h/practice split would
@@ -4318,7 +4318,7 @@ function getDoublesPracticeHitSectors(playerName) {
   return { hit: rows.map(r => r.sector), count: rows.length, total: 21 };
 }
 
-/* ---------- Just Chuckin' It (game-modes-roadmap.md "Just Chuckin' It") ----------
+/* ---------- Just Chuckin' It (docs/archive/game-modes-roadmap.md "Just Chuckin' It") ----------
    Freeform, completely unscored practice: every dart is its own 1-dart turn
    (mirrors Doubles Practice's per-dart-turn precedent — addTurn() already allows
    1-3 darts per turn), with no bust/win/checkout concept at all (turns.bust/
@@ -5112,7 +5112,7 @@ function getBounceOutCount(playerName, gameType, mode) {
   `).get(p.id).n;
 }
 
-/* ---------- Guided Around the Clock / Around the World (docs/game-modes-roadmap.md
+/* ---------- Guided Around the Clock / Around the World (docs/archive/game-modes-roadmap.md
    "Guided Around the Clock / Around the World") ----------
    Around the Clock: structurally identical to Doubles Practice — a "round" is one
    turns.leg_no grouping (leg_no repurposed as a round counter, incremented
@@ -5422,7 +5422,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)>0
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
 
-    // ---- Cricket metrics (game-modes-roadmap.md build-order step 3) ----
+    // ---- Cricket metrics (docs/archive/game-modes-roadmap.md build-order step 3) ----
     case 'cricketmpr':
       // Marks Per Round: SUM(marks)/COUNT(rounds), pre-aggregated per turn (like
       // 'avg' above) so the darts JOIN doesn't inflate the marks sum.
@@ -5467,7 +5467,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.leg_won)>0
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
 
-    // ---- Baseball metrics (game-modes-roadmap.md "Baseball" — stats pass) ----
+    // ---- Baseball metrics (docs/archive/game-modes-roadmap.md "Baseball" — stats pass) ----
     case 'baseballrpi':
       // Runs Per Inning: turns.scored already IS a Baseball visit's runs (set
       // by enterTurnBaseball()), so this reads it directly — no per-dart
@@ -5504,7 +5504,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         WHERE t.player_id=? ${baseballScope} ${T.and} ${weightWhere}
         GROUP BY bucket ORDER BY bucket`).all(...params);
 
-    // ---- Doubles Practice metrics (docs/game-modes-roadmap.md) ----
+    // ---- Doubles Practice metrics (docs/archive/game-modes-roadmap.md) ----
     case 'doublespracticepct':
       return db.prepare(`SELECT bucket, CAST(SUM(hits) AS REAL)*100/NULLIF(SUM(dcount),0) AS value FROM (
         SELECT ${T.fmt} AS bucket, ${DOUBLES_HIT_CASE('d')} AS hits, 1 AS dcount
@@ -5528,7 +5528,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         GROUP BY t.game_id,t.set_no,t.leg_no
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
 
-    // ---- Just Chuckin' It metrics (game-modes-roadmap.md "Just Chuckin' It") ----
+    // ---- Just Chuckin' It metrics (docs/archive/game-modes-roadmap.md "Just Chuckin' It") ----
     // Per-dart bucketing (like Cricket's cricketdartsthrown/doublespracticepct) —
     // there's no leg/round boundary in this mode to bucket by instead.
     case 'chuckindartsthrown':
@@ -5589,7 +5589,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         ) GROUP BY game_id, grp
       ) WHERE grp_count=3 AND grp_score=180 ${F.and} GROUP BY bucket ORDER BY bucket`).all(...params);
 
-    // ---- Guided Around the Clock metrics (docs/game-modes-roadmap.md) ----
+    // ---- Guided Around the Clock metrics (docs/archive/game-modes-roadmap.md) ----
     // Round-shaped metrics bucket by leg_ts (like Doubles Practice's own
     // per-round metrics) — a "round" here is one (game_id,set_no,leg_no) group.
     case 'atcdartsthrown':
@@ -5609,7 +5609,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
         GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.bust)=1
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
 
-    // ---- Guided Around the World metrics (docs/game-modes-roadmap.md) ----
+    // ---- Guided Around the World metrics (docs/archive/game-modes-roadmap.md) ----
     // Per-dart/per-session bucketing, same shape as Chuckin's own metrics — no
     // round boundary exists in this mode to bucket by instead.
     case 'atwdartsthrown':
@@ -5682,7 +5682,7 @@ const X01_ONLY = _scope({ gameType: 'x01' });
 // instead of a second, driftable copy of this string.
 const OPENING_CATS = `AND g.game_type='x01' AND json_extract(g.config,'$.startingScore') IN (501,301,170,101)`;
 
-// Just Chuckin' It (game-modes-roadmap.md) is the inverse of every other game-type
+// Just Chuckin' It (docs/archive/game-modes-roadmap.md) is the inverse of every other game-type
 // addition so far: Cricket/Doubles Practice darts were deliberately folded INTO the
 // "physical dart stats" aggregates above (dartsThrown, pace, sector analytics,
 // Around the World) since a cricket dart is still a real dart. Just Chuckin' It's
@@ -5729,7 +5729,7 @@ const NOT_CHECKOUT_TRAINER = `AND g.game_type != 'checkout_trainer'`;
 // just "was anyone in this game handicapped."
 const NOT_HANDICAPPED = `AND NOT EXISTS (SELECT 1 FROM game_players gph WHERE gph.game_id = t.game_id AND gph.player_id = t.player_id AND gph.start_score IS NOT NULL)`;
 
-// Guided Around the World (docs/game-modes-roadmap.md "Guided Around the Clock /
+// Guided Around the World (docs/archive/game-modes-roadmap.md "Guided Around the Clock /
 // Around the World") shares Chuckin's exact shape for leg/pace purposes: one
 // continuous stream of 1-dart turns per games row, set_no=leg_no=1 throughout, no
 // round boundary at all. Counting a single (potentially hours-long) World session

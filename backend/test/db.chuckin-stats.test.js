@@ -1,6 +1,6 @@
 'use strict';
 // Committed tests for backend/db.js's Just Chuckin' It stat formulas
-// (docs/game-modes-roadmap.md "Just Chuckin' It", REFERENCE.md §3) against a
+// (docs/archive/game-modes-roadmap.md "Just Chuckin' It", REFERENCE.md §3) against a
 // scratch SQLite database. Mirrors db.doubles-practice-stats.test.js's
 // structure and its X01/Cricket-isolation regression-check pattern, extended
 // to the fourth game_type. Not exhaustive; see db.x01-stats.test.js's header
@@ -325,7 +325,7 @@ describe('getBounceOutCount', () => {
   });
 });
 
-describe('getMetricHistory matches getChuckinStatBubbles (docs/game-modes-roadmap.md)', () => {
+describe('getMetricHistory matches getChuckinStatBubbles (docs/archive/game-modes-roadmap.md)', () => {
   test('"chuckindartsthrown" over "all" time sums to the stat-bubble dartsThrown', () => {
     const name = 'Chuckin_Metric_Darts';
     db.addPlayer(name);

@@ -826,7 +826,7 @@ function buildChuckinLiveHeatmap(cells){
   return s;
 }
 
-// Compact progress grid for the two guided drills (docs/game-modes-roadmap.md
+// Compact progress grid for the two guided drills (docs/archive/game-modes-roadmap.md
 // "Guided Around the Clock / Around the World") — mirror-copied from
 // frontend/index.html's buildOutcomeGridHtml() (this file has no shared module
 // with index.html, per the established convention above). hitKeys is a plain
@@ -1007,7 +1007,7 @@ const renderers = {
       </div>`;
     }
   },
-  // Baseball (docs/game-modes-roadmap.md): same shared chalkboard-table shape as
+  // Baseball (docs/archive/game-modes-roadmap.md): same shared chalkboard-table shape as
   // Cricket's (rows=innings 1-9, columns=players) rather than per-player cards —
   // all players share one live inning, not independent per-player state.
   baseball: {
@@ -1459,7 +1459,7 @@ const renderers = {
       </div>`;
     }
   },
-  // Doubles Practice (docs/game-modes-roadmap.md): solo drill, always exactly one
+  // Doubles Practice (docs/archive/game-modes-roadmap.md): solo drill, always exactly one
   // player/card — no legSummary, no scorecard, so this always goes through the
   // generic s.players.map(renderer.card) path below, same as X01.
   doubles_practice: {
@@ -1495,7 +1495,7 @@ const renderers = {
       </div>`;
     }
   },
-  // Just Chuckin' It (docs/game-modes-roadmap.md): solo, freeform, no rounds/legs
+  // Just Chuckin' It (docs/archive/game-modes-roadmap.md): solo, freeform, no rounds/legs
   // at all — always exactly one player/card, no legSummary, no scorecard, so this
   // always goes through the generic s.players.map(renderer.card) path below.
   // p.heatmap/p.sessionAvg come from index.html's playerSnapshotChuckin() — a
@@ -1543,7 +1543,7 @@ const renderers = {
       </div>`;
     }
   },
-  // Guided Around the Clock (docs/game-modes-roadmap.md): solo drill, always
+  // Guided Around the Clock (docs/archive/game-modes-roadmap.md): solo drill, always
   // exactly one player/card — no legSummary, no scorecard, goes through the
   // generic s.players.map(renderer.card) path, same as Doubles Practice/Chuckin.
   around_the_clock: {
@@ -1580,7 +1580,7 @@ const renderers = {
       </div>`;
     }
   },
-  // Guided Around the World (docs/game-modes-roadmap.md): solo, no rounds/legs at
+  // Guided Around the World (docs/archive/game-modes-roadmap.md): solo, no rounds/legs at
   // all — always exactly one player/card, same shape as Chuckin.
   around_the_world: {
     card(p, i, s, L){

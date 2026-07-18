@@ -1,7 +1,7 @@
 # Cut-throat Cricket — Design Roadmap
 
 > Status: **✅ Done (2026-07).** Picks up the variant explicitly deferred when
-> Cricket v1 shipped (`docs/game-modes-roadmap.md`, "Cricket variant scope for
+> Cricket v1 shipped (`docs/archive/game-modes-roadmap.md`, "Cricket variant scope for
 > v1: standard cricket only — cut-throat deferred to later"). Shipped exactly
 > as designed below: `config.variant` flag on the existing `game_type='cricket'`
 > (`evaluateVisitCricket()`/`rebuildCricketState()`, `frontend/scoring.js`),

@@ -418,7 +418,7 @@ describe('CRICKET_ALL_NUMBERS (the "hit a different number" picker\'s full pool,
   });
 });
 
-describe('evaluateVisitBaseball (inning target scoring + round/match completion, docs/game-modes-roadmap.md "Baseball")', () => {
+describe('evaluateVisitBaseball (inning target scoring + round/match completion, docs/archive/game-modes-roadmap.md "Baseball")', () => {
   const player = (totalRuns) => ({ totalRuns, inningRuns: {} });
   // `current` is the index of the player whose visit is being evaluated —
   // evaluateVisit*() always reads it before it's advanced to the next player,
@@ -943,7 +943,7 @@ describe('Ghost Opponent replay (docs/archive/ghost-opponent-roadmap.md)', () =>
 // Mirrors index.html's CHALLENGE_FORMATS constant (the 6 Daily Challenge formats).
 const CHALLENGE_FORMATS = ['checkout_sprint', 'speed_to_zero', 'bullseye_gauntlet', 'steady_hand', 'treble_run', 'long_game'];
 
-describe('evaluateDartDoublesPractice (per-dart drill mode, docs/game-modes-roadmap.md "Doubles Practice")', () => {
+describe('evaluateDartDoublesPractice (per-dart drill mode, docs/archive/game-modes-roadmap.md "Doubles Practice")', () => {
   const targets = [16, 8, 4, 25]; // D16, D8, D4, double-bull
 
   test('a double on a target number is a hit, session continues', () => {
@@ -994,7 +994,7 @@ describe('evaluateDartDoublesPractice (per-dart drill mode, docs/game-modes-road
   });
 });
 
-describe('evaluateDartAroundTheClock (guided drill mode, docs/game-modes-roadmap.md "Guided Around the Clock / Around the World")', () => {
+describe('evaluateDartAroundTheClock (guided drill mode, docs/archive/game-modes-roadmap.md "Guided Around the Clock / Around the World")', () => {
   test('a single on a new number 1-20 is a new hit, not yet completed', () => {
     const hitSet = new Set();
     assert.deepEqual(evaluateDartAroundTheClock(makeDartCore(5, 1), hitSet), { isNewHit: true, completed: false });
@@ -1069,7 +1069,7 @@ describe('challengeBadgeSignals (Daily Challenge badges: streak + format-complet
   });
 });
 
-describe('chuckinTiersReached (Just Chuckin\' It milestone ladders, game-modes-roadmap.md "Just Chuckin\' It")', () => {
+describe('chuckinTiersReached (Just Chuckin\' It milestone ladders, docs/archive/game-modes-roadmap.md "Just Chuckin\' It")', () => {
   // Mirrors index.html's CHUCKIN_MILESTONE_LADDERS trebles ladder thresholds
   // exactly, so a regression here would also catch a real ladder-data typo.
   const treblesTiers = [
@@ -1724,7 +1724,7 @@ describe('rebuildKillerState (docs/archive/game-modes-roadmap.md "Killer", pure 
   });
 });
 
-describe('isCricketWhitewash (Cricket-native badge, docs/game-modes-roadmap.md "New Cricket-native badges")', () => {
+describe('isCricketWhitewash (Cricket-native badge, docs/archive/game-modes-roadmap.md "New Cricket-native badges")', () => {
   test('true when every number is still open (0 marks each)', () => {
     assert.equal(isCricketWhitewash({ 15:0, 16:0, 17:0, 18:0, 19:0, 20:0, 25:0 }), true);
   });
@@ -1745,7 +1745,7 @@ describe('isCricketWhitewash (Cricket-native badge, docs/game-modes-roadmap.md "
   });
 });
 
-describe('cricketComebackAchieved (Cricket-native Comeback Kid, docs/game-modes-roadmap.md)', () => {
+describe('cricketComebackAchieved (Cricket-native Comeback Kid, docs/archive/game-modes-roadmap.md)', () => {
   test(`fires at exactly the ${CRICKET_COMEBACK_THRESHOLD}-point threshold and above`, () => {
     assert.equal(cricketComebackAchieved(CRICKET_COMEBACK_THRESHOLD), true);
     assert.equal(cricketComebackAchieved(CRICKET_COMEBACK_THRESHOLD + 1), true);

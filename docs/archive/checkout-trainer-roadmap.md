@@ -56,12 +56,12 @@ own scoring, leaderboard, and achievements — see its own section further down)
   you throw?" and graded instantly against the objectively optimal answer. One tests
   throwing performance; the other tests checkout knowledge/recall. They're
   complementary, not duplicates, and should stay distinct entry points.
-- **Doubles Practice** (`docs/game-modes-roadmap.md`) is the closest *structural*
+- **Doubles Practice** (`docs/archive/game-modes-roadmap.md`) is the closest *structural*
   precedent (solo, no win condition, per-dart evaluation) but is still a real throwing
   drill against a fixed target set. Checkout Trainer borrows its shape, not its
   content.
 - This is **not** a new way to *play* darts (unlike Cricket/Baseball in
-  `docs/game-modes-roadmap.md`), which is why it gets its own doc rather than a
+  `docs/archive/game-modes-roadmap.md`), which is why it gets its own doc rather than a
   section there.
 
 ## Design: Freeform mode

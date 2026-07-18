@@ -1,6 +1,6 @@
 'use strict';
 // Committed tests for backend/db.js's guided Around the Clock stat formulas
-// (docs/game-modes-roadmap.md "Guided Around the Clock / Around the World",
+// (docs/archive/game-modes-roadmap.md "Guided Around the Clock / Around the World",
 // REFERENCE.md §3) against a scratch SQLite database. Mirrors
 // db.doubles-practice-stats.test.js's structure and its X01/Cricket-isolation
 // regression-check pattern, extended to this fifth game_type. Not exhaustive; see

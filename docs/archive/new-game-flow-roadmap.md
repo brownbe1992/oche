@@ -108,7 +108,7 @@ being solved is exactly today's "everything stays visible forever" behavior.
   group. There's no catch-all bucket to design: today's already-built modes
   (Checkout Trainer, Around the Clock, Around the World) each get their own
   flat entry like everything else, and any future mode (Killer, Baseball,
-  etc., once actually built per `docs/game-modes-roadmap.md`) just adds one
+  etc., once actually built per `docs/archive/game-modes-roadmap.md`) just adds one
   more flat entry to this same list when it ships — nothing structural to
   reserve a place for now.
 - **X01 flavor**: selecting X01 reveals a second dropdown — 501/301/170/101 —

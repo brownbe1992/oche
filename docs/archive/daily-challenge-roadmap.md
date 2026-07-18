@@ -210,7 +210,7 @@ now exist:
   approachable formats with occasional harder ones?) — a content decision best made
   by actually playing each format a few times, not guessed up front.
 - Does this need to work for Cricket/Baseball once those exist (per
-  `docs/game-modes-roadmap.md`), or is it inherently X01-specific by nature — several
+  `docs/archive/game-modes-roadmap.md`), or is it inherently X01-specific by nature — several
   of the formats above (Checkout Sprint, Speed to Zero, The Long Game) are X01
   concepts that don't map cleanly onto marks-based or innings-based games, while
   others (Bullseye Gauntlet, Treble Run, Steady Hand) are really just "N darts,

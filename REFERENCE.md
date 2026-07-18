@@ -123,7 +123,7 @@ oche/
   checkout-hint equivalent, so forcing them through the same code would mean a lot
   of irrelevant branching. See §2 for Cricket's and Baseball's scoring rules.
 - **Player Profile/Home page game-type toggle**: each `GAME_TYPES` entry also
-  carries 3 UI-facing fields (game-modes-roadmap.md "Toggle mechanism
+  carries 3 UI-facing fields (docs/archive/game-modes-roadmap.md "Toggle mechanism
   generalized") — `label` (button text), `bubbleKeyMap` (patched on right after
   its own key-map `const` is defined, to dodge that const's temporal-dead-zone
   inside the earlier `GAME_TYPES` object literal), and `personalBestsRenderer`/
@@ -134,8 +134,11 @@ oche/
   Home page's toggle row, previously static HTML, is now populated by
   `renderHomeGameTypeTabs()`. Only the toggle *mechanism* is generalized this
   way — each type's own backend stat-fetch functions and stat shapes stay
-  bespoke; see game-modes-roadmap.md for why that part is deliberately left
-  unsolved. A `soloOnly:true` flag (currently just `GAME_TYPES.doubles_practice`
+  bespoke, a deliberate standing decision (2026-07-18, tracker item 34): a
+  single parameterized stat engine was considered and rejected in favor of the
+  per-type shape, so new game types add their own bespoke function set; see
+  docs/archive/game-modes-roadmap.md "Toggle mechanism generalized" for the
+  full rationale. A `soloOnly:true` flag (currently just `GAME_TYPES.doubles_practice`
   — a game type with no H2H mode at all) additionally hides that type's Home
   page tab while the H2H top-level tab is selected (`renderHomeGameTypeTabs()`),
   and `switchHomeTab('h2h')` bounces `homeGameType` back to `'x01'` if a
@@ -400,7 +403,7 @@ was never a points-based condition to begin with.
 
 ### Baseball rules — `GAME_TYPES.baseball.evaluateVisit(player, darts, game)` (`frontend/scoring.js`'s `evaluateVisitBaseball`)
 
-docs/game-modes-roadmap.md's "Baseball" — core playable game only (no stat
+docs/archive/game-modes-roadmap.md's "Baseball" — core playable game only (no stat
 vocabulary/achievements yet, tracked as a separate open item). 9 innings, one
 per number 1-9, fixed (`game.config = {innings: 9}`, not a New Game choice).
 Unlike Cricket's independent per-player `marks`, **the current inning is
@@ -541,7 +544,7 @@ its badges in §4.
 
 ### Doubles Practice per-dart rules — `evaluateDartDoublesPractice(dart, targets)` (`frontend/scoring.js`)
 
-docs/game-modes-roadmap.md's "Doubles Practice" drill mode — genuinely
+docs/archive/game-modes-roadmap.md's "Doubles Practice" drill mode — genuinely
 different from every other game type: evaluated **per dart**, not per 3-dart
 visit. A session-ending event can fire on dart 1, 2, or 3 of what would
 otherwise be a visit, so `throwDart()` routes straight to
@@ -613,7 +616,7 @@ Stat vocabulary is documented in §3 ("Doubles Practice stats").
 
 ### Just Chuckin' It — `throwDartChuckin(sector)` (`frontend/index.html`)
 
-docs/game-modes-roadmap.md's "Just Chuckin' It" drill mode — freeform, entirely
+docs/archive/game-modes-roadmap.md's "Just Chuckin' It" drill mode — freeform, entirely
 unscored practice. No starting score, no bust, no win, no opponent, and unlike
 Doubles Practice, **no round/leg concept at all**: a whole session is one
 continuous stream of darts from the first throw until "End game" is pressed,
@@ -682,7 +685,7 @@ Stat vocabulary is documented in §3 ("Just Chuckin' It stats").
 
 ### Guided Around the Clock / Around the World — `throwDartAroundTheClock(sector)` / `throwDartAroundTheWorld(sector)` (`frontend/index.html`)
 
-docs/game-modes-roadmap.md's "Guided Around the Clock / Around the World" drill
+docs/archive/game-modes-roadmap.md's "Guided Around the Clock / Around the World" drill
 modes — two new game types, `around_the_clock` and `around_the_world`, each an
 active practice-drill wrapper around a completion condition that already
 existed passively (§4's `around_the_clock`/`around_the_world` badges). No
@@ -778,7 +781,7 @@ World stats").
 Sections 3.1-3.N below are X01-only, read via `GAME_TYPES.x01.statDefs`
 (`STAT_DEFS`). Cricket has its own separate stat vocabulary
 (`GAME_TYPES.cricket.statDefs` / `CRICKET_STAT_DEFS`) — see "Cricket stats" at
-the end of this section for its formulas (game-modes-roadmap.md build-order
+the end of this section for its formulas (docs/archive/game-modes-roadmap.md build-order
 step 3).
 
 **How cricket games interact with these X01 stats** (`X01_ONLY` constant in
@@ -903,7 +906,7 @@ that isn't a real X01 leg at all — and, as always, every non-X01 game type
 `game_type` explicitly (not just matching on `category`, a human-readable label)
 means a future game type's category string can never accidentally collide with
 these four values the way a bare string match could. If a future starting score
-is added to X01 (per `docs/game-modes-roadmap.md`), it does **not** automatically
+is added to X01 (per `docs/archive/game-modes-roadmap.md`), it does **not** automatically
 join this scope — it must be added to this exact `IN (...)` list explicitly, the
 same deliberate step that added 170 and 101 here. `OPENING_CATS` is a
 module-level constant in `backend/db.js` (declared beside `X01_ONLY`) — Best
@@ -1305,7 +1308,7 @@ round counts, however it ended, since a Doubles Practice round never "wins."
 toggle (`playerGameType`) switches to this mode's `statDefs`/personal-bests
 shape/chart metrics, exactly the same mechanism Cricket's toggle already uses
 — no new toggle widget, no registry redesign. (This is the one
-`Doubles Practice`-specific slice of `docs/game-modes-roadmap.md`'s larger,
+`Doubles Practice`-specific slice of `docs/archive/game-modes-roadmap.md`'s larger,
 still-open "generalizing per-game-type stats beyond a two-way toggle" backlog
 item — extending 3 existing `playerGameType==='cricket'` ternaries to a third
 branch, not the full N-game-type redesign that backlog item describes.)
@@ -1789,7 +1792,7 @@ of getting a new section of their own.
 | Lifetime 180s | `lifetimeOneEightiesBase + p.sessionOneEighties` | 10 Ton-Eighty Club 🎯 · 25 Maximum Regular 🔴 · 50 Half-Century of Maximums 🌟 · 100 Century of Maximums 💯 · 250 Maximum Machine 🤖 |
 
 **Cricket badges** (checked in `enterTurnCricket()`/`onLegWonCricket()`,
-`frontend/index.html`). 9 Marks/Perfect Leg (game-modes-roadmap.md build-order
+`frontend/index.html`). 9 Marks/Perfect Leg (docs/archive/game-modes-roadmap.md build-order
 step 3) are the direct analogs of 180 and the nine-darter; Whitewash/Comeback
 Kid (Cricket) (2026-07, "New Cricket-native badges") are deliberately *not*
 X01 ports — shaped around what makes a Cricket leg dramatic (closing numbers,
@@ -2694,7 +2697,7 @@ signals "hit" with a non-color checkmark glyph + a per-cell `aria-label`
 ("Single 5, hit"/"Single 5, not yet hit"), not gold background color alone —
 closing a color-only gap that existed in the original, Player-Profile-only
 version of this grid before the two drill modes were built
-(docs/game-modes-roadmap.md "Guided Around the Clock / Around the World").
+(docs/archive/game-modes-roadmap.md "Guided Around the Clock / Around the World").
 The live in-drill usage (`live:true`) additionally wraps the grid in an
 `aria-live="polite"` region so a screen reader announces each new hit as it
 happens, without adding that live-announcement behavior to the static
@@ -5485,7 +5488,7 @@ maps instead.
 
 ## 28. Killer
 
-`docs/game-modes-roadmap.md`'s "Killer" section (ruleset sourced from
+`docs/archive/game-modes-roadmap.md`'s "Killer" section (ruleset sourced from
 dartscorner.com's published rules). Elimination-format **H2H** — the only
 game type in this app whose set of legal per-player targets isn't fixed or
 shared: each player is randomly assigned their own number, 1-20, when the

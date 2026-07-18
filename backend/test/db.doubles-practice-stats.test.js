@@ -1,6 +1,6 @@
 'use strict';
 // Committed tests for backend/db.js's Doubles Practice stat formulas
-// (docs/game-modes-roadmap.md "Doubles Practice", REFERENCE.md §3) against a
+// (docs/archive/game-modes-roadmap.md "Doubles Practice", REFERENCE.md §3) against a
 // scratch SQLite database. Mirrors db.cricket-stats.test.js's structure and its
 // X01/Cricket-isolation regression-check pattern, extended to the third
 // game_type. Not exhaustive; see db.x01-stats.test.js's header comment for the
@@ -124,7 +124,7 @@ describe('getDoublesPracticePersonalBests', () => {
   });
 });
 
-describe('getMetricHistory matches getDoublesPracticeStatBubbles (docs/game-modes-roadmap.md)', () => {
+describe('getMetricHistory matches getDoublesPracticeStatBubbles (docs/archive/game-modes-roadmap.md)', () => {
   test('"doublespracticepct" over "all" time equals the stat-bubble value', () => {
     const name = 'DP_Metric_A';
     db.addPlayer(name);
@@ -153,7 +153,7 @@ describe('getMetricHistory matches getDoublesPracticeStatBubbles (docs/game-mode
   });
 });
 
-describe('getDoublesPracticeAccuracyLeaderboard (Home page leaderboard, game-modes-roadmap.md "known gaps")', () => {
+describe('getDoublesPracticeAccuracyLeaderboard (Home page leaderboard, docs/archive/game-modes-roadmap.md "known gaps")', () => {
   test('requires at least 5 rounds (mirrors getCricketMprLeaderboard\'s 5-round floor convention)', () => {
     const under = 'DP_Acc_Under5', over = 'DP_Acc_Over5';
     db.addPlayer(under); db.addPlayer(over);
@@ -189,7 +189,7 @@ describe('getDoublesPracticeAccuracyLeaderboard (Home page leaderboard, game-mod
   });
 });
 
-describe('getDoublesPracticeBestRoundStats (Home page leaderboard, game-modes-roadmap.md "known gaps")', () => {
+describe('getDoublesPracticeBestRoundStats (Home page leaderboard, docs/archive/game-modes-roadmap.md "known gaps")', () => {
   test('one row per player, their own best round by hits (ties broken by fewest darts)', () => {
     const name = 'DP_Best_A';
     db.addPlayer(name);

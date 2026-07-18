@@ -69,7 +69,7 @@ function evaluateVisit(player, darts, game){
 }
 
 /* ---------- Doubles Practice ----------
-   docs/game-modes-roadmap.md's "Doubles Practice" drill mode. Genuinely
+   docs/archive/game-modes-roadmap.md's "Doubles Practice" drill mode. Genuinely
    different shape from every other game type: evaluated PER DART, not per
    3-dart visit — a session-ending event can fire on dart 1, 2, or 3 of what
    would otherwise be a visit, so this can't wait for a batched evaluateVisit()
@@ -77,7 +77,7 @@ function evaluateVisit(player, darts, game){
    of sectors, 1-20 plus 25 for bull — a "double" of 25 means double-bull/50,
    the same encoding makeDartCore() already uses).
 
-   "All simultaneously live" (2026-07 decision, docs/game-modes-roadmap.md):
+   "All simultaneously live" (2026-07 decision, docs/archive/game-modes-roadmap.md):
    every selected double is live at once — no rotation, no random pick. The
    player throws at whichever target they choose each dart:
    - a double on a target number is a hit (session continues)
@@ -99,7 +99,7 @@ function evaluateDartDoublesPractice(dart, targets){
   return { hit:false, ended:true, reason:'wrong-number' };
 }
 
-/* ---------- Guided Around the Clock (docs/game-modes-roadmap.md "Guided Around
+/* ---------- Guided Around the Clock (docs/archive/game-modes-roadmap.md "Guided Around
    the Clock / Around the World") ----------
    Pure per-dart rule, mirroring evaluateDartDoublesPractice()'s shape: a "hit" is
    a single (mult 1) on a number 1-20 not already in this round's hitSet — matches
@@ -206,7 +206,7 @@ function cricketStoneColdAchieved(gamePointsReceived, playerCount){
 }
 
 /* ---------- Baseball ----------
-   docs/game-modes-roadmap.md "Baseball (rules primer)". 9 innings, one per
+   docs/archive/game-modes-roadmap.md "Baseball (rules primer)". 9 innings, one per
    number 1-9, played in lockstep by every player (the whole match shares one
    current inning, not a per-player independent state like Cricket's marks).
    Each visit's 3 darts only score against THIS inning's number: single=1 run,
@@ -675,7 +675,7 @@ function challengeBadgeSignals(history, formats){
   };
 }
 
-// Just Chuckin' It milestone-ladder trigger condition (game-modes-roadmap.md
+// Just Chuckin' It milestone-ladder trigger condition (docs/archive/game-modes-roadmap.md
 // "Just Chuckin' It", REFERENCE.md's Achievements section) — each of the 18
 // tiers across 3 metrics (lifetime darts, lifetime trebles, single-session
 // darts) is just a >= threshold check on a cumulative count, but per
@@ -688,7 +688,7 @@ function chuckinTiersReached(tiers, value){
   return tiers.filter(t => value >= t.threshold).map(t => t.threshold);
 }
 
-// Cricket-native badge trigger conditions (docs/game-modes-roadmap.md "New
+// Cricket-native badge trigger conditions (docs/archive/game-modes-roadmap.md "New
 // Cricket-native badges") — 2-player only, same restriction as X01's own
 // social/margin-of-victory badges (Comeback Kid, Giant Slayer, etc.), since
 // both need a single well-defined opponent to compare against.

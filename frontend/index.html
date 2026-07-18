@@ -228,7 +228,7 @@
     clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
   /* Cricket's dedicated scoring screen (never Pad/Dartboard) — see
-     docs/game-modes-roadmap.md. Closed status is signaled by a checkmark + text,
+     docs/archive/game-modes-roadmap.md. Closed status is signaled by a checkmark + text,
      not color alone (docs/accessibility-roadmap.md). */
   .pad.cricket-pad{grid-template-columns:repeat(4,1fr)}
   .pad.cricket-pad button.miss{grid-column:1/-1}
@@ -2330,7 +2330,7 @@ let homeData=null;
 // Profile's own toggle, plus an extra `homeTabRenderer !== false` check — Just
 // Chuckin' It opts out of the Home page entirely via that explicit `false`, since
 // its stats don't map onto a leaderboard shape and none was requested; see
-// game-modes-roadmap.md "Generalizing per-game-type stats"). No data dependency,
+// docs/archive/game-modes-roadmap.md "Generalizing per-game-type stats"). No data dependency,
 // so this renders immediately rather than waiting on renderHome()'s fetch.
 function renderHomeGameTypeTabs(){
   const el=document.getElementById('home-gtype-tabs');
@@ -2713,7 +2713,7 @@ function renderHomeTabBody(){
   `;
 }
 
-// Cricket's Home leaderboards (game-modes-roadmap.md build-order step 4) — a
+// Cricket's Home leaderboards (docs/archive/game-modes-roadmap.md build-order step 4) — a
 // separate rendering path from renderHomeTabBody() above rather than shoehorned
 // branches, since Cricket's stat shapes (MPR, marks) don't map onto X01's
 // (average, checkouts).
@@ -2934,7 +2934,7 @@ function renderHomeTabBodyPressureChamber(){
   `;
 }
 
-// Doubles Practice's Home page leaderboards (game-modes-roadmap.md, previously a
+// Doubles Practice's Home page leaderboards (docs/archive/game-modes-roadmap.md, previously a
 // known gap). No H2H/Practice split — this mode is always solo practice, so
 // homeData.doublesPractice is a single flat dataset, not h2h/practice-keyed like
 // homeData.cricket is. Two boards, not Cricket's four: no win-rate leaderboard
@@ -4289,7 +4289,7 @@ function applyPreset(legsToWin, sets){
   const sv=document.getElementById('sets-val'); if(sv) sv.textContent=sets;
   updateFormatLine();
 }
-/* ---------- Cricket New Game config (game-modes-roadmap.md) ---------- */
+/* ---------- Cricket New Game config (docs/archive/game-modes-roadmap.md) ---------- */
 function setGameType(type){
   setup.gameType = type;
   document.getElementById('cricket-options-section').hidden = (type !== 'cricket');
@@ -4805,7 +4805,7 @@ function resolveCricketNumbers(){
   return setup.cricketPreset === 'custom' ? setup.cricketCustomNumbers.slice() : CRICKET_STANDARD_NUMBERS.slice();
 }
 
-/* ---------- Doubles Practice target picker (docs/game-modes-roadmap.md) ----------
+/* ---------- Doubles Practice target picker (docs/archive/game-modes-roadmap.md) ----------
    Same multi-select-grid mechanism as Cricket's custom targets, reused for a
    different target set (doubles only) and no fixed count requirement — any
    number of doubles from 1 upward, unlike Cricket's locked-to-7 rule. */
@@ -4921,7 +4921,7 @@ async function startGame(){
       return;
     }
   }
-  // Doubles Practice (docs/game-modes-roadmap.md "Doubles Practice"): needs at
+  // Doubles Practice (docs/archive/game-modes-roadmap.md "Doubles Practice"): needs at
   // least one selected double target before it can start — otherwise every dart
   // would be "off-target" by definition and the session could never register a hit.
   if(setup.mode === 'doubles_practice'){
@@ -4939,7 +4939,7 @@ async function startGame(){
   if(names.length===0){ uiAlert('Choose at least one player.'); return; }
   if(setup.mode==='h2h' && names.length < 2){ uiAlert('H2H mode requires at least two players. Add a second player or switch to Practice mode.'); return; }
   // Custom cricket is locked to exactly 7 targets (same count as classic) — never
-  // more, never fewer (docs/game-modes-roadmap.md "Decisions made").
+  // more, never fewer (docs/archive/game-modes-roadmap.md "Decisions made").
   // P1-b: the valid game types are exactly the real (non-dispatchOnly) GAME_TYPES
   // registry keys, so a new mode is recognized here automatically — no separate whitelist
   // to forget (the bug that once silently fell a new game type back to x01). Marathon
@@ -5026,7 +5026,7 @@ async function startGame(){
   // variant (docs/archive/cutthroat-cricket-roadmap.md): a config flag on the same
   // game_type='cricket', not a new game type — see that doc's "Design" section.
   const config = gameType === 'cricket' ? { numbers: cricketNumbers, variant: setup.cricketVariant === 'cutthroat' ? 'cutthroat' : 'standard' }
-    // Innings fixed at 9 (docs/game-modes-roadmap.md "Baseball") — not a New Game
+    // Innings fixed at 9 (docs/archive/game-modes-roadmap.md "Baseball") — not a New Game
     // choice, same "one-tap, no further input" precedent as Classic Cricket.
     : gameType === 'baseball' ? { innings: 9 }
     // Rounds (docs/archive/shanghai-roadmap.md) — default 1-7 (the common pub format),
@@ -5137,7 +5137,7 @@ async function startGame(){
     starter: 0,        // who throws first in the current leg
     current: 0,
     setNo: 1, legNo: 1,
-    baseballInning: 1, // Baseball only (docs/game-modes-roadmap.md) — which inning (1-9, or beyond on a tie) is live
+    baseballInning: 1, // Baseball only (docs/archive/game-modes-roadmap.md) — which inning (1-9, or beyond on a tie) is live
     shanghaiRound: 1, // Shanghai only (docs/archive/shanghai-roadmap.md) — which round (1-config.rounds, or beyond on a tie) is live
     halveItRound: 1, // Halve-It only (docs/archive/halve-it-roadmap.md) — which round (1-config.targets.length, or beyond on a tie) is live
     // The Pressure Chamber only (docs/archive/pressure-chamber-roadmap.md) — which
@@ -5183,12 +5183,12 @@ async function startGame(){
     matchResult: null,     // one-shot: leg/set/game just won (voice announcements)
     legStart: null,        // one-shot: a new leg just began, who's throwing first (voice announcements)
     hasGhost: false,       // true for a Ghost Opponent race (docs/archive/ghost-opponent-roadmap.md)
-    // Doubles Practice / guided Around the Clock (docs/game-modes-roadmap.md):
+    // Doubles Practice / guided Around the Clock (docs/archive/game-modes-roadmap.md):
     // per-dart evaluation, not per-visit — a round runs until
     // evaluateDartDoublesPractice()/evaluateDartAroundTheClock() ends it, never on
     // a fixed dart count. roundOver/roundEndReason are shared by both.
     roundOver: false, roundEndReason: null, dpLastDart: null, atcLastDart: null,
-    // Just Chuckin' It / guided Around the World (docs/game-modes-roadmap.md): no
+    // Just Chuckin' It / guided Around the World (docs/archive/game-modes-roadmap.md): no
     // round-ending condition at all — the session just runs until "End game" is pressed.
     chuckinLastDart: null, atwLastDart: null
   };
@@ -6185,7 +6185,7 @@ function renderPlayerPage(){
   };
   const primaryDefs = defs.filter(d=>d.primary);
   const secondaryDefs = defs.filter(d=>!d.primary);
-  // Iterates every registered game type with a stat vocabulary (game-modes-roadmap.md
+  // Iterates every registered game type with a stat vocabulary (docs/archive/game-modes-roadmap.md
   // "Generalizing per-game-type stats") rather than one hardcoded button per known
   // type — a future type with no statDefs (e.g. a stats-less drill mode) is filtered
   // out instead of rendering an empty tab.
@@ -6496,7 +6496,7 @@ const BADGE_INFO = {
   checkout_trainer_perfect_minute: { icon:'💎', label:'Perfect Minute', desc:'Every round in one Checkout Blitz run (5+ rounds) graded optimal.', checkoutTrainer:true },
   checkout_trainer_photo_finish:   { icon:'📸', label:'Photo Finish', desc:'Submit a legal Checkout Blitz round with under 1 second left on the clock.', checkoutTrainer:true },
   checkout_trainer_bogey_buster:   { icon:'💣', label:'Bogey Buster', desc:'With trick questions on, correctly call "no possible checkout" on a bogey number.', checkoutTrainer:true },
-  // Guided Around the Clock / Around the World (docs/game-modes-roadmap.md) —
+  // Guided Around the Clock / Around the World (docs/archive/game-modes-roadmap.md) —
   // deliberately distinct badges from the existing passive around_the_clock/
   // around_the_world above (2026-07 decision): completing a guided drill session
   // celebrates the session itself, separate from those two lifetime/per-game
@@ -6675,7 +6675,7 @@ function renderGauntletScarMap(data){
 // renderAroundTheWorldProgress() so both that static Player Profile section and
 // the two guided drills' live in-game progress views (renderGameAroundTheClock()/
 // renderGameAroundTheWorld()) share one implementation
-// (docs/game-modes-roadmap.md "reusing the same heatmap/progress-view UI
+// (docs/archive/game-modes-roadmap.md "reusing the same heatmap/progress-view UI
 // investment already built for Around the World"). hitSet keys are always
 // `${sector}:${mult}` strings, matching getAroundTheWorldProgress()'s own shape.
 // cells:'numbers' renders just the 20 number cells (Around the Clock — single hits
@@ -7859,7 +7859,7 @@ function achDescFor(type){
   return (BADGE_INFO[badgeId] && BADGE_INFO[badgeId].desc) || ACH_DESC_FALLBACK[type] || '';
 }
 
-// Just Chuckin' It's laddered milestone achievements (game-modes-roadmap.md "Just
+// Just Chuckin' It's laddered milestone achievements (docs/archive/game-modes-roadmap.md "Just
 // Chuckin' It" achievements — requested explicitly laddered, so there's a lot to
 // earn and the first ones come early). 3 ladders, each a genuine permanent
 // once-earned milestone (same INSERT-OR-IGNORE once:true semantics as Around the
@@ -9274,7 +9274,7 @@ async function shareOrSaveCanvas(canvas, filename, shareTitle, shareText){
 // is marked .voided), the badge never gets a chance to sit in the revert list —
 // so it's revoked immediately instead, closing the race the other direction.
 // Novelty time-of-day badges — shared between X01's enterTurn() and Cricket's
-// enterTurnCricket() (docs/game-modes-roadmap.md "Cricket badge parity": this was
+// enterTurnCricket() (docs/archive/game-modes-roadmap.md "Cricket badge parity": this was
 // previously X01-only by accident of code structure, not a deliberate scoping
 // decision — a Cricket player who only ever plays at 4am could never earn either
 // badge). The overlay only fires once per session (not once per turn, which would
@@ -9392,7 +9392,7 @@ function liveSnapshot(message){
     checkout,
     status: (game.gameType === 'doubles_practice' || game.gameType === 'around_the_clock') ? (game.roundOver ? 'bust' : 'live') : game.won ? 'won' : (game.busted ? 'bust' : 'live'),
     message: message || '',
-    // Doubles Practice / guided Around the Clock (docs/game-modes-roadmap.md): the
+    // Doubles Practice / guided Around the Clock (docs/archive/game-modes-roadmap.md): the
     // target set, the outcome of the most recent dart, and why the round ended (if
     // it has) — the /display renderer reads these instead of the X01/Cricket-shaped
     // fields above. roundOver/roundEndReason are shared by both game types.
@@ -9571,7 +9571,7 @@ function renderPad(){
 }
 
 /* Cricket's dedicated scoring screen — never the Pad or Dartboard (Decisions made
-   table, game-modes-roadmap.md). Only the 7 in-play numbers are tappable, each
+   table, docs/archive/game-modes-roadmap.md). Only the 7 in-play numbers are tappable, each
    showing the throwing player's own marks-so-far as a convenience; a closed number
    stays tappable (real cricket: still scores if an opponent has it open) so it's
    never disabled for that reason — only a full 3-dart visit disables the pad. */
@@ -10903,7 +10903,7 @@ function enterTurnCricket(){
 
   // Comeback Kid (Cricket) tracking: the worst points deficit seen at any point
   // this leg (needs an opponent to trail behind — mirrors X01's Comeback Kid,
-  // game-modes-roadmap.md "New Cricket-native badges"). Sampled BEFORE this
+  // docs/archive/game-modes-roadmap.md "New Cricket-native badges"). Sampled BEFORE this
   // visit's points update, same "deepest behind as you step up to throw"
   // timing X01 uses — neither player's points have changed yet at sampling time,
   // regardless of variant. Standard: higher points is better, so "trailing" means
@@ -10945,10 +10945,10 @@ function enterTurnCricket(){
   game.sessionTurns.push(turnRecord);
 
   // Novelty time-of-day badges — shared with X01's enterTurn(), see
-  // awardTimeOfDayBadges() (docs/game-modes-roadmap.md "Cricket badge parity").
+  // awardTimeOfDayBadges() (docs/archive/game-modes-roadmap.md "Cricket badge parity").
   awardTimeOfDayBadges(p);
 
-  // Cricket achievements (game-modes-roadmap.md build-order step 3) — the direct
+  // Cricket achievements (docs/archive/game-modes-roadmap.md build-order step 3) — the direct
   // analogs of X01's 180/nine-darter, detected the same way (inspect this visit's
   // raw darts / legDarts right after they're committed above).
   const _inPlayNumbers = game.config.numbers || CRICKET_STANDARD_NUMBERS;
@@ -11026,7 +11026,7 @@ function undoLastTurnCricket(){
    only knowable once the leg's winner is known — so they're checked here instead,
    the same split X01 uses (per-visit badges in enterTurn(), leg/match-outcome
    badges in onLegWon()). Neither is a port of an X01 badge; both are Cricket-native
-   (game-modes-roadmap.md "New Cricket-native badges") and 2-player only, same
+   (docs/archive/game-modes-roadmap.md "New Cricket-native badges") and 2-player only, same
    restriction as X01's own social/margin-of-victory badges. Set/leg advancement
    and the completeGame/HA webhook calls below are the same generic hooks the X01
    path uses. */
@@ -11142,7 +11142,7 @@ function onLegWonCricket(wi){
 /* ----- Baseball turn commit (dispatched from enterTurn()) -----
    Visit-based (3 darts per inning), same shape as X01/Cricket's undo, not
    Doubles Practice's per-dart shape. No achievements/stats for this pass
-   (docs/game-modes-roadmap.md "Baseball" — core playable game only) — just
+   (docs/archive/game-modes-roadmap.md "Baseball" — core playable game only) — just
    the time-of-day badges every game type already gets for free. */
 function enterTurnBaseball(){
   if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
@@ -11177,7 +11177,7 @@ function enterTurnBaseball(){
   game.sessionTurns.push(turnRecord);
 
   // Novelty time-of-day badges — shared with every other game type, see
-  // awardTimeOfDayBadges() (docs/game-modes-roadmap.md "Cricket badge parity").
+  // awardTimeOfDayBadges() (docs/archive/game-modes-roadmap.md "Cricket badge parity").
   awardTimeOfDayBadges(p);
 
   // Perfect Inning: 3 darts, all treble on this inning's target number — the
@@ -12590,7 +12590,7 @@ const STAT_DEFS = [
 ];
 let selectedStat = 'avg';
 
-// Cricket's own stat-bubble vocabulary (game-modes-roadmap.md build-order step 3)
+// Cricket's own stat-bubble vocabulary (docs/archive/game-modes-roadmap.md build-order step 3)
 // — same {key,label,desc,fmt,primary} shape as STAT_DEFS. Keys match
 // getMetricHistory()'s cricket metric case names 1:1, so the chart endpoint needs
 // no separate key-translation map the way the stat-bubbles endpoint does (see
@@ -12608,7 +12608,7 @@ const CRICKET_STAT_DEFS = [
 const CRICKET_BUBBLE_KEY_MAP = { cricketmpr:'mpr', cricket9marks:'nineMarks', cricketwinpct:'winPct',
   cricketgames:'gamesPlayed', cricketdartsthrown:'dartsThrown', cricketavgdartsperleg:'avgDartsPerLeg' };
 
-// Baseball's own stat-bubble vocabulary (game-modes-roadmap.md "Baseball" — stats
+// Baseball's own stat-bubble vocabulary (docs/archive/game-modes-roadmap.md "Baseball" — stats
 // pass). Same {key,label,desc,fmt,primary} shape as STAT_DEFS/CRICKET_STAT_DEFS.
 // Keys match getMetricHistory()'s baseball metric case names 1:1, same
 // no-translation-map-needed precedent as Cricket's own keys.
@@ -12743,7 +12743,7 @@ const DEAD_MAN_WALKING_BUBBLE_KEY_MAP = { dmwrunscompleted:'runsCompleted', dmwa
   dmwbustrate:'bustRate', dmwranoutofdartsrate:'ranOutOfDartsRate', dmwavgmargin:'avgMarginOnWalkedOut',
   dmwlongeststreak:'longestWalkedOutStreak' };
 
-// Doubles Practice's own 3 stat bubbles (docs/game-modes-roadmap.md's requested
+// Doubles Practice's own 3 stat bubbles (docs/archive/game-modes-roadmap.md's requested
 // vocabulary: darts per round, doubles hit per round, doubles%) — every bubble
 // here has a matching getMetricHistory() case, same completeness as Cricket's set.
 const DOUBLES_PRACTICE_STAT_DEFS = [
@@ -12754,7 +12754,7 @@ const DOUBLES_PRACTICE_STAT_DEFS = [
 const DOUBLES_PRACTICE_BUBBLE_KEY_MAP = { doublespracticepct:'doublesPct',
   doublespracticedartsperround:'avgDartsPerRound', doublespracticehitsperround:'avgHitsPerRound' };
 
-// Just Chuckin' It's own stat vocabulary (game-modes-roadmap.md "Just Chuckin' It")
+// Just Chuckin' It's own stat vocabulary (docs/archive/game-modes-roadmap.md "Just Chuckin' It")
 // — deliberately heatmap/trend-heavy per the feature request (patterns and
 // improvement over time, not a score). Darts Thrown/Sessions Played/Darts per
 // Session/Treble % are primary; Double %/Bull % live behind "More stats".
@@ -12783,7 +12783,7 @@ const CHECKOUT_TRAINER_STAT_DEFS = [
 const CHECKOUT_TRAINER_BUBBLE_KEY_MAP = { checkouttraineroptimalpct:'optimalPct',
   checkouttraineraccuracypct:'accuracyPct', checkouttrainerattempts:'totalAttempts' };
 
-// Guided Around the Clock's own stat vocabulary (docs/game-modes-roadmap.md
+// Guided Around the Clock's own stat vocabulary (docs/archive/game-modes-roadmap.md
 // "Guided Around the Clock / Around the World") — "darts taken to complete" and
 // "sessions played" are exactly what the roadmap doc asked for; completionRate
 // isn't chart-linked (no matching getMetricHistory case) but is still exposed as
@@ -12833,7 +12833,7 @@ function playerSnapshotX01(p){
     gameDarts:p.gameDarts || 0
   };
 }
-// `label`/`personalBestsRenderer`/`homeTabRenderer` (game-modes-roadmap.md
+// `label`/`personalBestsRenderer`/`homeTabRenderer` (docs/archive/game-modes-roadmap.md
 // "Generalizing per-game-type stats beyond a two-way toggle") are what let the
 // Player Profile and Home page game-type toggles iterate Object.values(GAME_TYPES)
 // instead of one hardcoded button + ternary per type at every call site. A `null`
@@ -12848,8 +12848,10 @@ function playerSnapshotX01(p){
 // (getCricketStatBubbles(), getDoublesPracticeStatBubbles(), etc. stay bespoke
 // per type) and the Home page's upfront Promise.all fetch list — a single
 // parameterized query engine across X01 (leg/win-based), Cricket (marks-based),
-// and drill modes (no legs, no opponent) is a real, separate design problem the
-// roadmap doc leaves open, not something this pass forces an abstraction onto.
+// and drill modes (no legs, no opponent) was considered and rejected as a
+// standing decision (2026-07, docs/archive/game-modes-roadmap.md "Toggle
+// mechanism generalized"): the per-type shape is kept, and any future game type
+// adds its own bespoke stat-function set the same way.
 const GAME_TYPES = {
   x01: {
     id: 'x01',
@@ -12880,7 +12882,7 @@ const GAME_TYPES = {
     evaluateVisit: evaluateVisitBaseball,
     resetForNextLeg: resetPlayerForNextLegBaseball,
     playerSnapshot: playerSnapshotBaseball,
-    // Stats pass (game-modes-roadmap.md "Baseball"): statDefs populated, so
+    // Stats pass (docs/archive/game-modes-roadmap.md "Baseball"): statDefs populated, so
     // Baseball now shows up on the Player Profile toggle
     // (`Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length)`).
     statDefs: BASEBALL_STAT_DEFS,
@@ -13107,7 +13109,7 @@ function activeStatDefs(){ return GAME_TYPES[playerGameType].statDefs; }
 function activeBubbleKeyMap(){ return GAME_TYPES[playerGameType].bubbleKeyMap; }
 function activeGameTypeParam(){ return playerGameType==='x01' ? '' : '&gameType='+playerGameType; }
 
-/* ---------- Cricket (game-modes-roadmap.md build-order step 2) ----------
+/* ---------- Cricket (docs/archive/game-modes-roadmap.md build-order step 2) ----------
    Standard cricket only (v1 scope decision) — highest score wins, cut-throat
    deferred. A match's in-play numbers are locked to exactly 7 (classic:
    15,16,17,18,19,20,Bull, or a custom 7-of-21 selection made at New Game time),
@@ -13136,7 +13138,7 @@ function playerSnapshotCricket(p){
   };
 }
 
-/* ---------- Baseball (game-modes-roadmap.md build-order step 5) ----------
+/* ---------- Baseball (docs/archive/game-modes-roadmap.md build-order step 5) ----------
    9 innings, one per number 1-9, all players in lockstep (the current inning
    is game-level state — game.baseballInning — not per-player like Cricket's
    marks). evaluateVisitBaseball()/baseballInningTarget() live in scoring.js;
@@ -14549,7 +14551,7 @@ const NON_SAVABLE_GAME_TYPES = ['doubles_practice', 'chuckin', 'checkout_trainer
 const SAVABLE_GAME_TYPES = Object.keys(GAME_TYPES).filter(k =>
   !GAME_TYPES[k].dispatchOnly && !NON_SAVABLE_GAME_TYPES.includes(k));
 
-/* ---------- Doubles Practice (docs/game-modes-roadmap.md) ----------
+/* ---------- Doubles Practice (docs/archive/game-modes-roadmap.md) ----------
    Solo drill mode: no opponent, no legs/sets in the usual sense — a "round" is
    one continuous session from the first dart until evaluateDartDoublesPractice()
    ends it, and game.legNo (reused as "round number") increments per round via
@@ -14580,7 +14582,7 @@ function playerSnapshotDoublesPractice(p){
 // Per-dart evaluation (evaluateDartDoublesPractice(), frontend/scoring.js) — every
 // dart commits immediately as its own 1-dart turn (addTurn() already supports 1-3
 // darts per turn), unlike every other game type's batched-3-dart visit. Undo
-// support (docs/game-modes-roadmap.md, previously a known gap): since each dart is
+// support (docs/archive/game-modes-roadmap.md, previously a known gap): since each dart is
 // its own committed turn, "undo the last turn" and "undo the last dart" are the
 // same action here — one snapshot per dart, same "one level of undo only"
 // convention as X01/Cricket's game.lastTurnSnapshot.
@@ -14728,7 +14730,7 @@ function renderGameDoublesPractice(){
   pushLive();
 }
 
-/* ---------- Just Chuckin' It (docs/game-modes-roadmap.md "Just Chuckin' It") ----------
+/* ---------- Just Chuckin' It (docs/archive/game-modes-roadmap.md "Just Chuckin' It") ----------
    Freeform, completely unscored practice: no starting score, no countdown, no
    bust, no win — every dart just gets recorded until the player presses "End
    game." No round-ending condition at all (unlike Doubles Practice), so every
@@ -15368,7 +15370,7 @@ function renderBlitzResults(){
   announce(`Time's up. Final score ${score} points.`);
 }
 
-/* ---------- Guided Around the Clock (docs/game-modes-roadmap.md "Guided Around
+/* ---------- Guided Around the Clock (docs/archive/game-modes-roadmap.md "Guided Around
    the Clock / Around the World") ----------
    Structurally identical to Doubles Practice: per-dart evaluation
    (evaluateDartAroundTheClock(), frontend/scoring.js), a "round" is one
@@ -15511,7 +15513,7 @@ function renderGameAroundTheClock(){
   pushLive();
 }
 
-/* ---------- Guided Around the World (docs/game-modes-roadmap.md "Guided Around
+/* ---------- Guided Around the World (docs/archive/game-modes-roadmap.md "Guided Around
    the Clock / Around the World") ----------
    Structurally identical to Just Chuckin' It: no round-ending condition at all,
    one continuous stream of 1-dart turns per games row (set_no=leg_no=1
@@ -16000,7 +16002,7 @@ function loadTopFinishes(){
     .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load finishes.</p>`; });
 }
 
-/* ---------- Just Chuckin' It dartboard heatmap (game-modes-roadmap.md) ----------
+/* ---------- Just Chuckin' It dartboard heatmap (docs/archive/game-modes-roadmap.md) ----------
    Reuses buildDartboard()'s geometry (radii, sector math) but as a standalone,
    non-interactive rendering — no onclick handlers, no hover states, shaded by hit
    frequency instead of the static light/dark scoring pattern. Kept fully separate

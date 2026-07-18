@@ -25,7 +25,7 @@ exactly where they left off — same leg, same scores, same thrower.
 ## Scope — what's savable
 
 - **Any H2H game**, any game type (X01, Cricket, Baseball today; Killer
-  when `docs/game-modes-roadmap.md`'s item ships — its design should treat
+  when `docs/archive/game-modes-roadmap.md`'s item ships — its design should treat
   savability as a requirement, not a retrofit). Any participant count the
   mode allows, not just 2 — "matchup" below always means the game's exact
   participant set.
@@ -257,7 +257,7 @@ Per `CLAUDE.md`'s standing conventions:
 5. Tournament/league-fixture linkage restore + the walkover-routed abandon.
 6. Guards: player-deletion, merge collision, two-device divergence.
 7. Killer, when it ships, treats savability as part of its own definition
-   of done (`docs/game-modes-roadmap.md` item 12b should reference this).
+   of done (`docs/archive/game-modes-roadmap.md` item 12b should reference this).
 
 ## Open questions for whoever picks this up
 

@@ -467,14 +467,14 @@ const ALLOWED_LIVE_KEYS = new Set([
   'currentIndex', 'players', 'darts', 'checkout', 'status', 'message', 'achievement',
   'gameOneEighties', 'gameBigFish', 'gameBusts', 'legSummary', 'practice', 'done',
   'lastTurnEvent', 'matchResult', 'legStart', 'checkoutTarget', 'turnSeq', 'ts',
-  // Doubles Practice only (docs/game-modes-roadmap.md) — read by display.html's
+  // Doubles Practice only (docs/archive/game-modes-roadmap.md) — read by display.html's
   // renderers.doubles_practice.card(), never by X01/Cricket. roundOver/roundEndReason
   // are shared with guided Around the Clock below (same "round ended" concept).
   'doublesTargets', 'dpLastDart', 'roundOver', 'roundEndReason',
-  // Just Chuckin' It only (docs/game-modes-roadmap.md) — read by display.html's
+  // Just Chuckin' It only (docs/archive/game-modes-roadmap.md) — read by display.html's
   // renderers.chuckin.card().
   'chuckinLastDart',
-  // Guided Around the Clock / Around the World only (docs/game-modes-roadmap.md) —
+  // Guided Around the Clock / Around the World only (docs/archive/game-modes-roadmap.md) —
   // read by display.html's renderers.around_the_clock.card()/renderers.around_the_world.card().
   // Per-player hit-set/progress data rides inside the already-unrestricted
   // per-player `players[]` array, same as Chuckin's heatmap/sessionAvg fields do.
@@ -482,7 +482,7 @@ const ALLOWED_LIVE_KEYS = new Set([
   // Tournament mode only (docs/archive/tournament-mode-roadmap.md) — read by display.html's
   // fmtText() for the top-bar round label ("Quarterfinal", "Final", ...).
   'tournamentRoundLabel',
-  // Baseball only (docs/game-modes-roadmap.md) — which inning (1-9, or beyond on a
+  // Baseball only (docs/archive/game-modes-roadmap.md) — which inning (1-9, or beyond on a
   // tie) is currently live; read by display.html's renderers.baseball.scorecard()
   // for the "Inning N of 9" header. Per-player runs ride inside the already-
   // unrestricted per-player `players[]` array, same as every other game type's own

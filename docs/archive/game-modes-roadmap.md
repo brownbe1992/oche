@@ -1,6 +1,17 @@
 # Additional Game Modes — Design Roadmap
 
-> Status: **Cricket is playable with full stats parity (build-order steps 1-4
+> Status: **Complete — archived 2026-07-18.** Every game type and follow-on in
+> this doc is shipped. The one long-open design thread — whether to generalize
+> the per-game-type backend stat functions and `renderHome()`'s per-type upfront
+> fetch list into a single parameterized engine (tracker item 34) — was closed
+> 2026-07-18 by an explicit owner decision to **keep the bespoke per-type
+> shape**; see "Toggle mechanism generalized" below for the recorded rationale.
+> No code changed as part of that decision. A couple of product-level open
+> questions (e.g. whether the game-type toggle should hide never-played types)
+> remain preserved under "Open questions" as ideas only — no tracked work.
+>
+> Historical status as of the last implementation pass:
+> **Cricket is playable with full stats parity (build-order steps 1-4
 > done). Step 5 (Baseball) is now also playable with full stats/achievements
 > parity** — turn engine, New Game setup, dedicated scoring screen, live
 > scoreboard, stat bubbles/Personal Bests/metric history, achievements/badges,
@@ -93,9 +104,9 @@
 > **✅ Done (2026-07): the Player Profile/Home page game-type toggle is now N-way**,
 > not three hardcoded buttons — see "Toggle mechanism generalized" below. The
 > *backend* half of that same section (a bespoke SQL function set per game type,
-> and the Home page's upfront fetch list growing the same way) is still open and
-> deliberately not attempted for Baseball — real design work for whoever builds it
-> next, not resolved by the toggle-mechanism generalization. (Just Chuckin' It's
+> and the Home page's upfront fetch list growing the same way) was long left
+> open, and is now **resolved (2026-07-18): keep the bespoke per-type shape** —
+> see "Toggle mechanism generalized" below. (Just Chuckin' It's
 > own backend function set shipped as part of building it, following the same
 > "bespoke per game type" pattern this section anticipated.)
 >
@@ -298,7 +309,7 @@ depends on it.
   change needed (the grouping is purely a client-side rendering split, since
   `player_badges` itself only ever needed a free-form `badge_id` string).
 
-## ✅ Toggle mechanism generalized (2026-07); backend stat-fetch generalization still open
+## ✅ Toggle mechanism generalized (2026-07); backend stat-fetch generalization resolved 2026-07-18 — keep the per-type shape
 
 Requested: every game mode's own stats (three-dart average, trebleless %, etc. or
 whatever that mode's equivalent is) should be viewable on the Player Profile, for
@@ -335,8 +346,9 @@ toggle-rendering or dispatch code itself, needing only its own `GAME_TYPES`
 entry plus `homeTabRenderer:false` (opting out of the Home toggle specifically,
 since none of its stats map onto a leaderboard shape there).
 
-**Still genuinely open for Baseball — Just Chuckin' It didn't resolve it
-generically, it just paid the same cost again**: the backend scaling concern.
+**Resolved 2026-07-18: keep the bespoke per-type shape** — an explicit owner
+decision recorded as tracker item 34, not a default that went unexamined. The
+concern as it stood while open: the backend scaling cost.
 Cricket's stats needed a full parallel set of functions
 (`getCricketStatBubbles`, `getCricketPersonalBests`, `getCricketMprLeaderboard`,
 `getCricketWinLeaderboard`, `getCricketPerfectLegStats`, 6 `getMetricHistory()`
@@ -356,9 +368,42 @@ now with three drill-shaped and non-drill-shaped data points banked (Cricket,
 Doubles Practice, Just Chuckin' It), whoever tackles Baseball next has a much
 better-informed basis for deciding whether it's finally worth generalizing. The
 Home page's upfront `Promise.all` fetch list (`renderHome()`) has the same
-"grows by N endpoints per type" shape and is left unresolved for the same
+"grows by N endpoints per type" shape and was left unresolved for the same
 reason (Just Chuckin' It opted out of it entirely via `homeTabRenderer:false`,
 so it didn't add to this list at all).
+
+**The 2026-07-18 decision and its rationale.** With every game type in this doc
+shipped (~12 types, ~47 bespoke `get<Type>...` functions in `backend/db.js`,
+and a `renderHome()` fetch list of ~47 endpoints), the question was finally put
+to the owner directly, and the answer is to keep the per-type shape:
+
+- **The only benefit of generalizing is making *future* game types cheaper to
+  add — and none are planned.** The refactor adds no features, changes nothing
+  a player sees, and makes no existing stat better. The doc's own game-type
+  wishlist is exhausted.
+- **The risk lands exactly where this project is most careful.** A shared
+  engine would mean rewriting ~47 working, individually-tested stat functions
+  through one abstraction spanning three genuinely different shapes — X01
+  (leg/win-gated), Cricket-style (marks-based), and the drills (no legs, no
+  opponent, no win concept; both Doubles Practice and Just Chuckin' It
+  independently needed their own 2-field Personal Bests shape because the
+  standard one doesn't fit). Every rewrite is a chance for the kind of quiet
+  stat regression (the backwards trebleless leaderboard, the missing
+  `OPENING_CATS` filter) that motivated the committed-test convention in the
+  first place.
+- **Duplication you can trust beats an abstraction you have to re-verify.**
+  The per-type functions are simple, independent, each protected by its own
+  committed tests — and the per-type shape had already been deliberately
+  re-chosen ~10 consecutive times as each new mode shipped. This decision
+  makes that repeated choice the recorded standing answer instead of an
+  ever-open question.
+
+**Standing guidance**: any future game type follows the same bespoke pattern —
+a `GAME_TYPES` entry plus its own stat-function set and endpoints, per
+`CLAUDE.md`'s calculation-testing convention. Reopen this question only if new
+game types start arriving frequently enough that the per-type cost
+demonstrably compounds; a concrete new consumer is the right moment to
+validate any abstraction against, exactly as this section always argued.
 - The **drill modes don't fit the existing per-type stats shape at all** —
   `getPersonalBests()`-style "best leg / fewest darts / win streak" concepts assume
   legs and opponents neither drill mode has (Doubles Practice worked around this
@@ -1104,7 +1149,9 @@ X01-only, see its status note above).
    own bespoke set shipped as part of item 9 below, and Baseball's own followed in
    a later pass (see item 5's update above) — confirming the pattern holds without
    ever needing the generic-parameterized-query redesign this section originally
-   floated as an open question.
+   floated as an open question. That open question was formally closed 2026-07-18
+   (tracker item 34): keep the per-type shape — see "Toggle mechanism
+   generalized" above for the full rationale.
 7. **✅ Done — Doubles Practice** — the first Practice Drill Mode built. Per-dart
    evaluation (`evaluateDartDoublesPractice()`), "all simultaneously live"
    multi-double sessions, its own 3 stat bubbles + 2-field Personal Bests, New

@@ -251,7 +251,7 @@ system, per the design goal above.
   like Hat Trick or So Close — get a lighter, smaller treatment so the app's biggest
   moment doesn't get crowded out by treating everything the same way.
 - **Extensibility per game type from day one.** Once Cricket/Baseball exist (per
-  `docs/game-modes-roadmap.md`), they need their own badge vocabulary (e.g. Cricket's
+  `docs/archive/game-modes-roadmap.md`), they need their own badge vocabulary (e.g. Cricket's
   "9 marks in one visit" as that mode's 180-equivalent) rather than every badge being
   implicitly X01-only. The `player_badges` table's `badge_id` should be a free-form
   string key from day one (not an enum tied to X01 concepts) so this doesn't require
