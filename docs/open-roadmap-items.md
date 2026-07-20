@@ -22,6 +22,12 @@
 
 ## Open items (not yet started, ordered by complexity — lowest first)
 
+> The rows for items **34–59** (the code-quality cluster from the 2026-07-20
+> review/`/simplify` passes) are the one exception to complexity-ordering:
+> they're sequenced by **recommended completion order** instead, since real
+> dependencies exist between them. See "Code-quality cluster: recommended
+> completion order" below the table for the phase-by-phase rationale.
+
 | # | Item | Source doc | Complexity |
 |---|---|---|---|
 | 1 | Mobile: multiple saved server profiles (stretch goal, step 7) | `docs/mobile-app-roadmap.md` | Low |
@@ -30,32 +36,32 @@
 | 4 | Mobile: distribution decision — App Store/Play Store listing vs. simpler sideload distribution (step 6) | `docs/mobile-app-roadmap.md` | Low-Medium |
 | 5 | Localize voice announcements beyond hardcoded English phrases | `docs/voice-announcements-i18n-roadmap.md` | Low-Medium |
 | 6 | UI Overhaul design phase: create comprehensive plan for player page reorganization (step 1) | `docs/ui-overhaul-roadmap.md` | Medium |
-| 34 | Game-modes: decide whether to generalize the per-game-type backend stat functions (a single parameterized stat-bubble/leaderboard query keyed by each type's formula definitions, plus the Home page's per-type `Promise.all` fetch list) rather than hand-writing a bespoke SQL function set per type — the explicitly-open design thread in `game-modes-roadmap.md`. Every game type shipped so far (X01/Cricket/Baseball/drills/Killer and all the later modes) has its stats fully viewable via per-type functions, so this is an optional architecture refactor to reduce the per-type cost, NOT a missing feature — genuinely undecided (the per-type shape has been kept ~10 times running, which may itself be the right answer). This is why `game-modes-roadmap.md` stays in `docs/` | `docs/game-modes-roadmap.md` | Medium |
-| 36 | One `winSectionHtml()` helper for the five identical "Most X Wins" Home templates | `docs/code-quality-roadmap.md` | Low |
+| 59 | Conventions: move the 10 inline badge predicates to scoring.js (+tests, per the file's own stated convention) and settle the `DB.*` wrapper boundary rule | `docs/code-quality-roadmap.md` | Low-Medium |
+| 58 | Declarative settings field table — load/save hand-maintain parallel per-field lists (13 HA webhook + 7 voice + 8 misc) | `docs/code-quality-roadmap.md` | Low-Medium |
+| 56 | Dart input/record helpers on the hottest path — `pushThrownDarts()` (4 copies of dart construction + zone stamping) and `recordSingleDartTurn()` (5 payload clones) | `docs/code-quality-roadmap.md` | Low-Medium |
+| 52 | Small shared-pattern helper batch for index.html: `jsArg()` (~24 escapeHtml(escapeJs()) sites), `openModal()` (12 builders), milestone-ladder registration helper (~12 loops), countdown-timer factory (Blitz + No Warmup), aria-pressed group helper (~10 controls) | `docs/code-quality-roadmap.md` | Low-Medium |
 | 38 | `savedGamePositionLabel()`: dispatch on `sg.gameType` instead of field presence (removes the reserved-field-name contract) | `docs/code-quality-roadmap.md` | Low-Medium |
 | 39 | Derive `NON_SAVABLE_GAME_TYPES` from the backend registry (or pin the two lists together with a committed test) | `docs/code-quality-roadmap.md` | Low-Medium |
-| 40 | Declare `newMatchPlayer`'s second-arg shape on the `GAME_TYPES` registry (startGame/resumeGame's hand lists already differ) | `docs/code-quality-roadmap.md` | Low-Medium |
-| 41 | `games.category` as a registry member (kills the 14-branch ternary whose `String(startScore)` fallthrough writes bad rows permanently) | `docs/code-quality-roadmap.md` | Low-Medium |
-| 35 | Consolidate the 16 copy-pasted `undoLastTurn*` trailers into `_finishUndo()` (copies have already drifted) | `docs/code-quality-roadmap.md` | Medium |
-| 37 | Registry-driven resume dispatch — replace `resumeGame()`'s 13-branch chain and `_savedGamePosition()`'s parallel copy (a missed future branch destroys the pause) | `docs/code-quality-roadmap.md` | Medium-High |
-| 42 | Live-state keys: per-mode container key (or registry-derived allowlist) — the silent-strip failure class has shipped twice | `docs/code-quality-roadmap.md` | Medium |
 | 43 | Id-keyed killer configs — one migration replaces the three name-rewrite compensators (rename/merge, import re-key, boot reconcile) | `docs/code-quality-roadmap.md` | Medium |
-| 44 | Whole-darts-table scan pass over hot stat queries (`_first9`/`_trebleLess`, recap per-player scans, personal-bests double scan, shanghai/halve-it O(players×history) legs loop) — overlaps item 34, decide together | `docs/code-quality-roadmap.md` | Medium |
-| 45 | Home page: lazy per-combo fetches instead of the ~47-request burst per navigation (SWR paint + keep-cache catch already shipped; the burst remains) | `docs/code-quality-roadmap.md` | Medium |
-| 52 | Small shared-pattern helper batch for index.html: `jsArg()` (~24 escapeHtml(escapeJs()) sites), `openModal()` (12 builders), milestone-ladder registration helper (~12 loops), countdown-timer factory (Blitz + No Warmup), aria-pressed group helper (~10 controls) | `docs/code-quality-roadmap.md` | Low-Medium |
+| 41 | `games.category` as a registry member (kills the 14-branch ternary whose `String(startScore)` fallthrough writes bad rows permanently) | `docs/code-quality-roadmap.md` | Low-Medium |
 | 46 | Per-mode option-section wiring as a registry member (setMode/setGameType/markup sprawl that produced the Step-3 drift; fold in the contexts-vs-soloOnly/h2hOnly mirror and setMode's three mode lists) | `docs/code-quality-roadmap.md` | Medium |
-| 47 | One `h2hStatsHtml(winner, scope)` with per-type rows from the registry (5 clones + finishUnit's twin 5-way ternary chains) | `docs/code-quality-roadmap.md` | Medium |
-| 48 | Declarative personal-bests renderers (17 near-identical functions → per-type spec + one generic renderer, ~280 lines → ~50) | `docs/code-quality-roadmap.md` | Medium |
-| 49 | One leaderboard-row template helper for the ~20 inline hof-list boards — supersedes item 36's five "Most X Wins" copies, implement together | `docs/code-quality-roadmap.md` | Medium |
-| 50 | One-shot badge award helper (`awardOnceBadge()`) — ~10 hand-rolled copies with already-drifted cache/queue behavior | `docs/code-quality-roadmap.md` | Medium |
-| 51 | Badge-progress fetch-baseline-once (ATW per-visit + Doubles per-dart scans), profile-navigation stats SWR + tab-scoped refetch, tournament-seeding batch read | `docs/code-quality-roadmap.md` | Medium |
 | 53 | Game-start construction factory — 4 hand-written copies of the runtime-state literal + badge prefetch + boot tail (tournament/marathon copies already drift) | `docs/code-quality-roadmap.md` | Medium |
 | 54 | One `advanceLegSetGame()` helper — the leg/set/game progression cascade is pasted in 8 `onLegWon*` handlers (~180 lines; the Shanghai copy is 100% generic) | `docs/code-quality-roadmap.md` | Medium |
+| 35 | Consolidate the 16 copy-pasted `undoLastTurn*` trailers into `_finishUndo()` (copies have already drifted) | `docs/code-quality-roadmap.md` | Medium |
+| 47 | One `h2hStatsHtml(winner, scope)` with per-type rows from the registry (5 clones + finishUnit's twin 5-way ternary chains) | `docs/code-quality-roadmap.md` | Medium |
 | 55 | Scoreboard/pad renderer scaffolding — shared cs-table builders (5 chalkboard renderers), one parameterized single-target pad (5 clones), `renderPad()` lookup dispatch | `docs/code-quality-roadmap.md` | Medium |
-| 56 | Dart input/record helpers on the hottest path — `pushThrownDarts()` (4 copies of dart construction + zone stamping) and `recordSingleDartTurn()` (5 payload clones) | `docs/code-quality-roadmap.md` | Low-Medium |
+| 48 | Declarative personal-bests renderers (17 near-identical functions → per-type spec + one generic renderer, ~280 lines → ~50) | `docs/code-quality-roadmap.md` | Medium |
+| 36 | One `winSectionHtml()` helper for the five identical "Most X Wins" Home templates | `docs/code-quality-roadmap.md` | Low |
+| 49 | One leaderboard-row template helper for the ~20 inline hof-list boards — supersedes item 36's five "Most X Wins" copies, implement together | `docs/code-quality-roadmap.md` | Medium |
+| 50 | One-shot badge award helper (`awardOnceBadge()`) — ~10 hand-rolled copies with already-drifted cache/queue behavior | `docs/code-quality-roadmap.md` | Medium |
+| 42 | Live-state keys: per-mode container key (or registry-derived allowlist) — the silent-strip failure class has shipped twice | `docs/code-quality-roadmap.md` | Medium |
+| 40 | Declare `newMatchPlayer`'s second-arg shape on the `GAME_TYPES` registry (startGame/resumeGame's hand lists already differ) | `docs/code-quality-roadmap.md` | Low-Medium |
+| 37 | Registry-driven resume dispatch — replace `resumeGame()`'s 13-branch chain and `_savedGamePosition()`'s parallel copy (a missed future branch destroys the pause) | `docs/code-quality-roadmap.md` | Medium-High |
 | 57 | Frontend efficiency batch — moment-card/webhook config gating (no-op canvas+POST per celebration), pad build-once (22 buttons rebuilt per dart), Chuckin heatmap serialization caching | `docs/code-quality-roadmap.md` | Medium |
-| 58 | Declarative settings field table — load/save hand-maintain parallel per-field lists (13 HA webhook + 7 voice + 8 misc) | `docs/code-quality-roadmap.md` | Low-Medium |
-| 59 | Conventions: move the 10 inline badge predicates to scoring.js (+tests, per the file's own stated convention) and settle the `DB.*` wrapper boundary rule | `docs/code-quality-roadmap.md` | Low-Medium |
+| 51 | Badge-progress fetch-baseline-once (ATW per-visit + Doubles per-dart scans), profile-navigation stats SWR + tab-scoped refetch, tournament-seeding batch read | `docs/code-quality-roadmap.md` | Medium |
+| 45 | Home page: lazy per-combo fetches instead of the ~47-request burst per navigation (SWR paint + keep-cache catch already shipped; the burst remains) | `docs/code-quality-roadmap.md` | Medium |
+| 34 | Game-modes: decide whether to generalize the per-game-type backend stat functions (a single parameterized stat-bubble/leaderboard query keyed by each type's formula definitions, plus the Home page's per-type `Promise.all` fetch list) rather than hand-writing a bespoke SQL function set per type — the explicitly-open design thread in `game-modes-roadmap.md`. Every game type shipped so far (X01/Cricket/Baseball/drills/Killer and all the later modes) has its stats fully viewable via per-type functions, so this is an optional architecture refactor to reduce the per-type cost, NOT a missing feature — genuinely undecided (the per-type shape has been kept ~10 times running, which may itself be the right answer). This is why `game-modes-roadmap.md` stays in `docs/` | `docs/game-modes-roadmap.md` | Medium |
+| 44 | Whole-darts-table scan pass over hot stat queries (`_first9`/`_trebleLess`, recap per-player scans, personal-bests double scan, shanghai/halve-it O(players×history) legs loop) — overlaps item 34, decide together | `docs/code-quality-roadmap.md` | Medium |
 | 7 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
 | 8 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
 | 9 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
@@ -81,6 +87,50 @@
   this game count toward, vs. is this specific pairing's match still owed).
 - **Mobile app's steps are sequential as listed** (step 2 → 3 → 4 → 5 → 6 → 7) per `docs/mobile-app-roadmap.md`'s own suggested build order; its one prerequisite (the responsive CSS pass) is already done.
 - **Row 5** (voice announcement i18n) is the one remaining order-independent Low-Medium item — it can be interleaved anywhere, including ahead of the bigger lifts.
+
+### Code-quality cluster (items 34–59): recommended completion order
+
+Reordered from the original by-complexity listing because several items have
+real dependencies on each other — doing them out of order means either
+blocking or reworking something already done. Seven phases, each best
+finished before starting the next; nothing within a phase depends on order:
+
+1. **Quick, independent wins** (59, 58, 56, 52, 38, 39) — no shared
+   dependencies, touch isolated code, and shrink the backlog count fast. 59
+   (badge predicates → scoring.js) is placed first because it makes the
+   predicates testable before phase 3 touches badge-award flow (50) and the
+   leg/set/game cascade (54) that triggers them.
+2. **Id-keyed killer configs** (43) — a self-contained backend migration
+   that deletes the three name-rewrite compensators added this session
+   (`_rewriteKillerConfigNames`, the import re-key, the boot reconcile).
+   Doing it early means every later phase that touches Killer works against
+   the simpler, post-migration code.
+3. **`GAME_TYPES` registry consolidation, batched** (41, 46, 53, 54, 35, 47,
+   55, 48, 36, 49, 50) — all repeatedly touch the same registry object and
+   the same per-mode dispatch functions, so batching avoids re-opening them
+   phase after phase. Internally ordered by the game's own lifecycle: setup
+   (41 category, 46 option sections) → construction (53) → play (54 leg/set/
+   game cascade, 35 undo — same turn-lifecycle functions as 54) → end-of-unit
+   stats (47, tightly coupled to 54's `finishUnit` call) → rendering (55) →
+   profile/Home (48, then 36+49 as one unit since 49 supersedes 36, then 50).
+4. **Live-state keys** (42) — a full-stack producer/allowlist/consumer
+   change; sequenced after phase 3 so it can reuse the now-mature registry
+   pattern instead of inventing its own.
+5. **Savable/resume infrastructure** (40, 37) — 40 explicitly folds into 37;
+   the biggest, riskiest item in the cluster (its own roadmap entry calls
+   for doing it "with the app runnable" for live verification), so it's
+   deliberately last among structural work, once everything upstream has
+   de-risked the surrounding code and testing habits are warmed up.
+6. **Efficiency passes** (57, 51, 45) — best done *after* the structural
+   work they build on: 57's "pad build-once" targets the pad rendering
+   phase 3 just restructured (doing it first would mean redoing it), 51's
+   badge-progress work follows 50's award-flow consolidation, and 45's Home
+   lazy-fetch refactor targets the consolidated renderers from 48/49.
+7. **Architecture decision, resolve together** (34, 44) — 44 explicitly
+   overlaps 34's pre-existing, still-undecided question (generalize the
+   per-game-type backend stat functions?). Placed last because it's a real
+   fork requiring a decision, not just an implementation — resolve 34 first,
+   then 44 follows from whichever direction that decision takes.
 
 ---
 
