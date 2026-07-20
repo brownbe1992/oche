@@ -42,6 +42,13 @@
 | 43 | Id-keyed killer configs — one migration replaces the three name-rewrite compensators (rename/merge, import re-key, boot reconcile) | `docs/code-quality-roadmap.md` | Medium |
 | 44 | Whole-darts-table scan pass over hot stat queries (`_first9`/`_trebleLess`, recap per-player scans, personal-bests double scan, shanghai/halve-it O(players×history) legs loop) — overlaps item 34, decide together | `docs/code-quality-roadmap.md` | Medium |
 | 45 | Home page: lazy per-combo fetches instead of the ~47-request burst per navigation (SWR paint + keep-cache catch already shipped; the burst remains) | `docs/code-quality-roadmap.md` | Medium |
+| 52 | Small shared-pattern helper batch for index.html: `jsArg()` (~24 escapeHtml(escapeJs()) sites), `openModal()` (12 builders), milestone-ladder registration helper (~12 loops), countdown-timer factory (Blitz + No Warmup), aria-pressed group helper (~10 controls) | `docs/code-quality-roadmap.md` | Low-Medium |
+| 46 | Per-mode option-section wiring as a registry member (setMode/setGameType/markup sprawl that produced the Step-3 drift; fold in the contexts-vs-soloOnly/h2hOnly mirror and setMode's three mode lists) | `docs/code-quality-roadmap.md` | Medium |
+| 47 | One `h2hStatsHtml(winner, scope)` with per-type rows from the registry (5 clones + finishUnit's twin 5-way ternary chains) | `docs/code-quality-roadmap.md` | Medium |
+| 48 | Declarative personal-bests renderers (17 near-identical functions → per-type spec + one generic renderer, ~280 lines → ~50) | `docs/code-quality-roadmap.md` | Medium |
+| 49 | One leaderboard-row template helper for the ~20 inline hof-list boards — supersedes item 36's five "Most X Wins" copies, implement together | `docs/code-quality-roadmap.md` | Medium |
+| 50 | One-shot badge award helper (`awardOnceBadge()`) — ~10 hand-rolled copies with already-drifted cache/queue behavior | `docs/code-quality-roadmap.md` | Medium |
+| 51 | Badge-progress fetch-baseline-once (ATW per-visit + Doubles per-dart scans), profile-navigation stats SWR + tab-scoped refetch, tournament-seeding batch read | `docs/code-quality-roadmap.md` | Medium |
 | 7 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
 | 8 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
 | 9 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |

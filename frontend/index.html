@@ -1583,12 +1583,11 @@ const DB = {
     if(!r.ok) throw new Error('backend health check failed: HTTP '+r.status);
   },
 
-  // load roster + prefs + stats into the in-memory caches the UI renders from
+  // load roster + prefs + stats into the in-memory caches the UI renders from.
+  // /api/stats alone carries everything (names, out, hasPin, stats) — a prior
+  // version also fetched /api/players first and built roster/prefs from it,
+  // only for refreshStats() to overwrite all of it one round-trip later.
   async loadAll(){
-    const players = await Backend.get('/api/players');
-    // No auto-creation — empty roster shows the Players page prompting the user to add their own name
-    roster = players.map(p=>p.name);
-    prefs = {}; players.forEach(p=>{ prefs[p.name]={out:p.out, hasPin:!!p.hasPin}; ensurePlayerStats(p.name); });
     await this.refreshStats();
   },
 
@@ -1603,7 +1602,6 @@ const DB = {
   addPlayer(name, out, opts){ Backend.send('POST','/api/players',{name, out:out||'double', pin:(opts&&opts.pin)||undefined, dartWeight:(opts&&opts.dartWeight)||undefined}).catch(logErr); },
   rename(from, to){ Backend.send('PUT','/api/players/rename',{from, to}).catch(logErr); },
   setOut(name, out){ Backend.send('PUT','/api/players/out',{name, out}).catch(logErr); },
-  setDartWeight(name, weight){ Backend.send('PUT','/api/players/dart-weight',{name, weight}).catch(logErr); },
   delete(name){ Backend.send('DELETE','/api/players?name='+encodeURIComponent(name)).catch(logErr); },
 
   // Dart Builder / loadouts (docs/archive/dart-builder-roadmap.md)
@@ -1984,7 +1982,7 @@ function setDartMode(mode){ dartboardMode=(mode==='board'); applyDartMode(); }
 
 /* ---------- per-player finish rule ---------- */
 function playerOut(name){ return (prefs[name] && prefs[name].out==='single') ? 'single' : 'double'; }
-function setPlayerOut(name, mode){ Auth.ensureCanWrite(()=>{ const out = mode==='single'?'single':'double'; prefs[name]={ ...(prefs[name]||{}), out }; DB.setOut(name, out); persist(); renderPlayerPage(); }); }
+function setPlayerOut(name, mode){ Auth.ensureCanWrite(()=>{ const out = mode==='single'?'single':'double'; prefs[name]={ ...(prefs[name]||{}), out }; DB.setOut(name, out); renderPlayerPage();  }); }
 
 /* ---------- navigation ---------- */
 function show(name){
@@ -2324,7 +2322,6 @@ function shareSessionRecap(){
 /* ---------- home screen ---------- */
 let homeTab='h2h';
 let homeGameType='x01';
-let settingsTab='account';
 let homeData=null;
 
 // Populates the Home page's game-type toggle from every registered game type with
@@ -2503,7 +2500,6 @@ function switchHomeGameType(type){
 }
 
 function switchSettingsTab(tab){
-  settingsTab=tab;
   document.querySelectorAll('#screen-settings .tab-btn[data-stab]').forEach(b=>b.classList.toggle('active', b.dataset.stab===tab));
   document.querySelectorAll('#screen-settings .settings-group').forEach(g=>{ g.hidden = (g.dataset.group!==tab); });
 }
@@ -3471,7 +3467,7 @@ function renderGhostLegPicker(){
   setup.ghostLeg = null;
   if(!name){ box.innerHTML = `<p class="pp-meta">Choose a player above to see their past won legs.</p>`; return; }
   box.innerHTML = `<p class="pp-meta">Loading…</p>`;
-  fetch(`/api/players/ghost-legs?name=${encodeURIComponent(name)}&limit=20`).then(r=>r.json()).then(legs=>{
+  Backend.get(`/api/players/ghost-legs?name=${encodeURIComponent(name)}&limit=20`).then(legs=>{
     if(setup.mode !== 'ghost' || setup.slots[0] !== name) return; // a newer selection took over
     box._legs = legs;
     if(!legs || !legs.length){
@@ -3905,7 +3901,7 @@ function renderServerErrors(rows){
   if(!list) return;
   if(!rows || !rows.length){ list.innerHTML = '<p class="pp-meta">No server errors recorded.</p>'; return; }
   list.innerHTML = rows.map(r=>{
-    const date = new Date(String(r.created_at).replace(' ','T')+'Z').toLocaleString();
+    const date = parseSqliteTimestamp(r.created_at).toLocaleString();
     return `<div style="padding:8px 0;border-bottom:1px solid var(--wire);font-size:12px">
       <div style="color:var(--muted)">${date} &nbsp;·&nbsp; <b style="color:var(--ink)">${r.status||'—'}</b> &nbsp;·&nbsp; ${escapeHtml(r.method||'')} ${escapeHtml(r.path||'')}</div>
       <div style="color:var(--ink);margin-top:2px">${escapeHtml(r.message||'(no message)')}</div>
@@ -4126,9 +4122,7 @@ function addToRoster(name, opts){
   roster.push(name); ensurePlayerStats(name);
   const out = opts.out==='single' ? 'single' : 'double';
   prefs[name]={ out, hasPin: !!opts.pin };
-  if(opts.dartWeight) stats[name].dartWeight = Number(opts.dartWeight);
-  DB.addPlayer(name, out, { pin: opts.pin, dartWeight: opts.dartWeight });
-  persist();
+  DB.addPlayer(name, out, { pin: opts.pin });
   return name;
 }
 function renamePlayer(oldName, newName){
@@ -4142,14 +4136,13 @@ function renamePlayer(oldName, newName){
   if(stats[oldName]){ stats[newName]=stats[oldName]; delete stats[oldName]; }
   if(prefs[oldName]){ prefs[newName]=prefs[oldName]; delete prefs[oldName]; }
   setup.slots=setup.slots.map(s=>s===oldName?newName:s);
-  persist(); return true;
+  return true;
 }
 function deletePlayer(name){
   DB.delete(name);
   roster=roster.filter(p=>p!==name);
   delete stats[name]; delete prefs[name];
   setup.slots=setup.slots.filter(s=>s!==name);
-  persist();
 }
 
 /* ---------- setup screen ---------- */
@@ -4723,8 +4716,8 @@ function setupGoToStep2(){
   }
   if(_pendingFixtureAbort) _pendingFixtureAbort.aborted = true;
   const tok = { aborted:false }; _pendingFixtureAbort = tok;
-  fetch(`/api/leagues/pending-fixture?p1=${encodeURIComponent(named[0])}&p2=${encodeURIComponent(named[1])}`)
-    .then(r=>r.json()).then(list=>{
+  Backend.get(`/api/leagues/pending-fixture?p1=${encodeURIComponent(named[0])}&p2=${encodeURIComponent(named[1])}`)
+    .then(list=>{
       if(tok.aborted) return;
       setup.pendingFixtures = Array.isArray(list) ? list : [];
       showSetupStep(2); renderSetupStep2Content();
@@ -4734,23 +4727,23 @@ function setupGoToStep2(){
       showSetupStep(2); renderSetupStep2Content();
     });
 }
-// Step 3 ("More options") only has real content for a subset of modes: Cricket's
-// target picker, Ghost's leg picker, Doubles Practice's target picker, Checkout
-// Trainer's sub-mode/difficulty, and the H2H legs/sets format (h2h-options, shown
-// only when setup.mode==='h2h' — including League Game, which forces h2h). Every
-// other mode (X01/Baseball practice, Chuckin, Around the Clock, Around the World,
-// Daily Challenge) has nothing there but the Start button itself — landing on it
-// was an unnecessary, contentless extra tap with no reason to exist. Reads each
-// section's actual DOM `hidden` state (already kept correct by setMode()'s own
-// per-mode toggles) rather than re-deriving the mode->section mapping a second
-// time here, so this can never silently drift out of sync with what setMode()
-// decides to show.
+// Step 3 ("More options") only has real content for the modes whose option
+// section is currently visible (Cricket/Killer/Shanghai/Halve-It pickers,
+// Ghost's leg picker, Doubles Practice's targets, Checkout Trainer's
+// sub-mode/difficulty, and the H2H legs/sets format — shown only when
+// setup.mode==='h2h', including League Game, which forces h2h). Modes with
+// nothing there (X01/Baseball practice, Chuckin, ATC/ATW, Daily Challenge)
+// skip straight to Start — landing on a contentless step was an unnecessary
+// extra tap. Reads each section's actual DOM `hidden` state (kept correct by
+// setMode()/setGameType()'s own per-mode toggles).
 function setupStep3HasContent(){
-  return ['cricket-options-section', 'ghost-options-section', 'doubles-options-section',
-    'checkout-trainer-options-section', 'killer-options-section', 'h2h-options'].some(id => {
-    const el = document.getElementById(id);
-    return el && !el.hidden;
-  });
+  // Query the step's own .setup-section children rather than a hand-kept id
+  // list — the list was a second copy of the mode->section mapping and DID
+  // drift: it never learned about shanghai/halve-it, so practice-mode Shanghai
+  // and Halve-It skipped Step 3 entirely, making the rounds picker and the
+  // custom target editor unreachable. The DOM query picks up any future
+  // section the moment it's added to the markup.
+  return [...document.querySelectorAll('#setup-step-3 .setup-section')].some(el => !el.hidden);
 }
 function setupGoToStep3(){
   renderHandicapOptions(); // re-derive from the current slot list before checking for content
@@ -4761,9 +4754,7 @@ function setupGoToStep3(){
 function setupBackTo(n){ showSetupStep(n); if(n===2) renderSetupStep2Content(); }
 
 const SETUP_STEP_LABELS = { 1:"Step 1 of 3 — Who's playing?", 2:'Step 2 of 3 — Choose a game', 3:'Step 3 of 3 — More options' };
-let setupStep = 1;
 function showSetupStep(n){
-  setupStep = n;
   document.getElementById('setup-step-1').hidden = (n!==1);
   document.getElementById('setup-step-2').hidden = (n!==2);
   document.getElementById('setup-step-3').hidden = (n!==3);
@@ -5383,9 +5374,6 @@ function ensurePlayerStats(name){
   delete s.games;
   stats[name]=s;
 }
-// no-op: all writes go straight to the backend (DB.*) — nothing to persist locally
-function persist(){}
-
 /* =========================================================================
    TOURNAMENT MODE (docs/archive/tournament-mode-roadmap.md) — single-elimination only.
    A tournament match IS a normal X01 game under the hood (see beginTournamentMatch
@@ -5844,7 +5832,6 @@ async function _reallyBeginTournamentMatch(matchId){
    league, enroll players, watch standings, end the season when it's over. */
 let leagueView = 'list';        // 'list' | 'setup' | 'detail'
 let currentLeagueId = null;
-let leagueDetailCache = null;   // last-fetched detail for currentLeagueId
 let leagueSetup = null;         // built fresh each time the setup view opens
 
 function renderLeagueScreen(){
@@ -6001,7 +5988,7 @@ function loadLeagueDetail(){
   const body=document.getElementById('league-body');
   body.innerHTML = `<p class="pp-meta" style="padding:4px 0">Loading…</p>`;
   Backend.get(`/api/leagues/${currentLeagueId}`)
-    .then(l=>{ leagueDetailCache = l; renderLeagueDetail(l); })
+    .then(l=>renderLeagueDetail(l))
     .catch(()=>{ body.innerHTML = `<p class="pp-meta">Could not load league.</p>`; });
 }
 function renderLeagueDetail(l){
@@ -6160,14 +6147,6 @@ let playerGameType = 'x01';
 let showMoreStats = false;
 let playerSettingsUnlocked = false;
 function localDateStr(d){ d = d || new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
-function setPlayerDartWeight(name, value){
-  Auth.ensureCanWrite(()=>{
-    const weight = value ? Number(value) : null;
-    if(stats[name]) stats[name].dartWeight = weight;
-    DB.setDartWeight(name, weight);
-    persist();
-  });
-}
 // docs/archive/dart-builder-roadmap.md: lives in the same PIN-gated player-controls block
 // as the finish-rule toggle above, so a PIN-protected player's default loadout is
 // already covered by unlockPlayerSettings()'s existing PIN gate.
@@ -6232,7 +6211,7 @@ function renderPlayerPage(){
   const bubblesHtml = `
     ${gameTypeTabsHtml}
     <div class="stat-bubbles" id="player-stat-bubbles">${primaryDefs.map(bubble).join('')}</div>
-    ${secondaryDefs.length ? `<button class="btn btn-ghost" style="margin:6px 0" onclick="toggleMoreStats()">${showMoreStats?'Fewer stats ▴':'More stats ▾'}</button>
+    ${secondaryDefs.length ? `<button class="btn btn-ghost" style="margin:6px 0" id="toggle-more-stats-btn" onclick="toggleMoreStats()">${showMoreStats?'Fewer stats ▴':'More stats ▾'}</button>
     <div class="stat-bubbles" id="player-stat-bubbles-more"${showMoreStats?'':' hidden'}>${secondaryDefs.map(bubble).join('')}</div>` : ''}`;
 
   // shared chart + top-finishes HTML (same structure for both tabs)
@@ -6406,8 +6385,8 @@ function renderPlayerPage(){
       <button class="btn btn-ghost" onclick="unlockPlayerSettings('${j}')">🔒 Enter PIN to change player settings</button>
       ` : `
       <div class="seg out-seg" role="group" aria-label="Finish rule">
-        <button aria-pressed="${out==='double'}" onclick="setPlayerOut('${j}','double'); renderPlayerPage();">Double out</button>
-        <button aria-pressed="${out==='single'}" onclick="setPlayerOut('${j}','single'); renderPlayerPage();">Single out</button>
+        <button aria-pressed="${out==='double'}" onclick="setPlayerOut('${j}','double')">Double out</button>
+        <button aria-pressed="${out==='single'}" onclick="setPlayerOut('${j}','single')">Single out</button>
       </div>
       <div style="margin-top:10px">
         <label class="field" style="margin-bottom:5px">Default loadout</label>
@@ -6571,7 +6550,7 @@ function renderPlayerBadges(data){
       border-radius:50%;min-width:18px;height:18px;padding:0 4px;font-size:10px;font-weight:700;
       display:flex;align-items:center;justify-content:center;line-height:1">${count}</span>` : '';
     if(row){
-      const date = new Date(row.earned_at.replace(' ','T')+'Z').toLocaleDateString();
+      const date = parseSqliteTimestamp(row.earned_at).toLocaleDateString();
       return `<div class="stat-block" style="position:relative;cursor:pointer" ${titleAttr} onclick="showBadgeInfo('${id}')">${countBadge}<div class="stat-val">${info.icon}</div><div class="stat-label">${info.label}<br>Earned ${date}</div>
         <button class="iconbtn" title="Share" style="margin-top:4px" onclick="event.stopPropagation();shareEarnedBadge('${id}')">📤</button></div>`;
     }
@@ -10485,7 +10464,6 @@ function undoLastTurn(){
   if(snap.ls && stats[snap.ls.name]){
     Object.assign(stats[snap.ls.name], snap.ls.g);
     Object.assign(stats[snap.ls.name][snap.ls.mk], snap.ls.m);
-    persist();
   }
 
   // Revoke any badges this turn awarded/incremented — otherwise a badge earned by
@@ -10857,7 +10835,6 @@ function enterTurn(){
     onLegWon(game.current);   // handles set/game progression
     return;
   }
-  persist();
 
   // next player
   game.darts=[]; game.busted=false; game.won=false;
@@ -12082,7 +12059,6 @@ function onLegWon(wi){
       DB.recordEvent('set_end', game.setNo, null);
       DB.recordEvent('game_end', null, null);
       DB.completeGame(w.name);   // api marks the game complete in the database
-      persist();
       // checkEloOnMatchWin() itself guards on game.practice, so a ghost race
       // (practice=true, reaches this branch via the || game.hasGhost above)
       // is correctly excluded even though it has a real `opp` object.
@@ -12160,7 +12136,6 @@ function onLegWon(wi){
     sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
     DB.recordEvent('leg_end', game.setNo, game.legNo);
     DB.recordEvent('set_end', game.setNo, null);
-    persist();
     if(_setDecider){
       queueBadge('nervesofsteel', w.name);
       awardRecurringBadge(w.name, 'nervesofsteel', 'nervesofsteel', { icon:'🧊', headline:'NERVES OF STEEL', player:w.name, statLine:'Won the deciding leg' });
@@ -12171,7 +12146,6 @@ function onLegWon(wi){
   }
   sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
   DB.recordEvent('leg_end', game.setNo, game.legNo);
-  persist();
   lastLegWasChallenge = false;
   if(activeChallenge && activeChallenge.player === w.name){
     const _metric = activeChallenge.overrideMetric != null ? activeChallenge.overrideMetric : w.legDarts;
@@ -12371,7 +12345,7 @@ function h2hStatsHtmlPressureChamber(winner, scope){
 function legSummaryX01(game, winner){
   return game.players.map(p=>({
     name: p.name,
-    avg:   p.legAvgDarts ? (p.legPoints / p.legAvgDarts * 3).toFixed(1) : null,
+    avg:   p.legAvgDarts ? avgStr(p.legPoints, p.legAvgDarts) : null,
     darts: p.legDarts  || 0,
     busts: p.legBusts  || 0,
     won:   p.name === winner
@@ -12859,8 +12833,8 @@ function playerSnapshotX01(p){
   return {
     name:p.name, score:p.score, out:p.doubleOut?'double':'single',
     startScore:p.startScore,
-    legAvg:  p.legAvgDarts  ? (p.legPoints/p.legAvgDarts*3).toFixed(1)   : null,
-    gameAvg: p.gameAvgDarts ? (p.gamePoints/p.gameAvgDarts*3).toFixed(1) : null,
+    legAvg:  p.legAvgDarts  ? avgStr(p.legPoints, p.legAvgDarts)   : null,
+    gameAvg: p.gameAvgDarts ? avgStr(p.gamePoints, p.gameAvgDarts) : null,
     legsWon:p.legsWon, setsWon:p.setsWon,
     legDarts: p.legDarts  || 0,
     setDarts: p.setDarts  || 0,
@@ -15866,7 +15840,13 @@ GAME_TYPES.killer.bubbleKeyMap = KILLER_BUBBLE_KEY_MAP;
 GAME_TYPES.dead_man_walking.bubbleKeyMap = DEAD_MAN_WALKING_BUBBLE_KEY_MAP;
 function toggleMoreStats(){
   showMoreStats = !showMoreStats;
-  renderPlayerPage();
+  // Flip the already-rendered section in place (the selectStat() targeted-DOM
+  // pattern) — a full renderPlayerPage() refired all ~17 profile fetches,
+  // several of them heavy aggregates, for a purely cosmetic toggle.
+  const more = document.getElementById('player-stat-bubbles-more');
+  if(more) more.hidden = !showMoreStats;
+  const btn = document.getElementById('toggle-more-stats-btn');
+  if(btn) btn.textContent = showMoreStats ? 'Fewer stats ▴' : 'More stats ▾';
 }
 function unlockPlayerSettings(name){
   uiVerifyPin(name, ()=>{ playerSettingsUnlocked = true; renderPlayerPage(); });
@@ -16013,9 +15993,10 @@ function toggleFinishRoute(row, player, score, mode){
 /* ---------- top finishes ---------- */
 function fmtDate(dt){
   if(!dt) return '';
-  // Stored timestamps are UTC ("YYYY-MM-DD HH:MM:SS"); display the local calendar date.
-  const hasTz = /[zZ]|[+-]\d\d:?\d\d$/.test(dt);
-  const d = new Date(dt.replace(' ','T') + (hasTz ? '' : 'Z'));
+  // Stored timestamps are UTC ("YYYY-MM-DD HH:MM:SS"); display the local
+  // calendar date. Parsing goes through the shared parseSqliteTimestamp()
+  // (scoring.js) — not an inline copy of its tz-detection regex.
+  const d = parseSqliteTimestamp(dt);
   if(!isNaN(d)) return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
   const [yr,mo,dy]=dt.slice(0,10).split('-');   // fallback: show the raw date
   return `${MONTHS[+mo-1]} ${+dy}, ${yr}`;
@@ -16220,9 +16201,10 @@ function loadDartAnalytics(){
 
 function dartLabelFromParts(sector, mult, zone){
   if(sector == null) return null;
-  if(sector === 0) return 'Miss';
-  if(sector === 25) return mult === 2 ? 'Bull' : '25';
-  const base = (mult === 3 ? 'T' : mult === 2 ? 'D' : '') + sector;
+  // Base notation comes from the shared dartLabel() (scoring.js) — the single
+  // authority every gameplay surface uses; only the zone suffixing is local.
+  const base = dartLabel(sector, mult);
+  if(sector === 0 || sector === 25) return base;
   if(zone) return `${base} (${zone})`;
   // docs/archive/dartboard-zone-tracking-roadmap.md open question, resolved: a single hit
   // with no zone at all (Pad mode, or thrown before this feature existed) gets an
@@ -16426,10 +16408,6 @@ function withPinCheck(name, onOk, onFail){
   if(prefs[name] && prefs[name].hasPin){ uiVerifyPin(name, onOk, onFail); }
   else onOk();
 }
-function dartWeightOptions(selected){
-  return Array.from({length:31},(_,i)=>10+i)
-    .map(g=>`<option value="${g}"${Number(selected)===g?' selected':''}>${g}g</option>`).join('');
-}
 function uiAddPlayer(onSubmit){
   window.__modalAddPlayer = onSubmit;
   document.getElementById('modal-body').innerHTML=
@@ -16498,11 +16476,16 @@ function showBackendErrorScreen(){
     showBackendErrorScreen();
     return;
   }
-  try{ const dt = await Backend.get('/api/settings/dart-timing'); dartTimingEnabled = !!dt.enabled; }catch(e){}
-  try{ const di = await Backend.get('/api/settings/default-input'); dartboardMode = di.input !== 'pad'; }catch(e){}
-  try{ const cb = await Backend.get('/api/settings/colorblind-mode'); colorblindMode = !!cb.enabled; }catch(e){}
+  // Four independent public settings — fetched in parallel (the same
+  // Promise.all pattern the auth bootstrap above uses); awaiting them in
+  // sequence stacked 3-4 needless round-trips onto every page load.
+  await Promise.all([
+    Backend.get('/api/settings/dart-timing').then(dt => { dartTimingEnabled = !!dt.enabled; }).catch(()=>{}),
+    Backend.get('/api/settings/default-input').then(di => { dartboardMode = di.input !== 'pad'; }).catch(()=>{}),
+    Backend.get('/api/settings/colorblind-mode').then(cb => { colorblindMode = !!cb.enabled; }).catch(()=>{}),
+    Backend.get('/api/settings/card-tagline').then(ct => { cardTagline = ct.tagline || DEFAULT_CARD_TAGLINE; }).catch(()=>{}),
+  ]);
   document.body.classList.toggle('colorblind', colorblindMode);
-  try{ const ct = await Backend.get('/api/settings/card-tagline'); cardTagline = ct.tagline || DEFAULT_CARD_TAGLINE; }catch(e){}
   restoreSetup();
   sanitizeSlots();
   renderPlayers();

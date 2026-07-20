@@ -1,9 +1,10 @@
 # Code-Quality Refactors — deferred review findings
 
 > **Status: OPEN — nothing here is started.** Every item below is tracked
-> individually on `docs/open-roadmap-items.md` (items 35–45). This doc is the
-> design context for them, in one place, so each can be picked up (or
-> explicitly rejected) on its own.
+> individually on `docs/open-roadmap-items.md` (items 35–45 from the branch
+> review, items 46–52 from the whole-file `/simplify frontend/index.html`
+> pass). This doc is the design context for them, in one place, so each can
+> be picked up (or explicitly rejected) on its own.
 >
 > **Origin:** the 2026-07-20 max-effort code review of the `dev` branch
 > (fix commits `878bf52` and `eba350f`). Every *correctness* finding from that
@@ -180,3 +181,93 @@ itself remains and grows with every mode. A real fix fetches per visible
 combo in `switchHomeTab()`/`switchHomeGameType()` (with `homeData` caching
 per group), or adds one combined endpoint. Touches every `homeTabRenderer` —
 needs the app runnable to verify each tab.
+
+---
+
+# Batch 2 — deferred findings from the whole-file `/simplify frontend/index.html` pass (2026-07-20)
+
+Same origin discipline as above: verified findings, none a live bug (the one
+real drift the pass found — `setupStep3HasContent()`'s stale id list hiding
+Shanghai/Halve-It's Step 3 options — was fixed on the spot, along with the
+helper-bypass, dead-code, and fetch-waste items). These are the remaining
+larger refactors, tracked as items 46–52.
+
+## Item 46 — Per-mode option-section wiring as a registry member
+
+The Step 3 option-section mapping lives in four places: the markup
+(`#setup-step-3 .setup-section` ids), `setMode()`'s toggles (~3313-3335),
+`setGameType()`'s repeat of four of them (~4328-4331), and (until fixed) the
+`setupStep3HasContent()` id list — the fourth copy is what drifted. An
+`optionsSectionId` member on `GAME_TYPES`/`NEW_GAME_MODE_OPTIONS` would
+collapse both toggle sites into loops. Related mirrors worth folding in:
+`NEW_GAME_MODE_OPTIONS[].contexts` duplicating the registry's
+`soloOnly`/`h2hOnly` flags, and `setMode()`'s three near-identical mode lists
+(`isSpecialMode`, `drillGameTypes`, the start-button-label ternary) plus
+`startGame()`'s separate `drillModes` — candidates for `isDrill`/`isSpecial`/
+`startLabel` fields on the mode entries.
+
+## Item 47 — One `h2hStatsHtml(winner, scope)` with per-type rows
+
+`h2hStatsHtml` / `...Baseball` / `...Shanghai` / `...HalveIt` /
+`...PressureChamber` (~12256-12365) are five copies of the same function
+differing only in 2-3 `statRow()` metrics, selected in `finishUnit()` by TWO
+parallel 5-way ternary chains (game scope and leg scope) whose exclusion sets
+differ only via a comment-enforced invariant. A per-type `h2hRows(p, scope)`
+registry member (the `legSummary` precedent) deletes four clones and both
+chains. ~110 lines → ~40.
+
+## Item 48 — Declarative personal-bests renderers
+
+17 near-identical `renderXxxPersonalBests()` functions (~6981-7253 + the
+marathon one) repeat the same scaffold: container guard, empty message,
+optional recent-form delta block (verbatim ×4), then `key != null ?
+stat-block : ''` rows. The registry already dispatches via
+`personalBestsRenderer` — replace the functions with a per-type spec
+(`{emptyMsg, stats:[{key,label,fmt}], form:{...}}`) consumed by one generic
+renderer. ~280 lines → ~50.
+
+## Item 49 — One leaderboard-row template helper (~20 sites; supersedes item 36's five)
+
+The hof-list row template (`rank/score/player/dates`) is re-implemented
+inline in ~20 Home tab boards beyond item 36's five "Most X Wins" copies
+(Elo, win-rate, trebleless, ton+, first-9, MPR, RPI, PPR, Halve-It, PC,
+Doubles ×2, Blitz, Bob's 27, Ladder, Gauntlet, DMW, Killer, ATC ×2, ATW,
+Marathon). One `leaderboardSectionHtml(rows, {score, meta, emptyMsg})`
+subsumes item 36 entirely — implement them together. The copies already lag
+`hofSection()`'s accessibility upgrades (role=button/aria-expanded).
+
+## Item 50 — One-shot badge award helper
+
+The award block (POST `/api/badges/award` `{once:true}` → `newlyEarned` →
+`queueBadge` + `fireMomentCard`) is hand-rolled ~10 times (~6805, 10770,
+10787, 10808, 11119, 12116, 12123, 14683, 15474, 15621) and has ALREADY
+drifted: only two sites maintain `earnedBadgeCache` (the rest re-fire the
+POST every re-trigger), one site skips `queueBadge`, and the undo-snapshot
+capture uses three naming conventions. Generalize
+`awardCheckoutTrainerBadge()` (which already encapsulates the pattern) into
+`awardOnceBadge(player, badgeId, achType, snap, momentOpts)`.
+
+## Item 51 — Per-dart/per-visit badge-progress fetches and profile refetch waste
+
+Three efficiency items sharing one shape (fetch-baseline-once + client-side
+tracking, the in-file precedent at ~15572): (a) every X01 visit fetches
+`/api/players/around-the-world` per unbadged player (a lifetime-darts
+DISTINCT scan per visit); (b) Doubles Practice fetches
+`/api/players/doubles-hit-sectors` on every hit dart until Ring Master;
+(c) profile navigation re-awaits the full `/api/stats` refresh
+unconditionally (`show('player')`) and tab/game-type switches refetch all
+~17 profile loads when only the mode-parameterized ones changed; plus
+tournament average-seeding fires one heavy personal-bests call per player
+when the in-memory stats blob (or one batch endpoint) would do.
+
+## Item 52 — Small shared-pattern helpers (batch)
+
+Low-risk, multi-site idioms worth one helper each, batched: `jsArg()` naming
+the `escapeHtml(escapeJs(...))` onclick-argument composition (~24 sites, an
+unnamed safety invariant); `openModal(html, focusId)` beside the existing
+`closeModal()` (12 builders repeat the innerHTML+unhide+focus tail);
+a `registerMilestoneLadders(ladders, flags)` helper for the ~12
+BADGE_INFO/ACH_LABELS/ACH_DURATION registration loops (bodies vary slightly —
+merge carefully); a countdown-timer factory for the Blitz and No-Warmup
+start/stop/tick trios; and a `setPressed(group, chosen)` helper for the ~10
+hand-enumerated aria-pressed segmented controls.
