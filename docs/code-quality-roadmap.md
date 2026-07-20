@@ -2,9 +2,9 @@
 
 > **Status: OPEN — nothing here is started.** Every item below is tracked
 > individually on `docs/open-roadmap-items.md` (items 35–45 from the branch
-> review, items 46–52 from the whole-file `/simplify frontend/index.html`
-> pass). This doc is the design context for them, in one place, so each can
-> be picked up (or explicitly rejected) on its own.
+> review, items 46–52 from the first whole-file `/simplify frontend/index.html`
+> pass, items 53–59 from the second). This doc is the design context for them,
+> in one place, so each can be picked up (or explicitly rejected) on its own.
 >
 > **Origin:** the 2026-07-20 max-effort code review of the `dev` branch
 > (fix commits `878bf52` and `eba350f`). Every *correctness* finding from that
@@ -271,3 +271,84 @@ BADGE_INFO/ACH_LABELS/ACH_DURATION registration loops (bodies vary slightly —
 merge carefully); a countdown-timer factory for the Blitz and No-Warmup
 start/stop/tick trios; and a `setPressed(group, chosen)` helper for the ~10
 hand-enumerated aria-pressed segmented controls.
+
+---
+
+# Batch 3 — deferred findings from the second `/simplify frontend/index.html` pass (2026-07-20)
+
+Second full-file sweep with batches 1-2 excluded. Fixed on the spot: the three
+culture badges missing from every overlay map (blank live headlines — the
+BUG-26 class), the un-gated tournament create/walkover writes, ~19 duplicate
+`pushLive()` calls (renderers already push; commit sites double-posted every
+turn), the undo double-render, `uiAlertErr()` + 25 conversions, the shared
+`BOARD_GEOM` dartboard kernel, `X01_CATEGORIES`, the `_seededIndex` →
+`_pcSeededIndex` alias, settings collapsible CSS classes (~47 inline styles),
+checkout-trainer one-off durations + stale comments, and two dead remnants.
+The rest, tracked as items 53–59:
+
+## Item 53 — Game-start construction factory (4 drifted copies)
+
+`startGame()`, `_reallyBeginTournamentMatch()`, `resumeSavedGame`'s literal,
+and `beginMarathonLeg()` each hand-write the same ~20-key runtime-state
+trailer (darts/busted/won/done, counters, turn logs, one-shot fields), the
+same 6-line `earnedBadgeCache` prefetch loop, and (three of them) the same
+`recordEvent` game/set/leg-start triple + render/show tail. Drift is visible:
+the tournament and marathon literals omit `atcLastDart`/`atwLastDart`.
+**Shape:** `baseGameRuntimeState()` factory spread into each literal +
+`prefetchEarnedBadges(names)` + a `beginGameSession()` tail helper.
+
+## Item 54 — One leg/set/game progression helper (8 pasted cascades)
+
+The `legsWon++ → set → match` decision tree (webhooks, recordEvent trio,
+completeGame, Elo check, matchResult, moment card, finishUnit) is pasted
+near-verbatim in 8 `onLegWon*` handlers (~180 lines; the Shanghai copy is
+100% generic). **Shape:** one `advanceLegSetGame(winner)` holding the tree;
+each mode keeps only its badge checks.
+
+## Item 55 — Scoreboard/pad renderer scaffolding
+
+The five chalkboard renderers (Cricket/Baseball/Shanghai/Halve-It/Pressure
+Chamber) share byte-identical headCells/table-assembly/round-banner blocks
+(~100 lines); the four single-target pads (+ Cricket's) share identical
+preamble/Miss-button trailers (~80 lines); `renderPad()`'s dispatch repeats a
+5-line block per mode with a redundant per-branch undo-btn line. **Shape:**
+`csHeadCellsHtml()`/`csTableInto()`/`roundBannerInto()` +
+`renderSingleTargetPad(spec)` + a `{gameType: renderer}` lookup.
+
+## Item 56 — Dart input/record helpers on the hottest path
+
+The dart-construction block (miss-fill vs `makeDart` + zone/miss/bounce
+stamping + `mult=1; updateMultUI()`) is copied in `throwDart`,
+`throwDartPressureChamber`, `throwDartCheckoutTrainer` (+ the stamping in
+`throwDartKiller`); the single-dart `DB.recordTurn` payload is cloned in five
+per-dart modes. **Shape:** `pushThrownDarts(...)` and
+`recordSingleDartTurn(...)` helpers — zone-metadata encoding rules then live
+once.
+
+## Item 57 — Frontend efficiency batch
+
+(a) `fireMomentCard()` unconditionally paints + JPEG-encodes an 800×800
+canvas (~10-30ms main-thread jank + ~250KB POST) and `sendHaWebhook()` fires
+a no-op POST per bust/180/leg even when no webhook is configured — expose a
+"webhook configured" flag in the boot settings fetch and skip client-side;
+(b) `renderPad()` recreates all 22 pad buttons + closures on every dart tap —
+build once, toggle `.disabled` (the dartboard branch's own pattern);
+(c) `playerSnapshotChuckin()` re-serializes the entire session heatmap into
+every per-dart live push — cache and invalidate on change.
+
+## Item 58 — Declarative settings field table
+
+`renderSettings()`'s loader and `saveSettings()` hand-maintain parallel
+per-field lists (13 HA webhook fields, 7 voice checkboxes, 8 numerics/toggles
+— the loader even already has a `voiceMap` table shape). **Shape:** one
+`SETTINGS_FIELDS` array `{key, id, kind, default}` driving both directions;
+a new setting then can't be added to save but not load.
+
+## Item 59 — Conventions: badge predicates + DB wrapper boundary
+
+Ten pure badge predicates (hattrick, triplebull, nocigar, …) live inline in
+`CHAIN_CHECKS` against the file's own stated convention (culture predicates
+moved to scoring.js "so they're covered by a committed test"); move them and
+add tests. And the `DB.*` wrapper boundary is unprincipled — three do-nothing
+pass-through GET wrappers vs ~122 direct `Backend.get` calls and split
+player-mutation homes; either drop the dead wrappers or write the rule down.

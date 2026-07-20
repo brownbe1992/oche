@@ -49,6 +49,13 @@
 | 49 | One leaderboard-row template helper for the ~20 inline hof-list boards — supersedes item 36's five "Most X Wins" copies, implement together | `docs/code-quality-roadmap.md` | Medium |
 | 50 | One-shot badge award helper (`awardOnceBadge()`) — ~10 hand-rolled copies with already-drifted cache/queue behavior | `docs/code-quality-roadmap.md` | Medium |
 | 51 | Badge-progress fetch-baseline-once (ATW per-visit + Doubles per-dart scans), profile-navigation stats SWR + tab-scoped refetch, tournament-seeding batch read | `docs/code-quality-roadmap.md` | Medium |
+| 53 | Game-start construction factory — 4 hand-written copies of the runtime-state literal + badge prefetch + boot tail (tournament/marathon copies already drift) | `docs/code-quality-roadmap.md` | Medium |
+| 54 | One `advanceLegSetGame()` helper — the leg/set/game progression cascade is pasted in 8 `onLegWon*` handlers (~180 lines; the Shanghai copy is 100% generic) | `docs/code-quality-roadmap.md` | Medium |
+| 55 | Scoreboard/pad renderer scaffolding — shared cs-table builders (5 chalkboard renderers), one parameterized single-target pad (5 clones), `renderPad()` lookup dispatch | `docs/code-quality-roadmap.md` | Medium |
+| 56 | Dart input/record helpers on the hottest path — `pushThrownDarts()` (4 copies of dart construction + zone stamping) and `recordSingleDartTurn()` (5 payload clones) | `docs/code-quality-roadmap.md` | Low-Medium |
+| 57 | Frontend efficiency batch — moment-card/webhook config gating (no-op canvas+POST per celebration), pad build-once (22 buttons rebuilt per dart), Chuckin heatmap serialization caching | `docs/code-quality-roadmap.md` | Medium |
+| 58 | Declarative settings field table — load/save hand-maintain parallel per-field lists (13 HA webhook + 7 voice + 8 misc) | `docs/code-quality-roadmap.md` | Low-Medium |
+| 59 | Conventions: move the 10 inline badge predicates to scoring.js (+tests, per the file's own stated convention) and settle the `DB.*` wrapper boundary rule | `docs/code-quality-roadmap.md` | Low-Medium |
 | 7 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
 | 8 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
 | 9 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |

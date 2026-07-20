@@ -375,7 +375,6 @@
   .note{font-size:12px;color:var(--muted);line-height:1.6;margin-top:16px;padding-top:14px;border-top:1px solid var(--wire)}
   .badge{display:inline-block;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--gold);
     border:1px solid var(--wire);border-radius:999px;padding:3px 9px;margin-bottom:4px}
-  .persist-tag{font-size:11px;color:var(--muted);margin-left:8px}
   @media (max-width:560px){
     .masthead .mark{font-size:30px}
   }
@@ -528,6 +527,11 @@
   .stat-block .stat-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:4px}
   .pp-section{margin-bottom:18px}
   .pp-section-title{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;margin-bottom:8px}
+  /* Settings collapsible sections — shared by ~15 headers/chevrons/intro paragraphs
+     that previously each carried these as verbatim inline styles. */
+  .settings-title{font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between}
+  .settings-chevron{transition:transform .15s}
+  .settings-intro{font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6}
   .pp-cat-lines{font-size:13px;color:var(--muted);line-height:1.8}
   .pp-cat-lines b{color:var(--ink)}
   .btn.danger{color:var(--bust);border-color:var(--wire)}
@@ -1067,12 +1071,12 @@
       <div class="settings-group" data-group="account">
       <!-- Manage admins -->
       <div class="pp-section" style="margin-bottom:24px">
-        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('admin-accounts-body',this)">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('admin-accounts-body',this)">
           Admin accounts
-          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="admin-accounts-body" hidden>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          <p class="settings-intro">
             Admin accounts can access this Settings page and manage player PINs. There must always be at least one.
           </p>
           <div id="admins-list" style="display:grid;gap:8px;margin-bottom:14px"></div>
@@ -1094,12 +1098,12 @@
 
       <!-- Player PINs -->
       <div class="pp-section" style="margin-bottom:24px">
-        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('player-pins-body',this)">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('player-pins-body',this)">
           Player PINs
-          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="player-pins-body" hidden>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          <p class="settings-intro">
             A PIN-protected player must have their PIN entered before they can be added to a game — useful for stopping others from playing as you. Players without a PIN can be picked by anyone.
           </p>
           <label class="field">Lock out after this many wrong PIN attempts</label>
@@ -1112,12 +1116,12 @@
       <div class="settings-group" data-group="gameplay" hidden>
       <!-- Scoring -->
       <div class="pp-section" style="margin-bottom:24px">
-        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('scoring-input-body',this)">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('scoring-input-body',this)">
           Scoring
-          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="scoring-input-body" hidden>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          <p class="settings-intro">
             Which dart entry method a new game opens with. Either can still be switched per-session from the scoring screen itself. <strong style="color:var(--ink)">Pad is the app's accessible input path</strong> — ordinary focusable buttons, no dartboard shape or precise tap-target aiming required — worth setting as the default for a low-vision or motor-impaired player.
           </p>
           <label class="field">Default input</label>
@@ -1130,12 +1134,12 @@
 
       <!-- Accessibility -->
       <div class="pp-section" style="margin-bottom:24px">
-        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('accessibility-body',this)">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('accessibility-body',this)">
           Accessibility
-          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="accessibility-body" hidden>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          <p class="settings-intro">
             Switches the app's red/green double and treble colors (dartboard rings, pad buttons, win/bust status, live scoreboard) to a colorblind-friendly blue/orange palette. Applies to this device and the live scoreboard.
           </p>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
@@ -1150,12 +1154,12 @@
 
       <!-- Voice Announcements -->
       <div class="pp-section" style="margin-bottom:24px">
-        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('voice-body',this)">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('voice-body',this)">
           Voice Announcements
-          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="voice-body" hidden>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          <p class="settings-intro">
             Spoken call-outs on the live scoreboard (`/display`) using the browser's built-in speech synthesis — no server involvement, no external service. Off by default. Each call-out can be turned on or off individually once voice is enabled.
           </p>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;font-weight:600;margin-bottom:10px">
@@ -1193,12 +1197,12 @@
 
       <!-- Shareable Moments -->
       <div class="pp-section" style="margin-bottom:24px">
-        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('sharecard-body',this)">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('sharecard-body',this)">
           Shareable Moments
-          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="sharecard-body" hidden>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          <p class="settings-intro">
             A short line printed on every shareable card (180s, Big Fish, nine-darters, match wins, personal bests). Update this once you have a website or social handle to point people at.
           </p>
           <label class="field">Card tagline</label>
@@ -1208,12 +1212,12 @@
 
       <!-- Data Collection -->
       <div class="pp-section" style="margin-bottom:24px">
-        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('data-collection-body',this)">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('data-collection-body',this)">
           Data Collection
-          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="data-collection-body" hidden>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          <p class="settings-intro">
             Records the exact moment each dart is tapped, in addition to existing per-visit data — useful for analyzing throwing pace, e.g. correlating with scoring or dart weight. Off by default since most setups won't need it.
           </p>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
@@ -1225,12 +1229,12 @@
 
       <!-- Live Scoreboard -->
       <div class="pp-section" style="margin-bottom:24px">
-        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('scoreboard-body',this)">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('scoreboard-body',this)">
           Live Scoreboard
-          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="scoreboard-body" hidden>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          <p class="settings-intro">
             Controls what the read-only scoreboard (the "Scoreboard ↗" link, meant for a second screen or TV by the board) shows. Pick the density that fits the screen it'll run on — each layout still scales to fill the screen.
           </p>
           <label class="field">Layout</label>
@@ -1247,15 +1251,11 @@
       </div><!-- end settings-group: gameplay -->
 
       <div class="settings-group" data-group="integrations" hidden>
-      <p id="settings-api-note" hidden style="color:var(--muted);font-size:13px;background:var(--surface-2);border:1px solid var(--wire);border-radius:10px;padding:12px 14px;margin-bottom:16px">
-        Smart Home Integration requires the server backend. Open the app via Docker at <code>http://&lt;your-server&gt;:8046</code>.
-      </p>
-
       <!-- Smart Home Integration -->
       <div class="pp-section" id="smart-home-section">
-        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('smart-home-body',this)">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('smart-home-body',this)">
           Smart Home Integration
-          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
 
         <div id="smart-home-body" hidden>
@@ -1264,7 +1264,7 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--gold)"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
           Home Assistant
         </div>
-        <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+        <p class="settings-intro">
           Send webhooks to Home Assistant when game events occur. In HA, create an automation with a <b style="color:var(--ink)">Webhook</b> trigger and paste the webhook ID below. Leave a field blank to skip that event.
         </p>
 
@@ -1345,12 +1345,12 @@
       <div class="settings-group" data-group="admin-danger" hidden>
       <!-- Daily Challenge -->
       <div class="pp-section" style="margin-top:24px">
-        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('challenge-admin-body',this)">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('challenge-admin-body',this)">
           Daily Challenge
-          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="challenge-admin-body" hidden>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          <p class="settings-intro">
             Each player gets one Daily Challenge attempt per calendar day. Resetting an attempt deletes it <b>and every stat recorded during it</b> (the game, turns, and darts), so the player can retake that day's challenge with a clean slate. Badges earned during the attempt are kept.
           </p>
           <label class="field">Player</label>
@@ -1365,12 +1365,12 @@
 
       <!-- Server Errors -->
       <div class="pp-section" style="margin-top:24px">
-        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('server-errors-body',this);loadServerErrors()">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('server-errors-body',this);loadServerErrors()">
           Server Errors
-          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="server-errors-body" hidden>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          <p class="settings-intro">
             The most recent server-side failures (up to 500), newest first — the same
             record kept for a self-hosted setup without shell/<code>docker logs</code> access.
             Ordinary player mistakes (a bad login, an invalid PIN) don't appear here; only
@@ -1385,12 +1385,12 @@
 
       <!-- Backups -->
       <div class="pp-section" style="margin-top:24px">
-        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('backups-body',this);loadBackups()">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('backups-body',this);loadBackups()">
           Backups
-          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="backups-body" hidden>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          <p class="settings-intro">
             A backup is a consistent, point-in-time snapshot of the whole database — every
             player, game, and stat. Take one on demand below, or schedule <code>backend/backup.js</code>
             via host cron (see README's "Backups" section). <b>Restoring replaces the entire live
@@ -1425,12 +1425,12 @@
 
       <!-- Data Export -->
       <div class="pp-section" style="margin-top:24px">
-        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('data-export-body',this)">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('data-export-body',this)">
           Data Export
-          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="data-export-body" hidden>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          <p class="settings-intro">
             Download a complete JSON export of every player, game, and stat in the database —
             it's your data, and you can always take it with you. Admin credentials and session
             data are never included.
@@ -1444,12 +1444,12 @@
 
       <!-- Merge Players (docs/archive/player-merge-roadmap.md, admin-only) -->
       <div class="pp-section" style="margin-top:24px">
-        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('merge-players-body',this);renderMergePlayersControls()">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('merge-players-body',this);renderMergePlayersControls()">
           Merge Players
-          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="merge-players-body" hidden>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          <p class="settings-intro">
             Combine two player records that are really the same person — a typo'd second
             account, or someone added twice under different names. One player keeps their
             name and settings and absorbs the other's entire history (games, stats, badges,
@@ -1469,12 +1469,12 @@
 
       <!-- Danger Zone -->
       <div class="pp-section" style="margin-top:24px">
-        <div class="pp-section-title" style="font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between" onclick="toggleSettingsSection('danger-zone-body',this)">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('danger-zone-body',this)">
           Danger Zone
-          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .15s"><polyline points="6 9 12 15 18 9"/></svg>
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="danger-zone-body" hidden>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+          <p class="settings-intro">
             Permanently deletes every player, game, and stat in the database. Admin accounts and these settings are kept. Meant for clearing out test/dev data, not everyday use.
           </p>
           <button class="btn btn-ghost danger" onclick="askWipeAllData()">Wipe all player &amp; game data</button>
@@ -1881,10 +1881,13 @@ const DB_SECTORS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
 function throwDartBoard(sector, m, zone, missZone, missDepth){ mult = m; throwDart(sector, zone, missZone, missDepth); }
 function throwBounceOut(){ throwDart(0, undefined, undefined, undefined, true); }
 
-function buildDartboard(){
-  // Built once — disabled state is toggled via .board-disabled on the wrapper.
-  // viewBox/CX/CY enlarged and recentered (docs/archive/dartboard-zone-tracking-roadmap.md
-  // "Miss-area tracking") to fit two new outer rings beyond the board itself.
+// Dartboard geometry kernel — the ONE authority for board layout, shared by
+// buildDartboard() (the input board) and buildDartHeatmap() (the profile
+// heatmap that mirrors it). The two RENDERERS stay deliberately separate (see
+// buildDartHeatmap's own header comment), but sharing the constants and path
+// helpers means a radius tweak can no longer silently misalign the heatmap
+// from the board it claims to mirror.
+const BOARD_GEOM = (() => {
   const CX=330, CY=330;
   const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248, missNear:270, missFar:310 };
   const DEG = 360/20;
@@ -1895,6 +1898,14 @@ function buildDartboard(){
     const lg=e-s>180?1:0;
     return `M${f(x1)},${f(y1)} A${r1},${r1} 0 ${lg},1 ${f(x2)},${f(y2)} L${f(x3)},${f(y3)} A${r2},${r2} 0 ${lg},0 ${f(x4)},${f(y4)} Z`;
   }
+  return { CX, CY, R, DEG, xy, f, annulus };
+})();
+
+function buildDartboard(){
+  // Built once — disabled state is toggled via .board-disabled on the wrapper.
+  // viewBox/CX/CY enlarged and recentered (docs/archive/dartboard-zone-tracking-roadmap.md
+  // "Miss-area tracking") to fit two new outer rings beyond the board itself.
+  const { CX, CY, R, DEG, xy, f, annulus } = BOARD_GEOM;
   const oc = (sec, m, zone) => `onclick="throwDartBoard(${sec},${m},${zone?`'${zone}'`:'null'})"`;
   // Miss ring taps: sector always 0/mult always 1 (a genuine miss), with the wedge
   // number and near/far depth carried as missZone/missDepth instead of zone.
@@ -2117,13 +2128,16 @@ function challengeMetricLabel(format, value){
   if(format==='long_game')         return `${value} visit${value===1?'':'s'}`;
   return `${value} darts`;
 }
-// Deterministic hash of a string -> a small non-negative int, used to pick an index
-// into a pool. Same date always produces the same pick — no stored state needed.
-function _seededIndex(s, mod){
-  let h = 0;
-  for(let i=0;i<s.length;i++){ h = (h*31 + s.charCodeAt(i)) | 0; }
-  return Math.abs(h) % mod;
-}
+// The four standard X01 starting scores — one shared list for the New Game
+// flavor select, tournament setup, and league setup (each previously
+// hand-rolled its own copy).
+const X01_CATEGORIES = ['501','301','170','101'];
+
+// Deterministic hash of a string -> a small non-negative int, used to pick an
+// index into a pool. Shared with scoring.js's _pcSeededIndex (loaded first, so
+// it's already a global here) — one formula, structurally, instead of the
+// "identical hash so both sides agree" invariant being comment-enforced.
+const _seededIndex = _pcSeededIndex;
 function todaysChallenge(dateStr){
   dateStr = dateStr || localDateStr();
   const format = CHALLENGE_FORMATS[_seededIndex(dateStr+'|format', CHALLENGE_FORMATS.length)];
@@ -3648,7 +3662,7 @@ function askAddAdmin(){
     uiPrompt('Password for "'+username+'" (min 8 characters)','',password=>{
       Backend.send('POST','/api/admins',{username,password})
         .then(renderAdminsList)
-        .catch(e=>uiAlert('Could not create admin: '+(e.message||'Unknown error')));
+        .catch(e=>uiAlertErr('Could not create admin', e));
     });
   });
 }
@@ -3657,14 +3671,14 @@ function askChangeAdminPassword(id, username){
     if(!password) return;
     Backend.send('PUT','/api/admins/password',{id,password})
       .then(()=>uiAlert('Password changed.'))
-      .catch(e=>uiAlert('Could not change password: '+(e.message||'Unknown error')));
+      .catch(e=>uiAlertErr('Could not change password', e));
   });
 }
 function askDeleteAdmin(id, username){
   uiConfirm('Remove admin account "'+username+'"?', ()=>{
     Backend.send('DELETE','/api/admins?id='+id)
       .then(renderAdminsList)
-      .catch(e=>uiAlert('Could not remove admin: '+(e.message||'Unknown error')));
+      .catch(e=>uiAlertErr('Could not remove admin', e));
   });
 }
 
@@ -3756,7 +3770,7 @@ function askImportPlayer(){
           : '';
         uiAlert(`Imported "${r.player.name}"${r.player.created ? (r.player.renamed ? ' (new player, renamed to avoid a name clash)' : ' (new player)') : ' (matched an existing player)'}: ${r.gamesImported} game(s) added, ${r.gamesSkipped} already present, ${r.turnsImported} turn(s), ${r.dartsImported} dart(s).${oppSummary}`);
       }catch(err){
-        uiAlert('Could not import: ' + (err.message || 'Unknown error'));
+        uiAlertErr('Could not import', err);
       }
     });
   };
@@ -3782,7 +3796,7 @@ function askResetChallengeAttempt(){
   uiConfirm(`Reset ${player}'s Daily Challenge attempt for ${date}? This deletes the attempt AND every stat recorded during it (the game, turns, and darts). ${player} will be able to retake that day's challenge. This can't be undone.`, ()=>{
     Backend.send('DELETE', `/api/challenges/attempt?player=${encodeURIComponent(player)}&date=${encodeURIComponent(date)}`)
       .then(()=>uiAlert(`Reset complete — ${player} can retake the ${date} challenge.`))
-      .catch(e=>uiAlert('Could not reset: '+(e.message||'Unknown error')));
+      .catch(e=>uiAlertErr('Could not reset', e));
   });
 }
 // Merge Players (docs/archive/player-merge-roadmap.md, admin-only, Settings -> Admin &
@@ -3816,7 +3830,7 @@ function askMergePlayers(){
   if(source === target){ uiAlert('Pick two different players — a player can\'t be merged into themselves.'); return; }
   Backend.get(`/api/players/merge-preview?source=${encodeURIComponent(source)}&target=${encodeURIComponent(target)}`)
     .then(showMergePreviewModal)
-    .catch(e=>uiAlert('Could not build the merge preview: '+(e.message||'Unknown error')));
+    .catch(e=>uiAlertErr('Could not build the merge preview', e));
 }
 function showMergePreviewModal(p){
   const esc = escapeHtml;
@@ -3881,7 +3895,7 @@ function confirmMergePlayers(source, target){
       renderPinPlayersList();
       uiAlert(`Merged "${r.source.name}" into "${r.target.name}": ${r.moves.games} game(s), ${r.moves.turns} turn(s), and ${r.moves.badges} badge(s) moved; the duplicate record was deleted.`);
     })
-    .catch(e=>uiAlert('Merge failed — nothing was changed: '+(e.message||'Unknown error')));
+    .catch(e=>uiAlertErr('Merge failed — nothing was changed', e));
 }
 // Server Errors settings section (docs/testing-and-observability-roadmap.md Part A) —
 // fetched only when the section is actually expanded (toggleSettingsSection() runs
@@ -3948,7 +3962,7 @@ function renderBackups(rows){
 function askBackupNow(){
   Backend.send('POST','/api/backups')
     .then(()=>loadBackups())
-    .catch(err=>uiAlert('Could not create backup: '+err.message));
+    .catch(err=>uiAlertErr('Could not create backup', err));
 }
 function downloadBackup(name){
   window.location = '/api/backups/download?name='+encodeURIComponent(name);
@@ -3957,7 +3971,7 @@ function askDeleteBackup(name){
   uiConfirm(`Delete backup "${name}"? This can't be undone (the live database is unaffected either way).`, ()=>{
     Backend.send('DELETE','/api/backups?name='+encodeURIComponent(name))
       .then(()=>loadBackups())
-      .catch(err=>uiAlert('Could not delete backup: '+err.message));
+      .catch(err=>uiAlertErr('Could not delete backup', err));
   });
 }
 function saveBackupRetention(){
@@ -3965,7 +3979,7 @@ function saveBackupRetention(){
   if(!Number.isInteger(days) || days<1 || days>365){ uiAlert('Enter a whole number of days between 1 and 365.'); return; }
   Backend.send('PUT','/api/backups/retention',{days})
     .then(()=>loadBackups())
-    .catch(err=>uiAlert('Could not save retention: '+err.message));
+    .catch(err=>uiAlertErr('Could not save retention', err));
 }
 
 // Restoring is at least as destructive as "Wipe all data" — it replaces the
@@ -4032,14 +4046,14 @@ function askSetPlayerPin(name){
     if(!pin) return;
     Backend.send('PUT','/api/players/pin',{name,pin})
       .then(()=>{ if(prefs[name]) prefs[name].hasPin=true; renderPinPlayersList(); })
-      .catch(e=>uiAlert('Could not set PIN: '+(e.message||'Unknown error')));
+      .catch(e=>uiAlertErr('Could not set PIN', e));
   }, 'inputmode="numeric" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" autocorrect="off" autocapitalize="off" spellcheck="false"');
 }
 function askRemovePlayerPin(name){
   uiConfirm('Remove PIN for "'+name+'"? Anyone will be able to play as this player.', ()=>{
     Backend.send('DELETE','/api/players/pin?name='+encodeURIComponent(name))
       .then(()=>{ if(prefs[name]) prefs[name].hasPin=false; renderPinPlayersList(); })
-      .catch(e=>uiAlert('Could not remove PIN: '+(e.message||'Unknown error')));
+      .catch(e=>uiAlertErr('Could not remove PIN', e));
   });
 }
 function saveSettings(){
@@ -4088,7 +4102,7 @@ function saveSettings(){
     uiAlert('Settings saved.');
   }).catch(err=>{
     if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
-    uiAlert('Failed to save settings: ' + (err.message || 'Unknown error'));
+    uiAlertErr('Failed to save settings', err);
   });
 }
 function testHaConnection(){
@@ -4623,7 +4637,7 @@ function renderSetupFlavorAndBlurb(){
   if(key === 'x01'){
     flavorSection.hidden = false;
     flavorLabel.textContent = 'Starting score';
-    flavorSelect.innerHTML = ['501','301','170','101'].map(v=>`<option value="${v}">${v}</option>`).join('');
+    flavorSelect.innerHTML = X01_CATEGORIES.map(v=>`<option value="${v}">${v}</option>`).join('');
     flavorSelect.value = String(setup.start);
   } else {
     flavorSection.hidden = true;
@@ -5481,7 +5495,7 @@ function renderTournamentSetup(){
     <input type="text" id="tourney-name" maxlength="64" value="${escapeHtml(ts.name)}" oninput="tournamentSetup.name=this.value" style="margin-bottom:14px">
     <label class="field">Format (X01)</label>
     <select class="date-input" id="tourney-category" style="width:auto;margin-bottom:14px" onchange="tournamentSetup.category=this.value">
-      ${['501','301','170','101'].map(c=>`<option value="${c}"${ts.category===c?' selected':''}>${c}</option>`).join('')}
+      ${X01_CATEGORIES.map(c=>`<option value="${c}"${ts.category===c?' selected':''}>${c}</option>`).join('')}
     </select>
     <label class="field">Bracket</label>
     <div class="seg out-seg" role="group" aria-label="Bracket type" style="margin-bottom:6px">
@@ -5599,6 +5613,10 @@ function submitTournamentSetup(){
   const name = (ts.name||'').trim();
   if(!name){ uiAlert('Enter a tournament name.'); return; }
   if(ts.selected.length < 2){ uiAlert('Select at least 2 players.'); return; }
+  // Same Auth.ensureCanWrite gate submitLeagueSetup()/beginTournamentMatch()
+  // use — without it, this write 401-alerted under required-auth instead of
+  // prompting login and resuming the action.
+  Auth.ensureCanWrite(()=>{
   Backend.send('POST', '/api/tournaments', { name, category: ts.category, players: ts.selected, rounds: ts.rounds, bracketType: ts.bracketType || 'single_elim' })
     .then(r=>{
       tournamentSetup = null;
@@ -5606,7 +5624,8 @@ function submitTournamentSetup(){
       tournamentView = 'detail';
       renderTournamentScreen();
     })
-    .catch(e=>{ uiAlert('Could not create tournament: ' + ((e && e.message) || 'unknown error')); });
+    .catch(e=>{ uiAlertErr('Could not create tournament', e); });
+  });
 }
 
 /* ---------- detail / bracket / up next ---------- */
@@ -5752,9 +5771,12 @@ function askTournamentWalkover(matchId, p1, p2){
 }
 function submitTournamentWalkover(matchId, winner){
   closeModal();
-  Backend.send('POST', `/api/tournaments/matches/${matchId}/walkover`, { winner })
-    .then(loadTournamentDetail)
-    .catch(e=>uiAlert('Could not record walkover: ' + ((e && e.message) || 'unknown error')));
+  // Same Auth.ensureCanWrite gate every sibling tournament/league write uses.
+  Auth.ensureCanWrite(()=>{
+    Backend.send('POST', `/api/tournaments/matches/${matchId}/walkover`, { winner })
+      .then(loadTournamentDetail)
+      .catch(e=>uiAlertErr('Could not record walkover', e));
+  });
 }
 
 // Starts a ready match's underlying game and drops straight into the existing X01
@@ -5778,7 +5800,7 @@ async function _reallyBeginTournamentMatch(matchId){
   const match = t.matches.find(mm=>mm.id===matchId);
   let result;
   try{ result = await Backend.send('POST', `/api/tournaments/matches/${matchId}/start`); }
-  catch(e){ uiAlert('Could not start match: ' + ((e && e.message) || 'unknown error')); return; }
+  catch(e){ uiAlertErr('Could not start match', e); return; }
   const startScore = Number(t.category);
   const names = [match.player1Name, match.player2Name];
   game = {
@@ -5881,7 +5903,7 @@ function openLeagueSetup(){ leagueSetup=null; leagueView='setup'; renderLeagueSc
 // reuse the exact two-value games.category label a Cricket H2H game is already
 // tagged with at creation (classic vs. custom target numbers) rather than a numeric
 // starting score.
-const LEAGUE_X01_CATEGORIES = ['501','301','170','101'];
+const LEAGUE_X01_CATEGORIES = X01_CATEGORIES;   // league setup reuses the shared list
 const LEAGUE_CRICKET_CATEGORIES = [
   { value:'Cricket (15-20, Bull)', label:'Classic (15-20, Bull)' },
   { value:'Custom Cricket', label:'Custom numbers' },
@@ -5968,7 +5990,7 @@ function submitLeagueSetup(){
       currentLeagueId = r.leagueId;
       leagueView = 'detail';
       renderLeagueScreen();
-    }).catch(e=>{ uiAlert('Could not create league: ' + ((e && e.message) || 'unknown error')); });
+    }).catch(e=>{ uiAlertErr('Could not create league', e); });
   });
 }
 
@@ -6047,7 +6069,7 @@ function submitEnrollLeaguePlayer(leagueId){
   Auth.ensureCanWrite(()=>{
     Backend.send('POST', `/api/leagues/${leagueId}/players`, { name: sel.value })
       .then(loadLeagueDetail)
-      .catch(e=>uiAlert('Could not enroll player: ' + ((e && e.message) || 'unknown error')));
+      .catch(e=>uiAlertErr('Could not enroll player', e));
   });
 }
 function askEndLeague(leagueId, name){
@@ -6055,7 +6077,7 @@ function askEndLeague(leagueId, name){
     Auth.ensureCanWrite(()=>{
       Backend.send('PUT', `/api/leagues/${leagueId}/status`, { status: 'ended' })
         .then(loadLeagueDetail)
-        .catch(e=>uiAlert('Could not end league: ' + ((e && e.message) || 'unknown error')));
+        .catch(e=>uiAlertErr('Could not end league', e));
     });
   });
 }
@@ -6064,7 +6086,7 @@ function askReopenLeague(leagueId, name){
     Auth.ensureCanWrite(()=>{
       Backend.send('PUT', `/api/leagues/${leagueId}/status`, { status: 'active' })
         .then(loadLeagueDetail)
-        .catch(e=>uiAlert('Could not reopen league: ' + ((e && e.message) || 'unknown error')));
+        .catch(e=>uiAlertErr('Could not reopen league', e));
     });
   });
 }
@@ -6501,8 +6523,10 @@ const BADGE_INFO = {
   // Checkout Trainer one-off flagship badges (docs/archive/checkout-trainer-roadmap.md
   // "Achievements") — the laddered milestones are populated further down (see
   // CHECKOUT_TRAINER_MILESTONE_LADDERS/CHECKOUT_BLITZ_MILESTONE_LADDERS), but
-  // these five aren't part of a ladder, so they're declared here like every
-  // other one-off badge above.
+  // these six aren't part of a ladder, so they're declared here like every
+  // other one-off badge above. (Deliberately NOT mirrored into display.html's
+  // maps: Checkout Trainer never broadcasts — pushLive() skips it — so /display
+  // can never show these overlays.)
   checkout_trainer_170_club:       { icon:'🐟', label:'The 170 Club', desc:'Solve 170 (T20-T20-Bull, the maximum possible checkout) optimally.', checkoutTrainer:true },
   checkout_trainer_one_darter:     { icon:'🎯', label:'One-Darter', desc:'Solve a target optimally in exactly 1 dart.', checkoutTrainer:true },
   checkout_trainer_perfectionist:  { icon:'🌟', label:'Perfectionist', desc:'Finish a Freeform session of 15+ attempts with a 100% optimal rate.', checkoutTrainer:true },
@@ -7245,7 +7269,7 @@ function askWipeAllData(){
   uiConfirm('Wipe every player, game, and stat? This deletes the entire database (admin accounts and these settings are kept) and cannot be undone. Intended for clearing out test/dev data.', ()=>{
     DB.wipeAll()
       .then(()=>{ uiAlert('All player and game data has been wiped.'); show('home'); })
-      .catch(err=>uiAlert('Could not wipe data: '+err.message));
+      .catch(err=>uiAlertErr('Could not wipe data', err));
   });
 }
 function askClearPlayerStats(name, mode){
@@ -7813,6 +7837,7 @@ const ACH_LABELS   = { '180':'180! 🎯', 'bigfish':'Big Fish! 🐟', 'ninedarte
   challengeweek:'Challenge Streak: Week! 🔥', challengemonth:'🏆 CHALLENGE STREAK: MONTH! 🏆',
   challengeallformats:'Full Rotation! 🗓️', nocigar:'No Cigar 🤦', chuckin180:'180! 🎯',
   staircasefinish:'Staircase Finish! 🪜', ghostslayer:'Ghost Slayer! 👻',
+  bedandbreakfast:'Bed & Breakfast! 🍳', madhouse:'Madhouse! 🏚️', shanghaivisit:'🀄 SHANGHAI! 🀄',
   tournamentchampion:'🏆 CHAMPION! 🏆', tournamentgiantslayer:'Giant Slayer ⚔️',
   guided_clock:'Guided Clock! 🧭', guided_world:'Guided World! 🗺️',
   triplebull:'🐂 TRIPLE BULL! 🐂', bullseyefinish:'Bullseye Finish! 🏹',
@@ -7832,6 +7857,7 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   cricket9marks:2500, cricketperfectclose:6000, cricketwhitewash:2500, cricketcomebackkid:3000,
   challengeweek:3000, challengemonth:6000, challengeallformats:3500, nocigar:2500, chuckin180:2500,
   staircasefinish:3000, ghostslayer:3500, tournamentchampion:6000, tournamentgiantslayer:2500,
+  bedandbreakfast:2500, madhouse:3000, shanghaivisit:3500,
   guided_clock:3500, guided_world:5000,
   triplebull:4000, bullseyefinish:2500,
   baseballperfectinning:2500, baseballperfectgame:6000,
@@ -8483,16 +8509,24 @@ function awardCheckoutTrainerBadge(playerName, badgeId, icon, headline, statLine
     }
   }).catch(()=>{});
 }
-// ACH_LABELS for the five one-off badges declared in BADGE_INFO's own literal
-// above (checkout_trainer_170_club/one_darter/perfectionist/perfect_minute/
-// photo_finish) — same "icon in the label too" convention every other badge's
-// ACH_LABELS entry uses.
+// ACH_LABELS + ACH_DURATION for the six one-off badges declared in BADGE_INFO's
+// own literal above (checkout_trainer_170_club/one_darter/perfectionist/
+// perfect_minute/photo_finish/bogey_buster) — same "icon in the label too"
+// convention every other badge's ACH_LABELS entry uses, and an explicit
+// duration like every other one-off (previously these silently fell back to
+// the 2500ms default).
 ACH_LABELS['checkout_trainer_170_club'] = 'The 170 Club 🐟';
 ACH_LABELS['checkout_trainer_one_darter'] = 'One-Darter 🎯';
 ACH_LABELS['checkout_trainer_perfectionist'] = 'Perfectionist 🌟';
 ACH_LABELS['checkout_trainer_perfect_minute'] = 'Perfect Minute 💎';
 ACH_LABELS['checkout_trainer_photo_finish'] = 'Photo Finish 📸';
 ACH_LABELS['checkout_trainer_bogey_buster'] = 'Bogey Buster 💣';
+ACH_DURATION['checkout_trainer_170_club'] = 3000;
+ACH_DURATION['checkout_trainer_one_darter'] = 2500;
+ACH_DURATION['checkout_trainer_perfectionist'] = 3000;
+ACH_DURATION['checkout_trainer_perfect_minute'] = 3000;
+ACH_DURATION['checkout_trainer_photo_finish'] = 2500;
+ACH_DURATION['checkout_trainer_bogey_buster'] = 2500;
 
 function spawnConfetti(root, count){
   const colors=['#d9b46a','#efe7d2','#f4e3b2','#caa94e'];
@@ -10027,7 +10061,7 @@ function saveCurrentGame(){
     try{
       await DB.saveGame(gameIdToSave);
     }catch(e){
-      uiAlert('Could not save this game: ' + ((e && e.message) || 'unknown error'));
+      uiAlertErr('Could not save this game', e);
       return;
     }
     // Same "clear game + push an inactive snapshot" pattern askEndGame() uses —
@@ -10060,7 +10094,7 @@ async function resumeGame(gameId){
   try{
     state = await DB.getResumeState(gameId);
   }catch(e){
-    uiAlert('Could not resume this game: ' + ((e && e.message) || 'unknown error'));
+    uiAlertErr('Could not resume this game', e);
     refreshSavedGamesList();
     return;
   }
@@ -10363,7 +10397,7 @@ function askAbandonSavedGame(gameId, retryStartGame){
   }
   uiConfirm(`Abandon this saved ${category} game? It can't be resumed afterward, but the stats already recorded stay.`, async ()=>{
     try{ await DB.abandonSavedGame(gameId); }
-    catch(e){ uiAlert('Could not abandon this saved game: ' + ((e && e.message) || 'unknown error')); return; }
+    catch(e){ uiAlertErr('Could not abandon this saved game', e); return; }
     refreshSavedGamesList();
     if(retryStartGame){ setup._skipResumePrompt = true; startGame(); }
   });
@@ -10487,7 +10521,10 @@ function undoLastTurn(){
 
   const status=document.getElementById('status');
   if(status){ status.className='status'; status.textContent='Last turn undone.'; }
-  renderGame(); renderSlots(); renderPad(); updateCheckout(false); pushLive();
+  // renderGame() itself ends with renderSlots()/renderPad()/updateCheckout()/
+  // pushLive() — calling them again here did the full rebuild and the live POST
+  // twice per undo press.
+  renderGame();
 }
 
 function undoDart(){
@@ -10843,7 +10880,6 @@ function enterTurn(){
   document.getElementById('status').className='status';
   document.getElementById('status').textContent='Tap a multiplier, then a number.';
   renderGame();
-  pushLive();
   // Ghost Opponent: the ghost has no input of its own — it auto-advances through
   // its scripted leg right after the human's turn rather than waiting on the
   // original historical pace (docs/archive/ghost-opponent-roadmap.md's open question,
@@ -10867,7 +10903,7 @@ function playGhostTurn(){
     // (shouldn't normally happen — a candidate leg's script always ends in a
     // win). Hand back to the human rather than looping or throwing.
     game.current = 0;
-    renderGame(); pushLive();
+    renderGame();
     return;
   }
   const scriptTurn = ghost.ghostScript[ghost.ghostTurnIndex++];
@@ -10895,7 +10931,6 @@ function playGhostTurn(){
   document.getElementById('status').className='status';
   document.getElementById('status').textContent='Tap a multiplier, then a number.';
   renderGame();
-  pushLive();
 }
 
 /* ----- Cricket turn commit (dispatched from enterTurn()) ----- */
@@ -11015,7 +11050,6 @@ function enterTurnCricket(){
   document.getElementById('status').className='status';
   document.getElementById('status').textContent='Tap a number to score.';
   renderGameCricket();
-  pushLive();
 }
 function undoLastTurnCricket(){
   if(!game || !game.lastTurnSnapshot) return;
@@ -11048,7 +11082,6 @@ function undoLastTurnCricket(){
   const status=document.getElementById('status');
   if(status){ status.className='status'; status.textContent='Last turn undone.'; }
   renderGameCricket();
-  pushLive();
 }
 /* ----- Cricket leg / set / game progression (dispatched from onLegWon path) -----
    9 Marks/Perfect Leg (per-visit achievements) are detected in enterTurnCricket()
@@ -11248,7 +11281,6 @@ function enterTurnBaseball(){
   document.getElementById('status').className='status';
   document.getElementById('status').textContent = `Inning ${Math.min(game.baseballInning,9)} of 9 — target ${baseballInningTarget(game.baseballInning)}.`;
   renderGameBaseball();
-  pushLive();
 }
 function undoLastTurnBaseball(){
   if(!game || !game.lastTurnSnapshot) return;
@@ -11274,7 +11306,6 @@ function undoLastTurnBaseball(){
   const status=document.getElementById('status');
   if(status){ status.className='status'; status.textContent='Last turn undone.'; }
   renderGameBaseball();
-  pushLive();
 }
 
 /* ----- Shanghai turn commit (dispatched from enterTurn()) -----
@@ -11341,7 +11372,6 @@ function enterTurnShanghai(){
   document.getElementById('status').className='status';
   document.getElementById('status').textContent = `Round ${Math.min(game.shanghaiRound,maxRounds)} of ${maxRounds} — target ${shanghaiRoundTarget(game.shanghaiRound, maxRounds)}.`;
   renderGameShanghai();
-  pushLive();
 }
 function undoLastTurnShanghai(){
   if(!game || !game.lastTurnSnapshot) return;
@@ -11367,7 +11397,6 @@ function undoLastTurnShanghai(){
   const status=document.getElementById('status');
   if(status){ status.className='status'; status.textContent='Last turn undone.'; }
   renderGameShanghai();
-  pushLive();
 }
 
 // Halve-It's own target label (docs/archive/halve-it-roadmap.md) — a plain
@@ -11442,7 +11471,6 @@ function enterTurnHalveIt(){
   document.getElementById('status').className='status';
   document.getElementById('status').textContent = `Round ${Math.min(game.halveItRound,maxRounds)} of ${maxRounds} — target ${halveItTargetLabel(halveItRoundTarget(game.halveItRound, (game.config&&game.config.targets)||HALVE_IT_DEFAULT_TARGETS))}.`;
   renderGameHalveIt();
-  pushLive();
 }
 function undoLastTurnHalveIt(){
   if(!game || !game.lastTurnSnapshot) return;
@@ -11469,7 +11497,6 @@ function undoLastTurnHalveIt(){
   const status=document.getElementById('status');
   if(status){ status.className='status'; status.textContent='Last turn undone.'; }
   renderGameHalveIt();
-  pushLive();
 }
 
 /* ----- Baseball leg / set / game progression (dispatched from enterTurnBaseball) -----
@@ -11750,7 +11777,6 @@ function enterTurnPressureChamber(){
   document.getElementById('status').className='status';
   document.getElementById('status').textContent = `Round ${Math.min(game.pressureChamberRound,PRESSURE_ROUNDS)} of ${PRESSURE_ROUNDS}.`;
   renderGamePressureChamber();
-  pushLive();
 }
 function undoLastTurnPressureChamber(){
   if(!game || !game.lastTurnSnapshot) return;
@@ -11779,7 +11805,6 @@ function undoLastTurnPressureChamber(){
   const status=document.getElementById('status');
   if(status){ status.className='status'; status.textContent='Last turn undone.'; }
   renderGamePressureChamber();
-  pushLive();
 }
 
 /* ----- The Pressure Chamber leg / set / game progression (dispatched from
@@ -13399,7 +13424,6 @@ function enterTurnCheckoutLadder(){
     document.getElementById('status').className='status';
     document.getElementById('status').textContent = `Target ${game.checkoutLadderTarget} — ${p.score} remaining, visit ${visitsUsed+1} of 3.`;
     renderGameCheckoutLadder();
-    pushLive();
   }
 }
 function undoLastTurnCheckoutLadder(){
@@ -13424,7 +13448,6 @@ function undoLastTurnCheckoutLadder(){
   const status=document.getElementById('status');
   if(status){ status.className='status'; status.textContent='Last turn undone.'; }
   renderGameCheckoutLadder();
-  pushLive();
 }
 // Resolves the current attempt (win, or 3 visits used without one) — climbs the
 // target one rung on a win, drops it one rung (floored at 61, docs/practice-
@@ -13837,7 +13860,6 @@ function enterTurnDeadManWalking(){
     document.getElementById('status').className='status';
     document.getElementById('status').textContent = `Round ${game.legNo} of 15 — ${p.score} remaining, ${dartsLeft} dart${dartsLeft===1?'':'s'} left.`;
     renderGameDeadManWalking();
-    pushLive();
   }
 }
 function undoLastTurnDeadManWalking(){
@@ -13862,7 +13884,6 @@ function undoLastTurnDeadManWalking(){
   const status=document.getElementById('status');
   if(status){ status.className='status'; status.textContent='Last turn undone.'; }
   renderGameDeadManWalking();
-  pushLive();
 }
 // Resolves the round just settled (Walked Out, or Executed by bust/out-of-
 // darts) — tallies it, advances game.legNo, and either seeds the NEXT
@@ -14039,7 +14060,6 @@ function advanceKillerTurn(){
   game.lastTurnSnapshot = null; // can't undo across a visit boundary
   game.turnSeq += 1;
   renderGameKiller();
-  pushLive();
 }
 /* The Pressure Chamber per-dart commit (docs/archive/pressure-chamber-roadmap.md
    "Sudden Death"): the round normally batches to 3 darts like any other
@@ -14207,7 +14227,6 @@ function undoLastTurnKiller(){
   const status=document.getElementById('status');
   if(status){ status.className='status'; status.textContent='Last dart undone.'; }
   renderGameKiller();
-  pushLive();
 }
 /* ----- Killer leg / set / match progression (dispatched from throwDartKiller()) ----- */
 function onKillerLegWon(w){
@@ -14292,7 +14311,7 @@ async function startMarathonMode(){
   saveSetup();
   let result;
   try{ result = await Backend.send('POST', '/api/marathon/sessions', { player, durationMinutes: 45 }); }
-  catch(e){ uiAlert('Could not start Marathon Mode: ' + ((e && e.message) || 'unknown error')); return; }
+  catch(e){ uiAlertErr('Could not start Marathon Mode', e); return; }
   marathonSession = { sessionId: result.sessionId, player, durationMinutes: result.durationMinutes,
     startedAtMs: Date.now(), legOrder: 1, dartCountsPerLeg: [] };
   beginMarathonLeg(result.gameId, 1, player);
@@ -16140,16 +16159,9 @@ function buildDartHeatmap(cells, opts){
   const missHits = (wedge, depth) => missMap[wedge+'_'+depth] || 0;
   const missHeat = (wedge, depth) => maxMissHeat>0 ? missHits(wedge,depth)/maxMissHeat : 0;
 
-  const CX=330, CY=330;
-  const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248, missNear:270, missFar:310 };
-  const DEG = 360/20;
-  const xy = (r, deg) => { const a=(deg-90)*Math.PI/180; return [CX+r*Math.cos(a), CY+r*Math.sin(a)]; };
-  const f = v => v.toFixed(2);
-  const annulus = (r1, r2, s, e) => {
-    const [x1,y1]=xy(r1,s),[x2,y2]=xy(r1,e),[x3,y3]=xy(r2,e),[x4,y4]=xy(r2,s);
-    const lg=e-s>180?1:0;
-    return `M${f(x1)},${f(y1)} A${r1},${r1} 0 ${lg},1 ${f(x2)},${f(y2)} L${f(x3)},${f(y3)} A${r2},${r2} 0 ${lg},0 ${f(x4)},${f(y4)} Z`;
-  };
+  // Geometry comes from the shared BOARD_GEOM kernel (one authority with the
+  // input board — see its comment).
+  const { CX, CY, R, DEG, xy, f, annulus } = BOARD_GEOM;
   // Single-hue heat scale: dark background -> gold, by relative hit frequency
   // (0 = never hit, 1 = the single most-hit region on the board).
   const heatFill = t => {
@@ -16314,6 +16326,10 @@ function escapeJs(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")
 
 /* ---------- in-app dialogs (native confirm/prompt are blocked in the sandbox) ---------- */
 function closeModal(){ const o=document.getElementById('modal'); if(o) o.hidden=true; document.getElementById('modal-body').innerHTML=''; }
+// Standard error alert: one place for the message fallback and null-safety —
+// call sites previously hand-rolled three variants, one of which rendered
+// "undefined" when an error carried no message.
+function uiAlertErr(prefix, e){ uiAlert(prefix + ': ' + ((e && e.message) || 'Unknown error')); }
 function uiAlert(msg){
   document.getElementById('modal-body').innerHTML=
     `<p class="modal-msg">${escapeHtml(msg)}</p>
@@ -16419,14 +16435,14 @@ function uiAddPlayer(onSubmit){
        <button type="button" aria-pressed="true" id="ap-out-double" onclick="document.getElementById('ap-out-double').setAttribute('aria-pressed','true');document.getElementById('ap-out-single').setAttribute('aria-pressed','false')">Double out</button>
        <button type="button" aria-pressed="false" id="ap-out-single" onclick="document.getElementById('ap-out-single').setAttribute('aria-pressed','true');document.getElementById('ap-out-double').setAttribute('aria-pressed','false')">Single out</button>
      </div>
-     <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+     <p class="settings-intro">
        Double out means the final dart of a leg must land on a double (or the bullseye) to win — the standard tournament rule. Single out means any score that brings the player to exactly zero wins, no double required — easier for beginners.
      </p>
      <label class="field">PIN (optional)</label>
      <input type="text" inputmode="numeric" id="ap-pin" maxlength="8" placeholder="Leave blank to allow anyone" style="margin-bottom:6px"
             autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"
             autocorrect="off" autocapitalize="off" spellcheck="false">
-     <p style="font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6">
+     <p class="settings-intro">
        Set a 4–8 digit PIN to stop other people from playing as this player — it will be asked for each time this player is added to a game. Leave it blank if anyone should be able to pick this player.
      </p>
      <div id="ap-error" style="color:var(--danger,#e5484d);font-size:12px;margin-bottom:8px" hidden></div>
