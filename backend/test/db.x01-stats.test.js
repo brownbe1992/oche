@@ -112,10 +112,10 @@ describe('getPlayerStatBubbles — OPENING_CATS scoping (exactly 501/301/170/101
   });
 });
 
-// docs/first-nine-average-roadmap.md — CLAUDE.md's every-new-calculation rule:
+// docs/archive/first-nine-average-roadmap.md — CLAUDE.md's every-new-calculation rule:
 // a normal leg, a short leg, a busted first visit, multi-leg aggregation, and
 // H2H/practice scoping, per the roadmap doc's own stated test plan.
-describe('getPlayerStatBubbles — first9avg (docs/first-nine-average-roadmap.md)', () => {
+describe('getPlayerStatBubbles — first9avg (docs/archive/first-nine-average-roadmap.md)', () => {
   test('a normal leg counts exactly the first 3 visits (9 darts) — a 4th visit is ignored', () => {
     const name = 'X01_First9_Normal';
     db.addPlayer(name);
@@ -183,7 +183,7 @@ describe('getPlayerStatBubbles — first9avg (docs/first-nine-average-roadmap.md
   });
 });
 
-describe('getPersonalBests — bestFirst9 (docs/first-nine-average-roadmap.md)', () => {
+describe('getPersonalBests — bestFirst9 (docs/archive/first-nine-average-roadmap.md)', () => {
   test('MAX of every eligible leg\'s first9avg, mirroring the stat bubble\'s own per-leg computation', () => {
     const name = 'X01_PB_First9';
     db.addPlayer(name);
@@ -215,7 +215,7 @@ describe('getPersonalBests — bestFirst9 (docs/first-nine-average-roadmap.md)',
   });
 });
 
-describe('getHomeExtra — Best First-9 Average leaderboard (docs/first-nine-average-roadmap.md)', () => {
+describe('getHomeExtra — Best First-9 Average leaderboard (docs/archive/first-nine-average-roadmap.md)', () => {
   test('ranks descending and excludes a player under the 20-legs floor', () => {
     const p1 = 'X01_Home_First9_Over', p2 = 'X01_Home_First9_Under';
     db.addPlayer(p1); db.addPlayer(p2);
@@ -418,7 +418,7 @@ describe('getMetricHistory matches getPlayerStatBubbles for the same metric (doc
     assert.equal(bubble, (140 + 170) / 2, '701 (non-standard) is excluded from both');
   });
 
-  test('"first9avg" is byte-for-byte identical between the two functions (docs/first-nine-average-roadmap.md)', () => {
+  test('"first9avg" is byte-for-byte identical between the two functions (docs/archive/first-nine-average-roadmap.md)', () => {
     const name = 'X01_History_First9';
     db.addPlayer(name);
     const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });

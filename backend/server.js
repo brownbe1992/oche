@@ -516,6 +516,24 @@ const ALLOWED_LIVE_KEYS = new Set([
   // Every card field is escaped at the display.html sink (docs/security-audit-roadmap.md
   // SEC-26 — modifier.icon in particular). Per-player CP totals ride inside `players[]`.
   'pressureChamberRound', 'pressureChamberDeadline', 'pressureChamberCards',
+  // Killer only (docs/game-modes-roadmap.md "Killer") — the configured lives
+  // threshold; read by display.html's renderers.killer.scorecard() for the
+  // "lives target N" header (falls back to 3 if absent — which is exactly why
+  // omitting it here silently mis-rendered every non-default game, the same
+  // BUG-28 silent-strip failure the Shanghai/Halve-It/Pressure Chamber keys
+  // above were added for). Per-player lives/number/isKiller ride inside `players[]`.
+  'killerLives',
+  // The 121 Checkout Ladder only (docs/archive/practice-ladders-roadmap.md Part B) —
+  // the current rung's target and how many of the attempt's 3 visits are used;
+  // read by renderers.checkout_ladder.scorecard() for the "Target N · Visit V/3"
+  // header (falls back to 121 / visit 1 if absent — same silent-strip failure as
+  // killerLives above).
+  'checkoutLadderTarget', 'checkoutLadderVisits',
+  // Dead Man Walking only (docs/archive/dead-man-walking-roadmap.md) — the round's
+  // par-darts budget, darts used this round, and walked-out tally; read by
+  // display.html's renderers.dead_man_walking.card(). The round number rides on
+  // the generic legNo; remaining score rides inside `players[]`.
+  'dmwBudget', 'dmwDartsUsed', 'dmwWalkedOut',
 ]);
 const MAX_LIVE_BYTES = 65536;
 // Returns the sanitized state, or null if it's over the size cap (caller sends 413).

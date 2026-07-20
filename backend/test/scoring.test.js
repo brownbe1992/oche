@@ -275,7 +275,7 @@ describe('evaluateVisitCricket (mark accumulation + opponent gating + win condit
   });
 });
 
-describe('evaluateVisitCricket — cutthroat variant (docs/cutthroat-cricket-roadmap.md)', () => {
+describe('evaluateVisitCricket — cutthroat variant (docs/archive/cutthroat-cricket-roadmap.md)', () => {
   const numbers = CRICKET_STANDARD_NUMBERS;
   const freshMarks = () => Object.fromEntries(numbers.map(n => [n, 0]));
   const player = (name, marks, points) => ({ name, marks, points });
@@ -373,7 +373,7 @@ describe('evaluateVisitCricket — cutthroat variant (docs/cutthroat-cricket-roa
   });
 });
 
-describe('cricketStoneColdAchieved (docs/cutthroat-cricket-roadmap.md 🔪 Stone Cold)', () => {
+describe('cricketStoneColdAchieved (docs/archive/cutthroat-cricket-roadmap.md 🔪 Stone Cold)', () => {
   test('requires 3+ players', () => {
     assert.equal(cricketStoneColdAchieved(0, 2), false, '2-player cutthroat never qualifies, even at 0 points received');
     assert.equal(cricketStoneColdAchieved(0, 3), true);
@@ -685,7 +685,7 @@ describe('pickCheckoutTarget difficulty tiers (docs/archive/checkout-trainer-roa
   });
 });
 
-describe('pickCheckoutTarget pinnedTarget (docs/checkout-drill-link-roadmap.md "Drill this checkout")', () => {
+describe('pickCheckoutTarget pinnedTarget (docs/archive/checkout-drill-link-roadmap.md "Drill this checkout")', () => {
   test('a finishable pin is always served, regardless of the rng roll', () => {
     for (const roll of [0, 0.25, 0.5, 0.75, 0.999]) {
       assert.equal(pickCheckoutTarget(true, () => roll, 'full', 0, 121), 121);
@@ -1881,7 +1881,7 @@ describe('rebuildCricketState (docs/archive/saved-games-roadmap.md, pure replay 
     assert.equal(dog.gameDarts, 7, '3+3+1');
   });
 
-  test('cutthroat variant (docs/cutthroat-cricket-roadmap.md): opponentGains apply to EVERY opponent across the replay, not just the first', () => {
+  test('cutthroat variant (docs/archive/cutthroat-cricket-roadmap.md): opponentGains apply to EVERY opponent across the replay, not just the first', () => {
     const turns = [
       // A: closes 20 (0->3, 0 pts), then 3->6 (3 beyond * 20 = 60) -- both B and
       // C have 20 open, so cutthroat puts the full 60 on EACH of them, not a split.
@@ -1907,28 +1907,28 @@ describe('rebuildBaseballState (docs/archive/saved-games-roadmap.md, pure replay
     }
     turns.push(v(0,1,1,[[9,1],[9,1],[9,1]]));   // inning 9: Ann scores 3 (target=9)
     turns.push(v(1,1,1,[[0,1],[0,1],[0,1]]));   // inning 9: Bob scores 0 -> Ann wins the leg (3 > 0)
-    // Leg 2, inning 1: Ann throws (the test only cares about the rebuild's own
-    // leg/set-transition bookkeeping here -- starter/current tracking is
-    // exercised directly by the assertions below, independent of which
-    // player's own turn record happens to follow).
-    turns.push(v(0,2,1,[[1,1]]));
+    // Leg 2, inning 1: Bob throws first — he's the rotated starter, exactly the
+    // order live play produces (startNextLeg() rotates game.starter each leg;
+    // roundComplete is starter-RELATIVE, so the leg's last thrower is the player
+    // just before the starter, not index n-1).
+    turns.push(v(1,2,1,[[1,1]]));
     const r = rebuildBaseballState({ names:['Ann','Bob'], legsPerSet:1, turns });
     assert.equal(r.setNo, 2);
     assert.equal(r.legNo, 1);
     assert.equal(r.starter, 1, 'rotated from 0');
-    assert.equal(r.baseballInning, 1, 'fresh leg -- back to inning 1');
+    assert.equal(r.baseballInning, 1, "fresh leg, and Bob's opening visit doesn't complete the round -- Ann (the player before the rotated starter) hasn't thrown inning 1 yet");
     const [ann, bob] = r.players;
-    assert.equal(ann.totalRuns, 1, "this leg's own single run so far");
+    assert.equal(bob.totalRuns, 1, "this leg's own single run so far (sector 1 = inning 1's target)");
+    assert.equal(ann.totalRuns, 0);
     assert.equal(ann.legsWon, 0, 'reset -- the set completed');
     assert.equal(ann.setsWon, 1);
-    assert.equal(ann.gameDarts, 28, '8 misses-innings*3 + inning9(3) + leg2(1) = 24+3+1');
-    assert.equal(bob.totalRuns, 0);
+    assert.equal(ann.gameDarts, 27, '8 miss-innings*3 + inning9(3) = 24+3, no leg2 turn yet');
     assert.equal(bob.legsWon, 0);
     assert.equal(bob.setsWon, 0);
-    assert.equal(bob.gameDarts, 27, '24+3, no leg2 turn yet');
-    // current: Ann's leg2 single-dart visit didn't complete the round (Bob,
-    // index 1, hasn't thrown leg2's inning 1 yet), so it's his turn next.
-    assert.equal(r.current, 1);
+    assert.equal(bob.gameDarts, 28, '24+3 + leg2(1)');
+    // current: Bob's leg2 opening visit didn't complete the round, so it's
+    // Ann's turn next.
+    assert.equal(r.current, 0);
   });
 });
 

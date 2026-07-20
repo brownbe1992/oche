@@ -75,6 +75,18 @@ test('sanitizeLiveState preserves the Shanghai/Halve-It/Pressure Chamber /displa
         { target: { type: 'sector', sector: 20, ring: 'treble', label: 'Treble 20' },
           modifier: { key: 'sudden_death', label: 'Sudden Death', icon: '💀', flavor: 'x' } },
       ],
+      // Killer — the lives threshold the /display "lives target N" header reads
+      // (a repeat of BUG-28: sent by liveSnapshot(), stripped by the allowlist,
+      // display silently fell back to the default 3).
+      killerLives: 5,
+      // The 121 Checkout Ladder — target/visit counter for the /display header
+      // (same BUG-28 repeat: stripped keys silently fell back to 121 / visit 1).
+      checkoutLadderTarget: 137,
+      checkoutLadderVisits: 2,
+      // Dead Man Walking — round budget/progress for the /display card.
+      dmwBudget: 9,
+      dmwDartsUsed: 4,
+      dmwWalkedOut: 3,
       // Control: an unknown key that must be stripped.
       totallyBogusKey: 'should not survive',
     };
@@ -94,6 +106,12 @@ test('sanitizeLiveState preserves the Shanghai/Halve-It/Pressure Chamber /displa
     assert.equal(state.pressureChamberRound, 6);
     assert.equal(state.pressureChamberDeadline, 1234567890);
     assert.deepEqual(state.pressureChamberCards, payload.pressureChamberCards);
+    assert.equal(state.killerLives, 5);
+    assert.equal(state.checkoutLadderTarget, 137);
+    assert.equal(state.checkoutLadderVisits, 2);
+    assert.equal(state.dmwBudget, 9);
+    assert.equal(state.dmwDartsUsed, 4);
+    assert.equal(state.dmwWalkedOut, 3);
 
     // The allowlist still drops unknown keys.
     assert.equal(state.totallyBogusKey, undefined);

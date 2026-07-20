@@ -212,7 +212,7 @@ describe('X01/Cricket isolation regression (turns.scored means a different quant
   });
 });
 
-describe('createGame() cricket config.variant validation (docs/cutthroat-cricket-roadmap.md)', () => {
+describe('createGame() cricket config.variant validation (docs/archive/cutthroat-cricket-roadmap.md)', () => {
   test("accepts 'standard' and 'cutthroat', and accepts a missing variant (defaults client-side)", () => {
     const a = 'CutthroatValidate_A', b = 'CutthroatValidate_B';
     db.addPlayer(a); db.addPlayer(b);

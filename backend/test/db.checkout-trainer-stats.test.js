@@ -124,7 +124,7 @@ describe('getCheckoutTrainerPersonalBests', () => {
     assert.equal(pb.bestStreak, 0);
   });
 
-  // docs/checkout-drill-link-roadmap.md "Drill this checkout": a pinned round
+  // docs/archive/checkout-drill-link-roadmap.md "Drill this checkout": a pinned round
   // grinding one known-good number repeatedly shouldn't set a "toughest ever"
   // record the random target pool didn't actually produce.
   test('toughestCheckout excludes optimal solves from a pinned-target game, even when higher than any unpinned solve', () => {

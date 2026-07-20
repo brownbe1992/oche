@@ -145,3 +145,28 @@ describe('getKillerWinLeaderboard', () => {
     assert.equal(rowB.won, 1);
   });
 });
+
+describe('renamePlayer — killer config rewrite', () => {
+  test('a rename rewrites the name-keyed number assignment so replay-derived stats survive', () => {
+    const a = 'Killer_Rn_A', b = 'Killer_Rn_B';
+    db.addPlayer(a); db.addPlayer(b);
+    const { gameId, config } = killerGame([a, b]);
+    const na = config.numbers[a], nb = config.numbers[b];
+    kt(gameId, a, 1, 1, na, 3, 3, a);   // a: treble own -> 3 lives, killer
+    kt(gameId, b, 1, 1, nb, 1, 1, b);   // b: single own -> 1 life
+    kt(gameId, a, 1, 1, nb, 1, 1, b);   // a attacks b -> b eliminated, a wins
+    db.completeGame(gameId, a);
+
+    // games.config.numbers is keyed by player NAME while every replay path
+    // (_killerLegOutcomesForPlayer, rebuildKillerState, the addTurn guard)
+    // looks up by CURRENT name — renamePlayer() must rewrite the stored key
+    // or this player's whole killer history replays as inert.
+    db.renamePlayer(a, 'Killer_Rn_A2');
+    const cfg = JSON.parse(db._db.prepare('SELECT config FROM games WHERE id = ?').get(gameId).config);
+    assert.equal(cfg.numbers['Killer_Rn_A2'], na, 'the assignment now lives under the new name');
+    assert.ok(!(a in cfg.numbers), 'the orphaned old-name key is gone');
+
+    const bubbles = db.getKillerStatBubbles('Killer_Rn_A2', 'h2h');
+    assert.equal(bubbles.avgKillsPerLeg, 1, 'replay still credits the kill under the new name');
+  });
+});

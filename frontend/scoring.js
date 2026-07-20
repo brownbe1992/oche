@@ -193,7 +193,7 @@ function evaluateVisitCricket(player, darts, game){
   return { marks, points, pointsThisVisit, scored:pointsThisVisit, win, opponentGains };
 }
 
-// 🔪 Stone Cold (docs/cutthroat-cricket-roadmap.md): won a 3+ player cut-throat
+// 🔪 Stone Cold (docs/archive/cutthroat-cricket-roadmap.md): won a 3+ player cut-throat
 // GAME (the whole match, every leg, not just the winning one) having received
 // zero points the entire time — the cutthroat analog of a shutout. Takes the
 // running "points ever received this game" total directly (accumulated in
@@ -232,7 +232,14 @@ function evaluateVisitBaseball(player, darts, game){
   // The round (inning) only completes once the LAST player in the rotation has
   // thrown — game.current still holds the throwing player's own index here,
   // the same "not yet advanced" timing every other evaluateVisit*() relies on.
-  const roundComplete = game.current === game.players.length - 1;
+  // "Last in rotation" is starter-RELATIVE: startNextLeg() rotates game.starter
+  // each leg, so the leg's final thrower is the player just before the starter —
+  // NOT index n-1, which is only true in leg 1. The old `current === n-1` check
+  // advanced the round after the rotated starter's own first visit in every leg
+  // after the first, skipping the other players' visit for that round entirely
+  // (and desyncing from the server guard, which derives the round from each
+  // player's OWN prior-turn count).
+  const roundComplete = (game.current + 1) % game.players.length === (game.starter || 0);
   let matchComplete = false, winnerIndex = null;
   if(roundComplete && inning >= 9){
     const totals = game.players.map((pl, i) => i === game.current ? totalRuns : (pl.totalRuns || 0));
@@ -288,8 +295,10 @@ function evaluateVisitShanghai(player, darts, game){
   const roundPoints = Object.assign({}, player.roundPoints, { [round]: pointsThisVisit });
   const shanghai = isShanghaiWin(darts, target);
   // Same "not yet advanced" timing every other evaluateVisit*() relies on —
-  // game.current still holds the throwing player's own index here.
-  const roundComplete = game.current === game.players.length - 1;
+  // game.current still holds the throwing player's own index here. Starter-
+  // relative like evaluateVisitBaseball() (see its comment): the leg's final
+  // thrower is the player just before the rotated game.starter, not index n-1.
+  const roundComplete = (game.current + 1) % game.players.length === (game.starter || 0);
   let matchComplete = false, winnerIndex = null;
   if(shanghai){
     matchComplete = true; winnerIndex = game.current;
@@ -489,7 +498,7 @@ function listUnsolvableTargets(doubleOut, difficulty){
 // unsolvable bogey number from the tier instead of a finishable target. The
 // trick roll consumes one rng draw and the bogey pick a second, so a
 // deterministic test can steer both.
-// `pinnedTarget` (docs/checkout-drill-link-roadmap.md "Drill this checkout" deep
+// `pinnedTarget` (docs/archive/checkout-drill-link-roadmap.md "Drill this checkout" deep
 // link): when set, short-circuits every difficulty/trick roll below and always
 // serves that same number — repetition is the point. Ignored (falls through to
 // the normal roll) if the pin isn't actually finishable under this out-mode, so
@@ -770,9 +779,17 @@ function _applyLegWin(players, winnerIndex, legsPerSet, setsGateOpen){
 // game bookkeeping and resetPlayerForNextLegX01()'s leg reset, minus every
 // side effect (DB writes, badges, webhooks, rendering) — see this section's
 // own header comment for why those are deliberately not replayed.
-function rebuildX01State({ names, outModes, startScore, practice, legsPerSet, turns }){
+// `startScores` (optional): per-player handicap starting scores aligned with
+// `names` (docs/archive/rating-and-handicap-roadmap.md Part B — stored on
+// game_players.start_score), overriding the game-wide `startScore` for the
+// players that have one. Live play applies handicaps per player on every leg
+// (index.html: `p.score = p.startScore`), so the replay must too — rebuilding a
+// handicapped player from the game-wide score would inflate their remaining and
+// mis-replay legitimate checkouts/busts as neither.
+function rebuildX01State({ names, outModes, startScore, startScores, practice, legsPerSet, turns }){
+  const startFor = i => (startScores && startScores[i] != null) ? startScores[i] : startScore;
   const players = names.map((name, i) => ({
-    name, score: startScore, doubleOut: (outModes[i] !== 'single'),
+    name, score: startFor(i), doubleOut: (outModes[i] !== 'single'),
     legPoints:0, legVisits:0, legDarts:0, legAvgDarts:0,
     setDarts:0, gameDarts:0, gamePoints:0, gameVisits:0, gameAvgDarts:0,
     legsWon:0, setsWon:0,
@@ -790,7 +807,7 @@ function rebuildX01State({ names, outModes, startScore, practice, legsPerSet, tu
       starter = (starter + 1) % players.length;
       current = starter;
       const newSet = t.setNo !== setNo;
-      players.forEach(p => { p.score = startScore; p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legAvgDarts=0; if(newSet) p.setDarts=0; });
+      players.forEach((p, i) => { p.score = startFor(i); p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legAvgDarts=0; if(newSet) p.setDarts=0; });
       setNo = t.setNo; legNo = t.legNo;
     }
     seenFirst = true;
@@ -819,7 +836,7 @@ function rebuildX01State({ names, outModes, startScore, practice, legsPerSet, tu
   if(pendingNewLeg){
     starter = (starter + 1) % players.length;
     current = starter;
-    players.forEach(p => { p.score = startScore; p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legAvgDarts=0; if(pendingNewSet) p.setDarts=0; });
+    players.forEach((p, i) => { p.score = startFor(i); p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legAvgDarts=0; if(pendingNewSet) p.setDarts=0; });
     if(pendingNewSet){ setNo += 1; legNo = 1; } else { legNo += 1; }
   }
   return { players, current, starter, setNo, legNo };
@@ -922,7 +939,7 @@ function rebuildBaseballState({ names, legsPerSet, turns }){
     current = t.playerIndex;
     const p = players[t.playerIndex];
     const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
-    const ev = evaluateVisitBaseball(p, dartsCore, { players, current, baseballInning });
+    const ev = evaluateVisitBaseball(p, dartsCore, { players, current, starter, baseballInning });
     p.totalRuns = ev.totalRuns; p.inningRuns = ev.inningRuns;
     p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
     if(ev.matchComplete){
@@ -972,7 +989,7 @@ function rebuildShanghaiState({ names, legsPerSet, maxRounds, turns }){
     current = t.playerIndex;
     const p = players[t.playerIndex];
     const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
-    const ev = evaluateVisitShanghai(p, dartsCore, { players, current, shanghaiRound, config:{ rounds:maxRounds } });
+    const ev = evaluateVisitShanghai(p, dartsCore, { players, current, starter, shanghaiRound, config:{ rounds:maxRounds } });
     p.totalPoints = ev.totalPoints; p.roundPoints = ev.roundPoints;
     p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
     if(ev.matchComplete){
@@ -1051,7 +1068,10 @@ function evaluateVisitHalveIt(player, darts, game){
   const priorTotal = player.total || 0;
   const total = halved ? Math.ceil(priorTotal / 2) : priorTotal + gained;
   const roundTotals = Object.assign({}, player.roundTotals, { [round]: total });
-  const roundComplete = game.current === game.players.length - 1;
+  // Starter-relative round completion, like evaluateVisitBaseball() (see its
+  // comment): the leg's final thrower is the player just before the rotated
+  // game.starter, not index n-1.
+  const roundComplete = (game.current + 1) % game.players.length === (game.starter || 0);
   let matchComplete = false, winnerIndex = null;
   if(roundComplete && round >= maxRounds){
     const totals = game.players.map((pl, i) => i === game.current ? total : (pl.total || 0));
@@ -1088,7 +1108,7 @@ function rebuildHalveItState({ names, legsPerSet, targets, turns }){
     current = t.playerIndex;
     const p = players[t.playerIndex];
     const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
-    const ev = evaluateVisitHalveIt(p, dartsCore, { players, current, halveItRound, config:{ targets } });
+    const ev = evaluateVisitHalveIt(p, dartsCore, { players, current, starter, halveItRound, config:{ targets } });
     p.total = ev.total; p.roundTotals = ev.roundTotals;
     p.lastVisitHalved = ev.halved;
     if(ev.halved) p.everHalved = true;
@@ -1401,7 +1421,10 @@ function evaluateVisitPressureChamber(player, darts, game){
   const currentFullHitStreak = result.outcome === 'full' ? (player.currentFullHitStreak || 0) + 1 : 0;
   const bestFullHitStreak = Math.max(player.bestFullHitStreak || 0, currentFullHitStreak);
   const roundResults = Object.assign({}, player.roundResults, { [round]: result.outcome });
-  const roundComplete = game.current === game.players.length - 1;
+  // Starter-relative round completion, like evaluateVisitBaseball() (see its
+  // comment): the leg's final thrower is the player just before the rotated
+  // game.starter, not index n-1.
+  const roundComplete = (game.current + 1) % game.players.length === (game.starter || 0);
   const maxRounds = (game.config && game.config.rounds) || PRESSURE_ROUNDS;
   let matchComplete = false, winnerIndex = null;
   if(roundComplete && round >= maxRounds){
@@ -1440,7 +1463,7 @@ function rebuildPressureChamberState({ gameId, names, legsPerSet, maxRounds, tur
     current = t.playerIndex;
     const p = players[t.playerIndex];
     const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
-    const ev = evaluateVisitPressureChamber(p, dartsCore, { gameId, players, current, pressureChamberRound, config:{ rounds:maxRounds } });
+    const ev = evaluateVisitPressureChamber(p, dartsCore, { gameId, players, current, starter, pressureChamberRound, config:{ rounds:maxRounds } });
     p.totalCp = ev.totalCp; p.misses = ev.misses; p.fullHits = ev.fullHits;
     p.currentFullHitStreak = ev.currentFullHitStreak; p.bestFullHitStreak = ev.bestFullHitStreak;
     p.roundResults = ev.roundResults;

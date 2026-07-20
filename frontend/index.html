@@ -642,7 +642,7 @@
   /* hof-row hover for homepage finishes */
   .hof-row.expandable{cursor:pointer;border-radius:8px;padding:7px 6px;margin:0 -6px;transition:background .15s}
   .hof-row.expandable:hover{background:var(--surface-2)}
-  /* "Drill this checkout" (docs/checkout-drill-link-roadmap.md) — a small icon+text
+  /* "Drill this checkout" (docs/archive/checkout-drill-link-roadmap.md) — a small icon+text
      button on a Top Finishes/Top Checkouts row or a Coaching Insights card, distinct
      from .iconbtn's fixed square sizing since it sits inline in a dense row. */
   .drill-btn{flex:none;font-size:10.5px;font-weight:700;letter-spacing:.02em;color:var(--gold);
@@ -878,7 +878,7 @@
              the intro paragraph itself now lives in Step 2's how-to-play blurb) -->
         <div class="setup-section" id="checkout-trainer-options-section" hidden>
           <div class="setup-label">Checkout Trainer options</div>
-          <!-- docs/checkout-drill-link-roadmap.md "Drill this checkout": shown only when
+          <!-- docs/archive/checkout-drill-link-roadmap.md "Drill this checkout": shown only when
                drillCheckout() applied a pin — inspectable and cancelable, never invisible
                state. Freeform + trick questions get force-disabled while a pin is active
                (see renderCheckoutTrainerPinChip()). -->
@@ -1848,7 +1848,7 @@ let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, 
   // entry of undefined) plays the game's own regular starting score — see
   // renderHandicapOptions()/startGame()'s per-player start-score lookup.
   handicaps:{} }; // mode: 'h2h' | 'practice' | 'challenge' | 'ghost' | 'doubles_practice' | 'checkout_trainer'; gameType: 'x01' | 'cricket' | 'doubles_practice' | 'checkout_trainer'; checkoutTrainerDifficulty: 'under40' | 'under100' | 'over100' | 'full'
-  // checkoutTrainerPin (docs/checkout-drill-link-roadmap.md): a specific target
+  // checkoutTrainerPin (docs/archive/checkout-drill-link-roadmap.md): a specific target
   // score to always serve, set only via drillCheckout(); null means "no pin,
   // roll normally" — see setMode()'s checkout_trainer branch for how it's applied
   // (and reset) every time this mode is (re)entered.
@@ -2345,7 +2345,16 @@ function renderHome(){
   const body=document.getElementById('home-body');
   if(!body) return;
   const empty={leaderboard:[],recent:[]};
-  body.innerHTML=`<p class="pp-meta">Loading…</p>`;
+  // Stale-while-revalidate: every Home visit refires the full aggregate fetch
+  // below (it must — games completed since the last visit change these boards),
+  // but a repeat visit paints instantly from the previous visit's homeData and
+  // the refresh repaints in place, instead of blanking to "Loading…" while ~47
+  // aggregate queries serialize through the synchronous single-threaded server.
+  // (Known accepted cost: the burst itself still runs whole — splitting it into
+  // per-game-type lazy fetches would touch every homeTabRenderer; revisit if the
+  // burst ever measurably stalls live scoring at real data sizes.)
+  if(homeData) renderHomeContent();
+  else body.innerHTML=`<p class="pp-meta">Loading…</p>`;
   Promise.all([
     Backend.get('/api/summary'),
     Backend.get('/api/home-extra'),
@@ -2660,7 +2669,7 @@ function renderHomeTabBody(){
                 : `<p class="pp-meta" style="padding:4px 0">No timing data yet — enable "Collect per-dart timing" in Settings to start tracking pace.</p>`}
     </div>`;
 
-  // docs/first-nine-average-roadmap.md: min-20-legs floor, ranked descending
+  // docs/archive/first-nine-average-roadmap.md: min-20-legs floor, ranked descending
   // (higher first-9 average is better, unlike Fewest Trebleless Visits' ascending rank).
   const first9RowsForMode = extra && extra.first9Rows && extra.first9Rows[mode];
   const first9Section = (first9RowsForMode && first9RowsForMode.length)
@@ -3222,7 +3231,7 @@ function hofSection(rows, mode=''){
       </div>`;
     }).join('')}</div>`;
   }
-// docs/checkout-drill-link-roadmap.md "Drill this checkout": shared markup for the
+// docs/archive/checkout-drill-link-roadmap.md "Drill this checkout": shared markup for the
 // small 🎯 Drill button on a Top Finishes/Top Checkouts row — stopPropagation() so
 // tapping it doesn't also toggle the row's own checkout-route expansion.
 function drillButtonHtml(jName, score){
@@ -3325,7 +3334,7 @@ function setMode(mode){
   if(mode === 'doubles_practice') renderDoublesTargetGrid();
   else if(mode === 'ghost'){ setup.ghostLeg = null; renderGhostLegPicker(); }
   else if(mode === 'checkout_trainer'){
-    // docs/checkout-drill-link-roadmap.md "Drill this checkout": _checkoutDrillPin
+    // docs/archive/checkout-drill-link-roadmap.md "Drill this checkout": _checkoutDrillPin
     // is a one-shot value set by drillCheckout() right before this call — same
     // "module-level variable consumed by the very next setMode() call" pattern
     // _ghostLegTarget/raceLeg() already established. Consuming it here means every
@@ -3341,7 +3350,7 @@ function setMode(mode){
     if(setup.checkoutTrainerPin) announce(`Checkout Trainer set to drill ${setup.checkoutTrainerPin}.`);
   }
 }
-// docs/checkout-drill-link-roadmap.md "Setup screen": renders/hides the "Drilling:
+// docs/archive/checkout-drill-link-roadmap.md "Setup screen": renders/hides the "Drilling:
 // N ✕" chip and disables the two options a pin makes meaningless — Checkout
 // Blitz (grinding one known number against a clock isn't a speed test) and trick
 // questions (there's nothing to spot-the-bogey on a target guaranteed solvable).
@@ -3479,7 +3488,7 @@ function selectGhostLeg(i){
   renderGhostLegList(legs);
 }
 
-/* ---------- "Drill this checkout" deep link (docs/checkout-drill-link-roadmap.md) ----------
+/* ---------- "Drill this checkout" deep link (docs/archive/checkout-drill-link-roadmap.md) ----------
    Same preselect-then-confirm pattern as raceLeg() above: a one-shot module-level
    variable set right before setMode(), consumed synchronously the moment setMode()
    lands on 'checkout_trainer' (see that function's own comment), plus a second
@@ -4498,8 +4507,9 @@ function applyLeagueGameSelection(){
     if(cu) cu.setAttribute('aria-pressed', setup.cricketPreset==='custom');
     const body = document.getElementById('cricket-custom-body');
     if(body) body.hidden = (setup.cricketPreset !== 'custom');
-    // League play is always Standard Cricket for now (docs/cutthroat-cricket-
-    // roadmap.md doesn't cover league fixtures) — reset explicitly rather than
+    // League play is always Standard Cricket for now
+    // (docs/archive/cutthroat-cricket-roadmap.md doesn't cover league fixtures)
+    // — reset explicitly rather than
     // silently carrying over whatever variant a previous, unrelated Cricket setup
     // left selected.
     setCricketVariant('standard');
@@ -5046,7 +5056,7 @@ async function startGame(){
     : gameType === 'pressure_chamber' ? { rounds: PRESSURE_ROUNDS }
     : gameType === 'doubles_practice' ? { doubles: setup.doublesTargets.slice() }
     : gameType === 'chuckin' ? {}
-    // docs/checkout-drill-link-roadmap.md "Drill this checkout": a pin forces
+    // docs/archive/checkout-drill-link-roadmap.md "Drill this checkout": a pin forces
     // Freeform + trick questions off regardless of whatever those toggles show —
     // the setup screen already disables them once a pin is applied (setCheckoutTrainerPin()),
     // this just guards the actual write path from a stale toggle state too.
@@ -9456,6 +9466,14 @@ function liveSnapshot(message){
     // lives threshold — per-player number/lives/isKiller/eliminated/kills ride
     // inside the players[] array above via playerSnapshotKiller().
     killerLives: game.gameType === 'killer' ? (game.killerLives || KILLER_DEFAULT_LIVES) : null,
+    // Dead Man Walking only (docs/archive/dead-man-walking-roadmap.md): the round's
+    // par-darts budget, darts used so far this round, and the walked-out tally —
+    // read by display.html's renderers.dead_man_walking.card() (the round number
+    // itself rides on the generic legNo above; remaining score rides inside
+    // players[] via playerSnapshotDeadManWalking()).
+    dmwBudget: game.gameType === 'dead_man_walking' ? (game.dmwBudget || 0) : null,
+    dmwDartsUsed: game.gameType === 'dead_man_walking' ? (game.dmwDartsUsedThisRound || 0) : null,
+    dmwWalkedOut: game.gameType === 'dead_man_walking' ? (game.dmwWalkedOutCount || 0) : null,
     achievement: pendingAchievement || null,
     gameOneEighties: game.gameOneEighties || 0,
     gameBigFish: game.gameBigFish || 0,
@@ -9486,7 +9504,11 @@ function pushLive(message){
   // Checkout Trainer (docs/archive/checkout-trainer-roadmap.md "No live scoreboard, deliberate"):
   // a single-device, solo-only drill that never needs a /display scoreboard — skip
   // the broadcast entirely rather than adding an ALLOWED_LIVE_KEYS shape nothing renders.
-  if(game && game.gameType === 'checkout_trainer') return;
+  // The Gauntlet gets the same skip (docs/archive/gauntlet-roadmap.md "No live-scoreboard
+  // sync needed"): its per-dart path already never pushed, but generic call sites
+  // (achievement broadcasts, end-game) still leaked snapshots that /display could
+  // only render through the X01 fallback card with no station/scar fields.
+  if(game && (game.gameType === 'checkout_trainer' || game.gameType === 'gauntlet')) return;
   const snap = liveSnapshot(message);
   DB.pushLive(snap);
 }
@@ -10045,15 +10067,22 @@ async function resumeGame(gameId){
   const startScore = Number(state.category) || 501;
   const config = state.config || {};
 
-  const players = names.map(n => GAME_TYPES[gameType].newMatchPlayer(n,
-    gameType === 'cricket' ? config : startScore));
+  // X01 players are constructed with their OWN start score (state.players[i]
+  // .startScore carries the game_players.start_score handicap, null when none) —
+  // exactly what startGame() does live via setup.handicaps — so p.startScore is
+  // right for every later leg reset (`p.score = p.startScore`), not just leg 1.
+  const players = names.map((n, i) => GAME_TYPES[gameType].newMatchPlayer(n,
+    gameType === 'cricket' ? config
+      : gameType === 'x01' ? (state.players[i].startScore ?? startScore)
+      : startScore));
 
   let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, shanghaiRound = 1, halveItRound = 1, pressureChamberRound = 1, bobs27Round = 1, roundOver = false, checkoutLadderTarget = 121, checkoutLadderVisits = 0;
   let gauntletStationIndex = 0, gauntletAwaitingRepeat = false, gauntletFinalMisses = [], gauntletCleanStreak = 0, gauntletBestCleanStreak = 0;
   let dmwTarget = 0, dmwBudget = 0, dmwDartsUsedThisRound = 0, dmwWalkedOutCount = 0, dmwCurrentStreak = 0, dmwBestStreak = 0;
   let statusMsg = '';
   if(gameType === 'x01'){
-    const r = rebuildX01State({ names, outModes, startScore, practice: !!state.practice, legsPerSet: state.legsPerSet, turns: state.turns });
+    const startScores = state.players.map(p => p.startScore ?? null);
+    const r = rebuildX01State({ names, outModes, startScore, startScores, practice: !!state.practice, legsPerSet: state.legsPerSet, turns: state.turns });
     players.forEach((p,i) => {
       const rp = r.players[i];
       Object.assign(p, { score:rp.score, doubleOut:rp.doubleOut, legsWon:rp.legsWon, setsWon:rp.setsWon,
@@ -16263,7 +16292,7 @@ const COACHING_TAG = { weakness: '🔧 Focus area', strength: '✅ Good form' };
 function renderCoachingInsights(insights, section, body){
   if(!Array.isArray(insights) || !insights.length){ section.hidden = true; return; }
   section.hidden = false;
-  // docs/checkout-drill-link-roadmap.md "Drill this checkout": only the
+  // docs/archive/checkout-drill-link-roadmap.md "Drill this checkout": only the
   // checkout_route insight type carries a concrete drillable number (i.score) —
   // weak_number/bust_parity/form_trend describe a pattern, not a single target.
   const jPlayer = escapeHtml(escapeJs(currentPlayer));

@@ -973,7 +973,7 @@ const renderers = {
         const lab = darts[k];
         return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
       }).join('');
-      // docs/cutthroat-cricket-roadmap.md: the one visible difference from
+      // docs/archive/cutthroat-cricket-roadmap.md: the one visible difference from
       // standard on this screen — everything else (marks grid, points cells)
       // renders identically either way.
       const ptsLabel = s.cricketVariant === 'cutthroat' ? 'Pts (lowest wins)' : 'Pts';
@@ -1072,7 +1072,7 @@ const renderers = {
       </div>`;
     }
   },
-  // Shanghai (docs/shanghai-roadmap.md): same shared chalkboard-table shape as
+  // Shanghai (docs/archive/shanghai-roadmap.md): same shared chalkboard-table shape as
   // Baseball's own (rows=rounds 1-config.rounds, columns=players) — all players
   // share one live round, not independent per-player state. Row labels show the
   // round's own TARGET NUMBER (not the round index) so the live board matches
@@ -1454,6 +1454,60 @@ const renderers = {
           <div class="sum-stat">
             <div class="sv">${num(p.kills)}</div>
             <div class="sl">Kills</div>
+          </div>
+        </div>
+      </div>`;
+    }
+  },
+  // Dead Man Walking (docs/archive/dead-man-walking-roadmap.md): solo drill,
+  // X01-shaped double-out countdown against a par-darts budget — mirrors
+  // index.html's own renderGameDeadManWalking() (round-of-15 header, darts left
+  // this round, walked-out tally). enterTurnDeadManWalking() broadcasts every
+  // committed turn, so without this entry the dispatch fell back to the X01
+  // card, which has none of the walk state. s.dmwBudget/dmwDartsUsed/
+  // dmwWalkedOut come from liveSnapshot()'s own DMW fields; the round number
+  // rides on the generic s.legNo.
+  dead_man_walking: {
+    card(p, i, s, L){
+      const active = i===s.currentIndex;
+      const dartsLeft = Math.max(0, num(s.dmwBudget) - num(s.dmwDartsUsed));
+      let throwbox = '';
+      if(active){
+        const darts = Array.isArray(s.darts) ? s.darts : [];
+        const slots = [0,1,2].map(k=>{
+          const lab = darts[k];
+          return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
+        }).join('');
+        throwbox = `<div class="throwbox"><div class="darts">${slots}</div></div>`;
+      }
+      let flash = '';
+      if(active && s.status==='bust') flash = `<div class="flash bust">BUST</div>`;
+      if(active && s.status==='won')  flash = `<div class="flash shot">WALKED OUT</div>`;
+
+      const meta = !L.showMeta ? '' : `<div class="meta"><span class="standing">Round ${num(s.legNo)} of 15 · ${dartsLeft} dart${dartsLeft===1?'':'s'} left · Walked Out ${num(s.dmwWalkedOut)}</span></div>`;
+
+      return `<div class="pcard ${active?'active':''}">
+        ${flash}
+        <div>
+          <div class="prow1">
+            <span class="pname">${escapeHtml(p.name)}</span>
+            ${L.showTag ? `<span class="ptag">💀 DOUBLE OUT</span>` : ''}
+            ${active?'<span class="throwflag">▸ throwing</span>':''}
+          </div>
+          <div class="score">${num(p.score)}</div>
+        </div>
+        ${meta}
+        ${throwbox}
+      </div>`;
+    },
+    summary(p){
+      return `
+      <div class="sum-card">
+        <div class="sum-name">${escapeHtml(p.name)}</div>
+        <div class="sum-stats">
+          <div class="sum-stat">
+            <div class="sv">${num(p.gameDarts)}</div>
+            <div class="sl">Darts This Walk</div>
           </div>
         </div>
       </div>`;

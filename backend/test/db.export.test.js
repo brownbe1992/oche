@@ -48,6 +48,9 @@ describe('getFullDatabaseExport (docs/archive/data-export-roadmap.md)', () => {
       'playerUuidAliases',
       // docs/archive/saved-games-roadmap.md: same standing rule applied to saved-game state
       'savedGames',
+      // docs/archive/marathon-mode-roadmap.md: same standing rule — session groupings
+      // (durations, leg order) can't be reconstructed from the raw leg games alone
+      'marathonSessions', 'marathonSessionLegs',
     ].sort());
 
     const alice = dump.players.find(p => p.name === 'export_alice');

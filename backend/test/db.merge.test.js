@@ -276,3 +276,45 @@ describe('player_uuid_aliases — the merge/import interaction (docs/archive/pla
     assert.equal(db._db.prepare('SELECT player_id FROM player_uuid_aliases WHERE uuid = ?').get(uuidB).player_id, cId);
   });
 });
+
+describe('mergePlayers — marathon sessions and killer configs', () => {
+  test('reassigns marathon_sessions instead of cascade-deleting them, and counts them in the preview', () => {
+    db.addPlayer('merge_mar_src'); db.addPlayer('merge_mar_tgt');
+    const legGame = soloGame('merge_mar_src');
+    // marathon_sessions.player_id is ON DELETE CASCADE with no games link — the
+    // one table where a missed reassignment silently DESTROYS history via the
+    // final source-player DELETE rather than stranding a row.
+    db._db.prepare(`INSERT INTO marathon_sessions (player_id, duration_minutes, ended_at)
+                    VALUES (?, 45, datetime('now'))`).run(pid('merge_mar_src'));
+    const sessionId = db._db.prepare('SELECT id FROM marathon_sessions WHERE player_id = ?').get(pid('merge_mar_src')).id;
+    db._db.prepare('INSERT INTO marathon_session_legs (session_id, game_id, leg_order) VALUES (?, ?, 1)').run(sessionId, legGame);
+
+    const preview = db.getMergePreview('merge_mar_src', 'merge_mar_tgt');
+    assert.equal(preview.moves.marathonSessions, 1, 'the preview warns about the marathon history being moved');
+
+    db.mergePlayers('merge_mar_src', 'merge_mar_tgt');
+    const s = db._db.prepare('SELECT player_id FROM marathon_sessions WHERE id = ?').get(sessionId);
+    assert.ok(s, 'the session row survived the source-player delete');
+    assert.equal(s.player_id, pid('merge_mar_tgt'), 'and now belongs to the target');
+    assert.equal(db._db.prepare('SELECT COUNT(*) n FROM marathon_session_legs WHERE session_id = ?').get(sessionId).n, 1,
+      'the session legs survived too (no cascade fired)');
+  });
+
+  test("rewrites killer configs' name-keyed number assignment to the target's name", () => {
+    db.addPlayer('merge_k_src'); db.addPlayer('merge_k_tgt'); db.addPlayer('merge_k_opp');
+    // games.config.numbers is keyed by player NAME; every replay path looks up
+    // by CURRENT name, so an unrewritten key would zero the whole game's
+    // replay-derived stats for every participant after the merge.
+    const kg = db.createGame({ category: 'Killer', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'killer', config: {}, players: [{ name: 'merge_k_src' }, { name: 'merge_k_opp' }] });
+    const before = JSON.parse(db._db.prepare('SELECT config FROM games WHERE id = ?').get(kg.gameId).config);
+    const srcNumber = before.numbers['merge_k_src'];
+    assert.ok(srcNumber != null, 'fixture sanity: the source has an assigned number');
+
+    db.mergePlayers('merge_k_src', 'merge_k_tgt');
+    const after = JSON.parse(db._db.prepare('SELECT config FROM games WHERE id = ?').get(kg.gameId).config);
+    assert.equal(after.numbers['merge_k_tgt'], srcNumber, "the source's assignment now lives under the target's name");
+    assert.ok(!('merge_k_src' in after.numbers), 'the orphaned old-name key is gone');
+    assert.equal(after.numbers['merge_k_opp'], before.numbers['merge_k_opp'], "the opponent's key is untouched");
+  });
+});

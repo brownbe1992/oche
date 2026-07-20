@@ -243,7 +243,7 @@ describe('createGame — gameType/category/config validation', () => {
     assert.doesNotThrow(() => db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, config: { startingScore: 501 }, players: [] }));
   });
 
-  // docs/checkout-drill-link-roadmap.md "Drill this checkout": pinnedTarget rides
+  // docs/archive/checkout-drill-link-roadmap.md "Drill this checkout": pinnedTarget rides
   // games.config through this same path from an untrusted client, so it gets the
   // same write-boundary validation as every other config field reaching here.
   describe('pinnedTarget (checkout_trainer only)', () => {

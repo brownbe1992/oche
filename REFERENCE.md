@@ -797,7 +797,7 @@ audit. The exact split:
 | Opening-window stats (1st 3/1st 9 avg, 140/leg, Best First-9, Best First-9 Average leaderboard) | Excluded already | `OPENING_CATS` requires `game_type='x01'` plus `config.startingScore` in `(501,301,170,101)` |
 | Checkout-based (Big Fish, ton+ finishes, highest checkout, checkout routes, fewest darts to finish, darts/leg, best leg avg) | **Excluded** (`X01_ONLY`) | cricket never writes `checkout=1`, but the 121 Checkout Ladder and Dead Man Walking now DO (a real `checkout=1` + `checkout_points` on a won round that isn't an X01 leg), so these can no longer rely on "only X01 writes `checkout=1`" — every checkout-based read is explicitly `X01_ONLY`-scoped (`docs/bug-roadmap.md` BUG-27). This covers `getSummary()`'s Ton+/Big Fish, `getPlayerStatBubbles()`'s Big Fish bubble, `getHomeExtra()`'s Ton+-rate/highest-checkout, `getBigFishStats()`, `getTopFinishesAll()`/`getTopFinishes()`, `getCheckoutRoutes()`, `getOnThisDay()`'s 170/100+ tiers, `getSessionRecap()`'s Ton+/highest-checkout/fewest-darts/moments, `getMetricHistory('bigfish')`, and `getPersonalBests()`'s own checkout fields |
 | Physical-dart stats (Darts Thrown, Darts/Day, Average Pace, dart analytics sector/treble maps, Around the World progress) | **Included** | a dart thrown in cricket is a real dart; these count physical throws, not X01 arithmetic |
-| Games / wins / win rate / win streak / H2H records / activity counters (legs, sets, darts, turns, today/this-week) | **Included** | a completed cricket H2H match is a real match; "Games Played" counts completed H2H matches of any game type. Per-category legs/sets **won** (`computeStats()`'s `h2hLegsWonByCat`/`h2hSetsWonByCat`) are built from `_h2hWonLegs()`, which credits each completed H2H leg to its real winner **per game type** — the `(checkout=1 OR leg_won=1)` winning-turn signal for X01/Cricket/Baseball/Killer/Checkout Ladder, `getShanghaiWonLegs()`'s hybrid for Shanghai, `getHalveItWonLegs()`'s final-total comparison for Halve-It, and the highest-CP leg winner (`_pressureChamberLegTotals()`) for The Pressure Chamber. This replaced a raw `(checkout=1 OR leg_won=1)` turn count that assumed one signal per won leg — true for X01/Cricket but not The Pressure Chamber (per-round `checkout=1`, so a run counted as up to 15 won legs) or Halve-It/Shanghai (points-wins carry no signal, so they counted 0) — `docs/bug-roadmap.md` BUG-29. The roster/profile "turns"/"darts thrown" totals are likewise unscoped (a cricket visit is a real visit); only the X01-scoped copies inside `h2hStats`/`practiceStats` feed the averages, and the H2H "avg darts per leg" (`h2hAvgDarts`) is `X01_ONLY` for the same reason (BUG-29) |
+| Games / wins / win rate / win streak / H2H records / activity counters (legs, sets, darts, turns, today/this-week) | **Included** | a completed cricket H2H match is a real match; "Games Played" counts completed H2H matches of any game type. Per-category legs/sets **won** (`computeStats()`'s `h2hLegsWonByCat`/`h2hSetsWonByCat`) are built from `_h2hWonLegs()`, which credits each completed H2H leg to its real winner **per game type** — the `(checkout=1 OR leg_won=1)` winning-turn signal for X01/Cricket/Baseball/Checkout Ladder, `getShanghaiWonLegs()`'s hybrid for Shanghai, `getHalveItWonLegs()`'s final-total comparison for Halve-It, the highest-CP leg winner (`_pressureChamberLegTotals()`) for The Pressure Chamber, and a `rebuildKillerState()` replay for Killer (whose turns carry NO winner signal at all — its `addTurn()` branch rejects `checkout` and never writes `leg_won`, so the signal-based query counted every Killer record as 0 legs forever). This replaced a raw `(checkout=1 OR leg_won=1)` turn count that assumed one signal per won leg — true for X01/Cricket but not The Pressure Chamber (per-round `checkout=1`, so a run counted as up to 15 won legs) or Halve-It/Shanghai (points-wins carry no signal, so they counted 0) — `docs/bug-roadmap.md` BUG-29. The roster/profile "turns"/"darts thrown" totals are likewise unscoped (a cricket visit is a real visit); only the X01-scoped copies inside `h2hStats`/`practiceStats` feed the averages, and the H2H "avg darts per leg" (`h2hAvgDarts`) is `X01_ONLY` for the same reason (BUG-29) |
 
 All formulas below are in `backend/db.js`. Two facts drive almost every one of
 them:
@@ -1495,16 +1495,23 @@ turn via `ROW_NUMBER() OVER (PARTITION BY game_id ORDER BY id)` (unambiguous
 since a bobs_27 game always has exactly one player/set/leg). A run that died
 early and one that finished all 20 rounds both fall out of this same formula
 for free — no separate "did they survive" input is needed beyond that game's
-own turn count and `bust` flag. Every query is scoped via `_scope({mode,
-gameType:'bobs_27'})`.
+own turn count and `bust` flag. That only covers runs that actually **ended**,
+though, so every run-level aggregate (runs/survival/avg/best/leaderboard)
+additionally requires `g.completed_at IS NOT NULL` — a paused/abandoned/
+in-progress run has no bust row simply because it hasn't died *yet*, and
+counting it as a survived run with its partial total would let abandoning bad
+runs inflate the stats (the same "an abandoned run's partial total isn't a
+real result" rule Gauntlet's PBs apply). Only the dart-level Doubles Hit %
+deliberately keeps counting every dart thrown. Every query is scoped via
+`_scope({mode, gameType:'bobs_27'})`.
 
 **Stat bubbles** (`getBobs27StatBubbles(name, mode)`):
 
 | Key | Label | Formula |
 |---|---|---|
-| `bobs27survivalrate` | Survival Rate | `runsWithNoBustTurn / runs * 100` — a run "survives" if none of its turns has `bust=1`, independent of its final score's sign |
-| `bobs27avgscore` | Avg Final Score | Mean of every run's own `27 + SUM(...)` final score (§2 formula), including died runs (their final score is typically ≤0) |
-| `bobs27runs` | Runs Played | `COUNT(DISTINCT game_id)` |
+| `bobs27survivalrate` | Survival Rate | `runsWithNoBustTurn / runs * 100` — a **completed** run "survives" if none of its turns has `bust=1`, independent of its final score's sign |
+| `bobs27avgscore` | Avg Final Score | Mean of every completed run's own `27 + SUM(...)` final score (§2 formula), including died runs (their final score is typically ≤0) |
+| `bobs27runs` | Runs Played | `COUNT(DISTINCT game_id)` over completed runs |
 | `bobs27dartsthrown` | Darts Thrown | Count of darts thrown across every Bob's 27 run |
 | `bobs27doubleshitrate` | Doubles Hit % | Of every dart actually thrown across every round, the fraction that landed on *that round's own* double (`sector=round AND multiplier=2`) — real board outcomes only, same "no hypothetical exclusion" convention Doubles Practice's own hit-rate bubble uses |
 
@@ -2865,10 +2872,13 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   gamePlayers, turns, darts, timelineEvents, playerBadges,
   dailyChallengeAttempts, tournaments, tournamentPlayers, tournamentRounds,
   tournamentMatches, dartComponents, loadouts, ghostRaces, leagues,
-  leaguePlayers, leagueFixtures, playerUuidAliases }` — every
+  leaguePlayers, leagueFixtures, playerUuidAliases, savedGames,
+  marathonSessions, marathonSessionLegs }` — every
   player/game/stat table (including the four
   tournament tables, `docs/bug-roadmap.md` BUG-6, the three league tables,
-  §18, and the merge tool's uuid-alias table), reformatted as plain JSON. It
+  §18, the merge tool's uuid-alias table, the saved-games pause slots, and
+  the two Marathon session tables — session groupings/durations can't be
+  reconstructed from the raw leg games alone), reformatted as plain JSON. It
   deliberately excludes the `admins`, `sessions`, `settings`, and `server_errors`
   tables entirely (internal/credential tables, not "your darts data"), and the
   `players` rows only select `id, uuid, name, out_mode, created_at, dart_weight` —
@@ -2961,6 +2971,13 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   hooks (league auto-tagging, badge-award checks, HA webhooks), since this is
   a historical data restore, not a live game being played, and the export's
   own `playerBadges` already carries exactly which badges the source earned.
+  The insert column lists must round-trip every stat-bearing column the
+  export's `SELECT *` carries: `game_players.start_score` (the handicap
+  marker `NOT_HANDICAPPED` filters on), `turns.declared_unsolvable`,
+  `turns.declared_hit` (the Honesty % input), and `turns.affected_player_id`
+  — the last remapped through the same source-id → local-id map as every
+  other player reference, never copied raw. Each uses `?? null`/`?? 0`
+  fallbacks so exports written before a column existed stay importable.
   `league_id` is always imported as `NULL` (leagues aren't part of a
   per-player export). **Duplicate-import guard**: before inserting each game,
   checks for an existing local game with the same
@@ -3027,7 +3044,7 @@ and a **Preview merge…** button; there is no merge without a preview.
   per-table counts of the source's rows (games, turns, gameWins, badges,
   challengeAttempts, tournamentEnrollments, tournamentTitles,
   tournamentMatchSlots, leagueEnrollments, leagueFixtures, dartComponents,
-  loadouts, ghostRaces, uuidAliases); `resolutions` lists what will be
+  loadouts, ghostRaces, marathonSessions, uuidAliases); `resolutions` lists what will be
   auto-resolved (`sharedBadges`, `resolvableChallengeDates`); `blockers`
   lists what stops the merge outright (`sharedGames`, `sharedTournaments`,
   `sharedLeagues`, `ambiguousChallengeDates`). `404` unknown player, `400`
@@ -3044,7 +3061,15 @@ and a **Preview merge…** button; there is no merge without a preview.
     `games.winner_id`, `daily_challenge_attempts`,
     `tournaments.champion_id`/`runner_up_id`, `tournament_players`,
     `tournament_matches.player1_id`/`player2_id`/`winner_id`,
-    `league_players`, `dart_components`, `loadouts`, `ghost_races`.
+    `league_players`, `dart_components`, `loadouts`, `ghost_races`,
+    `marathon_sessions` (the one players-FK table with no games link —
+    unreassigned, the final source-player DELETE would CASCADE the whole
+    Marathon history away).
+  - **Killer configs**: `games.config.numbers` is keyed by player *name*, so
+    every killer game being absorbed gets its source-name key rewritten to
+    the target's name (`_rewriteKillerConfigNames()` — the same rewrite
+    `renamePlayer()` applies), or the merged history would replay with an
+    orphaned assignment and zero out everyone's replay-derived Killer stats.
   - **`player_badges`** (both earned the same badge): the target keeps
     `MAX(count)` — a merge must never inflate a count beyond what either
     history actually earned — and `MIN(earned_at)`; the source's remaining
@@ -3129,6 +3154,7 @@ already-migrated database is a safe no-op).
 | `out_mode` | `TEXT NOT NULL DEFAULT 'double'` | Per-game checkout rule actually used (may differ from the player's current default) |
 | `dart_weight` | `INTEGER` | Snapshot at game start — **as of `docs/archive/dart-builder-roadmap.md`**, sourced from the selected loadout's barrel `weight_g` (`NULL` if no loadout was selected), not from `players.dart_weight` (see §16) |
 | `loadout_id` | `INTEGER REFERENCES loadouts(id) ON DELETE SET NULL` | The loadout selected for this player in this game, if any (§16). Nullable — playing without a loadout remains fully valid |
+| `start_score` | `INTEGER` | X01 handicapping only (§25): this player's own handicap starting score for this game, when it differs from the game-wide `games.category` score. `NULL` for every non-handicapped player and every non-X01 game. The presence of any non-NULL value in a game is what the `NOT_HANDICAPPED` exclusion (nine-darter/fewest-darts/first-9 leaderboards, Elo) filters on, so it must survive export/import round trips |
 
 ### `turns` (one row per visit, indexed on `player_id` and `game_id`)
 | Column | Type | Notes |
@@ -3368,12 +3394,40 @@ the linked game's `completed_at IS NULL` → `in_progress`; else `fulfilled`.
 | `player_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | The surviving player this uuid now resolves to. A merge repoints any aliases that targeted the (now-deleted) source, so a chained merge always resolves in one hop |
 | `merged_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 
+### `saved_games` (§23 Saved Games — "save for later" pause slots)
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `game_id` | `INTEGER NOT NULL UNIQUE REFERENCES games(id) ON DELETE CASCADE` | The paused in-progress game — `UNIQUE`, one pause slot per game. No snapshot blob: everything needed to resume is derived by replaying the game's own recorded turns (see §23) |
+| `saved_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
+
+### `marathon_sessions` (Marathon Mode — the "games-context table" convention, not a new game_type)
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `player_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | The one players-FK table with no games link — so `resetStats()` clears it explicitly (a games wipe can't cascade it) and `mergePlayers()` must reassign it (or the source-player delete would cascade the history away) |
+| `duration_minutes` | `INTEGER NOT NULL DEFAULT 45` | |
+| `started_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
+| `ended_at` | `TEXT` | `NULL` = session still in progress (mirrors `games.completed_at`'s nullable-lifecycle-marker shape) |
+
+### `marathon_session_legs`
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `session_id` | `INTEGER NOT NULL REFERENCES marathon_sessions(id) ON DELETE CASCADE` | |
+| `game_id` | `INTEGER REFERENCES games(id) ON DELETE SET NULL` | The leg's ordinary solo practice 501 game — only ever populated server-side by `startMarathonSession()`/`startNextMarathonLeg()`, never client-supplied. `SET NULL` on game deletion, so a stats reset reverts legs to unlinked rather than deleting session history structure |
+| `leg_order` | `INTEGER NOT NULL` | |
+| `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
+
 ### Cascade summary
 
 Deleting a `player` cascades: their `game_players` rows, `turns` (and
 transitively their `darts`), `player_badges`, `daily_challenge_attempts`,
 `tournament_players`, their `dart_components`/`loadouts` rows, their
-`ghost_races` rows, and any `player_uuid_aliases` rows pointing at them. `deletePlayer()`
+`ghost_races` rows, their `marathon_sessions` rows (and transitively their
+`marathon_session_legs`), and any `player_uuid_aliases` rows pointing at them.
+Deleting a `game` cascades its `saved_games` row (if paused) and SET-NULLs any
+`marathon_session_legs.game_id` pointing at it. `deletePlayer()`
 then prunes any `games` row left with zero remaining `game_players` (also run
 once at boot to self-heal older databases). Any `tournament_matches`/`tournaments`
 row referencing the deleted player (`player1_id`/`player2_id`/`winner_id`/
@@ -4031,6 +4085,15 @@ live to all-zero, never a stranded half-updated shell the way tournament
 brackets were pre-BUG-7. A league's own config is closer to player-profile
 configuration data (which also survives a stats reset) than to tournament's
 mid-flight bracket state.
+
+`resetStats()` **does** explicitly `DELETE FROM marathon_sessions` (cascading
+`marathon_session_legs`) — the same BUG-7 class as tournaments: nothing in
+`marathon_sessions` references a `games` row (only `player_id`), and
+`marathon_session_legs.game_id` is `ON DELETE SET NULL`, so without the
+explicit delete a stats reset would leave completed sessions behind as phantom
+history (`sessionsCompleted > 0` with zero legs). `wipeAllData()` needs no
+marathon line — the players wipe cascades `marathon_sessions` (and
+transitively the legs) for free.
 
 ### No player-deletion guard (a deliberate non-decision, not an oversight)
 
@@ -4798,7 +4861,14 @@ what resuming actually produces.
 full metadata plus every committed turn **in original chronological order**
 (`{playerIndex, setNo, legNo, darts:[{sector,mult}]}` — `playerIndex` is
 recovered from `game_players`' insertion-order rowid, the same order
-`createGame()` inserted participants in). The client rebuilds the live `game`
+`createGame()` inserted participants in). Each player entry also carries
+`startScore` (`game_players.start_score`, `null` when unhandicapped):
+`rebuildX01State()` takes the per-player `startScores` alongside the
+game-wide score, and `resumeGame()` constructs each X01 player from their
+own value — a handicapped player replayed from the game-wide score would
+come back with an inflated remaining and their legitimate checkouts/busts
+replayed as neither (the same per-player application live play's
+`setup.handicaps` does at `startGame()` and every leg reset). The client rebuilds the live `game`
 object by feeding every turn back through the **pure**
 `rebuildX01State()`/`rebuildCricketState()`/`rebuildBaseballState()`/
 `rebuildAroundTheClockState()`/`rebuildAroundTheWorldState()` functions
@@ -5211,7 +5281,14 @@ a leg boundary.
   *temporally latest game's* own resolved attempts — "where would my next
   attempt in that run start from," the closest a lifetime bubble can get to
   a genuinely live position for a mode with no persistent cross-session
-  ladder), `dartsThrown`.
+  ladder), `dartsThrown`. An attempt only counts once it's **resolved** —
+  won, or all 3 visits used (`a.won || a.visits >= 3`, the same check
+  `rebuildCheckoutLadderState()` applies): the temporally-last `(game, leg)`
+  group can be a still-in-progress attempt (permanently so for a paused/
+  abandoned game), and treating it as a completed failure would drop
+  `currentPosition` a rung and inflate `attempts`/`successRate` before the
+  attempt actually ends. The position replay uses the same 61–170 bounds the
+  rebuild enforces (+1 per win capped at 170, −1 per fail floored at 61).
 - **Personal Bests** (`getCheckoutLadderPersonalBests`): `highestTargetReached`
   (a peak — attempted, win or fail, since standing at rung 150 already means
   you climbed that high regardless of how that attempt ends) and
