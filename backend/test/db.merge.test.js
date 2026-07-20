@@ -42,6 +42,14 @@ function challengeAttempt(name, date, completed) {
   db._db.prepare(`INSERT INTO daily_challenge_attempts (game_id, player_id, challenge_date, format, completed)
                   VALUES (?, ?, ?, 'speed_to_zero', ?)`).run(gameId, pid(name), date, completed ? 1 : 0);
 }
+// Killer fixture (same per-file-helper convention db.killer-stats.test.js uses):
+// returns { gameId, config } — config is the server-assigned killerConfig whose
+// name-keyed numbers map the merge/rename rewrites operate on.
+function killerGame(names) {
+  return db.createGame({ category: 'Killer', legsPerSet: 1, setsPerGame: 1, practice: 0,
+    gameType: 'killer', config: {}, players: names.map(name => ({ name })) });
+}
+const storedKillerConfig = gameId => JSON.parse(db._db.prepare('SELECT config FROM games WHERE id = ?').get(gameId).config);
 
 describe('mergePlayers — conflict-free reassignment across every FK table', () => {
   test('moves games/turns/wins/badges/challenges/equipment/ghost races and deletes the source row', () => {
@@ -305,14 +313,13 @@ describe('mergePlayers — marathon sessions and killer configs', () => {
     // games.config.numbers is keyed by player NAME; every replay path looks up
     // by CURRENT name, so an unrewritten key would zero the whole game's
     // replay-derived stats for every participant after the merge.
-    const kg = db.createGame({ category: 'Killer', legsPerSet: 1, setsPerGame: 1, practice: 0,
-      gameType: 'killer', config: {}, players: [{ name: 'merge_k_src' }, { name: 'merge_k_opp' }] });
-    const before = JSON.parse(db._db.prepare('SELECT config FROM games WHERE id = ?').get(kg.gameId).config);
+    const kg = killerGame(['merge_k_src', 'merge_k_opp']);
+    const before = storedKillerConfig(kg.gameId);
     const srcNumber = before.numbers['merge_k_src'];
     assert.ok(srcNumber != null, 'fixture sanity: the source has an assigned number');
 
     db.mergePlayers('merge_k_src', 'merge_k_tgt');
-    const after = JSON.parse(db._db.prepare('SELECT config FROM games WHERE id = ?').get(kg.gameId).config);
+    const after = storedKillerConfig(kg.gameId);
     assert.equal(after.numbers['merge_k_tgt'], srcNumber, "the source's assignment now lives under the target's name");
     assert.ok(!('merge_k_src' in after.numbers), 'the orphaned old-name key is gone');
     assert.equal(after.numbers['merge_k_opp'], before.numbers['merge_k_opp'], "the opponent's key is untouched");
@@ -322,9 +329,8 @@ describe('mergePlayers — marathon sessions and killer configs', () => {
 describe('mergePlayers — turns.affected_player_id follows the merge', () => {
   test("killer turns that affected the source point at the target after the merge", () => {
     db.addPlayer('merge_ap_src'); db.addPlayer('merge_ap_tgt'); db.addPlayer('merge_ap_opp');
-    const kg = db.createGame({ category: 'Killer', legsPerSet: 1, setsPerGame: 1, practice: 0,
-      gameType: 'killer', config: {}, players: [{ name: 'merge_ap_src' }, { name: 'merge_ap_opp' }] });
-    const cfg = JSON.parse(db._db.prepare('SELECT config FROM games WHERE id = ?').get(kg.gameId).config);
+    const kg = killerGame(['merge_ap_src', 'merge_ap_opp']);
+    const cfg = storedKillerConfig(kg.gameId);
     // The opponent attacks the source: the turn's affected_player_id records the source.
     db.addTurn(kg.gameId, { player: 'merge_ap_opp', set: 1, leg: 1, scored: 1, bust: false, checkout: false,
       checkoutPoints: null, affectedPlayer: 'merge_ap_src',

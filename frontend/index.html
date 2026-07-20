@@ -2167,7 +2167,7 @@ function renderHomeRecapTeaser(){
   const el = document.getElementById('home-recap-teaser-body');
   if(!card || !el) return;
   const today = localDateStr();
-  Backend.get(`/api/session-recap?date=${today}&tz=${new Date().getTimezoneOffset()}`).then(r=>{
+  Backend.get(`/api/session-recap?date=${today}&tz=${-new Date().getTimezoneOffset()}`).then(r=>{
     if(!r || !r.totalGames){ card.hidden = true; return; }
     card.hidden = false;
     const players = new Set();
@@ -2187,7 +2187,7 @@ function loadSessionRecap(date){
   const el = document.getElementById('session-recap-body');
   if(!el) return;
   el.innerHTML = `<p class="pp-meta">Loading…</p>`;
-  Backend.get(`/api/session-recap?date=${encodeURIComponent(date)}&tz=${new Date().getTimezoneOffset()}`)
+  Backend.get(`/api/session-recap?date=${encodeURIComponent(date)}&tz=${-new Date().getTimezoneOffset()}`)
     .then(r=>{ _lastRecap = r; renderSessionRecapBody(r); })
     .catch(()=>{ el.innerHTML = `<p class="pp-meta">Couldn't load the recap for this date.</p>`; });
 }
@@ -2207,7 +2207,7 @@ function badgeLabelFor(id){
 function fmtRecapTime(ts){
   if(!ts) return '';
   const d = parseSqliteTimestamp(ts);
-  if(!d || isNaN(d)) return '';
+  if(isNaN(d)) return '';
   return d.toLocaleTimeString(undefined, { hour:'numeric', minute:'2-digit' });
 }
 function renderSessionRecapBody(r){
@@ -2334,11 +2334,19 @@ let homeData=null;
 // its stats don't map onto a leaderboard shape and none was requested; see
 // game-modes-roadmap.md "Generalizing per-game-type stats"). No data dependency,
 // so this renders immediately rather than waiting on renderHome()'s fetch.
+// The ONE per-type Home-visibility predicate — used by both the game-type
+// button filter and switchHomeTab()'s bounce guard, so the two can never
+// disagree (they briefly did: the button filter hid Killer under Practice
+// while the bounce only knew about soloOnly, leaving Killer's H2H board
+// rendering under the Practice heading with no button highlighted).
+function homeGameTypeVisible(g, tab){
+  return g.statDefs && g.statDefs.length && g.homeTabRenderer !== false
+    && !(g.soloOnly && tab==='h2h') && !(g.h2hOnly && tab==='practice');
+}
 function renderHomeGameTypeTabs(){
   const el=document.getElementById('home-gtype-tabs');
   if(!el) return;
-  el.innerHTML = Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length && g.homeTabRenderer !== false
-    && !(g.soloOnly && homeTab==='h2h') && !(g.h2hOnly && homeTab==='practice')).map(g=>
+  el.innerHTML = Object.values(GAME_TYPES).filter(g=>homeGameTypeVisible(g, homeTab)).map(g=>
     `<button class="tab-btn${homeGameType===g.id?' active':''}" data-gtype="${g.id}" onclick="switchHomeGameType('${g.id}')">${g.label}</button>`
   ).join('');
 }
@@ -2480,16 +2488,11 @@ function renderHome(){
 function switchHomeTab(tab){
   homeTab=tab;
   document.querySelectorAll('#screen-home .tab-btn[data-tab]').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
-  // A solo-only game type (Doubles Practice) has no H2H content — bounce back to
-  // X01 rather than leaving its tab selected-but-hidden showing solo data
-  // mislabeled as H2H.
-  if(tab==='h2h' && GAME_TYPES[homeGameType] && GAME_TYPES[homeGameType].soloOnly) homeGameType='x01';
-  // The inverse bounce: an h2hOnly type (Killer) has no Practice content — its
-  // button is hidden under that tab by renderHomeGameTypeTabs()'s filter, but
-  // without this reset homeGameType stayed 'killer' and renderHomeTabBody()
-  // kept dispatching to its H2H-only renderer under the Practice heading, with
-  // no game-type button highlighted.
-  if(tab==='practice' && GAME_TYPES[homeGameType] && GAME_TYPES[homeGameType].h2hOnly) homeGameType='x01';
+  // If the selected game type isn't visible under the new tab (soloOnly under
+  // H2H, h2hOnly under Practice — the same homeGameTypeVisible() predicate the
+  // button filter uses), bounce back to X01 rather than leaving a hidden type
+  // selected and its content rendering under the wrong heading.
+  if(GAME_TYPES[homeGameType] && !homeGameTypeVisible(GAME_TYPES[homeGameType], tab)) homeGameType='x01';
   renderHomeGameTypeTabs();
   renderHomeTabBody();
 }
@@ -9522,14 +9525,14 @@ function liveSnapshot(message){
 function pushLive(message){
   pendingAchievement = null;
   if(game){ game.lastTurnEvent = null; game.matchResult = null; game.legStart = null; }
-  // Checkout Trainer (docs/archive/checkout-trainer-roadmap.md "No live scoreboard, deliberate"):
-  // a single-device, solo-only drill that never needs a /display scoreboard — skip
-  // the broadcast entirely rather than adding an ALLOWED_LIVE_KEYS shape nothing renders.
-  // The Gauntlet gets the same skip (docs/archive/gauntlet-roadmap.md "No live-scoreboard
-  // sync needed"): its per-dart path already never pushed, but generic call sites
-  // (achievement broadcasts, end-game) still leaked snapshots that /display could
-  // only render through the X01 fallback card with no station/scar fields.
-  if(game && (game.gameType === 'checkout_trainer' || game.gameType === 'gauntlet')) return;
+  // Modes with no /display presence declare noLiveDisplay on their GAME_TYPES
+  // entry (Checkout Trainer per its roadmap's "No live scoreboard, deliberate";
+  // The Gauntlet per "No live-scoreboard sync needed") — the skip lives HERE,
+  // not at call sites, because generic pushes (achievement broadcasts, end-game)
+  // run for every mode and used to leak snapshots /display could only render
+  // through the X01 fallback card. A registry flag (not an inline OR-list) so
+  // the next single-device solo mode declares it instead of re-leaking.
+  if(game && GAME_TYPES[game.gameType] && GAME_TYPES[game.gameType].noLiveDisplay) return;
   const snap = liveSnapshot(message);
   DB.pushLive(snap);
 }
@@ -12361,6 +12364,19 @@ function h2hStatsHtmlPressureChamber(winner, scope){
   return `<div class="prac-stats">${cols}</div>`;
 }
 
+// Default (X01-shaped) end-of-unit summary entry — finishUnit()'s legSummary
+// dispatch falls back to this; modes with their own shape declare a legSummary
+// member on their GAME_TYPES entry, whose fields must match what display.html's
+// renderers.<type>.summary() card reads.
+function legSummaryX01(game, winner){
+  return game.players.map(p=>({
+    name: p.name,
+    avg:   p.legAvgDarts ? (p.legPoints / p.legAvgDarts * 3).toFixed(1) : null,
+    darts: p.legDarts  || 0,
+    busts: p.legBusts  || 0,
+    won:   p.name === winner
+  }));
+}
 function finishUnit(kind, winner){
   game.done = (kind==='game');
   updateSaveButtonVisibility(); // a just-completed match is no longer savable
@@ -12519,52 +12535,13 @@ function finishUnit(kind, winner){
         ${challengeShareBtn}
       </div>${legPanel}</div>`;
   }
-  game.legSummary = isCricket ? game.players.map(p=>({
-    name: p.name,
-    points: p.points || 0,
-    closed: Object.keys(p.marks||{}).filter(n=>(p.marks[n]||0)>=3).length,
-    won: p.name === winner
-  })) : isBaseball ? game.players.map(p=>({
-    name: p.name,
-    totalRuns: p.totalRuns || 0,
-    won: p.name === winner
-  })) : isShanghai ? game.players.map(p=>({
-    name: p.name,
-    totalPoints: p.totalPoints || 0,
-    won: p.name === winner
-  })) : isHalveIt ? game.players.map(p=>({
-    name: p.name,
-    total: p.total || 0,
-    won: p.name === winner
-  })) : isPressureChamber ? game.players.map(p=>({
-    name: p.name,
-    totalCp: p.totalCp || 0,
-    rating: pressureComposureRating(p.totalCp || 0),
-    won: p.name === winner
-  })) : isKiller ? game.players.map(p=>({
-    name: p.name,
-    number: p.number,
-    kills: p.kills || 0,
-    eliminated: !!p.eliminated,
-    won: p.name === winner
-  })) : isDeadManWalking ? [{
-    name: game.players[0].name,
-    walkedOut: game.dmwWalkedOutCount,
-    won: true,
-  }] : isBobs27 ? [{
-    // Bob's 27 previously fell through to the X01-shaped default below, whose
-    // fields the /display bobs_27 summary card doesn't read — the end-of-run
-    // card showed "Final Score: 0" for every run regardless of the real total.
-    name: game.players[0].name,
-    running: game.players[0].running,
-    won: true,
-  }] : game.players.map(p=>({
-    name: p.name,
-    avg:   p.legAvgDarts ? (p.legPoints / p.legAvgDarts * 3).toFixed(1) : null,
-    darts: p.legDarts  || 0,
-    busts: p.legBusts  || 0,
-    won:   p.name === winner
-  }));
+  // Each entry's shape is an unstated contract with display.html's
+  // renderers.<type>.summary() card — dispatched via the GAME_TYPES registry
+  // (per-entry legSummary, X01 shape as the default) so a new mode declares
+  // its shape next to its other per-mode members instead of falling through
+  // to X01-shaped fields nothing renders (that fallthrough silently broke the
+  // Bob's 27 and Dead Man Walking cards before this dispatch existed).
+  game.legSummary = (GAME_TYPES[game.gameType].legSummary || legSummaryX01)(game, winner);
   pushLive(`${winner} ${labels[kind]}`);
 }
 
@@ -12921,6 +12898,8 @@ const GAME_TYPES = {
   },
   cricket: {
     id: 'cricket',
+    legSummary: (game, winner) => game.players.map(p=>({ name:p.name, points:p.points||0,
+      closed:Object.keys(p.marks||{}).filter(n=>(p.marks[n]||0)>=3).length, won:p.name===winner })),
     label: 'Cricket',
     newMatchPlayer: newMatchPlayerCricket,
     evaluateVisit: evaluateVisitCricket,
@@ -12932,6 +12911,7 @@ const GAME_TYPES = {
   },
   baseball: {
     id: 'baseball',
+    legSummary: (game, winner) => game.players.map(p=>({ name:p.name, totalRuns:p.totalRuns||0, won:p.name===winner })),
     label: 'Baseball',
     newMatchPlayer: newMatchPlayerBaseball,
     evaluateVisit: evaluateVisitBaseball,
@@ -12946,6 +12926,7 @@ const GAME_TYPES = {
   },
   shanghai: {
     id: 'shanghai',
+    legSummary: (game, winner) => game.players.map(p=>({ name:p.name, totalPoints:p.totalPoints||0, won:p.name===winner })),
     label: 'Shanghai',
     newMatchPlayer: newMatchPlayerShanghai,
     evaluateVisit: evaluateVisitShanghai,
@@ -12957,6 +12938,7 @@ const GAME_TYPES = {
   },
   halve_it: {
     id: 'halve_it',
+    legSummary: (game, winner) => game.players.map(p=>({ name:p.name, total:p.total||0, won:p.name===winner })),
     label: 'Halve-It',
     newMatchPlayer: newMatchPlayerHalveIt,
     evaluateVisit: evaluateVisitHalveIt,
@@ -12968,6 +12950,8 @@ const GAME_TYPES = {
   },
   pressure_chamber: {
     id: 'pressure_chamber',
+    legSummary: (game, winner) => game.players.map(p=>({ name:p.name, totalCp:p.totalCp||0,
+      rating:pressureComposureRating(p.totalCp||0), won:p.name===winner })),
     label: 'The Pressure Chamber',
     newMatchPlayer: newMatchPlayerPressureChamber,
     evaluateVisit: evaluateVisitPressureChamber,
@@ -13020,6 +13004,9 @@ const GAME_TYPES = {
   checkout_trainer: {
     id: 'checkout_trainer',
     label: 'Checkout Trainer',
+    // "No live scoreboard, deliberate" (its roadmap) — pushLive() skips this
+    // mode entirely; see the flag's comment there.
+    noLiveDisplay: true,
     newMatchPlayer: newMatchPlayerCheckoutTrainer,
     // Unlike Doubles Practice/Chuckin, this genuinely IS a per-visit evaluation —
     // a checkout attempt is exactly a normal X01 visit starting from
@@ -13068,6 +13055,7 @@ const GAME_TYPES = {
   },
   bobs_27: {
     id: 'bobs_27',
+    legSummary: (game) => [{ name:game.players[0].name, running:game.players[0].running, won:true }],
     label: "Bob's 27",
     newMatchPlayer: newMatchPlayerBobs27,
     evaluateVisit: evaluateVisitBobs27,
@@ -13099,6 +13087,9 @@ const GAME_TYPES = {
   gauntlet: {
     id: 'gauntlet',
     label: 'The Gauntlet',
+    // "No live-scoreboard sync needed" (its roadmap) — pushLive() skips this
+    // mode entirely; see the flag's comment there.
+    noLiveDisplay: true,
     newMatchPlayer: newMatchPlayerGauntlet,
     // Per-position grading (evaluateGauntletStation(stationNumber, darts)), not
     // a batched-visit evaluateVisit — every call site is a dedicated
@@ -13114,6 +13105,8 @@ const GAME_TYPES = {
   },
   killer: {
     id: 'killer',
+    legSummary: (game, winner) => game.players.map(p=>({ name:p.name, number:p.number,
+      kills:p.kills||0, eliminated:!!p.eliminated, won:p.name===winner })),
     label: 'Killer',
     newMatchPlayer: newMatchPlayerKiller,
     // Per-dart evaluation (evaluateDartKiller(dart, throwerName, players)), not
@@ -13133,6 +13126,7 @@ const GAME_TYPES = {
   },
   dead_man_walking: {
     id: 'dead_man_walking',
+    legSummary: (game) => [{ name:game.players[0].name, walkedOut:game.dmwWalkedOutCount, won:true }],
     label: 'Dead Man Walking',
     newMatchPlayer: newMatchPlayerDeadManWalking,
     // Per-dart evaluation (evaluateVisitDeadManWalking(), a real function —
@@ -14460,7 +14454,7 @@ function renderMarathonAnalysisScreen(detail, fullDistance){
     <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream)">🏁 MARATHON COMPLETE</div>
     <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${completed.length} leg${completed.length===1?'':'s'} completed${fullDistance ? ' · Full 45 minutes' : ''}</p>
     <div class="summary-grid">
-      <div class="stat-block"><div class="stat-val">${detail.fatigueSplit}</div><div class="stat-label">Fatigue Split — ${escapeHtml(detail.fatigueTier)}</div></div>
+      <div class="stat-block"><div class="stat-val">${detail.fatigueSplit != null ? detail.fatigueSplit : '—'}</div><div class="stat-label">${detail.fatigueTier ? `Fatigue Split — ${escapeHtml(detail.fatigueTier)}` : 'Fatigue Split — needs 2+ legs'}</div></div>
       <div class="stat-block"><div class="stat-val">${MARATHON_TREND_ICON[detail.trend]||''} ${escapeHtml(detail.trend)}</div><div class="stat-label">Trend</div></div>
     </div>
     <p class="pp-meta" style="margin:10px 0 0">${escapeHtml(MARATHON_TREND_DESC[detail.trend]||'')}</p>

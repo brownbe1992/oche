@@ -195,9 +195,11 @@ describe('getSessionRecap', () => {
 
 // Timestamps are stored UTC while the client asks for its LOCAL calendar date —
 // getSessionRecap(date, tz) shifts every date() bucket by the client's UTC
-// offset (getTimezoneOffset() minutes, positive west of UTC). Without the
-// shift, a user at UTC-5 had every game after ~7pm local land in TOMORROW's
-// recap. tz absent/invalid falls back to 0 (raw UTC dates, old behavior).
+// offset via the shared _tzModifier() convention (minutes EAST of UTC, i.e.
+// the client sends `-new Date().getTimezoneOffset()`, same as avg-history and
+// on-this-day). Without the shift, a user at UTC-5 had every game after ~7pm
+// local land in TOMORROW's recap. tz absent/invalid falls back to 0 (raw UTC
+// dates, old behavior).
 describe('getSessionRecap tz offset', () => {
   test('a late-UTC-evening turn lands on the local date the player experienced', () => {
     const p = 'Recap_TZ_A';
@@ -206,15 +208,15 @@ describe('getSessionRecap tz offset', () => {
     db.addTurn(g.gameId, { player: p, set: 1, leg: 1, scored: 60, darts: [
       { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 } ] });
     const turnId = db._db.prepare('SELECT id FROM turns WHERE game_id = ?').get(g.gameId).id;
-    // 01:30 UTC on Mar 2 = 20:30 Mar 1 in UTC-5 (tz offset +300).
+    // 01:30 UTC on Mar 2 = 20:30 Mar 1 in UTC-5 (tz = -300 minutes east).
     setTurnDate(turnId, '2026-03-02 01:30:00');
 
     const utcView = db.getSessionRecap('2026-03-02');
     assert.ok(utcView.perPlayer.some(r => r.name === p), 'tz omitted: raw UTC date buckets (old behavior)');
 
-    const westView = db.getSessionRecap('2026-03-01', 300);
+    const westView = db.getSessionRecap('2026-03-01', -300);
     assert.ok(westView.perPlayer.some(r => r.name === p), "UTC-5 player's Mar 1 evening includes the turn");
-    const westWrongDay = db.getSessionRecap('2026-03-02', 300);
+    const westWrongDay = db.getSessionRecap('2026-03-02', -300);
     assert.ok(!westWrongDay.perPlayer.some(r => r.name === p), 'and it no longer leaks into their Mar 2');
   });
 });

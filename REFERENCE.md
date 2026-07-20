@@ -5756,11 +5756,12 @@ bubbles/Personal Best/win leaderboard via the API, and the live `/display`
 
 `docs/archive/session-recap-roadmap.md`. A one-tap digest of everything played on a
 single **local calendar date**. Timestamps are stored UTC, so the client also
-sends its UTC offset (`&tz=${new Date().getTimezoneOffset()}`, minutes,
-positive west of UTC) and `getSessionRecap(date, tz)` shifts every `date()`
-bucket by it (`date(t.created_at, '-N minutes')`) — without this, a user west
-of UTC had every game after ~7-8pm local land in tomorrow's recap. An
-absent/invalid `tz` falls back to 0 (raw UTC dates — old-client behavior).
+sends its UTC offset (`&tz=${-new Date().getTimezoneOffset()}` — minutes
+**east** of UTC, the same one wire convention avg-history and on-this-day
+use) and `getSessionRecap(date, tz)` shifts every `date()` bucket by it via
+the shared `_tzModifier()` — without this, a user west of UTC had every game
+after ~7-8pm local land in tomorrow's recap. An absent/invalid `tz` falls
+back to 0 (raw UTC dates — old-client behavior).
 A night that genuinely straddles the LOCAL midnight still splits in two, an
 accepted v1 tradeoff, same as Daily Challenge's own. (`getSummary()`'s
 `todayDarts` deliberately keeps the raw UTC boundary — see its own section.)
@@ -5949,11 +5950,12 @@ derivable from existing X01 turn/dart data, no new columns):
   and returns `max(0, secondHalfAvg - firstHalfAvg)` — clamped at zero, since
   a session where the player got *faster* in the second half isn't a
   fatigue problem to score against them. A 0- or 1-leg session (no second
-  half to compare) reads as a flat 0 **for display only** — that 0 is a
-  "no evidence" sentinel, not a measurement, so every db.js consumer requires
-  `legsCompleted >= 2` before treating `fatigueSplit` as a score (see below);
-  without that floor a one-leg session recorded the mathematically unbeatable
-  minimum and pinned the PB/leaderboard forever.
+  half to compare) returns `{ split: null, tier: null }` — "unmeasurable",
+  not "measured perfectly flat" — so every consumer (PBs, the average, the
+  leaderboard via PBs, and the frontend's Iron badge check / session-end
+  panel) naturally skips it with a null check; without that, a one-leg
+  session recorded the mathematically unbeatable 0 and pinned the
+  PB/leaderboard forever.
 
   | Fatigue Split | Tier |
   |---|---|
@@ -5981,16 +5983,15 @@ derivable from existing X01 turn/dart data, no new columns):
   legs per session, average fatigue split, and a 3-way lifetime trend-pattern
   breakdown (Cliff/Warm Machine/Flat Line session counts) — all scoped to
   **ended** sessions only (`ended_at IS NOT NULL`); the fatigue-split average
-  additionally only averages sessions with `legsCompleted >= 2` (a real
-  first/second-half comparison — sentinel zeros from shorter sessions would
-  drag it toward a flawless 0) and reads `null` when no session qualifies. An
+  only averages sessions with a non-null (measured) `fatigueSplit` and reads
+  `null` when no session qualifies. An
   `'h2h'` mode request always reads as zero sessions (Marathon Mode is
   inherently solo — the same answer a SQL-side `_scope()` join would reach,
   computed directly instead).
 - **Personal Bests** (`getMarathonPersonalBests`): **lowest** fatigue split
   ever (`MIN()` — ascending-is-better, the same polarity The Gauntlet's Scar
-  count uses, over sessions with `legsCompleted >= 2` only) and **most legs
-  completed** in a single session (`MAX()`, a stamina/throughput metric,
+  count uses, over sessions with a measured non-null split only) and **most
+  legs completed** in a single session (`MAX()`, a stamina/throughput metric,
   any session with at least one completed leg).
 - **Home leaderboard** (`getMarathonLeaderboard`): one row per player, their
   own lowest-ever fatigue split, sorted **ascending** — the same direction

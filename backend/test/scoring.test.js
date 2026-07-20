@@ -1988,9 +1988,13 @@ describe('computeFatigueSplit (docs/archive/marathon-mode-roadmap.md)', () => {
     assert.equal(computeFatigueSplit([10, 20]).tier, 'Running on Empty'); // split=10
   });
 
-  test('a 0- or 1-leg session has no second half to compare -- reads as zero fatigue', () => {
-    assert.equal(computeFatigueSplit([]).split, 0);
-    assert.equal(computeFatigueSplit([15]).split, 0);
+  test('a 0- or 1-leg session has no second half to compare -- unmeasurable, not "perfectly flat"', () => {
+    // null (not a sentinel 0) so consumers (PBs, averages, the Iron badge)
+    // naturally skip it — a 1-leg quit must never record the unbeatable minimum.
+    assert.equal(computeFatigueSplit([]).split, null);
+    assert.equal(computeFatigueSplit([]).tier, null);
+    assert.equal(computeFatigueSplit([15]).split, null);
+    assert.equal(computeFatigueSplit([15]).tier, null);
   });
 });
 

@@ -225,9 +225,13 @@ function baseballInningTarget(inning){
 // Starter-relative round completion, shared by the four fixed-round evaluators
 // (Baseball/Shanghai/Halve-It/Pressure Chamber): the leg's final thrower is the
 // player just before the rotated game.starter — NOT index n-1, which is only
-// true in leg 1. The old n-1 form was copy-pasted in all four and had to be
-// patched in all four when the rotation bug was fixed; one helper means a fifth
-// fixed-round mode can't clone a stale copy.
+// true in leg 1 (startNextLeg() rotates game.starter each leg; the old n-1 form
+// advanced the round after the rotated starter's own first visit, skipping the
+// other players' visit for that round and desyncing from the server guard,
+// which derives the round from each player's OWN prior-turn count). Callers
+// evaluate BEFORE game.current advances — it still holds the throwing player's
+// index — the same "not yet advanced" timing every evaluateVisit*() relies on.
+// One helper means a fifth fixed-round mode can't clone a stale copy.
 function isRoundComplete(game){
   return (game.current + 1) % game.players.length === (game.starter || 0);
 }
@@ -239,16 +243,6 @@ function evaluateVisitBaseball(player, darts, game){
   darts.forEach(d=>{ if(d.sector === target) runsThisVisit += d.mult; });
   const totalRuns = (player.totalRuns || 0) + runsThisVisit;
   const inningRuns = Object.assign({}, player.inningRuns, { [inning]: runsThisVisit });
-  // The round (inning) only completes once the LAST player in the rotation has
-  // thrown — game.current still holds the throwing player's own index here,
-  // the same "not yet advanced" timing every other evaluateVisit*() relies on.
-  // "Last in rotation" is starter-RELATIVE: startNextLeg() rotates game.starter
-  // each leg, so the leg's final thrower is the player just before the starter —
-  // NOT index n-1, which is only true in leg 1. The old `current === n-1` check
-  // advanced the round after the rotated starter's own first visit in every leg
-  // after the first, skipping the other players' visit for that round entirely
-  // (and desyncing from the server guard, which derives the round from each
-  // player's OWN prior-turn count).
   const roundComplete = isRoundComplete(game);
   let matchComplete = false, winnerIndex = null;
   if(roundComplete && inning >= 9){
@@ -305,10 +299,6 @@ function evaluateVisitShanghai(player, darts, game){
   const totalPoints = (player.totalPoints || 0) + pointsThisVisit;
   const roundPoints = Object.assign({}, player.roundPoints, { [round]: pointsThisVisit });
   const shanghai = isShanghaiWin(darts, target);
-  // Same "not yet advanced" timing every other evaluateVisit*() relies on —
-  // game.current still holds the throwing player's own index here. Starter-
-  // relative like evaluateVisitBaseball() (see its comment): the leg's final
-  // thrower is the player just before the rotated game.starter, not index n-1.
   const roundComplete = isRoundComplete(game);
   let matchComplete = false, winnerIndex = null;
   if(shanghai){
@@ -772,6 +762,9 @@ function cricketComebackAchieved(worstPointsDeficit){
 // just won is never the game's final one — so there's no "match complete"
 // branch to replicate. Returns true when a set completed (so the caller knows
 // whether the FOLLOWING leg, if replayed, is also a new set).
+// The four fixed-round rebuilds (Baseball/Shanghai/Halve-It/Pressure Chamber)
+// pass setsGateOpen=true unconditionally — their practice variants are forced
+// to 1 leg/1 set at creation, so the gate is a no-op for them either way.
 function _applyLegWin(players, winnerIndex, legsPerSet, setsGateOpen){
   const w = players[winnerIndex];
   w.legsWon += 1;
@@ -952,9 +945,6 @@ function rebuildBaseballState({ names, legsPerSet, turns }){
     p.totalRuns = ev.totalRuns; p.inningRuns = ev.inningRuns;
     p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
     if(ev.matchComplete){
-      // Same _applyLegWin() bookkeeping the X01/Cricket rebuilds use — these
-      // four modes have no practice gate on set completion (their practice
-      // variants are forced to 1 leg/1 set at creation), so setsGateOpen=true.
       pendingNewSet = _applyLegWin(players, ev.winnerIndex, legsPerSet, true);
       pendingNewLeg = true;
       current = ev.winnerIndex;
@@ -999,9 +989,6 @@ function rebuildShanghaiState({ names, legsPerSet, maxRounds, turns }){
     p.totalPoints = ev.totalPoints; p.roundPoints = ev.roundPoints;
     p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
     if(ev.matchComplete){
-      // Same _applyLegWin() bookkeeping the X01/Cricket rebuilds use — these
-      // four modes have no practice gate on set completion (their practice
-      // variants are forced to 1 leg/1 set at creation), so setsGateOpen=true.
       pendingNewSet = _applyLegWin(players, ev.winnerIndex, legsPerSet, true);
       pendingNewLeg = true;
       current = ev.winnerIndex;
@@ -1071,9 +1058,6 @@ function evaluateVisitHalveIt(player, darts, game){
   const priorTotal = player.total || 0;
   const total = halved ? Math.ceil(priorTotal / 2) : priorTotal + gained;
   const roundTotals = Object.assign({}, player.roundTotals, { [round]: total });
-  // Starter-relative round completion, like evaluateVisitBaseball() (see its
-  // comment): the leg's final thrower is the player just before the rotated
-  // game.starter, not index n-1.
   const roundComplete = isRoundComplete(game);
   let matchComplete = false, winnerIndex = null;
   if(roundComplete && round >= maxRounds){
@@ -1117,9 +1101,6 @@ function rebuildHalveItState({ names, legsPerSet, targets, turns }){
     if(ev.halved) p.everHalved = true;
     p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
     if(ev.matchComplete){
-      // Same _applyLegWin() bookkeeping the X01/Cricket rebuilds use — these
-      // four modes have no practice gate on set completion (their practice
-      // variants are forced to 1 leg/1 set at creation), so setsGateOpen=true.
       pendingNewSet = _applyLegWin(players, ev.winnerIndex, legsPerSet, true);
       pendingNewLeg = true;
       current = ev.winnerIndex;
@@ -1424,9 +1405,6 @@ function evaluateVisitPressureChamber(player, darts, game){
   const currentFullHitStreak = result.outcome === 'full' ? (player.currentFullHitStreak || 0) + 1 : 0;
   const bestFullHitStreak = Math.max(player.bestFullHitStreak || 0, currentFullHitStreak);
   const roundResults = Object.assign({}, player.roundResults, { [round]: result.outcome });
-  // Starter-relative round completion, like evaluateVisitBaseball() (see its
-  // comment): the leg's final thrower is the player just before the rotated
-  // game.starter, not index n-1.
   const roundComplete = isRoundComplete(game);
   const maxRounds = (game.config && game.config.rounds) || PRESSURE_ROUNDS;
   let matchComplete = false, winnerIndex = null;
@@ -1472,9 +1450,6 @@ function rebuildPressureChamberState({ gameId, names, legsPerSet, maxRounds, tur
     p.roundResults = ev.roundResults;
     p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
     if(ev.matchComplete){
-      // Same _applyLegWin() bookkeeping the X01/Cricket rebuilds use — these
-      // four modes have no practice gate on set completion (their practice
-      // variants are forced to 1 leg/1 set at creation), so setsGateOpen=true.
       pendingNewSet = _applyLegWin(players, ev.winnerIndex, legsPerSet, true);
       pendingNewLeg = true;
       current = ev.winnerIndex;
@@ -1793,7 +1768,10 @@ const MARATHON_FATIGUE_TIERS = [
 // zero — a player who got FASTER in the second half isn't a fatigue problem
 // to score against them, so that reads identically to zero fatigue (Iron),
 // not a negative/bonus value. A 0- or 1-leg session has no second half to
-// compare against and reads as a flat 0 (no evidence of fatigue either way).
+// compare against and returns { split: null, tier: null } — "unmeasurable",
+// not "measured perfectly flat" — so every consumer (PBs, averages,
+// leaderboard, the Iron badge check) naturally skips it with a null check
+// instead of each re-knowing the 2-leg floor.
 function computeFatigueSplit(dartCountsPerLeg){
   const n = dartCountsPerLeg.length;
   const half = Math.floor(n / 2);
@@ -1801,7 +1779,8 @@ function computeFatigueSplit(dartCountsPerLeg){
   const second = dartCountsPerLeg.slice(half);
   const avg = arr => arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : null;
   const firstAvg = avg(first), secondAvg = avg(second);
-  const split = (firstAvg == null || secondAvg == null) ? 0 : Math.max(0, secondAvg - firstAvg);
+  if(firstAvg == null || secondAvg == null) return { split: null, tier: null };
+  const split = Math.max(0, secondAvg - firstAvg);
   const tier = MARATHON_FATIGUE_TIERS.find(t => split <= t.max).tier;
   return { split: Math.round(split * 100) / 100, tier };
 }
