@@ -1574,7 +1574,7 @@ describe('rebuildGauntletState (docs/archive/saved-games-roadmap.md, pure replay
   });
 });
 
-describe('assignKillerNumbers / shuffleKillerNumbers (docs/archive/game-modes-roadmap.md "Killer")', () => {
+describe('assignKillerNumbers / shuffleKillerNumbers (docs/game-modes-roadmap.md "Killer")', () => {
   test('shuffleKillerNumbers returns a permutation of the input (same multiset), deterministic given a fixed rng', () => {
     let calls = 0;
     const fixedRng = () => { calls++; return 0; };
@@ -1602,7 +1602,7 @@ describe('assignKillerNumbers / shuffleKillerNumbers (docs/archive/game-modes-ro
   });
 });
 
-describe('evaluateDartKiller (docs/archive/game-modes-roadmap.md "Killer")', () => {
+describe('evaluateDartKiller (docs/game-modes-roadmap.md "Killer")', () => {
   const mkPlayers = (overrides) => {
     const base = [
       { name:'A', number:5,  lives:0, isKiller:false, eliminated:false },
@@ -1651,7 +1651,7 @@ describe('evaluateDartKiller (docs/archive/game-modes-roadmap.md "Killer")', () 
   });
 });
 
-describe('rebuildKillerState (docs/archive/game-modes-roadmap.md "Killer", pure replay)', () => {
+describe('rebuildKillerState (docs/game-modes-roadmap.md "Killer", pure replay)', () => {
   const kt = (throwerName, sector, mult) => ({ throwerName, sector, mult });
 
   test('an empty turn history: everyone at 0 lives, nobody a killer, no winner', () => {
@@ -2747,5 +2747,49 @@ describe('rebuildPressureChamberState (docs/archive/saved-games-roadmap.md pure 
     // practice-mode shape) -- setsWon is what actually persists the credit.
     assert.equal(r.players[0].setsWon + r.players[1].setsWon, 1, 'exactly one player is credited the leg/set win');
     assert.equal(r.pressureChamberRound, 1, 'leg complete -> reset to round 1 for the next leg');
+  });
+});
+
+// Starter-relative round completion (shared isRoundComplete()): startNextLeg()
+// rotates game.starter each leg, so in any leg after the first the leg's LAST
+// thrower is the player just before the starter — NOT index n-1. The old
+// `current === players.length - 1` form advanced the round after the rotated
+// starter's own first visit, skipping the other players' visit for that round
+// entirely. These pin the rotated-leg case for all four fixed-round evaluators
+// (the default starter=0 leg-1 case is covered by each evaluator's own tests).
+describe('rotated-starter round completion (leg 2+, starter=1 of 2)', () => {
+  const missDarts = [{sector:0,mult:1},{sector:0,mult:1},{sector:0,mult:1}];
+
+  test('Baseball: the rotated starter opening the leg does NOT complete the inning; the other player does', () => {
+    const p0 = { totalRuns: 0, inningRuns: {} }, p1 = { totalRuns: 0, inningRuns: {} };
+    const starterVisit = evaluateVisitBaseball(p1, missDarts, { players: [p0, p1], current: 1, starter: 1, baseballInning: 1 });
+    assert.equal(starterVisit.roundComplete, false, 'starter (index 1) throws FIRST in this leg');
+    const closerVisit = evaluateVisitBaseball(p0, missDarts, { players: [p0, p1], current: 0, starter: 1, baseballInning: 1 });
+    assert.equal(closerVisit.roundComplete, true, 'index 0 (just before the starter) throws LAST');
+  });
+
+  test('Shanghai: same starter-relative rule', () => {
+    const p0 = { totalPoints: 0, roundPoints: {} }, p1 = { totalPoints: 0, roundPoints: {} };
+    const g = (current) => ({ shanghaiRound: 2, current, starter: 1, players: [p0, p1], config: { rounds: 7 } });
+    assert.equal(evaluateVisitShanghai(p1, missDarts, g(1)).roundComplete, false);
+    assert.equal(evaluateVisitShanghai(p0, missDarts, g(0)).roundComplete, true);
+  });
+
+  test('Halve-It: same starter-relative rule', () => {
+    const p0 = { total: 10, roundTotals: {} }, p1 = { total: 10, roundTotals: {} };
+    const g = (current) => ({ halveItRound: 2, current, starter: 1, players: [p0, p1], config: { targets: HALVE_IT_DEFAULT_TARGETS } });
+    assert.equal(evaluateVisitHalveIt(p1, missDarts, g(1)).roundComplete, false);
+    assert.equal(evaluateVisitHalveIt(p0, missDarts, g(0)).roundComplete, true);
+  });
+
+  test('Pressure Chamber: same starter-relative rule', () => {
+    const mk = (current) => ({ gameId: 999, pressureChamberRound: 2, current, starter: 1,
+      players: [{ totalCp: 0, misses: 0, fullHits: 0, currentFullHitStreak: 0, bestFullHitStreak: 0, roundResults: {}, legDarts: 0 },
+                { totalCp: 0, misses: 0, fullHits: 0, currentFullHitStreak: 0, bestFullHitStreak: 0, roundResults: {}, legDarts: 0 }],
+      config: { rounds: PRESSURE_ROUNDS } });
+    const g1 = mk(1);
+    assert.equal(evaluateVisitPressureChamber(g1.players[1], missDarts, g1).roundComplete, false);
+    const g0 = mk(0);
+    assert.equal(evaluateVisitPressureChamber(g0.players[0], missDarts, g0).roundComplete, true);
   });
 });

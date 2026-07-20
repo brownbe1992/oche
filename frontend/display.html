@@ -358,7 +358,7 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   pcice:5000, pcnervesofsteel:3500, pcnowarmup:3500, pcdeadcalm:3500 };
 // Mirror-copied from frontend/index.html's BADGE_INFO[...].desc / ACH_DESC_FALLBACK —
 // this file has no Badge Case UI to source the text from directly, so it's kept as
-// its own flat map (docs/next-session-plan.md item 1).
+// its own flat map (docs/archive/next-session-plan.md item 1).
 const ACH_DESC = {
   '180': 'Three darts, sixty each — the biggest score possible in one visit.',
   bigfish: 'A 170 checkout — the highest finish possible in a leg.',
@@ -1416,7 +1416,7 @@ const renderers = {
       </div>`;
     }
   },
-  // Killer (docs/archive/game-modes-roadmap.md "Killer"): elimination H2H, always
+  // Killer (docs/game-modes-roadmap.md "Killer"): elimination H2H, always
   // multiple players/cards (never scorecard-layout) — one card per player showing
   // their randomly-assigned number, lives-as-pips (mirrors index.html's own
   // renderGameKiller()), killer status, and kills. s.killerLives comes from
@@ -1501,13 +1501,17 @@ const renderers = {
       </div>`;
     },
     summary(p){
+      // finishUnit()'s DMW legSummary entry is {name, walkedOut, won} — the
+      // walked-out tally is the run's headline result (an earlier version read
+      // p.gameDarts, a field that entry never carries, so the card always
+      // showed 0).
       return `
-      <div class="sum-card">
+      <div class="sum-card ${p.won?'winner':''}">
         <div class="sum-name">${escapeHtml(p.name)}</div>
         <div class="sum-stats">
           <div class="sum-stat">
-            <div class="sv">${num(p.gameDarts)}</div>
-            <div class="sl">Darts This Walk</div>
+            <div class="sv">${num(p.walkedOut)} / 15</div>
+            <div class="sl">Walked Out</div>
           </div>
         </div>
       </div>`;
@@ -1680,7 +1684,7 @@ function cricketMarkGlyph(n, numberLabel){
    Spoken call-outs using the browser's built-in speechSynthesis (SpeechSynthesisUtterance)
    plus a procedurally-synthesized splash effect (Web Audio API) for Big Fish — zero
    server involvement, zero external services, zero new dependencies, matching
-   docs/voice-announcements-roadmap.md. Multi-language support is left entirely to
+   docs/archive/voice-announcements-roadmap.md. Multi-language support is left entirely to
    whatever voice/locale the browser already provides (see
    docs/voice-announcements-i18n-roadmap.md for what a real i18n implementation would
    need beyond that). Off by default; each call-out type is independently toggleable

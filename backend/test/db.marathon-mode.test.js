@@ -199,3 +199,40 @@ describe('getMarathonStatBubbles / getMarathonPersonalBests / getMarathonLeaderb
     assert.equal(row.lowestFatigueSplit, 2);
   });
 });
+
+// computeFatigueSplit() returns a sentinel 0 (with the best 'Iron' tier) for a
+// 0-1-leg session — "no second half to compare", not "measured perfectly flat".
+// The consumers must not treat that sentinel as a score: without the
+// legsCompleted >= 2 floor, ending a session after one leg recorded the
+// mathematically unbeatable minimum, pinning lowestFatigueSplit (and the
+// ascending-sorted fatigue leaderboard) at 0 forever and dragging
+// avgFatigueSplit toward a flawless 0.
+describe('1-leg sessions never score a fatigue split', () => {
+  test('PB/avg ignore the sentinel; a real 2-leg session still scores', () => {
+    const name = 'Marathon_Sentinel';
+    db.addPlayer(name);
+
+    // Session 1: exactly one completed leg, then ended.
+    const s1 = db.startMarathonSession(name, 45);
+    winLeg(s1.gameId, name, 40, 15);
+    db.endMarathonSession(s1.sessionId);
+
+    let pbs = db.getMarathonPersonalBests(name, 'practice');
+    assert.equal(pbs.lowestFatigueSplit, null, 'a 1-leg session records no fatigue split');
+    assert.equal(pbs.mostLegsInASession, 1, 'but still counts for most-legs');
+    let bubbles = db.getMarathonStatBubbles(name, 'practice');
+    assert.equal(bubbles.avgFatigueSplit, null, 'no measurable session yet');
+
+    // Session 2: two completed legs, second slower by 9 darts -> split 9.
+    const s2 = db.startMarathonSession(name, 45);
+    winLeg(s2.gameId, name, 40, 15);
+    const leg2 = db.startNextMarathonLeg(s2.sessionId, name);
+    winLeg(leg2.gameId, name, 40, 24);
+    db.endMarathonSession(s2.sessionId);
+
+    pbs = db.getMarathonPersonalBests(name, 'practice');
+    assert.equal(pbs.lowestFatigueSplit, 9, "the real session's split, not the sentinel 0");
+    bubbles = db.getMarathonStatBubbles(name, 'practice');
+    assert.equal(bubbles.avgFatigueSplit, 9, 'averaged over measurable sessions only');
+  });
+});

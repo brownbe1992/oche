@@ -506,7 +506,7 @@ try { db.exec('ALTER TABLE turns ADD COLUMN target_score INTEGER'); } catch(e) {
 // the same feat as actually finishing from 169. Defaults to 0 for every existing
 // row and every other game type's write path.
 try { db.exec('ALTER TABLE turns ADD COLUMN declared_unsolvable INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
-// Killer (docs/archive/game-modes-roadmap.md "Killer"): which player, if any, had
+// Killer (docs/game-modes-roadmap.md "Killer"): which player, if any, had
 // their own life total change because of THIS dart — the one game type where a
 // single dart can affect a DIFFERENT player than the one who threw it (an attack).
 // NULL means the dart changed nothing at all; equal to the thrower's own player_id
@@ -738,6 +738,14 @@ async function addPlayer(name, out = 'double', opts = {}) {
 // or every past killer game's assignment is orphaned and the player's whole
 // participation replays as inert (zero kills/lives for them AND their opponents).
 function _rewriteKillerConfigNames(playerId, oldName, newName) {
+  // A no-op rename (same exact string — renamePlayer's clash guard deliberately
+  // permits it) must be a no-op HERE too: without this guard, the set-then-delete
+  // below operates on one and the same key and would strip the player's number
+  // assignment from every past killer game — the exact loss this function
+  // exists to prevent. (A pure case-change rename, 'ben' → 'Ben', is NOT a
+  // no-op for the config: object keys are case-sensitive even though player
+  // names are COLLATE NOCASE, so it correctly proceeds.)
+  if (oldName === newName) return;
   const rows = db.prepare(`
     SELECT g.id, g.config FROM games g
       JOIN game_players gp ON gp.game_id = g.id
@@ -896,6 +904,15 @@ function _resolveLoadoutForParticipant(playerId, loadoutId) {
   return row;
 }
 
+// Deduped participant-name list (truthy name, first-occurrence order, exact
+// string compare) — shared by every createGame() branch that validates or keys
+// on the roster (Killer's number assignment, DMW's solo check).
+function _uniquePlayerNames(players) {
+  const names = [];
+  (players || []).forEach(entry => { if (entry.name && !names.includes(entry.name)) names.push(entry.name); });
+  return names;
+}
+
 function createGame({ category, legsPerSet, setsPerGame, players, practice, gameType, config, leagueId, leagueFixtureId }) {
   // gameType/config default to X01 for every caller today (no New Game UI sends
   // anything else yet) — see docs/game-modes-roadmap.md. Accepting them as params
@@ -985,7 +1002,7 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
       ? { sector: Number(e.sector), ring: e.ring }
       : { sector: Number(e.sector) });
   }
-  // Killer (docs/archive/game-modes-roadmap.md "Killer"): the become-a-killer
+  // Killer (docs/game-modes-roadmap.md "Killer"): the become-a-killer
   // lives threshold is a New Game option (validated here, same as every other
   // config field reaching this function from an untrusted client), but the
   // per-player number ASSIGNMENT is never trusted from the client at all — a
@@ -994,8 +1011,11 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   // leg of this same game reuses this same assignment).
   let killerConfig = null;
   if (resolvedGameType === 'killer') {
-    const names = [];
-    (players || []).forEach(entry => { if (entry.name && !names.includes(entry.name)) names.push(entry.name); });
+    // _uniquePlayerNames: one shared dedup rule (truthy name, first-occurrence
+    // order, exact-string compare) for every branch that needs the participant
+    // name list — previously copy-pasted per game type, where a future tweak
+    // (e.g. case-insensitive dedup to match COLLATE NOCASE) could miss a copy.
+    const names = _uniquePlayerNames(players);
     if (names.length < 2) throw httpError(400, 'Killer requires at least 2 players');
     let lives = KILLER_DEFAULT_LIVES;
     if (config && config.lives != null) {
@@ -1016,8 +1036,7 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   // name, not just tidiness.
   let dmwConfig = null;
   if (resolvedGameType === 'dead_man_walking') {
-    const names = [];
-    (players || []).forEach(entry => { if (entry.name && !names.includes(entry.name)) names.push(entry.name); });
+    const names = _uniquePlayerNames(players);
     if (names.length !== 1) throw httpError(400, 'Dead Man Walking is solo only');
     dmwConfig = { rounds: _buildDeadManWalkingRounds(names[0]) };
   }
@@ -1341,7 +1360,7 @@ function addTurn(gameId, t, opts = {}) {
       throw httpError(400, "targetScore does not match this run's next station (in fixed clock-adjacency order, or its one pending repeat)");
     }
   } else if (gameTypeRow && gameTypeRow.game_type === 'killer') {
-    // docs/archive/game-modes-roadmap.md "Killer": scored is the plain non-negative
+    // docs/game-modes-roadmap.md "Killer": scored is the plain non-negative
     // magnitude of this dart's life-total change (0-3); affected_player_id says
     // WHOSE total it landed on (see that column's own migration comment for why).
     // Both are independently re-derived here by replaying every prior dart this
@@ -1523,7 +1542,7 @@ function addTurn(gameId, t, opts = {}) {
     targetScore = Number(t.targetScore);
     if (!Number.isInteger(targetScore) || targetScore < 1 || targetScore > 170) throw httpError(400, 'targetScore must be an integer between 1 and 170');
   }
-  // Killer (docs/archive/game-modes-roadmap.md "Killer"): which player this dart's
+  // Killer (docs/game-modes-roadmap.md "Killer"): which player this dart's
   // life-total change landed on, by name. NULL for every non-Killer turn, and NULL
   // for a Killer dart that changed nothing (see the killer branch above for what's
   // actually enforced). Gated to killer games the same way declaredUnsolvable is
@@ -2146,10 +2165,49 @@ function getChallengeHistory(playerName, todayDate) {
 // carries legWon — the win is only on games.winner_id). Here each game type's real
 // leg winner is derived the same way its own stat functions already do it, so a
 // leg is credited to exactly the player who won it.
+// Shared killer leg-replay pipeline — used by _h2hWonLegs() and
+// _killerLegOutcomesForPlayer(), which previously carried two near-verbatim
+// copies of the same three queries. ONE participants query + ONE turns+darts
+// query per game (the per-LEG query cascade made every /api/stats call an N+1
+// as killer history grew), grouped into legs in JS, each fed through
+// rebuildKillerState() — the same shared replay the write-time guard uses.
+// Statements are prepared once (node:sqlite has no statement cache, so a
+// db.prepare inside the loop paid a full SQL compile per iteration).
+let _killerReplayStmts = null;
+function _replayKillerLegs(gameId, cfg) {
+  if (!_killerReplayStmts) {
+    _killerReplayStmts = {
+      participants: db.prepare(`
+        SELECT p.id, p.name FROM game_players gp JOIN players p ON p.id=gp.player_id
+        WHERE gp.game_id=? ORDER BY gp.rowid`),
+      turns: db.prepare(`
+        SELECT t.set_no AS setNo, t.leg_no AS legNo, t.player_id AS playerId,
+               d.sector AS sector, d.multiplier AS mult
+        FROM turns t JOIN darts d ON d.turn_id=t.id
+        WHERE t.game_id=? ORDER BY t.set_no, t.leg_no, t.id`),
+    };
+  }
+  const participants = _killerReplayStmts.participants.all(gameId);
+  const idToName = new Map(participants.map(pp => [pp.id, pp.name]));
+  const names = participants.map(pp => pp.name);
+  const legGroups = [];
+  let cur = null;
+  for (const r of _killerReplayStmts.turns.all(gameId)) {
+    if (!cur || cur.setNo !== r.setNo || cur.legNo !== r.legNo) {
+      cur = { setNo: r.setNo, legNo: r.legNo, turns: [] };
+      legGroups.push(cur);
+    }
+    cur.turns.push({ throwerName: idToName.get(r.playerId), sector: r.sector, mult: r.mult });
+  }
+  return { participants, names,
+    legs: legGroups.map(l => ({ setNo: l.setNo, legNo: l.legNo,
+      state: rebuildKillerState({ names, numbers: cfg.numbers, turns: l.turns, threshold: cfg.lives }) })) };
+}
+
 function _h2hWonLegs() {
   const gameMeta = new Map(db.prepare(`
     SELECT id, category AS cat, legs_per_set AS legsPerSet
-    FROM games WHERE practice=0 AND player_count>1
+    FROM games g WHERE 1=1 ${_mf('h2h')}
   `).all().map(g => [g.id, g]));
   const won = [];
   const push = (gameId, setNo, legNo, pid) => {
@@ -2164,37 +2222,24 @@ function _h2hWonLegs() {
   db.prepare(`
     SELECT DISTINCT t.game_id AS gameId, t.set_no AS setNo, t.leg_no AS legNo, t.player_id AS pid
     FROM turns t JOIN games g ON g.id=t.game_id
-    WHERE (t.checkout=1 OR t.leg_won=1) AND g.practice=0 AND g.player_count>1
+    WHERE (t.checkout=1 OR t.leg_won=1) ${_mf('h2h')}
       AND g.game_type NOT IN ('pressure_chamber','checkout_trainer','halve_it','shanghai','killer')
   `).all().forEach(r => push(r.gameId, r.setNo, r.legNo, r.pid));
 
   // Killer: no turn ever carries a winner signal, so each leg's winner is derived
-  // by replaying its turn history through rebuildKillerState() — the same shared
-  // replay _killerLegOutcomesForPlayer() and the write-time guard already use.
+  // by replaying its turn history through _replayKillerLegs() — the same shared
+  // pipeline _killerLegOutcomesForPlayer() and the write-time guard use.
   const killerGames = db.prepare(`
     SELECT g.id AS gameId, g.config AS config FROM games g
-    WHERE g.practice=0 AND g.player_count>1 AND g.game_type='killer' AND g.config IS NOT NULL
+    WHERE g.game_type='killer' AND g.config IS NOT NULL ${_mf('h2h')}
   `).all();
   for (const g of killerGames) {
     let cfg = null;
     try { cfg = JSON.parse(g.config); } catch { cfg = null; }
     if (!cfg || !cfg.numbers) continue;
-    const participants = db.prepare(`
-      SELECT p.id, p.name FROM game_players gp JOIN players p ON p.id=gp.player_id
-      WHERE gp.game_id=? ORDER BY gp.rowid
-    `).all(g.gameId);
-    const idToName = new Map(participants.map(pp => [pp.id, pp.name]));
+    const { participants, legs } = _replayKillerLegs(g.gameId, cfg);
     const nameToId = new Map(participants.map(pp => [pp.name, pp.id]));
-    const names = participants.map(pp => pp.name);
-    const legRows = db.prepare('SELECT DISTINCT set_no AS setNo, leg_no AS legNo FROM turns WHERE game_id=? ORDER BY set_no, leg_no').all(g.gameId);
-    for (const { setNo, legNo } of legRows) {
-      const turnRows = db.prepare(`
-        SELECT t.player_id AS playerId, d.sector AS sector, d.multiplier AS mult
-        FROM turns t JOIN darts d ON d.turn_id=t.id
-        WHERE t.game_id=? AND t.set_no=? AND t.leg_no=? ORDER BY t.id
-      `).all(g.gameId, setNo, legNo);
-      const turns = turnRows.map(r => ({ throwerName: idToName.get(r.playerId), sector: r.sector, mult: r.mult }));
-      const state = rebuildKillerState({ names, numbers: cfg.numbers, turns, threshold: cfg.lives });
+    for (const { setNo, legNo, state } of legs) {
       if (state.winner && nameToId.has(state.winner)) push(g.gameId, setNo, legNo, nameToId.get(state.winner));
     }
   }
@@ -2204,7 +2249,7 @@ function _h2hWonLegs() {
   for (const gt of ['shanghai', 'halve_it']) {
     const pids = db.prepare(`
       SELECT DISTINCT gp.player_id AS pid FROM game_players gp JOIN games g ON g.id=gp.game_id
-      WHERE g.practice=0 AND g.player_count>1 AND g.game_type=?
+      WHERE g.game_type=? ${_mf('h2h')}
     `).all(gt).map(r => r.pid);
     for (const pid of pids) {
       const legs = gt === 'shanghai' ? getShanghaiWonLegs(pid, 'h2h') : getHalveItWonLegs(pid, 'h2h');
@@ -2515,23 +2560,11 @@ function getSummary() {
 // Additional homepage stats: win rates, trebleless %, ton+ rate, highest checkout,
 // last game played, today/this-week activity, and dart-pace (when timing data exists).
 function getHomeExtra() {
-  const winRows = db.prepare(`
-    SELECT p.id, p.name,
-      COUNT(*) AS played,
-      SUM(CASE WHEN g.winner_id = p.id THEN 1 ELSE 0 END) AS won
-    FROM game_players gp
-    JOIN players p ON p.id = gp.player_id
-    JOIN games g ON g.id = gp.game_id
-    WHERE g.completed_at IS NOT NULL AND g.practice = 0
-      AND g.player_count > 1
-    GROUP BY p.id
-    HAVING played >= 1
-    ORDER BY won DESC, played ASC
-  `).all();
-  const winLeaderboard = winRows.map(r => ({
-    name: r.name, played: r.played, won: r.won,
-    rate: r.played ? +((r.won / r.played) * 100).toFixed(1) : 0
-  }));
+  // The all-game-types board is the seventh sibling of the six per-type win
+  // leaderboards — same body, just no gameType scope (gameType is optional on
+  // _winLeaderboard for exactly this caller), so a ranking-rule tweak can't
+  // diverge between the homepage board and the per-type boards.
+  const winLeaderboard = _winLeaderboard();
 
   const H2H_WHERE = `(g.practice = 0 AND g.player_count > 1)`;
   const PRACTICE_WHERE = `(g.practice = 1 OR g.player_count = 1)`;
@@ -2703,14 +2736,25 @@ function getHomeExtra() {
 // End-of-Night Session Recap (docs/archive/session-recap-roadmap.md) — one read-time
 // aggregation over a single local calendar date's activity; nothing stored,
 // matching the "nothing pre-aggregated" house rule (CLAUDE.md). "The session"
-// = the local calendar date of turns.created_at/games.completed_at — the same
-// day-boundary convention Daily Challenge/getSummary()'s todayDarts already
-// use (a night that straddles midnight splits in two; accepted for v1, same
-// as Daily Challenge's own tradeoff — see the roadmap doc's Open Questions).
-// date is caller-supplied (server.js passes the query param straight through)
+// = the LOCAL calendar date of turns.created_at/games.completed_at. Timestamps
+// are stored UTC (datetime('now')), so the client also sends its UTC offset
+// (tz = new Date().getTimezoneOffset(), minutes, positive west of UTC) and
+// every date() bucket below shifts by it — without this, a user west of UTC
+// had every game after ~7-8pm local land in TOMORROW's recap, truncating the
+// feature's headline "tonight" use case. An absent/invalid tz falls back to 0
+// (raw UTC dates — the old behavior, still right for a UTC household and for
+// old clients). A night that genuinely straddles the local midnight still
+// splits in two; accepted for v1, same as Daily Challenge's own tradeoff —
+// see the roadmap doc's Open Questions.
+// date is caller-supplied (server.js passes the query params straight through)
 // and validated here, matching getChallengeStatus()'s own pattern.
-function getSessionRecap(date) {
+function getSessionRecap(date, tzOffsetMin) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) throw httpError(400, 'date must be YYYY-MM-DD');
+  let tz = Number(tzOffsetMin ?? 0);
+  if (!Number.isInteger(tz) || tz < -840 || tz > 840) tz = 0;
+  // Validated integer, interpolated as a SQLite datetime modifier: local time
+  // = UTC minus the offset (getTimezoneOffset() is positive west of UTC).
+  const TZ = tz === 0 ? '' : `, '${-tz} minutes'`;
 
   // The recap's spine (docs/archive/session-recap-roadmap.md: "the recap's spine is the
   // games people played against each other") — every H2H game (practice=0,
@@ -2721,8 +2765,8 @@ function getSessionRecap(date) {
     SELECT g.id AS gameId, g.category, g.game_type AS gameType, g.completed_at AS completedAt,
       g.winner_id AS winnerId, w.name AS winnerName
     FROM games g LEFT JOIN players w ON w.id = g.winner_id
-    WHERE g.practice = 0 AND g.player_count > 1 AND g.completed_at IS NOT NULL
-      AND date(g.completed_at) = ?
+    WHERE g.completed_at IS NOT NULL ${_mf('h2h')}
+      AND date(g.completed_at${TZ}) = ?
     ORDER BY g.completed_at ASC
   `).all(date);
   const gamePlayersStmt = db.prepare(`
@@ -2738,7 +2782,7 @@ function getSessionRecap(date) {
   const matchupOrder = [];
   const matchupMap = new Map();
   h2hGames.filter(g => g.players.length === 2).forEach(g => {
-    const key = g.players.slice().sort((a, b) => a.localeCompare(b)).join(' ');
+    const key = g.players.slice().sort((a, b) => a.localeCompare(b)).join('\u0000');
     if (!matchupMap.has(key)) { matchupMap.set(key, { players: g.players.slice(), games: [], record: {} }); matchupOrder.push(key); }
     const m = matchupMap.get(key);
     m.games.push({ gameId: g.gameId, category: g.category, gameType: g.gameType, winner: g.winnerName });
@@ -2751,7 +2795,7 @@ function getSessionRecap(date) {
   const activePlayers = db.prepare(`
     SELECT DISTINCT p.id, p.name FROM turns t
     JOIN players p ON p.id = t.player_id
-    WHERE date(t.created_at) = ?
+    WHERE date(t.created_at${TZ}) = ?
     ORDER BY p.name COLLATE NOCASE
   `).all(date);
 
@@ -2766,28 +2810,28 @@ function getSessionRecap(date) {
   // formula is left for a future pass rather than ballooning this aggregation.
   const gamesWonStmt = db.prepare(`
     SELECT COUNT(*) AS n FROM games g JOIN game_players gp ON gp.game_id = g.id
-    WHERE gp.player_id = ? AND g.winner_id = gp.player_id AND g.practice = 0 AND g.player_count > 1
-      AND date(g.completed_at) = ?
+    WHERE gp.player_id = ? AND g.winner_id = gp.player_id ${_mf('h2h')}
+      AND date(g.completed_at${TZ}) = ?
   `);
   const gamesPlayedStmt = db.prepare(`
     SELECT COUNT(DISTINCT g.id) AS n FROM games g JOIN game_players gp ON gp.game_id = g.id
-    WHERE gp.player_id = ? AND g.practice = 0 AND g.player_count > 1 AND date(g.completed_at) = ?
+    WHERE gp.player_id = ? ${_mf('h2h')} AND date(g.completed_at${TZ}) = ?
   `);
   const dartsTodayStmt = db.prepare(`
     SELECT COUNT(*) AS n FROM darts d JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id
-    WHERE t.player_id = ? AND date(t.created_at) = ? ${NOT_CHECKOUT_TRAINER}
+    WHERE t.player_id = ? AND date(t.created_at${TZ}) = ? ${NOT_CHECKOUT_TRAINER}
   `);
   const oneEightiesStmt = db.prepare(`
     SELECT COUNT(*) AS n FROM turns t JOIN games g ON g.id = t.game_id
-    WHERE t.player_id = ? AND date(t.created_at) = ? AND t.scored = 180 ${X01_ONLY}
+    WHERE t.player_id = ? AND date(t.created_at${TZ}) = ? AND t.scored = 180 ${X01_ONLY}
   `);
   const tonPlusStmt = db.prepare(`
     SELECT COUNT(*) AS n FROM turns t JOIN games g ON g.id = t.game_id
-    WHERE t.player_id = ? AND date(t.created_at) = ? AND t.checkout = 1 AND t.checkout_points >= 100 ${X01_ONLY}
+    WHERE t.player_id = ? AND date(t.created_at${TZ}) = ? AND t.checkout = 1 AND t.checkout_points >= 100 ${X01_ONLY}
   `);
   const bestVisitStmt = db.prepare(`
     SELECT MAX(t.scored) AS v FROM turns t JOIN games g ON g.id = t.game_id
-    WHERE t.player_id = ? AND date(t.created_at) = ? AND t.bust = 0 ${X01_ONLY}
+    WHERE t.player_id = ? AND date(t.created_at${TZ}) = ? AND t.bust = 0 ${X01_ONLY}
   `);
   const bestLegStmt = db.prepare(`
     SELECT MAX(la) AS avg, MIN(darts) AS minDartsAtBest FROM (
@@ -2795,7 +2839,7 @@ function getSessionRecap(date) {
         SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END) AS darts
       FROM turns t JOIN games g ON g.id = t.game_id
       JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
-      WHERE t.player_id = ? AND date(t.created_at) = ? ${X01_ONLY}
+      WHERE t.player_id = ? AND date(t.created_at${TZ}) = ? ${X01_ONLY}
       GROUP BY t.game_id, t.set_no, t.leg_no
       HAVING SUM(t.checkout) > 0
     )
@@ -2828,7 +2872,7 @@ function getSessionRecap(date) {
     JOIN players p ON p.id = t.player_id
     JOIN games g ON g.id = t.game_id
     LEFT JOIN darts d ON d.turn_id = t.id
-    WHERE date(t.created_at) = ? AND (g.practice = 1 OR g.player_count = 1)
+    WHERE date(t.created_at${TZ}) = ? ${_mf('practice')}
     GROUP BY p.id, g.game_type
     ORDER BY p.name COLLATE NOCASE, g.game_type
   `).all(date).map(r => ({
@@ -2847,7 +2891,7 @@ function getSessionRecap(date) {
   const badgesEarnedTonight = db.prepare(`
     SELECT p.name AS player, pb.badge_id AS badgeId, pb.count AS count, pb.earned_at AS earnedAt
     FROM player_badges pb JOIN players p ON p.id = pb.player_id
-    WHERE date(pb.earned_at) = ?
+    WHERE date(pb.earned_at${TZ}) = ?
     ORDER BY pb.earned_at ASC
   `).all(date);
 
@@ -2863,14 +2907,14 @@ function getSessionRecap(date) {
       SELECT CAST(SUM(t.scored) AS REAL)/NULLIF(SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END),0)*3 AS la
       FROM turns t JOIN games g ON g.id = t.game_id
       JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
-      WHERE t.player_id = ? AND date(t.created_at) < ? ${X01_ONLY}
+      WHERE t.player_id = ? AND date(t.created_at${TZ}) < ? ${X01_ONLY}
       GROUP BY t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout) > 0
     )
   `);
   const preFewestDartsStmt = db.prepare(`
     SELECT MIN(legDarts) AS v FROM (
       SELECT COUNT(d.id) AS legDarts FROM turns t JOIN games g ON g.id = t.game_id JOIN darts d ON d.turn_id = t.id
-      WHERE t.player_id = ? AND date(t.created_at) < ? ${NOT_CHECKOUT_TRAINER} ${NOT_HANDICAPPED} ${X01_ONLY}
+      WHERE t.player_id = ? AND date(t.created_at${TZ}) < ? ${NOT_CHECKOUT_TRAINER} ${NOT_HANDICAPPED} ${X01_ONLY}
       GROUP BY t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout) > 0
     )
   `);
@@ -2881,18 +2925,18 @@ function getSessionRecap(date) {
   // would fire a false "new personal best tonight."
   const preHighestCheckoutStmt = db.prepare(`
     SELECT MAX(t.checkout_points) AS v FROM turns t JOIN games g ON g.id = t.game_id
-    WHERE t.player_id = ? AND date(t.created_at) < ? AND t.checkout = 1 AND t.checkout_points IS NOT NULL ${X01_ONLY}
+    WHERE t.player_id = ? AND date(t.created_at${TZ}) < ? AND t.checkout = 1 AND t.checkout_points IS NOT NULL ${X01_ONLY}
   `);
   const tonightFewestDartsStmt = db.prepare(`
     SELECT MIN(legDarts) AS v FROM (
       SELECT COUNT(d.id) AS legDarts FROM turns t JOIN games g ON g.id = t.game_id JOIN darts d ON d.turn_id = t.id
-      WHERE t.player_id = ? AND date(t.created_at) = ? ${NOT_CHECKOUT_TRAINER} ${NOT_HANDICAPPED} ${X01_ONLY}
+      WHERE t.player_id = ? AND date(t.created_at${TZ}) = ? ${NOT_CHECKOUT_TRAINER} ${NOT_HANDICAPPED} ${X01_ONLY}
       GROUP BY t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout) > 0
     )
   `);
   const tonightHighestCheckoutStmt = db.prepare(`
     SELECT MAX(t.checkout_points) AS v FROM turns t JOIN games g ON g.id = t.game_id
-    WHERE t.player_id = ? AND date(t.created_at) = ? AND t.checkout = 1 AND t.checkout_points IS NOT NULL ${X01_ONLY}
+    WHERE t.player_id = ? AND date(t.created_at${TZ}) = ? AND t.checkout = 1 AND t.checkout_points IS NOT NULL ${X01_ONLY}
   `);
   const personalBestsSetTonight = [];
   activePlayers.forEach(p => {
@@ -2918,11 +2962,11 @@ function getSessionRecap(date) {
   const moments = [];
   db.prepare(`
     SELECT t.created_at AS ts, p.name AS player FROM turns t JOIN players p ON p.id = t.player_id JOIN games g ON g.id = t.game_id
-    WHERE date(t.created_at) = ? AND t.scored = 180 ${X01_ONLY}
+    WHERE date(t.created_at${TZ}) = ? AND t.scored = 180 ${X01_ONLY}
   `).all(date).forEach(r => moments.push({ ts: r.ts, type: '180', player: r.player, text: '180!' }));
   db.prepare(`
     SELECT t.created_at AS ts, p.name AS player, t.checkout_points AS points FROM turns t JOIN players p ON p.id = t.player_id JOIN games g ON g.id = t.game_id
-    WHERE date(t.created_at) = ? AND t.checkout = 1 AND t.checkout_points >= 100 ${X01_ONLY}
+    WHERE date(t.created_at${TZ}) = ? AND t.checkout = 1 AND t.checkout_points >= 100 ${X01_ONLY}
   `).all(date).forEach(r => moments.push({ ts: r.ts, type: r.points === 170 ? 'bigfish' : 'tonplus', player: r.player, text: `Checked out ${r.points}` }));
   h2hGames.forEach(g => { if (g.winnerName) moments.push({ ts: g.completedAt, type: 'matchwin', player: g.winnerName, text: `Won ${g.category}` }); });
   badgesEarnedTonight.forEach(b => moments.push({ ts: b.earnedAt, type: 'badge', player: b.player, text: b.badgeId }));
@@ -3129,10 +3173,10 @@ function getCricketMprLeaderboard(mode) {
 
 // Shared H2H win/loss leaderboard body — every game type whose match win lives
 // on games.winner_id ranks identically (played/won/rate, HAVING played >= 1,
-// most wins first, fewest games as tie-break), same shape as getHomeExtra()'s
-// all-types winLeaderboard. H2H-only by nature (practice has no opponent to win
-// against), so no mode param. One body behind six named wrappers, so a tweak to
-// the ranking rules can never silently diverge between game types.
+// most wins first, fewest games as tie-break). H2H-only by nature (practice has
+// no opponent to win against), so no mode param. gameType is optional: omitted,
+// it produces getHomeExtra()'s all-game-types board. One body behind seven
+// callers, so a ranking-rule tweak can never silently diverge between them.
 function _winLeaderboard(gameType) {
   const scope = _scope({ mode: 'h2h', gameType });
   const winRows = db.prepare(`
@@ -4779,7 +4823,8 @@ function getPlayerElo(playerName) {
 function _checkoutLadderAttempts(playerId, scope) {
   return db.prepare(`
     SELECT t.game_id AS gameId, t.leg_no AS legNo, MAX(t.checkout) AS won,
-      MAX(t.target_score) AS target, COUNT(*) AS visits, MAX(t.id) AS lastId
+      MAX(t.target_score) AS target, COUNT(*) AS visits, MAX(t.id) AS lastId,
+      MAX(t.created_at) AS lastAt
     FROM turns t JOIN games g ON g.id=t.game_id
     WHERE t.player_id=? ${scope}
     GROUP BY t.game_id, t.leg_no
@@ -4811,7 +4856,14 @@ function getCheckoutLadderStatBubbles(playerName, mode) {
   // persistent cross-session ladder.
   let currentPosition = null;
   if (attempts.length > 0) {
-    const latestGameId = Math.max(...attempts.map(a => a.gameId));
+    // "Temporally latest" must order by timestamp, not by MAX(game_id):
+    // importPlayerExport() inserts historical games with fresh AUTOINCREMENT
+    // ids, so after an import an old run can carry the highest id — the same
+    // (created_at, id) recency idiom the Elo walk uses. gameId breaks the tie
+    // for two games sharing a second.
+    const latest = attempts.reduce((best, a) =>
+      (!best || a.lastAt > best.lastAt || (a.lastAt === best.lastAt && a.gameId > best.gameId)) ? a : best, null);
+    const latestGameId = latest.gameId;
     const latestAttempts = resolved.filter(a => a.gameId === latestGameId).sort((a, b) => a.legNo - b.legNo);
     let target = 121;
     latestAttempts.forEach(a => { target = a.won ? Math.min(170, target + 1) : Math.max(61, target - 1); });
@@ -5006,15 +5058,16 @@ function getGauntletScarMap(playerName) {
   return { stations };
 }
 
-/* ---------- Killer (docs/archive/game-modes-roadmap.md "Killer") ----------
+/* ---------- Killer (docs/game-modes-roadmap.md "Killer") ----------
    games.winner_id/completed_at cover games-played/win-rate for free, exactly
    like Baseball/Cricket's own win leaderboards (Killer plays real best-of-N
    matches, DB.completeGame() called once the match is decided) — no replay
    needed for those two. Kills/lives-lost/"survived without becoming a
    killer" are genuinely new per-LEG metrics with no existing column to read,
    so they're derived by replaying every leg's own turn history through
-   rebuildKillerState() (frontend/scoring.js), the same shared function the
-   write-time guard uses. */
+   _replayKillerLegs() (the shared pipeline _h2hWonLegs() also uses, itself
+   built on rebuildKillerState() — the same function the write-time guard
+   uses). */
 function _killerLegOutcomesForPlayer(playerName, playerId, scope) {
   const games = db.prepare(`
     SELECT DISTINCT g.id AS gameId, g.config AS config
@@ -5023,24 +5076,12 @@ function _killerLegOutcomesForPlayer(playerName, playerId, scope) {
   `).all(playerId);
   const outcomes = [];
   games.forEach(g => {
-    const cfg = g.config ? JSON.parse(g.config) : null;
+    let cfg = null;
+    try { cfg = g.config ? JSON.parse(g.config) : null; } catch { cfg = null; }
     if (!cfg || !cfg.numbers) return;
-    const participants = db.prepare(`
-      SELECT p.id, p.name FROM game_players gp JOIN players p ON p.id=gp.player_id
-      WHERE gp.game_id=? ORDER BY gp.rowid
-    `).all(g.gameId);
-    const idToName = new Map(participants.map(pp => [pp.id, pp.name]));
-    const names = participants.map(pp => pp.name);
+    const { names, legs } = _replayKillerLegs(g.gameId, cfg);
     if (!names.includes(playerName)) return;
-    const legRows = db.prepare('SELECT DISTINCT set_no AS setNo, leg_no AS legNo FROM turns WHERE game_id=? ORDER BY set_no, leg_no').all(g.gameId);
-    legRows.forEach(({ setNo, legNo }) => {
-      const turnRows = db.prepare(`
-        SELECT t.player_id AS playerId, d.sector AS sector, d.multiplier AS mult
-        FROM turns t JOIN darts d ON d.turn_id=t.id
-        WHERE t.game_id=? AND t.set_no=? AND t.leg_no=? ORDER BY t.id
-      `).all(g.gameId, setNo, legNo);
-      const turns = turnRows.map(r => ({ throwerName: idToName.get(r.playerId), sector: r.sector, mult: r.mult }));
-      const state = rebuildKillerState({ names, numbers: cfg.numbers, turns, threshold: cfg.lives });
+    legs.forEach(({ state }) => {
       const me = state.players.find(pl => pl.name === playerName);
       if (!me) return;
       outcomes.push({ won: state.winner === playerName, kills: me.kills, livesLost: me.livesLost, becameKiller: me.isKiller, eliminated: me.eliminated });
@@ -5065,7 +5106,7 @@ function getKillerStatBubbles(playerName, mode) {
     winRate: matchRow.played ? (matchRow.won / matchRow.played * 100) : null,
     avgKillsPerLeg: n ? (outcomes.reduce((s, o) => s + o.kills, 0) / n) : null,
     avgLivesLostPerLeg: n ? (outcomes.reduce((s, o) => s + o.livesLost, 0) / n) : null,
-    // A curiosity stat (docs/archive/game-modes-roadmap.md's own sketch): how often
+    // A curiosity stat (docs/game-modes-roadmap.md's own sketch): how often
     // this player rode out an entire leg alive without ever becoming a killer
     // themselves — everyone else eliminated each other while they sat back.
     survivedWithoutKillerRate: n ? (outcomes.filter(o => !o.becameKiller && !o.eliminated).length / n * 100) : null,
@@ -6127,7 +6168,7 @@ function getDartAnalytics(playerName, mode) {
   return { topSectors, trebleRates, checkoutRoutes };
 }
 
-/* ---------- coaching insights (docs/coaching-insights-roadmap.md) ----------
+/* ---------- coaching insights (docs/archive/coaching-insights-roadmap.md) ----------
    Turns tables that already exist (getDartAnalytics/getCheckoutRoutes above,
    getPersonalBests) into plain-language practice guidance. No new data
    collection — X01 only (checkout routes and bust parity are X01-specific
@@ -6760,6 +6801,12 @@ function importPlayerExport(payload) {
   }
 
   const idMap = new Map(); // exported (source-server) player id -> this server's local player id
+  // exported player id -> { exportName, localName }: killer configs key number
+  // assignments by NAME, so any game whose config still carries the export's
+  // name for a player who resolved to a DIFFERENT local name (renamed row,
+  // merge-survivor alias, or collision uniquify below) must have that key
+  // re-mapped at insert time — the import-path twin of _rewriteKillerConfigNames().
+  const nameMap = new Map();
 
   function resolveStub(stub) {
     if (!stub || typeof stub.uuid !== 'string' || !stub.uuid || typeof stub.id !== 'number') {
@@ -6768,6 +6815,7 @@ function importPlayerExport(payload) {
     const existing = db.prepare('SELECT id, name FROM players WHERE uuid = ?').get(stub.uuid);
     if (existing) {
       idMap.set(stub.id, existing.id);
+      nameMap.set(stub.id, { exportName: stub.name, localName: existing.name });
       return { name: existing.name, uuid: stub.uuid, created: false, renamed: false };
     }
     // docs/archive/player-merge-roadmap.md: a merged-away player's uuid no longer exists on
@@ -6780,6 +6828,7 @@ function importPlayerExport(payload) {
     ).get(stub.uuid);
     if (aliased) {
       idMap.set(stub.id, aliased.id);
+      nameMap.set(stub.id, { exportName: stub.name, localName: aliased.name });
       return { name: aliased.name, uuid: stub.uuid, created: false, renamed: false };
     }
     let finalName = validatePlayerName(stub.name);
@@ -6792,6 +6841,7 @@ function importPlayerExport(payload) {
     db.prepare('INSERT INTO players (name, out_mode, uuid) VALUES (?, ?, ?)').run(finalName, 'double', stub.uuid);
     const created = db.prepare('SELECT id FROM players WHERE uuid = ?').get(stub.uuid);
     idMap.set(stub.id, created.id);
+    nameMap.set(stub.id, { exportName: stub.name, localName: finalName });
     return { name: finalName, uuid: stub.uuid, created: true, renamed: finalName !== originalName };
   }
 
@@ -6829,10 +6879,35 @@ function importPlayerExport(payload) {
     const existingId = _findMatchingLocalGame(g, targetIds);
     if (existingId) { gameIdMap.set(g.id, existingId); skippedGameIds.add(g.id); gamesSkipped++; continue; }
 
+    // games.config is untrusted file content and the read paths parse it
+    // unguarded — reject malformed JSON at the boundary rather than inserting a
+    // row that would 500 every later turn write / saved-games read. For killer
+    // games, re-key the name-keyed number assignment to each participant's
+    // RESOLVED local name (see nameMap above); comparison is case-sensitive on
+    // purpose — object keys are, even though player names collate NOCASE.
+    let configJson = g.config ?? null;
+    if (configJson != null) {
+      let cfg;
+      try { cfg = JSON.parse(configJson); } catch {
+        throw httpError(400, `Import file has malformed JSON in games.config (source game ${g.id})`);
+      }
+      if (g.game_type === 'killer' && cfg && cfg.numbers) {
+        for (const gp of participants) {
+          const m = nameMap.get(gp.player_id);
+          if (!m || m.exportName === m.localName) continue;
+          if (Object.prototype.hasOwnProperty.call(cfg.numbers, m.exportName)) {
+            cfg.numbers[m.localName] = cfg.numbers[m.exportName];
+            delete cfg.numbers[m.exportName];
+          }
+        }
+        configJson = JSON.stringify(cfg);
+      }
+    }
+
     const info = insertGame.run(
       g.category, g.legs_per_set, g.sets_per_game, g.created_at, g.completed_at,
       g.winner_id != null ? (idMap.get(g.winner_id) ?? null) : null,
-      g.practice, g.game_type, g.config, g.player_count
+      g.practice, g.game_type, configJson, g.player_count
     );
     const newGameId = Number(info.lastInsertRowid);
     gameIdMap.set(g.id, newGameId);
@@ -7058,6 +7133,11 @@ function mergePlayers(sourceName, targetName) {
     // verified above — so none of the composite PKs can collide).
     run('UPDATE game_players SET player_id = ? WHERE player_id = ?', target.id, source.id);
     run('UPDATE turns SET player_id = ? WHERE player_id = ?', target.id, source.id);
+    // affected_player_id (Killer: whose life total the dart changed) is a player
+    // reference too — added via bare ALTER with no FK, so a missed reassignment
+    // wouldn't error or cascade, it would just dangle at the deleted source id
+    // and silently NULL out on any later export/import round trip.
+    run('UPDATE turns SET affected_player_id = ? WHERE affected_player_id = ?', target.id, source.id);
     run('UPDATE games SET winner_id = ? WHERE winner_id = ?', target.id, source.id);
 
     // Badges: shared ones fold into the target (MAX count, earliest earned_at),
@@ -8850,12 +8930,17 @@ function getMarathonStatBubbles(playerName, mode) {
   if (mode === 'h2h') return empty;
   const sessions = db.prepare('SELECT id FROM marathon_sessions WHERE player_id = ? AND ended_at IS NOT NULL').all(p.id);
   if (!sessions.length) return empty;
-  let totalLegs = 0, totalSplit = 0;
+  let totalLegs = 0, totalSplit = 0, splitSessions = 0;
   const trendBreakdown = { cliff: 0, warmMachine: 0, flatLine: 0, inconclusive: 0 };
   sessions.forEach(row => {
     const d = getMarathonSessionDetail(row.id);
     totalLegs += d.legsCompleted;
-    totalSplit += d.fatigueSplit;
+    // computeFatigueSplit() returns a sentinel 0 for a 0-1-leg session ("no
+    // second half to compare against") — that's "unmeasurable", not "measured
+    // perfectly flat", so only sessions with a real first/second-half split
+    // (2+ completed legs) may enter the average; sentinel zeros would silently
+    // drag avgFatigueSplit toward a flawless 0.
+    if (d.legsCompleted >= 2) { totalSplit += d.fatigueSplit; splitSessions++; }
     if (d.trend === 'The Cliff') trendBreakdown.cliff++;
     else if (d.trend === 'The Warm Machine') trendBreakdown.warmMachine++;
     else if (d.trend === 'Flat Line') trendBreakdown.flatLine++;
@@ -8864,7 +8949,7 @@ function getMarathonStatBubbles(playerName, mode) {
   return {
     sessionsCompleted: sessions.length,
     avgLegsPerSession: +(totalLegs / sessions.length).toFixed(1),
-    avgFatigueSplit: +(totalSplit / sessions.length).toFixed(1),
+    avgFatigueSplit: splitSessions ? +(totalSplit / splitSessions).toFixed(1) : null,
     trendBreakdown,
     // Lifetime total (not the average above) -- feeds the "lifetime legs
     // completed inside Marathon sessions" milestone ladder, which needs an
@@ -8891,7 +8976,11 @@ function getMarathonPersonalBests(playerName, mode) {
   sessions.forEach(row => {
     const d = getMarathonSessionDetail(row.id);
     if (d.legsCompleted === 0) return;
-    if (lowestSplit == null || d.fatigueSplit < lowestSplit) lowestSplit = d.fatigueSplit;
+    // fatigueSplit is a sentinel 0 (not a measurement) for a 1-leg session —
+    // without this floor, ending a session after one leg records the
+    // mathematically unbeatable minimum and pins this PB (and tops the
+    // ascending-sorted fatigue leaderboard) forever.
+    if (d.legsCompleted >= 2 && (lowestSplit == null || d.fatigueSplit < lowestSplit)) lowestSplit = d.fatigueSplit;
     if (mostLegs == null || d.legsCompleted > mostLegs) mostLegs = d.legsCompleted;
   });
   return { lowestFatigueSplit: lowestSplit, mostLegsInASession: mostLegs };
@@ -8921,6 +9010,36 @@ function httpError(status, message) {
 // behind once every one of its participants had been deleted. Clean up any
 // that are already sitting in the database.
 pruneOrphanedGames();
+
+// Self-heal on boot: killer configs orphaned by renames/merges performed BEFORE
+// _rewriteKillerConfigNames() existed (config.numbers is keyed by player NAME —
+// a pre-fix rename left the old name in every past killer game's config, so the
+// player's whole participation replays as inert). Recoverable deterministically
+// whenever exactly one config key matches no current participant and exactly
+// one participant claims no key — remap that pair. Ambiguous games (2+ of each,
+// e.g. two players renamed pre-fix) are left untouched rather than guessed at.
+function reconcileKillerConfigNames() {
+  const games = db.prepare(`SELECT id, config FROM games WHERE game_type = 'killer' AND config IS NOT NULL`).all();
+  const partStmt = db.prepare(`
+    SELECT p.name FROM game_players gp JOIN players p ON p.id = gp.player_id
+    WHERE gp.game_id = ? ORDER BY gp.rowid`);
+  const upd = db.prepare('UPDATE games SET config = ? WHERE id = ?');
+  for (const g of games) {
+    let cfg;
+    try { cfg = JSON.parse(g.config); } catch { continue; }
+    if (!cfg || !cfg.numbers) continue;
+    const names = partStmt.all(g.id).map(r => r.name);
+    const keys = Object.keys(cfg.numbers);
+    const orphanKeys = keys.filter(k => !names.includes(k));
+    const unclaimed = names.filter(n => !keys.includes(n));
+    if (orphanKeys.length === 1 && unclaimed.length === 1) {
+      cfg.numbers[unclaimed[0]] = cfg.numbers[orphanKeys[0]];
+      delete cfg.numbers[orphanKeys[0]];
+      upd.run(JSON.stringify(cfg), g.id);
+    }
+  }
+}
+reconcileKillerConfigNames();
 
 module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer, registerDeletePlayerGuard,

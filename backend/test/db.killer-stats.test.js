@@ -1,6 +1,6 @@
 'use strict';
 // Committed tests for backend/db.js's Killer stat formulas
-// (docs/archive/game-modes-roadmap.md "Killer", REFERENCE.md's Killer section) —
+// (docs/game-modes-roadmap.md "Killer", REFERENCE.md's Killer section) —
 // against a scratch SQLite database. Not exhaustive; see db.x01-stats.test.js's
 // header comment for the same "focused, not 100% coverage" framing.
 //
@@ -168,5 +168,22 @@ describe('renamePlayer — killer config rewrite', () => {
 
     const bubbles = db.getKillerStatBubbles('Killer_Rn_A2', 'h2h');
     assert.equal(bubbles.avgKillsPerLeg, 1, 'replay still credits the kill under the new name');
+  });
+});
+
+describe('renamePlayer — no-op rename is config-safe', () => {
+  test('renaming a player to their exact current name leaves killer configs untouched', () => {
+    const a = 'Killer_Noop_A', b = 'Killer_Noop_B';
+    db.addPlayer(a); db.addPlayer(b);
+    const { gameId, config } = killerGame([a, b]);
+    const na = config.numbers[a];
+
+    // Saving the rename dialog without changing anything is a legitimate no-op
+    // (the clash guard deliberately permits it). The rewrite's set-then-delete
+    // would otherwise operate on one and the same key and strip the assignment
+    // from every past killer game.
+    db.renamePlayer(a, a);
+    const cfg = JSON.parse(db._db.prepare('SELECT config FROM games WHERE id = ?').get(gameId).config);
+    assert.equal(cfg.numbers[a], na, "the player's number assignment survives a no-op rename");
   });
 });

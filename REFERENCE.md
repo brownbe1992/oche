@@ -420,10 +420,12 @@ darts.forEach(d => { if (d.sector === target) runsThisVisit += d.mult; });
 ```
 
 **The round only completes once the LAST player in the rotation has thrown**
-(`game.current === game.players.length - 1`, read before `game.current`
-advances — the same timing every other `evaluateVisit*()` relies on). A solo
-practice game is always "last in rotation," so it advances one inning per
-visit. The **win condition is only checked on that round-completing visit,
+(`isRoundComplete(game)`: `(game.current + 1) % game.players.length ===
+(game.starter || 0)` — starter-RELATIVE, because `startNextLeg()` rotates
+`game.starter` each leg, so the leg's final thrower is the player just before
+the starter, not index n-1; read before `game.current` advances — the same
+timing every other `evaluateVisit*()` relies on). A solo practice game is
+always "last in rotation," so it advances one inning per visit. The **win condition is only checked on that round-completing visit,
 and only once inning 9 has been reached**: every player's total (including
 the just-evaluated visit) is compared, and the match ends only if there's a
 single unique highest total — an exact tie among the leaders continues into
@@ -2978,6 +2980,16 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   — the last remapped through the same source-id → local-id map as every
   other player reference, never copied raw. Each uses `?? null`/`?? 0`
   fallbacks so exports written before a column existed stay importable.
+  `games.config` is validated as JSON at the boundary (`400` on a malformed
+  entry — the read paths parse it unguarded), and a **killer** game's
+  name-keyed `config.numbers` is re-keyed to each participant's RESOLVED
+  local name (the import-path twin of `_rewriteKillerConfigNames()`:
+  `resolveStub()` can attach a game to a differently-named local player via
+  a uuid match onto a renamed row, a merge-survivor alias, or a collision
+  uniquify to `"Name (2)"` — an unmapped key would make the whole game
+  replay inert). Configs orphaned by pre-fix renames/merges are healed once
+  at boot by `reconcileKillerConfigNames()` (remaps only the unambiguous
+  one-orphan-key/one-unclaimed-participant case).
   `league_id` is always imported as `NULL` (leagues aren't part of a
   per-player export). **Duplicate-import guard**: before inserting each game,
   checks for an existing local game with the same
@@ -3057,7 +3069,9 @@ and a **Preview merge…** button; there is no merge without a preview.
   **single transaction** (any failure rolls back to the exact pre-merge
   state) across every table with a FK into `players.id`:
   - **Plain reassignment** (no uniqueness constraint, or no shared row can
-    exist once the blockers pass): `game_players`, `turns`,
+    exist once the blockers pass): `game_players`, `turns` (both `player_id`
+    AND `affected_player_id` — the Killer whose-life-changed column has no FK,
+    so a missed reassignment would dangle silently rather than error),
     `games.winner_id`, `daily_challenge_attempts`,
     `tournaments.champion_id`/`runner_up_id`, `tournament_players`,
     `tournament_matches.player1_id`/`player2_id`/`winner_id`,
@@ -4446,8 +4460,8 @@ awarded in `declareUnsolvable()`).
 
 **No live scoreboard**: this game type never writes to `liveState` and
 `/display` never renders it — `pushLive()` is a deliberate no-op for
-`game.gameType === 'checkout_trainer'`, a genuinely simpler surface than every
-other mode in that one respect.
+`game.gameType === 'checkout_trainer'` (The Gauntlet later joined the same
+skip list — see its own "No live-scoreboard sync" section).
 
 Nothing from the original design remains deferred: difficulty tiers shipped
 first (the `config.difficulty` toggle above), and the trick-question/
@@ -5507,10 +5521,15 @@ Wind** (pass a repeat attempt clean after failing the original with 2).
 ### No live-scoreboard sync
 
 Same conclusion Checkout Trainer reached, for the same reason: single-device,
-solo, no second-screen `/display` broadcast. No `pushLive()` call anywhere
-in this game type's code path, and no `renderers.gauntlet` exists in
-`display.html` — an ordinary in-game UI state (`renderGameGauntlet()`) is
-enough, the same as Checkout Trainer's own scoring screen.
+solo, no second-screen `/display` broadcast. Enforced INSIDE `pushLive()`
+itself (`game.gameType === 'gauntlet'` early-returns, same skip as
+checkout_trainer) — the mode's own code path never pushes, but generic call
+sites (achievement broadcasts, end-game) run for every mode, and before the
+skip they leaked Gauntlet snapshots that `/display` could only render through
+the X01 fallback card with no station/scar fields. No `renderers.gauntlet`
+exists in `display.html` — an ordinary in-game UI state
+(`renderGameGauntlet()`) is enough, the same as Checkout Trainer's own
+scoring screen.
 
 ### Saved games
 
@@ -5736,12 +5755,18 @@ bubbles/Personal Best/win leaderboard via the API, and the live `/display`
 ## 29. End-of-Night Session Recap
 
 `docs/archive/session-recap-roadmap.md`. A one-tap digest of everything played on a
-single **local calendar date** — the same day-boundary convention Daily
-Challenge and `getSummary()`'s `todayDarts` already use (a night that
-straddles midnight splits in two, an accepted v1 tradeoff, same as Daily
-Challenge's own). Purely read-time: `getSessionRecap(date)` (`backend/db.js`)
-aggregates over existing `turns`/`games`/`player_badges` rows — nothing is
-stored, so any past date is recomputable for free.
+single **local calendar date**. Timestamps are stored UTC, so the client also
+sends its UTC offset (`&tz=${new Date().getTimezoneOffset()}`, minutes,
+positive west of UTC) and `getSessionRecap(date, tz)` shifts every `date()`
+bucket by it (`date(t.created_at, '-N minutes')`) — without this, a user west
+of UTC had every game after ~7-8pm local land in tomorrow's recap. An
+absent/invalid `tz` falls back to 0 (raw UTC dates — old-client behavior).
+A night that genuinely straddles the LOCAL midnight still splits in two, an
+accepted v1 tradeoff, same as Daily Challenge's own. (`getSummary()`'s
+`todayDarts` deliberately keeps the raw UTC boundary — see its own section.)
+Purely read-time: `getSessionRecap()` (`backend/db.js`) aggregates over
+existing `turns`/`games`/`player_badges` rows — nothing is stored, so any
+past date is recomputable for free.
 
 ### Scope: H2H is the spine, solo is a footnote
 
@@ -5924,7 +5949,11 @@ derivable from existing X01 turn/dart data, no new columns):
   and returns `max(0, secondHalfAvg - firstHalfAvg)` — clamped at zero, since
   a session where the player got *faster* in the second half isn't a
   fatigue problem to score against them. A 0- or 1-leg session (no second
-  half to compare) reads as a flat 0.
+  half to compare) reads as a flat 0 **for display only** — that 0 is a
+  "no evidence" sentinel, not a measurement, so every db.js consumer requires
+  `legsCompleted >= 2` before treating `fatigueSplit` as a score (see below);
+  without that floor a one-leg session recorded the mathematically unbeatable
+  minimum and pinned the PB/leaderboard forever.
 
   | Fatigue Split | Tier |
   |---|---|
@@ -5951,13 +5980,18 @@ derivable from existing X01 turn/dart data, no new columns):
 - **Stat bubbles** (`getMarathonStatBubbles`): sessions completed, average
   legs per session, average fatigue split, and a 3-way lifetime trend-pattern
   breakdown (Cliff/Warm Machine/Flat Line session counts) — all scoped to
-  **ended** sessions only (`ended_at IS NOT NULL`); an `'h2h'` mode request
-  always reads as zero sessions (Marathon Mode is inherently solo — the same
-  answer a SQL-side `_scope()` join would reach, computed directly instead).
+  **ended** sessions only (`ended_at IS NOT NULL`); the fatigue-split average
+  additionally only averages sessions with `legsCompleted >= 2` (a real
+  first/second-half comparison — sentinel zeros from shorter sessions would
+  drag it toward a flawless 0) and reads `null` when no session qualifies. An
+  `'h2h'` mode request always reads as zero sessions (Marathon Mode is
+  inherently solo — the same answer a SQL-side `_scope()` join would reach,
+  computed directly instead).
 - **Personal Bests** (`getMarathonPersonalBests`): **lowest** fatigue split
   ever (`MIN()` — ascending-is-better, the same polarity The Gauntlet's Scar
-  count uses) and **most legs completed** in a single session (`MAX()`, a
-  stamina/throughput metric).
+  count uses, over sessions with `legsCompleted >= 2` only) and **most legs
+  completed** in a single session (`MAX()`, a stamina/throughput metric,
+  any session with at least one completed leg).
 - **Home leaderboard** (`getMarathonLeaderboard`): one row per player, their
   own lowest-ever fatigue split, sorted **ascending** — the same direction
   The Gauntlet's own leaderboard uses.
@@ -6027,8 +6061,9 @@ always decided by totals after the fixed round count; Shanghai's can end
 early, self-referentially, on the exact visit that threw it.
 
 Absent a Shanghai, **the round only completes once the LAST player in the
-rotation has thrown** (`game.current === game.players.length - 1`, read
-before `game.current` advances — same timing convention as
+rotation has thrown** (the shared starter-relative `isRoundComplete(game)` —
+see Baseball's own section for the formula and why it is NOT index n-1; read
+before `game.current` advances, same timing convention as
 `evaluateVisitBaseball()`), and **the win condition is only checked on that
 round-completing visit, and only once `config.rounds` has been reached**:
 every player's total (including the just-evaluated visit) is compared, and
@@ -6231,8 +6266,8 @@ never lower (both are covered by committed tests). A non-halved visit simply
 adds its gain: `total = priorTotal + gained`.
 
 **The round only completes once the LAST player in the rotation has thrown**
-(`game.current === game.players.length - 1`, same timing convention as
-Baseball/Shanghai), and **the win condition is only checked on that
+(the shared starter-relative `isRoundComplete(game)` — see Baseball's own
+section for the formula; same timing convention as Baseball/Shanghai), and **the win condition is only checked on that
 round-completing visit, and only once every configured target has been
 reached**: totals are compared, and the match ends only on a single unique
 highest total — a tie continues into extra rounds, repeating the final
@@ -6670,13 +6705,18 @@ own dark, self-aware humor per the roadmap doc's tone note:
 
 ### Live scoreboard
 
-Single-device, solo, no cross-device `/display` sync needed — the same
-conclusion Checkout Trainer/Gauntlet both reached, so there is deliberately
-**no `renderers.dead_man_walking` in `display.html`** (its own badge ids
-are still hand-copied into `display.html`'s `ACH_LABELS`/`ACH_DURATION`/
-`ACH_DESC` maps, per the standing convention, so the live achievement
-overlay's headline isn't blank for a session watching `/display` while
-these badges are earned elsewhere). `renderGameDeadManWalking()`
+Dead Man Walking DOES broadcast to `/display` (unlike Checkout Trainer and
+Gauntlet, which skip the push in `pushLive()` itself):
+`enterTurnDeadManWalking()`/`renderGameDeadManWalking()` push every committed
+turn, and `renderers.dead_man_walking` in `display.html` renders the card —
+round N/15, remaining score, darts left this round, and the Walked Out tally —
+from three DMW-only top-level live keys (`dmwBudget`, `dmwDartsUsed`,
+`dmwWalkedOut`, registered in `ALLOWED_LIVE_KEYS`; the round number rides on
+the generic `legNo`, remaining score inside `players[]`). The end-of-run
+summary card reads the DMW `legSummary` entry's `walkedOut`. Its badge ids are
+also hand-copied into `display.html`'s `ACH_LABELS`/`ACH_DURATION`/`ACH_DESC`
+maps, per the standing convention, so the live achievement overlay's headline
+isn't blank while these badges are earned. `renderGameDeadManWalking()`
 (`frontend/index.html`) shows current round N/15, the deficit (`p.score`),
 a **dart-count countdown** (never a wall-clock one — a deliberately
 different flavor from The Pressure Chamber's own timer) computed as

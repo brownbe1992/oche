@@ -141,3 +141,27 @@ describe('getCheckoutLadderLeaderboard', () => {
     assert.ok(board.indexOf(rowB) < board.indexOf(rowA), 'the higher best-target row ranks first');
   });
 });
+
+// An attempt only counts once it's RESOLVED — won, or all 3 visits used
+// (`a.won || a.visits >= 3`, the same check rebuildCheckoutLadderState()
+// applies). A still-in-progress attempt (1-2 visits, no checkout — permanently
+// so for a paused/abandoned game) previously counted as a completed failure:
+// currentPosition dropped a rung early and attempts/successRate inflated.
+describe('unresolved attempts are excluded until they resolve', () => {
+  test('a 1-visit attempt with no checkout does not count or move the ladder', () => {
+    const a = 'CLStats_Unresolved_A';
+    db.addPlayer(a);
+
+    const g = checkoutLadderGame(a);
+    // Leg 1: resolved win at 121 -> position climbs to 122.
+    checkoutLadderTurn(g.gameId, a, 1, [[19, 3], [20, 3], [2, 2]], { scored: 121, checkout: true, checkoutPoints: 121, targetScore: 121 });
+    // Leg 2: ONE visit at 122, no checkout — unresolved (2 visits still available).
+    checkoutLadderTurn(g.gameId, a, 2, [[1, 1]], { scored: 1, targetScore: 122 });
+
+    const bubbles = db.getCheckoutLadderStatBubbles(a, 'practice');
+    assert.equal(bubbles.attempts, 1, 'the unresolved attempt is not yet an attempt');
+    assert.equal(bubbles.successRate, 100, 'not yet a failure either');
+    assert.equal(bubbles.currentPosition, 122,
+      'the ladder stays at the rung the unresolved attempt is being thrown at (not dropped to 121)');
+  });
+});

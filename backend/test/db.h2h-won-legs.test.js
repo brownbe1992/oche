@@ -141,3 +141,33 @@ describe('BUG-29 — H2H per-category legs/sets credit the real per-leg winner',
     assert.equal(stats[J].h2hSetsWonByCat['501'], undefined, 'the loser took no set');
   });
 });
+
+// Killer writes NO winner signal at all (its addTurn branch rejects checkout and
+// never sets leg_won — the win lives only on games.winner_id), so _h2hWonLegs()
+// derives each leg's winner by replaying its turns through the shared
+// _replayKillerLegs() pipeline. Before that derivation existed, every Killer H2H
+// record read "N games · 0 sets · 0 legs" forever.
+describe('BUG-29 — Killer H2H legs derive from replay (no stored signal)', () => {
+  test('the last player standing is credited with the leg', () => {
+    const A = 'K_H2H_A', B = 'K_H2H_B';
+    db.addPlayer(A); db.addPlayer(B);
+    const g = db.createGame({
+      category: 'Killer', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'killer', config: {}, players: [{ name: A }, { name: B }],
+    });
+    const na = g.config.numbers[A], nb = g.config.numbers[B];
+    const kt = (player, sector, mult, scored, affectedPlayer) => db.addTurn(g.gameId, {
+      player, set: 1, leg: 1, scored, bust: false, checkout: false, checkoutPoints: null,
+      affectedPlayer, darts: [{ dartNo: 1, sector, multiplier: mult }],
+    });
+    kt(A, na, 3, 3, A);  // A: treble own number -> 3 lives, becomes a killer
+    kt(B, nb, 1, 1, B);  // B: single own number -> 1 life
+    kt(A, nb, 1, 1, B);  // A attacks B's last life -> B eliminated, A last standing
+    db.completeGame(g.gameId, A);
+
+    const stats = db.computeStats();
+    assert.equal(stats[A].h2hLegsWonByCat['Killer'], 1, 'the survivor is credited with the leg');
+    assert.equal(stats[B].h2hLegsWonByCat['Killer'], undefined, 'the eliminated player gets none');
+    assert.equal(stats[A].h2hSetsWonByCat['Killer'], 1, 'and the (1-leg) set');
+  });
+});

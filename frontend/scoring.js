@@ -222,6 +222,16 @@ function cricketStoneColdAchieved(gamePointsReceived, playerCount){
 function baseballInningTarget(inning){
   return inning <= 9 ? inning : 9;
 }
+// Starter-relative round completion, shared by the four fixed-round evaluators
+// (Baseball/Shanghai/Halve-It/Pressure Chamber): the leg's final thrower is the
+// player just before the rotated game.starter — NOT index n-1, which is only
+// true in leg 1. The old n-1 form was copy-pasted in all four and had to be
+// patched in all four when the rotation bug was fixed; one helper means a fifth
+// fixed-round mode can't clone a stale copy.
+function isRoundComplete(game){
+  return (game.current + 1) % game.players.length === (game.starter || 0);
+}
+
 function evaluateVisitBaseball(player, darts, game){
   const inning = game.baseballInning;
   const target = baseballInningTarget(inning);
@@ -239,7 +249,7 @@ function evaluateVisitBaseball(player, darts, game){
   // after the first, skipping the other players' visit for that round entirely
   // (and desyncing from the server guard, which derives the round from each
   // player's OWN prior-turn count).
-  const roundComplete = (game.current + 1) % game.players.length === (game.starter || 0);
+  const roundComplete = isRoundComplete(game);
   let matchComplete = false, winnerIndex = null;
   if(roundComplete && inning >= 9){
     const totals = game.players.map((pl, i) => i === game.current ? totalRuns : (pl.totalRuns || 0));
@@ -256,12 +266,18 @@ function evaluateVisitBaseball(player, darts, game){
 // pure-predicate shape, just parameterized by the inning's fixed target instead
 // of "any number 1-20", since a Baseball visit only ever scores against the one
 // number evaluateVisitBaseball() already computes as `target`.
-function isBaseballCycle(darts, target){
+// Shared core predicate: all 3 darts on `target`, multipliers a permutation of
+// {1,2,3}. ONE body behind three names — isBaseballCycle (a badge feat),
+// isShanghaiWin (an instant match win), isShanghaiVisit (the X01 feat badge) —
+// so a rule tweak can never make a badge and a match win disagree about the
+// same three physical darts.
+function isSingleDoubleTreble(darts, target){
   if(!darts || darts.length !== 3) return false;
   if(!darts.every(d => d.sector === target)) return false;
   const mults = darts.map(d => d.mult).sort();
   return mults[0]===1 && mults[1]===2 && mults[2]===3;
 }
+function isBaseballCycle(darts, target){ return isSingleDoubleTreble(darts, target); }
 
 /* ---------- Shanghai ----------
    docs/archive/shanghai-roadmap.md. Baseball is the direct structural template: a
@@ -279,12 +295,7 @@ function shanghaiRoundTarget(round, maxRounds){
 // meaning attached — same pure-predicate shape (all 3 darts on target,
 // multipliers a permutation of {1,2,3}), just named for what it means in
 // THIS game: a Shanghai visit isn't a bonus feat here, it's the whole game.
-function isShanghaiWin(darts, target){
-  if(!darts || darts.length !== 3) return false;
-  if(!darts.every(d => d.sector === target)) return false;
-  const mults = darts.map(d => d.mult).sort();
-  return mults[0]===1 && mults[1]===2 && mults[2]===3;
-}
+function isShanghaiWin(darts, target){ return isSingleDoubleTreble(darts, target); }
 function evaluateVisitShanghai(player, darts, game){
   const round = game.shanghaiRound;
   const maxRounds = (game.config && game.config.rounds) || 7;
@@ -298,7 +309,7 @@ function evaluateVisitShanghai(player, darts, game){
   // game.current still holds the throwing player's own index here. Starter-
   // relative like evaluateVisitBaseball() (see its comment): the leg's final
   // thrower is the player just before the rotated game.starter, not index n-1.
-  const roundComplete = (game.current + 1) % game.players.length === (game.starter || 0);
+  const roundComplete = isRoundComplete(game);
   let matchComplete = false, winnerIndex = null;
   if(shanghai){
     matchComplete = true; winnerIndex = game.current;
@@ -654,9 +665,7 @@ function isShanghaiVisit(darts){
   if(!darts || darts.length !== 3) return false;
   const sector = darts[0].sector;
   if(sector < 1 || sector > 20) return false;
-  if(!darts.every(dart => dart.sector === sector)) return false;
-  const mults = darts.map(dart => dart.mult).sort();
-  return mults[0]===1 && mults[1]===2 && mults[2]===3;
+  return isSingleDoubleTreble(darts, sector);
 }
 
 // Daily Challenge badge trigger thresholds (REFERENCE.md's Achievements section,
@@ -943,13 +952,10 @@ function rebuildBaseballState({ names, legsPerSet, turns }){
     p.totalRuns = ev.totalRuns; p.inningRuns = ev.inningRuns;
     p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
     if(ev.matchComplete){
-      const w = players[ev.winnerIndex];
-      w.legsWon += 1;
-      if(w.legsWon >= legsPerSet){
-        w.setsWon += 1;
-        players.forEach(pp => { pp.legsWon = 0; });
-        pendingNewSet = true;
-      }
+      // Same _applyLegWin() bookkeeping the X01/Cricket rebuilds use — these
+      // four modes have no practice gate on set completion (their practice
+      // variants are forced to 1 leg/1 set at creation), so setsGateOpen=true.
+      pendingNewSet = _applyLegWin(players, ev.winnerIndex, legsPerSet, true);
       pendingNewLeg = true;
       current = ev.winnerIndex;
     } else {
@@ -993,13 +999,10 @@ function rebuildShanghaiState({ names, legsPerSet, maxRounds, turns }){
     p.totalPoints = ev.totalPoints; p.roundPoints = ev.roundPoints;
     p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
     if(ev.matchComplete){
-      const w = players[ev.winnerIndex];
-      w.legsWon += 1;
-      if(w.legsWon >= legsPerSet){
-        w.setsWon += 1;
-        players.forEach(pp => { pp.legsWon = 0; });
-        pendingNewSet = true;
-      }
+      // Same _applyLegWin() bookkeeping the X01/Cricket rebuilds use — these
+      // four modes have no practice gate on set completion (their practice
+      // variants are forced to 1 leg/1 set at creation), so setsGateOpen=true.
+      pendingNewSet = _applyLegWin(players, ev.winnerIndex, legsPerSet, true);
       pendingNewLeg = true;
       current = ev.winnerIndex;
     } else {
@@ -1071,7 +1074,7 @@ function evaluateVisitHalveIt(player, darts, game){
   // Starter-relative round completion, like evaluateVisitBaseball() (see its
   // comment): the leg's final thrower is the player just before the rotated
   // game.starter, not index n-1.
-  const roundComplete = (game.current + 1) % game.players.length === (game.starter || 0);
+  const roundComplete = isRoundComplete(game);
   let matchComplete = false, winnerIndex = null;
   if(roundComplete && round >= maxRounds){
     const totals = game.players.map((pl, i) => i === game.current ? total : (pl.total || 0));
@@ -1114,13 +1117,10 @@ function rebuildHalveItState({ names, legsPerSet, targets, turns }){
     if(ev.halved) p.everHalved = true;
     p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
     if(ev.matchComplete){
-      const w = players[ev.winnerIndex];
-      w.legsWon += 1;
-      if(w.legsWon >= legsPerSet){
-        w.setsWon += 1;
-        players.forEach(pp => { pp.legsWon = 0; });
-        pendingNewSet = true;
-      }
+      // Same _applyLegWin() bookkeeping the X01/Cricket rebuilds use — these
+      // four modes have no practice gate on set completion (their practice
+      // variants are forced to 1 leg/1 set at creation), so setsGateOpen=true.
+      pendingNewSet = _applyLegWin(players, ev.winnerIndex, legsPerSet, true);
       pendingNewLeg = true;
       current = ev.winnerIndex;
     } else {
@@ -1188,7 +1188,10 @@ const PRESSURE_TARGET_POOL = [
   { type:'finish', score:121, label:'Finish 121', difficulty:'finish' },
 ];
 // Sector-target ring name -> the dart multiplier that satisfies it.
-const PRESSURE_RING_MULT = { single:1, double:2, treble:3 };
+// Same immutable dartboard fact as HALVE_IT_RING_MULT — one shared object, two
+// exported names, so a future ring nuance can never make the two modes grade
+// the same physical dart differently.
+const PRESSURE_RING_MULT = HALVE_IT_RING_MULT;
 
 // The 8 Pressure Modifiers (docs/archive/pressure-chamber-roadmap.md "The 8 Pressure
 // Modifiers"). `cpMultiplier` is the "modifier multiplier applied on top of
@@ -1424,7 +1427,7 @@ function evaluateVisitPressureChamber(player, darts, game){
   // Starter-relative round completion, like evaluateVisitBaseball() (see its
   // comment): the leg's final thrower is the player just before the rotated
   // game.starter, not index n-1.
-  const roundComplete = (game.current + 1) % game.players.length === (game.starter || 0);
+  const roundComplete = isRoundComplete(game);
   const maxRounds = (game.config && game.config.rounds) || PRESSURE_ROUNDS;
   let matchComplete = false, winnerIndex = null;
   if(roundComplete && round >= maxRounds){
@@ -1469,13 +1472,10 @@ function rebuildPressureChamberState({ gameId, names, legsPerSet, maxRounds, tur
     p.roundResults = ev.roundResults;
     p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
     if(ev.matchComplete){
-      const w = players[ev.winnerIndex];
-      w.legsWon += 1;
-      if(w.legsWon >= legsPerSet){
-        w.setsWon += 1;
-        players.forEach(pp => { pp.legsWon = 0; });
-        pendingNewSet = true;
-      }
+      // Same _applyLegWin() bookkeeping the X01/Cricket rebuilds use — these
+      // four modes have no practice gate on set completion (their practice
+      // variants are forced to 1 leg/1 set at creation), so setsGateOpen=true.
+      pendingNewSet = _applyLegWin(players, ev.winnerIndex, legsPerSet, true);
       pendingNewLeg = true;
       current = ev.winnerIndex;
     } else {
@@ -1651,7 +1651,7 @@ function rebuildGauntletState({ turns }){
   };
 }
 
-/* ---------- Killer (docs/archive/game-modes-roadmap.md "Killer") ----------
+/* ---------- Killer (docs/game-modes-roadmap.md "Killer") ----------
    Elimination-format H2H: each player is randomly assigned their own number
    once per MATCH (not re-rolled per leg — the same assignment carries across
    every leg, only a genuine new match/rematch re-rolls). Hitting your own

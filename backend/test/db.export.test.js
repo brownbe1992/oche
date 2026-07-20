@@ -380,3 +380,39 @@ describe('importPlayerExport (docs/archive/data-export-roadmap.md — the export
     assert.equal(totalGraceGames, 2, "Grace's single row now has both the shared game and her own solo game");
   });
 });
+
+// Killer configs key number assignments by player NAME. resolveStub() can
+// attach an imported game to a local player whose name differs from the
+// export's (uuid match onto a renamed row, merge-survivor alias, collision
+// uniquify) — the import must re-key config.numbers to the RESOLVED local
+// name, the import-path twin of _rewriteKillerConfigNames(), or the whole
+// game replays inert (no participant claims the assigned number).
+describe('importPlayerExport — killer config keys follow resolved local names', () => {
+  test('a uuid-matched player renamed locally gets their config key re-mapped', () => {
+    db.addPlayer('exp_kcfg_a'); db.addPlayer('exp_kcfg_b');
+    const kg = db.createGame({ category: 'Killer', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'killer', config: {}, players: [{ name: 'exp_kcfg_a' }, { name: 'exp_kcfg_b' }] });
+    const before = JSON.parse(db._db.prepare('SELECT config FROM games WHERE id = ?').get(kg.gameId).config);
+    const numA = before.numbers['exp_kcfg_a'];
+    db.addTurn(kg.gameId, { player: 'exp_kcfg_a', set: 1, leg: 1, scored: 1, bust: false, checkout: false,
+      checkoutPoints: null, affectedPlayer: 'exp_kcfg_a', darts: [{ dartNo: 1, sector: numA, multiplier: 1 }] });
+    db.completeGame(kg.gameId, 'exp_kcfg_a');
+
+    const exportPayload = db.getPlayerExport('exp_kcfg_a');
+    // Simulate the divergence: the local player is renamed AFTER the export was
+    // written, and the local copy of the game is gone (so the duplicate guard
+    // doesn't skip the insert — e.g. restoring onto a partially-wiped server).
+    db.renamePlayer('exp_kcfg_a', 'exp_kcfg_a2');
+    db._db.prepare('DELETE FROM games WHERE id = ?').run(kg.gameId);
+
+    const result = db.importPlayerExport(exportPayload);
+    assert.equal(result.player.name, 'exp_kcfg_a2', 'resolved via uuid onto the renamed row');
+    assert.equal(result.gamesImported, 1);
+
+    const imported = db._db.prepare(
+      `SELECT g.config FROM games g WHERE g.game_type='killer' ORDER BY g.id DESC LIMIT 1`).get();
+    const cfg = JSON.parse(imported.config);
+    assert.equal(cfg.numbers['exp_kcfg_a2'], numA, "the assignment now keys the RESOLVED local name");
+    assert.ok(!('exp_kcfg_a' in cfg.numbers), 'the export-name key is gone');
+  });
+});

@@ -318,3 +318,25 @@ describe('mergePlayers — marathon sessions and killer configs', () => {
     assert.equal(after.numbers['merge_k_opp'], before.numbers['merge_k_opp'], "the opponent's key is untouched");
   });
 });
+
+describe('mergePlayers — turns.affected_player_id follows the merge', () => {
+  test("killer turns that affected the source point at the target after the merge", () => {
+    db.addPlayer('merge_ap_src'); db.addPlayer('merge_ap_tgt'); db.addPlayer('merge_ap_opp');
+    const kg = db.createGame({ category: 'Killer', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'killer', config: {}, players: [{ name: 'merge_ap_src' }, { name: 'merge_ap_opp' }] });
+    const cfg = JSON.parse(db._db.prepare('SELECT config FROM games WHERE id = ?').get(kg.gameId).config);
+    // The opponent attacks the source: the turn's affected_player_id records the source.
+    db.addTurn(kg.gameId, { player: 'merge_ap_opp', set: 1, leg: 1, scored: 1, bust: false, checkout: false,
+      checkoutPoints: null, affectedPlayer: 'merge_ap_src',
+      darts: [{ dartNo: 1, sector: cfg.numbers['merge_ap_src'], multiplier: 1 }] });
+    const srcId = pid('merge_ap_src');
+
+    db.mergePlayers('merge_ap_src', 'merge_ap_tgt');
+    // affected_player_id has no FK (bare ALTER column), so a missed reassignment
+    // would dangle silently at the deleted source id rather than erroring.
+    assert.equal(db._db.prepare('SELECT COUNT(*) n FROM turns WHERE affected_player_id = ?').get(srcId).n, 0,
+      'no turn still points at the deleted source id');
+    assert.equal(db._db.prepare('SELECT COUNT(*) n FROM turns WHERE affected_player_id = ?').get(pid('merge_ap_tgt')).n, 1,
+      'the attack is now attributed to the target');
+  });
+});

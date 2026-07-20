@@ -924,7 +924,7 @@ describe('addTurn — The Gauntlet sequence/repeat-count/scored-range must match
   });
 });
 
-describe('createGame — Killer number assignment/validation (docs/archive/game-modes-roadmap.md "Killer")', () => {
+describe('createGame — Killer number assignment/validation (docs/game-modes-roadmap.md "Killer")', () => {
   test('rejects fewer than 2 players', () => {
     db.addPlayer('K_Solo');
     assert.throws(() => db.createGame({
@@ -968,7 +968,7 @@ describe('createGame — Killer number assignment/validation (docs/archive/game-
   });
 });
 
-describe('addTurn — Killer scored/affectedPlayer must match the derived life-change, when opted in (docs/archive/game-modes-roadmap.md "Killer")', () => {
+describe('addTurn — Killer scored/affectedPlayer must match the derived life-change, when opted in (docs/game-modes-roadmap.md "Killer")', () => {
   function killerGame(names, lives) {
     return db.createGame({
       category: 'Killer', legsPerSet: 1, setsPerGame: 1, practice: 0,

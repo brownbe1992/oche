@@ -821,7 +821,7 @@
           <div class="cricket-number-grid" id="doubles-target-grid" role="group" aria-label="Doubles to practice"></div>
         </div>
 
-        <!-- Killer options (Killer game type only, docs/archive/game-modes-roadmap.md
+        <!-- Killer options (Killer game type only, docs/game-modes-roadmap.md
              "Killer") — each player is randomly assigned their own number when the
              match starts (re-rolled for a rematch, never re-shown/editable here —
              there's nothing to configure about the assignment itself, only the
@@ -1640,7 +1640,7 @@ const DB = {
       // choice (New Game's "League Game" entry), not a re-validated hint the way the
       // old leagueId picker was — see docs/archive/new-game-flow-roadmap.md.
       leagueFixtureId:meta.leagueFixtureId}); this.gameId=r.gameId;
-      // Killer (docs/archive/game-modes-roadmap.md "Killer"): the server assigns
+      // Killer (docs/game-modes-roadmap.md "Killer"): the server assigns
       // each player's number randomly at createGame() time (never trusted from
       // the client) and returns it as {name: number} on r.config.numbers — this
       // is the only way the client ever learns them, so assign onto the actual
@@ -1832,7 +1832,7 @@ let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, 
   doublesTargets:[], loadoutByName:{}, leagueFixtureId:null, pendingFixtures:[],
   checkoutTrainerMode:'freeform', checkoutTrainerDifficulty:'full', checkoutTrainerTricks:false,
   checkoutTrainerPin:null,
-  // Killer (docs/archive/game-modes-roadmap.md "Killer"): how many lives it takes
+  // Killer (docs/game-modes-roadmap.md "Killer"): how many lives it takes
   // to become a killer — the only thing this mode's own setup step configures
   // (player numbers are randomly assigned server-side, not chosen here).
   killerLives:KILLER_DEFAULT_LIVES,
@@ -2167,7 +2167,7 @@ function renderHomeRecapTeaser(){
   const el = document.getElementById('home-recap-teaser-body');
   if(!card || !el) return;
   const today = localDateStr();
-  Backend.get(`/api/session-recap?date=${today}`).then(r=>{
+  Backend.get(`/api/session-recap?date=${today}&tz=${new Date().getTimezoneOffset()}`).then(r=>{
     if(!r || !r.totalGames){ card.hidden = true; return; }
     card.hidden = false;
     const players = new Set();
@@ -2187,7 +2187,7 @@ function loadSessionRecap(date){
   const el = document.getElementById('session-recap-body');
   if(!el) return;
   el.innerHTML = `<p class="pp-meta">Loading…</p>`;
-  Backend.get(`/api/session-recap?date=${encodeURIComponent(date)}`)
+  Backend.get(`/api/session-recap?date=${encodeURIComponent(date)}&tz=${new Date().getTimezoneOffset()}`)
     .then(r=>{ _lastRecap = r; renderSessionRecapBody(r); })
     .catch(()=>{ el.innerHTML = `<p class="pp-meta">Couldn't load the recap for this date.</p>`; });
 }
@@ -2198,14 +2198,16 @@ function badgeLabelFor(id){
   const b = BADGE_INFO[id];
   return b ? `${b.icon} ${escapeHtml(b.label)}` : escapeHtml(id);
 }
-// Timestamps come back as UTC "YYYY-MM-DD HH:MM:SS" (same shape fmtDate()
-// already handles) — this shows the local time-of-day instead of the date,
-// since the moments list is already grouped under one date heading.
+// Timestamps come back as UTC "YYYY-MM-DD HH:MM:SS" — parsed via the shared
+// parseSqliteTimestamp() (scoring.js), NOT an inline re-implementation: that
+// helper exists precisely because this parsing gap was inline-fixed three
+// separate times before Ghost mode reshipped the same 'Invalid Date' bug.
+// Shows the local time-of-day instead of the date, since the moments list is
+// already grouped under one date heading.
 function fmtRecapTime(ts){
   if(!ts) return '';
-  const hasTz = /[zZ]|[+-]\d\d:?\d\d$/.test(ts);
-  const d = new Date(ts.replace(' ','T') + (hasTz ? '' : 'Z'));
-  if(isNaN(d)) return '';
+  const d = parseSqliteTimestamp(ts);
+  if(!d || isNaN(d)) return '';
   return d.toLocaleTimeString(undefined, { hour:'numeric', minute:'2-digit' });
 }
 function renderSessionRecapBody(r){
@@ -2444,6 +2446,14 @@ function renderHome(){
       aroundTheWorld:{ progress:atwp }};
     renderHomeContent();
   }).catch(()=>{
+    // Promise.all is all-or-nothing: ONE failed request out of ~47 (a transient
+    // network drop, a server restart, a 429 from the global per-IP limiter —
+    // each Home visit burns 47 of its 300/min budget) lands here. With the
+    // stale-while-revalidate fast path above, the user may be looking at a
+    // fully-populated dashboard from cached homeData — keep it (stale-but-real
+    // beats blank; the next visit retries) and only fall back to the empty
+    // skeleton when there's nothing cached at all.
+    if(homeData) return;
     homeData={s:{players:roster.length,games:null,sets:null,legs:null,darts:null,oneEighties:null,bigFish:null,nineDarters:null,practiceLegs:null},
       extra:null,
       h2h:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
@@ -2474,6 +2484,12 @@ function switchHomeTab(tab){
   // X01 rather than leaving its tab selected-but-hidden showing solo data
   // mislabeled as H2H.
   if(tab==='h2h' && GAME_TYPES[homeGameType] && GAME_TYPES[homeGameType].soloOnly) homeGameType='x01';
+  // The inverse bounce: an h2hOnly type (Killer) has no Practice content — its
+  // button is hidden under that tab by renderHomeGameTypeTabs()'s filter, but
+  // without this reset homeGameType stayed 'killer' and renderHomeTabBody()
+  // kept dispatching to its H2H-only renderer under the Practice heading, with
+  // no game-type button highlighted.
+  if(tab==='practice' && GAME_TYPES[homeGameType] && GAME_TYPES[homeGameType].h2hOnly) homeGameType='x01';
   renderHomeGameTypeTabs();
   renderHomeTabBody();
 }
@@ -3119,7 +3135,7 @@ function renderHomeTabBodyDeadManWalking(){
   `;
 }
 
-// Killer's Home page leaderboard (docs/archive/game-modes-roadmap.md "Killer") —
+// Killer's Home page leaderboard (docs/game-modes-roadmap.md "Killer") —
 // win rate, H2H only, same "Most Wins"-style shape Cricket/Baseball's own win
 // leaderboards use (getKillerWinLeaderboard() shares their exact {name,played,
 // won,rate} row shape, since Killer's win/loss lives on games.winner_id too).
@@ -3817,6 +3833,7 @@ function showMergePreviewModal(p){
     [m.leagueFixtures, 'league fixture', 'league fixtures'],
     [m.dartComponents, 'dart component', 'dart components'], [m.loadouts, 'loadout', 'loadouts'],
     [m.ghostRaces, 'ghost race', 'ghost races'],
+    [m.marathonSessions, 'Marathon session', 'Marathon sessions'],
   ].filter(([n])=>n>0).map(([n,s,pl])=>`<li>${n} ${n===1?esc(s):esc(pl)}</li>`).join('') || '<li>No history to move — the duplicate is empty.</li>';
   const resLines = [
     ...(r.sharedBadges.length ? [`🔁 ${r.sharedBadges.length} badge(s) both players earned — kept once, with the higher count and earliest earned date`] : []),
@@ -3827,6 +3844,10 @@ function showMergePreviewModal(p){
     ...b.sharedTournaments.map(t=>`⛔ Both enrolled in tournament "${t.name}" — a bracket can't hold one person twice; resolve it by hand first`),
     ...b.sharedLeagues.map(l=>`⛔ Both enrolled in league "${l.name}" — a season can't hold one person twice; resolve it by hand first`),
     ...b.ambiguousChallengeDates.map(d=>`⛔ Both attempted the ${d} Daily Challenge (both finished, or neither) — delete one via Settings → Daily Challenge first`),
+    // Without this line, a merge blocked SOLELY by a saved-game slot collision
+    // showed the "blocked" modal with an empty reasons list — the admin had no
+    // way to discover they must resume/abandon a paused game first.
+    ...(b.savedGameCollisions||[]).map(c=>`⛔ Both players have a saved (paused) game in the same ${c.gameType || 'game'} slot — resume or abandon one via New Game → Saved Games first`),
   ].map(t=>`<li>${esc(t)}</li>`).join('');
   document.getElementById('modal-body').innerHTML = `
     <h3 style="margin:0 0 8px;font-size:16px">Merge preview</h3>
@@ -4308,7 +4329,7 @@ function setGameType(type){
   if(type === 'cricket') renderCricketNumberGrid();
   if(type === 'halve_it') setHalveItPreset(setup.halveItPreset);
 }
-// Killer lives threshold (docs/archive/game-modes-roadmap.md "Killer") — a simple
+// Killer lives threshold (docs/game-modes-roadmap.md "Killer") — a simple
 // 3-way segmented control, same aria-pressed toggle pattern as
 // setCheckoutTrainerDifficulty().
 // Shanghai round count (docs/archive/shanghai-roadmap.md) — a 2-way segmented control,
@@ -5070,7 +5091,7 @@ async function startGame(){
     : gameType === 'bobs_27' ? {}
     : gameType === 'checkout_ladder' ? {}
     : gameType === 'gauntlet' ? {}
-    // lives (docs/archive/game-modes-roadmap.md "Killer"): the only setup choice
+    // lives (docs/game-modes-roadmap.md "Killer"): the only setup choice
     // this mode has — player numbers are randomly assigned server-side
     // (createGame()'s killerConfig), never chosen or sent from here.
     : gameType === 'killer' ? { lives: setup.killerLives || KILLER_DEFAULT_LIVES }
@@ -5169,7 +5190,7 @@ async function startGame(){
     gauntletFinalMisses: [],  // settled per-station final miss counts so far, in station order
     gauntletCleanStreak: 0,   // current run of consecutive clean (0-miss) stations
     gauntletBestCleanStreak: 0, // this run's own peak clean streak (checked against GAUNTLET_STREAK_MILESTONE_LADDERS at run end)
-    // Killer only (docs/archive/game-modes-roadmap.md) — killerLives is the
+    // Killer only (docs/game-modes-roadmap.md) — killerLives is the
     // become-a-killer threshold chosen at setup; killerDartsThisVisit tracks
     // progress through the current 3-dart visit (advanceKillerTurn() resets it);
     // killerFirstBloodAwarded is match-lifetime (never reset per leg, unlike
@@ -7839,7 +7860,7 @@ const ACH_DURATION = { '180':2500, 'bigfish':2500, 'ninedarter':6000,
   pcice:5000, pcnervesofsteel:3500, pcnowarmup:3500, pcdeadcalm:3500 };
 // The live overlay's "type" key predates BADGE_INFO's persisted badge_id for these
 // four milestones — bridges the two so the overlay can reuse BADGE_INFO[...].desc
-// instead of duplicating copy (docs/next-session-plan.md item 1).
+// instead of duplicating copy (docs/archive/next-session-plan.md item 1).
 const ACH_TYPE_TO_BADGE_ID = {
   first100checkout: 'first_100_checkout', grudgematch: 'grudge_match',
   aroundtheclock: 'around_the_clock', aroundtheworld: 'around_the_world',
@@ -8294,7 +8315,7 @@ BADGE_INFO['pcnowarmup'] = { icon:'⏱️', label:'No Warmup Needed',
 BADGE_INFO['pcdeadcalm'] = { icon:'🃏', label:'Dead Calm, Steady Hands',
   desc:'Land a full hit under Dead Calm — no modifier, no excuses.', pressureChamber:true };
 
-/* ---------- Killer (docs/archive/game-modes-roadmap.md "Killer") ---------- Three
+/* ---------- Killer (docs/game-modes-roadmap.md "Killer") ---------- Three
    one-off badges, all recurring (a real repeatable feat across different
    matches) — no lifetime ladder proposed for this game type. */
 BADGE_INFO['killerfirstblood'] = { icon:'🩸', label:'First Blood',
@@ -8509,7 +8530,7 @@ function spawnConfetti(root, count){
 // more than one badge at once, but the overlay can only show one at a time — so
 // every celebration goes through queueBadge() instead of calling showAchievement()
 // directly, and they're played back one at a time instead of the second silently
-// clobbering the first. See docs/simultaneous-achievements-roadmap.md.
+// clobbering the first. See docs/archive/simultaneous-achievements-roadmap.md.
 let achTimer = null;
 let currentAchType = null;
 // Which turn's snapshot (game.lastTurnSnapshot at the moment it was queued) the
@@ -9319,7 +9340,7 @@ function trackBadgeForUndo(snap, playerName, badgeId){
 // these all fire on a per-visit/per-leg/per-match event that won't spuriously
 // re-trigger). The overlay celebration itself already happened via queueBadge()
 // synchronously, before this network round-trip even starts — deliberately not
-// blocked on it (docs/next-session-plan.md item 1). Once the award API's
+// blocked on it (docs/archive/next-session-plan.md item 1). Once the award API's
 // { newlyEarned, count } response comes back: the shareable moment card (if a
 // momentType/momentOpts pair was given) fires with the real count folded into its
 // statLine, and the live overlay itself gets the same count patched in via
@@ -9462,7 +9483,7 @@ function liveSnapshot(message){
     // playerSnapshotCheckoutLadder().
     checkoutLadderTarget: game.gameType === 'checkout_ladder' ? (game.checkoutLadderTarget || 121) : null,
     checkoutLadderVisits: game.gameType === 'checkout_ladder' ? (game.checkoutLadderVisits || 0) : null,
-    // Killer only (docs/archive/game-modes-roadmap.md "Killer"): the become-a-killer
+    // Killer only (docs/game-modes-roadmap.md "Killer"): the become-a-killer
     // lives threshold — per-player number/lives/isKiller/eliminated/kills ride
     // inside the players[] array above via playerSnapshotKiller().
     killerLives: game.gameType === 'killer' ? (game.killerLives || KILLER_DEFAULT_LIVES) : null,
@@ -10627,7 +10648,7 @@ function enterTurn(){
   // Busted Maximum suppresses Ton-titled to Nothing (a busted 3xT20 is a 100+ bust
   // by definition, but the specific story wins), and Bullseye Gauntlet suppresses
   // Double Trouble (double-bull-twice is technically "last two darts both doubles"
-  // too). See docs/simultaneous-achievements-roadmap.md.
+  // too). See docs/archive/simultaneous-achievements-roadmap.md.
   const _d = game.darts;
   const CHAIN_CHECKS = [
     { id:'hattrick', icon:'🎩', headline:'HAT TRICK!', statLine:'Three trebles, one visit',
@@ -12429,7 +12450,7 @@ function finishUnit(kind, winner){
         <div class="stat-block"><div class="stat-val">${escapeHtml(tier)}</div><div class="stat-label">Result</div></div>
       </div>`;
     })() : '';
-    // Killer's own tiny match-summary block (docs/archive/game-modes-roadmap.md
+    // Killer's own tiny match-summary block (docs/game-modes-roadmap.md
     // "Killer") — same reasoning as bobs27Summary/gauntletSummary above:
     // h2hStatsHtml() reads X01-shaped fields (score/legPoints) a killer player
     // doesn't have. Shows each player's assigned number, final status, and kills.
@@ -12529,6 +12550,13 @@ function finishUnit(kind, winner){
   })) : isDeadManWalking ? [{
     name: game.players[0].name,
     walkedOut: game.dmwWalkedOutCount,
+    won: true,
+  }] : isBobs27 ? [{
+    // Bob's 27 previously fell through to the X01-shaped default below, whose
+    // fields the /display bobs_27 summary card doesn't read — the end-of-run
+    // card showed "Final Score: 0" for every run regardless of the real total.
+    name: game.players[0].name,
+    running: game.players[0].running,
     won: true,
   }] : game.players.map(p=>({
     name: p.name,
@@ -12739,7 +12767,7 @@ const GAUNTLET_STAT_DEFS = [
 const GAUNTLET_BUBBLE_KEY_MAP = { gauntletrunscompleted:'runsCompleted', gauntletavgtotalscars:'avgTotalScars',
   gauntletcleanstationrate:'cleanStationRate', gauntletdeepscarrate:'deepScarRate', gauntletretryrate:'retryRate' };
 
-// Killer's own 5 stat bubbles (docs/archive/game-modes-roadmap.md "Killer" sketch:
+// Killer's own 5 stat bubbles (docs/game-modes-roadmap.md "Killer" sketch:
 // "kills-per-game, average lives lost per leg, win rate, and a 'survived
 // without becoming a killer' style curiosity stat").
 const KILLER_STAT_DEFS = [
@@ -13098,7 +13126,7 @@ const GAME_TYPES = {
     statDefs: KILLER_STAT_DEFS,
     personalBestsRenderer: renderKillerPersonalBests,
     homeTabRenderer: renderHomeTabBodyKiller,
-    // The inverse of soloOnly (docs/archive/game-modes-roadmap.md "Killer": the
+    // The inverse of soloOnly (docs/game-modes-roadmap.md "Killer": the
     // whole mechanic needs opponents to attack) — never offered/shown as a
     // solo/practice-only option the way Bob's 27 etc. are.
     h2hOnly: true
@@ -14000,7 +14028,7 @@ function renderGameDeadManWalking(){
   pushLive();
 }
 
-/* ---------- Killer (docs/archive/game-modes-roadmap.md "Killer") ----------
+/* ---------- Killer (docs/game-modes-roadmap.md "Killer") ----------
    Elimination-format H2H. Per-dart commit (no "Enter Turn" staging) — the
    Doubles Practice precedent — since a single visit's own darts can each
    affect a DIFFERENT player (a self-effect on dart 1, an attack on dart 2),
@@ -14016,7 +14044,7 @@ function newMatchPlayerKiller(name){
     legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 };
 }
 // Resets per-leg state but keeps `number` (assigned once for the whole match,
-// docs/archive/game-modes-roadmap.md: "assigned once at Start ... not re-derived
+// docs/game-modes-roadmap.md: "assigned once at Start ... not re-derived
 // per leg"), `kills`, and `gameLivesLost` (both match-lifetime tallies, not
 // per-leg — 🛡️ Untouchable needs the whole match's own history, not just
 // whichever leg happened to decide it).
@@ -16274,7 +16302,7 @@ function renderDartAnalytics(data, container){
     </div>`;
 }
 
-/* ---------- coaching insights (docs/coaching-insights-roadmap.md) ----------
+/* ---------- coaching insights (docs/archive/coaching-insights-roadmap.md) ----------
    X01 only for v1 — checkout-route/bust-parity insights are X01-specific
    concepts, so the section stays hidden for every other game type. */
 function loadCoachingInsights(){

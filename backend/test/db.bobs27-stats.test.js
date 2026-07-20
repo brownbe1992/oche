@@ -198,3 +198,38 @@ describe('getBobs27Leaderboard', () => {
     assert.ok(board.indexOf(rowB) < board.indexOf(rowA));
   });
 });
+
+// Run-level aggregates require g.completed_at IS NOT NULL: a paused/abandoned/
+// in-progress run has no bust row simply because it hasn't died YET, and
+// counting it as a survived run with its partial total made survival rate
+// gameable (abandon bad runs early) and let mid-run totals top the high-score
+// table. Only the dart-level Doubles Hit % keeps counting every dart thrown.
+describe('incomplete runs are excluded from run-level aggregates', () => {
+  test('an uncompleted run counts toward dartsThrown but not runs/survival/avg/best/leaderboard', () => {
+    const a = 'Bobs27_Incomplete_A';
+    db.addPlayer(a);
+
+    // A completed, survived run: D1 hit (+2), completed.
+    const gDone = bobs27Game(a);
+    bobs27Turn(gDone.gameId, a, 1, 1, [[1, 2]], { scored: 2 });
+    db.completeGame(gDone.gameId, a);
+
+    // An in-progress/abandoned run with a huge partial total — never completed.
+    const gOpen = bobs27Game(a);
+    bobs27Turn(gOpen.gameId, a, 1, 1, [[1, 2], [1, 2], [1, 2]], { scored: 6 });
+    // (no completeGame — the player quit here)
+
+    const bubbles = db.getBobs27StatBubbles(a, 'practice');
+    assert.equal(bubbles.runs, 1, 'only the completed run counts');
+    assert.equal(bubbles.survivalRate, 100, 'the abandoned run neither survives nor dies');
+    assert.equal(bubbles.avgFinalScore, 29, "the completed run's 27+2, not dragged by the partial 33");
+    assert.equal(bubbles.dartsThrown, 4, 'darts thrown still counts every real dart (1 + 3)');
+
+    const pbs = db.getBobs27PersonalBests(a, 'practice');
+    assert.equal(pbs.bestFinalScore, 29, "the abandoned run's partial 33 can't be a best");
+
+    const board = db.getBobs27Leaderboard();
+    const row = board.find(r => r.name === a);
+    assert.equal(row.bestScore, 29, 'the high-score table ignores the incomplete run');
+  });
+});
