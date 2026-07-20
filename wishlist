@@ -80,6 +80,7 @@ Others
 - Checkout Trainer (no-dartboard mental drill: given a target score, enter the fewest-darts checkout from memory, graded instantly — a checkout calculator, not a throwing game; untimed Freeform mode plus a 60-second Checkout Blitz sprint mode with its own leaderboard; laddered achievements for both; no live scoreboard needed) — done, all of it: difficulty tiers and the trick-question/💣 Bogey Buster variant included, see docs/archive/checkout-trainer-roadmap.md
 - Prep work to reduce future rework across all roadmap items — done, see docs/archive/existing-app-prep-roadmap.md; docs/open-roadmap-items.md is now the central tracker for all open roadmap items
 - New Game page revamp (less-crowded, step-by-step Who's playing?/Choose a game/More options flow, replacing the current all-controls-visible setup screen) — done, see docs/archive/new-game-flow-roadmap.md
+- Code-quality refactors deferred from the 2026-07-20 max-effort code review (undo-trailer consolidation, registry-driven resume dispatch, id-keyed killer configs, live-state per-mode container, hot-query scan pass, Home lazy fetches, and more — verified findings, none a live bug) — full design in docs/code-quality-roadmap.md, tracked as items 35-45 in docs/open-roadmap-items.md
 
 
 Fixes:

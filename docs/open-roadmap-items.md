@@ -31,6 +31,17 @@
 | 5 | Localize voice announcements beyond hardcoded English phrases | `docs/voice-announcements-i18n-roadmap.md` | Low-Medium |
 | 6 | UI Overhaul design phase: create comprehensive plan for player page reorganization (step 1) | `docs/ui-overhaul-roadmap.md` | Medium |
 | 34 | Game-modes: decide whether to generalize the per-game-type backend stat functions (a single parameterized stat-bubble/leaderboard query keyed by each type's formula definitions, plus the Home page's per-type `Promise.all` fetch list) rather than hand-writing a bespoke SQL function set per type — the explicitly-open design thread in `game-modes-roadmap.md`. Every game type shipped so far (X01/Cricket/Baseball/drills/Killer and all the later modes) has its stats fully viewable via per-type functions, so this is an optional architecture refactor to reduce the per-type cost, NOT a missing feature — genuinely undecided (the per-type shape has been kept ~10 times running, which may itself be the right answer). This is why `game-modes-roadmap.md` stays in `docs/` | `docs/game-modes-roadmap.md` | Medium |
+| 36 | One `winSectionHtml()` helper for the five identical "Most X Wins" Home templates | `docs/code-quality-roadmap.md` | Low |
+| 38 | `savedGamePositionLabel()`: dispatch on `sg.gameType` instead of field presence (removes the reserved-field-name contract) | `docs/code-quality-roadmap.md` | Low-Medium |
+| 39 | Derive `NON_SAVABLE_GAME_TYPES` from the backend registry (or pin the two lists together with a committed test) | `docs/code-quality-roadmap.md` | Low-Medium |
+| 40 | Declare `newMatchPlayer`'s second-arg shape on the `GAME_TYPES` registry (startGame/resumeGame's hand lists already differ) | `docs/code-quality-roadmap.md` | Low-Medium |
+| 41 | `games.category` as a registry member (kills the 14-branch ternary whose `String(startScore)` fallthrough writes bad rows permanently) | `docs/code-quality-roadmap.md` | Low-Medium |
+| 35 | Consolidate the 16 copy-pasted `undoLastTurn*` trailers into `_finishUndo()` (copies have already drifted) | `docs/code-quality-roadmap.md` | Medium |
+| 37 | Registry-driven resume dispatch — replace `resumeGame()`'s 13-branch chain and `_savedGamePosition()`'s parallel copy (a missed future branch destroys the pause) | `docs/code-quality-roadmap.md` | Medium-High |
+| 42 | Live-state keys: per-mode container key (or registry-derived allowlist) — the silent-strip failure class has shipped twice | `docs/code-quality-roadmap.md` | Medium |
+| 43 | Id-keyed killer configs — one migration replaces the three name-rewrite compensators (rename/merge, import re-key, boot reconcile) | `docs/code-quality-roadmap.md` | Medium |
+| 44 | Whole-darts-table scan pass over hot stat queries (`_first9`/`_trebleLess`, recap per-player scans, personal-bests double scan, shanghai/halve-it O(players×history) legs loop) — overlaps item 34, decide together | `docs/code-quality-roadmap.md` | Medium |
+| 45 | Home page: lazy per-combo fetches instead of the ~47-request burst per navigation (SWR paint + keep-cache catch already shipped; the burst remains) | `docs/code-quality-roadmap.md` | Medium |
 | 7 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
 | 8 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
 | 9 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
