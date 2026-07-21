@@ -568,6 +568,29 @@
   .stat-block .stat-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:4px}
   .pp-section{margin-bottom:18px}
   .pp-section-title{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;margin-bottom:8px}
+  /* every player-profile section becomes a real panel — previously .pp-section only
+     added spacing, so the chart/heatmap (the two things worth featuring) looked
+     identical to a two-line text list like "Practice — Legs Thrown". */
+  #player-page-body .pp-section{background:var(--surface-2);border:1px solid var(--wire);
+    border-radius:12px;padding:14px 16px;margin-bottom:14px}
+  #player-page-body .pp-section.spotlight{border-color:var(--gold);
+    box-shadow:0 0 0 1px rgba(217,180,106,.18) inset,0 14px 30px -22px rgba(0,0,0,.7)}
+  #player-page-body .pp-section.spotlight .pp-section-title{font-size:15px;color:var(--ink);
+    text-transform:none;letter-spacing:.01em;font-weight:700}
+  #player-page-body details.pp-section > summary{cursor:pointer;list-style:none;
+    display:flex;align-items:center;justify-content:space-between;gap:8px}
+  #player-page-body details.pp-section > summary::-webkit-details-marker{display:none}
+  #player-page-body details.pp-section > summary::after{content:'▾';color:var(--muted);
+    font-size:10px;flex:none;transition:transform .15s}
+  #player-page-body details.pp-section[open] > summary::after{transform:rotate(180deg)}
+  #player-page-body details.pp-section:not([open]) > summary{margin-bottom:0}
+  /* game-type sub-tabs (X01/Cricket/…) nest inside the spotlight panel and only
+     filter its contents, so they read as subordinate to the main player-tabs nav
+     above — a small pill control instead of the same underlined-tab treatment. */
+  .subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+  .subtabs .tab-btn{background:var(--board);border:1px solid var(--wire);border-radius:999px;
+    padding:5px 14px;font-size:12px;margin-bottom:0}
+  .subtabs .tab-btn.active{background:var(--surface-2);border-color:var(--gold);color:var(--gold)}
   /* Settings collapsible sections — shared by ~15 headers/chevrons/intro paragraphs
      that previously each carried these as verbatim inline styles. */
   .settings-title{font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between}
@@ -6334,27 +6357,30 @@ function renderPlayerPage(){
   // type — a future type with no statDefs (e.g. a stats-less drill mode) is filtered
   // out instead of rendering an empty tab.
   const gameTypeTabsHtml = `
-    <div class="player-tabs" style="margin-bottom:8px">
+    <div class="subtabs">
       ${Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length).map(g=>
         `<button class="tab-btn${gt===g.id?' active':''}" onclick="switchPlayerGameType('${g.id}')">${g.label}</button>`
       ).join('')}
     </div>`;
+  // bubblesHtml is folded straight into chartSection's spotlight panel below —
+  // both only ever render together (never shown on the Daily Challenge tab).
   const bubblesHtml = `
-    ${gameTypeTabsHtml}
     <div class="stat-bubbles" id="player-stat-bubbles">${primaryDefs.map(bubble).join('')}</div>
     ${secondaryDefs.length ? `<button class="btn btn-ghost" style="margin:6px 0" id="toggle-more-stats-btn" onclick="toggleMoreStats()">${showMoreStats?'Fewer stats ▴':'More stats ▾'}</button>
     <div class="stat-bubbles" id="player-stat-bubbles-more"${showMoreStats?'':' hidden'}>${secondaryDefs.map(bubble).join('')}</div>` : ''}`;
 
-  // shared chart + top-finishes HTML (same structure for both tabs)
+  // shared chart + top-finishes HTML (same structure for both tabs).
+  // Key stats + the chart they drive live together in one gold-accented
+  // "spotlight" panel — the two things worth featuring at a glance, per the
+  // player-page redesign — with the dartboard heatmap as its own spotlight
+  // right below. Everything else collapses into closed <details> by default
+  // so the page reads as "headline stats + graphs" first, "everything else,
+  // on demand" below.
   const chartSection = `
-    <div class="pp-section" id="dart-heatmap-section" hidden>
-      <div class="pp-section-title">Dartboard Heatmap</div>
-      <p class="pp-meta" style="margin:0 0 8px">Where every dart has landed — brighter means more hits (Dartboard-mode taps only split inner/outer singles and misses by direction; Pad-mode darts still count, just without that extra precision).</p>
-      <div id="dart-heatmap-body"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
-      <p class="pp-meta" id="bounce-out-count" style="margin-top:6px"></p>
-    </div>
-    <div class="pp-section">
-      <div class="pp-section-title" id="chart-metric-title">${(defs.find(d=>d.key===selectedStat)||defs[0]).label} over time</div>
+    <div class="pp-section spotlight">
+      ${gameTypeTabsHtml}
+      ${bubblesHtml}
+      <div class="pp-section-title" id="chart-metric-title" style="margin-top:14px">${(defs.find(d=>d.key===selectedStat)||defs[0]).label} over time</div>
       <div class="chart-periods">
         <button class="chart-period-btn${cp==='today'?' active':''}" data-period="today" onclick="loadAvgChart('today')">Today</button>
         <button class="chart-period-btn${cp==='week'?' active':''}" data-period="week" onclick="loadAvgChart('week')">Week</button>
@@ -6372,6 +6398,12 @@ function renderPlayerPage(){
       <div id="avg-weight-filters" class="chart-periods" hidden></div>
       <div id="avg-chart-body"></div>
     </div>
+    <div class="pp-section spotlight" id="dart-heatmap-section" hidden>
+      <div class="pp-section-title">Dartboard Heatmap</div>
+      <p class="pp-meta" style="margin:0 0 8px">Where every dart has landed — brighter means more hits (Dartboard-mode taps only split inner/outer singles and misses by direction; Pad-mode darts still count, just without that extra precision).</p>
+      <div id="dart-heatmap-body"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+      <p class="pp-meta" id="bounce-out-count" style="margin-top:6px"></p>
+    </div>
     <div class="pp-section">
       <div class="pp-section-title">Personal Bests</div>
       <div id="player-personal-bests"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
@@ -6380,14 +6412,14 @@ function renderPlayerPage(){
       <div class="pp-section-title">Coaching Insights</div>
       <div id="coaching-insights-body"></div>
     </div>
-    <div class="pp-section">
-      <div class="pp-section-title">Badge Case</div>
-      <div id="player-badges"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
-    </div>
     <div class="pp-section" id="on-this-day-section" hidden>
       <div class="pp-section-title">On This Day</div>
       <div id="player-on-this-day"></div>
     </div>
+    <details class="pp-section">
+      <summary class="pp-section-title">Badge Case</summary>
+      <div id="player-badges"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
+    </details>
     <details class="pp-section">
       <summary class="pp-section-title">Around the World Progress</summary>
       <div id="player-atw-progress"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
@@ -6419,34 +6451,34 @@ function renderPlayerPage(){
   // Tournaments are X01-only (docs/archive/tournament-mode-roadmap.md), so this block is
   // gated the same way the profile's other X01-only surfaces are.
   const tournamentStatsSection = gt==='x01' ? `
-    <div class="pp-section">
-      <div class="pp-section-title">Tournaments</div>
+    <details class="pp-section">
+      <summary class="pp-section-title">Tournaments</summary>
       <div id="player-tournament-stats"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
-    </div>` : '';
+    </details>` : '';
   // League mode is X01 or Cricket (docs/archive/league-mode-roadmap.md) — shown on both tabs.
   const leagueStatsSection = (gt==='x01' || gt==='cricket') ? `
-    <div class="pp-section">
-      <div class="pp-section-title">Leagues</div>
+    <details class="pp-section">
+      <summary class="pp-section-title">Leagues</summary>
       <div id="player-league-stats"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
-    </div>` : '';
+    </details>` : '';
   // Household Elo (docs/archive/rating-and-handicap-roadmap.md Part A): unlike
   // Tournaments/Leagues just above, not gated on `gt` — the rating is
   // deliberately combined across every competitive game type, so it's shown
   // once regardless of which per-game-type toggle is active.
   const eloSection = `
-    <div class="pp-section">
-      <div class="pp-section-title">📈 Household Rating</div>
+    <details class="pp-section">
+      <summary class="pp-section-title">📈 Household Rating</summary>
       <div id="player-elo-body"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
-    </div>`;
+    </details>`;
   const h2hSection = `
-    <div class="pp-section">
-      <div class="pp-section-title">H2H — Games &amp; Legs Played</div>
+    <details class="pp-section">
+      <summary class="pp-section-title">H2H — Games &amp; Legs Played</summary>
       <div class="pp-cat-lines">${catHtml}</div>
-    </div>
-    <div class="pp-section">
-      <div class="pp-section-title">H2H Wins</div>
+    </details>
+    <details class="pp-section">
+      <summary class="pp-section-title">H2H Wins</summary>
       <div class="pp-cat-lines">${h2hHtml}</div>
-    </div>
+    </details>
     ${eloSection}
     ${tournamentStatsSection}
     ${leagueStatsSection}`;
@@ -6457,10 +6489,10 @@ function renderPlayerPage(){
     ? pracCats.map(c=>`${c}: <b>${(s.practiceLegs||{})[c]||0}</b> legs`).join('<br>')
     : '<span style="color:var(--muted)">none yet</span>';
   const practiceSection = `
-    <div class="pp-section">
-      <div class="pp-section-title">Practice — Legs Thrown</div>
+    <details class="pp-section">
+      <summary class="pp-section-title">Practice — Legs Thrown</summary>
       <div class="pp-cat-lines">${pracHtml}</div>
-    </div>`;
+    </details>`;
 
   // Its own tab rather than a collapsible tucked inside Overall/H2H/Practice
   // (which is what this used to be) — the history/streak view is X01/Cricket-
@@ -6472,10 +6504,10 @@ function renderPlayerPage(){
       <summary class="pp-section-title">Daily Challenge History</summary>
       <div id="player-challenge-history"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>
-    <div class="pp-section">
-      <div class="pp-section-title">Badge Case</div>
+    <details class="pp-section">
+      <summary class="pp-section-title">Badge Case</summary>
       <div id="player-badges"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
-    </div>`;
+    </details>`;
 
   let tabContent;
   if(tab === 'overall'){
@@ -6486,23 +6518,23 @@ function renderPlayerPage(){
   } else if(tab === 'h2h'){
     tabContent = `
       ${chartSection}
-      <div class="pp-section">
-        <div class="pp-section-title">Games &amp; Legs Played</div>
+      <details class="pp-section">
+        <summary class="pp-section-title">Games &amp; Legs Played</summary>
         <div class="pp-cat-lines">${catHtml}</div>
-        </div>
-      <div class="pp-section">
-        <div class="pp-section-title">H2H Wins</div>
+      </details>
+      <details class="pp-section">
+        <summary class="pp-section-title">H2H Wins</summary>
         <div class="pp-cat-lines">${h2hHtml}</div>
-      </div>`;
+      </details>`;
   } else if(tab === 'challenge'){
     tabContent = challengeSection;
   } else {
     tabContent = `
       ${chartSection}
-      <div class="pp-section">
-        <div class="pp-section-title">Legs Thrown</div>
+      <details class="pp-section">
+        <summary class="pp-section-title">Legs Thrown</summary>
         <div class="pp-cat-lines">${pracHtml}</div>
-        </div>`;
+      </details>`;
   }
 
   body.innerHTML = `
@@ -6536,7 +6568,6 @@ function renderPlayerPage(){
       <button class="tab-btn${tab==='practice'?' active':''}" data-tab="practice" onclick="switchPlayerTab('practice')">Practice</button>
       <button class="tab-btn${tab==='challenge'?' active':''}" data-tab="challenge" onclick="switchPlayerTab('challenge')">Daily Challenge</button>
     </div>
-    ${tab==='challenge' ? '' : bubblesHtml}
     ${tabContent}
     <div class="btn-row">
       <button class="btn btn-ghost" onclick="askRenameFromProfile('${j}')">Rename</button>
