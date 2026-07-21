@@ -6,7 +6,7 @@
 <title>Oche — Per-Dart Scorer & Stats</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=Kalam:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root{
     --board:#0e0f0d;        /* dartboard black bed */
@@ -21,6 +21,17 @@
     --gold:#d9b46a;         /* brass oche */
     --bust:#ea6058;         /* was #e2473d — brightened so bust-status/error text passes 4.5:1 as text on --surface too, not just --board (docs/accessibility-roadmap.md contrast audit) */
     --red-text:#ff8a93;     /* readable red for text (e.g. the Pad's "Bull" label) — --red itself fails WCAG AA as text */
+
+    /* UI redesign tokens — "the board vs. the chalkboard": the board's own bed/
+       wedge/wire/brass materials above stay the app's everyday palette (setup,
+       scoring input, stats); --slate/--chalk are a second, deliberately distinct
+       surface reserved for the live scoreboard (display.html) — a chalkboard is a
+       different object from the dartboard itself, so it gets its own colors
+       rather than reusing --board/--cream and looking like the same screen. */
+    --slate:#15211c;        /* chalkboard slate */
+    --slate-2:#1b2a24;      /* lifted chalkboard panel */
+    --chalk:#f7f5ee;        /* chalk-marker white — cooler/starker than --cream */
+    --gold-hi:#f0d29a;      /* brass highlight, paired with --gold for a sheen gradient */
   }
   /* Colorblind-friendly palette (Settings -> Accessibility): red-green color vision
      deficiency is the most common form of colorblindness, and red/green is exactly
@@ -49,8 +60,24 @@
   }
   .wrap{max-width:760px;margin:0 auto}
   h1,h2,h3{margin:0;font-weight:600;letter-spacing:.01em}
+  /* Chalk-marker accent voice — used sparingly for headline-scale "just written
+     up" moments (setup step headline, oche section headers), never for dense
+     body copy or tiny caption-scale labels (a script face is illegible that
+     small). A very slight counter-rotation per use keeps it feeling hand-drawn
+     rather than a plain italic font swap. */
+  .chalk{font-family:'Kalam',cursive;font-weight:700;letter-spacing:.01em}
+  /* Tally-mark step indicator (setup wizard) — a chalked "|  ||  |||" instead of
+     a generic numbered-pill progress bar. Purely decorative (aria-hidden); the
+     real "Step X of 3" text stays in #setup-step-label for screen readers. */
+  .chalk-tally{display:flex;gap:7px;margin-bottom:8px}
+  .chalk-tally .tally-mark{width:3px;height:22px;border-radius:2px;background:var(--wire);
+    transform:rotate(-7deg);transition:background .2s ease}
+  .chalk-tally .tally-mark.done{background:var(--gold)}
+  .chalk-tally .tally-mark.current{background:var(--chalk)}
   .masthead{display:flex;align-items:baseline;gap:14px;padding:6px 2px 18px;border-bottom:1px solid var(--wire);margin-bottom:22px;flex-wrap:wrap}
-  .masthead .mark{font-family:'Bebas Neue',sans-serif;font-size:38px;line-height:.8;color:var(--cream);letter-spacing:.04em}
+  .masthead .mark{font-family:'Bebas Neue',sans-serif;font-size:38px;line-height:.8;letter-spacing:.04em;
+    background:linear-gradient(155deg,var(--gold-hi) 0%,var(--gold) 55%,#b8894a 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
   .masthead .sub{color:var(--muted);font-size:13px}
   .masthead .nav{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
   .navbtn{background:none;border:1px solid var(--wire);color:var(--muted);padding:7px 12px;border-radius:999px;font-size:12.5px;font-weight:600;cursor:pointer;letter-spacing:.02em}
@@ -63,7 +90,8 @@
   .navbtn:hover{color:var(--ink);border-color:var(--muted)}
   .navbtn[aria-current="true"]{color:var(--board);background:var(--gold);border-color:var(--gold)}
 
-  .card{background:var(--surface);border:1px solid var(--wire);border-radius:14px;padding:20px}
+  .card{background:var(--surface);border:1px solid var(--wire);border-radius:14px;padding:20px;
+    box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 10px 24px -18px rgba(0,0,0,.6)}
   .screen{display:none}
   .screen.on{display:block;animation:fade .25s ease both}
   @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
@@ -158,14 +186,16 @@
   .stepper .val{min-width:30px;text-align:center;font-family:'Bebas Neue';font-size:24px;color:var(--cream)}
 
   .btn{display:inline-block;border:none;border-radius:11px;padding:14px 20px;font:inherit;font-weight:700;
-    font-size:15px;cursor:pointer;letter-spacing:.02em}
+    font-size:15px;cursor:pointer;letter-spacing:.02em;transition:transform .12s ease,filter .12s ease}
+  .btn:active{transform:translateY(1px)}
+  @media(prefers-reduced-motion:reduce){.btn{transition:none}.btn:active{transform:none}}
   /* .btn's own display:inline-block is an author rule, so it beats the UA
      stylesheet's [hidden]{display:none} at equal specificity regardless of
      source order (author normal always wins over UA normal) — every .btn-classed
      button that's conditionally given the hidden attribute (#enter-btn, #undo-btn,
      #dp-next-round-btn) would otherwise stay visible no matter what. */
   .btn[hidden]{display:none}
-  .btn-primary{background:var(--gold);color:#1a160c}
+  .btn-primary{background:linear-gradient(155deg,var(--gold-hi) 0%,var(--gold) 60%,#c39a5c 100%);color:#1a160c}
   .btn-primary:hover{filter:brightness(1.06)}
   .btn-primary:disabled{opacity:.4;cursor:not-allowed}
   .btn-ghost{background:none;border:1px solid var(--wire);color:var(--ink)}
@@ -219,6 +249,10 @@
   .pad{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
   .pad button{background:var(--surface);border:1px solid var(--wire);color:var(--ink);border-radius:10px;
     padding:12px 0;font:inherit;font-size:24px;font-weight:600;cursor:pointer}
+  /* A faint alternating wedge tint on the 1-20 number buttons only (never
+     bull/miss, which aren't real wedges) — quiet nod to the board's own
+     alternating black/cream wedges, subtle enough not to fight legibility. */
+  .pad button:not(.bull):not(.miss):nth-child(even){background:color-mix(in srgb, var(--cream) 6%, var(--surface))}
   .pad button:hover:not(:disabled){border-color:var(--gold);color:var(--gold)}
   .pad button:disabled{opacity:.3;cursor:not-allowed}
   .pad button.bull{grid-column:span 2;color:var(--red-text)}
@@ -384,9 +418,16 @@
     overflow:hidden;
   }
   body.game-active .wrap{
-    position:fixed; top:0; left:0; right:0; bottom:0;
+    /* left:50%+translateX (not left:0/right:0) — a fixed box with BOTH left and
+       right pinned computes an explicit width the browser resolves before
+       max-width gets a chance to re-trigger auto-margin centering, so on a
+       wide (tablet/desktop) viewport the capped 760px box drifted to the left
+       edge instead of centering. Centering via transform isn't affected by
+       that width/margin resolution order. */
+    position:fixed; top:0; left:50%; bottom:0;
+    transform:translateX(-50%);
     display:flex; flex-direction:column; min-height:0;
-    width:100%; max-width:760px; margin:0 auto;
+    width:100%; max-width:760px;
     box-sizing:border-box;
     padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px);
   }
@@ -670,7 +711,7 @@
 </div>
 <div class="wrap">
   <header class="masthead">
-    <button class="mark" onclick="show('home')" style="background:none;border:none;cursor:pointer;padding:0;font:inherit;color:inherit">OCHE</button>
+    <button class="mark" onclick="show('home')" style="background-color:transparent;border:none;cursor:pointer;padding:0;font:inherit">OCHE</button>
     <div class="sub">Per-Dart Scoring &amp; Lifetime Stats</div>
     <nav class="nav">
       <button class="navbtn" id="nav-home" aria-current="true" onclick="show('home')">Home</button>
@@ -741,7 +782,14 @@
   <!-- ============ SETUP ============ -->
   <section id="screen-setup" class="screen">
     <div class="card">
-      <h2 style="font-size:18px;margin-bottom:4px">New game</h2>
+      <h2 class="chalk" style="font-size:24px;margin-bottom:6px">New game</h2>
+      <!-- Decorative chalk-tally step indicator (aria-hidden — #setup-step-label
+           right below still carries the real "Step X of 3" text for screen
+           readers/announce(), unchanged). Ties the wizard's progress to the same
+           pub-scorer tally-mark vocabulary as the chalkboard scoreboard. -->
+      <div class="chalk-tally" id="setup-step-tally" aria-hidden="true">
+        <span class="tally-mark"></span><span class="tally-mark"></span><span class="tally-mark"></span>
+      </div>
       <p class="pp-meta" id="setup-step-label" style="margin:0 0 16px">Step 1 of 3 — Who's playing?</p>
 
       <!-- ===== Step 1: Who's playing? (docs/archive/new-game-flow-roadmap.md) =====
@@ -4807,6 +4855,14 @@ function showSetupStep(n){
   const text = SETUP_STEP_LABELS[n] || '';
   if(label) label.textContent = text;
   announce(text);
+  const tally = document.getElementById('setup-step-tally');
+  if(tally){
+    [...tally.children].forEach((mark, i) => {
+      const step = i + 1;
+      mark.classList.toggle('done', step < n);
+      mark.classList.toggle('current', step === n);
+    });
+  }
   // Focus management (docs/archive/new-game-flow-roadmap.md accessibility): move focus to
   // each new step's first control, never silently left on a now-hidden one.
   requestAnimationFrame(()=>{
@@ -15262,7 +15318,13 @@ function drawAvgChart(data){
     const lx=Math.max(ml+2,Math.min(W-mr-2,p.x)).toFixed(1);
     return `<text x="${lx}" y="${ly}" text-anchor="middle" font-size="9.5" fill="#d9b46a" font-weight="600">${val}</text>`;
   }).join(''):'';
-  container.innerHTML=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;display:block;overflow:visible">
+  // Interactive hover: a transparent capture rect (pointer/touch) finds the
+  // nearest data point and moves a shared crosshair+dot+tooltip — richer than
+  // the always-on data labels above (which stay, since they're legible at a
+  // glance without needing to touch anything; the hover layer adds exact
+  // value+date on demand instead of replacing them).
+  container.innerHTML=`<div style="position:relative">
+  <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;display:block;overflow:visible" id="avg-chart-svg">
     <defs>
       <linearGradient id="${gId}" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="#d9b46a" stop-opacity=".28"/>
@@ -15272,11 +15334,80 @@ function drawAvgChart(data){
     ${yTicks.map(t=>`<line x1="${ml}" y1="${t.y}" x2="${W-mr}" y2="${t.y}" stroke="#2e3129" stroke-width="1"/>`).join('')}
     ${yTicks.map(t=>`<text x="${ml-6}" y="${t.y}" text-anchor="end" dominant-baseline="middle" font-size="10" fill="#7a8070">${t.label}</text>`).join('')}
     <polygon points="${areaPts}" fill="url(#${gId})"/>
-    <polyline points="${linePts}" fill="none" stroke="#d9b46a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <polyline id="avg-chart-line" points="${linePts}" fill="none" stroke="#d9b46a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
     ${showDots?pts.map(p=>`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="#d9b46a"/>`).join(''):''}
     ${dataLabels}
     ${xLabels.map(l=>`<text x="${l.x}" y="${mt+ch+18}" text-anchor="middle" font-size="10" fill="#7a8070">${l.label}</text>`).join('')}
-  </svg>`;
+    <g id="avg-chart-hover" style="opacity:0;pointer-events:none">
+      <line x1="0" y1="${mt}" x2="0" y2="${mt+ch}" stroke="#f7f5ee" stroke-width="1" stroke-dasharray="2,2"/>
+      <circle r="5" fill="#fff" stroke="#d9b46a" stroke-width="2"/>
+    </g>
+    <rect id="avg-chart-capture" x="${ml}" y="0" width="${cw}" height="${H}" fill="transparent"/>
+  </svg>
+  <div id="avg-chart-tooltip" class="chalk" style="position:absolute;top:0;left:0;pointer-events:none;
+    background:var(--surface-2);border:1px solid var(--gold);border-radius:8px;padding:4px 10px;
+    font-size:13px;color:var(--ink);white-space:nowrap;opacity:0;transition:opacity .1s ease;transform:translate(-50%,-125%)"></div>
+  </div>`;
+  wireAvgChartHover(pts, data, avgs, statFmt, W);
+  animateAvgChartDrawIn();
+}
+// Hover/tap interactivity for drawAvgChart()'s SVG (item: interactive stats
+// charts). A pointer over the transparent capture rect snaps the crosshair to
+// the nearest data point (nearest-x, not exact-pixel, so a touch a few px off
+// a dot still resolves it) and shows an exact value+date tooltip; leaving the
+// chart hides both. Pointer events (not separate mouse/touch handlers) cover
+// mouse, touch, and pen input identically.
+function wireAvgChartHover(pts, data, avgs, statFmt, svgWidth){
+  const capture = document.getElementById('avg-chart-capture');
+  const hoverG = document.getElementById('avg-chart-hover');
+  const tooltip = document.getElementById('avg-chart-tooltip');
+  const svg = document.getElementById('avg-chart-svg');
+  if(!capture || !hoverG || !tooltip || !svg) return;
+  const hoverLine = hoverG.querySelector('line');
+  const hoverDot = hoverG.querySelector('circle');
+  const nearestIndex = svgX => {
+    let best = 0, bestDist = Infinity;
+    pts.forEach((p,i) => { const d = Math.abs(p.x - svgX); if(d < bestDist){ bestDist = d; best = i; } });
+    return best;
+  };
+  const showAt = i => {
+    const p = pts[i];
+    hoverLine.setAttribute('x1', p.x); hoverLine.setAttribute('x2', p.x);
+    hoverDot.setAttribute('cx', p.x); hoverDot.setAttribute('cy', p.y);
+    hoverG.style.opacity = '1';
+    tooltip.textContent = `${statFmt(avgs[i])} · ${formatBucket(data[i].bucket)}`;
+    // Convert the SVG-space point to container-relative CSS pixels for the
+    // HTML tooltip overlay (the SVG scales via viewBox, so this isn't 1:1).
+    const rect = svg.getBoundingClientRect();
+    const scale = rect.width / svgWidth;
+    tooltip.style.left = (p.x*scale) + 'px';
+    tooltip.style.top = (p.y*scale) + 'px';
+    tooltip.style.opacity = '1';
+  };
+  const hide = () => { hoverG.style.opacity = '0'; tooltip.style.opacity = '0'; };
+  const move = clientX => {
+    const rect = svg.getBoundingClientRect();
+    const svgX = ((clientX - rect.left) / rect.width) * svgWidth;
+    showAt(nearestIndex(svgX));
+  };
+  capture.addEventListener('pointermove', e => move(e.clientX));
+  capture.addEventListener('pointerdown', e => move(e.clientX));
+  capture.addEventListener('pointerleave', hide);
+}
+// A brief "just drawn" reveal on first paint (item: interactive stats charts) —
+// the line's own length becomes its dash pattern, offset to fully hidden, then
+// animated to 0 so it draws itself in left-to-right rather than appearing all
+// at once. Skipped entirely under prefers-reduced-motion.
+function animateAvgChartDrawIn(){
+  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const line = document.getElementById('avg-chart-line');
+  if(!line || !line.getTotalLength) return;
+  const len = line.getTotalLength();
+  line.style.strokeDasharray = len;
+  line.style.strokeDashoffset = len;
+  line.getBoundingClientRect(); // force layout so the transition below actually animates from this starting state
+  line.style.transition = 'stroke-dashoffset .6s ease';
+  requestAnimationFrame(()=>{ line.style.strokeDashoffset = '0'; });
 }
 
 /* ---------- stat bubbles ---------- */
