@@ -6346,7 +6346,11 @@ function renderPlayerPage(){
   const gt = playerGameType;
   const defs = activeStatDefs();
   const bubble = d => {
-    const bl = d.key==='dartsthrown' ? (tab==='overall'?'Total Darts Thrown':'Darts Thrown') : d.label;
+    // Called out explicitly as "All Modes" — every other game type's own Darts
+    // Thrown bubble (now one dropdown-switch away) is scoped to that game type,
+    // so this one bare "dartsthrown" key (X01's tab, but a lifetime total) would
+    // otherwise read as X01-only by the same convention.
+    const bl = d.key==='dartsthrown' ? (tab==='overall'?'Total Darts Thrown — All Modes':'Darts Thrown — All Modes') : d.label;
     return `<button class="stat-bubble${selectedStat===d.key?' active':''}" data-stat="${d.key}" onclick="selectStat('${d.key}')" title="${d.desc}"><div class="bubble-val" id="bv-${d.key}">—</div><div class="bubble-label">${bl}</div></button>`;
   };
   const primaryDefs = defs.filter(d=>d.primary);
@@ -12014,13 +12018,13 @@ function startNextRound(){
 /* ---------- avg-over-time chart ---------- */
 const STAT_DEFS = [
   // primary:true bubbles are shown by default; the rest live behind the "More stats" toggle.
-  { key:'dartsthrown',    label:'Darts Thrown',   desc:'Total darts thrown',                        fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
+  { key:'dartsthrown',    label:'Darts Thrown',   desc:"Every dart you've ever thrown, across every game mode (Chuckin' counts, Checkout Trainer doesn't) — not scoped to X01, unlike the game-specific Darts Thrown bubbles on other modes", fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
   { key:'avg',           label:'Three-Dart Average', desc:'3-dart average',                      fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
   { key:'180s',          label:'180s',         desc:'Count of 180s thrown',                    fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
   { key:'bigfish',       label:'Big Fish',    desc:'170 checkouts',                            fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
   { key:'ninedarters',   label:'9-Darters',   desc:'501 legs finished in 9 darts',            fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
-  { key:'avgdartsperday', label:'Darts / Day',    desc:'Average darts thrown per day played',        fmt:v=>v!=null?Number(v).toFixed(1):'—' },
-  { key:'avgdartsperleg', label:'Darts / Leg',    desc:'Average darts thrown per won leg',           fmt:v=>v!=null?Number(v).toFixed(1):'—' },
+  { key:'avgdartsperday', label:'Darts / Day',    desc:'Average darts thrown per day played, across every game mode — not scoped to X01',        fmt:v=>v!=null?Number(v).toFixed(1):'—' },
+  { key:'avgdartsperleg', label:'Darts / Leg',    desc:'Average darts thrown per won X01 leg',           fmt:v=>v!=null?Number(v).toFixed(1):'—' },
   { key:'pace',           label:'Average Pace', desc:'Darts thrown per minute',                  fmt:v=>v!=null?Number(v).toFixed(1):'—' },
   { key:'treblelesspct', label:'Trebleless %',desc:'% of legs without hitting a treble',      fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
   { key:'first3avg',     label:'1st 3 AVG',   desc:'Average of 1st 3 darts in a leg (501/301/170/101 only)', fmt:v=>v!=null?v.toFixed(1):'—' },
@@ -15247,7 +15251,7 @@ const STATS_LEGEND = [
     { name:'Fewest Darts to Finish', desc:'The fewest darts ever used to win a leg (9 is the theoretical minimum in 501).' },
   ]},
   { group:'Volume & Pace', items:[
-    { name:'Total Darts Thrown', desc:'Lifetime count of every dart thrown.' },
+    { name:'Total Darts Thrown — All Modes', desc:"Lifetime count of every dart thrown, across every game mode (Chuckin' counts, Checkout Trainer doesn't) — shown on the X01 tab, but not scoped to X01 games specifically." },
     { name:'Darts / Day', desc:'Average darts thrown per day you played.' },
     { name:'Darts / Leg', desc:'Average darts used to win a leg.' },
     { name:'Average Pace', desc:'Darts thrown per minute, based on per-dart timing (only tracked when "Collect per-dart timing" is enabled in Settings).' },
