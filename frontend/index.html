@@ -6310,7 +6310,10 @@ function switchPlayerTab(tab){
 function switchPlayerGameType(type){
   if(playerGameType === type) return;
   playerGameType = type;
-  selectedStat = activeStatDefs()[0].key;
+  // 'daily_challenge' isn't in GAME_TYPES (no stat-bubble vocabulary of its
+  // own) — activeStatDefs() would throw looking it up, and there's no chart
+  // metric to select for it anyway.
+  if(type !== 'daily_challenge') selectedStat = activeStatDefs()[0].key;
   renderPlayerPage();
 }
 function showPlayer(name){
@@ -6344,7 +6347,11 @@ function renderPlayerPage(){
   // depends on the profile's own game-type toggle (playerGameType), not any
   // in-progress game — X01 and Cricket each have their own stat vocabulary.
   const gt = playerGameType;
-  const defs = activeStatDefs();
+  // Daily Challenge lives in this same dropdown (not a 5th top-level tab
+  // anymore) but has no stat-bubble vocabulary of its own — just its history +
+  // Badge Case, same content the old dedicated tab showed.
+  const isChallenge = gt === 'daily_challenge';
+  const defs = isChallenge ? [] : activeStatDefs();
   const bubble = d => {
     // Called out explicitly as "All Modes" — every other game type's own Darts
     // Thrown bubble (now one dropdown-switch away) is scoped to that game type,
@@ -6358,20 +6365,29 @@ function renderPlayerPage(){
   // Iterates every registered game type with a stat vocabulary (game-modes-roadmap.md
   // "Generalizing per-game-type stats") rather than one hardcoded button per known
   // type — a future type with no statDefs (e.g. a stats-less drill mode) is filtered
-  // out instead of rendering an empty tab.
-  // A dropdown, not a row of pills — with 17 game types the pill row wrapped
-  // across 6+ lines and swamped the spotlight panel it was meant to introduce.
-  const gameTypeTabsHtml = `
-    <div class="subtabs">
-      <label class="field" for="player-gametype-select">Choose a game mode to view more details</label>
-      <select class="date-input" id="player-gametype-select" style="width:auto" onchange="switchPlayerGameType(this.value)">
-        ${Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length).map(g=>
-          `<option value="${g.id}"${gt===g.id?' selected':''}>${g.label}</option>`
-        ).join('')}
-      </select>
+  // out instead of rendering an empty tab. Daily Challenge is appended manually
+  // since it isn't in GAME_TYPES/statDefs at all (it has no stat-bubble
+  // vocabulary — see isChallenge above) but still needs to be one of this
+  // dropdown's choices, not a 4th top-level tab alongside Overall/H2H/Practice
+  // (a Daily Challenge run isn't scoped by any of those the way a real game is).
+  // Its own fixed `.pp-section` above the spotlight panel, not nested inside
+  // it — unlike every other option, picking it swaps out the whole
+  // stat-bubbles/chart panel for the Daily Challenge history/badges below, so
+  // the picker itself needs to stay visible regardless of which is showing.
+  const modePickerHtml = `
+    <div class="pp-section">
+      <div class="subtabs">
+        <label class="field" for="player-gametype-select">Choose a game mode to view more details</label>
+        <select class="date-input" id="player-gametype-select" style="width:auto" onchange="switchPlayerGameType(this.value)">
+          ${Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length).map(g=>
+            `<option value="${g.id}"${gt===g.id?' selected':''}>${g.label}</option>`
+          ).join('')}
+          <option value="daily_challenge"${isChallenge?' selected':''}>🎯 Daily Challenge</option>
+        </select>
+      </div>
     </div>`;
-  // bubblesHtml is folded straight into chartSection's spotlight panel below —
-  // both only ever render together (never shown on the Daily Challenge tab).
+  // bubblesHtml is folded straight into gameStatsHtml's spotlight panel below —
+  // both only ever render together (never shown while isChallenge).
   const bubblesHtml = `
     <div class="stat-bubbles" id="player-stat-bubbles">${primaryDefs.map(bubble).join('')}</div>
     ${secondaryDefs.length ? `<button class="btn btn-ghost" style="margin:6px 0" id="toggle-more-stats-btn" onclick="toggleMoreStats()">${showMoreStats?'Fewer stats ▴':'More stats ▾'}</button>
@@ -6388,19 +6404,18 @@ function renderPlayerPage(){
       ).join('')}</div>
     </div>`;
 
-  // shared chart + top-finishes HTML (same structure for both tabs).
+  // Per-game-type stats + top-finishes HTML (same structure for every tab this
+  // renders under — only shown when !isChallenge, see tabContent below).
   // Key stats + the chart they drive live together in one gold-accented
   // "spotlight" panel — the two things worth featuring at a glance, per the
   // player-page redesign — with the dartboard heatmap as its own spotlight
   // right below. Everything else collapses into closed <details> by default
   // so the page reads as "headline stats + graphs" first, "everything else,
   // on demand" below.
-  const chartSection = `
-    ${lifetimeBubblesHtml}
+  const gameStatsHtml = `
     <div class="pp-section spotlight">
-      ${gameTypeTabsHtml}
       ${bubblesHtml}
-      <div class="pp-section-title" id="chart-metric-title" style="margin-top:14px">${(defs.find(d=>d.key===selectedStat)||defs[0]).label} over time</div>
+      <div class="pp-section-title" id="chart-metric-title" style="margin-top:14px">${(defs.find(d=>d.key===selectedStat)||defs[0]||{label:''}).label} over time</div>
       <div class="chart-periods">
         <button class="chart-period-btn${cp==='today'?' active':''}" data-period="today" onclick="loadAvgChart('today')">Today</button>
         <button class="chart-period-btn${cp==='week'?' active':''}" data-period="week" onclick="loadAvgChart('week')">Week</button>
@@ -6529,15 +6544,27 @@ function renderPlayerPage(){
       <div id="player-badges"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>`;
 
+  // Daily Challenge overrides tab entirely, same as it did back when it was
+  // its own 4th tab — a Daily Challenge run isn't scoped by Overall/H2H/
+  // Practice (it's always solo), so none of those sections make sense
+  // alongside it. modePickerHtml/lifetimeBubblesHtml stay visible either way:
+  // the mode picker so you can switch back out, the lifetime figures because
+  // they're independent of whatever's selected in it.
   let tabContent;
-  if(tab === 'overall'){
+  if(isChallenge){
+    tabContent = `${modePickerHtml}${lifetimeBubblesHtml}${challengeSection}`;
+  } else if(tab === 'overall'){
     tabContent = `
-      ${chartSection}
+      ${modePickerHtml}
+      ${lifetimeBubblesHtml}
+      ${gameStatsHtml}
       ${h2hSection}
       ${practiceSection}`;
   } else if(tab === 'h2h'){
     tabContent = `
-      ${chartSection}
+      ${modePickerHtml}
+      ${lifetimeBubblesHtml}
+      ${gameStatsHtml}
       <details class="pp-section">
         <summary class="pp-section-title">Games &amp; Legs Played</summary>
         <div class="pp-cat-lines">${catHtml}</div>
@@ -6546,11 +6573,11 @@ function renderPlayerPage(){
         <summary class="pp-section-title">H2H Wins</summary>
         <div class="pp-cat-lines">${h2hHtml}</div>
       </details>`;
-  } else if(tab === 'challenge'){
-    tabContent = challengeSection;
   } else {
     tabContent = `
-      ${chartSection}
+      ${modePickerHtml}
+      ${lifetimeBubblesHtml}
+      ${gameStatsHtml}
       <details class="pp-section">
         <summary class="pp-section-title">Legs Thrown</summary>
         <div class="pp-cat-lines">${pracHtml}</div>
@@ -6586,12 +6613,11 @@ function renderPlayerPage(){
       <button class="tab-btn${tab==='overall'?' active':''}" data-tab="overall" onclick="switchPlayerTab('overall')">Overall</button>
       <button class="tab-btn${tab==='h2h'?' active':''}" data-tab="h2h" onclick="switchPlayerTab('h2h')">H2H</button>
       <button class="tab-btn${tab==='practice'?' active':''}" data-tab="practice" onclick="switchPlayerTab('practice')">Practice</button>
-      <button class="tab-btn${tab==='challenge'?' active':''}" data-tab="challenge" onclick="switchPlayerTab('challenge')">Daily Challenge</button>
     </div>
     ${tabContent}
     <div class="btn-row">
       <button class="btn btn-ghost" onclick="askRenameFromProfile('${j}')">Rename</button>
-      ${(canManagePlayers() && tab!=='challenge')?`<button class="btn btn-ghost danger" onclick="askClearPlayerStats('${j}','${tab==='overall'?'all':tab}')">Reset ${tab==='overall'?'all':tab==='h2h'?'H2H':'Practice'} stats</button>`:''}
+      ${(canManagePlayers() && !isChallenge)?`<button class="btn btn-ghost danger" onclick="askClearPlayerStats('${j}','${tab==='overall'?'all':tab}')">Reset ${tab==='overall'?'all':tab==='h2h'?'H2H':'Practice'} stats</button>`:''}
       ${canManagePlayers()?`<button class="btn btn-ghost danger" onclick="askDeleteFromProfile('${j}')">Delete player</button>`:''}
     </div>`;
   loadStatBubbles();
