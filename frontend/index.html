@@ -12003,108 +12003,31 @@ function pracStatsHtml(turns){
   ].join('');
 }
 
-// per-player leg/game stats shown on the H2H leg-complete and game-over screens
+// Default (X01-shaped) per-player leg/game stat rows — GAME_TYPES entries
+// with their own player shape (Baseball/Shanghai/Halve-It/Pressure Chamber)
+// declare an h2hRows(p, scope) member instead; h2hStatsHtml() below falls
+// back to this one, same "X01 shape as the default" precedent legSummary
+// already established.
+function h2hRowsX01(p, scope){
+  return scope==='game' ? [
+    statRow('Game Avg', avgStr(p.gamePoints, p.gameAvgDarts)),
+    statRow('Darts (match)', p.gameDarts||0),
+  ] : [
+    statRow('Leg Avg', avgStr(p.legPoints, p.legAvgDarts)),
+    statRow('Game Avg', avgStr(p.gamePoints, p.gameAvgDarts)),
+    statRow('Darts (leg)', p.legDarts||0),
+  ];
+}
+// per-player leg/game stats shown on the H2H leg-complete and game-over
+// screens — dispatches each player's own stat rows through the current
+// mode's GAME_TYPES.h2hRows (or the X01-shaped default) so the shared
+// standing row / winner-marker title / prac-stats wrapper below is written
+// once instead of once per mode with its own player-shape fields.
 function h2hStatsHtml(winner, scope){
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
+  const rowsFor = GAME_TYPES[game.gameType].h2hRows || h2hRowsX01;
   const cols = game.players.map(p=>{
-    const rows = scope==='game' ? [
-      statRow('Game Avg', avgStr(p.gamePoints, p.gameAvgDarts)),
-      statRow('Darts (match)', p.gameDarts||0),
-    ] : [
-      statRow('Leg Avg', avgStr(p.legPoints, p.legAvgDarts)),
-      statRow('Game Avg', avgStr(p.gamePoints, p.gameAvgDarts)),
-      statRow('Darts (leg)', p.legDarts||0),
-    ];
-    if(showStanding){
-      const standing = game.setsPerGame>1 ? `Sets ${p.setsWon} · Legs ${p.legsWon}` : `Legs ${p.legsWon}/${game.legsPerSet}`;
-      rows.push(statRow(scope==='game' ? 'Final Standing' : 'Standing', standing, true));
-    }
-    const title = p.name===winner ? `${escapeHtml(p.name)} 🎯` : escapeHtml(p.name);
-    return `<div class="prac-col"><div class="prac-col-title">${title}</div>${rows.join('')}</div>`;
-  }).join('');
-  return `<div class="prac-stats">${cols}</div>`;
-}
-
-// Baseball's per-player leg/game comparison table (GAME OVER / LEG COMPLETE
-// screens) — same container h2hStatsHtml() builds for X01, but showing runs
-// instead of a score average (a Baseball player object has no
-// gamePoints/legPoints/avgDarts fields at all). "Runs (final leg)" at the
-// game scope is deliberately not a cumulative match total — p.totalRuns resets
-// every leg (resetPlayerForNextLegBaseball()) and Baseball has no game-scoped
-// runs accumulator yet, so a multi-leg match's GAME OVER screen only reflects
-// the deciding leg's runs, same as every other per-leg field here.
-function h2hStatsHtmlBaseball(winner, scope){
-  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
-  const cols = game.players.map(p=>{
-    const rows = scope==='game' ? [
-      statRow('Runs (final leg)', p.totalRuns||0),
-      statRow('Darts (match)', p.gameDarts||0),
-    ] : [
-      statRow('Runs', p.totalRuns||0),
-      statRow('Darts (leg)', p.legDarts||0),
-    ];
-    if(showStanding){
-      const standing = game.setsPerGame>1 ? `Sets ${p.setsWon} · Legs ${p.legsWon}` : `Legs ${p.legsWon}/${game.legsPerSet}`;
-      rows.push(statRow(scope==='game' ? 'Final Standing' : 'Standing', standing, true));
-    }
-    const title = p.name===winner ? `${escapeHtml(p.name)} 🎯` : escapeHtml(p.name);
-    return `<div class="prac-col"><div class="prac-col-title">${title}</div>${rows.join('')}</div>`;
-  }).join('');
-  return `<div class="prac-stats">${cols}</div>`;
-}
-
-function h2hStatsHtmlShanghai(winner, scope){
-  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
-  const cols = game.players.map(p=>{
-    const rows = scope==='game' ? [
-      statRow('Points (final leg)', p.totalPoints||0),
-      statRow('Darts (match)', p.gameDarts||0),
-    ] : [
-      statRow('Points', p.totalPoints||0),
-      statRow('Darts (leg)', p.legDarts||0),
-    ];
-    if(showStanding){
-      const standing = game.setsPerGame>1 ? `Sets ${p.setsWon} · Legs ${p.legsWon}` : `Legs ${p.legsWon}/${game.legsPerSet}`;
-      rows.push(statRow(scope==='game' ? 'Final Standing' : 'Standing', standing, true));
-    }
-    const title = p.name===winner ? `${escapeHtml(p.name)} 🎯` : escapeHtml(p.name);
-    return `<div class="prac-col"><div class="prac-col-title">${title}</div>${rows.join('')}</div>`;
-  }).join('');
-  return `<div class="prac-stats">${cols}</div>`;
-}
-
-function h2hStatsHtmlHalveIt(winner, scope){
-  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
-  const cols = game.players.map(p=>{
-    const rows = scope==='game' ? [
-      statRow('Total (final leg)', p.total||0),
-      statRow('Darts (match)', p.gameDarts||0),
-    ] : [
-      statRow('Total', p.total||0),
-      statRow('Darts (leg)', p.legDarts||0),
-    ];
-    if(showStanding){
-      const standing = game.setsPerGame>1 ? `Sets ${p.setsWon} · Legs ${p.legsWon}` : `Legs ${p.legsWon}/${game.legsPerSet}`;
-      rows.push(statRow(scope==='game' ? 'Final Standing' : 'Standing', standing, true));
-    }
-    const title = p.name===winner ? `${escapeHtml(p.name)} 🎯` : escapeHtml(p.name);
-    return `<div class="prac-col"><div class="prac-col-title">${title}</div>${rows.join('')}</div>`;
-  }).join('');
-  return `<div class="prac-stats">${cols}</div>`;
-}
-
-function h2hStatsHtmlPressureChamber(winner, scope){
-  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
-  const cols = game.players.map(p=>{
-    const rows = scope==='game' ? [
-      statRow('Composure Points (final run)', p.totalCp||0),
-      statRow('Composure Rating', pressureComposureRating(p.totalCp||0)),
-      statRow('Darts (match)', p.gameDarts||0),
-    ] : [
-      statRow('Composure Points', p.totalCp||0),
-      statRow('Composure Rating', pressureComposureRating(p.totalCp||0)),
-      statRow('Darts (run)', p.legDarts||0),
-    ];
+    const rows = rowsFor(p, scope);
     if(showStanding){
       const standing = game.setsPerGame>1 ? `Sets ${p.setsWon} · Legs ${p.legsWon}` : `Legs ${p.legsWon}/${game.legsPerSet}`;
       rows.push(statRow(scope==='game' ? 'Final Standing' : 'Standing', standing, true));
@@ -12194,10 +12117,10 @@ function finishUnit(kind, winner){
     const nextBtn = game.tournamentMatchId
       ? `<button class="btn btn-primary" onclick="show('tournament')">Back to bracket</button>`
       : `<button class="btn btn-primary" onclick="show('setup')">New game</button>`;
-    // Bob's 27's own tiny run-summary block — h2hStatsHtml()/h2hStatsHtmlBaseball()
-    // both read X01/Baseball-shaped player fields (score/doubleOut, totalRuns/
-    // inningRuns) that don't exist on a bobs_27 player, same reasoning Cricket's
-    // own '' suppression already documents above.
+    // Bob's 27's own tiny run-summary block — h2hStatsHtml() reads X01/
+    // Baseball-shaped player fields (score/doubleOut, totalRuns/inningRuns)
+    // that don't exist on a bobs_27 player, same reasoning Cricket's own ''
+    // suppression already documents above.
     const bobs27Summary = isBobs27 ? (()=>{
       const p = game.players[0];
       const survived = p.running > 0;
@@ -12207,8 +12130,8 @@ function finishUnit(kind, winner){
       </div>`;
     })() : '';
     // The Gauntlet's own tiny run-summary block (docs/archive/gauntlet-roadmap.md) —
-    // same reasoning as bobs27Summary above: h2hStatsHtml()/h2hStatsHtmlBaseball()
-    // read X01/Baseball-shaped player fields a gauntlet player doesn't have.
+    // same reasoning as bobs27Summary above: h2hStatsHtml() reads X01/Baseball-
+    // shaped player fields a gauntlet player doesn't have.
     const gauntletSummary = isGauntlet ? (()=>{
       const totalScars = gauntletTotalScars(game.gauntletFinalMisses);
       const tier = gauntletResultTier(totalScars);
@@ -12243,18 +12166,20 @@ function finishUnit(kind, winner){
       <div class="btn-row" style="justify-content:center">
         ${nextBtn}
         ${matchShareBtn}
-      </div>${isCricket || isBobs27 || isGauntlet || isKiller || isDeadManWalking ? '' : isBaseball ? h2hStatsHtmlBaseball(winner,'game') : isShanghai ? h2hStatsHtmlShanghai(winner,'game') : isHalveIt ? h2hStatsHtmlHalveIt(winner,'game') : isPressureChamber ? h2hStatsHtmlPressureChamber(winner,'game') : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}${killerSummary}${deadManWalkingSummary}</div>`;
+      </div>${isCricket || isBobs27 || isGauntlet || isKiller || isDeadManWalking ? '' : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}${killerSummary}${deadManWalkingSummary}</div>`;
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
     // Cricket has no per-leg stat panel yet (X01-only fields; its own stats
     // parity is a later build-order step) — skip straight to '' rather than
-    // reading fields that don't exist on a cricket player. Baseball always uses
-    // h2hStatsHtmlBaseball() here, never a practice-style dual-column panel — a
-    // practice Baseball game is forced to exactly 1 leg/1 set (docs/bug-roadmap.md
-    // BUG-22, see onLegWonBaseball()/startGame()'s isPracticeBaseball), so
-    // kind==='leg' is only ever reached for a genuine mid-match H2H leg now.
-    const legPanel = isCricket || isKiller || kind!=='leg' ? '' : isBaseball ? h2hStatsHtmlBaseball(winner) : isShanghai ? h2hStatsHtmlShanghai(winner) : isHalveIt ? h2hStatsHtmlHalveIt(winner) : isPressureChamber ? h2hStatsHtmlPressureChamber(winner) : game.practice ? `
+    // reading fields that don't exist on a cricket player. Every mode with its
+    // own GAME_TYPES.h2hRows (Baseball/Shanghai/Halve-It/Pressure Chamber)
+    // always uses h2hStatsHtml() here, never a practice-style dual-column
+    // panel — a practice Baseball game is forced to exactly 1 leg/1 set
+    // (docs/bug-roadmap.md BUG-22, see onLegWonBaseball()/startGame()'s
+    // isPracticeBaseball), so kind==='leg' is only ever reached for a genuine
+    // mid-match H2H leg now (same reasoning applies to the other 3 modes).
+    const legPanel = isCricket || isKiller || kind!=='leg' ? '' : GAME_TYPES[game.gameType].h2hRows ? h2hStatsHtml(winner) : game.practice ? `
       <div class="prac-stats">
         <div class="prac-col">
           <div class="prac-col-title">This Leg</div>
@@ -12666,6 +12591,20 @@ const GAME_TYPES = {
   baseball: {
     id: 'baseball',
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, totalRuns:p.totalRuns||0, won:p.name===winner })),
+    // h2hStatsHtml()'s per-player rows — a Baseball player has no
+    // gamePoints/legPoints/avgDarts fields at all, so it shows runs instead
+    // of a score average. "Runs (final leg)" at game scope is deliberately
+    // not a cumulative match total — p.totalRuns resets every leg
+    // (resetPlayerForNextLegBaseball()) and Baseball has no game-scoped runs
+    // accumulator yet, so a multi-leg match's GAME OVER screen only reflects
+    // the deciding leg's runs, same as every other per-leg field here.
+    h2hRows: (p, scope) => scope==='game' ? [
+      statRow('Runs (final leg)', p.totalRuns||0),
+      statRow('Darts (match)', p.gameDarts||0),
+    ] : [
+      statRow('Runs', p.totalRuns||0),
+      statRow('Darts (leg)', p.legDarts||0),
+    ],
     label: 'Baseball',
     category: () => 'Baseball',
     newMatchPlayer: newMatchPlayerBaseball,
@@ -12682,6 +12621,13 @@ const GAME_TYPES = {
   shanghai: {
     id: 'shanghai',
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, totalPoints:p.totalPoints||0, won:p.name===winner })),
+    h2hRows: (p, scope) => scope==='game' ? [
+      statRow('Points (final leg)', p.totalPoints||0),
+      statRow('Darts (match)', p.gameDarts||0),
+    ] : [
+      statRow('Points', p.totalPoints||0),
+      statRow('Darts (leg)', p.legDarts||0),
+    ],
     label: 'Shanghai',
     category: () => 'Shanghai',
     optionsSectionId: 'shanghai-options-section',
@@ -12696,6 +12642,13 @@ const GAME_TYPES = {
   halve_it: {
     id: 'halve_it',
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, total:p.total||0, won:p.name===winner })),
+    h2hRows: (p, scope) => scope==='game' ? [
+      statRow('Total (final leg)', p.total||0),
+      statRow('Darts (match)', p.gameDarts||0),
+    ] : [
+      statRow('Total', p.total||0),
+      statRow('Darts (leg)', p.legDarts||0),
+    ],
     label: 'Halve-It',
     category: setup => setup.halveItPreset === 'custom' ? 'Custom Halve-It' : 'Halve-It',
     optionsSectionId: 'halve-it-options-section',
@@ -12711,6 +12664,15 @@ const GAME_TYPES = {
     id: 'pressure_chamber',
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, totalCp:p.totalCp||0,
       rating:pressureComposureRating(p.totalCp||0), won:p.name===winner })),
+    h2hRows: (p, scope) => scope==='game' ? [
+      statRow('Composure Points (final run)', p.totalCp||0),
+      statRow('Composure Rating', pressureComposureRating(p.totalCp||0)),
+      statRow('Darts (match)', p.gameDarts||0),
+    ] : [
+      statRow('Composure Points', p.totalCp||0),
+      statRow('Composure Rating', pressureComposureRating(p.totalCp||0)),
+      statRow('Darts (run)', p.legDarts||0),
+    ],
     label: 'The Pressure Chamber',
     category: () => 'The Pressure Chamber',
     newMatchPlayer: newMatchPlayerPressureChamber,

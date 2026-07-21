@@ -320,15 +320,39 @@ collapse both toggle sites into loops. Related mirrors worth folding in:
 `startGame()`'s separate `drillModes` — candidates for `isDrill`/`isSpecial`/
 `startLabel` fields on the mode entries.
 
-## Item 47 — One `h2hStatsHtml(winner, scope)` with per-type rows
+## Item 47 — One `h2hStatsHtml(winner, scope)` with per-type rows — ✅ Done
 
-`h2hStatsHtml` / `...Baseball` / `...Shanghai` / `...HalveIt` /
-`...PressureChamber` (~12256-12365) are five copies of the same function
-differing only in 2-3 `statRow()` metrics, selected in `finishUnit()` by TWO
-parallel 5-way ternary chains (game scope and leg scope) whose exclusion sets
-differ only via a comment-enforced invariant. A per-type `h2hRows(p, scope)`
-registry member (the `legSummary` precedent) deletes four clones and both
-chains. ~110 lines → ~40.
+The five near-identical `h2hStatsHtml`/`...Baseball`/`...Shanghai`/
+`...HalveIt`/`...PressureChamber` functions (differing only in 2-3
+`statRow()` metrics per player) are now one `h2hStatsHtml(winner, scope)`
+that dispatches each player's stat rows through a new `h2hRows(p, scope)`
+member on `GAME_TYPES` — the same `legSummary` precedent this roadmap already
+established, X01 shape as the default (`h2hRowsX01`) since its entry
+declares no `h2hRows` of its own. Baseball/Shanghai/Halve-It/Pressure
+Chamber each declare their own `h2hRows`, carrying forward their exact
+original per-mode comments (Baseball's non-cumulative "Runs (final leg)"
+rationale, Pressure Chamber's extra Composure Rating row). The shared
+`showStanding`/winner-marker-title/`prac-stats` wrapper logic — previously
+pasted five times — is now written once.
+
+`finishUnit()`'s two parallel 5-way ternary chains collapse to direct
+`h2hStatsHtml(...)` calls: the game-scope call site keeps its existing
+`isCricket || isBobs27 || isGauntlet || isKiller || isDeadManWalking`
+exclusion (those 5 modes still build their own small custom summary block
+instead, since their player shapes don't match `h2hRowsX01`'s fields), and
+the leg-scope call site's per-mode chain becomes a single
+`GAME_TYPES[game.gameType].h2hRows ? h2hStatsHtml(winner) : game.practice ?
+<dual panel> : h2hStatsHtml(winner)` — preserving the exact original
+behavior that the practice-mode dual-column panel is X01-exclusive (every
+`h2hRows`-having mode always shows the H2H panel, in or out of practice).
+
+Verified live in a browser: called `h2hStatsHtml` directly for all 5 modes
+(X01, Baseball, Shanghai, Halve-It, Pressure Chamber) at both `'game'` and
+leg scope with representative player state, confirming every label/value
+matches the original functions exactly (Baseball's "Runs (final leg)",
+Pressure Chamber's 3-row Composure Points/Rating/Darts, X01's Leg/Game Avg),
+plus the multi-leg "Standing" row appearing correctly. Backend suite
+unaffected (1244 tests, same 6 pre-existing unrelated failures).
 
 ## Item 48 — Declarative personal-bests renderers
 
