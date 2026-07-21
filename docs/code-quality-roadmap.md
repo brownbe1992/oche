@@ -243,7 +243,43 @@ Shanghai/Halve-It's Step 3 options — was fixed on the spot, along with the
 helper-bypass, dead-code, and fetch-waste items). These are the remaining
 larger refactors, tracked as items 46–52.
 
-## Item 46 — Per-mode option-section wiring as a registry member
+## Item 46 — Per-mode option-section wiring as a registry member — ✅ Done
+
+`optionsSectionId` on the four gameType-keyed `GAME_TYPES` entries (Cricket/
+Killer/Shanghai/Halve-It) plus one `updateGameTypeOptionSections(gameType)`
+loop collapses the exact byte-for-byte 4-line block `setMode()` and
+`setGameType()` each hand-maintained separately. `setupStep3HasContent()`'s
+own id list had already been fixed (a live `.setup-section` DOM query, no
+hand-kept list left) before this pass — nothing to do there.
+
+Of the "related mirrors": `NEW_GAME_MODE_OPTIONS[].contexts` now derives from
+`GAME_TYPES`' own `soloOnly`/`h2hOnly` flags via `contextsForMode()`, called
+at `setupVisibleOptions()`'s own runtime (not at `NEW_GAME_MODE_OPTIONS`'s
+module-load time, since that array is defined earlier in the file than
+`GAME_TYPES` is) — only `challenge`/`ghost` keep an explicit `contexts` array,
+since both play as plain x01 underneath with no `GAME_TYPES` entry of their
+own to derive from (chuckin's entry gained a `soloOnly: true` it was
+factually missing, needed for its own derivation). `isSpecialMode`'s 12-mode
+OR-chain and the start-button-label ternary — confirmed by inspection to be
+the exact same 12-mode set — collapse into one `SPECIAL_MODE_START_LABELS`
+map (Checkout Trainer's Blitz-vs-Freeform label stays a function, the one
+genuinely dynamic entry).
+
+**Deliberately NOT unified:** `drillGameTypes` (`setMode()`, 9 modes) and
+`drillModes` (`startGame()`, 10 modes) look like the same list at a glance
+but aren't — each excludes a different subset (`marathon`/`dead_man_walking`/
+`challenge`/`ghost` in various combinations) for real, documented reasons
+(Dead Man Walking's own 15-round/1-game leg shape vs. every other drill's
+generic 1/1; Marathon diverting before either list is even built). Forcing
+these into one shared field risked silently changing which modes get which
+treatment for no simplification benefit — left as two separate, correct
+lists rather than one incorrect merged one.
+
+Verified live in a browser: every mode's option-section visibility and
+start-button label (including Checkout Trainer's dynamic Blitz/Freeform
+switch), every gameType-driven section toggle via both `setMode()` and
+`setGameType()`, and `setupVisibleOptions()`'s practice/h2h key lists all
+match the pre-refactor behavior exactly.
 
 The Step 3 option-section mapping lives in four places: the markup
 (`#setup-step-3 .setup-section` ids), `setMode()`'s toggles (~3313-3335),

@@ -3321,13 +3321,26 @@ function drillButtonHtml(jName, score){
 // solo-only mode once 2+ players are selected in Step 1 — so the single-slot
 // truncation below is purely a safety net for the few call sites that invoke
 // setMode() directly (raceLeg(), the post-game "Try Again"/"Play again" buttons).
+// One map drives both the forced-single-player/1-leg/1-set "special mode"
+// behavior AND the Start button's per-mode label (item 46, docs/code-quality-
+// roadmap.md) — these were two separate hardcoded 12-mode lists that could
+// only ever silently drift apart. A mode not listed here falls back to the
+// ordinary multi-player flow and the default 'Play Now' label. Checkout
+// Trainer's label is the one genuinely dynamic case (Blitz vs Freeform), so
+// its entry is a function instead of a plain string.
+const SPECIAL_MODE_START_LABELS = {
+  challenge: 'Start Challenge', ghost: 'Start race',
+  doubles_practice: 'Start practice', chuckin: "Start chuckin'",
+  checkout_trainer: setup => setup.checkoutTrainerMode === 'blitz' ? 'Start Blitz' : 'Start training',
+  around_the_clock: 'Start the clock', around_the_world: 'Start chipping away',
+  bobs_27: 'Start the run', checkout_ladder: 'Start climbing', gauntlet: 'Run the Gauntlet',
+  marathon: 'Start the marathon', dead_man_walking: 'Begin the walk',
+};
 function setMode(mode){
   setup.mode = mode;
   setup.practice = (mode !== 'h2h');
   document.getElementById('h2h-options').hidden = (mode !== 'h2h');
-  const isSpecialMode = (mode === 'challenge' || mode === 'ghost' || mode === 'doubles_practice' || mode === 'chuckin'
-    || mode === 'checkout_trainer' || mode === 'around_the_clock' || mode === 'around_the_world' || mode === 'bobs_27'
-    || mode === 'checkout_ladder' || mode === 'gauntlet' || mode === 'marathon' || mode === 'dead_man_walking');
+  const isSpecialMode = mode in SPECIAL_MODE_START_LABELS;
   // Daily Challenge and Ghost Opponent are both X01-only (docs/archive/ghost-opponent-roadmap.md
   // is explicitly X01-only for v1); Doubles Practice/Just Chuckin' It/Checkout
   // Trainer/both guided drills/Bob's 27 are each their own gameType, not a
@@ -3340,24 +3353,13 @@ function setMode(mode){
   if(!drillGameTypes.includes(mode) && drillGameTypes.includes(setup.gameType)) setup.gameType = 'x01';
   if((mode === 'challenge' || mode === 'ghost') && setup.gameType !== 'x01') setup.gameType = 'x01';
   if(drillGameTypes.includes(mode)) setup.gameType = mode;
-  document.getElementById('cricket-options-section').hidden = (setup.gameType !== 'cricket');
-  document.getElementById('killer-options-section').hidden = (setup.gameType !== 'killer');
-  document.getElementById('shanghai-options-section').hidden = (setup.gameType !== 'shanghai');
-  document.getElementById('halve-it-options-section').hidden = (setup.gameType !== 'halve_it');
+  updateGameTypeOptionSections(setup.gameType);
   document.getElementById('ghost-options-section').hidden = (mode !== 'ghost');
   document.getElementById('doubles-options-section').hidden = (mode !== 'doubles_practice');
   document.getElementById('checkout-trainer-options-section').hidden = (mode !== 'checkout_trainer');
   const startBtn = document.getElementById('start-btn');
-  if(startBtn) startBtn.textContent = (mode === 'challenge') ? 'Start Challenge' : (mode === 'ghost') ? 'Start race'
-    : (mode === 'doubles_practice') ? 'Start practice' : (mode === 'chuckin') ? "Start chuckin'"
-    : (mode === 'checkout_trainer') ? (setup.checkoutTrainerMode==='blitz' ? 'Start Blitz' : 'Start training')
-    : (mode === 'around_the_clock') ? 'Start the clock' : (mode === 'around_the_world') ? 'Start chipping away'
-    : (mode === 'bobs_27') ? 'Start the run'
-    : (mode === 'checkout_ladder') ? 'Start climbing'
-    : (mode === 'gauntlet') ? 'Run the Gauntlet'
-    : (mode === 'marathon') ? 'Start the marathon'
-    : (mode === 'dead_man_walking') ? 'Begin the walk'
-    : 'Play Now';
+  const label = SPECIAL_MODE_START_LABELS[mode];
+  if(startBtn) startBtn.textContent = (typeof label === 'function' ? label(setup) : label) || 'Play Now';
   if(isSpecialMode){
     setup.slots = setup.slots.slice(0,1);
     if(!setup.slots.length) setup.slots = [''];
@@ -4322,10 +4324,7 @@ function applyPreset(legsToWin, sets){
 /* ---------- Cricket New Game config (game-modes-roadmap.md) ---------- */
 function setGameType(type){
   setup.gameType = type;
-  document.getElementById('cricket-options-section').hidden = (type !== 'cricket');
-  document.getElementById('killer-options-section').hidden = (type !== 'killer');
-  document.getElementById('shanghai-options-section').hidden = (type !== 'shanghai');
-  document.getElementById('halve-it-options-section').hidden = (type !== 'halve_it');
+  updateGameTypeOptionSections(type);
   if(type === 'cricket') renderCricketNumberGrid();
   if(type === 'halve_it') setHalveItPreset(setup.halveItPreset);
 }
@@ -4428,73 +4427,84 @@ function resolveHalveItTargets(){
 function setupPlayerCount(){ return setup.slots.filter(s=>s).length; }
 
 // contexts: which player counts this entry is offered for ('practice' = exactly
-// 1, 'h2h' = 2+ — see docs/archive/new-game-flow-roadmap.md's table). blurb is the
-// how-to-play text shown in Step 2 for every entry except Daily Challenge, which
-// renders a live status card instead (renderSetupChallengeBlurb()). apply()
-// reuses the existing setMode()/setGameType() handlers exactly as they were —
-// only the surrounding screen structure changed, not what gets validated or what
-// the game object ends up looking like.
+// 1, 'h2h' = 2+ — see docs/archive/new-game-flow-roadmap.md's table), derived
+// from GAME_TYPES' own soloOnly/h2hOnly flags via contextsForMode() (item 46,
+// docs/code-quality-roadmap.md) rather than hand-duplicated here — only
+// challenge/ghost declare an explicit `contexts` array below, since both play
+// as plain x01 underneath and have no GAME_TYPES entry of their own to derive
+// from. blurb is the how-to-play text shown in Step 2 for every entry except
+// Daily Challenge, which renders a live status card instead
+// (renderSetupChallengeBlurb()). apply() reuses the existing setMode()/
+// setGameType() handlers exactly as they were — only the surrounding screen
+// structure changed, not what gets validated or what the game object ends up
+// looking like.
 const NEW_GAME_MODE_OPTIONS = [
   { key:'challenge', label:'🎯 Daily Challenge', contexts:['practice'],
     apply(){ setMode('challenge'); } },
-  { key:'x01', label:'X01', contexts:['practice','h2h'],
+  { key:'x01', label:'X01',
     blurb:"Count down from your starting score to exactly zero, finishing on a double (or single, if that player's finish rule is set to Singles Out). Play solo for practice, or head-to-head against another player.",
     apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('x01'); } },
-  { key:'cricket', label:'Cricket', contexts:['practice','h2h'],
+  { key:'cricket', label:'Cricket',
     blurb:"Close out 15 through 20 and Bull — hit a number 3 times to open it, then keep scoring on it until it's closed everywhere (against an opponent in H2H, or just for completion in practice). Choose Standard (highest score wins) or Cut-throat (those points land on your opponents instead, lowest score wins) on the next step.",
     apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('cricket'); } },
-  { key:'baseball', label:'Baseball', contexts:['practice','h2h'],
+  { key:'baseball', label:'Baseball',
     blurb:"9 innings, one per number 1-9. Each visit's 3 darts only count against that inning's number — a single scores 1 run, a double 2, a treble 3. After 9 innings, highest total runs wins (a tie continues into extra innings at number 9).",
     apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('baseball'); } },
-  { key:'shanghai', label:'🀄 Shanghai', contexts:['practice','h2h'],
+  { key:'shanghai', label:'🀄 Shanghai',
     blurb:"A fixed round sequence — round 1 targets the number 1, round 2 the number 2, and so on. Each visit's 3 darts only score on that round's own number — a single scores 1×, a double 2×, a treble 3× the number. Highest total after the last round wins — unless someone throws a Shanghai: single, double, AND treble of the round's number in one visit, which wins the WHOLE game instantly. Choose how many rounds on the next step.",
     apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('shanghai'); } },
-  { key:'halve_it', label:'🪓 Halve-It', contexts:['practice','h2h'],
+  { key:'halve_it', label:'🪓 Halve-It',
     blurb:"A fixed sequence of 7 targets — 20, 16, double 7, 14, treble 10, 17, and Bull. Each round's 3 darts only score against that round's own target: every dart that hits it adds its value to your running total — but if all three miss, your total is HALVED (rounded up). Highest total after the last round wins. One bad visit can cost a leader half their game, so nobody's really out of it until the end.",
     apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('halve_it'); } },
-  { key:'pressure_chamber', label:'🔒 The Pressure Chamber', contexts:['practice','h2h'],
+  { key:'pressure_chamber', label:'🔒 The Pressure Chamber',
     blurb:"15 rounds, 15 fresh Pressure Cards — a target, the stakes, and one of 8 situational modifiers (a 5-second shot clock, an instant-loss condition, a doubled penalty, or just Dead Calm — no modifier at all, sometimes the scariest of all). Bank Composure Points and land on a rating from Ice down to Rattled. Play solo to chase your own rating, or with up to 3 others on the identical card sequence — a fair contest of nerve, not just skill.",
     apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('pressure_chamber'); } },
-  { key:'chuckin', label:"Just Chuckin' It", contexts:['practice'],
+  { key:'chuckin', label:"Just Chuckin' It",
     blurb:"No score to chase, no leg to win — just throw for as long as you like. Every dart still counts toward your lifetime totals and heatmap, so it's a low-pressure way to warm up, find your rhythm, or chase down a milestone badge.",
     apply(){ setMode('chuckin'); } },
-  { key:'doubles_practice', label:'Doubles Practice', contexts:['practice'],
+  { key:'doubles_practice', label:'Doubles Practice',
     blurb:"Choose one or more doubles to practice on the next step — all stay live at once. A single/treble on a target number, or hitting a different double, ends the round.",
     apply(){ setMode('doubles_practice'); } },
   { key:'ghost', label:'👻 Ghost Mode', contexts:['practice'],
     blurb:"Race against a recording of one of your own past legs, dart for dart — whoever checks out first wins. Choose which leg to race on the next step.",
     apply(){ setMode('ghost'); } },
-  { key:'checkout_trainer', label:'🧮 Checkout Trainer', contexts:['practice'],
+  { key:'checkout_trainer', label:'🧮 Checkout Trainer',
     blurb:"No dartboard needed — the app gives you a target score, you tap out the fewest-darts checkout from memory, and it's graded instantly against the objectively optimal route. A pure recall drill, not a throwing game.",
     apply(){ setMode('checkout_trainer'); } },
-  { key:'around_the_clock', label:'Around the Clock', contexts:['practice'],
+  { key:'around_the_clock', label:'Around the Clock',
     blurb:'Hit every number, 1 through 20, as a single — in any order. Live progress shows exactly which numbers you still need. A round ends the moment all 20 are hit; press "Start Next Clock" to go again.',
     apply(){ setMode('around_the_clock'); } },
-  { key:'around_the_world', label:'Around the World', contexts:['practice'],
+  { key:'around_the_world', label:'Around the World',
     blurb:"Chip away at all 63 lifetime dart outcomes — every number 1-20 as a single, double, and treble, plus outer bull, double bull, and a miss. Tracks the same lifetime progress as your Player Profile, across as many sessions as it takes. No round to finish — throw for as long as you like.",
     apply(){ setMode('around_the_world'); } },
-  { key:'bobs_27', label:"Bob's 27", contexts:['practice'],
+  { key:'bobs_27', label:"Bob's 27",
     blurb:"Bob Anderson's famous doubles routine. Start with 27 points, then throw 3 darts at D1, then D2, all the way to D20 — every dart that hits the double adds its value, but if all three miss, that double's value is SUBTRACTED instead. Drop to 0 or below and the run is over; survive to D20 and your final score is the result (a perfect run is 1287).",
     apply(){ setMode('bobs_27'); } },
-  { key:'checkout_ladder', label:'🧗 121 Checkout Ladder', contexts:['practice'],
+  { key:'checkout_ladder', label:'🧗 121 Checkout Ladder',
     blurb:"The classic checkout ladder — the physical sibling of Checkout Trainer (that one asks what you'd throw; this makes you throw it). Start on 121, double out, up to 3 visits (9 darts) to check out. Check out and the target climbs one rung; fail all 3 visits and it drops one (never below 61). Play as long as you like — the story is how high you climb.",
     apply(){ setMode('checkout_ladder'); } },
-  { key:'gauntlet', label:'🥋 The Gauntlet', contexts:['practice'],
+  { key:'gauntlet', label:'🥋 The Gauntlet',
     blurb:"A 20-station endurance warm-up, one per board number, in a fixed order that never repeats a nearby number twice in a row. Each station is 3 darts, strictly in order: the single, then the treble, then the double. Miss 2 and you get one repeat attempt at that station; miss all 3 and it's a Deep Scar. Total Scars across all 20 stations lands on a result — from Unmarked to The Gauntlet Wins. Runs about 15 minutes.",
     apply(){ setMode('gauntlet'); } },
-  { key:'marathon', label:'🏃 Marathon Mode', contexts:['practice'],
+  { key:'marathon', label:'🏃 Marathon Mode',
     blurb:"A 45-minute solo endurance session — ordinary 501 legs, chained back to back with no return to this setup screen. When time runs out, the leg in progress finishes normally, then you get the story: dart count per leg, a fatigue split (did the second half run slower than the first?), and a trend read across the whole session — The Cliff, The Warm Machine, or The Flat Line.",
     apply(){ setMode('marathon'); } },
-  { key:'dead_man_walking', label:'💀 Dead Man Walking', contexts:['practice'],
+  { key:'dead_man_walking', label:'💀 Dead Man Walking',
     blurb:"15 rounds. Each one drops you mid-checkout on one of YOUR OWN historically weakest finishes, with one fewer dart than you'd usually need. Close it — Walked Out. Bust, or run out of darts — Executed. No warmup, no easy numbers: the deficits are pulled straight from your own worst history and keep recurring until you solve them. The count of Walked Out rounds out of 15 lands on a result, from Pardoned down to Executed.",
     apply(){ setMode('dead_man_walking'); } },
-  { key:'killer', label:'🔪 Killer', contexts:['h2h'],
+  { key:'killer', label:'🔪 Killer',
     blurb:"Elimination darts. Each player is randomly assigned their own number when the match starts. Land darts on your own number to build lives — reach the lives threshold and you become a killer. Once you're a killer, hitting an opponent's number costs them lives instead; drop to 0 lives and you're eliminated. Last player standing wins the leg (your own double is a self-kill if you're already a killer). Choose the lives threshold on the next step.",
     apply(){ setMode('h2h'); setGameType('killer'); } },
 ];
+// Item 46 (docs/code-quality-roadmap.md): most entries above have no explicit
+// `contexts` — their practice/h2h visibility derives from GAME_TYPES' own
+// soloOnly/h2hOnly flags via contextsForMode() instead of a third hand-
+// duplicated list. Only challenge/ghost keep an explicit array: both play as
+// plain x01 underneath (setMode('challenge'|'ghost')), so there's no
+// GAME_TYPES entry of their own to derive from.
 function setupVisibleOptions(){
   const ctx = setupPlayerCount()>=2 ? 'h2h' : 'practice';
-  return NEW_GAME_MODE_OPTIONS.filter(o=>o.contexts.includes(ctx));
+  return NEW_GAME_MODE_OPTIONS.filter(o=>(o.contexts || contextsForMode(o.key)).includes(ctx));
 }
 // The dropdown's current value: 'league_game' if a fixture is selected, otherwise
 // whatever gameType/mode setMode()/setGameType() last landed on.
@@ -12815,6 +12825,7 @@ const GAME_TYPES = {
       closed:Object.keys(p.marks||{}).filter(n=>(p.marks[n]||0)>=3).length, won:p.name===winner })),
     label: 'Cricket',
     category: setup => setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)',
+    optionsSectionId: 'cricket-options-section',
     newMatchPlayer: newMatchPlayerCricket,
     evaluateVisit: evaluateVisitCricket,
     resetForNextLeg: resetPlayerForNextLegCricket,
@@ -12844,6 +12855,7 @@ const GAME_TYPES = {
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, totalPoints:p.totalPoints||0, won:p.name===winner })),
     label: 'Shanghai',
     category: () => 'Shanghai',
+    optionsSectionId: 'shanghai-options-section',
     newMatchPlayer: newMatchPlayerShanghai,
     evaluateVisit: evaluateVisitShanghai,
     resetForNextLeg: resetPlayerForNextLegShanghai,
@@ -12857,6 +12869,7 @@ const GAME_TYPES = {
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, total:p.total||0, won:p.name===winner })),
     label: 'Halve-It',
     category: setup => setup.halveItPreset === 'custom' ? 'Custom Halve-It' : 'Halve-It',
+    optionsSectionId: 'halve-it-options-section',
     newMatchPlayer: newMatchPlayerHalveIt,
     evaluateVisit: evaluateVisitHalveIt,
     resetForNextLeg: resetPlayerForNextLegHalveIt,
@@ -12919,7 +12932,12 @@ const GAME_TYPES = {
     // false (not null) deliberately opts this mode out of the Home page toggle
     // entirely — unlike null ("use the built-in X01-shaped default"), this mode's
     // stats don't map onto that shape and no Home leaderboard was requested for it.
-    homeTabRenderer: false
+    homeTabRenderer: false,
+    // Practice-only, same reasoning as every other drill below — no opponent to
+    // play head-to-head against. (homeGameTypeVisible() never actually reaches
+    // this flag for chuckin, since homeTabRenderer:false above already excludes
+    // it; added for NEW_GAME_MODE_OPTIONS' contextsForMode() derivation, item 46.)
+    soloOnly: true
   },
   checkout_trainer: {
     id: 'checkout_trainer',
@@ -13035,6 +13053,7 @@ const GAME_TYPES = {
       kills:p.kills||0, eliminated:!!p.eliminated, won:p.name===winner })),
     label: 'Killer',
     category: () => 'Killer',
+    optionsSectionId: 'killer-options-section',
     newMatchPlayer: newMatchPlayerKiller,
     // Per-dart evaluation (evaluateDartKiller(dart, throwerName, players)), not
     // a batched-visit evaluateVisit — every call site is a dedicated
@@ -14503,6 +14522,34 @@ GAME_TYPES.marathon.bubbleKeyMap = MARATHON_BUBBLE_KEY_MAP;
 const NON_SAVABLE_GAME_TYPES = ['doubles_practice', 'chuckin', 'checkout_trainer', 'killer'];
 const SAVABLE_GAME_TYPES = Object.keys(GAME_TYPES).filter(k =>
   !GAME_TYPES[k].dispatchOnly && !NON_SAVABLE_GAME_TYPES.includes(k));
+// Shows/hides every New Game Step 3 option section that's keyed to a
+// gameType (Cricket/Killer/Shanghai/Halve-It) — the single registry-driven
+// loop setMode() and setGameType() both call, replacing the byte-for-byte
+// 4-line block each used to hand-maintain separately (item 46, docs/code-
+// quality-roadmap.md; the drift between them is exactly what that item
+// flags). Mode-keyed sections (h2h/ghost/doubles/checkout-trainer) aren't
+// gameType-keyed the same way, so they stay toggled directly in setMode().
+function updateGameTypeOptionSections(gameType){
+  Object.values(GAME_TYPES).forEach(gt => {
+    if(!gt.optionsSectionId) return;
+    const el = document.getElementById(gt.optionsSectionId);
+    if(el) el.hidden = (gameType !== gt.id);
+  });
+}
+// Derives NEW_GAME_MODE_OPTIONS' practice/h2h visibility from the registry's
+// own soloOnly/h2hOnly flags instead of a hand-duplicated third list (item 46)
+// — called at runtime (setupVisibleOptions(), well after GAME_TYPES exists),
+// not at NEW_GAME_MODE_OPTIONS' own module-load time, since that array is
+// defined earlier in the file than GAME_TYPES is. Returns null for a mode
+// with no real GAME_TYPES entry (challenge/ghost — both play as plain x01
+// underneath), which keeps its own explicit `contexts` array instead.
+function contextsForMode(key){
+  const gt = GAME_TYPES[key];
+  if(!gt) return null;
+  if(gt.h2hOnly) return ['h2h'];
+  if(gt.soloOnly) return ['practice'];
+  return ['practice','h2h'];
+}
 
 /* ---------- Doubles Practice (docs/game-modes-roadmap.md) ----------
    Solo drill mode: no opponent, no legs/sets in the usual sense — a "round" is
