@@ -1,14 +1,21 @@
 'use strict';
 // Committed regression test for backend/server.js's live-scoreboard allowlist
-// (docs/bug-roadmap.md BUG-28). sanitizeLiveState() keeps only the top-level keys
-// named in ALLOWED_LIVE_KEYS before broadcasting the payload to the /display second
-// screen. Shanghai, Halve-It, and The Pressure Chamber each ship per-game-type fields
-// (shanghaiRound/shanghaiMaxRounds, halveItRound/halveItTargets,
-// pressureChamberRound/pressureChamberDeadline/pressureChamberCards) that the client
-// (frontend/index.html's buildLiveState) sends but the allowlist originally omitted, so
-// the server stripped them and the second-screen scorecards rendered broken. This test
-// POSTs a payload carrying all of them (plus an unknown key as a control) to /api/live,
-// GETs it back, and asserts the game-type fields survive while the unknown key is dropped.
+// (docs/bug-roadmap.md BUG-28, and docs/code-quality-roadmap.md item 42's
+// consolidation of it). sanitizeLiveState() keeps only the top-level keys named
+// in ALLOWED_LIVE_KEYS before broadcasting the payload to the /display second
+// screen. Every per-game-type field (Shanghai's round count, Halve-It's target
+// sequence, Pressure Chamber's card sequence, Killer's lives threshold, Checkout
+// Ladder's target/visit counter, Dead Man Walking's dart budget, ...) used to be
+// its own top-level allowlist entry, and TWICE a new mode's fields were sent by
+// the client and read by /display but never allowlisted here (BUG-28's 7 keys,
+// then killerLives/checkoutLadderTarget/checkoutLadderVisits) — the server
+// silently stripped them before every broadcast. Item 42 replaced all of those
+// individual entries with one opaque `modeState` container (unrestricted-shape
+// the same way `players` already is), so a future mode's live fields can never
+// repeat that failure: this test posts a payload carrying every one of the
+// previously-bug-prone fields nested under `modeState` (plus an unknown
+// top-level key as a control) and asserts the whole container round-trips
+// intact while the unknown key is dropped.
 //
 // server.js isn't require()-able (it .listen()s at load and exports nothing), so this
 // spawns it as a real child process against a scratch DB and hits it over HTTP — the
@@ -52,16 +59,12 @@ async function withServer(port, fn) {
   }
 }
 
-test('sanitizeLiveState preserves the Shanghai/Halve-It/Pressure Chamber /display fields (BUG-28)', async () => {
+test('sanitizeLiveState preserves the opaque modeState container (item 42, BUG-28 regression)', async () => {
   // Fixed port in the same 84xx block the other server-spawn tests reserve, so parallel
   // `node --test` runs never collide (next free slot after 8496 in db.turn-consistency-guard).
   const port = 8497;
   await withServer(port, async () => {
-    const payload = {
-      active: true,
-      gameType: 'pressure_chamber',
-      players: [{ name: 'Ann', totalCp: 40 }],
-      currentIndex: 0,
+    const modeState = {
       // Shanghai
       shanghaiRound: 4,
       shanghaiMaxRounds: 5,
@@ -76,8 +79,8 @@ test('sanitizeLiveState preserves the Shanghai/Halve-It/Pressure Chamber /displa
           modifier: { key: 'sudden_death', label: 'Sudden Death', icon: '💀', flavor: 'x' } },
       ],
       // Killer — the lives threshold the /display "lives target N" header reads
-      // (a repeat of BUG-28: sent by liveSnapshot(), stripped by the allowlist,
-      // display silently fell back to the default 3).
+      // (a repeat of BUG-28: sent by liveSnapshot(), stripped by the old
+      // per-field allowlist, display silently fell back to the default 3).
       killerLives: 5,
       // The 121 Checkout Ladder — target/visit counter for the /display header
       // (same BUG-28 repeat: stripped keys silently fell back to 121 / visit 1).
@@ -87,7 +90,14 @@ test('sanitizeLiveState preserves the Shanghai/Halve-It/Pressure Chamber /displa
       dmwBudget: 9,
       dmwDartsUsed: 4,
       dmwWalkedOut: 3,
-      // Control: an unknown key that must be stripped.
+    };
+    const payload = {
+      active: true,
+      gameType: 'pressure_chamber',
+      players: [{ name: 'Ann', totalCp: 40 }],
+      currentIndex: 0,
+      modeState,
+      // Control: an unknown top-level key that must be stripped.
       totallyBogusKey: 'should not survive',
     };
 
@@ -98,22 +108,11 @@ test('sanitizeLiveState preserves the Shanghai/Halve-It/Pressure Chamber /displa
 
     const state = await (await fetch(`http://localhost:${port}/api/live`)).json();
 
-    // Every per-game-type field the /display renderers read must round-trip intact.
-    assert.equal(state.shanghaiRound, 4);
-    assert.equal(state.shanghaiMaxRounds, 5);
-    assert.equal(state.halveItRound, 3);
-    assert.deepEqual(state.halveItTargets, payload.halveItTargets);
-    assert.equal(state.pressureChamberRound, 6);
-    assert.equal(state.pressureChamberDeadline, 1234567890);
-    assert.deepEqual(state.pressureChamberCards, payload.pressureChamberCards);
-    assert.equal(state.killerLives, 5);
-    assert.equal(state.checkoutLadderTarget, 137);
-    assert.equal(state.checkoutLadderVisits, 2);
-    assert.equal(state.dmwBudget, 9);
-    assert.equal(state.dmwDartsUsed, 4);
-    assert.equal(state.dmwWalkedOut, 3);
+    // The whole modeState container round-trips intact, whatever shape it holds —
+    // no per-field allowlist entry to forget for a future mode.
+    assert.deepEqual(state.modeState, modeState);
 
-    // The allowlist still drops unknown keys.
+    // The allowlist still drops unknown top-level keys.
     assert.equal(state.totallyBogusKey, undefined);
   });
 });

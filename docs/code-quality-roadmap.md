@@ -156,20 +156,67 @@ matching, discovered only after bad rows exist.
 (static label for most, computed for Cricket preset / Halve-It preset /
 Doubles targets / Blitz-vs-Freeform), making the fallthrough impossible.
 
-## Item 42 — Live-state keys: per-mode container (or registry-derived allowlist)
+## Item 42 — Live-state keys: per-mode container (or registry-derived allowlist) — ✅ Done
 
-`ALLOWED_LIVE_KEYS` (`backend/server.js` ≈ 465) is a ~58-entry hand-kept
-flat list; every new mode adds top-level keys in three unlinked places
-(`liveSnapshot()` producer, the allowlist, the `display.html` reader). The
-silent-strip failure has now shipped **twice** (BUG-28's 7 keys, then
-`killerLives`/`checkoutLadder*` — the `/display` fallbacks made both
-invisible: plausible-looking wrong defaults, no error).
+`liveSnapshot()` (`frontend/index.html`) now builds one opaque `modeState`
+object via `GAME_TYPES[game.gameType].liveModeState(game)` — a new registry
+member declared inline next to each mode's `playerSnapshot`/`evaluateVisit`,
+following the exact `category`/`legSummary`/`h2hRows` precedent already
+established elsewhere in this registry — instead of ~22 individual
+`gameType === '...' ? value : null` fields at the top level. `ALLOWED_LIVE_KEYS`
+(`backend/server.js`) shrinks from enumerating every one of those per-mode
+field names to allow-listing `modeState` itself as an opaque value (the same
+"unrestricted shape, sanitized as a whole" treatment `players` already gets),
+alongside the ~13 genuinely generic top-level fields (`active`, `gameType`,
+`players`, `achievement`, `tournamentRoundLabel`, ...) that apply across every
+mode. The SEC-2 sanitization layer (size cap, top-level shape validation) is
+unchanged.
 
-**Shape:** either one allowlisted per-mode container key (`modeState`,
-unrestricted-shape the way `players[]` already is) with per-mode fields
-inside it, or derive the allowlist from a shared registry the producer and
-reader both consume. Reduces three sync points to zero. Touches the SEC-2
-sanitization layer — keep the size cap and the top-level shape validation.
+This closes the exact failure class the item was written to catch — a new
+mode's live-scoreboard fields silently missing the backend allowlist entry
+while the producer and `display.html`'s reader both already had them, twice
+(`docs/bug-roadmap.md` BUG-28's 7 keys, then `killerLives`/
+`checkoutLadderTarget`/`checkoutLadderVisits`) — by removing that step
+entirely. A new mode's per-mode live fields now only ever need touching in
+two places (its own `GAME_TYPES` entry and `display.html`'s reader), never
+`ALLOWED_LIVE_KEYS`.
+
+13 modes declare `liveModeState`: Cricket (`cricketVariant`), Baseball
+(`baseballInning`), Shanghai (`shanghaiRound`/`shanghaiMaxRounds`), Halve-It
+(`halveItRound`/`halveItTargets`), Pressure Chamber (`pressureChamberRound`/
+`pressureChamberDeadline`/`pressureChamberCards`), Doubles Practice
+(`doublesTargets`/`dpLastDart`/`roundOver`/`roundEndReason`), guided Around
+the Clock (`atcLastDart`, sharing `roundOver`/`roundEndReason` with Doubles
+Practice), Chuckin (`chuckinLastDart`), guided Around the World
+(`atwLastDart`), Bob's 27 (`bobs27Round`), Checkout Ladder
+(`checkoutLadderTarget`/`checkoutLadderVisits`), Killer (`killerLives`), and
+Dead Man Walking (`dmwBudget`/`dmwDartsUsed`/`dmwWalkedOut`). X01 declares no
+`liveModeState` member (`modeState` is `null` for X01 games, matching how it
+already has no `personalBestsSpec`/`h2hRows`).
+
+The regression test for BUG-28 (`backend/test/server.live-state-keys.test.js`)
+was rewritten to assert the whole `modeState` container round-trips intact
+(rather than 12 individual top-level keys) — same intent, new wire shape.
+`REFERENCE.md` §7's live-scoreboard payload documentation, plus every
+scattered per-mode reference to the old flat key names (Halve-It, Pressure
+Chamber, Checkout Ladder, Dead Man Walking, Around the Clock/World sections,
+and the debugging-tips entry), updated in the same change.
+
+Verified live in a browser: pushed real `game` objects for Killer, Halve-It,
+Pressure Chamber, and Cricket through the actual `liveSnapshot()` → `POST
+/api/live` → `GET /api/live` round-trip against a running server, confirming
+`modeState` carries every field correctly (including Pressure Chamber's full
+15-card sequence), and confirmed `display.html` rendered each pushed state
+via its live SSE connection with zero errors. Backend suite unaffected (1244
+tests, same 6 pre-existing unrelated failures) — plus fixed two real
+regressions this refactor exposed along the way: `display.pressure-chamber-
+hardening.test.js`'s SEC-26 payload shape (updated to nest under
+`modeState`), and `display.badge-value-parity.test.js`'s brace-matching
+`objectBody()` helper, which didn't understand `//` line comments and was
+already coincidentally over-scanning past its target object's real closing
+brace by accident — an apostrophe added in a nearby comment shifted that
+coincidence and broke the test; made the extractor comment-aware instead of
+gaming the comment's wording.
 
 ## Item 43 — Id-keyed killer configs (end the name-rewrite class) — ✅ Done
 

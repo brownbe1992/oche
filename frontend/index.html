@@ -9109,78 +9109,14 @@ function liveSnapshot(message){
     checkout,
     status: (game.gameType === 'doubles_practice' || game.gameType === 'around_the_clock') ? (game.roundOver ? 'bust' : 'live') : game.won ? 'won' : (game.busted ? 'bust' : 'live'),
     message: message || '',
-    // Doubles Practice / guided Around the Clock (docs/game-modes-roadmap.md): the
-    // target set, the outcome of the most recent dart, and why the round ended (if
-    // it has) — the /display renderer reads these instead of the X01/Cricket-shaped
-    // fields above. roundOver/roundEndReason are shared by both game types.
-    doublesTargets: game.gameType === 'doubles_practice' ? (game.config.doubles || []) : null,
-    dpLastDart: game.gameType === 'doubles_practice' ? (game.dpLastDart || null) : null,
-    roundOver: (game.gameType === 'doubles_practice' || game.gameType === 'around_the_clock') ? !!game.roundOver : null,
-    roundEndReason: (game.gameType === 'doubles_practice' || game.gameType === 'around_the_clock') ? (game.roundEndReason || null) : null,
-    atcLastDart: game.gameType === 'around_the_clock' ? (game.atcLastDart || null) : null,
-    // Just Chuckin' It / guided Around the World only: the outcome of the most
-    // recent dart — the /display renderer reads this instead of the
-    // X01/Cricket/Doubles-Practice-shaped fields.
-    chuckinLastDart: game.gameType === 'chuckin' ? (game.chuckinLastDart || null) : null,
-    atwLastDart: game.gameType === 'around_the_world' ? (game.atwLastDart || null) : null,
-    // Baseball only: which inning (1-9, or beyond on a tie) is currently live —
-    // per-player runs ride inside the players[] array above via playerSnapshotBaseball().
-    baseballInning: game.gameType === 'baseball' ? (game.baseballInning || 1) : null,
-    // Shanghai only (docs/archive/shanghai-roadmap.md): which round (1-config.rounds, or
-    // beyond on a tie) is currently live — per-player points ride inside the
-    // players[] array above via playerSnapshotShanghai().
-    shanghaiRound: game.gameType === 'shanghai' ? (game.shanghaiRound || 1) : null,
-    shanghaiMaxRounds: game.gameType === 'shanghai' ? ((game.config && game.config.rounds) || 7) : null,
-    // Halve-It only (docs/archive/halve-it-roadmap.md): which round is
-    // currently live, plus the round's own target -- per-player totals ride
-    // inside the players[] array above via playerSnapshotHalveIt().
-    halveItRound: game.gameType === 'halve_it' ? (game.halveItRound || 1) : null,
-    // The FULL target sequence (not just the live round's own target) — the
-    // /display renderer has no shared scoring.js module to derive per-row
-    // labels from, so it needs every round's target up front to render the
-    // whole scorecard grid, not just the live one.
-    halveItTargets: game.gameType === 'halve_it' ? ((game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS) : null,
-    // The Pressure Chamber only (docs/archive/pressure-chamber-roadmap.md): which
-    // round is currently live, its own wall-clock No Warmup deadline (if
-    // any), and the FULL 15-round card sequence up front (target+modifier
-    // for every round) — same "display.html has no shared scoring.js module"
-    // reasoning as halveItTargets above, since generatePressureCard() itself
-    // isn't reachable there. Per-player CP totals ride inside the players[]
-    // array above via playerSnapshotPressureChamber().
-    pressureChamberRound: game.gameType === 'pressure_chamber' ? (game.pressureChamberRound || 1) : null,
-    pressureChamberDeadline: game.gameType === 'pressure_chamber' ? (game.pressureChamberDeadline || null) : null,
-    pressureChamberCards: game.gameType === 'pressure_chamber'
-      ? Array.from({ length: (game.config && game.config.rounds) || PRESSURE_ROUNDS }, (_, i) => {
-          const c = generatePressureCard(game.gameId, i + 1);
-          return { target: c.target, modifier: { key: c.modifier.key, label: c.modifier.label, icon: c.modifier.icon, flavor: c.modifier.flavor } };
-        })
-      : null,
-    // Cricket only (docs/archive/cutthroat-cricket-roadmap.md): lets display.html's
-    // cricket scorecard label its points footer "lowest wins" for cutthroat,
-    // the one thing that otherwise renders identically to standard.
-    cricketVariant: game.gameType === 'cricket' ? (game.config.variant || 'standard') : null,
-    // Bob's 27 only (docs/archive/practice-ladders-roadmap.md Part A): which
-    // double (1-20) is currently live — per-player running score/round history
-    // ride inside the players[] array above via playerSnapshotBobs27().
-    bobs27Round: game.gameType === 'bobs_27' ? (game.bobs27Round || 1) : null,
-    // 121 Checkout Ladder only (docs/archive/practice-ladders-roadmap.md Part B): the
-    // current attempt's target and how many of its 3 visits are used —
-    // per-player remaining score rides inside the players[] array above via
-    // playerSnapshotCheckoutLadder().
-    checkoutLadderTarget: game.gameType === 'checkout_ladder' ? (game.checkoutLadderTarget || 121) : null,
-    checkoutLadderVisits: game.gameType === 'checkout_ladder' ? (game.checkoutLadderVisits || 0) : null,
-    // Killer only (docs/game-modes-roadmap.md "Killer"): the become-a-killer
-    // lives threshold — per-player number/lives/isKiller/eliminated/kills ride
-    // inside the players[] array above via playerSnapshotKiller().
-    killerLives: game.gameType === 'killer' ? (game.killerLives || KILLER_DEFAULT_LIVES) : null,
-    // Dead Man Walking only (docs/archive/dead-man-walking-roadmap.md): the round's
-    // par-darts budget, darts used so far this round, and the walked-out tally —
-    // read by display.html's renderers.dead_man_walking.card() (the round number
-    // itself rides on the generic legNo above; remaining score rides inside
-    // players[] via playerSnapshotDeadManWalking()).
-    dmwBudget: game.gameType === 'dead_man_walking' ? (game.dmwBudget || 0) : null,
-    dmwDartsUsed: game.gameType === 'dead_man_walking' ? (game.dmwDartsUsedThisRound || 0) : null,
-    dmwWalkedOut: game.gameType === 'dead_man_walking' ? (game.dmwWalkedOutCount || 0) : null,
+    // Every field a mode's own live-scoreboard rendering needs beyond the
+    // generic shape above (item 42) — a registry member instead of one
+    // `gameType === '...' ? ... : null` line per field per mode, so a new
+    // mode's live fields need touching only here and in display.html's own
+    // reader, never a matching backend ALLOWED_LIVE_KEYS entry (the exact
+    // sync point BUG-28 and the killerLives/checkoutLadder* bug both
+    // silently missed — twice).
+    modeState: (GAME_TYPES[game.gameType].liveModeState || (()=>null))(game),
     achievement: pendingAchievement || null,
     gameOneEighties: game.gameOneEighties || 0,
     gameBigFish: game.gameBigFish || 0,
@@ -12231,7 +12167,12 @@ const GAME_TYPES = {
     playerSnapshot: playerSnapshotCricket,
     statDefs: CRICKET_STAT_DEFS,
     personalBestsSpec: CRICKET_PB_SPEC,
-    homeTabRenderer: renderHomeTabBodyCricket
+    homeTabRenderer: renderHomeTabBodyCricket,
+    // /display's per-mode live-scoreboard fields (item 42) — nested under
+    // liveSnapshot()'s modeState so a new field here never needs a matching
+    // backend ALLOWED_LIVE_KEYS entry (the exact sync point BUG-28 and the
+    // killerLives/checkoutLadder* bug both silently missed).
+    liveModeState: game => ({ cricketVariant: game.config.variant || 'standard' })
   },
   baseball: {
     id: 'baseball',
@@ -12261,7 +12202,8 @@ const GAME_TYPES = {
     // (`Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length)`).
     statDefs: BASEBALL_STAT_DEFS,
     personalBestsSpec: BASEBALL_PB_SPEC,
-    homeTabRenderer: renderHomeTabBodyBaseball
+    homeTabRenderer: renderHomeTabBodyBaseball,
+    liveModeState: game => ({ baseballInning: game.baseballInning || 1 })
   },
   shanghai: {
     id: 'shanghai',
@@ -12282,7 +12224,8 @@ const GAME_TYPES = {
     playerSnapshot: playerSnapshotShanghai,
     statDefs: SHANGHAI_STAT_DEFS,
     personalBestsSpec: SHANGHAI_PB_SPEC,
-    homeTabRenderer: renderHomeTabBodyShanghai
+    homeTabRenderer: renderHomeTabBodyShanghai,
+    liveModeState: game => ({ shanghaiRound: game.shanghaiRound || 1, shanghaiMaxRounds: (game.config && game.config.rounds) || 7 })
   },
   halve_it: {
     id: 'halve_it',
@@ -12303,7 +12246,12 @@ const GAME_TYPES = {
     playerSnapshot: playerSnapshotHalveIt,
     statDefs: HALVE_IT_STAT_DEFS,
     personalBestsSpec: HALVE_IT_PB_SPEC,
-    homeTabRenderer: renderHomeTabBodyHalveIt
+    homeTabRenderer: renderHomeTabBodyHalveIt,
+    // The FULL target sequence (not just the live round's own target) — /display
+    // has no shared scoring.js module to derive per-row labels from, so it needs
+    // every round's target up front to render the whole scorecard grid.
+    liveModeState: game => ({ halveItRound: game.halveItRound || 1,
+      halveItTargets: (game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS })
   },
   pressure_chamber: {
     id: 'pressure_chamber',
@@ -12326,7 +12274,20 @@ const GAME_TYPES = {
     playerSnapshot: playerSnapshotPressureChamber,
     statDefs: PRESSURE_CHAMBER_STAT_DEFS,
     personalBestsSpec: PRESSURE_CHAMBER_PB_SPEC,
-    homeTabRenderer: renderHomeTabBodyPressureChamber
+    homeTabRenderer: renderHomeTabBodyPressureChamber,
+    // The FULL 15-round card sequence up front (target+modifier for every
+    // round), plus which round is live and its own wall-clock No Warmup
+    // deadline — same "display.html has no shared scoring.js module"
+    // reasoning as Halve-It's liveModeState above, since generatePressureCard()
+    // itself isn't reachable there.
+    liveModeState: game => ({
+      pressureChamberRound: game.pressureChamberRound || 1,
+      pressureChamberDeadline: game.pressureChamberDeadline || null,
+      pressureChamberCards: Array.from({ length: (game.config && game.config.rounds) || PRESSURE_ROUNDS }, (_, i) => {
+        const c = generatePressureCard(game.gameId, i + 1);
+        return { target: c.target, modifier: { key: c.modifier.key, label: c.modifier.label, icon: c.modifier.icon, flavor: c.modifier.flavor } };
+      }),
+    })
   },
   doubles_practice: {
     id: 'doubles_practice',
@@ -12345,6 +12306,11 @@ const GAME_TYPES = {
     statDefs: DOUBLES_PRACTICE_STAT_DEFS,
     personalBestsSpec: DOUBLES_PRACTICE_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyDoublesPractice,
+    // The target set, the outcome of the most recent dart, and why the round
+    // ended (if it has) — /display reads these instead of the X01/Cricket-shaped
+    // fields liveSnapshot() sends generically.
+    liveModeState: game => ({ doublesTargets: game.config.doubles || [], dpLastDart: game.dpLastDart || null,
+      roundOver: !!game.roundOver, roundEndReason: game.roundEndReason || null }),
     // Always solo — there's no opponent to play head-to-head against, so this
     // game type's Home page tab only makes sense under Practice. renderHomeGameTypeTabs()
     // hides it entirely while the H2H tab is selected, and switchHomeTab() bumps
@@ -12365,6 +12331,9 @@ const GAME_TYPES = {
     playerSnapshot: playerSnapshotChuckin,
     statDefs: CHUCKIN_STAT_DEFS,
     personalBestsSpec: CHUCKIN_PB_SPEC,
+    // The outcome of the most recent dart — /display reads this instead of the
+    // X01/Cricket/Doubles-Practice-shaped fields liveSnapshot() sends generically.
+    liveModeState: game => ({ chuckinLastDart: game.chuckinLastDart || null }),
     // false (not null) deliberately opts this mode out of the Home page toggle
     // entirely — unlike null ("use the built-in X01-shaped default"), this mode's
     // stats don't map onto that shape and no Home leaderboard was requested for it.
@@ -12412,6 +12381,9 @@ const GAME_TYPES = {
     statDefs: AROUND_THE_CLOCK_STAT_DEFS,
     personalBestsSpec: AROUND_THE_CLOCK_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyAroundTheClock,
+    // roundOver/roundEndReason are shared with Doubles Practice's liveModeState above.
+    liveModeState: game => ({ atcLastDart: game.atcLastDart || null,
+      roundOver: !!game.roundOver, roundEndReason: game.roundEndReason || null }),
     // Solo, same reasoning as Doubles Practice — no H2H equivalent.
     soloOnly: true
   },
@@ -12428,6 +12400,7 @@ const GAME_TYPES = {
     statDefs: AROUND_THE_WORLD_STAT_DEFS,
     personalBestsSpec: AROUND_THE_WORLD_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyAroundTheWorld,
+    liveModeState: game => ({ atwLastDart: game.atwLastDart || null }),
     soloOnly: true
   },
   bobs_27: {
@@ -12442,6 +12415,7 @@ const GAME_TYPES = {
     statDefs: BOBS_27_STAT_DEFS,
     personalBestsSpec: BOBS27_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyBobs27,
+    liveModeState: game => ({ bobs27Round: game.bobs27Round || 1 }),
     // Always solo — there's no opponent to play head-to-head against, same
     // reasoning as Doubles Practice/Checkout Trainer/both guided drills.
     soloOnly: true
@@ -12461,6 +12435,8 @@ const GAME_TYPES = {
     statDefs: CHECKOUT_LADDER_STAT_DEFS,
     personalBestsSpec: CHECKOUT_LADDER_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyCheckoutLadder,
+    liveModeState: game => ({ checkoutLadderTarget: game.checkoutLadderTarget || 121,
+      checkoutLadderVisits: game.checkoutLadderVisits || 0 }),
     soloOnly: true
   },
   gauntlet: {
@@ -12501,6 +12477,7 @@ const GAME_TYPES = {
     statDefs: KILLER_STAT_DEFS,
     personalBestsSpec: KILLER_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyKiller,
+    liveModeState: game => ({ killerLives: game.killerLives || KILLER_DEFAULT_LIVES }),
     // The inverse of soloOnly (docs/game-modes-roadmap.md "Killer": the
     // whole mechanic needs opponents to attack) — never offered/shown as a
     // solo/practice-only option the way Bob's 27 etc. are.
@@ -12523,6 +12500,10 @@ const GAME_TYPES = {
     statDefs: DEAD_MAN_WALKING_STAT_DEFS,
     personalBestsSpec: DEAD_MAN_WALKING_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyDeadManWalking,
+    // The round number itself rides on the generic legNo field; remaining
+    // score rides inside players[] via playerSnapshot.
+    liveModeState: game => ({ dmwBudget: game.dmwBudget || 0,
+      dmwDartsUsed: game.dmwDartsUsedThisRound || 0, dmwWalkedOut: game.dmwWalkedOutCount || 0 }),
     // Solo only — no opponent, same reasoning Bob's 27/Checkout Ladder/The
     // Gauntlet's own soloOnly already established.
     soloOnly: true

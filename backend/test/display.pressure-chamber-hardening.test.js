@@ -3,8 +3,9 @@
 // renderers.pressure_chamber.scorecard() in frontend/display.html built its
 // target/modifier banner by inserting liveCard.modifier.icon into innerHTML WITHOUT
 // escapeHtml, while every sibling field (target.label, modifier.label, modifier.flavor)
-// was escaped. The card sequence rides in the /api/live payload (s.pressureChamberCards),
-// which sanitizeLiveState() passes through without recursively escaping nested values,
+// was escaped. The card sequence rides in the /api/live payload (s.modeState.
+// pressureChamberCards, nested under item 42's modeState consolidation), which
+// sanitizeLiveState() passes through without recursively escaping nested values,
 // so once BUG-28 allowlisted that key a hostile POST /api/live could inject markup via
 // modifier.icon and have it execute in every /display viewer's browser. The fix escapes
 // the icon at the sink; this test proves a crafted icon renders as inert escaped text.
@@ -48,13 +49,15 @@ describe('SEC-26 — renderers.pressure_chamber.scorecard() escapes a hostile mo
     const s = {
       players: [{ name: 'Ann', totalCp: 40, roundResults: {} }],
       currentIndex: 0,
-      pressureChamberRound: 1,
-      pressureChamberDeadline: null,
       darts: [],
-      pressureChamberCards: [
-        { target: { type: 'sector', sector: 20, ring: 'treble', label: 'Treble 20' },
-          modifier: { key: 'dead_calm', label: 'Dead Calm', icon: XSS, flavor: 'baseline' } },
-      ],
+      modeState: {
+        pressureChamberRound: 1,
+        pressureChamberDeadline: null,
+        pressureChamberCards: [
+          { target: { type: 'sector', sector: 20, ring: 'treble', label: 'Treble 20' },
+            modifier: { key: 'dead_calm', label: 'Dead Calm', icon: XSS, flavor: 'baseline' } },
+        ],
+      },
     };
     let html;
     assert.doesNotThrow(() => { html = scorecard(s, {}); });

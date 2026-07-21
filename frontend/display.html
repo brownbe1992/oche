@@ -981,7 +981,7 @@ const renderers = {
       // docs/archive/cutthroat-cricket-roadmap.md: the one visible difference from
       // standard on this screen — everything else (marks grid, points cells)
       // renders identically either way.
-      const ptsLabel = s.cricketVariant === 'cutthroat' ? 'Pts (lowest wins)' : 'Pts';
+      const ptsLabel = (s.modeState||{}).cricketVariant === 'cutthroat' ? 'Pts (lowest wins)' : 'Pts';
 
       return `<div class="cs-wrap" style="--cs-cols:${players.length}">
         <div class="cs-table">
@@ -1019,7 +1019,7 @@ const renderers = {
     scorecard(s, L){
       const players = s.players;
       const active = s.currentIndex;
-      const inning = s.baseballInning || 1;
+      const inning = (s.modeState||{}).baseballInning || 1;
       const lastInning = Math.max(9, inning);
       const rows = [];
       for(let i=1;i<=lastInning;i++){
@@ -1086,8 +1086,8 @@ const renderers = {
     scorecard(s, L){
       const players = s.players;
       const active = s.currentIndex;
-      const maxRounds = s.shanghaiMaxRounds || 7;
-      const round = s.shanghaiRound || 1;
+      const maxRounds = (s.modeState||{}).shanghaiMaxRounds || 7;
+      const round = (s.modeState||{}).shanghaiRound || 1;
       const lastRound = Math.max(maxRounds, round);
       const rows = [];
       for(let i=1;i<=lastRound;i++){
@@ -1148,8 +1148,8 @@ const renderers = {
   },
   // Halve-It (docs/archive/halve-it-roadmap.md): same shared chalkboard-table
   // shape as Shanghai's own, with row labels showing the round's own TARGET
-  // LABEL (e.g. "Double 7", "Bull") read from s.halveItTargets (the full
-  // sequence, sent because this file has no shared scoring.js module to
+  // LABEL (e.g. "Double 7", "Bull") read from s.modeState.halveItTargets (the
+  // full sequence, sent because this file has no shared scoring.js module to
   // derive per-round targets from) and cells showing the RUNNING TOTAL after
   // that round with a ½ marker on a halved round, mirroring index.html's own
   // renderGameHalveIt() exactly.
@@ -1157,9 +1157,9 @@ const renderers = {
     scorecard(s, L){
       const players = s.players;
       const active = s.currentIndex;
-      const targets = (s.halveItTargets && s.halveItTargets.length) ? s.halveItTargets : [{sector:20}];
+      const targets = ((s.modeState||{}).halveItTargets && s.modeState.halveItTargets.length) ? s.modeState.halveItTargets : [{sector:20}];
       const maxRounds = targets.length;
-      const round = s.halveItRound || 1;
+      const round = (s.modeState||{}).halveItRound || 1;
       const lastRound = Math.max(maxRounds, round);
       const targetAt = i => targets[Math.min(i, maxRounds) - 1];
       const targetLabel = t => {
@@ -1230,18 +1230,19 @@ const renderers = {
   // cs-table chalkboard shape as Shanghai/Halve-It's own (rows=rounds
   // 1-config.rounds, columns=players), each settled cell showing an icon for
   // that round's outcome (✅ full / ➗ partial / ❌ miss). The full 15-round
-  // card sequence rides in s.pressureChamberCards (this file has no shared
-  // scoring.js module to derive per-round targets from, same reasoning
-  // s.halveItTargets already documents) — a big banner below the table shows
-  // the CURRENT round's target/modifier/flavor text, large and unmissable,
-  // plus a live No Warmup countdown read from s.pressureChamberDeadline.
+  // card sequence rides in s.modeState.pressureChamberCards (this file has no
+  // shared scoring.js module to derive per-round targets from, same reasoning
+  // s.modeState.halveItTargets already documents) — a big banner below the
+  // table shows the CURRENT round's target/modifier/flavor text, large and
+  // unmissable, plus a live No Warmup countdown read from
+  // s.modeState.pressureChamberDeadline.
   pressure_chamber: {
     scorecard(s, L){
       const players = s.players;
       const active = s.currentIndex;
-      const cards = Array.isArray(s.pressureChamberCards) ? s.pressureChamberCards : [];
+      const cards = Array.isArray((s.modeState||{}).pressureChamberCards) ? s.modeState.pressureChamberCards : [];
       const maxRounds = cards.length || 15;
-      const round = s.pressureChamberRound || 1;
+      const round = (s.modeState||{}).pressureChamberRound || 1;
       const lastRound = Math.max(maxRounds, round);
       const cardAt = i => cards[Math.min(i, maxRounds) - 1];
       const OUTCOME_ICON = { full:'✅', partial:'➗', miss:'❌' };
@@ -1279,7 +1280,8 @@ const renderers = {
 
       const liveCard = cardAt(round);
       const noWarmup = liveCard && liveCard.modifier && liveCard.modifier.key === 'no_warmup';
-      const remainingSec = (noWarmup && s.pressureChamberDeadline != null) ? Math.max(0, Math.ceil((s.pressureChamberDeadline - Date.now())/1000)) : null;
+      const pcDeadline = (s.modeState||{}).pressureChamberDeadline;
+      const remainingSec = (noWarmup && pcDeadline != null) ? Math.max(0, Math.ceil((pcDeadline - Date.now())/1000)) : null;
       const banner = liveCard ? `<div style="margin-top:10px;padding:12px;border:2px solid #c9a227;border-radius:10px;text-align:center;background:rgba(201,162,39,0.08)">
         <div style="font-size:22px;font-weight:800">${escapeHtml(liveCard.target.label)}</div>
         <div style="font-size:16px;font-weight:700;margin-top:4px">${escapeHtml(liveCard.modifier.icon)} ${escapeHtml(liveCard.modifier.label)}</div>
@@ -1324,7 +1326,7 @@ const renderers = {
   bobs_27: {
     scorecard(s, L){
       const p = s.players[0];
-      const round = s.bobs27Round || 1;
+      const round = (s.modeState||{}).bobs27Round || 1;
       const rows = [];
       for(let r=1;r<=20;r++){
         const isCurrentRound = r===round;
@@ -1374,8 +1376,8 @@ const renderers = {
   checkout_ladder: {
     card(p, i, s, L){
       const active = i===s.currentIndex;
-      const target = num(s.checkoutLadderTarget || 121);
-      const visit = Math.min((s.checkoutLadderVisits||0)+1, 3);
+      const target = num((s.modeState||{}).checkoutLadderTarget || 121);
+      const visit = Math.min(((s.modeState||{}).checkoutLadderVisits||0)+1, 3);
       let throwbox = '';
       if(active){
         const darts = Array.isArray(s.darts) ? s.darts : [];
@@ -1424,12 +1426,12 @@ const renderers = {
   // Killer (docs/game-modes-roadmap.md "Killer"): elimination H2H, always
   // multiple players/cards (never scorecard-layout) — one card per player showing
   // their randomly-assigned number, lives-as-pips (mirrors index.html's own
-  // renderGameKiller()), killer status, and kills. s.killerLives comes from
-  // liveSnapshot()'s own killerLives field (index.html).
+  // renderGameKiller()), killer status, and kills. s.modeState.killerLives comes
+  // from liveSnapshot()'s GAME_TYPES.killer.liveModeState (index.html).
   killer: {
     card(p, i, s, L){
       const active = i===s.currentIndex && !p.eliminated;
-      const livesTarget = num(s.killerLives) || 3;
+      const livesTarget = num((s.modeState||{}).killerLives) || 3;
       const lives = num(p.lives);
       const pips = Array.from({length: Math.max(lives, livesTarget)}, (_,k) =>
         `<span aria-hidden="true">${k < lives ? '●' : '○'}</span>`).join(' ');
@@ -1470,12 +1472,13 @@ const renderers = {
   // this round, walked-out tally). enterTurnDeadManWalking() broadcasts every
   // committed turn, so without this entry the dispatch fell back to the X01
   // card, which has none of the walk state. s.dmwBudget/dmwDartsUsed/
-  // dmwWalkedOut come from liveSnapshot()'s own DMW fields; the round number
-  // rides on the generic s.legNo.
+  // dmwWalkedOut come from liveSnapshot()'s GAME_TYPES.dead_man_walking.
+  // liveModeState; the round number rides on the generic s.legNo.
   dead_man_walking: {
     card(p, i, s, L){
       const active = i===s.currentIndex;
-      const dartsLeft = Math.max(0, num(s.dmwBudget) - num(s.dmwDartsUsed));
+      const ms = s.modeState || {};
+      const dartsLeft = Math.max(0, num(ms.dmwBudget) - num(ms.dmwDartsUsed));
       let throwbox = '';
       if(active){
         const darts = Array.isArray(s.darts) ? s.darts : [];
@@ -1489,7 +1492,7 @@ const renderers = {
       if(active && s.status==='bust') flash = `<div class="flash bust">BUST</div>`;
       if(active && s.status==='won')  flash = `<div class="flash shot">WALKED OUT</div>`;
 
-      const meta = !L.showMeta ? '' : `<div class="meta"><span class="standing">Round ${num(s.legNo)} of 15 · ${dartsLeft} dart${dartsLeft===1?'':'s'} left · Walked Out ${num(s.dmwWalkedOut)}</span></div>`;
+      const meta = !L.showMeta ? '' : `<div class="meta"><span class="standing">Round ${num(s.legNo)} of 15 · ${dartsLeft} dart${dartsLeft===1?'':'s'} left · Walked Out ${num(ms.dmwWalkedOut)}</span></div>`;
 
       return `<div class="pcard ${active?'active':''}">
         ${flash}
@@ -1528,16 +1531,17 @@ const renderers = {
   doubles_practice: {
     card(p, i, s, L){
       const active = i===s.currentIndex;
-      const targets = Array.isArray(s.doublesTargets) ? s.doublesTargets : [];
+      const ms = s.modeState || {};
+      const targets = Array.isArray(ms.doublesTargets) ? ms.doublesTargets : [];
       const targetLabel = targets.map(n => n===25 ? 'Bull' : 'D'+n).join(', ');
       const pct = p.roundDarts ? Math.round(p.roundHits/p.roundDarts*100) : 0;
       let flash = '';
-      if(active && s.roundOver){
-        flash = `<div class="flash bust">${s.roundEndReason==='so-close' ? 'SO CLOSE' : 'WRONG DOUBLE'}</div>`;
+      if(active && ms.roundOver){
+        flash = `<div class="flash bust">${ms.roundEndReason==='so-close' ? 'SO CLOSE' : 'WRONG DOUBLE'}</div>`;
       }
       let throwbox = '';
-      if(active && s.dpLastDart && !s.roundOver){
-        throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(s.dpLastDart.label)}">${esc(s.dpLastDart.label)}</div></div></div>`;
+      if(active && ms.dpLastDart && !ms.roundOver){
+        throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(ms.dpLastDart.label)}">${esc(ms.dpLastDart.label)}</div></div></div>`;
       }
       return `<div class="pcard ${active?'active':''}">
         ${flash}
@@ -1581,9 +1585,10 @@ const renderers = {
       const sessionAvgNum = p.sessionAvg == null ? null : Number(p.sessionAvg);
       const avgText = Number.isFinite(sessionAvgNum) ? sessionAvgNum.toFixed(1) : '—';
       let throwbox = '';
-      if(active && s.chuckinLastDart){
-        const treble = s.chuckinLastDart.isTreble ? '<span class="flash win" style="position:static;display:inline-block;margin-left:8px">TREBLE</span>' : '';
-        throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(s.chuckinLastDart.label)}">${esc(s.chuckinLastDart.label)}</div></div>${treble}</div>`;
+      const chuckinLastDart = (s.modeState||{}).chuckinLastDart;
+      if(active && chuckinLastDart){
+        const treble = chuckinLastDart.isTreble ? '<span class="flash win" style="position:static;display:inline-block;margin-left:8px">TREBLE</span>' : '';
+        throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(chuckinLastDart.label)}">${esc(chuckinLastDart.label)}</div></div>${treble}</div>`;
       }
       return `<div class="pcard ${active?'active':''}">
         <div class="chuckin-layout">
@@ -1612,15 +1617,16 @@ const renderers = {
   around_the_clock: {
     card(p, i, s, L){
       const active = i===s.currentIndex;
+      const ms = s.modeState || {};
       const hitNumbers = Array.isArray(p.hitNumbers) ? p.hitNumbers : [];
       const hitKeys = hitNumbers.map(n=>`${n}:1`);
       let flash = '';
-      if(active && s.roundOver){
+      if(active && ms.roundOver){
         flash = `<div class="flash win">CLOCK COMPLETE</div>`;
       }
       let throwbox = '';
-      if(active && s.atcLastDart && !s.roundOver){
-        throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(s.atcLastDart.label)}">${esc(s.atcLastDart.label)}</div></div></div>`;
+      if(active && ms.atcLastDart && !ms.roundOver){
+        throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(ms.atcLastDart.label)}">${esc(ms.atcLastDart.label)}</div></div></div>`;
       }
       return `<div class="pcard ${active?'active':''}">
         ${flash}
@@ -1649,10 +1655,11 @@ const renderers = {
     card(p, i, s, L){
       const active = i===s.currentIndex;
       const hitOutcomes = Array.isArray(p.hitOutcomes) ? p.hitOutcomes : [];
+      const atwLastDart = (s.modeState||{}).atwLastDart;
       let throwbox = '';
-      if(active && s.atwLastDart){
-        const newOutcome = s.atwLastDart.isNewLifetimeOutcome ? '<span class="flash win" style="position:static;display:inline-block;margin-left:8px">NEW!</span>' : '';
-        throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(s.atwLastDart.label)}">${esc(s.atwLastDart.label)}</div></div>${newOutcome}</div>`;
+      if(active && atwLastDart){
+        const newOutcome = atwLastDart.isNewLifetimeOutcome ? '<span class="flash win" style="position:static;display:inline-block;margin-left:8px">NEW!</span>' : '';
+        throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(atwLastDart.label)}">${esc(atwLastDart.label)}</div></div>${newOutcome}</div>`;
       }
       return `<div class="pcard ${active?'active':''}">
         <div class="chuckin-layout">

@@ -462,78 +462,29 @@ const MAX_BACKUP_UPLOAD_BYTES = 500 * 1024 * 1024;
 // connected screen. Restrict it to the fields liveSnapshot() in frontend/index.html
 // actually produces (and display.html reads) and cap its serialized size, so a
 // malformed/oversized payload can't bloat every broadcast.
+//
+// docs/code-quality-roadmap.md item 42: every per-mode field (Shanghai's round
+// count, Killer's lives threshold, Dead Man Walking's dart budget, ...) used to
+// be its own top-level entry here, in addition to the frontend's producer
+// (liveSnapshot()) and display.html's reader. That 3rd sync point — this list —
+// is exactly the one a new mode's live-scoreboard fields silently missed, twice
+// (BUG-28's 7 keys, then killerLives/checkoutLadder*): both bugs shipped a
+// mode whose fields were added to liveSnapshot() and read by display.html, but
+// never allowlisted here, so the server silently stripped them before every
+// broadcast — a plausible-looking wrong default on the TV, no error anywhere.
+// `modeState` (an opaque object, unrestricted-shape the same way `players[]`
+// already is) replaces all of those per-field entries — a new mode's live
+// fields now only ever need touching in two places (its own GAME_TYPES.
+// liveModeState member, and display.html's reader), never here.
 const ALLOWED_LIVE_KEYS = new Set([
   'active', 'gameType', 'category', 'legsPerSet', 'setsPerGame', 'setNo', 'legNo',
   'currentIndex', 'players', 'darts', 'checkout', 'status', 'message', 'achievement',
   'gameOneEighties', 'gameBigFish', 'gameBusts', 'legSummary', 'practice', 'done',
   'lastTurnEvent', 'matchResult', 'legStart', 'checkoutTarget', 'turnSeq', 'ts',
-  // Doubles Practice only (docs/game-modes-roadmap.md) — read by display.html's
-  // renderers.doubles_practice.card(), never by X01/Cricket. roundOver/roundEndReason
-  // are shared with guided Around the Clock below (same "round ended" concept).
-  'doublesTargets', 'dpLastDart', 'roundOver', 'roundEndReason',
-  // Just Chuckin' It only (docs/game-modes-roadmap.md) — read by display.html's
-  // renderers.chuckin.card().
-  'chuckinLastDart',
-  // Guided Around the Clock / Around the World only (docs/game-modes-roadmap.md) —
-  // read by display.html's renderers.around_the_clock.card()/renderers.around_the_world.card().
-  // Per-player hit-set/progress data rides inside the already-unrestricted
-  // per-player `players[]` array, same as Chuckin's heatmap/sessionAvg fields do.
-  'atcLastDart', 'atwLastDart',
+  'modeState',
   // Tournament mode only (docs/archive/tournament-mode-roadmap.md) — read by display.html's
   // fmtText() for the top-bar round label ("Quarterfinal", "Final", ...).
   'tournamentRoundLabel',
-  // Baseball only (docs/game-modes-roadmap.md) — which inning (1-9, or beyond on a
-  // tie) is currently live; read by display.html's renderers.baseball.scorecard()
-  // for the "Inning N of 9" header. Per-player runs ride inside the already-
-  // unrestricted per-player `players[]` array, same as every other game type's own
-  // per-player fields.
-  'baseballInning',
-  // Cricket only (docs/archive/cutthroat-cricket-roadmap.md) — 'standard' | 'cutthroat';
-  // read by display.html's renderers.cricket.scorecard() to label the points
-  // footer "lowest wins" for cutthroat, the one thing that otherwise renders
-  // identically to standard.
-  'cricketVariant',
-  // Bob's 27 only (docs/archive/practice-ladders-roadmap.md Part A) — which
-  // double (1-20) is currently live; read by display.html's
-  // renderers.bobs_27.scorecard() for the round header. Per-player running
-  // score/round history ride inside the already-unrestricted per-player
-  // `players[]` array, same as every other game type's own per-player fields.
-  'bobs27Round',
-  // Shanghai only (docs/archive/shanghai-roadmap.md) — which round is currently live
-  // and the game's own round count; read by display.html's renderers.shanghai.scorecard()
-  // for the round header and the current-round highlight. Per-player round points ride
-  // inside the already-unrestricted per-player `players[]` array.
-  'shanghaiRound', 'shanghaiMaxRounds',
-  // Halve-It only (docs/archive/halve-it-roadmap.md) — the live round plus the FULL target
-  // sequence (display.html has no shared scoring.js module to derive per-round targets
-  // from, so it needs every round's target up front); read by renderers.halve_it.scorecard()
-  // for the per-row target labels. Per-player running totals ride inside `players[]`.
-  'halveItRound', 'halveItTargets',
-  // The Pressure Chamber only (docs/archive/pressure-chamber-roadmap.md) — the live round, its
-  // No Warmup wall-clock deadline (if any), and the FULL 15-round card sequence up front
-  // (same "no shared scoring.js module" reasoning as halveItTargets); read by
-  // renderers.pressure_chamber.scorecard() for the target/modifier banner and countdown.
-  // Every card field is escaped at the display.html sink (docs/security-audit-roadmap.md
-  // SEC-26 — modifier.icon in particular). Per-player CP totals ride inside `players[]`.
-  'pressureChamberRound', 'pressureChamberDeadline', 'pressureChamberCards',
-  // Killer only (docs/game-modes-roadmap.md "Killer") — the configured lives
-  // threshold; read by display.html's renderers.killer.scorecard() for the
-  // "lives target N" header (falls back to 3 if absent — which is exactly why
-  // omitting it here silently mis-rendered every non-default game, the same
-  // BUG-28 silent-strip failure the Shanghai/Halve-It/Pressure Chamber keys
-  // above were added for). Per-player lives/number/isKiller ride inside `players[]`.
-  'killerLives',
-  // The 121 Checkout Ladder only (docs/archive/practice-ladders-roadmap.md Part B) —
-  // the current rung's target and how many of the attempt's 3 visits are used;
-  // read by renderers.checkout_ladder.scorecard() for the "Target N · Visit V/3"
-  // header (falls back to 121 / visit 1 if absent — same silent-strip failure as
-  // killerLives above).
-  'checkoutLadderTarget', 'checkoutLadderVisits',
-  // Dead Man Walking only (docs/archive/dead-man-walking-roadmap.md) — the round's
-  // par-darts budget, darts used this round, and walked-out tally; read by
-  // display.html's renderers.dead_man_walking.card(). The round number rides on
-  // the generic legNo; remaining score rides inside `players[]`.
-  'dmwBudget', 'dmwDartsUsed', 'dmwWalkedOut',
 ]);
 const MAX_LIVE_BYTES = 65536;
 // Returns the sanitized state, or null if it's over the size cap (caller sends 413).

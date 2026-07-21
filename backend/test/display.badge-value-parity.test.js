@@ -23,8 +23,14 @@ const INDEX_HTML = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 
 const DISPLAY_HTML = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'display.html'), 'utf8');
 
 // Returns the source text between the braces of `const NAME = { ... }`, matched by
-// tracking brace depth while skipping string/template literals — reliable no matter how the
-// object closes (bare `};`, indented, or trailing a line).
+// tracking brace depth while skipping string/template literals and `//` line
+// comments — reliable no matter how the object closes (bare `};`, indented, or
+// trailing a line), and not thrown off by an apostrophe in a comment elsewhere
+// in the file (a `'` inside a `//` comment previously toggled the same inStr
+// state a real string literal does, so the depth count could silently drift
+// across thousands of unrelated lines before landing on some other `}` by
+// coincidence — this treats `//` through end-of-line as never containing a
+// meaningful quote or brace, matching how a JS parser actually reads it).
 function objectBody(src, name) {
   const decl = src.match(new RegExp('const\\s+' + name + '\\s*=\\s*\\{'));
   assert.ok(decl, `const ${name} not found — has it moved/renamed?`);
@@ -34,6 +40,7 @@ function objectBody(src, name) {
     const c = src[i];
     if (esc) { esc = false; continue; }
     if (inStr) { if (c === '\\') esc = true; else if (c === inStr) inStr = null; continue; }
+    if (c === '/' && src[i + 1] === '/') { const nl = src.indexOf('\n', i); i = nl === -1 ? src.length : nl; continue; }
     if (c === "'" || c === '"' || c === '`') { inStr = c; continue; }
     if (c === '{') depth++;
     else if (c === '}' && --depth === 0) return src.slice(start, i);

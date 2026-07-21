@@ -1625,10 +1625,9 @@ hit/progress counter — `playerSnapshotAroundTheClock()`/
 `hitOutcomes` (plain arrays, not just counts) inside the per-player
 `players[]` array so the Live Scoreboard can render exactly which
 numbers/outcomes are still outstanding, the same live feedback the controller
-itself shows. Two new top-level `ALLOWED_LIVE_KEYS` entries,
-`atcLastDart`/`atwLastDart` (the last-dart throwbox data — `roundOver`/
-`roundEndReason` are reused as-is from Doubles Practice for Around the
-Clock's round-end signal, no new keys needed there).
+itself shows. `atcLastDart`/`atwLastDart` (the last-dart throwbox data) ride
+inside `modeState` (§7's "Payload shape") — `roundOver`/`roundEndReason` are
+reused as-is from Doubles Practice for Around the Clock's round-end signal.
 
 **Undo support**: both snapshot round/session state into
 `game.lastTurnSnapshot` before mutating (the same convention as every other
@@ -2316,19 +2315,46 @@ count via `playerSnapshotAroundTheClock`/`playerSnapshotAroundTheWorld`, §3's
 darts, checkout hint (X01 only — always empty for Cricket/Baseball), status,
 `pendingAchievement` (§5), one-shot fields (`lastTurnEvent`, `matchResult`,
 `legStart` — cleared immediately after each push, so they only ever announce
-once), a `checkoutTarget` for voice announcements, `baseballInning` (Baseball
-only — which inning, 1-9 or beyond on a tie, is currently live; per-player
-runs ride inside `players[]` above instead), and (tournament matches
-only, §15) `tournamentRoundLabel`. `ALLOWED_LIVE_KEYS` on the server
-allow-lists exactly these top-level fields (not the per-player shape inside
-`players`, which is how Cricket's/Baseball's differently-shaped player objects
-— and Chuckin's `heatmap`/`sessionAvg` — pass through unchanged) — anything else
-in a `POST /api/live` body is silently dropped (413 if the sanitized payload
-still exceeds 64KB). **Adding any new top-level `liveSnapshot()` field must add
-it to `ALLOWED_LIVE_KEYS` in the same change** — `tournamentRoundLabel` itself
-was initially missed here during development and silently dropped by the
-allow-list until caught in end-to-end testing, exactly the failure mode this
-note now exists to prevent happening again.
+once), a `checkoutTarget` for voice announcements, and (tournament matches
+only, §15) `tournamentRoundLabel`.
+
+**`modeState`** (docs/code-quality-roadmap.md item 42) is one opaque, per-mode
+container object holding every field a specific `gameType` needs beyond the
+generic shape above — Baseball's `baseballInning`, Cricket's `cricketVariant`,
+Shanghai's `shanghaiRound`/`shanghaiMaxRounds`, Halve-It's `halveItRound`/
+`halveItTargets` (the FULL target sequence, not just the live round's own
+target — `display.html` has no shared `scoring.js` module to derive per-round
+labels from), Pressure Chamber's `pressureChamberRound`/`pressureChamberDeadline`/
+`pressureChamberCards` (same "no shared module" reasoning, the FULL 15-round
+card sequence up front — every card field is escaped at the `display.html`
+sink, `docs/security-audit-roadmap.md` SEC-26), Bob's 27's `bobs27Round`,
+Checkout Ladder's `checkoutLadderTarget`/`checkoutLadderVisits`, Killer's
+`killerLives`, Dead Man Walking's `dmwBudget`/`dmwDartsUsed`/`dmwWalkedOut`,
+Doubles Practice's `doublesTargets`/`dpLastDart`/`roundOver`/`roundEndReason`,
+guided Around the Clock's `atcLastDart` (sharing `roundOver`/`roundEndReason`
+with Doubles Practice), Chuckin's `chuckinLastDart`, and guided Around the
+World's `atwLastDart`. `liveSnapshot()` builds it via `GAME_TYPES[game.gameType]
+.liveModeState(game)` — each mode declares this as a registry member next to
+its `playerSnapshot`/`evaluateVisit` (X01 has none, so `modeState` is `null`
+for X01 games).
+
+`ALLOWED_LIVE_KEYS` on the server allow-lists the generic top-level fields
+above plus `modeState` and `tournamentRoundLabel` as opaque values (the same
+"unrestricted shape, sanitized as a whole" treatment `players` already gets,
+not validated field-by-field) — anything else in a `POST /api/live` body is
+silently dropped (413 if the sanitized payload still exceeds 64KB). Before
+item 42, every one of `modeState`'s per-mode fields was its own top-level
+`ALLOWED_LIVE_KEYS` entry, and a new mode's fields were silently stripped
+twice by a forgotten allow-list update (`docs/bug-roadmap.md` BUG-28's 7
+keys, then `killerLives`/`checkoutLadderTarget`/`checkoutLadderVisits`) before
+either bug was caught in end-to-end testing — the `display.html` fallback
+defaults on a missing key (a plausible-looking wrong default, e.g. "lives
+target 3") gave no error to notice. **A new mode's own per-mode live fields
+now only ever need touching in its `GAME_TYPES` entry's `liveModeState` and in
+`display.html`'s own reader — never `ALLOWED_LIVE_KEYS`.** A genuinely new
+*generic* top-level field (applying across every mode, the way
+`tournamentRoundLabel` does) still needs adding to `ALLOWED_LIVE_KEYS` in the
+same change, same as before.
 
 Cricket's live scoreboard (`renderers.cricket.scorecard()` in `display.html`,
 mirrored by `renderGameCricket()` on the controller in `frontend/index.html`)
@@ -4756,9 +4782,12 @@ the call site is going through `queueBadge()` (§5), not calling
 
 **"The live scoreboard isn't updating."** Check the SSE connection caps in §7
 (`MAX_SSE_TOTAL`/`MAX_SSE_PER_IP`) — a stuck-open dead connection could be
-holding a slot. Check `ALLOWED_LIVE_KEYS` if a new field was added to
-`liveSnapshot()` but isn't showing up on `/display` — it needs to be added to
-that allow-list too, or the server silently drops it.
+holding a slot. If a per-mode field added to `GAME_TYPES.<type>.liveModeState`
+isn't showing up on `/display`, check `display.html`'s own reader for that
+mode (it should read `s.modeState.<field>`) — `ALLOWED_LIVE_KEYS` no longer
+needs a per-mode entry (§7's "Payload shape", item 42). A genuinely new
+*generic* top-level field (not nested under `modeState`) still needs adding
+to `ALLOWED_LIVE_KEYS`, or the server silently drops it.
 
 **"A Home Assistant webhook isn't firing."** Check `netguard.js`'s rules (§9)
 first — a webhook silently returns `{skipped:true}` if `ha_url` or the specific
@@ -5343,9 +5372,10 @@ a leg boundary.
 ### Live scoreboard
 
 `playerSnapshotCheckoutLadder(p)` rides the per-player `players[]` array
-(`score`, `out:'double'`, dart counts); `liveSnapshot()` adds
-`checkoutLadderTarget`/`checkoutLadderVisits` (mirroring `bobs27Round`'s own
-game-level field) and treats this game type as X01-shaped for the
+(`score`, `out:'double'`, dart counts); `GAME_TYPES.checkout_ladder.
+liveModeState` adds `checkoutLadderTarget`/`checkoutLadderVisits` to
+`modeState` (mirroring Bob's 27's own `bobs27Round` game-level field) and
+`liveSnapshot()` treats this game type as X01-shaped for the
 checkout-hint calculation (`isX01` also matches `'checkout_ladder'`, since
 it's a genuine double-out visit). `display.html`'s
 `renderers.checkout_ladder.card()` mirrors X01's own card almost exactly —
@@ -6369,8 +6399,9 @@ bare number, and each cell shows the **running total after that round**
 (never a per-round delta) with a `½` marker on a halved round, so the
 halving is visible without relying on color alone (per the roadmap doc's own
 accessibility note). `display.html` has no shared `scoring.js` module, so
-`liveSnapshot()` sends the FULL `halveItTargets` array (not just the live
-round's own target) so its renderer can compute every row's label itself.
+`GAME_TYPES.halve_it.liveModeState` puts the FULL `halveItTargets` array (not
+just the live round's own target) into `modeState` so its renderer can
+compute every row's label itself.
 `renderPadHalveIt()` shows one button for the round's live target — an
 unrestricted round works exactly like Baseball's/Shanghai's own single-target
 pad; a ring-restricted round (e.g. double 7) shows the ring prefix on the
@@ -6724,9 +6755,10 @@ Gauntlet, which skip the push in `pushLive()` itself):
 `enterTurnDeadManWalking()`/`renderGameDeadManWalking()` push every committed
 turn, and `renderers.dead_man_walking` in `display.html` renders the card —
 round N/15, remaining score, darts left this round, and the Walked Out tally —
-from three DMW-only top-level live keys (`dmwBudget`, `dmwDartsUsed`,
-`dmwWalkedOut`, registered in `ALLOWED_LIVE_KEYS`; the round number rides on
-the generic `legNo`, remaining score inside `players[]`). The end-of-run
+from three DMW-only fields (`dmwBudget`, `dmwDartsUsed`, `dmwWalkedOut`) inside
+`modeState` (§7's "Payload shape", built by `GAME_TYPES.dead_man_walking.
+liveModeState`; the round number rides on the generic `legNo`, remaining score
+inside `players[]`). The end-of-run
 summary card reads the DMW `legSummary` entry's `walkedOut`. Its badge ids are
 also hand-copied into `display.html`'s `ACH_LABELS`/`ACH_DURATION`/`ACH_DESC`
 maps, per the standing convention, so the live achievement overlay's headline
@@ -7079,10 +7111,10 @@ round's target, modifier (icon + label + flavor text), and stakes
 what's on the line before they throw," per the roadmap doc's own
 accessibility note. A live No Warmup countdown (`aria-live`, cued at 3s/1s
 remaining — not every second) shows when that modifier is drawn.
-`display.html` has no shared `scoring.js` module, so `liveSnapshot()` sends
-the FULL 15-round card sequence up front (`pressureChamberCards`, same
-"can't derive it there" reasoning `halveItTargets` already documents) plus
-the live round/deadline.
+`display.html` has no shared `scoring.js` module, so `GAME_TYPES.
+pressure_chamber.liveModeState` puts the FULL 15-round card sequence up front
+(`pressureChamberCards` inside `modeState`, same "can't derive it there"
+reasoning `halveItTargets` already documents) plus the live round/deadline.
 
 `renderPadPressureChamber()` is deliberately the FULL 1-20+Bull number grid
 (the same shape X01's own default Pad-mode grid uses), **not** a single
