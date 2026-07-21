@@ -486,15 +486,42 @@ Bob's 27's custom moment card — with `game.matchResult.kind` and the
 `finishUnit` call correct in every case. Backend suite unaffected (1244
 tests, same 6 pre-existing unrelated failures).
 
-## Item 55 — Scoreboard/pad renderer scaffolding
+## Item 55 — Scoreboard/pad renderer scaffolding — ✅ Done
 
 The five chalkboard renderers (Cricket/Baseball/Shanghai/Halve-It/Pressure
-Chamber) share byte-identical headCells/table-assembly/round-banner blocks
-(~100 lines); the four single-target pads (+ Cricket's) share identical
-preamble/Miss-button trailers (~80 lines); `renderPad()`'s dispatch repeats a
-5-line block per mode with a redundant per-branch undo-btn line. **Shape:**
-`csHeadCellsHtml()`/`csTableInto()`/`roundBannerInto()` +
-`renderSingleTargetPad(spec)` + a `{gameType: renderer}` lookup.
+Chamber) now share `csHeadCellsHtml()` (the per-player head-cell column:
+name, throw-chip, standing), `csTableInto(sb, headCells, bodyRowsHtml,
+footLabel, footCells)` (the `.cs-table` head/body/foot assembly), and
+`roundBannerInto(sb, text)` (the `.pp-meta` round banner Baseball/Shanghai/
+Halve-It/Pressure Chamber all show — Cricket has none, Pressure Chamber
+keeps its own extra custom card banner alongside this one). Each renderer
+keeps only its own body-row loop (the genuinely different data: marks vs.
+runs vs. points vs. totals vs. cp) and foot label/banner text.
+
+The four single-target pads (Baseball/Shanghai/Halve-It/Bob's 27 — Cricket's
+and Pressure Chamber's pads are structurally different, a multi-target grid
+and a full 1-20+Bull grid respectively, so they're excluded from this
+generalization) now share `renderSingleTargetPad(full, sector, label,
+ariaLabel)` for the identical preamble (hide the dartboard, reveal the
+multi-row, reset the pad) and Miss-button trailer; each mode keeps only its
+own target/label computation (Halve-It's ring-prefixed D7/T10 label, Bob's
+27's hardcoded `D${n}`).
+
+`renderPad()`'s dispatch — 6 near-identical `if(gameType===...)` branches,
+each repeating the same 2-line "sync the Undo button" snippet under a
+different local variable name — collapses to a `MODE_PAD_RENDERERS`
+`{gameType: renderer}` lookup plus a single undo-button sync at the end,
+run regardless of which branch (or the default dartboard/pad path) fired.
+
+Verified live in a browser: rendered all 5 chalkboard tables directly
+(Cricket/Baseball/Shanghai/Halve-It/Pressure Chamber) with representative
+player state and confirmed head-cell count, foot row, body-row count, and
+banner text all match the original per-mode output (e.g. Baseball's "Inning
+1 of 9 — target 1", Pressure Chamber's two stacked banners); rendered all 4
+single-target pads and confirmed the button label matches exactly (plain
+numbers for Baseball/Shanghai, "20" for an unrestricted Halve-It round,
+"D5" for Bob's 27). Backend suite unaffected (1244 tests, same 6
+pre-existing unrelated failures).
 
 ## Item 56 — Dart input/record helpers on the hottest path — ✅ Done
 

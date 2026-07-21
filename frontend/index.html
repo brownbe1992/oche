@@ -7339,15 +7339,14 @@ function renderGame(){
    columns=players), not per-player cards — matches how cricket is scored on a
    real board. Marks render as / (1), X (2), circled X (3/closed) — the circle
    is the non-color-only "closed" signal per docs/accessibility-roadmap.md. */
-function renderGameCricket(){
-  const sb = document.getElementById('scoreboard'); sb.innerHTML='';
-  const configNumbers = game.config.numbers || CRICKET_STANDARD_NUMBERS;
-  // Traditional chalkboard order: highest number down to lowest, Bull last.
-  const numbers = configNumbers.filter(n=>n!==25).sort((a,b)=>b-a);
-  if(configNumbers.includes(25)) numbers.push(25);
+// Shared chalkboard scaffolding for the 5 modes below (Cricket/Baseball/
+// Shanghai/Halve-It/Pressure Chamber) — every one of them builds the same
+// per-player head-cell column (name, throw-chip, standing) and assembles it
+// into the same head/body/foot .cs-table shape; only the body rows' data
+// source and the foot label are genuinely mode-specific.
+function csHeadCellsHtml(){
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
-
-  const headCells = game.players.map((p,i)=>{
+  return game.players.map((p,i)=>{
     const active = i===game.current;
     const standing = game.setsPerGame>1
       ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
@@ -7360,6 +7359,33 @@ function renderGameCricket(){
       ${showStanding?`<span class="cs-standing">${standing}</span>`:''}
     </div>`;
   }).join('');
+}
+function csTableInto(sb, headCells, bodyRowsHtml, footLabel, footCells){
+  const table = document.createElement('div');
+  table.className = 'cs-table';
+  table.style.setProperty('--cs-cols', game.players.length);
+  table.innerHTML = `
+    <div class="cs-row cs-head" role="row"><div class="cs-label"></div>${headCells}</div>
+    ${bodyRowsHtml}
+    <div class="cs-row cs-foot"><div class="cs-label">${footLabel}</div>${footCells}</div>`;
+  sb.appendChild(table);
+}
+// The "Round N of M — target X" (or Baseball's "Inning N of 9") banner
+// shared by Baseball/Shanghai/Halve-It/Pressure Chamber; Cricket has no
+// per-round concept so it never calls this.
+function roundBannerInto(sb, text){
+  const banner = document.createElement('p');
+  banner.className = 'pp-meta';
+  banner.style.cssText = 'text-align:center;margin:8px 0 0';
+  banner.textContent = text;
+  sb.appendChild(banner);
+}
+function renderGameCricket(){
+  const sb = document.getElementById('scoreboard'); sb.innerHTML='';
+  const configNumbers = game.config.numbers || CRICKET_STANDARD_NUMBERS;
+  // Traditional chalkboard order: highest number down to lowest, Bull last.
+  const numbers = configNumbers.filter(n=>n!==25).sort((a,b)=>b-a);
+  if(configNumbers.includes(25)) numbers.push(25);
 
   const bodyRows = numbers.map(n=>{
     const lbl = cricketNumberLabel(n);
@@ -7380,14 +7406,7 @@ function renderGameCricket(){
   // scoreboard needs to say which direction "winning" points go, since cutthroat
   // otherwise renders identically to standard (same marks, same points cells).
   const ptsLabel = game.config.variant === 'cutthroat' ? 'Pts (lowest wins)' : 'Pts';
-  const table = document.createElement('div');
-  table.className = 'cs-table';
-  table.style.setProperty('--cs-cols', game.players.length);
-  table.innerHTML = `
-    <div class="cs-row cs-head" role="row"><div class="cs-label"></div>${headCells}</div>
-    ${bodyRows}
-    <div class="cs-row cs-foot"><div class="cs-label">${ptsLabel}</div>${pointCells}</div>`;
-  sb.appendChild(table);
+  csTableInto(sb, csHeadCellsHtml(), bodyRows, ptsLabel, pointCells);
 
   renderSlots();
   renderPad();
@@ -7408,21 +7427,6 @@ function cricketMarkGlyph(n, numberLabel){
 function renderGameBaseball(){
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const lastInning = Math.max(9, game.baseballInning); // extend the table into extra innings once reached
-  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
-
-  const headCells = game.players.map((p,i)=>{
-    const active = i===game.current;
-    const standing = game.setsPerGame>1
-      ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
-      : game.practice
-      ? `Legs ${p.legsWon}`
-      : `Legs ${p.legsWon}/${game.legsPerSet}`;
-    return `<div class="cs-col-head${active?' active':''}">
-      <span>${escapeHtml(p.name)}</span>
-      ${active?'<span class="cs-throw-chip">▸ throwing</span>':''}
-      ${showStanding?`<span class="cs-standing">${standing}</span>`:''}
-    </div>`;
-  }).join('');
 
   const rows = [];
   for(let inning=1; inning<=lastInning; inning++){
@@ -7441,20 +7445,8 @@ function renderGameBaseball(){
     return `<div class="cs-cell${active?' active':''}"><span class="cs-points">${p.totalRuns||0}</span></div>`;
   }).join('');
 
-  const table = document.createElement('div');
-  table.className = 'cs-table';
-  table.style.setProperty('--cs-cols', game.players.length);
-  table.innerHTML = `
-    <div class="cs-row cs-head" role="row"><div class="cs-label"></div>${headCells}</div>
-    ${bodyRowsHtml}
-    <div class="cs-row cs-foot"><div class="cs-label">Runs</div>${totalCells}</div>`;
-  sb.appendChild(table);
-
-  const inningBanner = document.createElement('p');
-  inningBanner.className = 'pp-meta';
-  inningBanner.style.cssText = 'text-align:center;margin:8px 0 0';
-  inningBanner.textContent = `Inning ${Math.min(game.baseballInning,9)} of 9 — target ${baseballInningTarget(game.baseballInning)}${game.baseballInning>9?' (extra innings)':''}`;
-  sb.appendChild(inningBanner);
+  csTableInto(sb, csHeadCellsHtml(), bodyRowsHtml, 'Runs', totalCells);
+  roundBannerInto(sb, `Inning ${Math.min(game.baseballInning,9)} of 9 — target ${baseballInningTarget(game.baseballInning)}${game.baseballInning>9?' (extra innings)':''}`);
 
   renderSlots();
   renderPad();
@@ -7469,21 +7461,6 @@ function renderGameShanghai(){
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const maxRounds = (game.config && game.config.rounds) || 7;
   const lastRound = Math.max(maxRounds, game.shanghaiRound); // extend into extra rounds once reached
-  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
-
-  const headCells = game.players.map((p,i)=>{
-    const active = i===game.current;
-    const standing = game.setsPerGame>1
-      ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
-      : game.practice
-      ? `Legs ${p.legsWon}`
-      : `Legs ${p.legsWon}/${game.legsPerSet}`;
-    return `<div class="cs-col-head${active?' active':''}">
-      <span>${escapeHtml(p.name)}</span>
-      ${active?'<span class="cs-throw-chip">▸ throwing</span>':''}
-      ${showStanding?`<span class="cs-standing">${standing}</span>`:''}
-    </div>`;
-  }).join('');
 
   const rows = [];
   for(let round=1; round<=lastRound; round++){
@@ -7503,20 +7480,8 @@ function renderGameShanghai(){
     return `<div class="cs-cell${active?' active':''}"><span class="cs-points">${p.totalPoints||0}</span></div>`;
   }).join('');
 
-  const table = document.createElement('div');
-  table.className = 'cs-table';
-  table.style.setProperty('--cs-cols', game.players.length);
-  table.innerHTML = `
-    <div class="cs-row cs-head" role="row"><div class="cs-label"></div>${headCells}</div>
-    ${bodyRowsHtml}
-    <div class="cs-row cs-foot"><div class="cs-label">Points</div>${totalCells}</div>`;
-  sb.appendChild(table);
-
-  const roundBanner = document.createElement('p');
-  roundBanner.className = 'pp-meta';
-  roundBanner.style.cssText = 'text-align:center;margin:8px 0 0';
-  roundBanner.textContent = `Round ${Math.min(game.shanghaiRound,maxRounds)} of ${maxRounds} — target ${shanghaiRoundTarget(game.shanghaiRound, maxRounds)}${game.shanghaiRound>maxRounds?' (extra rounds)':''}`;
-  sb.appendChild(roundBanner);
+  csTableInto(sb, csHeadCellsHtml(), bodyRowsHtml, 'Points', totalCells);
+  roundBannerInto(sb, `Round ${Math.min(game.shanghaiRound,maxRounds)} of ${maxRounds} — target ${shanghaiRoundTarget(game.shanghaiRound, maxRounds)}${game.shanghaiRound>maxRounds?' (extra rounds)':''}`);
 
   renderSlots();
   renderPad();
@@ -7536,21 +7501,6 @@ function renderGameHalveIt(){
   const targets = (game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS;
   const maxRounds = targets.length;
   const lastRound = Math.max(maxRounds, game.halveItRound); // extend into extra rounds once reached
-  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
-
-  const headCells = game.players.map((p,i)=>{
-    const active = i===game.current;
-    const standing = game.setsPerGame>1
-      ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
-      : game.practice
-      ? `Legs ${p.legsWon}`
-      : `Legs ${p.legsWon}/${game.legsPerSet}`;
-    return `<div class="cs-col-head${active?' active':''}">
-      <span>${escapeHtml(p.name)}</span>
-      ${active?'<span class="cs-throw-chip">▸ throwing</span>':''}
-      ${showStanding?`<span class="cs-standing">${standing}</span>`:''}
-    </div>`;
-  }).join('');
 
   const rows = [];
   for(let round=1; round<=lastRound; round++){
@@ -7571,21 +7521,9 @@ function renderGameHalveIt(){
     return `<div class="cs-cell${active?' active':''}"><span class="cs-points">${p.total||0}</span></div>`;
   }).join('');
 
-  const table = document.createElement('div');
-  table.className = 'cs-table';
-  table.style.setProperty('--cs-cols', game.players.length);
-  table.innerHTML = `
-    <div class="cs-row cs-head" role="row"><div class="cs-label"></div>${headCells}</div>
-    ${bodyRowsHtml}
-    <div class="cs-row cs-foot"><div class="cs-label">Total</div>${totalCells}</div>`;
-  sb.appendChild(table);
-
-  const roundBanner = document.createElement('p');
-  roundBanner.className = 'pp-meta';
-  roundBanner.style.cssText = 'text-align:center;margin:8px 0 0';
+  csTableInto(sb, csHeadCellsHtml(), bodyRowsHtml, 'Total', totalCells);
   const liveTarget = halveItRoundTarget(game.halveItRound, targets);
-  roundBanner.textContent = `Round ${Math.min(game.halveItRound,maxRounds)} of ${maxRounds} — target ${halveItTargetLabel(liveTarget)}${game.halveItRound>maxRounds?' (extra rounds)':''}`;
-  sb.appendChild(roundBanner);
+  roundBannerInto(sb, `Round ${Math.min(game.halveItRound,maxRounds)} of ${maxRounds} — target ${halveItTargetLabel(liveTarget)}${game.halveItRound>maxRounds?' (extra rounds)':''}`);
 
   renderSlots();
   renderPad();
@@ -7605,21 +7543,6 @@ function renderGamePressureChamber(){
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const maxRounds = (game.config && game.config.rounds) || PRESSURE_ROUNDS;
   const lastRound = Math.max(maxRounds, game.pressureChamberRound);
-  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
-
-  const headCells = game.players.map((p,i)=>{
-    const active = i===game.current;
-    const standing = game.setsPerGame>1
-      ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
-      : game.practice
-      ? `Legs ${p.legsWon}`
-      : `Legs ${p.legsWon}/${game.legsPerSet}`;
-    return `<div class="cs-col-head${active?' active':''}">
-      <span>${escapeHtml(p.name)}</span>
-      ${active?'<span class="cs-throw-chip">▸ throwing</span>':''}
-      ${showStanding?`<span class="cs-standing">${standing}</span>`:''}
-    </div>`;
-  }).join('');
 
   const OUTCOME_ICON = { full:'✅', partial:'➗', miss:'❌' };
   const OUTCOME_LABEL = { full:'full hit', partial:'partial hit', miss:'miss' };
@@ -7642,14 +7565,7 @@ function renderGamePressureChamber(){
     return `<div class="cs-cell${active?' active':''}"><span class="cs-points">${p.totalCp||0}</span></div>`;
   }).join('');
 
-  const table = document.createElement('div');
-  table.className = 'cs-table';
-  table.style.setProperty('--cs-cols', game.players.length);
-  table.innerHTML = `
-    <div class="cs-row cs-head" role="row"><div class="cs-label"></div>${headCells}</div>
-    ${bodyRowsHtml}
-    <div class="cs-row cs-foot"><div class="cs-label">CP</div>${totalCells}</div>`;
-  sb.appendChild(table);
+  csTableInto(sb, csHeadCellsHtml(), bodyRowsHtml, 'CP', totalCells);
 
   const card = generatePressureCard(game.gameId, Math.min(game.pressureChamberRound, maxRounds));
   const baseCp = pressureBaseCp(card.target);
@@ -7667,11 +7583,7 @@ function renderGamePressureChamber(){
   `;
   sb.appendChild(banner);
 
-  const roundBanner = document.createElement('p');
-  roundBanner.className = 'pp-meta';
-  roundBanner.style.cssText = 'text-align:center;margin:8px 0 0';
-  roundBanner.textContent = `Round ${Math.min(game.pressureChamberRound,maxRounds)} of ${maxRounds}`;
-  sb.appendChild(roundBanner);
+  roundBannerInto(sb, `Round ${Math.min(game.pressureChamberRound,maxRounds)} of ${maxRounds}`);
 
   // No Warmup's wall-clock deadline (docs/archive/pressure-chamber-roadmap.md): armed
   // once per round, the moment the dart pad is first revealed — which, since the
@@ -9472,6 +9384,16 @@ function pushLive(message){
   DB.pushLive(snap);
 }
 
+// Modes with their own dedicated pad — everything else falls through to the
+// default 1-20+Bull(+Miss)/dartboard rendering at the bottom of renderPad().
+const MODE_PAD_RENDERERS = {
+  cricket: renderPadCricket,
+  baseball: renderPadBaseball,
+  shanghai: renderPadShanghai,
+  halve_it: renderPadHalveIt,
+  pressure_chamber: renderPadPressureChamber,
+  bobs_27: renderPadBobs27,
+};
 function renderPad(){
   // Doubles Practice / guided Around the Clock never batch to 3 darts — a round
   // runs until it's ended (so-close/wrong-double, or all 20 numbers hit), so the
@@ -9483,67 +9405,36 @@ function renderPad(){
   // needs a mid-visit disable; it's always tappable while the match is live.
   const full = (game.gameType === 'doubles_practice' || game.gameType === 'around_the_clock')
     ? !!game.roundOver : game.gameType === 'killer' ? false : !!(game.darts.length>=3 || game.busted || game.won);
-  if(game.gameType === 'cricket'){
-    renderPadCricket(full);
-    const utb0 = document.getElementById('undo-turn-btn');
-    if(utb0) utb0.disabled = !game.lastTurnSnapshot;
-    return;
-  }
-  if(game.gameType === 'baseball'){
-    renderPadBaseball(full);
-    const utb1 = document.getElementById('undo-turn-btn');
-    if(utb1) utb1.disabled = !game.lastTurnSnapshot;
-    return;
-  }
-  if(game.gameType === 'shanghai'){
-    renderPadShanghai(full);
-    const utbS = document.getElementById('undo-turn-btn');
-    if(utbS) utbS.disabled = !game.lastTurnSnapshot;
-    return;
-  }
-  if(game.gameType === 'halve_it'){
-    renderPadHalveIt(full);
-    const utbH = document.getElementById('undo-turn-btn');
-    if(utbH) utbH.disabled = !game.lastTurnSnapshot;
-    return;
-  }
-  if(game.gameType === 'pressure_chamber'){
-    renderPadPressureChamber(full);
-    const utbPC = document.getElementById('undo-turn-btn');
-    if(utbPC) utbPC.disabled = !game.lastTurnSnapshot;
-    return;
-  }
-  if(game.gameType === 'bobs_27'){
-    renderPadBobs27(full);
-    const utb2 = document.getElementById('undo-turn-btn');
-    if(utb2) utb2.disabled = !game.lastTurnSnapshot;
-    return;
-  }
-  const bounceBtn = document.getElementById('bounce-out-btn');
-  if(bounceBtn) bounceBtn.disabled = full;
-  if(dartboardMode){
-    const board = document.getElementById('dart-board-wrap');
-    if(board){
-      if(!board.querySelector('svg')) board.innerHTML = buildDartboard(); // build SVG once
-      board.classList.toggle('board-disabled', full);
-    }
+  const modeRenderer = MODE_PAD_RENDERERS[game.gameType];
+  if(modeRenderer){
+    modeRenderer(full);
   } else {
-    const pad = document.getElementById('pad');
-    if(!pad) return;
-    pad.innerHTML = '';
-    for(let n=1;n<=20;n++){
-      const b=document.createElement('button');
-      b.textContent=n; b.disabled=full;
-      b.onclick=()=>throwDart(n);
-      pad.appendChild(b);
-    }
-    const bull=document.createElement('button');
-    bull.className='bull'; bull.textContent='Bull'; bull.disabled=full;
-    bull.onclick=()=>throwDart(25); pad.appendChild(bull);
-    if(game.gameType !== 'checkout_trainer'){
-      const miss=document.createElement('button');
-      miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
-      miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+    const bounceBtn = document.getElementById('bounce-out-btn');
+    if(bounceBtn) bounceBtn.disabled = full;
+    if(dartboardMode){
+      const board = document.getElementById('dart-board-wrap');
+      if(board){
+        if(!board.querySelector('svg')) board.innerHTML = buildDartboard(); // build SVG once
+        board.classList.toggle('board-disabled', full);
+      }
+    } else {
+      const pad = document.getElementById('pad');
+      if(!pad) return;
+      pad.innerHTML = '';
+      for(let n=1;n<=20;n++){
+        const b=document.createElement('button');
+        b.textContent=n; b.disabled=full;
+        b.onclick=()=>throwDart(n);
+        pad.appendChild(b);
+      }
+      const bull=document.createElement('button');
+      bull.className='bull'; bull.textContent='Bull'; bull.disabled=full;
+      bull.onclick=()=>throwDart(25); pad.appendChild(bull);
+      if(game.gameType !== 'checkout_trainer'){
+        const miss=document.createElement('button');
+        miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
+        miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+      }
     }
   }
   // keep Undo Last Turn in sync — enabled only when a snapshot exists
@@ -9631,7 +9522,10 @@ function renderPadCricket(full){
    button) rather than inventing a new input flow. Reuses .cricket-pad/
    .cricket-target CSS wholesale — visually it's the identical single-big-
    target-plus-Miss shape, just with one button instead of seven. */
-function renderPadBaseball(full){
+// Shared preamble/trailer for the 4 modes below whose pad is a single big
+// target button plus Miss (Baseball/Shanghai/Halve-It/Bob's 27) — only the
+// target's sector, its button label, and its aria-label genuinely differ.
+function renderSingleTargetPad(full, sector, label, ariaLabel){
   const board = document.getElementById('dart-board-wrap');
   if(board) board.classList.add('hidden');
   const bounceBtn = document.getElementById('bounce-out-btn');
@@ -9643,45 +9537,28 @@ function renderPadBaseball(full){
   pad.classList.remove('hidden');
   pad.classList.add('cricket-pad');
   pad.innerHTML = '';
-  const target = baseballInningTarget(game.baseballInning);
   const b = document.createElement('button');
   b.className = 'cricket-target';
   b.disabled = full;
-  b.innerHTML = `<span class="ct-num">${target}</span>`;
-  b.setAttribute('aria-label', `Number ${target} — this inning's target`);
-  b.onclick = () => throwDart(target);
+  b.innerHTML = `<span class="ct-num">${label}</span>`;
+  b.setAttribute('aria-label', ariaLabel);
+  b.onclick = () => throwDart(sector);
   pad.appendChild(b);
   const miss=document.createElement('button');
   miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
   miss.onclick=()=>throwDart(0); pad.appendChild(miss);
 }
+function renderPadBaseball(full){
+  const target = baseballInningTarget(game.baseballInning);
+  renderSingleTargetPad(full, target, target, `Number ${target} — this inning's target`);
+}
 
 /* Shanghai's dedicated scoring screen — only one number is ever live (this
    round's target), same single-big-target-plus-Miss shape as Baseball's own. */
 function renderPadShanghai(full){
-  const board = document.getElementById('dart-board-wrap');
-  if(board) board.classList.add('hidden');
-  const bounceBtn = document.getElementById('bounce-out-btn');
-  if(bounceBtn) bounceBtn.disabled = full;
-  const multi = document.getElementById('multi-row');
-  if(multi) multi.classList.remove('hidden');
-  const pad = document.getElementById('pad');
-  if(!pad) return;
-  pad.classList.remove('hidden');
-  pad.classList.add('cricket-pad');
-  pad.innerHTML = '';
   const maxRounds = (game.config && game.config.rounds) || 7;
   const target = shanghaiRoundTarget(game.shanghaiRound, maxRounds);
-  const b = document.createElement('button');
-  b.className = 'cricket-target';
-  b.disabled = full;
-  b.innerHTML = `<span class="ct-num">${target}</span>`;
-  b.setAttribute('aria-label', `Number ${target} — this round's target`);
-  b.onclick = () => throwDart(target);
-  pad.appendChild(b);
-  const miss=document.createElement('button');
-  miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
-  miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+  renderSingleTargetPad(full, target, target, `Number ${target} — this round's target`);
 }
 
 /* Halve-It's dedicated scoring screen — one button, the round's own target.
@@ -9693,31 +9570,11 @@ function renderPadShanghai(full){
    correctly scores 0 for this round (halveItDartValue() rejects the wrong
    ring), same "selector determines the actual outcome" shape. */
 function renderPadHalveIt(full){
-  const board = document.getElementById('dart-board-wrap');
-  if(board) board.classList.add('hidden');
-  const bounceBtn = document.getElementById('bounce-out-btn');
-  if(bounceBtn) bounceBtn.disabled = full;
-  const multi = document.getElementById('multi-row');
-  if(multi) multi.classList.remove('hidden');
-  const pad = document.getElementById('pad');
-  if(!pad) return;
-  pad.classList.remove('hidden');
-  pad.classList.add('cricket-pad');
-  pad.innerHTML = '';
   const targets = (game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS;
   const target = halveItRoundTarget(game.halveItRound, targets);
-  const b = document.createElement('button');
-  b.className = 'cricket-target';
-  b.disabled = full;
   const ringPrefix = target.ring === 'double' ? 'D' : target.ring === 'treble' ? 'T' : '';
   const numLabel = target.sector === 25 ? 'Bull' : String(target.sector);
-  b.innerHTML = `<span class="ct-num">${ringPrefix}${numLabel}</span>`;
-  b.setAttribute('aria-label', `${halveItTargetLabel(target)} — this round's target`);
-  b.onclick = () => throwDart(target.sector);
-  pad.appendChild(b);
-  const miss=document.createElement('button');
-  miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
-  miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+  renderSingleTargetPad(full, target.sector, `${ringPrefix}${numLabel}`, `${halveItTargetLabel(target)} — this round's target`);
 }
 
 /* The Pressure Chamber's pad (docs/archive/pressure-chamber-roadmap.md): deliberately
@@ -9805,28 +9662,8 @@ function declarePressureHit(hit){
    double" via the ambient mult the same way Baseball's own single pad button
    already relies on. */
 function renderPadBobs27(full){
-  const board = document.getElementById('dart-board-wrap');
-  if(board) board.classList.add('hidden');
-  const bounceBtn = document.getElementById('bounce-out-btn');
-  if(bounceBtn) bounceBtn.disabled = full;
-  const multi = document.getElementById('multi-row');
-  if(multi) multi.classList.remove('hidden');
-  const pad = document.getElementById('pad');
-  if(!pad) return;
-  pad.classList.remove('hidden');
-  pad.classList.add('cricket-pad');
-  pad.innerHTML = '';
   const target = game.bobs27Round;
-  const b = document.createElement('button');
-  b.className = 'cricket-target';
-  b.disabled = full;
-  b.innerHTML = `<span class="ct-num">D${target}</span>`;
-  b.setAttribute('aria-label', `Double ${target} — this round's target`);
-  b.onclick = () => throwDart(target);
-  pad.appendChild(b);
-  const miss=document.createElement('button');
-  miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
-  miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+  renderSingleTargetPad(full, target, `D${target}`, `Double ${target} — this round's target`);
 }
 
 /* ---------- throwing ---------- */
