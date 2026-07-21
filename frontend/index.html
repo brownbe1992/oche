@@ -584,13 +584,12 @@
     font-size:10px;flex:none;transition:transform .15s}
   #player-page-body details.pp-section[open] > summary::after{transform:rotate(180deg)}
   #player-page-body details.pp-section:not([open]) > summary{margin-bottom:0}
-  /* game-type sub-tabs (X01/Cricket/…) nest inside the spotlight panel and only
-     filter its contents, so they read as subordinate to the main player-tabs nav
-     above — a small pill control instead of the same underlined-tab treatment. */
-  .subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
-  .subtabs .tab-btn{background:var(--board);border:1px solid var(--wire);border-radius:999px;
-    padding:5px 14px;font-size:12px;margin-bottom:0}
-  .subtabs .tab-btn.active{background:var(--surface-2);border-color:var(--gold);color:var(--gold)}
+  /* game-type picker (X01/Cricket/…) nests inside the spotlight panel and only
+     filters its contents, so it reads as subordinate to the main player-tabs
+     nav above. A dropdown, not a pill row — with 17 game types a pill row
+     wrapped across 6+ lines and swamped the panel it was meant to introduce. */
+  .subtabs{margin-bottom:14px}
+  .subtabs label.field{margin-bottom:6px}
   /* Settings collapsible sections — shared by ~15 headers/chevrons/intro paragraphs
      that previously each carried these as verbatim inline styles. */
   .settings-title{font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between}
@@ -6356,11 +6355,16 @@ function renderPlayerPage(){
   // "Generalizing per-game-type stats") rather than one hardcoded button per known
   // type — a future type with no statDefs (e.g. a stats-less drill mode) is filtered
   // out instead of rendering an empty tab.
+  // A dropdown, not a row of pills — with 17 game types the pill row wrapped
+  // across 6+ lines and swamped the spotlight panel it was meant to introduce.
   const gameTypeTabsHtml = `
     <div class="subtabs">
-      ${Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length).map(g=>
-        `<button class="tab-btn${gt===g.id?' active':''}" onclick="switchPlayerGameType('${g.id}')">${g.label}</button>`
-      ).join('')}
+      <label class="field" for="player-gametype-select">Choose a game mode to view more details</label>
+      <select class="date-input" id="player-gametype-select" style="width:auto" onchange="switchPlayerGameType(this.value)">
+        ${Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length).map(g=>
+          `<option value="${g.id}"${gt===g.id?' selected':''}>${g.label}</option>`
+        ).join('')}
+      </select>
     </div>`;
   // bubblesHtml is folded straight into chartSection's spotlight panel below —
   // both only ever render together (never shown on the Daily Challenge tab).
