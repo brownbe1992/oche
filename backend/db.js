@@ -1774,6 +1774,14 @@ function getPersonalBestsFor(gameType, name, mode) {
   const e = GAME_TYPE_REGISTRY[gameType];
   return (e && e.personalBests ? e.personalBests : getPersonalBests)(name, mode);
 }
+// Item 51: tournament average-seeding used to fire one getPersonalBestsFor() call
+// PER SELECTED PLAYER as N separate HTTP round trips (Promise.all of N fetches);
+// this collapses it to the one round trip the client actually needs — same X01-
+// lifetime record each of those calls already asked for (no gameType/mode), just
+// batched server-side into a single response keyed by name.
+function getPersonalBestsBatch(names) {
+  return Object.fromEntries((names || []).map(name => [name, getPersonalBestsFor(undefined, name, undefined)]));
+}
 
 const SAVABLE_GAME_TYPES = Object.keys(GAME_TYPE_REGISTRY).filter(k => GAME_TYPE_REGISTRY[k].savable);
 
@@ -7292,6 +7300,20 @@ function getDefaultScoringInput() {
   const input = row ? row.value : 'board';
   return { input: ['pad','board'].includes(input) ? input : 'board' };
 }
+// Public (no-auth) read of WHETHER each HA webhook event is configured (never the
+// webhook IDs themselves, which stay admin-only via getSettings()) — every device
+// playing a game calls sendHaWebhook() and needs to know up front whether firing
+// one is worth the request (item 57: fireHaWebhook() already no-ops server-side
+// per-event when unconfigured, but the client was still building/POSTing the full
+// payload — a ~250KB base64 moment-card image, for `momentcard` specifically —
+// only for the server to discard it unread).
+function getHaWebhookStatus() {
+  const cfg = getSettings();
+  const haUrl = cfg.ha_url || '';
+  const events = ['oneeighty','bigfish','bust','ninedarter','tonplus','momentcard',
+                   'gamestart','gameend','setstart','setend','legstart','legend'];
+  return { enabled: !!haUrl, events: Object.fromEntries(events.map(e => [e, !!haUrl && !!cfg[`ha_webhook_${e}`]])) };
+}
 
 /* ---------- admin accounts + sessions ---------- */
 function isSetupRequired() {
@@ -9074,7 +9096,7 @@ module.exports = {
   logServerError, getServerErrors,
   computeStats, getSummary, getHomeExtra, getSessionRecap, getOneEightyStats, getBigFishStats, getNineDarterStats,
   getPlayerStatBubbles, getMetricHistory, getPersonalBests, getH2HRecord,
-  getStatBubblesFor, getPersonalBestsFor, KNOWN_GAME_TYPES, SAVABLE_GAME_TYPES,
+  getStatBubblesFor, getPersonalBestsFor, getPersonalBestsBatch, KNOWN_GAME_TYPES, SAVABLE_GAME_TYPES,
   startMarathonSession, startNextMarathonLeg, endMarathonSession, getMarathonSessionDetail,
   getMarathonStatBubbles, getMarathonPersonalBests, getMarathonLeaderboard,
   getGhostCandidateLegs, getGhostLegScript,
@@ -9103,7 +9125,7 @@ module.exports = {
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport, getPlayerExport, getPlayerCsvExport, importPlayerExport, getMergePreview, mergePlayers,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics, getCoachingInsights,
-  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, fireHaWebhook,
+  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, getHaWebhookStatus, fireHaWebhook,
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword, clearAdminLockout,
   login, logout, getSessionAdmin, adminLockoutDelayMs, verifyAdminPassword, backupRetentionDays,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,

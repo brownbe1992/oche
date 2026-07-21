@@ -1872,6 +1872,34 @@ let game = null;
 let dartTimingEnabled = false;   // admin-toggled; refreshed at boot from /api/settings/dart-timing
 let roster = [];     // saved player names (profiles that own stats)
 let stats = {};
+// Per-player cache for the Player Profile's non-mode-parameterized sections
+// (loadDartWeights/loadPlayerLoadouts/loadPlayerElo/loadTournamentStats/
+// loadPlayerLeagueStats/loadAroundTheWorldProgress/loadGauntletScarMap/
+// loadOnThisDay/loadChallengeHistory) — these 9 loaders return the exact same
+// data regardless of playerPageTab/playerGameType, so a tab/game-type switch
+// (which re-renders the whole player-page-body, wiping their containers back
+// to "Loading…") shouldn't re-hit the network for them, only replay the
+// already-fetched data through their render function. Keyed by player name;
+// wiped in showPlayer()'s existing "player changed" block, the one place a
+// genuine "new player" event is already detected.
+// loadPlayerBadges is deliberately NOT cached here — a badge earned by a game
+// played earlier in the same session (player pauses mid-session, checks their
+// own profile) must never appear missing due to a stale cache, so the Badge
+// Case always fetches fresh.
+let profileSectionCache = {};
+// Fetches `section` for the current player at most once per profileSectionCache
+// entry, replaying the cached value through renderFn on every subsequent call
+// (e.g. every tab/game-type switch) instead of re-fetching. errFn preserves
+// each caller's own existing "could not load X" failure behavior.
+function cachedProfileLoad(section, fetchFn, renderFn, errFn){
+  const name = currentPlayer;
+  const cache = profileSectionCache[name] || (profileSectionCache[name] = {});
+  if(Object.prototype.hasOwnProperty.call(cache, section)){
+    renderFn(cache[section]);
+    return;
+  }
+  fetchFn().then(data=>{ cache[section]=data; renderFn(data); }).catch(errFn);
+}
 let prefs = {};      // name -> { out:'double'|'single' }  (per-player finish rule)
 let mult = 1;
 let dartboardMode = true;   // admin-configurable default; refreshed at boot from /api/settings/default-input
@@ -2062,7 +2090,20 @@ function show(name){
     }
   }
   if(name==='players') renderRoster();
-  if(name==='player'){ DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage); }
+  if(name==='player'){
+    // Stale-while-revalidate, mirroring renderHome()'s own comment/pattern just
+    // above: /api/stats must still refresh every visit (a game finished since
+    // the last visit changes these numbers), but re-showing a player whose
+    // stats are already cached client-side (from an earlier DB.refreshStats())
+    // should paint instantly instead of blanking to "Loading…" while the whole
+    // stats blob round-trips again. Only a genuinely first-ever profile view
+    // this session (nothing cached at all for this player) falls back to the
+    // loading skeleton.
+    const ppBody = document.getElementById('player-page-body');
+    if(currentPlayer && stats[currentPlayer]) renderPlayerPage();
+    else if(ppBody) ppBody.innerHTML = `<p class="pp-meta">Loading…</p>`;
+    DB.refreshStats().then(renderPlayerPage).catch(renderPlayerPage);
+  }
   if(name==='tournament') renderTournamentScreen();
   if(name==='league') renderLeagueScreen();
   if(name==='player-export') renderPlayerExportScreen();
@@ -2341,6 +2382,227 @@ function shareSessionRecap(){
 let homeTab='h2h';
 let homeGameType='x01';
 let homeData=null;
+// Shared empty shape for an achievement board with no rows (180s/9-marks/perfect-leg
+// style sections) — used both by the initial "nothing cached yet" fallback below
+// and by ensureHomeCombo()'s per-combo failure fallback.
+const HOME_EMPTY_ACHIEVEMENT={leaderboard:[],recent:[]};
+
+// Item 45 (code-quality-roadmap.md): renderHome() used to fire ALL ~47 aggregate
+// endpoints (every game type's H2H+Practice leaderboards) on every single Home
+// visit, though the Home page UI only ever shows ONE tab (H2H/Practice) crossed
+// with ONE game type at a time. HOME_COMBO_SPECS + ensureHomeCombo() below fetch
+// only the combo actually visible, lazily, into the exact same homeData shape
+// every homeTabRenderer already expects (homeData.cricket.h2h.mpr etc.) — the
+// renderers themselves are untouched. `s` (/api/summary) and `extra`
+// (/api/home-extra) are fetched separately in renderHome() itself since every
+// tab/game-type combo reads them (hero cards, Most Wins, pace, etc).
+//
+// Staleness policy: a combo's cached data paints instantly (no network wait) the
+// moment it's selected via switchHomeTab()/switchHomeGameType(), but every
+// selection — even of an already-cached combo — also kicks a silent background
+// refetch that repaints in place when it resolves (same stale-while-revalidate
+// precedent as the top-level Home visit already uses), so finishing a game
+// mid-session doesn't permanently freeze that combo's board at its first-ever
+// fetch. homeComboInFlight de-dupes concurrent refetches of the same combo.
+const homeComboInFlight=new Set();
+const HOME_COMBO_SPECS={
+  x01:{ perMode:true,
+    fetch(mode){
+      return Promise.all([
+        Backend.get(`/api/top-finishes?mode=${mode}`),
+        Backend.get(`/api/stats/180s?mode=${mode}`),
+        Backend.get(`/api/stats/big-fish?mode=${mode}`),
+        Backend.get(`/api/stats/nine-darters?mode=${mode}`),
+      ]).then(([finishes,eighties,bigFish,nineDarters])=>{
+        homeData[mode]={finishes,eighties,bigFish,nineDarters};
+      });
+    },
+    hasCache(mode){ return !!homeData[mode]; },
+    fallback(mode){ homeData[mode]={finishes:[],eighties:HOME_EMPTY_ACHIEVEMENT,bigFish:HOME_EMPTY_ACHIEVEMENT,nineDarters:HOME_EMPTY_ACHIEVEMENT}; },
+  },
+  cricket:{ perMode:true,
+    fetch(mode){
+      const reqs=[
+        Backend.get(`/api/stats/cricket-mpr?mode=${mode}`),
+        Backend.get(`/api/stats/cricket-9marks?mode=${mode}`),
+        Backend.get(`/api/stats/cricket-perfect-leg?mode=${mode}`),
+      ];
+      if(mode==='h2h') reqs.push(Backend.get('/api/stats/cricket-wins'));
+      return Promise.all(reqs).then(([mpr,nineMarks,perfectLeg,wins])=>{
+        if(!homeData.cricket) homeData.cricket={};
+        homeData.cricket[mode]={mpr,nineMarks,perfectLeg};
+        if(mode==='h2h') homeData.cricket.wins=wins;
+      });
+    },
+    hasCache(mode){ return !!(homeData.cricket && homeData.cricket[mode]); },
+    fallback(mode){
+      if(!homeData.cricket) homeData.cricket={};
+      homeData.cricket[mode]={mpr:[],nineMarks:HOME_EMPTY_ACHIEVEMENT,perfectLeg:HOME_EMPTY_ACHIEVEMENT};
+      if(mode==='h2h' && !homeData.cricket.wins) homeData.cricket.wins=[];
+    },
+  },
+  baseball:{ perMode:true,
+    fetch(mode){
+      const reqs=[
+        Backend.get(`/api/stats/baseball-rpi?mode=${mode}`),
+        Backend.get(`/api/stats/baseball-perfect-innings?mode=${mode}`),
+        Backend.get(`/api/stats/baseball-perfect-game?mode=${mode}`),
+      ];
+      if(mode==='h2h') reqs.push(Backend.get('/api/stats/baseball-wins'));
+      return Promise.all(reqs).then(([rpi,perfectInnings,perfectGame,wins])=>{
+        if(!homeData.baseball) homeData.baseball={};
+        homeData.baseball[mode]={rpi,perfectInnings,perfectGame};
+        if(mode==='h2h') homeData.baseball.wins=wins;
+      });
+    },
+    hasCache(mode){ return !!(homeData.baseball && homeData.baseball[mode]); },
+    fallback(mode){
+      if(!homeData.baseball) homeData.baseball={};
+      homeData.baseball[mode]={rpi:[],perfectInnings:HOME_EMPTY_ACHIEVEMENT,perfectGame:HOME_EMPTY_ACHIEVEMENT};
+      if(mode==='h2h' && !homeData.baseball.wins) homeData.baseball.wins=[];
+    },
+  },
+  shanghai:{ perMode:true,
+    fetch(mode){
+      const reqs=[
+        Backend.get(`/api/stats/shanghai-ppr?mode=${mode}`),
+        Backend.get(`/api/stats/shanghai-shanghais?mode=${mode}`),
+      ];
+      if(mode==='h2h') reqs.push(Backend.get('/api/stats/shanghai-wins'));
+      return Promise.all(reqs).then(([ppr,shanghais,wins])=>{
+        if(!homeData.shanghai) homeData.shanghai={};
+        homeData.shanghai[mode]={ppr,shanghais};
+        if(mode==='h2h') homeData.shanghai.wins=wins;
+      });
+    },
+    hasCache(mode){ return !!(homeData.shanghai && homeData.shanghai[mode]); },
+    fallback(mode){
+      if(!homeData.shanghai) homeData.shanghai={};
+      homeData.shanghai[mode]={ppr:[],shanghais:HOME_EMPTY_ACHIEVEMENT};
+      if(mode==='h2h' && !homeData.shanghai.wins) homeData.shanghai.wins=[];
+    },
+  },
+  halveIt:{ perMode:true,
+    fetch(mode){
+      const reqs=[Backend.get(`/api/stats/halve-it-best-total?mode=${mode}`)];
+      if(mode==='h2h') reqs.push(Backend.get('/api/stats/halve-it-wins'));
+      return Promise.all(reqs).then(([bestTotal,wins])=>{
+        if(!homeData.halveIt) homeData.halveIt={};
+        homeData.halveIt[mode]={bestTotal};
+        if(mode==='h2h') homeData.halveIt.wins=wins;
+      });
+    },
+    hasCache(mode){ return !!(homeData.halveIt && homeData.halveIt[mode]); },
+    fallback(mode){
+      if(!homeData.halveIt) homeData.halveIt={};
+      homeData.halveIt[mode]={bestTotal:[]};
+      if(mode==='h2h' && !homeData.halveIt.wins) homeData.halveIt.wins=[];
+    },
+  },
+  pressureChamber:{ perMode:true,
+    fetch(mode){
+      const reqs=[Backend.get(`/api/stats/pressure-chamber-best-cp?mode=${mode}`)];
+      if(mode==='h2h') reqs.push(Backend.get('/api/stats/pressure-chamber-wins'));
+      return Promise.all(reqs).then(([bestCp,wins])=>{
+        if(!homeData.pressureChamber) homeData.pressureChamber={};
+        homeData.pressureChamber[mode]={bestCp};
+        if(mode==='h2h') homeData.pressureChamber.wins=wins;
+      });
+    },
+    hasCache(mode){ return !!(homeData.pressureChamber && homeData.pressureChamber[mode]); },
+    fallback(mode){
+      if(!homeData.pressureChamber) homeData.pressureChamber={};
+      homeData.pressureChamber[mode]={bestCp:[]};
+      if(mode==='h2h' && !homeData.pressureChamber.wins) homeData.pressureChamber.wins=[];
+    },
+  },
+  // The remaining game types have no H2H/Practice split (always solo, or — for
+  // Killer — a single win-rate board with no mode-specific shape) so their specs
+  // fetch one flat group, keyed just by the game-type id (no mode suffix).
+  doublesPractice:{ perMode:false,
+    fetch(){
+      return Promise.all([
+        Backend.get('/api/stats/doubles-practice-accuracy'),
+        Backend.get('/api/stats/doubles-practice-best-round'),
+      ]).then(([accuracy,bestRound])=>{ homeData.doublesPractice={accuracy,bestRound}; });
+    },
+    hasCache(){ return !!homeData.doublesPractice; },
+    fallback(){ homeData.doublesPractice={accuracy:[],bestRound:[]}; },
+  },
+  checkoutTrainer:{ perMode:false,
+    fetch(){ return Backend.get('/api/stats/checkout-blitz-leaderboard').then(blitzLeaderboard=>{ homeData.checkoutTrainer={blitzLeaderboard}; }); },
+    hasCache(){ return !!homeData.checkoutTrainer; },
+    fallback(){ homeData.checkoutTrainer={blitzLeaderboard:[]}; },
+  },
+  bobs27:{ perMode:false,
+    fetch(){ return Backend.get('/api/stats/bobs27-leaderboard').then(leaderboard=>{ homeData.bobs27={leaderboard}; }); },
+    hasCache(){ return !!homeData.bobs27; },
+    fallback(){ homeData.bobs27={leaderboard:[]}; },
+  },
+  checkoutLadder:{ perMode:false,
+    fetch(){ return Backend.get('/api/stats/checkout-ladder-leaderboard').then(leaderboard=>{ homeData.checkoutLadder={leaderboard}; }); },
+    hasCache(){ return !!homeData.checkoutLadder; },
+    fallback(){ homeData.checkoutLadder={leaderboard:[]}; },
+  },
+  gauntlet:{ perMode:false,
+    fetch(){ return Backend.get('/api/stats/gauntlet-leaderboard').then(leaderboard=>{ homeData.gauntlet={leaderboard}; }); },
+    hasCache(){ return !!homeData.gauntlet; },
+    fallback(){ homeData.gauntlet={leaderboard:[]}; },
+  },
+  killer:{ perMode:false,
+    fetch(){ return Backend.get('/api/stats/killer-wins').then(winLeaderboard=>{ homeData.killer={winLeaderboard}; }); },
+    hasCache(){ return !!homeData.killer; },
+    fallback(){ homeData.killer={winLeaderboard:[]}; },
+  },
+  marathon:{ perMode:false,
+    fetch(){ return Backend.get('/api/stats/marathon-leaderboard').then(leaderboard=>{ homeData.marathon={leaderboard}; }); },
+    hasCache(){ return !!homeData.marathon; },
+    fallback(){ homeData.marathon={leaderboard:[]}; },
+  },
+  deadManWalking:{ perMode:false,
+    fetch(){ return Backend.get('/api/stats/dead-man-walking-leaderboard').then(leaderboard=>{ homeData.deadManWalking={leaderboard}; }); },
+    hasCache(){ return !!homeData.deadManWalking; },
+    fallback(){ homeData.deadManWalking={leaderboard:[]}; },
+  },
+  aroundTheClock:{ perMode:false,
+    fetch(){
+      return Promise.all([
+        Backend.get('/api/stats/around-the-clock-fastest'),
+        Backend.get('/api/stats/around-the-clock-completions'),
+      ]).then(([fastest,completions])=>{ homeData.aroundTheClock={fastest,completions}; });
+    },
+    hasCache(){ return !!homeData.aroundTheClock; },
+    fallback(){ homeData.aroundTheClock={fastest:[],completions:[]}; },
+  },
+  aroundTheWorld:{ perMode:false,
+    fetch(){ return Backend.get('/api/stats/around-the-world-progress').then(progress=>{ homeData.aroundTheWorld={progress}; }); },
+    hasCache(){ return !!homeData.aroundTheWorld; },
+    fallback(){ homeData.aroundTheWorld={progress:[]}; },
+  },
+};
+// Fetches (or, if already cached, silently refreshes in the background) the one
+// tab+game-type combo actually visible right now. Called from renderHome() (for
+// the combo selected when Home is opened) and from switchHomeTab()/
+// switchHomeGameType() (for whichever combo a switch lands on). De-duped via
+// homeComboInFlight so rapid tab-mashing can't stack up overlapping requests for
+// the same combo; a failed fetch falls back to an empty-but-valid shape ONLY if
+// nothing was cached yet (keep-cache-on-error, mirrored per-combo instead of the
+// old all-or-nothing Promise.all).
+function ensureHomeCombo(type, mode){
+  const spec=HOME_COMBO_SPECS[type];
+  if(!spec || !homeData) return;
+  const key=spec.perMode ? `${type}:${mode}` : type;
+  if(homeComboInFlight.has(key)) return;
+  homeComboInFlight.add(key);
+  spec.fetch(mode).then(()=>{
+    homeComboInFlight.delete(key);
+    if(homeGameType===type && homeTab===mode) renderHomeTabBody();
+  }).catch(()=>{
+    homeComboInFlight.delete(key);
+    if(!spec.hasCache(mode)) spec.fallback(mode);
+    if(homeGameType===type && homeTab===mode) renderHomeTabBody();
+  });
+}
 
 // Populates the Home page's game-type toggle from every registered game type with
 // a stat vocabulary AND a Home-page presence (same filter/iteration as the Player
@@ -4027,7 +4289,13 @@ function testHaConnection(){
       uiAlert('Connection failed: ' + (err.message || 'Could not reach the server'));
     });
 }
+// haWebhookStatus (refreshed at boot from /api/settings/ha-webhook-status) lets every
+// call site skip building/POSTing a payload the server would only discard unread —
+// the server already no-ops per-event when unconfigured (fireHaWebhook()), but for
+// `momentcard` that discarded payload is a ~250KB base64 image (item 57).
+let haWebhookStatus = { enabled: false, events: {} };
 function sendHaWebhook(event, player, category, extra){
+  if(!haWebhookStatus.enabled || !haWebhookStatus.events[event]) return;
   Backend.send('POST','/api/ha-webhook',{ event, player, category, ...(extra||{}) }).catch(()=>{});
 }
 
@@ -5254,6 +5522,13 @@ function newMatchPlayer(name, start){
     pendingIceInTheVeins:false,  // true right after a bust, cleared after the player's next visit
     legWorstDeficit:0,           // largest (my remaining - opponent remaining) seen this leg (Comeback Kid)
     singlesHit: new Set(),       // distinct 1-20 singles hit this session (Around the Clock)
+    // Around the World (item 51): baseline lifetime dart-outcome set fetched once
+    // at game start (below), same shape newMatchPlayerAroundTheWorld() already
+    // uses for its own guided mode; atwHitSet tracks this SESSION's own new
+    // outcomes locally so enterTurn()'s per-visit check (below) never re-queries
+    // the server — it was doing so on every X01 visit until this player earned
+    // the badge, a lifetime-DISTINCT-scan per visit.
+    atwHitSet: new Set(), atwBaselineHitSet: new Set(),
     sessionOneEighties:0, lifetimeOneEightiesBase:0 }; // Lifetime 180s ladder (docs/archive/culture-badges-roadmap.md Part A)
   // Fetched once at game start (not re-queried per turn) — same "avoid a network
   // round-trip per dart/turn" reasoning newMatchPlayerChuckin() documents for its
@@ -5266,6 +5541,16 @@ function newMatchPlayer(name, start){
   Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(name)}`).then(stats=>{
     if(!stats) return;
     p.lifetimeOneEightiesBase = (stats.one80s || 0) - p.sessionOneEighties;
+  }).catch(()=>{});
+  // Around the World baseline (see atwHitSet/atwBaselineHitSet above) — fetched
+  // unconditionally once here, same as newMatchPlayerAroundTheWorld()'s own
+  // precedent; enterTurn()'s per-visit check below still skips entirely once
+  // earnedBadgeCache confirms the badge, so this is never wasted once earned.
+  // If this hasn't resolved by the time a dart is thrown, the check just runs
+  // against an empty baseline and catches up once it lands, same tradeoff as
+  // the 180 ladder above.
+  Backend.get(`/api/players/around-the-world?name=${encodeURIComponent(name)}`).then(prog=>{
+    p.atwBaselineHitSet = new Set((prog.hit||[]).map(h=>`${h.sector}:${h.mult}`));
   }).catch(()=>{});
   return p;
 }
@@ -5483,9 +5768,12 @@ function shuffleTournamentSeed(){
 function loadTournamentSeedByAverage(){
   const ts = tournamentSetup;
   const names = ts.selected.slice();
-  Promise.all(names.map(nm => Backend.get(`/api/players/personal-bests?name=${encodeURIComponent(nm)}`).catch(()=>null)))
+  // One batch round trip instead of one getPersonalBestsFor() call per selected
+  // player (item 51) — same X01-lifetime record each of those calls asked for.
+  Backend.get(`/api/players/personal-bests-batch?names=${names.map(encodeURIComponent).join(',')}`)
+    .catch(()=>({}))
     .then(results=>{
-      const withAvg = names.map((nm,i)=>({ name:nm, avg: results[i] && results[i].lifetimeAvg!=null ? results[i].lifetimeAvg : null }));
+      const withAvg = names.map(nm=>({ name:nm, avg: results[nm] && results[nm].lifetimeAvg!=null ? results[nm].lifetimeAvg : null }));
       withAvg.sort((a,b)=>{
         if(a.avg==null && b.avg==null) return 0;
         if(a.avg==null) return 1;
@@ -6093,7 +6381,12 @@ function switchPlayerGameType(type){
   renderPlayerPage();
 }
 function showPlayer(name){
-  if(currentPlayer !== name){ avgChartWeight = null; cachedDartWeights = []; playerPageTab = 'overall'; playerGameType = 'x01'; showMoreStats = false; playerSettingsUnlocked = false; }
+  // profileSectionCache is cleared wholesale (not just this player's entry) rather
+  // than per-name, so returning to a player viewed earlier in the same session
+  // re-fetches once instead of replaying data that may now be stale (e.g. a game
+  // played as that player, or an admin merge/reset, happened while looking at
+  // someone else's profile in between).
+  if(currentPlayer !== name){ avgChartWeight = null; cachedDartWeights = []; playerPageTab = 'overall'; playerGameType = 'x01'; showMoreStats = false; playerSettingsUnlocked = false; profileSectionCache = {}; }
   currentPlayer = name;
   if(!customRangeEnd){
     const now=new Date();
@@ -6555,9 +6848,10 @@ function renderPlayerBadges(data){
 function loadAroundTheWorldProgress(){
   const container=document.getElementById('player-atw-progress');
   if(!container) return;
-  Backend.get(`/api/players/around-the-world?name=${encodeURIComponent(currentPlayer)}`)
-    .then(data=>renderAroundTheWorldProgress(data))
-    .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load progress.</p>`; });
+  cachedProfileLoad('atw',
+    () => Backend.get(`/api/players/around-the-world?name=${encodeURIComponent(currentPlayer)}`),
+    data=>renderAroundTheWorldProgress(data),
+    ()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load progress.</p>`; });
 }
 function renderAroundTheWorldProgress(data){
   const container=document.getElementById('player-atw-progress');
@@ -6577,9 +6871,10 @@ function renderAroundTheWorldProgress(data){
 function loadGauntletScarMap(){
   const container=document.getElementById('player-gauntlet-scarmap');
   if(!container) return;
-  Backend.get(`/api/players/gauntlet-scar-map?name=${encodeURIComponent(currentPlayer)}`)
-    .then(data=>renderGauntletScarMap(data))
-    .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load the Scar Map.</p>`; });
+  cachedProfileLoad('gauntletScarMap',
+    () => Backend.get(`/api/players/gauntlet-scar-map?name=${encodeURIComponent(currentPlayer)}`),
+    data=>renderGauntletScarMap(data),
+    ()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load the Scar Map.</p>`; });
 }
 function renderGauntletScarMap(data){
   const container=document.getElementById('player-gauntlet-scarmap');
@@ -6670,8 +6965,14 @@ function loadOnThisDay(){
   if(!section || !container) return;
   section.hidden = true;
   const tz = -new Date().getTimezoneOffset();
-  Backend.get(`/api/players/on-this-day?name=${encodeURIComponent(currentPlayer)}&tz=${tz}`)
-    .then(async data=>{
+  // The fetched `data` itself is cached/replayed via cachedProfileLoad (a tab/
+  // game-type switch shouldn't re-hit the network for the same flashback), but
+  // the moment-card canvas build below is async and touches DOM the profile
+  // re-render just wiped, so it re-runs every call — cheap (no network),
+  // unlike the fetch it follows.
+  cachedProfileLoad('onThisDay',
+    () => Backend.get(`/api/players/on-this-day?name=${encodeURIComponent(currentPlayer)}&tz=${tz}`),
+    async data=>{
       if(!data) return;
       section.hidden = false;
       const yearsLabel = data.yearsAgo===1 ? '1 year ago today' : `${data.yearsAgo} years ago today`;
@@ -6683,8 +6984,8 @@ function loadOnThisDay(){
       momentCards['flashback'] = { canvas, player: currentPlayer, headline: ON_THIS_DAY_LABEL[data.type] || 'FLASHBACK' };
       const btn = document.getElementById('otd-share-btn');
       if(btn) btn.onclick = () => shareMomentCard('flashback');
-    })
-    .catch(()=>{ section.hidden = true; });
+    },
+    ()=>{ section.hidden = true; });
 }
 // Daily Challenge history (docs/archive/daily-challenge-roadmap.md "Player Profile: Daily
 // Challenge history"): lifetime completion record, best result per format (reusing
@@ -6718,9 +7019,10 @@ function loadChallengeHistory(){
   const container = document.getElementById('player-challenge-history');
   if(!container) return;
   const today = localDateStr(new Date());
-  Backend.get(`/api/challenges/history?player=${encodeURIComponent(currentPlayer)}&date=${today}`)
-    .then(data=>renderChallengeHistory(data))
-    .catch(()=>{ container.innerHTML = `<p class="pp-meta" style="padding:4px 0">Could not load Daily Challenge history.</p>`; });
+  cachedProfileLoad('challengeHistory',
+    () => Backend.get(`/api/challenges/history?player=${encodeURIComponent(currentPlayer)}&date=${today}`),
+    data=>renderChallengeHistory(data),
+    ()=>{ container.innerHTML = `<p class="pp-meta" style="padding:4px 0">Could not load Daily Challenge history.</p>`; });
 }
 function renderChallengeHistory(data){
   const container = document.getElementById('player-challenge-history');
@@ -6781,20 +7083,23 @@ function loadTournamentStats(){
   const container=document.getElementById('player-tournament-stats');
   if(!container) return;
   const player = currentPlayer;
-  DB.tournamentStats(player).then(data=>{
-    if(currentPlayer !== player) return;   // a newer profile visit took over
-    const el = document.getElementById('player-tournament-stats');
-    if(!el) return;
-    if(!data || (!data.wins && !data.runnerUps && !data.bestFinish)){
-      el.innerHTML = `<p class="pp-meta" style="padding:4px 0">No tournaments played yet.</p>`;
-      return;
-    }
-    el.innerHTML = `<div class="summary-grid">
-      <div class="stat-block"><div class="stat-val">${data.wins}</div><div class="stat-label">Tournaments Won</div></div>
-      <div class="stat-block"><div class="stat-val">${data.runnerUps}</div><div class="stat-label">Runner-Up Finishes</div></div>
-      ${data.bestFinish?`<div class="stat-block"><div class="stat-val" style="font-size:1.4rem">${escapeHtml(data.bestFinish)}</div><div class="stat-label">Best Finish</div></div>`:''}
-    </div>`;
-  }).catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load tournament stats.</p>`; });
+  cachedProfileLoad('tournamentStats',
+    () => DB.tournamentStats(player),
+    data=>{
+      if(currentPlayer !== player) return;   // a newer profile visit took over
+      const el = document.getElementById('player-tournament-stats');
+      if(!el) return;
+      if(!data || (!data.wins && !data.runnerUps && !data.bestFinish)){
+        el.innerHTML = `<p class="pp-meta" style="padding:4px 0">No tournaments played yet.</p>`;
+        return;
+      }
+      el.innerHTML = `<div class="summary-grid">
+        <div class="stat-block"><div class="stat-val">${data.wins}</div><div class="stat-label">Tournaments Won</div></div>
+        <div class="stat-block"><div class="stat-val">${data.runnerUps}</div><div class="stat-label">Runner-Up Finishes</div></div>
+        ${data.bestFinish?`<div class="stat-block"><div class="stat-val" style="font-size:1.4rem">${escapeHtml(data.bestFinish)}</div><div class="stat-label">Best Finish</div></div>`:''}
+      </div>`;
+    },
+    ()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load tournament stats.</p>`; });
 }
 // docs/archive/rating-and-handicap-roadmap.md Part A: rating + rank + a rating-over-
 // time sparkline. Deliberately a bespoke minimal SVG (drawEloSparkline()
@@ -6808,22 +7113,25 @@ function loadPlayerElo(){
   const container=document.getElementById('player-elo-body');
   if(!container) return;
   const player = currentPlayer;
-  Backend.get(`/api/players/elo?name=${encodeURIComponent(player)}`).then(data=>{
-    if(currentPlayer !== player) return;   // a newer profile visit took over
-    const el = document.getElementById('player-elo-body');
-    if(!el || !data) return;
-    if(!data.played){
-      el.innerHTML = `<p class="pp-meta" style="padding:4px 0">No rated H2H games yet — play a 2-player X01, Cricket, or Baseball match to get started.</p>`;
-      return;
-    }
-    const rankLabel = data.qualifies ? `#${data.rank} of ${data.ratedPlayers}` : `Not yet ranked (needs 5 rated games, has ${data.played})`;
-    el.innerHTML = `<div class="summary-grid">
-      <div class="stat-block"><div class="stat-val">${data.rating}</div><div class="stat-label">Rating</div></div>
-      <div class="stat-block"><div class="stat-val">${data.wins}-${data.losses}</div><div class="stat-label">Record</div></div>
-      <div class="stat-block"><div class="stat-val" style="font-size:1.1rem">${escapeHtml(rankLabel)}</div><div class="stat-label">Household Rank</div></div>
-    </div>
-    ${drawEloSparkline(data.history)}`;
-  }).catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load rating.</p>`; });
+  cachedProfileLoad('elo',
+    () => Backend.get(`/api/players/elo?name=${encodeURIComponent(player)}`),
+    data=>{
+      if(currentPlayer !== player) return;   // a newer profile visit took over
+      const el = document.getElementById('player-elo-body');
+      if(!el || !data) return;
+      if(!data.played){
+        el.innerHTML = `<p class="pp-meta" style="padding:4px 0">No rated H2H games yet — play a 2-player X01, Cricket, or Baseball match to get started.</p>`;
+        return;
+      }
+      const rankLabel = data.qualifies ? `#${data.rank} of ${data.ratedPlayers}` : `Not yet ranked (needs 5 rated games, has ${data.played})`;
+      el.innerHTML = `<div class="summary-grid">
+        <div class="stat-block"><div class="stat-val">${data.rating}</div><div class="stat-label">Rating</div></div>
+        <div class="stat-block"><div class="stat-val">${data.wins}-${data.losses}</div><div class="stat-label">Record</div></div>
+        <div class="stat-block"><div class="stat-val" style="font-size:1.1rem">${escapeHtml(rankLabel)}</div><div class="stat-label">Household Rank</div></div>
+      </div>
+      ${drawEloSparkline(data.history)}`;
+    },
+    ()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load rating.</p>`; });
 }
 function drawEloSparkline(history){
   if(!history || history.length < 2) return '';
@@ -6852,20 +7160,23 @@ function loadPlayerLeagueStats(){
   const container=document.getElementById('player-league-stats');
   if(!container) return;
   const player = currentPlayer;
-  DB.leagueSummary(player).then(list=>{
-    if(currentPlayer !== player) return;   // a newer profile visit took over
-    const el = document.getElementById('player-league-stats');
-    if(!el) return;
-    if(!list || !list.length){
-      el.innerHTML = `<p class="pp-meta" style="padding:4px 0">Not enrolled in any league yet.</p>`;
-      return;
-    }
-    el.innerHTML = `<div class="roster-list">${list.map(s=>`
-      <button class="rp-main" onclick="openLeague(${s.leagueId}); show('league')">
-        <div class="rp-name-row">${s.gameType==='cricket'?'🎯 ':''}${escapeHtml(s.name)} ${s.status==='ended'?'<span class="pp-meta">(ended)</span>':''}</div>
-        <div class="rp-stat">#${s.rank} of ${s.totalPlayers} · ${s.played} played · ${s.points} pts</div>
-      </button>`).join('')}</div>`;
-  }).catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load league stats.</p>`; });
+  cachedProfileLoad('leagueStats',
+    () => DB.leagueSummary(player),
+    list=>{
+      if(currentPlayer !== player) return;   // a newer profile visit took over
+      const el = document.getElementById('player-league-stats');
+      if(!el) return;
+      if(!list || !list.length){
+        el.innerHTML = `<p class="pp-meta" style="padding:4px 0">Not enrolled in any league yet.</p>`;
+        return;
+      }
+      el.innerHTML = `<div class="roster-list">${list.map(s=>`
+        <button class="rp-main" onclick="openLeague(${s.leagueId}); show('league')">
+          <div class="rp-name-row">${s.gameType==='cricket'?'🎯 ':''}${escapeHtml(s.name)} ${s.status==='ended'?'<span class="pp-meta">(ended)</span>':''}</div>
+          <div class="rp-stat">#${s.rank} of ${s.totalPlayers} · ${s.played} played · ${s.points} pts</div>
+        </button>`).join('')}</div>`;
+    },
+    ()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load league stats.</p>`; });
 }
 // docs/archive/ghost-opponent-roadmap.md: populates the #ghost-race-record span next to the
 // "Race this leg" button — a no-op if that span doesn't exist (a non-X01 Personal
@@ -9058,9 +9369,15 @@ async function fireMomentCard(momentType, opts){
     const desc = opts.desc || achDescFor(momentType);
     const canvas = await buildMomentCard({ ...opts, desc });
     momentCards[momentType] = { canvas, ...opts, desc };
-    const image = canvas.toDataURL(MOMENT_CARD_MIME, MOMENT_CARD_QUALITY);
-    sendHaWebhook('momentcard', opts.player, (game && game.category) || '', {
-      momentType, headline: opts.headline, statLine: opts.statLine || '', image });
+    // The canvas itself is always built/cached — the in-app Share button
+    // (shareMomentCard()) needs it regardless of HA integration. Only the
+    // JPEG-encode + ~250KB webhook POST are skipped when nothing's listening
+    // (item 57) — those are pure waste the server would discard unread anyway.
+    if(haWebhookStatus.enabled && haWebhookStatus.events.momentcard){
+      const image = canvas.toDataURL(MOMENT_CARD_MIME, MOMENT_CARD_QUALITY);
+      sendHaWebhook('momentcard', opts.player, (game && game.category) || '', {
+        momentType, headline: opts.headline, statLine: opts.statLine || '', image });
+    }
   }catch(e){ console.warn('moment card generation failed:', e); }
 }
 // Keeps the match-win card's stat line simple: an exact score for the common
@@ -9192,21 +9509,33 @@ function renderPad(){
     } else {
       const pad = document.getElementById('pad');
       if(!pad) return;
-      pad.innerHTML = '';
-      for(let n=1;n<=20;n++){
-        const b=document.createElement('button');
-        b.textContent=n; b.disabled=full;
-        b.onclick=()=>throwDart(n);
-        pad.appendChild(b);
+      // The 1-20+Bull(+Miss) button labels/closures never change within a game
+      // (only their disabled state does) — build once and toggle, the same
+      // "build SVG once" pattern the dartboard branch above already uses
+      // (item 57). `pad`'s DOM identity itself resets fresh on every new game
+      // (renderGameShell() replaces the whole `.pad` container), so a stale
+      // build from a PREVIOUS game can never be toggled by mistake.
+      const hasMiss = game.gameType !== 'checkout_trainer';
+      if(pad.dataset.padKind !== 'default' || pad.dataset.hasMiss !== String(hasMiss)){
+        pad.innerHTML = '';
+        for(let n=1;n<=20;n++){
+          const b=document.createElement('button');
+          b.textContent=n;
+          b.onclick=()=>throwDart(n);
+          pad.appendChild(b);
+        }
+        const bull=document.createElement('button');
+        bull.className='bull'; bull.textContent='Bull';
+        bull.onclick=()=>throwDart(25); pad.appendChild(bull);
+        if(hasMiss){
+          const miss=document.createElement('button');
+          miss.className='miss'; miss.textContent='Miss';
+          miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+        }
+        pad.dataset.padKind = 'default';
+        pad.dataset.hasMiss = String(hasMiss);
       }
-      const bull=document.createElement('button');
-      bull.className='bull'; bull.textContent='Bull'; bull.disabled=full;
-      bull.onclick=()=>throwDart(25); pad.appendChild(bull);
-      if(game.gameType !== 'checkout_trainer'){
-        const miss=document.createElement('button');
-        miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
-        miss.onclick=()=>throwDart(0); pad.appendChild(miss);
-      }
+      for(const b of pad.children) b.disabled = full;
     }
   }
   // keep Undo Last Turn in sync — enabled only when a snapshot exists
@@ -10222,20 +10551,19 @@ function enterTurn(){
     awardOnceBadge(p.name, 'around_the_clock', 'aroundtheclock', game.lastTurnSnapshot,
       { icon:'🕐', headline:'AROUND THE CLOCK', statLine:'Every number, 1 to 20, singled out' });
   }
-  // Around the World (state-based milestone): all 63 lifetime dart outcomes. Skips
-  // the (mildly expensive) progress query once this player's cached badge list
-  // already has it. Queued behind DB.recordTurn() above (both go through the same
-  // DB._queue chain) so the progress query only runs once this visit's darts are
-  // actually persisted — querying immediately would race the still-pending write.
+  // Around the World (state-based milestone): all 63 lifetime dart outcomes.
+  // Skips entirely once this player's cached badge list already has it. Tracked
+  // via newMatchPlayer()'s fetch-baseline-once (atwBaselineHitSet) + this
+  // session's own newly-hit outcomes (atwHitSet) — item 51 — instead of a fresh
+  // lifetime-DISTINCT-scan query every single visit.
   if(!(earnedBadgeCache[p.name] && earnedBadgeCache[p.name].has('around_the_world'))){
-    const _snapAtw = game.lastTurnSnapshot;
-    DB._queue(()=>Backend.get(`/api/players/around-the-world?name=${encodeURIComponent(p.name)}`).then(prog=>{
-      if(prog && prog.count >= prog.total){
-        awardOnceBadge(p.name, 'around_the_world', 'aroundtheworld', _snapAtw,
-          { icon:'🌍', headline:'AROUND THE WORLD', statLine:'Every dart outcome, lifetime' },
-          { cacheCheck:true });
-      }
-    }).catch(()=>{}));
+    _d.forEach(d => p.atwHitSet.add(`${d.sector}:${d.mult}`));
+    const atwCount = new Set([...p.atwBaselineHitSet, ...p.atwHitSet]).size;
+    if(atwCount >= 63){
+      awardOnceBadge(p.name, 'around_the_world', 'aroundtheworld', game.lastTurnSnapshot,
+        { icon:'🌍', headline:'AROUND THE WORLD', statLine:'Every dart outcome, lifetime' },
+        { cacheCheck:true });
+    }
   }
 
   // Novelty time-of-day badges (shared with Cricket's enterTurnCricket() via
@@ -13941,7 +14269,13 @@ function contextsForMode(key){
    startNextRoundDoublesPractice(), not startNextLeg(). */
 function newMatchPlayerDoublesPractice(name){
   const p = { name, roundDarts:0, roundHits:0, sessionRounds:[],
-    sessionHits:0, lifetimeHitsBase:0 }; // Lifetime doubles-hit ladder (docs/archive/culture-badges-roadmap.md Part B)
+    sessionHits:0, lifetimeHitsBase:0, // Lifetime doubles-hit ladder (docs/archive/culture-badges-roadmap.md Part B)
+    // Ring Master (item 51): baseline lifetime distinct-doubled-sectors set
+    // fetched once here, sessionHitSectors tracks this session's own newly-hit
+    // sectors locally — throwDartDoublesPractice()'s per-hit check (below)
+    // then never re-queries the server, a lifetime-DISTINCT-scan it used to run
+    // on every hit dart until this player earned the badge.
+    sessionHitSectors: new Set(), baselineHitSectors: new Set() };
   // Fetched once at game start, not re-queried per dart — same "avoid a network
   // round-trip per throw" reasoning newMatchPlayerChuckin()/newMatchPlayerBaseball()
   // document for their own lifetime bases. No mode param -> genuinely unscoped
@@ -13949,6 +14283,9 @@ function newMatchPlayerDoublesPractice(name){
   Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(name)}&gameType=doubles_practice`).then(stats=>{
     if(!stats) return;
     p.lifetimeHitsBase = (stats.hits || 0) - p.sessionHits;
+  }).catch(()=>{});
+  Backend.get(`/api/players/doubles-hit-sectors?name=${encodeURIComponent(name)}`).then(prog=>{
+    p.baselineHitSectors = new Set(prog.hit || []);
   }).catch(()=>{});
   return p;
 }
@@ -14002,21 +14339,21 @@ function throwDartDoublesPractice(sector, zone, missZone, missDepth, bounced){
     p.sessionHits = (p.sessionHits||0) + 1;
     checkChuckinMilestoneTier(DOUBLES_HIT_MILESTONE_LADDERS[0], p.name, (p.lifetimeHitsBase||0) + p.sessionHits);
     // 🎪 Ring Master (docs/archive/culture-badges-roadmap.md Part B): lifetime completion
-    // over every double D1-D20 plus bull — same "query the server, compare
-    // count>=total" shape as the passive Around the World badge (throwDartAroundTheWorld()),
-    // queued behind DB._queue so the query only runs once this dart's own
-    // DB.recordTurn() write above has actually landed. Explicitly a ONE-OFF
-    // PERMANENT badge per the roadmap doc — unlike Around the Clock/World, this
-    // one deliberately skips trackBadgeForUndo/badgeReverts (no undo-revocation),
-    // matching the milestone ladders' own "permanent, once-earned" treatment.
+    // over every double D1-D20 plus bull. Tracked via newMatchPlayerDoublesPractice()'s
+    // fetch-baseline-once (baselineHitSectors) + this session's own newly-hit
+    // sectors (sessionHitSectors) — item 51 — instead of a fresh lifetime-DISTINCT-
+    // scan query on every hit dart. Explicitly a ONE-OFF PERMANENT badge per the
+    // roadmap doc — unlike Around the Clock/World, this one deliberately skips
+    // trackBadgeForUndo/badgeReverts (no undo-revocation), matching the milestone
+    // ladders' own "permanent, once-earned" treatment.
     if(!(earnedBadgeCache[p.name] && earnedBadgeCache[p.name].has('doublespracticeringmaster'))){
-      DB._queue(()=>Backend.get(`/api/players/doubles-hit-sectors?name=${encodeURIComponent(p.name)}`).then(prog=>{
-        if(prog && prog.count >= prog.total){
-          awardOnceBadge(p.name, 'doublespracticeringmaster', 'doublespracticeringmaster', null,
-            { icon:'🎪', headline:'RING MASTER', statLine:'Every double, D1 to Bull, lifetime' },
-            { cacheCheck:true });
-        }
-      }).catch(()=>{}));
+      p.sessionHitSectors.add(dart.sector);
+      const hitCount = new Set([...p.baselineHitSectors, ...p.sessionHitSectors]).size;
+      if(hitCount >= 21){
+        awardOnceBadge(p.name, 'doublespracticeringmaster', 'doublespracticeringmaster', null,
+          { icon:'🎪', headline:'RING MASTER', statLine:'Every double, D1 to Bull, lifetime' },
+          { cacheCheck:true });
+      }
     }
   }
   renderGameDoublesPractice();
@@ -14123,7 +14460,11 @@ function newMatchPlayerChuckin(name){
     // getChuckinHeatmap()); dartBuffer groups darts into non-overlapping runs of
     // 3 (mirroring the backend's CHUCKIN_GROUPS_OF_3) purely to detect a 180 —
     // see throwDartChuckin() below.
-    sessionScore:0, heatmap:{}, dartBuffer:[] };
+    // heatmapVersion (item 57): bumped on every heatmap mutation so
+    // playerSnapshotChuckin() — called on every per-dart live push — can cache
+    // its serialized array instead of re-walking+re-parsing the whole session
+    // heatmap's keys each time.
+    sessionScore:0, heatmap:{}, heatmapVersion:0, dartBuffer:[] };
   // Fetched once at game start (not re-queried per dart) so checkChuckinMilestones()
   // can compute lifetime darts/trebles as base+session entirely from local state —
   // this mode is built around rapid successive throws, and hitting the network on
@@ -14142,7 +14483,7 @@ function newMatchPlayerChuckin(name){
 // Not called by startNextLeg() (this mode never advances a leg) — provided only
 // to satisfy the GAME_TYPES contract, matching Doubles Practice's own precedent.
 function resetPlayerForNextLegChuckin(p){
-  p.sessionDarts = 0; p.sessionTrebles = 0; p.sessionScore = 0; p.heatmap = {}; p.dartBuffer = [];
+  p.sessionDarts = 0; p.sessionTrebles = 0; p.sessionScore = 0; p.heatmap = {}; p.heatmapVersion++; p.dartBuffer = [];
 }
 // heatmap is sent as a flat {sector,multiplier,hits} array (same shape
 // getChuckinHeatmap() returns) so the Live Scoreboard can feed it straight into
@@ -14151,17 +14492,24 @@ function resetPlayerForNextLegChuckin(p){
 // (see getChuckinStatBubbles()'s `avg` field for the backend/lifetime version
 // of the identical formula).
 function playerSnapshotChuckin(p){
-  const heatmap = Object.entries(p.heatmap||{}).map(([key,hits])=>{
-    // docs/bug-roadmap.md BUG-20: keys are sector_mult_zone_missZone_missDepth — zone/
-    // missDepth are strings ('' when absent), missZone a number. Parse zone/missDepth as
-    // strings, missZone as a number, so both the single-region (zone) and miss-ring
-    // (missZone/missDepth) breakdowns survive into the live-scoreboard cell shape.
-    const parts = key.split('_');
-    return { sector:Number(parts[0]), multiplier:Number(parts[1]), zone: parts[2] || null,
-      missZone: parts[3] ? Number(parts[3]) : null, missDepth: parts[4] || null, hits };
-  });
+  // Cached on p._heatmapCache, invalidated only when p.heatmapVersion has moved
+  // since the last build (item 57) — this snapshot fires on every per-dart live
+  // push, and re-parsing every key of the whole session's heatmap each time was
+  // pure waste once nothing about it had changed since the last push.
+  if(p._heatmapCacheVersion !== p.heatmapVersion){
+    p._heatmapCache = Object.entries(p.heatmap||{}).map(([key,hits])=>{
+      // docs/bug-roadmap.md BUG-20: keys are sector_mult_zone_missZone_missDepth — zone/
+      // missDepth are strings ('' when absent), missZone a number. Parse zone/missDepth as
+      // strings, missZone as a number, so both the single-region (zone) and miss-ring
+      // (missZone/missDepth) breakdowns survive into the live-scoreboard cell shape.
+      const parts = key.split('_');
+      return { sector:Number(parts[0]), multiplier:Number(parts[1]), zone: parts[2] || null,
+        missZone: parts[3] ? Number(parts[3]) : null, missDepth: parts[4] || null, hits };
+    });
+    p._heatmapCacheVersion = p.heatmapVersion;
+  }
   const sessionAvg = p.sessionDarts>0 ? (p.sessionScore/p.sessionDarts*3) : null;
-  return { name:p.name, sessionDarts:p.sessionDarts||0, sessionTrebles:p.sessionTrebles||0, heatmap, sessionAvg };
+  return { name:p.name, sessionDarts:p.sessionDarts||0, sessionTrebles:p.sessionTrebles||0, heatmap:p._heatmapCache, sessionAvg };
 }
 function throwDartChuckin(sector, zone, missZone, missDepth, bounced){
   const dart = makeDart(sector, bounced ? 1 : mult);
@@ -14191,6 +14539,7 @@ function throwDartChuckin(sector, zone, missZone, missDepth, bounced){
   // split it back apart unambiguously.
   const hKey = dart.sector+'_'+dart.mult+'_'+(zone||'')+'_'+(missZone!=null?missZone:'')+'_'+(missDepth||'');
   p.heatmap[hKey] = (p.heatmap[hKey]||0) + 1;
+  p.heatmapVersion++;
 
   // "Assuming three darts per turn" (explicitly requested): group darts into
   // non-overlapping runs of 3, purely to detect a 180 — this mode otherwise has
@@ -14228,6 +14577,7 @@ function undoLastTurnChuckin(){
   p.sessionScore = snap.sessionScore;
   p.dartBuffer = snap.dartBuffer;
   p.heatmap = snap.heatmap;
+  p.heatmapVersion++;
   game.chuckinLastDart = snap.chuckinLastDart;
 
   _finishUndo(snap, renderGameChuckin, { msg: 'Last dart undone.' });
@@ -15153,9 +15503,10 @@ function renderStatBubbles(data){
 function loadDartWeights(){
   const container=document.getElementById('avg-weight-filters');
   if(!container) return;
-  Backend.get(`/api/players/dart-weights?name=${encodeURIComponent(currentPlayer)}`)
-    .then(weights=>{ cachedDartWeights=weights; renderWeightFilters(); })
-    .catch(()=>{ container.hidden=true; });
+  cachedProfileLoad('dartWeights',
+    () => Backend.get(`/api/players/dart-weights?name=${encodeURIComponent(currentPlayer)}`),
+    weights=>{ cachedDartWeights=weights; renderWeightFilters(); },
+    ()=>{ container.hidden=true; });
 }
 
 // docs/archive/dart-builder-roadmap.md: populates the Player Profile's "Default loadout"
@@ -15165,14 +15516,17 @@ function loadPlayerLoadouts(){
   const sel = document.getElementById('pp-default-loadout');
   if(!sel) return;
   const player = currentPlayer;
-  Promise.all([DB.listLoadouts(player), DB.getDefaultLoadout(player)]).then(([list, def])=>{
-    if(currentPlayer !== player) return;   // a newer profile visit took over
-    const selEl = document.getElementById('pp-default-loadout');
-    if(!selEl) return;
-    const defaultId = def ? def.id : null;
-    selEl.innerHTML = '<option value="">Not set</option>' +
-      list.map(lo=>`<option value="${lo.id}"${defaultId===lo.id?' selected':''}>${escapeHtml(lo.name)}</option>`).join('');
-  }).catch(()=>{});
+  cachedProfileLoad('loadouts',
+    () => Promise.all([DB.listLoadouts(player), DB.getDefaultLoadout(player)]),
+    ([list, def])=>{
+      if(currentPlayer !== player) return;   // a newer profile visit took over
+      const selEl = document.getElementById('pp-default-loadout');
+      if(!selEl) return;
+      const defaultId = def ? def.id : null;
+      selEl.innerHTML = '<option value="">Not set</option>' +
+        list.map(lo=>`<option value="${lo.id}"${defaultId===lo.id?' selected':''}>${escapeHtml(lo.name)}</option>`).join('');
+    },
+    ()=>{});
 }
 function renderWeightFilters(){
   const container=document.getElementById('avg-weight-filters');
@@ -15764,6 +16118,7 @@ function showBackendErrorScreen(){
     Backend.get('/api/settings/default-input').then(di => { dartboardMode = di.input !== 'pad'; }).catch(()=>{}),
     Backend.get('/api/settings/colorblind-mode').then(cb => { colorblindMode = !!cb.enabled; }).catch(()=>{}),
     Backend.get('/api/settings/card-tagline').then(ct => { cardTagline = ct.tagline || DEFAULT_CARD_TAGLINE; }).catch(()=>{}),
+    Backend.get('/api/settings/ha-webhook-status').then(hw => { haWebhookStatus = { enabled: !!hw.enabled, events: hw.events || {} }; }).catch(()=>{}),
   ]);
   document.body.classList.toggle('colorblind', colorblindMode);
   restoreSetup();

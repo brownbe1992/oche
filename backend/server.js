@@ -43,6 +43,7 @@
        GET  /api/settings/colorblind-mode   -> { enabled } (public)
        GET  /api/settings/voice-announcements -> { enabled, turnScore, noScore, checkoutReq, oneEighty, bigFish, matchProgress } (public)
        GET  /api/settings/card-tagline      -> { tagline } (public)
+       GET  /api/settings/ha-webhook-status -> { enabled, events:{<event>:bool} } (public)
 
        POST /api/badges/award      -> { player, badgeId, once } -> { newlyEarned, count } (public)
        POST /api/badges/revoke     -> { player, badgeId } -> { count } (public, used by Undo Last Turn)
@@ -772,6 +773,12 @@ const server = http.createServer(async (req, res) => {
       // GAME_TYPE_REGISTRY now — one record per type instead of a ternary here.
       return send(res, 200, db.getPersonalBestsFor(gameType, name, mode));
     }
+    // Item 51: tournament average-seeding's own batch fetch — one request for every
+    // selected player's X01-lifetime personal bests instead of N separate round trips.
+    if (p === '/api/players/personal-bests-batch' && m === 'GET') {
+      const names = (url.searchParams.get('names') || '').split(',').map(s => s.trim()).filter(Boolean);
+      return send(res, 200, db.getPersonalBestsBatch(names));
+    }
     if (p === '/api/players/stat-bubbles' && m === 'GET') {
       const mode = url.searchParams.get('mode');
       const name = url.searchParams.get('name');
@@ -866,6 +873,10 @@ const server = http.createServer(async (req, res) => {
     // Public (no-auth) read of the shareable-card tagline — any device generating a
     // card needs this, not just the admin's browser.
     if (p === '/api/settings/card-tagline' && m === 'GET') { return send(res, 200, db.getCardTagline()); }
+    // Public (no-auth) read of WHETHER each HA webhook event is configured (never the
+    // webhook IDs themselves) — every device playing a game needs this to skip a
+    // pointless sendHaWebhook() call/payload build client-side (item 57).
+    if (p === '/api/settings/ha-webhook-status' && m === 'GET') { return send(res, 200, db.getHaWebhookStatus()); }
     if (p === '/api/settings' && m === 'PUT') {
       if (!requireAdmin(req, res)) return;
       const b = await readJson(req);
