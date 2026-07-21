@@ -15886,18 +15886,37 @@ function buildDartHeatmap(cells, opts){
 // stats charts) — call once after inserting the returned SVG into the DOM.
 // Delegated listeners on `container` (not one listener per region) since the
 // heatmap can be rebuilt/replaced wholesale on every game-type/tab switch.
+// One shared tooltip element + dismiss listeners for the whole page, created
+// once ever — the heatmap's body.innerHTML is rebuilt on every profile visit
+// (a fresh container each time), so a per-container tooltip div previously got
+// re-created and re-appended to document.body on every reload, leaking stray
+// fixed-position elements.
+let _hmTooltipEl = null;
+function _hmTooltip(){
+  if(_hmTooltipEl) return _hmTooltipEl;
+  const tip = document.createElement('div');
+  tip.className = 'hm-tooltip chalk';
+  tip.style.cssText = 'position:fixed;pointer-events:none;z-index:40;background:var(--surface-2);'+
+    'border:1px solid var(--gold);border-radius:8px;padding:5px 11px;font-size:13px;color:var(--ink);'+
+    'white-space:nowrap;opacity:0;transition:opacity .1s ease;transform:translate(-50%,-130%)';
+  document.body.appendChild(tip);
+  tip._hide = () => { tip.style.opacity = '0'; };
+  // A tap on a heatmap region (mobile has no hover, so pointerdown stands in
+  // for it) leaves no natural "moved away" event the way desktop's
+  // pointermove/pointerleave do — without these two, the tooltip stayed
+  // visible at its tap-time screen coordinate indefinitely, floating over
+  // whatever scrolled into view underneath it. A tap outside any region, or
+  // any page scroll (the tooltip is position:fixed at that stale coordinate),
+  // are the only reliable "the tap is over" signals left to dismiss it.
+  document.addEventListener('pointerdown', e => { if(!e.target.closest || !e.target.closest('.hm-region')) tip._hide(); }, true);
+  window.addEventListener('scroll', tip._hide, { passive:true, capture:true });
+  _hmTooltipEl = tip;
+  return tip;
+}
 function wireDartHeatmapInteractivity(container){
   if(!container || container.dataset.hmWired) return;
   container.dataset.hmWired = '1';
-  let tip = container.querySelector('.hm-tooltip');
-  if(!tip){
-    tip = document.createElement('div');
-    tip.className = 'hm-tooltip chalk';
-    tip.style.cssText = 'position:fixed;pointer-events:none;z-index:40;background:var(--surface-2);'+
-      'border:1px solid var(--gold);border-radius:8px;padding:5px 11px;font-size:13px;color:var(--ink);'+
-      'white-space:nowrap;opacity:0;transition:opacity .1s ease;transform:translate(-50%,-130%)';
-    document.body.appendChild(tip);
-  }
+  const tip = _hmTooltip();
   const show = (el, x, y) => {
     const t = el.getAttribute('data-tip');
     if(!t) return;
@@ -15905,16 +15924,15 @@ function wireDartHeatmapInteractivity(container){
     tip.style.left = x+'px'; tip.style.top = y+'px';
     tip.style.opacity = '1';
   };
-  const hide = () => { tip.style.opacity = '0'; };
   container.addEventListener('pointermove', e => {
     const el = e.target.closest && e.target.closest('.hm-region');
-    if(el) show(el, e.clientX, e.clientY); else hide();
+    if(el) show(el, e.clientX, e.clientY); else tip._hide();
   });
   container.addEventListener('pointerdown', e => {
     const el = e.target.closest && e.target.closest('.hm-region');
     if(el) show(el, e.clientX, e.clientY);
   });
-  container.addEventListener('pointerleave', hide);
+  container.addEventListener('pointerleave', tip._hide);
 }
 
 /* ---------- dart analytics ---------- */
