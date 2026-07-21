@@ -14929,8 +14929,9 @@ function throwDartCheckoutTrainer(sector, zone, missZone, missDepth, bounced){
   // minute after time ran out, still counted and badged, which is exactly what a
   // buzzer-beater achievement isn't supposed to be able to do). This check is one
   // of three equally-authoritative deadline checks (mirrored in
-  // submitCheckoutAttempt() and the tickCheckoutBlitzTimer() backstop) — any of
-  // the three ends the run the moment it notices the deadline has passed.
+  // submitCheckoutAttempt() and _checkoutBlitzTimer's own idle-run backstop
+  // tick) — any of the three ends the run the moment it notices the deadline
+  // has passed.
   if(game.config.mode === 'blitz' && blitzDeadlinePassed(game.blitzDeadline, Date.now())){
     return endBlitzRun();
   }
@@ -15188,41 +15189,45 @@ function renderGameCheckoutTrainer(){
   renderPad();
 }
 
-/* ---------- Checkout Blitz timer (docs/archive/checkout-trainer-roadmap.md) ----------
-   A wall-clock deadline (game.blitzDeadline = Date.now() + durationSec*1000),
-   checked on each tick rather than a naively decrementing counter — a plain
-   setInterval counter alone drifts under background-tab throttling, which
-   would let a backgrounded/unfocused run either cheat extra time or end early
-   depending on browser behavior. This ticker only ever READS Date.now() against
-   the fixed deadline; it never advances the deadline itself. */
-let checkoutBlitzTimerHandle = null;
-let checkoutBlitzAnnounced = null;
-function startCheckoutBlitzTimer(){
-  stopCheckoutBlitzTimer();
-  checkoutBlitzAnnounced = new Set();
-  tickCheckoutBlitzTimer();
-  checkoutBlitzTimerHandle = setInterval(tickCheckoutBlitzTimer, 250);
-}
-function stopCheckoutBlitzTimer(){
-  if(checkoutBlitzTimerHandle){ clearInterval(checkoutBlitzTimerHandle); checkoutBlitzTimerHandle = null; }
-}
-function tickCheckoutBlitzTimer(){
-  if(!game || game.gameType !== 'checkout_trainer' || game.config.mode !== 'blitz' || game.blitzEnded || game.blitzDeadline == null){
-    stopCheckoutBlitzTimer();
-    return;
+// Shared wall-clock countdown-timer engine (docs/code-quality-roadmap.md item
+// 52) — Checkout Blitz's and The Pressure Chamber's No Warmup timer are both
+// a Date.now()-checked deadline (never a naively decrementing counter, which
+// would drift under background-tab throttling — a backgrounded/unfocused run
+// could otherwise cheat extra time or end early depending on browser
+// behavior), ticked every 250ms, with periodic aria-live cues at a handful of
+// remaining-second marks (never every second, which would be pure noise).
+// This only ever READS Date.now() against the fixed deadline getDeadline()
+// returns; it never advances the deadline itself.
+function makeCountdownTimer({ shouldStop, getDeadline, elementId, formatText, announceMarks, onExpire }){
+  let handle = null, announced = null;
+  function tick(){
+    if(shouldStop()){ stop(); return; }
+    const remainingSec = Math.max(0, Math.ceil((getDeadline() - Date.now())/1000));
+    const el = document.getElementById(elementId);
+    if(el) el.textContent = formatText(remainingSec);
+    announceMarks.forEach(mark=>{
+      if(remainingSec === mark && !announced.has(mark)){
+        announced.add(mark);
+        announce(`${mark} second${mark===1?'':'s'} left.`);
+      }
+    });
+    if(remainingSec <= 0) onExpire();
   }
-  const remainingSec = Math.max(0, Math.ceil((game.blitzDeadline - Date.now())/1000));
-  const el = document.getElementById('checkout-trainer-timer');
-  if(el) el.textContent = `${remainingSec}s left`;
-  // aria-live cues at 30/10/5s remaining (not every second, which would be pure
-  // noise) — docs/archive/checkout-trainer-roadmap.md's explicit accessibility
-  // requirement so a screen-reader user can track time without relying on sight.
-  [30,10,5].forEach(mark=>{
-    if(remainingSec === mark && !checkoutBlitzAnnounced.has(mark)){
-      checkoutBlitzAnnounced.add(mark);
-      announce(`${mark} seconds left.`);
-    }
-  });
+  function start(){ stop(); announced = new Set(); tick(); handle = setInterval(tick, 250); }
+  function stop(){ if(handle){ clearInterval(handle); handle = null; } }
+  return { start, stop };
+}
+
+/* ---------- Checkout Blitz timer (docs/archive/checkout-trainer-roadmap.md) ---------- */
+const _checkoutBlitzTimer = makeCountdownTimer({
+  shouldStop: () => !game || game.gameType !== 'checkout_trainer' || game.config.mode !== 'blitz' || game.blitzEnded || game.blitzDeadline == null,
+  getDeadline: () => game.blitzDeadline,
+  elementId: 'checkout-trainer-timer',
+  formatText: s => `${s}s left`,
+  // aria-live cues at 30/10/5s remaining — docs/archive/checkout-trainer-roadmap.md's
+  // explicit accessibility requirement so a screen-reader user can track time
+  // without relying on sight.
+  announceMarks: [30,10,5],
   // Time's up — ends the run unconditionally, whether or not a round is
   // mid-entry (discarding it ungraded; see throwDartCheckoutTrainer()/
   // submitCheckoutAttempt()'s own matching deadline checks). This tick is the
@@ -15230,44 +15235,25 @@ function tickCheckoutBlitzTimer(){
   // buzzer, with no further dart tap or Submit press to trigger either of the
   // other two checks — so unlike them it can't wait for player input; at most a
   // 250ms tick period late.
-  if(remainingSec <= 0) endBlitzRun();
-}
+  onExpire: () => endBlitzRun(),
+});
+function startCheckoutBlitzTimer(){ _checkoutBlitzTimer.start(); }
+function stopCheckoutBlitzTimer(){ _checkoutBlitzTimer.stop(); }
 
 /* ---------- The Pressure Chamber's No Warmup timer (docs/archive/pressure-chamber-roadmap.md
-   "No Warmup") ---------- Same Date.now()-based wall-clock deadline precedent
-   as Checkout Blitz's own timer above (never a naively decrementing counter,
-   so a backgrounded/throttled tab can't grant extra time) — armed for exactly
-   5 seconds by renderGamePressureChamber() the instant a No Warmup card is
-   revealed, and only ever checked while dart 1 hasn't landed yet. */
-let pressureChamberTimerHandle = null;
-let pressureChamberAnnounced = null;
-function startPressureChamberNoWarmupTimer(){
-  stopPressureChamberNoWarmupTimer();
-  pressureChamberAnnounced = new Set();
-  tickPressureChamberNoWarmupTimer();
-  pressureChamberTimerHandle = setInterval(tickPressureChamberNoWarmupTimer, 250);
-}
-function stopPressureChamberNoWarmupTimer(){
-  if(pressureChamberTimerHandle){ clearInterval(pressureChamberTimerHandle); pressureChamberTimerHandle = null; }
-}
-function tickPressureChamberNoWarmupTimer(){
-  if(!game || game.gameType !== 'pressure_chamber' || game.pressureChamberDeadline == null || game.darts.length > 0){
-    stopPressureChamberNoWarmupTimer();
-    return;
-  }
-  const remainingSec = Math.max(0, Math.ceil((game.pressureChamberDeadline - Date.now())/1000));
-  const el = document.getElementById('pressure-chamber-no-warmup-timer');
-  if(el) el.textContent = `${remainingSec}s`;
-  // aria-live cues at 3s/1s remaining (not every second — pure noise), the
-  // same "periodic, not every second" accessibility requirement Checkout
-  // Blitz's own countdown follows, scaled down for a 5-second window.
-  [3,1].forEach(mark=>{
-    if(remainingSec === mark && !pressureChamberAnnounced.has(mark)){
-      pressureChamberAnnounced.add(mark);
-      announce(`${mark} second${mark===1?'':'s'} left.`);
-    }
-  });
-  if(blitzDeadlinePassed(game.pressureChamberDeadline, Date.now())){
+   "No Warmup") ---------- Armed for exactly 5 seconds by
+   renderGamePressureChamber() the instant a No Warmup card is revealed, and
+   only ever checked while dart 1 hasn't landed yet. */
+const _pressureChamberNoWarmupTimer = makeCountdownTimer({
+  shouldStop: () => !game || game.gameType !== 'pressure_chamber' || game.pressureChamberDeadline == null || game.darts.length > 0,
+  getDeadline: () => game.pressureChamberDeadline,
+  elementId: 'pressure-chamber-no-warmup-timer',
+  formatText: s => `${s}s`,
+  // aria-live cues at 3s/1s remaining, the same "periodic, not every second"
+  // accessibility requirement Checkout Blitz's own countdown follows, scaled
+  // down for a 5-second window.
+  announceMarks: [3,1],
+  onExpire: () => {
     stopPressureChamberNoWarmupTimer();
     // Dart 1 never landed before the deadline — the round is scored as a
     // miss automatically (docs/archive/pressure-chamber-roadmap.md's own explicit
@@ -15280,13 +15266,15 @@ function tickPressureChamberNoWarmupTimer(){
     if(status){ status.className='status bust'; status.textContent = 'NO WARMUP — too slow, scored as a miss. Press Enter turn.'; }
     announce('Too slow — scored as a miss.');
     renderSlots(); renderPad(); pushLive();
-  }
-}
+  },
+});
+function startPressureChamberNoWarmupTimer(){ _pressureChamberNoWarmupTimer.start(); }
+function stopPressureChamberNoWarmupTimer(){ _pressureChamberNoWarmupTimer.stop(); }
 // Ends the current Blitz run: locks input, stops the ticker, and shows the
 // results screen. Called from throwDartCheckoutTrainer()/submitCheckoutAttempt()
 // (either one noticing the deadline has passed — a blocked dart or a blocked
-// submission, its darts discarded ungraded) and tickCheckoutBlitzTimer() (the
-// idle-run backstop). Whichever of the three notices first wins — game.blitzEnded
+// submission, its darts discarded ungraded) and _checkoutBlitzTimer's own
+// idle-run backstop tick. Whichever of the three notices first wins — game.blitzEnded
 // makes every call after the first a no-op, so there's no double-ending race.
 function endBlitzRun(){
   if(!game || game.blitzEnded) return;
