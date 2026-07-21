@@ -5130,7 +5130,7 @@ async function startGame(){
     // override of this leg's own starting score, X01 only — setup.handicaps
     // only ever has entries when gameType==='x01' (renderHandicapOptions()
     // clears it for every other type), so this lookup is a no-op elsewhere.
-    players: names.map(n=>GAME_TYPES[gameType].newMatchPlayer(n, gameType==='cricket' || gameType==='doubles_practice' || gameType==='checkout_trainer' ? config : (setup.handicaps[n] || startScore))),
+    players: names.map(n=>GAME_TYPES[gameType].newMatchPlayer(n, GAME_TYPES[gameType].ctorArg==='config' ? config : (setup.handicaps[n] || startScore))),
     // Checkout Blitz (docs/archive/checkout-trainer-roadmap.md): a wall-clock deadline, not a
     // decrementing counter, so a backgrounded/throttled tab can't grant extra time.
     // Set once startNextRoundCheckoutTrainer() or the run itself begins; null for
@@ -9656,139 +9656,24 @@ async function resumeGame(gameId){
   const startScore = Number(state.category) || 501;
   const config = state.config || {};
 
+  const entry = GAME_TYPES[gameType];
+  if(!entry || !entry.resume){
+    uiAlert(`${gameType} games can't be resumed.`);
+    return;
+  }
+
   // X01 players are constructed with their OWN start score (state.players[i]
   // .startScore carries the game_players.start_score handicap, null when none) —
   // exactly what startGame() does live via setup.handicaps — so p.startScore is
   // right for every later leg reset (`p.score = p.startScore`), not just leg 1.
-  const players = names.map((n, i) => GAME_TYPES[gameType].newMatchPlayer(n,
-    gameType === 'cricket' ? config
+  const players = names.map((n, i) => entry.newMatchPlayer(n,
+    entry.ctorArg === 'config' ? config
       : gameType === 'x01' ? (state.players[i].startScore ?? startScore)
       : startScore));
 
-  let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, shanghaiRound = 1, halveItRound = 1, pressureChamberRound = 1, bobs27Round = 1, roundOver = false, checkoutLadderTarget = 121, checkoutLadderVisits = 0;
-  let gauntletStationIndex = 0, gauntletAwaitingRepeat = false, gauntletFinalMisses = [], gauntletCleanStreak = 0, gauntletBestCleanStreak = 0;
-  let dmwTarget = 0, dmwBudget = 0, dmwDartsUsedThisRound = 0, dmwWalkedOutCount = 0, dmwCurrentStreak = 0, dmwBestStreak = 0;
-  let statusMsg = '';
-  if(gameType === 'x01'){
-    const startScores = state.players.map(p => p.startScore ?? null);
-    const r = rebuildX01State({ names, outModes, startScore, startScores, practice: !!state.practice, legsPerSet: state.legsPerSet, turns: state.turns });
-    players.forEach((p,i) => {
-      const rp = r.players[i];
-      Object.assign(p, { score:rp.score, doubleOut:rp.doubleOut, legsWon:rp.legsWon, setsWon:rp.setsWon,
-        legPoints:rp.legPoints, legVisits:rp.legVisits, legDarts:rp.legDarts, legAvgDarts:rp.legAvgDarts,
-        setDarts:rp.setDarts, gameDarts:rp.gameDarts, gamePoints:rp.gamePoints, gameVisits:rp.gameVisits, gameAvgDarts:rp.gameAvgDarts });
-    });
-    current = r.current; starter = r.starter; setNo = r.setNo; legNo = r.legNo;
-    statusMsg = `Resumed — set ${setNo} leg ${legNo}, ${players[current].name} to throw, ${players[current].score} left.`;
-  } else if(gameType === 'cricket'){
-    const r = rebuildCricketState({ names, config, practice: !!state.practice, legsPerSet: state.legsPerSet, turns: state.turns });
-    players.forEach((p,i) => {
-      const rp = r.players[i];
-      Object.assign(p, { marks:rp.marks, points:rp.points, legsWon:rp.legsWon, setsWon:rp.setsWon,
-        legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
-    });
-    current = r.current; starter = r.starter; setNo = r.setNo; legNo = r.legNo;
-    statusMsg = `Resumed — set ${setNo} leg ${legNo}, ${players[current].name} to throw.`;
-  } else if(gameType === 'baseball'){
-    const r = rebuildBaseballState({ names, legsPerSet: state.legsPerSet, turns: state.turns });
-    players.forEach((p,i) => {
-      const rp = r.players[i];
-      Object.assign(p, { totalRuns:rp.totalRuns, inningRuns:rp.inningRuns, legsWon:rp.legsWon, setsWon:rp.setsWon,
-        legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
-    });
-    current = r.current; starter = r.starter; setNo = r.setNo; legNo = r.legNo; baseballInning = r.baseballInning;
-    statusMsg = `Resumed — set ${setNo} leg ${legNo}, inning ${Math.min(baseballInning,9)}, ${players[current].name} to throw.`;
-  } else if(gameType === 'shanghai'){
-    const maxRounds = config.rounds || 7;
-    const r = rebuildShanghaiState({ names, legsPerSet: state.legsPerSet, maxRounds, turns: state.turns });
-    players.forEach((p,i) => {
-      const rp = r.players[i];
-      Object.assign(p, { totalPoints:rp.totalPoints, roundPoints:rp.roundPoints, legsWon:rp.legsWon, setsWon:rp.setsWon,
-        legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
-    });
-    current = r.current; starter = r.starter; setNo = r.setNo; legNo = r.legNo; shanghaiRound = r.shanghaiRound;
-    statusMsg = `Resumed — set ${setNo} leg ${legNo}, round ${Math.min(shanghaiRound,maxRounds)} of ${maxRounds}, ${players[current].name} to throw.`;
-  } else if(gameType === 'halve_it'){
-    const targets = (config && config.targets) || HALVE_IT_DEFAULT_TARGETS;
-    const r = rebuildHalveItState({ names, legsPerSet: state.legsPerSet, targets, turns: state.turns });
-    players.forEach((p,i) => {
-      const rp = r.players[i];
-      Object.assign(p, { total:rp.total, roundTotals:rp.roundTotals, everHalved:rp.everHalved, lastVisitHalved:rp.lastVisitHalved,
-        legsWon:rp.legsWon, setsWon:rp.setsWon, legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
-    });
-    current = r.current; starter = r.starter; setNo = r.setNo; legNo = r.legNo; halveItRound = r.halveItRound;
-    statusMsg = `Resumed — set ${setNo} leg ${legNo}, round ${Math.min(halveItRound,targets.length)} of ${targets.length}, ${players[current].name} to throw.`;
-  } else if(gameType === 'pressure_chamber'){
-    const maxRounds = (config && config.rounds) || PRESSURE_ROUNDS;
-    const r = rebuildPressureChamberState({ gameId, names, legsPerSet: state.legsPerSet, maxRounds, turns: state.turns });
-    players.forEach((p,i) => {
-      const rp = r.players[i];
-      Object.assign(p, { totalCp:rp.totalCp, misses:rp.misses, fullHits:rp.fullHits,
-        currentFullHitStreak:rp.currentFullHitStreak, bestFullHitStreak:rp.bestFullHitStreak, roundResults:rp.roundResults,
-        legsWon:rp.legsWon, setsWon:rp.setsWon, legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
-    });
-    current = r.current; starter = r.starter; setNo = r.setNo; legNo = r.legNo; pressureChamberRound = r.pressureChamberRound;
-    statusMsg = `Resumed — set ${setNo} leg ${legNo}, round ${Math.min(pressureChamberRound,maxRounds)} of ${maxRounds}, ${players[current].name} to throw.`;
-  } else if(gameType === 'around_the_clock'){
-    const r = rebuildAroundTheClockState({ turns: state.turns });
-    Object.assign(players[0], { hitSet:r.hitSet, roundDarts:r.roundDarts });
-    legNo = r.legNo; roundOver = r.roundOver;
-    statusMsg = `Resumed — round ${legNo}, ${r.hitSet.size} of 20 numbers hit.`;
-  } else if(gameType === 'around_the_world'){
-    const r = rebuildAroundTheWorldState({ turns: state.turns });
-    players[0].sessionDarts = r.sessionDarts;
-    statusMsg = `Resumed — ${r.sessionDarts} darts this session so far.`;
-  } else if(gameType === 'bobs_27'){
-    const r = rebuildBobs27State({ turns: state.turns });
-    players[0].running = r.running;
-    bobs27Round = r.round;
-    statusMsg = `Resumed — D${bobs27Round}, running score: ${r.running}.`;
-  } else if(gameType === 'checkout_ladder'){
-    const r = rebuildCheckoutLadderState({ turns: state.turns });
-    players[0].score = r.remaining;
-    checkoutLadderTarget = r.target;
-    legNo = r.legNo;
-    checkoutLadderVisits = r.visitsThisLeg;
-    statusMsg = `Resumed — target ${checkoutLadderTarget}, ${r.remaining} remaining, visit ${checkoutLadderVisits+1} of 3.`;
-  } else if(gameType === 'gauntlet'){
-    const r = rebuildGauntletState({ turns: state.turns });
-    gauntletStationIndex = r.settledCount;
-    gauntletAwaitingRepeat = r.awaitingRepeat;
-    gauntletFinalMisses = r.finalMisses;
-    // Streaks aren't part of rebuildGauntletState()'s own return (they're a
-    // frontend-only running counter, not needed by the write-time guard or
-    // the stats queries that also consume that function) — re-derived here
-    // as a pure function of the settled finalMisses array.
-    let _cur = 0, _best = 0;
-    r.finalMisses.forEach(m => { if(m===0){ _cur++; _best = Math.max(_best,_cur); } else _cur = 0; });
-    gauntletCleanStreak = _cur; gauntletBestCleanStreak = _best;
-    statusMsg = r.done
-      ? `Resumed — all 20 stations settled, total Scars: ${r.totalScars}.`
-      : `Resumed — station ${gauntletStationIndex+1} of 20 (target ${r.currentStation}), total Scars so far: ${r.totalScars}.`;
-  } else if(gameType === 'dead_man_walking'){
-    const rounds = (config && config.rounds) || [];
-    const r = rebuildDeadManWalkingState({ rounds, turns: state.turns });
-    players[0].score = r.remaining;
-    players[0].doubleOut = true;
-    legNo = r.roundIndex + 1;
-    dmwTarget = r.remaining;
-    dmwBudget = r.budget;
-    dmwDartsUsedThisRound = r.dartsUsedThisRound;
-    dmwWalkedOutCount = r.walkedOutCount;
-    // The running current/best streak (badge-trigger bookkeeping, not needed
-    // by the write-time guard or stats) is re-derived here as a pure function
-    // of rebuildDeadManWalkingState()'s own settled-round history, mirroring
-    // Gauntlet's own resume-time streak re-derivation immediately above.
-    let _dcur = 0, _dbest = 0;
-    r.walkedOutRounds.forEach(walked => { if(walked){ _dcur++; _dbest = Math.max(_dbest, _dcur); } else _dcur = 0; });
-    dmwCurrentStreak = _dcur; dmwBestStreak = _dbest;
-    statusMsg = r.done
-      ? `Resumed — all 15 rounds settled, ${dmwWalkedOutCount} Walked Out.`
-      : `Resumed — round ${legNo} of 15 (target ${dmwTarget}), ${dmwWalkedOutCount} Walked Out so far.`;
-  } else {
-    uiAlert(`${gameType} games can't be resumed.`);
-    return;
-  }
+  const { overlay, statusMsg } = entry.resume({ names, outModes, startScore, config, players, state, gameId });
+  const starter = overlay.starter ?? 0;
+  const roundOver = overlay.roundOver ?? false;
 
   game = {
     ...baseGameRuntimeState(),
@@ -9798,24 +9683,26 @@ async function resumeGame(gameId){
     leagueFixtureId: state.leagueFixtureId,
     players,
     blitzDeadline: null, blitzEnded: false,
-    starter, current, setNo, legNo,
-    baseballInning, shanghaiRound, halveItRound, bobs27Round, checkoutLadderTarget, checkoutLadderVisits,
-    gauntletStationIndex, gauntletAwaitingRepeat, gauntletFinalMisses, gauntletCleanStreak, gauntletBestCleanStreak,
-    dmwTarget, dmwBudget, dmwDartsUsedThisRound, dmwWalkedOutCount, dmwCurrentStreak, dmwBestStreak,
+    starter: 0, current: 0, setNo: 1, legNo: 1,
+    baseballInning: 1, shanghaiRound: 1, halveItRound: 1, bobs27Round: 1, checkoutLadderTarget: 121, checkoutLadderVisits: 0,
+    gauntletStationIndex: 0, gauntletAwaitingRepeat: false, gauntletFinalMisses: [], gauntletCleanStreak: 0, gauntletBestCleanStreak: 0,
+    dmwTarget: 0, dmwBudget: 0, dmwDartsUsedThisRound: 0, dmwWalkedOutCount: 0, dmwCurrentStreak: 0, dmwBestStreak: 0,
     // The Pressure Chamber only (docs/archive/pressure-chamber-roadmap.md): gameId is
     // the real games.id generatePressureCard() seeds on — already known here
     // (unlike startGame(), which only learns it after DB.beginGame()
     // resolves), so it's set directly rather than patched in afterward.
     // _pcTimerRound stays null so renderGamePressureChamber()'s own No Warmup
     // guard treats this as a fresh round and arms the timer if needed.
-    pressureChamberRound, gameId: gameType === 'pressure_chamber' ? state.gameId : null,
+    pressureChamberRound: 1, gameId: gameType === 'pressure_chamber' ? state.gameId : null,
     pressureChamberDeadline: null, _pcTimerRound: null,
     // A resumed run always re-opens on the declare step for the current visit —
     // the call is transient per-visit state, never saved (see the setup default).
     pressureDeclared: null,
     lastTurnSnapshot: null, // undo unavailable for the first turn after resume, same as the first turn of any game
-    legStart: { ts: Date.now(), starter: players[starter] ? players[starter].name : players[0].name },
-    roundOver, roundEndReason: roundOver ? 'completed' : null,
+    roundOver: false,
+    ...overlay,
+    legStart: { ts: Date.now(), starter: (players[starter] || players[0]).name },
+    roundEndReason: roundOver ? 'completed' : null,
     tournamentMatchId: state.tournamentMatchId || null,
   };
   DB.gameId = state.gameId;
@@ -12152,7 +12039,28 @@ const GAME_TYPES = {
     playerSnapshot: playerSnapshotX01,
     statDefs: STAT_DEFS,
     personalBestsRenderer: null,
-    homeTabRenderer: null
+    homeTabRenderer: null,
+    // Item 37: resumeGame()'s per-type dispatch, replacing its old 13-branch
+    // else-if chain. ctx = {names, outModes, startScore, config, players,
+    // state, gameId}; returns {overlay, statusMsg} — `overlay` is spread onto
+    // the reconstructed `game` object (only the fields this type needs to
+    // override from resumeGame()'s shared defaults), `players` is mutated
+    // in place with the rebuilt per-player state.
+    resume: (ctx) => {
+      const { names, outModes, startScore, players, state } = ctx;
+      const startScores = state.players.map(p => p.startScore ?? null);
+      const r = rebuildX01State({ names, outModes, startScore, startScores, practice: !!state.practice, legsPerSet: state.legsPerSet, turns: state.turns });
+      players.forEach((p,i) => {
+        const rp = r.players[i];
+        Object.assign(p, { score:rp.score, doubleOut:rp.doubleOut, legsWon:rp.legsWon, setsWon:rp.setsWon,
+          legPoints:rp.legPoints, legVisits:rp.legVisits, legDarts:rp.legDarts, legAvgDarts:rp.legAvgDarts,
+          setDarts:rp.setDarts, gameDarts:rp.gameDarts, gamePoints:rp.gamePoints, gameVisits:rp.gameVisits, gameAvgDarts:rp.gameAvgDarts });
+      });
+      return {
+        overlay: { current: r.current, starter: r.starter, setNo: r.setNo, legNo: r.legNo },
+        statusMsg: `Resumed — set ${r.setNo} leg ${r.legNo}, ${players[r.current].name} to throw, ${players[r.current].score} left.`,
+      };
+    }
   },
   cricket: {
     id: 'cricket',
@@ -12161,6 +12069,10 @@ const GAME_TYPES = {
     label: 'Cricket',
     category: setup => setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)',
     optionsSectionId: 'cricket-options-section',
+    // Item 40: newMatchPlayer's 2nd arg is a config object, not a plain start
+    // score — declared here so startGame()/resumeGame() read one shared list
+    // instead of each hand-maintaining their own (which had already drifted).
+    ctorArg: 'config',
     newMatchPlayer: newMatchPlayerCricket,
     evaluateVisit: evaluateVisitCricket,
     resetForNextLeg: resetPlayerForNextLegCricket,
@@ -12172,7 +12084,20 @@ const GAME_TYPES = {
     // liveSnapshot()'s modeState so a new field here never needs a matching
     // backend ALLOWED_LIVE_KEYS entry (the exact sync point BUG-28 and the
     // killerLives/checkoutLadder* bug both silently missed).
-    liveModeState: game => ({ cricketVariant: game.config.variant || 'standard' })
+    liveModeState: game => ({ cricketVariant: game.config.variant || 'standard' }),
+    resume: (ctx) => {
+      const { names, config, players, state } = ctx;
+      const r = rebuildCricketState({ names, config, practice: !!state.practice, legsPerSet: state.legsPerSet, turns: state.turns });
+      players.forEach((p,i) => {
+        const rp = r.players[i];
+        Object.assign(p, { marks:rp.marks, points:rp.points, legsWon:rp.legsWon, setsWon:rp.setsWon,
+          legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
+      });
+      return {
+        overlay: { current: r.current, starter: r.starter, setNo: r.setNo, legNo: r.legNo },
+        statusMsg: `Resumed — set ${r.setNo} leg ${r.legNo}, ${players[r.current].name} to throw.`,
+      };
+    }
   },
   baseball: {
     id: 'baseball',
@@ -12203,7 +12128,20 @@ const GAME_TYPES = {
     statDefs: BASEBALL_STAT_DEFS,
     personalBestsSpec: BASEBALL_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyBaseball,
-    liveModeState: game => ({ baseballInning: game.baseballInning || 1 })
+    liveModeState: game => ({ baseballInning: game.baseballInning || 1 }),
+    resume: (ctx) => {
+      const { names, players, state } = ctx;
+      const r = rebuildBaseballState({ names, legsPerSet: state.legsPerSet, turns: state.turns });
+      players.forEach((p,i) => {
+        const rp = r.players[i];
+        Object.assign(p, { totalRuns:rp.totalRuns, inningRuns:rp.inningRuns, legsWon:rp.legsWon, setsWon:rp.setsWon,
+          legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
+      });
+      return {
+        overlay: { current: r.current, starter: r.starter, setNo: r.setNo, legNo: r.legNo, baseballInning: r.baseballInning },
+        statusMsg: `Resumed — set ${r.setNo} leg ${r.legNo}, inning ${Math.min(r.baseballInning,9)}, ${players[r.current].name} to throw.`,
+      };
+    }
   },
   shanghai: {
     id: 'shanghai',
@@ -12225,7 +12163,21 @@ const GAME_TYPES = {
     statDefs: SHANGHAI_STAT_DEFS,
     personalBestsSpec: SHANGHAI_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyShanghai,
-    liveModeState: game => ({ shanghaiRound: game.shanghaiRound || 1, shanghaiMaxRounds: (game.config && game.config.rounds) || 7 })
+    liveModeState: game => ({ shanghaiRound: game.shanghaiRound || 1, shanghaiMaxRounds: (game.config && game.config.rounds) || 7 }),
+    resume: (ctx) => {
+      const { config, players, state } = ctx;
+      const maxRounds = config.rounds || 7;
+      const r = rebuildShanghaiState({ names: players.map(p=>p.name), legsPerSet: state.legsPerSet, maxRounds, turns: state.turns });
+      players.forEach((p,i) => {
+        const rp = r.players[i];
+        Object.assign(p, { totalPoints:rp.totalPoints, roundPoints:rp.roundPoints, legsWon:rp.legsWon, setsWon:rp.setsWon,
+          legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
+      });
+      return {
+        overlay: { current: r.current, starter: r.starter, setNo: r.setNo, legNo: r.legNo, shanghaiRound: r.shanghaiRound },
+        statusMsg: `Resumed — set ${r.setNo} leg ${r.legNo}, round ${Math.min(r.shanghaiRound,maxRounds)} of ${maxRounds}, ${players[r.current].name} to throw.`,
+      };
+    }
   },
   halve_it: {
     id: 'halve_it',
@@ -12251,7 +12203,21 @@ const GAME_TYPES = {
     // has no shared scoring.js module to derive per-row labels from, so it needs
     // every round's target up front to render the whole scorecard grid.
     liveModeState: game => ({ halveItRound: game.halveItRound || 1,
-      halveItTargets: (game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS })
+      halveItTargets: (game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS }),
+    resume: (ctx) => {
+      const { config, players, state } = ctx;
+      const targets = (config && config.targets) || HALVE_IT_DEFAULT_TARGETS;
+      const r = rebuildHalveItState({ names: players.map(p=>p.name), legsPerSet: state.legsPerSet, targets, turns: state.turns });
+      players.forEach((p,i) => {
+        const rp = r.players[i];
+        Object.assign(p, { total:rp.total, roundTotals:rp.roundTotals, everHalved:rp.everHalved, lastVisitHalved:rp.lastVisitHalved,
+          legsWon:rp.legsWon, setsWon:rp.setsWon, legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
+      });
+      return {
+        overlay: { current: r.current, starter: r.starter, setNo: r.setNo, legNo: r.legNo, halveItRound: r.halveItRound },
+        statusMsg: `Resumed — set ${r.setNo} leg ${r.legNo}, round ${Math.min(r.halveItRound,targets.length)} of ${targets.length}, ${players[r.current].name} to throw.`,
+      };
+    }
   },
   pressure_chamber: {
     id: 'pressure_chamber',
@@ -12287,12 +12253,28 @@ const GAME_TYPES = {
         const c = generatePressureCard(game.gameId, i + 1);
         return { target: c.target, modifier: { key: c.modifier.key, label: c.modifier.label, icon: c.modifier.icon, flavor: c.modifier.flavor } };
       }),
-    })
+    }),
+    resume: (ctx) => {
+      const { config, players, state, gameId } = ctx;
+      const maxRounds = (config && config.rounds) || PRESSURE_ROUNDS;
+      const r = rebuildPressureChamberState({ gameId, names: players.map(p=>p.name), legsPerSet: state.legsPerSet, maxRounds, turns: state.turns });
+      players.forEach((p,i) => {
+        const rp = r.players[i];
+        Object.assign(p, { totalCp:rp.totalCp, misses:rp.misses, fullHits:rp.fullHits,
+          currentFullHitStreak:rp.currentFullHitStreak, bestFullHitStreak:rp.bestFullHitStreak, roundResults:rp.roundResults,
+          legsWon:rp.legsWon, setsWon:rp.setsWon, legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
+      });
+      return {
+        overlay: { current: r.current, starter: r.starter, setNo: r.setNo, legNo: r.legNo, pressureChamberRound: r.pressureChamberRound },
+        statusMsg: `Resumed — set ${r.setNo} leg ${r.legNo}, round ${Math.min(r.pressureChamberRound,maxRounds)} of ${maxRounds}, ${players[r.current].name} to throw.`,
+      };
+    }
   },
   doubles_practice: {
     id: 'doubles_practice',
     label: 'Doubles Practice',
     category: (setup, config) => `Doubles Practice (${config.doubles.map(doublesTargetLabel).join(', ')})`,
+    ctorArg: 'config',
     newMatchPlayer: newMatchPlayerDoublesPractice,
     // Per-dart evaluation (throwDartDoublesPractice()), not a batched-visit
     // evaluateVisit — every existing call site for this game type is a dedicated
@@ -12351,6 +12333,7 @@ const GAME_TYPES = {
     // "No live scoreboard, deliberate" (its roadmap) — pushLive() skips this
     // mode entirely; see the flag's comment there.
     noLiveDisplay: true,
+    ctorArg: 'config',
     newMatchPlayer: newMatchPlayerCheckoutTrainer,
     // Unlike Doubles Practice/Chuckin, this genuinely IS a per-visit evaluation —
     // a checkout attempt is exactly a normal X01 visit starting from
@@ -12385,7 +12368,16 @@ const GAME_TYPES = {
     liveModeState: game => ({ atcLastDart: game.atcLastDart || null,
       roundOver: !!game.roundOver, roundEndReason: game.roundEndReason || null }),
     // Solo, same reasoning as Doubles Practice — no H2H equivalent.
-    soloOnly: true
+    soloOnly: true,
+    resume: (ctx) => {
+      const { players, state } = ctx;
+      const r = rebuildAroundTheClockState({ turns: state.turns });
+      Object.assign(players[0], { hitSet:r.hitSet, roundDarts:r.roundDarts });
+      return {
+        overlay: { legNo: r.legNo, roundOver: r.roundOver },
+        statusMsg: `Resumed — round ${r.legNo}, ${r.hitSet.size} of 20 numbers hit.`,
+      };
+    }
   },
   around_the_world: {
     id: 'around_the_world',
@@ -12401,7 +12393,16 @@ const GAME_TYPES = {
     personalBestsSpec: AROUND_THE_WORLD_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyAroundTheWorld,
     liveModeState: game => ({ atwLastDart: game.atwLastDart || null }),
-    soloOnly: true
+    soloOnly: true,
+    resume: (ctx) => {
+      const { players, state } = ctx;
+      const r = rebuildAroundTheWorldState({ turns: state.turns });
+      players[0].sessionDarts = r.sessionDarts;
+      return {
+        overlay: {},
+        statusMsg: `Resumed — ${r.sessionDarts} darts this session so far.`,
+      };
+    }
   },
   bobs_27: {
     id: 'bobs_27',
@@ -12418,7 +12419,16 @@ const GAME_TYPES = {
     liveModeState: game => ({ bobs27Round: game.bobs27Round || 1 }),
     // Always solo — there's no opponent to play head-to-head against, same
     // reasoning as Doubles Practice/Checkout Trainer/both guided drills.
-    soloOnly: true
+    soloOnly: true,
+    resume: (ctx) => {
+      const { players, state } = ctx;
+      const r = rebuildBobs27State({ turns: state.turns });
+      players[0].running = r.running;
+      return {
+        overlay: { bobs27Round: r.round },
+        statusMsg: `Resumed — D${r.round}, running score: ${r.running}.`,
+      };
+    }
   },
   checkout_ladder: {
     id: 'checkout_ladder',
@@ -12437,7 +12447,16 @@ const GAME_TYPES = {
     homeTabRenderer: renderHomeTabBodyCheckoutLadder,
     liveModeState: game => ({ checkoutLadderTarget: game.checkoutLadderTarget || 121,
       checkoutLadderVisits: game.checkoutLadderVisits || 0 }),
-    soloOnly: true
+    soloOnly: true,
+    resume: (ctx) => {
+      const { players, state } = ctx;
+      const r = rebuildCheckoutLadderState({ turns: state.turns });
+      players[0].score = r.remaining;
+      return {
+        overlay: { checkoutLadderTarget: r.target, legNo: r.legNo, checkoutLadderVisits: r.visitsThisLeg },
+        statusMsg: `Resumed — target ${r.target}, ${r.remaining} remaining, visit ${r.visitsThisLeg+1} of 3.`,
+      };
+    }
   },
   gauntlet: {
     id: 'gauntlet',
@@ -12457,7 +12476,24 @@ const GAME_TYPES = {
     statDefs: GAUNTLET_STAT_DEFS,
     personalBestsSpec: GAUNTLET_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyGauntlet,
-    soloOnly: true
+    soloOnly: true,
+    resume: (ctx) => {
+      const { state } = ctx;
+      const r = rebuildGauntletState({ turns: state.turns });
+      // Streaks aren't part of rebuildGauntletState()'s own return (they're a
+      // frontend-only running counter, not needed by the write-time guard or
+      // the stats queries that also consume that function) — re-derived here
+      // as a pure function of the settled finalMisses array.
+      let cur = 0, best = 0;
+      r.finalMisses.forEach(m => { if(m===0){ cur++; best = Math.max(best,cur); } else cur = 0; });
+      return {
+        overlay: { gauntletStationIndex: r.settledCount, gauntletAwaitingRepeat: r.awaitingRepeat,
+          gauntletFinalMisses: r.finalMisses, gauntletCleanStreak: cur, gauntletBestCleanStreak: best },
+        statusMsg: r.done
+          ? `Resumed — all 20 stations settled, total Scars: ${r.totalScars}.`
+          : `Resumed — station ${r.settledCount+1} of 20 (target ${r.currentStation}), total Scars so far: ${r.totalScars}.`,
+      };
+    }
   },
   killer: {
     id: 'killer',
@@ -12504,6 +12540,27 @@ const GAME_TYPES = {
     // score rides inside players[] via playerSnapshot.
     liveModeState: game => ({ dmwBudget: game.dmwBudget || 0,
       dmwDartsUsed: game.dmwDartsUsedThisRound || 0, dmwWalkedOut: game.dmwWalkedOutCount || 0 }),
+    resume: (ctx) => {
+      const { config, players, state } = ctx;
+      const rounds = (config && config.rounds) || [];
+      const r = rebuildDeadManWalkingState({ rounds, turns: state.turns });
+      players[0].score = r.remaining;
+      players[0].doubleOut = true;
+      // The running current/best streak (badge-trigger bookkeeping, not needed
+      // by the write-time guard or stats) is re-derived here as a pure function
+      // of rebuildDeadManWalkingState()'s own settled-round history, mirroring
+      // Gauntlet's own resume-time streak re-derivation above.
+      let cur = 0, best = 0;
+      r.walkedOutRounds.forEach(walked => { if(walked){ cur++; best = Math.max(best, cur); } else cur = 0; });
+      return {
+        overlay: { legNo: r.roundIndex+1, dmwTarget: r.remaining, dmwBudget: r.budget,
+          dmwDartsUsedThisRound: r.dartsUsedThisRound, dmwWalkedOutCount: r.walkedOutCount,
+          dmwCurrentStreak: cur, dmwBestStreak: best },
+        statusMsg: r.done
+          ? `Resumed — all 15 rounds settled, ${r.walkedOutCount} Walked Out.`
+          : `Resumed — round ${r.roundIndex+1} of 15 (target ${r.remaining}), ${r.walkedOutCount} Walked Out so far.`,
+      };
+    },
     // Solo only — no opponent, same reasoning Bob's 27/Checkout Ladder/The
     // Gauntlet's own soloOnly already established.
     soloOnly: true

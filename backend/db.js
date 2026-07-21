@@ -1675,27 +1675,92 @@ function completeGame(gameId, winnerName) {
 // literal can name them regardless of file order. KNOWN_GAME_TYPES, SAVABLE_GAME_TYPES,
 // and getStatBubblesFor()/getPersonalBestsFor() all derive from this — see each below.
 const GAME_TYPE_REGISTRY = {
-  x01:              { savable: true,  statBubbles: getPlayerStatBubbles,            personalBests: getPersonalBests },
-  cricket:          { savable: true,  statBubbles: getCricketStatBubbles,           personalBests: getCricketPersonalBests },
-  baseball:         { savable: true,  statBubbles: getBaseballStatBubbles,          personalBests: getBaseballPersonalBests },
+  x01:              { savable: true,  statBubbles: getPlayerStatBubbles,            personalBests: getPersonalBests,
+    // Item 37: `rebuild(game, participants, turns)` replays turns.js.
+    // recorded turns into full per-player state (the same shape resumeGame()'s
+    // frontend counterpart reconstructs); `position(game, r)` trims that down
+    // to the one-line saved-games-list summary. Both members exist ONLY on
+    // savable types — see _savedGamePosition()'s generic dispatch below.
+    rebuild: (game, participants, turns) => rebuildX01State({ names: participants.map(p => p.name),
+      outModes: participants.map(p => p.outMode), startScore: Number(game.category) || 501,
+      startScores: participants.map(p => p.startScore ?? null),
+      practice: !!game.practice, legsPerSet: game.legs_per_set, turns }),
+    position: (game, r) => ({ setNo: r.setNo, legNo: r.legNo,
+      players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, score: p.score })) }) },
+  cricket:          { savable: true,  statBubbles: getCricketStatBubbles,           personalBests: getCricketPersonalBests,
+    rebuild: (game, participants, turns) => rebuildCricketState({ names: participants.map(p => p.name),
+      config: game.config ? JSON.parse(game.config) : null, practice: !!game.practice, legsPerSet: game.legs_per_set, turns }),
+    position: (game, r) => ({ setNo: r.setNo, legNo: r.legNo,
+      players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, points: p.points })) }) },
+  baseball:         { savable: true,  statBubbles: getBaseballStatBubbles,          personalBests: getBaseballPersonalBests,
+    rebuild: (game, participants, turns) => rebuildBaseballState({ names: participants.map(p => p.name),
+      legsPerSet: game.legs_per_set, turns }),
+    position: (game, r) => ({ setNo: r.setNo, legNo: r.legNo, baseballInning: r.baseballInning,
+      players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, totalRuns: p.totalRuns })) }) },
   doubles_practice: { savable: false, statBubbles: getDoublesPracticeStatBubbles,   personalBests: getDoublesPracticePersonalBests },
   chuckin:          { savable: false, statBubbles: getChuckinStatBubbles,           personalBests: getChuckinPersonalBests },
   // Checkout Trainer's Personal Bests merge two records (the trainer's toughest-checkout/
   // best-streak plus Checkout Blitz's peak/lifetime score) into one response.
   checkout_trainer: { savable: false, statBubbles: getCheckoutTrainerStatBubbles,
                       personalBests: (name, mode) => Object.assign({}, getCheckoutTrainerPersonalBests(name, mode), getCheckoutBlitzPersonalStats(name)) },
-  around_the_clock: { savable: true,  statBubbles: getAroundTheClockStatBubbles,    personalBests: getAroundTheClockPersonalBests },
+  around_the_clock: { savable: true,  statBubbles: getAroundTheClockStatBubbles,    personalBests: getAroundTheClockPersonalBests,
+    rebuild: (game, participants, turns) => rebuildAroundTheClockState({ turns }),
+    position: (game, r) => ({ legNo: r.legNo, hit: r.hitSet.size, total: 20 }) },
   // Note the stat-bubble function's own "Drill" name (distinct from the passive Around
   // the World badge helper) — preserved exactly as the old dispatch had it.
-  around_the_world: { savable: true,  statBubbles: getAroundTheWorldDrillStatBubbles, personalBests: getAroundTheWorldPersonalBests },
-  bobs_27:          { savable: true,  statBubbles: getBobs27StatBubbles,            personalBests: getBobs27PersonalBests },
-  checkout_ladder:  { savable: true,  statBubbles: getCheckoutLadderStatBubbles,    personalBests: getCheckoutLadderPersonalBests },
-  gauntlet:         { savable: true,  statBubbles: getGauntletStatBubbles,          personalBests: getGauntletPersonalBests },
+  around_the_world: { savable: true,  statBubbles: getAroundTheWorldDrillStatBubbles, personalBests: getAroundTheWorldPersonalBests,
+    rebuild: (game, participants, turns) => rebuildAroundTheWorldState({ turns }),
+    position: (game, r) => ({ sessionDarts: r.sessionDarts }) },
+  bobs_27:          { savable: true,  statBubbles: getBobs27StatBubbles,            personalBests: getBobs27PersonalBests,
+    rebuild: (game, participants, turns) => rebuildBobs27State({ turns }),
+    position: (game, r) => ({ round: r.round, running: r.running }) },
+  checkout_ladder:  { savable: true,  statBubbles: getCheckoutLadderStatBubbles,    personalBests: getCheckoutLadderPersonalBests,
+    rebuild: (game, participants, turns) => rebuildCheckoutLadderState({ turns }),
+    position: (game, r) => ({ target: r.target, legNo: r.legNo, remaining: r.remaining }) },
+  gauntlet:         { savable: true,  statBubbles: getGauntletStatBubbles,          personalBests: getGauntletPersonalBests,
+    rebuild: (game, participants, turns) => rebuildGauntletState({ turns }),
+    position: (game, r) => ({ station: r.currentStation, settled: r.settledCount, totalScars: r.totalScars, awaitingRepeat: r.awaitingRepeat }) },
   killer:           { savable: false, statBubbles: getKillerStatBubbles,            personalBests: getKillerPersonalBests },
-  shanghai:         { savable: true,  statBubbles: getShanghaiStatBubbles,          personalBests: getShanghaiPersonalBests },
-  halve_it:         { savable: true,  statBubbles: getHalveItStatBubbles,           personalBests: getHalveItPersonalBests },
-  dead_man_walking: { savable: true,  statBubbles: getDeadManWalkingStatBubbles,    personalBests: getDeadManWalkingPersonalBests },
-  pressure_chamber: { savable: true,  statBubbles: getPressureChamberStatBubbles,   personalBests: getPressureChamberPersonalBests },
+  shanghai:         { savable: true,  statBubbles: getShanghaiStatBubbles,          personalBests: getShanghaiPersonalBests,
+    rebuild: (game, participants, turns) => {
+      const config = game.config ? JSON.parse(game.config) : null;
+      return rebuildShanghaiState({ names: participants.map(p => p.name), legsPerSet: game.legs_per_set,
+        maxRounds: (config && config.rounds) || 7, turns });
+    },
+    position: (game, r) => ({ setNo: r.setNo, legNo: r.legNo, shanghaiRound: r.shanghaiRound,
+      players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, totalPoints: p.totalPoints })) }) },
+  halve_it:         { savable: true,  statBubbles: getHalveItStatBubbles,           personalBests: getHalveItPersonalBests,
+    rebuild: (game, participants, turns) => {
+      const config = game.config ? JSON.parse(game.config) : null;
+      return rebuildHalveItState({ names: participants.map(p => p.name), legsPerSet: game.legs_per_set,
+        targets: (config && config.targets) || HALVE_IT_DEFAULT_TARGETS, turns });
+    },
+    position: (game, r) => ({ setNo: r.setNo, legNo: r.legNo, halveItRound: r.halveItRound,
+      players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, total: p.total })) }) },
+  dead_man_walking: { savable: true,  statBubbles: getDeadManWalkingStatBubbles,    personalBests: getDeadManWalkingPersonalBests,
+    // Field names are free to overlap with other types' (round/target/etc) now
+    // that savedGamePositionLabel() (frontend/index.html) dispatches on
+    // sg.gameType rather than field presence — see item 38,
+    // docs/code-quality-roadmap.md. Unrelated to the live-state game.dmw*
+    // keys (docs/live-state-keys, item 42), which are a separate object.
+    rebuild: (game, participants, turns) => {
+      const config = game.config ? JSON.parse(game.config) : null;
+      return rebuildDeadManWalkingState({ rounds: (config && config.rounds) || [], turns });
+    },
+    position: (game, r) => {
+      const config = game.config ? JSON.parse(game.config) : null;
+      const rounds = (config && config.rounds) || [];
+      return { round: r.roundIndex + 1, totalRounds: rounds.length,
+        target: r.remaining, walkedOutCount: r.walkedOutCount, dartsUsedThisRound: r.dartsUsedThisRound, budget: r.budget };
+    } },
+  pressure_chamber: { savable: true,  statBubbles: getPressureChamberStatBubbles,   personalBests: getPressureChamberPersonalBests,
+    rebuild: (game, participants, turns) => {
+      const config = game.config ? JSON.parse(game.config) : null;
+      return rebuildPressureChamberState({ gameId: game.id, names: participants.map(p => p.name), legsPerSet: game.legs_per_set,
+        maxRounds: (config && config.rounds) || PRESSURE_ROUNDS, turns });
+    },
+    position: (game, r) => ({ setNo: r.setNo, legNo: r.legNo, pressureChamberRound: r.pressureChamberRound,
+      players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, totalCp: p.totalCp })) }) },
   marathon:         { dispatchOnly: true, statBubbles: getMarathonStatBubbles,      personalBests: getMarathonPersonalBests },
 };
 // Resolves the per-type Player Profile stat function, falling back to the X01 default
@@ -1810,79 +1875,10 @@ function _resumeStateTurns(gameId) {
 // produces. Returns null for a game type with no meaningful "position" beyond
 // the raw turn count (none currently — every SAVABLE_GAME_TYPES entry has one).
 function _savedGamePosition(game, participants, turns) {
-  const names = participants.map(p => p.name);
-  const legsPerSet = game.legs_per_set;
-  if (game.game_type === 'x01') {
-    const r = rebuildX01State({ names, outModes: participants.map(p => p.outMode),
-      startScore: Number(game.category) || 501,
-      // Per-player handicaps (game_players.start_score) — without these, a saved
-      // handicapped game's position summary (and the real resume below) would
-      // replay every player from the game-wide score.
-      startScores: participants.map(p => p.startScore ?? null),
-      practice: !!game.practice, legsPerSet, turns });
-    return { setNo: r.setNo, legNo: r.legNo, players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, score: p.score })) };
-  }
-  if (game.game_type === 'cricket') {
-    const config = game.config ? JSON.parse(game.config) : null;
-    const r = rebuildCricketState({ names, config, practice: !!game.practice, legsPerSet, turns });
-    return { setNo: r.setNo, legNo: r.legNo, players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, points: p.points })) };
-  }
-  if (game.game_type === 'baseball') {
-    const r = rebuildBaseballState({ names, legsPerSet, turns });
-    return { setNo: r.setNo, legNo: r.legNo, baseballInning: r.baseballInning, players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, totalRuns: p.totalRuns })) };
-  }
-  if (game.game_type === 'shanghai') {
-    const config = game.config ? JSON.parse(game.config) : null;
-    const maxRounds = (config && config.rounds) || 7;
-    const r = rebuildShanghaiState({ names, legsPerSet, maxRounds, turns });
-    return { setNo: r.setNo, legNo: r.legNo, shanghaiRound: r.shanghaiRound, players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, totalPoints: p.totalPoints })) };
-  }
-  if (game.game_type === 'halve_it') {
-    const config = game.config ? JSON.parse(game.config) : null;
-    const targets = (config && config.targets) || HALVE_IT_DEFAULT_TARGETS;
-    const r = rebuildHalveItState({ names, legsPerSet, targets, turns });
-    return { setNo: r.setNo, legNo: r.legNo, halveItRound: r.halveItRound, players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, total: p.total })) };
-  }
-  if (game.game_type === 'around_the_clock') {
-    const r = rebuildAroundTheClockState({ turns });
-    return { legNo: r.legNo, hit: r.hitSet.size, total: 20 };
-  }
-  if (game.game_type === 'around_the_world') {
-    const r = rebuildAroundTheWorldState({ turns });
-    return { sessionDarts: r.sessionDarts };
-  }
-  if (game.game_type === 'bobs_27') {
-    const r = rebuildBobs27State({ turns });
-    return { round: r.round, running: r.running };
-  }
-  if (game.game_type === 'checkout_ladder') {
-    const r = rebuildCheckoutLadderState({ turns });
-    return { target: r.target, legNo: r.legNo, remaining: r.remaining };
-  }
-  if (game.game_type === 'gauntlet') {
-    const r = rebuildGauntletState({ turns });
-    return { station: r.currentStation, settled: r.settledCount, totalScars: r.totalScars, awaitingRepeat: r.awaitingRepeat };
-  }
-  if (game.game_type === 'dead_man_walking') {
-    // Field names are free to overlap with other types' (round/target/etc) now
-    // that savedGamePositionLabel() (frontend/index.html) dispatches on
-    // sg.gameType rather than field presence — see item 38,
-    // docs/code-quality-roadmap.md. Unrelated to the live-state game.dmw*
-    // keys (docs/live-state-keys, item 42), which are a separate object.
-    const config = game.config ? JSON.parse(game.config) : null;
-    const rounds = (config && config.rounds) || [];
-    const r = rebuildDeadManWalkingState({ rounds, turns });
-    return { round: r.roundIndex + 1, totalRounds: rounds.length, target: r.remaining,
-      walkedOutCount: r.walkedOutCount, dartsUsedThisRound: r.dartsUsedThisRound, budget: r.budget };
-  }
-  if (game.game_type === 'pressure_chamber') {
-    const config = game.config ? JSON.parse(game.config) : null;
-    const maxRounds = (config && config.rounds) || PRESSURE_ROUNDS;
-    const r = rebuildPressureChamberState({ gameId: game.id, names, legsPerSet, maxRounds, turns });
-    return { setNo: r.setNo, legNo: r.legNo, pressureChamberRound: r.pressureChamberRound,
-      players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, totalCp: p.totalCp })) };
-  }
-  return null;
+  const entry = GAME_TYPE_REGISTRY[game.game_type];
+  if (!entry || !entry.rebuild) return null;
+  const r = entry.rebuild(game, participants, turns);
+  return entry.position(game, r);
 }
 
 // Everything the New Game resume prompt and the Saved Games list both need —

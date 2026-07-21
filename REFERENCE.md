@@ -4906,7 +4906,14 @@ Both surfaces read `getSavedGames()` (`backend/db.js`): one row per saved
 game with a **position summary computed via the exact same pure rebuild
 functions the real resume uses** (`_savedGamePosition()`) — never a second,
 parallel "roughly where things stand" implementation that could drift from
-what resuming actually produces.
+what resuming actually produces. `_savedGamePosition()` itself is a 4-line
+generic dispatch onto each savable `GAME_TYPE_REGISTRY` entry's own
+`rebuild(game, participants, turns)` (replays turns into full state, the
+backend counterpart to `GAME_TYPES.*.resume()` above) and
+`position(game, r)` (trims that down to the row's one-line summary fields)
+members — the same registry-driven-dispatch pattern item 37 gives the
+frontend's resume path, so a type missing either member can't silently fall
+through to a wrong or blank summary.
 
 ### Resuming — replay, not snapshot
 
@@ -4931,19 +4938,30 @@ each turn live, called from a dedicated, side-effect-free orchestrator
 instead of the live `enterTurn()`/`onLegWon()`/`startNextLeg()` UI functions
 (which carry real side effects — DB writes, badge awards, HA webhooks,
 rendering — that must never re-fire for turns the server already recorded
-once). `resumeGame()` (`frontend/index.html`) then builds full player objects
-via each type's own `GAME_TYPES.*.newMatchPlayer()` (for normal defaults and
-async lifetime-ladder-base fetches, exactly as any new game gets) and
-overlays the rebuilt core fields on top — remaining scores/marks+points/
-innings+runs, legs/sets won, current set/leg, whose turn (deterministic from
-the turn sequence plus the same leg-starter rotation `startNextLeg()` applies
-live — a **trailing leg win with no next-leg turn recorded yet** — saved on
-the "leg won — Next leg?" screen before that button was ever tapped — is
-handled explicitly: the rebuild functions apply one more rotation/reset pass
-so the resumed game lands on the new leg's first throw, never the stale
-summary screen). `DB.gameId` is pointed back at the existing game id, so
-subsequent turns append to the same game; the live scoreboard picks the match
-back up on the next `pushLive()`.
+once). `resumeGame()` (`frontend/index.html`) builds full player objects via
+each type's own `GAME_TYPES.*.newMatchPlayer()` (for normal defaults and async
+lifetime-ladder-base fetches, exactly as any new game gets), then dispatches
+to that type's own `GAME_TYPES.*.resume(ctx)` member (item 37,
+`docs/code-quality-roadmap.md`) — a per-type function returning
+`{overlay, statusMsg}` — instead of a hardcoded per-type if/else chain.
+`overlay` carries only the fields that type's resume needs to override on the
+generic `game` object (e.g. only Baseball's overlay sets `baseballInning`,
+only Gauntlet's sets its five gauntlet-specific fields); every savable type's
+`resume()` mutates the constructed `players` in place with the rebuilt core
+fields — remaining scores/marks+points/innings+runs, legs/sets won — and
+returns `current`/`starter`/`setNo`/`legNo` (deterministic from the turn
+sequence plus the same leg-starter rotation `startNextLeg()` applies live — a
+**trailing leg win with no next-leg turn recorded yet** — saved on the "leg
+won — Next leg?" screen before that button was ever tapped — is handled
+explicitly: the rebuild functions apply one more rotation/reset pass so the
+resumed game lands on the new leg's first throw, never the stale summary
+screen) inside that same `overlay`. A type with no `resume` member (i.e. every
+non-savable type) can't reach this path at all — `resumeGame()` checks
+`GAME_TYPES[gameType].resume` up front and alerts "can't be resumed" instead,
+the same by-construction guarantee `ctorArg` (item 40) gives the player
+constructor's argument shape. `DB.gameId` is pointed back at the existing game
+id, so subsequent turns append to the same game; the live scoreboard picks the
+match back up on the next `pushLive()`.
 
 **What resume deliberately does NOT rebuild** (cosmetic, session-scoped,
 already lost today by a page refresh mid-game): past-leg summary cards
@@ -6166,7 +6184,8 @@ Position is a pure function of recorded turns, same as every other savable
 game type: `rebuildShanghaiState({names, legsPerSet, maxRounds, turns})`
 (`frontend/scoring.js`) replays `running totals + round number` from the
 turn sequence, reused identically by `_savedGamePosition()` (write-time) and
-`resumeGame()`'s `shanghai` branch (read-time resume). `'shanghai'` is in
+`GAME_TYPES.shanghai.resume()` (read-time resume, dispatched from `resumeGame()` —
+item 37, `docs/code-quality-roadmap.md`). `'shanghai'` is in
 both `SAVABLE_GAME_TYPES` lists (`backend/db.js` and `frontend/index.html`).
 
 ### Live scoreboard
@@ -6416,8 +6435,9 @@ legsPerSet, targets, turns})` (`frontend/scoring.js`) replays running totals
 + round number from the turn sequence — including `everHalved`/
 `lastVisitHalved` per player, so a resumed leg's badge check still sees the
 whole leg's halving history, not just turns recorded after the resume.
-Reused identically by `_savedGamePosition()` (write-time) and `resumeGame()`'s
-`halve_it` branch (read-time). `'halve_it'` is in both `SAVABLE_GAME_TYPES`
+Reused identically by `_savedGamePosition()` (write-time) and
+`GAME_TYPES.halve_it.resume()` (read-time, dispatched from `resumeGame()` —
+item 37). `'halve_it'` is in both `SAVABLE_GAME_TYPES`
 lists (`backend/db.js` and `frontend/index.html`).
 
 ### Testing
@@ -6778,8 +6798,9 @@ icon+text status change (never color/flash alone).
 `rebuildDeadManWalkingState({rounds, turns})` (`frontend/scoring.js`) is a
 pure replay of recorded turns against the frozen `config.rounds` array —
 reused identically by the write-time guard's "already resolved" check,
-`_savedGamePosition()` (write-time list summary), and `resumeGame()`'s
-`dead_man_walking` branch (read-time resume). `'dead_man_walking'` is in
+`_savedGamePosition()` (write-time list summary), and
+`GAME_TYPES.dead_man_walking.resume()` (read-time resume, dispatched from
+`resumeGame()` — item 37). `'dead_man_walking'` is in
 both `SAVABLE_GAME_TYPES` lists (`backend/db.js` and `frontend/index.html`).
 `_savedGamePosition()`'s field names for this type (`round`/`totalRounds`/
 `target`/`walkedOutCount`/`dartsUsedThisRound`/`budget`) are free to overlap
@@ -7135,7 +7156,8 @@ Position is a pure function of recorded turns:
 (`frontend/scoring.js`) replays CP totals/misses/full-hit streaks/round
 number from the turn sequence, reusing `evaluateVisitPressureChamber()`
 directly. Reused identically by `_savedGamePosition()` (write-time) and
-`resumeGame()`'s `pressure_chamber` branch (read-time). `'pressure_chamber'`
+`GAME_TYPES.pressure_chamber.resume()` (read-time, dispatched from
+`resumeGame()` — item 37). `'pressure_chamber'`
 is in both `SAVABLE_GAME_TYPES` lists (`backend/db.js` and
 `frontend/index.html`).
 
