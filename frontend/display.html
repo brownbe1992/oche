@@ -6,11 +6,26 @@
 <title>Oche — Scoreboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=Kalam:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --board:#0e0f0d; --surface:#1a1c18; --surface-2:#212420; --wire:#3a3d38;
-    --cream:#efe7d2; --ink:#f3efe4; --muted:#9a9387;
+    /* UI redesign — "the chalkboard" (docs/code-quality-roadmap.md-adjacent design
+       pass): this screen is a genuinely different object from the dartboard itself
+       (index.html's board/wedge/wire materials stay for setup/scoring input) — the
+       room's chalked-up scoreboard, not the board. --surface/--surface-2 (every
+       card/table in this file already keys off these two names) are repointed to
+       slate tones instead of the dartboard's bed-black card tones, so the whole
+       screen shifts material without touching each of their many call sites;
+       --board itself stays defined (still referenced by the radial-gradient
+       fallback color below) but is no longer this file's primary surface.
+       --slate/--slate-2/--chalk mirror index.html's own tokens of the same name. */
+    --board:#0e0f0d; --slate:#15211c; --slate-2:#1b2a24; --chalk:#f7f5ee;
+    --surface:var(--slate); --surface-2:var(--slate-2); --wire:#33413a;
+    /* --cream repointed to --chalk (not left at its old wedge-cream hex) — every
+       use of --cream in this file is a scoreboard numeral/label, never a wedge
+       reference, so it's the same "just chalked" white as the rest of this
+       screen's text now, not a separate warmer tone. */
+    --cream:var(--chalk); --ink:#f3efe4; --muted:#a3ada6;
     /* --green/--bust brightened from #1b8a3a/#e2473d so they pass 4.5:1 as text on
        --board/--surface (docs/accessibility-roadmap.md contrast audit) — matches
        index.html's :root, kept in sync. --red stays border/background-only here
@@ -28,8 +43,13 @@
   *{box-sizing:border-box;margin:0}
   html,body{height:100%}
   body{
-    background:radial-gradient(120% 90% at 50% -10%, #1b1d19 0%, var(--board) 60%);
-    color:var(--ink); font-family:'Inter',system-ui,sans-serif;
+    /* The chalkboard, not the dartboard — slate instead of index.html's --board,
+       plus a faint chalk-dust grain (a tiled SVG turbulence texture) so the
+       surface itself reads as a real chalked slate, not a flat dark rectangle. */
+    background:
+      radial-gradient(120% 90% at 50% -10%, var(--slate-2) 0%, var(--slate) 60%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.02 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    color:var(--chalk); font-family:'Inter',system-ui,sans-serif;
     -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; height:100vh; overflow:hidden;
     display:flex; flex-direction:column; padding:2.2vmin 2.6vmin;
     font-feature-settings:"tnum" 1;
@@ -77,8 +97,29 @@
   .pname{font-weight:600;font-size:3.6vmin;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ptag{font-size:1.5vmin;font-weight:700;letter-spacing:.08em;color:var(--gold);border:1px solid var(--wire);border-radius:.8vmin;padding:.5vmin .9vmin;flex:none}
   .throwflag{margin-left:auto;font-size:1.7vmin;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);flex:none}
-  .score{font-family:'Bebas Neue';font-size:clamp(56px, 17vmin, 280px);line-height:.78;color:var(--cream);letter-spacing:.01em;margin:.4vmin 0 .2vmin}
+  .score{font-family:'Bebas Neue';font-size:clamp(56px, 17vmin, 280px);line-height:.78;color:var(--cream);letter-spacing:.01em;margin:.4vmin 0 .2vmin;
+    display:inline-block; transform:rotate(-0.6deg); transition:transform .15s ease}
+  /* Chalk never sits perfectly straight on a real board — a faint alternating
+     tilt per card (never per-digit, which would need per-character markup) so
+     the numerals read as hand-chalked rather than machine-typeset. */
+  .grid > *:nth-child(even) .score{transform:rotate(0.5deg)}
   .pcard.active .score{color:#fff}
+  /* Chalk-dust burst (item: signature live-scoreboard treatment) — fires when a
+     score's displayed text actually changes (see triggerChalkEffects() below),
+     not on every /api/live push (most pushes don't change every card). */
+  @keyframes chalk-flash{0%{text-shadow:0 0 2.4vmin rgba(247,245,238,.9)}100%{text-shadow:0 0 0 rgba(247,245,238,0)}}
+  .score.chalk-flash{animation:chalk-flash .5s ease-out}
+  .chalk-mote{position:absolute;border-radius:50%;background:var(--chalk);pointer-events:none;
+    animation:chalk-mote-drift .7s ease-out forwards}
+  @keyframes chalk-mote-drift{
+    0%{opacity:.95;transform:translate(0,0) scale(1)}
+    100%{opacity:0;transform:var(--mote-end,translate(0,-4vmin)) scale(.4)}
+  }
+  @media(prefers-reduced-motion:reduce){
+    .score{transition:none}
+    .score.chalk-flash{animation:none}
+    .chalk-mote{display:none}
+  }
   /* Compact/Minimal free up card space by dropping rows below — let the score grow into it */
   body.layout-compact .score{font-size:clamp(64px, 20vmin, 320px)}
   body.layout-minimal .score{font-size:clamp(72px, 24vmin, 360px)}
@@ -171,7 +212,7 @@
 
   /* idle */
   .idle{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1.6vmin;text-align:center}
-  .idle .mk{font-family:'Bebas Neue';font-size:9vmin;color:var(--cream);letter-spacing:.05em}
+  .idle .mk{font-family:'Kalam',cursive;font-weight:700;font-size:8vmin;color:var(--chalk);letter-spacing:.02em;transform:rotate(-1deg)}
   .idle .ln{color:var(--muted);font-size:2.6vmin}
   .hidden{display:none!important}
 
@@ -679,6 +720,55 @@ function spawnConfetti(root, count){
     root.appendChild(c);
     setTimeout(()=>c.remove(), 4500);
   }
+}
+
+// Chalk-dust burst — the live scoreboard's signature moment (design pass: "the
+// chalkboard"). A dozen small motes scatter off the score the instant it
+// changes, as if someone just re-chalked the number. Positioned relative to
+// the score element's own card (each .pcard is already position:relative), so
+// this works regardless of card size/grid layout.
+function spawnChalkDust(scoreEl){
+  const card = scoreEl.closest('.pcard') || scoreEl.parentElement;
+  if(!card) return;
+  const cardBox = card.getBoundingClientRect();
+  const scoreBox = scoreEl.getBoundingClientRect();
+  const originX = scoreBox.left - cardBox.left + scoreBox.width/2;
+  const originY = scoreBox.top - cardBox.top + scoreBox.height/2;
+  for(let i=0;i<14;i++){
+    const m = document.createElement('div');
+    m.className = 'chalk-mote';
+    const angle = Math.random()*Math.PI*2;
+    const dist = 3 + Math.random()*7; // vmin
+    const size = 0.35 + Math.random()*0.5; // vmin
+    m.style.left = originX + 'px';
+    m.style.top = originY + 'px';
+    m.style.width = size+'vmin'; m.style.height = size+'vmin';
+    m.style.setProperty('--mote-end', `translate(${(Math.cos(angle)*dist).toFixed(2)}vmin, ${(Math.sin(angle)*dist - 2).toFixed(2)}vmin)`);
+    m.style.animationDelay = (Math.random()*0.08)+'s';
+    card.appendChild(m);
+    setTimeout(()=>m.remove(), 900);
+  }
+}
+// Fires the flash+dust on any .score element whose rendered text just changed
+// from the previous render() call — grid.innerHTML is fully rebuilt every push
+// (see render() above), so a DOM-level "did this value change" comparison
+// (not a snapshot-field comparison, which would need per-game-type field
+// knowledge) is the one check that works identically for every renderer.
+let lastScoreTexts = [];
+function triggerChalkEffects(){
+  const scoreEls = grid.querySelectorAll('.score');
+  scoreEls.forEach((el, i) => {
+    const text = el.textContent;
+    if(lastScoreTexts[i] !== undefined && lastScoreTexts[i] !== text){
+      el.classList.add('chalk-flash');
+      spawnChalkDust(el);
+    }
+    lastScoreTexts[i] = text;
+  });
+  // A shorter list than last time (fewer players, or scorecard/summary layout
+  // with no .score elements at all) — drop the stale trailing entries so a
+  // later return to a per-player card layout doesn't compare against them.
+  lastScoreTexts.length = scoreEls.length;
 }
 
 function showAchievement(type, player, countText){
@@ -1932,6 +2022,7 @@ function render(s){
   } else {
     grid.innerHTML = s.players.map((p,i)=>renderer.card(p, i, s, L)).join('');
   }
+  triggerChalkEffects();
 
   // achievement flashes (180, Big Fish, nine-darter)
   if(s.achievement && s.achievement.ts){
