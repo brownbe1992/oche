@@ -11079,6 +11079,52 @@ function checkEloOnMatchWin(w, opp){
     }
   }).catch(()=>{});
 }
+// Shared leg → set → game progression tree for the 7 modes whose
+// onLegWon* handler has no badge logic interleaved *inside* the tree
+// itself (X01's onLegWon() keeps its own copy — Nerves of Steel/Giant
+// Slayer/Rematch/Grudge Match/Ghost Slayer are all decided mid-branch
+// there, and its practice/ghost-race/marathon gate is its own shape).
+// `opts.gate` defaults to the plain `w.legsWon >= game.legsPerSet` set-won
+// check; `opts.momentCard` is the generic matchWinStatLine() card unless
+// passed a function (a mode-specific card) or `false` (no card at all —
+// Cricket, whose own social/moment-card pass isn't built yet).
+function advanceLegSetGame(w, opts){
+  const { gate = () => w.legsWon >= game.legsPerSet, legsAtWin, checkElo = true, opp = null,
+    extraGameWonBadge, momentCard } = opts || {};
+  if(!gate()){
+    sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+    DB.recordEvent('leg_end', game.setNo, game.legNo);
+    game.matchResult = { ts:Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+    finishUnit('leg', w.name);
+    return;
+  }
+  w.setsWon += 1;
+  game.players.forEach(p=>p.legsWon=0);
+
+  if(w.setsWon >= game.setsPerGame){   // game (match) won
+    sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+    sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
+    sendHaWebhook('gameend', w.name, game.category);
+    DB.recordEvent('leg_end', game.setNo, game.legNo);
+    DB.recordEvent('set_end', game.setNo, null);
+    DB.recordEvent('game_end', null, null);
+    DB.completeGame(w.name);
+    if(checkElo) checkEloOnMatchWin(w, opp);
+    if(extraGameWonBadge) extraGameWonBadge();
+    game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+    const card = momentCard === false ? null : (typeof momentCard === 'function' ? momentCard()
+      : { icon:'🏅', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) });
+    if(card) fireMomentCard('matchwin', card);
+    finishUnit('game', w.name);
+    return;
+  }
+  sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+  sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
+  DB.recordEvent('leg_end', game.setNo, game.legNo);
+  DB.recordEvent('set_end', game.setNo, null);
+  game.matchResult = { ts:Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
+  finishUnit('set', w.name);
+}
 function onLegWonCricket(wi){
   const w = game.players[wi];
   const opp = game.players.length===2 ? game.players.find(p=>p!==w) : null;
@@ -11098,45 +11144,23 @@ function onLegWonCricket(wi){
       { icon:'🔥', headline:'COMEBACK KID', player:w.name, statLine:`Trailed by ${CRICKET_COMEBACK_THRESHOLD}+ points, won anyway` });
   }
 
-  if(!game.practice && w.legsWon >= game.legsPerSet){      // set won (H2H only)
-    w.setsWon += 1;
-    game.players.forEach(p=>p.legsWon=0);
-
-    if(w.setsWon >= game.setsPerGame){   // game (match) won
-      sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-      sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
-      sendHaWebhook('gameend', w.name, game.category);
-      DB.recordEvent('leg_end', game.setNo, game.legNo);
-      DB.recordEvent('set_end', game.setNo, null);
-      DB.recordEvent('game_end', null, null);
-      DB.completeGame(w.name);
-      checkEloOnMatchWin(w, opp);
-      // 🔪 Stone Cold (docs/archive/cutthroat-cricket-roadmap.md): won a 3+ player cut-throat
-      // GAME having received zero points across every leg of it — checked here (not
-      // per-leg) since "the game" is what the badge is scoped to; w.gamePointsReceived
-      // is never leg-reset (see newMatchPlayerCricket()), so it already reflects the
-      // whole match by the time the winning leg gets here.
+  advanceLegSetGame(w, {
+    gate: () => !game.practice && w.legsWon >= game.legsPerSet,   // set won (H2H only)
+    opp,
+    momentCard: false,   // no matchwin moment card built for Cricket yet
+    // 🔪 Stone Cold (docs/archive/cutthroat-cricket-roadmap.md): won a 3+ player cut-throat
+    // GAME having received zero points across every leg of it — checked here (not
+    // per-leg) since "the game" is what the badge is scoped to; w.gamePointsReceived
+    // is never leg-reset (see newMatchPlayerCricket()), so it already reflects the
+    // whole match by the time the winning leg gets here.
+    extraGameWonBadge: () => {
       if(game.config.variant === 'cutthroat' && cricketStoneColdAchieved(w.gamePointsReceived, game.players.length)){
         queueBadge('cricketstonecold', w.name);
         awardRecurringBadge(w.name, 'cricketstonecold', 'cricketstonecold',
           { icon:'🔪', headline:'STONE COLD', player:w.name, statLine:'Won a cut-throat game without receiving a point' });
       }
-      game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-      finishUnit('game', w.name);
-      return;
-    }
-    sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-    sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
-    DB.recordEvent('leg_end', game.setNo, game.legNo);
-    DB.recordEvent('set_end', game.setNo, null);
-    game.matchResult = { ts:Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-    finishUnit('set', w.name);
-    return;
-  }
-  sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-  DB.recordEvent('leg_end', game.setNo, game.legNo);
-  game.matchResult = { ts:Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-  finishUnit('leg', w.name);
+    },
+  });
 }
 
 /* ----- Baseball turn commit (dispatched from enterTurn()) -----
@@ -11486,42 +11510,11 @@ function onLegWonBaseball(wi){
   // every one of Baseball's own stat functions (getBaseballWonLegs(), gamesPlayed,
   // winPct) requires games.completed_at IS NOT NULL — so practice Baseball could
   // never show a single stat, ever, regardless of how many games were played.
-  if(w.legsWon >= game.legsPerSet){      // leg (or, for practice, the whole game) won
-    w.setsWon += 1;
-    game.players.forEach(p=>p.legsWon=0);
-
-    if(w.setsWon >= game.setsPerGame){   // game (match) won
-      sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-      sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
-      sendHaWebhook('gameend', w.name, game.category);
-      DB.recordEvent('leg_end', game.setNo, game.legNo);
-      DB.recordEvent('set_end', game.setNo, null);
-      DB.recordEvent('game_end', null, null);
-      DB.completeGame(w.name);
-      // checkEloOnMatchWin() itself already guards on !game.practice — this
-      // function's own gate (unlike X01/Cricket's) deliberately isn't
-      // !game.practice && ... (see BUG-22 above), so opp is derived fresh
-      // here rather than assumed from an outer H2H-only condition.
-      checkEloOnMatchWin(w, game.players.length===2 ? game.players.find(p=>p!==w) : null);
-      game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-      // matchWinStatLine() is fully generic over legsWon/setsWon/category —
-      // reused as-is, no Baseball-specific version needed.
-      fireMomentCard('matchwin', { icon:'🏅', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) });
-      finishUnit('game', w.name);
-      return;
-    }
-    sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-    sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
-    DB.recordEvent('leg_end', game.setNo, game.legNo);
-    DB.recordEvent('set_end', game.setNo, null);
-    game.matchResult = { ts:Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-    finishUnit('set', w.name);
-    return;
-  }
-  sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-  DB.recordEvent('leg_end', game.setNo, game.legNo);
-  game.matchResult = { ts:Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-  finishUnit('leg', w.name);
+  // checkEloOnMatchWin() itself already guards on !game.practice — this
+  // function's own gate (unlike X01/Cricket's) deliberately isn't
+  // !game.practice && ... (see BUG-22 above), so opp is derived fresh
+  // here rather than assumed from an outer H2H-only condition.
+  advanceLegSetGame(w, { legsAtWin, opp: game.players.length===2 ? game.players.find(p=>p!==w) : null });
 }
 
 /* ----- Shanghai leg / set / game progression (dispatched from enterTurnShanghai) -----
@@ -11540,36 +11533,7 @@ function onLegWonShanghai(wi){
   // Captured before the legs-reset below zeroes everyone out.
   const legsAtWin = new Map(game.players.map(p => [p, p.legsWon]));
 
-  if(w.legsWon >= game.legsPerSet){      // leg (or, for practice, the whole game) won
-    w.setsWon += 1;
-    game.players.forEach(p=>p.legsWon=0);
-
-    if(w.setsWon >= game.setsPerGame){   // game (match) won
-      sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-      sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
-      sendHaWebhook('gameend', w.name, game.category);
-      DB.recordEvent('leg_end', game.setNo, game.legNo);
-      DB.recordEvent('set_end', game.setNo, null);
-      DB.recordEvent('game_end', null, null);
-      DB.completeGame(w.name);
-      checkEloOnMatchWin(w, game.players.length===2 ? game.players.find(p=>p!==w) : null);
-      game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-      fireMomentCard('matchwin', { icon:'🏅', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) });
-      finishUnit('game', w.name);
-      return;
-    }
-    sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-    sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
-    DB.recordEvent('leg_end', game.setNo, game.legNo);
-    DB.recordEvent('set_end', game.setNo, null);
-    game.matchResult = { ts:Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-    finishUnit('set', w.name);
-    return;
-  }
-  sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-  DB.recordEvent('leg_end', game.setNo, game.legNo);
-  game.matchResult = { ts:Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-  finishUnit('leg', w.name);
+  advanceLegSetGame(w, { legsAtWin, opp: game.players.length===2 ? game.players.find(p=>p!==w) : null });
 }
 
 /* ----- Halve-It leg / set / game progression (dispatched from enterTurnHalveIt) -----
@@ -11599,36 +11563,7 @@ function onLegWonHalveIt(wi){
 
   const legsAtWin = new Map(game.players.map(p => [p, p.legsWon]));
 
-  if(w.legsWon >= game.legsPerSet){      // leg (or, for practice, the whole game) won
-    w.setsWon += 1;
-    game.players.forEach(p=>p.legsWon=0);
-
-    if(w.setsWon >= game.setsPerGame){   // game (match) won
-      sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-      sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
-      sendHaWebhook('gameend', w.name, game.category);
-      DB.recordEvent('leg_end', game.setNo, game.legNo);
-      DB.recordEvent('set_end', game.setNo, null);
-      DB.recordEvent('game_end', null, null);
-      DB.completeGame(w.name);
-      checkEloOnMatchWin(w, game.players.length===2 ? game.players.find(p=>p!==w) : null);
-      game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-      fireMomentCard('matchwin', { icon:'🏅', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) });
-      finishUnit('game', w.name);
-      return;
-    }
-    sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-    sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
-    DB.recordEvent('leg_end', game.setNo, game.legNo);
-    DB.recordEvent('set_end', game.setNo, null);
-    game.matchResult = { ts:Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-    finishUnit('set', w.name);
-    return;
-  }
-  sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-  DB.recordEvent('leg_end', game.setNo, game.legNo);
-  game.matchResult = { ts:Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-  finishUnit('leg', w.name);
+  advanceLegSetGame(w, { legsAtWin, opp: game.players.length===2 ? game.players.find(p=>p!==w) : null });
 }
 
 /* ----- The Pressure Chamber turn commit (dispatched from enterTurn()) -----
@@ -11777,36 +11712,7 @@ function onLegWonPressureChamber(wi){
 
   const legsAtWin = new Map(game.players.map(p => [p, p.legsWon]));
 
-  if(w.legsWon >= game.legsPerSet){      // leg (or, for practice, the whole game) won
-    w.setsWon += 1;
-    game.players.forEach(p=>p.legsWon=0);
-
-    if(w.setsWon >= game.setsPerGame){   // game (match) won
-      sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-      sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
-      sendHaWebhook('gameend', w.name, game.category);
-      DB.recordEvent('leg_end', game.setNo, game.legNo);
-      DB.recordEvent('set_end', game.setNo, null);
-      DB.recordEvent('game_end', null, null);
-      DB.completeGame(w.name);
-      checkEloOnMatchWin(w, game.players.length===2 ? game.players.find(p=>p!==w) : null);
-      game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-      fireMomentCard('matchwin', { icon:'🏅', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) });
-      finishUnit('game', w.name);
-      return;
-    }
-    sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-    sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
-    DB.recordEvent('leg_end', game.setNo, game.legNo);
-    DB.recordEvent('set_end', game.setNo, null);
-    game.matchResult = { ts:Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-    finishUnit('set', w.name);
-    return;
-  }
-  sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-  DB.recordEvent('leg_end', game.setNo, game.legNo);
-  game.matchResult = { ts:Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-  finishUnit('leg', w.name);
+  advanceLegSetGame(w, { legsAtWin, opp: game.players.length===2 ? game.players.find(p=>p!==w) : null });
 }
 
 /* ----- Bob's 27 turn commit (dispatched from enterTurn()) -----
@@ -11921,42 +11827,19 @@ function onLegWonBobs27(wi){
       { icon:'🏔️', headline:'THE FULL ANDERSON!', player:w.name, statLine:'Every double, all three darts — 1287' });
   }
 
-  if(w.legsWon >= game.legsPerSet){
-    w.setsWon += 1;
-    game.players.forEach(p=>p.legsWon=0);
-
-    if(w.setsWon >= game.setsPerGame){   // game (run) complete
-      sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-      sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
-      sendHaWebhook('gameend', w.name, game.category);
-      DB.recordEvent('leg_end', game.setNo, game.legNo);
-      DB.recordEvent('set_end', game.setNo, null);
-      DB.recordEvent('game_end', null, null);
-      DB.completeGame(w.name);
-      game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-      // Bob's 27's own moment card — a run always completes (never re-plays as
-      // a leg/set) so this is the only outcome to celebrate, "MATCH WON!"
-      // reads wrong for a died-early run so this uses a survived-vs-died
-      // headline instead, same "the generic matchWinStatLine() doesn't know
-      // about `running`" reasoning that gives every solo drill its own card copy.
+  // Bob's 27's own moment card — a run always completes (never re-plays as
+  // a leg/set) so this is the only outcome to celebrate, "MATCH WON!"
+  // reads wrong for a died-early run so this uses a survived-vs-died
+  // headline instead, same "the generic matchWinStatLine() doesn't know
+  // about `running`" reasoning that gives every solo drill its own card copy.
+  advanceLegSetGame(w, {
+    checkElo: false,
+    momentCard: () => {
       const survived = w.running > 0;
-      fireMomentCard('matchwin', { icon: survived ? '🎯' : '💀', headline: survived ? 'RUN COMPLETE!' : 'RUN OVER',
-        player:w.name, statLine: survived ? `Final score: ${w.running} — survived all 20` : `Died on D${Object.keys(w.roundResults).length} · final score ${w.running}` });
-      finishUnit('game', w.name);
-      return;
-    }
-    sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-    sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
-    DB.recordEvent('leg_end', game.setNo, game.legNo);
-    DB.recordEvent('set_end', game.setNo, null);
-    game.matchResult = { ts:Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-    finishUnit('set', w.name);
-    return;
-  }
-  sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-  DB.recordEvent('leg_end', game.setNo, game.legNo);
-  game.matchResult = { ts:Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-  finishUnit('leg', w.name);
+      return { icon: survived ? '🎯' : '💀', headline: survived ? 'RUN COMPLETE!' : 'RUN OVER',
+        player:w.name, statLine: survived ? `Final score: ${w.running} — survived all 20` : `Died on D${Object.keys(w.roundResults).length} · final score ${w.running}` };
+    },
+  });
 }
 
 /* ----- leg / set / game progression ----- */
@@ -14184,42 +14067,20 @@ function onKillerLegWon(w){
   w.legsWon += 1;
   const legsAtWin = new Map(game.players.map(p => [p, p.legsWon]));
 
-  if(w.legsWon >= game.legsPerSet){
-    w.setsWon += 1;
-    game.players.forEach(p=>p.legsWon=0);
-
-    if(w.setsWon >= game.setsPerGame){   // match won
-      sendHaWebhook('legend',  w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-      sendHaWebhook('setend',  w.name, game.category, { setNo: game.setNo });
-      sendHaWebhook('gameend', w.name, game.category);
-      DB.recordEvent('leg_end', game.setNo, game.legNo);
-      DB.recordEvent('set_end', game.setNo, null);
-      DB.recordEvent('game_end', null, null);
-      DB.completeGame(w.name);
-      // 🛡️ Untouchable: won the match having never lost a single life,
-      // across every leg (gameLivesLost is match-lifetime, never reset per leg).
+  advanceLegSetGame(w, {
+    legsAtWin,
+    checkElo: false,
+    momentCard: () => ({ icon:'🔪', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) }),
+    // 🛡️ Untouchable: won the match having never lost a single life,
+    // across every leg (gameLivesLost is match-lifetime, never reset per leg).
+    extraGameWonBadge: () => {
       if(w.gameLivesLost === 0){
         queueBadge('killeruntouchable', w.name);
         awardRecurringBadge(w.name, 'killeruntouchable', 'killeruntouchable',
           { icon:'🛡️', headline:'UNTOUCHABLE!', player:w.name, statLine:'Won without ever losing a life' });
       }
-      game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-      fireMomentCard('matchwin', { icon:'🔪', headline:'MATCH WON!', player:w.name, statLine: matchWinStatLine(w, legsAtWin) });
-      finishUnit('game', w.name);
-      return;
-    }
-    sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-    sendHaWebhook('setend', w.name, game.category, { setNo: game.setNo });
-    DB.recordEvent('leg_end', game.setNo, game.legNo);
-    DB.recordEvent('set_end', game.setNo, null);
-    game.matchResult = { ts:Date.now(), kind:'set', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-    finishUnit('set', w.name);
-    return;
-  }
-  sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
-  DB.recordEvent('leg_end', game.setNo, game.legNo);
-  game.matchResult = { ts:Date.now(), kind:'leg', legNo:game.legNo, setNo:game.setNo, winner:w.name, bigFish:false };
-  finishUnit('leg', w.name);
+    },
+  });
 }
 function renderGameKiller(){
   const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';

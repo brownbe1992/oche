@@ -399,13 +399,41 @@ constructed `game` objects now have zero missing trailer keys, including
 `atcLastDart`/`atwLastDart` on the two previously-drifted sites. Backend
 suite unaffected (1244 tests, same 6 pre-existing unrelated failures).
 
-## Item 54 — One leg/set/game progression helper (8 pasted cascades)
+## Item 54 — One leg/set/game progression helper (8 pasted cascades) — ✅ Done
 
-The `legsWon++ → set → match` decision tree (webhooks, recordEvent trio,
-completeGame, Elo check, matchResult, moment card, finishUnit) is pasted
-near-verbatim in 8 `onLegWon*` handlers (~180 lines; the Shanghai copy is
-100% generic). **Shape:** one `advanceLegSetGame(winner)` holding the tree;
-each mode keeps only its badge checks.
+7 of the 8 `onLegWon*` handlers (Cricket, Baseball, Shanghai, Halve-It,
+Pressure Chamber, Bob's 27, Killer) now delegate their `legsWon++ → set →
+match` decision tree (webhooks, recordEvent trio, `completeGame`, Elo check,
+`matchResult`, moment card, `finishUnit`) to a single `advanceLegSetGame(w,
+opts)`. Each mode keeps only its own before/after badge checks and passes
+whatever narrow set of options it genuinely differs on: `gate` (Cricket's
+`!game.practice && ...`), `checkElo` (`false` for Bob's 27 and Killer, which
+never call it), `opp`, `legsAtWin`, `extraGameWonBadge` (Cricket's Stone
+Cold, Killer's Untouchable — both fire right before `matchResult` is set),
+and `momentCard` (a function for a fully custom card — Bob's 27's
+survived/died headline, Killer's own icon — or `false` for Cricket, which
+has no moment card built yet; omitted for the 4 modes using the generic
+`matchWinStatLine()` card).
+
+X01's `onLegWon()` deliberately keeps its own copy, per this same roadmap's
+standing convention against forcing an abstraction over a real behavioral
+difference: its badge logic (Nerves of Steel, Giant Slayer, The Rematch,
+Grudge Match, Ghost Slayer) is interleaved *inside* the set/match-won
+branches themselves (not cleanly before/after), its practice/ghost-race/
+marathon gate is its own three-way condition, `matchResult.bigFish` is a
+real computed value instead of every other mode's hardcoded `false`, and its
+leg-won tail handles Daily Challenge completion — folding all of that into
+`advanceLegSetGame`'s options would need as many hooks as the function it
+replaced, for zero simplification.
+
+Verified live in a browser: constructed a minimal game object per mode and
+called each `onLegWon*`/`onKillerLegWon` function directly (stubbing
+`finishUnit` to capture its calls without needing full DOM rendering),
+covering all three branches (leg-only, set-only, match-won) and confirming
+the per-mode extras still fire — Cricket's Stone Cold, Killer's Untouchable,
+Bob's 27's custom moment card — with `game.matchResult.kind` and the
+`finishUnit` call correct in every case. Backend suite unaffected (1244
+tests, same 6 pre-existing unrelated failures).
 
 ## Item 55 — Scoreboard/pad renderer scaffolding
 
