@@ -1978,23 +1978,18 @@ function applyDartMode(){
   // replaced (Dartboard-mode-only, now folded into the miss ring), it's never
   // hidden by this mode switch, only disabled once the turn/visit is already full.
   const bounceBtn = document.getElementById('bounce-out-btn');
-  const tab1  = document.getElementById('imt-pad');
-  const tab2  = document.getElementById('imt-board');
   if(!pad || !board) return;
   const full  = !!(game && (game.darts.length>=3 || game.busted || game.won));
   if(bounceBtn) bounceBtn.disabled = full;
+  setPressed({pad:'imt-pad', board:'imt-board'}, dartboardMode ? 'board' : 'pad');
   if(dartboardMode){
     pad.classList.add('hidden'); if(multi) multi.classList.add('hidden');
     board.classList.remove('hidden');
     if(!board.querySelector('svg')) board.innerHTML = buildDartboard(); // build once
     board.classList.toggle('board-disabled', full);
-    if(tab1) tab1.setAttribute('aria-pressed','false');
-    if(tab2) tab2.setAttribute('aria-pressed','true');
   } else {
     pad.classList.remove('hidden'); if(multi) multi.classList.remove('hidden');
     board.classList.add('hidden');
-    if(tab1) tab1.setAttribute('aria-pressed','true');
-    if(tab2) tab2.setAttribute('aria-pressed','false');
     if(game) renderPad();   // populate buttons immediately when switching to pad mode
   }
 }
@@ -3424,8 +3419,7 @@ function clearCheckoutTrainerPin(){
 // button rather than being their own top-level modes.
 function setCheckoutTrainerMode(sub){
   setup.checkoutTrainerMode = sub;
-  document.getElementById('checkout-trainer-mode-freeform').setAttribute('aria-pressed', sub==='freeform');
-  document.getElementById('checkout-trainer-mode-blitz').setAttribute('aria-pressed', sub==='blitz');
+  setPressed({freeform:'checkout-trainer-mode-freeform', blitz:'checkout-trainer-mode-blitz'}, sub);
   document.getElementById('checkout-trainer-mode-desc').textContent = sub==='blitz'
     ? "A 60-second sprint: answer as many targets as you can. Optimal answers score 2 points, legal-but-not-optimal score 1, illegal score 0 — speed alone won't win, accuracy matters more."
     : 'Untimed — work through targets at your own pace, with the answer revealed after every attempt. Runs until you end the session.';
@@ -3440,10 +3434,8 @@ function setCheckoutTrainerMode(sub){
 // startGame() bakes into game.config.difficulty for the duration of the session.
 function setCheckoutTrainerDifficulty(tier){
   setup.checkoutTrainerDifficulty = tier;
-  document.getElementById('checkout-trainer-difficulty-under40').setAttribute('aria-pressed', tier==='under40');
-  document.getElementById('checkout-trainer-difficulty-under100').setAttribute('aria-pressed', tier==='under100');
-  document.getElementById('checkout-trainer-difficulty-over100').setAttribute('aria-pressed', tier==='over100');
-  document.getElementById('checkout-trainer-difficulty-full').setAttribute('aria-pressed', tier==='full');
+  setPressed({under40:'checkout-trainer-difficulty-under40', under100:'checkout-trainer-difficulty-under100',
+    over100:'checkout-trainer-difficulty-over100', full:'checkout-trainer-difficulty-full'}, tier);
 }
 
 // Checkout Trainer's trick-question toggle (docs/archive/checkout-trainer-roadmap.md
@@ -3453,8 +3445,7 @@ function setCheckoutTrainerDifficulty(tier){
 // not something to spring on someone doing straightforward recall practice.
 function setCheckoutTrainerTricks(on){
   setup.checkoutTrainerTricks = !!on;
-  document.getElementById('checkout-trainer-tricks-off').setAttribute('aria-pressed', !on);
-  document.getElementById('checkout-trainer-tricks-on').setAttribute('aria-pressed', !!on);
+  setPressed({false:'checkout-trainer-tricks-off', true:'checkout-trainer-tricks-on'}, !!on);
   document.getElementById('checkout-trainer-tricks-desc').textContent = on
     ? 'About 1 target in 8 will be a bogey number with no possible 3-dart checkout — spot it and press "No possible checkout" instead of answering. Bogey numbers only exist above 100, so the Under 40/Under 100 ranges are unaffected.'
     : 'Every target has a real checkout. Turn trick questions on to occasionally face a bogey number where the right answer is calling it impossible.';
@@ -4370,10 +4361,7 @@ function setKillerLives(n){
 const HALVE_IT_MAX_ROUNDS = 20;
 function setHalveItPreset(preset){
   setup.halveItPreset = preset;
-  const cc = document.getElementById('halve-it-preset-classic');
-  const cu = document.getElementById('halve-it-preset-custom');
-  if(cc) cc.setAttribute('aria-pressed', String(preset==='classic'));
-  if(cu) cu.setAttribute('aria-pressed', String(preset==='custom'));
+  setPressed({classic:'halve-it-preset-classic', custom:'halve-it-preset-custom'}, preset);
   const body = document.getElementById('halve-it-custom-body');
   if(body) body.hidden = (preset !== 'custom');
   // Seed the custom list from the classic default the first time it's opened empty, so the
@@ -4537,9 +4525,7 @@ function applyLeagueGameSelection(){
   if(chosen.gameType === 'cricket'){
     setup.cricketPreset = chosen.category === 'Custom Cricket' ? 'custom' : 'classic';
     if(setup.cricketPreset === 'custom' && setup.cricketCustomNumbers.length===0) fillCricketClassicIntoCustom();
-    const cc = document.getElementById('cricket-preset-classic'), cu = document.getElementById('cricket-preset-custom');
-    if(cc) cc.setAttribute('aria-pressed', setup.cricketPreset==='classic');
-    if(cu) cu.setAttribute('aria-pressed', setup.cricketPreset==='custom');
+    setPressed({classic:'cricket-preset-classic', custom:'cricket-preset-custom'}, setup.cricketPreset);
     const body = document.getElementById('cricket-custom-body');
     if(body) body.hidden = (setup.cricketPreset !== 'custom');
     // League play is always Standard Cricket for now
@@ -4792,8 +4778,7 @@ function showSetupStep(n){
 }
 function setCricketPreset(preset){
   setup.cricketPreset = preset;
-  document.getElementById('cricket-preset-classic').setAttribute('aria-pressed', preset==='classic');
-  document.getElementById('cricket-preset-custom').setAttribute('aria-pressed', preset==='custom');
+  setPressed({classic:'cricket-preset-classic', custom:'cricket-preset-custom'}, preset);
   document.getElementById('cricket-custom-body').hidden = (preset !== 'custom');
   if(preset === 'custom' && setup.cricketCustomNumbers.length===0) fillCricketClassicIntoCustom();
 }
@@ -4804,8 +4789,7 @@ function setCricketPreset(preset){
 // open opponent at once) actually shows up.
 function setCricketVariant(variant){
   setup.cricketVariant = variant;
-  document.getElementById('cricket-variant-standard').setAttribute('aria-pressed', variant==='standard');
-  document.getElementById('cricket-variant-cutthroat').setAttribute('aria-pressed', variant==='cutthroat');
+  setPressed({standard:'cricket-variant-standard', cutthroat:'cricket-variant-cutthroat'}, variant);
   const blurb = document.getElementById('cricket-variant-blurb');
   if(blurb) blurb.textContent = variant==='cutthroat'
     ? "Closing a number an opponent hasn't puts YOUR points on every opponent who still has it open instead — lowest points wins. Shines with 3+ players."
@@ -16239,6 +16223,17 @@ function escapeJs(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")
 // single-quoted JS string literal, escapeHtml() keeps it from breaking out
 // of the double-quoted HTML onclick="..." attribute it lives inside.
 function jsArg(s){ return escapeHtml(escapeJs(s)); }
+// Sets aria-pressed on a segmented control's buttons from an {key: elementId}
+// map — the pressed key gets 'true', every other key in the map gets 'false'
+// (docs/code-quality-roadmap.md item 52; ~10 sites previously hand-enumerated
+// one setAttribute call per button). Missing elements are skipped individually
+// rather than aborting the whole group.
+function setPressed(idsByKey, chosenKey){
+  Object.entries(idsByKey).forEach(([key, id]) => {
+    const el = document.getElementById(id);
+    if(el) el.setAttribute('aria-pressed', String(key === String(chosenKey)));
+  });
+}
 
 /* ---------- in-app dialogs (native confirm/prompt are blocked in the sandbox) ---------- */
 function closeModal(){ const o=document.getElementById('modal'); if(o) o.hidden=true; document.getElementById('modal-body').innerHTML=''; }
@@ -16343,8 +16338,8 @@ function uiAddPlayer(onSubmit){
      <input type="text" id="ap-name" maxlength="24" style="margin-bottom:14px">
      <label class="field">Finish rule</label>
      <div class="seg out-seg" role="group" aria-label="Finish rule" style="margin-bottom:6px">
-       <button type="button" aria-pressed="true" id="ap-out-double" onclick="document.getElementById('ap-out-double').setAttribute('aria-pressed','true');document.getElementById('ap-out-single').setAttribute('aria-pressed','false')">Double out</button>
-       <button type="button" aria-pressed="false" id="ap-out-single" onclick="document.getElementById('ap-out-single').setAttribute('aria-pressed','true');document.getElementById('ap-out-double').setAttribute('aria-pressed','false')">Single out</button>
+       <button type="button" aria-pressed="true" id="ap-out-double" onclick="setPressed({double:'ap-out-double',single:'ap-out-single'},'double')">Double out</button>
+       <button type="button" aria-pressed="false" id="ap-out-single" onclick="setPressed({double:'ap-out-double',single:'ap-out-single'},'single')">Single out</button>
      </div>
      <p class="settings-intro">
        Double out means the final dart of a leg must land on a double (or the bullseye) to win — the standard tournament rule. Single out means any score that brings the player to exactly zero wins, no double required — easier for beginners.
