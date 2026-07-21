@@ -1,0 +1,19 @@
+services:
+  darts-ui-testing:
+    build: .
+    container_name: oche-ui-testing
+    ports:
+      - "8066:8066"          # ui-testing branch — http://<your-server>:8066
+    volumes:
+      - ./darts_data_ui_testing:/data
+    environment:
+      - PORT=8066
+      - DARTS_DB=/data/darts.db
+      - COOKIE_SECURE=false   # set true if served over HTTPS (e.g. reverse proxy)
+      - OCHE_REQUIRE_AUTH=true   # zero-trust default; set false only for a fully-trusted LAN — see README.md
+      # - TRUST_PROXY=true       # only if behind a reverse proxy YOU control
+      # - HA_BLOCK_PRIVATE=true  # only to also block outbound HA requests to private/LAN IPs
+    # See docker-compose.yml for why a full read-only/cap_drop:[ALL] setup isn't used here.
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped

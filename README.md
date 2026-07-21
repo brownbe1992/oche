@@ -75,6 +75,20 @@ internet" below either way:
 docker compose -f docker-compose.live-test.yml up -d --build
 ```
 
+### UI testing environment
+
+`docker-compose.ui-testing.yml` runs whatever's checked out on the `ui-testing` branch, on
+port **8066** with its own isolated database — same pattern as the dev compose file above,
+just pointed at a different branch/port pairing:
+
+```bash
+docker compose -f docker-compose.ui-testing.yml up -d --build
+```
+
+**Port note:** this shares port 8066 with the live-test compose file above. Don't run both
+on the same host at once without changing one of the two ports (and the matching `PORT=` env
+var) first.
+
 ### Port
 
 Change the port by editing `docker-compose.yml` — update both sides of `"8046:8046"` and the `PORT=` env var to the same number.
@@ -1875,10 +1889,11 @@ oche/
 │   ├── index.html    The entire app — one self-contained HTML file
 │   └── display.html  Read-only live scoreboard for a second screen
 ├── docker-compose.yml
-├── docker-compose.dev.yml        Dev instance on port 8056
-├── docker-compose.live-test.yml  Internet-facing test server on port 8066
-├── docker-compose.portainer.yml  No-build variant for Portainer/Unraid
-├── docker-entrypoint.sh          Fixes /data ownership, then drops to non-root
+├── docker-compose.dev.yml         Dev instance on port 8056
+├── docker-compose.ui-testing.yml  ui-testing branch instance on port 8066
+├── docker-compose.live-test.yml   Internet-facing test server on port 8066
+├── docker-compose.portainer.yml   No-build variant for Portainer/Unraid
+├── docker-entrypoint.sh           Fixes /data ownership, then drops to non-root
 └── Dockerfile
 ```
 
