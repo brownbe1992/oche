@@ -132,6 +132,18 @@
   .meta b{color:var(--ink);font-weight:600}
   .standing{margin-left:auto;color:var(--gold);font-weight:700;letter-spacing:.04em;font-size:2vmin}
 
+  /* Daily Challenge card extras (frontend/index.html's GAME_TYPES.x01.liveModeState) —
+     replaces the normal Darts Thrown block, since "session darts" means nothing for
+     a one-off attempt; shows whichever number actually decides the challenge instead. */
+  .challenge-metric{font-family:'Bebas Neue';font-size:2.6vmin;color:var(--gold);letter-spacing:.03em;margin-bottom:.6vmin}
+  .challenge-pips{display:flex;gap:.8vmin;margin-bottom:.6vmin}
+  .pip{width:1.6vmin;height:1.6vmin;border-radius:50%;border:1.5px solid var(--wire);background:transparent}
+  .pip.done{background:var(--gold);border-color:var(--gold)}
+  .pip.live{border-color:var(--gold);box-shadow:0 0 0 2px rgba(217,180,106,.25)}
+  .challenge-chips{display:flex;flex-wrap:wrap;gap:.6vmin}
+  .challenge-chips .chip{font-family:'Bebas Neue';font-size:1.8vmin;letter-spacing:.03em;color:#1a160c;
+    background:var(--gold);border-radius:.6vmin;padding:.2vmin .8vmin}
+
   .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
     clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
@@ -798,6 +810,14 @@ function fmtText(s){
   // existing gameType-style snapshot fields — same shape as everything else
   // fmtText already reads off `s`, no new rendering path needed.
   const roundPrefix = s.tournamentRoundLabel ? `${esc(s.tournamentRoundLabel)} &nbsp;·&nbsp; ` : '';
+  // Daily Challenge (frontend/index.html's GAME_TYPES.x01.liveModeState): the
+  // top bar would otherwise show the rigged starting score as if it were a
+  // real category ("1000", "501", or a checkout target) — show the actual
+  // challenge instead. Still X01 underneath, so everything else about the bar
+  // (practice, leg number) stays as-is.
+  if(s.modeState && s.modeState.challengeFormat){
+    return `🎯 <b>Daily Challenge</b> &nbsp;·&nbsp; ${esc(s.modeState.challengeLabel)}`;
+  }
   if(s.practice){
     return `${roundPrefix}<b>${cat}</b> &nbsp; Practice &nbsp;·&nbsp; Leg ${legNo}`;
   }
@@ -1020,6 +1040,19 @@ const renderers = {
       // H2H standing (sets/legs) now lives in the match bar above the grid, not here —
       // showing it twice was redundant, and the match bar's boxed chips are more legible.
       const standing = s.practice ? `Leg ${num(s.legNo)}` : '';
+      // Daily Challenge (frontend/index.html's GAME_TYPES.x01.liveModeState) —
+      // still an X01 game underneath, but three of the six formats (Bullseye
+      // Gauntlet, Treble Run, Steady Hand) use a deliberately-too-high filler
+      // starting score so the engine never busts/wins mid-attempt, and the
+      // real countdown score would be meaningless to show. Those three swap
+      // the hero number for the actual challenge metric; the other three
+      // (Checkout Sprint, Speed to Zero, The Long Game) keep the real
+      // countdown — it's genuinely what's being chased — and add the metric
+      // as a secondary line instead.
+      const cm = (s.modeState && s.modeState.challengeFormat) ? s.modeState : null;
+      const THREE_VISIT_CHALLENGE_FORMATS = new Set(['bullseye_gauntlet','treble_run','steady_hand']);
+      const isThreeVisitChallenge = cm && THREE_VISIT_CHALLENGE_FORMATS.has(cm.challengeFormat);
+      const heroScore = isThreeVisitChallenge ? cm.challengeMetric : p.score;
       let throwbox = '';
       if(active){
         const darts = Array.isArray(s.darts) ? s.darts : [];
@@ -1046,6 +1079,21 @@ const renderers = {
                  <div class="dart-count-row"><span class="dart-count-val">${num(p.gameDarts)}</span><span class="dart-count-lbl">Game</span></div>`
             }
           </div>`;
+      // Daily Challenge's own progress block, replacing dartCounts above — "Set
+      // darts"/"Session darts" mean nothing for a one-off attempt, so this shows
+      // whichever numbers actually decide the challenge instead: the metric label
+      // (already fully formatted client-side — "3 bulls", "2 trebles", "45 pts",
+      // "7 darts", "2 visits"), a 3-visit progress pip row for the three formats
+      // that run exactly 3 visits, and (Treble Run only) which numbers so far.
+      const challengeBox = !cm ? '' : `
+          <div class="dart-counts">
+            <div class="challenge-metric">${esc(cm.challengeMetricLabel)}</div>
+            ${isThreeVisitChallenge ? `<div class="challenge-pips">${[0,1,2].map(vi=>
+              `<span class="pip ${vi<cm.challengeVisitsCompleted?'done':(active && vi===cm.challengeVisitsCompleted)?'live':''}"></span>`
+            ).join('')}</div>` : ''}
+            ${(cm.challengeFormat==='treble_run' && cm.challengeTrebleNumbers && cm.challengeTrebleNumbers.length)
+              ? `<div class="challenge-chips">${cm.challengeTrebleNumbers.map(n=>`<span class="chip">T${n}</span>`).join('')}</div>` : ''}
+          </div>`;
       const metaParts = [];
       if(L.showAverages) metaParts.push(`<span>leg <b>${p.legAvg!=null?esc(p.legAvg):'—'}</b></span><span>game <b>${p.gameAvg!=null?esc(p.gameAvg):'—'}</b></span>`);
       if(standing) metaParts.push(`<span class="standing">${standing}</span>`);
@@ -1056,12 +1104,13 @@ const renderers = {
         <div>
           <div class="prow1">
             <span class="pname">${escapeHtml(p.name)}</span>
+            ${cm ? `<span class="ptag">🎯 CHALLENGE</span>` : ''}
             ${L.showTag ? `<span class="ptag">${p.out==='double'?'DOUBLE OUT':'SINGLE OUT'}</span>` : ''}
             ${p.startScore != null && String(p.startScore) !== String(s.category) ? `<span class="ptag" title="Handicap: started this leg from ${num(p.startScore)} instead of ${esc(s.category)}">STARTED ${num(p.startScore)}</span>` : ''}
             ${active?'<span class="throwflag">▸ throwing</span>':''}
           </div>
-          <div class="score">${num(p.score)}</div>
-          ${dartCounts}
+          <div class="score">${num(heroScore)}</div>
+          ${cm ? challengeBox : dartCounts}
         </div>
         ${meta}
         ${throwbox}

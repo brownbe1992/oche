@@ -2263,6 +2263,45 @@ distinction server-side, for personal-best comparison:
   bullseye_gauntlet:'desc', treble_run:'desc', steady_hand:'desc' }
 ```
 
+### Live Scoreboard
+
+A Daily Challenge attempt is plain X01 underneath (`game.gameType` stays
+`'x01'` the whole attempt), so without extra plumbing `/display` would show
+the raw rigged starting score as if it were a real category — literally
+"1000" for the three filler-start formats. `GAME_TYPES.x01.liveModeState`
+(`frontend/index.html`) is the fix: `null` for every ordinary X01 game
+(`activeChallenge` is only ever non-null during a real attempt), but during a
+challenge it returns:
+
+```js
+{ challengeFormat, challengeTarget, challengeLabel,       // e.g. "Checkout 121"
+  challengeMetric, challengeMetricLabel,                  // e.g. 3, "3 bulls"
+  challengeVisitsCompleted,                               // legVisitLogs.length
+  challengeTrebleNumbers }                                // Treble Run only
+```
+
+`renderers.x01.card()` (`frontend/display.html`) branches on
+`s.modeState.challengeFormat`:
+- **Bullseye Gauntlet / Treble Run / Steady Hand** (the three filler-start,
+  exactly-3-visit formats): the hero `.score` number becomes the challenge
+  metric itself (bulls hit / distinct trebles / capped running total) instead
+  of the meaningless filler score, with `challengeMetricLabel` as a caption
+  and a 3-dot visit-progress row (`.challenge-pips` — filled for each
+  completed visit, a ringed "live" dot for the visit in progress). Treble Run
+  additionally shows which numbers (`T20`, `T19`, …) as small chips.
+- **Checkout Sprint / Speed to Zero / The Long Game**: the hero stays the real
+  remaining-score countdown (genuinely meaningful — checkout hints keep
+  working unchanged) with `challengeMetricLabel` (darts thrown, or visits used
+  for The Long Game) as the caption instead. No visit pips (Checkout
+  Sprint/Speed to Zero aren't visit-capped; The Long Game's visit count is
+  open-ended, not a fixed 3).
+- `fmtText()`'s top bar shows "🎯 Daily Challenge · `challengeLabel`" instead
+  of the raw category, and every card gets a "🎯 CHALLENGE" tag next to the
+  player name.
+
+No `ALLOWED_LIVE_KEYS` change needed — `modeState` is already an
+unrestricted-shape passthrough (§7).
+
 ### One attempt per player per calendar day
 
 `daily_challenge_attempts` has `UNIQUE(player_id, challenge_date)`. Enforced at

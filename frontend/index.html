@@ -12494,6 +12494,38 @@ const GAME_TYPES = {
         overlay: { current: r.current, starter: r.starter, setNo: r.setNo, legNo: r.legNo },
         statusMsg: `Resumed — set ${r.setNo} leg ${r.legNo}, ${players[r.current].name} to throw, ${players[r.current].score} left.`,
       };
+    },
+    // Daily Challenge is plain X01 underneath (setMode('challenge') forces
+    // gameType='x01' with a rigged starting score — see startGame()'s
+    // challengeStart computation) — game.gameType stays 'x01' the whole
+    // attempt, so liveSnapshot()'s modeState is the only place a challenge
+    // attempt can tell /display anything beyond a generic X01 countdown.
+    // Without this, the live scoreboard showed the raw starting score (e.g.
+    // "1000" for the three formats that use a too-high filler so the X01
+    // engine never busts/wins mid-challenge) as if it were a real target.
+    // null for every ordinary X01 game (activeChallenge is null except during
+    // an actual challenge attempt), so normal X01 play is untouched.
+    liveModeState: (game) => {
+      if(!activeChallenge || !game.players[0] || activeChallenge.player !== game.players[0].name) return null;
+      const p = game.players[0];
+      const fmt = activeChallenge.format;
+      const visitLogs = game.legVisitLogs || [];
+      const dartsSoFar = visitLogs.flat();
+      let metric;
+      if(fmt==='bullseye_gauntlet')      metric = dartsSoFar.filter(d=>d.sector===25).length;
+      else if(fmt==='treble_run')        metric = new Set(dartsSoFar.filter(d=>d.isTreble).map(d=>d.sector)).size;
+      else if(fmt==='steady_hand')       metric = visitLogs.reduce((sum,visit)=>{ const t=visit.reduce((x,d)=>x+d.value,0); return sum+(t<=20?t:0); }, 0);
+      else if(fmt==='long_game')         metric = p.legVisits;
+      else                               metric = p.legDarts; // checkout_sprint / speed_to_zero
+      return {
+        challengeFormat: fmt,
+        challengeTarget: activeChallenge.target,
+        challengeLabel: challengeShortLabel(fmt, activeChallenge.target),
+        challengeMetric: metric,
+        challengeMetricLabel: challengeMetricLabel(fmt, metric),
+        challengeVisitsCompleted: visitLogs.length,
+        challengeTrebleNumbers: fmt==='treble_run' ? [...new Set(dartsSoFar.filter(d=>d.isTreble).map(d=>d.sector))] : null,
+      };
     }
   },
   cricket: {
