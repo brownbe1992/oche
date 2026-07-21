@@ -9929,6 +9929,37 @@ function updateMultUI(){
 // Dartboard-mode-only positional metadata, stamped onto the dart object pushed to
 // game.darts alongside sector/mult/thrownAt — Pad mode's calls (throwDart(n)) simply
 // omit them, leaving every field undefined exactly as before this feature existed.
+
+// Shared by throwDart()/throwDartPressureChamber()/throwDartCheckoutTrainer()
+// (docs/code-quality-roadmap.md item 56) — the double/treble-Miss pad shortcut
+// (fills that many slots at once, up to the 3-dart cap) plus the ordinary
+// single-dart construction + zone/missZone/missDepth/bounced stamping, both
+// previously copy-pasted identically in all three call sites.
+function pushThrownDarts(darts, sector, mult, zone, missZone, missDepth, bounced){
+  if(!bounced && sector === 0 && mult > 1){
+    const count = Math.min(mult, 3 - darts.length);
+    for(let i = 0; i < count; i++) darts.push(makeDart(0, 1));
+  } else {
+    const d = makeDart(sector, bounced ? 1 : mult);
+    if(zone) d.zone = zone;
+    if(missZone != null){ d.missZone = missZone; d.missDepth = missDepth; }
+    if(bounced) d.bounced = true;
+    darts.push(d);
+  }
+}
+
+// Shared by every per-dart-commit game type's single-dart DB.recordTurn() call
+// (Killer, Doubles Practice, Just Chuckin' It, guided Around the Clock/World —
+// docs/code-quality-roadmap.md item 56): the zone/missZone/missDepth/bounced
+// stamping on the lone darts[] entry was identical in all five, with only the
+// surrounding fields (scored/bust/checkoutPoints/legWon/affectedPlayer/...)
+// varying by mode. `fields` carries those; `dart` supplies sector/mult/thrownAt.
+function recordSingleDartTurn(fields, dart, zone, missZone, missDepth, bounced){
+  DB.recordTurn({ ...fields,
+    darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt,
+      zone: zone || null, missZone: missZone != null ? missZone : null, missDepth: missDepth || null, bounced: !!bounced }] });
+}
+
 function throwDart(sector, zone, missZone, missDepth, bounced){
   if(game.gameType === 'doubles_practice') return throwDartDoublesPractice(sector, zone, missZone, missDepth, bounced);
   if(game.gameType === 'chuckin') return throwDartChuckin(sector, zone, missZone, missDepth, bounced);
@@ -9938,20 +9969,10 @@ function throwDart(sector, zone, missZone, missDepth, bounced){
   if(game.gameType === 'killer') return throwDartKiller(sector, zone, missZone, missDepth, bounced);
   if(game.gameType === 'pressure_chamber') return throwDartPressureChamber(sector, zone, missZone, missDepth, bounced);
   if(game.darts.length>=3 || game.busted || game.won) return;
-  // The double/treble-Miss shortcut (fill N slots at once) is a Pad-mode-only
-  // convenience — a bounce-out is always exactly one dart, regardless of whatever
-  // multiplier happens to still be selected, so it bypasses this branch entirely.
-  if(!bounced && sector === 0 && mult > 1){
-    // Double/Treble Miss fills that many slots at once
-    const count = Math.min(mult, 3 - game.darts.length);
-    for(let i = 0; i < count; i++) game.darts.push(makeDart(0, 1));
-  } else {
-    const d = makeDart(sector, bounced ? 1 : mult);
-    if(zone) d.zone = zone;
-    if(missZone != null){ d.missZone = missZone; d.missDepth = missDepth; }
-    if(bounced) d.bounced = true;
-    game.darts.push(d);
-  }
+  // A bounce-out is always exactly one dart, regardless of whatever multiplier
+  // happens to still be selected — pushThrownDarts()'s own double/treble-Miss
+  // shortcut check (!bounced && ...) already bypasses it in that case.
+  pushThrownDarts(game.darts, sector, mult, zone, missZone, missDepth, bounced);
   mult=1; updateMultUI();
 
   if(game.gameType === 'cricket'){
@@ -14085,16 +14106,7 @@ function advanceKillerTurn(){
    function's own comment for the finish-target judgment call. */
 function throwDartPressureChamber(sector, zone, missZone, missDepth, bounced){
   if(game.darts.length>=3 || game.busted || game.won) return;
-  if(!bounced && sector === 0 && mult > 1){
-    const count = Math.min(mult, 3 - game.darts.length);
-    for(let i=0;i<count;i++) game.darts.push(makeDart(0,1));
-  } else {
-    const d = makeDart(sector, bounced ? 1 : mult);
-    if(zone) d.zone = zone;
-    if(missZone != null){ d.missZone = missZone; d.missDepth = missDepth; }
-    if(bounced) d.bounced = true;
-    game.darts.push(d);
-  }
+  pushThrownDarts(game.darts, sector, mult, zone, missZone, missDepth, bounced);
   mult=1; updateMultUI();
 
   const maxRounds = (game.config && game.config.rounds) || PRESSURE_ROUNDS;
@@ -14190,11 +14202,9 @@ function throwDartKiller(sector, zone, missZone, missDepth, bounced){
 
   thrower.legDarts += 1; thrower.setDarts += 1; thrower.gameDarts += 1;
 
-  DB.recordTurn({ player:thrower.name, set:game.setNo, leg:game.legNo,
+  recordSingleDartTurn({ player:thrower.name, set:game.setNo, leg:game.legNo,
     scored: delta, bust:false, checkout:false, checkoutPoints:null,
-    affectedPlayer: ev ? ev.affectedName : null,
-    darts: [{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt,
-      zone: dart.zone || null, missZone: dart.missZone != null ? dart.missZone : null, missDepth: dart.missDepth || null, bounced: !!dart.bounced }] });
+    affectedPlayer: ev ? ev.affectedName : null }, dart, zone, missZone, missDepth, bounced);
 
   const turnRecord = { player:thrower.name, scored:delta, darts:[dart] };
   game.currentLegTurns.push(turnRecord);
@@ -14657,10 +14667,8 @@ function throwDartDoublesPractice(sector, zone, missZone, missDepth, bounced){
 
   p.roundDarts += 1;
   if(ev.hit) p.roundHits += 1;
-  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
-    scored:0, bust: !!ev.ended, checkout:false, checkoutPoints:null, legWon:false,
-    darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt,
-      zone: zone || null, missZone: missZone != null ? missZone : null, missDepth: missDepth || null, bounced: !!bounced }] });
+  recordSingleDartTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:0, bust: !!ev.ended, checkout:false, checkoutPoints:null, legWon:false }, dart, zone, missZone, missDepth, bounced);
   game.dpLastDart = { label:dart.label, hit:ev.hit, ended:ev.ended, reason:ev.reason };
   if(ev.ended){
     game.roundOver = true;
@@ -14883,10 +14891,8 @@ function throwDartChuckin(sector, zone, missZone, missDepth, bounced){
     p.dartBuffer = [];
   }
 
-  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
-    scored:0, bust:false, checkout:false, checkoutPoints:null, legWon:false,
-    darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt,
-      zone: zone || null, missZone: missZone != null ? missZone : null, missDepth: missDepth || null, bounced: !!bounced }] });
+  recordSingleDartTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:0, bust:false, checkout:false, checkoutPoints:null, legWon:false }, dart, zone, missZone, missDepth, bounced);
   game.chuckinLastDart = { label:dart.label, isTreble:!!dart.isTreble };
   announce(`${dart.label}. ${p.sessionDarts} dart${p.sessionDarts===1?'':'s'} this session.`);
   renderGameChuckin();
@@ -15012,18 +15018,7 @@ function throwDartCheckoutTrainer(sector, zone, missZone, missDepth, bounced){
   if(game.config.mode === 'blitz' && blitzDeadlinePassed(game.blitzDeadline, Date.now())){
     return endBlitzRun();
   }
-  // The double/treble-Miss shortcut (fill N slots at once) is a Pad-mode-only
-  // convenience — mirrors the identical block in the generic throwDart() path.
-  if(!bounced && sector === 0 && mult > 1){
-    const count = Math.min(mult, 3 - game.darts.length);
-    for(let i=0;i<count;i++) game.darts.push(makeDart(0,1));
-  } else {
-    const d = makeDart(sector, bounced ? 1 : mult);
-    if(zone) d.zone = zone;
-    if(missZone != null){ d.missZone = missZone; d.missDepth = missDepth; }
-    if(bounced) d.bounced = true;
-    game.darts.push(d);
-  }
+  pushThrownDarts(game.darts, sector, mult, zone, missZone, missDepth, bounced);
   mult=1; updateMultUI();
 
   const p = game.players[0];
@@ -15467,10 +15462,8 @@ function throwDartAroundTheClock(sector, zone, missZone, missDepth, bounced){
 
   p.roundDarts += 1;
   if(ev.isNewHit) p.hitSet.add(dart.sector);
-  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
-    scored:0, bust: !!ev.completed, checkout:false, checkoutPoints:null, legWon:false,
-    darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt,
-      zone: zone || null, missZone: missZone != null ? missZone : null, missDepth: missDepth || null, bounced: !!bounced }] });
+  recordSingleDartTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:0, bust: !!ev.completed, checkout:false, checkoutPoints:null, legWon:false }, dart, zone, missZone, missDepth, bounced);
   game.atcLastDart = { label:dart.label, isNewHit:ev.isNewHit, completed:ev.completed };
   const _snap = game.lastTurnSnapshot;
   if(ev.completed){
@@ -15615,10 +15608,8 @@ function throwDartAroundTheWorld(sector, zone, missZone, missDepth, bounced){
 
   p.sessionDarts += 1;
   if(isNewLifetimeOutcome) p.sessionHitSet.add(outcomeKey);
-  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
-    scored:0, bust:false, checkout:false, checkoutPoints:null, legWon:false,
-    darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt,
-      zone: zone || null, missZone: missZone != null ? missZone : null, missDepth: missDepth || null, bounced: !!bounced }] });
+  recordSingleDartTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:0, bust:false, checkout:false, checkoutPoints:null, legWon:false }, dart, zone, missZone, missDepth, bounced);
   game.atwLastDart = { label:dart.label, isNewLifetimeOutcome };
   const progress = p.baselineHitSet.size + p.sessionHitSet.size;
   announce(`${dart.label}. ${progress} of 63 lifetime outcomes.`);

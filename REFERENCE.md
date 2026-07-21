@@ -630,18 +630,24 @@ groups).
 `renderGameShell` all branch on this game type):
 
 ```js
-function throwDartChuckin(sector){
-  const dart = makeDart(sector, mult);
+function throwDartChuckin(sector, zone, missZone, missDepth, bounced){
+  const dart = makeDart(sector, bounced ? 1 : mult);
   const p = game.players[0];
   p.sessionDarts += 1;
   if(dart.isTreble) p.sessionTrebles += 1;
-  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
-    scored:0, bust:false, checkout:false, checkoutPoints:null, legWon:false,
-    darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt }] });
+  recordSingleDartTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:0, bust:false, checkout:false, checkoutPoints:null, legWon:false }, dart, zone, missZone, missDepth, bounced);
   game.chuckinLastDart = { label:dart.label, isTreble:!!dart.isTreble };
   checkChuckinMilestones(p);
 }
 ```
+
+(`recordSingleDartTurn()` — docs/code-quality-roadmap.md item 56 — is the shared
+`DB.recordTurn()` wrapper for every per-dart-commit game type: Killer, Doubles
+Practice, Just Chuckin' It, and guided Around the Clock/World. It stamps the lone
+`darts[]` entry's `zone`/`missZone`/`missDepth`/`bounced` fields identically for
+all five; only the surrounding fields — `scored`/`bust`/`checkoutPoints`/`legWon`/
+`affectedPlayer` — vary by mode.)
 
 - Every dart is simply recorded — `scored`/`bust`/`checkout`/`legWon` are always
   `0`/`false`, since this mode has no numeric score and never busts or wins.
