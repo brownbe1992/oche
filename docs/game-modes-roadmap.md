@@ -1017,6 +1017,57 @@ passive badges are unchanged and keep firing exactly as before, from any mode.
   per-dart-snapshot `badgeReverts`/`voided` undo-revocation mechanism every
   other moment-style badge uses, so undoing the completing dart un-earns it.
 
+### Around the Clock — H2H variant (proposed, not started)
+
+Not the same proposal as the "Round the Clock" backlog bullet above (§Other
+known variants) — that one additionally changes the *rule* (numbers hit
+strictly in order, 1 through 20, then bull). This item leaves today's built
+drill's rules completely alone (20 numbers, any order, singles only, no bull —
+`evaluateDartAroundTheClock()`, `frontend/scoring.js:111-116`) and only adds a
+second player racing the same board: whoever completes their own 20-number set
+first wins the leg. If "in order + bull" is ever wanted too, that's still a
+separate, later decision — this item doesn't force it.
+
+**Why it isn't H2H today**: `GAME_TYPES.around_the_clock` declares `soloOnly:
+true` (`frontend/index.html:12724`), and every function in the mode —
+`throwDartAroundTheClock()`, `renderGameAroundTheClock()`,
+`newMatchPlayerAroundTheClock()` — reads `game.players[0]` directly. There is
+no `game.current`/turn-rotation concept in this mode at all, unlike every
+multiplayer type (X01/Cricket/…) or Killer.
+
+**Closest precedent**: Killer (`docs/open-roadmap-items.md`, "H2H-only"
+counterpart to `soloOnly`) is the most recent mode built genuinely H2H-first —
+`h2hOnly: true`, per-dart cross-player evaluation (`evaluateDartKiller()`), a
+real `game.current` turn-rotation index, and best-of-N legs/sets via the
+shared `advanceLegSetGame()` helper.
+
+**What would need to change**, based on that precedent:
+- Drop `soloOnly: true`; decide whether it becomes `h2hOnly` (competitive-only,
+  like Killer) or stays optionally-solo (practice drill AND a real H2H match,
+  like X01) — leaning toward the latter, since the existing drill is worth
+  keeping exactly as-is for solo practice.
+- Generalize the per-dart/render functions off the hardcoded `game.players[0]`
+  to `game.players[game.current]`, adding real turn advancement (currently
+  absent — every dart in today's drill is thrown by the same fixed player).
+- Decide the win condition: first player to complete all 20 wins the leg
+  outright (a race, no elimination), which is the simplest reading of "H2H"
+  here and doesn't require Killer's elimination/lives machinery at all.
+- The data model mostly already generalizes for free: `playerSnapshotAroundTheClock()`
+  is already per-player and called via `.map()` across `game.players`
+  (`frontend/index.html:15095-15100`), and `hitSet` (a `Set` per player) has no
+  single-player assumption baked in — the gap is purely in the throw/render
+  dispatch, not the snapshot/stats shape.
+- `getAroundTheClockStatBubbles()`/Personal Bests and the two Home page
+  leaderboards (Fastest Completion, Most Completions) are today computed
+  practice-drill-only; decide whether an H2H race's completion also counts
+  toward them, or gets its own win/loss tracking the way Killer's `kills`/
+  `eliminated` fields do.
+- The live scoreboard's dartboard visualization (see the "big dartboard with
+  checkmarks" item elsewhere on this tracker) should be designed with 2+
+  simultaneous progress states in mind from the start, rather than retrofitted
+  — e.g. two overlaid marker styles, or a board per player, so this item and
+  that one aren't sequenced awkwardly against each other.
+
 ## New Game / Scoring screen changes
 
 New Game gets a game-type selector as a top-level choice (alongside the existing
@@ -1267,3 +1318,8 @@ anywhere else in the app, which is a bigger lift than the two badges above.
   generalize by literally listing every `GAME_TYPES` entry, or only the ones a
   given player has actually played (so a player who's never touched Cricket
   doesn't see an all-empty Cricket tab)? Leans toward the latter, not decided.
+- **New**: Around the Clock's H2H variant (proposed above, "Around the Clock —
+  H2H variant") — whether it's `soloOnly`-and-also-H2H (like X01) or becomes
+  `h2hOnly` (like Killer), and whether a completed H2H race should count toward
+  the existing practice-drill stats/leaderboards or get its own win/loss
+  tracking. Not decided; not started.
