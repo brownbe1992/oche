@@ -28,12 +28,24 @@ const INDEX_HTML_PATH = path.join(__dirname, '..', '..', 'frontend', 'index.html
 function loadBuildDartHeatmap() {
   const src = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
   const dbSectorsMatch = src.match(/^const DB_SECTORS = \[[^\]]*\];/m);
+  // BOARD_GEOM: the shared CX/CY/R/xy/annulus geometry kernel buildDartHeatmap()
+  // destructures from (also used by buildDartboard()) — extracted the same "real
+  // source, not a hand-copied duplicate" way as everything else here. Missing
+  // from this harness since the test file was first written, which is why every
+  // subtest below failed with "BOARD_GEOM is not defined" regardless of which
+  // behavior it was actually trying to check.
+  const boardGeomMatch = src.match(/^const BOARD_GEOM = \(\(\) => \{[\s\S]*?\n\}\)\(\);/m);
+  // escapeHtml: buildDartHeatmap()'s tooltip text goes through this before being
+  // embedded in the SVG; missing from this harness for the same reason BOARD_GEOM was.
+  const escapeHtmlMatch = src.match(/^function escapeHtml\([^\n]*$/m);
   const fnMatch = src.match(/function buildDartHeatmap\(cells, opts\)\{[\s\S]*?\n\}/);
   assert.ok(dbSectorsMatch, 'DB_SECTORS declaration not found in index.html — has it moved/renamed?');
+  assert.ok(boardGeomMatch, 'BOARD_GEOM declaration not found in index.html — has it moved/renamed?');
+  assert.ok(escapeHtmlMatch, 'escapeHtml() not found in index.html — has it moved/renamed?');
   assert.ok(fnMatch, 'buildDartHeatmap() not found in index.html — has it moved/renamed?');
   const context = {};
   vm.createContext(context);
-  vm.runInContext(`${dbSectorsMatch[0]}\n${fnMatch[0]}\nthis.buildDartHeatmap = buildDartHeatmap;`, context);
+  vm.runInContext(`${dbSectorsMatch[0]}\n${boardGeomMatch[0]}\n${escapeHtmlMatch[0]}\n${fnMatch[0]}\nthis.buildDartHeatmap = buildDartHeatmap;`, context);
   return context.buildDartHeatmap;
 }
 

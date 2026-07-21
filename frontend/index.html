@@ -6782,7 +6782,7 @@ const BADGE_INFO = {
   challengeweek:       { icon:'🔥', label:'Challenge Streak: Week', desc:'Complete the Daily Challenge 7 days in a row.', challenge:true },
   challengemonth:      { icon:'🏆', label:'Challenge Streak: Month', desc:'Complete the Daily Challenge 30 days in a row.', challenge:true },
   challengeallformats: { icon:'🗓️', label:'Full Rotation', desc:'Complete every Daily Challenge format at least once.', challenge:true },
-  chuckin180: { icon:'🎯', label:'180!', desc:"Three darts, sixty each — treated as a turn, since Just Chuckin' It otherwise has no turn boundary at all.", chuckin:true },
+  chuckin180: { icon:'🎯', label:'180!', desc:"Three darts, sixty each. Bet you wish that counted in a real game, eh mate?", chuckin:true },
   ghost_slayer:        { icon:'👻', label:'Ghost Slayer', desc:'Beat your ghost opponent — win a race against a replay of one of your own past legs.' },
   tournament_champion:     { icon:'🏆', label:'Champion', desc:'Win a tournament bracket.', tournament:true },
   tournament_giant_slayer: { icon:'⚔️', label:'Giant Slayer (Tournament)', desc:'Beat an opponent seeded 3 or more slots better than you in a tournament match.', tournament:true },
@@ -14698,7 +14698,7 @@ function throwDartChuckin(sector, zone, missZone, missDepth, bounced){
   checkChuckinMilestones(p);
   if(got180){
     queueBadge('chuckin180', p.name);
-    awardRecurringBadge(p.name, 'chuckin180', 'chuckin180', { icon:'🎯', headline:'180!', player:p.name, statLine:"Three darts, sixty each, in Just Chuckin' It" });
+    awardRecurringBadge(p.name, 'chuckin180', 'chuckin180', { icon:'🎯', headline:'180!', player:p.name, statLine:"Bet you wish that counted in a real game, eh mate?" });
   }
 }
 // Undoes the single most recently thrown dart — mirrors undoLastTurnDoublesPractice()'s
