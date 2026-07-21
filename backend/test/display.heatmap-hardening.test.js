@@ -24,12 +24,19 @@ const DISPLAY_HTML_PATH = path.join(__dirname, '..', '..', 'frontend', 'display.
 function loadBuildChuckinLiveHeatmap() {
   const src = fs.readFileSync(DISPLAY_HTML_PATH, 'utf8');
   const dbSectorsMatch = src.match(/^const DB_SECTORS = \[[^\]]*\];/m);
+  // BOARD_GEOM: the shared CX/CY/R/xy/annulus geometry kernel buildChuckinLiveHeatmap()
+  // destructures from, extracted the same "real source, not a hand-copied duplicate"
+  // way as everything else here — added once buildClockBoard() (Around the Clock's
+  // live board) became a second consumer and the geometry was pulled out of
+  // buildChuckinLiveHeatmap()'s own body into this shared constant.
+  const boardGeomMatch = src.match(/^const BOARD_GEOM = \(\(\) => \{[\s\S]*?\n\}\)\(\);/m);
   const fnMatch = src.match(/function buildChuckinLiveHeatmap\(cells\)\{[\s\S]*?\n\}/);
   assert.ok(dbSectorsMatch, 'DB_SECTORS declaration not found in display.html — has it moved/renamed?');
+  assert.ok(boardGeomMatch, 'BOARD_GEOM declaration not found in display.html — has it moved/renamed?');
   assert.ok(fnMatch, 'buildChuckinLiveHeatmap() not found in display.html — has it moved/renamed?');
   const context = {};
   vm.createContext(context);
-  vm.runInContext(`${dbSectorsMatch[0]}\n${fnMatch[0]}\nthis.buildChuckinLiveHeatmap = buildChuckinLiveHeatmap;`, context);
+  vm.runInContext(`${dbSectorsMatch[0]}\n${boardGeomMatch[0]}\n${fnMatch[0]}\nthis.buildChuckinLiveHeatmap = buildChuckinLiveHeatmap;`, context);
   return context.buildChuckinLiveHeatmap;
 }
 

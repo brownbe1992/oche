@@ -178,6 +178,13 @@
   .chuckin-board{flex:none;width:40vmin;max-width:44%}
   body.orientation-portrait .chuckin-board{width:100%;max-width:62vmin;margin:0 auto}
   .chuckin-board svg{width:100%;height:auto;display:block}
+  /* Around the Clock's own board is deliberately bigger than Chuckin's heatmap
+     above — a real progress board someone reads across a room, not a compact
+     detail panel — reusing .chuckin-layout's flex row/portrait-stack shell but
+     with its own width. */
+  .clock-board{flex:none;width:60vmin;max-width:60%}
+  body.orientation-portrait .clock-board{width:100%;max-width:82vmin;margin:0 auto}
+  .clock-board svg{width:100%;height:auto;display:block}
 
   /* darts in hand + checkout */
   .throwbox{margin-top:1.6vmin;border-top:1px dashed var(--wire);padding-top:1.6vmin;display:flex;flex-direction:column;gap:1.2vmin}
@@ -810,8 +817,27 @@ function dartClass(label){
 // Standard dartboard number ordering, clockwise from the top — mirror-copied
 // from frontend/index.html's DB_SECTORS (this file has no shared module with
 // index.html, per the established convention for every other duplicated map
-// above). Feeds buildChuckinLiveHeatmap() below.
+// above). Feeds buildChuckinLiveHeatmap()/buildClockBoard() below.
 const DB_SECTORS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
+// Shared geometry kernel — mirror-copied from frontend/index.html's own
+// BOARD_GEOM (same rationale as DB_SECTORS above: no shared module between the
+// two files). Extracted here, rather than left inlined a second time, once a
+// second consumer (buildClockBoard()) needed the identical CX/CY/R/xy/annulus
+// math buildChuckinLiveHeatmap() already had inlined — a within-file dedup,
+// not a new cross-file sharing mechanism.
+const BOARD_GEOM = (() => {
+  const CX=330, CY=330;
+  const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248, missNear:270, missFar:310 };
+  const DEG = 360/20;
+  const xy = (r, deg) => { const a=(deg-90)*Math.PI/180; return [CX+r*Math.cos(a), CY+r*Math.sin(a)]; };
+  const f = v => v.toFixed(2);
+  const annulus = (r1, r2, s, e) => {
+    const [x1,y1]=xy(r1,s),[x2,y2]=xy(r1,e),[x3,y3]=xy(r2,e),[x4,y4]=xy(r2,s);
+    const lg=e-s>180?1:0;
+    return `M${f(x1)},${f(y1)} A${r1},${r1} 0 ${lg},1 ${f(x2)},${f(y2)} L${f(x3)},${f(y3)} A${r2},${r2} 0 ${lg},0 ${f(x4)},${f(y4)} Z`;
+  };
+  return { CX, CY, R, DEG, xy, f, annulus };
+})();
 // Just Chuckin' It's live, session-only dartboard heatmap — mirror-copied from
 // frontend/index.html's buildChuckinHeatmap() (the Player Profile's lifetime
 // version), stripped of nothing structural: same geometry, same single-hue heat
@@ -874,19 +900,10 @@ function buildChuckinLiveHeatmap(cells){
   const missHits = (wedge, depth) => missMap[wedge+'_'+depth] || 0;
   const missHeat = (wedge, depth) => maxHeat>0 ? missHits(wedge,depth)/maxHeat : 0;
 
-  // CX/CY/viewBox enlarged to match buildDartHeatmap()'s lifetime geometry, leaving
-  // room past the board (bg:248) for the two miss bands (missNear:270, missFar:310) —
+  // CX/CY/viewBox matches buildDartHeatmap()'s lifetime geometry, leaving room
+  // past the board (bg:248) for the two miss bands (missNear:270, missFar:310) —
   // the board proper (doubleOut:212) is unchanged, just no longer flush to the edge.
-  const CX=330, CY=330;
-  const R = { bullIn:20, bullOut:38, trebleIn:118, trebleOut:140, doubleIn:190, doubleOut:212, numAt:231, bg:248, missNear:270, missFar:310 };
-  const DEG = 360/20;
-  const xy = (r, deg) => { const a=(deg-90)*Math.PI/180; return [CX+r*Math.cos(a), CY+r*Math.sin(a)]; };
-  const f = v => v.toFixed(2);
-  const annulus = (r1, r2, s, e) => {
-    const [x1,y1]=xy(r1,s),[x2,y2]=xy(r1,e),[x3,y3]=xy(r2,e),[x4,y4]=xy(r2,s);
-    const lg=e-s>180?1:0;
-    return `M${f(x1)},${f(y1)} A${r1},${r1} 0 ${lg},1 ${f(x2)},${f(y2)} L${f(x3)},${f(y3)} A${r2},${r2} 0 ${lg},0 ${f(x4)},${f(y4)} Z`;
-  };
+  const { CX, CY, R, DEG, xy, f, annulus } = BOARD_GEOM;
   const heatFill = t => {
     if(t<=0) return '#1c1e1a';
     const r = Math.round(28 + t*(217-28));
@@ -927,7 +944,45 @@ function buildChuckinLiveHeatmap(cells){
   return s;
 }
 
-// Compact progress grid for the two guided drills (docs/game-modes-roadmap.md
+// Around the Clock's live board — a real dartboard shape, one wedge per
+// number (bull excluded: not a target in this mode — evaluateDartAroundTheClock()
+// in frontend/scoring.js only counts a single on 1-20, "Resolved: no bull" per
+// docs/game-modes-roadmap.md), filled solid gold with a ✓ once its single has
+// been hit, dark/unfilled otherwise. Unlike buildChuckinLiveHeatmap() above,
+// this isn't a frequency map — a number is either done or not — so each wedge
+// spans its whole bullOut-to-doubleOut width as one region rather than
+// mirroring the inner/treble/outer/double sub-ring split: hitting a double or
+// treble of a number doesn't complete it here, so drawing those sub-rings as
+// if they mattered would be actively misleading for this mode.
+function buildClockBoard(hitNumbers){
+  const hitSet = new Set((Array.isArray(hitNumbers) ? hitNumbers : []).map(n => Number(n)));
+  const { CX, CY, R, DEG, xy, f, annulus } = BOARD_GEOM;
+  let s = `<svg viewBox="0 0 660 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Around the Clock board — ${hitSet.size} of 20 numbers hit">
+    <circle cx="${CX}" cy="${CY}" r="${R.doubleOut+1}" fill="#111210"/>
+    <circle cx="${CX}" cy="${CY}" r="${R.doubleOut}" fill="#0d0e0b"/>`;
+  DB_SECTORS.forEach((n,i)=>{
+    const s0=i*DEG-DEG/2, e0=s0+DEG;
+    const hit = hitSet.has(n);
+    s += `<path d="${annulus(R.bullOut,R.doubleOut,s0,e0)}" fill="${hit?'#d9b46a':'#1c1e1a'}" stroke="#151613" stroke-width="1"><title>${n}${hit?' — hit':''}</title></path>`;
+    const [nx,ny]=xy(R.numAt,s0+DEG/2);
+    // The number label sits at R.numAt, just outside R.doubleOut — always on the
+    // dark surrounding background regardless of hit state, never inside the
+    // gold wedge itself — so it stays the same bright color either way; only
+    // the wedge fill and the ✓ overlay change to signal "hit."
+    s += `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="20" fill="#efe7d2" style="pointer-events:none;user-select:none">${n}</text>`;
+    if(hit){
+      const [chx,chy]=xy((R.bullOut+R.trebleIn)/2, s0+DEG/2);
+      s += `<text x="${f(chx)}" y="${f(chy)}" text-anchor="middle" dominant-baseline="central" font-size="26" fill="#1a160c" style="pointer-events:none;user-select:none" aria-hidden="true">✓</text>`;
+    }
+  });
+  // Bull — greyed out, not lit or checkmarked, since it's never a target here.
+  s += `<circle cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="#151613" stroke="#0d0e0b" stroke-width="1"/>`;
+  s += `<circle cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="#0d0e0b"/>`;
+  s += `</svg>`;
+  return s;
+}
+
+// Compact progress grid for Around the World (docs/game-modes-roadmap.md
 // "Guided Around the Clock / Around the World") — mirror-copied from
 // frontend/index.html's buildOutcomeGridHtml() (this file has no shared module
 // with index.html, per the established convention above). hitKeys is a plain
@@ -1715,7 +1770,6 @@ const renderers = {
       const active = i===s.currentIndex;
       const ms = s.modeState || {};
       const hitNumbers = Array.isArray(p.hitNumbers) ? p.hitNumbers : [];
-      const hitKeys = hitNumbers.map(n=>`${n}:1`);
       let flash = '';
       if(active && ms.roundOver){
         flash = `<div class="flash win">CLOCK COMPLETE</div>`;
@@ -1739,7 +1793,7 @@ const renderers = {
             </div>
             ${throwbox}
           </div>
-          <div class="chuckin-board">${buildOutcomeGridCompact(hitKeys, 'numbers')}</div>
+          <div class="clock-board">${buildClockBoard(hitNumbers)}</div>
         </div>
         <div class="meta"><span class="standing">Round ${num(s.legNo)}</span></div>
       </div>`;

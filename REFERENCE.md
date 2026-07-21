@@ -1656,17 +1656,31 @@ axis for an open-ended, cross-session tracker. None take a `mode` param —
 same "always practice=1 by construction" reasoning as Doubles Practice's own
 Home boards.
 
-**Live Scoreboard**: `renderers.around_the_clock.card()` /
-`renderers.around_the_world.card()` (`frontend/display.html`) each show the
-compact `buildOutcomeGridCompact()` progress grid alongside the running
-hit/progress counter — `playerSnapshotAroundTheClock()`/
-`playerSnapshotAroundTheWorld()` (`frontend/index.html`) send `hitNumbers`/
-`hitOutcomes` (plain arrays, not just counts) inside the per-player
-`players[]` array so the Live Scoreboard can render exactly which
-numbers/outcomes are still outstanding, the same live feedback the controller
-itself shows. `atcLastDart`/`atwLastDart` (the last-dart throwbox data) ride
-inside `modeState` (§7's "Payload shape") — `roundOver`/`roundEndReason` are
-reused as-is from Doubles Practice for Around the Clock's round-end signal.
+**Live Scoreboard**: `renderers.around_the_world.card()` (`frontend/display.html`)
+shows the compact `buildOutcomeGridCompact()` progress grid alongside the running
+progress counter. `renderers.around_the_clock.card()` instead shows
+**`buildClockBoard()`** — a real dartboard shape (one wedge per number 1-20,
+bull excluded since it's never a target in this mode), filled solid gold with a
+✓ once its single has been hit, dark/unfilled otherwise, sized deliberately
+bigger (`.clock-board`, 60vmin) than Chuckin's heatmap or the compact grids —
+"a big dartboard read across a room," not a compact detail panel. Because a
+number is either done or not (not a frequency map), each wedge spans its whole
+bull-to-double-ring width as one region rather than mirroring the heatmap's
+inner/treble/outer/double sub-ring split — hitting a double or treble of a
+number doesn't complete it here, so shading those sub-rings as if they
+mattered would be misleading. Shares `BOARD_GEOM` (the CX/CY/R/xy/annulus
+geometry kernel) and `DB_SECTORS` with `buildChuckinLiveHeatmap()` — both
+mirror-copied from `frontend/index.html`'s own versions (no shared module
+between the two files), but no longer duplicated a second time *within*
+`display.html` itself once `buildClockBoard()` became a second consumer.
+Both `playerSnapshotAroundTheClock()`/`playerSnapshotAroundTheWorld()`
+(`frontend/index.html`) send `hitNumbers`/`hitOutcomes` (plain arrays, not just
+counts) inside the per-player `players[]` array so the Live Scoreboard can
+render exactly which numbers/outcomes are still outstanding, the same live
+feedback the controller itself shows. `atcLastDart`/`atwLastDart` (the
+last-dart throwbox data) ride inside `modeState` (§7's "Payload shape") —
+`roundOver`/`roundEndReason` are reused as-is from Doubles Practice for Around
+the Clock's round-end signal.
 
 **Undo support**: both snapshot round/session state into
 `game.lastTurnSnapshot` before mutating (the same convention as every other
