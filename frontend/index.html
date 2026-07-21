@@ -5094,37 +5094,13 @@ async function startGame(){
     // branch's shape consistent with every sibling drill above.
     : gameType === 'dead_man_walking' ? {}
     : { startingScore: startScore };
-  const category = gameType === 'cricket'
-    ? (setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)')
-    : gameType === 'baseball'
-    ? 'Baseball'
-    : gameType === 'shanghai'
-    ? 'Shanghai'
-    : gameType === 'halve_it'
-    ? (setup.halveItPreset === 'custom' ? 'Custom Halve-It' : 'Halve-It')
-    : gameType === 'pressure_chamber'
-    ? 'The Pressure Chamber'
-    : gameType === 'doubles_practice'
-    ? `Doubles Practice (${config.doubles.map(doublesTargetLabel).join(', ')})`
-    : gameType === 'chuckin'
-    ? `Just Chuckin' It`
-    : gameType === 'checkout_trainer'
-    ? (config.mode==='blitz' ? 'Checkout Blitz' : 'Checkout Trainer (Freeform)')
-    : gameType === 'around_the_clock'
-    ? 'Guided Around the Clock'
-    : gameType === 'bobs_27'
-    ? "Bob's 27"
-    : gameType === 'around_the_world'
-    ? 'Guided Around the World'
-    : gameType === 'checkout_ladder'
-    ? '121 Checkout Ladder'
-    : gameType === 'gauntlet'
-    ? 'The Gauntlet'
-    : gameType === 'killer'
-    ? 'Killer'
-    : gameType === 'dead_man_walking'
-    ? 'Dead Man Walking'
-    : String(startScore);
+  // Registry member (item 41, docs/code-quality-roadmap.md) — every real
+  // GAME_TYPES entry (including x01) declares its own category(setup, config,
+  // startScore); a future type that forgets to add one throws HERE, loudly,
+  // at game creation, instead of the old ternary's fallthrough silently
+  // writing category:String(startScore) — a nonsense label for a non-scored
+  // game type — into games.category permanently.
+  const category = GAME_TYPES[gameType].category(setup, config, startScore);
   game = {
     gameType,
     config,
@@ -12824,6 +12800,7 @@ const GAME_TYPES = {
   x01: {
     id: 'x01',
     label: 'X01',
+    category: (setup, config, startScore) => String(startScore),
     newMatchPlayer,
     evaluateVisit,
     resetForNextLeg: resetPlayerForNextLegX01,
@@ -12837,6 +12814,7 @@ const GAME_TYPES = {
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, points:p.points||0,
       closed:Object.keys(p.marks||{}).filter(n=>(p.marks[n]||0)>=3).length, won:p.name===winner })),
     label: 'Cricket',
+    category: setup => setup.cricketPreset === 'custom' ? 'Custom Cricket' : 'Cricket (15-20, Bull)',
     newMatchPlayer: newMatchPlayerCricket,
     evaluateVisit: evaluateVisitCricket,
     resetForNextLeg: resetPlayerForNextLegCricket,
@@ -12849,6 +12827,7 @@ const GAME_TYPES = {
     id: 'baseball',
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, totalRuns:p.totalRuns||0, won:p.name===winner })),
     label: 'Baseball',
+    category: () => 'Baseball',
     newMatchPlayer: newMatchPlayerBaseball,
     evaluateVisit: evaluateVisitBaseball,
     resetForNextLeg: resetPlayerForNextLegBaseball,
@@ -12864,6 +12843,7 @@ const GAME_TYPES = {
     id: 'shanghai',
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, totalPoints:p.totalPoints||0, won:p.name===winner })),
     label: 'Shanghai',
+    category: () => 'Shanghai',
     newMatchPlayer: newMatchPlayerShanghai,
     evaluateVisit: evaluateVisitShanghai,
     resetForNextLeg: resetPlayerForNextLegShanghai,
@@ -12876,6 +12856,7 @@ const GAME_TYPES = {
     id: 'halve_it',
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, total:p.total||0, won:p.name===winner })),
     label: 'Halve-It',
+    category: setup => setup.halveItPreset === 'custom' ? 'Custom Halve-It' : 'Halve-It',
     newMatchPlayer: newMatchPlayerHalveIt,
     evaluateVisit: evaluateVisitHalveIt,
     resetForNextLeg: resetPlayerForNextLegHalveIt,
@@ -12889,6 +12870,7 @@ const GAME_TYPES = {
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, totalCp:p.totalCp||0,
       rating:pressureComposureRating(p.totalCp||0), won:p.name===winner })),
     label: 'The Pressure Chamber',
+    category: () => 'The Pressure Chamber',
     newMatchPlayer: newMatchPlayerPressureChamber,
     evaluateVisit: evaluateVisitPressureChamber,
     resetForNextLeg: resetPlayerForNextLegPressureChamber,
@@ -12900,6 +12882,7 @@ const GAME_TYPES = {
   doubles_practice: {
     id: 'doubles_practice',
     label: 'Doubles Practice',
+    category: (setup, config) => `Doubles Practice (${config.doubles.map(doublesTargetLabel).join(', ')})`,
     newMatchPlayer: newMatchPlayerDoublesPractice,
     // Per-dart evaluation (throwDartDoublesPractice()), not a batched-visit
     // evaluateVisit — every existing call site for this game type is a dedicated
@@ -12922,6 +12905,7 @@ const GAME_TYPES = {
   chuckin: {
     id: 'chuckin',
     label: "Just Chuckin' It",
+    category: () => "Just Chuckin' It",
     newMatchPlayer: newMatchPlayerChuckin,
     // Per-dart, no round/leg-ending condition at all (throwDartChuckin()) — every
     // existing call site for this game type is a dedicated gameType==='chuckin'
@@ -12940,6 +12924,7 @@ const GAME_TYPES = {
   checkout_trainer: {
     id: 'checkout_trainer',
     label: 'Checkout Trainer',
+    category: (setup, config) => config.mode === 'blitz' ? 'Checkout Blitz' : 'Checkout Trainer (Freeform)',
     // "No live scoreboard, deliberate" (its roadmap) — pushLive() skips this
     // mode entirely; see the flag's comment there.
     noLiveDisplay: true,
@@ -12963,6 +12948,7 @@ const GAME_TYPES = {
   around_the_clock: {
     id: 'around_the_clock',
     label: 'Around the Clock',
+    category: () => 'Guided Around the Clock',
     newMatchPlayer: newMatchPlayerAroundTheClock,
     // Per-dart evaluation (throwDartAroundTheClock()) — same "hardcode a branch"
     // precedent as Doubles Practice/Chuckin, so this is never actually invoked.
@@ -12978,6 +12964,7 @@ const GAME_TYPES = {
   around_the_world: {
     id: 'around_the_world',
     label: 'Around the World',
+    category: () => 'Guided Around the World',
     newMatchPlayer: newMatchPlayerAroundTheWorld,
     // Per-dart, no round-ending condition at all (throwDartAroundTheWorld()) —
     // same precedent as Chuckin, so this is never actually invoked.
@@ -12993,6 +12980,7 @@ const GAME_TYPES = {
     id: 'bobs_27',
     legSummary: (game) => [{ name:game.players[0].name, running:game.players[0].running, won:true }],
     label: "Bob's 27",
+    category: () => "Bob's 27",
     newMatchPlayer: newMatchPlayerBobs27,
     evaluateVisit: evaluateVisitBobs27,
     resetForNextLeg: resetPlayerForNextLegBobs27,
@@ -13007,6 +12995,7 @@ const GAME_TYPES = {
   checkout_ladder: {
     id: 'checkout_ladder',
     label: 'Checkout Ladder',
+    category: () => '121 Checkout Ladder',
     newMatchPlayer: newMatchPlayerCheckoutLadder,
     // evaluateVisit() (the shared X01 evaluator) is reused UNMODIFIED — see
     // enterTurnCheckoutLadder()'s own dispatch, which calls it directly
@@ -13023,6 +13012,7 @@ const GAME_TYPES = {
   gauntlet: {
     id: 'gauntlet',
     label: 'The Gauntlet',
+    category: () => 'The Gauntlet',
     // "No live-scoreboard sync needed" (its roadmap) — pushLive() skips this
     // mode entirely; see the flag's comment there.
     noLiveDisplay: true,
@@ -13044,6 +13034,7 @@ const GAME_TYPES = {
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, number:p.number,
       kills:p.kills||0, eliminated:!!p.eliminated, won:p.name===winner })),
     label: 'Killer',
+    category: () => 'Killer',
     newMatchPlayer: newMatchPlayerKiller,
     // Per-dart evaluation (evaluateDartKiller(dart, throwerName, players)), not
     // a batched-visit evaluateVisit — every call site is a dedicated
@@ -13064,6 +13055,7 @@ const GAME_TYPES = {
     id: 'dead_man_walking',
     legSummary: (game) => [{ name:game.players[0].name, walkedOut:game.dmwWalkedOutCount, won:true }],
     label: 'Dead Man Walking',
+    category: () => 'Dead Man Walking',
     newMatchPlayer: newMatchPlayerDeadManWalking,
     // Per-dart evaluation (evaluateVisitDeadManWalking(), a real function —
     // both throwDart()'s live-preview branch AND enterTurnDeadManWalking()'s

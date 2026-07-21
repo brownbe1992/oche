@@ -106,7 +106,22 @@ object.
 **Shape:** a per-entry declaration (e.g. `ctorArg: 'config' | 'startScore'`)
 consumed by both call sites. Folds naturally into item 37 if done together.
 
-## Item 41 — `games.category` as a registry member
+## Item 41 — `games.category` as a registry member — ✅ Done
+
+Every `GAME_TYPES` entry (including x01, which relied on the old ternary's
+fallthrough) now declares its own `category(setup, config, startScore)`.
+`startGame()`'s call site collapses to
+`GAME_TYPES[gameType].category(setup, config, startScore)` — a future type
+that forgets to add one throws immediately at game creation (calling
+`undefined(...)`), instead of the old ternary's fallthrough silently writing
+`category: String(startScore)` — a nonsense label for a non-scored game
+type — into `games.category` permanently. Verified live in a browser: called
+every type's `category()` directly with representative setup/config
+combinations (Cricket classic/custom, Halve-It classic/custom, Checkout
+Trainer Blitz/Freeform, Doubles Practice's dynamic target list, and every
+static-label type), then played a real Cricket game end-to-end through the
+actual New Game UI and confirmed the server-persisted `games.category` row
+matches.
 
 The stored `games.category` string comes from a 14-branch gameType ternary
 (`frontend/index.html` ≈ 5085) falling through to `String(startScore)`. A
