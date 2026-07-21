@@ -838,8 +838,7 @@ function buildChuckinLiveHeatmap(cells){
   (Array.isArray(cells) ? cells : []).forEach(c=>{
     const sector = Number(c.sector) || 0, mult = Number(c.multiplier) || 0, hitCount = Number(c.hits) || 0;
     // A positioned miss (sector 0 with a wedge + near/far depth) goes into its own
-    // map on its own heat scale — same split buildDartHeatmap()'s lifetime board uses,
-    // since miss counts and scoring-hit counts are wildly different population sizes.
+    // map, but shares the same heat scale as scoring hits (see maxHeat below) —
     // missZone is constrained to a real 1-20 wedge and missDepth to 'near'/'far' at the
     // boundary (SEC-18 discipline); an unpositioned miss (Pad mode) has nothing to plot.
     if(sector === 0){
@@ -864,9 +863,16 @@ function buildChuckinLiveHeatmap(cells){
     if(hitCount>maxHits) maxHits = hitCount;
   });
   const hits = (sector, m, zone) => hitMap[sector+'_'+m+'_'+(zone||'')] || 0;
-  const heat = (sector, m, zone) => maxHits>0 ? hits(sector,m,zone)/maxHits : 0;
+  // BUG-fix (mirrors buildDartHeatmap()'s lifetime board, frontend/index.html):
+  // heat() and missHeat() used to normalize against separate maxima (maxHits vs
+  // maxMiss) — a single miss (maxMiss=1) divided to a ratio of 1.0 and rendered
+  // exactly as bright as e.g. a 10-hit sector (10/maxHits=10, also 1.0), making
+  // one lone miss look as "hot" as the board's most-hit region. Both scales now
+  // share one maximum across the whole visualization.
+  const maxHeat = Math.max(maxHits, maxMiss);
+  const heat = (sector, m, zone) => maxHeat>0 ? hits(sector,m,zone)/maxHeat : 0;
   const missHits = (wedge, depth) => missMap[wedge+'_'+depth] || 0;
-  const missHeat = (wedge, depth) => maxMiss>0 ? missHits(wedge,depth)/maxMiss : 0;
+  const missHeat = (wedge, depth) => maxHeat>0 ? missHits(wedge,depth)/maxHeat : 0;
 
   // CX/CY/viewBox enlarged to match buildDartHeatmap()'s lifetime geometry, leaving
   // room past the board (bg:248) for the two miss bands (missNear:270, missFar:310) —

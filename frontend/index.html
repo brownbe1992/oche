@@ -5034,7 +5034,8 @@ function baseGameRuntimeState(){
     currentLegTurns: [],   // turns in the current leg (reset per leg)
     legVisitLogs: [],      // raw dart arrays per visit this leg (reset per leg; Daily Challenge dart-count formats)
     sessionTurns: [],      // turns in the entire session (grows across legs)
-    lastTurnSnapshot: null,// state before last committed turn (for undo)
+    lastTurnSnapshot: null,// mirrors turnSnapshots' top entry (state before last committed turn, for undo)
+    turnSnapshots: [],     // stack of per-turn snapshots this leg/round — lets undo reach back more than one turn
     turnSeq: 0,            // monotonic counter, bumped each time a new turn begins (voice announcements dedup on this)
     lastTurnEvent: null,   // one-shot: outcome of the turn just entered (voice announcements)
     matchResult: null,     // one-shot: leg/set/game just won (voice announcements)
@@ -10012,6 +10013,7 @@ async function resumeGame(gameId){
     // the call is transient per-visit state, never saved (see the setup default).
     pressureDeclared: null,
     lastTurnSnapshot: null, // undo unavailable for the first turn after resume, same as the first turn of any game
+    turnSnapshots: [],      // stack of per-turn snapshots this leg/round (empty on resume, same reasoning)
     roundOver: false,
     ...overlay,
     legStart: { ts: Date.now(), starter: (players[starter] || players[0]).name },
@@ -10198,6 +10200,26 @@ function askEndGame(){
 // mode is single-player or per-dart and leaves both false. `push` is opt-in
 // since renderGame() already calls pushLive() itself (Bob's 27's own
 // renderer doesn't, so it's the one mode that asks for it explicitly).
+// game.lastTurnSnapshot always mirrors the top of game.turnSnapshots (a real
+// stack, so undo can reach back more than one turn) — every undoLastTurn*()
+// variant's own restore logic and guard checks (`if(!game.lastTurnSnapshot)
+// return`, `const snap = game.lastTurnSnapshot`) stay untouched, reading
+// whichever snapshot is currently "on top." pushTurnSnapshot() is the only
+// place a new snapshot is created; _finishUndo() below is the only place one
+// is consumed, popping the stack and re-exposing the previous entry (if any)
+// so a second Undo click immediately works instead of finding nothing left.
+function pushTurnSnapshot(snap){
+  game.turnSnapshots.push(snap);
+  game.lastTurnSnapshot = snap;
+}
+// Boundary sites ("can't undo past a round/visit/leg boundary") clear the
+// whole stack, not just the top — otherwise a still-populated turnSnapshots
+// would let _finishUndo() below re-expose an entry from before the boundary
+// the very next time it pops.
+function clearTurnSnapshots(){
+  game.turnSnapshots = [];
+  game.lastTurnSnapshot = null;
+}
 function _finishUndo(snap, renderFn, opts){
   const { msg = 'Last turn undone.', restoreCurrent = false, resetDarts = false, push = false } = opts || {};
   if(restoreCurrent) game.current = snap.pi;
@@ -10209,7 +10231,11 @@ function _finishUndo(snap, renderFn, opts){
     Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
   });
   cancelQueuedAchievementsForSnapshot(snap);
-  game.lastTurnSnapshot = null;   // one level of undo only
+  // Pop the snapshot just restored, then re-expose whatever's now on top (or
+  // null if that was the only one) — allowing undo to keep reaching back
+  // through every turn committed this leg/round, not just the last one.
+  game.turnSnapshots.pop();
+  game.lastTurnSnapshot = game.turnSnapshots.length ? game.turnSnapshots[game.turnSnapshots.length-1] : null;
   DB.deleteLastTurn();
   const status=document.getElementById('status');
   if(status){ status.className='status'; status.textContent=msg; }
@@ -10334,7 +10360,7 @@ function enterTurn(){
       legAvgDarts:game.players[1].legAvgDarts, gameDarts:game.players[1].gameDarts, gameAvgDarts:game.players[1].gameAvgDarts,
       gamePoints:game.players[1].gamePoints, gameVisits:game.players[1].gameVisits,
       ghostTurnIndex:game.players[1].ghostTurnIndex } : null };
-  game.lastTurnSnapshot = _snap;
+  pushTurnSnapshot(_snap);
 
   // per-leg and per-game scope (shown live on the scoreboard — both modes)
   const _adj = ev.bust ? 3 : game.darts.length;  // darts counted for the 3-dart average
@@ -10696,7 +10722,7 @@ function enterTurnCricket(){
     legWorstPointsDeficit:p.legWorstPointsDeficit,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
     badgeReverts:[], voided:false };
-  game.lastTurnSnapshot = _snap;
+  pushTurnSnapshot(_snap);
 
   // Comeback Kid (Cricket) tracking: the worst points deficit seen at any point
   // this leg (needs an opponent to trail behind — mirrors X01's Comeback Kid,
@@ -10959,7 +10985,7 @@ function enterTurnBaseball(){
     baseballInning:game.baseballInning,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
     badgeReverts:[], voided:false };
-  game.lastTurnSnapshot = _snap;
+  pushTurnSnapshot(_snap);
 
   p.totalRuns = ev.totalRuns; p.inningRuns = ev.inningRuns;
   const dartsThrown = game.darts.length;
@@ -11052,7 +11078,7 @@ function enterTurnShanghai(){
     shanghaiRound:game.shanghaiRound,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
     badgeReverts:[], voided:false };
-  game.lastTurnSnapshot = _snap;
+  pushTurnSnapshot(_snap);
 
   p.totalPoints = ev.totalPoints; p.roundPoints = ev.roundPoints;
   const dartsThrown = game.darts.length;
@@ -11144,7 +11170,7 @@ function enterTurnHalveIt(){
     halveItRound:game.halveItRound,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
     badgeReverts:[], voided:false };
-  game.lastTurnSnapshot = _snap;
+  pushTurnSnapshot(_snap);
 
   p.total = ev.total; p.roundTotals = ev.roundTotals;
   // roundHalved (display-only, not part of evaluateVisitHalveIt()'s own pure
@@ -11332,7 +11358,7 @@ function enterTurnPressureChamber(){
     pressureDeclared:game.pressureDeclared,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
     badgeReverts:[], voided:false };
-  game.lastTurnSnapshot = _snap;
+  pushTurnSnapshot(_snap);
 
   p.totalCp = ev.totalCp; p.misses = ev.misses; p.fullHits = ev.fullHits;
   p.currentFullHitStreak = ev.currentFullHitStreak; p.bestFullHitStreak = ev.bestFullHitStreak;
@@ -11466,7 +11492,7 @@ function enterTurnBobs27(){
     bobs27Round:game.bobs27Round,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
     badgeReverts:[], voided:false };
-  game.lastTurnSnapshot = _snap;
+  pushTurnSnapshot(_snap);
 
   p.running = ev.running;
   p.roundResults = Object.assign({}, p.roundResults, { [ev.round]: ev.gain });
@@ -11753,7 +11779,7 @@ function startNextLeg(newSet){
   game.legSummary = null;
   game.currentLegTurns = [];
   game.legVisitLogs = [];
-  game.lastTurnSnapshot = null;
+  clearTurnSnapshots();
   game.darts=[]; game.busted=false; game.won=false;
   game.turnSeq += 1;
   game.legStart = { ts: Date.now(), starter: game.players[game.starter].name };
@@ -13143,7 +13169,7 @@ function enterTurnCheckoutLadder(){
     visits:game.checkoutLadderVisits,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
     badgeReverts:[], voided:false };
-  game.lastTurnSnapshot = _snap;
+  pushTurnSnapshot(_snap);
 
   const dartsThrown = game.darts.length;
   p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
@@ -13302,7 +13328,7 @@ function enterTurnGauntlet(){
     cleanStreak:game.gauntletCleanStreak, bestCleanStreak:game.gauntletBestCleanStreak,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
     badgeReverts:[], voided:false };
-  game.lastTurnSnapshot = _snap;
+  pushTurnSnapshot(_snap);
 
   const dartsThrown = game.darts.length;
   p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
@@ -13552,7 +13578,7 @@ function enterTurnDeadManWalking(){
     dartsUsedThisRound: game.dmwDartsUsedThisRound,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
     badgeReverts:[], voided:false };
-  game.lastTurnSnapshot = _snap;
+  pushTurnSnapshot(_snap);
 
   // Only the darts actually reached before the round settled are ever
   // recorded — evaluateVisitDeadManWalking()'s own dartsConsumed, not simply
@@ -13640,7 +13666,7 @@ function resolveDeadManWalkingRound(walkedOut){
   game.legSummary = null;
   game.currentLegTurns = [];
   game.legVisitLogs = [];
-  game.lastTurnSnapshot = null;
+  clearTurnSnapshots();
   game.darts=[]; game.busted=false; game.won=false;
   game.turnSeq += 1;
   game.legStart = { ts: Date.now(), starter: p.name };
@@ -13773,7 +13799,7 @@ function advanceKillerTurn(){
     idx = (idx+1) % game.players.length;
     if(!game.players[idx].eliminated){ game.current = idx; break; }
   }
-  game.lastTurnSnapshot = null; // can't undo across a visit boundary
+  clearTurnSnapshots(); // can't undo across a visit boundary
   game.turnSeq += 1;
   renderGameKiller();
 }
@@ -13840,7 +13866,7 @@ function throwDartKiller(sector, zone, missZone, missDepth, bounced){
     dartsThisVisit: game.killerDartsThisVisit,
     ltLen: game.currentLegTurns.length, stLen: game.sessionTurns.length,
     badgeReverts:[], voided:false };
-  game.lastTurnSnapshot = _snap;
+  pushTurnSnapshot(_snap);
 
   let delta = 0;
   if(ev){
@@ -14314,9 +14340,9 @@ function throwDartDoublesPractice(sector, zone, missZone, missDepth, bounced){
   const ev = evaluateDartDoublesPractice(dart, targets);
 
   // snapshot state before mutation so undoLastTurnDoublesPractice() can restore it
-  game.lastTurnSnapshot = { roundDarts:p.roundDarts, roundHits:p.roundHits,
+  pushTurnSnapshot({ roundDarts:p.roundDarts, roundHits:p.roundHits,
     roundOver:game.roundOver, roundEndReason:game.roundEndReason,
-    dpLastDart:game.dpLastDart, sessionRoundsLen:p.sessionRounds.length };
+    dpLastDart:game.dpLastDart, sessionRoundsLen:p.sessionRounds.length });
 
   p.roundDarts += 1;
   if(ev.hit) p.roundHits += 1;
@@ -14384,7 +14410,7 @@ function startNextRoundDoublesPractice(){
   p.roundDarts = 0; p.roundHits = 0;
   game.roundOver = false; game.roundEndReason = null; game.dpLastDart = null;
   game.legNo += 1;   // each round is its own "leg" for turn grouping/personal bests
-  game.lastTurnSnapshot = null;  // undo only reaches back into the round just finished
+  clearTurnSnapshots();  // undo only reaches back into the round just finished
   DB.recordEvent('leg_start', game.setNo, game.legNo);
   renderGameDoublesPractice();
 }
@@ -14521,9 +14547,9 @@ function throwDartChuckin(sector, zone, missZone, missDepth, bounced){
   // moment-style badge like Hat Trick, not a slow-building milestone, so unlike
   // the 18 laddered milestones (deliberately not undo-revocable, see
   // checkChuckinMilestones()'s own comment) it DOES get revoked on undo.
-  game.lastTurnSnapshot = { sessionDarts:p.sessionDarts, sessionTrebles:p.sessionTrebles,
+  pushTurnSnapshot({ sessionDarts:p.sessionDarts, sessionTrebles:p.sessionTrebles,
     sessionScore:p.sessionScore, dartBuffer:p.dartBuffer.slice(), heatmap:{...p.heatmap},
-    chuckinLastDart:game.chuckinLastDart, badgeReverts:[], voided:false };
+    chuckinLastDart:game.chuckinLastDart, badgeReverts:[], voided:false });
 
   p.sessionDarts += 1;
   if(dart.isTreble) p.sessionTrebles += 1;
@@ -14719,9 +14745,9 @@ function submitCheckoutAttempt(){
     : `Not a legal finish for ${p.score}.`);
 
   // snapshot state before mutation so undoLastTurnCheckoutTrainer() can restore it
-  game.lastTurnSnapshot = { target:p.score, attempts:p.attempts, legalCount:p.legalCount,
+  pushTurnSnapshot({ target:p.score, attempts:p.attempts, legalCount:p.legalCount,
     optimalCount:p.optimalCount, currentStreak:p.currentStreak, sessionRoundsLen:p.sessionRounds.length,
-    legNo:game.legNo, badgeReverts:[], voided:false };
+    legNo:game.legNo, badgeReverts:[], voided:false });
 
   p.attempts += 1;
   if(grade.legal) p.legalCount += 1;
@@ -14795,9 +14821,9 @@ function declareUnsolvable(){
     : `Wrong — ${p.score} is finishable in ${grade.optimalDarts} dart${grade.optimalDarts===1?'':'s'}.`);
 
   // snapshot state before mutation so undoLastTurnCheckoutTrainer() can restore it
-  game.lastTurnSnapshot = { target:p.score, attempts:p.attempts, legalCount:p.legalCount,
+  pushTurnSnapshot({ target:p.score, attempts:p.attempts, legalCount:p.legalCount,
     optimalCount:p.optimalCount, currentStreak:p.currentStreak, sessionRoundsLen:p.sessionRounds.length,
-    legNo:game.legNo, badgeReverts:[], voided:false };
+    legNo:game.legNo, badgeReverts:[], voided:false });
 
   p.attempts += 1;
   if(grade.legal) p.legalCount += 1;
@@ -15083,10 +15109,10 @@ function throwDartAroundTheClock(sector, zone, missZone, missDepth, bounced){
   // badgeReverts/voided follow the same convention as every other game type's
   // snapshot (see trackBadgeForUndo()) — guided_clock is a moment-style
   // completion badge, so it DOES get revoked on undo.
-  game.lastTurnSnapshot = { hitSet: new Set(p.hitSet), roundDarts:p.roundDarts,
+  pushTurnSnapshot({ hitSet: new Set(p.hitSet), roundDarts:p.roundDarts,
     roundOver:game.roundOver, roundEndReason:game.roundEndReason,
     atcLastDart:game.atcLastDart, sessionRoundsLen:p.sessionRounds.length,
-    badgeReverts:[], voided:false };
+    badgeReverts:[], voided:false });
 
   p.roundDarts += 1;
   if(ev.isNewHit) p.hitSet.add(dart.sector);
@@ -15126,7 +15152,7 @@ function startNextClockRound(){
   p.hitSet = new Set(); p.roundDarts = 0;
   game.roundOver = false; game.roundEndReason = null; game.atcLastDart = null;
   game.legNo += 1;   // each round is its own "leg" for turn grouping/personal bests
-  game.lastTurnSnapshot = null;  // undo only reaches back into the round just finished
+  clearTurnSnapshots();  // undo only reaches back into the round just finished
   DB.recordEvent('leg_start', game.setNo, game.legNo);
   renderGameAroundTheClock();
 }
@@ -15216,8 +15242,8 @@ function throwDartAroundTheWorld(sector, zone, missZone, missDepth, bounced){
   const isNewLifetimeOutcome = !p.baselineHitSet.has(outcomeKey) && !p.sessionHitSet.has(outcomeKey);
 
   // snapshot state before mutation so undoLastTurnAroundTheWorld() can restore it.
-  game.lastTurnSnapshot = { sessionDarts:p.sessionDarts, sessionHitSet: new Set(p.sessionHitSet),
-    atwLastDart:game.atwLastDart, badgeReverts:[], voided:false };
+  pushTurnSnapshot({ sessionDarts:p.sessionDarts, sessionHitSet: new Set(p.sessionHitSet),
+    atwLastDart:game.atwLastDart, badgeReverts:[], voided:false });
 
   p.sessionDarts += 1;
   if(isNewLifetimeOutcome) p.sessionHitSet.add(outcomeKey);
@@ -15849,7 +15875,14 @@ function buildDartHeatmap(cells, opts){
     if(hitMap[key] > maxHitHeat) maxHitHeat = hitMap[key];
   });
   const hits = (sector, m, zone) => hitMap[sector+'_'+m+'_'+(zone||'')] || 0;
-  const heat = (sector, m, zone) => maxHitHeat>0 ? hits(sector,m,zone)/maxHitHeat : 0;
+  // BUG-fix: heat() and missHeat() used to normalize against their own separate
+  // maxima (maxHitHeat vs maxMissHeat) — a single miss (maxMissHeat=1) would
+  // divide to a ratio of 1.0 and render exactly as bright as a 10-hit sector
+  // (10/maxHitHeat=10 also =1.0), making one lone miss look as "hot" as the
+  // board's most-hit region. Both scales now share one maximum across the
+  // whole visualization, so brightness reflects the real hit count everywhere.
+  const maxHeat = Math.max(maxHitHeat, maxMissHeat);
+  const heat = (sector, m, zone) => maxHeat>0 ? hits(sector,m,zone)/maxHeat : 0;
   // Both single sub-regions read the SAME merged (zone-less) bucket for
   // noZoneTracking game types, so they always render identically — the whole
   // single ring lights up as one, honestly reflecting that inner/outer was never
@@ -15857,7 +15890,7 @@ function buildDartHeatmap(cells, opts){
   const singleInnerZone = noZoneTracking ? '' : 'inner';
   const singleOuterZone = noZoneTracking ? '' : 'outer';
   const missHits = (wedge, depth) => missMap[wedge+'_'+depth] || 0;
-  const missHeat = (wedge, depth) => maxMissHeat>0 ? missHits(wedge,depth)/maxMissHeat : 0;
+  const missHeat = (wedge, depth) => maxHeat>0 ? missHits(wedge,depth)/maxHeat : 0;
   // Total scoring hits (misses excluded — a wildly different population size,
   // see missHeat's own scale above) — the denominator for each region's tap
   // tooltip share (item: interactive stats charts), so a region reads e.g.
@@ -15900,8 +15933,10 @@ function buildDartHeatmap(cells, opts){
     s += `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="17" fill="#efe7d2" style="pointer-events:none;user-select:none">${num}</text>`;
     // Miss ring (docs/archive/dartboard-zone-tracking-roadmap.md "Miss-area tracking") — same
     // 20 wedges extended past the board, shaded by how many misses landed in that
-    // direction/depth, on their own independent heat scale (a wildly different
-    // population size than scoring hits — its own tooltip denominator, not totalHits).
+    // direction/depth, on the SAME shared heat scale as the in-board hits above
+    // (see maxHeat) — only the tooltip's percentage denominator (totalMiss, not
+    // totalHits) stays population-specific, since hits and misses are a wildly
+    // different population size for that purpose.
     const totalMiss = maxMissHeat>0 ? Object.values(missMap).reduce((a,b)=>a+b,0) : 0;
     const missTip = (label, h) => `${label} — ${h.toLocaleString()} miss${h===1?'':'es'}${totalMiss>0?` (${Math.round((h/totalMiss)*100)}% of ${totalMiss.toLocaleString()} misses)`:''}`;
     s += `<path class="hm-region" data-tip="${escapeHtml(missTip('Miss (near), wedge '+num,missHits(num,'near')))}" d="${annulus(R.bg,R.missNear,s0,e0)}" fill="${heatFill(missHeat(num,'near'))}" ${sw}><title>Miss (near), wedge ${num}: ${missHits(num,'near')} miss${missHits(num,'near')===1?'':'es'}</title></path>`;
