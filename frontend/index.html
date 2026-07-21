@@ -2607,12 +2607,7 @@ function renderHomePulse(){
   const eloTeaser = eloBoard.length ? `
     <div class="pp-section" style="margin-bottom:14px">
       <div class="pp-section-title">📈 Household Ratings</div>
-      <div class="hof-list" style="margin-top:8px">${eloBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.rating}</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-dates">${r.wins}-${r.losses}</span>
-      </div>`).join('')}</div>
+      ${leaderboardSectionHtml(eloBoard, { score:r=>r.rating, meta:r=>`${r.wins}-${r.losses}`, emptyMsg:'', listStyle:'margin-top:8px' })}
     </div>` : `
     <div class="pp-section" style="margin-bottom:14px">
       <div class="pp-section-title">📈 Household Ratings</div>
@@ -2660,12 +2655,7 @@ function renderHomeTabBody(){
   const winSection = (mode==='h2h' && extra && extra.winLeaderboard && extra.winLeaderboard.length)
     ? `<div class="pp-section">
         <div class="pp-section-title">Most Wins</div>
-        <div class="hof-list">${extra.winLeaderboard.slice(0,10).map((r,i)=>`<div class="hof-row">
-          <span class="hof-rank">${i+1}</span>
-          <span class="hof-score">${r.won}</span>
-          <span class="hof-player">${escapeHtml(r.name)}</span>
-          <span class="hof-dates">${r.rate}% of ${r.played}</span>
-        </div>`).join('')}</div>
+        ${leaderboardSectionHtml(extra.winLeaderboard, { score:r=>r.won, meta:r=>`${r.rate}% of ${r.played}`, emptyMsg:'' })}
       </div>`
     : '';
 
@@ -2673,12 +2663,7 @@ function renderHomeTabBody(){
   const trebleLessSection = (trebleLessRowsForMode && trebleLessRowsForMode.length)
     ? `<div class="pp-section">
         <div class="pp-section-title">Fewest Trebleless Visits</div>
-        <div class="hof-list">${trebleLessRowsForMode.slice(0,10).map((r,i)=>`<div class="hof-row">
-          <span class="hof-rank">${i+1}</span>
-          <span class="hof-score">${r.rate}%</span>
-          <span class="hof-player">${escapeHtml(r.name)}</span>
-          <span class="hof-dates">${r.trebleLess}/${r.turns} visits</span>
-        </div>`).join('')}</div>
+        ${leaderboardSectionHtml(trebleLessRowsForMode, { score:r=>`${r.rate}%`, meta:r=>`${r.trebleLess}/${r.turns} visits`, emptyMsg:'' })}
       </div>`
     : '';
 
@@ -2686,12 +2671,7 @@ function renderHomeTabBody(){
   const tonPlusSection = (tonPlusRowsForMode && tonPlusRowsForMode.length)
     ? `<div class="pp-section">
         <div class="pp-section-title">Ton+ Finish Rate</div>
-        <div class="hof-list">${tonPlusRowsForMode.slice(0,10).map((r,i)=>`<div class="hof-row">
-          <span class="hof-rank">${i+1}</span>
-          <span class="hof-score">${r.rate}%</span>
-          <span class="hof-player">${escapeHtml(r.name)}</span>
-          <span class="hof-dates">${r.tonPlus}/${r.checkouts} checkouts</span>
-        </div>`).join('')}</div>
+        ${leaderboardSectionHtml(tonPlusRowsForMode, { score:r=>`${r.rate}%`, meta:r=>`${r.tonPlus}/${r.checkouts} checkouts`, emptyMsg:'' })}
       </div>`
     : '';
 
@@ -2708,12 +2688,7 @@ function renderHomeTabBody(){
   const first9Section = (first9RowsForMode && first9RowsForMode.length)
     ? `<div class="pp-section">
         <div class="pp-section-title">Best First-9 Average</div>
-        <div class="hof-list">${first9RowsForMode.slice(0,10).map((r,i)=>`<div class="hof-row">
-          <span class="hof-rank">${i+1}</span>
-          <span class="hof-score">${r.avg.toFixed(1)}</span>
-          <span class="hof-player">${escapeHtml(r.name)}</span>
-          <span class="hof-dates">${r.legs} legs</span>
-        </div>`).join('')}</div>
+        ${leaderboardSectionHtml(first9RowsForMode, { score:r=>r.avg.toFixed(1), meta:r=>`${r.legs} legs`, emptyMsg:'' })}
       </div>`
     : '';
 
@@ -2766,24 +2741,15 @@ function renderHomeTabBodyCricket(){
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
 
   const mprBoard=data.mpr||[];
-  const mprLeaderboard=mprBoard.length
-    ? `<div class="hof-list">${mprBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.mpr.toFixed(1)}</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-dates">${r.rounds} rounds</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet (needs at least 5 rounds played).</p>`;
+  const mprLeaderboard=leaderboardSectionHtml(mprBoard, {
+    score:r=>r.mpr.toFixed(1), meta:r=>`${r.rounds} rounds`,
+    emptyMsg:'None recorded yet (needs at least 5 rounds played).',
+  });
 
   const winSection=(mode==='h2h' && homeData.cricket.wins && homeData.cricket.wins.length)
     ? `<div class="pp-section">
         <div class="pp-section-title">Most Cricket Wins</div>
-        <div class="hof-list">${homeData.cricket.wins.slice(0,10).map((r,i)=>`<div class="hof-row">
-          <span class="hof-rank">${i+1}</span>
-          <span class="hof-score">${r.won}</span>
-          <span class="hof-player">${escapeHtml(r.name)}</span>
-          <span class="hof-dates">${r.rate}% of ${r.played}</span>
-        </div>`).join('')}</div>
+        ${leaderboardSectionHtml(homeData.cricket.wins, { score:r=>r.won, meta:r=>`${r.rate}% of ${r.played}`, emptyMsg:'' })}
       </div>`
     : '';
 
@@ -2812,24 +2778,15 @@ function renderHomeTabBodyBaseball(){
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
 
   const rpiBoard=data.rpi||[];
-  const rpiLeaderboard=rpiBoard.length
-    ? `<div class="hof-list">${rpiBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.rpi.toFixed(1)}</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-dates">${r.rounds} innings</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet (needs at least 5 innings played).</p>`;
+  const rpiLeaderboard=leaderboardSectionHtml(rpiBoard, {
+    score:r=>r.rpi.toFixed(1), meta:r=>`${r.rounds} innings`,
+    emptyMsg:'None recorded yet (needs at least 5 innings played).',
+  });
 
   const winSection=(mode==='h2h' && homeData.baseball.wins && homeData.baseball.wins.length)
     ? `<div class="pp-section">
         <div class="pp-section-title">Most Baseball Wins</div>
-        <div class="hof-list">${homeData.baseball.wins.slice(0,10).map((r,i)=>`<div class="hof-row">
-          <span class="hof-rank">${i+1}</span>
-          <span class="hof-score">${r.won}</span>
-          <span class="hof-player">${escapeHtml(r.name)}</span>
-          <span class="hof-dates">${r.rate}% of ${r.played}</span>
-        </div>`).join('')}</div>
+        ${leaderboardSectionHtml(homeData.baseball.wins, { score:r=>r.won, meta:r=>`${r.rate}% of ${r.played}`, emptyMsg:'' })}
       </div>`
     : '';
 
@@ -2859,24 +2816,15 @@ function renderHomeTabBodyShanghai(){
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
 
   const pprBoard=data.ppr||[];
-  const pprLeaderboard=pprBoard.length
-    ? `<div class="hof-list">${pprBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.ppr.toFixed(1)}</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-dates">${r.rounds} rounds</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet (needs at least 5 rounds played).</p>`;
+  const pprLeaderboard=leaderboardSectionHtml(pprBoard, {
+    score:r=>r.ppr.toFixed(1), meta:r=>`${r.rounds} rounds`,
+    emptyMsg:'None recorded yet (needs at least 5 rounds played).',
+  });
 
   const winSection=(mode==='h2h' && homeData.shanghai.wins && homeData.shanghai.wins.length)
     ? `<div class="pp-section">
         <div class="pp-section-title">Most Shanghai Wins</div>
-        <div class="hof-list">${homeData.shanghai.wins.slice(0,10).map((r,i)=>`<div class="hof-row">
-          <span class="hof-rank">${i+1}</span>
-          <span class="hof-score">${r.won}</span>
-          <span class="hof-player">${escapeHtml(r.name)}</span>
-          <span class="hof-dates">${r.rate}% of ${r.played}</span>
-        </div>`).join('')}</div>
+        ${leaderboardSectionHtml(homeData.shanghai.wins, { score:r=>r.won, meta:r=>`${r.rate}% of ${r.played}`, emptyMsg:'' })}
       </div>`
     : '';
 
@@ -2903,23 +2851,14 @@ function renderHomeTabBodyHalveIt(){
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
 
   const board=data.bestTotal||[];
-  const leaderboard=board.length
-    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.total}</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — win a leg to claim the top spot.</p>`;
+  const leaderboard=leaderboardSectionHtml(board, {
+    score:r=>r.total, emptyMsg:'None recorded yet — win a leg to claim the top spot.',
+  });
 
   const winSection=(mode==='h2h' && homeData.halveIt.wins && homeData.halveIt.wins.length)
     ? `<div class="pp-section">
         <div class="pp-section-title">Most Halve-It Wins</div>
-        <div class="hof-list">${homeData.halveIt.wins.slice(0,10).map((r,i)=>`<div class="hof-row">
-          <span class="hof-rank">${i+1}</span>
-          <span class="hof-score">${r.won}</span>
-          <span class="hof-player">${escapeHtml(r.name)}</span>
-          <span class="hof-dates">${r.rate}% of ${r.played}</span>
-        </div>`).join('')}</div>
+        ${leaderboardSectionHtml(homeData.halveIt.wins, { score:r=>r.won, meta:r=>`${r.rate}% of ${r.played}`, emptyMsg:'' })}
       </div>`
     : '';
 
@@ -2945,23 +2884,15 @@ function renderHomeTabBodyPressureChamber(){
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
 
   const board=data.bestCp||[];
-  const leaderboard=board.length
-    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.total} <span class="pp-meta" style="font-size:11px">(${escapeHtml(r.rating)})</span></span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — complete a run to claim the top spot.</p>`;
+  const leaderboard=leaderboardSectionHtml(board, {
+    score:r=>`${r.total} <span class="pp-meta" style="font-size:11px">(${escapeHtml(r.rating)})</span>`,
+    emptyMsg:'None recorded yet — complete a run to claim the top spot.',
+  });
 
   const winSection=(mode==='h2h' && homeData.pressureChamber.wins && homeData.pressureChamber.wins.length)
     ? `<div class="pp-section">
         <div class="pp-section-title">Most Pressure Chamber Wins</div>
-        <div class="hof-list">${homeData.pressureChamber.wins.slice(0,10).map((r,i)=>`<div class="hof-row">
-          <span class="hof-rank">${i+1}</span>
-          <span class="hof-score">${r.won}</span>
-          <span class="hof-player">${escapeHtml(r.name)}</span>
-          <span class="hof-dates">${r.rate}% of ${r.played}</span>
-        </div>`).join('')}</div>
+        ${leaderboardSectionHtml(homeData.pressureChamber.wins, { score:r=>r.won, meta:r=>`${r.rate}% of ${r.played}`, emptyMsg:'' })}
       </div>`
     : '';
 
@@ -2988,24 +2919,16 @@ function renderHomeTabBodyDoublesPractice(){
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
 
   const accBoard=data.accuracy||[];
-  const accLeaderboard=accBoard.length
-    ? `<div class="hof-list">${accBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.pct.toFixed(1)}%</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-dates">${r.rounds} rounds</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet (needs at least 5 rounds played).</p>`;
+  const accLeaderboard=leaderboardSectionHtml(accBoard, {
+    score:r=>`${r.pct.toFixed(1)}%`, meta:r=>`${r.rounds} rounds`,
+    emptyMsg:'None recorded yet (needs at least 5 rounds played).',
+  });
 
   const bestBoard=data.bestRound||[];
-  const bestLeaderboard=bestBoard.length
-    ? `<div class="hof-list">${bestBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.hits}/${r.darts}</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-dates">${fmtDate(r.createdAt)}</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
+  const bestLeaderboard=leaderboardSectionHtml(bestBoard, {
+    score:r=>`${r.hits}/${r.darts}`, meta:r=>fmtDate(r.createdAt),
+    emptyMsg:'None recorded yet.',
+  });
 
   el.innerHTML=`
     <div class="home-pair">
@@ -3032,14 +2955,10 @@ function renderHomeTabBodyCheckoutTrainer(){
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
 
   const board=data.blitzLeaderboard||[];
-  const leaderboard=board.length
-    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.bestScore}</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-dates">${fmtDate(r.achievedAt)}</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — play a Checkout Blitz run to claim the top spot.</p>`;
+  const leaderboard=leaderboardSectionHtml(board, {
+    score:r=>r.bestScore, meta:r=>fmtDate(r.achievedAt),
+    emptyMsg:'None recorded yet — play a Checkout Blitz run to claim the top spot.',
+  });
 
   el.innerHTML=`
     <div class="pp-section">
@@ -3058,14 +2977,10 @@ function renderHomeTabBodyBobs27(){
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
 
   const board=data.leaderboard||[];
-  const leaderboard=board.length
-    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.bestScore}</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-dates">${fmtDate(r.achievedAt)}</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — play a Bob's 27 run to claim the top spot.</p>`;
+  const leaderboard=leaderboardSectionHtml(board, {
+    score:r=>r.bestScore, meta:r=>fmtDate(r.achievedAt),
+    emptyMsg:"None recorded yet — play a Bob's 27 run to claim the top spot.",
+  });
 
   el.innerHTML=`
     <div class="pp-section">
@@ -3083,14 +2998,10 @@ function renderHomeTabBodyCheckoutLadder(){
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
 
   const board=data.leaderboard||[];
-  const leaderboard=board.length
-    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.bestTarget}</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-dates">${fmtDate(r.achievedAt)}</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — climb the checkout ladder to claim the top spot.</p>`;
+  const leaderboard=leaderboardSectionHtml(board, {
+    score:r=>r.bestTarget, meta:r=>fmtDate(r.achievedAt),
+    emptyMsg:'None recorded yet — climb the checkout ladder to claim the top spot.',
+  });
 
   el.innerHTML=`
     <div class="pp-section">
@@ -3108,14 +3019,10 @@ function renderHomeTabBodyGauntlet(){
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
 
   const board=data.leaderboard||[];
-  const leaderboard=board.length
-    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.bestTotalScars}</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-dates">${fmtDate(r.achievedAt)}</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — complete a Gauntlet run to claim the top spot.</p>`;
+  const leaderboard=leaderboardSectionHtml(board, {
+    score:r=>r.bestTotalScars, meta:r=>fmtDate(r.achievedAt),
+    emptyMsg:'None recorded yet — complete a Gauntlet run to claim the top spot.',
+  });
 
   el.innerHTML=`
     <div class="pp-section">
@@ -3135,14 +3042,10 @@ function renderHomeTabBodyDeadManWalking(){
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
 
   const board=data.leaderboard||[];
-  const leaderboard=board.length
-    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.bestWalkedOut}/15</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-dates">${fmtDate(r.achievedAt)}</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — complete a Dead Man Walking run to claim the top spot.</p>`;
+  const leaderboard=leaderboardSectionHtml(board, {
+    score:r=>`${r.bestWalkedOut}/15`, meta:r=>fmtDate(r.achievedAt),
+    emptyMsg:'None recorded yet — complete a Dead Man Walking run to claim the top spot.',
+  });
 
   el.innerHTML=`
     <div class="pp-section">
@@ -3162,14 +3065,10 @@ function renderHomeTabBodyKiller(){
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
 
   const board=data.winLeaderboard||[];
-  const leaderboard=board.length
-    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.won}</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-dates">${r.rate}% of ${r.played}</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — play a Killer match to claim the top spot.</p>`;
+  const leaderboard=leaderboardSectionHtml(board, {
+    score:r=>r.won, meta:r=>`${r.rate}% of ${r.played}`,
+    emptyMsg:'None recorded yet — play a Killer match to claim the top spot.',
+  });
 
   el.innerHTML=`
     <div class="pp-section">
@@ -3189,23 +3088,14 @@ function renderHomeTabBodyAroundTheClock(){
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
 
   const fastBoard=data.fastest||[];
-  const fastLeaderboard=fastBoard.length
-    ? `<div class="hof-list">${fastBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.darts} darts</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-dates">${fmtDate(r.createdAt)}</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
+  const fastLeaderboard=leaderboardSectionHtml(fastBoard, {
+    score:r=>`${r.darts} darts`, meta:r=>fmtDate(r.createdAt), emptyMsg:'None recorded yet.',
+  });
 
   const compBoard=data.completions||[];
-  const compLeaderboard=compBoard.length
-    ? `<div class="hof-list">${compBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.completions}</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
+  const compLeaderboard=leaderboardSectionHtml(compBoard, {
+    score:r=>r.completions, emptyMsg:'None recorded yet.',
+  });
 
   el.innerHTML=`
     <div class="home-pair">
@@ -3230,13 +3120,9 @@ function renderHomeTabBodyAroundTheWorld(){
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
 
   const progBoard=data.progress||[];
-  const progLeaderboard=progBoard.length
-    ? `<div class="hof-list">${progBoard.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.progress}/${r.total}</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
+  const progLeaderboard=leaderboardSectionHtml(progBoard, {
+    score:r=>`${r.progress}/${r.total}`, emptyMsg:'None recorded yet.',
+  });
 
   el.innerHTML=`
     <div class="pp-section">
@@ -3246,6 +3132,34 @@ function renderHomeTabBodyAroundTheWorld(){
   `;
 }
 
+// Shared rank/score/player/meta row for the Home tab's many leaderboard
+// boards (items 36+49) — `meta` is the trailing "hof-dates" line (a date, a
+// "X% of Y" rate, a legs/rounds/visits count — whatever text the board
+// wants there) and is omitted entirely for the handful of boards with no
+// meta line at all; `extra` is a small opt-in slot for a badge between the
+// score and player name (the out-type DO/SO tag `renderAvgLeaderboard()`
+// shows). `hofSection()` above stays its own hand-written function — it
+// adds a checkout-route expand/collapse toggle and a Drill button that only
+// finish-shaped data has, not a plain leaderboard row.
+function leaderboardRowHtml(rank, score, name, meta, extra){
+  return `<div class="hof-row">
+    <span class="hof-rank">${rank}</span>
+    <span class="hof-score">${score}</span>
+    ${extra||''}
+    <span class="hof-player">${escapeHtml(name)}</span>
+    ${meta!=null?`<span class="hof-dates">${meta}</span>`:''}
+  </div>`;
+}
+// {score(r,i), meta(r,i)?, extra(r,i)?, emptyMsg, limit=10} — score/meta/extra
+// are functions since some boards compose them from more than one field
+// (Pressure Chamber's "total (rating)" score, X01's win-rate "X% of Y" meta).
+function leaderboardSectionHtml(rows, opts){
+  const { score, meta, extra, emptyMsg, limit=10, listStyle } = opts;
+  if(!rows || !rows.length) return `<p class="pp-meta" style="padding:8px 0">${emptyMsg}</p>`;
+  return `<div class="hof-list"${listStyle?` style="${listStyle}"`:''}>${rows.slice(0,limit).map((r,i)=>
+    leaderboardRowHtml(i+1, score(r,i), r.name, meta?meta(r,i):null, extra?extra(r,i):null)
+  ).join('')}</div>`;
+}
 function hofSection(rows, mode=''){
     if(!rows||!rows.length) return `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
     return `<div class="hof-list">${rows.map((f,i)=>{
@@ -3296,16 +3210,15 @@ function drillButtonHtml(jName, score){
   }
 
   function renderAvgLeaderboard(rows){
-    if(!rows.length) return `<p class="pp-meta" style="padding:8px 0">No games played yet.</p>`;
-    return `<div class="hof-list">${rows.map((r,i)=>{
-      const ob=r.out?`<span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;align-self:center">${r.out==='double'?'DO':'SO'}</span>`:'';
-      return `<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.avg.toFixed(1)}</span>
-        ${ob}
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-dates">${r.turns.toLocaleString()} visits</span>
-      </div>`;}).join('')}</div>`;
+    // Deliberately no top-10 cap here (unlike every other board below) — this
+    // is the one leaderboard shown in full.
+    return leaderboardSectionHtml(rows, {
+      score: r=>r.avg.toFixed(1),
+      meta: r=>`${r.turns.toLocaleString()} visits`,
+      extra: r=>r.out?`<span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;align-self:center">${r.out==='double'?'DO':'SO'}</span>`:'',
+      emptyMsg: 'No games played yet.',
+      limit: Infinity,
+    });
   }
 
 
@@ -13913,14 +13826,10 @@ function renderHomeTabBodyMarathon(){
   const data=homeData.marathon;
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
   const board=data.leaderboard||[];
-  const leaderboard=board.length
-    ? `<div class="hof-list">${board.slice(0,10).map((r,i)=>`<div class="hof-row">
-        <span class="hof-rank">${i+1}</span>
-        <span class="hof-score">${r.lowestFatigueSplit}</span>
-        <span class="hof-player">${escapeHtml(r.name)}</span>
-        <span class="hof-dates">${r.mostLegsInASession} legs</span>
-      </div>`).join('')}</div>`
-    : `<p class="pp-meta" style="padding:8px 0">None recorded yet — complete a Marathon Mode session to claim the top spot.</p>`;
+  const leaderboard=leaderboardSectionHtml(board, {
+    score:r=>r.lowestFatigueSplit, meta:r=>`${r.mostLegsInASession} legs`,
+    emptyMsg:'None recorded yet — complete a Marathon Mode session to claim the top spot.',
+  });
   el.innerHTML=`
     <div class="pp-section">
       <div class="pp-section-title">🏃 Marathon Mode — Lowest Fatigue Split</div>

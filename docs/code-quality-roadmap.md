@@ -64,17 +64,12 @@ and Doubles Practice's now-shared trailer (no-op badge path doesn't throw).
 Backend suite unaffected (1244 tests, same 6 pre-existing unrelated
 failures).
 
-## Item 36 — One `winSectionHtml()` for the five "Most X Wins" Home templates
+## Item 36 — One `winSectionHtml()` for the five "Most X Wins" Home templates — ✅ Done
 
-Five `renderHomeTabBody*` functions (`frontend/index.html` ≈ 2745, 2791,
-2838, 2881, 2923) embed the identical hof-list HTML template, differing only
-in the section title and `homeData` key. A markup/escaping/format change must
-be found five times; five copies of interpolated HTML is five XSS-audit
-surfaces.
-
-**Shape:** `winSectionHtml(title, rows)` called with
-(`"Most Cricket Wins"`, `homeData.cricket.wins`) etc. Pure extraction, no
-behavior change — the smallest item on this list.
+Superseded by, and implemented together with, item 49 below — see that
+item's done-note. All 7 "Most X Wins"-style copies (the 5 this item named,
+plus X01's own and Killer's) now go through the same `leaderboardSectionHtml`
+helper item 49 introduces.
 
 ## Item 37 — Registry-driven resume dispatch (savable ⇒ resumable, structurally)
 
@@ -409,15 +404,64 @@ the composed "progress / total" row and its empty case), Marathon, and The
 Gauntlet — every one produced exactly the original HTML. Backend suite
 unaffected (1244 tests, same 6 pre-existing unrelated failures).
 
-## Item 49 — One leaderboard-row template helper (~20 sites; supersedes item 36's five)
+## Item 49 — One leaderboard-row template helper (~20 sites; supersedes item 36's five) — ✅ Done
 
-The hof-list row template (`rank/score/player/dates`) is re-implemented
-inline in ~20 Home tab boards beyond item 36's five "Most X Wins" copies
-(Elo, win-rate, trebleless, ton+, first-9, MPR, RPI, PPR, Halve-It, PC,
-Doubles ×2, Blitz, Bob's 27, Ladder, Gauntlet, DMW, Killer, ATC ×2, ATW,
-Marathon). One `leaderboardSectionHtml(rows, {score, meta, emptyMsg})`
-subsumes item 36 entirely — implement them together. The copies already lag
-`hofSection()`'s accessibility upgrades (role=button/aria-expanded).
+Every hand-rolled `rank/score/player/meta` `.hof-row` template on the Home
+tab — roughly 25 sites once counted precisely (Elo, X01's win-rate/
+trebleless/ton+/first-9/three-dart-average, Cricket/Baseball/Shanghai's win
++ MPR/RPI/PPR boards, Halve-It/Pressure Chamber's win + peak-value boards,
+Doubles Practice ×2, Checkout Trainer, Bob's 27, Checkout Ladder, Gauntlet,
+Dead Man Walking, Killer, Around the Clock ×2, Around the World, Marathon)
+now goes through two shared helpers: `leaderboardRowHtml(rank, score, name,
+meta, extra)` for the single-row template, and `leaderboardSectionHtml(rows,
+{score, meta, extra, emptyMsg, limit, listStyle})` for the list-plus-empty-
+state wrapper every board built around it. Each call site supplies only what
+it genuinely differs on:
+- `score`/`meta`/`extra` are functions (not plain field names) since several
+  boards compose their display value from more than one field — Pressure
+  Chamber's "88 (Iron)" nests a rating string inside the score span instead
+  of using a separate meta line; the three-dart-average board's `extra`
+  slot renders an optional DO/SO out-type badge between score and player.
+- `meta` is omitted entirely for the handful of boards with no meta line at
+  all (Around the Clock's "Most Completions", Around the World, Halve-It's
+  "Highest Final Total") — matching their original missing-`hof-dates`
+  shape exactly, not just leaving it blank.
+- `limit` defaults to 10 (every board's original `.slice(0,10)`) but the
+  three-dart-average board passes `Infinity` — it was the one leaderboard
+  shown in full, not capped, and that stays true.
+- `emptyMsg` is always a free-text, per-site string — the ~10 distinct
+  wordings already in use (`"None recorded yet."`, `"No games played yet."`,
+  `"None recorded yet — play a Bob's 27 run to claim the top spot."`, etc.)
+  stay exactly as they were; the 7 win-rate-style sections instead pass
+  `emptyMsg:''` since their own outer ternary already collapses to nothing
+  when there's no data (never actually reached).
+- `listStyle` is an opt-in inline style on the `.hof-list` wrapper — only the
+  Household Elo board needs it (`margin-top:8px`, to match its section's
+  spacing), everything else omits it.
+
+`hofSection()` (Top Checkouts) and `achievementSection()`'s count-only board
+stay their own hand-written functions, unchanged — both are genuinely
+different shapes, not oversights: `hofSection()` adds a checkout-route
+expand/collapse toggle (`role="button" aria-expanded="false"` +
+`onclick="toggleFinishRoute(...)"`) and a Drill button that only
+finish-shaped data (with a decomposable dart route) can support, and
+`achievementSection()`'s board is a `rank/player/×count` shape with no
+score/meta line to consolidate against. The `role=button/aria-expanded`
+pattern the original item description called an "accessibility upgrade to
+carry over" turned out, on inspection, to be this checkout-route toggle
+specifically — not a generic collapsed-list/expand-for-more control (no such
+control exists anywhere in this family) — so it was correctly left where it
+already was rather than forced onto every plain leaderboard.
+
+Verified live in a browser: rendered representative boards across every
+shape (X01's win/trebleless/ton+/first-9/average with the out-badge,
+Cricket's MPR + win-rate, Pressure Chamber's nested-meta score, Gauntlet's
+ascending board, Around the Clock's two boards including the no-meta one,
+Around the World's empty state, and the Household Elo board's `listStyle`)
+and confirmed every row's HTML matches the original output exactly,
+including the one board's `Infinity` limit and the Elo board's custom
+wrapper spacing. Backend suite unaffected (1244 tests, same 6 pre-existing
+unrelated failures).
 
 ## Item 50 — One-shot badge award helper
 
