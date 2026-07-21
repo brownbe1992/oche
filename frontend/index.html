@@ -603,6 +603,11 @@
   /* ---- stat bubbles ---- */
   .stat-bubbles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px}
   @media(max-width:560px){.stat-bubbles{grid-template-columns:repeat(3,1fr)}}
+  /* Same author-rule-beats-UA-[hidden] gotcha as .btn[hidden] above — .stat-bubbles'
+     own display:grid otherwise wins over the UA stylesheet's [hidden]{display:none}
+     at equal specificity, so #player-stat-bubbles-more stayed visible regardless of
+     the hidden attribute toggleMoreStats() sets, making "More stats" a no-op. */
+  .stat-bubbles[hidden]{display:none}
   .stat-bubble{background:var(--surface-2);border:1px solid var(--wire);border-radius:11px;
     padding:11px 6px 10px;text-align:center;cursor:pointer;font:inherit;transition:border-color .12s}
   .stat-bubble:hover{border-color:var(--muted)}
