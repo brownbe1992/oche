@@ -3025,6 +3025,12 @@ function getPlayerStatBubbles(playerName, mode) {
   const qd = (sql) => { const r = db.prepare(sql).get(p.id); return r ? r.v : null; };
   const dartsThrown    = qd(`SELECT COUNT(*) AS v ${JD} ${mf}`) ?? 0;
   const avgDartsPerDay = qd(`SELECT CAST(COUNT(*) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS v ${JD} ${mf}`);
+  // X01-scoped counterparts of the two lifetime/all-modes figures above (Player
+  // Profile's "Lifetime" block uses dartsThrown/avgDartsPerDay; the X01 tab's own
+  // stat bubbles use these instead, so a Chuckin' or Cricket dart never inflates
+  // what's supposed to be an X01-only count).
+  const x01DartsThrown    = qd(`SELECT COUNT(*) AS v ${JD} ${mf} ${X01_ONLY}`) ?? 0;
+  const x01AvgDartsPerDay = qd(`SELECT CAST(COUNT(*) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS v ${JD} ${mf} ${X01_ONLY}`);
   // X01_ONLY: same fix as getPersonalBests()'s legAvgSql/fewestDartsCheckout —
   // checkout=1 alone no longer implies "this is an X01 leg" now that Checkout
   // Ladder and Dead Man Walking both set it too on non-X01 turns.
@@ -3103,7 +3109,7 @@ function getPlayerStatBubbles(playerName, mode) {
   ) WHERE gap_ms > 0 AND gap_ms < 60000`);
 
   return {
-    dartsThrown, avgDartsPerDay, avgDartsPerLeg, avg, one80s, bigFish, nineDarters,
+    dartsThrown, avgDartsPerDay, x01DartsThrown, x01AvgDartsPerDay, avgDartsPerLeg, avg, one80s, bigFish, nineDarters,
     treblelessPct: totalLegs > 0 ? (tlLegs / totalLegs * 100) : null,
     first3avg, first9avg, avg100plus, avg90minus, score140pct, pace,
     one80sPerLeg: totalLegs > 0 ? (legsWithOneEighty / totalLegs) : null,
@@ -5395,6 +5401,13 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
       return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(d.id) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere} ${NOT_CHECKOUT_TRAINER} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'avgdartsperday':
       return db.prepare(`SELECT ${T.fmt} AS bucket, CAST(COUNT(d.id) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere} ${NOT_CHECKOUT_TRAINER} GROUP BY bucket ORDER BY bucket`).all(...params);
+    // x01dartsthrown/x01avgdartsperday: the X01 tab's own bubbles — same shape as
+    // dartsthrown/avgdartsperday above, but X01_ONLY-scoped instead of just
+    // excluding Checkout Trainer, so a Cricket or Chuckin' dart can't count here.
+    case 'x01dartsthrown':
+      return db.prepare(`SELECT ${T.fmt} AS bucket, COUNT(d.id) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere} ${X01_ONLY} GROUP BY bucket ORDER BY bucket`).all(...params);
+    case 'x01avgdartsperday':
+      return db.prepare(`SELECT ${T.fmt} AS bucket, CAST(COUNT(d.id) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS value FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${T.and} ${modeWhere} ${weightWhere} ${X01_ONLY} GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'avg':
       // Standard 3-dart average: total points / counted darts * 3 (per-turn darts
       // pre-aggregated so the darts JOIN doesn't inflate SUM(scored)). A bust counts

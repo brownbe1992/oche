@@ -6377,6 +6377,17 @@ function renderPlayerPage(){
     ${secondaryDefs.length ? `<button class="btn btn-ghost" style="margin:6px 0" id="toggle-more-stats-btn" onclick="toggleMoreStats()">${showMoreStats?'Fewer stats ▴':'More stats ▾'}</button>
     <div class="stat-bubbles" id="player-stat-bubbles-more"${showMoreStats?'':' hidden'}>${secondaryDefs.map(bubble).join('')}</div>` : ''}`;
 
+  // Lifetime, all-modes figures — rendered above the game-mode dropdown (not
+  // inside its spotlight panel) since they're deliberately NOT scoped to
+  // whichever mode the dropdown has selected, unlike everything below it.
+  const lifetimeBubblesHtml = `
+    <div class="pp-section">
+      <div class="pp-section-title">Lifetime — Every Game Mode</div>
+      <div class="stat-bubbles" id="player-lifetime-bubbles">${LIFETIME_STAT_DEFS.map(d=>
+        `<div class="stat-block" title="${d.desc}"><div class="stat-val" id="bv-${d.key}">—</div><div class="stat-label">${d.label}</div></div>`
+      ).join('')}</div>
+    </div>`;
+
   // shared chart + top-finishes HTML (same structure for both tabs).
   // Key stats + the chart they drive live together in one gold-accented
   // "spotlight" panel — the two things worth featuring at a glance, per the
@@ -6385,6 +6396,7 @@ function renderPlayerPage(){
   // so the page reads as "headline stats + graphs" first, "everything else,
   // on demand" below.
   const chartSection = `
+    ${lifetimeBubblesHtml}
     <div class="pp-section spotlight">
       ${gameTypeTabsHtml}
       ${bubblesHtml}
@@ -6583,6 +6595,7 @@ function renderPlayerPage(){
       ${canManagePlayers()?`<button class="btn btn-ghost danger" onclick="askDeleteFromProfile('${j}')">Delete player</button>`:''}
     </div>`;
   loadStatBubbles();
+  loadLifetimeStatBubbles();
   loadAvgChart(avgChartPeriod);
   loadDartWeights();
   loadPlayerLoadouts();
@@ -12018,12 +12031,15 @@ function startNextRound(){
 /* ---------- avg-over-time chart ---------- */
 const STAT_DEFS = [
   // primary:true bubbles are shown by default; the rest live behind the "More stats" toggle.
-  { key:'dartsthrown',    label:'Darts Thrown',   desc:"Every dart you've ever thrown, across every game mode (Chuckin' counts, Checkout Trainer doesn't) — not scoped to X01, unlike the game-specific Darts Thrown bubbles on other modes", fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
+  // dartsthrown/avgdartsperday used to live here too, but they're lifetime totals
+  // across every game mode (see LIFETIME_STAT_DEFS below) — genuinely X01-only
+  // darts get counted by x01dartsthrown/x01avgdartsperday instead.
+  { key:'x01dartsthrown', label:'Darts Thrown', desc:'Total darts thrown in X01 games',        fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
   { key:'avg',           label:'Three-Dart Average', desc:'3-dart average',                      fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
   { key:'180s',          label:'180s',         desc:'Count of 180s thrown',                    fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
   { key:'bigfish',       label:'Big Fish',    desc:'170 checkouts',                            fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
   { key:'ninedarters',   label:'9-Darters',   desc:'501 legs finished in 9 darts',            fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
-  { key:'avgdartsperday', label:'Darts / Day',    desc:'Average darts thrown per day played, across every game mode — not scoped to X01',        fmt:v=>v!=null?Number(v).toFixed(1):'—' },
+  { key:'x01avgdartsperday', label:'Darts / Day', desc:'Average darts thrown per day played, in X01 games',        fmt:v=>v!=null?Number(v).toFixed(1):'—' },
   { key:'avgdartsperleg', label:'Darts / Leg',    desc:'Average darts thrown per won X01 leg',           fmt:v=>v!=null?Number(v).toFixed(1):'—' },
   { key:'pace',           label:'Average Pace', desc:'Darts thrown per minute',                  fmt:v=>v!=null?Number(v).toFixed(1):'—' },
   { key:'treblelesspct', label:'Trebleless %',desc:'% of legs without hitting a treble',      fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
@@ -12035,6 +12051,18 @@ const STAT_DEFS = [
   { key:'180sperleg',    label:'180s/Leg',    desc:'% of legs that contained a 180',           fmt:v=>v!=null?(v*100).toFixed(1)+'%':'—' },
 ];
 let selectedStat = 'avg';
+
+// Lifetime, all-modes figures — deliberately NOT part of any game type's own
+// STAT_DEFS list (see REFERENCE.md's "Physical-dart stats" table): a Chuckin'
+// dart is a real throw and is meant to count here, so these render in their own
+// fixed block above the game-mode dropdown instead of inside it, where sitting
+// next to mode-scoped bubbles like x01dartsthrown made them look like a scoping
+// bug rather than the deliberate lifetime totals they are. Static display only —
+// not clickable, doesn't drive the chart below (unlike the per-mode bubbles).
+const LIFETIME_STAT_DEFS = [
+  { key:'dartsthrown',    label:'Total Darts Thrown', desc:"Every dart you've ever thrown, across every game mode (Chuckin' counts, Checkout Trainer doesn't)", fmt:v=>v!=null?Number(v).toLocaleString():'—' },
+  { key:'avgdartsperday', label:'Darts / Day',        desc:'Average darts thrown per day played, across every game mode', fmt:v=>v!=null?Number(v).toFixed(1):'—' },
+];
 
 // Cricket's own stat-bubble vocabulary (game-modes-roadmap.md build-order step 3)
 // — same {key,label,desc,fmt,primary} shape as STAT_DEFS. Keys match
@@ -15450,7 +15478,7 @@ function animateAvgChartDrawIn(){
 }
 
 /* ---------- stat bubbles ---------- */
-const BUBBLE_KEY_MAP = { dartsthrown:'dartsThrown', avgdartsperday:'avgDartsPerDay', avgdartsperleg:'avgDartsPerLeg', '180s':'one80s', bigfish:'bigFish', ninedarters:'nineDarters', treblelesspct:'treblelessPct', '180sperleg':'one80sPerLeg' };
+const BUBBLE_KEY_MAP = { dartsthrown:'dartsThrown', avgdartsperday:'avgDartsPerDay', x01dartsthrown:'x01DartsThrown', x01avgdartsperday:'x01AvgDartsPerDay', avgdartsperleg:'avgDartsPerLeg', '180s':'one80s', bigfish:'bigFish', ninedarters:'nineDarters', treblelesspct:'treblelessPct', '180sperleg':'one80sPerLeg' };
 // Patched onto GAME_TYPES here (rather than inline in its own object literal
 // above) since BUBBLE_KEY_MAP itself isn't defined until this point in the file.
 GAME_TYPES.x01.bubbleKeyMap = BUBBLE_KEY_MAP;
@@ -15513,6 +15541,25 @@ function renderStatBubbles(data){
     const mk=keyMap[d.key]||d.key;
     el.textContent=d.fmt(data[mk]!=null?data[mk]:data[d.key]);
   });
+}
+// Lifetime, all-modes bubbles (Total Darts Thrown, Darts / Day) live above the
+// game-mode dropdown, not inside its game-type-scoped stat grid — so they're
+// fetched with no gameType param at all. getStatBubblesFor() falls back to the
+// plain getPlayerStatBubbles() for an unrecognized/absent gameType, which is
+// exactly the mode-independent lifetime figure this block wants, regardless of
+// whatever's currently selected in the dropdown.
+function loadLifetimeStatBubbles(){
+  const container=document.getElementById('player-lifetime-bubbles');
+  if(!container) return;
+  const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
+  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
+    .then(data=>{
+      if(!data) return;
+      LIFETIME_STAT_DEFS.forEach(d=>{
+        const el=document.getElementById('bv-'+d.key);
+        if(el) el.textContent=d.fmt(data[BUBBLE_KEY_MAP[d.key]||d.key]);
+      });
+    }).catch(()=>{});
 }
 
 function loadDartWeights(){

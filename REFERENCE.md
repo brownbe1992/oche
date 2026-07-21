@@ -876,14 +876,22 @@ checkout, and exactly 9 total darts were thrown across those 3 turns. Locked to
 
 ### Player Profile stat bubbles (`getPlayerStatBubbles(name, mode)`) — all 15
 
+**Darts Thrown / Darts / Day are X01-scoped here** (`x01DartsThrown`/`x01AvgDartsPerDay`,
+`AND g.game_type='x01'` added to each) — a Cricket or Just Chuckin' It dart no
+longer inflates the X01 tab's own bubbles. The *lifetime, every-game-mode*
+versions of these two figures (`dartsThrown`/`avgDartsPerDay`, unchanged from
+the formulas below minus the X01 scoping) are still returned by this same
+function, but rendered in their own fixed "Lifetime — Every Game Mode" block
+above the game-mode dropdown instead of inside it — see below the table.
+
 | Bubble | Denominator family | Formula |
 |---|---|---|
-| **Darts Thrown** | raw | `COUNT(*)` from `darts` |
+| **Darts Thrown** | raw | `COUNT(*)` from `darts`, **`AND g.game_type='x01'`** |
 | **Average** | 3-dart-avg | `totalPts / avgDarts * 3` where `avgDarts` sums `bust?3:COUNT(darts)` per turn |
 | **180s** | raw count | `COUNT(*) WHERE scored=180` |
 | **Big Fish** | raw count | `COUNT(*) WHERE checkout=1 AND checkout_points=170` |
 | **9 Darters** | leg-level | nine-darter definition above, scoped to this player |
-| **Darts / Day** | raw | `dartsThrown / COUNT(DISTINCT date(created_at))` |
+| **Darts / Day** | raw | `dartsThrown / COUNT(DISTINCT date(created_at))`, **`AND g.game_type='x01'`** |
 | **Darts / Leg** | raw | `AVG(darts in leg)`, **won legs only** (`HAVING SUM(checkout)>0`) |
 | **Trebleless %** | per-leg | `% of legs where SUM(is_treble)=0 across every dart in the leg` |
 | **1st 3 AVG** | first-visit-only | `AVG(scored)` of each leg's first visit (`ROW_NUMBER()...rn=1`). **Scoped to exactly 501/301/170/101** — see below. |
@@ -893,6 +901,19 @@ checkout, and exactly 9 total darts were thrown across those 3 turns. Locked to
 | **140/Leg** | first-visit-only | `% of opening visits scoring >=140`. **Scoped to exactly 501/301/170/101.** |
 | **180s/Leg** | fraction | `legs containing ≥1 180 / total legs` |
 | **Average Pace** | — | darts/minute, returned as the `pace` key — same formula as the Home page/chart versions (consecutive `thrown_at` gaps within a turn, clamped to `0 < gap < 60000ms`); `null` (bubble shows "—") until per-dart timing data exists. *Note: this key was missing from `getPlayerStatBubbles()`'s return object until the audit that produced this manual caught it — the bubble was permanently blank before that.* |
+
+### Lifetime, all-modes bubbles ("Lifetime — Every Game Mode" block)
+
+Rendered above the Player Profile's game-mode dropdown, not inside it — these two
+are deliberately **not** scoped to whichever mode the dropdown has selected, per
+the physical-dart-stats table above (a Chuckin' dart is a real throw and is meant
+to count). Non-interactive display tiles: unlike every bubble in the table above,
+clicking them does nothing — they don't drive the "\_\_\_ over time" chart.
+
+| Bubble | Formula |
+|---|---|
+| **Total Darts Thrown** | `dartsThrown` — `COUNT(*)` from `darts`, across every game mode except Checkout Trainer (`NOT_CHECKOUT_TRAINER`) |
+| **Darts / Day** | `avgDartsPerDay` — `dartsThrown / COUNT(DISTINCT date(created_at))`, same all-modes scope |
 
 **Why 1st 3 AVG / 1st 9 AVG / 140/Leg are scoped to exactly 501, 301, 170, and 101
 — never any other X01 starting score, and never any other game type — ever,
@@ -4420,8 +4441,11 @@ Two exclusion constants in `backend/db.js`:
   Chuckin is a deliberate exception to: `computeStats()`'s roster `turns`/
   `dartsThrown`, `getSummary()`'s `darts`/`todayDarts`/`weekDarts`, the roster
   "last played" timestamp, `getPlayerStatBubbles()`'s own `dartsThrown`/
-  `avgDartsPerDay`/`avgDartsPerLeg` (the X01 profile tab's bubbles),
-  `getMetricHistory()`'s `dartsthrown`/`avgdartsperday`/`avgdartsperleg`/`pace`
+  `avgDartsPerDay`/`avgDartsPerLeg` (the Player Profile's "Lifetime — Every Game
+  Mode" block and `avgDartsPerLeg`'s own X01 scoping — not to be confused with
+  that same function's `x01DartsThrown`/`x01AvgDartsPerDay`, which add
+  `AND g.game_type='x01'` on top of this exclusion for the X01 tab's own
+  bubbles), `getMetricHistory()`'s `dartsthrown`/`avgdartsperday`/`avgdartsperleg`/`pace`
   chart metrics, `getPersonalBests()`'s `bestLegAvg`/`fewestDartsCheckout`/
   `recentFormAvg`/`lifetimeAvg` (X01's own Personal Bests — `t.checkout=1` is
   only ever set by X01 and Checkout Trainer, so this was the most severe leak:
