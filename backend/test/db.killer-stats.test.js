@@ -146,8 +146,8 @@ describe('getKillerWinLeaderboard', () => {
   });
 });
 
-describe('renamePlayer — killer config rewrite', () => {
-  test('a rename rewrites the name-keyed number assignment so replay-derived stats survive', () => {
+describe('renamePlayer — killer configs are unaffected (item 43, docs/code-quality-roadmap.md)', () => {
+  test('a rename does not touch the stored config, and replay-derived stats still survive under the new name', () => {
     const a = 'Killer_Rn_A', b = 'Killer_Rn_B';
     db.addPlayer(a); db.addPlayer(b);
     const { gameId, config } = killerGame([a, b]);
@@ -157,33 +157,16 @@ describe('renamePlayer — killer config rewrite', () => {
     kt(gameId, a, 1, 1, nb, 1, 1, b);   // a attacks b -> b eliminated, a wins
     db.completeGame(gameId, a);
 
-    // games.config.numbers is keyed by player NAME while every replay path
-    // (_killerLegOutcomesForPlayer, rebuildKillerState, the addTurn guard)
-    // looks up by CURRENT name — renamePlayer() must rewrite the stored key
-    // or this player's whole killer history replays as inert.
+    // games.config.numbers is keyed by the immutable player id — a rename
+    // changes nothing about that row's id, so there is nothing left for
+    // renamePlayer() to rewrite (unlike the old name-keyed scheme, which
+    // needed a matching compensating rewrite on every rename).
+    const before = db._db.prepare('SELECT config FROM games WHERE id = ?').get(gameId).config;
     db.renamePlayer(a, 'Killer_Rn_A2');
-    const cfg = JSON.parse(db._db.prepare('SELECT config FROM games WHERE id = ?').get(gameId).config);
-    assert.equal(cfg.numbers['Killer_Rn_A2'], na, 'the assignment now lives under the new name');
-    assert.ok(!(a in cfg.numbers), 'the orphaned old-name key is gone');
+    const after = db._db.prepare('SELECT config FROM games WHERE id = ?').get(gameId).config;
+    assert.equal(after, before, 'the stored config is byte-for-byte unchanged by a rename');
 
     const bubbles = db.getKillerStatBubbles('Killer_Rn_A2', 'h2h');
-    assert.equal(bubbles.avgKillsPerLeg, 1, 'replay still credits the kill under the new name');
-  });
-});
-
-describe('renamePlayer — no-op rename is config-safe', () => {
-  test('renaming a player to their exact current name leaves killer configs untouched', () => {
-    const a = 'Killer_Noop_A', b = 'Killer_Noop_B';
-    db.addPlayer(a); db.addPlayer(b);
-    const { gameId, config } = killerGame([a, b]);
-    const na = config.numbers[a];
-
-    // Saving the rename dialog without changing anything is a legitimate no-op
-    // (the clash guard deliberately permits it). The rewrite's set-then-delete
-    // would otherwise operate on one and the same key and strip the assignment
-    // from every past killer game.
-    db.renamePlayer(a, a);
-    const cfg = JSON.parse(db._db.prepare('SELECT config FROM games WHERE id = ?').get(gameId).config);
-    assert.equal(cfg.numbers[a], na, "the player's number assignment survives a no-op rename");
+    assert.equal(bubbles.avgKillsPerLeg, 1, 'replay still credits the kill under the new name (looked up by id, not name)');
   });
 });

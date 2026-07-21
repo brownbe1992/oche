@@ -2988,14 +2988,15 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   fallbacks so exports written before a column existed stay importable.
   `games.config` is validated as JSON at the boundary (`400` on a malformed
   entry — the read paths parse it unguarded), and a **killer** game's
-  name-keyed `config.numbers` is re-keyed to each participant's RESOLVED
-  local name (the import-path twin of `_rewriteKillerConfigNames()`:
-  `resolveStub()` can attach a game to a differently-named local player via
-  a uuid match onto a renamed row, a merge-survivor alias, or a collision
-  uniquify to `"Name (2)"` — an unmapped key would make the whole game
-  replay inert). Configs orphaned by pre-fix renames/merges are healed once
-  at boot by `reconcileKillerConfigNames()` (remaps only the unambiguous
-  one-orphan-key/one-unclaimed-participant case).
+  id-keyed `config.numbers` (item 43, docs/code-quality-roadmap.md) is
+  re-keyed from the export's (source-server) player ids to this server's
+  own resolved local ids — `idMap` (the same source-id → local-id map every
+  other player reference in the import goes through) already carries
+  exactly that translation for every stub the import touched, so no
+  separate name-based map is needed; an unmapped key would make the whole
+  game replay inert. A database still carrying a pre-migration name-keyed
+  config gets converted to id-keys once at boot by
+  `migrateKillerConfigsToIdKeys()` before any import ever runs against it.
   `league_id` is always imported as `NULL` (leagues aren't part of a
   per-player export). **Duplicate-import guard**: before inserting each game,
   checks for an existing local game with the same
@@ -3085,11 +3086,14 @@ and a **Preview merge…** button; there is no merge without a preview.
     `marathon_sessions` (the one players-FK table with no games link —
     unreassigned, the final source-player DELETE would CASCADE the whole
     Marathon history away).
-  - **Killer configs**: `games.config.numbers` is keyed by player *name*, so
-    every killer game being absorbed gets its source-name key rewritten to
-    the target's name (`_rewriteKillerConfigNames()` — the same rewrite
-    `renamePlayer()` applies), or the merged history would replay with an
-    orphaned assignment and zero out everyone's replay-derived Killer stats.
+  - **Killer configs**: `games.config.numbers` is keyed by player *id* (item
+    43, docs/code-quality-roadmap.md), so every killer game being absorbed
+    gets its source-id key rewritten to the target's id
+    (`_rewriteKillerConfigIds()`), or the merged history would replay with
+    an orphaned assignment and zero out everyone's replay-derived Killer
+    stats. Unlike the old name-keyed scheme, `renamePlayer()` needs no
+    equivalent rewrite — a rename never changes a row's id, so it can never
+    orphan this key.
   - **`player_badges`** (both earned the same badge): the target keeps
     `MAX(count)` — a merge must never inflate a count beyond what either
     history actually earned — and `MIN(earned_at)`; the source's remaining
@@ -5601,17 +5605,20 @@ to 1 the way every solo drill in this app is — Killer never appears in the
 Assigned **server-side**, inside `createGame()` (`backend/db.js`) — never
 trusted from the client. A Fisher-Yates shuffle (`shuffleKillerNumbers`, an
 injectable-RNG pure function so it's deterministically testable) of the pool
-`[1..20]`, zipped one-to-one against the match's player names. Assigned once
+`[1..20]`, zipped one-to-one against the match's player **ids** (item 43,
+docs/code-quality-roadmap.md — an immutable identifier a later rename/merge
+can't orphan, unlike the old name-keyed scheme this replaced). Assigned once
 per **match** (not re-derived per leg — `resetPlayerForNextLegKiller()`
 explicitly preserves `player.number` while resetting every other per-leg
 field), and re-rolled fresh on every new game row — a rematch/"Play again"
 always calls `startGame()` → `createGame()` again, so it gets a brand-new
 random assignment rather than reusing the previous match's numbers.
-`createGame()`'s return value carries the assignment back to the client as
-`config.numbers` (`{playerName: number}`) — the *only* way the client ever
-learns them; `DB.beginGame()` (`frontend/index.html`) assigns each
-`game.players[i].number` from that response before the scoreboard's first
-render.
+`games.config.numbers` is stored as `{playerId: number}`; `createGame()`'s
+return value translates it back to `{playerName: number}` purely for this
+one-shot response — the client only ever models players by name and has no
+other reason to learn ids — which `DB.beginGame()` (`frontend/index.html`)
+assigns onto each `game.players[i].number` before the scoreboard's first
+render, exactly as before this migration.
 
 ### Becoming a killer, and attacking (`evaluateDartKiller`, `frontend/scoring.js`)
 

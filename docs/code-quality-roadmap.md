@@ -1,7 +1,7 @@
 # Code-Quality Refactors — deferred review findings
 
-> **Status: Phase 1 of the completion order done (items 59, 58, 56, 52, 38, 39
-> — see each item's own note below); the rest is open.** Every item below is
+> **Status: Phases 1-2 of the completion order done (items 59, 58, 56, 52, 38,
+> 39, 43 — see each item's own note below); the rest is open.** Every item below is
 > tracked individually on `docs/open-roadmap-items.md` (items 35–45 from the
 > branch review, items 46–52 from the first whole-file `/simplify
 > frontend/index.html` pass, items 53–59 from the second). This doc is the
@@ -134,7 +134,41 @@ inside it, or derive the allowlist from a shared registry the producer and
 reader both consume. Reduces three sync points to zero. Touches the SEC-2
 sanitization layer — keep the size cap and the top-level shape validation.
 
-## Item 43 — Id-keyed killer configs (end the name-rewrite class)
+## Item 43 — Id-keyed killer configs (end the name-rewrite class) — ✅ Done
+
+`config.numbers` is now keyed by `players.id`, migrated by a one-time boot
+function (`migrateKillerConfigsToIdKeys()`) that also heals any config a
+pre-fix rename/merge had already orphaned (same unambiguous one-orphan/one-
+unclaimed heuristic the old reconciler used) before converting it. Of the
+three compensating mechanisms, two are fully gone: `renamePlayer()` no
+longer touches `config.numbers` at all (a rename can't change a row's id,
+so there's nothing left to orphan), and the boot reconciler is replaced
+outright by the migration above (which folds its healing logic in rather
+than running it forever). The other two turned out not to be eliminable —
+not because the item's premise was wrong, but because they're not actually
+"bug compensators": `mergePlayers()` still moves a key from source.id to
+target.id (renamed `_rewriteKillerConfigIds()`), because a merge
+*intentionally* changes which id owns a participation — that's not drift,
+it's the merge's whole point, the same reason every other FK-into-players
+table gets an `UPDATE ... SET player_id = target.id` in that same
+transaction. `importPlayerExport()`'s re-key similarly survives (now
+reusing `idMap`, the existing source-id → local-id map — the separate
+`nameMap` it used to need is gone entirely) because translating any
+embedded id reference across two independent databases' autoincrement
+histories is an unavoidable structural need for import, unrelated to the
+old name-drift bug class. `rebuildKillerState()` (`frontend/scoring.js`)
+now takes `participants` ({id, name} rows) instead of bare `names`, looking
+up `numbers[id]`; its own internal replay (and `evaluateDartKiller()`)
+stays entirely name-based, matching the live game object's own shape — only
+the number *lookup* moved from name to id. The wire format `createGame()`
+returns to the client is unchanged (`{name: number}`), so `frontend/
+index.html` needed zero changes at all. Verified live in a browser: a
+Killer game's client-side numbers still resolve correctly by name, while
+the server-persisted `games.config` is confirmed id-keyed by direct query.
+Committed tests: `backend/test/db.killer-config-migration.test.js` (new —
+legacy name-keyed migration, orphan-healing, idempotence), plus updated
+assertions in `db.killer-stats.test.js`, `db.merge.test.js`,
+`db.export.test.js`, and `scoring.test.js`.
 
 Killer's `games.config.numbers` is keyed by player **name** while every
 replay path looks up by current name. Three compensating mechanisms now

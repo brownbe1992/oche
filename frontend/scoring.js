@@ -1723,11 +1723,14 @@ function shuffleKillerNumbers(pool, rng){
 }
 // Randomly assigns each player a distinct number 1-20 (docs/archive/game-modes-
 // roadmap.md: "assigning numbers randomly at Start is the pragmatic digital
-// equivalent" of the physical non-dominant-hand throw). Returns { [name]: number }.
-function assignKillerNumbers(names, rng){
+// equivalent" of the physical non-dominant-hand throw). `keys` is whatever the
+// caller stores the assignment keyed by — backend/db.js's createGame() passes
+// player ids (item 43, docs/code-quality-roadmap.md — an immutable identifier
+// a later rename/merge can't orphan). Returns { [key]: number }.
+function assignKillerNumbers(keys, rng){
   const pool = shuffleKillerNumbers([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20], rng);
   const out = {};
-  names.forEach((name, i) => { out[name] = pool[i]; });
+  keys.forEach((key, i) => { out[key] = pool[i]; });
   return out;
 }
 
@@ -1767,16 +1770,21 @@ function evaluateDartKiller(dart, throwerName, players){
 // submitted turn, never enforce turn order server-side; the client is
 // trusted for sequencing the same way it already is everywhere else).
 // `turns`: ordered {throwerName, sector, mult} rows for one leg.
-// `numbers`: this match's own {name: number} assignment (leg-invariant).
+// `numbers`: this match's own {id: number} assignment (leg-invariant), keyed
+// by players.id (item 43, docs/code-quality-roadmap.md) — `participants`
+// ({id, name} rows) is what bridges each entry back to the name every other
+// lookup in this function (and evaluateDartKiller) still uses; the replay's
+// own internal representation stays entirely name-based, only the number
+// LOOKUP moved from name to id.
 // `kills` (opponents THIS player personally eliminated via attack, never via
 // someone else's self-kill) and `livesLost` (total magnitude of losses this
 // player absorbed, attacks + self-kills combined) ride alongside each
 // player's own lives/killer/eliminated state — both needed for stats
 // (kills-per-game, avg lives lost per leg) as well as live display, derived
 // here once rather than recomputed by a second replay pass.
-function rebuildKillerState({ names, numbers, turns, threshold }){
+function rebuildKillerState({ participants, numbers, turns, threshold }){
   const liveThreshold = threshold || KILLER_DEFAULT_LIVES;
-  const players = names.map(name => ({ name, number: numbers[name], lives: 0, isKiller: false, eliminated: false, kills: 0, livesLost: 0 }));
+  const players = participants.map(({ id, name }) => ({ name, number: numbers[id], lives: 0, isKiller: false, eliminated: false, kills: 0, livesLost: 0 }));
   const byName = new Map(players.map(p => [p.name, p]));
   let winner = null;
   turns.forEach(t => {

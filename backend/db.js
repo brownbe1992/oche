@@ -746,19 +746,26 @@ function _parseKillerConfig(json) {
   try { cfg = JSON.parse(json); } catch { return null; }
   return (cfg && cfg.numbers) ? cfg : null;
 }
-// Returns true when the move changed anything. Equal names are a no-op by
-// construction (renamePlayer's clash guard deliberately permits a same-name
-// rename — a same-key set-then-delete would DELETE the assignment outright).
-// A pure case-change ('ben' → 'Ben') correctly proceeds: object keys are
-// case-sensitive even though player names collate NOCASE.
-function _moveKillerNumberKey(cfg, fromName, toName) {
-  if (fromName === toName || !Object.prototype.hasOwnProperty.call(cfg.numbers, fromName)) return false;
-  cfg.numbers[toName] = cfg.numbers[fromName];
-  delete cfg.numbers[fromName];
+// Returns true when the move changed anything. Equal ids are a no-op by
+// construction (object keys are always strings once round-tripped through
+// JSON, so both sides are coerced here rather than trusting the caller).
+function _moveKillerNumberKey(cfg, fromId, toId) {
+  fromId = String(fromId); toId = String(toId);
+  if (fromId === toId || !Object.prototype.hasOwnProperty.call(cfg.numbers, fromId)) return false;
+  cfg.numbers[toId] = cfg.numbers[fromId];
+  delete cfg.numbers[fromId];
   return true;
 }
-function _rewriteKillerConfigNames(playerId, oldName, newName) {
-  if (oldName === newName) return;
+// mergePlayers()'s own compensator (item 43, docs/code-quality-roadmap.md):
+// game_players.player_id has already been reassigned from source.id to
+// playerId (== target.id) by the time this runs, but the killer config's
+// stored key is still oldId (== source.id) — move it to match, or the merged
+// history replays with an orphaned assignment. Renaming a player no longer
+// needs an equivalent: config.numbers is keyed by the immutable players.id
+// now, so a rename alone can never orphan it (unlike the old name-keyed
+// scheme, which needed this same rewrite on every rename too).
+function _rewriteKillerConfigIds(playerId, oldId) {
+  if (oldId === playerId) return;
   const rows = db.prepare(`
     SELECT g.id, g.config FROM games g
       JOIN game_players gp ON gp.game_id = g.id
@@ -766,7 +773,7 @@ function _rewriteKillerConfigNames(playerId, oldName, newName) {
   const upd = db.prepare('UPDATE games SET config = ? WHERE id = ?');
   for (const row of rows) {
     const cfg = _parseKillerConfig(row.config);
-    if (cfg && _moveKillerNumberKey(cfg, oldName, newName)) upd.run(JSON.stringify(cfg), row.id);
+    if (cfg && _moveKillerNumberKey(cfg, oldId, playerId)) upd.run(JSON.stringify(cfg), row.id);
   }
 }
 
@@ -777,7 +784,6 @@ function renamePlayer(from, to) {
   const clash = getPlayer(to);
   if (clash && clash.id !== p.id) throw httpError(409, `"${to}" already exists`);
   q.renamePlayer.run(to, p.id);
-  _rewriteKillerConfigNames(p.id, p.name, to);
   return { name: to };
 }
 
@@ -1016,7 +1022,15 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   // hostile submission could otherwise hand itself a favorable matchup.
   // Assigned here, server-side, once per match (not re-derived per leg — every
   // leg of this same game reuses this same assignment).
+  //
+  // Stored keyed by players.id (item 43, docs/code-quality-roadmap.md) — an
+  // immutable identifier a later rename/merge can't orphan, unlike the old
+  // name-keyed scheme this replaces. The client only ever models players by
+  // name and has no other reason to learn ids, so killerNumbersForClient
+  // below translates back to {name: number} purely for this one-shot
+  // createGame() response; nothing else about the frontend changes.
   let killerConfig = null;
+  let killerNumbersForClient = null;
   if (resolvedGameType === 'killer') {
     const names = _uniquePlayerNames(players);
     if (names.length < 2) throw httpError(400, 'Killer requires at least 2 players');
@@ -1025,7 +1039,11 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
       lives = Number(config.lives);
       if (!Number.isInteger(lives) || lives < 1 || lives > 20) throw httpError(400, 'lives must be an integer between 1 and 20');
     }
-    killerConfig = { lives, numbers: assignKillerNumbers(names) };
+    const ids = names.map(n => ensurePlayer(n).id);
+    const numbers = assignKillerNumbers(ids);
+    killerConfig = { lives, numbers };
+    killerNumbersForClient = {};
+    names.forEach((n, i) => { killerNumbersForClient[n] = numbers[ids[i]]; });
   }
   // Dead Man Walking (docs/archive/dead-man-walking-roadmap.md "Data model" /
   // "Server-authoritative round generation"): config.rounds — the frozen
@@ -1118,7 +1136,7 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   // frozen config.rounds is the same shape of problem — the client has no
   // other way to learn its own 15 personalized targets/pars, since they were
   // never client-supplied in the first place (see dmwConfig's own comment above).
-  return killerConfig ? { gameId, config: killerConfig }
+  return killerConfig ? { gameId, config: { lives: killerConfig.lives, numbers: killerNumbersForClient } }
     : dmwConfig ? { gameId, config: dmwConfig }
     : { gameId };
 }
@@ -1388,7 +1406,6 @@ function addTurn(gameId, t, opts = {}) {
       WHERE gp.game_id=? ORDER BY gp.rowid
     `).all(Number(gameId));
     const idToName = new Map(participants.map(pp => [pp.id, pp.name]));
-    const names = participants.map(pp => pp.name);
     const throwerName = idToName.get(p.id);
     if (!throwerName) throw httpError(400, 'thrower is not a participant in this game');
 
@@ -1398,7 +1415,7 @@ function addTurn(gameId, t, opts = {}) {
       WHERE t.game_id=? AND t.set_no=? AND t.leg_no=? ORDER BY t.id
     `).all(Number(gameId), setNo, legNo);
     const priorTurns = priorRows.map(r => ({ throwerName: idToName.get(r.playerId), sector: r.sector, mult: r.mult }));
-    const state = rebuildKillerState({ names, numbers: cfg.numbers, turns: priorTurns, threshold: cfg.lives });
+    const state = rebuildKillerState({ participants, numbers: cfg.numbers, turns: priorTurns, threshold: cfg.lives });
     if (state.winner) throw httpError(400, 'this Killer leg has already been won');
     const thrower = state.players.find(pl => pl.name === throwerName);
     if (!thrower || thrower.eliminated) throw httpError(400, 'this player has already been eliminated this leg');
@@ -2201,7 +2218,7 @@ function _replayKillerLegs(gameId, cfg) {
   }
   return { participants, names,
     legs: legGroups.map(l => ({ setNo: l.setNo, legNo: l.legNo,
-      state: rebuildKillerState({ names, numbers: cfg.numbers, turns: l.turns, threshold: cfg.lives }) })) };
+      state: rebuildKillerState({ participants, numbers: cfg.numbers, turns: l.turns, threshold: cfg.lives }) })) };
 }
 
 function _h2hWonLegs() {
@@ -6807,12 +6824,6 @@ function importPlayerExport(payload) {
   }
 
   const idMap = new Map(); // exported (source-server) player id -> this server's local player id
-  // exported player id -> { exportName, localName }: killer configs key number
-  // assignments by NAME, so any game whose config still carries the export's
-  // name for a player who resolved to a DIFFERENT local name (renamed row,
-  // merge-survivor alias, or collision uniquify below) must have that key
-  // re-mapped at insert time — the import-path twin of _rewriteKillerConfigNames().
-  const nameMap = new Map();
 
   function resolveStub(stub) {
     if (!stub || typeof stub.uuid !== 'string' || !stub.uuid || typeof stub.id !== 'number') {
@@ -6821,7 +6832,6 @@ function importPlayerExport(payload) {
     const existing = db.prepare('SELECT id, name FROM players WHERE uuid = ?').get(stub.uuid);
     if (existing) {
       idMap.set(stub.id, existing.id);
-      nameMap.set(stub.id, { exportName: stub.name, localName: existing.name });
       return { name: existing.name, uuid: stub.uuid, created: false, renamed: false };
     }
     // docs/archive/player-merge-roadmap.md: a merged-away player's uuid no longer exists on
@@ -6834,7 +6844,6 @@ function importPlayerExport(payload) {
     ).get(stub.uuid);
     if (aliased) {
       idMap.set(stub.id, aliased.id);
-      nameMap.set(stub.id, { exportName: stub.name, localName: aliased.name });
       return { name: aliased.name, uuid: stub.uuid, created: false, renamed: false };
     }
     let finalName = validatePlayerName(stub.name);
@@ -6847,7 +6856,6 @@ function importPlayerExport(payload) {
     db.prepare('INSERT INTO players (name, out_mode, uuid) VALUES (?, ?, ?)').run(finalName, 'double', stub.uuid);
     const created = db.prepare('SELECT id FROM players WHERE uuid = ?').get(stub.uuid);
     idMap.set(stub.id, created.id);
-    nameMap.set(stub.id, { exportName: stub.name, localName: finalName });
     return { name: finalName, uuid: stub.uuid, created: true, renamed: finalName !== originalName };
   }
 
@@ -6888,9 +6896,11 @@ function importPlayerExport(payload) {
     // games.config is untrusted file content and the read paths parse it
     // unguarded — reject malformed JSON at the boundary rather than inserting a
     // row that would 500 every later turn write / saved-games read. For killer
-    // games, re-key the name-keyed number assignment to each participant's
-    // RESOLVED local name (see nameMap above); comparison is case-sensitive on
-    // purpose — object keys are, even though player names collate NOCASE.
+    // games, re-key the id-keyed number assignment from the export's
+    // (source-server) player ids to this server's own resolved local ids —
+    // idMap already carries exactly that translation for every stub this
+    // import touched, so no separate name-based map is needed the way the
+    // old name-keyed scheme required (item 43, docs/code-quality-roadmap.md).
     let configJson = g.config ?? null;
     if (configJson != null) {
       let cfg;
@@ -6898,10 +6908,12 @@ function importPlayerExport(payload) {
         throw httpError(400, `Import file has malformed JSON in games.config (source game ${g.id})`);
       }
       if (g.game_type === 'killer' && cfg && cfg.numbers) {
-        for (const gp of participants) {
-          const m = nameMap.get(gp.player_id);
-          if (m) _moveKillerNumberKey(cfg, m.exportName, m.localName);
+        const remapped = {};
+        for (const [sourceId, num] of Object.entries(cfg.numbers)) {
+          const localId = idMap.get(Number(sourceId));
+          if (localId != null) remapped[localId] = num;
         }
+        cfg.numbers = remapped;
         configJson = JSON.stringify(cfg);
       }
     }
@@ -7199,13 +7211,13 @@ function mergePlayers(sourceName, targetName) {
     // Marathon history (sessions and, via session_id CASCADE, their legs).
     run('UPDATE marathon_sessions SET player_id = ? WHERE player_id = ?', target.id, source.id);
 
-    // Killer configs key number assignments by player NAME — rewrite the source's
-    // key to the target's name in every killer game being absorbed, or the merged
-    // history replays with an orphaned assignment (see _rewriteKillerConfigNames).
+    // Killer configs key number assignments by player id — rewrite the source's
+    // key to the target's id in every killer game being absorbed, or the merged
+    // history replays with an orphaned assignment (see _rewriteKillerConfigIds).
     // The game_players reassignment already ran above, so the source's killer
     // games are found via target.id; target's own pre-existing killer games are
-    // untouched (they never carried the source's name as a key).
-    _rewriteKillerConfigNames(target.id, source.name, target.name);
+    // untouched (they never carried the source's id as a key).
+    _rewriteKillerConfigIds(target.id, source.id);
 
     // Identity: repoint any aliases already targeting the source (chained merges),
     // record the source's own uuid as an alias of the target, then delete the
@@ -9011,33 +9023,53 @@ function httpError(status, message) {
 // that are already sitting in the database.
 pruneOrphanedGames();
 
-// Self-heal on boot: killer configs orphaned by renames/merges performed BEFORE
-// _rewriteKillerConfigNames() existed (config.numbers is keyed by player NAME —
-// a pre-fix rename left the old name in every past killer game's config, so the
-// player's whole participation replays as inert). Recoverable deterministically
-// whenever exactly one config key matches no current participant and exactly
-// one participant claims no key — remap that pair. Ambiguous games (2+ of each,
-// e.g. two players renamed pre-fix) are left untouched rather than guessed at.
-function reconcileKillerConfigNames() {
+// One-time boot migration (item 43, docs/code-quality-roadmap.md): killer
+// configs used to be keyed by player NAME, which needed three separate
+// compensating mechanisms to stay in sync with reality — a rewrite on
+// rename, a rewrite on merge, and a boot self-heal for any config a pre-fix
+// rename/merge had already orphaned. This migrates every such config to be
+// keyed by the immutable players.id instead: first heals any still-orphaned
+// key (the same unambiguous one-orphan/one-unclaimed heuristic the old
+// reconciler used — anything more ambiguous than that is left alone, same as
+// before), then translates every (now name-consistent) key to that
+// participant's id. After this has run once, config.numbers is id-keyed
+// everywhere and a plain rename can never orphan it again — only
+// mergePlayers()/importPlayerExport() still rewrite a key going forward, and
+// only because THEY intentionally change which id owns a participation,
+// never because a name silently drifted underneath an unrelated key.
+function migrateKillerConfigsToIdKeys() {
   // Fast exit for killer-free databases (including every test scratch DB this
-  // module is required into): the heal below is one-time-by-construction work
-  // that would otherwise be re-verified with a full scan on every boot.
+  // module is required into): the work below is one-time-by-construction and
+  // a no-op on every later boot (keys are already id-shaped strings) anyway,
+  // but this skips even that re-check entirely.
   if (!db.prepare(`SELECT EXISTS(SELECT 1 FROM games WHERE game_type = 'killer') AS n`).get().n) return;
   const games = db.prepare(`SELECT id, config FROM games WHERE game_type = 'killer' AND config IS NOT NULL`).all();
   const upd = db.prepare('UPDATE games SET config = ? WHERE id = ?');
   for (const g of games) {
     const cfg = _parseKillerConfig(g.config);
     if (!cfg) continue;
-    const names = _participantNames(g.id);
     const keys = Object.keys(cfg.numbers);
+    if (keys.length && keys.every(k => /^\d+$/.test(k))) continue; // already migrated
+    const participants = db.prepare(`
+      SELECT p.id, p.name FROM game_players gp JOIN players p ON p.id = gp.player_id
+      WHERE gp.game_id = ?`).all(g.id);
+    const names = participants.map(p => p.name);
     const orphanKeys = keys.filter(k => !names.includes(k));
     const unclaimed = names.filter(n => !keys.includes(n));
-    if (orphanKeys.length === 1 && unclaimed.length === 1 && _moveKillerNumberKey(cfg, orphanKeys[0], unclaimed[0])) {
-      upd.run(JSON.stringify(cfg), g.id);
+    if (orphanKeys.length === 1 && unclaimed.length === 1) _moveKillerNumberKey(cfg, orphanKeys[0], unclaimed[0]);
+    const byName = new Map(participants.map(p => [p.name, p.id]));
+    const migrated = {};
+    for (const [key, num] of Object.entries(cfg.numbers)) {
+      // An unresolvable key (still ambiguous after the heal above) is carried
+      // over unchanged rather than dropped — same "don't guess, don't lose
+      // data" stance the old reconciler took.
+      migrated[byName.has(key) ? byName.get(key) : key] = num;
     }
+    cfg.numbers = migrated;
+    upd.run(JSON.stringify(cfg), g.id);
   }
 }
-reconcileKillerConfigNames();
+migrateKillerConfigsToIdKeys();
 
 module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer, registerDeletePlayerGuard,

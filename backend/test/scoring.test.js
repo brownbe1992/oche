@@ -1797,14 +1797,14 @@ describe('rebuildKillerState (docs/game-modes-roadmap.md "Killer", pure replay)'
   const kt = (throwerName, sector, mult) => ({ throwerName, sector, mult });
 
   test('an empty turn history: everyone at 0 lives, nobody a killer, no winner', () => {
-    const r = rebuildKillerState({ names:['A','B'], numbers:{A:5,B:9}, turns:[] });
+    const r = rebuildKillerState({ participants:[{id:1,name:'A'},{id:2,name:'B'}], numbers:{1:5,2:9}, turns:[] });
     assert.equal(r.winner, null);
     assert.deepEqual(r.players.map(p=>p.lives), [0,0]);
     assert.deepEqual(r.players.map(p=>p.isKiller), [false,false]);
   });
 
   test('a treble on the first dart makes a player an instant killer (3 >= default threshold)', () => {
-    const r = rebuildKillerState({ names:['A','B'], numbers:{A:5,B:9}, turns:[ kt('A',5,3) ] });
+    const r = rebuildKillerState({ participants:[{id:1,name:'A'},{id:2,name:'B'}], numbers:{1:5,2:9}, turns:[ kt('A',5,3) ] });
     const a = r.players.find(p=>p.name==='A');
     assert.equal(a.lives, 3);
     assert.equal(a.isKiller, true);
@@ -1816,7 +1816,7 @@ describe('rebuildKillerState (docs/game-modes-roadmap.md "Killer", pure replay)'
       kt('B',9,1),   // B: single own number -> 1 life (not yet a killer)
       kt('A',9,1),   // A attacks B for 1 -> B: 1-1=0 -> eliminated -> A is last one standing
     ];
-    const r = rebuildKillerState({ names:['A','B'], numbers:{A:5,B:9}, turns });
+    const r = rebuildKillerState({ participants:[{id:1,name:'A'},{id:2,name:'B'}], numbers:{1:5,2:9}, turns });
     assert.equal(r.winner, 'A');
     const b = r.players.find(p=>p.name==='B');
     assert.equal(b.lives, 0);
@@ -1833,7 +1833,7 @@ describe('rebuildKillerState (docs/game-modes-roadmap.md "Killer", pure replay)'
       kt('B',5,2),   // B attacks A's number for 2 -> A: 3-2=1 life, still a killer
       kt('A',5,2),   // A hits own double (already a killer) -> self-kill, -1 -> A: 1-1=0, eliminated
     ];
-    const r = rebuildKillerState({ names:['A','B'], numbers:{A:5,B:9}, turns });
+    const r = rebuildKillerState({ participants:[{id:1,name:'A'},{id:2,name:'B'}], numbers:{1:5,2:9}, turns });
     const a = r.players.find(p=>p.name==='A');
     assert.equal(a.lives, 0);
     assert.equal(a.eliminated, true);
@@ -1846,9 +1846,9 @@ describe('rebuildKillerState (docs/game-modes-roadmap.md "Killer", pure replay)'
 
   test('threshold is configurable — a lower lives threshold makes killer status kick in sooner', () => {
     const turns = [ kt('A',5,2) ]; // double own number -> 2 lives
-    const withDefault = rebuildKillerState({ names:['A','B'], numbers:{A:5,B:9}, turns });
+    const withDefault = rebuildKillerState({ participants:[{id:1,name:'A'},{id:2,name:'B'}], numbers:{1:5,2:9}, turns });
     assert.equal(withDefault.players.find(p=>p.name==='A').isKiller, false, 'default threshold is 3 -- 2 lives isn\'t enough yet');
-    const withThreshold2 = rebuildKillerState({ names:['A','B'], numbers:{A:5,B:9}, turns, threshold:2 });
+    const withThreshold2 = rebuildKillerState({ participants:[{id:1,name:'A'},{id:2,name:'B'}], numbers:{1:5,2:9}, turns, threshold:2 });
     assert.equal(withThreshold2.players.find(p=>p.name==='A').isKiller, true);
   });
 
@@ -1859,7 +1859,7 @@ describe('rebuildKillerState (docs/game-modes-roadmap.md "Killer", pure replay)'
       kt('B',5,3),  // B attacks A for 3 -> A eliminated, B wins
       kt('A',9,1),  // A (already eliminated) somehow throws again -- must be a no-op
     ];
-    const r = rebuildKillerState({ names:['A','B'], numbers:{A:5,B:9}, turns });
+    const r = rebuildKillerState({ participants:[{id:1,name:'A'},{id:2,name:'B'}], numbers:{1:5,2:9}, turns });
     assert.equal(r.winner, 'B');
     const b = r.players.find(p=>p.name==='B');
     assert.equal(b.lives, 3, "the eliminated player's bogus extra turn had no effect");
