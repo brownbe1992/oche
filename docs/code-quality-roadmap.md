@@ -1,10 +1,12 @@
 # Code-Quality Refactors — deferred review findings
 
-> **Status: OPEN — nothing here is started.** Every item below is tracked
-> individually on `docs/open-roadmap-items.md` (items 35–45 from the branch
-> review, items 46–52 from the first whole-file `/simplify frontend/index.html`
-> pass, items 53–59 from the second). This doc is the design context for them,
-> in one place, so each can be picked up (or explicitly rejected) on its own.
+> **Status: Phase 1 of the completion order done (items 59, 58, 56, 52, 38, 39
+> — see each item's own note below); the rest is open.** Every item below is
+> tracked individually on `docs/open-roadmap-items.md` (items 35–45 from the
+> branch review, items 46–52 from the first whole-file `/simplify
+> frontend/index.html` pass, items 53–59 from the second). This doc is the
+> design context for them, in one place, so each can be picked up (or
+> explicitly rejected) on its own.
 >
 > **Origin:** the 2026-07-20 max-effort code review of the `dev` branch
 > (fix commits `878bf52` and `eba350f`). Every *correctness* finding from that
@@ -65,7 +67,7 @@ savable type without resume support is impossible by construction. This is
 the largest single item here; do it with the app runnable for end-to-end
 verification of every savable type.
 
-## Item 38 — `savedGamePositionLabel()`: dispatch on `sg.gameType`, not field presence
+## Item 38 — `savedGamePositionLabel()`: dispatch on `sg.gameType`, not field presence — ✅ Done
 
 `savedGamePositionLabel()` (`frontend/index.html` ≈ 10279) picks its label
 format by probing which fields exist on the position object (`pos.players`,
@@ -79,7 +81,7 @@ nonsense values — a constraint visible only in a backend comment.
 used three lines earlier), or a `positionLabel` registry member. Small,
 self-contained.
 
-## Item 39 — Derive `NON_SAVABLE_GAME_TYPES` from the backend registry
+## Item 39 — Derive `NON_SAVABLE_GAME_TYPES` from the backend registry — ✅ Done
 
 `NON_SAVABLE_GAME_TYPES = ['doubles_practice','chuckin','checkout_trainer','killer']`
 (`frontend/index.html` ≈ 14577) hand-mirrors the backend
@@ -260,7 +262,7 @@ unconditionally (`show('player')`) and tab/game-type switches refetch all
 tournament average-seeding fires one heavy personal-bests call per player
 when the in-memory stats blob (or one batch endpoint) would do.
 
-## Item 52 — Small shared-pattern helpers (batch)
+## Item 52 — Small shared-pattern helpers (batch) — ✅ Done
 
 Low-risk, multi-site idioms worth one helper each, batched: `jsArg()` naming
 the `escapeHtml(escapeJs(...))` onclick-argument composition (~24 sites, an
@@ -315,7 +317,7 @@ preamble/Miss-button trailers (~80 lines); `renderPad()`'s dispatch repeats a
 `csHeadCellsHtml()`/`csTableInto()`/`roundBannerInto()` +
 `renderSingleTargetPad(spec)` + a `{gameType: renderer}` lookup.
 
-## Item 56 — Dart input/record helpers on the hottest path
+## Item 56 — Dart input/record helpers on the hottest path — ✅ Done
 
 The dart-construction block (miss-fill vs `makeDart` + zone/miss/bounce
 stamping + `mult=1; updateMultUI()`) is copied in `throwDart`,
@@ -336,7 +338,7 @@ build once, toggle `.disabled` (the dartboard branch's own pattern);
 (c) `playerSnapshotChuckin()` re-serializes the entire session heatmap into
 every per-dart live push — cache and invalidate on change.
 
-## Item 58 — Declarative settings field table
+## Item 58 — Declarative settings field table — ✅ Done
 
 `renderSettings()`'s loader and `saveSettings()` hand-maintain parallel
 per-field lists (13 HA webhook fields, 7 voice checkboxes, 8 numerics/toggles
@@ -344,7 +346,7 @@ per-field lists (13 HA webhook fields, 7 voice checkboxes, 8 numerics/toggles
 `SETTINGS_FIELDS` array `{key, id, kind, default}` driving both directions;
 a new setting then can't be added to save but not load.
 
-## Item 59 — Conventions: badge predicates + DB wrapper boundary
+## Item 59 — Conventions: badge predicates + DB wrapper boundary — ✅ Done
 
 Ten pure badge predicates (hattrick, triplebull, nocigar, …) live inline in
 `CHAIN_CHECKS` against the file's own stated convention (culture predicates
