@@ -2482,7 +2482,17 @@ const HOME_COMBO_SPECS={
       if(mode==='h2h' && !homeData.shanghai.wins) homeData.shanghai.wins=[];
     },
   },
-  halveIt:{ perMode:true,
+  // Item 45 bugfix (simplify pass): these keys must be the GAME_TYPES `id`
+  // values (snake_case — matches homeGameType exactly, since that's set
+  // directly from `g.id` by switchHomeGameType()'s onclick), NOT the camelCase
+  // `homeData` property names the fetch/hasCache/fallback bodies use
+  // internally (those stay camelCase — every homeTabRenderer already expects
+  // e.g. `homeData.halveIt`). The two are unrelated: this object's own keys
+  // are only ever looked up via `HOME_COMBO_SPECS[type]` in ensureHomeCombo(),
+  // keyed by the real game-type id. Originally shipped camelCase-keyed here,
+  // which silently no-op'd ensureHomeCombo() for every multi-word-id type —
+  // exactly the drift the GAME_TYPES registry pattern exists to prevent.
+  halve_it:{ perMode:true,
     fetch(mode){
       const reqs=[Backend.get(`/api/stats/halve-it-best-total?mode=${mode}`)];
       if(mode==='h2h') reqs.push(Backend.get('/api/stats/halve-it-wins'));
@@ -2499,7 +2509,7 @@ const HOME_COMBO_SPECS={
       if(mode==='h2h' && !homeData.halveIt.wins) homeData.halveIt.wins=[];
     },
   },
-  pressureChamber:{ perMode:true,
+  pressure_chamber:{ perMode:true,
     fetch(mode){
       const reqs=[Backend.get(`/api/stats/pressure-chamber-best-cp?mode=${mode}`)];
       if(mode==='h2h') reqs.push(Backend.get('/api/stats/pressure-chamber-wins'));
@@ -2519,7 +2529,7 @@ const HOME_COMBO_SPECS={
   // The remaining game types have no H2H/Practice split (always solo, or — for
   // Killer — a single win-rate board with no mode-specific shape) so their specs
   // fetch one flat group, keyed just by the game-type id (no mode suffix).
-  doublesPractice:{ perMode:false,
+  doubles_practice:{ perMode:false,
     fetch(){
       return Promise.all([
         Backend.get('/api/stats/doubles-practice-accuracy'),
@@ -2529,17 +2539,17 @@ const HOME_COMBO_SPECS={
     hasCache(){ return !!homeData.doublesPractice; },
     fallback(){ homeData.doublesPractice={accuracy:[],bestRound:[]}; },
   },
-  checkoutTrainer:{ perMode:false,
+  checkout_trainer:{ perMode:false,
     fetch(){ return Backend.get('/api/stats/checkout-blitz-leaderboard').then(blitzLeaderboard=>{ homeData.checkoutTrainer={blitzLeaderboard}; }); },
     hasCache(){ return !!homeData.checkoutTrainer; },
     fallback(){ homeData.checkoutTrainer={blitzLeaderboard:[]}; },
   },
-  bobs27:{ perMode:false,
+  bobs_27:{ perMode:false,
     fetch(){ return Backend.get('/api/stats/bobs27-leaderboard').then(leaderboard=>{ homeData.bobs27={leaderboard}; }); },
     hasCache(){ return !!homeData.bobs27; },
     fallback(){ homeData.bobs27={leaderboard:[]}; },
   },
-  checkoutLadder:{ perMode:false,
+  checkout_ladder:{ perMode:false,
     fetch(){ return Backend.get('/api/stats/checkout-ladder-leaderboard').then(leaderboard=>{ homeData.checkoutLadder={leaderboard}; }); },
     hasCache(){ return !!homeData.checkoutLadder; },
     fallback(){ homeData.checkoutLadder={leaderboard:[]}; },
@@ -2559,12 +2569,12 @@ const HOME_COMBO_SPECS={
     hasCache(){ return !!homeData.marathon; },
     fallback(){ homeData.marathon={leaderboard:[]}; },
   },
-  deadManWalking:{ perMode:false,
+  dead_man_walking:{ perMode:false,
     fetch(){ return Backend.get('/api/stats/dead-man-walking-leaderboard').then(leaderboard=>{ homeData.deadManWalking={leaderboard}; }); },
     hasCache(){ return !!homeData.deadManWalking; },
     fallback(){ homeData.deadManWalking={leaderboard:[]}; },
   },
-  aroundTheClock:{ perMode:false,
+  around_the_clock:{ perMode:false,
     fetch(){
       return Promise.all([
         Backend.get('/api/stats/around-the-clock-fastest'),
@@ -2574,7 +2584,7 @@ const HOME_COMBO_SPECS={
     hasCache(){ return !!homeData.aroundTheClock; },
     fallback(){ homeData.aroundTheClock={fastest:[],completions:[]}; },
   },
-  aroundTheWorld:{ perMode:false,
+  around_the_world:{ perMode:false,
     fetch(){ return Backend.get('/api/stats/around-the-world-progress').then(progress=>{ homeData.aroundTheWorld={progress}; }); },
     hasCache(){ return !!homeData.aroundTheWorld; },
     fallback(){ homeData.aroundTheWorld={progress:[]}; },
@@ -3116,87 +3126,57 @@ function renderHomeTabBodyDoublesPractice(){
 // game's one genuinely cross-player leaderboard (Freeform has no win condition
 // to rank on, same reasoning Doubles Practice's own Home tab already applies).
 // No H2H/Practice split — always solo, like Doubles Practice.
-function renderHomeTabBodyCheckoutTrainer(){
+// Shared by the six single-leaderboard Home tabs below (simplify pass,
+// simplification finding) — each used to hand-write the identical
+// "loading guard → pull one board out of homeData → leaderboardSectionHtml()
+// → one pp-section wrapper" shape, differing only in the homeData key, the
+// board's own field, and the section title/empty message.
+function renderSimpleHomeLeaderboardTab(dataKey, boardKey, title, opts){
   const el=document.getElementById('home-tab-body');
-  const data=homeData.checkoutTrainer;
+  const data=homeData[dataKey];
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
-
-  const board=data.blitzLeaderboard||[];
-  const leaderboard=leaderboardSectionHtml(board, {
-    score:r=>r.bestScore, meta:r=>fmtDate(r.achievedAt),
-    emptyMsg:'None recorded yet — play a Checkout Blitz run to claim the top spot.',
-  });
-
+  const board=data[boardKey]||[];
+  const leaderboard=leaderboardSectionHtml(board, opts);
   el.innerHTML=`
     <div class="pp-section">
-      <div class="pp-section-title">⏱️ Checkout Blitz — Best Score</div>
+      <div class="pp-section-title">${title}</div>
       ${leaderboard}
     </div>
   `;
+}
+function renderHomeTabBodyCheckoutTrainer(){
+  renderSimpleHomeLeaderboardTab('checkoutTrainer', 'blitzLeaderboard', '⏱️ Checkout Blitz — Best Score', {
+    score:r=>r.bestScore, meta:r=>fmtDate(r.achievedAt),
+    emptyMsg:'None recorded yet — play a Checkout Blitz run to claim the top spot.',
+  });
 }
 
 // Bob's 27's Home page leaderboard — same peak-single-run shape as Checkout
 // Blitz's above (docs/archive/practice-ladders-roadmap.md Part A: "the Checkout
 // Blitz precedent"), no H2H/Practice split (always solo).
 function renderHomeTabBodyBobs27(){
-  const el=document.getElementById('home-tab-body');
-  const data=homeData.bobs27;
-  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
-
-  const board=data.leaderboard||[];
-  const leaderboard=leaderboardSectionHtml(board, {
+  renderSimpleHomeLeaderboardTab('bobs27', 'leaderboard', "🎯 Bob's 27 — Best Final Score", {
     score:r=>r.bestScore, meta:r=>fmtDate(r.achievedAt),
     emptyMsg:"None recorded yet — play a Bob's 27 run to claim the top spot.",
   });
-
-  el.innerHTML=`
-    <div class="pp-section">
-      <div class="pp-section-title">🎯 Bob's 27 — Best Final Score</div>
-      ${leaderboard}
-    </div>
-  `;
 }
 
 // The 121 Checkout Ladder's Home page leaderboard (docs/archive/practice-ladders-roadmap.md
 // Part B) — same "peak single-run value, no minimum floor" shape as Bob's 27's.
 function renderHomeTabBodyCheckoutLadder(){
-  const el=document.getElementById('home-tab-body');
-  const data=homeData.checkoutLadder;
-  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
-
-  const board=data.leaderboard||[];
-  const leaderboard=leaderboardSectionHtml(board, {
+  renderSimpleHomeLeaderboardTab('checkoutLadder', 'leaderboard', '🪜 Checkout Ladder — Highest Target Reached', {
     score:r=>r.bestTarget, meta:r=>fmtDate(r.achievedAt),
     emptyMsg:'None recorded yet — climb the checkout ladder to claim the top spot.',
   });
-
-  el.innerHTML=`
-    <div class="pp-section">
-      <div class="pp-section-title">🪜 Checkout Ladder — Highest Target Reached</div>
-      ${leaderboard}
-    </div>
-  `;
 }
 
 // The Gauntlet's Home page leaderboard (docs/archive/gauntlet-roadmap.md) — the one
 // leaderboard in this app sorted ASCENDING (lowest total Scars first).
 function renderHomeTabBodyGauntlet(){
-  const el=document.getElementById('home-tab-body');
-  const data=homeData.gauntlet;
-  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
-
-  const board=data.leaderboard||[];
-  const leaderboard=leaderboardSectionHtml(board, {
+  renderSimpleHomeLeaderboardTab('gauntlet', 'leaderboard', '🥋 The Gauntlet — Lowest Total Scars', {
     score:r=>r.bestTotalScars, meta:r=>fmtDate(r.achievedAt),
     emptyMsg:'None recorded yet — complete a Gauntlet run to claim the top spot.',
   });
-
-  el.innerHTML=`
-    <div class="pp-section">
-      <div class="pp-section-title">🥋 The Gauntlet — Lowest Total Scars</div>
-      ${leaderboard}
-    </div>
-  `;
 }
 
 // Dead Man Walking's Home page leaderboard (docs/archive/dead-man-walking-roadmap.md
@@ -3204,22 +3184,10 @@ function renderHomeTabBodyGauntlet(){
 // their peak run. Same "single best-ever run, no minimum floor" shape as
 // Checkout Ladder/The Gauntlet's own boards above.
 function renderHomeTabBodyDeadManWalking(){
-  const el=document.getElementById('home-tab-body');
-  const data=homeData.deadManWalking;
-  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
-
-  const board=data.leaderboard||[];
-  const leaderboard=leaderboardSectionHtml(board, {
+  renderSimpleHomeLeaderboardTab('deadManWalking', 'leaderboard', '💀 Dead Man Walking — Most Walked Out', {
     score:r=>`${r.bestWalkedOut}/15`, meta:r=>fmtDate(r.achievedAt),
     emptyMsg:'None recorded yet — complete a Dead Man Walking run to claim the top spot.',
   });
-
-  el.innerHTML=`
-    <div class="pp-section">
-      <div class="pp-section-title">💀 Dead Man Walking — Most Walked Out</div>
-      ${leaderboard}
-    </div>
-  `;
 }
 
 // Killer's Home page leaderboard (docs/game-modes-roadmap.md "Killer") —
@@ -3227,22 +3195,10 @@ function renderHomeTabBodyDeadManWalking(){
 // leaderboards use (getKillerWinLeaderboard() shares their exact {name,played,
 // won,rate} row shape, since Killer's win/loss lives on games.winner_id too).
 function renderHomeTabBodyKiller(){
-  const el=document.getElementById('home-tab-body');
-  const data=homeData.killer;
-  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
-
-  const board=data.winLeaderboard||[];
-  const leaderboard=leaderboardSectionHtml(board, {
+  renderSimpleHomeLeaderboardTab('killer', 'winLeaderboard', '🔪 Killer — Most Wins', {
     score:r=>r.won, meta:r=>`${r.rate}% of ${r.played}`,
     emptyMsg:'None recorded yet — play a Killer match to claim the top spot.',
   });
-
-  el.innerHTML=`
-    <div class="pp-section">
-      <div class="pp-section-title">🔪 Killer — Most Wins</div>
-      ${leaderboard}
-    </div>
-  `;
 }
 
 // Guided Around the Clock's Home page leaderboards. Same "no H2H/Practice split,
@@ -4421,17 +4377,11 @@ function setGameType(type){
 // same aria-pressed toggle pattern as setKillerLives().
 function setShanghaiRounds(n){
   setup.shanghaiRounds = n;
-  [7,20].forEach(v => {
-    const btn = document.getElementById('shanghai-rounds-'+v);
-    if(btn) btn.setAttribute('aria-pressed', String(v===n));
-  });
+  setPressed({7:'shanghai-rounds-7', 20:'shanghai-rounds-20'}, n);
 }
 function setKillerLives(n){
   setup.killerLives = n;
-  [2,3,5].forEach(v => {
-    const btn = document.getElementById('killer-lives-'+v);
-    if(btn) btn.setAttribute('aria-pressed', String(v===n));
-  });
+  setPressed({2:'killer-lives-2', 3:'killer-lives-3', 5:'killer-lives-5'}, n);
 }
 
 /* ---------- Halve-It custom target editor (docs/archive/halve-it-roadmap.md, item 19) ----------
@@ -8349,17 +8299,11 @@ function checkCheckoutBlitzMilestones(playerName){
 // Shared helper for the one-off flagship badges below — same once:true /
 // earnedBadgeCache / queueBadge / fireMomentCard pattern the ladder tiers use
 // (see checkChuckinMilestoneTier()), just for a single non-laddered badge id.
-function awardCheckoutTrainerBadge(playerName, badgeId, icon, headline, statLine){
-  if(earnedBadgeCache[playerName] && earnedBadgeCache[playerName].has(badgeId)) return;
-  Backend.send('POST','/api/badges/award', { player:playerName, badgeId, once:true }).then(r=>{
-    if(!earnedBadgeCache[playerName]) earnedBadgeCache[playerName] = new Set();
-    earnedBadgeCache[playerName].add(badgeId);
-    if(r && r.newlyEarned){
-      queueBadge(badgeId, playerName, null, 'First time!');
-      fireMomentCard(badgeId, { icon, headline, player:playerName, statLine });
-    }
-  }).catch(()=>{});
-}
+// Checkout Trainer's six one-off badges all route through the shared
+// awardOnceBadge() helper (item 50) — awardCheckoutTrainerBadge() used to
+// hand-roll the identical cacheCheck+queueBadge+fireMomentCard sequence
+// (simplify pass, reuse finding) with a null snap, same as
+// checkChuckinMilestoneTier()'s own awardOnceBadge(..., {cacheCheck:true}) call.
 // ACH_LABELS + ACH_DURATION for the six one-off badges declared in BADGE_INFO's
 // own literal above (checkout_trainer_170_club/one_darter/perfectionist/
 // perfect_minute/photo_finish/bogey_buster) — same "icon in the label too"
@@ -9675,11 +9619,7 @@ function renderPadBobs27(full){
 /* ---------- throwing ---------- */
 function setMult(m){ mult=m; updateMultUI(); }
 function updateMultUI(){
-  const s=document.getElementById('m-s'), d=document.getElementById('m-d'), t=document.getElementById('m-t');
-  if(!s||!d||!t) return;   // controls not on screen yet — nothing to update
-  s.setAttribute('aria-pressed', mult===1);
-  d.setAttribute('aria-pressed', mult===2);
-  t.setAttribute('aria-pressed', mult===3);
+  setPressed({1:'m-s', 2:'m-d', 3:'m-t'}, mult);
 }
 // zone/missZone/missDepth/bounced (docs/archive/dartboard-zone-tracking-roadmap.md) are all
 // Dartboard-mode-only positional metadata, stamped onto the dart object pushed to
@@ -10097,7 +10037,7 @@ function askEndGame(){
     if(game && game.gameType === 'checkout_trainer' && game.config.mode === 'freeform'){
       const p = game.players[0];
       if(p.attempts >= 15 && p.optimalCount === p.attempts){
-        awardCheckoutTrainerBadge(p.name, 'checkout_trainer_perfectionist', '🌟', 'PERFECTIONIST', `${p.attempts} for ${p.attempts}, every answer optimal`);
+        awardOnceBadge(p.name, 'checkout_trainer_perfectionist', 'checkout_trainer_perfectionist', null, { icon:'🌟', headline:'PERFECTIONIST', statLine:`${p.attempts} for ${p.attempts}, every answer optimal` }, {cacheCheck:true});
       }
     }
     // Clear the game and push an inactive snapshot so any /display scoreboard stops
@@ -14649,17 +14589,17 @@ function submitCheckoutAttempt(){
   // reassigned to the next one below.
   checkCheckoutTrainerMilestones(p);
   if(grade.optimal && p.score === 170){
-    awardCheckoutTrainerBadge(p.name, 'checkout_trainer_170_club', '🐟', 'THE 170 CLUB', 'Solved 170 optimally — T20 T20 Bull');
+    awardOnceBadge(p.name, 'checkout_trainer_170_club', 'checkout_trainer_170_club', null, { icon:'🐟', headline:'THE 170 CLUB', statLine:'Solved 170 optimally — T20 T20 Bull' }, {cacheCheck:true});
   }
   if(grade.optimal && grade.usedDarts === 1){
-    awardCheckoutTrainerBadge(p.name, 'checkout_trainer_one_darter', '🎯', 'ONE-DARTER', `Solved ${p.score} optimally in a single dart`);
+    awardOnceBadge(p.name, 'checkout_trainer_one_darter', 'checkout_trainer_one_darter', null, { icon:'🎯', headline:'ONE-DARTER', statLine:`Solved ${p.score} optimally in a single dart` }, {cacheCheck:true});
   }
   // isPhotoFinishSubmission()'s own >= 0 bound is guaranteed by the deadline
   // check earlier in this function (a late submission never reaches here at
   // all) — checked explicitly anyway rather than trusted implicitly, so this
   // stays correct on its own even if that guarantee ever changes.
   if(game.config.mode === 'blitz' && grade.legal && isPhotoFinishSubmission(remainingMsAtSubmit)){
-    awardCheckoutTrainerBadge(p.name, 'checkout_trainer_photo_finish', '📸', 'PHOTO FINISH', 'Legal finish with under 1 second left');
+    awardOnceBadge(p.name, 'checkout_trainer_photo_finish', 'checkout_trainer_photo_finish', null, { icon:'📸', headline:'PHOTO FINISH', statLine:'Legal finish with under 1 second left' }, {cacheCheck:true});
   }
 
   game.legNo += 1;   // round counter, same convention as Doubles Practice
@@ -14721,10 +14661,10 @@ function declareUnsolvable(){
   checkCheckoutTrainerMilestones(p);
   // 💣 Bogey Buster — first correct "not possible" call on an actual bogey number.
   if(grade.correct){
-    awardCheckoutTrainerBadge(p.name, 'checkout_trainer_bogey_buster', '💣', 'BOGEY BUSTER', `Called it — ${p.score} has no possible checkout`);
+    awardOnceBadge(p.name, 'checkout_trainer_bogey_buster', 'checkout_trainer_bogey_buster', null, { icon:'💣', headline:'BOGEY BUSTER', statLine:`Called it — ${p.score} has no possible checkout` }, {cacheCheck:true});
   }
   if(game.config.mode === 'blitz' && grade.legal && isPhotoFinishSubmission(remainingMsAtSubmit)){
-    awardCheckoutTrainerBadge(p.name, 'checkout_trainer_photo_finish', '📸', 'PHOTO FINISH', 'Correct answer with under 1 second left');
+    awardOnceBadge(p.name, 'checkout_trainer_photo_finish', 'checkout_trainer_photo_finish', null, { icon:'📸', headline:'PHOTO FINISH', statLine:'Correct answer with under 1 second left' }, {cacheCheck:true});
   }
 
   game.legNo += 1;
@@ -14917,7 +14857,7 @@ function endBlitzRun(){
   // same "floor to prevent a lucky small sample" reasoning the leaderboards use.
   const rounds = p.sessionRounds || [];
   if(rounds.length >= 5 && rounds.every(r=>r.optimal)){
-    awardCheckoutTrainerBadge(p.name, 'checkout_trainer_perfect_minute', '💎', 'PERFECT MINUTE', `${rounds.length} for ${rounds.length}, every round optimal`);
+    awardOnceBadge(p.name, 'checkout_trainer_perfect_minute', 'checkout_trainer_perfect_minute', null, { icon:'💎', headline:'PERFECT MINUTE', statLine:`${rounds.length} for ${rounds.length}, every round optimal` }, {cacheCheck:true});
   }
   checkCheckoutBlitzMilestones(p.name);
   renderBlitzResults();
