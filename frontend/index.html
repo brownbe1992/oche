@@ -2631,135 +2631,31 @@ function renderHome(){
   renderHomeGameTypeTabs();
   const body=document.getElementById('home-body');
   if(!body) return;
-  const empty={leaderboard:[],recent:[]};
-  // Stale-while-revalidate: every Home visit refires the full aggregate fetch
-  // below (it must — games completed since the last visit change these boards),
-  // but a repeat visit paints instantly from the previous visit's homeData and
-  // the refresh repaints in place, instead of blanking to "Loading…" while ~47
-  // aggregate queries serialize through the synchronous single-threaded server.
-  // (Known accepted cost: the burst itself still runs whole — splitting it into
-  // per-game-type lazy fetches would touch every homeTabRenderer; revisit if the
-  // burst ever measurably stalls live scoring at real data sizes.)
-  if(homeData) renderHomeContent();
-  else body.innerHTML=`<p class="pp-meta">Loading…</p>`;
+  // Stale-while-revalidate, now split into two independent pieces (item 45):
+  // `s`/`extra` are cross-combo globals every tab reads (hero cards, Most Wins,
+  // pace, etc), refetched on every Home visit; the per-game-type leaderboard
+  // data underneath is fetched lazily, one tab+game-type combo at a time, via
+  // ensureHomeCombo() below — see HOME_COMBO_SPECS' comment for the full design
+  // (this replaces the old single ~47-request Promise.all that fired the whole
+  // burst regardless of which one combo was actually visible).
+  if(homeData && homeData.s) renderHomeContent();
+  else { if(!homeData) homeData={s:null, extra:null}; body.innerHTML=`<p class="pp-meta">Loading…</p>`; }
   Promise.all([
     Backend.get('/api/summary'),
     Backend.get('/api/home-extra'),
-    Backend.get('/api/top-finishes?mode=h2h'),
-    Backend.get('/api/stats/180s?mode=h2h'),
-    Backend.get('/api/stats/big-fish?mode=h2h'),
-    Backend.get('/api/stats/nine-darters?mode=h2h'),
-    Backend.get('/api/top-finishes?mode=practice'),
-    Backend.get('/api/stats/180s?mode=practice'),
-    Backend.get('/api/stats/big-fish?mode=practice'),
-    Backend.get('/api/stats/nine-darters?mode=practice'),
-    Backend.get('/api/stats/cricket-mpr?mode=h2h'),
-    Backend.get('/api/stats/cricket-9marks?mode=h2h'),
-    Backend.get('/api/stats/cricket-perfect-leg?mode=h2h'),
-    Backend.get('/api/stats/cricket-mpr?mode=practice'),
-    Backend.get('/api/stats/cricket-9marks?mode=practice'),
-    Backend.get('/api/stats/cricket-perfect-leg?mode=practice'),
-    Backend.get('/api/stats/cricket-wins'),
-    Backend.get('/api/stats/baseball-rpi?mode=h2h'),
-    Backend.get('/api/stats/baseball-perfect-innings?mode=h2h'),
-    Backend.get('/api/stats/baseball-perfect-game?mode=h2h'),
-    Backend.get('/api/stats/baseball-rpi?mode=practice'),
-    Backend.get('/api/stats/baseball-perfect-innings?mode=practice'),
-    Backend.get('/api/stats/baseball-perfect-game?mode=practice'),
-    Backend.get('/api/stats/baseball-wins'),
-    Backend.get('/api/stats/shanghai-ppr?mode=h2h'),
-    Backend.get('/api/stats/shanghai-shanghais?mode=h2h'),
-    Backend.get('/api/stats/shanghai-ppr?mode=practice'),
-    Backend.get('/api/stats/shanghai-shanghais?mode=practice'),
-    Backend.get('/api/stats/shanghai-wins'),
-    Backend.get('/api/stats/halve-it-best-total?mode=h2h'),
-    Backend.get('/api/stats/halve-it-best-total?mode=practice'),
-    Backend.get('/api/stats/halve-it-wins'),
-    Backend.get('/api/stats/pressure-chamber-best-cp?mode=h2h'),
-    Backend.get('/api/stats/pressure-chamber-best-cp?mode=practice'),
-    Backend.get('/api/stats/pressure-chamber-wins'),
-    Backend.get('/api/stats/doubles-practice-accuracy'),
-    Backend.get('/api/stats/doubles-practice-best-round'),
-    Backend.get('/api/stats/checkout-blitz-leaderboard'),
-    Backend.get('/api/stats/bobs27-leaderboard'),
-    Backend.get('/api/stats/checkout-ladder-leaderboard'),
-    Backend.get('/api/stats/gauntlet-leaderboard'),
-    Backend.get('/api/stats/killer-wins'),
-    Backend.get('/api/stats/marathon-leaderboard'),
-    Backend.get('/api/stats/dead-man-walking-leaderboard'),
-    Backend.get('/api/stats/around-the-clock-fastest'),
-    Backend.get('/api/stats/around-the-clock-completions'),
-    Backend.get('/api/stats/around-the-world-progress'),
-  ]).then(([s,extra,f,e,b,n,pf,pe,pb,pn,cm,c9,cp,pcm,pc9,pcp,cw,br,b9,bp,pbr,pb9,pbp,bw,shr,shs,pshr,pshs,shw,hibt,pihbt,hiw,pcbt,ppcbt,pcw,dpa,dpb,ctbl,b27,cl,ga,kw,mm,dmw,atcf,atcc,atwp])=>{
-    homeData={s, extra,
-      h2h:{finishes:f,eighties:e,bigFish:b,nineDarters:n},
-      practice:{finishes:pf,eighties:pe,bigFish:pb,nineDarters:pn},
-      cricket:{
-        h2h:{mpr:cm,nineMarks:c9,perfectLeg:cp},
-        practice:{mpr:pcm,nineMarks:pc9,perfectLeg:pcp},
-        wins:cw,
-      },
-      baseball:{
-        h2h:{rpi:br,perfectInnings:b9,perfectGame:bp},
-        practice:{rpi:pbr,perfectInnings:pb9,perfectGame:pbp},
-        wins:bw,
-      },
-      shanghai:{
-        h2h:{ppr:shr,shanghais:shs},
-        practice:{ppr:pshr,shanghais:pshs},
-        wins:shw,
-      },
-      halveIt:{
-        h2h:{bestTotal:hibt},
-        practice:{bestTotal:pihbt},
-        wins:hiw,
-      },
-      pressureChamber:{
-        h2h:{bestCp:pcbt},
-        practice:{bestCp:ppcbt},
-        wins:pcw,
-      },
-      doublesPractice:{ accuracy:dpa, bestRound:dpb },
-      checkoutTrainer:{ blitzLeaderboard:ctbl },
-      bobs27:{ leaderboard:b27 },
-      checkoutLadder:{ leaderboard:cl },
-      gauntlet:{ leaderboard:ga },
-      killer:{ winLeaderboard:kw },
-      marathon:{ leaderboard:mm },
-      deadManWalking:{ leaderboard:dmw },
-      aroundTheClock:{ fastest:atcf, completions:atcc },
-      aroundTheWorld:{ progress:atwp }};
+  ]).then(([s,extra])=>{
+    homeData.s=s;
+    homeData.extra=extra;
     renderHomeContent();
   }).catch(()=>{
-    // Promise.all is all-or-nothing: ONE failed request out of ~47 (a transient
-    // network drop, a server restart, a 429 from the global per-IP limiter —
-    // each Home visit burns 47 of its 300/min budget) lands here. With the
-    // stale-while-revalidate fast path above, the user may be looking at a
-    // fully-populated dashboard from cached homeData — keep it (stale-but-real
-    // beats blank; the next visit retries) and only fall back to the empty
-    // skeleton when there's nothing cached at all.
-    if(homeData) return;
-    homeData={s:{players:roster.length,games:null,sets:null,legs:null,darts:null,oneEighties:null,bigFish:null,nineDarters:null,practiceLegs:null},
-      extra:null,
-      h2h:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
-      practice:{finishes:[],eighties:empty,bigFish:empty,nineDarters:empty},
-      cricket:{h2h:{mpr:[],nineMarks:empty,perfectLeg:empty}, practice:{mpr:[],nineMarks:empty,perfectLeg:empty}, wins:[]},
-      baseball:{h2h:{rpi:[],perfectInnings:empty,perfectGame:empty}, practice:{rpi:[],perfectInnings:empty,perfectGame:empty}, wins:[]},
-      shanghai:{h2h:{ppr:[],shanghais:empty}, practice:{ppr:[],shanghais:empty}, wins:[]},
-      halveIt:{h2h:{bestTotal:[]}, practice:{bestTotal:[]}, wins:[]},
-      pressureChamber:{h2h:{bestCp:[]}, practice:{bestCp:[]}, wins:[]},
-      doublesPractice:{ accuracy:[], bestRound:[] },
-      checkoutTrainer:{ blitzLeaderboard:[] },
-      bobs27:{ leaderboard:[] },
-      checkoutLadder:{ leaderboard:[] },
-      gauntlet:{ leaderboard:[] },
-      killer:{ winLeaderboard:[] },
-      marathon:{ leaderboard:[] },
-      deadManWalking:{ leaderboard:[] },
-      aroundTheClock:{ fastest:[], completions:[] },
-      aroundTheWorld:{ progress:[] }};
+    // Keep-cache-on-error, scoped to the globals now: a failed summary/home-extra
+    // fetch shouldn't blank an already-populated dashboard.
+    if(homeData.s) return;
+    homeData.s={players:roster.length,games:null,sets:null,legs:null,darts:null,oneEighties:null,bigFish:null,nineDarters:null,practiceLegs:null};
+    homeData.extra=null;
     renderHomeContent();
   });
+  ensureHomeCombo(homeGameType, homeTab);
 }
 
 function switchHomeTab(tab){
@@ -2772,11 +2668,13 @@ function switchHomeTab(tab){
   if(GAME_TYPES[homeGameType] && !homeGameTypeVisible(GAME_TYPES[homeGameType], tab)) homeGameType='x01';
   renderHomeGameTypeTabs();
   renderHomeTabBody();
+  ensureHomeCombo(homeGameType, homeTab);
 }
 function switchHomeGameType(type){
   homeGameType=type;
   document.querySelectorAll('#screen-home .tab-btn[data-gtype]').forEach(b=>b.classList.toggle('active', b.dataset.gtype===type));
   renderHomeTabBody();
+  ensureHomeCombo(homeGameType, homeTab);
 }
 
 function switchSettingsTab(tab){
@@ -2785,7 +2683,10 @@ function switchSettingsTab(tab){
 }
 
 function renderHomeContent(){
-  if(!homeData) return;
+  // homeData.s is the "globals loaded" signal now that homeData itself can exist
+  // as an empty shell before /api/summary resolves (item 45's split-out global
+  // fetch) — without it, the hero cards below would crash on `s.nineDarters`.
+  if(!homeData || !homeData.s) return;
   const {s, extra}=homeData;
   const body=document.getElementById('home-body');
   if(!body) return;
@@ -2902,6 +2803,10 @@ function renderHomeTabBody(){
   if(custom) return custom();
   const mode=homeTab;
   const data=homeData[mode];
+  // X01's own combo data (homeData.h2h/homeData.practice) is now fetched lazily
+  // by ensureHomeCombo() — the first time this combo is selected, `data` won't
+  // exist yet until that fetch resolves and calls back into this function.
+  if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
   const extra=homeData.extra;
   const finishes=data.finishes, eighties=data.eighties, bigFishData=data.bigFish, nineDarterData=data.nineDarters;
 
