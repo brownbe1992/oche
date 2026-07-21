@@ -2726,7 +2726,7 @@ function renderHomeTabBody(){
   const highestCoSection = `<div class="pp-section">
       <div class="pp-section-title">Highest Checkout Ever</div>
       ${highestCo ? `<div class="hero-block expandable" role="button" aria-expanded="false" style="margin-top:6px;cursor:pointer"
-          onclick="toggleFinishRoute(this,'${escapeHtml(escapeJs(highestCo.name))}',${highestCo.points},'${mode}')">
+          onclick="toggleFinishRoute(this,'${jsArg(highestCo.name)}',${highestCo.points},'${mode}')">
           <div class="hero-val">${highestCo.points}</div><div class="hero-label">${escapeHtml(highestCo.name)} · ${fmtDate(highestCo.createdAt)}</div></div>`
                   : `<p class="pp-meta" style="padding:4px 0">None recorded yet.</p>`}
     </div>`;
@@ -3256,7 +3256,7 @@ function hofSection(rows, mode=''){
     return `<div class="hof-list">${rows.map((f,i)=>{
       const dates=fmtDate(f.last_date);
       const outBadge=f.out?`<span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;align-self:center">${f.out==='double'?'DO':'SO'}</span>`:'';
-      const jName=escapeHtml(escapeJs(f.name));
+      const jName=jsArg(f.name);
       return `<div class="hof-row expandable" role="button" aria-expanded="false"
         onclick="toggleFinishRoute(this,'${jName}',${f.score},'${mode}')">
         <span class="hof-rank">${i+1}</span>
@@ -3659,8 +3659,8 @@ function renderAdminsList(){
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:var(--surface-2);border-radius:8px">
         <span style="font-size:13px">${escapeHtml(a.username)}</span>
         <div style="display:flex;gap:6px">
-          <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="askChangeAdminPassword(${a.id},'${escapeHtml(escapeJs(a.username))}')">Change password</button>
-          <button class="btn btn-ghost danger" style="padding:4px 10px;font-size:12px" onclick="askDeleteAdmin(${a.id},'${escapeHtml(escapeJs(a.username))}')">Remove</button>
+          <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="askChangeAdminPassword(${a.id},'${jsArg(a.username)}')">Change password</button>
+          <button class="btn btn-ghost danger" style="padding:4px 10px;font-size:12px" onclick="askDeleteAdmin(${a.id},'${jsArg(a.username)}')">Remove</button>
         </div>
       </div>`).join('') || '<p style="font-size:12px;color:var(--muted)">No admins.</p>';
   }).catch(logErr);
@@ -3700,8 +3700,8 @@ function renderPinPlayersList(){
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:var(--surface-2);border-radius:8px">
         <span style="font-size:13px">${escapeHtml(n)} ${has?'<span style="color:var(--muted);font-size:11px">— PIN set</span>':''}</span>
         <div style="display:flex;gap:6px">
-          <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="askSetPlayerPin('${escapeHtml(escapeJs(n))}')">${has?'Reset PIN':'Set PIN'}</button>
-          ${has?`<button class="btn btn-ghost danger" style="padding:4px 10px;font-size:12px" onclick="askRemovePlayerPin('${escapeHtml(escapeJs(n))}')">Remove PIN</button>`:''}
+          <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="askSetPlayerPin('${jsArg(n)}')">${has?'Reset PIN':'Set PIN'}</button>
+          ${has?`<button class="btn btn-ghost danger" style="padding:4px 10px;font-size:12px" onclick="askRemovePlayerPin('${jsArg(n)}')">Remove PIN</button>`:''}
         </div>
       </div>`;
   }).join('') || '<p style="font-size:12px;color:var(--muted)">No players yet.</p>';
@@ -3871,7 +3871,7 @@ function showMergePreviewModal(p){
     // way to discover they must resume/abandon a paused game first.
     ...(b.savedGameCollisions||[]).map(c=>`⛔ Both players have a saved (paused) game in the same ${c.gameType || 'game'} slot — resume or abandon one via New Game → Saved Games first`),
   ].map(t=>`<li>${esc(t)}</li>`).join('');
-  document.getElementById('modal-body').innerHTML = `
+  openModal(`
     <h3 style="margin:0 0 8px;font-size:16px">Merge preview</h3>
     <p class="modal-msg" style="margin-bottom:10px">
       <b>${esc(p.source.name)}</b> will be merged into <b>${esc(p.target.name)}</b> and deleted.
@@ -3892,8 +3892,7 @@ function showMergePreviewModal(p){
         <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
         <button class="btn btn-primary" onclick="confirmMergePlayers('${esc(escapeJs(p.source.name))}','${esc(escapeJs(p.target.name))}')">Merge players</button>
       </div>
-    `}`;
-  document.getElementById('modal').hidden = false;
+    `}`);
 }
 function confirmMergePlayers(source, target){
   closeModal();
@@ -3962,9 +3961,9 @@ function renderBackups(rows){
         <div style="color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.name)}</div>
         <div style="color:var(--muted)">${date} &nbsp;·&nbsp; ${formatBytes(r.size)}</div>
       </div>
-      <button class="btn btn-ghost" style="padding:4px 10px" onclick="downloadBackup('${escapeHtml(escapeJs(r.name))}')">Download</button>
-      <button class="btn btn-ghost" style="padding:4px 10px" onclick="askRestoreBackup('${escapeHtml(escapeJs(r.name))}')">Restore</button>
-      <button class="btn btn-ghost danger" style="padding:4px 10px" onclick="askDeleteBackup('${escapeHtml(escapeJs(r.name))}')">Delete</button>
+      <button class="btn btn-ghost" style="padding:4px 10px" onclick="downloadBackup('${jsArg(r.name)}')">Download</button>
+      <button class="btn btn-ghost" style="padding:4px 10px" onclick="askRestoreBackup('${jsArg(r.name)}')">Restore</button>
+      <button class="btn btn-ghost danger" style="padding:4px 10px" onclick="askDeleteBackup('${jsArg(r.name)}')">Delete</button>
     </div>`;
   }).join('');
 }
@@ -3997,8 +3996,7 @@ function saveBackupRetention(){
 // alone (docs/archive/backups-roadmap.md v2's confirmed design decision).
 function uiPasswordConfirm(msg, onSubmit){
   window.__modalPwSubmit = onSubmit;
-  document.getElementById('modal-body').innerHTML=
-    `<p class="modal-msg">${escapeHtml(msg)}</p>
+  openModal(`<p class="modal-msg">${escapeHtml(msg)}</p>
      <label class="field">Admin password</label>
      <input type="password" id="modal-pw-input" autocomplete="current-password"
             onkeydown="if(event.key==='Enter')document.getElementById('modal-pw-ok').click()">
@@ -4007,9 +4005,7 @@ function uiPasswordConfirm(msg, onSubmit){
        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
        <button class="btn btn-primary" id="modal-pw-ok"
          onclick="(function(){var v=document.getElementById('modal-pw-input').value;var f=window.__modalPwSubmit;if(f)f(v);})()">Confirm</button>
-     </div>`;
-  document.getElementById('modal').hidden=false;
-  setTimeout(()=>{ const el=document.getElementById('modal-pw-input'); if(el) el.focus(); },0);
+     </div>`, 'modal-pw-input');
 }
 function modalPwError(msg){
   const el = document.getElementById('modal-pw-error');
@@ -4222,7 +4218,7 @@ function renderPlayers(){
     }
     const outTag = `<span class="out-tag" title="${playerOut(sel)==='double'?'Doubles out':'Singles out'}">${playerOut(sel)==='double'?'DO':'SO'}</span>`;
     const lo = setup.loadoutByName[sel];
-    const j = escapeHtml(escapeJs(sel));
+    const j = jsArg(sel);
     return `<div style="display:flex;flex-direction:column;gap:0">
       <div class="player-row">
         <span class="ix">${i+1}</span>
@@ -4282,7 +4278,7 @@ function onSlotChange(i, value){
 // scoped to this player's own loadouts, plus a shortcut into the Dart Builder for a
 // player with none yet. Not selecting a loadout at all remains fully valid.
 function openLoadoutPicker(name, slotIndex){
-  const j = escapeHtml(escapeJs(name));
+  const j = jsArg(name);
   Backend.get(`/api/loadouts?name=${encodeURIComponent(name)}`).then(loadouts=>{
     const current = setup.loadoutByName[name];
     const rows = loadouts.map(lo=>{
@@ -4292,7 +4288,7 @@ function openLoadoutPicker(name, slotIndex){
         ${complete?'':'disabled title="Missing a barrel, shaft, or flight"'}
         onclick="selectLoadoutForSlot('${j}', ${slotIndex}, ${lo.id})">${escapeHtml(lo.name)}${complete?'':' (incomplete)'}</button>`;
     }).join('');
-    document.getElementById('modal-body').innerHTML = `
+    openModal(`
       <p class="modal-msg">Loadout for ${escapeHtml(name)}</p>
       <button type="button" class="btn btn-ghost" style="width:100%;text-align:left;margin-bottom:6px${current?'':';border-color:var(--gold);color:var(--gold)'}"
         onclick="selectLoadoutForSlot('${j}', ${slotIndex}, null)">No loadout</button>
@@ -4300,8 +4296,7 @@ function openLoadoutPicker(name, slotIndex){
       <div class="modal-actions">
         <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
         <button class="btn btn-primary" onclick="closeModal();showDartBuilder('${j}','setup')">Build a loadout</button>
-      </div>`;
-    document.getElementById('modal').hidden=false;
+      </div>`);
   }).catch(()=>{ uiAlert('Could not load loadouts.'); });
 }
 function selectLoadoutForSlot(name, slotIndex, loadoutId){
@@ -5490,7 +5485,7 @@ function renderTournamentSetup(){
 
   const checklist = roster.map(name=>{
     const checked = ts.selected.includes(name);
-    const j = escapeHtml(escapeJs(name));
+    const j = jsArg(name);
     return `<label class="tourney-check-row">
       <input type="checkbox" ${checked?'checked':''} onchange="toggleTournamentPlayer('${j}', this.checked)">
       <span>${escapeHtml(name)}</span>
@@ -5670,7 +5665,7 @@ function renderTournamentDetail(t){
     <div class="da-row" style="align-items:center">
       <span class="da-label" style="flex:1;font-size:14px">${escapeHtml(m.label)}: ${escapeHtml(m.player1Name)} vs ${escapeHtml(m.player2Name)}${m.status==='in_progress'?' <span class="pp-meta">(in progress)</span>':''}</span>
       ${m.status==='ready' ? `<button class="btn btn-primary" style="margin-right:6px" onclick="beginTournamentMatch(${m.id})">Start</button>` : ''}
-      <button class="btn btn-ghost" onclick="askTournamentWalkover(${m.id}, '${escapeHtml(escapeJs(m.player1Name))}', '${escapeHtml(escapeJs(m.player2Name))}')">Walkover</button>
+      <button class="btn btn-ghost" onclick="askTournamentWalkover(${m.id}, '${jsArg(m.player1Name)}', '${jsArg(m.player2Name)}')">Walkover</button>
     </div>`).join('') : `<p class="pp-meta">Nothing ready to play right now.</p>`;
 
   // Group matches into per-round columns, then group those columns by bracket
@@ -5769,14 +5764,13 @@ function tournamentTabKeydown(e){
 }
 
 function askTournamentWalkover(matchId, p1, p2){
-  document.getElementById('modal-body').innerHTML = `
+  openModal(`
     <p class="modal-msg">Record a walkover — who advances without playing?</p>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="submitTournamentWalkover(${matchId}, '${escapeHtml(escapeJs(p1))}')">${escapeHtml(p1)}</button>
-      <button class="btn btn-primary" onclick="submitTournamentWalkover(${matchId}, '${escapeHtml(escapeJs(p2))}')">${escapeHtml(p2)}</button>
-    </div>`;
-  document.getElementById('modal').hidden = false;
+      <button class="btn btn-primary" onclick="submitTournamentWalkover(${matchId}, '${jsArg(p1)}')">${escapeHtml(p1)}</button>
+      <button class="btn btn-primary" onclick="submitTournamentWalkover(${matchId}, '${jsArg(p2)}')">${escapeHtml(p2)}</button>
+    </div>`);
 }
 function submitTournamentWalkover(matchId, winner){
   closeModal();
@@ -5929,7 +5923,7 @@ function renderLeagueSetup(){
 
   const checklist = roster.map(name=>{
     const checked = ls.selected.includes(name);
-    const j = escapeHtml(escapeJs(name));
+    const j = jsArg(name);
     return `<label class="tourney-check-row">
       <input type="checkbox" ${checked?'checked':''} onchange="toggleLeaguePlayer('${j}', this.checked)">
       <span>${escapeHtml(name)}</span>
@@ -6068,8 +6062,8 @@ function renderLeagueDetail(l){
         <button class="btn btn-ghost" onclick="submitEnrollLeaguePlayer(${l.id})">+ Enroll player</button>
       ` : ''}
       ${l.status==='active'
-        ? `<button class="btn btn-ghost danger" onclick="askEndLeague(${l.id},'${escapeHtml(escapeJs(l.name))}')">End league</button>`
-        : `<button class="btn btn-ghost" onclick="askReopenLeague(${l.id},'${escapeHtml(escapeJs(l.name))}')">Reopen league</button>`}
+        ? `<button class="btn btn-ghost danger" onclick="askEndLeague(${l.id},'${jsArg(l.name)}')">End league</button>`
+        : `<button class="btn btn-ghost" onclick="askReopenLeague(${l.id},'${jsArg(l.name)}')">Reopen league</button>`}
     </div>`;
 }
 function submitEnrollLeaguePlayer(leagueId){
@@ -6110,7 +6104,7 @@ function renderRoster(){
   box.innerHTML = roster.map(name=>{
     const s=stats[name]||{};
     const out = playerOut(name);
-    const j = escapeHtml(escapeJs(name));
+    const j = jsArg(name);
 
     // Lifetime avg
     const avg = s.avgDarts ? (s.totalPoints/s.avgDarts*3) : null;
@@ -6213,7 +6207,7 @@ function renderPlayerPage(){
   const name = currentPlayer;
   const s = stats[name] || {};
   const out = playerOut(name);
-  const j = escapeHtml(escapeJs(name));
+  const j = jsArg(name);
   const tab = playerPageTab;
   const cp = avgChartPeriod;
 
@@ -8720,7 +8714,7 @@ async function renderDartBuilderList(){
   const defaultId = defaultLoadout ? defaultLoadout.id : null;
   const cards = loadouts.map(lo=>{
     const parts = [lo.barrel, lo.shaft, lo.flight].filter(Boolean).map(c=>c.name).join(' · ') || 'No components yet';
-    const lj = escapeHtml(escapeJs(lo.name));
+    const lj = jsArg(lo.name);
     return `<div class="card" style="margin-bottom:10px;padding:14px">
       <div style="font-weight:600">${escapeHtml(lo.name)} ${lo.id===defaultId?'<span style="color:var(--gold);font-size:12px">★ Default</span>':''}</div>
       <div style="font-size:12px;color:var(--muted);margin-top:2px">${escapeHtml(parts)}</div>
@@ -9143,7 +9137,7 @@ function openComponentEditor(type){
   const shapeList = isShaft ? typeOpts.types : typeOpts.shapes;
   const lengthList = type !== 'flight' ? typeOpts.lengthRanges : null;
   window.__ceType = type;
-  document.getElementById('modal-body').innerHTML = `
+  openModal(`
     <p class="modal-msg">New ${type.charAt(0).toUpperCase()+type.slice(1)}</p>
     <label class="field">Name</label>
     <input type="text" id="ce-name" maxlength="64" placeholder="e.g. Red Dragon Razer Edge" style="margin-bottom:10px">
@@ -9175,9 +9169,7 @@ function openComponentEditor(type){
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
       <button class="btn btn-primary" onclick="submitComponentEditor()">Save</button>
-    </div>`;
-  document.getElementById('modal').hidden = false;
-  setTimeout(()=>{ const el=document.getElementById('ce-name'); if(el) el.focus(); },0);
+    </div>`, 'ce-name');
 }
 function submitComponentEditor(){
   const type = window.__ceType;
@@ -10395,15 +10387,14 @@ async function refreshSavedGamesList(){
 // labeled actions, not color-coded buttons alone (docs/archive/saved-games-roadmap.md's
 // accessibility section).
 function showResumeOrAbandonPrompt(sg){
-  document.getElementById('modal-body').innerHTML = `
+  openModal(`
     <p class="modal-msg">${escapeHtml(sg.players.join(' & '))} already have a saved ${escapeHtml(sg.category)} game (${escapeHtml(savedGamePositionLabel(sg))}), saved ${escapeHtml(savedGameDateLabel(sg.savedAt))}.</p>
     <p style="font-size:13px;color:var(--muted);margin:0 0 12px">Resume it, abandon it and start fresh, or cancel?</p>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
       <button class="btn btn-ghost" onclick="closeModal();askAbandonSavedGame(${sg.gameId}, true)">Abandon &amp; start fresh</button>
       <button class="btn btn-primary" onclick="closeModal();resumeGame(${sg.gameId})">Resume</button>
-    </div>`;
-  document.getElementById('modal').hidden = false;
+    </div>`);
 }
 
 // Abandon (from the list or the resume prompt): deletes the saved_games row —
@@ -16042,7 +16033,7 @@ function loadTopFinishes(){
         const first=fmtDate(r.first_date);
         const last=fmtDate(r.last_date);
         const dates=r.times===1?first:`First: ${first} · Last: ${last}`;
-        const jPlayer=escapeHtml(escapeJs(currentPlayer));
+        const jPlayer=jsArg(currentPlayer);
         return `<div class="finish-row" role="button" aria-expanded="false"
           onclick="toggleFinishRoute(this,'${jPlayer}',${r.score},'${_mode}')">
           <span class="finish-score">${r.score}</span>
@@ -16316,7 +16307,7 @@ function renderCoachingInsights(insights, section, body){
   // docs/archive/checkout-drill-link-roadmap.md "Drill this checkout": only the
   // checkout_route insight type carries a concrete drillable number (i.score) —
   // weak_number/bust_parity/form_trend describe a pattern, not a single target.
-  const jPlayer = escapeHtml(escapeJs(currentPlayer));
+  const jPlayer = jsArg(currentPlayer);
   body.innerHTML = `<div class="coaching-list">${insights.map(i => `
     <div class="coaching-row">
       <span class="coaching-tag">${COACHING_TAG[i.tone] || i.tone}</span>
@@ -16328,50 +16319,58 @@ function renderCoachingInsights(insights, section, body){
 /* ---------- util ---------- */
 function escapeHtml(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function escapeJs(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+// Names the escapeHtml(escapeJs(...)) composition used at every inline onclick
+// call site that interpolates a string argument inside single quotes (docs/
+// code-quality-roadmap.md item 52) — an unnamed safety invariant otherwise
+// repeated ad hoc: escapeJs() keeps the value from breaking out of the
+// single-quoted JS string literal, escapeHtml() keeps it from breaking out
+// of the double-quoted HTML onclick="..." attribute it lives inside.
+function jsArg(s){ return escapeHtml(escapeJs(s)); }
 
 /* ---------- in-app dialogs (native confirm/prompt are blocked in the sandbox) ---------- */
 function closeModal(){ const o=document.getElementById('modal'); if(o) o.hidden=true; document.getElementById('modal-body').innerHTML=''; }
+// Shared by every modal builder (docs/code-quality-roadmap.md item 52) — the
+// innerHTML+unhide tail was repeated identically 12 times; about half also
+// repeated a setTimeout-focus (some additionally select()ing the value) tail,
+// which focusId/selectText fold in here instead of at each call site.
+function openModal(html, focusId, selectText){
+  document.getElementById('modal-body').innerHTML = html;
+  document.getElementById('modal').hidden = false;
+  if(focusId) setTimeout(()=>{ const el=document.getElementById(focusId); if(el){ el.focus(); if(selectText) el.select(); } },0);
+}
 // Standard error alert: one place for the message fallback and null-safety —
 // call sites previously hand-rolled three variants, one of which rendered
 // "undefined" when an error carried no message.
 function uiAlertErr(prefix, e){ uiAlert(prefix + ': ' + ((e && e.message) || 'Unknown error')); }
 function uiAlert(msg){
-  document.getElementById('modal-body').innerHTML=
-    `<p class="modal-msg">${escapeHtml(msg)}</p>
-     <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">OK</button></div>`;
-  document.getElementById('modal').hidden=false;
+  openModal(`<p class="modal-msg">${escapeHtml(msg)}</p>
+     <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">OK</button></div>`);
 }
 function uiConfirm(msg, onYes){
   window.__modalYes = onYes;
-  document.getElementById('modal-body').innerHTML=
-    `<p class="modal-msg">${escapeHtml(msg)}</p>
+  openModal(`<p class="modal-msg">${escapeHtml(msg)}</p>
      <div class="modal-actions">
        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
        <button class="btn btn-primary" onclick="(function(){var f=window.__modalYes;closeModal();if(f)f();})()">Yes</button>
-     </div>`;
-  document.getElementById('modal').hidden=false;
+     </div>`);
 }
 function uiPrompt(msg, initial, onSubmit, extraAttrs){
   window.__modalSubmit = onSubmit;
-  document.getElementById('modal-body').innerHTML=
-    `<p class="modal-msg">${escapeHtml(msg)}</p>
+  openModal(`<p class="modal-msg">${escapeHtml(msg)}</p>
      <input type="text" id="modal-input" value="${escapeHtml(initial||'')}" maxlength="24" ${extraAttrs||''}
             onkeydown="if(event.key==='Enter')document.getElementById('modal-ok').click()">
      <div class="modal-actions">
        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
        <button class="btn btn-primary" id="modal-ok"
          onclick="(function(){var v=document.getElementById('modal-input').value;var f=window.__modalSubmit;closeModal();if(f)f(v);})()">Save</button>
-     </div>`;
-  document.getElementById('modal').hidden=false;
-  setTimeout(()=>{ const el=document.getElementById('modal-input'); if(el){ el.focus(); el.select(); } },0);
+     </div>`, 'modal-input', true);
 }
 
 function uiVerifyPin(name, onOk, onFail){
   window.__modalPinOk = onOk;
   window.__modalPinFail = onFail;
   window.__modalPinName = name;
-  document.getElementById('modal-body').innerHTML=
-    `<p class="modal-msg">Enter PIN for "${escapeHtml(name)}"</p>
+  openModal(`<p class="modal-msg">Enter PIN for "${escapeHtml(name)}"</p>
      <input type="text" inputmode="numeric" id="pin-input" maxlength="8"
             autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"
             autocorrect="off" autocapitalize="off" spellcheck="false" style="-webkit-text-security:disc"
@@ -16380,9 +16379,7 @@ function uiVerifyPin(name, onOk, onFail){
      <div class="modal-actions">
        <button class="btn btn-ghost" onclick="const f=window.__modalPinFail;closeModal();if(f)f();">Cancel</button>
        <button class="btn btn-primary" id="pin-ok" onclick="submitVerifyPin()">Confirm</button>
-     </div>`;
-  document.getElementById('modal').hidden=false;
-  setTimeout(()=>{ const el=document.getElementById('pin-input'); if(el) el.focus(); },0);
+     </div>`, 'pin-input');
 }
 function submitVerifyPin(){
   const pin = document.getElementById('pin-input').value.trim();
@@ -16399,8 +16396,7 @@ function submitVerifyPin(){
 // endpoint/session as the Settings gate); on success runs onOk.
 function uiLogin(onOk){
   window.__modalLoginOk = onOk;
-  document.getElementById('modal-body').innerHTML=
-    `<p class="modal-msg">This server requires an admin login to make changes.</p>
+  openModal(`<p class="modal-msg">This server requires an admin login to make changes.</p>
      <label class="field">Username</label>
      <input type="text" id="login-username" autocomplete="username" style="margin-bottom:10px">
      <label class="field">Password</label>
@@ -16410,9 +16406,7 @@ function uiLogin(onOk){
      <div class="modal-actions" style="margin-top:16px">
        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
        <button class="btn btn-primary" id="login-ok" onclick="submitUiLogin()">Log in</button>
-     </div>`;
-  document.getElementById('modal').hidden=false;
-  setTimeout(()=>{ const el=document.getElementById('login-username'); if(el) el.focus(); },0);
+     </div>`, 'login-username');
 }
 function submitUiLogin(){
   const username=document.getElementById('login-username').value;
@@ -16431,8 +16425,7 @@ function withPinCheck(name, onOk, onFail){
 }
 function uiAddPlayer(onSubmit){
   window.__modalAddPlayer = onSubmit;
-  document.getElementById('modal-body').innerHTML=
-    `<p class="modal-msg">Add a new player</p>
+  openModal(`<p class="modal-msg">Add a new player</p>
      <label class="field">Name</label>
      <input type="text" id="ap-name" maxlength="24" style="margin-bottom:14px">
      <label class="field">Finish rule</label>
@@ -16454,9 +16447,7 @@ function uiAddPlayer(onSubmit){
      <div class="modal-actions">
        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
        <button class="btn btn-primary" id="ap-ok" onclick="submitAddPlayer()">Add</button>
-     </div>`;
-  document.getElementById('modal').hidden=false;
-  setTimeout(()=>{ const el=document.getElementById('ap-name'); if(el) el.focus(); },0);
+     </div>`, 'ap-name');
 }
 function submitAddPlayer(){
   const name = document.getElementById('ap-name').value.trim();
