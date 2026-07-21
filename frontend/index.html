@@ -6976,7 +6976,9 @@ function loadGhostRaceRecord(){
 function renderPersonalBests(data){
   const container=document.getElementById('player-personal-bests');
   if(!container) return;
-  const custom = GAME_TYPES[playerGameType].personalBestsRenderer;
+  const gt = GAME_TYPES[playerGameType];
+  if(gt.personalBestsSpec) return renderPersonalBestsFromSpec(data, gt.personalBestsSpec);
+  const custom = gt.personalBestsRenderer;
   if(custom) return custom(data);
   if(!data || (data.bestLegAvg==null && data.bestFirst9==null && data.fewestDartsCheckout==null)){
     container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough legs recorded yet.</p>`;
@@ -7004,248 +7006,144 @@ function renderPersonalBests(data){
     ${formHtml}
   </div>`;
 }
-// Cricket's Personal Bests — same 5-field shape mirrored from getCricketPersonalBests(),
+// Shared "stat-block" template every render*PersonalBests() below used to
+// hand-write inline — byte-identical everywhere, only the value/label differ.
+function statBlockHtml(val, label){
+  return `<div class="stat-block"><div class="stat-val">${val}</div><div class="stat-label">${label}</div></div>`;
+}
+// Declarative personal-bests renderer consumed by every mode except X01
+// (whose own renderPersonalBests() above holds the registry dispatch itself,
+// plus per-stat share/race buttons no other mode has). A spec is
+// {emptyMsg, stats:[{key,label,fmt,guard,always,truthy}], form:{recentKey,lifetimeKey}}:
+// - guard (default true): counted when deciding whether the whole panel is
+//   "empty" (every guarded stat absent) — a secondary stat (winStreak-style)
+//   sets guard:false so its own presence/absence never flips the empty message,
+//   matching each mode's original (narrower) empty-check condition exactly.
+// - truthy (default false): Checkout Trainer's bestStreak is absence-tested by
+//   falsiness (0 counts as absent), not `== null`, matching its own original.
+// - always (default false): render unconditionally once the panel isn't
+//   empty — Around the World's "progress / total" row has no independent null
+//   check in the original, it's always shown alongside sessionsPlayed.
+// - fmt(value, data): formats the display value; defaults to the raw value.
+function renderPersonalBestsFromSpec(data, spec){
+  const container=document.getElementById('player-personal-bests');
+  if(!container) return;
+  const isAbsent = s => s.truthy ? !data[s.key] : data[s.key]==null;
+  const guardStats = spec.stats.filter(s=>s.guard!==false);
+  if(!data || guardStats.every(isAbsent)){
+    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">${spec.emptyMsg}</p>`;
+    return;
+  }
+  const rows = spec.stats.map(s=>{
+    if(!s.always && isAbsent(s)) return '';
+    const val = s.fmt ? s.fmt(data[s.key], data) : data[s.key];
+    return statBlockHtml(val, s.label);
+  }).join('');
+  let formHtml = '';
+  if(spec.form){
+    const { recentKey, lifetimeKey } = spec.form;
+    const formDelta = (data[recentKey]!=null && data[lifetimeKey]!=null) ? (data[recentKey] - data[lifetimeKey]) : null;
+    formHtml = formDelta!=null
+      ? statBlockHtml(data[recentKey].toFixed(1), `Recent Form (last 10 legs) ${formDelta>=0?'▲':'▼'} ${Math.abs(formDelta).toFixed(1)}`)
+      : '';
+  }
+  container.innerHTML = `<div class="summary-grid">${rows}${formHtml}</div>`;
+}
 // mpr formatted to 1 decimal in place of X01's avg.
-function renderCricketPersonalBests(data){
-  const container=document.getElementById('player-personal-bests');
-  if(!container) return;
-  if(!data || (data.bestLegMpr==null && data.fewestDartsToClose==null)){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough legs recorded yet.</p>`;
-    return;
-  }
-  const formDelta = (data.recentFormMpr!=null && data.lifetimeMpr!=null) ? (data.recentFormMpr - data.lifetimeMpr) : null;
-  const formHtml = formDelta!=null
-    ? `<div class="stat-block"><div class="stat-val">${data.recentFormMpr.toFixed(1)}</div><div class="stat-label">Recent Form (last 10 legs) ${formDelta>=0?'▲':'▼'} ${Math.abs(formDelta).toFixed(1)}</div></div>`
-    : '';
-  container.innerHTML=`<div class="summary-grid">
-    ${data.bestLegMpr!=null?`<div class="stat-block"><div class="stat-val">${data.bestLegMpr.toFixed(1)}</div><div class="stat-label">Best Leg MPR</div></div>`:''}
-    ${data.fewestDartsToClose!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsToClose}</div><div class="stat-label">Fewest Darts to Close</div></div>`:''}
-    ${data.winStreak?`<div class="stat-block"><div class="stat-val">${data.winStreak}</div><div class="stat-label">Current Win Streak</div></div>`:''}
-    ${formHtml}
-  </div>`;
-}
-// Baseball's Personal Bests — same 5-field shape mirrored from
-// getBaseballPersonalBests(), runs formatted as a whole number in place of
-// X01's avg/Cricket's mpr (a Baseball "average" is runs per inning, a whole-
-// number-feeling scale, not a fractional per-dart one).
-function renderBaseballPersonalBests(data){
-  const container=document.getElementById('player-personal-bests');
-  if(!container) return;
-  if(!data || (data.bestLegRuns==null && data.fewestDartsToWin==null)){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough legs recorded yet.</p>`;
-    return;
-  }
-  const formDelta = (data.recentFormRuns!=null && data.lifetimeRuns!=null) ? (data.recentFormRuns - data.lifetimeRuns) : null;
-  const formHtml = formDelta!=null
-    ? `<div class="stat-block"><div class="stat-val">${data.recentFormRuns.toFixed(1)}</div><div class="stat-label">Recent Form (last 10 legs) ${formDelta>=0?'▲':'▼'} ${Math.abs(formDelta).toFixed(1)}</div></div>`
-    : '';
-  container.innerHTML=`<div class="summary-grid">
-    ${data.bestLegRuns!=null?`<div class="stat-block"><div class="stat-val">${data.bestLegRuns}</div><div class="stat-label">Best Leg Runs</div></div>`:''}
-    ${data.fewestDartsToWin!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsToWin}</div><div class="stat-label">Fewest Darts to Win</div></div>`:''}
-    ${data.winStreak?`<div class="stat-block"><div class="stat-val">${data.winStreak}</div><div class="stat-label">Current Win Streak</div></div>`:''}
-    ${formHtml}
-  </div>`;
-}
-// Shanghai's Personal Bests — same 5-field shape mirrored from
-// getShanghaiPersonalBests(), points formatted as a whole number in place of
-// X01's avg/Cricket's mpr, same reasoning as Baseball's own renderer above.
-function renderShanghaiPersonalBests(data){
-  const container=document.getElementById('player-personal-bests');
-  if(!container) return;
-  if(!data || (data.bestLegPoints==null && data.fewestDartsToWin==null)){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough legs recorded yet.</p>`;
-    return;
-  }
-  const formDelta = (data.recentFormPoints!=null && data.lifetimePoints!=null) ? (data.recentFormPoints - data.lifetimePoints) : null;
-  const formHtml = formDelta!=null
-    ? `<div class="stat-block"><div class="stat-val">${data.recentFormPoints.toFixed(1)}</div><div class="stat-label">Recent Form (last 10 legs) ${formDelta>=0?'▲':'▼'} ${Math.abs(formDelta).toFixed(1)}</div></div>`
-    : '';
-  container.innerHTML=`<div class="summary-grid">
-    ${data.bestLegPoints!=null?`<div class="stat-block"><div class="stat-val">${data.bestLegPoints}</div><div class="stat-label">Best Leg Points</div></div>`:''}
-    ${data.fewestDartsToWin!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsToWin}</div><div class="stat-label">Fewest Darts to Win</div></div>`:''}
-    ${data.winStreak?`<div class="stat-block"><div class="stat-val">${data.winStreak}</div><div class="stat-label">Current Win Streak</div></div>`:''}
-    ${formHtml}
-  </div>`;
-}
-// Halve-It's Personal Bests — same 5-field shape mirrored from
-// getHalveItPersonalBests(), bestFinalTotal in place of bestLegPoints.
-function renderHalveItPersonalBests(data){
-  const container=document.getElementById('player-personal-bests');
-  if(!container) return;
-  if(!data || (data.bestFinalTotal==null && data.fewestDartsToWin==null)){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough legs recorded yet.</p>`;
-    return;
-  }
-  const formDelta = (data.recentFormTotal!=null && data.lifetimeTotal!=null) ? (data.recentFormTotal - data.lifetimeTotal) : null;
-  const formHtml = formDelta!=null
-    ? `<div class="stat-block"><div class="stat-val">${data.recentFormTotal.toFixed(1)}</div><div class="stat-label">Recent Form (last 10 legs) ${formDelta>=0?'▲':'▼'} ${Math.abs(formDelta).toFixed(1)}</div></div>`
-    : '';
-  container.innerHTML=`<div class="summary-grid">
-    ${data.bestFinalTotal!=null?`<div class="stat-block"><div class="stat-val">${data.bestFinalTotal}</div><div class="stat-label">Best Final Total</div></div>`:''}
-    ${data.fewestDartsToWin!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsToWin}</div><div class="stat-label">Fewest Darts to Win</div></div>`:''}
-    ${data.winStreak?`<div class="stat-block"><div class="stat-val">${data.winStreak}</div><div class="stat-label">Current Win Streak</div></div>`:''}
-    ${formHtml}
-  </div>`;
-}
-// The Pressure Chamber's Personal Bests — getPressureChamberPersonalBests()'s
-// 3-field shape (docs/archive/pressure-chamber-roadmap.md "Stats, Personal Bests,
-// leaderboard"): a peak single-run CP total (no minimum floor, the Checkout
-// Blitz/Halve-It precedent), the Composure Rating that peak corresponds to,
-// and the longest full-hit streak reached in any single run.
-function renderPressureChamberPersonalBests(data){
-  const container=document.getElementById('player-personal-bests');
-  if(!container) return;
-  if(!data || data.bestRunCp==null){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough runs recorded yet.</p>`;
-    return;
-  }
-  container.innerHTML=`<div class="summary-grid">
-    <div class="stat-block"><div class="stat-val">${data.bestRunCp}</div><div class="stat-label">Best Run CP</div></div>
-    ${data.bestRating!=null?`<div class="stat-block"><div class="stat-val">${escapeHtml(data.bestRating)}</div><div class="stat-label">Best Composure Rating</div></div>`:''}
-    ${data.longestFullHitStreak!=null?`<div class="stat-block"><div class="stat-val">${data.longestFullHitStreak}</div><div class="stat-label">Longest Full-Hit Streak</div></div>`:''}
-  </div>`;
-}
-// Bob's 27's Personal Bests — same "no win-streak, a solo run never wins
-// against anyone" shape Doubles Practice/Chuckin use below.
-function renderBobs27PersonalBests(data){
-  const container=document.getElementById('player-personal-bests');
-  if(!container) return;
-  if(!data || (data.bestFinalScore==null && data.deepestDoubleOnFail==null)){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough runs recorded yet.</p>`;
-    return;
-  }
-  container.innerHTML=`<div class="summary-grid">
-    ${data.bestFinalScore!=null?`<div class="stat-block"><div class="stat-val">${data.bestFinalScore}</div><div class="stat-label">Best Final Score</div></div>`:''}
-    ${data.deepestDoubleOnFail!=null?`<div class="stat-block"><div class="stat-val">D${data.deepestDoubleOnFail}</div><div class="stat-label">Deepest Double Reached on a Fail</div></div>`:''}
-  </div>`;
-}
-function renderCheckoutLadderPersonalBests(data){
-  const container=document.getElementById('player-personal-bests');
-  if(!container) return;
-  if(!data || (data.highestTargetReached==null && data.fewestDartsOnHighestCheckout==null)){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough attempts recorded yet.</p>`;
-    return;
-  }
-  container.innerHTML=`<div class="summary-grid">
-    ${data.highestTargetReached!=null?`<div class="stat-block"><div class="stat-val">${data.highestTargetReached}</div><div class="stat-label">Highest Target Reached</div></div>`:''}
-    ${data.fewestDartsOnHighestCheckout!=null?`<div class="stat-block"><div class="stat-val">${data.fewestDartsOnHighestCheckout}</div><div class="stat-label">Fewest Darts on the Highest Checkout</div></div>`:''}
-  </div>`;
-}
+const CRICKET_PB_SPEC = { emptyMsg: 'Not enough legs recorded yet.', stats: [
+  { key:'bestLegMpr', label:'Best Leg MPR', fmt:v=>v.toFixed(1) },
+  { key:'fewestDartsToClose', label:'Fewest Darts to Close' },
+  { key:'winStreak', label:'Current Win Streak', truthy:true, guard:false },
+], form:{ recentKey:'recentFormMpr', lifetimeKey:'lifetimeMpr' } };
+// runs formatted as a whole number in place of X01's avg/Cricket's mpr (a
+// Baseball "average" is runs per inning, a whole-number-feeling scale, not a
+// fractional per-dart one).
+const BASEBALL_PB_SPEC = { emptyMsg: 'Not enough legs recorded yet.', stats: [
+  { key:'bestLegRuns', label:'Best Leg Runs' },
+  { key:'fewestDartsToWin', label:'Fewest Darts to Win' },
+  { key:'winStreak', label:'Current Win Streak', truthy:true, guard:false },
+], form:{ recentKey:'recentFormRuns', lifetimeKey:'lifetimeRuns' } };
+// points formatted as a whole number, same reasoning as Baseball's spec above.
+const SHANGHAI_PB_SPEC = { emptyMsg: 'Not enough legs recorded yet.', stats: [
+  { key:'bestLegPoints', label:'Best Leg Points' },
+  { key:'fewestDartsToWin', label:'Fewest Darts to Win' },
+  { key:'winStreak', label:'Current Win Streak', truthy:true, guard:false },
+], form:{ recentKey:'recentFormPoints', lifetimeKey:'lifetimePoints' } };
+const HALVE_IT_PB_SPEC = { emptyMsg: 'Not enough legs recorded yet.', stats: [
+  { key:'bestFinalTotal', label:'Best Final Total' },
+  { key:'fewestDartsToWin', label:'Fewest Darts to Win' },
+  { key:'winStreak', label:'Current Win Streak', truthy:true, guard:false },
+], form:{ recentKey:'recentFormTotal', lifetimeKey:'lifetimeTotal' } };
+// docs/archive/pressure-chamber-roadmap.md "Stats, Personal Bests, leaderboard": a peak
+// single-run CP total (no minimum floor, the Checkout Blitz/Halve-It precedent),
+// the Composure Rating that peak corresponds to, and the longest full-hit
+// streak reached in any single run.
+const PRESSURE_CHAMBER_PB_SPEC = { emptyMsg: 'Not enough runs recorded yet.', stats: [
+  { key:'bestRunCp', label:'Best Run CP' },
+  { key:'bestRating', label:'Best Composure Rating', fmt:v=>escapeHtml(v), guard:false },
+  { key:'longestFullHitStreak', label:'Longest Full-Hit Streak', guard:false },
+] };
+// same "no win-streak, a solo run never wins against anyone" shape Doubles
+// Practice/Chuckin's specs use below.
+const BOBS27_PB_SPEC = { emptyMsg: 'Not enough runs recorded yet.', stats: [
+  { key:'bestFinalScore', label:'Best Final Score' },
+  { key:'deepestDoubleOnFail', label:'Deepest Double Reached on a Fail', fmt:v=>'D'+v },
+] };
+const CHECKOUT_LADDER_PB_SPEC = { emptyMsg: 'Not enough attempts recorded yet.', stats: [
+  { key:'highestTargetReached', label:'Highest Target Reached' },
+  { key:'fewestDartsOnHighestCheckout', label:'Fewest Darts on the Highest Checkout' },
+] };
 // Ascending-is-better (docs/archive/gauntlet-roadmap.md): LOWEST total Scars, the
 // opposite polarity from every other "peak single run" Personal Best in this
 // app (Bob's 27's final score, Checkout Blitz's score, ...).
-function renderGauntletPersonalBests(data){
-  const container=document.getElementById('player-personal-bests');
-  if(!container) return;
-  if(!data || data.lowestTotalScars==null){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No completed runs recorded yet.</p>`;
-    return;
-  }
-  container.innerHTML=`<div class="summary-grid">
-    <div class="stat-block"><div class="stat-val">${data.lowestTotalScars}</div><div class="stat-label">Lowest Total Scars</div></div>
-  </div>`;
-}
+const GAUNTLET_PB_SPEC = { emptyMsg: 'No completed runs recorded yet.', stats: [
+  { key:'lowestTotalScars', label:'Lowest Total Scars' },
+] };
 // Dead Man Walking's ONE Personal Best (docs/archive/dead-man-walking-roadmap.md
 // "Personal Bests") — most Walked Out rounds in a single run, a normal
-// descending "best" board (contrast The Gauntlet's own deliberately
-// ascending Lowest Total Scars just above — this one isn't inverted).
-function renderDeadManWalkingPersonalBests(data){
-  const container=document.getElementById('player-personal-bests');
-  if(!container) return;
-  if(!data || data.mostWalkedOut==null){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No completed runs recorded yet.</p>`;
-    return;
-  }
-  container.innerHTML=`<div class="summary-grid">
-    <div class="stat-block"><div class="stat-val">${data.mostWalkedOut}/15</div><div class="stat-label">Most Walked Out</div></div>
-  </div>`;
-}
-function renderKillerPersonalBests(data){
-  const container=document.getElementById('player-personal-bests');
-  if(!container) return;
-  if(!data || data.mostKillsInALeg==null){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No Killer legs recorded yet.</p>`;
-    return;
-  }
-  container.innerHTML=`<div class="summary-grid">
-    <div class="stat-block"><div class="stat-val">${data.mostKillsInALeg}</div><div class="stat-label">Most Kills in a Leg</div></div>
-  </div>`;
-}
+// descending "best" board (contrast The Gauntlet's own deliberately ascending
+// Lowest Total Scars just above — this one isn't inverted).
+const DEAD_MAN_WALKING_PB_SPEC = { emptyMsg: 'No completed runs recorded yet.', stats: [
+  { key:'mostWalkedOut', label:'Most Walked Out', fmt:v=>v+'/15' },
+] };
+const KILLER_PB_SPEC = { emptyMsg: 'No Killer legs recorded yet.', stats: [
+  { key:'mostKillsInALeg', label:'Most Kills in a Leg' },
+] };
 // No winStreak/recentForm/lifetime fields (see getDoublesPracticePersonalBests()'s
 // own comment) — a round never "wins", so those X01/Cricket concepts don't map.
-function renderDoublesPracticePersonalBests(data){
-  const container=document.getElementById('player-personal-bests');
-  if(!container) return;
-  if(!data || (data.bestRoundDarts==null && data.bestRoundHits==null)){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough rounds recorded yet.</p>`;
-    return;
-  }
-  container.innerHTML=`<div class="summary-grid">
-    ${data.bestRoundDarts!=null?`<div class="stat-block"><div class="stat-val">${data.bestRoundDarts}</div><div class="stat-label">Longest Round (darts)</div></div>`:''}
-    ${data.bestRoundHits!=null?`<div class="stat-block"><div class="stat-val">${data.bestRoundHits}</div><div class="stat-label">Most Doubles in a Round</div></div>`:''}
-  </div>`;
-}
+const DOUBLES_PRACTICE_PB_SPEC = { emptyMsg: 'Not enough rounds recorded yet.', stats: [
+  { key:'bestRoundDarts', label:'Longest Round (darts)' },
+  { key:'bestRoundHits', label:'Most Doubles in a Round' },
+] };
 // No winStreak/recentForm/lifetime fields (see getChuckinPersonalBests()'s own
 // comment) — a session never "wins", so those X01/Cricket concepts don't map.
-function renderChuckinPersonalBests(data){
-  const container=document.getElementById('player-personal-bests');
-  if(!container) return;
-  if(!data || (data.bestSessionDarts==null && data.bestSessionTrebles==null)){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough sessions recorded yet.</p>`;
-    return;
-  }
-  container.innerHTML=`<div class="summary-grid">
-    ${data.bestSessionDarts!=null?`<div class="stat-block"><div class="stat-val">${data.bestSessionDarts}</div><div class="stat-label">Longest Session (darts)</div></div>`:''}
-    ${data.bestSessionTrebles!=null?`<div class="stat-block"><div class="stat-val">${data.bestSessionTrebles}</div><div class="stat-label">Most Trebles in a Session</div></div>`:''}
-  </div>`;
-}
+const CHUCKIN_PB_SPEC = { emptyMsg: 'Not enough sessions recorded yet.', stats: [
+  { key:'bestSessionDarts', label:'Longest Session (darts)' },
+  { key:'bestSessionTrebles', label:'Most Trebles in a Session' },
+] };
 // Merges two backend calls into one record (see server.js's /api/players/personal-bests
 // checkout_trainer branch) — the lifetime toughest-checkout/best-streak record (both
 // sub-modes) plus Checkout Blitz's own peak-score/lifetime-average record. No
 // winStreak/recentForm fields, same reasoning as Doubles Practice/Chuckin above —
 // this mode never "wins" a leg the X01/Cricket way.
-function renderCheckoutTrainerPersonalBests(data){
-  const container=document.getElementById('player-personal-bests');
-  if(!container) return;
-  if(!data || (data.toughestCheckout==null && !data.bestStreak && data.bestScore==null)){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Not enough attempts recorded yet.</p>`;
-    return;
-  }
-  container.innerHTML=`<div class="summary-grid">
-    ${data.toughestCheckout!=null?`<div class="stat-block"><div class="stat-val">${data.toughestCheckout}</div><div class="stat-label">Toughest Checkout Solved</div></div>`:''}
-    ${data.bestStreak?`<div class="stat-block"><div class="stat-val">${data.bestStreak}</div><div class="stat-label">Best Optimal Streak</div></div>`:''}
-    ${data.bestScore!=null?`<div class="stat-block"><div class="stat-val">${data.bestScore}</div><div class="stat-label">Best Checkout Blitz Score</div></div>`:''}
-    ${data.lifetimeAvgScore!=null?`<div class="stat-block"><div class="stat-val">${data.lifetimeAvgScore.toFixed(1)}</div><div class="stat-label">Avg Checkout Blitz Score</div></div>`:''}
-  </div>`;
-}
+const CHECKOUT_TRAINER_PB_SPEC = { emptyMsg: 'Not enough attempts recorded yet.', stats: [
+  { key:'toughestCheckout', label:'Toughest Checkout Solved' },
+  { key:'bestStreak', label:'Best Optimal Streak', truthy:true },
+  { key:'bestScore', label:'Best Checkout Blitz Score' },
+  { key:'lifetimeAvgScore', label:'Avg Checkout Blitz Score', fmt:v=>v.toFixed(1), guard:false },
+] };
 // Fastest completion only (mirrors Doubles Practice/Chuckin's "best round"/"best
 // session" minimalism) — no winStreak/recentForm/lifetime, this mode never "wins".
-function renderAroundTheClockPersonalBests(data){
-  const container=document.getElementById('player-personal-bests');
-  if(!container) return;
-  if(!data || data.bestCompletionDarts==null){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No completed rounds yet.</p>`;
-    return;
-  }
-  container.innerHTML=`<div class="summary-grid">
-    <div class="stat-block"><div class="stat-val">${data.bestCompletionDarts}</div><div class="stat-label">Fastest Completion (darts)</div></div>
-  </div>`;
-}
+const AROUND_THE_CLOCK_PB_SPEC = { emptyMsg: 'No completed rounds yet.', stats: [
+  { key:'bestCompletionDarts', label:'Fastest Completion (darts)' },
+] };
 // This mode never "wins" and its progress is lifetime/cross-session by design, so
 // there's no per-round record to chase — sessions played + lifetime progress
 // instead (see backend/db.js's getAroundTheWorldPersonalBests() comment).
-function renderAroundTheWorldPersonalBests(data){
-  const container=document.getElementById('player-personal-bests');
-  if(!container) return;
-  if(!data || data.sessionsPlayed==null){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No sessions recorded yet.</p>`;
-    return;
-  }
-  container.innerHTML=`<div class="summary-grid">
-    <div class="stat-block"><div class="stat-val">${data.sessionsPlayed}</div><div class="stat-label">Sessions Played</div></div>
-    <div class="stat-block"><div class="stat-val">${data.progress} / ${data.total}</div><div class="stat-label">Lifetime Progress</div></div>
-  </div>`;
-}
+const AROUND_THE_WORLD_PB_SPEC = { emptyMsg: 'No sessions recorded yet.', stats: [
+  { key:'sessionsPlayed', label:'Sessions Played' },
+  { key:'progress', label:'Lifetime Progress', fmt:(v,d)=>`${d.progress} / ${d.total}`, guard:false, always:true },
+] };
 async function sharePersonalBest(kind, value){
   const cfg = { legavg: { icon:'📊', headline:'BEST LEG AVERAGE', statLine: value.toFixed(1),
       desc:'Your best 3-dart average across a single leg.' },
@@ -12422,7 +12320,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegCricket,
     playerSnapshot: playerSnapshotCricket,
     statDefs: CRICKET_STAT_DEFS,
-    personalBestsRenderer: renderCricketPersonalBests,
+    personalBestsSpec: CRICKET_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyCricket
   },
   baseball: {
@@ -12452,7 +12350,7 @@ const GAME_TYPES = {
     // Baseball now shows up on the Player Profile toggle
     // (`Object.values(GAME_TYPES).filter(g=>g.statDefs && g.statDefs.length)`).
     statDefs: BASEBALL_STAT_DEFS,
-    personalBestsRenderer: renderBaseballPersonalBests,
+    personalBestsSpec: BASEBALL_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyBaseball
   },
   shanghai: {
@@ -12473,7 +12371,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegShanghai,
     playerSnapshot: playerSnapshotShanghai,
     statDefs: SHANGHAI_STAT_DEFS,
-    personalBestsRenderer: renderShanghaiPersonalBests,
+    personalBestsSpec: SHANGHAI_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyShanghai
   },
   halve_it: {
@@ -12494,7 +12392,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegHalveIt,
     playerSnapshot: playerSnapshotHalveIt,
     statDefs: HALVE_IT_STAT_DEFS,
-    personalBestsRenderer: renderHalveItPersonalBests,
+    personalBestsSpec: HALVE_IT_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyHalveIt
   },
   pressure_chamber: {
@@ -12517,7 +12415,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegPressureChamber,
     playerSnapshot: playerSnapshotPressureChamber,
     statDefs: PRESSURE_CHAMBER_STAT_DEFS,
-    personalBestsRenderer: renderPressureChamberPersonalBests,
+    personalBestsSpec: PRESSURE_CHAMBER_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyPressureChamber
   },
   doubles_practice: {
@@ -12535,7 +12433,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegDoublesPractice,
     playerSnapshot: playerSnapshotDoublesPractice,
     statDefs: DOUBLES_PRACTICE_STAT_DEFS,
-    personalBestsRenderer: renderDoublesPracticePersonalBests,
+    personalBestsSpec: DOUBLES_PRACTICE_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyDoublesPractice,
     // Always solo — there's no opponent to play head-to-head against, so this
     // game type's Home page tab only makes sense under Practice. renderHomeGameTypeTabs()
@@ -12556,7 +12454,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegChuckin,
     playerSnapshot: playerSnapshotChuckin,
     statDefs: CHUCKIN_STAT_DEFS,
-    personalBestsRenderer: renderChuckinPersonalBests,
+    personalBestsSpec: CHUCKIN_PB_SPEC,
     // false (not null) deliberately opts this mode out of the Home page toggle
     // entirely — unlike null ("use the built-in X01-shaped default"), this mode's
     // stats don't map onto that shape and no Home leaderboard was requested for it.
@@ -12585,7 +12483,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegCheckoutTrainer,
     playerSnapshot: playerSnapshotCheckoutTrainer,
     statDefs: CHECKOUT_TRAINER_STAT_DEFS,
-    personalBestsRenderer: renderCheckoutTrainerPersonalBests,
+    personalBestsSpec: CHECKOUT_TRAINER_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyCheckoutTrainer,
     // Always solo, same reasoning as Doubles Practice — no opponent to play
     // head-to-head against.
@@ -12602,7 +12500,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegAroundTheClock,
     playerSnapshot: playerSnapshotAroundTheClock,
     statDefs: AROUND_THE_CLOCK_STAT_DEFS,
-    personalBestsRenderer: renderAroundTheClockPersonalBests,
+    personalBestsSpec: AROUND_THE_CLOCK_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyAroundTheClock,
     // Solo, same reasoning as Doubles Practice — no H2H equivalent.
     soloOnly: true
@@ -12618,7 +12516,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegAroundTheWorld,
     playerSnapshot: playerSnapshotAroundTheWorld,
     statDefs: AROUND_THE_WORLD_STAT_DEFS,
-    personalBestsRenderer: renderAroundTheWorldPersonalBests,
+    personalBestsSpec: AROUND_THE_WORLD_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyAroundTheWorld,
     soloOnly: true
   },
@@ -12632,7 +12530,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegBobs27,
     playerSnapshot: playerSnapshotBobs27,
     statDefs: BOBS_27_STAT_DEFS,
-    personalBestsRenderer: renderBobs27PersonalBests,
+    personalBestsSpec: BOBS27_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyBobs27,
     // Always solo — there's no opponent to play head-to-head against, same
     // reasoning as Doubles Practice/Checkout Trainer/both guided drills.
@@ -12651,7 +12549,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegCheckoutLadder,
     playerSnapshot: playerSnapshotCheckoutLadder,
     statDefs: CHECKOUT_LADDER_STAT_DEFS,
-    personalBestsRenderer: renderCheckoutLadderPersonalBests,
+    personalBestsSpec: CHECKOUT_LADDER_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyCheckoutLadder,
     soloOnly: true
   },
@@ -12671,7 +12569,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegGauntlet,
     playerSnapshot: playerSnapshotGauntlet,
     statDefs: GAUNTLET_STAT_DEFS,
-    personalBestsRenderer: renderGauntletPersonalBests,
+    personalBestsSpec: GAUNTLET_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyGauntlet,
     soloOnly: true
   },
@@ -12691,7 +12589,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegKiller,
     playerSnapshot: playerSnapshotKiller,
     statDefs: KILLER_STAT_DEFS,
-    personalBestsRenderer: renderKillerPersonalBests,
+    personalBestsSpec: KILLER_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyKiller,
     // The inverse of soloOnly (docs/game-modes-roadmap.md "Killer": the
     // whole mechanic needs opponents to attack) — never offered/shown as a
@@ -12713,7 +12611,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegDeadManWalking,
     playerSnapshot: playerSnapshotDeadManWalking,
     statDefs: DEAD_MAN_WALKING_STAT_DEFS,
-    personalBestsRenderer: renderDeadManWalkingPersonalBests,
+    personalBestsSpec: DEAD_MAN_WALKING_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyDeadManWalking,
     // Solo only — no opponent, same reasoning Bob's 27/Checkout Ladder/The
     // Gauntlet's own soloOnly already established.
@@ -14006,18 +13904,10 @@ const MARATHON_STAT_DEFS = [
 ];
 const MARATHON_BUBBLE_KEY_MAP = { marathonsessions:'sessionsCompleted', marathonavglegs:'avgLegsPerSession',
   marathonavgfatigue:'avgFatigueSplit', marathoncliff:'cliffSessions', marathonwarmmachine:'warmMachineSessions', marathonflatline:'flatLineSessions' };
-function renderMarathonPersonalBests(data){
-  const container=document.getElementById('player-personal-bests');
-  if(!container) return;
-  if(!data || data.lowestFatigueSplit==null){
-    container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No completed Marathon Mode sessions yet.</p>`;
-    return;
-  }
-  container.innerHTML=`<div class="summary-grid">
-    <div class="stat-block"><div class="stat-val">${data.lowestFatigueSplit}</div><div class="stat-label">Lowest Fatigue Split</div></div>
-    <div class="stat-block"><div class="stat-val">${data.mostLegsInASession}</div><div class="stat-label">Most Legs in a Session</div></div>
-  </div>`;
-}
+const MARATHON_PB_SPEC = { emptyMsg: 'No completed Marathon Mode sessions yet.', stats: [
+  { key:'lowestFatigueSplit', label:'Lowest Fatigue Split' },
+  { key:'mostLegsInASession', label:'Most Legs in a Session', guard:false },
+] };
 function renderHomeTabBodyMarathon(){
   const el=document.getElementById('home-tab-body');
   const data=homeData.marathon;
@@ -14050,7 +13940,7 @@ GAME_TYPES.marathon = {
   resetForNextLeg: () => {},
   playerSnapshot: p => p,
   statDefs: MARATHON_STAT_DEFS,
-  personalBestsRenderer: renderMarathonPersonalBests,
+  personalBestsSpec: MARATHON_PB_SPEC,
   homeTabRenderer: renderHomeTabBodyMarathon,
   soloOnly: true,
   // Marathon is a Home/Profile-toggle-only entry, never a real games.gameType or a

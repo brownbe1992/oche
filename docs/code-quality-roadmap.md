@@ -354,15 +354,60 @@ Pressure Chamber's 3-row Composure Points/Rating/Darts, X01's Leg/Game Avg),
 plus the multi-leg "Standing" row appearing correctly. Backend suite
 unaffected (1244 tests, same 6 pre-existing unrelated failures).
 
-## Item 48 — Declarative personal-bests renderers
+## Item 48 — Declarative personal-bests renderers — ✅ Done
 
-17 near-identical `renderXxxPersonalBests()` functions (~6981-7253 + the
-marathon one) repeat the same scaffold: container guard, empty message,
-optional recent-form delta block (verbatim ×4), then `key != null ?
-stat-block : ''` rows. The registry already dispatches via
-`personalBestsRenderer` — replace the functions with a per-type spec
-(`{emptyMsg, stats:[{key,label,fmt}], form:{...}}`) consumed by one generic
-renderer. ~280 lines → ~50.
+16 of the 17 near-identical `renderXxxPersonalBests()` functions (every one
+except X01's own `renderPersonalBests`) are replaced by a per-type spec —
+`{emptyMsg, stats:[{key,label,fmt,guard,always,truthy}], form:{recentKey,
+lifetimeKey}}` — consumed by one generic `renderPersonalBestsFromSpec(data,
+spec)`, itself built on a shared `statBlockHtml(val, label)` (the
+byte-identical `stat-block`/`stat-val`/`stat-label` template every one of
+the 17 hand-wrote inline). `GAME_TYPES` entries now carry
+`personalBestsSpec: X_PB_SPEC` in place of `personalBestsRenderer:
+renderXPersonalBests`; the dispatcher (`renderPersonalBests()`, still X01's
+own function) checks `gt.personalBestsSpec` before falling back to a
+`personalBestsRenderer` custom function (kept only as a mechanism, though no
+entry uses it anymore) and finally its own inline X01 body.
+
+The per-stat spec flags exist because the 16 originals' guard conditions and
+row-presence checks genuinely weren't uniform, and the spec makes each
+divergence an explicit, named option instead of a bespoke ternary:
+- `guard` (default `true`): whether a stat counts toward "is this whole panel
+  empty" — `winStreak`-style secondary stats set `guard:false` so their own
+  presence never flips the empty message, matching each original's narrower
+  compound guard exactly (e.g. Checkout Trainer's `lifetimeAvgScore` was
+  never part of its own empty-check either).
+- `truthy` (default `false`): Checkout Trainer's `bestStreak` is
+  absence-tested by falsiness (`0` counts as absent), not `== null` —
+  preserved via this flag rather than silently switching it to `!= null`.
+- `always` (default `false`): Around the World's "progress / total" row has
+  no independent null check in the original (always shown once
+  `sessionsPlayed` is present) — `always:true` plus a `fmt(v, data)` closure
+  over the whole record handles its two-field composed string.
+- `fmt(value, data)`: Bob's 27's literal `D` prefix, Dead Man Walking's `/15`
+  suffix, and every `.toFixed(1)` call are now named format functions instead
+  of ad hoc template-literal concatenation.
+
+X01's `renderPersonalBests` itself is kept hand-written and unchanged — it
+holds the dispatch shim (`gt.personalBestsSpec`/`gt.personalBestsRenderer`
+check) plus per-stat share buttons and a Ghost Opponent "race this leg"
+button + `#ghost-race-record` span that no other mode has; forcing those
+into the declarative spec would need an `extra` hook used by exactly one
+mode, the same "don't force an abstraction over a real difference" call this
+roadmap already made for X01's `onLegWon()`/drill-mode lists.
+
+Verified live in a browser: navigated to a real Player Profile page (so the
+dynamically-built `#player-personal-bests` container exists) and called
+`renderPersonalBestsFromSpec` directly for a representative sample —
+Cricket (full + empty, confirming the `winStreak` guard exclusion),
+Pressure Chamber (confirming `escapeHtml()` still runs on `bestRating`),
+Bob's 27 and Dead Man Walking (confirming the `D`-prefix/`/15`-suffix `fmt`
+functions), Checkout Trainer (confirming its non-uniform guard, including
+the edge case where `lifetimeAvgScore` alone present still shows the empty
+message, matching the original bug-for-bug), Around the World (confirming
+the composed "progress / total" row and its empty case), Marathon, and The
+Gauntlet — every one produced exactly the original HTML. Backend suite
+unaffected (1244 tests, same 6 pre-existing unrelated failures).
 
 ## Item 49 — One leaderboard-row template helper (~20 sites; supersedes item 36's five)
 
