@@ -1191,9 +1191,11 @@ between X01's leaderboard set and Cricket's own:
 | 9 Marks | `getCricketNineMarksStats(mode)` | Reused as-is from the achievements leaderboard already built for step 3 |
 | Perfect Leg | `getCricketPerfectLegStats(mode)` | A won leg (`leg_won=1`) whose total darts equal that match's config-derived theoretical minimum — the same logic as the Perfect Leg achievement trigger in `enterTurnCricket()`, computed here in SQL via `json_each(g.config,'$.numbers')` instead of read from client state |
 
-All four are fetched in the same upfront `Promise.all` `renderHome()` already
-uses for X01 (`homeData.cricket.h2h`/`.practice`/`.wins`) — no separate loading
-state or lazy-fetch-on-toggle.
+All four are fetched lazily via `HOME_COMBO_SPECS.cricket`/`ensureHomeCombo()`
+(item 45, `docs/code-quality-roadmap.md`) the first time the Cricket tab is
+selected — same `homeData.cricket.h2h`/`.practice`/`.wins` shape every
+`homeTabRenderer` reads, just populated on demand instead of upfront alongside
+X01's own leaderboards.
 
 ### Baseball stats (`GAME_TYPES.baseball.statDefs` / `BASEBALL_STAT_DEFS`)
 
@@ -1767,7 +1769,7 @@ co-fire with a chain badge or with each other in the same turn/leg:
 | 🥇 **First 100+ Checkout** | `win && pointsThisVisit >= 100`, **once-badge** — celebrates only the very first time it ever happens for that player. |
 | ⚔️ **Grudge Match** | On a match win, the same `h2h-summary` lookup shows `totalGames >= 10` against this opponent. **Once-badge** per player — awarded to both the winner and the loser once the threshold is first crossed. |
 | 🕐 **Around the Clock** | `singlesHit.size >= 20` — every number 1–20 hit as a single at least once **within the current game** (`singlesHit` is created fresh in `newMatchPlayer()` at every `startGame()`, persists across legs/sets within that game, and resets when a new game starts — not just on page reload). **Once-badge.** |
-| 🌍 **Around the World** | Lifetime: all 63 dart outcomes hit at least once (20 numbers × single/double/treble = 60, plus outer bull, double bull, and a miss). Checked via an async progress query (`/api/players/around-the-world`), skipped once the client-side `earnedBadgeCache` already has it. **Once-badge.** |
+| 🌍 **Around the World** | Lifetime: all 63 dart outcomes hit at least once (20 numbers × single/double/treble = 60, plus outer bull, double bull, and a miss). `newMatchPlayer()` fetches this lifetime outcome set once at game start (`atwBaselineHitSet`, `GET /api/players/around-the-world`) instead of re-querying every visit (item 51, `docs/code-quality-roadmap.md`); each visit's own darts are tracked locally (`atwHitSet`) and unioned against the baseline (`new Set([...baseline, ...session]).size >= 63`), skipped entirely once the client-side `earnedBadgeCache` already has it. **Once-badge.** |
 | 👻 **Ghost Slayer** | First-ever `result==='win'` row this player writes to the `ghost_races` table (§13) — win a race against a replay of one of your own past legs (Ghost Opponent, below). Unlike every other badge in this table, checked server-side: `recordGhostRace()` (`backend/db.js`) calls `awardBadge(playerName, 'ghost_slayer', true)` on every win — `once` mode's `INSERT OR IGNORE` makes the call a no-op past the first time, so no separate first-win check is needed. **Once-badge.** |
 
 **The lifetime-180s milestone ladder** (docs/archive/culture-badges-roadmap.md Part A,
@@ -1889,11 +1891,13 @@ the passive Around the World badge: `GET /api/players/doubles-hit-sectors`
 (`getDoublesPracticeHitSectors()`, `backend/db.js` — same `{hit,count,total}`
 shape as `getAroundTheWorldProgress()`, just scoped to this mode's own "hit"
 definition via `DOUBLES_HIT_CASE` instead of every raw dart outcome) is
-queried after every hit, behind `DB._queue` so the query only runs once that
-dart's own `DB.recordTurn()` write has landed; `prog.count >= prog.total`
-triggers a direct `Backend.send(..., {once:true})` call, checked for
+fetched once at game start (`newMatchPlayerDoublesPractice()`'s
+`baselineHitSectors`, item 51) instead of re-queried after every hit dart;
+each hit's own sector is tracked locally (`sessionHitSectors`) and unioned
+against the baseline (`new Set([...baseline, ...session]).size >= 21`)
+triggering a direct `Backend.send(..., {once:true})` call, checked for
 `newlyEarned`, guarded by `earnedBadgeCache` so an already-earned player skips
-the query entirely on every subsequent hit.
+the check entirely on every subsequent hit.
 
 **Bob's 27 badges** (`docs/archive/practice-ladders-roadmap.md` Part A, checked
 in `enterTurnBobs27()`/`onLegWonBobs27()`, `frontend/index.html`):
@@ -2421,8 +2425,18 @@ through; it resolves `desc` automatically via `achDescFor(type)` (the same
 lookup the live achievement overlay and voice announcements already use — see
 §4) whenever the caller doesn't supply its own, so every card gets a real
 explanation without each of the ~50 call sites needing to pass one. It then
-stores the card in `momentCards[type]` and fires the corresponding Home
-Assistant webhook (base64-encoded image) if one is configured.
+stores the card in `momentCards[type]` — always, regardless of HA
+configuration, since `shareMomentCard()`'s in-app Share button needs it — and,
+only if that event's Home Assistant webhook is actually configured (checked
+client-side via `haWebhookStatus`, refreshed at boot from
+`GET /api/settings/ha-webhook-status`, item 57 `docs/code-quality-roadmap.md`
+— the webhook IDs themselves stay admin-only, only a per-event boolean is
+exposed), JPEG-encodes the canvas to a data URL and fires the corresponding
+webhook. Skipping the encode+send when nothing's configured avoids building
+and POSTing a ~250KB base64 image the server would otherwise discard unread
+(`fireHaWebhook()`, `backend/db.js`, already no-ops per-event server-side when
+unconfigured — the client-side check just avoids the wasted work getting
+there).
 `shareMomentCard(type)` reads the stored canvas and opens the native Web Share
 sheet (or falls back to a plain image download).
 

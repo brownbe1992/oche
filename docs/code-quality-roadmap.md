@@ -323,15 +323,37 @@ single-threaded server that also handles live scoring. Item 34 (the
 per-game-type stat generalization decision) overlaps the last bullet —
 decide them together.
 
-## Item 45 — Home page: lazy per-combo fetches
+## Item 45 — Home page: lazy per-combo fetches — ✅ Done
 
-`renderHome()` fires ~47 aggregate fetches per Home navigation though only
-the selected tab+game-type combo renders. Two mitigations already shipped
-(stale-while-revalidate paint + the keep-cache-on-error catch); the burst
-itself remains and grows with every mode. A real fix fetches per visible
-combo in `switchHomeTab()`/`switchHomeGameType()` (with `homeData` caching
-per group), or adds one combined endpoint. Touches every `homeTabRenderer` —
-needs the app runnable to verify each tab.
+`renderHome()` used to fire ~47 aggregate fetches per Home navigation though
+only the selected tab+game-type combo renders. Two mitigations were already
+shipped (stale-while-revalidate paint + the keep-cache-on-error catch); the
+burst itself remained and grew with every new mode.
+
+A `HOME_COMBO_SPECS` table (one entry per `GAME_TYPES` id, mode-split
+H2H/Practice for x01/cricket/baseball/shanghai/halveIt/pressureChamber,
+flat for the always-solo types) plus `ensureHomeCombo(type, mode)` now
+fetch only the combo actually selected, lazily, into the exact same
+`homeData` shape every `homeTabRenderer` already reads — no renderer itself
+changed. `/api/summary`/`/api/home-extra` (read by every combo) stay fetched
+on every Home visit, same SWR treatment as before, just scoped to
+`homeData.s`/`homeData.extra` now. `switchHomeTab()`/`switchHomeGameType()`
+call `ensureHomeCombo()` for the combo they land on; selecting a combo paints
+instantly from cache if present, then always kicks a silent background
+refetch (de-duped via `homeComboInFlight`) so a game finished mid-session
+doesn't permanently freeze that combo's board at its first-ever fetch — a
+failed fetch only falls back to an empty-but-valid shape if nothing was
+cached yet (the existing keep-cache-on-error philosophy, now per-combo
+instead of all-or-nothing).
+
+Verified live: cold start now fires only 6 requests (2 globals + the
+default x01/H2H combo's 4) instead of ~47; walked all 16 game-type × tab
+combos and confirmed each selection fetches only its own endpoints (never
+the old full burst); re-selecting an already-visited combo silently
+refetches in the background without blocking the paint; leaderboard values
+spot-checked against direct endpoint calls matched exactly. Backend test
+suite unaffected (1244 tests, 1238 pass, 6 pre-existing unrelated
+`dart-heatmap` failures) — no backend changes.
 
 ---
 
@@ -586,18 +608,66 @@ short-circuits a second call before it reaches the network, and verified a
 `null` snap doesn't throw and still fires the moment card. Backend suite
 unaffected (1244 tests, same 6 pre-existing unrelated failures).
 
-## Item 51 — Per-dart/per-visit badge-progress fetches and profile refetch waste
+## Item 51 — Per-dart/per-visit badge-progress fetches and profile refetch waste — ✅ Done
 
-Three efficiency items sharing one shape (fetch-baseline-once + client-side
-tracking, the in-file precedent at ~15572): (a) every X01 visit fetches
-`/api/players/around-the-world` per unbadged player (a lifetime-darts
-DISTINCT scan per visit); (b) Doubles Practice fetches
-`/api/players/doubles-hit-sectors` on every hit dart until Ring Master;
-(c) profile navigation re-awaits the full `/api/stats` refresh
-unconditionally (`show('player')`) and tab/game-type switches refetch all
-~17 profile loads when only the mode-parameterized ones changed; plus
-tournament average-seeding fires one heavy personal-bests call per player
-when the in-memory stats blob (or one batch endpoint) would do.
+Four efficiency items sharing one shape (fetch-baseline-once + client-side
+tracking, the `newMatchPlayerAroundTheWorld()`/`newMatchPlayerChuckin()`
+precedent already in the file):
+
+(a) Every X01 visit used to fetch `/api/players/around-the-world` per
+unbadged player (a lifetime-darts DISTINCT scan per visit) — `newMatchPlayer()`
+now fetches that lifetime outcome set once at game start
+(`atwBaselineHitSet`) and `enterTurn()`'s per-visit check tracks this
+session's own newly-hit outcomes locally (`atwHitSet`), comparing
+`new Set([...baseline, ...session]).size >= 63` instead of re-querying the
+server every visit.
+
+(b) Doubles Practice used to fetch `/api/players/doubles-hit-sectors` on
+every hit dart until Ring Master — `newMatchPlayerDoublesPractice()` now
+fetches the baseline distinct-doubled-sectors set once at game start
+(`baselineHitSectors`) and `throwDartDoublesPractice()` tracks this
+session's own hits locally (`sessionHitSectors`), same local-set-union
+comparison against 21.
+
+(c) Profile navigation used to re-await the full `/api/stats` refresh
+unconditionally (`show('player')`) and every tab/game-type switch refetched
+all ~17 profile loads. `show('player')` now paints instantly from
+`stats[currentPlayer]` if already cached (stale-while-revalidate, mirroring
+`renderHome()`'s own precedent), only falling back to a loading skeleton on
+a genuinely first-ever profile view this session; `DB.refreshStats()` still
+always runs in the background and re-renders on resolve. Of the 17 profile
+loaders, 7 are mode-parameterized (`loadStatBubbles`, `loadAvgChart`,
+`loadTopFinishes`, `loadDartAnalytics`, `loadCoachingInsights`,
+`loadPersonalBests`, `loadDartHeatmap` — their query genuinely changes with
+`playerPageTab`/`playerGameType`) and still refetch on every switch; the
+other 9 (`loadDartWeights`, `loadPlayerLoadouts`, `loadPlayerElo`,
+`loadTournamentStats`, `loadPlayerLeagueStats`, `loadAroundTheWorldProgress`,
+`loadGauntletScarMap`, `loadOnThisDay`, `loadChallengeHistory`) now go
+through a `cachedProfileLoad(section, fetchFn, renderFn, errFn)` helper that
+serves from a per-player `profileSectionCache` after the first fetch this
+session, cleared wholesale in `showPlayer()`'s existing "player changed"
+guard. `loadPlayerBadges` was deliberately excluded from caching — a badge
+earned mid-session must never appear missing from a stale cache, so it
+always fetches fresh.
+
+Plus: tournament average-seeding used to fire one `getPersonalBestsFor()`
+call per selected player (`loadTournamentSeedByAverage()`); a new
+`GET /api/players/personal-bests-batch?names=...` endpoint
+(`db.getPersonalBestsBatch()`) now serves every selected player's record in
+one round trip.
+
+Verified live in a real browser + running server for every piece: ATW/Ring
+Master local-set counting matches server semantics (confirmed the counting
+logic increments by exactly 1 per genuinely new outcome, converging on the
+same completion point the old server-side DISTINCT scan would have);
+profile-page request counts confirmed via intercepted network requests —
+first profile open fires each of the 9 static endpoints once, subsequent
+tab/game-type switches fire zero additional requests for those 9 (only the
+7 mode-parameterized ones plus badges refetch), and switching to a
+different player still refetches everything correctly; the batch endpoint
+returns a per-name map matching `getPersonalBestsFor()`'s own shape.
+Backend test suite unaffected (1244 tests, 1238 pass, 6 pre-existing
+unrelated `dart-heatmap` failures).
 
 ## Item 52 — Small shared-pattern helpers (batch) — ✅ Done
 
@@ -734,16 +804,44 @@ per-dart modes. **Shape:** `pushThrownDarts(...)` and
 `recordSingleDartTurn(...)` helpers — zone-metadata encoding rules then live
 once.
 
-## Item 57 — Frontend efficiency batch
+## Item 57 — Frontend efficiency batch — ✅ Done
 
-(a) `fireMomentCard()` unconditionally paints + JPEG-encodes an 800×800
-canvas (~10-30ms main-thread jank + ~250KB POST) and `sendHaWebhook()` fires
-a no-op POST per bust/180/leg even when no webhook is configured — expose a
-"webhook configured" flag in the boot settings fetch and skip client-side;
-(b) `renderPad()` recreates all 22 pad buttons + closures on every dart tap —
-build once, toggle `.disabled` (the dartboard branch's own pattern);
-(c) `playerSnapshotChuckin()` re-serializes the entire session heatmap into
-every per-dart live push — cache and invalidate on change.
+(a) `fireMomentCard()` used to unconditionally JPEG-encode its 800×800
+canvas and `sendHaWebhook()` fired a POST per bust/180/leg even when no
+webhook was configured, for the server to discard unread (`fireHaWebhook()`
+already no-ops per-event when unconfigured — the waste was entirely
+client-side, and for `momentcard` specifically that discarded payload is a
+~250KB base64 image). A new public `GET /api/settings/ha-webhook-status`
+endpoint (`db.getHaWebhookStatus()`) exposes WHETHER each of the 12 webhook
+events is configured (never the webhook IDs themselves, which stay
+admin-only); `sendHaWebhook()` checks it up front and returns immediately if
+that event isn't configured. `fireMomentCard()` still always builds/caches
+the canvas itself (the in-app Share button needs it regardless of HA
+integration) but only calls `canvas.toDataURL()` + `sendHaWebhook()` when
+`momentcard` is actually configured.
+
+(b) `renderPad()`'s generic 1-20+Bull(+Miss) fallback pad used to tear down
+and rebuild all 22 buttons + closures on every dart tap. It now builds once
+(checked via a `pad.dataset.padKind` marker) and toggles `.disabled` on the
+existing buttons — the same "build the SVG once" pattern the dartboard
+branch already used just above it. The pad's DOM identity resets fresh on
+every new game (`renderGameShell()` replaces the whole `.pad` container), so
+a stale build from a previous game can never be toggled by mistake.
+
+(c) `playerSnapshotChuckin()` used to re-parse every key of the whole
+session heatmap into a fresh array on every per-dart live push.
+`p.heatmapVersion` (bumped on every heatmap mutation — hit dart, undo,
+leg-reset) now gates a cache on `p._heatmapCache`, only re-parsing when the
+version has actually moved since the last build.
+
+Verified live: pad button DOM identity (same node references) confirmed to
+persist across `throwDart()`/`enterTurn()`/undo calls while `.disabled`
+toggles correctly; Chuckin's cache confirmed to return the identical array
+reference across two same-version calls and to rebuild (with the correct
+new entry) after a version bump; the webhook-status endpoint returns
+correct per-event booleans and `sendHaWebhook()`/`fireMomentCard()` correctly
+skip the network call when unconfigured. Backend test suite unaffected
+(1244 tests, 1238 pass, 6 pre-existing unrelated `dart-heatmap` failures).
 
 ## Item 58 — Declarative settings field table — ✅ Done
 
