@@ -19,23 +19,50 @@
 
 ---
 
-## Item 35 — Consolidate the 16 `undoLastTurn*` trailers
+## Item 35 — Consolidate the 16 `undoLastTurn*` trailers — ✅ Done
 
-Every per-game-type `undoLastTurn*()` in `frontend/index.html` ends with the
-same ~14-line trailer: mark `snap.voided`, revoke `snap.badgeReverts`, call
-`cancelQueuedAchievementsForSnapshot(snap)`, reset `game.darts`/`busted`/
-`won`, `DB.deleteLastTurn()`, set a status message, re-render, `pushLive()`.
-Sixteen copies exist (≈ index.html 10471, 11037, 11263, 11356, 11458, 11768,
-11925, 13419, 13622, 13857, 14203, 14886, 15176, 15477, 15618) and they have
-**already drifted**: some copies skip `pushLive()` (Gauntlet, Chuckin,
-Checkout Trainer, ATC/ATW — partly deliberate, partly incidental) and some
-skip the `game.current` restore.
+All 16 `undoLastTurn*()` functions in `frontend/index.html` now end with a
+call to one shared `_finishUndo(snap, renderFn, {msg, restoreCurrent,
+resetDarts, push})`, which holds the trailer every copy pasted: mark
+`snap.voided`, revoke `snap.badgeReverts`, call
+`cancelQueuedAchievementsForSnapshot(snap)`, drop `game.lastTurnSnapshot`,
+`DB.deleteLastTurn()`, set the status message, and re-render. Each mode's
+function keeps only its own field restores and passes the narrow, now-explicit
+set of options it genuinely differs on:
 
-**Shape:** one `_finishUndo(snap, renderFn, {msg, restoreCurrent, push})`
-helper; each mode's function keeps only its game-specific field restores.
-The deliberate per-mode differences become explicit options instead of
-silent omissions. A fix to the undo protocol (a second badge-revert kind, a
-webhook cancel) then lands once instead of 16 times.
+- `restoreCurrent`/`resetDarts` — `true` for the 6 multi-visit turn-order
+  modes (X01, Cricket, Baseball, Shanghai, Halve-It, Pressure Chamber), which
+  restore whose turn it is and the shared darts/busted/won scratch state;
+  `resetDarts`-only for the 5 single-player visit-based modes (Bob's 27,
+  Checkout Ladder, Gauntlet, Dead Man Walking, Checkout Trainer); both `false`
+  for the 5 single-dart-at-a-time modes (Killer, Doubles Practice, Chuckin,
+  Around the Clock, Around the World), which don't have a `game.darts` buffer
+  concept to reset.
+- `push` — opt-in, since `renderGame()` (X01's own renderer) already calls
+  `pushLive()` itself; Bob's 27's renderer doesn't, so it's the one mode that
+  asks for it explicitly (previously the only one to call `pushLive()` at all
+  — the others' omission was incidental, not deliberate, until this pass made
+  every mode's choice explicit).
+- `msg` — the 3 distinct status strings this drifted into: `'Last turn
+  undone.'` (turn-based multi-visit modes), `'Last attempt undone.'`
+  (Gauntlet, Checkout Trainer), `'Last dart undone.'` (the single-dart modes,
+  including Killer).
+
+Doubles Practice's snapshot has no `badgeReverts` field at all (its one
+badge, Ring Master, is deliberately permanent/non-revocable) — folded into
+the same helper anyway since the badge-revert loop and `voided` flag are
+verified no-ops on that shape, so a future snapshot-based Doubles Practice
+badge gets undo protection for free instead of needing this function
+special-cased again.
+
+Verified live in a browser: played a real X01 game end-to-end (threw a 180,
+committed the turn, undid it) and confirmed the score/turn ownership
+restored exactly (`501 → 441 → 501`, turn correctly reverting to the
+original player) with the right status message; directly exercised Killer's
+undo (custom thrower/affected-player field restore, `'Last dart undone.'`)
+and Doubles Practice's now-shared trailer (no-op badge path doesn't throw).
+Backend suite unaffected (1244 tests, same 6 pre-existing unrelated
+failures).
 
 ## Item 36 — One `winSectionHtml()` for the five "Most X Wins" Home templates
 

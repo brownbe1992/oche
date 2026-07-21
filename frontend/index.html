@@ -10380,6 +10380,33 @@ function askEndGame(){
   });
 }
 
+// Shared trailer for every `undoLastTurn*`: void the snapshot, revoke any
+// badges it awarded, cancel a still-queued achievement card for it, drop the
+// snapshot, delete the turn server-side, set the status line, and re-render.
+// `restoreCurrent`/`resetDarts` cover the 6 multi-visit turn-order modes
+// (X01/Cricket/Baseball/Shanghai/Halve-It/Pressure Chamber) restoring whose
+// turn it is and the shared darts/busted/won scratch state — every other
+// mode is single-player or per-dart and leaves both false. `push` is opt-in
+// since renderGame() already calls pushLive() itself (Bob's 27's own
+// renderer doesn't, so it's the one mode that asks for it explicitly).
+function _finishUndo(snap, renderFn, opts){
+  const { msg = 'Last turn undone.', restoreCurrent = false, resetDarts = false, push = false } = opts || {};
+  if(restoreCurrent) game.current = snap.pi;
+  if(resetDarts){ game.darts = []; game.busted = false; game.won = false; }
+  // voided=true first, so any award call still in flight when this runs revokes
+  // itself on arrival instead of registering into a revert list nobody reads again.
+  snap.voided = true;
+  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+  });
+  cancelQueuedAchievementsForSnapshot(snap);
+  game.lastTurnSnapshot = null;   // one level of undo only
+  DB.deleteLastTurn();
+  const status=document.getElementById('status');
+  if(status){ status.className='status'; status.textContent=msg; }
+  renderFn();
+  if(push) pushLive();
+}
 function undoLastTurn(){
   if(game && game.gameType === 'cricket') return undoLastTurnCricket();
   if(game && game.gameType === 'baseball') return undoLastTurnBaseball();
@@ -10437,31 +10464,9 @@ function undoLastTurn(){
     Object.assign(stats[snap.ls.name][snap.ls.mk], snap.ls.m);
   }
 
-  // Revoke any badges this turn awarded/incremented — otherwise a badge earned by
-  // a turn that's since been undone stays sitting in the Badge Case regardless.
-  // voided=true first, so any award call still in flight when this runs revokes
-  // itself on arrival instead of registering into a revert list nobody reads again.
-  snap.voided = true;
-  snap.badgeReverts.forEach(({player, badgeId})=>{
-    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
-  });
-  cancelQueuedAchievementsForSnapshot(snap);
-
-  // Move back to the player who threw
-  game.current = snap.pi;
-  game.darts = []; game.busted = false; game.won = false;
-  game.lastTurnSnapshot = null;  // one level of undo only
-
-  // Remove the last turn record from the database (queued after the turn's POST so
-  // it can never overtake it)
-  DB.deleteLastTurn();
-
-  const status=document.getElementById('status');
-  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
   // renderGame() itself ends with renderSlots()/renderPad()/updateCheckout()/
-  // pushLive() — calling them again here did the full rebuild and the live POST
-  // twice per undo press.
-  renderGame();
+  // pushLive() — asking _finishUndo to push too would double the live POST.
+  _finishUndo(snap, renderGame, { restoreCurrent: true, resetDarts: true });
 }
 
 function undoDart(){
@@ -11005,20 +11010,7 @@ function undoLastTurnCricket(){
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
 
-  // Revoke any badges this turn awarded — same convention as X01's undoLastTurn().
-  snap.voided = true;
-  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
-    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
-  });
-  cancelQueuedAchievementsForSnapshot(snap);
-
-  game.current = snap.pi;
-  game.darts = []; game.busted=false; game.won=false;
-  game.lastTurnSnapshot = null;
-  DB.deleteLastTurn();
-  const status=document.getElementById('status');
-  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
-  renderGameCricket();
+  _finishUndo(snap, renderGameCricket, { restoreCurrent: true, resetDarts: true });
 }
 /* ----- Cricket leg / set / game progression (dispatched from onLegWon path) -----
    9 Marks/Perfect Leg (per-visit achievements) are detected in enterTurnCricket()
@@ -11254,19 +11246,7 @@ function undoLastTurnBaseball(){
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
 
-  snap.voided = true;
-  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
-    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
-  });
-  cancelQueuedAchievementsForSnapshot(snap);
-
-  game.current = snap.pi;
-  game.darts = []; game.busted=false; game.won=false;
-  game.lastTurnSnapshot = null;
-  DB.deleteLastTurn();
-  const status=document.getElementById('status');
-  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
-  renderGameBaseball();
+  _finishUndo(snap, renderGameBaseball, { restoreCurrent: true, resetDarts: true });
 }
 
 /* ----- Shanghai turn commit (dispatched from enterTurn()) -----
@@ -11345,19 +11325,7 @@ function undoLastTurnShanghai(){
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
 
-  snap.voided = true;
-  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
-    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
-  });
-  cancelQueuedAchievementsForSnapshot(snap);
-
-  game.current = snap.pi;
-  game.darts = []; game.busted=false; game.won=false;
-  game.lastTurnSnapshot = null;
-  DB.deleteLastTurn();
-  const status=document.getElementById('status');
-  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
-  renderGameShanghai();
+  _finishUndo(snap, renderGameShanghai, { restoreCurrent: true, resetDarts: true });
 }
 
 // Halve-It's own target label (docs/archive/halve-it-roadmap.md) — a plain
@@ -11445,19 +11413,7 @@ function undoLastTurnHalveIt(){
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
 
-  snap.voided = true;
-  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
-    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
-  });
-  cancelQueuedAchievementsForSnapshot(snap);
-
-  game.current = snap.pi;
-  game.darts = []; game.busted=false; game.won=false;
-  game.lastTurnSnapshot = null;
-  DB.deleteLastTurn();
-  const status=document.getElementById('status');
-  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
-  renderGameHalveIt();
+  _finishUndo(snap, renderGameHalveIt, { restoreCurrent: true, resetDarts: true });
 }
 
 /* ----- Baseball leg / set / game progression (dispatched from enterTurnBaseball) -----
@@ -11664,19 +11620,7 @@ function undoLastTurnPressureChamber(){
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
 
-  snap.voided = true;
-  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
-    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
-  });
-  cancelQueuedAchievementsForSnapshot(snap);
-
-  game.current = snap.pi;
-  game.darts = []; game.busted=false; game.won=false;
-  game.lastTurnSnapshot = null;
-  DB.deleteLastTurn();
-  const status=document.getElementById('status');
-  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
-  renderGamePressureChamber();
+  _finishUndo(snap, renderGamePressureChamber, { restoreCurrent: true, resetDarts: true });
 }
 
 /* ----- The Pressure Chamber leg / set / game progression (dispatched from
@@ -11791,19 +11735,7 @@ function undoLastTurnBobs27(){
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
 
-  snap.voided = true;
-  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
-    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
-  });
-  cancelQueuedAchievementsForSnapshot(snap);
-
-  game.darts = []; game.busted=false; game.won=false;
-  game.lastTurnSnapshot = null;
-  DB.deleteLastTurn();
-  const status=document.getElementById('status');
-  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
-  renderGameBobs27();
-  pushLive();
+  _finishUndo(snap, renderGameBobs27, { resetDarts: true, push: true });
 }
 /* ----- Bob's 27 leg / set / game progression (dispatched from enterTurnBobs27) -----
    Always exactly one player (wi is always 0) and always completes after its
@@ -13281,18 +13213,7 @@ function undoLastTurnCheckoutLadder(){
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
 
-  snap.voided = true;
-  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
-    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
-  });
-  cancelQueuedAchievementsForSnapshot(snap);
-
-  game.darts = []; game.busted=false; game.won=false;
-  game.lastTurnSnapshot = null;
-  DB.deleteLastTurn();
-  const status=document.getElementById('status');
-  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
-  renderGameCheckoutLadder();
+  _finishUndo(snap, renderGameCheckoutLadder, { resetDarts: true });
 }
 // Resolves the current attempt (win, or 3 visits used without one) — climbs the
 // target one rung on a win, drops it one rung (floored at 61, docs/practice-
@@ -13483,18 +13404,7 @@ function undoLastTurnGauntlet(){
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
 
-  snap.voided = true;
-  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
-    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
-  });
-  cancelQueuedAchievementsForSnapshot(snap);
-
-  game.darts = []; game.busted=false; game.won=false;
-  game.lastTurnSnapshot = null;
-  DB.deleteLastTurn();
-  const status=document.getElementById('status');
-  if(status){ status.className='status'; status.textContent='Last attempt undone.'; }
-  renderGameGauntlet();
+  _finishUndo(snap, renderGameGauntlet, { resetDarts: true, msg: 'Last attempt undone.' });
 }
 // Ends the run (all 20 stations settled) — the one point in this game type's
 // whole lifecycle that reaches finishUnit('game', ...), same "a run IS the
@@ -13717,18 +13627,7 @@ function undoLastTurnDeadManWalking(){
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
 
-  snap.voided = true;
-  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
-    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
-  });
-  cancelQueuedAchievementsForSnapshot(snap);
-
-  game.darts = []; game.busted=false; game.won=false;
-  game.lastTurnSnapshot = null;
-  DB.deleteLastTurn();
-  const status=document.getElementById('status');
-  if(status){ status.className='status'; status.textContent='Last turn undone.'; }
-  renderGameDeadManWalking();
+  _finishUndo(snap, renderGameDeadManWalking, { resetDarts: true });
 }
 // Resolves the round just settled (Walked Out, or Executed by bust/out-of-
 // darts) — tallies it, advances game.legNo, and either seeds the NEXT
@@ -14050,17 +13949,7 @@ function undoLastTurnKiller(){
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
 
-  snap.voided = true;
-  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
-    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
-  });
-  cancelQueuedAchievementsForSnapshot(snap);
-
-  game.lastTurnSnapshot = null;
-  DB.deleteLastTurn();
-  const status=document.getElementById('status');
-  if(status){ status.className='status'; status.textContent='Last dart undone.'; }
-  renderGameKiller();
+  _finishUndo(snap, renderGameKiller, { msg: 'Last dart undone.' });
 }
 /* ----- Killer leg / set / match progression (dispatched from throwDartKiller()) ----- */
 function onKillerLegWon(w){
@@ -14506,10 +14395,13 @@ function throwDartDoublesPractice(sector, zone, missZone, missDepth, bounced){
 }
 // Undoes the single most recently thrown dart (this mode's "turn" is always exactly
 // one dart) — mirrors undoLastTurn()/undoLastTurnCricket()'s snapshot-restore shape.
-// No badge reverts needed: Doubles Practice has no achievements (docs/game-modes-
-// roadmap.md, deliberately deferred). Only available until the next round starts
-// (startNextRoundDoublesPractice() clears the snapshot), same "one level of undo,
-// gone once you move on" rule X01/Cricket already follow.
+// This mode's own snapshot has no badgeReverts field at all (Doubles Practice's one
+// badge, Ring Master, is deliberately permanent/non-revocable — see its own award
+// site's comment), so _finishUndo()'s badge-revert loop and voided flag are no-ops
+// here — kept anyway so a future snapshot-based Doubles Practice badge gets undo
+// protection for free instead of needing this function special-cased again. Only
+// available until the next round starts (startNextRoundDoublesPractice() clears the
+// snapshot), same "one level of undo, gone once you move on" rule X01/Cricket follow.
 function undoLastTurnDoublesPractice(){
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
@@ -14520,11 +14412,8 @@ function undoLastTurnDoublesPractice(){
   game.roundEndReason = snap.roundEndReason;
   game.dpLastDart = snap.dpLastDart;
   p.sessionRounds.length = snap.sessionRoundsLen;
-  game.lastTurnSnapshot = null;
-  DB.deleteLastTurn();
-  const status=document.getElementById('status');
-  if(status){ status.className='status'; status.textContent='Last dart undone.'; }
-  renderGameDoublesPractice();
+
+  _finishUndo(snap, renderGameDoublesPractice, { msg: 'Last dart undone.' });
 }
 function startNextRoundDoublesPractice(){
   const p = game.players[0];
@@ -14713,17 +14602,7 @@ function undoLastTurnChuckin(){
   p.heatmap = snap.heatmap;
   game.chuckinLastDart = snap.chuckinLastDart;
 
-  snap.voided = true;
-  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
-    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
-  });
-  cancelQueuedAchievementsForSnapshot(snap);
-
-  game.lastTurnSnapshot = null;
-  DB.deleteLastTurn();
-  const status=document.getElementById('status');
-  if(status){ status.className='status'; status.textContent='Last dart undone.'; }
-  renderGameChuckin();
+  _finishUndo(snap, renderGameChuckin, { msg: 'Last dart undone.' });
 }
 function renderGameChuckin(){
   const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
@@ -14990,20 +14869,9 @@ function undoLastTurnCheckoutTrainer(){
   p.currentStreak = snap.currentStreak;
   p.sessionRounds.length = snap.sessionRoundsLen;
   game.legNo = snap.legNo;
-  game.darts = []; game.busted = false; game.won = false;
   game.lastResult = null;
 
-  snap.voided = true;
-  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
-    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
-  });
-  cancelQueuedAchievementsForSnapshot(snap);
-
-  game.lastTurnSnapshot = null;
-  DB.deleteLastTurn();
-  const status=document.getElementById('status');
-  if(status){ status.className='status'; status.textContent='Last attempt undone.'; }
-  renderGameCheckoutTrainer();
+  _finishUndo(snap, renderGameCheckoutTrainer, { resetDarts: true, msg: 'Last attempt undone.' });
 }
 function renderGameCheckoutTrainer(){
   const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
@@ -15279,17 +15147,7 @@ function undoLastTurnAroundTheClock(){
   game.atcLastDart = snap.atcLastDart;
   p.sessionRounds.length = snap.sessionRoundsLen;
 
-  snap.voided = true;
-  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
-    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
-  });
-  cancelQueuedAchievementsForSnapshot(snap);
-
-  game.lastTurnSnapshot = null;
-  DB.deleteLastTurn();
-  const status=document.getElementById('status');
-  if(status){ status.className='status'; status.textContent='Last dart undone.'; }
-  renderGameAroundTheClock();
+  _finishUndo(snap, renderGameAroundTheClock, { msg: 'Last dart undone.' });
 }
 function startNextClockRound(){
   const p = game.players[0];
@@ -15418,17 +15276,7 @@ function undoLastTurnAroundTheWorld(){
   p.sessionHitSet = snap.sessionHitSet;
   game.atwLastDart = snap.atwLastDart;
 
-  snap.voided = true;
-  (snap.badgeReverts || []).forEach(({player, badgeId})=>{
-    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
-  });
-  cancelQueuedAchievementsForSnapshot(snap);
-
-  game.lastTurnSnapshot = null;
-  DB.deleteLastTurn();
-  const status=document.getElementById('status');
-  if(status){ status.className='status'; status.textContent='Last dart undone.'; }
-  renderGameAroundTheWorld();
+  _finishUndo(snap, renderGameAroundTheWorld, { msg: 'Last dart undone.' });
 }
 function renderGameAroundTheWorld(){
   const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
