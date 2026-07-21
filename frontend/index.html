@@ -15544,7 +15544,7 @@ function loadDartHeatmap(){
   // zone-unspecified.
   const noZoneTracking = (gt === 'cricket' || gt === 'baseball' || gt === 'shanghai' || gt === 'pressure_chamber');
   Backend.get(`/api/players/dart-heatmap?name=${encodeURIComponent(currentPlayer)}&gameType=${gt}${modeParam}`)
-    .then(cells => { body.innerHTML = buildDartHeatmap(cells||[], { ariaLabel: `Dartboard heatmap of every ${label} dart thrown`, noZoneTracking }); })
+    .then(cells => { body.innerHTML = buildDartHeatmap(cells||[], { ariaLabel: `Dartboard heatmap of every ${label} dart thrown`, noZoneTracking }); wireDartHeatmapInteractivity(body); })
     .catch(()=>{ body.innerHTML = `<p class="pp-meta" style="padding:4px 0">Could not load the heatmap.</p>`; });
   const bounceEl = document.getElementById('bounce-out-count');
   if(bounceEl){
@@ -15610,6 +15610,13 @@ function buildDartHeatmap(cells, opts){
   const singleOuterZone = noZoneTracking ? '' : 'outer';
   const missHits = (wedge, depth) => missMap[wedge+'_'+depth] || 0;
   const missHeat = (wedge, depth) => maxMissHeat>0 ? missHits(wedge,depth)/maxMissHeat : 0;
+  // Total scoring hits (misses excluded — a wildly different population size,
+  // see missHeat's own scale above) — the denominator for each region's tap
+  // tooltip share (item: interactive stats charts), so a region reads e.g.
+  // "14 hits — 9% of 154" instead of just a raw count with no sense of scale.
+  const totalHits = Object.values(hitMap).reduce((a,b)=>a+b,0);
+  const pct = h => totalHits>0 ? Math.round((h/totalHits)*100) : 0;
+  const tip = (label, h, noun) => `${label} — ${h.toLocaleString()} ${noun}${h===1?'':'s'}${totalHits>0?` (${pct(h)}% of ${totalHits.toLocaleString()})`:''}`;
 
   // Geometry comes from the shared BOARD_GEOM kernel (one authority with the
   // input board — see its comment).
@@ -15623,6 +15630,11 @@ function buildDartHeatmap(cells, opts){
     const b = Math.round(26 + t*(106-26));
     return `rgb(${r},${g},${b})`;
   };
+  // data-tip (item: interactive stats charts) drives a custom chalk-styled
+  // tooltip wired up by wireDartHeatmapInteractivity() below, richer than the
+  // native <title> tooltip (still present as a same-content accessible/no-JS
+  // fallback — browsers just show it after a long hover delay) — instant on
+  // hover, and reachable by tap on touch screens where <title> never fires.
   let s = `<svg viewBox="0 0 660 660" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:360px;height:auto;display:block;margin:0 auto" role="img" aria-label="${ariaLabel}">
     <circle cx="${CX}" cy="${CY}" r="${R.bg}" fill="#0d0e0b"/>
     <circle cx="${CX}" cy="${CY}" r="${R.doubleOut+1}" fill="#111210"/>
@@ -15632,24 +15644,60 @@ function buildDartHeatmap(cells, opts){
     const sw = 'stroke="#151613" stroke-width="0.5"';
     const innerLabel = noZoneTracking ? `${num}` : `${num} (inner)`;
     const outerLabel = noZoneTracking ? `${num}` : `${num} (outer)`;
-    s += `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${heatFill(heat(num,1,singleInnerZone))}" ${sw}><title>${innerLabel}: ${hits(num,1,singleInnerZone)} hit${hits(num,1,singleInnerZone)===1?'':'s'}</title></path>`;
-    s += `<path d="${annulus(R.trebleIn,R.trebleOut,s0,e0)}" fill="${heatFill(heat(num,3))}" ${sw}><title>T${num}: ${hits(num,3)} treble hit${hits(num,3)===1?'':'s'}</title></path>`;
-    s += `<path d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${heatFill(heat(num,1,singleOuterZone))}" ${sw}><title>${outerLabel}: ${hits(num,1,singleOuterZone)} hit${hits(num,1,singleOuterZone)===1?'':'s'}</title></path>`;
-    s += `<path d="${annulus(R.doubleIn,R.doubleOut,s0,e0)}" fill="${heatFill(heat(num,2))}" ${sw}><title>D${num}: ${hits(num,2)} double hit${hits(num,2)===1?'':'s'}</title></path>`;
+    s += `<path class="hm-region" data-tip="${escapeHtml(tip(innerLabel,hits(num,1,singleInnerZone),'hit'))}" d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${heatFill(heat(num,1,singleInnerZone))}" ${sw}><title>${innerLabel}: ${hits(num,1,singleInnerZone)} hit${hits(num,1,singleInnerZone)===1?'':'s'}</title></path>`;
+    s += `<path class="hm-region" data-tip="${escapeHtml(tip('T'+num,hits(num,3),'treble hit'))}" d="${annulus(R.trebleIn,R.trebleOut,s0,e0)}" fill="${heatFill(heat(num,3))}" ${sw}><title>T${num}: ${hits(num,3)} treble hit${hits(num,3)===1?'':'s'}</title></path>`;
+    s += `<path class="hm-region" data-tip="${escapeHtml(tip(outerLabel,hits(num,1,singleOuterZone),'hit'))}" d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${heatFill(heat(num,1,singleOuterZone))}" ${sw}><title>${outerLabel}: ${hits(num,1,singleOuterZone)} hit${hits(num,1,singleOuterZone)===1?'':'s'}</title></path>`;
+    s += `<path class="hm-region" data-tip="${escapeHtml(tip('D'+num,hits(num,2),'double hit'))}" d="${annulus(R.doubleIn,R.doubleOut,s0,e0)}" fill="${heatFill(heat(num,2))}" ${sw}><title>D${num}: ${hits(num,2)} double hit${hits(num,2)===1?'':'s'}</title></path>`;
     const [nx,ny]=xy(R.numAt,s0+DEG/2);
     s += `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="17" fill="#efe7d2" style="pointer-events:none;user-select:none">${num}</text>`;
     // Miss ring (docs/archive/dartboard-zone-tracking-roadmap.md "Miss-area tracking") — same
     // 20 wedges extended past the board, shaded by how many misses landed in that
     // direction/depth, on their own independent heat scale (a wildly different
-    // population size than scoring hits).
-    s += `<path d="${annulus(R.bg,R.missNear,s0,e0)}" fill="${heatFill(missHeat(num,'near'))}" ${sw}><title>Miss (near), wedge ${num}: ${missHits(num,'near')} miss${missHits(num,'near')===1?'':'es'}</title></path>`;
-    s += `<path d="${annulus(R.missNear,R.missFar,s0,e0)}" fill="${heatFill(missHeat(num,'far'))}" ${sw}><title>Miss (far), wedge ${num}: ${missHits(num,'far')} miss${missHits(num,'far')===1?'':'es'}</title></path>`;
+    // population size than scoring hits — its own tooltip denominator, not totalHits).
+    const totalMiss = maxMissHeat>0 ? Object.values(missMap).reduce((a,b)=>a+b,0) : 0;
+    const missTip = (label, h) => `${label} — ${h.toLocaleString()} miss${h===1?'':'es'}${totalMiss>0?` (${Math.round((h/totalMiss)*100)}% of ${totalMiss.toLocaleString()} misses)`:''}`;
+    s += `<path class="hm-region" data-tip="${escapeHtml(missTip('Miss (near), wedge '+num,missHits(num,'near')))}" d="${annulus(R.bg,R.missNear,s0,e0)}" fill="${heatFill(missHeat(num,'near'))}" ${sw}><title>Miss (near), wedge ${num}: ${missHits(num,'near')} miss${missHits(num,'near')===1?'':'es'}</title></path>`;
+    s += `<path class="hm-region" data-tip="${escapeHtml(missTip('Miss (far), wedge '+num,missHits(num,'far')))}" d="${annulus(R.missNear,R.missFar,s0,e0)}" fill="${heatFill(missHeat(num,'far'))}" ${sw}><title>Miss (far), wedge ${num}: ${missHits(num,'far')} miss${missHits(num,'far')===1?'':'es'}</title></path>`;
   });
-  s += `<circle cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="${heatFill(heat(25,1))}" stroke="#151613" stroke-width="0.5"><title>Bull: ${hits(25,1)} hit${hits(25,1)===1?'':'s'}</title></circle>`;
-  s += `<circle cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="${heatFill(heat(25,2))}" stroke="#151613" stroke-width="0.5"><title>Double Bull: ${hits(25,2)} hit${hits(25,2)===1?'':'s'}</title></circle>`;
+  s += `<circle class="hm-region" data-tip="${escapeHtml(tip('Bull',hits(25,1),'hit'))}" cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="${heatFill(heat(25,1))}" stroke="#151613" stroke-width="0.5"><title>Bull: ${hits(25,1)} hit${hits(25,1)===1?'':'s'}</title></circle>`;
+  s += `<circle class="hm-region" data-tip="${escapeHtml(tip('Double Bull',hits(25,2),'hit'))}" cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="${heatFill(heat(25,2))}" stroke="#151613" stroke-width="0.5"><title>Double Bull: ${hits(25,2)} hit${hits(25,2)===1?'':'s'}</title></circle>`;
   s += `<text x="${CX}" y="${CY}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="12" fill="#efe7d2" style="pointer-events:none;user-select:none">Bull</text>`;
   s += `</svg>`;
   return s;
+}
+// Custom hover/tap tooltip for buildDartHeatmap()'s regions (item: interactive
+// stats charts) — call once after inserting the returned SVG into the DOM.
+// Delegated listeners on `container` (not one listener per region) since the
+// heatmap can be rebuilt/replaced wholesale on every game-type/tab switch.
+function wireDartHeatmapInteractivity(container){
+  if(!container || container.dataset.hmWired) return;
+  container.dataset.hmWired = '1';
+  let tip = container.querySelector('.hm-tooltip');
+  if(!tip){
+    tip = document.createElement('div');
+    tip.className = 'hm-tooltip chalk';
+    tip.style.cssText = 'position:fixed;pointer-events:none;z-index:40;background:var(--surface-2);'+
+      'border:1px solid var(--gold);border-radius:8px;padding:5px 11px;font-size:13px;color:var(--ink);'+
+      'white-space:nowrap;opacity:0;transition:opacity .1s ease;transform:translate(-50%,-130%)';
+    document.body.appendChild(tip);
+  }
+  const show = (el, x, y) => {
+    const t = el.getAttribute('data-tip');
+    if(!t) return;
+    tip.textContent = t;
+    tip.style.left = x+'px'; tip.style.top = y+'px';
+    tip.style.opacity = '1';
+  };
+  const hide = () => { tip.style.opacity = '0'; };
+  container.addEventListener('pointermove', e => {
+    const el = e.target.closest && e.target.closest('.hm-region');
+    if(el) show(el, e.clientX, e.clientY); else hide();
+  });
+  container.addEventListener('pointerdown', e => {
+    const el = e.target.closest && e.target.closest('.hm-region');
+    if(el) show(el, e.clientX, e.clientY);
+  });
+  container.addEventListener('pointerleave', hide);
 }
 
 /* ---------- dart analytics ---------- */
