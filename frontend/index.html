@@ -4896,6 +4896,82 @@ function restoreSetup(){
   }catch(e){}
 }
 
+// Game-start construction factory (item 53, docs/code-quality-roadmap.md) —
+// startGame(), _reallyBeginTournamentMatch(), resumeGame(), and
+// beginMarathonLeg() each hand-wrote the same ~20-key runtime-state trailer,
+// the same earnedBadgeCache prefetch loop, and (three of the four) the same
+// recordEvent game/set/leg-start triple + render/show tail. Drift had already
+// crept in — the tournament and marathon literals were both missing
+// atcLastDart/atwLastDart — which spreading this in once makes structurally
+// impossible going forward.
+function baseGameRuntimeState(){
+  return {
+    darts: [],
+    busted: false, won: false,
+    done: false,
+    gameOneEighties: 0,
+    gameBigFish: 0,
+    gameBusts: 0,
+    currentLegTurns: [],   // turns in the current leg (reset per leg)
+    legVisitLogs: [],      // raw dart arrays per visit this leg (reset per leg; Daily Challenge dart-count formats)
+    sessionTurns: [],      // turns in the entire session (grows across legs)
+    lastTurnSnapshot: null,// state before last committed turn (for undo)
+    turnSeq: 0,            // monotonic counter, bumped each time a new turn begins (voice announcements dedup on this)
+    lastTurnEvent: null,   // one-shot: outcome of the turn just entered (voice announcements)
+    matchResult: null,     // one-shot: leg/set/game just won (voice announcements)
+    legStart: null,        // one-shot: a new leg just began, who's throwing first (voice announcements)
+    hasGhost: false,       // true for a Ghost Opponent race (docs/archive/ghost-opponent-roadmap.md)
+    // Doubles Practice / guided Around the Clock (docs/game-modes-roadmap.md):
+    // per-dart evaluation, not per-visit — a round runs until
+    // evaluateDartDoublesPractice()/evaluateDartAroundTheClock() ends it, never on
+    // a fixed dart count. roundOver/roundEndReason are shared by both.
+    roundOver: false, roundEndReason: null, dpLastDart: null, atcLastDart: null,
+    // Just Chuckin' It / guided Around the World (docs/game-modes-roadmap.md): no
+    // round-ending condition at all — the session just runs until "End game" is pressed.
+    chuckinLastDart: null, atwLastDart: null,
+  };
+}
+// Resets and warms earnedBadgeCache for every player about to play — the
+// identical reset-and-refetch loop all four construction sites hand-rolled
+// separately (Marathon's own call site passes a 1-element array, since it's
+// always solo, reproducing its old single-call shape exactly).
+function prefetchEarnedBadges(names){
+  earnedBadgeCache = {};
+  names.forEach(n=>{
+    Backend.get(`/api/players/badges?name=${encodeURIComponent(n)}`)
+      .then(list=>{ earnedBadgeCache[n] = new Set((list||[]).map(b=>b.badge_id)); })
+      .catch(()=>{ earnedBadgeCache[n] = new Set(); });
+  });
+}
+// The recordEvent game/set/leg-start triple + render/show tail shared by
+// three of the four construction sites (resumeGame() isn't a "start" event,
+// so it never calls this). `webhooks` picks between the three genuinely
+// different HA webhook policies these sites use — not drift, each is
+// deliberate: startGame() gates the gamestart/setstart pair on whether this
+// is a real H2H match (a solo practice game never fires them) but always
+// fires legstart; tournament matches are always H2H, so all three fire
+// unconditionally; Marathon legs never fire any HA webhook at all.
+function beginGameSession(webhooks){
+  DB.recordEvent('game_start', null, null);
+  DB.recordEvent('set_start', 1, null);
+  DB.recordEvent('leg_start', 1, 1);
+  if(webhooks === 'h2h-gated'){
+    const isH2H = !game.practice && game.players.length > 1;
+    if(isH2H) sendHaWebhook('gamestart', '', game.category, { players: game.players.map(p=>p.name) });
+    if(isH2H) sendHaWebhook('setstart',  '', game.category, { setNo: 1 });
+    sendHaWebhook('legstart', '', game.category, { setNo: 1, legNo: 1 });
+  } else if(webhooks === 'always'){
+    sendHaWebhook('gamestart', '', game.category, { players: game.players.map(p=>p.name) });
+    sendHaWebhook('setstart',  '', game.category, { setNo: 1 });
+    sendHaWebhook('legstart',  '', game.category, { setNo: 1, legNo: 1 });
+  }
+  mult = 1;
+  game.legStart = { ts: Date.now(), starter: game.players[game.starter].name };
+  renderGameShell();        // ensure the throwing controls exist (e.g. after a finished game)
+  updateMultUI();
+  show('game'); renderGame();
+}
+
 async function startGame(){
   // When the server requires auth for writes, make sure we're logged in before
   // starting — otherwise every turn POST would 401 and the game wouldn't record.
@@ -5112,6 +5188,12 @@ async function startGame(){
   // game type — into games.category permanently.
   const category = GAME_TYPES[gameType].category(setup, config, startScore);
   game = {
+    // The runtime-state trailer common to every "begin playing" construction
+    // site (item 53, docs/code-quality-roadmap.md) — darts/busted/won/done,
+    // counters, turn logs, one-shot fields, all starting at the same values
+    // regardless of game type. Overridden below wherever this site needs
+    // something else (nothing does, here).
+    ...baseGameRuntimeState(),
     gameType,
     config,
     start: startScore,
@@ -5176,29 +5258,6 @@ async function startGame(){
     killerLives: gameType === 'killer' ? (config.lives || KILLER_DEFAULT_LIVES) : null,
     killerDartsThisVisit: 0,
     killerFirstBloodAwarded: false,
-    darts: [],
-    busted: false, won: false,
-    done: false,
-    gameOneEighties: 0,
-    gameBigFish: 0,
-    gameBusts: 0,
-    currentLegTurns: [],   // turns in the current leg (reset per leg)
-    legVisitLogs: [],      // raw dart arrays per visit this leg (reset per leg; Daily Challenge dart-count formats)
-    sessionTurns: [],      // turns in the entire session (grows across legs)
-    lastTurnSnapshot: null,// state before last committed turn (for undo)
-    turnSeq: 0,            // monotonic counter, bumped each time a new turn begins (voice announcements dedup on this)
-    lastTurnEvent: null,   // one-shot: outcome of the turn just entered (voice announcements)
-    matchResult: null,     // one-shot: leg/set/game just won (voice announcements)
-    legStart: null,        // one-shot: a new leg just began, who's throwing first (voice announcements)
-    hasGhost: false,       // true for a Ghost Opponent race (docs/archive/ghost-opponent-roadmap.md)
-    // Doubles Practice / guided Around the Clock (docs/game-modes-roadmap.md):
-    // per-dart evaluation, not per-visit — a round runs until
-    // evaluateDartDoublesPractice()/evaluateDartAroundTheClock() ends it, never on
-    // a fixed dart count. roundOver/roundEndReason are shared by both.
-    roundOver: false, roundEndReason: null, dpLastDart: null, atcLastDart: null,
-    // Just Chuckin' It / guided Around the World (docs/game-modes-roadmap.md): no
-    // round-ending condition at all — the session just runs until "End game" is pressed.
-    chuckinLastDart: null, atwLastDart: null
   };
   if(setup.mode === 'ghost'){
     game.hasGhost = true;
@@ -5221,12 +5280,7 @@ async function startGame(){
   // not once per game. Resetting it per startGame() meant three games after midnight
   // gave three Night Owl overlays. (The persisted per-occurrence count is unaffected;
   // that still increments every qualifying turn via awardRecurringBadge.)
-  earnedBadgeCache = {};
-  names.forEach(n=>{
-    Backend.get(`/api/players/badges?name=${encodeURIComponent(n)}`)
-      .then(list=>{ earnedBadgeCache[n] = new Set((list||[]).map(b=>b.badge_id)); })
-      .catch(()=>{ earnedBadgeCache[n] = new Set(); });
-  });
+  prefetchEarnedBadges(names);
   await DB.beginGame(game, names, setup.loadoutByName);   // registers the game; gets a gameId in api mode
   // Dead Man Walking: game.config.rounds only exists AFTER beginGame() resolves
   // (DB.beginGame() just threaded it on from the server's response — see its
@@ -5259,18 +5313,7 @@ async function startGame(){
         uiAlert("Couldn't register this as today's Daily Challenge attempt (it may already have been attempted). This game will play as regular practice and won't count as the challenge.");
       });
   }
-  DB.recordEvent('game_start', null, null);
-  DB.recordEvent('set_start', 1, null);
-  DB.recordEvent('leg_start', 1, 1);
-  const _isH2H = !game.practice && game.players.length > 1;
-  if(_isH2H) sendHaWebhook('gamestart', '', game.category, { players: game.players.map(p=>p.name) });
-  if(_isH2H) sendHaWebhook('setstart',  '', game.category, { setNo: 1 });
-  sendHaWebhook('legstart', '', game.category, { setNo: 1, legNo: 1 });
-  mult = 1;
-  game.legStart = { ts: Date.now(), starter: game.players[game.starter].name };
-  renderGameShell();        // ensure the throwing controls exist (e.g. after a finished game)
-  updateMultUI();
-  show('game'); renderGame();
+  beginGameSession('h2h-gated');
   if(game.gameType === 'checkout_trainer' && game.config.mode === 'blitz') startCheckoutBlitzTimer();
 }
 
@@ -5772,6 +5815,7 @@ async function _reallyBeginTournamentMatch(matchId){
   const startScore = Number(t.category);
   const names = [match.player1Name, match.player2Name];
   game = {
+    ...baseGameRuntimeState(),
     gameType:'x01',
     config:{ startingScore: startScore },
     start: startScore,
@@ -5780,11 +5824,6 @@ async function _reallyBeginTournamentMatch(matchId){
     practice: 0,
     players: names.map(nm=>GAME_TYPES.x01.newMatchPlayer(nm, startScore)),
     starter: 0, current: 0, setNo: 1, legNo: 1,
-    darts: [], busted:false, won:false, done:false,
-    gameOneEighties:0, gameBigFish:0, gameBusts:0,
-    currentLegTurns:[], legVisitLogs:[], sessionTurns:[],
-    lastTurnSnapshot:null, turnSeq:0, lastTurnEvent:null, matchResult:null, legStart:null,
-    hasGhost:false, roundOver:false, roundEndReason:null, dpLastDart:null, chuckinLastDart:null,
     // Tournament linkage — tournamentMatchId drives the "back to bracket" post-game
     // button (finishUnit()) and the End-game guard (askEndGame()); tournamentRoundLabel
     // feeds the live snapshot's tournamentRoundLabel field (liveSnapshot()) for /display.
@@ -5794,23 +5833,8 @@ async function _reallyBeginTournamentMatch(matchId){
   };
   DB.gameId = result.gameId;
   names.forEach(ensurePlayerStats);
-  earnedBadgeCache = {};
-  names.forEach(nm=>{
-    Backend.get(`/api/players/badges?name=${encodeURIComponent(nm)}`)
-      .then(list=>{ earnedBadgeCache[nm] = new Set((list||[]).map(b=>b.badge_id)); })
-      .catch(()=>{ earnedBadgeCache[nm] = new Set(); });
-  });
-  DB.recordEvent('game_start', null, null);
-  DB.recordEvent('set_start', 1, null);
-  DB.recordEvent('leg_start', 1, 1);
-  sendHaWebhook('gamestart', '', game.category, { players: names });
-  sendHaWebhook('setstart',  '', game.category, { setNo: 1 });
-  sendHaWebhook('legstart',  '', game.category, { setNo: 1, legNo: 1 });
-  mult = 1;
-  game.legStart = { ts: Date.now(), starter: game.players[game.starter].name };
-  renderGameShell();
-  updateMultUI();
-  show('game'); renderGame();
+  prefetchEarnedBadges(names);
+  beginGameSession('always');
 }
 
 /* ---------- leagues (docs/archive/league-mode-roadmap.md, X01 or Cricket) ----------
@@ -10158,6 +10182,7 @@ async function resumeGame(gameId){
   }
 
   game = {
+    ...baseGameRuntimeState(),
     gameType, config, start: startScore, category: state.category,
     legsPerSet: state.legsPerSet, setsPerGame: state.setsPerGame,
     practice: !!state.practice,
@@ -10179,25 +10204,14 @@ async function resumeGame(gameId){
     // A resumed run always re-opens on the declare step for the current visit —
     // the call is transient per-visit state, never saved (see the setup default).
     pressureDeclared: null,
-    darts: [], busted:false, won:false, done:false,
-    gameOneEighties:0, gameBigFish:0, gameBusts:0,
-    currentLegTurns: [], legVisitLogs: [], sessionTurns: [],
     lastTurnSnapshot: null, // undo unavailable for the first turn after resume, same as the first turn of any game
-    turnSeq: 0, lastTurnEvent: null, matchResult: null,
     legStart: { ts: Date.now(), starter: players[starter] ? players[starter].name : players[0].name },
-    hasGhost: false,
-    roundOver, roundEndReason: roundOver ? 'completed' : null, dpLastDart: null, atcLastDart: null,
-    chuckinLastDart: null, atwLastDart: null,
+    roundOver, roundEndReason: roundOver ? 'completed' : null,
     tournamentMatchId: state.tournamentMatchId || null,
   };
   DB.gameId = state.gameId;
   names.forEach(ensurePlayerStats);
-  earnedBadgeCache = {};
-  names.forEach(n=>{
-    Backend.get(`/api/players/badges?name=${encodeURIComponent(n)}`)
-      .then(list=>{ earnedBadgeCache[n] = new Set((list||[]).map(b=>b.badge_id)); })
-      .catch(()=>{ earnedBadgeCache[n] = new Set(); });
-  });
+  prefetchEarnedBadges(names);
   mult = 1;
   renderGameShell();
   updateMultUI();
@@ -14261,15 +14275,11 @@ async function startMarathonMode(){
 function beginMarathonLeg(gameId, legOrder, player){
   const startScore = 501;
   game = {
+    ...baseGameRuntimeState(),
     gameType:'x01', config:{startingScore:startScore}, start:startScore, category:'501',
     legsPerSet:1, setsPerGame:1, practice:1,
     players:[GAME_TYPES.x01.newMatchPlayer(player, startScore)],
     starter:0, current:0, setNo:1, legNo:1,
-    darts:[], busted:false, won:false, done:false,
-    gameOneEighties:0, gameBigFish:0, gameBusts:0,
-    currentLegTurns:[], legVisitLogs:[], sessionTurns:[],
-    lastTurnSnapshot:null, turnSeq:0, lastTurnEvent:null, matchResult:null, legStart:null,
-    hasGhost:false, roundOver:false, roundEndReason:null, dpLastDart:null, chuckinLastDart:null,
     // Marathon linkage — checked by finishUnit() to divert to finishMarathonLeg()
     // instead of the normal GAME OVER flow.
     marathonSessionId: marathonSession.sessionId,
@@ -14277,18 +14287,8 @@ function beginMarathonLeg(gameId, legOrder, player){
   };
   DB.gameId = gameId;
   ensurePlayerStats(player);
-  earnedBadgeCache = {};
-  Backend.get(`/api/players/badges?name=${encodeURIComponent(player)}`)
-    .then(list=>{ earnedBadgeCache[player] = new Set((list||[]).map(b=>b.badge_id)); })
-    .catch(()=>{ earnedBadgeCache[player] = new Set(); });
-  DB.recordEvent('game_start', null, null);
-  DB.recordEvent('set_start', 1, null);
-  DB.recordEvent('leg_start', 1, 1);
-  mult = 1;
-  game.legStart = { ts: Date.now(), starter: player };
-  renderGameShell();
-  updateMultUI();
-  show('game'); renderGame();
+  prefetchEarnedBadges([player]);
+  beginGameSession('none');
   renderMarathonBanner();
   if(!marathonTimerInterval) marathonTimerInterval = setInterval(renderMarathonBanner, 15000);
   announce(`Leg ${legOrder} starting.`);

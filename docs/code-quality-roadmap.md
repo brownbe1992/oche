@@ -373,16 +373,31 @@ turn), the undo double-render, `uiAlertErr()` + 25 conversions, the shared
 checkout-trainer one-off durations + stale comments, and two dead remnants.
 The rest, tracked as items 53–59:
 
-## Item 53 — Game-start construction factory (4 drifted copies)
+## Item 53 — Game-start construction factory (4 drifted copies) — ✅ Done
 
-`startGame()`, `_reallyBeginTournamentMatch()`, `resumeSavedGame`'s literal,
-and `beginMarathonLeg()` each hand-write the same ~20-key runtime-state
-trailer (darts/busted/won/done, counters, turn logs, one-shot fields), the
-same 6-line `earnedBadgeCache` prefetch loop, and (three of them) the same
-`recordEvent` game/set/leg-start triple + render/show tail. Drift is visible:
-the tournament and marathon literals omit `atcLastDart`/`atwLastDart`.
-**Shape:** `baseGameRuntimeState()` factory spread into each literal +
-`prefetchEarnedBadges(names)` + a `beginGameSession()` tail helper.
+All four construction sites (`startGame()`, `_reallyBeginTournamentMatch()`,
+`beginMarathonLeg()`, `resumeGame()`) now spread a shared
+`baseGameRuntimeState()` factory for the ~20-key runtime-state trailer
+(darts/busted/won/done, counters, turn logs, one-shot fields including
+`atcLastDart`/`atwLastDart`/`dpLastDart`/`chuckinLastDart`), call a shared
+`prefetchEarnedBadges(names)` for the badge-cache prefetch loop, and (three of
+them — `resumeGame()` has no start-event to record) call a shared
+`beginGameSession(webhooks)` for the `recordEvent` game/set/leg-start triple +
+optional HA webhooks + render/show tail. `beginGameSession` takes a mode
+(`'h2h-gated'` / `'always'` / `'none'`) instead of inferring webhook behavior
+from game state, since the three call sites genuinely differ on whether/how
+webhooks fire.
+
+This closes the exact drift the item was written to catch: the tournament and
+marathon literals were missing `atcLastDart`/`atwLastDart` before this
+change, silently breaking the Around the Clock/World throwbox for any game
+started via those two paths. Verified live in a browser: started a solo X01
+game, an H2H X01 game, and a resumed game, and separately drove
+`_reallyBeginTournamentMatch()` and `beginMarathonLeg()` directly (via the
+real `/api/tournaments` and `/api/marathon/sessions` endpoints) — all five
+constructed `game` objects now have zero missing trailer keys, including
+`atcLastDart`/`atwLastDart` on the two previously-drifted sites. Backend
+suite unaffected (1244 tests, same 6 pre-existing unrelated failures).
 
 ## Item 54 — One leg/set/game progression helper (8 pasted cascades)
 
