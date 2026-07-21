@@ -1847,16 +1847,16 @@ function _savedGamePosition(game, participants, turns) {
     return { station: r.currentStation, settled: r.settledCount, totalScars: r.totalScars, awaitingRepeat: r.awaitingRepeat };
   }
   if (game.game_type === 'dead_man_walking') {
-    // Field names deliberately don't reuse `round`/`target` (Bob's 27/
-    // Checkout Ladder's own position shapes already claim those, and
-    // savedGamePositionLabel() (frontend/index.html) branches on field
-    // PRESENCE, not game type — a name collision would silently match the
-    // wrong branch).
+    // Field names are free to overlap with other types' (round/target/etc) now
+    // that savedGamePositionLabel() (frontend/index.html) dispatches on
+    // sg.gameType rather than field presence — see item 38,
+    // docs/code-quality-roadmap.md. Unrelated to the live-state game.dmw*
+    // keys (docs/live-state-keys, item 42), which are a separate object.
     const config = game.config ? JSON.parse(game.config) : null;
     const rounds = (config && config.rounds) || [];
     const r = rebuildDeadManWalkingState({ rounds, turns });
-    return { dmwRound: r.roundIndex + 1, dmwTotalRounds: rounds.length, dmwTarget: r.remaining,
-      dmwWalkedOutCount: r.walkedOutCount, dmwDartsUsedThisRound: r.dartsUsedThisRound, dmwBudget: r.budget };
+    return { round: r.roundIndex + 1, totalRounds: rounds.length, target: r.remaining,
+      walkedOutCount: r.walkedOutCount, dartsUsedThisRound: r.dartsUsedThisRound, budget: r.budget };
   }
   if (game.game_type === 'pressure_chamber') {
     const config = game.config ? JSON.parse(game.config) : null;

@@ -122,6 +122,32 @@ describe('getSavedGames — position summaries reuse the pure rebuild functions'
     assert.equal(aPos.score, 441);
     assert.equal(aPos.legsWon, 0);
   });
+
+  // Item 38 (docs/code-quality-roadmap.md): savedGamePositionLabel() (frontend/index.html)
+  // dispatches on sg.gameType, not field presence, so Dead Man Walking's position object no
+  // longer needs dmw-prefixed field names — this pins the plain names down.
+  test("a Dead Man Walking game's summary uses plain (non-dmw-prefixed) field names", () => {
+    const a = uniqueName('sg_dmw');
+    db.addPlayer(a);
+    const { gameId } = db.createGame({
+      category: 'Dead Man Walking', legsPerSet: 15, setsPerGame: 1, practice: 1,
+      gameType: 'dead_man_walking', players: [{ name: a }],
+    });
+    db.saveGame(gameId);
+    const row = db.getSavedGames().find(s => s.gameId === gameId);
+    assert.ok(row);
+    assert.equal(row.gameType, 'dead_man_walking');
+    const pos = row.position;
+    assert.equal(pos.round, 1);
+    assert.equal(pos.totalRounds, 15);
+    assert.equal(pos.walkedOutCount, 0);
+    assert.equal(pos.dartsUsedThisRound, 0);
+    assert.equal(typeof pos.target, 'number');
+    assert.equal(typeof pos.budget, 'number');
+    for (const legacyKey of ['dmwRound', 'dmwTotalRounds', 'dmwTarget', 'dmwWalkedOutCount', 'dmwDartsUsedThisRound', 'dmwBudget']) {
+      assert.ok(!(legacyKey in pos), `${legacyKey} should no longer appear on the position object`);
+    }
+  });
 });
 
 describe('getResumeState — the full replay payload, and the two-device divergence guard', () => {

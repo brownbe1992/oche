@@ -658,6 +658,72 @@ function isShanghaiVisit(darts){
   return isSingleDoubleTreble(darts, sector);
 }
 
+// The remaining ten CHAIN_CHECKS predicates (docs/code-quality-roadmap.md item 59),
+// pulled out of frontend/index.html for the same reason as the four culture badges
+// above — pure predicates belong here, covered by a committed test, not left inline
+// where only a manual/Playwright check could catch a regression.
+
+// 🎩 Hat Trick: three trebles (any numbers) in one visit, without busting. Excludes
+// the 180 case (Busted Maximum/180 already own that headline).
+function isHatTrick(darts, scored, bust){
+  return !!darts && darts.length===3 && darts.every(d=>d.isTreble) && scored !== 180 && !bust;
+}
+
+// 🔴 Bullseye Gauntlet: double bull hit twice or more in one visit.
+function isBullseyeGauntlet(darts){
+  return !!darts && darts.filter(d=>d.sector===25 && d.mult===2).length >= 2;
+}
+
+// 👯 Double Trouble: checked out, and the visit's last two darts (not necessarily
+// the whole visit) both landed on doubles.
+function isDoubleTrouble(win, darts){
+  if(!win || !darts || darts.length < 2) return false;
+  return darts[darts.length-2].isDouble && darts[darts.length-1].isDouble;
+}
+
+// 💨 Where'd It Go?: three misses in one visit.
+function isWhereDidItGo(darts){
+  return !!darts && darts.length===3 && darts.every(d=>d.sector===0);
+}
+
+// 😩 So Close...: 140 scored (T20, T20, S20) without busting — one dart short of 180.
+function isSoCloseShot(darts, bust){
+  if(!darts || darts.length !== 3 || bust) return false;
+  const [d1, d2, d3] = darts;
+  return d1.sector===20 && d1.mult===3 && d2.sector===20 && d2.mult===3 && d3.sector===20 && d3.mult===1;
+}
+
+// 💥 Busted Maximum: a genuine 180 (three treble 20s) that still busted.
+function isBustedMaximum(darts, bust){
+  return !!bust && !!darts && darts.length===3 && darts.every(d=>d.sector===20 && d.mult===3);
+}
+
+// 😅 Ton-titled to Nothing: 100+ attempted in a visit that still busted.
+function isTontitledToNothing(darts, bust){
+  return !!bust && !!darts && darts.reduce((s,d)=>s+d.value,0) >= 100;
+}
+
+// 🤦 No Cigar: busted a double-out visit whose darts summed to exactly the score
+// needed — just not on a double. preVisitScore is the player's remaining score
+// BEFORE this visit (never mutated on a bust, so this only ever fires for the
+// exact-zero-not-a-double bust sub-case — see index.html's CHAIN_CHECKS comment
+// for why the other two bust sub-cases can't also satisfy this).
+function isNoCigar(bust, doubleOut, pointsThisVisit, preVisitScore){
+  return !!bust && !!doubleOut && pointsThisVisit === preVisitScore;
+}
+
+// 🐂 Triple Bull: checked out on exactly 150 by hitting the double bull three
+// times in one visit (there's no treble-bull ring — makeDartCore() already
+// downgrades an attempted "treble bull" tap to a single).
+function isTripleBullCheckout(win, darts){
+  return !!win && !!darts && darts.length===3 && darts.every(d=>d.sector===25 && d.mult===2);
+}
+
+// 🏹 Bullseye Finish: checked out with the double bull as the last dart, at any total.
+function isBullseyeFinish(win, darts){
+  return !!win && !!darts && darts.length>=1 && darts[darts.length-1].sector===25 && darts[darts.length-1].mult===2;
+}
+
 // Daily Challenge badge trigger thresholds (REFERENCE.md's Achievements section,
 // docs/archive/achievements-badges-roadmap.md) — a day-count streak, not a visit/leg count,
 // so "recurring" here means "can fire again after a later streak reaches the same
@@ -2048,6 +2114,8 @@ if (typeof module !== 'undefined' && module.exports) {
     evaluateVisitBaseball, baseballInningTarget, isBaseballCycle, parseSqliteTimestamp,
     evaluateDartDoublesPractice, evaluateDartAroundTheClock, isStaircaseFinish,
     isBedAndBreakfast, isMadhouseFinish, isShanghaiVisit,
+    isHatTrick, isBullseyeGauntlet, isDoubleTrouble, isWhereDidItGo, isSoCloseShot,
+    isBustedMaximum, isTontitledToNothing, isNoCigar, isTripleBullCheckout, isBullseyeFinish,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,
     pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
     CHECKOUT_TRAINER_TRICK_CHANCE, listUnsolvableTargets, gradeCheckoutDeclaration,

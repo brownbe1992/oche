@@ -6736,12 +6736,14 @@ reused identically by the write-time guard's "already resolved" check,
 `_savedGamePosition()` (write-time list summary), and `resumeGame()`'s
 `dead_man_walking` branch (read-time resume). `'dead_man_walking'` is in
 both `SAVABLE_GAME_TYPES` lists (`backend/db.js` and `frontend/index.html`).
-`_savedGamePosition()`'s own field names (`dmwRound`/`dmwTotalRounds`/
-`dmwTarget`/`dmwWalkedOutCount`/`dmwDartsUsedThisRound`/`dmwBudget`)
-deliberately avoid colliding with Bob's 27's/Checkout Ladder's own `round`/
-`target` fields, since `savedGamePositionLabel()` (`frontend/index.html`)
-branches on field PRESENCE across every game type's differently-shaped
-position object.
+`_savedGamePosition()`'s field names for this type (`round`/`totalRounds`/
+`target`/`walkedOutCount`/`dartsUsedThisRound`/`budget`) are free to overlap
+with Bob's 27's/Checkout Ladder's own `round`/`target` fields:
+`savedGamePositionLabel()` (`frontend/index.html`) dispatches on `sg.gameType`
+(item 38, `docs/code-quality-roadmap.md`), not field presence, so there is no
+shared namespace to collide in. This is unrelated to the three DMW-only
+top-level *live-state* keys above (`dmwBudget`/`dmwDartsUsed`/`dmwWalkedOut`)
+— a different object entirely.
 
 ### Accessibility and security
 

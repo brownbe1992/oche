@@ -14,6 +14,8 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
   evaluateDartDoublesPractice, evaluateDartAroundTheClock, chuckinTiersReached, isStaircaseFinish,
   isBedAndBreakfast, isMadhouseFinish, isShanghaiVisit,
+  isHatTrick, isBullseyeGauntlet, isDoubleTrouble, isWhereDidItGo, isSoCloseShot,
+  isBustedMaximum, isTontitledToNothing, isNoCigar, isTripleBullCheckout, isBullseyeFinish,
   isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved, cricketStoneColdAchieved,
   evaluateVisitBobs27, isBobs27FullHouse, isBobs27FullAnderson,
   pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
@@ -1245,6 +1247,146 @@ describe('isShanghaiVisit (docs/archive/culture-badges-roadmap.md Part A)', () =
   test('fewer or more than exactly 3 darts never qualifies', () => {
     assert.equal(isShanghaiVisit([d(20,1), d(20,2)]), false);
     assert.equal(isShanghaiVisit([d(20,1), d(20,2), d(20,3), d(20,1)]), false);
+  });
+});
+
+// The remaining ten CHAIN_CHECKS predicates (docs/code-quality-roadmap.md item 59),
+// pulled out of frontend/index.html's inline CHAIN_CHECKS test functions.
+describe('isHatTrick', () => {
+  test('three trebles (any numbers), no bust, not a 180', () => {
+    assert.equal(isHatTrick([d(20,3), d(19,3), d(18,3)], 171, false), true);
+  });
+  test('a genuine 180 is excluded (Busted Maximum/180 own that headline)', () => {
+    assert.equal(isHatTrick([d(20,3), d(20,3), d(20,3)], 180, false), false);
+  });
+  test('busted still qualifying trebles fails', () => {
+    assert.equal(isHatTrick([d(20,3), d(19,3), d(18,3)], 171, true), false);
+  });
+  test('fewer than three trebles fails', () => {
+    assert.equal(isHatTrick([d(20,3), d(19,3), d(18,1)], 168, false), false);
+  });
+});
+
+describe('isBullseyeGauntlet', () => {
+  test('double bull twice in one visit qualifies', () => {
+    assert.equal(isBullseyeGauntlet([d(25,2), d(25,2), d(1,1)]), true);
+  });
+  test('double bull only once fails', () => {
+    assert.equal(isBullseyeGauntlet([d(25,2), d(1,1), d(1,1)]), false);
+  });
+  test('no darts never qualifies', () => {
+    assert.equal(isBullseyeGauntlet(null), false);
+  });
+});
+
+describe('isDoubleTrouble', () => {
+  test('won, last two darts both doubles', () => {
+    assert.equal(isDoubleTrouble(true, [d(1,1), d(16,2), d(20,2)]), true);
+  });
+  test('a single trailing double checkout (only one dart) does not qualify', () => {
+    assert.equal(isDoubleTrouble(true, [d(20,2)]), false);
+  });
+  test('did not win never qualifies', () => {
+    assert.equal(isDoubleTrouble(false, [d(16,2), d(20,2)]), false);
+  });
+  test('last dart a double but the one before it is not', () => {
+    assert.equal(isDoubleTrouble(true, [d(16,1), d(20,2)]), false);
+  });
+});
+
+describe('isWhereDidItGo', () => {
+  test('three misses qualifies', () => {
+    assert.equal(isWhereDidItGo([d(0,0), d(0,0), d(0,0)]), true);
+  });
+  test('any hit among the three fails', () => {
+    assert.equal(isWhereDidItGo([d(0,0), d(0,0), d(20,1)]), false);
+  });
+  test('fewer than three darts fails', () => {
+    assert.equal(isWhereDidItGo([d(0,0), d(0,0)]), false);
+  });
+});
+
+describe('isSoCloseShot', () => {
+  test('T20, T20, S20 (140) without busting qualifies', () => {
+    assert.equal(isSoCloseShot([d(20,3), d(20,3), d(20,1)], false), true);
+  });
+  test('busting disqualifies even with the right darts', () => {
+    assert.equal(isSoCloseShot([d(20,3), d(20,3), d(20,1)], true), false);
+  });
+  test('a real 180 (three trebles) is not So Close', () => {
+    assert.equal(isSoCloseShot([d(20,3), d(20,3), d(20,3)], false), false);
+  });
+  test('wrong order of single/treble fails', () => {
+    assert.equal(isSoCloseShot([d(20,1), d(20,3), d(20,3)], false), false);
+  });
+});
+
+describe('isBustedMaximum', () => {
+  test('three treble 20s that busted qualifies', () => {
+    assert.equal(isBustedMaximum([d(20,3), d(20,3), d(20,3)], true), true);
+  });
+  test('three treble 20s that did NOT bust fails (that is a real 180)', () => {
+    assert.equal(isBustedMaximum([d(20,3), d(20,3), d(20,3)], false), false);
+  });
+  test('busted but not all treble 20 fails', () => {
+    assert.equal(isBustedMaximum([d(20,3), d(20,3), d(19,3)], true), false);
+  });
+});
+
+describe('isTontitledToNothing', () => {
+  test('100+ attempted that busted qualifies', () => {
+    assert.equal(isTontitledToNothing([d(20,3), d(20,2), d(1,1)], true), true); // 60+40+1=101
+  });
+  test('under 100 attempted fails even if busted', () => {
+    assert.equal(isTontitledToNothing([d(10,1), d(10,1), d(10,1)], true), false);
+  });
+  test('100+ attempted that did NOT bust fails', () => {
+    assert.equal(isTontitledToNothing([d(20,3), d(20,2), d(1,1)], false), false);
+  });
+});
+
+describe('isNoCigar', () => {
+  test('busted, double-out, darts summed to exactly the score needed', () => {
+    assert.equal(isNoCigar(true, true, 32, 32), true);
+  });
+  test('not a bust fails', () => {
+    assert.equal(isNoCigar(false, true, 32, 32), false);
+  });
+  test('single-out mode never qualifies (hitting exact remaining there is a win, not a bust)', () => {
+    assert.equal(isNoCigar(true, false, 32, 32), false);
+  });
+  test('darts summed to something other than the pre-visit remaining fails', () => {
+    assert.equal(isNoCigar(true, true, 30, 32), false);
+  });
+});
+
+describe('isTripleBullCheckout', () => {
+  test('won, three double-bulls (150 checkout) qualifies', () => {
+    assert.equal(isTripleBullCheckout(true, [d(25,2), d(25,2), d(25,2)]), true);
+  });
+  test('did not win fails', () => {
+    assert.equal(isTripleBullCheckout(false, [d(25,2), d(25,2), d(25,2)]), false);
+  });
+  test('fewer than three double-bulls fails', () => {
+    assert.equal(isTripleBullCheckout(true, [d(25,2), d(25,2), d(20,1)]), false);
+  });
+});
+
+describe('isBullseyeFinish', () => {
+  test('won, last dart the double bull, at any total, qualifies', () => {
+    assert.equal(isBullseyeFinish(true, [d(20,1), d(19,1), d(25,2)]), true);
+  });
+  test('single-dart double-bull checkout still qualifies', () => {
+    assert.equal(isBullseyeFinish(true, [d(25,2)]), true);
+  });
+  test('did not win fails', () => {
+    assert.equal(isBullseyeFinish(false, [d(20,1), d(19,1), d(25,2)]), false);
+  });
+  test('won, but last dart is not the double bull', () => {
+    assert.equal(isBullseyeFinish(true, [d(25,2), d(20,1)]), false);
+  });
+  test('no darts never qualifies', () => {
+    assert.equal(isBullseyeFinish(true, null), false);
   });
 });
 

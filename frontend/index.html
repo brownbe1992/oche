@@ -1558,6 +1558,18 @@ window.addEventListener('unhandledrejection', e => {
    a connection-error screen instead of silently scoring into the browser
    (which would split stats across two unsynced stores). Gameplay code calls
    DB.* without needing to think about connectivity.
+
+   DB.* vs. calling Backend.get()/Backend.send() directly (item 59,
+   docs/code-quality-roadmap.md): a GET only belongs on DB when it does
+   something a bare Backend.get(path) call wouldn't — URL-encode a caller-
+   supplied value (a player name, free text), build a path/query from more
+   than one argument, or fold a request into DB's write-serialization queue.
+   A single-argument path template with nothing to encode (a numeric id, no
+   argument at all) is a pass-through with no value over calling
+   Backend.get() straight from the call site, so it stays inline instead —
+   this is why most one-off GETs in this file call Backend.get() directly
+   rather than routing through a same-shaped DB wrapper. Writes always go
+   through DB (never a bare Backend.send()) since they need the queue.
    ========================================================================= */
 const Backend = {
   async get(p){ const r = await fetch(p, {cache:'no-store'}); if(!r.ok) throw new Error('GET '+p); return r.json(); },
@@ -1605,7 +1617,6 @@ const DB = {
   delete(name){ Backend.send('DELETE','/api/players?name='+encodeURIComponent(name)).catch(logErr); },
 
   // Dart Builder / loadouts (docs/archive/dart-builder-roadmap.md)
-  dartComponentOptions(){ return Backend.get('/api/dart-components/options'); },
   listComponents(player, type){ return Backend.get(`/api/dart-components?name=${encodeURIComponent(player)}`+(type?`&type=${type}`:'')); },
   createComponent(player, type, fields){ return Backend.send('POST','/api/dart-components',{player, type, ...fields}); },
   updateComponent(player, id, fields){ return Backend.send('PUT',`/api/dart-components/${id}`,{player, ...fields}); },
@@ -1681,9 +1692,7 @@ const DB = {
   // could race each other), and the caller needs to await the real response
   // (a resume needs the actual payload; a save/abandon needs to know it
   // actually succeeded before navigating away) rather than fire-and-forget.
-  listSavedGames(){ return Backend.get('/api/saved-games'); },
   saveGame(gameId){ return Backend.send('POST',`/api/games/${gameId}/save`); },
-  getResumeState(gameId){ return Backend.get(`/api/games/${gameId}/resume-state`); },
   abandonSavedGame(gameId){ return Backend.send('DELETE',`/api/saved-games/${gameId}`); },
 
   async reset(){ await Backend.send('POST','/api/reset').catch(logErr); await this.refreshStats(); },
@@ -5003,7 +5012,7 @@ async function startGame(){
   // fresh" below before it retries startGame()).
   if(SAVABLE_GAME_TYPES.includes(gameType) && setup.mode !== 'ghost' && setup.mode !== 'challenge' && !setup._skipResumePrompt){
     let list = [];
-    try{ list = await DB.listSavedGames(); }catch(e){ list = []; }
+    try{ list = await Backend.get('/api/saved-games'); }catch(e){ list = []; }
     savedGamesCache = list;
     const match = findMatchingSavedGame(list, names, gameType);
     if(match){
@@ -8693,7 +8702,7 @@ async function renderDartBuilderScreen(){
   const el = document.getElementById('dart-builder-body');
   if(!el || !dartBuilderPlayer) return;
   if(!_dartBuilderOptions){
-    try{ _dartBuilderOptions = await DB.dartComponentOptions(); }
+    try{ _dartBuilderOptions = await Backend.get('/api/dart-components/options'); }
     catch(e){ el.innerHTML = '<p style="color:var(--muted)">Could not load the Dart Builder right now.</p>'; return; }
   }
   if(dartBuilderView === 'edit') await renderDartBuilderEdit();
@@ -10092,7 +10101,7 @@ async function resumeGame(gameId){
   if(Auth.requireAuth && !Auth.loggedIn){ Auth.ensureCanWrite(()=>resumeGame(gameId)); return; }
   let state;
   try{
-    state = await DB.getResumeState(gameId);
+    state = await Backend.get(`/api/games/${gameId}/resume-state`);
   }catch(e){
     uiAlertErr('Could not resume this game', e);
     refreshSavedGamesList();
@@ -10312,21 +10321,26 @@ function findMatchingSavedGame(list, names, gameType){
 // One-line position summary — legs/sets won per player (X01/Cricket/Baseball),
 // round progress (Around the Clock), or session darts (Around the World).
 // Reads the raw fields _savedGamePosition() (backend/db.js) already computed
-// via the exact same rebuild functions resuming itself uses.
+// via the exact same rebuild functions resuming itself uses. Dispatches on
+// sg.gameType (item 38, docs/code-quality-roadmap.md) rather than probing
+// which fields exist on pos — the old field-presence dispatch forced every
+// future mode's position shape to avoid seven already-claimed field names.
 function savedGamePositionLabel(sg){
   const pos = sg.position;
   if(!pos) return '';
-  if(pos.players){
-    const parts = pos.players.map(p => `${p.name} ${p.legsWon}`);
-    return `Set ${pos.setNo} leg ${pos.legNo} · ${parts.join(' – ')}`;
+  switch(sg.gameType){
+    case 'x01': case 'cricket': case 'baseball': case 'shanghai': case 'halve_it': case 'pressure_chamber': {
+      const parts = pos.players.map(p => `${p.name} ${p.legsWon}`);
+      return `Set ${pos.setNo} leg ${pos.legNo} · ${parts.join(' – ')}`;
+    }
+    case 'around_the_clock': return `Round ${pos.legNo} · ${pos.hit}/${pos.total} numbers hit`;
+    case 'around_the_world': return `${pos.sessionDarts} dart${pos.sessionDarts===1?'':'s'} this session`;
+    case 'bobs_27': return `D${pos.round} · running score ${pos.running}`;
+    case 'checkout_ladder': return `Target ${pos.target} · attempt ${pos.legNo} · ${pos.remaining} remaining`;
+    case 'gauntlet': return `Station ${pos.settled+1} of 20 · total Scars ${pos.totalScars}${pos.awaitingRepeat ? ' · repeat pending' : ''}`;
+    case 'dead_man_walking': return `Round ${pos.round} of ${pos.totalRounds} · target ${pos.target} · ${pos.walkedOutCount} Walked Out`;
+    default: return '';
   }
-  if(pos.hit != null) return `Round ${pos.legNo} · ${pos.hit}/${pos.total} numbers hit`;
-  if(pos.sessionDarts != null) return `${pos.sessionDarts} dart${pos.sessionDarts===1?'':'s'} this session`;
-  if(pos.round != null) return `D${pos.round} · running score ${pos.running}`;
-  if(pos.target != null) return `Target ${pos.target} · attempt ${pos.legNo} · ${pos.remaining} remaining`;
-  if(pos.station != null) return `Station ${pos.settled+1} of 20 · total Scars ${pos.totalScars}${pos.awaitingRepeat ? ' · repeat pending' : ''}`;
-  if(pos.dmwRound != null) return `Round ${pos.dmwRound} of ${pos.dmwTotalRounds} · target ${pos.dmwTarget} · ${pos.dmwWalkedOutCount} Walked Out`;
-  return '';
 }
 function savedGameDateLabel(iso){
   const d = parseSqliteTimestamp(iso);
@@ -10339,7 +10353,7 @@ async function refreshSavedGamesList(){
   const section = document.getElementById('saved-games-section');
   const container = document.getElementById('saved-games-list');
   if(!section || !container) return;
-  try{ savedGamesCache = await DB.listSavedGames(); }
+  try{ savedGamesCache = await Backend.get('/api/saved-games'); }
   catch(e){ savedGamesCache = []; }
   section.hidden = savedGamesCache.length === 0;
   if(!savedGamesCache.length) return;
@@ -10670,26 +10684,26 @@ function enterTurn(){
   const _d = game.darts;
   const CHAIN_CHECKS = [
     { id:'hattrick', icon:'🎩', headline:'HAT TRICK!', statLine:'Three trebles, one visit',
-      test: () => _d.length===3 && _d.every(d=>d.isTreble) && ev.scored !== 180 && !ev.bust },
+      test: () => isHatTrick(_d, ev.scored, ev.bust) },
     { id:'bullseyegauntlet', icon:'🔴', headline:'BULLSEYE GAUNTLET!', statLine:'Double bull, twice in one visit',
-      test: () => _d.filter(d=>d.sector===25 && d.mult===2).length >= 2, suppresses:['doubletrouble'] },
+      test: () => isBullseyeGauntlet(_d), suppresses:['doubletrouble'] },
     // Double Trouble: the last two darts of the checkout visit both landed on
     // doubles — dart 1 of a 3-dart visit (miss/single/treble) doesn't matter, only
     // the trailing pair does. A single-dart double-out checkout doesn't qualify
     // ("consecutive" needs at least two) — see docs/archive/achievements-badges-roadmap.md.
     { id:'doubletrouble', icon:'👯', headline:'DOUBLE TROUBLE!', statLine:'Checked out on consecutive doubles',
-      test: () => ev.win && _d.length>=2 && _d[_d.length-2].isDouble && _d[_d.length-1].isDouble },
+      test: () => isDoubleTrouble(ev.win, _d) },
     { id:'wherediditgo', icon:'💨', headline:"WHERE'D IT GO?", statLine:'Three misses',
-      test: () => _d.length===3 && _d.every(d=>d.sector===0) },
+      test: () => isWhereDidItGo(_d) },
     { id:'socloseshot', icon:'😩', headline:'SO CLOSE...', statLine:'140 — one dart from 180',
-      test: () => _d.length===3 && !ev.bust && _d[0].sector===20 && _d[0].mult===3 && _d[1].sector===20 && _d[1].mult===3 && _d[2].sector===20 && _d[2].mult===1 },
+      test: () => isSoCloseShot(_d, ev.bust) },
     // Busted Maximum: a genuine 180 (three treble 20s) that still busts — more
     // specific than Ton-titled to Nothing below, so it suppresses it rather than
     // both firing for the same visit.
     { id:'bustedmaximum', icon:'💥', headline:'BUSTED MAXIMUM', statLine:'A genuine 180 that still busted',
-      test: () => ev.bust && _d.length===3 && _d.every(d=>d.sector===20 && d.mult===3), suppresses:['tontitled'] },
+      test: () => isBustedMaximum(_d, ev.bust), suppresses:['tontitled'] },
     { id:'tontitled', icon:'😅', headline:'TON-TITLED TO NOTHING', statLine:'100+ attempted, still busted',
-      test: () => ev.bust && _d.reduce((s,d)=>s+d.value,0) >= 100 },
+      test: () => isTontitledToNothing(_d, ev.bust) },
     // No Cigar: hit the exact score needed, just not on a double — double-out's
     // single most deflating bust. p.score here is still the PRE-visit remaining
     // (the score-unless-bust assignment above never runs on a bust), so this can
@@ -10699,7 +10713,7 @@ function enterTurn(){
     // single-out mode (hitting the exact remaining there is a win, not a bust),
     // hence the p.doubleOut guard.
     { id:'nocigar', icon:'🤦', headline:'NO CIGAR', statLine:'Hit the exact score needed — just not on a double',
-      test: () => ev.bust && p.doubleOut && ev.pointsThisVisit === p.score },
+      test: () => isNoCigar(ev.bust, p.doubleOut, ev.pointsThisVisit, p.score) },
     // Staircase Finish: checked out by aiming at a double, missing to the single,
     // and repeating that all the way down (single half, single quarter, double
     // eighth) — see scoring.js's isStaircaseFinish() for the exact math. _snap.score
@@ -10716,12 +10730,12 @@ function enterTurn(){
     // precedent as Busted Maximum/Ton-titled to Nothing and Bullseye Gauntlet/
     // Double Trouble above.
     { id:'triplebull', icon:'🐂', headline:'TRIPLE BULL!', statLine:'150 checkout — three bullseyes',
-      test: () => ev.win && _d.length===3 && _d.every(d=>d.sector===25 && d.mult===2), suppresses:['bullseyefinish'] },
+      test: () => isTripleBullCheckout(ev.win, _d), suppresses:['bullseyefinish'] },
     // Bullseye Finish: the checkout's last dart is the double bull, at any
     // total — a standalone achievement distinct from Bullseye Gauntlet above
     // (which is about hitting double bull twice mid-visit, not finishing on it).
     { id:'bullseyefinish', icon:'🏹', headline:'BULLSEYE FINISH', statLine:'Checked out on the bull',
-      test: () => ev.win && _d.length>=1 && _d[_d.length-1].sector===25 && _d[_d.length-1].mult===2 },
+      test: () => isBullseyeFinish(ev.win, _d) },
     // Darts-culture one-offs (docs/archive/culture-badges-roadmap.md Part A) — pure
     // predicates over this visit's darts, same shape as Staircase Finish above,
     // living in scoring.js so they're covered by a committed test rather than
