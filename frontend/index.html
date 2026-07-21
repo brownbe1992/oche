@@ -6709,14 +6709,8 @@ function checkChallengeBadges(playerName){
       awardRecurringBadge(playerName, 'challengemonth', 'challengemonth', { icon:'🏆', headline:'CHALLENGE STREAK: MONTH', player:playerName, statLine:'30 days in a row' });
     }
     if(sig.allFormats){
-      const _snapAllFmt = game && game.lastTurnSnapshot;
-      Backend.send('POST','/api/badges/award', { player:playerName, badgeId:'challengeallformats', once:true }).then(r=>{
-        if(r && r.newlyEarned){
-          trackBadgeForUndo(_snapAllFmt, playerName, 'challengeallformats');
-          queueBadge('challengeallformats', playerName, _snapAllFmt, 'First time!');
-          fireMomentCard('challengeallformats', { icon:'🗓️', headline:'FULL ROTATION', player:playerName, statLine:'Every Daily Challenge format completed' });
-        }
-      }).catch(()=>{});
+      awardOnceBadge(playerName, 'challengeallformats', 'challengeallformats', game && game.lastTurnSnapshot,
+        { icon:'🗓️', headline:'FULL ROTATION', statLine:'Every Daily Challenge format completed' });
     }
   }).catch(()=>{});
 }
@@ -8010,15 +8004,9 @@ function checkChuckinMilestoneTier(ladder, playerName, value){
   ladder.tiers.forEach(tier=>{
     const id = ladder.idPrefix + tier.threshold;
     if(!reached.includes(tier.threshold)) return;
-    if(earnedBadgeCache[playerName] && earnedBadgeCache[playerName].has(id)) return;
-    Backend.send('POST','/api/badges/award', { player:playerName, badgeId:id, once:true }).then(r=>{
-      if(!earnedBadgeCache[playerName]) earnedBadgeCache[playerName] = new Set();
-      earnedBadgeCache[playerName].add(id);
-      if(r && r.newlyEarned){
-        queueBadge(id, playerName, null, 'First time!');
-        fireMomentCard(id, { icon:tier.icon, headline:tier.label.toUpperCase(), player:playerName, statLine:`${value.toLocaleString()} ${ladder.statNoun}` });
-      }
-    }).catch(()=>{});
+    awardOnceBadge(playerName, id, id, null,
+      { icon:tier.icon, headline:tier.label.toUpperCase(), statLine:`${value.toLocaleString()} ${ladder.statNoun}` },
+      { cacheCheck:true });
   });
 }
 // Called after every dart from throwDartChuckin(). Every ladder is checked
@@ -9020,6 +9008,43 @@ function awardRecurringBadge(playerName, badgeId, momentType, momentOpts){
     })
     .catch(()=>{ if(momentType) fireMomentCard(momentType, momentOpts); });
   trackBadgeForUndo(snap, playerName, badgeId);
+}
+// One-shot ({once:true}) badge award — generalizes the ~10 hand-rolled
+// `Backend.send('POST','/api/badges/award', {once:true}).then(r=>{ if(r.newlyEarned)
+// ... })` copies this app had drifted into (three different undo-snapshot naming
+// conventions, one site silently skipping queueBadge, only some sites maintaining
+// earnedBadgeCache to avoid re-firing the POST every re-trigger).
+// - backendBadgeId/achId: usually identical, but a few badges (Around the Clock/
+//   World, First 100+ Checkout, Grudge Match) were already sending an underscored
+//   id to the backend while queueBadge()/fireMomentCard() use a different,
+//   no-underscore id — kept as two params rather than silently unifying them.
+// - snap: the undo snapshot, or `null` for a permanent/non-revocable badge
+//   (Doubles Practice's Ring Master, Chuckin's milestone ladders) — safe to pass
+//   through unconditionally since trackBadgeForUndo()/queueBadge() already treat
+//   a null/falsy snap as "nothing to track."
+// - momentOpts: {icon, headline, statLine} — `player` is filled in automatically.
+// - opts.cacheCheck (default false): pre-check/populate earnedBadgeCache so the
+//   POST doesn't re-fire every re-trigger (Around the World, Chuckin milestones,
+//   Doubles Practice's Ring Master already did this; most one-shot badges don't
+//   need it since their own trigger condition is already a rare one-time event).
+// - opts.silent (default false): skip queueBadge/fireMomentCard on success —
+//   Grudge Match's opponent-side award only wants undo-tracking, no UI celebration
+//   for a badge earned via someone else's match win.
+function awardOnceBadge(player, backendBadgeId, achId, snap, momentOpts, opts){
+  const { cacheCheck=false, silent=false } = opts || {};
+  if(cacheCheck && earnedBadgeCache[player] && earnedBadgeCache[player].has(backendBadgeId)) return;
+  Backend.send('POST','/api/badges/award', { player, badgeId:backendBadgeId, once:true }).then(r=>{
+    if(cacheCheck){
+      if(!earnedBadgeCache[player]) earnedBadgeCache[player] = new Set();
+      earnedBadgeCache[player].add(backendBadgeId);
+    }
+    if(r && r.newlyEarned){
+      trackBadgeForUndo(snap, player, backendBadgeId);
+      if(silent) return;
+      queueBadge(achId, player, snap, 'First time!');
+      fireMomentCard(achId, { ...momentOpts, player });
+    }
+  }).catch(()=>{});
 }
 
 const momentCards = {};
@@ -10371,14 +10396,8 @@ function enterTurn(){
   // inflate the count.
   _d.forEach(d=>{ if(d.sector>=1 && d.sector<=20 && d.mult===1) p.singlesHit.add(d.sector); });
   if(p.singlesHit.size >= 20){
-    const _snapAtc = game.lastTurnSnapshot;
-    Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'around_the_clock', once:true }).then(r=>{
-      if(r && r.newlyEarned){
-        trackBadgeForUndo(_snapAtc, p.name, 'around_the_clock');
-        queueBadge('aroundtheclock', p.name, _snapAtc, 'First time!');
-        fireMomentCard('aroundtheclock', { icon:'🕐', headline:'AROUND THE CLOCK', player:p.name, statLine:'Every number, 1 to 20, singled out' });
-      }
-    }).catch(()=>{});
+    awardOnceBadge(p.name, 'around_the_clock', 'aroundtheclock', game.lastTurnSnapshot,
+      { icon:'🕐', headline:'AROUND THE CLOCK', statLine:'Every number, 1 to 20, singled out' });
   }
   // Around the World (state-based milestone): all 63 lifetime dart outcomes. Skips
   // the (mildly expensive) progress query once this player's cached badge list
@@ -10389,15 +10408,9 @@ function enterTurn(){
     const _snapAtw = game.lastTurnSnapshot;
     DB._queue(()=>Backend.get(`/api/players/around-the-world?name=${encodeURIComponent(p.name)}`).then(prog=>{
       if(prog && prog.count >= prog.total){
-        Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'around_the_world', once:true }).then(r=>{
-          if(!earnedBadgeCache[p.name]) earnedBadgeCache[p.name] = new Set();
-          earnedBadgeCache[p.name].add('around_the_world');
-          if(r && r.newlyEarned){
-            trackBadgeForUndo(_snapAtw, p.name, 'around_the_world');
-            queueBadge('aroundtheworld', p.name, _snapAtw, 'First time!');
-            fireMomentCard('aroundtheworld', { icon:'🌍', headline:'AROUND THE WORLD', player:p.name, statLine:'Every dart outcome, lifetime' });
-          }
-        }).catch(()=>{});
+        awardOnceBadge(p.name, 'around_the_world', 'aroundtheworld', _snapAtw,
+          { icon:'🌍', headline:'AROUND THE WORLD', statLine:'Every dart outcome, lifetime' },
+          { cacheCheck:true });
       }
     }).catch(()=>{}));
   }
@@ -10409,14 +10422,8 @@ function enterTurn(){
   // First 100+ checkout — a one-time milestone (persisted server-side so the
   // celebration fires exactly once, ever, not every time it happens again).
   if(ev.win && ev.pointsThisVisit >= 100){
-    const _snap100 = game.lastTurnSnapshot;
-    Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'first_100_checkout', once:true }).then(r=>{
-      if(r && r.newlyEarned){
-        trackBadgeForUndo(_snap100, p.name, 'first_100_checkout');
-        queueBadge('first100checkout', p.name, _snap100, 'First time!');
-        fireMomentCard('first100checkout', { icon:'🥇', headline:'FIRST 100+ CHECKOUT', player:p.name, statLine:`${ev.pointsThisVisit} checkout` });
-      }
-    }).catch(()=>{});
+    awardOnceBadge(p.name, 'first_100_checkout', 'first100checkout', game.lastTurnSnapshot,
+      { icon:'🥇', headline:'FIRST 100+ CHECKOUT', statLine:`${ev.pointsThisVisit} checkout` });
   }
 
   // record turn for practice session stats display
@@ -10703,13 +10710,8 @@ function checkEloOnMatchWin(w, opp){
     // Champion's own manual once:true + explicit trackBadgeForUndo pattern rather
     // than awardRecurringBadge()'s internal (by-now-possibly-stale) snapshot read.
     if(data.qualifies && data.rank === 1){
-      Backend.send('POST','/api/badges/award', { player:w.name, badgeId:'topofthehouse', once:true }).then(r=>{
-        if(r && r.newlyEarned){
-          trackBadgeForUndo(_snap, w.name, 'topofthehouse');
-          queueBadge('topofthehouse', w.name, _snap, 'First time!');
-          fireMomentCard('topofthehouse', { icon:'👑', headline:'TOP OF THE HOUSE', player:w.name, statLine:`Household rating ${data.rating}` });
-        }
-      }).catch(()=>{});
+      awardOnceBadge(w.name, 'topofthehouse', 'topofthehouse', _snap,
+        { icon:'👑', headline:'TOP OF THE HOUSE', statLine:`Household rating ${data.rating}` });
     }
     // 🗡️ Upset: won this rated match despite a 150+ pre-game rating deficit.
     // Recurring — mirrors The Rematch's own async awardRecurringBadge() call.
@@ -11514,16 +11516,11 @@ function onLegWon(wi){
             // Grudge Match: a genuine milestone (has this rivalry crossed 10 games
             // yet), not a per-game event — once:true so re-crossing the threshold
             // on later games between the same two doesn't inflate the count.
-            Backend.send('POST','/api/badges/award', { player:w.name, badgeId:'grudge_match', once:true }).then(r=>{
-              if(r && r.newlyEarned){
-                trackBadgeForUndo(_snapGm, w.name, 'grudge_match');
-                queueBadge('grudgematch', w.name, _snapGm, 'First time!');
-                fireMomentCard('grudgematch', { icon:'⚔️', headline:'GRUDGE MATCH', player:w.name, statLine:`${sum.totalGames} games vs ${opp.name}` });
-              }
-            }).catch(()=>{});
-            Backend.send('POST','/api/badges/award', { player:opp.name, badgeId:'grudge_match', once:true }).then(r=>{
-              if(r && r.newlyEarned) trackBadgeForUndo(_snapGm, opp.name, 'grudge_match');
-            }).catch(()=>{});
+            awardOnceBadge(w.name, 'grudge_match', 'grudgematch', _snapGm,
+              { icon:'⚔️', headline:'GRUDGE MATCH', statLine:`${sum.totalGames} games vs ${opp.name}` });
+            // Opponent's own copy earns the same badge but gets no UI celebration —
+            // only undo-tracking, since the moment belongs to the winner's match.
+            awardOnceBadge(opp.name, 'grudge_match', 'grudgematch', _snapGm, null, { silent:true });
           }
         }).catch(()=>{});
       }
@@ -13977,14 +13974,9 @@ function throwDartDoublesPractice(sector, zone, missZone, missDepth, bounced){
     if(!(earnedBadgeCache[p.name] && earnedBadgeCache[p.name].has('doublespracticeringmaster'))){
       DB._queue(()=>Backend.get(`/api/players/doubles-hit-sectors?name=${encodeURIComponent(p.name)}`).then(prog=>{
         if(prog && prog.count >= prog.total){
-          Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'doublespracticeringmaster', once:true }).then(r=>{
-            if(!earnedBadgeCache[p.name]) earnedBadgeCache[p.name] = new Set();
-            earnedBadgeCache[p.name].add('doublespracticeringmaster');
-            if(r && r.newlyEarned){
-              queueBadge('doublespracticeringmaster', p.name, null, 'First time!');
-              fireMomentCard('doublespracticeringmaster', { icon:'🎪', headline:'RING MASTER', player:p.name, statLine:'Every double, D1 to Bull, lifetime' });
-            }
-          }).catch(()=>{});
+          awardOnceBadge(p.name, 'doublespracticeringmaster', 'doublespracticeringmaster', null,
+            { icon:'🎪', headline:'RING MASTER', statLine:'Every double, D1 to Bull, lifetime' },
+            { cacheCheck:true });
         }
       }).catch(()=>{}));
     }
@@ -14720,13 +14712,8 @@ function throwDartAroundTheClock(sector, zone, missZone, missDepth, bounced){
     game.roundEndReason = 'completed';
     p.sessionRounds.push({ darts:p.roundDarts });
     announce(`Around the Clock complete! ${p.roundDarts} darts.`);
-    Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'guided_clock', once:true }).then(r=>{
-      if(r && r.newlyEarned){
-        trackBadgeForUndo(_snap, p.name, 'guided_clock');
-        queueBadge('guided_clock', p.name, _snap, 'First time!');
-        fireMomentCard('guided_clock', { icon:'🧭', headline:'GUIDED CLOCK', player:p.name, statLine:`Completed a guided Around the Clock drill in ${p.roundDarts} darts` });
-      }
-    }).catch(()=>{});
+    awardOnceBadge(p.name, 'guided_clock', 'guided_clock', _snap,
+      { icon:'🧭', headline:'GUIDED CLOCK', statLine:`Completed a guided Around the Clock drill in ${p.roundDarts} darts` });
   } else if(ev.isNewHit){
     announce(`${dart.label}. ${p.hitSet.size} of 20 numbers hit.`);
   }
@@ -14854,14 +14841,8 @@ function throwDartAroundTheWorld(sector, zone, missZone, missDepth, bounced){
   announce(`${dart.label}. ${progress} of 63 lifetime outcomes.`);
   renderGameAroundTheWorld();
   if(progress >= 63){
-    const _snap = game.lastTurnSnapshot;
-    Backend.send('POST','/api/badges/award', { player:p.name, badgeId:'guided_world', once:true }).then(r=>{
-      if(r && r.newlyEarned){
-        trackBadgeForUndo(_snap, p.name, 'guided_world');
-        queueBadge('guided_world', p.name, _snap, 'First time!');
-        fireMomentCard('guided_world', { icon:'🗺️', headline:'GUIDED WORLD', player:p.name, statLine:'Completed Around the World during a guided session' });
-      }
-    }).catch(()=>{});
+    awardOnceBadge(p.name, 'guided_world', 'guided_world', game.lastTurnSnapshot,
+      { icon:'🗺️', headline:'GUIDED WORLD', statLine:'Completed Around the World during a guided session' });
   }
 }
 // Undoes the single most recently thrown dart — mirrors undoLastTurnChuckin()'s

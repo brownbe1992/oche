@@ -463,16 +463,50 @@ including the one board's `Infinity` limit and the Elo board's custom
 wrapper spacing. Backend suite unaffected (1244 tests, same 6 pre-existing
 unrelated failures).
 
-## Item 50 — One-shot badge award helper
+## Item 50 — One-shot badge award helper — ✅ Done
 
-The award block (POST `/api/badges/award` `{once:true}` → `newlyEarned` →
-`queueBadge` + `fireMomentCard`) is hand-rolled ~10 times (~6805, 10770,
-10787, 10808, 11119, 12116, 12123, 14683, 15474, 15621) and has ALREADY
-drifted: only two sites maintain `earnedBadgeCache` (the rest re-fire the
-POST every re-trigger), one site skips `queueBadge`, and the undo-snapshot
-capture uses three naming conventions. Generalize
-`awardCheckoutTrainerBadge()` (which already encapsulates the pattern) into
-`awardOnceBadge(player, badgeId, achType, snap, momentOpts)`.
+All 11 hand-rolled `Backend.send('POST','/api/badges/award', {once:true})`
+call blocks (Full Rotation, Chuckin's milestone ladders, Around the
+Clock/World's passive badges, First 100+ Checkout, Top of the House, Grudge
+Match's winner+opponent pair, Doubles Practice's Ring Master, and the guided
+Around the Clock/World drill badges) now go through one
+`awardOnceBadge(player, backendBadgeId, achId, snap, momentOpts, opts)`.
+Confirmed via inspection there were really 11 call sites, not ~10 as
+estimated, and the drift was worse than the estimate: 3 sites (not 2)
+maintained an `earnedBadgeCache` pre-check to avoid re-firing the POST on
+every re-trigger, and the badge id sent to the backend genuinely differs
+from the id used for `queueBadge()`/`fireMomentCard()` at 4 sites (Around
+the Clock, Around the World, First 100+ Checkout, Grudge Match) — kept as
+two explicit params (`backendBadgeId`/`achId`) rather than silently unifying
+them.
+
+The helper's options map directly onto the real per-site differences:
+- `snap` can be `null` for a permanent/non-revocable badge (Ring Master,
+  Chuckin's ladders) — safe to pass through unconditionally since
+  `trackBadgeForUndo()`/`queueBadge()` already treat a falsy snap as
+  "nothing to track," so no special-casing was needed at the call sites.
+- `opts.cacheCheck` (default `false`) reproduces the pre-check/populate
+  pattern for the 3 sites that had it.
+- `opts.silent` (default `false`) reproduces Grudge Match's opponent-side
+  award, the one site that intentionally skips `queueBadge`/`fireMomentCard`
+  (undo-tracking only — the celebration belongs to the winner's match, not
+  the opponent's identical badge).
+- `awardCheckoutTrainerBadge()` was found to have a different real signature
+  than the roadmap doc assumed (`(playerName, badgeId, icon, headline,
+  statLine)`, no `trackBadgeForUndo` call, no separate backend/ach id split)
+  — left alone rather than forced into `awardOnceBadge`'s shape, since its
+  own 3 call sites already work correctly through it as-is.
+
+Verified live in a browser: called `awardOnceBadge` against the real
+backend for a fresh player/badge (confirming `newlyEarned`, `queueBadge`,
+`fireMomentCard`, and `trackBadgeForUndo` all fire with the right
+arguments), re-called it for the same player/badge (confirming the
+once:true dedup means no celebration fires the second time), verified
+`silent:true` fires `trackBadgeForUndo` but skips `queueBadge`/
+`fireMomentCard`, verified `cacheCheck:true` populates the cache and
+short-circuits a second call before it reaches the network, and verified a
+`null` snap doesn't throw and still fires the moment card. Backend suite
+unaffected (1244 tests, same 6 pre-existing unrelated failures).
 
 ## Item 51 — Per-dart/per-visit badge-progress fetches and profile refetch waste
 
