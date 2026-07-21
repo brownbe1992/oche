@@ -7946,17 +7946,22 @@ const CHUCKIN_MILESTONE_LADDERS = [
       { threshold:1000, label:'Treble Legend',  icon:'🐐' },
     ] },
 ];
-CHUCKIN_MILESTONE_LADDERS.forEach(ladder=>{
-  ladder.tiers.forEach((tier, i)=>{
-    const id = ladder.idPrefix + tier.threshold;
-    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), chuckin:true };
-    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
-    // The top tier of each ladder gets a longer celebration, same convention as
-    // Around the World (the biggest completionist milestone) getting 5000 vs. the
-    // usual 2500-3000.
-    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
+// Shared by every milestone-ladder registration below (~12 sites, docs/code-
+// quality-roadmap.md item 52) — only the extra BADGE_INFO flags (chuckin/
+// baseball/gauntlet/etc, or none) vary per call site. The top tier of each
+// ladder gets a longer celebration, same convention as Around the World (the
+// biggest completionist milestone) getting 5000 vs. the usual 2500-3000.
+function registerMilestoneLadders(ladders, flags){
+  ladders.forEach(ladder=>{
+    ladder.tiers.forEach((tier, i)=>{
+      const id = ladder.idPrefix + tier.threshold;
+      BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), ...flags };
+      ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
+      ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
+    });
   });
-});
+}
+registerMilestoneLadders(CHUCKIN_MILESTONE_LADDERS, {chuckin:true});
 // Lifetime 180s ladder (docs/archive/culture-badges-roadmap.md Part A) — 180! has always
 // been a recurring live celebration (queueBadge('180',...) in enterTurn()) but
 // never a player_badges row at all (see REFERENCE.md's Achievements section: 180/
@@ -7982,14 +7987,7 @@ const ONE_EIGHTY_MILESTONE_LADDERS = [
       { threshold:250, label:'Maximum Machine',          icon:'🤖' },
     ] },
 ];
-ONE_EIGHTY_MILESTONE_LADDERS.forEach(ladder=>{
-  ladder.tiers.forEach((tier, i)=>{
-    const id = ladder.idPrefix + tier.threshold;
-    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold) };
-    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
-    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
-  });
-});
+registerMilestoneLadders(ONE_EIGHTY_MILESTONE_LADDERS, {});
 // Lifetime runs ladder (docs/archive/culture-badges-roadmap.md Part B) — Baseball's own
 // analog of the lifetime-180s ladder above, same reused engine, same "no network
 // round-trip per dart" reasoning: lifetimeRunsBase is fetched once per game at
@@ -8008,14 +8006,7 @@ const BASEBALL_RUNS_MILESTONE_LADDERS = [
       { threshold:5000, label:'Hall of Fame',    icon:'🏟️' },
     ] },
 ];
-BASEBALL_RUNS_MILESTONE_LADDERS.forEach(ladder=>{
-  ladder.tiers.forEach((tier, i)=>{
-    const id = ladder.idPrefix + tier.threshold;
-    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), baseball:true };
-    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
-    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
-  });
-});
+registerMilestoneLadders(BASEBALL_RUNS_MILESTONE_LADDERS, {baseball:true});
 // Lifetime doubles-hit ladder (docs/archive/culture-badges-roadmap.md Part B) — Doubles
 // Practice's own mode-defining count (a "hit" is a double landed on one of that
 // round's own targets), already computed for its stat bubbles
@@ -8036,14 +8027,7 @@ const DOUBLES_HIT_MILESTONE_LADDERS = [
       { threshold:5000, label:'Doubles Legend',   icon:'👑' },
     ] },
 ];
-DOUBLES_HIT_MILESTONE_LADDERS.forEach(ladder=>{
-  ladder.tiers.forEach((tier, i)=>{
-    const id = ladder.idPrefix + tier.threshold;
-    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), doublesPractice:true };
-    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
-    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
-  });
-});
+registerMilestoneLadders(DOUBLES_HIT_MILESTONE_LADDERS, {doublesPractice:true});
 // Bob's 27 survival/score ladder (docs/archive/practice-ladders-roadmap.md Part A)
 // — reuses the SAME generic engine (checkChuckinMilestoneTier() below) as
 // every ladder above, but with a DIFFERENT kind of "value": every other ladder
@@ -8068,14 +8052,7 @@ const BOBS27_SCORE_MILESTONE_LADDERS = [
       { threshold:1000, label:'Four Figures',  icon:'👑' },
     ] },
 ];
-BOBS27_SCORE_MILESTONE_LADDERS.forEach(ladder=>{
-  ladder.tiers.forEach((tier, i)=>{
-    const id = ladder.idPrefix + tier.threshold;
-    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), bobs27:true };
-    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
-    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
-  });
-});
+registerMilestoneLadders(BOBS27_SCORE_MILESTONE_LADDERS, {bobs27:true});
 
 /* ---------- 121 Checkout Ladder highest-rung ladder (docs/practice-ladders-
    roadmap.md Part B) ---------- Same data-driven {metric,idPrefix,statNoun,
@@ -8095,14 +8072,7 @@ const CHECKOUT_LADDER_MILESTONE_LADDERS = [
       { threshold:170, label:'Peak Rung',    icon:'🏔️' },
     ] },
 ];
-CHECKOUT_LADDER_MILESTONE_LADDERS.forEach(ladder=>{
-  ladder.tiers.forEach((tier, i)=>{
-    const id = ladder.idPrefix + tier.threshold;
-    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), checkoutLadder:true };
-    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
-    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
-  });
-});
+registerMilestoneLadders(CHECKOUT_LADDER_MILESTONE_LADDERS, {checkoutLadder:true});
 // 🧗 Peak Bagged (docs/archive/practice-ladders-roadmap.md Part B) — the harder,
 // separate feat of actually checking OUT 170 on the ladder (T20 T20 Bull, the
 // same double-out maximum X01's Big Fish celebrates), not just reaching that
@@ -8158,16 +8128,8 @@ const GAUNTLET_STREAK_MILESTONE_LADDERS = [
       { threshold:15, label:'Iron Focus',   icon:'🧠' },
     ] },
 ];
-[GAUNTLET_RUNS_MILESTONE_LADDERS, GAUNTLET_CLEAN_STATIONS_MILESTONE_LADDERS, GAUNTLET_STREAK_MILESTONE_LADDERS].forEach(ladders=>{
-  ladders.forEach(ladder=>{
-    ladder.tiers.forEach((tier, i)=>{
-      const id = ladder.idPrefix + tier.threshold;
-      BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), gauntlet:true };
-      ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
-      ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
-    });
-  });
-});
+[GAUNTLET_RUNS_MILESTONE_LADDERS, GAUNTLET_CLEAN_STATIONS_MILESTONE_LADDERS, GAUNTLET_STREAK_MILESTONE_LADDERS].forEach(ladders=>
+  registerMilestoneLadders(ladders, {gauntlet:true}));
 // One-off badges (docs/archive/gauntlet-roadmap.md "Achievements"). 💎 Flawless
 // Gauntlet is deliberately not mutually exclusive with 🥋 Unmarked (a
 // zero-Scar run is also, trivially, a 0-5-tier run) — both can and should
@@ -8230,16 +8192,8 @@ const DMW_STREAK_MILESTONE_LADDERS = [
       { threshold:10, label:'Untouchable',  icon:'🌟' },
     ] },
 ];
-[DMW_RUNS_MILESTONE_LADDERS, DMW_WALKED_OUT_MILESTONE_LADDERS, DMW_STREAK_MILESTONE_LADDERS].forEach(ladders=>{
-  ladders.forEach(ladder=>{
-    ladder.tiers.forEach((tier, i)=>{
-      const id = ladder.idPrefix + tier.threshold;
-      BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), deadManWalking:true };
-      ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
-      ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
-    });
-  });
-});
+[DMW_RUNS_MILESTONE_LADDERS, DMW_WALKED_OUT_MILESTONE_LADDERS, DMW_STREAK_MILESTONE_LADDERS].forEach(ladders=>
+  registerMilestoneLadders(ladders, {deadManWalking:true}));
 /* ---------- The Pressure Chamber (docs/archive/pressure-chamber-roadmap.md) ----------
    Three data-driven lifetime ladders (runs completed, CP earned — base+session,
    the Chuckin/Baseball pattern) plus one PER-RUN ladder (longest full-hit
@@ -8281,16 +8235,8 @@ const PRESSURE_STREAK_MILESTONE_LADDERS = [
       { threshold:12, label:'Untouchable',   icon:'💎' },
     ] },
 ];
-[PRESSURE_RUNS_MILESTONE_LADDERS, PRESSURE_CP_MILESTONE_LADDERS, PRESSURE_STREAK_MILESTONE_LADDERS].forEach(ladders=>{
-  ladders.forEach(ladder=>{
-    ladder.tiers.forEach((tier, i)=>{
-      const id = ladder.idPrefix + tier.threshold;
-      BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), pressureChamber:true };
-      ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
-      ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
-    });
-  });
-});
+[PRESSURE_RUNS_MILESTONE_LADDERS, PRESSURE_CP_MILESTONE_LADDERS, PRESSURE_STREAK_MILESTONE_LADDERS].forEach(ladders=>
+  registerMilestoneLadders(ladders, {pressureChamber:true}));
 // One-off badges (docs/archive/dead-man-walking-roadmap.md "Achievements") — framed
 // with the mode's own dark, self-aware humor per the doc's own tone note, not
 // purely celebratory across the board: 💀 Last Request is deliberately a "you
@@ -8437,14 +8383,7 @@ const CHECKOUT_TRAINER_MILESTONE_LADDERS = [
       { threshold:150, label:'Flawless Machine', icon:'🤖' },
     ] },
 ];
-CHECKOUT_TRAINER_MILESTONE_LADDERS.forEach(ladder=>{
-  ladder.tiers.forEach((tier, i)=>{
-    const id = ladder.idPrefix + tier.threshold;
-    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), checkoutTrainer:true };
-    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
-    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
-  });
-});
+registerMilestoneLadders(CHECKOUT_TRAINER_MILESTONE_LADDERS, {checkoutTrainer:true});
 const CHECKOUT_BLITZ_MILESTONE_LADDERS = [
   { metric:'blitzscore', idPrefix:'checkout_trainer_blitz_', statNoun:'best Checkout Blitz score',
     descFor: t => `Score ${t.toLocaleString()}+ points in a single 60-second Checkout Blitz run.`,
@@ -8457,14 +8396,7 @@ const CHECKOUT_BLITZ_MILESTONE_LADDERS = [
       { threshold:100, label:'One-Minute Wonder',  icon:'🌟' },
     ] },
 ];
-CHECKOUT_BLITZ_MILESTONE_LADDERS.forEach(ladder=>{
-  ladder.tiers.forEach((tier, i)=>{
-    const id = ladder.idPrefix + tier.threshold;
-    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), checkoutTrainer:true };
-    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
-    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
-  });
-});
+registerMilestoneLadders(CHECKOUT_BLITZ_MILESTONE_LADDERS, {checkoutTrainer:true});
 // Called after every attempt from submitCheckoutAttempt() (both Freeform and
 // Checkout Blitz — a round is a round, per the roadmap doc's explicit ruling
 // that Lifetime Attempts/Optimal/Streak count both modes). Session Endurance
@@ -14517,14 +14449,7 @@ const MARATHON_MILESTONE_LADDERS = [
       { threshold:500, label:'Ultra Marathoner', icon:'🌋' },
     ] },
 ];
-MARATHON_MILESTONE_LADDERS.forEach(ladder=>{
-  ladder.tiers.forEach((tier, i)=>{
-    const id = ladder.idPrefix + tier.threshold;
-    BADGE_INFO[id] = { icon:tier.icon, label:tier.label, desc:ladder.descFor(tier.threshold), marathon:true };
-    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
-    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
-  });
-});
+registerMilestoneLadders(MARATHON_MILESTONE_LADDERS, {marathon:true});
 BADGE_INFO['marathon_iron'] = { icon:'🛡️', label:'Iron', desc:'Reach the Iron fatigue-split tier in a Marathon Mode session.', marathon:true };
 ACH_LABELS['marathon_iron'] = 'Iron 🛡️'; ACH_DURATION['marathon_iron'] = 3000;
 BADGE_INFO['marathon_flatline'] = { icon:'📉', label:'Flat Line', desc:'Complete a Marathon Mode session classified Flat Line.', marathon:true };
