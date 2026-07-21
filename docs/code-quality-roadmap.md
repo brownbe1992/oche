@@ -761,3 +761,33 @@ moved to scoring.js "so they're covered by a committed test"); move them and
 add tests. And the `DB.*` wrapper boundary is unprincipled — three do-nothing
 pass-through GET wrappers vs ~122 direct `Backend.get` calls and split
 player-mutation homes; either drop the dead wrappers or write the rule down.
+
+## Item 60 — `DB.saveGame()` can race ahead of a still-queued `DB.recordTurn()`
+
+Found incidentally while live-verifying item 37's resume rewrite (a test
+script that called `enterTurn()` then `DB.saveGame()` back-to-back with zero
+delay saw every type's resume "revert to the fresh start state," e.g. X01
+back to 501 instead of the score after several visits). Root cause:
+`DB.recordTurn()` serializes its `POST /api/games/:id/turns` writes through
+`DB._queue`/`DB._chain` (`frontend/index.html` ≈ 1690's own comment notes
+this), but `DB.saveGame()` deliberately bypasses that queue and fires its
+`POST /api/games/:id/save` immediately. If the save request reaches the
+server and completes before the still-in-flight turn write does, the game
+gets marked saved with fewer turns recorded than the player actually
+completed — a real (if narrow) data-loss window, not just a test artifact:
+any real user who taps "Pause" fast enough after their last dart (double-tap,
+a laggy connection reordering the two requests, etc.) can hit it, not only
+an automated script with literally zero delay.
+
+Confirmed harmless for typical human timing (hundreds of ms between a last
+dart and manually tapping Pause is enough for the turn write to land first),
+and confirmed the backend registry/rebuild functions themselves are correct
+once the race is avoided — this is purely a client-side request-ordering
+gap, not a bug in item 37's registry dispatch or the `rebuild*State()`
+functions it calls.
+
+**Shape:** have `DB.saveGame()` await `DB._chain` (the same promise
+`DB.recordTurn()` chains onto) before firing its own request, so a save
+can never be sent while a turn write for the same game is still in flight —
+mirroring the ordering guarantee `DB._queue` already gives same-type writes,
+just extended to this one cross-type ordering dependency.

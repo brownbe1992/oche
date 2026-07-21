@@ -36,6 +36,7 @@
 | 4 | Mobile: distribution decision — App Store/Play Store listing vs. simpler sideload distribution (step 6) | `docs/mobile-app-roadmap.md` | Low-Medium |
 | 5 | Localize voice announcements beyond hardcoded English phrases | `docs/voice-announcements-i18n-roadmap.md` | Low-Medium |
 | 6 | UI Overhaul design phase: create comprehensive plan for player page reorganization (step 1) | `docs/ui-overhaul-roadmap.md` | Medium |
+| 60 | `DB.saveGame()` can race ahead of a still-queued `DB.recordTurn()` write for the same game (found live-verifying item 37) — save should await `DB._chain` before firing, mirroring `DB._queue`'s existing same-type ordering guarantee | `docs/code-quality-roadmap.md` | Low |
 | 57 | Frontend efficiency batch — moment-card/webhook config gating (no-op canvas+POST per celebration), pad build-once (22 buttons rebuilt per dart), Chuckin heatmap serialization caching | `docs/code-quality-roadmap.md` | Medium |
 | 51 | Badge-progress fetch-baseline-once (ATW per-visit + Doubles per-dart scans), profile-navigation stats SWR + tab-scoped refetch, tournament-seeding batch read | `docs/code-quality-roadmap.md` | Medium |
 | 45 | Home page: lazy per-combo fetches instead of the ~47-request burst per navigation (SWR paint + keep-cache catch already shipped; the burst remains) | `docs/code-quality-roadmap.md` | Medium |
