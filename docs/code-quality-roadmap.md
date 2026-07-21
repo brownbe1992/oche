@@ -71,23 +71,49 @@ item's done-note. All 7 "Most X Wins"-style copies (the 5 this item named,
 plus X01's own and Killer's) now go through the same `leaderboardSectionHtml`
 helper item 49 introduces.
 
-## Item 37 — Registry-driven resume dispatch (savable ⇒ resumable, structurally)
+## Item 37 — Registry-driven resume dispatch (savable ⇒ resumable, structurally) — ✅ Done
 
-`resumeGame()` (`frontend/index.html` ≈ 10083) is a hardcoded 13-branch
+`resumeGame()` (`frontend/index.html` ≈ 9643) was a hardcoded 13-branch
 else-if chain (per-type rebuild call + field overlay + status message), and
-`_savedGamePosition()` (`backend/db.js` ≈ 1773) is a second parallel
+`_savedGamePosition()` (`backend/db.js` ≈ 1877) was a second parallel
 12-branch copy of the same dispatch with the per-type config-default parsing
-duplicated in both. The failure mode is concrete: a future savable mode that
-misses the frontend branch hits the else-alert **after**
-`getResumeState()` has already consumed the `saved_games` row — the user's
-paused game is destroyed. A missed backend branch renders a blank position
+duplicated in both. The failure mode was concrete: a future savable mode that
+missed the frontend branch would hit the else-alert **after**
+`getResumeState()` had already consumed the `saved_games` row — the user's
+paused game destroyed. A missed backend branch would render a blank position
 label.
 
-**Shape:** a `resume`/`rebuildState` member on each `GAME_TYPES` entry (and a
-`position` member on the backend `GAME_TYPE_REGISTRY`), so registering a
-savable type without resume support is impossible by construction. This is
-the largest single item here; do it with the app runnable for end-to-end
-verification of every savable type.
+Every savable `GAME_TYPES` entry now declares a `resume(ctx) => {overlay,
+statusMsg}` member — `overlay` carries only the fields that type needs to
+override on the generic `game` object (only Baseball's sets `baseballInning`,
+only Gauntlet's sets its five gauntlet-specific fields, etc.), mutating the
+constructed `players` in place with the rebuilt core state. `resumeGame()`
+collapses to: build `players` via `entry.newMatchPlayer()` (using the type's
+declared `ctorArg`, item 40), call `entry.resume(ctx)`, spread the returned
+`overlay` onto the shared `game = {...}` defaults. A type with no `resume`
+member (every non-savable type) can't reach the resume path at all —
+`resumeGame()` checks `GAME_TYPES[gameType].resume` up front and alerts
+"can't be resumed" instead of ever touching `getResumeState()`'s
+already-consumed `saved_games` row.
+
+The backend mirrors this: every savable `GAME_TYPE_REGISTRY` entry now
+declares `rebuild(game, participants, turns)` (replays turns into full
+state) and `position(game, r)` (trims that to the saved-games-list summary
+fields) members; `_savedGamePosition()` collapses to a 4-line generic
+dispatch onto those two members instead of its old 12-branch copy.
+
+Verified live: a real running server + headless-Chromium session drove the
+actual `startGame()`/`throwDart()`/`enterTurn()`/`DB.saveGame()`/
+`resumeGame()` code paths for all 12 savable types (x01, cricket, baseball,
+shanghai, halve_it, pressure_chamber, around_the_clock, around_the_world,
+bobs_27, checkout_ladder, gauntlet, dead_man_walking) — every type's
+resumed state (scores/marks/points/rounds/streaks as applicable), current-
+player/turn order, and announced status message matched what the pre-refactor
+branch would have produced, with no JS errors. The Saved Games list's
+one-line position summary was also re-checked post-refactor for all 12
+types. Backend test suite unaffected (1244 tests, 1238 pass, 6 pre-existing
+unrelated `dart-heatmap` failures). `REFERENCE.md`'s §23 (Saved Games /
+Pause & Resume) updated to describe the registry dispatch.
 
 ## Item 38 — `savedGamePositionLabel()`: dispatch on `sg.gameType`, not field presence — ✅ Done
 
@@ -114,19 +140,24 @@ ties them together — a drifted entry either shows a Save button the server
 **Shape:** serve the savable list with existing game-type data (or assert
 the two lists match in a committed test — the cheap 80% version).
 
-## Item 40 — Declare `newMatchPlayer`'s second-arg shape on the registry
+## Item 40 — Declare `newMatchPlayer`'s second-arg shape on the registry — ✅ Done
 
 `startGame()` (`frontend/index.html` ≈ 5140) and `resumeGame()` (≈ 10074)
-each hardcode their own list of which types' `newMatchPlayer` takes `config`
-vs a start score — and the lists already differ (startGame:
+each hardcoded their own list of which types' `newMatchPlayer` takes `config`
+vs a start score — and the lists had already drifted apart (startGame:
 cricket|doubles_practice|checkout_trainer; resume: cricket only, plus the
-x01 per-player handicap case). They only agree today because the extra types
-happen to be non-savable. The next savable config-constructed mode silently
-builds resumed players from a number where the constructor expects an
+x01 per-player handicap case). They only agreed because the extra types
+happen to be non-savable. The next savable config-constructed mode would have
+silently built resumed players from a number where the constructor expects an
 object.
 
-**Shape:** a per-entry declaration (e.g. `ctorArg: 'config' | 'startScore'`)
-consumed by both call sites. Folds naturally into item 37 if done together.
+`cricket`/`doubles_practice`/`checkout_trainer` now each declare
+`ctorArg: 'config'` on their `GAME_TYPES` entry; both `startGame()` and
+`resumeGame()` read `GAME_TYPES[gameType].ctorArg === 'config'` instead of
+hand-maintaining their own (already-drifted) list, so the two call sites can
+never disagree again. Folded into item 37's implementation as planned.
+Verified via the same live resume pass covering item 37 (cricket's config-
+constructed resume path is exercised end-to-end there).
 
 ## Item 41 — `games.category` as a registry member — ✅ Done
 
