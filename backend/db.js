@@ -3354,9 +3354,20 @@ function getPersonalBests(playerName, mode) {
 // for v1 — Cricket's leg_won signal would need its own MPR-based candidate/script
 // queries, deferred until Cricket ghost support is actually requested.
 //
-// Browsable list of past legs this player won, most recent first — the "browsable
-// list" alternative to picking straight from Personal Bests' best-leg-average entry.
-function getGhostCandidateLegs(playerName, limit) {
+// Browsable list of past legs this player won — the "browsable list"
+// alternative to picking straight from Personal Bests' best-leg-average entry.
+// GHOST_LEG_SORTS whitelists the only 3 orderings the picker's "sort by"
+// control offers (never interpolate a raw request value into ORDER BY —
+// SEC-18 discipline); `sort` outside this set silently falls back to 'recent',
+// same "constrain the payload, don't trust it" posture as the rest of the file.
+const GHOST_LEG_SORTS = {
+  recent: 'date DESC, lastTurnId DESC',
+  // Ties on `avg` break the same way 'recent' does — newest first — rather
+  // than an arbitrary DB-order tie, so paging is stable across requests.
+  best:   'avg DESC, date DESC, lastTurnId DESC',
+  worst:  'avg ASC, date DESC, lastTurnId DESC',
+};
+function getGhostCandidateLegs(playerName, limit, opts) {
   const p = getPlayer(playerName);
   if (!p) return [];
   // docs/security-audit-roadmap.md SEC-23: this is a public, unauthenticated route
@@ -3364,6 +3375,8 @@ function getGhostCandidateLegs(playerName, limit) {
   // over every X01 leg the player has ever played and returned it in one response.
   // Clamp the same way getServerErrors() already clamps its own admin-only `limit`.
   const lim = Math.min(Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 20, 100);
+  const offset = Number.isInteger(Number(opts && opts.offset)) && Number(opts && opts.offset) > 0 ? Number(opts.offset) : 0;
+  const orderBy = GHOST_LEG_SORTS[opts && opts.sort] || GHOST_LEG_SORTS.recent;
   // Ties on `date` (created_at only has second-level resolution — plausible within
   // one fast-inserted test or a quick real session) break on MAX(t.id) DESC, the
   // same "force a deterministic newest-first order" fix winStreak's own tie case
@@ -3379,9 +3392,24 @@ function getGhostCandidateLegs(playerName, limit) {
     WHERE t.player_id = ? AND g.game_type = 'x01'
     GROUP BY t.game_id, t.set_no, t.leg_no
     HAVING SUM(t.checkout) > 0
-    ORDER BY date DESC, lastTurnId DESC
-    LIMIT ?
-  `).all(p.id, lim).map(({ lastTurnId, ...r }) => r);
+    ORDER BY ${orderBy}
+    LIMIT ? OFFSET ?
+  `).all(p.id, lim, offset).map(({ lastTurnId, ...r }) => r);
+}
+// Total count of ghost-race-able legs (same WHERE/HAVING as getGhostCandidateLegs,
+// no LIMIT/OFFSET) — lets the picker's pagination controls know how many pages
+// exist / whether "Next" should be disabled, without fetching every row.
+function getGhostCandidateLegsCount(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return 0;
+  return db.prepare(`
+    SELECT COUNT(*) AS c FROM (
+      SELECT 1 FROM turns t JOIN games g ON g.id = t.game_id
+      WHERE t.player_id = ? AND g.game_type = 'x01'
+      GROUP BY t.game_id, t.set_no, t.leg_no
+      HAVING SUM(t.checkout) > 0
+    )
+  `).get(p.id).c;
 }
 
 // The ordered turn-by-turn, dart-by-dart script for one specific past leg — the
@@ -9112,7 +9140,7 @@ module.exports = {
   getStatBubblesFor, getPersonalBestsFor, getPersonalBestsBatch, KNOWN_GAME_TYPES, SAVABLE_GAME_TYPES,
   startMarathonSession, startNextMarathonLeg, endMarathonSession, getMarathonSessionDetail,
   getMarathonStatBubbles, getMarathonPersonalBests, getMarathonLeaderboard,
-  getGhostCandidateLegs, getGhostLegScript,
+  getGhostCandidateLegs, getGhostCandidateLegsCount, getGhostLegScript,
   getCricketStatBubbles, getCricketNineMarksStats, getCricketPersonalBests,
   getBaseballStatBubbles, getBaseballPersonalBests,
   getBaseballPerfectInningsStats, getBaseballRpiLeaderboard, getBaseballWinLeaderboard, getBaseballPerfectGameStats,

@@ -998,10 +998,19 @@ the Player Profile's "👻" Race-this-leg button (§ Ghost Opponent, below).
 X01-only. Two backend functions in `backend/db.js`, both scoped so a script/leg list
 can only ever be built from legs the requesting player genuinely won themselves:
 
-- **`getGhostCandidateLegs(playerName, limit=20)`**: every X01 leg this player has
-  won (`turns.checkout=1`), most recent first, each row giving `{gameId, setNo,
-  legNo, date, category, practice, avg, darts}` — the browsable "past legs" list.
-  `GET /api/players/ghost-legs?name=&limit=`.
+- **`getGhostCandidateLegs(playerName, limit=20, opts)`**: every X01 leg this player
+  has won (`turns.checkout=1`), each row giving `{gameId, setNo, legNo, date,
+  category, practice, avg, darts}` — the browsable "past legs" list. `opts.sort`
+  picks the ordering (`'recent'` — most recent first, the default and the
+  fallback for any unrecognized value; `'best'`/`'worst'` — by `avg` descending/
+  ascending), `opts.offset` pages through it (paired with `limit`, both used
+  directly as SQL `LIMIT`/`OFFSET`). **`getGhostCandidateLegsCount(playerName)`**
+  returns the total matching row count (same `WHERE`/`HAVING`, no `LIMIT`) so the
+  picker's pagination controls know how many pages exist without fetching every
+  row. `GET /api/players/ghost-legs?name=&limit=&sort=&offset=` returns
+  `{legs: [...], total}` (Player Profile/New Game's leg picker: a "sort by"
+  dropdown — Most recent/Best average/Worst average — and a "per page" dropdown,
+  10/25/50/100, default 10, both resetting to page 1 when changed).
 - **`getGhostLegScript(gameId, setNo, legNo, playerName)`**: that leg's turns in
   playback order, each with its raw `{sector, multiplier}` darts, plus `category`,
   `config`, and the leg's actual recorded `outMode` (double/single-out) — returns
@@ -1038,6 +1047,13 @@ surfaced as a plain "👻 Ghost races: W–L" line next to the Player Profile's
 "Race this leg" button (`loadGhostRaceRecord()`). A win also checks the 👻 Ghost
 Slayer badge (§4's badge table) — `recordGhostRace()`'s `ghostSlayerNewlyEarned`
 return value tells `onLegWon()` whether to run the usual celebration sequence.
+
+The post-match GAME OVER screen gets a **"🔁 Repeat this leg"** button (next to
+"New game"/"Share", hidden for a tournament match) whenever `game.hasGhost &&
+game.ghostSourceLeg` — `repeatGhostLeg()` just calls `raceLeg()` again with that
+same `{gameId, setNo, legNo}` triple, landing back on the New Game screen with
+the identical leg preselected (one Start click away), rather than a silent
+auto-restart.
 
 ### Top Finishes / Checkout Routes
 

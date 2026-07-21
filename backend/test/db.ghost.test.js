@@ -85,6 +85,63 @@ describe('getGhostCandidateLegs', () => {
     assert.equal(db.getGhostCandidateLegs(name, 999999999).length, 100, 'clamped to the 100-row ceiling');
     assert.equal(db.getGhostCandidateLegs(name, 50).length, 50, 'a legitimate smaller explicit limit is unaffected');
   });
+
+  test('sort:"best"/"worst" order by leg average instead of recency; an unknown sort falls back to recent', () => {
+    const name = 'Ghost_Sort';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 3, practice: 1, players: [{ name }] });
+    // Leg 1: avg 60 (oldest); Leg 2: avg 170 (highest avg); Leg 3: avg 100 (most recent)
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 60, checkout: true, checkoutPoints: 60,
+      darts: [{ sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }] });
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 2, scored: 170, checkout: true, checkoutPoints: 170,
+      darts: [{ sector: 20, multiplier: 3 }, { sector: 20, multiplier: 3 }, { sector: 25, multiplier: 2 }] });
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 3, scored: 100, checkout: true, checkoutPoints: 100,
+      darts: [{ sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }] });
+
+    assert.deepEqual(db.getGhostCandidateLegs(name, 20, { sort: 'best' }).map(l => l.legNo), [2, 3, 1],
+      'best-average first');
+    assert.deepEqual(db.getGhostCandidateLegs(name, 20, { sort: 'worst' }).map(l => l.legNo), [1, 3, 2],
+      'worst-average first');
+    assert.deepEqual(db.getGhostCandidateLegs(name, 20, { sort: 'bogus' }).map(l => l.legNo), [3, 2, 1],
+      'an unrecognized sort value silently falls back to recency, not a SQL error');
+  });
+
+  test('offset pages through the result set, in step with whatever sort is active', () => {
+    const name = 'Ghost_Offset';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 5, practice: 1, players: [{ name }] });
+    for (let leg = 1; leg <= 5; leg++) {
+      db.addTurn(g.gameId, { player: name, set: 1, leg, scored: 100, checkout: true, checkoutPoints: 100,
+        darts: [{ sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }] });
+    }
+    const page1 = db.getGhostCandidateLegs(name, 2, { offset: 0 });
+    const page2 = db.getGhostCandidateLegs(name, 2, { offset: 2 });
+    assert.deepEqual(page1.map(l => l.legNo), [5, 4]);
+    assert.deepEqual(page2.map(l => l.legNo), [3, 2], 'offset 2 continues where offset 0 left off, not overlapping');
+  });
+});
+
+describe('getGhostCandidateLegsCount', () => {
+  test('counts every ghost-race-able leg regardless of limit/offset, for pagination controls', () => {
+    const name = 'Ghost_Count';
+    db.addPlayer(name);
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 3, practice: 1, players: [{ name }] });
+    for (let leg = 1; leg <= 3; leg++) {
+      db.addTurn(g.gameId, { player: name, set: 1, leg, scored: 100, checkout: true, checkoutPoints: 100,
+        darts: [{ sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }] });
+    }
+    // A 4th leg with no checkout doesn't count, matching getGhostCandidateLegs' own exclusion.
+    db.addTurn(g.gameId, { player: name, set: 1, leg: 4, scored: 60,
+      darts: [{ sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }] });
+
+    assert.equal(db.getGhostCandidateLegsCount(name), 3);
+    assert.equal(db.getGhostCandidateLegs(name, 1).length, 1, 'a small limit truncates the list...');
+    assert.equal(db.getGhostCandidateLegsCount(name), 3, '...but never affects the count');
+  });
+
+  test('an unknown player counts as zero', () => {
+    assert.equal(db.getGhostCandidateLegsCount('Ghost_Count_Nobody'), 0);
+  });
 });
 
 describe('getGhostLegScript', () => {

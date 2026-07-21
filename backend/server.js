@@ -803,8 +803,14 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { count: db.getBounceOutCount(url.searchParams.get('name'), url.searchParams.get('gameType'), url.searchParams.get('mode')) });
     }
     if (p === '/api/players/ghost-legs' && m === 'GET') {
+      const name = url.searchParams.get('name');
       const limit = url.searchParams.get('limit');
-      return send(res, 200, db.getGhostCandidateLegs(url.searchParams.get('name'), limit));
+      const sort = url.searchParams.get('sort');
+      const offset = url.searchParams.get('offset');
+      return send(res, 200, {
+        legs: db.getGhostCandidateLegs(name, limit, { sort, offset }),
+        total: db.getGhostCandidateLegsCount(name),
+      });
     }
     if (p === '/api/players/ghost-script' && m === 'GET') {
       const script = db.getGhostLegScript(

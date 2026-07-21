@@ -590,6 +590,15 @@
      wrapped across 6+ lines and swamped the panel it was meant to introduce. */
   .subtabs{margin-bottom:14px}
   .subtabs label.field{margin-bottom:6px}
+  /* Ghost leg picker's sort/page-size controls — a plain flex row of label+select
+     pairs (same .field/.date-input primitives used everywhere else), wrapping on
+     narrow screens rather than the 2-column grid the pager row below uses, since
+     these two controls are independent of each other. */
+  .ghost-leg-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin-bottom:10px}
+  .ghost-leg-toolbar label.field{margin-bottom:0}
+  .ghost-leg-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}
+  .ghost-leg-pager .btn{padding:8px 14px}
+  .ghost-leg-pager .btn[disabled]{opacity:.4;cursor:default}
   /* Settings collapsible sections — shared by ~15 headers/chevrons/intro paragraphs
      that previously each carried these as verbatim inline styles. */
   .settings-title{font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between}
@@ -3587,33 +3596,90 @@ function raceLeg(playerName, gameId, setNo, legNo){
   setMode('ghost');
   show('setup');
 }
+// "Repeat this leg" (post-match, Ghost Opponent games only) — the just-finished
+// game's own game.ghostSourceLeg identifies the exact leg that was raced, so
+// this is just raceLeg() called with that same triple instead of the player
+// re-opening the picker and re-finding it.
+function repeatGhostLeg(){
+  if(!game || !game.hasGhost || !game.ghostSourceLeg) return;
+  raceLeg(game.players[0].name, game.ghostSourceLeg.gameId, game.ghostSourceLeg.setNo, game.ghostSourceLeg.legNo);
+}
+// Sort/page state for the leg picker — module-level (not part of `setup`)
+// since it's purely a browsing preference, not something a started game needs
+// to remember. Reset to the defaults whenever a fresh player is chosen (see
+// renderGhostLegPicker below), so switching players doesn't carry over a
+// "page 3" from someone else's much longer history.
+let ghostLegSort = 'recent';       // 'recent' | 'best' | 'worst'
+let ghostLegPageSize = 10;         // 10 | 25 | 50 | 100
+let ghostLegPage = 0;              // 0-indexed
 function renderGhostLegPicker(){
   const box = document.getElementById('ghost-leg-picker-body');
   if(!box) return;
   const name = setup.slots[0];
   setup.ghostLeg = null;
   if(!name){ box.innerHTML = `<p class="pp-meta">Choose a player above to see their past won legs.</p>`; return; }
+  if(box._lastPlayer !== name){ ghostLegSort = 'recent'; ghostLegPageSize = 10; ghostLegPage = 0; box._lastPlayer = name; }
+  loadGhostLegPage();
+}
+function loadGhostLegPage(){
+  const box = document.getElementById('ghost-leg-picker-body');
+  if(!box) return;
+  const name = setup.slots[0];
+  if(!name) return;
   box.innerHTML = `<p class="pp-meta">Loading…</p>`;
-  Backend.get(`/api/players/ghost-legs?name=${encodeURIComponent(name)}&limit=20`).then(legs=>{
+  const offset = ghostLegPage * ghostLegPageSize;
+  Backend.get(`/api/players/ghost-legs?name=${encodeURIComponent(name)}&limit=${ghostLegPageSize}&offset=${offset}&sort=${ghostLegSort}`).then(data=>{
     if(setup.mode !== 'ghost' || setup.slots[0] !== name) return; // a newer selection took over
+    const legs = (data && data.legs) || [];
+    const total = (data && data.total) || 0;
     box._legs = legs;
-    if(!legs || !legs.length){
+    box._total = total;
+    if(!total){
       box.innerHTML = `<p class="pp-meta">No won legs yet — win a leg in H2H or Practice mode first, then come back to race it.</p>`;
       return;
     }
-    let idx = 0;
+    let idx = legs.length ? 0 : -1;
     if(_ghostLegTarget){
       const m = legs.findIndex(l=>l.gameId===_ghostLegTarget.gameId && l.setNo===_ghostLegTarget.setNo && l.legNo===_ghostLegTarget.legNo);
       if(m>=0) idx = m;
       _ghostLegTarget = null;
     }
-    setup.ghostLeg = legs[idx];
-    renderGhostLegList(legs);
+    setup.ghostLeg = idx>=0 ? legs[idx] : null;
+    renderGhostLegList(legs, total);
   }).catch(()=>{ box.innerHTML = `<p class="pp-meta">Couldn't load past legs.</p>`; });
 }
-function renderGhostLegList(legs){
+function setGhostLegSort(sort){
+  ghostLegSort = sort;
+  ghostLegPage = 0;   // a re-sorted list starts back at page 1
+  loadGhostLegPage();
+}
+function setGhostLegPageSize(size){
+  ghostLegPageSize = Number(size) || 10;
+  ghostLegPage = 0;
+  loadGhostLegPage();
+}
+function goToGhostLegPage(delta){
+  ghostLegPage = Math.max(0, ghostLegPage + delta);
+  loadGhostLegPage();
+}
+function renderGhostLegList(legs, total){
   const box = document.getElementById('ghost-leg-picker-body');
-  box.innerHTML = legs.map((l,i)=>{
+  const pageCount = Math.max(1, Math.ceil(total / ghostLegPageSize));
+  const curPage = ghostLegPage + 1;
+  const toolbar = `
+    <div class="ghost-leg-toolbar">
+      <label class="field" for="ghost-leg-sort" style="margin-bottom:0">Sort by</label>
+      <select class="date-input" id="ghost-leg-sort" style="width:auto" onchange="setGhostLegSort(this.value)">
+        <option value="recent"${ghostLegSort==='recent'?' selected':''}>Most recent</option>
+        <option value="best"${ghostLegSort==='best'?' selected':''}>Best average</option>
+        <option value="worst"${ghostLegSort==='worst'?' selected':''}>Worst average</option>
+      </select>
+      <label class="field" for="ghost-leg-pagesize" style="margin-bottom:0">Per page</label>
+      <select class="date-input" id="ghost-leg-pagesize" style="width:auto" onchange="setGhostLegPageSize(this.value)">
+        ${[10,25,50,100].map(n=>`<option value="${n}"${ghostLegPageSize===n?' selected':''}>${n}</option>`).join('')}
+      </select>
+    </div>`;
+  const rows = legs.map((l,i)=>{
     const date = parseSqliteTimestamp(l.date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
     const sel = setup.ghostLeg && setup.ghostLeg.gameId===l.gameId && setup.ghostLeg.setNo===l.setNo && setup.ghostLeg.legNo===l.legNo;
     return `<button class="btn ${sel?'btn-primary':'btn-ghost'}" style="display:flex;justify-content:space-between;width:100%;margin-bottom:6px;text-align:left" onclick="selectGhostLeg(${i})">
@@ -3621,13 +3687,20 @@ function renderGhostLegList(legs){
       <span>${l.avg.toFixed(1)} avg · ${l.darts} darts</span>
     </button>`;
   }).join('');
+  const pager = pageCount>1 ? `
+    <div class="ghost-leg-pager">
+      <button class="btn btn-ghost" ${curPage<=1?'disabled':''} onclick="goToGhostLegPage(-1)">← Prev</button>
+      <span class="pp-meta">Page ${curPage} of ${pageCount} · ${total} leg${total===1?'':'s'}</span>
+      <button class="btn btn-ghost" ${curPage>=pageCount?'disabled':''} onclick="goToGhostLegPage(1)">Next →</button>
+    </div>` : `<p class="pp-meta" style="margin-top:6px">${total} leg${total===1?'':'s'}</p>`;
+  box.innerHTML = toolbar + (rows || `<p class="pp-meta">No legs on this page.</p>`) + pager;
 }
 function selectGhostLeg(i){
   const box = document.getElementById('ghost-leg-picker-body');
   const legs = box && box._legs;
   if(!legs || !legs[i]) return;
   setup.ghostLeg = legs[i];
-  renderGhostLegList(legs);
+  renderGhostLegList(legs, box._total);
 }
 
 /* ---------- "Drill this checkout" deep link (docs/archive/checkout-drill-link-roadmap.md) ----------
@@ -11923,6 +11996,13 @@ function finishUnit(kind, winner){
     const nextBtn = game.tournamentMatchId
       ? `<button class="btn btn-primary" onclick="show('tournament')">Back to bracket</button>`
       : `<button class="btn btn-primary" onclick="show('setup')">New game</button>`;
+    // Ghost Opponent: one-click way back into the exact same race, rather than
+    // making the player re-open the leg picker and re-find it — same
+    // "navigate to setup pre-filled, one Start click away" shape the Daily
+    // Challenge "Try Again" button already established (setMode('challenge');
+    // show('setup')), not a silent auto-start.
+    const repeatGhostBtn = (game.hasGhost && game.ghostSourceLeg && !game.tournamentMatchId)
+      ? `<button class="btn btn-ghost" onclick="repeatGhostLeg()">🔁 Repeat this leg</button>` : '';
     // Bob's 27's own tiny run-summary block — h2hStatsHtml() reads X01/
     // Baseball-shaped player fields (score/doubleOut, totalRuns/inningRuns)
     // that don't exist on a bobs_27 player, same reasoning Cricket's own ''
@@ -11971,6 +12051,7 @@ function finishUnit(kind, winner){
       <div id="elo-delta-banner"></div>
       <div class="btn-row" style="justify-content:center">
         ${nextBtn}
+        ${repeatGhostBtn}
         ${matchShareBtn}
       </div>${isCricket || isBobs27 || isGauntlet || isKiller || isDeadManWalking ? '' : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}${killerSummary}${deadManWalkingSummary}</div>`;
   } else {
