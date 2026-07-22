@@ -179,6 +179,11 @@
   .cs-throw-lbl{font-size:2vmin;color:var(--muted);flex:none}
   .cs-throw-lbl b{color:var(--gold)}
   .cs-throw-row .darts{flex:1}
+  /* Pressure Chamber's live round banner — themed through the shared --gold/
+     --muted tokens (matching .pcard.active/.cs-foot .cs-label) instead of a
+     one-off inline hex palette (#c9a227/#999) that had already drifted
+     slightly from --gold's own #d9b46a. */
+  .pc-banner{margin-top:10px;padding:12px;border:2px solid var(--gold);border-radius:10px;text-align:center;background:rgba(217,180,106,.08);color:var(--muted)}
 
   /* Just Chuckin' It: dartboard heatmap alongside the session stats — side by
      side in landscape (plenty of width, since this mode is always solo so the
@@ -220,6 +225,12 @@
   .flash.shot{background:rgba(47,160,80,.22);color:#9bf0ba}
   body.colorblind .flash.bust{background:rgba(226,113,29,.22);color:#ffb570}
   body.colorblind .flash.shot{background:rgba(47,143,217,.22);color:#9cd2ff}
+  /* Killer's elimination — visually identical to .flash.bust today (both are a
+     full-card "this is over for you" red flash), but its own class name so the
+     two concepts can diverge later without a shared-name coincidence coupling
+     them together. */
+  .flash.eliminated{background:rgba(234,96,88,.22);color:#ffb4ad}
+  body.colorblind .flash.eliminated{background:rgba(226,113,29,.22);color:#ffb570}
 
   /* full-screen banner for leg/set/game results */
   .banner{position:fixed;top:0;right:0;bottom:0;left:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:1vmin;
@@ -722,6 +733,7 @@ portraitQuery.addEventListener('change', (e)=>{
 
 function spawnConfetti(root, count){
   const colors=['#d9b46a','#efe7d2','#f4e3b2','#caa94e'];
+  const pieces = [];
   for(let i=0;i<count;i++){
     const c=document.createElement('div');
     c.className='confetti';
@@ -730,8 +742,12 @@ function spawnConfetti(root, count){
     c.style.animationDuration=(1.8+Math.random()*1.6)+'s';
     c.style.animationDelay=(Math.random()*0.6)+'s';
     root.appendChild(c);
-    setTimeout(()=>c.remove(), 4500);
+    pieces.push(c);
   }
+  // One shared cleanup timer instead of `count` (up to 90) independent ones —
+  // every piece's animation is done well within 4.5s (max duration 3.4s + max
+  // delay 0.6s), so a single timer removing them all is equivalent.
+  setTimeout(()=>pieces.forEach(c=>c.remove()), 4500);
 }
 
 // Chalk-dust burst — the live scoreboard's signature moment (design pass: "the
@@ -853,6 +869,15 @@ function formatCheckoutRoute(route){
   return esc(route).replace(/ /g,'  →  ');
 }
 
+// The single-most-recent-dart throwbox — Doubles Practice/Around the
+// Clock/Around the World are all guided drills that show just the one dart
+// just thrown (unlike the 3-slot buildDartSlots() visits every other mode
+// uses), differing only in whether an extra badge (Around the World's "NEW!"
+// lifetime-outcome chip) follows it.
+function buildSingleDartBox(dart, extraBadgeHtml){
+  return `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(dart.label)}">${esc(dart.label)}</div></div>${extraBadgeHtml||''}</div>`;
+}
+
 // The BUST/won flash shown over an active player's card — identical shape
 // across X01, Checkout Ladder, and Dead Man Walking, differing only in the
 // win label text.
@@ -875,6 +900,58 @@ function buildScorecardHeadCells(players, active){
       ${isActive?'<span class="cs-throw-chip">▸ throwing</span>':''}
     </div>`;
   }).join('');
+}
+
+// The scorecard-layout footer total-row cells — identical across baseball/
+// shanghai/halve_it/pressure_chamber, differing only in which field of `p`
+// holds the running total.
+function buildScorecardFootCells(players, active, valueFn){
+  return players.map((p,i)=>{
+    const isActive = i===active;
+    return `<div class="cs-cell${isActive?' active':''}"><span class="cs-points${isActive?' active':''}">${num(valueFn(p))}</span></div>`;
+  }).join('');
+}
+
+// The scorecard-layout trailing "who's throwing + their darts" row — identical
+// across every cs-table renderer (cricket, baseball, shanghai, halve_it,
+// pressure_chamber, bobs_27), differing only in the label text.
+function buildScorecardThrowRow(labelHtml, darts){
+  return `<div class="cs-throw-row">
+    <span class="cs-throw-lbl">${labelHtml}</span>
+    <div class="darts">${buildDartSlots(darts)}</div>
+  </div>`;
+}
+
+// "Round N of M" / "Inning N of 9" overrun bookkeeping — baseball/shanghai/
+// halve_it/pressure_chamber's scorecards all extend their row count past the
+// game's normal length once play runs long (extra innings/rounds), each
+// re-deriving the same "how many rows, and what suffix to show" logic.
+function roundOverrunInfo(current, max, noun){
+  return {
+    lastCount: Math.max(max, current),
+    suffix: current > max ? ` (extra ${noun})` : '',
+  };
+}
+
+// The end-of-leg summary card shell — identical across every game type's
+// summary(): a name (+ optional 🏆 crown), an optional extra name-suffix
+// badge (Killer's ☠️), and a row of {value,label} stat pairs. Only the stats
+// shown differ per type.
+function buildSummaryCard(p, stats, opts){
+  const o = opts || {};
+  const winnerClass = o.noWinner ? '' : (p.won ? ' winner' : '');
+  const crown = o.noWinner ? '' : (p.won ? '<span class="sum-crown">🏆</span>' : '');
+  const nameSuffix = o.nameSuffix ? o.nameSuffix(p) : '';
+  const statsHtml = stats.map(st => `
+          <div class="sum-stat">
+            <div class="sv">${st.value}</div>
+            <div class="sl">${st.label}</div>
+          </div>`).join('');
+  return `
+      <div class="sum-card${winnerClass}">
+        <div class="sum-name">${escapeHtml(p.name)}${crown}${nameSuffix}</div>
+        <div class="sum-stats">${statsHtml}</div>
+      </div>`;
 }
 
 // Standard dartboard number ordering, clockwise from the top — mirror-copied
@@ -1052,16 +1129,13 @@ function buildClockBoard(hitNumbers){
 // array of `${sector}:${mult}` strings (Around the Clock always uses mult 1) —
 // index.html's playerSnapshotAroundTheClock()/playerSnapshotAroundTheWorld()
 // send hitNumbers/hitOutcomes respectively, normalized to that shape below.
-function buildOutcomeGridCompact(hitKeys, cellsMode){
+function buildOutcomeGridCompact(hitKeys){
   const hitSet = new Set(hitKeys||[]);
   const cell = (label, key, title) => {
     const hit = hitSet.has(key);
     return `<div title="${esc(title)}" style="width:24px;height:24px;border-radius:.5vmin;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;position:relative;
       background:${hit?'var(--gold)':'rgba(255,255,255,.08)'};color:${hit?'#111':'#8a8a80'}">${label}${hit ? '<span aria-hidden="true" style="position:absolute;bottom:-1px;right:0;font-size:7px">✓</span>' : ''}</div>`;
   };
-  if(cellsMode === 'numbers'){
-    return `<div style="display:flex;flex-wrap:wrap;gap:3px">${Array.from({length:20},(_,i)=>i+1).map(n=>cell(String(n), `${n}:1`, 'Number '+n)).join('')}</div>`;
-  }
   const numberCells = Array.from({length:20},(_,i)=>i+1).map(n=>
     `<div style="display:flex;gap:2px">${cell('S'+n,`${n}:1`,'Single '+n)}${cell('D'+n,`${n}:2`,'Double '+n)}${cell('T'+n,`${n}:3`,'Treble '+n)}</div>`
   ).join('');
@@ -1159,24 +1233,11 @@ const renderers = {
       </div>`;
     },
     summary(p){
-      return `
-      <div class="sum-card ${p.won?'winner':''}">
-        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}</div>
-        <div class="sum-stats">
-          <div class="sum-stat">
-            <div class="sv">${p.avg!=null?esc(p.avg):'—'}</div>
-            <div class="sl">Average</div>
-          </div>
-          <div class="sum-stat">
-            <div class="sv">${num(p.darts)}</div>
-            <div class="sl">Darts</div>
-          </div>
-          <div class="sum-stat">
-            <div class="sv">${num(p.busts)}</div>
-            <div class="sl">Busts</div>
-          </div>
-        </div>
-      </div>`;
+      return buildSummaryCard(p, [
+        { value: p.avg!=null?esc(p.avg):'—', label:'Average' },
+        { value: num(p.darts), label:'Darts' },
+        { value: num(p.busts), label:'Busts' },
+      ]);
     }
   },
   cricket: {
@@ -1203,10 +1264,7 @@ const renderers = {
         return `<div class="cs-row"><div class="cs-label">${lbl}</div>${cells}</div>`;
       }).join('');
 
-      const pointCells = players.map((p,i)=>{
-        const isActive = i===active;
-        return `<div class="cs-cell${isActive?' active':''}"><span class="cs-points${isActive?' active':''}">${num(p.points)}</span></div>`;
-      }).join('');
+      const pointCells = buildScorecardFootCells(players, active, p=>p.points);
 
       const thrower = players[active];
       // docs/archive/cutthroat-cricket-roadmap.md: the one visible difference from
@@ -1220,27 +1278,14 @@ const renderers = {
           ${bodyRows}
           <div class="cs-row cs-foot"><div class="cs-label">${ptsLabel}</div>${pointCells}</div>
         </div>
-        <div class="cs-throw-row">
-          <span class="cs-throw-lbl">${thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche`:''}</span>
-          <div class="darts">${buildDartSlots(s.darts)}</div>
-        </div>
+        ${buildScorecardThrowRow(thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche`:'', s.darts)}
       </div>`;
     },
     summary(p){
-      return `
-      <div class="sum-card ${p.won?'winner':''}">
-        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}</div>
-        <div class="sum-stats">
-          <div class="sum-stat">
-            <div class="sv">${num(p.points)}</div>
-            <div class="sl">Points</div>
-          </div>
-          <div class="sum-stat">
-            <div class="sv">${num(p.closed)}</div>
-            <div class="sl">Closed</div>
-          </div>
-        </div>
-      </div>`;
+      return buildSummaryCard(p, [
+        { value: num(p.points), label:'Points' },
+        { value: num(p.closed), label:'Closed' },
+      ]);
     }
   },
   // Baseball (docs/game-modes-roadmap.md): same shared chalkboard-table shape as
@@ -1251,7 +1296,7 @@ const renderers = {
       const players = s.players;
       const active = s.currentIndex;
       const inning = (s.modeState||{}).baseballInning || 1;
-      const lastInning = Math.max(9, inning);
+      const { lastCount: lastInning, suffix: inningSuffix } = roundOverrunInfo(inning, 9, 'innings');
       const rows = [];
       for(let i=1;i<=lastInning;i++){
         const isCurrentInning = i===inning;
@@ -1264,12 +1309,7 @@ const renderers = {
       }
 
       const headCells = buildScorecardHeadCells(players, active);
-
-      const totalCells = players.map((p,i)=>{
-        const isActive = i===active;
-        return `<div class="cs-cell${isActive?' active':''}"><span class="cs-points${isActive?' active':''}">${num(p.totalRuns)}</span></div>`;
-      }).join('');
-
+      const totalCells = buildScorecardFootCells(players, active, p=>p.totalRuns);
       const thrower = players[active];
 
       return `<div class="cs-wrap" style="--cs-cols:${players.length}">
@@ -1278,23 +1318,11 @@ const renderers = {
           ${rows.join('')}
           <div class="cs-row cs-foot"><div class="cs-label">Runs</div>${totalCells}</div>
         </div>
-        <div class="cs-throw-row">
-          <span class="cs-throw-lbl">${thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Inning ${Math.min(inning,9)} of 9${inning>9?' (extra innings)':''}`:''}</span>
-          <div class="darts">${buildDartSlots(s.darts)}</div>
-        </div>
+        ${buildScorecardThrowRow(thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Inning ${Math.min(inning,9)} of 9${inningSuffix}`:'', s.darts)}
       </div>`;
     },
     summary(p){
-      return `
-      <div class="sum-card ${p.won?'winner':''}">
-        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}</div>
-        <div class="sum-stats">
-          <div class="sum-stat">
-            <div class="sv">${num(p.totalRuns)}</div>
-            <div class="sl">Runs</div>
-          </div>
-        </div>
-      </div>`;
+      return buildSummaryCard(p, [{ value: num(p.totalRuns), label:'Runs' }]);
     }
   },
   // Shanghai (docs/archive/shanghai-roadmap.md): same shared chalkboard-table shape as
@@ -1308,7 +1336,7 @@ const renderers = {
       const active = s.currentIndex;
       const maxRounds = (s.modeState||{}).shanghaiMaxRounds || 7;
       const round = (s.modeState||{}).shanghaiRound || 1;
-      const lastRound = Math.max(maxRounds, round);
+      const { lastCount: lastRound, suffix: roundSuffix } = roundOverrunInfo(round, maxRounds, 'rounds');
       const rows = [];
       for(let i=1;i<=lastRound;i++){
         const isCurrentRound = i===round;
@@ -1322,12 +1350,7 @@ const renderers = {
       }
 
       const headCells = buildScorecardHeadCells(players, active);
-
-      const totalCells = players.map((p,i)=>{
-        const isActive = i===active;
-        return `<div class="cs-cell${isActive?' active':''}"><span class="cs-points${isActive?' active':''}">${num(p.totalPoints)}</span></div>`;
-      }).join('');
-
+      const totalCells = buildScorecardFootCells(players, active, p=>p.totalPoints);
       const thrower = players[active];
 
       return `<div class="cs-wrap" style="--cs-cols:${players.length}">
@@ -1336,23 +1359,11 @@ const renderers = {
           ${rows.join('')}
           <div class="cs-row cs-foot"><div class="cs-label">Points</div>${totalCells}</div>
         </div>
-        <div class="cs-throw-row">
-          <span class="cs-throw-lbl">${thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Round ${Math.min(round,maxRounds)} of ${maxRounds}${round>maxRounds?' (extra rounds)':''}`:''}</span>
-          <div class="darts">${buildDartSlots(s.darts)}</div>
-        </div>
+        ${buildScorecardThrowRow(thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Round ${Math.min(round,maxRounds)} of ${maxRounds}${roundSuffix}`:'', s.darts)}
       </div>`;
     },
     summary(p){
-      return `
-      <div class="sum-card ${p.won?'winner':''}">
-        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}</div>
-        <div class="sum-stats">
-          <div class="sum-stat">
-            <div class="sv">${num(p.totalPoints)}</div>
-            <div class="sl">Points</div>
-          </div>
-        </div>
-      </div>`;
+      return buildSummaryCard(p, [{ value: num(p.totalPoints), label:'Points' }]);
     }
   },
   // Halve-It (docs/archive/halve-it-roadmap.md): same shared chalkboard-table
@@ -1369,7 +1380,7 @@ const renderers = {
       const targets = ((s.modeState||{}).halveItTargets && s.modeState.halveItTargets.length) ? s.modeState.halveItTargets : [{sector:20}];
       const maxRounds = targets.length;
       const round = (s.modeState||{}).halveItRound || 1;
-      const lastRound = Math.max(maxRounds, round);
+      const { lastCount: lastRound, suffix: roundSuffix } = roundOverrunInfo(round, maxRounds, 'rounds');
       const targetAt = i => targets[Math.min(i, maxRounds) - 1];
       const targetLabel = t => {
         if(!t) return '';
@@ -1391,12 +1402,7 @@ const renderers = {
       }
 
       const headCells = buildScorecardHeadCells(players, active);
-
-      const totalCells = players.map((p,i)=>{
-        const isActive = i===active;
-        return `<div class="cs-cell${isActive?' active':''}"><span class="cs-points${isActive?' active':''}">${num(p.total)}</span></div>`;
-      }).join('');
-
+      const totalCells = buildScorecardFootCells(players, active, p=>p.total);
       const thrower = players[active];
 
       return `<div class="cs-wrap" style="--cs-cols:${players.length}">
@@ -1405,23 +1411,11 @@ const renderers = {
           ${rows.join('')}
           <div class="cs-row cs-foot"><div class="cs-label">Total</div>${totalCells}</div>
         </div>
-        <div class="cs-throw-row">
-          <span class="cs-throw-lbl">${thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Round ${Math.min(round,maxRounds)} of ${maxRounds}${round>maxRounds?' (extra rounds)':''}, target ${escapeHtml(targetLabel(targetAt(round)))}`:''}</span>
-          <div class="darts">${buildDartSlots(s.darts)}</div>
-        </div>
+        ${buildScorecardThrowRow(thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Round ${Math.min(round,maxRounds)} of ${maxRounds}${roundSuffix}, target ${escapeHtml(targetLabel(targetAt(round)))}`:'', s.darts)}
       </div>`;
     },
     summary(p){
-      return `
-      <div class="sum-card ${p.won?'winner':''}">
-        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}</div>
-        <div class="sum-stats">
-          <div class="sum-stat">
-            <div class="sv">${num(p.total)}</div>
-            <div class="sl">Total</div>
-          </div>
-        </div>
-      </div>`;
+      return buildSummaryCard(p, [{ value: num(p.total), label:'Total' }]);
     }
   },
   // The Pressure Chamber (docs/archive/pressure-chamber-roadmap.md): same shared
@@ -1438,10 +1432,11 @@ const renderers = {
     scorecard(s, L){
       const players = s.players;
       const active = s.currentIndex;
-      const cards = Array.isArray((s.modeState||{}).pressureChamberCards) ? s.modeState.pressureChamberCards : [];
+      const ms = s.modeState || {};
+      const cards = Array.isArray(ms.pressureChamberCards) ? ms.pressureChamberCards : [];
       const maxRounds = cards.length || 15;
-      const round = (s.modeState||{}).pressureChamberRound || 1;
-      const lastRound = Math.max(maxRounds, round);
+      const round = ms.pressureChamberRound || 1;
+      const { lastCount: lastRound } = roundOverrunInfo(round, maxRounds, 'rounds');
       const cardAt = i => cards[Math.min(i, maxRounds) - 1];
       const OUTCOME_ICON = { full:'✅', partial:'➗', miss:'❌' };
       const rows = [];
@@ -1458,21 +1453,16 @@ const renderers = {
 
       const headCells = buildScorecardHeadCells(players, active);
 
-      const totalCells = players.map((p,i)=>{
-        const isActive = i===active;
-        return `<div class="cs-cell${isActive?' active':''}"><span class="cs-points${isActive?' active':''}">${num(p.totalCp)}</span></div>`;
-      }).join('');
-
+      const totalCells = buildScorecardFootCells(players, active, p=>p.totalCp);
       const thrower = players[active];
 
       const liveCard = cardAt(round);
       const noWarmup = liveCard && liveCard.modifier && liveCard.modifier.key === 'no_warmup';
-      const pcDeadline = (s.modeState||{}).pressureChamberDeadline;
-      const remainingSec = (noWarmup && pcDeadline != null) ? Math.max(0, Math.ceil((pcDeadline - Date.now())/1000)) : null;
-      const banner = liveCard ? `<div style="margin-top:10px;padding:12px;border:2px solid #c9a227;border-radius:10px;text-align:center;background:rgba(201,162,39,0.08)">
+      const remainingSec = (noWarmup && ms.pressureChamberDeadline != null) ? Math.max(0, Math.ceil((ms.pressureChamberDeadline - Date.now())/1000)) : null;
+      const banner = liveCard ? `<div class="pc-banner">
         <div style="font-size:22px;font-weight:800">${escapeHtml(liveCard.target.label)}</div>
         <div style="font-size:16px;font-weight:700;margin-top:4px">${escapeHtml(liveCard.modifier.icon)} ${escapeHtml(liveCard.modifier.label)}</div>
-        <div style="font-style:italic;font-size:13px;color:#999;margin-top:2px">${escapeHtml(liveCard.modifier.flavor)}</div>
+        <div style="font-style:italic;font-size:13px;margin-top:2px">${escapeHtml(liveCard.modifier.flavor)}</div>
         ${remainingSec!=null?`<div style="margin-top:6px;font-size:20px;font-weight:800">${remainingSec}s</div>`:''}
       </div>` : '';
 
@@ -1483,27 +1473,14 @@ const renderers = {
           <div class="cs-row cs-foot"><div class="cs-label">CP</div>${totalCells}</div>
         </div>
         ${banner}
-        <div class="cs-throw-row">
-          <span class="cs-throw-lbl">${thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Round ${Math.min(round,maxRounds)} of ${maxRounds}`:''}</span>
-          <div class="darts">${buildDartSlots(s.darts)}</div>
-        </div>
+        ${buildScorecardThrowRow(thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Round ${Math.min(round,maxRounds)} of ${maxRounds}`:'', s.darts)}
       </div>`;
     },
     summary(p){
-      return `
-      <div class="sum-card ${p.won?'winner':''}">
-        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}</div>
-        <div class="sum-stats">
-          <div class="sum-stat">
-            <div class="sv">${num(p.totalCp)}</div>
-            <div class="sl">CP</div>
-          </div>
-          <div class="sum-stat">
-            <div class="sv">${escapeHtml(p.rating||'')}</div>
-            <div class="sl">Rating</div>
-          </div>
-        </div>
-      </div>`;
+      return buildSummaryCard(p, [
+        { value: num(p.totalCp), label:'CP' },
+        { value: escapeHtml(p.rating||''), label:'Rating' },
+      ]);
     }
   },
   // Bob's 27 (docs/archive/practice-ladders-roadmap.md Part A): same shared
@@ -1528,23 +1505,11 @@ const renderers = {
           ${rows.join('')}
           <div class="cs-row cs-foot"><div class="cs-label">Score</div><div class="cs-cell"><span class="cs-points active">${num(p.running)}</span></div></div>
         </div>
-        <div class="cs-throw-row">
-          <span class="cs-throw-lbl"><b>${escapeHtml(p.name)}</b> at the oche — D${round}, running score ${num(p.running)}</span>
-          <div class="darts">${buildDartSlots(s.darts)}</div>
-        </div>
+        ${buildScorecardThrowRow(`<b>${escapeHtml(p.name)}</b> at the oche — D${round}, running score ${num(p.running)}`, s.darts)}
       </div>`;
     },
     summary(p){
-      return `
-      <div class="sum-card ${p.won?'winner':''}">
-        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}</div>
-        <div class="sum-stats">
-          <div class="sum-stat">
-            <div class="sv">${num(p.running)}</div>
-            <div class="sl">Final Score</div>
-          </div>
-        </div>
-      </div>`;
+      return buildSummaryCard(p, [{ value: num(p.running), label:'Final Score' }]);
     }
   },
   // 121 Checkout Ladder (docs/archive/practice-ladders-roadmap.md Part B): solo drill,
@@ -1585,16 +1550,7 @@ const renderers = {
       </div>`;
     },
     summary(p){
-      return `
-      <div class="sum-card">
-        <div class="sum-name">${escapeHtml(p.name)}</div>
-        <div class="sum-stats">
-          <div class="sum-stat">
-            <div class="sv">${num(p.legDarts)}</div>
-            <div class="sl">Darts This Attempt</div>
-          </div>
-        </div>
-      </div>`;
+      return buildSummaryCard(p, [{ value: num(p.legDarts), label:'Darts This Attempt' }], { noWinner:true });
     }
   },
   // Killer (docs/game-modes-roadmap.md "Killer"): elimination H2H, always
@@ -1609,8 +1565,8 @@ const renderers = {
       const lives = num(p.lives);
       const pips = Array.from({length: Math.max(lives, livesTarget)}, (_,k) =>
         `<span aria-hidden="true">${k < lives ? '●' : '○'}</span>`).join(' ');
-      const flash = p.eliminated ? `<div class="flash bust">ELIMINATED</div>` : '';
-      return `<div class="pcard ${active?'active':''}${p.eliminated?' bust':''}">
+      const flash = p.eliminated ? `<div class="flash eliminated">ELIMINATED</div>` : '';
+      return `<div class="pcard ${active?'active':''}">
         ${flash}
         <div>
           <div class="prow1">
@@ -1624,20 +1580,10 @@ const renderers = {
       </div>`;
     },
     summary(p){
-      return `
-      <div class="sum-card ${p.won?'winner':''}">
-        <div class="sum-name">${escapeHtml(p.name)}${p.won?'<span class="sum-crown">🏆</span>':''}${p.eliminated?' <span style="opacity:.7">☠️</span>':''}</div>
-        <div class="sum-stats">
-          <div class="sum-stat">
-            <div class="sv">№ ${num(p.number)}</div>
-            <div class="sl">Number</div>
-          </div>
-          <div class="sum-stat">
-            <div class="sv">${num(p.kills)}</div>
-            <div class="sl">Kills</div>
-          </div>
-        </div>
-      </div>`;
+      return buildSummaryCard(p, [
+        { value: `№ ${num(p.number)}`, label:'Number' },
+        { value: num(p.kills), label:'Kills' },
+      ], { nameSuffix: p => p.eliminated ? ' <span style="opacity:.7">☠️</span>' : '' });
     }
   },
   // Dead Man Walking (docs/archive/dead-man-walking-roadmap.md): solo drill,
@@ -1680,16 +1626,7 @@ const renderers = {
       // walked-out tally is the run's headline result (an earlier version read
       // p.gameDarts, a field that entry never carries, so the card always
       // showed 0).
-      return `
-      <div class="sum-card ${p.won?'winner':''}">
-        <div class="sum-name">${escapeHtml(p.name)}</div>
-        <div class="sum-stats">
-          <div class="sum-stat">
-            <div class="sv">${num(p.walkedOut)} / 15</div>
-            <div class="sl">Walked Out</div>
-          </div>
-        </div>
-      </div>`;
+      return buildSummaryCard(p, [{ value: `${num(p.walkedOut)} / 15`, label:'Walked Out' }]);
     }
   },
   // Doubles Practice (docs/game-modes-roadmap.md): solo drill, always exactly one
@@ -1708,7 +1645,7 @@ const renderers = {
       }
       let throwbox = '';
       if(active && ms.dpLastDart && !ms.roundOver){
-        throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(ms.dpLastDart.label)}">${esc(ms.dpLastDart.label)}</div></div></div>`;
+        throwbox = buildSingleDartBox(ms.dpLastDart);
       }
       return `<div class="pcard ${active?'active':''}">
         ${flash}
@@ -1754,7 +1691,7 @@ const renderers = {
       let throwbox = '';
       const chuckinLastDart = (s.modeState||{}).chuckinLastDart;
       if(active && chuckinLastDart){
-        const treble = chuckinLastDart.isTreble ? '<span class="flash win" style="position:static;display:inline-block;margin-left:8px">TREBLE</span>' : '';
+        const treble = chuckinLastDart.isTreble ? '<span class="flash shot" style="position:static;display:inline-block;margin-left:8px">TREBLE</span>' : '';
         throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(chuckinLastDart.label)}">${esc(chuckinLastDart.label)}</div></div>${treble}</div>`;
       }
       return `<div class="pcard ${active?'active':''}">
@@ -1788,11 +1725,11 @@ const renderers = {
       const hitNumbers = Array.isArray(p.hitNumbers) ? p.hitNumbers : [];
       let flash = '';
       if(active && ms.roundOver){
-        flash = `<div class="flash win">CLOCK COMPLETE</div>`;
+        flash = `<div class="flash shot">CLOCK COMPLETE</div>`;
       }
       let throwbox = '';
       if(active && ms.atcLastDart && !ms.roundOver){
-        throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(ms.atcLastDart.label)}">${esc(ms.atcLastDart.label)}</div></div></div>`;
+        throwbox = buildSingleDartBox(ms.atcLastDart);
       }
       return `<div class="pcard ${active?'active':''}">
         ${flash}
@@ -1824,8 +1761,8 @@ const renderers = {
       const atwLastDart = (s.modeState||{}).atwLastDart;
       let throwbox = '';
       if(active && atwLastDart){
-        const newOutcome = atwLastDart.isNewLifetimeOutcome ? '<span class="flash win" style="position:static;display:inline-block;margin-left:8px">NEW!</span>' : '';
-        throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(atwLastDart.label)}">${esc(atwLastDart.label)}</div></div>${newOutcome}</div>`;
+        const newOutcome = atwLastDart.isNewLifetimeOutcome ? '<span class="flash shot" style="position:static;display:inline-block;margin-left:8px">NEW!</span>' : '';
+        throwbox = buildSingleDartBox(atwLastDart, newOutcome);
       }
       return `<div class="pcard ${active?'active':''}">
         <div class="chuckin-layout">
@@ -1841,7 +1778,7 @@ const renderers = {
             </div>
             ${throwbox}
           </div>
-          <div class="chuckin-board">${buildOutcomeGridCompact(hitOutcomes, 'all')}</div>
+          <div class="chuckin-board">${buildOutcomeGridCompact(hitOutcomes)}</div>
         </div>
       </div>`;
     }
@@ -2068,7 +2005,7 @@ function render(s){
     // Most live pushes are dart-level updates that never touch sets/legs/whose-turn —
     // skip the innerHTML rebuild entirely when none of that changed, same guard
     // pattern the checkout strip uses via lastCoKey above.
-    const matchbarKey = JSON.stringify([s.currentIndex, showSets, showLegs, s.players.map(p=>[p.setsWon, p.legsWon])]);
+    const matchbarKey = s.currentIndex+'|'+showSets+'|'+showLegs+'|'+s.players.map(p=>p.setsWon+'.'+p.legsWon).join(',');
     if(matchbarKey !== lastMatchbarKey){
       lastMatchbarKey = matchbarKey;
       matchbar.innerHTML = s.players.map((p,i)=>{
@@ -2109,7 +2046,14 @@ function render(s){
   } else {
     grid.innerHTML = s.players.map((p,i)=>renderer.card(p, i, s, L)).join('');
   }
-  triggerChalkEffects();
+  // Scorecard-layout game types (cricket/baseball/shanghai/halve_it/
+  // pressure_chamber/bobs_27) never render .score elements at all — skip the
+  // query/effects pass entirely instead of running it to find nothing every
+  // tick. NOT skipped for a legSummary render (any game type can show one
+  // transiently between legs): triggerChalkEffects()'s own truncation of
+  // lastScoreTexts to the current (zero) element count is what keeps a later
+  // return to per-player cards from comparing against stale leg data.
+  if(!isScorecardLayout) triggerChalkEffects();
 
   // achievement flashes (180, Big Fish, nine-darter)
   if(s.achievement && s.achievement.ts){
