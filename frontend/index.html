@@ -214,6 +214,10 @@
      button that's conditionally given the hidden attribute (#enter-btn, #undo-btn,
      #dp-next-round-btn) would otherwise stay visible no matter what. */
   .btn[hidden]{display:none}
+  /* Smaller variant of the standard pill button (New Game's "← Back" — same
+     bordered/filled look as its sibling Add existing/New player buttons, just
+     scaled down since it's a secondary navigation action, not a primary one). */
+  .btn-sm{padding:8px 14px;font-size:13px;border-radius:9px}
   .btn-primary{background:linear-gradient(155deg,var(--gold-hi) 0%,var(--gold) 60%,#c39a5c 100%);color:#1a160c}
   .btn-primary:hover{filter:brightness(1.06)}
   .btn-primary:disabled{opacity:.4;cursor:not-allowed}
@@ -897,7 +901,7 @@
 
       <!-- ===== Step 2: Choose a game ===== -->
       <div id="setup-step-2" hidden>
-        <button class="pp-back" onclick="setupBackTo(1)">← Back</button>
+        <button class="btn btn-ghost btn-sm" style="margin-bottom:16px" onclick="setupBackTo(1)">← Back</button>
         <div class="setup-section">
           <div class="setup-label" id="setup-mode-select-label">What are you playing?</div>
           <select class="date-input" id="setup-mode-select" style="width:100%;max-width:340px" aria-label="What are you playing?" onchange="onSetupModeSelect(this.value)"></select>
@@ -919,7 +923,7 @@
 
       <!-- ===== Step 3: More options ===== -->
       <div id="setup-step-3" hidden>
-        <button class="pp-back" onclick="setupBackTo(2)">← Back</button>
+        <button class="btn btn-ghost btn-sm" style="margin-bottom:16px" onclick="setupBackTo(2)">← Back</button>
 
         <!-- Cricket target numbers (Cricket only) -->
         <div class="setup-section" id="cricket-options-section" hidden>
