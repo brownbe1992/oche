@@ -192,8 +192,8 @@
   .chuckin-layout{display:flex;gap:2.8vmin;flex:1;min-height:0;align-items:center}
   body.orientation-portrait .chuckin-layout{flex-direction:column;align-items:stretch}
   .chuckin-stats{flex:1;display:flex;flex-direction:column;justify-content:center;min-width:0}
-  .chuckin-board{flex:none;width:40vmin;max-width:44%}
-  body.orientation-portrait .chuckin-board{width:100%;max-width:62vmin;margin:0 auto}
+  .chuckin-board{flex:none;width:56vmin;max-width:58%}
+  body.orientation-portrait .chuckin-board{width:100%;max-width:82vmin;margin:0 auto}
   .chuckin-board svg{width:100%;height:auto;display:block}
   /* Around the Clock's own board is deliberately bigger than Chuckin's heatmap
      above — a real progress board someone reads across a room, not a compact
@@ -206,6 +206,13 @@
   /* darts in hand + checkout */
   .throwbox{margin-top:1.6vmin;border-top:1px dashed var(--wire);padding-top:1.6vmin;display:flex;flex-direction:column;gap:1.2vmin}
   .darts{display:flex;gap:1.2vmin}
+  /* buildSingleDartBox()'s one-dart throwbox (Doubles Practice/Around the Clock/
+     Around the World/Chuckin) reuses the same .darts/.dart pair the 3-slot
+     buildDartSlots() modes do, but .dart's flex:1 was written for 3 boxes sharing
+     a row — with only one child it stretched to the full row width instead. The
+     `single` modifier caps it back down to a normal dart-box size. */
+  .darts.single{justify-content:flex-start}
+  .darts.single .dart{flex:none;width:16vmin}
   .checkout{display:flex;align-items:center;gap:1.6vmin;background:linear-gradient(180deg,rgba(217,180,106,.16),rgba(217,180,106,.05));
     border:1px solid var(--gold);border-radius:1.2vmin;padding:1.2vmin 1.8vmin}
   .checkout .lab{font-size:1.6vmin;text-transform:uppercase;letter-spacing:.14em;color:var(--gold);font-weight:700;flex:none}
@@ -891,7 +898,7 @@ function formatCheckoutRoute(route){
 // uses), differing only in whether an extra badge (Around the World's "NEW!"
 // lifetime-outcome chip) follows it.
 function buildSingleDartBox(dart, extraBadgeHtml){
-  return `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(dart.label)}">${esc(dart.label)}</div></div>${extraBadgeHtml||''}</div>`;
+  return `<div class="throwbox"><div class="darts single"><div class="dart ${dartClass(dart.label)}">${esc(dart.label)}</div></div>${extraBadgeHtml||''}</div>`;
 }
 
 // The BUST/won flash shown over an active player's card — identical shape
@@ -1758,7 +1765,7 @@ const renderers = {
       const chuckinLastDart = (s.modeState||{}).chuckinLastDart;
       if(active && chuckinLastDart){
         const treble = chuckinLastDart.isTreble ? '<span class="flash shot" style="position:static;display:inline-block;margin-left:8px">TREBLE</span>' : '';
-        throwbox = `<div class="throwbox"><div class="darts"><div class="dart ${dartClass(chuckinLastDart.label)}">${esc(chuckinLastDart.label)}</div></div>${treble}</div>`;
+        throwbox = buildSingleDartBox(chuckinLastDart, treble);
       }
       return `<div class="pcard ${active?'active':''}">
         <div class="chuckin-layout">
