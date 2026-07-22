@@ -2864,18 +2864,21 @@ const HOME_EMPTY_ACHIEVEMENT={leaderboard:[],recent:[]};
 const homeComboInFlight=new Set();
 const HOME_COMBO_SPECS={
   x01:{ perMode:true,
+    // 180s/Big Fish leaderboards used to be fetched here too, for the two
+    // achievementSection() panels renderHomeTabBody() no longer renders (they
+    // duplicated the 180s/Big Fish bubbles in the Overview's Achievements
+    // group above) — dropped along with those panels rather than fetching
+    // data nothing displays.
     fetch(mode){
       return Promise.all([
         Backend.get(`/api/top-finishes?mode=${mode}`),
-        Backend.get(`/api/stats/180s?mode=${mode}`),
-        Backend.get(`/api/stats/big-fish?mode=${mode}`),
         Backend.get(`/api/stats/nine-darters?mode=${mode}`),
-      ]).then(([finishes,eighties,bigFish,nineDarters])=>{
-        homeData[mode]={finishes,eighties,bigFish,nineDarters};
+      ]).then(([finishes,nineDarters])=>{
+        homeData[mode]={finishes,nineDarters};
       });
     },
     hasCache(mode){ return !!homeData[mode]; },
-    fallback(mode){ homeData[mode]={finishes:[],eighties:HOME_EMPTY_ACHIEVEMENT,bigFish:HOME_EMPTY_ACHIEVEMENT,nineDarters:HOME_EMPTY_ACHIEVEMENT}; },
+    fallback(mode){ homeData[mode]={finishes:[],nineDarters:HOME_EMPTY_ACHIEVEMENT}; },
   },
   cricket:{ perMode:true,
     fetch(mode){
@@ -3183,11 +3186,14 @@ function renderHomeContent(){
     {val:fmt(s.legs),         label:'H2H Legs Thrown'},
     {val:fmt(s.practiceLegs), label:'Practice Legs Thrown'},
   ];
+  // Highest Checkout deliberately isn't here — it has its own featured
+  // hero-style panel further down (renderHomeTabBody()'s highestCoSection,
+  // under the achievement section), and duplicating it as a plain number
+  // bubble up here undersold it.
   const achievementCards=[
     {val:fmt(s.tonPlus),     label:'Ton+ Finishes'},
     {val:fmt(s.oneEighties), label:'180s'},
     {val:fmt(s.bigFish),     label:'Big Fish'},
-    {val: extra && extra.highestCheckout && extra.highestCheckout.overall ? extra.highestCheckout.overall.points : '—', label:'Highest Checkout'},
   ];
 
   body.innerHTML=`
@@ -3278,7 +3284,7 @@ function renderHomeTabBody(){
   // exist yet until that fetch resolves and calls back into this function.
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
   const extra=homeData.extra;
-  const finishes=data.finishes, eighties=data.eighties, bigFishData=data.bigFish, nineDarterData=data.nineDarters;
+  const finishes=data.finishes, nineDarterData=data.nineDarters;
 
   // 3-dart average leaderboard
   const statsKey = mode==='h2h' ? 'h2hStats' : 'practiceStats';
@@ -3329,6 +3335,9 @@ function renderHomeTabBody(){
       </div>`
     : '';
 
+  // Rendered last, right under the achievement section (see el.innerHTML below)
+  // rather than paired with Ton+ Finish Rate — featuring it there, on its own,
+  // instead of it competing for attention squeezed into a home-pair column.
   const highestCo = extra && extra.highestCheckout && extra.highestCheckout[mode];
   const highestCoSection = `<div class="pp-section">
       <div class="pp-section-title">Highest Checkout Ever</div>
@@ -3355,15 +3364,11 @@ function renderHomeTabBody(){
     </div>
     <div class="home-pair">
       ${tonPlusSection}
-      ${highestCoSection}
-    </div>
-    <div class="home-pair">
       ${paceSection}
-      ${first9Section}
     </div>
-    ${achievementSection('180s 🎯', eighties)}
-    ${achievementSection('Big Fish 🐟', bigFishData)}
+    ${first9Section}
     ${achievementSection('9-Darters', nineDarterData||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
+    ${highestCoSection}
   `;
 }
 

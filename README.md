@@ -117,7 +117,7 @@ The landing page shows a live snapshot of all-time activity:
 
 **Activity:** Players · Games played *(completed H2H matches — practice, solo, and Daily Challenge sessions don't count as games)* · Sets played · H2H legs thrown · Practice legs thrown
 
-**Achievements:** Ton+ finishes (100+ checkouts) · 180s · Big Fish · Highest checkout ever recorded
+**Achievements:** Ton+ finishes (100+ checkouts) · 180s · Big Fish *(the all-time highest checkout isn't duplicated up here — see its own featured panel in the leaderboards below)*
 
 **This week / Last game played** — legs thrown today and this week, darts thrown this week, and a summary of the most recently completed game (players, category, winner, and when).
 
@@ -132,13 +132,12 @@ The landing page shows a live snapshot of all-time activity:
 - Most Wins (win rate) — H2H only
 - Fewest Trebleless Visits (lowest trebleless rate first — fewer is better)
 - Ton+ Finish Rate
-- Highest Checkout Ever (within that mode — the "Highest checkout ever recorded" figure in Achievements above is separate and always all-time)
 - Average Pace (darts/minute) — appears once dart-timing data exists, see [Settings](#settings)
+- Best First-9 Average — minimum 20 legs
 
 **X01 Hall of Fame sections:**
-- 🎯 **180s** — every player who has thrown a maximum, with count and most recent date
-- 🐟 **Big Fish** — every 170 checkout recorded
 - **Nine-Dart Finishes** — 501 completed in exactly 9 darts *("None recorded yet — you will never get this!")*
+- **Highest Checkout Ever** — a featured panel right under Nine-Dart Finishes (within that mode; the two other Achievements bubbles above, 180s and Big Fish, aren't duplicated as their own Hall of Fame sections here for the same reason)
 
 **Cricket leaderboards** (switching the toggle to Cricket):
 - Marks Per Round (MPR) leaderboard — minimum 5 rounds played, so one lucky visit can't top the board
