@@ -3120,8 +3120,11 @@ function getPlayerStatBubbles(playerName, mode) {
   // Trainer dart never touches a board, so it must never inflate any of them.
   const JD = `FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id WHERE t.player_id = ? ${NOT_CHECKOUT_TRAINER}`;
   const qd = (sql) => { const r = db.prepare(sql).get(p.id); return r ? r.v : null; };
-  const dartsThrown    = qd(`SELECT COUNT(*) AS v ${JD} ${mf}`) ?? 0;
-  const avgDartsPerDay = qd(`SELECT CAST(COUNT(*) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS v ${JD} ${mf}`);
+  // Deliberately NOT mode-filtered (no ${mf}): these are the lifetime, all-modes
+  // figures (Player Profile header / REFERENCE.md "Physical-dart stats") and must
+  // read the same total regardless of which h2h/practice tab is currently active.
+  const dartsThrown    = qd(`SELECT COUNT(*) AS v ${JD}`) ?? 0;
+  const avgDartsPerDay = qd(`SELECT CAST(COUNT(*) AS REAL)/NULLIF(COUNT(DISTINCT date(t.created_at)),0) AS v ${JD}`);
   // X01-scoped counterparts of the two lifetime/all-modes figures above (Player
   // Profile's "Lifetime" block uses dartsThrown/avgDartsPerDay; the X01 tab's own
   // stat bubbles use these instead, so a Chuckin' or Cricket dart never inflates

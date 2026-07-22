@@ -52,6 +52,28 @@ describe('getPlayerStatBubbles — 3-dart average (bust-as-3-darts denominator c
   });
 });
 
+describe('getPlayerStatBubbles — dartsThrown/avgDartsPerDay are lifetime, all-modes figures', () => {
+  test('switching the mode argument (h2h/practice) must not change dartsThrown or avgDartsPerDay', () => {
+    const name = 'X01_Lifetime_Darts';
+    const opp = 'X01_Lifetime_Darts_Opp';
+    db.addPlayer(name); db.addPlayer(opp);
+    const practiceGame = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    turn(practiceGame.gameId, name, 1, 1, { scored: 60, darts: 3 });
+    const h2hGame = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0, players: [{ name }, { name: opp }] });
+    turn(h2hGame.gameId, name, 1, 1, { scored: 45, darts: 3 });
+
+    const overall  = db.getPlayerStatBubbles(name, '');
+    const practice = db.getPlayerStatBubbles(name, 'practice');
+    const h2h      = db.getPlayerStatBubbles(name, 'h2h');
+
+    assert.equal(overall.dartsThrown, 6, 'must count darts from both the practice and h2h game');
+    assert.equal(practice.dartsThrown, overall.dartsThrown, 'the practice tab must not narrow the lifetime total');
+    assert.equal(h2h.dartsThrown, overall.dartsThrown, 'the h2h tab must not narrow the lifetime total');
+    assert.equal(practice.avgDartsPerDay, overall.avgDartsPerDay, 'avgDartsPerDay must also stay mode-independent');
+    assert.equal(h2h.avgDartsPerDay, overall.avgDartsPerDay, 'avgDartsPerDay must also stay mode-independent');
+  });
+});
+
 describe('getPlayerStatBubbles — 180s and Big Fish', () => {
   test('scored=180 counts as a 180; checkout=170 counts as a Big Fish', () => {
     const name = 'X01_180_BigFish';
