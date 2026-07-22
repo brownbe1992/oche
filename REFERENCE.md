@@ -1534,8 +1534,16 @@ otherwise; `missZone`/`missDepth` are populated only for a positioned miss and
 `{sector,multiplier,zone,missZone,missDepth,hits}` array shape
 `getChuckinHeatmap()` already returns, so `display.html`'s renderer
 (`buildChuckinLiveHeatmap()`, a
-mirror-copied port of `buildChuckinHeatmap()`'s SVG geometry — no shared module
+mirror-copied port of `buildDartHeatmap()`'s SVG geometry — no shared module
 between the two files, per the established convention) can feed it straight in.
+It also mirrors `buildDartHeatmap()`'s heat-scale/number-band **style** —
+`heatmapStyle`/`heatmapNumberStyle` (`display.html`, fetched at boot from
+`GET /api/settings/heatmap-style`/`heatmap-number-style`, same as the Player
+Profile's own copy of those globals) drive the identical classic/scorched
+fill functions and molten-seam/chalk-ledger number-band rendering, so the live
+scoreboard's heatmap always matches whatever style the admin has set for the
+Player Profile heatmap — previously hardcoded to the old single-hue look
+regardless of that setting (2026-07 fix).
 The renderer shades a number's inner and outer single regions independently
 (`heat(n,1,'inner')` vs `heat(n,1,'outer')`) and, like the lifetime heatmap,
 does not plot a zone-unspecified single (a Pad-mode dart) on either region

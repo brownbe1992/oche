@@ -30,13 +30,22 @@ function loadBuildChuckinLiveHeatmap() {
   // live board) became a second consumer and the geometry was pulled out of
   // buildChuckinLiveHeatmap()'s own body into this shared constant.
   const boardGeomMatch = src.match(/^const BOARD_GEOM = \(\(\) => \{[\s\S]*?\n\}\)\(\);/m);
+  // heatmapStyle/heatmapNumberStyle: the admin-toggled globals (Settings -> Player
+  // Profile Heatmap) buildChuckinLiveHeatmap() reads so the live scoreboard renders
+  // with the same heat-scale/number-band style the Player Profile heatmap does —
+  // fetched at boot in the real file, declared here with their own defaults so the
+  // function has something to read in isolation.
+  const heatmapStyleMatch = src.match(/^let heatmapStyle = '\w+';/m);
+  const heatmapNumberStyleMatch = src.match(/^let heatmapNumberStyle = '\w+';/m);
   const fnMatch = src.match(/function buildChuckinLiveHeatmap\(cells\)\{[\s\S]*?\n\}/);
   assert.ok(dbSectorsMatch, 'DB_SECTORS declaration not found in display.html — has it moved/renamed?');
   assert.ok(boardGeomMatch, 'BOARD_GEOM declaration not found in display.html — has it moved/renamed?');
+  assert.ok(heatmapStyleMatch, 'heatmapStyle declaration not found in display.html — has it moved/renamed?');
+  assert.ok(heatmapNumberStyleMatch, 'heatmapNumberStyle declaration not found in display.html — has it moved/renamed?');
   assert.ok(fnMatch, 'buildChuckinLiveHeatmap() not found in display.html — has it moved/renamed?');
   const context = {};
   vm.createContext(context);
-  vm.runInContext(`${dbSectorsMatch[0]}\n${boardGeomMatch[0]}\n${fnMatch[0]}\nthis.buildChuckinLiveHeatmap = buildChuckinLiveHeatmap;`, context);
+  vm.runInContext(`${dbSectorsMatch[0]}\n${boardGeomMatch[0]}\n${heatmapStyleMatch[0]}\n${heatmapNumberStyleMatch[0]}\n${fnMatch[0]}\nthis.buildChuckinLiveHeatmap = buildChuckinLiveHeatmap;`, context);
   return context.buildChuckinLiveHeatmap;
 }
 

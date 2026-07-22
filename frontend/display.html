@@ -712,6 +712,22 @@ fetch('/api/settings/colorblind-mode', {cache:'no-store'}).then(r=>r.ok?r.json()
   document.body.classList.toggle('colorblind', !!(s && s.enabled));
 }).catch(()=>{});
 
+// Mirrors index.html's own heatmapStyle/heatmapNumberStyle globals (admin-toggled,
+// Settings -> Player Profile Heatmap) so buildChuckinLiveHeatmap() below renders
+// with the SAME heat-scale/number-band look the Player Profile's lifetime heatmap
+// does — previously hardcoded to the old single-hue 'classic' look regardless of
+// what the admin had picked, so a scorched-styled Player Profile heatmap and a
+// still-classic live scoreboard heatmap were showing two different treatments of
+// the same data mid-session.
+let heatmapStyle = 'classic';
+let heatmapNumberStyle = 'original';
+fetch('/api/settings/heatmap-style', {cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{
+  heatmapStyle = (s && s.style === 'scorched') ? 'scorched' : 'classic';
+}).catch(()=>{});
+fetch('/api/settings/heatmap-number-style', {cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{
+  heatmapNumberStyle = (s && ['molten_seam','chalk_ledger'].includes(s.style)) ? s.style : 'original';
+}).catch(()=>{});
+
 /* ---- orientation detection ----
    A mounted tablet or spare phone can be portrait or landscape, and can be rotated
    mid-match — this isn't a one-time check at load. matchMedia's own change event
@@ -979,11 +995,14 @@ const BOARD_GEOM = (() => {
   return { CX, CY, R, DEG, xy, f, annulus };
 })();
 // Just Chuckin' It's live, session-only dartboard heatmap — mirror-copied from
-// frontend/index.html's buildChuckinHeatmap() (the Player Profile's lifetime
-// version), stripped of nothing structural: same geometry, same single-hue heat
-// scale, same hover tooltips. `cells` is index.html's playerSnapshotChuckin()'s
-// live {sector,multiplier,hits} array, gradually filling in as the session
-// progresses, not a fetched lifetime dataset.
+// frontend/index.html's buildDartHeatmap() (the Player Profile's lifetime
+// version), stripped of nothing structural: same geometry, same heat-scale/
+// number-band style (classic/scorched, driven by the same admin-toggled
+// heatmapStyle/heatmapNumberStyle globals fetched at boot above — so the live
+// scoreboard always matches whatever style the Player Profile heatmap is
+// currently set to render with), same hover tooltips. `cells` is index.html's
+// playerSnapshotChuckin()'s live {sector,multiplier,hits} array, gradually
+// filling in as the session progresses, not a fetched lifetime dataset.
 // docs/security-audit-roadmap.md SEC-18: c.hits (and c.sector/c.multiplier) come
 // straight from the /api/live broadcast payload, whose per-player heatmap array
 // ALLOWED_LIVE_KEYS deliberately leaves unrestricted in shape. Every other value
@@ -1044,17 +1063,71 @@ function buildChuckinLiveHeatmap(cells){
   // past the board (bg:248) for the two miss bands (missNear:270, missFar:310) —
   // the board proper (doubleOut:212) is unchanged, just no longer flush to the edge.
   const { CX, CY, R, DEG, xy, f, annulus } = BOARD_GEOM;
-  const heatFill = t => {
+  // Heat-scale/number-band style — mirrors buildDartHeatmap()'s own style branching
+  // in frontend/index.html byte-for-byte (this file has no shared module with
+  // index.html, per the established convention above), driven by the same
+  // heatmapStyle/heatmapNumberStyle globals fetched at boot from the admin's
+  // Settings -> Player Profile Heatmap choice, so the live scoreboard always
+  // matches whatever the Player Profile heatmap is currently rendering with.
+  const style = heatmapStyle === 'scorched' ? 'scorched' : 'classic';
+  const numberStyle = (style === 'scorched' && (heatmapNumberStyle === 'molten_seam' || heatmapNumberStyle === 'chalk_ledger')) ? heatmapNumberStyle : 'original';
+  const classicFill = t => {
     if(t<=0) return '#1c1e1a';
     const r = Math.round(28 + t*(217-28));
     const g = Math.round(30 + t*(180-30));
     const b = Math.round(26 + t*(106-26));
     return `rgb(${r},${g},${b})`;
   };
-  let s = `<svg viewBox="0 0 660 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Live dartboard heatmap of this Just Chuckin' It session, including the outer miss ring">
-    <circle cx="${CX}" cy="${CY}" r="${R.bg}" fill="#0d0e0b"/>
-    <circle cx="${CX}" cy="${CY}" r="${R.doubleOut+1}" fill="#111210"/>
-    <circle cx="${CX}" cy="${CY}" r="${R.doubleOut}" fill="#0d0e0b"/>`;
+  const scorchedFill = t => {
+    if(t<=0) return '#15110d';
+    const stops = [
+      [0.00, [21,17,13]], [0.15, [61,20,14]], [0.35, [138,30,18]],
+      [0.55, [199,68,22]], [0.75, [230,140,40]], [0.90, [247,199,90]], [1.00, [255,244,214]],
+    ];
+    let lo = stops[0], hi = stops[stops.length-1];
+    for(let i=0;i<stops.length-1;i++){ if(t>=stops[i][0] && t<=stops[i+1][0]){ lo=stops[i]; hi=stops[i+1]; break; } }
+    const span = hi[0]-lo[0] || 1;
+    const p = (t-lo[0])/span;
+    const c = lo[1].map((v,idx)=>Math.round(v + (hi[1][idx]-v)*p));
+    return `rgb(${c[0]},${c[1]},${c[2]})`;
+  };
+  const heatFill = style === 'scorched' ? scorchedFill : classicFill;
+  const glowAttr = t => (style === 'scorched' && t > 0.55) ? 'filter="url(#hm-ember-glow)"' : '';
+  const defs = style === 'scorched' ? `<defs>
+    <filter id="hm-ember-glow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    ${numberStyle==='molten_seam' ? '<filter id="hm-seam-glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>' : ''}
+    ${numberStyle==='chalk_ledger' ? '<filter id="hm-scorch-blur" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="6"/></filter>' : ''}
+  </defs>` : '';
+  const numberBandContent = (num, s0) => {
+    const [nx,ny]=xy(R.numAt,s0+DEG/2);
+    if(numberStyle === 'molten_seam'){
+      const [tx1,ty1]=xy(R.doubleOut+8,s0), [tx2,ty2]=xy(R.bg-2,s0);
+      return `<line x1="${f(tx1)}" y1="${f(ty1)}" x2="${f(tx2)}" y2="${f(ty2)}" stroke="#1c1411" stroke-width="1.5"/>`
+        + `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" letter-spacing="1" font-size="17" fill="#0a0806" stroke="#0a0806" stroke-width="3" paint-order="stroke" style="pointer-events:none;user-select:none">${num}</text>`
+        + `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" letter-spacing="1" font-size="17" fill="#f2a03c" style="pointer-events:none;user-select:none">${num}</text>`;
+    }
+    if(numberStyle === 'chalk_ledger'){
+      const [t1x,t1y]=xy(R.bg-6,s0-3), [t2x,t2y]=xy(R.bg-14,s0+3);
+      return `<line x1="${f(t1x)}" y1="${f(t1y)}" x2="${f(t2x)}" y2="${f(t2y)}" stroke="#efe7d2" stroke-width="1.2" opacity="0.4" stroke-linecap="round"/>`
+        + `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central" font-family="'Segoe Print','Bradley Hand',cursive" font-size="16" fill="#efe7d2" opacity="0.92" style="pointer-events:none;user-select:none">${num}</text>`;
+    }
+    return `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="17" fill="#efe7d2" style="pointer-events:none;user-select:none">${num}</text>`;
+  };
+  let s = `<svg viewBox="0 0 660 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Live dartboard heatmap of this Just Chuckin' It session, including the outer miss ring">${defs}
+    <circle cx="${CX}" cy="${CY}" r="${R.bg}" fill="${style==='scorched' ? '#0a0806' : '#0d0e0b'}"/>
+    <circle cx="${CX}" cy="${CY}" r="${R.doubleOut+1}" fill="${style==='scorched' ? '#0c0a08' : '#111210'}"/>
+    <circle cx="${CX}" cy="${CY}" r="${R.doubleOut}" fill="${style==='scorched' ? '#0a0806' : '#0d0e0b'}"/>`;
+  if(numberStyle === 'molten_seam'){
+    let seam = '';
+    for(let i=0;i<40;i++){
+      const a = i*9, jag = (i%2===0) ? R.doubleOut+2 : R.doubleOut+6;
+      const [x,y]=xy(jag,a);
+      seam += (i===0 ? `M${f(x)},${f(y)} ` : `L${f(x)},${f(y)} `);
+    }
+    s += `<path d="${seam}Z" fill="none" stroke="#e8752c" stroke-width="2" filter="url(#hm-seam-glow)" opacity="0.85"/>`;
+  } else if(numberStyle === 'chalk_ledger'){
+    s += `<circle cx="${CX}" cy="${CY}" r="${R.doubleOut+6}" fill="none" stroke="#1a0f08" stroke-width="14" opacity="0.55" filter="url(#hm-scorch-blur)"/>`;
+  }
   DB_SECTORS.forEach((n,i)=>{
     const s0=i*DEG-DEG/2, e0=s0+DEG;
     const sw = 'stroke="#151613" stroke-width="0.5"';
@@ -1063,12 +1136,11 @@ function buildChuckinLiveHeatmap(cells){
     // zone-unspecified single (Pad mode) is in neither 'inner' nor 'outer', so it
     // simply reads 0 on both here rather than lighting up both, the same deliberate
     // "don't plot a zone-less single" behavior the lifetime heatmap settled on.
-    s += `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${heatFill(heat(n,1,'inner'))}" ${sw}><title>${n} (inner): ${hits(n,1,'inner')} hit${hits(n,1,'inner')===1?'':'s'}</title></path>`;
-    s += `<path d="${annulus(R.trebleIn,R.trebleOut,s0,e0)}" fill="${heatFill(heat(n,3))}" ${sw}><title>T${n}: ${hits(n,3)} treble hit${hits(n,3)===1?'':'s'}</title></path>`;
-    s += `<path d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${heatFill(heat(n,1,'outer'))}" ${sw}><title>${n} (outer): ${hits(n,1,'outer')} hit${hits(n,1,'outer')===1?'':'s'}</title></path>`;
-    s += `<path d="${annulus(R.doubleIn,R.doubleOut,s0,e0)}" fill="${heatFill(heat(n,2))}" ${sw}><title>D${n}: ${hits(n,2)} double hit${hits(n,2)===1?'':'s'}</title></path>`;
-    const [nx,ny]=xy(R.numAt,s0+DEG/2);
-    s += `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="17" fill="#efe7d2" style="pointer-events:none;user-select:none">${n}</text>`;
+    s += `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${heatFill(heat(n,1,'inner'))}" ${sw} ${glowAttr(heat(n,1,'inner'))}><title>${n} (inner): ${hits(n,1,'inner')} hit${hits(n,1,'inner')===1?'':'s'}</title></path>`;
+    s += `<path d="${annulus(R.trebleIn,R.trebleOut,s0,e0)}" fill="${heatFill(heat(n,3))}" ${sw} ${glowAttr(heat(n,3))}><title>T${n}: ${hits(n,3)} treble hit${hits(n,3)===1?'':'s'}</title></path>`;
+    s += `<path d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${heatFill(heat(n,1,'outer'))}" ${sw} ${glowAttr(heat(n,1,'outer'))}><title>${n} (outer): ${hits(n,1,'outer')} hit${hits(n,1,'outer')===1?'':'s'}</title></path>`;
+    s += `<path d="${annulus(R.doubleIn,R.doubleOut,s0,e0)}" fill="${heatFill(heat(n,2))}" ${sw} ${glowAttr(heat(n,2))}><title>D${n}: ${hits(n,2)} double hit${hits(n,2)===1?'':'s'}</title></path>`;
+    s += numberBandContent(n, s0);
     // Miss ring (docs/archive/dartboard-zone-tracking-roadmap.md "Miss-area tracking") —
     // the two bands extending past the board, shaded by how many misses landed in that
     // wedge/depth this session, on their own independent heat scale. Mirrors
@@ -1077,8 +1149,8 @@ function buildChuckinLiveHeatmap(cells){
     s += `<path d="${annulus(R.bg,R.missNear,s0,e0)}" fill="${heatFill(missHeat(n,'near'))}" ${sw}><title>Miss (near), wedge ${n}: ${missHits(n,'near')} miss${missHits(n,'near')===1?'':'es'}</title></path>`;
     s += `<path d="${annulus(R.missNear,R.missFar,s0,e0)}" fill="${heatFill(missHeat(n,'far'))}" ${sw}><title>Miss (far), wedge ${n}: ${missHits(n,'far')} miss${missHits(n,'far')===1?'':'es'}</title></path>`;
   });
-  s += `<circle cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="${heatFill(heat(25,1))}" stroke="#151613" stroke-width="0.5"><title>Bull: ${hits(25,1)} hit${hits(25,1)===1?'':'s'}</title></circle>`;
-  s += `<circle cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="${heatFill(heat(25,2))}" stroke="#151613" stroke-width="0.5"><title>Double Bull: ${hits(25,2)} hit${hits(25,2)===1?'':'s'}</title></circle>`;
+  s += `<circle cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="${heatFill(heat(25,1))}" stroke="#151613" stroke-width="0.5" ${glowAttr(heat(25,1))}><title>Bull: ${hits(25,1)} hit${hits(25,1)===1?'':'s'}</title></circle>`;
+  s += `<circle cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="${heatFill(heat(25,2))}" stroke="#151613" stroke-width="0.5" ${glowAttr(heat(25,2))}><title>Double Bull: ${hits(25,2)} hit${hits(25,2)===1?'':'s'}</title></circle>`;
   s += `<text x="${CX}" y="${CY}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="12" fill="#efe7d2" style="pointer-events:none;user-select:none">Bull</text>`;
   s += `</svg>`;
   return s;
