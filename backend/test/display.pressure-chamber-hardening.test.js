@@ -31,6 +31,8 @@ function loadPressureChamberScorecard() {
   const src = fs.readFileSync(DISPLAY_HTML_PATH, 'utf8');
   const pieces = [
     extract(src, /function dartClass\(label\)\{[\s\S]*?\n\}/, 'dartClass()'),
+    extract(src, /function buildDartSlots\(darts\)\{[\s\S]*?\n\}/, 'buildDartSlots()'),
+    extract(src, /function buildScorecardHeadCells\(players, active\)\{[\s\S]*?\n\}/, 'buildScorecardHeadCells()'),
     extract(src, /^function escapeHtml\(s\)\{.*\}$/m, 'escapeHtml()'),
     extract(src, /function esc\(v\)\{[^}]*\}/, 'esc()'),
     extract(src, /function num\(v\)\{[^}]*\}/, 'num()'),

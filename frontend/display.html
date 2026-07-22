@@ -356,6 +356,7 @@ let lastAchTs = 0;
 // of being ignored by the ts-dedup, or restarting the whole reveal animation.
 let lastAchCountText = '';
 let lastCoKey = '';   // track checkout route to flash only on change
+let lastMatchbarKey = ''; // track sets/legs/whose-turn to skip an unchanged rebuild
 let bannerTimer = null;
 let achTimer = null;
 
@@ -529,14 +530,6 @@ const CHUCKIN_MILESTONE_LADDERS = [
       { threshold:1000, label:'Treble Legend',  icon:'🐐' },
     ] },
 ];
-CHUCKIN_MILESTONE_LADDERS.forEach(ladder=>{
-  ladder.tiers.forEach((tier, i)=>{
-    const id = ladder.idPrefix + tier.threshold;
-    ACH_LABELS[id] = `${tier.label} ${tier.icon}`;
-    ACH_DURATION[id] = (i === ladder.tiers.length-1) ? 5000 : 3000;
-    ACH_DESC[id] = ladder.descFor(tier.threshold);
-  });
-});
 // docs/bug-roadmap.md BUG-26: the lifetime-180s, Baseball-runs, and Doubles
 // Practice-hits ladders (index.html's ONE_EIGHTY_MILESTONE_LADDERS/
 // BASEBALL_RUNS_MILESTONE_LADDERS/DOUBLES_HIT_MILESTONE_LADDERS) were NEVER
@@ -668,7 +661,7 @@ const PRESSURE_STREAK_MILESTONE_LADDERS = [
       { threshold:12, label:'Untouchable',   icon:'💎' },
     ] },
 ];
-[ONE_EIGHTY_MILESTONE_LADDERS, BASEBALL_RUNS_MILESTONE_LADDERS, DOUBLES_HIT_MILESTONE_LADDERS, BOBS27_SCORE_MILESTONE_LADDERS, CHECKOUT_LADDER_MILESTONE_LADDERS,
+[CHUCKIN_MILESTONE_LADDERS, ONE_EIGHTY_MILESTONE_LADDERS, BASEBALL_RUNS_MILESTONE_LADDERS, DOUBLES_HIT_MILESTONE_LADDERS, BOBS27_SCORE_MILESTONE_LADDERS, CHECKOUT_LADDER_MILESTONE_LADDERS,
  DMW_RUNS_MILESTONE_LADDERS, DMW_WALKED_OUT_MILESTONE_LADDERS, DMW_STREAK_MILESTONE_LADDERS,
  PRESSURE_RUNS_MILESTONE_LADDERS, PRESSURE_CP_MILESTONE_LADDERS, PRESSURE_STREAK_MILESTONE_LADDERS].forEach(ladders=>{
   ladders.forEach(ladder=>{
@@ -790,12 +783,20 @@ function triggerChalkEffects(){
   lastScoreTexts.length = scoreEls.length;
 }
 
+// The rare, biggest-deal badges — a longer overlay + confetti burst instead of
+// the normal flash. A plain data set (same shape as ACH_LABELS/ACH_DURATION/
+// ACH_DESC above) instead of a hardcoded OR-chain, so a future "mega" badge is
+// one entry here, not a fifth thing to remember to extend.
+const MEGA_ACHIEVEMENT_TYPES = new Set([
+  'ninedarter', 'cricketperfectclose', 'challengemonth', 'tournamentchampion',
+  'cricketstonecold', 'bobs27fullanderson', 'topofthehouse',
+]);
 function showAchievement(type, player, countText){
   achText.textContent = ACH_LABELS[type] || '';
   achName.textContent = player || '';
   if(achDesc) achDesc.textContent = ACH_DESC[type] || '';
   if(achCount) achCount.textContent = countText || '';
-  const mega = type === 'ninedarter' || type === 'cricketperfectclose' || type === 'challengemonth' || type === 'tournamentchampion' || type === 'cricketstonecold' || type === 'bobs27fullanderson' || type === 'topofthehouse';
+  const mega = MEGA_ACHIEVEMENT_TYPES.has(type);
   achOverlay.classList.toggle('mega', mega);
   achOverlay.classList.add('show');
   if(mega) spawnConfetti(achOverlay, 90);
@@ -832,6 +833,48 @@ function dartClass(label){
   if(label[0]==='T') return 't';
   if(label[0]==='D' || label==='Bull') return 'd';
   return '';
+}
+
+// The 3-slot "darts thrown this visit" row — identical across every per-type
+// card renderer below (x01, cricket, baseball, shanghai, halve_it,
+// pressure_chamber, bobs_27, checkout_ladder, dead_man_walking), so it's one
+// shared builder instead of nine copies of the same loop.
+function buildDartSlots(darts){
+  const d = Array.isArray(darts) ? darts : [];
+  return [0,1,2].map(k=>{
+    const lab = d[k];
+    return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
+  }).join('');
+}
+
+// "T20 T20 D20" -> "T20  →  T20  →  D20" — used by both the X01/Checkout
+// Ladder cards and the top checkout strip.
+function formatCheckoutRoute(route){
+  return esc(route).replace(/ /g,'  →  ');
+}
+
+// The BUST/won flash shown over an active player's card — identical shape
+// across X01, Checkout Ladder, and Dead Man Walking, differing only in the
+// win label text.
+function statusFlash(active, status, winLabel){
+  if(!active) return '';
+  if(status==='bust') return `<div class="flash bust">BUST</div>`;
+  if(status==='won')  return `<div class="flash shot">${winLabel}</div>`;
+  return '';
+}
+
+// The scorecard-layout column header row — identical across the five
+// cs-table-based renderers (cricket, baseball, shanghai, halve_it,
+// pressure_chamber): one head cell per player, with a "throwing" chip on
+// whichever one is active.
+function buildScorecardHeadCells(players, active){
+  return players.map((p,i)=>{
+    const isActive = i===active;
+    return `<div class="cs-col-head${isActive?' active':''}">
+      <span>${escapeHtml(p.name)}</span>
+      ${isActive?'<span class="cs-throw-chip">▸ throwing</span>':''}
+    </div>`;
+  }).join('');
 }
 
 // Standard dartboard number ordering, clockwise from the top — mirror-copied
@@ -1033,6 +1076,13 @@ function buildOutcomeGridCompact(hitKeys, cellsMode){
    type gets its own small renderer here, looked up by s.gameType — X01's
    per-player cards and Cricket's shared chalkboard scorecard. A future game
    type (Baseball, etc.) plugs in the same way without touching either. */
+// Daily Challenge formats whose hero number is a challenge metric (bulls hit,
+// trebles, running total) instead of a real X01 countdown score — see the
+// x01 card's own comment on cm/heroScore below. Static, so it's built once
+// here rather than re-allocated on every card() call (once per player, per
+// render tick).
+const THREE_VISIT_CHALLENGE_FORMATS = new Set(['bullseye_gauntlet','treble_run','steady_hand']);
+
 const renderers = {
   x01: {
     card(p, i, s, L){
@@ -1050,24 +1100,16 @@ const renderers = {
       // countdown — it's genuinely what's being chased — and add the metric
       // as a secondary line instead.
       const cm = (s.modeState && s.modeState.challengeFormat) ? s.modeState : null;
-      const THREE_VISIT_CHALLENGE_FORMATS = new Set(['bullseye_gauntlet','treble_run','steady_hand']);
       const isThreeVisitChallenge = cm && THREE_VISIT_CHALLENGE_FORMATS.has(cm.challengeFormat);
       const heroScore = isThreeVisitChallenge ? cm.challengeMetric : p.score;
       let throwbox = '';
       if(active){
-        const darts = Array.isArray(s.darts) ? s.darts : [];
-        const slots = [0,1,2].map(k=>{
-          const lab = darts[k];
-          return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
-        }).join('');
         const co = s.checkout
-          ? `<div class="checkout"><span class="lab">Checkout</span><span class="route">${esc(s.checkout).replace(/ /g,'  →  ')}</span></div>`
+          ? `<div class="checkout"><span class="lab">Checkout</span><span class="route">${formatCheckoutRoute(s.checkout)}</span></div>`
           : '';
-        throwbox = `<div class="throwbox"><div class="darts">${slots}</div>${co}</div>`;
+        throwbox = `<div class="throwbox"><div class="darts">${buildDartSlots(s.darts)}</div>${co}</div>`;
       }
-      let flash = '';
-      if(active && s.status==='bust') flash = `<div class="flash bust">BUST</div>`;
-      if(active && s.status==='won')  flash = `<div class="flash shot">GAME SHOT</div>`;
+      const flash = statusFlash(active, s.status, 'GAME SHOT');
 
       const dartCounts = !L.showDartCounts ? '' : `
           <div class="dart-counts">
@@ -1149,13 +1191,7 @@ const renderers = {
       const nums = Array.from(numberSet).filter(n=>n!==25).sort((a,b)=>b-a);
       if(numberSet.has(25)) nums.push(25);
 
-      const headCells = players.map((p,i)=>{
-        const isActive = i===active;
-        return `<div class="cs-col-head${isActive?' active':''}">
-          <span>${escapeHtml(p.name)}</span>
-          ${isActive?'<span class="cs-throw-chip">▸ throwing</span>':''}
-        </div>`;
-      }).join('');
+      const headCells = buildScorecardHeadCells(players, active);
 
       const bodyRows = nums.map(n=>{
         const lbl = n===25 ? 'Bull' : String(n);
@@ -1173,11 +1209,6 @@ const renderers = {
       }).join('');
 
       const thrower = players[active];
-      const darts = Array.isArray(s.darts) ? s.darts : [];
-      const slots = [0,1,2].map(k=>{
-        const lab = darts[k];
-        return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
-      }).join('');
       // docs/archive/cutthroat-cricket-roadmap.md: the one visible difference from
       // standard on this screen — everything else (marks grid, points cells)
       // renders identically either way.
@@ -1191,7 +1222,7 @@ const renderers = {
         </div>
         <div class="cs-throw-row">
           <span class="cs-throw-lbl">${thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche`:''}</span>
-          <div class="darts">${slots}</div>
+          <div class="darts">${buildDartSlots(s.darts)}</div>
         </div>
       </div>`;
     },
@@ -1232,13 +1263,7 @@ const renderers = {
         rows.push(`<div class="cs-row"><div class="cs-label">${i}</div>${cells}</div>`);
       }
 
-      const headCells = players.map((p,i)=>{
-        const isActive = i===active;
-        return `<div class="cs-col-head${isActive?' active':''}">
-          <span>${escapeHtml(p.name)}</span>
-          ${isActive?'<span class="cs-throw-chip">▸ throwing</span>':''}
-        </div>`;
-      }).join('');
+      const headCells = buildScorecardHeadCells(players, active);
 
       const totalCells = players.map((p,i)=>{
         const isActive = i===active;
@@ -1246,11 +1271,6 @@ const renderers = {
       }).join('');
 
       const thrower = players[active];
-      const darts = Array.isArray(s.darts) ? s.darts : [];
-      const slots = [0,1,2].map(k=>{
-        const lab = darts[k];
-        return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
-      }).join('');
 
       return `<div class="cs-wrap" style="--cs-cols:${players.length}">
         <div class="cs-table">
@@ -1260,7 +1280,7 @@ const renderers = {
         </div>
         <div class="cs-throw-row">
           <span class="cs-throw-lbl">${thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Inning ${Math.min(inning,9)} of 9${inning>9?' (extra innings)':''}`:''}</span>
-          <div class="darts">${slots}</div>
+          <div class="darts">${buildDartSlots(s.darts)}</div>
         </div>
       </div>`;
     },
@@ -1301,13 +1321,7 @@ const renderers = {
         rows.push(`<div class="cs-row"><div class="cs-label">${target}</div>${cells}</div>`);
       }
 
-      const headCells = players.map((p,i)=>{
-        const isActive = i===active;
-        return `<div class="cs-col-head${isActive?' active':''}">
-          <span>${escapeHtml(p.name)}</span>
-          ${isActive?'<span class="cs-throw-chip">▸ throwing</span>':''}
-        </div>`;
-      }).join('');
+      const headCells = buildScorecardHeadCells(players, active);
 
       const totalCells = players.map((p,i)=>{
         const isActive = i===active;
@@ -1315,11 +1329,6 @@ const renderers = {
       }).join('');
 
       const thrower = players[active];
-      const darts = Array.isArray(s.darts) ? s.darts : [];
-      const slots = [0,1,2].map(k=>{
-        const lab = darts[k];
-        return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
-      }).join('');
 
       return `<div class="cs-wrap" style="--cs-cols:${players.length}">
         <div class="cs-table">
@@ -1329,7 +1338,7 @@ const renderers = {
         </div>
         <div class="cs-throw-row">
           <span class="cs-throw-lbl">${thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Round ${Math.min(round,maxRounds)} of ${maxRounds}${round>maxRounds?' (extra rounds)':''}`:''}</span>
-          <div class="darts">${slots}</div>
+          <div class="darts">${buildDartSlots(s.darts)}</div>
         </div>
       </div>`;
     },
@@ -1381,13 +1390,7 @@ const renderers = {
         rows.push(`<div class="cs-row"><div class="cs-label">${escapeHtml(targetLabel(targetAt(i)))}</div>${cells}</div>`);
       }
 
-      const headCells = players.map((p,i)=>{
-        const isActive = i===active;
-        return `<div class="cs-col-head${isActive?' active':''}">
-          <span>${escapeHtml(p.name)}</span>
-          ${isActive?'<span class="cs-throw-chip">▸ throwing</span>':''}
-        </div>`;
-      }).join('');
+      const headCells = buildScorecardHeadCells(players, active);
 
       const totalCells = players.map((p,i)=>{
         const isActive = i===active;
@@ -1395,11 +1398,6 @@ const renderers = {
       }).join('');
 
       const thrower = players[active];
-      const darts = Array.isArray(s.darts) ? s.darts : [];
-      const slots = [0,1,2].map(k=>{
-        const lab = darts[k];
-        return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
-      }).join('');
 
       return `<div class="cs-wrap" style="--cs-cols:${players.length}">
         <div class="cs-table">
@@ -1409,7 +1407,7 @@ const renderers = {
         </div>
         <div class="cs-throw-row">
           <span class="cs-throw-lbl">${thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Round ${Math.min(round,maxRounds)} of ${maxRounds}${round>maxRounds?' (extra rounds)':''}, target ${escapeHtml(targetLabel(targetAt(round)))}`:''}</span>
-          <div class="darts">${slots}</div>
+          <div class="darts">${buildDartSlots(s.darts)}</div>
         </div>
       </div>`;
     },
@@ -1458,13 +1456,7 @@ const renderers = {
         rows.push(`<div class="cs-row"><div class="cs-label">${i}</div>${cells}</div>`);
       }
 
-      const headCells = players.map((p,i)=>{
-        const isActive = i===active;
-        return `<div class="cs-col-head${isActive?' active':''}">
-          <span>${escapeHtml(p.name)}</span>
-          ${isActive?'<span class="cs-throw-chip">▸ throwing</span>':''}
-        </div>`;
-      }).join('');
+      const headCells = buildScorecardHeadCells(players, active);
 
       const totalCells = players.map((p,i)=>{
         const isActive = i===active;
@@ -1472,11 +1464,6 @@ const renderers = {
       }).join('');
 
       const thrower = players[active];
-      const darts = Array.isArray(s.darts) ? s.darts : [];
-      const slots = [0,1,2].map(k=>{
-        const lab = darts[k];
-        return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
-      }).join('');
 
       const liveCard = cardAt(round);
       const noWarmup = liveCard && liveCard.modifier && liveCard.modifier.key === 'no_warmup';
@@ -1498,7 +1485,7 @@ const renderers = {
         ${banner}
         <div class="cs-throw-row">
           <span class="cs-throw-lbl">${thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Round ${Math.min(round,maxRounds)} of ${maxRounds}`:''}</span>
-          <div class="darts">${slots}</div>
+          <div class="darts">${buildDartSlots(s.darts)}</div>
         </div>
       </div>`;
     },
@@ -1535,12 +1522,6 @@ const renderers = {
         rows.push(`<div class="cs-row"><div class="cs-label">D${r}</div><div class="cs-cell${isCurrentRound?' active':''}">${cellText}</div></div>`);
       }
 
-      const darts = Array.isArray(s.darts) ? s.darts : [];
-      const slots = [0,1,2].map(k=>{
-        const lab = darts[k];
-        return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
-      }).join('');
-
       return `<div class="cs-wrap" style="--cs-cols:1">
         <div class="cs-table">
           <div class="cs-row cs-head"><div class="cs-label"></div><div class="cs-col-head active"><span>${escapeHtml(p.name)}</span><span class="cs-throw-chip">▸ throwing</span></div></div>
@@ -1549,7 +1530,7 @@ const renderers = {
         </div>
         <div class="cs-throw-row">
           <span class="cs-throw-lbl"><b>${escapeHtml(p.name)}</b> at the oche — D${round}, running score ${num(p.running)}</span>
-          <div class="darts">${slots}</div>
+          <div class="darts">${buildDartSlots(s.darts)}</div>
         </div>
       </div>`;
     },
@@ -1580,19 +1561,12 @@ const renderers = {
       const visit = Math.min(((s.modeState||{}).checkoutLadderVisits||0)+1, 3);
       let throwbox = '';
       if(active){
-        const darts = Array.isArray(s.darts) ? s.darts : [];
-        const slots = [0,1,2].map(k=>{
-          const lab = darts[k];
-          return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
-        }).join('');
         const co = s.checkout
-          ? `<div class="checkout"><span class="lab">Checkout</span><span class="route">${esc(s.checkout).replace(/ /g,'  →  ')}</span></div>`
+          ? `<div class="checkout"><span class="lab">Checkout</span><span class="route">${formatCheckoutRoute(s.checkout)}</span></div>`
           : '';
-        throwbox = `<div class="throwbox"><div class="darts">${slots}</div>${co}</div>`;
+        throwbox = `<div class="throwbox"><div class="darts">${buildDartSlots(s.darts)}</div>${co}</div>`;
       }
-      let flash = '';
-      if(active && s.status==='bust') flash = `<div class="flash bust">BUST</div>`;
-      if(active && s.status==='won')  flash = `<div class="flash shot">TARGET CLEARED</div>`;
+      const flash = statusFlash(active, s.status, 'TARGET CLEARED');
 
       const meta = !L.showMeta ? '' : `<div class="meta"><span class="standing">Target ${target} · Attempt ${num(s.legNo)} · Visit ${visit}/3</span></div>`;
 
@@ -1681,16 +1655,9 @@ const renderers = {
       const dartsLeft = Math.max(0, num(ms.dmwBudget) - num(ms.dmwDartsUsed));
       let throwbox = '';
       if(active){
-        const darts = Array.isArray(s.darts) ? s.darts : [];
-        const slots = [0,1,2].map(k=>{
-          const lab = darts[k];
-          return `<div class="dart ${dartClass(lab)}">${lab ? esc(lab) : 'dart '+(k+1)}</div>`;
-        }).join('');
-        throwbox = `<div class="throwbox"><div class="darts">${slots}</div></div>`;
+        throwbox = `<div class="throwbox"><div class="darts">${buildDartSlots(s.darts)}</div></div>`;
       }
-      let flash = '';
-      if(active && s.status==='bust') flash = `<div class="flash bust">BUST</div>`;
-      if(active && s.status==='won')  flash = `<div class="flash shot">WALKED OUT</div>`;
+      const flash = statusFlash(active, s.status, 'WALKED OUT');
 
       const meta = !L.showMeta ? '' : `<div class="meta"><span class="standing">Round ${num(s.legNo)} of 15 · ${dartsLeft} dart${dartsLeft===1?'':'s'} left · Walked Out ${num(ms.dmwWalkedOut)}</span></div>`;
 
@@ -2079,7 +2046,7 @@ function render(s){
   const thrower = s.players[s.currentIndex];
   const hasCheckout = !!s.checkout && !s.legSummary;
   if(hasCheckout){
-    const route = s.checkout.replace(/ /g, '  →  ');
+    const route = formatCheckoutRoute(s.checkout);
     if(route !== lastCoKey){
       lastCoKey = route;
       coRoute.textContent = route;
@@ -2098,20 +2065,28 @@ function render(s){
     matchbar.classList.remove('hidden');
     const showSets = num(s.setsPerGame) > 1;
     const showLegs = showSets || num(s.legsPerSet) > 1;
-    matchbar.innerHTML = s.players.map((p,i)=>{
-      const active = i===s.currentIndex;
-      const chips = [
-        showSets ? `<div class="mb-stat"><span class="v">${num(p.setsWon)}</span><span class="l">Sets</span></div>` : '',
-        showLegs ? `<div class="mb-stat"><span class="v">${num(p.legsWon)}${showSets?'':'/'+num(s.legsPerSet)}</span><span class="l">Legs</span></div>` : '',
-      ].join('');
-      return `<div class="mb-row ${active?'active':''}">
-        <span class="mb-turn">${active?'▸':''}</span>
-        <span class="mb-name">${escapeHtml(p.name)}</span>
-        <div class="mb-stats">${chips}</div>
-      </div>`;
-    }).join('');
+    // Most live pushes are dart-level updates that never touch sets/legs/whose-turn —
+    // skip the innerHTML rebuild entirely when none of that changed, same guard
+    // pattern the checkout strip uses via lastCoKey above.
+    const matchbarKey = JSON.stringify([s.currentIndex, showSets, showLegs, s.players.map(p=>[p.setsWon, p.legsWon])]);
+    if(matchbarKey !== lastMatchbarKey){
+      lastMatchbarKey = matchbarKey;
+      matchbar.innerHTML = s.players.map((p,i)=>{
+        const active = i===s.currentIndex;
+        const chips = [
+          showSets ? `<div class="mb-stat"><span class="v">${num(p.setsWon)}</span><span class="l">Sets</span></div>` : '',
+          showLegs ? `<div class="mb-stat"><span class="v">${num(p.legsWon)}${showSets?'':'/'+num(s.legsPerSet)}</span><span class="l">Legs</span></div>` : '',
+        ].join('');
+        return `<div class="mb-row ${active?'active':''}">
+          <span class="mb-turn">${active?'▸':''}</span>
+          <span class="mb-name">${escapeHtml(p.name)}</span>
+          <div class="mb-stats">${chips}</div>
+        </div>`;
+      }).join('');
+    }
   } else {
     matchbar.classList.add('hidden');
+    lastMatchbarKey = '';
   }
 
   const n = s.players.length;
@@ -2119,8 +2094,11 @@ function render(s){
   // width (readable at a glance) instead of the side-by-side columns that make sense
   // in landscape's wide-and-short shape but cram score text into narrow cells here.
   // The cricket/baseball scorecards are always a single table spanning the whole
-  // grid, not per-player columns, regardless of orientation.
-  const isScorecardLayout = (s.gameType === 'cricket' || s.gameType === 'baseball' || s.gameType === 'shanghai' || s.gameType === 'halve_it' || s.gameType === 'pressure_chamber' || s.gameType === 'bobs_27') && !s.legSummary;
+  // grid, not per-player columns, regardless of orientation. Derived from
+  // whether the resolved renderer actually declares a scorecard() method,
+  // instead of a hand-maintained list of game-type names kept separately in
+  // sync with the `renderers` table above.
+  const isScorecardLayout = typeof renderer.scorecard === 'function' && !s.legSummary;
   const cols = isScorecardLayout ? 1 : (isPortrait ? 1 : (n<=1 ? 1 : n<=4 ? 2 : 3));
   grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
 
@@ -2208,7 +2186,10 @@ function escapeHtml(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':
 function esc(v){ return escapeHtml(v == null ? '' : String(v)); }
 function num(v){ return Number(v) || 0; }
 
-fetch('/api/live', {cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{ if(s) render(s); }).catch(()=>{});
+// connect()'s SSE handshake (or, if it falls back, startPolling()'s first tick)
+// already delivers the current live state immediately — the backend writes it
+// as the very first SSE event on connect (backend/server.js) — so a separate
+// initial fetch here would just render the same snapshot twice.
 connect();
 </script>
 </body>
