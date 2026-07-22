@@ -894,6 +894,10 @@ const server = http.createServer(async (req, res) => {
     // webhook IDs themselves) — every device playing a game needs this to skip a
     // pointless sendHaWebhook() call/payload build client-side (item 57).
     if (p === '/api/settings/ha-webhook-status' && m === 'GET') { return send(res, 200, db.getHaWebhookStatus()); }
+    // Public (no-auth) read of the Player Profile heatmap's heat-scale/number-band
+    // style — any device viewing a profile needs this, not just an admin's browser.
+    if (p === '/api/settings/heatmap-style' && m === 'GET') { return send(res, 200, db.getHeatmapStyle()); }
+    if (p === '/api/settings/heatmap-number-style' && m === 'GET') { return send(res, 200, db.getHeatmapNumberStyle()); }
     if (p === '/api/settings' && m === 'PUT') {
       if (!requireAdmin(req, res)) return;
       const b = await readJson(req);
@@ -906,7 +910,7 @@ const server = http.createServer(async (req, res) => {
         'ha_webhook_gamestart','ha_webhook_gameend','ha_webhook_setstart','ha_webhook_setend',
         'ha_webhook_legstart','ha_webhook_legend','pin_lockout_threshold',
         'admin_lockout_grace','admin_lockout_base_seconds','admin_lockout_max_seconds','scoreboard_layout',
-        'default_scoring_input','card_tagline', ...boolKeys];
+        'default_scoring_input','card_tagline','heatmap_style','heatmap_number_style', ...boolKeys];
       const safe = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
       if ('pin_lockout_threshold' in safe) {
         const n = Number(safe.pin_lockout_threshold);
@@ -946,6 +950,12 @@ const server = http.createServer(async (req, res) => {
       }
       if ('default_scoring_input' in safe && !['pad','board'].includes(safe.default_scoring_input)) {
         return send(res, 400, { error: 'default_scoring_input must be one of: pad, board' });
+      }
+      if ('heatmap_style' in safe && !['classic','scorched'].includes(safe.heatmap_style)) {
+        return send(res, 400, { error: 'heatmap_style must be one of: classic, scorched' });
+      }
+      if ('heatmap_number_style' in safe && !['original','molten_seam','chalk_ledger'].includes(safe.heatmap_number_style)) {
+        return send(res, 400, { error: 'heatmap_number_style must be one of: original, molten_seam, chalk_ledger' });
       }
       return send(res, 200, db.updateSettings(safe));
     }

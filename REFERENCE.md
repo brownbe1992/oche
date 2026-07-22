@@ -3684,7 +3684,7 @@ the linked game's `completed_at IS NULL` → `in_progress`; else `fulfilled`.
 `ha_webhook_<event>` (×12, see §10), `pin_lockout_threshold`,
 `admin_lockout_grace`, `admin_lockout_base_seconds`, `admin_lockout_max_seconds`,
 `scoreboard_layout`, `default_scoring_input`,
-`card_tagline`.
+`card_tagline`, `heatmap_style`, `heatmap_number_style`.
 
 ### `admins`
 | Column | Type | Notes |
@@ -4296,12 +4296,41 @@ markup) shows on every game-type tab that has one — `loadDartHeatmap()` fires
 for whichever tab is currently active, except Checkout Trainer (hidden
 entirely, since its taps aren't real thrown darts).
 
-`buildDartHeatmap(cells, {ariaLabel, noZoneTracking})` renders three things
-per number: the inner-single and outer-single regions (each independently
-shaded by hit count), and the miss ring (shaded by `missHeat(wedge, depth)`,
-its **own independent heat-scale normalization**, not shared with the
-scoring regions, since hit and miss counts are wildly different population
-sizes per player).
+`buildDartHeatmap(cells, {ariaLabel, noZoneTracking, heatmapStyle, numberStyle})`
+renders three things per number: the inner-single and outer-single regions
+(each independently shaded by hit count), and the miss ring (shaded by
+`missHeat(wedge, depth)`, its **own independent heat-scale normalization**,
+not shared with the scoring regions, since hit and miss counts are wildly
+different population sizes per player).
+
+**Heat-scale and number-band style** (Settings → Player Profile Heatmap,
+admin-toggled via `PUT /api/settings` keys `heatmap_style`/
+`heatmap_number_style`, read by every device via the public
+`GET /api/settings/heatmap-style` / `GET /api/settings/heatmap-number-style`
+endpoints — same "public read, admin write" split as `colorblind_mode`/
+`scoreboard_layout`). Designed via `/frontend-design`, picked by the site
+owner from a set of mockups (2026-07):
+- `heatmap_style` — `'classic'` (default) is the original single-hue dark-grey
+  (`#1c1e1a`) to gold (`~#d9b46a`) scale, unchanged. `'scorched'` is a
+  thermal-camera black → ember red → orange → white-hot ramp
+  (`scorchedFill(t)`, 7-stop interpolation), with a Gaussian-blur glow filter
+  (`#hm-ember-glow`) applied to any board region whose heat exceeds `0.55` —
+  "the hottest spots visibly burn." The miss ring shares the same fill scale
+  in both styles but never gets the glow.
+- `heatmap_number_style` — only meaningful when `heatmap_style` is
+  `'scorched'` (forced back to `'original'` otherwise, regardless of what's
+  saved, since the two extra treatments were designed to complement the
+  Scorched ramp specifically): `'original'` (default) is the plain cream
+  Bebas Neue numeral, unchanged from classic. `'molten_seam'` draws one
+  cracked, glowing divider ring (`#hm-seam-glow`) around the whole board plus
+  a per-sector radial tick and a stencil-cut numeral (dark outline, bright
+  orange fill). `'chalk_ledger'` draws one blurred scorch-mark ring
+  (`#hm-scorch-blur`) bleeding out from the board edge plus a per-sector
+  hand-chalk tally tick and a cursive-font numeral, tying into the app's
+  existing chalkboard visual language.
+`loadDartHeatmap()` reads the two module-level `let heatmapStyle`/
+`let heatmapNumberStyle` (refreshed at boot alongside `colorblindMode`) and
+passes them straight through as `opts.heatmapStyle`/`opts.numberStyle`.
 
 A **zone-unspecified single** — `d.zone` is only ever set by the geometric
 Dartboard-mode board's own single-region taps (`buildDartboard()`'s `oc(sec,

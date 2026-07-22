@@ -1046,7 +1046,7 @@ Plus global leaderboards for 180s, Big Fish, and nine-dart finishes, each filter
 
 ### Settings
 
-The Settings page (accessible from the top navigation) holds app-wide configuration, grouped into four tabs: **Account & Access**, **Gameplay & Display**, **Integrations**, and **Admin & Danger Zone**. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, **Daily Challenge**, **Server Errors**, **Backups**, **Data Export**, **Merge Players**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
+The Settings page (accessible from the top navigation) holds app-wide configuration, grouped into four tabs: **Account & Access**, **Gameplay & Display**, **Integrations**, and **Admin & Danger Zone**. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Player Profile Heatmap**, **Smart Home Integration**, **Daily Challenge**, **Server Errors**, **Backups**, **Data Export**, **Merge Players**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
 
 Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accounts--player-pins)) — until an admin account exists, the page offers to create the first one.
 
@@ -1807,7 +1807,8 @@ PUT  /api/settings                          Update settings       { ha_url, ha_w
                                                pin_lockout_threshold, admin_lockout_grace,
                                                admin_lockout_base_seconds, admin_lockout_max_seconds,
                                                collect_dart_timing, scoreboard_layout,
-                                               default_scoring_input, … }
+                                               default_scoring_input, heatmap_style,
+                                               heatmap_number_style, … }
 GET  /api/settings/dart-timing              { enabled } — public, read by every device during play
 GET  /api/settings/scoreboard-layout        { layout } — public, read by the /display screen
 GET  /api/settings/default-input            { input: 'pad'|'board' } — public, read at app boot
@@ -1815,6 +1816,8 @@ GET  /api/settings/colorblind-mode          { enabled } — public, read at app 
 GET  /api/settings/voice-announcements      { enabled, turnScore, noScore, checkoutReq, oneEighty,
                                                bigFish, matchProgress } — public, read at boot by /display
 GET  /api/settings/card-tagline             { tagline } — public, read at app boot for shareable cards
+GET  /api/settings/heatmap-style            { style: 'classic'|'scorched' } — public, read at app boot
+GET  /api/settings/heatmap-number-style     { style: 'original'|'molten_seam'|'chalk_ledger' } — public, read at app boot
 POST /api/ha-test                           Test HA connectivity  { url }                        [admin]
 POST /api/ha-webhook                        Fire an HA webhook    { event, player, category, … }
 ```

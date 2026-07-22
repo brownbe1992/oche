@@ -7561,6 +7561,21 @@ function getDefaultScoringInput() {
   const input = row ? row.value : 'board';
   return { input: ['pad','board'].includes(input) ? input : 'board' };
 }
+// Public (no-auth) read of the Player Profile heatmap's heat-scale style — any
+// device viewing a profile needs this, not just an admin's browser.
+function getHeatmapStyle() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'heatmap_style'").get();
+  const style = row ? row.value : 'classic';
+  return { style: ['classic','scorched'].includes(style) ? style : 'classic' };
+}
+// Public (no-auth) read of the heatmap's number-band treatment. Only meaningful
+// when the heatmap style above is 'scorched' — the classic style always uses
+// the plain original numbers regardless of this value.
+function getHeatmapNumberStyle() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'heatmap_number_style'").get();
+  const style = row ? row.value : 'original';
+  return { style: ['original','molten_seam','chalk_ledger'].includes(style) ? style : 'original' };
+}
 // Public (no-auth) read of WHETHER each HA webhook event is configured (never the
 // webhook IDs themselves, which stay admin-only via getSettings()) — every device
 // playing a game calls sendHaWebhook() and needs to know up front whether firing
@@ -9386,7 +9401,7 @@ module.exports = {
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport, getPlayerExport, getPlayerCsvExport, importPlayerExport, getMergePreview, mergePlayers,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics, getCoachingInsights,
-  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, getHaWebhookStatus, fireHaWebhook,
+  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, getHaWebhookStatus, fireHaWebhook, getHeatmapStyle, getHeatmapNumberStyle,
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword, clearAdminLockout,
   login, logout, getSessionAdmin, adminLockoutDelayMs, verifyAdminPassword, backupRetentionDays,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,

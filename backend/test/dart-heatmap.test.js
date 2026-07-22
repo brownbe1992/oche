@@ -109,3 +109,58 @@ describe('BUG-24 — buildDartHeatmap() no longer hides singles for Cricket/Base
     assert.doesNotThrow(() => buildDartHeatmap([], { noZoneTracking: true }));
   });
 });
+
+describe('Heatmap style + number-band style options (Settings -> Player Profile Heatmap)', () => {
+  const sampleCells = [
+    { sector: 20, multiplier: 1, zone: 'inner', hits: 40 },
+    { sector: 1, multiplier: 1, zone: 'inner', hits: 0 },
+  ];
+
+  test('default (no opts) still uses the classic dark-grey-to-gold scale, unchanged', () => {
+    const buildDartHeatmap = loadBuildDartHeatmap();
+    const svg = buildDartHeatmap(sampleCells);
+    assert.match(svg, /fill="#1c1e1a"/); // sector 1's never-hit region
+    assert.doesNotMatch(svg, /hm-ember-glow/);
+  });
+
+  test("heatmapStyle:'scorched' switches the zero-heat fill and adds the ember-glow filter", () => {
+    const buildDartHeatmap = loadBuildDartHeatmap();
+    const svg = buildDartHeatmap(sampleCells, { heatmapStyle: 'scorched' });
+    assert.match(svg, /fill="#15110d"/); // scorched zero-heat color
+    assert.doesNotMatch(svg, /fill="#1c1e1a"/);
+    assert.match(svg, /id="hm-ember-glow"/);
+    // The hottest region (sector 20, the only hit data) should pick up the glow filter.
+    assert.match(svg, /filter="url\(#hm-ember-glow\)"/);
+  });
+
+  test("numberStyle is ignored entirely when heatmapStyle isn't 'scorched'", () => {
+    const buildDartHeatmap = loadBuildDartHeatmap();
+    const svg = buildDartHeatmap(sampleCells, { numberStyle: 'molten_seam' });
+    assert.doesNotMatch(svg, /hm-seam-glow/);
+    assert.doesNotMatch(svg, /#e8752c/);
+    assert.match(svg, /font-family="Bebas Neue,sans-serif" font-size="17" fill="#efe7d2"/);
+  });
+
+  test("heatmapStyle:'scorched' + numberStyle:'molten_seam' renders the cracked seam divider and stencil numerals", () => {
+    const buildDartHeatmap = loadBuildDartHeatmap();
+    const svg = buildDartHeatmap(sampleCells, { heatmapStyle: 'scorched', numberStyle: 'molten_seam' });
+    assert.match(svg, /id="hm-seam-glow"/);
+    assert.match(svg, /stroke="#e8752c"/);
+    assert.match(svg, /fill="#f2a03c"/); // stencil numeral fill
+  });
+
+  test("heatmapStyle:'scorched' + numberStyle:'chalk_ledger' renders the scorched-edge divider and chalk numerals", () => {
+    const buildDartHeatmap = loadBuildDartHeatmap();
+    const svg = buildDartHeatmap(sampleCells, { heatmapStyle: 'scorched', numberStyle: 'chalk_ledger' });
+    assert.match(svg, /id="hm-scorch-blur"/);
+    assert.match(svg, /'Segoe Print'/);
+  });
+
+  test("an unrecognized numberStyle value falls back to 'original' rather than throwing", () => {
+    const buildDartHeatmap = loadBuildDartHeatmap();
+    assert.doesNotThrow(() => buildDartHeatmap(sampleCells, { heatmapStyle: 'scorched', numberStyle: 'not-a-real-style' }));
+    const svg = buildDartHeatmap(sampleCells, { heatmapStyle: 'scorched', numberStyle: 'not-a-real-style' });
+    assert.doesNotMatch(svg, /hm-seam-glow/);
+    assert.doesNotMatch(svg, /'Segoe Print'/);
+  });
+});
