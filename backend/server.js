@@ -95,6 +95,10 @@
            the one consumer.
        GET  /api/challenges/status -> (?player=...&date=YYYY-MM-DD) -> { today, streak, history } (public)
        GET  /api/challenges/history -> (?player=...&date=YYYY-MM-DD) -> { played, completed, currentStreak, longestStreak, bestByFormat, attempts } (public)
+       GET  /api/challenges/today-board -> (?date=YYYY-MM-DD&format=...) -> [{ player, result }, ...]
+         ranked best-to-worst (household comparison board, Home page) — format is
+         passed by the client (already computed client-side via todaysChallenge())
+         rather than re-derived server-side (public)
        DEL  /api/challenges/attempt -> (?player=...&date=YYYY-MM-DD) reset an attempt + wipe its recorded stats [admin]
 
        GET  /api/dart-components/options -> the fixed dropdown option lists (shapes/materials/grips/etc.) (public)
@@ -1295,6 +1299,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/challenges/history' && m === 'GET') {
       return send(res, 200, db.getChallengeHistory(url.searchParams.get('player'), url.searchParams.get('date')));
+    }
+    if (p === '/api/challenges/today-board' && m === 'GET') {
+      return send(res, 200, db.getTodaysChallengeBoard(url.searchParams.get('date'), url.searchParams.get('format')));
     }
     // Admin-only reset (Settings → Daily Challenge): deletes a player's attempt for
     // the given date plus the game/turns/darts recorded during it, unlocking a retake.

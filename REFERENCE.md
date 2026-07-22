@@ -2027,7 +2027,7 @@ inline in `index.html`, so they're covered by a committed `node:test`:
 |---|---|
 | 🔥 **Challenge Streak: Week** | `currentStreak === 7` exactly (an exact crossing check, not `>=`, so a long streak doesn't refire this every day). **Recurring** — a later streak that reaches 7 again after breaking can re-earn it. |
 | 🏆 **Challenge Streak: Month** | `currentStreak === 30` exactly, same exact-crossing reasoning as above. **Recurring**, mega-tier overlay (confetti) like Nine-Darter/Perfect Leg. |
-| 🗓️ **Full Rotation** | Every one of the 6 Daily Challenge formats (§6) has at least one *completed* attempt, ever (`bestByFormat` only ever contains completed attempts — see `getChallengeHistory()`'s own query — so this is already "at least once", not merely "attempted"). **Once-badge.** |
+| 🗓️ **Full Rotation** | Every one of the 9 Daily Challenge formats (§6) has at least one *completed* attempt, ever (`bestByFormat` only ever contains completed attempts — see `getChallengeHistory()`'s own query — so this is already "at least once", not merely "attempted"). **Once-badge.** |
 
 **The 18 Just Chuckin' It milestone badges** (checked in
 `checkChuckinMilestones(playerName)`, `frontend/index.html` — called after
@@ -2255,7 +2255,7 @@ function _seededIndex(s, mod){
   for (const ch of s) h = (h*31 + ch.charCodeAt(0)) | 0;
   return Math.abs(h) % mod;
 }
-format = CHALLENGE_FORMATS[_seededIndex(dateStr + '|format', 6)];
+format = CHALLENGE_FORMATS[_seededIndex(dateStr + '|format', 9)];
 target = format==='checkout_sprint' ? CHALLENGE_CHECKOUTS[_seededIndex(dateStr + '|target', 12)] : null;
 ```
 
@@ -2263,7 +2263,7 @@ Same date always produces the same format (and, for Checkout Sprint, the same
 target) on every client — no coordination needed. `CHALLENGE_CHECKOUTS` pool:
 `[121, 96, 100, 141, 170, 40, 32, 50, 60, 80, 110, 130]`.
 
-### The six formats — exact win condition and "better" direction
+### The nine formats — exact win condition and "better" direction
 
 | Format | Win condition | Metric | Direction |
 |---|---|---|---|
@@ -2273,8 +2273,11 @@ target) on every client — no coordination needed. `CHALLENGE_CHECKOUTS` pool:
 | **Steady Hand** | Exactly 3 visits, filler `1000` start | `SUM(each visit's total, only if <=20, else 0)` across all 3 visits | **More is better** |
 | **Treble Run** | Exactly 3 visits, filler `1000` start | `size of Set(sectors hit as a treble)` across all 3 visits (distinct numbers, not raw treble count) | **More is better** |
 | **The Long Game** | 501 leg; remaining drops below 40 with **no busts allowed at any point** | Visits taken to get under 40 | **Fewer is better**; a bust before reaching the target is an immediate DNF (`activeChallenge = null`), not a lower/worse score |
+| **Doubles Gauntlet** | Exactly 3 visits (9 darts), filler `1000` start | `size of Set(sectors hit as a double)` across all 3 visits (D1-D20 and D-Bull all count; distinct numbers, not raw double count) — `distinctDoubleSectors()`, `frontend/scoring.js` | **More is better** |
+| **Ton Hunter** | Exactly `TON_HUNTER_VISITS` (6) visits, filler `1000` start | `COUNT(visits whose total value >= 100)` — `countTonPlusVisits()`, `frontend/scoring.js` | **More is better** |
+| **Around the Horn** | Open-ended — hit every number 20 down to 1, strict descending order, **singles only** (a wrong number, wrong ring, or out-of-order single is simply ignored, never a bust/DNF); filler `100000` start (must outlast an unbounded number of darts, unlike the 3-visit formats' `1000`) | Total darts thrown once all 20 numbers are hit in order — `aroundTheHornProgress()`, `frontend/scoring.js` | **Fewer is better** |
 
-All six formats are entries in one registry, `CHALLENGE_FORMAT_DEFS`
+All nine formats are entries in one registry, `CHALLENGE_FORMAT_DEFS`
 (`frontend/index.html`) — keyed by format name, each entry a self-contained
 object of `gameType`, `label`/`shortLabel`/`genericName`/`metricLabel`,
 `pickTarget(dateStr)`, `startScore(target)`, `checkCompletion(game, p, ev)`,
@@ -2284,7 +2287,7 @@ into) stays a separate, explicit array — its order is load-bearing (a future
 format must always be *appended*, never inserted/reordered, or every past
 date's format would silently change) — rather than `Object.keys(...)` on the
 registry, so that invariant can't be broken by reordering the registry for
-readability. `gameType` is `'x01'` for all six today, but every dispatch site
+readability. `gameType` is `'x01'` for all nine today, but every dispatch site
 (`setMode()`, `startGame()`, `enterTurn()`, `GAME_TYPES.x01.liveModeState`)
 reads it generically off the registry rather than hardcoding `'x01'`, so a
 future non-X01 format needs no changes outside its own registry entry.
@@ -2372,6 +2375,32 @@ three layers:
    alert, no longer silently).
 3. **Locked completion**: `completeChallengeAttempt` only updates rows with
    `completed = 0`, so a repeat completion can never overwrite a locked-in result.
+
+### Household comparison board (Home page)
+
+`getTodaysChallengeBoard(dateStr, format)` (`backend/db.js`) → `GET
+/api/challenges/today-board?date=&format=` → `[{ player, result }, ...]`,
+ranked best-to-worst per `CHALLENGE_BETTER_DIRECTION[format]` (the same
+whitelisted asc/desc lookup `getChallengeHistory()`'s `bestByFormat` uses).
+Only **completed** attempts for the exact `challenge_date`+`format` pair
+appear — an in-progress attempt has no result to rank, and a different day's
+attempt at the same format never bleeds in. `format`/`date` are passed by the
+client (already computed via the pure `todaysChallenge()`, same as
+`startChallengeAttempt()` already receives them) rather than re-derived
+server-side — `db.js` has no independent copy of the date-seeded
+format-selection algorithm. No gating on having played it yourself — every
+player's result is visible to everyone, any time (deliberate design decision,
+not an oversight).
+
+`renderHomeChallengeBoard()` (`frontend/index.html`) renders it under the
+Home page's "🎯 Today's Challenge" card, patched in async once the round-trip
+resolves (same "render what's known synchronously, patch in the network-
+dependent part" pattern as the results screen's PB banner). That card also
+gets its own `.challenge-spotlight` CSS class (an animated gold glow,
+`@keyframes challengeGlow`) so it visually stands out from every other plain
+`.card` on the page — reduced-motion users get the static glow only, via the
+existing page-wide `@media(prefers-reduced-motion:reduce){*{animation:none!
+important}}` rule.
 
 ### Admin reset (Settings → Daily Challenge)
 
@@ -3515,7 +3544,7 @@ any existing stat query.
 | `game_id` | `INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE` | Links to the practice game the attempt was played in — per the "games-context" convention (own table + FK, not a boolean on `games`) |
 | `player_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | |
 | `challenge_date` | `TEXT NOT NULL` | `YYYY-MM-DD`, client-local |
-| `format` | `TEXT NOT NULL` | One of the 6 formats in §6 |
+| `format` | `TEXT NOT NULL` | One of the 9 formats in §6 |
 | `target` | `INTEGER` | Checkout target for `checkout_sprint`; `NULL` otherwise |
 | `result_darts` | `INTEGER` | The format's metric value (despite the name, not literally always "darts" — see §6); `NULL` until completed |
 | `completed` | `INTEGER NOT NULL DEFAULT 0` | |

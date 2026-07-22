@@ -30,6 +30,7 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   DEAD_MAN_WALKING_BANDS, deadManWalkingBandFor, deadManWalkingParForTarget, pickDeadManWalkingTargets,
   evaluateDeadManDart, resolveDeadManDart, DEAD_MAN_WALKING_RESULT_TIERS, deadManWalkingResultTier,
   rebuildDeadManWalkingState, CHALLENGE_CHECKOUTS,
+  distinctDoubleSectors, countTonPlusVisits, aroundTheHornProgress,
   generatePressureCard, gradePressureSectorRound, evaluateDartPressureSector,
   pressureFinishBaseCp, pressureBaseCp, pressureMissPenaltyBase, pressureMissPenaltyForCard,
   pressureRoundOutcome, computePressureRoundResult, pressureComposureRating,
@@ -3087,5 +3088,73 @@ describe('DNF-aware winner determination (docs/open-roadmap-items.md "Forfeiting
     // not stuck waiting on a departed player's turn that will never come.
     const ev = evaluateVisitBaseball(p2, missDarts, { players: [p0, p1, p2], current: 2, starter: 0, baseballInning: 1 });
     assert.equal(ev.roundComplete, true);
+  });
+});
+
+describe('Daily Challenge new-format calculations (Doubles Gauntlet / Ton Hunter / Around the Horn)', () => {
+  const d = (sector, mult) => makeDartCore(sector, mult);
+
+  test('distinctDoubleSectors counts each double sector once, ignoring repeats and non-doubles', () => {
+    const visitLogs = [
+      [d(20,2), d(5,1), d(1,3)],     // D20
+      [d(20,2), d(19,2), d(0,1)],    // D20 again (repeat), D19
+      [d(25,2), d(25,2), d(7,2)],    // D-Bull (sector 25) x2, D7
+    ];
+    assert.deepEqual(distinctDoubleSectors(visitLogs).sort((a,b)=>a-b), [7,19,20,25]);
+  });
+
+  test('distinctDoubleSectors is empty with no doubles hit', () => {
+    assert.deepEqual(distinctDoubleSectors([[d(20,1), d(5,3), d(0,1)]]), []);
+  });
+
+  test('countTonPlusVisits counts only visits totalling 100+', () => {
+    const visitLogs = [
+      [d(20,3), d(20,3), d(20,3)],   // 180 -> ton
+      [d(20,1), d(5,1), d(1,1)],     // 26 -> not a ton
+      [d(20,3), d(20,1), d(0,1)],    // 80 -> not a ton
+      [d(19,3), d(19,3), d(19,2)],   // 57+57+38=152 -> ton
+    ];
+    assert.equal(countTonPlusVisits(visitLogs), 2);
+  });
+
+  test('countTonPlusVisits is 0 with no visits yet', () => {
+    assert.equal(countTonPlusVisits([]), 0);
+  });
+
+  test('aroundTheHornProgress advances only on the correct next single, ignoring everything else', () => {
+    // Visit 1: hits 20 (correct), then a treble (ignored), then 19 (correct)
+    const v1 = [d(20,1), d(20,3), d(19,1)];
+    let prog = aroundTheHornProgress([v1]);
+    assert.equal(prog.nextExpected, 18);
+    assert.equal(prog.done, false);
+    assert.equal(prog.dartsThrown, 3);
+
+    // Visit 2: a double on 18 doesn't count (must be a single); a miss; then the
+    // real single 18
+    const v2 = [d(18,2), d(0,1), d(18,1)];
+    prog = aroundTheHornProgress([v1, v2]);
+    assert.equal(prog.nextExpected, 17);
+    assert.equal(prog.dartsThrown, 6);
+  });
+
+  test('aroundTheHornProgress rejects an out-of-order single (hitting 17 before the expected 18 does not skip ahead)', () => {
+    // First visit correctly advances 20 -> 19 -> expecting 18. Second visit throws
+    // 17 before 18 — the out-of-order 17 must be ignored, not treated as progress.
+    const visitLogs = [[d(20,1), d(19,1)], [d(17,1), d(18,1)]];
+    const prog = aroundTheHornProgress(visitLogs);
+    assert.equal(prog.nextExpected, 17, 'the early single-17 does not count; 18 lands next and advances to 17');
+  });
+
+  test('aroundTheHornProgress reports done once all 20 numbers are hit in descending order', () => {
+    const visitLogs = [];
+    for(let n = 20; n >= 1; n -= 3){
+      const visit = [];
+      for(let i = 0; i < 3 && n - i >= 1; i++) visit.push(d(n - i, 1));
+      visitLogs.push(visit);
+    }
+    const prog = aroundTheHornProgress(visitLogs);
+    assert.equal(prog.nextExpected, 0);
+    assert.equal(prog.done, true);
+    assert.equal(prog.dartsThrown, 20);
   });
 });

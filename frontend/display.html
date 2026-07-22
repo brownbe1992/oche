@@ -1150,13 +1150,6 @@ function buildOutcomeGridCompact(hitKeys){
    type gets its own small renderer here, looked up by s.gameType — X01's
    per-player cards and Cricket's shared chalkboard scorecard. A future game
    type (Baseball, etc.) plugs in the same way without touching either. */
-// Daily Challenge formats whose hero number is a challenge metric (bulls hit,
-// trebles, running total) instead of a real X01 countdown score — see the
-// x01 card's own comment on cm/heroScore below. Static, so it's built once
-// here rather than re-allocated on every card() call (once per player, per
-// render tick).
-const THREE_VISIT_CHALLENGE_FORMATS = new Set(['bullseye_gauntlet','treble_run','steady_hand']);
-
 const renderers = {
   x01: {
     card(p, i, s, L){
@@ -1165,17 +1158,16 @@ const renderers = {
       // showing it twice was redundant, and the match bar's boxed chips are more legible.
       const standing = s.practice ? `Leg ${num(s.legNo)}` : '';
       // Daily Challenge (frontend/index.html's GAME_TYPES.x01.liveModeState) —
-      // still an X01 game underneath, but three of the six formats (Bullseye
-      // Gauntlet, Treble Run, Steady Hand) use a deliberately-too-high filler
-      // starting score so the engine never busts/wins mid-attempt, and the
-      // real countdown score would be meaningless to show. Those three swap
-      // the hero number for the actual challenge metric; the other three
-      // (Checkout Sprint, Speed to Zero, The Long Game) keep the real
-      // countdown — it's genuinely what's being chased — and add the metric
-      // as a secondary line instead.
+      // still an X01 game underneath, but formats whose real score is a
+      // deliberately-too-high filler (the engine never busts/wins mid-attempt;
+      // `challengeUsesFillerScore`, generic — not a hardcoded format-name list,
+      // since display.html has no access to the CHALLENGE_FORMAT_DEFS registry
+      // that decides this) swap the hero number for the actual challenge metric
+      // instead. The formats that keep a real countdown (Checkout Sprint, Speed
+      // to Zero, The Long Game) show it unchanged, with the metric as a
+      // secondary line instead.
       const cm = (s.modeState && s.modeState.challengeFormat) ? s.modeState : null;
-      const isThreeVisitChallenge = cm && THREE_VISIT_CHALLENGE_FORMATS.has(cm.challengeFormat);
-      const heroScore = isThreeVisitChallenge ? cm.challengeMetric : p.score;
+      const heroScore = (cm && cm.challengeUsesFillerScore) ? cm.challengeMetric : p.score;
       let throwbox = '';
       if(active){
         const co = s.checkout
@@ -1199,12 +1191,14 @@ const renderers = {
       // darts"/"Session darts" mean nothing for a one-off attempt, so this shows
       // whichever numbers actually decide the challenge instead: the metric label
       // (already fully formatted client-side — "3 bulls", "2 trebles", "45 pts",
-      // "7 darts", "2 visits"), a 3-visit progress pip row for the three formats
-      // that run exactly 3 visits, and (Treble Run only) which numbers so far.
+      // "7 darts", "2 visits"), a visit-progress pip row for formats with a
+      // fixed visit cap (`challengeVisitCap`, generic — 3, 6, whatever a format
+      // declares; open-ended formats show no pips), and (where the format
+      // provides it) which numbers so far.
       const challengeBox = !cm ? '' : `
           <div class="dart-counts">
             <div class="challenge-metric">${esc(cm.challengeMetricLabel)}</div>
-            ${isThreeVisitChallenge ? `<div class="challenge-pips">${[0,1,2].map(vi=>
+            ${cm.challengeVisitCap ? `<div class="challenge-pips">${Array.from({length:cm.challengeVisitCap},(_,vi)=>vi).map(vi=>
               `<span class="pip ${vi<cm.challengeVisitsCompleted?'done':(active && vi===cm.challengeVisitsCompleted)?'live':''}"></span>`
             ).join('')}</div>` : ''}
             ${(cm.challengeTrebleNumbers && cm.challengeTrebleNumbers.length)

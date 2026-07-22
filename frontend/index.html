@@ -99,6 +99,18 @@
 
   .card{background:var(--surface);border:1px solid var(--wire);border-radius:14px;padding:20px;
     box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 10px 24px -18px rgba(0,0,0,.6)}
+  /* Daily Challenge idea 10: the Home page teaser should "catch the eye
+     immediately" — an animated gradient-glow border, distinct from every other
+     plain `.card` on the page. Reduced-motion disables the animation (the
+     shared `@media(prefers-reduced-motion:reduce){*{animation:none!important}}`
+     rule below already covers this), leaving just the static gold border/glow. */
+  .challenge-spotlight{position:relative;border-color:var(--gold);
+    box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 10px 24px -18px rgba(0,0,0,.6),0 0 18px -4px var(--gold);
+    animation:challengeGlow 3s ease-in-out infinite}
+  @keyframes challengeGlow{
+    0%,100%{box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 10px 24px -18px rgba(0,0,0,.6),0 0 14px -4px var(--gold)}
+    50%{box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 10px 24px -18px rgba(0,0,0,.6),0 0 28px 2px var(--gold)}
+  }
   .screen{display:none}
   .screen.on{display:block;animation:fade .25s ease both}
   @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
@@ -810,9 +822,10 @@
 
   <!-- ============ HOME ============ -->
   <section id="screen-home" class="screen on">
-    <div class="card">
+    <div class="card challenge-spotlight">
       <h2 style="font-size:20px;margin-bottom:12px">🎯 Today's Challenge</h2>
       <div id="home-challenge-body"><p class="pp-meta">Loading…</p></div>
+      <div id="home-challenge-board"></div>
     </div>
     <!-- End-of-Night Session Recap (docs/archive/session-recap-roadmap.md) — hidden
          entirely until renderHomeRecapTeaser() confirms today has at least one
@@ -2289,7 +2302,11 @@ function showDartBuilder(playerName, backTo){
 // past date "was", corrupting history. Kept as its own explicit array
 // (rather than Object.keys(CHALLENGE_FORMAT_DEFS)) so that invariant can't be
 // broken by silently reordering the registry below for readability.
-const CHALLENGE_FORMATS = ['checkout_sprint','speed_to_zero','bullseye_gauntlet','steady_hand','treble_run','long_game'];
+const CHALLENGE_FORMATS = ['checkout_sprint','speed_to_zero','bullseye_gauntlet','steady_hand','treble_run','long_game',
+  'doubles_gauntlet','ton_hunter','around_the_horn'];
+// Fixed visit count for Ton Hunter — enough attempts to make a 100+ visit a
+// real, earned outcome rather than a one-in-three coin flip.
+const TON_HUNTER_VISITS = 6;
 // Everything that makes a Daily Challenge format ITS OWN format, in one place
 // per entry — the registry-dispatch pattern this codebase already uses for
 // per-game-type behavior (GAME_TYPES), applied here so a new format (this
@@ -2322,6 +2339,16 @@ const CHALLENGE_FORMATS = ['checkout_sprint','speed_to_zero','bullseye_gauntlet'
 //   liveMetric(game, p) — the in-progress value of this format's metric at
 //     any point mid-attempt (not just once checkCompletion's threshold is
 //     met), for the live scoreboard (/display)'s running readout.
+//   usesFillerScore — true when startScore() is a meaningless filler (the
+//     real win condition is checkCompletion, not the score reaching 0), so
+//     the live scoreboard should show the metric as the hero number instead
+//     of the filler countdown. Omitted (falsy) for the 3 formats whose score
+//     genuinely means something (Checkout Sprint/Speed to Zero/The Long Game).
+//   visitCap — the fixed visit count this format completes at exactly (3 for
+//     Bullseye Gauntlet/Steady Hand/Treble Run/Doubles Gauntlet, 6 for Ton
+//     Hunter), driving the live scoreboard's visit-progress pip row. null/
+//     omitted for open-ended formats (Around the Horn, and the 3 real-score
+//     formats, none of which show pips).
 const CHALLENGE_FORMAT_DEFS = {
   checkout_sprint: {
     gameType: 'x01',
@@ -2356,6 +2383,8 @@ const CHALLENGE_FORMAT_DEFS = {
     // 9x60=540), purely so the X01 engine never spuriously busts/wins
     // mid-challenge — this format's real win condition is checkCompletion.
     startScore: () => 1000,
+    usesFillerScore: true,
+    visitCap: 3,
     checkCompletion: (game) => {
       if(game.legVisitLogs.length < 3) return null;
       return { metric: game.legVisitLogs.flat().filter(d=>d.sector===25).length };
@@ -2369,6 +2398,8 @@ const CHALLENGE_FORMAT_DEFS = {
     metricLabel: (v) => `${v} treble${v===1?'':'s'}`,
     pickTarget: () => null,
     startScore: () => 1000,
+    usesFillerScore: true,
+    visitCap: 3,
     checkCompletion: (game) => {
       if(game.legVisitLogs.length < 3) return null;
       return { metric: new Set(game.legVisitLogs.flat().filter(d=>d.isTreble).map(d=>d.sector)).size };
@@ -2383,6 +2414,8 @@ const CHALLENGE_FORMAT_DEFS = {
     metricLabel: (v) => `${v} pts`,
     pickTarget: () => null,
     startScore: () => 1000,
+    usesFillerScore: true,
+    visitCap: 3,
     checkCompletion: (game) => {
       if(game.legVisitLogs.length < 3) return null;
       const metric = game.legVisitLogs.reduce((s,visit)=>{ const t=visit.reduce((x,d)=>x+d.value,0); return s + (t<=20 ? t : 0); }, 0);
@@ -2410,6 +2443,54 @@ const CHALLENGE_FORMAT_DEFS = {
     // the same format depending on how the leg happened to end.
     winOverrideMetric: (p) => p.legVisits,
     liveMetric: (game, p) => p.legVisits,
+  },
+  doubles_gauntlet: {
+    gameType: 'x01',
+    label: () => `Doubles Gauntlet — most different doubles hit in 3 visits (9 darts)`,
+    shortLabel: () => `Doubles Gauntlet`,
+    metricLabel: (v) => `${v} double${v===1?'':'s'}`,
+    pickTarget: () => null,
+    startScore: () => 1000,
+    usesFillerScore: true,
+    visitCap: 3,
+    checkCompletion: (game) => {
+      if(game.legVisitLogs.length < 3) return null;
+      return { metric: distinctDoubleSectors(game.legVisitLogs).length };
+    },
+    liveMetric: (game) => distinctDoubleSectors(game.legVisitLogs).length,
+  },
+  ton_hunter: {
+    gameType: 'x01',
+    label: () => `Ton Hunter — most 100+ visits in ${TON_HUNTER_VISITS} visits`,
+    shortLabel: () => `Ton Hunter`,
+    metricLabel: (v) => `${v} ton${v===1?'':'s'}`,
+    pickTarget: () => null,
+    startScore: () => 1000,
+    usesFillerScore: true,
+    visitCap: TON_HUNTER_VISITS,
+    checkCompletion: (game) => {
+      if(game.legVisitLogs.length < TON_HUNTER_VISITS) return null;
+      return { metric: countTonPlusVisits(game.legVisitLogs) };
+    },
+    liveMetric: (game) => countTonPlusVisits(game.legVisitLogs),
+  },
+  around_the_horn: {
+    gameType: 'x01',
+    label: () => `Around the Horn — hit 20 down to 1 in order (singles only), fewest darts`,
+    shortLabel: () => `Around the Horn`,
+    metricLabel: (v) => `${v} darts`,
+    pickTarget: () => null,
+    // Open-ended — completion isn't visit-capped like the 3-visit formats, so
+    // the filler start needs to comfortably outlast however many darts a real
+    // attempt (including plenty of misses/wrong-number darts) actually takes.
+    startScore: () => 100000,
+    usesFillerScore: true,
+    checkCompletion: (game) => {
+      const prog = aroundTheHornProgress(game.legVisitLogs);
+      if(!prog.done) return null;
+      return { metric: prog.dartsThrown };
+    },
+    liveMetric: (game) => aroundTheHornProgress(game.legVisitLogs).dartsThrown,
   },
 };
 function challengeShortLabel(format, target){ return (CHALLENGE_FORMAT_DEFS[format] || CHALLENGE_FORMAT_DEFS.speed_to_zero).shortLabel(target); }
@@ -2495,6 +2576,33 @@ function renderHomeChallengeTeaser(){
   el.innerHTML = `
     <p style="margin:0;color:var(--ink);font-size:14px">${escapeHtml(challenge.label)}</p>
     <p class="pp-meta" style="margin-top:8px">Start it from <b>New Game</b>.</p>`;
+  renderHomeChallengeBoard(challenge);
+}
+// Daily Challenge idea 10: the household comparison board — every player's
+// completed result for TODAY's format, ranked best-to-worst (no gating on
+// having played it yourself, per the design decision — everyone sees the
+// board any time). A genuine network round-trip (unlike the label above),
+// so it's patched in once the response lands rather than blocking the
+// synchronous teaser render.
+function renderHomeChallengeBoard(challenge){
+  const el = document.getElementById('home-challenge-board');
+  if(!el) return;
+  el.innerHTML = '';
+  Backend.get(`/api/challenges/today-board?date=${challenge.date}&format=${challenge.format}`).then(board=>{
+    if(!el.isConnected) return; // navigated away before this resolved
+    if(!board || !board.length){
+      el.innerHTML = `<p class="pp-meta" style="margin-top:10px">No one's completed today's challenge yet — be the first!</p>`;
+      return;
+    }
+    const rows = board.map((row,i)=>`
+      <div class="stat-block" style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px">
+        <span><b>${i+1}.</b> ${escapeHtml(row.player)}</span>
+        <span style="color:var(--gold);font-weight:700">${escapeHtml(challengeMetricLabel(challenge.format, row.result))}</span>
+      </div>`).join('');
+    el.innerHTML = `
+      <p class="pp-meta" style="margin-top:12px;margin-bottom:4px">Today's household board</p>
+      <div style="display:flex;flex-direction:column;gap:2px">${rows}</div>`;
+  }).catch(()=>{ /* board is a nice-to-have — a failed fetch just leaves the teaser as-is */ });
 }
 
 /* =========================================================================
@@ -13049,6 +13157,11 @@ const GAME_TYPES = {
         challengeMetricLabel: challengeMetricLabel(fmt, metric),
         challengeVisitsCompleted: visitLogs.length,
         challengeTrebleNumbers: CHALLENGE_FORMAT_DEFS[fmt].extraResultData ? CHALLENGE_FORMAT_DEFS[fmt].extraResultData(game) : null,
+        // Generic (not per-format-name) so display.html — a standalone file with
+        // no access to this registry — can decide the hero-swap/pip-row treatment
+        // without hardcoding which formats use a filler score or a fixed visit cap.
+        challengeUsesFillerScore: !!CHALLENGE_FORMAT_DEFS[fmt].usesFillerScore,
+        challengeVisitCap: CHALLENGE_FORMAT_DEFS[fmt].visitCap || null,
       };
     }
   },

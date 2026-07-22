@@ -2109,6 +2109,7 @@ function startChallengeAttempt(playerName, gameId, challengeDate, format, target
 const CHALLENGE_BETTER_DIRECTION = {
   checkout_sprint: 'asc', speed_to_zero: 'asc', long_game: 'asc',
   bullseye_gauntlet: 'desc', treble_run: 'desc', steady_hand: 'desc',
+  doubles_gauntlet: 'desc', ton_hunter: 'desc', around_the_horn: 'asc',
 };
 
 // This file's own copy of frontend/index.html's CHALLENGE_FORMAT_DEFS[format].gameType
@@ -2119,6 +2120,7 @@ const CHALLENGE_BETTER_DIRECTION = {
 const CHALLENGE_FORMAT_GAME_TYPE = {
   checkout_sprint: 'x01', speed_to_zero: 'x01', long_game: 'x01',
   bullseye_gauntlet: 'x01', treble_run: 'x01', steady_hand: 'x01',
+  doubles_gauntlet: 'x01', ton_hunter: 'x01', around_the_horn: 'x01',
 };
 
 // Everything the post-completion results screen needs beyond the bare
@@ -2342,6 +2344,27 @@ function getChallengeHistory(playerName, todayDate) {
   `).all(p.id);
 
   return { played: totals.played || 0, completed: totals.completedCount || 0, currentStreak, longestStreak, bestByFormat, attempts };
+}
+
+// Household comparison board (Daily Challenge idea 10): every completed attempt
+// at today's format, ranked best-to-worst — `format` is passed by the client
+// (already computed client-side via the pure todaysChallenge(), same as
+// startChallengeAttempt() already receives it) rather than re-derived here, so
+// this file doesn't need its own copy of the date-seeded format-selection
+// algorithm. Direction (asc/desc) comes from the same whitelisted
+// CHALLENGE_BETTER_DIRECTION lookup getChallengeHistory() already uses for
+// bestByFormat — never raw-interpolated user input.
+function getTodaysChallengeBoard(dateStr, format) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr))) throw httpError(400, 'date must be YYYY-MM-DD');
+  const dir = CHALLENGE_BETTER_DIRECTION[String(format)];
+  if (!dir) throw httpError(400, `Unknown challenge format "${format}"`);
+  const order = dir === 'asc' ? 'ASC' : 'DESC';
+  return db.prepare(`
+    SELECT p.name AS player, a.result_darts AS result
+    FROM daily_challenge_attempts a JOIN players p ON p.id = a.player_id
+    WHERE a.challenge_date = ? AND a.format = ? AND a.completed = 1
+    ORDER BY a.result_darts ${order}
+  `).all(String(dateStr), String(format)).map(r => ({ player: r.player, result: r.result }));
 }
 
 // docs/bug-roadmap.md BUG-29: one row per actually-won completed H2H leg
@@ -9341,6 +9364,7 @@ module.exports = {
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,
   awardBadge, revokeBadge, getPlayerBadges, getH2HSummary, getAroundTheWorldProgress,
   startChallengeAttempt, completeChallengeAttempt, getChallengeStatus, getChallengeHistory, resetChallengeAttempt,
+  getTodaysChallengeBoard,
   createTournament, listTournaments, getTournament, startTournamentMatch, recordWalkover, getTournamentStats,
   createLeague, listLeagues, getLeague, getLeagueStandings, enrollLeaguePlayer, setLeagueStatus,
   getPlayerLeagueSummary, getEligibleLeagues, getLeagueFixtures, getPendingFixturesForPlayers,

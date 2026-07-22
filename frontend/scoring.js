@@ -2177,6 +2177,44 @@ function doubleElimStructure(k) {
 // createGame() needs it server-side too.
 const CHALLENGE_CHECKOUTS = [121, 96, 100, 141, 170, 40, 32, 50, 60, 80, 110, 130];
 
+/* ---------- Daily Challenge format calculations ----------
+   Pure metric functions for the 3 formats added after CHALLENGE_FORMAT_DEFS's
+   registry redesign (frontend/index.html) — kept here, not inline in the
+   registry, so each has a committed test per CLAUDE.md's "every new
+   calculation gets a permanent test" convention. Each takes `visitLogs`
+   (game.legVisitLogs — one array of that visit's raw darts per visit,
+   accumulated across the whole attempt) the same shape every other
+   filler-start format's checkCompletion/liveMetric already reads. */
+
+// Doubles Gauntlet: distinct double-sectors hit (D1-D20, D-Bull) across every
+// dart thrown so far — mirrors treble_run's distinct-treble-sectors shape.
+function distinctDoubleSectors(visitLogs){
+  return [...new Set((visitLogs||[]).flat().filter(d=>d.isDouble).map(d=>d.sector))];
+}
+
+// Ton Hunter: count of visits (each a full 1-3-dart array) whose total value
+// is 100 or more — a "ton" in darts slang, the classic single-visit milestone.
+function countTonPlusVisits(visitLogs){
+  return (visitLogs||[]).filter(visit => visit.reduce((s,d)=>s+d.value,0) >= 100).length;
+}
+
+// Around the Horn: hit every number 20 down to 1, in strict descending order,
+// singles only (mult===1) — any other dart (miss, wrong number, double/treble)
+// is simply ignored rather than breaking the run, so a genuine bust never
+// happens and there's no DNF condition (unlike The Long Game). `nextExpected`
+// is the next number still needed (0 once all 20 are done); `dartsThrown` is
+// the total darts thrown across the whole attempt so far, doubling as the
+// final metric once `done` (fewer darts is better).
+function aroundTheHornProgress(visitLogs){
+  const darts = (visitLogs||[]).flat();
+  let nextExpected = 20;
+  for(const d of darts){
+    if(nextExpected < 1) break;
+    if(d.mult === 1 && d.sector === nextExpected) nextExpected -= 1;
+  }
+  return { nextExpected, done: nextExpected < 1, dartsThrown: darts.length };
+}
+
 // Only executes under Node (require()'d from a test file) — undefined in a
 // browser, so this is a no-op there and every name above stays a plain global.
 if (typeof module !== 'undefined' && module.exports) {
@@ -2207,6 +2245,7 @@ if (typeof module !== 'undefined' && module.exports) {
     DEAD_MAN_WALKING_BANDS, deadManWalkingBandFor, deadManWalkingParForTarget, pickDeadManWalkingTargets,
     evaluateDeadManDart, resolveDeadManDart, DEAD_MAN_WALKING_RESULT_TIERS, deadManWalkingResultTier,
     rebuildDeadManWalkingState, CHALLENGE_CHECKOUTS,
+    distinctDoubleSectors, countTonPlusVisits, aroundTheHornProgress,
     _pcSeededIndex, PRESSURE_TARGET_POOL, PRESSURE_MODIFIERS, PRESSURE_RING_MULT, PRESSURE_ROUNDS, PRESSURE_NO_WARMUP_MS,
     generatePressureCard, gradePressureSectorRound, evaluateDartPressureSector,
     PRESSURE_BASE_CP, PRESSURE_MISS_PENALTY_BASE, pressureFinishBaseCp, pressureBaseCp, pressureMissPenaltyBase,
