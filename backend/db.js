@@ -2076,6 +2076,16 @@ function startChallengeAttempt(playerName, gameId, challengeDate, format, target
   if (!Object.prototype.hasOwnProperty.call(CHALLENGE_BETTER_DIRECTION, String(format))) {
     throw httpError(400, `Unknown challenge format "${format}"`);
   }
+  // Every format's gameType lives in frontend/index.html's CHALLENGE_FORMAT_DEFS
+  // registry (today, every format resolves to 'x01') — mirrored here so a future
+  // non-X01 format can't be started against a game of the wrong type by a stale or
+  // buggy client. CHALLENGE_FORMAT_GAME_TYPE is this file's own copy since db.js has
+  // no access to the frontend registry at runtime.
+  const expectedGameType = CHALLENGE_FORMAT_GAME_TYPE[String(format)];
+  const gameTypeRow = q.gameTypeById.get(Number(gameId));
+  if (gameTypeRow && expectedGameType && gameTypeRow.game_type !== expectedGameType) {
+    throw httpError(400, `Challenge format "${format}" requires a "${expectedGameType}" game, got "${gameTypeRow.game_type}"`);
+  }
   try {
     db.prepare(`
       INSERT INTO daily_challenge_attempts (game_id, player_id, challenge_date, format, target)
@@ -2099,6 +2109,16 @@ function startChallengeAttempt(playerName, gameId, challengeDate, format, target
 const CHALLENGE_BETTER_DIRECTION = {
   checkout_sprint: 'asc', speed_to_zero: 'asc', long_game: 'asc',
   bullseye_gauntlet: 'desc', treble_run: 'desc', steady_hand: 'desc',
+};
+
+// This file's own copy of frontend/index.html's CHALLENGE_FORMAT_DEFS[format].gameType
+// (db.js has no access to that client-side registry at runtime) — used by
+// startChallengeAttempt() to reject a format/game_type mismatch. Every format is
+// 'x01' today; a future non-X01 format adds its own entry here alongside its
+// frontend registry entry.
+const CHALLENGE_FORMAT_GAME_TYPE = {
+  checkout_sprint: 'x01', speed_to_zero: 'x01', long_game: 'x01',
+  bullseye_gauntlet: 'x01', treble_run: 'x01', steady_hand: 'x01',
 };
 
 // Everything the post-completion results screen needs beyond the bare

@@ -2283,32 +2283,137 @@ function showDartBuilder(playerName, backTo){
 // "Cold start" — Dead Man Walking's own cold-start fallback reuses this exact
 // pool server-side, so it moved to the shared module both index.html and
 // backend/db.js already require in, rather than being duplicated).
+// Order is load-bearing: todaysChallenge() seeds an index into this exact
+// array by date, so a future format must always be APPENDED, never inserted
+// or reordered — doing either would retroactively change which format every
+// past date "was", corrupting history. Kept as its own explicit array
+// (rather than Object.keys(CHALLENGE_FORMAT_DEFS)) so that invariant can't be
+// broken by silently reordering the registry below for readability.
 const CHALLENGE_FORMATS = ['checkout_sprint','speed_to_zero','bullseye_gauntlet','steady_hand','treble_run','long_game'];
-const CHALLENGE_LABELS = {
-  checkout_sprint:   (t)=>`Checkout Sprint — finish ${t} in the fewest darts`,
-  speed_to_zero:     ()=>`Speed to Zero — full 501 leg, fewest total darts`,
-  bullseye_gauntlet: ()=>`Bullseye Gauntlet — most bulls hit in 3 visits (9 darts)`,
-  steady_hand:       ()=>`Steady Hand — score as close to 20 as possible each visit, without going over`,
-  treble_run:        ()=>`Treble Run — most different trebles hit in 3 visits (9 darts)`,
-  long_game:         ()=>`The Long Game — fewest visits from 501 to under 40, no busts`,
+// Everything that makes a Daily Challenge format ITS OWN format, in one place
+// per entry — the registry-dispatch pattern this codebase already uses for
+// per-game-type behavior (GAME_TYPES), applied here so a new format (this
+// session added ideas 1-3: Doubles Gauntlet/Ton Hunter/Around the Horn) is one
+// new entry, not a change to 6 scattered functions across enterTurn()/
+// liveModeState/finishUnit()/todaysChallenge(). `gameType` names which
+// underlying game engine the attempt runs on — every format so far resolves
+// to 'x01' (a genuinely Cricket/Baseball-based format is still a real future
+// option this field exists for, per the codebase's full-frontend code
+// review's "Daily Challenge X01-coupling" audit), but nothing here assumes
+// it's the only value; setMode()/startGame() read it generically.
+//   label(target)       — full description (New Game screen)
+//   shortLabel(target)  — short form (moment cards, stat lines, comparisons)
+//   metricLabel(value)  — formats an achieved metric value for display
+//   pickTarget(dateStr) — this format's own per-day target, or null
+//   startScore(target)  — the X01 starting score to construct the game with
+//   checkCompletion(game, p, ev) — called from enterTurn() on every non-win
+//     visit by the challenge's own player; return null if not done yet,
+//     { dnf:true } to abandon (a bust before reaching the goal), or
+//     { metric } once the format's own win condition is met. Formats that
+//     complete via the normal X01 double-out path (checkout_sprint,
+//     speed_to_zero) leave this null — enterTurn()'s existing ev.win branch
+//     already handles them with no format-specific code needed.
+//   winOverrideMetric(p) — for a format whose metric isn't simply "darts to
+//     finish" but that CAN also end via a genuine ev.win (long_game: a real
+//     checkout that also happens to drop under 40) — returns the true metric
+//     to record instead of the generic dart-count fallback.
+//   extraResultData(game) — optional extra data for the results screen's
+//     format-specific visual (Treble Run's hit-number chips); null otherwise.
+//   liveMetric(game, p) — the in-progress value of this format's metric at
+//     any point mid-attempt (not just once checkCompletion's threshold is
+//     met), for the live scoreboard (/display)'s running readout.
+const CHALLENGE_FORMAT_DEFS = {
+  checkout_sprint: {
+    gameType: 'x01',
+    label: (t) => `Checkout Sprint — finish ${t} in the fewest darts`,
+    shortLabel: (t) => `Checkout ${t}`,
+    // shortLabel is per-day-target ("Checkout 40"); this is the target-independent
+    // name for cross-day aggregates (Player Profile's per-format best table).
+    genericName: 'Checkout Sprint',
+    metricLabel: (v) => `${v} darts`,
+    pickTarget: (dateStr) => CHALLENGE_CHECKOUTS[_seededIndex(dateStr+'|target', CHALLENGE_CHECKOUTS.length)],
+    startScore: (target) => target,
+    checkCompletion: null,
+    liveMetric: (game, p) => p.legDarts,
+  },
+  speed_to_zero: {
+    gameType: 'x01',
+    label: () => `Speed to Zero — full 501 leg, fewest total darts`,
+    shortLabel: () => `Speed to Zero`,
+    metricLabel: (v) => `${v} darts`,
+    pickTarget: () => null,
+    startScore: () => 501,
+    checkCompletion: null,
+    liveMetric: (game, p) => p.legDarts,
+  },
+  bullseye_gauntlet: {
+    gameType: 'x01',
+    label: () => `Bullseye Gauntlet — most bulls hit in 3 visits (9 darts)`,
+    shortLabel: () => `Bullseye Gauntlet`,
+    metricLabel: (v) => `${v} bull${v===1?'':'s'}`,
+    pickTarget: () => null,
+    // A filler start comfortably above any realistic 9-dart total (max
+    // 9x60=540), purely so the X01 engine never spuriously busts/wins
+    // mid-challenge — this format's real win condition is checkCompletion.
+    startScore: () => 1000,
+    checkCompletion: (game) => {
+      if(game.legVisitLogs.length < 3) return null;
+      return { metric: game.legVisitLogs.flat().filter(d=>d.sector===25).length };
+    },
+    liveMetric: (game) => game.legVisitLogs.flat().filter(d=>d.sector===25).length,
+  },
+  treble_run: {
+    gameType: 'x01',
+    label: () => `Treble Run — most different trebles hit in 3 visits (9 darts)`,
+    shortLabel: () => `Treble Run`,
+    metricLabel: (v) => `${v} treble${v===1?'':'s'}`,
+    pickTarget: () => null,
+    startScore: () => 1000,
+    checkCompletion: (game) => {
+      if(game.legVisitLogs.length < 3) return null;
+      return { metric: new Set(game.legVisitLogs.flat().filter(d=>d.isTreble).map(d=>d.sector)).size };
+    },
+    extraResultData: (game) => challengeTrebleNumbersFrom(game.legVisitLogs),
+    liveMetric: (game) => new Set(game.legVisitLogs.flat().filter(d=>d.isTreble).map(d=>d.sector)).size,
+  },
+  steady_hand: {
+    gameType: 'x01',
+    label: () => `Steady Hand — score as close to 20 as possible each visit, without going over`,
+    shortLabel: () => `Steady Hand`,
+    metricLabel: (v) => `${v} pts`,
+    pickTarget: () => null,
+    startScore: () => 1000,
+    checkCompletion: (game) => {
+      if(game.legVisitLogs.length < 3) return null;
+      const metric = game.legVisitLogs.reduce((s,visit)=>{ const t=visit.reduce((x,d)=>x+d.value,0); return s + (t<=20 ? t : 0); }, 0);
+      return { metric };
+    },
+    liveMetric: (game) => game.legVisitLogs.reduce((s,visit)=>{ const t=visit.reduce((x,d)=>x+d.value,0); return s + (t<=20 ? t : 0); }, 0),
+  },
+  long_game: {
+    gameType: 'x01',
+    label: () => `The Long Game — fewest visits from 501 to under 40, no busts`,
+    shortLabel: () => `The Long Game`,
+    metricLabel: (v) => `${v} visit${v===1?'':'s'}`,
+    pickTarget: () => null,
+    startScore: () => 501,
+    checkCompletion: (game, p, ev) => {
+      if(ev.bust) return { dnf: true };   // busted before reaching the target — DNF, stop tracking
+      if(p.score < 40) return { metric: p.legVisits };
+      return null;
+    },
+    // The metric is always "how many visits it took," even on the rare path
+    // where the final visit both drops under 40 AND is a legitimate
+    // double-out checkout to exactly 0 (a real ev.win, not checkCompletion) —
+    // without this, that one path would fall through to the generic
+    // dart-count fallback instead, storing a different kind of number for
+    // the same format depending on how the leg happened to end.
+    winOverrideMetric: (p) => p.legVisits,
+    liveMetric: (game, p) => p.legVisits,
+  },
 };
-// Short form for moment cards / stat lines, where the full label above is too long.
-const CHALLENGE_SHORT_LABELS = {
-  checkout_sprint:   (t)=>`Checkout ${t}`,
-  speed_to_zero:     ()=>`Speed to Zero`,
-  bullseye_gauntlet: ()=>`Bullseye Gauntlet`,
-  steady_hand:       ()=>`Steady Hand`,
-  treble_run:        ()=>`Treble Run`,
-  long_game:         ()=>`The Long Game`,
-};
-function challengeShortLabel(format, target){ return (CHALLENGE_SHORT_LABELS[format] || CHALLENGE_SHORT_LABELS.speed_to_zero)(target); }
-function challengeMetricLabel(format, value){
-  if(format==='bullseye_gauntlet') return `${value} bull${value===1?'':'s'}`;
-  if(format==='treble_run')        return `${value} treble${value===1?'':'s'}`;
-  if(format==='steady_hand')       return `${value} pts`;
-  if(format==='long_game')         return `${value} visit${value===1?'':'s'}`;
-  return `${value} darts`;
-}
+function challengeShortLabel(format, target){ return (CHALLENGE_FORMAT_DEFS[format] || CHALLENGE_FORMAT_DEFS.speed_to_zero).shortLabel(target); }
+function challengeMetricLabel(format, value){ return (CHALLENGE_FORMAT_DEFS[format] || CHALLENGE_FORMAT_DEFS.speed_to_zero).metricLabel(value); }
 // The async-patched portion of the Daily Challenge results screen
 // (docs/daily-challenge-results-roadmap.md): the personal-best banner already
 // existed here; this extends the same placeholder to also show a "your
@@ -2359,11 +2464,11 @@ const _seededIndex = _pcSeededIndex;
 function todaysChallenge(dateStr){
   dateStr = dateStr || localDateStr();
   const format = CHALLENGE_FORMATS[_seededIndex(dateStr+'|format', CHALLENGE_FORMATS.length)];
-  const target = format==='checkout_sprint' ? CHALLENGE_CHECKOUTS[_seededIndex(dateStr+'|target', CHALLENGE_CHECKOUTS.length)] : null;
-  return { date:dateStr, format, target, label: CHALLENGE_LABELS[format](target) };
+  const target = CHALLENGE_FORMAT_DEFS[format].pickTarget(dateStr);
+  return { date:dateStr, format, target, label: CHALLENGE_FORMAT_DEFS[format].label(target) };
 }
 
-let activeChallenge = null;   // { date, format, target, player } while a challenge attempt is in progress
+let activeChallenge = null;   // { date, format, target, player, gameType } while a challenge attempt is in progress
 let lastLegWasChallenge = false; // set true right when a challenge attempt's card fires, so finishUnit() knows to show its Share button
 // Captured at the same point lastLegWasChallenge is set (before activeChallenge is
 // nulled out) so finishUnit()'s results screen can show the actual challenge outcome
@@ -3571,7 +3676,16 @@ function setMode(mode){
   // type regardless of what Step 2 visibly shows.
   const drillGameTypes = ['doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'dead_man_walking'];
   if(!drillGameTypes.includes(mode) && drillGameTypes.includes(setup.gameType)) setup.gameType = 'x01';
-  if((mode === 'challenge' || mode === 'ghost') && setup.gameType !== 'x01') setup.gameType = 'x01';
+  // Daily Challenge's underlying gameType is per-FORMAT (CHALLENGE_FORMAT_DEFS),
+  // not hardcoded to X01 — today every format resolves to 'x01', but this reads
+  // the registry generically so a future non-X01 format needs no change here.
+  // todaysChallenge() is a pure function of the date, safe to call this early.
+  if(mode === 'challenge'){
+    const gt = CHALLENGE_FORMAT_DEFS[todaysChallenge().format].gameType;
+    if(setup.gameType !== gt) setup.gameType = gt;
+  } else if(mode === 'ghost' && setup.gameType !== 'x01'){
+    setup.gameType = 'x01';
+  }
   if(drillGameTypes.includes(mode)) setup.gameType = mode;
   updateGameTypeOptionSections(setup.gameType);
   document.getElementById('ghost-options-section').hidden = (mode !== 'ghost');
@@ -5316,14 +5430,9 @@ async function startGame(){
         return;
       }
     }catch(e){ /* status unreachable — fall through, the server-side 409 backstop below still applies */ }
-    // Bullseye Gauntlet / Steady Hand / Treble Run don't play to zero at all — the
-    // success metric is dart-count-based, not score-based — so they get a filler
-    // start score comfortably above any realistic 9-dart total (max 9x60=540) purely
-    // so the underlying X01 engine never spuriously "busts" or "wins" mid-challenge.
-    challengeStart = challenge.format==='checkout_sprint' ? challenge.target
-      : (challenge.format==='bullseye_gauntlet' || challenge.format==='steady_hand' || challenge.format==='treble_run') ? 1000
-      : 501; // speed_to_zero, long_game
-    activeChallenge = { date:challenge.date, format:challenge.format, target:challenge.target, player };
+    const _formatDef = CHALLENGE_FORMAT_DEFS[challenge.format];
+    challengeStart = _formatDef.startScore(challenge.target);
+    activeChallenge = { date:challenge.date, format:challenge.format, target:challenge.target, player, gameType:_formatDef.gameType };
   } else {
     activeChallenge = null; // guard against a stale challenge from an earlier abandoned attempt
   }
@@ -7268,14 +7377,11 @@ function renderChallengeHistory(data){
        ['Current Streak',data.currentStreak],['Longest Streak',data.longestStreak]]
       .map(([label,val])=>`<div class="stat-block"><div class="stat-val">${val}</div><div class="stat-label">${label}</div></div>`).join('')}</div>`;
 
-  // checkout_sprint's short label takes a per-day target ("Checkout 40"); this is a
-  // cross-day aggregate, so it needs its own target-independent name instead.
-  const FORMAT_NAME = { checkout_sprint:'Checkout Sprint', speed_to_zero:'Speed to Zero',
-    bullseye_gauntlet:'Bullseye Gauntlet', steady_hand:'Steady Hand', treble_run:'Treble Run', long_game:'The Long Game' };
   const bestHtml = CHALLENGE_FORMATS.map(fmt=>{
     const best = data.bestByFormat[fmt];
+    const def = CHALLENGE_FORMAT_DEFS[fmt];
     return `<div class="stat-block"><div class="stat-val">${best!=null ? challengeMetricLabel(fmt, best) : '—'}</div>
-      <div class="stat-label">${FORMAT_NAME[fmt]}</div></div>`;
+      <div class="stat-label">${def.genericName || def.shortLabel()}</div></div>`;
   }).join('');
 
   const rows = (data.attempts||[]).map(a=>{
@@ -11020,31 +11126,24 @@ function enterTurn(){
   // instead of duplicating it. Skipped entirely once a normal win already happened.
   if(activeChallenge && activeChallenge.player === p.name && !ev.win){
     game.legVisitLogs.push(game.darts.slice());
-    const _fmt = activeChallenge.format;
-    let _done = false, _metric = null;
-    if((_fmt==='bullseye_gauntlet' || _fmt==='treble_run' || _fmt==='steady_hand') && game.legVisitLogs.length >= 3){
-      _done = true;
-      const _all = game.legVisitLogs.flat();
-      if(_fmt==='bullseye_gauntlet') _metric = _all.filter(d=>d.sector===25).length;
-      else if(_fmt==='treble_run')   _metric = new Set(_all.filter(d=>d.isTreble).map(d=>d.sector)).size;
-      else _metric = game.legVisitLogs.reduce((s,visit)=>{ const t=visit.reduce((x,d)=>x+d.value,0); return s + (t<=20 ? t : 0); }, 0);
-    } else if(_fmt==='long_game'){
-      if(ev.bust){ activeChallenge = null; }              // busted before reaching target — DNF, stop tracking
-      else if(p.score < 40){ _done = true; _metric = p.legVisits; }
-    }
-    if(_done){
-      activeChallenge.overrideMetric = _metric;
+    const _checkCompletion = CHALLENGE_FORMAT_DEFS[activeChallenge.format].checkCompletion;
+    const _result = _checkCompletion ? _checkCompletion(game, p, ev) : null;
+    if(_result && _result.dnf){
+      activeChallenge = null;                              // busted before reaching target — DNF, stop tracking
+    } else if(_result){
+      activeChallenge.overrideMetric = _result.metric;
       onLegWon(game.current);
       return;
     }
   }
-  // The Long Game's metric is always "how many visits it took," even on the rare
-  // case where the player's final visit both drops under 40 *and* happens to be a
-  // legitimate double-out checkout to exactly 0 (a real ev.win) — without this, that
-  // one path would fall through to onLegWon()'s generic fallback (dart count) instead,
-  // making the same challenge format store two different kinds of number.
-  if(ev.win && activeChallenge && activeChallenge.player === p.name && activeChallenge.format==='long_game'){
-    activeChallenge.overrideMetric = p.legVisits;
+  // A format's metric is always the registry's own definition, even on the rare
+  // case where the player's final visit both satisfies that metric *and* happens to
+  // be a legitimate double-out checkout to exactly 0 (a real ev.win) — without this,
+  // that path would fall through to onLegWon()'s generic fallback (dart count)
+  // instead, making the same challenge format store two different kinds of number.
+  if(ev.win && activeChallenge && activeChallenge.player === p.name){
+    const _winOverride = CHALLENGE_FORMAT_DEFS[activeChallenge.format].winOverrideMetric;
+    if(_winOverride) activeChallenge.overrideMetric = _winOverride(p);
   }
 
   if(ev.win){
@@ -12188,9 +12287,11 @@ function onLegWon(wi){
     const _challengeFormat = activeChallenge.format, _challengeTarget = activeChallenge.target;
     // game.legVisitLogs is still the just-finished attempt's data at this point
     // (game state isn't reset until startNextLeg()) — captured now for the results
-    // screen's Treble Run number chips, same computation liveModeState uses live.
+    // screen's format-specific visual (extraResultData), same registry member
+    // liveModeState uses live.
+    const _extraResultData = CHALLENGE_FORMAT_DEFS[_challengeFormat].extraResultData;
     lastChallengeResult = { format: _challengeFormat, target: _challengeTarget, metric: _metric,
-      trebleNumbers: _challengeFormat==='treble_run' ? challengeTrebleNumbersFrom(game.legVisitLogs) : null };
+      trebleNumbers: _extraResultData ? _extraResultData(game) : null };
     // The results screen (finishUnit(), below) renders immediately — not blocked on
     // this round-trip, same "celebrate now, patch in extra detail once confirmed"
     // pattern as the achievement queue's count patching. The #challenge-result-extra
@@ -12327,9 +12428,10 @@ function buildChallengeResultPanel(){
   const headline = `<div class="summary-grid" style="margin-bottom:10px">
     <div class="stat-block"><div class="stat-val">${escapeHtml(challengeMetricLabel(format, metric))}</div><div class="stat-label">${escapeHtml(challengeShortLabel(format, target))}</div></div>
   </div>`;
-  // Treble Run's own visual: WHICH numbers were hit, not just the count —
-  // mirrors display.html's live .challenge-chips treatment of the same data.
-  const chips = (format==='treble_run' && trebleNumbers && trebleNumbers.length)
+  // A format's own extraResultData (currently only Treble Run's: WHICH numbers
+  // were hit, not just the count) — mirrors display.html's live .challenge-chips
+  // treatment of the same data. trebleNumbers is null for every other format.
+  const chips = (trebleNumbers && trebleNumbers.length)
     ? `<div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap;margin-bottom:10px">
         ${trebleNumbers.map(n=>`<span style="font-size:12px;font-weight:700;color:var(--gold);border:1px solid var(--wire);border-radius:6px;padding:3px 7px">T${n}</span>`).join('')}
       </div>` : '';
@@ -12926,13 +13028,7 @@ const GAME_TYPES = {
       const p = game.players[0];
       const fmt = activeChallenge.format;
       const visitLogs = game.legVisitLogs || [];
-      const dartsSoFar = visitLogs.flat();
-      let metric;
-      if(fmt==='bullseye_gauntlet')      metric = dartsSoFar.filter(d=>d.sector===25).length;
-      else if(fmt==='treble_run')        metric = new Set(dartsSoFar.filter(d=>d.isTreble).map(d=>d.sector)).size;
-      else if(fmt==='steady_hand')       metric = visitLogs.reduce((sum,visit)=>{ const t=visit.reduce((x,d)=>x+d.value,0); return sum+(t<=20?t:0); }, 0);
-      else if(fmt==='long_game')         metric = p.legVisits;
-      else                               metric = p.legDarts; // checkout_sprint / speed_to_zero
+      const metric = CHALLENGE_FORMAT_DEFS[fmt].liveMetric(game, p);
       return {
         challengeFormat: fmt,
         challengeTarget: activeChallenge.target,
@@ -12940,7 +13036,7 @@ const GAME_TYPES = {
         challengeMetric: metric,
         challengeMetricLabel: challengeMetricLabel(fmt, metric),
         challengeVisitsCompleted: visitLogs.length,
-        challengeTrebleNumbers: fmt==='treble_run' ? challengeTrebleNumbersFrom(visitLogs) : null,
+        challengeTrebleNumbers: CHALLENGE_FORMAT_DEFS[fmt].extraResultData ? CHALLENGE_FORMAT_DEFS[fmt].extraResultData(game) : null,
       };
     }
   },

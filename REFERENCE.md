@@ -2274,12 +2274,34 @@ target) on every client — no coordination needed. `CHALLENGE_CHECKOUTS` pool:
 | **Treble Run** | Exactly 3 visits, filler `1000` start | `size of Set(sectors hit as a treble)` across all 3 visits (distinct numbers, not raw treble count) | **More is better** |
 | **The Long Game** | 501 leg; remaining drops below 40 with **no busts allowed at any point** | Visits taken to get under 40 | **Fewer is better**; a bust before reaching the target is an immediate DNF (`activeChallenge = null`), not a lower/worse score |
 
-Checkout Sprint and Speed to Zero complete via the normal `ev.win` path in
-`enterTurn()` → `onLegWon()`. The other four end mid-visit, inside `enterTurn()`
-itself (`game.legVisitLogs` accumulates each visit's darts; once the
-visit/bust-free condition is met, `activeChallenge.overrideMetric` is set and
-`onLegWon()` is called directly, reusing its leg-completion machinery rather
-than duplicating it).
+All six formats are entries in one registry, `CHALLENGE_FORMAT_DEFS`
+(`frontend/index.html`) — keyed by format name, each entry a self-contained
+object of `gameType`, `label`/`shortLabel`/`genericName`/`metricLabel`,
+`pickTarget(dateStr)`, `startScore(target)`, `checkCompletion(game, p, ev)`,
+`winOverrideMetric(p)`, `extraResultData(game)`, and `liveMetric(game, p)`.
+`CHALLENGE_FORMATS` (the plain name array `todaysChallenge()` seeds an index
+into) stays a separate, explicit array — its order is load-bearing (a future
+format must always be *appended*, never inserted/reordered, or every past
+date's format would silently change) — rather than `Object.keys(...)` on the
+registry, so that invariant can't be broken by reordering the registry for
+readability. `gameType` is `'x01'` for all six today, but every dispatch site
+(`setMode()`, `startGame()`, `enterTurn()`, `GAME_TYPES.x01.liveModeState`)
+reads it generically off the registry rather than hardcoding `'x01'`, so a
+future non-X01 format needs no changes outside its own registry entry.
+
+Checkout Sprint and Speed to Zero (`checkCompletion: null`) complete via the
+normal `ev.win` path in `enterTurn()` → `onLegWon()`. The other four end
+mid-visit, inside `enterTurn()` itself: `game.legVisitLogs` accumulates each
+visit's darts, and after every non-winning visit `enterTurn()` calls
+`CHALLENGE_FORMAT_DEFS[format].checkCompletion(game, p, ev)`, which returns
+`null` (not done yet), `{ dnf: true }` (The Long Game's bust-before-target
+case — `activeChallenge` is nulled, no completion recorded), or
+`{ metric }` (the format's win condition is met — `activeChallenge.overrideMetric`
+is set to `metric` and `onLegWon()` is called directly, reusing its
+leg-completion machinery rather than duplicating it). The Long Game's own
+`winOverrideMetric(p)` also covers the rare case where its final visit is
+both under-40 *and* a genuine double-out `ev.win` — without it, that path
+would fall through to `onLegWon()`'s generic dart-count fallback instead.
 
 `CHALLENGE_BETTER_DIRECTION` (`backend/db.js`) encodes the same fewer/more
 distinction server-side, for personal-best comparison:
@@ -2287,6 +2309,11 @@ distinction server-side, for personal-best comparison:
 { checkout_sprint:'asc', speed_to_zero:'asc', long_game:'asc',
   bullseye_gauntlet:'desc', treble_run:'desc', steady_hand:'desc' }
 ```
+`CHALLENGE_FORMAT_GAME_TYPE` (`backend/db.js`) is this file's own copy of the
+registry's `gameType` field (the server has no access to the frontend
+registry at runtime) — `startChallengeAttempt()` rejects with `400` if the
+linked game's `game_type` doesn't match the format's expected type, guarding
+against a stale or buggy client starting the wrong kind of game for a format.
 
 ### Live Scoreboard
 
@@ -2296,7 +2323,11 @@ the raw rigged starting score as if it were a real category — literally
 "1000" for the three filler-start formats. `GAME_TYPES.x01.liveModeState`
 (`frontend/index.html`) is the fix: `null` for every ordinary X01 game
 (`activeChallenge` is only ever non-null during a real attempt), but during a
-challenge it returns:
+challenge it returns (`challengeMetric` computed via the active format's own
+`CHALLENGE_FORMAT_DEFS[format].liveMetric(game, p)` — the same in-progress
+value on every dart, not just once `checkCompletion`'s threshold is met, and
+`challengeTrebleNumbers` via `extraResultData(game)`, `null` for every format
+that doesn't define one):
 
 ```js
 { challengeFormat, challengeTarget, challengeLabel,       // e.g. "Checkout 121"

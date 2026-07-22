@@ -1207,7 +1207,7 @@ const renderers = {
             ${isThreeVisitChallenge ? `<div class="challenge-pips">${[0,1,2].map(vi=>
               `<span class="pip ${vi<cm.challengeVisitsCompleted?'done':(active && vi===cm.challengeVisitsCompleted)?'live':''}"></span>`
             ).join('')}</div>` : ''}
-            ${(cm.challengeFormat==='treble_run' && cm.challengeTrebleNumbers && cm.challengeTrebleNumbers.length)
+            ${(cm.challengeTrebleNumbers && cm.challengeTrebleNumbers.length)
               ? `<div class="challenge-chips">${cm.challengeTrebleNumbers.map(n=>`<span class="chip">T${n}</span>`).join('')}</div>` : ''}
           </div>`;
       const metaParts = [];
