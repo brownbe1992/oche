@@ -81,6 +81,7 @@ Others
 - Prep work to reduce future rework across all roadmap items — done, see docs/archive/existing-app-prep-roadmap.md; docs/open-roadmap-items.md is now the central tracker for all open roadmap items
 - New Game page revamp (less-crowded, step-by-step Who's playing?/Choose a game/More options flow, replacing the current all-controls-visible setup screen) — done, see docs/archive/new-game-flow-roadmap.md
 - Code-quality refactors deferred from the 2026-07-20 max-effort code review (undo-trailer consolidation, registry-driven resume dispatch, id-keyed killer configs, live-state per-mode container, hot-query scan pass, Home lazy fetches, and more — verified findings, none a live bug) — full design in docs/code-quality-roadmap.md, tracked as items 35-45 in docs/open-roadmap-items.md
+- Database normalization audit (full-schema 3NF review — verdict: already 3NF in the practical sense, two small genuinely-redundant columns found plus one JSON-blob 1NF finding, with a full migration plan for each) — full design in docs/database-normalization-roadmap.md, tracked as items 62-63 in docs/open-roadmap-items.md
 
 
 Fixes:
