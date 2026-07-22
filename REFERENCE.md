@@ -881,8 +881,9 @@ checkout, and exactly 9 total darts were thrown across those 3 turns. Locked to
 longer inflates the X01 tab's own bubbles. The *lifetime, every-game-mode*
 versions of these two figures (`dartsThrown`/`avgDartsPerDay`, unchanged from
 the formulas below minus the X01 scoping) are still returned by this same
-function, but rendered in their own fixed "Lifetime — Every Game Mode" block
-above the game-mode dropdown instead of inside it — see below the table.
+function, but rendered in the Player Profile's own **header row** (name +
+these figures, no game-mode dropdown involved) instead of inside it — see
+below the table.
 
 | Bubble | Denominator family | Formula |
 |---|---|---|
@@ -902,18 +903,42 @@ above the game-mode dropdown instead of inside it — see below the table.
 | **180s/Leg** | fraction | `legs containing ≥1 180 / total legs` |
 | **Average Pace** | — | darts/minute, returned as the `pace` key — same formula as the Home page/chart versions (consecutive `thrown_at` gaps within a turn, clamped to `0 < gap < 60000ms`); `null` (bubble shows "—") until per-dart timing data exists. *Note: this key was missing from `getPlayerStatBubbles()`'s return object until the audit that produced this manual caught it — the bubble was permanently blank before that.* |
 
-### Lifetime, all-modes bubbles ("Lifetime — Every Game Mode" block)
+### Player Profile header row (name + these three, `HEADER_STAT_DEFS`)
 
-Rendered above the Player Profile's game-mode dropdown, not inside it — these two
-are deliberately **not** scoped to whichever mode the dropdown has selected, per
-the physical-dart-stats table above (a Chuckin' dart is a real throw and is meant
-to count). Non-interactive display tiles: unlike every bubble in the table above,
-clicking them does nothing — they don't drive the "\_\_\_ over time" chart.
+Rendered directly under the player's name, above everything else (the game-mode
+dropdown, the Stats/Player Settings tabs) — `s.turns` ("N turns thrown (all-time)")
+used to be the only thing shown here and is gone; these three replace it, left to
+right: **X01 Average, Total Darts Thrown, Darts / Day**. All three are fetched via
+the same no-`gameType`-param `GET /api/players/stat-bubbles` call (`getPlayerStatBubbles()`'s
+plain, non-Cricket/non-Baseball/etc. shape), independent of whatever the game-mode
+dropdown below has selected — switching that dropdown to Cricket, for example,
+never changes these. Non-interactive display tiles, same as the two lifetime
+figures always were: unlike every bubble in the table above, clicking them does
+nothing — they don't drive the "\_\_\_ over time" chart. **X01 Average** is a second
+copy of the same `avg` value the X01 stat-bubble grid already shows elsewhere on
+the page (own `bv-header-avg` element id, so the two never collide); **Total Darts
+Thrown**/**Darts / Day** are the lifetime, every-game-mode figures that used to
+render in their own "Lifetime — Every Game Mode" block above the dropdown — that
+block is gone, fully replaced by this header row.
 
 | Bubble | Formula |
 |---|---|
+| **X01 Average** | `avg` — same 3-dart-average formula as the table above, X01-only |
 | **Total Darts Thrown** | `dartsThrown` — `COUNT(*)` from `darts`, across every game mode except Checkout Trainer (`NOT_CHECKOUT_TRAINER`) |
 | **Darts / Day** | `avgDartsPerDay` — `dartsThrown / COUNT(DISTINCT date(created_at))`, same all-modes scope |
+
+### Player Profile top-level tabs: Stats / Player Settings
+
+Two tabs sit below the header row (`playerPageSection`, `'stats'` default):
+**Stats** contains everything the page always showed — the game-mode dropdown,
+the Overall/H2H/Practice sub-tabs (`playerPageTab`, unchanged), and all the stat
+sections beneath them. **Player Settings** contains the finish-rule toggle
+(Double out/Single out), the default-loadout picker, and the "🎯 Manage Loadouts"
+button — all three used to render directly under the header, before the
+Overall/H2H/Practice sub-tabs; they now live behind this second tab instead, with
+no other behavior change (the same PIN gate via `unlockPlayerSettings()`/
+`playerSettingsUnlocked` still applies). Rename/Reset stats/Delete player stay
+where they were, below whichever tab's content is showing.
 
 **Why 1st 3 AVG / 1st 9 AVG / 140/Leg are scoped to exactly 501, 301, 170, and 101
 — never any other X01 starting score, and never any other game type — ever,

@@ -637,6 +637,11 @@
   /* ---- stat bubbles ---- */
   .stat-bubbles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px}
   @media(max-width:560px){.stat-bubbles{grid-template-columns:repeat(3,1fr)}}
+  /* Player Profile header row — always exactly 3 stats (X01 Average / Total
+     Darts Thrown / Darts Per Day), so it always uses 3 even columns rather
+     than the general 4-column grid above leaving a visibly empty 4th slot
+     on wider screens. */
+  #player-header-stats{grid-template-columns:repeat(3,1fr);margin-bottom:0}
   /* Same author-rule-beats-UA-[hidden] gotcha as .btn[hidden] above — .stat-bubbles'
      own display:grid otherwise wins over the UA stylesheet's [hidden]{display:none}
      at equal specificity, so #player-stat-bubbles-more stayed visible regardless of
@@ -6433,6 +6438,7 @@ function askDelete(name){
 /* ---------- player profile page ---------- */
 let currentPlayer = null;
 let playerPageTab = 'overall';
+let playerPageSection = 'stats'; // 'stats' | 'settings' — the page's own top-level tabs
 let playerGameType = 'x01';
 let showMoreStats = false;
 let playerSettingsUnlocked = false;
@@ -6447,6 +6453,10 @@ function setPlayerDefaultLoadout(name, value){
 }
 function switchPlayerTab(tab){
   playerPageTab = tab;
+  renderPlayerPage();
+}
+function switchPlayerSection(section){
+  playerPageSection = section;
   renderPlayerPage();
 }
 function switchPlayerGameType(type){
@@ -6464,7 +6474,7 @@ function showPlayer(name){
   // re-fetches once instead of replaying data that may now be stale (e.g. a game
   // played as that player, or an admin merge/reset, happened while looking at
   // someone else's profile in between).
-  if(currentPlayer !== name){ avgChartWeight = null; cachedDartWeights = []; playerPageTab = 'overall'; playerGameType = 'x01'; showMoreStats = false; playerSettingsUnlocked = false; profileSectionCache = {}; }
+  if(currentPlayer !== name){ avgChartWeight = null; cachedDartWeights = []; playerPageTab = 'overall'; playerPageSection = 'stats'; playerGameType = 'x01'; showMoreStats = false; playerSettingsUnlocked = false; profileSectionCache = {}; }
   currentPlayer = name;
   if(!customRangeEnd){
     const now=new Date();
@@ -6535,16 +6545,6 @@ function renderPlayerPage(){
     ${secondaryDefs.length ? `<button class="btn btn-ghost" style="margin:6px 0" id="toggle-more-stats-btn" onclick="toggleMoreStats()">${showMoreStats?'Fewer stats ▴':'More stats ▾'}</button>
     <div class="stat-bubbles" id="player-stat-bubbles-more"${showMoreStats?'':' hidden'}>${secondaryDefs.map(bubble).join('')}</div>` : ''}`;
 
-  // Lifetime, all-modes figures — rendered above the game-mode dropdown (not
-  // inside its spotlight panel) since they're deliberately NOT scoped to
-  // whichever mode the dropdown has selected, unlike everything below it.
-  const lifetimeBubblesHtml = `
-    <div class="pp-section">
-      <div class="pp-section-title">Lifetime — Every Game Mode</div>
-      <div class="stat-bubbles" id="player-lifetime-bubbles">${LIFETIME_STAT_DEFS.map(d=>
-        `<div class="stat-block" title="${d.desc}"><div class="stat-val" id="bv-${d.key}">—</div><div class="stat-label">${d.label}</div></div>`
-      ).join('')}</div>
-    </div>`;
 
   // Per-game-type stats + top-finishes HTML (same structure for every tab this
   // renders under — only shown when !isChallenge, see tabContent below).
@@ -6689,23 +6689,23 @@ function renderPlayerPage(){
   // Daily Challenge overrides tab entirely, same as it did back when it was
   // its own 4th tab — a Daily Challenge run isn't scoped by Overall/H2H/
   // Practice (it's always solo), so none of those sections make sense
-  // alongside it. modePickerHtml/lifetimeBubblesHtml stay visible either way:
-  // the mode picker so you can switch back out, the lifetime figures because
-  // they're independent of whatever's selected in it.
+  // alongside it. modePickerHtml stays visible either way, so you can switch
+  // back out of it. The lifetime darts-thrown/darts-per-day figures used to
+  // live in their own section down here — they now live in the page header
+  // instead (loadPlayerHeaderStats()), since they're independent of whatever
+  // tab/mode is selected, same reasoning, just moved up top.
   let tabContent;
   if(isChallenge){
-    tabContent = `${modePickerHtml}${lifetimeBubblesHtml}${challengeSection}`;
+    tabContent = `${modePickerHtml}${challengeSection}`;
   } else if(tab === 'overall'){
     tabContent = `
       ${modePickerHtml}
-      ${lifetimeBubblesHtml}
       ${gameStatsHtml}
       ${h2hSection}
       ${practiceSection}`;
   } else if(tab === 'h2h'){
     tabContent = `
       ${modePickerHtml}
-      ${lifetimeBubblesHtml}
       ${gameStatsHtml}
       <details class="pp-section">
         <summary class="pp-section-title">Games &amp; Legs Played</summary>
@@ -6718,7 +6718,6 @@ function renderPlayerPage(){
   } else {
     tabContent = `
       ${modePickerHtml}
-      ${lifetimeBubblesHtml}
       ${gameStatsHtml}
       <details class="pp-section">
         <summary class="pp-section-title">Legs Thrown</summary>
@@ -6726,11 +6725,12 @@ function renderPlayerPage(){
       </details>`;
   }
 
-  body.innerHTML = `
-    <div class="pp-header">
-      <div class="pp-name">${escapeHtml(name)}</div>
-      <div class="pp-meta">${s.turns||0} turns thrown (all-time)</div>
-    </div>
+  const section = playerPageSection;
+  // Player Settings: the finish-rule toggle + default loadout + Manage
+  // Loadouts button that used to sit directly under the header — now its own
+  // tab, alongside the renamed "Stats" tab (Overall/H2H/Practice + everything
+  // those already showed).
+  const settingsSectionHtml = `
     <div class="player-controls">
       ${((prefs[name] && prefs[name].hasPin) && !playerSettingsUnlocked) ? `
       <button class="btn btn-ghost" onclick="unlockPlayerSettings('${j}')">🔒 Enter PIN to change player settings</button>
@@ -6749,20 +6749,34 @@ function renderPlayerPage(){
         <button class="btn btn-ghost" onclick="showDartBuilder('${j}','player')">🎯 Manage Loadouts</button>
       </div>
       `}
-    </div>
+    </div>`;
+  const statsSectionHtml = `
     <div class="player-tabs">
       <button class="tab-btn${tab==='overall'?' active':''}" data-tab="overall" onclick="switchPlayerTab('overall')">Overall</button>
       <button class="tab-btn${tab==='h2h'?' active':''}" data-tab="h2h" onclick="switchPlayerTab('h2h')">H2H</button>
       <button class="tab-btn${tab==='practice'?' active':''}" data-tab="practice" onclick="switchPlayerTab('practice')">Practice</button>
     </div>
-    ${tabContent}
+    ${tabContent}`;
+
+  body.innerHTML = `
+    <div class="pp-header">
+      <div class="pp-name">${escapeHtml(name)}</div>
+      <div class="stat-bubbles" id="player-header-stats">${HEADER_STAT_DEFS.map(d=>
+        `<div class="stat-block" title="${d.desc}"><div class="stat-val" id="bv-header-${d.key}">—</div><div class="stat-label">${d.label}</div></div>`
+      ).join('')}</div>
+    </div>
+    <div class="player-tabs">
+      <button class="tab-btn${section==='stats'?' active':''}" data-tab="stats" onclick="switchPlayerSection('stats')">Stats</button>
+      <button class="tab-btn${section==='settings'?' active':''}" data-tab="settings" onclick="switchPlayerSection('settings')">Player Settings</button>
+    </div>
+    ${section==='settings' ? settingsSectionHtml : statsSectionHtml}
     <div class="btn-row">
       <button class="btn btn-ghost" onclick="askRenameFromProfile('${j}')">Rename</button>
       ${(canManagePlayers() && !isChallenge)?`<button class="btn btn-ghost danger" onclick="askClearPlayerStats('${j}','${tab==='overall'?'all':tab}')">Reset ${tab==='overall'?'all':tab==='h2h'?'H2H':'Practice'} stats</button>`:''}
       ${canManagePlayers()?`<button class="btn btn-ghost danger" onclick="askDeleteFromProfile('${j}')">Delete player</button>`:''}
     </div>`;
   loadStatBubbles();
-  loadLifetimeStatBubbles();
+  loadPlayerHeaderStats();
   loadAvgChart(avgChartPeriod);
   loadDartWeights();
   loadPlayerLoadouts();
@@ -12353,7 +12367,7 @@ function startNextRound(){
 const STAT_DEFS = [
   // primary:true bubbles are shown by default; the rest live behind the "More stats" toggle.
   // dartsthrown/avgdartsperday used to live here too, but they're lifetime totals
-  // across every game mode (see LIFETIME_STAT_DEFS below) — genuinely X01-only
+  // across every game mode (see HEADER_STAT_DEFS below) — genuinely X01-only
   // darts get counted by x01dartsthrown/x01avgdartsperday instead.
   { key:'x01dartsthrown', label:'Darts Thrown', desc:'Total darts thrown in X01 games',        fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
   { key:'avg',           label:'Three-Dart Average', desc:'3-dart average',                      fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
@@ -12373,14 +12387,17 @@ const STAT_DEFS = [
 ];
 let selectedStat = 'avg';
 
-// Lifetime, all-modes figures — deliberately NOT part of any game type's own
-// STAT_DEFS list (see REFERENCE.md's "Physical-dart stats" table): a Chuckin'
-// dart is a real throw and is meant to count here, so these render in their own
-// fixed block above the game-mode dropdown instead of inside it, where sitting
-// next to mode-scoped bubbles like x01dartsthrown made them look like a scoping
-// bug rather than the deliberate lifetime totals they are. Static display only —
-// not clickable, doesn't drive the chart below (unlike the per-mode bubbles).
-const LIFETIME_STAT_DEFS = [
+// Player Profile header row (name + these three), left to right: X01 Average,
+// Total Darts Thrown, Darts / Day. The latter two are lifetime, all-modes
+// figures — deliberately NOT part of any game type's own STAT_DEFS list (see
+// REFERENCE.md's "Physical-dart stats" table): a Chuckin' dart is a real throw
+// and is meant to count here — while X01 Average is STAT_DEFS' own `avg`
+// bubble, fetched the same mode-independent way (see loadPlayerHeaderStats())
+// and shown here in addition to its usual place in the X01 stat-bubble grid.
+// Static display only — not clickable, doesn't drive the chart below (unlike
+// the per-mode bubbles).
+const HEADER_STAT_DEFS = [
+  { key:'avg',            label:'X01 Average',        desc:'3-dart average across every X01 leg', fmt:v=>v!=null?v.toFixed(1):'—' },
   { key:'dartsthrown',    label:'Total Darts Thrown', desc:"Every dart you've ever thrown, across every game mode (Chuckin' counts, Checkout Trainer doesn't)", fmt:v=>v!=null?Number(v).toLocaleString():'—' },
   { key:'avgdartsperday', label:'Darts / Day',        desc:'Average darts thrown per day played, across every game mode', fmt:v=>v!=null?Number(v).toFixed(1):'—' },
 ];
@@ -15891,21 +15908,23 @@ function renderStatBubbles(data){
     el.textContent=d.fmt(data[mk]!=null?data[mk]:data[d.key]);
   });
 }
-// Lifetime, all-modes bubbles (Total Darts Thrown, Darts / Day) live above the
-// game-mode dropdown, not inside its game-type-scoped stat grid — so they're
-// fetched with no gameType param at all. getStatBubblesFor() falls back to the
-// plain getPlayerStatBubbles() for an unrecognized/absent gameType, which is
-// exactly the mode-independent lifetime figure this block wants, regardless of
-// whatever's currently selected in the dropdown.
-function loadLifetimeStatBubbles(){
-  const container=document.getElementById('player-lifetime-bubbles');
+// Player Profile header stats (X01 Average, Total Darts Thrown, Darts / Day)
+// live above the game-mode dropdown/tabs, not inside the game-type-scoped
+// stat grid — so they're fetched with no gameType param at all.
+// getStatBubblesFor() falls back to the plain getPlayerStatBubbles() for an
+// unrecognized/absent gameType, which is exactly the mode-independent figure
+// this block wants (including `avg`, X01's own 3-dart average — this is a
+// second, header-scoped copy of the same value the X01 stat-bubble grid
+// already shows, using `bv-header-` ids so the two never collide).
+function loadPlayerHeaderStats(){
+  const container=document.getElementById('player-header-stats');
   if(!container) return;
   const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
   Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
     .then(data=>{
       if(!data) return;
-      LIFETIME_STAT_DEFS.forEach(d=>{
-        const el=document.getElementById('bv-'+d.key);
+      HEADER_STAT_DEFS.forEach(d=>{
+        const el=document.getElementById('bv-header-'+d.key);
         if(el) el.textContent=d.fmt(data[BUBBLE_KEY_MAP[d.key]||d.key]);
       });
     }).catch(()=>{});
