@@ -955,11 +955,23 @@ passive badges are unchanged and keep firing exactly as before, from any mode.
 - **Resolved (was an open question): Around the Clock's target set is 20
   numbers only, no bull** — matches the existing passive `around_the_clock`
   badge's exact formula (`singlesHit.size >= 20`) exactly, even though this
-  section's earlier draft said "+bull". A round ends the instant all 20 are
-  hit as singles; `game.legNo` is repurposed as a round counter and
-  `turns.bust` as "this dart completed the round," the identical repurposing
-  Doubles Practice already established for both columns. "Start Next Clock"
-  starts a fresh round in the same `games` row.
+  section's earlier draft said "+bull". The clock is complete the instant all
+  20 are hit as singles; `turns.bust` marks "this dart completed the clock,"
+  the identical repurposing Doubles Practice already established for that
+  column.
+- **Superseded (2026-07): "one clock = one game."** The original design above
+  ("Start Next Clock" begins a fresh round in the same `games` row,
+  `game.legNo` repurposed as a round counter) was replaced — completing the
+  clock now ends the whole game immediately (`DB.completeGame()`/
+  `finishUnit('game', ...)`), the same "a run IS the game" shape Gauntlet/
+  Bob's 27/Dead Man Walking already use, instead of staying in the same
+  session for another attempt. This was a direct request (fixing a real bug:
+  under the old design `game.done` never became true, so the hamburger menu
+  kept offering "Save for later" even after a player had fully completed the
+  clock), not a planned roadmap item, so it has no separate roadmap doc — full
+  mechanics (the new CLOCK COMPLETE stats screen, Play Again/Return Home) are
+  `REFERENCE.md` §2's "Guided Around the Clock / Around the World" and "Game
+  Over screen — Play Again / Return Home" sections.
 - **Around the World**: no round boundary at all — structurally identical to
   Chuckin (one continuous stream of 1-dart turns per `games` row, `set_no=
   leg_no=1` throughout), tracking progress toward the same lifetime 63-outcome

@@ -492,7 +492,7 @@ const ALLOWED_LIVE_KEYS = new Set([
   'active', 'gameType', 'category', 'legsPerSet', 'setsPerGame', 'setNo', 'legNo',
   'currentIndex', 'players', 'darts', 'checkout', 'status', 'message', 'achievement',
   'gameOneEighties', 'gameBigFish', 'gameBusts', 'legSummary', 'practice', 'done',
-  'lastTurnEvent', 'matchResult', 'legStart', 'checkoutTarget', 'turnSeq', 'ts',
+  'doneHeading', 'lastTurnEvent', 'matchResult', 'legStart', 'checkoutTarget', 'turnSeq', 'ts',
   'modeState',
   // Tournament mode only (docs/archive/tournament-mode-roadmap.md) — read by display.html's
   // fmtText() for the top-bar round label ("Quarterfinal", "Final", ...).
