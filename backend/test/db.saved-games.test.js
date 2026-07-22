@@ -65,7 +65,30 @@ describe('saveGame — eligibility and the one-per-matchup constraint', () => {
     db.addPlayer(a); db.addPlayer(b);
     const gameId = startX01([a, b]);
     db.completeGame(gameId, a);
-    assert.throws(() => db.saveGame(gameId), /already complete/);
+    assert.throws(() => db.saveGame(gameId), /already ended/);
+  });
+
+  // dnf_at, not just completed_at (docs/open-roadmap-items.md "Forfeiting a
+  // multiplayer game") — an abandoned game must be just as unsavable as a
+  // completed one, or it could be paused and later "resumed" as if it were
+  // still live.
+  test('rejects an abandoned (DNF) game', () => {
+    const [a, b] = [uniqueName('sg_dnf_a'), uniqueName('sg_dnf_b')];
+    db.addPlayer(a); db.addPlayer(b);
+    const gameId = startX01([a, b]);
+    db.abandonGame(gameId);
+    assert.throws(() => db.saveGame(gameId), /already ended/);
+  });
+
+  test('rejects a game with a bowed-out participant', () => {
+    const [a, b, c] = [uniqueName('sg_bo_a'), uniqueName('sg_bo_b'), uniqueName('sg_bo_c')];
+    db.addPlayer(a); db.addPlayer(b); db.addPlayer(c);
+    const { gameId } = db.createGame({
+      category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: a }, { name: b }, { name: c }],
+    });
+    db.forfeitPlayer(gameId, a);
+    assert.throws(() => db.saveGame(gameId), /bowed out/);
   });
 
   test('rejects an ineligible game type (Doubles Practice)', () => {

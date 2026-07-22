@@ -798,7 +798,7 @@
       <div class="header-actions">
         <div class="game-menu">
           <button class="btn btn-ghost game-menu-btn" aria-haspopup="true" aria-expanded="false" aria-label="Game options" onclick="toggleGameMenu(this)">☰</button>
-          <div class="game-menu-list" role="menu" hidden>
+          <div class="game-menu-list" role="menu" hidden onkeydown="gameMenuKeydown(event)">
             <button class="game-menu-item save-game-btn" role="menuitem" onclick="closeAllGameMenus();saveCurrentGame()" hidden>⏸ Save for later</button>
             <button class="game-menu-item bow-out-btn" role="menuitem" onclick="closeAllGameMenus();askBowOut()" hidden>🚶 Bow out…</button>
             <button class="game-menu-item" role="menuitem" onclick="closeAllGameMenus();askEndGame()">🚪 End game</button>
@@ -1096,7 +1096,7 @@
     <div class="btn-row">
       <div class="game-menu">
         <button class="btn btn-ghost game-menu-btn" aria-haspopup="true" aria-expanded="false" aria-label="Game options" onclick="toggleGameMenu(this)">☰</button>
-        <div class="game-menu-list" role="menu" hidden>
+        <div class="game-menu-list" role="menu" hidden onkeydown="gameMenuKeydown(event)">
           <button class="game-menu-item save-game-btn" role="menuitem" onclick="closeAllGameMenus();saveCurrentGame()" hidden>⏸ Save for later</button>
           <button class="game-menu-item bow-out-btn" role="menuitem" onclick="closeAllGameMenus();askBowOut()" hidden>🚶 Bow out…</button>
           <button class="game-menu-item" role="menuitem" onclick="closeAllGameMenus();askEndGame()">🚪 End game</button>
@@ -10065,28 +10065,62 @@ function updateSaveButtonVisibility(){
 // the modes that share the turn-rotation engine advanceToNextActivePlayer()
 // (above) and the leader-exclusion logic in scoring.js actually cover — Ghost
 // mode's "opponent" isn't a real player who can leave, and every solo drill
-// has nobody left to keep playing with anyway.
-const BOW_OUT_GAME_TYPES = ['x01', 'cricket', 'baseball', 'shanghai', 'halve_it', 'pressure_chamber', 'killer'];
+// has nobody left to keep playing with anyway. BOW_OUT_GAME_TYPES itself is
+// declared later (right after SAVABLE_GAME_TYPES, once GAME_TYPES is fully
+// built) — canBowOutOfCurrentGame() only runs at click time, long after load,
+// so the declaration-order gap is safe.
 function canBowOutOfCurrentGame(){
   return !!(game && !game.done && !game.hasGhost && game.players.length > 1 && BOW_OUT_GAME_TYPES.includes(game.gameType));
 }
 function updateBowOutButtonVisibility(){
   document.querySelectorAll('.bow-out-btn').forEach(btn => { btn.hidden = !canBowOutOfCurrentGame(); });
 }
-// Game options menu (☰ Save for later / End game): only one can ever be open,
-// so closing every .game-menu-list is always correct — no per-menu state to track.
-function closeAllGameMenus(){
+// Game options menu (☰ Save for later / Bow out / End game): only one can
+// ever be open, so closing every .game-menu-list is always correct — no
+// per-menu state to track. `restoreFocus`: role="menu"/role="menuitem" on
+// this markup implies the standard ARIA menu keyboard contract (arrow-key
+// roving navigation, Escape closes AND returns focus to the trigger button) —
+// closeAllGameMenus() grabs whichever trigger is currently expanded BEFORE
+// hiding anything, so Escape/outside-click closing doesn't strand focus.
+function closeAllGameMenus(restoreFocus){
+  const openBtn = restoreFocus ? document.querySelector('.game-menu-btn[aria-expanded="true"]') : null;
   document.querySelectorAll('.game-menu-list').forEach(m => { m.hidden = true; });
   document.querySelectorAll('.game-menu-btn').forEach(b => b.setAttribute('aria-expanded', 'false'));
+  if(openBtn) openBtn.focus();
 }
 function toggleGameMenu(btn){
   const menu = btn.nextElementSibling;
   const willOpen = menu.hidden;
   closeAllGameMenus();
-  if(willOpen){ menu.hidden = false; btn.setAttribute('aria-expanded', 'true'); }
+  if(willOpen){
+    menu.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+    // Move focus into the menu on open, matching the roving-tabindex pattern
+    // tournamentTabKeydown() already establishes for role="tab" elsewhere in
+    // this file — a real ARIA menu's first item receives focus when opened.
+    const first = menu.querySelector('.game-menu-item:not([hidden])');
+    if(first) first.focus();
+  }
+}
+// Arrow-key roving navigation between visible menu items (Home/End jump to
+// the first/last), plus Escape — the keyboard contract role="menu"/
+// role="menuitem" implies. Bound on each .game-menu-list itself (onkeydown),
+// not a document-level delegate, since it only needs to act while focus is
+// already inside that one open menu.
+function gameMenuKeydown(e){
+  if(e.key === 'Escape'){ e.preventDefault(); closeAllGameMenus(true); return; }
+  if(!['ArrowDown','ArrowUp','Home','End'].includes(e.key)) return;
+  e.preventDefault();
+  const items = [...e.currentTarget.querySelectorAll('.game-menu-item:not([hidden])')];
+  const i = items.indexOf(document.activeElement);
+  let ni;
+  if(e.key==='Home') ni = 0;
+  else if(e.key==='End') ni = items.length - 1;
+  else ni = (i + (e.key==='ArrowDown'?1:-1) + items.length) % items.length;
+  if(items[ni]) items[ni].focus();
 }
 document.addEventListener('click', e => { if(!e.target.closest('.game-menu')) closeAllGameMenus(); });
-document.addEventListener('keydown', e => { if(e.key === 'Escape') closeAllGameMenus(); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && !e.target.closest('.game-menu-list')) closeAllGameMenus(true); });
 // "⏸ Save for later" — icon + text, never icon-only (docs/archive/saved-games-roadmap.md's
 // accessibility section). Lives with the header/turn-actions, not inside either
 // input widget, so both Pad and Dartboard modes get it for free — the same
@@ -10380,6 +10414,13 @@ function applyBowOut(name, res){
   if(idx < 0) return;
   game.players[idx].dnf = true;
   if(game.gameType === 'killer') game.players[idx].eliminated = true; // Killer's own win/turn logic keys off `eliminated`
+  // If the departing player was this leg's starter, the round-completion
+  // anchor (isRoundComplete(), frontend/scoring.js — compares the walked
+  // index against game.starter) must move too. Left stale, it would point at
+  // a now-permanently-skipped index, and Baseball/Shanghai/Halve-It/Pressure
+  // Chamber (all gated on isRoundComplete()) could never detect their round
+  // as complete again for the rest of this leg.
+  if(idx === game.starter) game.starter = nextActiveIndexFrom(game, game.starter);
   announce(`${name} has bowed out — recorded as a DNF. The rest of you can keep playing.`);
   if(game.current === idx){
     clearTurnSnapshots(); // can't undo across this boundary
@@ -10568,13 +10609,22 @@ function undoDart(){
 // way). A departed player stays IN game.players — only their own turn is
 // skipped — so their recorded stats/turns stay intact for the scoreboard and
 // history, exactly like Killer's existing eliminated-but-still-listed rows.
-function advanceToNextActivePlayer(game, also){
-  let idx = game.current;
+// Pure "next active index after fromIdx" walk — shared by
+// advanceToNextActivePlayer() (advances game.current mid-leg), startNextLeg()
+// (rotates game.starter between legs), and applyBowOut() (re-anchors
+// game.starter when the departing player WAS the starter — see that call
+// site's own comment for why leaving it stale breaks isRoundComplete()).
+function nextActiveIndexFrom(game, fromIdx, also){
+  let idx = fromIdx;
   for(let step=1; step<=game.players.length; step++){
     idx = (idx+1) % game.players.length;
     const p = game.players[idx];
-    if(!p.dnf && !(also && also(p))){ game.current = idx; return; }
+    if(!p.dnf && !(also && also(p))) return idx;
   }
+  return fromIdx;
+}
+function advanceToNextActivePlayer(game, also){
+  game.current = nextActiveIndexFrom(game, game.current, also);
 }
 function enterTurn(){
   if(game.gameType === 'cricket') return enterTurnCricket();
@@ -11194,7 +11244,14 @@ function advanceLegSetGame(w, opts){
 }
 function onLegWonCricket(wi){
   const w = game.players[wi];
-  const opp = game.players.length===2 ? game.players.find(p=>p!==w) : null;
+  // Active-player count, not game.players.length: a departed (bowed-out)
+  // player stays IN game.players (only their `dnf` flag is set), so a match
+  // that started with 4 players and has since shrunk to a genuine 2-player
+  // decider via bow-outs must still be recognized as H2H here — otherwise
+  // every opponent-gated badge below (Whitewash, Comeback Kid) silently never
+  // fires again for the rest of that match.
+  const active = game.players.filter(p=>!p.dnf);
+  const opp = active.length===2 ? active.find(p=>p!==w) : null;
   w.legsWon += 1;
 
   // Whitewash: the opponent closed zero numbers by the time this leg ended.
@@ -11862,7 +11919,14 @@ function onLegWon(wi){
   // ghost-opponent-roadmap.md), never reaches finishUnit('game', ...) and
   // incorrectly offers a "Next leg" button instead of ending the race
   // (BUG-18, found via a live user bug report).
-  const opp = game.players.length===2 && !game.hasGhost ? game.players.find(p=>p!==w) : null;
+  // Active-player count, not game.players.length: a departed (bowed-out)
+  // player stays IN game.players (only their `dnf` flag is set), so a match
+  // that started with more players and has since shrunk to a genuine
+  // 2-player decider via bow-outs must still be recognized as H2H here —
+  // otherwise Comeback Kid/Giant Slayer/Rematch/Grudge Match/Nerves of Steel
+  // silently never fire again for the rest of that match.
+  const active = game.players.filter(p=>!p.dnf);
+  const opp = active.length===2 && !game.hasGhost ? active.find(p=>p!==w) : null;
   // Snapshots taken before any of this leg's win bookkeeping mutates legsWon/setsWon —
   // "was this a decider" only makes sense measured against the state entering the leg.
   const legsWonBefore = new Map(game.players.map(p => [p, p.legsWon]));
@@ -12036,7 +12100,7 @@ function startNextLeg(newSet){
   // multiplayer game") the same way advanceToNextActivePlayer() skips them
   // mid-leg — otherwise a departed player could still be handed the next leg's
   // opening throw.
-  do { game.starter = (game.starter + 1) % game.players.length; } while(game.players[game.starter].dnf);
+  game.starter = nextActiveIndexFrom(game, game.starter);
   game.current = game.starter;
   game.players.forEach(p=>GAME_TYPES[game.gameType].resetForNextLeg(p, game, newSet));
   if(game.gameType === 'baseball') game.baseballInning = 1;
@@ -12666,6 +12730,7 @@ const GAME_TYPES = {
   x01: {
     id: 'x01',
     label: 'X01',
+    bowOutable: true, // shares advanceToNextActivePlayer()'s turn-rotation engine — see BOW_OUT_GAME_TYPES below
     category: (setup, config, startScore) => String(startScore),
     newMatchPlayer,
     evaluateVisit,
@@ -12730,6 +12795,7 @@ const GAME_TYPES = {
   },
   cricket: {
     id: 'cricket',
+    bowOutable: true,
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, points:p.points||0,
       closed:Object.keys(p.marks||{}).filter(n=>(p.marks[n]||0)>=3).length, won:p.name===winner })),
     label: 'Cricket',
@@ -12767,6 +12833,7 @@ const GAME_TYPES = {
   },
   baseball: {
     id: 'baseball',
+    bowOutable: true,
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, totalRuns:p.totalRuns||0, won:p.name===winner })),
     // h2hStatsHtml()'s per-player rows — a Baseball player has no
     // gamePoints/legPoints/avgDarts fields at all, so it shows runs instead
@@ -12811,6 +12878,7 @@ const GAME_TYPES = {
   },
   shanghai: {
     id: 'shanghai',
+    bowOutable: true,
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, totalPoints:p.totalPoints||0, won:p.name===winner })),
     h2hRows: (p, scope) => scope==='game' ? [
       statRow('Points (final leg)', p.totalPoints||0),
@@ -12847,6 +12915,7 @@ const GAME_TYPES = {
   },
   halve_it: {
     id: 'halve_it',
+    bowOutable: true,
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, total:p.total||0, won:p.name===winner })),
     h2hRows: (p, scope) => scope==='game' ? [
       statRow('Total (final leg)', p.total||0),
@@ -12887,6 +12956,7 @@ const GAME_TYPES = {
   },
   pressure_chamber: {
     id: 'pressure_chamber',
+    bowOutable: true,
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, totalCp:p.totalCp||0,
       rating:pressureComposureRating(p.totalCp||0), won:p.name===winner })),
     h2hRows: (p, scope) => scope==='game' ? [
@@ -13163,6 +13233,7 @@ const GAME_TYPES = {
   },
   killer: {
     id: 'killer',
+    bowOutable: true,
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, number:p.number,
       kills:p.kills||0, eliminated:!!p.eliminated, won:p.name===winner })),
     label: 'Killer',
@@ -14567,6 +14638,13 @@ GAME_TYPES.marathon.bubbleKeyMap = MARATHON_BUBBLE_KEY_MAP;
 const NON_SAVABLE_GAME_TYPES = ['doubles_practice', 'chuckin', 'checkout_trainer', 'killer'];
 const SAVABLE_GAME_TYPES = Object.keys(GAME_TYPES).filter(k =>
   !GAME_TYPES[k].dispatchOnly && !NON_SAVABLE_GAME_TYPES.includes(k));
+// Bow-out eligibility (docs/open-roadmap-items.md "Forfeiting a multiplayer
+// game"), derived the same way SAVABLE_GAME_TYPES is above rather than a
+// second hand-maintained list — a future H2H-capable game type declares
+// `bowOutable:true` on its own GAME_TYPES entry and picks this up for free,
+// instead of silently missing "Bow out" until someone remembers to also edit
+// a disconnected array (the exact drift class items 38/39/46 fixed elsewhere).
+const BOW_OUT_GAME_TYPES = Object.keys(GAME_TYPES).filter(k => GAME_TYPES[k].bowOutable);
 // Shows/hides every New Game Step 3 option section that's keyed to a
 // gameType (Cricket/Killer/Shanghai/Halve-It) — the single registry-driven
 // loop setMode() and setGameType() both call, replacing the byte-for-byte
@@ -15896,7 +15974,17 @@ function loadStatBubbles(){
   const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
   const gtParam=activeGameTypeParam();
   Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(currentPlayer)}${modeParam}${gtParam}`)
-    .then(data=>renderStatBubbles(data)).catch(()=>{});
+    .then(data=>{
+      renderStatBubbles(data);
+      // The X01 dropdown selected (gtParam empty) means this response IS the
+      // same plain/lifetime shape loadPlayerHeaderStats() below would fetch
+      // separately — reuse it instead of firing a second identical request
+      // to the same (non-trivial, multi-query) backend aggregation on every
+      // profile render. Any OTHER dropdown selection (Cricket/Baseball/etc.)
+      // gets a genuinely different per-type response here, so
+      // loadPlayerHeaderStats() still fetches its own in that case.
+      if(!gtParam) applyPlayerHeaderStatsData(data);
+    }).catch(()=>{});
 }
 function renderStatBubbles(data){
   if(!data) return;
@@ -15916,18 +16004,26 @@ function renderStatBubbles(data){
 // this block wants (including `avg`, X01's own 3-dart average — this is a
 // second, header-scoped copy of the same value the X01 stat-bubble grid
 // already shows, using `bv-header-` ids so the two never collide).
+function applyPlayerHeaderStatsData(data){
+  if(!data) return;
+  HEADER_STAT_DEFS.forEach(d=>{
+    const el=document.getElementById('bv-header-'+d.key);
+    if(el) el.textContent=d.fmt(data[BUBBLE_KEY_MAP[d.key]||d.key]);
+  });
+}
 function loadPlayerHeaderStats(){
   const container=document.getElementById('player-header-stats');
   if(!container) return;
+  // loadStatBubbles() (above) already covers this when the X01 dropdown is
+  // selected — its fetch response is byte-for-byte the same shape this would
+  // fetch separately, so skip the duplicate network round-trip/backend
+  // aggregation here and let that call populate the header instead.
+  if(!activeGameTypeParam()){
+    return;
+  }
   const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
   Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
-    .then(data=>{
-      if(!data) return;
-      HEADER_STAT_DEFS.forEach(d=>{
-        const el=document.getElementById('bv-header-'+d.key);
-        if(el) el.textContent=d.fmt(data[BUBBLE_KEY_MAP[d.key]||d.key]);
-      });
-    }).catch(()=>{});
+    .then(data=>applyPlayerHeaderStatsData(data)).catch(()=>{});
 }
 
 function loadDartWeights(){

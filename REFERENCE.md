@@ -3376,13 +3376,18 @@ any existing stat query.
   ended early, count as a DNF instead of silently staying an invisible, uncounted
   in-progress row forever (the pre-existing behavior — `askEndGame()` never called any
   completion endpoint at all).
-- **Known limitation**: `dnf`/`dnf_at` are live-session-only signals — a save/resume
-  cycle (`docs/archive/saved-games-roadmap.md`) replays purely from recorded
-  `turns`/`darts` via `rebuildX01State()`/`rebuildCricketState()`/etc., which have no
-  knowledge of an in-session bow-out. Saving, then resuming, a game after someone has
-  bowed out will rebuild that player as still active. Not fixed as part of this
-  feature — narrow edge case (pausing an already-forfeited-from match), flagged here
-  rather than silently left for a future session to rediscover.
+- **Known limitation, actively blocked rather than silently allowed**: `dnf` is a
+  live-session-only signal — a save/resume cycle (`docs/archive/saved-games-roadmap.md`)
+  replays purely from recorded `turns`/`darts` via `rebuildX01State()`/
+  `rebuildCricketState()`/etc., which have no knowledge of an in-session bow-out, so
+  resuming a game after someone bowed out would silently rebuild that player as still
+  active. Rather than half-support this, `saveGame()` rejects outright (409, "This
+  game has a player who bowed out — it can't be saved for later") whenever any
+  `game_players.dnf = 1` row exists for the game — pausing a still-in-progress bow-out
+  match just isn't offered, instead of quietly resuming into a desynced state.
+  `saveGame()`/`getResumeState()` also both check `dnf_at` (not just `completed_at`)
+  for the same reason — an abandoned match must be exactly as unsavable/unresumable
+  as a completed one.
 - Both endpoints are `requireWrite` (same tier as recording a turn — bowing out or
   ending a match is gameplay, not admin surgery). Committed tests:
   `backend/test/db.forfeit-and-abandon.test.js` (backend guards/lifecycle) and the

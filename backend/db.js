@@ -1639,7 +1639,25 @@ function addTurn(gameId, t, opts = {}) {
   return { ok: true, turnId };
 }
 
+// Shared "does this game exist, and has it not already ended" guard —
+// completeGame()/forfeitPlayer()/abandonGame() all need it (a game is "ended"
+// the moment EITHER completed_at or dnf_at is set; never both). Factored out
+// so the three can't drift the way completeGame() itself used to: it had no
+// such guard at all until this fix, meaning two concurrent completions (two
+// devices/tabs open on the same game, the same class of race BUG-13 already
+// documents for deleteLastTurn()) could silently overwrite winner_id and
+// re-fire the 'completed' lifecycle hook, or stamp completed_at onto a row
+// that already had dnf_at set — violating the "never both" invariant every
+// other consumer of these two columns relies on.
+function _requireLiveGame(gameId) {
+  const game = db.prepare('SELECT id, completed_at, dnf_at FROM games WHERE id = ?').get(Number(gameId));
+  if (!game) throw httpError(404, 'Game not found');
+  if (game.completed_at != null || game.dnf_at != null) throw httpError(409, 'This game has already ended');
+  return game;
+}
+
 function completeGame(gameId, winnerName) {
+  _requireLiveGame(gameId);
   const w = winnerName ? getPlayer(winnerName) : null;
   // docs/bug-roadmap.md BUG-9: only a player who actually took part in this game may be
   // recorded as its winner. winnerName is client-supplied; without this check, a
@@ -1670,9 +1688,7 @@ function completeGame(gameId, winnerName) {
 // (the last player standing also bows out), the match ends with no winner,
 // marked dnf_at like any other abandoned game.
 function forfeitPlayer(gameId, playerName) {
-  const game = db.prepare('SELECT id, completed_at, dnf_at FROM games WHERE id = ?').get(Number(gameId));
-  if (!game) throw httpError(404, 'Game not found');
-  if (game.completed_at != null || game.dnf_at != null) throw httpError(409, 'This game has already ended');
+  _requireLiveGame(gameId);
   const p = getPlayer(playerName);
   if (!p) throw httpError(404, 'Player not found');
   const participant = db.prepare('SELECT dnf FROM game_players WHERE game_id = ? AND player_id = ?').get(Number(gameId), p.id);
@@ -1698,9 +1714,7 @@ function forfeitPlayer(gameId, playerName) {
 // left (via forfeitPlayer() above) is marked DNF too, and the game itself
 // gets dnf_at instead of completed_at — never both on the same game.
 function abandonGame(gameId) {
-  const game = db.prepare('SELECT id, completed_at, dnf_at FROM games WHERE id = ?').get(Number(gameId));
-  if (!game) throw httpError(404, 'Game not found');
-  if (game.completed_at != null || game.dnf_at != null) throw httpError(409, 'This game has already ended');
+  _requireLiveGame(gameId);
   q.markAllActiveDnf.run(Number(gameId));
   q.markGameDnf.run(Number(gameId));
   _fireGameLifecycleHooks('completed', { gameId: Number(gameId), winnerName: null });
@@ -1891,10 +1905,23 @@ function findSavedGameForParticipants(names, gameType) {
 }
 
 function saveGame(gameId) {
-  const game = db.prepare('SELECT id, game_type, completed_at FROM games WHERE id = ?').get(Number(gameId));
+  const game = db.prepare('SELECT id, game_type, completed_at, dnf_at FROM games WHERE id = ?').get(Number(gameId));
   if (!game) throw httpError(404, 'Game not found');
-  if (game.completed_at != null) throw httpError(409, 'This game is already complete and cannot be saved');
+  // dnf_at, not just completed_at: a game ended via abandonGame()/forfeitPlayer()
+  // (docs/open-roadmap-items.md "Forfeiting a multiplayer game") sets dnf_at,
+  // not completed_at — without this check, an already-abandoned game could
+  // still be saved and later "resumed" via getResumeState() below.
+  if (game.completed_at != null || game.dnf_at != null) throw httpError(409, 'This game has already ended and cannot be saved');
   if (!SAVABLE_GAME_TYPES.includes(game.game_type)) throw httpError(400, `${game.game_type} games can't be saved for later`);
+  // A bowed-out participant's DNF status isn't threaded through the pure
+  // rebuild/replay functions the resume path uses below (Known limitation,
+  // REFERENCE.md §13 "Forfeiting a game / DNF") — resuming would silently
+  // reinstate them as an active player, desyncing from what the server still
+  // correctly knows. Block saving outright rather than half-support a resume
+  // that can't currently represent this state.
+  if (db.prepare('SELECT 1 FROM game_players WHERE game_id = ? AND dnf = 1').get(game.id)) {
+    throw httpError(409, "This game has a player who bowed out — it can't be saved for later");
+  }
   // Idempotent-safe: saving an already-saved game id is a no-op 200 (double-tap
   // protection), not an error — see the roadmap doc's "Saving" section.
   if (_savedGameRow(game.id)) return { ok: true, alreadySaved: true };
@@ -1999,9 +2026,10 @@ function getSavedGames() {
 // "The game is simply live again" (the roadmap doc's own framing) — pausing
 // again just re-saves it.
 function getResumeState(gameId) {
-  const game = db.prepare('SELECT id, category, game_type, config, legs_per_set, sets_per_game, practice, completed_at FROM games WHERE id = ?').get(Number(gameId));
+  const game = db.prepare('SELECT id, category, game_type, config, legs_per_set, sets_per_game, practice, completed_at, dnf_at FROM games WHERE id = ?').get(Number(gameId));
   if (!game) throw httpError(404, 'Game not found');
-  if (game.completed_at != null) throw httpError(409, 'This game is already complete');
+  // dnf_at, same reasoning as saveGame()'s own guard above.
+  if (game.completed_at != null || game.dnf_at != null) throw httpError(409, 'This game is already complete');
   if (!_savedGameRow(game.id)) {
     throw httpError(409, 'This game is not currently saved — it may already have been resumed or abandoned elsewhere');
   }

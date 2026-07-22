@@ -64,3 +64,40 @@ describe('completeGame — winner must be a participant (BUG-9)', () => {
     assert.equal(winnerIdOf(gameId), null);
   });
 });
+
+// Committed regression test for a gap found reviewing the forfeit/DNF feature
+// (docs/open-roadmap-items.md "Forfeiting a multiplayer game"): completeGame()
+// had no "already ended" guard at all, unlike its siblings forfeitPlayer()/
+// abandonGame(), which both reject a game whose completed_at or dnf_at is
+// already set. Without it, two devices/tabs scoring the same game (the same
+// class of race docs/bug-roadmap.md BUG-13 already documents for
+// deleteLastTurn()) could each call completeGame() with a different winner —
+// the second call would silently overwrite games.winner_id and re-fire the
+// 'completed' lifecycle hook — or stamp completed_at onto a row that already
+// has dnf_at set, violating the "never both" invariant every completed_at/
+// dnf_at consumer relies on.
+describe('completeGame — rejects a game that has already ended', () => {
+  test('a second completeGame() call on an already-completed game is rejected, winner_id unchanged', async () => {
+    await db.addPlayer('CG_Gina'); await db.addPlayer('CG_Hank');
+    const { gameId } = db.createGame({
+      category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: 'CG_Gina' }, { name: 'CG_Hank' }],
+    });
+    db.completeGame(gameId, 'CG_Gina');
+    const gina = db._db.prepare("SELECT id FROM players WHERE name = 'CG_Gina'").get();
+    assert.equal(winnerIdOf(gameId), gina.id);
+    assert.throws(() => db.completeGame(gameId, 'CG_Hank'), (err) => err.status === 409);
+    assert.equal(winnerIdOf(gameId), gina.id, 'a rejected replay must not overwrite the real winner');
+  });
+
+  test('completeGame() is rejected on a game already marked DNF (abandoned)', async () => {
+    await db.addPlayer('CG_Ivy'); await db.addPlayer('CG_Jack');
+    const { gameId } = db.createGame({
+      category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      players: [{ name: 'CG_Ivy' }, { name: 'CG_Jack' }],
+    });
+    db.abandonGame(gameId);
+    assert.throws(() => db.completeGame(gameId, 'CG_Ivy'), (err) => err.status === 409);
+    assert.equal(winnerIdOf(gameId), null, 'completed_at/winner_id must never be set on a DNF game');
+  });
+});
