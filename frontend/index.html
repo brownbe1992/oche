@@ -16469,11 +16469,18 @@ function applyPlayerHeaderStatsData(data){
 function loadPlayerHeaderStats(){
   const container=document.getElementById('player-header-stats');
   if(!container) return;
-  // loadStatBubbles() (above) already covers this when the X01 dropdown is
-  // selected — its fetch response is byte-for-byte the same shape this would
-  // fetch separately, so skip the duplicate network round-trip/backend
-  // aggregation here and let that call populate the header instead.
-  if(!activeGameTypeParam()){
+  // loadStatBubbles() (above) already covers this when the Stats section is
+  // showing AND the X01 dropdown is selected — its fetch response is
+  // byte-for-byte the same shape this would fetch separately, so skip the
+  // duplicate network round-trip/backend aggregation and let that call
+  // populate the header instead. But on the Player Settings section,
+  // #player-stat-bubbles doesn't exist at all (loadStatBubbles() early-returns
+  // without fetching anything there), so this needs its own fetch regardless
+  // of which game type is selected — otherwise the header bubbles (X01
+  // Average/Total Darts Thrown/Darts Per Day, independent of the Stats/
+  // Settings section) stayed permanently blank whenever Player Settings was
+  // the active section.
+  if(!activeGameTypeParam() && document.getElementById('player-stat-bubbles')){
     return;
   }
   const player=currentPlayer;
