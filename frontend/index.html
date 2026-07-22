@@ -47,6 +47,13 @@
   }
   *{box-sizing:border-box}
   html,body{margin:0}
+  /* touch-action:manipulation disables the double-tap-to-zoom gesture (the
+     "tapped a scoring button twice quickly and it zoomed the whole page in"
+     bug) without disabling pinch-zoom — pinch is still explicitly allowed
+     (manipulation = pan + pinch-zoom, minus double-tap-zoom only), so
+     WCAG 1.4.4 "Resize Text" accessibility stays intact; this only removes
+     the gesture that was misfiring, not the ability to zoom at all. */
+  html{touch-action:manipulation}
   body{
     background:
       radial-gradient(120% 80% at 50% -10%, #1b1d19 0%, var(--board) 60%) fixed;
@@ -775,6 +782,7 @@
       <button class="navbtn" id="nav-league" aria-current="false" onclick="show('league')">Leagues</button>
       <button class="navbtn" id="nav-scoreboard" onclick="openScoreboard()" title="Open the read-only scoreboard for a second screen">Scoreboard ↗</button>
       <button class="navbtn" id="nav-settings" aria-current="false" onclick="show('settings')">Settings</button>
+      <button class="navbtn" id="nav-glossary" aria-current="false" onclick="showLegend()">Glossary</button>
     </nav>
     <div id="game-header-controls">
       <span></span>
@@ -2164,6 +2172,7 @@ function show(name){
   document.getElementById('nav-tournament').setAttribute('aria-current', name==='tournament');
   document.getElementById('nav-league').setAttribute('aria-current', name==='league');
   document.getElementById('nav-settings').setAttribute('aria-current', name==='settings');
+  document.getElementById('nav-glossary').setAttribute('aria-current', name==='legend');
   if(name==='settings') renderSettings();
   if(name==='home'){ renderHome(); renderHomeChallengeTeaser(); renderHomeRecapTeaser(); }
   if(name==='session-recap'){
@@ -4455,13 +4464,19 @@ function renderPlayers(){
   let promptHtml = '';
   if(allFilled && atCap){
     promptHtml = `<p class="pp-meta" style="margin:12px 0 8px">Maximum of 6 players per game.</p>
-      <div class="btn-row" style="margin:0"><button class="btn btn-primary" onclick="setupGoToStep2()">Continue</button></div>`;
+      <div class="btn-row" style="margin:0"><button class="btn btn-primary" style="flex:1" onclick="setupGoToStep2()">Continue</button></div>`;
   } else if(allFilled){
+    // "Add existing"/"New player" share one row (flex:1 each, so together they
+    // span the full width evenly); "Continue" gets its own row below, also
+    // flex:1 on its lone button so it stretches to that same full span rather
+    // than sizing to its own text.
     promptHtml = `<p class="pp-meta" style="margin:12px 0 8px">Add someone else?</p>
       <div class="btn-row" style="margin:0">
-        <button class="btn btn-ghost" onclick="addExistingPlayer()">Add existing</button>
-        <button class="btn btn-ghost" onclick="addNewPlayer()">New player</button>
-        <button class="btn btn-primary" onclick="setupGoToStep2()">No, continue</button>
+        <button class="btn btn-ghost" style="flex:1" onclick="addExistingPlayer()">Add existing</button>
+        <button class="btn btn-ghost" style="flex:1" onclick="addNewPlayer()">New player</button>
+      </div>
+      <div class="btn-row" style="margin-top:10px">
+        <button class="btn btn-primary" style="flex:1" onclick="setupGoToStep2()">Continue</button>
       </div>`;
   }
   const shuffleHtml = named.length>=2
@@ -6715,7 +6730,6 @@ function renderPlayerPage(){
     <div class="pp-header">
       <div class="pp-name">${escapeHtml(name)}</div>
       <div class="pp-meta">${s.turns||0} turns thrown (all-time)</div>
-      <button class="btn btn-ghost" style="margin-top:6px" onclick="showLegend('player')">View stats glossary →</button>
     </div>
     <div class="player-controls">
       ${((prefs[name] && prefs[name].hasPin) && !playerSettingsUnlocked) ? `
