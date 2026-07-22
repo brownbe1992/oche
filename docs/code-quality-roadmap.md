@@ -4,9 +4,10 @@
 > 39, 43 — see each item's own note below); the rest is open.** Every item below is
 > tracked individually on `docs/open-roadmap-items.md` (items 35–45 from the
 > branch review, items 46–52 from the first whole-file `/simplify
-> frontend/index.html` pass, items 53–59 from the second). This doc is the
-> design context for them, in one place, so each can be picked up (or
-> explicitly rejected) on its own.
+> frontend/index.html` pass, items 53–59 from the second, items 64–70 from a
+> third full-frontend `/simplify` pass covering `index.html`+`scoring.js`
+> together). This doc is the design context for them, in one place, so each
+> can be picked up (or explicitly rejected) on its own.
 >
 > **Origin:** the 2026-07-20 max-effort code review of the `dev` branch
 > (fix commits `878bf52` and `eba350f`). Every *correctness* finding from that
@@ -889,3 +890,110 @@ functions it calls.
 can never be sent while a turn write for the same game is still in flight —
 mirroring the ordering guarantee `DB._queue` already gives same-type writes,
 just extended to this one cross-type ordering dependency.
+
+---
+
+## Items 64–70 — Full-frontend `/simplify` pass (2026-07-22), deferred findings
+
+Found by four parallel finder angles (reuse, simplification, efficiency,
+altitude) run over the whole of `frontend/index.html`/`frontend/scoring.js`
+(the code-quality cluster above was scoped to specific branches/files; this
+pass covered the full two files fresh). The quick, low-risk, purely-mechanical
+findings from the same pass were fixed immediately in the same change
+(`mapDartsForRecord()`, `noDartsThrown()`, `pctFmt`, and memoizing
+`generatePressureCard()`/`checkoutHint()` in `scoring.js`) — these seven are
+the larger/riskier ones, each touching every game type across a hot-path
+function, deferred the same way items 35–59 above were: too large or
+behavior-risky to refactor untested in the same pass, none a bug.
+
+### Item 64 — Unify `render()`/`throwDart()`/`undoLastTurn()`/`enterTurn()` dispatch via `GAME_TYPES`
+
+Independently flagged by 3 of the 4 finder angles — the single most-repeated
+finding of the pass. All four functions open with their own hand-maintained
+`if(game.gameType === 'x') return xForThatType()` chain (10-15 branches each),
+duplicating the exact same 15-type list four times over, even though
+`GAME_TYPES` already exists and `resumeGame()` (item 37) already proved the
+pattern: replace each chain with `(GAME_TYPES[game.gameType].render ||
+renderGameDefault)()`-style generic dispatch, one new registry member per
+function (`render`, `throwDart`, `undoLastTurn`, `enterTurn`), with X01 itself
+getting an explicit member instead of being the implicit fallthrough default.
+Deferred because it touches all 15 game types' hot-path turn loop across 4
+functions (~60 dispatch points) — real behavior-risk if a single branch is
+transcribed wrong, needs full per-type live verification before landing.
+
+### Item 65 — Generalize `rebuild*State()`'s shared replay-loop shape (`scoring.js`)
+
+`rebuildX01State`/`rebuildCricketState`/`rebuildBaseballState`/
+`rebuildShanghaiState`/`rebuildHalveItState`/`rebuildPressureChamberState` each
+reimplement an identical ~15-line control flow (detect a set/leg change,
+rotate starter, reset every player's leg-scoped fields, replay each turn
+through the type's own `evaluateVisit*`, apply the same "pendingNewLeg/
+pendingNewSet trailer" block for a leg won with no next-leg turn recorded
+yet), varying only in three hooks (`newPlayer`, `resetLeg`, `evaluateVisit`).
+Deferred: these are save/resume's core correctness engine, already the site
+of a real historical bug (the starter-rotation n-1 index desync, item 37's
+own note); a shared-loop refactor needs the same full-matrix live
+save/resume verification item 37 did for all 12 savable types before it's
+safe to land.
+
+### Item 66 — Generalize the 5 remaining `undoLastTurn*` per-type field restores
+
+A follow-on to item 35 (which already consolidated the shared *trailer*):
+`undoLastTurnBaseball`/`undoLastTurnShanghai`/`undoLastTurnHalveIt`/
+`undoLastTurnPressureChamber`/`undoLastTurnBobs27` still each hand-write which
+snapshot fields to copy back onto `p`/`game` before calling `_finishUndo()` —
+since each snapshot's keys already enumerate exactly the fields to restore, a
+generic `Object.assign(p, snap)` (excluding snapshot bookkeeping keys) could
+replace most of these bodies. Deferred: moderate regression risk per mode if
+a bookkeeping key is accidentally copied onto the live player object; needs
+a full undo-after-every-turn-type live check.
+
+### Item 67 — Build-once DOM for Cricket/single-target/Pressure-Chamber pads
+
+`renderPadCricket()`/`renderSingleTargetPad()`/`renderPadPressureChamber()`
+still tear down and rebuild every pad button (with fresh `onclick` closures)
+on every dart thrown, unlike the default 1-20+Bull pad (item 57b, already
+build-once-and-toggle). Deferred: needs the same `pad.dataset.padKind`-guard
+treatment as item 57b, but each of these three pads has its own per-dart
+visual state (mark glyphs/aria-labels, target highlighting) beyond plain
+`disabled` toggling, so the toggle-only-what-changed logic is more involved
+per pad than the generic fallback pad was.
+
+### Item 68 — `finishUnit()`'s per-type match-summary special cases → a `matchSummaryHtml` registry member
+
+`finishUnit()`'s GAME OVER branch hand-builds `isCricket`/`isBaseball`/.../
+`isDeadManWalking` flags, then bolts on four near-identical ad hoc "tiny
+match-summary" IIFEs (`bobs27Summary`, `gauntletSummary`, `killerSummary`,
+`deadManWalkingSummary`) plus a separate `isCricket`-only Share-button
+suppression and an exclusion list gating which types skip `h2hStatsHtml()`
+entirely — each justified by its own comment repeating "h2hStatsHtml() reads
+X01-shaped fields this player object doesn't have." Shape: a single
+`GAME_TYPES.matchSummaryHtml(game, winner)` member (absent/null for the
+X01-shaped types, which fall back to `h2hStatsHtml()`), replacing both the
+summary IIFEs and the exclusion list with one registry lookup. Deferred:
+touches the GAME OVER screen for every non-X01-shaped type; needs a full
+match-completion live check per type.
+
+### Item 69 — `startNextLeg()`'s parallel hardcoded round-counter reset chain
+
+Immediately after the already-generalized
+`game.players.forEach(p=>GAME_TYPES[game.gameType].resetForNextLeg(p, game,
+newSet))`, `startNextLeg()` runs a second hardcoded if-chain resetting each
+mode's game-level round counter (`baseballInning`, `shanghaiRound`,
+`halveItRound`, Pressure Chamber's round+timer state, `checkoutLadderVisits`)
+— the same conceptual "per-leg reset" job as `resetForNextLeg`, done through
+a second mechanism sitting one line away. Shape: fold the game-level counter
+reset into `resetForNextLeg`'s own contract (it already receives `game`).
+Deferred: touches every round-based type's leg-boundary reset; needs a
+full per-type multi-leg live check.
+
+### Item 70 — `startGame()`'s 14-branch config-building ternary → a `buildConfig` registry member
+
+`startGame()` builds each game's `config` object via a 14-branch
+`gameType === 'x' ? {...} : gameType === 'y' ? {...} : ...` chain, the same
+shape `category`/`ctorArg`/`resume` were already moved off of (items 41, 40,
+37). Shape: add a `buildConfig(setup)` member per `GAME_TYPES` entry, replace
+the ternary with `GAME_TYPES[gameType].buildConfig(setup)`. Deferred: a wrong
+transcription silently ships a different `games.config` shape for that type
+(no compile-time signal), so it needs a full per-type game-creation live
+check comparing the persisted `config` column before/after.
