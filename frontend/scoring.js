@@ -1492,7 +1492,14 @@ function evaluateVisitPressureChamber(player, darts, game){
   const round = game.pressureChamberRound;
   const card = generatePressureCard(game.gameId, round);
   const result = computePressureRoundResult(card, darts);
-  const totalCp = (player.totalCp || 0) + result.gained;
+  // Subtract the miss penalty too (result.gained is always 0 on a miss, and
+  // missPenalty is always 0 on a hit/partial, so this never double-counts) —
+  // matches the backend's own read-time formula (REFERENCE.md §34: total =
+  // SUM(scored) - SUM(missPenalty for every bust turn)). Previously only
+  // added `gained`, so a run with any miss under-penalized live (wrong live
+  // winner decision, wrong mid-run Ice-badge check) versus the backend's
+  // later recomputation of the same run.
+  const totalCp = (player.totalCp || 0) + result.gained - result.missPenalty;
   const misses = (player.misses || 0) + (result.outcome === 'miss' ? 1 : 0);
   const fullHits = (player.fullHits || 0) + (result.outcome === 'full' ? 1 : 0);
   const currentFullHitStreak = result.outcome === 'full' ? (player.currentFullHitStreak || 0) + 1 : 0;

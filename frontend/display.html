@@ -1983,9 +1983,14 @@ function render(s){
   const thrower = s.players[s.currentIndex];
   const hasCheckout = !!s.checkout && !s.legSummary;
   if(hasCheckout){
+    // Keyed on the route AND the thrower's name — a route-only key would miss
+    // the case where the turn passes to a different player left on the exact
+    // same checkout (a plausible symmetric H2H scoreline), silently leaving
+    // the old thrower's name displayed against the new thrower's checkout.
     const route = formatCheckoutRoute(s.checkout);
-    if(route !== lastCoKey){
-      lastCoKey = route;
+    const coKey = route + '|' + (thrower ? thrower.name : '');
+    if(coKey !== lastCoKey){
+      lastCoKey = coKey;
       coRoute.textContent = route;
       coWho.textContent   = thrower ? thrower.name + ' at the oche' : '';
       coStrip.classList.remove('flashpulse'); void coStrip.offsetWidth; coStrip.classList.add('flashpulse');
@@ -2040,7 +2045,13 @@ function render(s){
   grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
 
   if(s.legSummary){
-    grid.innerHTML = s.legSummary.map(p=>renderer.summary(p, L)).join('');
+    // doubles_practice/chuckin/around_the_clock/around_the_world declare no
+    // summary() (they never broadcast a legSummary in normal play) — fall
+    // back to the X01-shaped default rather than throwing on an undefined
+    // call, matching the "X01 shape as the default" convention index.html's
+    // own legSummaryX01() already establishes for this exact data.
+    const summaryFn = typeof renderer.summary === 'function' ? renderer.summary : renderers.x01.summary;
+    grid.innerHTML = s.legSummary.map(p=>summaryFn(p, L)).join('');
   } else if(isScorecardLayout){
     grid.innerHTML = renderer.scorecard(s, L);
   } else {

@@ -25,8 +25,8 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   GAUNTLET_STATION_ORDER, evaluateGauntletStation, gauntletTotalScars, gauntletResultTier, rebuildGauntletState,
   KILLER_DEFAULT_LIVES, shuffleKillerNumbers, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
   MARATHON_FATIGUE_TIERS, computeFatigueSplit, MARATHON_TREND_MIN_LEGS, MARATHON_TREND_TOLERANCE, classifyMarathonTrend,
-  shanghaiRoundTarget, isShanghaiWin, evaluateVisitShanghai,
-  HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, evaluateVisitHalveIt,
+  shanghaiRoundTarget, isShanghaiWin, evaluateVisitShanghai, rebuildShanghaiState,
+  HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, evaluateVisitHalveIt, rebuildHalveItState,
   DEAD_MAN_WALKING_BANDS, deadManWalkingBandFor, deadManWalkingParForTarget, pickDeadManWalkingTargets,
   evaluateDeadManDart, resolveDeadManDart, DEAD_MAN_WALKING_RESULT_TIERS, deadManWalkingResultTier,
   rebuildDeadManWalkingState, CHALLENGE_CHECKOUTS,
@@ -2372,6 +2372,61 @@ describe('evaluateVisitHalveIt (docs/archive/halve-it-roadmap.md)', () => {
   });
 });
 
+// Committed regression test found in a full-frontend code review (CLAUDE.md
+// "every new calculation gets a permanent, committed test"): everHalved/
+// lastVisitHalved are read by the live UI to award 🛡️ No Half Measures /
+// 🪓 Halved at the Death, and rebuildHalveItState()'s own comment says they're
+// "reconstructed here too so a resumed leg's badge check still sees the leg's
+// FULL halving history" — but had no committed test proving that reconstruction
+// actually works, despite backing a real badge trigger condition.
+describe('rebuildHalveItState (docs/archive/halve-it-roadmap.md, resume/badge-history reconstruction)', () => {
+  test('everHalved stays true after a later non-halving visit; lastVisitHalved reflects only the most recent visit', () => {
+    const turns = [
+      // Round 1 target is plain 20 (HALVE_IT_DEFAULT_TARGETS[0]) -- all misses halves.
+      { playerIndex: 0, setNo: 1, legNo: 1, darts: [{sector:1,mult:1},{sector:2,mult:1},{sector:3,mult:1}] },
+      // Round 2 target is plain 16 -- a hit does not halve.
+      { playerIndex: 0, setNo: 1, legNo: 1, darts: [{sector:16,mult:1}] },
+    ];
+    const r = rebuildHalveItState({ names: ['Solo'], legsPerSet: 1, targets: HALVE_IT_DEFAULT_TARGETS, turns });
+    assert.equal(r.players[0].everHalved, true, 'round 1\'s halve must still be remembered after round 2');
+    assert.equal(r.players[0].lastVisitHalved, false, 'the most recent visit (round 2) did not halve');
+    assert.equal(r.players[0].total, 16, '0 (halved from 0) + 16 gained in round 2');
+  });
+  test('everHalved resets to false at the start of a new leg', () => {
+    const turns = [
+      { playerIndex: 0, setNo: 1, legNo: 1, darts: [{sector:1,mult:1},{sector:2,mult:1},{sector:3,mult:1}] }, // halves
+      { playerIndex: 1, setNo: 1, legNo: 1, darts: [{sector:20,mult:1}] }, // p1's turn, round completes
+    ];
+    // Force a leg boundary by hand-appending a turn dated into leg 2 -- rebuildHalveItState
+    // detects the boundary purely from (setNo,legNo) changing between consecutive turns.
+    turns.push({ playerIndex: 0, setNo: 1, legNo: 2, darts: [{sector:20,mult:1}] });
+    const r = rebuildHalveItState({ names: ['Solo', 'Opp'], legsPerSet: 1, targets: HALVE_IT_DEFAULT_TARGETS, turns });
+    assert.equal(r.players[0].everHalved, false, 'a new leg must not carry over the previous leg\'s halving history');
+  });
+});
+
+// Committed regression test for the same CLAUDE.md testing gap, Shanghai's own
+// sibling of the fixed-round replay functions (rebuildBaseballState/
+// rebuildHalveItState) — totalPoints/roundPoints reconstruction had no
+// committed test even though it's exactly the kind of "recompute the running
+// score from raw turns" calculation the convention is meant to cover.
+describe('rebuildShanghaiState (docs/archive/shanghai-roadmap.md, resume reconstruction)', () => {
+  test('replays two rounds and lands on the correct running total/next player', () => {
+    const turns = [
+      // Round 1 target is round number 1 -- a single 1 scores 1.
+      { playerIndex: 0, setNo: 1, legNo: 1, darts: [{sector:1,mult:1}] },
+      { playerIndex: 1, setNo: 1, legNo: 1, darts: [{sector:1,mult:1}] },
+      // Round 2 target is round number 2 -- a double 2 scores 4.
+      { playerIndex: 0, setNo: 1, legNo: 1, darts: [{sector:2,mult:2}] },
+    ];
+    const r = rebuildShanghaiState({ names: ['Ann', 'Bob'], legsPerSet: 1, maxRounds: 7, turns });
+    assert.equal(r.players[0].totalPoints, 1 + 4, 'round 1 single-1 (1) + round 2 double-2 (4)');
+    assert.equal(r.players[1].totalPoints, 1, 'round 1 single-1 only');
+    assert.equal(r.shanghaiRound, 2, 'Ann has thrown round 2, round hasn\'t advanced past her yet');
+    assert.equal(r.current, 1, 'Bob throws next');
+  });
+});
+
 describe('Dead Man Walking (docs/archive/dead-man-walking-roadmap.md)', () => {
   describe('deadManWalkingBandFor', () => {
     test('band boundaries: 32/60 low, 61/100 mid, 101/170 high', () => {
@@ -2859,6 +2914,23 @@ describe('evaluateVisitPressureChamber (docs/archive/pressure-chamber-roadmap.md
     const ev = evaluateVisitPressureChamber(p1, [{sector:0,mult:1}], game);
     assert.equal(ev.matchComplete, true);
     assert.equal(ev.winnerIndex, 0, 'p0 has the higher total CP');
+  });
+  // Regression test found in a full-frontend code review: a miss's totalCp
+  // update only ever added result.gained (always 0 on a miss), never
+  // subtracted result.missPenalty — contradicting REFERENCE.md §34's
+  // documented read-time formula (SUM(scored) - SUM(missPenalty for every
+  // bust turn)), so the live scoreboard/winner decision could disagree with
+  // the backend's own later recomputation of the same run for any run
+  // containing at least one miss.
+  test('a miss subtracts the round\'s miss penalty from totalCp, not just skip adding to it', () => {
+    const p = { totalCp: 20, misses: 0, fullHits: 0, currentFullHitStreak: 0, bestFullHitStreak: 0, roundResults: {} };
+    const game = mkGame(1, 0, [p]);
+    const card = generatePressureCard(999, 1);
+    const ev = evaluateVisitPressureChamber(p, [{sector:0,mult:1}], game); // guaranteed miss
+    assert.equal(ev.outcome, 'miss');
+    assert.ok(ev.missPenalty > 0, 'this card must actually carry a nonzero miss penalty for the assertion below to mean anything');
+    assert.equal(ev.gained, 0, 'a miss gains nothing');
+    assert.equal(ev.totalCp, 20 - ev.missPenalty, 'totalCp must reflect the penalty, not just stay unchanged');
   });
 });
 

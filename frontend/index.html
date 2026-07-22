@@ -3879,6 +3879,11 @@ function loadSettingsField(cfg, f){
   if(f.kind === 'checkbox') el.checked = cfg[f.key] === '1';
   else if(f.kind === 'checkbox-optout') el.checked = cfg[f.key] !== '0';
   else if(f.kind === 'allowed') el.value = f.allowed.includes(cfg[f.key]) ? cfg[f.key] : f.default;
+  // 'number-zeroOk' needs its own branch, mirroring saveSettingsField()'s own
+  // dedicated handling below: the generic `cfg[f.key] || f.default` treats a
+  // genuinely-saved 0 as falsy and would show the default instead — wrong for
+  // a field whose whole point is that 0 is a distinct, legitimate value.
+  else if(f.kind === 'number-zeroOk') el.value = (cfg[f.key] != null && cfg[f.key] !== '') ? cfg[f.key] : f.default;
   else el.value = cfg[f.key] || f.default || '';
 }
 function saveSettingsField(payload, f){
@@ -5612,7 +5617,15 @@ async function startGame(){
   // seed is the real games.id, only known once the server assigns it here.
   if(game.gameType === 'pressure_chamber') game.gameId = DB.gameId;
   if(activeChallenge && DB.gameId != null){
-    Backend.send('POST','/api/challenges/start', { player:activeChallenge.player, gameId:DB.gameId,
+    // Awaited (not fire-and-forget): gameplay must not start before this
+    // resolves — the 3 filler-starting-score formats (bullseye_gauntlet/
+    // treble_run/steady_hand) rig the X01 engine to never naturally bust or
+    // win, so their ONLY way to end a leg is the activeChallenge-gated
+    // mid-visit check in enterTurn(). If a dart had already been thrown by
+    // the time this rejected and nulled activeChallenge, that check could
+    // never fire again for the rest of the attempt, leaving the player stuck
+    // grinding a countdown that can never reach zero.
+    await Backend.send('POST','/api/challenges/start', { player:activeChallenge.player, gameId:DB.gameId,
       challengeDate:activeChallenge.date, format:activeChallenge.format, target:activeChallenge.target })
       .catch(()=>{
         // Couldn't register (already attempted today — a race past the pre-check
@@ -6503,9 +6516,29 @@ function switchPlayerTab(tab){
   playerPageTab = tab;
   renderPlayerPage();
 }
-function switchPlayerSection(section){
+function switchPlayerSection(section, focus){
   playerPageSection = section;
   renderPlayerPage();
+  if(focus){ const el = document.getElementById('pp-tab-'+section); if(el) el.focus(); }
+}
+// Roving-tabindex keyboard support for the Stats/Player Settings tablist
+// (ArrowLeft/Right + Home/End) — same WAI-ARIA tabs pattern tournamentTabKeydown()
+// already establishes for the tournament bracket switcher (docs/accessibility-roadmap.md:
+// "keyboard/focus order... as part of its own design, not bolted on afterward" —
+// found missing here in a full-frontend code review).
+function playerTabKeydown(e){
+  const keys = ['ArrowRight','ArrowLeft','Home','End'];
+  if(!keys.includes(e.key)) return;
+  e.preventDefault();
+  const tabs = [...document.querySelectorAll('.player-tabs [role="tab"]')];
+  const i = tabs.indexOf(e.target);
+  if(i < 0) return;
+  let ni;
+  if(e.key==='Home') ni = 0;
+  else if(e.key==='End') ni = tabs.length - 1;
+  else ni = (i + (e.key==='ArrowRight'?1:-1) + tabs.length) % tabs.length;
+  const section = tabs[ni].dataset.tab;
+  switchPlayerSection(section, true);
 }
 function switchPlayerGameType(type){
   if(playerGameType === type) return;
@@ -6813,11 +6846,11 @@ function renderPlayerPage(){
         `<div class="stat-block" title="${d.desc}"><div class="stat-val" id="bv-header-${d.key}">—</div><div class="stat-label">${d.label}</div></div>`
       ).join('')}</div>
     </div>
-    <div class="player-tabs">
-      <button class="tab-btn${section==='stats'?' active':''}" data-tab="stats" onclick="switchPlayerSection('stats')">Stats</button>
-      <button class="tab-btn${section==='settings'?' active':''}" data-tab="settings" onclick="switchPlayerSection('settings')">Player Settings</button>
+    <div class="player-tabs" role="tablist" aria-label="Player profile sections">
+      <button role="tab" id="pp-tab-stats" class="tab-btn${section==='stats'?' active':''}" data-tab="stats" aria-selected="${section==='stats'}" aria-controls="pp-tab-panel" tabindex="${section==='stats'?0:-1}" onclick="switchPlayerSection('stats')" onkeydown="playerTabKeydown(event)">Stats</button>
+      <button role="tab" id="pp-tab-settings" class="tab-btn${section==='settings'?' active':''}" data-tab="settings" aria-selected="${section==='settings'}" aria-controls="pp-tab-panel" tabindex="${section==='settings'?0:-1}" onclick="switchPlayerSection('settings')" onkeydown="playerTabKeydown(event)">Player Settings</button>
     </div>
-    ${section==='settings' ? settingsSectionHtml : statsSectionHtml}
+    <div id="pp-tab-panel" role="tabpanel">${section==='settings' ? settingsSectionHtml : statsSectionHtml}</div>
     <div class="btn-row">
       <button class="btn btn-ghost" onclick="askRenameFromProfile('${j}')">Rename</button>
       ${(canManagePlayers() && !isChallenge)?`<button class="btn btn-ghost danger" onclick="askClearPlayerStats('${j}','${tab==='overall'?'all':tab}')">Reset ${tab==='overall'?'all':tab==='h2h'?'H2H':'Practice'} stats</button>`:''}
@@ -7211,7 +7244,13 @@ function loadChallengeHistory(){
   const container = document.getElementById('player-challenge-history');
   if(!container) return;
   const today = localDateStr(new Date());
-  cachedProfileLoad('challengeHistory',
+  // Date folded into the cache section key (not just the fetch URL) — without
+  // it, a profile re-rendered later in the same session (a tab/game-type
+  // switch, or simply re-opening the same player after midnight) would replay
+  // yesterday's cached played/completed/currentStreak/bestByFormat forever,
+  // since cachedProfileLoad's cache is otherwise only cleared on a player
+  // switch, never a date change.
+  cachedProfileLoad('challengeHistory:'+today,
     () => Backend.get(`/api/challenges/history?player=${encodeURIComponent(currentPlayer)}&date=${today}`),
     data=>renderChallengeHistory(data),
     ()=>{ container.innerHTML = `<p class="pp-meta" style="padding:4px 0">Could not load Daily Challenge history.</p>`; });
@@ -7262,11 +7301,15 @@ async function shareEarnedBadge(badgeId){
 function loadPersonalBests(){
   const container=document.getElementById('player-personal-bests');
   if(!container) return;
+  const player=currentPlayer;
   const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
   const gtParam=activeGameTypeParam();
-  Backend.get(`/api/players/personal-bests?name=${encodeURIComponent(currentPlayer)}${modeParam}${gtParam}`)
-    .then(data=>{ renderPersonalBests(data); loadGhostRaceRecord(); })
-    .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load personal bests.</p>`; });
+  Backend.get(`/api/players/personal-bests?name=${encodeURIComponent(player)}${modeParam}${gtParam}`)
+    .then(data=>{
+      if(currentPlayer !== player) return;   // a newer profile visit took over
+      renderPersonalBests(data); loadGhostRaceRecord();
+    })
+    .catch(()=>{ if(currentPlayer === player) container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load personal bests.</p>`; });
 }
 // docs/archive/tournament-mode-roadmap.md §8: the Player Profile's "Tournaments" stat
 // block — wins/runner-ups/best finish. A no-op if the section isn't rendered
@@ -10461,7 +10504,16 @@ function applyBowOut(name, res){
   const idx = game.players.findIndex(p=>p.name===name);
   if(idx < 0) return;
   game.players[idx].dnf = true;
-  if(game.gameType === 'killer') game.players[idx].eliminated = true; // Killer's own win/turn logic keys off `eliminated`
+  if(game.gameType === 'killer'){
+    game.players[idx].eliminated = true; // Killer's own win/turn logic keys off `eliminated`
+    // Killer's win check normally only runs inside throwDartKiller(), as a side
+    // effect of someone throwing a dart — a bow-out that drops the alive count
+    // to 1 must check this itself, or the match sits "in progress" (the sole
+    // survivor shown as "to throw") until they throw one more, otherwise-
+    // pointless dart before the game finally recognizes it's already decided.
+    const alive = game.players.filter(pl => !pl.eliminated);
+    if(alive.length === 1){ onKillerLegWon(alive[0]); return; }
+  }
   // If the departing player was this leg's starter, the round-completion
   // anchor (isRoundComplete(), frontend/scoring.js — compares the walked
   // index against game.starter) must move too. Left stale, it would point at
@@ -10744,8 +10796,15 @@ function enterTurn(){
   // A ghost isn't a real opponent for Comeback Kid purposes (see onLegWon()'s
   // matching guard) — racing your own past leg shouldn't earn a badge framed
   // around beating another player.
-  if(game.players.length===2 && !game.hasGhost){
-    const _opp = game.players.find(x=>x!==p);
+  // Active-player count, not game.players.length — matches onLegWon()'s own
+  // active-count check for this exact badge: a departed (bowed-out) player
+  // stays IN game.players (only `dnf` is set), so without this a 3+ player
+  // match that's shrunk to a genuine 2-player decider via bow-outs would
+  // freeze this sampling forever at its pre-bow-out value, while onLegWon()'s
+  // awarding check (correctly active-count-based) evaluates that stale number.
+  const _activeForDeficit = game.players.filter(x=>!x.dnf);
+  if(_activeForDeficit.length===2 && !game.hasGhost){
+    const _opp = _activeForDeficit.find(x=>x!==p);
     if(_opp) p.legWorstDeficit = Math.max(p.legWorstDeficit, p.score - _opp.score);
   }
   if(!ev.bust) p.score = ev.newScore;
@@ -11096,8 +11155,13 @@ function enterTurnCricket(){
   // (lower is better), so "trailing" means I've received MORE than they have
   // (me - opp) — docs/archive/cutthroat-cricket-roadmap.md's open question, resolved as a
   // variant-aware condition rather than a scope-out.
-  if(game.players.length===2){
-    const _opp = game.players.find(x=>x!==p);
+  // Active-player count, not game.players.length — same fix/reasoning as
+  // X01's own Comeback Kid sampling in enterTurn(): a bowed-out player stays
+  // IN game.players, so this must match onLegWonCricket()'s active-count
+  // awarding check or the sampling freezes stale after a bow-out.
+  const _activeForDeficit = game.players.filter(x=>!x.dnf);
+  if(_activeForDeficit.length===2){
+    const _opp = _activeForDeficit.find(x=>x!==p);
     if(_opp){
       const deficit = cutthroat ? (p.points - _opp.points) : ((_opp.points||0) - p.points);
       p.legWorstPointsDeficit = Math.max(p.legWorstPointsDeficit, deficit);
@@ -11957,6 +12021,18 @@ function onLegWonBobs27(wi){
 /* ----- leg / set / game progression ----- */
 function onLegWon(wi){
   const w = game.players[wi];
+  // Reset unconditionally, at the very top, regardless of which branch below
+  // this leg win ends up taking (leg/set/game) — previously only reset in the
+  // plain-leg tail, so a stale true/non-null value from an EARLIER, unrelated
+  // Daily Challenge attempt survived into a later real H2H match's "set won"
+  // or "game won" screen (finishUnit() reads both globals unconditionally for
+  // the heading/buttons on kind==='set', which never reaches the old reset
+  // site). A challenge attempt itself is always forced to legsPerSet=1/
+  // setsPerGame=1 (setMode()'s isSpecialMode branch), so it only ever takes
+  // the plain-leg tail anyway — moving the reset earlier changes nothing for
+  // an in-progress challenge, only fixes the stale-carryover case.
+  lastLegWasChallenge = false;
+  lastChallengeResult = null;
   // A ghost is never treated as a real H2H opponent — no Comeback Kid, Giant
   // Slayer, Rematch, Grudge Match, or Nerves of Steel for racing your own past
   // leg (those are all gated on `opp` below). The set/match-win tree below this
@@ -12105,7 +12181,6 @@ function onLegWon(wi){
   }
   sendHaWebhook('legend', w.name, game.category, { setNo: game.setNo, legNo: game.legNo });
   DB.recordEvent('leg_end', game.setNo, game.legNo);
-  lastLegWasChallenge = false;
   if(activeChallenge && activeChallenge.player === w.name){
     const _metric = activeChallenge.overrideMetric != null ? activeChallenge.overrideMetric : w.legDarts;
     // Captured before activeChallenge is nulled out below — the response this feeds
@@ -16047,10 +16122,12 @@ function selectStat(key){
 function loadStatBubbles(){
   const container=document.getElementById('player-stat-bubbles');
   if(!container) return;
+  const player=currentPlayer;
   const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
   const gtParam=activeGameTypeParam();
-  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(currentPlayer)}${modeParam}${gtParam}`)
+  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(player)}${modeParam}${gtParam}`)
     .then(data=>{
+      if(currentPlayer !== player) return;   // a newer profile visit took over
       renderStatBubbles(data);
       // The X01 dropdown selected (gtParam empty) means this response IS the
       // same plain/lifetime shape loadPlayerHeaderStats() below would fetch
@@ -16097,9 +16174,10 @@ function loadPlayerHeaderStats(){
   if(!activeGameTypeParam()){
     return;
   }
+  const player=currentPlayer;
   const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
-  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
-    .then(data=>applyPlayerHeaderStatsData(data)).catch(()=>{});
+  Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(player)}${modeParam}`)
+    .then(data=>{ if(currentPlayer === player) applyPlayerHeaderStatsData(data); }).catch(()=>{});
 }
 
 function loadDartWeights(){
@@ -16233,9 +16311,11 @@ function fmtDate(dt){
 function loadTopFinishes(){
   const container=document.getElementById('player-top-finishes');
   if(!container) return;
+  const player=currentPlayer;
   const _tfMode = (playerPageTab==='h2h'||playerPageTab==='practice') ? `&mode=${playerPageTab}` : '';
-  Backend.get(`/api/players/top-finishes?name=${encodeURIComponent(currentPlayer)}${_tfMode}`)
+  Backend.get(`/api/players/top-finishes?name=${encodeURIComponent(player)}${_tfMode}`)
     .then(rows=>{
+      if(currentPlayer !== player) return;   // a newer profile visit took over
       if(!rows||rows.length===0){
         container.innerHTML=`<p class="pp-meta" style="padding:4px 0">No checkouts recorded yet.</p>`;
         return;
@@ -16257,7 +16337,7 @@ function loadTopFinishes(){
         </div>`;
       }).join('')}</div>`;
     })
-    .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load finishes.</p>`; });
+    .catch(()=>{ if(currentPlayer === player) container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load finishes.</p>`; });
 }
 
 /* ---------- Just Chuckin' It dartboard heatmap (game-modes-roadmap.md) ----------
@@ -16300,14 +16380,18 @@ function loadDartHeatmap(){
   // logic race real device input), so its singles are equally always
   // zone-unspecified.
   const noZoneTracking = (gt === 'cricket' || gt === 'baseball' || gt === 'shanghai' || gt === 'pressure_chamber');
-  Backend.get(`/api/players/dart-heatmap?name=${encodeURIComponent(currentPlayer)}&gameType=${gt}${modeParam}`)
-    .then(cells => { body.innerHTML = buildDartHeatmap(cells||[], { ariaLabel: `Dartboard heatmap of every ${label} dart thrown`, noZoneTracking }); wireDartHeatmapInteractivity(body); })
-    .catch(()=>{ body.innerHTML = `<p class="pp-meta" style="padding:4px 0">Could not load the heatmap.</p>`; });
+  const player = currentPlayer;
+  Backend.get(`/api/players/dart-heatmap?name=${encodeURIComponent(player)}&gameType=${gt}${modeParam}`)
+    .then(cells => {
+      if(currentPlayer !== player) return;   // a newer profile visit took over
+      body.innerHTML = buildDartHeatmap(cells||[], { ariaLabel: `Dartboard heatmap of every ${label} dart thrown`, noZoneTracking }); wireDartHeatmapInteractivity(body);
+    })
+    .catch(()=>{ if(currentPlayer === player) body.innerHTML = `<p class="pp-meta" style="padding:4px 0">Could not load the heatmap.</p>`; });
   const bounceEl = document.getElementById('bounce-out-count');
   if(bounceEl){
     bounceEl.textContent = '';
-    Backend.get(`/api/players/bounce-outs?name=${encodeURIComponent(currentPlayer)}&gameType=${gt}${modeParam}`)
-      .then(r => { if(r && r.count > 0) bounceEl.textContent = `Bounce-outs: ${r.count}`; })
+    Backend.get(`/api/players/bounce-outs?name=${encodeURIComponent(player)}&gameType=${gt}${modeParam}`)
+      .then(r => { if(currentPlayer === player && r && r.count > 0) bounceEl.textContent = `Bounce-outs: ${r.count}`; })
       .catch(()=>{});
   }
 }
@@ -16504,10 +16588,11 @@ function loadDartAnalytics(){
   const body = document.getElementById('dart-analytics-body');
   const section = document.getElementById('dart-analytics-section');
   if(!body) return;
+  const player = currentPlayer;
   const modeParam = (playerPageTab==='h2h'||playerPageTab==='practice') ? `&mode=${playerPageTab}` : '';
-  Backend.get(`/api/players/dart-analytics?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
-    .then(data => renderDartAnalytics(data, body))
-    .catch(()=>{ body.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load dart analytics.</p>`; });
+  Backend.get(`/api/players/dart-analytics?name=${encodeURIComponent(player)}${modeParam}`)
+    .then(data => { if(currentPlayer === player) renderDartAnalytics(data, body); })
+    .catch(()=>{ if(currentPlayer === player) body.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load dart analytics.</p>`; });
 }
 
 function dartLabelFromParts(sector, mult, zone){
@@ -16598,9 +16683,10 @@ function loadCoachingInsights(){
   if(!section || !body) return;
   section.hidden = true;
   if(playerGameType !== 'x01') return;
+  const player = currentPlayer;
   const modeParam = (playerPageTab==='h2h'||playerPageTab==='practice') ? `&mode=${playerPageTab}` : '';
-  Backend.get(`/api/players/coaching-insights?name=${encodeURIComponent(currentPlayer)}${modeParam}`)
-    .then(insights => renderCoachingInsights(insights, section, body))
+  Backend.get(`/api/players/coaching-insights?name=${encodeURIComponent(player)}${modeParam}`)
+    .then(insights => { if(currentPlayer === player) renderCoachingInsights(insights, section, body); })
     .catch(()=>{});
 }
 const COACHING_TAG = { weakness: '🔧 Focus area', strength: '✅ Good form' };
