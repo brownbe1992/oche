@@ -378,6 +378,24 @@
     border-radius:8px;padding:5px 14px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.03em}
   .imt-btn[aria-pressed="true"]{background:var(--surface-2);color:var(--ink);border-color:var(--muted)}
   #game-header-controls{display:none}
+  /* Game options menu: "Save for later" + "End game" used to be two full-text
+     buttons that wrapped to 2-3 lines in the header on narrow phones, eating
+     vertical space from the board below. One hamburger trigger + a small
+     dropdown keeps both actions reachable (icon+text inside the menu — only
+     the trigger itself is icon-only, same convention as any standard "more
+     options" affordance) without costing header height. */
+  .game-menu{position:relative}
+  .game-menu-btn{line-height:1;padding:8px 12px!important}
+  .game-menu-list{position:absolute; top:100%; right:0; margin-top:6px; z-index:20;
+    background:var(--surface); border:1px solid var(--wire); border-radius:10px;
+    padding:6px; display:flex; flex-direction:column; gap:2px; min-width:180px;
+    box-shadow:0 8px 24px rgba(0,0,0,.4);}
+  .game-menu-item{display:block; width:100%; text-align:left; background:none; border:none;
+    color:var(--ink); font:inherit; font-size:13.5px; font-weight:600; padding:10px 12px;
+    border-radius:7px; cursor:pointer; white-space:nowrap}
+  .game-menu-item:hover{background:var(--surface-2)}
+  .game-menu-item[hidden]{display:none}
+  .game-menu-list[hidden]{display:none}
   .dart-board-wrap{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
   .dart-board-wrap.board-disabled{pointer-events:none;opacity:.4}
   .board-miss{flex:none;margin-top:8px}
@@ -449,7 +467,7 @@
   /* Cricket has no Pad/Dartboard choice — its scoring screen replaces both. */
   body.cricket-active #game-header-controls .imt-row{display:none}
   body.game-active .imt-btn{font-size:12px;padding:5px 13px}
-  body.game-active #game-header-controls .header-actions .btn{font-size:12px;padding:5px 12px}
+  body.game-active #game-header-controls .header-actions .game-menu-btn{font-size:14px;padding:4px 10px!important}
   /* screen container */
   body.game-active #screen-game{
     flex:1; display:flex; flex-direction:column; min-height:0; padding:8px 10px 0;
@@ -765,8 +783,13 @@
         <button class="imt-btn" id="imt-board" onclick="setDartMode('board')" aria-pressed="true">🎯</button>
       </div>
       <div class="header-actions">
-        <button class="btn btn-ghost save-game-btn" onclick="saveCurrentGame()" hidden>⏸ Save for later</button>
-        <button class="btn btn-ghost end-game-btn" onclick="askEndGame()">End game</button>
+        <div class="game-menu">
+          <button class="btn btn-ghost game-menu-btn" aria-haspopup="true" aria-expanded="false" aria-label="Game options" onclick="toggleGameMenu(this)">☰</button>
+          <div class="game-menu-list" role="menu" hidden>
+            <button class="game-menu-item save-game-btn" role="menuitem" onclick="closeAllGameMenus();saveCurrentGame()" hidden>⏸ Save for later</button>
+            <button class="game-menu-item" role="menuitem" onclick="closeAllGameMenus();askEndGame()">🚪 End game</button>
+          </div>
+        </div>
       </div>
     </div>
   </header>
@@ -1057,8 +1080,13 @@
     </div>
 
     <div class="btn-row">
-      <button class="btn btn-ghost save-game-btn" onclick="saveCurrentGame()" hidden>⏸ Save for later</button>
-      <button class="btn btn-ghost" onclick="askEndGame()">End game</button>
+      <div class="game-menu">
+        <button class="btn btn-ghost game-menu-btn" aria-haspopup="true" aria-expanded="false" aria-label="Game options" onclick="toggleGameMenu(this)">☰</button>
+        <div class="game-menu-list" role="menu" hidden>
+          <button class="game-menu-item save-game-btn" role="menuitem" onclick="closeAllGameMenus();saveCurrentGame()" hidden>⏸ Save for later</button>
+          <button class="game-menu-item" role="menuitem" onclick="closeAllGameMenus();askEndGame()">🚪 End game</button>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -9982,6 +10010,20 @@ function isCurrentGameSavable(){
 function updateSaveButtonVisibility(){
   document.querySelectorAll('.save-game-btn').forEach(btn => { btn.hidden = !isCurrentGameSavable(); });
 }
+// Game options menu (☰ Save for later / End game): only one can ever be open,
+// so closing every .game-menu-list is always correct — no per-menu state to track.
+function closeAllGameMenus(){
+  document.querySelectorAll('.game-menu-list').forEach(m => { m.hidden = true; });
+  document.querySelectorAll('.game-menu-btn').forEach(b => b.setAttribute('aria-expanded', 'false'));
+}
+function toggleGameMenu(btn){
+  const menu = btn.nextElementSibling;
+  const willOpen = menu.hidden;
+  closeAllGameMenus();
+  if(willOpen){ menu.hidden = false; btn.setAttribute('aria-expanded', 'true'); }
+}
+document.addEventListener('click', e => { if(!e.target.closest('.game-menu')) closeAllGameMenus(); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape') closeAllGameMenus(); });
 // "⏸ Save for later" — icon + text, never icon-only (docs/archive/saved-games-roadmap.md's
 // accessibility section). Lives with the header/turn-actions, not inside either
 // input widget, so both Pad and Dartboard modes get it for free — the same
