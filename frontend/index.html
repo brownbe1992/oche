@@ -17034,13 +17034,14 @@ function dartLabelFromParts(sector, mult, zone){
   const base = dartLabel(sector, mult);
   if(sector === 0 || sector === 25) return base;
   if(zone) return `${base} (${zone})`;
-  // docs/archive/dartboard-zone-tracking-roadmap.md open question, resolved: a single hit
-  // with no zone at all (Pad mode, or thrown before this feature existed) gets an
-  // explicit text suffix here too, same "don't silently imply precision that isn't
-  // there" posture as the heatmap's own hatch overlay — but only for a genuinely
-  // ambiguous single; a double/treble/bull never had a zone concept to begin with,
-  // so it stays unlabeled exactly as before.
-  return (mult === 1 && sector >= 1 && sector <= 20) ? `${base} (zone unknown)` : base;
+  // A single hit with no zone at all (Pad mode, old data predating this
+  // feature, or a game type that never captures zone) used to get an
+  // explicit "(zone unknown)" text suffix here — dropped per a live user
+  // report: on an aggregate view like a leaderboard or checkout-route
+  // breakdown, which inner/outer half was hit is never the point, so the
+  // caveat just read as clutter. It stays bare, exactly like a double/
+  // treble/bull always has (those never had a zone concept to begin with).
+  return base;
 }
 
 function renderDartAnalytics(data, container){

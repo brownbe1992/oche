@@ -4367,12 +4367,18 @@ BUG-24):
   including on real Cricket targets — from these two game types' own
   heatmaps entirely.
 
-The flat `topSectors` list (§3, Dart Analytics) is a separate surface and
-keeps its own distinct textual treatment (`dartLabelFromParts()` appends `"
-(zone unknown)"` to a zone-less single, never to a double/treble/bull, which
-never had a zone concept at all) — unaffected by either heatmap behavior
-above, since that's a text list, not the heatmap, and was never gated on zone
-at all.
+The flat `topSectors` list (§3, Dart Analytics), the Dart Analytics checkout
+routes list, and every checkout-route breakdown (`toggleFinishRoute()` — the
+Home page's Top Checkouts leaderboard and the Player Profile's own Top
+Finishes list) are all separate surfaces from the heatmap, unaffected by
+either heatmap behavior above since they're text lists, never gated on zone
+at all. They share one formatter, `dartLabelFromParts()`: a zone-less single
+renders bare, exactly like a double/treble/bull always has (those never had
+a zone concept to begin with). It used to append an explicit `" (zone
+unknown)"` suffix instead — removed 2026-07 per a live user report: on an
+aggregate view like these, which inner/outer half was hit was never the
+point, so the caveat just read as clutter, the same call made for the
+heatmap's own hatch-overlay removal above.
 
 ### Testing
 
