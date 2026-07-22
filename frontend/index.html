@@ -16268,15 +16268,30 @@ function wireDartHeatmapInteractivity(container){
     tip.style.left = x+'px'; tip.style.top = y+'px';
     tip.style.opacity = '1';
   };
+  // Desktop mouse: real hover — the tooltip tracks the pointer and disappears
+  // the moment it leaves a region, same as a native title tooltip.
   container.addEventListener('pointermove', e => {
+    if(e.pointerType !== 'mouse') return;
     const el = e.target.closest && e.target.closest('.hm-region');
     if(el) show(el, e.clientX, e.clientY); else tip._hide();
   });
+  container.addEventListener('pointerleave', e => {
+    if(e.pointerType === 'mouse') tip._hide();
+  });
+  // Touch/pen has no hover state — a tap PINS the tooltip in place instead of
+  // requiring a hover-equivalent gesture. Previously this relied on the same
+  // pointerleave hide above, but a touch's pointerup fires its own
+  // pointerleave immediately (there's no lingering "hover" once the finger
+  // lifts) — the tooltip vanished the instant you released, so you had to
+  // keep your finger down to read it, right where it was hidden behind the
+  // finger itself. Now a tap shows it and it stays put after lifting,
+  // dismissed only by tapping a different region (switches), tapping
+  // elsewhere on the page (the document-level pointerdown listener above),
+  // or scrolling.
   container.addEventListener('pointerdown', e => {
     const el = e.target.closest && e.target.closest('.hm-region');
     if(el) show(el, e.clientX, e.clientY);
   });
-  container.addEventListener('pointerleave', tip._hide);
 }
 
 /* ---------- dart analytics ---------- */
