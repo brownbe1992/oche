@@ -4828,7 +4828,10 @@ that number, instead of hoping the random target picker eventually serves it.
 `frontend/index.html`):
 - every **Top Finishes** row, both the Player Profile's own list
   (`loadTopFinishes()`) and the Home page's cross-player "Top Checkouts"
-  leaderboard (`hofSection()`);
+  leaderboard (`hofSection()` — the finish rule is an All/Double Out/Single
+  Out filter control above the list, `checkoutOutFilter`/
+  `setCheckoutOutFilter()`, rather than a DO/SO tag on every row, to keep
+  each row's rank/score/count/name/date/Drill button from crowding);
 - a **Coaching Insights** card, but only the `checkout_route` insight type
   (`getCoachingInsights()`, `backend/db.js`) — the only one carrying a
   concrete drillable number (`insight.score`, the player's most-established

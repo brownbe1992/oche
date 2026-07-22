@@ -2803,6 +2803,10 @@ function shareSessionRecap(){
 let homeTab='h2h';
 let homeGameType='x01';
 let homeData=null;
+// 'all' | 'double' | 'single' — Top Checkouts leaderboard's own out-rule filter
+// (hofSection()), replacing the DO/SO tag that used to sit inline on every row.
+let checkoutOutFilter='all';
+function setCheckoutOutFilter(f){ checkoutOutFilter=f; renderHomeTabBody(); }
 // Shared empty shape for an achievement board with no rows (180s/9-marks/perfect-leg
 // style sections) — used both by the initial "nothing cached yet" fallback below
 // and by ensureHomeCombo()'s per-combo failure fallback.
@@ -3706,15 +3710,24 @@ function leaderboardSectionHtml(rows, opts){
 }
 function hofSection(rows, mode=''){
     if(!rows||!rows.length) return `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
-    return `<div class="hof-list">${rows.map((f,i)=>{
+    // Out-rule filter (All/Double Out/Single Out) replaces the DO/SO tag that
+    // used to sit inline on every row — freeing up horizontal space in a
+    // fairly cramped row (rank/score/count/name/date/Drill button already).
+    const filterHtml = `
+      <div class="seg" role="group" aria-label="Filter by finish rule" style="margin-bottom:10px">
+        <button aria-pressed="${checkoutOutFilter==='all'}" onclick="setCheckoutOutFilter('all')">All</button>
+        <button aria-pressed="${checkoutOutFilter==='double'}" onclick="setCheckoutOutFilter('double')">Double Out</button>
+        <button aria-pressed="${checkoutOutFilter==='single'}" onclick="setCheckoutOutFilter('single')">Single Out</button>
+      </div>`;
+    const filtered = checkoutOutFilter==='all' ? rows : rows.filter(f=>f.out===checkoutOutFilter);
+    if(!filtered.length) return `${filterHtml}<p class="pp-meta" style="padding:8px 0">No ${checkoutOutFilter==='double'?'double':'single'}-out checkouts recorded yet.</p>`;
+    return `${filterHtml}<div class="hof-list">${filtered.map((f,i)=>{
       const dates=fmtDate(f.last_date);
-      const outBadge=f.out?`<span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;align-self:center">${f.out==='double'?'DO':'SO'}</span>`:'';
       const jName=jsArg(f.name);
       return `<div class="hof-row expandable" role="button" aria-expanded="false"
         onclick="toggleFinishRoute(this,'${jName}',${f.score},'${mode}')">
         <span class="hof-rank">${i+1}</span>
         <span class="hof-score">${f.score}</span>
-        ${outBadge}
         <span class="hof-times">${f.times===1?'×1':'×'+f.times}</span>
         <span class="hof-player">${escapeHtml(f.name)}</span>
         <span class="hof-dates">${dates}</span>
