@@ -2864,21 +2864,18 @@ const HOME_EMPTY_ACHIEVEMENT={leaderboard:[],recent:[]};
 const homeComboInFlight=new Set();
 const HOME_COMBO_SPECS={
   x01:{ perMode:true,
-    // 180s/Big Fish leaderboards used to be fetched here too, for the two
-    // achievementSection() panels renderHomeTabBody() no longer renders (they
-    // duplicated the 180s/Big Fish bubbles in the Overview's Achievements
-    // group above) — dropped along with those panels rather than fetching
-    // data nothing displays.
     fetch(mode){
       return Promise.all([
         Backend.get(`/api/top-finishes?mode=${mode}`),
+        Backend.get(`/api/stats/180s?mode=${mode}`),
+        Backend.get(`/api/stats/big-fish?mode=${mode}`),
         Backend.get(`/api/stats/nine-darters?mode=${mode}`),
-      ]).then(([finishes,nineDarters])=>{
-        homeData[mode]={finishes,nineDarters};
+      ]).then(([finishes,eighties,bigFish,nineDarters])=>{
+        homeData[mode]={finishes,eighties,bigFish,nineDarters};
       });
     },
     hasCache(mode){ return !!homeData[mode]; },
-    fallback(mode){ homeData[mode]={finishes:[],nineDarters:HOME_EMPTY_ACHIEVEMENT}; },
+    fallback(mode){ homeData[mode]={finishes:[],eighties:HOME_EMPTY_ACHIEVEMENT,bigFish:HOME_EMPTY_ACHIEVEMENT,nineDarters:HOME_EMPTY_ACHIEVEMENT}; },
   },
   cricket:{ perMode:true,
     fetch(mode){
@@ -3186,22 +3183,31 @@ function renderHomeContent(){
     {val:fmt(s.legs),         label:'H2H Legs Thrown'},
     {val:fmt(s.practiceLegs), label:'Practice Legs Thrown'},
   ];
-  // Highest Checkout deliberately isn't here — it has its own featured
-  // hero-style panel further down (renderHomeTabBody()'s highestCoSection,
-  // under the achievement section), and duplicating it as a plain number
-  // bubble up here undersold it.
+  // 180s/Big Fish deliberately aren't here — they have their own full
+  // leaderboard panels further down (renderHomeTabBody()'s achievementSection()
+  // calls), and duplicating them as plain number bubbles up here undersold them.
   const achievementCards=[
     {val:fmt(s.tonPlus),     label:'Ton+ Finishes'},
-    {val:fmt(s.oneEighties), label:'180s'},
-    {val:fmt(s.bigFish),     label:'Big Fish'},
   ];
+  // All-time record (not scoped to the H2H/Practice tab below, which this
+  // Overview section renders independently of) — same shape/wording as
+  // renderHomeTabBody()'s per-mode highestCoSection, just featured here
+  // instead of buried under the 9-Darters leaderboard, and always the
+  // all-time record rather than fluctuating with whichever tab is selected.
+  const highestCoOverall = extra && extra.highestCheckout && extra.highestCheckout.overall;
+  const highestCoOverallSection = `<div class="pp-section" style="margin-top:14px">
+      <div class="pp-section-title">Highest Checkout Ever</div>
+      ${highestCoOverall ? `<div class="hero-block" style="margin-top:6px"><div class="hero-val">${highestCoOverall.points}</div><div class="hero-label">${escapeHtml(highestCoOverall.name)} · ${fmtDate(highestCoOverall.createdAt)}</div></div>`
+                          : `<p class="pp-meta" style="padding:4px 0">None recorded yet.</p>`}
+    </div>`;
 
   body.innerHTML=`
     <div class="hero-grid">${heroCards.map(c=>`<div class="hero-block${c.empty?' hero-block-empty':''}"><div class="hero-val">${c.val}</div><div class="hero-label">${c.label}</div></div>`).join('')}</div>
     <div class="pp-section-title" style="margin-top:18px">Activity</div>
     <div class="summary-grid">${activityCards.map(c=>`<div class="stat-block"><div class="stat-val">${c.val}</div><div class="stat-label">${c.label}</div></div>`).join('')}</div>
     <div class="pp-section-title" style="margin-top:18px">Achievements</div>
-    <div class="summary-grid">${achievementCards.map(c=>`<div class="stat-block"><div class="stat-val">${c.val}</div><div class="stat-label">${c.label}</div></div>`).join('')}</div>`;
+    <div class="summary-grid">${achievementCards.map(c=>`<div class="stat-block"><div class="stat-val">${c.val}</div><div class="stat-label">${c.label}</div></div>`).join('')}</div>
+    ${highestCoOverallSection}`;
 
   renderHomePulse();
   renderHomeTabBody();
@@ -3284,7 +3290,7 @@ function renderHomeTabBody(){
   // exist yet until that fetch resolves and calls back into this function.
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
   const extra=homeData.extra;
-  const finishes=data.finishes, nineDarterData=data.nineDarters;
+  const finishes=data.finishes, eighties=data.eighties, bigFishData=data.bigFish, nineDarterData=data.nineDarters;
 
   // 3-dart average leaderboard
   const statsKey = mode==='h2h' ? 'h2hStats' : 'practiceStats';
@@ -3335,18 +3341,6 @@ function renderHomeTabBody(){
       </div>`
     : '';
 
-  // Rendered last, right under the achievement section (see el.innerHTML below)
-  // rather than paired with Ton+ Finish Rate — featuring it there, on its own,
-  // instead of it competing for attention squeezed into a home-pair column.
-  const highestCo = extra && extra.highestCheckout && extra.highestCheckout[mode];
-  const highestCoSection = `<div class="pp-section">
-      <div class="pp-section-title">Highest Checkout Ever</div>
-      ${highestCo ? `<div class="hero-block expandable" role="button" aria-expanded="false" style="margin-top:6px;cursor:pointer"
-          onclick="toggleFinishRoute(this,'${jsArg(highestCo.name)}',${highestCo.points},'${mode}')">
-          <div class="hero-val">${highestCo.points}</div><div class="hero-label">${escapeHtml(highestCo.name)} · ${fmtDate(highestCo.createdAt)}</div></div>`
-                  : `<p class="pp-meta" style="padding:4px 0">None recorded yet.</p>`}
-    </div>`;
-
   el.innerHTML=`
     <div class="home-pair">
       <div class="pp-section">
@@ -3367,8 +3361,9 @@ function renderHomeTabBody(){
       ${paceSection}
     </div>
     ${first9Section}
+    ${achievementSection('180s 🎯', eighties)}
+    ${achievementSection('Big Fish 🐟', bigFishData)}
     ${achievementSection('9-Darters', nineDarterData||{leaderboard:[],recent:[]},'None recorded yet - you will never get this!')}
-    ${highestCoSection}
   `;
 }
 
