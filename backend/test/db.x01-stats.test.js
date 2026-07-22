@@ -479,3 +479,39 @@ describe('getMetricHistory matches getPlayerStatBubbles for the same metric (doc
     assert.equal(bubble, (60 + 140) / 2);
   });
 });
+
+describe('getPlayerStatBubbles — pace (Average Pace) excludes rapid-fire continuous-stream game types', () => {
+  test('a Just Chuckin\' It session\'s sub-second gaps do not skew the X01 pace figure', () => {
+    const name = 'X01_Pace_Excludes_Chuckin';
+    db.addPlayer(name);
+    const dart = (dartNo, thrownAt) => ({ dartNo, sector: 1, multiplier: 1, thrownAt });
+    // Real X01 visit: 3 darts, 5 real seconds apart each -> 2 gaps of 5000ms.
+    const xg = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    db.addTurn(xg.gameId, {
+      player: name, set: 1, leg: 1, scored: 3, bust: false, checkout: false, checkoutPoints: null,
+      darts: [
+        dart(1, '2026-01-01 10:00:00.000'),
+        dart(2, '2026-01-01 10:00:05.000'),
+        dart(3, '2026-01-01 10:00:10.000'),
+      ],
+    });
+    // Just Chuckin' It: 3 darts 100ms apart -- a real rapid-fire rhythm that would
+    // pull the average pace up sharply if it leaked in (NOT_CONTINUOUS_STREAM must
+    // exclude it, matching getHomeExtra()'s _pace() and getMetricHistory('pace')).
+    const cg = db.createGame({ category: 'Just Chuckin\' It', legsPerSet: 1, setsPerGame: 1, practice: 1,
+      gameType: 'chuckin', config: {}, players: [{ name }] });
+    db.addTurn(cg.gameId, {
+      player: name, set: 1, leg: 1, scored: 0, bust: false, checkout: false, checkoutPoints: null,
+      darts: [
+        dart(1, '2026-01-01 11:00:00.000'),
+        dart(2, '2026-01-01 11:00:00.100'),
+        dart(3, '2026-01-01 11:00:00.200'),
+      ],
+    });
+
+    const bubbles = db.getPlayerStatBubbles(name, 'practice');
+    // julianday()-based ms math has tiny floating-point slop, so compare within
+    // a small tolerance rather than exact equality.
+    assert.ok(Math.abs(bubbles.pace - 12) < 0.01, `only the X01 5000ms gaps should count: 60000/5000 = 12 darts/min, got ${bubbles.pace}`);
+  });
+});

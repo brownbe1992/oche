@@ -134,4 +134,31 @@ describe('BUG-27 — checkout-based X01 stats exclude Checkout Ladder / Dead Man
     assert.ok(xFlash && xFlash.type === 'bigfish', 'the X01 170 surfaces as a Big Fish flashback');
     assert.equal(db.getOnThisDay('OTD_DRILL', 0), null, 'the drill 170 produces no flashback');
   });
+
+  test('avgDartsPerLeg / getMetricHistory("avgdartsperleg"): a Checkout Ladder leg does not dilute the X01-only average', () => {
+    const name = 'AVGLEG_X01_ISO';
+    db.addPlayer(name);
+    // A real X01 leg finished in 3 darts (checkoutTurn's fixed shape).
+    const xg = x01Game(name);
+    checkoutTurn(xg.gameId, name, 1, 121);
+    // A Checkout Ladder "leg" that took 5 darts across two visits to check out —
+    // same player, so any missing X01_ONLY guard would blend this into the
+    // average (making it > 3).
+    const dg = ladderGame(name);
+    db.addTurn(dg.gameId, {
+      player: name, set: 1, leg: 1, scored: 0, bust: false, checkout: false, checkoutPoints: null,
+      darts: [1, 2, 3].map(dartNo => ({ dartNo, sector: 1, multiplier: 1 })),
+    });
+    db.addTurn(dg.gameId, {
+      player: name, set: 1, leg: 1, scored: 121, bust: false, checkout: true, checkoutPoints: 121, targetScore: 121,
+      darts: [1, 2].map(dartNo => ({ dartNo, sector: 1, multiplier: 1 })),
+    });
+
+    const bubble = db.getPlayerStatBubbles(name, 'practice').avgDartsPerLeg;
+    assert.equal(bubble, 3, 'the bubble already excludes the 5-dart drill leg (X01_ONLY)');
+
+    const history = db.getMetricHistory(name, 'avgdartsperleg', 'all', { mode: 'practice' });
+    assert.equal(history.length, 1, 'both legs land in the same (current) month bucket');
+    assert.equal(history[0].value, bubble, 'the Darts/Leg chart must reproduce the exact same X01-only average as the bubble, not blend in the 5-dart drill leg');
+  });
 });

@@ -76,11 +76,37 @@ describe('getKillerStatBubbles', () => {
     kt(gameId, a, 1, 1, na, 3, 3, a);   // a killer
     kt(gameId, b, 1, 1, nb, 3, 3, b);   // b killer
     // c never throws at their own number at all this leg -- never becomes a killer.
-    kt(gameId, a, 1, 1, nb, 3, 3, b);   // a eliminates b (3 lives -> 0) -- only a and c remain, no winner yet (2 alive)
-    db.completeGame(gameId, a);
+    kt(gameId, a, 1, 1, nb, 3, 3, b);   // a eliminates b (3 lives -> 0) -- only a and c remain
+    // a (already a killer) self-kills on their own double 3 times, bringing their
+    // own 3 lives to 0 -- the leg needs a real winner (state.winner set) for this
+    // scenario to count at all, since an undecided leg (2+ alive, exactly what a
+    // prior version of this fixture stopped at) is now correctly excluded from
+    // survivedWithoutKillerRate as an incomplete outcome, not a real "survived".
+    kt(gameId, a, 1, 1, na, 2, 0, a);   // a's own double: self-kill, 3 lives -> 2
+    kt(gameId, a, 1, 1, na, 2, 0, a);   // 2 -> 1
+    kt(gameId, a, 1, 1, na, 2, 0, a);   // 1 -> 0: a eliminated -- only c remains, c wins the leg
+    db.completeGame(gameId, c);
 
     const bubblesC = db.getKillerStatBubbles(c, 'h2h');
     assert.equal(bubblesC.survivedWithoutKillerRate, 100, 'c never became a killer but also was never eliminated');
+  });
+
+  test('an undecided (in-progress/abandoned) leg is excluded from every lifetime average, not counted as a survival', () => {
+    const a = 'Killer_Undecided_A', b = 'Killer_Undecided_B', c = 'Killer_Undecided_C';
+    db.addPlayer(a); db.addPlayer(b); db.addPlayer(c);
+    const { gameId, config } = killerGame([a, b, c]);
+    const na = config.numbers[a], nb = config.numbers[b];
+    kt(gameId, a, 1, 1, na, 3, 3, a);   // a killer
+    kt(gameId, a, 1, 1, nb, 3, 3, b);   // a eliminates b -- only a and c remain, no winner yet (2 alive)
+    // The game row is marked complete (an abandoned/force-ended match), but this
+    // leg itself was never decided (rebuildKillerState's state.winner stays null
+    // with 2 players still alive) -- c's partial "never became a killer, never
+    // eliminated (yet)" snapshot must not be counted as a real completed survival.
+    db.completeGame(gameId, a);
+
+    const bubblesC = db.getKillerStatBubbles(c, 'h2h');
+    assert.equal(bubblesC.survivedWithoutKillerRate, null, 'no decided legs at all for c -- must not read as 100% survived');
+    assert.equal(bubblesC.avgKillsPerLeg, null, 'the undecided leg must not contribute to the kills average either');
   });
 
   test('a player with no Killer history gets a zeroed/null bubble set, not a crash', () => {

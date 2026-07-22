@@ -3302,12 +3302,18 @@ function getPlayerStatBubbles(playerName, mode) {
   // "collect per-dart timing" has captured data. The pace STAT_DEF bubble on the
   // Player Profile reads this key — it was missing from this return object for a
   // while, leaving that bubble permanently blank even with timing data recorded.
+  // NOT_CONTINUOUS_STREAM: same exclusion getHomeExtra()'s own _pace() and
+  // getMetricHistory()'s 'pace' case already apply — Just Chuckin' It/Checkout
+  // Trainer/guided Around the World are rapid-fire per-dart-only rhythms with no
+  // real inter-visit pacing, and previously skewed this bubble's average sharply
+  // faster than a player's actual scoring-game pace (this function's own comment
+  // claimed parity with those two siblings without actually matching them).
   const pace = q(`SELECT 60000.0/AVG(gap_ms) AS v FROM (
     SELECT (julianday(d.thrown_at) - julianday(prev.thrown_at)) * 86400000 AS gap_ms
     FROM darts d
     JOIN darts prev ON prev.turn_id = d.turn_id AND prev.dart_no = d.dart_no - 1
     JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id
-    WHERE t.player_id = ? AND d.thrown_at IS NOT NULL AND prev.thrown_at IS NOT NULL ${mf}
+    WHERE t.player_id = ? AND d.thrown_at IS NOT NULL AND prev.thrown_at IS NOT NULL ${mf} ${NOT_CONTINUOUS_STREAM}
   ) WHERE gap_ms > 0 AND gap_ms < 60000`);
 
   return {
@@ -5347,6 +5353,12 @@ function _killerLegOutcomesForPlayer(playerName, playerId, scope) {
     const { names, legs } = _replayKillerLegs(g.gameId, cfg);
     if (!names.includes(playerName)) return;
     legs.forEach(({ state }) => {
+      // Only a DECIDED leg (state.winner set) is a real, complete outcome — an
+      // in-progress or abandoned leg's snapshot (however far it got) is a partial
+      // result, not a finished one, and must not dilute lifetime averages with it.
+      // Same guard _h2hWonLegs() already applies to this identical replay pipeline
+      // when deriving Killer H2H leg wins — this sibling consumer was missing it.
+      if (!state.winner) return;
       const me = state.players.find(pl => pl.name === playerName);
       if (!me) return;
       outcomes.push({ won: state.winner === playerName, kills: me.kills, livesLost: me.livesLost, becameKiller: me.isKiller, eliminated: me.eliminated });
@@ -5741,10 +5753,16 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
       // NOT_CHECKOUT_TRAINER: Chuckin never sets checkout=1 so it's already
       // excluded by the HAVING clause below, but Checkout Trainer's `checkout`
       // column IS set to 1 for legal attempts — needs the explicit exclusion.
+      // X01_ONLY: same fix as getPlayerStatBubbles()'s avgDartsPerLeg (its
+      // documented sibling, which this case is supposed to match exactly) —
+      // checkout=1 alone no longer implies an X01 leg now that Checkout Ladder
+      // and Dead Man Walking both set it too on non-X01 turns. Missing here
+      // let those non-X01 legs' dart counts leak into the Darts/Leg chart,
+      // silently disagreeing with the (correctly-scoped) bubble value.
       return db.prepare(`SELECT ${L.fmt} AS bucket, AVG(leg_darts) AS value FROM (
         SELECT MAX(t.created_at) AS leg_ts, COUNT(d.id) AS leg_darts
         FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-        WHERE t.player_id=? ${modeWhere} ${weightWhere} ${NOT_CHECKOUT_TRAINER}
+        WHERE t.player_id=? ${modeWhere} ${weightWhere} ${NOT_CHECKOUT_TRAINER} ${X01_ONLY}
         GROUP BY t.game_id,t.set_no,t.leg_no HAVING SUM(t.checkout)>0
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
 
