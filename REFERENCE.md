@@ -2104,6 +2104,37 @@ Seven badges' live-overlay "type" key differs from their persisted `badge_id`
 `ghostslayer`→`ghost_slayer`, `tournamentchampion`→`tournament_champion`,
 `tournamentgiantslayer`→`tournament_giant_slayer`.
 
+### Player Profile Badge Case: game-type scoping, filter, and lifetime counter
+
+`renderPlayerBadges()` (`frontend/index.html`) groups `BADGE_INFO` into
+sections by category flag (`cricket`, `baseball`, `shanghai`, `halveIt`,
+`pressureChamber`, `doublesPractice`, `bobs27`, `checkoutLadder`, `gauntlet`,
+`killer`, `marathon`, `deadManWalking`, `chuckin`, `checkoutTrainer`, `drill`,
+`challenge`) plus a no-flag default bucket (every X01 badge, since X01 predates
+the flag system). Only the section matching the Player Profile's game-type
+dropdown (`playerGameType`, mapped via `GAME_TYPE_BADGE_FLAG`) is shown — the
+same per-game-type scoping the stat bubbles above it already apply via
+`GAME_TYPES[playerGameType].statDefs` — plus two cross-cutting sections
+(`elo` "Household Rating", `tournament` "Tournaments") that are always shown
+regardless of the dropdown, since neither is tied to one game mode. Selecting
+"🎯 Daily Challenge" sets `playerGameType` to `'daily_challenge'`, which maps to
+the `challenge` flag.
+
+A `role="group"` segmented control (`.seg`, the same component the Finish
+Rule toggle uses) filters the visible sections to All/Earned/Unearned
+(`badgeFilter`, module-level state re-rendered via `setBadgeFilter()` from
+the last-fetched `/api/players/badges` response — no refetch on a filter
+change). A section that ends up with zero badges after filtering (e.g. every
+badge in a small section is already earned, under the Unearned filter) is
+omitted entirely rather than shown empty.
+
+The `🏆 N/M` pill next to the player's name (`#pp-ach-counter`) is the
+player's **lifetime** earned/total count across every badge in `BADGE_INFO`
+(including every milestone-ladder tier registered via
+`registerMilestoneLadders()`) — unaffected by both the game-type dropdown and
+the Earned/Unearned filter, which only scope what's *listed* below it, not
+this total.
+
 ### Undo interaction
 
 `trackBadgeForUndo(snap, player, badgeId)` is called every time a badge is

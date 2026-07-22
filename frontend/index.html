@@ -599,8 +599,17 @@
   .pp-back{background:none;border:none;color:var(--muted);font:inherit;font-size:13px;cursor:pointer;padding:0;margin-bottom:16px}
   .pp-back:hover{color:var(--ink)}
   .pp-header{margin-bottom:20px}
-  .pp-name{font-size:22px;font-weight:700;margin-bottom:2px;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+  .pp-name-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:2px}
+  .pp-name{font-size:22px;font-weight:700;margin:0;flex:1 1 auto;min-width:0;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* Lifetime achievement counter (earned/total, e.g. "15/127") — a small gold
+     pill next to the name, same bordered-pill language as .navbtn[aria-current]/
+     .chart-period-btn.active elsewhere on the page, not a new visual idiom.
+     Always the GLOBAL total regardless of the game-type dropdown/earned-unearned
+     filter below — those scope which badges are LISTED, not this lifetime count. */
+  .ach-counter{flex:none;display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;
+    color:var(--gold);background:var(--surface-2);border:1px solid var(--wire);border-radius:999px;
+    padding:4px 10px;white-space:nowrap}
   .pp-meta{font-size:12px;color:var(--muted)}
   .stat-block{background:var(--surface-2);border:1px solid var(--wire);border-radius:11px;padding:12px 14px;text-align:center}
   .stat-block .stat-val{font-family:'Bebas Neue';font-size:28px;color:var(--cream);line-height:1}
@@ -6987,8 +6996,10 @@ function renderPlayerPage(){
   // Its own tab rather than a collapsible tucked inside Overall/H2H/Practice
   // (which is what this used to be) — the history/streak view is X01/Cricket-
   // agnostic, so it doesn't need the stat-bubbles/chart machinery those tabs use,
-  // just its own report plus the Badge Case (now grouped X01/Cricket/Daily
-  // Challenge, so the challenge-specific badges are visible from here too).
+  // just its own report plus the Badge Case (renderPlayerBadges() scopes it to
+  // just the Daily Challenge section + the always-shown cross-cutting sections
+  // when playerGameType is 'daily_challenge', the same per-game-type filtering
+  // every other selection gets).
   const challengeSection = `
     <details class="pp-section" open>
       <summary class="pp-section-title">Daily Challenge History</summary>
@@ -7073,7 +7084,10 @@ function renderPlayerPage(){
 
   body.innerHTML = `
     <div class="pp-header">
-      <div class="pp-name">${escapeHtml(name)}</div>
+      <div class="pp-name-row">
+        <div class="pp-name">${escapeHtml(name)}</div>
+        <span class="ach-counter" id="pp-ach-counter" title="Achievements earned" hidden>🏆 —/—</span>
+      </div>
       <div class="stat-bubbles" id="player-header-stats">${HEADER_STAT_DEFS.map(d=>
         `<div class="stat-block" title="${d.desc}"><div class="stat-val" id="bv-header-${d.key}">—</div><div class="stat-label">${d.label}</div></div>`
       ).join('')}</div>
@@ -7202,12 +7216,34 @@ const BADGE_INFO = {
   topofthehouse: { icon:'👑', label:'Top of the House', desc:'Reach #1 in the Household Ratings leaderboard.', elo:true },
   upset:         { icon:'🗡️', label:'Upset', desc:'Win a rated 2-player match against an opponent rated 150+ points above you.', elo:true },
 };
+// Maps the Player Profile's game-type dropdown (`playerGameType`) to the
+// matching BADGE_INFO category flag, so the Badge Case can show just the
+// selected game's badges — the same scoping the stat bubbles right above it
+// already do via GAME_TYPES[playerGameType].statDefs. `daily_challenge` is the
+// dropdown's own value (see modePickerHtml) for what BADGE_INFO calls
+// `challenge`; every other key matches its GAME_TYPES id 1:1. X01 (or any
+// unrecognized value) resolves to `null`, matching the no-flag default bucket
+// (`x01Ids` below) — X01 badges were never given an explicit flag since they
+// were the only category that existed before Cricket/Baseball/etc. shipped.
+const GAME_TYPE_BADGE_FLAG = {
+  cricket:'cricket', baseball:'baseball', shanghai:'shanghai', halve_it:'halveIt',
+  pressure_chamber:'pressureChamber', doubles_practice:'doublesPractice', bobs_27:'bobs27',
+  checkout_ladder:'checkoutLadder', gauntlet:'gauntlet', killer:'killer', marathon:'marathon',
+  dead_man_walking:'deadManWalking', chuckin:'chuckin', checkout_trainer:'checkoutTrainer',
+  around_the_clock:'drill', around_the_world:'drill', daily_challenge:'challenge',
+};
+let badgeFilter = 'all';         // 'all' | 'earned' | 'unearned' — the Badge Case's own filter control
+let _lastBadgeData = null;       // cached so setBadgeFilter() can re-render without refetching
 function loadPlayerBadges(){
   const container=document.getElementById('player-badges');
   if(!container) return;
   Backend.get(`/api/players/badges?name=${encodeURIComponent(currentPlayer)}`)
-    .then(data=>renderPlayerBadges(data))
+    .then(data=>{ _lastBadgeData = data; renderPlayerBadges(data); })
     .catch(()=>{ container.innerHTML=`<p class="pp-meta" style="padding:4px 0">Could not load badges.</p>`; });
+}
+function setBadgeFilter(f){
+  badgeFilter = f;
+  renderPlayerBadges(_lastBadgeData);
 }
 // Hovering a badge shows its "how to earn it" description via the native title
 // tooltip; tapping it (no hover on touchscreens) shows the same text in a modal.
@@ -7220,9 +7256,20 @@ function renderPlayerBadges(data){
   const container=document.getElementById('player-badges');
   if(!container) return;
   const earned = new Map((data||[]).map(b=>[b.badge_id, b]));
+  // Lifetime achievement counter (header pill) — always the GLOBAL earned/total
+  // count, independent of both the game-type dropdown and the earned/unearned
+  // filter below (those scope which badges are LISTED here, not this figure).
+  const counterEl = document.getElementById('pp-ach-counter');
+  if(counterEl){
+    const total = Object.keys(BADGE_INFO).length;
+    counterEl.textContent = `🏆 ${earned.size}/${total}`;
+    counterEl.hidden = false;
+  }
   const badgeBlock = id => {
     const info = BADGE_INFO[id];
     const row = earned.get(id);
+    if(badgeFilter==='earned' && !row) return '';
+    if(badgeFilter==='unearned' && row) return '';
     const count = row ? row.count : 0;
     const titleAttr = `title="${escapeHtml(info.desc)}"`;
     const countBadge = count > 1 ? `<span style="position:absolute;top:2px;right:2px;background:var(--gold);color:var(--board);
@@ -7239,65 +7286,51 @@ function renderPlayerBadges(data){
   // Challenge's 3, Just Chuckin' It's 18, Checkout Trainer's 34, Doubles
   // Practice's 5 (docs/archive/culture-badges-roadmap.md Part B), and the guided
   // drills' 2 each stay visually distinct sub-sections rather than one mixed
-  // flat grid.
-  const x01Ids = Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].shanghai && !BADGE_INFO[id].halveIt && !BADGE_INFO[id].pressureChamber && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder && !BADGE_INFO[id].gauntlet && !BADGE_INFO[id].killer && !BADGE_INFO[id].marathon && !BADGE_INFO[id].deadManWalking);
-  const eloIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].elo);
-  const cricketIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket);
-  const baseballIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].baseball);
-  const shanghaiIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].shanghai);
-  const halveItIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].halveIt);
-  const pressureChamberIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].pressureChamber);
-  const challengeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].challenge);
-  const chuckinIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].chuckin);
-  const tournamentIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].tournament);
-  const checkoutTrainerIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].checkoutTrainer);
-  const doublesPracticeIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].doublesPractice);
-  const drillIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].drill);
-  const bobs27Ids = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].bobs27);
-  const checkoutLadderIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].checkoutLadder);
-  const gauntletIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].gauntlet);
-  const killerIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].killer);
-  const marathonIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].marathon);
-  const deadManWalkingIds = Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].deadManWalking);
-  container.innerHTML = `
-    <div class="pp-section-title" style="margin-bottom:6px">X01</div>
-    <div class="summary-grid">${x01Ids.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">Cricket</div>
-    <div class="summary-grid">${cricketIds.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">Baseball</div>
-    <div class="summary-grid">${baseballIds.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">Shanghai</div>
-    <div class="summary-grid">${shanghaiIds.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">Halve-It</div>
-    <div class="summary-grid">${halveItIds.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">The Pressure Chamber</div>
-    <div class="summary-grid">${pressureChamberIds.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">Doubles Practice</div>
-    <div class="summary-grid">${doublesPracticeIds.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">Bob's 27</div>
-    <div class="summary-grid">${bobs27Ids.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">121 Checkout Ladder</div>
-    <div class="summary-grid">${checkoutLadderIds.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">The Gauntlet</div>
-    <div class="summary-grid">${gauntletIds.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">Killer</div>
-    <div class="summary-grid">${killerIds.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">Marathon Mode</div>
-    <div class="summary-grid">${marathonIds.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">Dead Man Walking</div>
-    <div class="summary-grid">${deadManWalkingIds.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">Household Rating</div>
-    <div class="summary-grid">${eloIds.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">Tournaments</div>
-    <div class="summary-grid">${tournamentIds.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">Daily Challenge</div>
-    <div class="summary-grid">${challengeIds.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">Just Chuckin' It</div>
-    <div class="summary-grid">${chuckinIds.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">Checkout Trainer</div>
-    <div class="summary-grid">${checkoutTrainerIds.map(badgeBlock).join('')}</div>
-    <div class="pp-section-title" style="margin:16px 0 6px">Practice Drills</div>
-    <div class="summary-grid">${drillIds.map(badgeBlock).join('')}</div>`;
+  // flat grid. `flag: null` marks the no-flag default (X01) bucket;
+  // `alwaysShow: true` marks the two cross-cutting sections (Household Rating,
+  // Tournaments) that aren't tied to one game-type dropdown entry, so they stay
+  // visible no matter which game type is selected.
+  const SECTIONS = [
+    { title:'X01', flag:null, ids: Object.keys(BADGE_INFO).filter(id=>!BADGE_INFO[id].cricket && !BADGE_INFO[id].baseball && !BADGE_INFO[id].shanghai && !BADGE_INFO[id].halveIt && !BADGE_INFO[id].pressureChamber && !BADGE_INFO[id].challenge && !BADGE_INFO[id].chuckin && !BADGE_INFO[id].tournament && !BADGE_INFO[id].checkoutTrainer && !BADGE_INFO[id].drill && !BADGE_INFO[id].doublesPractice && !BADGE_INFO[id].bobs27 && !BADGE_INFO[id].elo && !BADGE_INFO[id].checkoutLadder && !BADGE_INFO[id].gauntlet && !BADGE_INFO[id].killer && !BADGE_INFO[id].marathon && !BADGE_INFO[id].deadManWalking) },
+    { title:'Cricket', flag:'cricket', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].cricket) },
+    { title:'Baseball', flag:'baseball', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].baseball) },
+    { title:'Shanghai', flag:'shanghai', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].shanghai) },
+    { title:'Halve-It', flag:'halveIt', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].halveIt) },
+    { title:'The Pressure Chamber', flag:'pressureChamber', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].pressureChamber) },
+    { title:'Doubles Practice', flag:'doublesPractice', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].doublesPractice) },
+    { title:"Bob's 27", flag:'bobs27', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].bobs27) },
+    { title:'121 Checkout Ladder', flag:'checkoutLadder', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].checkoutLadder) },
+    { title:'The Gauntlet', flag:'gauntlet', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].gauntlet) },
+    { title:'Killer', flag:'killer', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].killer) },
+    { title:'Marathon Mode', flag:'marathon', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].marathon) },
+    { title:'Dead Man Walking', flag:'deadManWalking', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].deadManWalking) },
+    { title:"Just Chuckin' It", flag:'chuckin', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].chuckin) },
+    { title:'Checkout Trainer', flag:'checkoutTrainer', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].checkoutTrainer) },
+    { title:'Practice Drills', flag:'drill', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].drill) },
+    { title:'Daily Challenge', flag:'challenge', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].challenge) },
+    { title:'Household Rating', flag:'elo', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].elo), alwaysShow:true },
+    { title:'Tournaments', flag:'tournament', ids: Object.keys(BADGE_INFO).filter(id=>BADGE_INFO[id].tournament), alwaysShow:true },
+  ];
+  const currentFlag = GAME_TYPE_BADGE_FLAG[playerGameType] ?? null;
+  const filterControlHtml = `
+    <div class="seg" role="group" aria-label="Filter achievements" style="margin-bottom:14px">
+      <button aria-pressed="${badgeFilter==='all'}" onclick="setBadgeFilter('all')">All</button>
+      <button aria-pressed="${badgeFilter==='earned'}" onclick="setBadgeFilter('earned')">Earned</button>
+      <button aria-pressed="${badgeFilter==='unearned'}" onclick="setBadgeFilter('unearned')">Unearned</button>
+    </div>`;
+  const sectionsHtml = SECTIONS
+    .filter(s => s.alwaysShow || s.flag === currentFlag)
+    .map(s => {
+      const blocks = s.ids.map(badgeBlock).join('');
+      if(!blocks) return ''; // every badge in this section is hidden by the current filter — skip the empty section entirely
+      return `<div class="pp-section-title" style="margin:16px 0 6px">${s.title}</div>
+        <div class="summary-grid">${blocks}</div>`;
+    })
+    .join('');
+  const emptyMsg = badgeFilter==='all' ? 'No achievements defined for this game mode.'
+    : badgeFilter==='earned' ? 'No earned achievements yet for this game mode.'
+    : 'Every achievement for this game mode has already been earned.';
+  container.innerHTML = filterControlHtml + (sectionsHtml || `<p class="pp-meta" style="padding:4px 0">${emptyMsg}</p>`);
 }
 // Around the World progress (docs/archive/achievements-badges-roadmap.md): a compact grid
 // rather than a full dartboard-shaped heatmap — the doc explicitly calls the ideal
