@@ -87,7 +87,12 @@
        GET  /api/players/doubles-hit-sectors -> (?name=...) -> { hit, count, total } (public)
        GET  /api/players/on-this-day -> (?name=...&tz=...) -> { type, year, yearsAgo, statLine } | null (public)
        POST /api/challenges/start  -> { player, gameId, challengeDate, format, target } (public)
-       POST /api/challenges/complete -> { player, challengeDate, resultDarts } -> { ok, isPersonalBest } (public)
+       POST /api/challenges/complete -> { player, challengeDate, resultDarts } ->
+         { ok, isPersonalBest, format, target, resultDarts, personalBest, previousBest,
+           lastResult, recentAttempts, currentStreak } (public) — see
+           getChallengeResultSummary() (backend/db.js) for what each of the extra
+           fields means; the results screen (frontend/index.html finishUnit()) is
+           the one consumer.
        GET  /api/challenges/status -> (?player=...&date=YYYY-MM-DD) -> { today, streak, history } (public)
        GET  /api/challenges/history -> (?player=...&date=YYYY-MM-DD) -> { played, completed, currentStreak, longestStreak, bestByFormat, attempts } (public)
        DEL  /api/challenges/attempt -> (?player=...&date=YYYY-MM-DD) reset an attempt + wipe its recorded stats [admin]

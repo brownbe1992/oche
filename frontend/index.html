@@ -2309,6 +2309,43 @@ function challengeMetricLabel(format, value){
   if(format==='long_game')         return `${value} visit${value===1?'':'s'}`;
   return `${value} darts`;
 }
+// The async-patched portion of the Daily Challenge results screen
+// (docs/daily-challenge-results-roadmap.md): the personal-best banner already
+// existed here; this extends the same placeholder to also show a "your
+// best"/"last time" comparison, the current streak, and a small per-format
+// recent-attempts strip — all sourced from the exact fields
+// getChallengeResultSummary() (backend/db.js) already computes server-side
+// (personalBest/previousBest/lastResult/recentAttempts/currentStreak), so no
+// history math is duplicated client-side. `r` is /api/challenges/complete's
+// response; a no-op if `el` no longer exists (player already navigated away
+// before the round-trip resolved) or `r` is falsy (request failed).
+function renderChallengeResultExtra(el, r, format, target){
+  if(!el || !r) return;
+  const pbBanner = r.isPersonalBest
+    ? `<p style="color:var(--gold);font-weight:700;font-size:13px;margin:0 0 10px">🏆 New personal best for ${escapeHtml(challengeShortLabel(format, target))}!</p>` : '';
+  // Streak psychology: a bare "1-day streak" reads as filler, not a callout —
+  // only worth celebrating once it's actually a streak (2+).
+  const streakHtml = r.currentStreak >= 2
+    ? `<p style="color:var(--gold);font-weight:700;font-size:13px;margin:0 0 10px">🔥 ${r.currentStreak}-day streak</p>` : '';
+  const compareBlocks = [];
+  if(r.personalBest != null) compareBlocks.push(['Your Best', challengeMetricLabel(format, r.personalBest)]);
+  if(r.lastResult != null)   compareBlocks.push(['Last Time', challengeMetricLabel(format, r.lastResult)]);
+  const compareHtml = compareBlocks.length ? `<div class="summary-grid" style="margin-bottom:10px">
+    ${compareBlocks.map(([label,val])=>`<div class="stat-block"><div class="stat-val">${escapeHtml(val)}</div><div class="stat-label">${label}</div></div>`).join('')}
+  </div>` : '';
+  // A single lonely chip (first-ever attempt at this format) shows no trend —
+  // skip the strip entirely rather than render one uninformative box.
+  const recentHtml = (r.recentAttempts && r.recentAttempts.length > 1) ? `
+    <div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap;margin-top:2px">
+      ${r.recentAttempts.map((a,i)=>{
+        const isToday = i === r.recentAttempts.length - 1;
+        const isBest = r.personalBest != null && a.result === r.personalBest;
+        return `<div title="${escapeHtml(a.date)}" style="min-width:34px;padding:3px 6px;border-radius:6px;font-size:11px;font-weight:700;text-align:center;
+          background:${isToday?'var(--gold)':'rgba(255,255,255,.06)'};color:${isToday?'#111':isBest?'var(--gold)':'var(--muted)'}">${escapeHtml(String(a.result))}</div>`;
+      }).join('')}
+    </div>` : '';
+  el.innerHTML = `${pbBanner}${streakHtml}${compareHtml}${recentHtml}`;
+}
 // The four standard X01 starting scores — one shared list for the New Game
 // flavor select, tournament setup, and league setup (each previously
 // hand-rolled its own copy).
@@ -2328,6 +2365,17 @@ function todaysChallenge(dateStr){
 
 let activeChallenge = null;   // { date, format, target, player } while a challenge attempt is in progress
 let lastLegWasChallenge = false; // set true right when a challenge attempt's card fires, so finishUnit() knows to show its Share button
+// Captured at the same point lastLegWasChallenge is set (before activeChallenge is
+// nulled out) so finishUnit()'s results screen can show the actual challenge outcome
+// (docs/daily-challenge-results-roadmap.md) instead of falling through to the
+// generic X01 leg-complete panel. { format, target, metric, trebleNumbers } —
+// trebleNumbers is Treble Run only (mirrors GAME_TYPES.x01.liveModeState's own
+// dartsSoFar computation, kept in sync via the shared challengeTrebleNumbersFrom()
+// helper below rather than a second hand-copied Set-building expression).
+let lastChallengeResult = null;
+function challengeTrebleNumbersFrom(visitLogs){
+  return [...new Set((visitLogs||[]).flat().filter(d=>d.isTreble).map(d=>d.sector))];
+}
 let sessionBadgesShown = { nightOwl:false, earlyBird:false }; // novelty badges that should fire at most once per session
 let earnedBadgeCache = {}; // playerName -> Set(badgeId), warms per game so Around the World's query can be skipped once earned
 
@@ -11171,7 +11219,7 @@ function checkEloOnMatchWin(w, opp){
     // one. #elo-delta-banner is a placeholder finishUnit() renders synchronously
     // on the GAME OVER screen and patches in once this resolves, the same
     // "celebrate now, patch in extra detail once confirmed" pattern
-    // #challenge-pb-banner already uses.
+    // #challenge-result-extra already uses.
     const lcg = data.lastCompetitiveGame;
     if(lcg && lcg.winnerName === w.name){
       const banner = document.getElementById('elo-delta-banner');
@@ -12063,17 +12111,19 @@ function onLegWon(wi){
     // Captured before activeChallenge is nulled out below — the response this feeds
     // arrives after that happens, so the callback can't read activeChallenge itself.
     const _challengeFormat = activeChallenge.format, _challengeTarget = activeChallenge.target;
+    // game.legVisitLogs is still the just-finished attempt's data at this point
+    // (game state isn't reset until startNextLeg()) — captured now for the results
+    // screen's Treble Run number chips, same computation liveModeState uses live.
+    lastChallengeResult = { format: _challengeFormat, target: _challengeTarget, metric: _metric,
+      trebleNumbers: _challengeFormat==='treble_run' ? challengeTrebleNumbersFrom(game.legVisitLogs) : null };
     // The results screen (finishUnit(), below) renders immediately — not blocked on
     // this round-trip, same "celebrate now, patch in extra detail once confirmed"
-    // pattern as the achievement queue's count patching. The #challenge-pb-banner
+    // pattern as the achievement queue's count patching. The #challenge-result-extra
     // placeholder only exists on the just-rendered results screen, so this patch is
     // a no-op if the player has already navigated away by the time it resolves.
     Backend.send('POST','/api/challenges/complete',
       { player:activeChallenge.player, challengeDate:activeChallenge.date, resultDarts:_metric }).then(r=>{
-        if(r && r.isPersonalBest){
-          const el = document.getElementById('challenge-pb-banner');
-          if(el) el.innerHTML = `<p style="color:var(--gold);font-weight:700;font-size:13px;margin:0 0 14px">🏆 New personal best for ${challengeShortLabel(_challengeFormat, _challengeTarget)}!</p>`;
-        }
+        renderChallengeResultExtra(document.getElementById('challenge-result-extra'), r, _challengeFormat, _challengeTarget);
         checkChallengeBadges(w.name);
       }).catch(()=>{});
     fireMomentCard('dailychallenge', { icon:'📅', headline:'CHALLENGE COMPLETE!', player:w.name,
@@ -12188,6 +12238,27 @@ function legSummaryX01(game, winner){
     busts: p.legBusts  || 0,
     won:   p.name === winner
   }));
+}
+
+// The synchronous half of the Daily Challenge results panel (the async half —
+// personal-best/streak/comparison/recent-attempts — is renderChallengeResultExtra()
+// above, patched in once /api/challenges/complete resolves). Reads lastChallengeResult
+// (captured right before activeChallenge was nulled, in the same block that sets
+// lastLegWasChallenge) so finishUnit() can show the actual challenge outcome instead
+// of falling through to the generic X01 leg-complete panel.
+function buildChallengeResultPanel(){
+  if(!lastChallengeResult) return '';
+  const { format, target, metric, trebleNumbers } = lastChallengeResult;
+  const headline = `<div class="summary-grid" style="margin-bottom:10px">
+    <div class="stat-block"><div class="stat-val">${escapeHtml(challengeMetricLabel(format, metric))}</div><div class="stat-label">${escapeHtml(challengeShortLabel(format, target))}</div></div>
+  </div>`;
+  // Treble Run's own visual: WHICH numbers were hit, not just the count —
+  // mirrors display.html's live .challenge-chips treatment of the same data.
+  const chips = (format==='treble_run' && trebleNumbers && trebleNumbers.length)
+    ? `<div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap;margin-bottom:10px">
+        ${trebleNumbers.map(n=>`<span style="font-size:12px;font-weight:700;color:var(--gold);border:1px solid var(--wire);border-radius:6px;padding:3px 7px">T${n}</span>`).join('')}
+      </div>` : '';
+  return `${headline}${chips}`;
 }
 function finishUnit(kind, winner){
   game.done = (kind==='game');
@@ -12326,7 +12397,12 @@ function finishUnit(kind, winner){
     // (docs/bug-roadmap.md BUG-22, see onLegWonBaseball()/startGame()'s
     // isPracticeBaseball), so kind==='leg' is only ever reached for a genuine
     // mid-match H2H leg now (same reasoning applies to the other 3 modes).
-    const legPanel = isCricket || isKiller || kind!=='leg' ? '' : GAME_TYPES[game.gameType].h2hRows ? h2hStatsHtml(winner) : game.practice ? `
+    // Daily Challenge gets its own results panel below (buildChallengeResultPanel())
+    // instead of the generic X01 "This Leg / This Session" average panel — that
+    // panel is actively misleading for the 3 filler-starting-score formats
+    // (Bullseye Gauntlet/Treble Run/Steady Hand), whose 3-dart average is computed
+    // against a meaningless countdown, not the real challenge result.
+    const legPanel = isCricket || isKiller || kind!=='leg' || lastLegWasChallenge ? '' : GAME_TYPES[game.gameType].h2hRows ? h2hStatsHtml(winner) : game.practice ? `
       <div class="prac-stats">
         <div class="prac-col">
           <div class="prac-col-title">This Leg</div>
@@ -12352,11 +12428,11 @@ function finishUnit(kind, winner){
     oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
       <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">${heading}</div>
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${subtext}</p>
-      ${lastLegWasChallenge ? '<div id="challenge-pb-banner"></div>' : ''}
+      ${lastLegWasChallenge ? buildChallengeResultPanel() : ''}
       <div class="btn-row" style="justify-content:center">
         ${actionButtons}
         ${challengeShareBtn}
-      </div>${legPanel}</div>`;
+      </div>${lastLegWasChallenge ? '<div id="challenge-result-extra" style="margin-top:14px"></div>' : ''}${legPanel}</div>`;
   }
   // Each entry's shape is an unstated contract with display.html's
   // renderers.<type>.summary() card — dispatched via the GAME_TYPES registry
@@ -12789,7 +12865,7 @@ const GAME_TYPES = {
         challengeMetric: metric,
         challengeMetricLabel: challengeMetricLabel(fmt, metric),
         challengeVisitsCompleted: visitLogs.length,
-        challengeTrebleNumbers: fmt==='treble_run' ? [...new Set(dartsSoFar.filter(d=>d.isTreble).map(d=>d.sector))] : null,
+        challengeTrebleNumbers: fmt==='treble_run' ? challengeTrebleNumbersFrom(visitLogs) : null,
       };
     }
   },

@@ -2101,6 +2101,53 @@ const CHALLENGE_BETTER_DIRECTION = {
   bullseye_gauntlet: 'desc', treble_run: 'desc', steady_hand: 'desc',
 };
 
+// Everything the post-completion results screen needs beyond the bare
+// isPersonalBest flag (docs/daily-challenge-results-roadmap.md): the best-ever
+// result for this format (after including whatever was just completed for
+// challengeDate), the best result BEFORE challengeDate (for an explicit
+// "your best" callout even on a non-record attempt), the most recent PRIOR
+// completed attempt's result (a "vs last time" comparison, distinct from
+// "vs your best"), and a short recent-attempts strip for a trend view.
+// Pulled into its own function so completeChallengeAttempt()'s two return
+// paths (freshly completed, and the already-completed no-op retry) can share
+// it instead of duplicating four queries.
+function getChallengeResultSummary(playerId, format, challengeDate) {
+  const dir = CHALLENGE_BETTER_DIRECTION[format];
+  if (!dir) return { personalBest: null, previousBest: null, lastResult: null, recentAttempts: [] };
+  const agg = dir === 'asc' ? 'MIN' : 'MAX';
+
+  const previousBestRow = db.prepare(`
+    SELECT ${agg}(result_darts) AS v FROM daily_challenge_attempts
+    WHERE player_id = ? AND format = ? AND completed = 1 AND challenge_date != ?
+  `).get(playerId, format, challengeDate);
+  const previousBest = previousBestRow ? previousBestRow.v : null;
+
+  const personalBestRow = db.prepare(`
+    SELECT ${agg}(result_darts) AS v FROM daily_challenge_attempts
+    WHERE player_id = ? AND format = ? AND completed = 1
+  `).get(playerId, format);
+  const personalBest = personalBestRow ? personalBestRow.v : null;
+
+  const lastRow = db.prepare(`
+    SELECT result_darts FROM daily_challenge_attempts
+    WHERE player_id = ? AND format = ? AND completed = 1 AND challenge_date < ?
+    ORDER BY challenge_date DESC LIMIT 1
+  `).get(playerId, format, challengeDate);
+  const lastResult = lastRow ? lastRow.result_darts : null;
+
+  // Oldest-first so the frontend can render it left-to-right as a timeline
+  // without needing to reverse it itself. Mapped to plain {date,result}
+  // objects rather than passed through as raw node:sqlite rows, matching
+  // every other structured (non-scalar) return value in this file.
+  const recentAttempts = db.prepare(`
+    SELECT challenge_date AS date, result_darts AS result FROM daily_challenge_attempts
+    WHERE player_id = ? AND format = ? AND completed = 1 AND challenge_date <= ?
+    ORDER BY challenge_date DESC LIMIT 10
+  `).all(playerId, format, challengeDate).reverse().map(r => ({ date: r.date, result: r.result }));
+
+  return { personalBest, previousBest, lastResult, recentAttempts };
+}
+
 function completeChallengeAttempt(playerName, challengeDate, resultDarts) {
   const p = getPlayer(playerName);
   if (!p) throw httpError(404, 'Player not found');
@@ -2120,27 +2167,29 @@ function completeChallengeAttempt(playerName, challengeDate, resultDarts) {
     // Distinguish "no attempt started for that date" (a genuine 404) from "already
     // completed" (locked in — return the no-op result rather than erroring, so a
     // network retry of a legit completion doesn't surface as a user-visible failure).
-    const existing = db.prepare(`SELECT completed FROM daily_challenge_attempts WHERE player_id = ? AND challenge_date = ?`).get(p.id, String(challengeDate));
+    // Still returns the full result summary (not just the bare flags) so a retried
+    // request lands on the same rich results screen as the original completion did.
+    const existing = db.prepare(`SELECT completed, format, target, result_darts FROM daily_challenge_attempts WHERE player_id = ? AND challenge_date = ?`).get(p.id, String(challengeDate));
     if (!existing) throw httpError(404, 'No matching challenge attempt for that date');
-    return { ok: true, isPersonalBest: false, alreadyCompleted: true };
+    const summary = getChallengeResultSummary(p.id, existing.format, String(challengeDate));
+    const currentStreak = getChallengeStatus(playerName, String(challengeDate)).streak;
+    return { ok: true, isPersonalBest: false, alreadyCompleted: true,
+      format: existing.format, target: existing.target, resultDarts: existing.result_darts,
+      currentStreak, ...summary };
   }
 
   // "Beat your best" callout: compare this result against every other completed
   // attempt of the same format (excluding today, since UNIQUE(player_id,
   // challenge_date) means today's row is already the one we just wrote above).
-  const row = db.prepare(`SELECT format, result_darts FROM daily_challenge_attempts WHERE player_id = ? AND challenge_date = ?`).get(p.id, String(challengeDate));
-  let isPersonalBest = false;
+  const row = db.prepare(`SELECT format, target, result_darts FROM daily_challenge_attempts WHERE player_id = ? AND challenge_date = ?`).get(p.id, String(challengeDate));
   const dir = row && CHALLENGE_BETTER_DIRECTION[row.format];
+  const summary = dir ? getChallengeResultSummary(p.id, row.format, String(challengeDate)) : { personalBest: null, previousBest: null, lastResult: null, recentAttempts: [] };
+  let isPersonalBest = false;
   if (dir && row.result_darts != null) {
-    const agg = dir === 'asc' ? 'MIN' : 'MAX';
-    const prior = db.prepare(`
-      SELECT ${agg}(result_darts) AS v FROM daily_challenge_attempts
-      WHERE player_id = ? AND format = ? AND completed = 1 AND challenge_date != ?
-    `).get(p.id, row.format, String(challengeDate));
-    const priorBest = prior ? prior.v : null;
-    isPersonalBest = priorBest == null || (dir === 'asc' ? row.result_darts < priorBest : row.result_darts > priorBest);
+    isPersonalBest = summary.previousBest == null || (dir === 'asc' ? row.result_darts < summary.previousBest : row.result_darts > summary.previousBest);
   }
-  return { ok: true, isPersonalBest };
+  const currentStreak = getChallengeStatus(playerName, String(challengeDate)).streak;
+  return { ok: true, isPersonalBest, format: row.format, target: row.target, resultDarts: row.result_darts, currentStreak, ...summary };
 }
 
 // Admin reset (Settings → Daily Challenge): removes a player's attempt for a given

@@ -2375,15 +2375,47 @@ to today) + a confirm dialog spelling out what gets deleted.
   independent by design, so there's no "drift" risk between them the way there
   can be between sibling stat functions.
 
-### Personal best detection
+### Personal best detection, and the results screen
 
 `completeChallengeAttempt()` compares the just-completed result against every
 *other* completed attempt of the same format (`challenge_date != today`), using
-`CHALLENGE_BETTER_DIRECTION` to pick `MIN` or `MAX`, and returns
-`{ ok, isPersonalBest }`. The frontend patches a gold "New personal best!"
-banner into a `#challenge-pb-banner` placeholder on the results screen once
-this async response resolves — the results screen itself renders immediately,
-unblocked (same pattern as the achievement queue's count-patching).
+`CHALLENGE_BETTER_DIRECTION` to pick `MIN` or `MAX`. Its full response shape —
+returned both on a fresh completion and on the locked "already completed"
+no-op retry path (`getChallengeResultSummary()`, shared by both) — is:
+
+```
+{ ok, isPersonalBest, format, target, resultDarts,
+  personalBest,    // best-ever result for this format, including this attempt
+  previousBest,     // best result BEFORE this attempt (null on a first-ever attempt)
+  lastResult,       // the immediately-preceding completed attempt's result (null if none)
+  recentAttempts,   // up to 10 completed attempts of this format, oldest-first: [{date, result}]
+  currentStreak }   // getChallengeStatus()'s streak, as of this challengeDate
+```
+
+The Daily Challenge results screen (`finishUnit()`, `frontend/index.html`)
+replaced its old generic "This Leg / This Session" X01 average panel for a
+challenge completion — that panel was actively wrong for the three
+filler-starting-score formats (Bullseye Gauntlet/Treble Run/Steady Hand),
+whose 3-dart average is computed against a meaningless countdown, not the
+real result. It now shows two things instead:
+
+1. **Synchronous** (`lastChallengeResult`, captured right before
+   `activeChallenge` is nulled out; `buildChallengeResultPanel()`): the actual
+   challenge metric as the headline stat (`challengeShortLabel`/
+   `challengeMetricLabel`, the same functions the Share moment-card's caption
+   already used), plus — Treble Run only — which numbers were hit, as small
+   chips (`challengeTrebleNumbersFrom(game.legVisitLogs)`, the same
+   computation `GAME_TYPES.x01.liveModeState` uses for the live scoreboard).
+2. **Async** (`renderChallengeResultExtra()`, patched into a
+   `#challenge-result-extra` placeholder once `/api/challenges/complete`
+   resolves — the results screen itself renders immediately, unblocked, same
+   pattern as the achievement queue's count-patching): the gold "New personal
+   best!" banner (unchanged), a `🔥 N-day streak` callout (only shown at 2+,
+   since a bare "1-day streak" reads as filler rather than a callout), a
+   "Your Best"/"Last Time" comparison pair (shown even when today's attempt
+   *isn't* a new record, so every attempt has context), and a small
+   highlighted recent-attempts strip (skipped entirely on a first-ever
+   attempt at that format, since a single chip shows no trend).
 
 ### Player Profile history view
 
@@ -5315,7 +5347,7 @@ skips any game where either `game_players` row has a non-`NULL`
   though it has a real `opp` object). Patches a `#elo-delta-banner`
   placeholder on the GAME OVER screen once the fetch resolves (`📈
   Household rating: 1016 (+16)`) — the same "celebrate the win now, patch in
-  extra detail once confirmed" pattern `#challenge-pb-banner` already uses,
+  extra detail once confirmed" pattern `#challenge-result-extra` already uses,
   since the rating can't be known synchronously at match-end time.
 
 ### Badges
