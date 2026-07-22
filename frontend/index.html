@@ -10141,6 +10141,14 @@ function recordSingleDartTurn(fields, dart, zone, missZone, missDepth, bounced){
     darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt,
       zone: zone || null, missZone: missZone != null ? missZone : null, missDepth: missDepth || null, bounced: !!bounced }] });
 }
+// Same field-stamping shape as recordSingleDartTurn() above, for the ~7 per-visit
+// (X01/Baseball/Shanghai/Halve-It/Pressure Chamber/Bob's 27/Dead Man Walking)
+// enterTurn*() functions' DB.recordTurn() calls, each mapping a full 1-3-dart
+// visit array instead of a single dart.
+function mapDartsForRecord(darts){
+  return darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
+    zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced }));
+}
 
 function throwDart(sector, zone, missZone, missDepth, bounced){
   if(game.gameType === 'doubles_practice') return throwDartDoublesPractice(sector, zone, missZone, missDepth, bounced);
@@ -10832,6 +10840,14 @@ function nextActiveIndexFrom(game, fromIdx, also){
 function advanceToNextActivePlayer(game, also){
   game.current = nextActiveIndexFrom(game, game.current, also);
 }
+// Shared by every enterTurnX()'s empty-turn guard below — sets the status
+// message and returns true (so each call site reads `if(noDartsThrown()) return;`)
+// instead of re-declaring the identical inline check+message 9 times.
+function noDartsThrown(){
+  if(game.darts.length!==0) return false;
+  document.getElementById('status').textContent='Throw at least one dart, or use Miss.';
+  return true;
+}
 function enterTurn(){
   if(game.gameType === 'cricket') return enterTurnCricket();
   if(game.gameType === 'baseball') return enterTurnBaseball();
@@ -10843,7 +10859,7 @@ function enterTurn(){
   if(game.gameType === 'gauntlet') return enterTurnGauntlet();
   if(game.gameType === 'dead_man_walking') return enterTurnDeadManWalking();
   if(game.gameType === 'checkout_trainer') return submitCheckoutAttempt();
-  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  if(noDartsThrown()) return;
   const p = game.players[game.current];
   const ev = GAME_TYPES[game.gameType].evaluateVisit(p, game.darts, game);
 
@@ -10919,8 +10935,7 @@ function enterTurn(){
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.scored, bust:ev.bust,
     checkout:ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null,
-    darts: game.darts.map((d,i) => ({ dartNo: i+1, sector: d.sector, multiplier: d.mult, thrownAt: d.thrownAt,
-      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+    darts: mapDartsForRecord(game.darts) });
   // one-shot record of this turn's outcome, for voice announcements on the scoreboard
   game.lastTurnEvent = { ts: Date.now(), player: p.name, scored: ev.scored, bust: !!ev.bust,
     win: !!ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null };
@@ -11213,7 +11228,7 @@ function playGhostTurn(){
 
 /* ----- Cricket turn commit (dispatched from enterTurn()) ----- */
 function enterTurnCricket(){
-  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  if(noDartsThrown()) return;
   const p = game.players[game.current];
   const ev = GAME_TYPES.cricket.evaluateVisit(p, game.darts, game);
   const cutthroat = game.config.variant === 'cutthroat';
@@ -11285,8 +11300,7 @@ function enterTurnCricket(){
 
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.scored, bust:false, checkout:false, checkoutPoints:null, legWon:ev.win,
-    darts: game.darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
-      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+    darts: mapDartsForRecord(game.darts) });
 
   const turnRecord = { player:p.name, scored:ev.scored, darts:game.darts.slice() };
   game.currentLegTurns.push(turnRecord);
@@ -11504,7 +11518,7 @@ function onLegWonCricket(wi){
    (docs/game-modes-roadmap.md "Baseball" — core playable game only) — just
    the time-of-day badges every game type already gets for free. */
 function enterTurnBaseball(){
-  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  if(noDartsThrown()) return;
   const p = game.players[game.current];
   const ev = GAME_TYPES.baseball.evaluateVisit(p, game.darts, game);
 
@@ -11528,8 +11542,7 @@ function enterTurnBaseball(){
 
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.scored, bust:false, checkout:false, checkoutPoints:null,
-    darts: game.darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
-      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+    darts: mapDartsForRecord(game.darts) });
 
   const turnRecord = { player:p.name, scored:ev.scored, darts:game.darts.slice() };
   game.currentLegTurns.push(turnRecord);
@@ -11595,7 +11608,7 @@ function undoLastTurnBaseball(){
 /* ----- Shanghai turn commit (dispatched from enterTurn()) -----
    Visit-based (3 darts per round), same shape as Baseball's own. */
 function enterTurnShanghai(){
-  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  if(noDartsThrown()) return;
   const p = game.players[game.current];
   const ev = GAME_TYPES.shanghai.evaluateVisit(p, game.darts, game);
   const maxRounds = (game.config && game.config.rounds) || 7;
@@ -11626,8 +11639,7 @@ function enterTurnShanghai(){
   // totals for those legs instead, exactly like getBaseballWonLegs().
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.scored, bust:false, checkout:false, checkoutPoints:null, legWon:!!ev.shanghai,
-    darts: game.darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
-      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+    darts: mapDartsForRecord(game.darts) });
 
   const turnRecord = { player:p.name, scored:ev.scored, darts:game.darts.slice() };
   game.currentLegTurns.push(turnRecord);
@@ -11686,7 +11698,7 @@ function halveItTargetLabel(target){
 /* ----- Halve-It turn commit (dispatched from enterTurn()) -----
    Visit-based (3 darts per round), same shape as Baseball/Shanghai's own. */
 function enterTurnHalveIt(){
-  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  if(noDartsThrown()) return;
   const p = game.players[game.current];
   const ev = GAME_TYPES.halve_it.evaluateVisit(p, game.darts, game);
   const maxRounds = ((game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS).length;
@@ -11722,8 +11734,7 @@ function enterTurnHalveIt(){
   // the rest" shape.
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.gained, bust:ev.halved, checkout:false, checkoutPoints:null, legWon:false,
-    darts: game.darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
-      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+    darts: mapDartsForRecord(game.darts) });
 
   const turnRecord = { player:p.name, scored:ev.gained, darts:game.darts.slice() };
   game.currentLegTurns.push(turnRecord);
@@ -11870,7 +11881,7 @@ function onLegWonHalveIt(wi){
    early stop, see throwDartPressureChamber()), same lockstep-round shape as
    Baseball/Shanghai/Halve-It's own. */
 function enterTurnPressureChamber(){
-  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  if(noDartsThrown()) return;
   const p = game.players[game.current];
   const card = generatePressureCard(game.gameId, game.pressureChamberRound);
   const ev = GAME_TYPES.pressure_chamber.evaluateVisit(p, game.darts, game);
@@ -11926,8 +11937,7 @@ function enterTurnPressureChamber(){
     // before-the-throw hit/miss call, stored alongside the real outcome for the
     // informational Honesty% stat. Never a scoring input.
     declaredHit: game.pressureDeclared,
-    darts: game.darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
-      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+    darts: mapDartsForRecord(game.darts) });
 
   const turnRecord = { player:p.name, scored:ev.gained, darts:game.darts.slice() };
   game.currentLegTurns.push(turnRecord);
@@ -12010,7 +12020,7 @@ function onLegWonPressureChamber(wi){
    Baseball's rotation needs — solo, so every visit always completes its own
    round). */
 function enterTurnBobs27(){
-  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  if(noDartsThrown()) return;
   const p = game.players[game.current];
   const ev = GAME_TYPES.bobs_27.evaluateVisit(p, game.darts, game);
 
@@ -12037,8 +12047,7 @@ function enterTurnBobs27(){
   // never trusting the client's own ev.dead.
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.scored, bust:ev.dead, checkout:false, checkoutPoints:null,
-    darts: game.darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
-      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+    darts: mapDartsForRecord(game.darts) });
 
   const turnRecord = { player:p.name, scored:ev.scored, darts:game.darts.slice() };
   game.currentLegTurns.push(turnRecord);
@@ -12681,6 +12690,9 @@ function startNextRound(){
    script via <script src>. See scoring.js's own header comment. */
 
 /* ---------- avg-over-time chart ---------- */
+// Shared by every percentage-shaped stat spec below (STAT_DEFS and every
+// per-mode PB spec) instead of each entry re-declaring an identical closure.
+const pctFmt = v=>v!=null?v.toFixed(1)+'%':'—';
 const STAT_DEFS = [
   // primary:true bubbles are shown by default; the rest live behind the "More stats" toggle.
   // dartsthrown/avgdartsperday used to live here too, but they're lifetime totals
@@ -12694,12 +12706,12 @@ const STAT_DEFS = [
   { key:'x01avgdartsperday', label:'Darts / Day', desc:'Average darts thrown per day played, in X01 games',        fmt:v=>v!=null?Number(v).toFixed(1):'—' },
   { key:'avgdartsperleg', label:'Darts / Leg',    desc:'Average darts thrown per won X01 leg',           fmt:v=>v!=null?Number(v).toFixed(1):'—' },
   { key:'pace',           label:'Average Pace', desc:'Darts thrown per minute',                  fmt:v=>v!=null?Number(v).toFixed(1):'—' },
-  { key:'treblelesspct', label:'Trebleless %',desc:'% of legs without hitting a treble',      fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'treblelesspct', label:'Trebleless %',desc:'% of legs without hitting a treble',      fmt:pctFmt },
   { key:'first3avg',     label:'1st 3 AVG',   desc:'Average of 1st 3 darts in a leg (501/301/170/101 only)', fmt:v=>v!=null?v.toFixed(1):'—' },
   { key:'first9avg',     label:'1st 9 AVG',   desc:'Average of 1st 9 darts in a leg (501/301/170/101 only)', fmt:v=>v!=null?v.toFixed(1):'—' },
-  { key:'avg100plus',    label:'100+ AVG',    desc:'% of legs with a 100+ average',           fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
-  { key:'avg90minus',    label:'90- AVG',     desc:'% of legs with a 90 or lower average',    fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
-  { key:'score140pct',   label:'140/Leg',     desc:'% of opening visits scoring 140 or more', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'avg100plus',    label:'100+ AVG',    desc:'% of legs with a 100+ average',           fmt:pctFmt },
+  { key:'avg90minus',    label:'90- AVG',     desc:'% of legs with a 90 or lower average',    fmt:pctFmt },
+  { key:'score140pct',   label:'140/Leg',     desc:'% of opening visits scoring 140 or more', fmt:pctFmt },
   { key:'180sperleg',    label:'180s/Leg',    desc:'% of legs that contained a 180',           fmt:v=>v!=null?(v*100).toFixed(1)+'%':'—' },
 ];
 let selectedStat = 'avg';
@@ -12727,7 +12739,7 @@ const HEADER_STAT_DEFS = [
 const CRICKET_STAT_DEFS = [
   { key:'cricketmpr',           label:'MPR',            desc:'Marks Per Round — total marks scored / rounds played', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
   { key:'cricket9marks',        label:'9 Marks',        desc:'Visits where all 3 darts scored the maximum 9 marks', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
-  { key:'cricketwinpct',        label:'Win Rate',       desc:'% of H2H Cricket games won',              fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'cricketwinpct',        label:'Win Rate',       desc:'% of H2H Cricket games won',              fmt:pctFmt, primary:true },
   { key:'cricketgames',         label:'Games Played',   desc:'Cricket games played',                    fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
   { key:'cricketdartsthrown',   label:'Darts Thrown',   desc:'Total darts thrown in Cricket games',     fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
   { key:'cricketavgdartsperleg', label:'Darts / Won Leg', desc:'Average darts thrown per won Cricket leg', fmt:v=>v!=null?Number(v).toFixed(1):'—' },
@@ -12744,7 +12756,7 @@ const CRICKET_BUBBLE_KEY_MAP = { cricketmpr:'mpr', cricket9marks:'nineMarks', cr
 const BASEBALL_STAT_DEFS = [
   { key:'baseballrpi',            label:'RPI',            desc:'Runs Per Inning — total runs scored / innings played', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
   { key:'baseballperfectinnings', label:'Perfect Innings', desc:'Innings where all 3 darts scored the maximum 9 runs', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
-  { key:'baseballwinpct',         label:'Win Rate',       desc:'% of H2H Baseball games won',             fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'baseballwinpct',         label:'Win Rate',       desc:'% of H2H Baseball games won',             fmt:pctFmt, primary:true },
   { key:'baseballgames',          label:'Games Played',   desc:'Baseball games played',                   fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
   { key:'baseballdartsthrown',    label:'Darts Thrown',   desc:'Total darts thrown in Baseball games',    fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
   { key:'baseballbestinning',     label:'Best Inning',    desc:'Highest runs scored in a single inning (max 9)', fmt:v=>v!=null?String(Math.round(v)):'—' },
@@ -12759,7 +12771,7 @@ const BASEBALL_BUBBLE_KEY_MAP = { baseballrpi:'rpi', baseballperfectinnings:'per
 const SHANGHAI_STAT_DEFS = [
   { key:'shanghaippr',          label:'Points/Round',   desc:'Total points scored / rounds played', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
   { key:'shanghaisthrown',      label:'Shanghais Thrown', desc:'Instant wins — single, double, AND treble of the round\'s number in one visit', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
-  { key:'shanghaiwinpct',       label:'Win Rate',       desc:'% of H2H Shanghai games won',             fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'shanghaiwinpct',       label:'Win Rate',       desc:'% of H2H Shanghai games won',             fmt:pctFmt, primary:true },
   { key:'shanghaigames',        label:'Games Played',   desc:'Shanghai games played',                   fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
   { key:'shanghaidartsthrown',  label:'Darts Thrown',   desc:'Total darts thrown in Shanghai games',    fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
   { key:'shanghaibestround',    label:'Best Round',     desc:'Highest points scored in a single round', fmt:v=>v!=null?String(Math.round(v)):'—' },
@@ -12772,7 +12784,7 @@ const SHANGHAI_BUBBLE_KEY_MAP = { shanghaippr:'ppr', shanghaisthrown:'shanghaisT
 const HALVE_IT_STAT_DEFS = [
   { key:'halveitavgtotal',       label:'Avg Final Total', desc:'Average final total across every completed leg', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
   { key:'halveittimeshalved',    label:'Times Halved',   desc:'Total visits where all 3 darts missed the round\'s target', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
-  { key:'halveitwinpct',         label:'Win Rate',       desc:'% of H2H Halve-It games won',             fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'halveitwinpct',         label:'Win Rate',       desc:'% of H2H Halve-It games won',             fmt:pctFmt, primary:true },
   { key:'halveitgames',          label:'Games Played',   desc:'Halve-It games played',                   fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
   { key:'halveitdartsthrown',    label:'Darts Thrown',   desc:'Total darts thrown in Halve-It games',    fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
   { key:'halveitbestround',      label:'Best Round',     desc:'Highest points gained in a single round', fmt:v=>v!=null?String(Math.round(v)):'—' },
@@ -12789,16 +12801,16 @@ const HALVE_IT_BUBBLE_KEY_MAP = { halveitavgtotal:'avgFinalTotal', halveittimesh
 // them out individually either).
 const PRESSURE_CHAMBER_STAT_DEFS = [
   { key:'pcavgcp',        label:'Avg Run CP',     desc:'Average total Composure Points across every completed run', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
-  { key:'pcfullhitrate',  label:'Full-Hit Rate',  desc:'% of rounds graded a full hit',           fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
-  { key:'pcpartialhitrate', label:'Partial-Hit Rate', desc:'% of rounds graded a partial hit (right sector, wrong ring)', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
-  { key:'pcwinpct',       label:'Win Rate',       desc:'% of H2H Pressure Chamber runs won',      fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'pcfullhitrate',  label:'Full-Hit Rate',  desc:'% of rounds graded a full hit',           fmt:pctFmt, primary:true },
+  { key:'pcpartialhitrate', label:'Partial-Hit Rate', desc:'% of rounds graded a partial hit (right sector, wrong ring)', fmt:pctFmt, primary:true },
+  { key:'pcwinpct',       label:'Win Rate',       desc:'% of H2H Pressure Chamber runs won',      fmt:pctFmt, primary:true },
   { key:'pcruns',         label:'Runs Completed', desc:'Pressure Chamber runs completed',         fmt:v=>v!=null?String(Math.round(v)):'—' },
   { key:'pcdartsthrown',  label:'Darts Thrown',   desc:'Total darts thrown in Pressure Chamber runs', fmt:v=>v!=null?Number(v).toLocaleString():'—' },
   // docs/archive/pressure-chamber-roadmap.md build-order step 10: an informational
   // self-discipline signal — how often the player's own before-the-throw hit/miss
   // declaration matched the round's real outcome. Never a scoring input; '—' until
   // a declaration has actually been made.
-  { key:'pchonesty',      label:'Honesty %',      desc:'% of self-declared calls that matched the round\'s real hit/miss outcome', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'pchonesty',      label:'Honesty %',      desc:'% of self-declared calls that matched the round\'s real hit/miss outcome', fmt:pctFmt },
 ];
 // Translates a PRESSURE_CHAMBER_STAT_DEFS key to getPressureChamberStatBubbles()'s JSON field name.
 const PRESSURE_CHAMBER_BUBBLE_KEY_MAP = { pcavgcp:'avgCp', pcfullhitrate:'fullHitRate', pcpartialhitrate:'partialHitRate',
@@ -12809,11 +12821,11 @@ const PRESSURE_CHAMBER_BUBBLE_KEY_MAP = { pcavgcp:'avgCp', pcfullhitrate:'fullHi
 // Played" plays that role instead. Every bubble here has a matching
 // getBobs27StatBubbles() field (backend/db.js).
 const BOBS_27_STAT_DEFS = [
-  { key:'bobs27survivalrate', label:'Survival Rate', desc:"% of Bob's 27 runs that survived all 20 rounds", fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'bobs27survivalrate', label:'Survival Rate', desc:"% of Bob's 27 runs that survived all 20 rounds", fmt:pctFmt, primary:true },
   { key:'bobs27avgscore', label:'Avg Final Score', desc:"Average final score across every Bob's 27 run", fmt:v=>v!=null?v.toFixed(0):'—', primary:true },
   { key:'bobs27runs', label:'Runs Played', desc:"Number of Bob's 27 runs played", fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
   { key:'bobs27dartsthrown', label:'Darts Thrown', desc:"Total darts thrown in Bob's 27", fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
-  { key:'bobs27doubleshitrate', label:'Doubles Hit %', desc:"% of darts thrown that hit that round's own double", fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'bobs27doubleshitrate', label:'Doubles Hit %', desc:"% of darts thrown that hit that round's own double", fmt:pctFmt },
 ];
 const BOBS_27_BUBBLE_KEY_MAP = { bobs27survivalrate:'survivalRate', bobs27avgscore:'avgFinalScore',
   bobs27runs:'runs', bobs27dartsthrown:'dartsThrown', bobs27doubleshitrate:'doublesHitRate' };
@@ -12821,7 +12833,7 @@ const BOBS_27_BUBBLE_KEY_MAP = { bobs27survivalrate:'survivalRate', bobs27avgsco
 // The 121 Checkout Ladder (docs/archive/practice-ladders-roadmap.md Part B).
 const CHECKOUT_LADDER_STAT_DEFS = [
   { key:'checkoutladderattempts', label:'Attempts', desc:'Number of checkout ladder attempts made', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
-  { key:'checkoutladdersuccessrate', label:'Success Rate', desc:'% of attempts that checked out before running out of visits', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'checkoutladdersuccessrate', label:'Success Rate', desc:'% of attempts that checked out before running out of visits', fmt:pctFmt, primary:true },
   { key:'checkoutladdercurrentposition', label:'Current Position', desc:"This player's ladder position at the end of their most recent run", fmt:v=>v!=null?String(v):'—', primary:true },
   { key:'checkoutladderdartsthrown', label:'Darts Thrown', desc:'Total darts thrown on the checkout ladder', fmt:v=>v!=null?Number(v).toLocaleString():'—' },
 ];
@@ -12832,9 +12844,9 @@ const CHECKOUT_LADDER_BUBBLE_KEY_MAP = { checkoutladderattempts:'attempts', chec
 const GAUNTLET_STAT_DEFS = [
   { key:'gauntletrunscompleted', label:'Runs Completed', desc:'Number of full 20-station Gauntlet runs completed', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
   { key:'gauntletavgtotalscars', label:'Avg Total Scars', desc:'Average total Scars per completed run', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
-  { key:'gauntletcleanstationrate', label:'Clean Station Rate', desc:'% of stations finished with 0 misses on their final attempt', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
-  { key:'gauntletdeepscarrate', label:'Deep Scar Rate', desc:'% of stations that finished with all 3 tasks missed', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
-  { key:'gauntletretryrate', label:'Retry Rate', desc:'% of stations that needed the one-time repeat', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'gauntletcleanstationrate', label:'Clean Station Rate', desc:'% of stations finished with 0 misses on their final attempt', fmt:pctFmt, primary:true },
+  { key:'gauntletdeepscarrate', label:'Deep Scar Rate', desc:'% of stations that finished with all 3 tasks missed', fmt:pctFmt },
+  { key:'gauntletretryrate', label:'Retry Rate', desc:'% of stations that needed the one-time repeat', fmt:pctFmt },
 ];
 const GAUNTLET_BUBBLE_KEY_MAP = { gauntletrunscompleted:'runsCompleted', gauntletavgtotalscars:'avgTotalScars',
   gauntletcleanstationrate:'cleanStationRate', gauntletdeepscarrate:'deepScarRate', gauntletretryrate:'retryRate' };
@@ -12844,10 +12856,10 @@ const GAUNTLET_BUBBLE_KEY_MAP = { gauntletrunscompleted:'runsCompleted', gauntle
 // without becoming a killer' style curiosity stat").
 const KILLER_STAT_DEFS = [
   { key:'killergamesplayed', label:'Games Played', desc:'Number of completed Killer matches', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
-  { key:'killerwinrate', label:'Win Rate', desc:'% of Killer matches won', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'killerwinrate', label:'Win Rate', desc:'% of Killer matches won', fmt:pctFmt, primary:true },
   { key:'killeravgkillsperleg', label:'Avg Kills / Leg', desc:'Average number of opponents eliminated per leg', fmt:v=>v!=null?v.toFixed(2):'—', primary:true },
   { key:'killeravgliveslostperleg', label:'Avg Lives Lost / Leg', desc:'Average lives lost per leg, to attacks and self-kills combined', fmt:v=>v!=null?v.toFixed(2):'—' },
-  { key:'killersurvivedwithoutkillerrate', label:'Survived Without Killer', desc:"% of legs finished alive without ever becoming a killer yourself", fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'killersurvivedwithoutkillerrate', label:'Survived Without Killer', desc:"% of legs finished alive without ever becoming a killer yourself", fmt:pctFmt },
 ];
 const KILLER_BUBBLE_KEY_MAP = { killergamesplayed:'gamesPlayed', killerwinrate:'winRate',
   killeravgkillsperleg:'avgKillsPerLeg', killeravgliveslostperleg:'avgLivesLostPerLeg',
@@ -12863,8 +12875,8 @@ const KILLER_BUBBLE_KEY_MAP = { killergamesplayed:'gamesPlayed', killerwinrate:'
 const DEAD_MAN_WALKING_STAT_DEFS = [
   { key:'dmwrunscompleted', label:'Runs Completed', desc:'Number of full 15-round Dead Man Walking runs completed', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
   { key:'dmwavgwalkedout', label:'Avg Walked Out / Run', desc:'Average number of rounds Walked Out per completed run (out of 15)', fmt:v=>v!=null?v.toFixed(1):'—', primary:true },
-  { key:'dmwbustrate', label:'Bust Rate', desc:'% of rounds Executed by a real bust', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
-  { key:'dmwranoutofdartsrate', label:'Out-of-Darts Rate', desc:'% of rounds Executed by running out of the round\'s dart budget, without busting', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'dmwbustrate', label:'Bust Rate', desc:'% of rounds Executed by a real bust', fmt:pctFmt, primary:true },
+  { key:'dmwranoutofdartsrate', label:'Out-of-Darts Rate', desc:'% of rounds Executed by running out of the round\'s dart budget, without busting', fmt:pctFmt },
   { key:'dmwavgmargin', label:'Avg Margin (Walked Out)', desc:'Average darts of budget left unused on a Walked Out round', fmt:v=>v!=null?v.toFixed(1):'—' },
   { key:'dmwlongeststreak', label:'Longest Walked-Out Streak', desc:'Longest run of consecutive Walked Out rounds, lifetime (within or across runs)', fmt:v=>v!=null?String(Math.round(v)):'—' },
 ];
@@ -12876,7 +12888,7 @@ const DEAD_MAN_WALKING_BUBBLE_KEY_MAP = { dmwrunscompleted:'runsCompleted', dmwa
 // vocabulary: darts per round, doubles hit per round, doubles%) — every bubble
 // here has a matching getMetricHistory() case, same completeness as Cricket's set.
 const DOUBLES_PRACTICE_STAT_DEFS = [
-  { key:'doublespracticepct', label:'Doubles %', desc:'Doubles hit ÷ darts thrown, across every Doubles Practice round', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'doublespracticepct', label:'Doubles %', desc:'Doubles hit ÷ darts thrown, across every Doubles Practice round', fmt:pctFmt, primary:true },
   { key:'doublespracticedartsperround', label:'Darts / Round', desc:'Average darts thrown per Doubles Practice round', fmt:v=>v!=null?Number(v).toFixed(1):'—', primary:true },
   { key:'doublespracticehitsperround', label:'Doubles Hit / Round', desc:'Average doubles hit per Doubles Practice round', fmt:v=>v!=null?Number(v).toFixed(1):'—', primary:true },
 ];
@@ -12893,9 +12905,9 @@ const CHUCKIN_STAT_DEFS = [
   { key:'chuckin180s', label:'180s', desc:"Count of 180s thrown in Just Chuckin' It (3 consecutive darts, treated as a turn, all landing as treble 20)", fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
   { key:'chuckinsessions', label:'Sessions Played', desc:"Number of Just Chuckin' It sessions", fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
   { key:'chuckinavgdartspersession', label:'Darts / Session', desc:'Average darts thrown per session', fmt:v=>v!=null?Number(v).toFixed(1):'—' },
-  { key:'chuckintreblepct', label:'Treble %', desc:'% of darts landing in a treble bed', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
-  { key:'chuckindoublepct', label:'Double %', desc:'% of darts landing in a double bed (including double bull)', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
-  { key:'chuckinbullpct', label:'Bull %', desc:'% of darts landing on the bullseye (single or double)', fmt:v=>v!=null?v.toFixed(1)+'%':'—' },
+  { key:'chuckintreblepct', label:'Treble %', desc:'% of darts landing in a treble bed', fmt:pctFmt },
+  { key:'chuckindoublepct', label:'Double %', desc:'% of darts landing in a double bed (including double bull)', fmt:pctFmt },
+  { key:'chuckinbullpct', label:'Bull %', desc:'% of darts landing on the bullseye (single or double)', fmt:pctFmt },
 ];
 const CHUCKIN_BUBBLE_KEY_MAP = { chuckindartsthrown:'dartsThrown', chuckinsessions:'sessionsPlayed',
   chuckinavgdartspersession:'avgDartsPerSession', chuckintreblepct:'treblePct',
@@ -12905,8 +12917,8 @@ const CHUCKIN_BUBBLE_KEY_MAP = { chuckindartsthrown:'dartsThrown', chuckinsessio
 // accuracy/optimal-rate are the headline numbers (optimal % is THE point of the
 // game, per the roadmap doc), attempts is the volume figure.
 const CHECKOUT_TRAINER_STAT_DEFS = [
-  { key:'checkouttraineroptimalpct', label:'Optimal %', desc:'Attempts matching the objectively fewest darts, ÷ total attempts', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
-  { key:'checkouttraineraccuracypct', label:'Accuracy %', desc:'Legal finishes ÷ total attempts', fmt:v=>v!=null?v.toFixed(1)+'%':'—', primary:true },
+  { key:'checkouttraineroptimalpct', label:'Optimal %', desc:'Attempts matching the objectively fewest darts, ÷ total attempts', fmt:pctFmt, primary:true },
+  { key:'checkouttraineraccuracypct', label:'Accuracy %', desc:'Legal finishes ÷ total attempts', fmt:pctFmt, primary:true },
   { key:'checkouttrainerattempts', label:'Attempts', desc:'Total checkout attempts, Freeform and Checkout Blitz combined', fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
 ];
 const CHECKOUT_TRAINER_BUBBLE_KEY_MAP = { checkouttraineroptimalpct:'optimalPct',
@@ -13784,7 +13796,7 @@ function playerSnapshotCheckoutLadder(p){
    anywhere in this chain, matching Doubles Practice/Chuckin's "runs until End
    game is pressed" shape (neither of those calls DB.completeGame() either). */
 function enterTurnCheckoutLadder(){
-  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  if(noDartsThrown()) return;
   const p = game.players[0];
   const ev = evaluateVisit(p, game.darts, game);
 
@@ -13809,8 +13821,7 @@ function enterTurnCheckoutLadder(){
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.scored, bust:ev.bust, checkout:ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null,
     targetScore: game.checkoutLadderTarget,
-    darts: game.darts.map((d,i) => ({ dartNo: i+1, sector: d.sector, multiplier: d.mult, thrownAt: d.thrownAt,
-      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+    darts: mapDartsForRecord(game.darts) });
 
   const turnRecord = { player:p.name, scored:ev.scored, bust:ev.bust, checkout:ev.win, darts:game.darts.slice() };
   game.currentLegTurns.push(turnRecord);
@@ -13966,8 +13977,7 @@ function enterTurnGauntlet(){
 
   DB.recordTurn({ player:p.name, set:1, leg:1,
     scored: ev.misses, bust:false, checkout:false, checkoutPoints:null, targetScore: station,
-    darts: game.darts.map((d,i) => ({ dartNo: i+1, sector: d.sector, multiplier: d.mult, thrownAt: d.thrownAt,
-      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+    darts: mapDartsForRecord(game.darts) });
 
   const turnRecord = { player:p.name, scored:ev.misses, darts:game.darts.slice() };
   game.currentLegTurns.push(turnRecord);
@@ -14192,7 +14202,7 @@ function evaluateVisitDeadManWalking(player, darts, game){
 
 /* ----- Dead Man Walking turn commit (dispatched from enterTurn()) ----- */
 function enterTurnDeadManWalking(){
-  if(game.darts.length===0){ document.getElementById('status').textContent='Throw at least one dart, or use Miss.'; return; }
+  if(noDartsThrown()) return;
   const p = game.players[0];
   const ev = evaluateVisitDeadManWalking(p, game.darts, game);
 
@@ -14225,8 +14235,7 @@ function enterTurnDeadManWalking(){
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:ev.scored, bust: ev.bust, checkout: ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null,
     targetScore: game.dmwTarget,
-    darts: recordedDarts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
-      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+    darts: mapDartsForRecord(recordedDarts) });
 
   const turnRecord = { player:p.name, scored:ev.scored, bust:ev.bust, checkout:ev.win, darts:recordedDarts.slice() };
   game.currentLegTurns.push(turnRecord);
@@ -15392,8 +15401,7 @@ function submitCheckoutAttempt(){
 
   DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:0, bust:!grade.legal, checkout:grade.legal, checkoutPoints:null, legWon:grade.optimal, targetScore:p.score,
-    darts: game.darts.map((d,i) => ({ dartNo: i+1, sector: d.sector, multiplier: d.mult, thrownAt: d.thrownAt,
-      zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced })) });
+    darts: mapDartsForRecord(game.darts) });
 
   game.lastResult = Object.assign({}, grade, { target: p.score });
 

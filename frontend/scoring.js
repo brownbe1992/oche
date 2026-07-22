@@ -440,8 +440,22 @@ function coFinish3(R){
     const two=coFinish2(rest); if(two) return [f.label, ...two]; }
   return null;
 }
+// Pure function of (rem, doubleOut, maxDarts) over a small bounded input space
+// (rem 1-170, boolean, 1-3) but called up to twice per dart from
+// updateCheckout()/liveSnapshot() (frontend/index.html) — memoized so a
+// repeated call with the same inputs skips the O(400) CO_FIRSTS x CO_FIRSTS
+// search instead of re-running it.
+const _checkoutHintCache = new Map();
 function checkoutHint(rem, doubleOut, maxDarts){
   if(maxDarts == null) maxDarts = 3;
+  const cacheKey = `${rem}|${doubleOut}|${maxDarts}`;
+  const cached = _checkoutHintCache.get(cacheKey);
+  if(cached !== undefined) return cached;
+  const result = _checkoutHintCompute(rem, doubleOut, maxDarts);
+  _checkoutHintCache.set(cacheKey, result);
+  return result;
+}
+function _checkoutHintCompute(rem, doubleOut, maxDarts){
   if(rem<1 || rem>170 || maxDarts<1) return '';
   if(doubleOut){
     if(rem<2) return '';
@@ -1302,10 +1316,20 @@ const PRESSURE_NO_WARMUP_MS = 5000;
 // The single load-bearing function: a round's card as a pure function of
 // (gameId, roundIndex) — reachable identically from the live client,
 // backend/db.js's write-time guard, and every read-time derived-CP query.
+// Pure function of (gameId, roundIndex), but called repeatedly per dart across
+// several render/live-state sites (frontend/index.html) that all re-derive the
+// same round's card — memoized so a Pressure Chamber game's fixed card sequence
+// is hashed once per round, not re-hashed on every call.
+const _pressureCardCache = new Map();
 function generatePressureCard(gameId, roundIndex){
+  const key = `${gameId}|${roundIndex}`;
+  const cached = _pressureCardCache.get(key);
+  if(cached) return cached;
   const targetIdx = _pcSeededIndex(`${gameId}|${roundIndex}|target`, PRESSURE_TARGET_POOL.length);
   const modifierIdx = _pcSeededIndex(`${gameId}|${roundIndex}|modifier`, PRESSURE_MODIFIERS.length);
-  return { round: roundIndex, target: PRESSURE_TARGET_POOL[targetIdx], modifier: PRESSURE_MODIFIERS[modifierIdx] };
+  const card = { round: roundIndex, target: PRESSURE_TARGET_POOL[targetIdx], modifier: PRESSURE_MODIFIERS[modifierIdx] };
+  _pressureCardCache.set(key, card);
+  return card;
 }
 
 // Sector/ring grading — "best of the round's darts" (docs/archive/pressure-chamber-roadmap.md
