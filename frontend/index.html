@@ -4922,7 +4922,17 @@ function renderSetupStep2Content(){
   const hasFixtures = setup.pendingFixtures.length>0;
   const visible = setupVisibleOptions();
   let currentKey = currentSetupOptionKey();
-  const stillValid = (currentKey==='league_game' && hasFixtures) || visible.some(o=>o.key===currentKey);
+  // Bug: a key like 'x01' stays in `visible` regardless of player count (X01/
+  // Cricket/Baseball/Shanghai/Halve-It/Pressure Chamber all support both
+  // solo practice AND H2H) — so merely being "still offered" doesn't prove
+  // setup.mode itself still matches the CURRENT player count. Without this,
+  // going from 2 players down to 1 (or ever only having had 1 player at all)
+  // left a stale mode==='h2h' in place, silently surfacing Step 3's H2H-only
+  // legs/sets format picker for what was actually a solo game.
+  const ctx = setupPlayerCount()>=2 ? 'h2h' : 'practice';
+  const currentContext = (setup.mode==='h2h' || setup.mode==='practice') ? setup.mode : null;
+  const stillValid = (currentKey==='league_game' && hasFixtures)
+    || (visible.some(o=>o.key===currentKey) && (currentContext==null || currentContext===ctx));
   if(!stillValid){
     setup.leagueFixtureId = null;
     const fallback = visible.find(o=>o.key==='x01') || visible[0];
