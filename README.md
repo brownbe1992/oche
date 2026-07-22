@@ -186,6 +186,15 @@ A **"View full stats glossary"** link opens a shared reference explaining every 
 
 ### New Game
 
+A 3-step wizard: **choose a game** first (a categorized picker — Traditional,
+Practice & Drills, Solo Challenges, Head-to-Head Only, Special Modes — plus a
+Daily Challenge section on top showing who's already completed today's
+challenge), **then** who's playing, then any remaining options. How many
+players you can pick is decided by the game you chose: solo-only modes allow
+exactly one, X01 head-to-head stays capped at two, and every other
+head-to-head-capable game (Cricket, Baseball, Shanghai, Halve-It, Pressure
+Chamber, Killer) allows up to 6.
+
 Configure a game before starting:
 
 | Setting | Options |
@@ -201,12 +210,12 @@ Configure a game before starting:
 | **Variant (Cricket)** | Standard (highest points wins) · Cut-throat (bonus points land on opponents instead, lowest points wins) |
 | **Legs per set** | 1 – 9 |
 | **Sets per game** | 1 – 9 |
-| **Players** | Select from the roster (up to 6); H2H requires 2+ |
+| **Players** | Select from the roster (cap depends on the chosen game — solo-only modes allow exactly 1, X01 H2H stays at 2, other H2H-capable games allow up to 6) |
 | **Finish rule (X01)** | Double out · Single out (set per player) |
 
-H2H mode requires at least two players selected. Practice mode can be played solo or with others and is tracked separately from H2H statistics.
+Solo-only modes are restricted to exactly one player automatically. Every other head-to-head-capable game requires at least two players selected, and is tracked separately from Practice statistics.
 
-Players with a PIN set show a 🔒 next to their name in the dropdown. When exactly two players are selected in H2H mode, a banner shows their all-time head-to-head record (e.g. *"H2H: Alice leads 3–0 (3 games)"*).
+Players with a PIN set show a 🔒 next to their name in the dropdown.
 
 **Handicap (optional)** — a collapsed disclosure appears in X01's options step once 2 or more players are selected, letting a weaker player start the leg from a lower score (e.g. 401 instead of 501) — a per-player picker, no handicap by default. Nothing about the throwing changes, just the starting line; the [Live Scoreboard](#live-scoreboard) shows a "STARTED 401" tag next to a handicapped player's name so it's visible, not mysterious. Handicapped wins still count normally toward win rate and streaks — the whole point is a fair contest — but a handicapped game never enters the [📈 Household Ratings](#home) calculation (a compensated result isn't a fair strength comparison), and a handicapped leg's shortened-start finish never counts toward a nine-darter or the "fewest darts to finish" Personal Best.
 

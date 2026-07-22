@@ -120,6 +120,37 @@
   /* ---- New Game page ---- */
   .setup-section{margin-bottom:20px}
   .setup-label{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:8px}
+  /* Step 1's game-choice ledger (item: too many game-type options crammed into
+     one flat dropdown) — collapsible categories, one open at a time, each
+     row showing a category-colored icon medallion + name + one-line teaser
+     so a game's nature is legible before it's picked, not hidden behind a
+     post-selection blurb box. */
+  .setup-cat{margin-bottom:4px}
+  .setup-cat-head{display:flex;align-items:center;justify-content:space-between;padding:12px 4px;cursor:pointer;border-bottom:1px solid var(--wire)}
+  .setup-cat-head.open{border-bottom-color:transparent}
+  .setup-cat-title{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:.03em}
+  .setup-cat-sub{font-size:11px;color:var(--muted);margin-top:2px}
+  .setup-cat-chevron{transition:transform .2s;color:var(--muted);flex:none}
+  .setup-cat-head.open .setup-cat-chevron{transform:rotate(180deg)}
+  .setup-cat-rows{padding:6px 2px 12px;display:flex;flex-direction:column;gap:2px}
+  .setup-ledger-row{display:flex;gap:12px;align-items:flex-start;padding:10px 6px;border-radius:10px;cursor:pointer}
+  .setup-ledger-row:hover{background:var(--surface-2)}
+  .setup-ledger-row.sel{background:var(--surface-2);box-shadow:inset 0 0 0 1.5px var(--gold)}
+  .setup-ledger-medal{flex:none;width:32px;height:32px;border-radius:9px;background:var(--board);border:1px solid var(--wire);display:flex;align-items:center;justify-content:center}
+  .setup-ledger-name{font-weight:700;font-size:14px;color:var(--ink)}
+  .setup-ledger-teaser{font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.35}
+  .setup-ledger-check{flex:none;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--wire);margin-top:5px}
+  .setup-ledger-row.sel .setup-ledger-check{background:var(--gold);border-color:var(--gold)}
+  /* Daily Challenge's own featured section, above every category — same glow
+     treatment as the Home page's .challenge-spotlight card so it reads as the
+     identical "today's special one" signal in both places. */
+  .setup-dc{margin-bottom:22px;cursor:pointer}
+  .setup-dc-top{display:flex;align-items:center;gap:8px}
+  .setup-dc-title{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:.03em;color:var(--gold)}
+  .setup-dc-name{font-size:12.5px;color:var(--ink);margin-top:4px;font-weight:600}
+  .setup-dc-completed{font-size:11.5px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--wire)}
+  .setup-dc-completed b{color:var(--ink);font-weight:600}
+  .setup-dc-check{color:var(--green);font-weight:800;margin-right:2px}
   /* player slots */
   .players-list{display:flex;flex-direction:column;gap:8px;margin:4px 0 16px}
   .player-row{display:flex;gap:8px;align-items:center}
@@ -905,12 +936,38 @@
       <div class="chalk-tally" id="setup-step-tally" aria-hidden="true">
         <span class="tally-mark"></span><span class="tally-mark"></span><span class="tally-mark"></span>
       </div>
-      <p class="pp-meta" id="setup-step-label" style="margin:0 0 16px">Step 1 of 3 — Who's playing?</p>
+      <p class="pp-meta" id="setup-step-label" style="margin:0 0 16px">Step 1 of 3 — Choose a game</p>
 
-      <!-- ===== Step 1: Who's playing? (docs/archive/new-game-flow-roadmap.md) =====
-           A select → "Add someone else?" loop, not the old always-visible-rows
-           list — renderPlayers() (unchanged name, rewritten body) drives this. -->
+      <!-- ===== Step 1: Choose a game (Chalkboard Ledger — item: too many game-type
+           options crammed into one flat dropdown, no grouping, inconsistent emoji) =====
+           A featured Daily Challenge section on top, then every other game type
+           grouped into collapsible categories — renderSetupGameLedger() drives
+           this. Shown before players are picked (reversed from the old order) so
+           the chosen game can determine how many players Step 2 allows. -->
       <div id="setup-step-1">
+        <div id="setup-dc-section"></div>
+        <div id="setup-game-categories"></div>
+        <!-- X01 starting score only (League Game's own "which match?" question
+             moved to Step 2, where the pair is actually known). -->
+        <div class="setup-section" id="setup-flavor-section" hidden>
+          <div class="setup-label" id="setup-flavor-label">Starting score</div>
+          <select class="date-input" id="setup-flavor-select" style="width:auto" onchange="onSetupFlavorSelect(this.value)"></select>
+        </div>
+        <div class="setup-section" id="setup-blurb-section" style="border:1px solid var(--gold);border-radius:10px;padding:12px">
+          <div id="setup-blurb-body"></div>
+        </div>
+        <div class="btn-row" style="margin-top:16px">
+          <button class="btn btn-primary" id="setup-step1-continue" onclick="setupGoToStep2()">Continue</button>
+        </div>
+      </div>
+
+      <!-- ===== Step 2: Who's playing? (docs/archive/new-game-flow-roadmap.md) =====
+           A select → "Add someone else?" loop, not the old always-visible-rows
+           list — renderPlayers() (unchanged name, rewritten body) drives this.
+           How many slots it allows depends on the game chosen in Step 1 —
+           see maxPlayersForSetup(). -->
+      <div id="setup-step-2" hidden>
+        <button class="btn btn-ghost btn-sm" style="margin-bottom:16px" onclick="setupBackTo(1)">← Back</button>
         <!-- Saved games (docs/archive/saved-games-roadmap.md) — above the player slots,
              visible before any setup effort is spent; hidden entirely when none
              exist (refreshSavedGamesList()). -->
@@ -922,24 +979,24 @@
           <div class="setup-label">Players</div>
           <div class="players-list" id="players-list"></div>
         </div>
-      </div>
-
-      <!-- ===== Step 2: Choose a game ===== -->
-      <div id="setup-step-2" hidden>
-        <button class="btn btn-ghost btn-sm" style="margin-bottom:16px" onclick="setupBackTo(1)">← Back</button>
-        <div class="setup-section">
-          <div class="setup-label" id="setup-mode-select-label">What are you playing?</div>
-          <select class="date-input" id="setup-mode-select" style="width:100%;max-width:340px" aria-label="What are you playing?" onchange="onSetupModeSelect(this.value)"></select>
+        <!-- Daily Challenge's own "already attempted today" block for the ONE
+             player chosen here (distinct from Step 1's DC section, which lists
+             every player who's completed it — this checks the specific person
+             about to play). Only ever shown/relevant when the chosen game is
+             Daily Challenge. -->
+        <div class="setup-section" id="setup-challenge-status-section" hidden>
+          <div id="setup-challenge-status-body"></div>
         </div>
-        <!-- X01 starting score, OR "which league match?" when 2+ pending fixtures
-             are shared with the current pair — never both at once (one primary
-             entry is selected at a time). -->
-        <div class="setup-section" id="setup-flavor-section" hidden>
-          <div class="setup-label" id="setup-flavor-label">Starting score</div>
-          <select class="date-input" id="setup-flavor-select" style="width:auto" onchange="onSetupFlavorSelect(this.value)"></select>
-        </div>
-        <div class="setup-section" id="setup-blurb-section" style="border:1px solid var(--gold);border-radius:10px;padding:12px">
-          <div id="setup-blurb-body"></div>
+        <!-- Pending league fixture for the current pair (docs/archive/league-mode-roadmap.md) —
+             only ever shown once exactly 2 players are chosen and they share a
+             pending fixture; opt-in via the checkbox, never forced. -->
+        <div class="setup-section" id="setup-league-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
+          <div class="setup-label" style="color:var(--gold)">🏆 Pending League Match</div>
+          <p class="pp-meta" id="setup-league-desc" style="margin:0 0 8px"></p>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="setup-league-toggle" onchange="toggleLeagueGameSelection(this.checked)">
+            Count this game toward the league standings
+          </label>
         </div>
         <div class="btn-row" style="margin-top:16px">
           <button class="btn btn-primary" id="setup-step2-continue" onclick="setupGoToStep3()">Continue</button>
@@ -2061,10 +2118,12 @@ let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, 
   // roll normally" — see setMode()'s checkout_trainer branch for how it's applied
   // (and reset) every time this mode is (re)entered.
   // leagueFixtureId (docs/archive/league-mode-roadmap.md "League fixtures / pending
-  // matches"): only ever set via Step 2's "League Game" entry — an EXPLICIT choice,
-  // unlike the old category-based ambiguity picker this superseded (docs/archive/new-game-flow-roadmap.md).
+  // matches"): only ever set by toggling Step 2's "League Game" banner on — an
+  // EXPLICIT opt-in, unlike the old category-based ambiguity picker this superseded
+  // (docs/archive/new-game-flow-roadmap.md).
   // pendingFixtures: the current player pair's GET /api/leagues/pending-fixture
-  // result, fetched once Step 1 completes — [] means "League Game" isn't offered.
+  // result, refetched reactively whenever exactly 2 are named in Step 2 — []
+  // means the banner isn't offered.
   // Both reset to null/[] whenever the setup screen (re)loads.
   // loadoutByName: player name -> {id,name} of the loadout picked for THIS New Game
   // visit (docs/archive/dart-builder-roadmap.md) — reset each time the setup screen loads;
@@ -2287,6 +2346,9 @@ function show(name){
     } else {
       setup.slots=[]; setup.loadoutByName={}; setup.leagueFixtureId=null; setup.pendingFixtures=[];
       sanitizeSlots(); renderPlayers(); updateFormatLine();
+      renderSetupDailyChallengeSection();
+      renderSetupGameLedger();
+      renderSetupFlavorAndBlurb();
       showSetupStep(1);
       // stats are cached client-side and only refetched on demand — without this, averages
       // shown here can be stale after playing a game earlier in the same session.
@@ -3824,10 +3886,11 @@ function drillButtonHtml(jName, score){
 // H2H/Practice/Daily Challenge/Ghost/Doubles Practice/Just Chuckin' It/Checkout
 // Trainer/Around the Clock/Around the World; gameType (x01/cricket/baseball) only
 // applies when mode is 'h2h' or 'practice'. Every drill mode is reached through
-// Step 2's single flat dropdown (NEW_GAME_MODE_OPTIONS), which never even offers a
-// solo-only mode once 2+ players are selected in Step 1 — so the single-slot
-// truncation below is purely a safety net for the few call sites that invoke
-// setMode() directly (raceLeg(), the post-game "Try Again"/"Play again" buttons).
+// Step 1's game-choice ledger (NEW_GAME_MODE_OPTIONS), which caps Step 2 at a
+// single player slot for any solo-only mode (maxPlayersForSetup()) — so the
+// single-slot truncation below is purely a safety net for the few call sites
+// that invoke setMode() directly (raceLeg(), the post-game "Try Again"/"Play
+// again" buttons).
 // One map drives both the forced-single-player/1-leg/1-set "special mode"
 // behavior AND the Start button's per-mode label (item 46, docs/code-quality-
 // roadmap.md) — these were two separate hardcoded 12-mode lists that could
@@ -3855,7 +3918,7 @@ function setMode(mode){
   // mode must reset gameType back to a real one — otherwise it stays stuck on
   // the drill's own type underneath, and startGame() (which reads
   // setup.gameType, not any control) would silently build that drill's game
-  // type regardless of what Step 2 visibly shows.
+  // type regardless of what Step 1's ledger visibly shows.
   const drillGameTypes = ['doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'dead_man_walking'];
   if(!drillGameTypes.includes(mode) && drillGameTypes.includes(setup.gameType)) setup.gameType = 'x01';
   // Daily Challenge's underlying gameType is per-FORMAT (CHALLENGE_FORMAT_DEFS),
@@ -3889,7 +3952,7 @@ function setMode(mode){
     // is a one-shot value set by drillCheckout() right before this call — same
     // "module-level variable consumed by the very next setMode() call" pattern
     // _ghostLegTarget/raceLeg() already established. Consuming it here means every
-    // OTHER way of reaching this mode (the Step 2 dropdown, "Try Again") naturally
+    // OTHER way of reaching this mode (Step 1's ledger, "Try Again") naturally
     // lands with no pin, even if a stale one is still sitting in setup.* from an
     // earlier drill this session.
     setup.checkoutTrainerPin = _checkoutDrillPin;
@@ -4104,7 +4167,7 @@ function selectGhostLeg(i){
    variable set right before setMode(), consumed synchronously the moment setMode()
    lands on 'checkout_trainer' (see that function's own comment), plus a second
    one-shot flag consumed by show('setup') to jump straight to Step 3 instead of
-   the normal Step 1 player picker. */
+   the normal Step 1 game ledger / Step 2 player picker. */
 let _checkoutDrillPin = null;
 let _enteringSetupFromDrill = false;
 function drillCheckout(playerName, targetScore){
@@ -4762,7 +4825,7 @@ function sanitizeSlots(){
   if(setup.slots.length===0 && roster.length) setup.slots = [''];
 }
 
-// Step 1 — "Who's playing?" (docs/archive/new-game-flow-roadmap.md): a select → "Add
+// Step 2 — "Who's playing?" (docs/archive/new-game-flow-roadmap.md): a select → "Add
 // someone else?" loop, not the old always-visible-rows list. Every already-filled
 // slot renders as a name row (stat line, loadout pill, remove); the one slot still
 // awaiting a pick (if any) renders as a plain "Choose player" select; once every
@@ -4771,6 +4834,13 @@ function sanitizeSlots(){
 function renderPlayers(){
   const box = document.getElementById('players-list');
   if(!box) return;
+  // Re-derive practice-vs-h2h (for the 6 dual game types) and refresh the two
+  // reactive Step 2 sections (Daily Challenge's per-player status, League
+  // Game's pending-fixture banner) every time the slot list changes — the
+  // single choke point every slot mutator below already calls.
+  resyncSetupModeForPlayerCount();
+  renderSetupChallengeStatus();
+  checkLeagueFixtureForPair();
   if(roster.length===0){
     box.innerHTML = `<p style="color:var(--muted);font-size:13px;margin:0">No players yet.</p>
       <div class="btn-row" style="margin-top:12px"><button class="btn btn-primary" onclick="addNewPlayer()">+ New player</button></div>`;
@@ -4827,11 +4897,16 @@ function renderPlayers(){
 
   const named = setup.slots.filter(s=>s);
   const allFilled = setup.slots.length>0 && setup.slots.every(s=>s);
-  const atCap = setup.slots.length>=6;
+  const max = maxPlayersForSetup();
+  const atCap = setup.slots.length>=max;
   let promptHtml = '';
-  if(allFilled && atCap){
-    promptHtml = `<p class="pp-meta" style="margin:12px 0 8px">Maximum of 6 players per game.</p>
-      <div class="btn-row" style="margin:0"><button class="btn btn-primary" style="flex:1" onclick="setupGoToStep2()">Continue</button></div>`;
+  if(allFilled && max===1){
+    // Solo-only selection (or Daily Challenge/Ghost/Marathon) — exactly one
+    // slot, no "add someone else" prompt to show at all.
+    promptHtml = `<div class="btn-row" style="margin:12px 0 0"><button class="btn btn-primary" style="flex:1" onclick="setupGoToStep3()">Continue</button></div>`;
+  } else if(allFilled && atCap){
+    promptHtml = `<p class="pp-meta" style="margin:12px 0 8px">Maximum of ${max} players per game.</p>
+      <div class="btn-row" style="margin:0"><button class="btn btn-primary" style="flex:1" onclick="setupGoToStep3()">Continue</button></div>`;
   } else if(allFilled){
     // "Add existing"/"New player" share one row (flex:1 each, so together they
     // span the full width evenly); "Continue" gets its own row below, also
@@ -4843,7 +4918,7 @@ function renderPlayers(){
         <button class="btn btn-ghost" style="flex:1" onclick="addNewPlayer()">New player</button>
       </div>
       <div class="btn-row" style="margin-top:10px">
-        <button class="btn btn-primary" style="flex:1" onclick="setupGoToStep2()">Continue</button>
+        <button class="btn btn-primary" style="flex:1" onclick="setupGoToStep3()">Continue</button>
       </div>`;
   }
   const shuffleHtml = named.length>=2
@@ -4906,12 +4981,12 @@ function selectLoadoutForSlot(name, slotIndex, loadoutId){
 }
 
 function addExistingPlayer(){
-  if(setup.slots.length>=6) return;
+  if(setup.slots.length>=maxPlayersForSetup()) return;
   setup.slots.push('');
   renderPlayers();
 }
 function addNewPlayer(){
-  if(setup.slots.length>=6) return;
+  if(setup.slots.length>=maxPlayersForSetup()) return;
   Auth.ensureCanWrite(()=>uiAddPlayer((name,opts)=>{
     const a=addToRoster(name,opts);
     if(!a) return;
@@ -5024,26 +5099,31 @@ function resolveHalveItTargets(){
 }
 
 /* =========================================================================
-   New Game wizard — Step 2 "Choose a game" (docs/archive/new-game-flow-roadmap.md)
-   One flat dropdown replacing the old Mode row + Practice-type sub-toggle +
-   X01/Cricket/Baseball toggle, filtered by how many players Step 1 picked.
+   New Game wizard — Step 1 "Choose a game" (docs/archive/new-game-flow-roadmap.md,
+   reordered ahead of player-choice per item: too many game-type options
+   crammed into one flat dropdown). NEW_GAME_MODE_OPTIONS below is the same
+   underlying option list the old dropdown used; only the presentation changed
+   (a grouped, always-informative ledger — see GAME_LEDGER_CATEGORIES/
+   renderSetupGameLedger() below), and what used to filter the list by
+   already-picked player count now instead caps how many players Step 2 allows
+   for whatever's picked here (maxPlayersForSetup()).
    ========================================================================= */
 function setupPlayerCount(){ return setup.slots.filter(s=>s).length; }
 
-// contexts: which player counts this entry is offered for ('practice' = exactly
-// 1, 'h2h' = 2+ — see docs/archive/new-game-flow-roadmap.md's table), derived
-// from GAME_TYPES' own soloOnly/h2hOnly flags via contextsForMode() (item 46,
-// docs/code-quality-roadmap.md) rather than hand-duplicated here — only
-// challenge/ghost declare an explicit `contexts` array below, since both play
-// as plain x01 underneath and have no GAME_TYPES entry of their own to derive
-// from. blurb is the how-to-play text shown in Step 2 for every entry except
-// Daily Challenge, which renders a live status card instead
-// (renderSetupChallengeBlurb()). apply() reuses the existing setMode()/
-// setGameType() handlers exactly as they were — only the surrounding screen
-// structure changed, not what gets validated or what the game object ends up
-// looking like.
+// Which player counts a key is valid for ('practice' = exactly 1, 'h2h' = 2+)
+// is derived by chosenGameContexts() below from GAME_TYPES' own soloOnly/
+// h2hOnly flags via contextsForMode() (item 46, docs/code-quality-roadmap.md)
+// — challenge/ghost/marathon are special-cased there instead, since all three
+// play as plain/chained x01 underneath and have no GAME_TYPES entry of their
+// own to derive from. blurb is the how-to-play text shown in Step 1's recap
+// box for every entry except Daily Challenge, which has its own dedicated
+// sections instead (renderSetupDailyChallengeSection() in Step 1,
+// renderSetupChallengeStatus() in Step 2). apply() reuses the existing
+// setMode()/setGameType() handlers exactly as they were — only the
+// surrounding screen structure changed, not what gets validated or what the
+// game object ends up looking like.
 const NEW_GAME_MODE_OPTIONS = [
-  { key:'challenge', label:'🎯 Daily Challenge', contexts:['practice'],
+  { key:'challenge', label:'🎯 Daily Challenge',
     apply(){ setMode('challenge'); } },
   { key:'x01', label:'X01',
     blurb:"Count down from your starting score to exactly zero, finishing on a double (or single, if that player's finish rule is set to Singles Out). Play solo for practice, or head-to-head against another player.",
@@ -5069,7 +5149,7 @@ const NEW_GAME_MODE_OPTIONS = [
   { key:'doubles_practice', label:'Doubles Practice',
     blurb:"Choose one or more doubles to practice on the next step — all stay live at once. A single/treble on a target number, or hitting a different double, ends the round.",
     apply(){ setMode('doubles_practice'); } },
-  { key:'ghost', label:'👻 Ghost Mode', contexts:['practice'],
+  { key:'ghost', label:'👻 Ghost Mode',
     blurb:"Race against a recording of one of your own past legs, dart for dart — whoever checks out first wins. Choose which leg to race on the next step.",
     apply(){ setMode('ghost'); } },
   { key:'checkout_trainer', label:'🧮 Checkout Trainer',
@@ -5106,11 +5186,7 @@ const NEW_GAME_MODE_OPTIONS = [
 // duplicated list. Only challenge/ghost keep an explicit array: both play as
 // plain x01 underneath (setMode('challenge'|'ghost')), so there's no
 // GAME_TYPES entry of their own to derive from.
-function setupVisibleOptions(){
-  const ctx = setupPlayerCount()>=2 ? 'h2h' : 'practice';
-  return NEW_GAME_MODE_OPTIONS.filter(o=>(o.contexts || contextsForMode(o.key)).includes(ctx));
-}
-// The dropdown's current value: 'league_game' if a fixture is selected, otherwise
+// The ledger's current value: 'league_game' if a fixture is selected, otherwise
 // whatever gameType/mode setMode()/setGameType() last landed on.
 function currentSetupOptionKey(){
   if(setup.leagueFixtureId != null) return 'league_game';
@@ -5119,11 +5195,10 @@ function currentSetupOptionKey(){
 }
 
 // League Game (docs/archive/league-mode-roadmap.md "League fixtures / pending matches"):
-// fetched once, right when Step 1 completes with exactly 2 players — see
-// setupGoToStep2(). Injected at the top of the dropdown only when the pair has at
-// least one pending (scheduled-but-unplayed) fixture in a shared active league;
-// absent entirely otherwise, fully replacing the old category-based ambiguity
-// picker this superseded (docs/archive/new-game-flow-roadmap.md).
+// checked once exactly 2 players are named in Step 2 (checkLeagueFixtureForPair()
+// below) — surfaced as an opt-in banner there rather than a selectable entry in
+// Step 1's game list, since a fixture is tied to a specific pair that isn't known
+// until Step 2 (the reorder that moved game-choice ahead of player-choice).
 function applyLeagueGameSelection(){
   const fixtures = setup.pendingFixtures;
   const chosen = fixtures.find(f=>f.fixtureId===setup.leagueFixtureId) || fixtures[0];
@@ -5150,30 +5225,210 @@ function applyLeagueGameSelection(){
   }
 }
 
-function onSetupModeSelect(key){
-  setup.leagueFixtureId = null;
-  if(key === 'league_game') applyLeagueGameSelection();
-  else { const opt = NEW_GAME_MODE_OPTIONS.find(o=>o.key===key); if(opt) opt.apply(); }
-  renderSetupFlavorAndBlurb();
-}
 function onSetupFlavorSelect(value){
   const key = currentSetupOptionKey();
-  if(key === 'league_game'){ setup.leagueFixtureId = Number(value); applyLeagueGameSelection(); renderSetupFlavorAndBlurb(); }
-  else if(key === 'x01'){ setup.start = Number(value); }
+  if(key === 'x01') setup.start = Number(value);
+}
+
+// ---- Step 1 ledger: category grouping + a clean display name + a one-line
+// teaser per game (distinct from each option's longer `blurb`, still shown in
+// the recap box below the ledger once a game is picked). Presentation-only —
+// kept separate from NEW_GAME_MODE_OPTIONS itself since neither is validated
+// or sent to the server. Grouping matches how the games actually differ in
+// nature: traditional games playable solo or head-to-head, pure practice
+// drills, single-player games deliberately framed with stakes/tension, the
+// one game that structurally needs an opponent, and X01 variants layered on
+// top of it.
+const GAME_LEDGER_CATEGORIES = [
+  { key:'traditional', label:'Traditional', accent:'var(--gold)', sub:'Solo or head-to-head',
+    keys:['x01','cricket','baseball','shanghai','halve_it'] },
+  { key:'training', label:'Practice & Drills', accent:'var(--green)', sub:'Solo skill-building, no opponent',
+    keys:['doubles_practice','chuckin','checkout_trainer','around_the_clock','around_the_world','bobs_27','checkout_ladder'] },
+  { key:'solo_stakes', label:'Solo Challenges', accent:'var(--red-text)', sub:'Single-player, played under pressure',
+    keys:['pressure_chamber','gauntlet','dead_man_walking'] },
+  { key:'h2h_only', label:'Head-to-Head Only', accent:'#8a6fd1', sub:'Needs an opponent',
+    keys:['killer'] },
+  { key:'special', label:'Special Modes', accent:'var(--cream)', sub:'A twist on X01',
+    keys:['ghost','marathon'] },
+];
+const GAME_LEDGER_NAMES = {
+  x01:'X01', cricket:'Cricket', baseball:'Baseball', shanghai:'Shanghai', halve_it:'Halve-It',
+  doubles_practice:'Doubles Practice', chuckin:"Just Chuckin' It", checkout_trainer:'Checkout Trainer',
+  around_the_clock:'Around the Clock', around_the_world:'Around the World', bobs_27:"Bob's 27", checkout_ladder:'121 Checkout Ladder',
+  pressure_chamber:'The Pressure Chamber', gauntlet:'The Gauntlet', dead_man_walking:'Dead Man Walking',
+  killer:'Killer', ghost:'Ghost Mode', marathon:'Marathon Mode',
+};
+const GAME_LEDGER_TEASERS = {
+  x01:'Count down to zero, finish on a double.',
+  cricket:'Close 15–20 and Bull before your opponent.',
+  baseball:'9 innings, one target number per inning.',
+  shanghai:'One number per round — hit all three rings to win outright.',
+  halve_it:'7 fixed targets — miss all three and your score is halved.',
+  doubles_practice:'Pick one or more doubles and drill them.',
+  chuckin:'No score, no leg — just throw.',
+  checkout_trainer:'No dartboard — recall the optimal checkout from memory.',
+  around_the_clock:'Hit every number 1–20, in any order.',
+  around_the_world:'Chip away at all 63 lifetime outcomes.',
+  bobs_27:'The classic doubles routine — D1 through D20.',
+  checkout_ladder:'Climb the ladder one real checkout at a time.',
+  pressure_chamber:'15 rounds, 15 cards — a target, stakes, and a modifier.',
+  gauntlet:'20 stations, one repeat attempt if you miss.',
+  dead_man_walking:'15 rounds of your own worst historical finishes.',
+  killer:'Build lives on your own number, then hunt everyone else’s.',
+  ghost:'Race a recording of your own past leg, dart for dart.',
+  marathon:'45 minutes of chained 501 legs, back to back.',
+};
+// One small monoline icon per category (not per exact game) — a single
+// coherent visual system replacing the old ad hoc "some names have an emoji
+// prefix, some don't" inconsistency.
+function ledgerCategoryIcon(catKey, color){
+  const s = 20;
+  const stroke = `stroke="${color}" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"`;
+  const glyphs = {
+    traditional: `<circle cx="${s/2}" cy="${s/2}" r="${s*0.42}" ${stroke}/><circle cx="${s/2}" cy="${s/2}" r="${s*0.22}" ${stroke}/><circle cx="${s/2}" cy="${s/2}" r="${s*0.06}" fill="${color}"/>`,
+    training: `<circle cx="${s/2}" cy="${s/2}" r="${s*0.4}" ${stroke}/><line x1="${s*0.5}" y1="${s*0.12}" x2="${s*0.5}" y2="${s*0.34}" ${stroke}/><line x1="${s*0.5}" y1="${s*0.66}" x2="${s*0.5}" y2="${s*0.88}" ${stroke}/><line x1="${s*0.12}" y1="${s*0.5}" x2="${s*0.34}" y2="${s*0.5}" ${stroke}/><line x1="${s*0.66}" y1="${s*0.5}" x2="${s*0.88}" y2="${s*0.5}" ${stroke}/>`,
+    solo_stakes: `<path d="M${s*0.5},${s*0.1} C${s*0.3},${s*0.35} ${s*0.25},${s*0.5} ${s*0.35},${s*0.65} C${s*0.3},${s*0.5} ${s*0.42},${s*0.45} ${s*0.42},${s*0.55} C${s*0.42},${s*0.7} ${s*0.5},${s*0.75} ${s*0.5},${s*0.75} C${s*0.5},${s*0.75} ${s*0.58},${s*0.7} ${s*0.58},${s*0.55} C${s*0.58},${s*0.45} ${s*0.7},${s*0.5} ${s*0.65},${s*0.65} C${s*0.75},${s*0.5} ${s*0.7},${s*0.35} ${s*0.5},${s*0.1} Z" ${stroke}/>`,
+    h2h_only: `<line x1="${s*0.15}" y1="${s*0.15}" x2="${s*0.85}" y2="${s*0.85}" ${stroke}/><line x1="${s*0.85}" y1="${s*0.15}" x2="${s*0.15}" y2="${s*0.85}" ${stroke}/><circle cx="${s*0.15}" cy="${s*0.15}" r="1.6" fill="${color}"/><circle cx="${s*0.85}" cy="${s*0.15}" r="1.6" fill="${color}"/>`,
+    special: `<path d="M${s*0.5},${s*0.08} L${s*0.61},${s*0.38} L${s*0.92},${s*0.4} L${s*0.67},${s*0.6} L${s*0.76},${s*0.9} L${s*0.5},${s*0.72} L${s*0.24},${s*0.9} L${s*0.33},${s*0.6} L${s*0.08},${s*0.4} L${s*0.39},${s*0.38} Z" ${stroke}/>`,
+  };
+  return `<svg width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" aria-hidden="true">${glyphs[catKey]||''}</svg>`;
+}
+function setupOpenCategoryKey(){
+  const key = currentSetupOptionKey();
+  const found = GAME_LEDGER_CATEGORIES.find(c=>c.keys.includes(key));
+  return found ? found.key : 'traditional';
+}
+let setupExpandedCategory = ''; // '' = derive from the currently selected game
+function toggleSetupCategory(catKey){
+  setupExpandedCategory = ((setupExpandedCategory || setupOpenCategoryKey()) === catKey) ? 'none' : catKey;
+  renderSetupGameLedger();
+}
+function renderSetupGameLedger(){
+  const el = document.getElementById('setup-game-categories');
+  if(!el) return;
+  const currentKey = currentSetupOptionKey();
+  const openKey = setupExpandedCategory || setupOpenCategoryKey();
+  el.innerHTML = GAME_LEDGER_CATEGORIES.map(cat=>{
+    const isOpen = cat.key === openKey;
+    const rows = cat.keys.map(k=>{
+      const sel = k === currentKey;
+      return `<div class="setup-ledger-row${sel?' sel':''}" role="button" tabindex="0" aria-pressed="${sel}"
+          onclick="selectSetupGame('${k}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectSetupGame('${k}')}">
+        <div class="setup-ledger-medal">${ledgerCategoryIcon(cat.key, cat.accent)}</div>
+        <div style="flex:1"><div class="setup-ledger-name">${escapeHtml(GAME_LEDGER_NAMES[k]||k)}</div><div class="setup-ledger-teaser">${escapeHtml(GAME_LEDGER_TEASERS[k]||'')}</div></div>
+        <div class="setup-ledger-check"></div>
+      </div>`;
+    }).join('');
+    return `<div class="setup-cat">
+      <div class="setup-cat-head${isOpen?' open':''}" style="color:${cat.accent}" role="button" tabindex="0" aria-expanded="${isOpen}"
+        onclick="toggleSetupCategory('${cat.key}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSetupCategory('${cat.key}')}">
+        <div><span class="setup-cat-title">${cat.label}</span><div class="setup-cat-sub">${cat.sub}</div></div>
+        <svg class="setup-cat-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      ${isOpen ? `<div class="setup-cat-rows">${rows}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+// Which player counts a chosen key is valid for — same practice/h2h split
+// GAME_TYPES' own soloOnly/h2hOnly flags encode via contextsForMode(), except
+// challenge/ghost/marathon, which have no GAME_TYPES entry of their own (all
+// three play as plain/chained X01 underneath) so they're special-cased here
+// instead of hitting contextsForMode()'s null-for-unknown-key path.
+function chosenGameContexts(key){
+  if(key==='challenge' || key==='ghost' || key==='marathon') return ['practice'];
+  return contextsForMode(key) || ['practice','h2h'];
+}
+// How many player slots Step 2 allows for whatever's currently chosen — a
+// solo-only type (or Daily Challenge/Ghost/Marathon) allows exactly 1; Killer
+// and the other dual game types allow the existing global max; X01 stays
+// capped at 2 for now — 2-4 player X01 is a deliberate future roadmap item
+// (docs/x01-multiplayer-roadmap.md), not something this reorder silently
+// enables.
+const SETUP_GLOBAL_MAX_PLAYERS = 6;
+function maxPlayersForSetup(){
+  const key = currentSetupOptionKey();
+  if(key === 'league_game') return 2;
+  const ctxs = chosenGameContexts(key);
+  if(ctxs.length===1 && ctxs[0]==='practice') return 1;
+  if(key === 'x01') return 2;
+  return SETUP_GLOBAL_MAX_PLAYERS;
+}
+// The 6 game types playable either solo or head-to-head — the only ones whose
+// setup.mode ('practice' vs 'h2h') needs re-deriving as Step 2's player count
+// changes (every other key's mode is fixed regardless of player count).
+const SETUP_DUAL_MODE_KEYS = ['x01','cricket','baseball','shanghai','halve_it','pressure_chamber'];
+function resyncSetupModeForPlayerCount(){
+  const key = currentSetupOptionKey();
+  if(!SETUP_DUAL_MODE_KEYS.includes(key)) return;
+  const wantMode = setupPlayerCount()>=2 ? 'h2h' : 'practice';
+  if(setup.mode !== wantMode){ setMode(wantMode); setGameType(key); }
+}
+function selectSetupGame(key){
+  const opt = NEW_GAME_MODE_OPTIONS.find(o=>o.key===key);
+  if(!opt) return;
+  setup.leagueFixtureId = null;
+  opt.apply();
+  const max = maxPlayersForSetup();
+  if(setup.slots.length > max) setup.slots = setup.slots.slice(0, max);
+  if(!setup.slots.length) setup.slots = [''];
+  setupExpandedCategory = ''; // collapse back to "derive from selection" (this game's own category)
+  renderSetupGameLedger();
+  renderSetupFlavorAndBlurb();
+}
+
+let _dcCompletionsAbort = null;
+// Step 1's Daily Challenge section: who's already completed TODAY's challenge,
+// across every registered player — purely informational (distinct from Step
+// 2's own per-player "you've already attempted today" block below, which
+// blocks Continue for the specific person about to play).
+function renderSetupDailyChallengeSection(){
+  const el = document.getElementById('setup-dc-section');
+  if(!el) return;
+  const challenge = todaysChallenge();
+  const selected = currentSetupOptionKey() === 'challenge';
+  el.innerHTML = `<div class="card challenge-spotlight setup-dc" role="button" tabindex="0" aria-pressed="${selected}"
+      onclick="selectSetupGame('challenge')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectSetupGame('challenge')}">
+    <div class="setup-dc-top">🎯 <span class="setup-dc-title">Daily Challenge</span></div>
+    <div class="setup-dc-name">${escapeHtml(challenge.label)}</div>
+    <div class="setup-dc-completed" id="setup-dc-completed">Loading who's played today…</div>
+  </div>`;
+  if(selected){
+    const card = el.querySelector('.setup-dc');
+    if(card) card.style.boxShadow = '0 1px 0 rgba(255,255,255,.03) inset,0 10px 24px -18px rgba(0,0,0,.6),0 0 18px -4px var(--gold),inset 0 0 0 1.5px var(--gold)';
+  }
+  if(_dcCompletionsAbort) _dcCompletionsAbort.aborted = true;
+  const tok = { aborted:false }; _dcCompletionsAbort = tok;
+  Backend.get(`/api/challenges/today-board?date=${challenge.date}&format=${challenge.format}`).then(rows=>{
+    if(tok.aborted) return;
+    const body = document.getElementById('setup-dc-completed');
+    if(!body) return;
+    if(!rows || !rows.length){ body.textContent = "Nobody has played today's challenge yet — be the first."; return; }
+    body.innerHTML = rows.map(r=>`<span class="setup-dc-check">✓</span><b>${escapeHtml(r.player)}</b>`).join('&nbsp;&nbsp;&nbsp;') + ' already played today';
+  }).catch(()=>{ if(!tok.aborted){ const body=document.getElementById('setup-dc-completed'); if(body) body.textContent=''; } });
 }
 
 let _challengeAvailAbort = null;
-// Daily Challenge: the same-day-attempt check runs the moment it's SELECTED here
-// (docs/archive/new-game-flow-roadmap.md "check on selection, not before"), reusing the
-// same /api/challenges/status call startGame() used to only make at Play Now
-// time. Already attempted today -> a blocking message replaces the blurb and
-// Continue is disabled for this selection; the player can still pick something
-// else and proceed normally.
-function renderSetupChallengeBlurb(){
-  const el = document.getElementById('setup-blurb-body');
+// Daily Challenge: the same-day-attempt check for the ONE player chosen in
+// Step 2 (moved here from the old Step 2/game-choice screen — Step 1 no
+// longer knows who's playing before this fires, now that game-choice comes
+// first) — reuses the same /api/challenges/status call startGame() used to
+// only make at Play Now time. Already attempted today -> a blocking message
+// replaces this section and Continue is disabled; the player can still go
+// Back and choose someone else.
+function renderSetupChallengeStatus(){
+  const section = document.getElementById('setup-challenge-status-section');
+  const el = document.getElementById('setup-challenge-status-body');
   const continueBtn = document.getElementById('setup-step2-continue');
+  if(!section || !el) return;
+  const namedPlayers = setup.slots.filter(Boolean);
+  if(currentSetupOptionKey() !== 'challenge' || !namedPlayers.length){
+    section.hidden = true;
+    if(continueBtn) continueBtn.disabled = false;
+    return;
+  }
+  section.hidden = false;
   const challenge = todaysChallenge();
-  const player = setup.slots[0]; // guaranteed non-empty: Step 1 requires >=1 player before Step 2
+  const player = namedPlayers[0];
   el.innerHTML = `<div class="setup-label" style="color:var(--gold)">🎯 Today's Challenge</div>
     <p style="margin:0;color:var(--ink);font-size:14px">${escapeHtml(challenge.label)}</p>
     <p class="pp-meta" style="margin-top:8px">Loading…</p>`;
@@ -5185,9 +5440,10 @@ function renderSetupChallengeBlurb(){
       if(continueBtn) continueBtn.disabled = true;
       el.innerHTML = `<div class="setup-label" style="color:var(--gold)">🎯 Today's Challenge</div>
         <p style="margin:0;color:var(--ink);font-size:14px">${escapeHtml(challenge.label)}</p>
-        <p style="margin-top:10px;color:var(--ink)">You've already attempted today's Daily Challenge. Please come back tomorrow.</p>`;
+        <p style="margin-top:10px;color:var(--ink)">${escapeHtml(player)} has already attempted today's Daily Challenge. Please come back tomorrow, or choose someone else.</p>`;
       return;
     }
+    if(continueBtn) continueBtn.disabled = false;
     const streakHtml = status.streak > 0 ? `<span style="color:var(--gold);font-weight:600">🔥 ${status.streak} day streak</span>` : '';
     const historyHtml = status.history.length ? `<div style="display:flex;gap:6px;margin-top:12px">${
       status.history.slice().reverse().map(h=>{
@@ -5204,34 +5460,76 @@ function renderSetupChallengeBlurb(){
   }).catch(()=>{ if(!tok.aborted) el.innerHTML = `<p class="pp-meta">Could not load today's challenge.</p>`; });
 }
 
-// Repaints the (X01 flavor / "which league match?") secondary dropdown and the
-// how-to-play blurb for whatever's currently selected — called after every Step 2
-// selection change, and once when Step 2 is (re-)entered.
+let _pendingFixtureAbort = null;
+// League Game's own fixture check — runs from renderPlayers() any time exactly
+// 2 players are named (mirroring the old Step 1->Step 2 transition's one-time
+// check, just reactive now that Step 2 is where players are actually picked).
+// Surfaced as an opt-in banner (setup-league-section) rather than forcing a
+// game-type switch — the player already chose a game in Step 1.
+function checkLeagueFixtureForPair(){
+  const named = setup.slots.filter(Boolean);
+  if(named.length !== 2){
+    // Dropping below (or never reaching) exactly 2 invalidates an already-toggled
+    // League Game selection — a fixture is always tied to a specific pair.
+    if(setup.leagueFixtureId != null) setup.leagueFixtureId = null;
+    const banner = document.getElementById('setup-league-section');
+    if(banner) banner.hidden = true;
+    return;
+  }
+  if(_pendingFixtureAbort) _pendingFixtureAbort.aborted = true;
+  const tok = { aborted:false }; _pendingFixtureAbort = tok;
+  Backend.get(`/api/leagues/pending-fixture?p1=${encodeURIComponent(named[0])}&p2=${encodeURIComponent(named[1])}`)
+    .then(list=>{
+      if(tok.aborted) return;
+      setup.pendingFixtures = Array.isArray(list) ? list : [];
+      // A previously toggled fixture belonging to a now-different pair (one of
+      // the two slots was swapped for someone else) no longer applies.
+      if(setup.leagueFixtureId != null && !setup.pendingFixtures.some(f=>f.fixtureId===setup.leagueFixtureId)){
+        setup.leagueFixtureId = null;
+      }
+      renderSetupLeagueBanner();
+    }).catch(()=>{
+      if(tok.aborted) return;
+      setup.pendingFixtures = [];
+      if(setup.leagueFixtureId != null) setup.leagueFixtureId = null;
+      renderSetupLeagueBanner();
+    });
+}
+function renderSetupLeagueBanner(){
+  const banner = document.getElementById('setup-league-section');
+  const desc = document.getElementById('setup-league-desc');
+  const toggle = document.getElementById('setup-league-toggle');
+  if(!banner) return;
+  const fixtures = setup.pendingFixtures || [];
+  if(!fixtures.length){ banner.hidden = true; return; }
+  banner.hidden = false;
+  // Simplification: a pair with 2+ simultaneous pending fixtures (across
+  // different leagues) only ever gets offered the first one here — a rare
+  // edge case, and the old dropdown's "which league match?" picker for it
+  // isn't worth reproducing for a banner meant to stay out of the way.
+  const f = fixtures[0];
+  if(desc) desc.textContent = `${f.leagueName} (${f.category}) — starting here links the result straight back to your league standings.`;
+  if(toggle) toggle.checked = (setup.leagueFixtureId === f.fixtureId);
+}
+function toggleLeagueGameSelection(checked){
+  const fixtures = setup.pendingFixtures || [];
+  const chosen = fixtures[0];
+  if(checked && chosen){
+    setup.leagueFixtureId = chosen.fixtureId;
+    applyLeagueGameSelection();
+  } else {
+    setup.leagueFixtureId = null;
+  }
+}
+
+// Repaints the X01-starting-score dropdown and the how-to-play recap box for
+// whatever's currently selected in Step 1 — called after every ledger
+// selection change, and once when Step 1 is (re-)entered.
 function renderSetupFlavorAndBlurb(){
   const key = currentSetupOptionKey();
   const flavorSection = document.getElementById('setup-flavor-section');
   const flavorLabel = document.getElementById('setup-flavor-label');
   const flavorSelect = document.getElementById('setup-flavor-select');
-  const continueBtn = document.getElementById('setup-step2-continue');
-  if(continueBtn) continueBtn.disabled = false;
-
-  if(key === 'league_game'){
-    const fixtures = setup.pendingFixtures;
-    if(fixtures.length >= 2){
-      flavorSection.hidden = false;
-      flavorLabel.textContent = 'Which league match?';
-      flavorSelect.innerHTML = fixtures.map(f=>`<option value="${f.fixtureId}">${escapeHtml(f.leagueName)} (${escapeHtml(f.category)})</option>`).join('');
-      flavorSelect.value = String(setup.leagueFixtureId);
-    } else {
-      flavorSection.hidden = true;
-    }
-    const chosen = fixtures.find(f=>f.fixtureId===setup.leagueFixtureId) || fixtures[0];
-    document.getElementById('setup-blurb-body').innerHTML = chosen
-      ? `<div class="setup-label" style="color:var(--gold)">🏆 League Game</div>
-         <p class="pp-meta" style="margin:0">This pairing owes <b>${escapeHtml(chosen.leagueName)}</b> a match — starting here links the result straight back to your league standings. Legs/sets are still chosen next.</p>`
-      : '';
-    return;
-  }
 
   if(key === 'x01'){
     flavorSection.hidden = false;
@@ -5242,12 +5540,12 @@ function renderSetupFlavorAndBlurb(){
     flavorSection.hidden = true;
   }
 
-  if(key === 'challenge'){ renderSetupChallengeBlurb(); return; }
   const opt = NEW_GAME_MODE_OPTIONS.find(o=>o.key===key);
-  document.getElementById('setup-blurb-body').innerHTML = opt
+  document.getElementById('setup-blurb-body').innerHTML = (opt && opt.blurb)
     ? `<div class="setup-label" style="color:var(--gold)">${opt.label}</div><p class="pp-meta" style="margin:0">${opt.blurb}</p>`
-    : '';
-  renderHandicapOptions();
+    : (key === 'challenge'
+        ? `<div class="setup-label" style="color:var(--gold)">🎯 Daily Challenge</div><p class="pp-meta" style="margin:0">One shared X01 challenge, the same for everyone, once a day. Who's playing and today's completion status are shown on the next step.</p>`
+        : '');
 }
 // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): an optional,
 // collapsed-by-default disclosure — X01 only, 2+ real players filled in —
@@ -5295,60 +5593,12 @@ function setHandicap(name, value){
   else setup.handicaps[name] = Number(value);
 }
 
-// Rebuilds the Step 2 dropdown from the current player count + pending-fixture
-// state, reconciling a since-invalidated prior selection (e.g. the player went
-// Back to Step 1 and added a second player after picking a practice-only mode)
-// by falling back to X01 rather than leaving a stale, no-longer-offered option
-// selected underneath.
-function renderSetupStep2Content(){
-  const hasFixtures = setup.pendingFixtures.length>0;
-  const visible = setupVisibleOptions();
-  let currentKey = currentSetupOptionKey();
-  // Bug: a key like 'x01' stays in `visible` regardless of player count (X01/
-  // Cricket/Baseball/Shanghai/Halve-It/Pressure Chamber all support both
-  // solo practice AND H2H) — so merely being "still offered" doesn't prove
-  // setup.mode itself still matches the CURRENT player count. Without this,
-  // going from 2 players down to 1 (or ever only having had 1 player at all)
-  // left a stale mode==='h2h' in place, silently surfacing Step 3's H2H-only
-  // legs/sets format picker for what was actually a solo game.
-  const ctx = setupPlayerCount()>=2 ? 'h2h' : 'practice';
-  const currentContext = (setup.mode==='h2h' || setup.mode==='practice') ? setup.mode : null;
-  const stillValid = (currentKey==='league_game' && hasFixtures)
-    || (visible.some(o=>o.key===currentKey) && (currentContext==null || currentContext===ctx));
-  if(!stillValid){
-    setup.leagueFixtureId = null;
-    const fallback = visible.find(o=>o.key==='x01') || visible[0];
-    if(fallback) fallback.apply();
-    currentKey = currentSetupOptionKey();
-  }
-  const sel = document.getElementById('setup-mode-select');
-  sel.innerHTML = (hasFixtures ? `<option value="league_game">🏆 League Game</option>` : '')
-    + visible.map(o=>`<option value="${o.key}">${o.label}</option>`).join('');
-  sel.value = currentKey;
-  renderSetupFlavorAndBlurb();
-}
-
-let _pendingFixtureAbort = null;
+// Step 1 (Choose a game) -> Step 2 (Who's playing?). A game is always
+// selected (X01 by default), so there's nothing to validate here — just move
+// on and let renderPlayers() apply this game's own player-count cap.
 function setupGoToStep2(){
-  const named = setup.slots.filter(s=>s);
-  if(!named.length){ uiAlert('Choose at least one player.'); return; }
-  if(named.length !== 2){
-    setup.pendingFixtures = [];
-    showSetupStep(2); renderSetupStep2Content();
-    return;
-  }
-  if(_pendingFixtureAbort) _pendingFixtureAbort.aborted = true;
-  const tok = { aborted:false }; _pendingFixtureAbort = tok;
-  Backend.get(`/api/leagues/pending-fixture?p1=${encodeURIComponent(named[0])}&p2=${encodeURIComponent(named[1])}`)
-    .then(list=>{
-      if(tok.aborted) return;
-      setup.pendingFixtures = Array.isArray(list) ? list : [];
-      showSetupStep(2); renderSetupStep2Content();
-    }).catch(()=>{
-      if(tok.aborted) return;
-      setup.pendingFixtures = [];
-      showSetupStep(2); renderSetupStep2Content();
-    });
+  showSetupStep(2);
+  renderPlayers();
 }
 // Step 3 ("More options") only has real content for the modes whose option
 // section is currently visible (Cricket/Killer/Shanghai/Halve-It pickers,
@@ -5368,15 +5618,26 @@ function setupStep3HasContent(){
   // section the moment it's added to the markup.
   return [...document.querySelectorAll('#setup-step-3 .setup-section')].some(el => !el.hidden);
 }
+// Step 2 (Who's playing?) -> Step 3 (More options), or straight to Start.
+// Killer needs at least 2 (h2hOnly, backend already rejects fewer — see
+// backend/db.js createGame() — this just avoids a round trip for the same
+// rejection); every other type just needs at least 1 named player.
 function setupGoToStep3(){
+  const named = setup.slots.filter(s=>s);
+  if(!named.length){ uiAlert('Choose at least one player.'); return; }
+  if(currentSetupOptionKey()==='killer' && named.length < 2){ uiAlert('Killer requires at least 2 players.'); return; }
   renderHandicapOptions(); // re-derive from the current slot list before checking for content
   if(setupStep3HasContent()) showSetupStep(3);
   else startGame(); // nothing to configure — Continue doubles as Start, same as
                      // the challenge blurb's own "Press Continue below to play" already says
 }
-function setupBackTo(n){ showSetupStep(n); if(n===2) renderSetupStep2Content(); }
+function setupBackTo(n){
+  showSetupStep(n);
+  if(n===1) renderSetupGameLedger();
+  else if(n===2) renderPlayers();
+}
 
-const SETUP_STEP_LABELS = { 1:"Step 1 of 3 — Who's playing?", 2:'Step 2 of 3 — Choose a game', 3:'Step 3 of 3 — More options' };
+const SETUP_STEP_LABELS = { 1:'Step 1 of 3 — Choose a game', 2:"Step 2 of 3 — Who's playing?", 3:'Step 3 of 3 — More options' };
 function showSetupStep(n){
   document.getElementById('setup-step-1').hidden = (n!==1);
   document.getElementById('setup-step-2').hidden = (n!==2);
@@ -5397,8 +5658,8 @@ function showSetupStep(n){
   // each new step's first control, never silently left on a now-hidden one.
   requestAnimationFrame(()=>{
     let target;
-    if(n===1) target = document.querySelector('#players-list select, #players-list button');
-    else if(n===2) target = document.getElementById('setup-mode-select');
+    if(n===1) target = document.querySelector('#setup-dc-section [tabindex], #setup-game-categories [tabindex]');
+    else if(n===2) target = document.querySelector('#players-list select, #players-list button');
     else target = document.querySelector('#setup-step-3 .pp-back');
     if(target && typeof target.focus==='function') target.focus();
   });
@@ -15139,13 +15400,14 @@ function updateGameTypeOptionSections(gameType){
     if(el) el.hidden = (gameType !== gt.id);
   });
 }
-// Derives NEW_GAME_MODE_OPTIONS' practice/h2h visibility from the registry's
-// own soloOnly/h2hOnly flags instead of a hand-duplicated third list (item 46)
-// — called at runtime (setupVisibleOptions(), well after GAME_TYPES exists),
-// not at NEW_GAME_MODE_OPTIONS' own module-load time, since that array is
-// defined earlier in the file than GAME_TYPES is. Returns null for a mode
-// with no real GAME_TYPES entry (challenge/ghost — both play as plain x01
-// underneath), which keeps its own explicit `contexts` array instead.
+// Derives a game key's practice/h2h validity from the registry's own
+// soloOnly/h2hOnly flags instead of a hand-duplicated third list (item 46) —
+// called at runtime (chosenGameContexts()/maxPlayersForSetup(), well after
+// GAME_TYPES exists), not at NEW_GAME_MODE_OPTIONS' own module-load time,
+// since that array is defined earlier in the file than GAME_TYPES is. Returns
+// null for a mode with no real GAME_TYPES entry (challenge/ghost/marathon —
+// all three play as plain/chained x01 underneath); chosenGameContexts()
+// special-cases those three before ever calling this.
 function contextsForMode(key){
   const gt = GAME_TYPES[key];
   if(!gt) return null;

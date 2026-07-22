@@ -11,9 +11,19 @@
 > doc's own resolved open questions implemented as designed: the flat
 > player-count-filtered dropdown, Daily Challenge's check-on-selection
 > blocking message, the dropped H2H banner, and the League Game top-of-
-> dropdown entry. Full mechanics: `REFERENCE.md` §20. This doc's own design
-> below is kept as-written for context, same standing convention as every
-> other shipped roadmap doc in this repo.
+> dropdown entry.
+>
+> **Superseded (2026-07)**: a later redesign flipped the step order again —
+> **Choose a game → Who's playing? → More options** — replaced Step 1's flat
+> dropdown with a categorized "chalkboard ledger" picker (grouped by
+> Traditional/Practice & Drills/Solo Challenges/Head-to-Head Only/Special
+> Modes), moved League Game from a Step 2 dropdown entry to a reactive Step 2
+> opt-in banner, and added a Daily Challenge spotlight section (who's already
+> completed today, across every player) above the picker. This was a direct
+> request, not a planned roadmap item, so it has no roadmap doc of its own —
+> full current mechanics are `REFERENCE.md` §20. This doc's own design below
+> is kept as-written for context, same standing convention as every other
+> shipped roadmap doc in this repo.
 
 ## Goal
 

@@ -4517,14 +4517,15 @@ maintained-tally suggestion, not this one.
   `#league-picker-wrap`/`setup.leagueId` and the H2H banner they sat beside
   (`updateH2HBanner()`/`#h2h-banner`, `GET /api/players/h2h`) were all removed
   when the New Game screen became a 3-step wizard (`docs/archive/new-game-flow-roadmap.md`)
-  — superseded by Step 2's fixture-based "League Game" entry, see below and §18's
-  own "League fixtures / pending matches" section. `GET /api/leagues/eligible`
-  and the server-side `onGameCreated` auto-tag hook's own 0/1/>1-candidate
-  fallback (unrelated to any picker) are both unaffected and still fully
-  functional — only the frontend picker UI and its now-unreachable HTTP
-  companion (`/api/players/h2h`; `getH2HRecord()` itself stays, still used
-  internally by per-player export/import and still covered by its own tests)
-  are gone.
+  — superseded first by a Step 2 dropdown "League Game" entry, then (2026-07
+  reorder) by an opt-in banner in the player-picking step once exactly 2
+  players are named, see below and §20's own League Game description.
+  `GET /api/leagues/eligible` and the server-side `onGameCreated` auto-tag
+  hook's own 0/1/>1-candidate fallback (unrelated to any picker) are both
+  unaffected and still fully functional — only the frontend picker UI and its
+  now-unreachable HTTP companion (`/api/players/h2h`; `getH2HRecord()` itself
+  stays, still used internally by per-player export/import and still covered
+  by its own tests) are gone.
 - **League setup screen**: a `game_type` toggle (X01/Cricket) alongside the
   existing category picker, which switches between the X01 starting-score
   `<select>` and a Cricket classic/custom `<select>` depending on the chosen
@@ -4588,20 +4589,21 @@ because a fixture needs to exist *before* any game does.
   array via `getLeagueFixtures()`): every fixture with its derived status
   (`FIXTURE_STATUS_ICON`/`FIXTURE_STATUS_LABEL` — Pending/In progress/Played,
   icon + text together).
-- **New Game "League Game" entry** (§20's Step 2, `docs/archive/new-game-flow-roadmap.md`):
-  once Step 1 finishes with exactly 2 players, `setupGoToStep2()` calls the
-  pending-fixture endpoint above and, if it returns anything, injects a
-  "🏆 League Game" option at the top of Step 2's dropdown
-  (`renderSetupStep2Content()`). Selecting it (`applyLeagueGameSelection()`)
-  auto-fills `setup.gameType`/`setup.start`/`setup.cricketPreset` from the
-  fixture's league and sets `setup.leagueFixtureId`, skipping the X01
-  starting-score question entirely (hidden whenever League Game is selected,
-  since the league already pins it) — a Custom Cricket league still needs its
-  7 targets chosen in Step 3, since the league's category doesn't pin the
-  exact numbers. 2+ pending fixtures reveal a second "Which league match?"
-  dropdown, the same secondary-dropdown slot X01's own flavor question uses.
-  `setup.leagueFixtureId` threads through `startGame()`'s `game` object and
-  `DB.beginGame()`'s `POST /api/games` payload.
+- **New Game "League Game" banner** (§20's Step 2, `docs/archive/new-game-flow-roadmap.md`
+  for the original dropdown-entry design, superseded 2026-07 by this reactive
+  banner once the wizard's game-choice/player-choice order flipped): every
+  time exactly 2 players are named in Step 2, `checkLeagueFixtureForPair()`
+  calls the pending-fixture endpoint above and, if it returns anything, shows
+  a gold-bordered `#setup-league-section` banner with an opt-in checkbox
+  (`renderSetupLeagueBanner()`). Checking it (`toggleLeagueGameSelection()` →
+  `applyLeagueGameSelection()`) auto-fills `setup.gameType`/`setup.start`/
+  `setup.cricketPreset` from the fixture's league and sets
+  `setup.leagueFixtureId` — a Custom Cricket league still needs its 7 targets
+  chosen in Step 3, since the league's category doesn't pin the exact numbers.
+  2+ pending fixtures for the same pair still just offer `fixtures[0]` (a kept
+  simplification from the original design). `setup.leagueFixtureId` threads
+  through `startGame()`'s `game` object and `DB.beginGame()`'s
+  `POST /api/games` payload exactly as before.
 - **`wipeAllData()`/`resetStats()`**: `league_fixtures` needs no explicit
   delete in either — `wipeAllData()`'s `DELETE FROM leagues` cascades it
   (`league_id ON DELETE CASCADE`, also independently covered by the players
@@ -4944,69 +4946,114 @@ point of the drill, so it must never manufacture a "toughest ever" record.
 
 ## 20. New Game Screen (3-Step Wizard)
 
-Full design: `docs/archive/new-game-flow-roadmap.md`. Replaced the old single
-all-controls-visible `#screen-setup` card with a 3-step flow — Who's playing? →
-Choose a game → More options — so a player only ever sees the controls relevant
-to what they've already chosen. Purely a restructuring of *when/how* the
-existing controls are shown; no change to `startGame()`'s validation or the
-`game` object it builds for any mode except the new League Game entry (§18).
+Full design: `docs/archive/new-game-flow-roadmap.md` (original 3-step build,
+Who's playing? → Choose a game → More options) plus a later reorder (2026-07,
+no dedicated roadmap doc — a direct request, not a planned roadmap item) that
+flipped the first two steps: **Choose a game → Who's playing? → More
+options**, and replaced Step 1's flat `<select>` with a categorized "ledger"
+picker. Purely a restructuring of *when/how* the existing controls are shown;
+no change to `startGame()`'s validation or the `game` object it builds for any
+mode.
 
-### Step 1 — "Who's playing?"
+### Step 1 — "Choose a game"
 
-`renderPlayers()` (name unchanged from the old always-visible-rows layout, body
-rewritten) draws a select → "Add someone else?" loop into `#players-list`: each
-already-filled `setup.slots` entry renders as a name row (stat line, loadout
-pill, remove button); the one slot still awaiting a pick (if any) renders as a
-plain `<select>`. Once every slot is filled, a prompt appears — **Add
-existing** (`addExistingPlayer()`), **New player** (`addNewPlayer()`), or **No,
-continue** (`setupGoToStep2()`) — repeating until "No, continue" or the
-existing 6-player cap. A "🔀 Shuffle order" button appears once 2+ players are
-selected (`shufflePlayers()`, unchanged). Solo-only modes (Daily
-Challenge/Ghost/Doubles Practice/Just Chuckin' It/Checkout Trainer/both guided
-drills) are never truncated to 1 player *here* — Step 2's own dropdown
-filtering (below) makes them structurally unreachable once 2+ players are
-picked, so there's nothing to enforce yet at this step.
+Two pieces sit above the categorized picker itself:
 
-### Step 2 — "Choose a game"
+- **`renderSetupDailyChallengeSection()`** (`#setup-dc-section`): a
+  `.challenge-spotlight`-styled card (same gold border + animated glow as the
+  Home page's Daily Challenge teaser) shown above every category, always
+  clickable (`selectSetupGame('challenge')`). Below the challenge's own
+  name/label it fetches `GET /api/challenges/today-board?date=&format=`
+  (`getTodaysChallengeBoard()`, pre-existing — no new backend endpoint was
+  needed) and lists every player who has already completed *today's* challenge
+  format, each with a ✓ — this is informational (who's done it today, across
+  everyone), distinct from Step 2's per-*chosen*-player blocking check below.
+- **`renderSetupGameLedger()`** (`#setup-game-categories`): `NEW_GAME_MODE_OPTIONS`
+  (unchanged shape/contents — still the canonical `{ key, label, blurb,
+  apply() }` list) is grouped into `GAME_LEDGER_CATEGORIES` (Traditional /
+  Practice & Drills / Solo Challenges / Head-to-Head Only / Special Modes),
+  each with its own accent color and a monoline SVG glyph
+  (`ledgerCategoryIcon()`, one icon per *category*, not per game — avoids the
+  old inconsistent one-emoji-per-game clutter). One category is expanded at a
+  time — an accordion, not a flat list — defaulting to whichever category
+  contains the currently-selected game (`setupOpenCategoryKey()`); clicking a
+  category header overrides that via `setupExpandedCategory`. Each row inside
+  an open category shows the game's clean display name
+  (`GAME_LEDGER_NAMES`) and a one-line teaser (`GAME_LEDGER_TEASERS`), with a
+  gold check mark on the selected row. Selecting a row (`selectSetupGame(key)`)
+  calls that option's `apply()` exactly as the old dropdown's `onchange` did,
+  then truncates `setup.slots` down to whatever the newly-chosen game allows
+  (see "Player-count enforcement" below) before re-rendering.
+- **X01 flavor / recap blurb**: `renderSetupFlavorAndBlurb()` — X01 still
+  reveals `#setup-flavor-section` as a starting-score `<select>` (501/301/170/
+  101, `onSetupFlavorSelect()` sets `setup.start`); `#setup-blurb-body` shows
+  the selected entry's static `blurb` text (a Daily-Challenge-specific fallback
+  line when `opt.blurb` is absent, since Daily Challenge is rendered by its own
+  spotlight card above, not a ledger row).
+- **`#setup-step1-continue`** (`setupGoToStep1()` — no validation needed, a
+  game is always pre-selected) advances to Step 2.
 
-One flat `<select id="setup-mode-select">`, replacing the old Mode row +
-Practice-type sub-toggle + X01/Cricket/Baseball toggle. `NEW_GAME_MODE_OPTIONS`
-(`frontend/index.html`) is a flat list of `{ key, label, contexts, blurb,
-apply() }` — `contexts` is `['practice']`, `['practice','h2h']`, or (League
-Game only, injected dynamically rather than listed statically) `['h2h']`.
-`setupVisibleOptions()` filters by `setupPlayerCount()` (1 player → `practice`
-context, 2+ → `h2h` context) — with 2+ players only X01/Cricket/Baseball (plus
-League Game, if eligible) are ever offered, which is what makes picking either
-one *be* the H2H choice; no separate H2H toggle exists anymore.
-`renderSetupStep2Content()` rebuilds the dropdown on every entry into Step 2
-and reconciles a since-invalidated prior selection (e.g. the player went Back
-to Step 1 and added a second player after picking a practice-only mode) by
-falling back to X01 rather than leaving a stale, no-longer-offered option
-selected. `onSetupModeSelect()` calls the chosen entry's `apply()`, which is
-just `setMode()`/`setGameType()` called exactly as the old controls did —
-nothing about validation or the eventual `game` object changed, only what
-triggers the call.
+### Player-count enforcement (`maxPlayersForSetup()`)
 
-- **X01 flavor**: selecting X01 reveals `#setup-flavor-section` as a starting-
-  score `<select>` (501/301/170/101, `onSetupFlavorSelect()` sets
-  `setup.start`) — the same secondary-dropdown slot League Game's "which
-  league match?" question reuses (never shown simultaneously, since only one
-  primary entry is selected at a time).
-- **How-to-play blurb**: `#setup-blurb-body` shows each entry's static `blurb`
-  text, generalizing the old scattered per-mode `-info-section` blocks (now
-  removed) to every mode uniformly.
-- **Daily Challenge**: not a static blurb — `renderSetupChallengeBlurb()`
-  fetches `GET /api/challenges/status` the moment it's *selected* (moved from
-  Play Now time, where the same call previously only ran as a
-  race-condition backstop) for `setup.slots[0]` (guaranteed non-empty, since
-  Step 1 requires ≥1 player first). Already attempted today (`status.today`
-  truthy) → a blocking message replaces the blurb and `#setup-step2-continue`
-  is disabled for this selection; the player can still pick something else and
-  proceed normally. Not yet attempted → the same streak/history status
-  Home page's challenge teaser shows, Continue enabled.
-- **League Game**: see §18's "League fixtures / pending matches" section for
-  the full mechanism (`setupGoToStep2()`'s pending-fixture fetch,
-  `applyLeagueGameSelection()`, the "which league match?" secondary dropdown).
+Because the game is now chosen *before* any player, the old
+`setupPlayerCount()>=2 ? h2h : practice` dependency had to invert: a game's
+solo/H2H/dual nature is a static fact of the key itself
+(`chosenGameContexts(key)`, backed by `contextsForMode()`/`GAME_TYPES`'
+`soloOnly`/`h2hOnly` flags — unchanged), independent of how many players end
+up chosen.
+
+- **`maxPlayersForSetup()`**: `1` for any solo-only key (Daily
+  Challenge/Ghost/Marathon/every drill); `2` for League Game (a fixture is
+  always exactly one pair) and for X01 (2-4 player X01 is a deliberate future
+  roadmap item, not yet enabled — see `docs/multiplayer-x01-roadmap.md`); the
+  global cap (6) for every other dual-capable type (Cricket, Baseball,
+  Shanghai, Halve-It, Pressure Chamber) and for the one H2H-only type (Killer,
+  which additionally still enforces its own existing "at least 2" floor in
+  `setupGoToStep3()`, unchanged from before the reorder).
+- **`selectSetupGame(key)`** truncates `setup.slots` down to the new max the
+  moment a game is chosen (switching from a 3-player Cricket pick to X01, for
+  example, drops the third slot); `addExistingPlayer()`/`addNewPlayer()`
+  refuse past the same cap going forward.
+- **`resyncSetupModeForPlayerCount()`** (called from `renderPlayers()`, so it
+  re-evaluates on every slot change in Step 2) keeps `setup.mode` in sync with
+  the *current* player count for the 6 dual-capable types — the same
+  `practice`/`h2h` distinction `setMode(setupPlayerCount()>=2?'h2h':'practice')`
+  made once at selection time before the reorder, just deferred and reactive
+  now that player count is decided after game choice.
+
+### Step 2 — "Who's playing?"
+
+`renderPlayers()` (unchanged core rendering: select → "Add someone else?" loop
+into `#players-list`, each filled `setup.slots` entry as a name row, the
+6-or-fewer cap from `maxPlayersForSetup()` instead of a hardcoded 6, a
+"🔀 Shuffle order" button once 2+ players are picked) now also calls, at the
+top of every render:
+
+- **`renderSetupChallengeStatus()`** (`#setup-challenge-status-section`): the
+  per-*chosen*-player "have you already attempted today's challenge"
+  blocking check — this is the piece that used to live in the old Step 2's
+  blurb area (`renderSetupChallengeBlurb()`, retired). Only relevant when
+  Daily Challenge is the selected game (`maxPlayersForSetup()` caps it at 1,
+  so `setup.slots[0]` is the one player this applies to); already attempted
+  today disables `#setup-step2-continue` with a blocking message, same as
+  before the reorder. Resets `continueBtn.disabled` back to `false` whenever
+  the section doesn't apply (a different game is now selected, or no player
+  is named yet) so a block never survives past going Back and picking
+  something else.
+- **`checkLeagueFixtureForPair()`** / **`renderSetupLeagueBanner()`**
+  (`#setup-league-section`): League Game can no longer be a Step 1 ledger row
+  — a fixture is tied to a specific 2-player pair, unknowable before players
+  are picked — so it's now a reactive opt-in banner instead. Every time
+  exactly 2 players are named, `GET /api/leagues/pending-fixture?p1=&p2=` is
+  re-fetched (always, not just while the banner is toggled on, so swapping one
+  of the two named players re-validates rather than leaving a stale fixture
+  description showing); if any pending fixture is found the gold-bordered
+  banner appears with a checkbox (`toggleLeagueGameSelection()` sets/clears
+  `setup.leagueFixtureId`, `applyLeagueGameSelection()` unchanged from
+  before). Fewer or more than 2 named players hides the banner and clears
+  `setup.leagueFixtureId`. 2+ simultaneous pending fixtures for the same pair
+  still just offer `fixtures[0]` (unchanged simplification from the original
+  design).
 
 ### Step 3 — "More options"
 
@@ -5039,34 +5086,43 @@ Step 3 as described above.
 ### Wizard navigation and step-entry reconciliation
 
 `showSetupStep(n)` (`setupStep` 1/2/3) toggles the three step wrappers,
-updates the step-label text, and calls the global `announce()` (`#sr-announcer`,
-`aria-live="polite"`) so screen-reader users hear the step change; it also
-moves focus to each new step's first control (the first player `<select>`/
-button in Step 1, the mode `<select>` in Step 2, the Back button in Step 3) so
-focus is never silently left on a now-hidden control. Back buttons
-(`setupBackTo(n)`) restore, not reset, whatever was already selected on the
-step being returned to — nothing in `setup` is cleared by navigating backward,
-only by a genuinely fresh entry into the screen.
+updates the step-label text (`SETUP_STEP_LABELS`), and calls the global
+`announce()` (`#sr-announcer`, `aria-live="polite"`) so screen-reader users
+hear the step change; it also moves focus to each new step's first control
+(the Daily Challenge card or the first open ledger row in Step 1, the first
+player `<select>`/button in Step 2, the Back button in Step 3) so focus is
+never silently left on a now-hidden control. Back buttons (`setupBackTo(n)`)
+restore, not reset, whatever was already selected on the step being returned
+to — nothing in `setup` is cleared by navigating backward, only by a
+genuinely fresh entry into the screen.
 
 `show('setup')` resets `setup.slots`/`loadoutByName`/`leagueFixtureId`/
 `pendingFixtures` and starts at Step 1 on every normal entry (nav click, a
-post-game "Try Again"/"New Game" button, etc.) — **except** when
-`_enteringSetupFromRaceLeg` is set, which `raceLeg()` (Player Profile's "Race
-this leg" entry point) sets synchronously right before calling `show('setup')`,
-alongside presetting `setup.slots` to the one player being raced and calling
-`setMode('ghost')`. That flag is consumed (read + reset to `false`)
-synchronously inside `show('setup')` itself — deliberately **not** the same as
-`_ghostLegTarget` (which preselects a specific leg once `renderGhostLegPicker()`'s
-own fetch resolves, and is only cleared when a match is actually found in that
-player's leg history) — a raceLeg() entry must jump straight to Step 3 and
-must never get stuck doing so on every later "New game" nav click even when
-that player turns out to have zero ghost-race-able legs.
+post-game "Try Again"/"New Game" button, etc.), calling
+`renderSetupDailyChallengeSection()`/`renderSetupGameLedger()`/
+`renderSetupFlavorAndBlurb()` up front so Step 1 is fully populated the
+instant it's shown — **except** when `_enteringSetupFromRaceLeg` is set, which
+`raceLeg()` (Player Profile's "Race this leg" entry point) sets synchronously
+right before calling `show('setup')`, alongside presetting `setup.slots` to
+the one player being raced and calling `setMode('ghost')`. That flag is
+consumed (read + reset to `false`) synchronously inside `show('setup')` itself
+— deliberately **not** the same as `_ghostLegTarget` (which preselects a
+specific leg once `renderGhostLegPicker()`'s own fetch resolves, and is only
+cleared when a match is actually found in that player's leg history) — a
+raceLeg() entry must jump straight to Step 3 and must never get stuck doing so
+on every later "New game" nav click even when that player turns out to have
+zero ghost-race-able legs.
 
 ### Retired
 
 `updateH2HBanner()`/`#h2h-banner`/`GET /api/players/h2h` and
 `updateLeaguePicker()`/`#league-picker-wrap`/`setup.leagueId` — see §18's
-"New Game 'log to league?' picker — retired" note.
+"New Game 'log to league?' picker — retired" note. From the 2026-07 reorder:
+`setupVisibleOptions()`, `onSetupModeSelect()`, `renderSetupChallengeBlurb()`,
+and `renderSetupStep2Content()` (the old flat player-count-filtered
+`<select>` and its supporting functions) were all deleted, replaced by the
+ledger picker and `maxPlayersForSetup()`/`resyncSetupModeForPlayerCount()`
+described above.
 
 ---
 
