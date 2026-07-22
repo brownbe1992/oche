@@ -745,6 +745,13 @@
   @media(max-width:560px){.home-pair{grid-template-columns:1fr}}
   .achievement-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
   @media(max-width:500px){.achievement-pair{grid-template-columns:1fr}}
+  /* Dart Analytics' "Most Hit Sectors"/"Treble Rate by Number" columns — same
+     side-by-side-until-narrow pattern as .home-pair/.achievement-pair above.
+     Missed this pattern originally (a hardcoded inline 1fr-1fr grid with no
+     mobile breakpoint), which squeezed each .da-row's rank/label/bar/count
+     into an unreadably narrow column on phones. */
+  .da-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+  @media(max-width:520px){.da-pair{grid-template-columns:1fr}}
   .achievement-col-title{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;margin-bottom:6px}
   .recent-list{font-size:12px;color:var(--muted);line-height:1.9}
 
@@ -16879,7 +16886,7 @@ function renderDartAnalytics(data, container){
   }).join('');
 
   container.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+    <div class="da-pair">
       <div>
         <div class="pp-section-title" style="margin-bottom:8px">Most Hit Sectors</div>
         <div class="da-list">${sectorRows || '<p class="pp-meta">No data yet.</p>'}</div>
