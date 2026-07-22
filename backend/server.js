@@ -19,6 +19,8 @@
        POST /api/games/:id/turns   -> record one turn        { player, set, leg, scored, trebleLess, bust, checkout, checkoutPoints, legWon,
                                                                targetScore?, declaredUnsolvable? (both Checkout Trainer only) }
        POST /api/games/:id/complete-> finish a game          { winner }
+       POST /api/games/:id/forfeit -> one player bows out    { player } -> { ok, ended, winnerName } (game keeps going for the rest unless only one active player is left)
+       POST /api/games/:id/abandon-> end the whole match early, marking every still-active participant DNF
        GET  /api/saved-games       -> saved-game list + one-line position summaries (public)
        POST /api/games/:id/save    -> pause an in-progress game for later
        GET  /api/games/:id/resume-state -> the full replay payload -- ALSO deletes the
@@ -1034,6 +1036,18 @@ const server = http.createServer(async (req, res) => {
     if ((mt = p.match(/^\/api\/games\/(\d+)\/complete$/)) && m === 'POST') {
       if (!requireWrite(req, res)) return;
       const b = await readJson(req); return send(res, 200, db.completeGame(Number(mt[1]), b.winner));
+    }
+    // Forfeit / abandon (docs/open-roadmap-items.md "Forfeiting a multiplayer
+    // game" / "abandoned games count as a DNF") — same requireWrite tier as
+    // /complete, since bowing out or ending a match is gameplay, not admin
+    // surgery.
+    if ((mt = p.match(/^\/api\/games\/(\d+)\/forfeit$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req); return send(res, 200, db.forfeitPlayer(Number(mt[1]), b.player));
+    }
+    if ((mt = p.match(/^\/api\/games\/(\d+)\/abandon$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      return send(res, 200, db.abandonGame(Number(mt[1])));
     }
     if ((mt = p.match(/^\/api\/games\/(\d+)\/events$/)) && m === 'POST') {
       if (!requireWrite(req, res)) return;

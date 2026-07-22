@@ -836,7 +836,7 @@ them:
 | Stat | Scope | Formula |
 |---|---|---|
 | `players` | unscoped | `COUNT(*) FROM players` |
-| `games` | **H2H only — by design** | `COUNT(*) FROM games WHERE completed_at IS NOT NULL AND practice = 0 AND player_count > 1`. Practice, solo, and Daily Challenge sessions deliberately do **not** count as "Games Played" (product decision, 2026-07); completed cricket H2H matches **do** count (they're real matches — see the cricket-interaction table above). The explicit filter makes the practice exclusion intentional; independently, `completed_at` is only ever set on an H2H match win (`POST /api/games/:id/complete` is called from `onLegWon()`'s and `onLegWonCricket()`'s match-win branches — End Game navigates away without completing), so the filter is belt-and-braces rather than load-bearing today. |
+| `games` | **H2H only — by design** | `COUNT(*) FROM games WHERE completed_at IS NOT NULL AND practice = 0 AND player_count > 1`. Practice, solo, and Daily Challenge sessions deliberately do **not** count as "Games Played" (product decision, 2026-07); completed cricket H2H matches **do** count (they're real matches — see the cricket-interaction table above). The explicit filter makes the practice exclusion intentional; independently, `completed_at` is only ever set on a genuine finish — a real match win (`POST /api/games/:id/complete`, called from `onLegWon()`'s and `onLegWonCricket()`'s match-win branches) or a forfeit-triggered walkover (`forfeitPlayer()`, §13 "Forfeiting a game / DNF") — never on an abandoned/DNF'd match (`POST /api/games/:id/abandon` sets `dnf_at` instead), so the filter is belt-and-braces rather than load-bearing today. |
 | `sets` / `legs` | **H2H only** | Distinct `(game,set)` / `(game,set,leg)` combos with ≥1 turn recorded — **no completion requirement**, an in-progress leg still counts |
 | `darts` | fully global | `COUNT(*) FROM darts` |
 | `tonPlus` | fully global | `COUNT(*) FROM turns WHERE checkout=1 AND checkout_points>=100` |
@@ -3292,8 +3292,9 @@ already-migrated database is a safe no-op).
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
 | `category` | `TEXT NOT NULL` | For X01 games: the starting score as a string (`'501'`/`'301'`/`'170'`/`'101'`, or a filler `'1000'` for Daily Challenge's non-scoring formats). Cricket games write a display label instead (`'Cricket (15-20, Bull)'` or `'Custom Cricket'`); Chuckin games write `"Just Chuckin' It"`; the two guided drills write `'Guided Around the Clock'`/`'Guided Around the World'`. Category-scoped stat filters (`OPENING_CATS`'s `IN (501,301,170,101)`, nine-darter detection) either match X01 values explicitly or filter on `game_type`+`config`, so the non-X01 labels never collide with them |
 | `legs_per_set` / `sets_per_game` | `INTEGER NOT NULL` | |
-| `created_at` / `completed_at` | `TEXT` | `completed_at` is `NULL` for in-progress/abandoned games |
+| `created_at` / `completed_at` | `TEXT` | `completed_at` is `NULL` for an in-progress game **or** one that ended without a real finish — see `dnf_at` below and "Forfeiting a game / DNF" after the `game_players` table. `completed_at` means "reached a genuine conclusion" (a real win, or a forfeit-triggered walkover) — never both `completed_at` and `dnf_at` on the same row |
 | `winner_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | Set by `completeGame()`. **Must be a participant of the game** — `completeGame()` rejects a `winner` name that isn't in this game's `game_players` with a `400` (`docs/bug-roadmap.md` BUG-9), the same participant check `recordWalkover()` enforces; a `null` winner (abandoned game) is allowed. Behavior for legitimate input is unchanged — the frontend only ever completes with a real participant |
+| `dnf_at` | `TEXT` | `NULL` unless the match ended without anyone reaching a real finish — set by `abandonGame()` (the "End game" early-exit) or by `forfeitPlayer()` when bowing out leaves zero active participants. Deliberately separate from `completed_at`: every `completed_at IS NOT NULL` stat query already means "this match reached a genuine finish" (e.g. `getBaseballWonLegs()`'s own comment on that invariant) — reusing it for an abandoned match would let a since-abandoned mid-leg's partial totals start counting as real results |
 | `practice` | `INTEGER NOT NULL DEFAULT 0` | Explicit practice flag, set at creation |
 | `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, `'baseball'`, `'doubles_practice'`, `'chuckin'`, `'checkout_trainer'`, `'around_the_clock'`, `'around_the_world'`, `'bobs_27'`, `'checkout_ladder'`, `'gauntlet'`, `'killer'`, `'shanghai'`, `'halve_it'`, `'dead_man_walking'`, or `'pressure_chamber'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; each New Game flow passes its own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
 | `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{innings: 9}` for Baseball rows (fixed, not yet a New Game choice), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows, both guided-drill rows, and Bob's 27 rows (no config needed — Bob's 27 always plays the fixed D1-D20 ladder), `{targets: [...]}` for Halve-It rows (§32), `{rounds: [15 frozen {target, par} pairs]}` for Dead Man Walking rows — computed once server-side at creation and never client-supplied or recomputed (§33), and `{rounds: 15}` for Pressure Chamber rows (fixed, server-overridden regardless of client input — §34) |
@@ -3309,6 +3310,59 @@ already-migrated database is a safe no-op).
 | `dart_weight` | `INTEGER` | Snapshot at game start — **as of `docs/archive/dart-builder-roadmap.md`**, sourced from the selected loadout's barrel `weight_g` (`NULL` if no loadout was selected), not from `players.dart_weight` (see §16) |
 | `loadout_id` | `INTEGER REFERENCES loadouts(id) ON DELETE SET NULL` | The loadout selected for this player in this game, if any (§16). Nullable — playing without a loadout remains fully valid |
 | `start_score` | `INTEGER` | X01 handicapping only (§25): this player's own handicap starting score for this game, when it differs from the game-wide `games.category` score. `NULL` for every non-handicapped player and every non-X01 game. The presence of any non-NULL value in a game is what the `NOT_HANDICAPPED` exclusion (nine-darter/fewest-darts/first-9 leaderboards, Elo) filters on, so it must survive export/import round trips |
+| `dnf` | `INTEGER NOT NULL DEFAULT 0` | Set on this one participant when they leave the match early — see "Forfeiting a game / DNF" below. `0` for every player who finished (or is still playing) |
+
+### Forfeiting a game / DNF
+
+Two related, additive facts — neither changes what `completed_at`/`winner_id` mean for
+any existing stat query.
+
+- **Bowing out of a still-live multiplayer match** (`forfeitPlayer(gameId, playerName)`,
+  `POST /api/games/:id/forfeit` `{ player }`): the ☰ game-options menu's "🚶 Bow
+  out…" lists every still-active participant (not just the current thrower — anyone
+  might have to leave); the game keeps going for whoever's left. Marks that one
+  participant's `game_players.dnf = 1`. If that leaves exactly one other active
+  participant, the match is genuinely over (nobody left to play against), so it
+  completes normally via `completeGame()` with that survivor as the winner — a
+  walkover, the same shape `recordWalkover()` already uses for tournament matches. If
+  it leaves zero active participants (a solo game's only participant bowing out), the
+  match ends with no winner, marked `dnf_at` instead. Returns `{ ok, ended, winnerName }`
+  so the frontend knows whether to keep playing or wrap up. Scoped client-side to the
+  turn-rotation modes that share `advanceToNextActivePlayer()`/`isRoundComplete()`'s
+  skip-`dnf` logic and `soleActiveLeaderIndex()`'s leader-exclusion (X01, Cricket,
+  Baseball, Shanghai, Halve-It, Pressure Chamber, Killer) — Ghost mode's "opponent"
+  isn't a real player who can leave, and every solo drill has nobody left to keep
+  playing with anyway. A departed player stays IN `game.players` (their recorded
+  stats/turns/scoreboard row are untouched) — only their own turn is skipped from
+  then on, and every per-mode winner/tie check (`evaluateVisitCricket()`'s `opponents`
+  filter, `soleActiveLeaderIndex()` for Baseball/Shanghai/Halve-It, the filtered
+  candidate pool `pressureChamberDecideWinnerIndex()` sees) excludes them so their
+  frozen total can neither block someone else's win nor win/extend a tie themselves.
+  Killer reuses its own existing `eliminated` flag (bowing out sets both) rather than
+  a second parallel skip mechanism, since Killer's turn-skip and win check already key
+  off `eliminated` alone.
+- **Ending the whole match early** (`abandonGame(gameId)`, `POST /api/games/:id/abandon`,
+  no body): the ☰ menu's "🚪 End game" — every still-active participant is marked
+  `dnf = 1` and the game gets `dnf_at`. Wired into `askEndGame()`'s existing confirm
+  flow for every case except a Daily Challenge attempt (which already has its own
+  dedicated `daily_challenge_attempts` tracking, completely separate from
+  `games.completed_at`/`dnf_at` — marking the underlying game row here would be
+  redundant). This is what makes a 501 game that's never closed on a double, then
+  ended early, count as a DNF instead of silently staying an invisible, uncounted
+  in-progress row forever (the pre-existing behavior — `askEndGame()` never called any
+  completion endpoint at all).
+- **Known limitation**: `dnf`/`dnf_at` are live-session-only signals — a save/resume
+  cycle (`docs/archive/saved-games-roadmap.md`) replays purely from recorded
+  `turns`/`darts` via `rebuildX01State()`/`rebuildCricketState()`/etc., which have no
+  knowledge of an in-session bow-out. Saving, then resuming, a game after someone has
+  bowed out will rebuild that player as still active. Not fixed as part of this
+  feature — narrow edge case (pausing an already-forfeited-from match), flagged here
+  rather than silently left for a future session to rediscover.
+- Both endpoints are `requireWrite` (same tier as recording a turn — bowing out or
+  ending a match is gameplay, not admin surgery). Committed tests:
+  `backend/test/db.forfeit-and-abandon.test.js` (backend guards/lifecycle) and the
+  "DNF-aware winner determination" describe block in `backend/test/scoring.test.js`
+  (per-mode winner/tie exclusion + `isRoundComplete()` skip-`dnf` correctness).
 
 ### `turns` (one row per visit, indexed on `player_id` and `game_id`)
 | Column | Type | Notes |

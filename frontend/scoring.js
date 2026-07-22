@@ -161,7 +161,11 @@ const CRICKET_ALL_NUMBERS = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,
 function evaluateVisitCricket(player, darts, game){
   const numbers = game.config.numbers || CRICKET_STANDARD_NUMBERS;
   const cutthroat = game.config.variant === 'cutthroat';
-  const opponents = game.players.filter(pl=>pl!==player);
+  // A departed player (docs/open-roadmap-items.md "Forfeiting a multiplayer
+  // game") is never a real opponent any more — excluded so their frozen marks
+  // can't block someone else's win (standard win check) or receive/owe cutthroat
+  // points from a visit thrown after they left.
+  const opponents = game.players.filter(pl=>pl!==player && !pl.dnf);
   const marks = Object.assign({}, player.marks);
   let pointsThisVisit = 0;
   const gains = new Map(opponents.map(o=>[o, 0])); // opponent object -> points gained this visit
@@ -232,8 +236,34 @@ function baseballInningTarget(inning){
 // evaluate BEFORE game.current advances — it still holds the throwing player's
 // index — the same "not yet advanced" timing every evaluateVisit*() relies on.
 // One helper means a fifth fixed-round mode can't clone a stale copy.
+// Bow out (docs/open-roadmap-items.md "Forfeiting a multiplayer game"): a
+// departed player (p.dnf) never throws again, so the raw "(current+1)%length"
+// arithmetic below would desync once someone leaves mid-round — the actual
+// next thrower is whichever active player advanceToNextActivePlayer() (frontend/
+// index.html) would land on, so this walks the same skip-dnf sequence instead
+// of a plain index step.
 function isRoundComplete(game){
-  return (game.current + 1) % game.players.length === (game.starter || 0);
+  let idx = game.current;
+  for(let step=1; step<=game.players.length; step++){
+    idx = (idx + 1) % game.players.length;
+    if(!game.players[idx].dnf) break;
+  }
+  return idx === (game.starter || 0);
+}
+// Shared "who's ahead after the final round" comparison for the four
+// fixed-round modes (Baseball/Shanghai/Halve-It/Pressure Chamber): `totals` is
+// index-aligned with game.players (each entry that player's running total —
+// the thrower's own updated value already substituted in by the caller, since
+// evaluateVisit*() runs before game.current's own player object is mutated).
+// A player who has bowed out (docs/open-roadmap-items.md "Forfeiting a
+// multiplayer game") is never a candidate — their frozen total can't win, or
+// extend a tie into extra rounds, in a match they're no longer part of.
+// Returns the sole leader's index, or null if 2+ active players are tied.
+function soleActiveLeaderIndex(game, totals){
+  const activeIdx = totals.map((_, i) => i).filter(i => !game.players[i].dnf);
+  const maxTotal = Math.max(...activeIdx.map(i => totals[i]));
+  const leaders = activeIdx.filter(i => totals[i] === maxTotal);
+  return leaders.length === 1 ? leaders[0] : null;
 }
 
 function evaluateVisitBaseball(player, darts, game){
@@ -247,9 +277,8 @@ function evaluateVisitBaseball(player, darts, game){
   let matchComplete = false, winnerIndex = null;
   if(roundComplete && inning >= 9){
     const totals = game.players.map((pl, i) => i === game.current ? totalRuns : (pl.totalRuns || 0));
-    const maxTotal = Math.max(...totals);
-    const leaders = totals.reduce((acc, t, i) => { if(t === maxTotal) acc.push(i); return acc; }, []);
-    if(leaders.length === 1){ matchComplete = true; winnerIndex = leaders[0]; }
+    const sole = soleActiveLeaderIndex(game, totals);
+    if(sole != null){ matchComplete = true; winnerIndex = sole; }
   }
   return { inningRuns, totalRuns, runsThisVisit, scored:runsThisVisit, target, roundComplete, matchComplete, winnerIndex };
 }
@@ -305,12 +334,11 @@ function evaluateVisitShanghai(player, darts, game){
     matchComplete = true; winnerIndex = game.current;
   } else if(roundComplete && round >= maxRounds){
     const totals = game.players.map((pl, i) => i === game.current ? totalPoints : (pl.totalPoints || 0));
-    const maxTotal = Math.max(...totals);
-    const leaders = totals.reduce((acc, t, i) => { if(t === maxTotal) acc.push(i); return acc; }, []);
     // A tie among the leaders continues into an extra round repeating the
     // final round's own number (matching Baseball's extra-innings precedent,
     // per this doc's own "Open questions" lean) rather than a shared loss.
-    if(leaders.length === 1){ matchComplete = true; winnerIndex = leaders[0]; }
+    const sole = soleActiveLeaderIndex(game, totals);
+    if(sole != null){ matchComplete = true; winnerIndex = sole; }
   }
   return { roundPoints, totalPoints, pointsThisVisit, scored:pointsThisVisit, target, shanghai, roundComplete, matchComplete, winnerIndex };
 }
@@ -1128,9 +1156,8 @@ function evaluateVisitHalveIt(player, darts, game){
   let matchComplete = false, winnerIndex = null;
   if(roundComplete && round >= maxRounds){
     const totals = game.players.map((pl, i) => i === game.current ? total : (pl.total || 0));
-    const maxTotal = Math.max(...totals);
-    const leaders = totals.reduce((acc, t, i) => { if(t === maxTotal) acc.push(i); return acc; }, []);
-    if(leaders.length === 1){ matchComplete = true; winnerIndex = leaders[0]; }
+    const sole = soleActiveLeaderIndex(game, totals);
+    if(sole != null){ matchComplete = true; winnerIndex = sole; }
   }
   return { scored: gained, gained, halved, total, roundTotals, target, roundComplete, matchComplete, winnerIndex };
 }
@@ -1479,7 +1506,13 @@ function evaluateVisitPressureChamber(player, darts, game){
       ? { totalCp, misses, darts: (pl.legDarts || 0) + darts.length }
       : { totalCp: pl.totalCp || 0, misses: pl.misses || 0, darts: pl.legDarts || 0 });
     matchComplete = true;
-    winnerIndex = pressureChamberDecideWinnerIndex(totals);
+    // A departed player (docs/open-roadmap-items.md "Forfeiting a multiplayer
+    // game") can't win the round — pressureChamberDecideWinnerIndex() always
+    // picks SOMEONE (no extra-round tiebreak here), so it must only ever see
+    // active candidates, then the winning candidate's index maps back to its
+    // real game.players position.
+    const activeIdx = game.players.map((pl, i) => i).filter(i => !game.players[i].dnf);
+    winnerIndex = activeIdx[pressureChamberDecideWinnerIndex(activeIdx.map(i => totals[i]))];
   }
   return { scored: result.gained, gained: result.gained, missPenalty: result.missPenalty, outcome: result.outcome,
     card, target: card.target, modifier: card.modifier,

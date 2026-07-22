@@ -787,6 +787,7 @@
           <button class="btn btn-ghost game-menu-btn" aria-haspopup="true" aria-expanded="false" aria-label="Game options" onclick="toggleGameMenu(this)">☰</button>
           <div class="game-menu-list" role="menu" hidden>
             <button class="game-menu-item save-game-btn" role="menuitem" onclick="closeAllGameMenus();saveCurrentGame()" hidden>⏸ Save for later</button>
+            <button class="game-menu-item bow-out-btn" role="menuitem" onclick="closeAllGameMenus();askBowOut()" hidden>🚶 Bow out…</button>
             <button class="game-menu-item" role="menuitem" onclick="closeAllGameMenus();askEndGame()">🚪 End game</button>
           </div>
         </div>
@@ -1084,6 +1085,7 @@
         <button class="btn btn-ghost game-menu-btn" aria-haspopup="true" aria-expanded="false" aria-label="Game options" onclick="toggleGameMenu(this)">☰</button>
         <div class="game-menu-list" role="menu" hidden>
           <button class="game-menu-item save-game-btn" role="menuitem" onclick="closeAllGameMenus();saveCurrentGame()" hidden>⏸ Save for later</button>
+          <button class="game-menu-item bow-out-btn" role="menuitem" onclick="closeAllGameMenus();askBowOut()" hidden>🚶 Bow out…</button>
           <button class="game-menu-item" role="menuitem" onclick="closeAllGameMenus();askEndGame()">🚪 End game</button>
         </div>
       </div>
@@ -1795,6 +1797,14 @@ const DB = {
   recordTurn(t){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/turns`, t).then(r=>{ if(r && r.turnId!=null) this.lastTurnId=r.turnId; })); } },
   recordEvent(type, setNo, legNo){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/events`, {type, setNo:setNo??null, legNo:legNo??null})); } },
   completeGame(winner){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/complete`, {winner})); } },
+  // Forfeit/abandon (docs/open-roadmap-items.md "Forfeiting a multiplayer game" /
+  // "abandoned games count as a DNF") — not queued through DB._queue like
+  // recordTurn/recordEvent above: both are one-shot actions whose caller needs
+  // the real response (forfeitPlayer's `ended`/`winnerName` decide what the
+  // live UI shows next) rather than fire-and-forget, the same reasoning
+  // saveGame()/abandonSavedGame() below already follow.
+  forfeitPlayer(playerName){ return this.gameId!=null ? Backend.send('POST', `/api/games/${this.gameId}/forfeit`, { player: playerName }) : Promise.reject(new Error('No active game')); },
+  abandonGame(){ return this.gameId!=null ? Backend.send('POST', `/api/games/${this.gameId}/abandon`) : Promise.reject(new Error('No active game')); },
   deleteLastTurn(){ if(this.gameId!=null){ const id=this.gameId; const turnId=this.lastTurnId; this.lastTurnId=null;
     this._queue(()=>Backend.send('DELETE',`/api/games/${id}/turns/last`+(turnId!=null?`?turnId=${turnId}`:''))); } },
 
@@ -7528,7 +7538,7 @@ function renderGame(){
       : `Legs ${p.legsWon}/${game.legsPerSet}`;
     row.innerHTML=`
       <div>
-        <div class="nm">${escapeHtml(p.name)} <span class="nm-out">${p.doubleOut?'double out':'single out'}</span></div>
+        <div class="nm">${escapeHtml(p.name)} <span class="nm-out">${p.dnf?'DNF':p.doubleOut?'double out':'single out'}</span></div>
         ${i===game.current?'<div class="turnflag">▸ throwing</div>':''}
       </div>
       <div class="meta">
@@ -7568,7 +7578,7 @@ function csHeadCellsHtml(){
     return `<div class="cs-col-head${active?' active':''}">
       <span>${escapeHtml(p.name)}</span>
       ${active?'<span class="cs-throw-chip">▸ throwing</span>':''}
-      ${showStanding?`<span class="cs-standing">${standing}</span>`:''}
+      ${p.dnf?'<span class="cs-standing">DNF</span>':showStanding?`<span class="cs-standing">${standing}</span>`:''}
     </div>`;
   }).join('');
 }
@@ -10010,6 +10020,21 @@ function isCurrentGameSavable(){
 function updateSaveButtonVisibility(){
   document.querySelectorAll('.save-game-btn').forEach(btn => { btn.hidden = !isCurrentGameSavable(); });
 }
+// "Bow out" (docs/open-roadmap-items.md "Forfeiting a multiplayer game"): lets
+// one player in a still-live multiplayer match leave early without ending it
+// for everyone else — a 4-player Cricket game where one player has to leave
+// shouldn't force the other three to abandon their own match too. Scoped to
+// the modes that share the turn-rotation engine advanceToNextActivePlayer()
+// (above) and the leader-exclusion logic in scoring.js actually cover — Ghost
+// mode's "opponent" isn't a real player who can leave, and every solo drill
+// has nobody left to keep playing with anyway.
+const BOW_OUT_GAME_TYPES = ['x01', 'cricket', 'baseball', 'shanghai', 'halve_it', 'pressure_chamber', 'killer'];
+function canBowOutOfCurrentGame(){
+  return !!(game && !game.done && !game.hasGhost && game.players.length > 1 && BOW_OUT_GAME_TYPES.includes(game.gameType));
+}
+function updateBowOutButtonVisibility(){
+  document.querySelectorAll('.bow-out-btn').forEach(btn => { btn.hidden = !canBowOutOfCurrentGame(); });
+}
 // Game options menu (☰ Save for later / End game): only one can ever be open,
 // so closing every .game-menu-list is always correct — no per-menu state to track.
 function closeAllGameMenus(){
@@ -10266,6 +10291,67 @@ function askAbandonSavedGame(gameId, retryStartGame){
   });
 }
 
+// "Bow out" (docs/open-roadmap-items.md "Forfeiting a multiplayer game"): one
+// player in a still-live multiplayer match leaves early without ending it for
+// everyone else. askBowOut() lists every still-active player as a choice (not
+// just the current thrower — anyone might be the one who has to leave);
+// submitBowOut() confirms, then records it server-side via DB.forfeitPlayer()
+// before touching any local state, so a network failure leaves the live game
+// exactly as it was rather than silently drifting from what's actually saved.
+function askBowOut(){
+  if(!canBowOutOfCurrentGame()) return;
+  const active = game.players.filter(p=>!p.dnf);
+  if(active.length < 2) return;
+  const buttons = active.map(p=>
+    `<button class="btn btn-ghost" style="width:100%" onclick="submitBowOut('${jsArg(p.name)}')">${escapeHtml(p.name)}</button>`
+  ).join('');
+  openModal(`
+    <p class="modal-msg">Who's bowing out? They'll be recorded as a DNF for this match — everyone else can keep playing.</p>
+    <div class="modal-actions" style="flex-direction:column;align-items:stretch;gap:8px">${buttons}</div>
+    <div class="modal-actions" style="margin-top:10px"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
+}
+function submitBowOut(name){
+  closeModal();
+  uiConfirm(`${name} will drop out of this match — their stats so far are kept, and this counts as a DNF for them. Continue?`, ()=>{
+    Auth.ensureCanWrite(()=>{
+      DB.forfeitPlayer(name).then(res=>applyBowOut(name, res)).catch(e=>uiAlertErr('Could not record the forfeit', e));
+    });
+  });
+}
+// Applies the server's verdict: `ended` means bowing out left at most one
+// active participant, so the WHOLE match is already over server-side
+// (forfeitPlayer() itself called completeGame() for a walkover win, or marked
+// dnf_at if nobody was left at all) — the live game clears out exactly like
+// askEndGame()'s own tail. Otherwise the match keeps going: the departed
+// player is flagged locally (still IN game.players, so their recorded stats
+// stay on the scoreboard/history — only their own turn is skipped from here
+// on), and if it was their turn right now, play moves on to the next active
+// player immediately.
+function applyBowOut(name, res){
+  if(res.ended){
+    const msg = res.winnerName
+      ? `${escapeHtml(res.winnerName)} wins by forfeit — ${escapeHtml(name)} bowed out. Stats so far are kept.`
+      : `The match has ended — everyone remaining has bowed out. Stats so far are kept.`;
+    game = null;
+    pushLive();
+    show('setup');
+    uiAlert(msg);
+    return;
+  }
+  const idx = game.players.findIndex(p=>p.name===name);
+  if(idx < 0) return;
+  game.players[idx].dnf = true;
+  if(game.gameType === 'killer') game.players[idx].eliminated = true; // Killer's own win/turn logic keys off `eliminated`
+  announce(`${name} has bowed out — recorded as a DNF. The rest of you can keep playing.`);
+  if(game.current === idx){
+    clearTurnSnapshots(); // can't undo across this boundary
+    if(game.gameType === 'killer'){ advanceKillerTurn(); return; }
+    game.darts = []; game.busted = false; game.won = false;
+    advanceToNextActivePlayer(game);
+  }
+  updateBowOutButtonVisibility();
+  renderGame();
+}
 function askEndGame(){
   // Tournament mode (docs/archive/tournament-mode-roadmap.md): a plain "abandon and forget"
   // isn't allowed here — the bracket needs an actual result to advance. Send the
@@ -10283,8 +10369,17 @@ function askEndGame(){
     : (game && game.practice)
     ? 'Are you sure you want to end this practice session? Your stats have been saved.'
     : 'Abandon this match early? Recorded stats are kept.';
+  // docs/open-roadmap-items.md "abandoned games count as a DNF": Daily Challenge
+  // excluded — it already has its own dedicated attempt-tracking (daily_challenge_
+  // attempts), completely separate from games.completed_at/dnf_at, so marking the
+  // underlying game row here would be redundant noise on top of a system that
+  // already correctly locks out today's retry. Every other early-exit (H2H match,
+  // practice session, drill) gets the underlying game row marked DNF instead of
+  // silently staying an uncounted, invisible in-progress row forever.
+  const wasChallenge = !!activeChallenge;
   uiConfirm(msg, ()=>{
     activeChallenge = null;
+    if(!wasChallenge) DB.abandonGame().catch(()=>{});
     stopCheckoutBlitzTimer();   // no-op if no Blitz run is in progress
     // 🌟 Perfectionist (docs/archive/checkout-trainer-roadmap.md): ending a Freeform
     // session — this mode's only "session over" moment — with 15+ attempts and
@@ -10426,6 +10521,22 @@ function undoDart(){
   const status=document.getElementById('status');
   status.className='status'; status.textContent='Dart removed.';
   renderSlots(); renderPad(); updateCheckout(false); pushLive();
+}
+// Bow out (docs/open-roadmap-items.md "Forfeiting a multiplayer game"): advances
+// game.current to the next player who hasn't left (!p.dnf), wrapping — shared by
+// every multi-visit turn-based mode's own "next player" line below (X01/Cricket/
+// Baseball/Shanghai/Halve-It/Pressure Chamber), plus Killer's advanceKillerTurn()
+// (via the `also` predicate, since Killer already skips `eliminated` the same
+// way). A departed player stays IN game.players — only their own turn is
+// skipped — so their recorded stats/turns stay intact for the scoreboard and
+// history, exactly like Killer's existing eliminated-but-still-listed rows.
+function advanceToNextActivePlayer(game, also){
+  let idx = game.current;
+  for(let step=1; step<=game.players.length; step++){
+    idx = (idx+1) % game.players.length;
+    const p = game.players[idx];
+    if(!p.dnf && !(also && also(p))){ game.current = idx; return; }
+  }
 }
 function enterTurn(){
   if(game.gameType === 'cricket') return enterTurnCricket();
@@ -10748,7 +10859,7 @@ function enterTurn(){
 
   // next player
   game.darts=[]; game.busted=false; game.won=false;
-  game.current = (game.current+1) % game.players.length;
+  advanceToNextActivePlayer(game);
   game.turnSeq += 1;
   document.getElementById('status').className='status';
   document.getElementById('status').textContent='Tap a multiplier, then a number.';
@@ -10918,7 +11029,7 @@ function enterTurnCricket(){
   }
 
   game.darts=[]; game.busted=false; game.won=false;
-  game.current = (game.current+1) % game.players.length;
+  advanceToNextActivePlayer(game);
   game.turnSeq += 1;
   document.getElementById('status').className='status';
   document.getElementById('status').textContent='Tap a number to score.';
@@ -11155,7 +11266,7 @@ function enterTurnBaseball(){
 
   if(ev.roundComplete) game.baseballInning += 1;
   game.darts=[]; game.busted=false; game.won=false;
-  game.current = (game.current+1) % game.players.length;
+  advanceToNextActivePlayer(game);
   game.turnSeq += 1;
   document.getElementById('status').className='status';
   document.getElementById('status').textContent = `Inning ${Math.min(game.baseballInning,9)} of 9 — target ${baseballInningTarget(game.baseballInning)}.`;
@@ -11234,7 +11345,7 @@ function enterTurnShanghai(){
 
   if(ev.roundComplete) game.shanghaiRound += 1;
   game.darts=[]; game.busted=false; game.won=false;
-  game.current = (game.current+1) % game.players.length;
+  advanceToNextActivePlayer(game);
   game.turnSeq += 1;
   document.getElementById('status').className='status';
   document.getElementById('status').textContent = `Round ${Math.min(game.shanghaiRound,maxRounds)} of ${maxRounds} — target ${shanghaiRoundTarget(game.shanghaiRound, maxRounds)}.`;
@@ -11321,7 +11432,7 @@ function enterTurnHalveIt(){
 
   if(ev.roundComplete) game.halveItRound += 1;
   game.darts=[]; game.busted=false; game.won=false;
-  game.current = (game.current+1) % game.players.length;
+  advanceToNextActivePlayer(game);
   game.turnSeq += 1;
   document.getElementById('status').className='status';
   document.getElementById('status').textContent = `Round ${Math.min(game.halveItRound,maxRounds)} of ${maxRounds} — target ${halveItTargetLabel(halveItRoundTarget(game.halveItRound, (game.config&&game.config.targets)||HALVE_IT_DEFAULT_TARGETS))}.`;
@@ -11526,7 +11637,7 @@ function enterTurnPressureChamber(){
   if(ev.roundComplete) game.pressureChamberRound += 1;
   game.darts=[]; game.busted=false; game.won=false;
   game.pressureDeclared = null;  // the next player/round makes its own call
-  game.current = (game.current+1) % game.players.length;
+  advanceToNextActivePlayer(game);
   game.turnSeq += 1;
   document.getElementById('status').className='status';
   document.getElementById('status').textContent = `Round ${Math.min(game.pressureChamberRound,PRESSURE_ROUNDS)} of ${PRESSURE_ROUNDS}.`;
@@ -11883,7 +11994,11 @@ function startNextLeg(newSet){
   const _h2h = !game.practice && game.players.length > 1;
   if(newSet && _h2h) sendHaWebhook('setstart', '', game.category, { setNo: game.setNo });
   sendHaWebhook('legstart', '', game.category, { setNo: game.setNo, legNo: game.legNo });
-  game.starter = (game.starter + 1) % game.players.length;
+  // Skip any player who's bowed out (docs/open-roadmap-items.md "Forfeiting a
+  // multiplayer game") the same way advanceToNextActivePlayer() skips them
+  // mid-leg — otherwise a departed player could still be handed the next leg's
+  // opening throw.
+  do { game.starter = (game.starter + 1) % game.players.length; } while(game.players[game.starter].dnf);
   game.current = game.starter;
   game.players.forEach(p=>GAME_TYPES[game.gameType].resetForNextLeg(p, game, newSet));
   if(game.gameType === 'baseball') game.baseballInning = 1;
@@ -11975,6 +12090,7 @@ function legSummaryX01(game, winner){
 function finishUnit(kind, winner){
   game.done = (kind==='game');
   updateSaveButtonVisibility(); // a just-completed match is no longer savable
+  updateBowOutButtonVisibility();
   renderGame();
   const sb=document.getElementById('scoreboard');
   const labels = { leg:'wins the leg', set:'wins the set', game:'wins the game' };
@@ -12192,6 +12308,7 @@ function renderGameShell(){
       </div>`;
   applyDartMode();
   updateSaveButtonVisibility();
+  updateBowOutButtonVisibility();
 }
 // Shared "start the next round" dispatcher for the two per-dart drill modes that
 // have a genuine round boundary (Doubles Practice, guided Around the Clock) — Just
@@ -13949,11 +14066,7 @@ function playerSnapshotKiller(p){
 // eliminated players must be skipped entirely.
 function advanceKillerTurn(){
   game.killerDartsThisVisit = 0;
-  let idx = game.current;
-  for(let step=1; step<=game.players.length; step++){
-    idx = (idx+1) % game.players.length;
-    if(!game.players[idx].eliminated){ game.current = idx; break; }
-  }
+  advanceToNextActivePlayer(game, p => p.eliminated);
   clearTurnSnapshots(); // can't undo across a visit boundary
   game.turnSeq += 1;
   renderGameKiller();

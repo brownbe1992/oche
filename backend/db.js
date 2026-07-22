@@ -591,6 +591,21 @@ db.exec(`UPDATE games SET player_count = (SELECT COUNT(*) FROM game_players gp W
 // every pre-existing row is X01 (game_type defaults to 'x01') with category as its
 // stringified starting score, so this mirrors createGame()'s own derivation exactly.
 db.exec(`UPDATE games SET config = json_object('startingScore', CAST(category AS INTEGER)) WHERE config IS NULL AND game_type = 'x01'`);
+// Forfeit / DNF (docs/open-roadmap-items.md "Forfeiting a multiplayer game" /
+// "abandoned games count as a DNF"): a player who has to leave an in-progress
+// multiplayer match can bow out without ending it for everyone else, and a
+// match nobody actually finishes (the admin presses End Game before anyone
+// wins) is recorded as a DNF instead of silently vanishing (an abandoned game
+// never set completed_at at all before this). Both columns are purely
+// additive and deliberately NOT folded into completed_at/winner_id: every
+// existing `completed_at IS NOT NULL` stat query already means "this match
+// reached a genuine finish" (see e.g. getBaseballWonLegs()'s own comment on
+// that invariant) — reusing it for an abandoned match would let a
+// since-abandoned mid-leg's partial totals start counting as real results.
+// games.dnf_at marks "this match ended without a real conclusion" on its own,
+// parallel track; game_players.dnf marks which participant(s) didn't finish it.
+try { db.exec('ALTER TABLE games ADD COLUMN dnf_at TEXT'); } catch(e) {}
+try { db.exec('ALTER TABLE game_players ADD COLUMN dnf INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
 
 const DEFAULT_PIN_LOCKOUT_THRESHOLD = 10;
 // Admin login backoff (docs/archive/admin-login-backoff-roadmap.md) — replaces the old flat
@@ -670,6 +685,10 @@ const q = {
   gameTypeById : db.prepare('SELECT game_type FROM games WHERE id = ?'),
   addParticipant: db.prepare('INSERT OR IGNORE INTO game_players (game_id, player_id, dart_weight, out_mode, loadout_id, start_score) VALUES (?, ?, ?, ?, ?, ?)'),
   completeGame : db.prepare("UPDATE games SET completed_at = datetime('now'), winner_id = ? WHERE id = ?"),
+  markGameDnf       : db.prepare("UPDATE games SET dnf_at = datetime('now') WHERE id = ?"),
+  setParticipantDnf : db.prepare('UPDATE game_players SET dnf = 1 WHERE game_id = ? AND player_id = ?'),
+  markAllActiveDnf  : db.prepare('UPDATE game_players SET dnf = 1 WHERE game_id = ? AND dnf = 0'),
+  activeParticipants: db.prepare('SELECT p.id, p.name FROM game_players gp JOIN players p ON p.id = gp.player_id WHERE gp.game_id = ? AND gp.dnf = 0'),
 
   insertTurn   : db.prepare(`INSERT INTO turns
                    (game_id, player_id, set_no, leg_no, scored, bust, checkout, checkout_points, leg_won, target_score, declared_unsolvable, affected_player_id, declared_hit)
@@ -1635,6 +1654,56 @@ function completeGame(gameId, winnerName) {
   }
   q.completeGame.run(w ? w.id : null, Number(gameId));
   _fireGameLifecycleHooks('completed', { gameId: Number(gameId), winnerName: w ? w.name : null });
+  return { ok: true };
+}
+
+// forfeitPlayer(): one participant of a still-live multiplayer match leaves
+// early (docs/open-roadmap-items.md "Forfeiting a multiplayer game") — a
+// 4-player Cricket game where one player has to leave shouldn't force the
+// other three to abandon their own match too. Marks that participant DNF; if
+// that leaves exactly one other active participant, the match is genuinely
+// over (nobody left to play against), so it completes normally with that
+// survivor as the winner — the same "walkover" shape recordWalkover() already
+// uses for tournament matches, just for a casual game (reuses completeGame()
+// itself, so the participant check/winner_id/lifecycle hook all stay
+// identical to any other real completion). If NO active participant remains
+// (the last player standing also bows out), the match ends with no winner,
+// marked dnf_at like any other abandoned game.
+function forfeitPlayer(gameId, playerName) {
+  const game = db.prepare('SELECT id, completed_at, dnf_at FROM games WHERE id = ?').get(Number(gameId));
+  if (!game) throw httpError(404, 'Game not found');
+  if (game.completed_at != null || game.dnf_at != null) throw httpError(409, 'This game has already ended');
+  const p = getPlayer(playerName);
+  if (!p) throw httpError(404, 'Player not found');
+  const participant = db.prepare('SELECT dnf FROM game_players WHERE game_id = ? AND player_id = ?').get(Number(gameId), p.id);
+  if (!participant) throw httpError(400, 'That player is not part of this game');
+  if (participant.dnf) throw httpError(409, 'That player has already left this game');
+  q.setParticipantDnf.run(Number(gameId), p.id);
+  const stillActive = q.activeParticipants.all(Number(gameId));
+  if (stillActive.length === 1) {
+    completeGame(gameId, stillActive[0].name);
+    return { ok: true, ended: true, winnerName: stillActive[0].name };
+  }
+  if (stillActive.length === 0) {
+    q.markGameDnf.run(Number(gameId));
+    _fireGameLifecycleHooks('completed', { gameId: Number(gameId), winnerName: null });
+    return { ok: true, ended: true, winnerName: null };
+  }
+  return { ok: true, ended: false, winnerName: null };
+}
+
+// abandonGame(): the "End Game" early-exit path (docs/open-roadmap-items.md
+// "abandoned X01 game counts as a DNF") — the admin ends the whole match
+// before anyone reached a real finish. Every participant who hadn't already
+// left (via forfeitPlayer() above) is marked DNF too, and the game itself
+// gets dnf_at instead of completed_at — never both on the same game.
+function abandonGame(gameId) {
+  const game = db.prepare('SELECT id, completed_at, dnf_at FROM games WHERE id = ?').get(Number(gameId));
+  if (!game) throw httpError(404, 'Game not found');
+  if (game.completed_at != null || game.dnf_at != null) throw httpError(409, 'This game has already ended');
+  q.markAllActiveDnf.run(Number(gameId));
+  q.markGameDnf.run(Number(gameId));
+  _fireGameLifecycleHooks('completed', { gameId: Number(gameId), winnerName: null });
   return { ok: true };
 }
 
@@ -9132,7 +9201,7 @@ migrateKillerConfigsToIdKeys();
 
 module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer, registerDeletePlayerGuard,
-  createGame, addTurn, recordTurn, completeGame, recordEvent,
+  createGame, addTurn, recordTurn, completeGame, recordEvent, forfeitPlayer, abandonGame,
   onGameCreated, onGameCompleted,
   logServerError, getServerErrors,
   computeStats, getSummary, getHomeExtra, getSessionRecap, getOneEightyStats, getBigFishStats, getNineDarterStats,

@@ -2939,3 +2939,81 @@ describe('rotated-starter round completion (leg 2+, starter=1 of 2)', () => {
     assert.equal(evaluateVisitPressureChamber(g0.players[0], missDarts, g0).roundComplete, true);
   });
 });
+
+// docs/open-roadmap-items.md "Forfeiting a multiplayer game": a departed
+// player (p.dnf) must never (a) block someone else's win via a frozen mark/
+// total, (b) win/extend a tie themselves once they've left, or (c) desync
+// "is the round complete" once they're skipped in rotation.
+describe('DNF-aware winner determination (docs/open-roadmap-items.md "Forfeiting a multiplayer game")', () => {
+  test('Cricket: a departed opponent\'s frozen open marks can no longer block a win', () => {
+    const numbers = CRICKET_STANDARD_NUMBERS;
+    const freshMarks = () => Object.fromEntries(numbers.map(n => [n, 0]));
+    const shooter = { marks: { ...freshMarks(), 15: 3, 16: 3, 17: 3, 18: 3, 19: 3 }, points: 100 };
+    const departedOpp = { marks: freshMarks(), points: 999, dnf: true }; // still "open" on everything, way ahead on points
+    const activeOpp = { marks: { ...freshMarks(), 15: 3, 16: 3, 17: 3, 18: 3, 19: 3, 20: 3, 25: 3 }, points: 50 };
+    const game = { config: { numbers }, players: [shooter, departedOpp, activeOpp] };
+    // Closes the last two numbers (20, bull) with points left over.
+    const ev = evaluateVisitCricket(shooter, [d(20, 3), d(25, 2), d(25, 1)], game);
+    assert.equal(ev.win, true, 'the departed opponent must not count as still-open/still-ahead');
+  });
+
+  test('Cricket cutthroat: a departed opponent neither gains points nor is checked for the win', () => {
+    const numbers = CRICKET_STANDARD_NUMBERS;
+    const freshMarks = () => Object.fromEntries(numbers.map(n => [n, 0]));
+    const shooter = { marks: freshMarks(), points: 0 };
+    const departedOpp = { marks: freshMarks(), points: 0, dnf: true };
+    const game = { config: { numbers, variant: 'cutthroat' }, players: [shooter, departedOpp] };
+    const ev = evaluateVisitCricket(shooter, [d(20, 3), d(20, 3)], game);
+    assert.deepEqual(ev.opponentGains, [], 'a departed player is not a real opponent — no gains attributed to them');
+  });
+
+  test('Baseball: a departed player\'s frozen high total can no longer win the match', () => {
+    const shooter = { totalRuns: 5, inningRuns: {} };
+    const departedLeader = { totalRuns: 50, inningRuns: {}, dnf: true };
+    const game = { players: [shooter, departedLeader], current: 0, starter: 0, baseballInning: 9 };
+    const ev = evaluateVisitBaseball(shooter, [{sector:9,mult:1},{sector:9,mult:1},{sector:9,mult:1}], game);
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 0, 'the only active player wins outright, ignoring the departed leader\'s total');
+  });
+
+  test('Shanghai: a tie against a departed player resolves to the active player, not an extra round', () => {
+    const shooter = { totalPoints: 10, roundPoints: {} };
+    const departedTied = { totalPoints: 10, roundPoints: {}, dnf: true };
+    const g = { shanghaiRound: 7, current: 0, starter: 0, players: [shooter, departedTied], config: { rounds: 7 } };
+    const ev = evaluateVisitShanghai(shooter, [{sector:0,mult:1},{sector:0,mult:1},{sector:0,mult:1}], g);
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 0);
+  });
+
+  test('Halve-It: same tie-against-departed-player resolution', () => {
+    const shooter = { total: 20, roundTotals: {} };
+    const departedTied = { total: 20, roundTotals: {}, dnf: true };
+    const g = { halveItRound: HALVE_IT_DEFAULT_TARGETS.length, current: 0, starter: 0,
+      players: [shooter, departedTied], config: { targets: HALVE_IT_DEFAULT_TARGETS } };
+    const ev = evaluateVisitHalveIt(shooter, [{sector:0,mult:1},{sector:0,mult:1},{sector:0,mult:1}], g);
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 0);
+  });
+
+  test('Pressure Chamber: the decisive final-round pick never lands on a departed player', () => {
+    const shooter = { totalCp: 10, misses: 0, fullHits: 0, currentFullHitStreak: 0, bestFullHitStreak: 0, roundResults: {}, legDarts: 0 };
+    const departedLeader = { totalCp: 999, misses: 0, fullHits: 0, currentFullHitStreak: 0, bestFullHitStreak: 0, roundResults: {}, legDarts: 0, dnf: true };
+    const g = { gameId: 999, pressureChamberRound: PRESSURE_ROUNDS, current: 0, starter: 0,
+      players: [shooter, departedLeader], config: { rounds: PRESSURE_ROUNDS } };
+    const ev = evaluateVisitPressureChamber(shooter, [{sector:0,mult:1},{sector:0,mult:1},{sector:0,mult:1}], g);
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 0, 'the only active player wins, regardless of the departed player\'s CP total');
+  });
+
+  test('roundComplete stays correct once a player is skipped mid-round (3-player Baseball, index 1 has left)', () => {
+    const p0 = { totalRuns: 0, inningRuns: {} };
+    const p1 = { totalRuns: 0, inningRuns: {}, dnf: true };
+    const p2 = { totalRuns: 0, inningRuns: {} };
+    const missDarts = [{sector:0,mult:1},{sector:0,mult:1},{sector:0,mult:1}];
+    // Raw (current+1)%length from p0 would land on p1 (departed) — the round must
+    // still be recognized as complete once the LAST ACTIVE player (p2) throws,
+    // not stuck waiting on a departed player's turn that will never come.
+    const ev = evaluateVisitBaseball(p2, missDarts, { players: [p0, p1, p2], current: 2, starter: 0, baseballInning: 1 });
+    assert.equal(ev.roundComplete, true);
+  });
+});
