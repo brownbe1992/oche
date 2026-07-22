@@ -2830,7 +2830,8 @@ let homeTab='h2h';
 let homeGameType='x01';
 let homeData=null;
 // 'all' | 'double' | 'single' — Top Checkouts leaderboard's own out-rule filter
-// (hofSection()), replacing the DO/SO tag that used to sit inline on every row.
+// (hofSection()). The inline DO/SO tag still shows per-row (so the "All" view
+// stays disambiguated); this filter narrows the list itself.
 let checkoutOutFilter='all';
 function setCheckoutOutFilter(f){ checkoutOutFilter=f; renderHomeTabBody(); }
 // Shared empty shape for an achievement board with no rows (180s/9-marks/perfect-leg
@@ -3713,8 +3714,8 @@ function renderHomeTabBodyAroundTheWorld(){
 // meta line at all; `extra` is a small opt-in slot for a badge between the
 // score and player name (the out-type DO/SO tag `renderAvgLeaderboard()`
 // shows). `hofSection()` above stays its own hand-written function — it
-// adds a checkout-route expand/collapse toggle and a Drill button that only
-// finish-shaped data has, not a plain leaderboard row.
+// adds a checkout-route expand/collapse toggle and its own inline DO/SO tag
+// that only finish-shaped data has, not a plain leaderboard row.
 function leaderboardRowHtml(rank, score, name, meta, extra){
   return `<div class="hof-row">
     <span class="hof-rank">${rank}</span>
@@ -3736,9 +3737,11 @@ function leaderboardSectionHtml(rows, opts){
 }
 function hofSection(rows, mode=''){
     if(!rows||!rows.length) return `<p class="pp-meta" style="padding:8px 0">None recorded yet.</p>`;
-    // Out-rule filter (All/Double Out/Single Out) replaces the DO/SO tag that
-    // used to sit inline on every row — freeing up horizontal space in a
-    // fairly cramped row (rank/score/count/name/date/Drill button already).
+    // Out-rule filter (All/Double Out/Single Out) narrows the list itself; the
+    // inline DO/SO tag stays per-row too (removed once, then brought back per a
+    // live user report — the row was still too cramped for names to show
+    // properly with it gone, so the Drill button was dropped instead to make
+    // room, rather than the tag).
     const filterHtml = `
       <div class="seg" role="group" aria-label="Filter by finish rule" style="margin-bottom:10px">
         <button aria-pressed="${checkoutOutFilter==='all'}" onclick="setCheckoutOutFilter('all')">All</button>
@@ -3749,15 +3752,15 @@ function hofSection(rows, mode=''){
     if(!filtered.length) return `${filterHtml}<p class="pp-meta" style="padding:8px 0">No ${checkoutOutFilter==='double'?'double':'single'}-out checkouts recorded yet.</p>`;
     return `${filterHtml}<div class="hof-list">${filtered.map((f,i)=>{
       const dates=fmtDate(f.last_date);
-      const jName=jsArg(f.name);
+      const outTag = `<span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;align-self:center">${f.out==='double'?'DO':'SO'}</span>`;
       return `<div class="hof-row expandable" role="button" aria-expanded="false"
-        onclick="toggleFinishRoute(this,'${jName}',${f.score},'${mode}')">
+        onclick="toggleFinishRoute(this,'${jsArg(f.name)}',${f.score},'${mode}')">
         <span class="hof-rank">${i+1}</span>
         <span class="hof-score">${f.score}</span>
+        ${outTag}
         <span class="hof-times">${f.times===1?'×1':'×'+f.times}</span>
         <span class="hof-player">${escapeHtml(f.name)}</span>
         <span class="hof-dates">${dates}</span>
-        ${drillButtonHtml(jName, f.score)}
       </div>`;
     }).join('')}</div>`;
   }

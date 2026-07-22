@@ -4855,12 +4855,8 @@ that number, instead of hoping the random target picker eventually serves it.
 
 **Entry points** — a small `🎯 Drill` button (`drillButtonHtml(jName, score)`,
 `frontend/index.html`):
-- every **Top Finishes** row, both the Player Profile's own list
-  (`loadTopFinishes()`) and the Home page's cross-player "Top Checkouts"
-  leaderboard (`hofSection()` — the finish rule is an All/Double Out/Single
-  Out filter control above the list, `checkoutOutFilter`/
-  `setCheckoutOutFilter()`, rather than a DO/SO tag on every row, to keep
-  each row's rank/score/count/name/date/Drill button from crowding);
+- every **Top Finishes** row on the Player Profile's own list
+  (`loadTopFinishes()`);
 - a **Coaching Insights** card, but only the `checkout_route` insight type
   (`getCoachingInsights()`, `backend/db.js`) — the only one carrying a
   concrete drillable number (`insight.score`, the player's most-established
@@ -4870,6 +4866,15 @@ that number, instead of hoping the random target picker eventually serves it.
 
 Every Drill button's `onclick` calls `event.stopPropagation()` first so it
 never also triggers the row's own `toggleFinishRoute()` expansion.
+
+The Home page's cross-player "Top Checkouts" leaderboard (`hofSection()`) is
+**not** a Drill entry point — its row (rank/score/DO-SO tag/count/name/date)
+has no Drill button. It briefly had the tag replaced by an All/Double
+Out/Single Out filter above the list instead (to make room for a Drill
+button), but names still didn't have enough room once real data was on a
+narrow phone — the tag came back, the filter stayed (it narrows the list
+itself, independent of crowding), and the Drill button was dropped instead.
+`checkoutOutFilter`/`setCheckoutOutFilter()` still drive that filter.
 
 **Schema**: `games.config.pinnedTarget` (nullable integer, `checkout_trainer`
 only) — when set, every round of that session serves that same target instead
