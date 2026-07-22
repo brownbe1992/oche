@@ -1796,16 +1796,18 @@ const renderers = {
       const active = i===s.currentIndex;
       const ms = s.modeState || {};
       const hitNumbers = Array.isArray(p.hitNumbers) ? p.hitNumbers : [];
-      let flash = '';
-      if(active && ms.roundOver){
-        flash = `<div class="flash shot">CLOCK COMPLETE</div>`;
-      }
+      // No "CLOCK COMPLETE" flash branch here (2026-07): completing the clock
+      // now ends the whole game immediately (finishUnit('game', ...)), so by
+      // the time roundOver ever broadcasts true, s.legSummary is ALSO already
+      // set — render()'s own legSummary branch takes over before this card
+      // would ever draw a completed state, the same "a run IS the game" shape
+      // Gauntlet/Bob's 27/Dead Man Walking's cards never needed a live/done
+      // hybrid state for either.
       let throwbox = '';
-      if(active && ms.atcLastDart && !ms.roundOver){
+      if(active && ms.atcLastDart){
         throwbox = buildSingleDartBox(ms.atcLastDart);
       }
       return `<div class="pcard ${active?'active':''}">
-        ${flash}
         <div class="chuckin-layout">
           <div class="chuckin-stats">
             <div class="prow1">
@@ -1815,14 +1817,28 @@ const renderers = {
             <div class="score">${num(p.hit)}<span style="font-size:0.4em;opacity:.7"> / 20</span></div>
             <div class="dart-counts">
               <div class="dart-counts-title">Around the Clock</div>
-              <div class="dart-count-row"><span class="dart-count-val">${num(p.roundDarts)}</span><span class="dart-count-lbl">Darts this round</span></div>
+              <div class="dart-count-row"><span class="dart-count-val">${num(p.roundDarts)}</span><span class="dart-count-lbl">Darts thrown</span></div>
             </div>
             ${throwbox}
           </div>
           <div class="clock-board">${buildClockBoard(hitNumbers)}</div>
         </div>
-        <div class="meta"><span class="standing">Round ${num(s.legNo)}</span></div>
       </div>`;
+    },
+    // CLOCK COMPLETE — the live-scoreboard half of the "every completed game
+    // gets a stats screen" work (2026-07): darts/trebles/doubles/misses/
+    // duration for the just-finished clock, mirroring index.html's own
+    // aroundTheClockSummary block on the in-app GAME OVER screen (same
+    // underlying legSummary entry, two renderings of the same data).
+    summary(p){
+      const mins = Math.floor((p.durationSec||0)/60), secs = (p.durationSec||0)%60;
+      return buildSummaryCard(p, [
+        { value: num(p.darts), label:'Darts' },
+        { value: num(p.trebles), label:'Trebles' },
+        { value: num(p.doubles), label:'Doubles' },
+        { value: num(p.misses), label:'Misses' },
+        { value: `${mins}:${String(secs).padStart(2,'0')}`, label:'Time' },
+      ], { noWinner:true });
     }
   },
   // Guided Around the World (docs/game-modes-roadmap.md): solo, no rounds/legs at
@@ -2158,7 +2174,7 @@ function render(s){
   // result banners (leg / set / game) — show once per message
   if(s.message && s.message !== bannerKey){
     bannerKey = s.message;
-    document.getElementById('banner-big').textContent = s.done ? 'GAME OVER' : s.message;
+    document.getElementById('banner-big').textContent = s.done ? (s.doneHeading || 'GAME OVER') : s.message;
     document.getElementById('banner-sub').textContent = s.done ? s.message
       : s.message.includes(' the set') ? 'next set coming up'
       : 'next leg coming up';

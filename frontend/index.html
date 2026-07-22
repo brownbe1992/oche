@@ -5156,7 +5156,7 @@ const NEW_GAME_MODE_OPTIONS = [
     blurb:"No dartboard needed — the app gives you a target score, you tap out the fewest-darts checkout from memory, and it's graded instantly against the objectively optimal route. A pure recall drill, not a throwing game.",
     apply(){ setMode('checkout_trainer'); } },
   { key:'around_the_clock', label:'Around the Clock',
-    blurb:'Hit every number, 1 through 20, as a single — in any order. Live progress shows exactly which numbers you still need. A round ends the moment all 20 are hit; press "Start Next Clock" to go again.',
+    blurb:'Hit every number, 1 through 20, as a single — in any order. Live progress shows exactly which numbers you still need. The clock is complete the moment all 20 are hit.',
     apply(){ setMode('around_the_clock'); } },
   { key:'around_the_world', label:'Around the World',
     blurb:"Chip away at all 63 lifetime dart outcomes — every number 1-20 as a single, double, and treble, plus outer bull, double bull, and a miss. Tracks the same lifetime progress as your Player Profile, across as many sessions as it takes. No round to finish — throw for as long as you like.",
@@ -5804,6 +5804,11 @@ function baseGameRuntimeState(){
     lastTurnEvent: null,   // one-shot: outcome of the turn just entered (voice announcements)
     matchResult: null,     // one-shot: leg/set/game just won (voice announcements)
     legStart: null,        // one-shot: a new leg just began, who's throwing first (voice announcements)
+    // Custom /display "GAME OVER" banner heading for a just-finished game whose
+    // completion doesn't read naturally as "{winner} wins the game" (a solo
+    // drill like Around the Clock has no opponent to "win" against) — set by
+    // finishUnit()'s opts.heading, null for every type using the generic text.
+    doneHeading: null,
     hasGhost: false,       // true for a Ghost Opponent race (docs/archive/ghost-opponent-roadmap.md)
     // Doubles Practice / guided Around the Clock (docs/game-modes-roadmap.md):
     // per-dart evaluation, not per-visit — a round runs until
@@ -10254,6 +10259,7 @@ function liveSnapshot(message){
     gameBigFish: game.gameBigFish || 0,
     gameBusts: game.gameBusts || 0,
     legSummary: game.legSummary || null,
+    doneHeading: game.doneHeading || null,
     practice: !!game.practice,
     done: !!game.done,
     // Tournament mode (docs/archive/tournament-mode-roadmap.md): the round label ("Quarterfinal",
@@ -10965,7 +10971,7 @@ function savedGamePositionLabel(sg){
       const parts = pos.players.map(p => `${p.name} ${p.legsWon}`);
       return `Set ${pos.setNo} leg ${pos.legNo} · ${parts.join(' – ')}`;
     }
-    case 'around_the_clock': return `Round ${pos.legNo} · ${pos.hit}/${pos.total} numbers hit`;
+    case 'around_the_clock': return `${pos.hit}/${pos.total} numbers hit`;
     case 'around_the_world': return `${pos.sessionDarts} dart${pos.sessionDarts===1?'':'s'} this session`;
     case 'bobs_27': return `D${pos.round} · running score ${pos.running}`;
     case 'checkout_ladder': return `Target ${pos.target} · attempt ${pos.legNo} · ${pos.remaining} remaining`;
@@ -12926,16 +12932,25 @@ function buildChallengeResultPanel(){
       </div>` : '';
   return `${headline}${chips}`;
 }
-function finishUnit(kind, winner){
+// opts (2026-07, Around the Clock's "one clock = one game" redesign): a solo
+// drill completing itself has no real "winner" to announce — "Ben wins the
+// game" reads oddly for a session with no opponent. opts.bannerText/
+// opts.liveMessage override the small in-scoreboard banner + the live-
+// scoreboard broadcast message; opts.heading/opts.subtext override the big
+// GAME OVER card's own heading/subtext. All four default to the existing
+// generic winner-labeled phrasing, so every other call site is unaffected.
+function finishUnit(kind, winner, opts){
+  opts = opts || {};
   game.done = (kind==='game');
   updateSaveButtonVisibility(); // a just-completed match is no longer savable
   updateBowOutButtonVisibility();
   renderGame();
   const sb=document.getElementById('scoreboard');
   const labels = { leg:'wins the leg', set:'wins the set', game:'wins the game' };
+  const bannerText = opts.bannerText || `${escapeHtml(winner)} ${labels[kind]}`;
   const banner=document.createElement('div');
   banner.className='pscore'; banner.style.borderColor='var(--gold)';
-  banner.innerHTML=`<div class="nm" style="color:var(--gold)">🎯 ${escapeHtml(winner)} ${labels[kind]}</div>`;
+  banner.innerHTML=`<div class="nm" style="color:var(--gold)">🎯 ${bannerText}</div>`;
   sb.prepend(banner);
 
   const oche=document.querySelector('.oche');
@@ -12946,6 +12961,7 @@ function finishUnit(kind, winner){
   const isPressureChamber = game.gameType === 'pressure_chamber';
   const isBobs27 = game.gameType === 'bobs_27';
   const isGauntlet = game.gameType === 'gauntlet';
+  const isClock = game.gameType === 'around_the_clock';
   const isKiller = game.gameType === 'killer';
   const isDeadManWalking = game.gameType === 'dead_man_walking';
   // No matchwin moment card is built for Cricket yet (its own social/moment-card
@@ -12990,9 +13006,22 @@ function finishUnit(kind, winner){
         }
       }).catch(()=>{});
     }
+    // Play Again / Return Home (2026-07 completion-screen work): the two
+    // options every completed game should offer, per the standing convention
+    // this establishes — Play Again relaunches the identical game+players
+    // (playAgain(), above) rather than the old bare "New game" link straight
+    // to a blank setup screen; that link is kept, just demoted to a small
+    // tertiary "Choose a different game" text link below the main row (see
+    // newGameLink below) rather than removed outright. Tournament matches keep
+    // their existing single "Back to bracket" action unchanged — replaying
+    // outside the bracket isn't a tournament action, so Play Again/Return Home
+    // don't apply there.
     const nextBtn = game.tournamentMatchId
       ? `<button class="btn btn-primary" onclick="show('tournament')">Back to bracket</button>`
-      : `<button class="btn btn-primary" onclick="show('setup')">New game</button>`;
+      : `<button class="btn btn-primary" onclick="playAgain()">🔁 Play Again</button>
+         <button class="btn btn-ghost" onclick="show('home')">🏠 Return Home</button>`;
+    const newGameLink = game.tournamentMatchId ? '' :
+      `<p style="margin-top:14px"><button class="btn btn-ghost" style="font-size:12px;padding:5px 10px;opacity:.75" onclick="show('setup')">Choose a different game</button></p>`;
     // Ghost Opponent: one-click way back into the exact same race, rather than
     // making the player re-open the leg picker and re-find it — same
     // "navigate to setup pre-filled, one Start click away" shape the Daily
@@ -13042,15 +13071,36 @@ function finishUnit(kind, winner){
         <div class="stat-block"><div class="stat-val">${escapeHtml(tier)}</div><div class="stat-label">Result</div></div>
       </div>`;
     })() : '';
+    // Around the Clock's own tiny run-summary block (2026-07, "one clock = one
+    // game") — same reasoning as bobs27Summary/gauntletSummary above:
+    // h2hStatsHtml() reads X01-shaped fields a clock player doesn't have.
+    // Recomputes from game.players[0] rather than reading game.legSummary
+    // (not yet populated at this point in finishUnit() — set at the very end,
+    // same as every other type's summary block here).
+    const aroundTheClockSummary = isClock ? (()=>{
+      const cp = game.players[0];
+      const durationSec = Math.max(0, Math.round((Date.now() - (cp.roundStartedAt||Date.now()))/1000));
+      const mins = Math.floor(durationSec/60), secs = durationSec%60;
+      return `<div class="summary-grid" style="margin-top:14px">
+        <div class="stat-block"><div class="stat-val">${cp.roundDarts||0}</div><div class="stat-label">Darts</div></div>
+        <div class="stat-block"><div class="stat-val">${cp.roundTrebles||0}</div><div class="stat-label">Trebles</div></div>
+        <div class="stat-block"><div class="stat-val">${cp.roundDoubles||0}</div><div class="stat-label">Doubles</div></div>
+        <div class="stat-block"><div class="stat-val">${cp.roundMisses||0}</div><div class="stat-label">Misses</div></div>
+        <div class="stat-block"><div class="stat-val">${mins}:${String(secs).padStart(2,'0')}</div><div class="stat-label">Time</div></div>
+      </div>`;
+    })() : '';
+    const heading = opts.heading || 'GAME OVER';
+    const subtext = opts.subtext || `${escapeHtml(winner)} takes the match. Stats saved.`;
+    game.doneHeading = opts.heading || null; // mirrored to /display via liveSnapshot()
     oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
-      <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">GAME OVER</div>
-      <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${escapeHtml(winner)} takes the match. Stats saved.</p>
+      <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">${heading}</div>
+      <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${subtext}</p>
       <div id="elo-delta-banner"></div>
       <div class="btn-row" style="justify-content:center">
         ${nextBtn}
         ${repeatGhostBtn}
         ${matchShareBtn}
-      </div>${isCricket || isBobs27 || isGauntlet || isKiller || isDeadManWalking ? '' : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}${killerSummary}${deadManWalkingSummary}</div>`;
+      </div>${newGameLink}${isCricket || isBobs27 || isGauntlet || isKiller || isDeadManWalking || isClock ? '' : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}${killerSummary}${deadManWalkingSummary}${aroundTheClockSummary}</div>`;
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
@@ -13107,10 +13157,58 @@ function finishUnit(kind, winner){
   // to X01-shaped fields nothing renders (that fallthrough silently broke the
   // Bob's 27 and Dead Man Walking cards before this dispatch existed).
   game.legSummary = (GAME_TYPES[game.gameType].legSummary || legSummaryX01)(game, winner);
-  pushLive(`${winner} ${labels[kind]}`);
+  pushLive(opts.liveMessage || `${winner} ${labels[kind]}`);
 }
 
-/* rebuild the oche inner markup (used after a leg replaced it) */
+// Play Again (2026-07 completion-screen work): relaunches the exact game just
+// finished — same game type, same players, same leg/set format — one tap back
+// into the action instead of re-walking the New Game wizard from scratch.
+// Deliberately reuses the wizard's own machinery rather than duplicating it:
+// NEW_GAME_MODE_OPTIONS' own apply() (mode/gameType-setting logic) and
+// startGame() itself (validation/game-construction) — this function only
+// decides what goes into `setup` beforehand. Player order/loadouts and the
+// per-type secondary config below (cricket targets/variant, halve-it custom
+// targets, shanghai round count, killer lives, X01 starting score) are carried
+// over from the just-finished game; per-player handicaps are NOT (a fresh
+// start, not a resumed contest) — not requested, and re-applying a stale
+// handicap to a rematch would be a surprising, easy-to-miss carryover.
+function playAgain(){
+  if(!game) return;
+  const finished = game;
+  const opt = NEW_GAME_MODE_OPTIONS.find(o => o.key === finished.gameType);
+  if(!opt){ show('setup'); return; } // shouldn't happen — falls back to a blank setup rather than erroring
+  // Cleared up front, same as selectSetupGame()'s own convention — a stale
+  // handicap or league fixture ID left over in `setup` from a PRIOR session
+  // (never touched by renderPlayers()'s own pruning, since Play Again skips
+  // the wizard entirely) must not silently carry into this fresh rematch.
+  setup.handicaps = {};
+  setup.leagueFixtureId = null;
+  // Slots set BEFORE apply(): x01/cricket/baseball/shanghai/halve_it/
+  // pressure_chamber's own apply() calls setMode(setupPlayerCount()>=2?'h2h':
+  // 'practice') — it needs the real player count already in place to pick the
+  // right mode, not whatever setup.slots happened to hold from before.
+  setup.slots = finished.players.map(p => p.name);
+  setup._skipResumePrompt = false;
+  opt.apply();
+  setup.legsPerSet = finished.legsPerSet;
+  setup.setsPerGame = finished.setsPerGame;
+  const cfg = finished.config || {};
+  if(finished.gameType === 'x01'){
+    setup.start = String(finished.category);
+  } else if(finished.gameType === 'cricket'){
+    setup.cricketPreset = 'custom'; // always the custom path — reproduces the exact 7 numbers either way, classic set included
+    setup.cricketCustomNumbers = (cfg.numbers || CRICKET_STANDARD_NUMBERS).slice();
+    setup.cricketVariant = cfg.variant === 'cutthroat' ? 'cutthroat' : 'standard';
+  } else if(finished.gameType === 'shanghai'){
+    setup.shanghaiRounds = cfg.rounds || 7;
+  } else if(finished.gameType === 'halve_it'){
+    setup.halveItPreset = cfg.targets ? 'custom' : 'classic';
+    setup.halveItCustomTargets = cfg.targets ? cfg.targets.slice() : [];
+  } else if(finished.gameType === 'killer'){
+    setup.killerLives = cfg.lives || KILLER_DEFAULT_LIVES;
+  }
+  startGame();
+}
 function renderGameShell(){
   const isCricketGame = !!(game && game.gameType === 'cricket');
   const isDoublesPractice = !!(game && game.gameType === 'doubles_practice');
@@ -13148,19 +13246,21 @@ function renderGameShell(){
         </div>
         <button class="btn btn-ghost" id="declare-unsolvable-btn" onclick="declareUnsolvable()"${(isCheckoutTrainer && game && game.config && game.config.trickQuestions) ? '' : ' hidden'}>🚫 No possible checkout</button>
         <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()"${isPerDartMode ? ' hidden' : ''}>${isCheckoutTrainer ? 'Submit checkout' : 'Enter turn'}</button>
-        <button class="btn btn-primary" id="dp-next-round-btn" onclick="startNextRound()" hidden>${isClock ? 'Start Next Clock' : 'Start next round'}</button>
+        <button class="btn btn-primary" id="dp-next-round-btn" onclick="startNextRound()" hidden>Start next round</button>
       </div>`;
   applyDartMode();
   updateSaveButtonVisibility();
   updateBowOutButtonVisibility();
 }
-// Shared "start the next round" dispatcher for the two per-dart drill modes that
-// have a genuine round boundary (Doubles Practice, guided Around the Clock) — Just
-// Chuckin' It and guided Around the World have no round concept at all, so this is
-// never called for them (their "Start next round" button stays permanently hidden).
+// "Start the next round" dispatcher — Doubles Practice is the only per-dart
+// drill mode with a genuine repeating round boundary left (2026-07: guided
+// Around the Clock moved to "one clock = one game," finishUnit('game', ...)
+// on completion instead of a next-round continuation). Just Chuckin' It and
+// guided Around the World have no round concept at all, so this is never
+// called for them either (their "Start next round" button stays permanently
+// hidden).
 function startNextRound(){
   if(game && game.gameType === 'doubles_practice') return startNextRoundDoublesPractice();
-  if(game && game.gameType === 'around_the_clock') return startNextClockRound();
 }
 
 /* ---------- checkout calculator ----------
@@ -13844,6 +13944,15 @@ const GAME_TYPES = {
     statDefs: AROUND_THE_CLOCK_STAT_DEFS,
     personalBestsSpec: AROUND_THE_CLOCK_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyAroundTheClock,
+    // CLOCK COMPLETE screen (both the in-app GAME OVER card and the live
+    // scoreboard's renderers.around_the_clock.summary(), display.html) — the
+    // one-clock-one-game redesign's whole point was to make this moment feel
+    // like every other game's finish, not a silent state change.
+    legSummary: (game) => [{ name: game.players[0].name,
+      darts: game.players[0].roundDarts||0, trebles: game.players[0].roundTrebles||0,
+      doubles: game.players[0].roundDoubles||0, misses: game.players[0].roundMisses||0,
+      durationSec: Math.max(0, Math.round((Date.now() - (game.players[0].roundStartedAt||Date.now()))/1000)),
+      won: true }],
     // roundOver/roundEndReason are shared with Doubles Practice's liveModeState above.
     liveModeState: game => ({ atcLastDart: game.atcLastDart || null,
       roundOver: !!game.roundOver, roundEndReason: game.roundEndReason || null }),
@@ -13852,10 +13961,11 @@ const GAME_TYPES = {
     resume: (ctx) => {
       const { players, state } = ctx;
       const r = rebuildAroundTheClockState({ turns: state.turns });
-      Object.assign(players[0], { hitSet:r.hitSet, roundDarts:r.roundDarts });
+      Object.assign(players[0], { hitSet:r.hitSet, roundDarts:r.roundDarts,
+        roundTrebles:r.roundTrebles, roundDoubles:r.roundDoubles, roundMisses:r.roundMisses });
       return {
         overlay: { legNo: r.legNo, roundOver: r.roundOver },
-        statusMsg: `Resumed — round ${r.legNo}, ${r.hitSet.size} of 20 numbers hit.`,
+        statusMsg: `Resumed — ${r.hitSet.size} of 20 numbers hit, ${r.roundDarts} dart${r.roundDarts===1?'':'s'} thrown.`,
       };
     }
   },
@@ -16206,19 +16316,35 @@ function renderBlitzResults(){
 /* ---------- Guided Around the Clock (docs/game-modes-roadmap.md "Guided Around
    the Clock / Around the World") ----------
    Structurally identical to Doubles Practice: per-dart evaluation
-   (evaluateDartAroundTheClock(), frontend/scoring.js), a "round" is one
-   game.legNo grouping ended the instant hitSet reaches all 20 numbers, and
-   turns.bust is repurposed exactly the way Doubles Practice repurposes it —
-   1 marks whichever dart completed the round. Target set is 20 numbers only
-   (1-20 as singles), matching the existing passive around_the_clock badge's
-   exact formula, not the roadmap doc's "+bull" prose (2026-07 decision). */
+   (evaluateDartAroundTheClock(), frontend/scoring.js). Turns.bust is repurposed
+   exactly the way Doubles Practice repurposes it — 1 marks whichever dart
+   completed the clock. Target set is 20 numbers only (1-20 as singles),
+   matching the existing passive around_the_clock badge's exact formula, not
+   the roadmap doc's "+bull" prose (2026-07 decision).
+
+   One clock = one game (2026-07 redesign): completing all 20 numbers now ends
+   the whole game immediately (finishUnit('game', ...)), the same "a run IS the
+   game" shape Gauntlet/Bob's 27/Dead Man Walking already established, instead
+   of the earlier "Start Next Clock" multi-round-per-session design — fixes the
+   bug where a fully-completed clock still showed "⏸ Save for later" in the
+   hamburger menu, since game.done never became true under the old design.
+   roundTrebles/roundDoubles/roundMisses tally every dart thrown regardless of
+   whether it helped the clock (a treble/double on a number, or any dart on
+   bull, is a real dart thrown but never advances completion — see
+   evaluateDartAroundTheClock()'s own comment) — feeds the CLOCK COMPLETE
+   stats screen (legSummary below). roundStartedAt is a plain wall-clock
+   capture at game creation, not resume-aware (a resumed-after-a-pause clock's
+   duration includes the paused time) — acceptable for a stat whose whole
+   point is "how long this took start to finish," and consistent with every
+   other elapsed-time reading in this app being wall-clock, not play-time. */
 function newMatchPlayerAroundTheClock(name){
-  return { name, hitSet: new Set(), roundDarts:0, sessionRounds:[] };
+  return { name, hitSet: new Set(), roundDarts:0, roundTrebles:0, roundDoubles:0, roundMisses:0,
+    roundStartedAt: Date.now(), sessionRounds:[] };
 }
-// Not called by startNextLeg() (this mode uses startNextClockRound() instead) —
-// provided only to satisfy the GAME_TYPES contract, matching Doubles Practice.
+// Provided only to satisfy the GAME_TYPES contract (never actually called —
+// this mode never reaches a "next leg," see the header comment above).
 function resetPlayerForNextLegAroundTheClock(p){
-  p.hitSet = new Set(); p.roundDarts = 0;
+  p.hitSet = new Set(); p.roundDarts = 0; p.roundTrebles = 0; p.roundDoubles = 0; p.roundMisses = 0;
 }
 function playerSnapshotAroundTheClock(p){
   // hitNumbers (not just a count) so the Live Scoreboard can render exactly which
@@ -16238,11 +16364,15 @@ function throwDartAroundTheClock(sector, zone, missZone, missDepth, bounced){
   // snapshot (see trackBadgeForUndo()) — guided_clock is a moment-style
   // completion badge, so it DOES get revoked on undo.
   pushTurnSnapshot({ hitSet: new Set(p.hitSet), roundDarts:p.roundDarts,
+    roundTrebles:p.roundTrebles, roundDoubles:p.roundDoubles, roundMisses:p.roundMisses,
     roundOver:game.roundOver, roundEndReason:game.roundEndReason,
     atcLastDart:game.atcLastDart, sessionRoundsLen:p.sessionRounds.length,
     badgeReverts:[], voided:false });
 
   p.roundDarts += 1;
+  if(dart.sector === 0) p.roundMisses += 1;
+  else if(dart.isTreble) p.roundTrebles += 1;
+  else if(dart.isDouble) p.roundDoubles += 1;
   if(ev.isNewHit) p.hitSet.add(dart.sector);
   recordSingleDartTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:0, bust: !!ev.completed, checkout:false, checkoutPoints:null, legWon:false }, dart, zone, missZone, missDepth, bounced);
@@ -16255,6 +16385,28 @@ function throwDartAroundTheClock(sector, zone, missZone, missDepth, bounced){
     announce(`Around the Clock complete! ${p.roundDarts} darts.`);
     awardOnceBadge(p.name, 'guided_clock', 'guided_clock', _snap,
       { icon:'🧭', headline:'GUIDED CLOCK', statLine:`Completed a guided Around the Clock drill in ${p.roundDarts} darts` });
+    // One clock = one game (2026-07): completing the clock IS the game ending,
+    // the same "a run IS the game" shape Gauntlet/Bob's 27/Dead Man Walking
+    // already use — mirrors their exact completion sequence (webhooks, event
+    // log, DB.completeGame(), matchResult, finishUnit('game', ...)) rather than
+    // the old "Start Next Clock" continuation.
+    sendHaWebhook('legend', p.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+    sendHaWebhook('setend', p.name, game.category, { setNo: game.setNo });
+    sendHaWebhook('gameend', p.name, game.category);
+    DB.recordEvent('leg_end', game.setNo, game.legNo);
+    DB.recordEvent('set_end', game.setNo, null);
+    DB.recordEvent('game_end', null, null);
+    DB.completeGame(p.name);
+    game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:p.name, bigFish:false };
+    fireMomentCard('matchwin', { icon:'🕐', headline:'CLOCK COMPLETE!', player:p.name,
+      statLine: `${p.roundDarts} darts — ${p.roundTrebles} treble${p.roundTrebles===1?'':'s'}, ${p.roundDoubles} double${p.roundDoubles===1?'':'s'}, ${p.roundMisses} miss${p.roundMisses===1?'':'es'}` });
+    // Custom completion wording (finishUnit()'s opts) — a solo drill has no
+    // opponent to "win" against, so "Ben wins the game"/"GAME OVER" reads oddly.
+    finishUnit('game', p.name, {
+      heading: 'CLOCK COMPLETE', subtext: `${escapeHtml(p.name)} cleared the clock. Stats saved.`,
+      bannerText: `${escapeHtml(p.name)} clears the clock!`, liveMessage: `${p.name} clears the clock!`,
+    });
+    return;
   } else if(ev.isNewHit){
     announce(`${dart.label}. ${p.hitSet.size} of 20 numbers hit.`);
   }
@@ -16268,21 +16420,15 @@ function undoLastTurnAroundTheClock(){
   const p = game.players[0];
   p.hitSet = snap.hitSet;
   p.roundDarts = snap.roundDarts;
+  p.roundTrebles = snap.roundTrebles;
+  p.roundDoubles = snap.roundDoubles;
+  p.roundMisses = snap.roundMisses;
   game.roundOver = snap.roundOver;
   game.roundEndReason = snap.roundEndReason;
   game.atcLastDart = snap.atcLastDart;
   p.sessionRounds.length = snap.sessionRoundsLen;
 
   _finishUndo(snap, renderGameAroundTheClock, { msg: 'Last dart undone.' });
-}
-function startNextClockRound(){
-  const p = game.players[0];
-  p.hitSet = new Set(); p.roundDarts = 0;
-  game.roundOver = false; game.roundEndReason = null; game.atcLastDart = null;
-  game.legNo += 1;   // each round is its own "leg" for turn grouping/personal bests
-  clearTurnSnapshots();  // undo only reaches back into the round just finished
-  DB.recordEvent('leg_start', game.setNo, game.legNo);
-  renderGameAroundTheClock();
 }
 function renderGameAroundTheClock(){
   const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
@@ -16295,8 +16441,7 @@ function renderGameAroundTheClock(){
       <div class="turnflag">▸ throwing</div>
     </div>
     <div class="meta">
-      <div class="avgs">${p.hitSet.size} / 20 numbers hit &nbsp;·&nbsp; ${p.roundDarts} dart${p.roundDarts===1?'':'s'} this round</div>
-      <div class="standing">Round ${game.legNo}</div>
+      <div class="avgs">${p.hitSet.size} / 20 numbers hit &nbsp;·&nbsp; ${p.roundDarts} dart${p.roundDarts===1?'':'s'} thrown</div>
     </div>
     <div class="rem-wrap">
       <div class="rem">${p.hitSet.size}</div>
@@ -16324,8 +16469,9 @@ function renderGameAroundTheClock(){
     }
   }
   renderPad();
-  const nextBtn = document.getElementById('dp-next-round-btn');
-  if(nextBtn) nextBtn.hidden = !game.roundOver;
+  // No "Start next round" button here (2026-07): completing the clock now ends
+  // the whole game via finishUnit('game', ...) instead of offering another round
+  // in the same session — see this mode's header comment above.
   pushLive();
 }
 

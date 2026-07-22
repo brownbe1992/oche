@@ -270,6 +270,45 @@ Called from `enterTurn()` whenever `ev.win` is true. Order of operations:
 Practice mode (`game.practice === true`) never reaches the "set won" branch at
 all — a practice session is just a sequence of legs, no set/match structure.
 
+### Game Over screen — Play Again / Return Home (2026-07)
+
+Every `finishUnit('game', winner, opts)` completion (the shared path every
+match-style type ends through — X01/Cricket/Baseball/Shanghai/Halve-It/
+Pressure Chamber/Killer via `advanceLegSetGame()`, plus Gauntlet/Bob's 27/Dead
+Man Walking/Around the Clock's own "a run IS the game" call sites) shows two
+primary actions instead of the old single generic "New game" link:
+
+- **🔁 Play Again** (`playAgain()`, `frontend/index.html`) — relaunches the
+  *exact* game just finished: same game type, same players (same order),
+  same legs-per-set/sets-per-game format, and the relevant per-type secondary
+  config carried over from `game.config` (X01 starting score; Cricket's exact
+  target numbers via the custom-numbers path plus its Standard/Cut-throat
+  variant; Shanghai's round count; Halve-It's custom targets, if any; Killer's
+  lives threshold). Deliberately reuses the New Game wizard's own machinery
+  rather than duplicating it — finds the matching `NEW_GAME_MODE_OPTIONS`
+  entry and calls its `apply()` (mode/gameType-setting logic), then
+  `startGame()` itself (validation/game-construction) — so it can never drift
+  out of sync with what a manual New Game selection would produce. Per-player
+  handicaps are explicitly NOT carried over (a fresh rematch, not a resumed
+  contest) — `setup.handicaps`/`setup.leagueFixtureId` are both reset up front,
+  the same "don't silently leak stale `setup` state into a game that skipped
+  the wizard" precaution `selectSetupGame()` itself already takes.
+- **🏠 Return Home** — `show('home')`.
+- The old **"Choose a different game"** link (`show('setup')`, a blank
+  reconfigure-from-scratch setup screen) is kept, just demoted to a small,
+  less prominent text link below the main button row rather than removed.
+
+Tournament matches are unaffected — `game.tournamentMatchId` still shows only
+the single existing **"Back to bracket"** action (replaying outside the
+bracket isn't a tournament action, so Play Again/Return Home don't apply
+there); Marathon Mode/Daily Challenge/Ghost Opponent all divert to their own
+dedicated flows before this code runs at all, also unaffected.
+
+**Custom completion wording**: `finishUnit()`'s optional third argument,
+`opts`, lets a game type override the generic "{winner} wins the game"/
+"GAME OVER" phrasing where it doesn't fit (a solo drill has no opponent to
+"win" against) — see Around the Clock's own use of this, above.
+
 ### Undo — snapshot-based, one level deep
 
 Every call to `enterTurn()` builds a full snapshot (`_snap`) of the acting
@@ -703,14 +742,22 @@ active practice-drill wrapper around a completion condition that already
 existed passively (§4's `around_the_clock`/`around_the_world` badges). No
 schema changes — both just added to `KNOWN_GAME_TYPES` (`backend/db.js`).
 
-**Around the Clock** is structurally identical to Doubles Practice: a
-**round** is one continuous session tracked via `game.legNo` (reused as
-"round number," incremented by `startNextClockRound()`), ending the instant
-all 20 numbers 1-20 have been hit as singles. The target set is **20 numbers
-only, no bull** — matching the existing passive `around_the_clock` badge's
-exact formula (`singlesHit.size >= 20`), a deliberate 2026-07 decision that
-overrides this doc's own earlier draft wording of "+bull." The pure per-dart
-rule lives in `frontend/scoring.js`:
+**Around the Clock is one clock = one game** (2026-07 redesign, superseding
+this doc's original "a round is one continuous session, press 'Start Next
+Clock' to go again" design): completing all 20 numbers 1-20 as singles ends
+the **whole game** immediately, the same "a run IS the game" shape Gauntlet/
+Bob's 27/Dead Man Walking already use — `DB.completeGame()` fires and the
+GAME OVER / CLOCK COMPLETE screen shows right away, rather than offering
+another clock within the same `games` row. Playing again means starting a
+fresh game (one tap via the "🔁 Play Again" button below, or the New Game
+screen), exactly like every other completing game type. This closed a real
+bug: under the old design the session never called `DB.completeGame()` at
+all, so `game.done` never became `true` and the hamburger menu kept offering
+"⏸ Save for later" even after a player had fully completed the clock. The
+target set is **20 numbers only, no bull** — matching the existing passive
+`around_the_clock` badge's exact formula (`singlesHit.size >= 20`), a
+deliberate 2026-07 decision that overrides this doc's own earlier draft
+wording of "+bull." The pure per-dart rule lives in `frontend/scoring.js`:
 
 ```js
 function evaluateDartAroundTheClock(dart, hitSet){
@@ -722,16 +769,49 @@ function evaluateDartAroundTheClock(dart, hitSet){
 ```
 
 - A **single on a number not yet in `hitSet`** is a new hit; `completed`
-  fires exactly once, on the dart that brings the set to size 20.
+  fires exactly once, on the dart that brings the set to size 20 — the same
+  dart `throwDartAroundTheClock()` then runs the whole completion sequence
+  from (webhooks, event log, `DB.completeGame()`, `finishUnit('game', ...)`).
 - A **treble/double on a number, or any dart on bull** (sector 25, either
   multiplier) is a real dart thrown but never a hit — the "so close, not a
   hit" precedent Doubles Practice already established for its own targets,
   just with no round-ending failure mode here (this mode never "loses").
+  These still count toward the CLOCK COMPLETE stats screen below, just not
+  toward `hitSet`.
 - `turns.bust` is repurposed exactly the way Doubles Practice repurposes it:
-  `1` marks whichever dart completed the round (there is no "so-close"/
+  `1` marks whichever dart completed the game (there is no "so-close"/
   "wrong-target" failure mode to distinguish here, only completion or
-  abandonment — a round with no `bust=1` dart yet was abandoned, not
+  abandonment — a game with no `bust=1` dart yet was abandoned, not
   completed).
+- **CLOCK COMPLETE stats** — `newMatchPlayerAroundTheClock()` tracks
+  `roundTrebles`/`roundDoubles`/`roundMisses` alongside the existing
+  `roundDarts`, tallied on every dart (miss/treble/double, mutually
+  exclusive) regardless of whether it advanced the clock, plus
+  `roundStartedAt` (a plain `Date.now()` wall-clock capture at game creation —
+  not resume-aware, so a resumed-after-a-pause clock's duration includes the
+  paused time, the same tradeoff every other elapsed-time reading in this app
+  makes). `GAME_TYPES.around_the_clock.legSummary` packages
+  `{darts, trebles, doubles, misses, durationSec}` for both the in-app GAME
+  OVER card's own `aroundTheClockSummary` block and `display.html`'s
+  `renderers.around_the_clock.summary()` — "Darts/Trebles/Doubles/Misses/
+  Time," exactly the breakdown requested. `rebuildAroundTheClockState()`
+  (`frontend/scoring.js`) replays all three tallies the same way it replays
+  `roundDarts`, so resuming a saved (not-yet-completed) clock restores them
+  correctly too.
+- **Custom completion wording** — a solo drill has no opponent to "win"
+  against, so the generic "{winner} wins the game"/"GAME OVER" phrasing would
+  read oddly. `finishUnit(kind, winner, opts)` (`frontend/index.html`) gained
+  an optional third argument — `opts.heading`/`opts.subtext` override the big
+  GAME OVER card's own text, `opts.bannerText`/`opts.liveMessage` override the
+  small in-scoreboard banner and the `/display` broadcast message —
+  defaulting to the existing generic phrasing for every other call site.
+  Around the Clock's own call passes `heading:'CLOCK COMPLETE'`,
+  `subtext:'{name} cleared the clock. Stats saved.'`, and matching banner/live
+  text. The live-scoreboard heading itself is carried by a new one-shot
+  `game.doneHeading` field, mirrored through `liveSnapshot()`/
+  `ALLOWED_LIVE_KEYS` (`backend/server.js`) the same way `legSummary` already
+  is — `display.html`'s "GAME OVER" banner reads `s.doneHeading || 'GAME
+  OVER'` instead of the literal string.
 
 **Around the World** is structurally identical to Just Chuckin' It: no round
 boundary at all, one continuous stream of 1-dart turns per `games` row

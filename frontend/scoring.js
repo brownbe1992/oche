@@ -1602,19 +1602,34 @@ function rebuildPressureChamberState({ gameId, names, legsPerSet, maxRounds, tur
 // evaluateDartAroundTheClock()'s own `completed` flag rather than a leg-win
 // visit; no starter rotation (always the one player). Each recorded turn is a
 // single dart (this mode's own per-dart-turn shape, mirroring Doubles
-// Practice/Chuckin — see throwDartAroundTheClock()).
+// Practice/Chuckin — see throwDartAroundTheClock()). The legNo-transition
+// reset below is 2026-07-legacy-only: since the redesign ("one clock = one
+// game," completing the clock ends the game immediately via finishUnit()), a
+// resumable (not-yet-completed) game can never have a prior completed round
+// in its turns going forward — the reset only still matters for replaying an
+// already-saved game from before that change, whose turns may span more than
+// one legNo. roundTrebles/roundDoubles/roundMisses reset on that same
+// boundary, mirroring roundDarts, so a resumed legacy game's tallies reflect
+// only the current (unfinished) round, not every round ever played in it.
 function rebuildAroundTheClockState({ turns }){
-  let hitSet = new Set(), roundDarts = 0, legNo = 1, roundOver = false, seenFirst = false;
+  let hitSet = new Set(), roundDarts = 0, roundTrebles = 0, roundDoubles = 0, roundMisses = 0,
+    legNo = 1, roundOver = false, seenFirst = false;
   for(const t of turns){
-    if(seenFirst && t.legNo !== legNo){ hitSet = new Set(); roundDarts = 0; roundOver = false; legNo = t.legNo; }
+    if(seenFirst && t.legNo !== legNo){
+      hitSet = new Set(); roundDarts = 0; roundTrebles = 0; roundDoubles = 0; roundMisses = 0;
+      roundOver = false; legNo = t.legNo;
+    }
     seenFirst = true;
     const dart = makeDartCore(t.darts[0].sector, t.darts[0].mult);
     const ev = evaluateDartAroundTheClock(dart, hitSet);
     roundDarts += 1;
+    if(dart.sector === 0) roundMisses += 1;
+    else if(dart.isTreble) roundTrebles += 1;
+    else if(dart.isDouble) roundDoubles += 1;
     if(ev.isNewHit) hitSet.add(dart.sector);
     roundOver = ev.completed;
   }
-  return { hitSet, roundDarts, legNo, roundOver };
+  return { hitSet, roundDarts, roundTrebles, roundDoubles, roundMisses, legNo, roundOver };
 }
 
 // Bob's 27 (solo — docs/archive/practice-ladders-roadmap.md Part A) — one

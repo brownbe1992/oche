@@ -2099,6 +2099,42 @@ describe('rebuildAroundTheClockState (docs/archive/saved-games-roadmap.md, pure 
     assert.equal(r.hitSet.size, 20);
     assert.equal(r.roundOver, true);
   });
+
+  // 2026-07 "one clock = one game" redesign: completing the clock now ends the
+  // whole game (finishUnit('game', ...)) instead of offering another round in
+  // the same session, and the CLOCK COMPLETE stats screen (both the in-app
+  // GAME OVER card and the live scoreboard's summary()) needs an accurate
+  // treble/double/miss tally alongside the existing dart count — resume must
+  // reconstruct all three the same way it already reconstructs roundDarts.
+  test('tallies trebles, doubles, and misses alongside darts, regardless of whether they helped the clock', () => {
+    const turns = [
+      v(0,1,1,[[1,1]]),   // single hit -- counts as a dart, not a treble/double/miss
+      v(0,1,1,[[5,3]]),   // treble -- real dart thrown, never advances the clock
+      v(0,1,1,[[5,2]]),   // double -- same
+      v(0,1,1,[[0,1]]),   // miss
+      v(0,1,1,[[25,1]]),  // bull single -- not 1-20, so not a clock hit, and not a treble/double/miss either
+    ];
+    const r = rebuildAroundTheClockState({ turns });
+    assert.equal(r.roundDarts, 5, 'every dart thrown counts, whether or not it advanced the clock');
+    assert.equal(r.roundTrebles, 1);
+    assert.equal(r.roundDoubles, 1);
+    assert.equal(r.roundMisses, 1);
+    assert.equal(r.hitSet.size, 1, 'only the single on 1 actually advanced the clock');
+  });
+
+  test('trebles/doubles/misses reset on a legNo transition, same as roundDarts', () => {
+    const turns = [
+      v(0,1,1,[[5,3]]),   // round 1: a treble
+      v(0,1,1,[[0,1]]),   // round 1: a miss
+      v(0,1,2,[[7,2]]),   // round 2 (new leg): a double
+    ];
+    const r = rebuildAroundTheClockState({ turns });
+    assert.equal(r.legNo, 2);
+    assert.equal(r.roundDarts, 1, "only round 2's own dart");
+    assert.equal(r.roundTrebles, 0, "round 1's treble doesn't carry over");
+    assert.equal(r.roundDoubles, 1);
+    assert.equal(r.roundMisses, 0, "round 1's miss doesn't carry over");
+  });
 });
 
 describe('rebuildAroundTheWorldState (docs/archive/saved-games-roadmap.md, pure replay rebuild)', () => {
