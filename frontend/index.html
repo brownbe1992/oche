@@ -751,7 +751,11 @@
     text-transform:none;letter-spacing:.01em;margin-bottom:12px;
     border-bottom:1px solid var(--wire);padding-bottom:8px}
   .home-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:stretch;margin-bottom:14px}
-  .home-pair>.pp-section{margin-bottom:0;height:100%;box-sizing:border-box}
+  /* min-width:0 overrides a grid item's default auto min-width, which otherwise
+     sizes the 1fr track to its content's intrinsic width (e.g. a long unbroken
+     player name inside) instead of letting it shrink to fit the track/screen —
+     the same overflow-past-the-card-border bug reported for Top Checkouts. */
+  .home-pair>.pp-section{margin-bottom:0;height:100%;box-sizing:border-box;min-width:0}
   @media(max-width:560px){.home-pair{grid-template-columns:1fr}}
   .achievement-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
   @media(max-width:500px){.achievement-pair{grid-template-columns:1fr}}
@@ -874,7 +878,8 @@
         <button class="tab-btn active" data-tab="h2h" onclick="switchHomeTab('h2h')">H2H</button>
         <button class="tab-btn" data-tab="practice" onclick="switchHomeTab('practice')">Practice</button>
       </div>
-      <div class="player-tabs" id="home-gtype-tabs" style="margin-bottom:16px"></div>
+      <label class="field" for="home-gtype-select">Game mode</label>
+      <select class="date-input" id="home-gtype-select" style="width:auto;margin-bottom:16px" onchange="switchHomeGameType(this.value)"></select>
       <div id="home-tab-body"><p class="pp-meta">Loading…</p></div>
     </div>
     <div class="card" style="margin-top:14px">
@@ -3066,27 +3071,31 @@ function ensureHomeCombo(type, mode){
   });
 }
 
-// Populates the Home page's game-type toggle from every registered game type with
-// a stat vocabulary AND a Home-page presence (same filter/iteration as the Player
-// Profile's own toggle, plus an extra `homeTabRenderer !== false` check — Just
-// Chuckin' It opts out of the Home page entirely via that explicit `false`, since
-// its stats don't map onto a leaderboard shape and none was requested; see
-// game-modes-roadmap.md "Generalizing per-game-type stats"). No data dependency,
-// so this renders immediately rather than waiting on renderHome()'s fetch.
-// The ONE per-type Home-visibility predicate — used by both the game-type
-// button filter and switchHomeTab()'s bounce guard, so the two can never
-// disagree (they briefly did: the button filter hid Killer under Practice
+// Populates the Home page's game-type dropdown (item: too many game-type tabs
+// wrapped across several lines on the Practice tab specifically — Player
+// Profile already used a <select> for the same choice, so this switched to
+// match it) from every registered game type with a stat vocabulary AND a
+// Home-page presence (same filter/iteration as the Player Profile's own
+// dropdown, plus an extra `homeTabRenderer !== false` check — Just Chuckin'
+// It opts out of the Home page entirely via that explicit `false`, since its
+// stats don't map onto a leaderboard shape and none was requested; see
+// game-modes-roadmap.md "Generalizing per-game-type stats"). No data
+// dependency, so this renders immediately rather than waiting on
+// renderHome()'s fetch.
+// The ONE per-type Home-visibility predicate — used by both the dropdown's
+// option filter and switchHomeTab()'s bounce guard, so the two can never
+// disagree (they briefly did: the option filter hid Killer under Practice
 // while the bounce only knew about soloOnly, leaving Killer's H2H board
-// rendering under the Practice heading with no button highlighted).
+// rendering under the Practice heading with no option selected to match).
 function homeGameTypeVisible(g, tab){
   return g.statDefs && g.statDefs.length && g.homeTabRenderer !== false
     && !(g.soloOnly && tab==='h2h') && !(g.h2hOnly && tab==='practice');
 }
 function renderHomeGameTypeTabs(){
-  const el=document.getElementById('home-gtype-tabs');
+  const el=document.getElementById('home-gtype-select');
   if(!el) return;
   el.innerHTML = Object.values(GAME_TYPES).filter(g=>homeGameTypeVisible(g, homeTab)).map(g=>
-    `<button class="tab-btn${homeGameType===g.id?' active':''}" data-gtype="${g.id}" onclick="switchHomeGameType('${g.id}')">${g.label}</button>`
+    `<option value="${g.id}"${homeGameType===g.id?' selected':''}>${g.label}</option>`
   ).join('');
 }
 function renderHome(){
@@ -3134,7 +3143,6 @@ function switchHomeTab(tab){
 }
 function switchHomeGameType(type){
   homeGameType=type;
-  document.querySelectorAll('#screen-home .tab-btn[data-gtype]').forEach(b=>b.classList.toggle('active', b.dataset.gtype===type));
   renderHomeTabBody();
   ensureHomeCombo(homeGameType, homeTab);
 }

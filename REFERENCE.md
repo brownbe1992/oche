@@ -124,22 +124,29 @@ oche/
   of irrelevant branching. See §2 for Cricket's and Baseball's scoring rules.
 - **Player Profile/Home page game-type toggle**: each `GAME_TYPES` entry also
   carries 3 UI-facing fields (game-modes-roadmap.md "Toggle mechanism
-  generalized") — `label` (button text), `bubbleKeyMap` (patched on right after
+  generalized") — `label` (option text), `bubbleKeyMap` (patched on right after
   its own key-map `const` is defined, to dodge that const's temporal-dead-zone
   inside the earlier `GAME_TYPES` object literal), and `personalBestsRenderer`/
   `homeTabRenderer` (`null` means "use the built-in X01-shaped default" in
   `renderPersonalBests()`/`renderHomeTabBody()`, not a special case). Both
   toggles render via `Object.values(GAME_TYPES).filter(g=>g.statDefs &&
-  g.statDefs.length).map(...)` instead of one hardcoded button per type — the
-  Home page's toggle row, previously static HTML, is now populated by
-  `renderHomeGameTypeTabs()`. Only the toggle *mechanism* is generalized this
-  way — each type's own backend stat-fetch functions and stat shapes stay
-  bespoke; see game-modes-roadmap.md for why that part is deliberately left
-  unsolved. A `soloOnly:true` flag (currently just `GAME_TYPES.doubles_practice`
-  — a game type with no H2H mode at all) additionally hides that type's Home
-  page tab while the H2H top-level tab is selected (`renderHomeGameTypeTabs()`),
+  g.statDefs.length).map(...)` instead of one hardcoded control per type —
+  both are a single `<select>` dropdown (`player-gametype-select` on Player
+  Profile, `home-gtype-select` on Home), not a row of buttons: with as many as
+  15 Practice-only game types (Home) registered, a button per type wrapped
+  across several lines and pushed the leaderboards themselves far down the
+  page (item: too many game-type tabs). The Home page's dropdown, previously a
+  static-HTML button row, is populated by `renderHomeGameTypeTabs()` (name
+  unchanged from the button-row era; it still renders one `<option>` per
+  visible type into `#home-gtype-select`). Only the toggle *mechanism* is
+  generalized this way — each type's own backend stat-fetch functions and stat
+  shapes stay bespoke; see game-modes-roadmap.md for why that part is
+  deliberately left unsolved. A `soloOnly:true` flag (currently just
+  `GAME_TYPES.doubles_practice` and the other Practice-only drills — a game
+  type with no H2H mode at all) additionally hides that type's Home page
+  option while the H2H top-level tab is selected (`renderHomeGameTypeTabs()`),
   and `switchHomeTab('h2h')` bounces `homeGameType` back to `'x01'` if a
-  solo-only type was active, rather than leaving a hidden tab's solo data
+  solo-only type was active, rather than leaving a hidden option's solo data
   showing mislabeled as H2H content.
 - **Game-lifecycle hooks** (`backend/db.js`, `docs/archive/existing-app-prep-roadmap.md`
   item 4): `onGameCreated(fn)`/`onGameCompleted(fn)` register listener callbacks;
