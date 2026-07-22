@@ -16247,6 +16247,28 @@ function drawAvgChart(data){
 // a dot still resolves it) and shows an exact value+date tooltip; leaving the
 // chart hides both. Pointer events (not separate mouse/touch handlers) cover
 // mouse, touch, and pen input identically.
+// A single "currently active chart's hide function" pointer, plus document-level
+// dismiss listeners wired ONCE ever (guarded by _avgChartDismissWired) — mirrors
+// _hmTooltip()'s heatmap tooltip pattern. avg-chart-body's innerHTML is fully
+// replaced on every redraw (period switch, tab/game-type switch), so re-running
+// wireAvgChartHover() each time is safe for the capture-scoped listeners below
+// (old elements + their listeners are simply discarded), but a NEW document-level
+// listener on every redraw would accumulate forever — updating the shared
+// pointer instead of re-registering avoids that.
+let _avgChartHide = null;
+let _avgChartDismissWired = false;
+function _wireAvgChartDismiss(){
+  if(_avgChartDismissWired) return;
+  _avgChartDismissWired = true;
+  // Mirrors the heatmap tooltip's mobile fix: a tap PINS the tooltip in place
+  // (no hover state to fall back on), dismissed only by tapping outside the
+  // chart or scrolling — never by the touch's own pointerleave, which fires
+  // immediately on lift and previously hid the tooltip the instant you let go.
+  document.addEventListener('pointerdown', e => {
+    if(_avgChartHide && !(e.target.closest && e.target.closest('#avg-chart-capture'))) _avgChartHide();
+  }, true);
+  window.addEventListener('scroll', () => { if(_avgChartHide) _avgChartHide(); }, { passive:true, capture:true });
+}
 function wireAvgChartHover(pts, data, avgs, statFmt, svgWidth){
   const capture = document.getElementById('avg-chart-capture');
   const hoverG = document.getElementById('avg-chart-hover');
@@ -16275,14 +16297,21 @@ function wireAvgChartHover(pts, data, avgs, statFmt, svgWidth){
     tooltip.style.opacity = '1';
   };
   const hide = () => { hoverG.style.opacity = '0'; tooltip.style.opacity = '0'; };
+  _avgChartHide = hide;
+  _wireAvgChartDismiss();
   const move = clientX => {
     const rect = svg.getBoundingClientRect();
     const svgX = ((clientX - rect.left) / rect.width) * svgWidth;
     showAt(nearestIndex(svgX));
   };
-  capture.addEventListener('pointermove', e => move(e.clientX));
+  // Desktop mouse: real hover, same contract as the heatmap tooltip — tracks
+  // the pointer, disappears the moment it leaves the chart.
+  capture.addEventListener('pointermove', e => { if(e.pointerType === 'mouse') move(e.clientX); });
+  // Touch/pen tap (and a mouse click) both show/move the tooltip to the tapped
+  // point; only a real mouse leaving the chart hides it here — touch's hide
+  // is handled by _wireAvgChartDismiss()'s tap-elsewhere/scroll listeners above.
   capture.addEventListener('pointerdown', e => move(e.clientX));
-  capture.addEventListener('pointerleave', hide);
+  capture.addEventListener('pointerleave', e => { if(e.pointerType === 'mouse') hide(); });
 }
 // A brief "just drawn" reveal on first paint (item: interactive stats charts) —
 // the line's own length becomes its dash pattern, offset to fully hidden, then
@@ -16382,14 +16411,22 @@ function renderStatBubbles(data){
 // stat grid — so they're fetched with no gameType param at all.
 // getStatBubblesFor() falls back to the plain getPlayerStatBubbles() for an
 // unrecognized/absent gameType, which is exactly the mode-independent figure
-// this block wants (including `avg`, X01's own 3-dart average — this is a
-// second, header-scoped copy of the same value the X01 stat-bubble grid
-// already shows, using `bv-header-` ids so the two never collide).
+// this block wants for dartsthrown/avgdartsperday. `avg` (X01 Average) is NOT
+// the same value as the Overall/H2H/Practice tab's own "Three-Dart Average"
+// bubble, even though both read from the same backend response and both use
+// the frontend key `avg` — this header bubble maps to the backend's separate
+// `x01Avg` field (mode-independent: every X01 leg, H2H and Practice combined)
+// via HEADER_BUBBLE_KEY_MAP, instead of BUBBLE_KEY_MAP's plain `avg` (which
+// IS mode-filtered, correctly, for the tab bubble). Using the same map for
+// both previously left this header bubble silently changing value when
+// toggling the H2H/Practice tab, exactly the bug the "lifetime, all-modes"
+// figures above were already fixed against.
+const HEADER_BUBBLE_KEY_MAP = { avg: 'x01Avg' };
 function applyPlayerHeaderStatsData(data){
   if(!data) return;
   HEADER_STAT_DEFS.forEach(d=>{
     const el=document.getElementById('bv-header-'+d.key);
-    if(el) el.textContent=d.fmt(data[BUBBLE_KEY_MAP[d.key]||d.key]);
+    if(el) el.textContent=d.fmt(data[HEADER_BUBBLE_KEY_MAP[d.key]||BUBBLE_KEY_MAP[d.key]||d.key]);
   });
 }
 function loadPlayerHeaderStats(){

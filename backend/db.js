@@ -3233,6 +3233,16 @@ function getPlayerStatBubbles(playerName, mode) {
   const avgDarts   = qd(`SELECT SUM(adj) AS v FROM (SELECT CASE WHEN t.bust=1 THEN 3 ELSE COUNT(d.id) END AS adj ${JD} ${mf} ${X01_ONLY} GROUP BY t.id)`) ?? 0;
   const totalPts   = q(`SELECT SUM(t.scored) AS v ${J} ${mf} ${X01_ONLY}`) ?? 0;
   const avg        = avgDarts > 0 ? (totalPts / avgDarts * 3) : null;
+  // x01Avg: same formula as avg, deliberately NOT mode-filtered (no ${mf}) — the
+  // Player Profile header's "X01 Average" bubble (HEADER_STAT_DEFS, own desc:
+  // "3-dart average across every X01 leg") must read the same figure regardless
+  // of which H2H/Practice tab is active, the same "lifetime, all-modes" reasoning
+  // as x01DartsThrown/x01AvgDartsPerDay above — `avg` itself stays mode-filtered
+  // for the Overall/H2H/Practice tab's own "Three-Dart Average" bubble, which
+  // genuinely IS supposed to change with the mode toggle.
+  const x01AvgDartsAllModes = qd(`SELECT SUM(adj) AS v FROM (SELECT CASE WHEN t.bust=1 THEN 3 ELSE COUNT(d.id) END AS adj ${JD} ${X01_ONLY} GROUP BY t.id)`) ?? 0;
+  const x01TotalPtsAllModes = q(`SELECT SUM(t.scored) AS v ${J} ${X01_ONLY}`) ?? 0;
+  const x01Avg     = x01AvgDartsAllModes > 0 ? (x01TotalPtsAllModes / x01AvgDartsAllModes * 3) : null;
   const one80s     = q(`SELECT COUNT(*) AS v ${J} ${mf} ${X01_ONLY} AND t.scored=180`) ?? 0;
   const bigFish    = q(`SELECT COUNT(*) AS v ${J} ${mf} ${X01_ONLY} AND t.checkout=1 AND t.checkout_points=170`) ?? 0;
   const nineDarters= qd(`SELECT COUNT(*) AS v FROM (SELECT 1 ${JD} ${mf} AND g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501 ${NOT_HANDICAPPED} GROUP BY t.game_id,t.set_no,t.leg_no HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9)`) ?? 0;
@@ -3301,7 +3311,7 @@ function getPlayerStatBubbles(playerName, mode) {
   ) WHERE gap_ms > 0 AND gap_ms < 60000`);
 
   return {
-    dartsThrown, avgDartsPerDay, x01DartsThrown, x01AvgDartsPerDay, avgDartsPerLeg, avg, one80s, bigFish, nineDarters,
+    dartsThrown, avgDartsPerDay, x01DartsThrown, x01AvgDartsPerDay, avgDartsPerLeg, avg, x01Avg, one80s, bigFish, nineDarters,
     treblelessPct: totalLegs > 0 ? (tlLegs / totalLegs * 100) : null,
     first3avg, first9avg, avg100plus, avg90minus, score140pct, pace,
     one80sPerLeg: totalLegs > 0 ? (legsWithOneEighty / totalLegs) : null,

@@ -74,6 +74,30 @@ describe('getPlayerStatBubbles — dartsThrown/avgDartsPerDay are lifetime, all-
   });
 });
 
+describe('getPlayerStatBubbles — x01Avg (Player Profile header "X01 Average") is mode-independent, unlike avg', () => {
+  test('x01Avg combines practice and h2h legs; avg (the tab bubble) stays mode-filtered', () => {
+    const name = 'X01_Header_Avg';
+    const opp = 'X01_Header_Avg_Opp';
+    db.addPlayer(name); db.addPlayer(opp);
+    const practiceGame = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    turn(practiceGame.gameId, name, 1, 1, { scored: 60, darts: 3 }); // practice: avg 60
+    const h2hGame = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 0, players: [{ name }, { name: opp }] });
+    turn(h2hGame.gameId, name, 1, 1, { scored: 30, darts: 3 }); // h2h: avg 30
+
+    const overall  = db.getPlayerStatBubbles(name, '');
+    const practice = db.getPlayerStatBubbles(name, 'practice');
+    const h2h      = db.getPlayerStatBubbles(name, 'h2h');
+
+    assert.equal(overall.x01Avg, 45, 'x01Avg over both legs: (60+30)/6 darts * 3 = 45');
+    assert.equal(practice.x01Avg, overall.x01Avg, 'the practice tab must not narrow x01Avg');
+    assert.equal(h2h.x01Avg, overall.x01Avg, 'the h2h tab must not narrow x01Avg');
+
+    assert.equal(practice.avg, 60, 'avg (the Overall/H2H/Practice tab bubble) IS mode-filtered — practice-only');
+    assert.equal(h2h.avg, 30, 'avg IS mode-filtered — h2h-only');
+    assert.notEqual(practice.avg, h2h.avg, 'avg is genuinely supposed to differ by mode, unlike x01Avg');
+  });
+});
+
 describe('getPlayerStatBubbles — 180s and Big Fish', () => {
   test('scored=180 counts as a 180; checkout=170 counts as a Big Fish', () => {
     const name = 'X01_180_BigFish';
