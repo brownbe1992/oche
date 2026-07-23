@@ -991,6 +991,39 @@ existing payload and client-derived `todaysChallenge()`, restyled/rearranged in
   simply renders fewer seats (e.g. a single centered gold seat) — this is a normal,
   data-driven state, not an error condition to special-case.
 
+### Players page visual redesign — Standings Board (2026-07)
+
+The Players screen (`#screen-players`/`renderRoster()`) — the roster picker one
+level up from the Player Profile page, not the profile itself — was a flat,
+alphabetical list before this redesign; a `/frontend-design` exploration (four
+directions, screenshotted and shown to the owner) replaced it with a ranked
+"standings board" so the page answers "who's actually good right now" instead
+of being a bare intermediary step. No new backend endpoint or data shape —
+purely a client-side restyle/re-sort of the same `stats`/`roster` data the old
+list already used:
+
+- **Ranked by lifetime average** (`rosterAvgOf(name)`, `avgDarts`-derived —
+  same formula as everywhere else in this file): a genuine order, not a
+  decorative numbering. Players with no avg yet (never thrown a dart) can't be
+  meaningfully ranked, so they're kept in their own "Not yet ranked — no games
+  recorded" group below the standings instead of being sorted in at the
+  bottom by name.
+- **"The Oche"** — a gold divider styled after the actual toe line every dart
+  is thrown from, marking off rank #1 from the rest of the field. Shown only
+  when there's a field below it (more than one ranked player, or any unranked
+  players at all) — a single player alone in the roster gets no divider.
+- Each row shows: rank, name + achievement badges (180/🐟/🏆, same predicates
+  as before), a meta line (win rate — only once `gamesPlayed >= 3`, matching
+  every other win-rate threshold in this file — game count, last played
+  date), the lifetime average, and a recent-form arrow/delta (`s.recentAvg`
+  vs. lifetime avg, same ±0.5 up/down/flat thresholds as before).
+- Rename/Delete moved from two always-visible icon buttons to a single "⋮"
+  kebab per row (`toggleRosterKebab()`/`closeRosterKebabs()`) — a lightweight
+  show/hide popover, not a new dropdown component, closed by a document-level
+  click-outside listener. Delete still only appears for `canManagePlayers()`;
+  the actual writes still go through `Auth.ensureCanWrite()` exactly as
+  before, unchanged.
+
 ### Player Profile stat bubbles (`getPlayerStatBubbles(name, mode)`) — all 15
 
 **Darts Thrown / Darts / Day are X01-scoped here** (`x01DartsThrown`/`x01AvgDartsPerDay`,

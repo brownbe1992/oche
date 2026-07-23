@@ -209,21 +209,50 @@
   .out-tag{flex:none;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--gold);
     border:1px solid var(--wire);border-radius:8px;padding:7px 9px;min-width:38px;text-align:center}
 
-  .roster-list{display:flex;flex-direction:column;gap:8px;margin:0 0 16px}
-  .roster-row{display:flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--wire);
-    border-radius:11px;padding:10px 12px}
-  .roster-row .rp-main{flex:1;min-width:0}
-  .roster-row .rp-name-row{display:flex;align-items:center;gap:6px;font-weight:600;font-size:15px;flex-wrap:wrap}
-  .roster-row .rp-stat{font-size:12px;color:var(--muted);margin-top:2px}
-  .rp-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
-  .rp-chip{font-size:11px;color:var(--muted);background:var(--surface);border:1px solid var(--wire);border-radius:999px;padding:2px 8px}
-  .rp-badges{display:flex;gap:3px;align-items:center}
-  .rp-badge{font-size:11px;background:var(--surface);border:1px solid var(--wire);border-radius:6px;padding:1px 5px}
+  .roster-list{display:flex;flex-direction:column;gap:0;margin:0 0 16px}
   .out-seg button{padding:8px 11px;font-size:12.5px}
   .out-seg button[aria-pressed="true"]{background:var(--surface-2);color:var(--ink)}
-  .roster-row .iconbtn{width:40px;height:40px;font-size:15px;flex-shrink:0}
-  .roster-row .iconbtn:hover{color:var(--gold);border-color:var(--muted)}
-  .roster-row .iconbtn.danger:hover{color:var(--bust);border-color:var(--bust)}
+
+  /* Players page — Standings Board redesign (2026-07, /frontend-design "idea A"):
+     ranked by lifetime average (a real order, not decoration) instead of a flat
+     alphabetical list, so the page answers "who's actually good right now" the
+     moment it opens instead of being a bare intermediary picker. */
+  .sb-head{display:grid;grid-template-columns:26px 1fr 54px 44px 28px;gap:8px;
+    padding:12px 4px 6px;font-size:10px;font-weight:700;text-transform:uppercase;
+    letter-spacing:.08em;color:var(--muted)}
+  .sb-row-wrap{display:flex;align-items:stretch;gap:2px;position:relative}
+  .sb-row{flex:1;min-width:0;display:grid;grid-template-columns:26px 1fr 54px 44px;gap:8px;
+    align-items:center;background:none;border:none;color:inherit;font:inherit;text-align:left;
+    padding:11px 4px;cursor:pointer;border-bottom:1px solid var(--wire)}
+  .sb-row:hover .sb-name{color:var(--gold)}
+  .sb-rank{font-family:'Bebas Neue';font-size:16px;color:var(--muted);text-align:center}
+  .sb-row-wrap.top .sb-rank{color:var(--gold)}
+  .sb-namewrap{min-width:0}
+  .sb-name{font-size:14px;font-weight:700;display:flex;align-items:center;gap:5px;flex-wrap:wrap;overflow-wrap:anywhere;min-width:0}
+  .sb-badge{font-size:10px;background:var(--surface-2);border:1px solid var(--wire);border-radius:6px;padding:1px 5px;font-weight:400}
+  .sb-meta{font-size:11px;color:var(--muted);margin-top:2px;display:flex;gap:6px;flex-wrap:wrap}
+  .sb-avg{font-family:'Bebas Neue';font-size:19px;color:var(--gold);text-align:right}
+  .sb-avg.empty{color:var(--muted);font-size:15px}
+  .sb-form{font-size:11px;text-align:right;font-weight:700}
+  .sb-form.up{color:var(--green)}
+  .sb-form.down{color:#e2711d}
+  .sb-form.flat{color:var(--muted)}
+  .sb-oche{height:3px;background:linear-gradient(90deg,transparent,var(--gold),transparent);margin:2px 4px 0}
+  .sb-oche-label{font-family:'Bebas Neue';font-size:9px;letter-spacing:.15em;color:var(--gold);
+    text-align:center;margin:4px 0 2px;opacity:.75}
+  .sb-unranked-label{font-size:10.5px;color:var(--muted);margin:14px 4px 2px}
+  .sb-actions{flex:none;width:28px;display:flex;align-items:center;justify-content:center;
+    position:relative;border-bottom:1px solid var(--wire)}
+  .sb-kebab{background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;
+    padding:6px 4px;line-height:1}
+  .sb-kebab:hover{color:var(--ink)}
+  .sb-kebab-menu{position:absolute;right:0;top:calc(100% - 4px);background:var(--surface-2);
+    border:1px solid var(--wire);border-radius:9px;box-shadow:0 10px 24px rgba(0,0,0,.5);
+    z-index:5;min-width:130px;overflow:hidden}
+  .sb-kebab-menu button{display:block;width:100%;text-align:left;background:none;border:none;
+    color:var(--ink);padding:10px 12px;font-size:13px;cursor:pointer;font:inherit}
+  .sb-kebab-menu button:hover{background:var(--surface)}
+  .sb-kebab-menu button.danger:hover{color:var(--bust)}
 
   .modal-overlay{position:fixed;top:0;right:0;bottom:0;left:0;background:rgba(8,9,7,.72);display:flex;align-items:center;
     justify-content:center;padding:24px;z-index:50}
@@ -1339,7 +1368,7 @@
   <section id="screen-players" class="screen">
     <div class="card">
       <h2 style="font-size:18px;margin-bottom:4px">Players</h2>
-      <p style="color:var(--muted);font-size:13px;margin:0 0 16px">Create the people who throw. Each one keeps their own lifetime stats.</p>
+      <p style="color:var(--muted);font-size:13px;margin:0 0 16px">Ranked by lifetime average. Tap a name for their full stats.</p>
       <div id="roster-list" class="roster-list"></div>
       <div class="btn-row">
         <button class="btn btn-primary" onclick="askAddPlayer()">+ Add player</button>
@@ -7451,41 +7480,47 @@ function askReopenLeague(leagueId, name){
 }
 
 /* ---------- players management screen ---------- */
+// Standings Board (2026-07 /frontend-design redesign): ranked by lifetime
+// average, a real order rather than an arbitrary/alphabetical one, so the
+// page answers "who's actually good right now" instead of being a bare
+// intermediary list on the way to the real Player Profile page. Players with
+// no avg yet (no darts thrown) can't be meaningfully ranked, so they're kept
+// in their own unranked group below the standings rather than sorted in.
+function rosterAvgOf(name){
+  const s = stats[name]||{};
+  return s.avgDarts ? (s.totalPoints/s.avgDarts*3) : null;
+}
 function renderRoster(){
   const box=document.getElementById('roster-list');
   if(roster.length===0){
     box.innerHTML=`<div class="empty">No players yet.<br>Add your first player below.</div>`;
     return;
   }
-  box.innerHTML = roster.map(name=>{
-    const s=stats[name]||{};
-    const out = playerOut(name);
-    const j = jsArg(name);
+  const ranked = roster.filter(n=>rosterAvgOf(n)!=null).sort((a,b)=>rosterAvgOf(b)-rosterAvgOf(a));
+  const unranked = roster.filter(n=>rosterAvgOf(n)==null).sort((a,b)=>a.localeCompare(b));
 
-    // Lifetime avg
-    const avg = s.avgDarts ? (s.totalPoints/s.avgDarts*3) : null;
+  const rowHtml = (name, rank)=>{
+    const s=stats[name]||{};
+    const j = jsArg(name);
+    const avg = rosterAvgOf(name);
     const avgStr = avg != null ? avg.toFixed(1) : '—';
 
     // Recent form arrow vs lifetime avg
     let formHtml = '';
     if(avg != null && s.recentAvg != null){
       const delta = s.recentAvg - avg;
-      const arrow = delta >= 0.5 ? '▲' : delta <= -0.5 ? '▼' : '~';
-      const col   = delta >= 0.5 ? 'var(--gold)' : delta <= -0.5 ? 'var(--danger,#e5484d)' : 'var(--muted)';
-      formHtml = ` <span style="color:${col};font-size:11px">${arrow} ${Math.abs(delta).toFixed(1)}</span>`;
+      const dir = delta >= 0.5 ? 'up' : delta <= -0.5 ? 'down' : 'flat';
+      const arrow = dir==='up' ? '▲' : dir==='down' ? '▼' : '~';
+      formHtml = `<span class="sb-form ${dir}">${arrow}${Math.abs(delta).toFixed(1)}</span>`;
     }
 
-    // H2H win rate
+    // H2H win rate + games played
     const gamesPlayed = Object.values(s.gamesByCat||{}).reduce((a,b)=>a+b,0);
     const gamesWon    = Object.values(s.h2hGamesWonByCat||{}).reduce((a,b)=>a+b,0);
-    const winRateHtml = gamesPlayed >= 3
-      ? `<span class="rp-chip">${Math.round(gamesWon/gamesPlayed*100)}% wins · ${gamesPlayed}g</span>`
-      : '';
-
-    // Last played
-    const lastHtml = s.lastPlayed
-      ? `<span class="rp-chip">${fmtDate(s.lastPlayed)}</span>`
-      : '';
+    const metaBits = [];
+    if(gamesPlayed >= 3) metaBits.push(`${Math.round(gamesWon/gamesPlayed*100)}% wins`);
+    metaBits.push(gamesPlayed === 1 ? '1 game' : `${gamesPlayed} games`);
+    if(s.lastPlayed) metaBits.push(fmtDate(s.lastPlayed));
 
     // Achievement badges (only show achievements the player has actually hit)
     const badges = [
@@ -7493,24 +7528,59 @@ function renderRoster(){
       s.bigFish      ? '🐟' : '',
       s.nineDarters  ? '🏆' : '',
     ].filter(Boolean);
-    const badgesHtml = badges.length
-      ? `<div class="rp-badges">${badges.map(b=>`<span class="rp-badge">${b}</span>`).join('')}</div>`
-      : '';
+    const badgesHtml = badges.map(b=>`<span class="sb-badge">${b}</span>`).join('');
 
-    // DO / SO tag
-    const outTag = `<span class="out-tag" style="font-size:10px;padding:3px 7px;min-width:auto">${out==='double'?'DO':'SO'}</span>`;
-
-    return `<div class="roster-row">
-      <button class="rp-main" onclick="showPlayer('${j}')">
-        <div class="rp-name-row">${escapeHtml(name)} ${outTag} ${badgesHtml}</div>
-        <div class="rp-stat">avg ${avgStr}${formHtml} · ${s.turns||0} turns</div>
-        <div class="rp-chips">${winRateHtml}${lastHtml}</div>
+    return `<div class="sb-row-wrap ${rank===1?'top':''}">
+      <button class="sb-row" onclick="showPlayer('${j}')">
+        <span class="sb-rank">${rank!=null ? rank : '–'}</span>
+        <div class="sb-namewrap">
+          <div class="sb-name">${escapeHtml(name)}${badgesHtml}</div>
+          <div class="sb-meta">${metaBits.join(' · ')}</div>
+        </div>
+        <span class="sb-avg${avg==null?' empty':''}">${avgStr}</span>
+        ${formHtml || '<span></span>'}
       </button>
-      <button class="iconbtn" title="Rename" onclick="askRename('${j}')">✎</button>
-      ${canManagePlayers()?`<button class="iconbtn danger" title="Delete" onclick="askDelete('${j}')">🗑</button>`:''}
+      <div class="sb-actions">
+        <button class="sb-kebab" title="More actions" aria-label="More actions for ${escapeHtml(name)}" onclick="event.stopPropagation();toggleRosterKebab(event,'${j}')">⋮</button>
+        <div class="sb-kebab-menu" hidden>
+          <button onclick="event.stopPropagation();closeRosterKebabs();askRename('${j}')">✎ Rename</button>
+          ${canManagePlayers()?`<button class="danger" onclick="event.stopPropagation();closeRosterKebabs();askDelete('${j}')">🗑 Delete</button>`:''}
+        </div>
+      </div>
     </div>`;
+  };
+
+  const head = `<div class="sb-head"><span></span><span>Player</span><span style="text-align:right">Avg</span><span style="text-align:right">Form</span><span></span></div>`;
+  const rankedHtml = ranked.map((name,i)=>{
+    const row = rowHtml(name, i+1);
+    // "The oche" — the actual throw line — marks off the top spot from the
+    // rest of the field, but only when there's a field to mark it off from.
+    const oche = (i===0 && (ranked.length>1 || unranked.length>0))
+      ? `<div class="sb-oche"></div><div class="sb-oche-label">The Oche</div>` : '';
+    return row + oche;
   }).join('');
+  const unrankedHtml = unranked.length
+    ? `<div class="sb-unranked-label">Not yet ranked — no games recorded</div>${unranked.map(name=>rowHtml(name, null)).join('')}`
+    : '';
+
+  box.innerHTML = head + rankedHtml + unrankedHtml;
 }
+// The kebab menu (rename/delete) is a lightweight show/hide popover rather
+// than a full dropdown component — only one open at a time, and any outside
+// click closes it, matching the simple hidden-attribute toggling pattern
+// already used throughout this file (toggleSettingsSection() etc.).
+function closeRosterKebabs(){
+  document.querySelectorAll('#roster-list .sb-kebab-menu').forEach(m=>m.hidden=true);
+}
+function toggleRosterKebab(event, name){
+  const menu = event.currentTarget.nextElementSibling;
+  const wasHidden = menu.hidden;
+  closeRosterKebabs();
+  menu.hidden = !wasHidden;
+}
+document.addEventListener('click', e=>{
+  if(!e.target.closest('.sb-actions')) closeRosterKebabs();
+});
 function askAddPlayer(){
   Auth.ensureCanWrite(()=>uiAddPlayer((name, opts)=>{ if(addToRoster(name, opts)) renderRoster(); }));
 }
