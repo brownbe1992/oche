@@ -961,6 +961,36 @@ category `'501'` where the player recorded exactly 3 turns, one of which was a
 checkout, and exactly 9 total darts were thrown across those 3 turns. Locked to
 `category='501'` specifically.
 
+### Home page visual redesign — Live Ticker & Podium (2026-07)
+
+No new backend endpoint or data shape — this reuses `getSummary()`/`getHomeExtra()`'s
+existing payload and client-derived `todaysChallenge()`, restyled/rearranged in
+`frontend/index.html` only:
+
+- **`#home-ticker`** (`renderHomeTicker()`): a horizontally auto-scrolling marquee
+  above the challenge card, built from up to 5 items already fetched elsewhere on
+  the page — today's challenge name, last game's winner/category, the all-time
+  highest checkout, the all-time 180 count, and the Household Ratings leader.
+  Hidden entirely (`hidden` attribute) if none of those items have data yet. Marked
+  `aria-hidden="true"` since every item it shows also appears, non-scrolling,
+  further down the same page — the marquee is a decorative restatement, not the
+  source of truth, so screen readers skip it rather than re-announcing an
+  endlessly-looping duplicate feed. Animation (`@keyframes home-ticker-scroll`,
+  26s linear loop) is disabled under `prefers-reduced-motion: reduce`.
+- **Today's Challenge hero treatment**: the challenge name itself is now the
+  card's large Bebas Neue headline (`.home-hero-title`) with a small gold eyebrow
+  label above it (`.home-hero-eyebrow`), rather than being buried in body text.
+- **Three-Dart Average podium** (`renderAvgLeaderboard()`, the H2H/Practice tab's
+  X01 "Three-Dart Average" leaderboard only — every other Home leaderboard,
+  including this same section's own Top Checkouts/Most Wins/Fewest Trebleless/
+  Ton+ Rate/First-9/Household Ratings, is intentionally left as a plain ranked
+  list): ranks 1–3 render as a visual podium (`.home-pod`, center-gold/left-silver/
+  right-bronze bar heights, one initial-letter "face" circle each) instead of
+  stacked rows; rank 4+ still renders via the shared `leaderboardRowHtml()` row
+  template below the podium. With fewer than 3 qualifying players, the podium
+  simply renders fewer seats (e.g. a single centered gold seat) — this is a normal,
+  data-driven state, not an error condition to special-case.
+
 ### Player Profile stat bubbles (`getPlayerStatBubbles(name, mode)`) — all 15
 
 **Darts Thrown / Darts / Day are X01-scoped here** (`x01DartsThrown`/`x01AvgDartsPerDay`,

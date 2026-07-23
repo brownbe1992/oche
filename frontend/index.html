@@ -813,17 +813,54 @@
   .hero-block{background:var(--surface-2);border:1px solid var(--wire);border-radius:11px;padding:22px 14px;text-align:center}
   .hero-block-empty{border-style:dashed;opacity:.75}
   .hero-block-empty .hero-label{font-size:10px;line-height:1.4}
-  .hero-val{font-family:'Bebas Neue';font-size:52px;color:var(--cream);line-height:1}
+  /* A soft gold glow behind every hero numeral (item: homepage redesign via
+     /frontend-design, "Live Ticker & Podium" direction, owner's pick of 4) —
+     reads like a scoreboard's lit display rather than a flat number, applies
+     everywhere .hero-val is used (Overview's rarest-stat cards, Pace,
+     Highest Checkout Ever) for one consistent upgrade instead of a one-off. */
+  .hero-val{font-family:'Bebas Neue';font-size:52px;color:var(--cream);line-height:1;text-shadow:0 0 18px rgba(217,180,106,.35)}
   .hero-label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:7px}
   @media(max-width:400px){.hero-val{font-size:38px}}
-  #home-body .pp-section-title{font-size:16px;color:var(--ink);text-transform:none;letter-spacing:.01em;
-    font-weight:700;border-bottom:1.5px solid var(--wire);padding-bottom:10px;margin-bottom:14px}
+  #home-body .pp-section-title{font-family:'Bebas Neue';font-size:19px;color:var(--ink);text-transform:none;letter-spacing:.02em;
+    font-weight:400;border-bottom:1.5px solid var(--wire);padding-bottom:10px;margin-bottom:14px}
   #home-tab-body .pp-section, #home-pulse-body .pp-section{background:var(--surface-2);border:1px solid var(--wire);
     border-radius:12px;padding:16px 18px;margin-bottom:14px}
   #home-tab-body .pp-section:last-child, #home-pulse-body .pp-section:last-child{margin-bottom:0}
-  #home-tab-body .pp-section-title, #home-pulse-body .pp-section-title{font-size:16px;font-weight:700;color:var(--ink);
-    text-transform:none;letter-spacing:.01em;margin-bottom:12px;
+  #home-tab-body .pp-section-title, #home-pulse-body .pp-section-title{font-family:'Bebas Neue';font-size:19px;font-weight:400;color:var(--ink);
+    text-transform:none;letter-spacing:.02em;margin-bottom:12px;
     border-bottom:1px solid var(--wire);padding-bottom:8px}
+  /* Home page marquee (item: "Live Ticker & Podium" redesign) — a few
+     always-computable highlight strings (today's challenge, last game,
+     highest checkout, lifetime 180s, ratings leader), built from data the
+     page already fetches for Overview/Pulse — no new endpoint needed. Hidden
+     entirely if nothing qualifies (renderHomeTicker()). */
+  .home-ticker{background:var(--surface-2);border:1px solid var(--wire);border-radius:12px;padding:10px 0;overflow:hidden;margin-bottom:14px}
+  .home-ticker-track{display:inline-block;white-space:nowrap;animation:home-ticker-scroll 26s linear infinite}
+  .home-ticker-item{font-size:12.5px;color:var(--ink)}
+  .home-ticker-sep{color:var(--gold);padding:0 12px}
+  @keyframes home-ticker-scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  @media(prefers-reduced-motion:reduce){.home-ticker-track{animation:none}}
+  /* Today's Challenge hero treatment — the challenge's own name becomes the
+     big Bebas Neue headline instead of a generic "Today's Challenge" <h2>,
+     an eyebrow label sits above it. */
+  .home-hero-eyebrow{font-family:'Bebas Neue';font-size:13px;letter-spacing:.1em;color:var(--gold)}
+  .home-hero-title{font-family:'Bebas Neue';font-size:32px;color:var(--cream);line-height:1.05;margin-top:4px;letter-spacing:.01em}
+  @media(max-width:380px){.home-hero-title{font-size:26px}}
+  /* Three-Dart Average podium (the one leaderboard the redesign singles out
+     for the podium treatment — every other list stays a plain ranked list). */
+  .home-podium{display:flex;align-items:flex-end;gap:8px;justify-content:center;padding:4px 0 2px}
+  .home-pod{flex:1;text-align:center;max-width:120px;min-width:0}
+  .home-pod-face{width:36px;height:36px;border-radius:50%;background:var(--board);border:2px solid var(--wire);
+    margin:0 auto 6px;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue';font-size:15px;color:var(--ink)}
+  .home-pod.p1 .home-pod-face{border-color:var(--gold);width:44px;height:44px;font-size:18px}
+  .home-pod-bar{background:var(--surface-2);border-radius:8px 8px 0 0;height:16px}
+  .home-pod.p1 .home-pod-bar{height:38px;background:linear-gradient(180deg,#f0d29a,var(--gold))}
+  .home-pod.p2 .home-pod-bar{height:24px}
+  .home-pod.p3 .home-pod-bar{height:14px}
+  .home-pod-info{margin-top:8px}
+  .home-pod-medal{font-size:18px}
+  .home-pod-name{font-size:11.5px;font-weight:700;color:var(--ink);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .home-pod-val{font-family:'Bebas Neue';font-size:16px;color:var(--gold);margin-top:1px}
   .home-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:stretch;margin-bottom:14px}
   /* min-width:0 overrides a grid item's default auto min-width, which otherwise
      sizes the 1fr track to its content's intrinsic width (e.g. a long unbroken
@@ -924,8 +961,14 @@
 
   <!-- ============ HOME ============ -->
   <section id="screen-home" class="screen on">
-    <div class="card challenge-spotlight">
-      <h2 style="font-size:20px;margin-bottom:12px">🎯 Today's Challenge</h2>
+    <!-- Highlight ticker (item: homepage redesign via /frontend-design, "Live
+         Ticker & Podium" direction) — renderHomeTicker(), populated once
+         Overview/Pulse's own data has loaded; hidden entirely if nothing
+         qualifies. -->
+    <div class="home-ticker" id="home-ticker" hidden aria-hidden="true"><div class="home-ticker-track" id="home-ticker-track"></div></div>
+    <div class="card challenge-spotlight home-hero-card">
+      <div class="home-hero-eyebrow">🎯 TODAY'S CHALLENGE</div>
+      <div class="home-hero-title" id="home-challenge-title">Loading…</div>
       <div id="home-challenge-body"><p class="pp-meta">Loading…</p></div>
       <div id="home-challenge-board"></div>
     </div>
@@ -2785,11 +2828,11 @@ let earnedBadgeCache = {}; // playerName -> Set(badgeId), warms per game so Arou
 // todaysChallenge(), so no backend round-trip and nothing to get stuck loading.
 function renderHomeChallengeTeaser(){
   const el = document.getElementById('home-challenge-body');
+  const titleEl = document.getElementById('home-challenge-title');
   if(!el) return;
   const challenge = todaysChallenge();
-  el.innerHTML = `
-    <p style="margin:0;color:var(--ink);font-size:14px">${escapeHtml(challenge.label)}</p>
-    <p class="pp-meta" style="margin-top:8px">Start it from <b>New Game</b>.</p>`;
+  if(titleEl) titleEl.textContent = challenge.label;
+  el.innerHTML = `<p class="pp-meta" style="margin:10px 0 0">Start it from <b>New Game</b>.</p>`;
   renderHomeChallengeBoard(challenge);
 }
 // Daily Challenge idea 10: the household comparison board — every player's
@@ -3325,12 +3368,12 @@ function renderHomeContent(){
   // because of its rarity: shown even at zero, so the empty state itself signals
   // "this is the stat that matters most" rather than being buried in a leaderboard.
   const nineDarterHero = (s.nineDarters>0)
-    ? {val:fmt(s.nineDarters), label:'9-Darters 🏆'}
-    : {val:'—', label:'9-Darters — never happened. Will it be you?', empty:true};
+    ? {val:fmt(s.nineDarters), label:'🌟 9-Darters'}
+    : {val:'—', label:'🌟 9-Darters — never happened. Will it be you?', empty:true};
   const heroCards=[
-    {val:fmt(s.darts),       label:'Total Darts Thrown'},
-    {val:fmt(s.oneEighties), label:'180s'},
-    {val:fmt(s.bigFish),     label:'Big Fish'},
+    {val:fmt(s.darts),       label:'🎲 Total Darts Thrown'},
+    {val:fmt(s.oneEighties), label:'🎯 180s'},
+    {val:fmt(s.bigFish),     label:'🐟 Big Fish'},
     nineDarterHero,
   ];
 
@@ -3368,8 +3411,41 @@ function renderHomeContent(){
     <div class="summary-grid">${achievementCards.map(c=>`<div class="stat-block"><div class="stat-val">${c.val}</div><div class="stat-label">${c.label}</div></div>`).join('')}</div>
     ${highestCoOverallSection}`;
 
+  renderHomeTicker();
   renderHomePulse();
   renderHomeTabBody();
+}
+// Highlight ticker (item: homepage redesign via /frontend-design, "Live
+// Ticker & Podium" direction) — built entirely from data renderHomeContent()
+// already has in scope (s/extra), no new endpoint. Hidden entirely if
+// nothing qualifies (e.g. a brand-new install with no games yet at all).
+function renderHomeTicker(){
+  const wrap = document.getElementById('home-ticker');
+  const track = document.getElementById('home-ticker-track');
+  if(!wrap || !track || !homeData || !homeData.s) return;
+  const {s, extra} = homeData;
+  const items = [];
+  const challenge = todaysChallenge();
+  items.push(`🎯 Today's Challenge: <b>${escapeHtml(challenge.label)}</b>`);
+  if(extra && extra.lastGame && extra.lastGame.winnerName){
+    items.push(`🏆 Last game: <b>${escapeHtml(extra.lastGame.winnerName)}</b> won ${escapeHtml(extra.lastGame.category)}`);
+  }
+  if(extra && extra.highestCheckout && extra.highestCheckout.overall){
+    const hc = extra.highestCheckout.overall;
+    items.push(`🐟 Highest checkout ever: <b>${hc.points}</b> by ${escapeHtml(hc.name)}`);
+  }
+  if(s.oneEighties){
+    items.push(`🎯 <b>${Number(s.oneEighties).toLocaleString()}</b> 180s thrown all-time`);
+  }
+  if(extra && extra.eloLeaderboard && extra.eloLeaderboard.length){
+    items.push(`📈 <b>${escapeHtml(extra.eloLeaderboard[0].name)}</b> leads the household ratings`);
+  }
+  if(!items.length){ wrap.hidden = true; return; }
+  wrap.hidden = false;
+  // The sequence is duplicated once so the CSS scroll animation (-50%) loops
+  // seamlessly instead of showing a gap when it wraps.
+  const seq = items.map(i=>`<span class="home-ticker-item">${i}</span>`).join('<span class="home-ticker-sep">&middot;</span>');
+  track.innerHTML = `${seq}<span class="home-ticker-sep">&middot;</span>${seq}`;
 }
 
 function renderHomePulse(){
@@ -3962,16 +4038,43 @@ function drillButtonHtml(jName, score){
     </div>`;
   }
 
+  // Three-Dart Average is the one leaderboard the "Live Ticker & Podium"
+  // homepage redesign singles out for the podium treatment (every other list
+  // on Home stays a plain ranked list) — top 3 render as a 1st/2nd/3rd
+  // podium, 4th-onward continue as the same plain hof-list rows as before.
+  // Deliberately no top-10 cap here (unlike every other board below) — this
+  // is the one leaderboard shown in full.
   function renderAvgLeaderboard(rows){
-    // Deliberately no top-10 cap here (unlike every other board below) — this
-    // is the one leaderboard shown in full.
-    return leaderboardSectionHtml(rows, {
-      score: r=>r.avg.toFixed(1),
-      meta: r=>`${r.turns.toLocaleString()} visits`,
-      extra: r=>r.out?`<span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;align-self:center">${r.out==='double'?'DO':'SO'}</span>`:'',
-      emptyMsg: 'No games played yet.',
-      limit: Infinity,
-    });
+    if(!rows || !rows.length) return `<p class="pp-meta" style="padding:8px 0">No games played yet.</p>`;
+    const scoreOf = r=>r.avg.toFixed(1);
+    const metaOf = r=>`${r.turns.toLocaleString()} visits`;
+    const extraOf = r=>r.out?`<span class="out-tag" style="padding:2px 7px;font-size:9.5px;min-width:auto;align-self:center">${r.out==='double'?'DO':'SO'}</span>`:'';
+    const top3 = rows.slice(0,3);
+    const rest = rows.slice(3);
+    const medal = ['🥇','🥈','🥉'];
+    // Visual podium order (2nd, 1st, 3rd — 1st in the center, tallest) rather
+    // than rank order.
+    const seats = [1,0,2].filter(i=>top3[i]!==undefined);
+    const podium = `<div class="home-podium">${seats.map(i=>{
+      const r = top3[i];
+      const initial = (r.name||'?').trim().charAt(0).toUpperCase();
+      return `<div class="home-pod p${i+1}">
+        <div class="home-pod-face">${escapeHtml(initial)}</div>
+        <div class="home-pod-bar"></div>
+        <div class="home-pod-info">
+          <div class="home-pod-medal">${medal[i]}</div>
+          <div class="home-pod-name">${escapeHtml(r.name)}</div>
+          <div class="home-pod-val">${scoreOf(r)}</div>
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+    // leaderboardRowHtml's rank param is passed directly (not leaderboardSectionHtml's
+    // own always-starts-at-1 mapping) so 4th+ continues the real ranking instead
+    // of restarting at 1.
+    const restHtml = rest.length
+      ? `<div class="hof-list" style="margin-top:14px">${rest.map((r,i)=>leaderboardRowHtml(i+4, scoreOf(r), r.name, metaOf(r), extraOf(r))).join('')}</div>`
+      : '';
+    return podium + restHtml;
   }
 
 
