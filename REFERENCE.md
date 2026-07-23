@@ -5164,6 +5164,15 @@ Two pieces sit above the categorized picker itself:
   spotlight card above, not a ledger row).
 - **`#setup-step1-continue`** (`setupGoToStep1()` — no validation needed, a
   game is always pre-selected) advances to Step 2.
+- **"VS" chip**: every row for a mode whose `chosenGameContexts(key)` includes
+  `'h2h'` (X01, Cricket, Baseball, Shanghai, Halve-It, Pressure Chamber,
+  Killer) gets a small gold-outlined "VS" chip next to its name
+  (`.setup-ledger-vs`, `aria-label="Supports head-to-head play"` so it reads
+  as more than two letters to a screen reader) — a subtle, non-color-only
+  marker that a mode supports 2+ players, as distinct from every solo-only
+  row which gets no chip. Reuses `chosenGameContexts()` rather than a second
+  hand-maintained key list, so it always agrees with `maxPlayersForSetup()`
+  and the rest of the player-count enforcement below.
 
 ### Player-count enforcement (`maxPlayersForSetup()`)
 

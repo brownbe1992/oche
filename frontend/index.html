@@ -137,7 +137,8 @@
   .setup-ledger-row:hover{background:var(--surface-2)}
   .setup-ledger-row.sel{background:var(--surface-2);box-shadow:inset 0 0 0 1.5px var(--gold)}
   .setup-ledger-medal{flex:none;width:32px;height:32px;border-radius:9px;background:var(--board);border:1px solid var(--wire);display:flex;align-items:center;justify-content:center}
-  .setup-ledger-name{font-weight:700;font-size:14px;color:var(--ink)}
+  .setup-ledger-name{font-weight:700;font-size:14px;color:var(--ink);display:flex;align-items:center;gap:6px}
+  .setup-ledger-vs{font-family:'Bebas Neue',sans-serif;font-size:10px;letter-spacing:.08em;color:var(--gold);border:1px solid var(--gold);border-radius:4px;padding:1px 5px;line-height:1.4}
   .setup-ledger-teaser{font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.35}
   .setup-ledger-check{flex:none;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--wire);margin-top:5px}
   .setup-ledger-row.sel .setup-ledger-check{background:var(--gold);border-color:var(--gold)}
@@ -5378,10 +5379,16 @@ function renderSetupGameLedger(){
     const isOpen = cat.key === openKey;
     const rows = cat.keys.map(k=>{
       const sel = k === currentKey;
+      // "VS" chip: any mode whose contexts include 'h2h' can be played
+      // head-to-head, not just solo — chosenGameContexts() already derives
+      // this from GAME_TYPES' own soloOnly/h2hOnly flags, so this reuses that
+      // instead of hand-listing multiplayer-capable keys a second time.
+      const vsChip = chosenGameContexts(k).includes('h2h')
+        ? `<span class="setup-ledger-vs" aria-label="Supports head-to-head play">VS</span>` : '';
       return `<div class="setup-ledger-row${sel?' sel':''}" role="button" tabindex="0" aria-pressed="${sel}"
           onclick="selectSetupGame('${k}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectSetupGame('${k}')}">
         <div class="setup-ledger-medal">${ledgerCategoryIcon(cat.key, cat.accent)}</div>
-        <div style="flex:1"><div class="setup-ledger-name">${escapeHtml(GAME_LEDGER_NAMES[k]||k)}</div><div class="setup-ledger-teaser">${escapeHtml(GAME_LEDGER_TEASERS[k]||'')}</div></div>
+        <div style="flex:1"><div class="setup-ledger-name">${escapeHtml(GAME_LEDGER_NAMES[k]||k)}${vsChip}</div><div class="setup-ledger-teaser">${escapeHtml(GAME_LEDGER_TEASERS[k]||'')}</div></div>
         <div class="setup-ledger-check"></div>
       </div>`;
     }).join('');
