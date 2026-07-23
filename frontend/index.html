@@ -999,7 +999,7 @@
           </label>
         </div>
         <div class="btn-row" style="margin-top:16px">
-          <button class="btn btn-primary" id="setup-step2-continue" onclick="setupGoToStep3()">Continue</button>
+          <button class="btn btn-primary" id="setup-step2-continue" style="flex:1" onclick="setupGoToStep3()">Continue</button>
         </div>
       </div>
 
@@ -4965,26 +4965,26 @@ function renderPlayers(){
   const allFilled = setup.slots.length>0 && setup.slots.every(s=>s);
   const max = maxPlayersForSetup();
   const atCap = setup.slots.length>=max;
+  // No "Continue" button injected here anymore — #setup-step2-continue (the
+  // static button at the bottom of Step 2, always present regardless of fill
+  // state) is the one and only Continue action now. Previously every branch
+  // below ALSO rendered its own "Continue" button right in the player list,
+  // stacking a second one directly above the static button the instant all
+  // slots were filled (immediately, for any solo-only game — max===1 makes
+  // "allFilled" true the moment the one slot is picked).
   let promptHtml = '';
   if(allFilled && max===1){
     // Solo-only selection (or Daily Challenge/Ghost/Marathon) — exactly one
-    // slot, no "add someone else" prompt to show at all.
-    promptHtml = `<div class="btn-row" style="margin:12px 0 0"><button class="btn btn-primary" style="flex:1" onclick="setupGoToStep3()">Continue</button></div>`;
+    // slot, nothing else to prompt for here at all.
   } else if(allFilled && atCap){
-    promptHtml = `<p class="pp-meta" style="margin:12px 0 8px">Maximum of ${max} players per game.</p>
-      <div class="btn-row" style="margin:0"><button class="btn btn-primary" style="flex:1" onclick="setupGoToStep3()">Continue</button></div>`;
+    promptHtml = `<p class="pp-meta" style="margin:12px 0 8px">Maximum of ${max} players per game.</p>`;
   } else if(allFilled){
     // "Add existing"/"New player" share one row (flex:1 each, so together they
-    // span the full width evenly); "Continue" gets its own row below, also
-    // flex:1 on its lone button so it stretches to that same full span rather
-    // than sizing to its own text.
+    // span the full width evenly).
     promptHtml = `<p class="pp-meta" style="margin:12px 0 8px">Add someone else?</p>
       <div class="btn-row" style="margin:0">
         <button class="btn btn-ghost" style="flex:1" onclick="addExistingPlayer()">Add existing</button>
         <button class="btn btn-ghost" style="flex:1" onclick="addNewPlayer()">New player</button>
-      </div>
-      <div class="btn-row" style="margin-top:10px">
-        <button class="btn btn-primary" style="flex:1" onclick="setupGoToStep3()">Continue</button>
       </div>`;
   }
   const shuffleHtml = named.length>=2

@@ -5201,6 +5201,19 @@ into `#players-list`, each filled `setup.slots` entry as a name row, the
 "🔀 Shuffle order" button once 2+ players are picked) now also calls, at the
 top of every render:
 
+`#setup-step2-continue` — a single static, always-present "Continue" button
+at the bottom of Step 2 (`style="flex:1"`, spanning the full row width) — is
+the **only** Continue action on this step. `renderPlayers()`'s own
+`promptHtml` (the "Add existing"/"New player" row shown once every slot is
+filled but the roster isn't at cap, and the "Maximum of N players" note once
+it is) never renders a second Continue button of its own; it used to, which
+produced two visible Continue buttons stacked the instant all slots were
+filled (immediately, for any solo-only mode, since `max===1` makes
+`allFilled` true the moment the one required player is picked) — fixed so
+`#setup-step2-continue` is the single button for every fill state, including
+a still-partial roster (`setupGoToStep3()` only requires `named.length >= 1`,
+not every slot filled).
+
 - **`renderSetupChallengeStatus()`** (`#setup-challenge-status-section`): the
   per-*chosen*-player "have you already attempted today's challenge"
   blocking check — this is the piece that used to live in the old Step 2's
