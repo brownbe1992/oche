@@ -5352,6 +5352,24 @@ shown once every slot is filled but the roster isn't at cap, and the
 button of its own — see the BUG note in the git history around 2026-07 for
 the two-buttons-stacked defect this fixed.
 
+**Each named player's average + trend ("rail")**: `.player-rail`, a
+right-edge column in the `.player-row` (built via `/frontend-design`,
+5 directions explored, the owner picked this one) — a large Bebas Neue
+numeral (`.rail-num`) with a small "avg"/"h2h" caption underneath
+(`.rail-lbl`), plus a spelled-out trend line when `recentAvg` differs from
+the average by ≥0.5 (`.rail-trend`, e.g. "▼ 5.0 recent" — a full phrase, not
+a bare arrow+delta, which wasn't self-explanatory on its own). Replaces the
+old 11px inline `.slot-stat` line, which was easy to overlook. Whether the
+number shown is the h2h average or the overall average is decided by
+**`setup.mode === 'h2h'`**, not by whether `s.h2hStats` merely has data —
+Ghost (`mode:'ghost'`), every drill, and a solo-player X01/Cricket/etc. pick
+(`mode:'practice'`) all show the overall average even when that player has
+real h2h stats from other matches; only an *actual* head-to-head game
+(`mode:'h2h'`, including Killer, which is always h2h) shows "h2h". This
+fixed a real bug: Ghost is a solo race against your own past leg, never a
+real head-to-head match, but used to show "h2h" for any player who'd ever
+played a real H2H game elsewhere.
+
 - **`renderSetupChallengeStatus()`** (`#setup-challenge-status-section`): the
   per-*chosen*-player "have you already attempted today's challenge"
   blocking check. Only relevant when Daily Challenge is the selected game
@@ -5366,6 +5384,16 @@ the two-buttons-stacked defect this fixed.
   unlike every other per-mode option (folded into Step 1, see above) this
   stays a reactive Step 2 section, shown/hidden by `setMode()` exactly as
   before, refreshed on every player-slot change by `renderPlayers()`.
+  Its "X01 mode" filter is documented alongside `getGhostCandidateLegs()`
+  in §7 (Ghost Opponent); each leg row (`.ghost-leg-row`, `renderGhostLegList()`)
+  is a fixed-height (46px) 4-column grid — date, category (+ a reused "VS"
+  chip for H2H legs instead of a "(H2H)" text suffix), average, dart count —
+  so nothing wraps onto a second line regardless of name/date length
+  (the previous plain flex-row buttons wrapped in two places on an
+  iPhone-width screen, making each row very tall). The date column drops the
+  year for the common case (a leg played this year) and only shows it when
+  the leg is from a previous year, via a plain `legDate.getFullYear() !==
+  new Date().getFullYear()` check.
 - **Handicap** (`#handicap-options-section`, `renderHandicapOptions()`) —
   same reason as Ghost above: needs the actual 2+ chosen player identities,
   not just the fact that X01 was picked. Physically relocated out of the old

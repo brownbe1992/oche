@@ -181,7 +181,17 @@
     border:1px solid var(--wire);color:var(--ink);
     border-radius:10px;padding:12px 36px 12px 13px;font-size:15px;font-family:inherit;cursor:pointer}
   .pselect:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
-  .slot-stat{font-size:11px;color:var(--muted)}
+  /* Player row's stat rail (item: the old inline avg/trend line was 11px and
+     easy to overlook, and a bare arrow+delta wasn't self-explanatory) — a
+     bigger Bebas Neue numeral at the row's right edge, with a spelled-out
+     trend line beneath it instead of just a colored triangle. */
+  .player-rail{flex:none;margin-left:4px;padding-left:10px;border-left:1px solid var(--wire);text-align:right}
+  .player-rail .rail-num{font-family:'Bebas Neue';font-size:22px;line-height:1;color:var(--ink)}
+  .player-rail .rail-lbl{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .player-rail .rail-trend{font-size:10.5px;font-weight:700;margin-top:2px;white-space:nowrap}
+  .player-rail .rail-trend.down{color:var(--danger,#e5484d)}
+  .player-rail .rail-trend.up{color:var(--gold)}
+  .player-rail .rail-trend.flat{color:var(--muted)}
   .loadout-pill{background:none;border:1px solid var(--wire);color:var(--muted);border-radius:20px;
     padding:3px 10px;font-size:11px;font-family:inherit;cursor:pointer}
   .loadout-pill:hover{color:var(--gold);border-color:var(--gold)}
@@ -698,6 +708,19 @@
   .ghost-leg-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}
   .ghost-leg-pager .btn{padding:8px 14px}
   .ghost-leg-pager .btn[disabled]{opacity:.4;cursor:default}
+  /* Ghost leg-picker rows (item: on an iPhone-width screen, the old plain
+     flex-row buttons wrapped their text in two places, making each row very
+     tall — "bloated"). A fixed-height grid with divider columns instead:
+     nothing wraps regardless of name/date length, each row stays one line. */
+  .ghost-leg-row{display:grid;grid-template-columns:60px 52px 1fr 52px;align-items:stretch;
+    width:100%;height:46px;background:var(--surface-2);border:1px solid var(--wire);border-radius:9px;
+    margin-bottom:6px;color:var(--ink);font:inherit;text-align:left;cursor:pointer;overflow:hidden}
+  .ghost-leg-row.sel{border-color:var(--gold);box-shadow:inset 0 0 0 1px var(--gold)}
+  .ghost-leg-row > span{display:flex;align-items:center;padding:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ghost-leg-row .glr-date{color:var(--muted);font-size:11px;border-right:1px solid var(--wire)}
+  .ghost-leg-row .glr-mode{font-family:'Bebas Neue';font-size:13px;color:var(--ink);border-right:1px solid var(--wire);gap:4px}
+  .ghost-leg-row .glr-avg{justify-content:flex-end;font-family:'Bebas Neue';font-size:18px;color:var(--gold)}
+  .ghost-leg-row .glr-darts{justify-content:flex-end;font-size:10.5px;color:var(--muted);border-left:1px solid var(--wire)}
   /* Settings collapsible sections — shared by ~15 headers/chevrons/intro paragraphs
      that previously each carried these as verbatim inline styles. */
   .settings-title{font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between}
@@ -4244,11 +4267,22 @@ function renderGhostLegList(legs, total){
   const curPage = ghostLegPage + 1;
   const toolbar = ghostLegToolbarHtml();
   const rows = legs.map((l,i)=>{
-    const date = parseSqliteTimestamp(l.date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+    const legDate = parseSqliteTimestamp(l.date);
+    // Year only shown when it isn't the current year — saves the column
+    // width for the common case without losing information on older legs.
+    const dateOpts = { month:'short', day:'numeric' };
+    if(legDate.getFullYear() !== new Date().getFullYear()) dateOpts.year = 'numeric';
+    const date = legDate.toLocaleDateString(undefined, dateOpts);
     const sel = setup.ghostLeg && setup.ghostLeg.gameId===l.gameId && setup.ghostLeg.setNo===l.setNo && setup.ghostLeg.legNo===l.legNo;
-    return `<button class="btn ${sel?'btn-primary':'btn-ghost'}" style="display:flex;justify-content:space-between;width:100%;margin-bottom:6px;text-align:left" onclick="selectGhostLeg(${i})">
-      <span>${escapeHtml(date)} · ${escapeHtml(l.category)}${l.practice?'':' (H2H)'}</span>
-      <span>${l.avg.toFixed(1)} avg · ${l.darts} darts</span>
+    // Reuses the same "VS" chip Step 1's ledger uses for head-to-head-capable
+    // modes, instead of a "(H2H)" text suffix that was one of the two things
+    // wrapping these rows onto a second line.
+    const vsChip = l.practice ? '' : `<span class="setup-ledger-vs" aria-label="Head-to-head" style="margin-left:4px">VS</span>`;
+    return `<button type="button" class="ghost-leg-row${sel?' sel':''}" onclick="selectGhostLeg(${i})">
+      <span class="glr-date">${escapeHtml(date)}</span>
+      <span class="glr-mode">${escapeHtml(l.category)}${vsChip}</span>
+      <span class="glr-avg">${l.avg.toFixed(1)}</span>
+      <span class="glr-darts">${l.darts}d</span>
     </button>`;
   }).join('');
   const pager = pageCount>1 ? `
@@ -5006,21 +5040,34 @@ function renderPlayers(){
         </select>
       </div>`;
     }
-    let statHtml = '';
+    // The player's average + recent-form trend, as a "rail" at the right edge
+    // of the player row (item: the old inline `.slot-stat` line was 11px and
+    // easy to miss, and its bare arrow+delta wasn't self-explanatory without
+    // already knowing what it meant) — a bigger Bebas Neue numeral plus a
+    // spelled-out trend line ("▼ 5.0 recent"), not just a triangle.
+    let railHtml = '';
     if(stats[sel]){
       const s = stats[sel];
-      const src = (s.h2hStats && s.h2hStats.avgDarts) ? s.h2hStats : s;
+      // Only actually-head-to-head play (setup.mode==='h2h') shows the h2h
+      // average — Ghost (mode:'ghost'), every drill, and solo-player X01/
+      // Cricket/etc (mode:'practice') all show the player's overall average
+      // instead, even when they happen to have real h2h stats from other
+      // matches. Gating on whether h2hStats merely *exists* (the previous
+      // check) showed "h2h" for Ghost — a solo practice race against your own
+      // past leg, never a real head-to-head match — whenever that player had
+      // ever played a real H2H game elsewhere.
+      const src = (setup.mode === 'h2h' && s.h2hStats && s.h2hStats.avgDarts) ? s.h2hStats : s;
       const avg = src.avgDarts ? (src.totalPoints / src.avgDarts * 3) : null;
       if(avg != null){
-        let form = '';
+        let trendHtml = '';
         if(s.recentAvg != null){
           const d = s.recentAvg - avg;
-          const arrow = d >= 0.5 ? '▲' : d <= -0.5 ? '▼' : '~';
-          const col = d >= 0.5 ? 'var(--gold)' : d <= -0.5 ? 'var(--danger,#e5484d)' : 'var(--muted)';
-          form = `<span style="color:${col};margin-left:4px">${arrow} ${Math.abs(d).toFixed(1)}</span>`;
+          const dir = d >= 0.5 ? 'up' : d <= -0.5 ? 'down' : 'flat';
+          const arrow = dir==='up' ? '▲' : dir==='down' ? '▼' : '~';
+          trendHtml = `<div class="rail-trend ${dir}">${arrow} ${Math.abs(d).toFixed(1)} recent</div>`;
         }
         const label = src === s.h2hStats ? 'h2h' : 'avg';
-        statHtml = `<span class="slot-stat">${label} ${avg.toFixed(1)}${form}</span>`;
+        railHtml = `<div class="player-rail"><div class="rail-num">${avg.toFixed(1)}</div><div class="rail-lbl">${label}</div>${trendHtml}</div>`;
       }
     }
     const outTag = `<span class="out-tag" title="${playerOut(sel)==='double'?'Doubles out':'Singles out'}">${playerOut(sel)==='double'?'DO':'SO'}</span>`;
@@ -5031,9 +5078,9 @@ function renderPlayers(){
         <span class="ix">${i+1}</span>
         <span style="flex:1;font-weight:600;color:var(--ink)">${escapeHtml(sel)}</span>
         ${outTag}
+        ${railHtml}
         <button class="iconbtn" title="Remove from game" onclick="removePlayer(${i})">✕</button>
       </div>
-      ${statHtml ? `<div style="padding-left:30px;margin-top:3px">${statHtml}</div>` : ''}
       <div style="padding-left:30px;margin-top:3px">
         <button type="button" class="loadout-pill" onclick="openLoadoutPicker('${j}', ${i})">🎯 ${lo ? escapeHtml(lo.name) : 'No loadout'}</button>
       </div>
