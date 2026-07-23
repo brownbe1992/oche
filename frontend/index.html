@@ -1322,6 +1322,26 @@
         </div>
       </div>
 
+      <!-- Require admin login for gameplay writes -->
+      <div class="pp-section" style="margin-bottom:24px">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('require-auth-body',this)">
+          Require admin login to play
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="require-auth-body" hidden>
+          <p class="settings-intro">
+            When on, every device must log in as an admin before starting a game, adding or editing a player, or recording a turn — viewing stats and the live scoreboard always stays open to everyone either way.
+          </p>
+          <label class="field" style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400;letter-spacing:0">
+            <input type="checkbox" id="require-admin-auth" onchange="onRequireAuthToggle(this)">
+            Require admin login before gameplay writes
+          </label>
+          <p style="font-size:12px;color:var(--bust);margin:10px 0 0;line-height:1.6">
+            ⚠️ Turning this off removes the login prompt for everyone on every device, including mid-game — anyone who can reach this server on your network could then add or remove players, start or end games, wipe stats, or change these settings without logging in. Only turn this off on a household network you fully trust.
+          </p>
+        </div>
+      </div>
+
       <!-- Player PINs -->
       <div class="pp-section" style="margin-bottom:24px">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('player-pins-body',this)">
@@ -4245,10 +4265,20 @@ const SETTINGS_FIELDS = [
   { key:'card_tagline', id:'card-tagline', kind:'text', default: DEFAULT_CARD_TAGLINE },
   { key:'heatmap_style',        id:'heatmap-style',        kind:'allowed', allowed:['classic','scorched'], default:'classic' },
   { key:'heatmap_number_style', id:'heatmap-number-style', kind:'allowed', allowed:['original','molten_seam','chalk_ledger'], default:'original' },
+  { key:'require_admin_auth',   id:'require-admin-auth',   kind:'checkbox' },
 ];
 function loadSettingsField(cfg, f){
   const el = document.getElementById(f.id);
   if(!el) return;
+  // require_admin_auth's raw stored value can be absent (never explicitly saved
+  // yet) even though the EFFECTIVE current behavior is still "on" (the server
+  // falls back to OCHE_REQUIRE_AUTH's boot-time default until an admin saves an
+  // explicit choice) — Auth.requireAuth is already that resolved value (read via
+  // GET /api/auth-config as part of Auth.refresh(), called just above in
+  // renderSettings()), so this reads the true current behavior instead of the
+  // generic `cfg[f.key] === '1'` check below, which would show unchecked/off any
+  // time the on-by-default fallback hadn't yet been explicitly saved.
+  if(f.key === 'require_admin_auth'){ el.checked = !!Auth.requireAuth; return; }
   if(f.kind === 'checkbox') el.checked = cfg[f.key] === '1';
   else if(f.kind === 'checkbox-optout') el.checked = cfg[f.key] !== '0';
   else if(f.kind === 'allowed') el.value = f.allowed.includes(cfg[f.key]) ? cfg[f.key] : f.default;
@@ -4354,6 +4384,21 @@ function renderAdminsList(){
         </div>
       </div>`).join('') || '<p style="font-size:12px;color:var(--muted)">No admins.</p>';
   }).catch(logErr);
+}
+// Confirms before letting the "require admin login" checkbox actually go to
+// unchecked — reverts the click immediately and only commits it once the admin
+// explicitly confirms, so there's no way to silently flip this off with a single
+// stray click. Turning it back ON needs no confirmation (only ever makes things
+// more locked down). The actual persistence still happens through the normal
+// "Save settings" button, same as every other field on this screen — this only
+// gates the checkbox's own state, not a separate immediate save.
+function onRequireAuthToggle(cb){
+  if(cb.checked) return;
+  cb.checked = true;
+  uiConfirm(
+    "Turn OFF the admin login requirement? Anyone who can reach this server on your network — not just admins — would then be able to add or remove players, start or end games, wipe stats, or change these settings, with no login prompt at all. Only do this on a household network you fully trust.",
+    ()=>{ cb.checked = false; }
+  );
 }
 function askAddAdmin(){
   uiPrompt('New admin username','',username=>{
@@ -4773,6 +4818,7 @@ function saveSettings(){
     heatmapStyle = (document.getElementById('heatmap-style')||{}).value === 'scorched' ? 'scorched' : 'classic';
     const nsVal = (document.getElementById('heatmap-number-style')||{}).value;
     heatmapNumberStyle = ['molten_seam','chalk_ledger'].includes(nsVal) ? nsVal : 'original';
+    Auth.requireAuth = (document.getElementById('require-admin-auth')||{}).checked || false;
     uiAlert('Settings saved.');
   }).catch(err=>{
     if(btn){ btn.disabled=false; btn.textContent='Save settings'; }

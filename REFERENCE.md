@@ -2952,22 +2952,61 @@ beyond human play, but it's the reason Just Chuckin' It's milestone-badge check
 found during testing, doubling the request rate per dart in that mode was
 enough to occasionally trip this exact path.
 
-### `OCHE_REQUIRE_AUTH` — the write-gating switch
+### `require_admin_auth` — the write-gating switch (admin-toggleable at runtime, 2026-07)
 
 Two auth gates exist: **`requireAdmin`** always requires a logged-in admin
-session; **`requireWrite`** behaves exactly like `requireAdmin` unless
-`OCHE_REQUIRE_AUTH` is explicitly set to `"false"` or `"0"` (case-insensitive),
-in which case it's a no-op (public). Zero-trust default: reads (stats,
-scoreboard, settings-for-display) always stay public, but every write
-(recording turns, starting games, awarding badges) requires a logged-in admin
-session even on a fully-trusted LAN — the app never assumes a device on the
-network is safe just because it's on the network. An unrecognized env value
-fails closed (still required), not silently disabled. Set
-`OCHE_REQUIRE_AUTH=false` to opt back into the pre-2026-07 open-LAN behavior
-(reads and gameplay writes both open, only destructive/admin actions require
-login) for a fully-trusted household network. See
-`docs/security-hardening-roadmap.md` for the design history of this default
-flip.
+session; **`requireWrite`** behaves exactly like `requireAdmin` unless the
+effective setting is off, in which case it's a no-op (public). Zero-trust
+default: reads (stats, scoreboard, settings-for-display) always stay public,
+but every write (recording turns, starting games, awarding badges) requires a
+logged-in admin session even on a fully-trusted LAN by default — the app never
+assumes a device on the network is safe just because it's on the network.
+
+**Originally a boot-time-only env var, now a runtime Settings toggle.** The
+`OCHE_REQUIRE_AUTH` env var (unrecognized values fail closed, still required)
+still sets the **boot-time default** (`REQUIRE_AUTH_ENV_DEFAULT`, `server.js`)
+for a deployment that never touches the UI (e.g. infra-as-code), but an admin
+can now flip the actual behavior at runtime from **Settings → Admin accounts
+→ "Require admin login to play"**, stored as the `require_admin_auth` DB
+setting (`db.getRequireAuthSetting(envDefault)` — `{ requireAuth: row ?
+row.value === '1' : !!envDefault }`). Once an admin explicitly saves a choice
+here, the stored value governs **permanently** — even across a restart,
+regardless of what the env var says from then on. `requireWrite()` and
+`GET /api/auth-config` both re-resolve this fresh on every call rather than
+caching a boot-time constant, so toggling it in Settings takes effect
+immediately for every device, no restart required. This exists because the
+old boot-time-only switch meant the login prompt could only ever be
+turned off by editing the env var and restarting the container — annoying to
+reach mid-session, and not something a self-hoster without shell/docker
+access could do at all; letting the admin who's already authenticated into
+Settings make this call directly, with a clear warning, matches every other
+security-relevant tunable in this app (the lockout backoff knobs right above
+this section, `pin_lockout_threshold`, etc.) already being admin-configurable
+rather than env-var-only.
+
+**The Settings checkbox always reflects the resolved effective value**, not
+just the raw stored one — `Auth.requireAuth` (read fresh via `GET
+/api/auth-config` as part of `Auth.refresh()`, called at the top of
+`renderSettings()`) is what the checkbox loads from
+(`loadSettingsField()`'s `require_admin_auth` special case), so it correctly
+shows "on" for a deployment that's never explicitly saved a choice but has
+the zero-trust env default in effect, rather than misleadingly showing
+unchecked just because nothing's been written to the `settings` table yet.
+Unchecking it (`onRequireAuthToggle()`) immediately reverts the click and
+shows a `uiConfirm()` warning ("anyone who can reach this server on your
+network... would then be able to add or remove players, start or end games,
+wipe stats, or change these settings, with no login prompt at all") before
+actually committing the uncheck — turning it back on needs no confirmation,
+since that direction only ever locks things down further. The actual save
+still goes through the normal "Save settings" button, same as every other
+field on this screen; the confirm only gates the checkbox's own state.
+
+Set `OCHE_REQUIRE_AUTH=false` to opt back into the pre-2026-07 open-LAN
+behavior as the initial default (reads and gameplay writes both open, only
+destructive/admin actions require login) for a fully-trusted household
+network — until an admin overrides it via Settings. See
+`docs/security-hardening-roadmap.md` for the design history of the original
+zero-trust default flip.
 
 ### The setup wizard and `Auth.ensureCanWrite()` (`frontend/index.html`)
 
@@ -3068,7 +3107,9 @@ None currently open. `POST /api/ha-webhook` (the inbound trigger that fires an
 already-configured HA webhook) is gated by `requireWrite` like every other
 state-changing endpoint (SEC-7, `docs/security-audit-roadmap.md`) — requires a
 logged-in admin session by default, the same as `POST /api/games` or any other
-write, unless `OCHE_REQUIRE_AUTH=false` opts back into open-LAN behavior.
+write, unless the effective `require_admin_auth` setting is off (§9) — the
+`OCHE_REQUIRE_AUTH` env var's boot-time default, or an admin's runtime
+Settings override.
 
 ---
 

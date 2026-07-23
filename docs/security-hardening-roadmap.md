@@ -92,6 +92,13 @@ recorded turns as a PIN-protected player with no PIN. Addressed:
   household network — unrecognized values fail closed (still required), not silently
   disabled. This is the chosen mitigation for the client-only-PIN gap — PINs stay a
   UI convenience; the auth gate is the real lock.
+  **Follow-up (2026-07):** this env var is now only the boot-time default —
+  an admin can flip the actual behavior at runtime from Settings, with a
+  confirm-before-disabling warning, no restart required
+  (`db.getRequireAuthSetting()`, `REFERENCE.md` §9's "`require_admin_auth`" section).
+  The zero-trust default and the underlying `requireWrite()` gate are unchanged;
+  only how an admin controls it moved from "edit the env var and restart" to
+  "toggle it in Settings."
 - **Stat reclassification fixed.** H2H-vs-practice classification now reads a frozen
   `games.player_count` (captured at creation, backfilled) instead of a live
   `COUNT(game_players)` subquery, so deleting or resetting a player can no longer flip

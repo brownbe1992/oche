@@ -7561,6 +7561,20 @@ function getDefaultScoringInput() {
   const input = row ? row.value : 'board';
   return { input: ['pad','board'].includes(input) ? input : 'board' };
 }
+// Public (no-auth) read of whether writes currently require an admin login — every
+// device attempting a game-affecting write needs this, not just an admin's browser
+// (matches every other public settings-read function's own reasoning above).
+// `envDefault` is the OCHE_REQUIRE_AUTH env var's resolved boot-time value (computed
+// in server.js, since that's where every other process.env read already lives) —
+// used ONLY until an admin explicitly saves this via Settings. Once saved, the
+// stored value governs from then on (including across a server restart, and
+// regardless of what the env var says), so flipping this switch is a genuine
+// runtime decision an admin controls directly, not something that requires editing
+// the env var and restarting the container.
+function getRequireAuthSetting(envDefault) {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'require_admin_auth'").get();
+  return { requireAuth: row ? row.value === '1' : !!envDefault };
+}
 // Public (no-auth) read of the Player Profile heatmap's heat-scale style — any
 // device viewing a profile needs this, not just an admin's browser.
 function getHeatmapStyle() {
@@ -9401,7 +9415,7 @@ module.exports = {
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport, getPlayerExport, getPlayerCsvExport, importPlayerExport, getMergePreview, mergePlayers,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics, getCoachingInsights,
-  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, getHaWebhookStatus, fireHaWebhook, getHeatmapStyle, getHeatmapNumberStyle,
+  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, getHaWebhookStatus, fireHaWebhook, getHeatmapStyle, getHeatmapNumberStyle, getRequireAuthSetting,
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword, clearAdminLockout,
   login, logout, getSessionAdmin, adminLockoutDelayMs, verifyAdminPassword, backupRetentionDays,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,

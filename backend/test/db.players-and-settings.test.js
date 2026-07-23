@@ -229,6 +229,21 @@ describe('settings key/value store', () => {
     assert.equal(db.getScoreboardLayout().layout, 'full');
   });
 
+  // getRequireAuthSetting (2026-07): promoted from a boot-time-only OCHE_REQUIRE_AUTH
+  // env var to an admin-toggleable runtime setting — the env var's resolved value is
+  // passed in as `envDefault` and only used as a fallback until an admin explicitly
+  // saves an override via Settings, at which point the stored value governs
+  // permanently (even if envDefault later disagrees, e.g. because the env var itself
+  // changed on a later restart).
+  test('getRequireAuthSetting falls back to envDefault until explicitly saved, then the saved value wins regardless of envDefault', () => {
+    assert.equal(db.getRequireAuthSetting(true).requireAuth, true, 'no stored override yet -> follows envDefault=true');
+    assert.equal(db.getRequireAuthSetting(false).requireAuth, false, 'no stored override yet -> follows envDefault=false');
+    db.updateSettings({ require_admin_auth: '0' });
+    assert.equal(db.getRequireAuthSetting(true).requireAuth, false, 'explicit "0" override wins even against envDefault=true');
+    db.updateSettings({ require_admin_auth: '1' });
+    assert.equal(db.getRequireAuthSetting(false).requireAuth, true, 'explicit "1" override wins even against envDefault=false');
+  });
+
   test('backupRetentionDays defaults to 7, reflects updateSettings, and falls back on an invalid value', () => {
     assert.equal(db.backupRetentionDays(), 7);
     db.updateSettings({ backup_retention_days: '30' });

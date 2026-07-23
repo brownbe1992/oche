@@ -1208,12 +1208,27 @@ live-scoreboard feed) requires a logged-in admin session by default — even on 
 network you fully trust. Reads always stay public, so the read-only scoreboard and
 stats pages work for everyone with no login needed to just watch.
 
-Set the environment variable **`OCHE_REQUIRE_AUTH=false`** to opt back into the old
-LAN-trust behavior instead: reads *and* gameplay writes both open, and only the
-admin/destructive actions in the table above still require login. Only do this on a
-network you fully trust (no untrusted devices, no internet exposure) — player PINs
+**Any admin can turn this off at runtime**, no restart or env var needed:
+Settings → Admin accounts → "Require admin login to play" is a checkbox, off by
+default only if you've set `OCHE_REQUIRE_AUTH=false` (see below), on otherwise.
+Unchecking it shows a warning and asks you to confirm before it takes effect — with
+it off, anyone who can reach the server on your network can start/end games, add or
+remove players, record turns, and wipe stats with no login prompt at all, on every
+device, immediately. Turning it back on is instant too, no confirmation needed since
+that direction only locks things down further. This is exactly the annoyance this
+setting exists to fix: previously the only way to turn off the login prompt was
+editing an environment variable and restarting the whole server — not something
+reachable from inside the app, and not something you'd want to do just to skip a
+login popup that showed up at an inconvenient moment mid-New-Game.
+
+The environment variable **`OCHE_REQUIRE_AUTH=false`** still exists — it sets the
+*initial* default the very first time the app boots (useful for infra-as-code
+deployments that never touch the Settings UI), but once an admin explicitly saves a
+choice via the checkbox above, that saved choice governs from then on, even across a
+restart, regardless of what the env var says. Whichever way it's set, only do this on
+a network you fully trust (no untrusted devices, no internet exposure) — player PINs
 are a UI convenience, not real authentication. They gate the player picker, **not**
-the underlying API, so with `OCHE_REQUIRE_AUTH=false` anyone who can reach the server
+the underlying API, so with the requirement off, anyone who can reach the server
 could record games or edit players directly.
 
 ### Exposing this to the internet — checklist
@@ -1229,8 +1244,11 @@ work through this list. It's also tracked in `docs/security-audit-roadmap.md`.
   `TRUST_PROXY=true` below** — a reverse-proxy deployment needs both, not just one:
   `COOKIE_SECURE` protects the session cookie, `TRUST_PROXY` keeps the rate limiter
   looking at real client IPs instead of the proxy's single address.
-- **Leave `OCHE_REQUIRE_AUTH` at its default (`true`)** — every write already requires a
-  logged-in admin with no configuration needed.
+- **Leave `OCHE_REQUIRE_AUTH` at its default (`true`), and don't turn off the
+  "Require admin login to play" checkbox in Settings** — every write already requires
+  a logged-in admin with no configuration needed. Turning that checkbox off makes
+  every write endpoint public, which is a much bigger exposure on the open internet
+  than it is on a trusted LAN.
 - **Set `TRUST_PROXY=true`** *only* if the reverse proxy in front of it is one you control
   and it sets `X-Forwarded-For`. This makes the built-in per-IP rate limiting (login,
   first-run setup, PIN verification, and a general per-IP request budget) use the real
@@ -1265,9 +1283,11 @@ Returns `{ ok: true }`.
 
 ```
 GET    /api/setup-required                  { required } — true until the first admin exists
-GET    /api/auth-config                     { requireAuth } — the effective OCHE_REQUIRE_AUTH
-                                             value (true by default; read at app boot to know
-                                             if writes need a login)
+GET    /api/auth-config                     { requireAuth } — the effective require-login
+                                             setting (true by default; the OCHE_REQUIRE_AUTH
+                                             env var's boot-time value until an admin overrides
+                                             it via Settings, which then wins permanently; read
+                                             at app boot to know if writes need a login)
 POST   /api/setup                           Create the first admin   { username, password }
                                              (only while setup-required)
 POST   /api/login                           Log in                   { username, password }

@@ -218,8 +218,16 @@ const PORT = process.env.PORT || 8046;
 // set OCHE_REQUIRE_AUTH=false (or "0") to opt back into open-LAN behavior for a
 // fully-trusted household network. Unrecognized values are treated as "required" (fail
 // closed), not silently disabled.
+//
+// This env var is only the BOOT-TIME DEFAULT now (2026-07) — an admin can flip the
+// actual behavior at runtime from Settings -> Admin accounts, stored as the
+// `require_admin_auth` DB setting (db.getRequireAuthSetting()), which takes over
+// permanently once explicitly saved (even across a restart, regardless of what this
+// env var says from then on). requireWrite()/`GET /api/auth-config` both read the
+// DB-resolved value fresh on every call rather than caching a boot-time constant, so
+// toggling it in Settings takes effect immediately, no restart required.
 const _requireAuthEnv = String(process.env.OCHE_REQUIRE_AUTH ?? '').toLowerCase();
-const REQUIRE_AUTH = !(_requireAuthEnv === 'false' || _requireAuthEnv === '0');
+const REQUIRE_AUTH_ENV_DEFAULT = !(_requireAuthEnv === 'false' || _requireAuthEnv === '0');
 const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
 const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript', '.css':'text/css', '.svg':'image/svg+xml', '.ico':'image/x-icon' };
 
@@ -323,12 +331,14 @@ function requireAdmin(req, res) {
   return admin;
 }
 
-// Call at the top of any state-changing (write) route. When OCHE_REQUIRE_AUTH is off
-// this is a no-op (returns true, preserving open LAN behavior). When on, it requires a
-// logged-in admin, sending 401 and returning false if absent. Returns true when the
-// request may proceed.
+// Call at the top of any state-changing (write) route. When the admin-configurable
+// require_admin_auth setting (db.getRequireAuthSetting(), falling back to
+// REQUIRE_AUTH_ENV_DEFAULT until explicitly saved) is off, this is a no-op (returns
+// true, preserving open LAN behavior). When on, it requires a logged-in admin,
+// sending 401 and returning false if absent. Returns true when the request may
+// proceed.
 function requireWrite(req, res) {
-  if (!REQUIRE_AUTH) return true;
+  if (!db.getRequireAuthSetting(REQUIRE_AUTH_ENV_DEFAULT).requireAuth) return true;
   return !!requireAdmin(req, res);
 }
 
@@ -598,7 +608,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/health' && m === 'GET') return send(res, 200, { ok: true });
     // Public: lets the frontend know whether writes require an admin login, so it can
     // gate gameplay/roster changes behind login when OCHE_REQUIRE_AUTH is enabled.
-    if (p === '/api/auth-config' && m === 'GET') return send(res, 200, { requireAuth: REQUIRE_AUTH });
+    if (p === '/api/auth-config' && m === 'GET') return send(res, 200, db.getRequireAuthSetting(REQUIRE_AUTH_ENV_DEFAULT));
 
     // ----- auth -----
     if (p === '/api/setup-required' && m === 'GET') return send(res, 200, { required: db.isSetupRequired() });
@@ -903,7 +913,7 @@ const server = http.createServer(async (req, res) => {
       const b = await readJson(req);
       // Only allow known setting keys through
       const boolKeys = ['collect_dart_timing','colorblind_mode','voice_enabled','voice_turn_score',
-        'voice_no_score','voice_checkout_req','voice_180','voice_bigfish','voice_match_progress'];
+        'voice_no_score','voice_checkout_req','voice_180','voice_bigfish','voice_match_progress','require_admin_auth'];
       const allowed = ['ha_url',
         'ha_webhook_oneeighty','ha_webhook_bigfish','ha_webhook_bust','ha_webhook_ninedarter','ha_webhook_tonplus',
         'ha_webhook_momentcard',
