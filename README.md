@@ -1060,7 +1060,7 @@ Plus global leaderboards for 180s, Big Fish, and nine-dart finishes, each filter
 
 ### Settings
 
-The Settings page (accessible from the top navigation) holds app-wide configuration, grouped into four tabs: **Account & Access**, **Gameplay & Display**, **Integrations**, and **Admin & Danger Zone**. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Player Profile Heatmap**, **Smart Home Integration**, **Daily Challenge**, **Server Errors**, **Backups**, **Data Export**, **Merge Players**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
+The Settings page (accessible from the top navigation) holds app-wide configuration, grouped into four tabs: **Account & Access**, **Gameplay & Display**, **Integrations**, and **Admin & Danger Zone**. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Heatmap**, **Smart Home Integration**, **Daily Challenge**, **Server Errors**, **Backups**, **Data Export**, **Merge Players**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
 
 Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accounts--player-pins)) — until an admin account exists, the page offers to create the first one.
 

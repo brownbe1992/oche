@@ -4523,7 +4523,7 @@ renders three things per number: the inner-single and outer-single regions
 not shared with the scoring regions, since hit and miss counts are wildly
 different population sizes per player).
 
-**Heat-scale and number-band style** (Settings → Player Profile Heatmap,
+**Heat-scale and number-band style** (Settings → Heatmap,
 admin-toggled via `PUT /api/settings` keys `heatmap_style`/
 `heatmap_number_style`, read by every device via the public
 `GET /api/settings/heatmap-style` / `GET /api/settings/heatmap-number-style`

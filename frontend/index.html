@@ -1598,15 +1598,15 @@
         </div>
       </div>
 
-      <!-- Player Profile Heatmap -->
+      <!-- Heatmap -->
       <div class="pp-section" style="margin-bottom:24px">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('heatmap-style-body',this)">
-          Player Profile Heatmap
+          Heatmap
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="heatmap-style-body" hidden>
           <p class="settings-intro">
-            The dartboard heatmap on every Player Profile page shows which sectors a player hits most often. Pick the heat-scale look it renders with.
+            The dartboard heatmap on every Player Profile page and the live scoreboard shows which sectors a player hits most often. Pick the heat-scale look it renders with.
           </p>
           <label class="field">Heat scale</label>
           <select class="date-input" id="heatmap-style" style="width:auto;margin-bottom:6px" onchange="toggleHeatmapNumberStyleOption()">
@@ -17616,7 +17616,7 @@ function buildDartHeatmap(cells, opts){
   // Geometry comes from the shared BOARD_GEOM kernel (one authority with the
   // input board — see its comment).
   const { CX, CY, R, DEG, xy, f, annulus } = BOARD_GEOM;
-  // Heat-scale style (Settings -> Player Profile Heatmap, admin-toggled, 'classic'
+  // Heat-scale style (Settings -> Heatmap, admin-toggled, 'classic'
   // by default). 'classic' is the original single-hue dark-grey-to-gold scale;
   // 'scorched' is a thermal-camera black -> ember red -> orange -> white-hot ramp
   // with a glow on the hottest regions — one of the /frontend-design mockup

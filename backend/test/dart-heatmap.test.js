@@ -110,7 +110,7 @@ describe('BUG-24 — buildDartHeatmap() no longer hides singles for Cricket/Base
   });
 });
 
-describe('Heatmap style + number-band style options (Settings -> Player Profile Heatmap)', () => {
+describe('Heatmap style + number-band style options (Settings -> Heatmap)', () => {
   const sampleCells = [
     { sector: 20, multiplier: 1, zone: 'inner', hits: 40 },
     { sector: 1, multiplier: 1, zone: 'inner', hits: 0 },

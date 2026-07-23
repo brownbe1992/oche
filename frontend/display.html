@@ -720,7 +720,7 @@ fetch('/api/settings/colorblind-mode', {cache:'no-store'}).then(r=>r.ok?r.json()
 }).catch(()=>{});
 
 // Mirrors index.html's own heatmapStyle/heatmapNumberStyle globals (admin-toggled,
-// Settings -> Player Profile Heatmap) so buildChuckinLiveHeatmap() below renders
+// Settings -> Heatmap) so buildChuckinLiveHeatmap() below renders
 // with the SAME heat-scale/number-band look the Player Profile's lifetime heatmap
 // does — previously hardcoded to the old single-hue 'classic' look regardless of
 // what the admin had picked, so a scorched-styled Player Profile heatmap and a
@@ -1074,7 +1074,7 @@ function buildChuckinLiveHeatmap(cells){
   // in frontend/index.html byte-for-byte (this file has no shared module with
   // index.html, per the established convention above), driven by the same
   // heatmapStyle/heatmapNumberStyle globals fetched at boot from the admin's
-  // Settings -> Player Profile Heatmap choice, so the live scoreboard always
+  // Settings -> Heatmap choice, so the live scoreboard always
   // matches whatever the Player Profile heatmap is currently rendering with.
   const style = heatmapStyle === 'scorched' ? 'scorched' : 'classic';
   const numberStyle = (style === 'scorched' && (heatmapNumberStyle === 'molten_seam' || heatmapNumberStyle === 'chalk_ledger')) ? heatmapNumberStyle : 'original';
