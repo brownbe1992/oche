@@ -5116,16 +5116,22 @@ point of the drill, so it must never manufacture a "toughest ever" record.
 
 ---
 
-## 20. New Game Screen (3-Step Wizard)
+## 20. New Game Screen (2-Step Wizard)
 
 Full design: `docs/archive/new-game-flow-roadmap.md` (original 3-step build,
-Who's playing? → Choose a game → More options) plus a later reorder (2026-07,
-no dedicated roadmap doc — a direct request, not a planned roadmap item) that
-flipped the first two steps: **Choose a game → Who's playing? → More
-options**, and replaced Step 1's flat `<select>` with a categorized "ledger"
-picker. Purely a restructuring of *when/how* the existing controls are shown;
-no change to `startGame()`'s validation or the `game` object it builds for any
-mode.
+Who's playing? → Choose a game → More options); a 2026-07 reorder (no
+dedicated roadmap doc — a direct request, not a planned roadmap item) flipped
+the first two steps to **Choose a game → Who's playing? → More options**, and
+replaced Step 1's flat `<select>` with a categorized "ledger" picker; a
+further 2026-07 change (also a direct request) **folded Step 3 entirely into
+Step 1** — every per-mode option that doesn't need to know *who's* playing now
+renders inline, inside whichever ledger row is selected, alongside a
+collapsed-by-default "Rules" disclosure — leaving a **2-step wizard**: Choose
+a game (with its own options + rules built in) → Who's playing? (which now
+also doubles as Start, since there's nothing left to advance to). No change
+to `startGame()`'s validation or the `game` object it builds for any mode —
+this is still purely a restructuring of *when/how* the existing controls are
+shown.
 
 ### Step 1 — "Choose a game"
 
@@ -5156,14 +5162,18 @@ Two pieces sit above the categorized picker itself:
   calls that option's `apply()` exactly as the old dropdown's `onchange` did,
   then truncates `setup.slots` down to whatever the newly-chosen game allows
   (see "Player-count enforcement" below) before re-rendering.
-- **X01 flavor / recap blurb**: `renderSetupFlavorAndBlurb()` — X01 still
-  reveals `#setup-flavor-section` as a starting-score `<select>` (501/301/170/
-  101, `onSetupFlavorSelect()` sets `setup.start`); `#setup-blurb-body` shows
-  the selected entry's static `blurb` text (a Daily-Challenge-specific fallback
-  line when `opt.blurb` is absent, since Daily Challenge is rendered by its own
-  spotlight card above, not a ledger row).
-- **`#setup-step1-continue`** (`setupGoToStep1()` — no validation needed, a
-  game is always pre-selected) advances to Step 2.
+- **X01 flavor**: `renderSetupFlavorAndBlurb()` — X01 still reveals
+  `#setup-flavor-section` as a starting-score `<select>` (501/301/170/101,
+  `onSetupFlavorSelect()` sets `setup.start`), now mounted inline inside the
+  X01 row itself rather than as a standalone section below the categories.
+- **`#setup-step1-continue`** (`setupGoToStep2()` — no validation needed, a
+  game is always pre-selected) advances to Step 2. Lives inside
+  `.setup-sticky-bar` (`#setup-step1-stickybar`), a `position:fixed` bar
+  pinned to the bottom of the viewport the entire time Step 1 is showing —
+  fixing the complaint that a long category list (or a selected row's own
+  options) pushed Continue off the bottom of the screen, a scroll away.
+  `showSetupStep(n)` toggles its `hidden` alongside the two step wrappers so
+  it never shows while Step 2 is active.
 - **"VS" chip**: every row for a mode whose `chosenGameContexts(key)` includes
   `'h2h'` (X01, Cricket, Baseball, Shanghai, Halve-It, Pressure Chamber,
   Killer) gets a small gold-outlined "VS" chip next to its name
@@ -5173,6 +5183,68 @@ Two pieces sit above the categorized picker itself:
   row which gets no chip. Reuses `chosenGameContexts()` rather than a second
   hand-maintained key list, so it always agrees with `maxPlayersForSetup()`
   and the rest of the player-count enforcement below.
+
+### Step 1's inline options + Rules disclosure (formerly "Step 3")
+
+Whichever ledger row is currently selected (`sel` in `renderSetupGameLedger()`)
+renders two things directly beneath its teaser, inside a `.setup-ledger-options`
+wrapper:
+
+- **The mode's own options** (an anchor div, `#setup-inline-options-anchor`,
+  that `mountSetupInlineOptions()` fills — see below).
+- **A "Rules" disclosure** (`.setup-ledger-rules-toggle` /
+  `.setup-ledger-rules-body`, `setupRulesOpen`/`toggleSetupRules()`) —
+  collapsed by default, showing that entry's `NEW_GAME_MODE_OPTIONS[key].blurb`
+  text (unchanged strings, several reworded from "…on the next step" to
+  "…above" now that their controls sit right there instead of a further page
+  away). This replaces the old always-visible `#setup-blurb-section` box that
+  used to sit below the whole category list — the user-visible complaint that
+  a long how-to-play paragraph rendered separately, every time, whether
+  wanted or not.
+
+**`mountSetupInlineOptions()`** is how the actual options controls get there
+without duplicating any of their existing markup or `onclick` handlers: every
+per-mode `.setup-section` that used to live on the old Step 3 page (Cricket
+targets + variant, Killer's lives threshold, Shanghai's round count,
+Halve-It's classic/custom editor, Checkout Trainer's sub-mode/difficulty/pin
+chip, Doubles Practice's target grid, X01's flavor `<select>`, and the H2H
+Format legs/sets block) now lives in a single reusable pool,
+`#setup-inline-options-pool`, sitting in a static holding div
+(`#setup-inline-options-holding`) that `renderSetupGameLedger()`'s own
+`innerHTML` replace never touches. Each time the ledger re-renders,
+`mountSetupInlineOptions()` physically moves (`appendChild`, not clone) that
+pool into whichever anchor was just created for the newly-selected row — so
+every `set*()` handler (`setCricketPreset()`, `setKillerLives()`, etc.) keeps
+working completely unchanged regardless of which row's DOM subtree the pool
+currently sits inside. (`renderSetupGameLedger()` parks the pool back in its
+holding div *before* the `innerHTML` replace runs, since a node whose parent
+gets wiped that way is removed from the document entirely — even a live
+`getElementById` reference to it would come back empty afterward.)
+
+**Format's visibility is decided by the chosen *key*, not the resolved
+mode**: `mountSetupInlineOptions()` shows `#h2h-options` whenever
+`chosenGameContexts(currentSetupOptionKey()).includes('h2h')` — i.e. for any
+of the 6 dual-capable types plus Killer, regardless of how many players
+end up chosen. This is deliberately different from the old Step 3, which
+gated the same block on `setup.mode === 'h2h'` — a value that isn't resolved
+until Step 2 knows the actual player count (`resyncSetupModeForPlayerCount()`).
+Gating on the eventual mode would hide the Format controls until it's too
+late in the flow to see them; gating on the key instead means Format is
+visible the moment a dual-capable game is picked, exactly like X01's
+starting score already was — its value simply goes unused if the player
+ends up playing solo.
+
+**Two options can't move here at all**, because they need to know *who's*
+playing, not just which game — that isn't decided until Step 2:
+
+- **Ghost's leg picker** (`#ghost-options-section`, `renderGhostLegPicker()`)
+  — needs the specific player's past-leg history.
+- **The Handicap disclosure** (`#handicap-options-section`,
+  `renderHandicapOptions()`) — needs the actual 2+ chosen player identities.
+
+Both are reactive Step 2 sections instead (see below), the same pattern
+Daily Challenge's and League Game's own Step 2 sections already used before
+this change.
 
 ### Player-count enforcement (`maxPlayersForSetup()`)
 
@@ -5202,110 +5274,111 @@ up chosen.
   made once at selection time before the reorder, just deferred and reactive
   now that player count is decided after game choice.
 
-### Step 2 — "Who's playing?"
+### Step 2 — "Who's playing?" (also: Start)
 
 `renderPlayers()` (unchanged core rendering: select → "Add someone else?" loop
 into `#players-list`, each filled `setup.slots` entry as a name row, the
 6-or-fewer cap from `maxPlayersForSetup()` instead of a hardcoded 6, a
 "🔀 Shuffle order" button once 2+ players are picked) now also calls, at the
-top of every render:
+top of every render: `resyncSetupModeForPlayerCount()`,
+`renderSetupChallengeStatus()`, `checkLeagueFixtureForPair()`,
+`renderGhostLegPicker()` (only when Ghost is selected), and
+`renderHandicapOptions()` (self-gates on X01 + 2+ players internally) — every
+reactive section that needs to know the actual chosen players, re-derived on
+every slot change.
 
-`#setup-step2-continue` — a single static, always-present "Continue" button
-at the bottom of Step 2 (`style="flex:1"`, spanning the full row width) — is
-the **only** Continue action on this step. `renderPlayers()`'s own
-`promptHtml` (the "Add existing"/"New player" row shown once every slot is
-filled but the roster isn't at cap, and the "Maximum of N players" note once
-it is) never renders a second Continue button of its own; it used to, which
-produced two visible Continue buttons stacked the instant all slots were
-filled (immediately, for any solo-only mode, since `max===1` makes
-`allFilled` true the moment the one required player is picked) — fixed so
-`#setup-step2-continue` is the single button for every fill state, including
-a still-partial roster (`setupGoToStep3()` only requires `named.length >= 1`,
-not every slot filled).
+`#setup-step2-continue` — a single static, always-present button at the
+bottom of Step 2 (`style="flex:1"`, spanning the full row width) — is the
+**only** Continue/Start action on this step, and now the wizard's **last**
+step: its handler, `setupFinishAndStart()`, validates `named.length >= 1` and
+Killer's own "at least 2" floor exactly as the old Step 2→3 transition did,
+then calls `startGame()` directly — there's no further step to advance to.
+Its label is kept in sync with the selected mode by the same
+`SPECIAL_MODE_START_LABELS` lookup the old `#start-btn` used ("Play Now" for
+H2H/Practice/X01/Cricket/Baseball, a per-mode verb otherwise — "Start
+Challenge", "Start race", "Start Blitz"/"Start training" for Checkout
+Trainer's two sub-modes, etc.) — `setMode()`/`setCheckoutTrainerMode()` now
+target `#setup-step2-continue` by id instead of the retired `#start-btn`.
+`renderPlayers()`'s own `promptHtml` (the "Add existing"/"New player" row
+shown once every slot is filled but the roster isn't at cap, and the
+"Maximum of N players" note once it is) never renders a second Continue
+button of its own — see the BUG note in the git history around 2026-07 for
+the two-buttons-stacked defect this fixed.
 
 - **`renderSetupChallengeStatus()`** (`#setup-challenge-status-section`): the
   per-*chosen*-player "have you already attempted today's challenge"
-  blocking check — this is the piece that used to live in the old Step 2's
-  blurb area (`renderSetupChallengeBlurb()`, retired). Only relevant when
-  Daily Challenge is the selected game (`maxPlayersForSetup()` caps it at 1,
-  so `setup.slots[0]` is the one player this applies to); already attempted
-  today disables `#setup-step2-continue` with a blocking message, same as
-  before the reorder. Resets `continueBtn.disabled` back to `false` whenever
-  the section doesn't apply (a different game is now selected, or no player
-  is named yet) so a block never survives past going Back and picking
+  blocking check. Only relevant when Daily Challenge is the selected game
+  (`maxPlayersForSetup()` caps it at 1, so `setup.slots[0]` is the one player
+  this applies to); already attempted today disables `#setup-step2-continue`
+  with a blocking message. Resets `continueBtn.disabled` back to `false`
+  whenever the section doesn't apply (a different game is now selected, or no
+  player is named yet) so a block never survives past going Back and picking
   something else.
+- **Ghost's leg picker** (`#ghost-options-section`, `renderGhostLegPicker()`)
+  — needs to know who's racing before it can look up their past legs, so
+  unlike every other per-mode option (folded into Step 1, see above) this
+  stays a reactive Step 2 section, shown/hidden by `setMode()` exactly as
+  before, refreshed on every player-slot change by `renderPlayers()`.
+- **Handicap** (`#handicap-options-section`, `renderHandicapOptions()`) —
+  same reason as Ghost above: needs the actual 2+ chosen player identities,
+  not just the fact that X01 was picked. Physically relocated out of the old
+  `#h2h-options` block (which moved to Step 1) into its own standalone Step 2
+  section; its own internal gating (`setup.gameType!=='x01' || names.length<2`
+  → hidden) is unchanged.
 - **`checkLeagueFixtureForPair()`** / **`renderSetupLeagueBanner()`**
   (`#setup-league-section`): League Game can no longer be a Step 1 ledger row
   — a fixture is tied to a specific 2-player pair, unknowable before players
-  are picked — so it's now a reactive opt-in banner instead. Every time
-  exactly 2 players are named, `GET /api/leagues/pending-fixture?p1=&p2=` is
-  re-fetched (always, not just while the banner is toggled on, so swapping one
-  of the two named players re-validates rather than leaving a stale fixture
+  are picked — so it's a reactive opt-in banner instead. Every time exactly 2
+  players are named, `GET /api/leagues/pending-fixture?p1=&p2=` is re-fetched
+  (always, not just while the banner is toggled on, so swapping one of the
+  two named players re-validates rather than leaving a stale fixture
   description showing); if any pending fixture is found the gold-bordered
   banner appears with a checkbox (`toggleLeagueGameSelection()` sets/clears
-  `setup.leagueFixtureId`, `applyLeagueGameSelection()` unchanged from
-  before). Fewer or more than 2 named players hides the banner and clears
+  `setup.leagueFixtureId`, `applyLeagueGameSelection()` unchanged). Fewer or
+  more than 2 named players hides the banner and clears
   `setup.leagueFixtureId`. 2+ simultaneous pending fixtures for the same pair
   still just offer `fixtures[0]` (unchanged simplification from the original
   design).
 
-### Step 3 — "More options"
-
-Every mode-specific options block (Cricket targets **and** its Standard/
-Cut-throat variant toggle — `docs/archive/cutthroat-cricket-roadmap.md`,
-`setCricketVariant()` — both feed `startGame()`'s `config` the same way the
-targets themselves already did — Ghost's leg picker, Doubles Practice's
-target grid, Checkout Trainer's Freeform/Blitz toggle + difficulty tiers, the
-H2H legs/sets Format controls) is unchanged in behavior, just relocated under
-this step — each block's own `hidden` toggling by `setMode()`/`setGameType()`
-still works exactly as before, independent of which step wrapper it happens
-to sit inside. `#start-btn` (labeled "Play Now"
-for H2H/Practice/X01/Cricket/Baseball, a per-mode verb otherwise — "Start
-Challenge", "Start race", etc., unchanged) calls the existing `startGame()`
-unmodified.
-
-**Step 3 is skipped entirely for modes with nothing to configure there**
-(BUG-25, `docs/bug-roadmap.md`): `setupStep3HasContent()` checks whether any
-of the five conditional sections above (`cricket-options-section`,
-`ghost-options-section`, `doubles-options-section`,
-`checkout-trainer-options-section`, `h2h-options`) is currently un-hidden;
-`setupGoToStep3()` — Step 2's "Continue" button handler — calls `startGame()`
-directly instead of `showSetupStep(3)` when none of them are. This affects
-X01 practice, Baseball practice, Chuckin, Around the Clock, Around the World,
-and Daily Challenge, none of which have any Step 3 content; Cricket (any
-context), Ghost, Doubles Practice, Checkout Trainer, and every H2H mode
-(including League Game, which forces H2H) are unaffected and still stop on
-Step 3 as described above.
-
 ### Wizard navigation and step-entry reconciliation
 
-`showSetupStep(n)` (`setupStep` 1/2/3) toggles the three step wrappers,
-updates the step-label text (`SETUP_STEP_LABELS`), and calls the global
-`announce()` (`#sr-announcer`, `aria-live="polite"`) so screen-reader users
-hear the step change; it also moves focus to each new step's first control
-(the Daily Challenge card or the first open ledger row in Step 1, the first
-player `<select>`/button in Step 2, the Back button in Step 3) so focus is
-never silently left on a now-hidden control. Back buttons (`setupBackTo(n)`)
-restore, not reset, whatever was already selected on the step being returned
-to — nothing in `setup` is cleared by navigating backward, only by a
-genuinely fresh entry into the screen.
+`showSetupStep(n)` (`setupStep` 1/2) toggles the two step wrappers (plus
+`#setup-step1-stickybar`, hidden whenever `n!==1`), updates the step-label
+text (`SETUP_STEP_LABELS`, now just `{1: '…Choose a game', 2: '…Who's
+playing?'}`), and calls the global `announce()` (`#sr-announcer`,
+`aria-live="polite"`) so screen-reader users hear the step change; it also
+moves focus to each new step's first control (the Daily Challenge card or the
+first open ledger row in Step 1, the first player `<select>`/button in Step
+2) so focus is never silently left on a now-hidden control. Back buttons
+(`setupBackTo(n)`) restore, not reset, whatever was already selected on the
+step being returned to — nothing in `setup` is cleared by navigating
+backward, only by a genuinely fresh entry into the screen.
 
 `show('setup')` resets `setup.slots`/`loadoutByName`/`leagueFixtureId`/
 `pendingFixtures` and starts at Step 1 on every normal entry (nav click, a
 post-game "Try Again"/"New Game" button, etc.), calling
 `renderSetupDailyChallengeSection()`/`renderSetupGameLedger()`/
 `renderSetupFlavorAndBlurb()` up front so Step 1 is fully populated the
-instant it's shown — **except** when `_enteringSetupFromRaceLeg` is set, which
-`raceLeg()` (Player Profile's "Race this leg" entry point) sets synchronously
-right before calling `show('setup')`, alongside presetting `setup.slots` to
-the one player being raced and calling `setMode('ghost')`. That flag is
-consumed (read + reset to `false`) synchronously inside `show('setup')` itself
-— deliberately **not** the same as `_ghostLegTarget` (which preselects a
-specific leg once `renderGhostLegPicker()`'s own fetch resolves, and is only
-cleared when a match is actually found in that player's leg history) — a
-raceLeg() entry must jump straight to Step 3 and must never get stuck doing so
-on every later "New game" nav click even when that player turns out to have
-zero ghost-race-able legs.
+instant it's shown — **except** for two preset entry points, each of which
+jumps straight to whichever step actually holds *its* pre-configured option
+now that Step 3 no longer exists as a shared landing spot for both:
+
+- **`raceLeg()`** (Player Profile's "Race this leg" entry point) presets
+  `setup.slots` to the one player being raced, calls `setMode('ghost')`, and
+  sets `_enteringSetupFromRaceLeg` synchronously right before calling
+  `show('setup')` — consumed there to jump straight to **Step 2**, since
+  Ghost's leg picker lives there now (it needs the already-preset player).
+  Deliberately **not** the same as `_ghostLegTarget` (which preselects a
+  specific leg once `renderGhostLegPicker()`'s own fetch resolves, and is only
+  cleared when a match is actually found in that player's leg history).
+- **`drillCheckout()`** (Top Finishes row / Coaching Insights "🎯 Drill"
+  button) presets `setup.slots` to the one player drilling, calls
+  `setMode('checkout_trainer')` with a one-shot pin (`_checkoutDrillPin`) already
+  applied, and sets `_enteringSetupFromDrill` the same way — consumed to jump
+  to **Step 1** instead, since Checkout Trainer's options (including the pin
+  chip itself, "inspectable and cancelable, never invisible state") now live
+  in Step 1's inline pool; focus lands on the sticky Continue bar rather than
+  the pin chip/toggles (the player already chose exactly what to drill).
 
 ### Retired
 
@@ -5316,7 +5389,11 @@ zero ghost-race-able legs.
 and `renderSetupStep2Content()` (the old flat player-count-filtered
 `<select>` and its supporting functions) were all deleted, replaced by the
 ledger picker and `maxPlayersForSetup()`/`resyncSetupModeForPlayerCount()`
-described above.
+described above. From the later Step-3-into-Step-1 fold: `#setup-step-3`,
+`#start-btn`, `#setup-blurb-section`, `setupGoToStep3()`, and
+`setupStep3HasContent()` were all deleted — replaced by
+`mountSetupInlineOptions()`/`toggleSetupRules()`, `#setup-step2-continue`
+(now doing double duty as Start), and `setupFinishAndStart()`.
 
 ---
 

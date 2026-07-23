@@ -140,6 +140,25 @@
   .setup-ledger-name{font-weight:700;font-size:14px;color:var(--ink);display:flex;align-items:center;gap:6px}
   .setup-ledger-vs{font-family:'Bebas Neue',sans-serif;font-size:10px;letter-spacing:.08em;color:var(--gold);border:1px solid var(--gold);border-radius:4px;padding:1px 5px;line-height:1.4}
   .setup-ledger-teaser{font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.35}
+  /* Inline per-mode options + Rules disclosure, mounted beneath whichever
+     ledger row is currently selected (mountSetupInlineOptions()) — this is
+     what used to be the separate "Step 3: More options" page (item: users
+     had to scroll to the bottom of a long page to find Continue, and a
+     duplicate always-shown blurb box sat above it). */
+  .setup-ledger-options{padding:2px 10px 4px;margin:2px 4px 6px;background:var(--surface-2);border-radius:0 0 10px 10px;border-top:1px dashed var(--wire)}
+  .setup-ledger-options .setup-section{padding:10px 0;margin:0;border:none}
+  .setup-ledger-options .setup-section + .setup-section{border-top:1px solid var(--wire)}
+  .setup-ledger-rules-toggle{background:none;border:none;padding:8px 0;font-size:11.5px;color:var(--gold);cursor:pointer;display:flex;align-items:center;gap:5px;font-family:inherit}
+  .setup-ledger-rules-toggle .chev{transition:transform .15s ease;display:inline-block}
+  .setup-ledger-rules-toggle[aria-expanded="true"] .chev{transform:rotate(90deg)}
+  .setup-ledger-rules-body{font-size:12.5px;color:var(--muted);line-height:1.5;padding:0 0 8px}
+  /* Floating Continue bar for Step 1 — a game is always pre-selected, so this
+     stays pinned to the bottom of the viewport the whole time Step 1 is
+     showing, rather than requiring a scroll to the end of a long category
+     list the way the old flat "Continue" row at the bottom of the page did. */
+  .setup-sticky-bar{position:fixed;left:0;right:0;bottom:0;z-index:20;
+    padding:22px 16px 16px;background:linear-gradient(180deg,rgba(14,15,13,0) 0%,var(--board) 35%)}
+  .setup-sticky-bar .wrap{max-width:760px;margin:0 auto}
   .setup-ledger-check{flex:none;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--wire);margin-top:5px}
   .setup-ledger-row.sel .setup-ledger-check{background:var(--gold);border-color:var(--gold)}
   /* Daily Challenge's own featured section, above every category — same glow
@@ -931,42 +950,217 @@
     <div class="card">
       <h2 class="chalk" style="font-size:24px;margin-bottom:6px">New game</h2>
       <!-- Decorative chalk-tally step indicator (aria-hidden — #setup-step-label
-           right below still carries the real "Step X of 3" text for screen
+           right below still carries the real "Step X of 2" text for screen
            readers/announce(), unchanged). Ties the wizard's progress to the same
            pub-scorer tally-mark vocabulary as the chalkboard scoreboard. -->
       <div class="chalk-tally" id="setup-step-tally" aria-hidden="true">
-        <span class="tally-mark"></span><span class="tally-mark"></span><span class="tally-mark"></span>
+        <span class="tally-mark"></span><span class="tally-mark"></span>
       </div>
-      <p class="pp-meta" id="setup-step-label" style="margin:0 0 16px">Step 1 of 3 — Choose a game</p>
+      <p class="pp-meta" id="setup-step-label" style="margin:0 0 16px">Step 1 of 2 — Choose a game</p>
 
       <!-- ===== Step 1: Choose a game (Chalkboard Ledger — item: too many game-type
            options crammed into one flat dropdown, no grouping, inconsistent emoji) =====
            A featured Daily Challenge section on top, then every other game type
            grouped into collapsible categories — renderSetupGameLedger() drives
-           this. Shown before players are picked (reversed from the old order) so
-           the chosen game can determine how many players Step 2 allows. -->
+           this. Whichever row is selected expands in place to show that mode's
+           own options (mountSetupInlineOptions() relocates the reusable
+           #setup-inline-options-pool below into the row) plus a collapsed-by-
+           default "Rules" disclosure — this is what used to be a separate
+           "Step 3: More options" page, folded in so a mode's customizations sit
+           right where it's picked instead of a further page away. Player-
+           dependent options (Ghost's past-leg picker, the Handicap disclosure)
+           can't live here — they need to know WHO is playing, which isn't
+           decided until Step 2 — so those stay there instead, same as Daily
+           Challenge's and League Game's own reactive Step 2 sections. -->
       <div id="setup-step-1">
         <div id="setup-dc-section"></div>
-        <div id="setup-game-categories"></div>
-        <!-- X01 starting score only (League Game's own "which match?" question
-             moved to Step 2, where the pair is actually known). -->
-        <div class="setup-section" id="setup-flavor-section" hidden>
-          <div class="setup-label" id="setup-flavor-label">Starting score</div>
-          <select class="date-input" id="setup-flavor-select" style="width:auto" onchange="onSetupFlavorSelect(this.value)"></select>
+        <div id="setup-game-categories" style="padding-bottom:70px"></div>
+      </div>
+
+      <!-- Reusable pool of per-mode option sections — never rendered via
+           innerHTML, physically relocated (mountSetupInlineOptions()) into
+           whichever ledger row is currently selected, so every existing
+           set*()/onclick handler below keeps working completely unchanged
+           regardless of where in the DOM its element currently sits. Parked
+           here (a plain sibling never touched by renderSetupGameLedger()'s
+           own innerHTML replace) between mounts. -->
+      <div id="setup-inline-options-holding" hidden>
+        <div id="setup-inline-options-pool">
+          <!-- X01 starting score (League Game's own "which match?" question is
+               on Step 2, where the pair is actually known). -->
+          <div class="setup-section" id="setup-flavor-section" hidden>
+            <div class="setup-label" id="setup-flavor-label">Starting score</div>
+            <select class="date-input" id="setup-flavor-select" style="width:auto" onchange="onSetupFlavorSelect(this.value)"></select>
+          </div>
+
+          <!-- Cricket target numbers (Cricket only) -->
+          <div class="setup-section" id="cricket-options-section" hidden>
+            <div class="setup-label">Cricket targets</div>
+            <div class="opts" style="margin:0">
+              <div class="seg" role="group" aria-label="Cricket target set">
+                <button id="cricket-preset-classic" aria-pressed="true" onclick="setCricketPreset('classic')">Classic (15-20, Bull)</button>
+                <button id="cricket-preset-custom" aria-pressed="false" onclick="setCricketPreset('custom')">Custom</button>
+              </div>
+            </div>
+            <div id="cricket-custom-body" hidden style="margin-top:10px">
+              <p class="pp-meta" style="margin:0 0 8px">Choose exactly 7 targets — <span id="cricket-custom-count">0 of 7</span> selected.</p>
+              <div class="cricket-number-grid" id="cricket-number-grid" role="group" aria-label="Custom cricket targets"></div>
+              <button class="btn btn-ghost" style="margin-top:8px" onclick="fillCricketClassicIntoCustom()">Start from classic</button>
+            </div>
+            <!-- docs/archive/cutthroat-cricket-roadmap.md -->
+            <div class="setup-label" style="margin-top:14px">Cricket variant</div>
+            <div class="opts" style="margin:0">
+              <div class="seg" role="group" aria-label="Cricket variant">
+                <button id="cricket-variant-standard" aria-pressed="true" onclick="setCricketVariant('standard')">Standard</button>
+                <button id="cricket-variant-cutthroat" aria-pressed="false" onclick="setCricketVariant('cutthroat')">Cut-throat</button>
+              </div>
+            </div>
+            <p class="pp-meta" id="cricket-variant-blurb" style="margin:6px 0 0">Closing a number your opponent hasn't lets you keep scoring on it — highest points wins.</p>
+          </div>
+
+          <!-- Doubles Practice target picker (Doubles Practice mode only) -->
+          <div class="setup-section" id="doubles-options-section" hidden>
+            <div class="setup-label">Doubles to practice</div>
+            <p class="pp-meta" style="margin:0 0 8px">Choose one or more doubles — <span id="doubles-target-count">0</span> selected. All selected doubles stay live at once; a single/treble on a target number, or hitting a different double, ends the round.</p>
+            <div class="cricket-number-grid" id="doubles-target-grid" role="group" aria-label="Doubles to practice"></div>
+          </div>
+
+          <!-- Killer options (Killer game type only, docs/game-modes-roadmap.md
+               "Killer") — each player is randomly assigned their own number when the
+               match starts (re-rolled for a rematch, never re-shown/editable here —
+               there's nothing to configure about the assignment itself, only the
+               become-a-killer lives threshold). -->
+          <div class="setup-section" id="killer-options-section" hidden>
+            <div class="setup-label">Killer options</div>
+            <p class="pp-meta" style="margin:0 0 8px">Each player is randomly assigned their own number when the match starts. Choose how many lives it takes to become a killer:</p>
+            <div class="opts" style="margin:0">
+              <div class="seg" role="group" aria-label="Killer lives threshold">
+                <button id="killer-lives-2" aria-pressed="false" onclick="setKillerLives(2)">2</button>
+                <button id="killer-lives-3" aria-pressed="true" onclick="setKillerLives(3)">3 (standard)</button>
+                <button id="killer-lives-5" aria-pressed="false" onclick="setKillerLives(5)">5</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Shanghai options (Shanghai game type only, docs/archive/shanghai-roadmap.md) —
+               a fixed round sequence 1..rounds; each round's 3 darts only score
+               against that round's own number. -->
+          <div class="setup-section" id="shanghai-options-section" hidden>
+            <div class="setup-label">Shanghai options</div>
+            <p class="pp-meta" style="margin:0 0 8px">Round 1 targets the number 1, round 2 the number 2, and so on. A single, double, AND treble of the round's own number in one visit — a Shanghai — wins instantly.</p>
+            <div class="opts" style="margin:0">
+              <div class="seg" role="group" aria-label="Shanghai round count">
+                <button id="shanghai-rounds-7" aria-pressed="true" onclick="setShanghaiRounds(7)">7 (standard)</button>
+                <button id="shanghai-rounds-20" aria-pressed="false" onclick="setShanghaiRounds(20)">20 (long-form)</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Halve-It targets (Halve-It game type only, docs/archive/halve-it-roadmap.md
+               "Custom target editor", item 19) — Classic plays the standard 7-round set;
+               Custom reveals an ordered per-round editor (each round: a sector + an optional
+               required ring). Same Classic/Custom toggle shape as Cricket's own picker. -->
+          <div class="setup-section" id="halve-it-options-section" hidden>
+            <div class="setup-label">Halve-It targets</div>
+            <div class="opts" style="margin:0">
+              <div class="seg" role="group" aria-label="Halve-It target set">
+                <button id="halve-it-preset-classic" aria-pressed="true" onclick="setHalveItPreset('classic')">Classic (7 rounds)</button>
+                <button id="halve-it-preset-custom" aria-pressed="false" onclick="setHalveItPreset('custom')">Custom</button>
+              </div>
+            </div>
+            <div id="halve-it-custom-body" hidden style="margin-top:10px">
+              <p class="pp-meta" style="margin:0 0 8px">Build your own round sequence — <span id="halve-it-round-count">0</span> rounds. Each round targets a number (or the Bull); pick a required ring, or “Any” to count any hit on that number.</p>
+              <div id="halve-it-target-rows" role="group" aria-label="Halve-It custom rounds"></div>
+              <div class="btn-row" style="margin-top:8px">
+                <button class="btn btn-ghost" type="button" onclick="addHalveItTargetRow()">+ Add round</button>
+                <button class="btn btn-ghost" type="button" onclick="fillHalveItClassicIntoCustom()">Start from classic</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Checkout Trainer sub-mode + difficulty (Checkout Trainer mode only) -->
+          <div class="setup-section" id="checkout-trainer-options-section" hidden>
+            <div class="setup-label">Checkout Trainer options</div>
+            <!-- docs/archive/checkout-drill-link-roadmap.md "Drill this checkout": shown only when
+                 drillCheckout() applied a pin — inspectable and cancelable, never invisible
+                 state. Freeform + trick questions get force-disabled while a pin is active
+                 (see renderCheckoutTrainerPinChip()). -->
+            <div id="checkout-trainer-pin-chip" hidden style="padding:8px 10px;background:var(--surface-2);border-radius:8px;align-items:center;justify-content:space-between;gap:10px;margin:0 0 10px">
+              <span id="checkout-trainer-pin-text" style="font-size:13px;color:var(--cream);font-weight:600"></span>
+              <button type="button" class="iconbtn" title="Stop drilling this number" onclick="clearCheckoutTrainerPin()">✕</button>
+            </div>
+            <div class="opts" style="margin:0">
+              <div class="seg" role="group" aria-label="Checkout Trainer sub-mode">
+                <button id="checkout-trainer-mode-freeform" aria-pressed="true" onclick="setCheckoutTrainerMode('freeform')">Freeform</button>
+                <button id="checkout-trainer-mode-blitz" aria-pressed="false" onclick="setCheckoutTrainerMode('blitz')">⏱️ Checkout Blitz (60s)</button>
+              </div>
+            </div>
+            <p class="pp-meta" id="checkout-trainer-mode-desc" style="margin:10px 0 0"></p>
+            <div class="opts" style="margin:10px 0 0">
+              <div class="seg" role="group" aria-label="Checkout Trainer difficulty">
+                <button id="checkout-trainer-difficulty-under40" aria-pressed="false" onclick="setCheckoutTrainerDifficulty('under40')">Under 40</button>
+                <button id="checkout-trainer-difficulty-under100" aria-pressed="false" onclick="setCheckoutTrainerDifficulty('under100')">Under 100</button>
+                <button id="checkout-trainer-difficulty-over100" aria-pressed="false" onclick="setCheckoutTrainerDifficulty('over100')">Over 100</button>
+                <button id="checkout-trainer-difficulty-full" aria-pressed="true" onclick="setCheckoutTrainerDifficulty('full')">Full Range (2-170)</button>
+              </div>
+            </div>
+            <div class="opts" style="margin:10px 0 0">
+              <div class="seg" role="group" aria-label="Checkout Trainer trick questions">
+                <button id="checkout-trainer-tricks-off" aria-pressed="true" onclick="setCheckoutTrainerTricks(false)">Trick questions off</button>
+                <button id="checkout-trainer-tricks-on" aria-pressed="false" onclick="setCheckoutTrainerTricks(true)">💣 Trick questions on</button>
+              </div>
+            </div>
+            <p class="pp-meta" id="checkout-trainer-tricks-desc" style="margin:10px 0 0"></p>
+          </div>
+
+          <!-- Format — any mode that CAN be played head-to-head gets this,
+               regardless of how many players end up chosen on Step 2 (same
+               treatment X01's starting score already got before this
+               reorder) — setup.mode itself isn't resolved until Step 2 knows
+               the actual player count, so gating this on setup.mode the way
+               the old Step 3 did would hide it until it's too late to see. -->
+          <div id="h2h-options" class="setup-section">
+            <div class="setup-label">Format</div>
+            <div class="preset-row">
+              <span style="font-size:12px;color:var(--muted);margin-right:2px">Quick:</span>
+              <button class="preset-btn" onclick="applyPreset(2,1)">Bo3</button>
+              <button class="preset-btn" onclick="applyPreset(3,1)">Bo5</button>
+              <button class="preset-btn" onclick="applyPreset(4,1)">Bo7</button>
+            </div>
+            <div class="opts" style="margin:0">
+              <div class="stepper">
+                <span class="lbl">Legs per set</span>
+                <button aria-label="Fewer legs" onclick="bump('legsPerSet',-1)">−</button>
+                <span class="val" id="legs-val">3</span>
+                <button aria-label="More legs" onclick="bump('legsPerSet',1)">+</button>
+              </div>
+              <div class="stepper">
+                <span class="lbl">Sets per game</span>
+                <button aria-label="Fewer sets" onclick="bump('setsPerGame',-1)">−</button>
+                <span class="val" id="sets-val">1</span>
+                <button aria-label="More sets" onclick="bump('setsPerGame',1)">+</button>
+              </div>
+            </div>
+            <p style="color:var(--muted);font-size:12px;margin:10px 2px 0" id="format-line"></p>
+          </div>
         </div>
-        <div class="setup-section" id="setup-blurb-section" style="border:1px solid var(--gold);border-radius:10px;padding:12px">
-          <div id="setup-blurb-body"></div>
-        </div>
-        <div class="btn-row" style="margin-top:16px">
-          <button class="btn btn-primary" id="setup-step1-continue" onclick="setupGoToStep2()">Continue</button>
-        </div>
+      </div>
+
+      <!-- Floating Continue bar — pinned to the bottom of the viewport the
+           whole time Step 1 is showing (a game is always pre-selected), so
+           it's never a scroll away regardless of how long the category list
+           or the selected row's own options run. -->
+      <div class="setup-sticky-bar" id="setup-step1-stickybar" hidden>
+        <div class="wrap"><button class="btn btn-primary play-btn-block" id="setup-step1-continue" style="flex:1" onclick="setupGoToStep2()">Continue</button></div>
       </div>
 
       <!-- ===== Step 2: Who's playing? (docs/archive/new-game-flow-roadmap.md) =====
            A select → "Add someone else?" loop, not the old always-visible-rows
            list — renderPlayers() (unchanged name, rewritten body) drives this.
            How many slots it allows depends on the game chosen in Step 1 —
-           see maxPlayersForSetup(). -->
+           see maxPlayersForSetup(). This is now also the WHOLE rest of the
+           wizard — its Continue button (setupFinishAndStart()) starts the
+           game directly; there's no further step to advance to. -->
       <div id="setup-step-2" hidden>
         <button class="btn btn-ghost btn-sm" style="margin-bottom:16px" onclick="setupBackTo(1)">← Back</button>
         <!-- Saved games (docs/archive/saved-games-roadmap.md) — above the player slots,
@@ -988,6 +1182,19 @@
         <div class="setup-section" id="setup-challenge-status-section" hidden>
           <div id="setup-challenge-status-body"></div>
         </div>
+        <!-- Ghost leg picker (Ghost Opponent mode only) — needs to know WHO's
+             playing (to look up their past legs), so unlike every other
+             per-mode option this can't live in Step 1's inline options; it's
+             a reactive Step 2 section instead, same shape as the Daily
+             Challenge/League sections around it. -->
+        <div class="setup-section" id="ghost-options-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
+          <div class="setup-label" style="color:var(--gold)">👻 Race a past leg</div>
+          <div id="ghost-leg-picker-body"><p class="pp-meta">Choose a player above to see their past won legs.</p></div>
+        </div>
+        <!-- Handicapping (X01 only, 2+ named players) — same reason as Ghost's
+             leg picker above: needs the actual chosen players, not just the
+             game key, so it stays here rather than in Step 1. -->
+        <div id="handicap-options-section" hidden></div>
         <!-- Pending league fixture for the current pair (docs/archive/league-mode-roadmap.md) —
              only ever shown once exactly 2 players are chosen and they share a
              pending fixture; opt-in via the checkbox, never forced. -->
@@ -1000,170 +1207,7 @@
           </label>
         </div>
         <div class="btn-row" style="margin-top:16px">
-          <button class="btn btn-primary" id="setup-step2-continue" style="flex:1" onclick="setupGoToStep3()">Continue</button>
-        </div>
-      </div>
-
-      <!-- ===== Step 3: More options ===== -->
-      <div id="setup-step-3" hidden>
-        <button class="btn btn-ghost btn-sm" style="margin-bottom:16px" onclick="setupBackTo(2)">← Back</button>
-
-        <!-- Cricket target numbers (Cricket only) -->
-        <div class="setup-section" id="cricket-options-section" hidden>
-          <div class="setup-label">Cricket targets</div>
-          <div class="opts" style="margin:0">
-            <div class="seg" role="group" aria-label="Cricket target set">
-              <button id="cricket-preset-classic" aria-pressed="true" onclick="setCricketPreset('classic')">Classic (15-20, Bull)</button>
-              <button id="cricket-preset-custom" aria-pressed="false" onclick="setCricketPreset('custom')">Custom</button>
-            </div>
-          </div>
-          <div id="cricket-custom-body" hidden style="margin-top:10px">
-            <p class="pp-meta" style="margin:0 0 8px">Choose exactly 7 targets — <span id="cricket-custom-count">0 of 7</span> selected.</p>
-            <div class="cricket-number-grid" id="cricket-number-grid" role="group" aria-label="Custom cricket targets"></div>
-            <button class="btn btn-ghost" style="margin-top:8px" onclick="fillCricketClassicIntoCustom()">Start from classic</button>
-          </div>
-          <!-- docs/archive/cutthroat-cricket-roadmap.md -->
-          <div class="setup-label" style="margin-top:14px">Cricket variant</div>
-          <div class="opts" style="margin:0">
-            <div class="seg" role="group" aria-label="Cricket variant">
-              <button id="cricket-variant-standard" aria-pressed="true" onclick="setCricketVariant('standard')">Standard</button>
-              <button id="cricket-variant-cutthroat" aria-pressed="false" onclick="setCricketVariant('cutthroat')">Cut-throat</button>
-            </div>
-          </div>
-          <p class="pp-meta" id="cricket-variant-blurb" style="margin:6px 0 0">Closing a number your opponent hasn't lets you keep scoring on it — highest points wins.</p>
-        </div>
-
-        <!-- Ghost leg picker (Ghost Opponent mode only) -->
-        <div class="setup-section" id="ghost-options-section" hidden style="border:1px solid var(--gold);border-radius:10px;padding:12px">
-          <div class="setup-label" style="color:var(--gold)">👻 Race a past leg</div>
-          <div id="ghost-leg-picker-body"><p class="pp-meta">Choose a player above to see their past won legs.</p></div>
-        </div>
-
-        <!-- Doubles Practice target picker (Doubles Practice mode only) -->
-        <div class="setup-section" id="doubles-options-section" hidden>
-          <div class="setup-label">Doubles to practice</div>
-          <p class="pp-meta" style="margin:0 0 8px">Choose one or more doubles — <span id="doubles-target-count">0</span> selected. All selected doubles stay live at once; a single/treble on a target number, or hitting a different double, ends the round.</p>
-          <div class="cricket-number-grid" id="doubles-target-grid" role="group" aria-label="Doubles to practice"></div>
-        </div>
-
-        <!-- Killer options (Killer game type only, docs/game-modes-roadmap.md
-             "Killer") — each player is randomly assigned their own number when the
-             match starts (re-rolled for a rematch, never re-shown/editable here —
-             there's nothing to configure about the assignment itself, only the
-             become-a-killer lives threshold). -->
-        <div class="setup-section" id="killer-options-section" hidden>
-          <div class="setup-label">Killer options</div>
-          <p class="pp-meta" style="margin:0 0 8px">Each player is randomly assigned their own number when the match starts. Choose how many lives it takes to become a killer:</p>
-          <div class="opts" style="margin:0">
-            <div class="seg" role="group" aria-label="Killer lives threshold">
-              <button id="killer-lives-2" aria-pressed="false" onclick="setKillerLives(2)">2</button>
-              <button id="killer-lives-3" aria-pressed="true" onclick="setKillerLives(3)">3 (standard)</button>
-              <button id="killer-lives-5" aria-pressed="false" onclick="setKillerLives(5)">5</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Shanghai options (Shanghai game type only, docs/archive/shanghai-roadmap.md) —
-             a fixed round sequence 1..rounds; each round's 3 darts only score
-             against that round's own number. -->
-        <div class="setup-section" id="shanghai-options-section" hidden>
-          <div class="setup-label">Shanghai options</div>
-          <p class="pp-meta" style="margin:0 0 8px">Round 1 targets the number 1, round 2 the number 2, and so on. A single, double, AND treble of the round's own number in one visit — a Shanghai — wins instantly.</p>
-          <div class="opts" style="margin:0">
-            <div class="seg" role="group" aria-label="Shanghai round count">
-              <button id="shanghai-rounds-7" aria-pressed="true" onclick="setShanghaiRounds(7)">7 (standard)</button>
-              <button id="shanghai-rounds-20" aria-pressed="false" onclick="setShanghaiRounds(20)">20 (long-form)</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Halve-It targets (Halve-It game type only, docs/archive/halve-it-roadmap.md
-             "Custom target editor", item 19) — Classic plays the standard 7-round set;
-             Custom reveals an ordered per-round editor (each round: a sector + an optional
-             required ring). Same Classic/Custom toggle shape as Cricket's own picker. -->
-        <div class="setup-section" id="halve-it-options-section" hidden>
-          <div class="setup-label">Halve-It targets</div>
-          <div class="opts" style="margin:0">
-            <div class="seg" role="group" aria-label="Halve-It target set">
-              <button id="halve-it-preset-classic" aria-pressed="true" onclick="setHalveItPreset('classic')">Classic (7 rounds)</button>
-              <button id="halve-it-preset-custom" aria-pressed="false" onclick="setHalveItPreset('custom')">Custom</button>
-            </div>
-          </div>
-          <div id="halve-it-custom-body" hidden style="margin-top:10px">
-            <p class="pp-meta" style="margin:0 0 8px">Build your own round sequence — <span id="halve-it-round-count">0</span> rounds. Each round targets a number (or the Bull); pick a required ring, or “Any” to count any hit on that number.</p>
-            <div id="halve-it-target-rows" role="group" aria-label="Halve-It custom rounds"></div>
-            <div class="btn-row" style="margin-top:8px">
-              <button class="btn btn-ghost" type="button" onclick="addHalveItTargetRow()">+ Add round</button>
-              <button class="btn btn-ghost" type="button" onclick="fillHalveItClassicIntoCustom()">Start from classic</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Checkout Trainer sub-mode + difficulty (Checkout Trainer mode only —
-             the intro paragraph itself now lives in Step 2's how-to-play blurb) -->
-        <div class="setup-section" id="checkout-trainer-options-section" hidden>
-          <div class="setup-label">Checkout Trainer options</div>
-          <!-- docs/archive/checkout-drill-link-roadmap.md "Drill this checkout": shown only when
-               drillCheckout() applied a pin — inspectable and cancelable, never invisible
-               state. Freeform + trick questions get force-disabled while a pin is active
-               (see renderCheckoutTrainerPinChip()). -->
-          <div id="checkout-trainer-pin-chip" hidden style="padding:8px 10px;background:var(--surface-2);border-radius:8px;align-items:center;justify-content:space-between;gap:10px;margin:0 0 10px">
-            <span id="checkout-trainer-pin-text" style="font-size:13px;color:var(--cream);font-weight:600"></span>
-            <button type="button" class="iconbtn" title="Stop drilling this number" onclick="clearCheckoutTrainerPin()">✕</button>
-          </div>
-          <div class="opts" style="margin:0">
-            <div class="seg" role="group" aria-label="Checkout Trainer sub-mode">
-              <button id="checkout-trainer-mode-freeform" aria-pressed="true" onclick="setCheckoutTrainerMode('freeform')">Freeform</button>
-              <button id="checkout-trainer-mode-blitz" aria-pressed="false" onclick="setCheckoutTrainerMode('blitz')">⏱️ Checkout Blitz (60s)</button>
-            </div>
-          </div>
-          <p class="pp-meta" id="checkout-trainer-mode-desc" style="margin:10px 0 0"></p>
-          <div class="opts" style="margin:10px 0 0">
-            <div class="seg" role="group" aria-label="Checkout Trainer difficulty">
-              <button id="checkout-trainer-difficulty-under40" aria-pressed="false" onclick="setCheckoutTrainerDifficulty('under40')">Under 40</button>
-              <button id="checkout-trainer-difficulty-under100" aria-pressed="false" onclick="setCheckoutTrainerDifficulty('under100')">Under 100</button>
-              <button id="checkout-trainer-difficulty-over100" aria-pressed="false" onclick="setCheckoutTrainerDifficulty('over100')">Over 100</button>
-              <button id="checkout-trainer-difficulty-full" aria-pressed="true" onclick="setCheckoutTrainerDifficulty('full')">Full Range (2-170)</button>
-            </div>
-          </div>
-          <div class="opts" style="margin:10px 0 0">
-            <div class="seg" role="group" aria-label="Checkout Trainer trick questions">
-              <button id="checkout-trainer-tricks-off" aria-pressed="true" onclick="setCheckoutTrainerTricks(false)">Trick questions off</button>
-              <button id="checkout-trainer-tricks-on" aria-pressed="false" onclick="setCheckoutTrainerTricks(true)">💣 Trick questions on</button>
-            </div>
-          </div>
-          <p class="pp-meta" id="checkout-trainer-tricks-desc" style="margin:10px 0 0"></p>
-        </div>
-
-        <!-- Format (H2H only) -->
-        <div id="h2h-options" class="setup-section">
-          <div class="setup-label">Format</div>
-          <div class="preset-row">
-            <span style="font-size:12px;color:var(--muted);margin-right:2px">Quick:</span>
-            <button class="preset-btn" onclick="applyPreset(2,1)">Bo3</button>
-            <button class="preset-btn" onclick="applyPreset(3,1)">Bo5</button>
-            <button class="preset-btn" onclick="applyPreset(4,1)">Bo7</button>
-          </div>
-          <div class="opts" style="margin:0">
-            <div class="stepper">
-              <span class="lbl">Legs per set</span>
-              <button aria-label="Fewer legs" onclick="bump('legsPerSet',-1)">−</button>
-              <span class="val" id="legs-val">3</span>
-              <button aria-label="More legs" onclick="bump('legsPerSet',1)">+</button>
-            </div>
-            <div class="stepper">
-              <span class="lbl">Sets per game</span>
-              <button aria-label="Fewer sets" onclick="bump('setsPerGame',-1)">−</button>
-              <span class="val" id="sets-val">1</span>
-              <button aria-label="More sets" onclick="bump('setsPerGame',1)">+</button>
-            </div>
-          </div>
-          <p style="color:var(--muted);font-size:12px;margin:10px 2px 0" id="format-line"></p>
-          <div id="handicap-options-section" hidden></div>
-        </div>
-
-        <div class="btn-row">
-          <button class="btn btn-primary" id="start-btn" onclick="startGame()">Play Now</button>
+          <button class="btn btn-primary" id="setup-step2-continue" style="flex:1" onclick="setupFinishAndStart()">Play Now</button>
         </div>
       </div>
     </div>
@@ -2352,28 +2396,32 @@ function show(name){
     // to the one player being raced, calls setMode('ghost'), and sets
     // _enteringSetupFromRaceLeg right before this — consumed here, synchronously,
     // so this show('setup') call does NOT reset that selection the way a fresh
-    // visit does. Jump straight to Step 3, which shows the leg picker.
+    // visit does. Jump straight to Step 2, which shows the leg picker (Ghost's
+    // only option, and one that needs to know who's playing — see
+    // renderGhostLegPicker()'s call site in renderPlayers()).
     if(_enteringSetupFromRaceLeg){
       _enteringSetupFromRaceLeg = false;
       setup.loadoutByName={}; setup.leagueFixtureId=null; setup.pendingFixtures=[];
       sanitizeSlots(); renderPlayers(); updateFormatLine();
-      showSetupStep(3);
+      showSetupStep(2);
       DB.refreshStats().then(()=>{ sanitizeSlots(); renderPlayers(); }).catch(()=>{});
     } else if(_enteringSetupFromDrill){
       // drillCheckout() (Top Finishes row / Coaching Insights "🎯 Drill" button)
       // presets setup.slots to the one player drilling, calls setMode('checkout_trainer')
       // with the pin already applied, and sets this flag right before calling
-      // show('setup') — same jump-straight-to-Step-3 shape as raceLeg() above, except
-      // focus lands on Start rather than the step's default first control (the pin
-      // chip/toggles aren't meant to be the first stop — the player already chose
-      // exactly what to drill).
+      // show('setup') — unlike raceLeg() above, Checkout Trainer's options
+      // (including the pin chip itself — "inspectable and cancelable, never
+      // invisible state") now live in Step 1's inline pool, so this jumps
+      // there instead, focusing the sticky Continue bar rather than the pin
+      // chip/toggles (the player already chose exactly what to drill).
       _enteringSetupFromDrill = false;
       setup.loadoutByName={}; setup.leagueFixtureId=null; setup.pendingFixtures=[];
       sanitizeSlots(); renderPlayers(); updateFormatLine();
-      showSetupStep(3);
+      renderSetupGameLedger();
+      showSetupStep(1);
       requestAnimationFrame(()=>{
-        const startBtn = document.getElementById('start-btn');
-        if(startBtn && typeof startBtn.focus==='function') startBtn.focus();
+        const continueBtn = document.getElementById('setup-step1-continue');
+        if(continueBtn && typeof continueBtn.focus==='function') continueBtn.focus();
       });
       DB.refreshStats().then(()=>{ sanitizeSlots(); renderPlayers(); }).catch(()=>{});
     } else {
@@ -3942,7 +3990,12 @@ const SPECIAL_MODE_START_LABELS = {
 function setMode(mode){
   setup.mode = mode;
   setup.practice = (mode !== 'h2h');
-  document.getElementById('h2h-options').hidden = (mode !== 'h2h');
+  // Format's visibility is handled in mountSetupInlineOptions() instead of
+  // here — it depends on whether the chosen KEY can ever be played
+  // head-to-head, not on setup.mode (mode is 'practice' the moment a dual
+  // game is picked, before any player is chosen, and only resolves to 'h2h'
+  // once Step 2 knows the eventual player count — gating visibility on that
+  // would hide Format until it's too late to see it).
   const isSpecialMode = mode in SPECIAL_MODE_START_LABELS;
   // Daily Challenge and Ghost Opponent are both X01-only (docs/archive/ghost-opponent-roadmap.md
   // is explicitly X01-only for v1); Doubles Practice/Just Chuckin' It/Checkout
@@ -3969,7 +4022,9 @@ function setMode(mode){
   document.getElementById('ghost-options-section').hidden = (mode !== 'ghost');
   document.getElementById('doubles-options-section').hidden = (mode !== 'doubles_practice');
   document.getElementById('checkout-trainer-options-section').hidden = (mode !== 'checkout_trainer');
-  const startBtn = document.getElementById('start-btn');
+  // #setup-step2-continue is the wizard's one and only start-the-game button
+  // now that Step 3 is gone — same per-mode label swap #start-btn used to get.
+  const startBtn = document.getElementById('setup-step2-continue');
   const label = SPECIAL_MODE_START_LABELS[mode];
   if(startBtn) startBtn.textContent = (typeof label === 'function' ? label(setup) : label) || 'Play Now';
   if(isSpecialMode){
@@ -4037,7 +4092,7 @@ function setCheckoutTrainerMode(sub){
   document.getElementById('checkout-trainer-mode-desc').textContent = sub==='blitz'
     ? "A 60-second sprint: answer as many targets as you can. Optimal answers score 2 points, legal-but-not-optimal score 1, illegal score 0 — speed alone won't win, accuracy matters more."
     : 'Untimed — work through targets at your own pace, with the answer revealed after every attempt. Runs until you end the session.';
-  const startBtn = document.getElementById('start-btn');
+  const startBtn = document.getElementById('setup-step2-continue');
   if(startBtn && setup.mode === 'checkout_trainer') startBtn.textContent = sub==='blitz' ? 'Start Blitz' : 'Start training';
 }
 
@@ -4901,13 +4956,19 @@ function sanitizeSlots(){
 function renderPlayers(){
   const box = document.getElementById('players-list');
   if(!box) return;
-  // Re-derive practice-vs-h2h (for the 6 dual game types) and refresh the two
+  // Re-derive practice-vs-h2h (for the 6 dual game types) and refresh the
   // reactive Step 2 sections (Daily Challenge's per-player status, League
-  // Game's pending-fixture banner) every time the slot list changes — the
-  // single choke point every slot mutator below already calls.
+  // Game's pending-fixture banner, Ghost's past-leg picker, the Handicap
+  // disclosure) every time the slot list changes — the single choke point
+  // every slot mutator below already calls. Ghost and Handicap both need to
+  // know WHO's playing, which is only decided here on Step 2, so unlike
+  // every other per-mode option (folded into Step 1's ledger row instead)
+  // these two stay reactive Step 2 sections.
   resyncSetupModeForPlayerCount();
   renderSetupChallengeStatus();
   checkLeagueFixtureForPair();
+  if(currentSetupOptionKey()==='ghost') renderGhostLegPicker();
+  renderHandicapOptions();
   if(roster.length===0){
     box.innerHTML = `<p style="color:var(--muted);font-size:13px;margin:0">No players yet.</p>
       <div class="btn-row" style="margin-top:12px"><button class="btn btn-primary" onclick="addNewPlayer()">+ New player</button></div>`;
@@ -5196,13 +5257,13 @@ const NEW_GAME_MODE_OPTIONS = [
     blurb:"Count down from your starting score to exactly zero, finishing on a double (or single, if that player's finish rule is set to Singles Out). Play solo for practice, or head-to-head against another player.",
     apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('x01'); } },
   { key:'cricket', label:'Cricket',
-    blurb:"Close out 15 through 20 and Bull — hit a number 3 times to open it, then keep scoring on it until it's closed everywhere (against an opponent in H2H, or just for completion in practice). Choose Standard (highest score wins) or Cut-throat (those points land on your opponents instead, lowest score wins) on the next step.",
+    blurb:"Close out 15 through 20 and Bull — hit a number 3 times to open it, then keep scoring on it until it's closed everywhere (against an opponent in H2H, or just for completion in practice). Choose Standard (highest score wins) or Cut-throat (those points land on your opponents instead, lowest score wins) above.",
     apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('cricket'); } },
   { key:'baseball', label:'Baseball',
     blurb:"9 innings, one per number 1-9. Each visit's 3 darts only count against that inning's number — a single scores 1 run, a double 2, a treble 3. After 9 innings, highest total runs wins (a tie continues into extra innings at number 9).",
     apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('baseball'); } },
   { key:'shanghai', label:'🀄 Shanghai',
-    blurb:"A fixed round sequence — round 1 targets the number 1, round 2 the number 2, and so on. Each visit's 3 darts only score on that round's own number — a single scores 1×, a double 2×, a treble 3× the number. Highest total after the last round wins — unless someone throws a Shanghai: single, double, AND treble of the round's number in one visit, which wins the WHOLE game instantly. Choose how many rounds on the next step.",
+    blurb:"A fixed round sequence — round 1 targets the number 1, round 2 the number 2, and so on. Each visit's 3 darts only score on that round's own number — a single scores 1×, a double 2×, a treble 3× the number. Highest total after the last round wins — unless someone throws a Shanghai: single, double, AND treble of the round's number in one visit, which wins the WHOLE game instantly. Choose how many rounds above.",
     apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('shanghai'); } },
   { key:'halve_it', label:'🪓 Halve-It',
     blurb:"A fixed sequence of 7 targets — 20, 16, double 7, 14, treble 10, 17, and Bull. Each round's 3 darts only score against that round's own target: every dart that hits it adds its value to your running total — but if all three miss, your total is HALVED (rounded up). Highest total after the last round wins. One bad visit can cost a leader half their game, so nobody's really out of it until the end.",
@@ -5214,7 +5275,7 @@ const NEW_GAME_MODE_OPTIONS = [
     blurb:"No score to chase, no leg to win — just throw for as long as you like. Every dart still counts toward your lifetime totals and heatmap, so it's a low-pressure way to warm up, find your rhythm, or chase down a milestone badge.",
     apply(){ setMode('chuckin'); } },
   { key:'doubles_practice', label:'Doubles Practice',
-    blurb:"Choose one or more doubles to practice on the next step — all stay live at once. A single/treble on a target number, or hitting a different double, ends the round.",
+    blurb:"Choose one or more doubles to practice above — all stay live at once. A single/treble on a target number, or hitting a different double, ends the round.",
     apply(){ setMode('doubles_practice'); } },
   { key:'ghost', label:'👻 Ghost Mode',
     blurb:"Race against a recording of one of your own past legs, dart for dart — whoever checks out first wins. Choose which leg to race on the next step.",
@@ -5244,7 +5305,7 @@ const NEW_GAME_MODE_OPTIONS = [
     blurb:"15 rounds. Each one drops you mid-checkout on one of YOUR OWN historically weakest finishes, with one fewer dart than you'd usually need. Close it — Walked Out. Bust, or run out of darts — Executed. No warmup, no easy numbers: the deficits are pulled straight from your own worst history and keep recurring until you solve them. The count of Walked Out rounds out of 15 lands on a result, from Pardoned down to Executed.",
     apply(){ setMode('dead_man_walking'); } },
   { key:'killer', label:'🔪 Killer',
-    blurb:"Elimination darts. Each player is randomly assigned their own number when the match starts. Land darts on your own number to build lives — reach the lives threshold and you become a killer. Once you're a killer, hitting an opponent's number costs them lives instead; drop to 0 lives and you're eliminated. Last player standing wins the leg (your own double is a self-kill if you're already a killer). Choose the lives threshold on the next step.",
+    blurb:"Elimination darts. Each player is randomly assigned their own number when the match starts. Land darts on your own number to build lives — reach the lives threshold and you become a killer. Once you're a killer, hitting an opponent's number costs them lives instead; drop to 0 lives and you're eliminated. Last player standing wins the leg (your own double is a self-kill if you're already a killer). Choose the lives threshold above.",
     apply(){ setMode('h2h'); setGameType('killer'); } },
 ];
 // Item 46 (docs/code-quality-roadmap.md): most entries above have no explicit
@@ -5370,11 +5431,23 @@ function toggleSetupCategory(catKey){
   setupExpandedCategory = ((setupExpandedCategory || setupOpenCategoryKey()) === catKey) ? 'none' : catKey;
   renderSetupGameLedger();
 }
+// Collapsed by default every time a different game is selected — re-opening
+// the same game (e.g. going Back from Step 2) keeps whatever the player last
+// had it set to, since setupRulesOpen isn't reset anywhere else.
+let setupRulesOpen = false;
 function renderSetupGameLedger(){
   const el = document.getElementById('setup-game-categories');
   if(!el) return;
   const currentKey = currentSetupOptionKey();
   const openKey = setupExpandedCategory || setupOpenCategoryKey();
+  // #setup-inline-options-pool physically relocates into whichever row is
+  // selected below (mountSetupInlineOptions()) — park it back in its holding
+  // pen first so this innerHTML replace doesn't detach it from the document
+  // entirely (a node whose parent gets wiped by innerHTML is gone for good,
+  // even though a live reference to it, e.g. from getElementById, remains).
+  const pool = document.getElementById('setup-inline-options-pool');
+  const holdingPen = document.getElementById('setup-inline-options-holding');
+  if(pool && holdingPen && pool.parentNode !== holdingPen) holdingPen.appendChild(pool);
   el.innerHTML = GAME_LEDGER_CATEGORIES.map(cat=>{
     const isOpen = cat.key === openKey;
     const rows = cat.keys.map(k=>{
@@ -5385,12 +5458,24 @@ function renderSetupGameLedger(){
       // instead of hand-listing multiplayer-capable keys a second time.
       const vsChip = chosenGameContexts(k).includes('h2h')
         ? `<span class="setup-ledger-vs" aria-label="Supports head-to-head play">VS</span>` : '';
+      const opt = sel ? NEW_GAME_MODE_OPTIONS.find(o=>o.key===k) : null;
+      const rulesText = opt && opt.blurb ? opt.blurb
+        : (k === 'challenge' ? "One shared X01 challenge, the same for everyone, once a day. Who's playing and today's completion status are shown on the next step." : '');
+      // The options anchor only exists for the selected row — there's only
+      // ever one selection at a time, so one anchor is all mountSetupInlineOptions()
+      // needs to find.
+      const expanded = sel ? `<div class="setup-ledger-options">
+          <div id="setup-inline-options-anchor"></div>
+          ${rulesText ? `<button type="button" class="setup-ledger-rules-toggle" aria-expanded="${setupRulesOpen}" onclick="event.stopPropagation();toggleSetupRules()">
+            <span class="chev">▸</span> How to play &amp; win</button>
+          <div class="setup-ledger-rules-body" id="setup-ledger-rules-body" ${setupRulesOpen?'':'hidden'}>${escapeHtml(rulesText)}</div>` : ''}
+        </div>` : '';
       return `<div class="setup-ledger-row${sel?' sel':''}" role="button" tabindex="0" aria-pressed="${sel}"
           onclick="selectSetupGame('${k}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectSetupGame('${k}')}">
         <div class="setup-ledger-medal">${ledgerCategoryIcon(cat.key, cat.accent)}</div>
         <div style="flex:1"><div class="setup-ledger-name">${escapeHtml(GAME_LEDGER_NAMES[k]||k)}${vsChip}</div><div class="setup-ledger-teaser">${escapeHtml(GAME_LEDGER_TEASERS[k]||'')}</div></div>
         <div class="setup-ledger-check"></div>
-      </div>`;
+      </div>${expanded}`;
     }).join('');
     return `<div class="setup-cat">
       <div class="setup-cat-head${isOpen?' open':''}" style="color:${cat.accent}" role="button" tabindex="0" aria-expanded="${isOpen}"
@@ -5401,6 +5486,30 @@ function renderSetupGameLedger(){
       ${isOpen ? `<div class="setup-cat-rows">${rows}</div>` : ''}
     </div>`;
   }).join('');
+  mountSetupInlineOptions();
+}
+// Physically moves the real #setup-inline-options-pool element (with all its
+// existing ids/onclick handlers untouched) into the anchor slot that was just
+// rendered inside the selected row — see the "park it back" comment above for
+// why it has to leave the holding pen fresh on every render rather than
+// staying put.
+function mountSetupInlineOptions(){
+  const pool = document.getElementById('setup-inline-options-pool');
+  const anchor = document.getElementById('setup-inline-options-anchor');
+  if(pool && anchor) anchor.appendChild(pool);
+  // Format's own visibility: any key that CAN be played head-to-head shows
+  // it, regardless of setup.mode (see setMode()'s comment on why gating this
+  // on mode instead of key would hide it until Step 2 knows the eventual
+  // player count).
+  const h2hOptions = document.getElementById('h2h-options');
+  if(h2hOptions) h2hOptions.hidden = !chosenGameContexts(currentSetupOptionKey()).includes('h2h');
+}
+function toggleSetupRules(){
+  setupRulesOpen = !setupRulesOpen;
+  const btn = document.querySelector('.setup-ledger-rules-toggle');
+  const body = document.getElementById('setup-ledger-rules-body');
+  if(btn) btn.setAttribute('aria-expanded', String(setupRulesOpen));
+  if(body) body.hidden = !setupRulesOpen;
 }
 // Which player counts a chosen key is valid for — same practice/h2h split
 // GAME_TYPES' own soloOnly/h2hOnly flags encode via contextsForMode(), except
@@ -5595,9 +5704,10 @@ function toggleLeagueGameSelection(checked){
   }
 }
 
-// Repaints the X01-starting-score dropdown and the how-to-play recap box for
-// whatever's currently selected in Step 1 — called after every ledger
-// selection change, and once when Step 1 is (re-)entered.
+// Repaints the X01-starting-score dropdown for whatever's currently selected
+// in Step 1 — called after every ledger selection change, and once when Step
+// 1 is (re-)entered. The how-to-play recap itself is now the per-row Rules
+// disclosure (renderSetupGameLedger()), not a separate always-visible box.
 function renderSetupFlavorAndBlurb(){
   const key = currentSetupOptionKey();
   const flavorSection = document.getElementById('setup-flavor-section');
@@ -5612,13 +5722,6 @@ function renderSetupFlavorAndBlurb(){
   } else {
     flavorSection.hidden = true;
   }
-
-  const opt = NEW_GAME_MODE_OPTIONS.find(o=>o.key===key);
-  document.getElementById('setup-blurb-body').innerHTML = (opt && opt.blurb)
-    ? `<div class="setup-label" style="color:var(--gold)">${opt.label}</div><p class="pp-meta" style="margin:0">${opt.blurb}</p>`
-    : (key === 'challenge'
-        ? `<div class="setup-label" style="color:var(--gold)">🎯 Daily Challenge</div><p class="pp-meta" style="margin:0">One shared X01 challenge, the same for everyone, once a day. Who's playing and today's completion status are shown on the next step.</p>`
-        : '');
 }
 // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): an optional,
 // collapsed-by-default disclosure — X01 only, 2+ real players filled in —
@@ -5673,48 +5776,29 @@ function setupGoToStep2(){
   showSetupStep(2);
   renderPlayers();
 }
-// Step 3 ("More options") only has real content for the modes whose option
-// section is currently visible (Cricket/Killer/Shanghai/Halve-It pickers,
-// Ghost's leg picker, Doubles Practice's targets, Checkout Trainer's
-// sub-mode/difficulty, and the H2H legs/sets format — shown only when
-// setup.mode==='h2h', including League Game, which forces h2h). Modes with
-// nothing there (X01/Baseball practice, Chuckin, ATC/ATW, Daily Challenge)
-// skip straight to Start — landing on a contentless step was an unnecessary
-// extra tap. Reads each section's actual DOM `hidden` state (kept correct by
-// setMode()/setGameType()'s own per-mode toggles).
-function setupStep3HasContent(){
-  // Query the step's own .setup-section children rather than a hand-kept id
-  // list — the list was a second copy of the mode->section mapping and DID
-  // drift: it never learned about shanghai/halve-it, so practice-mode Shanghai
-  // and Halve-It skipped Step 3 entirely, making the rounds picker and the
-  // custom target editor unreachable. The DOM query picks up any future
-  // section the moment it's added to the markup.
-  return [...document.querySelectorAll('#setup-step-3 .setup-section')].some(el => !el.hidden);
-}
-// Step 2 (Who's playing?) -> Step 3 (More options), or straight to Start.
+// Step 2 (Who's playing?) -> Start. The wizard's last step now that every
+// mode's own options live in Step 1's inline pool (or, for the two that need
+// to know who's playing — Ghost's leg picker, Handicap — reactively here in
+// Step 2) — there's nothing left to advance to, so Continue doubles as Play.
 // Killer needs at least 2 (h2hOnly, backend already rejects fewer — see
 // backend/db.js createGame() — this just avoids a round trip for the same
 // rejection); every other type just needs at least 1 named player.
-function setupGoToStep3(){
+function setupFinishAndStart(){
   const named = setup.slots.filter(s=>s);
   if(!named.length){ uiAlert('Choose at least one player.'); return; }
   if(currentSetupOptionKey()==='killer' && named.length < 2){ uiAlert('Killer requires at least 2 players.'); return; }
-  renderHandicapOptions(); // re-derive from the current slot list before checking for content
-  if(setupStep3HasContent()) showSetupStep(3);
-  else startGame(); // nothing to configure — Continue doubles as Start, same as
-                     // the challenge blurb's own "Press Continue below to play" already says
+  startGame();
 }
 function setupBackTo(n){
   showSetupStep(n);
   if(n===1) renderSetupGameLedger();
-  else if(n===2) renderPlayers();
 }
 
-const SETUP_STEP_LABELS = { 1:'Step 1 of 3 — Choose a game', 2:"Step 2 of 3 — Who's playing?", 3:'Step 3 of 3 — More options' };
+const SETUP_STEP_LABELS = { 1:'Step 1 of 2 — Choose a game', 2:"Step 2 of 2 — Who's playing?" };
 function showSetupStep(n){
   document.getElementById('setup-step-1').hidden = (n!==1);
+  document.getElementById('setup-step1-stickybar').hidden = (n!==1);
   document.getElementById('setup-step-2').hidden = (n!==2);
-  document.getElementById('setup-step-3').hidden = (n!==3);
   const label = document.getElementById('setup-step-label');
   const text = SETUP_STEP_LABELS[n] || '';
   if(label) label.textContent = text;
@@ -5732,8 +5816,7 @@ function showSetupStep(n){
   requestAnimationFrame(()=>{
     let target;
     if(n===1) target = document.querySelector('#setup-dc-section [tabindex], #setup-game-categories [tabindex]');
-    else if(n===2) target = document.querySelector('#players-list select, #players-list button');
-    else target = document.querySelector('#setup-step-3 .pp-back');
+    else target = document.querySelector('#players-list select, #players-list button');
     if(target && typeof target.focus==='function') target.focus();
   });
 }

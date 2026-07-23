@@ -186,14 +186,17 @@ A **"View full stats glossary"** link opens a shared reference explaining every 
 
 ### New Game
 
-A 3-step wizard: **choose a game** first (a categorized picker — Traditional,
+A 2-step wizard: **choose a game** first (a categorized picker — Traditional,
 Practice & Drills, Solo Challenges, Head-to-Head Only, Special Modes — plus a
 Daily Challenge section on top showing who's already completed today's
-challenge), **then** who's playing, then any remaining options. How many
-players you can pick is decided by the game you chose: solo-only modes allow
-exactly one, X01 head-to-head stays capped at two, and every other
-head-to-head-capable game (Cricket, Baseball, Shanghai, Halve-It, Pressure
-Chamber, Killer) allows up to 6.
+challenge), **then** who's playing. Picking a game expands its row in place to
+show that mode's own options (starting score, targets/variant, format, and so
+on) right there, plus a collapsed "How to play & win" disclosure — there's no
+separate options page to click through to. How many players you can pick is
+decided by the game you chose: solo-only modes allow exactly one, X01
+head-to-head stays capped at two, and every other head-to-head-capable game
+(Cricket, Baseball, Shanghai, Halve-It, Pressure Chamber, Killer) allows up to
+6.
 
 Configure a game before starting:
 
