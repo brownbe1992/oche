@@ -828,9 +828,10 @@ const server = http.createServer(async (req, res) => {
       const limit = url.searchParams.get('limit');
       const sort = url.searchParams.get('sort');
       const offset = url.searchParams.get('offset');
+      const category = url.searchParams.get('category');
       return send(res, 200, {
-        legs: db.getGhostCandidateLegs(name, limit, { sort, offset }),
-        total: db.getGhostCandidateLegsCount(name),
+        legs: db.getGhostCandidateLegs(name, limit, { sort, offset, category }),
+        total: db.getGhostCandidateLegsCount(name, category),
       });
     }
     if (p === '/api/players/ghost-script' && m === 'GET') {

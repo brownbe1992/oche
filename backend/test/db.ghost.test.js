@@ -106,6 +106,33 @@ describe('getGhostCandidateLegs', () => {
       'an unrecognized sort value silently falls back to recency, not a SQL error');
   });
 
+  test('category filters to one X01 starting score; an unrecognized category means "every mode"', () => {
+    const name = 'Ghost_Category';
+    db.addPlayer(name);
+    const g501 = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 2, practice: 1, players: [{ name }] });
+    db.addTurn(g501.gameId, { player: name, set: 1, leg: 1, scored: 100, checkout: true, checkoutPoints: 100,
+      darts: [{ sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }] });
+    const g301 = db.createGame({ category: '301', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
+    db.addTurn(g301.gameId, { player: name, set: 1, leg: 1, scored: 100, checkout: true, checkoutPoints: 100,
+      darts: [{ sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }, { sector: 20, multiplier: 1 }] });
+
+    const only501 = db.getGhostCandidateLegs(name, 20, { category: '501' });
+    assert.equal(only501.length, 1);
+    assert.equal(only501[0].category, '501');
+
+    const only301 = db.getGhostCandidateLegs(name, 20, { category: '301' });
+    assert.equal(only301.length, 1);
+    assert.equal(only301[0].category, '301');
+
+    assert.equal(db.getGhostCandidateLegs(name, 20, { category: 'bogus' }).length, 2,
+      'an unrecognized category value is treated as no filter, not zero results');
+    assert.equal(db.getGhostCandidateLegs(name).length, 2, 'no category param at all still returns every mode');
+
+    assert.equal(db.getGhostCandidateLegsCount(name, '501'), 1);
+    assert.equal(db.getGhostCandidateLegsCount(name, '301'), 1);
+    assert.equal(db.getGhostCandidateLegsCount(name), 2);
+  });
+
   test('offset pages through the result set, in step with whatever sort is active', () => {
     const name = 'Ghost_Offset';
     db.addPlayer(name);

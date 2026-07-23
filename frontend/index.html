@@ -152,19 +152,19 @@
   .setup-ledger-rules-toggle .chev{transition:transform .15s ease;display:inline-block}
   .setup-ledger-rules-toggle[aria-expanded="true"] .chev{transform:rotate(90deg)}
   .setup-ledger-rules-body{font-size:12.5px;color:var(--muted);line-height:1.5;padding:0 0 8px}
-  /* Floating Continue bar for Step 1 — a game is always pre-selected, so this
-     stays pinned to the bottom of the viewport the whole time Step 1 is
-     showing, rather than requiring a scroll to the end of a long category
-     list the way the old flat "Continue" row at the bottom of the page did. */
-  .setup-sticky-bar{position:fixed;left:0;right:0;bottom:0;z-index:20;
-    padding:22px 16px 16px;background:linear-gradient(180deg,rgba(14,15,13,0) 0%,var(--board) 35%)}
-  .setup-sticky-bar .wrap{max-width:760px;margin:0 auto}
   .setup-ledger-check{flex:none;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--wire);margin-top:5px}
   .setup-ledger-row.sel .setup-ledger-check{background:var(--gold);border-color:var(--gold)}
   /* Daily Challenge's own featured section, above every category — same glow
      treatment as the Home page's .challenge-spotlight card so it reads as the
      identical "today's special one" signal in both places. */
   .setup-dc{margin-bottom:22px;cursor:pointer}
+  /* Selected-state check-circle, top-right corner of the DC card — same
+     symbol/size as .setup-ledger-check's filled state, distinct from the
+     card's own permanent gold border/glow (challenge-spotlight, always on
+     regardless of selection) so "this is currently chosen" doesn't get lost
+     in "this is today's featured item". */
+  .setup-dc-selectcheck{position:absolute;top:16px;right:16px;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--wire)}
+  .setup-dc-selectcheck.on{background:var(--gold);border-color:var(--gold);display:flex;align-items:center;justify-content:center;color:#1a1408;font-weight:800;font-size:12px}
   .setup-dc-top{display:flex;align-items:center;gap:8px}
   .setup-dc-title{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:.03em;color:var(--gold)}
   .setup-dc-name{font-size:12.5px;color:var(--ink);margin-top:4px;font-weight:600}
@@ -974,7 +974,7 @@
            Challenge's and League Game's own reactive Step 2 sections. -->
       <div id="setup-step-1">
         <div id="setup-dc-section"></div>
-        <div id="setup-game-categories" style="padding-bottom:70px"></div>
+        <div id="setup-game-categories"></div>
       </div>
 
       <!-- Reusable pool of per-mode option sections — never rendered via
@@ -1144,14 +1144,6 @@
             <p style="color:var(--muted);font-size:12px;margin:10px 2px 0" id="format-line"></p>
           </div>
         </div>
-      </div>
-
-      <!-- Floating Continue bar — pinned to the bottom of the viewport the
-           whole time Step 1 is showing (a game is always pre-selected), so
-           it's never a scroll away regardless of how long the category list
-           or the selected row's own options run. -->
-      <div class="setup-sticky-bar" id="setup-step1-stickybar" hidden>
-        <div class="wrap"><button class="btn btn-primary play-btn-block" id="setup-step1-continue" style="flex:1" onclick="setupGoToStep2()">Continue</button></div>
       </div>
 
       <!-- ===== Step 2: Who's playing? (docs/archive/new-game-flow-roadmap.md) =====
@@ -2412,8 +2404,9 @@ function show(name){
       // show('setup') — unlike raceLeg() above, Checkout Trainer's options
       // (including the pin chip itself — "inspectable and cancelable, never
       // invisible state") now live in Step 1's inline pool, so this jumps
-      // there instead, focusing the sticky Continue bar rather than the pin
-      // chip/toggles (the player already chose exactly what to drill).
+      // there instead, focusing the row's own inline Continue button rather
+      // than the pin chip/toggles (the player already chose exactly what to
+      // drill).
       _enteringSetupFromDrill = false;
       setup.loadoutByName={}; setup.leagueFixtureId=null; setup.pendingFixtures=[];
       sanitizeSlots(); renderPlayers(); updateFormatLine();
@@ -4159,13 +4152,14 @@ function repeatGhostLeg(){
 let ghostLegSort = 'recent';       // 'recent' | 'best' | 'worst'
 let ghostLegPageSize = 10;         // 10 | 25 | 50 | 100
 let ghostLegPage = 0;              // 0-indexed
+let ghostLegCategory = '';         // '' (every X01 mode) | '501' | '301' | '170' | '101'
 function renderGhostLegPicker(){
   const box = document.getElementById('ghost-leg-picker-body');
   if(!box) return;
   const name = setup.slots[0];
   setup.ghostLeg = null;
   if(!name){ box.innerHTML = `<p class="pp-meta">Choose a player above to see their past won legs.</p>`; return; }
-  if(box._lastPlayer !== name){ ghostLegSort = 'recent'; ghostLegPageSize = 10; ghostLegPage = 0; box._lastPlayer = name; }
+  if(box._lastPlayer !== name){ ghostLegSort = 'recent'; ghostLegPageSize = 10; ghostLegPage = 0; ghostLegCategory = ''; box._lastPlayer = name; }
   loadGhostLegPage();
 }
 function loadGhostLegPage(){
@@ -4175,14 +4169,21 @@ function loadGhostLegPage(){
   if(!name) return;
   box.innerHTML = `<p class="pp-meta">Loading…</p>`;
   const offset = ghostLegPage * ghostLegPageSize;
-  Backend.get(`/api/players/ghost-legs?name=${encodeURIComponent(name)}&limit=${ghostLegPageSize}&offset=${offset}&sort=${ghostLegSort}`).then(data=>{
+  Backend.get(`/api/players/ghost-legs?name=${encodeURIComponent(name)}&limit=${ghostLegPageSize}&offset=${offset}&sort=${ghostLegSort}&category=${encodeURIComponent(ghostLegCategory)}`).then(data=>{
     if(setup.mode !== 'ghost' || setup.slots[0] !== name) return; // a newer selection took over
     const legs = (data && data.legs) || [];
     const total = (data && data.total) || 0;
     box._legs = legs;
     box._total = total;
     if(!total){
-      box.innerHTML = `<p class="pp-meta">No won legs yet — win a leg in H2H or Practice mode first, then come back to race it.</p>`;
+      // Keep the toolbar visible even with zero results so a mode filter that
+      // came up empty can be changed back without losing the picker entirely —
+      // only the fully-unfiltered case gets the plain "you've never won a leg"
+      // message with no controls to show.
+      const emptyMsg = ghostLegCategory
+        ? `No won legs in ${escapeHtml(ghostLegCategory)} yet — try a different mode, or "All modes".`
+        : `No won legs yet — win a leg in H2H or Practice mode first, then come back to race it.`;
+      box.innerHTML = ghostLegCategory ? (ghostLegToolbarHtml() + `<p class="pp-meta">${emptyMsg}</p>`) : `<p class="pp-meta">${emptyMsg}</p>`;
       return;
     }
     let idx = legs.length ? 0 : -1;
@@ -4209,12 +4210,17 @@ function goToGhostLegPage(delta){
   ghostLegPage = Math.max(0, ghostLegPage + delta);
   loadGhostLegPage();
 }
-function renderGhostLegList(legs, total){
-  const box = document.getElementById('ghost-leg-picker-body');
-  const pageCount = Math.max(1, Math.ceil(total / ghostLegPageSize));
-  const curPage = ghostLegPage + 1;
-  const toolbar = `
+// Shared by renderGhostLegList() and loadGhostLegPage()'s zero-result branch
+// so the category filter stays reachable even when it filtered the list down
+// to nothing.
+function ghostLegToolbarHtml(){
+  return `
     <div class="ghost-leg-toolbar">
+      <label class="field" for="ghost-leg-category" style="margin-bottom:0">X01 mode</label>
+      <select class="date-input" id="ghost-leg-category" style="width:auto" onchange="setGhostLegCategory(this.value)">
+        <option value=""${ghostLegCategory===''?' selected':''}>All modes</option>
+        ${X01_CATEGORIES.map(c=>`<option value="${c}"${ghostLegCategory===c?' selected':''}>${c}</option>`).join('')}
+      </select>
       <label class="field" for="ghost-leg-sort" style="margin-bottom:0">Sort by</label>
       <select class="date-input" id="ghost-leg-sort" style="width:auto" onchange="setGhostLegSort(this.value)">
         <option value="recent"${ghostLegSort==='recent'?' selected':''}>Most recent</option>
@@ -4226,6 +4232,17 @@ function renderGhostLegList(legs, total){
         ${[10,25,50,100].map(n=>`<option value="${n}"${ghostLegPageSize===n?' selected':''}>${n}</option>`).join('')}
       </select>
     </div>`;
+}
+function setGhostLegCategory(category){
+  ghostLegCategory = category;
+  ghostLegPage = 0;   // a re-filtered list starts back at page 1
+  loadGhostLegPage();
+}
+function renderGhostLegList(legs, total){
+  const box = document.getElementById('ghost-leg-picker-body');
+  const pageCount = Math.max(1, Math.ceil(total / ghostLegPageSize));
+  const curPage = ghostLegPage + 1;
+  const toolbar = ghostLegToolbarHtml();
   const rows = legs.map((l,i)=>{
     const date = parseSqliteTimestamp(l.date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
     const sel = setup.ghostLeg && setup.ghostLeg.gameId===l.gameId && setup.ghostLeg.setNo===l.setNo && setup.ghostLeg.legNo===l.legNo;
@@ -5458,9 +5475,12 @@ function renderSetupGameLedger(){
       // instead of hand-listing multiplayer-capable keys a second time.
       const vsChip = chosenGameContexts(k).includes('h2h')
         ? `<span class="setup-ledger-vs" aria-label="Supports head-to-head play">VS</span>` : '';
+      // 'challenge' is never a ledger row (it has its own spotlight card,
+      // rendered separately by renderSetupDailyChallengeSection() — see
+      // DAILY_CHALLENGE_RULES for its Rules text), so every key reaching
+      // this point always has a real NEW_GAME_MODE_OPTIONS entry.
       const opt = sel ? NEW_GAME_MODE_OPTIONS.find(o=>o.key===k) : null;
-      const rulesText = opt && opt.blurb ? opt.blurb
-        : (k === 'challenge' ? "One shared X01 challenge, the same for everyone, once a day. Who's playing and today's completion status are shown on the next step." : '');
+      const rulesText = (opt && opt.blurb) || '';
       // The options anchor only exists for the selected row — there's only
       // ever one selection at a time, so one anchor is all mountSetupInlineOptions()
       // needs to find.
@@ -5469,6 +5489,9 @@ function renderSetupGameLedger(){
           ${rulesText ? `<button type="button" class="setup-ledger-rules-toggle" aria-expanded="${setupRulesOpen}" onclick="event.stopPropagation();toggleSetupRules()">
             <span class="chev">▸</span> How to play &amp; win</button>
           <div class="setup-ledger-rules-body" id="setup-ledger-rules-body" ${setupRulesOpen?'':'hidden'}>${escapeHtml(rulesText)}</div>` : ''}
+          <div class="btn-row" style="margin-top:14px">
+            <button class="btn btn-primary" id="setup-step1-continue" style="flex:1" onclick="setupGoToStep2()">Continue</button>
+          </div>
         </div>` : '';
       return `<div class="setup-ledger-row${sel?' sel':''}" role="button" tabindex="0" aria-pressed="${sel}"
           onclick="selectSetupGame('${k}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectSetupGame('${k}')}">
@@ -5510,6 +5533,22 @@ function toggleSetupRules(){
   const body = document.getElementById('setup-ledger-rules-body');
   if(btn) btn.setAttribute('aria-expanded', String(setupRulesOpen));
   if(body) body.hidden = !setupRulesOpen;
+}
+// A small hand-kept list because these three modes gate their inline options
+// on `setup.mode`/`setup.gameType` inside setMode() rather than through a
+// registry field the way Cricket/Killer/Shanghai/Halve-It's `optionsSectionId`
+// already does — see setMode()'s own `ghost-options-section`/`doubles-options-section`/
+// `checkout-trainer-options-section` toggles. (Ghost is deliberately absent:
+// its one option, the leg picker, lives in Step 2, not here.)
+const SETUP_MODE_GATED_OPTION_KEYS = ['x01', 'doubles_practice', 'checkout_trainer'];
+// Whether a key has ANY inline options to show at all — used to auto-expand
+// the Rules disclosure for modes with nothing else in the row (Bob's 27, 121
+// Checkout Ladder, Chuckin, etc.), since there'd otherwise be nothing to look
+// at besides the teaser line already visible before selecting it.
+function keyHasInlineOptions(key){
+  if(chosenGameContexts(key).includes('h2h')) return true; // Format
+  if(GAME_TYPES[key] && GAME_TYPES[key].optionsSectionId) return true; // Cricket/Killer/Shanghai/Halve-It
+  return SETUP_MODE_GATED_OPTION_KEYS.includes(key);
 }
 // Which player counts a chosen key is valid for — same practice/h2h split
 // GAME_TYPES' own soloOnly/h2hOnly flags encode via contextsForMode(), except
@@ -5554,10 +5593,22 @@ function selectSetupGame(key){
   if(setup.slots.length > max) setup.slots = setup.slots.slice(0, max);
   if(!setup.slots.length) setup.slots = [''];
   setupExpandedCategory = ''; // collapse back to "derive from selection" (this game's own category)
+  // A mode with nothing else to show (Bob's 27, 121 Checkout Ladder, Chuckin,
+  // etc.) auto-expands Rules on selection — otherwise there'd be nothing
+  // visible in the row besides the teaser already shown before picking it.
+  // Modes with real options stay collapsed by default, same as before.
+  setupRulesOpen = !keyHasInlineOptions(key);
   renderSetupGameLedger();
+  renderSetupDailyChallengeSection(); // keep the DC card's own selected/expanded state in sync
   renderSetupFlavorAndBlurb();
 }
 
+// Reused by renderSetupDailyChallengeSection() below as the Daily Challenge
+// card's own Rules text — kept as one named constant rather than an inline
+// string so it can't drift from what used to live in renderSetupGameLedger()'s
+// now-removed dead 'challenge' branch (that function never actually renders
+// a 'challenge' row — the DC card is a separate spotlight, not a ledger row).
+const DAILY_CHALLENGE_RULES = "One shared X01 challenge, the same for everyone, once a day. Who's playing and today's completion status are shown on the next step.";
 let _dcCompletionsAbort = null;
 // Step 1's Daily Challenge section: who's already completed TODAY's challenge,
 // across every registered player — purely informational (distinct from Step
@@ -5568,16 +5619,27 @@ function renderSetupDailyChallengeSection(){
   if(!el) return;
   const challenge = todaysChallenge();
   const selected = currentSetupOptionKey() === 'challenge';
+  // Selected state: a plain filled check-circle, the same symbol every
+  // ordinary ledger row already uses — the card's own permanent gold
+  // border/glow (there regardless of selection, to keep it eye-catching as
+  // today's featured item) made the old, subtler "extra inset shadow"
+  // treatment nearly invisible against it.
+  const expanded = selected ? `<div class="setup-ledger-options" style="margin-top:10px">
+      <button type="button" class="setup-ledger-rules-toggle" aria-expanded="${setupRulesOpen}" onclick="event.stopPropagation();toggleSetupRules()">
+        <span class="chev">▸</span> How to play &amp; win</button>
+      <div class="setup-ledger-rules-body" id="setup-ledger-rules-body" ${setupRulesOpen?'':'hidden'}>${escapeHtml(DAILY_CHALLENGE_RULES)}</div>
+      <div class="btn-row" style="margin-top:14px">
+        <button class="btn btn-primary" id="setup-step1-continue" style="flex:1" onclick="setupGoToStep2()">Continue</button>
+      </div>
+    </div>` : '';
   el.innerHTML = `<div class="card challenge-spotlight setup-dc" role="button" tabindex="0" aria-pressed="${selected}"
       onclick="selectSetupGame('challenge')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectSetupGame('challenge')}">
+    <div class="setup-dc-selectcheck${selected?' on':''}" aria-hidden="true">${selected?'✓':''}</div>
     <div class="setup-dc-top">🎯 <span class="setup-dc-title">Daily Challenge</span></div>
     <div class="setup-dc-name">${escapeHtml(challenge.label)}</div>
     <div class="setup-dc-completed" id="setup-dc-completed">Loading who's played today…</div>
+    ${expanded}
   </div>`;
-  if(selected){
-    const card = el.querySelector('.setup-dc');
-    if(card) card.style.boxShadow = '0 1px 0 rgba(255,255,255,.03) inset,0 10px 24px -18px rgba(0,0,0,.6),0 0 18px -4px var(--gold),inset 0 0 0 1.5px var(--gold)';
-  }
   if(_dcCompletionsAbort) _dcCompletionsAbort.aborted = true;
   const tok = { aborted:false }; _dcCompletionsAbort = tok;
   Backend.get(`/api/challenges/today-board?date=${challenge.date}&format=${challenge.format}`).then(rows=>{
@@ -5797,7 +5859,6 @@ function setupBackTo(n){
 const SETUP_STEP_LABELS = { 1:'Step 1 of 2 — Choose a game', 2:"Step 2 of 2 — Who's playing?" };
 function showSetupStep(n){
   document.getElementById('setup-step-1').hidden = (n!==1);
-  document.getElementById('setup-step1-stickybar').hidden = (n!==1);
   document.getElementById('setup-step-2').hidden = (n!==2);
   const label = document.getElementById('setup-step-label');
   const text = SETUP_STEP_LABELS[n] || '';

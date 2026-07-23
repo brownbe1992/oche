@@ -3575,6 +3575,12 @@ const GHOST_LEG_SORTS = {
   best:   'avg DESC, date DESC, lastTurnId DESC',
   worst:  'avg ASC, date DESC, lastTurnId DESC',
 };
+// X01 starting-score categories a ghost-candidate leg can be filtered to —
+// same whitelist X01_CATEGORIES uses on the frontend (shared/x01.js has no
+// server-side equivalent module, so this is kept in sync by hand, the same
+// way GAME_TYPES' own soloOnly/h2hOnly flags are the source of truth other
+// derived lists reference).
+const GHOST_LEG_CATEGORIES = ['501', '301', '170', '101'];
 function getGhostCandidateLegs(playerName, limit, opts) {
   const p = getPlayer(playerName);
   if (!p) return [];
@@ -3585,6 +3591,10 @@ function getGhostCandidateLegs(playerName, limit, opts) {
   const lim = Math.min(Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 20, 100);
   const offset = Number.isInteger(Number(opts && opts.offset)) && Number(opts && opts.offset) > 0 ? Number(opts.offset) : 0;
   const orderBy = GHOST_LEG_SORTS[opts && opts.sort] || GHOST_LEG_SORTS.recent;
+  // Only a whitelisted X01 category filters at all — an unrecognized/absent
+  // value means "every mode", not "no legs" (same posture as `sort` above,
+  // constrain the input rather than trust it).
+  const category = GHOST_LEG_CATEGORIES.includes(opts && opts.category) ? opts.category : null;
   // Ties on `date` (created_at only has second-level resolution — plausible within
   // one fast-inserted test or a quick real session) break on MAX(t.id) DESC, the
   // same "force a deterministic newest-first order" fix winStreak's own tie case
@@ -3597,27 +3607,28 @@ function getGhostCandidateLegs(playerName, limit, opts) {
     FROM turns t
     JOIN games g ON g.id = t.game_id
     JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
-    WHERE t.player_id = ? AND g.game_type = 'x01'
+    WHERE t.player_id = ? AND g.game_type = 'x01' ${category ? 'AND g.category = ?' : ''}
     GROUP BY t.game_id, t.set_no, t.leg_no
     HAVING SUM(t.checkout) > 0
     ORDER BY ${orderBy}
     LIMIT ? OFFSET ?
-  `).all(p.id, lim, offset).map(({ lastTurnId, ...r }) => r);
+  `).all(...(category ? [p.id, category, lim, offset] : [p.id, lim, offset])).map(({ lastTurnId, ...r }) => r);
 }
 // Total count of ghost-race-able legs (same WHERE/HAVING as getGhostCandidateLegs,
 // no LIMIT/OFFSET) — lets the picker's pagination controls know how many pages
 // exist / whether "Next" should be disabled, without fetching every row.
-function getGhostCandidateLegsCount(playerName) {
+function getGhostCandidateLegsCount(playerName, category) {
   const p = getPlayer(playerName);
   if (!p) return 0;
+  const cat = GHOST_LEG_CATEGORIES.includes(category) ? category : null;
   return db.prepare(`
     SELECT COUNT(*) AS c FROM (
       SELECT 1 FROM turns t JOIN games g ON g.id = t.game_id
-      WHERE t.player_id = ? AND g.game_type = 'x01'
+      WHERE t.player_id = ? AND g.game_type = 'x01' ${cat ? 'AND g.category = ?' : ''}
       GROUP BY t.game_id, t.set_no, t.leg_no
       HAVING SUM(t.checkout) > 0
     )
-  `).get(p.id).c;
+  `).get(...(cat ? [p.id, cat] : [p.id])).c;
 }
 
 // The ordered turn-by-turn, dart-by-dart script for one specific past leg — the

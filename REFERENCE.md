@@ -1116,13 +1116,24 @@ can only ever be built from legs the requesting player genuinely won themselves:
   picks the ordering (`'recent'` — most recent first, the default and the
   fallback for any unrecognized value; `'best'`/`'worst'` — by `avg` descending/
   ascending), `opts.offset` pages through it (paired with `limit`, both used
-  directly as SQL `LIMIT`/`OFFSET`). **`getGhostCandidateLegsCount(playerName)`**
-  returns the total matching row count (same `WHERE`/`HAVING`, no `LIMIT`) so the
-  picker's pagination controls know how many pages exist without fetching every
-  row. `GET /api/players/ghost-legs?name=&limit=&sort=&offset=` returns
-  `{legs: [...], total}` (Player Profile/New Game's leg picker: a "sort by"
-  dropdown — Most recent/Best average/Worst average — and a "per page" dropdown,
-  10/25/50/100, default 10, both resetting to page 1 when changed).
+  directly as SQL `LIMIT`/`OFFSET`), `opts.category` filters to one X01
+  starting-score category (`'501'`/`'301'`/`'170'`/`'101'` — `GHOST_LEG_CATEGORIES`;
+  an absent or unrecognized value means every mode, not zero results, the same
+  "constrain the input, don't trust it" posture `sort` already used).
+  **`getGhostCandidateLegsCount(playerName, category)`** returns the total
+  matching row count (same `WHERE`/`HAVING` including the same optional
+  category filter, no `LIMIT`) so the picker's pagination controls know how
+  many pages exist without fetching every row. `GET
+  /api/players/ghost-legs?name=&limit=&sort=&offset=&category=` returns
+  `{legs: [...], total}` (Player Profile/New Game's leg picker: an "X01 mode"
+  dropdown — All modes/501/301/170/101 — a "sort by" dropdown — Most recent/
+  Best average/Worst average — and a "per page" dropdown, 10/25/50/100,
+  default 10, all three resetting to page 1 when changed). The category
+  dropdown stays visible even when it filters the list down to zero results
+  (`ghostLegToolbarHtml()`, shared between the populated and empty-result
+  render paths) — a mode-aware empty message ("No won legs in 170 yet — try
+  a different mode, or 'All modes'.") rather than losing the control that
+  would let the player switch back.
 - **`getGhostLegScript(gameId, setNo, legNo, playerName)`**: that leg's turns in
   playback order, each with its raw `{sector, multiplier}` darts, plus `category`,
   `config`, and the leg's actual recorded `outMode` (double/single-out) — returns
@@ -5146,6 +5157,21 @@ Two pieces sit above the categorized picker itself:
   needed) and lists every player who has already completed *today's* challenge
   format, each with a ✓ — this is informational (who's done it today, across
   everyone), distinct from Step 2's per-*chosen*-player blocking check below.
+  **Selected state**: a filled gold check-circle (`.setup-dc-selectcheck`,
+  top-right corner) — the same symbol `.setup-ledger-check` uses on an
+  ordinary row — appears only when `currentSetupOptionKey()==='challenge'`.
+  This card's own permanent border/glow (there regardless of selection, to
+  stay eye-catching as today's featured item) made an earlier, subtler
+  "extra inset shadow" treatment nearly invisible against it; the check-circle
+  reads clearly either way, and is unmistakably distinct from the ambient
+  glow. When selected, the card also gets its own Rules disclosure
+  (`DAILY_CHALLENGE_RULES` — the fixed text a `'challenge'` key never had a
+  `NEW_GAME_MODE_OPTIONS` entry of its own for) and inline `#setup-step1-continue`
+  button, same shape as an ordinary ledger row's expanded content (below).
+  `selectSetupGame()` calls this function on every selection change (not just
+  once at Step 1 entry) so switching away from Daily Challenge correctly
+  clears its check-circle/expanded content instead of leaving it stuck
+  showing "selected" from an earlier pick.
 - **`renderSetupGameLedger()`** (`#setup-game-categories`): `NEW_GAME_MODE_OPTIONS`
   (unchanged shape/contents — still the canonical `{ key, label, blurb,
   apply() }` list) is grouped into `GAME_LEDGER_CATEGORIES` (Traditional /
@@ -5167,13 +5193,15 @@ Two pieces sit above the categorized picker itself:
   `onSetupFlavorSelect()` sets `setup.start`), now mounted inline inside the
   X01 row itself rather than as a standalone section below the categories.
 - **`#setup-step1-continue`** (`setupGoToStep2()` — no validation needed, a
-  game is always pre-selected) advances to Step 2. Lives inside
-  `.setup-sticky-bar` (`#setup-step1-stickybar`), a `position:fixed` bar
-  pinned to the bottom of the viewport the entire time Step 1 is showing —
-  fixing the complaint that a long category list (or a selected row's own
-  options) pushed Continue off the bottom of the screen, a scroll away.
-  `showSetupStep(n)` toggles its `hidden` alongside the two step wrappers so
-  it never shows while Step 2 is active.
+  game is always pre-selected) advances to Step 2. Rendered inline inside
+  whichever row (or the Daily Challenge card) is currently selected, right
+  after its Rules disclosure — not a separate always-visible element, since
+  only one row/card is ever expanded at a time. A first pass used a
+  `position:fixed` bar pinned to the bottom of the viewport instead (fixing
+  the complaint that a long category list pushed Continue off the bottom of
+  the screen); a follow-up request replaced that with this inline placement
+  instead, which fixes the same complaint more directly — Continue is right
+  there in the content the user just opened, not a separate floating element.
 - **"VS" chip**: every row for a mode whose `chosenGameContexts(key)` includes
   `'h2h'` (X01, Cricket, Baseball, Shanghai, Halve-It, Pressure Chamber,
   Killer) gets a small gold-outlined "VS" chip next to its name
@@ -5194,13 +5222,32 @@ wrapper:
   that `mountSetupInlineOptions()` fills — see below).
 - **A "Rules" disclosure** (`.setup-ledger-rules-toggle` /
   `.setup-ledger-rules-body`, `setupRulesOpen`/`toggleSetupRules()`) —
-  collapsed by default, showing that entry's `NEW_GAME_MODE_OPTIONS[key].blurb`
-  text (unchanged strings, several reworded from "…on the next step" to
-  "…above" now that their controls sit right there instead of a further page
-  away). This replaces the old always-visible `#setup-blurb-section` box that
-  used to sit below the whole category list — the user-visible complaint that
-  a long how-to-play paragraph rendered separately, every time, whether
-  wanted or not.
+  showing that entry's `NEW_GAME_MODE_OPTIONS[key].blurb` text (unchanged
+  strings, several reworded from "…on the next step" to "…above" now that
+  their controls sit right there instead of a further page away). This
+  replaces the old always-visible `#setup-blurb-section` box that used to sit
+  below the whole category list — the user-visible complaint that a long
+  how-to-play paragraph rendered separately, every time, whether wanted or
+  not. Collapsed by default for any key with real options to show
+  (`keyHasInlineOptions(key)` true) — but **auto-expanded instead** the
+  moment a key with nothing else in the row is selected
+  (`selectSetupGame(key)` sets `setupRulesOpen = !keyHasInlineOptions(key)`),
+  since a mode like Bob's 27 or 121 Checkout Ladder would otherwise show
+  nothing new at all besides the teaser already visible before picking it.
+  `keyHasInlineOptions()` reuses `chosenGameContexts()` (for Format) and
+  `GAME_TYPES[key].optionsSectionId` (for Cricket/Killer/Shanghai/Halve-It),
+  plus a small hand-kept list (`SETUP_MODE_GATED_OPTION_KEYS`: X01, Doubles
+  Practice, Checkout Trainer) for the three modes whose option section is
+  still toggled directly in `setMode()` rather than through the registry
+  field.
+- **An inline "Continue" button** (`#setup-step1-continue`,
+  `onclick="setupGoToStep2()"`) — the very last thing in the row's expanded
+  block, right after the Rules disclosure. There is only ever one selected
+  row at a time, so this is the only place the button is ever rendered; a
+  first pass instead used a `position:fixed` bar pinned to the bottom of the
+  viewport, replaced by this inline placement per a follow-up request (fixes
+  the same "have to scroll to find Continue" complaint more directly, since
+  Continue now sits in the exact content the user just opened).
 
 **`mountSetupInlineOptions()`** is how the actual options controls get there
 without duplicating any of their existing markup or `onclick` handlers: every
@@ -5342,10 +5389,9 @@ the two-buttons-stacked defect this fixed.
 
 ### Wizard navigation and step-entry reconciliation
 
-`showSetupStep(n)` (`setupStep` 1/2) toggles the two step wrappers (plus
-`#setup-step1-stickybar`, hidden whenever `n!==1`), updates the step-label
-text (`SETUP_STEP_LABELS`, now just `{1: '…Choose a game', 2: '…Who's
-playing?'}`), and calls the global `announce()` (`#sr-announcer`,
+`showSetupStep(n)` (`setupStep` 1/2) toggles the two step wrappers, updates
+the step-label text (`SETUP_STEP_LABELS`, now just `{1: '…Choose a game', 2:
+'…Who's playing?'}`), and calls the global `announce()` (`#sr-announcer`,
 `aria-live="polite"`) so screen-reader users hear the step change; it also
 moves focus to each new step's first control (the Daily Challenge card or the
 first open ledger row in Step 1, the first player `<select>`/button in Step
@@ -5377,8 +5423,9 @@ now that Step 3 no longer exists as a shared landing spot for both:
   applied, and sets `_enteringSetupFromDrill` the same way — consumed to jump
   to **Step 1** instead, since Checkout Trainer's options (including the pin
   chip itself, "inspectable and cancelable, never invisible state") now live
-  in Step 1's inline pool; focus lands on the sticky Continue bar rather than
-  the pin chip/toggles (the player already chose exactly what to drill).
+  in Step 1's inline pool; focus lands on the row's own inline Continue button
+  rather than the pin chip/toggles (the player already chose exactly what to
+  drill).
 
 ### Retired
 
@@ -5393,7 +5440,11 @@ described above. From the later Step-3-into-Step-1 fold: `#setup-step-3`,
 `#start-btn`, `#setup-blurb-section`, `setupGoToStep3()`, and
 `setupStep3HasContent()` were all deleted — replaced by
 `mountSetupInlineOptions()`/`toggleSetupRules()`, `#setup-step2-continue`
-(now doing double duty as Start), and `setupFinishAndStart()`.
+(now doing double duty as Start), and `setupFinishAndStart()`. A follow-up
+request then replaced that fold's own first-pass `.setup-sticky-bar`/
+`#setup-step1-stickybar` (`position:fixed` bottom bar) with `#setup-step1-continue`
+rendered inline inside the selected row/card instead — the fixed bar's CSS
+and markup were deleted outright, not kept as a fallback.
 
 ---
 
