@@ -1992,8 +1992,20 @@ const Auth = {
     uiLogin(()=>{ onOk(); });
   },
   async login(username, password){
+    // POST /api/login not throwing means the server genuinely accepted the
+    // credentials and set a valid session cookie — but refresh() swallows its
+    // OWN network errors internally (so a transient hiccup at boot never blocks
+    // the whole app from loading), which meant a hiccup on the very next GET
+    // /api/me right here could leave `loggedIn` false even though login just
+    // succeeded — the caller saw no exception, re-rendered, and found the login
+    // gate still showing as if the password had been rejected, when simply
+    // reloading the page (a fresh /api/me call) would have shown the account
+    // was already logged in the whole time. One retry, then a clear error
+    // instead of silently pretending nothing happened.
     await Backend.send('POST','/api/login',{username,password});
     await this.refresh();
+    if(!this.loggedIn) await this.refresh();
+    if(!this.loggedIn) throw new Error("Logged in, but couldn't confirm the session — try refreshing the page.");
   },
   async logout(){
     await Backend.send('POST','/api/logout').catch(()=>{});
@@ -4272,7 +4284,7 @@ async function renderSettings(){
       <input type="text" id="gate-username" autocomplete="username" style="margin-bottom:10px">
       <label class="field">Password <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— at least 8 characters</span></label>
       <input type="password" id="gate-password" autocomplete="new-password" style="margin-bottom:16px">
-      <button class="btn btn-primary" onclick="submitGateCreateAdmin()">Create admin account</button>`;
+      <button class="btn btn-primary" id="gate-submit-btn" onclick="submitGateCreateAdmin()">Create admin account</button>`;
     return;
   }
 
@@ -4284,7 +4296,7 @@ async function renderSettings(){
       <input type="text" id="gate-username" autocomplete="username" onkeydown="if(event.key==='Enter')submitGateLogin()" style="margin-bottom:10px">
       <label class="field">Password</label>
       <input type="password" id="gate-password" autocomplete="current-password" onkeydown="if(event.key==='Enter')submitGateLogin()" style="margin-bottom:16px">
-      <button class="btn btn-primary" onclick="submitGateLogin()">Log in</button>`;
+      <button class="btn btn-primary" id="gate-submit-btn" onclick="submitGateLogin()">Log in</button>`;
     return;
   }
 
@@ -4305,19 +4317,27 @@ async function renderSettings(){
   }).catch(err=>{ const s=document.getElementById('settings-error'); if(s){ s.textContent='Could not load settings: '+err.message; s.hidden=false; } });
 }
 
+// btn.disabled while the request is in flight (matching submitUiLogin()'s
+// existing guard) — this form had none, so a double-click or a double Enter-
+// press across the two fields could fire two concurrent /api/login requests
+// with nothing to stop it and no visual sign a request was already pending.
 async function submitGateLogin(){
   const username = document.getElementById('gate-username').value;
   const password = document.getElementById('gate-password').value;
   const err = document.getElementById('settings-gate-error');
+  const btn = document.getElementById('gate-submit-btn');
+  if(btn) btn.disabled = true;
   try{ await Auth.login(username, password); renderSettings(); }
-  catch(e){ if(err){ err.textContent = e.message || 'Login failed'; err.hidden=false; } }
+  catch(e){ if(btn) btn.disabled = false; if(err){ err.textContent = e.message || 'Login failed'; err.hidden=false; } }
 }
 async function submitGateCreateAdmin(){
   const username = document.getElementById('gate-username').value;
   const password = document.getElementById('gate-password').value;
   const err = document.getElementById('settings-gate-error');
+  const btn = document.getElementById('gate-submit-btn');
+  if(btn) btn.disabled = true;
   try{ await Auth.createAdmin(username, password); renderSettings(); }
-  catch(e){ if(err){ err.textContent = e.message || 'Could not create admin account'; err.hidden=false; } }
+  catch(e){ if(btn) btn.disabled = false; if(err){ err.textContent = e.message || 'Could not create admin account'; err.hidden=false; } }
 }
 
 function renderAdminsList(){

@@ -2869,6 +2869,49 @@ enumerate valid usernames.
   `loginFailCount`/`loginLockedUntil` so the CLI's `list` subcommand can show
   lockout status without a separate query.
 
+### Admin login — username case-insensitivity, and two frontend login-flow robustness fixes (2026-07)
+
+`admins.username` is `COLLATE NOCASE` (both the `UNIQUE` constraint and
+`adminByUsername`'s lookup query explicitly restate it), so logging in with a
+different case than the account was created with (`Admin` vs `admin`) already
+works correctly — verified directly against `db.login()`. Two separate,
+confirmed frontend issues found reviewing this area (`frontend/index.html`),
+both explaining a real "the password sometimes doesn't work, but refreshing
+shows I'm already logged in" symptom report:
+
+- **`Auth.login()` could silently under-report a genuinely successful login.**
+  `Auth.refresh()` swallows its own network errors (`try{...}catch(e){logErr(e);}`,
+  no rethrow) so a transient hiccup at page boot never blocks the whole app —
+  but `login()` called it right after `POST /api/login` succeeded, with
+  nothing checking whether that immediately-following `GET /api/me` actually
+  confirmed the new session. If that one call transiently failed, `Auth.loggedIn`
+  stayed `false` even though the server had already set a valid session cookie —
+  the caller saw no exception, re-rendered, and found the login gate still
+  showing as if the password had been rejected. A page refresh (a fresh
+  `/api/me` call) then correctly showed the account was logged in the whole
+  time. `login()` now retries `refresh()` once if the first attempt didn't
+  reflect a logged-in state, and throws a clear, honest error
+  ("Logged in, but couldn't confirm the session — try refreshing the page.")
+  only if it still can't confirm — never silently returns as if nothing
+  happened.
+- **The Settings page's own login/create-admin form
+  (`submitGateLogin()`/`submitGateCreateAdmin()`) had no submit-in-flight
+  guard** — unlike the other login modal (`uiLogin()`/`submitUiLogin()`,
+  triggered mid-gameplay by `Auth.ensureCanWrite()`), which already disables
+  its button while a request is pending. A double-click or a double Enter-press
+  across the username/password fields could fire two concurrent
+  `POST /api/login` requests with no protection and no visual sign a request
+  was already in flight. Now disables `#gate-submit-btn` for the duration of
+  the request, matching `submitUiLogin()`'s existing pattern, re-enabling it
+  only on failure.
+
+The account-lockout backoff above is a separate, working-as-designed
+contributor worth knowing about if this symptom recurs: a correct password
+genuinely **does** get rejected (423, not silently) for the remainder of an
+active lockout window, even though the lockout was earned by *earlier* failed
+attempts — the "no point at which a correct password stops working" guarantee
+in the section above only holds once `login_locked_until` has actually passed.
+
 ### Rate limiting (`server.js`, `rateLimit(bucket, ip, max, windowMs)`)
 
 | Bucket | Limit | Applies to |
