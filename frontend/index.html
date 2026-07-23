@@ -785,17 +785,23 @@
   .stile.search-hidden,.settings-zone-label.search-hidden{display:none}
   .pp-cat-lines{font-size:13px;color:var(--muted);line-height:1.8}
   .pp-cat-lines b{color:var(--ink)}
+  /* Games & H2H summary (2026-07 redesign, "persistent summary line" direction):
+     per-category chip breakdown, X01 only — see categoryChipsHtml. */
+  .pp-mode-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .pp-mode-chip{font-size:11px;color:var(--muted);background:var(--surface-2);
+    border:1px solid var(--wire);border-radius:999px;padding:3px 10px}
+  .pp-mode-chip b{color:var(--ink)}
   .btn.danger{color:var(--bust);border-color:var(--wire)}
   .btn.danger:hover{border-color:var(--bust)}
 
   /* ---- stat bubbles ---- */
   .stat-bubbles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px}
   @media(max-width:560px){.stat-bubbles{grid-template-columns:repeat(3,1fr)}}
-  /* Player Profile header row — always exactly 3 stats (X01 Average / Total
-     Darts Thrown / Darts Per Day), so it always uses 3 even columns rather
-     than the general 4-column grid above leaving a visibly empty 4th slot
-     on wider screens. */
-  #player-header-stats{grid-template-columns:repeat(3,1fr);margin-bottom:0}
+  /* Player Profile header row — 4 stats (X01 Average / Total Darts Thrown /
+     Darts Per Day / Household Rating), so the general 4-column .stat-bubbles
+     grid above already fits exactly, no override needed beyond the tighter
+     margin a header sitting right under the name wants. */
+  #player-header-stats{margin-bottom:0}
   /* Same author-rule-beats-UA-[hidden] gotcha as .btn[hidden] above — .stat-bubbles'
      own display:grid otherwise wins over the UA stylesheet's [hidden]{display:none}
      at equal specificity, so #player-stat-bubbles-more stayed visible regardless of
@@ -7792,15 +7798,63 @@ function renderPlayerPage(){
 
   // statGrid replaced by stat bubbles above
 
-  // H2H sections (reused by both 'h2h' and 'overall' tabs)
-  const cats = Object.keys({...(s.legsByCat||{}), ...(s.gamesByCat||{})});
-  const catHtml = cats.length
-    ? cats.map(c=>`${c}: <b>${(s.gamesByCat||{})[c]||0}</b> games · <b>${(s.legsByCat||{})[c]||0}</b> legs`).join('<br>')
-    : '<span style="color:var(--muted)">none yet</span>';
-  const h2hCats = Object.keys({...(s.h2hGamesWonByCat||{}), ...(s.h2hSetsWonByCat||{}), ...(s.h2hLegsWonByCat||{})});
-  const h2hHtml = h2hCats.length
-    ? h2hCats.map(c=>`${c}: <b>${(s.h2hGamesWonByCat||{})[c]||0}</b> games · <b>${(s.h2hSetsWonByCat||{})[c]||0}</b> sets · <b>${(s.h2hLegsWonByCat||{})[c]||0}</b> legs`).join('<br>')
-    : '<span style="color:var(--muted)">none yet</span>';
+  // H2H sections (reused by both 'h2h' and 'overall' tabs) — scoped to the
+  // selected Game Mode dropdown (gt), the same way the stat bubbles above
+  // already are. Previously this ignored `gt` entirely and listed every
+  // category from every game type mixed together (e.g. "170", "301", and
+  // "Cricket (15-20, Bull)" all shown at once regardless of which mode was
+  // selected up top) — each H2H-capable game type's own category() generator
+  // (item 41, GAME_TYPES[gt].category) produces a small, distinguishable set
+  // of strings, matched against here instead.
+  const CATEGORY_MATCHERS = {
+    x01: c => /^\d+$/.test(c),
+    cricket: c => c.includes('Cricket'),
+    baseball: c => c === 'Baseball',
+    shanghai: c => c === 'Shanghai',
+    halve_it: c => c.includes('Halve-It'),
+    pressure_chamber: c => c === 'The Pressure Chamber',
+    killer: c => c === 'Killer',
+  };
+  const categoryMatchesMode = c => (CATEGORY_MATCHERS[gt] || (()=>true))(c);
+  const cats = Object.keys({...(s.legsByCat||{}), ...(s.gamesByCat||{})}).filter(categoryMatchesMode);
+  const h2hCats = Object.keys({...(s.h2hGamesWonByCat||{}), ...(s.h2hSetsWonByCat||{}), ...(s.h2hLegsWonByCat||{})}).filter(categoryMatchesMode);
+  // Cricket/Baseball/Shanghai/Halve-It/Pressure Chamber/Killer already show a
+  // primary "Games Played" (or equivalent) and "Win Rate" bubble in their own
+  // stat-bubble grid (CRICKET_STAT_DEFS etc., all above on this same page
+  // view) — repeating those same two figures again down here is exactly the
+  // same-page redundancy a /code-review audit flagged, so those 6 modes get a
+  // slimmer line with just what isn't already a bubble anywhere (legs/sets
+  // played); X01 has no games/win-rate bubble at all, so it keeps the full line.
+  const GAMES_WINRATE_ALREADY_BUBBLED = new Set(['cricket','baseball','shanghai','halve_it','pressure_chamber','killer']);
+  const sumCat = (map, list) => list.reduce((sum,c)=>sum+((map||{})[c]||0), 0);
+  const totalGames    = sumCat(s.gamesByCat, cats);
+  const totalLegs      = sumCat(s.legsByCat, cats);
+  const totalH2hGames = sumCat(s.h2hGamesWonByCat, h2hCats);
+  const totalH2hSets   = sumCat(s.h2hSetsWonByCat, h2hCats);
+  const totalH2hLegs    = sumCat(s.h2hLegsWonByCat, h2hCats);
+  const modeLabel = (GAME_TYPES[gt] && GAME_TYPES[gt].label) || '';
+  const gamesAndH2hSummaryHtml = !cats.length
+    ? `<p class="pp-meta" style="padding:4px 0">No ${escapeHtml(modeLabel)} games recorded yet.</p>`
+    : GAMES_WINRATE_ALREADY_BUBBLED.has(gt)
+      ? `<p class="pp-cat-lines" style="padding:4px 0 0">🎯 <b>${totalLegs}</b> legs played${h2hCats.length?` · <b>${totalH2hSets}</b> sets won · <b>${totalH2hLegs}</b> legs won`:''}</p>`
+      : `<p class="pp-cat-lines" style="padding:4px 0 0">🎯 <b>${totalGames}</b> games · <b>${totalLegs}</b> legs played${h2hCats.length?` · <b>${totalH2hGames}-${Math.max(totalGames-totalH2hGames,0)}</b> H2H`:''}</p>`;
+  // Per-category chip breakdown — only X01 has more than one real category to
+  // split by among the H2H-capable game types (Cricket's two variants don't
+  // get one: the trimmed line above already omits games/win-rate for it, and
+  // a chip row for just legs/sets played isn't worth the extra UI here).
+  const categoryChipsHtml = (gt==='x01' && cats.length>1)
+    ? `<div class="pp-mode-chips">${cats.map(c=>{
+        const cg=(s.gamesByCat||{})[c]||0, cl=(s.legsByCat||{})[c]||0;
+        const chg=(s.h2hGamesWonByCat||{})[c]||0;
+        return `<span class="pp-mode-chip"><b>${escapeHtml(c)}</b> · ${cg}g · ${cl}L${h2hCats.includes(c)?` · ${chg}-${Math.max(cg-chg,0)}`:''}</span>`;
+      }).join('')}</div>`
+    : '';
+  const gamesAndH2hSectionHtml = `
+    <div class="pp-section">
+      <div class="pp-section-title">${escapeHtml(modeLabel)} — Games &amp; H2H</div>
+      ${gamesAndH2hSummaryHtml}
+      ${categoryChipsHtml}
+    </div>`;
   // Tournaments are X01-only (docs/archive/tournament-mode-roadmap.md), so this block is
   // gated the same way the profile's other X01-only surfaces are.
   const tournamentStatsSection = gt==='x01' ? `
@@ -7824,20 +7878,18 @@ function renderPlayerPage(){
       <div id="player-elo-body"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>`;
   const h2hSection = `
-    <details class="pp-section">
-      <summary class="pp-section-title">H2H — Games &amp; Legs Played</summary>
-      <div class="pp-cat-lines">${catHtml}</div>
-    </details>
-    <details class="pp-section">
-      <summary class="pp-section-title">H2H Wins</summary>
-      <div class="pp-cat-lines">${h2hHtml}</div>
-    </details>
+    ${gamesAndH2hSectionHtml}
     ${eloSection}
     ${tournamentStatsSection}
     ${leagueStatsSection}`;
 
-  // Practice sections (reused by both 'practice' and 'overall' tabs)
-  const pracCats = Object.keys(s.practiceLegs||{});
+  // Practice sections (reused by both 'practice' and 'overall' tabs) — same
+  // per-mode category scoping as the H2H sections above (a drill-only game
+  // type only ever produces one category anyway, so categoryMatchesMode()'s
+  // fallback of "true" for those is never actually filtering anything out —
+  // this only changes behavior for the multi-mode-sharing category strings
+  // the H2H fix above targets).
+  const pracCats = Object.keys(s.practiceLegs||{}).filter(categoryMatchesMode);
   const pracHtml = pracCats.length
     ? pracCats.map(c=>`${c}: <b>${(s.practiceLegs||{})[c]||0}</b> legs`).join('<br>')
     : '<span style="color:var(--muted)">none yet</span>';
@@ -7885,14 +7937,7 @@ function renderPlayerPage(){
     tabContent = `
       ${modePickerHtml}
       ${gameStatsHtml}
-      <details class="pp-section">
-        <summary class="pp-section-title">Games &amp; Legs Played</summary>
-        <div class="pp-cat-lines">${catHtml}</div>
-      </details>
-      <details class="pp-section">
-        <summary class="pp-section-title">H2H Wins</summary>
-        <div class="pp-cat-lines">${h2hHtml}</div>
-      </details>`;
+      ${gamesAndH2hSectionHtml}`;
   } else {
     tabContent = `
       ${modePickerHtml}
@@ -7944,7 +7989,9 @@ function renderPlayerPage(){
       </div>
       <div class="stat-bubbles" id="player-header-stats">${HEADER_STAT_DEFS.map(d=>
         `<div class="stat-block" title="${d.desc}"><div class="stat-val" id="bv-header-${d.key}">—</div><div class="stat-label">${d.label}</div></div>`
-      ).join('')}</div>
+      ).join('')}
+        <div class="stat-block" title="Combined rating across every rated H2H match (X01/Cricket/Baseball) — independent of whatever tab/mode is selected below"><div class="stat-val" id="bv-header-rating">—</div><div class="stat-label">Household Rating</div></div>
+      </div>
     </div>
     <div class="player-tabs" role="tablist" aria-label="Player profile sections">
       <button role="tab" id="pp-tab-stats" class="tab-btn${section==='stats'?' active':''}" data-tab="stats" aria-selected="${section==='stats'}" aria-controls="pp-tab-panel" tabindex="${section==='stats'?0:-1}" onclick="switchPlayerSection('stats')" onkeydown="playerTabKeydown(event)">Stats</button>
@@ -7958,6 +8005,7 @@ function renderPlayerPage(){
     </div>`;
   loadStatBubbles();
   loadPlayerHeaderStats();
+  loadPlayerHeaderRating();
   loadAvgChart(avgChartPeriod);
   loadDartWeights();
   loadPlayerLoadouts();
@@ -17483,6 +17531,24 @@ function loadPlayerHeaderStats(){
   const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
   Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(player)}${modeParam}`)
     .then(data=>{ if(currentPlayer === player) applyPlayerHeaderStatsData(data); }).catch(()=>{});
+}
+// Household Rating header tile: its own fetch (not the stat-bubbles endpoint
+// above) since the rating is a separate cross-game-type Elo record, not a
+// per-tab/per-mode figure — same data source the "📈 Household Rating"
+// section further down the page already uses (loadPlayerElo()), just the
+// headline number surfaced up top too, independent of tab/mode, the same
+// precedent X01 Average already set (shown in both the header and its own
+// stat-bubble grid).
+function loadPlayerHeaderRating(){
+  const el = document.getElementById('bv-header-rating');
+  if(!el) return;
+  const player = currentPlayer;
+  Backend.get(`/api/players/elo?name=${encodeURIComponent(player)}`)
+    .then(data=>{
+      if(currentPlayer !== player) return;
+      const e = document.getElementById('bv-header-rating');
+      if(e) e.textContent = (data && data.played) ? data.rating : '—';
+    }).catch(()=>{});
 }
 
 function loadDartWeights(){

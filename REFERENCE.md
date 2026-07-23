@@ -1053,29 +1053,83 @@ below the table.
 | **180s/Leg** | fraction | `legs containing ≥1 180 / total legs` |
 | **Average Pace** | — | darts/minute, returned as the `pace` key — same formula as the Home page/chart versions (consecutive `thrown_at` gaps within a turn, clamped to `0 < gap < 60000ms`); `null` (bubble shows "—") until per-dart timing data exists. *Note: this key was missing from `getPlayerStatBubbles()`'s return object until the audit that produced this manual caught it — the bubble was permanently blank before that.* |
 
-### Player Profile header row (name + these three, `HEADER_STAT_DEFS`)
+### Player Profile header row (name + these four, `HEADER_STAT_DEFS` + Household Rating)
 
 Rendered directly under the player's name, above everything else (the game-mode
 dropdown, the Stats/Player Settings tabs) — `s.turns` ("N turns thrown (all-time)")
-used to be the only thing shown here and is gone; these three replace it, left to
-right: **X01 Average, Total Darts Thrown, Darts / Day**. All three are fetched via
-the same no-`gameType`-param `GET /api/players/stat-bubbles` call (`getPlayerStatBubbles()`'s
-plain, non-Cricket/non-Baseball/etc. shape), independent of whatever the game-mode
-dropdown below has selected — switching that dropdown to Cricket, for example,
-never changes these. Non-interactive display tiles, same as the two lifetime
-figures always were: unlike every bubble in the table above, clicking them does
-nothing — they don't drive the "\_\_\_ over time" chart. **X01 Average** is a second
-copy of the same `avg` value the X01 stat-bubble grid already shows elsewhere on
-the page (own `bv-header-avg` element id, so the two never collide); **Total Darts
-Thrown**/**Darts / Day** are the lifetime, every-game-mode figures that used to
-render in their own "Lifetime — Every Game Mode" block above the dropdown — that
-block is gone, fully replaced by this header row.
+used to be the only thing shown here and is gone; four tiles replace it, left to
+right: **X01 Average, Total Darts Thrown, Darts / Day, Household Rating**. The
+first three are fetched via the same no-`gameType`-param `GET /api/players/stat-bubbles`
+call (`getPlayerStatBubbles()`'s plain, non-Cricket/non-Baseball/etc. shape),
+independent of whatever the game-mode dropdown below has selected — switching
+that dropdown to Cricket, for example, never changes these. Non-interactive
+display tiles, same as the two lifetime figures always were: unlike every bubble
+in the table above, clicking them does nothing — they don't drive the "\_\_\_ over
+time" chart. **X01 Average** is a second copy of the same `avg` value the X01
+stat-bubble grid already shows elsewhere on the page (own `bv-header-avg` element
+id, so the two never collide); **Total Darts Thrown**/**Darts / Day** are the
+lifetime, every-game-mode figures that used to render in their own "Lifetime —
+Every Game Mode" block above the dropdown — that block is gone, fully replaced
+by this header row.
+
+**Household Rating** (2026-07, moved up from its own collapsible section further
+down the page) is fetched separately (`loadPlayerHeaderRating()` → `GET
+/api/players/elo`, the same endpoint the "📈 Household Rating" `<details>` section
+below already uses) rather than folded into the stat-bubbles call above, since it's
+a genuinely different data source — a combined Elo-style rating across every rated
+H2H match (X01/Cricket/Baseball), not a per-game-type figure. Shows just the raw
+rating number (or `—` if the player has no rated H2H games yet); the fuller detail
+(win-loss record, household rank, rating-over-time sparkline) still lives in the
+"📈 Household Rating" section below — the same "headline number in the header,
+full detail in its own section" precedent X01 Average already set, not a removal
+of that section.
 
 | Bubble | Formula |
 |---|---|
 | **X01 Average** | `avg` — same 3-dart-average formula as the table above, X01-only |
 | **Total Darts Thrown** | `dartsThrown` — `COUNT(*)` from `darts`, across every game mode except Checkout Trainer (`NOT_CHECKOUT_TRAINER`) |
 | **Darts / Day** | `avgDartsPerDay` — `dartsThrown / COUNT(DISTINCT date(created_at))`, same all-modes scope |
+| **Household Rating** | `rating` from `GET /api/players/elo` — `—` if `!data.played` (no rated H2H games yet) |
+
+### Games & H2H section — scoped to the selected Game Mode (2026-07 fix)
+
+The "Games & Legs Played"/"H2H Wins" sections below the stat-bubble grid (H2H and
+Overall tabs) used to read `s.gamesByCat`/`s.legsByCat`/`s.h2hGamesWonByCat`/
+`s.h2hSetsWonByCat`/`s.h2hLegsWonByCat` unfiltered — every category from every
+game type the player has ever played (e.g. `"170"`, `"301"`, `"Cricket (15-20,
+Bull)"`) shown together regardless of which Game Mode dropdown value (`gt`) was
+selected, the one part of the profile that ignored `gt` entirely while the stat
+bubbles right above it already scoped correctly. Fixed by filtering both category
+lists through `categoryMatchesMode()`, a small lookup (`CATEGORY_MATCHERS`)
+keyed on each H2H-capable game type's own `category()` generator (item 41,
+`GAME_TYPES[gt].category`) — X01's is any bare integer string, Cricket's is
+`"Custom Cricket"` or anything containing `"Cricket"`, Halve-It's anything
+containing `"Halve-It"`, and Baseball/Shanghai/Pressure Chamber/Killer are each
+a single fixed string. The same filter also scopes the Practice tab's "Legs
+Thrown" category list (`pracCats`) — a drill-only game type only ever produces
+one category, so the filter is a no-op there; it only changes behavior for the
+multi-mode-sharing category strings the H2H fix targets.
+
+Merged into a single **"{Mode} — Games & H2H"** section (`gamesAndH2hSectionHtml`)
+replacing the two separate `<details>` blocks, and no longer collapsible — just
+one or two lines, always visible, no expand needed:
+
+- **X01**: `N games · M legs played · W-L H2H` (`W` = `h2hGamesWonByCat` summed
+  across X01 categories, `L` = games played minus games won) — X01 has no
+  "Games Played"/"Win Rate" bubble anywhere in `STAT_DEFS`, so nothing here
+  duplicates anything else on the page. Also gets a per-category chip row
+  (`.pp-mode-chip`, one per X01 point-target the player has actually played)
+  since X01 is the one H2H-capable type with more than one real category worth
+  splitting by.
+- **Cricket/Baseball/Shanghai/Halve-It/Pressure Chamber/Killer**: `M legs played
+  · S sets won · L legs won` — deliberately omits the games-played count and
+  win-loss record, since every one of these 6 types already shows a primary
+  "Games Played" (or equivalent) and "Win Rate" bubble in its own stat-bubble
+  grid (`CRICKET_STAT_DEFS` etc., visible on this same page view, right above)
+  — repeating those same two figures again down here was exactly the kind of
+  same-page redundancy an audit flagged (`docs/open-roadmap-items.md`'s
+  completion ledger has the full audit). Legs/sets played are never a bubble
+  for any of these types, so that part stays.
 
 ### Player Profile top-level tabs: Stats / Player Settings
 
