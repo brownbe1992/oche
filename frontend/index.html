@@ -726,6 +726,34 @@
   .settings-title{font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between}
   .settings-chevron{transition:transform .15s}
   .settings-intro{font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.6}
+
+  /* Settings page — modular dashboard redesign (2026-07, /frontend-design "idea 4"
+     + search box from "idea 2"): every setting is a tile showing its current state
+     up front, grouped continuously by zone (no tab-click needed), with a search box
+     that filters tiles by name/description. Zone accent colors are a redundant visual
+     cue on top of the always-present zone heading text, never the only signal. */
+  .settings-search{display:flex;align-items:center;gap:8px;background:var(--surface);
+    border:1px solid var(--wire);border-radius:10px;padding:10px 12px;margin-bottom:18px;
+    color:var(--muted);font-size:13px}
+  .settings-search input{flex:1;background:none;border:none;color:var(--ink);font:inherit;outline:none}
+  .settings-search input::placeholder{color:var(--muted)}
+  .settings-zone-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;
+    color:var(--muted);margin:20px 2px 8px}
+  .settings-zone-label:first-of-type{margin-top:2px}
+  .stile-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:8px}
+  @media(max-width:300px){.stile-grid{grid-template-columns:1fr}}
+  .stile{background:var(--surface);border:1px solid var(--wire);border-left:3px solid var(--gold);
+    border-radius:10px;padding:11px 12px;margin-bottom:0}
+  .stile.zone-gameplay{border-left-color:#4a8fd9}
+  .stile.zone-integrations{border-left-color:var(--green)}
+  .stile.zone-danger{border-left-color:var(--red)}
+  .stile .settings-title{font-size:12.5px;font-weight:700}
+  .stile .settings-title > span:first-child{display:block;min-width:0}
+  .stile .stile-icon{margin-right:6px}
+  .stile .stile-state{font-size:10.5px;font-weight:400;color:var(--muted);margin-top:4px;display:block}
+  .stile.expanded{grid-column:1/-1}
+  .stile.expanded .settings-intro{margin-top:12px}
+  .stile.search-hidden,.settings-zone-label.search-hidden{display:none}
   .pp-cat-lines{font-size:13px;color:var(--muted);line-height:1.8}
   .pp-cat-lines b{color:var(--ink)}
   .btn.danger{color:var(--bust);border-color:var(--wire)}
@@ -1390,18 +1418,16 @@
         <button class="btn btn-ghost" onclick="adminLogout()">Log out</button>
       </div>
 
-      <div class="player-tabs">
-        <button class="tab-btn active" data-stab="account" onclick="switchSettingsTab('account')">Account &amp; Access</button>
-        <button class="tab-btn" data-stab="gameplay" onclick="switchSettingsTab('gameplay')">Gameplay &amp; Display</button>
-        <button class="tab-btn" data-stab="integrations" onclick="switchSettingsTab('integrations')">Integrations</button>
-        <button class="tab-btn" data-stab="admin-danger" onclick="switchSettingsTab('admin-danger')">Admin &amp; Danger Zone</button>
+      <div class="settings-search">
+        🔍 <input type="text" id="settings-search-input" placeholder="Search settings…" oninput="filterSettingsTiles(this.value)">
       </div>
 
-      <div class="settings-group" data-group="account">
+      <div class="settings-zone-label">Access &amp; Account</div>
+      <div class="stile-grid">
       <!-- Manage admins -->
-      <div class="pp-section" style="margin-bottom:24px">
+      <div class="pp-section stile zone-account">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('admin-accounts-body',this)">
-          Admin accounts
+          <span><span class="stile-icon">🔑</span>Admin accounts<span class="stile-state" id="tile-state-admin-accounts">…</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="admin-accounts-body" hidden>
@@ -1426,9 +1452,9 @@
       </div>
 
       <!-- Require admin login for gameplay writes -->
-      <div class="pp-section" style="margin-bottom:24px">
+      <div class="pp-section stile zone-account">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('require-auth-body',this)">
-          Require admin login to play
+          <span><span class="stile-icon">🔒</span>Require admin login to play<span class="stile-state" id="tile-state-require-auth">…</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="require-auth-body" hidden>
@@ -1446,9 +1472,9 @@
       </div>
 
       <!-- Player PINs -->
-      <div class="pp-section" style="margin-bottom:24px">
+      <div class="pp-section stile zone-account">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('player-pins-body',this)">
-          Player PINs
+          <span><span class="stile-icon">🎯</span>Player PINs<span class="stile-state" id="tile-state-player-pins">…</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="player-pins-body" hidden>
@@ -1460,13 +1486,14 @@
           <div id="pin-players-list" style="display:grid;gap:8px"></div>
         </div>
       </div>
-      </div><!-- end settings-group: account -->
+      </div><!-- end stile-grid: account -->
 
-      <div class="settings-group" data-group="gameplay" hidden>
+      <div class="settings-zone-label">Gameplay &amp; Display</div>
+      <div class="stile-grid">
       <!-- Scoring -->
-      <div class="pp-section" style="margin-bottom:24px">
+      <div class="pp-section stile zone-gameplay">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('scoring-input-body',this)">
-          Scoring
+          <span><span class="stile-icon">⌨️</span>Scoring<span class="stile-state" id="tile-state-scoring-input">…</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="scoring-input-body" hidden>
@@ -1482,9 +1509,9 @@
       </div>
 
       <!-- Accessibility -->
-      <div class="pp-section" style="margin-bottom:24px">
+      <div class="pp-section stile zone-gameplay">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('accessibility-body',this)">
-          Accessibility
+          <span><span class="stile-icon">👁️</span>Accessibility<span class="stile-state" id="tile-state-accessibility">…</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="accessibility-body" hidden>
@@ -1502,9 +1529,9 @@
       </div>
 
       <!-- Voice Announcements -->
-      <div class="pp-section" style="margin-bottom:24px">
+      <div class="pp-section stile zone-gameplay">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('voice-body',this)">
-          Voice Announcements
+          <span><span class="stile-icon">🔊</span>Voice Announcements<span class="stile-state" id="tile-state-voice">…</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="voice-body" hidden>
@@ -1545,9 +1572,9 @@
       </div>
 
       <!-- Shareable Moments -->
-      <div class="pp-section" style="margin-bottom:24px">
+      <div class="pp-section stile zone-gameplay">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('sharecard-body',this)">
-          Shareable Moments
+          <span><span class="stile-icon">📤</span>Shareable Moments<span class="stile-state" id="tile-state-sharecard">…</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="sharecard-body" hidden>
@@ -1560,9 +1587,9 @@
       </div>
 
       <!-- Data Collection -->
-      <div class="pp-section" style="margin-bottom:24px">
+      <div class="pp-section stile zone-gameplay">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('data-collection-body',this)">
-          Data Collection
+          <span><span class="stile-icon">⏱️</span>Data Collection<span class="stile-state" id="tile-state-data-collection">…</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="data-collection-body" hidden>
@@ -1577,9 +1604,9 @@
       </div>
 
       <!-- Live Scoreboard -->
-      <div class="pp-section" style="margin-bottom:24px">
+      <div class="pp-section stile zone-gameplay">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('scoreboard-body',this)">
-          Live Scoreboard
+          <span><span class="stile-icon">📺</span>Live Scoreboard<span class="stile-state" id="tile-state-scoreboard">…</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="scoreboard-body" hidden>
@@ -1599,9 +1626,9 @@
       </div>
 
       <!-- Heatmap -->
-      <div class="pp-section" style="margin-bottom:24px">
+      <div class="pp-section stile zone-gameplay">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('heatmap-style-body',this)">
-          Heatmap
+          <span><span class="stile-icon">🔥</span>Heatmap<span class="stile-state" id="tile-state-heatmap">…</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="heatmap-style-body" hidden>
@@ -1621,13 +1648,14 @@
           </select>
         </div>
       </div>
-      </div><!-- end settings-group: gameplay -->
+      </div><!-- end stile-grid: gameplay -->
 
-      <div class="settings-group" data-group="integrations" hidden>
+      <div class="settings-zone-label">Integrations</div>
+      <div class="stile-grid">
       <!-- Smart Home Integration -->
-      <div class="pp-section" id="smart-home-section">
+      <div class="pp-section stile zone-integrations" id="smart-home-section">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('smart-home-body',this)">
-          Smart Home Integration
+          <span><span class="stile-icon">🏠</span>Smart Home Integration<span class="stile-state" id="tile-state-smart-home">…</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
 
@@ -1713,13 +1741,14 @@
         </div><!-- end HA subsection -->
         </div><!-- end smart-home-body -->
       </div><!-- end Smart Home section -->
-      </div><!-- end settings-group: integrations -->
+      </div><!-- end stile-grid: integrations -->
 
-      <div class="settings-group" data-group="admin-danger" hidden>
+      <div class="settings-zone-label">Admin &amp; Danger Zone</div>
+      <div class="stile-grid">
       <!-- Daily Challenge -->
-      <div class="pp-section" style="margin-top:24px">
+      <div class="pp-section stile zone-danger">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('challenge-admin-body',this)">
-          Daily Challenge
+          <span><span class="stile-icon">📅</span>Daily Challenge<span class="stile-state">Reset a player's attempt</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="challenge-admin-body" hidden>
@@ -1737,9 +1766,9 @@
       </div>
 
       <!-- Server Errors -->
-      <div class="pp-section" style="margin-top:24px">
+      <div class="pp-section stile zone-danger">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('server-errors-body',this);loadServerErrors()">
-          Server Errors
+          <span><span class="stile-icon">🧾</span>Server Errors<span class="stile-state">Recent server-side failures</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="server-errors-body" hidden>
@@ -1757,9 +1786,9 @@
       </div>
 
       <!-- Backups -->
-      <div class="pp-section" style="margin-top:24px">
+      <div class="pp-section stile zone-danger">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('backups-body',this);loadBackups()">
-          Backups
+          <span><span class="stile-icon">💾</span>Backups<span class="stile-state">Snapshot &amp; restore the database</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="backups-body" hidden>
@@ -1797,9 +1826,9 @@
       </div>
 
       <!-- Data Export -->
-      <div class="pp-section" style="margin-top:24px">
+      <div class="pp-section stile zone-danger">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('data-export-body',this)">
-          Data Export
+          <span><span class="stile-icon">📦</span>Data Export<span class="stile-state">Download your data</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="data-export-body" hidden>
@@ -1816,9 +1845,9 @@
       </div>
 
       <!-- Merge Players (docs/archive/player-merge-roadmap.md, admin-only) -->
-      <div class="pp-section" style="margin-top:24px">
+      <div class="pp-section stile zone-danger">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('merge-players-body',this);renderMergePlayersControls()">
-          Merge Players
+          <span><span class="stile-icon">🔀</span>Merge Players<span class="stile-state">Combine duplicate players</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="merge-players-body" hidden>
@@ -1841,9 +1870,9 @@
       </div>
 
       <!-- Danger Zone -->
-      <div class="pp-section" style="margin-top:24px">
+      <div class="pp-section stile zone-danger">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('danger-zone-body',this)">
-          Danger Zone
+          <span><span class="stile-icon">⚠️</span>Danger Zone<span class="stile-state">Wipe all player &amp; game data</span></span>
           <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         <div id="danger-zone-body" hidden>
@@ -1853,7 +1882,7 @@
           <button class="btn btn-ghost danger" onclick="askWipeAllData()">Wipe all player &amp; game data</button>
         </div>
       </div>
-      </div><!-- end settings-group: admin-danger -->
+      </div><!-- end stile-grid: admin-danger -->
 
       <div class="btn-row" style="margin-top:20px">
         <button class="btn btn-primary" id="settings-save-btn" onclick="saveSettings()">Save settings</button>
@@ -3349,11 +3378,6 @@ function switchHomeGameType(type){
   ensureHomeCombo(homeGameType, homeTab);
 }
 
-function switchSettingsTab(tab){
-  document.querySelectorAll('#screen-settings .tab-btn[data-stab]').forEach(b=>b.classList.toggle('active', b.dataset.stab===tab));
-  document.querySelectorAll('#screen-settings .settings-group').forEach(g=>{ g.hidden = (g.dataset.group!==tab); });
-}
-
 function renderHomeContent(){
   // homeData.s is the "globals loaded" signal now that homeData itself can exist
   // as an empty shell before /api/summary resolves (item 45's split-out global
@@ -4554,6 +4578,7 @@ async function renderSettings(){
     // off), which is exactly what SETTINGS_FIELDS' 'checkbox-optout' kind reads.
     toggleVoiceSubOptions();
     toggleHeatmapNumberStyleOption();
+    refreshSettingsTileStates();
   }).catch(err=>{ const s=document.getElementById('settings-error'); if(s){ s.textContent='Could not load settings: '+err.message; s.hidden=false; } });
 }
 
@@ -4593,6 +4618,8 @@ function renderAdminsList(){
           <button class="btn btn-ghost danger" style="padding:4px 10px;font-size:12px" onclick="askDeleteAdmin(${a.id},'${jsArg(a.username)}')">Remove</button>
         </div>
       </div>`).join('') || '<p style="font-size:12px;color:var(--muted)">No admins.</p>';
+    const tileState = document.getElementById('tile-state-admin-accounts');
+    if(tileState) tileState.textContent = `${admins.length} admin${admins.length===1?'':'s'}`;
   }).catch(logErr);
 }
 // Confirms before letting the "require admin login" checkbox actually go to
@@ -4657,6 +4684,67 @@ function toggleSettingsSection(bodyId, titleEl){
   body.hidden = !body.hidden;
   const chevron = titleEl && titleEl.querySelector('.settings-chevron');
   if(chevron) chevron.style.transform = body.hidden ? '' : 'rotate(180deg)';
+  // Modular dashboard tiles (2026-07 redesign): a tile spans the full grid row
+  // while its body is open, so the expanded content isn't squeezed into a
+  // half-width column — see .stile.expanded in the CSS.
+  const tile = titleEl && titleEl.closest('.stile');
+  if(tile) tile.classList.toggle('expanded', !body.hidden);
+}
+// Settings search box (2026-07 redesign): filters tiles by their own visible
+// text (title + collapsed state line) rather than a separate hand-maintained
+// keyword list, so a new tile's search behavior never needs updating here.
+// A zone label/grid hides once every tile beneath it is filtered out.
+function filterSettingsTiles(query){
+  const q = query.trim().toLowerCase();
+  document.querySelectorAll('#settings-content .stile-grid').forEach(grid=>{
+    const tiles = [...grid.querySelectorAll('.stile')];
+    let anyVisible = false;
+    tiles.forEach(tile=>{
+      const match = !q || tile.textContent.toLowerCase().includes(q);
+      tile.classList.toggle('search-hidden', !match);
+      if(match) anyVisible = true;
+    });
+    grid.classList.toggle('search-hidden', !anyVisible);
+    const label = grid.previousElementSibling;
+    if(label && label.classList.contains('settings-zone-label')) label.classList.toggle('search-hidden', !anyVisible);
+  });
+}
+// One-line "current state" summary shown on each tile before it's expanded
+// (2026-07 modular-dashboard redesign) — read straight from the same form
+// elements SETTINGS_FIELDS already loads/saves, so a tile's summary can never
+// drift out of sync with what Save settings would actually persist.
+const SETTINGS_TILE_STATES = [
+  { id:'tile-state-require-auth', compute: () => (document.getElementById('require-admin-auth')||{}).checked ? 'On, every device' : 'Off' },
+  { id:'tile-state-scoring-input', compute: () => (document.getElementById('default-scoring-input')||{}).value === 'pad' ? 'Pad' : 'Dartboard' },
+  { id:'tile-state-accessibility', compute: () => (document.getElementById('colorblind-mode')||{}).checked ? 'Colorblind palette on' : 'Off' },
+  { id:'tile-state-voice', compute: () => {
+      if(!(document.getElementById('voice-enabled')||{}).checked) return 'Off';
+      const subs = ['voice-turn-score','voice-no-score','voice-checkout-req','voice-180','voice-bigfish','voice-match-progress'];
+      const on = subs.filter(id=>(document.getElementById(id)||{}).checked).length;
+      return `On · ${on} of ${subs.length} call-outs`;
+    } },
+  { id:'tile-state-sharecard', compute: () => {
+      const v = (document.getElementById('card-tagline')||{}).value;
+      return (v && v !== DEFAULT_CARD_TAGLINE) ? 'Custom tagline' : 'Default tagline';
+    } },
+  { id:'tile-state-data-collection', compute: () => (document.getElementById('collect-dart-timing')||{}).checked ? 'On' : 'Off' },
+  { id:'tile-state-scoreboard', compute: () => {
+      const v = (document.getElementById('scoreboard-layout')||{}).value;
+      return v === 'compact' ? 'Compact' : v === 'minimal' ? 'Minimal' : 'Full';
+    } },
+  { id:'tile-state-heatmap', compute: () => (document.getElementById('heatmap-style')||{}).value === 'scorched' ? 'Scorched' : 'Classic' },
+  { id:'tile-state-smart-home', compute: () => (document.getElementById('ha-url')||{}).value ? 'URL set' : 'Not set' },
+];
+function refreshSettingsTileStates(){
+  SETTINGS_TILE_STATES.forEach(t=>{
+    const el = document.getElementById(t.id);
+    if(el) el.textContent = t.compute();
+  });
+  const pinEl = document.getElementById('tile-state-player-pins');
+  if(pinEl){
+    const pinCount = roster.filter(n=>prefs[n] && prefs[n].hasPin).length;
+    pinEl.textContent = pinCount ? `${pinCount} protected` : 'None set';
+  }
 }
 // docs/archive/data-export-roadmap.md: per-player export, admin-only. Reuses the already-loaded
 // `roster` array (populated by DB.loadAll()/refreshStats()) rather than a fresh fetch --
@@ -18109,6 +18197,15 @@ function showBackendErrorScreen(){
     Backend.get('/api/settings/heatmap-number-style').then(ns => { heatmapNumberStyle = ['molten_seam','chalk_ledger'].includes(ns.style) ? ns.style : 'original'; }).catch(()=>{}),
   ]);
   document.body.classList.toggle('colorblind', colorblindMode);
+  // Settings tiles (2026-07 modular-dashboard redesign) show a live one-line
+  // summary of each setting's current value — refresh it as the admin edits a
+  // field, not just once at page load, via delegation instead of an onchange
+  // on every individual control.
+  const settingsContent = document.getElementById('settings-content');
+  if(settingsContent){
+    settingsContent.addEventListener('input', refreshSettingsTileStates);
+    settingsContent.addEventListener('change', refreshSettingsTileStates);
+  }
   restoreSetup();
   sanitizeSlots();
   renderPlayers();

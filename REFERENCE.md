@@ -3323,6 +3323,49 @@ in `backup-lib.js`): the `settings.backup_retention_days` value if one has been
 set from Settings → Backups, else `BACKUP_RETENTION_DAYS`, else the 7-day
 default.
 
+### Settings page visual redesign — Modular Dashboard + Search (2026-07)
+
+No new backend endpoint or data shape, no change to any individual setting's
+own semantics — a `/frontend-design` restyle of how the existing 17 settings
+sections (Admin accounts, Require admin login to play, Player PINs, Scoring,
+Accessibility, Voice Announcements, Shareable Moments, Data Collection, Live
+Scoreboard, Heatmap, Smart Home Integration, Daily Challenge, Server Errors,
+Backups, Data Export, Merge Players, Danger Zone) are presented and navigated
+in `frontend/index.html`, replacing the previous 4-tab-plus-accordion layout:
+
+- **Modular dashboard tiles** (`.stile`): every setting is a 2-column grid tile
+  (`.stile-grid`) that shows a one-line current-state summary up front —
+  "On, every device", "3 protected", "Scorched", "Not set" — computed by
+  `refreshSettingsTileStates()`/`SETTINGS_TILE_STATES` straight from the same
+  form elements `SETTINGS_FIELDS` already loads/saves, so a tile's summary can
+  never drift out of sync with what **Save settings** would actually persist.
+  Refreshed live as the admin edits a field (event delegation on `input`/
+  `change` at the `#settings-content` container, not a per-field `onchange`),
+  not just once at page load. Admin accounts' and Player PINs' counts come
+  from `renderAdminsList()`'s response and the already-loaded `roster`/`prefs`
+  respectively, since neither is a `SETTINGS_FIELDS` entry. The six admin-tool
+  tiles that aren't a toggle/value at all (Daily Challenge, Server Errors,
+  Backups, Data Export, Merge Players, Danger Zone) show a static one-line
+  description instead of a live state, deliberately — an eagerly-fetched
+  "0 recent errors"/"last backup: today" figure isn't worth a network round
+  trip just for the collapsed tile face.
+- Tapping a tile's header expands it to the full grid row (`.stile.expanded`,
+  `grid-column:1/-1`) rather than squeezing its existing detail body into a
+  half-width column — `toggleSettingsSection()` still owns the same show/hide
+  + chevron-rotate behavior it always has, just also toggles this class.
+- Zones (Access & Account / Gameplay & Display / Integrations / Admin & Danger
+  Zone) are now continuous zone-label headings over their own tile grid rather
+  than tab-gated panels — the old `.player-tabs`/`switchSettingsTab()` tab bar
+  and the `.settings-group[data-group]` `hidden` gating are gone; every zone
+  is always on the page at once. Each zone has a left-border accent color
+  (gold/blue/green/red) as a redundant visual grouping cue layered on top of
+  the always-present zone-label text — never the only signal for which zone a
+  tile belongs to.
+- **Search box** (`#settings-search-input` → `filterSettingsTiles()`): filters
+  tiles by their own rendered text (title + collapsed state line), so a new
+  tile's search behavior never needs a hand-maintained keyword entry. A zone's
+  label and grid hide together once every tile beneath it is filtered out.
+
 ### Settings → Backups (admin-gated UI + API)
 
 Lets an admin manage backups from the app instead of needing shell access to
