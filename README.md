@@ -6,9 +6,9 @@
 
 A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player statistics, and no external dependencies.
 
-**v0.14.0**
+**v0.20.0**
 
-You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, an [86-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. A solo [Checkout Trainer mode](#new-game) is a no-dartboard mental drill — given a target score, tap out the fewest-darts checkout from memory and get graded instantly — with an untimed Freeform mode and a 60-second Checkout Blitz sprint with its own leaderboard. Two guided practice drills, [🧭 Around the Clock and 🗺️ Around the World](#new-game), turn the app's existing completion tracking into active solo sessions with live progress feedback. All data lives in a SQLite database on your own server.
+You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [172-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. A solo [Checkout Trainer mode](#new-game) is a no-dartboard mental drill — given a target score, tap out the fewest-darts checkout from memory and get graded instantly — with an untimed Freeform mode and a 60-second Checkout Blitz sprint with its own leaderboard. Two guided practice drills, [🧭 Around the Clock and 🗺️ Around the World](#new-game), turn the app's existing completion tracking into active solo sessions with live progress feedback. All data lives in a SQLite database on your own server.
 
 > Looking for exact stat formulas, achievement trigger conditions, the full database schema, or how a feature works internally (e.g. to debug it)? See **[REFERENCE.md](REFERENCE.md)** — the technical reference manual, kept up to date alongside this README.
 
@@ -22,6 +22,7 @@ You enter every dart individually — multiplier first, then the number — and 
   - [Home](#home)
   - [New Game](#new-game)
   - [Scoring](#scoring)
+  - [Saved Games](#saved-games)
   - [Achievements & Badges](#achievements--badges)
   - [Daily Challenge](#daily-challenge)
   - [Shareable Moments](#shareable-moments)
@@ -62,6 +63,32 @@ A separate compose file runs on port **8056** with its own isolated database:
 docker compose -f docker-compose.dev.yml up -d --build
 ```
 
+### Live test / internet-facing environment
+
+A third compose file, `docker-compose.live-test.yml`, is preconfigured for a server open to
+the internet (its own network segment, behind a TLS-terminating reverse proxy you control) —
+`COOKIE_SECURE`/`TRUST_PROXY` already set correctly, on port **8066** with its own isolated
+database. Read the file's header comment before deploying it, and see "Exposing this to the
+internet" below either way:
+
+```bash
+docker compose -f docker-compose.live-test.yml up -d --build
+```
+
+### UI testing environment
+
+`docker-compose.ui-testing.yml` runs whatever's checked out on the `ui-testing` branch, on
+port **8066** with its own isolated database — same pattern as the dev compose file above,
+just pointed at a different branch/port pairing:
+
+```bash
+docker compose -f docker-compose.ui-testing.yml up -d --build
+```
+
+**Port note:** this shares port 8066 with the live-test compose file above. Don't run both
+on the same host at once without changing one of the two ports (and the matching `PORT=` env
+var) first.
+
 ### Port
 
 Change the port by editing `docker-compose.yml` — update both sides of `"8046:8046"` and the `PORT=` env var to the same number.
@@ -90,19 +117,23 @@ The landing page shows a live snapshot of all-time activity:
 
 **Activity:** Players · Games played *(completed H2H matches — practice, solo, and Daily Challenge sessions don't count as games)* · Sets played · H2H legs thrown · Practice legs thrown
 
-**Achievements:** Ton+ finishes (100+ checkouts) · 180s · Big Fish · Highest checkout ever recorded
+**Achievements:** Ton+ finishes (100+ checkouts) · a featured **Highest Checkout Ever** panel (all-time record, independent of whichever H2H/Practice tab or game-type is selected below) *(180s and Big Fish aren't duplicated up here as plain counts — see their own Hall of Fame sections in the leaderboards below)*
 
 **This week / Last game played** — legs thrown today and this week, darts thrown this week, and a summary of the most recently completed game (players, category, winner, and when).
 
-**H2H / Practice toggle** — switches the leaderboards below between head-to-head and solo/practice stats. A second game-type toggle — **X01 / Cricket / Doubles Practice / Checkout Trainer / Around the Clock / Around the World** — switches the leaderboards between each game type's own stat vocabulary (the solo-only entries — Doubles Practice, Checkout Trainer, Around the Clock, and Around the World — only appear while the Practice tab is selected). (Just Chuckin' It isn't on this toggle — it has no win/opponent-based stats to rank on a leaderboard; its stats are Player Profile-only.)
+**🌙 Tonight's Recap** — appears once at least one H2H game has completed today: a one-tap digest of the night so far (game count, player count, badges earned, personal bests set), opening a full recap screen with a date picker (any past night is recomputable for free — nothing about the recap is stored). The recap screen shows the night's results (per-matchup win/loss records, or a flat list for 3+ player games), each player's own tonight-only stats (games won/lost, darts thrown, best visit, best leg average, 180s, ton+ checkouts — best visit/leg scoped to X01), a light "also tonight" line for any solo/practice activity, badges earned, personal bests set (compared against each player's own best from every night before this one), and a chronological moments timeline (180s, high checkouts, match wins, badges). A **📤 Share** button renders the whole night as a single summary card through the same shareable-moment card engine every other achievement uses.
+
+**H2H / Practice toggle** — switches the leaderboards below between head-to-head and solo/practice stats. A second game-type toggle — **X01 / Cricket / Baseball / Shanghai / Halve-It / The Pressure Chamber / Doubles Practice / Bob's 27 / 121 Checkout Ladder / The Gauntlet / Dead Man Walking / Checkout Trainer / Around the Clock / Around the World / Killer / Marathon Mode** — switches the leaderboards between each game type's own stat vocabulary (the solo-only entries — Doubles Practice, Bob's 27, 121 Checkout Ladder, The Gauntlet, Dead Man Walking, Checkout Trainer, Around the Clock, Around the World, and Marathon Mode — only appear while the Practice tab is selected; **Killer** is the inverse — always H2H, since the whole mechanic needs opponents to attack — and only appears while the H2H tab is selected). (Just Chuckin' It isn't on this toggle — it has no win/opponent-based stats to rank on a leaderboard; its stats are Player Profile-only.)
+
+**📈 Household Ratings** — always visible regardless of which game-type tab is selected, since it's a single rating combined across every competitive game type (X01, Cricket, Baseball — "who beats whom," not a per-game-type number). Shows rating + win/loss record, ranked descending, for every player with at least 5 rated H2H games. See [Player Profile](#player-profile) for a player's own rating, rank, and rating-over-time chart, and [Achievements & Badges](#achievements--badges) for its two badges.
 
 **X01 leaderboards:**
 - 3-dart average leaderboard
 - Most Wins (win rate) — H2H only
 - Fewest Trebleless Visits (lowest trebleless rate first — fewer is better)
 - Ton+ Finish Rate
-- Highest Checkout Ever (within that mode — the "Highest checkout ever recorded" figure in Achievements above is separate and always all-time)
 - Average Pace (darts/minute) — appears once dart-timing data exists, see [Settings](#settings)
+- Best First-9 Average — minimum 20 legs
 
 **X01 Hall of Fame sections:**
 - 🎯 **180s** — every player who has thrown a maximum, with count and most recent date
@@ -121,6 +152,24 @@ The landing page shows a live snapshot of all-time activity:
 - Doubles % leaderboard — minimum 5 rounds played, so one lucky round can't top the board
 - Best Round — each player's own best single round (most doubles hit; a tie is broken by fewest darts)
 
+**Bob's 27 leaderboard** (switching the toggle to Bob's 27 — no mode param, always solo, only shown outside the H2H tab):
+- 🎯 **Best Run — Final Score** — each player's own single best-ever run, ranked descending. No minimum-runs floor (a peak single-run value, like Checkout Blitz's leaderboard — a single legendary run, up to and including a perfect 1,287, is exactly the kind of feat this exists to surface).
+
+**121 Checkout Ladder leaderboard** (switching the toggle to 121 Checkout Ladder — no mode param, always solo, only shown outside the H2H tab):
+- 🧗 **Best Run — Highest Target Reached** — each player's own single best-ever target, ranked descending. No minimum-attempts floor, same "a peak single-run value" reasoning as Bob's 27's own leaderboard above.
+
+**The Gauntlet leaderboard** (switching the toggle to The Gauntlet — no mode param, always solo, only shown outside the H2H tab):
+- 🥋 **Best Run — Lowest Total Scars** — each player's own single best (lowest) completed-run total, ranked **ascending** — the one leaderboard in this app sorted that direction, since fewer Scars is better here.
+
+**Dead Man Walking leaderboard** (switching the toggle to Dead Man Walking — no mode param, always solo, only shown outside the H2H tab):
+- 💀 **Best Run — Most Walked Out** — each player's own single best-ever run, ranked descending by how many of the 15 rounds they Walked Out of. No minimum-runs floor, same "a peak single-run value" reasoning as Bob's 27/121 Checkout Ladder's own leaderboards above.
+
+**Killer leaderboard** (switching the toggle to Killer — no mode param, always H2H, only shown outside the Practice tab):
+- 🔪 **Most Wins (win rate)** — same shape as X01/Cricket's own Most Wins leaderboards, since Killer has a real winner per match.
+
+**Marathon Mode leaderboard** (switching the toggle to Marathon Mode — no mode param, always solo, only shown outside the H2H tab):
+- 🏃 **Best Session — Lowest Fatigue Split** — each player's own single best (lowest) session, ranked **ascending**, same sort direction as The Gauntlet's own leaderboard.
+
 **Checkout Trainer leaderboard** (switching the toggle to Checkout Trainer — no mode param, always solo, only shown outside the H2H tab):
 - ⏱️ **Checkout Blitz — Best Score** — each player's single best-ever 60-second run, ranked descending. No minimum-attempts floor (a peak single-run value, like Highest Checkout, not a rate).
 
@@ -137,6 +186,18 @@ A **"View full stats glossary"** link opens a shared reference explaining every 
 
 ### New Game
 
+A 2-step wizard: **choose a game** first (a categorized picker — Traditional,
+Practice & Drills, Solo Challenges, Head-to-Head Only, Special Modes — plus a
+Daily Challenge section on top showing who's already completed today's
+challenge), **then** who's playing. Picking a game expands its row in place to
+show that mode's own options (starting score, targets/variant, format, and so
+on) right there, plus a collapsed "How to play & win" disclosure — there's no
+separate options page to click through to. How many players you can pick is
+decided by the game you chose: solo-only modes allow exactly one, X01
+head-to-head stays capped at two, and every other head-to-head-capable game
+(Cricket, Baseball, Shanghai, Halve-It, Pressure Chamber, Killer) allows up to
+6.
+
 Configure a game before starting:
 
 | Setting | Options |
@@ -145,24 +206,31 @@ Configure a game before starting:
 | **Mode** | H2H (head-to-head) · Practice (solo) · 🎯 Daily Challenge · 👻 Ghost · 🧮 Checkout Trainer |
 | **Practice type** (Practice only) | Practice · Doubles Practice · Just Chuckin' It · Around the Clock · Around the World |
 | **Checkout Trainer sub-mode** (Checkout Trainer only) | Freeform (untimed) · ⏱️ Checkout Blitz (60 seconds) |
+| **Checkout Trainer difficulty** (Checkout Trainer only) | Under 40 · Under 100 · Over 100 · Full Range (2–170) |
+| **Checkout Trainer trick questions** (Checkout Trainer only) | Off (default) · 💣 On (~1 target in 8 is a bogey number — call it) |
 | **Format (X01)** | 501 · 301 · 170 · 101 (dropdown) |
 | **Targets (Cricket)** | Classic (15–20, Bull) · Custom (any 7 numbers) |
+| **Variant (Cricket)** | Standard (highest points wins) · Cut-throat (bonus points land on opponents instead, lowest points wins) |
 | **Legs per set** | 1 – 9 |
 | **Sets per game** | 1 – 9 |
-| **Players** | Select from the roster (up to 6); H2H requires 2+ |
+| **Players** | Select from the roster (cap depends on the chosen game — solo-only modes allow exactly 1, X01 H2H stays at 2, other H2H-capable games allow up to 6) |
 | **Finish rule (X01)** | Double out · Single out (set per player) |
 
-H2H mode requires at least two players selected. Practice mode can be played solo or with others and is tracked separately from H2H statistics.
+Solo-only modes are restricted to exactly one player automatically. Every other head-to-head-capable game requires at least two players selected, and is tracked separately from Practice statistics.
 
-Players with a PIN set show a 🔒 next to their name in the dropdown. When exactly two players are selected in H2H mode, a banner shows their all-time head-to-head record (e.g. *"H2H: Alice leads 3–0 (3 games)"*).
+Players with a PIN set show a 🔒 next to their name in the dropdown.
 
-**Cricket** is a second game type alongside X01. Choosing **Classic** locks the targets to the standard 15, 16, 17, 18, 19, 20, and Bull. Choosing **Custom** reveals a 1–20-plus-Bull picker — pick any numbers you like, but always exactly 7 (the same count as classic); Start is blocked until exactly 7 are checked, with a running "N of 7 selected" count and a one-tap "Start from classic" fill-in. Once a Cricket game begins, the scoring screen and live scoreboard both switch to Cricket's own marks/closed/points display — the X01 Pad and Dartboard input screens are never shown during a Cricket game, and there's no per-game choice between them the way there is for X01. See [Scoring](#scoring) below and `REFERENCE.md` for the exact marks/points rules. Cricket has its own stat bubbles (MPR, 9 Marks, Win Rate, Games Played, Darts Thrown, Darts/Won Leg), Personal Bests, 4 achievements (9 Marks, Perfect Leg, Whitewash, and Comeback Kid), and its own Home page leaderboard set (Marks Per Round, Most Cricket Wins, 9 Marks, Perfect Leg) — a game-type toggle on both the Home page and the Player Profile switches between it and every other game type.
+**When a game finishes**, the GAME OVER screen offers **🔁 Play Again** (instantly relaunches the identical game — same game type, same players, same legs/sets format) and **🏠 Return Home**, with a smaller "Choose a different game" link back to a blank New Game screen if you'd rather reconfigure from scratch. Tournament matches show **Back to bracket** instead, since replaying outside the bracket isn't a tournament action.
+
+**Handicap (optional)** — a collapsed disclosure appears in X01's options step once 2 or more players are selected, letting a weaker player start the leg from a lower score (e.g. 401 instead of 501) — a per-player picker, no handicap by default. Nothing about the throwing changes, just the starting line; the [Live Scoreboard](#live-scoreboard) shows a "STARTED 401" tag next to a handicapped player's name so it's visible, not mysterious. Handicapped wins still count normally toward win rate and streaks — the whole point is a fair contest — but a handicapped game never enters the [📈 Household Ratings](#home) calculation (a compensated result isn't a fair strength comparison), and a handicapped leg's shortened-start finish never counts toward a nine-darter or the "fewest darts to finish" Personal Best.
+
+**Cricket** is a second game type alongside X01. Choosing **Classic** locks the targets to the standard 15, 16, 17, 18, 19, 20, and Bull. Choosing **Custom** reveals a 1–20-plus-Bull picker — pick any numbers you like, but always exactly 7 (the same count as classic); Start is blocked until exactly 7 are checked, with a running "N of 7 selected" count and a one-tap "Start from classic" fill-in. A **Standard / Cut-throat** toggle sits alongside the targets: Standard is the classic rule (closing a number an opponent hasn't lets you keep scoring on it, highest points wins); **Cut-throat** inverts it — those same bonus points land on *every* opponent who still has the number open instead (each gets the full amount, not a split), and lowest points (once everything's closed) wins. Cut-throat is legal with 2 players but really comes alive with 3+, where a single big visit can hurt two rivals at once. Once a Cricket game begins, the scoring screen and live scoreboard both switch to Cricket's own marks/closed/points display (with a "Pts (lowest wins)" footer label in cut-throat games, on both the controller and the [Live Scoreboard](#live-scoreboard)) — the X01 Pad and Dartboard input screens are never shown during a Cricket game, and there's no per-game choice between them the way there is for X01. See [Scoring](#scoring) below and `REFERENCE.md` for the exact marks/points rules. Cricket has its own stat bubbles (MPR, 9 Marks, Win Rate, Games Played, Darts Thrown, Darts/Won Leg), Personal Bests, 5 achievements (9 Marks, Perfect Leg, Whitewash, Comeback Kid, and cut-throat's own 🔪 Stone Cold), and its own Home page leaderboard set (Marks Per Round, Most Cricket Wins, 9 Marks, Perfect Leg) — a game-type toggle on both the Home page and the Player Profile switches between it and every other game type. Cricket's mark-based stats (MPR, 9 Marks) count games from both variants together; there's no points-based leaderboard for either variant to need separating.
 
 **Daily Challenge mode** turns New Game into today's [Daily Challenge](#daily-challenge) launcher instead of a regular match: Starting Score and Format hide (the challenge decides them), and a gold **Today's Challenge** panel shows the challenge description plus whoever is currently in the player slot's streak and results history. Selecting who's attempting it uses the exact same single "Choose player" slot as Practice mode — a PIN-protected player still needs their PIN entered, since it's the identical gate every other slot uses, not a separate picker of its own. The **Start game** button relabels to **Start Challenge** while this mode is active. Daily Challenge is X01-only — the Game-type choice is hidden and forced back to X01 whenever this mode is selected.
 
 **👻 Ghost mode** races a replay of one of your own past legs — literally your prior self, thrown dart-by-dart from a leg you actually won, not a simulated opponent. Choosing it shows a gold **Race a past leg** panel listing that player's past won legs (date, category, average, darts used) once a player is picked — the same single-player slot as Practice mode. You can also jump straight into this from a **👻** button next to **Best Leg Average** on a [Player Profile](#player-profile)'s Personal Bests, which preselects that specific leg. The ghost throws back automatically right after each of your own turns (not at the leg's real historical pace) — its card on the scoring screen and Live Scoreboard is labeled **"👻 Ghost (date)"**. Ghost mode is X01-only, always exactly one leg, and always tracked as practice: your own darts record normally, but nothing is recorded for the ghost, and it can never trigger a head-to-head badge like Comeback Kid or Giant Slayer.
 
-**Doubles Practice mode** is a solo drill for practicing specific doubles — choose one or more from a 1–20-plus-Bull picker (any number, no fixed count), then throw. All selected doubles stay **live at once** — you choose which one to aim at each dart, not a forced rotation. A **round** keeps going, however many darts it takes, until one of two things happens: a single or treble lands on one of your target numbers ("so close" — right number, wrong ring), or a double lands on a number that isn't one of your targets ("wrong double"). A genuine miss elsewhere on the board doesn't end anything — just keep throwing. When a round ends, **Start next round** resets the tally and keeps the same targets. The scoring screen and Live Scoreboard show the live target set, this round's hit count and darts-thrown, and the running doubles percentage; there's no numeric score, no opponent, and no Enter-turn step — every dart commits the instant it's thrown. See [Player Profile](#player-profile) for its own stat bubbles (Doubles %, Darts/Round, Doubles Hit/Round) and Personal Bests (longest round, most doubles in a round), reachable via the same game-type toggle. Undo Last Dart is supported, one dart deep.
+**Doubles Practice mode** is a solo drill for practicing specific doubles — choose one or more from a 1–20-plus-Bull picker (any number, no fixed count), then throw. All selected doubles stay **live at once** — you choose which one to aim at each dart, not a forced rotation. A **round** keeps going, however many darts it takes, until one of two things happens: a single or treble lands on one of your target numbers ("so close" — right number, wrong ring), or a double lands on a number that isn't one of your targets ("wrong double"). A genuine miss elsewhere on the board doesn't end anything — just keep throwing. When a round ends, **Start next round** resets the tally and keeps the same targets. The scoring screen and Live Scoreboard show the live target set, this round's hit count and darts-thrown, and the running doubles percentage; there's no numeric score, no opponent, and no Enter-turn step — every dart commits the instant it's thrown. See [Player Profile](#player-profile) for its own stat bubbles (Doubles %, Darts/Round, Doubles Hit/Round), Personal Bests (longest round, most doubles in a round), and 5 achievements (a 4-tier lifetime doubles-hit ladder plus 🎪 Ring Master for hitting every double lifetime — see [Achievements & Badges](#achievements--badges)), reachable via the same game-type toggle. Undo Last Dart is supported, one dart deep.
 
 **Just Chuckin' It** is completely freeform, unscored practice — no starting score, no bust, no win, no opponent, just throwing dart after dart until you press **End game**. Selecting it on the [New Game](#new-game) page shows a short explanation of what it's for. The point is pure warm-up/muscle-memory reps without any game pressure at all. Every dart commits instantly (no Enter-turn step, same as Doubles Practice), and there's undo support for the last dart. Its stats are heatmap-heavy on purpose: [Player Profile](#player-profile) gets a [Dartboard Heatmap](#player-profile) (shared with every other game type, see below) plus 8 stat bubbles (Darts Thrown, Three-Dart Average, 180s, Treble/Bull/Double %, Sessions Played, Avg Darts/Session), a 2-field Personal Bests (longest session, most trebles in a session), and 19 achievements (18 laddered milestones plus its own 180! — see [Achievements & Badges](#achievements--badges)) so there's always another one within reach. Darts thrown in this mode count toward your lifetime/daily/weekly total darts thrown (the one deliberate exception) but never toward any X01/Cricket/Doubles Practice stat, average, or leaderboard.
 
@@ -170,15 +238,29 @@ The **Live Scoreboard** shows a live dartboard heatmap for this mode too, gradua
 
 **🧮 Checkout Trainer** is a pure mental-recall drill, not a throwing game — no dartboard is involved at all. The app gives you a target score and you tap out your proposed checkout (up to 3 darts) using the same Pad or Dartboard input you already use everywhere else; on submit it's graded instantly: ✅ **Optimal** (the objectively fewest possible darts), ⚠️ **Legal, not optimal** (a valid finish, just not the shortest route), or ❌ **Not a legal finish**. Anything short of optimal reveals the best route so you actually learn something from every attempt, not just get scored. This is deliberately different from Daily Challenge's **Checkout Sprint** format, which measures a real physical throw at a real target — Checkout Trainer never involves a real dart, it tests checkout *knowledge*, not throwing performance.
 
+An optional **💣 trick questions** toggle (off by default, chosen at New Game) makes roughly 1 target in 8 an actual **bogey number** — a score with no possible 3-dart checkout (159, 162, 163, 165, 166, 168, 169 under double-out). Spot it and press the **🚫 No possible checkout** button instead of answering: a correct call counts as an optimal answer (and 2 Checkout Blitz points), tapping out any route against a bogey grades as a trick-question miss, and calling a *finishable* target impossible is equally wrong — the real route is revealed. Bogey numbers only exist above 100, so the Under 40/Under 100 difficulty ranges are unaffected. Works in both sub-modes.
+
 Two sub-modes:
 - **Freeform** — untimed, runs at your own pace until you press **End game**. [Player Profile](#player-profile) tracks Accuracy %, Optimal % (the headline stat), and Attempts as stat bubbles, plus a Personal Bests block (Toughest Checkout Solved, Best Optimal Streak).
-- **⏱️ Checkout Blitz** — a 60-second sprint against a wall-clock countdown (announced at 30/10/5 seconds remaining for screen-reader users). Every submission — right or wrong — immediately serves the next target; a round already in progress when time runs out is always allowed to finish. Optimal answers score 2 points, legal-but-not-optimal score 1, illegal scores 0, so rushing to *any* finish scores worse than taking the extra half-second to find the best one. Results show your final score plus the optimal/legal/illegal breakdown. Your best-ever run and its date appear on a dedicated Home page leaderboard, and your Personal Bests block adds Best Checkout Blitz Score and Avg Checkout Blitz Score.
+- **⏱️ Checkout Blitz** — a 60-second sprint against a wall-clock countdown (announced at 30/10/5 seconds remaining for screen-reader users). Every submission — right or wrong — immediately serves the next target; the buzzer is a hard stop (a round still mid-entry when time runs out is discarded ungraded, so pausing past the deadline can't sneak in a late answer). Optimal answers score 2 points, legal-but-not-optimal score 1, illegal scores 0, so rushing to *any* finish scores worse than taking the extra half-second to find the best one. Results show your final score plus the optimal/legal/illegal breakdown. Your best-ever run and its date appear on a dedicated Home page leaderboard, and your Personal Bests block adds Best Checkout Blitz Score and Avg Checkout Blitz Score.
 
-Checkout Trainer has its own 33-badge set (28 laddered milestones across 5 ladders — Lifetime Attempts, Lifetime Optimal Answers, Session Endurance, Best Optimal Streak, and Checkout Blitz's own Best Blitz Score — plus 5 one-off badges: 🐟 The 170 Club, 🎯 One-Darter, 🌟 Perfectionist, 💎 Perfect Minute, and 📸 Photo Finish). Like Just Chuckin' It's milestones, every laddered badge here is a permanent, once-earned achievement. See [Achievements & Badges](#achievements--badges) below.
+Checkout Trainer has its own 34-badge set (28 laddered milestones across 5 ladders — Lifetime Attempts, Lifetime Optimal Answers, Session Endurance, Best Optimal Streak, and Checkout Blitz's own Best Blitz Score — plus 6 one-off badges: 🐟 The 170 Club, 🎯 One-Darter, 🌟 Perfectionist, 💎 Perfect Minute, 📸 Photo Finish, and 💣 Bogey Buster for a first correct "no possible checkout" call with trick questions on). Like Just Chuckin' It's milestones, every laddered badge here is a permanent, once-earned achievement. See [Achievements & Badges](#achievements--badges) below.
 
-**🧭 Around the Clock** is a guided solo drill: hit every number 1 through 20 as a single, in any order. A live progress grid on the scoring screen and Live Scoreboard shows exactly which numbers are still outstanding, updating after every dart. A round ends the instant all 20 are hit — **Start Next Clock** resets the grid and starts a fresh round. There's no numeric score, no opponent, and no Enter-turn step, same as Doubles Practice/Just Chuckin' It — every dart commits the instant it's thrown, and Undo Last Dart is supported. The first time you ever complete a round, you earn the **Guided Clock** badge. See [Player Profile](#player-profile) for its own stat bubbles (Completions, Darts/Completion, Darts Thrown) and Personal Bests (fastest completion), and the Home page for its own leaderboards.
+**🧭 Around the Clock** is a guided solo drill: hit every number 1 through 20 as a single, in any order. A live progress grid on the scoring screen and Live Scoreboard shows exactly which numbers are still outstanding, updating after every dart. The clock is complete the instant all 20 are hit — the game ends right there with a **Clock Complete** results screen (darts thrown, trebles, doubles, misses, and time taken) on both the scoring screen and the Live Scoreboard, plus the same **🔁 Play Again**/**🏠 Return Home** options every other completed game gets. There's no numeric score, no opponent, and no Enter-turn step, same as Doubles Practice/Just Chuckin' It — every dart commits the instant it's thrown, and Undo Last Dart is supported. The first time you ever complete a clock, you earn the **Guided Clock** badge. See [Player Profile](#player-profile) for its own stat bubbles (Completions, Darts/Completion, Darts Thrown) and Personal Bests (fastest completion), and the Home page for its own leaderboards.
 
 **🗺️ Around the World** is the same idea applied to the game's full lifetime tracker: chip away at all 63 dart outcomes (every number 1–20 as a single, double, and treble, plus outer bull, double bull, and a miss) in one focused session. Unlike Around the Clock, progress carries across sessions — the live grid shows your combined lifetime progress, not just what you've hit today — and there's no round to finish; throw for as long as you like, then press **End game**. Reaching all 63 outcomes during a guided session earns the **Guided World** badge (separate from the existing passive **Around the World** badge, which keeps firing from any mode). See [Player Profile](#player-profile) for its own stat bubbles (Sessions Played, Darts Thrown) and Personal Bests (sessions played, lifetime progress), and the Home page for its own leaderboard.
+
+**🎯 Bob's 27** is Bob Anderson's renowned doubles-practice routine: start on **27 points**, then work your way up the board one double at a time — round 1 targets D1, round 2 D2, and so on through D20. Each round is 3 darts at that round's own double only: any dart that lands on it adds double its value to your running score (all three hit D1 = +6, all three hit D20 = +120), but a round where all three darts miss it subtracts that same value instead — there's no partial credit for hitting the right number with the wrong ring. The run ends the instant your running score drops to zero or below, or the moment you clear D20 — whichever comes first. The scoring screen shows the live round-by-round scorecard (which double is live, each round's own +/− result) and your current running score; Save Game mid-run and Undo Last Turn are both supported. Hit all three darts on a round for a **🎯 Full House**, and a flawless run — every one of the 20 rounds with all three darts — earns **🏔️ The Full Anderson** (a perfect final score of exactly 1,287). See [Player Profile](#player-profile) for its own stat bubbles (Survival Rate, Avg Final Score, Runs Played, Darts Thrown, Doubles Hit %), Personal Bests (Best Final Score, Deepest Double Reached on a Fail), a 5-tier survival/score achievement ladder (Survivor · Century · Quarter Grand · Half Grand · Four Figures) checked against each run's own final score, and the Home page for its own arcade-style high-score leaderboard (single best-ever run, no minimum floor).
+
+**🧗 121 Checkout Ladder** is the classic solo checkout ladder — the *physical* sibling of Checkout Trainer below (that one asks what you'd throw; this one makes you actually throw it). Start on **121**, always double out, with up to **3 visits (9 darts)** to check it out. Check out and the target climbs one rung; use all 3 visits without checking out and it drops one rung instead (floored at **61** — every attempt stays a genuine 2–3 dart combination finish). Every visit is a real X01-shaped throw, bust rules included; play as long as you like and press **End game** whenever you're done. The scoring screen shows the live target, your remaining score, and which visit (of 3) is live; Save Game mid-attempt and Undo Last Turn are both supported. Reach rung 125/130/140/150/160/170 for a 6-tier climbing ladder, and check out 170 itself for **🧗 Peak Bagged** — the harder, separate feat of actually finishing it, not just reaching it. See [Player Profile](#player-profile) for its own stat bubbles (Attempts, Success Rate, Current Ladder Position, Darts Thrown), Personal Bests (Highest Target Reached, Fewest Darts on the Highest Checkout), and the Home page for its own arcade-style high-score leaderboard (single best-ever target reached, no minimum floor).
+
+**💀 Dead Man Walking** is a solo drill built entirely from your own weak spots: **15 rounds**, each one dropping you mid-checkout on one of *your own* historically toughest X01 finishes (drawn from real double-out history in the 32–170 range, weighted by how often you've busted or failed to close that exact number — see `REFERENCE.md` for the exact formula), with a personalized **dart budget one tighter than you'd usually need** to finish it. Every round is a real X01-shaped visit, double out always, bust rules included — check it out before the budget runs dry and you've **Walked Out**; bust, or run out of darts first, and you're **Executed**. Both your 15 targets and their budgets are computed once, server-side, from a snapshot of your own history the moment the run starts, then locked for the whole session — there's no live recalculation and no way to influence which numbers you get. A player without enough double-out history yet instead draws from the same curated checkout pool Daily Challenge uses, so the drill works from the very first run. The scoring screen shows the live round (N of 15), your deficit, a dart-count countdown to the budget, and your running Walked Out tally; Save Game mid-run and Undo Last Turn are both supported. How many of the 15 you Walk Out of lands on a result from **Executed** up through **Pardoned**. See [Player Profile](#player-profile) for its own stat bubbles (Runs Completed, Avg Walked Out/Run, Bust Rate, Out-of-Darts Rate, Avg Margin, Longest Walked-Out Streak), a Personal Best (Most Walked Out in a Run), the Home page for its own arcade-style high-score leaderboard (single best-ever run, no minimum floor), and 14 achievements (three milestone ladders — lifetime runs completed, lifetime rounds Walked Out, and a longest Walked-Out streak that can span across runs — plus 🕊️ Full Reprieve, ⚰️ Pardoned, and 💀 Last Request).
+
+**🥋 The Gauntlet** is a 20-station solo endurance warm-up — one station per board number, in a fixed order that never puts two nearby numbers back to back (so you're always re-targeting across the board, never settling into one spot). Each station is 3 darts, strictly in order: the single, then the treble, then the double of that station's own number — no partial credit for landing the right number on the wrong ring. Miss 2 of the 3 and you get one repeat attempt at that same station; miss all 3 and it's a Deep Scar (counts double toward your total). A run always ends after all 20 stations settle (~15 minutes), landing on a result from Unmarked (0-5 total Scars) up through The Gauntlet Wins (31+). The scoring screen shows the live station, which of the 3 tasks is next, and the running Scar tally; Save Game mid-run and Undo Last Turn are both supported. See [Player Profile](#player-profile) for its own stat bubbles (Runs Completed, Avg Total Scars, Clean Station Rate, Deep Scar Rate, Retry Rate), a Personal Best (Lowest Total Scars — the one ascending-is-better Personal Best in this app), the Home page for its own leaderboard (also sorted ascending), and the **Gauntlet Scar Map** — a per-station weakness heatmap, averaged across every completed run you've ever finished, that accumulates the more you play.
+
+**🔪 Killer** is an elimination-format head-to-head game, always 2+ players — the only game type where every player's legal target is their own, randomly assigned. When the match starts, each player is dealt a random number, 1-20 (choose the become-a-killer lives threshold — 2, 3, or 5, standard is 3 — right there in New Game). Hit your own number to build lives toward that threshold (single = 1, double = 2, treble = 3, same as scoring anywhere else); the instant you reach it, you become a **killer** and can start attacking. From then on, hitting an opponent's number removes lives from them at the same rate; drop an opponent to 0 lives and they're eliminated. Watch out for friendly fire, though — hitting your *own* double after you're already a killer costs you exactly 1 life, a genuine way to eliminate yourself. Last player standing wins the leg; real best-of-N legs and sets are supported, same as X01/Cricket/Baseball. The live scoreboard shows every player's number, lives (as pips), and killer status at a glance. See [Player Profile](#player-profile) for its own stat bubbles (Games Played, Win Rate, Avg Kills/Leg, Avg Lives Lost/Leg, Survived Without Killer Rate), a Personal Best (Most Kills in a Leg), the Home page for its own win-rate leaderboard, and 3 achievements (🩸 First Blood, 🛡️ Untouchable, 🙈 Own Worst Enemy). Killer has no Save Game support — an intentional scope decision, not a limitation.
+
+**🏃 Marathon Mode** is a 45-minute solo endurance session — not a new way to score darts, a session *wrapper* chaining ordinary, unmodified 501 practice legs back to back with no return to the New Game screen between them. A persistent banner shows the leg count and time remaining, with an **End Marathon** control to stop early (the leg in progress is left unfinished; everything completed so far is kept). The 45-minute check happens only between legs, never mid-leg, so the actual session can run a little past 45 minutes if the final leg takes a while. When it's over, you get the story: a **fatigue split** (how much slower the second half ran than the first, clamped at zero — getting *faster* isn't a fatigue problem) landing on a tier from Iron down to Running on Empty, and a **trend read** across the whole session — The Cliff (fine, then a drop-off), The Warm Machine (slow start, steady finish), Flat Line (the goal — steady the whole way), or Inconclusive (too few legs, or too irregular a shape, for a clean read). Every leg is a genuinely real 501 leg — it counts toward lifetime X01 stats, Personal Bests, and even Nine-Darter, exactly like any other practice leg. Marathon Mode has no Save Game support, same reasoning as Killer. See [Player Profile](#player-profile) for its own stat bubbles (Sessions Completed, Avg Legs/Session, Avg Fatigue Split, plus a lifetime trend-pattern breakdown), Personal Bests (Lowest Fatigue Split, Most Legs in a Session), the Home page for its own leaderboard (lowest fatigue split, ascending), and 11 achievements (two lifetime ladders — sessions completed, legs completed — plus 🛡️ Iron, 📉 Flat Line, and ⏱️ Full Distance).
 
 ---
 
@@ -249,9 +331,38 @@ choice, no checkout hints, and no bust concept:
 
 ---
 
+### Saved Games
+
+Playing someone and need to stop mid-match? Tap **⏸ Save for later** (it lives
+next to **End game**, in both Pad and Dartboard input modes) to pause an
+in-progress X01, Cricket, Baseball, Shanghai, Bob's 27, 121 Checkout Ladder, The
+Gauntlet, Dead Man Walking, or guided Around the Clock/World game — H2H or solo practice, tournament matches and
+league fixtures included. Any
+staged-but-not-yet-entered darts of the current turn are discarded (a confirm
+dialog says so); everything already recorded is kept. The app returns to the
+New Game screen, free to start other games while the paused one waits — at
+most one saved game per exact matchup and game type.
+
+Starting a New Game whose players and game type match a saved game prompts
+**Resume**, **Abandon & start fresh**, or **Cancel**. A **Saved games**
+section also appears at the top of the New Game screen itself whenever at
+least one exists, listing each with its players, a one-line position summary
+(legs/sets or round progress), and its own Resume/Abandon buttons — for
+finding a forgotten save without recreating the exact matchup. Resuming
+rebuilds the match to *exactly* where it left off — same leg, same scores,
+same thrower — by replaying every recorded dart back through the same scoring
+engine that recorded it live, not from a saved snapshot. Abandoning a saved
+game keeps its recorded stats (same as quitting a live game early); abandoning
+a tournament match instead routes to the bracket's walkover control, since a
+bracket match can't just be left dangling. See
+[REFERENCE.md §23](REFERENCE.md#23-saved-games--pause--resume) for full
+mechanics.
+
+---
+
 ### Achievements & Badges
 
-Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 4 Cricket-specific badges, 2 [Tournament](#tournaments)-specific badges, 3 Daily Challenge badges, 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!), 33 Checkout Trainer badges (28 laddered milestones across 5 ladders — 4 Freeform, 1 Checkout Blitz — plus 5 one-off badges), and 2 Practice Drills badges for the two [guided drills](#new-game). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
+Beyond 180s, Big Fish, and nine-darters, Oche tracks 33 X01 achievement badges (including a 5-tier lifetime-180s ladder and a handful of darts-culture one-offs — Bed & Breakfast, Madhouse, Shanghai) covering precision, consistency, clutch play, rivalries, and a few purely-for-fun moments every darts player recognizes, plus 5 Cricket-specific badges (including cut-throat's own 🔪 Stone Cold), 8 Baseball badges (Perfect Inning, Perfect Game, ⚾ Walk-Off, 🔄 The Cycle, and a 4-tier lifetime-runs ladder), 1 Shanghai badge (🀄 Shanghai! — win the game instantly), 2 Halve-It badges (🪓 Halved at the Death, 🛡️ No Half Measures), 15 The Pressure Chamber badges (a 4-tier lifetime-runs ladder, a 4-tier lifetime-CP-earned ladder, a 3-tier per-run full-hit-streak ladder, plus 🥶 Ice, 🎯 Nerves of Steel, ⏱️ No Warmup Needed, and 🃏 Dead Calm, Steady Hands), 5 Doubles Practice badges (a 4-tier lifetime doubles-hit ladder plus 🎪 Ring Master for hitting every double lifetime), 7 Bob's 27 badges (🎯 Full House, 🏔️ The Full Anderson, and a 5-tier survival/score ladder), 7 121 Checkout Ladder badges (a 6-tier highest-rung ladder plus 🧗 Peak Bagged for checking out 170), 14 The Gauntlet badges (a 4-tier lifetime-runs ladder, a 4-tier lifetime-clean-stations ladder, a 3-tier per-run clean-streak ladder, plus 💎 Flawless Gauntlet, 🥋 Unmarked, and 🩹 Second Wind), 14 Dead Man Walking badges (a 4-tier lifetime-runs ladder, a 4-tier lifetime-Walked-Out ladder, a 3-tier longest-streak ladder that can span across runs, plus 🕊️ Full Reprieve, ⚰️ Pardoned, and 💀 Last Request), 3 Killer badges (🩸 First Blood, 🛡️ Untouchable, 🙈 Own Worst Enemy — all recurring), 11 Marathon Mode badges (a 4-tier lifetime-sessions-completed ladder, a 4-tier lifetime-legs-completed ladder, plus 🛡️ Iron, 📉 Flat Line, and ⏱️ Full Distance), 2 Household Rating badges (👑 Top of the House, 🗡️ Upset), 2 [Tournament](#tournaments)-specific badges, 3 Daily Challenge badges, 19 Just Chuckin' It badges (18 laddered milestones plus its own 180!), 34 Checkout Trainer badges (28 laddered milestones across 5 ladders — 4 Freeform, 1 Checkout Blitz — plus 6 one-off badges), and 2 Practice Drills badges for the two [guided drills](#new-game). Each one flashes a full-screen overlay (with a **📤 Share** button — see [Shareable Moments](#shareable-moments)) the moment it happens, live during play, on both the controller and the [Live Scoreboard](#live-scoreboard).
 
 | Badge | How to earn it |
 |---|---|
@@ -279,7 +390,7 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges c
 | 🌍 **Around the World** | Hit every dart outcome at least once, over your lifetime — 63 total: singles/doubles/trebles 1–20, outer bull, double bull, and a miss |
 | 👻 **Ghost Slayer** | Win a race against a [👻 Ghost](#new-game) — a replay of one of your own past legs |
 
-**Cricket's 4 badges** — 9 Marks and Perfect Leg are its own analogs of 180 and the nine-darter; Whitewash and Comeback Kid are Cricket-native (not ports of the X01 badges of similar names — shaped around closing numbers and points instead of checkouts and remaining score) and, like their X01 counterparts, require exactly 2 players:
+**Cricket's 5 badges** — 9 Marks and Perfect Leg are its own analogs of 180 and the nine-darter, and fire the same way in either variant; Whitewash and Comeback Kid are Cricket-native (not ports of the X01 badges of similar names — shaped around closing numbers and points instead of checkouts and remaining score) and, like their X01 counterparts, require exactly 2 players (Comeback Kid's "trailing" direction flips for cut-throat, since lower points is better there); Stone Cold is cut-throat only:
 
 | Badge | How to earn it |
 |---|---|
@@ -287,6 +398,132 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges c
 | 🏆 **Perfect Leg** | Close every Cricket number using the fewest darts physically possible for that match |
 | 🧹 **Whitewash** | Win a Cricket leg without your opponent closing a single number |
 | 🔥 **Comeback Kid** | Win a Cricket leg after trailing your opponent's points by 20 or more at some point |
+| 🔪 **Stone Cold** | Win a 3+ player Cut-throat Cricket game without receiving a single point, across the whole match |
+
+**Baseball's 8 badges** — Perfect Inning and Perfect Game are its own analogs of 180 and the nine-darter; Walk-Off and The Cycle round out Baseball's coverage parity (docs/archive/culture-badges-roadmap.md Part B), plus a 4-tier lifetime-runs ladder:
+
+| Badge | How to earn it |
+|---|---|
+| 🔥 **Perfect Inning** | Score 9 runs in one Baseball inning — three trebles on target |
+| 🏆 **Perfect Game** | Win a Baseball leg with a perfect 9 runs in every one of the 9 innings — 81 total |
+| ⚾ **Walk-Off** | Win a Baseball leg in extra innings — the game went past inning 9 |
+| 🔄 **The Cycle** | Hit a single, double, AND treble of the current inning's number in one visit — 6 runs the scenic way |
+
+| Ladder | Tiers (threshold — label) |
+|---|---|
+| Lifetime Runs | 100 Rookie Season ⚾ · 500 Everyday Player 🧢 · 1,500 All-Star ⭐ · 5,000 Hall of Fame 🏟️ |
+
+**Shanghai's 1 badge** — win the game outright with a Shanghai instead of grinding out the final round:
+
+| Badge | How to earn it |
+|---|---|
+| 🀄 **Shanghai!** | Win a Shanghai game instantly — single, double, AND treble of the round's own number in one visit |
+
+**Halve-It's 2 badges** — one flavor badge for winning despite a scare on the final round, one for a spotless run:
+
+| Badge | How to earn it |
+|---|---|
+| 🪓 **Halved at the Death** | Win a Halve-It game after your own final-round visit halved your total |
+| 🛡️ **No Half Measures** | Win a Halve-It game without ever being halved |
+
+**The Pressure Chamber's 15 badges** (`docs/archive/pressure-chamber-roadmap.md`) — a lifetime-runs ladder, a lifetime-CP-earned ladder, a per-run full-hit-streak ladder, and 4 modifier-specific flavor badges:
+
+| Badge | How to earn it |
+|---|---|
+| 😬🧊🛡️🥶 **Runs ladder** (4 tiers) | Complete 5 / 25 / 100 / 250 lifetime Pressure Chamber runs |
+| 🎯😎🗿👑 **CP ladder** (4 tiers) | Earn 500 / 2,000 / 5,000 / 15,000 lifetime Composure Points |
+| 🎯🔒💎 **Streak ladder** (3 tiers) | String together 5 / 8 / 12 consecutive full hits in a single run |
+| 🥶 **Ice** | Reach the Ice Composure Rating (120+ CP) in a single run |
+| 🎯 **Nerves of Steel** | Land a full hit under Sudden Death |
+| ⏱️ **No Warmup Needed** | Land a full hit under No Warmup |
+| 🃏 **Dead Calm, Steady Hands** | Land a full hit under Dead Calm — no modifier, no excuses |
+
+**Doubles Practice's 5 badges** (docs/archive/culture-badges-roadmap.md Part B — this mode had none before) — a 4-tier lifetime doubles-hit ladder plus one completion badge:
+
+| Ladder | Tiers (threshold — label) |
+|---|---|
+| Lifetime Doubles Hit | 50 Ring Finder 🎯 · 250 Double Duty 🔁 · 1,000 Precision Expert 🔬 · 5,000 Doubles Legend 👑 |
+
+| Badge | How to earn it |
+|---|---|
+| 🎪 **Ring Master** | Hit every double, D1 through D20 plus the bull, in Doubles Practice — lifetime |
+
+**Bob's 27's 7 badges** — 🎯 Full House is its own analog of 180 (the maximum possible gain in a single round); 🏔️ The Full Anderson is a perfect run, every one of the 20 rounds hit with all three darts (final score exactly 1,287); the survival/score ladder is checked against each individual run's own final score, not a lifetime total — a run that dies with a high enough score still earns a tier:
+
+| Badge | How to earn it |
+|---|---|
+| 🎯 **Full House** | All three darts of a round land on that round's own double — the maximum possible gain |
+| 🏔️ **The Full Anderson** | Survive a perfect run — every one of the 20 rounds hit with all three darts, final score exactly 1,287 |
+
+| Ladder | Tiers (threshold — label) |
+|---|---|
+| Survival/Score | 1 Survivor 🛡️ · 100 Century 💯 · 250 Quarter Grand 🌟 · 500 Half Grand 🚀 · 1,000 Four Figures 👑 |
+
+**121 Checkout Ladder's 7 badges** — a highest-rung ladder checked against the new target just climbed to (so a tier fires the moment a climb first reaches it, even after slipping back down and re-climbing later), plus 🧗 Peak Bagged for the separate, harder feat of actually checking out 170 itself (not just reaching that rung):
+
+| Badge | How to earn it |
+|---|---|
+| 🧗 **Peak Bagged** | Check out 170 on the 121 Checkout Ladder |
+
+| Ladder | Tiers (threshold — label) |
+|---|---|
+| Highest Rung | 125 Climbing 🧗 · 130 Ascending ⛰️ · 140 High Ground 🏕️ · 150 Summit Push 🚩 · 160 Near The Top 🌤️ · 170 Peak Rung 🏔️ |
+
+**The Gauntlet's 14 badges** — three lifetime/per-run ladders plus three one-off badges. The lifetime-runs and lifetime-clean-stations ladders check base-plus-this-run against a running lifetime total; the streak ladder is checked once, at the end of each run, against that run's own peak consecutive-clean-station streak (not a lifetime count):
+
+| Badge | How to earn it |
+|---|---|
+| 💎 **Flawless Gauntlet** | Complete a full 20-station run with zero Scars anywhere |
+| 🥋 **Unmarked** | Finish a run in the Unmarked tier (0-5 total Scars) |
+| 🩹 **Second Wind** | Pass a repeat attempt clean (0 misses) after failing the original station with 2 misses |
+
+| Ladder | Tiers (threshold — label) |
+|---|---|
+| Lifetime Runs Completed | 5 Warmed Up 🔥 · 25 Battle-Tested 🛡️ · 100 Hardened ⚔️ · 250 Gauntlet Veteran 🎖️ |
+| Lifetime Clean Stations | 50 Sharp Eye 🎯 · 250 Precision Strikes 🔬 · 1,000 Flawless Instinct ✨ · 2,500 Living Legend 👑 |
+| Longest Clean Streak (one run) | 5 In The Zone 🎯 · 10 Unbroken 🔗 · 15 Iron Focus 🧠 |
+
+**Dead Man Walking's 14 badges** — two lifetime ladders (runs completed, rounds Walked Out) plus one longest-streak ladder that can span across separate runs (checked at the end of every run against a fresh lifetime figure, not a per-run local count), plus three one-off badges, all recurring, framed with the mode's own dark humor:
+
+| Badge | How to earn it |
+|---|---|
+| 🕊️ **Full Reprieve** | Walk Out of all 15 rounds in a single run — a perfect run |
+| ⚰️ **Pardoned** | Walk Out of 13 or more rounds in a single run — reach the top result tier |
+| 💀 **Last Request** | Complete a run without Walking Out of a single round |
+
+| Ladder | Tiers (threshold — label) |
+|---|---|
+| Lifetime Runs Completed | 5 Repeat Offender 🔁 · 25 Frequent Flyer ✈️ · 100 Death Row Regular ⛓️ · 250 Old Sparky ⚡ |
+| Lifetime Rounds Walked Out | 50 Free Man 🕊️ · 250 Habitual Escapee 🏃 · 1,000 Uncatchable 💨 · 2,500 Legend of the Yard 👑 |
+| Longest Walked-Out Streak (lifetime, cross-run) | 3 On A Roll 🎲 · 5 Charmed Life 🍀 · 10 Untouchable 🌟 |
+
+**Killer's 3 badges** — one-off, all-recurring (no lifetime ladder — each can fire again in a later match):
+
+| Badge | How to earn it |
+|---|---|
+| 🩸 **First Blood** | Land the first elimination of a Killer match |
+| 🛡️ **Untouchable** | Win a Killer match without ever losing a life |
+| 🙈 **Own Worst Enemy** | Eliminate yourself via your own double after becoming a killer |
+
+**Marathon Mode's 11 badges** — two lifetime ladders (checked once a session ends) plus three one-off, all-recurring condition badges (each can fire again in a later session):
+
+| Badge | How to earn it |
+|---|---|
+| 🛡️ **Iron** | End a Marathon Mode session with the Iron fatigue-split tier |
+| 📉 **Flat Line** | Complete a Marathon Mode session classified Flat Line |
+| ⏱️ **Full Distance** | Complete the full 45 minutes without an early "End Marathon" stop |
+
+| Ladder | Tiers (threshold — label) |
+|---|---|
+| Lifetime Sessions Completed | 1 First Marathon 🏁 · 5 Regular Runner 🏃 · 15 Seasoned Endurer 🥾 · 30 Marathon Veteran 🎖️ |
+| Lifetime Legs Completed | 25 Getting Going 👟 · 100 In Stride 🏃 · 250 Long Hauler 🚛 · 500 Ultra Marathoner 🌋 |
+
+**Household Rating's 2 badges** — both keyed off the [📈 Household Ratings](#home) leaderboard, checked right after a rated 2-player match completes:
+
+| Badge | How to earn it |
+|---|---|
+| 👑 **Top of the House** | Reach #1 in the Household Ratings leaderboard (requires at least 5 rated games to qualify) |
+| 🗡️ **Upset** | Win a rated 2-player match against an opponent rated 150 or more points above you |
 
 **Tournament's 2 badges** (see [Tournaments](#tournaments)):
 
@@ -322,7 +559,7 @@ Beyond 180s, Big Fish, and nine-darters, Oche tracks 23 X01 achievement badges c
 | 🧭 **Guided Clock** | Complete a guided Around the Clock drill — hit every number 1–20 as a single |
 | 🗺️ **Guided World** | Reach all 63 lifetime dart outcomes while playing a guided Around the World session |
 
-**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 86-badge roster, grouped into X01/Cricket/Tournament/Daily Challenge/Just Chuckin' It/Checkout Trainer/Practice Drills sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), both Tournament badges (Champion, Giant Slayer (Tournament)), Full Rotation, both Practice Drills badges (Guided Clock, Guided World), all 18 Just Chuckin' It milestones, and all 33 Checkout Trainer badges are one-time-only by nature and never show a counter beyond 1. **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
+**Badge Case** — every player's profile ([Player Profile](#player-profile)) shows the full 187-badge roster, grouped into X01/Cricket/Baseball/Shanghai/Halve-It/The Pressure Chamber/Doubles Practice/Bob's 27/121 Checkout Ladder/The Gauntlet/Dead Man Walking/Killer/Marathon Mode/Household Rating/Tournament/Daily Challenge/Just Chuckin' It/Checkout Trainer/Practice Drills sections: greyed out and desaturated if not yet earned, full color once it is. A gold counter circle appears in the top-right corner of any badge earned more than once (e.g. Hat Trick ×5, or 180! after a second 180 in the same session) — 5 X01 badges (Around the Clock, Around the World, Grudge Match, First 100+ Checkout, Ghost Slayer), all 4 Baseball lifetime-runs ladder tiers, both Tournament badges (Champion, Giant Slayer (Tournament)), Full Rotation, both Practice Drills badges (Guided Clock, Guided World), all 18 Just Chuckin' It milestones, all 34 Checkout Trainer badges, all 5 Doubles Practice badges, all 5 Bob's 27 survival/score ladder tiers, all 6 121 Checkout Ladder ladder tiers, all 11 Gauntlet ladder tiers, all 8 Marathon Mode ladder tiers, all 11 Dead Man Walking ladder tiers, all 11 Pressure Chamber ladder tiers, and 👑 Top of the House are one-time-only by nature and never show a counter beyond 1 (🧗 Peak Bagged, Gauntlet's own 💎 Flawless Gauntlet/🥋 Unmarked/🩹 Second Wind, all 3 Killer badges, all 3 Marathon Mode one-off badges — 🛡️ Iron/📉 Flat Line/⏱️ Full Distance —, all 3 Dead Man Walking one-off badges — 🕊️ Full Reprieve/⚰️ Pardoned/💀 Last Request —, and all 4 Pressure Chamber one-off badges — 🥶 Ice/🎯 Nerves of Steel/⏱️ No Warmup Needed/🃏 Dead Calm, Steady Hands — are all recurring/repeatable instead, so those seventeen DO show a counter after a second occurrence). **Hover** any badge to see how to earn it; **tap** it on a touchscreen for the same info in a popup, since hover doesn't exist on touch. Earned badges get their own **📤 Share** button.
 
 **Around the World Progress** — a dedicated grid on the Player Profile showing exactly which of the 63 lifetime dart outcomes are still missing, alongside the Badge Case.
 
@@ -444,7 +681,7 @@ Each player has a dedicated profile page with full career statistics, accessible
 
 #### Tabs
 
-**Overall** · **H2H** · **Practice** — all stats and charts filter to the selected mode. A second game-type toggle sits just above the stat bubbles — **X01 / Cricket / Doubles Practice / Just Chuckin' It / Checkout Trainer / Around the Clock / Around the World** — switches the bubbles, chart, and Personal Bests section between each game type's own stat vocabulary (X01's 15 stats, Cricket's 6, Doubles Practice's 3, Chuckin's 8, Checkout Trainer's 3, Around the Clock's 3, or Around the World's 2 — see below). The Home page's leaderboards cover X01, Cricket, Doubles Practice, Checkout Trainer (its Checkout Blitz leaderboard), Around the Clock, and Around the World — Just Chuckin' It doesn't have a competitive leaderboard shape to show there (no wins, no opponent), so it's Player Profile-only.
+**Overall** · **H2H** · **Practice** — all stats and charts filter to the selected mode. A second game-type toggle sits just above the stat bubbles — **X01 / Cricket / Baseball / Shanghai / Halve-It / The Pressure Chamber / Doubles Practice / Bob's 27 / 121 Checkout Ladder / The Gauntlet / Dead Man Walking / Killer / Marathon Mode / Just Chuckin' It / Checkout Trainer / Around the Clock / Around the World** — switches the bubbles, chart, and Personal Bests section between each game type's own stat vocabulary (X01's 15 stats, Cricket's 6, Shanghai's 6, Halve-It's 6, The Pressure Chamber's 6, Doubles Practice's 3, Bob's 27's 5, 121 Checkout Ladder's 4, The Gauntlet's 5, Dead Man Walking's 6, Killer's 5, Marathon Mode's 6, Chuckin's 8, Checkout Trainer's 3, Around the Clock's 3, or Around the World's 2 — see below). The Home page's leaderboards cover X01, Cricket, Baseball, Shanghai, Halve-It, The Pressure Chamber, Doubles Practice, Bob's 27, 121 Checkout Ladder, The Gauntlet, Dead Man Walking, Killer, Marathon Mode, Checkout Trainer (its Checkout Blitz leaderboard), Around the Clock, and Around the World — Just Chuckin' It doesn't have a competitive leaderboard shape to show there (no wins, no opponent), so it's Player Profile-only.
 
 #### Stat Bubbles
 
@@ -486,6 +723,100 @@ Switching to **Doubles Practice** shows its own 3 stat bubbles instead:
 | **Doubles %** | Doubles hit ÷ every dart ever thrown in this mode, lifetime |
 | **Darts / Round** | Average darts thrown per round |
 | **Doubles Hit / Round** | Average doubles hit per round |
+
+Switching to **Bob's 27** shows its own 5 stat bubbles instead:
+
+| Bubble | Description |
+|---|---|
+| **Survival Rate** | Percentage of runs that survived all 20 rounds without ever dropping to 0 or below |
+| **Avg Final Score** | Average final score across every run, died runs included |
+| **Runs Played** | Number of Bob's 27 runs played |
+| **Darts Thrown** | Total individual darts thrown in this mode, lifetime |
+| **Doubles Hit %** | Percentage of darts thrown that landed on that round's own double |
+
+Switching to **121 Checkout Ladder** shows its own 4 stat bubbles instead:
+
+| Bubble | Description |
+|---|---|
+| **Attempts** | Number of checkout ladder attempts played |
+| **Success Rate** | Percentage of attempts that ended in a checkout |
+| **Current Ladder Position** | Where your most recent run's own attempts leave the target — 121, +1 per win, −1 per fail, floored at 61 |
+| **Darts Thrown** | Total individual darts thrown in this mode, lifetime |
+
+Switching to **The Gauntlet** shows its own 5 stat bubbles instead:
+
+| Bubble | Description |
+|---|---|
+| **Runs Completed** | Number of full 20-station Gauntlet runs completed |
+| **Avg Total Scars** | Average total Scars per completed run |
+| **Clean Station Rate** | % of stations finished with 0 misses on their final attempt |
+| **Deep Scar Rate** | % of stations that finished with all 3 tasks missed |
+| **Retry Rate** | % of stations that needed the one-time repeat |
+
+Switching to **Dead Man Walking** shows its own 6 stat bubbles instead:
+
+| Bubble | Description |
+|---|---|
+| **Runs Completed** | Number of full 15-round Dead Man Walking runs completed |
+| **Avg Walked Out / Run** | Average number of rounds Walked Out of per completed run |
+| **Bust Rate** | % of rounds Executed by a real bust |
+| **Out-of-Darts Rate** | % of rounds Executed by running out of budget without busting — a distinct tally from Bust Rate, both ways to not Walk Out |
+| **Avg Margin (Walked Out)** | Average darts of budget left unused on a Walked Out round |
+| **Longest Walked-Out Streak** | Longest run of consecutive Walked Out rounds, lifetime — can span across separate runs |
+
+Switching to **Killer** shows its own 5 stat bubbles instead:
+
+| Bubble | Description |
+|---|---|
+| **Games Played** | Killer matches played |
+| **Win Rate** | Percentage of Killer matches won |
+| **Avg Kills / Leg** | Average eliminations landed per leg |
+| **Avg Lives Lost / Leg** | Average lives lost per leg |
+| **Survived Without Killer** | Percentage of legs survived to the end without ever becoming a killer |
+
+Switching to **Marathon Mode** shows its own 6 stat bubbles instead:
+
+| Bubble | Description |
+|---|---|
+| **Sessions Completed** | Number of completed Marathon Mode sessions |
+| **Avg Legs / Session** | Average legs completed per session |
+| **Avg Fatigue Split** | Average fatigue split (second-half minus first-half average dart count, clamped at zero) across every session |
+| **The Cliff** | Sessions classified The Cliff |
+| **The Warm Machine** | Sessions classified The Warm Machine |
+| **Flat Line** | Sessions classified Flat Line |
+
+Switching to **Shanghai** shows its own 6 stat bubbles instead:
+
+| Bubble | Description |
+|---|---|
+| **Points/Round** | Total points scored ÷ rounds played, Shanghai's direct analog of Baseball's RPI |
+| **Shanghais Thrown** | Instant wins — single, double, AND treble of the round's own number in one visit |
+| **Win Rate** | Percentage of H2H Shanghai games won |
+| **Games Played** | Shanghai games played |
+| **Darts Thrown** | Darts thrown in Shanghai games specifically |
+| **Best Round** | Highest points scored in a single round |
+
+Switching to **Halve-It** shows its own 6 stat bubbles instead:
+
+| Bubble | Description |
+|---|---|
+| **Avg Final Total** | Average final total across every completed leg |
+| **Times Halved** | Total visits where all 3 darts missed the round's target |
+| **Win Rate** | Percentage of H2H Halve-It games won |
+| **Games Played** | Halve-It games played |
+| **Darts Thrown** | Darts thrown in Halve-It games specifically |
+| **Best Round** | Highest points gained in a single round |
+
+Switching to **The Pressure Chamber** shows its own 6 stat bubbles instead:
+
+| Bubble | Description |
+|---|---|
+| **Avg Run CP** | Average total Composure Points across every completed run |
+| **Full-Hit Rate** | % of rounds graded a full hit |
+| **Partial-Hit Rate** | % of rounds graded a partial hit (right sector, wrong ring) |
+| **Win Rate** | Percentage of H2H Pressure Chamber runs won |
+| **Runs Completed** | Pressure Chamber runs completed |
+| **Darts Thrown** | Darts thrown in Pressure Chamber runs specifically |
 
 Switching to **Just Chuckin' It** shows its own 8 stat bubbles instead:
 
@@ -541,15 +872,19 @@ A non-interactive dartboard shaded by how often each region has been hit (with e
 - **Current Win Streak**
 - **Recent Form** — average of the last 10 legs, with an arrow showing the delta vs. lifetime average
 
-On the Cricket toggle, this section shows **Best Leg MPR**, **Fewest Darts to Close**, **Current Win Streak**, and **Recent Form** (MPR-based) instead — the same shape, keyed off the turn that won each Cricket leg rather than an X01 checkout.
+On the Cricket toggle, this section shows **Best Leg MPR**, **Fewest Darts to Close**, **Current Win Streak**, and **Recent Form** (MPR-based) instead — the same shape, keyed off the turn that won each Cricket leg rather than an X01 checkout. On the Shanghai toggle, it shows **Best Leg Points**, **Fewest Darts to Win**, **Current Win Streak**, and **Recent Form** (points-based) — the same shape again, keyed off whichever visit actually won each Shanghai leg (either a genuine instant Shanghai, or whoever led on points once the final round settled). On the Halve-It toggle, it shows **Best Final Total**, **Fewest Darts to Win**, **Current Win Streak**, and **Recent Form** (total-based) — again the same shape, keyed off whichever player actually had the higher final total each leg (Halve-It never ends early, so this is always derived from final totals, never a single decisive visit). On the Pressure Chamber toggle, it shows **Best Run CP** (a peak, no minimum floor), **Best Composure Rating**, and **Longest Full-Hit Streak** instead — a run never "wins" against a fixed target the way a leg does, so these are record-book peaks rather than a win-gated shape.
 
-On the Doubles Practice toggle, this section shows just **Best Round (Darts)** and **Best Round (Doubles Hit)** — no win-streak/recent-form fields, since this mode has no win condition. On the Just Chuckin' It toggle, it shows **Best Session (Darts)** and **Best Session (Trebles)**, the same deliberately-smaller 2-field shape. On the Checkout Trainer toggle, it shows **Toughest Checkout Solved**, **Best Optimal Streak**, **Best Checkout Blitz Score**, and **Avg Checkout Blitz Score** (whichever fields have data) — same no-win-condition reasoning as Doubles Practice/Chuckin.
+On the Doubles Practice toggle, this section shows just **Best Round (Darts)** and **Best Round (Doubles Hit)** — no win-streak/recent-form fields, since this mode has no win condition. On the Bob's 27 toggle, it shows **Best Final Score** (the peak across every run, including a run that died with a high score) and **Deepest Double Reached on a Fail** (scoped to runs that actually ended in death — a survived run has nothing to report here). On the 121 Checkout Ladder toggle, it shows **Highest Target Reached** (a peak — attempted, win or fail, since standing at rung 150 already means you climbed that high regardless of how that attempt ends) and **Fewest Darts on the Highest Checkout** (scoped to the highest target you actually checked out, which can be lower than the peak reached if that top attempt itself failed). On The Gauntlet toggle, it shows just **Lowest Total Scars** across every completed run — an ascending-is-better ("fewer is better") Personal Best field, so it's shown alone rather than paired with a second field the way every other solo drill's Personal Bests are. On the Dead Man Walking toggle, it shows just **Most Walked Out** — the most rounds Walked Out of in a single 15-round run, a standard descending "best run" peak (contrast The Gauntlet's own deliberately-ascending field above) — no win-streak/recent-form fields, same no-opponent reasoning as Bob's 27/121 Checkout Ladder/The Gauntlet. On the Killer toggle, it shows just **Most Kills in a Leg** — the highest single-leg elimination count across every match played. On the Marathon Mode toggle, it shows **Lowest Fatigue Split** (the other ascending-is-better field in this app) and **Most Legs in a Session** (a stamina/throughput metric, descending as usual). On the Just Chuckin' It toggle, it shows **Best Session (Darts)** and **Best Session (Trebles)**, the same deliberately-smaller 2-field shape. On the Checkout Trainer toggle, it shows **Toughest Checkout Solved**, **Best Optimal Streak**, **Best Checkout Blitz Score**, and **Avg Checkout Blitz Score** (whichever fields have data) — same no-win-condition reasoning as Doubles Practice/Chuckin.
 
 On the Around the Clock toggle, this section shows just **Fastest Completion (Darts)** — the fewest darts a completed round has ever taken. On the Around the World toggle, it shows **Sessions Played** and **Lifetime Progress** (e.g. "22 / 63") instead of a per-round record, since this mode's progress is lifetime/cross-session by design and never "wins."
 
+#### Household Rating
+
+Shown once on the Overall/H2H tabs, regardless of which per-game-type toggle above is selected — this rating is deliberately combined across every competitive game type, not scoped to any one of them. Shows current rating, win-loss record, and household rank (e.g. "#2 of 6" — requires at least 5 rated games to be ranked at all), plus a rating-over-time line chart. See [Home](#home) for the full leaderboard.
+
 #### Badge Case
 
-The full 86-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (23 badges), a **Cricket** section (4 badges), a **Tournament** section (2 badges), a **Daily Challenge** section (3 badges), a **Just Chuckin' It** section (19 badges), a **Checkout Trainer** section (33 badges), and a **Practice Drills** section (2 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
+The full 187-badge [achievement](#achievements--badges) roster for this player, grouped into an **X01** section (33 badges), a **Cricket** section (5 badges), a **Baseball** section (8 badges), a **Shanghai** section (1 badge), a **Halve-It** section (2 badges), a **The Pressure Chamber** section (15 badges), a **Doubles Practice** section (5 badges), a **Bob's 27** section (7 badges), a **121 Checkout Ladder** section (7 badges), a **The Gauntlet** section (14 badges), a **Dead Man Walking** section (14 badges), a **Killer** section (3 badges), a **Marathon Mode** section (11 badges), a **Household Rating** section (2 badges), a **Tournament** section (2 badges), a **Daily Challenge** section (3 badges), a **Just Chuckin' It** section (19 badges), a **Checkout Trainer** section (34 badges), and a **Practice Drills** section (2 badges) — greyed out until earned, full color once earned, with a counter for badges earned more than once. Hover (or tap on a touchscreen) any badge to see how to earn it.
 
 #### On This Day
 
@@ -628,33 +963,41 @@ selected for a game until barrel, shaft, and flight are all filled in.
 
 ### Tournaments
 
-Single-elimination brackets, any X01 format (501/301/170/101) — built on top of the
-existing scoring engine, not a parallel one: a tournament match is a normal H2H game
-under the hood, so PINs, checkout hints, undo, the live scoreboard, and every stat
-keep working exactly as they do outside a tournament.
+Single- **and** double-elimination brackets, any X01 format (501/301/170/101) —
+built on top of the existing scoring engine, not a parallel one: a tournament match
+is a normal H2H game under the hood, so PINs, checkout hints, undo, the live
+scoreboard, and every stat keep working exactly as they do outside a tournament.
 
 **Creating a bracket** — from the **Tournaments** nav button: name it, pick an X01
-format, check off who's playing, choose a seeding method, then set the match format
-(legs/sets) for each round before generating:
+format, choose **Single** or **Double elimination**, check off who's playing, choose
+a seeding method, then set the match format (legs/sets) for each round before
+generating:
 
 - **Random** — a shuffle of the selected players, same as the New Game screen's own 🔀 Shuffle.
 - **Manual order** — reorder the selected players yourself (▲/▼) before generating.
 - **By 3-dart average** — seeds by each player's existing lifetime average, best first; a player with no recorded legs yet is seeded last rather than treated as a last-place average.
 
-Any player count works — the bracket pads to the next power of two with byes,
-which auto-advance immediately (including cascading: a later round can already be
-fully set once two separate byes have resolved into it, with neither of those
-first-round "matches" ever actually played).
+For **single elimination**, any player count works — the bracket pads to the next
+power of two with byes, which auto-advance immediately (including cascading: a later
+round can already be fully set once two separate byes have resolved into it, with
+neither of those first-round "matches" ever actually played). **Double elimination**
+gives every player a second life in a losers bracket (a first loss only drops you
+there; a second loss knocks you out) and requires exactly 4, 8, 16, 32, 64, or 128
+players — the setup screen enforces that. Its grand final can trigger a **bracket
+reset**: if the losers-bracket finalist wins the first grand-final game, both
+players have one loss each and a single decider game settles it.
 
 **Playing it out** — the bracket screen has an **Up Next** list of every match
 that's ready to play, each with a **Start** button that drops straight into the
 normal scoring screen for those two players, and a **Walkover** button for
 recording a result without playing it out (also the recovery path if a match was
 started and abandoned via End Game — tournament matches can't just be left
-unfinished, since the bracket depends on a real result to advance). A visual
-bracket tree shows the whole tournament at a glance, with a linearized list view
-underneath it for anyone who'd rather read than scan the tree. The champion and
-runner-up are shown once the final resolves.
+unfinished, since the bracket depends on a real result to advance). A bracket view
+shows the whole tournament at a glance — for double elimination it's split into
+**Winners / Losers / Grand Final** tabs (keyboard-navigable), one bracket at a time
+so even a large tree stays readable — with a linearized list view underneath it for
+anyone who'd rather read than scan the columns. The champion and runner-up are shown
+once the final resolves.
 
 **Badges** — winning the whole bracket earns 🏆 **Champion**; beating an
 opponent seeded 3 or more slots better than you earns ⚔️ **Giant Slayer
@@ -664,8 +1007,7 @@ opponent seeded 3 or more slots better than you earns ⚔️ **Giant Slayer
 runner-up finishes, best finish reached) shows on each player's profile
 alongside their H2H stats.
 
-**Double-elimination isn't built** — single-elimination only for now; see
-`REFERENCE.md` for the deferred design.
+See `REFERENCE.md` §15 for full mechanics.
 
 ---
 
@@ -718,7 +1060,7 @@ Plus global leaderboards for 180s, Big Fish, and nine-dart finishes, each filter
 
 ### Settings
 
-The Settings page (accessible from the top navigation) holds app-wide configuration, grouped into four tabs: **Account & Access**, **Gameplay & Display**, **Integrations**, and **Admin & Danger Zone**. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Smart Home Integration**, **Daily Challenge**, **Server Errors**, **Backups**, **Data Export**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
+The Settings page (accessible from the top navigation) holds app-wide configuration, grouped into four tabs: **Account & Access**, **Gameplay & Display**, **Integrations**, and **Admin & Danger Zone**. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Heatmap**, **Smart Home Integration**, **Daily Challenge**, **Server Errors**, **Backups**, **Data Export**, **Merge Players**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
 
 Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accounts--player-pins)) — until an admin account exists, the page offers to create the first one.
 
@@ -802,7 +1144,12 @@ Shows the most recent server-side failures (up to 500, newest first) — the sam
 
 - **Export all data** — downloads a complete JSON export of every player, game, stat, tournament, and league in the database. Admin-only. Excludes admin accounts, sessions, app settings, and player PINs.
 - **Export a player…** — opens a dedicated admin page to pick one player and download just their history: every game they've played as JSON, including opponents' turn-by-turn data from those same games (so a result like "Ben beat Alaina" stays intact) plus a minimal identity record for each opponent. Admin-only; nothing export-related appears on a player's own page.
+- **Spreadsheet (CSV) export** — the same page can also download a simpler CSV of the selected player's own stats for Excel/Numbers/Google Sheets, either one row per game (with per-game totals: points, average per turn, busts, checkouts, result, opponents) or one row per turn (with each dart in plain notation like `T20 S5 D16`). Their stats only — no opponents' turn data — and not importable back into Oche; the JSON export above is the one that moves a player between servers.
 - **Import a player** — on the same page, pick a player export file (from this or another Oche server) and import it. Players are matched by their export identity, not just by name, so a coincidental same-name player already on this server is never merged with it — a genuine match reuses the existing player, otherwise a new one is created (renamed if the name collides). Importing the same file twice is safe: games already present are skipped, not duplicated.
+
+#### Merge Players
+
+Combine two player records that are really the same person — a typo'd second account, or someone added twice under different names. Pick the duplicate to merge away and the player who survives; the survivor keeps their own name, finish rule, and PIN, and absorbs the duplicate's entire history: games, turns, wins, badges, Daily Challenge attempts, tournament and league records, dart components/loadouts, and ghost races. Before anything happens you get a full **preview** of exactly what will move, and the merge refuses to run at all if the two records genuinely conflict — they've played each other, share a tournament or league, or both attempted the same day's Daily Challenge — with each conflict listed so you can resolve it by hand first. A badge both players earned is kept once (with the higher count and the earliest earned date), and a same-day challenge attempt where only one of them finished keeps the finished one. The whole merge is atomic (it either fully completes or changes nothing), can't be undone afterward, and even keeps old **player exports** of the merged-away player importable — they resolve onto the survivor instead of recreating the duplicate. Admin-only.
 
 #### Danger Zone
 
@@ -864,12 +1211,27 @@ live-scoreboard feed) requires a logged-in admin session by default — even on 
 network you fully trust. Reads always stay public, so the read-only scoreboard and
 stats pages work for everyone with no login needed to just watch.
 
-Set the environment variable **`OCHE_REQUIRE_AUTH=false`** to opt back into the old
-LAN-trust behavior instead: reads *and* gameplay writes both open, and only the
-admin/destructive actions in the table above still require login. Only do this on a
-network you fully trust (no untrusted devices, no internet exposure) — player PINs
+**Any admin can turn this off at runtime**, no restart or env var needed:
+Settings → Admin accounts → "Require admin login to play" is a checkbox, off by
+default only if you've set `OCHE_REQUIRE_AUTH=false` (see below), on otherwise.
+Unchecking it shows a warning and asks you to confirm before it takes effect — with
+it off, anyone who can reach the server on your network can start/end games, add or
+remove players, record turns, and wipe stats with no login prompt at all, on every
+device, immediately. Turning it back on is instant too, no confirmation needed since
+that direction only locks things down further. This is exactly the annoyance this
+setting exists to fix: previously the only way to turn off the login prompt was
+editing an environment variable and restarting the whole server — not something
+reachable from inside the app, and not something you'd want to do just to skip a
+login popup that showed up at an inconvenient moment mid-New-Game.
+
+The environment variable **`OCHE_REQUIRE_AUTH=false`** still exists — it sets the
+*initial* default the very first time the app boots (useful for infra-as-code
+deployments that never touch the Settings UI), but once an admin explicitly saves a
+choice via the checkbox above, that saved choice governs from then on, even across a
+restart, regardless of what the env var says. Whichever way it's set, only do this on
+a network you fully trust (no untrusted devices, no internet exposure) — player PINs
 are a UI convenience, not real authentication. They gate the player picker, **not**
-the underlying API, so with `OCHE_REQUIRE_AUTH=false` anyone who can reach the server
+the underlying API, so with the requirement off, anyone who can reach the server
 could record games or edit players directly.
 
 ### Exposing this to the internet — checklist
@@ -885,8 +1247,11 @@ work through this list. It's also tracked in `docs/security-audit-roadmap.md`.
   `TRUST_PROXY=true` below** — a reverse-proxy deployment needs both, not just one:
   `COOKIE_SECURE` protects the session cookie, `TRUST_PROXY` keeps the rate limiter
   looking at real client IPs instead of the proxy's single address.
-- **Leave `OCHE_REQUIRE_AUTH` at its default (`true`)** — every write already requires a
-  logged-in admin with no configuration needed.
+- **Leave `OCHE_REQUIRE_AUTH` at its default (`true`), and don't turn off the
+  "Require admin login to play" checkbox in Settings** — every write already requires
+  a logged-in admin with no configuration needed. Turning that checkbox off makes
+  every write endpoint public, which is a much bigger exposure on the open internet
+  than it is on a trusted LAN.
 - **Set `TRUST_PROXY=true`** *only* if the reverse proxy in front of it is one you control
   and it sets `X-Forwarded-For`. This makes the built-in per-IP rate limiting (login,
   first-run setup, PIN verification, and a general per-IP request budget) use the real
@@ -921,9 +1286,11 @@ Returns `{ ok: true }`.
 
 ```
 GET    /api/setup-required                  { required } — true until the first admin exists
-GET    /api/auth-config                     { requireAuth } — the effective OCHE_REQUIRE_AUTH
-                                             value (true by default; read at app boot to know
-                                             if writes need a login)
+GET    /api/auth-config                     { requireAuth } — the effective require-login
+                                             setting (true by default; the OCHE_REQUIRE_AUTH
+                                             env var's boot-time value until an admin overrides
+                                             it via Settings, which then wins permanently; read
+                                             at app boot to know if writes need a login)
 POST   /api/setup                           Create the first admin   { username, password }
                                              (only while setup-required)
 POST   /api/login                           Log in                   { username, password }
@@ -958,6 +1325,22 @@ DELETE /api/players/stats?name=&mode=       Clear stats for a player            
 POST   /api/players/verify-pin              Verify a player's PIN  { name, pin } (public, rate-limited)
 PUT    /api/players/pin                     Set/reset a player's PIN { name, pin }    [admin]
 DELETE /api/players/pin?name=               Remove a player's PIN                     [admin]
+GET    /api/players/merge-preview           (?source=&target=) Everything a merge     [admin]
+                                             WOULD do, computed without writing:
+                                             per-table move counts, auto-resolved
+                                             badge/challenge conflicts, and the
+                                             blocking-conflict list (shared game/
+                                             tournament/league, ambiguous same-day
+                                             challenge attempts). 404 unknown player,
+                                             400 same player.
+POST   /api/players/merge                   { source, target } Absorb source's full   [admin]
+                                             history into target and delete source's
+                                             row, atomically. Target's name/finish
+                                             rule/PIN always win. 400 if any blocking
+                                             conflict exists (same list the preview
+                                             shows). Old exports of the merged-away
+                                             player keep importing onto the survivor
+                                             (player_uuid_aliases). Rate-limited.
 ```
 
 ### Stats & Leaderboards
@@ -965,6 +1348,11 @@ DELETE /api/players/pin?name=               Remove a player's PIN               
 ```
 GET  /api/stats                             All player stats (full computed object)
 GET  /api/summary                           Site-wide totals (darts, legs, 180s, etc.)
+GET  /api/session-recap?date=                End-of-Night Session Recap for one local
+                                             calendar date (YYYY-MM-DD, default today) —
+                                             results, per-player stats, solo activity,
+                                             badges, personal bests set that night, and
+                                             a chronological moments timeline
 GET  /api/home-extra                        Home page extras: win/trebleless/ton+ leaderboards,
                                              highest checkout, last game played, today/week
                                              activity, and dart pace
@@ -976,18 +1364,39 @@ GET  /api/stats/cricket-9marks?mode=        Cricket 9-marks-in-one-visit leaderb
 GET  /api/stats/cricket-mpr?mode=           Cricket Marks Per Round leaderboard (min. 5 rounds)
 GET  /api/stats/cricket-wins                Cricket win-rate leaderboard (H2H only, no mode param)
 GET  /api/stats/cricket-perfect-leg?mode=   Cricket "closed in the fewest possible darts" leaderboard
+GET  /api/stats/shanghai-ppr?mode=          Shanghai Points Per Round leaderboard (min. 5 rounds)
+GET  /api/stats/shanghai-shanghais?mode=    Shanghai instant-win (🀄 Shanghai!) leaderboard
+GET  /api/stats/shanghai-wins               Shanghai win-rate leaderboard (H2H only, no mode param)
+GET  /api/stats/halve-it-best-total?mode=   Halve-It highest-final-total leaderboard (peak, no minimum floor)
+GET  /api/stats/halve-it-wins               Halve-It win-rate leaderboard (H2H only, no mode param)
+GET  /api/stats/pressure-chamber-best-cp?mode= Pressure Chamber best-run-CP leaderboard (peak, no minimum floor)
+GET  /api/stats/pressure-chamber-wins       Pressure Chamber win-rate leaderboard (H2H only, no mode param)
 GET  /api/stats/doubles-practice-accuracy   Doubles % leaderboard (no mode param — always practice)
 GET  /api/stats/doubles-practice-best-round Doubles Practice best-single-round leaderboard (no mode param)
+GET  /api/stats/bobs27-leaderboard          Bob's 27 best-single-run final-score leaderboard (no mode param)
+GET  /api/stats/checkout-ladder-leaderboard 121 Checkout Ladder best-target-reached leaderboard (no mode param)
+GET  /api/stats/gauntlet-leaderboard        The Gauntlet lowest-total-Scars leaderboard, ASCENDING (no mode param)
+GET  /api/stats/dead-man-walking-leaderboard Dead Man Walking best-single-run most-Walked-Out
+                                             leaderboard (no mode param — always solo)
+GET  /api/stats/killer-wins                 Killer win-rate leaderboard (H2H only, no mode param —
+                                             same reasoning as cricket-wins/baseball-wins)
+GET  /api/stats/marathon-leaderboard        Marathon Mode lowest-fatigue-split leaderboard, ASCENDING
+                                             (no mode param — always solo)
 GET  /api/stats/checkout-blitz-leaderboard  Checkout Blitz best-single-run leaderboard (no mode param)
 GET  /api/stats/around-the-clock-fastest    Around the Clock fastest-completion leaderboard (no mode param)
 GET  /api/stats/around-the-clock-completions Around the Clock most-completions leaderboard (no mode param)
 GET  /api/stats/around-the-world-progress   Around the World lifetime-progress leaderboard (no mode param)
+GET  /api/stats/elo-leaderboard             Household Elo rating leaderboard — rating + W/L, min 5
+                                             rated games, combined across every competitive game
+                                             type (no mode param — inherently H2H-only already)
 ```
 
 All leaderboard endpoints accept `?mode=h2h|practice` to filter by game mode. Omit for overall. The
-Doubles Practice, Checkout Blitz, and Around the Clock/World endpoints above never take a `mode`
-param — every one of those game types is always solo practice, so there's no H2H side to split
-against (same reasoning as `cricket-wins` above, just the opposite polarity).
+Doubles Practice, Bob's 27, 121 Checkout Ladder, The Gauntlet, Checkout Blitz, Around the Clock/World, and Elo
+leaderboard endpoints above never take a `mode` param — every one of those game types is always
+solo practice (or, for
+Elo, inherently H2H-only already), so there's no H2H side to split against (same reasoning as
+`cricket-wins` above, just the opposite polarity).
 
 ### Per-Player Stats
 
@@ -996,9 +1405,36 @@ GET  /api/players/stat-bubbles?name=&mode=  All 15 stat bubble values for a play
      &gameType=cricket                      Pass gameType=cricket for Cricket's 6 stat bubbles
                                              (MPR, 9 Marks, Win Rate, Games Played, Darts
                                              Thrown, Darts/Won Leg) instead of X01's 15.
+     &gameType=shanghai                      Pass gameType=shanghai for Shanghai's 6 stat
+                                             bubbles (Points/Round, Shanghais Thrown, Win Rate,
+                                             Games Played, Darts Thrown, Best Round) instead.
+     &gameType=halve_it                      Pass gameType=halve_it for Halve-It's 6 stat
+                                             bubbles (Avg Final Total, Times Halved, Win Rate,
+                                             Games Played, Darts Thrown, Best Round) instead.
+     &gameType=pressure_chamber              Pass gameType=pressure_chamber for The Pressure
+                                             Chamber's 6 stat bubbles (Avg Run CP, Full-Hit Rate,
+                                             Partial-Hit Rate, Win Rate, Runs Completed, Darts
+                                             Thrown) instead.
      &gameType=doubles_practice             Pass gameType=doubles_practice for Doubles
                                              Practice's 3 stat bubbles (Doubles %, Darts/Round,
                                              Doubles Hit/Round) instead.
+     &gameType=bobs_27                      Pass gameType=bobs_27 for Bob's 27's 5 stat
+                                             bubbles (Survival Rate, Avg Final Score, Runs
+                                             Played, Darts Thrown, Doubles Hit %) instead.
+     &gameType=checkout_ladder               Pass gameType=checkout_ladder for 121 Checkout
+                                             Ladder's 4 stat bubbles (Attempts, Success Rate,
+                                             Current Ladder Position, Darts Thrown) instead.
+     &gameType=gauntlet                      Pass gameType=gauntlet for The Gauntlet's 5 stat
+                                             bubbles (Runs Completed, Avg Total Scars, Clean
+                                             Station Rate, Deep Scar Rate, Retry Rate) instead.
+     &gameType=dead_man_walking              Pass gameType=dead_man_walking for Dead Man
+                                             Walking's 6 stat bubbles (Runs Completed, Avg
+                                             Walked Out/Run, Bust Rate, Out-of-Darts Rate, Avg
+                                             Margin (Walked Out), Longest Walked-Out Streak)
+                                             instead.
+     &gameType=killer                        Pass gameType=killer for Killer's 5 stat bubbles
+                                             (Games Played, Win Rate, Avg Kills/Leg, Avg Lives
+                                             Lost/Leg, Survived Without Killer Rate) instead.
      &gameType=chuckin                      Pass gameType=chuckin for Just Chuckin' It's 8
                                              stat bubbles (Darts Thrown, Three-Dart Average,
                                              180s, Treble/Bull/Double %, Sessions Played,
@@ -1019,9 +1455,36 @@ GET  /api/players/personal-bests?name=&mode= Best leg average, fewest darts to f
      &gameType=cricket                      Pass gameType=cricket for Cricket's Personal Bests
                                              (best leg MPR, fewest darts to close, win streak,
                                              recent/lifetime MPR) instead.
+     &gameType=shanghai                      Pass gameType=shanghai for Shanghai's Personal
+                                             Bests (best leg points, fewest darts to win, win
+                                             streak, recent/lifetime points) instead.
+     &gameType=halve_it                      Pass gameType=halve_it for Halve-It's Personal
+                                             Bests (best final total, fewest darts to win, win
+                                             streak, recent/lifetime total) instead.
+     &gameType=pressure_chamber              Pass gameType=pressure_chamber for The Pressure
+                                             Chamber's Personal Bests (best run CP, best
+                                             Composure Rating, longest full-hit streak) instead.
      &gameType=doubles_practice             Pass gameType=doubles_practice for Doubles
                                              Practice's Personal Bests (longest round by darts,
                                              most doubles hit in a round) instead.
+     &gameType=bobs_27                      Pass gameType=bobs_27 for Bob's 27's Personal
+                                             Bests (best final score across every run,
+                                             deepest double reached on a run that died)
+                                             instead.
+     &gameType=checkout_ladder               Pass gameType=checkout_ladder for 121 Checkout
+                                             Ladder's Personal Bests (highest target ever
+                                             reached, fewest darts on the highest target
+                                             actually checked out) instead.
+     &gameType=gauntlet                      Pass gameType=gauntlet for The Gauntlet's Personal
+                                             Bests (lowest total Scars across every completed
+                                             run — ascending, the opposite polarity from every
+                                             other game type here) instead.
+     &gameType=dead_man_walking              Pass gameType=dead_man_walking for Dead Man
+                                             Walking's Personal Best (most rounds Walked Out of
+                                             in a single 15-round run — one field, no win-streak/
+                                             recent-form) instead.
+     &gameType=killer                        Pass gameType=killer for Killer's Personal Bests
+                                             (most kills in a single leg) instead.
      &gameType=chuckin                      Pass gameType=chuckin for Just Chuckin' It's
                                              Personal Bests (longest session by darts, most
                                              trebles hit in a session) instead.
@@ -1048,6 +1511,10 @@ GET  /api/players/dart-heatmap              Per-(sector,multiplier,zone,missZone
                                              multiplier, zone, missZone, missDepth, hits } ]
 GET  /api/players/bounce-outs               Count of darts that struck the board but bounced
      ?name=&gameType=&mode=                 or fell out before counting → { count }
+GET  /api/players/gauntlet-scar-map?name=   The Gauntlet's Scar Map — average final miss count
+                                             per station, across every COMPLETED run this player
+                                             has ever finished → { stations: [ { station,
+                                             avgScars, runs } ] }
 GET  /api/players/top-finishes?name=&mode=  Top 10 checkouts for a player
 GET  /api/players/checkout-route            Most-used routes for a specific checkout score
      ?name=&score=&mode=
@@ -1058,6 +1525,12 @@ GET  /api/players/coaching-insights         X01-only plain-language practice gui
                                              bust parity, form trend) — see REFERENCE.md
 GET  /api/players/h2h?p1=&p2=               Head-to-head record between two players
                                              (used by the New Game H2H banner)
+GET  /api/players/elo?name=                 Household Elo rating for one player: rating, wins,
+                                             losses, played, qualifies (5+ rated games), rank,
+                                             ratedPlayers, history (rating after each rated game),
+                                             lastCompetitiveGame (the most recently completed rated
+                                             game — used for the match-win delta banner and the
+                                             Top of the House / Upset badge checks)
 GET  /api/players/ghost-legs?name=&limit=   X01 legs this player has won, most recent
                                              first (Ghost Opponent's leg picker);
                                              limit is capped at 100 (docs/security-
@@ -1100,6 +1573,8 @@ GET  /api/players/h2h-summary               Games played and previous-match winn
      ?player=&opponent=&excludeGameId=       players (used by the Grudge Match/Rematch badges)
 GET  /api/players/around-the-world?name=    Around the World progress
                                              → { hit: [{sector, mult}], count, total: 63 }
+GET  /api/players/doubles-hit-sectors?name= Ring Master progress (docs/archive/culture-badges-roadmap.md
+                                             Part B) → { hit: [sector...], count, total: 21 }
 GET  /api/players/on-this-day               Most notable thing this player did on today's exact
      ?name=&tz=                             calendar date in a past year (180 > 170 checkout >
                                              100+ checkout, in that priority order)
@@ -1130,7 +1605,12 @@ DELETE /api/challenges/attempt              Reset a player's attempt for a date 
 ```
 POST /api/games                             Start a game
                                              { category, legsPerSet, setsPerGame,
-                                               players: [{ name, out }], practice: 0|1,
+                                               players: [{ name, out, startScore }], practice: 0|1,
+                                               (startScore: docs/archive/rating-and-handicap-roadmap.md
+                                               Part B — X01-only per-player handicap override,
+                                               omit/null for the game's regular starting score;
+                                               validated server-side: integer, 101 <= startScore <
+                                               category)
                                                gameType: "x01"|"cricket"|"doubles_practice"|
                                                          "chuckin"|"around_the_clock"|
                                                          "around_the_world" (default "x01"),
@@ -1144,16 +1624,21 @@ POST /api/games                             Start a game
 POST /api/games/:id/turns                   Record a visit
                                              { player, set, leg, scored,
                                                bust, checkout, checkoutPoints, legWon,
-                                               targetScore, darts: [{sector, multiplier}] }
+                                               targetScore, declaredUnsolvable,
+                                               darts: [{sector, multiplier}] }
                                              → { ok: true, turnId }
                                              legWon marks the turn that won the leg —
                                              set by Cricket (which has no checkout
                                              mechanism); X01 omits it and keeps using
                                              checkout for its own Personal Bests. Checkout
                                              Trainer reuses legWon to mean "this attempt
-                                             was optimal" and targetScore to record the
-                                             round's target (the one field no other game
-                                             type sends). Requires Content-Type:
+                                             was optimal", targetScore to record the
+                                             round's target, and declaredUnsolvable: true
+                                             for a trick-question "no possible checkout"
+                                             answer — the one turn shape allowed (and
+                                             required) to carry an empty darts array, and
+                                             rejected outside checkout_trainer games.
+                                             Requires Content-Type:
                                              application/json (415 otherwise, docs/
                                              security-audit-roadmap.md SEC-19) — every
                                              write endpoint does. For X01 specifically,
@@ -1176,6 +1661,49 @@ POST /api/games/:id/events                  Record a timeline event
                                                       "set_start"|"set_end"|
                                                       "game_start"|"game_end",
                                                setNo, legNo }
+```
+
+### Marathon Mode
+
+```
+POST /api/marathon/sessions                 Start a session — creates leg 1's own
+                                             ordinary solo practice 501 game too
+                                             { player, durationMinutes (default 45,
+                                               5-240) }
+                                             → { sessionId, gameId, legOrder: 1,
+                                                  startedAt, durationMinutes }
+
+GET  /api/marathon/sessions/:id             Full session detail — per-leg dart
+                                             count/checkout/busts, plus the
+                                             computed fatigueSplit/fatigueTier/trend
+
+POST /api/marathon/sessions/:id/legs        Create and link the NEXT leg's own
+                                             ordinary solo practice 501 game
+                                             { player } → { gameId, legOrder }
+                                             409 if the session has already ended
+
+POST /api/marathon/sessions/:id/end         End the session (idempotent — ending
+                                             an already-ended session just returns
+                                             its unchanged detail) → full session
+                                             detail, same shape as the GET above
+```
+
+### Saved Games / Pause & Resume
+
+See [REFERENCE.md §23](REFERENCE.md#23-saved-games--pause--resume) for full
+mechanics (savable game types, the replay-rebuild engine, the divergence
+guard, tournament walkover routing on abandon).
+
+```
+GET    /api/saved-games                     Saved-game list + one-line position
+                                             summaries (public)
+POST   /api/games/:id/save                  Pause an in-progress game for later
+GET    /api/games/:id/resume-state          The full replay payload -- ALSO deletes
+                                             the saved_games row (this is the two-
+                                             device divergence guard, not an oversight)
+DELETE /api/saved-games/:id                 Abandon a saved game (:id is the game id,
+                                             not the saved_games row's own id) --
+                                             recorded stats are kept either way
 ```
 
 ### Dart Builder / Loadouts
@@ -1313,7 +1841,8 @@ PUT  /api/settings                          Update settings       { ha_url, ha_w
                                                pin_lockout_threshold, admin_lockout_grace,
                                                admin_lockout_base_seconds, admin_lockout_max_seconds,
                                                collect_dart_timing, scoreboard_layout,
-                                               default_scoring_input, … }
+                                               default_scoring_input, heatmap_style,
+                                               heatmap_number_style, … }
 GET  /api/settings/dart-timing              { enabled } — public, read by every device during play
 GET  /api/settings/scoreboard-layout        { layout } — public, read by the /display screen
 GET  /api/settings/default-input            { input: 'pad'|'board' } — public, read at app boot
@@ -1321,6 +1850,8 @@ GET  /api/settings/colorblind-mode          { enabled } — public, read at app 
 GET  /api/settings/voice-announcements      { enabled, turnScore, noScore, checkoutReq, oneEighty,
                                                bigFish, matchProgress } — public, read at boot by /display
 GET  /api/settings/card-tagline             { tagline } — public, read at app boot for shareable cards
+GET  /api/settings/heatmap-style            { style: 'classic'|'scorched' } — public, read at app boot
+GET  /api/settings/heatmap-number-style     { style: 'original'|'molten_seam'|'chalk_ledger' } — public, read at app boot
 POST /api/ha-test                           Test HA connectivity  { url }                        [admin]
 POST /api/ha-webhook                        Fire an HA webhook    { event, player, category, … }
 ```
@@ -1362,6 +1893,13 @@ GET  /api/players/export                    (?name=...) Streams one player's JSO
                                              in, including opponents' rows within those same games,
                                              plus minimal {id,uuid,name} opponent identity stubs.
                                              404 if the name doesn't exist.
+GET  /api/players/export-csv                (?name=...&kind=games|turns) Streams one player's own         [admin]
+                                             history as a CSV spreadsheet download -- kind=games is
+                                             one row per game with per-game aggregates, kind=turns
+                                             is one row per turn with per-dart notation. Their own
+                                             rows only (no opponents' turns), not importable.
+                                             400 for a missing name or bad kind, 404 if the name
+                                             doesn't exist.
 POST /api/players/import                    Body = exactly the JSON GET /api/players/export produces.    [admin]
                                              Resolves players by uuid first (creating a new,
                                              uniquified-if-needed row on no match); inserts
@@ -1388,9 +1926,11 @@ oche/
 │   ├── index.html    The entire app — one self-contained HTML file
 │   └── display.html  Read-only live scoreboard for a second screen
 ├── docker-compose.yml
-├── docker-compose.dev.yml        Dev instance on port 8056
-├── docker-compose.portainer.yml  No-build variant for Portainer/Unraid
-├── docker-entrypoint.sh          Fixes /data ownership, then drops to non-root
+├── docker-compose.dev.yml         Dev instance on port 8056
+├── docker-compose.ui-testing.yml  ui-testing branch instance on port 8066
+├── docker-compose.live-test.yml   Internet-facing test server on port 8066
+├── docker-compose.portainer.yml   No-build variant for Portainer/Unraid
+├── docker-entrypoint.sh           Fixes /data ownership, then drops to non-root
 └── Dockerfile
 ```
 
@@ -1489,9 +2029,12 @@ a player export (from this server or a different one): players are matched by a
 portable identity assigned at creation, not just by name, so a same-named but
 unrelated local player is never merged with the imported one, and importing the same
 file twice is a safe no-op — already-present games are skipped, not duplicated.
-Export and import are both admin-only: there is no export or import entry point
-anywhere on a player's own page. Neither export ever includes admin accounts,
-sessions, app settings, or any player's PIN.
+The same page also offers a **spreadsheet (CSV) export** of the selected player's
+own stats — one row per game or one row per turn — for opening in Excel, Numbers,
+or Google Sheets; unlike the JSON export it carries no opponents' turn data and
+can't be imported back. Export and import are all admin-only: there is no export
+or import entry point anywhere on a player's own page. No export ever includes
+admin accounts, sessions, app settings, or any player's PIN.
 
 ### Admin Account Recovery
 

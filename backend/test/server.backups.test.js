@@ -1,6 +1,6 @@
 'use strict';
 // Committed tests for the backup-management routes added to backend/server.js
-// (docs/backups-roadmap.md v2): list/create/retention/download/delete, and the
+// (docs/archive/backups-roadmap.md v2): list/create/retention/download/delete, and the
 // two restore paths (from an existing backup, and an uploaded file) — both of
 // which re-verify the admin's password independently of the active session.
 //
@@ -66,7 +66,7 @@ function api(base, cookie, p, opts = {}) {
   return fetch(base + p, { ...opts, headers: { Cookie: cookie, ...(opts.headers || {}) } });
 }
 
-describe('backup management routes (docs/backups-roadmap.md v2)', () => {
+describe('backup management routes (docs/archive/backups-roadmap.md v2)', () => {
   test('every route 401s without an admin session', async () => {
     await withServer(8420, async ({ base }) => {
       assert.equal((await fetch(`${base}/api/backups`)).status, 401);

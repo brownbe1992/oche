@@ -152,6 +152,125 @@ describe('personal best detection (CHALLENGE_BETTER_DIRECTION)', () => {
   });
 });
 
+describe('completeChallengeAttempt — result summary fields (personalBest/previousBest/lastResult/recentAttempts/currentStreak)', () => {
+  test('speed_to_zero: previousBest/lastResult are null on the first-ever attempt, then populate correctly across three days', () => {
+    const name = 'Challenge_Summary_Asc';
+    db.addPlayer(name);
+
+    const g1 = practiceGame(name);
+    db.startChallengeAttempt(name, g1.gameId, '2021-02-01', 'speed_to_zero', null);
+    const first = db.completeChallengeAttempt(name, '2021-02-01', 30);
+    assert.equal(first.previousBest, null, 'nothing before the first attempt');
+    assert.equal(first.lastResult, null, 'no prior attempt to compare against');
+    assert.equal(first.personalBest, 30, 'the only result so far is the best so far');
+    assert.deepEqual(first.recentAttempts, [{ date: '2021-02-01', result: 30 }]);
+
+    const g2 = practiceGame(name);
+    db.startChallengeAttempt(name, g2.gameId, '2021-02-02', 'speed_to_zero', null);
+    const worse = db.completeChallengeAttempt(name, '2021-02-02', 35); // more darts = worse
+    assert.equal(worse.previousBest, 30, 'best-before-today is still the day-1 result');
+    assert.equal(worse.lastResult, 30, 'the most recent prior attempt, same value here as previousBest');
+    assert.equal(worse.personalBest, 30, 'a worse attempt does not move the personal best');
+    assert.equal(worse.isPersonalBest, false);
+    assert.deepEqual(worse.recentAttempts, [{ date: '2021-02-01', result: 30 }, { date: '2021-02-02', result: 35 }]);
+
+    const g3 = practiceGame(name);
+    db.startChallengeAttempt(name, g3.gameId, '2021-02-03', 'speed_to_zero', null);
+    const better = db.completeChallengeAttempt(name, '2021-02-03', 27); // fewer darts = better
+    assert.equal(better.previousBest, 30, 'best-before-today excludes today\'s new record');
+    assert.equal(better.lastResult, 35, 'lastResult is the immediately-preceding attempt, not the best one');
+    assert.equal(better.personalBest, 27, 'the new record is now reflected in the overall best');
+    assert.equal(better.isPersonalBest, true);
+    assert.deepEqual(better.recentAttempts, [
+      { date: '2021-02-01', result: 30 }, { date: '2021-02-02', result: 35 }, { date: '2021-02-03', result: 27 },
+    ]);
+    assert.equal(better.currentStreak, 3);
+  });
+
+  test('recentAttempts only includes completed attempts of the SAME format, not other formats mixed in', () => {
+    const name = 'Challenge_Summary_FormatScoped';
+    db.addPlayer(name);
+    const g1 = practiceGame(name);
+    db.startChallengeAttempt(name, g1.gameId, '2021-03-01', 'speed_to_zero', null);
+    db.completeChallengeAttempt(name, '2021-03-01', 30);
+
+    const g2 = practiceGame(name);
+    db.startChallengeAttempt(name, g2.gameId, '2021-03-02', 'bullseye_gauntlet', null);
+    const bullseye = db.completeChallengeAttempt(name, '2021-03-02', 4);
+    assert.equal(bullseye.previousBest, null, 'a different format has no shared history with speed_to_zero');
+    assert.deepEqual(bullseye.recentAttempts, [{ date: '2021-03-02', result: 4 }]);
+  });
+
+  test('the already-completed no-op retry path returns the same summary shape as the original completion', () => {
+    const name = 'Challenge_Summary_AlreadyCompleted';
+    db.addPlayer(name);
+    const g = practiceGame(name);
+    db.startChallengeAttempt(name, g.gameId, '2021-04-01', 'speed_to_zero', null);
+    db.completeChallengeAttempt(name, '2021-04-01', 22);
+    const retry = db.completeChallengeAttempt(name, '2021-04-01', 999); // an attempted overwrite
+    assert.equal(retry.alreadyCompleted, true);
+    assert.equal(retry.format, 'speed_to_zero');
+    assert.equal(retry.resultDarts, 22, 'the locked-in result, not the retry\'s 999');
+    assert.equal(retry.personalBest, 22);
+    assert.deepEqual(retry.recentAttempts, [{ date: '2021-04-01', result: 22 }]);
+  });
+});
+
+describe('getTodaysChallengeBoard (Daily Challenge idea 10: household comparison board)', () => {
+  test('ranks completed attempts best-to-worst, direction-aware (asc for speed_to_zero)', () => {
+    const [a, b, c] = ['Board_A', 'Board_B', 'Board_C'];
+    [a, b, c].forEach(n => db.addPlayer(n));
+    const date = '2022-05-01';
+    db.startChallengeAttempt(a, practiceGame(a).gameId, date, 'speed_to_zero', null);
+    db.completeChallengeAttempt(a, date, 40);
+    db.startChallengeAttempt(b, practiceGame(b).gameId, date, 'speed_to_zero', null);
+    db.completeChallengeAttempt(b, date, 25); // fewest darts — best for an 'asc' format
+    db.startChallengeAttempt(c, practiceGame(c).gameId, date, 'speed_to_zero', null);
+    db.completeChallengeAttempt(c, date, 32);
+
+    const board = db.getTodaysChallengeBoard(date, 'speed_to_zero');
+    assert.deepEqual(board, [
+      { player: b, result: 25 },
+      { player: c, result: 32 },
+      { player: a, result: 40 },
+    ]);
+  });
+
+  test('ranks descending for a "more is better" format (bullseye_gauntlet)', () => {
+    const [a, b] = ['Board_Desc_A', 'Board_Desc_B'];
+    [a, b].forEach(n => db.addPlayer(n));
+    const date = '2022-05-02';
+    db.startChallengeAttempt(a, practiceGame(a).gameId, date, 'bullseye_gauntlet', null);
+    db.completeChallengeAttempt(a, date, 2);
+    db.startChallengeAttempt(b, practiceGame(b).gameId, date, 'bullseye_gauntlet', null);
+    db.completeChallengeAttempt(b, date, 5);
+
+    const board = db.getTodaysChallengeBoard(date, 'bullseye_gauntlet');
+    assert.deepEqual(board, [{ player: b, result: 5 }, { player: a, result: 2 }]);
+  });
+
+  test('excludes a not-yet-completed attempt and a different date/format', () => {
+    const [a, b] = ['Board_Excl_A', 'Board_Excl_B'];
+    [a, b].forEach(n => db.addPlayer(n));
+    const date = '2022-05-03';
+    db.startChallengeAttempt(a, practiceGame(a).gameId, date, 'speed_to_zero', null);
+    db.completeChallengeAttempt(a, date, 30);
+    // b started today's attempt but hasn't finished it yet — no result to rank
+    db.startChallengeAttempt(b, practiceGame(b).gameId, date, 'speed_to_zero', null);
+    // a different day, same player/format — must not bleed into today's board
+    db.startChallengeAttempt(a, practiceGame(a).gameId, '2022-05-04', 'speed_to_zero', null);
+    db.completeChallengeAttempt(a, '2022-05-04', 10);
+
+    const board = db.getTodaysChallengeBoard(date, 'speed_to_zero');
+    assert.deepEqual(board, [{ player: a, result: 30 }]);
+  });
+
+  test('rejects a malformed date or unknown format', () => {
+    assert.throws(() => db.getTodaysChallengeBoard('not-a-date', 'speed_to_zero'), /date must be/);
+    assert.throws(() => db.getTodaysChallengeBoard('2022-05-01', 'not_a_format'), /Unknown challenge format/);
+  });
+});
+
 describe('getChallengeStatus — current streak', () => {
   test('an attempted-but-DNF\'d today reads streak 0, even after a real prior streak', () => {
     const name = 'Challenge_Streak_DNF';

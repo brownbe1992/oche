@@ -155,7 +155,7 @@ describe('login and lockout', () => {
   });
 });
 
-// verifyAdminPassword (docs/backups-roadmap.md v2) re-verifies an already-known
+// verifyAdminPassword (docs/archive/backups-roadmap.md v2) re-verifies an already-known
 // admin's password without creating a session — gates restoring a database
 // backup, which is at least as destructive as "Wipe all data" and shouldn't rely
 // on an active session alone. It deliberately reuses login()'s exact

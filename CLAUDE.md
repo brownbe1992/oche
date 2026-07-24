@@ -13,8 +13,8 @@ game, an online session, or anything similar), that context gets its **own table
 a `game_id` foreign key pointing at `games`** — never a new `is_tournament`/`is_online`
 -style boolean bolted directly onto the `games` table itself.
 
-This is already the shape used by `docs/tournament-mode-roadmap.md`
-(`tournament_matches.game_id`) and `docs/league-mode-roadmap.md`
+This is already the shape used by `docs/archive/tournament-mode-roadmap.md`
+(`tournament_matches.game_id`) and `docs/archive/league-mode-roadmap.md`
 (`games.league_id`, nullable FK). Apply the same pattern to any other future context
 (online multiplayer, or anything not yet designed) rather than adding a fourth or
 fifth boolean flag to `games` — `games` already has `practice`; it should not
@@ -102,6 +102,17 @@ an assumed next value — always ask the user which version to use and wait for
 their explicit confirmation before editing either file. This applies even when the
 user has already asked for "a version bump" in general terms; confirm the specific
 number, since the next logical version isn't always obvious from git history alone.
+
+## Standing security-review methodology
+
+When the owner asks for a "risk assessment" or "security risk assessment" of Oche,
+follow the methodology in `docs/security/AI Risk Assessment Prompt.md` verbatim —
+same threat model, review areas, report structure, finding format, and metadata —
+unless they explicitly say otherwise. That document is the owner's canonical process,
+version-controlled on purpose. The most recent output lives alongside it
+(`docs/security/oche-internet-exposure-risk-assessment.md`). If a future request
+conflicts with the stored methodology, ask which version to use before proceeding
+rather than guessing.
 
 ## Reference manual — `REFERENCE.md` must be kept current
 

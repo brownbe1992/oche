@@ -16,8 +16,16 @@
        DEL  /api/players           -> delete (?name=...)
        GET  /api/stats             -> computed stats per player
        POST /api/games             -> start a game           { category, legsPerSet, setsPerGame, players:[names] } -> { gameId }
-       POST /api/games/:id/turns   -> record one turn        { player, set, leg, scored, trebleLess, bust, checkout, checkoutPoints, legWon }
+       POST /api/games/:id/turns   -> record one turn        { player, set, leg, scored, trebleLess, bust, checkout, checkoutPoints, legWon,
+                                                               targetScore?, declaredUnsolvable? (both Checkout Trainer only) }
        POST /api/games/:id/complete-> finish a game          { winner }
+       POST /api/games/:id/forfeit -> one player bows out    { player } -> { ok, ended, winnerName } (game keeps going for the rest unless only one active player is left)
+       POST /api/games/:id/abandon-> end the whole match early, marking every still-active participant DNF
+       GET  /api/saved-games       -> saved-game list + one-line position summaries (public)
+       POST /api/games/:id/save    -> pause an in-progress game for later
+       GET  /api/games/:id/resume-state -> the full replay payload -- ALSO deletes the
+                                            saved_games row (divergence guard, see db.js)
+       DEL  /api/saved-games/:id   -> abandon a saved game (:id is the game id) -- stats kept
        POST /api/reset             -> wipe all games/turns (players kept)        [admin]
        POST /api/wipe-all          -> wipe all players/games/stats (admins kept) [admin]
 
@@ -37,6 +45,7 @@
        GET  /api/settings/colorblind-mode   -> { enabled } (public)
        GET  /api/settings/voice-announcements -> { enabled, turnScore, noScore, checkoutReq, oneEighty, bigFish, matchProgress } (public)
        GET  /api/settings/card-tagline      -> { tagline } (public)
+       GET  /api/settings/ha-webhook-status -> { enabled, events:{<event>:bool} } (public)
 
        POST /api/badges/award      -> { player, badgeId, once } -> { newlyEarned, count } (public)
        POST /api/badges/revoke     -> { player, badgeId } -> { count } (public, used by Undo Last Turn)
@@ -75,11 +84,21 @@
        GET  /api/players/dart-heatmap -> (?name=...&gameType=...&mode=...) -> [{sector,multiplier,zone,missZone,missDepth,hits}] (public)
        GET  /api/players/bounce-outs -> (?name=...&gameType=...&mode=...) -> { count } (public)
        GET  /api/players/around-the-world -> (?name=...) -> { hit, count, total } (public)
+       GET  /api/players/doubles-hit-sectors -> (?name=...) -> { hit, count, total } (public)
        GET  /api/players/on-this-day -> (?name=...&tz=...) -> { type, year, yearsAgo, statLine } | null (public)
        POST /api/challenges/start  -> { player, gameId, challengeDate, format, target } (public)
-       POST /api/challenges/complete -> { player, challengeDate, resultDarts } -> { ok, isPersonalBest } (public)
+       POST /api/challenges/complete -> { player, challengeDate, resultDarts } ->
+         { ok, isPersonalBest, format, target, resultDarts, personalBest, previousBest,
+           lastResult, recentAttempts, currentStreak } (public) — see
+           getChallengeResultSummary() (backend/db.js) for what each of the extra
+           fields means; the results screen (frontend/index.html finishUnit()) is
+           the one consumer.
        GET  /api/challenges/status -> (?player=...&date=YYYY-MM-DD) -> { today, streak, history } (public)
        GET  /api/challenges/history -> (?player=...&date=YYYY-MM-DD) -> { played, completed, currentStreak, longestStreak, bestByFormat, attempts } (public)
+       GET  /api/challenges/today-board -> (?date=YYYY-MM-DD&format=...) -> [{ player, result }, ...]
+         ranked best-to-worst (household comparison board, Home page) — format is
+         passed by the client (already computed client-side via todaysChallenge())
+         rather than re-derived server-side (public)
        DEL  /api/challenges/attempt -> (?player=...&date=YYYY-MM-DD) reset an attempt + wipe its recorded stats [admin]
 
        GET  /api/dart-components/options -> the fixed dropdown option lists (shapes/materials/grips/etc.) (public)
@@ -115,19 +134,44 @@
                                        validates it's a genuine, non-corrupt SQLite file
                                        (header + PRAGMA integrity_check) before staging the
                                        same restore as above. Capped at 500MB. [admin]
-       GET  /api/export-all        -> streams a full-database JSON export (docs/
+       GET  /api/export-all        -> streams a full-database JSON export (docs/archive/
                                        data-export-roadmap.md, admin-only, Settings ->
                                        Admin & Danger Zone -> Data Export). Excludes
                                        admins/sessions/settings/server_errors and strips
                                        PIN-hash columns from players. [admin]
        GET  /api/players/export    -> (?name=...) streams one player's JSON export
-                                       (docs/data-export-roadmap.md, admin-only,
+                                       (docs/archive/data-export-roadmap.md, admin-only,
                                        Settings -> Data Export -> Export Player) --
                                        games/turns/darts for every game that player is
                                        in, including opponents' rows within those same
                                        games (H2H isn't stored anywhere, only derivable
                                        from them) plus minimal opponent identity stubs
                                        (uuid+name). 404 if the name doesn't exist. [admin]
+       GET  /api/players/export-csv -> (?name=...&kind=games|turns) streams one player's
+                                       history as a CSV spreadsheet (docs/archive/
+                                       data-export-roadmap.md, admin-only, same screen as
+                                       the JSON export) -- kind=games is one row per game
+                                       with per-game aggregates of the player's own turns,
+                                       kind=turns is one row per turn they threw with
+                                       per-dart notation. Non-portable by design (no
+                                       uuids, no opponents' turns, no import path). 400
+                                       for a missing name or bad kind, 404 if the name
+                                       doesn't exist. [admin]
+       GET  /api/players/merge-preview -> (?source=...&target=...) everything a merge
+                                       WOULD do, computed without writing: per-table
+                                       move counts, auto-resolved badge/challenge
+                                       conflicts, and the blocking-conflict list
+                                       (shared game/tournament/league, ambiguous
+                                       same-day challenge attempts). 404 unknown
+                                       player, 400 same player. (docs/archive/
+                                       player-merge-roadmap.md) [admin]
+       POST /api/players/merge     -> { source, target } -> absorbs source's full
+                                       history into target and deletes source's row,
+                                       atomically; records source's uuid in
+                                       player_uuid_aliases so old exports still
+                                       import onto the survivor. 400 if any blocking
+                                       conflict exists (same list as the preview).
+                                       Rate-limited; logged server-side. [admin]
        POST /api/players/import    -> body = exactly the JSON GET /api/players/export
                                        produces. Resolves the main player + every
                                        opponent stub by uuid first (creating a new,
@@ -174,8 +218,16 @@ const PORT = process.env.PORT || 8046;
 // set OCHE_REQUIRE_AUTH=false (or "0") to opt back into open-LAN behavior for a
 // fully-trusted household network. Unrecognized values are treated as "required" (fail
 // closed), not silently disabled.
+//
+// This env var is only the BOOT-TIME DEFAULT now (2026-07) — an admin can flip the
+// actual behavior at runtime from Settings -> Admin accounts, stored as the
+// `require_admin_auth` DB setting (db.getRequireAuthSetting()), which takes over
+// permanently once explicitly saved (even across a restart, regardless of what this
+// env var says from then on). requireWrite()/`GET /api/auth-config` both read the
+// DB-resolved value fresh on every call rather than caching a boot-time constant, so
+// toggling it in Settings takes effect immediately, no restart required.
 const _requireAuthEnv = String(process.env.OCHE_REQUIRE_AUTH ?? '').toLowerCase();
-const REQUIRE_AUTH = !(_requireAuthEnv === 'false' || _requireAuthEnv === '0');
+const REQUIRE_AUTH_ENV_DEFAULT = !(_requireAuthEnv === 'false' || _requireAuthEnv === '0');
 const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
 const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript', '.css':'text/css', '.svg':'image/svg+xml', '.ico':'image/x-icon' };
 
@@ -279,17 +331,19 @@ function requireAdmin(req, res) {
   return admin;
 }
 
-// Call at the top of any state-changing (write) route. When OCHE_REQUIRE_AUTH is off
-// this is a no-op (returns true, preserving open LAN behavior). When on, it requires a
-// logged-in admin, sending 401 and returning false if absent. Returns true when the
-// request may proceed.
+// Call at the top of any state-changing (write) route. When the admin-configurable
+// require_admin_auth setting (db.getRequireAuthSetting(), falling back to
+// REQUIRE_AUTH_ENV_DEFAULT until explicitly saved) is off, this is a no-op (returns
+// true, preserving open LAN behavior). When on, it requires a logged-in admin,
+// sending 401 and returning false if absent. Returns true when the request may
+// proceed.
 function requireWrite(req, res) {
-  if (!REQUIRE_AUTH) return true;
+  if (!db.getRequireAuthSetting(REQUIRE_AUTH_ENV_DEFAULT).requireAuth) return true;
   return !!requireAdmin(req, res);
 }
 
 const MAX_JSON_BODY_BYTES = 1e6;
-// docs/data-export-roadmap.md: a per-player export/import file is real user data
+// docs/archive/data-export-roadmap.md: a per-player export/import file is real user data
 // (games/turns/darts), not a normal small write body — a prolific player's full
 // history can genuinely exceed 1MB as JSON. 20MB is generous headroom while still
 // being a bounded, defensive cap (nowhere near the 500MB raw-file backup cap, since
@@ -418,7 +472,7 @@ const MAX_SSE_TOTAL = 50;
 const MAX_SSE_PER_IP = 5;
 const sseByIp = new Map(); // ip -> open connection count
 
-// docs/backups-roadmap.md v2: an uploaded backup file bypasses readJson()'s 1MB
+// docs/archive/backups-roadmap.md v2: an uploaded backup file bypasses readJson()'s 1MB
 // cap entirely (streamed straight to disk, never buffered as one JSON string) —
 // this is its own, independent ceiling. 500MB comfortably covers years of
 // per-dart history for a household while still bounding worst-case disk use
@@ -430,32 +484,29 @@ const MAX_BACKUP_UPLOAD_BYTES = 500 * 1024 * 1024;
 // connected screen. Restrict it to the fields liveSnapshot() in frontend/index.html
 // actually produces (and display.html reads) and cap its serialized size, so a
 // malformed/oversized payload can't bloat every broadcast.
+//
+// docs/code-quality-roadmap.md item 42: every per-mode field (Shanghai's round
+// count, Killer's lives threshold, Dead Man Walking's dart budget, ...) used to
+// be its own top-level entry here, in addition to the frontend's producer
+// (liveSnapshot()) and display.html's reader. That 3rd sync point — this list —
+// is exactly the one a new mode's live-scoreboard fields silently missed, twice
+// (BUG-28's 7 keys, then killerLives/checkoutLadder*): both bugs shipped a
+// mode whose fields were added to liveSnapshot() and read by display.html, but
+// never allowlisted here, so the server silently stripped them before every
+// broadcast — a plausible-looking wrong default on the TV, no error anywhere.
+// `modeState` (an opaque object, unrestricted-shape the same way `players[]`
+// already is) replaces all of those per-field entries — a new mode's live
+// fields now only ever need touching in two places (its own GAME_TYPES.
+// liveModeState member, and display.html's reader), never here.
 const ALLOWED_LIVE_KEYS = new Set([
   'active', 'gameType', 'category', 'legsPerSet', 'setsPerGame', 'setNo', 'legNo',
   'currentIndex', 'players', 'darts', 'checkout', 'status', 'message', 'achievement',
   'gameOneEighties', 'gameBigFish', 'gameBusts', 'legSummary', 'practice', 'done',
-  'lastTurnEvent', 'matchResult', 'legStart', 'checkoutTarget', 'turnSeq', 'ts',
-  // Doubles Practice only (docs/game-modes-roadmap.md) — read by display.html's
-  // renderers.doubles_practice.card(), never by X01/Cricket. roundOver/roundEndReason
-  // are shared with guided Around the Clock below (same "round ended" concept).
-  'doublesTargets', 'dpLastDart', 'roundOver', 'roundEndReason',
-  // Just Chuckin' It only (docs/game-modes-roadmap.md) — read by display.html's
-  // renderers.chuckin.card().
-  'chuckinLastDart',
-  // Guided Around the Clock / Around the World only (docs/game-modes-roadmap.md) —
-  // read by display.html's renderers.around_the_clock.card()/renderers.around_the_world.card().
-  // Per-player hit-set/progress data rides inside the already-unrestricted
-  // per-player `players[]` array, same as Chuckin's heatmap/sessionAvg fields do.
-  'atcLastDart', 'atwLastDart',
-  // Tournament mode only (docs/tournament-mode-roadmap.md) — read by display.html's
+  'doneHeading', 'lastTurnEvent', 'matchResult', 'legStart', 'checkoutTarget', 'turnSeq', 'ts',
+  'modeState',
+  // Tournament mode only (docs/archive/tournament-mode-roadmap.md) — read by display.html's
   // fmtText() for the top-bar round label ("Quarterfinal", "Final", ...).
   'tournamentRoundLabel',
-  // Baseball only (docs/game-modes-roadmap.md) — which inning (1-9, or beyond on a
-  // tie) is currently live; read by display.html's renderers.baseball.scorecard()
-  // for the "Inning N of 9" header. Per-player runs ride inside the already-
-  // unrestricted per-player `players[]` array, same as every other game type's own
-  // per-player fields.
-  'baseballInning',
 ]);
 const MAX_LIVE_BYTES = 65536;
 // Returns the sanitized state, or null if it's over the size cap (caller sends 413).
@@ -468,7 +519,7 @@ function sanitizeLiveState(b) {
   return out;
 }
 
-// docs/backups-roadmap.md v2: streams an uploaded .db file straight to a temp
+// docs/archive/backups-roadmap.md v2: streams an uploaded .db file straight to a temp
 // file on disk rather than buffering it as one string — every other endpoint
 // goes through readJson()'s 1MB cap, which a real backup file will exceed as
 // data grows over years, so this is its own path (manual 'data'/'end'/'error'
@@ -557,7 +608,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/health' && m === 'GET') return send(res, 200, { ok: true });
     // Public: lets the frontend know whether writes require an admin login, so it can
     // gate gameplay/roster changes behind login when OCHE_REQUIRE_AUTH is enabled.
-    if (p === '/api/auth-config' && m === 'GET') return send(res, 200, { requireAuth: REQUIRE_AUTH });
+    if (p === '/api/auth-config' && m === 'GET') return send(res, 200, db.getRequireAuthSetting(REQUIRE_AUTH_ENV_DEFAULT));
 
     // ----- auth -----
     if (p === '/api/setup-required' && m === 'GET') return send(res, 200, { required: db.isSetupRequired() });
@@ -694,6 +745,10 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/summary'       && m === 'GET') return send(res, 200, db.getSummary());
     if (p === '/api/home-extra'    && m === 'GET') return send(res, 200, db.getHomeExtra());
+    // End-of-Night Session Recap (docs/archive/session-recap-roadmap.md) — same public-read
+    // tier as every other stats endpoint it aggregates; date validated inside
+    // getSessionRecap() itself (YYYY-MM-DD), same pattern as /api/challenges/status.
+    if (p === '/api/session-recap' && m === 'GET') return send(res, 200, db.getSessionRecap(url.searchParams.get('date'), url.searchParams.get('tz')));
     if (p === '/api/top-finishes'  && m === 'GET') return send(res, 200, db.getTopFinishesAll(10, url.searchParams.get('mode')));
     if (p === '/api/stats/180s'         && m === 'GET') return send(res, 200, db.getOneEightyStats(url.searchParams.get('mode')));
     if (p === '/api/stats/cricket-9marks' && m === 'GET') return send(res, 200, db.getCricketNineMarksStats(url.searchParams.get('mode')));
@@ -704,9 +759,22 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/stats/baseball-rpi' && m === 'GET') return send(res, 200, db.getBaseballRpiLeaderboard(url.searchParams.get('mode')));
     if (p === '/api/stats/baseball-wins' && m === 'GET') return send(res, 200, db.getBaseballWinLeaderboard());
     if (p === '/api/stats/baseball-perfect-game' && m === 'GET') return send(res, 200, db.getBaseballPerfectGameStats(url.searchParams.get('mode')));
+    if (p === '/api/stats/shanghai-ppr' && m === 'GET') return send(res, 200, db.getShanghaiPprLeaderboard(url.searchParams.get('mode')));
+    if (p === '/api/stats/shanghai-shanghais' && m === 'GET') return send(res, 200, db.getShanghaiShanghaisStats(url.searchParams.get('mode')));
+    if (p === '/api/stats/shanghai-wins' && m === 'GET') return send(res, 200, db.getShanghaiWinLeaderboard());
+    if (p === '/api/stats/halve-it-best-total' && m === 'GET') return send(res, 200, db.getHalveItBestTotalLeaderboard(url.searchParams.get('mode')));
+    if (p === '/api/stats/halve-it-wins' && m === 'GET') return send(res, 200, db.getHalveItWinLeaderboard());
+    if (p === '/api/stats/pressure-chamber-best-cp' && m === 'GET') return send(res, 200, db.getPressureChamberBestCpLeaderboard(url.searchParams.get('mode')));
+    if (p === '/api/stats/pressure-chamber-wins' && m === 'GET') return send(res, 200, db.getPressureChamberWinLeaderboard());
     if (p === '/api/stats/doubles-practice-accuracy' && m === 'GET') return send(res, 200, db.getDoublesPracticeAccuracyLeaderboard());
     if (p === '/api/stats/doubles-practice-best-round' && m === 'GET') return send(res, 200, db.getDoublesPracticeBestRoundStats());
     if (p === '/api/stats/checkout-blitz-leaderboard' && m === 'GET') return send(res, 200, db.getCheckoutBlitzLeaderboard());
+    if (p === '/api/stats/bobs27-leaderboard' && m === 'GET') return send(res, 200, db.getBobs27Leaderboard());
+    if (p === '/api/stats/elo-leaderboard' && m === 'GET') return send(res, 200, db.getEloLeaderboard());
+    if (p === '/api/stats/checkout-ladder-leaderboard' && m === 'GET') return send(res, 200, db.getCheckoutLadderLeaderboard());
+    if (p === '/api/stats/gauntlet-leaderboard' && m === 'GET') return send(res, 200, db.getGauntletLeaderboard());
+    if (p === '/api/stats/dead-man-walking-leaderboard' && m === 'GET') return send(res, 200, db.getDeadManWalkingLeaderboard());
+    if (p === '/api/stats/killer-wins' && m === 'GET') return send(res, 200, db.getKillerWinLeaderboard());
     if (p === '/api/stats/around-the-clock-fastest' && m === 'GET') return send(res, 200, db.getAroundTheClockFastestLeaderboard());
     if (p === '/api/stats/around-the-clock-completions' && m === 'GET') return send(res, 200, db.getAroundTheClockCompletionsLeaderboard());
     if (p === '/api/stats/around-the-world-progress' && m === 'GET') return send(res, 200, db.getAroundTheWorldLeaderboard());
@@ -721,33 +789,27 @@ const server = http.createServer(async (req, res) => {
       const mode = url.searchParams.get('mode');
       const name = url.searchParams.get('name');
       const gameType = url.searchParams.get('gameType');
-      // Checkout Trainer merges two functions into one response: the lifetime
-      // toughest-checkout/best-streak record (both sub-modes) plus Checkout
-      // Blitz's own peak-score/lifetime-average record — one Personal Bests
-      // block covers both, no separate route needed for the Blitz half.
-      if (gameType === 'checkout_trainer') {
-        return send(res, 200, Object.assign({}, db.getCheckoutTrainerPersonalBests(name, mode), db.getCheckoutBlitzPersonalStats(name)));
-      }
-      return send(res, 200, gameType === 'cricket' ? db.getCricketPersonalBests(name, mode)
-        : gameType === 'baseball' ? db.getBaseballPersonalBests(name, mode)
-        : gameType === 'doubles_practice' ? db.getDoublesPracticePersonalBests(name, mode)
-        : gameType === 'chuckin' ? db.getChuckinPersonalBests(name, mode)
-        : gameType === 'around_the_clock' ? db.getAroundTheClockPersonalBests(name, mode)
-        : gameType === 'around_the_world' ? db.getAroundTheWorldPersonalBests(name, mode)
-        : db.getPersonalBests(name, mode));
+      // Per-type dispatch (including Checkout Trainer's merged trainer+Blitz record,
+      // Marathon's routing-key-only mapping, and the X01 default) lives in db.js's
+      // GAME_TYPE_REGISTRY now — one record per type instead of a ternary here.
+      return send(res, 200, db.getPersonalBestsFor(gameType, name, mode));
+    }
+    // Item 51: tournament average-seeding's own batch fetch — one request for every
+    // selected player's X01-lifetime personal bests instead of N separate round trips.
+    if (p === '/api/players/personal-bests-batch' && m === 'GET') {
+      const names = (url.searchParams.get('names') || '').split(',').map(s => s.trim()).filter(Boolean);
+      return send(res, 200, db.getPersonalBestsBatch(names));
     }
     if (p === '/api/players/stat-bubbles' && m === 'GET') {
       const mode = url.searchParams.get('mode');
       const name = url.searchParams.get('name');
       const gameType = url.searchParams.get('gameType');
-      return send(res, 200, gameType === 'cricket' ? db.getCricketStatBubbles(name, mode)
-        : gameType === 'baseball' ? db.getBaseballStatBubbles(name, mode)
-        : gameType === 'doubles_practice' ? db.getDoublesPracticeStatBubbles(name, mode)
-        : gameType === 'chuckin' ? db.getChuckinStatBubbles(name, mode)
-        : gameType === 'checkout_trainer' ? db.getCheckoutTrainerStatBubbles(name, mode)
-        : gameType === 'around_the_clock' ? db.getAroundTheClockStatBubbles(name, mode)
-        : gameType === 'around_the_world' ? db.getAroundTheWorldDrillStatBubbles(name, mode)
-        : db.getPlayerStatBubbles(name, mode));
+      // Same GAME_TYPE_REGISTRY dispatch as personal-bests above (X01 default for an
+      // unknown/absent type) — one record per type in db.js, no ternary here.
+      return send(res, 200, db.getStatBubblesFor(gameType, name, mode));
+    }
+    if (p === '/api/players/gauntlet-scar-map' && m === 'GET') {
+      return send(res, 200, db.getGauntletScarMap(url.searchParams.get('name')));
     }
     if (p === '/api/players/chuckin-heatmap' && m === 'GET') {
       return send(res, 200, db.getChuckinHeatmap(url.searchParams.get('name'), url.searchParams.get('mode')));
@@ -762,8 +824,15 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { count: db.getBounceOutCount(url.searchParams.get('name'), url.searchParams.get('gameType'), url.searchParams.get('mode')) });
     }
     if (p === '/api/players/ghost-legs' && m === 'GET') {
+      const name = url.searchParams.get('name');
       const limit = url.searchParams.get('limit');
-      return send(res, 200, db.getGhostCandidateLegs(url.searchParams.get('name'), limit));
+      const sort = url.searchParams.get('sort');
+      const offset = url.searchParams.get('offset');
+      const category = url.searchParams.get('category');
+      return send(res, 200, {
+        legs: db.getGhostCandidateLegs(name, limit, { sort, offset, category }),
+        total: db.getGhostCandidateLegsCount(name, category),
+      });
     }
     if (p === '/api/players/ghost-script' && m === 'GET') {
       const script = db.getGhostLegScript(
@@ -832,19 +901,27 @@ const server = http.createServer(async (req, res) => {
     // Public (no-auth) read of the shareable-card tagline — any device generating a
     // card needs this, not just the admin's browser.
     if (p === '/api/settings/card-tagline' && m === 'GET') { return send(res, 200, db.getCardTagline()); }
+    // Public (no-auth) read of WHETHER each HA webhook event is configured (never the
+    // webhook IDs themselves) — every device playing a game needs this to skip a
+    // pointless sendHaWebhook() call/payload build client-side (item 57).
+    if (p === '/api/settings/ha-webhook-status' && m === 'GET') { return send(res, 200, db.getHaWebhookStatus()); }
+    // Public (no-auth) read of the Player Profile heatmap's heat-scale/number-band
+    // style — any device viewing a profile needs this, not just an admin's browser.
+    if (p === '/api/settings/heatmap-style' && m === 'GET') { return send(res, 200, db.getHeatmapStyle()); }
+    if (p === '/api/settings/heatmap-number-style' && m === 'GET') { return send(res, 200, db.getHeatmapNumberStyle()); }
     if (p === '/api/settings' && m === 'PUT') {
       if (!requireAdmin(req, res)) return;
       const b = await readJson(req);
       // Only allow known setting keys through
       const boolKeys = ['collect_dart_timing','colorblind_mode','voice_enabled','voice_turn_score',
-        'voice_no_score','voice_checkout_req','voice_180','voice_bigfish','voice_match_progress'];
+        'voice_no_score','voice_checkout_req','voice_180','voice_bigfish','voice_match_progress','require_admin_auth'];
       const allowed = ['ha_url',
         'ha_webhook_oneeighty','ha_webhook_bigfish','ha_webhook_bust','ha_webhook_ninedarter','ha_webhook_tonplus',
         'ha_webhook_momentcard',
         'ha_webhook_gamestart','ha_webhook_gameend','ha_webhook_setstart','ha_webhook_setend',
         'ha_webhook_legstart','ha_webhook_legend','pin_lockout_threshold',
         'admin_lockout_grace','admin_lockout_base_seconds','admin_lockout_max_seconds','scoreboard_layout',
-        'default_scoring_input','card_tagline', ...boolKeys];
+        'default_scoring_input','card_tagline','heatmap_style','heatmap_number_style', ...boolKeys];
       const safe = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
       if ('pin_lockout_threshold' in safe) {
         const n = Number(safe.pin_lockout_threshold);
@@ -884,6 +961,12 @@ const server = http.createServer(async (req, res) => {
       }
       if ('default_scoring_input' in safe && !['pad','board'].includes(safe.default_scoring_input)) {
         return send(res, 400, { error: 'default_scoring_input must be one of: pad, board' });
+      }
+      if ('heatmap_style' in safe && !['classic','scorched'].includes(safe.heatmap_style)) {
+        return send(res, 400, { error: 'heatmap_style must be one of: classic, scorched' });
+      }
+      if ('heatmap_number_style' in safe && !['original','molten_seam','chalk_ledger'].includes(safe.heatmap_number_style)) {
+        return send(res, 400, { error: 'heatmap_number_style must be one of: original, molten_seam, chalk_ledger' });
       }
       return send(res, 200, db.updateSettings(safe));
     }
@@ -938,7 +1021,33 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/games' && m === 'POST') { if (!requireWrite(req, res)) return; const b = await readJson(req); return send(res, 200, db.createGame({ ...b, practice: b.practice ? 1 : 0 })); }
 
+    // Marathon Mode (docs/archive/marathon-mode-roadmap.md) — the session/leg-chaining
+    // endpoints. Never accepts a client-supplied game_id anywhere; each leg's
+    // game is always created server-side, inside db.js, by these calls
+    // themselves.
+    if (p === '/api/marathon/sessions' && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.startMarathonSession(b.player, b.durationMinutes));
+    }
     let mt;
+    if ((mt = p.match(/^\/api\/marathon\/sessions\/(\d+)$/)) && m === 'GET') {
+      return send(res, 200, db.getMarathonSessionDetail(Number(mt[1])));
+    }
+    if ((mt = p.match(/^\/api\/marathon\/sessions\/(\d+)\/legs$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.startNextMarathonLeg(Number(mt[1]), b.player));
+    }
+    if ((mt = p.match(/^\/api\/marathon\/sessions\/(\d+)\/end$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      return send(res, 200, db.endMarathonSession(Number(mt[1])));
+    }
+    if (p === '/api/stats/marathon-leaderboard' && m === 'GET') {
+      return send(res, 200, db.getMarathonLeaderboard());
+    }
+
+
     if ((mt = p.match(/^\/api\/games\/(\d+)\/turns\/last$/)) && m === 'DELETE') {
       if (!requireWrite(req, res)) return;
       // docs/bug-roadmap.md BUG-13: optional — index.html sends it when it knows
@@ -949,16 +1058,26 @@ const server = http.createServer(async (req, res) => {
     if ((mt = p.match(/^\/api\/games\/(\d+)\/turns$/)) && m === 'POST') {
       if (!requireWrite(req, res)) return;
       const b = await readJson(req);
-      // docs/security-audit-roadmap.md SEC-22: this is the one production call site
-      // untrusted input actually reaches, so it's the one place that opts into the
-      // scored/darts consistency cross-check — see addTurn()'s own comment for why
-      // this isn't the default for every caller (backend/test/db.*.test.js calls
-      // addTurn() directly with placeholder scored values unrelated to this invariant).
-      return send(res, 200, db.addTurn(Number(mt[1]), b, { enforceConsistency: true }));
+      // recordTurn() is the validated-by-construction public write entry (it always runs
+      // the SEC-22 scored/darts consistency cross-check — there is no flag to omit). Any
+      // future route that records a turn should call this, not the raw db.addTurn().
+      return send(res, 200, db.recordTurn(Number(mt[1]), b));
     }
     if ((mt = p.match(/^\/api\/games\/(\d+)\/complete$/)) && m === 'POST') {
       if (!requireWrite(req, res)) return;
       const b = await readJson(req); return send(res, 200, db.completeGame(Number(mt[1]), b.winner));
+    }
+    // Forfeit / abandon (docs/open-roadmap-items.md "Forfeiting a multiplayer
+    // game" / "abandoned games count as a DNF") — same requireWrite tier as
+    // /complete, since bowing out or ending a match is gameplay, not admin
+    // surgery.
+    if ((mt = p.match(/^\/api\/games\/(\d+)\/forfeit$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req); return send(res, 200, db.forfeitPlayer(Number(mt[1]), b.player));
+    }
+    if ((mt = p.match(/^\/api\/games\/(\d+)\/abandon$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      return send(res, 200, db.abandonGame(Number(mt[1])));
     }
     if ((mt = p.match(/^\/api\/games\/(\d+)\/events$/)) && m === 'POST') {
       if (!requireWrite(req, res)) return;
@@ -966,7 +1085,30 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, db.recordEvent(Number(mt[1]), b.type, b.setNo ?? null, b.legNo ?? null));
     }
 
-    // ----- tournaments (docs/tournament-mode-roadmap.md, single-elimination only) -----
+    // ----- saved games / pause & resume (docs/archive/saved-games-roadmap.md) -----
+    // Viewing the list is public, same as every other stats/scoreboard read;
+    // saving/resuming/abandoning are all state-changing writes, same requireWrite
+    // tier as recording a turn (pausing is gameplay, not admin surgery — per the
+    // roadmap doc's security section). GET .../resume-state is the one read that
+    // also mutates (consumes the pause) — see getResumeState()'s own comment in
+    // db.js for why that's deliberate, not an oversight.
+    if (p === '/api/saved-games' && m === 'GET') {
+      return send(res, 200, db.getSavedGames());
+    }
+    if ((mt = p.match(/^\/api\/games\/(\d+)\/save$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      return send(res, 200, db.saveGame(Number(mt[1])));
+    }
+    if ((mt = p.match(/^\/api\/games\/(\d+)\/resume-state$/)) && m === 'GET') {
+      if (!requireWrite(req, res)) return;
+      return send(res, 200, db.getResumeState(Number(mt[1])));
+    }
+    if ((mt = p.match(/^\/api\/saved-games\/(\d+)$/)) && m === 'DELETE') {
+      if (!requireWrite(req, res)) return;
+      return send(res, 200, db.abandonSavedGame(Number(mt[1])));
+    }
+
+    // ----- tournaments (docs/archive/tournament-mode-roadmap.md, single-elimination only) -----
     // Viewing a bracket is public, same as every other stats/scoreboard view; creating
     // a tournament, starting a match, and recording a walkover are all state-changing
     // writes and go through the same requireWrite gate as starting/completing a game.
@@ -996,7 +1138,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, db.getTournamentStats(url.searchParams.get('name')));
     }
 
-    // ----- leagues (docs/league-mode-roadmap.md, X01 or Cricket) -----
+    // ----- leagues (docs/archive/league-mode-roadmap.md, X01 or Cricket) -----
     // Same read/write split as tournaments: viewing leagues/standings is public;
     // creating a league, enrolling a player, and ending/reopening one are all
     // state-changing writes gated by requireWrite. Games auto-tag into a league via
@@ -1033,7 +1175,7 @@ const server = http.createServer(async (req, res) => {
       const names = String(url.searchParams.get('players') || '').split(',').map(s => s.trim()).filter(Boolean);
       return send(res, 200, db.getEligibleLeagues(names[0], names[1], url.searchParams.get('category'), url.searchParams.get('gameType')));
     }
-    // Public: league fixtures / pending matches (docs/league-mode-roadmap.md) — the
+    // Public: league fixtures / pending matches (docs/archive/league-mode-roadmap.md) — the
     // New Game screen's future "League Game" entry (item 11b) calls this right after
     // Step 1 (opponent pair picked), *before* any game type is chosen — unlike
     // /api/leagues/eligible above, which needs category/gameType already known.
@@ -1135,12 +1277,22 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/players/badges' && m === 'GET') {
       return send(res, 200, db.getPlayerBadges(url.searchParams.get('name')));
     }
+    if (p === '/api/players/elo' && m === 'GET') {
+      return send(res, 200, db.getPlayerElo(url.searchParams.get('name')));
+    }
     if (p === '/api/players/h2h-summary' && m === 'GET') {
       const exGid = Number(url.searchParams.get('excludeGameId'));
       return send(res, 200, db.getH2HSummary(url.searchParams.get('player'), url.searchParams.get('opponent'), Number.isFinite(exGid) ? exGid : null));
     }
     if (p === '/api/players/around-the-world' && m === 'GET') {
       return send(res, 200, db.getAroundTheWorldProgress(url.searchParams.get('name')));
+    }
+    // docs/archive/culture-badges-roadmap.md Part B: Ring Master's own lifetime-progress
+    // query — same {hit,count,total} shape as around-the-world above, just scoped
+    // to Doubles Practice's own "hit" definition (a double landed on a genuine
+    // target) instead of every raw dart outcome.
+    if (p === '/api/players/doubles-hit-sectors' && m === 'GET') {
+      return send(res, 200, db.getDoublesPracticeHitSectors(url.searchParams.get('name')));
     }
     if (p === '/api/players/on-this-day' && m === 'GET') {
       const tzRaw = url.searchParams.get('tz');
@@ -1152,7 +1304,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, db.getOnThisDay(url.searchParams.get('name'), tzSafe));
     }
 
-    // ----- daily challenge (docs/daily-challenge-roadmap.md) -----
+    // ----- daily challenge (docs/archive/daily-challenge-roadmap.md) -----
     if (p === '/api/challenges/start' && m === 'POST') {
       if (!requireWrite(req, res)) return;
       const b = await readJson(req);
@@ -1169,6 +1321,9 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/challenges/history' && m === 'GET') {
       return send(res, 200, db.getChallengeHistory(url.searchParams.get('player'), url.searchParams.get('date')));
     }
+    if (p === '/api/challenges/today-board' && m === 'GET') {
+      return send(res, 200, db.getTodaysChallengeBoard(url.searchParams.get('date'), url.searchParams.get('format')));
+    }
     // Admin-only reset (Settings → Daily Challenge): deletes a player's attempt for
     // the given date plus the game/turns/darts recorded during it, unlocking a retake.
     if (p === '/api/challenges/attempt' && m === 'DELETE') {
@@ -1176,7 +1331,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, db.resetChallengeAttempt(url.searchParams.get('player'), url.searchParams.get('date')));
     }
 
-    // ----- backups (docs/backups-roadmap.md v2) -----
+    // ----- backups (docs/archive/backups-roadmap.md v2) -----
     // Every route here is unconditionally admin-gated (requireAdmin, not
     // requireWrite) regardless of OCHE_REQUIRE_AUTH — managing or restoring the
     // whole database is at least as sensitive as /api/wipe-all and /api/admins,
@@ -1272,10 +1427,46 @@ const server = http.createServer(async (req, res) => {
       });
       return res.end(body);
     }
+    if (p === '/api/players/export-csv' && m === 'GET') {
+      if (!requireAdmin(req, res)) return;
+      const name = url.searchParams.get('name');
+      if (!name) return send(res, 400, { error: 'name is required' });
+      const kind = url.searchParams.get('kind') || 'games';
+      // throws httpError(400) for an unknown kind, httpError(404) for an unknown name -- caught below
+      const csv = db.getPlayerCsvExport(name, kind);
+      const body = Buffer.from(csv);
+      const safeName = String(name).replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '').slice(0, 40) || 'player';
+      const filename = `oche-export-${safeName}-${kind}-${new Date().toISOString().slice(0, 10)}.csv`;
+      res.writeHead(200, {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': String(body.length),
+        ...SECURITY_HEADERS,
+      });
+      return res.end(body);
+    }
     if (p === '/api/players/import' && m === 'POST') {
       if (!requireAdmin(req, res)) return;
       const payload = await readJson(req, MAX_PLAYER_IMPORT_BYTES);
       const result = db.importPlayerExport(payload); // throws httpError(400) for a malformed/wrong-version file
+      return send(res, 200, result);
+    }
+    if (p === '/api/players/merge-preview' && m === 'GET') {
+      if (!requireAdmin(req, res)) return;
+      const source = url.searchParams.get('source'), target = url.searchParams.get('target');
+      if (!source || !target) return send(res, 400, { error: 'source and target are required' });
+      return send(res, 200, db.getMergePreview(source, target)); // throws 404 unknown player / 400 same player
+    }
+    if (p === '/api/players/merge' && m === 'POST') {
+      if (!requireAdmin(req, res)) return;
+      // docs/archive/player-merge-roadmap.md "Security": rate-limited like the backup-restore
+      // routes — an irreversible cross-table rewrite shouldn't be hammerable — and
+      // logged server-side so a mistaken merge leaves an audit trail in `docker logs`.
+      if (!rateLimit('player-merge', ip, 10, 60000)) return tooManyRequests(res, 60);
+      const b = await readJson(req);
+      if (!b.source || !b.target) return send(res, 400, { error: 'source and target are required' });
+      const result = db.mergePlayers(b.source, b.target); // throws 400 (blocked/same player) / 404 (unknown)
+      console.log(`[${new Date().toISOString()}] player merge: "${result.source.name}" -> "${result.target.name}" (${JSON.stringify(result.moves)})`);
       return send(res, 200, result);
     }
 

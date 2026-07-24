@@ -43,8 +43,41 @@
 > opened by a live user bug report (2026-07) against Just Chuckin' It's live scoreboard
 > heatmap lighting up *both* single regions of a number for any single hit (the live
 > session tally and its renderer were zone-blind, even though dart recording and the
-> lifetime heatmap were already zone-aware), now fixed. **BUG-1 through BUG-20 are all
-> fixed as of this writing** — nothing open on either tracker.
+> lifetime heatmap were already zone-aware), now fixed. **BUG-21** was opened by a
+> live user bug report (2026-07) against a re-shared Badge Case card showing no
+> explanation at all — `shareEarnedBadge()` never used the badge's own `desc` field,
+> the only moment-card-building path in the app that didn't, now fixed (extended to
+> every other card-building path for full coverage in the same change). **BUG-22**
+> was opened by a live user bug report (2026-07) against practice-mode Baseball
+> games never recording — Games Played, Win Rate, and every Personal Best stayed
+> empty no matter how many practice games were played, because
+> `onLegWonBaseball()`'s match-completion gate was copy-pasted from X01/Cricket's
+> open-ended-practice-session template, which Baseball's own completed_at-dependent
+> stat functions can't tolerate — now fixed. **BUG-23** was opened by a live user
+> bug report (2026-07) against Cricket's scoring pad having no way to log a real
+> off-target number hit (e.g. 1-14 in classic Cricket) — every one was forced
+> through `Miss`, corrupting Dart Analytics' sector/treble-rate stats — now fixed
+> with a "hit a different number" picker. **BUG-24** was found while verifying
+> BUG-23's fix, when a follow-up "check the heatmap works for Cricket" request
+> revealed every single hit (not just off-target ones) was silently invisible on
+> Cricket's (and Baseball's) lifetime dartboard heatmap, because the two game
+> types can never produce the "zone" data the heatmap's existing exclusion rule
+> assumed was always a Pad-mode choice — now fixed. **BUG-25** was opened by a
+> live user bug report (2026-07) against the New Game wizard forcing every
+> mode through Step 3 ("More options") even when that mode had nothing to
+> configure there — Chuckin, X01/Baseball practice, Around the Clock, Around
+> the World, and Daily Challenge all landed on an effectively blank page
+> requiring an extra click, now fixed by skipping straight to Start when Step
+> 3 has no visible content. **BUG-26** (fixed 2026-07) closed a `display.html`
+> ACH-labels parity gap. An **eighth-pass audit** (2026-07, weighted to the six
+> game modes merged since the seventh pass — Session Recap, Marathon, Shanghai,
+> Halve-It, The Pressure Chamber, Dead Man Walking) opened **BUG-27** through
+> **BUG-29**, plus one coupled security finding (`security-audit-roadmap.md`
+> **SEC-26**) that rode on BUG-28's fix — see the "Eighth-pass audit" section at
+> the bottom. All four were **fixed** in the same pass (2026-07), each with a
+> committed regression test and `REFERENCE.md` updated where the behavior it
+> documents changed. **BUG-1 through BUG-29 are all fixed as of this writing** —
+> nothing open on either tracker.
 
 ## Severity legend
 
@@ -719,7 +752,7 @@ restore) or corrupting the still-live old data before the restart discards it.
    over `DB_PATH` (`fs.renameSync`, same-filesystem so it's atomic), delete the marker,
    and only then proceed to open the (now-restored) database. This guarantees the swap
    only ever happens while nothing holds the file open.
-3. Update the "restart now" message and `docs/backups-roadmap.md` to describe the new
+3. Update the "restart now" message and `docs/archive/backups-roadmap.md` to describe the new
    two-phase behavior (staged now, applied automatically on next start) so it stays
    accurate — this is a behavior change, not just an implementation detail, per
    CLAUDE.md's "keep docs in sync" convention.
@@ -885,7 +918,7 @@ constrained self-hosted hardware (SD card, network-attached storage, a Pi) — N
 keeps buffering unwritten chunks in process memory rather than pausing `req`, so a
 large upload (up to the documented `MAX_BACKUP_UPLOAD_BYTES` = 500MB) can transiently
 hold most or all of itself in memory instead of the small streaming footprint the
-design comment (`docs/backups-roadmap.md v2`, "streams straight to disk... rather than
+design comment (`docs/archive/backups-roadmap.md v2`, "streams straight to disk... rather than
 buffering it as one string") intends. Admin-only route, so this needs a cooperating or
 compromised admin session to trigger — low severity, but a straightforward fix.
 
@@ -1344,6 +1377,862 @@ Purely visual — no stat, count, or stored dart is wrong.
 throwing an inner 20 lights only the inner half of the 20 wedge on /display, an outer 20
 only the outer half; the lifetime Player Profile heatmap is unchanged; full backend
 suite green.
+
+---
+
+### BUG-21 — Re-sharing an already-earned badge from the Badge Case produced a moment card with no explanation at all — no statLine, no achievement description  **(LOW, user-facing / cosmetic; found via a live user bug report)**
+
+**Status: ✅ Fixed (2026-07).** `buildMomentCard()` gained a new `desc` param — a
+second, muted, wrapped line drawn beneath `statLine` (the actual **explanation of
+the achievement**, e.g. "Throw 500 lifetime darts in Just Chuckin' It.", distinct
+from `statLine`'s specific-occurrence recap, e.g. "500 lifetime darts") — chained
+off whichever of player/statLine was drawn last so it never overlaps either.
+`fireMomentCard(type, opts)`, the one choke point nearly every achievement/moment
+card already goes through, now resolves `desc` automatically via the existing
+`achDescFor(type)` helper (the same lookup the live achievement overlay and voice
+announcements already use) whenever a caller doesn't supply its own — so every
+card gets a real explanation without ~50 call sites each needing to pass one.
+`ACH_DESC_FALLBACK` gained three new entries (`matchwin`, `dailychallenge`,
+`checkout100`) so `achDescFor()` never resolves to an empty string for any moment-
+card type in use. The three call sites that build a card directly, bypassing
+`fireMomentCard()`, were each updated to pass their own `desc`:
+`shareEarnedBadge(badgeId)` (the actual bug — see below) now passes `info.desc`,
+already sitting right there on `BADGE_INFO[badgeId]`; the On This Day flashback
+(`loadOnThisDay()`) now passes `achDescFor(data.type)`; `sharePersonalBest()`
+(Best Leg Average / Fewest Darts to Finish, neither a real badge) now carries its
+own short description per kind. `REFERENCE.md` §8 updated to describe the new
+`desc` param, `fireMomentCard()`'s auto-resolution, and each direct-call
+exception. Committed regression test `backend/test/moment-card-desc.test.js`
+vm-extracts the real `BADGE_INFO`/`ACH_TYPE_TO_BADGE_ID`/`ACH_DESC_FALLBACK`/
+`achDescFor` from `frontend/index.html` (using `frontend/scoring.js`'s real
+`CRICKET_COMEBACK_THRESHOLD`, which one `BADGE_INFO` entry's description
+interpolates) and asserts every moment-card type actually used in the app —
+including the three new fallback entries — resolves to a non-empty explanation.
+Verified end-to-end in a real Chromium browser: driving `shareEarnedBadge()` for
+the exact "In the Groove" badge from the bug report now renders both the stat
+recap and the explanation sentence on the generated card; a live in-game 180
+card (which already had a `statLine`) now also shows its explanation beneath it.
+Full backend suite green.
+
+**Original report:** a user attached a shareable moment card — "IN THE GROOVE"
+(the 500-lifetime-darts Just Chuckin' It milestone), player "Ben" — showing only
+the headline and player name, with nothing else beneath it before the tagline.
+The card in the report was generated by tapping the Badge Case's 📤 Share button
+on an already-earned badge, not by the achievement firing live in a game.
+
+**Where:** `frontend/index.html` `shareEarnedBadge(badgeId)` (the Badge Case's
+re-share path, `onclick="shareEarnedBadge('${id}')"` on every *earned* badge
+tile):
+
+```js
+async function shareEarnedBadge(badgeId){
+  const info = BADGE_INFO[badgeId];
+  if(!info) return;
+  const canvas = await buildMomentCard({ icon:info.icon, headline:info.label.toUpperCase(), player:currentPlayer });
+  // ...
+}
+```
+
+`info` (i.e. `BADGE_INFO[badgeId]`) already carries a `desc` field — the exact
+"how to earn this" sentence `showBadgeInfo()` shows in a tooltip/modal elsewhere
+on the very same page, and the exact text the live achievement overlay shows
+beneath the headline when the badge is first earned — but `shareEarnedBadge()`
+never read it, and passed no `statLine` either. So a card built through THIS
+path (as opposed to the live-firing path via `fireMomentCard()`, which always
+carries a `statLine`) rendered with nothing at all beneath the player's name: a
+genuinely blank card, matching the reported screenshot exactly.
+
+**The asymmetry that proves it's a gap:** every card fired live, in-game, at the
+moment an achievement is earned (`fireMomentCard()`, ~50 call sites) already
+carried a `statLine`. `shareEarnedBadge()` is the *only* card-building path that
+had access to a genuine achievement description (`info.desc`, sitting one
+property away) and simply never used it — the three other direct-`buildMomentCard`
+call sites (On This Day, Personal Bests, and every `fireMomentCard()` caller) all
+supply *some* context text; this one alone supplied none.
+
+**Fix (step by step):**
+1. Add a `desc` param to `buildMomentCard()`, drawn as a second, smaller, muted,
+   wrapped line beneath `statLine` (or beneath the player name if there's no
+   `statLine`) — using a running Y cursor so the pre-existing icon/headline/
+   player/statLine pixel positions are completely unchanged for any card that
+   doesn't pass `desc`.
+2. In `fireMomentCard(type, opts)`, resolve `desc = opts.desc || achDescFor(type)`
+   before building the card — the single choke point fix that gives every
+   live-firing achievement a real explanation with no per-call-site changes
+   needed, since `achDescFor()` already existed and already covers every badge
+   id via `BADGE_INFO`/`ACH_TYPE_TO_BADGE_ID`, plus the ladder-populated Chuckin/
+   Checkout Trainer/Blitz milestone ids (added to `BADGE_INFO` dynamically at
+   load time, so already covered without any per-tier change).
+3. Add three missing entries to `ACH_DESC_FALLBACK` (`matchwin`, `dailychallenge`,
+   `checkout100`) — the only moment-card types in use that resolved to `''` from
+   `achDescFor()` today (harmless before this fix, since both `matchwin` and
+   `dailychallenge` always carry a real `statLine`; `checkout100` is the flashback
+   card's own label key, not a `badge_id`) — so no card type is left without a
+   real explanation once `desc` is wired up everywhere.
+4. Fix `shareEarnedBadge()` — the actual reported bug — to pass `desc:info.desc`.
+5. Fix the two other direct-`buildMomentCard` callers for full coverage:
+   `loadOnThisDay()` (`desc: achDescFor(data.type)`) and `sharePersonalBest()`
+   (its own short `desc` per kind, since Personal Bests aren't badges).
+6. `REFERENCE.md` §8 updated in the same change.
+7. Committed `node:test`: vm-extract the real `BADGE_INFO`/`ACH_TYPE_TO_BADGE_ID`/
+   `ACH_DESC_FALLBACK`/`achDescFor` and assert non-empty resolution for a
+   representative set of moment-card types across every category (X01, Cricket,
+   Baseball, Chuckin ladder ids, Daily Challenge, tournament, guided drills, the
+   three new fallback entries, and the flashback-only `checkout100` key) — a
+   regression guard against a future achievement/badge type shipping without a
+   description, the same gap that let `matchwin`/`dailychallenge` go unnoticed
+   (harmlessly) until now.
+
+**Verify:** the new test passes; a live Chromium check confirms
+`shareEarnedBadge()` now renders both a stat-free explanation line for a badge
+with no natural "statLine" (e.g. a laddered milestone re-shared from the Badge
+Case) and doesn't regress any card that already had a `statLine`; full backend
+suite green.
+
+---
+
+### BUG-22 — Practice-mode Baseball games never called `DB.completeGame()`, so Games Played / Win Rate / every Personal Best stayed empty no matter how many practice games were played  **(MED, user-facing / data-integrity; found via a live user bug report)**
+
+**Status: ✅ Fixed (2026-07).** Two changes, mirroring BUG-18's exact precedent
+for the same class of bug (a `!game.practice` gate wrongly blocking a match
+completion the scoring engine had already decided):
+1. `startGame()`'s `drillModes`-derived `legsPerSet`/`setsPerGame` computation now
+   also forces `1`/`1` when `setup.gameType === 'baseball' && setup.mode !== 'h2h'`
+   (`isPracticeBaseball`) — a practice Baseball leg is a complete, standalone
+   9-inning game (its outcome is decided unconditionally by
+   `evaluateVisitBaseball()`, unlike X01/Cricket's open-ended countdown legs), so
+   it's forced to exactly 1 leg/1 set, the same treatment every drill mode
+   (Ghost, Chuckin, Doubles Practice, etc.) already gets. H2H Baseball is
+   untouched — `setup.mode` stays `'h2h'` either way, so a genuine Bo3/Bo5
+   multi-leg H2H match still requires the configured number of legs.
+2. `onLegWonBaseball()`'s outer gate changed from `if(!game.practice &&
+   w.legsWon >= game.legsPerSet)` to `if(w.legsWon >= game.legsPerSet)` — dropping
+   the practice check entirely. This function is Baseball-exclusive, so with (1)
+   in place, `legsWon >= legsPerSet` alone already correctly distinguishes "the
+   single practice leg just finished" (`legsPerSet=1`, completes immediately)
+   from "this leg finished but the H2H match isn't decided yet" (`legsPerSet`
+   unchanged for H2H). `finishUnit('game', ...)` already renders correctly for a
+   practice win with no changes needed (same "GAME OVER"/"New game" UI BUG-18
+   already proved works for a practice-flagged match).
+
+The now-unreachable `pracStatsHtmlBaseball()` dual-column "This Leg/This
+Session" panel (`finishUnit()`'s `kind==='leg'` screen — Baseball can no longer
+reach `kind==='leg'` in practice mode, since it always completes in exactly one
+leg now) was removed in the same change, along with its two call sites;
+`isBaseball` under `kind==='leg'` now always uses `h2hStatsHtmlBaseball()`,
+matching what H2H already used. `docs/game-modes-roadmap.md` and
+`docs/open-roadmap-items.md` updated to drop the stale function reference.
+
+**No committed `node:test`** — this is a DOM/game-state control-flow defect
+(the gating logic and its fix live entirely in `frontend/index.html`'s
+`startGame()`/`onLegWonBaseball()`), the same class of gap BUG-8/BUG-18 covered
+with a live Playwright check instead, not a pure calculation to extract. Verified
+end-to-end with a real Chromium browser driving the actual scoring UI (not the
+raw API):
+- **Solo practice Baseball** (the exact reported scenario): played a full
+  9-inning game via real pad-button/Enter-turn clicks. Before the fix,
+  `GET /api/players/stat-bubbles?...&gameType=baseball` returned `gamesPlayed:
+  0` and `GET /api/players/personal-bests?...` returned all-`null` fields
+  despite 27 real darts thrown; after the fix, the same player/session shows
+  `gamesPlayed: 1` and every Personal Best field populated
+  (`bestLegRuns`/`fewestDartsToWin`/`recentFormRuns`/`lifetimeRuns` all `27`).
+- **H2H Bo3 regression check**: a 2-player, `legsPerSet:2` match correctly does
+  **not** complete after the first (decisively won) leg — `game.done` stays
+  `false`, "Next leg" is offered — and correctly **does** complete after the
+  second leg is also won, confirming multi-leg H2H behavior is unchanged.
+
+**Original report:** "The baseball stats on the player pages aren't
+populating. I played three games and it's not displaying any results."
+
+**Where:** `frontend/index.html` `onLegWonBaseball(wi)` — copy-pasted its outer
+gate wholesale from X01/Cricket's own `onLegWon()`:
+
+```js
+if(!game.practice && w.legsWon >= game.legsPerSet){      // set won (H2H only)
+  ...
+  if(w.setsWon >= game.setsPerGame){   // game (match) won
+    ...
+    DB.completeGame(w.name);
+    ...
+```
+
+**The design mismatch that caused it:** for X01/Cricket, `!game.practice` here
+is *correct* — practice mode is deliberately an open-ended session ("keep
+playing legs until you manually end it"), and every leg-level stat (average,
+checkout, etc.) is captured via `turns.leg_won`, entirely independent of
+`games.completed_at`. Baseball's `onLegWonBaseball()` inherited the identical
+gate from that template, but Baseball has **no equivalent per-turn "this won
+the leg" flag** — its own code comment elsewhere explains why: a Baseball leg's
+winner isn't self-referential to one visit the way a checkout or closing a
+Cricket number is. Every one of Baseball's own stat functions
+(`getBaseballWonLegs()`, and `gamesPlayed`/`winPct` in
+`getBaseballStatBubbles()`) therefore has no choice but to gate on
+`g.completed_at IS NOT NULL` as its only "is this a real, decided result, not
+an abandoned mid-leg" signal. With the `!game.practice` gate blocking
+`DB.completeGame()` unconditionally, that signal could never fire for a
+practice game — so `gamesPlayed` stayed `0` and Personal Bests stayed entirely
+empty forever, no matter how many practice games were played through to a real
+result.
+
+**Misbehavior (verified):** a player who plays Baseball only in practice mode
+(a very natural way to try out a brand-new game type solo, no second player
+needed) sees the RPI/Perfect Innings/Darts Thrown/Best Inning stat bubbles at
+the top of their Player Profile populate correctly (those read straight from
+`turns`, unaffected), but "Games Played" permanently reads `0`, "Win Rate"
+permanently reads `—`, and the entire Personal Bests panel (Best Leg Runs,
+Fewest Darts to Win, Win Streak, Recent Form, Lifetime Runs) stays empty —
+exactly matching "not displaying any results," even after playing several full
+games.
+
+**Fix (step by step):**
+1. In `startGame()`, add `isPracticeBaseball` (`setup.gameType === 'baseball'
+   && setup.mode !== 'h2h'`) to the `legsPerSet`/`setsPerGame` forcing logic
+   alongside `drillModes`.
+2. In `onLegWonBaseball()`, drop `!game.practice` from the outer gate — safe
+   because this function is Baseball-only and (1) already makes
+   `legsWon >= legsPerSet` alone correctly distinguish the two cases.
+3. Remove `pracStatsHtmlBaseball()` and its two call sites in `finishUnit()`
+   (now genuinely unreachable), simplifying the `isBaseball` branch of
+   `kind==='leg'` to always use `h2hStatsHtmlBaseball()`.
+4. Update `docs/game-modes-roadmap.md`'s and `docs/open-roadmap-items.md`'s
+   stale references to the removed function.
+
+**Verify:** the two live-browser checks above (solo practice completes and
+populates stats; H2H Bo3 still requires both legs) both pass against the fix
+and fail against the pre-fix code (`gamesPlayed`/personal bests stayed empty
+for the solo practice case); full backend suite green (unaffected — this is a
+frontend-only fix, no backend code touched).
+
+---
+
+### BUG-23 — Cricket's scoring pad had no way to log a real off-target number hit, forcing it to be recorded as a genuine miss and corrupting Dart Analytics  **(LOW, data-integrity / user-facing; found via a live user bug report)**
+
+**Status: ✅ Fixed (2026-07).** `renderPadCricket()` gains a collapsed-by-default
+"Hit a different number ▾" picker beneath the existing 7 target buttons + Miss,
+listing the 14 numbers (of the full 1-20 + Bull pool, a new `CRICKET_ALL_NUMBERS`
+constant in `frontend/scoring.js`) not in play this match — always exactly 14,
+whether classic (1-14) or a custom 7-of-21 selection. Tapping one calls the
+exact same `throwDart(n)` the 7 real target buttons already use (respecting
+the ambient single/double/treble selector, so a treble or double off-target
+hit is captured accurately too, not just a bare single), so it needed **zero**
+scoring-logic changes: `evaluateVisitCricket()` already no-ops any sector not
+in `game.config.numbers` regardless of which specific number it is
+(`if(!numbers.includes(d.sector)) return;`) — this is purely an input-
+affordance fix, letting a real sector reach the database instead of being
+forced through `sector:0`. `cricketOffTargetOpen` (new module-level state,
+same pattern as `dartboardMode`) keeps the picker's expanded/collapsed state
+stable across re-renders within a session. `REFERENCE.md`'s Cricket section
+updated in the same change. Committed regression test in
+`backend/test/scoring.test.js` (`CRICKET_ALL_NUMBERS` describe block): exactly
+21 numbers with no duplicates; subtracting classic Cricket's 7 targets leaves
+precisely `[1..14]`; subtracting an arbitrary valid custom 7-selection always
+leaves exactly 14 with no overlap — the pure calculation the picker's number
+list is built from. The picker itself (a DOM-rendering feature, same class of
+gap as BUG-8/BUG-18/BUG-22) has no `node:test` — verified instead with a real
+Chromium browser driving the actual scoring UI: the toggle is present and
+collapsed by default; expanding it shows exactly `1-14` for classic Cricket;
+tapping treble-7 records `{sector:7, multiplier:3}` (not `sector:0`)
+server-side and appears correctly in `GET /api/players/dart-analytics` (a
+100% treble rate for sector 7, one real miss still correctly counted as
+`sector:0`) instead of being folded into the miss count; and three
+off-target darts followed by "Enter turn" leave every mark and the leg's
+points total at zero, exactly matching a genuine miss — confirming Cricket
+scoring itself is completely unaffected. Full backend suite green.
+
+**Original report:** "Make sure that misses in cricket don't actually count
+as a miss in the dart analytics. Since there is no option for 1-14 when
+playing a classic cricket game, I have to log all those numbers as misses."
+
+**Where:** `frontend/index.html` `renderPadCricket()` built exactly 8 buttons —
+the game's 7 in-play targets plus a single `Miss` (`sector:0`) — with no way
+to specify any other number 1-20:
+
+```js
+numbers.forEach(n=>{ ... b.onclick = () => throwDart(n); pad.appendChild(b); });
+const miss=document.createElement('button');
+miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
+miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+```
+
+Classic Cricket plays 15/16/17/18/19/20/Bull — 7 of the 21 numbers a dart can
+land on (1-20 plus Bull). A dart that genuinely lands on, say, 7 is a real
+board hit, worth recording accurately (which sector, which multiplier), but
+the pad offered no button for it — only `Miss`, identical to a dart that
+missed the dartboard entirely.
+
+**The gap that let it ship:** `getDartAnalytics()`'s "Most Hit Sectors" and
+"Treble Rate by Number" queries read `darts.sector`/`darts.multiplier`
+directly, with no game-type-specific interpretation — they trust whatever
+sector was actually recorded. There was never a bug in the *analytics* query
+itself; the data reaching it was already wrong, because Cricket's own input
+UI was the only game type that had no way to record 13 of the 20 real
+numbers (14 including Bull for a custom config that doesn't select it) at
+all — X01, Baseball, and every other Pad-based mode's target set is either
+"every number" or forced down to exactly one live target with its own
+dedicated screen, so this specific gap only existed for Cricket.
+
+**Misbehavior (verified):** a Cricket player whose darts frequently land
+outside the 7 in-play numbers (a very normal occurrence — half the board
+isn't live in a Cricket match) had every one of those hits recorded as
+`sector:0`, identical to a genuine miss. Their Player Profile's Dart
+Analytics "Most Hit Sectors" list showed an inflated, meaningless "Miss"
+entry combining real off-board misses with real on-board hits that simply
+weren't Cricket targets, while "Treble Rate by Number" silently excluded
+every treble thrown at a non-target number (since those darts had no real
+sector to group by) — an accuracy gap invisible from the Cricket scoring
+screen itself, only surfacing once the player checked their stats.
+
+**Fix (step by step):**
+1. Add `CRICKET_ALL_NUMBERS` (`[1..20, 25]`) to `frontend/scoring.js`, exported
+   alongside the existing `CRICKET_STANDARD_NUMBERS`.
+2. In `renderPadCricket()`, after the existing 7 targets + Miss, add a
+   collapsed-by-default toggle revealing a grid of
+   `CRICKET_ALL_NUMBERS.filter(n => !numbers.includes(n))` — each button
+   calling `throwDart(n)` exactly like a real target button (so multiplier
+   selection and every existing dart-shape/undo/live-broadcast code path is
+   reused unchanged).
+3. No backend or scoring changes needed — `evaluateVisitCricket()` and
+   `getDartAnalytics()` both already handle an arbitrary real sector
+   correctly; only the *input* was ever missing a way to produce one.
+4. `REFERENCE.md`'s Cricket rules section documents the new picker in the
+   same change.
+5. Committed `node:test` for `CRICKET_ALL_NUMBERS`'s pure pool/subtraction
+   math (Status note above); the DOM picker itself verified live instead.
+
+**Verify:** the new test passes; a live Chromium check confirms the picker
+renders the correct 14 off-target numbers, records their real sector/
+multiplier (visible in Dart Analytics, not folded into "Miss"), and scores
+zero marks/points exactly like a genuine miss; a genuine `Miss` tap is
+completely unaffected; full backend suite green.
+
+---
+
+### BUG-24 — Cricket's (and Baseball's) lifetime dartboard heatmap silently hid every single hit, including on real target numbers  **(MED, data-integrity / user-facing; found while verifying BUG-23's fix)**
+
+**Status: ✅ Fixed (2026-07).** `buildDartHeatmap()` gains a `noZoneTracking`
+option. `loadDartHeatmap()` sets it whenever the active Player Profile tab is
+`cricket` or `baseball` — the two game types whose `renderPad*()` never has a
+Dartboard-mode alternative, unlike X01/Chuckin/Doubles Practice. When set: the
+existing "zone-unspecified single: not plotted at all" exclusion is skipped,
+and both the inner and outer single sub-regions read the SAME merged bucket
+(every single for that number, regardless of the always-`null` `zone` field)
+instead of two separately-keyed, permanently-empty buckets — so the whole
+single ring lights up honestly reflecting "this many singles, position
+unknown" rather than showing nothing. Tooltips drop the false "(inner)"/
+"(outer)" precision claim for these two game types, reading e.g. `"15: 3
+hits"` instead of `"15 (inner): 0 hits"` / `"15 (outer): 0 hits"`. Trebles,
+doubles, and bull were never affected by the exclusion (`multiplier !== 1`)
+and needed no change. `REFERENCE.md`'s Cricket rules and generalized-heatmap
+sections updated in the same change. Committed regression test
+`backend/test/dart-heatmap.test.js` (vm-extracts the real `buildDartHeatmap()`
++ `DB_SECTORS` from `frontend/index.html`, the same technique
+`display.heatmap-hardening.test.js` already established for its sibling
+function — `buildDartHeatmap()` is pure string-building, unlike the moment
+card's real-Canvas dependency, so unlike BUG-8/18/22/23 this one **is**
+fully `node:test`-able): a zone-unspecified single stays excluded without
+`noZoneTracking` (X01/Chuckin/Doubles Practice, unchanged); with
+`noZoneTracking` the same single now renders on both sub-regions with the
+real count and no false inner/outer label; trebles/doubles/bull are
+unaffected either way; an unpositioned miss still plots nothing (unrelated to
+this fix); ordinary zoned X01 data still renders exactly as before. Verified
+the exclusion-still-applies-without-the-flag test fails against the pre-fix
+code. Verified end-to-end in a real Chromium browser: a genuine Cricket
+target (single-15) that showed **"0 hits" on the heatmap despite being
+correctly stored server-side** before the fix now shows "1 hit"; a mixed real
+game (singles, an off-target BUG-23 single, a treble, a double) all render
+correctly together, confirmed both numerically (SVG tooltips) and visually
+(screenshot: solid lit single wedges where the board was previously blank);
+Baseball's heatmap confirmed fixed identically. Full backend suite green (663
+tests, +6 new).
+
+**How this was found:** while verifying BUG-23's fix (confirming Dart
+Analytics correctly reflects a Cricket off-target hit), a broader "does the
+heatmap work for Cricket" check was requested. Reproducing a plain, genuine
+Cricket **target** hit (a single on one of the 7 in-play numbers — nothing to
+do with BUG-23's off-target case) against the fixed BUG-23 code still showed
+"0 hits" on the rendered heatmap despite the backend correctly storing it —
+revealing this as a distinct, pre-existing defect, not a side effect of the
+BUG-23 change.
+
+**Where:** `frontend/index.html` `buildDartHeatmap()`:
+
+```js
+if(c.multiplier === 1 && c.sector >= 1 && c.sector <= 20 && !c.zone) return; // zone-unspecified single: not plotted at all
+```
+
+Per this function's own long-standing comment (and the commit that introduced
+it, "Dartboard heatmap: don't display zone-unknown darts at all"), this
+exclusion was a deliberate product decision **for game types where Pad mode
+is the player's own choice over an available Dartboard mode** (X01, Chuckin,
+Doubles Practice) — a real, meaningful signal is being *withheld*, not lost,
+in that case, since the player could switch input modes to get zone
+precision if they wanted it. `renderPadCricket()`/`renderPadBaseball()`,
+however, are unconditionally used regardless of the `dartboardMode`
+preference (`renderPad()`: `if(game.gameType === 'cricket'){
+renderPadCricket(full); ... return; }`, no `dartboardMode` check at all) — so
+for these two game types, `zone` is not withheld by choice, it is
+**structurally impossible to ever capture**. The exact same exclusion rule,
+applied to data that can never satisfy its own precondition, silently
+discarded every single dart these two game types ever recorded.
+
+**Misbehavior (verified):** a Cricket player's lifetime dartboard heatmap on
+their Player Profile showed data for treble/double/bull hits but a
+permanently blank, unlit single ring for every number — including the 7 real
+in-play targets, the darts a Cricket player throws most often — with no
+indication anything was missing (the heatmap simply looked "cold" there,
+indistinguishable from a number genuinely never hit). Baseball's own
+heatmap, sharing the same input shape and the same generalized
+`buildDartHeatmap()`, had the identical defect.
+
+**Fix (step by step):**
+1. Add a `noZoneTracking` option to `buildDartHeatmap(cells, opts)`: when
+   true, skip the zone-unspecified-single exclusion, and key every single for
+   a number into one merged bucket (empty zone key) rather than the real
+   `c.zone` value — so both the inner and outer render calls
+   (`heat(num,1,singleInnerZone)` / `heat(num,1,singleOuterZone)`, with
+   `singleInnerZone`/`singleOuterZone` both resolving to `''` when
+   `noZoneTracking`) read the same total automatically, needing no separate
+   SVG-building branch.
+2. Drop the false "(inner)"/"(outer)" tooltip suffix for `noZoneTracking`
+   game types — the position genuinely isn't known, so the label shouldn't
+   claim otherwise.
+3. `loadDartHeatmap()` passes `noZoneTracking: (gt === 'cricket' || gt ===
+   'baseball')` based on the active Player Profile game-type tab.
+4. `REFERENCE.md` updated in the same change.
+5. Committed `node:test` per the Status note above.
+
+**Verify:** the new tests pass (and the "still excluded without the flag"
+case fails against pre-fix code); a live Chromium check confirms a genuine
+Cricket single now lights its number's whole single ring instead of showing
+0 hits, with trebles/doubles/bull/misses all unaffected; Baseball's heatmap
+confirmed fixed the same way; X01/Chuckin/Doubles Practice's existing
+zone-aware behavior is completely unchanged; full backend suite green.
+
+---
+
+### BUG-25 — New Game wizard's Step 3 ("More options") forced every mode through it, even modes with nothing to configure there  **(LOW, user-facing / UX; found via a live user bug report)**
+
+**Status: ✅ Fixed (2026-07).** `setupGoToStep3()` — the Step 2 "Continue"
+button's only handler — unconditionally called `showSetupStep(3)`. Step 3
+only has real content for a subset of modes (Cricket's target picker,
+Ghost's leg picker, Doubles Practice's target picker, Checkout Trainer's
+sub-mode/difficulty, and H2H's legs/sets format); every other mode (X01
+practice, Baseball practice, Chuckin, Around the Clock, Around the World,
+Daily Challenge) landed on a page with nothing but the Start button itself —
+an unnecessary extra tap the Daily Challenge blurb already anticipated
+("Press Continue below to play") but never actually delivered on. Added
+`setupStep3HasContent()`, which checks each of Step 3's five conditional
+section elements' own DOM `hidden` state (already kept correct by
+`setMode()`'s per-mode toggles, so this can never drift out of sync with
+what `setMode()` decides to show) rather than re-deriving the mode→section
+mapping a second time. `setupGoToStep3()` now calls `startGame()` directly
+when none of the five sections are visible, skipping Step 3 entirely;
+`startGame()` was already safe to call this way since it validates purely
+from `setup.*` state, not from Step-3 DOM state requiring that step to have
+rendered. Verified end-to-end in a real Chromium browser across all 13 mode
+combinations (X01/Baseball practice, Chuckin, Around the Clock, Around the
+World, Daily Challenge, Cricket practice, Ghost, Doubles Practice, Checkout
+Trainer, and X01/Baseball/Cricket H2H): every contentless mode now starts
+the game the moment Continue is clicked on Step 2, and every mode with real
+Step 3 content still lands there uninterrupted. This is pure frontend
+control flow (an `onclick` handler's branching, not a calculation), so per
+`CLAUDE.md`'s standing rule it's verified with a live Playwright click-driven
+test rather than a `node:test` case — the same category as BUG-8/18/22/23.
+Full backend suite green (663 tests, unaffected since no backend or scoring
+logic changed).
+
+**Where:** `frontend/index.html` `setupGoToStep3()`:
+
+```js
+function setupGoToStep3(){ showSetupStep(3); }
+```
+
+**Misbehavior (verified):** choosing Chuckin (or X01 practice, Baseball
+practice, Around the Clock, Around the World, or Daily Challenge) and
+clicking Continue on Step 2 always advanced to Step 3, which for these
+modes rendered with every conditional section (`cricket-options-section`,
+`ghost-options-section`, `doubles-options-section`,
+`checkout-trainer-options-section`, `h2h-options`) hidden — an
+effectively-blank page whose only purpose was to require a second click on
+its own Start button before the game actually began.
+
+**Fix (step by step):**
+1. Add `setupStep3HasContent()`: returns true if any of the five Step-3
+   conditional sections is currently un-hidden.
+2. Change `setupGoToStep3()` to call `startGame()` directly instead of
+   `showSetupStep(3)` when `setupStep3HasContent()` is false.
+3. No change needed to `startGame()`, `setMode()`, or any Step-3 section's
+   own rendering — they were already correct; only the navigation decision
+   was wrong.
+
+**Verify:** live Chromium sweep across all 13 mode/player-count
+combinations confirms contentless modes skip straight to a started game and
+content-bearing modes still stop on Step 3; full backend suite green (no
+regressions, no backend logic touched).
+
+---
+
+### BUG-26 — `display.html`'s ACH_LABELS/ACH_DURATION/ACH_DESC (the live overlay's
+own hand-copied badge-text maps) had drifted 9 static entries behind
+`index.html`'s, rendering a blank achievement headline on the /display second
+screen  **(LOW, cosmetic; found while adding a new badge for docs/archive/cutthroat-cricket-roadmap.md)**
+
+**Status: ✅ Fixed (2026-07).** `frontend/display.html` has no build step and no
+shared module with `frontend/index.html` (documented in its own "mirror-copied"
+comment above `ACH_DESC`), so every badge added to `index.html`'s
+`ACH_LABELS`/`ACH_DURATION`/`BADGE_INFO[...].desc` needs a matching, by-hand
+entry added here too. Nine static badges shipped across several earlier
+features — `guided_clock`/`guided_world` (guided drills), `triplebull`/
+`bullseyefinish` (X01 chain-check badges), `baseballperfectinning`/
+`baseballperfectgame`/`baseballwalkoff`/`baseballcycle` (Baseball), and
+`doublespracticeringmaster` (Doubles Practice's Ring Master) — never got that
+second entry. `achText.textContent = ACH_LABELS[type] || ''` silently falls
+back to an empty string, so the live overlay's full-screen headline rendered
+**blank** on the /display screen for all nine, even though every one of them
+awarded and persisted correctly server-side (Badge Case, stats, and the
+moment card all read from a different, unaffected source) — exactly the same
+gap class as Ring Master's own missing `index.html` `ACH_LABELS` entry
+(`docs/archive/culture-badges-roadmap.md` Part B), just the mirror-file
+version of it. Added all nine entries to `display.html`'s three maps, plus
+its own `mega`-duration flag for the ones that belong in that list to match
+`index.html`. Committed regression test `backend/test/display.ach-labels-parity.test.js`:
+extracts both files' static `ACH_LABELS`/`ACH_DURATION`/`ACH_DESC` object-literal
+key sets directly from source (no shared module to `require()`, so a
+line-anchored regex reads the real current source rather than a hand-copied
+duplicate that can drift again unnoticed) and asserts `index.html`'s key set
+is a subset of `display.html`'s for each map — fails loudly the moment a
+future badge is added to one file and not the other, instead of shipping a
+silent blank headline. Ladder-generated ids (`CHUCKIN_MILESTONE_LADDERS` and
+its siblings) are deliberately out of scope for this test: those are
+populated via an already-mirrored `forEach` loop in both files, a different,
+already-correct mechanism from the one that actually drifted here.
+
+**How this was found:** while adding `cricketstonecold`
+(`docs/archive/cutthroat-cricket-roadmap.md`'s 🔪 Stone Cold badge) and checking
+`display.html` stayed in sync per the Ring Master precedent, a full key-set
+diff between the two files' `ACH_LABELS` turned up eight *other*, pre-existing
+gaps unrelated to the new badge.
+
+**Where:** `frontend/display.html`'s `ACH_LABELS`/`ACH_DURATION`/`ACH_DESC`
+declarations (missing entries; `frontend/index.html`'s own copies were
+already correct and are the source of truth).
+
+**Fix (step by step):**
+1. Diff `index.html`'s `ACH_LABELS` key set against `display.html`'s to find
+   every static badge id present in one but not the other.
+2. Copy each missing id's label/duration/description text verbatim from
+   `index.html`'s `ACH_LABELS`/`ACH_DURATION`/`BADGE_INFO[...].desc` into
+   `display.html`'s three maps.
+3. Add a committed parity test comparing the two files' key sets directly, so
+   a future one-off addition to only one file fails CI instead of shipping
+   silently.
+
+**Verify:** `backend/test/display.ach-labels-parity.test.js` passes (and
+would have failed against the pre-fix `display.html`, confirmed by re-running
+it before the nine entries were added); full backend suite green.
+
+---
+
+## Eighth-pass audit (2026-07, weighted to the six game modes merged since the seventh pass)
+
+The functional-defect counterparts to `security-audit-roadmap.md` Part 10, from an
+adversarial re-read weighted toward the six game modes merged since the seventh pass:
+End-of-Night Session Recap, Marathon Mode, Shanghai, Halve-It, The Pressure Chamber,
+and Dead Man Walking. The write-time consistency guards for all six new/expanded types
+(`addTurn()`'s per-game-type branches) were cross-checked against `REFERENCE.md` and
+found sound, as were the CP/points/fatigue formulas (all have committed `node:test`
+coverage). Three data-integrity bugs found — **BUG-27** (checkout-based stats leak
+Checkout Ladder / Dead Man Walking checkouts), **BUG-28** (the live-state allowlist
+strips the three newest game types' `/display` fields), and **BUG-29** (the won-leg
+heuristic miscounts Pressure Chamber H2H and Shanghai/Halve-It). One coupled security
+finding (`security-audit-roadmap.md` **SEC-26**) rides on BUG-28's fix — see the note in
+BUG-28's own entry.
+
+### BUG-27 — Checkout-based X01 stats (Ton+, Big Fish, Highest Checkout, Top Finishes, On This Day, Session Recap) silently count Checkout Ladder and Dead Man Walking checkouts, which are real `checkout=1` rows but not X01 legs  **(MED, silent data-integrity drift)**
+
+**Status: ✅ Fixed (2026-07).** Added the `X01_ONLY` guard (joining `games` where a query
+didn't already) to every leaking read site: `getSummary()`'s Ton+ and Big Fish counts,
+`getPlayerStatBubbles()`'s Big Fish bubble (the one field the earlier partial fix missed),
+`getHomeExtra()`'s Ton+ Finish Rate leaderboard and both highest-checkout queries,
+`getBigFishStats()`, `getTopFinishesAll()`, `getTopFinishes()`, `getCheckoutRoutes()`,
+`getOnThisDay()`'s 170/100+ CASE tiers and their return branches, `getMetricHistory()`'s
+`'bigfish'` case, and `getSessionRecap()`'s `tonPlusStmt` / pre+tonight highest-checkout /
+pre+tonight fewest-darts-checkout statements / moments timeline (the fewest-darts pair keys
+on `SUM(checkout)>0`, the same non-X01-exclusive signal, so it was brought into line with
+`getPersonalBests()` too). `computeStats()`'s `_agg`, `getCoachingInsights()`'s route
+insight, and the Dead Man Walking target-builders were already correctly scoped and left
+unchanged. Committed regression test `backend/test/db.checkout-stat-x01-isolation.test.js`:
+plays a Checkout Ladder run (170/140/121 checkouts) alongside a real X01 game (170/121/100)
+and asserts all of the above read a value reflecting only the X01 checkouts — Big Fish count
+1 not 2, the drill player absent from every leaderboard/record/recap/flashback — and would
+report the leaked (higher) numbers against the pre-fix source. `REFERENCE.md` §3's
+Cricket-interaction grid updated in the same change (the "Checkout-based" row now reads
+"**Excluded** (`X01_ONLY`)" with the Checkout Ladder / Dead Man Walking rationale, replacing
+the stale "naturally excluded — cricket never writes `checkout=1`" wording). Full backend
+suite green.
+
+**What actually goes wrong (plain language):** `REFERENCE.md`'s Cricket-interaction
+table (§3, the "Category → Cricket games…" grid) states that the checkout-based stats —
+Big Fish, ton+ finishes, highest checkout, checkout routes/Top Finishes — are
+"*Naturally excluded*" from non-X01 games because "*cricket never writes `checkout=1`,
+and these are all scoped to won legs / checkout rows.*" That was true when only X01 and
+Cricket existed. It is **no longer true**: the 121 Checkout Ladder and Dead Man Walking
+both now write a genuine `checkout=1` **with a real `checkout_points`** on a won round
+(`frontend/index.html`'s `recordTurn` for both — `checkoutPoints: ev.win ?
+ev.pointsThisVisit : null`, where `pointsThisVisit` is the finishing visit's score, 61-170
+for the Ladder and the personalized deficit for Dead Man Walking). Every checkout-based
+aggregate that was written assuming "`checkout=1` ⟹ X01" now silently folds those drill
+checkouts in. So a player who checks out 121 in a Checkout Ladder attempt, or clears a
+personalized 140 in Dead Man Walking, has that finish counted as a household Ton+
+checkout, a Top Finishes row, an "On This Day" flashback, and — if it's 170 — a **Big
+Fish** (which is supposed to mean a 170 checkout in an X01 game). The same drill checkout
+can top the "Highest Checkout" household record and inflate the Ton+ Finish Rate
+leaderboard.
+
+This is the *exact* leak that `getPersonalBests()` was already fixed for — it carries an
+explicit `X01_ONLY` guard now, with a long comment ("*a Checkout Ladder/Dead Man Walking
+checkout is real, but not an X01 leg*") and a committed isolation-regression test.
+`getPlayerStatBubbles()` was fixed **only partially** in that same pass (its `avg`/`180s`/
+`totalPts` got `X01_ONLY`, but its **Big Fish bubble** — `t.checkout=1 AND
+t.checkout_points=170` — was missed and still leaks). Every other checkout-based read site
+below was never brought along at all, so the leak persists across the Home page,
+leaderboards, profile, recap, and On This Day.
+
+**Where (all `backend/db.js`):**
+- `getSummary()` — the global `tonPlus` (`WHERE checkout=1 AND checkout_points>=100`)
+  and `bigFish` (`WHERE checkout=1 AND checkout_points=170`) counts shown on the Home
+  page. Neither joins `games` or filters game type. (Note: `computeStats()`'s own
+  `co100`/`bigFish` in its `_agg` *are* correctly `X01_ONLY` — the gap is `getSummary()`,
+  not `computeStats()`.)
+- `getPlayerStatBubbles()` — the per-player **Big Fish** stat bubble
+  (`${J} ${mf} AND t.checkout=1 AND t.checkout_points=170`, no `X01_ONLY`), the one field
+  the otherwise-applied `X01_ONLY` fix skipped in this function.
+- `getHomeExtra()` — `_tonPlus` (the "Ton+ Finish Rate" leaderboard; has
+  `NOT_CHECKOUT_TRAINER` but no `X01_ONLY`) and both `_highestCheckout(modeWhere)` and
+  the `overall` highest-checkout (`WHERE t.checkout=1 AND t.checkout_points IS NOT NULL`,
+  no game-type filter).
+- `getBigFishStats(mode)` — the `/api/stats/big-fish` leaderboard + recent list
+  (`WHERE t.checkout=1 AND t.checkout_points=170 ${mf}`, no `X01_ONLY`).
+- `getTopFinishesAll(limit, mode)` — the `/api/top-finishes` Home + profile list
+  (`WHERE t.checkout=1 AND t.checkout_points>0 ${mf}`, no `X01_ONLY`).
+- `getTopFinishes(playerName, mode)` — the per-player Top Finishes list on the profile
+  (`WHERE t.player_id=? AND t.checkout=1 AND t.checkout_points>0 ${mf}`, no `X01_ONLY`).
+- `getCheckoutRoutes(playerName, score, mode)` — the checkout-route breakdown for a given
+  score (`WHERE t.player_id=? AND t.checkout=1 AND t.checkout_points=? ${mf}`, no
+  `X01_ONLY`), so a drill checkout of that value contributes phantom "routes" to an
+  X01 analysis. (Contrast `getCoachingInsights()`'s own route insight, which *is*
+  `X01_ONLY` — the correct precedent to copy.)
+- `getOnThisDay(name, tz)` — the `checkout_points=170` (bigfish) and `>=100`
+  (checkout100) ordering/return branches are unscoped (only the `scored=180` branch
+  checks `game_type='x01'`).
+- `getSessionRecap(date)` — `tonPlusStmt` (`checkout=1 AND checkout_points>=100`), the
+  pre/tonight highest-checkout statements, and the `moments` timeline's tonplus/bigfish
+  query are all unscoped, so a drill checkout appears in the nightly recap's Ton+ count,
+  Personal-Bests-set-tonight highest-checkout, and moment cards.
+- `getMetricHistory()` — the `'bigfish'` metric case (`AND t.checkout=1 AND
+  t.checkout_points=170`) is unscoped, unlike the `'180s'` case immediately above it
+  which correctly carries `${X01_ONLY}` — so a profile's Big-Fish-over-time chart plots
+  drill 170s too.
+
+(Confirmed **not** leaking, so leave them alone: `computeStats()`'s `_agg` co100/bigFish,
+`getCoachingInsights()`'s route insight, and the Dead Man Walking target-builders
+`getWeakestCheckouts()` / `_dmwHistoricalAverageDarts()` are all already `X01_ONLY` or
+`game_type='x01'`-scoped.)
+
+**Repro:** play one Dead Man Walking (or 121 Checkout Ladder) run and clear a round whose
+target is ≥ 100 (a 170 target makes it a "Big Fish"). Then load the Home page and the
+player's profile: the household Ton+/Big Fish counts, the Big Fish leaderboard, Top
+Finishes, and Highest Checkout all now include that drill checkout, and the same evening's
+Session Recap counts it as a ton+ checkout / moment — even though the player's own X01
+Personal Bests (correctly `X01_ONLY`) do not.
+
+**Fix (step by step):**
+1. Add the `${X01_ONLY}` scope (joining `games g ON g.id=t.game_id` where a query doesn't
+   already) to each of the read sites listed above, matching the guard already applied in
+   `getPersonalBests()`/`getPlayerStatBubbles()`. Decide deliberately whether "highest
+   checkout" and "Top Finishes" should be strictly X01 (the documented intent) or a new
+   explicitly-labelled all-modes variant — the spec (§3 grid + `REFERENCE.md` §3 "Top
+   Finishes / Checkout Routes") says X01, so default to `X01_ONLY` and update the spec
+   only if the behavior is deliberately changed.
+2. Add a committed regression test (extend `backend/test/db.dead-man-walking-stats.test.js`
+   or a new `db.checkout-stat-isolation.test.js`) that plays a Dead Man Walking / Checkout
+   Ladder ≥100 (and a 170) checkout and asserts `getSummary().tonPlus`/`bigFish`,
+   `getPlayerStatBubbles()`'s Big Fish bubble, `getBigFishStats()`, `getTopFinishesAll()`,
+   `getTopFinishes()`, `getCheckoutRoutes()`, `getHomeExtra()` highest-checkout/ton+,
+   `getOnThisDay()`, `getSessionRecap()`, and `getMetricHistory('bigfish')` all stay
+   unchanged from their X01-only baseline — the same isolation shape the existing Dead Man
+   Walking test uses for Personal Bests.
+
+**Verify:** the new test passes and fails against the pre-fix source; a real X01 170
+checkout still counts everywhere; `REFERENCE.md` §3's "naturally excluded" wording is
+corrected (the exclusion is now enforced by `X01_ONLY`, not by "cricket never writes
+`checkout=1`") in the same change.
+
+### BUG-28 — The live-scoreboard allowlist (`ALLOWED_LIVE_KEYS`) was never extended for Shanghai, Halve-It, or The Pressure Chamber, so the server strips their `/display` fields and the second-screen scoreboard renders broken for all three  **(MED, user-facing / feature-degraded)**
+
+**Status: ✅ Fixed (2026-07).** Added the seven missing keys to `ALLOWED_LIVE_KEYS`
+(`backend/server.js`) — `shanghaiRound`/`shanghaiMaxRounds`, `halveItRound`/`halveItTargets`,
+`pressureChamberRound`/`pressureChamberDeadline`/`pressureChamberCards` — each with the same
+per-key "only read by renderers.X" comment the existing Baseball/Bob's 27 entries carry, so
+the server now forwards them to `/display` instead of stripping them. Landed **together with
+SEC-26's fix** (escaping `modifier.icon` at the `display.html` sink) in the same change, so
+allowlisting `pressureChamberCards` doesn't open the XSS. Committed regression test
+`backend/test/server.live-state-keys.test.js`: spawns the real server, POSTs a payload
+carrying all seven fields plus an unknown control key to `/api/live`, GETs it back, and
+asserts the seven survive while the unknown key is still stripped — fails against the pre-fix
+allowlist. Verified the three `/display` scorecards render correctly (Halve-It shows the full
+target ladder, Pressure Chamber shows the target/modifier banner + No Warmup countdown,
+Shanghai advances the active-round highlight). Full backend suite green.
+
+**What actually goes wrong (plain language):** the `/display` second screen is driven by
+the live-state payload the playing device POSTs to `/api/live`. For safety, the server's
+`sanitizeLiveState()` (`backend/server.js`) keeps only the top-level keys named in the
+`ALLOWED_LIVE_KEYS` allowlist and drops everything else. When Baseball and Bob's 27
+shipped, their per-game-type fields (`baseballInning`, `bobs27Round`) were added to that
+allowlist. The six modes merged in this batch were not: `frontend/index.html`'s
+`buildLiveState()` sends `shanghaiRound`, `shanghaiMaxRounds`, `halveItRound`,
+`halveItTargets`, `pressureChamberRound`, `pressureChamberDeadline`, and
+`pressureChamberCards`, but **none of the seven is in `ALLOWED_LIVE_KEYS`**, so the server
+strips all of them before broadcasting. The `/display` renderers then fall back to
+defaults and render wrong:
+- **Shanghai** (`renderers.shanghai`): `s.shanghaiRound`/`s.shanghaiMaxRounds` gone → the
+  live-round highlight is stuck on round 1, and a non-default round count (e.g. a 5- or
+  20-round Shanghai) renders the wrong number of grid rows (falls back to 7).
+- **Halve-It** (`renderers.halve_it`): `s.halveItTargets` gone → falls back to
+  `[{sector:20}]`, so `maxRounds` collapses to **1**; the scorecard shows a single row
+  labelled "20" instead of the whole 7-round target ladder, and the round labels/highlight
+  are wrong.
+- **The Pressure Chamber** (`renderers.pressure_chamber`): `s.pressureChamberCards` gone →
+  `cards=[]`, so the large **target/modifier banner never renders at all** and the **No
+  Warmup countdown never appears**; the live-round highlight is stuck on round 1. (The
+  per-round ✅/➗/❌ outcome icons still show — those ride inside the allowlisted `players[]`
+  array — so the breakage is "the card/banner/countdown are simply missing," which is easy
+  to miss in a quick glance but removes the whole point of the second-screen view for this
+  mode.)
+
+The primary playing device is unaffected (it renders from its own in-memory `game`
+object, not the round-tripped payload), which is why this can slip through a single-device
+test.
+
+**Security note (coupling to `security-audit-roadmap.md` SEC-26):** the naïve fix — just
+add the seven keys to `ALLOWED_LIVE_KEYS` — is correct for six of them, but `pressureChamberCards`
+carries a nested `modifier.icon` that `renderers.pressure_chamber` inserts into `innerHTML`
+**without** `escapeHtml` (`display.html`, the card banner: `${liveCard.modifier.icon}`).
+`sanitizeLiveState()` does not recursively escape nested values, so allowlisting
+`pressureChamberCards` without first escaping that sink turns a stripped-and-harmless
+field into a **stored-XSS vector** on `/display` (a hostile `POST /api/live` under the
+documented `OCHE_REQUIRE_AUTH=false` LAN default). Fix SEC-26 **in the same change** as
+this bug — see its entry.
+
+**Where:** `backend/server.js` `ALLOWED_LIVE_KEYS` (missing the seven keys);
+`frontend/index.html` `buildLiveState()` (already sends them, source of truth);
+`frontend/display.html` `renderers.shanghai` / `renderers.halve_it` /
+`renderers.pressure_chamber` (the consumers that fall back to defaults).
+
+**Repro:** start a Halve-It (or Shanghai, or Pressure Chamber) game on one device, open
+`/display` on a second, and compare. Halve-It shows one "20" row instead of seven target
+rows; Pressure Chamber shows no target/modifier banner and no countdown; Shanghai's active
+round never advances past 1 on the second screen.
+
+**Fix (step by step):**
+1. Add `shanghaiRound`, `shanghaiMaxRounds`, `halveItRound`, `halveItTargets`,
+   `pressureChamberRound`, `pressureChamberDeadline`, and `pressureChamberCards` to
+   `ALLOWED_LIVE_KEYS` (with the same per-key "only read by renderers.X" comments the
+   existing Baseball/Bob's 27 entries carry).
+2. Apply SEC-26's fix (escape `modifier.icon` at the `display.html` sink, and/or validate
+   the card shape server-side) in the same change, so allowlisting `pressureChamberCards`
+   doesn't open the XSS.
+3. Add a committed test asserting `sanitizeLiveState()` preserves each of the seven keys
+   for a representative payload (mirrors the existing live-state key coverage), so a future
+   game type that forgets to allowlist its fields fails loudly instead of shipping a silent
+   `/display` regression.
+
+**Verify:** with two browsers, all three modes' `/display` scorecards render correctly
+(Halve-It shows the full target ladder, Pressure Chamber shows the banner + countdown,
+Shanghai advances the active-round highlight); the SEC-26 escape is in place; full backend
+suite green.
+
+### BUG-29 — The `(checkout=1 OR leg_won=1)` won-leg heuristic in `computeStats()` assumes exactly one such signal per won leg, but Pressure Chamber writes it on every hit round — inflating its H2H per-category legs/sets — while Halve-It and Shanghai under-count  **(MED, silent data-integrity drift)**
+
+**Status: ✅ Fixed (2026-07).** Replaced the raw turn-count heuristic with a new
+`_h2hWonLegs()` helper that returns one row per actually-won completed H2H leg and credits
+each to its real winner **per game type**: the `(checkout=1 OR leg_won=1)` winning-turn
+signal for the types where it marks exactly the leg winner (X01/Cricket/Baseball/Killer/
+Checkout Ladder), `getShanghaiWonLegs()`'s instant-or-final-total hybrid for Shanghai,
+`getHalveItWonLegs()`'s final-total comparison for Halve-It, and the highest-CP leg winner
+(`_pressureChamberLegTotals()`, tie-broken fewest misses then fewest darts, mirroring
+`pressureChamberDecideWinnerIndex()`) for The Pressure Chamber. `computeStats()` now derives
+`h2hLegs`/`h2hSets` from that list in JS (a set is won by whoever took ≥ `legs_per_set` of
+its legs), and `h2hAvgDarts` is now `X01_ONLY` so a Pressure Chamber leg's ~45 darts no
+longer dilute the H2H "avg darts per leg." Committed regression test
+`backend/test/db.h2h-won-legs.test.js`: a Pressure Chamber H2H leg where both players hit
+all 15 rounds now credits the higher-CP player with exactly **1** leg (was 15) and the
+loser with **0** (was 15); a Halve-It H2H leg now credits the higher-total winner with 1
+leg (was 0); and an X01 H2H leg still counts one checkout = one won leg. `REFERENCE.md` §3's
+won-leg description updated in the same change. Full backend suite green.
+
+**What actually goes wrong (plain language):** `computeStats()` derives each player's
+per-category H2H record (`h2hLegsWonByCat` / `h2hSetsWonByCat`, shown on the Player
+Profile as "N games · M sets · K legs") by counting turns where `(t.checkout = 1 OR
+t.leg_won = 1)`, grouped by category. `REFERENCE.md` §3 documents the intent: "*X01
+signals a won leg with `checkout`, Cricket with `leg_won`*" — i.e. the heuristic assumes
+**exactly one** such signal per won leg. That holds for X01 (one `checkout=1` on the
+finishing visit), Cricket and Baseball (one `leg_won=1` on the leg win). It breaks for the
+Pressure Chamber, which is **H2H-capable** (`contexts: ['practice','h2h']`) and writes
+`checkout=1` on *every partial or full-hit round* and `leg_won=1` on *every full-hit
+round* (reusing Checkout Trainer's per-round 3-way outcome — `frontend/index.html`'s
+pressure-chamber `recordTurn`). A single 15-round Pressure Chamber run therefore emits up
+to 15 `checkout=1` rows for one player in one leg, and `h2hLegs`/`h2hSets` count each as a
+separate won leg. Checkout Trainer has the same per-round semantics but is solo-only, so
+it's excluded by the `practice=0 AND player_count>1` filter; Pressure Chamber is the first
+H2H-capable type to break the invariant.
+
+The blast radius is bounded because Pressure Chamber games carry their own
+`category='The Pressure Chamber'`, so the inflated counts land in that category's row of
+the H2H record, not in X01's `501` row. But that row is simply wrong — a player who hit 12
+of 15 rounds shows "12 legs" for a single run. `h2hSets` (`HAVING COUNT(*) >=
+g.legs_per_set`) is inflated the same way, and `h2hAvgDarts` (`HAVING SUM(t.checkout)>0`,
+no game-type scope) folds Pressure Chamber's ~45-dart runs into the H2H "average darts per
+leg" figure.
+
+The mirror-image defect: **Halve-It** never writes `checkout=1` **or** `leg_won=1` (its
+`recordTurn` sends both false — the win is derived from final totals), so a Halve-It H2H
+leg win contributes **0** to `h2hLegsWonByCat`; **Shanghai** sets `leg_won=1` only on an
+instant Shanghai, not on a normal final-round points win, so points-decided Shanghai legs
+are under-counted too. So the per-category H2H "legs won" is unreliable for all three
+newest H2H-capable non-X01/Cricket/Baseball modes — over-counted for Pressure Chamber,
+under-counted for Halve-It and Shanghai.
+
+**Where:** `backend/db.js` `computeStats()` — `h2hLegs`, `h2hSets`, and (for the darts
+skew) `h2hAvgDarts`. Root cause is the shape mismatch between the `(checkout=1 OR
+leg_won=1)` heuristic and the per-round `checkout`/`leg_won` semantics of Pressure Chamber
+(and the no-signal / instant-only semantics of Halve-It / Shanghai) — `frontend/index.html`'s
+`recordTurn` for those three types.
+
+**Repro:** play a Pressure Chamber **H2H** match (2 players) and finish a run hitting
+several rounds; open either player's profile and read the "The Pressure Chamber" row of
+their H2H record — legs (and, depending on `legs_per_set`, sets) are far higher than the
+number of legs actually played. Separately, play a Halve-It H2H match and note its category
+row shows 0 legs won for the winner.
+
+**Fix (step by step):**
+1. Make the won-leg count game-type-aware rather than relying on the raw `(checkout=1 OR
+   leg_won=1)` signal for every type. The most robust approach is to count a won *leg* as
+   one distinct `(game_id,set_no,leg_no)` whose winner is this player, deriving the winner
+   the same way each game type already does elsewhere (X01/Ladder: the `checkout=1` turn;
+   Cricket/Baseball: the `leg_won=1` turn; Shanghai: `getShanghaiWonLegs()`'s hybrid;
+   Halve-It: `getHalveItWonLegs()`'s total comparison; Pressure Chamber: the per-leg CP
+   winner via `pressureChamberDecideWinnerIndex()`), instead of counting raw signal rows.
+   At minimum, scope `h2hLegs`/`h2hSets`/`h2hAvgDarts` so per-round-signal types
+   (Pressure Chamber, and Checkout Trainer defensively) can't contribute more than one
+   won-leg row per `(game,set,leg,player)`.
+2. Add a committed regression test that plays a Pressure Chamber H2H run and asserts the
+   winner's `h2hLegsWonByCat['The Pressure Chamber']` equals the real legs won (not the
+   hit-round count), plus a Halve-It/Shanghai H2H case asserting their category rows
+   reflect real leg wins.
+
+**Verify:** the new test passes and fails against the pre-fix source; X01/Cricket/Baseball
+per-category records are unchanged; full backend suite green.
 
 ---
 

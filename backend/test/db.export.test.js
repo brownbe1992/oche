@@ -1,5 +1,5 @@
 'use strict';
-// Committed test for getFullDatabaseExport() (docs/data-export-roadmap.md, admin-only
+// Committed test for getFullDatabaseExport() (docs/archive/data-export-roadmap.md, admin-only
 // full-database export). Confirms the export contains real, correctly-counted game
 // data, and — the security-sensitive part — that it never includes the admins/
 // sessions/settings/server_errors tables or any player PIN/credential column, even
@@ -23,7 +23,7 @@ after(() => {
   try { fs.rmdirSync(scratchDir); } catch (e) {}
 });
 
-describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
+describe('getFullDatabaseExport (docs/archive/data-export-roadmap.md)', () => {
   test('includes real player/game/turn/dart data with correct shape and counts', async () => {
     db.addPlayer('export_alice');
     await db.setPlayerPin('export_alice', '1234');
@@ -42,8 +42,15 @@ describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
       'dartComponents', 'loadouts',
       // docs/archive/ghost-opponent-roadmap.md: same standing rule applied to ghost races
       'ghostRaces',
-      // docs/league-mode-roadmap.md: same standing rule applied to league data
+      // docs/archive/league-mode-roadmap.md: same standing rule applied to league data
       'leagues', 'leaguePlayers', 'leagueFixtures',
+      // docs/archive/player-merge-roadmap.md: merged-away-uuid aliases
+      'playerUuidAliases',
+      // docs/archive/saved-games-roadmap.md: same standing rule applied to saved-game state
+      'savedGames',
+      // docs/archive/marathon-mode-roadmap.md: same standing rule — session groupings
+      // (durations, leg order) can't be reconstructed from the raw leg games alone
+      'marathonSessions', 'marathonSessionLegs',
     ].sort());
 
     const alice = dump.players.find(p => p.name === 'export_alice');
@@ -68,7 +75,7 @@ describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
     assert.ok(dump.tournamentMatches.length >= 1, 'match rows exported');
   });
 
-  test('includes league data (docs/league-mode-roadmap.md) — an enrolled league appears in the export', () => {
+  test('includes league data (docs/archive/league-mode-roadmap.md) — an enrolled league appears in the export', () => {
     db.addPlayer('export_l1'); db.addPlayer('export_l2');
     const { leagueId } = db.createLeague({ name: 'Export League', category: '501', players: ['export_l1', 'export_l2'] });
 
@@ -105,7 +112,7 @@ describe('getFullDatabaseExport (docs/data-export-roadmap.md)', () => {
   });
 });
 
-describe('players.uuid (docs/data-export-roadmap.md — portable per-player identity)', () => {
+describe('players.uuid (docs/archive/data-export-roadmap.md — portable per-player identity)', () => {
   test('every player gets a well-formed, unique uuid at creation', () => {
     db.addPlayer('export_uuid_a');
     db.addPlayer('export_uuid_b');
@@ -119,7 +126,7 @@ describe('players.uuid (docs/data-export-roadmap.md — portable per-player iden
   });
 });
 
-describe('getPlayerExport (docs/data-export-roadmap.md — per-player export)', () => {
+describe('getPlayerExport (docs/archive/data-export-roadmap.md — per-player export)', () => {
   test('scopes games/turns/darts to the requested player, includes a minimal opponent stub, and excludes the opponent\'s unrelated games', () => {
     db.addPlayer('export_ben');
     db.addPlayer('export_alaina');
@@ -235,7 +242,7 @@ describe('getPlayerExport (docs/data-export-roadmap.md — per-player export)', 
   });
 });
 
-describe('importPlayerExport (docs/data-export-roadmap.md — the export/import round trip)', () => {
+describe('importPlayerExport (docs/archive/data-export-roadmap.md — the export/import round trip)', () => {
   test('rejects a malformed or wrong-schemaVersion payload', () => {
     assert.throws(() => db.importPlayerExport(null), /Invalid import file/);
     assert.throws(() => db.importPlayerExport({ schemaVersion: 2, player: {}, games: [], gamePlayers: [], turns: [], darts: [], opponents: [] }), /Unsupported schemaVersion/);
@@ -371,5 +378,51 @@ describe('importPlayerExport (docs/data-export-roadmap.md — the export/import 
 
     const totalGraceGames = db._db.prepare('SELECT COUNT(*) n FROM game_players WHERE player_id = ?').get(graceIdAfter).n;
     assert.equal(totalGraceGames, 2, "Grace's single row now has both the shared game and her own solo game");
+  });
+});
+
+// Killer configs key number assignments by player id (item 43, docs/code-
+// quality-roadmap.md). resolveStub() can attach an imported game to a local
+// player whose id differs from the export's (the normal case for any cross-
+// server import, not just a renamed row) — the import must re-key
+// config.numbers to the RESOLVED local id via idMap, or the whole game
+// replays inert (no participant claims the assigned number).
+describe('importPlayerExport — killer config keys follow resolved local ids (item 43, docs/code-quality-roadmap.md)', () => {
+  test('a uuid-matched player resolving to a DIFFERENT local id gets their config key re-mapped', () => {
+    db.addPlayer('exp_kcfg_a'); db.addPlayer('exp_kcfg_b');
+    const kg = db.createGame({ category: 'Killer', legsPerSet: 1, setsPerGame: 1, practice: 0,
+      gameType: 'killer', config: {}, players: [{ name: 'exp_kcfg_a' }, { name: 'exp_kcfg_b' }] });
+    const exportedAId = db._db.prepare('SELECT id FROM players WHERE name = ?').get('exp_kcfg_a').id;
+    const before = JSON.parse(db._db.prepare('SELECT config FROM games WHERE id = ?').get(kg.gameId).config);
+    const numA = before.numbers[exportedAId];
+    db.addTurn(kg.gameId, { player: 'exp_kcfg_a', set: 1, leg: 1, scored: 1, bust: false, checkout: false,
+      checkoutPoints: null, affectedPlayer: 'exp_kcfg_a', darts: [{ dartNo: 1, sector: numA, multiplier: 1 }] });
+    db.completeGame(kg.gameId, 'exp_kcfg_a');
+
+    const exportPayload = db.getPlayerExport('exp_kcfg_a');
+    // Simulate the divergence importPlayerExport() must always handle, not just
+    // after a rename: the export's player id is whatever autoincrement value
+    // THAT server assigned, which generally does NOT match this server's own
+    // id for the uuid-matched row — the normal case for any cross-server
+    // import. Force it here by deleting the local row and recreating it under
+    // the same uuid, which SQLite's autoincrement guarantees gets a fresh,
+    // different id; the local copy of the game is also gone (so the duplicate
+    // guard doesn't skip the insert).
+    const uuid = db._db.prepare('SELECT uuid FROM players WHERE name = ?').get('exp_kcfg_a').uuid;
+    db._db.prepare('DELETE FROM games WHERE id = ?').run(kg.gameId);
+    db._db.prepare('DELETE FROM players WHERE name = ?').run('exp_kcfg_a');
+    db._db.prepare('INSERT INTO players (name, out_mode, uuid) VALUES (?, ?, ?)').run('exp_kcfg_a2', 'double', uuid);
+    const localAId = db._db.prepare('SELECT id FROM players WHERE uuid = ?').get(uuid).id;
+    assert.notEqual(localAId, exportedAId, 'fixture sanity: the recreated row really does get a different id');
+
+    const result = db.importPlayerExport(exportPayload);
+    assert.equal(result.player.name, 'exp_kcfg_a2', 'resolved via uuid onto the recreated row');
+    assert.equal(result.gamesImported, 1);
+
+    const imported = db._db.prepare(
+      `SELECT g.config FROM games g WHERE g.game_type='killer' ORDER BY g.id DESC LIMIT 1`).get();
+    const cfg = JSON.parse(imported.config);
+    assert.equal(cfg.numbers[localAId], numA, 'the assignment now keys the RESOLVED local id');
+    assert.ok(!(exportedAId in cfg.numbers), "the export server's old id key is gone");
   });
 });

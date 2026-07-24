@@ -1,5 +1,5 @@
 'use strict';
-// Committed tests for backend/backup-lib.js (docs/backups-roadmap.md), the
+// Committed tests for backend/backup-lib.js (docs/archive/backups-roadmap.md), the
 // shared backup/restore mechanics used by both the standalone cron script
 // (backend/backup.js) and the admin-gated Settings routes (backend/server.js).
 const { test, describe, after } = require('node:test');

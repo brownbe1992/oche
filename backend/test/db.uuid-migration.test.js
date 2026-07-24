@@ -1,5 +1,5 @@
 'use strict';
-// Committed regression test for the players.uuid migration (docs/data-export-roadmap.md).
+// Committed regression test for the players.uuid migration (docs/archive/data-export-roadmap.md).
 // CREATE TABLE IF NOT EXISTS only takes effect on a genuinely fresh database -- an
 // EXISTING installation's players table already exists (without the uuid column) and
 // needs its own explicit ALTER TABLE to get one at all. Every other test in this repo

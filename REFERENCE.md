@@ -41,8 +41,22 @@ convention in `CLAUDE.md`.
 - [17. Dartboard Zone / Miss / Bounce-Out Tracking](#17-dartboard-zone--miss--bounce-out-tracking)
 - [18. League Mode](#18-league-mode)
 - [19. Checkout Trainer](#19-checkout-trainer)
-- [20. Known Limitations & Open Gaps](#20-known-limitations--open-gaps)
-- [21. Troubleshooting](#21-troubleshooting)
+- [19a. "Drill this checkout" deep link](#19a-drill-this-checkout-deep-link)
+- [20. New Game Screen (3-Step Wizard)](#20-new-game-screen-3-step-wizard)
+- [21. Known Limitations & Open Gaps](#21-known-limitations--open-gaps)
+- [22. Troubleshooting](#22-troubleshooting)
+- [23. Saved Games / Pause & Resume](#23-saved-games--pause--resume)
+- [24. Household Elo Rating](#24-household-elo-rating)
+- [25. Handicapping](#25-handicapping)
+- [26. 121 Checkout Ladder](#26-121-checkout-ladder)
+- [27. The Gauntlet](#27-the-gauntlet)
+- [28. Killer](#28-killer)
+- [29. End-of-Night Session Recap](#29-end-of-night-session-recap)
+- [30. Marathon Mode](#30-marathon-mode)
+- [31. Shanghai](#31-shanghai)
+- [32. Halve-It](#32-halve-it)
+- [33. Dead Man Walking](#33-dead-man-walking)
+- [34. The Pressure Chamber](#34-the-pressure-chamber)
 
 ---
 
@@ -110,22 +124,29 @@ oche/
   of irrelevant branching. See §2 for Cricket's and Baseball's scoring rules.
 - **Player Profile/Home page game-type toggle**: each `GAME_TYPES` entry also
   carries 3 UI-facing fields (game-modes-roadmap.md "Toggle mechanism
-  generalized") — `label` (button text), `bubbleKeyMap` (patched on right after
+  generalized") — `label` (option text), `bubbleKeyMap` (patched on right after
   its own key-map `const` is defined, to dodge that const's temporal-dead-zone
   inside the earlier `GAME_TYPES` object literal), and `personalBestsRenderer`/
   `homeTabRenderer` (`null` means "use the built-in X01-shaped default" in
   `renderPersonalBests()`/`renderHomeTabBody()`, not a special case). Both
   toggles render via `Object.values(GAME_TYPES).filter(g=>g.statDefs &&
-  g.statDefs.length).map(...)` instead of one hardcoded button per type — the
-  Home page's toggle row, previously static HTML, is now populated by
-  `renderHomeGameTypeTabs()`. Only the toggle *mechanism* is generalized this
-  way — each type's own backend stat-fetch functions and stat shapes stay
-  bespoke; see game-modes-roadmap.md for why that part is deliberately left
-  unsolved. A `soloOnly:true` flag (currently just `GAME_TYPES.doubles_practice`
-  — a game type with no H2H mode at all) additionally hides that type's Home
-  page tab while the H2H top-level tab is selected (`renderHomeGameTypeTabs()`),
+  g.statDefs.length).map(...)` instead of one hardcoded control per type —
+  both are a single `<select>` dropdown (`player-gametype-select` on Player
+  Profile, `home-gtype-select` on Home), not a row of buttons: with as many as
+  15 Practice-only game types (Home) registered, a button per type wrapped
+  across several lines and pushed the leaderboards themselves far down the
+  page (item: too many game-type tabs). The Home page's dropdown, previously a
+  static-HTML button row, is populated by `renderHomeGameTypeTabs()` (name
+  unchanged from the button-row era; it still renders one `<option>` per
+  visible type into `#home-gtype-select`). Only the toggle *mechanism* is
+  generalized this way — each type's own backend stat-fetch functions and stat
+  shapes stay bespoke; see game-modes-roadmap.md for why that part is
+  deliberately left unsolved. A `soloOnly:true` flag (currently just
+  `GAME_TYPES.doubles_practice` and the other Practice-only drills — a game
+  type with no H2H mode at all) additionally hides that type's Home page
+  option while the H2H top-level tab is selected (`renderHomeGameTypeTabs()`),
   and `switchHomeTab('h2h')` bounces `homeGameType` back to `'x01'` if a
-  solo-only type was active, rather than leaving a hidden tab's solo data
+  solo-only type was active, rather than leaving a hidden option's solo data
   showing mislabeled as H2H content.
 - **Game-lifecycle hooks** (`backend/db.js`, `docs/archive/existing-app-prep-roadmap.md`
   item 4): `onGameCreated(fn)`/`onGameCompleted(fn)` register listener callbacks;
@@ -249,6 +270,45 @@ Called from `enterTurn()` whenever `ev.win` is true. Order of operations:
 Practice mode (`game.practice === true`) never reaches the "set won" branch at
 all — a practice session is just a sequence of legs, no set/match structure.
 
+### Game Over screen — Play Again / Return Home (2026-07)
+
+Every `finishUnit('game', winner, opts)` completion (the shared path every
+match-style type ends through — X01/Cricket/Baseball/Shanghai/Halve-It/
+Pressure Chamber/Killer via `advanceLegSetGame()`, plus Gauntlet/Bob's 27/Dead
+Man Walking/Around the Clock's own "a run IS the game" call sites) shows two
+primary actions instead of the old single generic "New game" link:
+
+- **🔁 Play Again** (`playAgain()`, `frontend/index.html`) — relaunches the
+  *exact* game just finished: same game type, same players (same order),
+  same legs-per-set/sets-per-game format, and the relevant per-type secondary
+  config carried over from `game.config` (X01 starting score; Cricket's exact
+  target numbers via the custom-numbers path plus its Standard/Cut-throat
+  variant; Shanghai's round count; Halve-It's custom targets, if any; Killer's
+  lives threshold). Deliberately reuses the New Game wizard's own machinery
+  rather than duplicating it — finds the matching `NEW_GAME_MODE_OPTIONS`
+  entry and calls its `apply()` (mode/gameType-setting logic), then
+  `startGame()` itself (validation/game-construction) — so it can never drift
+  out of sync with what a manual New Game selection would produce. Per-player
+  handicaps are explicitly NOT carried over (a fresh rematch, not a resumed
+  contest) — `setup.handicaps`/`setup.leagueFixtureId` are both reset up front,
+  the same "don't silently leak stale `setup` state into a game that skipped
+  the wizard" precaution `selectSetupGame()` itself already takes.
+- **🏠 Return Home** — `show('home')`.
+- The old **"Choose a different game"** link (`show('setup')`, a blank
+  reconfigure-from-scratch setup screen) is kept, just demoted to a small,
+  less prominent text link below the main button row rather than removed.
+
+Tournament matches are unaffected — `game.tournamentMatchId` still shows only
+the single existing **"Back to bracket"** action (replaying outside the
+bracket isn't a tournament action, so Play Again/Return Home don't apply
+there); Marathon Mode/Daily Challenge/Ghost Opponent all divert to their own
+dedicated flows before this code runs at all, also unaffected.
+
+**Custom completion wording**: `finishUnit()`'s optional third argument,
+`opts`, lets a game type override the generic "{winner} wins the game"/
+"GAME OVER" phrasing where it doesn't fit (a solo drill has no opponent to
+"win" against) — see Around the Clock's own use of this, above.
+
 ### Undo — snapshot-based, one level deep
 
 Every call to `enterTurn()` builds a full snapshot (`_snap`) of the acting
@@ -270,13 +330,22 @@ Cricket achievements (9 Marks, Perfect Leg) plus the two Cricket-native badges
 (Whitewash, Comeback Kid (Cricket)) — no Daily Challenge integration, since
 challenges are X01-only.
 
-### Cricket rules — `GAME_TYPES.cricket.evaluateVisit(player, darts, game)` (`frontend/index.html`)
+### Cricket rules — `GAME_TYPES.cricket.evaluateVisit(player, darts, game)` (`evaluateVisitCricket()`, `frontend/scoring.js`)
 
-Standard cricket only (v1 scope decision — cut-throat deferred). A match's
-in-play numbers are locked to exactly 7, chosen at New Game time: classic
-(15, 16, 17, 18, 19, 20, Bull) or a custom 7-of-21 selection, stored as
+A match's in-play numbers are locked to exactly 7, chosen at New Game time:
+classic (15, 16, 17, 18, 19, 20, Bull) or a custom 7-of-21 selection, stored as
 `game.config.numbers`. Per-player state is `{marks: {sector: count, ...},
 points}` — no `score` field, no bust concept.
+
+**Two variants share this one engine** (`game.config.variant: 'standard' |
+'cutthroat'`, missing/unrecognized treated as `'standard'` — `docs/archive/cutthroat-cricket-roadmap.md`):
+- **Standard**: closing a number the shooter has but an opponent hasn't lets
+  further hits on it score points onto the **shooter's own** total. Highest
+  score (once every number is closed) wins.
+- **Cutthroat**: the same marks/closing rules, but those points land on
+  **every opponent who still has the number open** instead — each gets the
+  **full** amount, not a split — and the shooter's own total never moves from
+  their own hits. Lowest score (once every number is closed) wins.
 
 **Marks accumulate dart-by-dart within a visit**, not per-visit-total — a
 number can go from open to closed mid-visit, with the remaining darts in that
@@ -290,8 +359,12 @@ darts.forEach(d => {
   marks[d.sector] = after;
   const newBeyond = Math.max(0, after - 3) - Math.max(0, before - 3);
   if (newBeyond > 0) {
-    const opponentOpen = opponents.some(o => (o.marks[d.sector] || 0) < 3);
-    if (opponentOpen) pointsThisVisit += newBeyond * d.sector;   // Bull's "sector" is 25
+    const openOpponents = opponents.filter(o => (o.marks[d.sector] || 0) < 3);
+    if (openOpponents.length) {
+      const value = newBeyond * d.sector;          // Bull's "sector" is 25
+      pointsThisVisit += value;                     // the visit's total GENERATED value, either variant
+      if (cutthroat) openOpponents.forEach(o => gains.set(o, gains.get(o) + value)); // full value to EACH open opponent
+    }
   }
 });
 ```
@@ -304,24 +377,72 @@ snapshot is needed). Real-darts bull scoring is inherited for free from the
 existing `makeDart()` guard — single bull is 1 mark, double bull is 2, and a
 "treble bull" tap is silently downgraded to a single (no triple bull exists).
 
-**Win condition**: this player has closed all 7 numbers **and** has strictly
-more points than every opponent. If they've closed everything but don't lead,
-the leg just continues — real cricket lets them keep throwing/blocking
-normally, and the per-dart rule above already lets them score against any
-opponent still open on a number they've closed, with no extra logic needed.
+**Data model**: `turns.scored` is always the points this visit *generated*
+(`pointsThisVisit`), attributed to the shooter's row, regardless of which
+player(s) it actually lands on — a single cutthroat visit can score onto
+several players at once, and `turns` rows belong to the shooter, so there's no
+per-recipient row to attribute it to instead. Each player's own *received*
+total (`player.points`) is a live, in-memory quantity the client mutates
+directly (standard: the shooter's own; cutthroat: every hit opponent's) and
+the saved-games replay (`rebuildCricketState()`, `docs/archive/saved-games-roadmap.md`)
+reconstructs identically by replaying `evaluateVisitCricket()`'s
+`opponentGains` across every recorded turn — it is never derived from
+`turns.scored` at query time. Cricket's mark-based stats (MPR, 9 Marks — §3)
+are unaffected by variant either way, since they read darts/marks, not
+`points`; no points-based Cricket leaderboard exists today, so none needs
+variant-scoping.
 
-**Known open edge case, not silently resolved**: an exact points *tie* at the
-moment the last number closes is not a win by this rule — the leg continues
-with no tie-break implemented. Verified behavior (not a bug): two players
-tied 0-0 when the second one closes their last number keep playing.
+**Logging a real off-target hit vs. a genuine miss** (`docs/bug-roadmap.md`
+BUG-23): `renderPadCricket()`'s main pad only ever shows the match's 7 in-play
+numbers plus `Miss` — but a dart landing on one of the other 14 numbers (1-14
+in classic Cricket) is a real board hit, not a miss, and worth recording
+accurately for Dart Analytics (§3 "Top Finishes / Checkout Routes") even though it scores nothing here
+either way. A collapsed-by-default "Hit a different number ▾" picker lists
+those 14 numbers (`CRICKET_ALL_NUMBERS` in `frontend/scoring.js` — the full
+1-20-plus-Bull pool — minus `game.config.numbers`); tapping one calls the
+exact same `throwDart(n)` the 7 real target buttons use, so it respects the
+ambient single/double/treble selector and needed zero scoring-logic changes —
+the `if (!numbers.includes(d.sector)) return;` no-op above already treats any
+non-target sector identically regardless of which one it is. Only the input
+was ever missing a way to produce a real sector instead of `0`.
+
+**Win condition**: this player has closed all 7 numbers **and** — standard —
+has strictly more points than every opponent, **or** — cutthroat — has
+strictly fewer points than every opponent, compared as of *after* this
+visit's own gains are applied (a visit that closes the shooter's last number
+can, in cutthroat, also be the one that pushes an opponent's total up in the
+same visit). If they've closed everything but the points check fails, the leg
+just continues — real cricket lets them keep throwing/blocking normally, and
+the per-dart rule above already lets them score against any opponent still
+open on a number they've closed, with no extra logic needed.
+
+**Known open edge case, not silently resolved, same in both variants**: an
+exact points *tie* at the moment the last number closes is not a win by this
+rule — the leg continues with no tie-break implemented. Verified behavior
+(not a bug): two players tied 0-0 when the second one closes their last
+number keep playing.
 
 Leg/set/game progression (`onLegWonCricket`) mirrors X01's `onLegWon`
 structurally (legs/sets advance the same way, same `DB.completeGame`/HA
-webhook calls). Cricket's two achievements (9 Marks, Perfect Leg — §4) are
-detected in `enterTurnCricket()` before it runs; `onLegWonCricket` itself
-carries no achievement or Daily Challenge integration, since X01's
-clutch/social badges and the Daily Challenge formats don't apply to Cricket.
+webhook calls). Cricket's achievements (9 Marks, Perfect Leg — variant-agnostic,
+mark/dart-based — plus cutthroat's own 🔪 Stone Cold, §4) are detected in
+`enterTurnCricket()`/`onLegWonCricket()`; carries no Daily Challenge
+integration, since the Daily Challenge formats don't apply to Cricket.
 Cricket's stat vocabulary is documented in §3 ("Cricket stats").
+
+**Comeback Kid (Cricket)'s deficit direction flips with the variant**: the
+running "worst points deficit seen this leg" (`p.legWorstPointsDeficit`,
+sampled before each visit's own points update, since neither player's points
+have changed yet at that moment regardless of variant) is `opponent.points -
+my.points` in standard (higher is better, so trailing means the opponent is
+ahead) and `my.points - opponent.points` in cutthroat (lower is better, so
+trailing means *I've* received more). The threshold itself
+(`CRICKET_COMEBACK_THRESHOLD`, 20) and the badge condition
+(`cricketComebackAchieved()`) are unchanged either way — only which side
+"ahead" points at is variant-aware, computed in `enterTurnCricket()` rather
+than in the pure `cricketComebackAchieved()` predicate itself. Whitewash
+("the opponent closed zero numbers") reads identically in both variants — it
+was never a points-based condition to begin with.
 
 ### Baseball rules — `GAME_TYPES.baseball.evaluateVisit(player, darts, game)` (`frontend/scoring.js`'s `evaluateVisitBaseball`)
 
@@ -345,10 +466,12 @@ darts.forEach(d => { if (d.sector === target) runsThisVisit += d.mult; });
 ```
 
 **The round only completes once the LAST player in the rotation has thrown**
-(`game.current === game.players.length - 1`, read before `game.current`
-advances — the same timing every other `evaluateVisit*()` relies on). A solo
-practice game is always "last in rotation," so it advances one inning per
-visit. The **win condition is only checked on that round-completing visit,
+(`isRoundComplete(game)`: `(game.current + 1) % game.players.length ===
+(game.starter || 0)` — starter-RELATIVE, because `startNextLeg()` rotates
+`game.starter` each leg, so the leg's final thrower is the player just before
+the starter, not index n-1; read before `game.current` advances — the same
+timing every other `evaluateVisit*()` relies on). A solo practice game is
+always "last in rotation," so it advances one inning per visit. The **win condition is only checked on that round-completing visit,
 and only once inning 9 has been reached**: every player's total (including
 the just-evaluated visit) is compared, and the match ends only if there's a
 single unique highest total — an exact tie among the leaders continues into
@@ -367,14 +490,102 @@ Visit-based (3 darts per turn), same undo shape as X01/Cricket
 (`undoLastTurnBaseball()`, dispatched from `undoLastTurn()`) — restores
 `totalRuns`/`inningRuns`/dart counts and `game.baseballInning` from
 `game.lastTurnSnapshot`. Leg/set/game progression (`onLegWonBaseball`)
-mirrors `onLegWonCricket()` structurally; no achievements or Daily Challenge
-integration (X01/Cricket's own don't apply to Baseball either). Scoring
+mirrors `onLegWonCricket()` structurally **with one deliberate divergence**:
+its outer gate is `if(w.legsWon >= game.legsPerSet)`, not X01/Cricket's
+`if(!game.practice && ...)`. Practice-mode Baseball is forced to exactly
+`legsPerSet=1`/`setsPerGame=1` at `startGame()` (`isPracticeBaseball`, the
+same treatment every drill mode gets — Ghost, Chuckin, Doubles Practice,
+etc.), so a practice Baseball leg *is* the whole game, unlike X01/Cricket's
+genuinely open-ended practice legs. This is required, not cosmetic: unlike
+X01/Cricket (whose leg-level stats read `turns.leg_won`, independent of
+`games.completed_at`), every one of Baseball's own stat functions
+(`getBaseballWonLegs()`, `gamesPlayed`/`winPct` in
+`getBaseballStatBubbles()`) requires `g.completed_at IS NOT NULL` as its only
+"this is a real result, not an abandoned mid-leg" signal — and
+`DB.completeGame()` only ever fires from this same gate. Copying X01/Cricket's
+`!game.practice` gate wholesale (as an earlier version of this function did)
+meant a practice Baseball game could never be marked complete at all, so
+`gamesPlayed`/Personal Bests stayed empty forever regardless of how many
+practice games were played — `docs/bug-roadmap.md` BUG-22. H2H Baseball is
+unaffected by this — `legsPerSet`/`setsPerGame` stay whatever the New Game
+wizard's Bo3/Bo5/etc. picker set, so a genuine multi-leg H2H match still
+requires every configured leg before completing. No achievements or Daily
+Challenge integration (X01/Cricket's own don't apply to Baseball either). Scoring
 screen (`renderPadBaseball`) reuses Cricket's exact "select a multiplier,
 then tap the target" interaction with a single target button (this inning's
 number) instead of Cricket's seven. Live scoreboard (`renderers.baseball` in
 `display.html`) is the same chalkboard-table shape as Cricket's (rows =
 innings 1-9, columns = players), always single-column regardless of
 orientation. Baseball's stat vocabulary is documented in §3 ("Baseball stats").
+
+### Bob's 27 rules — `GAME_TYPES.bobs_27.evaluateVisit(player, darts, game)` (`evaluateVisitBobs27()`, `frontend/scoring.js`)
+
+`docs/archive/practice-ladders-roadmap.md` Part A — Bob Anderson's doubles-
+practice routine. Solo only (`GAME_TYPES.bobs_27.soloOnly = true`), visit-based
+(3 darts per round) like Baseball, with the same "always exactly one player,
+`game.current` never moves" shape. Starts on 27; **the current round IS the
+live double target** — round 1 targets D1, round 2 D2, ... round 20 D20, one
+number per round, never repeating. Game-level round counter (`game.bobs27Round`,
+mirroring `game.baseballInning`) rather than per-player, since the mode is
+always solo.
+
+**Each round's outcome is all-or-nothing per dart, summed**: every dart that
+lands on *that round's own double* (`sector === round && multiplier === 2`)
+adds `round * 2` to the running score; a round with zero such hits subtracts
+`round * 2` instead — there's no partial credit for landing a single or treble
+on the right number, and no penalty scaling by "how many darts missed":
+
+```js
+const hits = darts.filter(d => d.sector === round && d.isDouble).length;
+const gain = hits * round * 2;
+running += gain > 0 ? gain : -(round * 2);
+```
+
+A run ends the moment `running <= 0` (**dead**) or after round 20 completes
+(survived) — both set `matchComplete`, checked identically to Baseball's
+`ev.matchComplete` dispatch. `evaluateVisitBobs27()` returns `{running, gain,
+scored, hits, dead, matchComplete, round}` — `scored` is deliberately just an
+alias for `gain` (never negative), not the actual signed change to `running`;
+see "store the gain, derive the penalty" below.
+
+**"Store the gain, derive the penalty"**: `turns.scored` only ever holds a
+round's *positive* gain (`0` on a miss-all round) — the penalty is never
+written as a negative number anywhere. Both the live client and
+`rebuildBobs27State({turns})` (the pure resume/replay rebuilder, `frontend/
+scoring.js`, same "replay every turn with zero side effects" contract as
+Baseball's and X01's own rebuilders) derive the actual running-score delta at
+read time from `scored > 0 ? scored : -2*round` — `round` itself is never
+stored either, always re-derived as that turn's own 1-indexed position within
+the game (`ROW_NUMBER() OVER (PARTITION BY game_id ORDER BY id)` server-side;
+a plain loop counter client-side, since a player only ever has one turn per
+round). This is the same design `docs/archive/halve-it-roadmap.md` proposed for a
+similar "hit gains, miss loses" shape, applied here for the first time.
+
+**Write-time guard** (`addTurn()`, `backend/db.js`, SEC-25-style, opted in via
+`{enforceConsistency:true}`): rejects `checkout=true` outright (no checkout
+concept); derives `round` from this player's own prior-turn count in this
+game/set/leg (`+1`), rejecting anything past round 20; replays every prior
+turn's `scored` to reconstruct the running score entering this round; computes
+`expectedGain` from the submitted darts the same `hits * round*2` formula
+above; 400s if `scored !== expectedGain`; computes `expectedRunning` from that
+and 400s if the submitted `bust` flag doesn't match `expectedRunning <= 0`.
+Never trusts the client's own `ev.dead`.
+
+**Undo** (`undoLastTurnBobs27()`, dispatched from `undoLastTurn()`) — same
+`lastTurnSnapshot` shape as Baseball's, restoring `running`/`roundResults`/
+dart counts/`game.bobs27Round` and calling `DB.deleteLastTurn()`.
+
+**"A run IS the game"** (practice Baseball's BUG-22 precedent, §2's own
+Baseball write-up above): `legsPerSet`/`setsPerGame` are forced to 1 at
+`startGame()` (bobs_27 is in `drillModes`), so the very first `matchComplete`
+(survive-to-20 or die) auto-completes the whole game via the same generic
+leg/set/game progression tree every other mode uses (`onLegWonBobs27`, mirrors
+`onLegWonBaseball`'s structure including its "structurally unreachable but
+kept for tree consistency" leg/set branches). Its own moment card picks a
+survived-vs-died headline (`'RUN COMPLETE!'`/`'RUN OVER'`, `🎯`/`💀`) since
+X01/Baseball's generic "MATCH WON!" framing reads wrong for a run that ended
+in death. Bob's 27's stat vocabulary is documented in §3 ("Bob's 27 stats");
+its badges in §4.
 
 ### Doubles Practice per-dart rules — `evaluateDartDoublesPractice(dart, targets)` (`frontend/scoring.js`)
 
@@ -465,18 +676,24 @@ groups).
 `renderGameShell` all branch on this game type):
 
 ```js
-function throwDartChuckin(sector){
-  const dart = makeDart(sector, mult);
+function throwDartChuckin(sector, zone, missZone, missDepth, bounced){
+  const dart = makeDart(sector, bounced ? 1 : mult);
   const p = game.players[0];
   p.sessionDarts += 1;
   if(dart.isTreble) p.sessionTrebles += 1;
-  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
-    scored:0, bust:false, checkout:false, checkoutPoints:null, legWon:false,
-    darts:[{ dartNo:1, sector:dart.sector, multiplier:dart.mult, thrownAt:dart.thrownAt }] });
+  recordSingleDartTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:0, bust:false, checkout:false, checkoutPoints:null, legWon:false }, dart, zone, missZone, missDepth, bounced);
   game.chuckinLastDart = { label:dart.label, isTreble:!!dart.isTreble };
   checkChuckinMilestones(p);
 }
 ```
+
+(`recordSingleDartTurn()` — docs/code-quality-roadmap.md item 56 — is the shared
+`DB.recordTurn()` wrapper for every per-dart-commit game type: Killer, Doubles
+Practice, Just Chuckin' It, and guided Around the Clock/World. It stamps the lone
+`darts[]` entry's `zone`/`missZone`/`missDepth`/`bounced` fields identically for
+all five; only the surrounding fields — `scored`/`bust`/`checkoutPoints`/`legWon`/
+`affectedPlayer` — vary by mode.)
 
 - Every dart is simply recorded — `scored`/`bust`/`checkout`/`legWon` are always
   `0`/`false`, since this mode has no numeric score and never busts or wins.
@@ -525,14 +742,22 @@ active practice-drill wrapper around a completion condition that already
 existed passively (§4's `around_the_clock`/`around_the_world` badges). No
 schema changes — both just added to `KNOWN_GAME_TYPES` (`backend/db.js`).
 
-**Around the Clock** is structurally identical to Doubles Practice: a
-**round** is one continuous session tracked via `game.legNo` (reused as
-"round number," incremented by `startNextClockRound()`), ending the instant
-all 20 numbers 1-20 have been hit as singles. The target set is **20 numbers
-only, no bull** — matching the existing passive `around_the_clock` badge's
-exact formula (`singlesHit.size >= 20`), a deliberate 2026-07 decision that
-overrides this doc's own earlier draft wording of "+bull." The pure per-dart
-rule lives in `frontend/scoring.js`:
+**Around the Clock is one clock = one game** (2026-07 redesign, superseding
+this doc's original "a round is one continuous session, press 'Start Next
+Clock' to go again" design): completing all 20 numbers 1-20 as singles ends
+the **whole game** immediately, the same "a run IS the game" shape Gauntlet/
+Bob's 27/Dead Man Walking already use — `DB.completeGame()` fires and the
+GAME OVER / CLOCK COMPLETE screen shows right away, rather than offering
+another clock within the same `games` row. Playing again means starting a
+fresh game (one tap via the "🔁 Play Again" button below, or the New Game
+screen), exactly like every other completing game type. This closed a real
+bug: under the old design the session never called `DB.completeGame()` at
+all, so `game.done` never became `true` and the hamburger menu kept offering
+"⏸ Save for later" even after a player had fully completed the clock. The
+target set is **20 numbers only, no bull** — matching the existing passive
+`around_the_clock` badge's exact formula (`singlesHit.size >= 20`), a
+deliberate 2026-07 decision that overrides this doc's own earlier draft
+wording of "+bull." The pure per-dart rule lives in `frontend/scoring.js`:
 
 ```js
 function evaluateDartAroundTheClock(dart, hitSet){
@@ -544,16 +769,49 @@ function evaluateDartAroundTheClock(dart, hitSet){
 ```
 
 - A **single on a number not yet in `hitSet`** is a new hit; `completed`
-  fires exactly once, on the dart that brings the set to size 20.
+  fires exactly once, on the dart that brings the set to size 20 — the same
+  dart `throwDartAroundTheClock()` then runs the whole completion sequence
+  from (webhooks, event log, `DB.completeGame()`, `finishUnit('game', ...)`).
 - A **treble/double on a number, or any dart on bull** (sector 25, either
   multiplier) is a real dart thrown but never a hit — the "so close, not a
   hit" precedent Doubles Practice already established for its own targets,
   just with no round-ending failure mode here (this mode never "loses").
+  These still count toward the CLOCK COMPLETE stats screen below, just not
+  toward `hitSet`.
 - `turns.bust` is repurposed exactly the way Doubles Practice repurposes it:
-  `1` marks whichever dart completed the round (there is no "so-close"/
+  `1` marks whichever dart completed the game (there is no "so-close"/
   "wrong-target" failure mode to distinguish here, only completion or
-  abandonment — a round with no `bust=1` dart yet was abandoned, not
+  abandonment — a game with no `bust=1` dart yet was abandoned, not
   completed).
+- **CLOCK COMPLETE stats** — `newMatchPlayerAroundTheClock()` tracks
+  `roundTrebles`/`roundDoubles`/`roundMisses` alongside the existing
+  `roundDarts`, tallied on every dart (miss/treble/double, mutually
+  exclusive) regardless of whether it advanced the clock, plus
+  `roundStartedAt` (a plain `Date.now()` wall-clock capture at game creation —
+  not resume-aware, so a resumed-after-a-pause clock's duration includes the
+  paused time, the same tradeoff every other elapsed-time reading in this app
+  makes). `GAME_TYPES.around_the_clock.legSummary` packages
+  `{darts, trebles, doubles, misses, durationSec}` for both the in-app GAME
+  OVER card's own `aroundTheClockSummary` block and `display.html`'s
+  `renderers.around_the_clock.summary()` — "Darts/Trebles/Doubles/Misses/
+  Time," exactly the breakdown requested. `rebuildAroundTheClockState()`
+  (`frontend/scoring.js`) replays all three tallies the same way it replays
+  `roundDarts`, so resuming a saved (not-yet-completed) clock restores them
+  correctly too.
+- **Custom completion wording** — a solo drill has no opponent to "win"
+  against, so the generic "{winner} wins the game"/"GAME OVER" phrasing would
+  read oddly. `finishUnit(kind, winner, opts)` (`frontend/index.html`) gained
+  an optional third argument — `opts.heading`/`opts.subtext` override the big
+  GAME OVER card's own text, `opts.bannerText`/`opts.liveMessage` override the
+  small in-scoreboard banner and the `/display` broadcast message —
+  defaulting to the existing generic phrasing for every other call site.
+  Around the Clock's own call passes `heading:'CLOCK COMPLETE'`,
+  `subtext:'{name} cleared the clock. Stats saved.'`, and matching banner/live
+  text. The live-scoreboard heading itself is carried by a new one-shot
+  `game.doneHeading` field, mirrored through `liveSnapshot()`/
+  `ALLOWED_LIVE_KEYS` (`backend/server.js`) the same way `legSummary` already
+  is — `display.html`'s "GAME OVER" banner reads `s.doneHeading || 'GAME
+  OVER'` instead of the literal string.
 
 **Around the World** is structurally identical to Just Chuckin' It: no round
 boundary at all, one continuous stream of 1-dart turns per `games` row
@@ -631,10 +889,10 @@ audit. The exact split:
 | Category | Cricket games… | Why |
 |---|---|---|
 | `scored`-derived (3-dart avg, 180s, 180s/leg, 100+/90− leg averages, trebleless %, recent-form avg, On This Day's 180 detection, metric-history equivalents) | **Excluded** (`X01_ONLY`) | `scored` means a different quantity in cricket |
-| Opening-window stats (1st 3/1st 9 avg, 140/leg) | Excluded already | `OPENING_CATS` requires `game_type='x01'` plus `config.startingScore` in `(501,301,170,101)` |
-| Checkout-based (Big Fish, ton+ finishes, highest checkout, checkout routes, fewest darts to finish, darts/leg, best leg avg) | Naturally excluded | cricket never writes `checkout=1`, and these are all scoped to won legs / checkout rows |
+| Opening-window stats (1st 3/1st 9 avg, 140/leg, Best First-9, Best First-9 Average leaderboard) | Excluded already | `OPENING_CATS` requires `game_type='x01'` plus `config.startingScore` in `(501,301,170,101)` |
+| Checkout-based (Big Fish, ton+ finishes, highest checkout, checkout routes, fewest darts to finish, darts/leg, best leg avg) | **Excluded** (`X01_ONLY`) | cricket never writes `checkout=1`, but the 121 Checkout Ladder and Dead Man Walking now DO (a real `checkout=1` + `checkout_points` on a won round that isn't an X01 leg), so these can no longer rely on "only X01 writes `checkout=1`" — every checkout-based read is explicitly `X01_ONLY`-scoped (`docs/bug-roadmap.md` BUG-27). This covers `getSummary()`'s Ton+/Big Fish, `getPlayerStatBubbles()`'s Big Fish bubble, `getHomeExtra()`'s Ton+-rate/highest-checkout, `getBigFishStats()`, `getTopFinishesAll()`/`getTopFinishes()`, `getCheckoutRoutes()`, `getOnThisDay()`'s 170/100+ tiers, `getSessionRecap()`'s Ton+/highest-checkout/fewest-darts/moments, `getMetricHistory('bigfish')`, and `getPersonalBests()`'s own checkout fields |
 | Physical-dart stats (Darts Thrown, Darts/Day, Average Pace, dart analytics sector/treble maps, Around the World progress) | **Included** | a dart thrown in cricket is a real dart; these count physical throws, not X01 arithmetic |
-| Games / wins / win rate / win streak / H2H records / activity counters (legs, sets, darts, turns, today/this-week) | **Included** | a completed cricket H2H match is a real match; "Games Played" counts completed H2H matches of any game type. Per-category legs/sets **won** (`computeStats()`'s `h2hLegsWonByCat`/`h2hSetsWonByCat`) count a won leg via `(checkout=1 OR leg_won=1)` — X01 signals a won leg with `checkout`, Cricket with `leg_won`. The roster/profile "turns"/"darts thrown" totals are likewise unscoped (a cricket visit is a real visit); only the X01-scoped copies inside `h2hStats`/`practiceStats` feed the averages |
+| Games / wins / win rate / win streak / H2H records / activity counters (legs, sets, darts, turns, today/this-week) | **Included** | a completed cricket H2H match is a real match; "Games Played" counts completed H2H matches of any game type. Per-category legs/sets **won** (`computeStats()`'s `h2hLegsWonByCat`/`h2hSetsWonByCat`) are built from `_h2hWonLegs()`, which credits each completed H2H leg to its real winner **per game type** — the `(checkout=1 OR leg_won=1)` winning-turn signal for X01/Cricket/Baseball/Checkout Ladder, `getShanghaiWonLegs()`'s hybrid for Shanghai, `getHalveItWonLegs()`'s final-total comparison for Halve-It, the highest-CP leg winner (`_pressureChamberLegTotals()`) for The Pressure Chamber, and a `rebuildKillerState()` replay for Killer (whose turns carry NO winner signal at all — its `addTurn()` branch rejects `checkout` and never writes `leg_won`, so the signal-based query counted every Killer record as 0 legs forever). This replaced a raw `(checkout=1 OR leg_won=1)` turn count that assumed one signal per won leg — true for X01/Cricket but not The Pressure Chamber (per-round `checkout=1`, so a run counted as up to 15 won legs) or Halve-It/Shanghai (points-wins carry no signal, so they counted 0) — `docs/bug-roadmap.md` BUG-29. The roster/profile "turns"/"darts thrown" totals are likewise unscoped (a cricket visit is a real visit); only the X01-scoped copies inside `h2hStats`/`practiceStats` feed the averages, and the H2H "avg darts per leg" (`h2hAvgDarts`) is `X01_ONLY` for the same reason (BUG-29) |
 
 All formulas below are in `backend/db.js`. Two facts drive almost every one of
 them:
@@ -665,7 +923,7 @@ them:
 | Stat | Scope | Formula |
 |---|---|---|
 | `players` | unscoped | `COUNT(*) FROM players` |
-| `games` | **H2H only — by design** | `COUNT(*) FROM games WHERE completed_at IS NOT NULL AND practice = 0 AND player_count > 1`. Practice, solo, and Daily Challenge sessions deliberately do **not** count as "Games Played" (product decision, 2026-07); completed cricket H2H matches **do** count (they're real matches — see the cricket-interaction table above). The explicit filter makes the practice exclusion intentional; independently, `completed_at` is only ever set on an H2H match win (`POST /api/games/:id/complete` is called from `onLegWon()`'s and `onLegWonCricket()`'s match-win branches — End Game navigates away without completing), so the filter is belt-and-braces rather than load-bearing today. |
+| `games` | **H2H only — by design** | `COUNT(*) FROM games WHERE completed_at IS NOT NULL AND practice = 0 AND player_count > 1`. Practice, solo, and Daily Challenge sessions deliberately do **not** count as "Games Played" (product decision, 2026-07); completed cricket H2H matches **do** count (they're real matches — see the cricket-interaction table above). The explicit filter makes the practice exclusion intentional; independently, `completed_at` is only ever set on a genuine finish — a real match win (`POST /api/games/:id/complete`, called from `onLegWon()`'s and `onLegWonCricket()`'s match-win branches) or a forfeit-triggered walkover (`forfeitPlayer()`, §13 "Forfeiting a game / DNF") — never on an abandoned/DNF'd match (`POST /api/games/:id/abandon` sets `dnf_at` instead), so the filter is belt-and-braces rather than load-bearing today. |
 | `sets` / `legs` | **H2H only** | Distinct `(game,set)` / `(game,set,leg)` combos with ≥1 turn recorded — **no completion requirement**, an in-progress leg still counts |
 | `darts` | fully global | `COUNT(*) FROM darts` |
 | `tonPlus` | fully global | `COUNT(*) FROM turns WHERE checkout=1 AND checkout_points>=100` |
@@ -684,6 +942,13 @@ them:
   2026-07 audit; the ordering was always ascending — the title was what changed).
 - **Ton+ leaderboard**: `SUM(checkouts >=100)/checkouts*100` — rate among a
   player's own *finishing* visits, `HAVING checkouts >= 3`.
+- **Best First-9 Average leaderboard** (`first9Rows`, docs/archive/first-nine-average-
+  roadmap.md): each player's own per-leg 1st 9 AVG (`OPENING_CATS`-scoped,
+  bust-as-3-darts denominator), averaged across their eligible legs, `HAVING
+  legs >= 20` — the same lifetime-legs floor `COACHING_MIN_LEGS_FOR_FORM` uses
+  elsewhere in this file, chosen so one or two lucky opening legs can't top the
+  board over a genuinely well-established start. Ranked **descending**
+  (unlike Fewest Trebleless Visits above) — a higher first-9 average is better.
 - **Highest checkout**: `MAX(checkout_points)`, ties broken by earliest date; `overall`/`h2h`/`practice` variants.
 - **Today/week activity**: legs/darts with `date(created_at)` today or in the
   trailing 7 days — **not mode-scoped** (H2H and practice both count), and not
@@ -696,16 +961,88 @@ category `'501'` where the player recorded exactly 3 turns, one of which was a
 checkout, and exactly 9 total darts were thrown across those 3 turns. Locked to
 `category='501'` specifically.
 
+### Home page visual redesign — Live Ticker & Podium (2026-07)
+
+No new backend endpoint or data shape — this reuses `getSummary()`/`getHomeExtra()`'s
+existing payload and client-derived `todaysChallenge()`, restyled/rearranged in
+`frontend/index.html` only:
+
+- **`#home-ticker`** (`renderHomeTicker()`): a horizontally auto-scrolling marquee
+  above the challenge card, built from up to 5 items already fetched elsewhere on
+  the page — today's challenge name, last game's winner/category, the all-time
+  highest checkout, the all-time 180 count, and the Household Ratings leader.
+  Hidden entirely (`hidden` attribute) if none of those items have data yet. Marked
+  `aria-hidden="true"` since every item it shows also appears, non-scrolling,
+  further down the same page — the marquee is a decorative restatement, not the
+  source of truth, so screen readers skip it rather than re-announcing an
+  endlessly-looping duplicate feed. Animation (`@keyframes home-ticker-scroll`,
+  26s linear loop) is disabled under `prefers-reduced-motion: reduce`.
+- **Today's Challenge hero treatment**: the challenge name itself is now the
+  card's large Bebas Neue headline (`.home-hero-title`) with a small gold eyebrow
+  label above it (`.home-hero-eyebrow`), rather than being buried in body text.
+- **Three-Dart Average podium** (`renderAvgLeaderboard()`, the H2H/Practice tab's
+  X01 "Three-Dart Average" leaderboard only — every other Home leaderboard,
+  including this same section's own Top Checkouts/Most Wins/Fewest Trebleless/
+  Ton+ Rate/First-9/Household Ratings, is intentionally left as a plain ranked
+  list): ranks 1–3 render as a visual podium (`.home-pod`, center-gold/left-silver/
+  right-bronze bar heights, one initial-letter "face" circle each) instead of
+  stacked rows; rank 4+ still renders via the shared `leaderboardRowHtml()` row
+  template below the podium. With fewer than 3 qualifying players, the podium
+  simply renders fewer seats (e.g. a single centered gold seat) — this is a normal,
+  data-driven state, not an error condition to special-case.
+
+### Players page visual redesign — Standings Board (2026-07)
+
+The Players screen (`#screen-players`/`renderRoster()`) — the roster picker one
+level up from the Player Profile page, not the profile itself — was a flat,
+alphabetical list before this redesign; a `/frontend-design` exploration (four
+directions, screenshotted and shown to the owner) replaced it with a ranked
+"standings board" so the page answers "who's actually good right now" instead
+of being a bare intermediary step. No new backend endpoint or data shape —
+purely a client-side restyle/re-sort of the same `stats`/`roster` data the old
+list already used:
+
+- **Ranked by lifetime average** (`rosterAvgOf(name)`, `avgDarts`-derived —
+  same formula as everywhere else in this file): a genuine order, not a
+  decorative numbering. Players with no avg yet (never thrown a dart) can't be
+  meaningfully ranked, so they're kept in their own "Not yet ranked — no games
+  recorded" group below the standings instead of being sorted in at the
+  bottom by name.
+- **"The Oche"** — a gold divider styled after the actual toe line every dart
+  is thrown from, marking off rank #1 from the rest of the field. Shown only
+  when there's a field below it (more than one ranked player, or any unranked
+  players at all) — a single player alone in the roster gets no divider.
+- Each row shows: rank, name + achievement badges (180/🐟/🏆, same predicates
+  as before), a meta line (win rate — only once `gamesPlayed >= 3`, matching
+  every other win-rate threshold in this file — game count, last played
+  date), the lifetime average, and a recent-form arrow/delta (`s.recentAvg`
+  vs. lifetime avg, same ±0.5 up/down/flat thresholds as before).
+- Rename/Delete moved from two always-visible icon buttons to a single "⋮"
+  kebab per row (`toggleRosterKebab()`/`closeRosterKebabs()`) — a lightweight
+  show/hide popover, not a new dropdown component, closed by a document-level
+  click-outside listener. Delete still only appears for `canManagePlayers()`;
+  the actual writes still go through `Auth.ensureCanWrite()` exactly as
+  before, unchanged.
+
 ### Player Profile stat bubbles (`getPlayerStatBubbles(name, mode)`) — all 15
+
+**Darts Thrown / Darts / Day are X01-scoped here** (`x01DartsThrown`/`x01AvgDartsPerDay`,
+`AND g.game_type='x01'` added to each) — a Cricket or Just Chuckin' It dart no
+longer inflates the X01 tab's own bubbles. The *lifetime, every-game-mode*
+versions of these two figures (`dartsThrown`/`avgDartsPerDay`, unchanged from
+the formulas below minus the X01 scoping) are still returned by this same
+function, but rendered in the Player Profile's own **header row** (name +
+these figures, no game-mode dropdown involved) instead of inside it — see
+below the table.
 
 | Bubble | Denominator family | Formula |
 |---|---|---|
-| **Darts Thrown** | raw | `COUNT(*)` from `darts` |
+| **Darts Thrown** | raw | `COUNT(*)` from `darts`, **`AND g.game_type='x01'`** |
 | **Average** | 3-dart-avg | `totalPts / avgDarts * 3` where `avgDarts` sums `bust?3:COUNT(darts)` per turn |
 | **180s** | raw count | `COUNT(*) WHERE scored=180` |
 | **Big Fish** | raw count | `COUNT(*) WHERE checkout=1 AND checkout_points=170` |
 | **9 Darters** | leg-level | nine-darter definition above, scoped to this player |
-| **Darts / Day** | raw | `dartsThrown / COUNT(DISTINCT date(created_at))` |
+| **Darts / Day** | raw | `dartsThrown / COUNT(DISTINCT date(created_at))`, **`AND g.game_type='x01'`** |
 | **Darts / Leg** | raw | `AVG(darts in leg)`, **won legs only** (`HAVING SUM(checkout)>0`) |
 | **Trebleless %** | per-leg | `% of legs where SUM(is_treble)=0 across every dart in the leg` |
 | **1st 3 AVG** | first-visit-only | `AVG(scored)` of each leg's first visit (`ROW_NUMBER()...rn=1`). **Scoped to exactly 501/301/170/101** — see below. |
@@ -715,6 +1052,97 @@ checkout, and exactly 9 total darts were thrown across those 3 turns. Locked to
 | **140/Leg** | first-visit-only | `% of opening visits scoring >=140`. **Scoped to exactly 501/301/170/101.** |
 | **180s/Leg** | fraction | `legs containing ≥1 180 / total legs` |
 | **Average Pace** | — | darts/minute, returned as the `pace` key — same formula as the Home page/chart versions (consecutive `thrown_at` gaps within a turn, clamped to `0 < gap < 60000ms`); `null` (bubble shows "—") until per-dart timing data exists. *Note: this key was missing from `getPlayerStatBubbles()`'s return object until the audit that produced this manual caught it — the bubble was permanently blank before that.* |
+
+### Player Profile header row (name + these four, `HEADER_STAT_DEFS` + Household Rating)
+
+Rendered directly under the player's name, above everything else (the game-mode
+dropdown, the Stats/Player Settings tabs) — `s.turns` ("N turns thrown (all-time)")
+used to be the only thing shown here and is gone; four tiles replace it, left to
+right: **X01 Average, Total Darts Thrown, Darts / Day, Household Rating**. The
+first three are fetched via the same no-`gameType`-param `GET /api/players/stat-bubbles`
+call (`getPlayerStatBubbles()`'s plain, non-Cricket/non-Baseball/etc. shape),
+independent of whatever the game-mode dropdown below has selected — switching
+that dropdown to Cricket, for example, never changes these. Non-interactive
+display tiles, same as the two lifetime figures always were: unlike every bubble
+in the table above, clicking them does nothing — they don't drive the "\_\_\_ over
+time" chart. **X01 Average** is a second copy of the same `avg` value the X01
+stat-bubble grid already shows elsewhere on the page (own `bv-header-avg` element
+id, so the two never collide); **Total Darts Thrown**/**Darts / Day** are the
+lifetime, every-game-mode figures that used to render in their own "Lifetime —
+Every Game Mode" block above the dropdown — that block is gone, fully replaced
+by this header row.
+
+**Household Rating** (2026-07, moved up from its own collapsible section further
+down the page) is fetched separately (`loadPlayerHeaderRating()` → `GET
+/api/players/elo`, the same endpoint the "📈 Household Rating" `<details>` section
+below already uses) rather than folded into the stat-bubbles call above, since it's
+a genuinely different data source — a combined Elo-style rating across every rated
+H2H match (X01/Cricket/Baseball), not a per-game-type figure. Shows just the raw
+rating number (or `—` if the player has no rated H2H games yet); the fuller detail
+(win-loss record, household rank, rating-over-time sparkline) still lives in the
+"📈 Household Rating" section below — the same "headline number in the header,
+full detail in its own section" precedent X01 Average already set, not a removal
+of that section.
+
+| Bubble | Formula |
+|---|---|
+| **X01 Average** | `avg` — same 3-dart-average formula as the table above, X01-only |
+| **Total Darts Thrown** | `dartsThrown` — `COUNT(*)` from `darts`, across every game mode except Checkout Trainer (`NOT_CHECKOUT_TRAINER`) |
+| **Darts / Day** | `avgDartsPerDay` — `dartsThrown / COUNT(DISTINCT date(created_at))`, same all-modes scope |
+| **Household Rating** | `rating` from `GET /api/players/elo` — `—` if `!data.played` (no rated H2H games yet) |
+
+### Games & H2H section — scoped to the selected Game Mode (2026-07 fix)
+
+The "Games & Legs Played"/"H2H Wins" sections below the stat-bubble grid (H2H and
+Overall tabs) used to read `s.gamesByCat`/`s.legsByCat`/`s.h2hGamesWonByCat`/
+`s.h2hSetsWonByCat`/`s.h2hLegsWonByCat` unfiltered — every category from every
+game type the player has ever played (e.g. `"170"`, `"301"`, `"Cricket (15-20,
+Bull)"`) shown together regardless of which Game Mode dropdown value (`gt`) was
+selected, the one part of the profile that ignored `gt` entirely while the stat
+bubbles right above it already scoped correctly. Fixed by filtering both category
+lists through `categoryMatchesMode()`, a small lookup (`CATEGORY_MATCHERS`)
+keyed on each H2H-capable game type's own `category()` generator (item 41,
+`GAME_TYPES[gt].category`) — X01's is any bare integer string, Cricket's is
+`"Custom Cricket"` or anything containing `"Cricket"`, Halve-It's anything
+containing `"Halve-It"`, and Baseball/Shanghai/Pressure Chamber/Killer are each
+a single fixed string. The same filter also scopes the Practice tab's "Legs
+Thrown" category list (`pracCats`) — a drill-only game type only ever produces
+one category, so the filter is a no-op there; it only changes behavior for the
+multi-mode-sharing category strings the H2H fix targets.
+
+Merged into a single **"{Mode} — Games & H2H"** section (`gamesAndH2hSectionHtml`)
+replacing the two separate `<details>` blocks, and no longer collapsible — just
+one or two lines, always visible, no expand needed:
+
+- **X01**: `N games · M legs played · W-L H2H` (`W` = `h2hGamesWonByCat` summed
+  across X01 categories, `L` = games played minus games won) — X01 has no
+  "Games Played"/"Win Rate" bubble anywhere in `STAT_DEFS`, so nothing here
+  duplicates anything else on the page. Also gets a per-category chip row
+  (`.pp-mode-chip`, one per X01 point-target the player has actually played)
+  since X01 is the one H2H-capable type with more than one real category worth
+  splitting by.
+- **Cricket/Baseball/Shanghai/Halve-It/Pressure Chamber/Killer**: `M legs played
+  · S sets won · L legs won` — deliberately omits the games-played count and
+  win-loss record, since every one of these 6 types already shows a primary
+  "Games Played" (or equivalent) and "Win Rate" bubble in its own stat-bubble
+  grid (`CRICKET_STAT_DEFS` etc., visible on this same page view, right above)
+  — repeating those same two figures again down here was exactly the kind of
+  same-page redundancy an audit flagged (`docs/open-roadmap-items.md`'s
+  completion ledger has the full audit). Legs/sets played are never a bubble
+  for any of these types, so that part stays.
+
+### Player Profile top-level tabs: Stats / Player Settings
+
+Two tabs sit below the header row (`playerPageSection`, `'stats'` default):
+**Stats** contains everything the page always showed — the game-mode dropdown,
+the Overall/H2H/Practice sub-tabs (`playerPageTab`, unchanged), and all the stat
+sections beneath them. **Player Settings** contains the finish-rule toggle
+(Double out/Single out), the default-loadout picker, and the "🎯 Manage Loadouts"
+button — all three used to render directly under the header, before the
+Overall/H2H/Practice sub-tabs; they now live behind this second tab instead, with
+no other behavior change (the same PIN gate via `unlockPlayerSettings()`/
+`playerSettingsUnlocked` still applies). Rename/Reset stats/Delete player stay
+where they were, below whichever tab's content is showing.
 
 **Why 1st 3 AVG / 1st 9 AVG / 140/Leg are scoped to exactly 501, 301, 170, and 101
 — never any other X01 starting score, and never any other game type — ever,
@@ -735,7 +1163,12 @@ means a future game type's category string can never accidentally collide with
 these four values the way a bare string match could. If a future starting score
 is added to X01 (per `docs/game-modes-roadmap.md`), it does **not** automatically
 join this scope — it must be added to this exact `IN (...)` list explicitly, the
-same deliberate step that added 170 and 101 here.
+same deliberate step that added 170 and 101 here. `OPENING_CATS` is a
+module-level constant in `backend/db.js` (declared beside `X01_ONLY`) — Best
+First-9 (`getPersonalBests()`) and the Best First-9 Average leaderboard
+(`getHomeExtra()`) both reuse it directly rather than a second copy of the
+string, so all four "opening exchange" surfaces (2 stat bubbles, 1 Personal
+Best, 1 leaderboard) can never drift out of scope with each other.
 
 **Historical bug, fixed**: `1st 3 AVG`/`1st 9 AVG` originally summed raw
 per-dart values instead of using the bust-zeroed `turns.scored` column, so a
@@ -760,6 +1193,16 @@ re-verify they still match.
 
 - **Best Leg Average**: `MAX` of the 3-dart-avg-convention leg average (darts,
   bust-as-3), **won legs only**.
+- **Best First-9** (`bestFirst9`, docs/archive/first-nine-average-roadmap.md): `MAX` of the
+  same per-leg 1st 9 AVG computation the stat bubble averages (`OPENING_CATS`-scoped
+  to 501/301/170/101, bust-as-3-darts denominator, first up-to-3 visits) —
+  **not** restricted to won legs, unlike Best Leg Average: the opening 9 darts
+  are already fully determined the moment the 3rd visit is recorded, regardless
+  of whether (or how) the leg eventually ends, and the stat bubble it mirrors
+  carries no such restriction either. No `bestLeg`-style leg-location companion
+  field and no Ghost Opponent "Race this leg" button — Ghost mode can only
+  replay a leg the player actually won, so pointing it at a possibly-unfinished
+  first-9 record leg would frequently 404.
 - **Fewest Darts to Finish**: `MIN` raw darts in a won leg.
 - **Recent Form**: mean of the 3-dart-avg leg average over the **last 10 won
   legs by most-recent finishing turn's row id** (a proxy for chronological
@@ -784,10 +1227,30 @@ the Player Profile's "👻" Race-this-leg button (§ Ghost Opponent, below).
 X01-only. Two backend functions in `backend/db.js`, both scoped so a script/leg list
 can only ever be built from legs the requesting player genuinely won themselves:
 
-- **`getGhostCandidateLegs(playerName, limit=20)`**: every X01 leg this player has
-  won (`turns.checkout=1`), most recent first, each row giving `{gameId, setNo,
-  legNo, date, category, practice, avg, darts}` — the browsable "past legs" list.
-  `GET /api/players/ghost-legs?name=&limit=`.
+- **`getGhostCandidateLegs(playerName, limit=20, opts)`**: every X01 leg this player
+  has won (`turns.checkout=1`), each row giving `{gameId, setNo, legNo, date,
+  category, practice, avg, darts}` — the browsable "past legs" list. `opts.sort`
+  picks the ordering (`'recent'` — most recent first, the default and the
+  fallback for any unrecognized value; `'best'`/`'worst'` — by `avg` descending/
+  ascending), `opts.offset` pages through it (paired with `limit`, both used
+  directly as SQL `LIMIT`/`OFFSET`), `opts.category` filters to one X01
+  starting-score category (`'501'`/`'301'`/`'170'`/`'101'` — `GHOST_LEG_CATEGORIES`;
+  an absent or unrecognized value means every mode, not zero results, the same
+  "constrain the input, don't trust it" posture `sort` already used).
+  **`getGhostCandidateLegsCount(playerName, category)`** returns the total
+  matching row count (same `WHERE`/`HAVING` including the same optional
+  category filter, no `LIMIT`) so the picker's pagination controls know how
+  many pages exist without fetching every row. `GET
+  /api/players/ghost-legs?name=&limit=&sort=&offset=&category=` returns
+  `{legs: [...], total}` (Player Profile/New Game's leg picker: an "X01 mode"
+  dropdown — All modes/501/301/170/101 — a "sort by" dropdown — Most recent/
+  Best average/Worst average — and a "per page" dropdown, 10/25/50/100,
+  default 10, all three resetting to page 1 when changed). The category
+  dropdown stays visible even when it filters the list down to zero results
+  (`ghostLegToolbarHtml()`, shared between the populated and empty-result
+  render paths) — a mode-aware empty message ("No won legs in 170 yet — try
+  a different mode, or 'All modes'.") rather than losing the control that
+  would let the player switch back.
 - **`getGhostLegScript(gameId, setNo, legNo, playerName)`**: that leg's turns in
   playback order, each with its raw `{sector, multiplier}` darts, plus `category`,
   `config`, and the leg's actual recorded `outMode` (double/single-out) — returns
@@ -825,6 +1288,13 @@ surfaced as a plain "👻 Ghost races: W–L" line next to the Player Profile's
 Slayer badge (§4's badge table) — `recordGhostRace()`'s `ghostSlayerNewlyEarned`
 return value tells `onLegWon()` whether to run the usual celebration sequence.
 
+The post-match GAME OVER screen gets a **"🔁 Repeat this leg"** button (next to
+"New game"/"Share", hidden for a tournament match) whenever `game.hasGhost &&
+game.ghostSourceLeg` — `repeatGhostLeg()` just calls `raceLeg()` again with that
+same `{gameId, setNo, legNo}` triple, landing back on the New Game screen with
+the identical leg preselected (one Start click away), rather than a silent
+auto-restart.
+
 ### Top Finishes / Checkout Routes
 
 - **`getTopFinishesAll()`** (global leaderboard): one row per `(player, checkout
@@ -835,6 +1305,10 @@ return value tells `onLegWon()` whether to run the usual celebration sequence.
   hits), `trebleRates` (per number 1–20, `% of throws at that number that were
   a treble`), `checkoutRoutes` (top 10 exact 3-dart sequences across all
   checkout scores). **Busted turns are excluded entirely** from all three.
+  Trusts `darts.sector`/`darts.multiplier` as recorded, with no game-type-
+  specific interpretation — so it's only ever as accurate as what each game
+  type's own input UI can produce; Cricket's own picker was the one gap where
+  that wasn't fully true (`docs/bug-roadmap.md` BUG-23, §2's Cricket rules).
 - **`getCheckoutRoutes(name, score)`**: same route query, scoped to one specific
   checkout score, `LIMIT 5` — this is the "how do I usually hit this number"
   drill-down on the Top 10 Finishes list.
@@ -927,8 +1401,10 @@ both into one SQL fragment instead of each query hand-rolling its own
 `AND g.game_type='...'` alongside its mode filter
 (`docs/archive/existing-app-prep-roadmap.md` item 1) — `gameType` is whitelisted
 against `KNOWN_GAME_TYPES` (`['x01','cricket','baseball','doubles_practice',
-'chuckin','checkout_trainer','around_the_clock','around_the_world']`) as
-defense-in-depth, though it's always an internally-controlled literal, never
+'chuckin','checkout_trainer','around_the_clock','around_the_world','bobs_27',
+'checkout_ladder','gauntlet','killer','shanghai','halve_it','dead_man_walking',
+'pressure_chamber']`)
+as defense-in-depth, though it's always an internally-controlled literal, never
 raw request input.
 `X01_ONLY` is now `_scope({gameType:'x01'})` (byte-identical string, so its
 existing call sites needed no changes), and every Cricket query function below
@@ -992,9 +1468,11 @@ between X01's leaderboard set and Cricket's own:
 | 9 Marks | `getCricketNineMarksStats(mode)` | Reused as-is from the achievements leaderboard already built for step 3 |
 | Perfect Leg | `getCricketPerfectLegStats(mode)` | A won leg (`leg_won=1`) whose total darts equal that match's config-derived theoretical minimum — the same logic as the Perfect Leg achievement trigger in `enterTurnCricket()`, computed here in SQL via `json_each(g.config,'$.numbers')` instead of read from client state |
 
-All four are fetched in the same upfront `Promise.all` `renderHome()` already
-uses for X01 (`homeData.cricket.h2h`/`.practice`/`.wins`) — no separate loading
-state or lazy-fetch-on-toggle.
+All four are fetched lazily via `HOME_COMBO_SPECS.cricket`/`ensureHomeCombo()`
+(item 45, `docs/code-quality-roadmap.md`) the first time the Cricket tab is
+selected — same `homeData.cricket.h2h`/`.practice`/`.wins` shape every
+`homeTabRenderer` reads, just populated on demand instead of upfront alongside
+X01's own leaderboards.
 
 ### Baseball stats (`GAME_TYPES.baseball.statDefs` / `BASEBALL_STAT_DEFS`)
 
@@ -1017,6 +1495,12 @@ is scoped via `_scope({mode, gameType:'baseball'})`.
 | `baseballgames` | Games Played | Count of completed Baseball games this player took part in |
 | `baseballdartsthrown` | Darts Thrown | Count of darts thrown in Baseball games (a baseball-scoped breakdown — the global "Darts Thrown" bubble already includes these too) |
 | `baseballbestinning` | Best Inning | `MAX(scored)` across every turn — the player's personal-best single-inning run total (max possible 9) |
+
+The same response also carries a raw `totalRuns` (`SUM(scored)`, the figure
+`baseballrpi` is itself derived from) — not a UI bubble (no
+`BASEBALL_BUBBLE_KEY_MAP` entry), only fetched via a no-`mode`-param call as
+the lifetime-runs achievement ladder's base (docs/archive/culture-badges-roadmap.md
+Part B, see §4).
 
 **Personal Bests** (`getBaseballPersonalBests(name, mode)`, same 5-field shape
 as X01's/Cricket's, adapted to what's actually meaningful for a fixed-inning-
@@ -1082,6 +1566,11 @@ of a 1-3 mark value. Every query is scoped via
 | `doublespracticepct` | Doubles % | `hits / dartsThrown * 100` — every dart ever thrown in this mode, lifetime |
 | `doublespracticedartsperround` | Darts / Round | `dartsThrown / roundsPlayed` — a round is one `(game_id, set_no, leg_no)` grouping |
 | `doublespracticehitsperround` | Doubles Hit / Round | `hits / roundsPlayed` |
+
+The same response also carries a raw `hits` (the lifetime doubles-hit count
+`doublespracticepct` is itself derived from) — not a UI bubble, only fetched
+via a no-`mode`-param call as the lifetime doubles-hit ladder's base
+(docs/archive/culture-badges-roadmap.md Part B, see §4).
 
 **Personal Bests** (`getDoublesPracticePersonalBests(name, mode)`) — deliberately
 just 2 fields, not the 5-field X01/Cricket shape: `bestRoundDarts` (the longest
@@ -1253,8 +1742,16 @@ otherwise; `missZone`/`missDepth` are populated only for a positioned miss and
 `{sector,multiplier,zone,missZone,missDepth,hits}` array shape
 `getChuckinHeatmap()` already returns, so `display.html`'s renderer
 (`buildChuckinLiveHeatmap()`, a
-mirror-copied port of `buildChuckinHeatmap()`'s SVG geometry — no shared module
+mirror-copied port of `buildDartHeatmap()`'s SVG geometry — no shared module
 between the two files, per the established convention) can feed it straight in.
+It also mirrors `buildDartHeatmap()`'s heat-scale/number-band **style** —
+`heatmapStyle`/`heatmapNumberStyle` (`display.html`, fetched at boot from
+`GET /api/settings/heatmap-style`/`heatmap-number-style`, same as the Player
+Profile's own copy of those globals) drive the identical classic/scorched
+fill functions and molten-seam/chalk-ledger number-band rendering, so the live
+scoreboard's heatmap always matches whatever style the admin has set for the
+Player Profile heatmap — previously hardcoded to the old single-hue look
+regardless of that setting (2026-07 fix).
 The renderer shades a number's inner and outer single regions independently
 (`heat(n,1,'inner')` vs `heat(n,1,'outer')`) and, like the lifetime heatmap,
 does not plot a zone-unspecified single (a Pad-mode dart) on either region
@@ -1282,6 +1779,59 @@ score, and dart-buffer state into `game.lastTurnSnapshot` before mutating (the
 same convention as every other per-dart-commit mode), and
 `undoLastTurnChuckin()` restores it, calls `DB.deleteLastTurn()`, and (new)
 revokes any `chuckin180` badge that dart awarded — see above.
+
+### Bob's 27 stats (`GAME_TYPES.bobs_27.statDefs` / `BOBS_27_STAT_DEFS`)
+
+Nothing is pre-aggregated (`backend/db.js`'s standing house style) — a run's
+final score is derived at read time from its own turns via the identical
+store-gain/derive-penalty formula §2's rules write-up and the write-time guard
+both use: `27 + SUM(scored>0 ? scored : -2*round)`, `round` re-derived per
+turn via `ROW_NUMBER() OVER (PARTITION BY game_id ORDER BY id)` (unambiguous
+since a bobs_27 game always has exactly one player/set/leg). A run that died
+early and one that finished all 20 rounds both fall out of this same formula
+for free — no separate "did they survive" input is needed beyond that game's
+own turn count and `bust` flag. That only covers runs that actually **ended**,
+though, so every run-level aggregate (runs/survival/avg/best/leaderboard)
+additionally requires `g.completed_at IS NOT NULL` — a paused/abandoned/
+in-progress run has no bust row simply because it hasn't died *yet*, and
+counting it as a survived run with its partial total would let abandoning bad
+runs inflate the stats (the same "an abandoned run's partial total isn't a
+real result" rule Gauntlet's PBs apply). Only the dart-level Doubles Hit %
+deliberately keeps counting every dart thrown. Every query is scoped via
+`_scope({mode, gameType:'bobs_27'})`.
+
+**Stat bubbles** (`getBobs27StatBubbles(name, mode)`):
+
+| Key | Label | Formula |
+|---|---|---|
+| `bobs27survivalrate` | Survival Rate | `runsWithNoBustTurn / runs * 100` — a **completed** run "survives" if none of its turns has `bust=1`, independent of its final score's sign |
+| `bobs27avgscore` | Avg Final Score | Mean of every completed run's own `27 + SUM(...)` final score (§2 formula), including died runs (their final score is typically ≤0) |
+| `bobs27runs` | Runs Played | `COUNT(DISTINCT game_id)` over completed runs |
+| `bobs27dartsthrown` | Darts Thrown | Count of darts thrown across every Bob's 27 run |
+| `bobs27doubleshitrate` | Doubles Hit % | Of every dart actually thrown across every round, the fraction that landed on *that round's own* double (`sector=round AND multiplier=2`) — real board outcomes only, same "no hypothetical exclusion" convention Doubles Practice's own hit-rate bubble uses |
+
+All 5 return `null` when the player has no Bob's 27 runs yet, matching every
+other stat bubble's "no data" convention.
+
+**Personal Bests** (`getBobs27PersonalBests(name, mode)`) — deliberately just
+2 fields, following Chuckin/Doubles Practice's precedent that a drill mode
+doesn't need X01/Cricket's 5-field shape: `bestFinalScore` (`MAX()` across
+every run's own final score, no minimum floor — a died run can still be the
+peak if it died deep enough into the ladder with enough gains along the way)
+and `deepestDoubleOnFail` (`MAX(roundsReached)` scoped to only runs that
+actually have a `bust=1` turn — a survived run has no "reached on a fail" to
+report, so it's excluded entirely rather than counted as round 20).
+
+**Home page leaderboard** (`getBobs27Leaderboard()`, `renderHomeTabBodyBobs27()`)
+— an arcade-style high-score table: one row per player, their own single
+best-ever run's final score (`MAX()` across every run, same "peak single run"
+shape Checkout Blitz's own leaderboard uses), ranked descending, **no
+minimum-runs floor** — a single legendary run (up to and including The Full
+Anderson's 1287 itself, §4) is exactly the kind of feat this exists to
+surface, not something a floor should hide behind "not enough games played."
+
+**Player Profile UI**: its own button on the `.player-tabs` game-type toggle
+(`playerGameType`), same mechanism as every other mode.
 
 ### Guided Around the Clock / Around the World stats (`GAME_TYPES.around_the_clock.statDefs` / `GAME_TYPES.around_the_world.statDefs`)
 
@@ -1354,18 +1904,31 @@ axis for an open-ended, cross-session tracker. None take a `mode` param —
 same "always practice=1 by construction" reasoning as Doubles Practice's own
 Home boards.
 
-**Live Scoreboard**: `renderers.around_the_clock.card()` /
-`renderers.around_the_world.card()` (`frontend/display.html`) each show the
-compact `buildOutcomeGridCompact()` progress grid alongside the running
-hit/progress counter — `playerSnapshotAroundTheClock()`/
-`playerSnapshotAroundTheWorld()` (`frontend/index.html`) send `hitNumbers`/
-`hitOutcomes` (plain arrays, not just counts) inside the per-player
-`players[]` array so the Live Scoreboard can render exactly which
-numbers/outcomes are still outstanding, the same live feedback the controller
-itself shows. Two new top-level `ALLOWED_LIVE_KEYS` entries,
-`atcLastDart`/`atwLastDart` (the last-dart throwbox data — `roundOver`/
-`roundEndReason` are reused as-is from Doubles Practice for Around the
-Clock's round-end signal, no new keys needed there).
+**Live Scoreboard**: `renderers.around_the_world.card()` (`frontend/display.html`)
+shows the compact `buildOutcomeGridCompact()` progress grid alongside the running
+progress counter. `renderers.around_the_clock.card()` instead shows
+**`buildClockBoard()`** — a real dartboard shape (one wedge per number 1-20,
+bull excluded since it's never a target in this mode), filled solid gold with a
+✓ once its single has been hit, dark/unfilled otherwise, sized deliberately
+bigger (`.clock-board`, 60vmin) than Chuckin's heatmap or the compact grids —
+"a big dartboard read across a room," not a compact detail panel. Because a
+number is either done or not (not a frequency map), each wedge spans its whole
+bull-to-double-ring width as one region rather than mirroring the heatmap's
+inner/treble/outer/double sub-ring split — hitting a double or treble of a
+number doesn't complete it here, so shading those sub-rings as if they
+mattered would be misleading. Shares `BOARD_GEOM` (the CX/CY/R/xy/annulus
+geometry kernel) and `DB_SECTORS` with `buildChuckinLiveHeatmap()` — both
+mirror-copied from `frontend/index.html`'s own versions (no shared module
+between the two files), but no longer duplicated a second time *within*
+`display.html` itself once `buildClockBoard()` became a second consumer.
+Both `playerSnapshotAroundTheClock()`/`playerSnapshotAroundTheWorld()`
+(`frontend/index.html`) send `hitNumbers`/`hitOutcomes` (plain arrays, not just
+counts) inside the per-player `players[]` array so the Live Scoreboard can
+render exactly which numbers/outcomes are still outstanding, the same live
+feedback the controller itself shows. `atcLastDart`/`atwLastDart` (the
+last-dart throwbox data) ride inside `modeState` (§7's "Payload shape") —
+`roundOver`/`roundEndReason` are reused as-is from Doubles Practice for Around
+the Clock's round-end signal.
 
 **Undo support**: both snapshot round/session state into
 `game.lastTurnSnapshot` before mutating (the same convention as every other
@@ -1378,13 +1941,20 @@ badge that dart awarded.
 
 ## 4. Achievements & Badges
 
-88 badges (23 X01 + 4 Cricket + 2 Baseball + 2 Tournament + 3 Daily Challenge +
-19 Just Chuckin' It + 33 Checkout Trainer + 2 Practice Drills) — that split is by
-which table each is listed under below (and which section of the Player
-Profile's Badge Case each renders in, via `BADGE_INFO`'s
-`cricket`/`baseball`/`challenge`/`chuckin`/`tournament`/`checkoutTrainer`/`drill`
+187 badges (33 X01 + 5 Cricket + 8 Baseball + 1 Shanghai + 2 Halve-It + 15 The
+Pressure Chamber + 5 Doubles Practice + 7 Bob's 27 + 7 121 Checkout Ladder +
+14 The Gauntlet + 14 Dead Man Walking + 3 Killer + 11 Marathon Mode +
+2 Household Rating + 2 Tournament + 3 Daily Challenge + 19 Just Chuckin' It +
+34 Checkout Trainer + 2 Practice Drills
+— this header count previously drifted out of sync as later game types
+(Shanghai onward) each shipped their own badges without it being updated;
+fixed here to match README.md's own fully-enumerated total, which stayed
+current the whole time)
+— that split is by which table each is listed under below (and which section of
+the Player Profile's Badge Case each renders in, via `BADGE_INFO`'s
+`cricket`/`baseball`/`doublesPractice`/`challenge`/`chuckin`/`tournament`/`checkoutTrainer`/`drill`
 flags — anything without one of those flags buckets as X01), not a strict statement
-of which game types can trigger it: Checkout Trainer's own 33 badges are
+of which game types can trigger it: Checkout Trainer's own 34 badges are
 documented in full in §19 rather than repeated here, since that section
 already covers the mode end-to-end. Night Owl/
 Early Bird (listed under X01) are one exception, checked from both
@@ -1399,7 +1969,12 @@ are the same shape — checked server-side in `_advanceTournamentMatch()` —
 see their own table below. Tracked in the `player_badges` table (one row per
 player+badge, with a running `count`). X01 detection logic otherwise lives in
 `frontend/index.html`'s `enterTurn()`/`onLegWon()`; Cricket's 4 own badges
-live in `enterTurnCricket()`/`onLegWonCricket()`; Daily Challenge's 3 badges
+live in `enterTurnCricket()`/`onLegWonCricket()`; Baseball's 8 own badges
+(docs/archive/culture-badges-roadmap.md Part B added 6 of them — Walk-Off, The Cycle,
+and a 4-tier lifetime-runs ladder — to the 2 that already existed) live in
+`enterTurnBaseball()`/`onLegWonBaseball()`; Doubles Practice's 5 own badges
+(also Part B — this mode had none before) are checked in
+`throwDartDoublesPractice()`; Daily Challenge's 3 badges
 are checked in `checkChallengeBadges()`, called right after every
 `/api/challenges/complete` response; Just Chuckin' It's 18 laddered milestones
 are checked in `checkChuckinMilestones()`, called after every dart from
@@ -1418,9 +1993,9 @@ coverage of them).
   {once:true})` call, checked for `newlyEarned` before celebrating — used for
   state-based badges whose trigger condition stays true forever once crossed
   (`INSERT OR IGNORE`, so re-checking an already-true condition never inflates
-  the count past 1): **Around the Clock, Around the World, Grudge Match, First
-  100+ Checkout, Full Rotation, Ghost Slayer, Champion, Giant Slayer
-  (Tournament)** — the last three are the exceptions to "a direct
+  the count past 1): **Around the Clock, Around the World, Ring Master, Grudge
+  Match, First 100+ Checkout, Full Rotation, Ghost Slayer, Champion, Giant
+  Slayer (Tournament)** — the last three are the exceptions to "a direct
   `Backend.send()` call": Ghost Slayer's `awardBadge(..., true)` call happens
   server-side, inside `recordGhostRace()` itself (see above), and its
   `newlyEarned` flag reaches the frontend as `recordGhostRace()`'s own
@@ -1434,7 +2009,7 @@ coverage of them).
   the `onGameCompleted` hook with no room to thread a badge result back
   through that response.
 
-### The 25 badges, exact trigger conditions
+### The 28 badges, exact trigger conditions
 
 **Expanded-chain badges** (the `CHAIN_CHECKS` list in `enterTurn()` — collected
 as an array and filtered by suppression pairs, not an if/else-if chain, so a
@@ -1453,6 +2028,9 @@ turn matching more than one condition queues all of them):
 | 🪜 **Staircase Finish** | `win && isStaircaseFinish(preVisitScore, darts)` (`frontend/scoring.js`, unit-tested in `backend/test/scoring.test.js`) — checked out in exactly 3 darts by aiming at a double, missing to the single, and repeating that all the way down: `darts === [single(N), single(N/2), double(N/4)]` where `N = preVisitScore/2`. Only qualifies when `preVisitScore` is a multiple of 8 with `N<=20` and `N/4>=1` — the 5 qualifying starting scores are 8, 16, 24, 32, and 40 (e.g. 32: single 16, single 8, double 4; 40: single 20, single 10, double 5; 8: single 4, single 2, double 1). `preVisitScore` is read from `_snap.score` (the turn's snapshot, captured before `p.score` is mutated), not `p.score` itself, since by the time `CHAIN_CHECKS` runs `p.score` already reflects the post-visit value. |
 | 🐂 **Triple Bull** | `win && darts.length===3 && every dart is sector===25 && mult===2` — checked out on 150 by hitting the double bull three separate times in one visit. There's no treble-bull ring (`makeDart()` already downgrades any attempted "treble bull" tap to a single), so this is three individual double-bull darts, not one dart at a x3 multiplier. Gets the same mega-tier confetti overlay as a nine-darter (`showAchievement()`'s `mega` check) — a comparably rare feat. |
 | 🏹 **Bullseye Finish** | `win && the visit's last dart has sector===25 && mult===2` — the checkout's final dart is the double bull, at any total. Distinct from Bullseye Gauntlet (double bull hit twice *mid-visit*, not necessarily finishing there) and from Triple Bull (all three darts are the bull, not just the last one). |
+| 🍳 **Bed & Breakfast** | `isBedAndBreakfast(darts)` (`frontend/scoring.js`, unit-tested in `backend/test/scoring.test.js`, docs/archive/culture-badges-roadmap.md Part A) — the classic "26" splash around the 20: a visit of exactly single 20, single 5, and single 1, in any order. An exact sector/multiplier match on all three darts, not merely `scored===26` (other routes to that same total aren't the joke). No `win`/`bust` requirement — the splash itself is the achievement, whatever the visit's outcome. |
+| 🏚️ **Madhouse** | `isMadhouseFinish(win, darts)` (`frontend/scoring.js`, unit-tested) — won the leg and the visit's last dart is double 1, the finish nobody wants to be left on. Same "last dart" shape as Bullseye Finish above, with sector 1 in place of the bull. |
+| 🀄 **Shanghai** | `isShanghaiVisit(darts)` (`frontend/scoring.js`, unit-tested) — a single, double, AND treble of the *same* number in one visit, any order, any number 1-20 (the bull is structurally excluded — there's no treble-bull ring, `makeDartCore()` already downgrades an attempted "treble bull" tap to a single). Deliberately independent of the Shanghai *game mode*'s own instant-win badge (§31, `docs/archive/shanghai-roadmap.md`) — this is the same feat landing inside a normal X01 leg; each doc cross-references the other so the two features never merge. |
 
 **Suppression pairs**: two conditions above are deliberately treated as the same
 event wearing two labels, not two distinct achievements — the more specific one
@@ -1463,6 +2041,15 @@ suppresses the generic one when both would otherwise match the same visit:
   dart is trivially also the bull, but the more specific story wins).
 - **Bullseye Gauntlet** suppresses **Double Trouble** (double-bull-twice is
   technically "last two darts both doubles" too).
+
+Bed & Breakfast, Madhouse, and Shanghai each co-fire freely alongside any other
+matching entry (no suppression pair) — their dart-shape requirements don't
+overlap closely enough with an existing condition to be "the same event wearing
+two labels": Bed & Breakfast requires an all-singles visit no other entry needs,
+Madhouse only inspects the last dart's sector/multiplier (distinct from Bullseye
+Finish's sector 25), and Shanghai's exact `{single, double, treble}` multiplier
+set can never also satisfy Hat Trick (which requires all three darts to be
+trebles).
 
 All other badges are checked independently (own `if` blocks), so any of them can
 co-fire with a chain badge or with each other in the same turn/leg:
@@ -1481,8 +2068,40 @@ co-fire with a chain badge or with each other in the same turn/leg:
 | 🥇 **First 100+ Checkout** | `win && pointsThisVisit >= 100`, **once-badge** — celebrates only the very first time it ever happens for that player. |
 | ⚔️ **Grudge Match** | On a match win, the same `h2h-summary` lookup shows `totalGames >= 10` against this opponent. **Once-badge** per player — awarded to both the winner and the loser once the threshold is first crossed. |
 | 🕐 **Around the Clock** | `singlesHit.size >= 20` — every number 1–20 hit as a single at least once **within the current game** (`singlesHit` is created fresh in `newMatchPlayer()` at every `startGame()`, persists across legs/sets within that game, and resets when a new game starts — not just on page reload). **Once-badge.** |
-| 🌍 **Around the World** | Lifetime: all 63 dart outcomes hit at least once (20 numbers × single/double/treble = 60, plus outer bull, double bull, and a miss). Checked via an async progress query (`/api/players/around-the-world`), skipped once the client-side `earnedBadgeCache` already has it. **Once-badge.** |
+| 🌍 **Around the World** | Lifetime: all 63 dart outcomes hit at least once (20 numbers × single/double/treble = 60, plus outer bull, double bull, and a miss). `newMatchPlayer()` fetches this lifetime outcome set once at game start (`atwBaselineHitSet`, `GET /api/players/around-the-world`) instead of re-querying every visit (item 51, `docs/code-quality-roadmap.md`); each visit's own darts are tracked locally (`atwHitSet`) and unioned against the baseline (`new Set([...baseline, ...session]).size >= 63`), skipped entirely once the client-side `earnedBadgeCache` already has it. **Once-badge.** |
 | 👻 **Ghost Slayer** | First-ever `result==='win'` row this player writes to the `ghost_races` table (§13) — win a race against a replay of one of your own past legs (Ghost Opponent, below). Unlike every other badge in this table, checked server-side: `recordGhostRace()` (`backend/db.js`) calls `awardBadge(playerName, 'ghost_slayer', true)` on every win — `once` mode's `INSERT OR IGNORE` makes the call a no-op past the first time, so no separate first-win check is needed. **Once-badge.** |
+
+**The lifetime-180s milestone ladder** (docs/archive/culture-badges-roadmap.md Part A,
+`ONE_EIGHTY_MILESTONE_LADDERS` in `frontend/index.html`, checked from `enterTurn()`'s
+existing `if(ev.scored===180){...}` block). 180! has always been a live
+celebration (`queueBadge('180', p.name)`) but never a `player_badges` row at all —
+it's one of the three older top-level stats (180/Big Fish/Nine-Darter, see
+"Description text" below), so it had no milestone tiers despite how central
+180s are and how well this data-driven ladder shape has worked for Just
+Chuckin' It and Checkout Trainer. Reuses `CHUCKIN_MILESTONE_LADDERS`'s exact
+`{metric,idPrefix,statNoun,descFor,tiers}` shape and `checkChuckinMilestoneTier()`
+wholesale (that helper is fully generic despite its name, already shared with
+Checkout Trainer's own ladders) — a single ladder, X01-only, whose value is
+`(p.lifetimeOneEightiesBase||0) + p.sessionOneEighties`: `lifetimeOneEightiesBase`
+is fetched once per game at `newMatchPlayer()` time via `GET /api/players/stat-
+bubbles?name=<player>` with **no `mode` param** (`_mf(undefined)` returns `''`
+server-side, so this is a genuinely unscoped H2H+practice lifetime count, not
+one mode's own slice), and `sessionOneEighties` increments locally on every
+180 this game — the same "avoid a network round-trip per dart/turn" reasoning
+`newMatchPlayerChuckin()` documents for its own lifetime bases. **Permanent,
+once-earned tiers** (`once:true`, never undo-revoked) — the roadmap doc's own
+framing: "ladder tiers are permanent, like every other ladder," the same rule
+Chuckin/Checkout Trainer's ladders already follow regardless of how
+competitive the surrounding game mode is. Its `BADGE_INFO` rows carry **no
+category flag** (unlike Chuckin's `chuckin:true`/Checkout Trainer's
+`checkoutTrainer:true`) — X01 already has a Badge Case section to fold into,
+unlike those two modes when their own ladders were built, so these 5 tiers
+render inside the existing X01 section alongside the 28 badges above instead
+of getting a new section of their own.
+
+| Ladder | Metric | Tiers (threshold → label) |
+|---|---|---|
+| Lifetime 180s | `lifetimeOneEightiesBase + p.sessionOneEighties` | 10 Ton-Eighty Club 🎯 · 25 Maximum Regular 🔴 · 50 Half-Century of Maximums 🌟 · 100 Century of Maximums 💯 · 250 Maximum Machine 🤖 |
 
 **Cricket badges** (checked in `enterTurnCricket()`/`onLegWonCricket()`,
 `frontend/index.html`). 9 Marks/Perfect Leg (game-modes-roadmap.md build-order
@@ -1490,30 +2109,123 @@ step 3) are the direct analogs of 180 and the nine-darter; Whitewash/Comeback
 Kid (Cricket) (2026-07, "New Cricket-native badges") are deliberately *not*
 X01 ports — shaped around what makes a Cricket leg dramatic (closing numbers,
 points) instead of forcing X01's checkout/remaining-score concepts onto a game
-that has neither. Both are 2-player only, same restriction as X01's own
-social/margin-of-victory badges, and both have their pure trigger-condition
-logic in `frontend/scoring.js` (`isCricketWhitewash()`/
-`cricketComebackAchieved()`), unit-tested in `backend/test/scoring.test.js`:
+that has neither. Whitewash/Comeback Kid are both 2-player only, same
+restriction as X01's own social/margin-of-victory badges, and both have their
+pure trigger-condition logic in `frontend/scoring.js` (`isCricketWhitewash()`/
+`cricketComebackAchieved()`), unit-tested in `backend/test/scoring.test.js`.
+9 Marks and Perfect Leg fire identically in both Cricket variants (mark/dart-based,
+not points-based); Whitewash reads the same in both too (never a points
+condition); Comeback Kid's deficit *direction* flips per variant (§2's own
+"Comeback Kid (Cricket)'s deficit direction flips with the variant" — the
+badge condition itself, `legWorstPointsDeficit >= 20`, is unchanged). 🔪 Stone
+Cold is cutthroat-only, checked at the whole-*game* level rather than per-leg:
 
 | Badge | Exact condition |
 |---|---|
 | 🎯 **9 Marks** | `darts.length===3 && marksThisVisit===9` — 3 darts, each a treble on an in-play number, the maximum possible marks in one visit (same framing as 180 being the max possible X01 visit score). **Recurring.** |
 | 🏆 **Perfect Leg** | `win && legDarts === theoreticalMinimum`, where the minimum is computed per match from `game.config.numbers`: each non-Bull number can close in a single treble (3 marks); Bull can't be trebled (`makeDart()` already downgrades a "treble bull" tap to a single), so it needs a minimum of 2 darts. A win at exactly this minimum already implies enough bonus marks were scored to strictly lead (the win condition in §2 guarantees that), so no separate points check is needed. **Recurring**, mega-tier overlay (confetti) like Nine-Darter. |
 | 🧹 **Whitewash** | `isCricketWhitewash(opp.marks)` at the moment the leg is won — every value in the opponent's `marks` object is `< 3` (nobody closed), checked in `onLegWonCricket(wi)`. 2-player only. **Recurring.** |
-| 🔥 **Comeback Kid (Cricket)** | `cricketComebackAchieved(w.legWorstPointsDeficit)` — `legWorstPointsDeficit >= 20` (Cricket's own threshold, chosen against Cricket's much smaller/more variable points scale than X01's 501 countdown, not X01's 100). `legWorstPointsDeficit` is the largest `(opponent.points - my.points)` seen at any point this leg, tracked in `enterTurnCricket()` the same "sample before this visit's own update" timing X01's `legWorstDeficit` uses. 2-player only. **Recurring.** |
+| 🔥 **Comeback Kid (Cricket)** | `cricketComebackAchieved(w.legWorstPointsDeficit)` — `legWorstPointsDeficit >= 20` (Cricket's own threshold, chosen against Cricket's much smaller/more variable points scale than X01's 501 countdown, not X01's 100). `legWorstPointsDeficit` is the largest deficit seen at any point this leg, direction depending on variant (§2), tracked in `enterTurnCricket()` the same "sample before this visit's own update" timing X01's `legWorstDeficit` uses. 2-player only. **Recurring.** |
+| 🔪 **Stone Cold** | `cricketStoneColdAchieved(w.gamePointsReceived, game.players.length)` — `game.players.length >= 3 && gamePointsReceived === 0`, checked at GAME-win time (not per-leg) in `onLegWonCricket(wi)`, cutthroat only (`game.config.variant === 'cutthroat'`). `w.gamePointsReceived` is a running total of every point ever received across the *whole match* (every leg, not leg-reset — parallel to `gameDarts`), bumped in `enterTurnCricket()` whenever this player is one of an opponent's `opponentGains`. Not resumable — like every other badge-trigger tracker, it starts fresh on a resumed game (`docs/archive/saved-games-roadmap.md`'s "what resume deliberately does NOT rebuild"). **Recurring**, mega-tier overlay (confetti) like Nine-Darter/Perfect Leg. |
 
 **Baseball badges** (checked in `enterTurnBaseball()`/`onLegWonBaseball()`,
 `frontend/index.html`) — the direct analogs of Cricket's 9 Marks/Perfect Leg,
 mapped onto Baseball's own vocabulary: Perfect Inning is the per-visit max
 (mirroring 9 Marks/180), Perfect Game is the per-leg max (mirroring Perfect
-Leg/Nine-Darter):
+Leg/Nine-Darter). Walk-Off and The Cycle (docs/archive/culture-badges-roadmap.md Part
+B — Baseball/Doubles Practice coverage parity) round the set out to 4:
 
 | Badge | Exact condition |
 |---|---|
 | 🔥 **Perfect Inning** | `dartsThrown===3 && ev.runsThisVisit===9` — 3 darts, each a treble on that inning's target number, the maximum possible runs in one visit. Checked per-visit in `enterTurnBaseball()`, the same "doesn't depend on the leg's outcome" timing 9 Marks uses. **Recurring.** |
 | 🏆 **Perfect Game** | `w.inningRuns[i]===9` for every one of innings 1–9 — a won leg with the maximum possible 9 runs in every single inning (81 total). Checked in `onLegWonBaseball(wi)` once the leg's winner and full `inningRuns` are known, the same leg-outcome timing Perfect Leg uses. **Recurring**, mega-tier overlay (confetti) like Nine-Darter/Perfect Leg. |
+| ⚾ **Walk-Off** | `game.baseballInning > 9` at the moment the leg is won — the match ran past the regulation 9 innings before a sole leader emerged. Checked in `onLegWonBaseball(wi)`; `game.baseballInning` still holds the deciding visit's own inning number at that point, since `enterTurnBaseball()` only increments it *after* dispatching to `onLegWonBaseball()` on `ev.matchComplete`. **Recurring.** |
+| 🔄 **The Cycle** | `isBaseballCycle(darts, ev.target)` (`frontend/scoring.js`, unit-tested in `backend/test/scoring.test.js`) — a single, double, AND treble of the *current inning's own number* in one visit (6 runs the scenic way), Baseball's cousin of Shanghai visit parameterized by the fixed inning target instead of "any number 1-20." Checked per-visit in `enterTurnBaseball()`, same timing as Perfect Inning; mutually exclusive with it (three trebles vs. one of each), so no suppression pairing is needed. **Recurring.** |
 
-**Tournament badges** (`docs/tournament-mode-roadmap.md` §7 — checked server-side
+**The Baseball lifetime-runs ladder** (docs/archive/culture-badges-roadmap.md Part B,
+`BASEBALL_RUNS_MILESTONE_LADDERS` in `frontend/index.html`, checked from
+`enterTurnBaseball()` after every visit). Reuses `checkChuckinMilestoneTier()`
+wholesale, same as the lifetime-180s ladder above — a single ladder, whose
+value is `(p.lifetimeRunsBase||0) + p.sessionRuns`: `lifetimeRunsBase` is
+fetched once per game at `newMatchPlayerBaseball()` time via the same
+no-`mode`-param `GET /api/players/stat-bubbles` pattern (now returning
+`totalRuns` from `getBaseballStatBubbles()`), and `sessionRuns` accumulates
+locally across every visit this game (not reset per leg, unlike
+`p.totalRuns`). **Permanent, once-earned tiers** (`once:true`, never
+undo-revoked), `baseball:true` — Baseball already has a Badge Case section to
+fold into.
+
+| Ladder | Metric | Tiers (threshold → label) |
+|---|---|---|
+| Lifetime Runs | `lifetimeRunsBase + p.sessionRuns` | 100 Rookie Season ⚾ · 500 Everyday Player 🧢 · 1,500 All-Star ⭐ · 5,000 Hall of Fame 🏟️ |
+
+**Doubles Practice badges** (docs/archive/culture-badges-roadmap.md Part B — this mode
+had zero badges before this change). Both checked in
+`throwDartDoublesPractice()`, `frontend/index.html`, right after a dart
+registers as a "hit" (a double landed on one of that round's own
+`config.doubles` targets — the same `ev.hit` `evaluateDartDoublesPractice()`
+already computes). Both are explicitly **one-off, permanent** per the roadmap
+doc — neither calls `trackBadgeForUndo()`, so unlike Around the Clock/World
+(this mode's nearest structural analogs), an undone dart never revokes
+either, matching the milestone ladders' own "permanent, once-earned"
+treatment instead:
+
+**The lifetime doubles-hit ladder** (`DOUBLES_HIT_MILESTONE_LADDERS`) reuses
+`checkChuckinMilestoneTier()` wholesale, same shape as the runs/180s ladders
+above — value is `(p.lifetimeHitsBase||0) + p.sessionHits`: `lifetimeHitsBase`
+fetched once per game at `newMatchPlayerDoublesPractice()` time via
+`GET /api/players/stat-bubbles?...&gameType=doubles_practice` (now returning
+`hits` from `getDoublesPracticeStatBubbles()`), `sessionHits` accumulates
+locally across every round this game (not reset per round, unlike
+`p.roundHits`). `doublesPractice:true` — the new Badge Case section this
+change adds (`renderPlayerBadges()`'s `doublesPracticeIds` bucket).
+
+| Ladder | Metric | Tiers (threshold → label) |
+|---|---|---|
+| Lifetime Doubles Hit | `lifetimeHitsBase + p.sessionHits` | 50 Ring Finder 🎯 · 250 Double Duty 🔁 · 1,000 Precision Expert 🔬 · 5,000 Doubles Legend 👑 |
+
+🎪 **Ring Master** — hit every double D1 through D20 plus the bull (21
+distinct targets) in Doubles Practice, lifetime. Direct structural analog of
+the passive Around the World badge: `GET /api/players/doubles-hit-sectors`
+(`getDoublesPracticeHitSectors()`, `backend/db.js` — same `{hit,count,total}`
+shape as `getAroundTheWorldProgress()`, just scoped to this mode's own "hit"
+definition via `DOUBLES_HIT_CASE` instead of every raw dart outcome) is
+fetched once at game start (`newMatchPlayerDoublesPractice()`'s
+`baselineHitSectors`, item 51) instead of re-queried after every hit dart;
+each hit's own sector is tracked locally (`sessionHitSectors`) and unioned
+against the baseline (`new Set([...baseline, ...session]).size >= 21`)
+triggering a direct `Backend.send(..., {once:true})` call, checked for
+`newlyEarned`, guarded by `earnedBadgeCache` so an already-earned player skips
+the check entirely on every subsequent hit.
+
+**Bob's 27 badges** (`docs/archive/practice-ladders-roadmap.md` Part A, checked
+in `enterTurnBobs27()`/`onLegWonBobs27()`, `frontend/index.html`):
+
+| Badge | Exact condition |
+|---|---|
+| 🎯 **Full House** | `dartsThrown===3 && hits===3` — all three darts landed on the round's own double, the maximum possible gain for that round (Bob's 27's own "180" for a single visit). Checked per-visit in `enterTurnBobs27()`. **Recurring.** |
+| 🏔️ **The Full Anderson** | `w.running === 1287` at run-end — every one of the 20 rounds hit with all three darts (27 + 3×2×(1+2+...+20) = 1287), the maximum possible run. Checked once in `onLegWonBobs27(wi)`, mega-tier overlay (confetti) like Nine-Darter/Perfect Leg/Perfect Game/Stone Cold. **Recurring**, though only ever achievable once per run by construction. |
+
+**The survival/score ladder** (`BOBS27_SCORE_MILESTONE_LADDERS`, checked once
+in `onLegWonBobs27(wi)` against `w.running`) reuses `checkChuckinMilestoneTier()`
+wholesale, same generic engine as the lifetime ladders above — **but its
+"value" is genuinely different in kind**: every other ladder's value is a
+lifetime-cumulative counter (`lifetimeXBase + p.sessionX`) that only ever
+grows across a player's whole history; this ladder's value is **this single
+run's own final score**, checked once at the moment the run ends, never
+accumulated across runs. `checkChuckinMilestoneTier()` is agnostic to where
+its `value` argument comes from — it just tests tiers against a number and
+caches "have I ever crossed this tier," which works identically whether that
+number is a running lifetime total or a fresh per-run score — so no engine
+changes were needed, only a different call site. **Permanent, once-earned
+tiers** (`once:true`), its own Badge Case section (`renderPlayerBadges()`'s
+`bobs27Ids` bucket).
+
+| Ladder | Metric | Tiers (threshold → label) |
+|---|---|---|
+| Survival/Score | This run's own final `running` score | 1 Survivor 🛡️ · 100 Century 💯 · 250 Quarter Grand 🌟 · 500 Half Grand 🚀 · 1000 Four Figures 👑 |
+
+**Tournament badges** (`docs/archive/tournament-mode-roadmap.md` §7 — checked server-side
 in `_advanceTournamentMatch()`, `backend/db.js`, the same function that already
 sets `winner_id`/`champion_id`, rather than a second parallel hook. Like Ghost
 Slayer, the frontend never computes these conditions itself — it only detects a
@@ -1523,8 +2235,8 @@ branch, to fire the live celebration):
 
 | Badge | Exact condition |
 |---|---|
-| 🏆 **Champion** | Awarded to the winning player exactly where `_advanceTournamentMatch()` sets `tournaments.champion_id` (no `winner_next_match_id` — this was the final). **Once-badge.** |
-| ⚔️ **Giant Slayer (Tournament)** | On any tournament match result: `winner's tournament_players.seed - loser's seed >= 3` (`TOURNAMENT_GIANT_SLAYER_SEED_THRESHOLD`) — the winner was seeded at least 3 slots worse than the opponent they beat. Never fires on a bye advance (no real opponent was beaten). Mirrors the H2H Giant Slayer's headline concept with a seed-based threshold instead of an average-based one, and uses its own `badgeId` (`tournament_giant_slayer`) rather than the H2H `giantslayer` row, since the two trigger mechanics don't share a meaning. **Once-badge.** |
+| 🏆 **Champion** | Awarded to the winning player exactly where `_completeTournament()` sets `tournaments.champion_id` — the single-elim final, or the double-elim grand final / reset decider. **Once-badge.** |
+| ⚔️ **Giant Slayer (Tournament)** | On any real (non-bye) tournament match result — awarded by `_maybeAwardTournamentGiantSlayer()` per match, so a double-elim winners-bracket upset counts even though that loser only drops to the losers bracket: `winner's tournament_players.seed - loser's seed >= 3` (`TOURNAMENT_GIANT_SLAYER_SEED_THRESHOLD`) — the winner was seeded at least 3 slots worse than the opponent they beat. (In the grand final it's awarded only on the decisive result, never on a game-one loss that triggers a reset, so a reset can't double-count one conquest.) Uses its own `badgeId` (`tournament_giant_slayer`) rather than the H2H `giantslayer` row. **Once-badge.** |
 
 **Daily Challenge badges** (checked in `checkChallengeBadges(playerName)`,
 `frontend/index.html` — called right after every `/api/challenges/complete`
@@ -1538,7 +2250,7 @@ inline in `index.html`, so they're covered by a committed `node:test`:
 |---|---|
 | 🔥 **Challenge Streak: Week** | `currentStreak === 7` exactly (an exact crossing check, not `>=`, so a long streak doesn't refire this every day). **Recurring** — a later streak that reaches 7 again after breaking can re-earn it. |
 | 🏆 **Challenge Streak: Month** | `currentStreak === 30` exactly, same exact-crossing reasoning as above. **Recurring**, mega-tier overlay (confetti) like Nine-Darter/Perfect Leg. |
-| 🗓️ **Full Rotation** | Every one of the 6 Daily Challenge formats (§6) has at least one *completed* attempt, ever (`bestByFormat` only ever contains completed attempts — see `getChallengeHistory()`'s own query — so this is already "at least once", not merely "attempted"). **Once-badge.** |
+| 🗓️ **Full Rotation** | Every one of the 9 Daily Challenge formats (§6) has at least one *completed* attempt, ever (`bestByFormat` only ever contains completed attempts — see `getChallengeHistory()`'s own query — so this is already "at least once", not merely "attempted"). **Once-badge.** |
 
 **The 18 Just Chuckin' It milestone badges** (checked in
 `checkChuckinMilestones(playerName)`, `frontend/index.html` — called after
@@ -1614,6 +2326,37 @@ Seven badges' live-overlay "type" key differs from their persisted `badge_id`
 `aroundtheclock`→`around_the_clock`, `aroundtheworld`→`around_the_world`,
 `ghostslayer`→`ghost_slayer`, `tournamentchampion`→`tournament_champion`,
 `tournamentgiantslayer`→`tournament_giant_slayer`.
+
+### Player Profile Badge Case: game-type scoping, filter, and lifetime counter
+
+`renderPlayerBadges()` (`frontend/index.html`) groups `BADGE_INFO` into
+sections by category flag (`cricket`, `baseball`, `shanghai`, `halveIt`,
+`pressureChamber`, `doublesPractice`, `bobs27`, `checkoutLadder`, `gauntlet`,
+`killer`, `marathon`, `deadManWalking`, `chuckin`, `checkoutTrainer`, `drill`,
+`challenge`) plus a no-flag default bucket (every X01 badge, since X01 predates
+the flag system). Only the section matching the Player Profile's game-type
+dropdown (`playerGameType`, mapped via `GAME_TYPE_BADGE_FLAG`) is shown — the
+same per-game-type scoping the stat bubbles above it already apply via
+`GAME_TYPES[playerGameType].statDefs` — plus two cross-cutting sections
+(`elo` "Household Rating", `tournament` "Tournaments") that are always shown
+regardless of the dropdown, since neither is tied to one game mode. Selecting
+"🎯 Daily Challenge" sets `playerGameType` to `'daily_challenge'`, which maps to
+the `challenge` flag.
+
+A `role="group"` segmented control (`.seg`, the same component the Finish
+Rule toggle uses) filters the visible sections to All/Earned/Unearned
+(`badgeFilter`, module-level state re-rendered via `setBadgeFilter()` from
+the last-fetched `/api/players/badges` response — no refetch on a filter
+change). A section that ends up with zero badges after filtering (e.g. every
+badge in a small section is already earned, under the Unearned filter) is
+omitted entirely rather than shown empty.
+
+The `🏆 N/M` pill next to the player's name (`#pp-ach-counter`) is the
+player's **lifetime** earned/total count across every badge in `BADGE_INFO`
+(including every milestone-ladder tier registered via
+`registerMilestoneLadders()`) — unaffected by both the game-type dropdown and
+the Earned/Unearned filter, which only scope what's *listed* below it, not
+this total.
 
 ### Undo interaction
 
@@ -1766,7 +2509,7 @@ function _seededIndex(s, mod){
   for (const ch of s) h = (h*31 + ch.charCodeAt(0)) | 0;
   return Math.abs(h) % mod;
 }
-format = CHALLENGE_FORMATS[_seededIndex(dateStr + '|format', 6)];
+format = CHALLENGE_FORMATS[_seededIndex(dateStr + '|format', 9)];
 target = format==='checkout_sprint' ? CHALLENGE_CHECKOUTS[_seededIndex(dateStr + '|target', 12)] : null;
 ```
 
@@ -1774,7 +2517,7 @@ Same date always produces the same format (and, for Checkout Sprint, the same
 target) on every client — no coordination needed. `CHALLENGE_CHECKOUTS` pool:
 `[121, 96, 100, 141, 170, 40, 32, 50, 60, 80, 110, 130]`.
 
-### The six formats — exact win condition and "better" direction
+### The nine formats — exact win condition and "better" direction
 
 | Format | Win condition | Metric | Direction |
 |---|---|---|---|
@@ -1784,13 +2527,38 @@ target) on every client — no coordination needed. `CHALLENGE_CHECKOUTS` pool:
 | **Steady Hand** | Exactly 3 visits, filler `1000` start | `SUM(each visit's total, only if <=20, else 0)` across all 3 visits | **More is better** |
 | **Treble Run** | Exactly 3 visits, filler `1000` start | `size of Set(sectors hit as a treble)` across all 3 visits (distinct numbers, not raw treble count) | **More is better** |
 | **The Long Game** | 501 leg; remaining drops below 40 with **no busts allowed at any point** | Visits taken to get under 40 | **Fewer is better**; a bust before reaching the target is an immediate DNF (`activeChallenge = null`), not a lower/worse score |
+| **Doubles Gauntlet** | Exactly 3 visits (9 darts), filler `1000` start | `size of Set(sectors hit as a double)` across all 3 visits (D1-D20 and D-Bull all count; distinct numbers, not raw double count) — `distinctDoubleSectors()`, `frontend/scoring.js` | **More is better** |
+| **Ton Hunter** | Exactly `TON_HUNTER_VISITS` (6) visits, filler `1000` start | `COUNT(visits whose total value >= 100)` — `countTonPlusVisits()`, `frontend/scoring.js` | **More is better** |
+| **Around the Horn** | Open-ended — hit every number 20 down to 1, strict descending order, **singles only** (a wrong number, wrong ring, or out-of-order single is simply ignored, never a bust/DNF); filler `100000` start (must outlast an unbounded number of darts, unlike the 3-visit formats' `1000`) | Total darts thrown once all 20 numbers are hit in order — `aroundTheHornProgress()`, `frontend/scoring.js` | **Fewer is better** |
 
-Checkout Sprint and Speed to Zero complete via the normal `ev.win` path in
-`enterTurn()` → `onLegWon()`. The other four end mid-visit, inside `enterTurn()`
-itself (`game.legVisitLogs` accumulates each visit's darts; once the
-visit/bust-free condition is met, `activeChallenge.overrideMetric` is set and
-`onLegWon()` is called directly, reusing its leg-completion machinery rather
-than duplicating it).
+All nine formats are entries in one registry, `CHALLENGE_FORMAT_DEFS`
+(`frontend/index.html`) — keyed by format name, each entry a self-contained
+object of `gameType`, `label`/`shortLabel`/`genericName`/`metricLabel`,
+`pickTarget(dateStr)`, `startScore(target)`, `checkCompletion(game, p, ev)`,
+`winOverrideMetric(p)`, `extraResultData(game)`, and `liveMetric(game, p)`.
+`CHALLENGE_FORMATS` (the plain name array `todaysChallenge()` seeds an index
+into) stays a separate, explicit array — its order is load-bearing (a future
+format must always be *appended*, never inserted/reordered, or every past
+date's format would silently change) — rather than `Object.keys(...)` on the
+registry, so that invariant can't be broken by reordering the registry for
+readability. `gameType` is `'x01'` for all nine today, but every dispatch site
+(`setMode()`, `startGame()`, `enterTurn()`, `GAME_TYPES.x01.liveModeState`)
+reads it generically off the registry rather than hardcoding `'x01'`, so a
+future non-X01 format needs no changes outside its own registry entry.
+
+Checkout Sprint and Speed to Zero (`checkCompletion: null`) complete via the
+normal `ev.win` path in `enterTurn()` → `onLegWon()`. The other four end
+mid-visit, inside `enterTurn()` itself: `game.legVisitLogs` accumulates each
+visit's darts, and after every non-winning visit `enterTurn()` calls
+`CHALLENGE_FORMAT_DEFS[format].checkCompletion(game, p, ev)`, which returns
+`null` (not done yet), `{ dnf: true }` (The Long Game's bust-before-target
+case — `activeChallenge` is nulled, no completion recorded), or
+`{ metric }` (the format's win condition is met — `activeChallenge.overrideMetric`
+is set to `metric` and `onLegWon()` is called directly, reusing its
+leg-completion machinery rather than duplicating it). The Long Game's own
+`winOverrideMetric(p)` also covers the rare case where its final visit is
+both under-40 *and* a genuine double-out `ev.win` — without it, that path
+would fall through to `onLegWon()`'s generic dart-count fallback instead.
 
 `CHALLENGE_BETTER_DIRECTION` (`backend/db.js`) encodes the same fewer/more
 distinction server-side, for personal-best comparison:
@@ -1798,6 +2566,54 @@ distinction server-side, for personal-best comparison:
 { checkout_sprint:'asc', speed_to_zero:'asc', long_game:'asc',
   bullseye_gauntlet:'desc', treble_run:'desc', steady_hand:'desc' }
 ```
+`CHALLENGE_FORMAT_GAME_TYPE` (`backend/db.js`) is this file's own copy of the
+registry's `gameType` field (the server has no access to the frontend
+registry at runtime) — `startChallengeAttempt()` rejects with `400` if the
+linked game's `game_type` doesn't match the format's expected type, guarding
+against a stale or buggy client starting the wrong kind of game for a format.
+
+### Live Scoreboard
+
+A Daily Challenge attempt is plain X01 underneath (`game.gameType` stays
+`'x01'` the whole attempt), so without extra plumbing `/display` would show
+the raw rigged starting score as if it were a real category — literally
+"1000" for the three filler-start formats. `GAME_TYPES.x01.liveModeState`
+(`frontend/index.html`) is the fix: `null` for every ordinary X01 game
+(`activeChallenge` is only ever non-null during a real attempt), but during a
+challenge it returns (`challengeMetric` computed via the active format's own
+`CHALLENGE_FORMAT_DEFS[format].liveMetric(game, p)` — the same in-progress
+value on every dart, not just once `checkCompletion`'s threshold is met, and
+`challengeTrebleNumbers` via `extraResultData(game)`, `null` for every format
+that doesn't define one):
+
+```js
+{ challengeFormat, challengeTarget, challengeLabel,       // e.g. "Checkout 121"
+  challengeMetric, challengeMetricLabel,                  // e.g. 3, "3 bulls"
+  challengeVisitsCompleted,                               // legVisitLogs.length
+  challengeTrebleNumbers }                                // Treble Run only
+```
+
+`renderers.x01.card()` (`frontend/display.html`) branches on
+`s.modeState.challengeFormat`:
+- **Bullseye Gauntlet / Treble Run / Steady Hand** (the three filler-start,
+  exactly-3-visit formats): the hero `.score` number becomes the challenge
+  metric itself (bulls hit / distinct trebles / capped running total) instead
+  of the meaningless filler score, with `challengeMetricLabel` as a caption
+  and a 3-dot visit-progress row (`.challenge-pips` — filled for each
+  completed visit, a ringed "live" dot for the visit in progress). Treble Run
+  additionally shows which numbers (`T20`, `T19`, …) as small chips.
+- **Checkout Sprint / Speed to Zero / The Long Game**: the hero stays the real
+  remaining-score countdown (genuinely meaningful — checkout hints keep
+  working unchanged) with `challengeMetricLabel` (darts thrown, or visits used
+  for The Long Game) as the caption instead. No visit pips (Checkout
+  Sprint/Speed to Zero aren't visit-capped; The Long Game's visit count is
+  open-ended, not a fixed 3).
+- `fmtText()`'s top bar shows "🎯 Daily Challenge · `challengeLabel`" instead
+  of the raw category, and every card gets a "🎯 CHALLENGE" tag next to the
+  player name.
+
+No `ALLOWED_LIVE_KEYS` change needed — `modeState` is already an
+unrestricted-shape passthrough (§7).
 
 ### One attempt per player per calendar day
 
@@ -1813,6 +2629,32 @@ three layers:
    alert, no longer silently).
 3. **Locked completion**: `completeChallengeAttempt` only updates rows with
    `completed = 0`, so a repeat completion can never overwrite a locked-in result.
+
+### Household comparison board (Home page)
+
+`getTodaysChallengeBoard(dateStr, format)` (`backend/db.js`) → `GET
+/api/challenges/today-board?date=&format=` → `[{ player, result }, ...]`,
+ranked best-to-worst per `CHALLENGE_BETTER_DIRECTION[format]` (the same
+whitelisted asc/desc lookup `getChallengeHistory()`'s `bestByFormat` uses).
+Only **completed** attempts for the exact `challenge_date`+`format` pair
+appear — an in-progress attempt has no result to rank, and a different day's
+attempt at the same format never bleeds in. `format`/`date` are passed by the
+client (already computed via the pure `todaysChallenge()`, same as
+`startChallengeAttempt()` already receives them) rather than re-derived
+server-side — `db.js` has no independent copy of the date-seeded
+format-selection algorithm. No gating on having played it yourself — every
+player's result is visible to everyone, any time (deliberate design decision,
+not an oversight).
+
+`renderHomeChallengeBoard()` (`frontend/index.html`) renders it under the
+Home page's "🎯 Today's Challenge" card, patched in async once the round-trip
+resolves (same "render what's known synchronously, patch in the network-
+dependent part" pattern as the results screen's PB banner). That card also
+gets its own `.challenge-spotlight` CSS class (an animated gold glow,
+`@keyframes challengeGlow`) so it visually stands out from every other plain
+`.card` on the page — reduced-motion users get the static glow only, via the
+existing page-wide `@media(prefers-reduced-motion:reduce){*{animation:none!
+important}}` rule.
 
 ### Admin reset (Settings → Daily Challenge)
 
@@ -1847,15 +2689,47 @@ to today) + a confirm dialog spelling out what gets deleted.
   independent by design, so there's no "drift" risk between them the way there
   can be between sibling stat functions.
 
-### Personal best detection
+### Personal best detection, and the results screen
 
 `completeChallengeAttempt()` compares the just-completed result against every
 *other* completed attempt of the same format (`challenge_date != today`), using
-`CHALLENGE_BETTER_DIRECTION` to pick `MIN` or `MAX`, and returns
-`{ ok, isPersonalBest }`. The frontend patches a gold "New personal best!"
-banner into a `#challenge-pb-banner` placeholder on the results screen once
-this async response resolves — the results screen itself renders immediately,
-unblocked (same pattern as the achievement queue's count-patching).
+`CHALLENGE_BETTER_DIRECTION` to pick `MIN` or `MAX`. Its full response shape —
+returned both on a fresh completion and on the locked "already completed"
+no-op retry path (`getChallengeResultSummary()`, shared by both) — is:
+
+```
+{ ok, isPersonalBest, format, target, resultDarts,
+  personalBest,    // best-ever result for this format, including this attempt
+  previousBest,     // best result BEFORE this attempt (null on a first-ever attempt)
+  lastResult,       // the immediately-preceding completed attempt's result (null if none)
+  recentAttempts,   // up to 10 completed attempts of this format, oldest-first: [{date, result}]
+  currentStreak }   // getChallengeStatus()'s streak, as of this challengeDate
+```
+
+The Daily Challenge results screen (`finishUnit()`, `frontend/index.html`)
+replaced its old generic "This Leg / This Session" X01 average panel for a
+challenge completion — that panel was actively wrong for the three
+filler-starting-score formats (Bullseye Gauntlet/Treble Run/Steady Hand),
+whose 3-dart average is computed against a meaningless countdown, not the
+real result. It now shows two things instead:
+
+1. **Synchronous** (`lastChallengeResult`, captured right before
+   `activeChallenge` is nulled out; `buildChallengeResultPanel()`): the actual
+   challenge metric as the headline stat (`challengeShortLabel`/
+   `challengeMetricLabel`, the same functions the Share moment-card's caption
+   already used), plus — Treble Run only — which numbers were hit, as small
+   chips (`challengeTrebleNumbersFrom(game.legVisitLogs)`, the same
+   computation `GAME_TYPES.x01.liveModeState` uses for the live scoreboard).
+2. **Async** (`renderChallengeResultExtra()`, patched into a
+   `#challenge-result-extra` placeholder once `/api/challenges/complete`
+   resolves — the results screen itself renders immediately, unblocked, same
+   pattern as the achievement queue's count-patching): the gold "New personal
+   best!" banner (unchanged), a `🔥 N-day streak` callout (only shown at 2+,
+   since a bare "1-day streak" reads as filler rather than a callout), a
+   "Your Best"/"Last Time" comparison pair (shown even when today's attempt
+   *isn't* a new record, so every attempt has context), and a small
+   highlighted recent-attempts strip (skipped entirely on a first-ever
+   attempt at that format, since a single chip shows no trend).
 
 ### Player Profile history view
 
@@ -1906,19 +2780,46 @@ count via `playerSnapshotAroundTheClock`/`playerSnapshotAroundTheWorld`, §3's
 darts, checkout hint (X01 only — always empty for Cricket/Baseball), status,
 `pendingAchievement` (§5), one-shot fields (`lastTurnEvent`, `matchResult`,
 `legStart` — cleared immediately after each push, so they only ever announce
-once), a `checkoutTarget` for voice announcements, `baseballInning` (Baseball
-only — which inning, 1-9 or beyond on a tie, is currently live; per-player
-runs ride inside `players[]` above instead), and (tournament matches
-only, §15) `tournamentRoundLabel`. `ALLOWED_LIVE_KEYS` on the server
-allow-lists exactly these top-level fields (not the per-player shape inside
-`players`, which is how Cricket's/Baseball's differently-shaped player objects
-— and Chuckin's `heatmap`/`sessionAvg` — pass through unchanged) — anything else
-in a `POST /api/live` body is silently dropped (413 if the sanitized payload
-still exceeds 64KB). **Adding any new top-level `liveSnapshot()` field must add
-it to `ALLOWED_LIVE_KEYS` in the same change** — `tournamentRoundLabel` itself
-was initially missed here during development and silently dropped by the
-allow-list until caught in end-to-end testing, exactly the failure mode this
-note now exists to prevent happening again.
+once), a `checkoutTarget` for voice announcements, and (tournament matches
+only, §15) `tournamentRoundLabel`.
+
+**`modeState`** (docs/code-quality-roadmap.md item 42) is one opaque, per-mode
+container object holding every field a specific `gameType` needs beyond the
+generic shape above — Baseball's `baseballInning`, Cricket's `cricketVariant`,
+Shanghai's `shanghaiRound`/`shanghaiMaxRounds`, Halve-It's `halveItRound`/
+`halveItTargets` (the FULL target sequence, not just the live round's own
+target — `display.html` has no shared `scoring.js` module to derive per-round
+labels from), Pressure Chamber's `pressureChamberRound`/`pressureChamberDeadline`/
+`pressureChamberCards` (same "no shared module" reasoning, the FULL 15-round
+card sequence up front — every card field is escaped at the `display.html`
+sink, `docs/security-audit-roadmap.md` SEC-26), Bob's 27's `bobs27Round`,
+Checkout Ladder's `checkoutLadderTarget`/`checkoutLadderVisits`, Killer's
+`killerLives`, Dead Man Walking's `dmwBudget`/`dmwDartsUsed`/`dmwWalkedOut`,
+Doubles Practice's `doublesTargets`/`dpLastDart`/`roundOver`/`roundEndReason`,
+guided Around the Clock's `atcLastDart` (sharing `roundOver`/`roundEndReason`
+with Doubles Practice), Chuckin's `chuckinLastDart`, and guided Around the
+World's `atwLastDart`. `liveSnapshot()` builds it via `GAME_TYPES[game.gameType]
+.liveModeState(game)` — each mode declares this as a registry member next to
+its `playerSnapshot`/`evaluateVisit` (X01 has none, so `modeState` is `null`
+for X01 games).
+
+`ALLOWED_LIVE_KEYS` on the server allow-lists the generic top-level fields
+above plus `modeState` and `tournamentRoundLabel` as opaque values (the same
+"unrestricted shape, sanitized as a whole" treatment `players` already gets,
+not validated field-by-field) — anything else in a `POST /api/live` body is
+silently dropped (413 if the sanitized payload still exceeds 64KB). Before
+item 42, every one of `modeState`'s per-mode fields was its own top-level
+`ALLOWED_LIVE_KEYS` entry, and a new mode's fields were silently stripped
+twice by a forgotten allow-list update (`docs/bug-roadmap.md` BUG-28's 7
+keys, then `killerLives`/`checkoutLadderTarget`/`checkoutLadderVisits`) before
+either bug was caught in end-to-end testing — the `display.html` fallback
+defaults on a missing key (a plausible-looking wrong default, e.g. "lives
+target 3") gave no error to notice. **A new mode's own per-mode live fields
+now only ever need touching in its `GAME_TYPES` entry's `liveModeState` and in
+`display.html`'s own reader — never `ALLOWED_LIVE_KEYS`.** A genuinely new
+*generic* top-level field (applying across every mode, the way
+`tournamentRoundLabel` does) still needs adding to `ALLOWED_LIVE_KEYS` in the
+same change, same as before.
 
 Cricket's live scoreboard (`renderers.cricket.scorecard()` in `display.html`,
 mirrored by `renderGameCricket()` on the controller in `frontend/index.html`)
@@ -1972,31 +2873,69 @@ noise via `AudioContext`), not a recorded file — kept dependency/licensing-fre
 
 ## 8. Shareable Moments
 
-`buildMomentCard({icon, headline, player, statLine, footer})` renders an 800×800
-JPEG (quality 0.88) canvas card entirely client-side — no server round-trip, no
-image hosting. `fireMomentCard(type, opts)` builds the card, stores it in
-`momentCards[type]`, and fires the corresponding Home Assistant webhook
-(base64-encoded image) if one is configured. `shareMomentCard(type)` reads the
-stored canvas and opens the native Web Share sheet (or falls back to a plain
-image download).
+`buildMomentCard({icon, headline, player, statLine, desc, footer})` renders an
+800×800 JPEG (quality 0.88) canvas card entirely client-side — no server
+round-trip, no image hosting. Below the icon/headline/player name, `statLine`
+(if given) draws the specific-occurrence recap (e.g. "500 lifetime darts" or
+"501 · Won 3-1 in legs") and `desc` (if given) draws a second, muted, wrapped
+line beneath it — the actual **explanation of the achievement** (e.g. "Throw
+500 lifetime darts in Just Chuckin' It."), chained off whichever of
+player/statLine was drawn last so it never overlaps either. `fireMomentCard(type,
+opts)` is the one choke point nearly every achievement/moment card goes
+through; it resolves `desc` automatically via `achDescFor(type)` (the same
+lookup the live achievement overlay and voice announcements already use — see
+§4) whenever the caller doesn't supply its own, so every card gets a real
+explanation without each of the ~50 call sites needing to pass one. It then
+stores the card in `momentCards[type]` — always, regardless of HA
+configuration, since `shareMomentCard()`'s in-app Share button needs it — and,
+only if that event's Home Assistant webhook is actually configured (checked
+client-side via `haWebhookStatus`, refreshed at boot from
+`GET /api/settings/ha-webhook-status`, item 57 `docs/code-quality-roadmap.md`
+— the webhook IDs themselves stay admin-only, only a per-event boolean is
+exposed), JPEG-encodes the canvas to a data URL and fires the corresponding
+webhook. Skipping the encode+send when nothing's configured avoids building
+and POSTing a ~250KB base64 image the server would otherwise discard unread
+(`fireHaWebhook()`, `backend/db.js`, already no-ops per-event server-side when
+unconfigured — the client-side check just avoids the wasted work getting
+there).
+`shareMomentCard(type)` reads the stored canvas and opens the native Web Share
+sheet (or falls back to a plain image download).
 
-**Exception — passive/repeat-view features don't use `fireMomentCard()`
-directly**: the On This Day flashback (§3) calls `buildMomentCard()` directly
-and skips the HA webhook, since it fires on *every* profile page view, not on a
-real occurrence — routing it through `fireMomentCard()` would spam an HA
-webhook every time someone opens a profile page.
+`achDescFor()`'s fallback chain (§4) is the single source for every
+explanation: a badge id's `BADGE_INFO[id].desc` first, then `ACH_DESC_FALLBACK`
+for the handful of card types that aren't a persisted badge (`180`/`bigfish`/
+`ninedarter`, plus `matchwin`/`dailychallenge`, which fire a card on every
+occurrence rather than a one-off milestone). `checkout100` (the On This Day
+flashback's own label for a 100+ checkout, not a real `badge_id`) has its own
+`ACH_DESC_FALLBACK` entry for the same reason.
+
+**Exceptions — call sites that don't go through `fireMomentCard()`, and so
+resolve `desc` themselves**:
+- The On This Day flashback (§3) calls `buildMomentCard()` directly and skips
+  the HA webhook, since it fires on *every* profile page view, not on a real
+  occurrence — routing it through `fireMomentCard()` would spam an HA webhook
+  every time someone opens a profile page. Passes `desc: achDescFor(data.type)`
+  itself.
+- `sharePersonalBest(kind, value)` (Player Profile → Personal Bests → 📤 Share,
+  for Best Leg Average / Fewest Darts to Finish) — these aren't badges (no
+  `BADGE_INFO` entry, so `achDescFor()` doesn't apply), so it carries its own
+  short `desc` per kind.
 
 **Player Profile "Moments" gallery** (`docs/archive/shareable-moments-roadmap.md`):
 the Badge Case (§4) doubles as this — every *earned* badge tile gets a 📤 Share
 button (`shareEarnedBadge(badgeId)`) that regenerates that badge's card on
-demand (icon, label, current player) and shares/downloads it via the same
-`shareOrSaveCanvas()` path, independent of whether the achievement overlay is
-still showing or was ever tapped at the time. This is a genuine "moment from
-the past" replay, not a stored image — resolving the roadmap doc's own open
-question ("cache cards, or regenerate on demand?") in favor of regenerating,
-consistent with this app's standing "recompute at query time, store nothing
-pre-aggregated" philosophy. Not-yet-earned badges (dimmed/greyscale in the
-Badge Case) get no Share button, since there's nothing to regenerate.
+demand (icon, label, current player, and — since this reads straight from
+`BADGE_INFO[badgeId]`, which already has it — `desc`) and shares/downloads it
+via the same `shareOrSaveCanvas()` path, independent of whether the achievement
+overlay is still showing or was ever tapped at the time. This is a genuine
+"moment from the past" replay, not a stored image — resolving the roadmap
+doc's own open question ("cache cards, or regenerate on demand?") in favor of
+regenerating, consistent with this app's standing "recompute at query time,
+store nothing pre-aggregated" philosophy. Not-yet-earned badges (dimmed/
+greyscale in the Badge Case) get no Share button, since there's nothing to
+regenerate. (This re-share path previously omitted `statLine`/`desc` entirely —
+a re-shared badge card showed only the icon, headline, and player name, with
+no explanation of what was earned — see `docs/bug-roadmap.md` BUG-21.)
 
 ---
 
@@ -2058,6 +2997,49 @@ enumerate valid usernames.
   `loginFailCount`/`loginLockedUntil` so the CLI's `list` subcommand can show
   lockout status without a separate query.
 
+### Admin login — username case-insensitivity, and two frontend login-flow robustness fixes (2026-07)
+
+`admins.username` is `COLLATE NOCASE` (both the `UNIQUE` constraint and
+`adminByUsername`'s lookup query explicitly restate it), so logging in with a
+different case than the account was created with (`Admin` vs `admin`) already
+works correctly — verified directly against `db.login()`. Two separate,
+confirmed frontend issues found reviewing this area (`frontend/index.html`),
+both explaining a real "the password sometimes doesn't work, but refreshing
+shows I'm already logged in" symptom report:
+
+- **`Auth.login()` could silently under-report a genuinely successful login.**
+  `Auth.refresh()` swallows its own network errors (`try{...}catch(e){logErr(e);}`,
+  no rethrow) so a transient hiccup at page boot never blocks the whole app —
+  but `login()` called it right after `POST /api/login` succeeded, with
+  nothing checking whether that immediately-following `GET /api/me` actually
+  confirmed the new session. If that one call transiently failed, `Auth.loggedIn`
+  stayed `false` even though the server had already set a valid session cookie —
+  the caller saw no exception, re-rendered, and found the login gate still
+  showing as if the password had been rejected. A page refresh (a fresh
+  `/api/me` call) then correctly showed the account was logged in the whole
+  time. `login()` now retries `refresh()` once if the first attempt didn't
+  reflect a logged-in state, and throws a clear, honest error
+  ("Logged in, but couldn't confirm the session — try refreshing the page.")
+  only if it still can't confirm — never silently returns as if nothing
+  happened.
+- **The Settings page's own login/create-admin form
+  (`submitGateLogin()`/`submitGateCreateAdmin()`) had no submit-in-flight
+  guard** — unlike the other login modal (`uiLogin()`/`submitUiLogin()`,
+  triggered mid-gameplay by `Auth.ensureCanWrite()`), which already disables
+  its button while a request is pending. A double-click or a double Enter-press
+  across the username/password fields could fire two concurrent
+  `POST /api/login` requests with no protection and no visual sign a request
+  was already in flight. Now disables `#gate-submit-btn` for the duration of
+  the request, matching `submitUiLogin()`'s existing pattern, re-enabling it
+  only on failure.
+
+The account-lockout backoff above is a separate, working-as-designed
+contributor worth knowing about if this symptom recurs: a correct password
+genuinely **does** get rejected (423, not silently) for the remainder of an
+active lockout window, even though the lockout was earned by *earlier* failed
+attempts — the "no point at which a correct password stops working" guarantee
+in the section above only holds once `login_locked_until` has actually passed.
+
 ### Rate limiting (`server.js`, `rateLimit(bucket, ip, max, windowMs)`)
 
 | Bucket | Limit | Applies to |
@@ -2098,22 +3080,61 @@ beyond human play, but it's the reason Just Chuckin' It's milestone-badge check
 found during testing, doubling the request rate per dart in that mode was
 enough to occasionally trip this exact path.
 
-### `OCHE_REQUIRE_AUTH` — the write-gating switch
+### `require_admin_auth` — the write-gating switch (admin-toggleable at runtime, 2026-07)
 
 Two auth gates exist: **`requireAdmin`** always requires a logged-in admin
-session; **`requireWrite`** behaves exactly like `requireAdmin` unless
-`OCHE_REQUIRE_AUTH` is explicitly set to `"false"` or `"0"` (case-insensitive),
-in which case it's a no-op (public). Zero-trust default: reads (stats,
-scoreboard, settings-for-display) always stay public, but every write
-(recording turns, starting games, awarding badges) requires a logged-in admin
-session even on a fully-trusted LAN — the app never assumes a device on the
-network is safe just because it's on the network. An unrecognized env value
-fails closed (still required), not silently disabled. Set
-`OCHE_REQUIRE_AUTH=false` to opt back into the pre-2026-07 open-LAN behavior
-(reads and gameplay writes both open, only destructive/admin actions require
-login) for a fully-trusted household network. See
-`docs/security-hardening-roadmap.md` for the design history of this default
-flip.
+session; **`requireWrite`** behaves exactly like `requireAdmin` unless the
+effective setting is off, in which case it's a no-op (public). Zero-trust
+default: reads (stats, scoreboard, settings-for-display) always stay public,
+but every write (recording turns, starting games, awarding badges) requires a
+logged-in admin session even on a fully-trusted LAN by default — the app never
+assumes a device on the network is safe just because it's on the network.
+
+**Originally a boot-time-only env var, now a runtime Settings toggle.** The
+`OCHE_REQUIRE_AUTH` env var (unrecognized values fail closed, still required)
+still sets the **boot-time default** (`REQUIRE_AUTH_ENV_DEFAULT`, `server.js`)
+for a deployment that never touches the UI (e.g. infra-as-code), but an admin
+can now flip the actual behavior at runtime from **Settings → Admin accounts
+→ "Require admin login to play"**, stored as the `require_admin_auth` DB
+setting (`db.getRequireAuthSetting(envDefault)` — `{ requireAuth: row ?
+row.value === '1' : !!envDefault }`). Once an admin explicitly saves a choice
+here, the stored value governs **permanently** — even across a restart,
+regardless of what the env var says from then on. `requireWrite()` and
+`GET /api/auth-config` both re-resolve this fresh on every call rather than
+caching a boot-time constant, so toggling it in Settings takes effect
+immediately for every device, no restart required. This exists because the
+old boot-time-only switch meant the login prompt could only ever be
+turned off by editing the env var and restarting the container — annoying to
+reach mid-session, and not something a self-hoster without shell/docker
+access could do at all; letting the admin who's already authenticated into
+Settings make this call directly, with a clear warning, matches every other
+security-relevant tunable in this app (the lockout backoff knobs right above
+this section, `pin_lockout_threshold`, etc.) already being admin-configurable
+rather than env-var-only.
+
+**The Settings checkbox always reflects the resolved effective value**, not
+just the raw stored one — `Auth.requireAuth` (read fresh via `GET
+/api/auth-config` as part of `Auth.refresh()`, called at the top of
+`renderSettings()`) is what the checkbox loads from
+(`loadSettingsField()`'s `require_admin_auth` special case), so it correctly
+shows "on" for a deployment that's never explicitly saved a choice but has
+the zero-trust env default in effect, rather than misleadingly showing
+unchecked just because nothing's been written to the `settings` table yet.
+Unchecking it (`onRequireAuthToggle()`) immediately reverts the click and
+shows a `uiConfirm()` warning ("anyone who can reach this server on your
+network... would then be able to add or remove players, start or end games,
+wipe stats, or change these settings, with no login prompt at all") before
+actually committing the uncheck — turning it back on needs no confirmation,
+since that direction only ever locks things down further. The actual save
+still goes through the normal "Save settings" button, same as every other
+field on this screen; the confirm only gates the checkbox's own state.
+
+Set `OCHE_REQUIRE_AUTH=false` to opt back into the pre-2026-07 open-LAN
+behavior as the initial default (reads and gameplay writes both open, only
+destructive/admin actions require login) for a fully-trusted household
+network — until an admin overrides it via Settings. See
+`docs/security-hardening-roadmap.md` for the design history of the original
+zero-trust default flip.
 
 ### The setup wizard and `Auth.ensureCanWrite()` (`frontend/index.html`)
 
@@ -2214,7 +3235,9 @@ None currently open. `POST /api/ha-webhook` (the inbound trigger that fires an
 already-configured HA webhook) is gated by `requireWrite` like every other
 state-changing endpoint (SEC-7, `docs/security-audit-roadmap.md`) — requires a
 logged-in admin session by default, the same as `POST /api/games` or any other
-write, unless `OCHE_REQUIRE_AUTH=false` opts back into open-LAN behavior.
+write, unless the effective `require_admin_auth` setting is off (§9) — the
+`OCHE_REQUIRE_AUTH` env var's boot-time default, or an admin's runtime
+Settings override.
 
 ---
 
@@ -2288,6 +3311,63 @@ new game opens with; the Settings copy (both the Scoring section that owns the
 setting and the Accessibility section, which cross-references it) says so
 directly, so an admin setting up the app for a low-vision or motor-impaired
 player knows which mode to pick.
+
+### Scoring-screen layout: portrait "Focus Mode" / landscape "Tablet Split" (2026-07)
+
+`#screen-game`'s in-game markup (both the static pre-game-start skeleton and
+`renderGameShell()`'s per-leg/game rebuilt template, `frontend/index.html`)
+groups `#scoreboard`/`#slots`/`#status`/`.turn-actions` inside one `.rail`
+wrapper, sibling to `.oche` (the multi-row + Pad/Dartboard board itself). Both
+`.game-play-area` (the outer, single-innerHTML-target wrapper `renderGameShell()`
+replaces wholesale) and `.rail` are `display:contents` by default, so on a
+portrait/narrow viewport everything flattens straight through to `#screen-game`'s
+existing `display:flex;flex-direction:column` layout — unchanged from before
+this redesign, aside from `.oche`/`.turn-actions` needing explicit `order`
+values (1 and 2) since `.turn-actions` had to move earlier in the markup, ahead
+of `.oche`, so `.rail` could group it contiguously with
+scoreboard/slots/status.
+
+`@media (orientation:landscape) and (min-width:700px)` (a tablet held
+sideways) flips `.rail` into a real `display:flex;flex-direction:column` box
+and grid-places it beside `.oche` in a **single-row** two-column grid
+(`#screen-game{display:grid;grid-template-columns:minmax(190px,300px) 1fr;
+grid-template-rows:1fr}`) — a narrow rail column for scores/status/actions,
+full-height board column. Deliberately a single row with `.rail` as one real
+box, not `.oche` spanning multiple rail rows: an earlier version grid-placed
+`#scoreboard`/`#slots`/`#status`/`.turn-actions` as four separate row-1..5
+items with `.oche` spanning `grid-row:1/-1` across all of them, which hit a
+genuine CSS Grid behavior (verified live via Playwright, not a guess): a
+multi-row-spanning item's min-size need gets redistributed into every
+intrinsically-sized ("auto"-family) row it spans, ballooning row 1 to ~875px
+tall in an 820px-tall viewport for Around the Clock's one-line scoreboard
+card and squeezing the flexible row to 0. Grouping the rail into one real
+flex-column box sidesteps that whole class of bug.
+
+Two other landscape-only adjustments, both because the rail column is
+genuinely narrower than the old full-width scoring screen:
+- `#slots`' three dart-slot cards go from a 3-column grid to a single column
+  of compact horizontal rows (number + points side by side, not stacked).
+- Around the Clock/Around the World's solo scoreboard row (`.pscore`, which
+  packs a name block, a meta block, a remaining-count, and a wrapping
+  20/63-cell outcome grid all into one flex row) switches to
+  `flex-direction:column` — in a flex row that content had squeezed the
+  outcome grid down to almost no width, wrapping it into dozens of rows and
+  ballooning the card's height; stacked, the grid gets the rail's full width.
+
+GAME OVER/LEG COMPLETE/etc. results overlays (`finishUnit()`,
+`finishMarathonLeg()`, `renderMarathonAnalysisScreen()`, the Checkout Blitz
+"TIME'S UP" screen) all target `.game-play-area` (not `.oche`), replacing its
+entire innerHTML with one results div — the same takeover behavior as before
+this redesign, when `.oche` alone was the only child needing replacement.
+Since that results div becomes `.game-play-area`'s only child, a
+`.game-play-area > *:only-child{grid-column:1/-1;grid-row:1}` landscape rule
+gives it the full grid area instead of the narrow rail slot `.rail`/`.oche`
+would otherwise occupy.
+
+Bounce Out moved into `.turn-actions .undo-row` as a third flex button
+(relabeling "Undo Last Turn" to "Undo Turn" for space), reclaiming the
+standalone full-width row it used to occupy — the space-saving portrait
+change ("Focus Mode").
 
 ### Contrast (WCAG AA)
 
@@ -2387,6 +3467,49 @@ in `backup-lib.js`): the `settings.backup_retention_days` value if one has been
 set from Settings → Backups, else `BACKUP_RETENTION_DAYS`, else the 7-day
 default.
 
+### Settings page visual redesign — Modular Dashboard + Search (2026-07)
+
+No new backend endpoint or data shape, no change to any individual setting's
+own semantics — a `/frontend-design` restyle of how the existing 17 settings
+sections (Admin accounts, Require admin login to play, Player PINs, Scoring,
+Accessibility, Voice Announcements, Shareable Moments, Data Collection, Live
+Scoreboard, Heatmap, Smart Home Integration, Daily Challenge, Server Errors,
+Backups, Data Export, Merge Players, Danger Zone) are presented and navigated
+in `frontend/index.html`, replacing the previous 4-tab-plus-accordion layout:
+
+- **Modular dashboard tiles** (`.stile`): every setting is a 2-column grid tile
+  (`.stile-grid`) that shows a one-line current-state summary up front —
+  "On, every device", "3 protected", "Scorched", "Not set" — computed by
+  `refreshSettingsTileStates()`/`SETTINGS_TILE_STATES` straight from the same
+  form elements `SETTINGS_FIELDS` already loads/saves, so a tile's summary can
+  never drift out of sync with what **Save settings** would actually persist.
+  Refreshed live as the admin edits a field (event delegation on `input`/
+  `change` at the `#settings-content` container, not a per-field `onchange`),
+  not just once at page load. Admin accounts' and Player PINs' counts come
+  from `renderAdminsList()`'s response and the already-loaded `roster`/`prefs`
+  respectively, since neither is a `SETTINGS_FIELDS` entry. The six admin-tool
+  tiles that aren't a toggle/value at all (Daily Challenge, Server Errors,
+  Backups, Data Export, Merge Players, Danger Zone) show a static one-line
+  description instead of a live state, deliberately — an eagerly-fetched
+  "0 recent errors"/"last backup: today" figure isn't worth a network round
+  trip just for the collapsed tile face.
+- Tapping a tile's header expands it to the full grid row (`.stile.expanded`,
+  `grid-column:1/-1`) rather than squeezing its existing detail body into a
+  half-width column — `toggleSettingsSection()` still owns the same show/hide
+  + chevron-rotate behavior it always has, just also toggles this class.
+- Zones (Access & Account / Gameplay & Display / Integrations / Admin & Danger
+  Zone) are now continuous zone-label headings over their own tile grid rather
+  than tab-gated panels — the old `.player-tabs`/`switchSettingsTab()` tab bar
+  and the `.settings-group[data-group]` `hidden` gating are gone; every zone
+  is always on the page at once. Each zone has a left-border accent color
+  (gold/blue/green/red) as a redundant visual grouping cue layered on top of
+  the always-present zone-label text — never the only signal for which zone a
+  tile belongs to.
+- **Search box** (`#settings-search-input` → `filterSettingsTiles()`): filters
+  tiles by their own rendered text (title + collapsed state line), so a new
+  tile's search behavior never needs a hand-maintained keyword entry. A zone's
+  label and grid hide together once every tile beneath it is filtered out.
+
 ### Settings → Backups (admin-gated UI + API)
 
 Lets an admin manage backups from the app instead of needing shell access to
@@ -2431,7 +3554,7 @@ file.
 
 ### Settings → Data Export (admin-only)
 
-`docs/data-export-roadmap.md`'s original design proposed a per-player,
+`docs/archive/data-export-roadmap.md`'s original design proposed a per-player,
 PIN-gated export reachable from a Player Profile page; that was reopened with
 fresh product direction (2026-07) and shipped differently — **admin-only**,
 reached from a dedicated admin page (`Settings → Admin & Danger Zone → Data
@@ -2442,9 +3565,13 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   gamePlayers, turns, darts, timelineEvents, playerBadges,
   dailyChallengeAttempts, tournaments, tournamentPlayers, tournamentRounds,
   tournamentMatches, dartComponents, loadouts, ghostRaces, leagues,
-  leaguePlayers }` — every player/game/stat table (including the four
-  tournament tables, `docs/bug-roadmap.md` BUG-6, and the two league tables,
-  §18), reformatted as plain JSON. It
+  leaguePlayers, leagueFixtures, playerUuidAliases, savedGames,
+  marathonSessions, marathonSessionLegs }` — every
+  player/game/stat table (including the four
+  tournament tables, `docs/bug-roadmap.md` BUG-6, the three league tables,
+  §18, the merge tool's uuid-alias table, the saved-games pause slots, and
+  the two Marathon session tables — session groupings/durations can't be
+  reconstructed from the raw leg games alone), reformatted as plain JSON. It
   deliberately excludes the `admins`, `sessions`, `settings`, and `server_errors`
   tables entirely (internal/credential tables, not "your darts data"), and the
   `players` rows only select `id, uuid, name, out_mode, created_at, dart_weight` —
@@ -2475,18 +3602,58 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   `turns` reference as `player_id`/`winner_id`), never a portable identity on
   its own; `uuid` is the one that's portable. Throws `httpError(404)` for an
   unknown name. Deliberately out of scope for v1: tournament/league/
-  daily-challenge/ghost-race participation — see `docs/data-export-roadmap.md`
+  daily-challenge/ghost-race participation — see `docs/archive/data-export-roadmap.md`
   for the reasoning.
 - **`GET /api/players/export`** (`?name=...`, `requireAdmin`) streams that
   object as a `Content-Disposition: attachment` download named
   `oche-export-<sanitized-name>-<YYYY-MM-DD>.json`. `400` with no `name`
   param, `404` for an unknown player.
+- **`db.getPlayerCsvExport(name, kind)`** (CSV spreadsheet export, admin-only)
+  — the deliberately simpler, **non-portable** "your own stats as a
+  spreadsheet" flavor: no uuids, no opponents' turns, no import path (so
+  unlike the JSON export it cannot reconstruct H2H and isn't meant to).
+  `kind='games'` returns one row per game the player is in, with per-game
+  aggregates of **their own turns only**: `game_id, started_at, completed_at,
+  game_type, category, legs_per_set, sets_per_game, practice, opponents,
+  result, turns, darts_thrown, points_scored, avg_per_turn, best_turn, busts,
+  checkouts, highest_checkout` — `opponents` is the other participants'
+  names, `; `-joined and alphabetized; `result` is relative to this player
+  (`won` / `lost` / `completed` for a finished game with no recorded winner /
+  `unfinished`); `avg_per_turn` is `points_scored / turns` rounded to 2
+  decimals (empty when they had no turns); `highest_checkout` is
+  `MAX(checkout_points)` over their `checkout=1` turns (empty when none).
+  `kind='turns'` returns one row per turn **they threw** (never an
+  opponent's), ordered by game then turn id: `turn_id, game_id, game_type,
+  category, turn_at, set_no, leg_no, scored, bust, checkout, checkout_points,
+  leg_won, target_score, declared_unsolvable, darts, darts_detail` —
+  `darts_detail` is each
+  dart in throw order as `S`/`D`/`T`+sector notation (`T20 S5 D16`), with
+  `25` for a single bull, `BULL` for the 50, and `MISS` for sector 0. Column
+  semantics follow the underlying schema, so `scored`/`checkout`/`bust` mean
+  whatever they mean for that row's `game_type` (Cricket's `scored` is
+  points, `target_score` is Checkout-Trainer-only, etc.). Encoding is
+  RFC-4180 (cells containing `"`, `,`, or newlines are quoted with `""`
+  doubling; CRLF line endings), and any string cell starting with
+  `=`/`+`/`-`/`@`/tab is prefixed with `'` — the standard CSV-formula-
+  injection neutralization, since player names may legally start with those
+  characters. Throws `httpError(404)` for an unknown name, `httpError(400)`
+  for a `kind` other than `games`/`turns`.
+- **`GET /api/players/export-csv`** (`?name=...&kind=games|turns`,
+  `requireAdmin`) streams that CSV as a `Content-Disposition: attachment`
+  download named `oche-export-<sanitized-name>-<kind>-<YYYY-MM-DD>.csv`
+  (`Content-Type: text/csv; charset=utf-8`). `kind` defaults to `games` when
+  omitted; `400` with no `name` param or a bad `kind`, `404` for an unknown
+  player.
 - **`db.importPlayerExport(payload)`** (per-player import, admin-only) — the
   counterpart to `getPlayerExport()`. `400`s if `payload.schemaVersion !== 1`
   or the shape is otherwise malformed. Resolves the main player and every
   opponent stub by **`uuid` first** (never `name` alone, since `name` is only
   unique within one server's own roster): a `uuid` match reuses that existing
-  local row; no match creates a new row from the exported `uuid`+`name`,
+  local row; failing that, the **`player_uuid_aliases` table** (written by
+  the player-merge tool, see "Settings → Merge Players" below) is checked so
+  an old export of a since-merged-away player resolves onto the surviving
+  row instead of recreating a stub duplicate; no match on either creates a
+  new row from the exported `uuid`+`name`,
   uniquifying the name (`"Name (2)"`, `"Name (3)"`, …) if it collides with an
   unrelated local player that has a *different* uuid, rather than silently
   merging two different people's histories onto one row. Every referenced
@@ -2497,6 +3664,24 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   hooks (league auto-tagging, badge-award checks, HA webhooks), since this is
   a historical data restore, not a live game being played, and the export's
   own `playerBadges` already carries exactly which badges the source earned.
+  The insert column lists must round-trip every stat-bearing column the
+  export's `SELECT *` carries: `game_players.start_score` (the handicap
+  marker `NOT_HANDICAPPED` filters on), `turns.declared_unsolvable`,
+  `turns.declared_hit` (the Honesty % input), and `turns.affected_player_id`
+  — the last remapped through the same source-id → local-id map as every
+  other player reference, never copied raw. Each uses `?? null`/`?? 0`
+  fallbacks so exports written before a column existed stay importable.
+  `games.config` is validated as JSON at the boundary (`400` on a malformed
+  entry — the read paths parse it unguarded), and a **killer** game's
+  id-keyed `config.numbers` (item 43, docs/code-quality-roadmap.md) is
+  re-keyed from the export's (source-server) player ids to this server's
+  own resolved local ids — `idMap` (the same source-id → local-id map every
+  other player reference in the import goes through) already carries
+  exactly that translation for every stub the import touched, so no
+  separate name-based map is needed; an unmapped key would make the whole
+  game replay inert. A database still carrying a pre-migration name-keyed
+  config gets converted to id-keys once at boot by
+  `migrateKillerConfigsToIdKeys()` before any import ever runs against it.
   `league_id` is always imported as `NULL` (leagues aren't part of a
   per-player export). **Duplicate-import guard**: before inserting each game,
   checks for an existing local game with the same
@@ -2520,7 +3705,10 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   directions: **"Export all data"** navigates straight to `/api/export-all`
   (unchanged); **"Export a player…"** opens `#screen-player-export`
   (`renderPlayerExportScreen()`), which has a `<select>` (populated from the
-  already-loaded `roster` array) + "Export data" button for export, and a
+  already-loaded `roster` array) + "Export data" button for export, a
+  "Spreadsheet (CSV) export" subsection with "Games CSV" / "Turns CSV"
+  buttons (`exportSelectedPlayerCsv(kind)`, navigating to
+  `/api/players/export-csv` for the same selected player), and a
   file input + "Import" button (`askImportPlayer()`) below it for import —
   reads the chosen file client-side (catching malformed JSON before it ever
   reaches the network), confirms via `uiConfirm()`, then `POST`s the parsed
@@ -2542,6 +3730,94 @@ stay effectively unique. `id` remains the internal join/FK target
 everywhere — `uuid` is exposed in exports (full-database and per-player) as
 the portable identity `importPlayerExport()` (above) keys its player/opponent
 resolution on.
+
+### Settings → Merge Players (admin-only)
+
+`docs/archive/player-merge-roadmap.md`. Combines two player records that are
+really the same person (a typo'd second account, someone added twice): the
+**target** (an explicit admin choice, never inferred from age/game count)
+absorbs the **source**'s full history and the source's row is deleted. Lives
+in **Settings → Admin & Danger Zone → Merge Players** — two `<select>`s
+(source = "duplicate to merge away", target = "player who keeps everything")
+and a **Preview merge…** button; there is no merge without a preview.
+
+- **`db.getMergePreview(sourceName, targetName)`** / **`GET
+  /api/players/merge-preview`** (`?source=...&target=...`, `requireAdmin`) —
+  computes everything a merge WOULD do without writing a byte: `{ ok,
+  blocked, source, target, moves, resolutions, blockers }`. `moves` is
+  per-table counts of the source's rows (games, turns, gameWins, badges,
+  challengeAttempts, tournamentEnrollments, tournamentTitles,
+  tournamentMatchSlots, leagueEnrollments, leagueFixtures, dartComponents,
+  loadouts, ghostRaces, marathonSessions, uuidAliases); `resolutions` lists what will be
+  auto-resolved (`sharedBadges`, `resolvableChallengeDates`); `blockers`
+  lists what stops the merge outright (`sharedGames`, `sharedTournaments`,
+  `sharedLeagues`, `ambiguousChallengeDates`). `404` unknown player, `400`
+  same player.
+- **`db.mergePlayers(sourceName, targetName)`** / **`POST
+  /api/players/merge`** (`{ source, target }`, `requireAdmin`, rate-limited
+  10/min like the backup-restore routes, logged server-side) — re-derives
+  the same blockers itself (the API can't be called blind or raced past the
+  preview) and `400`s if any exist; otherwise runs the whole rewrite in a
+  **single transaction** (any failure rolls back to the exact pre-merge
+  state) across every table with a FK into `players.id`:
+  - **Plain reassignment** (no uniqueness constraint, or no shared row can
+    exist once the blockers pass): `game_players`, `turns` (both `player_id`
+    AND `affected_player_id` — the Killer whose-life-changed column has no FK,
+    so a missed reassignment would dangle silently rather than error),
+    `games.winner_id`, `daily_challenge_attempts`,
+    `tournaments.champion_id`/`runner_up_id`, `tournament_players`,
+    `tournament_matches.player1_id`/`player2_id`/`winner_id`,
+    `league_players`, `dart_components`, `loadouts`, `ghost_races`,
+    `marathon_sessions` (the one players-FK table with no games link —
+    unreassigned, the final source-player DELETE would CASCADE the whole
+    Marathon history away).
+  - **Killer configs**: `games.config.numbers` is keyed by player *id* (item
+    43, docs/code-quality-roadmap.md), so every killer game being absorbed
+    gets its source-id key rewritten to the target's id
+    (`_rewriteKillerConfigIds()`), or the merged history would replay with
+    an orphaned assignment and zero out everyone's replay-derived Killer
+    stats. Unlike the old name-keyed scheme, `renamePlayer()` needs no
+    equivalent rewrite — a rename never changes a row's id, so it can never
+    orphan this key.
+  - **`player_badges`** (both earned the same badge): the target keeps
+    `MAX(count)` — a merge must never inflate a count beyond what either
+    history actually earned — and `MIN(earned_at)`; the source's remaining
+    unshared badges reassign as-is.
+  - **`daily_challenge_attempts`** (same date from both, exactly one
+    completed — the only unblocked kind): the completed attempt survives,
+    whichever side it came from.
+  - **`league_fixtures`**: `player1_id`/`player2_id` reassign, then any
+    pair the swap left inverted is re-canonicalized back to
+    `player1_id < player2_id` (the invariant
+    `getPendingFixturesForPlayers()`'s order-independent lookup relies on).
+    A source-vs-target fixture can never survive to this point — it would
+    require a shared league, which blocks.
+  - **`loadouts.is_default`**: if the target already has a default loadout,
+    the source's default flag is cleared — the target never ends up with
+    two defaults, same "target's own settings/preferences always win" rule
+    as name/`out_mode`/`dart_weight`/PIN/`uuid` (none of which ever change).
+  - **Blocked outright** — shared game (`game_players`' composite PK would
+    collide, and a "played themselves" row is a structural oddity worth
+    surfacing, not papering over), shared tournament or league enrollment
+    (same collision + silent bracket/standings corruption risk), and a
+    same-date challenge pair where both or neither completed (no
+    non-destructive default; the admin deletes one first via the existing
+    Settings → Daily Challenge reset tool).
+  - **Identity**: aliases already pointing at the source repoint to the
+    target (a chained merge A→B→C leaves A's alias resolving to C in one
+    hop), the source's own `uuid` is recorded in `player_uuid_aliases`
+    pointing at the target, and the source row is deleted via plain SQL —
+    not `deletePlayer()`, whose guards exist to protect exactly the history
+    that has just become the target's. Returns the same
+    `moves`/`resolutions` shape as the preview, captured pre-write.
+
+**Why `player_uuid_aliases` exists**: merging deletes the source's row, so
+its `uuid` would stop resolving — and a *later* import of an old export
+still carrying that uuid (from another server) would silently recreate a
+stub duplicate of the player the admin just consolidated.
+`importPlayerExport()`'s `resolveStub()` therefore checks the alias table as
+a fallback whenever a direct `players.uuid` match fails, before falling
+through to "create a new player" — resolving old exports onto the survivor.
 
 ---
 
@@ -2571,11 +3847,12 @@ already-migrated database is a safe no-op).
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
 | `category` | `TEXT NOT NULL` | For X01 games: the starting score as a string (`'501'`/`'301'`/`'170'`/`'101'`, or a filler `'1000'` for Daily Challenge's non-scoring formats). Cricket games write a display label instead (`'Cricket (15-20, Bull)'` or `'Custom Cricket'`); Chuckin games write `"Just Chuckin' It"`; the two guided drills write `'Guided Around the Clock'`/`'Guided Around the World'`. Category-scoped stat filters (`OPENING_CATS`'s `IN (501,301,170,101)`, nine-darter detection) either match X01 values explicitly or filter on `game_type`+`config`, so the non-X01 labels never collide with them |
 | `legs_per_set` / `sets_per_game` | `INTEGER NOT NULL` | |
-| `created_at` / `completed_at` | `TEXT` | `completed_at` is `NULL` for in-progress/abandoned games |
+| `created_at` / `completed_at` | `TEXT` | `completed_at` is `NULL` for an in-progress game **or** one that ended without a real finish — see `dnf_at` below and "Forfeiting a game / DNF" after the `game_players` table. `completed_at` means "reached a genuine conclusion" (a real win, or a forfeit-triggered walkover) — never both `completed_at` and `dnf_at` on the same row |
 | `winner_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | Set by `completeGame()`. **Must be a participant of the game** — `completeGame()` rejects a `winner` name that isn't in this game's `game_players` with a `400` (`docs/bug-roadmap.md` BUG-9), the same participant check `recordWalkover()` enforces; a `null` winner (abandoned game) is allowed. Behavior for legitimate input is unchanged — the frontend only ever completes with a real participant |
+| `dnf_at` | `TEXT` | `NULL` unless the match ended without anyone reaching a real finish — set by `abandonGame()` (the "End game" early-exit) or by `forfeitPlayer()` when bowing out leaves zero active participants. Deliberately separate from `completed_at`: every `completed_at IS NOT NULL` stat query already means "this match reached a genuine finish" (e.g. `getBaseballWonLegs()`'s own comment on that invariant) — reusing it for an abandoned match would let a since-abandoned mid-leg's partial totals start counting as real results |
 | `practice` | `INTEGER NOT NULL DEFAULT 0` | Explicit practice flag, set at creation |
-| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, `'baseball'`, `'doubles_practice'`, `'chuckin'`, `'checkout_trainer'`, `'around_the_clock'`, or `'around_the_world'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; each New Game flow passes its own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
-| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{innings: 9}` for Baseball rows (fixed, not yet a New Game choice), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows and both guided-drill rows (no config needed — every number/multiplier is always "in play") |
+| `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, `'baseball'`, `'doubles_practice'`, `'chuckin'`, `'checkout_trainer'`, `'around_the_clock'`, `'around_the_world'`, `'bobs_27'`, `'checkout_ladder'`, `'gauntlet'`, `'killer'`, `'shanghai'`, `'halve_it'`, `'dead_man_walking'`, or `'pressure_chamber'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; each New Game flow passes its own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
+| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{innings: 9}` for Baseball rows (fixed, not yet a New Game choice), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows, both guided-drill rows, and Bob's 27 rows (no config needed — Bob's 27 always plays the fixed D1-D20 ladder), `{targets: [...]}` for Halve-It rows (§32), `{rounds: [15 frozen {target, par} pairs]}` for Dead Man Walking rows — computed once server-side at creation and never client-supplied or recomputed (§33), and `{rounds: 15}` for Pressure Chamber rows (fixed, server-overridden regardless of client input — §34) |
 | `player_count` | `INTEGER` | **Frozen** participant count at creation (not a live subquery) — see §3's mode-scoping note |
 | `league_id` | `INTEGER REFERENCES leagues(id) ON DELETE SET NULL` | Nullable — set by the `onGameCreated` auto-tag hook (§18), never by `createGame()`'s own INSERT. `NULL` for every game that isn't a tagged league match (the overwhelming majority) |
 
@@ -2587,6 +3864,65 @@ already-migrated database is a safe no-op).
 | `out_mode` | `TEXT NOT NULL DEFAULT 'double'` | Per-game checkout rule actually used (may differ from the player's current default) |
 | `dart_weight` | `INTEGER` | Snapshot at game start — **as of `docs/archive/dart-builder-roadmap.md`**, sourced from the selected loadout's barrel `weight_g` (`NULL` if no loadout was selected), not from `players.dart_weight` (see §16) |
 | `loadout_id` | `INTEGER REFERENCES loadouts(id) ON DELETE SET NULL` | The loadout selected for this player in this game, if any (§16). Nullable — playing without a loadout remains fully valid |
+| `start_score` | `INTEGER` | X01 handicapping only (§25): this player's own handicap starting score for this game, when it differs from the game-wide `games.category` score. `NULL` for every non-handicapped player and every non-X01 game. The presence of any non-NULL value in a game is what the `NOT_HANDICAPPED` exclusion (nine-darter/fewest-darts/first-9 leaderboards, Elo) filters on, so it must survive export/import round trips |
+| `dnf` | `INTEGER NOT NULL DEFAULT 0` | Set on this one participant when they leave the match early — see "Forfeiting a game / DNF" below. `0` for every player who finished (or is still playing) |
+
+### Forfeiting a game / DNF
+
+Two related, additive facts — neither changes what `completed_at`/`winner_id` mean for
+any existing stat query.
+
+- **Bowing out of a still-live multiplayer match** (`forfeitPlayer(gameId, playerName)`,
+  `POST /api/games/:id/forfeit` `{ player }`): the ☰ game-options menu's "🚶 Bow
+  out…" lists every still-active participant (not just the current thrower — anyone
+  might have to leave); the game keeps going for whoever's left. Marks that one
+  participant's `game_players.dnf = 1`. If that leaves exactly one other active
+  participant, the match is genuinely over (nobody left to play against), so it
+  completes normally via `completeGame()` with that survivor as the winner — a
+  walkover, the same shape `recordWalkover()` already uses for tournament matches. If
+  it leaves zero active participants (a solo game's only participant bowing out), the
+  match ends with no winner, marked `dnf_at` instead. Returns `{ ok, ended, winnerName }`
+  so the frontend knows whether to keep playing or wrap up. Scoped client-side to the
+  turn-rotation modes that share `advanceToNextActivePlayer()`/`isRoundComplete()`'s
+  skip-`dnf` logic and `soleActiveLeaderIndex()`'s leader-exclusion (X01, Cricket,
+  Baseball, Shanghai, Halve-It, Pressure Chamber, Killer) — Ghost mode's "opponent"
+  isn't a real player who can leave, and every solo drill has nobody left to keep
+  playing with anyway. A departed player stays IN `game.players` (their recorded
+  stats/turns/scoreboard row are untouched) — only their own turn is skipped from
+  then on, and every per-mode winner/tie check (`evaluateVisitCricket()`'s `opponents`
+  filter, `soleActiveLeaderIndex()` for Baseball/Shanghai/Halve-It, the filtered
+  candidate pool `pressureChamberDecideWinnerIndex()` sees) excludes them so their
+  frozen total can neither block someone else's win nor win/extend a tie themselves.
+  Killer reuses its own existing `eliminated` flag (bowing out sets both) rather than
+  a second parallel skip mechanism, since Killer's turn-skip and win check already key
+  off `eliminated` alone.
+- **Ending the whole match early** (`abandonGame(gameId)`, `POST /api/games/:id/abandon`,
+  no body): the ☰ menu's "🚪 End game" — every still-active participant is marked
+  `dnf = 1` and the game gets `dnf_at`. Wired into `askEndGame()`'s existing confirm
+  flow for every case except a Daily Challenge attempt (which already has its own
+  dedicated `daily_challenge_attempts` tracking, completely separate from
+  `games.completed_at`/`dnf_at` — marking the underlying game row here would be
+  redundant). This is what makes a 501 game that's never closed on a double, then
+  ended early, count as a DNF instead of silently staying an invisible, uncounted
+  in-progress row forever (the pre-existing behavior — `askEndGame()` never called any
+  completion endpoint at all).
+- **Known limitation, actively blocked rather than silently allowed**: `dnf` is a
+  live-session-only signal — a save/resume cycle (`docs/archive/saved-games-roadmap.md`)
+  replays purely from recorded `turns`/`darts` via `rebuildX01State()`/
+  `rebuildCricketState()`/etc., which have no knowledge of an in-session bow-out, so
+  resuming a game after someone bowed out would silently rebuild that player as still
+  active. Rather than half-support this, `saveGame()` rejects outright (409, "This
+  game has a player who bowed out — it can't be saved for later") whenever any
+  `game_players.dnf = 1` row exists for the game — pausing a still-in-progress bow-out
+  match just isn't offered, instead of quietly resuming into a desynced state.
+  `saveGame()`/`getResumeState()` also both check `dnf_at` (not just `completed_at`)
+  for the same reason — an abandoned match must be exactly as unsavable/unresumable
+  as a completed one.
+- Both endpoints are `requireWrite` (same tier as recording a turn — bowing out or
+  ending a match is gameplay, not admin surgery). Committed tests:
+  `backend/test/db.forfeit-and-abandon.test.js` (backend guards/lifecycle) and the
+  "DNF-aware winner determination" describe block in `backend/test/scoring.test.js`
+  (per-mode winner/tie exclusion + `isRoundComplete()` skip-`dnf` correctness).
 
 ### `turns` (one row per visit, indexed on `player_id` and `game_id`)
 | Column | Type | Notes |
@@ -2594,10 +3930,14 @@ already-migrated database is a safe no-op).
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
 | `game_id` / `player_id` | `INTEGER NOT NULL, FK, ON DELETE CASCADE` | |
 | `set_no` / `leg_no` | `INTEGER NOT NULL` | Must be a positive integer (`addTurn()` rejects `0` or negative explicitly — an explicit `0` is validation-rejected, not silently treated as the "omitted" default of `1`) |
-| `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3). `addTurn()` rejects a non-numeric value outright rather than silently coercing it to `0`. For `game_type='x01'` specifically, `POST /api/games/:id/turns` (the one production caller that opts into `addTurn()`'s `enforceConsistency` flag) additionally rejects a `scored` that doesn't match the sum of that visit's dart face values (`0` required on a bust; `checkout_points` must equal `scored` on a checkout) — `docs/security-audit-roadmap.md` SEC-22. For `game_type='baseball'` the same caller also rejects a `scored` that doesn't equal this visit's runs — the sum of dart `multiplier`s that hit the inning's target number, where the inning is derived server-side from the player's own prior turn count in the leg (`min(inning, 9)` for extra innings); a Baseball turn must also be neither a bust nor a checkout (`docs/security-audit-roadmap.md` SEC-25). Still deliberately skipped for Cricket (`scored` is computed from mark-closing state, not a dart-value sum, so the same rule would reject legitimate Cricket visits) and for Doubles Practice / Chuckin / Checkout Trainer / Around the Clock / World (non-arithmetic or non-points `scored`) |
+| `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3). `addTurn()` rejects a non-numeric value outright rather than silently coercing it to `0`. For `game_type='x01'` specifically, `POST /api/games/:id/turns` (the one production caller that opts into `addTurn()`'s `enforceConsistency` flag) additionally rejects a `scored` that doesn't match the sum of that visit's dart face values (`0` required on a bust; `checkout_points` must equal `scored` on a checkout) — `docs/security-audit-roadmap.md` SEC-22. For `game_type='baseball'` the same caller also rejects a `scored` that doesn't equal this visit's runs — the sum of dart `multiplier`s that hit the inning's target number, where the inning is derived server-side from the player's own prior turn count in the leg (`min(inning, 9)` for extra innings); a Baseball turn must also be neither a bust nor a checkout (`docs/security-audit-roadmap.md` SEC-25). For `game_type='bobs_27'`, `scored` is that round's own *gain only* — never a negative penalty (see §2's "store the gain, derive the penalty"); the same caller derives the round from the player's own prior turn count (capped at 20), rejects a `scored` that doesn't match `hits * round*2` on the submitted darts, rejects `checkout=true` outright, and requires `bust` to match whether replaying every prior round's gain/penalty plus this round's own would drop the running score to 0 or below (`docs/archive/practice-ladders-roadmap.md` Part A). Still deliberately skipped for Cricket (`scored` is computed from mark-closing state, not a dart-value sum, so the same rule would reject legitimate Cricket visits) and for Doubles Practice / Chuckin / Checkout Trainer / Around the Clock / World (non-arithmetic or non-points `scored`) |
 | `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans. Cricket turns always write `bust=0, checkout=0` — cricket has neither concept. Doubles Practice repurposes `bust` as "this dart ended the round" (so-close or wrong-double, §2) — the closest existing column to that meaning, since this mode has no bust/win concept of its own either; `checkout` stays `0` always. Guided Around the Clock repurposes `bust` the identical way: `1` marks whichever dart completed the round (all 20 numbers hit) — there's no "so-close"/"wrong-target" failure mode here, only completion or abandonment. Guided Around the World writes `bust=0` always (no round to end, matching Chuckin's own turns) |
 | `checkout_points` | `INTEGER` | Only set when `checkout=1` (X01 only) |
-| `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set only by Cricket's write path (`enterTurnCricket()`) — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged |
+| `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set only by Cricket's write path (`enterTurnCricket()`) — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged. Checkout Trainer repurposes it as "answered with the objectively fewest darts" (§19) |
+| `target_score` | `INTEGER` | Checkout Trainer only (§19): the target offered for that round — unlike X01 there's no persistent "remaining score" state to derive it from afterward. `NULL` for every other game type; `addTurn()` range-checks it to 1–170 |
+| `declared_unsolvable` | `INTEGER NOT NULL DEFAULT 0` | Checkout Trainer trick questions only (§19): `1` marks a round answered by declaring "no possible checkout" instead of tapping out darts — the only turn shape allowed to carry **zero** dart rows (`addTurn()` rejects it outside `checkout_trainer` games, with any darts attached, or with a nonzero `scored`). The verdict still lives on `bust`/`checkout`/`leg_won` (correct call → `checkout=1, leg_won=1`; wrong call → `bust=1`); this flag exists so "a real checkout was solved" queries (Toughest Checkout Solved) can exclude declarations |
+| `affected_player_id` | `INTEGER` | Killer only (§ Killer): which player's life total this dart changed (`NULL` = no effect, thrower's own id = self-effect, another id = an attack). `NULL` for every other game type |
+| `declared_hit` | `INTEGER` | The Pressure Chamber only (§34): the player's before-the-throw self-declaration — `1` = declared hit, `0` = declared miss, `NULL` = no declaration / every other game type. **Not a scoring input** and carries no leaderboard weight; feeds only the informational Honesty % stat. Deliberately has **no consistency guard** (unverifiable by design — an honor-system signal); `addTurn()` validates only its shape (`0`/`1`) and rejects it outside `pressure_chamber` games |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 
 ### `darts` (one row per physical dart, indexed on `turn_id` and `(sector,multiplier)`)
@@ -2642,13 +3982,13 @@ already-migrated database is a safe no-op).
 | `game_id` | `INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE` | Links to the practice game the attempt was played in — per the "games-context" convention (own table + FK, not a boolean on `games`) |
 | `player_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | |
 | `challenge_date` | `TEXT NOT NULL` | `YYYY-MM-DD`, client-local |
-| `format` | `TEXT NOT NULL` | One of the 6 formats in §6 |
+| `format` | `TEXT NOT NULL` | One of the 9 formats in §6 |
 | `target` | `INTEGER` | Checkout target for `checkout_sprint`; `NULL` otherwise |
 | `result_darts` | `INTEGER` | The format's metric value (despite the name, not literally always "darts" — see §6); `NULL` until completed |
 | `completed` | `INTEGER NOT NULL DEFAULT 0` | |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 
-### Tournament mode (`docs/tournament-mode-roadmap.md`, single-elimination only — see §15)
+### Tournament mode (`docs/archive/tournament-mode-roadmap.md`, single- and double-elimination — see §15)
 
 **`tournaments`**
 | Column | Type | Notes |
@@ -2656,7 +3996,7 @@ already-migrated database is a safe no-op).
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
 | `name` | `TEXT NOT NULL` | |
 | `category` | `TEXT NOT NULL` | X01 starting score as a string: `'501'`\|`'301'`\|`'170'`\|`'101'` — every match in the tournament uses this same format |
-| `bracket_type` | `TEXT NOT NULL DEFAULT 'single_elim' CHECK (IN ('single_elim','double_elim'))` | Always `'single_elim'` today — the column exists so a future double-elimination pass (tracked separately, not yet started) needs no migration |
+| `bracket_type` | `TEXT NOT NULL DEFAULT 'single_elim' CHECK (IN ('single_elim','double_elim'))` | `'single_elim'` or `'double_elim'` — chosen at creation (§15). Double-elim is restricted to exact powers of two (4/8/16/32/64/128) |
 | `player_count` | `INTEGER NOT NULL` | Frozen at creation |
 | `status` | `TEXT NOT NULL DEFAULT 'in_progress' CHECK (IN ('in_progress','completed'))` | |
 | `champion_id` / `runner_up_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | Set together, atomically, the instant the final resolves |
@@ -2675,7 +4015,7 @@ already-migrated database is a safe no-op).
 |---|---|---|
 | `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
 | `tournament_id` | `INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE` | |
-| `bracket` | `TEXT NOT NULL DEFAULT 'winners' CHECK (IN ('winners','losers','grand_final'))` | Always `'winners'` today (no losers bracket in single-elim) |
+| `bracket` | `TEXT NOT NULL DEFAULT 'winners' CHECK (IN ('winners','losers','grand_final'))` | `'winners'` for every single-elim round; a double-elim tournament also has `'losers'` rounds and two `'grand_final'` rounds (the final and its reset decider) |
 | `round_no` | `INTEGER NOT NULL` | 1-based, earliest round first |
 | `label` | `TEXT NOT NULL` | `"Quarterfinal"`/`"Semifinal"`/`"Final"`/`"Round N"` — computed once at creation, not looked up dynamically (see §15) |
 | `legs_per_set` / `sets_per_game` | `INTEGER NOT NULL` | This round's own match format |
@@ -2691,14 +4031,14 @@ already-migrated database is a safe no-op).
 | `game_id` | `INTEGER REFERENCES games(id) ON DELETE SET NULL` | The normal `games` row this match's play created — `NULL` until started, stays `NULL` forever for a walkover |
 | `winner_id` | `INTEGER REFERENCES players(id) ON DELETE SET NULL` | Set once, never changed |
 | `winner_next_match_id` / `winner_next_slot` | `INTEGER` / `INTEGER (1 or 2)` | Where the winner advances to |
-| `loser_next_match_id` / `loser_next_slot` | `INTEGER` / `INTEGER` | Always `NULL` in v1 (single-elim has no losers bracket) — reserved for a future double-elimination pass, per the roadmap doc's original schema design |
+| `loser_next_match_id` / `loser_next_slot` | `INTEGER` / `INTEGER` | Where the loser drops to. `NULL` for single-elim (a loss eliminates) and for double-elim losers-bracket matches (a second loss eliminates); set on double-elim winners-bracket matches so the loser drops into the losers bracket |
 
 A match's **status** (`pending`/`ready`/`in_progress`/`complete`) is derived at read
 time by `getTournament()`, never stored: `winner_id` set → `complete`; else `game_id`
 set → `in_progress`; else both player slots filled → `ready`; else `pending`. Same
 "compute from raw data" philosophy as the rest of the schema (§1).
 
-### League mode (`docs/league-mode-roadmap.md`, X01 or Cricket — see §18)
+### League mode (`docs/archive/league-mode-roadmap.md`, X01 or Cricket — see §18)
 
 **`leagues`**
 | Column | Type | Notes |
@@ -2751,7 +4091,7 @@ the linked game's `completed_at IS NULL` → `in_progress`; else `fulfilled`.
 `ha_webhook_<event>` (×12, see §10), `pin_lockout_threshold`,
 `admin_lockout_grace`, `admin_lockout_base_seconds`, `admin_lockout_max_seconds`,
 `scoreboard_layout`, `default_scoring_input`,
-`card_tagline`.
+`card_tagline`, `heatmap_style`, `heatmap_number_style`.
 
 ### `admins`
 | Column | Type | Notes |
@@ -2815,12 +4155,47 @@ the linked game's `completed_at IS NULL` → `in_progress`; else `fulfilled`.
 | `human_darts` / `ghost_darts` | `INTEGER` (nullable) | Total darts each side took to finish this specific race |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 
+### `player_uuid_aliases` (player merge — "Settings → Merge Players")
+| Column | Type | Notes |
+|---|---|---|
+| `uuid` | `TEXT PRIMARY KEY` | A merged-away player's old `uuid` — kept resolvable so an old export still imports onto the survivor instead of recreating a stub duplicate |
+| `player_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | The surviving player this uuid now resolves to. A merge repoints any aliases that targeted the (now-deleted) source, so a chained merge always resolves in one hop |
+| `merged_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
+
+### `saved_games` (§23 Saved Games — "save for later" pause slots)
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `game_id` | `INTEGER NOT NULL UNIQUE REFERENCES games(id) ON DELETE CASCADE` | The paused in-progress game — `UNIQUE`, one pause slot per game. No snapshot blob: everything needed to resume is derived by replaying the game's own recorded turns (see §23) |
+| `saved_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
+
+### `marathon_sessions` (Marathon Mode — the "games-context table" convention, not a new game_type)
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `player_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | The one players-FK table with no games link — so `resetStats()` clears it explicitly (a games wipe can't cascade it) and `mergePlayers()` must reassign it (or the source-player delete would cascade the history away) |
+| `duration_minutes` | `INTEGER NOT NULL DEFAULT 45` | |
+| `started_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
+| `ended_at` | `TEXT` | `NULL` = session still in progress (mirrors `games.completed_at`'s nullable-lifecycle-marker shape) |
+
+### `marathon_session_legs`
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `session_id` | `INTEGER NOT NULL REFERENCES marathon_sessions(id) ON DELETE CASCADE` | |
+| `game_id` | `INTEGER REFERENCES games(id) ON DELETE SET NULL` | The leg's ordinary solo practice 501 game — only ever populated server-side by `startMarathonSession()`/`startNextMarathonLeg()`, never client-supplied. `SET NULL` on game deletion, so a stats reset reverts legs to unlinked rather than deleting session history structure |
+| `leg_order` | `INTEGER NOT NULL` | |
+| `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
+
 ### Cascade summary
 
 Deleting a `player` cascades: their `game_players` rows, `turns` (and
 transitively their `darts`), `player_badges`, `daily_challenge_attempts`,
-`tournament_players`, their `dart_components`/`loadouts` rows, and their
-`ghost_races` rows. `deletePlayer()`
+`tournament_players`, their `dart_components`/`loadouts` rows, their
+`ghost_races` rows, their `marathon_sessions` rows (and transitively their
+`marathon_session_legs`), and any `player_uuid_aliases` rows pointing at them.
+Deleting a `game` cascades its `saved_games` row (if paused) and SET-NULLs any
+`marathon_session_legs.game_id` pointing at it. `deletePlayer()`
 then prunes any `games` row left with zero remaining `game_players` (also run
 once at boot to self-heal older databases). Any `tournament_matches`/`tournaments`
 row referencing the deleted player (`player1_id`/`player2_id`/`winner_id`/
@@ -2859,13 +4234,16 @@ hard connection caps, not a `rateLimit()` bucket.
 
 ## 15. Tournament Mode
 
-`docs/tournament-mode-roadmap.md`. Single-elimination only — double-elimination
-is explicitly deferred (tracked as its own Not-started item on
-`docs/open-roadmap-items.md`; the schema's `winner_next_*`/`loser_next_*`
-pointer-pair design already supports it without a migration, see §13). X01
-only — any of the four starting scores (501/301/170/101). Backend:
-`backend/db.js`'s tournament section. Frontend: `frontend/index.html`'s
-"TOURNAMENT MODE" block, reachable via the **Tournaments** nav button.
+`docs/archive/tournament-mode-roadmap.md`. **Single- AND double-elimination** —
+`tournaments.bracket_type` (`'single_elim'` default | `'double_elim'`) chosen on
+the setup screen. Both share one schema: the `winner_next_*`/`loser_next_*`
+pointer-pair design (§13) makes a losers-bracket drop just "a loser with a
+`loser_next_match_id` instead of `NULL`." X01 only — any of the four starting
+scores (501/301/170/101). Backend: `backend/db.js`'s tournament section.
+Frontend: `frontend/index.html`'s "TOURNAMENT MODE" block, reachable via the
+**Tournaments** nav button. Tournament mode is now **feature-complete** — both
+bracket types, the setup screen, the tabbed double-elim bracket view, badges, and
+Player Profile stats all ship.
 
 ### Design principle: a tournament match IS a normal game
 
@@ -2891,7 +4269,15 @@ screen offers three seeding methods, all computed in `frontend/index.html`:
 
 ### Bracket generation (`createTournament()`, `backend/db.js`)
 
-Given N players and `bracketSize` = the smallest power of two ≥ N:
+`createTournament({name, category, players, rounds, bracketType})` dispatches to
+`_generateSingleElimBracket()` or `_generateDoubleElimBracket()` on
+`bracketType`. Both take the seed-ordered `players` and the per-round
+`rounds` format array; the expected `rounds` length is the round count for that
+bracket shape (single: `log2(bracketSize)`; double:
+`doubleElimStructure(k).length`), validated up-front.
+
+**Single-elimination** — given N players and `bracketSize` = the smallest power of
+two ≥ N:
 
 - **Standard tournament seeding placement** (`_bracketSeedOrder()`): recursively
   expands `[1,2]` → `[1,4,2,3]` → `[1,8,4,5,2,7,3,6]` → ..., pairing each
@@ -2918,6 +4304,31 @@ Given N players and `bracketSize` = the smallest power of two ≥ N:
   `"Quarterfinal"`, else `"Round N"` — and stored on `tournament_rounds.label`,
   not recomputed on read.
 
+**Double-elimination** — v1 is restricted to exact powers of two (4/8/16/32/64/128,
+`TOURNAMENT_DOUBLE_ELIM_COUNTS`), the deliberate de-risking from the roadmap's §2:
+with an exact power of two there are **zero byes**, so the losers bracket has no
+cascading-bye problem to solve. The round plan comes from
+`doubleElimStructure(k)` in `frontend/scoring.js` (shared with the frontend's
+per-round format table so counts/labels can never drift): `k` winners rounds
+(match counts N/2, N/4, …, 1), then `2k−2` losers rounds alternating a **minor**
+round (LB survivors pair off) and a **major/drop** round (that round's
+winners-bracket losers enter), then the **Grand Final** and its conditional
+**Grand Final (Reset)** decider — `3k` rounds and `2N−1` matches total (the
+reset only ever gets played out when the reset condition is met).
+`_generateDoubleElimBracket()` creates every round/match up-front, then wires the
+pointer pairs in a second UPDATE pass:
+  - Winners winners advance normally; the winners-final winner → Grand Final slot 1.
+  - Winners-round-1 losers pair into losers round 1; each later winners round `i`
+    (≥2) drops its losers into losers round `2(i−1)` slot 2 (`loser_next_*`).
+  - Losers minor rounds feed the next drop round 1:1 (slot 1); drop rounds pair
+    their winners into the next minor round; the **losers final** winner → Grand
+    Final slot 2.
+  So by construction Grand Final slot 1 is always the winners-bracket champion and
+  slot 2 the losers-bracket champion. (Anti-rematch losers-bracket seeding — the
+  optional refinement that reorders which LB survivors meet — is a deliberate v1
+  simplification: the bracket is a valid, fully-playable pairing, just not the
+  rematch-minimizing one.)
+
 ### Match lifecycle
 
 1. **`startTournamentMatch(matchId)`**: validates the match is `ready` (both
@@ -2928,11 +4339,22 @@ Given N players and `bracketSize` = the smallest power of two ≥ N:
 2. **On completion**: an `onGameCompleted` hook (registered once at module
    load — see §1's "Game-lifecycle hooks") checks whether the finished game's
    id matches a `tournament_matches.game_id`; if so it calls
-   `_advanceTournamentMatch(matchId, winnerId)`, which records the winner,
-   marks the loser `eliminated` in `tournament_players`, and either fills the
-   winner into `winner_next_match_id`'s slot or — if there is no next match
-   (this was the final) — sets `tournaments.champion_id`/`runner_up_id`/
-   `status='completed'`/`completed_at` and marks the winner `champion`.
+   `_advanceTournamentMatch(matchId, winnerId)`, which records the winner and then:
+   the **loser** drops into `loser_next_match_id`'s slot if set (a
+   double-elimination winners-bracket loss) or is marked `eliminated` in
+   `tournament_players` if not (single-elim, or a losers-bracket loss); the
+   **winner** fills `winner_next_match_id`'s slot, or — if there is no next match
+   (a single-elim final) — the tournament completes via `_completeTournament()`
+   (sets `champion_id`/`runner_up_id`/`status='completed'`/`completed_at`, marks
+   the winner `champion`). **Giant Slayer** (§7) is awarded per real (non-bye)
+   match by `_maybeAwardTournamentGiantSlayer()`, so a winners-bracket upset still
+   counts even though that loser only drops rather than being eliminated.
+   The **grand final** is settled separately by `_resolveGrandFinal()` (a plain
+   "no next match → complete" rule can't express the conditional decider): if the
+   winners-bracket champion (slot 1) wins game one the tournament ends; if the
+   losers-bracket champion (slot 2) wins game one, both hold exactly one loss, so
+   the pre-created **reset** match is populated with the same two finalists and
+   becomes `ready` — the tournament only completes once that decider resolves.
    `_advanceTournamentMatch()` **guards** before doing any of that
    (`docs/bug-roadmap.md` BUG-4): it silently returns if the match already has a
    `winner_id` (a replayed/forged completion can't overwrite a decided match) or
@@ -2978,13 +4400,35 @@ Given N players and `bracketSize` = the smallest power of two ≥ N:
   `in_progress`/`complete`) is always icon + text label together
   (`TOURNEY_STATUS_ICON`/`TOURNEY_STATUS_LABEL`), never color alone.
 
+### Frontend: double-elimination setup and bracket view
+
+- **Setup** (`renderTournamentSetup()`): a Single/Double-elimination toggle
+  (`setTournamentBracketType()`). Double-elim blocks Create with an explanatory
+  note unless the selected count is one of `TOURNAMENT_DOUBLE_ELIM_COUNTS`
+  (4/8/16/32/64/128). The per-round format table derives its rows and labels from
+  `tournamentRoundPlan()`, which for double-elim calls the **same**
+  `doubleElimStructure()` the backend generates from.
+- **Bracket view** (`renderTournamentDetail()`): matches are grouped into per-round
+  columns. Single-elim (only the winners bracket) shows the columns directly, no
+  tabs. Double-elim renders a **Winners / Losers / Grand Final tab switcher**
+  (`.tourney-tabs`, `role="tablist"`) showing one bracket panel
+  (`role="tabpanel"`) at a time — the roadmap's §4 "two scrollable panels with a
+  tab switcher," which keeps the deep double-elim tree (up to ~19 rounds at 128
+  players) readable rather than stacking every bracket in one long scroll.
+  `tournamentBracketTab` holds the active tab (module-level, persists across the
+  re-renders an action triggers; reset in `openTournament()`); `setTournamentBracketTab()`
+  re-renders from `tournamentDetailCache` with no network round-trip. The tablist
+  is a standard roving-tabindex WAI-ARIA pattern — the selected tab has
+  `tabindex="0"`, the rest `-1`, and `tournamentTabKeydown()` handles
+  ArrowLeft/Right + Home/End, moving both selection and focus. The linearized
+  "Full bracket (list view)" and "Up Next" lists (both bracket-agnostic, always
+  visible) remain the non-spatial way to follow either bracket type.
+
 ### Deliberately out of scope for this pass
 
-- **Double-elimination** — schema supports it (§13), generation/advancement
-  logic doesn't exist yet. Tracked separately on `docs/open-roadmap-items.md`.
-- **A "Practice this" style deep link or bracket-tree drag/zoom** — not
-  requested; the simple column layout was sufficient for single-elimination's
-  much shallower tree (no winners/losers split to manage).
+- **Anti-rematch losers-bracket seeding** — the pairing is valid and fully
+  playable but not rematch-minimizing (see generation above).
+- **A "Practice this" style deep link or bracket-tree drag/zoom** — not requested.
 
 ### Tournament badges and Player Profile stats (§7-8, built)
 
@@ -3244,7 +4688,7 @@ dart struck *after* it already fell isn't reliable data; a camera has genuine
 ground truth at the moment of impact, a human guessing under time pressure
 doesn't.
 
-### The generalized dartboard heatmap (X01, Cricket, Doubles Practice, Chuckin)
+### The generalized dartboard heatmap (X01, Cricket, Baseball, Doubles Practice, Chuckin)
 
 Originally Chuckin-exclusive (`getChuckinHeatmap()`/`buildChuckinHeatmap()`);
 generalized since `darts` is the one universal per-dart table every game type
@@ -3255,28 +4699,86 @@ uses. `GET /api/players/chuckin-heatmap` is kept exactly as-is for backward
 compatibility; `GET /api/players/dart-heatmap?name=&gameType=&mode=` is the
 generalized surface. The Player Profile's "Dartboard Heatmap" section
 (`dart-heatmap-section`/`dart-heatmap-body`, inside the shared `chartSection`
-markup) now shows on all four game-type tabs instead of Chuckin only —
-`loadDartHeatmap()` fires for whichever tab is currently active, replacing the
-old `if(playerGameType !== 'chuckin') return` early-out.
+markup) shows on every game-type tab that has one — `loadDartHeatmap()` fires
+for whichever tab is currently active, except Checkout Trainer (hidden
+entirely, since its taps aren't real thrown darts).
 
-`buildDartHeatmap(cells, {ariaLabel})` renders three things per number: the
-inner-single and outer-single regions (each independently shaded by hit
-count), and the miss ring (shaded by `missHeat(wedge, depth)`, its **own
-independent heat-scale normalization**, not shared with the scoring regions,
-since hit and miss counts are wildly different population sizes per player).
-A **zone-unspecified single** (Pad mode, or a pre-feature row) is excluded
-from the heatmap entirely, by product decision — real hit data, just not
-attributable to inner or outer, so rather than show any visual trace of it,
-it's simply not plotted. (An earlier version drew a faint diagonal hatch
-overlay across both single regions for that number instead of omitting it —
-changed 2026-07 per a live user bug report: the hatch box read as a display
-glitch, not a meaningful third state.) It's still never silently folded into
-either real bucket or split 50/50 — omitted is not the same as miscounted.
-The flat `topSectors` list is a separate surface and keeps its own distinct
-textual treatment (`dartLabelFromParts()` appends `" (zone unknown)"` to a
-zone-less single, never to a double/treble/bull, which never had a zone
-concept at all) — unaffected by this change, since that's a text list, not
-the heatmap.
+`buildDartHeatmap(cells, {ariaLabel, noZoneTracking, heatmapStyle, numberStyle})`
+renders three things per number: the inner-single and outer-single regions
+(each independently shaded by hit count), and the miss ring (shaded by
+`missHeat(wedge, depth)`, its **own independent heat-scale normalization**,
+not shared with the scoring regions, since hit and miss counts are wildly
+different population sizes per player).
+
+**Heat-scale and number-band style** (Settings → Heatmap,
+admin-toggled via `PUT /api/settings` keys `heatmap_style`/
+`heatmap_number_style`, read by every device via the public
+`GET /api/settings/heatmap-style` / `GET /api/settings/heatmap-number-style`
+endpoints — same "public read, admin write" split as `colorblind_mode`/
+`scoreboard_layout`). Designed via `/frontend-design`, picked by the site
+owner from a set of mockups (2026-07):
+- `heatmap_style` — `'classic'` (default) is the original single-hue dark-grey
+  (`#1c1e1a`) to gold (`~#d9b46a`) scale, unchanged. `'scorched'` is a
+  thermal-camera black → ember red → orange → white-hot ramp
+  (`scorchedFill(t)`, 7-stop interpolation), with a Gaussian-blur glow filter
+  (`#hm-ember-glow`) applied to any board region whose heat exceeds `0.55` —
+  "the hottest spots visibly burn." The miss ring shares the same fill scale
+  in both styles but never gets the glow.
+- `heatmap_number_style` — only meaningful when `heatmap_style` is
+  `'scorched'` (forced back to `'original'` otherwise, regardless of what's
+  saved, since the two extra treatments were designed to complement the
+  Scorched ramp specifically): `'original'` (default) is the plain cream
+  Bebas Neue numeral, unchanged from classic. `'molten_seam'` draws one
+  cracked, glowing divider ring (`#hm-seam-glow`) around the whole board plus
+  a per-sector radial tick and a stencil-cut numeral (dark outline, bright
+  orange fill). `'chalk_ledger'` draws one blurred scorch-mark ring
+  (`#hm-scorch-blur`) bleeding out from the board edge plus a per-sector
+  hand-chalk tally tick and a cursive-font numeral, tying into the app's
+  existing chalkboard visual language.
+`loadDartHeatmap()` reads the two module-level `let heatmapStyle`/
+`let heatmapNumberStyle` (refreshed at boot alongside `colorblindMode`) and
+passes them straight through as `opts.heatmapStyle`/`opts.numberStyle`.
+
+A **zone-unspecified single** — `d.zone` is only ever set by the geometric
+Dartboard-mode board's own single-region taps (`buildDartboard()`'s `oc(sec,
+1,'inner'|'outer')`) — is handled two different ways, depending on whether
+the game type can ever produce a zone value at all (`docs/bug-roadmap.md`
+BUG-24):
+- **X01, Chuckin, Doubles Practice** (`noZoneTracking` unset/false — these all
+  have a real Dartboard-mode alternative to Pad mode, so an unzoned single
+  reflects the player's own input-mode choice): excluded from the heatmap
+  entirely, by product decision — real hit data, just not attributable to
+  inner or outer, so rather than show any visual trace of it, it's simply not
+  plotted. (An earlier version drew a faint diagonal hatch overlay across
+  both single regions for that number instead of omitting it — changed
+  2026-07 per a live user bug report: the hatch box read as a display glitch,
+  not a meaningful third state.) It's still never silently folded into either
+  real bucket or split 50/50 — omitted is not the same as miscounted.
+- **Cricket, Baseball** (`noZoneTracking` true — `renderPadCricket()`/
+  `renderPadBaseball()` are always used regardless of the `dartboardMode`
+  preference, so these two game types can **never** produce a zone value;
+  every single they ever record is unzoned, permanently, not by choice):
+  the exclusion is skipped, and both the inner and outer sub-regions read one
+  merged bucket (every single for that number, zone ignored) instead of two
+  separately-keyed always-empty ones — so the whole single ring lights up
+  with the real total, tooltip reading e.g. `"15: 3 hits"` with no
+  "(inner)"/"(outer)" claim, rather than staying permanently blank. Applying
+  the X01-style exclusion here had silently hidden every single hit —
+  including on real Cricket targets — from these two game types' own
+  heatmaps entirely.
+
+The flat `topSectors` list (§3, Dart Analytics), the Dart Analytics checkout
+routes list, and every checkout-route breakdown (`toggleFinishRoute()` — the
+Home page's Top Checkouts leaderboard and the Player Profile's own Top
+Finishes list) are all separate surfaces from the heatmap, unaffected by
+either heatmap behavior above since they're text lists, never gated on zone
+at all. They share one formatter, `dartLabelFromParts()`: a zone-less single
+renders bare, exactly like a double/treble/bull always has (those never had
+a zone concept to begin with). It used to append an explicit `" (zone
+unknown)"` suffix instead — removed 2026-07 per a live user report: on an
+aggregate view like these, which inner/outer half was hit was never the
+point, so the caveat just read as clutter, the same call made for the
+heatmap's own hatch-overlay removal above.
 
 ### Testing
 
@@ -3284,15 +4786,18 @@ the heatmap.
 grouping" and "getBounceOutCount" describe blocks; `backend/test/db.turn-
 validation.test.js`'s "addTurn — zone/missZone/missDepth/bounced validation"
 block; `backend/test/scoring.test.js`'s regression proving this metadata never
-changes `evaluateVisit()`'s outcome. See `docs/archive/dartboard-zone-tracking-
-roadmap.md`'s own "Testing" section for the full list, including a manual
-end-to-end Playwright verification pass against a running server.
+changes `evaluateVisit()`'s outcome; `backend/test/dart-heatmap.test.js`'s
+`noZoneTracking` describe block (`docs/bug-roadmap.md` BUG-24), vm-extracting
+`buildDartHeatmap()` directly from `frontend/index.html`. See
+`docs/archive/dartboard-zone-tracking-roadmap.md`'s own "Testing" section for
+the full list, including a manual end-to-end Playwright verification pass
+against a running server.
 
 ---
 
 ## 18. League Mode
 
-`docs/league-mode-roadmap.md`. X01 or Cricket, per `leagues.game_type`
+`docs/archive/league-mode-roadmap.md`. X01 or Cricket, per `leagues.game_type`
 (Doubles Practice/Just Chuckin' It/Checkout Trainer are structurally excluded
 regardless — all solo/no-winner formats). Backend: `backend/db.js`'s league
 section. Frontend: `frontend/index.html`'s "leagues" block, reachable via the
@@ -3384,6 +4889,15 @@ brackets were pre-BUG-7. A league's own config is closer to player-profile
 configuration data (which also survives a stats reset) than to tournament's
 mid-flight bracket state.
 
+`resetStats()` **does** explicitly `DELETE FROM marathon_sessions` (cascading
+`marathon_session_legs`) — the same BUG-7 class as tournaments: nothing in
+`marathon_sessions` references a `games` row (only `player_id`), and
+`marathon_session_legs.game_id` is `ON DELETE SET NULL`, so without the
+explicit delete a stats reset would leave completed sessions behind as phantom
+history (`sessionsCompleted > 0` with zero legs). `wipeAllData()` needs no
+marathon line — the players wipe cascades `marathon_sessions` (and
+transitively the legs) for free.
+
 ### No player-deletion guard (a deliberate non-decision, not an oversight)
 
 Tournament mode registers a `registerDeletePlayerGuard()` (§15) because an
@@ -3402,15 +4916,16 @@ maintained-tally suggestion, not this one.
 - **New Game "log to league?" picker — retired (2026-07)**: `updateLeaguePicker()`/
   `#league-picker-wrap`/`setup.leagueId` and the H2H banner they sat beside
   (`updateH2HBanner()`/`#h2h-banner`, `GET /api/players/h2h`) were all removed
-  when the New Game screen became a 3-step wizard (`docs/new-game-flow-roadmap.md`)
-  — superseded by Step 2's fixture-based "League Game" entry, see below and §18's
-  own "League fixtures / pending matches" section. `GET /api/leagues/eligible`
-  and the server-side `onGameCreated` auto-tag hook's own 0/1/>1-candidate
-  fallback (unrelated to any picker) are both unaffected and still fully
-  functional — only the frontend picker UI and its now-unreachable HTTP
-  companion (`/api/players/h2h`; `getH2HRecord()` itself stays, still used
-  internally by per-player export/import and still covered by its own tests)
-  are gone.
+  when the New Game screen became a 3-step wizard (`docs/archive/new-game-flow-roadmap.md`)
+  — superseded first by a Step 2 dropdown "League Game" entry, then (2026-07
+  reorder) by an opt-in banner in the player-picking step once exactly 2
+  players are named, see below and §20's own League Game description.
+  `GET /api/leagues/eligible` and the server-side `onGameCreated` auto-tag
+  hook's own 0/1/>1-candidate fallback (unrelated to any picker) are both
+  unaffected and still fully functional — only the frontend picker UI and its
+  now-unreachable HTTP companion (`/api/players/h2h`; `getH2HRecord()` itself
+  stays, still used internally by per-player export/import and still covered
+  by its own tests) are gone.
 - **League setup screen**: a `game_type` toggle (X01/Cricket) alongside the
   existing category picker, which switches between the X01 starting-score
   `<select>` and a Cricket classic/custom `<select>` depending on the chosen
@@ -3441,7 +4956,7 @@ maintained-tally suggestion, not this one.
   local `Date` getters; doing that to a bare calendar date shifts it by a day
   in any negative-UTC-offset timezone).
 
-### League fixtures / pending matches (`docs/league-mode-roadmap.md`)
+### League fixtures / pending matches (`docs/archive/league-mode-roadmap.md`)
 
 A scheduled-but-unplayed pairing, tracked separately from the direct
 `games.league_id` tagging above — `league_fixtures` follows `tournament_matches`'
@@ -3474,20 +4989,21 @@ because a fixture needs to exist *before* any game does.
   array via `getLeagueFixtures()`): every fixture with its derived status
   (`FIXTURE_STATUS_ICON`/`FIXTURE_STATUS_LABEL` — Pending/In progress/Played,
   icon + text together).
-- **New Game "League Game" entry** (§20's Step 2, `docs/new-game-flow-roadmap.md`):
-  once Step 1 finishes with exactly 2 players, `setupGoToStep2()` calls the
-  pending-fixture endpoint above and, if it returns anything, injects a
-  "🏆 League Game" option at the top of Step 2's dropdown
-  (`renderSetupStep2Content()`). Selecting it (`applyLeagueGameSelection()`)
-  auto-fills `setup.gameType`/`setup.start`/`setup.cricketPreset` from the
-  fixture's league and sets `setup.leagueFixtureId`, skipping the X01
-  starting-score question entirely (hidden whenever League Game is selected,
-  since the league already pins it) — a Custom Cricket league still needs its
-  7 targets chosen in Step 3, since the league's category doesn't pin the
-  exact numbers. 2+ pending fixtures reveal a second "Which league match?"
-  dropdown, the same secondary-dropdown slot X01's own flavor question uses.
-  `setup.leagueFixtureId` threads through `startGame()`'s `game` object and
-  `DB.beginGame()`'s `POST /api/games` payload.
+- **New Game "League Game" banner** (§20's Step 2, `docs/archive/new-game-flow-roadmap.md`
+  for the original dropdown-entry design, superseded 2026-07 by this reactive
+  banner once the wizard's game-choice/player-choice order flipped): every
+  time exactly 2 players are named in Step 2, `checkLeagueFixtureForPair()`
+  calls the pending-fixture endpoint above and, if it returns anything, shows
+  a gold-bordered `#setup-league-section` banner with an opt-in checkbox
+  (`renderSetupLeagueBanner()`). Checking it (`toggleLeagueGameSelection()` →
+  `applyLeagueGameSelection()`) auto-fills `setup.gameType`/`setup.start`/
+  `setup.cricketPreset` from the fixture's league and sets
+  `setup.leagueFixtureId` — a Custom Cricket league still needs its 7 targets
+  chosen in Step 3, since the league's category doesn't pin the exact numbers.
+  2+ pending fixtures for the same pair still just offer `fixtures[0]` (a kept
+  simplification from the original design). `setup.leagueFixtureId` threads
+  through `startGame()`'s `game` object and `DB.beginGame()`'s
+  `POST /api/games` payload exactly as before.
 - **`wipeAllData()`/`resetStats()`**: `league_fixtures` needs no explicit
   delete in either — `wipeAllData()`'s `DELETE FROM leagues` cascades it
   (`league_id ON DELETE CASCADE`, also independently covered by the players
@@ -3508,14 +5024,14 @@ because a fixture needs to exist *before* any game does.
   ended, never removed, short of `wipeAllData()`.
 - **Double round-robin, manual fixtures, and end-of-season unplayed-fixture
   callouts** — each resolved as "not for v1" rather than left open; see
-  `docs/league-mode-roadmap.md`'s "League fixtures / pending matches" section
+  `docs/archive/league-mode-roadmap.md`'s "League fixtures / pending matches" section
   for the reasoning behind each.
 
 ---
 
 ## 19. Checkout Trainer
 
-Full design: `docs/checkout-trainer-roadmap.md`. A pure mental-recall drill —
+Full design: `docs/archive/checkout-trainer-roadmap.md`. A pure mental-recall drill —
 no dartboard throwing involved at all — genuinely different from Daily
 Challenge's "Checkout Sprint" format (which measures a real physical throw at
 a real target). The app gives a target score; the player taps out a proposed
@@ -3533,7 +5049,10 @@ rather than a live match with an opponent to track, so a bounced/missed dart
 and turn-level undo have no meaningful role — "Undo Dart" (which un-stages an
 uncommitted dart within the current attempt) and "Submit checkout" (this
 mode's relabeled Enter Turn) remain, since a checkout attempt is still a
-staged up-to-3-dart visit.
+staged up-to-3-dart visit. When the session has trick questions on
+(`config.trickQuestions`), a "🚫 No possible checkout" button appears
+alongside Submit — the declaration answer path (see **Trick questions**
+below).
 
 **Game type**: `checkout_trainer`, one of `KNOWN_GAME_TYPES` (`backend/db.js`).
 Every dart-count attempt is its own 1-3 dart `turns` row — the same per-dart-
@@ -3544,7 +5063,10 @@ attempt genuinely IS a normal X01 visit starting from `remaining = target`.
 **Schema**: `turns.target_score INTEGER` (nullable) — the target offered for
 that round; only ever populated for this game type, since (unlike X01) there's
 no persistent "remaining score" state to derive it from afterward.
-`games.config.mode`: `'freeform' | 'blitz'` — a mode flag, not a second
+`turns.declared_unsolvable INTEGER NOT NULL DEFAULT 0` — `1` marks a
+trick-question round answered by declaring "no possible checkout" (see
+**Trick questions** below); the only turn shape allowed to carry zero dart
+rows. `games.config.mode`: `'freeform' | 'blitz'` — a mode flag, not a second
 `game_type`, since both sub-modes share identical target selection and grading
 and differ only in pacing/scoring (the same relationship X01's own H2H-vs-
 Practice split has within one `game_type`). `games.config.durationSec`: fixed
@@ -3553,33 +5075,76 @@ at `60` for Blitz, `null` for Freeform. `games.config.difficulty`: one of
 New Game via the Checkout Trainer options section's difficulty toggle
 (`setCheckoutTrainerDifficulty()`, `frontend/index.html`) and immutable for the
 rest of that session, same "baked into `config` at `startGame()`" treatment
-`mode`/`durationSec` already get.
+`mode`/`durationSec` already get. `games.config.trickQuestions`: boolean
+(default `false`) — the trick-question variant's own New Game toggle
+(`setCheckoutTrainerTricks()`), baked in the same way.
 
 **Grading** (`frontend/scoring.js`):
-- `pickCheckoutTarget(doubleOut, rng, difficulty)` — picks a uniform-random
-  integer target within the selected difficulty tier's `[low,high]` bound
-  (`CHECKOUT_TRAINER_DIFFICULTY_TIERS`), intersected with the out-mode's own
-  floor (`2` under double-out since `1` is an unfinishable bogey, `1` under
-  single-out). `difficulty` defaults to `'full'` (`[1,170]` intersected with
-  the out-mode floor — the original, tier-less range) when omitted or
-  unrecognized, so every pre-existing caller keeps working unchanged. Tiers:
-  `under40` `[1,39]`, `under100` `[1,99]`, `over100` `[100,170]`, `full`
-  `[1,170]`. Re-rolls while `checkoutHint()` reports the candidate
-  unfinishable, reusing `checkoutHint()`'s own `''` unfinishable signal
-  instead of a separate hardcoded bogey-number list.
+- `pickCheckoutTarget(doubleOut, rng, difficulty, trickChance, pinnedTarget)` —
+  picks a uniform-random integer target within the selected difficulty tier's
+  `[low,high]` bound (`CHECKOUT_TRAINER_DIFFICULTY_TIERS`), intersected with
+  the out-mode's own floor (`2` under double-out since `1` is an unfinishable
+  bogey, `1` under single-out). `difficulty` defaults to `'full'` (`[1,170]`
+  intersected with the out-mode floor — the original, tier-less range) when
+  omitted or unrecognized, so every pre-existing caller keeps working
+  unchanged. Tiers: `under40` `[1,39]`, `under100` `[1,99]`, `over100`
+  `[100,170]`, `full` `[1,170]`. Re-rolls while `checkoutHint()` reports the
+  candidate unfinishable, reusing `checkoutHint()`'s own `''` unfinishable
+  signal instead of a separate hardcoded bogey-number list. `trickChance`
+  (0..1, default `0` — the pre-trick behavior byte-for-byte): probability
+  this round instead serves a deliberately **unsolvable** bogey number from
+  the tier (`listUnsolvableTargets()`, also derived from `checkoutHint()`'s
+  `''` signal — `159/162/163/165/166/168/169` under double-out,
+  `163/166/169` under single-out, all above 100 so the Under 40/Under 100
+  tiers simply fall through to a normal target). Set to
+  `CHECKOUT_TRAINER_TRICK_CHANCE` (0.125, ~1 round in 8) when the session has
+  `config.trickQuestions` on. `pinnedTarget` (§19a, "Drill this checkout" deep
+  link) short-circuits every difficulty/trick roll above: if set and
+  finishable under `doubleOut` (checked via the same `checkoutHint()` signal),
+  it's returned immediately regardless of `rng`; an unfinishable pin (a bogey
+  number, or `1` under double-out) is ignored and falls through to the normal
+  roll.
 - `gradeCheckoutAttempt(target, doubleOut, darts)` — returns
   `{legal, usedDarts, optimalDarts, optimal, hint}`. `legal` mirrors
   `evaluateVisit()`'s `win` flag (reached exactly zero, valid last dart under
   double-out). `optimal` additionally requires `usedDarts === optimalDarts`
   (`optimalDarts` = `checkoutHint(target, doubleOut, 3)`'s token count) —
   grading is by dart **count**, not exact route match, since multiple routes
-  can tie for the objective minimum.
+  can tie for the objective minimum. A route submitted against a bogey
+  target grades illegal with `hint: ''` — the UI shows the "trick question"
+  reveal for that case instead of an empty "best route".
+- `gradeCheckoutDeclaration(target, doubleOut)` — the trick-question
+  variant's second answer path (the "🚫 No possible checkout" button).
+  Correct exactly when `checkoutHint()` has no route for the target; returns
+  `{declared: true, correct, legal, optimal, usedDarts: 0, optimalDarts,
+  hint}` where a **correct** declaration sets `legal`/`optimal` both true (it
+  IS that round's best possible answer) and a **wrong** one sets both false,
+  with `hint` carrying the route that proves the target was finishable.
 
 Every attempt writes exactly one of three outcomes onto the existing
 `bust`/`checkout`/`leg_won` columns (no new columns needed beyond
-`target_score`): `bust=1` = not a legal finish; `bust=0, checkout=1, leg_won=0`
-= legal but not optimal; `bust=0, checkout=1, leg_won=1` = optimal. Checkout
-Blitz's scoring formula reads directly off this three-way outcome.
+`target_score`/`declared_unsolvable`): `bust=1` = not a legal finish;
+`bust=0, checkout=1, leg_won=0` = legal but not optimal; `bust=0, checkout=1,
+leg_won=1` = optimal. Checkout Blitz's scoring formula reads directly off
+this three-way outcome — declarations included (a correct call is `leg_won=1`
+= 2 points; a wrong one is `bust=1` = 0 points), recorded with
+`declared_unsolvable=1` and zero dart rows (`declareUnsolvable()`,
+`frontend/index.html`, which discards any half-staged darts — "there's no
+checkout" supersedes a half-entered route).
+
+**Trick questions** (docs: the roadmap doc's "Trick-question difficulty
+variant", shipped 2026-07): an opt-in New Game toggle
+(`config.trickQuestions`, off by default). When on, ~1 round in 8 serves an
+actual bogey number, the scoring screen shows a "🚫 No possible checkout"
+button alongside "Submit checkout", and the correct answer is pressing it —
+tapping out any route against a bogey grades illegal with a "trick question"
+reveal, and declaring a *finishable* target unsolvable is equally wrong (the
+real route is revealed). Correct declarations count as optimal answers
+everywhere the three-way outcome is read (Accuracy/Optimal %, all four
+milestone ladders, the streak, Blitz's 2 points) but are excluded from
+Toughest Checkout Solved via `declared_unsolvable` and can never trigger the
+route-specific one-offs (170 Club, One-Darter — the declaration path never
+runs those checks).
 
 **Physical-stat exclusion — stricter than Chuckin's**: these darts are a
 *proposed* route, not a real throw, and must have **zero footprint on any
@@ -3596,8 +5161,11 @@ Two exclusion constants in `backend/db.js`:
   Chuckin is a deliberate exception to: `computeStats()`'s roster `turns`/
   `dartsThrown`, `getSummary()`'s `darts`/`todayDarts`/`weekDarts`, the roster
   "last played" timestamp, `getPlayerStatBubbles()`'s own `dartsThrown`/
-  `avgDartsPerDay`/`avgDartsPerLeg` (the X01 profile tab's bubbles),
-  `getMetricHistory()`'s `dartsthrown`/`avgdartsperday`/`avgdartsperleg`/`pace`
+  `avgDartsPerDay`/`avgDartsPerLeg` (the Player Profile's "Lifetime — Every Game
+  Mode" block and `avgDartsPerLeg`'s own X01 scoping — not to be confused with
+  that same function's `x01DartsThrown`/`x01AvgDartsPerDay`, which add
+  `AND g.game_type='x01'` on top of this exclusion for the X01 tab's own
+  bubbles), `getMetricHistory()`'s `dartsthrown`/`avgdartsperday`/`avgdartsperleg`/`pace`
   chart metrics, `getPersonalBests()`'s `bestLegAvg`/`fewestDartsCheckout`/
   `recentFormAvg`/`lifetimeAvg` (X01's own Personal Bests — `t.checkout=1` is
   only ever set by X01 and Checkout Trainer, so this was the most severe leak:
@@ -3616,7 +5184,17 @@ Two exclusion constants in `backend/db.js`:
 - **Optimal %** = attempts matching the minimum dart count ÷ total attempts
   (the headline stat — hitting the objective optimum is the actual point of
   the game).
-- **Toughest Checkout Solved** = `MAX(target_score)` where `leg_won=1`.
+- **Toughest Checkout Solved** = `MAX(target_score)` where `leg_won=1 AND
+  declared_unsolvable=0 AND json_extract(games.config,'$.pinnedTarget') IS
+  NULL` — a correctly-called trick question grades `leg_won=1` but its bogey
+  target was never a checkout anyone *solved*, so without the
+  `declared_unsolvable` exclusion one correct "169 is a bogey" call would
+  permanently pin this Personal Best at 169. The `pinnedTarget` exclusion
+  (§19a) is the same idea for a different reason: grinding one known-good
+  number repeatedly via a "Drill this checkout" pin shouldn't set a "toughest
+  ever" record the random target pool never actually produced. Scoped by the
+  game row's `config`, no schema change — every turn in a pinned game shares
+  the same `pinnedTarget`.
 - **Best Optimal Streak** = longest-ever run of consecutive optimal answers,
   computed by walking every attempt in order and resetting on any non-optimal
   result (not a maintained counter). Freeform and Blitz rounds both count
@@ -3663,135 +5241,455 @@ non-revocable milestones (`INSERT OR IGNORE`), same as Chuckin's own ladders:
 | Best Optimal Streak | longest-ever consecutive-optimal run | 5 / 15 / 30 / 75 / 150 |
 | Best Blitz Score | single best-ever 60-second score | 10 / 20 / 35 / 50 / 75 / 100 |
 
-Plus five one-off flagship badges: 🐟 **The 170 Club** (solve 170 optimally),
+Plus six one-off flagship badges: 🐟 **The 170 Club** (solve 170 optimally),
 🎯 **One-Darter** (first 1-dart optimal solve), 🌟 **Perfectionist** (end a
 15+-attempt Freeform session with a 100% optimal rate — checked in
 `askEndGame()`), 💎 **Perfect Minute** (every round in a 5+-round Blitz run
 graded optimal — checked in `endBlitzRun()`), 📸 **Photo Finish** (a legal
-Blitz round submitted with under 1 second left on the clock).
+Blitz round submitted with under 1 second left on the clock — a correct
+trick-question declaration under the buzzer qualifies too, same "legal
+answer" bar), and 💣 **Bogey Buster** (with trick questions on, correctly
+call "no possible checkout" on an actual bogey number for the first time —
+awarded in `declareUnsolvable()`).
 
 **No live scoreboard**: this game type never writes to `liveState` and
 `/display` never renders it — `pushLive()` is a deliberate no-op for
-`game.gameType === 'checkout_trainer'`, a genuinely simpler surface than every
-other mode in that one respect.
+`game.gameType === 'checkout_trainer'` (The Gauntlet later joined the same
+skip list — see its own "No live-scoreboard sync" section).
 
-**Deferred (not built)**: the trick-question/bogey-number difficulty variant
-("declare this unsolvable") and its conditional 💣 Bogey Buster badge, and
-difficulty tiers (under-40/under-100/full-range) beyond the single full-range
-(2-170) target pool — both tracked as their own open items on
-`docs/open-roadmap-items.md` rather than left silently unbuilt.
+Nothing from the original design remains deferred: difficulty tiers shipped
+first (the `config.difficulty` toggle above), and the trick-question/
+bogey-number variant with its 💣 Bogey Buster badge shipped 2026-07 as the
+mode's final open roadmap item.
+
+### 19a. "Drill this checkout" deep link
+
+Full design: `docs/archive/checkout-drill-link-roadmap.md`. One tap from a checkout
+worth practicing straight into a Checkout Trainer session drilling exactly
+that number, instead of hoping the random target picker eventually serves it.
+
+**Entry points** — a small `🎯 Drill` button (`drillButtonHtml(jName, score)`,
+`frontend/index.html`):
+- every **Top Finishes** row on the Player Profile's own list
+  (`loadTopFinishes()`);
+- a **Coaching Insights** card, but only the `checkout_route` insight type
+  (`getCoachingInsights()`, `backend/db.js`) — the only one carrying a
+  concrete drillable number (`insight.score`, the player's most-established
+  checkout score). `weak_number`/`bust_parity`/`form_trend` describe a
+  pattern rather than a single target and carry no `score` field, so
+  `renderCoachingInsights()` only renders the button where one exists.
+
+Every Drill button's `onclick` calls `event.stopPropagation()` first so it
+never also triggers the row's own `toggleFinishRoute()` expansion.
+
+The Home page's cross-player "Top Checkouts" leaderboard (`hofSection()`) is
+**not** a Drill entry point — its row (rank/score/DO-SO tag/count/name/date)
+has no Drill button. It briefly had the tag replaced by an All/Double
+Out/Single Out filter above the list instead (to make room for a Drill
+button), but names still didn't have enough room once real data was on a
+narrow phone — the tag came back, the filter stayed (it narrows the list
+itself, independent of crowding), and the Drill button was dropped instead.
+`checkoutOutFilter`/`setCheckoutOutFilter()` still drive that filter.
+
+**Schema**: `games.config.pinnedTarget` (nullable integer, `checkout_trainer`
+only) — when set, every round of that session serves that same target instead
+of calling the random picker (see `pickCheckoutTarget()` above). No new
+column: it rides `games.config` exactly like `mode`/`difficulty`/
+`trickQuestions`. `createGame()` (`backend/db.js`) validates it server-side
+for any `checkout_trainer` game — must be an integer in `[2,170]` — the same
+write-boundary treatment every other config field gets; a game of any other
+`gameType` ignores the field entirely if present.
+
+**Deep-link mechanics** (`frontend/index.html`), the same preselect-then-
+confirm pattern `raceLeg()` (§ Ghost Opponent) already established for
+jumping into Ghost mode from a Personal Best:
+- `drillCheckout(playerName, targetScore)` sets `setup.slots = [playerName]`,
+  stashes `targetScore` into the one-shot module-level `_checkoutDrillPin`,
+  sets `_enteringSetupFromDrill = true`, calls `setMode('checkout_trainer')`,
+  then `show('setup')`.
+- `setMode()`'s `checkout_trainer` branch consumes `_checkoutDrillPin` into
+  `setup.checkoutTrainerPin` (resetting the one-shot variable to `null`)
+  every time it runs — so any OTHER way of reaching this mode (the Step 2
+  dropdown, the post-Blitz "Play again" button) naturally lands with no pin,
+  even if a stale one is sitting in `setup.checkoutTrainerPin` from an
+  earlier drill this session. A pin forces `setCheckoutTrainerMode('freeform')`
+  and `setCheckoutTrainerTricks(false)` — **Freeform only**: a Blitz run of
+  one repeated answer isn't a speed test, and trick questions are meaningless
+  against a target guaranteed solvable. `startGame()`'s `config` builder
+  guards the same two fields again independently at the actual write path, in
+  case a stale toggle state ever disagreed with `setup.checkoutTrainerPin`.
+- `show('setup')` consumes `_enteringSetupFromDrill` synchronously (mirroring
+  `_enteringSetupFromRaceLeg`) to jump straight to Step 3 — the player and
+  mode are already fixed, so Steps 1-2 have nothing left to ask. Unlike the
+  Ghost deep link (which focuses Step 3's default first control), focus lands
+  on the Start button instead, since the pin chip/toggles aren't the natural
+  first stop here — the player already chose exactly what to drill.
+
+**Setup screen**: `#checkout-trainer-pin-chip` (hidden unless
+`setup.checkoutTrainerPin` is set) shows "🎯 Drilling: *N*" plus a `✕` button
+(`clearCheckoutTrainerPin()`) — the pin is inspectable and cancelable, never
+invisible state. `renderCheckoutTrainerPinChip()` also disables the Checkout
+Blitz and trick-questions-on buttons while a pin is active (Freeform and
+trick-questions-off stay enabled, since they're exactly the state a pin
+already forces). Applying a pin announces "Checkout Trainer set to drill *N*."
+via the shared `announce()` `aria-live` region; clearing one announces "Drill
+target cleared."
+
+**Stats/badges**: pinned rounds are ordinary Checkout Trainer rounds in every
+other respect — they count toward Accuracy/Optimal %, every milestone ladder,
+and Checkout Blitz scoring unchanged (moot in practice since a pin forces
+Freeform). The one deliberate exception is **Toughest Checkout Solved**,
+which excludes pinned rounds entirely (see above) — repetition is the whole
+point of the drill, so it must never manufacture a "toughest ever" record.
 
 ---
 
-## 20. New Game Screen (3-Step Wizard)
+## 20. New Game Screen (2-Step Wizard)
 
-Full design: `docs/new-game-flow-roadmap.md`. Replaced the old single
-all-controls-visible `#screen-setup` card with a 3-step flow — Who's playing? →
-Choose a game → More options — so a player only ever sees the controls relevant
-to what they've already chosen. Purely a restructuring of *when/how* the
-existing controls are shown; no change to `startGame()`'s validation or the
-`game` object it builds for any mode except the new League Game entry (§18).
+Full design: `docs/archive/new-game-flow-roadmap.md` (original 3-step build,
+Who's playing? → Choose a game → More options); a 2026-07 reorder (no
+dedicated roadmap doc — a direct request, not a planned roadmap item) flipped
+the first two steps to **Choose a game → Who's playing? → More options**, and
+replaced Step 1's flat `<select>` with a categorized "ledger" picker; a
+further 2026-07 change (also a direct request) **folded Step 3 entirely into
+Step 1** — every per-mode option that doesn't need to know *who's* playing now
+renders inline, inside whichever ledger row is selected, alongside a
+collapsed-by-default "Rules" disclosure — leaving a **2-step wizard**: Choose
+a game (with its own options + rules built in) → Who's playing? (which now
+also doubles as Start, since there's nothing left to advance to). No change
+to `startGame()`'s validation or the `game` object it builds for any mode —
+this is still purely a restructuring of *when/how* the existing controls are
+shown.
 
-### Step 1 — "Who's playing?"
+### Step 1 — "Choose a game"
 
-`renderPlayers()` (name unchanged from the old always-visible-rows layout, body
-rewritten) draws a select → "Add someone else?" loop into `#players-list`: each
-already-filled `setup.slots` entry renders as a name row (stat line, loadout
-pill, remove button); the one slot still awaiting a pick (if any) renders as a
-plain `<select>`. Once every slot is filled, a prompt appears — **Add
-existing** (`addExistingPlayer()`), **New player** (`addNewPlayer()`), or **No,
-continue** (`setupGoToStep2()`) — repeating until "No, continue" or the
-existing 6-player cap. A "🔀 Shuffle order" button appears once 2+ players are
-selected (`shufflePlayers()`, unchanged). Solo-only modes (Daily
-Challenge/Ghost/Doubles Practice/Just Chuckin' It/Checkout Trainer/both guided
-drills) are never truncated to 1 player *here* — Step 2's own dropdown
-filtering (below) makes them structurally unreachable once 2+ players are
-picked, so there's nothing to enforce yet at this step.
+Two pieces sit above the categorized picker itself:
 
-### Step 2 — "Choose a game"
+- **`renderSetupDailyChallengeSection()`** (`#setup-dc-section`): a
+  `.challenge-spotlight`-styled card (same gold border + animated glow as the
+  Home page's Daily Challenge teaser) shown above every category, always
+  clickable (`selectSetupGame('challenge')`). Below the challenge's own
+  name/label it fetches `GET /api/challenges/today-board?date=&format=`
+  (`getTodaysChallengeBoard()`, pre-existing — no new backend endpoint was
+  needed) and lists every player who has already completed *today's* challenge
+  format, each with a ✓ — this is informational (who's done it today, across
+  everyone), distinct from Step 2's per-*chosen*-player blocking check below.
+  **Selected state**: a filled gold check-circle (`.setup-dc-selectcheck`,
+  top-right corner) — the same symbol `.setup-ledger-check` uses on an
+  ordinary row — appears only when `currentSetupOptionKey()==='challenge'`.
+  This card's own permanent border/glow (there regardless of selection, to
+  stay eye-catching as today's featured item) made an earlier, subtler
+  "extra inset shadow" treatment nearly invisible against it; the check-circle
+  reads clearly either way, and is unmistakably distinct from the ambient
+  glow. When selected, the card also gets its own Rules disclosure
+  (`DAILY_CHALLENGE_RULES` — the fixed text a `'challenge'` key never had a
+  `NEW_GAME_MODE_OPTIONS` entry of its own for) and inline `#setup-step1-continue`
+  button, same shape as an ordinary ledger row's expanded content (below).
+  `selectSetupGame()` calls this function on every selection change (not just
+  once at Step 1 entry) so switching away from Daily Challenge correctly
+  clears its check-circle/expanded content instead of leaving it stuck
+  showing "selected" from an earlier pick.
+- **`renderSetupGameLedger()`** (`#setup-game-categories`): `NEW_GAME_MODE_OPTIONS`
+  (unchanged shape/contents — still the canonical `{ key, label, blurb,
+  apply() }` list) is grouped into `GAME_LEDGER_CATEGORIES` (Traditional /
+  Practice & Drills / Solo Challenges / Head-to-Head Only / Special Modes),
+  each with its own accent color and a monoline SVG glyph
+  (`ledgerCategoryIcon()`, one icon per *category*, not per game — avoids the
+  old inconsistent one-emoji-per-game clutter). One category is expanded at a
+  time — an accordion, not a flat list — defaulting to whichever category
+  contains the currently-selected game (`setupOpenCategoryKey()`); clicking a
+  category header overrides that via `setupExpandedCategory`. Each row inside
+  an open category shows the game's clean display name
+  (`GAME_LEDGER_NAMES`) and a one-line teaser (`GAME_LEDGER_TEASERS`), with a
+  gold check mark on the selected row. Selecting a row (`selectSetupGame(key)`)
+  calls that option's `apply()` exactly as the old dropdown's `onchange` did,
+  then truncates `setup.slots` down to whatever the newly-chosen game allows
+  (see "Player-count enforcement" below) before re-rendering.
+- **X01 flavor**: `renderSetupFlavorAndBlurb()` — X01 still reveals
+  `#setup-flavor-section` as a starting-score `<select>` (501/301/170/101,
+  `onSetupFlavorSelect()` sets `setup.start`), now mounted inline inside the
+  X01 row itself rather than as a standalone section below the categories.
+- **`#setup-step1-continue`** (`setupGoToStep2()` — no validation needed, a
+  game is always pre-selected) advances to Step 2. Rendered inline inside
+  whichever row (or the Daily Challenge card) is currently selected, right
+  after its Rules disclosure — not a separate always-visible element, since
+  only one row/card is ever expanded at a time. A first pass used a
+  `position:fixed` bar pinned to the bottom of the viewport instead (fixing
+  the complaint that a long category list pushed Continue off the bottom of
+  the screen); a follow-up request replaced that with this inline placement
+  instead, which fixes the same complaint more directly — Continue is right
+  there in the content the user just opened, not a separate floating element.
+- **"VS" chip**: every row for a mode whose `chosenGameContexts(key)` includes
+  `'h2h'` (X01, Cricket, Baseball, Shanghai, Halve-It, Pressure Chamber,
+  Killer) gets a small gold-outlined "VS" chip next to its name
+  (`.setup-ledger-vs`, `aria-label="Supports head-to-head play"` so it reads
+  as more than two letters to a screen reader) — a subtle, non-color-only
+  marker that a mode supports 2+ players, as distinct from every solo-only
+  row which gets no chip. Reuses `chosenGameContexts()` rather than a second
+  hand-maintained key list, so it always agrees with `maxPlayersForSetup()`
+  and the rest of the player-count enforcement below.
 
-One flat `<select id="setup-mode-select">`, replacing the old Mode row +
-Practice-type sub-toggle + X01/Cricket/Baseball toggle. `NEW_GAME_MODE_OPTIONS`
-(`frontend/index.html`) is a flat list of `{ key, label, contexts, blurb,
-apply() }` — `contexts` is `['practice']`, `['practice','h2h']`, or (League
-Game only, injected dynamically rather than listed statically) `['h2h']`.
-`setupVisibleOptions()` filters by `setupPlayerCount()` (1 player → `practice`
-context, 2+ → `h2h` context) — with 2+ players only X01/Cricket/Baseball (plus
-League Game, if eligible) are ever offered, which is what makes picking either
-one *be* the H2H choice; no separate H2H toggle exists anymore.
-`renderSetupStep2Content()` rebuilds the dropdown on every entry into Step 2
-and reconciles a since-invalidated prior selection (e.g. the player went Back
-to Step 1 and added a second player after picking a practice-only mode) by
-falling back to X01 rather than leaving a stale, no-longer-offered option
-selected. `onSetupModeSelect()` calls the chosen entry's `apply()`, which is
-just `setMode()`/`setGameType()` called exactly as the old controls did —
-nothing about validation or the eventual `game` object changed, only what
-triggers the call.
+### Step 1's inline options + Rules disclosure (formerly "Step 3")
 
-- **X01 flavor**: selecting X01 reveals `#setup-flavor-section` as a starting-
-  score `<select>` (501/301/170/101, `onSetupFlavorSelect()` sets
-  `setup.start`) — the same secondary-dropdown slot League Game's "which
-  league match?" question reuses (never shown simultaneously, since only one
-  primary entry is selected at a time).
-- **How-to-play blurb**: `#setup-blurb-body` shows each entry's static `blurb`
-  text, generalizing the old scattered per-mode `-info-section` blocks (now
-  removed) to every mode uniformly.
-- **Daily Challenge**: not a static blurb — `renderSetupChallengeBlurb()`
-  fetches `GET /api/challenges/status` the moment it's *selected* (moved from
-  Play Now time, where the same call previously only ran as a
-  race-condition backstop) for `setup.slots[0]` (guaranteed non-empty, since
-  Step 1 requires ≥1 player first). Already attempted today (`status.today`
-  truthy) → a blocking message replaces the blurb and `#setup-step2-continue`
-  is disabled for this selection; the player can still pick something else and
-  proceed normally. Not yet attempted → the same streak/history status
-  Home page's challenge teaser shows, Continue enabled.
-- **League Game**: see §18's "League fixtures / pending matches" section for
-  the full mechanism (`setupGoToStep2()`'s pending-fixture fetch,
-  `applyLeagueGameSelection()`, the "which league match?" secondary dropdown).
+Whichever ledger row is currently selected (`sel` in `renderSetupGameLedger()`)
+renders two things directly beneath its teaser, inside a `.setup-ledger-options`
+wrapper:
 
-### Step 3 — "More options"
+- **The mode's own options** (an anchor div, `#setup-inline-options-anchor`,
+  that `mountSetupInlineOptions()` fills — see below).
+- **A "Rules" disclosure** (`.setup-ledger-rules-toggle` /
+  `.setup-ledger-rules-body`, `setupRulesOpen`/`toggleSetupRules()`) —
+  showing that entry's `NEW_GAME_MODE_OPTIONS[key].blurb` text (unchanged
+  strings, several reworded from "…on the next step" to "…above" now that
+  their controls sit right there instead of a further page away). This
+  replaces the old always-visible `#setup-blurb-section` box that used to sit
+  below the whole category list — the user-visible complaint that a long
+  how-to-play paragraph rendered separately, every time, whether wanted or
+  not. Collapsed by default for any key with real options to show
+  (`keyHasInlineOptions(key)` true) — but **auto-expanded instead** the
+  moment a key with nothing else in the row is selected
+  (`selectSetupGame(key)` sets `setupRulesOpen = !keyHasInlineOptions(key)`),
+  since a mode like Bob's 27 or 121 Checkout Ladder would otherwise show
+  nothing new at all besides the teaser already visible before picking it.
+  `keyHasInlineOptions()` reuses `chosenGameContexts()` (for Format) and
+  `GAME_TYPES[key].optionsSectionId` (for Cricket/Killer/Shanghai/Halve-It),
+  plus a small hand-kept list (`SETUP_MODE_GATED_OPTION_KEYS`: X01, Doubles
+  Practice, Checkout Trainer) for the three modes whose option section is
+  still toggled directly in `setMode()` rather than through the registry
+  field.
+- **An inline "Continue" button** (`#setup-step1-continue`,
+  `onclick="setupGoToStep2()"`) — the very last thing in the row's expanded
+  block, right after the Rules disclosure. There is only ever one selected
+  row at a time, so this is the only place the button is ever rendered; a
+  first pass instead used a `position:fixed` bar pinned to the bottom of the
+  viewport, replaced by this inline placement per a follow-up request (fixes
+  the same "have to scroll to find Continue" complaint more directly, since
+  Continue now sits in the exact content the user just opened).
 
-Every mode-specific options block (Cricket targets, Ghost's leg picker,
-Doubles Practice's target grid, Checkout Trainer's Freeform/Blitz toggle +
-difficulty tiers, the H2H legs/sets Format controls) is unchanged in behavior,
-just relocated under this step — each block's own `hidden` toggling by
-`setMode()`/`setGameType()` still works exactly as before, independent of
-which step wrapper it happens to sit inside. `#start-btn` (labeled "Play Now"
-for H2H/Practice/X01/Cricket/Baseball, a per-mode verb otherwise — "Start
-Challenge", "Start race", etc., unchanged) calls the existing `startGame()`
-unmodified.
+**`mountSetupInlineOptions()`** is how the actual options controls get there
+without duplicating any of their existing markup or `onclick` handlers: every
+per-mode `.setup-section` that used to live on the old Step 3 page (Cricket
+targets + variant, Killer's lives threshold, Shanghai's round count,
+Halve-It's classic/custom editor, Checkout Trainer's sub-mode/difficulty/pin
+chip, Doubles Practice's target grid, X01's flavor `<select>`, and the H2H
+Format legs/sets block) now lives in a single reusable pool,
+`#setup-inline-options-pool`, sitting in a static holding div
+(`#setup-inline-options-holding`) that `renderSetupGameLedger()`'s own
+`innerHTML` replace never touches. Each time the ledger re-renders,
+`mountSetupInlineOptions()` physically moves (`appendChild`, not clone) that
+pool into whichever anchor was just created for the newly-selected row — so
+every `set*()` handler (`setCricketPreset()`, `setKillerLives()`, etc.) keeps
+working completely unchanged regardless of which row's DOM subtree the pool
+currently sits inside. (`renderSetupGameLedger()` parks the pool back in its
+holding div *before* the `innerHTML` replace runs, since a node whose parent
+gets wiped that way is removed from the document entirely — even a live
+`getElementById` reference to it would come back empty afterward.)
+
+**Format's visibility is decided by the chosen *key*, not the resolved
+mode**: `mountSetupInlineOptions()` shows `#h2h-options` whenever
+`chosenGameContexts(currentSetupOptionKey()).includes('h2h')` — i.e. for any
+of the 6 dual-capable types plus Killer, regardless of how many players
+end up chosen. This is deliberately different from the old Step 3, which
+gated the same block on `setup.mode === 'h2h'` — a value that isn't resolved
+until Step 2 knows the actual player count (`resyncSetupModeForPlayerCount()`).
+Gating on the eventual mode would hide the Format controls until it's too
+late in the flow to see them; gating on the key instead means Format is
+visible the moment a dual-capable game is picked, exactly like X01's
+starting score already was — its value simply goes unused if the player
+ends up playing solo.
+
+**Two options can't move here at all**, because they need to know *who's*
+playing, not just which game — that isn't decided until Step 2:
+
+- **Ghost's leg picker** (`#ghost-options-section`, `renderGhostLegPicker()`)
+  — needs the specific player's past-leg history.
+- **The Handicap disclosure** (`#handicap-options-section`,
+  `renderHandicapOptions()`) — needs the actual 2+ chosen player identities.
+
+Both are reactive Step 2 sections instead (see below), the same pattern
+Daily Challenge's and League Game's own Step 2 sections already used before
+this change.
+
+### Player-count enforcement (`maxPlayersForSetup()`)
+
+Because the game is now chosen *before* any player, the old
+`setupPlayerCount()>=2 ? h2h : practice` dependency had to invert: a game's
+solo/H2H/dual nature is a static fact of the key itself
+(`chosenGameContexts(key)`, backed by `contextsForMode()`/`GAME_TYPES`'
+`soloOnly`/`h2hOnly` flags — unchanged), independent of how many players end
+up chosen.
+
+- **`maxPlayersForSetup()`**: `1` for any solo-only key (Daily
+  Challenge/Ghost/Marathon/every drill); `2` for League Game (a fixture is
+  always exactly one pair) and for X01 (2-4 player X01 is a deliberate future
+  roadmap item, not yet enabled — see `docs/multiplayer-x01-roadmap.md`); the
+  global cap (6) for every other dual-capable type (Cricket, Baseball,
+  Shanghai, Halve-It, Pressure Chamber) and for the one H2H-only type (Killer,
+  which additionally still enforces its own existing "at least 2" floor in
+  `setupGoToStep3()`, unchanged from before the reorder).
+- **`selectSetupGame(key)`** truncates `setup.slots` down to the new max the
+  moment a game is chosen (switching from a 3-player Cricket pick to X01, for
+  example, drops the third slot); `addExistingPlayer()`/`addNewPlayer()`
+  refuse past the same cap going forward.
+- **`resyncSetupModeForPlayerCount()`** (called from `renderPlayers()`, so it
+  re-evaluates on every slot change in Step 2) keeps `setup.mode` in sync with
+  the *current* player count for the 6 dual-capable types — the same
+  `practice`/`h2h` distinction `setMode(setupPlayerCount()>=2?'h2h':'practice')`
+  made once at selection time before the reorder, just deferred and reactive
+  now that player count is decided after game choice.
+
+### Step 2 — "Who's playing?" (also: Start)
+
+`renderPlayers()` (unchanged core rendering: select → "Add someone else?" loop
+into `#players-list`, each filled `setup.slots` entry as a name row, the
+6-or-fewer cap from `maxPlayersForSetup()` instead of a hardcoded 6, a
+"🔀 Shuffle order" button once 2+ players are picked) now also calls, at the
+top of every render: `resyncSetupModeForPlayerCount()`,
+`renderSetupChallengeStatus()`, `checkLeagueFixtureForPair()`,
+`renderGhostLegPicker()` (only when Ghost is selected), and
+`renderHandicapOptions()` (self-gates on X01 + 2+ players internally) — every
+reactive section that needs to know the actual chosen players, re-derived on
+every slot change.
+
+`#setup-step2-continue` — a single static, always-present button at the
+bottom of Step 2 (`style="flex:1"`, spanning the full row width) — is the
+**only** Continue/Start action on this step, and now the wizard's **last**
+step: its handler, `setupFinishAndStart()`, validates `named.length >= 1` and
+Killer's own "at least 2" floor exactly as the old Step 2→3 transition did,
+then calls `startGame()` directly — there's no further step to advance to.
+Its label is kept in sync with the selected mode by the same
+`SPECIAL_MODE_START_LABELS` lookup the old `#start-btn` used ("Play Now" for
+H2H/Practice/X01/Cricket/Baseball, a per-mode verb otherwise — "Start
+Challenge", "Start race", "Start Blitz"/"Start training" for Checkout
+Trainer's two sub-modes, etc.) — `setMode()`/`setCheckoutTrainerMode()` now
+target `#setup-step2-continue` by id instead of the retired `#start-btn`.
+`renderPlayers()`'s own `promptHtml` (the "Add existing"/"New player" row
+shown once every slot is filled but the roster isn't at cap, and the
+"Maximum of N players" note once it is) never renders a second Continue
+button of its own — see the BUG note in the git history around 2026-07 for
+the two-buttons-stacked defect this fixed.
+
+**Each named player's average + trend ("rail")**: `.player-rail`, a
+right-edge column in the `.player-row` (built via `/frontend-design`,
+5 directions explored, the owner picked this one) — a large Bebas Neue
+numeral (`.rail-num`) with a small "avg"/"h2h" caption underneath
+(`.rail-lbl`), plus a spelled-out trend line when `recentAvg` differs from
+the average by ≥0.5 (`.rail-trend`, e.g. "▼ 5.0 recent" — a full phrase, not
+a bare arrow+delta, which wasn't self-explanatory on its own). Replaces the
+old 11px inline `.slot-stat` line, which was easy to overlook. Whether the
+number shown is the h2h average or the overall average is decided by
+**`setup.mode === 'h2h'`**, not by whether `s.h2hStats` merely has data —
+Ghost (`mode:'ghost'`), every drill, and a solo-player X01/Cricket/etc. pick
+(`mode:'practice'`) all show the overall average even when that player has
+real h2h stats from other matches; only an *actual* head-to-head game
+(`mode:'h2h'`, including Killer, which is always h2h) shows "h2h". This
+fixed a real bug: Ghost is a solo race against your own past leg, never a
+real head-to-head match, but used to show "h2h" for any player who'd ever
+played a real H2H game elsewhere.
+
+- **`renderSetupChallengeStatus()`** (`#setup-challenge-status-section`): the
+  per-*chosen*-player "have you already attempted today's challenge"
+  blocking check. Only relevant when Daily Challenge is the selected game
+  (`maxPlayersForSetup()` caps it at 1, so `setup.slots[0]` is the one player
+  this applies to); already attempted today disables `#setup-step2-continue`
+  with a blocking message. Resets `continueBtn.disabled` back to `false`
+  whenever the section doesn't apply (a different game is now selected, or no
+  player is named yet) so a block never survives past going Back and picking
+  something else.
+- **Ghost's leg picker** (`#ghost-options-section`, `renderGhostLegPicker()`)
+  — needs to know who's racing before it can look up their past legs, so
+  unlike every other per-mode option (folded into Step 1, see above) this
+  stays a reactive Step 2 section, shown/hidden by `setMode()` exactly as
+  before, refreshed on every player-slot change by `renderPlayers()`.
+  Its "X01 mode" filter is documented alongside `getGhostCandidateLegs()`
+  in §7 (Ghost Opponent); each leg row (`.ghost-leg-row`, `renderGhostLegList()`)
+  is a fixed-height (46px) 4-column grid — date, category (+ a reused "VS"
+  chip for H2H legs instead of a "(H2H)" text suffix), average, dart count —
+  so nothing wraps onto a second line regardless of name/date length
+  (the previous plain flex-row buttons wrapped in two places on an
+  iPhone-width screen, making each row very tall). The date column drops the
+  year for the common case (a leg played this year) and only shows it when
+  the leg is from a previous year, via a plain `legDate.getFullYear() !==
+  new Date().getFullYear()` check.
+- **Handicap** (`#handicap-options-section`, `renderHandicapOptions()`) —
+  same reason as Ghost above: needs the actual 2+ chosen player identities,
+  not just the fact that X01 was picked. Physically relocated out of the old
+  `#h2h-options` block (which moved to Step 1) into its own standalone Step 2
+  section; its own internal gating (`setup.gameType!=='x01' || names.length<2`
+  → hidden) is unchanged.
+- **`checkLeagueFixtureForPair()`** / **`renderSetupLeagueBanner()`**
+  (`#setup-league-section`): League Game can no longer be a Step 1 ledger row
+  — a fixture is tied to a specific 2-player pair, unknowable before players
+  are picked — so it's a reactive opt-in banner instead. Every time exactly 2
+  players are named, `GET /api/leagues/pending-fixture?p1=&p2=` is re-fetched
+  (always, not just while the banner is toggled on, so swapping one of the
+  two named players re-validates rather than leaving a stale fixture
+  description showing); if any pending fixture is found the gold-bordered
+  banner appears with a checkbox (`toggleLeagueGameSelection()` sets/clears
+  `setup.leagueFixtureId`, `applyLeagueGameSelection()` unchanged). Fewer or
+  more than 2 named players hides the banner and clears
+  `setup.leagueFixtureId`. 2+ simultaneous pending fixtures for the same pair
+  still just offer `fixtures[0]` (unchanged simplification from the original
+  design).
 
 ### Wizard navigation and step-entry reconciliation
 
-`showSetupStep(n)` (`setupStep` 1/2/3) toggles the three step wrappers,
-updates the step-label text, and calls the global `announce()` (`#sr-announcer`,
+`showSetupStep(n)` (`setupStep` 1/2) toggles the two step wrappers, updates
+the step-label text (`SETUP_STEP_LABELS`, now just `{1: '…Choose a game', 2:
+'…Who's playing?'}`), and calls the global `announce()` (`#sr-announcer`,
 `aria-live="polite"`) so screen-reader users hear the step change; it also
-moves focus to each new step's first control (the first player `<select>`/
-button in Step 1, the mode `<select>` in Step 2, the Back button in Step 3) so
-focus is never silently left on a now-hidden control. Back buttons
+moves focus to each new step's first control (the Daily Challenge card or the
+first open ledger row in Step 1, the first player `<select>`/button in Step
+2) so focus is never silently left on a now-hidden control. Back buttons
 (`setupBackTo(n)`) restore, not reset, whatever was already selected on the
-step being returned to — nothing in `setup` is cleared by navigating backward,
-only by a genuinely fresh entry into the screen.
+step being returned to — nothing in `setup` is cleared by navigating
+backward, only by a genuinely fresh entry into the screen.
 
 `show('setup')` resets `setup.slots`/`loadoutByName`/`leagueFixtureId`/
 `pendingFixtures` and starts at Step 1 on every normal entry (nav click, a
-post-game "Try Again"/"New Game" button, etc.) — **except** when
-`_enteringSetupFromRaceLeg` is set, which `raceLeg()` (Player Profile's "Race
-this leg" entry point) sets synchronously right before calling `show('setup')`,
-alongside presetting `setup.slots` to the one player being raced and calling
-`setMode('ghost')`. That flag is consumed (read + reset to `false`)
-synchronously inside `show('setup')` itself — deliberately **not** the same as
-`_ghostLegTarget` (which preselects a specific leg once `renderGhostLegPicker()`'s
-own fetch resolves, and is only cleared when a match is actually found in that
-player's leg history) — a raceLeg() entry must jump straight to Step 3 and
-must never get stuck doing so on every later "New game" nav click even when
-that player turns out to have zero ghost-race-able legs.
+post-game "Try Again"/"New Game" button, etc.), calling
+`renderSetupDailyChallengeSection()`/`renderSetupGameLedger()`/
+`renderSetupFlavorAndBlurb()` up front so Step 1 is fully populated the
+instant it's shown — **except** for two preset entry points, each of which
+jumps straight to whichever step actually holds *its* pre-configured option
+now that Step 3 no longer exists as a shared landing spot for both:
+
+- **`raceLeg()`** (Player Profile's "Race this leg" entry point) presets
+  `setup.slots` to the one player being raced, calls `setMode('ghost')`, and
+  sets `_enteringSetupFromRaceLeg` synchronously right before calling
+  `show('setup')` — consumed there to jump straight to **Step 2**, since
+  Ghost's leg picker lives there now (it needs the already-preset player).
+  Deliberately **not** the same as `_ghostLegTarget` (which preselects a
+  specific leg once `renderGhostLegPicker()`'s own fetch resolves, and is only
+  cleared when a match is actually found in that player's leg history).
+- **`drillCheckout()`** (Top Finishes row / Coaching Insights "🎯 Drill"
+  button) presets `setup.slots` to the one player drilling, calls
+  `setMode('checkout_trainer')` with a one-shot pin (`_checkoutDrillPin`) already
+  applied, and sets `_enteringSetupFromDrill` the same way — consumed to jump
+  to **Step 1** instead, since Checkout Trainer's options (including the pin
+  chip itself, "inspectable and cancelable, never invisible state") now live
+  in Step 1's inline pool; focus lands on the row's own inline Continue button
+  rather than the pin chip/toggles (the player already chose exactly what to
+  drill).
 
 ### Retired
 
 `updateH2HBanner()`/`#h2h-banner`/`GET /api/players/h2h` and
 `updateLeaguePicker()`/`#league-picker-wrap`/`setup.leagueId` — see §18's
-"New Game 'log to league?' picker — retired" note.
+"New Game 'log to league?' picker — retired" note. From the 2026-07 reorder:
+`setupVisibleOptions()`, `onSetupModeSelect()`, `renderSetupChallengeBlurb()`,
+and `renderSetupStep2Content()` (the old flat player-count-filtered
+`<select>` and its supporting functions) were all deleted, replaced by the
+ledger picker and `maxPlayersForSetup()`/`resyncSetupModeForPlayerCount()`
+described above. From the later Step-3-into-Step-1 fold: `#setup-step-3`,
+`#start-btn`, `#setup-blurb-section`, `setupGoToStep3()`, and
+`setupStep3HasContent()` were all deleted — replaced by
+`mountSetupInlineOptions()`/`toggleSetupRules()`, `#setup-step2-continue`
+(now doing double duty as Start), and `setupFinishAndStart()`. A follow-up
+request then replaced that fold's own first-pass `.setup-sticky-bar`/
+`#setup-step1-stickybar` (`position:fixed` bottom bar) with `#setup-step1-continue`
+rendered inline inside the selected row/card instead — the fixed bar's CSS
+and markup were deleted outright, not kept as a fallback.
 
 ---
 
@@ -3829,10 +5727,11 @@ already-shipped limitations, not just unbuilt future features:
   such game, `previousWinner` still reports one of the two named players. Only reaches
   the Rematch/Grudge badges, which the controller evaluates for 2-player matches only,
   so it's latent in practice.
-- **Double-elimination tournaments aren't built** — single-elimination only
-  (§15); the schema already supports double-elim without a migration, but the
-  generation/advancement logic doesn't exist yet. Tracked as its own item on
-  `docs/open-roadmap-items.md`.
+- **Tournament mode is feature-complete** — single- and double-elimination,
+  generation/advancement/reset logic, the setup screen, the tabbed double-elim
+  bracket view, badges, and Player Profile stats all ship (§15). (Optional future
+  refinements only: anti-rematch losers-bracket seeding, arbitrary double-elim
+  counts, a bracket-tree drag/zoom.)
 - See the individual `docs/*.md` files for full design detail on every other
   not-yet-built feature (league mode, Baseball/other game-mode variants,
   camera scoring, mobile app, online multiplayer, and more).
@@ -3870,9 +5769,12 @@ the call site is going through `queueBadge()` (§5), not calling
 
 **"The live scoreboard isn't updating."** Check the SSE connection caps in §7
 (`MAX_SSE_TOTAL`/`MAX_SSE_PER_IP`) — a stuck-open dead connection could be
-holding a slot. Check `ALLOWED_LIVE_KEYS` if a new field was added to
-`liveSnapshot()` but isn't showing up on `/display` — it needs to be added to
-that allow-list too, or the server silently drops it.
+holding a slot. If a per-mode field added to `GAME_TYPES.<type>.liveModeState`
+isn't showing up on `/display`, check `display.html`'s own reader for that
+mode (it should read `s.modeState.<field>`) — `ALLOWED_LIVE_KEYS` no longer
+needs a per-mode entry (§7's "Payload shape", item 42). A genuinely new
+*generic* top-level field (not nested under `modeState`) still needs adding
+to `ALLOWED_LIVE_KEYS`, or the server silently drops it.
 
 **"A Home Assistant webhook isn't firing."** Check `netguard.js`'s rules (§9)
 first — a webhook silently returns `{skipped:true}` if `ha_url` or the specific
@@ -3884,3 +5786,2404 @@ the resolved host is blocked (loopback/link-local always; private-range only if
 mechanics — default thresholds are 5 (admin) / 10 (PIN) failed attempts, 5-minute
 lockout, configurable in Settings. The `RETURNING`-based increment means the
 count is always accurate even under concurrent attempts.
+
+---
+
+## 23. Saved Games / Pause & Resume
+
+`docs/archive/saved-games-roadmap.md`. Pause an in-progress game and come back to it
+later — the New Game screen offers **Resume** or **Abandon** for a matching
+in-progress match instead of forcing it to be finished or thrown away.
+Backend: `backend/db.js`'s "Saved games" section. Frontend:
+`frontend/index.html`'s `saveCurrentGame()`/`resumeGame()`/Saved Games list
+block. Pure replay-rebuild math: `frontend/scoring.js`'s
+`rebuildX01State()`/`rebuildCricketState()`/`rebuildBaseballState()`/
+`rebuildAroundTheClockState()`/`rebuildAroundTheWorldState()`/`rebuildBobs27State()`.
+
+### Scope — what's savable
+
+**Any H2H game** (any participant count the mode allows) or **solo practice
+game**, X01/Cricket/Baseball/guided Around the Clock/guided Around the World/
+Bob's 27 (`SAVABLE_GAME_TYPES`, defined identically in both `backend/db.js` and
+`frontend/index.html` — the server never trusts the client's own copy). Bob's
+27 is savable for the same reason the guided drills are and Doubles Practice/
+Chuckin/Checkout Trainer aren't: it has a genuine mid-run "position" worth
+resuming — the current round and running score — rather than being open-ended
+with nothing lost by starting fresh.
+**Tournament matches and league fixture games are savable** — normal games
+under the hood, so nothing extra is needed beyond restoring their
+`tournamentMatchId`/`leagueFixtureId` linkage on resume (see below).
+**Not savable**: Daily Challenge (one attempt per calendar day is the whole
+format), Ghost mode (the opponent is a replay with in-memory script position),
+Doubles Practice/Just Chuckin' It/Checkout Trainer (open-ended solo drills
+with no meaningful "position" — ending and starting fresh loses nothing).
+
+### Schema — a context table, never a boolean on `games`
+
+Per `CLAUDE.md`'s standing convention (`tournament_matches.game_id` /
+`league_fixtures.game_id` precedent), except `game_id` here is `UNIQUE` and
+`ON DELETE CASCADE` rather than nullable/`SET NULL` — a saved game always
+points at exactly one real `games` row, and deleting that row (a total wipe,
+a stats reset) should take the pause state with it:
+
+```sql
+CREATE TABLE saved_games (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  game_id   INTEGER NOT NULL UNIQUE REFERENCES games(id) ON DELETE CASCADE,
+  saved_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+That's the whole table — "this game is paused" is the only new fact.
+Everything needed to resume is **derived from the turns/darts already
+recorded live** (see "Resuming" below) — no snapshot blob, no schema-versioned
+client state to drift. Wired into `getFullDatabaseExport()` (ordinary "your
+data," no secrets); needs **no extra code** in `wipeAllData()`/`resetStats()`
+— `game_id ON DELETE CASCADE` means wiping the games it touches already
+cascades away any pause state for free, same as `tournament_matches`.
+Deliberately **NOT** in the per-player portable export (`getPlayerExport()`)
+— a pause is local workflow state, not portable history; an imported
+incomplete game simply arrives unsaved, its stats intact.
+
+### One saved game per matchup
+
+At most one saved game per **(exact participant set, game type)**
+(`findSavedGameForParticipants()`, order-independent — compares sorted,
+case-insensitive name lists). `saveGame(gameId)` rejects (409) a second save
+into an occupied slot rather than replacing or stacking; saving an
+already-saved game id is an idempotent no-op (`{ok:true, alreadySaved:true}`,
+double-tap protection).
+
+### Saving
+
+**"⏸ Save for later"** — icon + text, in both the persistent game-screen
+header and the bottom button row (outside `.oche`'s per-turn re-rendered
+content, so it survives the "leg won — Next leg?" transition screen too,
+which only replaces `.oche`'s own innerHTML). Visibility is driven by
+`updateSaveButtonVisibility()`, called from `renderGameShell()` (every new
+game/leg) and from `finishUnit()`'s game-complete branch (`game.done`).
+`saveCurrentGame()` warns if darts are staged in the current, uncommitted
+visit ("The N darts of the current turn haven't been entered and won't be
+kept" — **staged darts are always discarded**, never stored; only committed
+turns exist server-side), then `POST /api/games/:id/save` → `saveGame()`
+(`backend/db.js`) re-validates eligibility server-side (game exists,
+`completed_at IS NULL`, `game_type` is in `SAVABLE_GAME_TYPES`) before
+inserting the row — never trusting the client's own check. On success, the
+client clears `game`, pushes an inactive `pushLive()` snapshot (so `/display`
+stops showing the paused match as live — same pattern `askEndGame()` uses),
+and returns to the New Game screen.
+
+### Where saved games surface
+
+1. **The resume prompt** — `startGame()` checks, at Start time (after the
+   final participant set/game type are known, not buried in step 1) via
+   `findMatchingSavedGame()` against the same `GET /api/saved-games` list the
+   list below renders from (no bespoke lookup). A match interrupts with a
+   real 3-action modal (`showResumeOrAbandonPrompt()`): **Resume**,
+   **Abandon & start fresh**, or **Cancel**. Skipped for Ghost/Daily
+   Challenge (`setup.mode`), even though their `gameType` is `'x01'` — neither
+   mode is itself savable.
+2. **The Saved Games list** (`refreshSavedGamesList()`) — a New Game step-1
+   section, above the player slots, shown only when at least one exists.
+   Each row: players, category, a one-line position summary
+   (`savedGamePositionLabel()`), saved date, and **Resume**/**Abandon**
+   buttons — real buttons/headings, not click-anywhere divs.
+
+Both surfaces read `getSavedGames()` (`backend/db.js`): one row per saved
+game with a **position summary computed via the exact same pure rebuild
+functions the real resume uses** (`_savedGamePosition()`) — never a second,
+parallel "roughly where things stand" implementation that could drift from
+what resuming actually produces. `_savedGamePosition()` itself is a 4-line
+generic dispatch onto each savable `GAME_TYPE_REGISTRY` entry's own
+`rebuild(game, participants, turns)` (replays turns into full state, the
+backend counterpart to `GAME_TYPES.*.resume()` above) and
+`position(game, r)` (trims that down to the row's one-line summary fields)
+members — the same registry-driven-dispatch pattern item 37 gives the
+frontend's resume path, so a type missing either member can't silently fall
+through to a wrong or blank summary.
+
+### Resuming — replay, not snapshot
+
+`GET /api/games/:id/resume-state` (`getResumeState()`) returns the game's
+full metadata plus every committed turn **in original chronological order**
+(`{playerIndex, setNo, legNo, darts:[{sector,mult}]}` — `playerIndex` is
+recovered from `game_players`' insertion-order rowid, the same order
+`createGame()` inserted participants in). Each player entry also carries
+`startScore` (`game_players.start_score`, `null` when unhandicapped):
+`rebuildX01State()` takes the per-player `startScores` alongside the
+game-wide score, and `resumeGame()` constructs each X01 player from their
+own value — a handicapped player replayed from the game-wide score would
+come back with an inflated remaining and their legitimate checkouts/busts
+replayed as neither (the same per-player application live play's
+`setup.handicaps` does at `startGame()` and every leg reset). The client rebuilds the live `game`
+object by feeding every turn back through the **pure**
+`rebuildX01State()`/`rebuildCricketState()`/`rebuildBaseballState()`/
+`rebuildAroundTheClockState()`/`rebuildAroundTheWorldState()` functions
+(`frontend/scoring.js`) — the same `evaluateVisit()`/`evaluateVisitCricket()`/
+`evaluateVisitBaseball()`/`evaluateDartAroundTheClock()` engines that scored
+each turn live, called from a dedicated, side-effect-free orchestrator
+instead of the live `enterTurn()`/`onLegWon()`/`startNextLeg()` UI functions
+(which carry real side effects — DB writes, badge awards, HA webhooks,
+rendering — that must never re-fire for turns the server already recorded
+once). `resumeGame()` (`frontend/index.html`) builds full player objects via
+each type's own `GAME_TYPES.*.newMatchPlayer()` (for normal defaults and async
+lifetime-ladder-base fetches, exactly as any new game gets), then dispatches
+to that type's own `GAME_TYPES.*.resume(ctx)` member (item 37,
+`docs/code-quality-roadmap.md`) — a per-type function returning
+`{overlay, statusMsg}` — instead of a hardcoded per-type if/else chain.
+`overlay` carries only the fields that type's resume needs to override on the
+generic `game` object (e.g. only Baseball's overlay sets `baseballInning`,
+only Gauntlet's sets its five gauntlet-specific fields); every savable type's
+`resume()` mutates the constructed `players` in place with the rebuilt core
+fields — remaining scores/marks+points/innings+runs, legs/sets won — and
+returns `current`/`starter`/`setNo`/`legNo` (deterministic from the turn
+sequence plus the same leg-starter rotation `startNextLeg()` applies live — a
+**trailing leg win with no next-leg turn recorded yet** — saved on the "leg
+won — Next leg?" screen before that button was ever tapped — is handled
+explicitly: the rebuild functions apply one more rotation/reset pass so the
+resumed game lands on the new leg's first throw, never the stale summary
+screen) inside that same `overlay`. A type with no `resume` member (i.e. every
+non-savable type) can't reach this path at all — `resumeGame()` checks
+`GAME_TYPES[gameType].resume` up front and alerts "can't be resumed" instead,
+the same by-construction guarantee `ctorArg` (item 40) gives the player
+constructor's argument shape. `DB.gameId` is pointed back at the existing game
+id, so subsequent turns append to the same game; the live scoreboard picks the
+match back up on the next `pushLive()`.
+
+**What resume deliberately does NOT rebuild** (cosmetic, session-scoped,
+already lost today by a page refresh mid-game): past-leg summary cards
+(`game.legSummary`), the one-level undo snapshot (`lastTurnSnapshot: null` —
+undo is unavailable for the first turn after resume, same as the first turn
+of any game), voice-announcement/celebration state, and every per-leg
+badge-trigger tracker (Metronome streaks, Comeback Kid deficits, Around the
+Clock's lifetime `singlesHit`, etc.) — a resumed leg's in-leg-so-far badge
+opportunities are cosmetically lost, the same tradeoff Chuckin/Checkout
+Trainer's own milestone ladders already accept elsewhere.
+
+**Tournament/league-fixture linkage restore**: `getResumeState()` looks up
+`tournament_matches`/`league_fixtures` by `game_id` and returns
+`tournamentMatchId`/`leagueFixtureId` alongside the replay payload;
+`resumeGame()` threads them straight back onto `game.tournamentMatchId`/
+`game.leagueFixtureId` exactly as `_reallyBeginTournamentMatch()`/
+`startGame()` set them the first time, so completion advances the
+bracket/fulfills the fixture exactly as if never paused.
+
+**Divergence guard** (two devices racing the same resume): `getResumeState()`
+re-verifies the game is still incomplete AND still has a `saved_games` row
+immediately before deleting it — a 409 ("not currently saved — it may
+already have been resumed or abandoned elsewhere") beats silently
+double-driving one game from two controllers. The delete happens **as part
+of the same read** (a deliberate GET-with-a-side-effect, not a separate
+mutation call) — "the game is simply live again," and a separate mutation
+call would let a network hiccup between the two leave a phantom
+`saved_games` row.
+
+### Abandoning
+
+`DELETE /api/saved-games/:id` (`:id` is the **game id**, matching every other
+saved-games route's numbering — not the `saved_games` row's own id) deletes
+only the `saved_games` row; the game stays a permanently incomplete `games`
+row, and **stats recorded during it are kept** (matches `askEndGame()`'s
+existing behavior for quitting a live game). A **tournament-linked** saved
+game can't just be orphaned this way — `askAbandonSavedGame()` detects
+`tournamentMatchId` (surfaced by `getSavedGames()`) and instead deletes the
+`saved_games` row THEN routes to the bracket (`show('tournament')`) with the
+same message `askEndGame()` already gives for quitting a *live* tournament
+match, so the admin can record a walkover there. The saved-games row is
+deleted proactively in this path (not left for `recordWalkover()` to clean
+up) because `_advanceTournamentMatch()` never touches `games.completed_at` —
+a walked-over match's underlying game stays incomplete forever, so leaving
+`saved_games` in place would strand it in the list indefinitely, pointing at
+a match the bracket has already moved on from.
+
+### Interactions with existing features
+
+- **Player deletion**: `registerDeletePlayerGuard()` blocks deleting a player
+  who's in a currently-saved game ("abandon it (or resume and finish it)
+  before deleting") — cheaper and louder than an auto-abandon side effect
+  buried inside a delete.
+- **Player merge**: a saved game between source and target is already a
+  shared game (blocks the merge via the existing `sharedGames` check). A
+  saved game against a THIRD player can still collide after reassignment —
+  `_savedGameCollisions()` detects when the merge would leave the target
+  with two saved games in one (participants, game type) slot (something
+  normal play can never produce) and blocks it, consistent with every other
+  shared-row case in `_mergeBlockers()`. No explicit reassignment SQL is
+  needed in `mergePlayers()`'s own write transaction — `saved_games` has no
+  `player_id` column, so it "follows" `game_players.player_id`'s
+  reassignment automatically.
+- **Backups/restore**: nothing special — `saved_games` rides along in the
+  SQLite file like every other table.
+
+### API
+
+```
+GET  /api/saved-games            -> saved-game list + one-line position summaries (public)
+POST /api/games/:id/save         -> pause an in-progress game for later
+GET  /api/games/:id/resume-state -> the full replay payload -- ALSO deletes the
+                                     saved_games row (divergence guard, see above)
+DEL  /api/saved-games/:id        -> abandon a saved game (:id is the game id) -- stats kept
+```
+
+Save/resume/abandon are all `requireWrite` (same tier as recording a turn —
+pausing is gameplay, not admin surgery); the resume-state endpoint exposes
+only data already readable via existing stats endpoints, and mutates
+(deletes the `saved_games` row) as an explicit, documented exception to
+GET-is-safe (see "Divergence guard" above).
+
+### Testing
+
+Committed tests: `backend/test/scoring.test.js` (`rebuildX01State`/
+`rebuildCricketState`/`rebuildBaseballState`/`rebuildAroundTheClockState`/
+`rebuildAroundTheWorldState` — mid-game state across a leg boundary, a
+trailing leg win with no next-leg turn recorded, a practice game's
+`!practice` set-completion gate, a full 9-inning Baseball leg, and Around the
+Clock/World's own simpler shapes) and `backend/test/db.saved-games.test.js`
+(save/list/resume-state/abandon lifecycle, the one-per-matchup constraint,
+server-side eligibility checks, the two-device divergence guard, tournament-
+match linkage restore through a full resume-then-complete-then-bracket-
+advances cycle, the player-deletion guard, and the merge-collision block).
+
+---
+
+## 24. Household Elo Rating
+
+`docs/archive/rating-and-handicap-roadmap.md` Part A. A single evolving number per
+player answering "who's actually on top right now?" — more responsive than
+raw win totals (beating the house champion moves you more than beating the
+newest player), self-correcting as form changes.
+
+### Live-computed, never stored
+
+`getEloRatings()` (`backend/db.js`) walks every completed, non-practice,
+2-player game — across every competitive game type combined into **one
+household rating** (deliberately "who beats whom," not a per-game-type
+number; Tournament and league-fixture games count, since they're real
+competitive results; Ghost/Daily Challenge/solo drills never enter, since
+there's no second real player) — in `(created_at, id)` order, folding the
+textbook update: start 1000, `K=32`, `expected = 1/(1+10^((opponent-mine)/
+400))`, the winner gains `round(K*(1-expected))` and the loser loses the
+*exact same amount* (a simple zero-sum split, not each side independently
+rounding its own formula, which could drift apart by a point). This means
+ratings retroactively heal after `deleteLastTurn`, player merges, game
+deletions, or imports, with zero migration/backfill machinery — the
+standing "nothing pre-aggregated" schema philosophy applied to Elo. A few
+thousand games is a trivial walk at household scale; revisit only if a
+server ever accumulates enough games for this to matter.
+
+**Handicapped games are excluded** (§25 below): the walk's `WHERE` clause
+skips any game where either `game_players` row has a non-`NULL`
+`start_score` — a compensated result says nothing about raw strength.
+
+### Surfaces
+
+- **Home page** "📈 Household Ratings" leaderboard (`getEloLeaderboard()`,
+  `GET /api/stats/elo-leaderboard`) — rating + W/L, sorted descending, a
+  **minimum 5 rated games** before a player appears (`ELO_MIN_GAMES`), so a
+  1-game player isn't ranked off a single result. Lives in
+  `renderHomePulse()` (piggybacked onto `getHomeExtra()`'s existing payload,
+  the same way the Active Leagues teaser is), not inside
+  `renderHomeTabBody()`'s per-game-type dispatch — the rating deliberately
+  spans every competitive game type, so pinning it to whichever per-type tab
+  happens to be selected (the way "Most Wins" today only visibly shows on
+  the X01 tab despite its own query already spanning every type) would
+  misleadingly suggest it's type-scoped.
+- **Player Profile** "📈 Household Rating" section (`getPlayerElo(name)`,
+  `GET /api/players/elo?name=`) — rating, W-L record, and rank (`#N of M`
+  qualifying players, or "Not yet ranked" below the 5-game floor — rank is
+  computed against the *same* qualifying pool the Home leaderboard uses, so
+  "rank #1" and "topping the Home leaderboard" are always the same claim)
+  plus a rating-over-time sparkline (`drawEloSparkline()`, a bespoke minimal
+  SVG rather than reusing `drawAvgChart()` — that function is tightly
+  coupled to `activeStatDefs()`/`selectedStat`'s period-picker/value-
+  formatter machinery, none of which applies to a single always-on number
+  with no period picker). Shown once inside the `overall`/`h2h` tabs'
+  shared `h2hSection`, unconditional on the per-game-type toggle (`gt`) —
+  unlike Tournaments/Leagues just above it, which *are* gated on `gt`.
+- **Match-win delta**: `checkEloOnMatchWin(w, opp)` (`frontend/index.html`)
+  is called from the "game (match) won" branch of every H2H-capable game
+  type's own `onLegWon`/`onLegWonCricket`/`onLegWonBaseball`, right after
+  `DB.completeGame()` so the just-finished game is already reflected in the
+  walk by the time the async fetch resolves. Guards on `opp` (null for
+  solo/practice/3+-player games — Baseball's own gate isn't `!game.practice`
+  the way X01/Cricket's is, per BUG-22, so `opp` is derived fresh there
+  rather than assumed) and `!game.practice` (excludes a Ghost race even
+  though it has a real `opp` object). Patches a `#elo-delta-banner`
+  placeholder on the GAME OVER screen once the fetch resolves (`📈
+  Household rating: 1016 (+16)`) — the same "celebrate the win now, patch in
+  extra detail once confirmed" pattern `#challenge-result-extra` already uses,
+  since the rating can't be known synchronously at match-end time.
+
+### Badges
+
+| Badge | Exact condition |
+|---|---|
+| 👑 **Top of the House** | `qualifies && rank === 1` for the winner, checked via the same async fetch as the delta banner. **Once-badge** — manually managed (`Backend.send(..., {once:true})` + explicit `trackBadgeForUndo()`) rather than trusted to `awardRecurringBadge()`'s own internal `game.lastTurnSnapshot` read, since by the time this network round-trip resolves the live game state may have moved on — the same precaution Grudge Match's own async check already takes. Mega-tier overlay (confetti) like Nine-Darter/Perfect Leg/Champion. |
+| 🗡️ **Upset** | `lastCompetitiveGame.isUpset` for the winner — the loser's *pre-game* rating was 150+ above the winner's pre-game rating (`getEloRatings()` captures both pre-game ratings before applying the update, so this checks the gap that made the win an upset in the first place, not the post-game ratings). **Recurring** — mirrors The Rematch's own async `awardRecurringBadge()` call. |
+
+Both get their own Badge Case section ("Household Rating") on the Player
+Profile — cross-game-type, so folding into X01's section (the way most
+one-off badges do) would misrepresent their scope, the same reasoning
+Bob's 27's own `bobs27:true` flag already established.
+
+### API
+
+```
+GET /api/stats/elo-leaderboard     Home page leaderboard (rating+W/L, min 5 rated games, no mode param)
+GET /api/players/elo?name=         Single-player view: rating, wins, losses, played,
+                                    qualifies, rank, ratedPlayers, history (rating after
+                                    each rated game), lastCompetitiveGame (global — the
+                                    most recently completed rated game, for the delta
+                                    banner/badge checks right after a match ends)
+```
+
+### Testing
+
+`backend/test/db.elo.test.js`: hand-verified K=32 arithmetic for a single
+win (1000→1016/984) and a rematch (999/1001, proving the zero-sum delta
+application), plus derivation-only checks (not re-verifying the same
+formula a third time) for the Upset threshold, the min-5-games floor,
+practice/3+-player/handicapped-game exclusion, and `getPlayerElo()`'s
+qualifies/rank fields. Verified end-to-end with Playwright: a real 2-player
+X01 match played through the actual UI, confirming `/api/players/elo`
+returns the exact hand-computed rating, the Home page's Household Ratings
+section renders (including the below-floor empty state), and the Player
+Profile's Household Rating section renders the correct rating/record/rank.
+
+---
+
+## 25. Handicapping
+
+`docs/archive/rating-and-handicap-roadmap.md` Part B. Lets mismatched players have a
+real game: the stronger player starts an X01 leg from a higher score (e.g.
+501 vs. 401), chosen per player at setup. Nothing about the throwing
+changes — just the mountain's height. **X01 only** — starting score is
+X01's natural handicap lever; Cricket/Baseball have no equivalent single
+knob.
+
+### Schema
+
+`game_players.start_score INTEGER` — nullable, a per-game snapshot
+following the established `out_mode`/`dart_weight`/`loadout_id` precedent.
+`NULL` (the default for every existing row and every game that doesn't use
+it) means "the game's own `config.startingScore`"; a value overrides it for
+that player only — the game's own `category`/`config.startingScore` stay
+whatever the *other* (unhandicapped) participant is really playing, since
+they aren't handicapped. Purely additive; every existing game reads
+unchanged.
+
+### Write-time validation (`createGame()`, `backend/db.js`)
+
+Server-side, never trusting the client's own setup-screen eligibility check
+(the same precedent `pinnedTarget`/Cricket's `config.variant` already
+establish): a supplied `startScore` must be for an X01 game (400 otherwise),
+an integer, `>= 101` (the lowest starting score this app supports at all),
+and **strictly less than** the game's own category value — equal-or-above
+isn't a real handicap, and would otherwise still wrongly exclude that
+player from Elo/nine-darter/fewest-darts credit for a game they didn't
+actually shorten. Checked for every participant before any `game_players`
+row is written.
+
+### Setup UI
+
+An optional, collapsed-by-default "Handicap" `<details>` disclosure inside
+the X01 options step (`renderHandicapOptions()`, `frontend/index.html`) —
+shown only when `setup.gameType === 'x01'` and 2+ player slots are filled.
+One per-player `<select>` (steps of 50 between 101 and the chosen
+category's own value minus 50, plus a "No handicap" default), keyed by
+`setup.handicaps = {playerName: overrideStartScore}`. Rebuilt fresh on
+every call from current setup state (mirroring `renderPlayers()`'s own "just
+re-render" convention) rather than patched incrementally, and re-derived
+whenever the mode/game type/starting category changes
+(`renderSetupFlavorAndBlurb()`) or Step 3 is entered
+(`setupGoToStep3()`, in case Step 1's slots changed since).
+
+### Engine
+
+`newMatchPlayer(name, start)` seeds both `p.score` and a new `p.startScore`
+field from `start` — `startGame()` passes `setup.handicaps[name] ||
+startScore` per player instead of the one shared `startScore` every other
+game type gets. `resetPlayerForNextLegX01()` resets `p.score` to
+`p.startScore` (this player's own start), not `game.start` (the shared
+category) — a handicap is chosen once at setup and holds for every
+subsequent leg/set of the same match, not just its first leg.
+`evaluateVisitX01()`/the bust/checkout logic need nothing — they never knew
+where scores start.
+
+### Live scoreboard
+
+`playerSnapshotX01()` includes `startScore` in the live payload (rides
+inside the already-unrestricted per-player `players[]` array — no
+`ALLOWED_LIVE_KEYS` change needed). `display.html`'s `renderers.x01.card()`
+shows a "STARTED 401" tag next to a player's name whenever their own
+`startScore` differs from the game's `category` — visible only for the
+handicapped player, so the handicap is legible from the second screen
+without cluttering an even match.
+
+### Interaction with other features
+
+- **Household Elo (§24) excludes handicapped games entirely** —
+  `getEloRatings()`'s own `WHERE` clause skips any game where either
+  participant's `game_players.start_score` is non-`NULL`, since a
+  compensated result says nothing about raw strength.
+- **Win-based stats count a handicapped win as a real win, deliberately** —
+  the whole point of a handicap is a fair contest, so `getSummary()`/win-rate/
+  streak stats are unaffected.
+- **"Fewest darts to finish"-shaped Personal Bests and nine-darter
+  detection exclude a handicapped leg** — a shortened start makes finishing
+  in fewer darts mechanically easier, not a skill feat. A new `NOT_HANDICAPPED`
+  SQL fragment (`backend/db.js`, alongside `NOT_CHECKOUT_TRAINER`) — `NOT
+  EXISTS (... game_players ... start_score IS NOT NULL)`, scoped to the
+  *same* player and game the surrounding query is already reading —
+  excludes it from all 6 nine-darter-detection call sites
+  (`nineDarterBase`, `getSummary`, `getPlayerStatBubbles`,
+  `getMetricHistory`'s `ninedarters` case, both `getNineDarterStats`
+  queries) and `getPersonalBests()`'s `fewestDartsCheckout`. **Average-based
+  stats (`bestLegAvg`, `recentFormAvg`, `lifetimeAvg`, 3-dart average, 1st-9
+  average) are deliberately NOT excluded** — a leg average is
+  starting-score-agnostic (points scored ÷ darts thrown), so a shortened
+  start doesn't inflate it the way "fewest darts" does; excluding those too
+  would just be throwing away real, fairly-earned data.
+
+### Testing
+
+`backend/test/db.handicap.test.js`: `createGame()`'s validation (rejects a
+non-X01 game type, rejects out-of-range/non-integer values, accepts a valid
+override), nine-darter detection excluding a handicapped player's
+shortened-start finish while the *same game's* unhandicapped opponent keeps
+full credit, and `fewestDartsCheckout` excluding a handicapped leg while a
+genuine unhandicapped one still sets it normally. Verified end-to-end with
+Playwright: a real 2-player X01 match set up through the actual New Game UI
+(one player handicapped to 401, the other a real 501), confirming both
+players' starting scores are exactly right, the match completes, and the
+handicapped winner's Elo rating correctly shows zero rated games afterward.
+
+## 26. 121 Checkout Ladder
+
+`docs/archive/practice-ladders-roadmap.md` Part B. The classic solo checkout
+ladder: start on **121**, double out, up to **3 visits (9 darts)** to check
+it out. Check out and the target climbs one rung; use all 3 visits without
+checking out and it drops one rung (floored at **61**). Play as long as you
+like — the story is how high you climb. Deliberately the *physical* sibling
+of Checkout Trainer (§19): that mode asks what you'd *throw*; this one makes
+you actually throw it.
+
+### Design
+
+`checkout_ladder` game type, solo-only (`GAME_TYPES.checkout_ladder.soloOnly
+= true`). Each target attempt is its own **leg** (`turns.leg_no` increments
+per attempt) of ordinary X01-shaped visits — `evaluateVisit()` (the same
+shared X01 evaluator, `frontend/scoring.js`) is reused **completely
+unmodified**; the 3-visit cap and the ladder's up-one/down-one movement are
+the only new rules layered on top. The game never completes — no
+`finishUnit('game', ...)`/`DB.completeGame()` call anywhere in this chain,
+matching Doubles Practice/Just Chuckin' It's "runs until End Game is
+pressed" shape (`games.completed_at` stays `NULL` forever, same as those two
+modes).
+
+### Ladder movement is derived, not stored
+
+The current target is never trusted from any stored value — it's derived
+fresh, every time, by replaying every prior attempt's own recorded outcome:
+start at 121; a win (`checkout=1`) climbs one rung; a loss (3 visits
+recorded, no checkout) drops one rung, floored at 61. **Capped at 170**
+(not just the highest badge rung but a hard ceiling): `turns.target_score`
+is the same shared column Checkout Trainer uses for "a checkout target,"
+whose valid range tops out at 170 (the highest possible double-out finish,
+T20 T20 Bull) — repeatedly clearing 170 just keeps a run parked at the
+summit rather than requesting a target outside that column's own valid
+range. This "nothing pre-aggregated" replay happens in three independent
+places that must all agree: the write-time guard (`backend/db.js`
+`addTurn()`), the stats/personal-bests reads (`_checkoutLadderAttempts()`),
+and the pure rebuild function used for saved-game resume
+(`rebuildCheckoutLadderState()`, `frontend/scoring.js`).
+
+### Write-time validation (`addTurn()`, `backend/db.js`)
+
+A `checkout_ladder` turn is checked the same way an X01 visit is
+(`scored` must equal the sum of the darts thrown, or `0` on a bust;
+`checkoutPoints` must equal `scored` on a checkout), plus two new rules:
+- **At most 3 visits per attempt** — a 4th turn recorded against the same
+  `(game_id, leg_no)` is rejected (the attempt should already have resolved).
+- **`targetScore` must match the attempt's derived ladder position** —
+  computed server-side from every turn with a strictly smaller `leg_no`
+  (grouped by leg, a leg with any `checkout=1` turn counts as a win,
+  otherwise a loss), never trusted from the client. A first attempt must
+  target 121; any other value is rejected.
+
+### Engine (`frontend/index.html`)
+
+`newMatchPlayerCheckoutLadder(name)` seeds `p.score = 121`, `doubleOut:
+true` (always double-out regardless of that player's own X01 finish-rule
+preference elsewhere). `enterTurnCheckoutLadder()` (dispatched from
+`enterTurn()`) commits a visit via `evaluateVisit()` unmodified, tracks
+`game.checkoutLadderVisits` (0-2 while an attempt is still live), and on a
+win or a 3rd used visit hands off to `resolveCheckoutLadderAttempt()`,
+which climbs/drops `game.checkoutLadderTarget` and then calls
+`startNextLeg(false)` — the **same generic leg-transition function X01
+itself uses** (increments `game.legNo`, resets each player via
+`resetForNextLeg()`, clears `currentLegTurns`/`lastTurnSnapshot`,
+re-renders) rather than a bespoke reimplementation of that bookkeeping.
+`startNextLeg()` gets one small `checkout_ladder`-specific addition
+(resetting `game.checkoutLadderVisits` to 0), the same pattern
+`baseballInning`'s own reset there already established. Undo
+(`undoLastTurnCheckoutLadder()`) only reaches back into the still-live
+attempt — once an attempt resolves, `lastTurnSnapshot` is cleared by the
+leg transition, so (same as every other game type) a player can't undo past
+a leg boundary.
+
+### Stats, Personal Bests, Home leaderboard
+
+- **Stat bubbles** (`getCheckoutLadderStatBubbles`): `attempts`,
+  `successRate` (wins ÷ attempts), `currentPosition` (replays only the
+  *temporally latest game's* own resolved attempts — "where would my next
+  attempt in that run start from," the closest a lifetime bubble can get to
+  a genuinely live position for a mode with no persistent cross-session
+  ladder), `dartsThrown`. An attempt only counts once it's **resolved** —
+  won, or all 3 visits used (`a.won || a.visits >= 3`, the same check
+  `rebuildCheckoutLadderState()` applies): the temporally-last `(game, leg)`
+  group can be a still-in-progress attempt (permanently so for a paused/
+  abandoned game), and treating it as a completed failure would drop
+  `currentPosition` a rung and inflate `attempts`/`successRate` before the
+  attempt actually ends. The position replay uses the same 61–170 bounds the
+  rebuild enforces (+1 per win capped at 170, −1 per fail floored at 61).
+- **Personal Bests** (`getCheckoutLadderPersonalBests`): `highestTargetReached`
+  (a peak — attempted, win or fail, since standing at rung 150 already means
+  you climbed that high regardless of how that attempt ends) and
+  `fewestDartsOnHighestCheckout` (darts thrown on the highest attempt
+  actually *won*, which can be lower than `highestTargetReached` if the
+  peak attempt itself failed).
+- **Home leaderboard** (`getCheckoutLadderLeaderboard`): one row per player,
+  their own highest-ever target reached (`MAX(turns.target_score)`), no
+  minimum-attempts floor — same "a single best run" precedent Checkout
+  Blitz's own board established.
+- Real throws: darts count toward heatmaps/doubles% like every other
+  physical game type — no hypothetical exclusion.
+
+### Badges
+
+- A highest-rung ladder (`CHECKOUT_LADDER_MILESTONE_LADDERS`, the same
+  data-driven `checkChuckinMilestoneTier()` engine every other milestone
+  ladder in this app uses): Climbing 🧗 (125), Ascending ⛰️ (130), High
+  Ground 🏕️ (140), Summit Push 🚩 (150), Near The Top 🌤️ (160), Peak Rung
+  🏔️ (170) — checked against the **new** target just climbed to, so a tier
+  fires the moment a climb first reaches that rung.
+- 🧗 **Peak Bagged** (`checkoutladderpeakbagged`) — the separate, harder
+  feat of actually *checking out* 170 (T20 T20 Bull, the same double-out
+  maximum X01's Big Fish celebrates), not just reaching that rung. Recurring
+  (`awardRecurringBadge`) — climbing back up to 170 and clearing it again in
+  a later run is a real repeatable feat, not a one-off.
+
+### Live scoreboard
+
+`playerSnapshotCheckoutLadder(p)` rides the per-player `players[]` array
+(`score`, `out:'double'`, dart counts); `GAME_TYPES.checkout_ladder.
+liveModeState` adds `checkoutLadderTarget`/`checkoutLadderVisits` to
+`modeState` (mirroring Bob's 27's own `bobs27Round` game-level field) and
+`liveSnapshot()` treats this game type as X01-shaped for the
+checkout-hint calculation (`isX01` also matches `'checkout_ladder'`, since
+it's a genuine double-out visit). `display.html`'s
+`renderers.checkout_ladder.card()` mirrors X01's own card almost exactly —
+swapping the "Leg N" standing line for "Target N · Attempt N · Visit N/3."
+
+### Saved games
+
+Follows `docs/archive/saved-games-roadmap.md` for free — the ladder's own
+"nothing pre-aggregated" design means `rebuildCheckoutLadderState()`
+(`frontend/scoring.js`) is a pure replay of `turns`, no extra schema needed.
+`_savedGamePosition()` (`backend/db.js`) returns `{target, legNo,
+remaining}` for this game type; `savedGamePositionLabel()`
+(`frontend/index.html`) renders it as "Target N · attempt N · N remaining."
+
+### Testing
+
+`backend/test/scoring.test.js`: `rebuildCheckoutLadderState()`'s up/down
+movement, the 61 floor, a still-live (unresolved) attempt, and a bust
+burning a visit without ending the attempt early.
+`backend/test/db.turn-consistency-guard.test.js`: the write-time guard's
+dart-sum/checkout-points checks, the 3-visit cap, `targetScore` validation
+after both a win and a loss, and the 170 ceiling never producing an
+out-of-range `targetScore`. `backend/test/db.checkout-ladder-stats.test.js`:
+all three stats/PB/leaderboard functions, including the
+"`highestTargetReached` counts a failed peak attempt but
+`fewestDartsOnHighestCheckout` only looks at the highest **won** target"
+distinction. Verified end-to-end with Playwright: a real solo game climbing
+121→126 across 6 real 3-dart double-out checkouts (confirming the 🧗
+Climbing badge fires at 125), a failed attempt dropping the target back
+down, undo restoring state mid-attempt, save/resume round-tripping a
+mid-attempt position exactly, and the live `/display` scoreboard rendering
+the target/attempt/visit line with no console errors.
+
+## 27. The Gauntlet
+
+`docs/archive/gauntlet-roadmap.md`. A solo endurance warm-up: **20 stations**, one
+per board number, played in a **fixed clock-adjacency order** that never
+sits two consecutive stations near each other on the board
+(`GAUNTLET_STATION_ORDER = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5]`
+— itself the standard clockwise dartboard walk, identical every run,
+forever). At each station, 3 darts must each complete a specific task **in
+strict throw order**: dart 1 the single, dart 2 the treble, dart 3 the
+double — no partial credit, and no re-matching across positions (a double
+thrown as dart 1 doesn't count for dart 3's own task). Misses earn **Scars**;
+2 misses gets one repeat attempt at that same station; 3 misses is a **Deep
+Scar** (no repeat, and it counts double toward the run's total). Runs ~15
+minutes and always ends after all 20 stations settle — unlike Checkout
+Ladder/Doubles Practice's perpetual "runs until End Game," a run **IS** the
+game (the same shape practice Baseball/Bob's 27 both established).
+
+### Design
+
+`gauntlet` game type, solo-only, `legsPerSet`/`setsPerGame` forced to 1.
+Every turn is stamped `set=1, leg=1` — there's no leg/set progression
+concept at all for this mode; station identity lives entirely in
+`turns.target_score`, not in `leg_no` (contrast Checkout Ladder, where
+`leg_no` increments per attempt).
+
+### The Scar / repeat rule
+
+| Misses this attempt | Outcome |
+|---|---|
+| 0 | Clean pass — advance |
+| 1 | 1 Scar — carry it, advance |
+| 2 | **One repeat attempt**, same station — the retry's own result is final regardless of what it comes back as (even another 2 or 3) |
+| 3 | **Deep Scar** directly, no repeat offered — advance |
+
+A station **settles** the moment either its first attempt scores something
+other than 2, or a second attempt (the repeat) exists for it at all — this
+single derivation (`rebuildGauntletState()`, `frontend/scoring.js`) is
+shared by the write-time guard, every stats query, and saved-game resume, so
+"which stations are settled, is one awaiting its repeat, what's the running
+Scar tally" is computed exactly once and can never drift between call sites.
+
+### Per-dart grading (`evaluateGauntletStation`, `frontend/scoring.js`)
+
+Pure, positional: `evaluateGauntletStation(stationNumber, darts)` checks
+`darts[0]` against the station's single, `darts[1]` against its treble,
+`darts[2]` against its double — each independently, never best-fit across
+positions. Returns `{hits:[bool,bool,bool], misses}`. A missing dart (an
+attempt somehow cut short) counts as a miss for that slot, though in
+practice every Gauntlet attempt is always exactly 3 darts (no bust/win
+early-exit condition the way X01 has).
+
+### Scar tally and result tiers
+
+`gauntletTotalScars(finalMisses)` (`frontend/scoring.js`) sums every
+station's **final** (post-any-repeat) miss count, **doubling** any station
+whose final result is 3 (a Deep Scar contributes 6, not 3) — derived at read
+time, never stored pre-multiplied, the same "store the raw number, derive
+the special-case scaling" shape Halve-It's halving rule uses.
+`gauntletResultTier(totalScars)`:
+
+| Scars | Result |
+|---|---|
+| 0–5 | Unmarked |
+| 6–12 | Scarred but Standing |
+| 13–20 | Bloodied |
+| 21–30 | Broken Down |
+| 31+ | The Gauntlet Wins |
+
+### Data model
+
+Reuses the existing per-dart-turn shape; no new columns. `turns.target_score`
+(already exists, already range-checked 1–170, comfortably covers 1–20)
+stores which station this attempt was for — read back directly rather than
+derived from prior-turn count, since a repeat attempt would otherwise break
+the usual "turn count maps 1:1 to position" trick (SEC-25/Baseball-inning
+style). `turns.scored` stores the raw miss count for that specific attempt
+(0–3). Whether a station was repeated is derivable from row count (more
+than one `turns` row sharing the same `(game_id, target_score)`); no
+`was_repeat` column exists. Every dart is a real physical throw — full
+participation in heatmaps/treble-rate/dart-pace, no hypothetical exclusion
+(same conclusion Bob's 27/Checkout Ladder both reached).
+
+### Write-time validation (`addTurn()`, `backend/db.js`)
+
+`scored` (miss count) must be 0–3; `checkout`/`bust` must both be false
+(Gauntlet has neither concept). The **sequence guard** (only the next
+station in `GAUNTLET_STATION_ORDER`, or the current station's own pending
+repeat) and the **repeat-count guard** (at most 2 rows per station, and only
+if the first came back as exactly 2) collapse into a single check:
+`rebuildGauntletState()` re-derives "which station is expected next" from
+every prior turn for this player+game, and the submitted `targetScore` must
+match it exactly — this one comparison rejects both a skipped-ahead station
+and a 3rd attempt at an already-settled one. Once all 20 stations are
+settled, no further turn is accepted at all.
+
+### Engine (`frontend/index.html`)
+
+`enterTurnGauntlet()` (dispatched from `enterTurn()`) commits a 3-dart
+attempt via `evaluateGauntletStation()`. If the (non-repeat) attempt scores
+exactly 2, `game.gauntletAwaitingRepeat` is set and the SAME station is
+re-attempted next — no station advance, no push to
+`game.gauntletFinalMisses`. Otherwise the attempt is final: pushed to
+`gauntletFinalMisses`, `gauntletStationIndex` advances, and once it reaches
+20, `onGauntletComplete()` runs — the one point in this game type's whole
+lifecycle that reaches `finishUnit('game', ...)`, calling `DB.completeGame()`
+and building the run's own "GAME OVER" summary (Total Scars + Result tier,
+`finishUnit()`'s `gauntletSummary` block, mirroring Bob's 27's own
+`bobs27Summary`). Undo (`undoLastTurnGauntlet()`) only reaches back into the
+still-live attempt — once an attempt settles and the station advances,
+`lastTurnSnapshot` only covers up to that settling turn (same "can't undo
+past a leg boundary" rule every other game type follows).
+
+### Stats, Personal Bests, Home leaderboard, Scar Map
+
+- **Stat bubbles** (`getGauntletStatBubbles`): runs completed, average total
+  Scars per completed run, clean-station rate (% of every settled station,
+  across all runs — completed or not — finished with 0 misses on its final
+  attempt), Deep Scar rate, retry rate.
+- **Personal Best** (`getGauntletPersonalBests`): **lowest** total Scars
+  across completed runs only — ascending-is-better, the opposite polarity
+  from most "best run" Personal Bests in this app (`MIN()`, not `MAX()`,
+  same shape X01's `fewestDartsCheckout` uses).
+- **Home leaderboard** (`getGauntletLeaderboard`): one row per player, their
+  own lowest-ever total Scars — sorted **ascending** (lower is better), the
+  one leaderboard in this app sorted that direction.
+- **The Scar Map** (`getGauntletScarMap`) — the actual point of the game:
+  for every **completed** run, each station's final miss count averaged per
+  station number across every run a player has ever finished. Rendered
+  (`renderGauntletScarMap()`) as a 20-cell severity-shaded grid in
+  `GAUNTLET_STATION_ORDER`'s own order (already the standard clockwise
+  board walk, so no separate layout math is needed to read as "around the
+  board"), plus a plain text table alongside it for screen readers
+  (docs/archive/gauntlet-roadmap.md's own accessibility requirement).
+
+### Achievements
+
+Three data-driven ladders off the existing `checkChuckinMilestoneTier()`
+engine: lifetime runs completed (`GAUNTLET_RUNS_MILESTONE_LADDERS`, base+session,
+fetched once at game start the way Chuckin's own lifetime bases are),
+lifetime clean stations (`GAUNTLET_CLEAN_STATIONS_MILESTONE_LADDERS`, same
+pattern), and — checked once, at run completion, against **that run's own
+peak value**, the Bob's 27 final-score pattern, not a lifetime accumulator —
+longest streak of consecutive clean stations within one run
+(`GAUNTLET_STREAK_MILESTONE_LADDERS`). Plus three one-offs: 💎 **Flawless
+Gauntlet** (all 20 stations, zero Scars anywhere — deliberately not mutually
+exclusive with 🥋 Unmarked, since a flawless run is trivially also an
+Unmarked-tier run), 🥋 **Unmarked** (finish in the 0–5 tier), and 🩹 **Second
+Wind** (pass a repeat attempt clean after failing the original with 2).
+
+### No live-scoreboard sync
+
+Same conclusion Checkout Trainer reached, for the same reason: single-device,
+solo, no second-screen `/display` broadcast. Enforced INSIDE `pushLive()`
+itself (`game.gameType === 'gauntlet'` early-returns, same skip as
+checkout_trainer) — the mode's own code path never pushes, but generic call
+sites (achievement broadcasts, end-game) run for every mode, and before the
+skip they leaked Gauntlet snapshots that `/display` could only render through
+the X01 fallback card with no station/scar fields. No `renderers.gauntlet`
+exists in `display.html` — an ordinary in-game UI state
+(`renderGameGauntlet()`) is enough, the same as Checkout Trainer's own
+scoring screen.
+
+### Saved games
+
+Fully reconstructable: current station = `rebuildGauntletState()`'s own
+`currentStation` (the first `GAUNTLET_STATION_ORDER` entry with no settled
+final result yet, or the pending repeat's station if one is live), running
+Scar tally = `gauntletTotalScars()` of the settled `finalMisses` so far —
+pure functions of recorded turns, per `docs/archive/saved-games-roadmap.md`.
+The run's own clean-streak counters (`gauntletCleanStreak`/
+`gauntletBestCleanStreak`) aren't part of that shared rebuild function (they're
+a frontend-only running counter, not needed by the write-time guard or any
+stats query) — re-derived on resume as a pure pass over the settled
+`finalMisses` array instead.
+
+### Testing
+
+`backend/test/scoring.test.js`: `evaluateGauntletStation()`'s strict
+positional grading (including "no re-matching across positions" and a
+missing dart counting as a miss), `gauntletTotalScars()`/`gauntletResultTier()`'s
+Deep-Scar-doubling and tier boundaries, and `rebuildGauntletState()`'s
+settle/repeat/done derivation. `backend/test/db.turn-consistency-guard.test.js`:
+the sequence guard, the repeat-count guard, the scored-range guard, and
+rejecting any turn once all 20 stations are settled.
+`backend/test/db.gauntlet-stats.test.js`: all four stats/PB/leaderboard/Scar-Map
+functions, including the "clean-station rate counts every settled station
+across completed AND in-progress runs, but avgTotalScars/Personal
+Best/leaderboard/Scar Map only ever look at completed runs" distinction.
+Verified end-to-end with Playwright: a full 20-station run (17 clean, one
+2-miss station resolved by a clean repeat earning 🩹 Second Wind, one Deep
+Scar, and a final clean station) landing on 6 total Scars/"Scarred but
+Standing" and awarding the 5/10/15 streak-ladder tiers correctly; the
+Checkout Ladder stat-bubble parity bug found and fixed along the way (see
+below); a partial run saved and resumed with its station index, final
+misses, and awaiting-repeat state exactly intact; and undo restoring
+mid-attempt state correctly.
+
+### Bug found and fixed while building this: Checkout Ladder's stat bubbles were never wired up
+
+While patching `GAME_TYPES.gauntlet.bubbleKeyMap` onto the shared
+`bubbleKeyMap`-assignment list (`frontend/index.html`), the equivalent line
+for `checkout_ladder` (item 22, shipped just before this one) turned out to
+have never been added at all — `GAME_TYPES.checkout_ladder.bubbleKeyMap` was
+`undefined`, so `activeBubbleKeyMap()` silently returned `undefined` the
+moment a player switched the Player Profile toggle to Checkout Ladder,
+blanking its stat bubble values. Fixed in the same change (both lines added
+together) rather than left for a future session to rediscover — the same
+class of gap BUG-26 was for the badge-label maps, just for the bubble-key
+maps instead.
+
+## 28. Killer
+
+`docs/game-modes-roadmap.md`'s "Killer" section (ruleset sourced from
+dartscorner.com's published rules). Elimination-format **H2H** — the only
+game type in this app whose set of legal per-player targets isn't fixed or
+shared: each player is randomly assigned their own number, 1-20, when the
+match starts. Real best-of-N legs/sets (like Cricket/Baseball), never forced
+to 1 the way every solo drill in this app is — Killer never appears in the
+1-player/practice New Game context at all (a new `h2hOnly` flag on
+`GAME_TYPES`, the inverse of the existing `soloOnly` flag).
+
+### Number assignment (`assignKillerNumbers`, `frontend/scoring.js`)
+
+Assigned **server-side**, inside `createGame()` (`backend/db.js`) — never
+trusted from the client. A Fisher-Yates shuffle (`shuffleKillerNumbers`, an
+injectable-RNG pure function so it's deterministically testable) of the pool
+`[1..20]`, zipped one-to-one against the match's player **ids** (item 43,
+docs/code-quality-roadmap.md — an immutable identifier a later rename/merge
+can't orphan, unlike the old name-keyed scheme this replaced). Assigned once
+per **match** (not re-derived per leg — `resetPlayerForNextLegKiller()`
+explicitly preserves `player.number` while resetting every other per-leg
+field), and re-rolled fresh on every new game row — a rematch/"Play again"
+always calls `startGame()` → `createGame()` again, so it gets a brand-new
+random assignment rather than reusing the previous match's numbers.
+`games.config.numbers` is stored as `{playerId: number}`; `createGame()`'s
+return value translates it back to `{playerName: number}` purely for this
+one-shot response — the client only ever models players by name and has no
+other reason to learn ids — which `DB.beginGame()` (`frontend/index.html`)
+assigns onto each `game.players[i].number` before the scoreboard's first
+render, exactly as before this migration.
+
+### Becoming a killer, and attacking (`evaluateDartKiller`, `frontend/scoring.js`)
+
+Every player starts at **0 lives** on their own number. Hitting your own
+number scores lives at the same rate every ring scores elsewhere in this
+app — single = 1, double = 2, treble = 3. The instant a player's own-number
+life total reaches the match's own `config.lives` threshold (2, 3, or 5 —
+chosen at New Game setup; 3 is the sourced standard default), they become a
+**killer** and can start attacking. Until then, every dart at anyone else's
+number is a no-op. Once a killer, hitting an **opponent's** assigned number
+removes lives from their total at the identical rate (single = −1, double =
+−2, treble = −3) — this directly mirrors the multiplier, not a flat
+per-hit cost. **Self-kill**: hitting your own **double** after you're already
+a killer costs exactly **1 life**, a flat cost never scaled by multiplier —
+hitting your own single/treble again post-threshold is a no-op. A player
+reduced to 0 lives is eliminated immediately, mid-visit if that's when it
+happens; the last player left with lives > 0 wins the leg the instant every
+other player hits 0 — this can end a leg mid-round, unlike X01/Cricket where
+the round always finishes for players who already went.
+
+`evaluateDartKiller(dart, throwerName, players)` is a **per-dart**
+evaluation, not a batched 3-dart visit — the same architectural pattern
+Doubles Practice established, required here because a single visit's three
+darts can each affect a **different** player (a self-life-build on dart 1,
+an attack on a different opponent on dart 2). It returns `null` for a no-op
+dart, or `{affectedName, delta, isGain, selfKill}` describing exactly whose
+life total changes and by how much; `rebuildKillerState({names, numbers,
+turns, threshold})` replays a whole leg's turns through it to derive
+lives/`isKiller`/`eliminated`/kills for every player at any point in the
+turn history — shared identically by the write-time consistency guard and
+every stats query.
+
+### Data model
+
+Because one visit's darts can each affect a different player, a single
+`turns` row per **visit** could never represent Killer's own effects — this
+needed a genuine schema change, not just new application logic. A new
+nullable `turns.affected_player_id` column (FK to `players`) records which
+player a dart's life-change landed on; only Killer ever populates it. As a
+consequence, Killer stores **one `turns` row per dart** (not per visit) —
+the one game type in this app that does. `turns.scored` stores the plain
+non-negative magnitude of the change (0-3); direction (gain vs. loss) is
+never stored, only derived by replaying `evaluateDartKiller()` again at read
+time. `checkout`/`bust` are always false (Killer has neither concept).
+`games.config` stores `{lives, numbers: {playerName: 1-20}}` — keyed by
+player **name**, not id, matching every other part of the write path
+(turns, badges, stats) that already keys on name.
+
+### Write-time validation (`addTurn()`, `backend/db.js`)
+
+Validates `checkout=false`/`bust=false`/`scored` in 0-3/exactly one dart per
+turn, then replays the leg's full turn history via `rebuildKillerState()`
+and rejects the incoming turn unless its claimed `affectedPlayer`/`scored`
+exactly matches `evaluateDartKiller()`'s own independently-computed
+expectation for that dart. Also rejects a turn once the leg already has a
+winner, or if the thrower is already eliminated. Turn-order itself (whether
+this player is really "next") is **not** enforced — matching the existing
+precedent that no consistency guard in this app enforces turn order, only
+arithmetic.
+
+### Engine (`frontend/index.html`)
+
+Per-dart commit, no staged "Enter Turn" step — `throwDartKiller(sector,
+zone, missZone, missDepth, bounced)` has the identical signature every other
+per-dart-commit mode's handler does (Doubles Practice, Just Chuckin' It), so
+the existing interactive Dartboard SVG scoring screen is reused unmodified;
+no bespoke Killer pad was needed. A "visit" is still up to 3 darts (fewer if
+the thrower self-eliminates early) before turn passes to the next
+non-eliminated player — `game.killerDartsThisVisit` tracks progress through
+it, and `advanceKillerTurn()` skips eliminated players (a static
+`(current+1)%n` the way X01 advances doesn't work here). `onKillerLegWon()`
+mirrors `onLegWonBaseball()`'s own legs/sets/match tree (Killer gets its own
+bespoke leg-win handler, not the generic X01 one, since X01's assumes
+X01-shaped player fields). Undo (`undoLastTurnKiller()`) restores both the
+thrower's and the affected player's state from a single snapshot — same
+"can't undo past a visit boundary" rule every other game type follows.
+
+### Live scoreboard
+
+The one new game type this batch with live-scoreboard sync (`pushLive()`
+calls throughout `throwDartKiller`/`advanceKillerTurn`/`renderGameKiller`).
+`renderers.killer` (`display.html`) renders one card per player: number,
+lives as pips (`●`/`○`) with an `aria-label` stating the exact count (never
+color-only), killer status (🔪), and a distinct "ELIMINATED" flash state —
+mirroring `renderGameKiller()`'s own in-game content. `game.legSummary` has
+its own Killer-shaped branch (number, kills, eliminated, won) for the
+end-of-leg summary cards, rather than falling through to X01's shape.
+
+### Stats, Personal Bests, Home leaderboard
+
+- **Stat bubbles** (`getKillerStatBubbles`): games played, win rate (from
+  `games.winner_id`, the same source Baseball's win rate uses), average
+  kills per leg, average lives lost per leg, and "survived without becoming
+  a killer" rate (rode out the whole leg alive, never crossing the
+  threshold) — all derived from leg replay via `rebuildKillerState()`.
+- **Personal Best** (`getKillerPersonalBests`): most kills in a single leg
+  (`MAX()` across every leg played).
+- **Home leaderboard** (`getKillerWinLeaderboard`): one row per player,
+  `{name, played, won, rate}` — reuses `getBaseballWinLeaderboard()`'s exact
+  shape unmodified, since Killer has a real `games.winner_id` the way
+  Baseball does (unlike Gauntlet/Checkout Ladder, which have no opponent to
+  win against).
+
+### Achievements
+
+Three one-off, all-recurring badges (no lifetime ladder, unlike Gauntlet/Bob's
+27) — 🩸 **First Blood** (the match's first elimination, whichever leg it
+happens in — `game.killerFirstBloodAwarded` lives on the game object itself,
+never reset per leg, so it fires at most once per match), 🛡️ **Untouchable**
+(win the match having never lost a single life across any leg —
+`gameLivesLost` is match-lifetime, never reset by
+`resetPlayerForNextLegKiller()`), and 🙈 **Own Worst Enemy** (eliminate
+yourself via your own double after becoming a killer).
+
+### Deliberately out of scope: no save/resume support
+
+Unlike every other H2H game type, `SAVABLE_GAME_TYPES` does not include
+`killer`. Mid-match state is fully re-derivable from replaying `turns`
+either way (`rebuildKillerState()` already does exactly this for stats), so
+this is a scope decision, not a technical limitation — worth revisiting if
+ever requested.
+
+### Testing
+
+`backend/test/scoring.test.js`: `shuffleKillerNumbers`/`assignKillerNumbers`'s
+even distribution and no-duplicates guarantee, `evaluateDartKiller()`'s full
+matrix (own-number builds at each multiplier, attacks at each multiplier,
+self-kill on double only, no-ops on an eliminated target or a post-threshold
+single/treble on your own number), and `rebuildKillerState()`'s lives/killer/
+eliminated/kills/winner derivation across a full leg. `backend/test/db.turn-
+consistency-guard.test.js`: `createGame()`'s number-assignment validation
+(min 2 distinct names, `lives` range), and the full scored/affectedPlayer
+guard matrix. `backend/test/db.killer-stats.test.js`: all three stats/PB/
+leaderboard functions, including the zeroed/null shape for a player with no
+Killer history. Verified end-to-end with Playwright: the New Game setup flow
+(lives-threshold selector, H2H-only visibility), random distinct number
+assignment surfaced via `DB.beginGame()`'s `config.numbers` handling, a
+single treble instantly clearing the become-a-killer threshold, an attack
+eliminating an opponent (including the degenerate case of eliminating a
+player who never built any lives), First Blood and Untouchable firing
+correctly, a full multi-leg best-of-N match playing out to the correct
+winner (leg wins that don't reach `legsPerSet` correctly stop at "LEG
+COMPLETE" rather than ending the match), the GAME OVER summary panel, stat
+bubbles/Personal Best/win leaderboard via the API, and the live `/display`
+`renderers.killer` card (number, lives-as-pips, throwing indicator).
+
+## 29. End-of-Night Session Recap
+
+`docs/archive/session-recap-roadmap.md`. A one-tap digest of everything played on a
+single **local calendar date**. Timestamps are stored UTC, so the client also
+sends its UTC offset (`&tz=${-new Date().getTimezoneOffset()}` — minutes
+**east** of UTC, the same one wire convention avg-history and on-this-day
+use) and `getSessionRecap(date, tz)` shifts every `date()` bucket by it via
+the shared `_tzModifier()` — without this, a user west of UTC had every game
+after ~7-8pm local land in tomorrow's recap. An absent/invalid `tz` falls
+back to 0 (raw UTC dates — old-client behavior).
+A night that genuinely straddles the LOCAL midnight still splits in two, an
+accepted v1 tradeoff, same as Daily Challenge's own. (`getSummary()`'s
+`todayDarts` deliberately keeps the raw UTC boundary — see its own section.)
+Purely read-time: `getSessionRecap()` (`backend/db.js`) aggregates over
+existing `turns`/`games`/`player_badges` rows — nothing is stored, so any
+past date is recomputable for free.
+
+### Scope: H2H is the spine, solo is a footnote
+
+Per the roadmap doc's own framing ("the recap's spine is the games people
+played against each other"): every **completed** H2H game (`practice=0`,
+`player_count>1`, `completed_at` on the given date) is fully itemized —
+per-matchup win/loss records for 2-player games, a flat list for 3+ player
+games. Non-H2H activity (practice or solo, any game type) is folded into a
+light `soloActivity` summary grouped by player+game type (legs/rounds +
+darts thrown, `legs` omitted for the continuous-stream types — Chuckin,
+Checkout Trainer, guided Around the World — where a "leg" is meaningless),
+never itemized.
+
+### Response shape (`GET /api/session-recap?date=YYYY-MM-DD`)
+
+```
+{
+  date, totalGames,               // totalGames = completed H2H games only
+  h2hGames: [ {gameId, category, gameType, completedAt, winnerId, winnerName, players:[name,...]} ],
+  h2hResultsByMatchup: [ {players:[a,b], games:[{gameId,category,gameType,winner}], record:{name:wins}} ],
+  perPlayer: [ {name, gamesPlayed, gamesWon, gamesLost, dartsThrown, oneEighties,
+                tonPlusCheckouts, bestVisit, bestLegAvg} ],
+  soloActivity: [ {name, gameType, legs, darts} ],
+  badgesEarnedTonight: [ {player, badgeId, count, earnedAt} ],
+  personalBestsSetTonight: [ {player, metric, value, previousBest} ],
+  moments: [ {ts, type, player, text} ],   // chronological
+}
+```
+
+- **`perPlayer`'s `bestVisit`/`bestLegAvg` are X01-only** (same scope
+  `getPersonalBests()`'s own `bestLegAvg` uses) — extending "best leg" to
+  every other game type's own formula is left for a future pass rather than
+  ballooning this one aggregation. `gamesWon`/`gamesLost`/`dartsThrown`/
+  `oneEighties`/`tonPlusCheckouts` cover every game type a player touched
+  that date (darts thrown excludes Checkout Trainer's non-physical darts,
+  same `NOT_CHECKOUT_TRAINER` convention as `getHomeExtra()`'s own
+  `todayDarts`).
+- **`h2hResultsByMatchup`** only covers exactly-2-player games, grouped by
+  the unordered player pair in first-played order; a 3+ player game has no
+  single pairwise record and is listed only in `h2hGames`.
+- **`badgesEarnedTonight`** returns the raw `badge_id` only — label/icon/
+  description resolve through the frontend's own `BADGE_INFO` map (the
+  single source of truth for that data everywhere else badges surface, not
+  duplicated server-side).
+
+### Personal bests set tonight
+
+The roadmap doc's own flagged risk ("the pre-tonight comparison is the
+easiest formula to get subtly wrong"). For each player active on the date,
+three well-defined single-number X01 records are each computed twice — once
+scoped to `date(t.created_at) = ?` (tonight) and once to `date(t.created_at)
+< ?` (every day strictly before it) — and a record only lands in
+`personalBestsSetTonight` if tonight's own best exists **and** either no
+pre-tonight value exists at all, or tonight's value beats it in the correct
+direction:
+
+| Metric | Direction | Pre-tonight baseline query |
+|---|---|---|
+| `legAvg` | ascending (higher wins) | `MAX` of every won leg's average, dated before tonight |
+| `fewestDartsCheckout` | descending (lower wins) | `MIN` darts across every won leg, dated before tonight (`NOT_HANDICAPPED`-scoped, same as `getPersonalBests()`) |
+| `highestCheckout` | ascending (higher wins) | `MAX(checkout_points)`, dated before tonight |
+
+A worse leg played later the same night never adds a second entry for a
+metric already recorded as beaten earlier that night — the comparison is
+always "tonight's own best vs. the pre-tonight baseline," not per-leg.
+
+### Moments timeline
+
+A chronological merge of the same event classes the live moment cards
+already fire on — 180s (X01-only), ton+/Big Fish checkouts
+(`checkout_points >= 100`, `170` specifically tagged `bigfish`), H2H match
+wins, and badges earned that date — sorted ascending by timestamp so the
+recap reads start-to-finish like the night actually happened.
+
+### Frontend
+
+A **🌙 Tonight's recap** teaser card on the Home page (`renderHomeRecapTeaser()`),
+hidden entirely until a network round-trip confirms `totalGames > 0` for
+today — unlike the Daily Challenge teaser just above it (purely derived
+client-side, no fetch needed), "did anyone finish a game tonight" can't be
+known without asking the server. Wired into both `show('home')` and the
+page's own boot sequence (the initial load never calls `show('home')` since
+the Home screen starts already `.on` in the static markup — the same reason
+`renderHomeChallengeTeaser()` needed its own explicit boot-time call).
+
+The recap screen itself (`renderSessionRecapBody()`) takes a date (a plain
+`<input type="date">`, default today) and renders Results / Tonight-per-player
+/ Also tonight / Badges / Personal bests / Moments sections, each hidden when
+empty. **📤 Share** renders the night through the existing shareable-moment
+card generator (`fireMomentCard('sessionrecap', {...})` → `shareMomentCard()`)
+as a single summary card — headline "TONIGHT'S RECAP", the date as the
+"player" line, and a stat-line summary (game count, player count, top-180
+scorer, badge count) — no new canvas code, matching the roadmap doc's own
+"one new card layout, the rest of the pipeline already built."
+
+### Testing
+
+`backend/test/db.session-recap.test.js`: invalid-date rejection, an
+empty-activity date, a full 2-player H2H fixture (results grid, per-player
+stats, moments), personal-bests-set-tonight firing only on a genuine
+improvement over the pre-tonight baseline (and not re-firing for a worse leg
+played later the same night), badge date-scoping, solo-activity grouping
+kept separate from the H2H spine, and date-boundary scoping (a turn just
+before midnight vs. just after land in two different recaps). Verified
+end-to-end with Playwright: the Home teaser appearing after a completed H2H
+match, the recap screen's full render, and the Share button producing a real
+downloaded card image.
+
+## 30. Marathon Mode
+
+`docs/archive/marathon-mode-roadmap.md`. A 45-minute solo endurance session —
+not a new way to score darts, a **session wrapper** chaining ordinary,
+completely unmodified 501 practice legs back to back with no return to the
+New Game screen between them. `game.gameType` stays `'x01'` for every leg
+throughout; only `marathon_session_legs`'s own `game_id` FK marks a leg as
+belonging to a session (the `league_fixtures`-style "context table with a
+`game_id` FK" pattern per CLAUDE.md — never a new `game_type`).
+
+### Data model
+
+```sql
+marathon_sessions (id, player_id, duration_minutes, started_at, ended_at)
+marathon_session_legs (id, session_id, game_id, leg_order, created_at)
+```
+
+`ended_at` NULL means the session is still in progress. Every leg's `game_id`
+is created **server-side**, inside `startMarathonSession()`/
+`startNextMarathonLeg()` themselves (`backend/db.js`) — no endpoint ever
+accepts a client-supplied `game_id` to link, which means the roadmap doc's
+own flagged worry about validating an externally-supplied `game_id` never
+actually applies: there's nothing to validate.
+
+### The chaining loop
+
+`POST /api/marathon/sessions` creates the session row and leg 1's own
+ordinary solo practice 501 game in one call. Each leg plays through the
+**completely unmodified** X01 engine (`renderers.x01`, `enterTurn()`,
+`evaluateVisit()` — no marathon-specific scoring code anywhere). The instant
+a leg is won, `finishMarathonLeg()` (`frontend/index.html`) checks the wall
+clock against `startedAtMs + durationMinutes*60000` — **only at this leg
+boundary, never mid-leg** (a deliberate tradeoff: real session length can run
+a little past 45 minutes by however long the final leg takes, rather than
+ever truncating a leg in progress). If time remains, it calls `POST
+/api/marathon/sessions/:id/legs` (creates and links the next leg's game,
+rejecting with 409 once the session has already ended) and transitions
+straight into that leg's live scoreboard via `beginMarathonLeg()` — no return
+to New Game. A persistent banner (`renderMarathonBanner()`) sits above the
+scoreboard showing elapsed/remaining time and leg count, `aria-live` on a
+~15s cadence, with an **End Marathon** control that ends the session
+**immediately** (not "wait for this leg to finish") via `POST
+/api/marathon/sessions/:id/end` — idempotent, so retrying a dropped response
+can't double-process anything.
+
+### A real bug found and fixed while building this (BUG-18-class)
+
+The generic X01 `onLegWon()` only cascades a leg win up into a full
+`finishUnit('game', ...)` when `!game.practice` — practice mode's own
+default is to treat every win as "just a leg" and offer an endless "Next
+leg" button, since an ordinary practice session has no match structure to
+complete. Ghost Opponent races already needed (and got, when BUG-18 was
+originally found) a `|| game.hasGhost` carve-out for the identical reason —
+a ghost race is `practice=true` but is always exactly 1 leg/1 set and must
+still reach `finishUnit('game', ...)`. Marathon Mode legs are `practice=1`
+too (an ordinary practice game is exactly what each leg genuinely is);
+without the same carve-out, a leg win would never reach
+`finishMarathonLeg()` at all — every leg would just show the ordinary "Next
+leg" panel forever, with no auto-chaining and no session ever ending. Fixed
+by extending the existing condition to `(!game.practice || game.hasGhost ||
+game.marathonSessionId)`, mirroring the ghost precedent exactly.
+
+### The analysis (`frontend/scoring.js`)
+
+Two pure functions, the only genuinely new calculations this feature needs
+(every other per-leg figure — dart count, checkout, busts — is already
+derivable from existing X01 turn/dart data, no new columns):
+
+- **`computeFatigueSplit(dartCountsPerLeg)`** — splits the ordered leg list
+  into a first half and second half (`Math.floor(n/2)` in the first half,
+  the roadmap doc's own "floor the smaller half" convention), averages each,
+  and returns `max(0, secondHalfAvg - firstHalfAvg)` — clamped at zero, since
+  a session where the player got *faster* in the second half isn't a
+  fatigue problem to score against them. A 0- or 1-leg session (no second
+  half to compare) returns `{ split: null, tier: null }` — "unmeasurable",
+  not "measured perfectly flat" — so every consumer (PBs, the average, the
+  leaderboard via PBs, and the frontend's Iron badge check / session-end
+  panel) naturally skips it with a null check; without that, a one-leg
+  session recorded the mathematically unbeatable 0 and pinned the
+  PB/leaderboard forever.
+
+  | Fatigue Split | Tier |
+  |---|---|
+  | 0–2 darts | Iron |
+  | 3–5 darts | Tested |
+  | 6–9 darts | Fading |
+  | 10+ darts | Running on Empty |
+
+- **`classifyMarathonTrend(dartCountsPerLeg)`** — fewer than
+  `MARATHON_TREND_MIN_LEGS` (6) legs is always `'Inconclusive'`. Otherwise
+  splits into three roughly-equal segments (early/middle/late,
+  `Math.floor(n/3)`-sized early/middle, remainder in late) and reads the
+  shape within a ±`MARATHON_TREND_TOLERANCE` (2 darts) band: all three
+  segments mutually within tolerance → **Flat Line**; early≈middle, late
+  meaningfully worse → **The Cliff**; early meaningfully worse than middle,
+  late≈middle → **The Warm Machine**; any other shape (a steady gradual
+  climb, fatigue then partial recovery, etc.) → **Inconclusive** rather than
+  forcing a label onto ambiguous data. Both the minimum-legs floor and the
+  tolerance width are first-pass numbers, not confirmed against real
+  sessions (the roadmap doc's own caveat).
+
+### Stats, Personal Bests, Home leaderboard
+
+- **Stat bubbles** (`getMarathonStatBubbles`): sessions completed, average
+  legs per session, average fatigue split, and a 3-way lifetime trend-pattern
+  breakdown (Cliff/Warm Machine/Flat Line session counts) — all scoped to
+  **ended** sessions only (`ended_at IS NOT NULL`); the fatigue-split average
+  only averages sessions with a non-null (measured) `fatigueSplit` and reads
+  `null` when no session qualifies. An
+  `'h2h'` mode request always reads as zero sessions (Marathon Mode is
+  inherently solo — the same answer a SQL-side `_scope()` join would reach,
+  computed directly instead).
+- **Personal Bests** (`getMarathonPersonalBests`): **lowest** fatigue split
+  ever (`MIN()` — ascending-is-better, the same polarity The Gauntlet's Scar
+  count uses, over sessions with a measured non-null split only) and **most
+  legs completed** in a single session (`MAX()`, a stamina/throughput metric,
+  any session with at least one completed leg).
+- **Home leaderboard** (`getMarathonLeaderboard`): one row per player, their
+  own lowest-ever fatigue split, sorted **ascending** — the same direction
+  The Gauntlet's own leaderboard uses.
+
+### Achievements
+
+Two data-driven ladders off the existing `checkChuckinMilestoneTier()`
+engine (once-earned, not recurring): lifetime sessions completed (1/5/15/30)
+and lifetime legs completed inside Marathon sessions (25/100/250/500). Plus
+three one-off, all-recurring condition badges, checked once a session ends:
+🛡️ **Iron** (session's own fatigue tier is Iron), 📉 **Flat Line** (session
+classified Flat Line), and ⏱️ **Full Distance** (the session ended because
+the wall clock ran out, never on a manual "End Marathon" stop).
+
+### Deliberately out of scope: no save/resume support
+
+Same scope decision Killer already made. `isCurrentGameSavable()`
+explicitly excludes any leg carrying a `marathonSessionId` — the generic
+resume path rebuilds a plain `rebuildX01State()` game object with no
+marathon linkage at all, so a resumed leg would silently finish as an
+ordinary standalone practice game instead of continuing the session.
+
+### Testing
+
+`backend/test/scoring.test.js`: `computeFatigueSplit()`'s floor-half split,
+zero-clamping, tier boundaries, and 0/1-leg edge case; `classifyMarathonTrend()`'s
+too-few-legs floor and all three named patterns plus the no-match
+Inconclusive fallback. `backend/test/db.marathon-mode.test.js`: session/leg
+creation and linkage guards (rejects once ended, rejects a player mismatch),
+per-leg dart-count/checkout/bust derivation (excluding an in-progress leg
+from the analysis series), and the stats/PB/leaderboard functions. Verified
+end-to-end with Playwright: the full New Game → Marathon Mode flow, the
+persistent banner, a leg auto-chaining into the next on completion, a
+manual "End Marathon" stop, the analysis screen, badges (First Marathon,
+Iron), and Player Profile/Home page wiring.
+
+## 31. Shanghai
+
+`docs/archive/shanghai-roadmap.md`. The classic pub game — `game_type='shanghai'`, a
+genuine new game type, structurally a sibling of Baseball: a fixed round
+sequence, all players in lockstep on one shared live round
+(`game.shanghaiRound`, game-level state, not per-player). Round 1 targets the
+number 1, round 2 the number 2, and so on through `config.rounds` (default
+**7**, the common pub format; a **20**-round long-form option is offered on
+the setup screen — `NEW_GAME_MODE_OPTIONS`'s `shanghai` entry, `setShanghaiRounds()`).
+Per-player state is `{totalPoints, roundPoints: {round: points, ...}}` — no
+`score` field, no bust/checkout concept, the same shape family as Baseball's
+`totalRuns`/`inningRuns`.
+
+### Scoring — `GAME_TYPES.shanghai.evaluateVisit(player, darts, game)` (`frontend/scoring.js`'s `evaluateVisitShanghai`)
+
+**Only the current round's own number scores**, evaluated dart-by-dart within
+the 3-dart visit — a single scores 1× the round number, a double 2×, a treble
+3×; anything else (a different number, or a genuine miss) scores 0 for that
+dart:
+
+```js
+const target = shanghaiRoundTarget(round, maxRounds); // round <= maxRounds ? round : maxRounds
+darts.forEach(d => { if (d.sector === target) pointsThisVisit += d.mult * target; });
+```
+
+**A Shanghai — single, double, AND treble of the round's own number, in one
+visit, any order — wins the WHOLE match instantly, mid-round**
+(`isShanghaiWin(darts, target)`), regardless of running point totals. This is
+the one genuine difference from Baseball's shape: Baseball's win condition is
+always decided by totals after the fixed round count; Shanghai's can end
+early, self-referentially, on the exact visit that threw it.
+
+Absent a Shanghai, **the round only completes once the LAST player in the
+rotation has thrown** (the shared starter-relative `isRoundComplete(game)` —
+see Baseball's own section for the formula and why it is NOT index n-1; read
+before `game.current` advances, same timing convention as
+`evaluateVisitBaseball()`), and **the win condition is only checked on that
+round-completing visit, and only once `config.rounds` has been reached**:
+every player's total (including the just-evaluated visit) is compared, and
+the match ends only if there's a single unique highest total — an exact tie
+among the leaders continues into extra rounds instead, still targeting the
+final round's own number (`shanghaiRoundTarget()` caps at `maxRounds` rather
+than cycling back to 1, matching Baseball's extra-innings precedent per the
+roadmap doc's own "Open questions" answer).
+
+Because a final-round win isn't always self-referential to the round-ending
+visit (exactly Baseball's own situation — the player whose turn ends the
+round and the player with the higher point total aren't always the same
+person), `evaluateVisitShanghai()` returns `{ matchComplete, winnerIndex }`
+rather than a simple `win: true` implicitly meaning "this player."
+`enterTurnShanghai()` calls `onLegWonShanghai(ev.winnerIndex)`, not
+`onLegWonShanghai(game.current)`.
+
+### `turns.leg_won` — set ONLY for a genuine instant Shanghai
+
+Unlike Baseball (which never sets `turns.leg_won` at all, see §Baseball
+stats), Shanghai's win condition is a genuine hybrid: an instant Shanghai
+really is self-referential to one visit, the same signal Cricket/Killer use
+`turns.leg_won` for — so `enterTurnShanghai()` passes `legWon: !!ev.shanghai`
+on every turn it records. **A final-round win decided by point totals is
+never flagged this way** — only the Shanghai-throwing visit itself ever sets
+it. `getShanghaiWonLegs()` (`backend/db.js`) reads this hybrid signal at
+query time: legs with a `leg_won=1` turn use that player directly; every
+other completed leg falls back to comparing `SUM(scored)` totals per
+`(game, set, leg, player)`, exactly `getBaseballWonLegs()`'s own derivation.
+This matters for correctness, not just symmetry: a player who throws a
+Shanghai on an early round can have a LOWER running point total than an
+opponent who was still leading on points right up until that visit ended the
+match — a pure "highest total wins" derivation (Baseball's own shape) would
+misattribute the win to the wrong player for that case, so Shanghai cannot
+use Baseball's derivation unmodified.
+
+### Consistency guard (SEC-25-style, `addTurn()` in `backend/db.js`)
+
+Same shape as Baseball's own guard: the round is re-derived from the
+player's own prior-turn count in that game/set/leg
+(`shanghaiRoundTarget(priorTurns + 1, maxRounds)`), and a hostile `scored`
+that the round's own number can't produce is rejected. `bust`/`checkout`
+are rejected outright (the game has neither concept). **Ceiling note**: the
+roadmap doc's own draft text says "max legit visit = 6× the round number,
+and a Shanghai visit is exactly 6×" — this undersells it. Three trebles of
+the round's own number is a real, legal, non-Shanghai visit worth 9× the
+round number, more than a Shanghai's 6× — so the actual ceiling this guard
+enforces (naturally, via summing each dart's own contribution) is 9×, not
+6×. A correctness fix over the doc's literal wording, not a deviation from
+its actual intent — the same class of correction Dead Man Walking's own
+open-roadmap-items.md entry independently made over its own pitch doc.
+
+### Saved games
+
+Position is a pure function of recorded turns, same as every other savable
+game type: `rebuildShanghaiState({names, legsPerSet, maxRounds, turns})`
+(`frontend/scoring.js`) replays `running totals + round number` from the
+turn sequence, reused identically by `_savedGamePosition()` (write-time) and
+`GAME_TYPES.shanghai.resume()` (read-time resume, dispatched from `resumeGame()` —
+item 37, `docs/code-quality-roadmap.md`). `'shanghai'` is in
+both `SAVABLE_GAME_TYPES` lists (`backend/db.js` and `frontend/index.html`).
+
+### Live scoreboard
+
+`renderGameShanghai()` (`frontend/index.html`) and `renderers.shanghai`
+(`frontend/display.html`) both render a per-round score grid (players ×
+rounds) — same shared chalkboard-table shape as Baseball's own, extended into
+extra rounds once reached. **Row labels show the round's own TARGET NUMBER**
+(not the round index) so the grid always matches what's actually live to
+score against — meaningfully different from Baseball's row labels (which
+show the inning index, since Baseball's target number and inning index are
+always numerically identical anyway; Shanghai's round index and target
+number diverge once extra rounds begin, e.g. round 9 of a 7-round game still
+targets 7). `renderPadShanghai()` hides the dartboard entirely and shows one
+big single-button pad for the round's target + Miss, mirroring
+`renderPadBaseball()` — only one number is ever live. The instant-Shanghai
+moment fires `announce()` plus an icon+text 🀄 moment card banner (never
+color/confetti alone, per the roadmap doc's own accessibility note).
+
+### Stats (`GAME_TYPES.shanghai.statDefs` / `SHANGHAI_STAT_DEFS`)
+
+A separate, smaller stat vocabulary, structurally mirroring Baseball's own —
+`turns.scored` for a Shanghai turn already **is** that visit's points
+(`enterTurnShanghai()` writes `scored:ev.scored` directly), so every formula
+reads it as-is. Every query is scoped via `_scope({mode, gameType:'shanghai'})`.
+
+**Stat bubbles** (`getShanghaiStatBubbles(name, mode)`):
+
+| Key | Label | Formula |
+|---|---|---|
+| `shanghaippr` | Points/Round | Points Per Round — `SUM(scored) / COUNT(rounds)`, Shanghai's analog of Baseball's RPI |
+| `shanghaisthrown` | Shanghais Thrown | `SUM(leg_won)` — count of turns that were a genuine instant Shanghai |
+| `shanghaiwinpct` | Win Rate | `won / played * 100` over completed Shanghai games this player took part in |
+| `shanghaigames` | Games Played | Count of completed Shanghai games this player took part in |
+| `shanghaidartsthrown` | Darts Thrown | Count of darts thrown in Shanghai games |
+| `shanghaibestround` | Best Round | `MAX(scored)` across every turn — the player's personal-best single-round points |
+
+**Personal Bests** (`getShanghaiPersonalBests(name, mode)`, built on
+`getShanghaiWonLegs()`'s hybrid derivation above): `bestLegPoints`,
+`fewestDartsToWin`, `winStreak`, `recentFormPoints` (avg over the last 10 won
+legs), `lifetimePoints` (avg over every won leg) — same 5-field shape as
+Baseball's own.
+
+**Home page leaderboards**: Points Per Round (`getShanghaiPprLeaderboard()`,
+5-round floor, mirrors `getBaseballRpiLeaderboard()`), Shanghais Thrown
+(`getShanghaiShanghaisStats()`, leaderboard + recent feed off `leg_won=1`,
+mirrors `getBaseballPerfectInningsStats()`), and Most Shanghai Wins
+(`getShanghaiWinLeaderboard()`, H2H only, identical shape to
+`getBaseballWinLeaderboard()`). No Perfect-Game analog — a Shanghai win is
+instant, not a perfect-every-round feat, so there's nothing for one to mean.
+
+### Badges
+
+🀄 **Shanghai!** (recurring) — win a Shanghai game instantly. Fires from
+`enterTurnShanghai()` the moment `ev.shanghai` is true, via the same
+`queueBadge`/`awardRecurringBadge` pair every other in-visit badge uses.
+
+### Testing
+
+`backend/test/scoring.test.js`: `shanghaiRoundTarget()`'s in-range/extra-round
+capping, `isShanghaiWin()`'s exact single+double+treble match (including the
+"two singles and a treble is NOT a Shanghai" negative case), and
+`evaluateVisitShanghai()`'s scoring/instant-win/final-round-tie/non-final-round/
+extra-round cases. `backend/test/db.shanghai-stats.test.js`: stat-bubble
+formulas, the hybrid `getShanghaiWonLegs()` derivation (both the instant-Shanghai
+path and the final-round-points path, plus an abandoned-game exclusion), the
+PPR/win leaderboards, and an X01/Cricket/Baseball/Shanghai cross-contamination
+regression. `backend/test/db.turn-consistency-guard.test.js`: the SEC-25-style
+guard's accept/reject cases, including the 6×-vs-9× ceiling correctness fix
+and the extra-round target-advancement case. Verified end-to-end with
+Playwright: the full New Game → Shanghai flow (practice and H2H), an instant
+mid-round Shanghai win, a final-round decider correctly awarded to the
+higher-points player rather than whoever's turn ended the round, badges/stat
+bubbles/personal bests/win leaderboard, and the live `/display` scorecard.
+
+## 32. Halve-It
+
+`docs/archive/halve-it-roadmap.md`. The classic pressure game —
+`game_type='halve_it'`, structurally another Baseball/Shanghai sibling (a
+fixed round sequence, all players in lockstep on one shared live round,
+`game.halveItRound`) with no instant-win condition at all — the match only
+ever completes once the final round settles, same shape as Baseball (never
+Shanghai's early-exit case). Per-player state is `{total, roundTotals:
+{round: runningTotalAfterThatRound, ...}}` — `roundTotals` stores the
+CUMULATIVE running total after each round (not a per-round delta the way
+Baseball's `inningRuns`/Shanghai's `roundPoints` do), since a bare `0` on a
+halved round would hide the halving that just happened.
+
+### Targets — `config.targets`
+
+An ordered array of `{sector, ring?}` pairs. `ring` omitted means any ring of
+that sector counts at face value (single = sector, double = 2×sector, treble
+= 3×sector); `ring` present (`'single'`/`'double'`/`'treble'`) restricts
+scoring to exactly that ring. The default is the classic 7-round set —
+20, 16, double 7, 14, treble 10, 17, Bull (`HALVE_IT_DEFAULT_TARGETS` in
+`frontend/scoring.js`).
+
+**Custom target editor.** The New Game setup screen offers a Classic/Custom
+toggle (`#halve-it-options-section`, same shape as Cricket's custom-numbers
+picker). Classic omits `config.targets` entirely and the game plays the
+default; Custom exposes a per-round editor (`setHalveItPreset`,
+`addHalveItTargetRow`, `updateHalveItTarget`, `renderHalveItTargetRows`,
+`resolveHalveItTargets` in `frontend/index.html`) building an ordered
+1–20-round sequence of `{sector, ring?}` rows — each row a native `<select>`
+for the sector (Bull 25, or 20…1) and one for the required ring (Any / Single
+/ Double / Treble, with Treble hidden for Bull). A custom set is sent as
+`config.targets` and the game's category label reads **"Custom Halve-It"**
+instead of "Halve-It".
+
+**Server-side validation (`createGame()`, `backend/db.js`).** When
+`game_type='halve_it'` and `config.targets` is supplied it must be an array of
+1–20 entries; each entry's `sector` must be an integer 1–20 or 25 (Bull), each
+`ring` (if present) one of `single`/`double`/`treble`, and a treble-25 round is
+rejected outright (the Bull has no treble ring, so the round could never be
+won). Each entry is normalised to `{sector}` or `{sector, ring}`, stripping any
+extra fields before storage. Omitting `config.targets` is always valid and
+keeps `HALVE_IT_DEFAULT_TARGETS`. Covered by
+`backend/test/db.halve-it-stats.test.js`.
+
+### Scoring — `GAME_TYPES.halve_it.evaluateVisit(player, darts, game)` (`frontend/scoring.js`'s `evaluateVisitHalveIt`)
+
+```js
+function halveItDartValue(d, target){
+  if(!target || d.sector !== target.sector) return 0;
+  if(target.ring && d.mult !== HALVE_IT_RING_MULT[target.ring]) return 0;
+  return d.mult * d.sector;
+}
+```
+
+This single formula covers Bull for free: `makeDartCore()` already downgrades
+an attempted "treble bull" tap to a single (there's no treble-bull ring), so
+`mult*sector` alone yields 25/50 for single/double bull with no bull-specific
+branch anywhere.
+
+**The halving rule**: if a visit's total gain across all 3 darts is exactly
+`0` (every dart missed the target/ring entirely — hitting it always scores
+`>0`, so `gained===0` is unambiguous), the running total **halves, rounding
+UP**: `total = Math.ceil(priorTotal / 2)`. Round-up is deliberate — round-down
+risks a permanent `1 → 0 → 0` death spiral, while round-up's floor is `1 → 1`,
+never lower (both are covered by committed tests). A non-halved visit simply
+adds its gain: `total = priorTotal + gained`.
+
+**The round only completes once the LAST player in the rotation has thrown**
+(the shared starter-relative `isRoundComplete(game)` — see Baseball's own
+section for the formula; same timing convention as Baseball/Shanghai), and **the win condition is only checked on that
+round-completing visit, and only once every configured target has been
+reached**: totals are compared, and the match ends only on a single unique
+highest total — a tie continues into extra rounds, repeating the final
+target (`halveItRoundTarget()` caps at the target list's own length rather
+than cycling back to round 1, the same Baseball/Shanghai extra-round
+precedent — this doc's own design section didn't explicitly address ties,
+so this fills that gap using the established convention rather than
+inventing a new one). Like Baseball/Shanghai, a final-round win isn't always
+self-referential to the round-ending visit, so `evaluateVisitHalveIt()`
+returns `{ matchComplete, winnerIndex }` rather than assuming the current
+player won; `enterTurnHalveIt()` calls `onLegWonHalveIt(ev.winnerIndex)`.
+
+### `turns.bust` — repurposed as the halving flag, `turns.scored` as the gain
+
+Following the exact column-repurposing precedent Doubles Practice/guided
+Around the Clock already established for `bust`: `turns.scored` stores the
+visit's **gain only** (`0` on a halved visit, never the halving delta
+itself — the same "store the gain, derive the rest" shape Bob's 27's own
+penalty already uses), and `turns.bust=1` marks a halved visit for cheap
+querying. `turns.checkout`/`turns.leg_won` are never set (no checkout or
+self-referential-win concept exists here).
+
+### Consistency guard (SEC-25-style, `addTurn()` in `backend/db.js`)
+
+Same shape as Baseball/Shanghai's own guards — the round is re-derived from
+the player's own prior-turn count (`halveItRoundTarget(priorTurns+1,
+targets)`), and a hostile `scored` the target/ring can't produce is
+rejected. `checkout` is rejected outright. **Unlike** Shanghai/Baseball,
+`bust` is NOT rejected — it's validated for **consistency** instead: `bust`
+must be `true` iff the derived gain is exactly `0`, since `bust` here
+legitimately means "this visit halved the total," not "this is illegal."
+
+### Stats not computable by a single SQL aggregate — the one genuine complication this drill has that Baseball/Shanghai don't
+
+Because the running total is **order-dependent** (`ceil(total/2)` interspersed
+with additions, not a flat sum), it can't be derived with `SUM(scored)` the
+way RPI/PPR are. `_replayHalveItLegTotals(mode)` (`backend/db.js`) replays
+every matching turn once, in order, computing each `(game, set, leg,
+player)` group's final total exactly the way `rebuildHalveItState()` does for
+live resume — same "nothing pre-aggregated, replay the raw turns" philosophy,
+just read-only and grouped for stats instead of resuming a game.
+`getHalveItWonLegs(playerId, mode)` derives each completed leg's winner from
+this replay by comparing final totals (Halve-It has no `leg_won=1` signal at
+all, ever — there's no instant-win condition, so unlike Shanghai's hybrid
+derivation this is a pure Baseball-style comparison with no self-referential
+case to special-case).
+
+### Stats (`GAME_TYPES.halve_it.statDefs` / `HALVE_IT_STAT_DEFS`)
+
+**Stat bubbles** (`getHalveItStatBubbles(name, mode)`): Avg Final Total
+(`avgFinalTotal`, averaged over every completed leg via the replay above),
+Times Halved (`SUM(bust)`), Win Rate, Games Played, Darts Thrown, and Best
+Round (`MAX(scored)` — highest single-round gain, the same "peak single-round
+figure in the bubbles, not Personal Bests" split Baseball's own Best Inning
+uses).
+
+**Personal Bests** (`getHalveItPersonalBests(name, mode)`, built on
+`getHalveItWonLegs()`): `bestFinalTotal`, `fewestDartsToWin`, `winStreak`,
+`recentFormTotal` (last 10 won legs), `lifetimeTotal` — same 5-field shape as
+Baseball's/Shanghai's own.
+
+**Home page leaderboards**: Highest Final Total (`getHalveItBestTotalLeaderboard()`,
+one row per player, their peak total across BOTH won and lost legs — same
+no-minimum-floor "single best-ever run" shape as Checkout Ladder's/Checkout
+Blitz's own boards, not gated on having actually won) and Most Halve-It Wins
+(`getHalveItWinLeaderboard()`, H2H only, identical shape to Baseball's/
+Shanghai's own).
+
+### Badges
+
+🪓 **Halved at the Death** (recurring) — the winner's own most recent visit
+(the one that decided the leg) halved their total, and they still won.
+Tracked via a per-player `lastVisitHalved` flag, overwritten every visit.
+🛡️ **No Half Measures** (recurring) — won the leg without ever being halved,
+tracked via a per-player `everHalved` flag, reset every leg. Both are
+leg-OUTCOME badges (checked once the winner is known, in `onLegWonHalveIt()`),
+the same split Baseball's Perfect Game/Walk-Off use.
+
+### Live scoreboard
+
+`renderGameHalveIt()` (`frontend/index.html`) and `renderers.halve_it`
+(`frontend/display.html`) both render a per-round chalkboard grid — row
+labels show the round's own **target label** ("Double 7", "Bull"), not a
+bare number, and each cell shows the **running total after that round**
+(never a per-round delta) with a `½` marker on a halved round, so the
+halving is visible without relying on color alone (per the roadmap doc's own
+accessibility note). `display.html` has no shared `scoring.js` module, so
+`GAME_TYPES.halve_it.liveModeState` puts the FULL `halveItTargets` array (not
+just the live round's own target) into `modeState` so its renderer can
+compute every row's label itself.
+`renderPadHalveIt()` shows one button for the round's live target — an
+unrestricted round works exactly like Baseball's/Shanghai's own single-target
+pad; a ring-restricted round (e.g. double 7) shows the ring prefix on the
+button (`D7`) and relies on the same ambient multi-row selector Bob's 27's own
+pad already uses, since `halveItDartValue()` naturally scores the wrong ring
+as `0` regardless of which button was tapped.
+
+### Saved games
+
+Position is a pure function of recorded turns: `rebuildHalveItState({names,
+legsPerSet, targets, turns})` (`frontend/scoring.js`) replays running totals
++ round number from the turn sequence — including `everHalved`/
+`lastVisitHalved` per player, so a resumed leg's badge check still sees the
+whole leg's halving history, not just turns recorded after the resume.
+Reused identically by `_savedGamePosition()` (write-time) and
+`GAME_TYPES.halve_it.resume()` (read-time, dispatched from `resumeGame()` —
+item 37). `'halve_it'` is in both `SAVABLE_GAME_TYPES`
+lists (`backend/db.js` and `frontend/index.html`).
+
+### Testing
+
+`backend/test/scoring.test.js`: `halveItRoundTarget()`'s in-range/extra-round
+capping and empty-list fallback, `halveItDartValue()`'s unrestricted/
+ring-restricted/wrong-sector/bull cases, and `evaluateVisitHalveIt()`'s
+hit/halve/round-up/final-round/tie/extra-round cases. `backend/test/db.halve-it-stats.test.js`:
+stat-bubble formulas, `getHalveItWonLegs()`'s pure-total derivation (including
+a case proving the order-dependent replay differs from a naive
+`SUM(scored)`), the best-total/win leaderboards, an
+X01/Cricket/Baseball/Shanghai/Halve-It cross-contamination regression, and
+`createGame()`'s custom-target validation/normalisation (well-formed accept,
+extra-field stripping, malformed-array reject, treble-Bull reject, omitted-OK).
+`backend/test/db.turn-consistency-guard.test.js`: the SEC-25-style guard's
+accept/reject cases, including the bust-must-match-the-derived-halving
+consistency check and the ring-restricted/extra-round target-advancement
+cases. Verified end-to-end with Playwright: the full New Game → Halve-It
+practice flow (a hit, a halving with correct round-up math, a ring-restricted
+round, a full 7-round game to completion), the 🛡️ No Half Measures badge,
+stat bubbles/personal bests/best-total leaderboard, the live scorecard's
+target-label row headers, and the `/display` scorecard.
+
+## 33. Dead Man Walking
+
+`docs/archive/dead-man-walking-roadmap.md`. A solo drill that skips the warmup:
+**15 rounds** (`game_type='dead_man_walking'`, solo-only), each one dropping
+the player mid-checkout on one of *their own* historically weakest X01
+finishes, with a personalized dart budget one tighter than they'd usually
+need. Close it → **Walked Out**. Bust, or run out of darts → **Executed**.
+The count of Walked Out rounds out of 15 lands on a result tier at the end,
+Pardoned down to Executed. Structurally the closest existing precedent is
+the 121 Checkout Ladder (§26) — real X01-shaped visits from a non-501
+deficit, reusing X01's own bust/win legality — but two things are
+genuinely different: the deficit and dart budget are **personalized and
+frozen server-side at creation**, never client-supplied or recomputed
+mid-session, and a bust here is **immediately fatal to the round** (no
+second visit to retry within the same round the way the Ladder's
+up-to-3-visits shape allows).
+
+### Sourcing the deficit — `getWeakestCheckouts(playerName, count)` (`backend/db.js`)
+
+Reuses Coaching Insight #3's own remaining-score reconstruction technique
+(§3's "Bust pattern by parity" formula) verbatim: the remaining score
+entering each X01 turn isn't stored, so it's rebuilt with the same
+window-function trick —
+
+```sql
+json_extract(g.config,'$.startingScore')
+  - COALESCE(SUM(t.scored) OVER (
+      PARTITION BY t.game_id, t.set_no, t.leg_no
+      ORDER BY t.id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+    ), 0) AS remaining
+```
+
+— filtered to this player's own double-out X01 turns (`gp.out_mode='double'`,
+`g.game_type='x01'`, `startingScore IN (501,301,170,101)`) where the
+reconstructed `remaining` falls in **32–170** (the doc's own range —
+below 32 isn't "genuinely weak" territory for this drill), grouped by that
+exact remaining value into a per-number **weakness score**:
+
+```
+weaknessScore = 0.5 * bustRate + 0.5 * nonCompletionRate
+```
+
+(deliberately overlapping — every bust is also a non-completion, so a
+number the player busts on often is weighted extra versus one merely left
+unfinished without busting). A `DMW_MIN_NUMBER_SAMPLES` floor (8, a first
+pass mirroring Coaching Insights' own `COACHING_MIN_ROUTE_USES`) excludes any
+remaining value seen too rarely to trust. Bogey numbers (159/162/163/165/166/
+168/169 under double-out) are excluded via `checkoutHint()`'s own `''`
+unfinishable signal — the same source of truth the Checkout Trainer
+trick-question tier already uses — never served as a round's deficit.
+Results sort worst-first (ties broken by larger sample, then lower number)
+and cap at `count`. **"Avoided" checkouts** (a third failure mode the
+original pitch mentions) aren't measured — there's no reliable signal in
+recorded data for "the player routed around this number on purpose," per
+the roadmap doc's own "Open questions."
+
+**A known characteristic, not a bug**: a fresh leg's very first turn is
+itself an "encounter" this same query reconstructs, at `remaining =
+startingScore` (170 or 101, since 501/301 fall outside `checkoutHint()`'s
+170-max range and are excluded by the bogey filter) — a real X01 player's
+opening visit essentially never checks out immediately, so a player with a
+lot of 170- or 101-category play will tend to see that exact category
+number itself surface as a moderately "weak" pool entry. This is the same
+reconstruction-technique artifact Coaching Insight #3's own bust-parity
+check already carries (just diluted there across an odd/even bucket rather
+than concentrated on one specific number) — inherited by faithfully reusing
+that technique, not introduced fresh here, and not addressed by this doc.
+
+**Cold start**: a player with too little double-out X01 history (an empty
+pool) falls back to `CHALLENGE_CHECKOUTS` (`frontend/scoring.js` — moved
+there from `frontend/index.html` specifically so this server-side path can
+share it, since Daily Challenge's own copy was frontend-only) — the same
+"reuse existing curated content" precedent Daily Challenge itself set.
+`pickDeadManWalkingTargets(pool, 15, rng)` (`frontend/scoring.js`) then draws
+15 targets from whichever pool applies, **with replacement** (a real,
+uniform random draw, not a fixed cycle — repeats are expected whenever a
+player's own weak pool is smaller than 15).
+
+### Par — `deadManWalkingParForTarget(target, historicalAverage)` (`frontend/scoring.js`)
+
+The pitch's "par minus one" only makes sense if par is a personalized
+standard **above** the theoretical minimum — using `checkoutHint()`'s own
+optimal dart count as par directly would make every round mathematically
+impossible (you cannot finish in fewer darts than the theoretical minimum).
+This doc's own correctness fix:
+
+```
+par = historicalAverage != null
+  ? max(historicalAverage, objectiveOptimal + 1)   // the floor
+  : objectiveOptimal + 2                            // no history yet in this band
+```
+
+`historicalAverage` (`_dmwHistoricalAverageDarts(playerId, band)`,
+`backend/db.js`) is this player's own **average total darts-to-finish**
+across their real won X01 double-out legs whose `checkout_points` (stored
+directly on the checkout turn — no reconstruction needed here, unlike the
+weakness query above) falls in the same **band** as this round's target:
+Low 32–60 / Mid 61–100 / High 101–170 (`DEAD_MAN_WALKING_BANDS`,
+`deadManWalkingBandFor()`, `frontend/scoring.js` — three bands is this
+build's chosen granularity, a first pass per the roadmap doc's own "Band
+granularity" open question, not confirmed against real play). "Total
+darts" already spans every visit in a won leg (including any earlier busts
+within it), the same convention `fewestDartsCheckout`/`getShanghaiWonLegs()`
+already use for "how many darts did this checkout actually take." The floor
+(`objectiveOptimal + 1`) is the one concrete, testable correctness property
+this doc adds: **the round's actual dart budget (`par - 1`) can never drop
+below the objective-optimal dart count**, verified by an exhaustive test
+across every finishable score 2–170 (`backend/test/scoring.test.js`, the
+same rigor `checkoutHint()`'s own exhaustive test already has).
+
+### `config.rounds` — frozen, server-authoritative, never client-supplied
+
+`games.config.rounds` is an array of exactly 15 `{target, par}` pairs,
+computed **once, server-side, inside `createGame()`** (`_buildDeadManWalkingRounds()`,
+`backend/db.js`) from a live snapshot of the player's own history at that
+exact moment, then frozen for the whole session — recomputing it live
+mid-session would make a resumed/saved game non-reproducible, and (the real
+security point) **a client can never supply or influence `config.rounds`
+at all** — any `config` the request body carries for this game type is
+simply ignored, closing off a hostile client choosing its own easy
+targets/generous pars for itself. The one way the client learns its own 15
+personalized rounds is the same channel Killer's number assignment already
+uses: `createGame()`'s response carries `{gameId, config: {rounds}}` back,
+and `DB.beginGame()` (`frontend/index.html`) threads it onto the live
+`game.config.rounds` the moment the POST resolves.
+
+### Execution — per-dart, not per-visit (`evaluateDeadManDart`/`resolveDeadManDart`, `frontend/scoring.js`)
+
+Because the budget won't generally be a multiple of 3, and a bust or a
+finish must end the round the **instant** it happens, this can't wait for
+`evaluateVisit()`'s batched 3-darts-at-once shape — a new pure per-dart
+evaluator generalizes its own bust/win logic:
+
+```js
+function evaluateDeadManDart(remaining, dart, doubleOut){
+  const newRemaining = remaining - dart.value;
+  let bust=false, win=false;
+  if(newRemaining < 0) bust = true;
+  else if(doubleOut && newRemaining === 1) bust = true;
+  else if(newRemaining === 0){
+    if(doubleOut && !dart.isDouble) bust = true;
+    else win = true;
+  }
+  return { newRemaining: bust ? remaining : newRemaining, bust, win };
+}
+```
+
+`resolveDeadManDart(remaining, dart, doubleOut, dartsUsedThisRound, budget)`
+composes this with the round's own budget: a dart that neither busts nor
+wins but exhausts the budget still ends the round — **Executed, out of
+darts** — a real, valid, non-bust visit that simply ran out of room
+(`scored` keeps its genuine point value; this is NOT stored as `bust=1`,
+since nothing about the scoring itself failed). Both `frontend/index.html`'s
+live per-dart preview (`throwDart()`'s `dead_man_walking` branch) and the
+actual commit (`enterTurnDeadManWalking()`) call this SAME function, so they
+can never disagree about which of the three outcomes just happened.
+
+### Data model — ordinary X01 columns, reused in their normal sense
+
+**No new columns at all.** Each round is its own `leg_no` (`turns.target_score`
+stores that round's frozen deficit); `bust`/`checkout` are used in their
+**ordinary X01 sense**, no repurposing — a round is **Walked Out** iff any
+turn within its leg has `checkout=1`, **Executed** otherwise, whether by a
+real bust (`bust=1` on the terminal turn) or by exhausting the budget
+without one (`bust=0`, `checkout=0`, but the round settled anyway because
+`darts used == budget`). This doc's own open question ("should the two
+Executed flavors be visibly distinct?") is resolved as: **not stored
+distinctly** (both collapse to "not Walked Out" for every tally/stat/badge),
+but the live UI/`announce()` calls DO distinguish them in the moment
+("EXECUTED — bust" vs. "EXECUTED — out of darts"), matching the doc's own
+framing that the distinction "matters for live feedback but not for
+anything stored or tallied."
+
+### Write-time guard (`addTurn()`, `backend/db.js`)
+
+Same dart-sum/bust/checkoutPoints arithmetic as the `'x01'`/`'checkout_ladder'`
+branches, reused wholesale, plus what's genuinely new here: a **per-round
+variable dart-budget guard**, generalizing the Checkout Ladder's flat
+9-dart/3-visit cap to a variable `config.rounds[leg-1].par - 1`. `targetScore`
+is validated against the FROZEN round the server itself computed at
+creation (never a live-derived climbing target the way the Ladder's own
+guard re-derives). A round already resolved (any prior turn has
+`checkout=1` or `bust=1`, OR the cumulative recorded darts already equal
+the budget) rejects any further turn against that same leg outright.
+
+### Round progression — a dedicated function, not an X01 `onLegWon()` carve-out
+
+Every prior fixed-round-per-visit game type in this app (Baseball/Shanghai/
+Halve-It) is "one visit = one round," each with its own dedicated
+`onLegWon*()` reimplementing leg/set/game bookkeeping from scratch. Dead Man
+Walking is structurally closer to a real X01 leg that can span **multiple**
+visits (a round only settles once a genuine bust/win/out-of-darts event
+fires) — but a bust here is immediately fatal to the round, unlike Checkout
+Ladder's forgiving up-to-3-visits shape, and **two of the three ways a
+round can end (a bust, or running out of darts) are never an X01 leg-win
+EVENT at all** — there's no `onLegWon()` hook to carve into for them the
+way Marathon Mode's own practice-leg carve-out (`|| game.marathonSessionId`)
+worked. `resolveDeadManWalkingRound(walkedOut)` (`frontend/index.html`) is
+therefore its own dedicated progression function: it tallies the round,
+advances `game.legNo`, and either seeds the next round's own frozen
+target/par (rounds 1–14 settling) or calls `onDeadManWalkingComplete()` →
+`finishUnit('game', ...)` (round 15 settling) — `legsPerSet`/`setsPerGame`
+are forced to 15/1 at `startGame()` time purely so the live scoreboard's
+"Round N of 15" framing has somewhere sane to read `game.legNo` from; the
+actual 15-round-and-stop logic lives entirely in this function, never in
+the generic `legsPerSet`/`setsPerGame` machinery (which this mode never
+actually checks, the same "a run IS the game" shape Gauntlet/Bob's 27 use,
+just with 15 legs instead of 1).
+
+### Result tiers (derived, never stored)
+
+| Walked Out | Result |
+|---|---|
+| 13–15 | Pardoned |
+| 10–12 | Reprieve |
+| 7–9 | Last Rites |
+| 4–6 | The Walk |
+| 0–3 | Executed |
+
+`deadManWalkingResultTier(walkedOutCount)` (`frontend/scoring.js`), computed
+fresh at read time (the GAME OVER screen, the moment-card headline) — never
+stored, same derive-don't-store precedent every tiered result in this app
+uses.
+
+### Stats (`GAME_TYPES.dead_man_walking.statDefs` / `DEAD_MAN_WALKING_STAT_DEFS`)
+
+Because a round's own termination reason (Walked Out / bust / out-of-darts)
+isn't a single `SUM()`-able column, `_replayDeadManWalkingLegs(mode)`
+(`backend/db.js`) replays every matching `(game, player, leg)` group once —
+the same "nothing pre-aggregated" complication Halve-It's own
+`_replayHalveItLegTotals()` hit — reading each leg's config to know its own
+frozen `par` (for the margin calculation below).
+
+**Stat bubbles** (`getDeadManWalkingStatBubbles(name, mode)`): Runs
+Completed, Avg Walked Out / Run, Bust Rate (% of rounds Executed by a real
+bust), Out-of-Darts Rate (% Executed by running out of budget without
+busting — two DISTINCT tallies, both ways to not Walk Out), Avg Margin
+(Walked Out) (average darts of budget left unused on a Walked Out round —
+`(par-1) - dartsUsed`), and Longest Walked-Out Streak (see below). `totalWalkedOut`
+(the exact lifetime sum, not derived by re-multiplying the average) also
+rides along in this same response as the raw ingredient the lifetime
+achievement ladder reads.
+
+**Personal Best** (`getDeadManWalkingPersonalBests(name, mode)`): **one
+field**, `mostWalkedOut` — the most Walked Out rounds in a single run, a
+**higher-is-better** peak (`MAX()`, the standard descending "best run" shape
+most Personal Bests in this app use — contrast The Gauntlet's own
+deliberately-ascending Scar count, which this one is NOT). No win-streak/
+recent-form/lifetime-average fields — there's no opponent, the same reasoning
+Bob's 27/Checkout Ladder/The Gauntlet's own single-or-few-field Personal
+Bests already settled on.
+
+**Home leaderboard** (`getDeadManWalkingLeaderboard()`): best (highest)
+Walked Out count, one row per player, their peak run — no mode param
+(always solo/practice), same "no h2h/practice split needed" precedent
+Doubles Practice's own leaderboards established.
+
+**Longest Walked-Out Streak** (`getDeadManWalkingLongestStreak(playerName)`):
+a **lifetime, cross-run** figure (the roadmap doc's own "within or across
+runs") — a flat chronological scan of every round this player has ever
+played, across every game (`ORDER BY MIN(t.id)`, since `game_id` increases
+with creation time and turn id orders rounds within a game correctly too),
+counting the longest run of consecutive Walked Out rounds. This naturally
+lets a streak begun at the tail of one run continue into the next run's
+opening rounds, which a per-run-only calculation (checked once at each
+run's own end, the way Gauntlet's own clean-station streak is) could never
+represent.
+
+**A real isolation bug found and fixed along the way**: `getPersonalBests()`'s
+`bestLegAvg`/`bestLeg`/`recentFormAvg`/`lifetimeAvg` (the X01 Personal
+Bests) and `getPlayerStatBubbles()`'s `avgDartsPerLeg`, plus
+`getPersonalBests()`'s `fewestDartsCheckout`, all relied on `t.checkout=1`
+as an implicit "this is a real X01 leg" signal with no explicit
+`game_type='x01'` filter — true only as long as X01 (and Checkout Trainer,
+excluded separately via `NOT_CHECKOUT_TRAINER`) were the only game types
+that ever set `checkout=1`. Checkout Ladder broke that assumption when it
+shipped, and Dead Man Walking's own real Walked Out checkouts made it
+concrete: a committed isolation-regression test (played a full Dead Man
+Walking run) caught `bestLegAvg`/`bestLeg`/`recentFormAvg`/`lifetimeAvg` all
+changing from `null` to real (wrong) values. `bestLeg` in particular feeds
+the Ghost Opponent "Race this leg" button, explicitly X01-only
+(`docs/archive/ghost-opponent-roadmap.md`) — pointing it at a
+personalized-deficit Dead Man Walking round would have made that button
+silently replay the wrong thing. Fixed by adding `X01_ONLY` to all three
+queries. (`dartsThrown`/`avgDartsPerDay`/`bigFish`/`fewestDartsCheckout`
+remain deliberately global/cross-game-type — §3's own "Physical-dart stats"
+scoping table already documents that as intentional, not part of this fix.)
+
+### Badges
+
+Data-driven ladders off the same `checkChuckinMilestoneTier()` engine every
+other milestone ladder in this app uses — two lifetime ladders (`DMW_RUNS_MILESTONE_LADDERS`:
+runs completed; `DMW_WALKED_OUT_MILESTONE_LADDERS`: lifetime Walked Out
+rounds, the Chuckin base+session pattern) plus one **lifetime, cross-run**
+streak ladder (`DMW_STREAK_MILESTONE_LADDERS`), checked at the end of
+EVERY run against a fresh server-computed value
+(`getDeadManWalkingLongestStreak()`) rather than a per-run local counter the
+way Gauntlet's own streak ladder is — since this streak can genuinely span
+multiple runs. Three one-off badges, all recurring, framed with the mode's
+own dark, self-aware humor per the roadmap doc's tone note:
+
+| Badge | Exact condition |
+|---|---|
+| 🕊️ **Full Reprieve** | `walkedOutCount === 15` — a perfect run |
+| ⚰️ **Pardoned** | `walkedOutCount >= 13` — reached the top result tier |
+| 💀 **Last Request** | `walkedOutCount === 0` — "you showed up," not purely celebratory, matching the mode's own tone |
+
+### Live scoreboard
+
+Dead Man Walking DOES broadcast to `/display` (unlike Checkout Trainer and
+Gauntlet, which skip the push in `pushLive()` itself):
+`enterTurnDeadManWalking()`/`renderGameDeadManWalking()` push every committed
+turn, and `renderers.dead_man_walking` in `display.html` renders the card —
+round N/15, remaining score, darts left this round, and the Walked Out tally —
+from three DMW-only fields (`dmwBudget`, `dmwDartsUsed`, `dmwWalkedOut`) inside
+`modeState` (§7's "Payload shape", built by `GAME_TYPES.dead_man_walking.
+liveModeState`; the round number rides on the generic `legNo`, remaining score
+inside `players[]`). The end-of-run
+summary card reads the DMW `legSummary` entry's `walkedOut`. Its badge ids are
+also hand-copied into `display.html`'s `ACH_LABELS`/`ACH_DURATION`/`ACH_DESC`
+maps, per the standing convention, so the live achievement overlay's headline
+isn't blank while these badges are earned. `renderGameDeadManWalking()`
+(`frontend/index.html`) shows current round N/15, the deficit (`p.score`),
+a **dart-count countdown** (never a wall-clock one — a deliberately
+different flavor from The Pressure Chamber's own timer) computed as
+`budget - dartsUsedThisRound`, and the running Walked Out tally, all as
+persistent always-visible text (not merely inferred from a highlighted
+dartboard region), with the darts-remaining line also `aria-live` so it's
+announced as the budget runs low. A bust, a Walked Out, and an
+Executed-by-budget result each get their own `announce()` call and
+icon+text status change (never color/flash alone).
+
+### Saved games
+
+`rebuildDeadManWalkingState({rounds, turns})` (`frontend/scoring.js`) is a
+pure replay of recorded turns against the frozen `config.rounds` array —
+reused identically by the write-time guard's "already resolved" check,
+`_savedGamePosition()` (write-time list summary), and
+`GAME_TYPES.dead_man_walking.resume()` (read-time resume, dispatched from
+`resumeGame()` — item 37). `'dead_man_walking'` is in
+both `SAVABLE_GAME_TYPES` lists (`backend/db.js` and `frontend/index.html`).
+`_savedGamePosition()`'s field names for this type (`round`/`totalRounds`/
+`target`/`walkedOutCount`/`dartsUsedThisRound`/`budget`) are free to overlap
+with Bob's 27's/Checkout Ladder's own `round`/`target` fields:
+`savedGamePositionLabel()` (`frontend/index.html`) dispatches on `sg.gameType`
+(item 38, `docs/code-quality-roadmap.md`), not field presence, so there is no
+shared namespace to collide in. This is unrelated to the three DMW-only
+top-level *live-state* keys above (`dmwBudget`/`dmwDartsUsed`/`dmwWalkedOut`)
+— a different object entirely.
+
+### Accessibility and security
+
+Same accessibility treatment as every live scoreboard in this app (see
+"Live scoreboard" above) — no color-only signals, persistent text labels,
+`aria-live` on the darts-remaining countdown. Security: `config.rounds` is
+server-generated at creation and never client-supplied (see "`config.rounds`"
+above); the per-round dart-budget guard (see "Write-time guard" above); no
+new credential/secret surface.
+
+### Testing
+
+`backend/test/scoring.test.js`: `deadManWalkingBandFor()`'s band boundaries;
+`deadManWalkingParForTarget()`'s historical-average/floor/cold-start-default
+cases, plus the **exhaustive** floor-never-violated test across every
+finishable score 2–170; `pickDeadManWalkingTargets()`'s deterministic draw
+with an injectable rng; `evaluateDeadManDart()`'s three-way bust/win/continue
+outcomes; `resolveDeadManDart()`'s budget-exhaustion "out of darts" case;
+`deadManWalkingResultTier()`'s threshold boundaries; `rebuildDeadManWalkingState()`'s
+Walked-Out/bust/out-of-darts/still-in-progress/session-complete replay
+cases. `backend/test/db.turn-consistency-guard.test.js`: the write-time
+guard's dart-sum/checkoutPoints/budget-exhaustion/already-resolved/
+beyond-15-rounds cases, using `createGame()`'s own real (cold-start)
+`config.rounds` rather than hand-picked values. `backend/test/db.dead-man-walking-stats.test.js`:
+`getWeakestCheckouts()`'s ranking/sample-floor/bogey-exclusion/single-out-
+exclusion/other-game-type-exclusion cases; the par calculation's
+historical-average and cold-start-default paths via real `createGame()`
+calls; all four stats/PB/leaderboard functions; the lifetime cross-run
+streak (including a streak spanning the tail of one run into the head of
+the next); and an isolation-regression suite proving Dead Man Walking turns
+never leak into X01's own arithmetic-scoped stats (and the `X01_ONLY` fix
+above) or vice versa. Verified end-to-end with Playwright: both the
+real-weak-checkout-history path (a seeded player with genuine bust/
+completion history driving a deterministic, personalized `config.rounds`)
+and the cold-start fallback path (a fresh player drawing from
+`CHALLENGE_CHECKOUTS`), a Walked Out round, an Executed-by-bust round, an
+Executed-by-out-of-darts round, a full 15-round run reaching a real result
+tier (Pardoned) with the correct streak-ladder and `dmwpardoned` badges,
+stat bubbles/Personal Best/Home leaderboard via the live API, and
+save-for-later/resume round-tripping mid-run state (round, target, Walked
+Out tally) exactly.
+
+## 34. The Pressure Chamber
+
+`docs/archive/pressure-chamber-roadmap.md`. A 15-round pressure-training drill —
+`game_type='pressure_chamber'`, `config.rounds: 15` (fixed, server-overridden
+regardless of whatever the client sends, the same never-trust-the-client
+precedent Killer's number assignment already established), 1-4 players
+(`contexts: ['practice', 'h2h']`). Structurally another Baseball/Shanghai/
+Halve-It sibling — a fixed round sequence, all players in lockstep on one
+shared live round (`game.pressureChamberRound`) — but with a genuinely new
+mechanic none of those three have: each round's **Pressure Card** (a target +
+a situational modifier) is a **pure function of `(gameId, roundIndex)`**,
+never stored, re-derived identically by the live client, the write-time
+consistency guard, and every read-time stats query.
+
+### The card sequence — generated, never stored
+
+`generatePressureCard(gameId, roundIndex)` (`frontend/scoring.js`):
+
+```js
+function generatePressureCard(gameId, roundIndex){
+  const targetIdx = _pcSeededIndex(`${gameId}|${roundIndex}|target`, PRESSURE_TARGET_POOL.length);
+  const modifierIdx = _pcSeededIndex(`${gameId}|${roundIndex}|modifier`, PRESSURE_MODIFIERS.length);
+  return { round: roundIndex, target: PRESSURE_TARGET_POOL[targetIdx], modifier: PRESSURE_MODIFIERS[modifierIdx] };
+}
+```
+
+`_pcSeededIndex()` is `scoring.js`'s own copy of `frontend/index.html`'s
+`_seededIndex(seedStr, poolSize)` (the same deterministic string-hash used by
+Daily Challenge) — duplicated rather than shared because `scoring.js` has no
+reach into `index.html`'s globals and vice versa, and both the live client
+*and* `backend/db.js` need to call `generatePressureCard()` directly. Because
+the seed is `gameId` (the real `games.id`, never a per-player value), every
+player sharing one `games` row sees byte-identical cards round for round —
+H2H's "identical sequence" falls out of this for free, no sequence pre-rolled
+or stored anywhere. **No `target_sector`/`modifier_id` column exists at all**
+— grading only ever needs the recorded `darts` for that round plus a
+re-derivation of the card that produced it.
+
+`PRESSURE_TARGET_POOL` (14 curated entries, `frontend/scoring.js`) has two
+shapes: `{type:'sector', sector, ring, label, difficulty}` (ring one of
+`'single'/'double'/'treble'`) and `{type:'finish', score, label,
+difficulty:'finish'}` (2, 3, or 4-figure finish targets: 40/81/121).
+`PRESSURE_MODIFIERS` (8 entries) carries `{key, label, icon, flavor,
+cpMultiplier, missMultiplier?, comebackBonus?, matchDart?, suddenDeath?,
+noWarmup?}` — see "The 8 modifiers" below for exactly what each flag changes.
+
+### Grading — two shapes, two paths
+
+**Sector/ring targets** — `gradePressureSectorRound(target, darts,
+matchDartOnly)`: "best of the round's darts" — an exact ring+sector match on
+ANY dart is a **full** hit; the sector hit but the wrong ring is a
+**partial**; neither is a **miss**. Under Match Dart (`matchDartOnly`), darts
+1-2 are ignored entirely — only a genuine 3rd dart is ever consulted (fewer
+than 3 darts thrown is always a miss under this modifier).
+
+**Finish targets** — `pressureRoundOutcome()` reuses `evaluateVisit()`
+**unmodified** (`{score: target.score, doubleOut:true}` — always double-out,
+a judgment call this doc settles since the roadmap doc itself didn't pin it
+down): a legal double-out finish is a **full** hit, anything else (a bust, an
+illegal last dart, a non-double checkout) is a **miss** — there is no partial
+tier for a finish target. Under Match Dart, a legal finish reached on dart 1
+or 2 does **not** count — `darts.length===3` is required alongside `ev.win`,
+since a real visit only ever contains as many darts as were actually thrown
+before a checkout ended it.
+
+`darts` passed into any Pressure Chamber grading function must be full
+dart-core objects (`makeDartCore()`'s own `{sector, mult, value, isDouble,
+...}` shape) — sector grading only reads `.sector`/`.mult`, but finish
+grading's `evaluateVisit()` call needs `.value`/`.isDouble` too, so every real
+caller (the live client, `backend/db.js`'s write-time guard) always deals in
+full dart-core objects, never raw `{sector, mult}` pairs.
+
+### The 8 modifiers — what's digitally enforceable and what isn't
+
+| Modifier | Key | Effect |
+|---|---|---|
+| Dead Calm | `dead_calm` | Baseline — `cpMultiplier:1.0`, no other flags. |
+| Double Down | `double_down` | `cpMultiplier:1.0`, `missMultiplier:2` — doubles the miss penalty only; a full/partial hit's reward is unchanged. |
+| Comeback | `comeback` | `cpMultiplier:1.4`, `missMultiplier:2`, `comebackBonus:true` — a full hit adds a flat bonus (half the base CP) on top of the normal reward; a miss doubles the penalty, same as Double Down. |
+| Audience | `audience` | `cpMultiplier:1.15`. Flavor/instruction text only (`flavor` shown on the card banner) — unenforceable, honor system. |
+| Ghost Leg | `ghost_leg` | `cpMultiplier:1.15`. Same unenforceable honor-system shape as Audience. |
+| Sudden Death | `sudden_death`, flag `suddenDeath:true` | `cpMultiplier:1.5`. **Enforced**: the round stops the instant a dart isn't a full hit at all (sector/ring targets only — see below), via a real per-dart engine function, not just flavor text. |
+| Match Dart | `match_dart`, flag `matchDart:true` | `cpMultiplier:1.3`. **Enforced**: only the round's 3rd dart counts (see grading above). |
+| No Warmup | `no_warmup`, flag `noWarmup:true` | `cpMultiplier:1.25`. **Enforced**: a real 5-second wall-clock deadline (`Date.now()`-based, the Checkout Blitz precedent) from card reveal to dart 1. |
+
+**Sudden Death's per-dart early stop** (`evaluateDartPressureSector(dart,
+target)`, mirroring `evaluateDartDoublesPractice()`'s `{hit, ended, reason}`
+shape): stops the instant a dart isn't a full hit — including a
+partial/wrong-ring hit, per the roadmap doc's own explicit wording. **Judgment
+call**: scoped to sector/ring targets only — a finish target under Sudden
+Death grades exactly as it would under Dead Calm, since "hit" isn't a single
+binary per-dart event the way it is for a sector target (the roadmap doc left
+this combination unspecified).
+
+**No Warmup's deadline** is enforced **client-side only**, the same
+established limitation Checkout Blitz's own deadline already has (neither
+`backend/db.js` nor `server.js` know anything about wall-clock timing — only
+`scored`/`bust`/`checkout`/`leg_won` arithmetic is ever validated
+server-side). The client auto-commits a genuine miss dart (`sector:0`) the
+instant the deadline passes with no dart 1 yet thrown, so the server's
+consistency guard always re-derives from the SAME real darts the client
+graded — never a client-only "trust me, this was late" flag.
+
+### Composure Points formula
+
+`computePressureRoundResult(card, darts)` (`frontend/scoring.js`):
+
+- **Base CP** by target difficulty (`PRESSURE_BASE_CP`): single 5, double 10,
+  treble 15, bull 20. A finish target's base
+  (`pressureFinishBaseCp(score)`) instead scales with `checkoutHint()`'s own
+  optimal dart count: `10 + optimalDarts*5` (15/20/25 for a 1/2/3-dart
+  finish) — a 2-dart finish is worth less than a 3-dart one, per the roadmap
+  doc.
+- **Miss-penalty base** (`PRESSURE_MISS_PENALTY_BASE`), always smaller than
+  the base CP: single 2, double 4, treble 6, bull 8, finish 10.
+- **Full hit**: `gained = round(baseCp * modifier.cpMultiplier)`, plus a flat
+  `round(baseCp * 0.5)` bonus under Comeback.
+- **Partial hit**: `gained = round(baseCp * modifier.cpMultiplier / 2)`.
+- **Miss**: `gained = 0` (never negative — satisfies `turns.scored`'s
+  existing non-negative validation unchanged); `missPenalty =
+  round(missBase * modifier.cpMultiplier * (modifier.missMultiplier || 1))` —
+  "base-and-modifier-scaled," per the roadmap doc's own formula wording, with
+  Double Down/Comeback's `missMultiplier` doubling it again on top.
+
+All of these numeric constants are a first-pass playtesting default per the
+roadmap doc's own explicit framing ("not final") — what's actually tested is
+the FORMULA'S SHAPE (base × modifier, half on partial, doubled miss penalty
+under Double Down/Comeback), not these specific values.
+
+### Composure Rating
+
+Derived at read time from a run's total CP, never stored (monotonic
+thresholds, so "the best rating ever reached" is always just
+`pressureComposureRating()` of the single highest total CP ever recorded —
+no separate tracking needed):
+
+| Total CP | Rating |
+|---|---|
+| 120+ | Ice |
+| 90–119 | Steel |
+| 60–89 | Copper |
+| 30–59 | Tin |
+| Below 30 | Rattled |
+
+### Data model — `turns.scored`/`bust`/`checkout`/`leg_won`
+
+Reuses Checkout Trainer's exact 3-way outcome verbatim: `bust=1` = miss,
+`checkout=1, leg_won=0` = partial, `checkout=1, leg_won=1` = full. No new
+columns of any kind — `turns.scored` stores the CP **gained** this round
+(never the miss penalty, which is never stored anywhere). A run's total CP
+is:
+
+```
+total = SUM(scored) − SUM(pressureMissPenaltyForCard(card) for every bust=1 turn)
+```
+
+recomputed at read time by re-rolling `generatePressureCard(gameId, round)`
+for every missed round — the same "derive the rest, don't store it"
+philosophy Halve-It's halving rule already established, just simpler here
+since the total isn't order-dependent (a plain `SUM` minus a derived
+subtraction, not a running replay — `_pressureChamberLegTotals(mode)` in
+`backend/db.js`).
+
+### Consistency guard (SEC-25-style, `addTurn()` in `backend/db.js`)
+
+The round is derived from the player's own prior-turn count in this
+game/set/leg (`priorTurns+1`, the same SEC-25 pattern Baseball/Shanghai/
+Halve-It's own guards use), rejected outright past round 15 (no extra-rounds
+extension exists for this game type — see tie-breaking below). The card is
+re-derived via `generatePressureCard(gameId, round)` and
+`computePressureRoundResult(card, dartsCore)` recomputes the expected
+`scored`/`bust`/`checkout`/`leg_won`; any mismatch is rejected.
+
+### Solo vs. H2H tie-breaking (a judgment call — the roadmap doc's own last open question)
+
+`pressureChamberDecideWinnerIndex(totals)` (`frontend/scoring.js`): highest
+total CP wins outright; a CP tie breaks on fewest total misses (the more
+composed run); a further tie breaks on fewest darts thrown (efficiency); a
+genuine remaining coincidence resolves to whichever player is earlier in turn
+order. **Always returns a definite winner** — this app has no distinct "draw"
+result/UI class for any other game type, and a real numeric CP total makes an
+exact 3-way tie vanishingly unlikely in practice, so this was chosen over
+introducing one just for this feature.
+
+### Stats (`GAME_TYPES.pressure_chamber.statDefs` / `PRESSURE_CHAMBER_STAT_DEFS`)
+
+**Stat bubbles** (`getPressureChamberStatBubbles(name, mode)`): Avg Run CP,
+Full-Hit Rate, Partial-Hit Rate (all `getPressureChamberStatBubbles`'
+`avgCp`/`fullHitRate`/`partialHitRate` — the roadmap doc's own explicit list),
+plus Win Rate/Runs Completed/Darts Thrown for parity with Shanghai's/
+Halve-It's own bubble sets, and **Honesty %** (`honestyPct` — see the
+self-declare mechanic below). `totalCpEarned` (lifetime CP, clamped at 0 per
+run before summing) also rides in this response as the achievement-ladder
+base — see Achievements below.
+
+### Self-declare honesty mechanic — `turns.declared_hit` + Honesty %
+
+Before each visit's darts are read off the board, the player makes a
+**self-declaration**: tapping "🎯 I'll hit it" or "❌ I'll miss" on a declare
+screen that sits ahead of the normal dart pad (`renderPadPressureChamber()`
+shows the two declare buttons and hides the number pad / S·D·T multi-row until
+a call is made; No Warmup's 5-second clock only arms once the call is made, not
+when the card first shows). The call is stored on the new nullable
+`turns.declared_hit` column (`1` = declared hit, `0` = declared miss, `NULL` =
+no declaration / every other game type). It is transient per-visit client state
+(`game.pressureDeclared`, reset to `NULL` each turn, never saved or resumed) and
+is passed to `db.recordTurn()` as `declaredHit`.
+
+`declared_hit` is **explicitly not a scoring input** and carries no leaderboard
+weight. It feeds only the informational **Honesty %** stat
+(`getPressureChamberStatBubbles`' `honestyPct`/`declaredRounds`): of every round
+where a declaration was made, the percentage that matched the round's real
+outcome — a declared hit is honest iff the round graded at least a partial hit
+(`checkout=1`), a declared miss is honest iff the round busted (`bust=1`).
+`honestyPct` is `null` until at least one declaration exists. Unlike every other
+new column there is **no consistency guard** for `declared_hit`: the server can
+never prove the declaration was truly made before verifying (a determined client
+can submit one matching the outcome in hindsight), so it is an honor-system
+self-discipline signal by design. `addTurn()` validates only its shape (`0`/`1`)
+and rejects it on any non-`pressure_chamber` game, the same gating
+`declared_unsolvable` uses for Checkout Trainer. Covered by
+`backend/test/db.pressure-chamber-stats.test.js` (honest→100%, mixed→50%,
+undeclared→`null`, and the game-type/shape guards).
+
+**Personal Bests** (`getPressureChamberPersonalBests(name, mode)`):
+`bestRunCp` (a peak, no minimum-attempts floor — the Checkout Blitz/Halve-It
+precedent), `bestRating` (`pressureComposureRating(bestRunCp)` — see
+Composure Rating above for why no separate tracking is needed), and
+`longestFullHitStreak` (the best of every completed run's own peak
+consecutive-full-hit streak).
+
+**Home page leaderboard**: Best Run CP (`getPressureChamberBestCpLeaderboard(mode)`,
+one row per player, their peak total across BOTH won and lost runs — same
+no-minimum-floor shape as Halve-It's own board, each row annotated with its
+Composure Rating) and Most Pressure Chamber Wins
+(`getPressureChamberWinLeaderboard()`, H2H only, identical shape to
+Halve-It's/Shanghai's own).
+
+### Achievements
+
+Three data-driven ladders, `chuckinTiersReached()`/`checkChuckinMilestoneTier()`-powered
+(the `CHUCKIN_MILESTONE_LADDERS` engine, reused wholesale): **lifetime runs
+completed** (`PRESSURE_RUNS_MILESTONE_LADDERS`, 4 tiers, 5/25/100/250),
+**lifetime CP earned** (`PRESSURE_CP_MILESTONE_LADDERS`, 4 tiers,
+500/2,000/5,000/15,000, base+session fetched once per game like Baseball's
+own `lifetimeRunsBase`), and **longest full-hit streak in a single run**
+(`PRESSURE_STREAK_MILESTONE_LADDERS`, 3 tiers, 5/8/12 — checked once at run
+end against that run's own peak streak, the Bob's 27/Gauntlet-streak
+pattern, not a lifetime accumulator).
+
+**Judgment call**: unlike every sibling game type's own leg-outcome badges
+(checked only for the match winner in `onLegWon*()`), Composure Rating is a
+**personal** achievement even in H2H — the roadmap doc's own Goal section
+says "solo players chase their own rating; 2-4 players can run the identical
+card sequence head-to-head," meaning a losing player who still reaches Ice
+should still earn it. `onLegWonPressureChamber()` therefore checks 🥶 Ice and
+every lifetime ladder for **every player**, not just the leg winner (all
+players' round-15 turns are already recorded by the time it fires, since the
+round only advances once everyone's thrown) — win/loss progression
+(`legsWon`/`setsWon`) is still applied to the winner only.
+
+Four one-off flavor badges, all recurring, checked the moment a round is
+graded in `enterTurnPressureChamber()`: 🥶 **Ice** (reach the Ice Composure
+Rating, 120+ CP, in a single run), 🎯 **Nerves of Steel** (a full hit under
+Sudden Death), ⏱️ **No Warmup Needed** (a full hit under No Warmup), 🃏
+**Dead Calm, Steady Hands** (a full hit under Dead Calm — "sometimes the
+scariest of all," per the roadmap doc).
+
+### Live scoreboard
+
+`renderGamePressureChamber()` (`frontend/index.html`) and
+`renderers.pressure_chamber` (`frontend/display.html`) both render a
+per-round chalkboard grid (rows = rounds 1-15, cells showing ✅/➗/❌ for a
+settled round — icon+text via a `title`/`aria-label`, never color alone) plus
+a large, unmissable **Pressure Card banner** below the table: the current
+round's target, modifier (icon + label + flavor text), and stakes
+(full-hit/miss CP values) — "the whole game hinges on the player registering
+what's on the line before they throw," per the roadmap doc's own
+accessibility note. A live No Warmup countdown (`aria-live`, cued at 3s/1s
+remaining — not every second) shows when that modifier is drawn.
+`display.html` has no shared `scoring.js` module, so `GAME_TYPES.
+pressure_chamber.liveModeState` puts the FULL 15-round card sequence up front
+(`pressureChamberCards` inside `modeState`, same "can't derive it there"
+reasoning `halveItTargets` already documents) plus the live round/deadline.
+
+`renderPadPressureChamber()` is deliberately the FULL 1-20+Bull number grid
+(the same shape X01's own default Pad-mode grid uses), **not** a single
+restricted target button like Halve-It's/Bob's 27's own pads — a finish-
+target round can legitimately need a multi-number checkout route, and even a
+sector-target round needs to record a genuine off-target hit, not just
+"hit or miss." Always Pad-mode, **never the Dartboard SVG** — Sudden Death's
+per-dart early stop and No Warmup's wall-clock deadline both need
+`throwDart()` to route through this one commit path, not race a second live
+input surface. Because of this, Pressure Chamber's own singles are always
+zone-unspecified, the same BUG-24 gap class Cricket/Baseball/Shanghai already
+have (`noZoneTracking` in `frontend/index.html` includes `'pressure_chamber'`).
+
+### Saved games
+
+Position is a pure function of recorded turns:
+`rebuildPressureChamberState({gameId, names, legsPerSet, maxRounds, turns})`
+(`frontend/scoring.js`) replays CP totals/misses/full-hit streaks/round
+number from the turn sequence, reusing `evaluateVisitPressureChamber()`
+directly. Reused identically by `_savedGamePosition()` (write-time) and
+`GAME_TYPES.pressure_chamber.resume()` (read-time, dispatched from
+`resumeGame()` — item 37). `'pressure_chamber'`
+is in both `SAVABLE_GAME_TYPES` lists (`backend/db.js` and
+`frontend/index.html`).
+
+### The self-declare honesty mechanic (build-order step 10, shipped)
+
+The roadmap doc's own build-order step 10 — `declared_hit`, a self-declare
+hit/miss step before darts are read, and an Honesty% stat comparing the
+declaration against the real outcome — **shipped** as its own v2 item (split out
+of the core-game v1 the same way Halve-It's custom target editor was). Its full
+data model, the declare-screen UI, the informational Honesty % stat, and the
+"no consistency guard, honor-system by design" rationale are documented under
+"Self-declare honesty mechanic" above. With this item done,
+`docs/archive/pressure-chamber-roadmap.md` is fully complete and moved to
+`docs/archive/`.
+
+### Testing
+
+`backend/test/scoring.test.js`: `generatePressureCard()`'s determinism
+(including a same-gameId-different-round and different-gameId sweep),
+`gradePressureSectorRound()`'s full/partial/miss + Match Dart cases,
+`evaluateDartPressureSector()`'s Sudden Death early-stop cases,
+`pressureBaseCp()`/`pressureFinishBaseCp()`/`pressureMissPenaltyBase()`'s
+scaling, `pressureMissPenaltyForCard()`'s pure-function-of-the-card property,
+`computePressureRoundResult()`'s full/partial/miss/Double-Down/Comeback/
+finish/Match-Dart-on-a-finish cases, `pressureComposureRating()`'s threshold
+table, `isPressureIceRun()`/`isPressureModifierFullHit()`,
+`pressureChamberDecideWinnerIndex()`'s CP/misses/darts/order tie-break chain,
+`evaluateVisitPressureChamber()`'s round/match-completion timing, and
+`rebuildPressureChamberState()`'s replay + leg-progression cases.
+`backend/test/db.pressure-chamber-stats.test.js`: stat-bubble formulas
+(deriving expected values from the real engine, never hand-picked numbers),
+Personal Bests, the best-CP/win leaderboards, and an X01/Cricket/Baseball/
+Shanghai/Halve-It/Pressure Chamber cross-contamination regression (both
+directions). `backend/test/db.turn-consistency-guard.test.js`: the SEC-25-style
+guard's accept/reject cases (a genuine full hit, a claimed-but-unreal full
+hit, a genuine miss, an inconsistent 3-way outcome, the 16th-round rejection,
+and a finish-target grading case). `backend/test/display.ach-labels-parity.test.js`
+extended to cover the 4 new one-off badges and 3 new ladders. Verified
+end-to-end with Playwright: the full New Game → Pressure Chamber practice and
+H2H flows, a full 15-round solo run to a Composure Rating, badges/stat
+bubbles/personal bests/leaderboards via the API, and the live `/display`
+scorecard.

@@ -35,6 +35,14 @@ function loadChuckinCard() {
   const pieces = [
     extract(src, /function dartClass\(label\)\{[\s\S]*?\n\}/, 'dartClass()'),
     extract(src, /^const DB_SECTORS = \[[^\]]*\];/m, 'DB_SECTORS'),
+    // BOARD_GEOM: buildChuckinLiveHeatmap()'s shared geometry kernel (see the
+    // comment in display.heatmap-hardening.test.js for the full "why").
+    extract(src, /^const BOARD_GEOM = \(\(\) => \{[\s\S]*?\n\}\)\(\);/m, 'BOARD_GEOM'),
+    // heatmapStyle/heatmapNumberStyle: see the comment in
+    // display.heatmap-hardening.test.js for the full "why" — the admin-toggled
+    // globals buildChuckinLiveHeatmap() now reads for its heat-scale/number-band style.
+    extract(src, /^let heatmapStyle = '\w+';/m, 'heatmapStyle'),
+    extract(src, /^let heatmapNumberStyle = '\w+';/m, 'heatmapNumberStyle'),
     extract(src, /function buildChuckinLiveHeatmap\(cells\)\{[\s\S]*?\n\}/, 'buildChuckinLiveHeatmap()'),
     extract(src, /^function escapeHtml\(s\)\{.*\}$/m, 'escapeHtml()'),
     extract(src, /function esc\(v\)\{[^}]*\}/, 'esc()'),

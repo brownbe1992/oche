@@ -41,7 +41,7 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
-  # Opt-in automated backups (docs/backups-roadmap.md's Compose-profile stretch
+  # Opt-in automated backups (docs/archive/backups-roadmap.md's Compose-profile stretch
   # goal) — an alternative to host cron for anyone who'd rather not touch their
   # server's crontab. Off by default: `docker compose up` never starts this.
   # Enable it with: docker compose --profile backups up -d

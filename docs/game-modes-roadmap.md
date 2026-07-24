@@ -64,12 +64,10 @@
 > confirming the toggle switches cleanly in both H2H/Practice modes with zero
 > regression to the existing X01 leaderboards.
 >
-> **Not yet built**: Baseball (step 5). See "Suggested build order" below.
-> **Killer now has a full rules primer** (config schema, per-dart evaluation, win
-> condition, and its own open questions), grounded in dartscorner.com's published
-> ruleset — see "Killer" below. Design only, not started, and not yet added to the
-> suggested build order pending a priority decision (it's an alternative next
-> variant to Baseball, not a step after it).
+> **Killer is now built and shipped (2026-07)** — elimination-format H2H, per the
+> rules primer below (dartscorner.com's published ruleset). See "Killer"'s own
+> "Implementation notes" subsection for exactly how each open question was
+> resolved; full write-up in `REFERENCE.md` §28.
 >
 > **Doubles Practice is built (2026-07)** — the first of the two "Practice Drill
 > Modes" candidates below to ship. A genuinely different shape from every other
@@ -123,7 +121,7 @@ added later without starting from scratch each time.
 |---|---|
 | Architecture approach | Proper generalization now — refactor X01 into "the first plugin" in a real game-type framework, rather than bolting Cricket on separately |
 | Cricket stats depth | ✅ Built. A dedicated Cricket stat (Marks Per Round) plus 5 more stat bubbles, Personal Bests, and profile charts (Player Profile), and its own Home page leaderboard set (MPR, Most Cricket Wins, 9 Marks, Perfect Leg) |
-| Cricket variant scope for v1 | Standard cricket only (highest score wins). Cut-throat (points scored against opponents) deferred to later |
+| Cricket variant scope for v1 | Standard cricket only (highest score wins). Cut-throat (points scored against opponents) deferred to later — done, see `docs/archive/cutthroat-cricket-roadmap.md` |
 | Custom cricket target count | ✅ Built. Fixed at 7 targets — the same count as classic cricket (15, 16, 17, 18, 19, 20, Bull) — freely chosen from 1-20 + Bull, but never more or fewer than 7. Enforced at Start (`startGame()` blocks with an alert if the count is wrong) |
 | Scoring screen during Cricket | ✅ Built. A dedicated Cricket scoring screen (traditional chalkboard scorecard — slash/X/circled-X marks), not the X01 Pad or Dartboard screens — it's the automatic default the instant a Cricket game is active, with no player choice to fall back to Pad/Dartboard |
 | Live scoreboard orientation | ✅ Built. Cricket's `renderers.cricket` inherits portrait/landscape detection from the shared shell — see `docs/archive/existing-app-prep-roadmap.md` item 11 |
@@ -264,8 +262,9 @@ depends on it.
   is resolved one way or another; this needs to be modeled correctly in the win-check
   logic, not simplified away.
 - Cut-throat (points scored against opponents instead of for yourself, lowest score
-  wins) is explicitly out of scope for v1 — deferred since it inverts the scoring and
-  win-condition logic and is cleaner to add once standard mode is solid.
+  wins) was explicitly out of scope for v1 — deferred since it inverts the scoring and
+  win-condition logic and was cleaner to add once standard mode was solid. **Done,
+  see `docs/archive/cutthroat-cricket-roadmap.md`.**
 
 ## Cricket stats (full parity with X01)
 
@@ -471,16 +470,20 @@ each the direct Baseball-vocabulary analog of a Cricket precedent.
   both flagged `baseball:true` in `BADGE_INFO` so the Player Profile's Badge Case
   gets its own "Baseball" section (mirroring the Cricket section). Full trigger
   conditions in REFERENCE.md §4.
-- **Matchwin moment card, Share button, per-leg practice stat panel**: Baseball
-  now gets its own `pracStatsHtmlBaseball()`/`h2hStatsHtmlBaseball()` pair
-  (mirroring X01's `pracStatsHtml()`/`h2hStatsHtml()`, since Cricket's own
-  versions read X01-shaped fields — `p.gamePoints`/`avgDarts` — that don't exist
-  on a Baseball player) plumbed into `finishUnit()`. `matchWinStatLine()` needed
-  no Baseball-specific version at all — it only reads `legsWon`/`setsWon`/
-  `category`/`players.length`, already generic across every game type. The Share
-  button, previously excluded for Baseball the same way it's excluded for
-  Cricket (`isCricket || isBaseball` in `finishUnit()`), now only excludes
-  Cricket — Baseball gets the same `shareMomentCard('matchwin')` flow X01 has.
+- **Matchwin moment card, Share button, per-leg comparison table**: Baseball
+  now gets its own `h2hStatsHtmlBaseball()` (mirroring X01's `h2hStatsHtml()`,
+  since Cricket's own version reads X01-shaped fields — `p.gamePoints`/
+  `avgDarts` — that don't exist on a Baseball player) plumbed into
+  `finishUnit()`. `matchWinStatLine()` needed no Baseball-specific version at
+  all — it only reads `legsWon`/`setsWon`/`category`/`players.length`, already
+  generic across every game type. The Share button, previously excluded for
+  Baseball the same way it's excluded for Cricket (`isCricket || isBaseball` in
+  `finishUnit()`), now only excludes Cricket — Baseball gets the same
+  `shareMomentCard('matchwin')` flow X01 has. (A `pracStatsHtmlBaseball()`
+  dual-column "This Leg/This Session" panel briefly existed alongside this for
+  practice mode's `kind==='leg'` screen, but was removed by
+  `docs/bug-roadmap.md` BUG-22 — practice Baseball is now always exactly 1 leg/
+  1 set, so that branch became unreachable; see BUG-22 for why.)
 - **Home page leaderboards** (`renderHomeTabBodyBaseball()`, mirroring
   `renderHomeTabBodyCricket()` exactly): `homeTabRenderer` flipped from `false`
   to the new renderer, so Baseball now appears on the Home page's game-type
@@ -635,6 +638,69 @@ by ring throughout, in both directions:
   configurable**, or should it just be hardcoded to the sourced standard of 3
   since no variant has been requested yet? Leans toward configurable (cheap to
   build, matches X01's precedent of exposing this kind of number), not decided.
+
+### Implementation notes (2026-07, shipped)
+
+Built essentially as designed. The open questions above were resolved as follows:
+
+- **Minimum player count**: no dedicated block below 3 — Killer just requires
+  2+ players like every other H2H game type (a new `h2hOnly` flag, the inverse
+  of the existing `soloOnly` flag, keeps it off the practice/1-player New Game
+  list entirely). A 2-player game is allowed and does play out as "X01 with
+  extra steps," exactly as this doc anticipated, rather than being blocked.
+- **Number reassignment**: re-rolled every time, not persisted — numbers are
+  assigned inside `createGame()` fresh for every new game row (`assignKillerNumbers()`),
+  so a rematch/"Play again" (which always calls `startGame()` again) gets a
+  brand-new random assignment, resolving this doc's "leans toward re-roll" note.
+- **Turn order**: the existing player-entry-order convention, not a simulated
+  closest-to-bull throw-off — resolving this doc's other open lean.
+- **`config.lives` configurable**: yes — a New Game setup section offers 2/3/5,
+  defaulting to the sourced standard of 3.
+- **Config schema**: shipped as `{ lives, numbers: { <playerName>: <1-20> } }` —
+  keyed by player **name**, not player id, since `assignKillerNumbers()` zips
+  the shuffled 1-20 pool directly against the same name strings every other
+  part of the write path already keys on (turns, badges, stats).
+- **Scoring screen**: the existing interactive Dartboard SVG is reused
+  unmodified, confirming this doc's suspicion — `throwDartKiller(sector, zone,
+  missZone, missDepth, bounced)` has the exact same signature as every other
+  per-dart-commit mode's handler (Doubles Practice, Just Chuckin' It), so no
+  new bespoke pad was needed.
+- **Per-dart evaluation required a genuine schema change, not just a code
+  wrinkle**: because one 3-dart visit's darts can each affect a *different*
+  player (a self-life-build on dart 1, an attack on dart 2), a single `turns`
+  row per *visit* could never represent it — this needed a new nullable
+  `turns.affected_player_id` column, one row per *dart* for this game type
+  only. Validated as an actual architectural necessity, not a convenience,
+  before building it.
+- **Live scoreboard**: shipped as designed — a new `renderers.killer` card
+  (number, lives as pips with an `aria-label` stating the exact count, killer
+  status, a distinct "ELIMINATED" state) plus `game.legSummary`'s own
+  Killer-shaped branch for the end-of-leg summary cards.
+- **Stats**: shipped `GAME_TYPES.killer.statDefs` (games played, win rate, avg
+  kills/leg, avg lives lost/leg, and the "survived without becoming a killer"
+  curiosity stat this doc floated), a Personal Best (most kills in a leg), and
+  a win-rate leaderboard (reusing `getBaseballWinLeaderboard()`'s exact shape,
+  since Killer has a real `games.winner_id` the way Baseball does).
+- **Achievements**: all three floated ideas shipped exactly as sketched — 🩸
+  First Blood (first elimination of the match), 🛡️ Untouchable (won without
+  ever losing a life), 🙈 Own Worst Enemy (eliminated via your own double).
+- **Accessibility**: life count is pips + an `aria-label` stating the exact
+  count, never color-only; killer/eliminated status is an icon + text label
+  (🔪 Killer / ☠️ Eliminated), not a color signal.
+
+**Deliberately out of scope, decided during the build (not covered by this
+doc's own open questions)**: **no save/resume support** — `SAVABLE_GAME_TYPES`
+does not include `killer`, unlike every other H2H game type. Mid-match state
+(who's a killer, remaining lives, who's eliminated) is fully re-derivable from
+replaying `turns` either way, so this is a scope call, not a technical
+limitation — worth revisiting if it's ever requested. Turn-order enforcement
+(rejecting a turn from a player who isn't actually up next) was also left out
+of the write-time consistency guard, matching the existing precedent that no
+guard in this app enforces turn order, only arithmetic.
+
+Full write-up: `REFERENCE.md` §28; committed tests in
+`backend/test/scoring.test.js`, `backend/test/db.turn-consistency-guard.test.js`,
+`backend/test/db.killer-stats.test.js`.
 
 ## Other known variants (backlog, not designed yet)
 
@@ -842,8 +908,11 @@ stats").
   single round by hits, ties broken by fewest darts). Neither takes a `mode`
   param, since this game type is always `practice=1` by construction — an
   h2h/practice split would always leave the h2h side empty.
-- **Still not built**: achievements/badges for this mode (none were requested
-  for this pass).
+- **Built later (2026-07)**: achievements/badges for this mode — none were
+  requested in this pass, but `docs/archive/culture-badges-roadmap.md` Part B
+  subsequently added a lifetime doubles-hit milestone ladder plus 🎪 **Ring
+  Master** (hit every double D1–D20 + bull lifetime), `DOUBLES_HIT_MILESTONE_LADDERS`
+  in `frontend/index.html`.
 - **Fixed (2026-07, follow-up pass): the Doubles Practice Home page tab no
   longer shows while H2H is selected.** Since this mode has no H2H equivalent
   at all, its Home leaderboard tab only makes sense under Practice — a new
@@ -886,11 +955,23 @@ passive badges are unchanged and keep firing exactly as before, from any mode.
 - **Resolved (was an open question): Around the Clock's target set is 20
   numbers only, no bull** — matches the existing passive `around_the_clock`
   badge's exact formula (`singlesHit.size >= 20`) exactly, even though this
-  section's earlier draft said "+bull". A round ends the instant all 20 are
-  hit as singles; `game.legNo` is repurposed as a round counter and
-  `turns.bust` as "this dart completed the round," the identical repurposing
-  Doubles Practice already established for both columns. "Start Next Clock"
-  starts a fresh round in the same `games` row.
+  section's earlier draft said "+bull". The clock is complete the instant all
+  20 are hit as singles; `turns.bust` marks "this dart completed the clock,"
+  the identical repurposing Doubles Practice already established for that
+  column.
+- **Superseded (2026-07): "one clock = one game."** The original design above
+  ("Start Next Clock" begins a fresh round in the same `games` row,
+  `game.legNo` repurposed as a round counter) was replaced — completing the
+  clock now ends the whole game immediately (`DB.completeGame()`/
+  `finishUnit('game', ...)`), the same "a run IS the game" shape Gauntlet/
+  Bob's 27/Dead Man Walking already use, instead of staying in the same
+  session for another attempt. This was a direct request (fixing a real bug:
+  under the old design `game.done` never became true, so the hamburger menu
+  kept offering "Save for later" even after a player had fully completed the
+  clock), not a planned roadmap item, so it has no separate roadmap doc — full
+  mechanics (the new CLOCK COMPLETE stats screen, Play Again/Return Home) are
+  `REFERENCE.md` §2's "Guided Around the Clock / Around the World" and "Game
+  Over screen — Play Again / Return Home" sections.
 - **Around the World**: no round boundary at all — structurally identical to
   Chuckin (one continuous stream of 1-dart turns per `games` row, `set_no=
   leg_no=1` throughout), tracking progress toward the same lifetime 63-outcome
@@ -947,6 +1028,57 @@ passive badges are unchanged and keep firing exactly as before, from any mode.
   firing unrelated to this feature. Both are wired through the same
   per-dart-snapshot `badgeReverts`/`voided` undo-revocation mechanism every
   other moment-style badge uses, so undoing the completing dart un-earns it.
+
+### Around the Clock — H2H variant (proposed, not started)
+
+Not the same proposal as the "Round the Clock" backlog bullet above (§Other
+known variants) — that one additionally changes the *rule* (numbers hit
+strictly in order, 1 through 20, then bull). This item leaves today's built
+drill's rules completely alone (20 numbers, any order, singles only, no bull —
+`evaluateDartAroundTheClock()`, `frontend/scoring.js:111-116`) and only adds a
+second player racing the same board: whoever completes their own 20-number set
+first wins the leg. If "in order + bull" is ever wanted too, that's still a
+separate, later decision — this item doesn't force it.
+
+**Why it isn't H2H today**: `GAME_TYPES.around_the_clock` declares `soloOnly:
+true` (`frontend/index.html:12724`), and every function in the mode —
+`throwDartAroundTheClock()`, `renderGameAroundTheClock()`,
+`newMatchPlayerAroundTheClock()` — reads `game.players[0]` directly. There is
+no `game.current`/turn-rotation concept in this mode at all, unlike every
+multiplayer type (X01/Cricket/…) or Killer.
+
+**Closest precedent**: Killer (`docs/open-roadmap-items.md`, "H2H-only"
+counterpart to `soloOnly`) is the most recent mode built genuinely H2H-first —
+`h2hOnly: true`, per-dart cross-player evaluation (`evaluateDartKiller()`), a
+real `game.current` turn-rotation index, and best-of-N legs/sets via the
+shared `advanceLegSetGame()` helper.
+
+**What would need to change**, based on that precedent:
+- Drop `soloOnly: true`; decide whether it becomes `h2hOnly` (competitive-only,
+  like Killer) or stays optionally-solo (practice drill AND a real H2H match,
+  like X01) — leaning toward the latter, since the existing drill is worth
+  keeping exactly as-is for solo practice.
+- Generalize the per-dart/render functions off the hardcoded `game.players[0]`
+  to `game.players[game.current]`, adding real turn advancement (currently
+  absent — every dart in today's drill is thrown by the same fixed player).
+- Decide the win condition: first player to complete all 20 wins the leg
+  outright (a race, no elimination), which is the simplest reading of "H2H"
+  here and doesn't require Killer's elimination/lives machinery at all.
+- The data model mostly already generalizes for free: `playerSnapshotAroundTheClock()`
+  is already per-player and called via `.map()` across `game.players`
+  (`frontend/index.html:15095-15100`), and `hitSet` (a `Set` per player) has no
+  single-player assumption baked in — the gap is purely in the throw/render
+  dispatch, not the snapshot/stats shape.
+- `getAroundTheClockStatBubbles()`/Personal Bests and the two Home page
+  leaderboards (Fastest Completion, Most Completions) are today computed
+  practice-drill-only; decide whether an H2H race's completion also counts
+  toward them, or gets its own win/loss tracking the way Killer's `kills`/
+  `eliminated` fields do.
+- The live scoreboard's dartboard visualization (see the "big dartboard with
+  checkmarks" item elsewhere on this tracker) should be designed with 2+
+  simultaneous progress states in mind from the start, rather than retrofitted
+  — e.g. two overlaid marker styles, or a board per player, so this item and
+  that one aren't sequenced awkwardly against each other.
 
 ## New Game / Scoring screen changes
 
@@ -1198,3 +1330,8 @@ anywhere else in the app, which is a bigger lift than the two badges above.
   generalize by literally listing every `GAME_TYPES` entry, or only the ones a
   given player has actually played (so a player who's never touched Cricket
   doesn't see an all-empty Cricket tab)? Leans toward the latter, not decided.
+- **New**: Around the Clock's H2H variant (proposed above, "Around the Clock —
+  H2H variant") — whether it's `soloOnly`-and-also-H2H (like X01) or becomes
+  `h2hOnly` (like Killer), and whether a completed H2H race should count toward
+  the existing practice-drill stats/leaderboards or get its own win/loss
+  tracking. Not decided; not started.

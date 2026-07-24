@@ -1,0 +1,70 @@
+# Live test server, open to the internet — see "Exposing this to the internet"
+# in README.md for the full checklist this file follows.
+#
+# Expected deployment: this host sits on its own network segment (a dedicated
+# VLAN/subnet, isolated from your LAN and any other docker-compose projects on
+# the box) with a TLS-terminating reverse proxy (Caddy/nginx/Traefik/your
+# platform's load balancer, etc.) in front of it that you control. That
+# network/proxy separation is a host- and infra-level concern outside what a
+# compose file can express, so it isn't modeled here — this file only expects
+# to land behind such a proxy on the port below, and assumes TLS already
+# terminates before traffic reaches it (the app itself only speaks plain HTTP).
+#
+# Before deploying:
+#   1. Point your reverse proxy at this host on port 8066, terminating TLS there.
+#   2. Confirm the proxy sets X-Forwarded-For — TRUST_PROXY below assumes it does.
+#   3. `docker compose -f docker-compose.live-test.yml up -d`
+services:
+  darts-live-test:
+    build: .
+    container_name: oche-live-test
+    ports:
+      - "8066:8066"                # reverse proxy forwards to <this-host>:8066
+    volumes:
+      - ./darts_data_live_test:/data   # SQLite database, stored on this host only
+    environment:
+      - PORT=8066
+      - DARTS_DB=/data/darts.db
+      # Internet-facing: served over HTTPS via the reverse proxy in front of this
+      # container, so the admin session cookie gets the Secure flag.
+      - COOKIE_SECURE=true
+      # Zero-trust default — every write requires a logged-in admin. Never set
+      # this to false on a server open to the internet.
+      - OCHE_REQUIRE_AUTH=true
+      # Paired with COOKIE_SECURE above per README's internet-exposure checklist.
+      # Only correct because the reverse proxy in front of this host is one you
+      # control and it sets X-Forwarded-For — if that's not true for your setup,
+      # set this back to false, since trusting that header from an untrusted
+      # source would let a client spoof its way around the per-IP rate limiter.
+      - TRUST_PROXY=true
+      # Only set to "true" to additionally block outbound Home Assistant requests
+      # to private/LAN address ranges (loopback and link-local/metadata addresses
+      # are always blocked regardless). Leave unset unless this test server also
+      # talks to a LAN-hosted Home Assistant instance you want walled off from.
+      # - HA_BLOCK_PRIVATE=true
+    # The container runs as a non-root user (see Dockerfile / docker-entrypoint.sh).
+    # no-new-privileges is safe to add unconditionally; a full read-only root
+    # filesystem / cap_drop:[ALL] were deliberately NOT added here — see
+    # docker-compose.yml for why (the entrypoint needs CAP_CHOWN briefly on
+    # first run against a freshly bind-mounted volume).
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  # Opt-in automated backups — same pattern as docker-compose.yml. Off by
+  # default: `docker compose -f docker-compose.live-test.yml up -d` never
+  # starts this on its own.
+  # Enable with: docker compose -f docker-compose.live-test.yml --profile backups up -d
+  backups:
+    build: .
+    container_name: oche-live-test-backups
+    profiles: ["backups"]
+    volumes:
+      - ./darts_data_live_test:/data
+    environment:
+      - DARTS_DB=/data/darts.db
+      # - BACKUP_RETENTION_DAYS=7   # overridden by Settings -> Backups once set there
+    command: ["sh", "-c", "while true; do node backend/backup.js; sleep 86400; done"]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped

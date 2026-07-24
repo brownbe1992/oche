@@ -1,5 +1,5 @@
 'use strict';
-// Committed tests for backend/db.js's tournament mode (docs/tournament-mode-roadmap.md,
+// Committed tests for backend/db.js's tournament mode (docs/archive/tournament-mode-roadmap.md,
 // single-elimination only — double-elimination explicitly deferred, tracked separately
 // on docs/open-roadmap-items.md). Covers: bracket generation across player counts
 // (round count, standard seeding pairs, bye cascading with no double-byes),
@@ -272,10 +272,14 @@ describe('BUG-4 — advancement guards (winner validation + already-decided)', (
     const { gameId } = db.startTournamentMatch(final.id);
     db.completeGame(gameId, A);
     assert.equal(db.getTournament(tournamentId).champion_name, A);
-    // Replay the completion with the OTHER player — must be a no-op for the bracket.
-    db.completeGame(gameId, B);
+    // Replaying the completion with the OTHER player must now be rejected
+    // outright (completeGame() gained an "already ended" guard — the same
+    // one forfeitPlayer()/abandonGame() already had) rather than silently
+    // succeeding and relying on _advanceTournamentMatch()'s own idempotency
+    // to hide that games.winner_id itself would otherwise get overwritten.
+    assert.throws(() => db.completeGame(gameId, B), (e) => e.status === 409);
     const t = db.getTournament(tournamentId);
-    assert.equal(t.champion_name, A, 'champion is not overwritten by a replayed complete');
+    assert.equal(t.champion_name, A, 'champion is not overwritten by a rejected replayed complete');
     assert.equal(t.matches[0].winnerName, A);
   });
 });
@@ -307,7 +311,7 @@ describe('BUG-7 — wipeAllData clears tournament tables', () => {
   });
 });
 
-// docs/tournament-mode-roadmap.md §7 — Champion and Giant Slayer (Tournament)
+// docs/archive/tournament-mode-roadmap.md §7 — Champion and Giant Slayer (Tournament)
 // badges, awarded inline from _advanceTournamentMatch() (see the "not a second
 // parallel hook" note in the roadmap doc itself).
 describe('tournament badges (§7)', () => {

@@ -1,6 +1,6 @@
 'use strict';
 /* =============================================================================
-   Shared backup/restore mechanics (docs/backups-roadmap.md).
+   Shared backup/restore mechanics (docs/archive/backups-roadmap.md).
 
    Used by two call sites that must always agree on paths, naming, and the WAL
    gotcha: backend/backup.js (the standalone cron script) and the admin-gated
@@ -155,7 +155,7 @@ function validateSqliteFile(filePath) {
 // This does NOT make the already-running server process pick anything up — the
 // pending file is only ever applied by applyPendingRestoreIfAny(), called once at
 // the very next process startup, before db.js opens the live database. A restart is
-// still required after this returns (docs/backups-roadmap.md's v2 design
+// still required after this returns (docs/archive/backups-roadmap.md's v2 design
 // deliberately hands the admin an explicit "restart now" instruction rather than the
 // server triggering its own process exit mid-request) — the difference is that the
 // live file itself is untouched, and therefore un-corruptible, until that restart.

@@ -9,12 +9,39 @@ const assert = require('node:assert/strict');
 const path = require('path');
 
 const scoring = require(path.join('..', '..', 'frontend', 'scoring.js'));
-const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET_STANDARD_NUMBERS,
-  evaluateVisitBaseball, baseballInningTarget, parseSqliteTimestamp,
+const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET_STANDARD_NUMBERS, CRICKET_ALL_NUMBERS,
+  evaluateVisitBaseball, baseballInningTarget, isBaseballCycle, parseSqliteTimestamp,
   challengeBadgeSignals, CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH,
   evaluateDartDoublesPractice, evaluateDartAroundTheClock, chuckinTiersReached, isStaircaseFinish,
-  isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved,
-  pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission } = scoring;
+  isBedAndBreakfast, isMadhouseFinish, isShanghaiVisit,
+  isHatTrick, isBullseyeGauntlet, isDoubleTrouble, isWhereDidItGo, isSoCloseShot,
+  isBustedMaximum, isTontitledToNothing, isNoCigar, isTripleBullCheckout, isBullseyeFinish,
+  isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved, cricketStoneColdAchieved,
+  evaluateVisitBobs27, isBobs27FullHouse, isBobs27FullAnderson,
+  pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
+  CHECKOUT_TRAINER_TRICK_CHANCE, listUnsolvableTargets, gradeCheckoutDeclaration,
+  rebuildX01State, rebuildCricketState, rebuildBaseballState,
+  rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State, rebuildCheckoutLadderState,
+  GAUNTLET_STATION_ORDER, evaluateGauntletStation, gauntletTotalScars, gauntletResultTier, rebuildGauntletState,
+  KILLER_DEFAULT_LIVES, shuffleKillerNumbers, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
+  MARATHON_FATIGUE_TIERS, computeFatigueSplit, MARATHON_TREND_MIN_LEGS, MARATHON_TREND_TOLERANCE, classifyMarathonTrend,
+  shanghaiRoundTarget, isShanghaiWin, evaluateVisitShanghai, rebuildShanghaiState,
+  HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, evaluateVisitHalveIt, rebuildHalveItState,
+  DEAD_MAN_WALKING_BANDS, deadManWalkingBandFor, deadManWalkingParForTarget, pickDeadManWalkingTargets,
+  evaluateDeadManDart, resolveDeadManDart, DEAD_MAN_WALKING_RESULT_TIERS, deadManWalkingResultTier,
+  rebuildDeadManWalkingState, CHALLENGE_CHECKOUTS,
+  distinctDoubleSectors, countTonPlusVisits, aroundTheHornProgress,
+  generatePressureCard, gradePressureSectorRound, evaluateDartPressureSector,
+  pressureFinishBaseCp, pressureBaseCp, pressureMissPenaltyBase, pressureMissPenaltyForCard,
+  pressureRoundOutcome, computePressureRoundResult, pressureComposureRating,
+  isPressureIceRun, isPressureModifierFullHit, pressureChamberDecideWinnerIndex,
+  evaluateVisitPressureChamber, rebuildPressureChamberState,
+  PRESSURE_TARGET_POOL, PRESSURE_MODIFIERS, PRESSURE_ROUNDS } = scoring;
+
+// Shorthand for building a rebuild-function turn record: v(playerIndex, setNo,
+// legNo, [[sector,mult], ...]) — mirrors the {playerIndex,setNo,legNo,darts}
+// shape getResumeState() (backend/db.js) sends the client.
+const v = (playerIndex, setNo, legNo, darts) => ({ playerIndex, setNo, legNo, darts: darts.map(([sector, mult]) => ({ sector, mult })) });
 
 // Builds a real dart object the same way the app does (makeDart minus the
 // thrownAt timestamp), rather than hand-rolling a fake {value,isDouble,...} shape.
@@ -251,6 +278,149 @@ describe('evaluateVisitCricket (mark accumulation + opponent gating + win condit
   });
 });
 
+describe('evaluateVisitCricket — cutthroat variant (docs/archive/cutthroat-cricket-roadmap.md)', () => {
+  const numbers = CRICKET_STANDARD_NUMBERS;
+  const freshMarks = () => Object.fromEntries(numbers.map(n => [n, 0]));
+  const player = (name, marks, points) => ({ name, marks, points });
+  const cutthroatGame = (players) => ({ config: { numbers, variant: 'cutthroat' }, players });
+
+  test('closing marks (exactly 3) still score 0 onto anyone, same as standard', () => {
+    const shooter = player('A', freshMarks(), 0);
+    const opp = player('B', freshMarks(), 0);
+    const ev = evaluateVisitCricket(shooter, [d(20,3)], cutthroatGame([shooter, opp]));
+    assert.equal(ev.pointsThisVisit, 0);
+    assert.equal(ev.points, 0, "shooter's own total never moves in cutthroat");
+    assert.deepEqual(ev.opponentGains, [{ name:'B', gained:0 }]);
+  });
+
+  test('marks beyond closing land on the OPPONENT, not the shooter, while the opponent is still open', () => {
+    const shooter = player('A', freshMarks(), 0);
+    const opp = player('B', freshMarks(), 0);
+    const ev = evaluateVisitCricket(shooter, [d(20,3), d(20,3)], cutthroatGame([shooter, opp]));
+    // dart1: 0->3 (closes, 0 pts). dart2: 3->6, 3 marks beyond * 20 = 60 -> onto B, not A.
+    assert.equal(ev.pointsThisVisit, 60, 'the visit still generated 60 points of value');
+    assert.equal(ev.points, 0, "shooter's own points are untouched by their own hits");
+    assert.deepEqual(ev.opponentGains, [{ name:'B', gained:60 }]);
+  });
+
+  test('with 2+ opponents still open on the number, EVERY open opponent gets the FULL amount (not a split)', () => {
+    const shooter = player('A', { ...freshMarks(), 20: 3 }, 0); // already closed 20
+    const oppB = player('B', freshMarks(), 0); // 20 open
+    const oppC = player('C', freshMarks(), 0); // 20 open
+    const ev = evaluateVisitCricket(shooter, [d(20,3)], cutthroatGame([shooter, oppB, oppC])); // 3->6, 3 beyond * 20 = 60
+    assert.equal(ev.pointsThisVisit, 60);
+    assert.deepEqual(ev.opponentGains, [{ name:'B', gained:60 }, { name:'C', gained:60 }], 'each open opponent gets the full 60, not 30 each');
+  });
+
+  test('an opponent who has already closed the number receives nothing, even while another opponent is still open', () => {
+    const shooter = player('A', { ...freshMarks(), 20: 3 }, 0);
+    const closedOpp = player('B', { ...freshMarks(), 20: 3 }, 0); // B already closed 20
+    const openOpp = player('C', freshMarks(), 0); // C still open
+    const ev = evaluateVisitCricket(shooter, [d(20,3)], cutthroatGame([shooter, closedOpp, openOpp]));
+    assert.deepEqual(ev.opponentGains, [{ name:'B', gained:0 }, { name:'C', gained:60 }]);
+  });
+
+  test('once every opponent has closed the number, further marks score nothing onto anyone (same gating rule as standard)', () => {
+    const shooter = player('A', { ...freshMarks(), 20: 3 }, 0);
+    const opp = player('B', { ...freshMarks(), 20: 3 }, 0); // opponent already closed 20 too
+    const ev = evaluateVisitCricket(shooter, [d(20,3), d(20,3)], cutthroatGame([shooter, opp]));
+    assert.equal(ev.pointsThisVisit, 0);
+    assert.deepEqual(ev.opponentGains, [{ name:'B', gained:0 }]);
+  });
+
+  test('win requires every number closed AND strictly FEWER points than every opponent (lowest wins, inverted from standard)', () => {
+    const closedMarks = Object.fromEntries(numbers.map(n => [n, 3]));
+    const shooter = player('A', closedMarks, 5);
+    const opp = player('B', freshMarks(), 10); // opponent has more (worse) points
+    const ev = evaluateVisitCricket(shooter, [d(0,1)], cutthroatGame([shooter, opp]));
+    assert.equal(ev.win, true);
+  });
+
+  test('closed everything but has MORE points than an opponent: not a win', () => {
+    const closedMarks = Object.fromEntries(numbers.map(n => [n, 3]));
+    const shooter = player('A', closedMarks, 15);
+    const opp = player('B', freshMarks(), 10);
+    assert.equal(evaluateVisitCricket(shooter, [d(0,1)], cutthroatGame([shooter, opp])).win, false);
+  });
+
+  test('exact tie on points at the moment of closing is not a win (same known edge case as standard, direction-independent)', () => {
+    const closedMarks = Object.fromEntries(numbers.map(n => [n, 3]));
+    const shooter = player('A', closedMarks, 10);
+    const opp = player('B', freshMarks(), 10);
+    assert.equal(evaluateVisitCricket(shooter, [d(0,1)], cutthroatGame([shooter, opp])).win, false);
+  });
+
+  test('a winning visit\'s OWN points-onto-opponents count toward the win check (opponent totals are compared as of AFTER this visit)', () => {
+    // Shooter closes their last number (Bull) while opponent still has it open —
+    // this same visit both closes the shooter out AND pushes points onto the
+    // opponent. The win check must use the opponent's POST-visit total (100+50),
+    // not their pre-visit total (100), since the shooter's own hit is what
+    // pushed the opponent further behind in the same visit.
+    const almostClosed = { ...Object.fromEntries(numbers.map(n => [n, 3])), 25: 0 }; // Bull still open
+    const shooter = player('A', almostClosed, 90);
+    const opp = player('B', freshMarks(), 100); // opponent already worse than shooter even before this visit
+    const ev = evaluateVisitCricket(shooter, [d(25,2), d(25,1)], cutthroatGame([shooter, opp])); // closes bull (0->3), no beyond marks
+    assert.equal(ev.win, true, 'shooter (90) beats opponent (100) even with no bonus marks this visit');
+  });
+
+  test('3+ players: win requires strictly fewer points than EVERY opponent, not just one', () => {
+    const closedMarks = Object.fromEntries(numbers.map(n => [n, 3]));
+    const shooter = player('A', closedMarks, 5);
+    const opponentB = player('B', freshMarks(), 10); // shooter beats this one
+    const opponentC = player('C', freshMarks(), 3);  // shooter is behind (worse than) this one
+    const g = cutthroatGame([shooter, opponentB, opponentC]);
+    assert.equal(evaluateVisitCricket(shooter, [d(0,1)], g).win, false, 'still worse than opponentC');
+
+    opponentC.points = 8; // now shooter leads (has fewer points than) both
+    assert.equal(evaluateVisitCricket(shooter, [d(0,1)], g).win, true);
+  });
+});
+
+describe('cricketStoneColdAchieved (docs/archive/cutthroat-cricket-roadmap.md 🔪 Stone Cold)', () => {
+  test('requires 3+ players', () => {
+    assert.equal(cricketStoneColdAchieved(0, 2), false, '2-player cutthroat never qualifies, even at 0 points received');
+    assert.equal(cricketStoneColdAchieved(0, 3), true);
+    assert.equal(cricketStoneColdAchieved(0, 4), true);
+  });
+
+  test('requires exactly zero points ever received', () => {
+    assert.equal(cricketStoneColdAchieved(1, 3), false);
+    assert.equal(cricketStoneColdAchieved(60, 4), false);
+  });
+
+  test('null/undefined gamePointsReceived treated as zero', () => {
+    assert.equal(cricketStoneColdAchieved(null, 3), true);
+    assert.equal(cricketStoneColdAchieved(undefined, 3), true);
+  });
+});
+
+// docs/bug-roadmap.md BUG-23: CRICKET_ALL_NUMBERS is the pool frontend/index.html's
+// "hit a different number" picker (renderPadCricket()) subtracts game.config.numbers
+// from, to find which numbers aren't in play this match — the actual DOM/canvas
+// picker itself isn't node:test-able (same class of gap as BUG-8/BUG-18/BUG-22, a
+// live Playwright check covers it), but this constant and the subtraction it enables
+// are a genuine, pure, regression-worthy calculation.
+describe('CRICKET_ALL_NUMBERS (the "hit a different number" picker\'s full pool, docs/bug-roadmap.md BUG-23)', () => {
+  test('is exactly 1-20 plus bull (25) — 21 numbers, no duplicates', () => {
+    assert.equal(CRICKET_ALL_NUMBERS.length, 21);
+    assert.equal(new Set(CRICKET_ALL_NUMBERS).size, 21, 'no duplicate numbers');
+    for (let n = 1; n <= 20; n++) assert.ok(CRICKET_ALL_NUMBERS.includes(n), `missing ${n}`);
+    assert.ok(CRICKET_ALL_NUMBERS.includes(25), 'missing bull (25)');
+  });
+
+  test('subtracting classic cricket\'s 7 targets leaves exactly 1-14 as "off-target"', () => {
+    const offTarget = CRICKET_ALL_NUMBERS.filter(n => !CRICKET_STANDARD_NUMBERS.includes(n));
+    assert.deepEqual(offTarget, [1,2,3,4,5,6,7,8,9,10,11,12,13,14]);
+  });
+
+  test('subtracting any valid custom 7-number selection always leaves exactly 14 off-target numbers', () => {
+    const customNumbers = [1, 5, 9, 13, 17, 20, 25]; // an arbitrary valid 7-of-21 custom pick
+    const offTarget = CRICKET_ALL_NUMBERS.filter(n => !customNumbers.includes(n));
+    assert.equal(offTarget.length, 14);
+    assert.ok(!offTarget.some(n => customNumbers.includes(n)), 'no overlap between targets and off-target numbers');
+  });
+});
+
 describe('evaluateVisitBaseball (inning target scoring + round/match completion, docs/game-modes-roadmap.md "Baseball")', () => {
   const player = (totalRuns) => ({ totalRuns, inningRuns: {} });
   // `current` is the index of the player whose visit is being evaluated —
@@ -443,7 +613,7 @@ describe('checkoutHint (checkout route calculator, REFERENCE.md §2)', () => {
   });
 });
 
-describe('pickCheckoutTarget (Checkout Trainer target selection, docs/checkout-trainer-roadmap.md)', () => {
+describe('pickCheckoutTarget (Checkout Trainer target selection, docs/archive/checkout-trainer-roadmap.md)', () => {
   test('double-out: never returns a known bogey number, always finishable', () => {
     // Sweep the rng across the full [0,1) range so every candidate in [2,170]
     // gets picked at least once, then assert none of the known double-out bogey
@@ -477,7 +647,7 @@ describe('pickCheckoutTarget (Checkout Trainer target selection, docs/checkout-t
   });
 });
 
-describe('pickCheckoutTarget difficulty tiers (docs/checkout-trainer-roadmap.md "Target selection")', () => {
+describe('pickCheckoutTarget difficulty tiers (docs/archive/checkout-trainer-roadmap.md "Target selection")', () => {
   const tiers = ['under40', 'under100', 'over100', 'full'];
 
   test('every tier stays within its own [low,high] bound, under both out-modes', () => {
@@ -518,7 +688,45 @@ describe('pickCheckoutTarget difficulty tiers (docs/checkout-trainer-roadmap.md 
   });
 });
 
-describe('gradeCheckoutAttempt (Checkout Trainer grading, docs/checkout-trainer-roadmap.md)', () => {
+describe('pickCheckoutTarget pinnedTarget (docs/archive/checkout-drill-link-roadmap.md "Drill this checkout")', () => {
+  test('a finishable pin is always served, regardless of the rng roll', () => {
+    for (const roll of [0, 0.25, 0.5, 0.75, 0.999]) {
+      assert.equal(pickCheckoutTarget(true, () => roll, 'full', 0, 121), 121);
+      assert.equal(pickCheckoutTarget(false, () => roll, 'full', 0, 121), 121);
+    }
+  });
+
+  test('a pin overrides difficulty tier bounds entirely — 121 is outside under40 but still served', () => {
+    assert.equal(pickCheckoutTarget(true, () => 0.5, 'under40', 0, 121), 121);
+  });
+
+  test('a pin overrides an active trick roll — never redirected to a bogey number', () => {
+    const rolls = [0.01, 0]; // would normally trigger the trick roll + pick bogey 159
+    assert.equal(pickCheckoutTarget(true, () => rolls.shift() ?? 0.5, 'full', CHECKOUT_TRAINER_TRICK_CHANCE, 121), 121);
+  });
+
+  test('an unfinishable pin under the out-mode (a bogey number) is ignored, falling through to a normal roll', () => {
+    // 169 is a classic double-out bogey — pinning it must never wedge the trainer
+    // on an impossible target.
+    const target = pickCheckoutTarget(true, () => 0, 'full', 0, 169);
+    assert.notEqual(target, 169);
+    assert.notEqual(checkoutHint(target, true, 3), '', 'falls through to a genuinely finishable target');
+  });
+
+  test('a pin of 1 under double-out (never finishable) is ignored, falling through to a normal roll', () => {
+    const target = pickCheckoutTarget(true, () => 0, 'full', 0, 1);
+    assert.notEqual(target, 1);
+  });
+
+  test('null/undefined pinnedTarget behaves exactly like the pre-drill-link signature', () => {
+    for (const roll of [0, 0.5, 0.999]) {
+      assert.equal(pickCheckoutTarget(true, () => roll, 'full', 0, null), pickCheckoutTarget(true, () => roll, 'full', 0));
+      assert.equal(pickCheckoutTarget(true, () => roll, 'full'), pickCheckoutTarget(true, () => roll, 'full', 0, undefined));
+    }
+  });
+});
+
+describe('gradeCheckoutAttempt (Checkout Trainer grading, docs/archive/checkout-trainer-roadmap.md)', () => {
   test('optimal: legal finish in the objective minimum dart count', () => {
     const g = gradeCheckoutAttempt(40, true, [d(20, 2)]); // D20, 1 dart — the minimum for 40
     assert.equal(g.legal, true);
@@ -566,6 +774,89 @@ describe('gradeCheckoutAttempt (Checkout Trainer grading, docs/checkout-trainer-
     const g = gradeCheckoutAttempt(170, true, [d(20, 3)]); // a bust attempt at 170
     assert.equal(g.hint, 'T20 T20 Bull');
   });
+
+  test('a route submitted against a bogey number grades illegal with an empty hint (nothing to reveal)', () => {
+    const g = gradeCheckoutAttempt(169, true, [d(20, 3), d(20, 3), d(20, 3)]);
+    assert.equal(g.legal, false);
+    assert.equal(g.optimal, false);
+    assert.equal(g.hint, '', 'no route exists for a bogey number');
+    assert.equal(g.optimalDarts, null);
+  });
+});
+
+describe('trick questions (docs/archive/checkout-trainer-roadmap.md "Trick-question difficulty variant")', () => {
+  test('listUnsolvableTargets under double-out is exactly the classic bogey set for the full tier', () => {
+    // The known double-out bogey numbers (1 is excluded by the tier floor of 2).
+    assert.deepEqual(listUnsolvableTargets(true, 'full'), [159, 162, 163, 165, 166, 168, 169]);
+  });
+
+  test('every listed unsolvable target really has no checkoutHint route, and everything else in the tier does', () => {
+    for (const doubleOut of [true, false]) {
+      const bogeys = new Set(listUnsolvableTargets(doubleOut, 'full'));
+      const low = doubleOut ? 2 : 1;
+      for (let c = low; c <= 170; c++) {
+        assert.equal(bogeys.has(c), checkoutHint(c, doubleOut, 3) === '',
+          `target ${c} (${doubleOut ? 'double' : 'single'}-out) must be listed iff it has no route`);
+      }
+    }
+  });
+
+  test('tiers below the bogey range come back empty — every low target is finishable', () => {
+    assert.deepEqual(listUnsolvableTargets(true, 'under40'), []);
+    assert.deepEqual(listUnsolvableTargets(true, 'under100'), []);
+  });
+
+  test('the trick roll serves a bogey number from the tier when it hits', () => {
+    // First rng draw is the trick roll (below the chance), second picks the bogey.
+    const rolls = [0.01, 0]; // trick roll hits, then pick index 0
+    const target = pickCheckoutTarget(true, () => rolls.shift(), 'full', CHECKOUT_TRAINER_TRICK_CHANCE);
+    assert.equal(target, 159, 'lowest bogey — index 0 of the double-out bogey set');
+    assert.equal(checkoutHint(target, true, 3), '', 'served target really is unsolvable');
+  });
+
+  test('a trick roll that misses serves a normal finishable target', () => {
+    const rolls = [0.9, 0.5]; // trick roll misses, then the normal pick
+    const target = pickCheckoutTarget(true, () => rolls.shift() ?? 0.5, 'full', CHECKOUT_TRAINER_TRICK_CHANCE);
+    assert.notEqual(checkoutHint(target, true, 3), '', 'must be finishable');
+  });
+
+  test('trick mode in a tier with no bogeys falls through to a normal finishable target', () => {
+    const rolls = [0.01, 0.5]; // trick roll hits, but under40 has no bogeys
+    const target = pickCheckoutTarget(true, () => rolls.shift() ?? 0.5, 'under40', CHECKOUT_TRAINER_TRICK_CHANCE);
+    assert.ok(target >= 2 && target <= 39, 'still within the tier');
+    assert.notEqual(checkoutHint(target, true, 3), '');
+  });
+
+  test('trickChance omitted or 0 never consumes a trick roll — existing behavior byte-for-byte', () => {
+    for (const roll of [0, 0.01, 0.5, 0.999]) {
+      assert.equal(pickCheckoutTarget(true, () => roll, 'full'), pickCheckoutTarget(true, () => roll, 'full', 0));
+    }
+  });
+
+  test('gradeCheckoutDeclaration: calling a real bogey number is correct, legal, and optimal', () => {
+    const g = gradeCheckoutDeclaration(169, true);
+    assert.equal(g.declared, true);
+    assert.equal(g.correct, true);
+    assert.equal(g.legal, true, 'a correct declaration maps onto checkout=1');
+    assert.equal(g.optimal, true, 'a correct declaration maps onto leg_won=1 (2 Blitz points)');
+    assert.equal(g.usedDarts, 0);
+    assert.equal(g.hint, '');
+  });
+
+  test('gradeCheckoutDeclaration: calling a finishable target unsolvable is wrong, with the route revealed', () => {
+    const g = gradeCheckoutDeclaration(170, true);
+    assert.equal(g.correct, false);
+    assert.equal(g.legal, false, 'a wrong declaration maps onto bust=1 (0 Blitz points)');
+    assert.equal(g.optimal, false);
+    assert.equal(g.hint, 'T20 T20 Bull');
+    assert.equal(g.optimalDarts, 3);
+  });
+
+  test('gradeCheckoutDeclaration respects the out-mode — the same number can be a bogey in one and not the other', () => {
+    // 159 is a classic double-out bogey but IS finishable straight-out (e.g. T20 T20 T13).
+    assert.equal(gradeCheckoutDeclaration(159, true).correct, true);
+    assert.equal(gradeCheckoutDeclaration(159, false).correct, false);
+  });
 });
 
 // Regression coverage for the Checkout Blitz timeout bug reported live: a player
@@ -576,7 +867,7 @@ describe('gradeCheckoutAttempt (Checkout Trainer grading, docs/checkout-trainer-
 // on how late. blitzDeadlinePassed()/isPhotoFinishSubmission() are the two pure
 // predicates index.html's throwDartCheckoutTrainer()/submitCheckoutAttempt()/
 // tickCheckoutBlitzTimer() now all share for this decision.
-describe('blitzDeadlinePassed (Checkout Blitz hard-stop, docs/checkout-trainer-roadmap.md "Core loop delta")', () => {
+describe('blitzDeadlinePassed (Checkout Blitz hard-stop, docs/archive/checkout-trainer-roadmap.md "Core loop delta")', () => {
   test('false while now is strictly before the deadline', () => {
     assert.equal(blitzDeadlinePassed(10000, 9999), false);
   });
@@ -591,7 +882,7 @@ describe('blitzDeadlinePassed (Checkout Blitz hard-stop, docs/checkout-trainer-r
   });
 });
 
-describe('isPhotoFinishSubmission (📸 Photo Finish trigger, docs/checkout-trainer-roadmap.md "Achievements")', () => {
+describe('isPhotoFinishSubmission (📸 Photo Finish trigger, docs/archive/checkout-trainer-roadmap.md "Achievements")', () => {
   test('fires with genuinely under 1 second remaining', () => {
     assert.equal(isPhotoFinishSubmission(999), true);
     assert.equal(isPhotoFinishSubmission(1), true);
@@ -745,7 +1036,7 @@ describe('evaluateDartAroundTheClock (guided drill mode, docs/game-modes-roadmap
   });
 });
 
-describe('challengeBadgeSignals (Daily Challenge badges: streak + format-completionist, docs/daily-challenge-roadmap.md)', () => {
+describe('challengeBadgeSignals (Daily Challenge badges: streak + format-completionist, docs/archive/daily-challenge-roadmap.md)', () => {
   test('week badge fires only at exactly a 7-day streak, not before or after', () => {
     assert.equal(challengeBadgeSignals({ currentStreak: 6, bestByFormat: {} }, CHALLENGE_FORMATS).week, false);
     assert.equal(challengeBadgeSignals({ currentStreak: CHALLENGE_STREAK_WEEK, bestByFormat: {} }, CHALLENGE_FORMATS).week, true);
@@ -861,6 +1152,721 @@ describe('isStaircaseFinish (Staircase Finish achievement, REFERENCE.md\'s Achie
   });
 });
 
+describe('isBedAndBreakfast (docs/archive/culture-badges-roadmap.md Part A)', () => {
+  test('S20, S5, S1 in the canonical order', () => {
+    assert.equal(isBedAndBreakfast([d(20,1), d(5,1), d(1,1)]), true);
+  });
+
+  test('any order still qualifies — the joke is the three numbers, not the sequence', () => {
+    assert.equal(isBedAndBreakfast([d(1,1), d(20,1), d(5,1)]), true);
+    assert.equal(isBedAndBreakfast([d(5,1), d(1,1), d(20,1)]), true);
+  });
+
+  test('scoring 26 a different way (not S20/S5/S1) does not qualify', () => {
+    // 16+9+1 also totals 26, but it isn't the specific "hotel breakfast" splash —
+    // the predicate matches on the exact dart set, not just the total.
+    assert.equal(isBedAndBreakfast([d(16,1), d(9,1), d(1,1)]), false);
+  });
+
+  test('right numbers, wrong multiplier on any dart fails', () => {
+    assert.equal(isBedAndBreakfast([d(20,2), d(5,1), d(1,1)]), false); // double 20, not single
+    assert.equal(isBedAndBreakfast([d(20,1), d(5,3), d(1,1)]), false); // treble 5, not single
+  });
+
+  test('fewer or more than exactly 3 darts never qualifies', () => {
+    assert.equal(isBedAndBreakfast([d(20,1), d(5,1)]), false);
+    assert.equal(isBedAndBreakfast([d(20,1), d(5,1), d(1,1), d(1,1)]), false);
+  });
+
+  test('a missing/empty darts array never qualifies', () => {
+    assert.equal(isBedAndBreakfast(null), false);
+    assert.equal(isBedAndBreakfast([]), false);
+  });
+});
+
+describe('isMadhouseFinish (docs/archive/culture-badges-roadmap.md Part A)', () => {
+  test('won the leg and the last dart is double 1', () => {
+    assert.equal(isMadhouseFinish(true, [d(20,3), d(20,1), d(1,2)]), true);
+  });
+
+  test('a single-dart double-1 checkout still qualifies — only the last dart matters', () => {
+    assert.equal(isMadhouseFinish(true, [d(1,2)]), true);
+  });
+
+  test('did not win the leg — never qualifies even with a trailing double 1', () => {
+    assert.equal(isMadhouseFinish(false, [d(20,3), d(20,1), d(1,2)]), false);
+  });
+
+  test('won, but the last dart is a different double', () => {
+    assert.equal(isMadhouseFinish(true, [d(20,3), d(20,1), d(2,2)]), false);
+  });
+
+  test('won, but the last dart on sector 1 is not a double', () => {
+    assert.equal(isMadhouseFinish(true, [d(1,1)]), false); // single 1
+    assert.equal(isMadhouseFinish(true, [d(1,3)]), false); // treble 1
+  });
+
+  test('no darts recorded never qualifies', () => {
+    assert.equal(isMadhouseFinish(true, []), false);
+    assert.equal(isMadhouseFinish(true, null), false);
+  });
+});
+
+describe('isShanghaiVisit (docs/archive/culture-badges-roadmap.md Part A)', () => {
+  test('single, double, and treble of the same number, in order', () => {
+    assert.equal(isShanghaiVisit([d(20,1), d(20,2), d(20,3)]), true);
+  });
+
+  test('any order still qualifies', () => {
+    assert.equal(isShanghaiVisit([d(7,3), d(7,1), d(7,2)]), true);
+  });
+
+  test('every number 1-20 can Shanghai, not just 20', () => {
+    assert.equal(isShanghaiVisit([d(1,1), d(1,2), d(1,3)]), true);
+  });
+
+  test('two singles and a treble (not a genuine Shanghai) fails', () => {
+    assert.equal(isShanghaiVisit([d(20,1), d(20,1), d(20,3)]), false);
+  });
+
+  test('a double and two trebles (missing the single) fails', () => {
+    assert.equal(isShanghaiVisit([d(20,2), d(20,3), d(20,3)]), false);
+  });
+
+  test('S/D/T of DIFFERENT numbers does not qualify — must be the same number', () => {
+    assert.equal(isShanghaiVisit([d(20,1), d(19,2), d(18,3)]), false);
+  });
+
+  test('the bull can never Shanghai — no treble-bull ring exists', () => {
+    assert.equal(isShanghaiVisit([d(25,1), d(25,2), d(25,2)]), false);
+  });
+
+  test('a miss anywhere in the visit fails', () => {
+    assert.equal(isShanghaiVisit([d(20,1), d(20,2), d(0,0)]), false);
+  });
+
+  test('fewer or more than exactly 3 darts never qualifies', () => {
+    assert.equal(isShanghaiVisit([d(20,1), d(20,2)]), false);
+    assert.equal(isShanghaiVisit([d(20,1), d(20,2), d(20,3), d(20,1)]), false);
+  });
+});
+
+// The remaining ten CHAIN_CHECKS predicates (docs/code-quality-roadmap.md item 59),
+// pulled out of frontend/index.html's inline CHAIN_CHECKS test functions.
+describe('isHatTrick', () => {
+  test('three trebles (any numbers), no bust, not a 180', () => {
+    assert.equal(isHatTrick([d(20,3), d(19,3), d(18,3)], 171, false), true);
+  });
+  test('a genuine 180 is excluded (Busted Maximum/180 own that headline)', () => {
+    assert.equal(isHatTrick([d(20,3), d(20,3), d(20,3)], 180, false), false);
+  });
+  test('busted still qualifying trebles fails', () => {
+    assert.equal(isHatTrick([d(20,3), d(19,3), d(18,3)], 171, true), false);
+  });
+  test('fewer than three trebles fails', () => {
+    assert.equal(isHatTrick([d(20,3), d(19,3), d(18,1)], 168, false), false);
+  });
+});
+
+describe('isBullseyeGauntlet', () => {
+  test('double bull twice in one visit qualifies', () => {
+    assert.equal(isBullseyeGauntlet([d(25,2), d(25,2), d(1,1)]), true);
+  });
+  test('double bull only once fails', () => {
+    assert.equal(isBullseyeGauntlet([d(25,2), d(1,1), d(1,1)]), false);
+  });
+  test('no darts never qualifies', () => {
+    assert.equal(isBullseyeGauntlet(null), false);
+  });
+});
+
+describe('isDoubleTrouble', () => {
+  test('won, last two darts both doubles', () => {
+    assert.equal(isDoubleTrouble(true, [d(1,1), d(16,2), d(20,2)]), true);
+  });
+  test('a single trailing double checkout (only one dart) does not qualify', () => {
+    assert.equal(isDoubleTrouble(true, [d(20,2)]), false);
+  });
+  test('did not win never qualifies', () => {
+    assert.equal(isDoubleTrouble(false, [d(16,2), d(20,2)]), false);
+  });
+  test('last dart a double but the one before it is not', () => {
+    assert.equal(isDoubleTrouble(true, [d(16,1), d(20,2)]), false);
+  });
+});
+
+describe('isWhereDidItGo', () => {
+  test('three misses qualifies', () => {
+    assert.equal(isWhereDidItGo([d(0,0), d(0,0), d(0,0)]), true);
+  });
+  test('any hit among the three fails', () => {
+    assert.equal(isWhereDidItGo([d(0,0), d(0,0), d(20,1)]), false);
+  });
+  test('fewer than three darts fails', () => {
+    assert.equal(isWhereDidItGo([d(0,0), d(0,0)]), false);
+  });
+});
+
+describe('isSoCloseShot', () => {
+  test('T20, T20, S20 (140) without busting qualifies', () => {
+    assert.equal(isSoCloseShot([d(20,3), d(20,3), d(20,1)], false), true);
+  });
+  test('busting disqualifies even with the right darts', () => {
+    assert.equal(isSoCloseShot([d(20,3), d(20,3), d(20,1)], true), false);
+  });
+  test('a real 180 (three trebles) is not So Close', () => {
+    assert.equal(isSoCloseShot([d(20,3), d(20,3), d(20,3)], false), false);
+  });
+  test('wrong order of single/treble fails', () => {
+    assert.equal(isSoCloseShot([d(20,1), d(20,3), d(20,3)], false), false);
+  });
+});
+
+describe('isBustedMaximum', () => {
+  test('three treble 20s that busted qualifies', () => {
+    assert.equal(isBustedMaximum([d(20,3), d(20,3), d(20,3)], true), true);
+  });
+  test('three treble 20s that did NOT bust fails (that is a real 180)', () => {
+    assert.equal(isBustedMaximum([d(20,3), d(20,3), d(20,3)], false), false);
+  });
+  test('busted but not all treble 20 fails', () => {
+    assert.equal(isBustedMaximum([d(20,3), d(20,3), d(19,3)], true), false);
+  });
+});
+
+describe('isTontitledToNothing', () => {
+  test('100+ attempted that busted qualifies', () => {
+    assert.equal(isTontitledToNothing([d(20,3), d(20,2), d(1,1)], true), true); // 60+40+1=101
+  });
+  test('under 100 attempted fails even if busted', () => {
+    assert.equal(isTontitledToNothing([d(10,1), d(10,1), d(10,1)], true), false);
+  });
+  test('100+ attempted that did NOT bust fails', () => {
+    assert.equal(isTontitledToNothing([d(20,3), d(20,2), d(1,1)], false), false);
+  });
+});
+
+describe('isNoCigar', () => {
+  test('busted, double-out, darts summed to exactly the score needed', () => {
+    assert.equal(isNoCigar(true, true, 32, 32), true);
+  });
+  test('not a bust fails', () => {
+    assert.equal(isNoCigar(false, true, 32, 32), false);
+  });
+  test('single-out mode never qualifies (hitting exact remaining there is a win, not a bust)', () => {
+    assert.equal(isNoCigar(true, false, 32, 32), false);
+  });
+  test('darts summed to something other than the pre-visit remaining fails', () => {
+    assert.equal(isNoCigar(true, true, 30, 32), false);
+  });
+});
+
+describe('isTripleBullCheckout', () => {
+  test('won, three double-bulls (150 checkout) qualifies', () => {
+    assert.equal(isTripleBullCheckout(true, [d(25,2), d(25,2), d(25,2)]), true);
+  });
+  test('did not win fails', () => {
+    assert.equal(isTripleBullCheckout(false, [d(25,2), d(25,2), d(25,2)]), false);
+  });
+  test('fewer than three double-bulls fails', () => {
+    assert.equal(isTripleBullCheckout(true, [d(25,2), d(25,2), d(20,1)]), false);
+  });
+});
+
+describe('isBullseyeFinish', () => {
+  test('won, last dart the double bull, at any total, qualifies', () => {
+    assert.equal(isBullseyeFinish(true, [d(20,1), d(19,1), d(25,2)]), true);
+  });
+  test('single-dart double-bull checkout still qualifies', () => {
+    assert.equal(isBullseyeFinish(true, [d(25,2)]), true);
+  });
+  test('did not win fails', () => {
+    assert.equal(isBullseyeFinish(false, [d(20,1), d(19,1), d(25,2)]), false);
+  });
+  test('won, but last dart is not the double bull', () => {
+    assert.equal(isBullseyeFinish(true, [d(25,2), d(20,1)]), false);
+  });
+  test('no darts never qualifies', () => {
+    assert.equal(isBullseyeFinish(true, null), false);
+  });
+});
+
+describe('isBaseballCycle (docs/archive/culture-badges-roadmap.md Part B)', () => {
+  test('single, double, and treble of the inning target, in order', () => {
+    assert.equal(isBaseballCycle([d(4,1), d(4,2), d(4,3)], 4), true);
+  });
+
+  test('any order still qualifies', () => {
+    assert.equal(isBaseballCycle([d(7,3), d(7,1), d(7,2)], 7), true);
+  });
+
+  test('two singles and a treble (not a genuine Cycle) fails', () => {
+    assert.equal(isBaseballCycle([d(4,1), d(4,1), d(4,3)], 4), false);
+  });
+
+  test('S/D/T of a DIFFERENT number than the inning target does not qualify', () => {
+    assert.equal(isBaseballCycle([d(3,1), d(3,2), d(3,3)], 4), false);
+  });
+
+  test('a miss anywhere in the visit fails', () => {
+    assert.equal(isBaseballCycle([d(4,1), d(4,2), d(0,0)], 4), false);
+  });
+
+  test('fewer or more than exactly 3 darts never qualifies', () => {
+    assert.equal(isBaseballCycle([d(4,1), d(4,2)], 4), false);
+    assert.equal(isBaseballCycle([d(4,1), d(4,2), d(4,3), d(4,1)], 4), false);
+  });
+});
+
+describe('evaluateVisitBobs27 (docs/archive/practice-ladders-roadmap.md Part A)', () => {
+  const player = (running) => ({ running });
+  const game = (round) => ({ bobs27Round: round });
+
+  test('a single dart on the round\'s double adds exactly 2x the round number', () => {
+    const ev = evaluateVisitBobs27(player(27), [d(1,2)], game(1));
+    assert.equal(ev.hits, 1);
+    assert.equal(ev.gain, 2);
+    assert.equal(ev.running, 29);
+    assert.equal(ev.scored, 2);
+    assert.equal(ev.dead, false);
+  });
+
+  test('multiple darts on the double each add their own 2x — D20 hit twice adds 80', () => {
+    const ev = evaluateVisitBobs27(player(100), [d(20,2), d(20,2)], game(20));
+    assert.equal(ev.hits, 2);
+    assert.equal(ev.gain, 80);
+    assert.equal(ev.running, 180);
+  });
+
+  test('all three darts hitting the double add the maximum possible gain (Full House shape)', () => {
+    const ev = evaluateVisitBobs27(player(27), [d(5,2), d(5,2), d(5,2)], game(5));
+    assert.equal(ev.hits, 3);
+    assert.equal(ev.gain, 30, '3 darts * 2*5');
+    assert.equal(ev.running, 57);
+  });
+
+  test('all three darts missing the double SUBTRACTS the double\'s value instead of storing negative scored', () => {
+    const ev = evaluateVisitBobs27(player(27), [d(3,1), d(3,3), d(0,1)], game(3));
+    assert.equal(ev.hits, 0);
+    assert.equal(ev.gain, 0, 'scored/gain is 0, never negative -- the penalty is derived, not stored');
+    assert.equal(ev.scored, 0);
+    assert.equal(ev.running, 21, '27 - 2*3');
+  });
+
+  test('a single or treble of the round\'s OWN number does not count as a hit (only a double does)', () => {
+    const ev = evaluateVisitBobs27(player(27), [d(7,1), d(7,3), d(7,1)], game(7));
+    assert.equal(ev.hits, 0);
+    assert.equal(ev.running, 13, '27 - 2*7');
+  });
+
+  test('a double of a DIFFERENT number than the round\'s own does not count as a hit', () => {
+    const ev = evaluateVisitBobs27(player(27), [d(8,2), d(8,2), d(8,2)], game(9));
+    assert.equal(ev.hits, 0, 'D8 hits are irrelevant when the live round is D9');
+    assert.equal(ev.running, 9, '27 - 2*9');
+  });
+
+  test('dead flips true the moment running reaches exactly 0', () => {
+    const ev = evaluateVisitBobs27(player(4), [d(0,1)], game(2)); // miss D2: 4 - 2*2 = 0
+    assert.equal(ev.running, 0);
+    assert.equal(ev.dead, true, 'exactly 0 counts as dead ("drop to 0 or below")');
+  });
+
+  test('dead stays false while the running score is still positive after a miss', () => {
+    const ev = evaluateVisitBobs27(player(27), [d(0,1)], game(3)); // miss D3: 27 - 6 = 21
+    assert.equal(ev.running, 21);
+    assert.equal(ev.dead, false);
+  });
+
+  test('matchComplete is true once dead, even before round 20', () => {
+    const ev = evaluateVisitBobs27(player(4), [d(0,1)], game(2));
+    assert.equal(ev.matchComplete, true);
+  });
+
+  test('matchComplete is true at round 20 even without dying (a full survival)', () => {
+    const ev = evaluateVisitBobs27(player(1200), [d(20,2)], game(20));
+    assert.equal(ev.dead, false);
+    assert.equal(ev.matchComplete, true);
+  });
+
+  test('matchComplete is false for an ordinary surviving round before D20', () => {
+    const ev = evaluateVisitBobs27(player(27), [d(5,2)], game(5));
+    assert.equal(ev.matchComplete, false);
+  });
+
+  test('a perfect run through every round reaches exactly 1287 (27 + 3*(2+4+...+40))', () => {
+    let running = 27;
+    for (let round = 1; round <= 20; round++) {
+      const ev = evaluateVisitBobs27({ running }, [d(round,2), d(round,2), d(round,2)], { bobs27Round: round });
+      running = ev.running;
+    }
+    assert.equal(running, 1287);
+  });
+});
+
+describe('isBobs27FullHouse / isBobs27FullAnderson (docs/archive/practice-ladders-roadmap.md Part A)', () => {
+  test('Full House requires exactly 3 hits this visit', () => {
+    assert.equal(isBobs27FullHouse(3), true);
+    assert.equal(isBobs27FullHouse(2), false);
+    assert.equal(isBobs27FullHouse(0), false);
+  });
+
+  test('The Full Anderson requires the exact perfect-run total, 1287', () => {
+    assert.equal(isBobs27FullAnderson(1287), true);
+    assert.equal(isBobs27FullAnderson(1286), false);
+    assert.equal(isBobs27FullAnderson(0), false);
+  });
+});
+
+describe('rebuildBobs27State (docs/archive/saved-games-roadmap.md, pure replay rebuild)', () => {
+  test('replays a mixed hit/miss run and lands on the correct running score and next round', () => {
+    const turns = [
+      v(0,1,1,[[1,2]]),               // D1 hit: 27+2=29
+      v(0,1,1,[[2,1],[2,3],[0,1]]),   // D2 miss (single+treble+miss, no double): 29-4=25
+      v(0,1,1,[[3,2],[3,2]]),         // D3 two hits: 25+12=37
+    ];
+    const r = rebuildBobs27State({ turns });
+    assert.equal(r.running, 37);
+    assert.equal(r.round, 4, 'next round to play is D4');
+  });
+
+  test('an empty turn history starts fresh at 27, round 1', () => {
+    const r = rebuildBobs27State({ turns: [] });
+    assert.equal(r.running, 27);
+    assert.equal(r.round, 1);
+  });
+});
+
+describe('rebuildCheckoutLadderState (docs/archive/practice-ladders-roadmap.md Part B, pure replay rebuild)', () => {
+  test('an empty turn history starts fresh at target 121, attempt 1', () => {
+    const r = rebuildCheckoutLadderState({ turns: [] });
+    assert.equal(r.target, 121);
+    assert.equal(r.legNo, 1);
+    assert.equal(r.remaining, 121);
+    assert.equal(r.visitsThisLeg, 0);
+  });
+
+  test('a checkout in a single visit climbs the target one rung and starts a fresh attempt', () => {
+    // 121 = T19(57) + T20(60) + D2(4), a legal double-out finish.
+    const turns = [ v(0,1,1,[[19,3],[20,3],[2,2]]) ];
+    const r = rebuildCheckoutLadderState({ turns });
+    assert.equal(r.target, 122, 'climbed one rung after clearing 121');
+    assert.equal(r.legNo, 2, 'moved on to attempt 2');
+    assert.equal(r.remaining, 122, 'attempt 2 starts fresh from the new target');
+    assert.equal(r.visitsThisLeg, 0);
+  });
+
+  test('3 visits used without a checkout fails the attempt and drops the target one rung', () => {
+    const turns = [
+      v(0,1,1,[[20,3],[20,3],[1,1]]),  // 60+60+1=121 leaves exactly 0, but the last dart isn't a double -> bust, stays on 121
+      v(0,1,1,[[5,1]]),                // second visit: single 5, doesn't finish
+      v(0,1,1,[[7,1]]),                // third (decisive) visit: single 7, still doesn't finish -> attempt fails
+    ];
+    const r = rebuildCheckoutLadderState({ turns });
+    assert.equal(r.target, 120, 'dropped one rung after failing target 121');
+    assert.equal(r.legNo, 2);
+    assert.equal(r.remaining, 120);
+    assert.equal(r.visitsThisLeg, 0);
+  });
+
+  test('the target never drops below the 61 floor', () => {
+    // Simulate 65 consecutive failed attempts (leg_no 1..65), each burning all
+    // 3 visits on a single 1 (never finishes, never busts) — enough to walk
+    // the target from 121 all the way down past 61 if the floor didn't hold.
+    const turns = [];
+    for(let leg = 1; leg <= 65; leg++){
+      turns.push(v(0,1,leg,[[1,1]]));
+      turns.push(v(0,1,leg,[[1,1]]));
+      turns.push(v(0,1,leg,[[1,1]]));
+    }
+    const r = rebuildCheckoutLadderState({ turns });
+    assert.equal(r.target, 61, 'floored at 61, never lower');
+  });
+
+  test('a still-live attempt (fewer than 3 visits, no checkout yet) reports the in-progress remaining score and visit count', () => {
+    const turns = [
+      v(0,1,1,[[20,3]]),   // 60 scored, 61 remaining — visit 1 of 3, not resolved
+    ];
+    const r = rebuildCheckoutLadderState({ turns });
+    assert.equal(r.target, 121, 'attempt still live on the original target');
+    assert.equal(r.legNo, 1, 'still attempt 1 — not yet resolved');
+    assert.equal(r.remaining, 61);
+    assert.equal(r.visitsThisLeg, 1);
+  });
+
+  test('a bust burns the visit without ending the attempt early', () => {
+    const turns = [
+      v(0,1,1,[[20,3],[20,3],[20,3]]), // 180 scored against a 121 target -> bust, stays on 121
+    ];
+    const r = rebuildCheckoutLadderState({ turns });
+    assert.equal(r.remaining, 121, 'a bust leaves the player exactly where they started this visit');
+    assert.equal(r.visitsThisLeg, 1, 'the bust visit still counts toward the 3-visit cap');
+    assert.equal(r.legNo, 1, 'attempt not yet resolved — 2 visits remain');
+  });
+});
+
+describe('evaluateGauntletStation (docs/archive/gauntlet-roadmap.md, strictly positional per-dart grading)', () => {
+  test('a clean pass: dart 1 the single, dart 2 the treble, dart 3 the double, all on the station number', () => {
+    const r = evaluateGauntletStation(20, [d(20,1), d(20,3), d(20,2)]);
+    assert.deepEqual(r.hits, [true, true, true]);
+    assert.equal(r.misses, 0);
+  });
+
+  test('no re-matching across positions: a double thrown first does not satisfy dart 1\'s single task', () => {
+    const r = evaluateGauntletStation(20, [d(20,2), d(20,3), d(20,2)]);
+    assert.deepEqual(r.hits, [false, true, true], 'dart 1 landed the double, not the single it was asked for');
+    assert.equal(r.misses, 1);
+  });
+
+  test('a dart on the wrong number never counts, regardless of ring', () => {
+    const r = evaluateGauntletStation(20, [d(5,1), d(20,3), d(20,2)]);
+    assert.deepEqual(r.hits, [false, true, true]);
+    assert.equal(r.misses, 1);
+  });
+
+  test('all three tasks missed -> misses=3 (a Deep Scar upstream)', () => {
+    const r = evaluateGauntletStation(20, [d(1,1), d(2,1), d(3,1)]);
+    assert.equal(r.misses, 3);
+  });
+
+  test('a missing dart (attempt cut short) counts as a miss for that slot', () => {
+    const r = evaluateGauntletStation(20, [d(20,1), d(20,3)]); // no 3rd dart
+    assert.deepEqual(r.hits, [true, true, false]);
+    assert.equal(r.misses, 1);
+  });
+});
+
+describe('gauntletTotalScars / gauntletResultTier (docs/archive/gauntlet-roadmap.md Scar tally + result tiers)', () => {
+  test('sums final per-station miss counts, doubling any Deep Scar (a final result of 3)', () => {
+    assert.equal(gauntletTotalScars([0,0,0]), 0);
+    assert.equal(gauntletTotalScars([1,2,0]), 3);
+    assert.equal(gauntletTotalScars([3]), 6, 'a single Deep Scar contributes 6, not 3');
+    assert.equal(gauntletTotalScars([3,3,1]), 13, '6 + 6 + 1');
+  });
+
+  test('result tier boundaries: 0-5 Unmarked, 6-12 Scarred but Standing, 13-20 Bloodied, 21-30 Broken Down, 31+ The Gauntlet Wins', () => {
+    assert.equal(gauntletResultTier(0), 'Unmarked');
+    assert.equal(gauntletResultTier(5), 'Unmarked');
+    assert.equal(gauntletResultTier(6), 'Scarred but Standing');
+    assert.equal(gauntletResultTier(12), 'Scarred but Standing');
+    assert.equal(gauntletResultTier(13), 'Bloodied');
+    assert.equal(gauntletResultTier(20), 'Bloodied');
+    assert.equal(gauntletResultTier(21), 'Broken Down');
+    assert.equal(gauntletResultTier(30), 'Broken Down');
+    assert.equal(gauntletResultTier(31), 'The Gauntlet Wins');
+    assert.equal(gauntletResultTier(120), 'The Gauntlet Wins');
+  });
+});
+
+describe('rebuildGauntletState (docs/archive/saved-games-roadmap.md, pure replay rebuild)', () => {
+  const gt = (station, scored) => ({ targetScore: station, scored });
+
+  test('an empty turn history starts at the first station in GAUNTLET_STATION_ORDER, nothing settled', () => {
+    const r = rebuildGauntletState({ turns: [] });
+    assert.equal(r.currentStation, GAUNTLET_STATION_ORDER[0]);
+    assert.equal(r.settledCount, 0);
+    assert.equal(r.awaitingRepeat, false);
+    assert.equal(r.totalScars, 0);
+    assert.equal(r.done, false);
+  });
+
+  test('clean passes settle immediately and advance to the next station in order', () => {
+    const turns = [ gt(GAUNTLET_STATION_ORDER[0], 0), gt(GAUNTLET_STATION_ORDER[1], 1) ];
+    const r = rebuildGauntletState({ turns });
+    assert.equal(r.settledCount, 2);
+    assert.equal(r.currentStation, GAUNTLET_STATION_ORDER[2]);
+    assert.equal(r.awaitingRepeat, false);
+    assert.deepEqual(r.finalMisses, [0, 1]);
+    assert.equal(r.totalScars, 1);
+  });
+
+  test('a first attempt scoring 2 misses is NOT settled -- it awaits its one repeat, and stays the current station', () => {
+    const turns = [ gt(GAUNTLET_STATION_ORDER[0], 0), gt(GAUNTLET_STATION_ORDER[1], 2) ];
+    const r = rebuildGauntletState({ turns });
+    assert.equal(r.settledCount, 1, 'only the first station settled -- the second is awaiting repeat');
+    assert.equal(r.currentStation, GAUNTLET_STATION_ORDER[1]);
+    assert.equal(r.awaitingRepeat, true);
+  });
+
+  test('a repeat attempt (a 2nd turn for the same station) is authoritative regardless of its own result', () => {
+    const turns = [
+      gt(GAUNTLET_STATION_ORDER[0], 2), gt(GAUNTLET_STATION_ORDER[0], 3), // repeated, came back WORSE (3) -- still final
+      gt(GAUNTLET_STATION_ORDER[1], 2), gt(GAUNTLET_STATION_ORDER[1], 0), // repeated, came back clean
+    ];
+    const r = rebuildGauntletState({ turns });
+    assert.equal(r.settledCount, 2);
+    assert.deepEqual(r.finalMisses, [3, 0]);
+    assert.equal(r.awaitingRepeat, false);
+    assert.equal(r.currentStation, GAUNTLET_STATION_ORDER[2]);
+  });
+
+  test('a 3-miss (Deep Scar) first attempt settles immediately, no repeat offered', () => {
+    const turns = [ gt(GAUNTLET_STATION_ORDER[0], 3) ];
+    const r = rebuildGauntletState({ turns });
+    assert.equal(r.settledCount, 1);
+    assert.deepEqual(r.finalMisses, [3]);
+    assert.equal(r.currentStation, GAUNTLET_STATION_ORDER[1]);
+  });
+
+  test('all 20 stations settled -> done=true, no current station to report as "next"', () => {
+    const turns = GAUNTLET_STATION_ORDER.map(station => gt(station, 0));
+    const r = rebuildGauntletState({ turns });
+    assert.equal(r.settledCount, 20);
+    assert.equal(r.done, true);
+    assert.equal(r.totalScars, 0);
+    assert.equal(r.currentStation, undefined);
+  });
+});
+
+describe('assignKillerNumbers / shuffleKillerNumbers (docs/game-modes-roadmap.md "Killer")', () => {
+  test('shuffleKillerNumbers returns a permutation of the input (same multiset), deterministic given a fixed rng', () => {
+    let calls = 0;
+    const fixedRng = () => { calls++; return 0; };
+    const shuffled = shuffleKillerNumbers([1,2,3,4,5], fixedRng);
+    assert.deepEqual([...shuffled].sort((a,b)=>a-b), [1,2,3,4,5], 'same multiset, just reordered');
+    assert.equal(calls, 4, 'Fisher-Yates makes n-1 rng calls for n items');
+  });
+
+  test('assignKillerNumbers gives every player a distinct number from 1-20', () => {
+    const names = ['Alice','Bob','Carol','Dave'];
+    const assignment = assignKillerNumbers(names);
+    const values = names.map(n => assignment[n]);
+    assert.equal(new Set(values).size, names.length, 'no two players share a number');
+    values.forEach(v => assert.ok(v >= 1 && v <= 20, `number ${v} out of 1-20 range`));
+  });
+
+  test('assignKillerNumbers is reproducible given the same seeded rng sequence', () => {
+    const seq = [0.1, 0.2, 0.3];
+    let i = 0;
+    const rng = () => seq[i++ % seq.length];
+    const a = assignKillerNumbers(['A','B','C'], rng);
+    i = 0;
+    const b = assignKillerNumbers(['A','B','C'], rng);
+    assert.deepEqual(a, b);
+  });
+});
+
+describe('evaluateDartKiller (docs/game-modes-roadmap.md "Killer")', () => {
+  const mkPlayers = (overrides) => {
+    const base = [
+      { name:'A', number:5,  lives:0, isKiller:false, eliminated:false },
+      { name:'B', number:9,  lives:0, isKiller:false, eliminated:false },
+      { name:'C', number:14, lives:0, isKiller:false, eliminated:false },
+    ];
+    return base.map(p => Object.assign({}, p, overrides && overrides[p.name]));
+  };
+
+  test('pre-killer, hitting your own number builds lives scaled by ring (single=1, double=2, treble=3)', () => {
+    const players = mkPlayers();
+    assert.deepEqual(evaluateDartKiller(d(5,1), 'A', players), { affectedName:'A', delta:1, isGain:true, selfKill:false });
+    assert.equal(evaluateDartKiller(d(5,3), 'A', players).delta, 3);
+  });
+
+  test('pre-killer, hitting an opponent\'s number is a no-op — can\'t attack until you\'re a killer', () => {
+    const players = mkPlayers();
+    assert.equal(evaluateDartKiller(d(9,2), 'A', players), null);
+  });
+
+  test('a miss or an unclaimed number is a no-op', () => {
+    const players = mkPlayers();
+    assert.equal(evaluateDartKiller(d(0,1), 'A', players), null);
+    assert.equal(evaluateDartKiller(d(20,1), 'A', players), null); // 20 is unassigned in this fixture
+  });
+
+  test('once a killer, hitting an opponent\'s number removes lives at the same scaled rate', () => {
+    const players = mkPlayers({ A: { isKiller:true, lives:3 } });
+    assert.deepEqual(evaluateDartKiller(d(9,3), 'A', players), { affectedName:'B', delta:3, isGain:false, selfKill:false });
+  });
+
+  test('once a killer, hitting your own DOUBLE costs a flat 1 life (self-kill), never scaled by multiplier', () => {
+    const players = mkPlayers({ A: { isKiller:true, lives:3 } });
+    assert.deepEqual(evaluateDartKiller(d(5,2), 'A', players), { affectedName:'A', delta:1, isGain:false, selfKill:true });
+  });
+
+  test('once a killer, a single or treble on your own number again is a no-op', () => {
+    const players = mkPlayers({ A: { isKiller:true, lives:3 } });
+    assert.equal(evaluateDartKiller(d(5,1), 'A', players), null);
+    assert.equal(evaluateDartKiller(d(5,3), 'A', players), null);
+  });
+
+  test('hitting an already-eliminated player\'s number is a no-op, even for a killer', () => {
+    const players = mkPlayers({ A: { isKiller:true, lives:3 }, B: { eliminated:true, lives:0 } });
+    assert.equal(evaluateDartKiller(d(9,1), 'A', players), null);
+  });
+});
+
+describe('rebuildKillerState (docs/game-modes-roadmap.md "Killer", pure replay)', () => {
+  const kt = (throwerName, sector, mult) => ({ throwerName, sector, mult });
+
+  test('an empty turn history: everyone at 0 lives, nobody a killer, no winner', () => {
+    const r = rebuildKillerState({ participants:[{id:1,name:'A'},{id:2,name:'B'}], numbers:{1:5,2:9}, turns:[] });
+    assert.equal(r.winner, null);
+    assert.deepEqual(r.players.map(p=>p.lives), [0,0]);
+    assert.deepEqual(r.players.map(p=>p.isKiller), [false,false]);
+  });
+
+  test('a treble on the first dart makes a player an instant killer (3 >= default threshold)', () => {
+    const r = rebuildKillerState({ participants:[{id:1,name:'A'},{id:2,name:'B'}], numbers:{1:5,2:9}, turns:[ kt('A',5,3) ] });
+    const a = r.players.find(p=>p.name==='A');
+    assert.equal(a.lives, 3);
+    assert.equal(a.isKiller, true);
+  });
+
+  test('a killer attacking an opponent down to exactly 0 lives eliminates them and ends a 2-player match', () => {
+    const turns = [
+      kt('A',5,3),   // A: treble own number -> 3 lives, killer
+      kt('B',9,1),   // B: single own number -> 1 life (not yet a killer)
+      kt('A',9,1),   // A attacks B for 1 -> B: 1-1=0 -> eliminated -> A is last one standing
+    ];
+    const r = rebuildKillerState({ participants:[{id:1,name:'A'},{id:2,name:'B'}], numbers:{1:5,2:9}, turns });
+    assert.equal(r.winner, 'A');
+    const b = r.players.find(p=>p.name==='B');
+    assert.equal(b.lives, 0);
+    assert.equal(b.eliminated, true);
+    assert.equal(b.livesLost, 1);
+    const a = r.players.find(p=>p.name==='A');
+    assert.equal(a.kills, 1, "A's attack eliminated B -- a real kill");
+  });
+
+  test('a self-kill (own double after becoming a killer) can eliminate the thrower themselves, and does NOT count as a kill for anyone', () => {
+    const turns = [
+      kt('A',5,3),   // A: treble own -> 3 lives, killer
+      kt('B',9,3),   // B: treble own -> 3 lives, killer (so it isn't already over)
+      kt('B',5,2),   // B attacks A's number for 2 -> A: 3-2=1 life, still a killer
+      kt('A',5,2),   // A hits own double (already a killer) -> self-kill, -1 -> A: 1-1=0, eliminated
+    ];
+    const r = rebuildKillerState({ participants:[{id:1,name:'A'},{id:2,name:'B'}], numbers:{1:5,2:9}, turns });
+    const a = r.players.find(p=>p.name==='A');
+    assert.equal(a.lives, 0);
+    assert.equal(a.eliminated, true);
+    assert.equal(a.livesLost, 3, "A lost 2 to B's attack + 1 to the self-kill = 3 total");
+    assert.equal(a.kills, 0, "A never eliminated anyone -- the self-kill doesn't count as B's kill either");
+    const b = r.players.find(p=>p.name==='B');
+    assert.equal(b.kills, 0, "B's own attack only brought A to 1 life, not 0 -- B never actually landed the elimination");
+    assert.equal(r.winner, 'B');
+  });
+
+  test('threshold is configurable — a lower lives threshold makes killer status kick in sooner', () => {
+    const turns = [ kt('A',5,2) ]; // double own number -> 2 lives
+    const withDefault = rebuildKillerState({ participants:[{id:1,name:'A'},{id:2,name:'B'}], numbers:{1:5,2:9}, turns });
+    assert.equal(withDefault.players.find(p=>p.name==='A').isKiller, false, 'default threshold is 3 -- 2 lives isn\'t enough yet');
+    const withThreshold2 = rebuildKillerState({ participants:[{id:1,name:'A'},{id:2,name:'B'}], numbers:{1:5,2:9}, turns, threshold:2 });
+    assert.equal(withThreshold2.players.find(p=>p.name==='A').isKiller, true);
+  });
+
+  test('a turn thrown by an already-eliminated player is ignored (defensive replay)', () => {
+    const turns = [
+      kt('A',5,3),  // A killer, 3 lives
+      kt('B',9,3),  // B killer, 3 lives
+      kt('B',5,3),  // B attacks A for 3 -> A eliminated, B wins
+      kt('A',9,1),  // A (already eliminated) somehow throws again -- must be a no-op
+    ];
+    const r = rebuildKillerState({ participants:[{id:1,name:'A'},{id:2,name:'B'}], numbers:{1:5,2:9}, turns });
+    assert.equal(r.winner, 'B');
+    const b = r.players.find(p=>p.name==='B');
+    assert.equal(b.lives, 3, "the eliminated player's bogus extra turn had no effect");
+  });
+});
+
 describe('isCricketWhitewash (Cricket-native badge, docs/game-modes-roadmap.md "New Cricket-native badges")', () => {
   test('true when every number is still open (0 marks each)', () => {
     assert.equal(isCricketWhitewash({ 15:0, 16:0, 17:0, 18:0, 19:0, 20:0, 25:0 }), true);
@@ -901,5 +1907,1290 @@ describe('cricketComebackAchieved (Cricket-native Comeback Kid, docs/game-modes-
   test('a missing/undefined deficit is treated as zero, not a crash', () => {
     assert.equal(cricketComebackAchieved(undefined), false);
     assert.equal(cricketComebackAchieved(null), false);
+  });
+});
+
+describe('rebuildX01State (docs/archive/saved-games-roadmap.md, pure replay rebuild)', () => {
+  test('mid-game across a leg boundary: scores, legsWon/setsWon, rotation, and current thrower all match hand-derived state', () => {
+    const turns = [
+      v(0,1,1,[[20,3],[20,3],[20,3]]),   // Ben: 180 -> 321
+      v(1,1,1,[[20,3],[20,3],[20,3]]),   // Alaina: 180 -> 321
+      v(0,1,1,[[20,3],[20,3],[20,3]]),   // Ben: 180 -> 141
+      v(1,1,1,[[20,3],[20,3],[20,3]]),   // Alaina: 180 -> 141
+      v(0,1,1,[[20,3],[19,3],[12,2]]),   // Ben: 60+57+24=141 -> 0, double-out WIN (leg1=set1, legsPerSet 1)
+      v(1,2,1,[[20,1]]),                 // Alaina (new set, starter rotates to her): 501-20=481
+      v(0,2,1,[[5,1]]),                  // Ben: 501-5=496 (mid-leg -- this is the "saved" point)
+    ];
+    const r = rebuildX01State({ names:['Ben','Alaina'], outModes:['double','double'], startScore:501, practice:false, legsPerSet:1, turns });
+    assert.equal(r.setNo, 2);
+    assert.equal(r.legNo, 1);
+    assert.equal(r.starter, 1, 'starter rotates by exactly one leg transition, like startNextLeg()');
+    assert.equal(r.current, 1, "Alaina's turn next -- Ben's last visit didn't win");
+    const [ben, alaina] = r.players;
+    assert.equal(ben.score, 496);
+    assert.equal(ben.legsWon, 0, 'reset when the new set began');
+    assert.equal(ben.setsWon, 1);
+    assert.equal(ben.legDarts, 1, 'only this new leg\'s own turn counts');
+    assert.equal(ben.gameDarts, 10, '3+3+3+1 across the whole match');
+    assert.equal(ben.gamePoints, 506, '180+180+141+5');
+    assert.equal(ben.gameVisits, 4);
+    assert.equal(alaina.score, 481);
+    assert.equal(alaina.legsWon, 0);
+    assert.equal(alaina.setsWon, 0);
+    assert.equal(alaina.legDarts, 1);
+    assert.equal(alaina.gameDarts, 7, '3+3+1');
+    assert.equal(alaina.gamePoints, 380, '180+180+20');
+  });
+
+  test("a trailing leg win with no next-leg turn recorded yet lands on the next leg's first throw, not the leg-complete screen", () => {
+    // Saved on the "leg won -- Next leg?" screen, before that button was ever
+    // tapped -- the same turn history as the previous test's first 5 turns,
+    // stopping right at the win instead of continuing into leg 2.
+    const turns = [
+      v(0,1,1,[[20,3],[20,3],[20,3]]),   // Ben: 180 -> 321
+      v(1,1,1,[[20,3],[20,3],[20,3]]),   // Alaina: 180 -> 321
+      v(0,1,1,[[20,3],[20,3],[20,3]]),   // Ben: 180 -> 141
+      v(1,1,1,[[20,3],[20,3],[20,3]]),   // Alaina: 180 -> 141
+      v(0,1,1,[[20,3],[19,3],[12,2]]),   // Ben: 141 -> 0, double-out WIN (leg1=set1, legsPerSet 1)
+    ];
+    const r = rebuildX01State({ names:['Ben','Alaina'], outModes:['double','double'], startScore:501, practice:false, legsPerSet:1, turns });
+    assert.equal(r.setNo, 2, 'auto-advanced one set past the win, same as tapping Next Set would have');
+    assert.equal(r.legNo, 1);
+    assert.equal(r.starter, 1);
+    assert.equal(r.current, 1);
+    const [ben, alaina] = r.players;
+    assert.equal(ben.score, 501, 'fresh leg -- back to the starting score');
+    assert.equal(ben.legsWon, 0);
+    assert.equal(ben.setsWon, 1);
+    assert.equal(ben.legDarts, 0, 'no turns recorded in the not-yet-started leg 2');
+    assert.equal(ben.setDarts, 0, 'a new SET too -- setDarts resets, not just legDarts');
+    assert.equal(ben.gameDarts, 9, '3+3+3 from the leg actually played');
+    assert.equal(ben.gamePoints, 501, '180+180+141');
+    assert.equal(alaina.score, 501);
+    assert.equal(alaina.legsWon, 0);
+    assert.equal(alaina.setsWon, 0);
+    assert.equal(alaina.gameDarts, 6);
+    assert.equal(alaina.gamePoints, 360, '180+180');
+  });
+
+  test('a practice game never advances legsWon into a set win (matches onLegWon()\'s !practice gate)', () => {
+    const turns = [
+      v(0,1,1,[[20,3],[20,3],[20,3]]),   // Ben: 180 -> 321
+      v(1,1,1,[[1,1]]),                  // Alaina: a filler visit, 501-1=500
+      v(0,1,1,[[20,3],[20,3],[20,3]]),   // Ben: 180 -> 141
+      v(1,1,1,[[1,1]]),
+      v(0,1,1,[[20,3],[19,3],[12,2]]),   // Ben wins the leg
+    ];
+    const r = rebuildX01State({ names:['Ben','Alaina'], outModes:['double','double'], startScore:501, practice:true, legsPerSet:1, turns });
+    // practice=true -> setsGateOpen=false -> legsWon increments but never
+    // triggers a set win, so there's no "new set" transition to auto-advance
+    // into -- the trailing-win branch still fires (pendingNewLeg), just
+    // without a set boundary.
+    assert.equal(r.setNo, 1, 'practice never completes a set');
+    assert.equal(r.legNo, 2, 'still auto-advances to the next leg, just not a new set');
+    assert.equal(r.players[0].legsWon, 1, 'never reset -- no set win occurred to zero it');
+    assert.equal(r.players[0].setsWon, 0);
+  });
+});
+
+describe('rebuildCricketState (docs/archive/saved-games-roadmap.md, pure replay rebuild)', () => {
+  test('mid-game across a leg boundary: marks/points, legsWon/setsWon, rotation all match hand-derived state', () => {
+    const turns = [
+      v(0,1,1,[[20,3],[19,3],[18,3]]),   // Cat closes 20,19,18 exactly (0 points -- no bonus marks)
+      v(1,1,1,[[20,3],[19,3],[18,3]]),   // Dog closes the same 3
+      v(0,1,1,[[17,3],[16,3],[15,3]]),   // Cat closes 17,16,15 too (6 of 7 -- everything but bull)
+      v(1,1,1,[[17,3],[16,3],[15,3]]),   // Dog closes the same 6
+      v(0,1,1,[[25,2],[25,2],[25,1]]),   // Cat: double-bull, double-bull, single-bull -- 2 bonus marks on bull once closed, Dog's bull still open -> 2*25=50 points, closes bull -> allClosed -> Cat WINS (50 > 0)
+      v(1,2,1,[[20,1]]),                 // Dog (new set, starter rotates to him): single 20 -> 1 mark, 0 points
+      v(0,2,1,[[19,1]]),                 // Cat: single 19 -> 1 mark, 0 points (mid-leg -- the "saved" point)
+    ];
+    const r = rebuildCricketState({ names:['Cat','Dog'], config:{ numbers:CRICKET_STANDARD_NUMBERS }, practice:false, legsPerSet:1, turns });
+    assert.equal(r.setNo, 2);
+    assert.equal(r.legNo, 1);
+    assert.equal(r.starter, 1);
+    assert.equal(r.current, 1);
+    const [cat, dog] = r.players;
+    assert.equal(cat.points, 0, 'reset for the new leg');
+    assert.equal(cat.marks[19], 1);
+    assert.equal(cat.marks[20], 0, 'reset for the new leg');
+    assert.equal(cat.legsWon, 0);
+    assert.equal(cat.setsWon, 1);
+    assert.equal(cat.legDarts, 1, "only this new leg's own turn");
+    assert.equal(cat.gameDarts, 10, '3+3+3+1 across the whole match');
+    assert.equal(dog.points, 0);
+    assert.equal(dog.marks[20], 1);
+    assert.equal(dog.legsWon, 0);
+    assert.equal(dog.setsWon, 0);
+    assert.equal(dog.gameDarts, 7, '3+3+1');
+  });
+
+  test('cutthroat variant (docs/archive/cutthroat-cricket-roadmap.md): opponentGains apply to EVERY opponent across the replay, not just the first', () => {
+    const turns = [
+      // A: closes 20 (0->3, 0 pts), then 3->6 (3 beyond * 20 = 60) -- both B and
+      // C have 20 open, so cutthroat puts the full 60 on EACH of them, not a split.
+      v(0,1,1,[[20,3],[20,3]]),
+      v(1,1,1,[[0,1]]), // B: a no-op miss, just to advance the turn
+    ];
+    const r = rebuildCricketState({ names:['A','B','C'], config:{ numbers:CRICKET_STANDARD_NUMBERS, variant:'cutthroat' }, practice:false, legsPerSet:1, turns });
+    const [a, b, c] = r.players;
+    assert.equal(a.points, 0, "the shooter's own points never move in cutthroat, even across a multi-turn replay");
+    assert.equal(a.marks[20], 6);
+    assert.equal(b.points, 60, 'B received the full 60, not a split');
+    assert.equal(c.points, 60, 'C ALSO received the full 60 -- the same visit hit every open opponent');
+    assert.equal(r.current, 2, "C's turn next");
+  });
+});
+
+describe('rebuildBaseballState (docs/archive/saved-games-roadmap.md, pure replay rebuild)', () => {
+  test('a full leg win (9 real innings) plus a trailing partial next-leg turn matches hand-derived state', () => {
+    const turns = [];
+    for(let inning=1; inning<=8; inning++){
+      turns.push(v(0,1,1,[[0,1],[0,1],[0,1]])); // Ann misses all 3
+      turns.push(v(1,1,1,[[0,1],[0,1],[0,1]])); // Bob misses all 3
+    }
+    turns.push(v(0,1,1,[[9,1],[9,1],[9,1]]));   // inning 9: Ann scores 3 (target=9)
+    turns.push(v(1,1,1,[[0,1],[0,1],[0,1]]));   // inning 9: Bob scores 0 -> Ann wins the leg (3 > 0)
+    // Leg 2, inning 1: Bob throws first — he's the rotated starter, exactly the
+    // order live play produces (startNextLeg() rotates game.starter each leg;
+    // roundComplete is starter-RELATIVE, so the leg's last thrower is the player
+    // just before the starter, not index n-1).
+    turns.push(v(1,2,1,[[1,1]]));
+    const r = rebuildBaseballState({ names:['Ann','Bob'], legsPerSet:1, turns });
+    assert.equal(r.setNo, 2);
+    assert.equal(r.legNo, 1);
+    assert.equal(r.starter, 1, 'rotated from 0');
+    assert.equal(r.baseballInning, 1, "fresh leg, and Bob's opening visit doesn't complete the round -- Ann (the player before the rotated starter) hasn't thrown inning 1 yet");
+    const [ann, bob] = r.players;
+    assert.equal(bob.totalRuns, 1, "this leg's own single run so far (sector 1 = inning 1's target)");
+    assert.equal(ann.totalRuns, 0);
+    assert.equal(ann.legsWon, 0, 'reset -- the set completed');
+    assert.equal(ann.setsWon, 1);
+    assert.equal(ann.gameDarts, 27, '8 miss-innings*3 + inning9(3) = 24+3, no leg2 turn yet');
+    assert.equal(bob.legsWon, 0);
+    assert.equal(bob.setsWon, 0);
+    assert.equal(bob.gameDarts, 28, '24+3 + leg2(1)');
+    // current: Bob's leg2 opening visit didn't complete the round, so it's
+    // Ann's turn next.
+    assert.equal(r.current, 0);
+  });
+});
+
+describe('rebuildAroundTheClockState (docs/archive/saved-games-roadmap.md, pure replay rebuild)', () => {
+  test('rebuilds the CURRENT round\'s hitSet only, not earlier completed rounds', () => {
+    const turns = [
+      v(0,1,1,[[1,1]]),   // round 1: hit 1
+      v(0,1,1,[[2,1]]),   // round 1: hit 2 (round then abandoned/completed some other way in this fixture)
+      v(0,1,2,[[5,1]]),   // round 2 (new leg): hit 5
+      v(0,1,2,[[5,1]]),   // round 2: repeat hit on 5 -- a real dart, but not a NEW hit
+    ];
+    const r = rebuildAroundTheClockState({ turns });
+    assert.equal(r.legNo, 2);
+    assert.equal(r.roundDarts, 2, 'only round 2\'s own 2 darts, not round 1\'s');
+    assert.equal(r.hitSet.size, 1);
+    assert.ok(r.hitSet.has(5));
+    assert.ok(!r.hitSet.has(1), "round 1's hits don't carry over");
+    assert.equal(r.roundOver, false);
+  });
+
+  test('roundOver is true once all 20 numbers are hit', () => {
+    const turns = [];
+    for(let n=1;n<=20;n++) turns.push(v(0,1,1,[[n,1]]));
+    const r = rebuildAroundTheClockState({ turns });
+    assert.equal(r.hitSet.size, 20);
+    assert.equal(r.roundOver, true);
+  });
+
+  // 2026-07 "one clock = one game" redesign: completing the clock now ends the
+  // whole game (finishUnit('game', ...)) instead of offering another round in
+  // the same session, and the CLOCK COMPLETE stats screen (both the in-app
+  // GAME OVER card and the live scoreboard's summary()) needs an accurate
+  // treble/double/miss tally alongside the existing dart count — resume must
+  // reconstruct all three the same way it already reconstructs roundDarts.
+  test('tallies trebles, doubles, and misses alongside darts, regardless of whether they helped the clock', () => {
+    const turns = [
+      v(0,1,1,[[1,1]]),   // single hit -- counts as a dart, not a treble/double/miss
+      v(0,1,1,[[5,3]]),   // treble -- real dart thrown, never advances the clock
+      v(0,1,1,[[5,2]]),   // double -- same
+      v(0,1,1,[[0,1]]),   // miss
+      v(0,1,1,[[25,1]]),  // bull single -- not 1-20, so not a clock hit, and not a treble/double/miss either
+    ];
+    const r = rebuildAroundTheClockState({ turns });
+    assert.equal(r.roundDarts, 5, 'every dart thrown counts, whether or not it advanced the clock');
+    assert.equal(r.roundTrebles, 1);
+    assert.equal(r.roundDoubles, 1);
+    assert.equal(r.roundMisses, 1);
+    assert.equal(r.hitSet.size, 1, 'only the single on 1 actually advanced the clock');
+  });
+
+  test('trebles/doubles/misses reset on a legNo transition, same as roundDarts', () => {
+    const turns = [
+      v(0,1,1,[[5,3]]),   // round 1: a treble
+      v(0,1,1,[[0,1]]),   // round 1: a miss
+      v(0,1,2,[[7,2]]),   // round 2 (new leg): a double
+    ];
+    const r = rebuildAroundTheClockState({ turns });
+    assert.equal(r.legNo, 2);
+    assert.equal(r.roundDarts, 1, "only round 2's own dart");
+    assert.equal(r.roundTrebles, 0, "round 1's treble doesn't carry over");
+    assert.equal(r.roundDoubles, 1);
+    assert.equal(r.roundMisses, 0, "round 1's miss doesn't carry over");
+  });
+});
+
+describe('rebuildAroundTheWorldState (docs/archive/saved-games-roadmap.md, pure replay rebuild)', () => {
+  test('restores the session dart count -- the one cosmetic figure worth resuming for a lifetime-cumulative mode', () => {
+    const turns = [v(0,1,1,[[1,1]]), v(0,1,1,[[2,2]]), v(0,1,1,[[3,3]])];
+    const r = rebuildAroundTheWorldState({ turns });
+    assert.equal(r.sessionDarts, 3);
+  });
+});
+
+describe('computeFatigueSplit (docs/archive/marathon-mode-roadmap.md)', () => {
+  test('splits an odd leg count with the floor half first, per the roadmap doc', () => {
+    // 5 legs: floor(5/2)=2 in the first half, 3 in the second.
+    const r = computeFatigueSplit([10, 10, 20, 20, 20]);
+    // first avg = 10, second avg = (20+20+20)/3 = 20 -> split = 10
+    assert.equal(r.split, 10);
+    assert.equal(r.tier, 'Running on Empty');
+  });
+
+  test('a session that got FASTER in the second half clamps to zero, not negative', () => {
+    const r = computeFatigueSplit([20, 20, 10, 10]);
+    assert.equal(r.split, 0);
+    assert.equal(r.tier, 'Iron');
+  });
+
+  test('tier boundaries: 0-2 Iron, 3-5 Tested, 6-9 Fading, 10+ Running on Empty', () => {
+    assert.equal(computeFatigueSplit([10, 12]).tier, 'Iron');   // split=2
+    assert.equal(computeFatigueSplit([10, 14]).tier, 'Tested'); // split=4
+    assert.equal(computeFatigueSplit([10, 18]).tier, 'Fading'); // split=8
+    assert.equal(computeFatigueSplit([10, 20]).tier, 'Running on Empty'); // split=10
+  });
+
+  test('a 0- or 1-leg session has no second half to compare -- unmeasurable, not "perfectly flat"', () => {
+    // null (not a sentinel 0) so consumers (PBs, averages, the Iron badge)
+    // naturally skip it — a 1-leg quit must never record the unbeatable minimum.
+    assert.equal(computeFatigueSplit([]).split, null);
+    assert.equal(computeFatigueSplit([]).tier, null);
+    assert.equal(computeFatigueSplit([15]).split, null);
+    assert.equal(computeFatigueSplit([15]).tier, null);
+  });
+});
+
+describe('classifyMarathonTrend (docs/archive/marathon-mode-roadmap.md)', () => {
+  test('fewer than MARATHON_TREND_MIN_LEGS legs is always Inconclusive', () => {
+    const legs = Array(MARATHON_TREND_MIN_LEGS - 1).fill(9);
+    assert.equal(classifyMarathonTrend(legs), 'Inconclusive');
+  });
+
+  test('a clear Cliff: early and middle roughly equal, late meaningfully worse', () => {
+    // 9 legs -> 3/3/3 segments. early=9, middle=9, late=20.
+    const legs = [9, 9, 9, 9, 9, 9, 20, 20, 20];
+    assert.equal(classifyMarathonTrend(legs), 'The Cliff');
+  });
+
+  test('a clear Warm Machine: early worse than middle, late holds at middle\'s level', () => {
+    const legs = [20, 20, 20, 9, 9, 9, 9, 9, 9];
+    assert.equal(classifyMarathonTrend(legs), 'The Warm Machine');
+  });
+
+  test('a clear Flat Line: all three segments within tolerance of each other', () => {
+    const legs = [9, 10, 9, 10, 9, 10, 9, 10, 9];
+    assert.equal(classifyMarathonTrend(legs), 'Flat Line');
+  });
+
+  test('a shape matching no named pattern (steady gradual climb) is Inconclusive, not forced into one', () => {
+    const legs = [8, 10, 12, 14, 16, 18, 20, 22, 24];
+    assert.equal(classifyMarathonTrend(legs), 'Inconclusive');
+  });
+});
+
+describe('shanghaiRoundTarget (docs/archive/shanghai-roadmap.md)', () => {
+  test('within range returns the round itself; beyond maxRounds caps at maxRounds (extra rounds)', () => {
+    assert.equal(shanghaiRoundTarget(3, 7), 3);
+    assert.equal(shanghaiRoundTarget(7, 7), 7);
+    assert.equal(shanghaiRoundTarget(8, 7), 7);
+    assert.equal(shanghaiRoundTarget(20, 7), 7);
+  });
+});
+
+describe('isShanghaiWin (docs/archive/shanghai-roadmap.md)', () => {
+  test('single, double, and treble of the target, any order, IS a Shanghai', () => {
+    assert.equal(isShanghaiWin([{sector:5,mult:1},{sector:5,mult:2},{sector:5,mult:3}], 5), true);
+    assert.equal(isShanghaiWin([{sector:5,mult:3},{sector:5,mult:1},{sector:5,mult:2}], 5), true);
+  });
+  test('two singles and a treble is NOT a Shanghai (missing the double)', () => {
+    assert.equal(isShanghaiWin([{sector:5,mult:1},{sector:5,mult:1},{sector:5,mult:3}], 5), false);
+  });
+  test('any dart off the target number breaks it, even if the multiplier set is right', () => {
+    assert.equal(isShanghaiWin([{sector:5,mult:1},{sector:5,mult:2},{sector:6,mult:3}], 5), false);
+  });
+  test('fewer than 3 darts is never a Shanghai', () => {
+    assert.equal(isShanghaiWin([{sector:5,mult:1},{sector:5,mult:2}], 5), false);
+  });
+});
+
+describe('evaluateVisitShanghai (docs/archive/shanghai-roadmap.md)', () => {
+  function mkGame(round, current, players, maxRounds){
+    return { shanghaiRound: round, current, players, config: { rounds: maxRounds || 7 } };
+  }
+  test('scores multiplier x round-number for darts on target, zero for darts off it', () => {
+    const player = { totalPoints: 0, roundPoints: {} };
+    const game = mkGame(4, 0, [player, { totalPoints: 0 }]);
+    const ev = evaluateVisitShanghai(player, [{sector:4,mult:1},{sector:4,mult:3},{sector:9,mult:2}], game);
+    // single 4 = 4, treble 4 = 12, sector 9 (off-target) = 0 -> 16 total
+    assert.equal(ev.pointsThisVisit, 16);
+    assert.equal(ev.scored, 16);
+    assert.equal(ev.target, 4);
+    assert.equal(ev.shanghai, false);
+  });
+
+  test('a Shanghai wins the WHOLE match instantly, mid-round, regardless of running totals', () => {
+    const p0 = { totalPoints: 0, roundPoints: {} };
+    const p1 = { totalPoints: 500, roundPoints: {} }; // far ahead on points
+    const game = mkGame(3, 0, [p0, p1]); // p0 throws first, round not complete yet
+    const ev = evaluateVisitShanghai(p0, [{sector:3,mult:1},{sector:3,mult:2},{sector:3,mult:3}], game);
+    assert.equal(ev.shanghai, true);
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 0, 'the Shanghai thrower wins regardless of who is ahead on points');
+  });
+
+  test('final round, single leader: match completes for the leader', () => {
+    const p0 = { totalPoints: 10, roundPoints: {} };
+    const p1 = { totalPoints: 20, roundPoints: {} };
+    // p1 (index 1) is the last player in the rotation -- roundComplete=true
+    const game = mkGame(7, 1, [p0, p1], 7);
+    const ev = evaluateVisitShanghai(p1, [{sector:0,mult:1}], game); // miss, p1 stays at 20
+    assert.equal(ev.roundComplete, true);
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 1);
+  });
+
+  test('final round tie, no Shanghai: match does not complete', () => {
+    const p0 = { totalPoints: 20, roundPoints: {} };
+    const p1 = { totalPoints: 20, roundPoints: {} };
+    const game = mkGame(7, 1, [p0, p1], 7);
+    const ev = evaluateVisitShanghai(p1, [{sector:0,mult:1}], game); // miss, stays tied 20-20
+    assert.equal(ev.roundComplete, true);
+    assert.equal(ev.matchComplete, false, 'a tie with no Shanghai continues into an extra round');
+  });
+
+  test('not the final round: match never completes even with a big lead', () => {
+    const p0 = { totalPoints: 100, roundPoints: {} };
+    const p1 = { totalPoints: 5, roundPoints: {} };
+    const game = mkGame(3, 1, [p0, p1], 7);
+    const ev = evaluateVisitShanghai(p1, [{sector:0,mult:1}], game);
+    assert.equal(ev.matchComplete, false);
+  });
+
+  test('extra rounds keep targeting maxRounds, not cycling back to 1', () => {
+    const player = { totalPoints: 0, roundPoints: {} };
+    const game = mkGame(9, 0, [player, {totalPoints:0}], 7); // round 9 > maxRounds 7
+    const ev = evaluateVisitShanghai(player, [{sector:7,mult:1}], game);
+    assert.equal(ev.target, 7, 'extra rounds repeat the final round\'s own number, matching Baseball');
+  });
+});
+
+describe('halveItRoundTarget (docs/archive/halve-it-roadmap.md)', () => {
+  test('within range returns the target at that index; beyond the list caps at the final target', () => {
+    const targets = HALVE_IT_DEFAULT_TARGETS;
+    assert.deepEqual(halveItRoundTarget(1, targets), { sector: 20 });
+    assert.deepEqual(halveItRoundTarget(7, targets), { sector: 25 });
+    assert.deepEqual(halveItRoundTarget(8, targets), { sector: 25 }, 'extra rounds repeat the final target');
+    assert.deepEqual(halveItRoundTarget(20, targets), { sector: 25 });
+  });
+  test('an empty/missing targets list falls back to the default set', () => {
+    assert.deepEqual(halveItRoundTarget(1, null), { sector: 20 });
+    assert.deepEqual(halveItRoundTarget(1, []), { sector: 20 });
+  });
+});
+
+describe('halveItDartValue (docs/archive/halve-it-roadmap.md)', () => {
+  test('an unrestricted target counts any ring at face value', () => {
+    const target = { sector: 20 };
+    assert.equal(halveItDartValue({ sector: 20, mult: 1 }, target), 20, 'single');
+    assert.equal(halveItDartValue({ sector: 20, mult: 2 }, target), 40, 'double');
+    assert.equal(halveItDartValue({ sector: 20, mult: 3 }, target), 60, 'treble');
+  });
+  test('a wrong sector scores 0 regardless of ring', () => {
+    assert.equal(halveItDartValue({ sector: 5, mult: 3 }, { sector: 20 }), 0);
+  });
+  test('a ring-restricted target rejects the right sector on the wrong ring', () => {
+    const target = { sector: 7, ring: 'double' };
+    assert.equal(halveItDartValue({ sector: 7, mult: 2 }, target), 14, 'the required ring counts');
+    assert.equal(halveItDartValue({ sector: 7, mult: 1 }, target), 0, 'single 7 does not satisfy a double-7 round');
+    assert.equal(halveItDartValue({ sector: 7, mult: 3 }, target), 0, 'treble 7 does not satisfy a double-7 round either');
+  });
+  test('a treble-restricted target only counts the treble', () => {
+    const target = { sector: 10, ring: 'treble' };
+    assert.equal(halveItDartValue({ sector: 10, mult: 3 }, target), 30);
+    assert.equal(halveItDartValue({ sector: 10, mult: 1 }, target), 0);
+  });
+  test('bull (sector 25) scores via the same mult*sector formula -- single 25, double 50, no treble ring exists', () => {
+    const target = { sector: 25 };
+    assert.equal(halveItDartValue({ sector: 25, mult: 1 }, target), 25);
+    assert.equal(halveItDartValue({ sector: 25, mult: 2 }, target), 50);
+  });
+});
+
+describe('evaluateVisitHalveIt (docs/archive/halve-it-roadmap.md)', () => {
+  function mkGame(round, current, players, targets){
+    return { halveItRound: round, current, players, config: { targets: targets || HALVE_IT_DEFAULT_TARGETS } };
+  }
+  test('a hit adds the visit\'s value to the running total -- never halves', () => {
+    const player = { total: 10, roundTotals: {} };
+    const game = mkGame(1, 0, [player, { total: 0 }]); // round 1 targets plain 20
+    const ev = evaluateVisitHalveIt(player, [{sector:20,mult:1},{sector:20,mult:1},{sector:0,mult:1}], game);
+    assert.equal(ev.gained, 40, '20 + 20 + a miss dart');
+    assert.equal(ev.halved, false);
+    assert.equal(ev.total, 50, '10 prior + 40 gained');
+  });
+  test('missing the target with all 3 darts halves the running total, rounding UP', () => {
+    const player = { total: 25, roundTotals: {} };
+    const game = mkGame(1, 0, [player, { total: 0 }]);
+    const ev = evaluateVisitHalveIt(player, [{sector:1,mult:1},{sector:2,mult:1},{sector:3,mult:1}], game); // none hit 20
+    assert.equal(ev.gained, 0);
+    assert.equal(ev.halved, true);
+    assert.equal(ev.total, 13, 'ceil(25/2) = 13, not floor\'s 12');
+  });
+  test('halving a total of 1 stays at 1 -- round-up never reaches a permanent 0', () => {
+    const player = { total: 1, roundTotals: {} };
+    const game = mkGame(1, 0, [player, { total: 0 }]);
+    const ev = evaluateVisitHalveIt(player, [{sector:0,mult:1}], game);
+    assert.equal(ev.total, 1, 'ceil(1/2) = 1');
+  });
+  test('halving a total of 0 stays at 0 (an early-round miss with nothing built up yet)', () => {
+    const player = { total: 0, roundTotals: {} };
+    const game = mkGame(1, 0, [player, { total: 0 }]);
+    const ev = evaluateVisitHalveIt(player, [{sector:0,mult:1}], game);
+    assert.equal(ev.total, 0);
+  });
+  test('a ring-restricted round (double 7) only credits the exact ring', () => {
+    const player = { total: 0, roundTotals: {} };
+    const game = mkGame(3, 0, [player, { total: 0 }]); // round 3 = {sector:7, ring:'double'}
+    const ev = evaluateVisitHalveIt(player, [{sector:7,mult:1},{sector:7,mult:2},{sector:7,mult:3}], game);
+    assert.equal(ev.gained, 14, 'only the double-7 dart counts -- single/treble 7 both score 0 here');
+    assert.equal(ev.target.ring, 'double');
+  });
+  test('the match only completes once the FINAL round\'s last player throws, never early', () => {
+    const p0 = { total: 100, roundTotals: {} };
+    const p1 = { total: 5, roundTotals: {} };
+    const game = mkGame(3, 1, [p0, p1], HALVE_IT_DEFAULT_TARGETS); // round 3 of 7, p1 is last in rotation
+    const ev = evaluateVisitHalveIt(p1, [{sector:0,mult:1}], game);
+    assert.equal(ev.roundComplete, true, 'p1 is last in the rotation this round');
+    assert.equal(ev.matchComplete, false, 'round 3 of 7 -- not the final round yet, even with a huge lead');
+  });
+  test('final round, single leader: match completes for the leader', () => {
+    const p0 = { total: 10, roundTotals: {} };
+    const p1 = { total: 20, roundTotals: {} };
+    const game = mkGame(7, 1, [p0, p1], HALVE_IT_DEFAULT_TARGETS); // round 7 = Bull, unrestricted
+    // p1 hits a single bull (+25) instead of missing, so this visit doesn't trigger
+    // Halve-It's own halving rule -- isolates "single leader after final round" from
+    // the halving mechanic, which is covered by its own tests above.
+    const ev = evaluateVisitHalveIt(p1, [{sector:25,mult:1}], game);
+    assert.equal(ev.total, 45, '20 prior + 25 gained');
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 1);
+  });
+  test('final round tie: match does not complete, continues into an extra round', () => {
+    const p0 = { total: 20, roundTotals: {} };
+    const p1 = { total: 40, roundTotals: {} };
+    const game = mkGame(7, 1, [p0, p1], HALVE_IT_DEFAULT_TARGETS);
+    // p1 misses the final round entirely -> halved from 40 to 20, tying p0.
+    const ev = evaluateVisitHalveIt(p1, [{sector:0,mult:1}], game);
+    assert.equal(ev.total, 20, 'ceil(40/2) = 20, now tied with p0');
+    assert.equal(ev.matchComplete, false, 'a tie after the final round continues into an extra round');
+  });
+  test('extra rounds keep targeting the final round\'s own target, not cycling back to round 1', () => {
+    const player = { total: 0, roundTotals: {} };
+    const game = mkGame(9, 0, [player, { total: 0 }], HALVE_IT_DEFAULT_TARGETS); // round 9 > 7 targets
+    const ev = evaluateVisitHalveIt(player, [{sector:25,mult:1}], game);
+    assert.deepEqual(ev.target, { sector: 25 }, 'round 9 still targets round 7\'s own Bull, matching Baseball/Shanghai');
+  });
+});
+
+// Committed regression test found in a full-frontend code review (CLAUDE.md
+// "every new calculation gets a permanent, committed test"): everHalved/
+// lastVisitHalved are read by the live UI to award 🛡️ No Half Measures /
+// 🪓 Halved at the Death, and rebuildHalveItState()'s own comment says they're
+// "reconstructed here too so a resumed leg's badge check still sees the leg's
+// FULL halving history" — but had no committed test proving that reconstruction
+// actually works, despite backing a real badge trigger condition.
+describe('rebuildHalveItState (docs/archive/halve-it-roadmap.md, resume/badge-history reconstruction)', () => {
+  test('everHalved stays true after a later non-halving visit; lastVisitHalved reflects only the most recent visit', () => {
+    const turns = [
+      // Round 1 target is plain 20 (HALVE_IT_DEFAULT_TARGETS[0]) -- all misses halves.
+      { playerIndex: 0, setNo: 1, legNo: 1, darts: [{sector:1,mult:1},{sector:2,mult:1},{sector:3,mult:1}] },
+      // Round 2 target is plain 16 -- a hit does not halve.
+      { playerIndex: 0, setNo: 1, legNo: 1, darts: [{sector:16,mult:1}] },
+    ];
+    const r = rebuildHalveItState({ names: ['Solo'], legsPerSet: 1, targets: HALVE_IT_DEFAULT_TARGETS, turns });
+    assert.equal(r.players[0].everHalved, true, 'round 1\'s halve must still be remembered after round 2');
+    assert.equal(r.players[0].lastVisitHalved, false, 'the most recent visit (round 2) did not halve');
+    assert.equal(r.players[0].total, 16, '0 (halved from 0) + 16 gained in round 2');
+  });
+  test('everHalved resets to false at the start of a new leg', () => {
+    const turns = [
+      { playerIndex: 0, setNo: 1, legNo: 1, darts: [{sector:1,mult:1},{sector:2,mult:1},{sector:3,mult:1}] }, // halves
+      { playerIndex: 1, setNo: 1, legNo: 1, darts: [{sector:20,mult:1}] }, // p1's turn, round completes
+    ];
+    // Force a leg boundary by hand-appending a turn dated into leg 2 -- rebuildHalveItState
+    // detects the boundary purely from (setNo,legNo) changing between consecutive turns.
+    turns.push({ playerIndex: 0, setNo: 1, legNo: 2, darts: [{sector:20,mult:1}] });
+    const r = rebuildHalveItState({ names: ['Solo', 'Opp'], legsPerSet: 1, targets: HALVE_IT_DEFAULT_TARGETS, turns });
+    assert.equal(r.players[0].everHalved, false, 'a new leg must not carry over the previous leg\'s halving history');
+  });
+});
+
+// Committed regression test for the same CLAUDE.md testing gap, Shanghai's own
+// sibling of the fixed-round replay functions (rebuildBaseballState/
+// rebuildHalveItState) — totalPoints/roundPoints reconstruction had no
+// committed test even though it's exactly the kind of "recompute the running
+// score from raw turns" calculation the convention is meant to cover.
+describe('rebuildShanghaiState (docs/archive/shanghai-roadmap.md, resume reconstruction)', () => {
+  test('replays two rounds and lands on the correct running total/next player', () => {
+    const turns = [
+      // Round 1 target is round number 1 -- a single 1 scores 1.
+      { playerIndex: 0, setNo: 1, legNo: 1, darts: [{sector:1,mult:1}] },
+      { playerIndex: 1, setNo: 1, legNo: 1, darts: [{sector:1,mult:1}] },
+      // Round 2 target is round number 2 -- a double 2 scores 4.
+      { playerIndex: 0, setNo: 1, legNo: 1, darts: [{sector:2,mult:2}] },
+    ];
+    const r = rebuildShanghaiState({ names: ['Ann', 'Bob'], legsPerSet: 1, maxRounds: 7, turns });
+    assert.equal(r.players[0].totalPoints, 1 + 4, 'round 1 single-1 (1) + round 2 double-2 (4)');
+    assert.equal(r.players[1].totalPoints, 1, 'round 1 single-1 only');
+    assert.equal(r.shanghaiRound, 2, 'Ann has thrown round 2, round hasn\'t advanced past her yet');
+    assert.equal(r.current, 1, 'Bob throws next');
+  });
+});
+
+describe('Dead Man Walking (docs/archive/dead-man-walking-roadmap.md)', () => {
+  describe('deadManWalkingBandFor', () => {
+    test('band boundaries: 32/60 low, 61/100 mid, 101/170 high', () => {
+      assert.equal(deadManWalkingBandFor(32).name, 'low');
+      assert.equal(deadManWalkingBandFor(60).name, 'low');
+      assert.equal(deadManWalkingBandFor(61).name, 'mid');
+      assert.equal(deadManWalkingBandFor(100).name, 'mid');
+      assert.equal(deadManWalkingBandFor(101).name, 'high');
+      assert.equal(deadManWalkingBandFor(170).name, 'high');
+    });
+  });
+
+  describe('deadManWalkingParForTarget', () => {
+    test('with no historical average, defaults to objective-optimal + 2', () => {
+      // 40 finishes optimally in 1 dart (D20).
+      assert.equal(deadManWalkingParForTarget(40, null), 1 + 2);
+      // 170 (T20 T20 Bull) finishes optimally in 3 darts.
+      assert.equal(deadManWalkingParForTarget(170, null), 3 + 2);
+    });
+    test('with a historical average above the floor, par is the historical average', () => {
+      assert.equal(deadManWalkingParForTarget(40, 4.5), 4.5, 'D20 is 1 dart optimally, but this player usually needs 4.5');
+    });
+    test('with a historical average BELOW the objective floor, the floor wins -- par can never make the round unachievable', () => {
+      // 40 -> D20, 1 dart optimal, floor = 2. A (bogus/optimistic) historical
+      // average of 1 must still be floored up to 2.
+      assert.equal(deadManWalkingParForTarget(40, 1), 2);
+    });
+    test('exhaustive: for every finishable score 2-170, par-1 (the actual dart budget) is never below the objective-optimal dart count, regardless of historicalAverage', () => {
+      // Mirrors checkoutHint()'s own exhaustive-range verification (backend/test/
+      // scoring.test.js's "checkoutHint" describe block) -- this is the one
+      // concrete, testable correctness property the roadmap doc calls out by name.
+      let checked = 0;
+      for (let score = 2; score <= 170; score++) {
+        const hint = checkoutHint(score, true, 3);
+        if (!hint) continue; // bogey/unfinishable -- Dead Man Walking never serves these
+        const optimal = hint.split(' ').length;
+        for (const historicalAverage of [null, 0, 1, optimal - 1, optimal, optimal + 5, 20]) {
+          const par = deadManWalkingParForTarget(score, historicalAverage);
+          const budget = par - 1;
+          assert.ok(budget >= optimal,
+            `score ${score}: optimal=${optimal}, historicalAverage=${historicalAverage} -> par=${par}, budget=${budget} must be >= ${optimal}`);
+          checked++;
+        }
+      }
+      assert.ok(checked > 900, `sanity: exercised a real range of finishable scores (got ${checked} checks)`);
+    });
+  });
+
+  describe('pickDeadManWalkingTargets', () => {
+    test('draws n targets from the pool with replacement, using the injectable rng deterministically', () => {
+      const pool = [40, 60, 90];
+      let calls = 0;
+      const seq = [0.0, 0.5, 0.99, 0.34, 0.1];
+      const rng = () => seq[calls++ % seq.length];
+      const drawn = pickDeadManWalkingTargets(pool, 5, rng);
+      assert.deepEqual(drawn, [40, 60, 90, 60, 40]);
+    });
+    test('a pool smaller than 15 still produces exactly 15 draws, with repeats', () => {
+      const pool = [50];
+      const drawn = pickDeadManWalkingTargets(pool, 15, () => 0.4);
+      assert.equal(drawn.length, 15);
+      assert.ok(drawn.every(t => t === 50));
+    });
+  });
+
+  describe('evaluateDeadManDart', () => {
+    test('overshoot (new remaining < 0) is a bust -- remaining stays unchanged', () => {
+      const ev = evaluateDeadManDart(20, makeDartCore(20, 3), true); // T20 = 60, way over
+      assert.equal(ev.bust, true);
+      assert.equal(ev.win, false);
+      assert.equal(ev.newRemaining, 20, 'a bust never changes the remaining score');
+    });
+    test('leaving exactly 1 under double-out is a bust', () => {
+      const ev = evaluateDeadManDart(21, makeDartCore(20, 1), true); // 21-20=1
+      assert.equal(ev.bust, true);
+      assert.equal(ev.newRemaining, 21);
+    });
+    test('reaching 0 on a double is a Walked Out win', () => {
+      const ev = evaluateDeadManDart(40, makeDartCore(20, 2), true); // D20
+      assert.equal(ev.win, true);
+      assert.equal(ev.bust, false);
+      assert.equal(ev.newRemaining, 0);
+    });
+    test('reaching 0 on a non-double under double-out is a bust, not a win', () => {
+      const ev = evaluateDeadManDart(20, makeDartCore(20, 1), true); // single 20, not a double
+      assert.equal(ev.bust, true);
+      assert.equal(ev.win, false);
+      assert.equal(ev.newRemaining, 20);
+    });
+    test('a normal scoring dart that leaves a positive, non-1 remainder just continues', () => {
+      const ev = evaluateDeadManDart(90, makeDartCore(20, 3), true); // T20 = 60, leaves 30
+      assert.equal(ev.bust, false);
+      assert.equal(ev.win, false);
+      assert.equal(ev.newRemaining, 30);
+    });
+  });
+
+  describe('resolveDeadManDart', () => {
+    test('a dart that neither busts nor wins, but exhausts the round budget, is Executed "out of darts"', () => {
+      // budget=1 (par=2, e.g. a 1-dart-optimal target the player gets no grace
+      // on), dartsUsedThisRound=0 -- this is the round's only allowed dart.
+      const r = resolveDeadManDart(32, makeDartCore(20, 1), true, 0, 1); // single 20, leaves 12 -- no bust, no win
+      assert.equal(r.bust, false);
+      assert.equal(r.win, false);
+      assert.equal(r.outOfDarts, true);
+      assert.equal(r.roundOver, true);
+      assert.equal(r.newRemaining, 12, 'a real, non-bust visit keeps its actual scored value');
+    });
+    test('the same dart with budget still remaining just continues -- roundOver is false', () => {
+      const r = resolveDeadManDart(32, makeDartCore(20, 1), true, 0, 3);
+      assert.equal(r.outOfDarts, false);
+      assert.equal(r.roundOver, false);
+    });
+    test('a bust ends the round even with darts left in the budget', () => {
+      const r = resolveDeadManDart(20, makeDartCore(20, 3), true, 0, 9); // way over, plenty of budget left
+      assert.equal(r.bust, true);
+      assert.equal(r.roundOver, true);
+    });
+    test('a win ends the round even with darts left in the budget', () => {
+      const r = resolveDeadManDart(40, makeDartCore(20, 2), true, 0, 9);
+      assert.equal(r.win, true);
+      assert.equal(r.roundOver, true);
+    });
+  });
+
+  describe('deadManWalkingResultTier', () => {
+    test('every documented threshold boundary lands on the right tier', () => {
+      assert.equal(deadManWalkingResultTier(15), 'Pardoned');
+      assert.equal(deadManWalkingResultTier(13), 'Pardoned');
+      assert.equal(deadManWalkingResultTier(12), 'Reprieve');
+      assert.equal(deadManWalkingResultTier(10), 'Reprieve');
+      assert.equal(deadManWalkingResultTier(9), 'Last Rites');
+      assert.equal(deadManWalkingResultTier(7), 'Last Rites');
+      assert.equal(deadManWalkingResultTier(6), 'The Walk');
+      assert.equal(deadManWalkingResultTier(4), 'The Walk');
+      assert.equal(deadManWalkingResultTier(3), 'Executed');
+      assert.equal(deadManWalkingResultTier(0), 'Executed');
+    });
+  });
+
+  describe('rebuildDeadManWalkingState', () => {
+    // A tiny 3-round frozen config for replay tests (real sessions always
+    // freeze 15, but the replay logic itself doesn't care about the count).
+    const rounds = [
+      { target: 40, par: 3 },  // round 1: D20 optimal in 1, budget 2
+      { target: 32, par: 3 },  // round 2: D16 optimal in 1, budget 2
+      { target: 61, par: 4 },  // round 3: T7 D20 optimal in 2, budget 3
+    ];
+    test('a Walked Out round (single dart double-out finish) advances to the next round\'s own target/budget', () => {
+      const turns = [ v(0, 1, 1, [[20, 2]]) ]; // D20 checks out round 1 (target 40) in 1 dart
+      const r = rebuildDeadManWalkingState({ rounds, turns });
+      assert.equal(r.walkedOutCount, 1);
+      assert.equal(r.roundIndex, 1, 'advanced to round 2 (0-based index 1)');
+      assert.equal(r.remaining, 32, 'round 2\'s own frozen target');
+      assert.equal(r.dartsUsedThisRound, 0);
+      assert.equal(r.done, false);
+    });
+    test('a bust ends the round immediately (Executed), even mid-visit -- only the darts actually thrown are replayed', () => {
+      // Round 1: first dart overshoots (T20=60 against remaining 40) -- a bust,
+      // second/third darts of what would have been a 3-dart visit never happen.
+      const turns = [ v(0, 1, 1, [[20, 3]]) ];
+      const r = rebuildDeadManWalkingState({ rounds, turns });
+      assert.equal(r.walkedOutCount, 0);
+      assert.equal(r.roundIndex, 1, 'still advances to round 2 -- Executed rounds progress the session too');
+      assert.equal(r.remaining, 32);
+    });
+    test('running out of darts without busting also Executes the round (no checkout)', () => {
+      // Round 1 target 40, budget 2 (par 3). Two single-20s: dart 1 leaves 20
+      // (no bust, no win, 1 dart used of 2) -- dart 2 (single 20 again) leaves 0
+      // but on a SINGLE under double-out, which is itself a bust (not merely
+      // out-of-darts) -- so instead use a genuine "ran the clock out cleanly"
+      // shape: single 5 (leaves 35), single 5 (leaves 30, budget exhausted, not 0).
+      const turns = [ v(0, 1, 1, [[5, 1]]), v(0, 1, 1, [[5, 1]]) ];
+      const r = rebuildDeadManWalkingState({ rounds, turns });
+      assert.equal(r.walkedOutCount, 0);
+      assert.equal(r.roundIndex, 1, 'round 1 settled (out of darts) and advanced to round 2');
+    });
+    test('a round still in progress (mid-replay, e.g. a resumed game) reports its own live remaining/darts-used', () => {
+      // Round 1, budget 2: one dart used (single 5, leaves 35), round not yet settled.
+      const turns = [ v(0, 1, 1, [[5, 1]]) ];
+      const r = rebuildDeadManWalkingState({ rounds, turns });
+      assert.equal(r.roundIndex, 0, 'still on round 1 (0-based index 0)');
+      assert.equal(r.remaining, 35);
+      assert.equal(r.dartsUsedThisRound, 1);
+      assert.equal(r.done, false);
+    });
+    test('reaching and settling the final round marks the session done', () => {
+      const turns = [
+        v(0, 1, 1, [[20, 2]]),   // round 1: walked out
+        v(0, 1, 2, [[16, 2]]),   // round 2: walked out (D16, target 32)
+        v(0, 1, 3, [[7, 3], [20, 2]]), // round 3: T7 (21) + D20 (40) = 61, walked out
+      ];
+      const r = rebuildDeadManWalkingState({ rounds, turns });
+      assert.equal(r.walkedOutCount, 3);
+      assert.equal(r.roundIndex, 3, 'past the last round');
+      assert.equal(r.done, true);
+    });
+    test('a leg spanning multiple visits within one round (no early stop) replays all of them', () => {
+      // Round 3, target 61, budget 3: visit 1 misses everything (leaves 61, 3
+      // darts used -- exactly the budget), so the round settles "out of darts"
+      // on the 3rd dart of the FIRST visit, never reaching a second visit.
+      const turns = [ v(0, 1, 3, [[0, 1], [0, 1], [0, 1]]) ];
+      // Splice round 3 to be reached directly by starting the fixture at round 3
+      // (rounds[] is 0-indexed by leg_no - 1, so leg 3 maps to rounds[2]).
+      const r = rebuildDeadManWalkingState({ rounds, turns: [ v(0, 1, 1, [[20, 2]]), v(0, 1, 2, [[16, 2]]), ...turns ] });
+      assert.equal(r.walkedOutCount, 2, 'rounds 1 and 2 walked out; round 3 missed entirely');
+      assert.equal(r.done, true);
+    });
+  });
+
+  describe('CHALLENGE_CHECKOUTS (shared with Daily Challenge, docs/archive/dead-man-walking-roadmap.md "Cold start")', () => {
+    test('every value is a genuinely finishable double-out checkout', () => {
+      CHALLENGE_CHECKOUTS.forEach(target => {
+        assert.notEqual(checkoutHint(target, true, 3), '', `${target} must be finishable under double-out`);
+      });
+    });
+  });
+});
+
+describe('generatePressureCard (docs/archive/pressure-chamber-roadmap.md "The card sequence is generated, never stored")', () => {
+  test('deterministic: same (gameId, roundIndex) always yields the same card', () => {
+    const a = generatePressureCard(7, 3);
+    const b = generatePressureCard(7, 3);
+    assert.deepEqual(a, b);
+  });
+  test('every target/modifier pool entry is a valid index (no out-of-range pick across a wide round sweep)', () => {
+    for(let round=1; round<=50; round++){
+      const card = generatePressureCard(1, round);
+      assert.ok(PRESSURE_TARGET_POOL.includes(card.target));
+      assert.ok(PRESSURE_MODIFIERS.includes(card.modifier));
+    }
+  });
+  test('H2H identical sequence: the same gameId gives every "player" (i.e. every caller) the same round N card', () => {
+    // The whole point of keying on gameId alone (not a per-player seed) --
+    // 2-4 players sharing one game.id must see byte-identical cards.
+    const gameId = 555;
+    for(let round=1; round<=15; round++){
+      const first = generatePressureCard(gameId, round);
+      const second = generatePressureCard(gameId, round);
+      assert.deepEqual(first, second);
+    }
+  });
+  test('different gameIds usually (not guaranteed every round, but overwhelmingly) diverge', () => {
+    let differences = 0;
+    for(let round=1; round<=15; round++){
+      const a = generatePressureCard(100, round);
+      const b = generatePressureCard(200, round);
+      if(JSON.stringify(a) !== JSON.stringify(b)) differences++;
+    }
+    assert.ok(differences > 0, 'two different game ids should not produce an identical 15-round sequence');
+  });
+});
+
+describe('gradePressureSectorRound (docs/archive/pressure-chamber-roadmap.md "Targets")', () => {
+  const target = { type:'sector', sector:20, ring:'double', label:'Double 20', difficulty:'double' };
+  test('an exact ring+sector match on any dart is a full hit', () => {
+    const darts = [{sector:1,mult:1},{sector:20,mult:2},{sector:5,mult:1}];
+    assert.equal(gradePressureSectorRound(target, darts), 'full');
+  });
+  test('the sector hit but the wrong ring is a partial', () => {
+    const darts = [{sector:20,mult:1},{sector:1,mult:1},{sector:5,mult:1}];
+    assert.equal(gradePressureSectorRound(target, darts), 'partial');
+  });
+  test('neither sector nor ring hit at all is a miss', () => {
+    const darts = [{sector:1,mult:1},{sector:2,mult:1},{sector:0,mult:1}];
+    assert.equal(gradePressureSectorRound(target, darts), 'miss');
+  });
+  test('Match Dart: only the 3rd dart counts -- a full hit on dart 1 is ignored', () => {
+    const darts = [{sector:20,mult:2},{sector:1,mult:1},{sector:5,mult:1}];
+    assert.equal(gradePressureSectorRound(target, darts, true), 'miss', 'dart 1 hit the target, but Match Dart only reads dart 3');
+    const darts2 = [{sector:1,mult:1},{sector:5,mult:1},{sector:20,mult:2}];
+    assert.equal(gradePressureSectorRound(target, darts2, true), 'full', 'dart 3 is the real hit');
+  });
+  test('Match Dart with fewer than 3 darts thrown is always a miss (no dart 3 to read)', () => {
+    assert.equal(gradePressureSectorRound(target, [{sector:20,mult:2}], true), 'miss');
+  });
+});
+
+describe('evaluateDartPressureSector (Sudden Death per-dart early-stop, docs/archive/pressure-chamber-roadmap.md)', () => {
+  const target = { type:'sector', sector:16, ring:'double', label:'Double 16', difficulty:'double' };
+  test('an exact ring+sector hit continues (not ended)', () => {
+    const r = evaluateDartPressureSector({sector:16,mult:2}, target);
+    assert.equal(r.hit, true);
+    assert.equal(r.ended, false);
+  });
+  test('the sector but wrong ring ends the round immediately (a partial still stops Sudden Death)', () => {
+    const r = evaluateDartPressureSector({sector:16,mult:1}, target);
+    assert.equal(r.hit, false);
+    assert.equal(r.ended, true);
+    assert.equal(r.reason, 'wrong-ring');
+  });
+  test('missing the sector entirely ends the round', () => {
+    const r = evaluateDartPressureSector({sector:1,mult:1}, target);
+    assert.equal(r.ended, true);
+    assert.equal(r.reason, 'miss');
+  });
+});
+
+describe('pressureBaseCp / pressureFinishBaseCp / pressureMissPenaltyBase (docs/archive/pressure-chamber-roadmap.md "Composure Points formula")', () => {
+  test('base CP scales single < double < treble < bullseye', () => {
+    const single = pressureBaseCp({ type:'sector', difficulty:'single' });
+    const double = pressureBaseCp({ type:'sector', difficulty:'double' });
+    const treble = pressureBaseCp({ type:'sector', difficulty:'treble' });
+    const bull   = pressureBaseCp({ type:'sector', difficulty:'bull' });
+    assert.ok(single < double && double < treble && treble < bull);
+  });
+  test('a finish target\'s base CP scales with its optimal dart count', () => {
+    const oneDart = pressureFinishBaseCp(40);   // D20, 1 dart
+    const threeDart = pressureFinishBaseCp(121); // needs all 3 darts
+    assert.ok(threeDart > oneDart, 'a 3-dart finish is worth more than a 1-dart finish');
+  });
+  test('the miss penalty is always smaller than the base CP for the same target', () => {
+    const target = { type:'sector', difficulty:'treble' };
+    assert.ok(pressureMissPenaltyBase(target) < pressureBaseCp(target));
+  });
+});
+
+describe('pressureMissPenaltyForCard (docs/archive/pressure-chamber-roadmap.md "derived-at-read-time" miss penalty)', () => {
+  test('Double Down doubles the miss penalty relative to Dead Calm on the same target', () => {
+    const target = { type:'sector', difficulty:'double' };
+    const deadCalm = PRESSURE_MODIFIERS.find(m => m.key === 'dead_calm');
+    const doubleDown = PRESSURE_MODIFIERS.find(m => m.key === 'double_down');
+    const base = pressureMissPenaltyForCard({ target, modifier: deadCalm });
+    const doubled = pressureMissPenaltyForCard({ target, modifier: doubleDown });
+    assert.equal(doubled, base * 2);
+  });
+  test('is a pure function of the card alone -- no darts needed', () => {
+    const target = { type:'sector', difficulty:'treble' };
+    const modifier = PRESSURE_MODIFIERS.find(m => m.key === 'sudden_death');
+    const a = pressureMissPenaltyForCard({ target, modifier });
+    const b = pressureMissPenaltyForCard({ target, modifier });
+    assert.equal(a, b);
+  });
+});
+
+describe('pressureRoundOutcome / computePressureRoundResult (docs/archive/pressure-chamber-roadmap.md "Composure Points formula")', () => {
+  const deadCalm = PRESSURE_MODIFIERS.find(m => m.key === 'dead_calm');
+  const doubleDown = PRESSURE_MODIFIERS.find(m => m.key === 'double_down');
+  const comeback = PRESSURE_MODIFIERS.find(m => m.key === 'comeback');
+  const sectorTarget = { type:'sector', sector:20, ring:'treble', label:'Treble 20', difficulty:'treble' };
+
+  test('full hit: gained = base x modifier multiplier, no miss penalty', () => {
+    const card = { target: sectorTarget, modifier: deadCalm };
+    const r = computePressureRoundResult(card, [{sector:20,mult:3}]);
+    assert.equal(r.outcome, 'full');
+    assert.equal(r.gained, pressureBaseCp(sectorTarget) * deadCalm.cpMultiplier);
+    assert.equal(r.missPenalty, 0);
+  });
+  test('partial hit: gained = half of base x modifier multiplier', () => {
+    const card = { target: sectorTarget, modifier: deadCalm };
+    const r = computePressureRoundResult(card, [{sector:20,mult:1}]);
+    assert.equal(r.outcome, 'partial');
+    assert.equal(r.gained, Math.round((pressureBaseCp(sectorTarget) * deadCalm.cpMultiplier) / 2));
+  });
+  test('miss: gained is 0 (never negative), missPenalty is the card\'s derived penalty', () => {
+    const card = { target: sectorTarget, modifier: deadCalm };
+    const r = computePressureRoundResult(card, [{sector:1,mult:1}]);
+    assert.equal(r.outcome, 'miss');
+    assert.equal(r.gained, 0);
+    assert.equal(r.missPenalty, pressureMissPenaltyForCard(card));
+  });
+  test('Double Down doubles the miss penalty but does not change a full hit\'s gain', () => {
+    const calmCard = { target: sectorTarget, modifier: deadCalm };
+    const ddCard = { target: sectorTarget, modifier: doubleDown };
+    const calmFull = computePressureRoundResult(calmCard, [{sector:20,mult:3}]);
+    const ddFull = computePressureRoundResult(ddCard, [{sector:20,mult:3}]);
+    assert.equal(ddFull.gained, calmFull.gained, "Double Down is miss-penalty-only, per the roadmap doc's own wording");
+    const calmMiss = computePressureRoundResult(calmCard, [{sector:1,mult:1}]);
+    const ddMiss = computePressureRoundResult(ddCard, [{sector:1,mult:1}]);
+    assert.equal(ddMiss.missPenalty, calmMiss.missPenalty * 2);
+  });
+  test('Comeback adds a bonus on a full hit and doubles the miss penalty', () => {
+    const card = { target: sectorTarget, modifier: comeback };
+    const full = computePressureRoundResult(card, [{sector:20,mult:3}]);
+    const plainFull = Math.round(pressureBaseCp(sectorTarget) * comeback.cpMultiplier);
+    assert.ok(full.gained > plainFull, 'the comeback bonus adds on top of the normal modifier-scaled reward');
+    const miss = computePressureRoundResult(card, [{sector:1,mult:1}]);
+    // Miss penalty is "base-and-modifier-scaled" per the roadmap doc's own
+    // formula wording -- Comeback's cpMultiplier (1.4) legitimately scales it
+    // same as every other modifier; missMultiplier (2) is the EXTRA "doubled
+    // again" factor on top of that base-and-modifier-scaled value.
+    const missBase = pressureMissPenaltyBase(sectorTarget);
+    const expectedMiss = Math.round(missBase * comeback.cpMultiplier * comeback.missMultiplier);
+    assert.equal(miss.missPenalty, expectedMiss);
+    const withoutTheExtraDoubling = Math.round(missBase * comeback.cpMultiplier);
+    assert.ok(miss.missPenalty > withoutTheExtraDoubling, 'missMultiplier really did add an extra penalty on top');
+  });
+  test('a finish target has no partial tier -- anything short of a legal finish is a miss', () => {
+    const finishTarget = { type:'finish', score:40, label:'Finish 40', difficulty:'finish' };
+    const card = { target: finishTarget, modifier: deadCalm };
+    const legal = computePressureRoundResult(card, [makeDartCore(20,2)]);
+    assert.equal(legal.outcome, 'full');
+    const overshoot = computePressureRoundResult(card, [makeDartCore(20,2), makeDartCore(20,1)]); // busts past 0
+    assert.equal(overshoot.outcome, 'miss', 'a bust finish attempt is a miss, never a partial');
+  });
+  test('Match Dart on a finish target: a checkout on dart 1 or 2 does NOT count, only dart 3', () => {
+    const matchDart = PRESSURE_MODIFIERS.find(m => m.key === 'match_dart');
+    const finishTarget = { type:'finish', score:40, label:'Finish 40', difficulty:'finish' };
+    const card = { target: finishTarget, modifier: matchDart };
+    const onDart1 = computePressureRoundResult(card, [makeDartCore(20,2)]);
+    assert.equal(onDart1.outcome, 'miss', 'legal finish, but not on dart 3 -- Match Dart rejects it');
+    const onDart3 = computePressureRoundResult(card, [makeDartCore(1,1), makeDartCore(1,1), makeDartCore(19,2)]);
+    assert.equal(onDart3.outcome, 'full', '1+1+D19(38)=40 on dart 3, a genuine double-out finish');
+  });
+});
+
+describe('pressureComposureRating (docs/archive/pressure-chamber-roadmap.md "Composure Rating")', () => {
+  test('threshold table matches the roadmap doc exactly', () => {
+    assert.equal(pressureComposureRating(120), 'Ice');
+    assert.equal(pressureComposureRating(200), 'Ice');
+    assert.equal(pressureComposureRating(119), 'Steel');
+    assert.equal(pressureComposureRating(90), 'Steel');
+    assert.equal(pressureComposureRating(89), 'Copper');
+    assert.equal(pressureComposureRating(60), 'Copper');
+    assert.equal(pressureComposureRating(59), 'Tin');
+    assert.equal(pressureComposureRating(30), 'Tin');
+    assert.equal(pressureComposureRating(29), 'Rattled');
+    assert.equal(pressureComposureRating(-50), 'Rattled', 'a heavily-missed run can go negative -- still Rattled, not a crash');
+  });
+});
+
+describe('isPressureIceRun / isPressureModifierFullHit (docs/archive/pressure-chamber-roadmap.md "Achievements")', () => {
+  test('isPressureIceRun is true only at 120+ CP', () => {
+    assert.equal(isPressureIceRun(120), true);
+    assert.equal(isPressureIceRun(119), false);
+  });
+  test('isPressureModifierFullHit requires both a full outcome and the specific modifier', () => {
+    const suddenDeathCard = { modifier: { key:'sudden_death' } };
+    assert.equal(isPressureModifierFullHit(suddenDeathCard, 'full', 'sudden_death'), true);
+    assert.equal(isPressureModifierFullHit(suddenDeathCard, 'partial', 'sudden_death'), false, 'not a full hit');
+    assert.equal(isPressureModifierFullHit(suddenDeathCard, 'full', 'no_warmup'), false, 'wrong modifier');
+  });
+});
+
+describe('pressureChamberDecideWinnerIndex (docs/archive/pressure-chamber-roadmap.md "Solo vs. H2H tie-breaking")', () => {
+  test('highest total CP wins outright', () => {
+    const idx = pressureChamberDecideWinnerIndex([{totalCp:80,misses:2,darts:30},{totalCp:100,misses:5,darts:30}]);
+    assert.equal(idx, 1);
+  });
+  test('a CP tie breaks on fewest misses', () => {
+    const idx = pressureChamberDecideWinnerIndex([{totalCp:80,misses:3,darts:30},{totalCp:80,misses:1,darts:30}]);
+    assert.equal(idx, 1);
+  });
+  test('a CP+misses tie breaks on fewest darts thrown', () => {
+    const idx = pressureChamberDecideWinnerIndex([{totalCp:80,misses:2,darts:40},{totalCp:80,misses:2,darts:35}]);
+    assert.equal(idx, 1);
+  });
+  test('a total coincidence resolves to the earlier player in turn order', () => {
+    const idx = pressureChamberDecideWinnerIndex([{totalCp:80,misses:2,darts:30},{totalCp:80,misses:2,darts:30}]);
+    assert.equal(idx, 0);
+  });
+});
+
+describe('evaluateVisitPressureChamber (docs/archive/pressure-chamber-roadmap.md "Data model")', () => {
+  function mkGame(round, current, players, gameId){
+    return { gameId: gameId || 999, pressureChamberRound: round, current, players, config: { rounds: PRESSURE_ROUNDS } };
+  }
+  test('a full hit adds to totalCp and bumps the full-hit streak', () => {
+    const p = { totalCp: 10, misses: 0, fullHits: 1, currentFullHitStreak: 1, bestFullHitStreak: 1, roundResults: {} };
+    const game = mkGame(2, 0, [p]);
+    const card = generatePressureCard(999, 2);
+    // Build darts that actually hit this round's own sector target (or skip via a finish check)
+    const darts = card.target.type === 'sector'
+      ? [{sector:card.target.sector, mult: {single:1,double:2,treble:3}[card.target.ring]}]
+      : [{sector:0,mult:1}]; // a finish target: leave as a guaranteed miss for this particular assertion
+    const ev = evaluateVisitPressureChamber(p, darts, game);
+    if(card.target.type === 'sector'){
+      assert.equal(ev.outcome, 'full');
+      assert.equal(ev.totalCp, 10 + ev.gained);
+      assert.equal(ev.currentFullHitStreak, 2);
+    }
+  });
+  test('the match only completes once the FINAL round\'s last player throws, never early', () => {
+    const p0 = { totalCp: 100, misses: 0, fullHits: 0, currentFullHitStreak:0, bestFullHitStreak:0, roundResults:{}, legDarts:0 };
+    const p1 = { totalCp: 5, misses: 0, fullHits: 0, currentFullHitStreak:0, bestFullHitStreak:0, roundResults:{}, legDarts:0 };
+    const game = mkGame(3, 1, [p0, p1]); // round 3 of 15, p1 is last in rotation
+    const ev = evaluateVisitPressureChamber(p1, [{sector:0,mult:1}], game);
+    assert.equal(ev.roundComplete, true);
+    assert.equal(ev.matchComplete, false, 'round 3 of 15 -- nowhere near the final round');
+  });
+  test('final round: the match always completes with a definite winner, never null', () => {
+    const p0 = { totalCp: 50, misses: 2, fullHits: 3, currentFullHitStreak:0, bestFullHitStreak:2, roundResults:{}, legDarts:40 };
+    const p1 = { totalCp: 10, misses: 10, fullHits: 0, currentFullHitStreak:0, bestFullHitStreak:0, roundResults:{}, legDarts:42 };
+    const game = mkGame(PRESSURE_ROUNDS, 1, [p0, p1]);
+    const ev = evaluateVisitPressureChamber(p1, [{sector:0,mult:1}], game);
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 0, 'p0 has the higher total CP');
+  });
+  // Regression test found in a full-frontend code review: a miss's totalCp
+  // update only ever added result.gained (always 0 on a miss), never
+  // subtracted result.missPenalty — contradicting REFERENCE.md §34's
+  // documented read-time formula (SUM(scored) - SUM(missPenalty for every
+  // bust turn)), so the live scoreboard/winner decision could disagree with
+  // the backend's own later recomputation of the same run for any run
+  // containing at least one miss.
+  test('a miss subtracts the round\'s miss penalty from totalCp, not just skip adding to it', () => {
+    const p = { totalCp: 20, misses: 0, fullHits: 0, currentFullHitStreak: 0, bestFullHitStreak: 0, roundResults: {} };
+    const game = mkGame(1, 0, [p]);
+    const card = generatePressureCard(999, 1);
+    const ev = evaluateVisitPressureChamber(p, [{sector:0,mult:1}], game); // guaranteed miss
+    assert.equal(ev.outcome, 'miss');
+    assert.ok(ev.missPenalty > 0, 'this card must actually carry a nonzero miss penalty for the assertion below to mean anything');
+    assert.equal(ev.gained, 0, 'a miss gains nothing');
+    assert.equal(ev.totalCp, 20 - ev.missPenalty, 'totalCp must reflect the penalty, not just stay unchanged');
+  });
+});
+
+describe('rebuildPressureChamberState (docs/archive/saved-games-roadmap.md pure replay rebuild, adapted for docs/archive/pressure-chamber-roadmap.md)', () => {
+  test('replays turns and lands on the correct next round/player', () => {
+    const gameId = 321;
+    const names = ['Ben', 'Alaina'];
+    // Just throw all-miss darts for both players across 2 rounds -- we only care
+    // about bookkeeping (round/current/darts), not the specific CP outcome.
+    const turns = [
+      { playerIndex: 0, setNo: 1, legNo: 1, darts: [{sector:0,mult:1}] },
+      { playerIndex: 1, setNo: 1, legNo: 1, darts: [{sector:0,mult:1}] },
+      { playerIndex: 0, setNo: 1, legNo: 1, darts: [{sector:0,mult:1}] },
+    ];
+    const r = rebuildPressureChamberState({ gameId, names, legsPerSet: 1, maxRounds: PRESSURE_ROUNDS, turns });
+    assert.equal(r.pressureChamberRound, 2, 'p0 has thrown round 2, round hasn\'t advanced past them yet');
+    assert.equal(r.current, 1, 'Alaina throws next');
+  });
+  test('a completed 15-round leg produces a definite winner and resets for the next leg', () => {
+    const gameId = 654;
+    const names = ['Ben', 'Alaina'];
+    const turns = [];
+    for(let round=1; round<=15; round++){
+      turns.push({ playerIndex:0, setNo:1, legNo:1, darts:[{sector:0,mult:1}] }); // Ben always misses
+      turns.push({ playerIndex:1, setNo:1, legNo:1, darts:[{sector:0,mult:1}] }); // Alaina always misses too (tie on CP=0)
+    }
+    const r = rebuildPressureChamberState({ gameId, names, legsPerSet: 1, maxRounds: 15, turns });
+    // Both players missed every round (totalCp stays 0 for both, a genuine tie) --
+    // pressureChamberDecideWinnerIndex()'s own tie-break chain still names a winner.
+    // legsPerSet:1 means the leg win is immediately also a set win (legsWon resets
+    // to 0 the same instant it's credited, matching every other game type's own
+    // practice-mode shape) -- setsWon is what actually persists the credit.
+    assert.equal(r.players[0].setsWon + r.players[1].setsWon, 1, 'exactly one player is credited the leg/set win');
+    assert.equal(r.pressureChamberRound, 1, 'leg complete -> reset to round 1 for the next leg');
+  });
+});
+
+// Starter-relative round completion (shared isRoundComplete()): startNextLeg()
+// rotates game.starter each leg, so in any leg after the first the leg's LAST
+// thrower is the player just before the starter — NOT index n-1. The old
+// `current === players.length - 1` form advanced the round after the rotated
+// starter's own first visit, skipping the other players' visit for that round
+// entirely. These pin the rotated-leg case for all four fixed-round evaluators
+// (the default starter=0 leg-1 case is covered by each evaluator's own tests).
+describe('rotated-starter round completion (leg 2+, starter=1 of 2)', () => {
+  const missDarts = [{sector:0,mult:1},{sector:0,mult:1},{sector:0,mult:1}];
+
+  test('Baseball: the rotated starter opening the leg does NOT complete the inning; the other player does', () => {
+    const p0 = { totalRuns: 0, inningRuns: {} }, p1 = { totalRuns: 0, inningRuns: {} };
+    const starterVisit = evaluateVisitBaseball(p1, missDarts, { players: [p0, p1], current: 1, starter: 1, baseballInning: 1 });
+    assert.equal(starterVisit.roundComplete, false, 'starter (index 1) throws FIRST in this leg');
+    const closerVisit = evaluateVisitBaseball(p0, missDarts, { players: [p0, p1], current: 0, starter: 1, baseballInning: 1 });
+    assert.equal(closerVisit.roundComplete, true, 'index 0 (just before the starter) throws LAST');
+  });
+
+  test('Shanghai: same starter-relative rule', () => {
+    const p0 = { totalPoints: 0, roundPoints: {} }, p1 = { totalPoints: 0, roundPoints: {} };
+    const g = (current) => ({ shanghaiRound: 2, current, starter: 1, players: [p0, p1], config: { rounds: 7 } });
+    assert.equal(evaluateVisitShanghai(p1, missDarts, g(1)).roundComplete, false);
+    assert.equal(evaluateVisitShanghai(p0, missDarts, g(0)).roundComplete, true);
+  });
+
+  test('Halve-It: same starter-relative rule', () => {
+    const p0 = { total: 10, roundTotals: {} }, p1 = { total: 10, roundTotals: {} };
+    const g = (current) => ({ halveItRound: 2, current, starter: 1, players: [p0, p1], config: { targets: HALVE_IT_DEFAULT_TARGETS } });
+    assert.equal(evaluateVisitHalveIt(p1, missDarts, g(1)).roundComplete, false);
+    assert.equal(evaluateVisitHalveIt(p0, missDarts, g(0)).roundComplete, true);
+  });
+
+  test('Pressure Chamber: same starter-relative rule', () => {
+    const mk = (current) => ({ gameId: 999, pressureChamberRound: 2, current, starter: 1,
+      players: [{ totalCp: 0, misses: 0, fullHits: 0, currentFullHitStreak: 0, bestFullHitStreak: 0, roundResults: {}, legDarts: 0 },
+                { totalCp: 0, misses: 0, fullHits: 0, currentFullHitStreak: 0, bestFullHitStreak: 0, roundResults: {}, legDarts: 0 }],
+      config: { rounds: PRESSURE_ROUNDS } });
+    const g1 = mk(1);
+    assert.equal(evaluateVisitPressureChamber(g1.players[1], missDarts, g1).roundComplete, false);
+    const g0 = mk(0);
+    assert.equal(evaluateVisitPressureChamber(g0.players[0], missDarts, g0).roundComplete, true);
+  });
+});
+
+// docs/open-roadmap-items.md "Forfeiting a multiplayer game": a departed
+// player (p.dnf) must never (a) block someone else's win via a frozen mark/
+// total, (b) win/extend a tie themselves once they've left, or (c) desync
+// "is the round complete" once they're skipped in rotation.
+describe('DNF-aware winner determination (docs/open-roadmap-items.md "Forfeiting a multiplayer game")', () => {
+  test('Cricket: a departed opponent\'s frozen open marks can no longer block a win', () => {
+    const numbers = CRICKET_STANDARD_NUMBERS;
+    const freshMarks = () => Object.fromEntries(numbers.map(n => [n, 0]));
+    const shooter = { marks: { ...freshMarks(), 15: 3, 16: 3, 17: 3, 18: 3, 19: 3 }, points: 100 };
+    const departedOpp = { marks: freshMarks(), points: 999, dnf: true }; // still "open" on everything, way ahead on points
+    const activeOpp = { marks: { ...freshMarks(), 15: 3, 16: 3, 17: 3, 18: 3, 19: 3, 20: 3, 25: 3 }, points: 50 };
+    const game = { config: { numbers }, players: [shooter, departedOpp, activeOpp] };
+    // Closes the last two numbers (20, bull) with points left over.
+    const ev = evaluateVisitCricket(shooter, [d(20, 3), d(25, 2), d(25, 1)], game);
+    assert.equal(ev.win, true, 'the departed opponent must not count as still-open/still-ahead');
+  });
+
+  test('Cricket cutthroat: a departed opponent neither gains points nor is checked for the win', () => {
+    const numbers = CRICKET_STANDARD_NUMBERS;
+    const freshMarks = () => Object.fromEntries(numbers.map(n => [n, 0]));
+    const shooter = { marks: freshMarks(), points: 0 };
+    const departedOpp = { marks: freshMarks(), points: 0, dnf: true };
+    const game = { config: { numbers, variant: 'cutthroat' }, players: [shooter, departedOpp] };
+    const ev = evaluateVisitCricket(shooter, [d(20, 3), d(20, 3)], game);
+    assert.deepEqual(ev.opponentGains, [], 'a departed player is not a real opponent — no gains attributed to them');
+  });
+
+  test('Baseball: a departed player\'s frozen high total can no longer win the match', () => {
+    const shooter = { totalRuns: 5, inningRuns: {} };
+    const departedLeader = { totalRuns: 50, inningRuns: {}, dnf: true };
+    const game = { players: [shooter, departedLeader], current: 0, starter: 0, baseballInning: 9 };
+    const ev = evaluateVisitBaseball(shooter, [{sector:9,mult:1},{sector:9,mult:1},{sector:9,mult:1}], game);
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 0, 'the only active player wins outright, ignoring the departed leader\'s total');
+  });
+
+  test('Shanghai: a tie against a departed player resolves to the active player, not an extra round', () => {
+    const shooter = { totalPoints: 10, roundPoints: {} };
+    const departedTied = { totalPoints: 10, roundPoints: {}, dnf: true };
+    const g = { shanghaiRound: 7, current: 0, starter: 0, players: [shooter, departedTied], config: { rounds: 7 } };
+    const ev = evaluateVisitShanghai(shooter, [{sector:0,mult:1},{sector:0,mult:1},{sector:0,mult:1}], g);
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 0);
+  });
+
+  test('Halve-It: same tie-against-departed-player resolution', () => {
+    const shooter = { total: 20, roundTotals: {} };
+    const departedTied = { total: 20, roundTotals: {}, dnf: true };
+    const g = { halveItRound: HALVE_IT_DEFAULT_TARGETS.length, current: 0, starter: 0,
+      players: [shooter, departedTied], config: { targets: HALVE_IT_DEFAULT_TARGETS } };
+    const ev = evaluateVisitHalveIt(shooter, [{sector:0,mult:1},{sector:0,mult:1},{sector:0,mult:1}], g);
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 0);
+  });
+
+  test('Pressure Chamber: the decisive final-round pick never lands on a departed player', () => {
+    const shooter = { totalCp: 10, misses: 0, fullHits: 0, currentFullHitStreak: 0, bestFullHitStreak: 0, roundResults: {}, legDarts: 0 };
+    const departedLeader = { totalCp: 999, misses: 0, fullHits: 0, currentFullHitStreak: 0, bestFullHitStreak: 0, roundResults: {}, legDarts: 0, dnf: true };
+    const g = { gameId: 999, pressureChamberRound: PRESSURE_ROUNDS, current: 0, starter: 0,
+      players: [shooter, departedLeader], config: { rounds: PRESSURE_ROUNDS } };
+    const ev = evaluateVisitPressureChamber(shooter, [{sector:0,mult:1},{sector:0,mult:1},{sector:0,mult:1}], g);
+    assert.equal(ev.matchComplete, true);
+    assert.equal(ev.winnerIndex, 0, 'the only active player wins, regardless of the departed player\'s CP total');
+  });
+
+  test('roundComplete stays correct once a player is skipped mid-round (3-player Baseball, index 1 has left)', () => {
+    const p0 = { totalRuns: 0, inningRuns: {} };
+    const p1 = { totalRuns: 0, inningRuns: {}, dnf: true };
+    const p2 = { totalRuns: 0, inningRuns: {} };
+    const missDarts = [{sector:0,mult:1},{sector:0,mult:1},{sector:0,mult:1}];
+    // Raw (current+1)%length from p0 would land on p1 (departed) — the round must
+    // still be recognized as complete once the LAST ACTIVE player (p2) throws,
+    // not stuck waiting on a departed player's turn that will never come.
+    const ev = evaluateVisitBaseball(p2, missDarts, { players: [p0, p1, p2], current: 2, starter: 0, baseballInning: 1 });
+    assert.equal(ev.roundComplete, true);
+  });
+});
+
+describe('Daily Challenge new-format calculations (Doubles Gauntlet / Ton Hunter / Around the Horn)', () => {
+  const d = (sector, mult) => makeDartCore(sector, mult);
+
+  test('distinctDoubleSectors counts each double sector once, ignoring repeats and non-doubles', () => {
+    const visitLogs = [
+      [d(20,2), d(5,1), d(1,3)],     // D20
+      [d(20,2), d(19,2), d(0,1)],    // D20 again (repeat), D19
+      [d(25,2), d(25,2), d(7,2)],    // D-Bull (sector 25) x2, D7
+    ];
+    assert.deepEqual(distinctDoubleSectors(visitLogs).sort((a,b)=>a-b), [7,19,20,25]);
+  });
+
+  test('distinctDoubleSectors is empty with no doubles hit', () => {
+    assert.deepEqual(distinctDoubleSectors([[d(20,1), d(5,3), d(0,1)]]), []);
+  });
+
+  test('countTonPlusVisits counts only visits totalling 100+', () => {
+    const visitLogs = [
+      [d(20,3), d(20,3), d(20,3)],   // 180 -> ton
+      [d(20,1), d(5,1), d(1,1)],     // 26 -> not a ton
+      [d(20,3), d(20,1), d(0,1)],    // 80 -> not a ton
+      [d(19,3), d(19,3), d(19,2)],   // 57+57+38=152 -> ton
+    ];
+    assert.equal(countTonPlusVisits(visitLogs), 2);
+  });
+
+  test('countTonPlusVisits is 0 with no visits yet', () => {
+    assert.equal(countTonPlusVisits([]), 0);
+  });
+
+  test('aroundTheHornProgress advances only on the correct next single, ignoring everything else', () => {
+    // Visit 1: hits 20 (correct), then a treble (ignored), then 19 (correct)
+    const v1 = [d(20,1), d(20,3), d(19,1)];
+    let prog = aroundTheHornProgress([v1]);
+    assert.equal(prog.nextExpected, 18);
+    assert.equal(prog.done, false);
+    assert.equal(prog.dartsThrown, 3);
+
+    // Visit 2: a double on 18 doesn't count (must be a single); a miss; then the
+    // real single 18
+    const v2 = [d(18,2), d(0,1), d(18,1)];
+    prog = aroundTheHornProgress([v1, v2]);
+    assert.equal(prog.nextExpected, 17);
+    assert.equal(prog.dartsThrown, 6);
+  });
+
+  test('aroundTheHornProgress rejects an out-of-order single (hitting 17 before the expected 18 does not skip ahead)', () => {
+    // First visit correctly advances 20 -> 19 -> expecting 18. Second visit throws
+    // 17 before 18 — the out-of-order 17 must be ignored, not treated as progress.
+    const visitLogs = [[d(20,1), d(19,1)], [d(17,1), d(18,1)]];
+    const prog = aroundTheHornProgress(visitLogs);
+    assert.equal(prog.nextExpected, 17, 'the early single-17 does not count; 18 lands next and advances to 17');
+  });
+
+  test('aroundTheHornProgress reports done once all 20 numbers are hit in descending order', () => {
+    const visitLogs = [];
+    for(let n = 20; n >= 1; n -= 3){
+      const visit = [];
+      for(let i = 0; i < 3 && n - i >= 1; i++) visit.push(d(n - i, 1));
+      visitLogs.push(visit);
+    }
+    const prog = aroundTheHornProgress(visitLogs);
+    assert.equal(prog.nextExpected, 0);
+    assert.equal(prog.done, true);
+    assert.equal(prog.dartsThrown, 20);
   });
 });

@@ -8,7 +8,7 @@
    retention window.
 
    The actual backup()/prune mechanics live in backup-lib.js, shared with the
-   admin-gated Settings routes in server.js (docs/backups-roadmap.md v2) so both
+   admin-gated Settings routes in server.js (docs/archive/backups-roadmap.md v2) so both
    call sites always agree on paths, naming, and the WAL gotcha.
 
    Env vars (all optional):

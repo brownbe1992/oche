@@ -1,5 +1,5 @@
 'use strict';
-// Committed tests for backend/db.js's league mode (docs/league-mode-roadmap.md, X01 or
+// Committed tests for backend/db.js's league mode (docs/archive/league-mode-roadmap.md, X01 or
 // Cricket). Covers: creation/validation, enrollment (including multi-league
 // enrollment), the onGameCreated auto-tag hook (0/1/>1 eligible-league cases, explicit
 // valid/invalid leagueId, and every non-eligible game shape), live standings
@@ -333,7 +333,7 @@ describe('wipeAllData / resetStats — standing-rule interactions', () => {
   });
 });
 
-describe('Cricket league support (docs/league-mode-roadmap.md "Game-type scope")', () => {
+describe('Cricket league support (docs/archive/league-mode-roadmap.md "Game-type scope")', () => {
   test('gameType omitted defaults to x01, matching pre-Cricket behavior', () => {
     const [A, B] = makePlayers(uniqueName('GTDEF_'), 2);
     const { leagueId } = db.createLeague({ name: 'Default Cup', category: '501', players: [A, B] });
@@ -408,7 +408,7 @@ describe('Cricket league support (docs/league-mode-roadmap.md "Game-type scope")
   });
 });
 
-describe('League fixtures / pending matches (docs/league-mode-roadmap.md "League fixtures / pending matches")', () => {
+describe('League fixtures / pending matches (docs/archive/league-mode-roadmap.md "League fixtures / pending matches")', () => {
   function fixtureRow(leagueId, p1, p2) {
     return db._db.prepare(`
       SELECT * FROM league_fixtures WHERE league_id = ?
