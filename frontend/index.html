@@ -348,7 +348,25 @@
      visually). The landscape media query flips this to a real flex column
      instead, grid-placed beside `.oche` as a single unit. */
   .rail{display:contents}
+  /* Groups slots/status/turn-actions so a results screen can hide the play
+     controls in one move (showGameResult()) while leaving #scoreboard — its
+     sibling inside .rail — on screen. display:contents so it adds no box of
+     its own; the `order` values below still apply to its flattened children. */
+  .rail-play{display:contents}
+  /* Make `hidden` actually hide, for every game-screen element that carries an
+     author `display`. An author declaration outranks the UA stylesheet's own
+     [hidden]{display:none} no matter how weak its selector, so `el.hidden=true`
+     silently does NOTHING on these four — .rail-play (display:contents above),
+     .oche (display:flex under body.game-active), .slots (display:grid), and
+     .game-result. Verified live: without this, showGameResult() left the whole
+     dartboard on screen behind the results card. Scoped to these four rather
+     than a blanket [hidden]{display:none!important} so it can't change the
+     behavior of anything else in the app that already relies on `hidden`. */
+  .rail-play[hidden], .oche[hidden], .slots[hidden], .game-result[hidden]{display:none!important}
   .turn-actions{order:2}
+  /* Results host (GAME OVER / LEG COMPLETE / …). order:3 keeps it below the
+     scoreboard in portrait; hidden and empty during play. */
+  .game-result{order:3}
 
   .slots{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
   .slot{position:relative;background:var(--surface);border:1px dashed var(--wire);border-radius:11px;
@@ -743,11 +761,12 @@
     body.game-active .oche{grid-column:2;grid-row:1;display:flex;flex-direction:column;justify-content:center;min-height:0}
     body.game-active .turn-actions{margin-top:auto;padding-top:8px}
 
-    /* GAME OVER/LEG COMPLETE/etc. overlays replace .game-play-area's entire
-       innerHTML with one results div, making it the container's only child —
-       give that one child the full grid area instead of the narrow rail
-       column `.rail`/`.oche` would otherwise occupy. */
-    body.game-active .game-play-area > *:only-child{grid-column:1/-1;grid-row:1}
+    /* GAME OVER/LEG COMPLETE/etc. results card. showGameResult() hides .oche,
+       freeing column 2 — so the card takes the board's own big column while
+       the rail (and the scoreboard reporting the match state the card is
+       summarising) stays in column 1, which is why the takeover deliberately
+       hides rather than destroys. */
+    body.game-active .game-result{grid-column:2;grid-row:1;min-height:0;overflow-y:auto;align-self:center}
   }
 
   @media (prefers-reduced-motion:reduce){*{animation:none!important}}
@@ -1424,20 +1443,30 @@
   <section id="screen-game" class="screen">
     <!-- game-play-area is display:contents (see CSS) — a single innerHTML
          target for renderGameShell() to replace wholesale, while its children
-         still lay out as if they were direct children of #screen-game. -->
+         still lay out as if they were direct children of #screen-game.
+
+         A leg/game-over takeover does NOT replace this container's innerHTML —
+         it calls showGameResult(), which hides the two play regions
+         (#rail-play and .oche) and fills #game-result instead. That's what
+         keeps #scoreboard alive through the results screen: finishUnit()
+         prepends its "X wins the leg" banner into the scoreboard, so an
+         innerHTML takeover here would destroy the banner in the same tick it
+         was built, and blank the match state the summary is reporting on. -->
     <div class="game-play-area">
       <div class="rail">
         <div class="scoreboard" id="scoreboard"></div>
-        <div class="slots" id="slots"></div>
-        <div class="status" id="status">Tap the board to score.</div>
+        <div class="rail-play" id="rail-play">
+          <div class="slots" id="slots"></div>
+          <div class="status" id="status">Tap the board to score.</div>
 
-        <div class="turn-actions">
-          <div class="undo-row">
-            <button class="btn btn-ghost board-miss" id="bounce-out-btn" onclick="throwBounceOut()">Bounce Out</button>
-            <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled>Undo Turn</button>
-            <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo Dart</button>
+          <div class="turn-actions">
+            <div class="undo-row">
+              <button class="btn btn-ghost board-miss" id="bounce-out-btn" onclick="throwBounceOut()">Bounce Out</button>
+              <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled>Undo Turn</button>
+              <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo Dart</button>
+            </div>
+            <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
           </div>
-          <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
         </div>
       </div>
 
@@ -1450,6 +1479,10 @@
         <div class="pad" id="pad"></div>
         <div class="dart-board-wrap" id="dart-board-wrap"></div>
       </div>
+
+      <!-- Results host for GAME OVER / LEG COMPLETE / MARATHON COMPLETE /
+           Checkout Blitz's TIME'S UP. Empty and hidden during play. -->
+      <div class="game-result" id="game-result" hidden></div>
     </div>
 
     <div class="btn-row">
@@ -3580,6 +3613,11 @@ function renderHomeTicker(){
   const items = [];
   const challenge = todaysChallenge();
   items.push(`🎯 Today's Challenge: <b>${escapeHtml(challenge.label)}</b>`);
+  // Everything after the challenge needs real household history to exist. The
+  // challenge itself is date-derived and therefore ALWAYS present, so counting
+  // it made the "nothing qualifies" check below unreachable — a brand-new
+  // install got a ticker looping one lone item instead of staying hidden.
+  const activityStart = items.length;
   if(extra && extra.lastGame && extra.lastGame.winnerName){
     items.push(`🏆 Last game: <b>${escapeHtml(extra.lastGame.winnerName)}</b> won ${escapeHtml(extra.lastGame.category)}`);
   }
@@ -3593,7 +3631,7 @@ function renderHomeTicker(){
   if(extra && extra.eloLeaderboard && extra.eloLeaderboard.length){
     items.push(`📈 <b>${escapeHtml(extra.eloLeaderboard[0].name)}</b> leads the household ratings`);
   }
-  if(!items.length){ wrap.hidden = true; return; }
+  if(items.length === activityStart){ wrap.hidden = true; return; }
   wrap.hidden = false;
   // The sequence is duplicated once so the CSS scroll animation (-50%) loops
   // seamlessly instead of showing a gap when it wraps.
@@ -4432,14 +4470,31 @@ let ghostLegSort = 'recent';       // 'recent' | 'best' | 'worst'
 let ghostLegPageSize = 10;         // 10 | 25 | 50 | 100
 let ghostLegPage = 0;              // 0-indexed
 let ghostLegCategory = '';         // '' (every X01 mode) | '501' | '301' | '170' | '101'
+// Bumped per request so only the newest in-flight load is allowed to apply its
+// response — see loadGhostLegPage()'s own comment for what that guards against.
+let _ghostLegReqSeq = 0;
 function renderGhostLegPicker(){
   const box = document.getElementById('ghost-leg-picker-body');
   if(!box) return;
   const name = setup.slots[0];
-  setup.ghostLeg = null;
-  if(!name){ box.innerHTML = `<p class="pp-meta">Choose a player above to see their past won legs.</p>`; return; }
-  if(box._lastPlayer !== name){ ghostLegSort = 'recent'; ghostLegPageSize = 10; ghostLegPage = 0; ghostLegCategory = ''; box._lastPlayer = name; }
-  loadGhostLegPage();
+  if(!name){
+    setup.ghostLeg = null; box._lastPlayer = null;
+    box.innerHTML = `<p class="pp-meta">Choose a player above to see their past won legs.</p>`; return;
+  }
+  const playerChanged = box._lastPlayer !== name;
+  if(playerChanged){
+    ghostLegSort = 'recent'; ghostLegPageSize = 10; ghostLegPage = 0; ghostLegCategory = '';
+    box._lastPlayer = name;
+    setup.ghostLeg = null;   // a different player's picked leg can never carry over
+  }
+  // Reload only when something actually changed. renderPlayers() calls this on
+  // EVERY slot mutation — including a loadout change, which can't affect the
+  // leg list at all — and this used to unconditionally null setup.ghostLeg and
+  // refetch, silently throwing away a leg the player had already picked. It
+  // also meant two loads could be in flight for the same player at once, and
+  // whichever landed first consumed _ghostLegTarget, so "Race this leg" /
+  // "Repeat this leg" would quietly race legs[0] instead of the leg asked for.
+  if(playerChanged || _ghostLegTarget || !setup.ghostLeg) loadGhostLegPage();
 }
 function loadGhostLegPage(){
   const box = document.getElementById('ghost-leg-picker-body');
@@ -4447,8 +4502,13 @@ function loadGhostLegPage(){
   const name = setup.slots[0];
   if(!name) return;
   box.innerHTML = `<p class="pp-meta">Loading…</p>`;
+  const seq = ++_ghostLegReqSeq;
   const offset = ghostLegPage * ghostLegPageSize;
   Backend.get(`/api/players/ghost-legs?name=${encodeURIComponent(name)}&limit=${ghostLegPageSize}&offset=${offset}&sort=${ghostLegSort}&category=${encodeURIComponent(ghostLegCategory)}`).then(data=>{
+    // A newer request has superseded this one. The player check below only ever
+    // rejected a DIFFERENT player, so two overlapping loads for the SAME player
+    // both applied their results (and both tried to consume _ghostLegTarget).
+    if(seq !== _ghostLegReqSeq) return;
     if(setup.mode !== 'ghost' || setup.slots[0] !== name) return; // a newer selection took over
     const legs = (data && data.legs) || [];
     const total = (data && data.total) || 0;
@@ -4763,7 +4823,11 @@ function onRequireAuthToggle(cb){
   cb.checked = true;
   uiConfirm(
     "Turn OFF the admin login requirement? Anyone who can reach this server on your network — not just admins — would then be able to add or remove players, start or end games, wipe stats, or change these settings, with no login prompt at all. Only do this on a household network you fully trust.",
-    ()=>{ cb.checked = false; }
+    // Setting .checked from script fires no change/input event, and the Settings
+    // tile summaries are refreshed purely by delegated change/input listeners —
+    // so without this the tile stayed stuck reading "On, every device" after the
+    // toggle had visibly flipped off.
+    ()=>{ cb.checked = false; refreshSettingsTileStates(); }
   );
 }
 function askAddAdmin(){
@@ -5810,6 +5874,20 @@ function setupOpenCategoryKey(){
   const found = GAME_LEDGER_CATEGORIES.find(c=>c.keys.includes(key));
   return found ? found.key : 'traditional';
 }
+// Enter/Space activation for a role="button" CONTAINER that has real focusable
+// controls nested inside it (the game ledger rows and the Daily Challenge
+// spotlight card both do). The nested control's own keydown bubbles up to the
+// container, so an unconditional preventDefault() here suppresses the browser's
+// "Enter on a focused <button> fires a click" default — which left those nested
+// buttons working for mouse users but completely dead for keyboard users.
+// Acting only when the container itself is the focused target fixes that
+// without giving up the container's own keyboard activation.
+function containerKeyActivate(event, fn){
+  if(event.key !== 'Enter' && event.key !== ' ') return;
+  if(event.target !== event.currentTarget) return;   // nested control — let it handle its own key
+  event.preventDefault();
+  fn();
+}
 let setupExpandedCategory = ''; // '' = derive from the currently selected game
 function toggleSetupCategory(catKey){
   setupExpandedCategory = ((setupExpandedCategory || setupOpenCategoryKey()) === catKey) ? 'none' : catKey;
@@ -5861,7 +5939,7 @@ function renderSetupGameLedger(){
           </div>
         </div>` : '';
       return `<div class="setup-ledger-row${sel?' sel':''}" role="button" tabindex="0" aria-pressed="${sel}"
-          onclick="selectSetupGame('${k}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectSetupGame('${k}')}">
+          onclick="selectSetupGame('${k}')" onkeydown="containerKeyActivate(event, ()=>selectSetupGame('${k}'))">
         <div class="setup-ledger-medal">${ledgerCategoryIcon(cat.key, cat.accent)}</div>
         <div style="flex:1"><div class="setup-ledger-name">${escapeHtml(GAME_LEDGER_NAMES[k]||k)}${vsChip}</div><div class="setup-ledger-teaser">${escapeHtml(GAME_LEDGER_TEASERS[k]||'')}</div></div>
         <div class="setup-ledger-check"></div>
@@ -5869,13 +5947,26 @@ function renderSetupGameLedger(){
     }).join('');
     return `<div class="setup-cat">
       <div class="setup-cat-head${isOpen?' open':''}" style="color:${cat.accent}" role="button" tabindex="0" aria-expanded="${isOpen}"
-        onclick="toggleSetupCategory('${cat.key}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSetupCategory('${cat.key}')}">
+        onclick="toggleSetupCategory('${cat.key}')" onkeydown="containerKeyActivate(event, ()=>toggleSetupCategory('${cat.key}'))">
         <div><span class="setup-cat-title">${cat.label}</span><div class="setup-cat-sub">${cat.sub}</div></div>
         <svg class="setup-cat-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
       ${isOpen ? `<div class="setup-cat-rows">${rows}</div>` : ''}
     </div>`;
   }).join('');
+  // Fallback Continue. The per-row Continue above only exists while the
+  // SELECTED game's own category is expanded, but a game stays selected when
+  // its category is collapsed (toggleSetupCategory() can set 'none', and
+  // opening a different category collapses this one) — which left Step 1 with
+  // no way to advance at all despite having a valid selection. The Daily
+  // Challenge is excluded because its spotlight card is rendered separately by
+  // renderSetupDailyChallengeSection() and is always on screen with its own
+  // Continue, so it can never reach the stranded state this covers.
+  if(currentKey && currentKey !== 'challenge' && openKey !== setupOpenCategoryKey()){
+    el.innerHTML += `<div class="btn-row" style="margin-top:14px">
+      <button class="btn btn-primary" id="setup-step1-continue" style="flex:1" onclick="setupGoToStep2()">Continue with ${escapeHtml(GAME_LEDGER_NAMES[currentKey]||currentKey)}</button>
+    </div>`;
+  }
   mountSetupInlineOptions();
 }
 // Physically moves the real #setup-inline-options-pool element (with all its
@@ -6000,7 +6091,7 @@ function renderSetupDailyChallengeSection(){
       </div>
     </div>` : '';
   el.innerHTML = `<div class="card challenge-spotlight setup-dc" role="button" tabindex="0" aria-pressed="${selected}"
-      onclick="selectSetupGame('challenge')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectSetupGame('challenge')}">
+      onclick="selectSetupGame('challenge')" onkeydown="containerKeyActivate(event, ()=>selectSetupGame('challenge'))">
     <div class="setup-dc-selectcheck${selected?' on':''}" aria-hidden="true">${selected?'✓':''}</div>
     <div class="setup-dc-top">🎯 <span class="setup-dc-title">Daily Challenge</span></div>
     <div class="setup-dc-name">${escapeHtml(challenge.label)}</div>
@@ -13620,10 +13711,12 @@ function finishUnit(kind, winner, opts){
   banner.innerHTML=`<div class="nm" style="color:var(--gold)">🎯 ${bannerText}</div>`;
   sb.prepend(banner);
 
-  // Targets .game-play-area, not .oche — a full leg/game-over takeover needs to
-  // replace the slots/status/bounce/turn-actions siblings too, not just the
-  // smaller board box .oche shrank to in the 2026-07 landscape-split redesign.
-  const oche=document.querySelector('.game-play-area');
+  // Hides the play regions (#rail-play + .oche) and returns the #game-result
+  // host the results card below is written into. Deliberately NOT an innerHTML
+  // replace of .game-play-area: #scoreboard lives in there too, and the banner
+  // prepended into it a few lines above would be destroyed in the same tick it
+  // was built — see #screen-game's skeleton comment and showGameResult().
+  const oche=showGameResult('');
   const isCricket = game.gameType === 'cricket';
   const isBaseball = game.gameType === 'baseball';
   const isShanghai = game.gameType === 'shanghai';
@@ -13911,20 +14004,25 @@ function renderGameShell(){
     : isCheckoutTrainer ? 'Tap out your proposed checkout, then press Submit.'
     : isKillerGame ? (dartboardMode ? 'Tap the board to score — your own numbers to build lives, an opponent\'s to attack once you\'re a killer.' : 'Select a multiplier, then tap a number — your own to build lives, an opponent\'s to attack once you\'re a killer.')
     : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.';
+  // Rebuilding this container also resets any previous leg's results screen:
+  // #game-result comes back empty+hidden and #rail-play/.oche come back
+  // unhidden, so showGameResult()'s takeover never leaks into the next leg.
   document.querySelector('.game-play-area').innerHTML=`
       <div class="rail">
         <div class="scoreboard" id="scoreboard"></div>
-        <div class="slots" id="slots"${isPerDartMode ? ' hidden' : ''}></div>
-        <div class="status" id="status">${statusText}</div>
-        <div class="turn-actions">
-          <div class="undo-row">
-            <button class="btn btn-ghost board-miss" id="bounce-out-btn" onclick="throwBounceOut()"${isCheckoutTrainer ? ' hidden' : ''}>Bounce Out</button>
-            <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled${isCheckoutTrainer ? ' hidden' : ''}>${isPerDartMode ? 'Undo Dart' : 'Undo Turn'}</button>
-            <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()"${isPerDartMode ? ' hidden' : ''}>Undo Dart</button>
+        <div class="rail-play" id="rail-play">
+          <div class="slots" id="slots"${isPerDartMode ? ' hidden' : ''}></div>
+          <div class="status" id="status">${statusText}</div>
+          <div class="turn-actions">
+            <div class="undo-row">
+              <button class="btn btn-ghost board-miss" id="bounce-out-btn" onclick="throwBounceOut()"${isCheckoutTrainer ? ' hidden' : ''}>Bounce Out</button>
+              <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled${isCheckoutTrainer ? ' hidden' : ''}>${isPerDartMode ? 'Undo Dart' : 'Undo Turn'}</button>
+              <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()"${isPerDartMode ? ' hidden' : ''}>Undo Dart</button>
+            </div>
+            <button class="btn btn-ghost" id="declare-unsolvable-btn" onclick="declareUnsolvable()"${(isCheckoutTrainer && game && game.config && game.config.trickQuestions) ? '' : ' hidden'}>🚫 No possible checkout</button>
+            <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()"${isPerDartMode ? ' hidden' : ''}>${isCheckoutTrainer ? 'Submit checkout' : 'Enter turn'}</button>
+            <button class="btn btn-primary" id="dp-next-round-btn" onclick="startNextRound()" hidden>Start next round</button>
           </div>
-          <button class="btn btn-ghost" id="declare-unsolvable-btn" onclick="declareUnsolvable()"${(isCheckoutTrainer && game && game.config && game.config.trickQuestions) ? '' : ' hidden'}>🚫 No possible checkout</button>
-          <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()"${isPerDartMode ? ' hidden' : ''}>${isCheckoutTrainer ? 'Submit checkout' : 'Enter turn'}</button>
-          <button class="btn btn-primary" id="dp-next-round-btn" onclick="startNextRound()" hidden>Start next round</button>
         </div>
       </div>
       <div class="oche">
@@ -13935,10 +14033,25 @@ function renderGameShell(){
         </div>
         <div class="pad" id="pad"></div>
         <div class="dart-board-wrap" id="dart-board-wrap"></div>
-      </div>`;
+      </div>
+      <div class="game-result" id="game-result" hidden></div>`;
   applyDartMode();
   updateSaveButtonVisibility();
   updateBowOutButtonVisibility();
+}
+// The one way a leg/game/session-over screen takes over the play area. Hides
+// the two play regions rather than replacing .game-play-area's innerHTML, so
+// #scoreboard (and the "X wins the leg" banner finishUnit() prepends into it)
+// survive the takeover — see the #screen-game skeleton's own comment. Returns
+// the host so callers can keep wiring up buttons inside the card they passed.
+function showGameResult(html){
+  const host = document.getElementById('game-result');
+  const railPlay = document.getElementById('rail-play');
+  const oche = document.querySelector('.oche');
+  if(railPlay) railPlay.hidden = true;
+  if(oche) oche.hidden = true;
+  if(host){ host.innerHTML = html; host.hidden = false; }
+  return host;
 }
 // "Start the next round" dispatcher — Doubles Practice is the only per-dart
 // drill mode with a genuine repeating round boundary left (2026-07: guided
@@ -16006,7 +16119,7 @@ async function finishMarathonLeg(){
   const elapsedMs = Date.now() - marathonSession.startedAtMs;
   const timeUp = elapsedMs >= marathonSession.durationMinutes*60000;
   if(timeUp){ endMarathonMode(true); return; }
-  const oche = document.querySelector('.game-play-area');
+  const oche = showGameResult('');
   if(oche) oche.innerHTML = `<div style="text-align:center;padding:40px 4px">
     <div style="font-family:'Bebas Neue';font-size:28px;color:var(--gold)">Leg ${marathonSession.legOrder} complete — ${dartsThisLeg} darts</div>
     <p class="pp-meta" style="margin:10px 0 0">Starting the next leg…</p>
@@ -16043,7 +16156,7 @@ const MARATHON_TREND_DESC = {
 function renderMarathonAnalysisScreen(detail, fullDistance){
   const completed = detail.legs.filter(l=>l.completedAt!=null);
   const rows = completed.map(l=>`<div class="dart-count-row"><span class="dart-count-val">${l.dartCount}</span><span class="dart-count-lbl">Leg ${l.legOrder}</span></div>`).join('');
-  const oche=document.querySelector('.game-play-area');
+  const oche=showGameResult('');
   const legPanel = `<div class="summary-grid" style="margin-top:14px">
     <button class="btn btn-ghost" onclick="show('setup')">New game</button>
   </div>`;
@@ -16983,7 +17096,7 @@ function renderBlitzResults(){
   const illegalCount = rounds.filter(r=>!r.legal).length;
   const score = optimalCount*2 + legalNotOptimal*1;
   const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
-  const oche = document.querySelector('.game-play-area');
+  const oche = showGameResult('');
   if(oche) oche.innerHTML = `<div style="text-align:center;padding:14px 4px">
     <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">TIME'S UP!</div>
     <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">Checkout Blitz — final score</p>

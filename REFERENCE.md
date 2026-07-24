@@ -3316,10 +3316,12 @@ player knows which mode to pick.
 
 `#screen-game`'s in-game markup (both the static pre-game-start skeleton and
 `renderGameShell()`'s per-leg/game rebuilt template, `frontend/index.html`)
-groups `#scoreboard`/`#slots`/`#status`/`.turn-actions` inside one `.rail`
-wrapper, sibling to `.oche` (the multi-row + Pad/Dartboard board itself). Both
-`.game-play-area` (the outer, single-innerHTML-target wrapper `renderGameShell()`
-replaces wholesale) and `.rail` are `display:contents` by default, so on a
+groups `#scoreboard` plus a `#rail-play` sub-wrapper (holding
+`#slots`/`#status`/`.turn-actions`) inside one `.rail` wrapper, sibling to
+`.oche` (the multi-row + Pad/Dartboard board itself) and to `#game-result`
+(the results host, empty and hidden during play). `.game-play-area` (the
+outer, single-innerHTML-target wrapper `renderGameShell()` replaces
+wholesale), `.rail`, and `#rail-play` are all `display:contents` by default, so on a
 portrait/narrow viewport everything flattens straight through to `#screen-game`'s
 existing `display:flex;flex-direction:column` layout — unchanged from before
 this redesign, aside from `.oche`/`.turn-actions` needing explicit `order`
@@ -3354,15 +3356,41 @@ genuinely narrower than the old full-width scoring screen:
   outcome grid down to almost no width, wrapping it into dozens of rows and
   ballooning the card's height; stacked, the grid gets the rail's full width.
 
-GAME OVER/LEG COMPLETE/etc. results overlays (`finishUnit()`,
-`finishMarathonLeg()`, `renderMarathonAnalysisScreen()`, the Checkout Blitz
-"TIME'S UP" screen) all target `.game-play-area` (not `.oche`), replacing its
-entire innerHTML with one results div — the same takeover behavior as before
-this redesign, when `.oche` alone was the only child needing replacement.
-Since that results div becomes `.game-play-area`'s only child, a
-`.game-play-area > *:only-child{grid-column:1/-1;grid-row:1}` landscape rule
-gives it the full grid area instead of the narrow rail slot `.rail`/`.oche`
-would otherwise occupy.
+**Results takeover — `showGameResult(html)`.** GAME OVER/LEG COMPLETE/MARATHON
+COMPLETE/Checkout Blitz "TIME'S UP" all go through this one helper
+(`finishUnit()`, `finishMarathonLeg()`, `renderMarathonAnalysisScreen()`, and
+the Blitz results function each call it and write into the host it returns).
+It **hides** the two play regions — `#rail-play` and `.oche` — and unhides
+`#game-result`; it deliberately does **not** replace `.game-play-area`'s
+innerHTML.
+
+That distinction is load-bearing, not stylistic: `#scoreboard` lives inside
+`.game-play-area` too, and `finishUnit()` prepends its "🎯 X wins the leg"
+banner into the scoreboard immediately before the takeover. An innerHTML
+replace therefore destroyed that banner in the same tick it was built (it
+never rendered at all) and blanked the very match state the summary card is
+reporting on. Hiding instead keeps the scoreboard and its banner on screen
+through the results screen — the behavior that predates the landscape-split
+redesign, when `#scoreboard` was a permanent sibling outside the replaced
+region.
+
+`renderGameShell()` rebuilds `.game-play-area` wholesale on every new
+leg/game, which naturally resets the takeover: `#game-result` comes back empty
+and hidden, `#rail-play`/`.oche` come back unhidden. In landscape,
+`#game-result` takes `grid-column:2` — the board's own column, free because
+`.oche` is hidden — so the rail keeps column 1 and the summary sits where the
+board was.
+
+One CSS trap worth knowing, since it silently defeats `hidden` and was hit
+twice while building this: **an author `display` declaration outranks the UA
+stylesheet's `[hidden]{display:none}` regardless of selector strength.**
+`.rail-play` (`display:contents`), `.oche` (`display:flex` under
+`body.game-active`), and `.slots` (`display:grid`) all carry one, so
+`el.hidden = true` on them does nothing on its own — verified live, the whole
+dartboard stayed on screen behind the results card. A single scoped rule,
+`.rail-play[hidden], .oche[hidden], .slots[hidden], .game-result[hidden]
+{display:none!important}`, fixes the class of bug for the game screen without
+a blanket `[hidden]` override that could change behavior elsewhere in the app.
 
 Bounce Out moved into `.turn-actions .undo-row` as a third flex button
 (relabeling "Undo Last Turn" to "Undo Turn" for space), reclaiming the
