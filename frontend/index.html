@@ -365,8 +365,13 @@
   .rail-play[hidden], .oche[hidden], .slots[hidden], .game-result[hidden]{display:none!important}
   .turn-actions{order:2}
   /* Results host (GAME OVER / LEG COMPLETE / …). order:3 keeps it below the
-     scoreboard in portrait; hidden and empty during play. */
+     scoreboard in portrait; hidden and empty during play. It must be its own
+     scroll container: the takeover now deliberately KEEPS #scoreboard and the
+     winner banner on screen above it, so on a short phone the card below them
+     can exceed the remaining height — and body.game-active{overflow:hidden}
+     means anything that overflows is simply unreachable, not scrolled to. */
   .game-result{order:3}
+  body.game-active .game-result{flex:1;min-height:0;overflow-y:auto}
 
   .slots{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
   .slot{position:relative;background:var(--surface);border:1px dashed var(--wire);border-radius:11px;
@@ -736,13 +741,17 @@
     body.game-active #screen-game{
       display:grid;
       grid-template-columns:minmax(190px,300px) 1fr;
-      grid-template-rows:1fr;
-      column-gap:14px;
+      /* Row 1 is the optional full-width Marathon banner (collapses to 0 when
+         absent); row 2 is the rail + board. Every item sits in exactly ONE
+         row — no multi-row span — so this stays clear of the row-sizing trap
+         described above. */
+      grid-template-rows:auto 1fr;
+      column-gap:14px; row-gap:6px;
       padding:8px 12px 10px;
     }
     body.game-active .rail{
       display:flex; flex-direction:column;
-      grid-column:1; grid-row:1;
+      grid-column:1; grid-row:2;
       min-height:0; overflow-y:auto;
     }
     body.game-active #scoreboard{margin-bottom:0;max-width:none;overflow-x:auto}
@@ -758,7 +767,7 @@
     body.game-active #slots .slot{height:auto;flex-direction:row;justify-content:flex-start;gap:8px;padding:6px 12px}
     body.game-active #slots .slot .lab{font-size:22px}
     body.game-active #status{margin-bottom:0}
-    body.game-active .oche{grid-column:2;grid-row:1;display:flex;flex-direction:column;justify-content:center;min-height:0}
+    body.game-active .oche{grid-column:2;grid-row:2;display:flex;flex-direction:column;justify-content:center;min-height:0}
     body.game-active .turn-actions{margin-top:auto;padding-top:8px}
 
     /* GAME OVER/LEG COMPLETE/etc. results card. showGameResult() hides .oche,
@@ -766,7 +775,25 @@
        the rail (and the scoreboard reporting the match state the card is
        summarising) stays in column 1, which is why the takeover deliberately
        hides rather than destroys. */
-    body.game-active .game-result{grid-column:2;grid-row:1;min-height:0;overflow-y:auto;align-self:center}
+    body.game-active .game-result{
+      grid-column:2; grid-row:2; min-height:0; overflow-y:auto;
+      /* NOT align-self:center — a centred grid item is sized to its content
+         rather than stretched to the row, so clientHeight always equals
+         scrollHeight and overflow-y:auto never forms a scroll container. A
+         card taller than the row then overflowed with no way to reach the
+         cut-off part (verified live: clipped at 1024x380 with no scrollable
+         ancestor). Stretching and centring the CONTENT with `safe center`
+         keeps the short-card look while staying scrollable when tall — `safe`
+         degrades to flex-start on overflow instead of hiding the top. */
+      display:flex; flex-direction:column; justify-content:safe center;
+    }
+    /* Marathon Mode's persistent banner (renderMarathonBanner() inserts it
+       before .oche, inside display:contents .game-play-area — so it lands here
+       as a grid item). Without an explicit placement it auto-flows into an
+       implicit row below everything else, ending up squeezed into the bottom
+       of the narrow rail column. Row 1 spans both columns and collapses to
+       zero height whenever no banner exists. */
+    body.game-active #marathon-banner{grid-column:1/-1;grid-row:1;align-self:start}
   }
 
   @media (prefers-reduced-motion:reduce){*{animation:none!important}}
@@ -5833,6 +5860,10 @@ const GAME_LEDGER_NAMES = {
   around_the_clock:'Around the Clock', around_the_world:'Around the World', bobs_27:"Bob's 27", checkout_ladder:'121 Checkout Ladder',
   pressure_chamber:'The Pressure Chamber', gauntlet:'The Gauntlet', dead_man_walking:'Dead Man Walking',
   killer:'Killer', ghost:'Ghost Mode', marathon:'Marathon Mode',
+  // Not a ledger row (no category lists it) — currentSetupOptionKey() returns
+  // it once a league fixture is picked, and the fallback Continue below needs
+  // a human-readable name for it.
+  league_game:'League Game',
 };
 const GAME_LEDGER_TEASERS = {
   x01:'Count down to zero, finish on a double.',
@@ -5954,17 +5985,25 @@ function renderSetupGameLedger(){
       ${isOpen ? `<div class="setup-cat-rows">${rows}</div>` : ''}
     </div>`;
   }).join('');
-  // Fallback Continue. The per-row Continue above only exists while the
-  // SELECTED game's own category is expanded, but a game stays selected when
-  // its category is collapsed (toggleSetupCategory() can set 'none', and
-  // opening a different category collapses this one) — which left Step 1 with
-  // no way to advance at all despite having a valid selection. The Daily
-  // Challenge is excluded because its spotlight card is rendered separately by
-  // renderSetupDailyChallengeSection() and is always on screen with its own
-  // Continue, so it can never reach the stranded state this covers.
-  if(currentKey && currentKey !== 'challenge' && openKey !== setupOpenCategoryKey()){
+  // Fallback Continue. The per-row Continue above is rendered INSIDE the
+  // selected row, so it only exists when that row is actually on screen —
+  // which it isn't whenever the selection's category is collapsed
+  // (toggleSetupCategory() can set 'none', and opening another category
+  // collapses this one), leaving Step 1 with no way to advance at all.
+  //
+  // Keyed on "was the selected row actually rendered?" rather than on
+  // comparing category keys: 'league_game' (currentSetupOptionKey()'s value
+  // once a fixture is picked) belongs to NO ledger category, so
+  // setupOpenCategoryKey() falls back to 'traditional' for it and a key
+  // comparison wrongly concludes its row is visible when no such row exists.
+  // The Daily Challenge is the one genuine exception — its spotlight card is
+  // rendered separately by renderSetupDailyChallengeSection(), always on
+  // screen with its own Continue.
+  const selectedRowRendered = GAME_LEDGER_CATEGORIES
+    .some(c => c.key === openKey && c.keys.includes(currentKey));
+  if(currentKey && currentKey !== 'challenge' && !selectedRowRendered){
     el.innerHTML += `<div class="btn-row" style="margin-top:14px">
-      <button class="btn btn-primary" id="setup-step1-continue" style="flex:1" onclick="setupGoToStep2()">Continue with ${escapeHtml(GAME_LEDGER_NAMES[currentKey]||currentKey)}</button>
+      <button class="btn btn-primary" id="setup-step1-continue" style="flex:1" onclick="setupGoToStep2()">Continue with ${escapeHtml(GAME_LEDGER_NAMES[currentKey]||'this game')}</button>
     </div>`;
   }
   mountSetupInlineOptions();

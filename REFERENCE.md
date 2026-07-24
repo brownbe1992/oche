@@ -3331,11 +3331,16 @@ scoreboard/slots/status.
 
 `@media (orientation:landscape) and (min-width:700px)` (a tablet held
 sideways) flips `.rail` into a real `display:flex;flex-direction:column` box
-and grid-places it beside `.oche` in a **single-row** two-column grid
+and grid-places it beside `.oche` in a two-column grid
 (`#screen-game{display:grid;grid-template-columns:minmax(190px,300px) 1fr;
-grid-template-rows:1fr}`) — a narrow rail column for scores/status/actions,
-full-height board column. Deliberately a single row with `.rail` as one real
-box, not `.oche` spanning multiple rail rows: an earlier version grid-placed
+grid-template-rows:auto 1fr}`) — a narrow rail column for scores/status/actions,
+full-height board column. Row 1 exists solely for Marathon Mode's persistent
+banner, which `renderMarathonBanner()` inserts before `.oche` and which
+therefore becomes a grid item of its own; it's placed `grid-column:1/-1;
+grid-row:1` so it spans the full width above both columns, and the `auto` row
+collapses to zero height whenever no banner exists. Everything else sits in
+row 2. Every item occupies exactly **one** row — no multi-row span — because
+an earlier version grid-placed
 `#scoreboard`/`#slots`/`#status`/`.turn-actions` as four separate row-1..5
 items with `.oche` spanning `grid-row:1/-1` across all of them, which hit a
 genuine CSS Grid behavior (verified live via Playwright, not a guess): a
@@ -3380,6 +3385,19 @@ and hidden, `#rail-play`/`.oche` come back unhidden. In landscape,
 `#game-result` takes `grid-column:2` — the board's own column, free because
 `.oche` is hidden — so the rail keeps column 1 and the summary sits where the
 board was.
+
+`#game-result` is its own scroll container in both orientations
+(`flex:1;min-height:0;overflow-y:auto` in portrait, the grid cell plus
+`overflow-y:auto` in landscape). It has to be: the takeover deliberately keeps
+the scoreboard and winner banner above the card, so on a short screen the card
+can exceed the space left over, and `body.game-active{overflow:hidden}` means
+anything that overflows is unreachable rather than scrolled to. In landscape
+the card is centred with `justify-content:safe center` on a stretched host
+rather than `align-self:center` — a centred grid item is sized to its content,
+so `clientHeight` always equals `scrollHeight` and `overflow-y:auto` never
+forms a scroll container at all (verified live: clipped with no scrollable
+ancestor at 1024×380). `safe` degrades to flex-start once the content
+overflows, so the top of the card can never become unreachable either.
 
 One CSS trap worth knowing, since it silently defeats `hidden` and was hit
 twice while building this: **an author `display` declaration outranks the UA
