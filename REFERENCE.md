@@ -3312,6 +3312,63 @@ setting and the Accessibility section, which cross-references it) says so
 directly, so an admin setting up the app for a low-vision or motor-impaired
 player knows which mode to pick.
 
+### Scoring-screen layout: portrait "Focus Mode" / landscape "Tablet Split" (2026-07)
+
+`#screen-game`'s in-game markup (both the static pre-game-start skeleton and
+`renderGameShell()`'s per-leg/game rebuilt template, `frontend/index.html`)
+groups `#scoreboard`/`#slots`/`#status`/`.turn-actions` inside one `.rail`
+wrapper, sibling to `.oche` (the multi-row + Pad/Dartboard board itself). Both
+`.game-play-area` (the outer, single-innerHTML-target wrapper `renderGameShell()`
+replaces wholesale) and `.rail` are `display:contents` by default, so on a
+portrait/narrow viewport everything flattens straight through to `#screen-game`'s
+existing `display:flex;flex-direction:column` layout — unchanged from before
+this redesign, aside from `.oche`/`.turn-actions` needing explicit `order`
+values (1 and 2) since `.turn-actions` had to move earlier in the markup, ahead
+of `.oche`, so `.rail` could group it contiguously with
+scoreboard/slots/status.
+
+`@media (orientation:landscape) and (min-width:700px)` (a tablet held
+sideways) flips `.rail` into a real `display:flex;flex-direction:column` box
+and grid-places it beside `.oche` in a **single-row** two-column grid
+(`#screen-game{display:grid;grid-template-columns:minmax(190px,300px) 1fr;
+grid-template-rows:1fr}`) — a narrow rail column for scores/status/actions,
+full-height board column. Deliberately a single row with `.rail` as one real
+box, not `.oche` spanning multiple rail rows: an earlier version grid-placed
+`#scoreboard`/`#slots`/`#status`/`.turn-actions` as four separate row-1..5
+items with `.oche` spanning `grid-row:1/-1` across all of them, which hit a
+genuine CSS Grid behavior (verified live via Playwright, not a guess): a
+multi-row-spanning item's min-size need gets redistributed into every
+intrinsically-sized ("auto"-family) row it spans, ballooning row 1 to ~875px
+tall in an 820px-tall viewport for Around the Clock's one-line scoreboard
+card and squeezing the flexible row to 0. Grouping the rail into one real
+flex-column box sidesteps that whole class of bug.
+
+Two other landscape-only adjustments, both because the rail column is
+genuinely narrower than the old full-width scoring screen:
+- `#slots`' three dart-slot cards go from a 3-column grid to a single column
+  of compact horizontal rows (number + points side by side, not stacked).
+- Around the Clock/Around the World's solo scoreboard row (`.pscore`, which
+  packs a name block, a meta block, a remaining-count, and a wrapping
+  20/63-cell outcome grid all into one flex row) switches to
+  `flex-direction:column` — in a flex row that content had squeezed the
+  outcome grid down to almost no width, wrapping it into dozens of rows and
+  ballooning the card's height; stacked, the grid gets the rail's full width.
+
+GAME OVER/LEG COMPLETE/etc. results overlays (`finishUnit()`,
+`finishMarathonLeg()`, `renderMarathonAnalysisScreen()`, the Checkout Blitz
+"TIME'S UP" screen) all target `.game-play-area` (not `.oche`), replacing its
+entire innerHTML with one results div — the same takeover behavior as before
+this redesign, when `.oche` alone was the only child needing replacement.
+Since that results div becomes `.game-play-area`'s only child, a
+`.game-play-area > *:only-child{grid-column:1/-1;grid-row:1}` landscape rule
+gives it the full grid area instead of the narrow rail slot `.rail`/`.oche`
+would otherwise occupy.
+
+Bounce Out moved into `.turn-actions .undo-row` as a third flex button
+(relabeling "Undo Last Turn" to "Undo Turn" for space), reclaiming the
+standalone full-width row it used to occupy — the space-saving portrait
+change ("Focus Mode").
+
 ### Contrast (WCAG AA)
 
 Audited 2026-07 (relative-luminance contrast ratios computed against every

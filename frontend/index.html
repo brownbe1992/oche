@@ -330,7 +330,25 @@
   @keyframes coflash{0%{color:#fff}100%{color:var(--gold)}}
   .pscore .co-inline.flash{animation:coflash .5s ease-out}
 
-  .oche{background:var(--board);border:1px solid var(--wire);border-radius:14px;padding:18px}
+  .oche{background:var(--board);border:1px solid var(--wire);border-radius:14px;padding:18px;order:1}
+  /* Purely a structural wrapper (2026-07 redesign) — renderGameShell() replaces
+     its innerHTML wholesale, same as `.oche` alone used to be, but its actual
+     children (.rail/.oche) need to lay out as if they were direct children of
+     #screen-game so the landscape media query below can grid-place them
+     independently — display:contents makes this wrapper invisible to layout
+     while keeping it as one single innerHTML target. */
+  .game-play-area{display:contents}
+  /* Also display:contents by default — scoreboard/slots/status/turn-actions
+     flatten straight through to be flex children of #screen-game (already
+     display:flex;flex-direction:column for portrait, see body.game-active
+     #screen-game below), preserving today's stacked order via the `order`
+     values here and on `.oche` above (`.turn-actions` had to move earlier in
+     the markup, ahead of `.oche`, so this wrapper could group it contiguously
+     with scoreboard/slots/status — `order` puts it back after `.oche`
+     visually). The landscape media query flips this to a real flex column
+     instead, grid-placed beside `.oche` as a single unit. */
+  .rail{display:contents}
+  .turn-actions{order:2}
 
   .slots{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
   .slot{position:relative;background:var(--surface);border:1px dashed var(--wire);border-radius:11px;
@@ -436,7 +454,11 @@
   .turn-actions .undo-row{display:flex;gap:8px}
   .turn-actions .undo-row .btn{flex:1;font-size:13px}
   .turn-actions .btn-primary{font-size:17px;padding:16px 20px}
-  .board-miss{flex:none;width:100%;margin-top:6px}
+  /* #bounce-out-btn (.board-miss) now lives inside .undo-row (2026-07 redesign
+     — Bounce Out merged into the same row as Undo Last Turn/Undo Dart to
+     reclaim a whole row of vertical space for the board/pad below), so it's
+     sized identically to its row-mates via the .undo-row .btn rule above —
+     no separate width/flex override needed here anymore. */
 
   /* ---- dart analytics ---- */
   .da-list{display:flex;flex-direction:column;gap:5px}
@@ -508,7 +530,6 @@
   .game-menu-list[hidden]{display:none}
   .dart-board-wrap{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
   .dart-board-wrap.board-disabled{pointer-events:none;opacity:.4}
-  .board-miss{flex:none;margin-top:8px}
   .hidden{display:none!important}
 
   /* ---- Dart Builder: icon picker (docs/archive/dart-builder-roadmap.md accessibility
@@ -661,14 +682,13 @@
   body.game-active .ct-marks{font-size:clamp(8px,1.3dvh,13px)}
   /* dartboard — grows to fill all available height */
   body.game-active .dart-board-wrap{flex:1;min-height:0}
-  body.game-active .board-miss{
-    font-size:clamp(12px,1.6dvh,15px);
-    padding:clamp(8px,1.1dvh,13px) 8px;
-  }
-  /* turn actions — always anchored at bottom, never flex */
+  /* turn actions — always anchored at bottom, never flex. #bounce-out-btn
+     (.board-miss) lives inside .undo-row now (2026-07 redesign) so it's
+     already sized by the .undo-row .btn rule just below — no separate rule
+     needed here anymore. */
   body.game-active .turn-actions{
     flex:none; margin-top:0; background:none;
-    padding:8px 0 0; gap:6px;
+    padding:6px 0 0; gap:5px;
   }
   body.game-active .turn-actions .undo-row .btn{
     font-size:clamp(10px,1.4dvh,13px);
@@ -677,6 +697,57 @@
   body.game-active .turn-actions .btn-primary{
     font-size:clamp(13px,1.8dvh,17px);
     padding:clamp(10px,1.5dvh,16px) 8px;
+  }
+
+  /* 2026-07 redesign: "Landscape Tablet Split" (C) — on wide/landscape
+     viewports (how a tablet actually sits in hand), give the board its own
+     full-height column and rail the scoreboard/slots/status/turn-actions into
+     a narrow left column instead of stacking everything above the board.
+     Deliberately a SINGLE-ROW grid with `.rail` as one real flex-column box
+     (not `.oche` spanning multiple rail rows) — an earlier attempt that
+     grid-placed #scoreboard/#slots/#status/.turn-actions as four separate
+     row-1..5 items, with `.oche` spanning grid-row:1/-1 across all of them,
+     hit a real CSS Grid gotcha found live via Playwright: a multi-row-spanning
+     item's min-size need gets redistributed into every intrinsically-sized
+     ("auto"-family) row it spans, which inflated row 1 to ~875px tall in an
+     820px-tall viewport for Around the Clock's one-line scoreboard card,
+     squeezing the flexible row to 0. Grouping the rail into one real box
+     sidesteps that whole class of bug — `.rail`'s own internal stacking is a
+     plain, independent flex column. */
+  @media (orientation:landscape) and (min-width:700px){
+    body.game-active #screen-game{
+      display:grid;
+      grid-template-columns:minmax(190px,300px) 1fr;
+      grid-template-rows:1fr;
+      column-gap:14px;
+      padding:8px 12px 10px;
+    }
+    body.game-active .rail{
+      display:flex; flex-direction:column;
+      grid-column:1; grid-row:1;
+      min-height:0; overflow-y:auto;
+    }
+    body.game-active #scoreboard{margin-bottom:0;max-width:none;overflow-x:auto}
+    /* Solo per-dart modes' scoreboard row (Around the Clock/World) packs a
+       name block, a meta block, a remaining-count, AND a wrapping 20/63-cell
+       outcome grid all into one flex ROW — fine in the old full-width layout,
+       but in the narrow rail the outcome grid gets squeezed to almost no
+       width and wraps into dozens of rows, ballooning the card's height.
+       Stack it as a column here so the grid gets the rail's full width. */
+    body.game-active .rail .pscore{flex-direction:column;align-items:stretch;gap:6px}
+    body.game-active .rail .pscore .rem-wrap{align-items:flex-start;margin-left:0}
+    body.game-active #slots{grid-template-columns:1fr;gap:6px;margin-bottom:0}
+    body.game-active #slots .slot{height:auto;flex-direction:row;justify-content:flex-start;gap:8px;padding:6px 12px}
+    body.game-active #slots .slot .lab{font-size:22px}
+    body.game-active #status{margin-bottom:0}
+    body.game-active .oche{grid-column:2;grid-row:1;display:flex;flex-direction:column;justify-content:center;min-height:0}
+    body.game-active .turn-actions{margin-top:auto;padding-top:8px}
+
+    /* GAME OVER/LEG COMPLETE/etc. overlays replace .game-play-area's entire
+       innerHTML with one results div, making it the container's only child —
+       give that one child the full grid area instead of the narrow rail
+       column `.rail`/`.oche` would otherwise occupy. */
+    body.game-active .game-play-area > *:only-child{grid-column:1/-1;grid-row:1}
   }
 
   @media (prefers-reduced-motion:reduce){*{animation:none!important}}
@@ -1335,26 +1406,49 @@
   </section>
 
   <!-- ============ GAME ============ -->
+  <!-- 2026-07 redesign (/frontend-design, "Landscape Tablet Split" (C) for wide
+       viewports + "Focus Mode" (D) for portrait — see REFERENCE.md's own section
+       on this): scoreboard/slots/status/turn-actions live inside a `.rail`
+       wrapper, `.oche` (multi+pad/board only) is its sibling. `.rail` and
+       `.game-play-area` are both display:contents by default (see CSS), so
+       portrait keeps today's exact visual order via plain document order plus
+       two `order` overrides (`.oche` before `.turn-actions`, since
+       `.turn-actions` had to move earlier in the markup so `.rail` could wrap
+       it contiguously with scoreboard/slots/status). The landscape media query
+       flips `.rail` to a real flex column and grid-places it beside `.oche` —
+       a single-row grid, deliberately NOT a multi-row span, because a
+       multi-row-spanning `.oche` was found (live, via Playwright) to make
+       Grid's auto-row-sizing algorithm redistribute its own min-size need into
+       the rail's tracks, ballooning e.g. Around the Clock's one-line
+       scoreboard row to ~875px tall in an 820px-tall viewport. -->
   <section id="screen-game" class="screen">
-    <div class="scoreboard" id="scoreboard"></div>
+    <!-- game-play-area is display:contents (see CSS) — a single innerHTML
+         target for renderGameShell() to replace wholesale, while its children
+         still lay out as if they were direct children of #screen-game. -->
+    <div class="game-play-area">
+      <div class="rail">
+        <div class="scoreboard" id="scoreboard"></div>
+        <div class="slots" id="slots"></div>
+        <div class="status" id="status">Tap the board to score.</div>
 
-    <div class="oche">
-      <div class="slots" id="slots"></div>
-      <div class="status" id="status">Tap the board to score.</div>
-      <div class="multi" id="multi-row" role="group" aria-label="Dart multiplier">
-        <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
-        <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
-        <button class="m-t" id="m-t" aria-pressed="false" onclick="setMult(3)">Treble</button>
-      </div>
-      <div class="pad" id="pad"></div>
-      <div class="dart-board-wrap" id="dart-board-wrap"></div>
-      <button class="btn btn-ghost board-miss" id="bounce-out-btn" onclick="throwBounceOut()">Bounce Out</button>
-      <div class="turn-actions">
-        <div class="undo-row">
-          <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled>Undo Last Turn</button>
-          <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo Dart</button>
+        <div class="turn-actions">
+          <div class="undo-row">
+            <button class="btn btn-ghost board-miss" id="bounce-out-btn" onclick="throwBounceOut()">Bounce Out</button>
+            <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled>Undo Turn</button>
+            <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()">Undo Dart</button>
+          </div>
+          <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
         </div>
-        <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()">Enter turn</button>
+      </div>
+
+      <div class="oche">
+        <div class="multi" id="multi-row" role="group" aria-label="Dart multiplier">
+          <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
+          <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
+          <button class="m-t" id="m-t" aria-pressed="false" onclick="setMult(3)">Treble</button>
+        </div>
+        <div class="pad" id="pad"></div>
+        <div class="dart-board-wrap" id="dart-board-wrap"></div>
       </div>
     </div>
 
@@ -13526,7 +13620,10 @@ function finishUnit(kind, winner, opts){
   banner.innerHTML=`<div class="nm" style="color:var(--gold)">🎯 ${bannerText}</div>`;
   sb.prepend(banner);
 
-  const oche=document.querySelector('.oche');
+  // Targets .game-play-area, not .oche — a full leg/game-over takeover needs to
+  // replace the slots/status/bounce/turn-actions siblings too, not just the
+  // smaller board box .oche shrank to in the 2026-07 landscape-split redesign.
+  const oche=document.querySelector('.game-play-area');
   const isCricket = game.gameType === 'cricket';
   const isBaseball = game.gameType === 'baseball';
   const isShanghai = game.gameType === 'shanghai';
@@ -13801,25 +13898,30 @@ function renderGameShell(){
   // roadmap.md "Killer"): every dart commits immediately via throwDartKiller(),
   // which also advances the visit/turn itself — there's no staged visit to enter.
   const isPerDartMode = isDoublesPractice || isChuckin || isClock || isWorld || isKillerGame;
-  document.querySelector('.oche').innerHTML=`
-      <div class="slots" id="slots"${isPerDartMode ? ' hidden' : ''}></div>
-      <div class="status" id="status">${isChuckin ? "Select a multiplier, then tap a number. No score, no pressure — just throw." : isClock ? 'Select a multiplier, then tap a number. Hit every 1-20 as a single.' : isWorld ? 'Select a multiplier, then tap a number. Chip away at every lifetime outcome.' : isDoublesPractice ? 'Select a multiplier, then tap a number.' : isCricketGame ? 'Select a multiplier, then tap a target number.' : isCheckoutTrainer ? 'Tap out your proposed checkout, then press Submit.' : isKillerGame ? 'Select a multiplier, then tap a number — your own to build lives, an opponent\'s to attack once you\'re a killer.' : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
-      <div class="multi" id="multi-row" role="group" aria-label="Dart multiplier">
-        <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
-        <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
-        <button class="m-t" id="m-t" aria-pressed="false" onclick="setMult(3)">Treble</button>
-      </div>
-      <div class="pad" id="pad"></div>
-      <div class="dart-board-wrap" id="dart-board-wrap"></div>
-      <button class="btn btn-ghost board-miss" id="bounce-out-btn" onclick="throwBounceOut()"${isCheckoutTrainer ? ' hidden' : ''}>Bounce Out</button>
-      <div class="turn-actions">
-        <div class="undo-row">
-          <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled${isCheckoutTrainer ? ' hidden' : ''}>${isPerDartMode ? 'Undo Last Dart' : 'Undo Last Turn'}</button>
-          <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()"${isPerDartMode ? ' hidden' : ''}>Undo Dart</button>
+  document.querySelector('.game-play-area').innerHTML=`
+      <div class="rail">
+        <div class="scoreboard" id="scoreboard"></div>
+        <div class="slots" id="slots"${isPerDartMode ? ' hidden' : ''}></div>
+        <div class="status" id="status">${isChuckin ? "Select a multiplier, then tap a number. No score, no pressure — just throw." : isClock ? 'Select a multiplier, then tap a number. Hit every 1-20 as a single.' : isWorld ? 'Select a multiplier, then tap a number. Chip away at every lifetime outcome.' : isDoublesPractice ? 'Select a multiplier, then tap a number.' : isCricketGame ? 'Select a multiplier, then tap a target number.' : isCheckoutTrainer ? 'Tap out your proposed checkout, then press Submit.' : isKillerGame ? 'Select a multiplier, then tap a number — your own to build lives, an opponent\'s to attack once you\'re a killer.' : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
+        <div class="turn-actions">
+          <div class="undo-row">
+            <button class="btn btn-ghost board-miss" id="bounce-out-btn" onclick="throwBounceOut()"${isCheckoutTrainer ? ' hidden' : ''}>Bounce Out</button>
+            <button class="btn btn-ghost" id="undo-turn-btn" onclick="undoLastTurn()" disabled${isCheckoutTrainer ? ' hidden' : ''}>${isPerDartMode ? 'Undo Dart' : 'Undo Turn'}</button>
+            <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()"${isPerDartMode ? ' hidden' : ''}>Undo Dart</button>
+          </div>
+          <button class="btn btn-ghost" id="declare-unsolvable-btn" onclick="declareUnsolvable()"${(isCheckoutTrainer && game && game.config && game.config.trickQuestions) ? '' : ' hidden'}>🚫 No possible checkout</button>
+          <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()"${isPerDartMode ? ' hidden' : ''}>${isCheckoutTrainer ? 'Submit checkout' : 'Enter turn'}</button>
+          <button class="btn btn-primary" id="dp-next-round-btn" onclick="startNextRound()" hidden>Start next round</button>
         </div>
-        <button class="btn btn-ghost" id="declare-unsolvable-btn" onclick="declareUnsolvable()"${(isCheckoutTrainer && game && game.config && game.config.trickQuestions) ? '' : ' hidden'}>🚫 No possible checkout</button>
-        <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()"${isPerDartMode ? ' hidden' : ''}>${isCheckoutTrainer ? 'Submit checkout' : 'Enter turn'}</button>
-        <button class="btn btn-primary" id="dp-next-round-btn" onclick="startNextRound()" hidden>Start next round</button>
+      </div>
+      <div class="oche">
+        <div class="multi" id="multi-row" role="group" aria-label="Dart multiplier">
+          <button class="m-s" id="m-s" aria-pressed="true"  onclick="setMult(1)">Single</button>
+          <button class="m-d" id="m-d" aria-pressed="false" onclick="setMult(2)">Double</button>
+          <button class="m-t" id="m-t" aria-pressed="false" onclick="setMult(3)">Treble</button>
+        </div>
+        <div class="pad" id="pad"></div>
+        <div class="dart-board-wrap" id="dart-board-wrap"></div>
       </div>`;
   applyDartMode();
   updateSaveButtonVisibility();
@@ -15891,7 +15993,7 @@ async function finishMarathonLeg(){
   const elapsedMs = Date.now() - marathonSession.startedAtMs;
   const timeUp = elapsedMs >= marathonSession.durationMinutes*60000;
   if(timeUp){ endMarathonMode(true); return; }
-  const oche = document.querySelector('.oche');
+  const oche = document.querySelector('.game-play-area');
   if(oche) oche.innerHTML = `<div style="text-align:center;padding:40px 4px">
     <div style="font-family:'Bebas Neue';font-size:28px;color:var(--gold)">Leg ${marathonSession.legOrder} complete — ${dartsThisLeg} darts</div>
     <p class="pp-meta" style="margin:10px 0 0">Starting the next leg…</p>
@@ -15928,7 +16030,7 @@ const MARATHON_TREND_DESC = {
 function renderMarathonAnalysisScreen(detail, fullDistance){
   const completed = detail.legs.filter(l=>l.completedAt!=null);
   const rows = completed.map(l=>`<div class="dart-count-row"><span class="dart-count-val">${l.dartCount}</span><span class="dart-count-lbl">Leg ${l.legOrder}</span></div>`).join('');
-  const oche=document.querySelector('.oche');
+  const oche=document.querySelector('.game-play-area');
   const legPanel = `<div class="summary-grid" style="margin-top:14px">
     <button class="btn btn-ghost" onclick="show('setup')">New game</button>
   </div>`;
@@ -16868,7 +16970,7 @@ function renderBlitzResults(){
   const illegalCount = rounds.filter(r=>!r.legal).length;
   const score = optimalCount*2 + legalNotOptimal*1;
   const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
-  const oche = document.querySelector('.oche');
+  const oche = document.querySelector('.game-play-area');
   if(oche) oche.innerHTML = `<div style="text-align:center;padding:14px 4px">
     <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">TIME'S UP!</div>
     <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">Checkout Blitz — final score</p>
