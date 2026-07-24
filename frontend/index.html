@@ -13898,11 +13898,24 @@ function renderGameShell(){
   // roadmap.md "Killer"): every dart commits immediately via throwDartKiller(),
   // which also advances the visit/turn itself — there's no staged visit to enter.
   const isPerDartMode = isDoublesPractice || isChuckin || isClock || isWorld || isKillerGame;
+  // Dartboard mode hides the multiplier buttons entirely (tapping a zone on the
+  // board IS the multiplier selection), so every branch's "Select a
+  // multiplier..." instruction is dropped in favor of a generic "Tap the
+  // board to score." (plus whichever mode-specific flavor text still applies)
+  // whenever dartboardMode is on — it used to show regardless of input mode.
+  const statusText = isChuckin ? `${dartboardMode ? 'Tap the board to score' : 'Select a multiplier, then tap a number'}. No score, no pressure — just throw.`
+    : isClock ? `${dartboardMode ? 'Tap the board to score' : 'Select a multiplier, then tap a number'}. Hit every 1-20 as a single.`
+    : isWorld ? `${dartboardMode ? 'Tap the board to score' : 'Select a multiplier, then tap a number'}. Chip away at every lifetime outcome.`
+    : isDoublesPractice ? (dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.')
+    : isCricketGame ? (dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a target number.')
+    : isCheckoutTrainer ? 'Tap out your proposed checkout, then press Submit.'
+    : isKillerGame ? (dartboardMode ? 'Tap the board to score — your own numbers to build lives, an opponent\'s to attack once you\'re a killer.' : 'Select a multiplier, then tap a number — your own to build lives, an opponent\'s to attack once you\'re a killer.')
+    : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.';
   document.querySelector('.game-play-area').innerHTML=`
       <div class="rail">
         <div class="scoreboard" id="scoreboard"></div>
         <div class="slots" id="slots"${isPerDartMode ? ' hidden' : ''}></div>
-        <div class="status" id="status">${isChuckin ? "Select a multiplier, then tap a number. No score, no pressure — just throw." : isClock ? 'Select a multiplier, then tap a number. Hit every 1-20 as a single.' : isWorld ? 'Select a multiplier, then tap a number. Chip away at every lifetime outcome.' : isDoublesPractice ? 'Select a multiplier, then tap a number.' : isCricketGame ? 'Select a multiplier, then tap a target number.' : isCheckoutTrainer ? 'Tap out your proposed checkout, then press Submit.' : isKillerGame ? 'Select a multiplier, then tap a number — your own to build lives, an opponent\'s to attack once you\'re a killer.' : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.'}</div>
+        <div class="status" id="status">${statusText}</div>
         <div class="turn-actions">
           <div class="undo-row">
             <button class="btn btn-ghost board-miss" id="bounce-out-btn" onclick="throwBounceOut()"${isCheckoutTrainer ? ' hidden' : ''}>Bounce Out</button>
