@@ -42,7 +42,7 @@
 > one 15KB anonymous GET, on a single-threaded process) and **SEC-28** (a stored XSS: one
 > bare `escapeJs()` without `escapeHtml()` in `renderHandicapOptions()`, the third check
 > and second regression of the SEC-12/SEC-15 "zero bare `escapeJs`" invariant — confirmed
-> executing in a real browser) — **both open** — see "Part 11". Every Part 11 finding was
+> executing in a real browser) — **both now fixed in v0.20.1** — see "Part 11". Every Part 11 finding was
 > reproduced against a running server rather than inferred from reading, which the new
 > seeder made practical by supplying a household-sized database to measure against.
 > Functional-defect counterparts live in
@@ -50,11 +50,13 @@
 > third; BUG-6/BUG-7 from the fourth; BUG-9 from the fifth; BUG-10 through BUG-15 from
 > the sixth; BUG-19 from the seventh, all fixed; **BUG-27 through BUG-29** from the
 > eighth, all fixed; **BUG-30** and **BUG-31** from the ninth, both open). **SEC-1 through
-> SEC-26 are all fixed as of this writing; SEC-27 and SEC-28 are OPEN** — SEC-26
+> SEC-28 are all fixed as of this writing** — SEC-26
 > (opened by the eighth pass, coupled to BUG-28) shipped its escape-at-the-sink fix in the
 > same change as BUG-28's allowlist addition, so the field never became forwardable in an
-> unescaped released state. BUG-1 through BUG-29 are all fixed. **Open as of the ninth pass:
-> SEC-27, SEC-28, BUG-30, BUG-31** — that pass was a scan, not a fix pass.
+> unescaped released state. BUG-1 through BUG-31 are all fixed. The ninth pass's four findings
+> (SEC-27, SEC-28, BUG-30, BUG-31) were opened as a scan and **fixed in the following
+> change, v0.20.1**, each with a committed regression test proven to fail against the
+> pre-fix source. Nothing open on either tracker.
 >
 > See the "Status" line
 > under each finding below for what actually shipped, which in a couple of places is
@@ -1740,7 +1742,29 @@ Functional-defect counterparts from this same pass are `docs/bug-roadmap.md`
 
 ### SEC-27 — `GET /api/players/personal-bests-batch` runs one full personal-bests computation per name with no cap on how many names are asked for, so a single anonymous request can freeze the whole server for a minute  **(HIGH, unauthenticated denial of service)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07, v0.20.1).** Two independent bounds, because either alone
+leaves a hole. The route now **dedupes and then caps** (`[...new Set(...)].slice(0,
+MAX_BATCH_NAMES)`, `backend/server.js`), and `getPersonalBestsBatch()` (`backend/db.js`)
+dedupes again so the function is safe for any future caller that forgets the route's cap
+— the same "validated by construction" reasoning `recordTurn()` applies to `addTurn()`.
+Two details worth recording. **The cap is 128, not the 32 first drafted**: the suggested
+fix below reasoned from a wrong recollection of `TOURNAMENT_MAX_PLAYERS`, which is
+actually 128, and a lower cap would have silently truncated a large bracket's
+average-seeding — securing the endpoint by breaking its only real caller. **The order is
+load-bearing**: capping before deduping would let a run of duplicates consume the whole
+budget and drop a genuine name behind it, and would leave the cap counting repeats
+instead of real lookups. Deduping first makes `MAX_BATCH_NAMES` mean "at most N
+*distinct* players computed." Re-ran the original attack against the fix with
+`require_admin_auth` on: **59.4s → 0.02s**, the concurrent `/api/health` no longer
+stalled at all (58.9s → 0.00s), same correct 196-byte response. Committed regression
+test `backend/test/server.batch-bounds.test.js`. Its load-bearing case is deliberately
+**deterministic, not timing-based**: a list of 3,000 duplicates followed by one real name
+must answer both — which fails if the dedupe is missing or applied after the cap, on any
+machine, with any amount of history. (A first draft asserted on elapsed time instead and
+passed even with the dedupe deleted, because the scratch database was empty enough that
+128 uncollapsed lookups were still fast; the timing assertions that remain are loose and
+documentary only.) `REFERENCE.md` §14 gains a "public reads must bound their own work"
+table covering this and SEC-23's `ghost-legs` clamp. Full backend suite green.
 
 **What actually goes wrong (plain language):** this endpoint exists so the tournament
 screen can fetch several players' records in one request instead of one request per
@@ -1836,7 +1860,24 @@ regresses when someone "just raises the limit."
 
 ### SEC-28 — A player name is interpolated into an inline `onchange` handler with `escapeJs()` but **not** `escapeHtml()`, so a name containing a double quote breaks out of the attribute and runs arbitrary JavaScript  **(HIGH, stored XSS)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07, v0.20.1).** Took step 3 of the fix list rather than the
+one-word `jsArg()` swap: `renderHandicapOptions()` (`frontend/index.html`) now emits no
+inline handler at all and attaches a real listener in the loop that was **already**
+re-querying these elements to re-select each dropdown's current value
+(`sel.addEventListener('change', () => setHandicap(n, sel.value))`). Closing over `n`
+means the name is never serialized into markup, so no escaping question arises at this
+site — the durable fix, and essentially free here because the loop existed. Verified in a
+real browser against the original payload: the attacker-named `<select>` now carries only
+`class` and `style` (no `on*` attribute), `window.__xss` stays `undefined` after a
+hover, the visible label renders the name literally, **and the feature still works** —
+selecting 401 lands `setup.handicaps` keyed by the player's real name, quote and all,
+with no uncaught page errors. The invariant is now mechanical rather than a habit:
+`backend/test/frontend.inline-handler-escaping.test.js` fails on any bare
+`${escapeJs(...)}` in either frontend file, asserts `jsArg()` is still the
+`escapeHtml(escapeJs(...))` composition it claims to be, and asserts this specific site
+builds no interpolated inline handler. `REFERENCE.md` §9 gains a "two-context rule"
+section stating which helper belongs in which context and why `escapeJs` alone is never
+correct in an interpolation. Full backend suite green.
 
 **What actually goes wrong (plain language):** the Handicap section of the New Game
 screen draws one dropdown per player, and wires each one up with an inline handler that

@@ -1052,7 +1052,7 @@ below the table.
 | **90- AVG** | per-visit-avg | same shape, `<= 90` |
 | **140/Leg** | first-visit-only | `% of opening visits scoring >=140`. **Scoped to exactly 501/301/170/101.** |
 | **180s/Leg** | fraction | `legs containing ≥1 180 / total legs` |
-| **Average Pace** | — | darts/minute, returned as the `pace` key — same formula as the Home page/chart versions (consecutive `thrown_at` gaps within a turn, clamped to `0 < gap < 60000ms`); `null` (bubble shows "—") until per-dart timing data exists. *Note: this key was missing from `getPlayerStatBubbles()`'s return object until the audit that produced this manual caught it — the bubble was permanently blank before that.* |
+| **Average Pace** | — | darts/minute, returned as the `pace` key — same formula **and the same game-type exclusion** as the Home page/chart versions (consecutive `thrown_at` gaps within a turn, clamped to `0 < gap < 60000ms`, scoped by `NOT_CONTINUOUS_STREAM`); `null` (bubble shows "—") until per-dart timing data exists. All three sites — this bubble, `getHomeExtra()`'s Pulse `_pace()`, and `getMetricHistory()`'s `'pace'` case — must use `NOT_CONTINUOUS_STREAM`, i.e. exclude Just Chuckin' It, Checkout Trainer **and guided Around the World**: all three are rapid-fire per-dart rhythms with no real inter-visit pacing. `docs/bug-roadmap.md` BUG-31: the history case used the narrower `NOT_HYPOTHETICAL_DARTS` (which omits `around_the_world`), so the chart read ~14x the bubble directly above it for a player who had done the drill. `backend/test/db.pace-parity.test.js` asserts the three agree. *Note: this key was missing from `getPlayerStatBubbles()`'s return object until the audit that produced this manual caught it — the bubble was permanently blank before that.* |
 
 ### Player Profile header row (name + these four, `HEADER_STAT_DEFS` + Household Rating)
 
@@ -2844,7 +2844,31 @@ for X01 games).
 above plus `modeState` and `tournamentRoundLabel` as opaque values (the same
 "unrestricted shape, sanitized as a whole" treatment `players` already gets,
 not validated field-by-field) — anything else in a `POST /api/live` body is
-silently dropped (413 if the sanitized payload still exceeds 64KB). Before
+silently dropped (413 if the sanitized payload still exceeds 64KB).
+
+**Because `modeState` is opaque, `display.html` owns its own robustness.** The
+server guarantees nothing about the shape *inside* it, so every renderer must
+treat each nested field as possibly absent — a truthiness check on a container
+followed by unguarded reads of its nested fields is a bug (`docs/bug-roadmap.md`
+BUG-30: `renderers.pressure_chamber.scorecard()` checked only that the card
+existed, then read `card.target.label`, so a card missing `target` threw). Two
+rules follow, both required:
+
+1. **Guard the nested shape at the renderer.** A field group that can't be
+   rendered is omitted, not half-built — see `hasBanner` in
+   `renderers.pressure_chamber.scorecard()` and the `Array.isArray()` checks in
+   `renderers.halve_it`.
+2. **Every redraw goes through `renderSafe()`, never `render()` directly.**
+   `render()` writes to the DOM incrementally (format bar → player grid →
+   banners), so an exception part-way through leaves a **torn frame** — the new
+   game's header above the previous game's scores. `renderSafe()` logs the
+   failure (a bare `catch(e){}` on the only redraw path is what made this
+   invisible) and repaints `lastGoodSnapshot`, so a failure degrades to a
+   consistent stale frame instead of an incoherent one. Note `lastSnapshot` is
+   assigned on entry to `render()` and is therefore already the offending
+   snapshot when a throw is caught — `lastGoodSnapshot`, set only after a clean
+   render, is the one to fall back to. `backend/test/display.render-resilience.test.js`
+   asserts both rules. Before
 item 42, every one of `modeState`'s per-mode fields was its own top-level
 `ALLOWED_LIVE_KEYS` entry, and a new mode's fields were silently stripped
 twice by a forgotten allow-list update (`docs/bug-roadmap.md` BUG-28's 7
@@ -3258,6 +3282,41 @@ a request dropped mid-restart, etc.) — without its own guard, that failure
 left every section of the page frozen on its static "Loading…" placeholder
 forever with no error shown, indistinguishable from the app having actually
 lost its data.
+
+### Escaping user data into HTML — the two-context rule
+
+Both frontend files build markup as template strings, so a stored value can land
+in one of two contexts, and they need different escaping:
+
+| Context | Helper | Escapes |
+|---|---|---|
+| Text content, or a **double-quoted** HTML attribute | `escapeHtml(s)` (aliased `esc`) | `&` `<` `>` `"` |
+| Inside a JavaScript string **within** an HTML attribute (an inline handler) | `jsArg(s)` = `escapeHtml(escapeJs(s))` | both of the above |
+
+`escapeJs()` alone escapes only `'` and `\`. **It must never be used bare in an
+interpolation.** An inline handler like `onchange="f('${escapeJs(name)}')"` is
+double-quoted, so a value containing `"` ends the attribute and everything after
+it is parsed as further attributes — including an event handler of the
+attacker's choosing. Player names permit any non-control character (§13), so a
+quote in a name is legal and stored verbatim; this is a real stored-XSS vector,
+not a theoretical one, and the CSP does not mitigate it (`script-src` includes
+`'unsafe-inline'`, which permits inline handlers by definition).
+
+This invariant has regressed twice — `docs/security-audit-roadmap.md` SEC-12
+established it, SEC-15 re-asserted it, and SEC-28 found it broken again in
+`renderHandicapOptions()`. It is now enforced mechanically by
+`backend/test/frontend.inline-handler-escaping.test.js`, which fails on any bare
+`${escapeJs(...)}` in either frontend file.
+
+**Prefer removing the question to answering it.** Where the code already
+re-queries the rendered elements — as `renderHandicapOptions()` does, to
+re-select each dropdown's current value — attach the listener there
+(`sel.addEventListener('change', () => setHandicap(n, sel.value))`) and emit no
+inline handler at all. Closing over the value means it is never serialized into
+markup, so no escaping applies. Note also that `escapeHtml()` does **not** escape
+`'`, which is correct for text and double-quoted attributes but would be unsafe
+inside a single-quoted attribute — there are none today, and new markup should
+keep it that way.
 
 ### Sessions
 
@@ -4331,6 +4390,27 @@ even on a normal LAN deployment.
 **Rate-limit buckets**: see §9's table — `global` (300/60s, every request),
 `setup`/`login`/`pin` (10/60s each, their own endpoint only). SSE uses separate
 hard connection caps, not a `rateLimit()` bucket.
+
+**Public reads must bound their own work, not just their rate.** The server is a
+single process with one thread, so any request that blocks the event loop blocks
+*everything* — including a dart being scored mid-leg and the live scoreboard. A
+rate limit alone does not contain a read whose cost scales with a caller-supplied
+parameter, because one request can be arbitrarily expensive. Two endpoints take
+such a parameter and both clamp it:
+
+| Endpoint | Caller-supplied cost driver | Bound |
+|---|---|---|
+| `GET /api/players/ghost-legs` | `limit` | clamped to 100 (`getGhostCandidateLegs()`, SEC-23) |
+| `GET /api/players/personal-bests-batch` | `names` list length | **deduped, then** truncated to `MAX_BATCH_NAMES` = 128 (SEC-27) |
+
+For the batch endpoint the order is load-bearing: dedupe first, cap second. Capping
+first would let a run of duplicates consume the whole budget and silently drop a real
+name behind it, and would leave the cap counting repeats rather than actual lookups.
+Deduping first makes `MAX_BATCH_NAMES` mean "at most N *distinct* players computed."
+The cap is 128 because it must clear `TOURNAMENT_MAX_PLAYERS` — the only real caller
+is tournament average-seeding, which sends one name per entrant. Uncapped, one 15KB
+anonymous GET repeating a real player's name froze the whole server for ~60 seconds.
+`backend/test/server.batch-bounds.test.js` covers both bounds.
 
 ---
 

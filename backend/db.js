@@ -1863,7 +1863,18 @@ function getPersonalBestsFor(gameType, name, mode) {
 // lifetime record each of those calls already asked for (no gameType/mode), just
 // batched server-side into a single response keyed by name.
 function getPersonalBestsBatch(names) {
-  return Object.fromEntries((names || []).map(name => [name, getPersonalBestsFor(undefined, name, undefined)]));
+  // docs/security-audit-roadmap.md SEC-27: dedupe BEFORE doing the work, not after.
+  // Object.fromEntries already collapsed duplicate keys in the result, which hid the
+  // problem — the response stayed small while the cost was paid once per repeat. That
+  // made this a pure amplification primitive on a public, unauthenticated read: one
+  // 15KB GET repeating a real player's name 3,800 times ran 3,800 full personal-bests
+  // computations and froze the (single-threaded) server for ~60 seconds.
+  //
+  // The dedupe lives here rather than only at the route so the function is safe for
+  // every caller, including any future one that forgets the route's own cap — the same
+  // "validated by construction" reasoning recordTurn() applies to addTurn().
+  return Object.fromEntries([...new Set(names || [])]
+    .map(name => [name, getPersonalBestsFor(undefined, name, undefined)]));
 }
 
 const SAVABLE_GAME_TYPES = Object.keys(GAME_TYPE_REGISTRY).filter(k => GAME_TYPE_REGISTRY[k].savable);
@@ -3302,12 +3313,17 @@ function getPlayerStatBubbles(playerName, mode) {
   // "collect per-dart timing" has captured data. The pace STAT_DEF bubble on the
   // Player Profile reads this key — it was missing from this return object for a
   // while, leaving that bubble permanently blank even with timing data recorded.
-  // NOT_CONTINUOUS_STREAM: same exclusion getHomeExtra()'s own _pace() and
-  // getMetricHistory()'s 'pace' case already apply — Just Chuckin' It/Checkout
-  // Trainer/guided Around the World are rapid-fire per-dart-only rhythms with no
-  // real inter-visit pacing, and previously skewed this bubble's average sharply
-  // faster than a player's actual scoring-game pace (this function's own comment
-  // claimed parity with those two siblings without actually matching them).
+  // NOT_CONTINUOUS_STREAM: the same exclusion getHomeExtra()'s own _pace() and
+  // getMetricHistory()'s 'pace' case apply — Just Chuckin' It/Checkout Trainer/
+  // guided Around the World are rapid-fire per-dart-only rhythms with no real
+  // inter-visit pacing, and previously skewed this bubble's average sharply faster
+  // than a player's actual scoring-game pace.
+  //
+  // All three sites genuinely use this same constant as of docs/bug-roadmap.md
+  // BUG-31; before that fix, getMetricHistory()'s case used the narrower
+  // NOT_HYPOTHETICAL_DARTS and this comment's claim of parity with it was wrong.
+  // backend/test/db.pace-parity.test.js now asserts the three agree, rather than
+  // leaving a comment to be trusted.
   const pace = q(`SELECT 60000.0/AVG(gap_ms) AS v FROM (
     SELECT (julianday(d.thrown_at) - julianday(prev.thrown_at)) * 86400000 AS gap_ms
     FROM darts d
@@ -5749,16 +5765,20 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
     case 'pace':
       // Darts/minute, derived from the gap between consecutive thrown_at timestamps
       // within the same turn — only populated when "collect per-dart timing" is on.
-      // NOT_HYPOTHETICAL_DARTS: same exclusion getHomeExtra()'s own _pace() already
-      // applies (rapid-fire per-dart Chuckin/Checkout-Trainer rhythm would skew this
-      // as a measure of match-throwing pace) — this per-metric-history version had
-      // been missing it.
+      // NOT_CONTINUOUS_STREAM: the SAME constant getPlayerStatBubbles()'s `pace` and
+      // getHomeExtra()'s _pace() use, per REFERENCE.md §3's "these must be identical"
+      // rule. docs/bug-roadmap.md BUG-31: this case previously used the NARROWER
+      // NOT_HYPOTHETICAL_DARTS, which omits 'around_the_world' — so guided Around the
+      // World's rapid-fire per-dart rhythm counted here but not in the bubble directly
+      // above the chart on the same screen, and the two disagreed by ~14x (41 vs 3
+      // darts/min on a reproduction fixture). Both sites carried a comment asserting
+      // parity with the other; neither was correct.
       return db.prepare(`SELECT bucket, 60000.0/AVG(gap_ms) AS value FROM (
         SELECT ${T.fmt} AS bucket, (julianday(d.thrown_at) - julianday(prev.thrown_at)) * 86400000 AS gap_ms
         FROM darts d
         JOIN darts prev ON prev.turn_id = d.turn_id AND prev.dart_no = d.dart_no - 1
         JOIN turns t ON t.id = d.turn_id JOIN games g ON g.id = t.game_id
-        WHERE t.player_id=? AND d.thrown_at IS NOT NULL AND prev.thrown_at IS NOT NULL ${T.and} ${modeWhere} ${weightWhere} ${NOT_HYPOTHETICAL_DARTS}
+        WHERE t.player_id=? AND d.thrown_at IS NOT NULL AND prev.thrown_at IS NOT NULL ${T.and} ${modeWhere} ${weightWhere} ${NOT_CONTINUOUS_STREAM}
       ) WHERE gap_ms > 0 AND gap_ms < 60000 GROUP BY bucket ORDER BY bucket`).all(...params);
     case 'avgdartsperleg':
       // NOT_CHECKOUT_TRAINER: Chuckin never sets checkout=1 so it's already

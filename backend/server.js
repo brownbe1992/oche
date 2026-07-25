@@ -342,6 +342,15 @@ function requireWrite(req, res) {
   return !!requireAdmin(req, res);
 }
 
+// docs/security-audit-roadmap.md SEC-27: the ceiling on GET /api/players/personal-bests-batch's
+// `names` list. Its only real caller is tournament average-seeding, which sends one
+// name per entrant, so the cap must clear db.js's own TOURNAMENT_MAX_PLAYERS (128) —
+// anything lower would silently truncate a large bracket's seeding rather than secure
+// it. The cap alone is therefore NOT what closes the amplification: getPersonalBestsBatch()
+// dedupes, so the real bound is "one computation per DISTINCT real player," and the
+// attack (repeat one real name a few thousand times) costs exactly one lookup.
+const MAX_BATCH_NAMES = 128;
+
 const MAX_JSON_BODY_BYTES = 1e6;
 // docs/archive/data-export-roadmap.md: a per-player export/import file is real user data
 // (games/turns/darts), not a normal small write body — a prolific player's full
@@ -797,7 +806,20 @@ const server = http.createServer(async (req, res) => {
     // Item 51: tournament average-seeding's own batch fetch — one request for every
     // selected player's X01-lifetime personal bests instead of N separate round trips.
     if (p === '/api/players/personal-bests-batch' && m === 'GET') {
-      const names = (url.searchParams.get('names') || '').split(',').map(s => s.trim()).filter(Boolean);
+      // docs/security-audit-roadmap.md SEC-27: deduped, THEN capped. This is a PUBLIC
+      // read whose cost scales with the caller's own list length, on a single-threaded
+      // process — unbounded, one 15KB anonymous GET repeating a real player's name froze
+      // the whole server for ~60s (measured), and the 300-req/min budget made that
+      // sustainable indefinitely.
+      //
+      // The order matters and is the whole fix. Capping first would bound the work but
+      // silently DROP real names behind a run of duplicates (a list of 3,000 "Ada"
+      // followed by "Bex" would answer only Ada), and it would leave the cap counting
+      // repeats rather than actual lookups. Deduping first makes MAX_BATCH_NAMES mean
+      // what it should — at most N *distinct* players computed — so the cap bounds real
+      // work and the attack collapses to a single lookup.
+      const names = [...new Set((url.searchParams.get('names') || '').split(',')
+        .map(s => s.trim()).filter(Boolean))].slice(0, MAX_BATCH_NAMES);
       return send(res, 200, db.getPersonalBestsBatch(names));
     }
     if (p === '/api/players/stat-bubbles' && m === 'GET') {

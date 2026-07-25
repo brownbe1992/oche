@@ -745,13 +745,19 @@ fetch('/api/settings/heatmap-number-style', {cache:'no-store'}).then(r=>r.ok?r.j
    change means a rotation reshapes the board immediately, not on the next server
    push. See docs/archive/existing-app-prep-roadmap.md item 11. */
 let lastSnapshot = null;
+// docs/bug-roadmap.md BUG-30: the last snapshot that rendered all the way through
+// WITHOUT throwing — distinct from lastSnapshot, which render() assigns on entry and
+// so is already the offending one by the time an exception is caught. renderSafe()
+// falls back to this so a failed redraw shows a consistent (if stale) frame instead
+// of a torn one. See renderSafe() below.
+let lastGoodSnapshot = null;
 const portraitQuery = window.matchMedia('(orientation: portrait)');
 let isPortrait = portraitQuery.matches;
 document.body.classList.toggle('orientation-portrait', isPortrait);
 portraitQuery.addEventListener('change', (e)=>{
   isPortrait = e.matches;
   document.body.classList.toggle('orientation-portrait', isPortrait);
-  if(lastSnapshot) render(lastSnapshot);
+  if(lastSnapshot) renderSafe(lastSnapshot);
 });
 
 function spawnConfetti(root, count){
@@ -1532,7 +1538,13 @@ const renderers = {
       const liveCard = cardAt(round);
       const noWarmup = liveCard && liveCard.modifier && liveCard.modifier.key === 'no_warmup';
       const remainingSec = (noWarmup && ms.pressureChamberDeadline != null) ? Math.max(0, Math.ceil((ms.pressureChamberDeadline - Date.now())/1000)) : null;
-      const banner = liveCard ? `<div class="pc-banner">
+      // docs/bug-roadmap.md BUG-30: the banner needs BOTH nested objects, not just a
+      // truthy card — `liveCard ?` alone let a card missing `target`/`modifier` through
+      // and then threw on `.label`, which (before renderSafe()) tore the whole screen.
+      // Same Array.isArray()/shape-check discipline renderers.halve_it already applies
+      // to its own targets list; a card that isn't fully formed simply gets no banner.
+      const hasBanner = !!(liveCard && liveCard.target && liveCard.modifier);
+      const banner = hasBanner ? `<div class="pc-banner">
         <div style="font-size:22px;font-weight:800">${escapeHtml(liveCard.target.label)}</div>
         <div style="font-size:16px;font-weight:700;margin-top:4px">${escapeHtml(liveCard.modifier.icon)} ${escapeHtml(liveCard.modifier.label)}</div>
         <div style="font-style:italic;font-size:13px;margin-top:2px">${escapeHtml(liveCard.modifier.flavor)}</div>
@@ -2189,6 +2201,42 @@ function render(s){
   }
 }
 
+/* docs/bug-roadmap.md BUG-30 — the only entry point anything should call.
+ *
+ * render() writes to the DOM incrementally (format bar, then the player grid, then
+ * banners), so an exception part-way through leaves the earlier writes applied and the
+ * later ones not: a TORN frame mixing the new game's header with the previous game's
+ * scores. Every call site used to be wrapped in a bare `catch(e){}`, which meant that
+ * happened silently — nothing in the console, nothing server-side, and the screen stuck
+ * that way for as long as the controller kept pushing whatever shape was throwing.
+ *
+ * That is reachable without an attacker: `modeState` is forwarded by the server as an
+ * opaque object (code-quality item 42, deliberately — it removed the third sync point
+ * that caused BUG-28), so the shape of everything inside it is guaranteed only by the
+ * frontend producer agreeing with this file. One mode emitting an incomplete card
+ * mid-leg used to freeze the TV for the rest of the leg with no way to find out why.
+ *
+ * So: log it (a silent catch on the only redraw path is the root cause), then repaint
+ * the last snapshot that DID render cleanly, so a failure degrades to a consistent
+ * stale frame rather than an incoherent one. `restoring` breaks the recursion if that
+ * repaint throws too — in which case the screen keeps whatever it has and the console
+ * carries both errors.
+ */
+let restoring = false;
+function renderSafe(s){
+  try {
+    render(s);
+    lastGoodSnapshot = s;
+  } catch (e) {
+    console.error('[display] render failed for this snapshot; keeping the last good frame', e, s);
+    if(restoring || !lastGoodSnapshot) return;
+    restoring = true;
+    try { render(lastGoodSnapshot); }
+    catch (e2) { console.error('[display] restoring the last good frame also failed', e2); }
+    finally { restoring = false; }
+  }
+}
+
 function setLive(on){
   dot.classList.toggle('off', !on);
   liveTx.textContent = on ? 'live' : 'reconnecting…';
@@ -2199,7 +2247,7 @@ let usePoll = false, pollTimer = null;
 function startPolling(){
   if(usePoll) return; usePoll = true; setLive(false);
   const tick = async () => {
-    try { const r = await fetch('/api/live', {cache:'no-store'}); if(r.ok){ setLive(true); render(await r.json()); } else setLive(false); }
+    try { const r = await fetch('/api/live', {cache:'no-store'}); if(r.ok){ setLive(true); renderSafe(await r.json()); } else setLive(false); }
     catch(e){ setLive(false); }
   };
   tick(); pollTimer = setInterval(tick, 1500);
@@ -2211,7 +2259,13 @@ function connect(){
   catch(e){ return startPolling(); }
   let errCount = 0;
   es.onopen = () => { setLive(true); errCount = 0; };
-  es.onmessage = (ev) => { setLive(true); errCount = 0; try { render(JSON.parse(ev.data)); } catch(e){} };
+  // renderSafe(), not a bare `try { render(...) } catch(e){}` — see BUG-30 above. The
+  // try here now only guards JSON.parse of the stream frame itself.
+  es.onmessage = (ev) => {
+    setLive(true); errCount = 0;
+    let snap; try { snap = JSON.parse(ev.data); } catch(e){ console.error('[display] unparseable stream frame', e); return; }
+    renderSafe(snap);
+  };
   es.onerror = () => {
     setLive(false);
     errCount++;

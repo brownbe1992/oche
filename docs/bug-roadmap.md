@@ -91,9 +91,10 @@
 > parity that doesn't hold), plus two security findings
 > (`security-audit-roadmap.md` **SEC-27**, **SEC-28**) — see the "Ninth-pass audit"
 > section at the bottom. Both were reproduced against a running server rather than
-> inferred from reading. **BUG-1 through BUG-29 are all fixed as of this writing;
-> BUG-30 and BUG-31 are OPEN** (the ninth pass was a scan, not a fix pass), alongside
-> SEC-27 and SEC-28 on the security tracker.
+> inferred from reading, and **all four were fixed in the following change, v0.20.1**,
+> each with a committed regression test proven to fail against the pre-fix source.
+> **BUG-1 through BUG-31 are all fixed as of this writing**, and nothing is open on the
+> security tracker either.
 
 ## Severity legend
 
@@ -2266,7 +2267,30 @@ running server rather than inferred from reading.
 
 ### BUG-30 — Any exception thrown by a `/display` renderer is silently swallowed, leaving the second screen showing a torn frame (new game's header, previous game's scores) with nothing logged anywhere  **(MED, user-facing / silent failure)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07, v0.20.1).** Both halves shipped. (1) A new `renderSafe(s)`
+in `frontend/display.html` is now the only entry point anything calls — the SSE handler,
+the polling fallback, and the orientation-change repaint all route through it. It logs
+the failure (`console.error`, replacing the bare `catch(e){}` that was the root cause)
+and repaints `lastGoodSnapshot`, a new binding set only *after* a clean render — distinct
+from `lastSnapshot`, which `render()` assigns on entry and so is already the offending
+snapshot by the time a throw is caught. A `restoring` flag breaks the recursion if the
+repaint throws too. The remaining `try` around `JSON.parse` of the stream frame is
+scoped to that parse alone and logs. (2) `renderers.pressure_chamber.scorecard()` now
+checks the nested shape (`hasBanner = liveCard && liveCard.target && liveCard.modifier`)
+instead of only the container, matching `renderers.halve_it`'s existing `Array.isArray()`
+discipline — a card that isn't fully formed simply gets no banner. Swept the other
+renderers: this was the only two-level nested read in the file. Verified in a browser
+both ways — the malformed Pressure Chamber payload from the repro now renders the
+scorecard correctly *without* its banner (the guard means `renderSafe`'s fallback isn't
+even needed for that case), and a separately forced renderer exception confirmed the
+fallback path itself: the last good frame held intact with no torn header, the failure
+was logged, and the screen recovered on the next valid push. Committed regression test
+`backend/test/display.render-resilience.test.js` — four malformed-card shapes must not
+throw, a well-formed card must still render its banner (so "fixed" can't mean "never
+show the banner"), no call site may wrap `render()` in an empty catch, and `renderSafe()`
+must log, record and restore. Proven to fail against the pre-fix source (5 of 8
+assertions). `REFERENCE.md` §7 gains the two-rule robustness contract this establishes
+for the opaque `modeState` container. Full backend suite green.
 
 **What actually goes wrong (plain language):** the `/display` second screen redraws
 itself every time the playing device pushes a new snapshot. `render()` updates the
@@ -2371,7 +2395,25 @@ for a structurally-incomplete `modeState`.
 
 ### BUG-31 — The Average Pace chart and the Average Pace bubble use two different game-type exclusion lists, so the same player's chart can read ~14x the bubble directly above it  **(MED, stats-integrity / two numbers on one screen disagreeing)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07, v0.20.1).** `getMetricHistory()`'s `'pace'` case now uses
+`NOT_CONTINUOUS_STREAM`, the same constant `getPlayerStatBubbles()`'s `pace` and
+`getHomeExtra()`'s `_pace()` already used, so guided Around the World is excluded from
+all three. Corrected both comments that asserted the parity that didn't hold — each had
+named the other as its authority, and neither was right. Committed regression test
+`backend/test/db.pace-parity.test.js`: it asserts the three sites **agree** (deriving the
+expectation from the real engine rather than hard-coding a number, so they stay in step
+through future edits) *and* separately asserts the real value is ~3 darts/min from the
+20s-apart X01 darts alone — that second assertion is what would catch a future change
+breaking all three sites the same way, which pure parity checks cannot. Proven to fail
+against the pre-fix source (2 of 3 assertions, reading 41 instead of 3). `REFERENCE.md`
+§3's Average Pace row now states the shared-constant requirement explicitly instead of
+leaving it to a comment. Full backend suite green.
+
+**Not done, and deliberately deferred:** fix step 4's full sweep of `getMetricHistory()`'s
+remaining arms against their bubble siblings. This is the second scope mismatch found in
+that one function and it stays the largest uncovered block in `db.js`, so the sweep is
+still worth doing — it is a substantially larger piece of work than this fix and is
+tracked as its own item on `docs/open-roadmap-items.md` rather than being half-done here.
 
 **What actually goes wrong (plain language):** "Average Pace" measures how fast someone
 throws, in darts per minute, from the gap between consecutive darts. Some game types

@@ -6402,14 +6402,29 @@ function renderHandicapOptions(){
       ${names.map(n=>`
         <div class="stepper" style="justify-content:space-between">
           <span class="lbl">${escapeHtml(n)}</span>
-          <select class="date-input" style="width:auto" onchange="setHandicap('${escapeJs(n)}', this.value)">${optionsHtml}</select>
+          <select class="date-input" style="width:auto">${optionsHtml}</select>
         </div>`).join('')}
     </details>`;
-  // Re-select each player's current choice (innerHTML above always resets to
-  // the option list's own default) now that the elements actually exist.
+  // Re-select each player's current choice (innerHTML above always resets to the
+  // option list's own default) and wire the change handler, now that the elements
+  // actually exist.
+  //
+  // docs/security-audit-roadmap.md SEC-28: the handler is attached here rather than
+  // written as an inline onchange="setHandicap('<name>', ...)" attribute. A player
+  // name in an inline handler has to survive TWO nested contexts at once (a JS string
+  // inside an HTML attribute) and this site escaped only the first — escapeJs() alone,
+  // which handles ' and \ but not the " that ends the attribute — so a name containing
+  // a double quote broke out and the rest of it was parsed as further attributes,
+  // including an event handler of the attacker's choosing. Closing over `n` in a real
+  // listener removes the escaping question entirely instead of answering it, which is
+  // the durable fix at a site like this one where the loop already exists. Sites that
+  // genuinely need an inline handler must use jsArg() (= escapeHtml(escapeJs(...))),
+  // never a bare escapeJs — see that finding's own step 2.
   names.forEach((n,i)=>{
     const sel = el.querySelectorAll('select')[i];
-    if(sel) sel.value = setup.handicaps[n] != null ? String(setup.handicaps[n]) : '';
+    if(!sel) return;
+    sel.value = setup.handicaps[n] != null ? String(setup.handicaps[n]) : '';
+    sel.addEventListener('change', () => setHandicap(n, sel.value));
   });
 }
 function setHandicap(name, value){
