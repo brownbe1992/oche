@@ -780,6 +780,23 @@
   /* Focus must stay obvious on cream — the app's gold ring disappears against it. */
   body.paper-mode .game-play-area :focus-visible{outline:2px solid var(--paper-ink);outline-offset:2px}
 
+  /* Colorblind mode on paper. `body.colorblind` remaps --red to orange and --green
+     to blue precisely because red/green is the pairing this app leans on — but the
+     paper rules above hardcode their own red/green (the tokens are tuned for the
+     dark board and are far too light on cream), so without these overrides this one
+     screen silently ignored a setting the whole rest of the app honours.
+     The meaning was never colour-only here — the status line says "That's a finish!"
+     or "That overshoots the target" in words — so this is a legibility fix, not a
+     correctness one.
+     Darkened from the app's own #e2711d/#2f8fd9, which measure 2.58:1 and 2.81:1 on
+     paper; these are 5.02:1 and 5.89:1 and keep the same orange/blue relationship. */
+  body.colorblind.paper-mode .status.bust,
+  body.colorblind.paper-mode .pad button.bull{color:#9c4a06}
+  body.colorblind.paper-mode .status.win{color:#1d5a8c}
+  body.colorblind .pocket .pk-verdict.bad,
+  body.colorblind .pocket .pk-nums button.bull{color:#9c4a06}
+  body.colorblind .pocket .pk-verdict.good{color:#1d5a8c}
+
   /* A pad-only game type (GAME_TYPES.<type>.padOnly — Checkout Trainer) hides the
      toggle via the `hidden` attribute in applyDartMode(). `.imt-row{display:flex}`
      above is an AUTHOR declaration, and an author `display` always outranks the UA

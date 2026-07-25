@@ -273,6 +273,17 @@ function send(res, status, data, headers = {}) {
 // sets it) — otherwise any client could put an arbitrary value in that header to
 // evade the limiter or frame another IP.
 const TRUST_PROXY = String(process.env.TRUST_PROXY || '').toLowerCase() === 'true';
+// SEC-3's loose global budget, per IP per 60s. Configurable because 300 is a guess
+// about one household's traffic, and two real cases push past it: a big household
+// behind one NAT'd address (the reverse-proxy warning below is the same problem seen
+// from the other side), and an automated browser suite driving dozens of full games
+// against a throwaway server — .claude/skills/verify-ui/ raises it for exactly that,
+// where the limiter protects nothing and only produces failures that look like app
+// bugs. Default unchanged, so no deployment behaves differently unless it opts in.
+const GLOBAL_RATE_LIMIT = (() => {
+  const n = Number(process.env.OCHE_RATE_LIMIT_GLOBAL);
+  return Number.isInteger(n) && n > 0 ? n : 300;
+})();
 // docs/bug-roadmap.md BUG-15: a reverse-proxy deployment that forgets TRUST_PROXY=true
 // makes every request look like it comes from the proxy's single address, so the
 // whole household shares one rate-limit budget — normal multi-device gameplay can
@@ -610,7 +621,7 @@ const server = http.createServer(async (req, res) => {
     const ip = clientIp(req);
 
     // SEC-3: loose global budget on every request, ahead of any routing/work.
-    if (!rateLimit('global', ip, 300, 60000)) return tooManyRequests(res, 60);
+    if (!rateLimit('global', ip, GLOBAL_RATE_LIMIT, 60000)) return tooManyRequests(res, 60);
 
     if (!p.startsWith('/api/')) return serveStatic(req, res);
 

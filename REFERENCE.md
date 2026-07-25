@@ -4387,9 +4387,20 @@ documented as `[admin]` in the README use `requireAdmin`; everything else that
 mutates state uses `requireWrite`, which requires a logged-in admin by default
 even on a normal LAN deployment.
 
-**Rate-limit buckets**: see §9's table — `global` (300/60s, every request),
-`setup`/`login`/`pin` (10/60s each, their own endpoint only). SSE uses separate
-hard connection caps, not a `rateLimit()` bucket.
+**Rate-limit buckets**: see §9's table — `global` (300/60s, every request, and the
+only one that is configurable — `OCHE_RATE_LIMIT_GLOBAL`, default 300),
+`setup`/`login`/`pin` (10/60s each, their own endpoint only, deliberately fixed
+since they guard credentials). SSE uses separate hard connection caps, not a
+`rateLimit()` bucket.
+
+`OCHE_RATE_LIMIT_GLOBAL` exists because 300 is a guess about one household's
+traffic and two real cases exceed it: a large household behind a single NAT'd
+address (the same problem the `TRUST_PROXY` warning describes from the other
+side), and an automated browser suite driving dozens of full games — the
+`verify-ui` skill raises it for its own throwaway server, where the limiter
+protects nothing and only produces failures that look like application bugs.
+Raising it is an explicit opt-in; the default is unchanged, so no deployment
+behaves differently unless it sets the variable.
 
 **Public reads must bound their own work, not just their rate.** The server is a
 single process with one thread, so any request that blocks the event loop blocks

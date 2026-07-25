@@ -141,6 +141,40 @@ describe('Paper palette meets the contrast standard', () => {
   });
 });
 
+describe('Colorblind mode reaches the paper surfaces too', () => {
+  // body.colorblind remaps --red to orange and --green to blue, because red/green is
+  // the pairing this app leans on. The paper rules hardcode their own red/green (the
+  // dark-board tokens are far too light on cream — #e2711d and #2f8fd9 measure
+  // 2.58:1 and 2.81:1 there), so without explicit overrides this one screen silently
+  // ignores a setting the rest of the app honours.
+  const overrides = [
+    ['scoring status bust', /body\.colorblind\.paper-mode \.status\.bust,\s*\n\s*body\.colorblind\.paper-mode \.pad button\.bull\{color:(#[0-9a-f]{6})\}/],
+    ['scoring status win', /body\.colorblind\.paper-mode \.status\.win\{color:(#[0-9a-f]{6})\}/],
+    ['pocket verdict bad', /body\.colorblind \.pocket \.pk-verdict\.bad,\s*\n\s*body\.colorblind \.pocket \.pk-nums button\.bull\{color:(#[0-9a-f]{6})\}/],
+    ['pocket verdict good', /body\.colorblind \.pocket \.pk-verdict\.good\{color:(#[0-9a-f]{6})\}/],
+  ];
+
+  for (const [name, re] of overrides) {
+    test(`${name} has a colorblind override that passes on paper`, () => {
+      const m = src().match(re);
+      assert.ok(m, `${name}: no colorblind override found for the paper surface`);
+      const r = contrast(m[1], PAPER);
+      assert.ok(r >= 4.5, `${name} override ${m[1]} is ${r.toFixed(2)}:1 on paper`);
+    });
+  }
+
+  test('the overrides are orange/blue, not another red/green pair', () => {
+    // The whole point is escaping red vs green. Check the two hues actually differ
+    // on the red-green axis the setting exists to avoid: the "bad" colour must be
+    // warmer (more red than blue) and the "good" colour cooler (more blue than red).
+    const bad = src().match(new RegExp(String.raw`body\.colorblind\.paper-mode \.status\.bust,[\s\S]*?button\.bull\{color:(#[0-9a-f]{6})\}`))[1];
+    const good = src().match(/body\.colorblind\.paper-mode \.status\.win\{color:(#[0-9a-f]{6})\}/)[1];
+    const [br, , bb] = rgb(bad), [gr, , gb] = rgb(good);
+    assert.ok(br > bb, `bust colour ${bad} should read warm (r>b)`);
+    assert.ok(gb > gr, `win colour ${good} should read cool (b>r)`);
+  });
+});
+
 describe('the shared grader still backs the card', () => {
   test('a 3-dart optimal route on 167 is the one the card would praise', () => {
     const g = S.gradeCheckoutAttempt(167, true, [S.makeDartCore(20, 3), S.makeDartCore(19, 3), S.makeDartCore(25, 2)]);
