@@ -40,13 +40,42 @@ series, on purpose (see Rate limiting below).
 
 ## What it covers
 
+144 assertions across seven checks:
+
 | Check | Guards |
 |---|---|
 | `results-takeover` | Scoreboard and winner banner survive a leg win; play controls hide and restore across Next leg; results card is scrollable when it overflows; a whole-session summary clears the stale scoreboard. Portrait and landscape. |
 | `new-game` | Step 1 keeps a working Continue *and* reachable per-game options when the selected row's category collapses; keyboard activation of buttons nested inside activatable cards. |
 | `ghost-picker` | Deep-linked "Race this leg" arms the exact leg asked for; an unfindable one arms nothing and says so; an empty filter clears a stale selection; the deep link costs one fetch. |
-| `scoring-modes` | X01, Cricket, Around the Clock and Checkout Trainer each still render and accept darts, with the right shell (slots row, undo labels, enter button) for their type. |
+| `scoring-modes` | X01, Cricket, Around the Clock and Checkout Trainer in depth — the right shell (slots row, undo labels, enter button) for each shape. |
+| `all-game-types` | Every non-dispatchOnly type in `GAME_TYPES` starts, reaches the game screen with exactly one input surface live, and takes a dart without throwing. |
+| `live-scoreboard` | The `/display` second screen picks up players, updates on a scored visit, renders an end-of-leg card, and switches renderer for Cricket. |
 | `home-settings` | Home ticker hides with no activity and shows with some; a Settings tile summary tracks a script-driven change. |
+
+`all-game-types` reads the list from the app's own registry rather than one kept
+here, so a new game type arrives with coverage already in place — the same
+registry-driven discipline the app uses internally instead of hand-maintained
+parallel lists. It goes shallow across all 16; `scoring-modes` goes deep on four
+representative shapes.
+
+`live-scoreboard` drives the controller in one page and reads `/display` in
+another, which is the only way to exercise the contract between them. That seam
+has a history: the controller's `legSummary` shape is an unstated contract with
+the display's `summary()` card, and mismatches have produced blank end-of-leg
+cards before — the sort of thing nobody notices until a match is on the TV.
+
+## When something fails
+
+Failures print the measured value, and a screenshot of the screen **at the
+moment the assertion failed** is written to
+`/tmp/oche-verify-ui-artifacts/` (override with `VERIFY_UI_ARTIFACTS`). Look at
+it before theorising: a layout failure is usually obvious on sight and ambiguous
+from the numbers. Nothing is written on a green run.
+
+Capture timing matters when adding checks — put `await rep.captureIfFailed(page,
+tag)` at the point of interest, not at the end of the block. A shot taken after
+the check has clicked onward shows a perfectly normal screen and explains
+nothing.
 
 ## What does NOT belong here
 

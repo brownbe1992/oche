@@ -129,11 +129,35 @@ async function withPage(viewport, fn) {
       () => typeof startGame === 'function' && typeof show === 'function' && typeof DB !== 'undefined',
       { timeout: 30000 });
     await page.waitForTimeout(300);
+    await dismissFirstRunWizard(page);
     return await fn(page, pageErrors);
   } finally {
     await ctx.close().catch(() => {});
     await browser.close().catch(() => {});
   }
+}
+
+// A scratch database has no admin account, so the app opens its first-run
+// "Welcome to Oche / create an admin account" wizard over everything. It never
+// appears against a real database, so leaving it up would make every check run
+// against a screen no user sees — clicks can land on the overlay, and every
+// failure screenshot comes back obscured by it. Dismissing it is closing a
+// setup step the checks aren't about, not suppressing app behaviour.
+// It is opened by showWizard(), which fires only once an async admin-existence
+// check resolves — so dismissing it once at load races it and usually loses.
+// Neutering showWizard() instead is deterministic, and safe to do here because
+// nothing in this suite is about first-run account setup: it only appears at
+// all because the checks deliberately run against an empty scratch database.
+async function dismissFirstRunWizard(page) {
+  try {
+    await page.evaluate(() => {
+      if (typeof showWizard === 'function') window.showWizard = () => {};
+      if (typeof closeWizard === 'function') closeWizard();
+      const wiz = document.getElementById('wizard');
+      if (wiz) wiz.hidden = true;
+    });
+    await page.waitForTimeout(150);
+  } catch { /* no wizard on this build — nothing to do */ }
 }
 
 const PORTRAIT = { width: 820, height: 1180 };
@@ -195,13 +219,57 @@ const uniqueName = prefix => `${prefix}_${Date.now()}_${Math.floor(Math.random()
    Result reporting
    --------------------------------------------------------------------------- */
 
+// Failure artifacts land here. A failing layout assertion is very hard to
+// reason about from a boolean alone — "board hidden: false" doesn't tell you
+// whether the board is on top of the card, beside it, or the whole screen is
+// blank. A screenshot answers that instantly, and capturing it at the moment of
+// failure avoids the reconstruct-the-scenario-by-hand step entirely.
+const ARTIFACTS = process.env.VERIFY_UI_ARTIFACTS
+  || path.join(os.tmpdir(), 'oche-verify-ui-artifacts');
+
+const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+
 function makeReporter(checkName) {
   const results = [];
+  const artifacts = [];
   return {
     ok(label, passed, detail) {
       results.push({ label, passed: !!passed, detail: detail == null ? '' : String(detail) });
       const mark = passed ? 'PASS' : 'FAIL';
       console.log(`  [${mark}] ${label}${detail ? ` — ${detail}` : ''}`);
+    },
+    failedSoFar() {
+      return results.filter(r => !r.passed).length;
+    },
+    // Call before leaving a withPage() block. Screenshots only when something in
+    // that block failed, so a green run leaves no clutter behind.
+    async captureIfFailed(page, label) {
+      if (!results.some(r => !r.passed)) return null;
+      if (artifacts.some(a => a.label === label)) return null;   // one per block
+      try {
+        fs.mkdirSync(ARTIFACTS, { recursive: true });
+        const file = path.join(ARTIFACTS, `${slug(checkName)}--${slug(label)}.png`);
+        // Hide the achievement overlay for the shot only. It is genuine app
+        // behaviour (Night Owl fires on any dart between midnight and 5am, so
+        // whether it appears depends on the wall clock), but it covers the
+        // middle of the screen — precisely where the thing being diagnosed
+        // usually is. Assertions read the DOM and are unaffected either way.
+        await page.evaluate(() => {
+          const ach = document.getElementById('ach-overlay');
+          if (ach) ach.style.visibility = 'hidden';
+        }).catch(() => {});
+        await page.screenshot({ path: file, fullPage: false });
+        await page.evaluate(() => {
+          const ach = document.getElementById('ach-overlay');
+          if (ach) ach.style.visibility = '';
+        }).catch(() => {});
+        artifacts.push({ label, file });
+        console.log(`  [shot] ${file}`);
+        return file;
+      } catch (err) {
+        console.log(`  [shot] could not capture (${err.message})`);
+        return null;
+      }
     },
     finish(pageErrors = []) {
       for (const e of pageErrors) {
@@ -210,7 +278,7 @@ function makeReporter(checkName) {
       }
       const failed = results.filter(r => !r.passed);
       console.log(`${checkName}: ${results.length - failed.length}/${results.length} passed`);
-      return { check: checkName, results, passed: failed.length === 0 };
+      return { check: checkName, results, artifacts, passed: failed.length === 0 };
     },
   };
 }

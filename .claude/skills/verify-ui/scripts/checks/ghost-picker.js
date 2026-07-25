@@ -123,6 +123,7 @@ module.exports = async function run() {
     rep.ok('empty filter: clears the stale selection', emptied.armedAfter === false);
 
     rep.ok('ghost-picker: no uncaught page errors', pageErrors.length === 0, pageErrors.join('; '));
+    await rep.captureIfFailed(page, 'picker');
   });
 
   return rep.finish();

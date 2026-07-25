@@ -53,6 +53,7 @@ module.exports = async function run() {
     }
 
     rep.ok('home-settings: no uncaught page errors', pageErrors.length === 0, pageErrors.join('; '));
+    await rep.captureIfFailed(page, 'home-settings');
   });
 
   return rep.finish();

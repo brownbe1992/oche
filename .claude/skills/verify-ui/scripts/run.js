@@ -19,6 +19,8 @@ const CHECKS = {
   'new-game': './checks/new-game',
   'ghost-picker': './checks/ghost-picker',
   'scoring-modes': './checks/scoring-modes',
+  'all-game-types': './checks/all-game-types',
+  'live-scoreboard': './checks/live-scoreboard',
   'home-settings': './checks/home-settings',
 };
 
@@ -78,6 +80,7 @@ async function main() {
 
   const total = summaries.reduce((n, s) => n + s.results.length, 0);
   const failed = summaries.flatMap(s => s.results.filter(r => !r.passed));
+  const shots = summaries.flatMap(s => s.artifacts || []);
 
   console.log('\n' + '='.repeat(60));
   for (const s of summaries) {
@@ -90,6 +93,12 @@ async function main() {
   if (failed.length) {
     console.log('\nFailures:');
     for (const f of failed) console.log(`  - ${f.label}${f.detail ? ` — ${f.detail}` : ''}`);
+    if (shots.length) {
+      // Worth looking at before theorising: a layout failure is usually obvious
+      // on sight and ambiguous from the numbers alone.
+      console.log('\nScreenshots at the point of failure:');
+      for (const a of shots) console.log(`  - ${a.file}`);
+    }
     return 1;
   }
   console.log('All checks green.');

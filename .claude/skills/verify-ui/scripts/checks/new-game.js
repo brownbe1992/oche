@@ -70,6 +70,7 @@ async function step1Escape(rep) {
     rep.ok('step 1: the surviving Continue advances to step 2', advanced);
 
     rep.ok('new-game: no uncaught page errors', pageErrors.length === 0, pageErrors.join('; '));
+    await rep.captureIfFailed(page, 'step1');
   });
 }
 
@@ -119,6 +120,7 @@ async function keyboardActivation(rep) {
     });
     rep.ok('keyboard: the card itself is still keyboard-activatable',
       cardActivates === 'challenge', `key=${cardActivates}`);
+    await rep.captureIfFailed(page, 'keyboard');
   });
 }
 

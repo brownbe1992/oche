@@ -53,6 +53,12 @@ async function inOrientation(rep, viewport, label) {
     rep.ok(`${label}: board hidden (computed)`, done.ocheDisplay === 'none', `display=${done.ocheDisplay}`);
     rep.ok(`${label}: results card shown`, done.resultShown && done.resultHasCard);
 
+    // Captured HERE rather than at the end of the block: the interesting state
+    // is the results screen itself, and the "Next leg" click below replaces it
+    // with a fresh leg. A screenshot taken afterwards shows a perfectly normal
+    // board and explains nothing.
+    await rep.captureIfFailed(page, `${label}-results`);
+
     // The takeover has to be reversible — a leg-over screen that doesn't fully
     // reset leaks into the next leg.
     await page.evaluate(() => {
@@ -78,6 +84,7 @@ async function inOrientation(rep, viewport, label) {
     rep.ok(`${label}: next leg clears the winner banner`, next.bannerGone);
 
     rep.ok(`${label}: no uncaught page errors`, pageErrors.length === 0, pageErrors.join('; '));
+    await rep.captureIfFailed(page, `${label}-after-next-leg`);
   });
 }
 
@@ -118,6 +125,7 @@ async function scrollContainer(rep, viewport, label) {
       rep.ok(`${label}: overflowing results card is scrollable`, !!m.scrollable,
         m.scrollable ? `scrolls in ${m.scrollable}` : 'NO scrollable ancestor — content unreachable');
     }
+    await rep.captureIfFailed(page, label);
   });
 }
 
@@ -150,6 +158,7 @@ async function wholeSessionClearsScoreboard(rep) {
     rep.ok('marathon summary: had a live scoreboard beforehand', before > 0, `rows=${before}`);
     rep.ok('marathon summary: clears the stale scoreboard', after.scoreboardRows === 0, `rows=${after.scoreboardRows}`);
     rep.ok('marathon summary: shows the session card', after.hasSummary);
+    await rep.captureIfFailed(page, 'marathon-summary');
   });
 }
 

@@ -43,6 +43,7 @@ async function stagedVisitMode(rep, gameType, viewport, label, expectSlotText) {
     await page.evaluate(() => enterTurn());
     await page.waitForTimeout(300);
     rep.ok(`${label}: entering the turn doesn't error`, pageErrors.length === 0, pageErrors.join('; '));
+    await rep.captureIfFailed(page, label);
   });
 }
 
@@ -82,6 +83,7 @@ async function soloMode(rep, gameType, label, expect) {
     rep.ok(`${label}: enter-turn ${expect.enterHidden ? 'hidden' : 'shown'}`,
       shell.enterHidden === expect.enterHidden);
     rep.ok(`${label}: no uncaught page errors`, pageErrors.length === 0, pageErrors.join('; '));
+    await rep.captureIfFailed(page, label);
   });
 }
 
